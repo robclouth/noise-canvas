@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   Menubar,
   MenubarContent,
@@ -9,6 +10,16 @@ import {
 } from '@/components/ui/menubar'
 
 function App(): React.JSX.Element {
+  const [rms, setRms] = useState<number | null>(null)
+
+  const handleAnalyze = async (): Promise<void> => {
+    const filePath = await window.electron.ipcRenderer.invoke('open-file-dialog')
+    if (filePath) {
+      const result = await window.electron.ipcRenderer.invoke('analyze-audio', filePath)
+      setRms(result.rms)
+    }
+  }
+
   return (
     <div className="h-screen w-screen bg-background text-foreground flex flex-col">
       <Menubar>
@@ -18,7 +29,7 @@ function App(): React.JSX.Element {
             <MenubarItem>
               New <MenubarShortcut>⌘N</MenubarShortcut>
             </MenubarItem>
-            <MenubarItem>
+            <MenubarItem onClick={handleAnalyze}>
               Open <MenubarShortcut>⌘O</MenubarShortcut>
             </MenubarItem>
             <MenubarSeparator />
@@ -74,7 +85,7 @@ function App(): React.JSX.Element {
       </Menubar>
 
       {/* Main Content Area */}
-      <div className="flex-1 bg-background"></div>
+      <div className="flex-1 bg-background p-4">{rms !== null && <p>RMS: {rms}</p>}</div>
     </div>
   )
 }

@@ -1,7 +1,13 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { Essentia, EssentiaWASM } from 'essentia.js'
+import ffmpeg from 'fluent-ffmpeg'
+import ffmpegPath from 'ffmpeg-static'
+import { Writable } from 'stream'
+
+ffmpeg.setFfmpegPath(ffmpegPath!)
 
 function createWindow(): void {
   // Create the browser window.
@@ -13,7 +19,9 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      nodeIntegration: true,
+      contextIsolation: false
     }
   })
 
@@ -51,6 +59,54 @@ app.whenReady().then(() => {
 
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
+
+  ipcMain.handle('open-file-dialog', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        {
+          name: 'Audio Files',
+          extensions: ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma', 'aiff']
+        }
+      ]
+    })
+    if (!canceled) {
+      return filePaths[0]
+    }
+    return null
+  })
+
+  ipcMain.handle('analyze-audio', async (_, filePath: string) => {
+    return new Promise((resolve, reject) => {
+      const essentia = new Essentia(EssentiaWASM)
+      const audioBuffer: Buffer[] = []
+
+      const audioStream = new Writable({
+        write(chunk, encoding, callback) {
+          audioBuffer.push(chunk)
+          callback()
+        }
+      })
+
+      ffmpeg(filePath)
+        .toFormat('f32le')
+        .audioChannels(1)
+        .on('error', (err) => reject(err))
+        .stream(audioStream)
+        .on('finish', () => {
+          const concatenatedBuffer = Buffer.concat(audioBuffer)
+          const audioVector = essentia.arrayToVector(
+            new Float32Array(
+              concatenatedBuffer.buffer,
+              concatenatedBuffer.byteOffset,
+              concatenatedBuffer.length / Float32Array.BYTES_PER_ELEMENT
+            )
+          )
+          const rms = essentia.RMS(audioVector)
+          resolve(rms)
+        })
+    })
+  })
 
   createWindow()
 
