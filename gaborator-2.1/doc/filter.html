@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<!--
+Copyright (C) 2017-2023 Andreas Gustafsson.  This file is part of
+the Gaborator library source distribution.  See the file LICENSE at
+the top level of the distribution for license information.
+-->
+<html>
+<head>
+<link rel="stylesheet" href="doc.css" />
+<title>Gaborator Example 2: Frequency-Domain Filtering</title>
+</head>
+<body>
+<h1>Example 2: Frequency-Domain Filtering</h1>
+
+<h2>Introduction</h2>
+
+<p>This example shows how to apply a filter to an audio file using
+the Gaborator library, by turning the audio into spectrogram
+coefficients, modifying the coefficients, and resynthesizing audio
+from them.</p>
+
+<p>The specific filter implemented here is a 3 dB/octave lowpass
+filter.  This is sometimes called a <i>pinking filter</i> because it
+can be used to produce pink noise from white noise.  In practice, the
+3 dB/octave slope is only applied above some minimum frequency, for
+example 20 Hz, because otherwise the gain of the filter would approach
+infinity as the frequency approaches 0, and the impulse response would
+have to be infinitely wide.
+</p>
+
+<p>Since the slope of this filter is not a multiple of 6 dB/octave, it
+is difficult to implement as an analog filter, but by filtering
+digitally in the frequency domain, arbitrary filter responses such as
+this can easily be achieved.
+</p>
+
+<h2>Preamble</h2>
+
+<pre>
+#include &lt;memory.h&gt;
+#include &lt;iostream&gt;
+#include &lt;sndfile.h&gt;
+#include &lt;gaborator/gaborator.h&gt;
+
+int main(int argc, char **argv) {
+    if (argc &lt; 3) {
+        std::cerr &lt;&lt; "usage: filter input.wav output.wav\n";
+        exit(1);
+    }
+</pre>
+
+<h2>Reading the Audio</h2>
+
+<p>The code for reading the input audio file is identical to
+that in <a href="render.html">Example 1</a>:</p>
+
+<pre>
+    SF_INFO sfinfo;
+    memset(&amp;sfinfo, 0, sizeof(sfinfo));
+    SNDFILE *sf_in = sf_open(argv[1], SFM_READ, &amp;sfinfo);
+    if (! sf_in) {
+        std::cerr &lt;&lt; "could not open input audio file: "
+            &lt;&lt; sf_strerror(sf_in) &lt;&lt; "\n";
+        exit(1);
+    }
+    double fs = sfinfo.samplerate;
+    sf_count_t n_frames = sfinfo.frames;
+    sf_count_t n_samples = sfinfo.frames * sfinfo.channels;
+    std::vector&lt;float&gt; audio(n_samples);
+    sf_count_t n_read = sf_readf_float(sf_in, audio.data(), n_frames);
+    if (n_read != n_frames) {
+        std::cerr &lt;&lt; "read error\n";
+        exit(1);
+    }
+    sf_close(sf_in);
+</pre>
+
+<h2>Spectrum Analysis Parameters</h2>
+
+<p>The spectrum analysis works much the same as in Example 1, but uses
+slightly different parameters.  The number of frequency bands per
+octave determines how steep the transitions between filter bands can
+be made, and since this particular filter has no steep transitions, a
+low value like 10 is sufficient.  The reference frequency argument is
+omitted as we don't care about the exact alignment of the bands with
+respect to a musical scale.</p>
+
+<pre>
+    gaborator::log_fq_scale scale(10, 20.0 / fs);
+    gaborator::parameters params(scale);
+    gaborator::analyzer&lt;float&gt; analyzer(params);
+</pre>
+
+<h2>Precalculating Gains</h2>
+
+<p>The filtering will be done by multiplying each spectrogram
+coefficient with a frequency-dependent gain.  To avoid having to
+calculate the gain on the fly for each coefficient, which would
+be slow, we will precalculate the gains into a vector <code>band_gains</code>
+of one gain value per band, including one for the
+special lowpass band that contains the frequencies from 0 to 20 Hz.</p>
+
+<pre>
+    std::vector&lt;float&gt; band_gains(analyzer.bands_end());
+</pre>
+
+<p>First, we calculate the gains for the bandpass bands.
+For a 3 dB/octave lowpass filter, the voltage gain needs to be
+proportional to the square root of the inverse of the frequency.
+To get the frequency of each band, we call the
+<code>analyzer</code> method <code>band_ff()</code>, which
+returns the center frequency of the band in units of the
+sample rate.  The gain is normalized to unity at 20 Hz.
+</p>
+<pre>
+    for (int band = analyzer.bandpass_bands_begin(); band &lt; analyzer.bandpass_bands_end(); band++) {
+        double f_hz = analyzer.band_ff(band) * fs;
+        band_gains[band] = 1.0 / sqrt(f_hz / 20.0);
+    }
+</pre>
+
+<p>The gain of the lowpass band is set to the the same value as the
+lowest-frequency bandpass band, so that the overall filter gain
+plateaus smoothly to a constant value below 20&#xA0;Hz.</p>
+
+<pre>
+    band_gains[analyzer.band_lowpass()] = band_gains[analyzer.bandpass_bands_end() - 1];
+</pre>
+
+<h2>De-interleaving</h2>
+
+<p>To handle stereo and other multi-channel audio files,
+we will loop over the channels and filter each channel separately.
+Since <i>libsndfile</i> produces interleaved samples, we first
+de-interleave the current channel into a temporary vector called
+<code>channel</code>:</p>
+<pre>
+    for (sf_count_t ch = 0; ch &lt; sfinfo.channels; ch++) {
+        std::vector&lt;float&gt; channel(n_frames);
+        for (sf_count_t i = 0; i &lt; n_frames; i++)
+            channel[i] = audio[i * sfinfo.channels + ch];
+</pre>
+<h2>Spectrum Analysis</h2>
+<p>Now we can spectrum analyze the current channel, producing
+a set of coefficients:</p>
+<pre>
+        gaborator::coefs&lt;float&gt; coefs(analyzer);
+        analyzer.analyze(channel.data(), 0, channel.size(), coefs);
+</pre>
+
+<h2>Filtering</h2>
+<p>
+The filtering is done using the function
+<code>process()</code>, which applies a user-defined function
+to each spectrogram coefficient.  Here, that user-defined function is a
+lambda expression that multiplies the coefficient by the appropriate
+precalculated frequency-dependent gain, modifying the coefficient in
+place.  The unused <code>int64_t</code> argument is the time in units
+of samples; this could be use to implement a time-varying filter if
+desired.</p>
+<p>
+The second and third argument to <code>process()</code> specify a
+range of frequency bands to process; here we pass <code>INT_MIN,
+INT_MAX</code> to process all of them.  Similarly, the fourth and
+fifth argument specify a time range to process, and we pass
+<code>INT64_MIN, INT64_MAX</code> to process all the coefficients
+in <code>coefs</code> regardless of time.
+</p>
+<pre>
+        process([&amp;](int band, int64_t, std::complex&lt;float&gt; &amp;coef) {
+                coef *= band_gains[band];
+            },
+            INT_MIN, INT_MAX,
+            INT64_MIN, INT64_MAX,
+            coefs);
+</pre>
+
+<h2>Resynthesis</h2>
+<p>We can now resynthesize audio from the filtered coefficients by
+calling <code>synthesize()</code>.  This is a mirror image of the call to
+<code>analyze()</code>: now the coefficients are the input, and
+the buffer of samples is the output.  The <code>channel</code>
+vector that originally contained the input samples for the channel
+is now reused to hold the output samples.</p>
+<pre>
+        analyzer.synthesize(coefs, 0, channel.size(), channel.data());
+</pre>
+
+<h2>Re-interleaving</h2>
+<p>The <code>audio</code> vector that contained the
+original interleaved audio is reused for the interleaved
+filtered audio.  This concludes the loop over the channels.
+</p>
+<pre>
+        for (sf_count_t i = 0; i &lt; n_frames; i++)
+            audio[i * sfinfo.channels + ch] = channel[i];
+    }
+</pre>
+
+<h2>Writing the Audio</h2>
+<p>The filtered audio is written using <i>libsndfile</i>,
+using code that closely mirrors that for reading.
+Note that we use <code>SFC_SET_CLIPPING</code>
+to make sure that any samples too loud for the file format
+will saturate; by default, <i>libsndfile</i> makes them
+wrap around, which sounds really bad.</p>
+<a id="writing_audio_code">
+<pre>
+    SNDFILE *sf_out = sf_open(argv[2], SFM_WRITE, &amp;sfinfo);
+    if (! sf_out) {
+        std::cerr &lt;&lt; "could not open output audio file: "
+            &lt;&lt; sf_strerror(sf_out) &lt;&lt; "\n";
+        exit(1);
+    }
+    sf_command(sf_out, SFC_SET_CLIPPING, NULL, SF_TRUE);
+    sf_count_t n_written = sf_writef_float(sf_out, audio.data(), n_frames);
+    if (n_written != n_frames) {
+        std::cerr &lt;&lt; "write error\n";
+        exit(1);
+    }
+    sf_close(sf_out);
+</pre>
+</a>
+
+<h2>Postamble</h2>
+<p>
+We need a couple more lines of boilerplate to make the example a
+complete program:
+</p>
+<pre>
+    return 0;
+}
+</pre>
+
+<h2>Compiling</h2>
+<p>Like <a href="render.html#compiling">Example 1</a>, this example
+can be built using a one-line build command:
+</p>
+<pre class="build Darwin Linux NetBSD FreeBSD OpenBSD">
+c++ -std=c++11 -I.. -O3 -ffast-math $(pkg-config --cflags sndfile) filter.cc $(pkg-config --libs sndfile) -o filter
+</pre>
+<p>Or using the vDSP FFT on macOS:</p>
+<pre class="build Darwin">
+c++ -std=c++11 -I.. -O3 -ffast-math -DGABORATOR_USE_VDSP $(pkg-config --cflags sndfile) filter.cc $(pkg-config --libs sndfile) -framework Accelerate -o filter
+</pre>
+<p>Or using PFFFT (see <a href="render.html#compiling">Example 1</a> for how to download and build PFFFT):</p>
+<pre class="build">
+c++ -std=c++11 -I.. -Ipffft -O3 -ffast-math -DGABORATOR_USE_PFFFT $(pkg-config --cflags sndfile) filter.cc pffft/pffft.o pffft/fftpack.o $(pkg-config --libs sndfile) -o filter
+</pre>
+
+<h2>Running</h2>
+<p>Running the following shell commands will download an example
+audio file containing five seconds of white noise and filter it,
+producing pink noise.</p>
+<pre class="run">
+wget http://download.gaborator.com/audio/white_noise.wav
+./filter white_noise.wav pink_noise.wav
+</pre>
+
+<h2>Frequency response</h2>
+<p>The following plot shows the actual measured frequency response of the
+filter, with the expected 3 dB/octave slope above 20&#xA0;Hz and minimal
+ripple:</p>
+<img src="filter-response.png" alt="Frequency response plot" data-autogen="no" />
+
+<div class="nav"><span class="prev"><a href="render.html">Previous: Example 1: Rendering a Spectrogram Image</a></span><span class="next"><a href="stream.html">Next: Example 3: Streaming</a></span></div>
+
+</body>
+</html>

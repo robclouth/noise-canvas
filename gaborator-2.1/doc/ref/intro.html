@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<!--
+Copyright (C) 2018-2023 Andreas Gustafsson.  This file is part of
+the Gaborator library source distribution.  See the file LICENSE at
+the top level of the distribution for license information.
+-->
+<html>
+<head>
+<link rel="stylesheet" href="../doc.css" type="text/css" />
+<title>Gaborator reference: API Introduction</title>
+</head>
+<body>
+<h1>Gaborator reference: API Introduction</h1>
+
+<p>The public API of the Gaborator library is defined in the HTML
+documentation in the form of annotated C++ declarations.  These are
+similar to the actual declarations in the respective header files, but
+simplified for clarity, omitting implementation details.</p>
+
+<p>The actual implementation in the header file may be different in a
+number of ways, but nonetheless compatible with the documented API.
+For example, classes may be declared using the keyword <code>struct</code>
+rather than <code>class</code>, function parameter names may be
+different, types may be declared using different but equivalent
+typedefs, and functions or templates in the header file may have
+additional arguments with default values.  Any classes, functions, and
+other definitions not mentioned in the documentation should be
+considered private and subject to change or deletion without
+notice.
+</p>
+
+<p>All definitions are in the namespace <code>gaborator</code>.
+Applications need to either prefix class names
+with <code>gaborator::</code>, or use <code>using namespace
+gaborator;</code>.
+</p>
+
+<h2>Frequency and Time Units</h2>
+
+<p>The Gaborator is generally <i>sample rate agnostic</i>: it does not
+know or care what the actual sample rate of the signal is, and will
+work equally well for signals measured in millihertz or gigahertz.
+Frequencies are specified as dimensionless numbers, in units of the
+sample rate.  Since the highest frequency that can be represented by a
+sampled signal is half the sample rate, frequencies in the Gaborator
+range from 0 to 0.5.  In the API, arguments that represent frequencies
+in this way have names beginning with <code>ff_</code> (short
+for <i>fractional frequency</i>) as a reminder that the values are
+fractions of the sample rate rather than having a unit such as Hz.</p>
+
+<p>Similarly, time is measured not in an absolute unit such as
+seconds, but the dimensionless unit of samples.</p>
+
+<div class="nav"><span class="prev"><a href="../synth.html">Previous: Example 5: Synthesis from Scratch</a></span><span class="next"><a href="gaborator_h.html">Next: Spectrum analysis and synthesis: <code>gaborator.h</code></a></span></div>
+
+</body>
+</html>

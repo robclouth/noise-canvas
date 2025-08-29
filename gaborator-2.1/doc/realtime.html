@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<!--
+Copyright (C) 2018-2023 Andreas Gustafsson.  This file is part of
+the Gaborator library source distribution.  See the file LICENSE at
+the top level of the distribution for license information.
+-->
+<html>
+<head>
+<link rel="stylesheet" href="doc.css" />
+<title>Is it real-time?</title>
+</head>
+<body>
+<h1>Is it real-time?</h1>
+
+<p>Several people have asked whether the Gaborator is suitable for
+real-time applications.  There is no simple yes or no answer to
+this question, because there are many different definitions of
+"real-time", and the answer will depend the definition.
+Below are some answers to the question "is it real-time?"
+rephrased in terms of different definitions.</p>
+
+<h2>Can it processes a recording in less time than its duration?</h2>
+
+<p>Yes.  For example, at 48 frequency bands per
+octave, a single core of a 2.5 GHz Intel Core i5 CPU can analyze some
+10 million samples per second, which is more than 200 times faster
+than real time for a single channel of 44.1&#xA0;kHz audio.</p>
+
+<h2>Does it have bounded latency?
+Can it start producing output before consuming the entire input?
+Will it stream?</h2>
+<p>Yes.  See the <a href="stream.html">streaming example</a>.</p>
+
+<h2>Does it have low latency?</h2>
+
+<p>Probably not low enough for applications such as live musical
+effects.  The exact latency depends on factors such as the frequency
+range and number of bands per octave, but tends to range between
+"high" and "very high".  For example, with the parameters used in the
+online demo, 48 frequency bands per octave down to 20 Hz, the latency
+of the analysis side alone is some 3.5 seconds, and if you do
+analysis followed by resynthesis, the total latency will
+be almost 13 seconds.</p>
+
+<p>This can be reduced by choosing the analysis parameters for low latency.
+For example, if you decrease the number of frequency bands per octave to 12,
+and increase the minimum frequency to 200 Hz, the latency
+will be about 85 milliseconds for analysis only, and about
+300 milliseconds for analysis + resynthesis, but this is
+still too much for a live effect.</p>
+
+<p>Any constant-Q spectrum analysis involving low frequencies will
+inherently have rather high latency (at least for musically useful
+values of Q), because the lowest-frequency analysis filters will have
+narrow bandwidths, which lead to long impulse responses.  Furthermore,
+the Gaborator uses symmetric Gaussian analysis filters that were
+chosen for properties such as linear phase and accurate
+reconstruction, not for low latency, so the latency will be higher
+than what might be achievable with a constant-Q filter bank
+specifically designed for low latency.</p>
+
+<p>The latency only affects <i>causal</i> applications, and
+arises from the need to wait for the arrival of future input samples
+needed to calculate the present output, and not from the time it takes
+to perform the calculations.  In a non-causal application,
+such as applying an effect to a recording, the latency does not apply,
+and performance is limited only by the speed of the calculations.
+This can lead to the somewhat paradoxical situation that applying an
+effect to a live stream causes a latency of several seconds, but
+applying the same effect to an entire one-minute recording runs in a
+fraction of a second.</p>
+
+<p>In analysis and visualization applications that don't need to
+perform resynthesis, it is possible to partly hide the latency by
+taking advantage of the fact that the coefficients for the higher
+frequencies exhibit lower latency than those for low frequencies.
+For example, a live spectrogram display could update the
+high-frequency parts of the display before the corresponding
+low-frequency parts.  Alternatively, low-frequency parts of the
+spectrogram may be drawn multiple times, effectively animating
+the display of the low-frequency coefficients as they converge to
+their final values.  This approach can be seen in action in
+the <a href="https://waxingwave.com/spectrolite/">Spectrolite</a>
+iOS app.</p>
+
+<h2>Does it support small blocks sizes?</h2>
+
+<p>Yes, but there is a significant performance penalty.
+The Gaborator works most efficiently when the signal is processed
+in large blocks, preferably 2<sup>17</sup> samples or more,
+corresponding to several seconds of signal at typical audio sample
+rates.</p>
+
+<p>A real-time application aiming for low latency will want to
+use smaller blocks, for examples 2<sup>5</sup> to 2<sup>10</sup>
+samples, and processing these will be significantly slower.
+For example, as of version 1.4, analyzing a signal in blocks of
+2<sup>10</sup> samples takes roughly five times as much CPU as
+analyzing it in blocks of 2<sup>20</sup> samples.</p>
+
+<p>For very small blocks, the processing time will exceed the
+duration of the signal, at which point the system can no longer be
+considered real-time.  For example, analyzing a 48&#xA0;kHz audio
+stream on a 2.5 GHz Intel Core i5 CPU, this happens at block sizes
+below about 2<sup>4</sup> = 16 samples.</p>
+
+<p>The resynthesis code is currently less optimized for small block
+sizes than the analysis code, so the performance penalty for
+resynthesizing small blocks is even greater than for analyzing small
+blocks.</p>
+
+<h2>Can it process a signal stream of any length?</h2>
+
+<p>As of version 2, the length of a stream is only limited by the
+64-bit signed integers used to represent sample times, allowing for
+more than a million years of 192 kHz audio both before and after t=0.
+This assumes the local phase convention is used (which is the default
+in version 2).  When using the global phase convention (as in version
+1), the floating point precision of phase values used in internal
+calculations will decrease as the distance from t=0 increases, causing
+a noticeable decrease in the signal to noise ratio after some
+hours.</p>
+
+<h2>Does it avoid dynamic memory allocation in the audio processing path?</h2>
+
+<p>Currently, no &#x2014; it dynamically allocates both the coefficient data
+structures and various temporary buffers.</p>
+
+<div class="nav"><span class="prev"><a href="overview.html">Previous: Overview of Operation</a></span><span class="next"><a href="relnotes/2_1.html">Next: Version 2.1</a></span></div>
+
+</body>
+</html>

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<!--
+Copyright (C) 2020-2023 Andreas Gustafsson.  This file is part of
+the Gaborator library source distribution.  See the file LICENSE at
+the top level of the distribution for license information.
+-->
+<html>
+<head>
+<link rel="stylesheet" href="doc.css" />
+<title>Gaborator Example 5: Synthesis from Scratch</title>
+</head>
+<body>
+<h1>Example 5: Synthesis from Scratch</h1>
+
+<h2>Introduction</h2>
+
+<p>This example demonstrates how to synthesize a signal by creating
+spectrogram coefficients from scratch rather than by analyzing an
+existing signal.  It creates a random pentatonic melody of decaying
+sine waves as spectrogram coefficients and then synthesizes audio
+from them.
+</p>
+
+<h2>Preamble</h2>
+
+<p>This example program takes a single command line argument, the name
+of the output file.</p>
+<pre>
+#include &lt;memory.h&gt;
+#include &lt;iostream&gt;
+#include &lt;sndfile.h&gt;
+#include &lt;gaborator/gaborator.h&gt;
+
+int main(int argc, char **argv) {
+    if (argc &lt; 2) {
+        std::cerr &lt;&lt; "usage: synth output.wav\n";
+        exit(1);
+    }
+</pre>
+
+<h2>Synthesis Parameters</h2>
+
+<p>Although this example does not perform any analysis, we nonetheless
+need to create an <code>analyzer</code> object, as it is used for both
+analysis and synthesis purposes.  To generate the frequencies of the
+12-note equal-tempered scale, we need 12 bands per octave.  A multiple
+of 12 would also work, but here we don't need the added frequency
+resolution that would bring, and the time resolution would be
+worse.</p>
+
+<p>To simplify converting MIDI note numbers to band numbers, we choose
+the frequency of MIDI note 0 as the reference frequency; this is
+8.18&#xA0;Hz, which happens to be outside the frequency range of the
+bandpass filter bank, but that doesn't matter.</p>
+
+<pre>
+    double fs = 44100;
+    gaborator::log_fq_scale scale(12, 20.0 / fs, 8.18 / fs);
+    gaborator::parameters params(scale);
+</pre>
+
+<p>As we create new complex coefficients from scratch, we need to be
+careful about their phases.  For any given frequency, the portions of
+the output signal contributed by the coefficients at different points
+in time need to be in phase so that they combine constructively into a
+single (co)sine wave rather than interfering destructively.  The
+easiest way to achieve this is to select the global phase convention
+in the synthesis parameters.  With this setting, the coefficient phases
+will be interpreted relative to the common reference point of t=0
+rather than the time of each individual coefficient:</p>
+
+<pre>
+    params.phase = gaborator::coef_phase::global;
+    gaborator::analyzer&lt;float&gt; analyzer(params);
+</pre>
+
+<h2>Melody Parameters</h2>
+
+<p>
+We will use the A minor pentatonic scale, which contains the
+following notes (using the MIDI note numbering):</p>
+<pre>
+    static int pentatonic[] = { 57, 60, 62, 64, 67 };
+</pre>
+
+<p>
+The melody will consist of 64 notes, at a tempo of 120 beats per
+minute:
+</p>
+<pre>
+    int n_notes = 64;
+    double tempo = 120.0;
+    double beat_duration = 60.0 / tempo;
+</pre>
+
+<p>
+The variable <code>volume</code> determines the amplitude of
+each note, and has been chosen such that there will be no clipping
+of the final output.
+</p>
+<pre>
+    float volume = 0.2;
+</pre>
+
+<h2>Composition</h2>
+
+<p>We start with an empty coefficient set:</p>
+<pre>
+    gaborator::coefs&lt;float&gt; coefs(analyzer);
+</pre>
+
+<p>Each note is chosen randomly from the pentatonic scale and added
+to the coefficient set by calling the function <code>fill()</code>.
+The <code>fill()</code> function is similar to the <code>process()</code>
+function used in previous examples, except that it can be used to
+create new coefficients rather than just modifying existing ones.</p>
+
+<p>Each note is created by calling <code>fill()</code> on a region of
+the time-frequency plane that covers a single band in the frequency
+dimension and the duration of the note in the time dimension.  Each
+coefficient within this region is set to a complex number whose
+magnitude decays exponentially over time, like the amplitude of a
+plucked string.  The phase is arbitrarily set to zero by using an
+imaginary part of zero.  Since notes can overlap, the new coefficients
+are added to any existing ones using the <code>+=</code> operator
+rather than overwriting them.</p>
+
+<p>Note that band numbers increase towards lower frequencies but MIDI
+note numbers increase towards higher frequencies, hence the minus sign
+in front of <code>midi_note</code>.
+</p>
+
+<pre>
+    for (int i = 0; i &lt; n_notes; i++) {
+        int midi_note = pentatonic[rand() % 5];
+        double note_start_time = beat_duration * i;
+        double note_end_time = note_start_time + 3.0;
+        int band = analyzer.band_ref() - midi_note;
+        fill([&amp;](int, int64_t t, std::complex&lt;float&gt; &amp;coef) {
+                float amplitude =
+                    volume * expf(-2.0f * (float)(t / fs - note_start_time));
+                coef += std::complex&lt;float&gt;(amplitude, 0.0f);
+            },
+            band, band + 1,
+            note_start_time * fs, note_end_time * fs,
+            coefs);
+    }
+</pre>
+
+<h2>Synthesis</h2>
+
+<p>We can now synthesize audio from the coefficients by
+calling <code>synthesize()</code>.  Audio will be generated
+starting half a second before the first note to allow for pre-ringing
+of the synthesis filters, and ending a few seconds after the
+last note to give the note time to decay.
+</p>
+<pre>
+    double audio_start_time = -0.5;
+    double audio_end_time = beat_duration * n_notes + 5.0;
+    int64_t start_frame = audio_start_time * fs;
+    int64_t end_frame = audio_end_time * fs;
+    size_t n_frames = end_frame - start_frame;
+    std::vector&lt;float&gt; audio(n_frames);
+    analyzer.synthesize(coefs, start_frame, end_frame, audio.data());
+</pre>
+
+<h2>Writing the Audio</h2>
+
+<p>Since there is no input audio file to inherit a file format from,
+we need to choose a file format for the output file by filling in the
+<code>sfinfo</code> structure:</p>
+<pre>
+    SF_INFO sfinfo;
+    memset(&amp;sfinfo, 0, sizeof(sfinfo));
+    sfinfo.samplerate = fs;
+    sfinfo.channels = 1;
+    sfinfo.format = SF_FORMAT_WAV | SF_FORMAT_PCM_16;
+</pre>
+
+<p>The rest is identical to
+<a href="filter.html#writing_audio_code">Example 2</a>:
+</p>
+<pre>
+    SNDFILE *sf_out = sf_open(argv[1], SFM_WRITE, &amp;sfinfo);
+    if (! sf_out) {
+        std::cerr &lt;&lt; "could not open output audio file: "
+            &lt;&lt; sf_strerror(sf_out) &lt;&lt; "\n";
+        exit(1);
+    }
+    sf_command(sf_out, SFC_SET_CLIPPING, NULL, SF_TRUE);
+    sf_count_t n_written = sf_writef_float(sf_out, audio.data(), n_frames);
+    if (n_written != n_frames) {
+        std::cerr &lt;&lt; "write error\n";
+        exit(1);
+    }
+    sf_close(sf_out);
+    return 0;
+}
+</pre>
+
+<h2>Compiling</h2>
+<p>Like <a href="render.html#compiling">Example 1</a>, this example
+can be built using a one-line build command:
+</p>
+<pre class="build Darwin Linux NetBSD FreeBSD OpenBSD">
+c++ -std=c++11 -I.. -O3 -ffast-math $(pkg-config --cflags sndfile) synth.cc $(pkg-config --libs sndfile) -o synth
+</pre>
+<p>Or using the vDSP FFT on macOS:</p>
+<pre class="build Darwin">
+c++ -std=c++11 -I.. -O3 -ffast-math -DGABORATOR_USE_VDSP $(pkg-config --cflags sndfile) synth.cc $(pkg-config --libs sndfile) -framework Accelerate -o synth
+</pre>
+<p>Or using PFFFT (see <a href="render.html">Example 1</a> for how to download and build PFFFT):</p>
+<pre class="build">
+c++ -std=c++11 -I.. -Ipffft -O3 -ffast-math -DGABORATOR_USE_PFFFT $(pkg-config --cflags sndfile) synth.cc pffft/pffft.o pffft/fftpack.o $(pkg-config --libs sndfile) -o synth
+</pre>
+
+<h2>Running</h2>
+<p>The example program can be run using the command</p>
+<pre class="run">
+./synth melody.wav
+</pre>
+<p>The resulting audio will be in <code>melody.wav</code>.</p>
+
+<div class="nav"><span class="prev"><a href="snr.html">Previous: Example 4: Measuring the Signal-to-Noise Ratio</a></span><span class="next"><a href="ref/intro.html">Next: API Introduction</a></span></div>
+
+</body>
+</html>

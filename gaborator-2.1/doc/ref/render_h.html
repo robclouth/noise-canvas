@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<!--
+Copyright (C) 2018-2023 Andreas Gustafsson.  This file is part of
+the Gaborator library source distribution.  See the file LICENSE at
+the top level of the distribution for license information.
+-->
+<html>
+<head>
+<link rel="stylesheet" href="../doc.css" type="text/css" />
+<title>Gaborator reference: render.h</title>
+</head>
+<body>
+<h1>Gaborator reference: <code>render.h</code></h1>
+
+<h3>Spectrogram Rendering with Power-of-Two Scaling</h3>
+<pre>
+template &lt;class OI, class T&gt;
+void render_p2scale(const analyzer&lt;T&gt; &amp;a,
+                    const coefs&lt;T&gt; &amp;c,
+                    int64_t xorigin, int64_t yorigin,
+                    int64_t xi0, int64_t xi1, int xe,
+                    int64_t yi0, int64_t yi1, int ye,
+                    OI output);
+</pre>
+<p>Render a rectangular array of pixel values representing signal
+amplitudes in time-frequency space, optionally scaling up or
+down by powers of two.
+</p>
+<dl>
+  <dt><code>a</code></dt>
+  <dd>The spectrum analyzer that produced the coefficients <code>c</code></dd>
+  <dt><code>c</code></dt>
+  <dd>A set of spectrogram coefficients to render</dd>
+  <dt><code>xorigin</code></dt>
+  <dd>The point in time corresponding to pixel X coordinate 0, in samples.
+  Due to limitations of the implementation, this must currently be 0.
+  Instead, horizontal translation must be done by means of converting the
+  origin to pixel units and adding it to both <code>xi0</code> and <code>yi0</code>.</dd>
+  <dt><code>yorigin</code></dt>
+  <dd>The band number of the frequency band corresponding to pixel Y coordinate 0.
+  Typically 0, or the band number of a reference frequency such as 440&#xA0;Hz,
+  to make that frequency always coincide exactly with a pixel regardless of the
+  scale factor.</dd>
+  <dt><code>xi0</code></dt>
+  <dd>The X coordinate of the first pixel to render</dd>
+  <dt><code>xi1</code></dt>
+  <dd>The X coordinate one past the last pixel to render</dd>
+  <dt><code>xe</code></dt>
+  <dd>The horizontal scaling exponent.  One horizontal pixel corresponds to 2<sup>xe</sup> signal samples.</dd>
+  <dt><code>yi0</code></dt>
+  <dd>The Y coordinate of the first pixel to render</dd>
+  <dt><code>yi1</code></dt>
+  <dd>The Y coordinate one past the last pixel to render</dd>
+  <dt><code>ye</code></dt>
+  <dd>The vertical scaling exponent.  One vertical pixel corresponds to 2<sup>ye</sup> frequency bands.</dd>
+  <dt><code>output</code></dt>
+  <dd>A random access iterator through which the output
+    pixel amplitude values will be written.  This is
+    typically a <code>float *</code>.  A total of
+    <code>(xi1 - xi0) * (yi1 - yi0))</code> values will be written.
+  </dd>
+</dl>
+
+<h3>Utility Functions</h3>
+<pre>
+template &lt;class T&gt;
+unsigned int float2pixel_8bit(T amp);
+</pre>
+<p>Convert a normalized amplitude value to a 8-bit greyscale pixel value.</p>
+<dl>
+  <dt><code>amp</code></dt>
+  <dd>A floating point value representing a signal amplitude, nominally ranging from 0 to 1</dd>
+</dl>
+<p>Returns an pixel value ranging from 0 to 255 (inclusive), using an
+approximation of the sRGB gamma.</p>
+
+<div class="nav"><span class="prev"><a href="gaborator_h.html">Previous: Spectrum analysis and synthesis: <code>gaborator.h</code></a></span><span class="next"><a href="../overview.html">Next: Overview of Operation</a></span></div>
+
+</body>
+</html>

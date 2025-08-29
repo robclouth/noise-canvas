@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<!--
+Copyright (C) 2017-2023 Andreas Gustafsson.  This file is part of
+the Gaborator library source distribution.  See the file LICENSE at
+the top level of the distribution for license information.
+-->
+<html>
+<head>
+<link rel="stylesheet" href="doc.css" />
+<title>Gaborator Example 1: Rendering a Spectrogram Image</title>
+</head>
+<body>
+<h1>Example 1: Rendering a Spectrogram Image</h1>
+
+<h2>Introduction</h2>
+
+<p>This example shows how to generate a greyscale constant-Q
+spectrogram image from an audio file using the Gaborator library.
+</p>
+
+<h2>Preamble</h2>
+
+<p>We start off with some boilerplate #includes.</p>
+
+<pre>
+#include &lt;memory.h&gt;
+#include &lt;iostream&gt;
+#include &lt;fstream&gt;
+#include &lt;sndfile.h&gt;
+</pre>
+
+<p>The Gaborator is a header-only library &#x2014; there are no C++ files
+to compile, only header files to include.
+The core spectrum analysis and resynthesis code is in
+<code>gaborator/gaborator.h</code>, and the code for rendering
+images from the spectrogram coefficients is in
+<code>gaborator/render.h</code>.</p>
+
+<pre>
+#include &lt;gaborator/gaborator.h&gt;
+#include &lt;gaborator/render.h&gt;
+</pre>
+
+<p>The program takes the names of the input audio file and output spectrogram
+image file as command line arguments, so we check that they are present:</p>
+
+<pre>
+int main(int argc, char **argv) {
+    if (argc &lt; 3) {
+        std::cerr &lt;&lt; "usage: render input.wav output.pgm\n";
+        exit(1);
+    }
+</pre>
+
+<h2>Reading the Audio</h2>
+
+<p>The audio file is read using the <i>libsndfile</i> library
+and stored in a <code>std::vector&lt;float&gt;</code>.
+Note that although <i>libsndfile</i> is used in this example,
+the Gaborator library itself does not depend on or
+use <i>libsndfile</i>.</p>
+<pre>
+    SF_INFO sfinfo;
+    memset(&amp;sfinfo, 0, sizeof(sfinfo));
+    SNDFILE *sf_in = sf_open(argv[1], SFM_READ, &amp;sfinfo);
+    if (! sf_in) {
+        std::cerr &lt;&lt; "could not open input audio file: "
+            &lt;&lt; sf_strerror(sf_in) &lt;&lt; "\n";
+        exit(1);
+    }
+    double fs = sfinfo.samplerate;
+    sf_count_t n_frames = sfinfo.frames;
+    sf_count_t n_samples = sfinfo.frames * sfinfo.channels;
+    std::vector&lt;float&gt; audio(n_samples);
+    sf_count_t n_read = sf_readf_float(sf_in, audio.data(), n_frames);
+    if (n_read != n_frames) {
+        std::cerr &lt;&lt; "read error\n";
+        exit(1);
+    }
+    sf_close(sf_in);
+</pre>
+<p>In case the audio file is a stereo or multi-channel one,
+mix down the channels to mono, into a new
+<code>std::vector&lt;float&gt;</code>:</p>
+<pre>
+    std::vector&lt;float&gt; mono(n_frames);
+    for (size_t i = 0; i &lt; (size_t)n_frames; i++) {
+        float v = 0;
+        for (size_t c = 0; c &lt; (size_t)sfinfo.channels; c++)
+            v += audio[i * sfinfo.channels + c];
+        mono[i] = v;
+    }
+</pre>
+
+<h2>The Frequency Scale</h2>
+
+<p>To make a constant-Q spectrogram, we will use a logarithmic
+frequency scale, represented by a <code>gaborator::log_fq_scale</code> object.
+To create a <code>log_fq_scale</code>, we must choose some
+parameters: the frequency resolution, the frequency range, and
+optionally a reference frequency.</p>
+
+<p>The frequency resolution is specified as a number of frequency
+bands per octave.  A typical number for analyzing music signals is 48
+bands per octave, or in other words, four bands per semitone
+in the 12-note equal tempered scale.</p>
+
+<p>The frequency range is specified by giving a minimum frequency;
+this is the lowest frequency that will be included in the spectrogram
+display.
+For audio signals, a typical minimum frequency is 20&#xA0;Hz,
+the lower limit of human hearing.  In the Gaborator library,
+all frequencies are given in units of the sample rate rather
+than in Hz, so we need to divide the 20&#xA0;Hz by the sample
+rate of the input audio file: <code>20.0 / fs</code>.</p>
+
+<p>Unlike the minimum frequency, the maximum frequency is not given
+explicitly &#x2014; instead, the analysis always produces coefficients
+for frequencies all the way up to half the sample rate
+(a.k.a. the Nyquist frequency).  If you don't need the coefficients
+for the highest frequencies, you can simply ignore them.</p>
+
+<p>If desired, one of the frequency bands can be exactly aligned with
+a <i>reference frequency</i>.  When analyzing music signals, this is
+typically 440 Hz, the standard tuning of the note <i>A<sub>4</sub></i>.
+Like the minimum frequency, it is given in
+units of the sample rate, so we pass <code>440.0 / fs</code>.</p>
+
+<p>Let's construct a <code>log_fq_scale</code>:</p>
+
+<pre>
+    gaborator::log_fq_scale scale(48, 20.0 / fs, 440.0 / fs);
+</pre>
+
+<h2>The Spectrum Analysis Parameters</h2>
+
+<p>The frequency scale forms a part of the spectrum analysis parameters,
+which are stored in an object of type <code>gaborator::parameters</code>.
+In this example, there is no need to specify parameters other than the
+frequency scale, so the parameters can be constructed simply by calling
+the <code>gaborator::parameters</code> constructor with the frequency scale
+as an argument:</p>
+<pre>
+    gaborator::parameters params(scale);
+</pre>
+
+<h2>The Spectrum Analyzer</h2>
+
+<p>Next, we create an object of type <code>gaborator::analyzer</code>;
+this is the workhorse that performs the actual spectrum analysis
+(and/or resynthesis, but that's for a later example).
+It is a template class, parametrized by the floating point type to
+use for the calculations; this is typically <code>float</code>.
+Constructing the <code>gaborator::analyzer</code> involves allocating and
+precalculating all the filter coefficients and other auxiliary data needed
+for the analysis and resynthesis, and this takes considerable time and memory,
+so when analyzing multiple pieces of audio with the same
+parameters, creating a single <code>gaborator::analyzer</code>
+and reusing it is preferable to destroying and recreating it.</p>
+<pre>
+    gaborator::analyzer&lt;float&gt; analyzer(params);
+</pre>
+
+<h2>The Spectrogram Coefficients</h2>
+
+<p>The result of the spectrum analysis will be a set of <i>spectrogram
+coefficients</i>.  To store them, we will use a <code>gaborator::coefs</code>
+object.  Like the <code>analyzer</code>, this is a template class parametrized
+by the data type.  Because the layout of the coefficients is determined by
+the spectrum analyzer, it must be passed as an argument to the constructor:</p>
+<pre>
+    gaborator::coefs&lt;float&gt; coefs(analyzer);
+</pre>
+
+<h2>Running the Analysis</h2>
+
+<p>Now we are ready to do the actual spectrum analysis,
+by calling the <code>analyze</code> method of the spectrum
+analyzer object.
+The first argument to <code>analyze</code> is a <code>float</code> pointer
+pointing to the first element in the array of samples to analyze.
+The second and third arguments are of type
+<code>int64_t</code> and indicate the time range covered by the
+array, in units of samples.  Since we are passing the whole file at
+once, the beginning of the range is sample number zero, and the end is
+sample number <code>mono.size()</code>.  The fourth argument is a
+reference to the set of coefficients that the results of the spectrum
+analysis will be stored in (or to be precise, added to).
+</p>
+<pre>
+    analyzer.analyze(mono.data(), 0, mono.size(), coefs);
+</pre>
+
+<h2>Rendering an Image</h2>
+
+<p>Now there is a set of spectrogram coefficients in <code>coefs</code>.
+To render them as an image, we will use the function
+<code>gaborator::render_p2scale()</code>.
+</p>
+
+<p>Rendering involves two different coordinate
+spaces: the time-frequency coordinates of the spectrogram
+coefficients, and the x-y coordinates of the image.
+The two spaces are related by an origin and a scale factor,
+each with an x and y component.</p>
+
+<p>The origin specifies the point in time-frequency space that
+corresponds to the pixel coordinates (0, 0).  Here, we will
+use an origin where the x (time) component
+is zero (the beginning of the signal), and the y (frequency) component
+is the band number of the first (highest frequency) band:</p>
+
+<pre>
+    int64_t x_origin = 0;
+    int64_t y_origin = analyzer.bandpass_bands_begin();
+</pre>
+
+<p><code>render_p2scale()</code> supports scaling the spectrogram in
+both the time (horizontal) and frequency (vertical) dimension, but only
+by power-of-two scale factors.  These scale factors are specified
+relative to a reference scale of one vertical pixel per frequency band
+and one horizontal pixel per signal sample.</p>
+
+<p>Although a horizontal scale of one pixel per signal sample is a
+mathematically pleasing reference point, this reference scale is not
+used in practice because it would result in a spectrogram that is much
+too stretched out horizontally.  A more typical scale factor might be
+2<sup>10</sup> = 1024, yielding one pixel for every 1024 signal
+samples, which is about one pixel per 23 milliseconds of signal at a
+sample rate of 44.1 kHz.</p>
+<pre>
+    int x_scale_exp = 10;
+</pre>
+
+<p>To ensure that the spectrogram will fit on the screen even in the
+case of a long audio file, let's auto-scale it down further until
+it is no more than 1000 pixels wide:</p>
+<pre>
+    while ((n_frames &gt;&gt; x_scale_exp) &gt; 1000)
+        x_scale_exp++;
+</pre>
+
+<p>In the vertical, the reference scale factor of one pixel per
+frequency band is reasonable, so we will use it as-is.  In other words,
+the vertical scale factor will be 2<sup>0</sup>.</p>
+<pre>
+    int y_scale_exp = 0;
+</pre>
+
+<p>Next, we need to define the rectangular region of the image
+coordinate space to render.  Since we are rendering the entire
+spectrogram rather than a tile, the top left corner of the
+rectangle will have an origin of (0, 0).
+</p>
+
+<pre>
+    int64_t x0 = 0;
+    int64_t y0 = 0;
+</pre>
+
+<p>The coordinates of the bottom right corner are determined by the
+length of the signal and the number of bands, respectively, taking the
+scale factors into account.
+The length of the signal in samples is <code>n_frames</code>,
+and we get the number of bands as the difference of the end points of
+the range of band numbers:
+<code>analyzer.bandpass_bands_end() - analyzer.bandpass_bands_begin()</code>.
+The scale factor is taken into account by right shifting by the
+scale exponent.
+</p>
+
+<pre>
+    int64_t x1 = n_frames &gt;&gt; x_scale_exp;
+    int64_t y1 = (analyzer.bandpass_bands_end() - analyzer.bandpass_bands_begin()) &gt;&gt; y_scale_exp;
+</pre>
+
+<p>The right shift by <code>y_scale_exp</code> above doesn't actually
+do anything because <code>y_scale_exp</code> is zero, but it would be
+needed if, for example, you were to change <code>y_scale_exp</code> to
+1 to get a spectrogram scaled to half the height.  You could also make a
+double-height spectrogram by setting <code>y_scale_exp</code> to -1,
+but then you also need to change the
+<code>&gt;&gt; y_scale_exp</code> to
+<code>&lt;&lt; -y_scale_exp</code> since you can't shift by
+a negative number.
+</p>
+
+<p>We are now ready to render the spectrogram, producing
+a vector of floating-point amplitude values, one per pixel.
+Although this is stored as a 1-dimensional vector of floats, its
+contents should be interpreted as a 2-dimensional rectangular array of
+<code>(y1 - y0)</code> rows of <code>(x1 - x0)</code> columns
+each, with the row indices increasing towards lower
+frequencies and column indices increasing towards later
+sampling times.
+</p>
+<pre>
+    std::vector&lt;float&gt; amplitudes((x1 - x0) * (y1 - y0));
+    gaborator::render_p2scale(
+        analyzer,
+        coefs,
+        x_origin, y_origin,
+        x0, x1, x_scale_exp,
+        y0, y1, y_scale_exp,
+        amplitudes.data());
+</pre>
+
+<h2>Writing the Image File</h2>
+
+<p>To keep the code simple and to avoid additional library
+dependencies, the image is stored in
+<code>pgm</code> (Portable GreyMap) format, which is simple
+enough to be generated with just a few lines of inline code.
+Each amplitude value in <code>amplitudes</code> is converted into an 8-bit
+gamma corrected pixel value by calling <code>gaborator::float2pixel_8bit()</code>.
+To control the brightness of the resulting image, each
+amplitude value is multiplied by a gain; this may have to be adjusted
+depending on the type of signal and the amount of headroom in the
+recording, but a gain of about 15 often works well for typical music
+signals.</p>
+<pre>
+    float gain = 15;
+    std::ofstream f;
+    f.open(argv[2], std::ios::out | std::ios::binary);
+    f &lt;&lt; "P5\n" &lt;&lt; (x1 - x0) &lt;&lt; ' ' &lt;&lt; (y1 - y0) &lt;&lt; "\n255\n";
+    for (size_t i = 0; i &lt; amplitudes.size(); i++)
+        f.put(gaborator::float2pixel_8bit(amplitudes[i] * gain));
+    f.close();
+</pre>
+
+<h2>Postamble</h2>
+<p>
+To make the example code a complete program,
+we just need to finish <code>main()</code>:
+</p>
+<pre>
+    return 0;
+}
+</pre>
+
+<a id="compiling"><h2>Compiling</h2></a>
+<p>
+If you are using macOS, Linux, NetBSD, or a similar system, you can build
+the example by running the following command in the <code>examples</code>
+subdirectory.
+You need to have <i>libsndfile</i> installed and supported by
+<code>pkg-config</code>.
+</p>
+<pre class="build Darwin Linux NetBSD FreeBSD OpenBSD">
+c++ -std=c++11 -I.. -O3 -ffast-math $(pkg-config --cflags sndfile) render.cc $(pkg-config --libs sndfile) -o render
+</pre>
+
+<h2>Compiling for Speed</h2>
+<p>The above build command uses the Gaborator's built-in FFT implementation,
+which is simple and portable but rather slow.  Performance can be
+significantly improved by using a faster FFT library.  On macOS, you
+can use the FFT from Apple's vDSP library by defining
+<code>GABORATOR_USE_VDSP</code> and linking with the <code>Accelerate</code>
+framework:
+</p>
+<pre class="build Darwin">
+c++ -std=c++11 -I.. -O3 -ffast-math -DGABORATOR_USE_VDSP $(pkg-config --cflags sndfile) render.cc $(pkg-config --libs sndfile) -framework Accelerate -o render
+</pre>
+
+<p>On Linux and NetBSD, you can use the PFFFT (Pretty Fast FFT) library.
+You can get the latest version from
+<a href="https://bitbucket.org/jpommier/pffft">https://bitbucket.org/jpommier/pffft</a>,
+or the exact version the example code was tested with from gaborator.com:
+</p>
+<!-- ftp https://bitbucket.org/jpommier/pffft/get/7641e67977cf.zip -->
+<pre class="build Linux NetBSD FreeBSD OpenBSD">
+wget http://download.gaborator.com/mirror/pffft/7641e67977cf.zip
+unzip 7641e67977cf.zip
+mv jpommier-pffft-7641e67977cf pffft
+</pre>
+<p>Then, compile it:</p>
+<pre class="build Linux NetBSD FreeBSD OpenBSD">
+cc -c -O3 -ffast-math pffft/pffft.c -o pffft/pffft.o
+</pre>
+<p>(If you are building for ARM, you will need to add <code>-mfpu=neon</code> to
+both the above compilation command and the ones below.)</p>
+<p>PFFFT is single precision only, but it comes with a copy of FFTPACK which can
+be used for double-precision FFTs.  Let's compile that, too:</p>
+<pre class="build Linux NetBSD FreeBSD OpenBSD">
+cc -c -O3 -ffast-math -DFFTPACK_DOUBLE_PRECISION pffft/fftpack.c -o pffft/fftpack.o
+</pre>
+<p>Then build the example and link it with both PFFFT and FFTPACK:</p>
+<pre class="build Linux NetBSD FreeBSD OpenBSD">
+c++ -std=c++11 -I.. -Ipffft -O3 -ffast-math -DGABORATOR_USE_PFFFT $(pkg-config --cflags sndfile) render.cc pffft/pffft.o pffft/fftpack.o $(pkg-config --libs sndfile) -o render
+</pre>
+
+<h2>Running</h2>
+<p>Running the following shell commands will download a short example
+audio file (of picking each string on an acoustic guitar), generate
+a spectrogram from it as a <code>.pgm</code> image, and then convert
+the <code>.pgm</code> image into a <code>JPEG</code> image:</p>
+<pre class="run">
+wget http://download.gaborator.com/audio/guitar.wav
+./render guitar.wav guitar.pgm
+cjpeg &lt;guitar.pgm &gt;guitar.jpg
+</pre>
+
+<h2>Example Output</h2>
+<p>The JPEG file produced by the above will look like this:</p>
+<img src="spectrogram.jpg" alt="Spectrogram" data-autogen="no" />
+
+<div class="nav"><span class="prev"><a href="index.html">Up: Main Page</a></span><span class="next"><a href="filter.html">Next: Example 2: Frequency-Domain Filtering</a></span></div>
+
+</body>
+</html>

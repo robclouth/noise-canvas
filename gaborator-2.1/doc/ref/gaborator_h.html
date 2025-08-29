@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<!--
+Copyright (C) 2018-2023 Andreas Gustafsson.  This file is part of
+the Gaborator library source distribution.  See the file LICENSE at
+the top level of the distribution for license information.
+-->
+<html>
+<head>
+<link rel="stylesheet" href="../doc.css" type="text/css" />
+<title>Gaborator reference: gaborator.h</title>
+</head>
+<body>
+<h1>Gaborator reference: <code>gaborator.h</code></h1>
+
+<pre class="forward_decl">
+template&lt;class T&gt; class analyzer;
+</pre>
+
+<h2>Frequency scales</h2>
+
+<p>The Gaborator supports three types of frequency scales:
+logarithmic, linear, and mel scales.  Each is represented by a class
+deriving from the abstract base class <code>fq_scale</code>.</p>
+
+<pre>
+class fq_scale {
+</pre>
+
+<div class="class_def">
+
+<h3>Comparison</h3>
+<p>
+Comparison operators are provided for compatibility with
+standard container classes.
+</p>
+<pre>
+bool operator&lt;(const fq_scale &amp;rhs) const;
+bool operator==(const fq_scale &amp;rhs) const;
+</pre>
+
+</div>
+
+<pre>
+};
+</pre>
+
+<h3>Logarithmic frequency scale</h3>
+
+<p>The <code>log_fq_scale</code> class represents a logarithmic
+frequency scale, corresponding to a constant-Q transform or
+constant-Q spectrogram.</p>
+
+<pre>
+class log_fq_scale: public fq_scale {
+</pre>
+
+<div class="class_def">
+
+<h4>Constructor</h4>
+
+<pre>
+log_fq_scale(double bands_per_octave,
+             double ff_min,
+             double ff_ref = 0.5);
+</pre>
+
+<dl>
+  <dt><code>bands_per_octave</code></dt>
+  <dd>The number of frequency bands per octave.
+  Values from 4 to 384 (inclusive) are supported.
+  Integer values yield the best performance, but
+  non-integer values are also supported.
+  The minimum of 4 applies when the default overlap of 0.7 is used;
+  if the overlap is increased from the default, the minimum should be
+  increased proportionally.
+  Values greater than 384 probably work but are not regularly tested.
+  </dd>
+  <dt><code>ff_min</code></dt>
+  <dd>The lower limit of the analysis frequency range, in units of the
+  sample rate.  The analysis filter bank will extend low enough in
+  frequency that the lowest bandpass filter center frequency falls at
+  or below <code>ff_min</code>.
+  Values from 0.0001 up to but not including 0.5 are supported.
+  Values below 0.0001 probably work but are not regularly tested.</dd>
+  <dt><code>ff_ref</code></dt>
+  <dd>The reference frequency, in units of the sample rate.
+  This allows fine-tuning of the analysis and synthesis filter
+  banks such that the center frequency of one of the filters
+  is aligned with <code>ff_ref</code>.  If <code>ff_ref</code>
+  falls outside the frequency range of the bandpass filter bank, this
+  works as if the range were extended to include
+  <code>ff_ref</code>.  Must be positive.  A typical value
+  when analyzing music is <code>440.0 / fs</code>, where
+  <code>fs</code> is the sample rate in Hz.
+  </dd>
+</dl>
+
+</div>
+
+<pre>
+};
+</pre>
+
+<h3>Linear frequency scale</h3>
+
+<p>The <code>lin_fq_scale</code> class represents a linear
+frequency scale, corresponding to a short-term Fourier transform
+(STFT) or constant-bandwidth spectrogram.
+</p>
+
+<pre>
+class lin_fq_scale: public fq_scale {
+</pre>
+
+<div class="class_def">
+
+<h4>Constructor</h4>
+
+<pre>
+lin_fq_scale(double size);
+</pre>
+
+<dl>
+<dt><code>size</code></dt>
+
+<dd><p style="margin-top: 0pt">The size of the transform.  This
+corresponds to the "FFT size" parameter that is typically used with
+FFT based spectrum analyzers: the frequency spacing between bands is
+the sample rate divided by <i>size</i>, and the number of frequency
+bands produced is roughly half of <i>size</i> because negative
+frequencies are omitted.  However, in the Gaborator, the <i>size</i>
+parameter is not limited to powers of two, or even to integer values,
+so any arbitrary band spacing of <i>x</i> Hz can be achieved by
+specifying a <i>size</i> of <code>fs / x</code> where
+<code>fs</code> is the sample rate in Hz.</p>
+
+<p>Values from 2 to 10000 are supported.  Larger values probably work but
+are not regularly tested.</p>
+
+</dd>
+</dl>
+
+</div>
+
+<pre>
+};
+</pre>
+
+<h3>Mel frequency scale</h3>
+
+<p>The <code>mel_fq_scale</code> class represents a mel
+frequency scale, a scale designed to mimic human pitch perception
+such that one mel is close to the smallest perceptible difference
+in frequency.
+It is defined by the formula <i>mel = 2595
+log<sub>10</sub>(1 + f / 700)</i>, where <i>f</i>&#x2009;
+is the frequency in Hz.</p>
+
+<p>The mel scale is approximately logarithmic
+at high frequencies, and approximately linear at low frequencies,
+with a smooth transition between the two.</p>
+
+<pre>
+class mel_fq_scale: public fq_scale {
+</pre>
+
+<div class="class_def">
+<h4>Constructor</h4>
+
+<pre>
+mel_fq_scale(double bands_per_mel,
+             double fs);
+</pre>
+
+<dl>
+<dt><code>bands_per_mel</code></dt>
+
+<dd><p style="margin-top: 0pt">The number of frequency bands per mel.
+Supported values range from 0.003 (yielding a total of 12 frequency
+bands between 0 and 22.05&#xA0;kHz at a 44.1&#xA0;kHz sample rate) to
+1.0 (yielding some 3924 bands).  Values larger than 1.0 probably work
+but are not regularly tested.</p>
+
+<p>The minimum of 0.003 applies when the default overlap of 0.7 is
+used; if the overlap is increased from the default, the minimum should
+be increased proportionally.  Also, if the sample rate is lower than
+44.1&#xA0;kHz, the minimum should be increased in inverse proportion
+to the sample rate.  For example, at a sample rate 22.05 kHz and the
+default overlap of 0.7, the minimum number of bands per mel is 0.008).
+</p></dd>
+
+<dt><code>fs</code></dt>
+
+<dd>The sample rate in Hz.  Because the mel scale is defined in terms
+of absolute frequencies in Hz, the sample rate needs to be specified
+explicitly; this is an exception to the sample rate agnostic design
+of the rest of the Gaborator API.  Values from 8000 to 96000 are
+supported.  Values outside this range probably work but are not
+regularly tested.
+</dd>
+</dl>
+
+</div>
+
+<pre>
+};
+</pre>
+
+<h2 id="phase_conventions">Phase conventions</h2>
+
+<pre>
+enum class coef_phase { global, local };
+</pre>
+
+<p>The spectrogram coefficients produced by the Gaborator are complex
+numbers, and as such they have both a magnitude and a phase.  The
+phase can be defined in several different ways, using different
+reference points for what is considered a phase of zero.</p>
+
+<p>Under one possible definition, an input signal of a real and
+positive impulse at some time <i>t</i>&#x2009; will cause all
+spectrogram coefficients at that time <i>t</i>&#x2009; to also be real
+and positive, or in other words, to have a phase of zero, for any
+frequency.  We call this the <i>local</i> phase convention, and it is
+the default beginning with version 2 of the Gaborator.</p>
+
+<p>Under an alternative definition, an input signal of a cosine wave
+at some frequency <i>f</i>&#x2009; will cause all spectrogram coefficients at
+that frequency <i>f</i>&#x2009; to have a phase of zero, at any point in time.
+We call this the <i>global</i> phase convention, and it was the
+default in version 1 of the Gaborator.</p>
+
+<p>The local phase convention is preferred because it guarantees that
+the coefficients for a given point in time only depend on the local
+signal behavior around that point in time, and not on how far that
+point in time is from the reference point of t=0.  This avoids a
+loss of floating point precision for signals far from t=0.</p>
+
+<h2>Spectrum Analysis Parameters</h2>
+
+<p>A <code>parameters</code> object holds a set of parameters for
+the spectrum analysis and resynthesis.</p>
+
+<pre>
+class parameters {
+</pre>
+
+<div class="class_def">
+<h3>Constructor</h3>
+
+<p>The only required parameter is the frequency scale, which is passed
+as an argument to the <code>parameters</code> constructor.  Optional
+parameters may be specified by assigning to data members of
+the <code>parameters</code> object after construction.</p>
+
+<pre>
+parameters(const fq_scale &amp;scale);
+</pre>
+<h3>Legacy Constructor</h3>
+<p>For backwards compatibility with version 1 of the Gaborator,
+the following constructor is also supported:</p>
+<pre>
+parameters(double bands_per_octave,
+           double ff_min,
+           double ff_ref = 1.0);
+</pre>
+<p>This constructs a set of parameters with a logarithmic frequency scale, like
+<code>parameters(log_fq_scale(bands_per_octave, ff_min, ff_ref))</code>
+except that the <code>phase</code> member is initialized to the version 1 default
+of <code>coef_phase::global</code> rather than the version 2 default of
+<code>coef_phase::local</code>.
+</p>
+
+<h3>Phase convention</h3>
+
+<p>The <a href="#phase_conventions">phase convention</a>
+to be used for the analysis and resynthesis
+can be set or examined using the public data member <code>phase</code>.</p>
+
+<pre>
+coef_phase phase;
+</pre>
+
+<h3>Overlap</h3>
+
+<p>The amount of <a href="../overview.html#overlap">overlap</a> between
+adjacent bandpass bands can be set or examined using the public data
+member <code>overlap</code>.  The default is 0.7, meaning each band
+will have a standard deviation of 0.7 times the band spacing.</p>
+
+<pre>
+double overlap;
+</pre>
+
+<h3>Comparison</h3>
+<p>
+Comparison operators are provided for compatibility with
+standard container classes.
+</p>
+<pre>
+bool operator&lt;(const parameters &amp;rhs) const;
+bool operator==(const parameters &amp;rhs) const;
+</pre>
+
+</div>
+<pre>
+};
+</pre>
+
+<h2>Spectrogram Coefficients</h2>
+
+<p>
+A <code>coefs</code> object stores a set of spectrogram coefficients.
+It is a dynamic data structure and will be automatically grown to
+accommodate new time ranges, for example as newly recorded audio is analyzed.
+The template argument <code>T</code>
+must match that of the <code>analyzer</code> (usually <code>float</code>).
+The template argument <code>C</code> is the data type used to store each
+coefficient value; there is usually no need to specify it explicitly as
+it will default to <code>std::complex&lt;T&gt;</code>.
+</p>
+
+<pre>
+template &lt;class T, class C = std::complex&lt;T&gt;&gt;
+class coefs {
+</pre>
+<div class="class_def">
+<h3>Constructor</h3>
+<pre>
+coefs(analyzer&lt;T&gt; &amp;a);
+</pre>
+<p>
+Construct an empty set of coefficients for use with the spectrum
+analyzer <code>a</code>.  This represents a signal that is zero
+at all points in time.
+</p>
+
+</div>
+<pre>
+};
+</pre>
+
+<h2>Spectrum Analyzer</h2>
+
+<p>
+The <code>analyzer</code> object performs spectrum analysis and/or resynthesis
+according to the given parameters.  The template argument <code>T</code> is
+the floating-point type to use for the calculations.  This is typically <code>float</code>;
+alternatively, <code>double</code> can be used for increased accuracy at the
+expense of speed and memory consumption.</p>
+
+<pre>template &lt;class T&gt;
+class analyzer {</pre>
+<div class="class_def">
+
+<h3>Constructor</h3>
+
+<pre>
+analyzer(const parameters &amp;params);
+</pre>
+<dl>
+  <dt><code>params</code></dt>
+  <dd>The spectrum analysis parameters.</dd>
+</dl>
+
+<h3>Analysis and synthesis</h3>
+
+<pre>
+void
+analyze(const T *signal,
+        int64_t t0,
+        int64_t t1,
+        coefs&lt;T&gt; &amp;coefs) const;
+</pre>
+<p>Spectrum analyze the samples at <code>*signal</code> and add the
+resulting coefficients to <code>coefs</code>.</p>
+<dl>
+  <dt><code>signal</code></dt>
+  <dd>The signal samples to analyze, beginning with the sample from time <code>t0</code>
+  and ending with the last sample before time <code>t1</code>, for a total of
+  <code>t1 - t0</code> samples.</dd>
+  <dt><code>t0</code></dt>
+  <dd>The point in time when the sample at <code>signal[0]</code> was taken,
+  in samples.  For example, when analyzing an audio recording, this is typically
+  0 for the first sample in the recording, but this reference point is arbitrary,
+  and negative times are valid.  When using the global phase convention,
+  accuracy begins to successively decrease outside the range of about
+  &#xB1;10<sup>8</sup> samples, so using large time values should be
+  avoided.  When using the local phase convention, no such loss of accuracy
+  occurs.
+  </dd>
+  <dt><code>t1</code></dt>
+  <dd>The point in time of the sample one past the
+  end of the array of samples at <code>signal</code>,
+  in samples.
+  </dd>
+  <dt><code>coefs</code></dt><dd>The coefficient object that the results of the
+  spectrum analysis are added to.</dd>
+</dl>
+<p>If the <code>coefs</code> object already contains some
+coefficients, the new coefficients are summed to those already
+present.  Because the analysis is a linear operation, this allows a
+signal to be analyzed in blocks, by making multiple calls
+to <code>analyze()</code> with non-overlapping ranges that together
+cover the entire signal.  For efficiency, the blocks should
+be large, as in
+<code>analyze(first_131072_samples, 0, 131072, coefs)</code>,
+<code>analyze(next_131072_samples, 131072, 262144, coefs)</code>,
+etc.
+</p>
+
+<pre>
+void
+synthesize(const coefs&lt;T&gt; &amp;coefs,
+           int64_t t0,
+           int64_t t1,
+           T *signal) const;
+</pre>
+<p>Synthesize signal samples from the coefficients <code>coefs</code>
+and store them at <code>*signal</code>.
+</p>
+<dl>
+  <dt><code>coefs</code></dt><dd>The coefficients to synthesize the signal from.</dd>
+  <dt><code>t0</code></dt>
+  <dd>The point in time of the first sample to synthesize,
+  in samples, using the same time scale as in <code>analyze()</code>.</dd>
+  <dt><code>t1</code></dt>
+  <dd>The point in time of the sample one past the last one to synthesize.</dd>
+  <dt><code>signal</code></dt>
+  <dd>The synthesized signal samples will be written here,
+  beginning with the sample from time <code>t0</code> and
+  and ending with the last sample before time <code>t1</code>,
+  for a total of <code>t1 - t0</code> samples.</dd>
+</dl>
+<p>The time range <code>t0</code>...<code>t1</code> may extend outside
+the range analyzed using <code>analyze()</code>, in which case the
+signal is assumed to be zero in the un-analyzed range.</p>
+
+<p>A signal may be synthesized in blocks by making multiple calls to
+<code>analyze()</code> with different sample ranges.  For efficiency,
+the blocks should be large, and each <code>t0</code> should
+be a multiple of a large power of two.</p>
+
+<h3>Frequency Band Numbering</h3>
+
+<p>The frequency bands of the analysis filter bank are numbered by
+non-negative integers that increase towards lower (sic) frequencies.
+Although this numbering may seem backwards, it makes a certain
+amount of sense for constant-Q analysis where the
+frequency range has a hard upper limit (the Nyquist frequency) but no
+hard lower limit.  Numbering the bands from high to low frequency
+allows the frequency range to be extended into arbitrarily low
+frequencies without using negative band numbers or having to renumber
+existing bands.  It also maps logically to computer graphics
+coordinate systems where the Y coordinate increases downwards.</p>
+
+<p>When using a logarithmic frequency scale,
+there is a number of <i>bandpass bands</i> corresponding to the
+logarithmically spaced bandpass analysis filters, from near 0.5
+(the Nyquist frequency, or half the sample rate) to
+near f<sub>min</sub>, and a single <i>lowpass band</i> containing the
+residual signal from frequencies below f<sub>min</sub>.
+Note that there is no special highpass band; frequencies at or
+close to the Nyquist frequency are included in the highest-frequency
+bandpass band(s).
+</p>
+
+<p>When using a linear or mel frequency scale, all the bands are
+considered <i>bandpass bands</i> and there is no special <i>lowpass band</i>.
+</p>
+
+<p>
+The band numbering can be examined using the following methods:
+</p>
+
+<pre>
+int bands_begin() const;
+</pre>
+<p>
+Return the lowest valid band number.  This is always 0.
+</p>
+<pre>
+int bands_end() const;
+</pre>
+<p>
+Return the highest valid band number plus one.  This is also the
+total number of bands.
+</p>
+<pre>
+int bandpass_bands_begin() const;
+</pre>
+<p>
+Return the lowest valid bandpass band number, corresponding to the
+highest-frequency bandpass band.  This is currently 0, but should
+a future version of the Gaborator support a highpass band, that will
+become band 0 and <code>bandpass_bands_begin()</code> will return 1.
+</p>
+<pre>
+int bandpass_bands_end() const;
+</pre>
+<p>
+Return the highest valid bandpass band number plus one, corresponding
+to one past the lowest-frequency bandpass band.
+</p>
+<pre>
+int band_lowpass() const;
+</pre>
+<p>
+For an analyzer using a logarithmic frequency scale only,
+return the band number of the lowpass band.  This returns the same
+number as <code>bandpass_bands_end()</code>, but is preferred for
+clarity when referring to the lowpass band rather than
+the excluded upper bound of the range of bandpass bands.
+</p>
+<pre>
+int band_ref() const;
+</pre>
+<p>
+For an analyzer using a logarithmic frequency scale only,
+return the band number corresponding to the reference frequency
+<code>ff_ref</code>.   If <code>ff_ref</code> falls within
+the frequency range of the bandpass filter bank, this is
+a valid bandpass band number, otherwise it is not.
+</p>
+
+<h3>Band properties</h3>
+
+<pre>
+double band_ff(int band) const;
+</pre>
+<p>
+Return the center frequency of band number <i>band</i>, in units of the
+sample rate.  The center frequency of the lowpass band (if present) is 0.
+</p>
+
+<pre>
+double bandpass_band_ff(double band) const;
+</pre>
+<p>
+Return the center frequency of bandpass band number <i>band</i>, in
+units of the sample rate.  Unlike <code>band_ff</code>, this takes a
+floating point argument and supports interpolating between bands by
+giving a non-integer band number, and/or extrapolating outside the valid
+range of bandpass band numbers.
+</p>
+
+<pre>
+double band_q(double band) const;
+</pre>
+<p>
+Return the Q (quality factor) of the analysis filter of bandpass
+band <i>band</i>.  Q is defined as the -3&#xA0;dB bandwidth divided by
+the center frequency.  When using a logarithmic frequency scale, the
+bands form a constant-Q filter bank and Q is the same for all bands,
+and when using a linear or mel frequency scale, Q will vary from band
+to band.
+</p>
+
+<h3>Support</h3>
+
+<pre>
+double band_analysis_support(int band) const;
+</pre>
+<p>Return the one-sided time domain <i>support</i> of the analysis
+filter for band <i>band</i>.
+When calling <code>analyze()</code> with a sample at time <i>t</i>,
+the spectrogram coefficients of band <i>band</i> will change
+significantly only within the time range <i>t &#xB1; support</i>.
+Coefficients outside the range may change slightly,
+but the changes will sufficiently small that they may be ignored without
+significantly reducing accuracy.</p>
+
+<pre>
+double analysis_support() const;
+</pre>
+<p>Return the largest <code>band_analysis_support(band)</code> of any band.
+</p>
+
+<pre>
+double band_synthesis_support(int band) const;
+</pre>
+<p>Returns the one-sided time domain <i>support</i> of the
+reconstruction filter for band <i>band</i>.  When
+calling <code>synthesize()</code> to synthesize a sample at
+time <i>t</i>, the sample will only be significantly affected by
+spectrogram coefficients of band <i>band</i> in the time range <i>t
+&#xB1; support</i>.  Coefficients outside the range may be used in
+the synthesis, but substituting zeroes for the actual coefficient
+values will not significantly reduce accuracy.</p>
+
+<pre>
+double synthesis_support() const;
+</pre>
+<p>Return the largest <code>band_synthesis_support(band)</code> of any band.
+</p>
+
+</div>
+<pre>
+};
+</pre>
+
+<h2>Functions</h2>
+
+<h3>Iterating Over Existing Coefficients</h3>
+
+<pre>
+template &lt;class T, class F, class C0, class... CI&gt;
+void process(F f,
+             int b0,
+             int b1,
+             int64_t t0,
+             int64_t t1,
+             coefs&lt;T, C0&gt; &amp;coefs0,
+             coefs&lt;T, CI&gt;&amp;... coefsi);
+</pre>
+
+<p>
+Process one or more coefficient sets <code>coefs0</code>... by applying
+the function <code>f</code> to each coefficient present in <code>coefs0</code>,
+in an indeterminate order.</p>
+
+<p>This can be optionally limited to coefficients whose
+band number <i>b</i> and sample time <i>t</i> satisfy
+<code>b0</code> &#x2264; <i>b</i> &lt; <code>b1</code> and
+<code>t0</code> &#x2264; <i>t</i> &lt; <code>t1</code>.
+To process every coefficient present
+in <code>coefs0</code>, pass <code>INT_MIN, INT_MAX, INT64_MIN, INT64_MAX</code>
+for the arguments <code>b0</code>, <code>b1</code>, <code>t0</code>,
+and <code>t1</code>, respectively.
+</p>
+<p>The function <code>f</code> should have the call signature</p>
+<pre>
+template &lt;class T&gt;
+void f(int b, int64_t t, std::complex&lt;T&gt; &amp;c0, std::complex&lt;T&gt; &amp;ci...);
+</pre>
+<p>where</p>
+<dl>
+     <dt><code>b</code></dt>
+     <dd>The band number of the frequency band the coefficients
+         <code>c0</code> and <code>ci...</code> pertain to.
+     This may be either a bandpass band or the lowpass band.</dd>
+     <dt><code>t</code></dt>
+     <dd>The point in time the coefficients <code>c0</code> and
+         <code>ci...</code> pertain to, in samples</dd>
+     <dt><code>c0</code></dt>
+     <dd>A reference to a complex coefficient from <code>coefs0</code></dd>
+     <dt><code>ci...</code></dt>
+     <dd>Optional references to complex coefficients from the additional
+         coefficient sets <code>coefsi...</code>.</dd>
+</dl>
+
+<p>The function <code>f</code> may read and/or modify each of the
+coefficients passed through <code>c0</code> and each
+<code>ci...</code>.</p>
+
+<p>The first coefficient set <code>c0</code> is a special case when
+it comes to the treatment of missing values.  Coefficients missing
+from <code>c0</code> will not be iterated over at all, but when a
+coefficient <i>is</i> iterated over and is missing from one of the additional
+coefficient sets <code>ci...</code>, it will be automatically created
+and initialized to zero in that additional coefficient set.</p>
+
+<p>For example, in the common case where the processing takes one input
+and produces one output, <code>c0</code> should be the input
+and <code>c1</code> should be the output.  This ensures that the
+entire input is iterated over, and that the output coefficients get
+created as needed.</p>
+
+<p><i>Note: The template parameters <code>C0</code>
+and <code>CI</code>...  exist to support the processing of coefficient
+sets containing data of types other
+than <code>std::complex&lt;T&gt;</code>, which is not currently part of the
+documented API.  In typical use, there is no need to specify them
+because the template parameter list
+can be deduced, but if they are explicitly specified, they should all
+be <code>std::complex&lt;T&gt;</code>.
+</i></p>
+
+<h3>Creating New Coefficients</h3>
+
+<pre>
+template &lt;class T, class F, class C0, class... CI&gt;
+void fill(F f,
+          int b0,
+          int b1,
+          int64_t t0,
+          int64_t t1,
+          coefs&lt;T, C0&gt; &amp;coefs0,
+          coefs&lt;T, CI&gt;&amp;... coefsi);
+</pre>
+<p>
+Fill a region of the time-frequency plane with coefficients
+and apply the function <code>f</code> to each.
+</p>
+<p>This works like <code>process()</code> except that it is not limited
+to processing coefficients that already exist in <code>coefs0</code>;
+instead, any missing coefficients in <code>coefs0</code> as well as
+any of the <code>coefsi</code>... are created and initialized to zero
+before <code>f</code> is called.</p>
+
+<p>The <code>t0</code> and <code>t1</code> arguments must specify an
+explicit, bounded time range &#x2014; they must not be given as
+INT64_MIN and/or INT64_MAX as that would mean creating coefficients
+for an an astronomically large time range, requiring a correspondingly
+astronomical amount of memory.</p>
+
+<h3>Forgetting Coefficients</h3>
+<pre>
+template &lt;class T&gt;
+void forget_before(const analyzer&lt;T&gt; &amp;a,
+                   coefs&lt;T&gt; &amp;c,
+                   int64_t limit);
+</pre>
+<p>Allow the coefficients for points in time before <code>limit</code>
+(a time in units of samples) to be forgotten.
+Streaming applications can use this to free memory used by coefficients
+that are no longer needed.  Coefficients that have been forgotten will
+read as zero.  This does not guarantee that all coefficients before
+<code>limit</code> are forgotten, only that ones for
+<code>limit</code> or later are not, and that the amount of memory
+consumed by any remaining coefficients before <code>limit</code> is
+bounded.</p>
+
+<h3>Legacy API For Iterating Over Existing Coefficients</h3>
+
+<p>Prior to version 1.5, iteration over the coefficients was done
+using the <code>apply()</code> function.
+It is similar to <code>process()</code>, except that it
+</p>
+<ul>
+<li>requires an additional <code>analyzer</code> argument,</li>
+<li>takes arguments in a different order,</li>
+<li>applies a function <code>f</code> taking arguments in a different order,</li>
+<li>does not support restricting the processing to a range of band numbers,</li>
+<li>only supports iterating over a single coefficient set, and</li>
+<li>provides default values for t0 and t1.</li>
+</ul>
+<p>In new code, <code>process()</code> is preferred.</p>
+
+<pre>
+template &lt;class T, class F&gt;
+void apply(const analyzer&lt;T&gt; &amp;a,
+           coefs&lt;T&gt; &amp;c,
+           F f,
+           int64_t t0 = INT64_MIN,
+           int64_t t1 = INT64_MAX);
+</pre>
+<p>
+Apply the function <code>f</code> to each coefficient in the coefficient
+set <code>c</code> for points in time <i>t</i> that satisfy
+<code>t0</code> &#x2264; <i>t</i> &lt; <code>t1</code>.
+If the <code>t0</code> and <code>t1</code> arguments are omitted, <code>f</code>
+is applied to every coefficient.
+</p>
+<dl>
+  <dt><code>a</code></dt>
+  <dd>The spectrum analyzer that produced the coefficients <code>c</code></dd>
+  <dt><code>c</code></dt>
+  <dd>A set of spectrogram coefficients</dd>
+  <dt><code>f</code></dt>
+  <dd>A function to apply to each coefficient in <code>c</code>,
+  with the call signature
+<pre>
+template &lt;class T&gt;
+void f(std::complex&lt;T&gt; &amp;coef, int band, int64_t t);
+</pre>
+    <dl>
+      <dt><code>coef</code></dt>
+      <dd>A reference to a single complex coefficient.  This may be read and/or modified.</dd>
+      <dt><code>band</code></dt>
+      <dd>The band number of the frequency band the coefficient <code>coef</code> pertains to.
+        This may be either a bandpass band or the lowpass band.</dd>
+      <dt><code>t</code></dt>
+      <dd>The point in time the coefficient <code>coef</code> pertains to, in samples</dd>
+    </dl>
+    </dd>
+    <dt><code>t0</code></dt><dd>When not <code>INT64_MIN</code>, only apply <code>f</code> to the coefficients for time &#x2265; <code>t0</code></dd>
+    <dt><code>t1</code></dt><dd>When not <code>INT64_MAX</code>, only apply <code>f</code> to the coefficients for time &lt; <code>t1</code></dd>
+</dl>
+
+<div class="nav"><span class="prev"><a href="intro.html">Previous: API Introduction</a></span><span class="next"><a href="render_h.html">Next: Spectrogram rendering: <code>render.h</code></a></span></div>
+
+</body>
+</html>

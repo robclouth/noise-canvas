@@ -1,0 +1,53 @@
+body {
+  background-color: #000;
+  font-family: sans-serif;
+  margin: 10%;
+  color: #eee;
+}
+a:link, a:visited, a:hover, a:active {
+  color: currentColor;
+}
+pre {
+  border: 1px solid #888;
+  margin: 20px;
+  margin-left: 0px;
+  padding: 10px;
+  background: #222;
+  /* To avoid text extending outside the border on narrow displays */
+  white-space:pre-wrap;
+}
+img {
+  border: 1px solid #888;
+  margin: 20px;
+  margin-left: 0px;
+  padding: 10px;
+  background: #000;
+}
+h2 {
+  margin-top: 2em;
+}
+h3 {
+  margin-top: 1.5em;
+}
+/* http://code.stephenmorley.org/html-and-css/fixing-browsers-broken-monospace-font-handling/ */
+pre, code, kbd, samp, tt {
+  font-family:monospace,monospace;
+  font-size:1em;
+}
+pre.forward_decl {
+/* Needed for syntax checking, but avoid clutter for human readers */
+  display: none;
+}
+div.class_def {
+  margin-left: 2em;
+}
+div.nav {
+  margin-top: 30px;
+  font-style: oblique;
+}
+div.nav span.prev {
+  float: left;
+}
+div.nav span.next {
+  float: right;
+}

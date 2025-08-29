@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!--
+Copyright (C) 2023 Andreas Gustafsson.  This file is part of
+the Gaborator library source distribution.  See the file LICENSE at
+the top level of the distribution for license information.
+-->
+<html>
+<head>
+<link rel="stylesheet" href="../doc.css" />
+<title>Gaborator 2.1 Release Notes</title>
+</head>
+<body>
+
+<h1>Gaborator 2.1 Release Notes</h1>
+
+<h2>Deletion of <code>coefs</code> copy constructor and assignment operator</h2>
+
+<p>The copy constructor and assignment operator of the <code>coefs</code>
+template class in versions of the Gaborator up to and including 2.0 had
+ill-defined semantics where the <code>coefs</code> object did not behave fully like a value
+nor fully like a reference, but as a hybrid where copying resulted in a
+partially copied data structure containing references to the original.
+The copy would generally behave like a reference to the original,
+but unlike the case of a true reference, the copy operation had a nontrivial cost
+in time and space, potentially causing hard-to-diagnose performance problems
+if <code>coefs</code> objects were accidentally passed by value rather
+than by reference.</p>
+
+<p>In version 2.1, the ill-defined copy constructor and assignment
+operator have been deleted, and instead a move constructor and move
+assignment operator have been added.</p>
+
+<p>This change will intentionally break any existing code that
+accidentally passes <code>coefs</code> objects by value.  It may also
+unintentionally break some existing code that copies <code>coefs</code>
+objects in harmless ways, such as copying empty ones.  For example, in
+2.0, code like the following could be used to create a vector
+of <code>coefs</code> objects:</p>
+
+<pre>
+std::vector&lt;gaborator::coefs&lt;float&gt;&gt; channels(n_channels, gaborator::coefs&lt;float&gt;(anl));
+</pre>
+
+<p>In version 2.1, this no longer works, and needs to be rewritten
+in a way that avoids copying, such as</p>
+
+<pre>
+std::vector&lt;gaborator::coefs&lt;float&gt;&gt; channels;
+for (int i = 0; i &lt; n_channels; i++)
+    channels.emplace_back(anl);
+</pre>
+
+<p>Alternatively, you can enable a corrected copy constructor and
+assignment operator that make a deep copy of the <code>coefs</code>
+object by defining <code>GABORATOR_COEFS_DEEP_COPY</code> as
+<code>1</code> before including <code>gaborator.h</code>.  This lets
+code like the above example work without changes, but has the disadvantage
+that accidental copying of non-empty <code>coefs</code> objects will
+not be detected, and the performance problems caused by any such
+accidental copying will be exacerbated because the <code>coefs</code>
+objects are now copied in full, not just partly.</p>
+
+<div class="nav"><span class="prev"><a href="../realtime.html">Previous: Is it real-time?</a></span><span class="next"><a href="../index.html">Up: Main Page</a></span></div>
+
+</body>
+</html>

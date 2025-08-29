@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<!--
+Copyright (C) 2018-2023 Andreas Gustafsson.  This file is part of
+the Gaborator library source distribution.  See the file LICENSE at
+the top level of the distribution for license information.
+-->
+<html>
+<head>
+<link rel="stylesheet" href="doc.css" />
+<link rel="icon" type="image/png" href="favicon64.png" />
+<title>The Gaborator</title>
+</head>
+<body>
+<h1>The Gaborator</h1>
+
+<p>The Gaborator is a C++ library that generates spectrograms for the
+visualization and analysis of audio signals.  It supports constant-Q,
+constant-bandwidth and mel-frequency spectrograms, as well as a fast and
+accurate inverse transformation of the spectrogram coefficients back
+into audio for spectral effects and editing.</p>
+
+<p>The Gaborator is compatible with C++ versions from C++11 through
+C++20 and beyond.  It has been tested on macOS, iOS, Linux, NetBSD,
+FreeBSD, and OpenBSD, on Intel x86_64 and ARM processors.</p>
+
+<p>The Gaborator is open source under the GNU Affero General Public
+License, version 3, and is also available for commercial licensing.
+See the file <a href="../LICENSE">LICENSE</a> for details.</p>
+
+<h2>Example Code</h2>
+
+<p>The following examples demonstrate the use of the library in
+various scenarios.  They are presented in a "literate
+programming" style, where the code is embedded in the commentary
+rather than the other way around.
+Concatenating the code fragments in each example yields a complete C++
+program, which can also be found as a <code>.cc</code> file in
+the <code>examples/</code> directory.</p>
+<ul>
+<li><a href="render.html">Example 1: Rendering a Spectrogram Image</a></li>
+<li><a href="filter.html">Example 2: Frequency-Domain Filtering</a></li>
+<li><a href="stream.html">Example 3: Streaming</a></li>
+<li><a href="snr.html">Example 4: Measuring the Signal-to-Noise Ratio</a></li>
+<li><a href="synth.html">Example 5: Synthesis from Scratch</a></li>
+</ul>
+
+<h2>API Reference</h2>
+<p>The following documents define the library API.
+</p>
+<ul>
+<li><a href="ref/intro.html">API Introduction</a></li>
+<li><a href="ref/gaborator_h.html">Spectrum analysis and synthesis: <code>gaborator.h</code></a></li>
+<li><a href="ref/render_h.html">Spectrogram rendering: <code>render.h</code></a></li>
+</ul>
+
+<h2>How it Works</h2>
+<p>The following document outlines the operation of the library.</p>
+<ul>
+<li><a href="overview.html">Overview of Operation</a></li>
+</ul>
+
+<h2>FAQ</h2>
+<ul>
+<li><a href="realtime.html">Is it real-time?</a></li>
+</ul>
+
+<h2>Release Notes</h2>
+<ul>
+<li><a href="relnotes/2_1.html">Version 2.1</a></li>
+</ul>
+
+<h2>Contact</h2>
+<p>Email questions and bug reports to the author at info@gaborator.com.</p>
+
+</body>
+</html>

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<!--
+Copyright (C) 2018-2023 Andreas Gustafsson.  This file is part of
+the Gaborator library source distribution.  See the file LICENSE at
+the top level of the distribution for license information.
+-->
+<html>
+<head>
+<link rel="stylesheet" href="doc.css" />
+<title>Gaborator Example 3: Streaming</title>
+</head>
+<body>
+<h1>Example 3: Streaming</h1>
+
+<h2>Introduction</h2>
+
+<p>This example shows how to process streaming audio a block at a time,
+rather than operating on a complete recording at once as in the previous
+examples.</p>
+
+<p>This program doesn't do anything particularly useful &#x2014; it just
+inverts the phase of the signal, but not using the obvious method of
+changing the sign of each sample but by changing the sign of each
+spectrogram coefficient.  Consider the expression <code>coef =
+-coef</code> a placeholder for your own streaming filter or effect
+code.</p>
+
+<h2>Preamble</h2>
+
+<pre>
+#include &lt;memory.h&gt;
+#include &lt;iostream&gt;
+#include &lt;sndfile.h&gt;
+#include &lt;gaborator/gaborator.h&gt;
+
+int main(int argc, char **argv) {
+    if (argc &lt; 3) {
+        std::cerr &lt;&lt; "usage: stream input.wav output.wav\n";
+        exit(1);
+    }
+</pre>
+
+<h2>Opening the Streams</h2>
+
+<p>We again use <i>libsndfile</i> to read the input and write the output.
+To keep it simple, this example only handles mono files.</p>
+<pre>
+    SF_INFO sfinfo;
+    memset(&amp;sfinfo, 0, sizeof(sfinfo));
+    SNDFILE *sf_in = sf_open(argv[1], SFM_READ, &amp;sfinfo);
+    if (! sf_in) {
+        std::cerr &lt;&lt; "could not open input audio file: "
+            &lt;&lt; sf_strerror(sf_in) &lt;&lt; "\n";
+        exit(1);
+    }
+    if (sfinfo.channels != 1) {
+        std::cerr &lt;&lt; "only mono files are supported\n";
+        exit(1);
+    }
+    double fs = sfinfo.samplerate;
+
+    SNDFILE *sf_out = sf_open(argv[2], SFM_WRITE, &amp;sfinfo);
+    if (! sf_out) {
+        std::cerr &lt;&lt; "could not open output audio file: "
+            &lt;&lt; sf_strerror(sf_out) &lt;&lt; "\n";
+        exit(1);
+    }
+</pre>
+<p>The next couple of lines work around a design flaw in
+<i>libsndfile</i>.  By default, when reading a 16-bit
+audio file as floating point data and then writing them
+as another 16-bit audio file, <i>libsndfile</i> will use slightly
+different scale factors on input and output, and the output will
+not be bit-identical to the input.  To make it easier to verify
+that this example actually yields correct results to within
+the full 16-bit precision, we select a non-normalized floating
+point representation, which does not suffer from this flaw.</p>
+<pre>
+    sf_command(sf_in, SFC_SET_NORM_FLOAT, NULL, SF_FALSE);
+    sf_command(sf_out, SFC_SET_NORM_FLOAT, NULL, SF_FALSE);
+</pre>
+
+<h2>Spectrum Analysis Parameters</h2>
+
+<p>As in Example 1, the parameters are chosen for analyzing music, but
+to reduce the latency, the number of frequency bands per octave is reduced
+from 48 to 12 (one per semitone), and the lower frequency limit of
+the bandpass filter bank is raised from 20&#xA0;Hz to 200&#xA0;Hz.</p>
+<pre>
+    gaborator::log_fq_scale scale(12, 200.0 / fs, 440.0 / fs);
+    gaborator::parameters params(scale);
+    gaborator::analyzer&lt;float&gt; analyzer(params);
+</pre>
+
+<h2>Calculating Latency</h2>
+<p>The spectrogram coefficients are calculated by applying symmetric
+FIR filters to the audio signal.  This means a spectrogram coefficient
+for any given point in time <i>t</i> is a weighted average of samples
+from both before and after <i>t</i>, representing both past and future
+signal.  The width of the filter impulse response depends on the
+bandwidth, which in turn depends on the center frequency of its band.
+The lowest-frequency filters have the narrowest bandwidths, and
+therefore the widest impulses response, and need the greatest amount
+of past and future signal.  The width of the filter impulse response
+is called its <i>support</i>, and the worst-case (widest) support of
+any analysis filter can be found by calling the function
+<code>gaborator::analyzer::analysis_support()</code>.  This returns
+the <i>one-sided</i> support, the width of the impulse
+response <i>to each side</i> of its center, as a floating point number.
+To be on the safe side, let's round this up to the next integer:</p>
+<pre>
+    size_t analysis_support = ceil(analyzer.analysis_support());
+</pre>
+<p>Similarly, when resynthesizing audio from coefficients, calculating
+a sample at time <i>t</i> involves applying symmetric FIR
+reconstruction filters, calculating a weighted average of both past and
+future spectrogram coefficients.  The support of the widest reconstruction
+filter can be calculated by calling
+<code>gaborator::analyzer::synthesis_support()</code>:
+</p>
+<pre>
+    size_t synthesis_support = ceil(analyzer.synthesis_support());
+</pre>
+
+<p>In a real-time application, the need to access future signal
+samples and/or coefficients causes latency.  A real-time audio
+analysis application that needs to examine the coefficients for
+time <i>t</i> can only do so when it has received the input samples up
+to time <i>t + analysis_support</i>, and therefore has a minimum latency of
+<i>analysis_support</i>.  A real-time filtering or effect
+application, such as the present example,
+incurs latency from both analysis and reconstruction
+filters, and can only produce the output sample for time <i>t</i> once
+it has received the input samples up to
+<i>t + analysis_support + synthesis_support</i>,
+for a minimum latency of <i>analysis_support + synthesis_support</i>.
+Let's print this total latency to standard output:
+</p>
+<pre>
+    std::cerr &lt;&lt; "latency: " &lt;&lt; analysis_support + synthesis_support &lt;&lt; " samples\n";
+</pre>
+
+<p>In a practical real-time system, there will be additional latency
+caused by processing the signal in blocks of samples rather than a
+sample at a time.  Since the block size is a property of the overall
+system, and causes latency even if the Gaborator is not involved, that
+latency is considered outside the scope of this discussion.
+</p>
+
+<h2>Streaming</h2>
+<p>To mimic a typical real-time system, the audio is processed
+in fixed-size blocks (here, 1024 samples).  If the size
+of the input file is not divisible by the block size, the last block
+is padded with zeroes.
+The variable <code>t_in</code> keeps track of time, indicating
+the sampling time of the first sample of the current input block,
+in units of samples.
+</p>
+<pre>
+    gaborator::coefs&lt;float&gt; coefs(analyzer);
+    const size_t blocksize = 1024;
+    std::vector&lt;float&gt; buf(blocksize);
+    int64_t t_in = 0;
+    for (;;) {
+        sf_count_t n_read = sf_readf_float(sf_in, buf.data(), blocksize);
+        if (n_read == 0)
+            break;
+        if (n_read &lt; blocksize)
+            std::fill(buf.data() + n_read, buf.data() + blocksize, 0);
+</pre>
+<p>Now we can spectrum analyze the current block of samples.  Note how
+the time range,
+<code>t_in</code>...<code>t_in + blocksize</code>,
+is explicitly passed to <code>analyze()</code>.
+</p>
+<pre>
+        analyzer.analyze(buf.data(), t_in, t_in + blocksize, coefs);
+</pre>
+<p>The call to <code>analyze()</code> updates the coefficients
+for the time range from <code>t_in - analysis_support</code> to
+<code>t_in + blocksize + analysis_support</code>.  The oldest
+<code>blocksize</code> samples of this time range,
+that is, from <code>t_in - analysis_support</code> to
+<code>t_in - analysis_support + blocksize</code>, were now updated for
+the last time and will not be affected by future input blocks.
+Therefore, it is now safe to examine and/or modify these
+coefficients as required by your application.  Here, by way
+of example, we simply change their signs to invert the phase of the signal.
+Note that unlike the earlier filter example where <code>process()</code>
+applied a function to all the coefficients, here it is applied only to
+the coefficients within a limited time range.
+</p>
+<pre>
+        process(
+            [&amp;](int, int64_t, std::complex&lt;float&gt; &amp;coef) {
+                 coef = -coef;
+            },
+            INT_MIN, INT_MAX,
+            t_in - (int)analysis_support,
+            t_in - (int)analysis_support + (int)blocksize,
+            coefs);
+</pre>
+
+<p>Next, we will generate a block of output samples. To get correct results,
+we can only generate output when the coefficients that the output samples
+depend on will no longer change.  Specifically, a resynthesized audio
+sample for time <code>t</code> will depend on the coefficients of the
+time range <code>t - synthesis_support</code>...<code>t +
+synthesis_support</code>.  To ensure that the resynthesis uses only
+coefficients that have already been processed by
+the <code>process()</code> call above, the most recent block of samples
+that can safely be resynthesized ranges from <code>t_out = t_in -
+analysis_support - synthesis_support</code> to <code>t_out +
+blocksize</code>.</p>
+<pre>
+        int64_t t_out = t_in - analysis_support - synthesis_support;
+        analyzer.synthesize(coefs, t_out, t_out + blocksize, buf.data());
+</pre>
+<p>The synthesized audio can now be written to the output file:</p>
+<pre>
+        sf_count_t n_written = sf_writef_float(sf_out, buf.data(), blocksize);
+        if (n_written != blocksize) {
+            std::cerr &lt;&lt; "write error\n";
+            exit(1);
+        }
+</pre>
+<p>Coefficients older than <code>t_out + blocksize - synthesis_support</code>
+will no longer be needed to synthesize the next block of output signal, so
+we can now forget them to free up the memory they used:
+</p>
+<pre>
+        forget_before(analyzer, coefs, t_out + blocksize - synthesis_support);
+</pre>
+<p>This concludes the block-by-block processing loop.</p>
+<pre>
+        t_in += blocksize;
+    }
+</pre>
+
+<h2>Postamble</h2>
+<pre>
+    sf_close(sf_in);
+    sf_close(sf_out);
+    return 0;
+}
+</pre>
+
+<h2>Compiling</h2>
+<p>Like the previous ones, this example can also be built using a one-line build command:
+</p>
+<pre class="build Darwin Linux NetBSD FreeBSD OpenBSD">
+c++ -std=c++11 -I.. -O3 -ffast-math $(pkg-config --cflags sndfile) stream.cc $(pkg-config --libs sndfile) -o stream
+</pre>
+<p>Or using the vDSP FFT on macOS:</p>
+<pre class="build Darwin">
+c++ -std=c++11 -I.. -O3 -ffast-math -DGABORATOR_USE_VDSP $(pkg-config --cflags sndfile) stream.cc $(pkg-config --libs sndfile) -framework Accelerate -o stream
+</pre>
+<p>Or using PFFFT (see <a href="render.html#compiling">Example 1</a> for how to download and build PFFFT):</p>
+<pre class="build">
+c++ -std=c++11 -I.. -Ipffft -O3 -ffast-math -DGABORATOR_USE_PFFFT $(pkg-config --cflags sndfile) stream.cc pffft/pffft.o pffft/fftpack.o $(pkg-config --libs sndfile) -o stream
+</pre>
+
+<h2>Running</h2>
+<p>Running the following shell commands will download an example
+audio file containing an impulse (a single sample of maximum amplitude)
+padded with silence to a total of 65536 samples, and process it.</p>
+<pre class="run">
+wget http://download.gaborator.com/audio/impulse.wav
+./stream impulse.wav impulse_streamed.wav
+</pre>
+
+<p>The file <code>impulse_streamed.wav</code> will be identical to
+<code>impulse.wav</code> except that the impulse will be of
+opposite polarity, and delayed by the latency of
+<code>analysis_support + synthesis_support</code> samples.</p>
+
+<div class="nav"><span class="prev"><a href="filter.html">Previous: Example 2: Frequency-Domain Filtering</a></span><span class="next"><a href="snr.html">Next: Example 4: Measuring the Signal-to-Noise Ratio</a></span></div>
+
+</body>
+</html>

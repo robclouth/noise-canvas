@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<!--
+Copyright (C) 2019-2023 Andreas Gustafsson.  This file is part of
+the Gaborator library source distribution.  See the file LICENSE at
+the top level of the distribution for license information.
+-->
+<html>
+<head>
+<link rel="stylesheet" href="doc.css" />
+<title>Gaborator Example 4: Measuring the Signal-to-Noise Ratio</title>
+</head>
+<body>
+<h1>Example 4: Measuring the Signal-to-Noise Ratio</h1>
+
+<h2>Introduction</h2>
+
+<p>This example measures the signal-to-noise ratio (SNR) of the
+resynthesis by analyzing and resynthesizing a test signal
+and comparing the resynthesis result to the original.
+</p>
+
+<p>Since it does not involve any audio file I/O, this example
+does not require the libsndfile library, making it the shortest
+and simplest one by far.</p>
+
+<h2>Preamble</h2>
+
+<pre>
+#include &lt;iostream&gt;
+#include &lt;iomanip&gt;
+#include &lt;random&gt;
+#include &lt;gaborator/gaborator.h&gt;
+</pre>
+
+<h2>Amplitude Measurement</h2>
+<p>To calculate the signal-to-noise ratio, we need to measure the
+amplitude of the original signal and the error residue.  We will use
+the root-mean-square amplitude, which is calculated by the
+function <code>rms()</code>.
+</p>
+<pre>
+double rms(const std::vector&lt;float&gt; &amp;v) {
+    double sqsum = 0;
+    for (size_t i = 0; i &lt; v.size(); i++) {
+        sqsum += v[i] * v[i];
+    }
+    return sqrt(sqsum);
+}
+</pre>
+
+<h2>Main Program</h2>
+
+<p>For the test signal, we use a million samples of white noise with a
+uniform amplitude distribution between -1 and +1.</p>
+<pre>
+int main(int argc, char **argv) {
+    size_t len = 1000000;
+    std::vector&lt;float&gt; signal_in(len);
+    std::minstd_rand rand;
+    std::uniform_real_distribution&lt;&gt; uniform(-1.0, 1.0);
+    for (size_t i = 0; i &lt; len; i++)
+        signal_in[i] = uniform(rand);
+</pre>
+<p>Then we create a spectrum analyzer with 48 bands per octave
+and a frequency range of 3 decades (0.0005 to 0.5 times the sample rate):</p>
+<pre>
+    gaborator::parameters params(gaborator::log_fq_scale(48, 5e-4));
+    gaborator::analyzer&lt;float&gt; analyzer(params);
+</pre>
+<p>...and run the spectrum analysis:</p>
+<pre>
+    gaborator::coefs&lt;float&gt; coefs(analyzer);
+    analyzer.analyze(signal_in.data(), 0, len, coefs);
+</pre>
+<p>...resynthesize the signal into <code>signal_out</code>:</p>
+<pre>
+    std::vector&lt;float&gt; signal_out(len);
+    analyzer.synthesize(coefs, 0, len, signal_out.data());
+</pre>
+<p>...measure the resynthesis error:</p>
+<pre>
+    std::vector&lt;float&gt; error(len);
+    for (size_t i = 0; i &lt; len; i++)
+         error[i] = signal_out[i] - signal_in[i];
+</pre>
+<p>...calculate the signal-to-noise ratio:</p>
+<pre>
+    double snr = rms(signal_in) / rms(error);
+</pre>
+<p>...and print it in decibels:</p>
+<pre>
+    std::cout &lt;&lt; std::fixed &lt;&lt; std::setprecision(1) &lt;&lt; 20 * log10(snr) &lt;&lt; " dB\n";
+}
+</pre>
+<h2>Compiling</h2>
+<p>Like <a href="render.html#compiling">Example 1</a>, this example
+can be built using a one-line build command:
+</p>
+<pre class="build Darwin Linux NetBSD FreeBSD OpenBSD">
+c++ -std=c++11 -I.. -O3 -ffast-math $(pkg-config --cflags sndfile) snr.cc $(pkg-config --libs sndfile) -o snr
+</pre>
+<p>Or using the vDSP FFT on macOS:</p>
+<pre class="build Darwin">
+c++ -std=c++11 -I.. -O3 -ffast-math -DGABORATOR_USE_VDSP $(pkg-config --cflags sndfile) snr.cc $(pkg-config --libs sndfile) -framework Accelerate -o snr
+</pre>
+<p>Or using PFFFT (see <a href="render.html#compiling">Example 1</a> for how to download and build PFFFT):</p>
+<pre class="build">
+c++ -std=c++11 -I.. -Ipffft -O3 -ffast-math -DGABORATOR_USE_PFFFT $(pkg-config --cflags sndfile) snr.cc pffft/pffft.o pffft/fftpack.o $(pkg-config --libs sndfile) -o snr
+</pre>
+
+<h2>Running</h2>
+<p>The program is run with no arguments:</p>
+<pre class="run">
+./snr
+</pre>
+<p>This will print the SNR which should be more than 100 dB when the library is working correctly.</p>
+
+<div class="nav"><span class="prev"><a href="stream.html">Previous: Example 3: Streaming</a></span><span class="next"><a href="synth.html">Next: Example 5: Synthesis from Scratch</a></span></div>
+
+</body>
+</html>
