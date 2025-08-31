@@ -4,10 +4,12 @@
 #include <vector>
 #include <complex>
 #include <numeric>
+#include <cmath>
+#include <algorithm> 
 #include "gaborator/gaborator.h"
 
 // This function takes a multi-channel audio buffer and returns a spectrogram
-// as a single flat Float32Array with all metadata needed for shader-based rendering.
+// with perfectly padded data buffers and dimensions, ready for GPU textures.
 Napi::Value analyze(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
 
@@ -28,11 +30,6 @@ Napi::Value analyze(const Napi::CallbackInfo& info) {
     }
     size_t numFrames = numSamplesInterleaved / channels;
 
-    if (numFrames == 0) {
-        Napi::Error::New(env, "Number of frames must be greater than 0.").ThrowAsJavaScriptException();
-        return env.Null();
-    }
-
     std::vector<std::vector<float>> audioChannels(channels, std::vector<float>(numFrames));
     float* interleavedData = inputBuffer.Data();
     for (size_t i = 0; i < numFrames; ++i) {
@@ -48,13 +45,6 @@ Napi::Value analyze(const Napi::CallbackInfo& info) {
     gaborator::parameters params(scale);
     gaborator::analyzer<float> analyzer(params);
 
-    std::vector<gaborator::coefs<float>> allCoefs;
-    allCoefs.reserve(channels);
-    for (int ch = 0; ch < channels; ++ch) {
-        allCoefs.emplace_back(analyzer);
-        analyzer.analyze(audioChannels[ch].data(), 0, numFrames, allCoefs.back());
-    }
-
     int bandBegin = analyzer.bandpass_bands_begin();
     int numBands = analyzer.bandpass_bands_end() - bandBegin;
     if (numBands < 0) {
@@ -65,98 +55,136 @@ Napi::Value analyze(const Napi::CallbackInfo& info) {
     std::vector<uint32_t> bandOffsets(numBands);
     std::vector<int32_t> bandStepLog2s(numBands);
     std::vector<uint32_t> bandLengths(numBands);
-
     size_t totalComplexCoefficients = 0;
+
     for (int i = 0; i < numBands; ++i) {
         int gbno = bandBegin + i;
         int stepLog2 = analyzer.band_step_log2(gbno);
         size_t len = (numFrames > 0) ? ((numFrames - 1) >> stepLog2) + 1 : 0;
-        
         bandOffsets[i] = static_cast<uint32_t>(totalComplexCoefficients);
         bandStepLog2s[i] = stepLog2;
         bandLengths[i] = static_cast<uint32_t>(len);
-        
         totalComplexCoefficients += len;
     }
 
-    // Each "pixel" in the texture will be RGBA.
-    // For mono, we use 2 floats (R,G) and pad with 2 zeros (B,A).
-    // For stereo, we use 4 floats (L_R, L_I, R_R, R_I).
-    size_t floatsPerPixel = 4;
-    size_t totalFloats = totalComplexCoefficients * floatsPerPixel;
-    std::vector<float> interleavedOutput(totalFloats, 0.0f); // Initialize with zeros for padding
+    // Calculate texture dimensions
+    const int maxWidth = 4096;
+    const int textureWidth = std::min((size_t)maxWidth, totalComplexCoefficients);
+    const int textureHeight = (totalComplexCoefficients > 0) ? (totalComplexCoefficients + textureWidth - 1) / textureWidth : 0; // Ceiling division
 
+    // Allocate perfectly sized, padded buffers
+    size_t floatsPerPixel = 4;
+    size_t paddedDataFloatCount = (size_t)textureWidth * textureHeight * floatsPerPixel;
+    std::vector<float> paddedData(paddedDataFloatCount, 0.0f);
+
+    size_t floatsPerMapPixel = 2;
+    size_t paddedMapFloatCount = (size_t)textureWidth * textureHeight * floatsPerMapPixel;
+    std::vector<float> paddedInverseMap(paddedMapFloatCount, 0.0f);
+
+    size_t floatsPerMetaPixel = 3;
+    size_t metadataFloatCount = (size_t)numBands * floatsPerMetaPixel;
+    std::vector<float> metadataTexture(metadataFloatCount);
+
+    // --- Populate Buffers ---
+
+    // 1. Metadata Texture
+    for (int i = 0; i < numBands; ++i) {
+        metadataTexture[i * 3 + 0] = static_cast<float>(bandOffsets[i]);
+        metadataTexture[i * 3 + 1] = static_cast<float>(bandLengths[i]);
+        metadataTexture[i * 3 + 2] = static_cast<float>(bandStepLog2s[i]);
+    }
+
+    // 2. Inverse Map
+    for (int bandIdx = 0; bandIdx < numBands; ++bandIdx) {
+        uint64_t timeStep = 1ULL << bandStepLog2s[bandIdx];
+        for (uint32_t i = 0; i < bandLengths[bandIdx]; ++i) {
+            size_t linearPixelIndex = bandOffsets[bandIdx] + i;
+            paddedInverseMap[linearPixelIndex * 2 + 0] = static_cast<float>(i * timeStep);
+            paddedInverseMap[linearPixelIndex * 2 + 1] = static_cast<float>(bandIdx);
+        }
+    }
+
+    // 3. Coefficient Data
+    std::vector<gaborator::coefs<float>> allCoefs;
+    allCoefs.reserve(channels);
     for (int ch = 0; ch < channels; ++ch) {
+        allCoefs.emplace_back(analyzer);
+        analyzer.analyze(audioChannels[ch].data(), 0, numFrames, allCoefs.back());
         gaborator::process(
             [&](int b, int64_t t, std::complex<float> &coef) {
                 int bandIdx = b - bandBegin;
                 if (bandIdx < 0 || bandIdx >= numBands) return;
-
                 int64_t tInBand = t >> bandStepLog2s[bandIdx];
-
                 if (tInBand < 0 || (size_t)tInBand >= bandLengths[bandIdx]) return;
-
                 size_t baseOffset = bandOffsets[bandIdx] + tInBand;
                 size_t writeOffset = baseOffset * floatsPerPixel;
-                
-                interleavedOutput[writeOffset + ch * 2 + 0] = coef.real();
-                interleavedOutput[writeOffset + ch * 2 + 1] = coef.imag();
+                paddedData[writeOffset + ch * 2 + 0] = coef.real();
+                paddedData[writeOffset + ch * 2 + 1] = coef.imag();
             },
-            bandBegin, analyzer.bandpass_bands_end(),
-            0, numFrames,
-            allCoefs[ch]
+            bandBegin, analyzer.bandpass_bands_end(), 0, numFrames, allCoefs[ch]
         );
     }
     
-    Napi::Object metaJs = Napi::Object::New(env);
-    metaJs.Set("numChannels", Napi::Number::New(env, channels));
-    metaJs.Set("numBands", Napi::Number::New(env, numBands));
+    // --- Assemble Return Object ---
+    Napi::Object resultJs = Napi::Object::New(env);
 
+    Napi::Float32Array dataJs = Napi::Float32Array::New(env, paddedData.size());
+    memcpy(dataJs.Data(), paddedData.data(), paddedData.size() * sizeof(float));
+    resultJs.Set("data", dataJs);
+
+    Napi::Float32Array inverseMapJs = Napi::Float32Array::New(env, paddedInverseMap.size());
+    memcpy(inverseMapJs.Data(), paddedInverseMap.data(), paddedInverseMap.size() * sizeof(float));
+    resultJs.Set("inverseMap", inverseMapJs);
+
+    Napi::Float32Array metadataTextureJs = Napi::Float32Array::New(env, metadataTexture.size());
+    memcpy(metadataTextureJs.Data(), metadataTexture.data(), metadataTexture.size() * sizeof(float));
+    resultJs.Set("metadataTexture", metadataTextureJs);
+
+    resultJs.Set("textureWidth", Napi::Number::New(env, textureWidth));
+    resultJs.Set("textureHeight", Napi::Number::New(env, textureHeight));
+    resultJs.Set("numFrames", Napi::Number::New(env, numFrames));
+    resultJs.Set("numChannels", Napi::Number::New(env, channels));
+    resultJs.Set("numBands", Napi::Number::New(env, numBands));
+
+    // Keep raw metadata arrays for the synthesizer
     Napi::Uint32Array bandOffsetsJs = Napi::Uint32Array::New(env, bandOffsets.size());
     memcpy(bandOffsetsJs.Data(), bandOffsets.data(), bandOffsets.size() * sizeof(uint32_t));
-    metaJs.Set("bandOffsets", bandOffsetsJs);
+    resultJs.Set("bandOffsets", bandOffsetsJs);
 
     Napi::Int32Array bandStepLog2sJs = Napi::Int32Array::New(env, bandStepLog2s.size());
     memcpy(bandStepLog2sJs.Data(), bandStepLog2s.data(), bandStepLog2s.size() * sizeof(int32_t));
-    metaJs.Set("bandStepLog2s", bandStepLog2sJs);
+    resultJs.Set("bandStepLog2s", bandStepLog2sJs);
 
     Napi::Uint32Array bandLengthsJs = Napi::Uint32Array::New(env, bandLengths.size());
     memcpy(bandLengthsJs.Data(), bandLengths.data(), bandLengths.size() * sizeof(uint32_t));
-    metaJs.Set("bandLengths", bandLengthsJs);
-
-    Napi::Object resultJs = Napi::Object::New(env);
-    Napi::Float32Array dataJs = Napi::Float32Array::New(env, interleavedOutput.size());
-    memcpy(dataJs.Data(), interleavedOutput.data(), interleavedOutput.size() * sizeof(float));
-    
-    resultJs.Set("data", dataJs);
-    resultJs.Set("metadata", metaJs);
+    resultJs.Set("bandLengths", bandLengthsJs);
     
     return resultJs;
 }
 
-// This function takes a spectrogram (as a flat buffer with metadata)
-// and returns a multi-channel audio buffer.
 Napi::Value synthesize(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
 
-    if (info.Length() < 5 || !info[0].IsTypedArray() || !info[1].IsObject() || !info[2].IsNumber() || !info[3].IsObject() || !info[4].IsNumber()) {
-        Napi::TypeError::New(env, "Expected: data (TypedArray), metadata (Object), sampleRate (Number), params (Object), numFrames (Number)").ThrowAsJavaScriptException();
+    if (info.Length() < 4 || !info[0].IsTypedArray() || !info[1].IsObject() || !info[2].IsNumber() || !info[3].IsObject()) {
+        Napi::TypeError::New(env, "Expected: data (TypedArray), analysisObject (Object), sampleRate (Number), params (Object)").ThrowAsJavaScriptException();
         return env.Null();
     }
 
     Napi::Float32Array inputDataJs = info[0].As<Napi::Float32Array>();
     const float* inputData = inputDataJs.Data();
-    Napi::Object metaJs = info[1].As<Napi::Object>();
+    Napi::Object analysisObj = info[1].As<Napi::Object>();
     double sampleRate = info[2].As<Napi::Number>().DoubleValue();
     Napi::Object paramsJs = info[3].As<Napi::Object>();
-    size_t numFrames = info[4].As<Napi::Number>().Int64Value();
-
-    int channels = metaJs.Get("numChannels").As<Napi::Number>().Int32Value();
-    int numBands = metaJs.Get("numBands").As<Napi::Number>().Int32Value();
-    Napi::Uint32Array bandOffsetsJs = metaJs.Get("bandOffsets").As<Napi::Uint32Array>();
+    
+    size_t numFrames = analysisObj.Get("numFrames").As<Napi::Number>().Int64Value();
+    int channels = analysisObj.Get("numChannels").As<Napi::Number>().Int32Value();
+    int numBands = analysisObj.Get("numBands").As<Napi::Number>().Int32Value();
+    Napi::Uint32Array bandOffsetsJs = analysisObj.Get("bandOffsets").As<Napi::Uint32Array>();
     const uint32_t* bandOffsets = bandOffsetsJs.Data();
-    Napi::Uint32Array bandLengthsJs = metaJs.Get("bandLengths").As<Napi::Uint32Array>();
+    Napi::Uint32Array bandLengthsJs = analysisObj.Get("bandLengths").As<Napi::Uint32Array>();
     const uint32_t* bandLengths = bandLengthsJs.Data();
+    Napi::Int32Array bandStepLog2sJs = analysisObj.Get("bandStepLog2s").As<Napi::Int32Array>();
+    const int32_t* bandStepLog2s = bandStepLog2sJs.Data();
 
     int bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
     double fminHz = paramsJs.Get("fmin").As<Napi::Number>().DoubleValue();
@@ -179,8 +207,7 @@ Napi::Value synthesize(const Napi::CallbackInfo& info) {
                 if (band_idx < 0 || band_idx >= numBands) {
                     coef = {0.0f, 0.0f}; return;
                 }
-                int step_log2 = analyzer.band_step_log2(b);
-                int64_t t_in_band = t >> step_log2;
+                int64_t t_in_band = t >> bandStepLog2s[band_idx];
                 if (t_in_band < 0 || (size_t)t_in_band >= (size_t)bandLengths[band_idx]) {
                     coef = {0.0f, 0.0f}; return;
                 }

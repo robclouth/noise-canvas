@@ -16,12 +16,43 @@ ffmpeg.setFfmpegPath(ffmpegPath!);
 // It's updated each time a file is analyzed.
 let currentSampleRate = 44100;
 
-// --- Corrected Interfaces ---
+// --- Final, Corrected Interfaces ---
 
-// Describes the object returned directly from the C++ addon
-interface GaboratorAnalysis {
+// Describes the flat object returned directly from the C++ addon
+interface GaboratorAnalysisResult {
   data: Float32Array;
-  metadata: {
+  inverseMap: Float32Array;
+  metadataTexture: Float32Array;
+  textureWidth: number;
+  textureHeight: number;
+  numFrames: number;
+  numChannels: number;
+  numBands: number;
+  bandOffsets: Uint32Array;
+  bandStepLog2s: Int32Array;
+  bandLengths: Uint32Array;
+}
+
+// Describes the payload sent to the renderer process via IPC. Large arrays are Buffers.
+interface AnalysisPayloadForRenderer {
+  data: Buffer;
+  inverseMap: Buffer;
+  metadataTexture: Buffer;
+  textureWidth: number;
+  textureHeight: number;
+  numFrames: number;
+  numChannels: number;
+  numBands: number;
+  bandOffsets: Uint32Array;
+  bandStepLog2s: Int32Array;
+  bandLengths: Uint32Array;
+}
+
+// Describes the payload received from the renderer when requesting synthesis
+interface SynthesisPayload {
+  processedData: Buffer; // The modified data from the GPU
+  analysisMetadata: {
+    numFrames: number;
     numChannels: number;
     numBands: number;
     bandOffsets: Uint32Array;
@@ -30,32 +61,21 @@ interface GaboratorAnalysis {
   };
 }
 
-// Describes the payload sent to the renderer process via IPC
-interface AnalysisPayload {
-  data: Buffer; // Float32Array data converted to a Buffer for efficient transfer
-  metadata: GaboratorAnalysis["metadata"];
-  numFrames: number;
-  sampleRate: number;
-}
-
 interface GaboratorParams {
   bandsPerOctave: number;
   fmin: number;
 }
 
 function createWindow(): void {
-  // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
+    width: 1200, // Wider for better spectrogram view
+    height: 800,
     show: false,
     autoHideMenuBar: true,
     ...(process.platform === "linux" ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
-      // Note: These are insecure settings, suitable for development but
-      // should be revisited for a production app.
       nodeIntegration: true,
       contextIsolation: false,
     },
@@ -88,12 +108,7 @@ app.whenReady().then(() => {
   ipcMain.handle("open-file-dialog", async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       properties: ["openFile"],
-      filters: [
-        {
-          name: "Audio Files",
-          extensions: ["mp3", "wav", "ogg", "flac", "aac", "m4a", "wma", "aiff"],
-        },
-      ],
+      filters: [{ name: "Audio Files", extensions: ["mp3", "wav", "ogg", "flac", "aac", "m4a"] }],
     });
     if (!canceled && filePaths.length > 0) {
       return filePaths[0];
@@ -101,92 +116,82 @@ app.whenReady().then(() => {
     return null;
   });
 
-  ipcMain.handle("analyze-audio", async (_, filePath: string, params: GaboratorParams): Promise<AnalysisPayload> => {
-    return new Promise((resolve, reject) => {
-      // 1. Probe the file to get metadata (sample rate, channels)
-      ffmpeg.ffprobe(filePath, (err, metadata) => {
-        if (err) {
-          return reject(err);
-        }
-        const audioStreamInfo = metadata.streams.find((s) => s.codec_type === "audio");
-        if (!audioStreamInfo || !audioStreamInfo.sample_rate) {
-          return reject(new Error("Could not determine sample rate from audio file."));
-        }
+  ipcMain.handle(
+    "analyze-audio",
+    async (_, filePath: string, params: GaboratorParams): Promise<AnalysisPayloadForRenderer> => {
+      return new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(filePath, (err, metadata) => {
+          if (err) return reject(err);
+          const audioStreamInfo = metadata.streams.find((s) => s.codec_type === "audio");
+          if (!audioStreamInfo || !audioStreamInfo.sample_rate) {
+            return reject(new Error("Could not determine sample rate from audio file."));
+          }
 
-        const sampleRate =
-          typeof audioStreamInfo.sample_rate === "string"
-            ? parseInt(audioStreamInfo.sample_rate, 10)
-            : audioStreamInfo.sample_rate;
-        currentSampleRate = sampleRate; // Store for potential synthesis later
+          const sampleRate = audioStreamInfo.sample_rate;
+          currentSampleRate = sampleRate;
+          const channels = audioStreamInfo.channels || 1;
 
-        const channels = audioStreamInfo.channels || 1;
+          const audioChunks: Buffer[] = [];
+          ffmpeg(filePath)
+            .toFormat("f32le")
+            .audioChannels(channels)
+            .audioFrequency(sampleRate)
+            .on("error", (err) => reject(new Error(`FFmpeg error: ${err.message}`)))
+            .stream(
+              new Writable({
+                write(chunk, _encoding, callback) {
+                  audioChunks.push(chunk);
+                  callback();
+                },
+              }),
+            )
+            .on("finish", () => {
+              try {
+                const concatenatedBuffer = Buffer.concat(audioChunks);
+                const audioVector = new Float32Array(
+                  concatenatedBuffer.buffer,
+                  concatenatedBuffer.byteOffset,
+                  concatenatedBuffer.length / Float32Array.BYTES_PER_ELEMENT,
+                );
 
-        // 2. Decode the entire audio file to raw 32-bit float PCM
-        const audioChunks: Buffer[] = [];
-        const audioStream = new Writable({
-          write(chunk, _encoding, callback) {
-            audioChunks.push(chunk);
-            callback();
-          },
+                // 1. Call the C++ addon, which returns a single flat object
+                const analysisResult: GaboratorAnalysisResult = gaborator.analyze(
+                  audioVector,
+                  channels,
+                  sampleRate,
+                  params,
+                );
+
+                // 2. Convert large arrays to Buffers for efficient IPC transfer
+                const payload: AnalysisPayloadForRenderer = {
+                  ...analysisResult,
+                  data: Buffer.from(analysisResult.data.buffer),
+                  inverseMap: Buffer.from(analysisResult.inverseMap.buffer),
+                  metadataTexture: Buffer.from(analysisResult.metadataTexture.buffer),
+                };
+
+                resolve(payload);
+              } catch (e) {
+                reject(e);
+              }
+            });
         });
-
-        ffmpeg(filePath)
-          .toFormat("f32le") // Decode to 32-bit floating point, little-endian
-          .audioChannels(channels)
-          .audioFrequency(sampleRate)
-          .on("error", (err) => reject(new Error(`FFmpeg error: ${err.message}`)))
-          .stream(audioStream)
-          .on("finish", () => {
-            try {
-              // 3. Prepare data for the native addon
-              const concatenatedBuffer = Buffer.concat(audioChunks);
-              const audioVector = new Float32Array(
-                concatenatedBuffer.buffer,
-                concatenatedBuffer.byteOffset,
-                concatenatedBuffer.length / Float32Array.BYTES_PER_ELEMENT,
-              );
-              const numFrames = audioVector.length / channels;
-
-              // 4. Call the C++ Gaborator analysis function
-              const analysisResult: GaboratorAnalysis = gaborator.analyze(audioVector, channels, sampleRate, params);
-
-              // 5. Package the results for efficient IPC transfer
-              const payload: AnalysisPayload = {
-                // Convert the Float32Array's underlying ArrayBuffer to a Node.js Buffer
-                data: Buffer.from(analysisResult.data.buffer),
-                metadata: analysisResult.metadata,
-                numFrames,
-                sampleRate,
-              };
-
-              resolve(payload);
-            } catch (e) {
-              reject(e);
-            }
-          });
       });
-    });
-  });
+    },
+  );
 
-  // This handler assumes you will add a 'synthesize' function to your C++ addon
   ipcMain.handle(
     "synthesize-audio",
-    async (_, payload: AnalysisPayload, params: GaboratorParams): Promise<Float32Array> => {
-      // Reconstruct the Float32Array from the Buffer for the C++ addon
-      const dataArray = new Float32Array(
-        payload.data.buffer,
-        payload.data.byteOffset,
-        payload.data.length / Float32Array.BYTES_PER_ELEMENT,
+    async (_, payload: SynthesisPayload, params: GaboratorParams): Promise<Float32Array> => {
+      // Convert the processed data Buffer from the renderer back to a Float32Array
+      const processedDataArray = new Float32Array(
+        payload.processedData.buffer,
+        payload.processedData.byteOffset,
+        payload.processedData.byteLength / Float32Array.BYTES_PER_ELEMENT,
       );
 
-      // The C++ addon would need a function that accepts this structure
-      const audioVector = gaborator.synthesize(
-        dataArray,
-        payload.metadata,
-        currentSampleRate, // Using the globally stored sample rate
-        params,
-        payload.numFrames,
-      );
+      // The C++ addon expects the processed data array and the original metadata object
+      const audioVector = gaborator.synthesize(processedDataArray, payload.analysisMetadata, currentSampleRate, params);
       return audioVector;
     },
   );
