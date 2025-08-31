@@ -12,19 +12,30 @@ const gaborator = require(join(__dirname, "../../build/Release/gaborator_addon.n
 
 ffmpeg.setFfmpegPath(ffmpegPath!);
 
-let sampleRate = 44100; // Default, will be updated on file load
+// This is treated as a global for the synthesis function.
+// It's updated each time a file is analyzed.
+let currentSampleRate = 44100;
 
-interface SpectrogramTexture {
-  data: Buffer;
-  width: number;
-  height: number;
+// --- Corrected Interfaces ---
+
+// Describes the object returned directly from the C++ addon
+interface GaboratorAnalysis {
+  data: Float32Array;
+  metadata: {
+    numChannels: number;
+    numBands: number;
+    bandOffsets: Uint32Array;
+    bandStepLog2s: Int32Array;
+    bandLengths: Uint32Array;
+  };
 }
 
-interface RenderedSpectrogram {
-  textures: SpectrogramTexture[];
-  width: number;
-  height: number;
-  channels: number;
+// Describes the payload sent to the renderer process via IPC
+interface AnalysisPayload {
+  data: Buffer; // Float32Array data converted to a Buffer for efficient transfer
+  metadata: GaboratorAnalysis["metadata"];
+  numFrames: number;
+  sampleRate: number;
 }
 
 interface GaboratorParams {
@@ -43,6 +54,8 @@ function createWindow(): void {
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
+      // Note: These are insecure settings, suitable for development but
+      // should be revisited for a production app.
       nodeIntegration: true,
       contextIsolation: false,
     },
@@ -57,31 +70,20 @@ function createWindow(): void {
     return { action: "deny" };
   });
 
-  // HMR for renderer base on electron-vite cli.
-  // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
     mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
+    if (is.dev) mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
   }
 }
 
-// This method will be called when Electron has finished
-// initialization and is ready to create browser windows.
-// Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
-  // Set app user model id for windows
   electronApp.setAppUserModelId("com.electron");
 
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
   app.on("browser-window-created", (_, window) => {
     optimizer.watchWindowShortcuts(window);
   });
-
-  // IPC test
-  ipcMain.on("ping", () => console.log("pong"));
 
   ipcMain.handle("open-file-dialog", async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -93,69 +95,98 @@ app.whenReady().then(() => {
         },
       ],
     });
-    if (!canceled) {
+    if (!canceled && filePaths.length > 0) {
       return filePaths[0];
     }
     return null;
   });
 
-  ipcMain.handle(
-    "analyze-audio",
-    async (_, filePath: string, params: GaboratorParams): Promise<RenderedSpectrogram> => {
-      return new Promise((resolve, reject) => {
-        ffmpeg.ffprobe(filePath, (err, metadata) => {
-          if (err) {
-            return reject(err);
-          }
-          const audioStreamInfo = metadata.streams.find((s) => s.codec_type === "audio");
-          if (!audioStreamInfo || !audioStreamInfo.sample_rate) {
-            return reject(new Error("Could not determine sample rate from audio file."));
-          }
-          sampleRate =
-            typeof audioStreamInfo.sample_rate === "string"
-              ? parseInt(audioStreamInfo.sample_rate, 10)
-              : audioStreamInfo.sample_rate;
+  ipcMain.handle("analyze-audio", async (_, filePath: string, params: GaboratorParams): Promise<AnalysisPayload> => {
+    return new Promise((resolve, reject) => {
+      // 1. Probe the file to get metadata (sample rate, channels)
+      ffmpeg.ffprobe(filePath, (err, metadata) => {
+        if (err) {
+          return reject(err);
+        }
+        const audioStreamInfo = metadata.streams.find((s) => s.codec_type === "audio");
+        if (!audioStreamInfo || !audioStreamInfo.sample_rate) {
+          return reject(new Error("Could not determine sample rate from audio file."));
+        }
 
-          const channels = audioStreamInfo.channels || 1;
+        const sampleRate =
+          typeof audioStreamInfo.sample_rate === "string"
+            ? parseInt(audioStreamInfo.sample_rate, 10)
+            : audioStreamInfo.sample_rate;
+        currentSampleRate = sampleRate; // Store for potential synthesis later
 
-          const audioBuffer: Buffer[] = [];
-          const audioStream = new Writable({
-            write(chunk, _encoding, callback) {
-              audioBuffer.push(chunk);
-              callback();
-            },
-          });
-          ffmpeg(filePath)
-            .toFormat("f32le")
-            .audioChannels(channels)
-            .on("error", (err) => reject(err))
-            .stream(audioStream)
-            .on("finish", () => {
-              const concatenatedBuffer = Buffer.concat(audioBuffer);
+        const channels = audioStreamInfo.channels || 1;
+
+        // 2. Decode the entire audio file to raw 32-bit float PCM
+        const audioChunks: Buffer[] = [];
+        const audioStream = new Writable({
+          write(chunk, _encoding, callback) {
+            audioChunks.push(chunk);
+            callback();
+          },
+        });
+
+        ffmpeg(filePath)
+          .toFormat("f32le") // Decode to 32-bit floating point, little-endian
+          .audioChannels(channels)
+          .audioFrequency(sampleRate)
+          .on("error", (err) => reject(new Error(`FFmpeg error: ${err.message}`)))
+          .stream(audioStream)
+          .on("finish", () => {
+            try {
+              // 3. Prepare data for the native addon
+              const concatenatedBuffer = Buffer.concat(audioChunks);
               const audioVector = new Float32Array(
                 concatenatedBuffer.buffer,
                 concatenatedBuffer.byteOffset,
                 concatenatedBuffer.length / Float32Array.BYTES_PER_ELEMENT,
               );
+              const numFrames = audioVector.length / channels;
 
-              const analysisResult = gaborator.analyze(audioVector, channels, sampleRate, params);
-              resolve(analysisResult);
-            });
-        });
+              // 4. Call the C++ Gaborator analysis function
+              const analysisResult: GaboratorAnalysis = gaborator.analyze(audioVector, channels, sampleRate, params);
+
+              // 5. Package the results for efficient IPC transfer
+              const payload: AnalysisPayload = {
+                // Convert the Float32Array's underlying ArrayBuffer to a Node.js Buffer
+                data: Buffer.from(analysisResult.data.buffer),
+                metadata: analysisResult.metadata,
+                numFrames,
+                sampleRate,
+              };
+
+              resolve(payload);
+            } catch (e) {
+              reject(e);
+            }
+          });
       });
-    },
-  );
+    });
+  });
 
+  // This handler assumes you will add a 'synthesize' function to your C++ addon
   ipcMain.handle(
     "synthesize-audio",
-    async (
-      _,
-      spectrogram: RenderedSpectrogram,
-      channels: number,
-      numFrames: number,
-      params: GaboratorParams,
-    ): Promise<Float32Array> => {
-      const audioVector = gaborator.synthesize(spectrogram, channels, sampleRate, numFrames, params);
+    async (_, payload: AnalysisPayload, params: GaboratorParams): Promise<Float32Array> => {
+      // Reconstruct the Float32Array from the Buffer for the C++ addon
+      const dataArray = new Float32Array(
+        payload.data.buffer,
+        payload.data.byteOffset,
+        payload.data.length / Float32Array.BYTES_PER_ELEMENT,
+      );
+
+      // The C++ addon would need a function that accepts this structure
+      const audioVector = gaborator.synthesize(
+        dataArray,
+        payload.metadata,
+        currentSampleRate, // Using the globally stored sample rate
+        params,
+        payload.numFrames,
+      );
       return audioVector;
     },
   );
@@ -163,20 +194,12 @@ app.whenReady().then(() => {
   createWindow();
 
   app.on("activate", function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
 });
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.

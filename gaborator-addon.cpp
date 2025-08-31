@@ -1,46 +1,46 @@
+// addon.cpp
+
 #include <napi.h>
 #include <vector>
-#include <cmath>
 #include <complex>
-#include <algorithm>
+#include <numeric>
 #include "gaborator/gaborator.h"
-#include "gaborator/render.h"
 
-// Define a function object to return the complex number itself
-template <class T>
-struct complex_identity_fob {
-    std::complex<T> operator()(const std::complex<T> &c) const {
-        return c;
-    }
-    typedef std::complex<T> return_type;
-};
-
-// This function will take a multi-channel audio buffer and return a spectrogram
-Napi::Value Analyze(const Napi::CallbackInfo& info) {
+// This function takes a multi-channel audio buffer and returns a spectrogram
+// as a single flat Float32Array with all metadata needed for shader-based rendering.
+Napi::Value analyze(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
 
-    // Basic argument checking
     if (info.Length() < 4 || !info[0].IsTypedArray() || !info[1].IsNumber() || !info[2].IsNumber() || !info[3].IsObject()) {
-        Napi::TypeError::New(env, "Expected AudioBuffer (TypedArray), channels (Number), sampleRate (Number), params (Object)").ThrowAsJavaScriptException();
+        Napi::TypeError::New(env, "Expected: audioBuffer (TypedArray), channels (Number), sampleRate (Number), params (Object)").ThrowAsJavaScriptException();
         return env.Null();
     }
 
-    // 1. Get arguments from JavaScript
     Napi::Float32Array inputBuffer = info[0].As<Napi::Float32Array>();
     int channels = info[1].As<Napi::Number>().Int32Value();
     double sampleRate = info[2].As<Napi::Number>().DoubleValue();
     Napi::Object paramsJs = info[3].As<Napi::Object>();
     size_t numSamplesInterleaved = inputBuffer.ElementLength();
+
+    if (channels <= 0 || channels > 2) {
+        Napi::TypeError::New(env, "Number of channels must be 1 or 2.").ThrowAsJavaScriptException();
+        return env.Null();
+    }
     size_t numFrames = numSamplesInterleaved / channels;
 
-    // 2. De-interleave the audio buffer
-    std::vector<std::vector<float>> audioChannels(channels, std::vector<float>(numFrames));
-    float* interleavedData = inputBuffer.Data();
-    for (size_t i = 0; i < numSamplesInterleaved; ++i) {
-        audioChannels[i % channels][i / channels] = interleavedData[i];
+    if (numFrames == 0) {
+        Napi::Error::New(env, "Number of frames must be greater than 0.").ThrowAsJavaScriptException();
+        return env.Null();
     }
 
-    // 3. Set up Gaborator parameters from JavaScript
+    std::vector<std::vector<float>> audioChannels(channels, std::vector<float>(numFrames));
+    float* interleavedData = inputBuffer.Data();
+    for (size_t i = 0; i < numFrames; ++i) {
+        for (int ch = 0; ch < channels; ++ch) {
+            audioChannels[ch][i] = interleavedData[i * channels + ch];
+        }
+    }
+
     int bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
     double fminHz = paramsJs.Get("fmin").As<Napi::Number>().DoubleValue();
     double fminFrac = fminHz / sampleRate;
@@ -48,174 +48,167 @@ Napi::Value Analyze(const Napi::CallbackInfo& info) {
     gaborator::parameters params(scale);
     gaborator::analyzer<float> analyzer(params);
 
-    // 4. Analyze and render channels in pairs
-    int64_t x0 = 0;
-    int64_t y0 = 0;
-    int64_t x1 = numFrames;
-    int64_t y1 = (analyzer.bandpass_bands_end() - analyzer.bandpass_bands_begin());
-    int64_t width = x1 - x0;
-    int64_t height = y1 - y0;
-
-    if (channels == 0) {
-        Napi::Object resultJs = Napi::Object::New(env);
-        resultJs.Set("textures", Napi::Array::New(env, 0));
-        resultJs.Set("width", Napi::Number::New(env, 0));
-        resultJs.Set("height", Napi::Number::New(env, 0));
-        return resultJs;
+    std::vector<gaborator::coefs<float>> allCoefs;
+    allCoefs.reserve(channels);
+    for (int ch = 0; ch < channels; ++ch) {
+        allCoefs.emplace_back(analyzer);
+        analyzer.analyze(audioChannels[ch].data(), 0, numFrames, allCoefs.back());
     }
 
-    // --- Process left channel (ch 0) ---
-    gaborator::coefs<float> coefsLeft(analyzer);
-    analyzer.analyze(audioChannels[0].data(), 0, numFrames, coefsLeft);
+    int bandBegin = analyzer.bandpass_bands_begin();
+    int numBands = analyzer.bandpass_bands_end() - bandBegin;
+    if (numBands < 0) {
+        Napi::Error::New(env, "Gaborator analysis resulted in a negative number of bands.").ThrowAsJavaScriptException();
+        return env.Null();
+    }
 
-    int64_t xOrigin = 0;
-    int64_t yOrigin = 0;
-    int xScaleExp = 0; // Full width
-    int yScaleExp = 0; // Full height
+    std::vector<uint32_t> bandOffsets(numBands);
+    std::vector<int32_t> bandStepLog2s(numBands);
+    std::vector<uint32_t> bandLengths(numBands);
 
-    std::vector<std::complex<float>> complexDataLeft(width * height);
+    size_t totalComplexCoefficients = 0;
+    for (int i = 0; i < numBands; ++i) {
+        int gbno = bandBegin + i;
+        int stepLog2 = analyzer.band_step_log2(gbno);
+        size_t len = (numFrames > 0) ? ((numFrames - 1) >> stepLog2) + 1 : 0;
+        
+        bandOffsets[i] = static_cast<uint32_t>(totalComplexCoefficients);
+        bandStepLog2s[i] = stepLog2;
+        bandLengths[i] = static_cast<uint32_t>(len);
+        
+        totalComplexCoefficients += len;
+    }
 
-    gaborator::render_p2scale(
-        analyzer,
-        coefsLeft,
-        xOrigin, yOrigin,
-        x0, x1, xScaleExp,
-        y0, y1, yScaleExp,
-        complexDataLeft.data(),
-        complex_identity_fob<float>()
-    );
+    // Each "pixel" in the texture will be RGBA.
+    // For mono, we use 2 floats (R,G) and pad with 2 zeros (B,A).
+    // For stereo, we use 4 floats (L_R, L_I, R_R, R_I).
+    size_t floatsPerPixel = 4;
+    size_t totalFloats = totalComplexCoefficients * floatsPerPixel;
+    std::vector<float> interleavedOutput(totalFloats, 0.0f); // Initialize with zeros for padding
 
-    // --- Process right channel (ch 1) if it exists ---
-    std::vector<std::complex<float>> complexDataRight;
-    bool hasRightChannel = channels > 1;
-    if (hasRightChannel) {
-        complexDataRight.resize(width * height);
-        gaborator::coefs<float> coefsRight(analyzer);
-        analyzer.analyze(audioChannels[1].data(), 0, numFrames, coefsRight);
-        gaborator::render_p2scale(
-            analyzer,
-            coefsRight,
-            xOrigin, yOrigin,
-            x0, x1, xScaleExp,
-            y0, y1, yScaleExp,
-            complexDataRight.data(),
-            complex_identity_fob<float>()
+    for (int ch = 0; ch < channels; ++ch) {
+        gaborator::process(
+            [&](int b, int64_t t, std::complex<float> &coef) {
+                int bandIdx = b - bandBegin;
+                if (bandIdx < 0 || bandIdx >= numBands) return;
+
+                int64_t tInBand = t >> bandStepLog2s[bandIdx];
+
+                if (tInBand < 0 || (size_t)tInBand >= bandLengths[bandIdx]) return;
+
+                size_t baseOffset = bandOffsets[bandIdx] + tInBand;
+                size_t writeOffset = baseOffset * floatsPerPixel;
+                
+                interleavedOutput[writeOffset + ch * 2 + 0] = coef.real();
+                interleavedOutput[writeOffset + ch * 2 + 1] = coef.imag();
+            },
+            bandBegin, analyzer.bandpass_bands_end(),
+            0, numFrames,
+            allCoefs[ch]
         );
     }
+    
+    Napi::Object metaJs = Napi::Object::New(env);
+    metaJs.Set("numChannels", Napi::Number::New(env, channels));
+    metaJs.Set("numBands", Napi::Number::New(env, numBands));
 
-    // --- Combine into textures ---
-    const int maxTextureWidth = 4096;
-    Napi::Array texturesJs = Napi::Array::New(env);
-    int textureIdxCounter = 0;
+    Napi::Uint32Array bandOffsetsJs = Napi::Uint32Array::New(env, bandOffsets.size());
+    memcpy(bandOffsetsJs.Data(), bandOffsets.data(), bandOffsets.size() * sizeof(uint32_t));
+    metaJs.Set("bandOffsets", bandOffsetsJs);
 
-    for (int64_t xOffset = 0; xOffset < width; xOffset += maxTextureWidth) {
-        int64_t currentWidth = std::min((int64_t)maxTextureWidth, width - xOffset);
-        
-        std::vector<float> textureData(currentWidth * height * 4);
+    Napi::Int32Array bandStepLog2sJs = Napi::Int32Array::New(env, bandStepLog2s.size());
+    memcpy(bandStepLog2sJs.Data(), bandStepLog2s.data(), bandStepLog2s.size() * sizeof(int32_t));
+    metaJs.Set("bandStepLog2s", bandStepLog2sJs);
 
-        for (int64_t y = 0; y < height; ++y) {
-            for (int64_t x = 0; x < currentWidth; ++x) {
-                int64_t complexIdx = (y * width) + (xOffset + x);
-                int64_t textureRgbaIdx = (y * currentWidth + x) * 4;
-                
-                const auto& cLeft = complexDataLeft[complexIdx];
-                textureData[textureRgbaIdx + 0] = cLeft.real(); // R
-                textureData[textureRgbaIdx + 1] = cLeft.imag(); // G
-
-                if (hasRightChannel) {
-                    const auto& cRight = complexDataRight[complexIdx];
-                    textureData[textureRgbaIdx + 2] = cRight.real();     // B
-                    textureData[textureRgbaIdx + 3] = cRight.imag();     // A
-                } else {
-                    textureData[textureRgbaIdx + 2] = 0.0f;     // B
-                    textureData[textureRgbaIdx + 3] = 0.0f;     // A
-                }
-            }
-        }
-
-        Napi::Float32Array dataJs = Napi::Float32Array::New(env, textureData.size());
-        memcpy(dataJs.Data(), textureData.data(), textureData.size() * sizeof(float));
-        
-        Napi::Object textureJs = Napi::Object::New(env);
-        textureJs.Set("data", dataJs);
-        textureJs.Set("width", Napi::Number::New(env, currentWidth));
-        textureJs.Set("height", Napi::Number::New(env, height));
-        
-        texturesJs[textureIdxCounter++] = textureJs;
-    }
+    Napi::Uint32Array bandLengthsJs = Napi::Uint32Array::New(env, bandLengths.size());
+    memcpy(bandLengthsJs.Data(), bandLengths.data(), bandLengths.size() * sizeof(uint32_t));
+    metaJs.Set("bandLengths", bandLengthsJs);
 
     Napi::Object resultJs = Napi::Object::New(env);
-    resultJs.Set("textures", texturesJs);
-    resultJs.Set("width", Napi::Number::New(env, width));
-    resultJs.Set("height", Napi::Number::New(env, height));
-    resultJs.Set("channels", Napi::Number::New(env, channels));
+    Napi::Float32Array dataJs = Napi::Float32Array::New(env, interleavedOutput.size());
+    memcpy(dataJs.Data(), interleavedOutput.data(), interleavedOutput.size() * sizeof(float));
+    
+    resultJs.Set("data", dataJs);
+    resultJs.Set("metadata", metaJs);
     
     return resultJs;
 }
 
-// This function will take a spectrogram and return a multi-channel audio buffer
-Napi::Value Synthesize(const Napi::CallbackInfo& info) {
+// This function takes a spectrogram (as a flat buffer with metadata)
+// and returns a multi-channel audio buffer.
+Napi::Value synthesize(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
 
-    if (info.Length() < 5 || !info[0].IsArray() || !info[1].IsNumber() || !info[2].IsNumber() || !info[3].IsNumber() || !info[4].IsObject()) {
-        Napi::TypeError::New(env, "Expected Spectrogram (Array), channels (Number), sampleRate (Number), num_frames (Number), params (Object)").ThrowAsJavaScriptException();
+    if (info.Length() < 5 || !info[0].IsTypedArray() || !info[1].IsObject() || !info[2].IsNumber() || !info[3].IsObject() || !info[4].IsNumber()) {
+        Napi::TypeError::New(env, "Expected: data (TypedArray), metadata (Object), sampleRate (Number), params (Object), numFrames (Number)").ThrowAsJavaScriptException();
         return env.Null();
     }
 
-    Napi::Array spectrogramJs = info[0].As<Napi::Array>();
-    int channels = info[1].As<Napi::Number>().Int32Value();
+    Napi::Float32Array inputDataJs = info[0].As<Napi::Float32Array>();
+    const float* inputData = inputDataJs.Data();
+    Napi::Object metaJs = info[1].As<Napi::Object>();
     double sampleRate = info[2].As<Napi::Number>().DoubleValue();
-    size_t numFrames = info[3].As<Napi::Number>().Int64Value();
-    Napi::Object paramsJs = info[4].As<Napi::Object>();
+    Napi::Object paramsJs = info[3].As<Napi::Object>();
+    size_t numFrames = info[4].As<Napi::Number>().Int64Value();
+
+    int channels = metaJs.Get("numChannels").As<Napi::Number>().Int32Value();
+    int numBands = metaJs.Get("numBands").As<Napi::Number>().Int32Value();
+    Napi::Uint32Array bandOffsetsJs = metaJs.Get("bandOffsets").As<Napi::Uint32Array>();
+    const uint32_t* bandOffsets = bandOffsetsJs.Data();
+    Napi::Uint32Array bandLengthsJs = metaJs.Get("bandLengths").As<Napi::Uint32Array>();
+    const uint32_t* bandLengths = bandLengthsJs.Data();
 
     int bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
     double fminHz = paramsJs.Get("fmin").As<Napi::Number>().DoubleValue();
     double fminFrac = fminHz / sampleRate;
     gaborator::log_fq_scale scale(bandsPerOctave, fminFrac);
     gaborator::parameters params(scale);
+    gaborator::analyzer<float> analyzer(params);
+
+    int band_begin = analyzer.bandpass_bands_begin();
+    int band_end = analyzer.bandpass_bands_end();
 
     std::vector<std::vector<float>> audioChannels(channels);
-    size_t numSamplesInterleaved = numFrames * channels;
+    size_t floatsPerPixel = 4;
 
     for (int ch = 0; ch < channels; ++ch) {
-        gaborator::analyzer<float> analyzer(params);
         gaborator::coefs<float> channelCoefs(analyzer);
-
-        Napi::Array bandsJs = spectrogramJs.Get(ch).As<Napi::Array>();
-        int numBands = bandsJs.Length();
-        int64_t currentT = 0; 
-        
         gaborator::fill(
             [&](int b, int64_t t, std::complex<float> &coef) {
-                Napi::Float32Array coefsJs = bandsJs.Get(b).As<Napi::Float32Array>();
-                int64_t tOffset = t - currentT;
-                if(tOffset >= 0 && (size_t)tOffset < coefsJs.ElementLength()/2) {
-                    coef.real(coefsJs[(size_t)tOffset * 2]);
-                    coef.imag(coefsJs[(size_t)tOffset * 2 + 1]);
+                int band_idx = b - band_begin;
+                if (band_idx < 0 || band_idx >= numBands) {
+                    coef = {0.0f, 0.0f}; return;
                 }
+                int step_log2 = analyzer.band_step_log2(b);
+                int64_t t_in_band = t >> step_log2;
+                if (t_in_band < 0 || (size_t)t_in_band >= (size_t)bandLengths[band_idx]) {
+                    coef = {0.0f, 0.0f}; return;
+                }
+                size_t base_offset = bandOffsets[band_idx] + t_in_band;
+                size_t readOffset = base_offset * floatsPerPixel;
+                coef.real(inputData[readOffset + ch * 2 + 0]);
+                coef.imag(inputData[readOffset + ch * 2 + 1]);
             },
-            0, numBands,
-            0, numFrames, 
-            channelCoefs
+            band_begin, band_end, 0, numFrames, channelCoefs
         );
-
         audioChannels[ch].resize(numFrames);
         analyzer.synthesize(channelCoefs, 0, numFrames, audioChannels[ch].data());
     }
 
+    size_t numSamplesInterleaved = numFrames * channels;
     Napi::Float32Array outputBuffer = Napi::Float32Array::New(env, numSamplesInterleaved);
-    for (size_t i = 0; i < numSamplesInterleaved; ++i) {
-        outputBuffer[i] = audioChannels[i % channels][i / channels];
+    for (size_t i = 0; i < numFrames; ++i) {
+        for (int ch = 0; ch < channels; ++ch) {
+            outputBuffer[i * channels + ch] = audioChannels[ch][i];
+        }
     }
-
     return outputBuffer;
 }
 
-
-Napi::Object Init(Napi::Env env, Napi::Object exports) {
-  exports.Set("analyze", Napi::Function::New(env, Analyze));
-  exports.Set("synthesize", Napi::Function::New(env, Synthesize));
+Napi::Object init(Napi::Env env, Napi::Object exports) {
+  exports.Set("analyze", Napi::Function::New(env, analyze));
+  exports.Set("synthesize", Napi::Function::New(env, synthesize));
   return exports;
 }
 
-NODE_API_MODULE(gaborator_addon, Init)
+NODE_API_MODULE(gaborator_addon, init);

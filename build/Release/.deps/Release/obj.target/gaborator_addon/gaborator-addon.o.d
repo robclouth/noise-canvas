@@ -14,9 +14,7 @@ Release/obj.target/gaborator_addon/gaborator-addon.o: \
   ../Gaborator-2.1/gaborator/gaussian.h ../Gaborator-2.1/gaborator/mel.h \
   ../Gaborator-2.1/gaborator/pod_vector.h \
   ../Gaborator-2.1/gaborator/pool.h ../Gaborator-2.1/gaborator/ref.h \
-  ../Gaborator-2.1/gaborator/vector_math.h \
-  ../Gaborator-2.1/gaborator/render.h \
-  ../Gaborator-2.1/gaborator/resample2.h
+  ../Gaborator-2.1/gaborator/vector_math.h
 ../gaborator-addon.cpp:
 /Users/rob/Documents/Projects/Music/Tools/noise-canvas/node_modules/node-addon-api/napi.h:
 /Users/rob/Library/Caches/node-gyp/24.2.0/include/node/node_api.h:
@@ -35,5 +33,3 @@ Release/obj.target/gaborator_addon/gaborator-addon.o: \
 ../Gaborator-2.1/gaborator/pool.h:
 ../Gaborator-2.1/gaborator/ref.h:
 ../Gaborator-2.1/gaborator/vector_math.h:
-../Gaborator-2.1/gaborator/render.h:
-../Gaborator-2.1/gaborator/resample2.h:

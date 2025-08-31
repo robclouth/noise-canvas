@@ -12,8 +12,7 @@ import { Canvas } from "@react-three/fiber";
 import { SpectrogramCanvas } from "./components/SpectrogramCanvas";
 import { openAudioFile, runAnalysis } from "./store";
 
-const testFilePath =
-  "/Users/rob/Splice/sounds/packs/The Jungle Drummer - Breakbeat Culture/Test_Press_-_The_Jungle_Drummer_-_Breakbeat_Culture/Loops/Layered_Breaks/TSP_TJD_172_break_layered_2snare_junglism.wav";
+const testFilePath = "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas/input/tone.wav";
 
 function App(): React.JSX.Element {
   useEffect(() => {
