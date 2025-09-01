@@ -180,7 +180,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     "synthesize-audio",
-    async (_, payload: SynthesisPayload, params: GaboratorParams): Promise<Float32Array> => {
+    async (_, payload: SynthesisPayload, params: GaboratorParams, normalize: boolean): Promise<Float32Array> => {
       // Convert the processed data Buffer from the renderer back to a Float32Array
       const processedDataArray = new Float32Array(
         payload.processedData.buffer,
@@ -189,7 +189,13 @@ app.whenReady().then(() => {
       );
 
       // The C++ addon expects the processed data array and the original metadata object
-      const audioVector = gaborator.synthesize(processedDataArray, payload.analysisMetadata, currentSampleRate, params);
+      const audioVector = gaborator.synthesize(
+        processedDataArray,
+        payload.analysisMetadata,
+        currentSampleRate,
+        params,
+        normalize,
+      );
       return audioVector;
     },
   );

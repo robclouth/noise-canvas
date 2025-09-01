@@ -118,12 +118,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
   }));
 
   if (!spectrogramData) {
-    return (
-      <mesh>
-        <planeGeometry args={[2, 2]} />
-        <meshBasicMaterial color="black" />
-      </mesh>
-    );
+    return null;
   }
 
   return (

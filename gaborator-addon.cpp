@@ -166,8 +166,8 @@ Napi::Value analyze(const Napi::CallbackInfo& info) {
 Napi::Value synthesize(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
 
-    if (info.Length() < 4 || !info[0].IsTypedArray() || !info[1].IsObject() || !info[2].IsNumber() || !info[3].IsObject()) {
-        Napi::TypeError::New(env, "Expected: data (TypedArray), analysisObject (Object), sampleRate (Number), params (Object)").ThrowAsJavaScriptException();
+    if (info.Length() < 5 || !info[0].IsTypedArray() || !info[1].IsObject() || !info[2].IsNumber() || !info[3].IsObject() || !info[4].IsBoolean()) {
+        Napi::TypeError::New(env, "Expected: data (TypedArray), analysisObject (Object), sampleRate (Number), params (Object), normalize (Boolean)").ThrowAsJavaScriptException();
         return env.Null();
     }
 
@@ -176,6 +176,7 @@ Napi::Value synthesize(const Napi::CallbackInfo& info) {
     Napi::Object analysisObj = info[1].As<Napi::Object>();
     double sampleRate = info[2].As<Napi::Number>().DoubleValue();
     Napi::Object paramsJs = info[3].As<Napi::Object>();
+    bool normalize = info[4].As<Napi::Boolean>().Value();
     
     size_t numFrames = analysisObj.Get("numFrames").As<Napi::Number>().Int64Value();
     int channels = analysisObj.Get("numChannels").As<Napi::Number>().Int32Value();
@@ -223,11 +224,28 @@ Napi::Value synthesize(const Napi::CallbackInfo& info) {
         analyzer.synthesize(channelCoefs, 0, numFrames, audioChannels[ch].data());
     }
 
+    float normalization_factor = 1.0f;
+    if (normalize) {
+        // Find the peak absolute value across all channels.
+        float peak_value = 0.0f;
+        for (const auto& channel_data : audioChannels) {
+            for (float sample : channel_data) {
+                peak_value = std::max(peak_value, std::abs(sample));
+            }
+        }
+
+        if (peak_value > 0.0f) {
+            normalization_factor = 1.0f / peak_value;
+        }
+    }
+
     size_t numSamplesInterleaved = numFrames * channels;
     Napi::Float32Array outputBuffer = Napi::Float32Array::New(env, numSamplesInterleaved);
+    
+    // Apply the normalization factor while interleaving the final buffer.
     for (size_t i = 0; i < numFrames; ++i) {
         for (int ch = 0; ch < channels; ++ch) {
-            outputBuffer[i * channels + ch] = audioChannels[ch][i];
+            outputBuffer[i * channels + ch] = audioChannels[ch][i] * normalization_factor;
         }
     }
     return outputBuffer;

@@ -491,6 +491,7 @@
     "prefix": "/opt/homebrew",
     "user_agent": "npm/11.3.0 node/v24.2.0 darwin arm64 workspaces/false",
     "cache": "/Users/rob/.npm",
+    "yes": "true",
     "node_gyp": "/opt/homebrew/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js",
     "npm_version": "11.3.0",
     "init_module": "/Users/rob/.npm-init.js",

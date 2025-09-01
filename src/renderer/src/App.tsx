@@ -16,7 +16,8 @@ import { Button } from "./components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { Slider } from "./components/ui/slider";
-import { brushHeightAtom, brushWidthAtom, isPlayingAtom, openAudioFile, runAnalysis } from "./store";
+import { Switch } from "./components/ui/switch";
+import { brushHeightAtom, brushWidthAtom, isPlayingAtom, normalizeAtom, openAudioFile, runAnalysis } from "./store";
 import { playAudio, stopAudio } from "./audio-manager";
 
 const testFilePath = "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas/input/voice.wav";
@@ -25,6 +26,7 @@ function App(): React.JSX.Element {
   const [brushWidth, setBrushWidth] = useAtom(brushWidthAtom);
   const [brushHeight, setBrushHeight] = useAtom(brushHeightAtom);
   const [isPlaying, setIsPlaying] = useAtom(isPlayingAtom);
+  const [normalize, setNormalize] = useAtom(normalizeAtom);
 
   useEffect(() => {
     runAnalysis(testFilePath);
@@ -156,6 +158,12 @@ function App(): React.JSX.Element {
               value={[brushHeight]}
               onValueChange={([val]) => setBrushHeight(val)}
             />
+          </div>
+          <div className="flex items-center justify-between">
+            <label htmlFor="normalize-switch" className="text-sm font-medium">
+              Normalize output
+            </label>
+            <Switch id="normalize-switch" checked={normalize} onCheckedChange={setNormalize} />
           </div>
           <Select>
             <SelectTrigger>

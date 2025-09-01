@@ -69,6 +69,9 @@ export const brushHeightAtom = atom(1000); // in Hz
 // Holds the current pitch shift value from the UI (in bands)
 export const pitchShiftAtom = atom(0.0);
 
+// Controls whether the output of the synthesis is normalized
+export const normalizeAtom = atom(true);
+
 // --- Core Functions ---
 
 const analysisParams = {
@@ -148,6 +151,7 @@ export const openAudioFile = async (): Promise<void> => {
 
 export const runSynthesis = async (processedData: Float32Array | null): Promise<void> => {
   const originalAnalysis = store.get(spectrogramDataAtom);
+  const normalize = store.get(normalizeAtom);
 
   if (!processedData || !originalAnalysis) {
     console.error("No processed data available to synthesize.");
@@ -172,6 +176,7 @@ export const runSynthesis = async (processedData: Float32Array | null): Promise<
     "synthesize-audio",
     payload,
     analysisParams, // Pass original analysis params
+    normalize,
   );
 
   const audioContext = Tone.getContext().rawContext;
