@@ -1,4 +1,5 @@
 import { atom, createStore } from "jotai";
+import { atomWithStorage } from "jotai/utils";
 import { DataTexture, RGBFormat, FloatType, NearestFilter, RGBAFormat, RGFormat, Vector2 } from "three";
 import { audioBufferAtom } from "./audio-manager";
 import * as Tone from "tone";
@@ -63,8 +64,8 @@ export const gainAtom = atom(0.0);
 export const isPlayingAtom = atom(false);
 
 // Brush dimensions
-export const brushWidthAtom = atom(0.1); // in seconds
-export const brushHeightAtom = atom(1000); // in Hz
+export const brushWidthAtom = atomWithStorage("brushWidth", 0.1); // in seconds
+export const brushHeightAtom = atomWithStorage("brushHeight", 1000); // in Hz
 
 // Holds the current pitch shift value from the UI (in bands)
 export const pitchShiftAtom = atom(0.0);
