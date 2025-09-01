@@ -1,5 +1,7 @@
 import { atom, createStore } from "jotai";
 import { DataTexture, RGBFormat, FloatType, NearestFilter, RGBAFormat, RGFormat, Vector2 } from "three";
+import { audioBufferAtom } from "./audio-manager";
+import * as Tone from "tone";
 
 export const store = createStore();
 
@@ -57,15 +59,15 @@ export const spectrogramDataAtom = atom<SpectrogramData | null>(null);
 // Holds the current gain value from the UI (in dB)
 export const gainAtom = atom(0.0);
 
+// Is audio currently playing?
+export const isPlayingAtom = atom(false);
+
 // Brush dimensions
 export const brushWidthAtom = atom(0.1); // in seconds
 export const brushHeightAtom = atom(1000); // in Hz
 
 // Holds the current pitch shift value from the UI (in bands)
 export const pitchShiftAtom = atom(0.0);
-
-// This will hold the Float32Array read back from the GPU, ready for synthesis
-export const processedSpectrogramDataAtom = atom<Float32Array | null>(null);
 
 // --- Core Functions ---
 
@@ -139,13 +141,12 @@ export const openAudioFile = async (): Promise<void> => {
   if (filePath) {
     // Reset state before loading new file
     store.set(spectrogramDataAtom, null);
-    store.set(processedSpectrogramDataAtom, null);
+    // store.set(processedSpectrogramDataAtom, null);
     await runAnalysis(filePath);
   }
 };
 
-export const runSynthesis = async (): Promise<void> => {
-  const processedData = store.get(processedSpectrogramDataAtom);
+export const runSynthesis = async (processedData: Float32Array | null): Promise<void> => {
   const originalAnalysis = store.get(spectrogramDataAtom);
 
   if (!processedData || !originalAnalysis) {
@@ -167,13 +168,29 @@ export const runSynthesis = async (): Promise<void> => {
     },
   };
 
-  const audioBuffer: Float32Array = await window.electron.ipcRenderer.invoke(
+  const audioBufferArray: Float32Array = await window.electron.ipcRenderer.invoke(
     "synthesize-audio",
     payload,
     analysisParams, // Pass original analysis params
   );
 
-  console.log("Synthesis complete!", audioBuffer);
-  // Next steps: play the audio or offer it as a download
-  // For example, you could create a Blob and an object URL to play in an <audio> element.
+  // Convert Float32Array to AudioBuffer
+  const audioContext = Tone.getContext().rawContext;
+  const audioBuffer = audioContext.createBuffer(
+    originalAnalysis.numChannels,
+    audioBufferArray.length / originalAnalysis.numChannels,
+    originalAnalysis.sampleRate,
+  );
+
+  for (let i = 0; i < originalAnalysis.numChannels; i++) {
+    const channelData = audioBufferArray.subarray(
+      i * (audioBufferArray.length / originalAnalysis.numChannels),
+      (i + 1) * (audioBufferArray.length / originalAnalysis.numChannels),
+    );
+    audioBuffer.copyToChannel(channelData, i);
+  }
+
+  store.set(audioBufferAtom, audioBuffer);
+
+  console.log("Synthesis complete and audio buffer is ready!");
 };

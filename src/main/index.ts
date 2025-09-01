@@ -106,7 +106,7 @@ app.whenReady().then(() => {
   ipcMain.handle("open-file-dialog", async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       properties: ["openFile"],
-      filters: [{ name: "Audio Files", extensions: ["mp3", "wav", "ogg", "flac", "aac", "m4a"] }],
+      filters: [{ name: "Audio Files", extensions: ["mp3", "wav", "ogg", "flac", "aac", "m4a", "wma", "aiff"] }],
     });
     if (!canceled && filePaths.length > 0) {
       return filePaths[0];
@@ -197,10 +197,15 @@ app.whenReady().then(() => {
   createWindow();
 
   app.on("activate", function () {
+    // On macOS it's common to re-create a window in the app when the
+    // dock icon is clicked and there are no other windows open.
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
+// Quit when all windows are closed, except on macOS. There, it's common
+// for applications and their menu bar to stay active until the user quits
+// explicitly with Cmd + Q.
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();

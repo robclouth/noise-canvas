@@ -9,18 +9,22 @@ import {
 } from "@/components/ui/menubar";
 import { Canvas } from "@react-three/fiber";
 import { useAtom } from "jotai";
+import { PlayIcon, SquareIcon } from "lucide-react";
 import { MouseEventHandler, useEffect, useRef } from "react";
 import { Renderer, RendererHandle } from "./components/renderer";
+import { Button } from "./components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { Slider } from "./components/ui/slider";
-import { brushHeightAtom, brushWidthAtom, openAudioFile, runAnalysis } from "./store";
+import { brushHeightAtom, brushWidthAtom, isPlayingAtom, openAudioFile, runAnalysis } from "./store";
+import { playAudio, stopAudio } from "./audio-manager";
 
 const testFilePath = "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas/input/voice.wav";
 
 function App(): React.JSX.Element {
   const [brushWidth, setBrushWidth] = useAtom(brushWidthAtom);
   const [brushHeight, setBrushHeight] = useAtom(brushHeightAtom);
+  const [isPlaying, setIsPlaying] = useAtom(isPlayingAtom);
 
   useEffect(() => {
     runAnalysis(testFilePath);
@@ -31,6 +35,17 @@ function App(): React.JSX.Element {
 
   const handleOpenFile = (): void => {
     openAudioFile();
+  };
+
+  const handleTogglePlay = async (): Promise<void> => {
+    if (isPlaying) {
+      stopAudio();
+      setIsPlaying(false);
+    } else {
+      await rendererRef.current?.triggerSynthesis();
+      await playAudio();
+      setIsPlaying(true);
+    }
   };
 
   const handleCanvasClick: MouseEventHandler<HTMLDivElement> = (event) => {
@@ -153,11 +168,19 @@ function App(): React.JSX.Element {
         </ResizablePanel>
         <ResizableHandle />
         <ResizablePanel className="flex">
-          <div className="flex-1">
-            <Canvas onClick={handleCanvasClick} onMouseMove={handleMouseMove} frameloop="demand">
-              <Renderer ref={rendererRef} />
-            </Canvas>
-          </div>
+          <ResizablePanelGroup direction="vertical" className="flex-1">
+            <ResizablePanel>
+              <Canvas onClick={handleCanvasClick} onMouseMove={handleMouseMove} frameloop="demand">
+                <Renderer ref={rendererRef} />
+              </Canvas>
+            </ResizablePanel>
+            <ResizableHandle />
+            <ResizablePanel defaultSize={20} maxSize={50} minSize={10} className="flex items-center justify-center p-4">
+              <Button onClick={handleTogglePlay}>
+                {isPlaying ? <SquareIcon className="h-6 w-6" /> : <PlayIcon className="h-6 w-6" />}
+              </Button>
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

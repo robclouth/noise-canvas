@@ -2,7 +2,7 @@ import { useThree } from "@react-three/fiber";
 import { useAtomValue } from "jotai";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { brushHeightAtom, brushWidthAtom, spectrogramDataAtom } from "../store";
+import { brushHeightAtom, brushWidthAtom, runSynthesis, spectrogramDataAtom } from "../store";
 import { DisplayMaterial } from "./spectrogram-material";
 import { GainMaterial } from "./gain-material";
 import { useFBO } from "@react-three/drei";
@@ -10,6 +10,7 @@ import { CopyMaterial } from "./copy-material";
 
 export interface RendererHandle {
   update: (x: number, y: number) => void;
+  triggerSynthesis: () => Promise<void>;
 }
 
 export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_props, ref) {
@@ -97,8 +98,19 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
     invalidate();
   };
 
+  const triggerSynthesis = async (): Promise<void> => {
+    if (!spectrogramData || !textureSize) return;
+
+    const fboToRead = pingPong.current === 0 ? fbo1 : fbo2;
+
+    const buffer = new Float32Array(textureSize.x * textureSize.y * 4);
+    await gl.readRenderTargetPixelsAsync(fboToRead, 0, 0, textureSize.x, textureSize.y, buffer);
+    await runSynthesis(buffer);
+  };
+
   useImperativeHandle(ref, () => ({
     update,
+    triggerSynthesis,
   }));
 
   if (!spectrogramData) {
