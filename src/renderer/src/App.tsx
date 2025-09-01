@@ -103,7 +103,7 @@ function App(): React.JSX.Element {
         <ResizableHandle />
         <ResizablePanel className="flex">
           <div className="flex-1">
-            <Canvas>
+            <Canvas frameloop="demand">
               <Renderer />
             </Canvas>
           </div>

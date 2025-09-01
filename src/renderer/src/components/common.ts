@@ -1,4 +1,4 @@
-import { DataTexture, Vector2 } from "three";
+import { Texture, Vector2 } from "three";
 
 export const code = `
 
@@ -43,9 +43,9 @@ vec4 getDataFromUv(vec2 vUv) {
 `;
 
 export const uniforms = {
-  packedDataTex: new DataTexture(),
-  inverseMapTex: new DataTexture(),
-  metadataTex: new DataTexture(),
+  packedDataTex: new Texture(),
+  inverseMapTex: new Texture(),
+  metadataTex: new Texture(),
   numFrames: 0,
   numBands: 0,
   packedTextureSize: new Vector2(0, 0),
