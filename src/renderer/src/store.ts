@@ -57,6 +57,10 @@ export const spectrogramDataAtom = atom<SpectrogramData | null>(null);
 // Holds the current gain value from the UI (in dB)
 export const gainAtom = atom(0.0);
 
+// Brush dimensions
+export const brushWidthAtom = atom(0.1); // in seconds
+export const brushHeightAtom = atom(1000); // in Hz
+
 // Holds the current pitch shift value from the UI (in bands)
 export const pitchShiftAtom = atom(0.0);
 

@@ -1,14 +1,18 @@
 import { Texture, Vector2 } from "three";
 
 export const code = `
-
 uniform sampler2D packedDataTex;
 uniform sampler2D metadataTex;
 uniform float numFrames;
 uniform float numBands;
 uniform vec2 packedTextureSize;
 uniform int numChannels;
-uniform float inverseMapTex;
+uniform sampler2D inverseMapTex;
+uniform float sampleRate;
+
+// Brush uniforms
+uniform vec2 brushCenterUv; // Center of the brush in UV coordinates
+uniform vec2 brushSizeUv;   // Size of the brush in UV coordinates
 
 vec4 getDataFromUv(vec2 vUv) {
   float bandIndex = floor((1.0 - vUv.y) * numBands);
@@ -34,11 +38,25 @@ vec4 getDataFromUv(vec2 vUv) {
   float packedY = floor(linearPixelIndex / packedTextureSize.x);
   float packedX = mod(linearPixelIndex, packedTextureSize.x);
   vec2 packedUv = (vec2(packedX, packedY) + 0.5) / packedTextureSize;
-
+  
   // Fetch the single RGBA texel containing all channel data for this point
   vec4 packedValue = texture2D(packedDataTex, packedUv);
 
   return packedValue;
+}
+
+vec2 getUnpackedUvFromPackedUv(vec2 packedUv) {
+    vec2 rawUnpacked = texture2D(inverseMapTex, packedUv).rg;
+    vec2 unpackedUv;
+    unpackedUv.x = rawUnpacked.x / numFrames;
+    unpackedUv.y = 1.0 - (rawUnpacked.y + 0.5) / numBands;
+    return unpackedUv;
+}
+
+// Check if a given UV coordinate is within the rectangular brush
+bool isInBrush(vec2 vUv) {
+    vec2 diff = abs(vUv - brushCenterUv);
+    return (diff.x < brushSizeUv.x / 2.0 && diff.y < brushSizeUv.y / 2.0);
 }
 `;
 
@@ -50,4 +68,7 @@ export const uniforms = {
   numBands: 0,
   packedTextureSize: new Vector2(0, 0),
   numChannels: 1,
+  sampleRate: 44100.0,
+  brushCenterUv: new Vector2(0.5, 0.5),
+  brushSizeUv: new Vector2(0.1, 0.1),
 };

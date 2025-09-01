@@ -7,23 +7,48 @@ import {
   MenubarShortcut,
   MenubarTrigger,
 } from "@/components/ui/menubar";
-import { useEffect } from "react";
 import { Canvas } from "@react-three/fiber";
-import { openAudioFile, runAnalysis } from "./store";
+import { useAtom } from "jotai";
+import { MouseEventHandler, useEffect, useRef } from "react";
+import { Renderer, RendererHandle } from "./components/renderer";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
-import { Renderer } from "./components/renderer";
-import { Select, SelectItem, SelectContent, SelectTrigger, SelectValue } from "./components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
+import { Slider } from "./components/ui/slider";
+import { brushHeightAtom, brushWidthAtom, openAudioFile, runAnalysis } from "./store";
 
 const testFilePath = "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas/input/voice.wav";
 
 function App(): React.JSX.Element {
+  const [brushWidth, setBrushWidth] = useAtom(brushWidthAtom);
+  const [brushHeight, setBrushHeight] = useAtom(brushHeightAtom);
+
   useEffect(() => {
     runAnalysis(testFilePath);
     console.log("testFilePath", testFilePath);
   }, []);
 
+  const rendererRef = useRef<RendererHandle>(null);
+
   const handleOpenFile = (): void => {
     openAudioFile();
+  };
+
+  const handleCanvasClick: MouseEventHandler<HTMLDivElement> = (event) => {
+    if (rendererRef.current) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      rendererRef.current.update(x / event.currentTarget.clientWidth, y / event.currentTarget.clientHeight);
+    }
+  };
+
+  const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
+    if (rendererRef.current && event.buttons === 1) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      rendererRef.current.update(x / event.currentTarget.clientWidth, y / event.currentTarget.clientHeight);
+    }
   };
 
   return (
@@ -90,7 +115,33 @@ function App(): React.JSX.Element {
         </MenubarMenu>
       </Menubar>
       <ResizablePanelGroup direction="horizontal">
-        <ResizablePanel className="max-w-64 min-w-64 p-2 flex flex-col gap-2 items-stretch">
+        <ResizablePanel className="max-w-64 min-w-64 p-2 flex flex-col gap-4 items-stretch">
+          <div className="flex flex-col gap-2">
+            <label htmlFor="brush-width" className="text-sm font-medium">
+              Brush Width: {brushWidth.toFixed(2)}s
+            </label>
+            <Slider
+              id="brush-width"
+              min={0.01}
+              max={2}
+              step={0.01}
+              value={[brushWidth]}
+              onValueChange={([val]) => setBrushWidth(val)}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="brush-height" className="text-sm font-medium">
+              Brush Height: {brushHeight.toFixed(0)} Hz
+            </label>
+            <Slider
+              id="brush-height"
+              min={10}
+              max={20000}
+              step={10}
+              value={[brushHeight]}
+              onValueChange={([val]) => setBrushHeight(val)}
+            />
+          </div>
           <Select>
             <SelectTrigger>
               <SelectValue placeholder="Brush" />
@@ -103,8 +154,8 @@ function App(): React.JSX.Element {
         <ResizableHandle />
         <ResizablePanel className="flex">
           <div className="flex-1">
-            <Canvas frameloop="demand">
-              <Renderer />
+            <Canvas onClick={handleCanvasClick} onMouseMove={handleMouseMove} frameloop="demand">
+              <Renderer ref={rendererRef} />
             </Canvas>
           </div>
         </ResizablePanel>

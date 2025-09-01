@@ -145,7 +145,8 @@ Napi::Value analyze(const Napi::CallbackInfo& info) {
     resultJs.Set("numFrames", Napi::Number::New(env, numFrames));
     resultJs.Set("numChannels", Napi::Number::New(env, channels));
     resultJs.Set("numBands", Napi::Number::New(env, numBands));
-
+    resultJs.Set("sampleRate", Napi::Number::New(env, sampleRate));
+    
     // Keep raw metadata arrays for the synthesizer
     Napi::Uint32Array bandOffsetsJs = Napi::Uint32Array::New(env, bandOffsets.size());
     memcpy(bandOffsetsJs.Data(), bandOffsets.data(), bandOffsets.size() * sizeof(uint32_t));

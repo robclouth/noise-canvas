@@ -19,13 +19,17 @@ export const GainMaterial = shaderMaterial(
     ${code}
 
     void main() {
-       vec4 texel = texture2D(packedDataTex, vUv);
+        vec2 unpackedUv = getUnpackedUvFromPackedUv(vUv);
 
-    // Apply gain to the complex numbers (real and imaginary parts)
-    // For mono, this affects .rg. For stereo, it affects all four channels.
-    texel.rgba *= 2.0;
+        vec4 texel = texture2D(packedDataTex, vUv);
 
-    gl_FragColor = texel;
+        if (isInBrush(unpackedUv)) {
+            // Apply gain to the complex numbers (real and imaginary parts)
+            // For mono, this affects .rg. For stereo, it affects all four channels.
+            texel *= 2.0;
+        }
+
+        gl_FragColor = texel;
     }
   `,
 );
