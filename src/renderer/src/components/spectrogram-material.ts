@@ -1,11 +1,11 @@
 import { shaderMaterial } from "@react-three/drei";
-import { code, uniform } from "./common";
+import { code, uniforms } from "./common";
 
-export const SpectrogramMaterial = shaderMaterial(
+export const DisplayMaterial = shaderMaterial(
   {
-    ...uniform,
-    uMinDB: -70.0,
-    uMaxDB: 0.0,
+    ...uniforms,
+    minDB: -70.0,
+    maxDB: 0.0,
   },
   /*glsl*/ `
 varying vec2 vUv;
@@ -19,15 +19,15 @@ precision highp float;
 
 ${code}
 
-uniform float uMinDB;
-uniform float uMaxDB;
+uniform float minDB;
+uniform float maxDB;
 
 
 varying vec2 vUv;
 
 float magnitudeToDb(float mag) {
     float logMag = 20.0 * log(mag + 1.0e-7) / log(10.0); // Use a smaller epsilon
-    float db = (logMag - uMinDB) / (uMaxDB - uMinDB);
+    float db = (logMag - minDB) / (maxDB - minDB);
     return clamp(db, 0.0, 1.0);
 }
 
@@ -39,7 +39,7 @@ void main() {
     float leftMag = length(leftComplex);
     float leftDb = magnitudeToDb(leftMag);
     
-    if (uNumChannels == 1) {
+    if (numChannels == 1) {
         gl_FragColor = vec4(leftDb, leftDb, leftDb, 1.0);
     } else {
         vec2 rightComplex = packedValue.ba; // B=Real, A=Imag

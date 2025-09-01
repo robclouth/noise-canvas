@@ -2,24 +2,24 @@ import { DataTexture, Vector2 } from "three";
 
 export const code = `
 
-uniform sampler2D uPackedData;
-uniform sampler2D uMetadata;
-uniform float uNumFrames;
-uniform float uNumBands;
-uniform vec2 uPackedTextureSize;
-uniform int uNumChannels;
-uniform float uInverseMap;
+uniform sampler2D packedDataTex;
+uniform sampler2D metadataTex;
+uniform float numFrames;
+uniform float numBands;
+uniform vec2 packedTextureSize;
+uniform int numChannels;
+uniform float inverseMapTex;
 
 vec4 getDataFromUv(vec2 vUv) {
-  float bandIndex = floor((1.0 - vUv.y) * uNumBands);
+  float bandIndex = floor((1.0 - vUv.y) * numBands);
     
-  vec2 metaUv = vec2((bandIndex + 0.5) / uNumBands, 0.5);
-  vec3 meta = texture2D(uMetadata, metaUv).rgb;
+  vec2 metaUv = vec2((bandIndex + 0.5) / numBands, 0.5);
+  vec3 meta = texture2D(metadataTex, metaUv).rgb;
   float bandOffset = meta.r;
   float bandLength = meta.g;
   float bandScaleExp = meta.b;
 
-  float timeSample = vUv.x * uNumFrames;
+  float timeSample = vUv.x * numFrames;
   float timeInBand = timeSample / exp2(bandScaleExp);
   float coefIndexInBand = floor(timeInBand);
 
@@ -31,23 +31,23 @@ vec4 getDataFromUv(vec2 vUv) {
   float linearPixelIndex = bandOffset + coefIndexInBand;
 
   // Convert that to a UV coordinate
-  float packedY = floor(linearPixelIndex / uPackedTextureSize.x);
-  float packedX = mod(linearPixelIndex, uPackedTextureSize.x);
-  vec2 packedUv = (vec2(packedX, packedY) + 0.5) / uPackedTextureSize;
+  float packedY = floor(linearPixelIndex / packedTextureSize.x);
+  float packedX = mod(linearPixelIndex, packedTextureSize.x);
+  vec2 packedUv = (vec2(packedX, packedY) + 0.5) / packedTextureSize;
 
   // Fetch the single RGBA texel containing all channel data for this point
-  vec4 packedValue = texture2D(uPackedData, packedUv);
+  vec4 packedValue = texture2D(packedDataTex, packedUv);
 
   return packedValue;
 }
 `;
 
-export const uniform = {
-  uPackedData: new DataTexture(),
-  uInverseMap: new DataTexture(),
-  uMetadata: new DataTexture(),
-  uNumFrames: 0,
-  uNumBands: 0,
-  uPackedTextureSize: new Vector2(0, 0),
-  uNumChannels: 1,
+export const uniforms = {
+  packedDataTex: new DataTexture(),
+  inverseMapTex: new DataTexture(),
+  metadataTex: new DataTexture(),
+  numFrames: 0,
+  numBands: 0,
+  packedTextureSize: new Vector2(0, 0),
+  numChannels: 1,
 };

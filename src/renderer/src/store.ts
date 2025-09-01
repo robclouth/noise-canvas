@@ -1,4 +1,5 @@
 import { atom, createStore } from "jotai";
+import { DataTexture, RGBFormat, FloatType, NearestFilter, RGBAFormat, RGFormat, Vector2 } from "three";
 
 export const store = createStore();
 
@@ -18,16 +19,15 @@ export interface AnalysisPayload {
   sampleRate: number; // Pass sample rate through
 }
 
-// This is the processed data structure that our React components will use.
-// It's now a direct mapping of the payload, with Buffers converted to Float32Arrays.
-export interface ProcessedAnalysis {
-  dataForTexture: { array: Float32Array; width: number; height: number };
-  metadataForTexture: { array: Float32Array; width: number; height: number };
-  inverseMapForTexture: { array: Float32Array; width: number; height: number };
+export interface SpectrogramData {
+  packedDataTex: DataTexture;
+  inverseMapTex: DataTexture;
+  metadataTex: DataTexture;
   numFrames: number;
   numBands: number;
   numChannels: number;
   sampleRate: number;
+  packedTextureSize: Vector2;
   // Store the raw metadata needed for synthesis separately for clarity
   synthesisMetadata: {
     bandOffsets: Uint32Array;
@@ -52,7 +52,7 @@ export interface SynthesisPayload {
 // --- Jotai Atoms ---
 
 // This atom will hold the processed, ready-to-render spectrogram data
-export const spectrogramDataAtom = atom<ProcessedAnalysis | null>(null);
+export const spectrogramDataAtom = atom<SpectrogramData | null>(null);
 
 // Holds the current gain value from the UI (in dB)
 export const gainAtom = atom(0.0);
@@ -71,48 +71,63 @@ const analysisParams = {
 };
 
 export const runAnalysis = async (filePath: string): Promise<void> => {
-  // 1. Get the complete, padded, flattened payload from the C++ addon via the main process
   const payload: AnalysisPayload = await window.electron.ipcRenderer.invoke("analyze-audio", filePath, analysisParams);
 
-  // 2. Assemble the final object for the React components.
-  //    The only logic here is converting IPC-friendly Buffers into GPU-friendly Float32Arrays.
-  const processedResult: ProcessedAnalysis = {
-    dataForTexture: {
-      array: new Float32Array(payload.data.buffer, payload.data.byteOffset, payload.data.byteLength / 4),
-      width: payload.textureWidth,
-      height: payload.textureHeight,
-    },
-    metadataForTexture: {
-      array: new Float32Array(
-        payload.metadataTexture.buffer,
-        payload.metadataTexture.byteOffset,
-        payload.metadataTexture.byteLength / 4,
-      ),
-      width: payload.numBands,
-      height: 1,
-    },
-    inverseMapForTexture: {
-      array: new Float32Array(
-        payload.inverseMap.buffer,
-        payload.inverseMap.byteOffset,
-        payload.inverseMap.byteLength / 4,
-      ),
-      width: payload.textureWidth,
-      height: payload.textureHeight,
-    },
+  const packedDataTex = new DataTexture(
+    new Float32Array(payload.data.buffer, payload.data.byteOffset, payload.data.byteLength / 4),
+    payload.textureWidth,
+    payload.textureHeight,
+    RGBAFormat,
+    FloatType,
+  );
+  packedDataTex.internalFormat = "RGBA32F";
+  packedDataTex.minFilter = NearestFilter;
+  packedDataTex.magFilter = NearestFilter;
+  packedDataTex.needsUpdate = true;
+
+  const inverseMapTex = new DataTexture(
+    new Float32Array(payload.inverseMap.buffer, payload.inverseMap.byteOffset, payload.inverseMap.byteLength / 4),
+    payload.textureWidth,
+    payload.textureHeight,
+    RGFormat,
+    FloatType,
+  );
+  inverseMapTex.internalFormat = "RG32F";
+  inverseMapTex.minFilter = NearestFilter;
+  inverseMapTex.magFilter = NearestFilter;
+  inverseMapTex.needsUpdate = true;
+
+  const metadataTex = new DataTexture(
+    new Float32Array(
+      payload.metadataTexture.buffer,
+      payload.metadataTexture.byteOffset,
+      payload.metadataTexture.byteLength / 4,
+    ),
+    payload.numBands,
+    1,
+    RGBFormat,
+    FloatType,
+  );
+  metadataTex.internalFormat = "RGB32F";
+  metadataTex.minFilter = NearestFilter;
+  metadataTex.magFilter = NearestFilter;
+  metadataTex.needsUpdate = true;
+
+  store.set(spectrogramDataAtom, {
+    packedDataTex,
+    inverseMapTex,
+    metadataTex,
     numFrames: payload.numFrames,
     numBands: payload.numBands,
     numChannels: payload.numChannels,
     sampleRate: payload.sampleRate,
+    packedTextureSize: new Vector2(payload.textureWidth, payload.textureHeight),
     synthesisMetadata: {
       bandOffsets: payload.bandOffsets,
       bandStepLog2s: payload.bandStepLog2s,
       bandLengths: payload.bandLengths,
     },
-  };
-
-  // 3. Set the atom, which will trigger the UI to update
-  store.set(spectrogramDataAtom, processedResult);
+  });
 };
 
 export const openAudioFile = async (): Promise<void> => {

@@ -9,8 +9,10 @@ import {
 } from "@/components/ui/menubar";
 import { useEffect } from "react";
 import { Canvas } from "@react-three/fiber";
-import { SpectrogramCanvas } from "./components/SpectrogramCanvas";
 import { openAudioFile, runAnalysis } from "./store";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
+import { Renderer } from "./components/renderer";
+import { Select, SelectItem, SelectContent, SelectTrigger, SelectValue } from "./components/ui/select";
 
 const testFilePath = "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas/input/voice.wav";
 
@@ -87,11 +89,26 @@ function App(): React.JSX.Element {
           </MenubarContent>
         </MenubarMenu>
       </Menubar>
-      <div className="flex-1 bg-background">
-        <Canvas>
-          <SpectrogramCanvas />
-        </Canvas>
-      </div>
+      <ResizablePanelGroup direction="horizontal">
+        <ResizablePanel className="max-w-64 min-w-64 p-2 flex flex-col gap-2 items-stretch">
+          <Select>
+            <SelectTrigger>
+              <SelectValue placeholder="Brush" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="gain">Gain</SelectItem>
+            </SelectContent>
+          </Select>
+        </ResizablePanel>
+        <ResizableHandle />
+        <ResizablePanel className="flex">
+          <div className="flex-1">
+            <Canvas>
+              <Renderer />
+            </Canvas>
+          </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   );
 }
