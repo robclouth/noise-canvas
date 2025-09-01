@@ -5,7 +5,6 @@ import * as THREE from "three";
 import { brushHeightAtom, brushWidthAtom, runSynthesis, spectrogramDataAtom } from "../store";
 import { DisplayMaterial } from "./spectrogram-material";
 import { GainMaterial } from "./gain-material";
-import { useFBO } from "@react-three/drei";
 import { CopyMaterial } from "./copy-material";
 
 export interface RendererHandle {
@@ -23,14 +22,18 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
 
   const textureSize = spectrogramData?.packedTextureSize;
 
-  const fbo1 = useFBO(textureSize?.x, textureSize?.y, {
-    format: THREE.RGBAFormat,
-    type: THREE.FloatType,
-  });
-  const fbo2 = useFBO(textureSize?.x, textureSize?.y, {
-    format: THREE.RGBAFormat,
-    type: THREE.FloatType,
-  });
+  const [fbo1, fbo2] = useMemo(() => {
+    if (!textureSize) return [null, null];
+    const options = {
+      format: THREE.RGBAFormat,
+      type: THREE.FloatType,
+    };
+    return [
+      new THREE.WebGLRenderTarget(textureSize.x, textureSize.y, options),
+      new THREE.WebGLRenderTarget(textureSize.x, textureSize.y, options),
+    ];
+  }, [textureSize]);
+
   const pingPong = useRef(0);
 
   const { gainMaterial, copyMaterial, displayMaterial } = useMemo(() => {
@@ -41,7 +44,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
   }, []);
 
   useEffect(() => {
-    if (spectrogramData && mesh.current) {
+    if (spectrogramData && mesh.current && fbo1) {
       mesh.current.material = copyMaterial;
       copyMaterial.uniforms.inputTex.value = spectrogramData.packedDataTex;
 
@@ -64,7 +67,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
   }, [spectrogramData, camera, copyMaterial, displayMaterial, fbo1, gl, invalidate, scene]);
 
   const update = (x: number, y: number) => {
-    if (!spectrogramData || !mesh.current) return;
+    if (!spectrogramData || !mesh.current || !fbo1 || !fbo2) return;
 
     const source = pingPong.current === 0 ? fbo1 : fbo2;
     const destination = pingPong.current === 0 ? fbo2 : fbo1;
@@ -99,12 +102,13 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
   };
 
   const triggerSynthesis = async (): Promise<void> => {
-    if (!spectrogramData || !textureSize) return;
+    if (!spectrogramData || !textureSize || !fbo1 || !fbo2) return;
 
     const fboToRead = pingPong.current === 0 ? fbo1 : fbo2;
 
     const buffer = new Float32Array(textureSize.x * textureSize.y * 4);
-    await gl.readRenderTargetPixelsAsync(fboToRead, 0, 0, textureSize.x, textureSize.y, buffer);
+    gl.getContext().finish();
+    gl.readRenderTargetPixels(fboToRead, 0, 0, textureSize.x, textureSize.y, buffer);
     await runSynthesis(buffer);
   };
 
