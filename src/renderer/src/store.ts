@@ -66,7 +66,7 @@ export const processedSpectrogramDataAtom = atom<Float32Array | null>(null);
 // --- Core Functions ---
 
 const analysisParams = {
-  bandsPerOctave: 96,
+  bandsPerOctave: 48,
   fmin: 20.0,
 };
 

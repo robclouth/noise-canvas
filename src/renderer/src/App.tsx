@@ -12,7 +12,7 @@ import { Canvas } from "@react-three/fiber";
 import { SpectrogramCanvas } from "./components/SpectrogramCanvas";
 import { openAudioFile, runAnalysis } from "./store";
 
-const testFilePath = "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas/input/tone.wav";
+const testFilePath = "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas/input/voice.wav";
 
 function App(): React.JSX.Element {
   useEffect(() => {

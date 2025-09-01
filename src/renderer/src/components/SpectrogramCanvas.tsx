@@ -1,7 +1,7 @@
 import { extend } from "@react-three/fiber";
 import { useAtomValue } from "jotai";
 import { useMemo, useRef } from "react";
-import { DataTexture, FloatType, NearestFilter, RGBAFormat, RGBFormat, Vector2 } from "three";
+import { DataTexture, FloatType, NearestFilter, RGBAFormat, RGBFormat, RGFormat, Vector2 } from "three";
 import { spectrogramDataAtom } from "../store";
 import { SpectrogramMaterial } from "./spectrogram-material";
 
@@ -31,6 +31,17 @@ export const SpectrogramCanvas = () => {
     packedTex.magFilter = NearestFilter;
     packedTex.needsUpdate = true;
 
+    const {
+      array: inverseMapArray,
+      width: inverseMapWidth,
+      height: inverseMapHeight,
+    } = analysisResult.inverseMapForTexture;
+    const inverseMapTex = new DataTexture(inverseMapArray, inverseMapWidth, inverseMapHeight, RGFormat, FloatType);
+    inverseMapTex.internalFormat = "RG32F";
+    inverseMapTex.minFilter = NearestFilter;
+    inverseMapTex.magFilter = NearestFilter;
+    inverseMapTex.needsUpdate = true;
+
     // 2. Metadata Texture
     const { array: metaArray, width: metaWidth, height: metaHeight } = analysisResult.metadataForTexture;
     const metaTex = new DataTexture(metaArray, metaWidth, metaHeight, RGBFormat, FloatType);
@@ -41,6 +52,7 @@ export const SpectrogramCanvas = () => {
 
     return {
       uPackedData: packedTex,
+      uInverseMap: inverseMapTex,
       uMetadata: metaTex,
       uNumFrames: analysisResult.numFrames,
       uNumBands: analysisResult.numBands,

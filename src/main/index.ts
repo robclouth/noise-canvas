@@ -16,8 +16,6 @@ ffmpeg.setFfmpegPath(ffmpegPath!);
 // It's updated each time a file is analyzed.
 let currentSampleRate = 44100;
 
-// --- Final, Corrected Interfaces ---
-
 // Describes the flat object returned directly from the C++ addon
 interface GaboratorAnalysisResult {
   data: Float32Array;
