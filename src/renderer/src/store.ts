@@ -159,8 +159,6 @@ export const runSynthesis = async (processedData: Float32Array | null): Promise<
     return;
   }
 
-  console.log("Sending processed data to main process for synthesis...");
-
   // Assemble the payload for the main process
   const payload: SynthesisPayload = {
     processedData: Buffer.from(processedData.buffer),
@@ -199,6 +197,4 @@ export const runSynthesis = async (processedData: Float32Array | null): Promise<
   }
 
   store.set(audioBufferAtom, audioBuffer);
-
-  console.log("Synthesis complete and audio buffer is ready!");
 };

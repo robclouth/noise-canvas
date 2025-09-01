@@ -8,16 +8,24 @@ import {
   MenubarTrigger,
 } from "@/components/ui/menubar";
 import { Canvas } from "@react-three/fiber";
-import { useAtom } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { PlayIcon, SquareIcon } from "lucide-react";
-import { MouseEventHandler, useEffect, useRef } from "react";
+import { MouseEventHandler, useEffect, useRef, useState } from "react";
 import { Renderer, RendererHandle } from "./components/renderer";
 import { Button } from "./components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { Slider } from "./components/ui/slider";
 import { Switch } from "./components/ui/switch";
-import { brushHeightAtom, brushWidthAtom, isPlayingAtom, normalizeAtom, openAudioFile, runAnalysis } from "./store";
+import {
+  brushHeightAtom,
+  brushWidthAtom,
+  isPlayingAtom,
+  normalizeAtom,
+  openAudioFile,
+  runAnalysis,
+  spectrogramDataAtom,
+} from "./store";
 import { playAudio, stopAudio } from "./audio-manager";
 
 const testFilePath = "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas/input/voice.wav";
@@ -27,6 +35,10 @@ function App(): React.JSX.Element {
   const [brushHeight, setBrushHeight] = useAtom(brushHeightAtom);
   const [isPlaying, setIsPlaying] = useAtom(isPlayingAtom);
   const [normalize, setNormalize] = useAtom(normalizeAtom);
+  const spectrogramData = useAtomValue(spectrogramDataAtom);
+  const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
+  const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     runAnalysis(testFilePath);
@@ -66,7 +78,54 @@ function App(): React.JSX.Element {
       const y = event.clientY - rect.top;
       rendererRef.current.update(x / event.currentTarget.clientWidth, y / event.currentTarget.clientHeight);
     }
+    if (event.currentTarget) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      setMousePosition({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+    }
   };
+
+  const handleMouseEnter = (event: React.MouseEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMousePosition({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+  };
+
+  const handleMouseLeave = () => {
+    setMousePosition(null);
+  };
+
+  useEffect(() => {
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setCanvasSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
+    });
+
+    if (canvasContainerRef.current) {
+      resizeObserver.observe(canvasContainerRef.current);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  const brushStyle: React.CSSProperties = {};
+  if (mousePosition && spectrogramData) {
+    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+    const brushWidthUv = brushWidth / totalDuration;
+    const brushHeightUv = brushHeight / (spectrogramData.sampleRate / 2);
+
+    const brushWidthPx = brushWidthUv * canvasSize.width;
+    const brushHeightPx = brushHeightUv * canvasSize.height;
+
+    brushStyle.position = "absolute";
+    brushStyle.border = "1px solid white";
+    brushStyle.pointerEvents = "none";
+    brushStyle.left = `${mousePosition.x - brushWidthPx / 2}px`;
+    brushStyle.top = `${mousePosition.y - brushHeightPx / 2}px`;
+    brushStyle.width = `${brushWidthPx}px`;
+    brushStyle.height = `${brushHeightPx}px`;
+  }
 
   return (
     <div className="h-screen w-screen bg-background text-foreground flex flex-col">
@@ -178,9 +237,19 @@ function App(): React.JSX.Element {
         <ResizablePanel className="flex">
           <ResizablePanelGroup direction="vertical" className="flex-1">
             <ResizablePanel>
-              <Canvas onClick={handleCanvasClick} onMouseMove={handleMouseMove} frameloop="demand">
-                <Renderer ref={rendererRef} />
-              </Canvas>
+              <div
+                ref={canvasContainerRef}
+                className="w-full h-full relative cursor-none"
+                onMouseMove={handleMouseMove}
+                onMouseEnter={handleMouseEnter}
+                onMouseLeave={handleMouseLeave}
+                onClick={handleCanvasClick}
+              >
+                <Canvas frameloop="demand">
+                  <Renderer ref={rendererRef} />
+                </Canvas>
+                {mousePosition && <div style={brushStyle} />}
+              </div>
             </ResizablePanel>
             <ResizableHandle />
             <ResizablePanel defaultSize={20} maxSize={50} minSize={10} className="flex items-center justify-center p-4">
