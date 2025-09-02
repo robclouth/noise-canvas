@@ -1,23 +1,21 @@
-import {
-  Menubar,
-  MenubarContent,
-  MenubarItem,
-  MenubarMenu,
-  MenubarSeparator,
-  MenubarShortcut,
-  MenubarTrigger,
-} from "@/components/ui/menubar";
 import { Canvas } from "@react-three/fiber";
 import { useAtom, useAtomValue } from "jotai";
 import { PlayIcon, SquareIcon } from "lucide-react";
 import { MouseEventHandler, useCallback, useEffect, useRef, useState } from "react";
+import { DataTexture, FloatType, NearestFilter, RGBAFormat, RGBFormat, RGFormat, Vector2 } from "three";
+import { playAudio, playbackTimeAtom, stopAudio } from "./audio-manager";
+import { BrushType, brushes } from "./components/brushes";
+import { BrushParameter, SelectParameter, SliderParameter } from "./components/brushes/base-brush";
+import { unitsToUv } from "./components/brushes/common";
 import { Renderer, RendererHandle } from "./components/renderer";
 import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { Slider } from "./components/ui/slider";
 import { Switch } from "./components/ui/switch";
 import {
+  AnalysisPayload,
   analysisParams,
   bpmAtom,
   brushHeightAtom,
@@ -26,17 +24,12 @@ import {
   gridSizeAtom,
   isPlayingAtom,
   normalizeAtom,
-  openAudioFile,
-  runAnalysis,
-  spectrogramDataAtom,
   snapXAtom,
   snapYAtom,
+  spectrogramDataAtom,
+  store,
 } from "./store";
-import { playbackTimeAtom, playAudio, stopAudio } from "./audio-manager";
-import { BrushType, brushes } from "./components/brushes";
-import { BrushParameter, SelectParameter, SliderParameter } from "./components/brushes/base-brush";
-import { unitsToUv } from "./components/brushes/common";
-import { Input } from "./components/ui/input";
+import { canRedoAtom, canUndoAtom, initUndo, addUndoState, clearUndoHistory } from "./undo";
 
 const SliderControl = ({ parameter }: { parameter: SliderParameter }) => {
   const [value, setValue] = useAtom(parameter.atom);
@@ -119,6 +112,8 @@ function App(): React.JSX.Element {
   const [gridSize, setGridSize] = useAtom(gridSizeAtom);
   const spectrogramData = useAtomValue(spectrogramDataAtom);
   const playbackTime = useAtomValue(playbackTimeAtom);
+  const canUndo = useAtomValue(canUndoAtom);
+  const canRedo = useAtomValue(canRedoAtom);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const brushRef = useRef<HTMLDivElement>(null);
@@ -127,24 +122,98 @@ function App(): React.JSX.Element {
   const rendererRef = useRef<RendererHandle>(null);
 
   useEffect(() => {
+    if (rendererRef.current) {
+      initUndo((data) => rendererRef.current?.setFBOData(data));
+    }
+  }, [rendererRef.current]);
+
+  useEffect(() => {
+    window.electron.ipcRenderer.send("undo-state-changed", {
+      canUndo,
+      canRedo,
+    });
+  }, [canUndo, canRedo]);
+
+  useEffect(() => {
     if (process.env.NODE_ENV === "development") {
-      const testFilePath = "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/voice.wav";
-      runAnalysis(testFilePath);
+      // Dev mode: load a test file automatically.
+      // We need to ask the main process to do this for us.
+      // Note: This requires a path that is valid on the machine running the app.
+      window.electron.ipcRenderer.send(
+        "dev:load-file",
+        "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/voice.wav",
+      );
     }
 
     window.api.onOpenFile((path) => {
-      runAnalysis(path);
+      window.electron.ipcRenderer.send("dev:load-file", path);
     });
 
-    window.api.onDebugArguments((args) => {
-      console.log("%c[DEBUG] Raw Launch Arguments Received:", "color: yellow; font-weight: bold;", args);
-      console.log("%c[DEBUG] Arguments as JSON:", "color: yellow; font-weight: bold;", JSON.stringify(args, null, 2));
+    window.electron.ipcRenderer.on("analysis-complete", (_, payload: AnalysisPayload) => {
+      const packedDataTex = new DataTexture(
+        new Float32Array(payload.data.buffer, payload.data.byteOffset, payload.data.byteLength / 4),
+        payload.textureWidth,
+        payload.textureHeight,
+        RGBAFormat,
+        FloatType,
+      );
+      packedDataTex.internalFormat = "RGBA32F";
+      packedDataTex.minFilter = NearestFilter;
+      packedDataTex.magFilter = NearestFilter;
+      packedDataTex.needsUpdate = true;
+
+      const inverseMapTex = new DataTexture(
+        new Float32Array(payload.inverseMap.buffer, payload.inverseMap.byteOffset, payload.inverseMap.byteLength / 4),
+        payload.textureWidth,
+        payload.textureHeight,
+        RGFormat,
+        FloatType,
+      );
+      inverseMapTex.internalFormat = "RG32F";
+      inverseMapTex.minFilter = NearestFilter;
+      inverseMapTex.magFilter = NearestFilter;
+      inverseMapTex.needsUpdate = true;
+
+      const metadataTex = new DataTexture(
+        new Float32Array(
+          payload.metadataTexture.buffer,
+          payload.metadataTexture.byteOffset,
+          payload.metadataTexture.byteLength / 4,
+        ),
+        payload.numBands,
+        1,
+        RGBFormat,
+        FloatType,
+      );
+      metadataTex.internalFormat = "RGB32F";
+      metadataTex.minFilter = NearestFilter;
+      metadataTex.magFilter = NearestFilter;
+      metadataTex.needsUpdate = true;
+
+      store.set(spectrogramDataAtom, {
+        packedDataTex,
+        inverseMapTex,
+        metadataTex,
+        numFrames: payload.numFrames,
+        numBands: payload.numBands,
+        numChannels: payload.numChannels,
+        sampleRate: payload.sampleRate,
+        packedTextureSize: new Vector2(payload.textureWidth, payload.textureHeight),
+        synthesisMetadata: {
+          bandOffsets: payload.bandOffsets,
+          bandStepLog2s: payload.bandStepLog2s,
+          bandLengths: payload.bandLengths,
+        },
+      });
+      clearUndoHistory();
+    });
+
+    window.electron.ipcRenderer.on("analysis-error", (_, message: string) => {
+      // You could display this in a more user-friendly way, e.g., a toast notification
+      console.error("Analysis Error:", message);
+      alert(`An error occurred during analysis: ${message}`);
     });
   }, []);
-
-  const handleOpenFile = (): void => {
-    openAudioFile();
-  };
 
   const handleTogglePlay = async (): Promise<void> => {
     if (isPlaying) {
@@ -195,6 +264,31 @@ function App(): React.JSX.Element {
     }
 
     return [snappedX, snappedY];
+  };
+
+  const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
+    if (event.button === 0 && rendererRef.current) {
+      // Left mouse button down
+      const beforeState = rendererRef.current.getFBOData();
+      if (beforeState) {
+        // We'll capture the 'after' state on mouse up
+        (event.currentTarget as any)._undoBeforeState = beforeState;
+      }
+    }
+  };
+
+  const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = (event) => {
+    if (event.button === 0 && rendererRef.current) {
+      // Left mouse button up
+      const beforeState = (event.currentTarget as any)._undoBeforeState;
+      if (beforeState) {
+        const afterState = rendererRef.current.getFBOData();
+        if (afterState) {
+          addUndoState(beforeState, afterState);
+        }
+        delete (event.currentTarget as any)._undoBeforeState;
+      }
+    }
   };
 
   const handleCanvasClick: MouseEventHandler<HTMLDivElement> = (event) => {
@@ -296,67 +390,6 @@ function App(): React.JSX.Element {
 
   return (
     <div className="h-screen w-screen bg-background text-foreground flex flex-col">
-      <Menubar>
-        <MenubarMenu>
-          <MenubarTrigger>File</MenubarTrigger>
-          <MenubarContent>
-            <MenubarItem>
-              New <MenubarShortcut>⌘N</MenubarShortcut>
-            </MenubarItem>
-            <MenubarItem onClick={handleOpenFile}>
-              Open <MenubarShortcut>⌘O</MenubarShortcut>
-            </MenubarItem>
-            <MenubarSeparator />
-            <MenubarItem>
-              Save <MenubarShortcut>⌘S</MenubarShortcut>
-            </MenubarItem>
-            <MenubarItem>
-              Save As... <MenubarShortcut>⇧⌘S</MenubarShortcut>
-            </MenubarItem>
-            <MenubarSeparator />
-            <MenubarItem>
-              Exit <MenubarShortcut>⌘Q</MenubarShortcut>
-            </MenubarItem>
-          </MenubarContent>
-        </MenubarMenu>
-        <MenubarMenu>
-          <MenubarTrigger>Edit</MenubarTrigger>
-          <MenubarContent>
-            <MenubarItem>
-              Undo <MenubarShortcut>⌘Z</MenubarShortcut>
-            </MenubarItem>
-            <MenubarItem>
-              Redo <MenubarShortcut>⇧⌘Z</MenubarShortcut>
-            </MenubarItem>
-            <MenubarSeparator />
-            <MenubarItem>
-              Cut <MenubarShortcut>⌘X</MenubarShortcut>
-            </MenubarItem>
-            <MenubarItem>
-              Copy <MenubarShortcut>⌘C</MenubarShortcut>
-            </MenubarItem>
-            <MenubarItem>
-              Paste <MenubarShortcut>⌘V</MenubarShortcut>
-            </MenubarItem>
-          </MenubarContent>
-        </MenubarMenu>
-        <MenubarMenu>
-          <MenubarTrigger>View</MenubarTrigger>
-          <MenubarContent>
-            <MenubarItem>Zoom In</MenubarItem>
-            <MenubarItem>Zoom Out</MenubarItem>
-            <MenubarSeparator />
-            <MenubarItem>Full Screen</MenubarItem>
-          </MenubarContent>
-        </MenubarMenu>
-        <MenubarMenu>
-          <MenubarTrigger>Tools</MenubarTrigger>
-          <MenubarContent>
-            <MenubarItem>Settings</MenubarItem>
-            <MenubarItem>Preferences</MenubarItem>
-          </MenubarContent>
-        </MenubarMenu>
-      </Menubar>
       <ResizablePanelGroup direction="horizontal">
         <ResizablePanel className="max-w-64 min-w-64 p-2 flex flex-col gap-4 items-stretch">
           <div className="flex flex-col gap-2">
@@ -427,6 +460,8 @@ function App(): React.JSX.Element {
                 onMouseMove={handleMouseMove}
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
+                onMouseDown={handleCanvasMouseDown}
+                onMouseUp={handleCanvasMouseUp}
                 onClick={handleCanvasClick}
               >
                 <Canvas frameloop="demand">

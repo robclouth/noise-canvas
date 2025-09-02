@@ -19,7 +19,10 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld("electron", {
       ...electronAPI,
       ipcRenderer: {
-        invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+        send: (channel: string, ...args: any) => ipcRenderer.send(channel, ...args),
+        on: (channel: string, listener: (event: Electron.IpcRendererEvent, ...args: any[]) => void) =>
+          ipcRenderer.on(channel, listener),
+        invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
       },
     });
     contextBridge.exposeInMainWorld("api", api);
@@ -31,7 +34,10 @@ if (process.contextIsolated) {
   window.electron = {
     ...electronAPI,
     ipcRenderer: {
-      invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+      send: (channel: string, ...args: any) => ipcRenderer.send(channel, ...args),
+      on: (channel: string, listener: (event: Electron.IpcRendererEvent, ...args: any[]) => void) =>
+        ipcRenderer.on(channel, listener),
+      invoke: (channel: string, ...args: any[]) => ipcRenderer.invoke(channel, ...args),
     },
   };
   // @ts-ignore (define in dts)

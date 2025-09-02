@@ -20,6 +20,8 @@ import { displayMaterial } from "./display-material";
 export interface RendererHandle {
   update: (x: number, y: number) => void;
   triggerSynthesis: () => Promise<void>;
+  getFBOData: () => Float32Array | null;
+  setFBOData: (data: Float32Array) => void;
 }
 
 export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_props, ref) {
@@ -113,20 +115,51 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
     invalidate();
   };
 
-  const triggerSynthesis = async (): Promise<void> => {
-    if (!spectrogramData || !textureSize || !fbo1 || !fbo2) return;
+  const getFBOData = (): Float32Array | null => {
+    if (!spectrogramData || !textureSize || !fbo1 || !fbo2) return null;
 
     const fboToRead = pingPong.current === 0 ? fbo1 : fbo2;
-
     const buffer = new Float32Array(textureSize.x * textureSize.y * 4);
     gl.getContext().finish();
     gl.readRenderTargetPixels(fboToRead, 0, 0, textureSize.x, textureSize.y, buffer);
-    await runSynthesis(buffer);
+    return buffer;
+  };
+
+  const setFBOData = (data: Float32Array) => {
+    if (!spectrogramData || !mesh.current || !fbo1 || !fbo2 || !textureSize) return;
+
+    const destination = pingPong.current === 0 ? fbo1 : fbo2;
+
+    const dataTex = new THREE.DataTexture(data, textureSize.x, textureSize.y, THREE.RGBAFormat, THREE.FloatType);
+    dataTex.needsUpdate = true;
+
+    mesh.current.material = copyMaterial;
+    copyMaterial.uniforms.inputTex.value = dataTex;
+
+    gl.setRenderTarget(destination);
+    gl.render(scene, camera);
+    gl.setRenderTarget(null);
+
+    mesh.current.material = displayMaterial;
+    displayMaterial.uniforms.packedDataTex.value = destination.texture;
+
+    invalidate();
+
+    dataTex.dispose();
+  };
+
+  const triggerSynthesis = async (): Promise<void> => {
+    const buffer = getFBOData();
+    if (buffer) {
+      await runSynthesis(buffer);
+    }
   };
 
   useImperativeHandle(ref, () => ({
     update,
     triggerSynthesis,
+    getFBOData,
+    setFBOData,
   }));
 
   if (!spectrogramData) {
