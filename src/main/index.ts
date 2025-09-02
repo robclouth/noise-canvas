@@ -1,16 +1,27 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from "electron";
-import { join } from "path";
-import { electronApp, optimizer, is } from "@electron-toolkit/utils";
-import icon from "../../resources/icon.png?asset";
-import ffmpeg from "fluent-ffmpeg";
+import { electronApp, is, optimizer } from "@electron-toolkit/utils";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import ffmpegPath from "ffmpeg-static";
+import ffprobePath from "ffprobe-static";
+import ffmpeg from "fluent-ffmpeg";
+import { join } from "path";
 import { Writable } from "stream";
+import icon from "../../resources/icon.png?asset";
 
 // Load the native addon
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const gaborator = require(join(__dirname, "../../build/Release/gaborator_addon.node"));
+const gaboratorPath = app.isPackaged
+  ? join(process.resourcesPath, "app.asar.unpacked/build/Release/gaborator_addon.node")
+  : join(__dirname, "../../build/Release/gaborator_addon.node");
 
-ffmpeg.setFfmpegPath(ffmpegPath!);
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const gaborator = require(gaboratorPath);
+
+const correctFfmpegPath = app.isPackaged ? ffmpegPath!.replace("app.asar", "app.asar.unpacked") : ffmpegPath!;
+const correctFfprobePath = app.isPackaged
+  ? ffprobePath.path.replace("app.asar", "app.asar.unpacked")
+  : ffprobePath.path;
+ffmpeg.setFfmpegPath(correctFfmpegPath);
+ffmpeg.setFfprobePath(correctFfprobePath);
 
 // This is treated as a global for the synthesis function.
 // It's updated each time a file is analyzed.
@@ -90,7 +101,7 @@ function createWindow(): void {
 
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
     mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
-    if (is.dev) mainWindow.webContents.openDevTools();
+    mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
   }

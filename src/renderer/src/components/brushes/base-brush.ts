@@ -1,8 +1,10 @@
-import { WritableAtom } from "jotai";
-import { SetStateActionWithReset } from "jotai/utils";
+import { WritableAtom, SetStateAction } from "jotai";
 import * as THREE from "three";
 import { IUniform } from "three";
 import { store, spectrogramDataAtom } from "../../store";
+import { RESET } from "jotai/utils";
+
+export type SetStateActionWithReset<Value> = SetStateAction<Value> | typeof RESET;
 
 export interface UpdateUniformsProps {
   brushCenterUv: THREE.Vector2;
@@ -31,12 +33,12 @@ export type SliderParameter = BaseParameter<number, SetStateActionWithReset<numb
   isLog?: boolean;
 };
 
-export type SelectParameter = BaseParameter<string, SetStateActionWithReset<string>> & {
+export type SelectParameter<T extends string = string> = BaseParameter<T, SetStateActionWithReset<T>> & {
   type: "select";
-  options: readonly string[];
+  options: readonly T[];
 };
 
-export type BrushParameter = SliderParameter | SelectParameter;
+export type BrushParameter = SliderParameter | SelectParameter<any>;
 
 export abstract class BaseBrush {
   abstract material: THREE.ShaderMaterial;

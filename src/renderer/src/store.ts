@@ -189,17 +189,12 @@ export const runSynthesis = async (processedData: Float32Array | null): Promise<
 
   const audioBuffer = audioContext.createBuffer(originalAnalysis.numChannels, numFrames, originalAnalysis.sampleRate);
 
-  // If it's mono, we can just copy it directly.
-  if (originalAnalysis.numChannels === 1) {
-    audioBuffer.copyToChannel(audioBufferArray, 0);
-  } else {
-    // For stereo (or more channels), we must de-interleave.
-    for (let c = 0; c < originalAnalysis.numChannels; c++) {
-      const channelData = audioBuffer.getChannelData(c);
-      for (let i = 0; i < numFrames; i++) {
-        // Pick samples from the interleaved array
-        channelData[i] = audioBufferArray[i * originalAnalysis.numChannels + c];
-      }
+  // For each channel, copy the samples from the interleaved array
+  for (let c = 0; c < originalAnalysis.numChannels; c++) {
+    const channelData = audioBuffer.getChannelData(c);
+    for (let i = 0; i < numFrames; i++) {
+      // Pick samples from the interleaved array
+      channelData[i] = audioBufferArray[i * originalAnalysis.numChannels + c];
     }
   }
 
