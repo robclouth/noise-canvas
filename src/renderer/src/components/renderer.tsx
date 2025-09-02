@@ -2,17 +2,10 @@ import { useThree } from "@react-three/fiber";
 import { useAtomValue } from "jotai";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import * as THREE from "three";
-import {
-  blurXAtom,
-  blurYAtom,
-  brushHeightAtom,
-  brushTypeAtom,
-  brushWidthAtom,
-  gainAmountAtom,
-  runSynthesis,
-  spectrogramDataAtom,
-} from "../store";
+import { brushHeightAtom, brushTypeAtom, brushWidthAtom, runSynthesis, spectrogramDataAtom } from "../store";
 import { brushes } from "./brushes";
+import { blurXAtom, blurYAtom } from "./brushes/blur-brush";
+import { gainAmountAtom } from "./brushes/gain-brush";
 import { copyMaterial } from "./copy-material";
 import { displayMaterial } from "./spectrogram-material";
 

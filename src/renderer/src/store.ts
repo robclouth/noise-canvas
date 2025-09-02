@@ -3,6 +3,7 @@ import { atomWithStorage } from "jotai/utils";
 import { DataTexture, RGBFormat, FloatType, NearestFilter, RGBAFormat, RGFormat, Vector2 } from "three";
 import { audioBufferAtom } from "./audio-manager";
 import * as Tone from "tone";
+import { BrushType, brushes } from "./components/brushes";
 
 export const store = createStore();
 
@@ -61,22 +62,12 @@ export const spectrogramDataAtom = atom<SpectrogramData | null>(null);
 export const isPlayingAtom = atom(false);
 
 // Brush type
-export type BrushType = "gain" | "blur";
-export const brushTypeAtom = atomWithStorage<BrushType>("brushType", "gain");
+const defaultBrush = Object.keys(brushes)[0] as BrushType;
+export const brushTypeAtom = atomWithStorage<BrushType>("brushType", defaultBrush);
 
 // Brush dimensions
 export const brushWidthAtom = atomWithStorage("brushWidth", 0.1); // in seconds
 export const brushHeightAtom = atomWithStorage("brushHeight", 1000); // in Hz
-
-// Gain brush parameters
-export const gainAmountAtom = atomWithStorage("gainAmount", 1.0);
-
-// Blur brush parameters
-export const blurXAtom = atomWithStorage("blurX", 0.01); // in seconds
-export const blurYAtom = atomWithStorage("blurY", 100); // in Hz
-
-// Holds the current pitch shift value from the UI (in bands)
-export const pitchShiftAtom = atom(0.0);
 
 // Controls whether the output of the synthesis is normalized
 export const normalizeAtom = atom(true);

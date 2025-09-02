@@ -1,7 +1,11 @@
 import { shaderMaterial } from "@react-three/drei";
+import { atomWithStorage } from "jotai/utils";
 import * as THREE from "three";
 import { code, uniforms, vertexShader } from "./common";
-import { BaseBrush } from "./base-brush";
+import { BaseBrush, BrushParameter } from "./base-brush";
+
+export const blurXAtom = atomWithStorage("blurX", 0.01); // in seconds
+export const blurYAtom = atomWithStorage("blurY", 100); // in Hz
 
 const BlurMaterial = shaderMaterial(
   {
@@ -53,10 +57,31 @@ const BlurMaterial = shaderMaterial(
 
 class BlurBrush extends BaseBrush {
   material: THREE.ShaderMaterial;
+  parameters: BrushParameter[];
 
   constructor() {
     super();
     this.material = new BlurMaterial();
+    this.parameters = [
+      {
+        type: "slider",
+        atom: blurXAtom,
+        label: "Blur X",
+        min: 0,
+        max: 0.1,
+        step: 0.001,
+        formatValue: (value) => `${value.toFixed(3)}s`,
+      },
+      {
+        type: "slider",
+        atom: blurYAtom,
+        label: "Blur Y",
+        min: 0,
+        max: 1000,
+        step: 10,
+        formatValue: (value) => `${value.toFixed(0)} Hz`,
+      },
+    ];
   }
 
   updateUniforms(props: Record<string, any>): void {
