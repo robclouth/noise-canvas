@@ -3,6 +3,7 @@ import { useAtomValue } from "jotai";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import * as THREE from "three";
 import {
+  analysisParams,
   bpmAtom,
   brushHeightAtom,
   brushTypeAtom,
@@ -12,8 +13,7 @@ import {
   spectrogramDataAtom,
 } from "../store";
 import { brushes } from "./brushes";
-import { blurXAtom, blurYAtom } from "./brushes/blur-brush";
-import { gainAmountAtom } from "./brushes/gain-brush";
+import { unitsToUv } from "./brushes/common";
 import { copyMaterial } from "./copy-material";
 import { displayMaterial } from "./display-material";
 
@@ -27,9 +27,6 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
   const brushWidth = useAtomValue(brushWidthAtom);
   const brushHeight = useAtomValue(brushHeightAtom);
   const brushType = useAtomValue(brushTypeAtom);
-  const gainAmount = useAtomValue(gainAmountAtom);
-  const blurX = useAtomValue(blurXAtom);
-  const blurY = useAtomValue(blurYAtom);
   const bpm = useAtomValue(bpmAtom);
   const gridSize = useAtomValue(gridSizeAtom);
   const { gl, scene, camera, invalidate } = useThree();
@@ -84,41 +81,24 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
     const source = pingPong.current === 0 ? fbo1 : fbo2;
     const destination = pingPong.current === 0 ? fbo2 : fbo1;
 
-    // Convert brush size from beats/semitones to seconds/Hz, then to UV dimensions
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-    const brushWidthSeconds = brushWidth * (60.0 / bpm);
-    const brushWidthUv = brushWidthSeconds / totalDuration;
-
-    // Convert semitones to a frequency span in Hz.
-    // This is a musically-aware approximation that calculates the Hz span of an interval
-    // centered around A4 (440Hz).
-    const a4 = 440.0;
-    const f_high = a4 * Math.pow(2.0, brushHeight / 2.0 / 12.0);
-    const f_low = a4 * Math.pow(2.0, -brushHeight / 2.0 / 12.0);
-    const brushHeightHz = f_high - f_low;
-    const brushHeightUv = brushHeightHz / (spectrogramData.sampleRate / 2);
+    const brushSizeUv = unitsToUv(
+      brushWidth,
+      brushHeight,
+      bpm,
+      totalDuration,
+      analysisParams.bandsPerOctave,
+      spectrogramData.numBands,
+    );
+    const brushCenterUv = new THREE.Vector2(x, 1 - y);
 
     const brush = brushes[brushType];
     mesh.current.material = brush.material;
-    const uniforms = brush.material.uniforms;
-
-    uniforms.packedDataTex.value = source.texture;
-    uniforms.inverseMapTex.value = spectrogramData.inverseMapTex;
-    uniforms.metadataTex.value = spectrogramData.metadataTex;
-    uniforms.numFrames.value = spectrogramData.numFrames;
-    uniforms.numBands.value = spectrogramData.numBands;
-    uniforms.numChannels.value = spectrogramData.numChannels;
-    uniforms.packedTextureSize.value = spectrogramData.packedTextureSize;
-    uniforms.sampleRate.value = spectrogramData.sampleRate;
-    uniforms.brushCenterUv.value.set(x, 1 - y);
-    uniforms.brushSizeUv.value.set(brushWidthUv, brushHeightUv);
 
     brush.updateUniforms({
-      gainAmount,
-      blurX,
-      blurY,
-      spectrogramData,
-      bpm,
+      brushCenterUv,
+      brushSizeUv,
+      sourceTexture: source.texture,
     });
 
     gl.setRenderTarget(destination);

@@ -1,8 +1,9 @@
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
 import * as THREE from "three";
-import { code, uniforms, vertexShader } from "./common";
-import { BaseBrush, BrushParameter } from "./base-brush";
+import { code, unitsToUv, uniforms, vertexShader } from "./common";
+import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
+import { store, spectrogramDataAtom, bpmAtom, analysisParams } from "../../store";
 
 export const blurXAtom = atomWithStorage("blurX", 0.0625); // in beats
 export const blurYAtom = atomWithStorage("blurY", 1); // in semitones
@@ -67,6 +68,7 @@ class BlurBrush extends BaseBrush {
         type: "slider",
         atom: blurXAtom,
         label: "Blur X",
+        propName: "blurX",
         min: -6,
         max: 0,
         step: 1,
@@ -77,6 +79,7 @@ class BlurBrush extends BaseBrush {
         type: "slider",
         atom: blurYAtom,
         label: "Blur Y",
+        propName: "blurY",
         min: 0,
         max: 24,
         step: 1,
@@ -85,24 +88,27 @@ class BlurBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: Record<string, any>): void {
-    const { spectrogramData, blurX, blurY, bpm } = props;
+  updateUniforms(props: UpdateUniformsProps): void {
+    super.updateUniforms(props);
 
-    // Convert beats to seconds
-    const blurXSeconds = blurX * (60.0 / bpm);
+    const spectrogramData = store.get(spectrogramDataAtom);
+    const bpm = store.get(bpmAtom);
+    const blurX = store.get(blurXAtom);
+    const blurY = store.get(blurYAtom);
+
+    if (!spectrogramData) return;
+
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-    const blurXUv = blurXSeconds / totalDuration;
+    const blurSizeUv = unitsToUv(
+      blurX,
+      blurY,
+      bpm,
+      totalDuration,
+      analysisParams.bandsPerOctave,
+      spectrogramData.numBands,
+    );
 
-    // Convert semitones to a frequency span in Hz
-    const a4 = 440.0;
-    const f_high = a4 * Math.pow(2.0, blurY / 2.0 / 12.0);
-    const f_low = a4 * Math.pow(2.0, -blurY / 2.0 / 12.0);
-    const blurYHz = f_high - f_low;
-    const blurYUv = blurYHz / (spectrogramData.sampleRate / 2);
-
-    if (this.material.uniforms.blurSizeUv) {
-      this.material.uniforms.blurSizeUv.value.set(blurXUv, blurYUv);
-    }
+    this.material.uniforms.blurSizeUv.value.copy(blurSizeUv);
   }
 }
 

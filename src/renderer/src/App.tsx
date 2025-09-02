@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Slider } from "./components/ui/slider";
 import { Switch } from "./components/ui/switch";
 import {
+  analysisParams,
   bpmAtom,
   brushHeightAtom,
   brushTypeAtom,
@@ -33,10 +34,11 @@ import {
 } from "./store";
 import { playbackTimeAtom, playAudio, stopAudio } from "./audio-manager";
 import { BrushType, brushes } from "./components/brushes";
-import { BrushParameter } from "./components/brushes/base-brush";
+import { BrushParameter, SelectParameter, SliderParameter } from "./components/brushes/base-brush";
+import { unitsToUv } from "./components/brushes/common";
 import { Input } from "./components/ui/input";
 
-const ParameterControl = ({ parameter }: { parameter: BrushParameter }) => {
+const SliderControl = ({ parameter }: { parameter: SliderParameter }) => {
   const [value, setValue] = useAtom(parameter.atom);
   return (
     <div key={parameter.label} className="flex flex-col gap-2">
@@ -53,6 +55,40 @@ const ParameterControl = ({ parameter }: { parameter: BrushParameter }) => {
       />
     </div>
   );
+};
+
+const SelectControl = ({ parameter }: { parameter: SelectParameter }) => {
+  const [value, setValue] = useAtom(parameter.atom);
+  return (
+    <div key={parameter.label} className="flex flex-col gap-2">
+      <label htmlFor={parameter.label} className="text-sm font-medium">
+        {parameter.label}
+      </label>
+      <Select value={value} onValueChange={(val) => setValue(val)}>
+        <SelectTrigger>
+          <SelectValue placeholder={parameter.label} />
+        </SelectTrigger>
+        <SelectContent>
+          {parameter.options.map((key) => (
+            <SelectItem key={key} value={key}>
+              {key.charAt(0).toUpperCase() + key.slice(1)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+};
+
+const ParameterControl = ({ parameter }: { parameter: BrushParameter }) => {
+  switch (parameter.type) {
+    case "slider":
+      return <SliderControl parameter={parameter} />;
+    case "select":
+      return <SelectControl parameter={parameter} />;
+    default:
+      return null;
+  }
 };
 
 const formatTime = (seconds: number): string => {
@@ -90,12 +126,12 @@ function App(): React.JSX.Element {
   const brushRef = useRef<HTMLDivElement>(null);
   const playbackLineRef = useRef<HTMLDivElement>(null);
 
+  const rendererRef = useRef<RendererHandle>(null);
+
   useEffect(() => {
     runAnalysis(testFilePath);
     console.log("testFilePath", testFilePath);
   }, []);
-
-  const rendererRef = useRef<RendererHandle>(null);
 
   const handleOpenFile = (): void => {
     openAudioFile();
@@ -169,18 +205,17 @@ function App(): React.JSX.Element {
     (x: number, y: number) => {
       if (brushRef.current && spectrogramData && canvasSize.width > 0 && canvasSize.height > 0) {
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const brushWidthSeconds = brushWidth * (60.0 / bpm);
-        const brushWidthUv = brushWidthSeconds / totalDuration;
+        const brushSizeUv = unitsToUv(
+          brushWidth,
+          brushHeight,
+          bpm,
+          totalDuration,
+          analysisParams.bandsPerOctave,
+          spectrogramData.numBands,
+        );
 
-        // Same conversion as in renderer
-        const a4 = 440.0;
-        const f_high = a4 * Math.pow(2.0, brushHeight / 2.0 / 12.0);
-        const f_low = a4 * Math.pow(2.0, -brushHeight / 2.0 / 12.0);
-        const brushHeightHz = f_high - f_low;
-        const brushHeightUv = brushHeightHz / (spectrogramData.sampleRate / 2);
-
-        const brushWidthPx = brushWidthUv * canvasSize.width;
-        const brushHeightPx = brushHeightUv * canvasSize.height;
+        const brushWidthPx = brushSizeUv.x * canvasSize.width;
+        const brushHeightPx = brushSizeUv.y * canvasSize.height;
 
         brushRef.current.style.left = `${x - brushWidthPx / 2}px`;
         brushRef.current.style.top = `${y - brushHeightPx / 2}px`;

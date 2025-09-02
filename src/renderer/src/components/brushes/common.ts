@@ -80,3 +80,23 @@ export const uniforms = {
   brushCenterUv: new Vector2(0.5, 0.5),
   brushSizeUv: new Vector2(0.1, 0.1),
 };
+
+export const unitsToUv = (
+  beats: number,
+  semitones: number,
+  bpm: number,
+  totalDuration: number,
+  bandsPerOctave: number,
+  totalBands: number,
+): Vector2 => {
+  const uv = new Vector2();
+
+  const seconds = beats * (60.0 / bpm);
+  uv.x = seconds / totalDuration;
+
+  const bandsPerSemitone = bandsPerOctave / 12.0;
+  const shiftInBands = semitones * bandsPerSemitone;
+  uv.y = shiftInBands / totalBands;
+
+  return uv;
+};

@@ -81,7 +81,7 @@ export const gridSizeAtom = atomWithStorage("gridSize", 0.25); // in beats
 
 // --- Core Functions ---
 
-const analysisParams = {
+export const analysisParams = {
   bandsPerOctave: 48,
   fmin: 20.0,
 };

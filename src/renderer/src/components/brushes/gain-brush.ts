@@ -2,7 +2,8 @@ import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
 import * as THREE from "three";
 import { code, uniforms, vertexShader } from "./common";
-import { BaseBrush, BrushParameter } from "./base-brush";
+import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
+import { store } from "../../store";
 
 export const gainAmountAtom = atomWithStorage("gainAmount", 1.0);
 
@@ -48,6 +49,7 @@ class GainBrush extends BaseBrush {
         type: "slider",
         atom: gainAmountAtom,
         label: "Gain Amount",
+        propName: "gainAmount",
         min: 0,
         max: 10,
         step: 0.1,
@@ -56,10 +58,9 @@ class GainBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: Record<string, any>) {
-    if (this.material.uniforms.gainAmount) {
-      this.material.uniforms.gainAmount.value = props.gainAmount;
-    }
+  updateUniforms(props: UpdateUniformsProps) {
+    super.updateUniforms(props);
+    this.material.uniforms.gainAmount.value = store.get(gainAmountAtom);
   }
 }
 

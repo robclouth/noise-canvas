@@ -1,0 +1,1 @@
+- Load the current sample and take the tempo from the arguments passed upon opening the application.
