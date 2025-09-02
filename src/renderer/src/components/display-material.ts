@@ -65,7 +65,7 @@ void main() {
     float lineThicknessUv = fwidth(vUv.x);
 
     if (line < lineThicknessUv) {
-        color = mix(color, vec3(0.4), 0.7);
+        color = mix(color, vec3(1.0), 0.2);
     }
 
     gl_FragColor = vec4(color, 1.0);

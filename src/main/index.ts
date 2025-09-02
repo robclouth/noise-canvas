@@ -14,7 +14,13 @@ let pendingPath: string | null = null;
 
 app.on("open-file", (event, path) => {
   event.preventDefault();
-  pendingPath = path;
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+    mainWindow.webContents.send("open-file", path);
+  } else {
+    pendingPath = path;
+  }
 });
 
 const fileArgIndex = app.isPackaged ? 1 : 2;
@@ -47,15 +53,6 @@ if (!gotTheLock) {
     }
   });
 }
-
-app.on("open-file", (event, path) => {
-  event.preventDefault();
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
-    mainWindow.webContents.send("open-file", path);
-  }
-});
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -107,7 +104,6 @@ app.whenReady().then(() => {
     registerAudioIpcHandlers(mainWindow);
 
     mainWindow.webContents.on("did-finish-load", () => {
-      mainWindow?.webContents.send("debug-arguments", process.argv);
       if (pendingPath) {
         mainWindow?.webContents.send("open-file", pendingPath);
         pendingPath = null;
