@@ -16,6 +16,7 @@ export interface BrushParameter {
   max: number;
   step: number;
   formatValue: (value: number) => string;
+  isLog?: boolean;
 }
 
 export abstract class BaseBrush {
