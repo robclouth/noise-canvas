@@ -316,7 +316,7 @@ function App(): React.JSX.Element {
                 </Canvas>
                 <div
                   ref={brushRef}
-                  className="absolute border border-white pointer-events-none"
+                  className="absolute border border-white pointer-events-none opacity-80"
                   style={{ display: "none" }}
                 />
                 <div
