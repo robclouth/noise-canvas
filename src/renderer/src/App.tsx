@@ -27,7 +27,7 @@ import {
   runAnalysis,
   spectrogramDataAtom,
 } from "./store";
-import { playAudio, stopAudio } from "./audio-manager";
+import { playbackTimeAtom, playAudio, stopAudio } from "./audio-manager";
 import { BrushType, brushes } from "./components/brushes";
 import { BrushParameter } from "./components/brushes/base-brush";
 
@@ -50,6 +50,22 @@ const ParameterControl = ({ parameter }: { parameter: BrushParameter }) => {
   );
 };
 
+const formatTime = (seconds: number): string => {
+  const h = Math.floor(seconds / 3600)
+    .toString()
+    .padStart(2, "0");
+  const m = Math.floor((seconds % 3600) / 60)
+    .toString()
+    .padStart(2, "0");
+  const s = Math.floor(seconds % 60)
+    .toString()
+    .padStart(2, "0");
+  const ms = Math.floor((seconds % 1) * 1000)
+    .toString()
+    .padStart(3, "0");
+  return `${h}:${m}:${s}:${ms}`;
+};
+
 const testFilePath = "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas/input/voice.wav";
 
 function App(): React.JSX.Element {
@@ -59,9 +75,11 @@ function App(): React.JSX.Element {
   const [isPlaying, setIsPlaying] = useAtom(isPlayingAtom);
   const [normalize, setNormalize] = useAtom(normalizeAtom);
   const spectrogramData = useAtomValue(spectrogramDataAtom);
+  const playbackTime = useAtomValue(playbackTimeAtom);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const brushRef = useRef<HTMLDivElement>(null);
+  const playbackLineRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     runAnalysis(testFilePath);
@@ -77,7 +95,6 @@ function App(): React.JSX.Element {
   const handleTogglePlay = async (): Promise<void> => {
     if (isPlaying) {
       stopAudio();
-      setIsPlaying(false);
     } else {
       await rendererRef.current?.triggerSynthesis();
       await playAudio();
@@ -151,6 +168,19 @@ function App(): React.JSX.Element {
       resizeObserver.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    if (playbackLineRef.current && spectrogramData && canvasSize.width > 0) {
+      if (isPlaying) {
+        playbackLineRef.current.style.display = "block";
+        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+        const left = (playbackTime / totalDuration) * canvasSize.width;
+        playbackLineRef.current.style.left = `${left}px`;
+      } else {
+        playbackLineRef.current.style.display = "none";
+      }
+    }
+  }, [playbackTime, isPlaying, spectrogramData, canvasSize]);
 
   return (
     <div className="h-screen w-screen bg-background text-foreground flex flex-col">
@@ -286,13 +316,24 @@ function App(): React.JSX.Element {
                   className="absolute border border-white pointer-events-none"
                   style={{ display: "none" }}
                 />
+                <div
+                  ref={playbackLineRef}
+                  className="absolute top-0 w-px bg-white h-full pointer-events-none"
+                  style={{ display: "none" }}
+                />
               </div>
             </ResizablePanel>
             <ResizableHandle />
-            <ResizablePanel defaultSize={20} maxSize={50} minSize={10} className="flex items-center justify-center p-4">
+            <ResizablePanel
+              defaultSize={20}
+              maxSize={50}
+              minSize={10}
+              className="flex items-center justify-center p-4 gap-4"
+            >
               <Button onClick={handleTogglePlay}>
                 {isPlaying ? <SquareIcon className="h-6 w-6" /> : <PlayIcon className="h-6 w-6" />}
               </Button>
+              <div className="font-mono text-lg">{formatTime(playbackTime)}</div>
             </ResizablePanel>
           </ResizablePanelGroup>
         </ResizablePanel>
