@@ -4,8 +4,8 @@ import * as THREE from "three";
 import { code, uniforms, vertexShader } from "./common";
 import { BaseBrush, BrushParameter } from "./base-brush";
 
-export const blurXAtom = atomWithStorage("blurX", 0.01); // in seconds
-export const blurYAtom = atomWithStorage("blurY", 100); // in Hz
+export const blurXAtom = atomWithStorage("blurX", 0.0625); // in beats
+export const blurYAtom = atomWithStorage("blurY", 1); // in semitones
 
 const BlurMaterial = shaderMaterial(
   {
@@ -67,28 +67,38 @@ class BlurBrush extends BaseBrush {
         type: "slider",
         atom: blurXAtom,
         label: "Blur X",
-        min: 0,
-        max: 0.1,
-        step: 0.001,
-        formatValue: (value) => `${value.toFixed(3)}s`,
+        min: -6,
+        max: 0,
+        step: 1,
+        formatValue: (value) => `${value < 1 ? `1/${1 / value}` : value} beats`,
+        isLog: true,
       },
       {
         type: "slider",
         atom: blurYAtom,
         label: "Blur Y",
         min: 0,
-        max: 1000,
-        step: 10,
-        formatValue: (value) => `${value.toFixed(0)} Hz`,
+        max: 24,
+        step: 1,
+        formatValue: (value) => `${value.toFixed(0)} semitones`,
       },
     ];
   }
 
   updateUniforms(props: Record<string, any>): void {
-    const { spectrogramData, blurX, blurY } = props;
+    const { spectrogramData, blurX, blurY, bpm } = props;
+
+    // Convert beats to seconds
+    const blurXSeconds = blurX * (60.0 / bpm);
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-    const blurXUv = blurX / totalDuration;
-    const blurYUv = blurY / (spectrogramData.sampleRate / 2);
+    const blurXUv = blurXSeconds / totalDuration;
+
+    // Convert semitones to a frequency span in Hz
+    const a4 = 440.0;
+    const f_high = a4 * Math.pow(2.0, blurY / 2.0 / 12.0);
+    const f_low = a4 * Math.pow(2.0, -blurY / 2.0 / 12.0);
+    const blurYHz = f_high - f_low;
+    const blurYUv = blurYHz / (spectrogramData.sampleRate / 2);
 
     if (this.material.uniforms.blurSizeUv) {
       this.material.uniforms.blurSizeUv.value.set(blurXUv, blurYUv);

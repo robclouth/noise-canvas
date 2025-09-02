@@ -66,13 +66,18 @@ const defaultBrush = Object.keys(brushes)[0] as BrushType;
 export const brushTypeAtom = atomWithStorage<BrushType>("brushType", defaultBrush);
 
 // Brush dimensions
-export const brushWidthAtom = atomWithStorage("brushWidth", 0.1); // in seconds
-export const brushHeightAtom = atomWithStorage("brushHeight", 1000); // in Hz
+export const brushWidthAtom = atomWithStorage("brushWidth", 0.25); // in beats
+export const brushHeightAtom = atomWithStorage("brushHeight", 1); // in semitones
 
 export const bpmAtom = atomWithStorage("bpm", 120);
 
 // Controls whether the output of the synthesis is normalized
 export const normalizeAtom = atom(true);
+
+// Brush snapping
+export const snapXAtom = atomWithStorage("snapX", true);
+export const snapYAtom = atomWithStorage("snapY", true);
+export const gridSizeAtom = atomWithStorage("gridSize", 0.25); // in beats
 
 // --- Core Functions ---
 

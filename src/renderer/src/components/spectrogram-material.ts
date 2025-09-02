@@ -7,6 +7,7 @@ const DisplayMaterial = shaderMaterial(
     minDB: -70.0,
     maxDB: 0.0,
     bpm: 120.0,
+    gridSize: 0.25,
   },
   /*glsl*/ `
 varying vec2 vUv;
@@ -23,6 +24,7 @@ ${code}
 uniform float minDB;
 uniform float maxDB;
 uniform float bpm;
+uniform float gridSize;
 
 
 varying vec2 vUv;
@@ -53,20 +55,17 @@ void main() {
     }
 
     // Grid lines
-    float beatDuration = 60.0 / bpm;
+    float gridIntervalSeconds = (60.0 / bpm) * gridSize;
     float totalDuration = numFrames / sampleRate;
-    float beatWidthUv = beatDuration / totalDuration;
-    float subBeatWidthUv = beatWidthUv / 4.0;
+    float gridWidthUv = gridIntervalSeconds / totalDuration;
 
-    float beatLine = mod(vUv.x, beatWidthUv);
-    float subBeatLine = mod(vUv.x, subBeatWidthUv);
+    float line = mod(vUv.x, gridWidthUv);
 
-    float lineThicknessUv = 0.0005; 
+    // Use fwidth for consistent 1-pixel line thickness regardless of zoom
+    float lineThicknessUv = fwidth(vUv.x);
 
-    if (beatLine < lineThicknessUv) {
-        color = mix(color, vec3(0.5), 0.7); // Stronger line for beats
-    } else if (subBeatLine < lineThicknessUv) {
-        color = mix(color, vec3(0.2), 0.7); // Fainter line for sub-beats
+    if (line < lineThicknessUv) {
+        color = mix(color, vec3(0.4), 0.7);
     }
 
     gl_FragColor = vec4(color, 1.0);

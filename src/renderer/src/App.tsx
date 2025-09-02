@@ -22,11 +22,14 @@ import {
   brushHeightAtom,
   brushTypeAtom,
   brushWidthAtom,
+  gridSizeAtom,
   isPlayingAtom,
   normalizeAtom,
   openAudioFile,
   runAnalysis,
   spectrogramDataAtom,
+  snapXAtom,
+  snapYAtom,
 } from "./store";
 import { playbackTimeAtom, playAudio, stopAudio } from "./audio-manager";
 import { BrushType, brushes } from "./components/brushes";
@@ -45,8 +48,8 @@ const ParameterControl = ({ parameter }: { parameter: BrushParameter }) => {
         min={parameter.min}
         max={parameter.max}
         step={parameter.step}
-        value={[value]}
-        onValueChange={([val]) => setValue(val)}
+        value={parameter.isLog ? [Math.log2(value)] : [value]}
+        onValueChange={([val]) => setValue(parameter.isLog ? Math.pow(2, val) : val)}
       />
     </div>
   );
@@ -77,6 +80,9 @@ function App(): React.JSX.Element {
   const [isPlaying, setIsPlaying] = useAtom(isPlayingAtom);
   const [normalize, setNormalize] = useAtom(normalizeAtom);
   const [bpm, setBpm] = useAtom(bpmAtom);
+  const [snapX, setSnapX] = useAtom(snapXAtom);
+  const [snapY, setSnapY] = useAtom(snapYAtom);
+  const [gridSize, setGridSize] = useAtom(gridSizeAtom);
   const spectrogramData = useAtomValue(spectrogramDataAtom);
   const playbackTime = useAtomValue(playbackTimeAtom);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
@@ -105,12 +111,57 @@ function App(): React.JSX.Element {
     }
   };
 
+  const applySnapping = (x: number, y: number): [number, number] => {
+    if (!spectrogramData) {
+      return [x, y];
+    }
+
+    let snappedX = x;
+    let snappedY = y;
+
+    // Snap X to the nearest grid line
+    if (snapX) {
+      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+      const gridIntervalSeconds = (60 / bpm) * gridSize;
+      const currentTime = x * totalDuration; // This is the center of the brush in seconds
+
+      const brushWidthSeconds = brushWidth * (60.0 / bpm);
+      const startTime = currentTime - brushWidthSeconds / 2.0;
+
+      const snappedStartTime = Math.round(startTime / gridIntervalSeconds) * gridIntervalSeconds;
+      const snappedCenterTime = snappedStartTime + brushWidthSeconds / 2.0;
+
+      snappedX = snappedCenterTime / totalDuration;
+    }
+
+    // Snap Y to the nearest MIDI note
+    if (snapY) {
+      const maxFreq = spectrogramData.sampleRate / 2;
+      // The y-coordinate is inverted (0 is top, 1 is bottom)
+      const currentFreq = (1 - y) * maxFreq;
+
+      if (currentFreq > 0) {
+        // Convert frequency to MIDI note, snap, then convert back
+        const midiNote = 69 + 12 * Math.log2(currentFreq / 440);
+        const snappedMidiNote = Math.round(midiNote);
+        const snappedFreq = 440 * Math.pow(2, (snappedMidiNote - 69) / 12);
+        snappedY = 1 - snappedFreq / maxFreq;
+      }
+    }
+
+    return [snappedX, snappedY];
+  };
+
   const handleCanvasClick: MouseEventHandler<HTMLDivElement> = (event) => {
     if (rendererRef.current) {
       const rect = event.currentTarget.getBoundingClientRect();
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
-      rendererRef.current.update(x / event.currentTarget.clientWidth, y / event.currentTarget.clientHeight);
+      const [snappedX, snappedY] = applySnapping(
+        x / event.currentTarget.clientWidth,
+        y / event.currentTarget.clientHeight,
+      );
+      rendererRef.current.update(snappedX, snappedY);
     }
   };
 
@@ -118,8 +169,15 @@ function App(): React.JSX.Element {
     (x: number, y: number) => {
       if (brushRef.current && spectrogramData && canvasSize.width > 0 && canvasSize.height > 0) {
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const brushWidthUv = brushWidth / totalDuration;
-        const brushHeightUv = brushHeight / (spectrogramData.sampleRate / 2);
+        const brushWidthSeconds = brushWidth * (60.0 / bpm);
+        const brushWidthUv = brushWidthSeconds / totalDuration;
+
+        // Same conversion as in renderer
+        const a4 = 440.0;
+        const f_high = a4 * Math.pow(2.0, brushHeight / 2.0 / 12.0);
+        const f_low = a4 * Math.pow(2.0, -brushHeight / 2.0 / 12.0);
+        const brushHeightHz = f_high - f_low;
+        const brushHeightUv = brushHeightHz / (spectrogramData.sampleRate / 2);
 
         const brushWidthPx = brushWidthUv * canvasSize.width;
         const brushHeightPx = brushHeightUv * canvasSize.height;
@@ -130,7 +188,7 @@ function App(): React.JSX.Element {
         brushRef.current.style.height = `${brushHeightPx}px`;
       }
     },
-    [spectrogramData, brushWidth, brushHeight, canvasSize],
+    [spectrogramData, brushWidth, brushHeight, canvasSize, bpm],
   );
 
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
@@ -138,10 +196,17 @@ function App(): React.JSX.Element {
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
 
+    const [snappedX, snappedY] = applySnapping(
+      x / event.currentTarget.clientWidth,
+      y / event.currentTarget.clientHeight,
+    );
+    const snappedPxX = snappedX * rect.width;
+    const snappedPxY = snappedY * rect.height;
+
     if (rendererRef.current && event.buttons === 1) {
-      rendererRef.current.update(x / event.currentTarget.clientWidth, y / event.currentTarget.clientHeight);
+      rendererRef.current.update(snappedX, snappedY);
     }
-    updateBrushPosition(x, y);
+    updateBrushPosition(snappedPxX, snappedPxY);
   };
 
   const handleMouseEnter = () => {
@@ -252,26 +317,26 @@ function App(): React.JSX.Element {
         <ResizablePanel className="max-w-64 min-w-64 p-2 flex flex-col gap-4 items-stretch">
           <div className="flex flex-col gap-2">
             <label htmlFor="brush-width" className="text-sm font-medium">
-              Brush Width: {brushWidth.toFixed(2)}s
+              Brush Width: {brushWidth < 1 ? `1/${1 / brushWidth}` : brushWidth} beats
             </label>
             <Slider
               id="brush-width"
-              min={0.01}
+              min={-4}
               max={2}
-              step={0.01}
-              value={[brushWidth]}
-              onValueChange={([val]) => setBrushWidth(val)}
+              step={1}
+              value={[Math.log2(brushWidth)]}
+              onValueChange={([val]) => setBrushWidth(Math.pow(2, val))}
             />
           </div>
           <div className="flex flex-col gap-2">
             <label htmlFor="brush-height" className="text-sm font-medium">
-              Brush Height: {brushHeight.toFixed(0)} Hz
+              Brush Height: {brushHeight} semitones
             </label>
             <Slider
               id="brush-height"
-              min={10}
-              max={20000}
-              step={10}
+              min={1}
+              max={48}
+              step={1}
               value={[brushHeight]}
               onValueChange={([val]) => setBrushHeight(val)}
             />
@@ -281,6 +346,31 @@ function App(): React.JSX.Element {
               Normalize output
             </label>
             <Switch id="normalize-switch" checked={normalize} onCheckedChange={setNormalize} />
+          </div>
+          <div className="flex items-center justify-between">
+            <label htmlFor="snap-x-switch" className="text-sm font-medium">
+              Snap Time
+            </label>
+            <Switch id="snap-x-switch" checked={snapX} onCheckedChange={setSnapX} />
+          </div>
+          <div className="flex items-center justify-between">
+            <label htmlFor="snap-y-switch" className="text-sm font-medium">
+              Snap Pitch
+            </label>
+            <Switch id="snap-y-switch" checked={snapY} onCheckedChange={setSnapY} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="grid-size-slider" className="text-sm font-medium">
+              Grid Size: {gridSize >= 1 ? `${gridSize} beats` : `1/${1 / gridSize}`}
+            </label>
+            <Slider
+              id="grid-size-slider"
+              min={-6}
+              max={2}
+              step={1}
+              value={[Math.log2(gridSize)]}
+              onValueChange={([val]) => setGridSize(Math.pow(2, val))}
+            />
           </div>
           <Select value={brushType} onValueChange={(value) => setBrushType(value as BrushType)}>
             <SelectTrigger>

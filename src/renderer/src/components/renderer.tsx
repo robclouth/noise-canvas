@@ -2,7 +2,15 @@ import { useThree } from "@react-three/fiber";
 import { useAtomValue } from "jotai";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { bpmAtom, brushHeightAtom, brushTypeAtom, brushWidthAtom, runSynthesis, spectrogramDataAtom } from "../store";
+import {
+  bpmAtom,
+  brushHeightAtom,
+  brushTypeAtom,
+  brushWidthAtom,
+  gridSizeAtom,
+  runSynthesis,
+  spectrogramDataAtom,
+} from "../store";
 import { brushes } from "./brushes";
 import { blurXAtom, blurYAtom } from "./brushes/blur-brush";
 import { gainAmountAtom } from "./brushes/gain-brush";
@@ -23,6 +31,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
   const blurX = useAtomValue(blurXAtom);
   const blurY = useAtomValue(blurYAtom);
   const bpm = useAtomValue(bpmAtom);
+  const gridSize = useAtomValue(gridSizeAtom);
   const { gl, scene, camera, invalidate } = useThree();
 
   const mesh = useRef<THREE.Mesh>(null);
@@ -61,11 +70,13 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
       displayMaterial.uniforms.numChannels.value = spectrogramData.numChannels;
       displayMaterial.uniforms.packedTextureSize.value = spectrogramData.packedTextureSize;
       displayMaterial.uniforms.bpm.value = bpm;
+      displayMaterial.uniforms.gridSize.value = gridSize;
+      displayMaterial.uniforms.sampleRate.value = spectrogramData.sampleRate;
 
       pingPong.current = 0;
       invalidate();
     }
-  }, [spectrogramData, camera, fbo1, gl, invalidate, scene, bpm]);
+  }, [spectrogramData, camera, fbo1, gl, invalidate, scene, bpm, gridSize]);
 
   const update = (x: number, y: number) => {
     if (!spectrogramData || !mesh.current || !fbo1 || !fbo2) return;
@@ -73,10 +84,19 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
     const source = pingPong.current === 0 ? fbo1 : fbo2;
     const destination = pingPong.current === 0 ? fbo2 : fbo1;
 
-    // Convert brush size from seconds/Hz to UV dimensions
+    // Convert brush size from beats/semitones to seconds/Hz, then to UV dimensions
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-    const brushWidthUv = brushWidth / totalDuration;
-    const brushHeightUv = brushHeight / (spectrogramData.sampleRate / 2);
+    const brushWidthSeconds = brushWidth * (60.0 / bpm);
+    const brushWidthUv = brushWidthSeconds / totalDuration;
+
+    // Convert semitones to a frequency span in Hz.
+    // This is a musically-aware approximation that calculates the Hz span of an interval
+    // centered around A4 (440Hz).
+    const a4 = 440.0;
+    const f_high = a4 * Math.pow(2.0, brushHeight / 2.0 / 12.0);
+    const f_low = a4 * Math.pow(2.0, -brushHeight / 2.0 / 12.0);
+    const brushHeightHz = f_high - f_low;
+    const brushHeightUv = brushHeightHz / (spectrogramData.sampleRate / 2);
 
     const brush = brushes[brushType];
     mesh.current.material = brush.material;
@@ -98,6 +118,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
       blurX,
       blurY,
       spectrogramData,
+      bpm,
     });
 
     gl.setRenderTarget(destination);
