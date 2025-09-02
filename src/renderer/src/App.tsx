@@ -372,22 +372,6 @@ function App(): React.JSX.Element {
               onValueChange={([val]) => setGridSize(Math.pow(2, val))}
             />
           </div>
-          <Select value={brushType} onValueChange={(value) => setBrushType(value as BrushType)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Brush" />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.keys(brushes).map((key) => (
-                <SelectItem key={key} value={key}>
-                  {key.charAt(0).toUpperCase() + key.slice(1)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {brushes[brushType].parameters.map((param) => (
-            <ParameterControl key={param.label} parameter={param} />
-          ))}
         </ResizablePanel>
         <ResizableHandle />
         <ResizablePanel className="flex">
@@ -418,8 +402,8 @@ function App(): React.JSX.Element {
             </ResizablePanel>
             <ResizableHandle />
             <ResizablePanel
-              defaultSize={20}
-              maxSize={50}
+              defaultSize={10}
+              maxSize={10}
               minSize={10}
               className="flex items-center justify-center p-4 gap-4"
             >
@@ -430,6 +414,25 @@ function App(): React.JSX.Element {
               <div className="font-mono text-lg">{formatTime(playbackTime)}</div>
             </ResizablePanel>
           </ResizablePanelGroup>
+        </ResizablePanel>
+        <ResizableHandle />
+        <ResizablePanel className="max-w-64 min-w-64 p-2 flex flex-col gap-4 items-stretch">
+          <Select value={brushType} onValueChange={(value) => setBrushType(value as BrushType)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Brush" />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.keys(brushes).map((key) => (
+                <SelectItem key={key} value={key}>
+                  {key.charAt(0).toUpperCase() + key.slice(1)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {brushes[brushType].parameters.map((param) => (
+            <ParameterControl key={param.label} parameter={param} />
+          ))}
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>
