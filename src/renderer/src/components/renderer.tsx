@@ -2,10 +2,20 @@ import { useThree } from "@react-three/fiber";
 import { useAtomValue } from "jotai";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { brushHeightAtom, brushWidthAtom, runSynthesis, spectrogramDataAtom } from "../store";
-import { DisplayMaterial } from "./spectrogram-material";
-import { GainMaterial } from "./gain-material";
+import {
+  blurXAtom,
+  blurYAtom,
+  brushHeightAtom,
+  brushTypeAtom,
+  brushWidthAtom,
+  gainAmountAtom,
+  runSynthesis,
+  spectrogramDataAtom,
+} from "../store";
+import { BlurMaterial } from "./blur-material";
 import { CopyMaterial } from "./copy-material";
+import { GainMaterial } from "./gain-material";
+import { DisplayMaterial } from "./spectrogram-material";
 
 export interface RendererHandle {
   update: (x: number, y: number) => void;
@@ -16,6 +26,10 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
   const spectrogramData = useAtomValue(spectrogramDataAtom);
   const brushWidth = useAtomValue(brushWidthAtom);
   const brushHeight = useAtomValue(brushHeightAtom);
+  const brushType = useAtomValue(brushTypeAtom);
+  const gainAmount = useAtomValue(gainAmountAtom);
+  const blurX = useAtomValue(blurXAtom);
+  const blurY = useAtomValue(blurYAtom);
   const { gl, scene, camera, invalidate } = useThree();
 
   const mesh = useRef<THREE.Mesh>(null);
@@ -36,11 +50,12 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
 
   const pingPong = useRef(0);
 
-  const { gainMaterial, copyMaterial, displayMaterial } = useMemo(() => {
+  const { gainMaterial, blurMaterial, copyMaterial, displayMaterial } = useMemo(() => {
     const gainMaterial = new GainMaterial();
+    const blurMaterial = new BlurMaterial();
     const copyMaterial = new CopyMaterial();
     const displayMaterial = new DisplayMaterial();
-    return { gainMaterial, copyMaterial, displayMaterial };
+    return { gainMaterial, blurMaterial, copyMaterial, displayMaterial };
   }, []);
 
   useEffect(() => {
@@ -77,17 +92,34 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
     const brushWidthUv = brushWidth / totalDuration;
     const brushHeightUv = brushHeight / (spectrogramData.sampleRate / 2);
 
-    mesh.current.material = gainMaterial;
-    gainMaterial.uniforms.packedDataTex.value = source.texture;
-    gainMaterial.uniforms.inverseMapTex.value = spectrogramData.inverseMapTex;
-    gainMaterial.uniforms.metadataTex.value = spectrogramData.metadataTex;
-    gainMaterial.uniforms.numFrames.value = spectrogramData.numFrames;
-    gainMaterial.uniforms.numBands.value = spectrogramData.numBands;
-    gainMaterial.uniforms.numChannels.value = spectrogramData.numChannels;
-    gainMaterial.uniforms.packedTextureSize.value = spectrogramData.packedTextureSize;
-    gainMaterial.uniforms.sampleRate.value = spectrogramData.sampleRate;
-    gainMaterial.uniforms.brushCenterUv.value.set(x, 1 - y);
-    gainMaterial.uniforms.brushSizeUv.value.set(brushWidthUv, brushHeightUv);
+    let material;
+    if (brushType === "gain") {
+      material = gainMaterial;
+    } else {
+      material = blurMaterial;
+    }
+
+    mesh.current.material = material;
+    const uniforms = material.uniforms;
+
+    uniforms.packedDataTex.value = source.texture;
+    uniforms.inverseMapTex.value = spectrogramData.inverseMapTex;
+    uniforms.metadataTex.value = spectrogramData.metadataTex;
+    uniforms.numFrames.value = spectrogramData.numFrames;
+    uniforms.numBands.value = spectrogramData.numBands;
+    uniforms.numChannels.value = spectrogramData.numChannels;
+    uniforms.packedTextureSize.value = spectrogramData.packedTextureSize;
+    uniforms.sampleRate.value = spectrogramData.sampleRate;
+    uniforms.brushCenterUv.value.set(x, 1 - y);
+    uniforms.brushSizeUv.value.set(brushWidthUv, brushHeightUv);
+
+    if (brushType === "gain") {
+      uniforms.gainAmount.value = gainAmount;
+    } else if (brushType === "blur") {
+      const blurXUv = blurX / totalDuration;
+      const blurYUv = blurY / (spectrogramData.sampleRate / 2);
+      uniforms.blurSizeUv.value.set(blurXUv, blurYUv);
+    }
 
     gl.setRenderTarget(destination);
     gl.render(scene, camera);

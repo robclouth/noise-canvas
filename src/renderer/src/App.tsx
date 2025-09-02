@@ -18,8 +18,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Slider } from "./components/ui/slider";
 import { Switch } from "./components/ui/switch";
 import {
+  blurXAtom,
+  blurYAtom,
   brushHeightAtom,
+  brushTypeAtom,
+  BrushType,
   brushWidthAtom,
+  gainAmountAtom,
   isPlayingAtom,
   normalizeAtom,
   openAudioFile,
@@ -33,6 +38,10 @@ const testFilePath = "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas/inp
 function App(): React.JSX.Element {
   const [brushWidth, setBrushWidth] = useAtom(brushWidthAtom);
   const [brushHeight, setBrushHeight] = useAtom(brushHeightAtom);
+  const [brushType, setBrushType] = useAtom(brushTypeAtom);
+  const [gainAmount, setGainAmount] = useAtom(gainAmountAtom);
+  const [blurX, setBlurX] = useAtom(blurXAtom);
+  const [blurY, setBlurY] = useAtom(blurYAtom);
   const [isPlaying, setIsPlaying] = useAtom(isPlayingAtom);
   const [normalize, setNormalize] = useAtom(normalizeAtom);
   const spectrogramData = useAtomValue(spectrogramDataAtom);
@@ -226,14 +235,62 @@ function App(): React.JSX.Element {
             </label>
             <Switch id="normalize-switch" checked={normalize} onCheckedChange={setNormalize} />
           </div>
-          <Select>
+          <Select value={brushType} onValueChange={(value) => setBrushType(value as BrushType)}>
             <SelectTrigger>
               <SelectValue placeholder="Brush" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="gain">Gain</SelectItem>
+              <SelectItem value="blur">Blur</SelectItem>
             </SelectContent>
           </Select>
+
+          {brushType === "gain" && (
+            <div className="flex flex-col gap-2">
+              <label htmlFor="gain-amount" className="text-sm font-medium">
+                Gain Amount: {gainAmount.toFixed(2)}
+              </label>
+              <Slider
+                id="gain-amount"
+                min={0}
+                max={10}
+                step={0.1}
+                value={[gainAmount]}
+                onValueChange={([val]) => setGainAmount(val)}
+              />
+            </div>
+          )}
+
+          {brushType === "blur" && (
+            <>
+              <div className="flex flex-col gap-2">
+                <label htmlFor="blur-x" className="text-sm font-medium">
+                  Blur X: {blurX.toFixed(3)}s
+                </label>
+                <Slider
+                  id="blur-x"
+                  min={0}
+                  max={0.1}
+                  step={0.001}
+                  value={[blurX]}
+                  onValueChange={([val]) => setBlurX(val)}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <label htmlFor="blur-y" className="text-sm font-medium">
+                  Blur Y: {blurY.toFixed(0)} Hz
+                </label>
+                <Slider
+                  id="blur-y"
+                  min={0}
+                  max={1000}
+                  step={10}
+                  value={[blurY]}
+                  onValueChange={([val]) => setBlurY(val)}
+                />
+              </div>
+            </>
+          )}
         </ResizablePanel>
         <ResizableHandle />
         <ResizablePanel className="flex">

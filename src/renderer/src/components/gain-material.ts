@@ -4,6 +4,7 @@ import { code, uniforms } from "./common";
 export const GainMaterial = shaderMaterial(
   {
     ...uniforms,
+    gainAmount: 1.0,
   },
   /*glsl*/ `
     varying vec2 vUv;
@@ -16,6 +17,8 @@ export const GainMaterial = shaderMaterial(
     precision highp float;
     varying vec2 vUv;
 
+    uniform float gainAmount;
+
     ${code}
 
     void main() {
@@ -26,7 +29,7 @@ export const GainMaterial = shaderMaterial(
         if (isInBrush(unpackedUv)) {
             // Apply gain to the complex numbers (real and imaginary parts)
             // For mono, this affects .rg. For stereo, it affects all four channels.
-            texel *= 2.0;
+            texel *= gainAmount;
         }
 
         gl_FragColor = texel;

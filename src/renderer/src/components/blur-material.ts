@@ -1,0 +1,57 @@
+import { shaderMaterial } from "@react-three/drei";
+import * as THREE from "three";
+import { code, uniforms } from "./common";
+
+export const BlurMaterial = shaderMaterial(
+  {
+    ...uniforms,
+    blurSizeUv: new THREE.Vector2(0.01, 0.01),
+  },
+  /*glsl*/ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = vec4(position, 1.0);
+    }
+  `,
+  /*glsl*/ `
+    precision highp float;
+    varying vec2 vUv;
+
+    uniform vec2 blurSizeUv;
+
+    ${code}
+
+    void main() {
+        vec2 unpackedUv = getUnpackedUvFromPackedUv(vUv);
+        vec4 originalTexel = texture2D(packedDataTex, vUv);
+
+        if (isInBrush(unpackedUv)) {
+            vec4 blurredTexel = vec4(0.0);
+            int samples = 0;
+            // Simple box blur - might be slow on some hardware
+            for (int x = -2; x <= 2; x++) {
+                for (int y = -2; y <= 2; y++) {
+                    vec2 offset = vec2(float(x), float(y)) * blurSizeUv;
+                    vec2 sampleUv = vUv + offset;
+                    
+                    // We need to check if the sampled UV is still within the brush
+                    // to avoid bleeding the blur outside the brush area.
+                    vec2 unpackedSampleUv = getUnpackedUvFromPackedUv(sampleUv);
+                    if (isInBrush(unpackedSampleUv)) {
+                        blurredTexel += texture2D(packedDataTex, sampleUv);
+                        samples++;
+                    }
+                }
+            }
+            if (samples > 0) {
+              gl_FragColor = blurredTexel / float(samples);
+            } else {
+              gl_FragColor = originalTexel;
+            }
+        } else {
+            gl_FragColor = originalTexel;
+        }
+    }
+  `,
+);
