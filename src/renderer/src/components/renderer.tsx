@@ -2,7 +2,7 @@ import { useThree } from "@react-three/fiber";
 import { useAtomValue } from "jotai";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { brushHeightAtom, brushTypeAtom, brushWidthAtom, runSynthesis, spectrogramDataAtom } from "../store";
+import { bpmAtom, brushHeightAtom, brushTypeAtom, brushWidthAtom, runSynthesis, spectrogramDataAtom } from "../store";
 import { brushes } from "./brushes";
 import { blurXAtom, blurYAtom } from "./brushes/blur-brush";
 import { gainAmountAtom } from "./brushes/gain-brush";
@@ -22,6 +22,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
   const gainAmount = useAtomValue(gainAmountAtom);
   const blurX = useAtomValue(blurXAtom);
   const blurY = useAtomValue(blurYAtom);
+  const bpm = useAtomValue(bpmAtom);
   const { gl, scene, camera, invalidate } = useThree();
 
   const mesh = useRef<THREE.Mesh>(null);
@@ -59,11 +60,12 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
       displayMaterial.uniforms.numBands.value = spectrogramData.numBands;
       displayMaterial.uniforms.numChannels.value = spectrogramData.numChannels;
       displayMaterial.uniforms.packedTextureSize.value = spectrogramData.packedTextureSize;
+      displayMaterial.uniforms.bpm.value = bpm;
 
       pingPong.current = 0;
       invalidate();
     }
-  }, [spectrogramData, camera, fbo1, gl, invalidate, scene]);
+  }, [spectrogramData, camera, fbo1, gl, invalidate, scene, bpm]);
 
   const update = (x: number, y: number) => {
     if (!spectrogramData || !mesh.current || !fbo1 || !fbo2) return;

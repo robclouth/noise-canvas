@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Slider } from "./components/ui/slider";
 import { Switch } from "./components/ui/switch";
 import {
+  bpmAtom,
   brushHeightAtom,
   brushTypeAtom,
   brushWidthAtom,
@@ -30,6 +31,7 @@ import {
 import { playbackTimeAtom, playAudio, stopAudio } from "./audio-manager";
 import { BrushType, brushes } from "./components/brushes";
 import { BrushParameter } from "./components/brushes/base-brush";
+import { Input } from "./components/ui/input";
 
 const ParameterControl = ({ parameter }: { parameter: BrushParameter }) => {
   const [value, setValue] = useAtom(parameter.atom);
@@ -74,6 +76,7 @@ function App(): React.JSX.Element {
   const [brushType, setBrushType] = useAtom(brushTypeAtom);
   const [isPlaying, setIsPlaying] = useAtom(isPlayingAtom);
   const [normalize, setNormalize] = useAtom(normalizeAtom);
+  const [bpm, setBpm] = useAtom(bpmAtom);
   const spectrogramData = useAtomValue(spectrogramDataAtom);
   const playbackTime = useAtomValue(playbackTimeAtom);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
@@ -330,6 +333,7 @@ function App(): React.JSX.Element {
               minSize={10}
               className="flex items-center justify-center p-4 gap-4"
             >
+              <Input type="number" className="w-24" value={bpm} onChange={(e) => setBpm(Number(e.target.value))} />
               <Button onClick={handleTogglePlay}>
                 {isPlaying ? <SquareIcon className="h-6 w-6" /> : <PlayIcon className="h-6 w-6" />}
               </Button>

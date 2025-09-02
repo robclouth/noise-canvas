@@ -69,6 +69,8 @@ export const brushTypeAtom = atomWithStorage<BrushType>("brushType", defaultBrus
 export const brushWidthAtom = atomWithStorage("brushWidth", 0.1); // in seconds
 export const brushHeightAtom = atomWithStorage("brushHeight", 1000); // in Hz
 
+export const bpmAtom = atomWithStorage("bpm", 120);
+
 // Controls whether the output of the synthesis is normalized
 export const normalizeAtom = atom(true);
 

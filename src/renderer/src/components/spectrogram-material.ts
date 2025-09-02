@@ -6,6 +6,7 @@ const DisplayMaterial = shaderMaterial(
     ...uniforms,
     minDB: -70.0,
     maxDB: 0.0,
+    bpm: 120.0,
   },
   /*glsl*/ `
 varying vec2 vUv;
@@ -21,6 +22,7 @@ ${code}
 
 uniform float minDB;
 uniform float maxDB;
+uniform float bpm;
 
 
 varying vec2 vUv;
@@ -39,15 +41,35 @@ void main() {
     float leftMag = length(leftComplex);
     float leftDb = magnitudeToDb(leftMag);
     
+    vec3 color;
     if (numChannels == 1) {
-        gl_FragColor = vec4(leftDb, leftDb, leftDb, 1.0);
+        color = vec3(leftDb, leftDb, leftDb);
     } else {
         vec2 rightComplex = packedValue.ba; // B=Real, A=Imag
         float rightMag = length(rightComplex);
         float rightDb = magnitudeToDb(rightMag);
         // Visualize L in Red, R in Blue
-        gl_FragColor = vec4(leftDb, 0.0, rightDb, 1.0);
+        color = vec3(leftDb, 0.0, rightDb);
     }
+
+    // Grid lines
+    float beatDuration = 60.0 / bpm;
+    float totalDuration = numFrames / sampleRate;
+    float beatWidthUv = beatDuration / totalDuration;
+    float subBeatWidthUv = beatWidthUv / 4.0;
+
+    float beatLine = mod(vUv.x, beatWidthUv);
+    float subBeatLine = mod(vUv.x, subBeatWidthUv);
+
+    float lineThicknessUv = 0.0005; 
+
+    if (beatLine < lineThicknessUv) {
+        color = mix(color, vec3(0.5), 0.7); // Stronger line for beats
+    } else if (subBeatLine < lineThicknessUv) {
+        color = mix(color, vec3(0.2), 0.7); // Fainter line for sub-beats
+    }
+
+    gl_FragColor = vec4(color, 1.0);
 }
 `,
 );
