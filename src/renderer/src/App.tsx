@@ -10,7 +10,7 @@ import {
 import { Canvas } from "@react-three/fiber";
 import { useAtom, useAtomValue } from "jotai";
 import { PlayIcon, SquareIcon } from "lucide-react";
-import { MouseEventHandler, useEffect, useRef, useState } from "react";
+import { MouseEventHandler, useCallback, useEffect, useRef, useState } from "react";
 import { Renderer, RendererHandle } from "./components/renderer";
 import { Button } from "./components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
@@ -36,9 +36,9 @@ function App(): React.JSX.Element {
   const [isPlaying, setIsPlaying] = useAtom(isPlayingAtom);
   const [normalize, setNormalize] = useAtom(normalizeAtom);
   const spectrogramData = useAtomValue(spectrogramDataAtom);
-  const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const brushRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     runAnalysis(testFilePath);
@@ -71,26 +71,46 @@ function App(): React.JSX.Element {
     }
   };
 
+  const updateBrushPosition = useCallback(
+    (x: number, y: number) => {
+      if (brushRef.current && spectrogramData && canvasSize.width > 0 && canvasSize.height > 0) {
+        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+        const brushWidthUv = brushWidth / totalDuration;
+        const brushHeightUv = brushHeight / (spectrogramData.sampleRate / 2);
+
+        const brushWidthPx = brushWidthUv * canvasSize.width;
+        const brushHeightPx = brushHeightUv * canvasSize.height;
+
+        brushRef.current.style.left = `${x - brushWidthPx / 2}px`;
+        brushRef.current.style.top = `${y - brushHeightPx / 2}px`;
+        brushRef.current.style.width = `${brushWidthPx}px`;
+        brushRef.current.style.height = `${brushHeightPx}px`;
+      }
+    },
+    [spectrogramData, brushWidth, brushHeight, canvasSize],
+  );
+
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
     if (rendererRef.current && event.buttons === 1) {
-      const rect = event.currentTarget.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
       rendererRef.current.update(x / event.currentTarget.clientWidth, y / event.currentTarget.clientHeight);
     }
-    if (event.currentTarget) {
-      const rect = event.currentTarget.getBoundingClientRect();
-      setMousePosition({ x: event.clientX - rect.left, y: event.clientY - rect.top });
-    }
+    updateBrushPosition(x, y);
   };
 
-  const handleMouseEnter = (event: React.MouseEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    setMousePosition({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+  const handleMouseEnter = () => {
+    if (brushRef.current) {
+      brushRef.current.style.display = "block";
+    }
   };
 
   const handleMouseLeave = () => {
-    setMousePosition(null);
+    if (brushRef.current) {
+      brushRef.current.style.display = "none";
+    }
   };
 
   useEffect(() => {
@@ -108,24 +128,6 @@ function App(): React.JSX.Element {
       resizeObserver.disconnect();
     };
   }, []);
-
-  const brushStyle: React.CSSProperties = {};
-  if (mousePosition && spectrogramData) {
-    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-    const brushWidthUv = brushWidth / totalDuration;
-    const brushHeightUv = brushHeight / (spectrogramData.sampleRate / 2);
-
-    const brushWidthPx = brushWidthUv * canvasSize.width;
-    const brushHeightPx = brushHeightUv * canvasSize.height;
-
-    brushStyle.position = "absolute";
-    brushStyle.border = "1px solid white";
-    brushStyle.pointerEvents = "none";
-    brushStyle.left = `${mousePosition.x - brushWidthPx / 2}px`;
-    brushStyle.top = `${mousePosition.y - brushHeightPx / 2}px`;
-    brushStyle.width = `${brushWidthPx}px`;
-    brushStyle.height = `${brushHeightPx}px`;
-  }
 
   return (
     <div className="h-screen w-screen bg-background text-foreground flex flex-col">
@@ -248,7 +250,11 @@ function App(): React.JSX.Element {
                 <Canvas frameloop="demand">
                   <Renderer ref={rendererRef} />
                 </Canvas>
-                {mousePosition && <div style={brushStyle} />}
+                <div
+                  ref={brushRef}
+                  className="absolute border border-white pointer-events-none"
+                  style={{ display: "none" }}
+                />
               </div>
             </ResizablePanel>
             <ResizableHandle />
