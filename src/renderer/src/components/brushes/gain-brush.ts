@@ -1,18 +1,14 @@
 import { shaderMaterial } from "@react-three/drei";
-import { code, uniforms } from "./common";
+import * as THREE from "three";
+import { code, uniforms, vertexShader } from "./common";
+import { BaseBrush } from "./base-brush";
 
-export const GainMaterial = shaderMaterial(
+const GainMaterial = shaderMaterial(
   {
     ...uniforms,
     gainAmount: 1.0,
   },
-  /*glsl*/ `
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = vec4(position, 1.0);
-    }
-  `,
+  vertexShader,
   /*glsl*/ `
     precision highp float;
     varying vec2 vUv;
@@ -36,3 +32,20 @@ export const GainMaterial = shaderMaterial(
     }
   `,
 );
+
+class GainBrush extends BaseBrush {
+  material: THREE.ShaderMaterial;
+
+  constructor() {
+    super();
+    this.material = new GainMaterial();
+  }
+
+  updateUniforms(props: Record<string, any>) {
+    if (this.material.uniforms.gainAmount) {
+      this.material.uniforms.gainAmount.value = props.gainAmount;
+    }
+  }
+}
+
+export const gainBrush = new GainBrush();

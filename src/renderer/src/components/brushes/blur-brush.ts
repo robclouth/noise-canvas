@@ -1,19 +1,14 @@
 import { shaderMaterial } from "@react-three/drei";
 import * as THREE from "three";
-import { code, uniforms } from "./common";
+import { code, uniforms, vertexShader } from "./common";
+import { BaseBrush } from "./base-brush";
 
-export const BlurMaterial = shaderMaterial(
+const BlurMaterial = shaderMaterial(
   {
     ...uniforms,
     blurSizeUv: new THREE.Vector2(0.01, 0.01),
   },
-  /*glsl*/ `
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = vec4(position, 1.0);
-    }
-  `,
+  vertexShader,
   /*glsl*/ `
     precision highp float;
     varying vec2 vUv;
@@ -55,3 +50,25 @@ export const BlurMaterial = shaderMaterial(
     }
   `,
 );
+
+class BlurBrush extends BaseBrush {
+  material: THREE.ShaderMaterial;
+
+  constructor() {
+    super();
+    this.material = new BlurMaterial();
+  }
+
+  updateUniforms(props: Record<string, any>): void {
+    const { spectrogramData, blurX, blurY } = props;
+    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+    const blurXUv = blurX / totalDuration;
+    const blurYUv = blurY / (spectrogramData.sampleRate / 2);
+
+    if (this.material.uniforms.blurSizeUv) {
+      this.material.uniforms.blurSizeUv.value.set(blurXUv, blurYUv);
+    }
+  }
+}
+
+export const blurBrush = new BlurBrush();

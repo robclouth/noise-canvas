@@ -1,8 +1,9 @@
 import { shaderMaterial } from "@react-three/drei";
+import * as THREE from "three";
 
-export const CopyMaterial = shaderMaterial(
+const CopyMaterial = shaderMaterial(
   {
-    inputTex: null,
+    inputTex: new THREE.Texture(),
   },
   /*glsl*/ `
     varying vec2 vUv;
@@ -21,3 +22,5 @@ export const CopyMaterial = shaderMaterial(
     }
   `,
 );
+
+export const copyMaterial = new CopyMaterial();

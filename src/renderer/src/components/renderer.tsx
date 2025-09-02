@@ -12,10 +12,9 @@ import {
   runSynthesis,
   spectrogramDataAtom,
 } from "../store";
-import { BlurMaterial } from "./blur-material";
-import { CopyMaterial } from "./copy-material";
-import { GainMaterial } from "./gain-material";
-import { DisplayMaterial } from "./spectrogram-material";
+import { brushes } from "./brushes";
+import { copyMaterial } from "./copy-material";
+import { displayMaterial } from "./spectrogram-material";
 
 export interface RendererHandle {
   update: (x: number, y: number) => void;
@@ -50,14 +49,6 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
 
   const pingPong = useRef(0);
 
-  const { gainMaterial, blurMaterial, copyMaterial, displayMaterial } = useMemo(() => {
-    const gainMaterial = new GainMaterial();
-    const blurMaterial = new BlurMaterial();
-    const copyMaterial = new CopyMaterial();
-    const displayMaterial = new DisplayMaterial();
-    return { gainMaterial, blurMaterial, copyMaterial, displayMaterial };
-  }, []);
-
   useEffect(() => {
     if (spectrogramData && mesh.current && fbo1) {
       mesh.current.material = copyMaterial;
@@ -79,7 +70,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
       pingPong.current = 0;
       invalidate();
     }
-  }, [spectrogramData, camera, copyMaterial, displayMaterial, fbo1, gl, invalidate, scene]);
+  }, [spectrogramData, camera, fbo1, gl, invalidate, scene]);
 
   const update = (x: number, y: number) => {
     if (!spectrogramData || !mesh.current || !fbo1 || !fbo2) return;
@@ -92,15 +83,9 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
     const brushWidthUv = brushWidth / totalDuration;
     const brushHeightUv = brushHeight / (spectrogramData.sampleRate / 2);
 
-    let material;
-    if (brushType === "gain") {
-      material = gainMaterial;
-    } else {
-      material = blurMaterial;
-    }
-
-    mesh.current.material = material;
-    const uniforms = material.uniforms;
+    const brush = brushes[brushType];
+    mesh.current.material = brush.material;
+    const uniforms = brush.material.uniforms;
 
     uniforms.packedDataTex.value = source.texture;
     uniforms.inverseMapTex.value = spectrogramData.inverseMapTex;
@@ -113,13 +98,12 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
     uniforms.brushCenterUv.value.set(x, 1 - y);
     uniforms.brushSizeUv.value.set(brushWidthUv, brushHeightUv);
 
-    if (brushType === "gain") {
-      uniforms.gainAmount.value = gainAmount;
-    } else if (brushType === "blur") {
-      const blurXUv = blurX / totalDuration;
-      const blurYUv = blurY / (spectrogramData.sampleRate / 2);
-      uniforms.blurSizeUv.value.set(blurXUv, blurYUv);
-    }
+    brush.updateUniforms({
+      gainAmount,
+      blurX,
+      blurY,
+      spectrogramData,
+    });
 
     gl.setRenderTarget(destination);
     gl.render(scene, camera);
