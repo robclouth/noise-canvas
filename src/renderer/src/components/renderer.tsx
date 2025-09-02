@@ -15,7 +15,7 @@ import { brushes } from "./brushes";
 import { blurXAtom, blurYAtom } from "./brushes/blur-brush";
 import { gainAmountAtom } from "./brushes/gain-brush";
 import { copyMaterial } from "./copy-material";
-import { displayMaterial } from "./spectrogram-material";
+import { displayMaterial } from "./display-material";
 
 export interface RendererHandle {
   update: (x: number, y: number) => void;
