@@ -7,6 +7,66 @@ import { join } from "path";
 import { Writable } from "stream";
 import icon from "../../resources/icon.png?asset";
 
+let mainWindow: BrowserWindow | null = null;
+
+const gotTheLock = app.requestSingleInstanceLock();
+let pendingPath: string | null = null;
+
+// This handles opening a file with the app on macOS when it's not running.
+// The event fires before the 'ready' event.
+app.on("open-file", (event, path) => {
+  event.preventDefault();
+  // On launch, we just save the path. It will be opened when the window is created.
+  pendingPath = path;
+});
+
+// In dev, the first arg is the app path, second is CWD.
+// In prod, the first is the app path.
+const fileArgIndex = app.isPackaged ? 1 : 2;
+const args = process.argv.slice(fileArgIndex);
+for (const arg of args) {
+  // Simple check to filter out flags and take the first non-flag argument as the file path.
+  if (!arg.startsWith("--")) {
+    pendingPath = arg;
+    break;
+  }
+}
+
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, argv) => {
+    // Someone tried to run a second instance, we should focus our window.
+    if (mainWindow) {
+      mainWindow.webContents.send("debug-arguments", argv);
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
+      mainWindow.focus();
+
+      const newFileArgs = argv.slice(fileArgIndex);
+      for (const arg of newFileArgs) {
+        if (!arg.startsWith("--") && mainWindow) {
+          // Send the file path to the renderer process
+          // We'll just send the first valid file path we find
+          mainWindow.webContents.send("open-file", arg);
+          break; // only open one file
+        }
+      }
+    }
+  });
+}
+
+// This handles opening a file with the app on macOS when it's already running.
+app.on("open-file", (event, path) => {
+  event.preventDefault();
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+    mainWindow.webContents.send("open-file", path);
+  }
+});
+
 // Load the native addon
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const gaboratorPath = app.isPackaged
@@ -76,7 +136,7 @@ interface GaboratorParams {
 }
 
 function createWindow(): void {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1200, // Wider for better spectrogram view
     height: 800,
     show: false,
@@ -91,7 +151,7 @@ function createWindow(): void {
   });
 
   mainWindow.on("ready-to-show", () => {
-    mainWindow.show();
+    mainWindow?.show();
   });
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -104,6 +164,7 @@ function createWindow(): void {
     mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+    mainWindow.webContents.openDevTools();
   }
 }
 
@@ -213,6 +274,19 @@ app.whenReady().then(() => {
 
   createWindow();
 
+  if (mainWindow) {
+    mainWindow.webContents.on("did-finish-load", () => {
+      // Send initial arguments for debugging
+      mainWindow?.webContents.send("debug-arguments", process.argv);
+
+      if (pendingPath) {
+        // Send the pending file path to the renderer
+        mainWindow?.webContents.send("open-file", pendingPath);
+        pendingPath = null;
+      }
+    });
+  }
+
   app.on("activate", function () {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
@@ -220,11 +294,6 @@ app.whenReady().then(() => {
   });
 });
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  app.quit();
 });

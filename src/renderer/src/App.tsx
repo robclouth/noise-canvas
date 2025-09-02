@@ -107,8 +107,6 @@ const formatTime = (seconds: number): string => {
   return `${h}:${m}:${s}:${ms}`;
 };
 
-const testFilePath = "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas/input/voice.wav";
-
 function App(): React.JSX.Element {
   const [brushWidth, setBrushWidth] = useAtom(brushWidthAtom);
   const [brushHeight, setBrushHeight] = useAtom(brushHeightAtom);
@@ -129,8 +127,19 @@ function App(): React.JSX.Element {
   const rendererRef = useRef<RendererHandle>(null);
 
   useEffect(() => {
-    runAnalysis(testFilePath);
-    console.log("testFilePath", testFilePath);
+    if (process.env.NODE_ENV === "development") {
+      const testFilePath = "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/voice.wav";
+      runAnalysis(testFilePath);
+    }
+
+    window.api.onOpenFile((path) => {
+      runAnalysis(path);
+    });
+
+    window.api.onDebugArguments((args) => {
+      console.log("%c[DEBUG] Raw Launch Arguments Received:", "color: yellow; font-weight: bold;", args);
+      console.log("%c[DEBUG] Arguments as JSON:", "color: yellow; font-weight: bold;", JSON.stringify(args, null, 2));
+    });
   }, []);
 
   const handleOpenFile = (): void => {
