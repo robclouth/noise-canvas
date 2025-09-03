@@ -133,10 +133,10 @@ export function registerAudioIpcHandlers(window: BrowserWindow) {
     },
   );
 
-  ipcMain.on("dev:load-file", async (_, filePath: string) => {
+  ipcMain.on("load-file", async (_, filePath: string) => {
     const params = {
       bandsPerOctave: 48,
-      fmin: 20.0,
+      fmin: 8.18,
     };
 
     try {

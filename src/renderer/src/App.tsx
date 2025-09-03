@@ -22,6 +22,7 @@ import {
   brushTypeAtom,
   brushWidthAtom,
   gridSizeAtom,
+  gridSizeYAtom,
   isPlayingAtom,
   normalizeAtom,
   snapXAtom,
@@ -29,7 +30,6 @@ import {
   spectrogramDataAtom,
   store,
 } from "./store";
-import { canRedoAtom, canUndoAtom, initUndo, addUndoState, clearUndoHistory } from "./undo";
 
 const SliderControl = ({ parameter }: { parameter: SliderParameter }) => {
   const [value, setValue] = useAtom(parameter.atom);
@@ -110,29 +110,16 @@ function App(): React.JSX.Element {
   const [snapX, setSnapX] = useAtom(snapXAtom);
   const [snapY, setSnapY] = useAtom(snapYAtom);
   const [gridSize, setGridSize] = useAtom(gridSizeAtom);
+  const [gridSizeY, setGridSizeY] = useAtom(gridSizeYAtom);
   const spectrogramData = useAtomValue(spectrogramDataAtom);
   const playbackTime = useAtomValue(playbackTimeAtom);
-  const canUndo = useAtomValue(canUndoAtom);
-  const canRedo = useAtomValue(canRedoAtom);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const brushRef = useRef<HTMLDivElement>(null);
   const playbackLineRef = useRef<HTMLDivElement>(null);
 
   const rendererRef = useRef<RendererHandle>(null);
-
-  useEffect(() => {
-    if (rendererRef.current) {
-      initUndo((data) => rendererRef.current?.setFBOData(data));
-    }
-  }, [rendererRef.current]);
-
-  useEffect(() => {
-    window.electron.ipcRenderer.send("undo-state-changed", {
-      canUndo,
-      canRedo,
-    });
-  }, [canUndo, canRedo]);
+  const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (process.env.NODE_ENV === "development") {
@@ -140,13 +127,13 @@ function App(): React.JSX.Element {
       // We need to ask the main process to do this for us.
       // Note: This requires a path that is valid on the machine running the app.
       window.electron.ipcRenderer.send(
-        "dev:load-file",
-        "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/voice.wav",
+        "load-file",
+        "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/tone.wav",
       );
     }
 
     window.api.onOpenFile((path) => {
-      window.electron.ipcRenderer.send("dev:load-file", path);
+      window.electron.ipcRenderer.send("load-file", path);
     });
 
     window.electron.ipcRenderer.on("analysis-complete", (_, payload: AnalysisPayload) => {
@@ -205,13 +192,19 @@ function App(): React.JSX.Element {
           bandLengths: payload.bandLengths,
         },
       });
-      clearUndoHistory();
+      window.electron.ipcRenderer.send("undo:clear");
     });
 
     window.electron.ipcRenderer.on("analysis-error", (_, message: string) => {
       // You could display this in a more user-friendly way, e.g., a toast notification
       console.error("Analysis Error:", message);
       alert(`An error occurred during analysis: ${message}`);
+    });
+
+    window.electron.ipcRenderer.on("undo:apply-state", (_, data: Buffer) => {
+      rendererRef.current?.setFBOData(
+        new Float32Array(data.buffer, data.byteOffset, data.byteLength / Float32Array.BYTES_PER_ELEMENT),
+      );
     });
   }, []);
 
@@ -225,7 +218,14 @@ function App(): React.JSX.Element {
     }
   };
 
-  const applySnapping = (x: number, y: number): [number, number] => {
+  const getSnappedCoordinates = (event: React.MouseEvent<HTMLDivElement>): [number, number] | null => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      return null;
+    }
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
+
     if (!spectrogramData) {
       return [x, y];
     }
@@ -250,20 +250,27 @@ function App(): React.JSX.Element {
 
     // Snap Y to the nearest MIDI note
     if (snapY) {
-      const maxFreq = spectrogramData.sampleRate / 2;
-      // The y-coordinate is inverted (0 is top, 1 is bottom)
-      const currentFreq = (1 - y) * maxFreq;
-
-      if (currentFreq > 0) {
-        // Convert frequency to MIDI note, snap, then convert back
-        const midiNote = 69 + 12 * Math.log2(currentFreq / 440);
-        const snappedMidiNote = Math.round(midiNote);
-        const snappedFreq = 440 * Math.pow(2, (snappedMidiNote - 69) / 12);
-        snappedY = 1 - snappedFreq / maxFreq;
-      }
+      const bandsPerSemitone = analysisParams.bandsPerOctave / 12;
+      const gridIntervalBands = gridSizeY * bandsPerSemitone;
+      const currentBand = y * spectrogramData.numBands;
+      const snappedBand = Math.round(currentBand / gridIntervalBands) * gridIntervalBands;
+      snappedY = snappedBand / spectrogramData.numBands;
     }
 
     return [snappedX, snappedY];
+  };
+
+  const performBrushStroke = (snappedX: number, snappedY: number, force = false): void => {
+    if (!rendererRef.current) return;
+    if (
+      force ||
+      !lastSnappedPositionRef.current ||
+      lastSnappedPositionRef.current.x !== snappedX ||
+      lastSnappedPositionRef.current.y !== snappedY
+    ) {
+      rendererRef.current.update(snappedX, snappedY);
+      lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
+    }
   };
 
   const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
@@ -273,6 +280,11 @@ function App(): React.JSX.Element {
       if (beforeState) {
         // We'll capture the 'after' state on mouse up
         (event.currentTarget as any)._undoBeforeState = beforeState;
+      }
+
+      const coords = getSnappedCoordinates(event);
+      if (coords) {
+        performBrushStroke(coords[0], coords[1], true);
       }
     }
   };
@@ -284,23 +296,13 @@ function App(): React.JSX.Element {
       if (beforeState) {
         const afterState = rendererRef.current.getFBOData();
         if (afterState) {
-          addUndoState(beforeState, afterState);
+          window.electron.ipcRenderer.send("undo:add-state", {
+            before: Buffer.from(beforeState.buffer),
+            after: Buffer.from(afterState.buffer),
+          });
         }
         delete (event.currentTarget as any)._undoBeforeState;
       }
-    }
-  };
-
-  const handleCanvasClick: MouseEventHandler<HTMLDivElement> = (event) => {
-    if (rendererRef.current) {
-      const rect = event.currentTarget.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      const [snappedX, snappedY] = applySnapping(
-        x / event.currentTarget.clientWidth,
-        y / event.currentTarget.clientHeight,
-      );
-      rendererRef.current.update(snappedX, snappedY);
     }
   };
 
@@ -330,19 +332,16 @@ function App(): React.JSX.Element {
   );
 
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const coords = getSnappedCoordinates(event);
+    if (!coords) return;
+    const [snappedX, snappedY] = coords;
 
-    const [snappedX, snappedY] = applySnapping(
-      x / event.currentTarget.clientWidth,
-      y / event.currentTarget.clientHeight,
-    );
+    const rect = event.currentTarget.getBoundingClientRect();
     const snappedPxX = snappedX * rect.width;
     const snappedPxY = snappedY * rect.height;
 
-    if (rendererRef.current && event.buttons === 1) {
-      rendererRef.current.update(snappedX, snappedY);
+    if (event.buttons === 1) {
+      performBrushStroke(snappedX, snappedY);
     }
     updateBrushPosition(snappedPxX, snappedPxY);
   };
@@ -449,6 +448,19 @@ function App(): React.JSX.Element {
               onValueChange={([val]) => setGridSize(Math.pow(2, val))}
             />
           </div>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="grid-size-y-slider" className="text-sm font-medium">
+              Grid Size (Pitch): {gridSizeY} semitones
+            </label>
+            <Slider
+              id="grid-size-y-slider"
+              min={1}
+              max={24}
+              step={1}
+              value={[gridSizeY]}
+              onValueChange={([val]) => setGridSizeY(val)}
+            />
+          </div>
         </ResizablePanel>
         <ResizableHandle />
         <ResizablePanel className="flex">
@@ -462,7 +474,6 @@ function App(): React.JSX.Element {
                 onMouseLeave={handleMouseLeave}
                 onMouseDown={handleCanvasMouseDown}
                 onMouseUp={handleCanvasMouseUp}
-                onClick={handleCanvasClick}
               >
                 <Canvas frameloop="demand">
                   <Renderer ref={rendererRef} />
