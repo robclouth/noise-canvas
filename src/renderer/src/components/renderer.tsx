@@ -8,11 +8,14 @@ import {
   brushHeightAtom,
   brushTypeAtom,
   brushWidthAtom,
+  featherXAtom,
+  featherYAtom,
   gridSizeAtom,
+  mouseUvAtom,
   runSynthesis,
+  scrollAtom,
   spectrogramDataAtom,
   zoomPowerAtom,
-  scrollAtom,
 } from "../store";
 import { brushes } from "./brushes";
 import { unitsToUv } from "./brushes/common";
@@ -35,6 +38,9 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
   const gridSize = useAtomValue(gridSizeAtom);
   const zoomPower = useAtomValue(zoomPowerAtom);
   const scroll = useAtomValue(scrollAtom);
+  const featherX = useAtomValue(featherXAtom);
+  const featherY = useAtomValue(featherYAtom);
+  const mouseUv = useAtomValue(mouseUvAtom);
   const { gl, scene, camera, invalidate } = useThree();
 
   const mesh = useRef<THREE.Mesh>(null);
@@ -87,9 +93,44 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
       displayMaterial.uniforms.sampleRate.value = spectrogramData.sampleRate;
       displayMaterial.uniforms.zoomPower.value = zoomPower;
       displayMaterial.uniforms.scroll.value = scroll;
+      displayMaterial.uniforms.featherX.value = featherX;
+      displayMaterial.uniforms.featherY.value = featherY;
+
+      // Update brush visualization uniforms
+      if (mouseUv) {
+        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+        const brushSizeUv = unitsToUv(
+          brushWidth,
+          brushHeight,
+          bpm,
+          totalDuration,
+          analysisParams.bandsPerOctave,
+          spectrogramData.numBands,
+        );
+        displayMaterial.uniforms.brushCenterUv.value.copy(mouseUv);
+        displayMaterial.uniforms.brushSizeUv.value.copy(brushSizeUv);
+      } else {
+        // Hide brush viz when mouse is outside canvas
+        displayMaterial.uniforms.brushSizeUv.value.set(0, 0);
+      }
+
       invalidate();
     }
-  }, [spectrogramData, bpm, gridSize, zoomPower, scroll, invalidate, fbo1, fbo2]);
+  }, [
+    spectrogramData,
+    bpm,
+    gridSize,
+    zoomPower,
+    scroll,
+    featherX,
+    featherY,
+    invalidate,
+    fbo1,
+    fbo2,
+    mouseUv,
+    brushWidth,
+    brushHeight,
+  ]);
 
   const update = (x: number, y: number) => {
     if (!spectrogramData || !mesh.current || !fbo1 || !fbo2) return;
@@ -117,6 +158,8 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
       sourceTexture: source.texture,
       zoomPower,
       scroll,
+      featherX,
+      featherY,
     });
 
     gl.setRenderTarget(destination);

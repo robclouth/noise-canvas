@@ -83,6 +83,11 @@ export const gridSizeYAtom = atomWithStorage("gridSizeY", 1); // in semitones
 export const zoomPowerAtom = atomWithStorage("zoomPower", 0);
 export const scrollAtom = atom(0);
 
+export const featherXAtom = atomWithStorage("featherX", 0.5);
+export const featherYAtom = atomWithStorage("featherY", 0.5);
+
+export const mouseUvAtom = atom<Vector2 | null>(null);
+
 // --- Core Functions ---
 
 export const analysisParams = {

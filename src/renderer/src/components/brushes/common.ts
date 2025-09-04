@@ -23,6 +23,8 @@ uniform vec2 brushCenterUv; // Center of the brush in UV coordinates
 uniform vec2 brushSizeUv;   // Size of the brush in UV coordinates
 uniform float zoomPower;
 uniform float scroll;
+uniform float featherX;
+uniform float featherY;
 
 vec2 screenToZoomed(vec2 screenUv) {
   float zoom = pow(2.0, zoomPower);
@@ -93,6 +95,21 @@ bool isInBrush(vec2 vUv) {
     vec2 diff = abs(vUv - brushCenterUv);
     return (diff.x < brushSizeUv.x / 2.0 && diff.y < brushSizeUv.y / 2.0);
 }
+
+float getFeatherWeight(vec2 vUv) {
+    if (!isInBrush(vUv)) {
+        return 0.0;
+    }
+    vec2 diff = abs(vUv - brushCenterUv) / brushSizeUv; // Normalized position within the brush [0, 0.5]
+
+    float featherZoneX = 0.5 * featherX;
+    float featherZoneY = 0.5 * featherY;
+
+    float weightX = smoothstep(0.5, 0.5 - featherZoneX, diff.x);
+    float weightY = smoothstep(0.5, 0.5 - featherZoneY, diff.y);
+
+    return weightX * weightY;
+}
 `;
 
 export const uniforms = {
@@ -108,6 +125,8 @@ export const uniforms = {
   brushSizeUv: new Vector2(0.1, 0.1),
   zoomPower: 0.0,
   scroll: 0.0,
+  featherX: 0.5,
+  featherY: 0.5,
 };
 
 export const unitsToUv = (

@@ -9,7 +9,7 @@ export const shiftWrapModes = ["smear", "cut", "wrap"] as const;
 export type ShiftWrapMode = (typeof shiftWrapModes)[number];
 
 export const shiftXAtom = atomWithStorage("shiftX", 0.0); // in beats
-export const shiftYAtom = atomWithStorage("shiftY", 0.0); // in semitones
+export const shiftYCentsAtom = atomWithStorage("shiftYCents", 0.0); // in cents
 export const shiftWrapModeAtom = atomWithStorage<ShiftWrapMode>("shiftWrapMode", "cut");
 
 const ShiftMaterial = shaderMaterial(
@@ -34,19 +34,22 @@ const ShiftMaterial = shaderMaterial(
 
         if (isInBrush(unpackedUv)) {
             vec2 unpackedSourceUv = unpackedUv - shiftUv;
+            vec4 shiftedTexel;
 
             if (isInBrush(unpackedSourceUv)) {
-                gl_FragColor = getDataFromLogicalUv(unpackedSourceUv);
+                shiftedTexel = getDataFromLogicalUv(unpackedSourceUv);
             } else {
                 if (wrapMode == 0) { // Smear
-                    gl_FragColor = getDataFromLogicalUv(unpackedSourceUv);
+                    shiftedTexel = getDataFromLogicalUv(unpackedSourceUv);
                 } else if (wrapMode == 1) { // Cut
-                    gl_FragColor = vec4(0.0); 
-                } else if (wrapMode == 2) { // Wrap
+                    shiftedTexel = vec4(0.0); 
+                } else { // Wrap
                     unpackedSourceUv = fract(unpackedSourceUv);
-                    gl_FragColor = getDataFromLogicalUv(unpackedSourceUv);
+                    shiftedTexel = getDataFromLogicalUv(unpackedSourceUv);
                 }
             }
+            float weight = getFeatherWeight(unpackedUv);
+            gl_FragColor = mix(originalTexel, shiftedTexel, weight);
         } else {
             gl_FragColor = originalTexel;
         }
@@ -67,20 +70,20 @@ class ShiftBrush extends BaseBrush {
         atom: shiftXAtom,
         label: "Shift X",
         propName: "shiftX",
-        min: -1.0,
+        min: 0.0,
         max: 1.0,
         step: 1 / 16,
         formatValue: (value) => `${value.toFixed(2)} beats`,
       },
       {
         type: "slider",
-        atom: shiftYAtom,
+        atom: shiftYCentsAtom,
         label: "Shift Y",
-        propName: "shiftY",
-        min: -12,
-        max: 12,
-        step: 1,
-        formatValue: (value) => `${value.toFixed(0)} semitones`,
+        propName: "shiftYCents",
+        min: -1200,
+        max: 1200,
+        step: 10,
+        formatValue: (value) => `${value.toFixed(0)} cents`,
       },
       {
         type: "select",
@@ -97,7 +100,7 @@ class ShiftBrush extends BaseBrush {
     const spectrogramData = store.get(spectrogramDataAtom);
     const bpm = store.get(bpmAtom);
     const shiftX = store.get(shiftXAtom);
-    const shiftY = store.get(shiftYAtom);
+    const shiftYCents = store.get(shiftYCentsAtom);
     const shiftWrapMode = store.get(shiftWrapModeAtom);
 
     if (!spectrogramData) return;
@@ -105,7 +108,7 @@ class ShiftBrush extends BaseBrush {
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
     const shiftUv = unitsToUv(
       shiftX,
-      shiftY,
+      shiftYCents / 100, // convert cents to semitones
       bpm,
       totalDuration,
       analysisParams.bandsPerOctave,

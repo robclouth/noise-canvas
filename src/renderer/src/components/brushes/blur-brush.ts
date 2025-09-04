@@ -6,7 +6,7 @@ import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
 import { store, spectrogramDataAtom, bpmAtom, analysisParams } from "../../store";
 
 export const blurXAtom = atomWithStorage("blurX", 0.0625); // in beats
-export const blurYAtom = atomWithStorage("blurY", 1); // in semitones
+export const blurYCentsAtom = atomWithStorage("blurYCents", 100); // in cents
 
 const BlurMaterial = shaderMaterial(
   {
@@ -42,7 +42,9 @@ const BlurMaterial = shaderMaterial(
                 }
             }
             if (totalWeight > 0.0) {
-              gl_FragColor = blurredTexel / totalWeight;
+              vec4 finalBlur = blurredTexel / totalWeight;
+              float weight = getFeatherWeight(unpackedUv);
+              gl_FragColor = mix(originalTexel, finalBlur, weight);
             } else {
               gl_FragColor = originalTexel;
             }
@@ -74,13 +76,13 @@ class BlurBrush extends BaseBrush {
       },
       {
         type: "slider",
-        atom: blurYAtom,
+        atom: blurYCentsAtom,
         label: "Blur Y",
         propName: "blurY",
         min: 0,
-        max: 24,
+        max: 2400,
         step: 1,
-        formatValue: (value) => `${value.toFixed(0)} semitones`,
+        formatValue: (value) => `${value.toFixed(0)} cents`,
       },
     ];
   }
@@ -91,14 +93,14 @@ class BlurBrush extends BaseBrush {
     const spectrogramData = store.get(spectrogramDataAtom);
     const bpm = store.get(bpmAtom);
     const blurX = store.get(blurXAtom);
-    const blurY = store.get(blurYAtom);
+    const blurYCents = store.get(blurYCentsAtom);
 
     if (!spectrogramData) return;
 
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
     const blurSizeUv = unitsToUv(
       blurX,
-      blurY,
+      blurYCents / 100, // convert cents to semitones
       bpm,
       totalDuration,
       analysisParams.bandsPerOctave,

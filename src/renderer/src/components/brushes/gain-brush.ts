@@ -5,19 +5,19 @@ import { code, uniforms, vertexShader } from "./common";
 import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
 import { store } from "../../store";
 
-export const gainAmountAtom = atomWithStorage("gainAmount", 1.0);
+export const gainDbAtom = atomWithStorage("gainDb", 0.0);
 
 const GainMaterial = shaderMaterial(
   {
     ...uniforms,
-    gainAmount: 1.0,
+    gainDb: 0.0,
   },
   vertexShader,
   /*glsl*/ `
     precision highp float;
     varying vec2 vUv;
 
-    uniform float gainAmount;
+    uniform float gainDb;
 
     ${code}
 
@@ -27,9 +27,10 @@ const GainMaterial = shaderMaterial(
         vec4 texel = texture2D(packedDataTex, vUv);
 
         if (isInBrush(unpackedUv)) {
-            // Apply gain to the complex numbers (real and imaginary parts)
-            // For mono, this affects .rg. For stereo, it affects all four channels.
-            texel *= gainAmount;
+            float weight = getFeatherWeight(unpackedUv);
+            float gain = pow(10.0, gainDb / 20.0);
+            float featheredGain = mix(1.0, gain, weight);
+            texel *= featheredGain;
         }
 
         gl_FragColor = texel;
@@ -47,20 +48,20 @@ class GainBrush extends BaseBrush {
     this.parameters = [
       {
         type: "slider",
-        atom: gainAmountAtom,
-        label: "Gain Amount",
-        propName: "gainAmount",
-        min: 0,
-        max: 10,
+        atom: gainDbAtom,
+        label: "Gain",
+        propName: "gainDb",
+        min: -60,
+        max: 6,
         step: 0.1,
-        formatValue: (value) => value.toFixed(2),
+        formatValue: (value) => `${value.toFixed(1)} dB`,
       },
     ];
   }
 
   updateUniforms(props: UpdateUniformsProps) {
     super.updateUniforms(props);
-    this.material.uniforms.gainAmount.value = store.get(gainAmountAtom);
+    this.material.uniforms.gainDb.value = store.get(gainDbAtom);
   }
 }
 

@@ -1,12 +1,13 @@
 import { Canvas } from "@react-three/fiber";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { PlayIcon, SquareIcon } from "lucide-react";
-import { MouseEventHandler, useCallback, useEffect, useRef, useState } from "react";
+import { MouseEventHandler, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { DataTexture, FloatType, NearestFilter, RGBAFormat, RGBFormat, RGFormat, Vector2 } from "three";
 import { playAudio, playbackTimeAtom, stopAudio } from "./audio-manager";
 import { BrushType, brushes } from "./components/brushes";
 import { BrushParameter, SelectParameter, SliderParameter } from "./components/brushes/base-brush";
-import { unitsToUv, screenToZoomed, zoomedToScreen } from "./components/brushes/common";
+import { screenToZoomed, zoomedToScreen } from "./components/brushes/common";
 import { Renderer, RendererHandle } from "./components/renderer";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
@@ -15,23 +16,25 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Slider } from "./components/ui/slider";
 import { Toaster } from "./components/ui/sonner";
 import { Switch } from "./components/ui/switch";
-import { toast } from "sonner";
 import {
   analysisParams,
   bpmAtom,
   brushHeightAtom,
   brushTypeAtom,
   brushWidthAtom,
+  featherXAtom,
+  featherYAtom,
   gridSizeAtom,
   gridSizeYAtom,
   isPlayingAtom,
+  mouseUvAtom,
   normalizeAtom,
+  scrollAtom,
   snapXAtom,
   snapYAtom,
   spectrogramDataAtom,
   store,
   zoomPowerAtom,
-  scrollAtom,
 } from "./store";
 
 const SliderControl = ({ parameter }: { parameter: SliderParameter }) => {
@@ -118,9 +121,11 @@ function App(): React.JSX.Element {
   const playbackTime = useAtomValue(playbackTimeAtom);
   const [zoomPower, setZoomPower] = useAtom(zoomPowerAtom);
   const [scroll, setScroll] = useAtom(scrollAtom);
+  const [featherX, setFeatherX] = useAtom(featherXAtom);
+  const [featherY, setFeatherY] = useAtom(featherYAtom);
+  const setMouseUv = useSetAtom(mouseUvAtom);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const canvasContainerRef = useRef<HTMLDivElement>(null);
-  const brushRef = useRef<HTMLDivElement>(null);
   const playbackLineRef = useRef<HTMLDivElement>(null);
 
   const rendererRef = useRef<RendererHandle>(null);
@@ -353,58 +358,20 @@ function App(): React.JSX.Element {
     }
   };
 
-  const updateBrushPosition = useCallback(
-    (x: number, y: number) => {
-      if (brushRef.current && spectrogramData && canvasSize.width > 0 && canvasSize.height > 0) {
-        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const brushSizeUv = unitsToUv(
-          brushWidth,
-          brushHeight,
-          bpm,
-          totalDuration,
-          analysisParams.bandsPerOctave,
-          spectrogramData.numBands,
-        );
-
-        const zoom = Math.pow(2, zoomPower);
-        const brushWidthPx = brushSizeUv.x * canvasSize.width * zoom;
-        const brushHeightPx = brushSizeUv.y * canvasSize.height;
-
-        brushRef.current.style.left = `${x - brushWidthPx / 2}px`;
-        brushRef.current.style.top = `${y - brushHeightPx / 2}px`;
-        brushRef.current.style.width = `${brushWidthPx}px`;
-        brushRef.current.style.height = `${brushHeightPx}px`;
-      }
-    },
-    [spectrogramData, brushWidth, brushHeight, canvasSize, bpm, zoomPower],
-  );
-
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
     const coords = getSnappedCoordinates(event);
     if (!coords) return;
     const [snappedX, snappedY] = coords;
 
-    const rect = event.currentTarget.getBoundingClientRect();
-    const screenCoords = zoomedToScreen(new Vector2(snappedX, snappedY), zoomPower, scroll);
-    const snappedPxX = screenCoords.x * rect.width;
-    const snappedPxY = screenCoords.y * rect.height;
+    setMouseUv(new Vector2(snappedX, 1 - snappedY));
 
     if (event.buttons === 1) {
       performBrushStroke(snappedX, snappedY);
     }
-    updateBrushPosition(snappedPxX, snappedPxY);
-  };
-
-  const handleMouseEnter = () => {
-    if (brushRef.current) {
-      brushRef.current.style.display = "block";
-    }
   };
 
   const handleMouseLeave = () => {
-    if (brushRef.current) {
-      brushRef.current.style.display = "none";
-    }
+    setMouseUv(null);
   };
 
   useEffect(() => {
@@ -473,7 +440,6 @@ function App(): React.JSX.Element {
                 ref={canvasContainerRef}
                 className="w-full h-full relative cursor-none"
                 onMouseMove={handleMouseMove}
-                onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
                 onMouseDown={handleCanvasMouseDown}
                 onMouseUp={handleCanvasMouseUp}
@@ -481,11 +447,6 @@ function App(): React.JSX.Element {
                 <Canvas frameloop="demand">
                   <Renderer ref={rendererRef} />
                 </Canvas>
-                <div
-                  ref={brushRef}
-                  className="absolute border border-white pointer-events-none opacity-80"
-                  style={{ display: "none" }}
-                />
                 <div
                   ref={playbackLineRef}
                   className="absolute top-0 w-px bg-white h-full pointer-events-none"
@@ -556,7 +517,7 @@ function App(): React.JSX.Element {
           </div>
           <div className="flex flex-col gap-2">
             <label htmlFor="grid-size-slider" className="text-sm font-medium">
-              Grid Size: {gridSize >= 1 ? `${gridSize} beats` : `1/${1 / gridSize}`}
+              Grid X: {gridSize >= 1 ? `${gridSize} beats` : `1/${1 / gridSize} beats`}
             </label>
             <Slider
               id="grid-size-slider"
@@ -569,7 +530,7 @@ function App(): React.JSX.Element {
           </div>
           <div className="flex flex-col gap-2">
             <label htmlFor="grid-size-y-slider" className="text-sm font-medium">
-              Grid Size (Pitch): {gridSizeY} semitones
+              Grid Y: {gridSizeY} semitones
             </label>
             <Slider
               id="grid-size-y-slider"
@@ -608,6 +569,32 @@ function App(): React.JSX.Element {
               />
             </div>
           )}
+          <div className="flex flex-col gap-2">
+            <label htmlFor="feather-x-slider" className="text-sm font-medium">
+              Feather X: {(featherX * 100).toFixed(0)}%
+            </label>
+            <Slider
+              id="feather-x-slider"
+              min={0}
+              max={1}
+              step={0.01}
+              value={[featherX]}
+              onValueChange={([val]) => setFeatherX(val)}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="feather-y-slider" className="text-sm font-medium">
+              Feather Y: {(featherY * 100).toFixed(0)}%
+            </label>
+            <Slider
+              id="feather-y-slider"
+              min={0}
+              max={1}
+              step={0.01}
+              value={[featherY]}
+              onValueChange={([val]) => setFeatherY(val)}
+            />
+          </div>
         </ResizablePanel>
       </ResizablePanelGroup>
       <Toaster position="bottom-right" />
