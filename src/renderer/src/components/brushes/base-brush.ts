@@ -10,6 +10,8 @@ export interface UpdateUniformsProps {
   brushCenterUv: THREE.Vector2;
   brushSizeUv: THREE.Vector2;
   sourceTexture: THREE.Texture;
+  zoomPower: number;
+  scroll: number;
 }
 
 export interface BrushUniforms {
@@ -45,7 +47,7 @@ export abstract class BaseBrush {
   abstract parameters: BrushParameter[];
 
   updateUniforms(props: UpdateUniformsProps): void {
-    const { brushCenterUv, brushSizeUv, sourceTexture } = props;
+    const { brushCenterUv, brushSizeUv, sourceTexture, zoomPower, scroll } = props;
     const uniforms = this.material.uniforms;
     const spectrogramData = store.get(spectrogramDataAtom);
 
@@ -61,5 +63,7 @@ export abstract class BaseBrush {
     uniforms.sampleRate.value = spectrogramData.sampleRate;
     uniforms.brushCenterUv.value.copy(brushCenterUv);
     uniforms.brushSizeUv.value.copy(brushSizeUv);
+    uniforms.zoomPower.value = zoomPower;
+    uniforms.scroll.value = scroll;
   }
 }

@@ -8,7 +8,7 @@ export const vertexShader = /*glsl*/ `
   }
 `;
 
-export const code = `
+export const code = /* glsl */ `
 uniform sampler2D packedDataTex;
 uniform sampler2D metadataTex;
 uniform float numFrames;
@@ -21,9 +21,31 @@ uniform float sampleRate;
 // Brush uniforms
 uniform vec2 brushCenterUv; // Center of the brush in UV coordinates
 uniform vec2 brushSizeUv;   // Size of the brush in UV coordinates
+uniform float zoomPower;
+uniform float scroll;
 
-vec4 getDataFromUv(vec2 vUv) {
-  float bandIndex = floor((1.0 - vUv.y) * numBands);
+vec2 screenToZoomed(vec2 screenUv) {
+  float zoom = pow(2.0, zoomPower);
+  if (zoom <= 1.0) {
+    return screenUv;
+  }
+  float viewWidth = 1.0 / zoom;
+  float viewStartX = scroll * (1.0 - viewWidth);
+  return vec2(viewStartX + screenUv.x * viewWidth, screenUv.y);
+}
+
+vec2 zoomedToScreen(vec2 zoomedUv) {
+    float zoom = pow(2.0, zoomPower);
+    if (zoom <= 1.0) {
+      return zoomedUv;
+    }
+    float viewWidth = 1.0 / zoom;
+    float viewStartX = scroll * (1.0 - viewWidth);
+    return vec2((zoomedUv.x - viewStartX) / viewWidth, zoomedUv.y);
+}
+
+vec4 getDataFromLogicalUv(vec2 logicalUv) {
+  float bandIndex = floor((1.0 - logicalUv.y) * numBands);
     
   vec2 metaUv = vec2((bandIndex + 0.5) / numBands, 0.5);
   vec3 meta = texture2D(metadataTex, metaUv).rgb;
@@ -31,7 +53,7 @@ vec4 getDataFromUv(vec2 vUv) {
   float bandLength = meta.g;
   float bandScaleExp = meta.b;
 
-  float timeSample = vUv.x * numFrames;
+  float timeSample = logicalUv.x * numFrames;
   float timeInBand = timeSample / exp2(bandScaleExp);
   float coefIndexInBand = floor(timeInBand);
 
@@ -51,6 +73,11 @@ vec4 getDataFromUv(vec2 vUv) {
   vec4 packedValue = texture2D(packedDataTex, packedUv);
 
   return packedValue;
+}
+
+vec4 getDataFromScreenUv(vec2 vUv) {
+  vec2 zoomedUv = screenToZoomed(vUv);
+  return getDataFromLogicalUv(zoomedUv);
 }
 
 vec2 getUnpackedUvFromPackedUv(vec2 packedUv) {
@@ -79,6 +106,8 @@ export const uniforms = {
   sampleRate: 44100.0,
   brushCenterUv: new Vector2(0.5, 0.5),
   brushSizeUv: new Vector2(0.1, 0.1),
+  zoomPower: 0.0,
+  scroll: 0.0,
 };
 
 export const unitsToUv = (
@@ -99,4 +128,24 @@ export const unitsToUv = (
   uv.y = shiftInBands / totalBands;
 
   return uv;
+};
+
+export const screenToZoomed = (screenUv: Vector2, zoomPower: number, scroll: number): Vector2 => {
+  const zoom = Math.pow(2, zoomPower);
+  if (zoom <= 1) {
+    return screenUv.clone();
+  }
+  const viewWidth = 1.0 / zoom;
+  const viewStartX = scroll * (1.0 - viewWidth);
+  return new Vector2(viewStartX + screenUv.x * viewWidth, screenUv.y);
+};
+
+export const zoomedToScreen = (zoomedUv: Vector2, zoomPower: number, scroll: number): Vector2 => {
+  const zoom = Math.pow(2, zoomPower);
+  if (zoom <= 1) {
+    return zoomedUv.clone();
+  }
+  const viewWidth = 1.0 / zoom;
+  const viewStartX = scroll * (1.0 - viewWidth);
+  return new Vector2((zoomedUv.x - viewStartX) / viewWidth, zoomedUv.y);
 };

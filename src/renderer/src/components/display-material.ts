@@ -37,7 +37,7 @@ float magnitudeToDb(float mag) {
 
 void main() {
     
-    vec4 packedValue = getDataFromUv(vUv);
+    vec4 packedValue = getDataFromScreenUv(vUv);
 
     vec2 leftComplex = packedValue.rg; // R=Real, G=Imag
     float leftMag = length(leftComplex);
@@ -58,11 +58,12 @@ void main() {
     float gridIntervalSeconds = (60.0 / bpm) * gridSize;
     float totalDuration = numFrames / sampleRate;
     float gridWidthUv = gridIntervalSeconds / totalDuration;
-
-    float line = mod(vUv.x, gridWidthUv);
+    
+    vec2 zoomedUv = screenToZoomed(vUv);
+    float line = mod(zoomedUv.x, gridWidthUv);
 
     // Use fwidth for consistent 1-pixel line thickness regardless of zoom
-    float lineThicknessUv = fwidth(vUv.x);
+    float lineThicknessUv = fwidth(zoomedUv.x);
 
     if (line < lineThicknessUv) {
         color = mix(color, vec3(1.0), 0.2);

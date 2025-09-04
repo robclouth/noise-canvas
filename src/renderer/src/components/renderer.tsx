@@ -11,6 +11,8 @@ import {
   gridSizeAtom,
   runSynthesis,
   spectrogramDataAtom,
+  zoomPowerAtom,
+  scrollAtom,
 } from "../store";
 import { brushes } from "./brushes";
 import { unitsToUv } from "./brushes/common";
@@ -31,6 +33,8 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
   const brushType = useAtomValue(brushTypeAtom);
   const bpm = useAtomValue(bpmAtom);
   const gridSize = useAtomValue(gridSizeAtom);
+  const zoomPower = useAtomValue(zoomPowerAtom);
+  const scroll = useAtomValue(scrollAtom);
   const { gl, scene, camera, invalidate } = useThree();
 
   const mesh = useRef<THREE.Mesh>(null);
@@ -61,7 +65,17 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
       gl.setRenderTarget(null);
 
       mesh.current.material = displayMaterial;
-      displayMaterial.uniforms.packedDataTex.value = fbo1.texture;
+
+      pingPong.current = 0;
+      invalidate();
+    }
+  }, [spectrogramData, camera, fbo1, gl, invalidate, scene]);
+
+  useEffect(() => {
+    if (spectrogramData && fbo1 && fbo2) {
+      const source = pingPong.current === 0 ? fbo1 : fbo2;
+
+      displayMaterial.uniforms.packedDataTex.value = source.texture;
       displayMaterial.uniforms.inverseMapTex.value = spectrogramData.inverseMapTex;
       displayMaterial.uniforms.metadataTex.value = spectrogramData.metadataTex;
       displayMaterial.uniforms.numFrames.value = spectrogramData.numFrames;
@@ -71,11 +85,11 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
       displayMaterial.uniforms.bpm.value = bpm;
       displayMaterial.uniforms.gridSize.value = gridSize;
       displayMaterial.uniforms.sampleRate.value = spectrogramData.sampleRate;
-
-      pingPong.current = 0;
+      displayMaterial.uniforms.zoomPower.value = zoomPower;
+      displayMaterial.uniforms.scroll.value = scroll;
       invalidate();
     }
-  }, [spectrogramData, camera, fbo1, gl, invalidate, scene, bpm, gridSize]);
+  }, [spectrogramData, bpm, gridSize, zoomPower, scroll, invalidate, fbo1, fbo2]);
 
   const update = (x: number, y: number) => {
     if (!spectrogramData || !mesh.current || !fbo1 || !fbo2) return;
@@ -101,6 +115,8 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
       brushCenterUv,
       brushSizeUv,
       sourceTexture: source.texture,
+      zoomPower,
+      scroll,
     });
 
     gl.setRenderTarget(destination);

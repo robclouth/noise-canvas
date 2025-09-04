@@ -80,6 +80,9 @@ export const snapYAtom = atomWithStorage("snapY", true);
 export const gridSizeAtom = atomWithStorage("gridSize", 0.25); // in beats
 export const gridSizeYAtom = atomWithStorage("gridSizeY", 1); // in semitones
 
+export const zoomPowerAtom = atomWithStorage("zoomPower", 0);
+export const scrollAtom = atom(0);
+
 // --- Core Functions ---
 
 export const analysisParams = {

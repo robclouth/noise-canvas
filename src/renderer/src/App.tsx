@@ -6,7 +6,7 @@ import { DataTexture, FloatType, NearestFilter, RGBAFormat, RGBFormat, RGFormat,
 import { playAudio, playbackTimeAtom, stopAudio } from "./audio-manager";
 import { BrushType, brushes } from "./components/brushes";
 import { BrushParameter, SelectParameter, SliderParameter } from "./components/brushes/base-brush";
-import { unitsToUv } from "./components/brushes/common";
+import { unitsToUv, screenToZoomed, zoomedToScreen } from "./components/brushes/common";
 import { Renderer, RendererHandle } from "./components/renderer";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
@@ -30,6 +30,8 @@ import {
   snapYAtom,
   spectrogramDataAtom,
   store,
+  zoomPowerAtom,
+  scrollAtom,
 } from "./store";
 
 const SliderControl = ({ parameter }: { parameter: SliderParameter }) => {
@@ -114,6 +116,8 @@ function App(): React.JSX.Element {
   const [gridSizeY, setGridSizeY] = useAtom(gridSizeYAtom);
   const spectrogramData = useAtomValue(spectrogramDataAtom);
   const playbackTime = useAtomValue(playbackTimeAtom);
+  const [zoomPower, setZoomPower] = useAtom(zoomPowerAtom);
+  const [scroll, setScroll] = useAtom(scrollAtom);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const brushRef = useRef<HTMLDivElement>(null);
@@ -267,18 +271,20 @@ function App(): React.JSX.Element {
     const x = (event.clientX - rect.left) / rect.width;
     const y = (event.clientY - rect.top) / rect.height;
 
+    const zoomedX = screenToZoomed(new Vector2(x, y), zoomPower, scroll).x;
+
     if (!spectrogramData) {
-      return [x, y];
+      return [zoomedX, y];
     }
 
-    let snappedX = x;
+    let snappedX = zoomedX;
     let snappedY = y;
 
     // Snap X to the nearest grid line
     if (snapX) {
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
       const gridIntervalSeconds = (60 / bpm) * gridSize;
-      const currentTime = x * totalDuration; // This is the center of the brush in seconds
+      const currentTime = zoomedX * totalDuration; // This is the center of the brush in seconds
 
       const brushWidthSeconds = brushWidth * (60.0 / bpm);
       const startTime = currentTime - brushWidthSeconds / 2.0;
@@ -360,7 +366,8 @@ function App(): React.JSX.Element {
           spectrogramData.numBands,
         );
 
-        const brushWidthPx = brushSizeUv.x * canvasSize.width;
+        const zoom = Math.pow(2, zoomPower);
+        const brushWidthPx = brushSizeUv.x * canvasSize.width * zoom;
         const brushHeightPx = brushSizeUv.y * canvasSize.height;
 
         brushRef.current.style.left = `${x - brushWidthPx / 2}px`;
@@ -369,7 +376,7 @@ function App(): React.JSX.Element {
         brushRef.current.style.height = `${brushHeightPx}px`;
       }
     },
-    [spectrogramData, brushWidth, brushHeight, canvasSize, bpm],
+    [spectrogramData, brushWidth, brushHeight, canvasSize, bpm, zoomPower],
   );
 
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
@@ -378,8 +385,9 @@ function App(): React.JSX.Element {
     const [snappedX, snappedY] = coords;
 
     const rect = event.currentTarget.getBoundingClientRect();
-    const snappedPxX = snappedX * rect.width;
-    const snappedPxY = snappedY * rect.height;
+    const screenCoords = zoomedToScreen(new Vector2(snappedX, snappedY), zoomPower, scroll);
+    const snappedPxX = screenCoords.x * rect.width;
+    const snappedPxY = screenCoords.y * rect.height;
 
     if (event.buttons === 1) {
       performBrushStroke(snappedX, snappedY);
@@ -420,17 +428,87 @@ function App(): React.JSX.Element {
       if (isPlaying) {
         playbackLineRef.current.style.display = "block";
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const left = (playbackTime / totalDuration) * canvasSize.width;
-        playbackLineRef.current.style.left = `${left}px`;
+        const progress = playbackTime / totalDuration;
+        const screenCoords = zoomedToScreen(new Vector2(progress, 0), zoomPower, scroll);
+        const left = screenCoords.x * canvasSize.width;
+
+        if (left < 0 || left > canvasSize.width) {
+          playbackLineRef.current.style.display = "none";
+        } else {
+          playbackLineRef.current.style.display = "block";
+          playbackLineRef.current.style.left = `${left}px`;
+        }
       } else {
         playbackLineRef.current.style.display = "none";
       }
     }
-  }, [playbackTime, isPlaying, spectrogramData, canvasSize]);
+  }, [playbackTime, isPlaying, spectrogramData, canvasSize, zoomPower, scroll]);
 
   return (
     <div className="h-screen w-screen bg-background text-foreground flex flex-col">
       <ResizablePanelGroup direction="horizontal">
+        <ResizablePanel className="max-w-64 min-w-64 p-2 flex flex-col gap-4 items-stretch">
+          <Select value={brushType} onValueChange={(value) => setBrushType(value as BrushType)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Brush" />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.keys(brushes).map((key) => (
+                <SelectItem key={key} value={key}>
+                  {key.charAt(0).toUpperCase() + key.slice(1)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {brushes[brushType].parameters.map((param) => (
+            <ParameterControl key={param.label} parameter={param} />
+          ))}
+        </ResizablePanel>
+        <ResizableHandle />
+        <ResizablePanel className="flex">
+          <ResizablePanelGroup direction="vertical" className="flex-1">
+            <ResizablePanel>
+              <div
+                ref={canvasContainerRef}
+                className="w-full h-full relative cursor-none"
+                onMouseMove={handleMouseMove}
+                onMouseEnter={handleMouseEnter}
+                onMouseLeave={handleMouseLeave}
+                onMouseDown={handleCanvasMouseDown}
+                onMouseUp={handleCanvasMouseUp}
+              >
+                <Canvas frameloop="demand">
+                  <Renderer ref={rendererRef} />
+                </Canvas>
+                <div
+                  ref={brushRef}
+                  className="absolute border border-white pointer-events-none opacity-80"
+                  style={{ display: "none" }}
+                />
+                <div
+                  ref={playbackLineRef}
+                  className="absolute top-0 w-px bg-white h-full pointer-events-none"
+                  style={{ display: "none" }}
+                />
+              </div>
+            </ResizablePanel>
+            <ResizableHandle />
+            <ResizablePanel
+              defaultSize={10}
+              maxSize={10}
+              minSize={10}
+              className="flex items-center justify-center p-4 gap-4"
+            >
+              <Input type="number" className="w-24" value={bpm} onChange={(e) => setBpm(Number(e.target.value))} />
+              <Button onClick={handleTogglePlay}>
+                {isPlaying ? <SquareIcon className="h-6 w-6" /> : <PlayIcon className="h-6 w-6" />}
+              </Button>
+              <div className="font-mono text-lg">{formatTime(playbackTime)}</div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </ResizablePanel>
+        <ResizableHandle />
         <ResizablePanel className="max-w-64 min-w-64 p-2 flex flex-col gap-4 items-stretch">
           <div className="flex flex-col gap-2">
             <label htmlFor="brush-width" className="text-sm font-medium">
@@ -502,68 +580,34 @@ function App(): React.JSX.Element {
               onValueChange={([val]) => setGridSizeY(val)}
             />
           </div>
-        </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel className="flex">
-          <ResizablePanelGroup direction="vertical" className="flex-1">
-            <ResizablePanel>
-              <div
-                ref={canvasContainerRef}
-                className="w-full h-full relative cursor-none"
-                onMouseMove={handleMouseMove}
-                onMouseEnter={handleMouseEnter}
-                onMouseLeave={handleMouseLeave}
-                onMouseDown={handleCanvasMouseDown}
-                onMouseUp={handleCanvasMouseUp}
-              >
-                <Canvas frameloop="demand">
-                  <Renderer ref={rendererRef} />
-                </Canvas>
-                <div
-                  ref={brushRef}
-                  className="absolute border border-white pointer-events-none opacity-80"
-                  style={{ display: "none" }}
-                />
-                <div
-                  ref={playbackLineRef}
-                  className="absolute top-0 w-px bg-white h-full pointer-events-none"
-                  style={{ display: "none" }}
-                />
-              </div>
-            </ResizablePanel>
-            <ResizableHandle />
-            <ResizablePanel
-              defaultSize={10}
-              maxSize={10}
-              minSize={10}
-              className="flex items-center justify-center p-4 gap-4"
-            >
-              <Input type="number" className="w-24" value={bpm} onChange={(e) => setBpm(Number(e.target.value))} />
-              <Button onClick={handleTogglePlay}>
-                {isPlaying ? <SquareIcon className="h-6 w-6" /> : <PlayIcon className="h-6 w-6" />}
-              </Button>
-              <div className="font-mono text-lg">{formatTime(playbackTime)}</div>
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel className="max-w-64 min-w-64 p-2 flex flex-col gap-4 items-stretch">
-          <Select value={brushType} onValueChange={(value) => setBrushType(value as BrushType)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Brush" />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.keys(brushes).map((key) => (
-                <SelectItem key={key} value={key}>
-                  {key.charAt(0).toUpperCase() + key.slice(1)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {brushes[brushType].parameters.map((param) => (
-            <ParameterControl key={param.label} parameter={param} />
-          ))}
+          <div className="flex flex-col gap-2">
+            <label htmlFor="zoom-slider" className="text-sm font-medium">
+              Zoom: {Math.pow(2, zoomPower).toFixed(2)}x
+            </label>
+            <Slider
+              id="zoom-slider"
+              min={0}
+              max={4}
+              step={0.1}
+              value={[zoomPower]}
+              onValueChange={([val]) => setZoomPower(val)}
+            />
+          </div>
+          {zoomPower > 0 && (
+            <div className="flex flex-col gap-2">
+              <label htmlFor="scroll-slider" className="text-sm font-medium">
+                Scroll
+              </label>
+              <Slider
+                id="scroll-slider"
+                min={0}
+                max={1}
+                step={0.001}
+                value={[scroll]}
+                onValueChange={([val]) => setScroll(val)}
+              />
+            </div>
+          )}
         </ResizablePanel>
       </ResizablePanelGroup>
       <Toaster position="bottom-right" />

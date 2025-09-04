@@ -36,15 +36,15 @@ const ShiftMaterial = shaderMaterial(
             vec2 unpackedSourceUv = unpackedUv - shiftUv;
 
             if (isInBrush(unpackedSourceUv)) {
-                gl_FragColor = getDataFromUv(unpackedSourceUv);
+                gl_FragColor = getDataFromLogicalUv(unpackedSourceUv);
             } else {
                 if (wrapMode == 0) { // Smear
-                    gl_FragColor = getDataFromUv(unpackedSourceUv);
+                    gl_FragColor = getDataFromLogicalUv(unpackedSourceUv);
                 } else if (wrapMode == 1) { // Cut
                     gl_FragColor = vec4(0.0); 
                 } else if (wrapMode == 2) { // Wrap
                     unpackedSourceUv = fract(unpackedSourceUv);
-                    gl_FragColor = getDataFromUv(unpackedSourceUv);
+                    gl_FragColor = getDataFromLogicalUv(unpackedSourceUv);
                 }
             }
         } else {

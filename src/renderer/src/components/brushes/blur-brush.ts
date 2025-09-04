@@ -28,24 +28,21 @@ const BlurMaterial = shaderMaterial(
 
         if (isInBrush(unpackedUv)) {
             vec4 blurredTexel = vec4(0.0);
-            int samples = 0;
-            // Simple box blur - might be slow on some hardware
+            float totalWeight = 0.0;
+            // Simple box blur
             for (int x = -2; x <= 2; x++) {
                 for (int y = -2; y <= 2; y++) {
                     vec2 offset = vec2(float(x), float(y)) * blurSizeUv;
-                    vec2 sampleUv = vUv + offset;
+                    vec2 unpackedSampleUv = unpackedUv + offset;
                     
-                    // We need to check if the sampled UV is still within the brush
-                    // to avoid bleeding the blur outside the brush area.
-                    vec2 unpackedSampleUv = getUnpackedUvFromPackedUv(sampleUv);
                     if (isInBrush(unpackedSampleUv)) {
-                        blurredTexel += texture2D(packedDataTex, sampleUv);
-                        samples++;
+                        blurredTexel += getDataFromLogicalUv(unpackedSampleUv);
+                        totalWeight += 1.0;
                     }
                 }
             }
-            if (samples > 0) {
-              gl_FragColor = blurredTexel / float(samples);
+            if (totalWeight > 0.0) {
+              gl_FragColor = blurredTexel / totalWeight;
             } else {
               gl_FragColor = originalTexel;
             }
