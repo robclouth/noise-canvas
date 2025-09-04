@@ -3,6 +3,7 @@ import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
 import { registerAudioIpcHandlers, setupAudio } from "./lib/audio";
+import { ipcMainOn, webContentsSend } from "./lib/ipc-typed";
 import { createMenu } from "./lib/menu";
 import { UndoService } from "./lib/undo";
 
@@ -17,7 +18,7 @@ app.on("open-file", (event, path) => {
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
-    mainWindow.webContents.send("open-file", path);
+    webContentsSend(mainWindow, "open-file", path);
   } else {
     pendingPath = path;
   }
@@ -37,7 +38,6 @@ if (!gotTheLock) {
 } else {
   app.on("second-instance", (_event, argv) => {
     if (mainWindow) {
-      mainWindow.webContents.send("debug-arguments", argv);
       if (mainWindow.isMinimized()) {
         mainWindow.restore();
       }
@@ -46,7 +46,7 @@ if (!gotTheLock) {
       const newFileArgs = argv.slice(fileArgIndex);
       for (const arg of newFileArgs) {
         if (!arg.startsWith("--") && mainWindow) {
-          mainWindow.webContents.send("open-file", arg);
+          webContentsSend(mainWindow, "open-file", arg);
           break;
         }
       }
@@ -65,7 +65,7 @@ function createWindow(): void {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
       nodeIntegration: true,
-      contextIsolation: false,
+      contextIsolation: true,
     },
   });
 
@@ -105,7 +105,7 @@ app.whenReady().then(() => {
 
     mainWindow.webContents.on("did-finish-load", () => {
       if (pendingPath) {
-        mainWindow?.webContents.send("open-file", pendingPath);
+        webContentsSend(mainWindow, "open-file", pendingPath);
         pendingPath = null;
       }
     });
@@ -116,11 +116,11 @@ app.whenReady().then(() => {
   });
 });
 
-ipcMain.on("undo:add-state", (_, { before, after }: { before: Buffer; after: Buffer }) => {
-  undoService?.addState(before, after);
+ipcMainOn("undo:add-state", (_, args) => {
+  undoService?.addState(args.before, args.after);
 });
 
-ipcMain.on("undo:clear", () => {
+ipcMainOn("undo:clear", () => {
   undoService?.clear();
 });
 

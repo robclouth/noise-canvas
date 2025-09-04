@@ -3,6 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "f
 import { compressSync, uncompressSync } from "lz4-napi";
 import { tmpdir } from "os";
 import { join } from "path";
+import { webContentsSend } from "./ipc-typed";
 
 export class UndoService {
   private tempDir: string;
@@ -19,7 +20,7 @@ export class UndoService {
     const canRedo = this.redoStack.length > 0;
 
     // Update renderer UI state
-    this.window.webContents.send("undo:state-changed", { canUndo, canRedo });
+    webContentsSend(this.window, "undo:state-changed", { canUndo, canRedo });
 
     // Update native menu
     const menu = Menu.getApplicationMenu();
@@ -63,7 +64,7 @@ export class UndoService {
       this.redoStack.push(state);
       const buffer = readFileSync(state.undoPath);
       const decompressed = uncompressSync(buffer);
-      this.window.webContents.send("undo:apply-state", decompressed);
+      webContentsSend(this.window, "undo:apply-state", decompressed);
     }
     this.updateState();
   }
@@ -74,7 +75,7 @@ export class UndoService {
       this.undoStack.push(state);
       const buffer = readFileSync(state.redoPath);
       const decompressed = uncompressSync(buffer);
-      this.window.webContents.send("undo:apply-state", decompressed);
+      webContentsSend(this.window, "undo:apply-state", decompressed);
     }
     this.updateState();
   }

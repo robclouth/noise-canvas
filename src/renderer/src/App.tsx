@@ -15,7 +15,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Slider } from "./components/ui/slider";
 import { Switch } from "./components/ui/switch";
 import {
-  AnalysisPayload,
   analysisParams,
   bpmAtom,
   brushHeightAtom,
@@ -126,17 +125,14 @@ function App(): React.JSX.Element {
       // Dev mode: load a test file automatically.
       // We need to ask the main process to do this for us.
       // Note: This requires a path that is valid on the machine running the app.
-      window.electron.ipcRenderer.send(
-        "load-file",
-        "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/tone.wav",
-      );
+      window.api.loadFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/tone.wav");
     }
 
     window.api.onOpenFile((path) => {
-      window.electron.ipcRenderer.send("load-file", path);
+      window.api.loadFile(path);
     });
 
-    window.electron.ipcRenderer.on("analysis-complete", (_, payload: AnalysisPayload) => {
+    window.api.onAnalysisComplete((payload) => {
       const packedDataTex = new DataTexture(
         new Float32Array(payload.data.buffer, payload.data.byteOffset, payload.data.byteLength / 4),
         payload.textureWidth,
@@ -192,16 +188,16 @@ function App(): React.JSX.Element {
           bandLengths: payload.bandLengths,
         },
       });
-      window.electron.ipcRenderer.send("undo:clear");
+      window.api.clearUndoState();
     });
 
-    window.electron.ipcRenderer.on("analysis-error", (_, message: string) => {
+    window.api.onAnalysisError((message) => {
       // You could display this in a more user-friendly way, e.g., a toast notification
       console.error("Analysis Error:", message);
       alert(`An error occurred during analysis: ${message}`);
     });
 
-    window.electron.ipcRenderer.on("undo:apply-state", (_, data: Buffer) => {
+    window.api.onUndoApplyState((data) => {
       rendererRef.current?.setFBOData(
         new Float32Array(data.buffer, data.byteOffset, data.byteLength / Float32Array.BYTES_PER_ELEMENT),
       );
@@ -296,9 +292,9 @@ function App(): React.JSX.Element {
       if (beforeState) {
         const afterState = rendererRef.current.getFBOData();
         if (afterState) {
-          window.electron.ipcRenderer.send("undo:add-state", {
-            before: Buffer.from(beforeState.buffer),
-            after: Buffer.from(afterState.buffer),
+          window.api.addUndoState({
+            before: beforeState.buffer,
+            after: afterState.buffer,
           });
         }
         delete (event.currentTarget as any)._undoBeforeState;

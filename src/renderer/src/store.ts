@@ -99,8 +99,8 @@ export const runSynthesis = async (processedData: Float32Array | null): Promise<
     }
 
     // Assemble the payload for the main process
-    const payload: SynthesisPayload = {
-      processedData: Buffer.from(processedData.buffer),
+    const payload = {
+      processedData: processedData.buffer,
       analysisMetadata: {
         numFrames: originalAnalysis.numFrames,
         numChannels: originalAnalysis.numChannels,
@@ -109,8 +109,7 @@ export const runSynthesis = async (processedData: Float32Array | null): Promise<
       },
     };
 
-    const audioBufferArray: Float32Array = await window.electron.ipcRenderer.invoke(
-      "synthesize-audio",
+    const audioBufferArray: Float32Array = await window.api.synthesizeAudio(
       payload,
       analysisParams, // Pass original analysis params
       normalize,

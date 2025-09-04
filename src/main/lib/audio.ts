@@ -1,10 +1,11 @@
-import { app, dialog, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
 import ffmpegPath from "ffmpeg-static";
 import ffprobePath from "ffprobe-static";
 import ffmpeg from "fluent-ffmpeg";
 import { join } from "path";
 import { Writable } from "stream";
-import type { AnalysisPayloadForRenderer, GaboratorAnalysisResult, GaboratorParams, SynthesisPayload } from "./types";
+import { ipcMainHandle, ipcMainOn, webContentsSend } from "./ipc-typed";
+import type { AnalysisPayloadForRenderer, GaboratorAnalysisResult, GaboratorParams } from "./types";
 
 let gaborator;
 let currentSampleRate = 44100;
@@ -45,10 +46,10 @@ export async function openAndAnalyzeAudioFile(window: BrowserWindow) {
 
   try {
     const payload = await analyzeAudio(filePath, params);
-    window.webContents.send("analysis-complete", payload);
+    webContentsSend(window, "analysis-complete", payload);
   } catch (error) {
     console.error("Analysis failed:", error);
-    window.webContents.send("analysis-error", error instanceof Error ? error.message : "Unknown error");
+    webContentsSend(window, "analysis-error", error instanceof Error ? error.message : "Unknown error");
   }
 }
 
@@ -113,38 +114,35 @@ export function analyzeAudio(filePath: string, params: GaboratorParams): Promise
 }
 
 export function registerAudioIpcHandlers(window: BrowserWindow) {
-  ipcMain.handle(
-    "synthesize-audio",
-    async (_, payload: SynthesisPayload, params: GaboratorParams, normalize: boolean): Promise<Float32Array> => {
-      const processedDataArray = new Float32Array(
-        payload.processedData.buffer,
-        payload.processedData.byteOffset,
-        payload.processedData.byteLength / Float32Array.BYTES_PER_ELEMENT,
-      );
+  ipcMainHandle("synthesize-audio", async (_, payload, params, normalize) => {
+    const processedDataArray = new Float32Array(
+      payload.processedData.buffer,
+      payload.processedData.byteOffset,
+      payload.processedData.byteLength / Float32Array.BYTES_PER_ELEMENT,
+    );
 
-      const audioVector = gaborator.synthesize(
-        processedDataArray,
-        payload.analysisMetadata,
-        currentSampleRate,
-        params,
-        normalize,
-      );
-      return audioVector;
-    },
-  );
+    const audioVector = gaborator.synthesize(
+      processedDataArray,
+      payload.analysisMetadata,
+      currentSampleRate,
+      params,
+      normalize,
+    );
+    return audioVector;
+  });
 
-  ipcMain.on("load-file", async (_, filePath: string) => {
+  ipcMainOn("load-file", async (_, filePath) => {
     const params = {
       bandsPerOctave: 48,
-      fmin: 8.18,
+      fmin: 20.0,
     };
 
     try {
       const payload = await analyzeAudio(filePath, params);
-      window.webContents.send("analysis-complete", payload);
+      webContentsSend(window, "analysis-complete", payload);
     } catch (error) {
       console.error("Analysis failed:", error);
-      window.webContents.send("analysis-error", error instanceof Error ? error.message : "Unknown error");
+      webContentsSend(window, "analysis-error", error instanceof Error ? error.message : "Unknown error");
     }
   });
 }
