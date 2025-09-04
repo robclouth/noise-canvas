@@ -5,16 +5,24 @@ import type { IpcApi } from "../main/lib/types";
 // Custom APIs for renderer
 const api: IpcApi = {
   onOpenFile: (callback) => {
-    ipcRenderer.on("open-file", (_event, value) => callback(value));
+    const handler = (_event, value) => callback(value);
+    ipcRenderer.on("open-file", handler);
+    return () => ipcRenderer.removeListener("open-file", handler);
   },
   onAnalysisComplete: (callback) => {
-    ipcRenderer.on("analysis-complete", (_event, value) => callback(value));
+    const handler = (_event, value) => callback(value);
+    ipcRenderer.on("analysis-complete", handler);
+    return () => ipcRenderer.removeListener("analysis-complete", handler);
   },
   onAnalysisError: (callback) => {
-    ipcRenderer.on("analysis-error", (_event, value) => callback(value));
+    const handler = (_event, value) => callback(value);
+    ipcRenderer.on("analysis-error", handler);
+    return () => ipcRenderer.removeListener("analysis-error", handler);
   },
   onUndoApplyState: (callback) => {
-    ipcRenderer.on("undo:apply-state", (_event, value) => callback(value));
+    const handler = (_event, value) => callback(value);
+    ipcRenderer.on("undo:apply-state", handler);
+    return () => ipcRenderer.removeListener("undo:apply-state", handler);
   },
   loadFile: (filePath: string) => {
     ipcRenderer.send("load-file", filePath);
@@ -38,6 +46,24 @@ const api: IpcApi = {
       params,
       normalize,
     );
+  },
+  saveAudioData: (payload, params, normalize) => {
+    return ipcRenderer.invoke(
+      "save-audio-data",
+      {
+        ...payload,
+        processedData: Buffer.from(payload.processedData),
+      },
+      params,
+      normalize,
+    );
+  },
+  onRequestAudioForSaving: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("request-audio-for-saving", handler);
+    return () => {
+      ipcRenderer.removeListener("request-audio-for-saving", handler);
+    };
   },
 };
 

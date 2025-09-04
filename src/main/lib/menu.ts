@@ -1,5 +1,5 @@
 import { app, Menu, BrowserWindow } from "electron";
-import { openAndAnalyzeAudioFile } from "./audio";
+import { openAndAnalyzeAudioFile, saveAudioFile } from "./audio";
 import { UndoService } from "./undo";
 
 export function createMenu(window: BrowserWindow, undoService: UndoService) {
@@ -12,6 +12,13 @@ export function createMenu(window: BrowserWindow, undoService: UndoService) {
           accelerator: "CmdOrCtrl+O",
           click: () => {
             openAndAnalyzeAudioFile(window);
+          },
+        },
+        {
+          label: "Save",
+          accelerator: "CmdOrCtrl+S",
+          click: () => {
+            saveAudioFile(window);
           },
         },
         { type: "separator" },

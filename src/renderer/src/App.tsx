@@ -13,7 +13,9 @@ import { Input } from "./components/ui/input";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { Slider } from "./components/ui/slider";
+import { Toaster } from "./components/ui/sonner";
 import { Switch } from "./components/ui/switch";
+import { toast } from "sonner";
 import {
   analysisParams,
   bpmAtom,
@@ -128,11 +130,11 @@ function App(): React.JSX.Element {
       window.api.loadFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/tone.wav");
     }
 
-    window.api.onOpenFile((path) => {
+    const unsubOpenFile = window.api.onOpenFile((path) => {
       window.api.loadFile(path);
     });
 
-    window.api.onAnalysisComplete((payload) => {
+    const unsubAnalysisComplete = window.api.onAnalysisComplete((payload) => {
       const packedDataTex = new DataTexture(
         new Float32Array(payload.data.buffer, payload.data.byteOffset, payload.data.byteLength / 4),
         payload.textureWidth,
@@ -191,17 +193,60 @@ function App(): React.JSX.Element {
       window.api.clearUndoState();
     });
 
-    window.api.onAnalysisError((message) => {
+    const unsubAnalysisError = window.api.onAnalysisError((message) => {
       // You could display this in a more user-friendly way, e.g., a toast notification
       console.error("Analysis Error:", message);
-      alert(`An error occurred during analysis: ${message}`);
+      toast.error("Analysis Error", {
+        description: message,
+      });
     });
 
-    window.api.onUndoApplyState((data) => {
+    const unsubUndo = window.api.onUndoApplyState((data) => {
       rendererRef.current?.setFBOData(
         new Float32Array(data.buffer, data.byteOffset, data.byteLength / Float32Array.BYTES_PER_ELEMENT),
       );
     });
+
+    const unsubRequestAudioForSaving = window.api.onRequestAudioForSaving(async () => {
+      if (!rendererRef.current) {
+        return;
+      }
+      const processedData = rendererRef.current.getFBOData();
+      const spectrogramData = store.get(spectrogramDataAtom);
+      if (!processedData || !spectrogramData) {
+        return;
+      }
+
+      const payload = {
+        processedData: processedData.buffer,
+        analysisMetadata: {
+          numFrames: spectrogramData.numFrames,
+          numChannels: spectrogramData.numChannels,
+          numBands: spectrogramData.numBands,
+          ...spectrogramData.synthesisMetadata,
+        },
+      };
+      const normalize = store.get(normalizeAtom);
+
+      try {
+        await window.api.saveAudioData(payload, analysisParams, normalize);
+        toast.success("File saved successfully!");
+        console.log("File saved successfully!");
+      } catch (e) {
+        console.error("Failed to save audio", e);
+        toast.error("Failed to save file", {
+          description: e instanceof Error ? e.message : "An unknown error occurred.",
+        });
+      }
+    });
+
+    return () => {
+      unsubOpenFile();
+      unsubAnalysisComplete();
+      unsubAnalysisError();
+      unsubUndo();
+      unsubRequestAudioForSaving();
+    };
   }, []);
 
   const handleTogglePlay = async (): Promise<void> => {
@@ -521,6 +566,7 @@ function App(): React.JSX.Element {
           ))}
         </ResizablePanel>
       </ResizablePanelGroup>
+      <Toaster position="bottom-right" />
     </div>
   );
 }

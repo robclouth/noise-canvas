@@ -5,7 +5,10 @@ export function ipcMainOn<K extends keyof IpcMainHandlers>(channel: K, listener:
   ipcMain.on(channel, listener as any);
 }
 
-export function ipcMainHandle<K extends "synthesize-audio">(channel: K, listener: IpcMainHandlers[K]): void {
+export function ipcMainHandle<K extends "synthesize-audio" | "save-audio-data">(
+  channel: K,
+  listener: IpcMainHandlers[K],
+): void {
   ipcMain.handle(channel, listener as any);
 }
 

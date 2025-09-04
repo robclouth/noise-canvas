@@ -48,10 +48,10 @@ export interface GaboratorParams {
 }
 
 export interface IpcApi {
-  onOpenFile: (callback: (path: string) => void) => void;
-  onAnalysisComplete: (callback: (payload: AnalysisPayloadForRenderer) => void) => void;
-  onAnalysisError: (callback: (error: string) => void) => void;
-  onUndoApplyState: (callback: (data: Buffer) => void) => void;
+  onOpenFile: (callback: (path: string) => void) => () => void;
+  onAnalysisComplete: (callback: (payload: AnalysisPayloadForRenderer) => void) => () => void;
+  onAnalysisError: (callback: (error: string) => void) => () => void;
+  onUndoApplyState: (callback: (data: Buffer) => void) => () => void;
   loadFile: (filePath: string) => void;
   addUndoState: (args: { before: ArrayBufferLike; after: ArrayBufferLike }) => void;
   clearUndoState: () => void;
@@ -60,6 +60,12 @@ export interface IpcApi {
     params: GaboratorParams,
     normalize: boolean,
   ) => Promise<Float32Array>;
+  saveAudioData: (
+    payload: Omit<SynthesisPayload, "processedData"> & { processedData: ArrayBufferLike },
+    params: GaboratorParams,
+    normalize: boolean,
+  ) => Promise<void>;
+  onRequestAudioForSaving: (callback: () => void) => () => void;
 }
 
 export interface IpcMainHandlers {
@@ -72,12 +78,19 @@ export interface IpcMainHandlers {
     params: GaboratorParams,
     normalize: boolean,
   ) => Promise<Float32Array>;
+  "save-audio-data": (
+    event: Electron.IpcMainInvokeEvent,
+    payload: SynthesisPayload,
+    params: GaboratorParams,
+    normalize: boolean,
+  ) => Promise<void>;
 }
 
 export interface IpcRendererEvents {
   "open-file": (path: string) => void;
   "analysis-complete": (payload: AnalysisPayloadForRenderer) => void;
   "analysis-error": (error: string) => void;
+  "request-audio-for-saving": () => void;
   "undo:apply-state": (data: Buffer) => void;
   "undo:state-changed": (state: { canUndo: boolean; canRedo: boolean }) => void;
 }
