@@ -18,7 +18,6 @@ let currentMetadata: {
 
 export function setupAudio() {
   // Load the native addon
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const gaboratorPath = app.isPackaged
     ? join(process.resourcesPath, "app.asar.unpacked/build/Release/gaborator_addon.node")
     : join(__dirname, "../../build/Release/gaborator_addon.node");
@@ -32,32 +31,6 @@ export function setupAudio() {
     : ffprobePath.path;
   ffmpeg.setFfmpegPath(correctFfmpegPath);
   ffmpeg.setFfprobePath(correctFfprobePath);
-}
-
-export async function openAndAnalyzeAudioFile(window: BrowserWindow) {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
-    properties: ["openFile"],
-    filters: [{ name: "Audio Files", extensions: ["mp3", "wav", "ogg", "flac", "aac", "m4a", "wma", "aiff"] }],
-  });
-  if (canceled || filePaths.length === 0) {
-    return;
-  }
-
-  const filePath = filePaths[0];
-  currentFilePath = filePath;
-
-  const params = {
-    bandsPerOctave: 48,
-    fmin: 20.0,
-  };
-
-  try {
-    const payload = await analyzeAudio(filePath, params);
-    webContentsSend(window, "analysis-complete", payload);
-  } catch (error) {
-    console.error("Analysis failed:", error);
-    webContentsSend(window, "analysis-error", error instanceof Error ? error.message : "Unknown error");
-  }
 }
 
 export function saveAudioFile(window: BrowserWindow) {
@@ -135,6 +108,29 @@ export function analyzeAudio(filePath: string, params: GaboratorParams): Promise
 }
 
 export function registerAudioIpcHandlers(window: BrowserWindow) {
+  ipcMainHandle("open-file-and-analyze", async (_event, params) => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      properties: ["openFile"],
+      filters: [{ name: "Audio Files", extensions: ["mp3", "wav", "ogg", "flac", "aac", "m4a", "wma", "aiff"] }],
+    });
+    if (canceled || filePaths.length === 0) {
+      return { canceled: true };
+    }
+
+    const filePath = filePaths[0];
+    currentFilePath = filePath;
+
+    try {
+      const payload = await analyzeAudio(filePath, params);
+      webContentsSend(window, "analysis-complete", payload);
+      return { canceled: false };
+    } catch (error) {
+      console.error("Analysis failed:", error);
+      webContentsSend(window, "analysis-error", error instanceof Error ? error.message : "Unknown error");
+      throw error; // re-throw to be caught in renderer
+    }
+  });
+
   ipcMainHandle("synthesize-audio", async (_, payload, params, normalize) => {
     const processedDataArray = new Float32Array(
       payload.processedData.buffer,
@@ -195,12 +191,8 @@ export function registerAudioIpcHandlers(window: BrowserWindow) {
     });
   });
 
-  ipcMainOn("load-file", async (_, filePath) => {
+  ipcMainOn("load-file", async (_, filePath, params) => {
     currentFilePath = filePath;
-    const params = {
-      bandsPerOctave: 48,
-      fmin: 20.0,
-    };
 
     try {
       const payload = await analyzeAudio(filePath, params);

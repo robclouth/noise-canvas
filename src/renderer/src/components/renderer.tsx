@@ -3,7 +3,7 @@ import { useAtomValue } from "jotai";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import * as THREE from "three";
 import {
-  analysisParams,
+  bandsPerOctaveAtom,
   bpmAtom,
   brushHeightAtom,
   brushTypeAtom,
@@ -41,6 +41,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
   const featherX = useAtomValue(featherXAtom);
   const featherY = useAtomValue(featherYAtom);
   const mouseUv = useAtomValue(mouseUvAtom);
+  const bandsPerOctave = useAtomValue(bandsPerOctaveAtom);
   const { gl, scene, camera, invalidate } = useThree();
 
   const mesh = useRef<THREE.Mesh>(null);
@@ -104,7 +105,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
           brushHeight,
           bpm,
           totalDuration,
-          analysisParams.bandsPerOctave,
+          bandsPerOctave,
           spectrogramData.numBands,
         );
         displayMaterial.uniforms.brushCenterUv.value.copy(mouseUv);
@@ -130,6 +131,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
     mouseUv,
     brushWidth,
     brushHeight,
+    bandsPerOctave,
   ]);
 
   const update = (x: number, y: number) => {
@@ -144,7 +146,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
       brushHeight,
       bpm,
       totalDuration,
-      analysisParams.bandsPerOctave,
+      bandsPerOctave,
       spectrogramData.numBands,
     );
     const brushCenterUv = new THREE.Vector2(x, 1 - y);

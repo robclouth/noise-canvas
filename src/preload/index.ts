@@ -1,6 +1,6 @@
 import { electronAPI } from "@electron-toolkit/preload";
 import { contextBridge, ipcRenderer } from "electron";
-import type { IpcApi } from "../main/lib/types";
+import type { GaboratorParams, IpcApi } from "../main/lib/types";
 
 // Custom APIs for renderer
 const api: IpcApi = {
@@ -8,6 +8,11 @@ const api: IpcApi = {
     const handler = (_event, value) => callback(value);
     ipcRenderer.on("open-file", handler);
     return () => ipcRenderer.removeListener("open-file", handler);
+  },
+  onTriggerOpenFile: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("trigger-open-file", handler);
+    return () => ipcRenderer.removeListener("trigger-open-file", handler);
   },
   onAnalysisComplete: (callback) => {
     const handler = (_event, value) => callback(value);
@@ -24,8 +29,8 @@ const api: IpcApi = {
     ipcRenderer.on("undo:apply-state", handler);
     return () => ipcRenderer.removeListener("undo:apply-state", handler);
   },
-  loadFile: (filePath: string) => {
-    ipcRenderer.send("load-file", filePath);
+  loadFile: (filePath: string, params: GaboratorParams) => {
+    ipcRenderer.send("load-file", filePath, params);
   },
   addUndoState: (args: { before: ArrayBufferLike; after: ArrayBufferLike }) => {
     ipcRenderer.send("undo:add-state", {
@@ -47,6 +52,7 @@ const api: IpcApi = {
       normalize,
     );
   },
+  openFileAndAnalyze: (params) => ipcRenderer.invoke("open-file-and-analyze", params),
   saveAudioData: (payload, params, normalize) => {
     return ipcRenderer.invoke(
       "save-audio-data",

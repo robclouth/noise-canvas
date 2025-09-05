@@ -88,12 +88,10 @@ export const featherYAtom = atomWithStorage("featherY", 0.5);
 
 export const mouseUvAtom = atom<Vector2 | null>(null);
 
-// --- Core Functions ---
+export const bandsPerOctaveAtom = atomWithStorage("bandsPerOctave", 48);
+export const fminAtom = atomWithStorage("fmin", 20.0);
 
-export const analysisParams = {
-  bandsPerOctave: 48,
-  fmin: 20.0,
-};
+// --- Core Functions ---
 
 export const runSynthesis = async (processedData: Float32Array | null): Promise<void> => {
   try {
@@ -117,11 +115,11 @@ export const runSynthesis = async (processedData: Float32Array | null): Promise<
       },
     };
 
-    const audioBufferArray: Float32Array = await window.api.synthesizeAudio(
-      payload,
-      analysisParams, // Pass original analysis params
-      normalize,
-    );
+    const analysisParams = {
+      bandsPerOctave: store.get(bandsPerOctaveAtom),
+      fmin: store.get(fminAtom),
+    };
+    const audioBufferArray: Float32Array = await window.api.synthesizeAudio(payload, analysisParams, normalize);
 
     const audioContext = Tone.getContext().rawContext;
     const numFrames = audioBufferArray.length / originalAnalysis.numChannels;

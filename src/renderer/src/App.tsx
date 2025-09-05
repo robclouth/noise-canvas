@@ -17,13 +17,14 @@ import { Slider } from "./components/ui/slider";
 import { Toaster } from "./components/ui/sonner";
 import { Switch } from "./components/ui/switch";
 import {
-  analysisParams,
+  bandsPerOctaveAtom,
   bpmAtom,
   brushHeightAtom,
   brushTypeAtom,
   brushWidthAtom,
   featherXAtom,
   featherYAtom,
+  fminAtom,
   gridSizeAtom,
   gridSizeYAtom,
   isPlayingAtom,
@@ -143,11 +144,32 @@ function App(): React.JSX.Element {
       // Dev mode: load a test file automatically.
       // We need to ask the main process to do this for us.
       // Note: This requires a path that is valid on the machine running the app.
-      window.api.loadFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/garage.mp3");
+      const params = {
+        bandsPerOctave: store.get(bandsPerOctaveAtom),
+        fmin: store.get(fminAtom),
+      };
+      window.api.loadFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/garage.mp3", params);
     }
 
     const unsubOpenFile = window.api.onOpenFile((path) => {
-      window.api.loadFile(path);
+      const params = {
+        bandsPerOctave: store.get(bandsPerOctaveAtom),
+        fmin: store.get(fminAtom),
+      };
+      window.api.loadFile(path, params);
+    });
+
+    const unsubTriggerOpenFile = window.api.onTriggerOpenFile(async () => {
+      try {
+        const bandsPerOctave = store.get(bandsPerOctaveAtom);
+        const fmin = store.get(fminAtom);
+        await window.api.openFileAndAnalyze({ bandsPerOctave, fmin });
+      } catch (error) {
+        console.error("Analysis failed:", error);
+        toast.error("Analysis Error", {
+          description: "An error occurred while analyzing the audio.",
+        });
+      }
     });
 
     const unsubAnalysisComplete = window.api.onAnalysisComplete((payload) => {
@@ -231,6 +253,10 @@ function App(): React.JSX.Element {
         return;
       }
 
+      const analysisParams = {
+        bandsPerOctave: store.get(bandsPerOctaveAtom),
+        fmin: store.get(fminAtom),
+      };
       const payload = {
         processedData: processedData.buffer,
         analysisMetadata: {
@@ -256,6 +282,7 @@ function App(): React.JSX.Element {
 
     return () => {
       unsubOpenFile();
+      unsubTriggerOpenFile();
       unsubAnalysisComplete();
       unsubAnalysisError();
       unsubUndo();
@@ -307,7 +334,8 @@ function App(): React.JSX.Element {
 
     // Snap Y to the nearest MIDI note
     if (snapY) {
-      const bandsPerSemitone = analysisParams.bandsPerOctave / 12;
+      const bandsPerOctave = store.get(bandsPerOctaveAtom);
+      const bandsPerSemitone = bandsPerOctave / 12;
       const gridIntervalBands = gridSizeY * bandsPerSemitone;
       const currentBand = y * spectrogramData.numBands;
       const snappedBand = Math.round(currentBand / gridIntervalBands) * gridIntervalBands;

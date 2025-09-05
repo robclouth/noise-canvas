@@ -3,7 +3,7 @@ import { atomWithStorage } from "jotai/utils";
 import * as THREE from "three";
 import { code, unitsToUv, uniforms, vertexShader } from "./common";
 import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
-import { store, spectrogramDataAtom, bpmAtom, analysisParams } from "../../store";
+import { store, spectrogramDataAtom, bpmAtom, bandsPerOctaveAtom } from "../../store";
 
 export const blurXAtom = atomWithStorage("blurX", 0.0625); // in beats
 export const blurYCentsAtom = atomWithStorage("blurYCents", 100); // in cents
@@ -98,12 +98,13 @@ class BlurBrush extends BaseBrush {
     if (!spectrogramData) return;
 
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+    const bandsPerOctave = store.get(bandsPerOctaveAtom);
     const blurSizeUv = unitsToUv(
       blurX,
       blurYCents / 100, // convert cents to semitones
       bpm,
       totalDuration,
-      analysisParams.bandsPerOctave,
+      bandsPerOctave,
       spectrogramData.numBands,
     );
 

@@ -1,7 +1,7 @@
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
 import * as THREE from "three";
-import { analysisParams, bpmAtom, spectrogramDataAtom, store } from "../../store";
+import { bandsPerOctaveAtom, bpmAtom, spectrogramDataAtom, store } from "../../store";
 import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
 import { code, uniforms, unitsToUv, vertexShader } from "./common";
 
@@ -71,15 +71,6 @@ const TransformMaterial = shaderMaterial(
                     transformedTexel = getDataFromLogicalUv(finalSourceUv);
                 }
             }
-
-            if (scale.x < 0.0) {
-                // For a clean time-reversal, we must apply a complex conjugation
-                // to the spectral data, which corresponds to negating the phase.
-                // Ch 1 Imaginary: .g, Ch 2 Imaginary: .a
-                transformedTexel.g = -transformedTexel.g;
-                transformedTexel.a = -transformedTexel.a;
-            }
-            
             float weight = getFeatherWeight(unpackedUv);
             gl_FragColor = mix(originalTexel, transformedTexel, weight);
         } else {
@@ -171,12 +162,13 @@ class TransformBrush extends BaseBrush {
     if (!spectrogramData) return;
 
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+    const bandsPerOctave = store.get(bandsPerOctaveAtom);
     const shiftUv = unitsToUv(
       shiftX,
       shiftYCents / 100, // convert cents to semitones
       bpm,
       totalDuration,
-      analysisParams.bandsPerOctave,
+      bandsPerOctave,
       spectrogramData.numBands,
     );
 

@@ -1,5 +1,5 @@
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, shell } from "electron";
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
 import { registerAudioIpcHandlers, setupAudio } from "./lib/audio";
@@ -105,7 +105,7 @@ app.whenReady().then(() => {
 
     mainWindow.webContents.on("did-finish-load", () => {
       if (pendingPath) {
-        webContentsSend(mainWindow, "open-file", pendingPath);
+        webContentsSend(mainWindow!, "open-file", pendingPath);
         pendingPath = null;
       }
     });

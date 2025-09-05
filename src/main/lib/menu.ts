@@ -1,5 +1,5 @@
-import { app, Menu, BrowserWindow } from "electron";
-import { openAndAnalyzeAudioFile, saveAudioFile } from "./audio";
+import { app, BrowserWindow, Menu } from "electron";
+import { saveAudioFile } from "./audio";
 import { UndoService } from "./undo";
 
 export function createMenu(window: BrowserWindow, undoService: UndoService) {
@@ -11,7 +11,7 @@ export function createMenu(window: BrowserWindow, undoService: UndoService) {
           label: "Open...",
           accelerator: "CmdOrCtrl+O",
           click: () => {
-            openAndAnalyzeAudioFile(window);
+            window.webContents.send("trigger-open-file");
           },
         },
         {
