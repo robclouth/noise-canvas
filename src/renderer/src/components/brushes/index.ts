@@ -1,12 +1,12 @@
 import { atom } from "jotai";
 import { blurBrush } from "./blur-brush";
 import { gainBrush } from "./gain-brush";
-import { shiftBrush } from "./shift-brush";
+import { transformBrush } from "./transform-brush";
 
 export const brushes = {
   gain: gainBrush,
   blur: blurBrush,
-  shift: shiftBrush,
+  transform: transformBrush,
 };
 
 export type BrushType = keyof typeof brushes;

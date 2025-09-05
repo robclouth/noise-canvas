@@ -132,11 +132,18 @@ function App(): React.JSX.Element {
   const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
+    // Ensure brushType is valid, reset if not
+    if (!brushes[brushType]) {
+      setBrushType(Object.keys(brushes)[0] as BrushType);
+    }
+  }, [brushType, setBrushType]);
+
+  useEffect(() => {
     if (process.env.NODE_ENV === "development") {
       // Dev mode: load a test file automatically.
       // We need to ask the main process to do this for us.
       // Note: This requires a path that is valid on the machine running the app.
-      window.api.loadFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/tone.wav");
+      window.api.loadFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/garage.mp3");
     }
 
     const unsubOpenFile = window.api.onOpenFile((path) => {
@@ -202,11 +209,9 @@ function App(): React.JSX.Element {
       window.api.clearUndoState();
     });
 
-    const unsubAnalysisError = window.api.onAnalysisError((message) => {
-      // You could display this in a more user-friendly way, e.g., a toast notification
-      console.error("Analysis Error:", message);
+    const unsubAnalysisError = window.api.onAnalysisError(() => {
       toast.error("Analysis Error", {
-        description: message,
+        description: "An error occurred while analyzing the audio.",
       });
     });
 
