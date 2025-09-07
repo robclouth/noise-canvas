@@ -3,7 +3,6 @@ import { atomWithStorage } from "jotai/utils";
 import { DataTexture, Vector2 } from "three";
 import * as Tone from "tone";
 import { audioBufferAtom } from "./audio-manager";
-import { BrushType, brushes } from "./components/brushes";
 
 export const store = createStore();
 
@@ -61,9 +60,9 @@ export const spectrogramDataAtom = atom<SpectrogramData | null>(null);
 // Is audio currently playing?
 export const isPlayingAtom = atom(false);
 
-// Brush type
-const defaultBrush = Object.keys(brushes)[0] as BrushType;
-export const brushTypeAtom = atomWithStorage<BrushType>("brushType", defaultBrush);
+// Brush type - The default is just a string.
+// The App component will be responsible for validating it.
+export const brushTypeAtom = atomWithStorage<string>("brushType", "gain");
 
 // Brush dimensions
 export const brushWidthAtom = atomWithStorage("brushWidth", 0.25); // in beats
