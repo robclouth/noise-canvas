@@ -1,17 +1,21 @@
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { MantineProvider } from "@mantine/core";
+import { Notifications } from "@mantine/notifications";
+import App from "./App";
 import "./assets/main.css";
-
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import App from "./app";
-import { Provider } from "jotai";
+import "@mantine/core/styles.css";
+import "@mantine/notifications/styles.css";
 import { store } from "./store";
-import { Toaster } from "./components/ui/sonner";
+import { Provider as JotaiProvider } from "jotai";
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <Provider store={store}>
-      <App />
-      <Toaster position="bottom-right" />
-    </Provider>
-  </StrictMode>,
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <JotaiProvider store={store}>
+      <MantineProvider forceColorScheme="dark">
+        <Notifications />
+        <App />
+      </MantineProvider>
+    </JotaiProvider>
+  </React.StrictMode>,
 );

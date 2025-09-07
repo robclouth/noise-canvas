@@ -1,21 +1,15 @@
+import { ActionIcon, Box, Flex, NumberInput, Paper, Select, Slider, Stack, Switch, Text } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { Canvas } from "@react-three/fiber";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { PlayIcon, SquareIcon } from "lucide-react";
+import { Play, Square } from "lucide-react";
 import { MouseEventHandler, useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import { DataTexture, FloatType, NearestFilter, RGBAFormat, RGBFormat, RGFormat, Vector2 } from "three";
 import { playAudio, playbackTimeAtom, stopAudio } from "./audio-manager";
 import { BrushType, brushes } from "./components/brushes";
 import { BrushParameter, SelectParameter, SliderParameter } from "./components/brushes/base-brush";
 import { screenToZoomed, zoomedToScreen } from "./components/brushes/common";
 import { Renderer, RendererHandle } from "./components/renderer";
-import { Button } from "./components/ui/button";
-import { Input } from "./components/ui/input";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
-import { Slider } from "./components/ui/slider";
-import { Toaster } from "./components/ui/sonner";
-import { Switch } from "./components/ui/switch";
 import {
   bandsPerOctaveAtom,
   bpmAtom,
@@ -45,17 +39,17 @@ const BRUSH_HEIGHT_MAX = 128;
 const SliderControl = ({ parameter }: { parameter: SliderParameter }) => {
   const [value, setValue] = useAtom(parameter.atom);
   return (
-    <div key={parameter.label} className="flex flex-col gap-2">
-      <label htmlFor={parameter.label} className="text-sm font-medium">
+    <div key={parameter.label}>
+      <Text size="sm">
         {parameter.label}: {parameter.formatValue(value)}
-      </label>
+      </Text>
       <Slider
-        id={parameter.label}
+        label={null}
         min={parameter.min}
         max={parameter.max}
         step={parameter.step}
-        value={parameter.isLog ? [Math.log2(value)] : [value]}
-        onValueChange={([val]) => setValue(parameter.isLog ? Math.pow(2, val) : val)}
+        value={parameter.isLog ? Math.log2(value) : value}
+        onChange={(val) => setValue(parameter.isLog ? Math.pow(2, val) : val)}
       />
     </div>
   );
@@ -63,24 +57,19 @@ const SliderControl = ({ parameter }: { parameter: SliderParameter }) => {
 
 const SelectControl = ({ parameter }: { parameter: SelectParameter }) => {
   const [value, setValue] = useAtom(parameter.atom);
+  const data = parameter.options.map((key) => ({
+    value: key,
+    label: key.charAt(0).toUpperCase() + key.slice(1),
+  }));
+
   return (
-    <div key={parameter.label} className="flex flex-col gap-2">
-      <label htmlFor={parameter.label} className="text-sm font-medium">
-        {parameter.label}
-      </label>
-      <Select value={value} onValueChange={(val) => setValue(val)}>
-        <SelectTrigger>
-          <SelectValue placeholder={parameter.label} />
-        </SelectTrigger>
-        <SelectContent>
-          {parameter.options.map((key) => (
-            <SelectItem key={key} value={key}>
-              {key.charAt(0).toUpperCase() + key.slice(1)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
+    <Select
+      key={parameter.label}
+      label={parameter.label}
+      data={data}
+      value={value}
+      onChange={(val) => setValue(val || parameter.options[0])}
+    />
   );
 };
 
@@ -130,6 +119,7 @@ function App(): React.JSX.Element {
   const [featherY, setFeatherY] = useAtom(featherYAtom);
   const [brushIntensity, setBrushIntensity] = useAtom(brushIntensityAtom);
   const setMouseUv = useSetAtom(mouseUvAtom);
+  const setSpectrogramData = useSetAtom(spectrogramDataAtom);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const playbackLineRef = useRef<HTMLDivElement>(null);
@@ -147,8 +137,6 @@ function App(): React.JSX.Element {
   useEffect(() => {
     if (process.env.NODE_ENV === "development") {
       // Dev mode: load a test file automatically.
-      // We need to ask the main process to do this for us.
-      // Note: This requires a path that is valid on the machine running the app.
       const params = {
         bandsPerOctave: store.get(bandsPerOctaveAtom),
         fmin: store.get(fminAtom),
@@ -171,8 +159,10 @@ function App(): React.JSX.Element {
         await window.api.openFileAndAnalyze({ bandsPerOctave, fmin });
       } catch (error) {
         console.error("Analysis failed:", error);
-        toast.error("Analysis Error", {
-          description: "An error occurred while analyzing the audio.",
+        notifications.show({
+          title: "Analysis Error",
+          message: "An error occurred while analyzing the audio.",
+          color: "red",
         });
       }
     });
@@ -218,7 +208,7 @@ function App(): React.JSX.Element {
       metadataTex.magFilter = NearestFilter;
       metadataTex.needsUpdate = true;
 
-      store.set(spectrogramDataAtom, {
+      setSpectrogramData({
         packedDataTex,
         inverseMapTex,
         metadataTex,
@@ -237,8 +227,10 @@ function App(): React.JSX.Element {
     });
 
     const unsubAnalysisError = window.api.onAnalysisError(() => {
-      toast.error("Analysis Error", {
-        description: "An error occurred while analyzing the audio.",
+      notifications.show({
+        title: "Analysis Error",
+        message: "An error occurred while analyzing the audio.",
+        color: "red",
       });
     });
 
@@ -275,12 +267,18 @@ function App(): React.JSX.Element {
 
       try {
         await window.api.saveAudioData(payload, analysisParams, normalize);
-        toast.success("File saved successfully!");
+        notifications.show({
+          title: "Success",
+          message: "File saved successfully!",
+          color: "green",
+        });
         console.log("File saved successfully!");
       } catch (e) {
         console.error("Failed to save audio", e);
-        toast.error("Failed to save file", {
-          description: e instanceof Error ? e.message : "An unknown error occurred.",
+        notifications.show({
+          title: "Failed to save file",
+          message: e instanceof Error ? e.message : "An unknown error occurred.",
+          color: "red",
         });
       }
     });
@@ -293,7 +291,7 @@ function App(): React.JSX.Element {
       unsubUndo();
       unsubRequestAudioForSaving();
     };
-  }, []);
+  }, [setSpectrogramData]);
 
   const handleTogglePlay = async (): Promise<void> => {
     if (isPlaying) {
@@ -450,77 +448,78 @@ function App(): React.JSX.Element {
   }, [playbackTime, isPlaying, spectrogramData, canvasSize, zoomPower, scroll]);
 
   return (
-    <div className="h-screen w-screen bg-background text-foreground flex flex-col">
-      <ResizablePanelGroup direction="horizontal">
-        <ResizablePanel className="max-w-64 min-w-64 p-2 flex flex-col gap-4 items-stretch">
-          <Select value={brushType} onValueChange={(value) => setBrushType(value as BrushType)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Brush" />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.keys(brushes).map((key) => (
-                <SelectItem key={key} value={key}>
-                  {key.charAt(0).toUpperCase() + key.slice(1)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+    <Flex h="100vh" w="100vw" bg="dark.8" c="gray.2">
+      <Paper w={256} p="md" radius={0} bg="dark.7">
+        <Stack>
+          <Select
+            label="Brush"
+            data={Object.keys(brushes).map((key) => ({
+              value: key,
+              label: key.charAt(0).toUpperCase() + key.slice(1),
+            }))}
+            value={brushType}
+            onChange={(value) => setBrushType(value as BrushType)}
+          />
 
           {brushes[brushType].parameters.map((param) => (
             <ParameterControl key={param.label} parameter={param} />
           ))}
-        </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel className="flex">
-          <ResizablePanelGroup direction="vertical" className="flex-1">
-            <ResizablePanel>
-              <div
-                ref={canvasContainerRef}
-                className="w-full h-full relative cursor-none"
-                onMouseMove={handleMouseMove}
-                onMouseLeave={handleMouseLeave}
-                onMouseDown={handleCanvasMouseDown}
-                onMouseUp={handleCanvasMouseUp}
-              >
-                <Canvas frameloop="demand">
-                  <Renderer ref={rendererRef} />
-                </Canvas>
-                <div
-                  ref={playbackLineRef}
-                  className="absolute top-0 w-px bg-white h-full pointer-events-none"
-                  style={{ display: "none" }}
-                />
-              </div>
-            </ResizablePanel>
-            <ResizableHandle />
-            <ResizablePanel
-              defaultSize={10}
-              maxSize={10}
-              minSize={10}
-              className="flex items-center justify-center p-4 gap-4"
-            >
-              <Input type="number" className="w-24" value={bpm} onChange={(e) => setBpm(Number(e.target.value))} />
-              <Button onClick={handleTogglePlay}>
-                {isPlaying ? <SquareIcon className="h-6 w-6" /> : <PlayIcon className="h-6 w-6" />}
-              </Button>
-              <div className="font-mono text-lg">{formatTime(playbackTime)}</div>
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel className="max-w-64 min-w-64 p-2 flex flex-col gap-4 items-stretch">
-          <div className="flex flex-col gap-2">
-            <label htmlFor="brush-width" className="text-sm font-medium">
+        </Stack>
+      </Paper>
+
+      <Flex direction="column" style={{ flex: 1 }}>
+        <Box
+          style={{ flex: 1, position: "relative", cursor: "none" }}
+          ref={canvasContainerRef}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+          onMouseDown={handleCanvasMouseDown}
+          onMouseUp={handleCanvasMouseUp}
+        >
+          <Canvas frameloop="demand">
+            <Renderer ref={rendererRef} />
+          </Canvas>
+          <div
+            ref={playbackLineRef}
+            style={{
+              position: "absolute",
+              top: 0,
+              width: "1px",
+              backgroundColor: "white",
+              height: "100%",
+              pointerEvents: "none",
+              display: "none", // Initially hidden
+            }}
+          />
+        </Box>
+
+        <Paper h={80} p="md" radius={0} bg="dark.7">
+          <Flex align="center" justify="center" gap="md">
+            <NumberInput w={100} value={bpm} onChange={(val) => setBpm(Number(val))} />
+            <ActionIcon onClick={handleTogglePlay} size="lg">
+              {isPlaying ? <Square /> : <Play />}
+            </ActionIcon>
+            <Text ff="monospace" size="xl">
+              {formatTime(playbackTime)}
+            </Text>
+          </Flex>
+        </Paper>
+      </Flex>
+
+      <Paper w={256} p="md" radius={0} bg="dark.7">
+        <Stack>
+          <div>
+            <Text size="sm">
               Brush Width:{" "}
               {brushWidth === Infinity ? "Full" : (brushWidth < 1 ? `1/${1 / brushWidth}` : brushWidth) + " beats"}
-            </label>
+            </Text>
             <Slider
-              id="brush-width"
+              label={null}
               min={-4}
               max={BRUSH_WIDTH_MAX_LOG2 + 1}
               step={1}
-              value={[brushWidth === Infinity ? BRUSH_WIDTH_MAX_LOG2 + 1 : Math.log2(brushWidth)]}
-              onValueChange={([val]) => {
+              value={brushWidth === Infinity ? BRUSH_WIDTH_MAX_LOG2 + 1 : Math.log2(brushWidth)}
+              onChange={(val) => {
                 if (val === BRUSH_WIDTH_MAX_LOG2 + 1) {
                   setBrushWidth(Infinity);
                 } else {
@@ -529,17 +528,15 @@ function App(): React.JSX.Element {
               }}
             />
           </div>
-          <div className="flex flex-col gap-2">
-            <label htmlFor="brush-height" className="text-sm font-medium">
-              Brush Height: {brushHeight === Infinity ? "Full" : `${brushHeight} semitones`}
-            </label>
+          <div>
+            <Text size="sm">Brush Height: {brushHeight === Infinity ? "Full" : `${brushHeight} semitones`}</Text>
             <Slider
-              id="brush-height"
+              label={null}
               min={1}
               max={BRUSH_HEIGHT_MAX + 1}
               step={1}
-              value={[brushHeight === Infinity ? BRUSH_HEIGHT_MAX + 1 : brushHeight]}
-              onValueChange={([val]) => {
+              value={brushHeight === Infinity ? BRUSH_HEIGHT_MAX + 1 : brushHeight}
+              onChange={(val) => {
                 if (val === BRUSH_HEIGHT_MAX + 1) {
                   setBrushHeight(Infinity);
                 } else {
@@ -548,121 +545,53 @@ function App(): React.JSX.Element {
               }}
             />
           </div>
-          <div className="flex flex-col gap-2">
-            <label htmlFor="intensity-slider" className="text-sm font-medium">
-              Intensity: {(brushIntensity * 100).toFixed(0)}%
-            </label>
+          <div>
+            <Text size="sm">Intensity: {(brushIntensity * 100).toFixed(0)}%</Text>
+            <Slider label={null} min={0.01} max={1} step={0.01} value={brushIntensity} onChange={setBrushIntensity} />
+          </div>
+          <Switch
+            checked={normalize}
+            onChange={(e) => setNormalize(e.currentTarget.checked)}
+            label="Normalize output"
+          />
+          <Switch checked={snapX} onChange={(e) => setSnapX(e.currentTarget.checked)} label="Snap Time" />
+          <Switch checked={snapY} onChange={(e) => setSnapY(e.currentTarget.checked)} label="Snap Pitch" />
+          <div>
+            <Text size="sm">Grid X: {gridSize >= 1 ? `${gridSize} beats` : `1/${1 / gridSize} beats`}</Text>
             <Slider
-              id="intensity-slider"
-              min={0.01}
-              max={1}
-              step={0.01}
-              value={[brushIntensity]}
-              onValueChange={([val]) => setBrushIntensity(val)}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <label htmlFor="normalize-switch" className="text-sm font-medium">
-              Normalize output
-            </label>
-            <Switch id="normalize-switch" checked={normalize} onCheckedChange={setNormalize} />
-          </div>
-          <div className="flex items-center justify-between">
-            <label htmlFor="snap-x-switch" className="text-sm font-medium">
-              Snap Time
-            </label>
-            <Switch id="snap-x-switch" checked={snapX} onCheckedChange={setSnapX} />
-          </div>
-          <div className="flex items-center justify-between">
-            <label htmlFor="snap-y-switch" className="text-sm font-medium">
-              Snap Pitch
-            </label>
-            <Switch id="snap-y-switch" checked={snapY} onCheckedChange={setSnapY} />
-          </div>
-          <div className="flex flex-col gap-2">
-            <label htmlFor="grid-size-slider" className="text-sm font-medium">
-              Grid X: {gridSize >= 1 ? `${gridSize} beats` : `1/${1 / gridSize} beats`}
-            </label>
-            <Slider
-              id="grid-size-slider"
+              label={null}
               min={-6}
               max={2}
               step={1}
-              value={[Math.log2(gridSize)]}
-              onValueChange={([val]) => setGridSize(Math.pow(2, val))}
+              value={Math.log2(gridSize)}
+              onChange={(val) => setGridSize(Math.pow(2, val))}
             />
           </div>
-          <div className="flex flex-col gap-2">
-            <label htmlFor="grid-size-y-slider" className="text-sm font-medium">
-              Grid Y: {gridSizeY} semitones
-            </label>
-            <Slider
-              id="grid-size-y-slider"
-              min={1}
-              max={24}
-              step={1}
-              value={[gridSizeY]}
-              onValueChange={([val]) => setGridSizeY(val)}
-            />
+          <div>
+            <Text size="sm">Grid Y: {gridSizeY} semitones</Text>
+            <Slider label={null} min={1} max={24} step={1} value={gridSizeY} onChange={setGridSizeY} />
           </div>
-          <div className="flex flex-col gap-2">
-            <label htmlFor="zoom-slider" className="text-sm font-medium">
-              Zoom: {Math.pow(2, zoomPower).toFixed(2)}x
-            </label>
-            <Slider
-              id="zoom-slider"
-              min={0}
-              max={4}
-              step={0.1}
-              value={[zoomPower]}
-              onValueChange={([val]) => setZoomPower(val)}
-            />
+          <div>
+            <Text size="sm">Zoom: {Math.pow(2, zoomPower).toFixed(2)}x</Text>
+            <Slider label={null} min={0} max={4} step={0.1} value={zoomPower} onChange={setZoomPower} />
           </div>
           {zoomPower > 0 && (
-            <div className="flex flex-col gap-2">
-              <label htmlFor="scroll-slider" className="text-sm font-medium">
-                Scroll
-              </label>
-              <Slider
-                id="scroll-slider"
-                min={0}
-                max={1}
-                step={0.001}
-                value={[scroll]}
-                onValueChange={([val]) => setScroll(val)}
-              />
+            <div>
+              <Text size="sm">Scroll</Text>
+              <Slider label={null} min={0} max={1} step={0.001} value={scroll} onChange={setScroll} />
             </div>
           )}
-          <div className="flex flex-col gap-2">
-            <label htmlFor="feather-x-slider" className="text-sm font-medium">
-              Feather X: {(featherX * 100).toFixed(0)}%
-            </label>
-            <Slider
-              id="feather-x-slider"
-              min={0}
-              max={1}
-              step={0.01}
-              value={[featherX]}
-              onValueChange={([val]) => setFeatherX(val)}
-            />
+          <div>
+            <Text size="sm">Feather X: {(featherX * 100).toFixed(0)}%</Text>
+            <Slider label={null} min={0} max={1} step={0.01} value={featherX} onChange={setFeatherX} />
           </div>
-          <div className="flex flex-col gap-2">
-            <label htmlFor="feather-y-slider" className="text-sm font-medium">
-              Feather Y: {(featherY * 100).toFixed(0)}%
-            </label>
-            <Slider
-              id="feather-y-slider"
-              min={0}
-              max={1}
-              step={0.01}
-              value={[featherY]}
-              onValueChange={([val]) => setFeatherY(val)}
-            />
+          <div>
+            <Text size="sm">Feather Y: {(featherY * 100).toFixed(0)}%</Text>
+            <Slider label={null} min={0} max={1} step={0.01} value={featherY} onChange={setFeatherY} />
           </div>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-      <Toaster position="bottom-right" />
-    </div>
+        </Stack>
+      </Paper>
+    </Flex>
   );
 }
 
