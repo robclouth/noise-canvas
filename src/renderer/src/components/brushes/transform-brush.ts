@@ -40,17 +40,28 @@ const TransformMaterial = shaderMaterial(
         vec4 originalTexel = texture2D(packedDataTex, vUv);
 
         if (isInBrush(unpackedUv)) {
+            // The origin for all transforms is the brush center.
+            // We are applying the INVERSE transform to find the source pixel.
             vec2 relativeUv = unpackedUv - brushCenterUv;
 
-            if (scale.x != 0.0 && scale.y != 0.0) {
-              relativeUv /= scale;
-            }
-
+            // 1. Rotation (around center)
             float rad = radians(-rotation);
             mat2 rotMat = mat2(cos(rad), -sin(rad), sin(rad), cos(rad));
-            relativeUv = rotMat * relativeUv;
+            vec2 rotatedUv = rotMat * relativeUv;
 
-            vec2 transformedUv = relativeUv + brushCenterUv;
+            // 2. Scale (from bottom-left corner)
+            vec2 brushBottomLeft = brushCenterUv - brushSizeUv * 0.5;
+            vec2 rotatedAbsoluteUv = rotatedUv + brushCenterUv;
+            vec2 fromBottomLeft = rotatedAbsoluteUv - brushBottomLeft;
+            
+            vec2 scaledUv = fromBottomLeft;
+            if (scale.x != 0.0 && scale.y != 0.0) {
+              scaledUv /= scale;
+            }
+
+            vec2 finalRelativeUv = scaledUv - (brushCenterUv - brushBottomLeft);
+
+            vec2 transformedUv = finalRelativeUv + brushCenterUv;
             vec2 finalSourceUv = transformedUv - shiftUv;
             
             vec4 transformedTexel;
