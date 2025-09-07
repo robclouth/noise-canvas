@@ -15,7 +15,7 @@ export const useIpcListeners = (rendererRef: React.RefObject<RendererHandle | nu
         bandsPerOctave: store.get(bandsPerOctaveAtom),
         fmin: store.get(fminAtom),
       };
-      window.api.loadFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/voice.wav", params);
+      window.api.loadFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/garage.mp3", params);
     }
 
     const unsubOpenFile = window.api.onOpenFile((path) => {

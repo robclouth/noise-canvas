@@ -5,6 +5,7 @@ import { transformBrush } from "./transform-brush";
 import { pitchShiftBrush } from "./pitch-shift-brush";
 import { transientShaperBrush } from "./transient-shaper";
 import { dynamicsBrush } from "./dynamics-brush";
+import { convolveBrush } from "./convolve-brush";
 
 export const brushes = {
   gain: gainBrush,
@@ -13,6 +14,7 @@ export const brushes = {
   transform: transformBrush,
   "transient shaper": transientShaperBrush,
   dynamics: dynamicsBrush,
+  convolve: convolveBrush,
 };
 
 export type BrushType = keyof typeof brushes;
