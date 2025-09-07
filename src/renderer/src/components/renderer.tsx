@@ -1,6 +1,6 @@
 import { useThree } from "@react-three/fiber";
-import { useAtomValue } from "jotai";
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import { useAtom, useAtomValue } from "jotai";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import {
   bandsPerOctaveAtom,
@@ -13,13 +13,16 @@ import {
   featherYAtom,
   gridSizeAtom,
   mouseUvAtom,
+  offsetLockAtom,
+  offsetXAtom,
+  offsetYAtom,
   runSynthesis,
   scrollAtom,
   spectrogramDataAtom,
   zoomPowerAtom,
 } from "../store";
 import { brushes } from "./brushes";
-import { unitsToUv } from "./brushes/common";
+import { unitsToUv, uvToUnits } from "./brushes/common";
 import { copyMaterial } from "./copy-material";
 import { displayMaterial } from "./display-material";
 
@@ -44,7 +47,12 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
   const mouseUv = useAtomValue(mouseUvAtom);
   const bandsPerOctave = useAtomValue(bandsPerOctaveAtom);
   const brushIntensity = useAtomValue(brushIntensityAtom);
+  const [offsetX, setOffsetX] = useAtom(offsetXAtom);
+  const [offsetY, setOffsetY] = useAtom(offsetYAtom);
+  const offsetLock = useAtomValue(offsetLockAtom);
   const { gl, scene, camera, invalidate } = useThree();
+
+  const [lockedUv, setLockedUv] = useState<THREE.Vector2 | null>(null);
 
   const mesh = useRef<THREE.Mesh>(null);
 
@@ -80,9 +88,51 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
     }
   }, [spectrogramData, camera, fbo1, gl, invalidate, scene]);
 
+  // This effect handles the offset lock logic
+  useEffect(() => {
+    if (!spectrogramData) return;
+    if (offsetLock) {
+      if (!lockedUv && mouseUv) {
+        // Lock engage: capture current mouse UV and existing offset
+        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+        const currentOffsetUv = unitsToUv(
+          offsetX,
+          offsetY,
+          bpm,
+          totalDuration,
+          bandsPerOctave,
+          spectrogramData.numBands,
+        );
+        const lockPosition = mouseUv.clone().sub(currentOffsetUv);
+        setLockedUv(lockPosition);
+      } else if (lockedUv && mouseUv) {
+        // Lock active: dynamically update offset to counteract mouse movement
+        const diffUv = mouseUv.clone().sub(lockedUv);
+        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+        const [newOffsetX, newOffsetY] = uvToUnits(
+          diffUv,
+          bpm,
+          totalDuration,
+          bandsPerOctave,
+          spectrogramData.numBands,
+        );
+        setOffsetX(newOffsetX);
+        setOffsetY(newOffsetY);
+      }
+    } else {
+      // Lock disengaged
+      if (lockedUv) {
+        setLockedUv(null);
+      }
+    }
+  }, [offsetLock, mouseUv, lockedUv, spectrogramData, bpm, bandsPerOctave, offsetX, offsetY, setOffsetX, setOffsetY]);
+
   useEffect(() => {
     if (spectrogramData && fbo1 && fbo2) {
       const source = pingPong.current === 0 ? fbo1 : fbo2;
+
+      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+      const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
 
       displayMaterial.uniforms.packedDataTex.value = source.texture;
       displayMaterial.uniforms.inverseMapTex.value = spectrogramData.inverseMapTex;
@@ -96,8 +146,9 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
       displayMaterial.uniforms.sampleRate.value = spectrogramData.sampleRate;
       displayMaterial.uniforms.zoomPower.value = zoomPower;
       displayMaterial.uniforms.scroll.value = scroll;
-      displayMaterial.uniforms.featherX.value = featherX;
-      displayMaterial.uniforms.featherY.value = featherY;
+      displayMaterial.uniforms.featherX.value = featherX / 100;
+      displayMaterial.uniforms.featherY.value = featherY / 100;
+      displayMaterial.uniforms.offsetUv.value.copy(offsetUv);
 
       // Update brush visualization uniforms
       if (mouseUv) {
@@ -134,6 +185,8 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
     brushWidth,
     brushHeight,
     bandsPerOctave,
+    offsetX,
+    offsetY,
   ]);
 
   const update = (x: number, y: number) => {
@@ -153,6 +206,8 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
     );
     const brushCenterUv = new THREE.Vector2(x, 1 - y);
 
+    const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
+
     const brush = brushes[brushType];
     mesh.current.material = brush.material;
 
@@ -162,9 +217,10 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
       sourceTexture: source.texture,
       zoomPower,
       scroll,
-      featherX,
-      featherY,
+      featherX: featherX / 100,
+      featherY: featherY / 100,
       brushIntensity,
+      offsetUv,
     });
 
     gl.setRenderTarget(destination);

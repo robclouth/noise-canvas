@@ -38,13 +38,13 @@ const TransformMaterial = shaderMaterial(
     ${code}
 
     void main() {
-        vec2 unpackedUv = getUnpackedUvFromPackedUv(vUv);
+        Coords coords = getCoords(vUv);
         vec4 originalTexel = texture2D(packedDataTex, vUv);
 
-        if (isInBrush(unpackedUv)) {
+        if (isInBrush(coords.dest)) {
             // The origin for all transforms is the brush center.
             // We are applying the INVERSE transform to find the source pixel.
-            vec2 relativeUv = unpackedUv - brushCenterUv;
+            vec2 relativeUv = coords.source - brushCenterUv;
 
             // 1. Rotation (around center)
             float rad = radians(-rotation);
@@ -67,9 +67,9 @@ const TransformMaterial = shaderMaterial(
             vec2 finalSourceUv = transformedUv - shiftUv;
             
             vec4 transformedTexel;
-            vec2 targetUv = unpackedUv; // The destination is the current pixel
+            vec2 targetUv = coords.dest; // The destination is the current pixel
 
-            if (isInBrush(finalSourceUv)) {
+            if (isInBrush(finalSourceUv + offsetUv)) {
                 transformedTexel = sampleSpectrogramTransformed(finalSourceUv, targetUv);
             } else {
                 if (boundaryMode == 0) { // Smear
@@ -81,7 +81,7 @@ const TransformMaterial = shaderMaterial(
                     transformedTexel = sampleSpectrogramTransformed(wrappedSourceUv, targetUv);
                 }
             }
-            float weight = getFeatherWeight(unpackedUv);
+            float weight = getFeatherWeight(coords.dest);
             gl_FragColor = mix(originalTexel, transformedTexel, weight * brushIntensity);
         } else {
             gl_FragColor = originalTexel;

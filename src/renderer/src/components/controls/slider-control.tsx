@@ -45,6 +45,7 @@ export const LabeledSlider = ({
         onChange={(val) => onChange(isLog ? Math.pow(2, val) : val)}
       />
       <NumberInput
+        variant="unstyled"
         w={80}
         size="xs"
         hideControls

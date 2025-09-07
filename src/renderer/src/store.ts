@@ -86,6 +86,11 @@ export const featherXAtom = atomWithStorage("featherX", 0.5);
 export const featherYAtom = atomWithStorage("featherY", 0.5);
 
 export const brushIntensityAtom = atomWithStorage("brushIntensity", 1.0);
+export const panAtom = atomWithStorage("pan", 0.0);
+
+export const offsetXAtom = atomWithStorage("offsetX", 0.0);
+export const offsetYAtom = atomWithStorage("offsetY", 0.0);
+export const offsetLockAtom = atomWithStorage("offsetLock", false);
 
 export const mouseUvAtom = atom<Vector2 | null>(null);
 

@@ -26,20 +26,20 @@ const PitchShiftMaterial = shaderMaterial(
     ${code}
 
     void main() {
-        vec2 unpackedUv = getUnpackedUvFromPackedUv(vUv);
+        Coords coords = getCoords(vUv);
         vec4 originalTexel = texture2D(packedDataTex, vUv);
 
-        if (isInBrush(unpackedUv)) {
+        if (isInBrush(coords.dest)) {
             // 1. Determine the source UV for PITCH information
             // This is the original UV, shifted vertically by the desired pitch amount.
-            vec2 sourceUvPitch = unpackedUv - pitchShiftUv;
+            vec2 sourceUvPitch = coords.source - pitchShiftUv;
 
             // 2. Get the high-quality, phase-correct complex data from the PITCH source
             vec4 complexDataPitch = sampleSpectrogramPhaseCorrect(sourceUvPitch);
 
             // 3. Determine the source UV for FORMANT (magnitude) information
             // This is simply the original, unshifted UV.
-            vec2 sourceUvFormant = unpackedUv;
+            vec2 sourceUvFormant = coords.source;
             
             // 4. Get the magnitude from the FORMANT source. A simple point sample is
             // often best for this, as it captures the raw spectral envelope.
@@ -64,7 +64,7 @@ const PitchShiftMaterial = shaderMaterial(
             vec4 transformedTexel = vec4(finalComplexCh1, finalComplexCh2);
 
             // Apply feathering
-            float weight = getFeatherWeight(unpackedUv);
+            float weight = getFeatherWeight(coords.dest);
             gl_FragColor = mix(originalTexel, transformedTexel, weight);
         } else {
             gl_FragColor = originalTexel;

@@ -23,18 +23,20 @@ const GainMaterial = shaderMaterial(
     ${code}
 
     void main() {
-        vec2 unpackedUv = getUnpackedUvFromPackedUv(vUv);
+        Coords coords = getCoords(vUv);
+        vec4 originalTexel = texture2D(packedDataTex, vUv);
 
-        vec4 texel = texture2D(packedDataTex, vUv);
-
-        if (isInBrush(unpackedUv)) {
-            float weight = getFeatherWeight(unpackedUv);
+        if (isInBrush(coords.dest)) {
+            float weight = getFeatherWeight(coords.dest);
             float gain = pow(10.0, gainDb / 20.0);
-            float featheredGain = mix(1.0, gain, weight * brushIntensity);
-            texel *= featheredGain;
-        }
+            
+            vec4 sourceTexel = sampleSpectrogramPoint(coords.source);
+            vec4 modifiedTexel = sourceTexel * gain;
 
-        gl_FragColor = texel;
+            gl_FragColor = mix(originalTexel, modifiedTexel, weight * brushIntensity);
+        } else {
+            gl_FragColor = originalTexel;
+        }
     }
   `,
 );

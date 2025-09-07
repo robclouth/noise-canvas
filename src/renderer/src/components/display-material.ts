@@ -74,6 +74,12 @@ void main() {
         color = mix(color, vec3(1.0), featherWeight * 0.15);
     }
 
+    // Offset brush visualization
+    float offsetFeatherWeight = getFeatherWeight(zoomedUv + offsetUv);
+    if (offsetFeatherWeight > 0.0) {
+        color = mix(color, vec3(1.0, 0.5, 0.5), offsetFeatherWeight * 0.15);
+    }
+
     gl_FragColor = vec4(color, 1.0);
 }
 `,

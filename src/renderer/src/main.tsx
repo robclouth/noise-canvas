@@ -12,7 +12,7 @@ import { Provider as JotaiProvider } from "jotai";
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <JotaiProvider store={store}>
-      <MantineProvider forceColorScheme="dark">
+      <MantineProvider forceColorScheme="dark" theme={{ primaryColor: "violet" }}>
         <Notifications />
         <App />
       </MantineProvider>

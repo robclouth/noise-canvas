@@ -39,10 +39,16 @@ uniform float zoomPower;
 uniform float scroll;
 uniform float featherX;
 uniform float featherY;
+uniform vec2 offsetUv;
 
 //------------------------------------------------------------------------------
 // Coordinate System & Helpers
 //------------------------------------------------------------------------------
+struct Coords {
+    vec2 dest;
+    vec2 source;
+};
+
 vec2 screenToZoomed(vec2 screenUv) {
   float zoom = pow(2.0, zoomPower);
   if (zoom <= 1.0) { return screenUv; }
@@ -65,6 +71,13 @@ vec2 getUnpackedUvFromPackedUv(vec2 packedUv) {
     unpackedUv.x = rawUnpacked.x / numFrames;
     unpackedUv.y = 1.0 - (rawUnpacked.y + 0.5) / numBands;
     return unpackedUv;
+}
+
+Coords getCoords(vec2 packedUv) {
+    Coords c;
+    c.dest = getUnpackedUvFromPackedUv(packedUv);
+    c.source = c.dest - offsetUv;
+    return c;
 }
 
 bool isInBrush(vec2 logicalUv) {
@@ -210,6 +223,7 @@ export const uniforms = {
   featherX: 0.5,
   featherY: 0.5,
   brushIntensity: 1.0,
+  offsetUv: new Vector2(0, 0),
 };
 
 export const unitsToUv = (
@@ -227,6 +241,23 @@ export const unitsToUv = (
   const shiftInBands = semitones * bandsPerSemitone;
   uv.y = shiftInBands / totalBands;
   return uv;
+};
+
+export const uvToUnits = (
+  uv: Vector2,
+  bpm: number,
+  totalDuration: number,
+  bandsPerOctave: number,
+  totalBands: number,
+): [number, number] => {
+  const seconds = uv.x * totalDuration;
+  const beats = seconds / (60.0 / bpm);
+
+  const bandsPerSemitone = bandsPerOctave / 12.0;
+  const shiftedBands = uv.y * totalBands;
+  const semitones = shiftedBands / bandsPerSemitone;
+
+  return [beats, semitones];
 };
 
 export const screenToZoomed = (screenUv: Vector2, zoomPower: number, scroll: number): Vector2 => {

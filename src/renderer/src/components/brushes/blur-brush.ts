@@ -30,27 +30,28 @@ const BlurMaterial = shaderMaterial(
     }
     
     void main() {
-        vec2 unpackedUv = getUnpackedUvFromPackedUv(vUv);
+        Coords coords = getCoords(vUv);
         vec4 originalTexel = texture2D(packedDataTex, vUv);
 
-        if (isInBrush(unpackedUv)) {
+        if (isInBrush(coords.dest)) {
             vec4 blurredTexel = vec4(0.0);
             float totalWeight = 0.0;
             // Simple box blur
             for (int x = -2; x <= 2; x++) {
                 for (int y = -2; y <= 2; y++) {
                     vec2 offset = vec2(float(x), float(y)) * blurSizeUv;
-                    vec2 unpackedSampleUv = unpackedUv + offset;
+                    vec2 sampleUv = coords.source + offset;
                     
-                    if (isInBrush(unpackedSampleUv)) {
-                        blurredTexel += getDataFromLogicalUv(unpackedSampleUv);
+                    // Check if the ORIGINAL location of this sample is in the brush
+                    if (isInBrush(sampleUv + offsetUv)) {
+                        blurredTexel += getDataFromLogicalUv(sampleUv);
                         totalWeight += 1.0;
                     }
                 }
             }
             if (totalWeight > 0.0) {
               vec4 finalBlur = blurredTexel / totalWeight;
-              float weight = getFeatherWeight(unpackedUv);
+              float weight = getFeatherWeight(coords.dest);
               gl_FragColor = mix(originalTexel, finalBlur, weight * brushIntensity);
             } else {
               gl_FragColor = originalTexel;
