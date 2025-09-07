@@ -55,7 +55,8 @@ class GainBrush extends BaseBrush {
         min: -60,
         max: 6,
         step: 0.1,
-        formatValue: (value) => `${value.toFixed(1)} dB`,
+        unit: "dB",
+        formatValue: (value) => `${value.toFixed(1)}`,
       },
     ];
   }

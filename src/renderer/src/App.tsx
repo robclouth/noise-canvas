@@ -110,13 +110,13 @@ function App(): React.JSX.Element {
 
   return (
     <Flex h="100vh" w="100vw" bg="dark.8" c="gray.2">
-      <ControlsPanel />
+      <BrushPanel />
       <CanvasPanel
         rendererRef={rendererRef}
         getSnappedCoordinates={getSnappedCoordinates}
         performBrushStroke={performBrushStroke}
       />
-      <BrushPanel />
+      <ControlsPanel />
     </Flex>
   );
 }

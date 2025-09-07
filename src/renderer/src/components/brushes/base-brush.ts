@@ -36,6 +36,7 @@ export type SliderParameter = BaseParameter<number, SetStateActionWithReset<numb
   step: number;
   formatValue: (value: number) => string;
   isLog?: boolean;
+  unit?: string;
 };
 
 export type SelectParameter<T extends string = string> = BaseParameter<T, SetStateActionWithReset<T>> & {

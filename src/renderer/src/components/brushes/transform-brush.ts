@@ -106,7 +106,8 @@ class TransformBrush extends BaseBrush {
         min: 0.0,
         max: 1.0,
         step: 1 / 16,
-        formatValue: (v) => `${v.toFixed(2)} beats`,
+        unit: " beats",
+        formatValue: (v) => `${v.toFixed(2)}`,
       },
       {
         type: "slider",
@@ -116,7 +117,8 @@ class TransformBrush extends BaseBrush {
         min: -1200,
         max: 1200,
         step: 10,
-        formatValue: (v) => `${v.toFixed(0)} cents`,
+        unit: " cents",
+        formatValue: (v) => `${v.toFixed(0)}`,
       },
       {
         type: "slider",
@@ -126,7 +128,8 @@ class TransformBrush extends BaseBrush {
         min: -4.0,
         max: 4.0,
         step: 0.01,
-        formatValue: (v) => `${(v * 100).toFixed(0)}%`,
+        unit: "%",
+        formatValue: (v) => `${(v * 100).toFixed(0)}`,
       },
       {
         type: "slider",
@@ -136,7 +139,8 @@ class TransformBrush extends BaseBrush {
         min: -4.0,
         max: 4.0,
         step: 0.01,
-        formatValue: (v) => `${(v * 100).toFixed(0)}%`,
+        unit: "%",
+        formatValue: (v) => `${(v * 100).toFixed(0)}`,
       },
       {
         type: "slider",
@@ -146,7 +150,8 @@ class TransformBrush extends BaseBrush {
         min: -180,
         max: 180,
         step: 1,
-        formatValue: (v) => `${v.toFixed(0)}°`,
+        unit: "°",
+        formatValue: (v) => `${v.toFixed(0)}`,
       },
       {
         type: "select",

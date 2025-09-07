@@ -78,7 +78,8 @@ class BlurBrush extends BaseBrush {
         min: -6,
         max: 0,
         step: 1,
-        formatValue: (value) => `${value < 1 ? `1/${1 / value}` : value} beats`,
+        unit: "beats",
+        formatValue: (value) => `${value < 1 ? `1/${1 / value}` : value}`,
         isLog: true,
       },
       {
@@ -89,7 +90,8 @@ class BlurBrush extends BaseBrush {
         min: 0,
         max: 2400,
         step: 1,
-        formatValue: (value) => `${value.toFixed(0)} cents`,
+        unit: "cents",
+        formatValue: (value) => `${value.toFixed(0)}`,
       },
     ];
   }

@@ -1,4 +1,4 @@
-import { BrushParameter } from "../../brushes/base-brush";
+import { BrushParameter } from "@/components/brushes/base-brush";
 import { SelectControl } from "./select-control";
 import { SliderControl } from "./slider-control";
 

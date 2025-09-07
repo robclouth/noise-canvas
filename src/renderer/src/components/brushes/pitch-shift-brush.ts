@@ -84,22 +84,24 @@ class PitchShiftBrush extends BaseBrush {
       {
         type: "slider",
         atom: pitchShiftSemitonesAtom,
-        label: "Pitch Shift",
+        label: "Pitch",
         propName: "pitchShiftSemitones",
         min: -24,
         max: 24,
         step: 1,
-        formatValue: (v) => `${v.toFixed(0)} st`,
+        unit: "st",
+        formatValue: (v) => `${v.toFixed(0)}`,
       },
       {
         type: "slider",
         atom: formantPreservationAtom,
-        label: "Formant Preservation",
+        label: "Formant",
         propName: "formantPreservation",
         min: 0.0,
         max: 1.0,
         step: 0.01,
-        formatValue: (v) => `${(v * 100).toFixed(0)}%`,
+        unit: "%",
+        formatValue: (v) => `${(v * 100).toFixed(0)}`,
       },
     ];
   }
