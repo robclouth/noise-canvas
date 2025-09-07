@@ -4,7 +4,7 @@
       "target_name": "gaborator_addon",
       "sources": [ "gaborator-addon.cpp" ],
       "include_dirs": [
-        "<!@(node -p \"require('node-addon-api').include\")",
+        "node_modules/node-addon-api",
         "Gaborator-2.1"
       ],
       "cflags!": [ "-fno-exceptions" ],

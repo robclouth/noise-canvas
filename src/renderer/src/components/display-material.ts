@@ -4,8 +4,8 @@ import { code, uniforms } from "./brushes/common";
 const DisplayMaterial = shaderMaterial(
   {
     ...uniforms,
-    minDB: -70.0,
-    maxDB: 0.0,
+    minDb: -70.0,
+    maxDb: 0.0,
     bpm: 120.0,
     gridSize: 0.25,
   },
@@ -19,39 +19,39 @@ void main(){
   /*glsl*/ `
 precision highp float;
 
+// The refactored common code with new function names
 ${code}
 
-uniform float minDB;
-uniform float maxDB;
+// Uniforms specific to this display material
+uniform float minDb;
+uniform float maxDb;
 uniform float bpm;
 uniform float gridSize;
-
 
 varying vec2 vUv;
 
 float magnitudeToDb(float mag) {
-    float logMag = 20.0 * log(mag + 1.0e-7) / log(10.0); // Use a smaller epsilon
-    float db = (logMag - minDB) / (maxDB - minDB);
+    float logMag = 20.0 * log(mag + 1.0e-7) / log(10.0);
+    float db = (logMag - minDb) / (maxDb - minDb);
     return clamp(db, 0.0, 1.0);
 }
 
 void main() {
-    
-    vec4 packedValue = getDataFromScreenUv(vUv);
+    // UPDATED: Use the new, fast point-sampler for display.
+    vec4 packedValue = samplePointFromScreen(vUv);
 
-    vec2 leftComplex = packedValue.rg; // R=Real, G=Imag
+    vec2 leftComplex = packedValue.rg;
     float leftMag = length(leftComplex);
     float leftDb = magnitudeToDb(leftMag);
     
     vec3 color;
     if (numChannels == 1) {
-        color = vec3(leftDb, leftDb, leftDb);
+        color = vec3(leftDb);
     } else {
-        vec2 rightComplex = packedValue.ba; // B=Real, A=Imag
+        vec2 rightComplex = packedValue.ba;
         float rightMag = length(rightComplex);
         float rightDb = magnitudeToDb(rightMag);
-        // Visualize L in Red, R in Blue
-        color = vec3(leftDb, 0.0, rightDb);
+        color = vec3(leftDb, leftDb * 0.5, rightDb);
     }
 
     // Grid lines
@@ -62,13 +62,13 @@ void main() {
     vec2 zoomedUv = screenToZoomed(vUv);
     float line = mod(zoomedUv.x, gridWidthUv);
 
-    // Use fwidth for consistent 1-pixel line thickness regardless of zoom
     float lineThicknessUv = fwidth(zoomedUv.x);
 
     if (line < lineThicknessUv) {
         color = mix(color, vec3(1.0), 0.2);
     }
 
+    // Brush feather visualization
     float featherWeight = getFeatherWeight(zoomedUv);
     if (featherWeight > 0.0) {
         color = mix(color, vec3(1.0), featherWeight * 0.15);

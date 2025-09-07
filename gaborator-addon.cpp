@@ -42,7 +42,12 @@ Napi::Value analyze(const Napi::CallbackInfo& info) {
     double fminHz = paramsJs.Get("fmin").As<Napi::Number>().DoubleValue();
     double fminFrac = fminHz / sampleRate;
     gaborator::log_fq_scale scale(bandsPerOctave, fminFrac);
-    gaborator::parameters params(scale);
+
+    // Higher values (up to 1.0) mean more
+    // temporal resolution but are computationally more expensive.
+    double overlap = 0.8;
+    gaborator::parameters params(scale, overlap);
+
     gaborator::analyzer<float> analyzer(params);
 
     int bandBegin = analyzer.bandpass_bands_begin();
@@ -68,7 +73,7 @@ Napi::Value analyze(const Napi::CallbackInfo& info) {
     }
 
     // Calculate texture dimensions
-    const int maxWidth = 4096;
+    const int maxWidth = 8192;
     const int textureWidth = std::min((size_t)maxWidth, totalComplexCoefficients);
     const int textureHeight = (totalComplexCoefficients > 0) ? (totalComplexCoefficients + textureWidth - 1) / textureWidth : 0; // Ceiling division
 
@@ -192,7 +197,13 @@ Napi::Value synthesize(const Napi::CallbackInfo& info) {
     double fminHz = paramsJs.Get("fmin").As<Napi::Number>().DoubleValue();
     double fminFrac = fminHz / sampleRate;
     gaborator::log_fq_scale scale(bandsPerOctave, fminFrac);
-    gaborator::parameters params(scale);
+
+    // Default overlap is 0.6. Let's increase it to 0.8 for higher time resolution.
+    // You can experiment with this value. Higher values (up to 1.0) mean more
+    // temporal resolution but are computationally more expensive.
+    double overlap = 0.8;
+    gaborator::parameters params(scale, overlap);
+
     gaborator::analyzer<float> analyzer(params);
 
     int band_begin = analyzer.bandpass_bands_begin();

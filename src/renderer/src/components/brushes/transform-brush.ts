@@ -1,18 +1,18 @@
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
 import * as THREE from "three";
-import { bandsPerOctaveAtom, bpmAtom, spectrogramDataAtom, store } from "../../store";
+import { bandsPerOctaveAtom, bpmAtom, fminAtom, spectrogramDataAtom, store } from "../../store";
 import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
 import { code, uniforms, unitsToUv, vertexShader } from "./common";
 
 export const boundaryModes = ["smear", "cut", "wrap"] as const;
 export type BoundaryMode = (typeof boundaryModes)[number];
 
-export const shiftXAtom = atomWithStorage("shiftX", 0.0); // in beats
-export const shiftYCentsAtom = atomWithStorage("shiftYCents", 0.0); // in cents
-export const scaleXAtom = atomWithStorage("scaleX", 1.0); // as a factor
-export const scaleYAtom = atomWithStorage("scaleY", 1.0); // as a factor
-export const rotationAtom = atomWithStorage("rotation", 0.0); // in degrees
+export const shiftXAtom = atomWithStorage("shiftX", 0.0);
+export const shiftYCentsAtom = atomWithStorage("shiftYCents", 0.0);
+export const scaleXAtom = atomWithStorage("scaleX", 1.0);
+export const scaleYAtom = atomWithStorage("scaleY", 1.0);
+export const rotationAtom = atomWithStorage("rotation", 0.0);
 export const boundaryModeAtom = atomWithStorage<BoundaryMode>("boundaryMode", "cut");
 
 const TransformMaterial = shaderMaterial(
@@ -20,8 +20,8 @@ const TransformMaterial = shaderMaterial(
     ...uniforms,
     shiftUv: new THREE.Vector2(0.0, 0.0),
     scale: new THREE.Vector2(1.0, 1.0),
-    rotation: 0.0, // in degrees
-    boundaryMode: 0, // 0: smear, 1: cut, 2: wrap
+    rotation: 0.0,
+    boundaryMode: 0,
   },
   vertexShader,
   /*glsl*/ `
@@ -31,7 +31,7 @@ const TransformMaterial = shaderMaterial(
     uniform vec2 shiftUv;
     uniform vec2 scale;
     uniform float rotation;
-    uniform int boundaryMode; // 0: smear, 1: cut, 2: wrap
+    uniform int boundaryMode;
 
     ${code}
 
@@ -42,33 +42,30 @@ const TransformMaterial = shaderMaterial(
         if (isInBrush(unpackedUv)) {
             vec2 relativeUv = unpackedUv - brushCenterUv;
 
-            // Inverse Scale
             if (scale.x != 0.0 && scale.y != 0.0) {
               relativeUv /= scale;
             }
 
-            // Inverse Rotation
             float rad = radians(-rotation);
-            float s = sin(rad);
-            float c = cos(rad);
-            mat2 rotMat = mat2(c, -s, s, c);
+            mat2 rotMat = mat2(cos(rad), -sin(rad), sin(rad), cos(rad));
             relativeUv = rotMat * relativeUv;
 
             vec2 transformedUv = relativeUv + brushCenterUv;
             vec2 finalSourceUv = transformedUv - shiftUv;
             
             vec4 transformedTexel;
+            vec2 targetUv = unpackedUv; // The destination is the current pixel
 
             if (isInBrush(finalSourceUv)) {
-                transformedTexel = getDataFromLogicalUv(finalSourceUv);
+                transformedTexel = sampleSpectrogramTransformed(finalSourceUv, targetUv);
             } else {
                 if (boundaryMode == 0) { // Smear
-                    transformedTexel = getDataFromLogicalUv(finalSourceUv);
+                    transformedTexel = sampleSpectrogramTransformed(finalSourceUv, targetUv);
                 } else if (boundaryMode == 1) { // Cut
                     transformedTexel = vec4(0.0); 
                 } else { // Wrap
-                    finalSourceUv = fract(finalSourceUv);
-                    transformedTexel = getDataFromLogicalUv(finalSourceUv);
+                    vec2 wrappedSourceUv = fract(finalSourceUv);
+                    transformedTexel = sampleSpectrogramTransformed(wrappedSourceUv, targetUv);
                 }
             }
             float weight = getFeatherWeight(unpackedUv);
@@ -96,7 +93,7 @@ class TransformBrush extends BaseBrush {
         min: 0.0,
         max: 1.0,
         step: 1 / 16,
-        formatValue: (value) => `${value.toFixed(2)} beats`,
+        formatValue: (v) => `${v.toFixed(2)} beats`,
       },
       {
         type: "slider",
@@ -106,7 +103,7 @@ class TransformBrush extends BaseBrush {
         min: -1200,
         max: 1200,
         step: 10,
-        formatValue: (value) => `${value.toFixed(0)} cents`,
+        formatValue: (v) => `${v.toFixed(0)} cents`,
       },
       {
         type: "slider",
@@ -116,7 +113,7 @@ class TransformBrush extends BaseBrush {
         min: -4.0,
         max: 4.0,
         step: 0.01,
-        formatValue: (value) => `${(value * 100).toFixed(0)}%`,
+        formatValue: (v) => `${(v * 100).toFixed(0)}%`,
       },
       {
         type: "slider",
@@ -126,7 +123,7 @@ class TransformBrush extends BaseBrush {
         min: -4.0,
         max: 4.0,
         step: 0.01,
-        formatValue: (value) => `${(value * 100).toFixed(0)}%`,
+        formatValue: (v) => `${(v * 100).toFixed(0)}%`,
       },
       {
         type: "slider",
@@ -136,7 +133,7 @@ class TransformBrush extends BaseBrush {
         min: -180,
         max: 180,
         step: 1,
-        formatValue: (value) => `${value.toFixed(0)}°`,
+        formatValue: (v) => `${v.toFixed(0)}°`,
       },
       {
         type: "select",
@@ -152,20 +149,19 @@ class TransformBrush extends BaseBrush {
     super.updateUniforms(props);
     const spectrogramData = store.get(spectrogramDataAtom);
     const bpm = store.get(bpmAtom);
-    const shiftX = store.get(shiftXAtom);
-    const shiftYCents = store.get(shiftYCentsAtom);
-    const scaleX = store.get(scaleXAtom);
-    const scaleY = store.get(scaleYAtom);
-    const rotation = store.get(rotationAtom);
-    const boundaryMode = store.get(boundaryModeAtom);
+    const bandsPerOctave = store.get(bandsPerOctaveAtom);
+    const minFreq = store.get(fminAtom);
 
     if (!spectrogramData) return;
 
+    // Update new uniforms for pitch shifting
+    this.material.uniforms.minFreq.value = minFreq;
+    this.material.uniforms.bandsPerOctave.value = bandsPerOctave;
+
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-    const bandsPerOctave = store.get(bandsPerOctaveAtom);
     const shiftUv = unitsToUv(
-      shiftX,
-      shiftYCents / 100, // convert cents to semitones
+      store.get(shiftXAtom),
+      store.get(shiftYCentsAtom) / 100,
       bpm,
       totalDuration,
       bandsPerOctave,
@@ -173,9 +169,9 @@ class TransformBrush extends BaseBrush {
     );
 
     this.material.uniforms.shiftUv.value.copy(shiftUv);
-    this.material.uniforms.scale.value.set(scaleX, scaleY);
-    this.material.uniforms.rotation.value = rotation;
-    this.material.uniforms.boundaryMode.value = boundaryModes.indexOf(boundaryMode);
+    this.material.uniforms.scale.value.set(store.get(scaleXAtom), store.get(scaleYAtom));
+    this.material.uniforms.rotation.value = store.get(rotationAtom);
+    this.material.uniforms.boundaryMode.value = boundaryModes.indexOf(store.get(boundaryModeAtom));
   }
 }
 

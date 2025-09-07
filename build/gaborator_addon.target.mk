@@ -52,7 +52,7 @@ INCS_Debug := \
 	-I/Users/rob/Library/Caches/node-gyp/24.2.0/deps/uv/include \
 	-I/Users/rob/Library/Caches/node-gyp/24.2.0/deps/zlib \
 	-I/Users/rob/Library/Caches/node-gyp/24.2.0/deps/v8/include \
-	-I/Users/rob/Documents/Projects/Music/Tools/noise-canvas/node_modules/node-addon-api \
+	-I$(srcdir)/node_modules/node-addon-api \
 	-I$(srcdir)/Gaborator-2.1
 
 DEFS_Release := \
@@ -103,7 +103,7 @@ INCS_Release := \
 	-I/Users/rob/Library/Caches/node-gyp/24.2.0/deps/uv/include \
 	-I/Users/rob/Library/Caches/node-gyp/24.2.0/deps/zlib \
 	-I/Users/rob/Library/Caches/node-gyp/24.2.0/deps/v8/include \
-	-I/Users/rob/Documents/Projects/Music/Tools/noise-canvas/node_modules/node-addon-api \
+	-I$(srcdir)/node_modules/node-addon-api \
 	-I$(srcdir)/Gaborator-2.1
 
 OBJS := \

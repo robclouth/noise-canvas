@@ -38,6 +38,9 @@ import {
   zoomPowerAtom,
 } from "./store";
 
+const BRUSH_WIDTH_MAX_LOG2 = 8;
+const BRUSH_HEIGHT_MAX = 128;
+
 const SliderControl = ({ parameter }: { parameter: SliderParameter }) => {
   const [value, setValue] = useAtom(parameter.atom);
   return (
@@ -148,7 +151,7 @@ function App(): React.JSX.Element {
         bandsPerOctave: store.get(bandsPerOctaveAtom),
         fmin: store.get(fminAtom),
       };
-      window.api.loadFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/garage.mp3", params);
+      window.api.loadFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/voice.wav", params);
     }
 
     const unsubOpenFile = window.api.onOpenFile((path) => {
@@ -506,28 +509,41 @@ function App(): React.JSX.Element {
         <ResizablePanel className="max-w-64 min-w-64 p-2 flex flex-col gap-4 items-stretch">
           <div className="flex flex-col gap-2">
             <label htmlFor="brush-width" className="text-sm font-medium">
-              Brush Width: {brushWidth < 1 ? `1/${1 / brushWidth}` : brushWidth} beats
+              Brush Width:{" "}
+              {brushWidth === Infinity ? "Full" : (brushWidth < 1 ? `1/${1 / brushWidth}` : brushWidth) + " beats"}
             </label>
             <Slider
               id="brush-width"
               min={-4}
-              max={2}
+              max={BRUSH_WIDTH_MAX_LOG2 + 1}
               step={1}
-              value={[Math.log2(brushWidth)]}
-              onValueChange={([val]) => setBrushWidth(Math.pow(2, val))}
+              value={[brushWidth === Infinity ? BRUSH_WIDTH_MAX_LOG2 + 1 : Math.log2(brushWidth)]}
+              onValueChange={([val]) => {
+                if (val === BRUSH_WIDTH_MAX_LOG2 + 1) {
+                  setBrushWidth(Infinity);
+                } else {
+                  setBrushWidth(Math.pow(2, val));
+                }
+              }}
             />
           </div>
           <div className="flex flex-col gap-2">
             <label htmlFor="brush-height" className="text-sm font-medium">
-              Brush Height: {brushHeight} semitones
+              Brush Height: {brushHeight === Infinity ? "Full" : `${brushHeight} semitones`}
             </label>
             <Slider
               id="brush-height"
               min={1}
-              max={48}
+              max={BRUSH_HEIGHT_MAX + 1}
               step={1}
-              value={[brushHeight]}
-              onValueChange={([val]) => setBrushHeight(val)}
+              value={[brushHeight === Infinity ? BRUSH_HEIGHT_MAX + 1 : brushHeight]}
+              onValueChange={([val]) => {
+                if (val === BRUSH_HEIGHT_MAX + 1) {
+                  setBrushHeight(Infinity);
+                } else {
+                  setBrushHeight(val);
+                }
+              }}
             />
           </div>
           <div className="flex items-center justify-between">
