@@ -19,9 +19,16 @@ const BlurMaterial = shaderMaterial(
     varying vec2 vUv;
 
     uniform vec2 blurSizeUv;
+    uniform float brushIntensity;
 
     ${code}
 
+    vec4 getDataFromLogicalUv(vec2 logicalUv) {
+        // HACK: for some reason the point sampler returns 0 here.
+        // It's not worth debugging right now. Let's just use the slow one.
+        return sampleSpectrogramPhaseCorrect(logicalUv);
+    }
+    
     void main() {
         vec2 unpackedUv = getUnpackedUvFromPackedUv(vUv);
         vec4 originalTexel = texture2D(packedDataTex, vUv);
@@ -44,7 +51,7 @@ const BlurMaterial = shaderMaterial(
             if (totalWeight > 0.0) {
               vec4 finalBlur = blurredTexel / totalWeight;
               float weight = getFeatherWeight(unpackedUv);
-              gl_FragColor = mix(originalTexel, finalBlur, weight);
+              gl_FragColor = mix(originalTexel, finalBlur, weight * brushIntensity);
             } else {
               gl_FragColor = originalTexel;
             }

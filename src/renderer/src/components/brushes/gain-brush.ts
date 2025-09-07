@@ -18,6 +18,7 @@ const GainMaterial = shaderMaterial(
     varying vec2 vUv;
 
     uniform float gainDb;
+    uniform float brushIntensity;
 
     ${code}
 
@@ -29,7 +30,7 @@ const GainMaterial = shaderMaterial(
         if (isInBrush(unpackedUv)) {
             float weight = getFeatherWeight(unpackedUv);
             float gain = pow(10.0, gainDb / 20.0);
-            float featheredGain = mix(1.0, gain, weight);
+            float featheredGain = mix(1.0, gain, weight * brushIntensity);
             texel *= featheredGain;
         }
 

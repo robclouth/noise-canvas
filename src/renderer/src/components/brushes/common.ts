@@ -209,6 +209,7 @@ export const uniforms = {
   scroll: 0.0,
   featherX: 0.5,
   featherY: 0.5,
+  brushIntensity: 1.0,
 };
 
 export const unitsToUv = (

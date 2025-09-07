@@ -20,6 +20,7 @@ import {
   bandsPerOctaveAtom,
   bpmAtom,
   brushHeightAtom,
+  brushIntensityAtom,
   brushTypeAtom,
   brushWidthAtom,
   featherXAtom,
@@ -127,6 +128,7 @@ function App(): React.JSX.Element {
   const [scroll, setScroll] = useAtom(scrollAtom);
   const [featherX, setFeatherX] = useAtom(featherXAtom);
   const [featherY, setFeatherY] = useAtom(featherYAtom);
+  const [brushIntensity, setBrushIntensity] = useAtom(brushIntensityAtom);
   const setMouseUv = useSetAtom(mouseUvAtom);
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -544,6 +546,19 @@ function App(): React.JSX.Element {
                   setBrushHeight(val);
                 }
               }}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <label htmlFor="intensity-slider" className="text-sm font-medium">
+              Intensity: {(brushIntensity * 100).toFixed(0)}%
+            </label>
+            <Slider
+              id="intensity-slider"
+              min={0.01}
+              max={1}
+              step={0.01}
+              value={[brushIntensity]}
+              onValueChange={([val]) => setBrushIntensity(val)}
             />
           </div>
           <div className="flex items-center justify-between">

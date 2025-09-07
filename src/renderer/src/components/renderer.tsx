@@ -6,6 +6,7 @@ import {
   bandsPerOctaveAtom,
   bpmAtom,
   brushHeightAtom,
+  brushIntensityAtom,
   brushTypeAtom,
   brushWidthAtom,
   featherXAtom,
@@ -42,6 +43,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
   const featherY = useAtomValue(featherYAtom);
   const mouseUv = useAtomValue(mouseUvAtom);
   const bandsPerOctave = useAtomValue(bandsPerOctaveAtom);
+  const brushIntensity = useAtomValue(brushIntensityAtom);
   const { gl, scene, camera, invalidate } = useThree();
 
   const mesh = useRef<THREE.Mesh>(null);
@@ -162,6 +164,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
       scroll,
       featherX,
       featherY,
+      brushIntensity,
     });
 
     gl.setRenderTarget(destination);

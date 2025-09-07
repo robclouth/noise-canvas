@@ -14,6 +14,7 @@ export interface UpdateUniformsProps {
   scroll: number;
   featherX: number;
   featherY: number;
+  brushIntensity: number;
 }
 
 export interface BrushUniforms {
@@ -49,7 +50,7 @@ export abstract class BaseBrush {
   abstract parameters: BrushParameter[];
 
   updateUniforms(props: UpdateUniformsProps): void {
-    const { brushCenterUv, brushSizeUv, sourceTexture, zoomPower, scroll, featherX, featherY } = props;
+    const { brushCenterUv, brushSizeUv, sourceTexture, zoomPower, scroll, featherX, featherY, brushIntensity } = props;
     const uniforms = this.material.uniforms;
     const spectrogramData = store.get(spectrogramDataAtom);
 
@@ -69,5 +70,6 @@ export abstract class BaseBrush {
     uniforms.scroll.value = scroll;
     uniforms.featherX.value = featherX;
     uniforms.featherY.value = featherY;
+    uniforms.brushIntensity.value = brushIntensity;
   }
 }
