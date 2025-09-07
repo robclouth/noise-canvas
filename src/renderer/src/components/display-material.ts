@@ -51,7 +51,10 @@ void main() {
         vec2 rightComplex = packedValue.ba;
         float rightMag = length(rightComplex);
         float rightDb = magnitudeToDb(rightMag);
-        color = vec3(leftDb, leftDb * 0.5, rightDb);
+        
+        vec3 leftColor = vec3(leftDb, leftDb * 0.5, 0.0);
+        vec3 rightColor = vec3(0.0, rightDb * 0.5, rightDb);
+        color = leftColor + rightColor;
     }
 
     // Grid lines
