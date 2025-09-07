@@ -18,7 +18,6 @@ const GainMaterial = shaderMaterial(
     varying vec2 vUv;
 
     uniform float gainDb;
-    uniform float brushIntensity;
 
     ${code}
 
@@ -33,7 +32,7 @@ const GainMaterial = shaderMaterial(
             vec4 sourceTexel = sampleSpectrogramPoint(coords.source);
             vec4 modifiedTexel = sourceTexel * gain;
 
-            gl_FragColor = mix(originalTexel, modifiedTexel, weight * brushIntensity);
+            gl_FragColor = applyBrushEffect(originalTexel, modifiedTexel, weight);
         } else {
             gl_FragColor = originalTexel;
         }

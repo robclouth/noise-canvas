@@ -7,7 +7,7 @@ import { ParameterControl } from "../controls/parameter-control";
 export function BrushPanel() {
   const [brushType, setBrushType] = useAtom(brushTypeAtom);
   return (
-    <Flex direction="column" w={300} p="xs" gap="xs">
+    <Flex direction="column" w={300} p="xs" gap={0}>
       <Select
         size="xs"
         value={brushType}

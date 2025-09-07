@@ -16,6 +16,7 @@ import {
   offsetLockAtom,
   offsetXAtom,
   offsetYAtom,
+  panAtom,
   runSynthesis,
   scrollAtom,
   spectrogramDataAtom,
@@ -50,6 +51,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
   const [offsetX, setOffsetX] = useAtom(offsetXAtom);
   const [offsetY, setOffsetY] = useAtom(offsetYAtom);
   const offsetLock = useAtomValue(offsetLockAtom);
+  const pan = useAtomValue(panAtom);
   const { gl, scene, camera, invalidate } = useThree();
 
   const [lockedUv, setLockedUv] = useState<THREE.Vector2 | null>(null);
@@ -221,6 +223,7 @@ export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_pr
       featherY: featherY / 100,
       brushIntensity,
       offsetUv,
+      pan,
     });
 
     gl.setRenderTarget(destination);

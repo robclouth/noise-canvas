@@ -19,7 +19,6 @@ const BlurMaterial = shaderMaterial(
     varying vec2 vUv;
 
     uniform vec2 blurSizeUv;
-    uniform float brushIntensity;
 
     ${code}
 
@@ -52,7 +51,7 @@ const BlurMaterial = shaderMaterial(
             if (totalWeight > 0.0) {
               vec4 finalBlur = blurredTexel / totalWeight;
               float weight = getFeatherWeight(coords.dest);
-              gl_FragColor = mix(originalTexel, finalBlur, weight * brushIntensity);
+              gl_FragColor = applyBrushEffect(originalTexel, finalBlur, weight);
             } else {
               gl_FragColor = originalTexel;
             }

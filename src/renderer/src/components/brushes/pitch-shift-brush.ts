@@ -65,7 +65,7 @@ const PitchShiftMaterial = shaderMaterial(
 
             // Apply feathering
             float weight = getFeatherWeight(coords.dest);
-            gl_FragColor = mix(originalTexel, transformedTexel, weight);
+            gl_FragColor = applyBrushEffect(originalTexel, transformedTexel, weight);
         } else {
             gl_FragColor = originalTexel;
         }

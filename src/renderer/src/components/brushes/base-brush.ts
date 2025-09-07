@@ -16,6 +16,7 @@ export interface UpdateUniformsProps {
   featherY: number;
   brushIntensity: number;
   offsetUv: THREE.Vector2;
+  pan: number;
 }
 
 export interface BrushUniforms {
@@ -74,5 +75,6 @@ export abstract class BaseBrush {
     uniforms.featherY.value = featherY;
     uniforms.brushIntensity.value = brushIntensity;
     uniforms.offsetUv.value.copy(props.offsetUv);
+    this.material.uniforms.pan.value = props.pan;
   }
 }

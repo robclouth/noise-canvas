@@ -40,6 +40,8 @@ uniform float scroll;
 uniform float featherX;
 uniform float featherY;
 uniform vec2 offsetUv;
+uniform float pan;
+uniform float brushIntensity;
 
 //------------------------------------------------------------------------------
 // Coordinate System & Helpers
@@ -78,6 +80,21 @@ Coords getCoords(vec2 packedUv) {
     c.dest = getUnpackedUvFromPackedUv(packedUv);
     c.source = c.dest - offsetUv;
     return c;
+}
+
+vec4 applyBrushEffect(vec4 original, vec4 modified, float weight) {
+    vec2 originalL = original.rg;
+    vec2 originalR = original.ba;
+    vec2 modifiedL = modified.rg;
+    vec2 modifiedR = modified.ba;
+
+    float leftWeight = clamp(1.0 - pan, 0.0, 1.0);
+    float rightWeight = clamp(1.0 + pan, 0.0, 1.0);
+
+    vec2 finalL = mix(originalL, modifiedL, weight * brushIntensity * leftWeight);
+    vec2 finalR = mix(originalR, modifiedR, weight * brushIntensity * rightWeight);
+
+    return vec4(finalL, finalR);
 }
 
 bool isInBrush(vec2 logicalUv) {
@@ -224,6 +241,7 @@ export const uniforms = {
   featherY: 0.5,
   brushIntensity: 1.0,
   offsetUv: new Vector2(0, 0),
+  pan: 0.0,
 };
 
 export const unitsToUv = (

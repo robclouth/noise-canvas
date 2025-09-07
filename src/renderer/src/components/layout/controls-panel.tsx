@@ -10,6 +10,7 @@ import {
   offsetLockAtom,
   offsetXAtom,
   offsetYAtom,
+  panAtom,
   snapXAtom,
   snapYAtom,
 } from "@/store";
@@ -31,9 +32,10 @@ export function ControlsPanel() {
   const [featherX, setFeatherX] = useAtom(featherXAtom);
   const [featherY, setFeatherY] = useAtom(featherYAtom);
   const [brushIntensity, setBrushIntensity] = useAtom(brushIntensityAtom);
+  const [pan, setPan] = useAtom(panAtom);
 
   return (
-    <Flex direction="column" w={300} p="xs" gap="xs">
+    <Flex direction="column" w={300} p="xs" gap={0}>
       <Divider my="sm" label="Brush" labelPosition="center" />
       <LabeledSlider
         label="Width"
@@ -63,6 +65,7 @@ export function ControlsPanel() {
         step={1}
         unit="%"
       />
+      <LabeledSlider label="Pan" value={pan} onChange={setPan} min={-1} max={1} step={0.01} />
       <LabeledSlider label="Feather Time" value={featherX} onChange={setFeatherX} min={0} max={100} step={1} unit="%" />
       <LabeledSlider
         label="Feather Pitch"

@@ -22,7 +22,6 @@ const TransformMaterial = shaderMaterial(
     scale: new THREE.Vector2(1.0, 1.0),
     rotation: 0.0,
     boundaryMode: 0,
-    brushIntensity: 1.0,
   },
   vertexShader,
   /*glsl*/ `
@@ -33,7 +32,6 @@ const TransformMaterial = shaderMaterial(
     uniform vec2 scale;
     uniform float rotation;
     uniform int boundaryMode;
-    uniform float brushIntensity;
 
     ${code}
 
@@ -82,7 +80,7 @@ const TransformMaterial = shaderMaterial(
                 }
             }
             float weight = getFeatherWeight(coords.dest);
-            gl_FragColor = mix(originalTexel, transformedTexel, weight * brushIntensity);
+            gl_FragColor = applyBrushEffect(originalTexel, transformedTexel, weight);
         } else {
             gl_FragColor = originalTexel;
         }
@@ -156,7 +154,7 @@ class TransformBrush extends BaseBrush {
       {
         type: "select",
         atom: boundaryModeAtom,
-        label: "Boundary Mode",
+        label: "Boundary",
         propName: "boundaryMode",
         options: boundaryModes,
       },
