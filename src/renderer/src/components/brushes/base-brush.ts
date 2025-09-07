@@ -46,7 +46,14 @@ export type SelectParameter<T extends string = string> = BaseParameter<T, SetSta
   options: readonly T[];
 };
 
-export type BrushParameter = SliderParameter | SelectParameter<any>;
+export type SwitchParameter = {
+  type: "switch";
+  atom: WritableAtom<boolean, [typeof RESET], void> | WritableAtom<boolean, [SetStateAction<boolean>], void>;
+  label: string;
+  propName: string;
+};
+
+export type BrushParameter = SliderParameter | SelectParameter<any> | SwitchParameter;
 
 export abstract class BaseBrush {
   abstract material: THREE.ShaderMaterial;

@@ -3,12 +3,16 @@ import { blurBrush } from "./blur-brush";
 import { gainBrush } from "./gain-brush";
 import { transformBrush } from "./transform-brush";
 import { pitchShiftBrush } from "./pitch-shift-brush";
+import { transientShaperBrush } from "./transient-shaper";
+import { dynamicsBrush } from "./dynamics-brush";
 
 export const brushes = {
   gain: gainBrush,
   blur: blurBrush,
+  "pitch shift": pitchShiftBrush,
   transform: transformBrush,
-  pitchShift: pitchShiftBrush,
+  "transient shaper": transientShaperBrush,
+  dynamics: dynamicsBrush,
 };
 
 export type BrushType = keyof typeof brushes;
