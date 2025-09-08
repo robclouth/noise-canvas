@@ -1,11 +1,20 @@
 import { Box, Paper, Flex, NumberInput, ActionIcon, Text } from "@mantine/core";
 import { Canvas } from "@react-three/fiber";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { Play, Square } from "lucide-react";
+import { Play, Repeat, Square } from "lucide-react";
 import { MouseEventHandler, RefObject, useEffect, useRef, useState } from "react";
 import { Vector2 } from "three";
 import { playAudio, playbackTimeAtom, stopAudio } from "../../audio-manager";
-import { bpmAtom, isPlayingAtom, mouseUvAtom, scrollAtom, spectrogramDataAtom, zoomPowerAtom } from "../../store";
+import {
+  bpmAtom,
+  isPlayingAtom,
+  loopAtom,
+  mouseUvAtom,
+  scrollAtom,
+  spectrogramDataAtom,
+  store,
+  zoomPowerAtom,
+} from "../../store";
 import { zoomedToScreen } from "../brushes/common";
 import { Renderer, RendererHandle } from "../renderer";
 
@@ -36,12 +45,11 @@ export const CanvasPanel = ({ rendererRef, getSnappedCoordinates, performBrushSt
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const playbackLineRef = useRef<HTMLDivElement>(null);
-  const spectrogramData = useAtomValue(spectrogramDataAtom);
-  const zoomPower = useAtomValue(zoomPowerAtom);
-  const scroll = useAtomValue(scrollAtom);
   const playbackTime = useAtomValue(playbackTimeAtom);
   const [isPlaying, setIsPlaying] = useAtom(isPlayingAtom);
   const [bpm, setBpm] = useAtom(bpmAtom);
+  const [loop, setLoop] = useAtom(loopAtom);
+  const animationFrameIdRef = useRef<number | null>(null);
 
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
     const coords = getSnappedCoordinates(event);
@@ -119,25 +127,50 @@ export const CanvasPanel = ({ rendererRef, getSnappedCoordinates, performBrushSt
   }, []);
 
   useEffect(() => {
-    if (playbackLineRef.current && spectrogramData && canvasSize.width > 0) {
-      if (isPlaying) {
-        playbackLineRef.current.style.display = "block";
-        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const progress = playbackTime / totalDuration;
-        const screenCoords = zoomedToScreen(new Vector2(progress, 0), zoomPower, scroll);
-        const left = screenCoords.x * canvasSize.width;
+    const animate = () => {
+      if (playbackLineRef.current) {
+        const spectrogramData = store.get(spectrogramDataAtom);
+        const zoomPower = store.get(zoomPowerAtom);
+        const scroll = store.get(scrollAtom);
+        const playbackTime = store.get(playbackTimeAtom);
 
-        if (left < 0 || left > canvasSize.width) {
-          playbackLineRef.current.style.display = "none";
-        } else {
+        if (spectrogramData && canvasSize.width > 0) {
           playbackLineRef.current.style.display = "block";
-          playbackLineRef.current.style.left = `${left}px`;
+          const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+          const progress = playbackTime / totalDuration;
+          const screenCoords = zoomedToScreen(new Vector2(progress, 0), zoomPower, scroll);
+          const left = screenCoords.x * canvasSize.width;
+
+          if (left < 0 || left > canvasSize.width) {
+            playbackLineRef.current.style.display = "none";
+          } else {
+            playbackLineRef.current.style.display = "block";
+            playbackLineRef.current.style.left = `${left}px`;
+          }
+        } else {
+          playbackLineRef.current.style.display = "none";
         }
-      } else {
+      }
+      animationFrameIdRef.current = requestAnimationFrame(animate);
+    };
+
+    if (isPlaying) {
+      animationFrameIdRef.current = requestAnimationFrame(animate);
+    } else {
+      if (animationFrameIdRef.current) {
+        cancelAnimationFrame(animationFrameIdRef.current);
+      }
+      if (playbackLineRef.current) {
         playbackLineRef.current.style.display = "none";
       }
     }
-  }, [playbackTime, isPlaying, spectrogramData, canvasSize, zoomPower, scroll]);
+
+    return () => {
+      if (animationFrameIdRef.current) {
+        cancelAnimationFrame(animationFrameIdRef.current);
+      }
+    };
+  }, [isPlaying, canvasSize]);
 
   return (
     <Flex direction="column" style={{ flex: 1 }}>
@@ -171,6 +204,9 @@ export const CanvasPanel = ({ rendererRef, getSnappedCoordinates, performBrushSt
           <NumberInput w={100} value={bpm} onChange={(val) => setBpm(Number(val))} />
           <ActionIcon onClick={handleTogglePlay} size="lg">
             {isPlaying ? <Square /> : <Play />}
+          </ActionIcon>
+          <ActionIcon onClick={() => setLoop(!loop)} size="lg" variant={loop ? "filled" : "outline"}>
+            <Repeat />
           </ActionIcon>
           <Text ff="monospace" size="xl">
             {formatTime(playbackTime)}

@@ -61,6 +61,7 @@ export const filePathAtom = atom<string | null>(null);
 
 // Is audio currently playing?
 export const isPlayingAtom = atom(false);
+export const loopAtom = atom(false);
 
 // Brush type - The default is just a string.
 // The App component will be responsible for validating it.
