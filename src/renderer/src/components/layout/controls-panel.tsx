@@ -15,9 +15,12 @@ import {
   scaleTypeAtom,
   snapXAtom,
   snapYAtom,
+  bandsPerOctaveAtom,
+  store,
 } from "@/store";
+import { filePathAtom, fminAtom } from "@/store";
 import { Flex, Switch, Divider, Select } from "@mantine/core";
-import { useAtom } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { LabeledSlider } from "../controls/slider-control";
 
 export function ControlsPanel() {
@@ -37,12 +40,35 @@ export function ControlsPanel() {
   const [pan, setPan] = useAtom(panAtom);
   const [scaleRoot, setScaleRoot] = useAtom(scaleRootAtom);
   const [scaleType, setScaleType] = useAtom(scaleTypeAtom);
+  const [bandsPerOctave, setBandsPerOctave] = useAtom(bandsPerOctaveAtom);
+  const filePath = useAtomValue(filePathAtom);
 
   const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
   const scaleNames = ["Major", "Minor", "Pentatonic Major", "Pentatonic Minor", "Blues"];
 
+  const handleAnalysisParamsChange = (value: string | null) => {
+    if (value) {
+      const newBandsPerOctave = parseInt(value, 10);
+      setBandsPerOctave(newBandsPerOctave);
+      const params = {
+        bandsPerOctave: newBandsPerOctave,
+        fmin: store.get(fminAtom),
+      };
+      window.api.reanalyzeCurrentFile(params);
+    }
+  };
+
   return (
     <Flex direction="column" w={300} p="xs" gap="xs">
+      <Divider my="sm" label="Analysis" labelPosition="center" />
+      <Select
+        label="Bands per octave"
+        size="xs"
+        value={bandsPerOctave.toString()}
+        onChange={handleAnalysisParamsChange}
+        data={["12", "24", "36", "48", "60", "72", "84", "96"]}
+        disabled={!filePath}
+      />
       <Divider my="sm" label="Brush" labelPosition="center" />
       <LabeledSlider
         label="Width"

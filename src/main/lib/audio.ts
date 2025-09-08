@@ -123,11 +123,26 @@ export function registerAudioIpcHandlers(window: BrowserWindow) {
     try {
       const payload = await analyzeAudio(filePath, params);
       webContentsSend(window, "analysis-complete", payload);
-      return { canceled: false };
+      return { canceled: false, filePath };
     } catch (error) {
       console.error("Analysis failed:", error);
       webContentsSend(window, "analysis-error", error instanceof Error ? error.message : "Unknown error");
       throw error; // re-throw to be caught in renderer
+    }
+  });
+
+  ipcMainHandle("reanalyze-current-file", async (_event, params) => {
+    if (!currentFilePath) {
+      console.warn("No file to re-analyze.");
+      return;
+    }
+    try {
+      const payload = await analyzeAudio(currentFilePath, params);
+      webContentsSend(window, "analysis-complete", payload);
+    } catch (error) {
+      console.error("Re-analysis failed:", error);
+      webContentsSend(window, "analysis-error", error instanceof Error ? error.message : "Unknown error");
+      throw error;
     }
   });
 

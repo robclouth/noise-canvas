@@ -61,7 +61,8 @@ export interface IpcApi {
     params: GaboratorParams,
     normalize: boolean,
   ) => Promise<Float32Array>;
-  openFileAndAnalyze: (params: GaboratorParams) => Promise<{ canceled: boolean }>;
+  openFileAndAnalyze: (params: GaboratorParams) => Promise<{ canceled: boolean; filePath?: string }>;
+  reanalyzeCurrentFile: (params: GaboratorParams) => Promise<void>;
   saveAudioData: (
     payload: Omit<SynthesisPayload, "processedData"> & { processedData: ArrayBufferLike },
     params: GaboratorParams,
@@ -74,10 +75,11 @@ export interface IpcMainHandlers {
   "load-file": (event: Electron.IpcMainEvent, filePath: string, params: GaboratorParams) => void;
   "undo:add-state": (event: Electron.IpcMainEvent, args: { before: Buffer; after: Buffer }) => void;
   "undo:clear": (event: Electron.IpcMainEvent) => void;
+  "reanalyze-current-file": (event: Electron.IpcMainInvokeEvent, params: GaboratorParams) => Promise<void>;
   "open-file-and-analyze": (
     event: Electron.IpcMainInvokeEvent,
     params: GaboratorParams,
-  ) => Promise<{ canceled: boolean }>;
+  ) => Promise<{ canceled: boolean; filePath?: string }>;
   "synthesize-audio": (
     event: Electron.IpcMainInvokeEvent,
     payload: SynthesisPayload,

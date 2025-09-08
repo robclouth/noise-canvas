@@ -57,6 +57,8 @@ export interface SynthesisPayload {
 // This atom will hold the processed, ready-to-render spectrogram data
 export const spectrogramDataAtom = atom<SpectrogramData | null>(null);
 
+export const filePathAtom = atom<string | null>(null);
+
 // Is audio currently playing?
 export const isPlayingAtom = atom(false);
 

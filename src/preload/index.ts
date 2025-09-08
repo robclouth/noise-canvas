@@ -52,6 +52,7 @@ const api: IpcApi = {
       normalize,
     );
   },
+  reanalyzeCurrentFile: (params) => ipcRenderer.invoke("reanalyze-current-file", params),
   openFileAndAnalyze: (params) => ipcRenderer.invoke("open-file-and-analyze", params),
   saveAudioData: (payload, params, normalize) => {
     return ipcRenderer.invoke(

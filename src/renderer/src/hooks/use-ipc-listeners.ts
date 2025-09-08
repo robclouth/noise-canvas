@@ -3,36 +3,43 @@ import { useEffect } from "react";
 import { DataTexture, FloatType, NearestFilter, RGBAFormat, RGBFormat, RGFormat, Vector2 } from "three";
 import { notifications } from "@mantine/notifications";
 import { RendererHandle } from "../components/renderer";
-import { bandsPerOctaveAtom, fminAtom, normalizeAtom, spectrogramDataAtom, store } from "../store";
+import { bandsPerOctaveAtom, filePathAtom, fminAtom, normalizeAtom, spectrogramDataAtom, store } from "../store";
 
 export const useIpcListeners = (rendererRef: React.RefObject<RendererHandle | null>): void => {
   const setSpectrogramData = useSetAtom(spectrogramDataAtom);
+  const setFilePath = useSetAtom(filePathAtom);
 
   useEffect(() => {
-    if (process.env.NODE_ENV === "development") {
-      // Dev mode: load a test file automatically.
+    const handleOpenFile = (filePath: string) => {
+      setFilePath(filePath);
       const params = {
         bandsPerOctave: store.get(bandsPerOctaveAtom),
         fmin: store.get(fminAtom),
       };
-      window.api.loadFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/garage.mp3", params);
+      window.api.loadFile(filePath, params);
+      store.set(spectrogramDataAtom, null);
+    };
+
+    if (process.env.NODE_ENV === "development") {
+      handleOpenFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/garage.mp3");
     }
 
     const unsubOpenFile = window.api.onOpenFile((path) => {
-      const params = {
-        bandsPerOctave: store.get(bandsPerOctaveAtom),
-        fmin: store.get(fminAtom),
-      };
-      window.api.loadFile(path, params);
+      handleOpenFile(path);
     });
 
     const unsubTriggerOpenFile = window.api.onTriggerOpenFile(async () => {
       try {
-        const bandsPerOctave = store.get(bandsPerOctaveAtom);
-        const fmin = store.get(fminAtom);
-        await window.api.openFileAndAnalyze({ bandsPerOctave, fmin });
+        const analysisParams = {
+          bandsPerOctave: store.get(bandsPerOctaveAtom),
+          fmin: store.get(fminAtom),
+        };
+        const result = await window.api.openFileAndAnalyze(analysisParams);
+        if (result && result.filePath) {
+          handleOpenFile(result.filePath);
+        }
       } catch (error) {
-        console.error("Analysis failed:", error);
+        console.error("Error opening file:", error);
         notifications.show({
           title: "Analysis Error",
           message: "An error occurred while analyzing the audio.",
