@@ -125,6 +125,16 @@ float uvToHz(float v) {
     return minFreq * pow(2.0, octave);
 }
 
+/**
+ * Converts a frequency in Hz to its corresponding vertical logical UV coordinate.
+ */
+float hzToUv(float hz) {
+    if (hz < minFreq) return 1.0;
+    float octave = log2(hz / minFreq);
+    float totalOctaves = numBands / bandsPerOctave;
+    return 1.0 - (octave / totalOctaves);
+}
+
 //------------------------------------------------------------------------------
 // Core Sampling Logic (Final Version)
 //------------------------------------------------------------------------------

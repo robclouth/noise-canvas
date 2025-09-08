@@ -11,10 +11,12 @@ import {
   offsetXAtom,
   offsetYAtom,
   panAtom,
+  scaleRootAtom,
+  scaleTypeAtom,
   snapXAtom,
   snapYAtom,
 } from "@/store";
-import { Flex, Switch, Divider } from "@mantine/core";
+import { Flex, Switch, Divider, Select } from "@mantine/core";
 import { useAtom } from "jotai";
 import { LabeledSlider } from "../controls/slider-control";
 
@@ -33,9 +35,14 @@ export function ControlsPanel() {
   const [featherY, setFeatherY] = useAtom(featherYAtom);
   const [brushIntensity, setBrushIntensity] = useAtom(brushIntensityAtom);
   const [pan, setPan] = useAtom(panAtom);
+  const [scaleRoot, setScaleRoot] = useAtom(scaleRootAtom);
+  const [scaleType, setScaleType] = useAtom(scaleTypeAtom);
+
+  const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  const scaleNames = ["Major", "Minor", "Pentatonic Major", "Pentatonic Minor", "Blues"];
 
   return (
-    <Flex direction="column" w={300} p="xs" gap={0}>
+    <Flex direction="column" w={300} p="xs" gap="xs">
       <Divider my="sm" label="Brush" labelPosition="center" />
       <LabeledSlider
         label="Width"
@@ -107,6 +114,21 @@ export function ControlsPanel() {
         max={12}
         step={0.1}
         unit=" semi"
+      />
+      <Divider my="sm" label="Musical" labelPosition="center" />
+      <Select
+        label="Root"
+        size="xs"
+        value={scaleRoot}
+        onChange={(value) => setScaleRoot(value || "C")}
+        data={noteNames}
+      />
+      <Select
+        label="Scale"
+        size="xs"
+        value={scaleType}
+        onChange={(value) => setScaleType(value || "Major")}
+        data={scaleNames}
       />
       <Divider my="sm" label="Output" labelPosition="center" />
       <Switch size="xs" label="Normalize" checked={normalize} onChange={(e) => setNormalize(e.currentTarget.checked)} />

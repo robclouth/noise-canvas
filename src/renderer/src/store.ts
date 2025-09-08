@@ -88,6 +88,9 @@ export const featherYAtom = atomWithStorage("featherY", 0.5);
 export const brushIntensityAtom = atomWithStorage("brushIntensity", 1.0);
 export const panAtom = atomWithStorage("pan", 0.0);
 
+export const scaleRootAtom = atomWithStorage("scaleRoot", "C");
+export const scaleTypeAtom = atomWithStorage("scaleType", "Major");
+
 export const offsetXAtom = atomWithStorage("offsetX", 0.0);
 export const offsetYAtom = atomWithStorage("offsetY", 0.0);
 export const offsetLockAtom = atomWithStorage("offsetLock", false);
