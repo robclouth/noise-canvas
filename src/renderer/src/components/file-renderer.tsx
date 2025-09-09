@@ -2,6 +2,8 @@ import {
   bandsPerOctaveAtom,
   bpmAtom,
   brushHeightAtom,
+  brushIntensityAtom,
+  brushTypeAtom,
   brushWidthAtom,
   featherXAtom,
   featherYAtom,
@@ -11,30 +13,44 @@ import {
   offsetXAtom,
   offsetYAtom,
   OpenFile,
-  openFilesAtom,
+  panAtom,
+  runSynthesis,
   scrollAtom,
+  sourceFileAtom,
   zoomPowerAtom,
 } from "@/store";
 import { View } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
-import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { RefObject, useEffect, useState } from "react";
+import { useAtom, useAtomValue } from "jotai";
+import { forwardRef, RefObject, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { RenderingContext } from "../rendering-context";
-import { uvToUnits } from "./brushes/common";
+import { brushes } from "./brushes";
+import { unitsToUv, uvToUnits } from "./brushes/common";
+import { copyMaterial } from "./copy-material";
+import { displayMaterial } from "./display-material";
 
 interface FileRendererProps {
   file: OpenFile;
   viewRef: RefObject<HTMLDivElement | null>;
 }
 
-export const FileRenderer = ({ file, viewRef }: FileRendererProps): React.JSX.Element | null => {
+export interface FileRendererHandle {
+  renderStroke: (x: number, y: number) => void;
+  triggerSynthesis: () => Promise<void>;
+  getFBOData: () => Float32Array | null;
+  setFBOData: (data: Float32Array) => void;
+  getFBO: () => THREE.WebGLRenderTarget | null;
+}
+
+export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({ file, viewRef }, ref) => {
   const { spectrogramData } = file;
-  const { gl, scene, camera, invalidate } = useThree();
-  const setOpenFiles = useSetAtom(openFilesAtom);
+  const { gl, camera, invalidate, scene } = useThree();
+
+  const fboScene = useMemo(() => new THREE.Scene(), []);
 
   const brushWidth = useAtomValue(brushWidthAtom);
   const brushHeight = useAtomValue(brushHeightAtom);
+  const brushType = useAtomValue(brushTypeAtom);
   const bpm = useAtomValue(bpmAtom);
   const gridSize = useAtomValue(gridSizeAtom);
   const zoomPower = useAtomValue(zoomPowerAtom);
@@ -43,31 +59,72 @@ export const FileRenderer = ({ file, viewRef }: FileRendererProps): React.JSX.El
   const featherY = useAtomValue(featherYAtom);
   const mouseUv = useAtomValue(mouseUvAtom);
   const bandsPerOctave = useAtomValue(bandsPerOctaveAtom);
+  const brushIntensity = useAtomValue(brushIntensityAtom);
   const [offsetX, setOffsetX] = useAtom(offsetXAtom);
   const [offsetY, setOffsetY] = useAtom(offsetYAtom);
   const offsetLock = useAtomValue(offsetLockAtom);
+  const pan = useAtomValue(panAtom);
+  const sourceFile = useAtomValue(sourceFileAtom);
 
   const [lockedUv, setLockedUv] = useState<THREE.Vector2 | null>(null);
 
-  useEffect(() => {
-    if (!file.renderingContext && spectrogramData) {
-      invalidate();
-      const context = new RenderingContext(gl, scene, camera, spectrogramData);
-      setOpenFiles((files) => files.map((f) => (f.id === file.id ? { ...f, renderingContext: context } : f)));
-    }
-  }, [file, spectrogramData, gl, scene, camera, setOpenFiles]);
+  const mesh = useRef<THREE.Mesh>(null!);
 
-  // This effect handles the offset lock logic
+  const [fbo1, fbo2] = useMemo(() => {
+    if (!spectrogramData) return [null, null];
+    const { packedTextureSize } = spectrogramData;
+    const options = {
+      format: THREE.RGBAFormat,
+      type: THREE.FloatType,
+    };
+    return [
+      new THREE.WebGLRenderTarget(packedTextureSize.x, packedTextureSize.y, options),
+      new THREE.WebGLRenderTarget(packedTextureSize.x, packedTextureSize.y, options),
+    ];
+  }, [spectrogramData]);
+
+  const pingPong = useRef(0);
+
+  useEffect(() => {
+    if (spectrogramData && fbo1 && mesh.current) {
+      invalidate();
+      mesh.current.material = copyMaterial;
+      copyMaterial.uniforms.inputTex.value = spectrogramData.packedDataTex;
+
+      const parent = mesh.current.parent;
+      if (parent) {
+        fboScene.add(mesh.current);
+        gl.setRenderTarget(fbo1);
+        gl.render(fboScene, camera);
+        gl.setRenderTarget(null);
+        parent.add(mesh.current);
+      }
+
+      mesh.current.material = displayMaterial;
+      const source = pingPong.current === 0 ? fbo1 : fbo2;
+      if (source) displayMaterial.uniforms.packedDataTex.value = source.texture;
+
+      pingPong.current = 0;
+      invalidate();
+    }
+  }, [spectrogramData, fbo1, fbo2, gl, camera, mesh, invalidate, scene, fboScene]);
+
   useEffect(() => {
     if (!spectrogramData) return;
     if (offsetLock) {
       if (!lockedUv && mouseUv) {
-        // Lock engage: capture current mouse UV and existing offset
-        const currentOffsetUv = new THREE.Vector2(offsetX, offsetY); // simplified
+        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+        const currentOffsetUv = unitsToUv(
+          offsetX,
+          offsetY,
+          bpm,
+          totalDuration,
+          bandsPerOctave,
+          spectrogramData.numBands,
+        );
         const lockPosition = mouseUv.clone().sub(currentOffsetUv);
         setLockedUv(lockPosition);
       } else if (lockedUv && mouseUv) {
-        // Lock active: dynamically update offset to counteract mouse movement
         const diffUv = mouseUv.clone().sub(lockedUv);
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
         const [newOffsetX, newOffsetY] = uvToUnits(
@@ -81,7 +138,6 @@ export const FileRenderer = ({ file, viewRef }: FileRendererProps): React.JSX.El
         setOffsetY(newOffsetY);
       }
     } else {
-      // Lock disengaged
       if (lockedUv) {
         setLockedUv(null);
       }
@@ -89,25 +145,46 @@ export const FileRenderer = ({ file, viewRef }: FileRendererProps): React.JSX.El
   }, [offsetLock, mouseUv, lockedUv, spectrogramData, bpm, bandsPerOctave, offsetX, offsetY, setOffsetX, setOffsetY]);
 
   useEffect(() => {
-    if (file.renderingContext) {
-      file.renderingContext.updateUniforms({
-        bpm,
-        gridSize,
-        zoomPower,
-        scroll,
-        featherX,
-        featherY,
-        mouseUv,
-        brushWidth,
-        brushHeight,
-        bandsPerOctave,
-        offsetX,
-        offsetY,
-      });
+    if (spectrogramData && fbo1 && fbo2) {
+      const source = pingPong.current === 0 ? fbo1 : fbo2;
+      displayMaterial.uniforms.packedDataTex.value = source.texture;
+
+      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+      const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
+
+      displayMaterial.uniforms.inverseMapTex.value = spectrogramData.inverseMapTex;
+      displayMaterial.uniforms.metadataTex.value = spectrogramData.metadataTex;
+      displayMaterial.uniforms.numFrames.value = spectrogramData.numFrames;
+      displayMaterial.uniforms.numBands.value = spectrogramData.numBands;
+      displayMaterial.uniforms.numChannels.value = spectrogramData.numChannels;
+      displayMaterial.uniforms.packedTextureSize.value = spectrogramData.packedTextureSize;
+      displayMaterial.uniforms.bpm.value = bpm;
+      displayMaterial.uniforms.gridSize.value = gridSize;
+      displayMaterial.uniforms.sampleRate.value = spectrogramData.sampleRate;
+      displayMaterial.uniforms.zoomPower.value = zoomPower;
+      displayMaterial.uniforms.scroll.value = scroll;
+      displayMaterial.uniforms.featherX.value = featherX / 100;
+      displayMaterial.uniforms.featherY.value = featherY / 100;
+      displayMaterial.uniforms.offsetUv.value.copy(offsetUv);
+
+      if (mouseUv) {
+        const brushSizeUv = unitsToUv(
+          brushWidth,
+          brushHeight,
+          bpm,
+          totalDuration,
+          bandsPerOctave,
+          spectrogramData.numBands,
+        );
+        displayMaterial.uniforms.brushCenterUv.value.copy(mouseUv);
+        displayMaterial.uniforms.brushSizeUv.value.copy(brushSizeUv);
+      } else {
+        displayMaterial.uniforms.brushSizeUv.value.set(0, 0);
+      }
       invalidate();
     }
   }, [
-    file.renderingContext,
+    spectrogramData,
     bpm,
     gridSize,
     zoomPower,
@@ -115,6 +192,8 @@ export const FileRenderer = ({ file, viewRef }: FileRendererProps): React.JSX.El
     featherX,
     featherY,
     invalidate,
+    fbo1,
+    fbo2,
     mouseUv,
     brushWidth,
     brushHeight,
@@ -123,13 +202,130 @@ export const FileRenderer = ({ file, viewRef }: FileRendererProps): React.JSX.El
     offsetY,
   ]);
 
-  if (!spectrogramData || !file.renderingContext?.mesh || !viewRef.current) {
+  const renderStroke = (x: number, y: number) => {
+    if (!spectrogramData || !fbo1 || !fbo2) return;
+
+    const source = pingPong.current === 0 ? fbo1 : fbo2;
+    const destination = pingPong.current === 0 ? fbo2 : fbo1;
+
+    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+    const brushSizeUv = unitsToUv(
+      brushWidth,
+      brushHeight,
+      bpm,
+      totalDuration,
+      bandsPerOctave,
+      spectrogramData.numBands,
+    );
+    const brushCenterUv = new THREE.Vector2(x, 1 - y);
+    const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
+    const crossFileTexture = sourceFile?.renderer?.current?.getFBO()?.texture ?? null;
+
+    const brush = brushes[brushType];
+    mesh.current.material = brush.material;
+
+    brush.updateUniforms({
+      brushCenterUv,
+      brushSizeUv,
+      sourceTexture: source.texture,
+      crossFileTexture,
+      zoomPower,
+      scroll,
+      featherX: featherX / 100,
+      featherY: featherY / 100,
+      brushIntensity,
+      offsetUv,
+      pan,
+    });
+
+    const parent = mesh.current.parent;
+    if (parent) {
+      fboScene.add(mesh.current);
+      gl.setRenderTarget(destination);
+      gl.render(fboScene, camera);
+      gl.setRenderTarget(null);
+      parent.add(mesh.current);
+    }
+
+    mesh.current.material = displayMaterial;
+    displayMaterial.uniforms.packedDataTex.value = destination.texture;
+    pingPong.current = 1 - pingPong.current;
+    invalidate();
+  };
+
+  const getFBOData = (): Float32Array | null => {
+    if (!spectrogramData || !fbo1 || !fbo2) return null;
+    const { packedTextureSize } = spectrogramData;
+    const fboToRead = pingPong.current === 0 ? fbo1 : fbo2;
+    const buffer = new Float32Array(packedTextureSize.x * packedTextureSize.y * 4);
+    gl.getContext().finish();
+    gl.readRenderTargetPixels(fboToRead, 0, 0, packedTextureSize.x, packedTextureSize.y, buffer);
+    return buffer;
+  };
+
+  const setFBOData = (data: Float32Array) => {
+    if (!spectrogramData || !fbo1 || !fbo2) return;
+    const { packedTextureSize } = spectrogramData;
+    const destination = pingPong.current === 0 ? fbo1 : fbo2;
+
+    const dataTex = new THREE.DataTexture(
+      data,
+      packedTextureSize.x,
+      packedTextureSize.y,
+      THREE.RGBAFormat,
+      THREE.FloatType,
+    );
+    dataTex.needsUpdate = true;
+
+    mesh.current.material = copyMaterial;
+    copyMaterial.uniforms.inputTex.value = dataTex;
+
+    const parent = mesh.current.parent;
+    if (parent) {
+      fboScene.add(mesh.current);
+      gl.setRenderTarget(destination);
+      gl.render(fboScene, camera);
+      gl.setRenderTarget(null);
+      parent.add(mesh.current);
+    }
+
+    mesh.current.material = displayMaterial;
+    displayMaterial.uniforms.packedDataTex.value = destination.texture;
+
+    dataTex.dispose();
+  };
+
+  const getFBO = (): THREE.WebGLRenderTarget | null => {
+    if (!fbo1 || !fbo2) return null;
+    return pingPong.current === 0 ? fbo1 : fbo2;
+  };
+
+  const triggerSynthesis = async (): Promise<void> => {
+    const buffer = getFBOData();
+    if (buffer) {
+      await runSynthesis(buffer);
+    }
+  };
+
+  useImperativeHandle(ref, () => ({
+    renderStroke,
+    triggerSynthesis,
+    getFBOData,
+    setFBOData,
+    getFBO,
+  }));
+
+  if (!spectrogramData) {
     return null;
   }
 
   return (
     <View track={viewRef as RefObject<HTMLElement>}>
-      <primitive object={file.renderingContext.mesh} />
+      <mesh ref={mesh}>
+        <planeGeometry args={[2, 2]} />
+      </mesh>
     </View>
   );
-};
+});
+
+FileRenderer.displayName = "FileRenderer";

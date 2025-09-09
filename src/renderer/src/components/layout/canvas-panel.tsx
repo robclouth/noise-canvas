@@ -1,9 +1,9 @@
-import { FileRenderer } from "@/components/file-renderer";
+import { FileRenderer, FileRendererHandle } from "@/components/file-renderer";
 import { ActionIcon, Flex, NumberInput, Paper, ScrollArea, Text } from "@mantine/core";
 import { Canvas } from "@react-three/fiber";
 import { useAtom, useAtomValue } from "jotai";
 import { Play, Repeat, Square } from "lucide-react";
-import { createRef, useMemo } from "react";
+import { createRef, useEffect, useMemo } from "react";
 import { playAudio, playbackTimeAtom, stopAudio } from "../../audio-manager";
 import { activeFileAtom, bpmAtom, isPlayingAtom, loopAtom, openFilesAtom } from "../../store";
 import { FileView } from "../file-view";
@@ -29,7 +29,7 @@ export const CanvasPanel = () => {
   const [isPlaying, setIsPlaying] = useAtom(isPlayingAtom);
   const [bpm, setBpm] = useAtom(bpmAtom);
   const [loop, setLoop] = useAtom(loopAtom);
-  const openFiles = useAtomValue(openFilesAtom);
+  const [openFiles, setOpenFiles] = useAtom(openFilesAtom);
   const activeFile = useAtomValue(activeFileAtom);
 
   const viewRefs = useMemo(
@@ -40,12 +40,32 @@ export const CanvasPanel = () => {
     [openFiles.length],
   );
 
+  const rendererRefs = useMemo(
+    () =>
+      Array(openFiles.length)
+        .fill(0)
+        .map(() => createRef<FileRendererHandle>()),
+    [openFiles.length],
+  );
+
+  useEffect(() => {
+    // Only update if the refs haven't been assigned yet
+    if (openFiles.length > 0 && !openFiles[0].renderer) {
+      setOpenFiles(
+        openFiles.map((file, index) => ({
+          ...file,
+          renderer: rendererRefs[index],
+        })),
+      );
+    }
+  }, [openFiles, rendererRefs, setOpenFiles]);
+
   const handleTogglePlay = async (): Promise<void> => {
     if (isPlaying) {
       stopAudio();
     } else {
-      if (activeFile && activeFile.renderingContext) {
-        await activeFile.renderingContext.triggerSynthesis();
+      if (activeFile?.renderer?.current) {
+        await activeFile.renderer.current.triggerSynthesis();
         await playAudio();
         setIsPlaying(true);
       }
@@ -60,12 +80,12 @@ export const CanvasPanel = () => {
         frameloop="demand"
       >
         {openFiles.map((file, index) => (
-          <FileRenderer key={file.id} file={file} viewRef={viewRefs[index]} />
+          <FileRenderer key={file.id} file={file} viewRef={viewRefs[index]} ref={rendererRefs[index]} />
         ))}
       </Canvas>
       <ScrollArea flex={1} pos="relative">
         {openFiles.map((file, index) => (
-          <FileView key={file.id} file={file} viewRef={viewRefs[index]} />
+          <FileView key={file.id} file={file} viewRef={viewRefs[index]} rendererRef={rendererRefs[index]} />
         ))}
       </ScrollArea>
 

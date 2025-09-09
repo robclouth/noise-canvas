@@ -3,38 +3,31 @@ import {
   activeFileIdAtom,
   bandsPerOctaveAtom,
   bpmAtom,
-  brushHeightAtom,
-  brushIntensityAtom,
-  brushTypeAtom,
   brushWidthAtom,
   closeFile,
-  featherXAtom,
-  featherYAtom,
   gridSizeAtom,
   gridSizeYAtom,
   mouseUvAtom,
   OpenFile,
-  offsetXAtom,
-  offsetYAtom,
-  panAtom,
   scrollAtom,
   snapXAtom,
   snapYAtom,
-  sourceFileAtom,
   store,
   zoomPowerAtom,
 } from "@/store";
 import { ActionIcon, Box, Flex, Title } from "@mantine/core";
 import { useAtomValue, useSetAtom } from "jotai";
 import { X } from "lucide-react";
-import { MouseEventHandler, RefObject, useRef } from "react";
+import { ForwardedRef, MouseEventHandler, RefObject, useRef } from "react";
 import { Vector2 } from "three";
-import { screenToZoomed, unitsToUv } from "./brushes/common";
+import { screenToZoomed } from "./brushes/common";
+import { FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
 
 interface FileViewProps {
   file: OpenFile;
   viewRef: RefObject<HTMLDivElement | null>;
+  rendererRef: ForwardedRef<FileRendererHandle | null>;
 }
 
 function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>): [number, number] | null {
@@ -62,7 +55,6 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>): [number
   const gridSize = store.get(gridSizeAtom);
   const brushWidth = store.get(brushWidthAtom);
 
-  // Snap X to the nearest grid line
   if (snapX) {
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
     const gridIntervalSeconds = (60 / bpm) * gridSize;
@@ -80,7 +72,6 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>): [number
   const snapY = store.get(snapYAtom);
   const gridSizeY = store.get(gridSizeYAtom);
 
-  // Snap Y to the nearest MIDI note
   if (snapY) {
     const bandsPerOctave = store.get(bandsPerOctaveAtom);
     const bandsPerSemitone = bandsPerOctave / 12;
@@ -93,63 +84,23 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>): [number
   return [snappedX, snappedY];
 }
 
-export const FileView = ({ file, viewRef }: FileViewProps) => {
+export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
   const setActiveFileId = useSetAtom(activeFileIdAtom);
   const activeFile = useAtomValue(activeFileAtom);
   const setMouseUv = useSetAtom(mouseUvAtom);
 
-  const brushType = useAtomValue(brushTypeAtom);
-  const brushWidth = useAtomValue(brushWidthAtom);
-  const brushHeight = useAtomValue(brushHeightAtom);
-  const brushIntensity = useAtomValue(brushIntensityAtom);
-  const featherX = useAtomValue(featherXAtom);
-  const featherY = useAtomValue(featherYAtom);
-  const pan = useAtomValue(panAtom);
-  const zoomPower = useAtomValue(zoomPowerAtom);
-  const scroll = useAtomValue(scrollAtom);
-  const bpm = useAtomValue(bpmAtom);
-  const bandsPerOctave = useAtomValue(bandsPerOctaveAtom);
-  const offsetX = useAtomValue(offsetXAtom);
-  const offsetY = useAtomValue(offsetYAtom);
-  const sourceFile = useAtomValue(sourceFileAtom);
-
   const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
 
   const performBrushStroke = (snappedX: number, snappedY: number, force = false): void => {
-    if (!file.renderingContext || !file.spectrogramData) return;
+    if (typeof rendererRef === "function" || !rendererRef?.current) return;
+
     if (
       force ||
       !lastSnappedPositionRef.current ||
       lastSnappedPositionRef.current.x !== snappedX ||
       lastSnappedPositionRef.current.y !== snappedY
     ) {
-      const { spectrogramData } = file;
-      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-
-      const brushSizeUv = unitsToUv(
-        brushWidth,
-        brushHeight,
-        bpm,
-        totalDuration,
-        bandsPerOctave,
-        spectrogramData.numBands,
-      );
-      const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
-
-      const crossFileTexture = sourceFile?.renderingContext?.getFBO()?.texture ?? null;
-      file.renderingContext.renderStroke({
-        brushType,
-        brushCenterUv: new Vector2(snappedX, 1 - snappedY),
-        brushSizeUv,
-        brushIntensity,
-        featherX: featherX / 100,
-        featherY: featherY / 100,
-        pan,
-        offsetUv,
-        zoomPower,
-        scroll,
-        crossFileTexture,
-      });
+      rendererRef.current.renderStroke(snappedX, snappedY);
       lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
     }
   };
@@ -171,9 +122,9 @@ export const FileView = ({ file, viewRef }: FileViewProps) => {
   };
 
   const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
-    if (event.button === 0 && file.renderingContext) {
+    if (event.button === 0 && file.renderer?.current) {
       // Left mouse button down
-      const beforeState = file.renderingContext.getFBOData();
+      const beforeState = file.renderer.current.getFBOData();
       if (beforeState) {
         // We'll capture the 'after' state on mouse up
         (event.currentTarget as any)._undoBeforeState = beforeState;
@@ -187,11 +138,11 @@ export const FileView = ({ file, viewRef }: FileViewProps) => {
   };
 
   const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = (event) => {
-    if (event.button === 0 && file.renderingContext) {
+    if (event.button === 0 && file.renderer?.current) {
       // Left mouse button up
       const beforeState = (event.currentTarget as any)._undoBeforeState;
       if (beforeState) {
-        const afterState = file.renderingContext.getFBOData();
+        const afterState = file.renderer.current.getFBOData();
         if (afterState) {
           window.api.addUndoState({
             before: beforeState.buffer,

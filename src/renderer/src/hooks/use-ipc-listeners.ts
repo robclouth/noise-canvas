@@ -134,7 +134,6 @@ export const useIpcListeners = (): void => {
             bandLengths: payload.bandLengths,
           },
         },
-        renderingContext: null,
       };
 
       setOpenFiles((files) => [...files, newFile]);
@@ -153,8 +152,8 @@ export const useIpcListeners = (): void => {
 
     const unsubUndo = window.api.onUndoApplyState((data) => {
       const activeFile = store.get(activeFileAtom);
-      if (activeFile && activeFile.renderingContext) {
-        activeFile.renderingContext.setFBOData(
+      if (activeFile?.renderer?.current) {
+        activeFile.renderer.current.setFBOData(
           new Float32Array(data.buffer, data.byteOffset, data.byteLength / Float32Array.BYTES_PER_ELEMENT),
         );
       }
@@ -162,12 +161,11 @@ export const useIpcListeners = (): void => {
 
     const unsubRequestAudioForSaving = window.api.onRequestAudioForSaving(async () => {
       const activeFile = store.get(activeFileAtom);
-
-      if (!activeFile || !activeFile.renderingContext) {
+      if (!activeFile?.renderer?.current) {
         return;
       }
 
-      const processedData = activeFile.renderingContext.getFBOData();
+      const processedData = activeFile.renderer.current.getFBOData();
       const spectrogramData = activeFile.spectrogramData;
       if (!processedData || !spectrogramData) {
         return;
@@ -216,5 +214,5 @@ export const useIpcListeners = (): void => {
       unsubCloseActiveFile();
       unsubCloseAllFiles();
     };
-  }, [setOpenFiles, setActiveFileId, closeFile, openFiles.length]);
+  }, [setOpenFiles, setActiveFileId, openFiles.length]);
 };

@@ -1,9 +1,10 @@
 import { atom, createStore } from "jotai";
 import { atomWithStorage } from "jotai/utils";
+import { RefObject } from "react";
 import { DataTexture, Vector2 } from "three";
 import * as Tone from "tone";
 import { audioBufferAtom } from "./audio-manager";
-import { RenderingContext } from "./rendering-context";
+import type { FileRendererHandle } from "./components/file-renderer";
 
 export const store = createStore();
 
@@ -44,7 +45,7 @@ export interface OpenFile {
   id: string;
   filePath: string;
   spectrogramData: SpectrogramData;
-  renderingContext: RenderingContext | null;
+  renderer?: RefObject<FileRendererHandle | null>;
 }
 
 // Describes the payload sent back to the main process for synthesis
