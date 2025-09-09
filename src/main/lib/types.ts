@@ -69,6 +69,8 @@ export interface IpcApi {
     normalize: boolean,
   ) => Promise<void>;
   onRequestAudioForSaving: (callback: () => void) => () => void;
+  onCloseActiveFile: (callback: () => void) => () => void;
+  onCloseAllFiles: (callback: () => void) => () => void;
 }
 
 export interface IpcMainHandlers {
@@ -101,4 +103,6 @@ export interface IpcRendererEvents {
   "request-audio-for-saving": () => void;
   "undo:apply-state": (data: Buffer) => void;
   "undo:state-changed": (state: { canUndo: boolean; canRedo: boolean }) => void;
+  "close-active-file": () => void;
+  "close-all-files": () => void;
 }

@@ -87,7 +87,11 @@ const HarmonizerMaterial = shaderMaterial(
             // Perform the pitch shift from the source audio to the new target pitch
             vec4 modifiedTexel = sampleSpectrogramTransformed(coords.source, targetUv);
 
-            vec4 mixedTexel = mix(sampleSpectrogramPoint(coords.source), modifiedTexel, amount);
+            vec4 mixedTexel = mix(
+              sampleSpectrogramPoint(coords.source, packedDataTex, metadataTex, packedTextureSize, numFrames, numBands, sampleRate),
+              modifiedTexel,
+              amount
+            );
 
             float weight = getFeatherWeight(coords.dest);
             gl_FragColor = applyBrushEffect(originalTexel, mixedTexel, weight);

@@ -32,6 +32,17 @@ uniform float pi;
 uniform float minFreq;
 uniform float bandsPerOctave;
 
+// Source texture uniforms
+uniform bool sourceSelected;
+uniform sampler2D sourceTexture;
+uniform sampler2D sourceMetadataTex;
+uniform vec2 sourcePackedTextureSize;
+uniform float sourceNumFrames;
+uniform float sourceNumBands;
+uniform float sourceMinFreq;
+uniform float sourceBandsPerOctave;
+uniform float sourceSampleRate;
+
 // Brush & View Uniforms
 uniform vec2 brushCenterUv;
 uniform vec2 brushSizeUv;
@@ -139,61 +150,67 @@ float hzToUv(float hz) {
 // Core Sampling Logic (Final Version)
 //------------------------------------------------------------------------------
 
-vec4 sampleSpectrogramPoint(vec2 logicalUv) {
-  float bandIndex = floor((1.0 - logicalUv.y) * numBands);
-  vec2 metaUv = vec2((bandIndex + 0.5) / numBands, 0.5);
-  vec3 meta = texture2D(metadataTex, metaUv).rgb;
-  float bandOffset = meta.r;
-  float bandLength = meta.g;
-  float bandScaleExp = meta.b;
-  float timeSample = logicalUv.x * numFrames;
+vec4 sampleSpectrogramPoint(vec2 logicalUv, sampler2D data, sampler2D meta, vec2 texSize, float nFrames, float nBands, float sRate) {
+  float bandIndex = floor((1.0 - logicalUv.y) * nBands);
+  vec2 metaUv = vec2((bandIndex + 0.5) / nBands, 0.5);
+  vec3 metaData = texture2D(meta, metaUv).rgb;
+  float bandOffset = metaData.r;
+  float bandLength = metaData.g;
+  float bandScaleExp = metaData.b;
+  float timeSample = logicalUv.x * nFrames;
   float timeInBand = timeSample / exp2(bandScaleExp);
   float coefIndexInBand = floor(timeInBand);
   if (coefIndexInBand < 0.0 || coefIndexInBand >= bandLength) { return vec4(0.0); }
   float linearPixelIndex = bandOffset + coefIndexInBand;
-  float packedY = floor(linearPixelIndex / packedTextureSize.x);
-  float packedX = mod(linearPixelIndex, packedTextureSize.x);
-  vec2 packedUv = (vec2(packedX, packedY) + 0.5) / packedTextureSize;
-  return texture2D(packedDataTex, packedUv);
+  float packedY = floor(linearPixelIndex / texSize.x);
+  float packedX = mod(linearPixelIndex, texSize.x);
+  vec2 packedUv = (vec2(packedX, packedY) + 0.5) / texSize;
+  return texture2D(data, packedUv);
 }
 
-/**
- * HIGH QUALITY (PITCH-AWARE): Performs true pitch-shifting and time-stretching.
- * @param sourceUv The logical UV coordinate to sample FROM.
- * @param targetUv The logical UV coordinate of the pixel we are writing TO.
- */
-vec4 sampleSpectrogramTransformed(vec2 sourceUv, vec2 targetUv) {
-    float sourceFreq = uvToHz(sourceUv.y);
-    float targetFreq = uvToHz(targetUv.y);
+vec4 sampleFromSource(vec2 logicalUv) {
+    if (sourceSelected) {
+        return sampleSpectrogramPoint(logicalUv, sourceTexture, sourceMetadataTex, sourcePackedTextureSize, sourceNumFrames, sourceNumBands, sourceSampleRate);
+    }
+    return sampleSpectrogramPoint(logicalUv, packedDataTex, metadataTex, packedTextureSize, numFrames, numBands, sampleRate);
+}
+
+
+vec4 _performTransformation(vec2 sourceUv, vec2 targetUv,
+                           float srcNBands, float srcBPerOctave, float srcMFreq, float srcNFrames,
+                           sampler2D srcMeta, sampler2D srcData, vec2 srcTexSize, float srcSRate,
+                           float dstNBands, float dstBPerOctave, float dstMFreq) {
+    float sourceFreq = srcMFreq * pow(2.0, (1.0 - sourceUv.y) * srcNBands / srcBPerOctave);
+    float targetFreq = dstMFreq * pow(2.0, (1.0 - targetUv.y) * dstNBands / dstBPerOctave);
     float pitchRatio = (sourceFreq > 1.0e-5) ? targetFreq / sourceFreq : 1.0;
 
-    float bandNumFloat = (1.0 - sourceUv.y) * numBands;
+    float bandNumFloat = (1.0 - sourceUv.y) * srcNBands;
     float bandIndexBase = floor(bandNumFloat);
     float yFrac = fract(bandNumFloat);
 
-    vec2 metaUvBase = vec2((bandIndexBase + 0.5) / numBands, 0.5);
-    vec3 metaBase = texture2D(metadataTex, metaUvBase).rgb;
+    vec2 metaUvBase = vec2((bandIndexBase + 0.5) / srcNBands, 0.5);
+    vec3 metaBase = texture2D(srcMeta, metaUvBase).rgb;
     float bandScaleExpBase = metaBase.b;
 
-    float timeSample = sourceUv.x * numFrames;
+    float timeSample = sourceUv.x * srcNFrames;
     float timeInBand = timeSample / exp2(bandScaleExpBase);
     float coefIndexInBandBase = floor(timeInBand);
     float xFrac = fract(timeInBand);
 
-    float localTimeStepUv = exp2(bandScaleExpBase) / numFrames;
+    float localTimeStepUv = exp2(bandScaleExpBase) / srcNFrames;
 
     vec2 uvBase;
-    uvBase.x = (coefIndexInBandBase * exp2(bandScaleExpBase)) / numFrames;
-    uvBase.y = 1.0 - (bandIndexBase + 0.5) / numBands;
+    uvBase.x = (coefIndexInBandBase * exp2(bandScaleExpBase)) / srcNFrames;
+    uvBase.y = 1.0 - (bandIndexBase + 0.5) / srcNBands;
     vec2 uvT = uvBase + vec2(localTimeStepUv, 0.0);
     vec2 uvF = uvBase;
-    uvF.y = 1.0 - (bandIndexBase + 1.0 + 0.5) / numBands;
+    uvF.y = 1.0 - (bandIndexBase + 1.0 + 0.5) / srcNBands;
     vec2 uvTf = uvF + vec2(localTimeStepUv, 0.0);
 
-    vec4 dataBase = sampleSpectrogramPoint(uvBase);
-    vec4 dataT = sampleSpectrogramPoint(uvT);
-    vec4 dataF = sampleSpectrogramPoint(uvF);
-    vec4 dataTf = sampleSpectrogramPoint(uvTf);
+    vec4 dataBase = sampleSpectrogramPoint(uvBase, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
+    vec4 dataT = sampleSpectrogramPoint(uvT, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
+    vec4 dataF = sampleSpectrogramPoint(uvF, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
+    vec4 dataTf = sampleSpectrogramPoint(uvTf, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
 
     vec2 magBase = vec2(length(dataBase.rg), length(dataBase.ba));
     vec2 magT = vec2(length(dataT.rg), length(dataT.ba));
@@ -225,9 +242,29 @@ vec4 sampleSpectrogramTransformed(vec2 sourceUv, vec2 targetUv) {
     return vec4(newComplexCh1, newComplexCh2);
 }
 
+
+/**
+ * HIGH QUALITY (PITCH-AWARE): Performs true pitch-shifting and time-stretching.
+ * @param sourceUv The logical UV coordinate to sample FROM.
+ * @param targetUv The logical UV coordinate of the pixel we are writing TO.
+ */
+vec4 sampleSpectrogramTransformed(vec2 sourceUv, vec2 targetUv) {
+    if (sourceSelected) {
+        return _performTransformation(sourceUv, targetUv,
+                                     sourceNumBands, sourceBandsPerOctave, sourceMinFreq, sourceNumFrames,
+                                     sourceMetadataTex, sourceTexture, sourcePackedTextureSize, sourceSampleRate,
+                                     numBands, bandsPerOctave, minFreq);
+    } else {
+        return _performTransformation(sourceUv, targetUv,
+                                     numBands, bandsPerOctave, minFreq, numFrames,
+                                     metadataTex, packedDataTex, packedTextureSize, sampleRate,
+                                     numBands, bandsPerOctave, minFreq);
+    }
+}
+
 // Convenience wrapper for display
 vec4 samplePointFromScreen(vec2 screenUv) {
-    return sampleSpectrogramPoint(screenToZoomed(screenUv));
+    return sampleSpectrogramPoint(screenToZoomed(screenUv), packedDataTex, metadataTex, packedTextureSize, numFrames, numBands, sampleRate);
 }
 `;
 
@@ -235,6 +272,7 @@ export const uniforms = {
   packedDataTex: new Texture(),
   inverseMapTex: new Texture(),
   metadataTex: new Texture(),
+  sourceTexture: null as Texture | null,
   numFrames: 0,
   numBands: 0,
   packedTextureSize: new Vector2(0, 0),
@@ -243,6 +281,16 @@ export const uniforms = {
   pi: Math.PI,
   minFreq: 20.0,
   bandsPerOctave: 24.0,
+
+  sourceSelected: false,
+  sourceMetadataTex: new Texture(),
+  sourcePackedTextureSize: new Vector2(0, 0),
+  sourceNumFrames: 0,
+  sourceNumBands: 0,
+  sourceMinFreq: 20.0,
+  sourceBandsPerOctave: 24.0,
+  sourceSampleRate: 44100.0,
+
   brushCenterUv: new Vector2(0.5, 0.5),
   brushSizeUv: new Vector2(0.1, 0.1),
   zoomPower: 0.0,

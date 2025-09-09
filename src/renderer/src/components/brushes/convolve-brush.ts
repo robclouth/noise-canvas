@@ -38,7 +38,7 @@ const ConvolveMaterial = shaderMaterial(
         vec4 originalTexel = texture2D(packedDataTex, vUv);
 
         if (isInBrush(coords.dest)) {
-            vec4 currentTexel = sampleSpectrogramPoint(coords.source);
+            vec4 currentTexel = sampleFromSource(coords.source);
             vec4 convolvedColor = vec4(0.0);
             float totalKernelWeight = 0.0;
 
@@ -52,7 +52,7 @@ const ConvolveMaterial = shaderMaterial(
                     vec2 offset = vec2(float(i), float(j));
                     vec2 sampleUv = coords.source + offset * stepUv;
                     
-                    vec4 spectrogramSample = sampleSpectrogramPoint(sampleUv);
+                    vec4 spectrogramSample = sampleFromSource(sampleUv);
                     
                     vec2 kernelUv = offset / KERNEL_DIAMETER + 0.5;
                     float kernelWeight = texture2D(kernelTex, kernelUv).r;
@@ -93,6 +93,7 @@ class ConvolveBrush extends BaseBrush {
         min: 0,
         max: 1,
         step: 0.01,
+        formatValue: (v) => `${(v * 100).toFixed(0)}%`,
       },
       {
         type: "slider",
@@ -102,6 +103,7 @@ class ConvolveBrush extends BaseBrush {
         min: 0,
         max: 5,
         step: 0.01,
+        formatValue: (v) => v.toFixed(2),
       },
       {
         type: "slider",
@@ -111,6 +113,7 @@ class ConvolveBrush extends BaseBrush {
         min: 0,
         max: 5,
         step: 0.01,
+        formatValue: (v) => v.toFixed(2),
       },
     ];
   }

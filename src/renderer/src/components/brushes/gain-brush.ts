@@ -29,7 +29,7 @@ const GainMaterial = shaderMaterial(
             float weight = getFeatherWeight(coords.dest);
             float gain = pow(10.0, gainDb / 20.0);
             
-            vec4 sourceTexel = sampleSpectrogramPoint(coords.source);
+            vec4 sourceTexel = sampleFromSource(coords.source);
             vec4 modifiedTexel = sourceTexel * gain;
 
             gl_FragColor = applyBrushEffect(originalTexel, modifiedTexel, weight);

@@ -67,6 +67,8 @@ const TransformMaterial = shaderMaterial(
             vec4 transformedTexel;
             vec2 targetUv = coords.dest; // The destination is the current pixel
 
+            // This is complex. When sampling from another texture, we should use its spectrogram data.
+            // For now, let's assume the spectrograms are compatible.
             if (isInBrush(finalSourceUv + offsetUv)) {
                 transformedTexel = sampleSpectrogramTransformed(finalSourceUv, targetUv);
             } else {

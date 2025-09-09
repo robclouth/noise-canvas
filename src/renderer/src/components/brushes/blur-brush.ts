@@ -3,7 +3,7 @@ import { atomWithStorage } from "jotai/utils";
 import * as THREE from "three";
 import { code, unitsToUv, uniforms, vertexShader } from "./common";
 import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
-import { store, spectrogramDataAtom, bpmAtom, bandsPerOctaveAtom } from "../../store";
+import { store, activeFileAtom, bpmAtom, bandsPerOctaveAtom } from "../../store";
 
 export const blurXAtom = atomWithStorage("blurX", 0.0625); // in beats
 export const blurYCentsAtom = atomWithStorage("blurYCents", 100); // in cents
@@ -21,12 +21,6 @@ const BlurMaterial = shaderMaterial(
     uniform vec2 blurSizeUv;
 
     ${code}
-
-    vec4 getDataFromLogicalUv(vec2 logicalUv) {
-        // HACK: for some reason the point sampler returns 0 here.
-        // It's not worth debugging right now. Let's just use the slow one.
-        return sampleSpectrogramPhaseCorrect(logicalUv);
-    }
     
     void main() {
         Coords coords = getCoords(vUv);
@@ -43,7 +37,7 @@ const BlurMaterial = shaderMaterial(
                     
                     // Check if the ORIGINAL location of this sample is in the brush
                     if (isInBrush(sampleUv + offsetUv)) {
-                        blurredTexel += getDataFromLogicalUv(sampleUv);
+                        blurredTexel += sampleFromSource(sampleUv);
                         totalWeight += 1.0;
                     }
                 }
@@ -99,12 +93,13 @@ class BlurBrush extends BaseBrush {
   updateUniforms(props: UpdateUniformsProps): void {
     super.updateUniforms(props);
 
-    const spectrogramData = store.get(spectrogramDataAtom);
+    const activeFile = store.get(activeFileAtom);
     const bpm = store.get(bpmAtom);
     const blurX = store.get(blurXAtom);
     const blurYCents = store.get(blurYCentsAtom);
 
-    if (!spectrogramData) return;
+    if (!activeFile) return;
+    const spectrogramData = activeFile.spectrogramData;
 
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
     const bandsPerOctave = store.get(bandsPerOctaveAtom);

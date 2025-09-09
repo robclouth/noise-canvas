@@ -22,6 +22,21 @@ export function createMenu(window: BrowserWindow, undoService: UndoService) {
           },
         },
         { type: "separator" },
+        {
+          label: "Close Active",
+          accelerator: "CmdOrCtrl+W",
+          click: () => {
+            window.webContents.send("close-active-file");
+          },
+        },
+        {
+          label: "Close All",
+          accelerator: "CmdOrCtrl+Shift+W",
+          click: () => {
+            window.webContents.send("close-all-files");
+          },
+        },
+        { type: "separator" },
         { role: "quit" },
       ],
     },

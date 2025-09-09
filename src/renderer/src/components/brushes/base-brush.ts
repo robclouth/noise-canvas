@@ -1,7 +1,7 @@
 import { WritableAtom, SetStateAction } from "jotai";
 import * as THREE from "three";
 import { IUniform } from "three";
-import { store, spectrogramDataAtom } from "../../store";
+import { OpenFile, SpectrogramData, activeFileAtom, sourceFileAtom, store } from "../../store";
 import { RESET } from "jotai/utils";
 
 export type SetStateActionWithReset<Value> = SetStateAction<Value> | typeof RESET;
@@ -10,6 +10,7 @@ export interface UpdateUniformsProps {
   brushCenterUv: THREE.Vector2;
   brushSizeUv: THREE.Vector2;
   sourceTexture: THREE.Texture;
+  crossFileTexture: THREE.Texture | null;
   zoomPower: number;
   scroll: number;
   featherX: number;
@@ -60,11 +61,25 @@ export abstract class BaseBrush {
   abstract parameters: BrushParameter[];
 
   updateUniforms(props: UpdateUniformsProps): void {
-    const { brushCenterUv, brushSizeUv, sourceTexture, zoomPower, scroll, featherX, featherY, brushIntensity } = props;
+    const {
+      brushCenterUv,
+      brushSizeUv,
+      zoomPower,
+      scroll,
+      featherX,
+      featherY,
+      brushIntensity,
+      offsetUv,
+      pan,
+      sourceTexture,
+      crossFileTexture,
+    } = props;
     const uniforms = this.material.uniforms;
-    const spectrogramData = store.get(spectrogramDataAtom);
+    const activeFile = store.get(activeFileAtom);
+    const sourceFile = store.get(sourceFileAtom);
 
-    if (!spectrogramData) return;
+    if (!activeFile) return;
+    const spectrogramData = activeFile.spectrogramData;
 
     uniforms.packedDataTex.value = sourceTexture;
     uniforms.inverseMapTex.value = spectrogramData.inverseMapTex;
@@ -81,7 +96,18 @@ export abstract class BaseBrush {
     uniforms.featherX.value = featherX;
     uniforms.featherY.value = featherY;
     uniforms.brushIntensity.value = brushIntensity;
-    uniforms.offsetUv.value.copy(props.offsetUv);
-    this.material.uniforms.pan.value = props.pan;
+    uniforms.offsetUv.value.copy(offsetUv);
+    uniforms.pan.value = pan;
+
+    const sourceSelected = crossFileTexture && sourceFile;
+    uniforms.sourceSelected.value = sourceSelected;
+    if (sourceSelected) {
+      uniforms.sourceTexture.value = crossFileTexture;
+      uniforms.sourceMetadataTex.value = sourceFile.spectrogramData.metadataTex;
+      uniforms.sourcePackedTextureSize.value = sourceFile.spectrogramData.packedTextureSize;
+      uniforms.sourceNumFrames.value = sourceFile.spectrogramData.numFrames;
+      uniforms.sourceNumBands.value = sourceFile.spectrogramData.numBands;
+      uniforms.sourceSampleRate.value = sourceFile.spectrogramData.sampleRate;
+    }
   }
 }

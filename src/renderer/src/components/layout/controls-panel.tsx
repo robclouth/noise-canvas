@@ -1,9 +1,14 @@
 import {
+  activeFileAtom,
+  bandsPerOctaveAtom,
   brushHeightAtom,
   brushIntensityAtom,
+  brushTypeAtom,
   brushWidthAtom,
   featherXAtom,
   featherYAtom,
+  openFilesAtom,
+  fminAtom,
   gridSizeAtom,
   gridSizeYAtom,
   normalizeAtom,
@@ -15,12 +20,12 @@ import {
   scaleTypeAtom,
   snapXAtom,
   snapYAtom,
-  bandsPerOctaveAtom,
+  sourceFileIdAtom,
   store,
 } from "@/store";
-import { filePathAtom, fminAtom } from "@/store";
 import { Flex, Switch, Divider, Select } from "@mantine/core";
 import { useAtom, useAtomValue } from "jotai";
+import { brushes } from "../brushes";
 import { LabeledSlider } from "../controls/slider-control";
 
 export function ControlsPanel() {
@@ -41,13 +46,19 @@ export function ControlsPanel() {
   const [scaleRoot, setScaleRoot] = useAtom(scaleRootAtom);
   const [scaleType, setScaleType] = useAtom(scaleTypeAtom);
   const [bandsPerOctave, setBandsPerOctave] = useAtom(bandsPerOctaveAtom);
-  const filePath = useAtomValue(filePathAtom);
+  const activeFile = useAtomValue(activeFileAtom);
+  const files = useAtomValue(openFilesAtom);
+  const [sourceFileId, setSourceFileId] = useAtom(sourceFileIdAtom);
+  const brushType = useAtomValue(brushTypeAtom);
 
   const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
   const scaleNames = ["Major", "Minor", "Pentatonic Major", "Pentatonic Minor", "Blues"];
 
+  const brush = brushes[brushType];
+  const supportsSource = brush && "sourceTexture" in brush.material.uniforms;
+
   const handleAnalysisParamsChange = (value: string | null) => {
-    if (value) {
+    if (value && activeFile) {
       const newBandsPerOctave = parseInt(value, 10);
       setBandsPerOctave(newBandsPerOctave);
       const params = {
@@ -67,7 +78,7 @@ export function ControlsPanel() {
         value={bandsPerOctave.toString()}
         onChange={handleAnalysisParamsChange}
         data={["12", "24", "36", "48", "60", "72", "84", "96"]}
-        disabled={!filePath}
+        disabled={!activeFile}
       />
       <Divider my="sm" label="Brush" labelPosition="center" />
       <LabeledSlider
@@ -109,7 +120,20 @@ export function ControlsPanel() {
         step={1}
         unit="%"
       />
-      <Divider my="sm" label="Offset" labelPosition="center" />
+      <Divider my="sm" label="Source" labelPosition="center" />
+      <Select
+        size="xs"
+        label="File"
+        placeholder="Self"
+        value={sourceFileId}
+        onChange={setSourceFileId}
+        disabled={!supportsSource}
+        data={files.map((file) => ({
+          value: file.id,
+          label: file.filePath.split("/").pop() || file.filePath,
+        }))}
+        clearable
+      />
       <LabeledSlider label="Time" value={offsetX} onChange={setOffsetX} min={-4} max={4} step={1 / 16} unit=" beats" />
       <LabeledSlider label="Pitch" value={offsetY} onChange={setOffsetY} min={-12} max={12} step={0.1} unit=" semi" />
       <Switch

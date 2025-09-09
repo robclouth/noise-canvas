@@ -3,6 +3,7 @@ import { atomWithStorage } from "jotai/utils";
 import { DataTexture, Vector2 } from "three";
 import * as Tone from "tone";
 import { audioBufferAtom } from "./audio-manager";
+import { RenderingContext } from "./rendering-context";
 
 export const store = createStore();
 
@@ -39,6 +40,13 @@ export interface SpectrogramData {
   };
 }
 
+export interface OpenFile {
+  id: string;
+  filePath: string;
+  spectrogramData: SpectrogramData;
+  renderingContext: RenderingContext | null;
+}
+
 // Describes the payload sent back to the main process for synthesis
 export interface SynthesisPayload {
   processedData: Buffer;
@@ -54,10 +62,28 @@ export interface SynthesisPayload {
 
 // --- Jotai Atoms ---
 
-// This atom will hold the processed, ready-to-render spectrogram data
-export const spectrogramDataAtom = atom<SpectrogramData | null>(null);
+export const openFilesAtom = atom<OpenFile[]>([]);
+export const activeFileIdAtom = atom<string | null>(null);
+export const sourceFileIdAtom = atom<string | null>(null);
 
-export const filePathAtom = atom<string | null>(null);
+export const activeFileAtom = atom((get) => {
+  const files = get(openFilesAtom);
+  const activeId = get(activeFileIdAtom);
+  if (!activeId) return null;
+  return files.find((f) => f.id === activeId) ?? null;
+});
+
+export const sourceFileAtom = atom((get) => {
+  const files = get(openFilesAtom);
+  const sourceId = get(sourceFileIdAtom);
+  if (sourceId === null) return null;
+  return files.find((f) => f.id === sourceId) ?? null;
+});
+
+export const spectrogramDataAtom = atom<SpectrogramData | null>((get) => {
+  const activeFile = get(activeFileAtom);
+  return activeFile?.spectrogramData ?? null;
+});
 
 // Is audio currently playing?
 export const isPlayingAtom = atom(false);
@@ -104,6 +130,13 @@ export const bandsPerOctaveAtom = atomWithStorage("bandsPerOctave", 48);
 export const fminAtom = atomWithStorage("fmin", 20.0);
 
 // --- Core Functions ---
+
+export function closeFile(fileId: string) {
+  store.set(
+    openFilesAtom,
+    store.get(openFilesAtom).filter((f) => f.id !== fileId),
+  );
+}
 
 export const runSynthesis = async (processedData: Float32Array | null): Promise<void> => {
   try {

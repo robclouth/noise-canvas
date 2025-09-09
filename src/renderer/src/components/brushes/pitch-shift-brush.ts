@@ -1,7 +1,7 @@
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
 import * as THREE from "three";
-import { bandsPerOctaveAtom, bpmAtom, spectrogramDataAtom, store } from "../../store";
+import { activeFileAtom, bandsPerOctaveAtom, bpmAtom, store } from "../../store";
 import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
 import { code, uniforms, unitsToUv, vertexShader } from "./common";
 
@@ -35,7 +35,7 @@ const PitchShiftMaterial = shaderMaterial(
             vec2 sourceUvPitch = coords.source - pitchShiftUv;
 
             // 2. Get the high-quality, phase-correct complex data from the PITCH source
-            vec4 complexDataPitch = sampleSpectrogramPhaseCorrect(sourceUvPitch);
+            vec4 complexDataPitch = sampleSpectrogramTransformed(sourceUvPitch, coords.dest);
 
             // 3. Determine the source UV for FORMANT (magnitude) information
             // This is simply the original, unshifted UV.
@@ -43,7 +43,7 @@ const PitchShiftMaterial = shaderMaterial(
             
             // 4. Get the magnitude from the FORMANT source. A simple point sample is
             // often best for this, as it captures the raw spectral envelope.
-            vec4 formantData = sampleSpectrogramPoint(sourceUvFormant);
+            vec4 formantData = sampleFromSource(sourceUvFormant);
             vec2 magnitudeFormant = vec2(length(formantData.rg), length(formantData.ba));
 
             // 5. Get the magnitude from the PITCH source for blending
@@ -108,9 +108,10 @@ class PitchShiftBrush extends BaseBrush {
 
   updateUniforms(props: UpdateUniformsProps): void {
     super.updateUniforms(props);
-    const spectrogramData = store.get(spectrogramDataAtom);
+    const activeFile = store.get(activeFileAtom);
     const bpm = store.get(bpmAtom);
-    if (!spectrogramData) return;
+    if (!activeFile) return;
+    const spectrogramData = activeFile.spectrogramData;
 
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
     const bandsPerOctave = store.get(bandsPerOctaveAtom);

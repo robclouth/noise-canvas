@@ -34,8 +34,8 @@ const TransientShaperMaterial = shaderMaterial(
         if (isInBrush(coords.dest)) {
             vec2 timeStep = vec2(1.0 / numFrames, 0.0);
 
-            vec4 prevTexel = sampleSpectrogramPoint(coords.source - timeStep);
-            vec4 currentTexel = sampleSpectrogramPoint(coords.source);
+            vec4 prevTexel = sampleFromSource(coords.source - timeStep);
+            vec4 currentTexel = sampleFromSource(coords.source);
 
             float prevMag = length(prevTexel.rg) + length(prevTexel.ba);
             float currentMag = length(currentTexel.rg) + length(currentTexel.ba);

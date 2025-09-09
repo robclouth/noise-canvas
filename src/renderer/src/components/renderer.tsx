@@ -1,297 +1,234 @@
-import { useThree } from "@react-three/fiber";
-import { useAtom, useAtomValue } from "jotai";
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { Box } from "@mantine/core";
+import { useAtomValue, useSetAtom } from "jotai";
+import { MouseEventHandler, useEffect, useRef, useState, RefObject } from "react";
 import * as THREE from "three";
+import { createPortal } from "react-dom";
+import { playbackTimeAtom } from "@/audio-manager";
 import {
+  OpenFile,
+  activeFileAtom,
   bandsPerOctaveAtom,
   bpmAtom,
-  brushHeightAtom,
-  brushIntensityAtom,
-  brushTypeAtom,
   brushWidthAtom,
-  featherXAtom,
-  featherYAtom,
   gridSizeAtom,
+  gridSizeYAtom,
+  isPlayingAtom,
   mouseUvAtom,
-  offsetLockAtom,
-  offsetXAtom,
-  offsetYAtom,
-  panAtom,
-  runSynthesis,
   scrollAtom,
-  spectrogramDataAtom,
+  snapXAtom,
+  snapYAtom,
+  store,
   zoomPowerAtom,
-} from "../store";
-import { brushes } from "./brushes";
-import { unitsToUv, uvToUnits } from "./brushes/common";
-import { copyMaterial } from "./copy-material";
-import { displayMaterial } from "./display-material";
+} from "@/store";
+import { screenToZoomed, zoomedToScreen } from "./brushes/common";
+import { useSpectrogramManager } from "@/components/use-spectrogram-manager";
+import { RenderingContext } from "@/rendering-context";
 
-export interface RendererHandle {
-  update: (x: number, y: number) => void;
-  triggerSynthesis: () => Promise<void>;
-  getFBOData: () => Float32Array | null;
-  setFBOData: (data: Float32Array) => void;
+interface RendererProps {
+  file: OpenFile;
+  containerRef: RefObject<HTMLDivElement>;
+  context: RenderingContext;
 }
 
-export const Renderer = forwardRef<RendererHandle, object>(function Renderer(_props, ref) {
-  const spectrogramData = useAtomValue(spectrogramDataAtom);
-  const brushWidth = useAtomValue(brushWidthAtom);
-  const brushHeight = useAtomValue(brushHeightAtom);
-  const brushType = useAtomValue(brushTypeAtom);
-  const bpm = useAtomValue(bpmAtom);
-  const gridSize = useAtomValue(gridSizeAtom);
-  const zoomPower = useAtomValue(zoomPowerAtom);
-  const scroll = useAtomValue(scrollAtom);
-  const featherX = useAtomValue(featherXAtom);
-  const featherY = useAtomValue(featherYAtom);
-  const mouseUv = useAtomValue(mouseUvAtom);
-  const bandsPerOctave = useAtomValue(bandsPerOctaveAtom);
-  const brushIntensity = useAtomValue(brushIntensityAtom);
-  const [offsetX, setOffsetX] = useAtom(offsetXAtom);
-  const [offsetY, setOffsetY] = useAtom(offsetYAtom);
-  const offsetLock = useAtomValue(offsetLockAtom);
-  const pan = useAtomValue(panAtom);
-  const { gl, scene, camera, invalidate } = useThree();
+export const Renderer = ({ file, containerRef, context }: RendererProps) => {
+  const setMouseUv = useSetAtom(mouseUvAtom);
+  const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const playbackLineRef = useRef<HTMLDivElement>(null);
+  const isPlaying = useAtomValue(isPlayingAtom);
+  const animationFrameIdRef = useRef<number | null>(null);
+  const activeFile = useAtomValue(activeFileAtom);
+  const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
 
-  const [lockedUv, setLockedUv] = useState<THREE.Vector2 | null>(null);
+  const manager = useSpectrogramManager(file, context);
 
-  const mesh = useRef<THREE.Mesh>(null);
+  const getSnappedCoordinates = (event: React.MouseEvent<HTMLDivElement>): [number, number] | null => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
 
-  const textureSize = spectrogramData?.packedTextureSize;
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
 
-  const [fbo1, fbo2] = useMemo(() => {
-    if (!textureSize) return [null, null];
-    const options = {
-      format: THREE.RGBAFormat,
-      type: THREE.FloatType,
-    };
-    return [
-      new THREE.WebGLRenderTarget(textureSize.x, textureSize.y, options),
-      new THREE.WebGLRenderTarget(textureSize.x, textureSize.y, options),
-    ];
-  }, [textureSize]);
+    const zoomPower = store.get(zoomPowerAtom);
+    const scroll = store.get(scrollAtom);
+    const zoomedX = screenToZoomed(new THREE.Vector2(x, y), zoomPower, scroll).x;
 
-  const pingPong = useRef(0);
+    let snappedX = zoomedX;
+    let snappedY = y;
 
-  useEffect(() => {
-    if (spectrogramData && mesh.current && fbo1) {
-      mesh.current.material = copyMaterial;
-      copyMaterial.uniforms.inputTex.value = spectrogramData.packedDataTex;
+    if (activeFile?.id !== file.id) return [snappedX, snappedY];
 
-      gl.setRenderTarget(fbo1);
-      gl.render(scene, camera);
-      gl.setRenderTarget(null);
-
-      mesh.current.material = displayMaterial;
-
-      pingPong.current = 0;
-      invalidate();
-    }
-  }, [spectrogramData, camera, fbo1, gl, invalidate, scene]);
-
-  // This effect handles the offset lock logic
-  useEffect(() => {
-    if (!spectrogramData) return;
-    if (offsetLock) {
-      if (!lockedUv && mouseUv) {
-        // Lock engage: capture current mouse UV and existing offset
-        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const currentOffsetUv = unitsToUv(
-          offsetX,
-          offsetY,
-          bpm,
-          totalDuration,
-          bandsPerOctave,
-          spectrogramData.numBands,
-        );
-        const lockPosition = mouseUv.clone().sub(currentOffsetUv);
-        setLockedUv(lockPosition);
-      } else if (lockedUv && mouseUv) {
-        // Lock active: dynamically update offset to counteract mouse movement
-        const diffUv = mouseUv.clone().sub(lockedUv);
-        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const [newOffsetX, newOffsetY] = uvToUnits(
-          diffUv,
-          bpm,
-          totalDuration,
-          bandsPerOctave,
-          spectrogramData.numBands,
-        );
-        setOffsetX(newOffsetX);
-        setOffsetY(newOffsetY);
-      }
-    } else {
-      // Lock disengaged
-      if (lockedUv) {
-        setLockedUv(null);
-      }
-    }
-  }, [offsetLock, mouseUv, lockedUv, spectrogramData, bpm, bandsPerOctave, offsetX, offsetY, setOffsetX, setOffsetY]);
-
-  useEffect(() => {
-    if (spectrogramData && fbo1 && fbo2) {
-      const source = pingPong.current === 0 ? fbo1 : fbo2;
-
+    const snapX = store.get(snapXAtom);
+    if (snapX) {
+      const { spectrogramData } = file;
+      const bpm = store.get(bpmAtom);
+      const gridSize = store.get(gridSizeAtom);
+      const brushWidth = store.get(brushWidthAtom);
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-      const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
+      const gridIntervalSeconds = (60 / bpm) * gridSize;
+      const currentTime = zoomedX * totalDuration;
+      const brushWidthSeconds = brushWidth * (60.0 / bpm);
+      const startTime = currentTime - brushWidthSeconds / 2.0;
+      const snappedStartTime = Math.round(startTime / gridIntervalSeconds) * gridIntervalSeconds;
+      const snappedCenterTime = snappedStartTime + brushWidthSeconds / 2.0;
+      snappedX = snappedCenterTime / totalDuration;
+    }
 
-      displayMaterial.uniforms.packedDataTex.value = source.texture;
-      displayMaterial.uniforms.inverseMapTex.value = spectrogramData.inverseMapTex;
-      displayMaterial.uniforms.metadataTex.value = spectrogramData.metadataTex;
-      displayMaterial.uniforms.numFrames.value = spectrogramData.numFrames;
-      displayMaterial.uniforms.numBands.value = spectrogramData.numBands;
-      displayMaterial.uniforms.numChannels.value = spectrogramData.numChannels;
-      displayMaterial.uniforms.packedTextureSize.value = spectrogramData.packedTextureSize;
-      displayMaterial.uniforms.bpm.value = bpm;
-      displayMaterial.uniforms.gridSize.value = gridSize;
-      displayMaterial.uniforms.sampleRate.value = spectrogramData.sampleRate;
-      displayMaterial.uniforms.zoomPower.value = zoomPower;
-      displayMaterial.uniforms.scroll.value = scroll;
-      displayMaterial.uniforms.featherX.value = featherX / 100;
-      displayMaterial.uniforms.featherY.value = featherY / 100;
-      displayMaterial.uniforms.offsetUv.value.copy(offsetUv);
+    const snapY = store.get(snapYAtom);
+    if (snapY) {
+      const { spectrogramData } = file;
+      const gridSizeY = store.get(gridSizeYAtom);
+      const bandsPerOctave = store.get(bandsPerOctaveAtom);
+      const bandsPerSemitone = bandsPerOctave / 12;
+      const gridIntervalBands = gridSizeY * bandsPerSemitone;
+      const currentBand = y * spectrogramData.numBands;
+      const snappedBand = Math.round(currentBand / gridIntervalBands) * gridIntervalBands;
+      snappedY = snappedBand / spectrogramData.numBands;
+    }
 
-      // Update brush visualization uniforms
-      if (mouseUv) {
-        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const brushSizeUv = unitsToUv(
-          brushWidth,
-          brushHeight,
-          bpm,
-          totalDuration,
-          bandsPerOctave,
-          spectrogramData.numBands,
-        );
-        displayMaterial.uniforms.brushCenterUv.value.copy(mouseUv);
-        displayMaterial.uniforms.brushSizeUv.value.copy(brushSizeUv);
-      } else {
-        // Hide brush viz when mouse is outside canvas
-        displayMaterial.uniforms.brushSizeUv.value.set(0, 0);
+    return [snappedX, snappedY];
+  };
+
+  const performBrushStrokeWithDebounce = (snappedX: number, snappedY: number, force = false): void => {
+    if (
+      force ||
+      !lastSnappedPositionRef.current ||
+      lastSnappedPositionRef.current.x !== snappedX ||
+      lastSnappedPositionRef.current.y !== snappedY
+    ) {
+      manager.performBrushStroke(snappedX, snappedY);
+      lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
+    }
+  };
+
+  const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
+    const coords = getSnappedCoordinates(event);
+    if (!coords) return;
+    const [snappedX, snappedY] = coords;
+
+    const mouseUv = new THREE.Vector2(snappedX, 1 - snappedY);
+    setMouseUv(mouseUv);
+    if (activeFile?.id === file.id) {
+      manager.handleMouseUvUpdate(mouseUv);
+    }
+
+    if (event.buttons === 1 && activeFile?.id === file.id) {
+      performBrushStrokeWithDebounce(snappedX, snappedY);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setMouseUv(null);
+    if (activeFile?.id === file.id) {
+      manager.handleMouseUvUpdate(null);
+    }
+  };
+
+  const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
+    if (event.button === 0 && activeFile?.id === file.id && context) {
+      const beforeState = context.getFBOData();
+      if (beforeState) {
+        (event.currentTarget as any)._undoBeforeState = beforeState;
       }
-
-      invalidate();
+      const coords = getSnappedCoordinates(event);
+      if (coords) {
+        performBrushStrokeWithDebounce(coords[0], coords[1], true);
+      }
     }
-  }, [
-    spectrogramData,
-    bpm,
-    gridSize,
-    zoomPower,
-    scroll,
-    featherX,
-    featherY,
-    invalidate,
-    fbo1,
-    fbo2,
-    mouseUv,
-    brushWidth,
-    brushHeight,
-    bandsPerOctave,
-    offsetX,
-    offsetY,
-  ]);
+  };
 
-  const update = (x: number, y: number) => {
-    if (!spectrogramData || !mesh.current || !fbo1 || !fbo2) return;
+  const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = (event) => {
+    if (event.button === 0 && activeFile?.id === file.id && context) {
+      const beforeState = (event.currentTarget as any)._undoBeforeState;
+      if (beforeState) {
+        const afterState = context.getFBOData();
+        if (afterState) {
+          window.api.addUndoState({ before: beforeState.buffer, after: afterState.buffer });
+        }
+        delete (event.currentTarget as any)._undoBeforeState;
+      }
+    }
+  };
 
-    const source = pingPong.current === 0 ? fbo1 : fbo2;
-    const destination = pingPong.current === 0 ? fbo2 : fbo1;
-
-    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-    const brushSizeUv = unitsToUv(
-      brushWidth,
-      brushHeight,
-      bpm,
-      totalDuration,
-      bandsPerOctave,
-      spectrogramData.numBands,
-    );
-    const brushCenterUv = new THREE.Vector2(x, 1 - y);
-
-    const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
-
-    const brush = brushes[brushType];
-    mesh.current.material = brush.material;
-
-    brush.updateUniforms({
-      brushCenterUv,
-      brushSizeUv,
-      sourceTexture: source.texture,
-      zoomPower,
-      scroll,
-      featherX: featherX / 100,
-      featherY: featherY / 100,
-      brushIntensity,
-      offsetUv,
-      pan,
+  useEffect(() => {
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setCanvasSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
     });
+    if (containerRef.current) resizeObserver.observe(containerRef.current);
+    return () => resizeObserver.disconnect();
+  }, [containerRef]);
 
-    gl.setRenderTarget(destination);
-    gl.render(scene, camera);
-    gl.setRenderTarget(null);
+  useEffect(() => {
+    const animate = () => {
+      if (playbackLineRef.current && activeFile?.id === file.id) {
+        const { spectrogramData } = file;
+        const zoomPower = store.get(zoomPowerAtom);
+        const scroll = store.get(scrollAtom);
+        const playbackTime = store.get(playbackTimeAtom);
 
-    mesh.current.material = displayMaterial;
-    displayMaterial.uniforms.packedDataTex.value = destination.texture;
+        if (canvasSize.width > 0) {
+          const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+          const progress = playbackTime / totalDuration;
+          const screenCoords = zoomedToScreen(new THREE.Vector2(progress, 0), zoomPower, scroll);
+          const left = screenCoords.x * canvasSize.width;
 
-    pingPong.current = 1 - pingPong.current;
+          if (left < 0 || left > canvasSize.width) {
+            playbackLineRef.current.style.display = "none";
+          } else {
+            playbackLineRef.current.style.display = "block";
+            playbackLineRef.current.style.left = `${left}px`;
+          }
+        } else {
+          playbackLineRef.current.style.display = "none";
+        }
+      } else if (playbackLineRef.current) {
+        playbackLineRef.current.style.display = "none";
+      }
+      animationFrameIdRef.current = requestAnimationFrame(animate);
+    };
 
-    invalidate();
-  };
-
-  const getFBOData = (): Float32Array | null => {
-    if (!spectrogramData || !textureSize || !fbo1 || !fbo2) return null;
-
-    const fboToRead = pingPong.current === 0 ? fbo1 : fbo2;
-    const buffer = new Float32Array(textureSize.x * textureSize.y * 4);
-    gl.getContext().finish();
-    gl.readRenderTargetPixels(fboToRead, 0, 0, textureSize.x, textureSize.y, buffer);
-    return buffer;
-  };
-
-  const setFBOData = (data: Float32Array) => {
-    if (!spectrogramData || !mesh.current || !fbo1 || !fbo2 || !textureSize) return;
-
-    const destination = pingPong.current === 0 ? fbo1 : fbo2;
-
-    const dataTex = new THREE.DataTexture(data, textureSize.x, textureSize.y, THREE.RGBAFormat, THREE.FloatType);
-    dataTex.needsUpdate = true;
-
-    mesh.current.material = copyMaterial;
-    copyMaterial.uniforms.inputTex.value = dataTex;
-
-    gl.setRenderTarget(destination);
-    gl.render(scene, camera);
-    gl.setRenderTarget(null);
-
-    mesh.current.material = displayMaterial;
-    displayMaterial.uniforms.packedDataTex.value = destination.texture;
-
-    invalidate();
-
-    dataTex.dispose();
-  };
-
-  const triggerSynthesis = async (): Promise<void> => {
-    const buffer = getFBOData();
-    if (buffer) {
-      await runSynthesis(buffer);
+    if (isPlaying) {
+      animationFrameIdRef.current = requestAnimationFrame(animate);
+    } else {
+      if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
+      if (playbackLineRef.current) playbackLineRef.current.style.display = "none";
     }
-  };
 
-  useImperativeHandle(ref, () => ({
-    update,
-    triggerSynthesis,
-    getFBOData,
-    setFBOData,
-  }));
+    return () => {
+      if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
+    };
+  }, [isPlaying, canvasSize, file, activeFile]);
 
-  if (!spectrogramData) {
+  if (!containerRef.current) {
     return null;
   }
 
-  return (
-    <mesh ref={mesh}>
-      <planeGeometry args={[2, 2]} />
-    </mesh>
+  return createPortal(
+    <Box
+      pos="absolute"
+      top={0}
+      left={0}
+      w="100%"
+      h="100%"
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      onMouseDown={handleCanvasMouseDown}
+      onMouseUp={handleCanvasMouseUp}
+    >
+      <div
+        ref={playbackLineRef}
+        style={{
+          position: "absolute",
+          top: 0,
+          width: "1px",
+          backgroundColor: "white",
+          height: "100%",
+          pointerEvents: "none",
+          display: "none",
+        }}
+      />
+    </Box>,
+    containerRef.current,
   );
-});
+};

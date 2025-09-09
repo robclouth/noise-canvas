@@ -55,7 +55,7 @@ const DynamicsMaterial = shaderMaterial(
         // Simplified: sample a few points in a window
         for (float i = -3.0; i <= 3.0; i++) {
             float timeOffset = i * (1.0 / numFrames);
-            vec4 texel = sampleSpectrogramPoint(uv + vec2(timeOffset, 0.0));
+            vec4 texel = sampleFromSource(uv + vec2(timeOffset, 0.0));
             float mag = length(texel.rg) + length(texel.ba);
 
             float weight = 1.0;
@@ -74,7 +74,7 @@ const DynamicsMaterial = shaderMaterial(
         vec4 originalTexel = texture2D(packedDataTex, vUv);
 
         if (isInBrush(coords.dest)) {
-            vec4 currentTexel = sampleSpectrogramPoint(coords.source);
+            vec4 currentTexel = sampleFromSource(coords.source);
             float currentMag = length(currentTexel.rg) + length(currentTexel.ba);
             float inputDb = linToDb(currentMag);
 

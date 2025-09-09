@@ -72,6 +72,20 @@ const api: IpcApi = {
       ipcRenderer.removeListener("request-audio-for-saving", handler);
     };
   },
+  onCloseActiveFile: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("close-active-file", handler);
+    return () => {
+      ipcRenderer.removeListener("close-active-file", handler);
+    };
+  },
+  onCloseAllFiles: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("close-all-files", handler);
+    return () => {
+      ipcRenderer.removeListener("close-all-files", handler);
+    };
+  },
 };
 
 // Use `contextBridge` APIs to expose Electron APIs to
