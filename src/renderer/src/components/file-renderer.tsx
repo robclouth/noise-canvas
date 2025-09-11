@@ -19,8 +19,8 @@ import {
   sourceFileAtom,
   zoomPowerAtom,
 } from "@/store";
-import { View } from "@react-three/drei";
-import { useThree } from "@react-three/fiber";
+import { useFBO, View } from "@react-three/drei";
+import { useFrame, useThree } from "@react-three/fiber";
 import { useAtom, useAtomValue } from "jotai";
 import { forwardRef, RefObject, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -44,9 +44,11 @@ export interface FileRendererHandle {
 
 export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({ file, viewRef }, ref) => {
   const { spectrogramData } = file;
-  const { gl, camera, invalidate, scene } = useThree();
+  const { gl, camera, invalidate } = useThree();
 
-  const fboScene = useMemo(() => new THREE.Scene(), []);
+  const [packedDataTex, setPackedDataTex] = useState<THREE.DataTexture | null>(null);
+  const [inverseMapTex, setInverseMapTex] = useState<THREE.DataTexture | null>(null);
+  const [metadataTex, setMetadataTex] = useState<THREE.DataTexture | null>(null);
 
   const brushWidth = useAtomValue(brushWidthAtom);
   const brushHeight = useAtomValue(brushHeightAtom);
@@ -69,45 +71,131 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
   const [lockedUv, setLockedUv] = useState<THREE.Vector2 | null>(null);
 
   const mesh = useRef<THREE.Mesh>(null!);
+  const { scene: fboScene, mesh: fboMesh } = useMemo(() => {
+    const scene = new THREE.Scene();
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
+    scene.add(mesh);
+    return { scene, mesh };
+  }, []);
 
-  const [fbo1, fbo2] = useMemo(() => {
-    if (!spectrogramData) return [null, null];
-    const { packedTextureSize } = spectrogramData;
-    const options = {
+  const fboSettings = useMemo(
+    () => ({
       format: THREE.RGBAFormat,
       type: THREE.FloatType,
-    };
-    return [
-      new THREE.WebGLRenderTarget(packedTextureSize.x, packedTextureSize.y, options),
-      new THREE.WebGLRenderTarget(packedTextureSize.x, packedTextureSize.y, options),
-    ];
-  }, [spectrogramData]);
+    }),
+    [],
+  );
+
+  const fbo1 = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, fboSettings);
+  const fbo2 = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, fboSettings);
 
   const pingPong = useRef(0);
+  const isInitialized = useRef(false);
+
+  const [strokeParams, setStrokeParams] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
-    if (spectrogramData && fbo1 && mesh.current) {
-      invalidate();
-      mesh.current.material = copyMaterial;
-      copyMaterial.uniforms.inputTex.value = spectrogramData.packedDataTex;
+    if (!spectrogramData) return;
+    isInitialized.current = false;
+    const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
 
-      const parent = mesh.current.parent;
-      if (parent) {
-        fboScene.add(mesh.current);
-        gl.setRenderTarget(fbo1);
-        gl.render(fboScene, camera);
-        gl.setRenderTarget(null);
-        parent.add(mesh.current);
-      }
+    const packed = new THREE.DataTexture(packedData, textureWidth, textureHeight, THREE.RGBAFormat, THREE.FloatType);
+    packed.internalFormat = "RGBA32F";
+    packed.minFilter = THREE.NearestFilter;
+    packed.magFilter = THREE.NearestFilter;
+    packed.needsUpdate = true;
 
-      mesh.current.material = displayMaterial;
-      const source = pingPong.current === 0 ? fbo1 : fbo2;
-      if (source) displayMaterial.uniforms.packedDataTex.value = source.texture;
+    const inverse = new THREE.DataTexture(inverseMap, textureWidth, textureHeight, THREE.RGFormat, THREE.FloatType);
+    inverse.internalFormat = "RG32F";
+    inverse.minFilter = THREE.NearestFilter;
+    inverse.magFilter = THREE.NearestFilter;
+    inverse.needsUpdate = true;
 
+    const meta = new THREE.DataTexture(metadata, numBands, 1, THREE.RGBFormat, THREE.FloatType);
+    meta.internalFormat = "RGB32F";
+    meta.minFilter = THREE.NearestFilter;
+    meta.magFilter = THREE.NearestFilter;
+    meta.needsUpdate = true;
+
+    setPackedDataTex(packed);
+    setInverseMapTex(inverse);
+    setMetadataTex(meta);
+
+    return () => {
+      packed.dispose();
+      inverse.dispose();
+      meta.dispose();
+      setPackedDataTex(null);
+      setInverseMapTex(null);
+      setMetadataTex(null);
+    };
+  }, [spectrogramData]);
+
+  useFrame(({ gl, camera }) => {
+    if (!fboMesh || !spectrogramData || !packedDataTex || !fbo1 || !fbo2) return;
+
+    // Initial copy
+    if (!isInitialized.current) {
+      fboMesh.material = copyMaterial;
+      copyMaterial.uniforms.inputTex.value = packedDataTex;
+
+      gl.setRenderTarget(fbo1);
+      gl.render(fboScene, camera);
+      gl.setRenderTarget(null);
+
+      isInitialized.current = true;
       pingPong.current = 0;
-      invalidate();
     }
-  }, [spectrogramData, fbo1, fbo2, gl, camera, mesh, invalidate, scene, fboScene]);
+
+    // Render stroke
+    if (strokeParams) {
+      const source = pingPong.current === 0 ? fbo1 : fbo2;
+      const destination = pingPong.current === 0 ? fbo2 : fbo1;
+      const { x, y } = strokeParams;
+
+      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+      const brushSizeUv = unitsToUv(
+        brushWidth,
+        brushHeight,
+        bpm,
+        totalDuration,
+        bandsPerOctave,
+        spectrogramData.numBands,
+      );
+      const brushCenterUv = new THREE.Vector2(x, 1 - y);
+      const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
+      const crossFileTexture = sourceFile?.renderer?.current?.getFBO()?.texture ?? null;
+
+      const brush = brushes[brushType];
+      fboMesh.material = brush.material;
+
+      brush.updateUniforms({
+        brushCenterUv,
+        brushSizeUv,
+        sourceTexture: source.texture,
+        crossFileTexture,
+        zoomPower,
+        scroll,
+        featherX: featherX / 100,
+        featherY: featherY / 100,
+        brushIntensity,
+        offsetUv,
+        pan,
+      });
+
+      gl.setRenderTarget(destination);
+      gl.render(fboScene, camera);
+      gl.setRenderTarget(null);
+
+      pingPong.current = 1 - pingPong.current;
+      setStrokeParams(null); // Reset stroke params
+    }
+
+    // Update display material
+    const currentFBO = pingPong.current === 0 ? fbo1 : fbo2;
+    displayMaterial.uniforms.packedDataTex.value = currentFBO.texture;
+    invalidate();
+  });
 
   useEffect(() => {
     if (!spectrogramData) return;
@@ -145,15 +233,12 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
   }, [offsetLock, mouseUv, lockedUv, spectrogramData, bpm, bandsPerOctave, offsetX, offsetY, setOffsetX, setOffsetY]);
 
   useEffect(() => {
-    if (spectrogramData && fbo1 && fbo2) {
-      const source = pingPong.current === 0 ? fbo1 : fbo2;
-      displayMaterial.uniforms.packedDataTex.value = source.texture;
-
+    if (spectrogramData && inverseMapTex && metadataTex) {
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
       const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
 
-      displayMaterial.uniforms.inverseMapTex.value = spectrogramData.inverseMapTex;
-      displayMaterial.uniforms.metadataTex.value = spectrogramData.metadataTex;
+      displayMaterial.uniforms.inverseMapTex.value = inverseMapTex;
+      displayMaterial.uniforms.metadataTex.value = metadataTex;
       displayMaterial.uniforms.numFrames.value = spectrogramData.numFrames;
       displayMaterial.uniforms.numBands.value = spectrogramData.numBands;
       displayMaterial.uniforms.numChannels.value = spectrogramData.numChannels;
@@ -192,66 +277,15 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     featherX,
     featherY,
     invalidate,
-    fbo1,
-    fbo2,
     mouseUv,
     brushWidth,
     brushHeight,
     bandsPerOctave,
     offsetX,
     offsetY,
+    inverseMapTex,
+    metadataTex,
   ]);
-
-  const renderStroke = (x: number, y: number) => {
-    if (!spectrogramData || !fbo1 || !fbo2) return;
-
-    const source = pingPong.current === 0 ? fbo1 : fbo2;
-    const destination = pingPong.current === 0 ? fbo2 : fbo1;
-
-    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-    const brushSizeUv = unitsToUv(
-      brushWidth,
-      brushHeight,
-      bpm,
-      totalDuration,
-      bandsPerOctave,
-      spectrogramData.numBands,
-    );
-    const brushCenterUv = new THREE.Vector2(x, 1 - y);
-    const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
-    const crossFileTexture = sourceFile?.renderer?.current?.getFBO()?.texture ?? null;
-
-    const brush = brushes[brushType];
-    mesh.current.material = brush.material;
-
-    brush.updateUniforms({
-      brushCenterUv,
-      brushSizeUv,
-      sourceTexture: source.texture,
-      crossFileTexture,
-      zoomPower,
-      scroll,
-      featherX: featherX / 100,
-      featherY: featherY / 100,
-      brushIntensity,
-      offsetUv,
-      pan,
-    });
-
-    const parent = mesh.current.parent;
-    if (parent) {
-      fboScene.add(mesh.current);
-      gl.setRenderTarget(destination);
-      gl.render(fboScene, camera);
-      gl.setRenderTarget(null);
-      parent.add(mesh.current);
-    }
-
-    mesh.current.material = displayMaterial;
-    displayMaterial.uniforms.packedDataTex.value = destination.texture;
-    pingPong.current = 1 - pingPong.current;
-    invalidate();
-  };
 
   const getFBOData = (): Float32Array | null => {
     if (!spectrogramData || !fbo1 || !fbo2) return null;
@@ -264,7 +298,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
   };
 
   const setFBOData = (data: Float32Array) => {
-    if (!spectrogramData || !fbo1 || !fbo2) return;
+    if (!spectrogramData || !fbo1 || !fbo2 || !fboMesh) return;
     const { packedTextureSize } = spectrogramData;
     const destination = pingPong.current === 0 ? fbo1 : fbo2;
 
@@ -277,20 +311,12 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     );
     dataTex.needsUpdate = true;
 
-    mesh.current.material = copyMaterial;
+    fboMesh.material = copyMaterial;
     copyMaterial.uniforms.inputTex.value = dataTex;
 
-    const parent = mesh.current.parent;
-    if (parent) {
-      fboScene.add(mesh.current);
-      gl.setRenderTarget(destination);
-      gl.render(fboScene, camera);
-      gl.setRenderTarget(null);
-      parent.add(mesh.current);
-    }
-
-    mesh.current.material = displayMaterial;
-    displayMaterial.uniforms.packedDataTex.value = destination.texture;
+    gl.setRenderTarget(destination);
+    gl.render(fboScene, camera);
+    gl.setRenderTarget(null);
 
     dataTex.dispose();
   };
@@ -308,7 +334,9 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
   };
 
   useImperativeHandle(ref, () => ({
-    renderStroke,
+    renderStroke: (x: number, y: number) => {
+      setStrokeParams({ x, y });
+    },
     triggerSynthesis,
     getFBOData,
     setFBOData,
@@ -323,6 +351,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     <View track={viewRef as RefObject<HTMLElement>}>
       <mesh ref={mesh}>
         <planeGeometry args={[2, 2]} />
+        <primitive object={displayMaterial} attach="material" />
       </mesh>
     </View>
   );
