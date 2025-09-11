@@ -1,8 +1,8 @@
-import { WritableAtom, SetStateAction } from "jotai";
+import { SetStateAction, WritableAtom } from "jotai";
+import { RESET } from "jotai/utils";
 import * as THREE from "three";
 import { IUniform } from "three";
-import { OpenFile, SpectrogramData, activeFileAtom, sourceFileAtom, store } from "../../store";
-import { RESET } from "jotai/utils";
+import { activeFileAtom, store } from "../../store";
 
 export type SetStateActionWithReset<Value> = SetStateAction<Value> | typeof RESET;
 
@@ -10,7 +10,8 @@ export interface UpdateUniformsProps {
   brushCenterUv: THREE.Vector2;
   brushSizeUv: THREE.Vector2;
   sourceTexture: THREE.Texture;
-  crossFileTexture: THREE.Texture | null;
+  inverseMapTex: THREE.Texture;
+  metadataTex: THREE.Texture;
   zoomPower: number;
   scroll: number;
   featherX: number;
@@ -72,18 +73,18 @@ export abstract class BaseBrush {
       offsetUv,
       pan,
       sourceTexture,
-      crossFileTexture,
+      inverseMapTex,
+      metadataTex,
     } = props;
     const uniforms = this.material.uniforms;
     const activeFile = store.get(activeFileAtom);
-    const sourceFile = store.get(sourceFileAtom);
 
     if (!activeFile) return;
     const spectrogramData = activeFile.spectrogramData;
 
     uniforms.packedDataTex.value = sourceTexture;
-    uniforms.inverseMapTex.value = spectrogramData.inverseMapTex;
-    uniforms.metadataTex.value = spectrogramData.metadataTex;
+    uniforms.inverseMapTex.value = inverseMapTex;
+    uniforms.metadataTex.value = metadataTex;
     uniforms.numFrames.value = spectrogramData.numFrames;
     uniforms.numBands.value = spectrogramData.numBands;
     uniforms.numChannels.value = spectrogramData.numChannels;
@@ -98,16 +99,5 @@ export abstract class BaseBrush {
     uniforms.brushIntensity.value = brushIntensity;
     uniforms.offsetUv.value.copy(offsetUv);
     uniforms.pan.value = pan;
-
-    const sourceSelected = crossFileTexture && sourceFile;
-    uniforms.sourceSelected.value = sourceSelected;
-    if (sourceSelected) {
-      uniforms.sourceTexture.value = crossFileTexture;
-      uniforms.sourceMetadataTex.value = sourceFile.spectrogramData.metadataTex;
-      uniforms.sourcePackedTextureSize.value = sourceFile.spectrogramData.packedTextureSize;
-      uniforms.sourceNumFrames.value = sourceFile.spectrogramData.numFrames;
-      uniforms.sourceNumBands.value = sourceFile.spectrogramData.numBands;
-      uniforms.sourceSampleRate.value = sourceFile.spectrogramData.sampleRate;
-    }
   }
 }

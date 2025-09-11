@@ -9,23 +9,22 @@ import {
   featherYAtom,
   gridSizeAtom,
   mouseUvAtom,
-  offsetLockAtom,
   offsetXAtom,
   offsetYAtom,
   OpenFile,
   panAtom,
   runSynthesis,
   scrollAtom,
-  sourceFileAtom,
+  store,
   zoomPowerAtom,
 } from "@/store";
 import { useFBO, View } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue } from "jotai";
 import { forwardRef, RefObject, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { brushes } from "./brushes";
-import { unitsToUv, uvToUnits } from "./brushes/common";
+import { unitsToUv } from "./brushes/common";
 import { copyMaterial } from "./copy-material";
 import { displayMaterial } from "./display-material";
 
@@ -49,6 +48,14 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
   const [packedDataTex, setPackedDataTex] = useState<THREE.DataTexture | null>(null);
   const [inverseMapTex, setInverseMapTex] = useState<THREE.DataTexture | null>(null);
   const [metadataTex, setMetadataTex] = useState<THREE.DataTexture | null>(null);
+  const mouseUv = useRef<THREE.Vector2 | null>(null);
+
+  useEffect(() => {
+    const unsub = store.sub(mouseUvAtom, () => {
+      mouseUv.current = store.get(mouseUvAtom);
+    });
+    return unsub;
+  }, []);
 
   const brushWidth = useAtomValue(brushWidthAtom);
   const brushHeight = useAtomValue(brushHeightAtom);
@@ -59,16 +66,11 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
   const scroll = useAtomValue(scrollAtom);
   const featherX = useAtomValue(featherXAtom);
   const featherY = useAtomValue(featherYAtom);
-  const mouseUv = useAtomValue(mouseUvAtom);
   const bandsPerOctave = useAtomValue(bandsPerOctaveAtom);
   const brushIntensity = useAtomValue(brushIntensityAtom);
-  const [offsetX, setOffsetX] = useAtom(offsetXAtom);
-  const [offsetY, setOffsetY] = useAtom(offsetYAtom);
-  const offsetLock = useAtomValue(offsetLockAtom);
+  const offsetX = useAtomValue(offsetXAtom);
+  const offsetY = useAtomValue(offsetYAtom);
   const pan = useAtomValue(panAtom);
-  const sourceFile = useAtomValue(sourceFileAtom);
-
-  const [lockedUv, setLockedUv] = useState<THREE.Vector2 | null>(null);
 
   const mesh = useRef<THREE.Mesh>(null!);
   const { scene: fboScene, mesh: fboMesh } = useMemo(() => {
@@ -78,21 +80,20 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     return { scene, mesh };
   }, []);
 
-  const fboSettings = useMemo(
-    () => ({
-      format: THREE.RGBAFormat,
-      type: THREE.FloatType,
-    }),
-    [],
-  );
+  const fbo1 = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+    format: THREE.RGBAFormat,
+    type: THREE.FloatType,
+  });
 
-  const fbo1 = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, fboSettings);
-  const fbo2 = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, fboSettings);
+  const fbo2 = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+    format: THREE.RGBAFormat,
+    type: THREE.FloatType,
+  });
 
   const pingPong = useRef(0);
   const isInitialized = useRef(false);
 
-  const [strokeParams, setStrokeParams] = useState<{ x: number; y: number } | null>(null);
+  const strokeParams = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (!spectrogramData) return;
@@ -132,7 +133,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
   }, [spectrogramData]);
 
   useFrame(({ gl, camera }) => {
-    if (!fboMesh || !spectrogramData || !packedDataTex || !fbo1 || !fbo2) return;
+    if (!fboMesh || !spectrogramData || !packedDataTex || !inverseMapTex || !metadataTex || !fbo1 || !fbo2) return;
 
     // Initial copy
     if (!isInitialized.current) {
@@ -148,10 +149,10 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     }
 
     // Render stroke
-    if (strokeParams) {
+    if (strokeParams.current) {
       const source = pingPong.current === 0 ? fbo1 : fbo2;
       const destination = pingPong.current === 0 ? fbo2 : fbo1;
-      const { x, y } = strokeParams;
+      const { x, y } = strokeParams.current;
 
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
       const brushSizeUv = unitsToUv(
@@ -164,7 +165,6 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
       );
       const brushCenterUv = new THREE.Vector2(x, 1 - y);
       const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
-      const crossFileTexture = sourceFile?.renderer?.current?.getFBO()?.texture ?? null;
 
       const brush = brushes[brushType];
       fboMesh.material = brush.material;
@@ -173,7 +173,8 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
         brushCenterUv,
         brushSizeUv,
         sourceTexture: source.texture,
-        crossFileTexture,
+        inverseMapTex,
+        metadataTex,
         zoomPower,
         scroll,
         featherX: featherX / 100,
@@ -188,52 +189,14 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
       gl.setRenderTarget(null);
 
       pingPong.current = 1 - pingPong.current;
-      setStrokeParams(null); // Reset stroke params
+      strokeParams.current = null; // Reset stroke params
     }
 
     // Update display material
     const currentFBO = pingPong.current === 0 ? fbo1 : fbo2;
     displayMaterial.uniforms.packedDataTex.value = currentFBO.texture;
-    invalidate();
-  });
 
-  useEffect(() => {
-    if (!spectrogramData) return;
-    if (offsetLock) {
-      if (!lockedUv && mouseUv) {
-        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const currentOffsetUv = unitsToUv(
-          offsetX,
-          offsetY,
-          bpm,
-          totalDuration,
-          bandsPerOctave,
-          spectrogramData.numBands,
-        );
-        const lockPosition = mouseUv.clone().sub(currentOffsetUv);
-        setLockedUv(lockPosition);
-      } else if (lockedUv && mouseUv) {
-        const diffUv = mouseUv.clone().sub(lockedUv);
-        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const [newOffsetX, newOffsetY] = uvToUnits(
-          diffUv,
-          bpm,
-          totalDuration,
-          bandsPerOctave,
-          spectrogramData.numBands,
-        );
-        setOffsetX(newOffsetX);
-        setOffsetY(newOffsetY);
-      }
-    } else {
-      if (lockedUv) {
-        setLockedUv(null);
-      }
-    }
-  }, [offsetLock, mouseUv, lockedUv, spectrogramData, bpm, bandsPerOctave, offsetX, offsetY, setOffsetX, setOffsetY]);
-
-  useEffect(() => {
-    if (spectrogramData && inverseMapTex && metadataTex) {
+    if (inverseMapTex && metadataTex) {
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
       const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
 
@@ -252,7 +215,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
       displayMaterial.uniforms.featherY.value = featherY / 100;
       displayMaterial.uniforms.offsetUv.value.copy(offsetUv);
 
-      if (mouseUv) {
+      if (mouseUv.current) {
         const brushSizeUv = unitsToUv(
           brushWidth,
           brushHeight,
@@ -261,31 +224,14 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
           bandsPerOctave,
           spectrogramData.numBands,
         );
-        displayMaterial.uniforms.brushCenterUv.value.copy(mouseUv);
+        displayMaterial.uniforms.brushCenterUv.value.copy(mouseUv.current);
         displayMaterial.uniforms.brushSizeUv.value.copy(brushSizeUv);
       } else {
         displayMaterial.uniforms.brushSizeUv.value.set(0, 0);
       }
-      invalidate();
     }
-  }, [
-    spectrogramData,
-    bpm,
-    gridSize,
-    zoomPower,
-    scroll,
-    featherX,
-    featherY,
-    invalidate,
-    mouseUv,
-    brushWidth,
-    brushHeight,
-    bandsPerOctave,
-    offsetX,
-    offsetY,
-    inverseMapTex,
-    metadataTex,
-  ]);
+    invalidate();
+  });
 
   const getFBOData = (): Float32Array | null => {
     if (!spectrogramData || !fbo1 || !fbo2) return null;
@@ -335,7 +281,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
 
   useImperativeHandle(ref, () => ({
     renderStroke: (x: number, y: number) => {
-      setStrokeParams({ x, y });
+      strokeParams.current = { x, y };
     },
     triggerSynthesis,
     getFBOData,

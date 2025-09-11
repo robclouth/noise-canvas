@@ -32,17 +32,6 @@ uniform float pi;
 uniform float minFreq;
 uniform float bandsPerOctave;
 
-// Source texture uniforms
-uniform bool sourceSelected;
-uniform sampler2D sourceTexture;
-uniform sampler2D sourceMetadataTex;
-uniform vec2 sourcePackedTextureSize;
-uniform float sourceNumFrames;
-uniform float sourceNumBands;
-uniform float sourceMinFreq;
-uniform float sourceBandsPerOctave;
-uniform float sourceSampleRate;
-
 // Brush & View Uniforms
 uniform vec2 brushCenterUv;
 uniform vec2 brushSizeUv;
@@ -169,9 +158,6 @@ vec4 sampleSpectrogramPoint(vec2 logicalUv, sampler2D data, sampler2D meta, vec2
 }
 
 vec4 sampleFromSource(vec2 logicalUv) {
-    if (sourceSelected) {
-        return sampleSpectrogramPoint(logicalUv, sourceTexture, sourceMetadataTex, sourcePackedTextureSize, sourceNumFrames, sourceNumBands, sourceSampleRate);
-    }
     return sampleSpectrogramPoint(logicalUv, packedDataTex, metadataTex, packedTextureSize, numFrames, numBands, sampleRate);
 }
 
@@ -249,17 +235,10 @@ vec4 _performTransformation(vec2 sourceUv, vec2 targetUv,
  * @param targetUv The logical UV coordinate of the pixel we are writing TO.
  */
 vec4 sampleSpectrogramTransformed(vec2 sourceUv, vec2 targetUv) {
-    if (sourceSelected) {
-        return _performTransformation(sourceUv, targetUv,
-                                     sourceNumBands, sourceBandsPerOctave, sourceMinFreq, sourceNumFrames,
-                                     sourceMetadataTex, sourceTexture, sourcePackedTextureSize, sourceSampleRate,
-                                     numBands, bandsPerOctave, minFreq);
-    } else {
-        return _performTransformation(sourceUv, targetUv,
-                                     numBands, bandsPerOctave, minFreq, numFrames,
-                                     metadataTex, packedDataTex, packedTextureSize, sampleRate,
-                                     numBands, bandsPerOctave, minFreq);
-    }
+    return _performTransformation(sourceUv, targetUv,
+                                 numBands, bandsPerOctave, minFreq, numFrames,
+                                 metadataTex, packedDataTex, packedTextureSize, sampleRate,
+                                 numBands, bandsPerOctave, minFreq);
 }
 
 // Convenience wrapper for display
@@ -272,7 +251,6 @@ export const uniforms = {
   packedDataTex: new Texture(),
   inverseMapTex: new Texture(),
   metadataTex: new Texture(),
-  sourceTexture: null as Texture | null,
   numFrames: 0,
   numBands: 0,
   packedTextureSize: new Vector2(0, 0),
@@ -281,15 +259,6 @@ export const uniforms = {
   pi: Math.PI,
   minFreq: 20.0,
   bandsPerOctave: 24.0,
-
-  sourceSelected: false,
-  sourceMetadataTex: new Texture(),
-  sourcePackedTextureSize: new Vector2(0, 0),
-  sourceNumFrames: 0,
-  sourceNumBands: 0,
-  sourceMinFreq: 20.0,
-  sourceBandsPerOctave: 24.0,
-  sourceSampleRate: 44100.0,
 
   brushCenterUv: new Vector2(0.5, 0.5),
   brushSizeUv: new Vector2(0.1, 0.1),
