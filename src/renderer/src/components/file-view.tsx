@@ -1,6 +1,5 @@
 import {
   activeFileAtom,
-  activeFileIdAtom,
   bandsPerOctaveAtom,
   bpmAtom,
   brushWidthAtom,
@@ -20,6 +19,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { X } from "lucide-react";
 import { ForwardedRef, MouseEventHandler, RefObject, useRef } from "react";
 import { Vector2 } from "three";
+import { stopAudio } from "../audio-manager";
 import { screenToZoomed } from "./brushes/common";
 import { FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
@@ -85,9 +85,9 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>): [number
 }
 
 export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
-  const setActiveFileId = useSetAtom(activeFileIdAtom);
   const activeFile = useAtomValue(activeFileAtom);
   const setMouseUv = useSetAtom(mouseUvAtom);
+  const setActiveFile = useSetAtom(activeFileAtom);
 
   const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -122,9 +122,9 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
   };
 
   const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
-    if (event.button === 0 && file.renderer?.current) {
+    if (event.button === 0 && file.rendererRef?.current) {
       // Left mouse button down
-      const beforeState = file.renderer.current.getFBOData();
+      const beforeState = file.rendererRef.current.getFBOData();
       if (beforeState) {
         // We'll capture the 'after' state on mouse up
         (event.currentTarget as any)._undoBeforeState = beforeState;
@@ -138,11 +138,11 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
   };
 
   const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = (event) => {
-    if (event.button === 0 && file.renderer?.current) {
+    if (event.button === 0 && file.rendererRef?.current) {
       // Left mouse button up
       const beforeState = (event.currentTarget as any)._undoBeforeState;
       if (beforeState) {
-        const afterState = file.renderer.current.getFBOData();
+        const afterState = file.rendererRef.current.getFBOData();
         if (afterState) {
           window.api.addUndoState({
             before: beforeState.buffer,
@@ -156,9 +156,12 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
 
   return (
     <Box
-      onClick={() => setActiveFileId(file.id)}
+      onClick={() => {
+        stopAudio();
+        setActiveFile(file);
+      }}
       pos="relative"
-      bd={activeFile?.id === file.id ? "2px solid orange" : "2px solid transparent"}
+      bd={activeFile?.filePath === file.filePath ? "2px solid orange" : "2px solid transparent"}
     >
       <Flex justify="space-between" align="center" p="xs">
         <Title order={6}>{file.filePath.split("/").pop() || file.filePath}</Title>
@@ -166,7 +169,7 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
           size="xs"
           onClick={(e) => {
             e.stopPropagation();
-            closeFile(file.id);
+            closeFile(file);
           }}
         >
           <X />
@@ -181,7 +184,7 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
         onMouseDown={handleCanvasMouseDown}
         onMouseUp={handleCanvasMouseUp}
       />
-      <PlaybackLine file={file} containerRef={viewRef} />
+      {activeFile?.filePath === file.filePath && <PlaybackLine file={file} containerRef={viewRef} />}
     </Box>
   );
 };

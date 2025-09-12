@@ -1,11 +1,10 @@
 import { notifications } from "@mantine/notifications";
 import { atom, createStore } from "jotai";
 import { atomWithStorage } from "jotai/utils";
-import { RefObject } from "react";
+import { omit } from "lodash-es";
+import { createRef, RefObject } from "react";
 import type { AnalysisPayloadForRenderer } from "src/main/lib/types";
 import { Vector2 } from "three";
-import * as Tone from "tone";
-import { audioBufferAtom } from "./audio-manager";
 import type { FileRendererHandle } from "./components/file-renderer";
 
 export const store = createStore();
@@ -46,10 +45,11 @@ export interface SpectrogramData {
 }
 
 export interface OpenFile {
-  id: string;
   filePath: string;
   spectrogramData: SpectrogramData;
-  renderer?: RefObject<FileRendererHandle | null>;
+  rendererRef: RefObject<FileRendererHandle | null>;
+  viewRef: RefObject<HTMLDivElement | null>;
+  audioBuffer?: AudioBuffer | null;
 }
 
 // Describes the payload sent back to the main process for synthesis
@@ -67,22 +67,14 @@ export interface SynthesisPayload {
 
 // --- Jotai Atoms ---
 
-export const openFilesAtom = atom<OpenFile[]>([]);
-export const activeFileIdAtom = atom<string | null>(null);
-export const sourceFileIdAtom = atom<string | null>(null);
+export const openFilesAtom = atom<Record<string, OpenFile>>({});
+export const activeFileAtom = atom<OpenFile | null>(null);
 
-export const activeFileAtom = atom((get) => {
-  const files = get(openFilesAtom);
-  const activeId = get(activeFileIdAtom);
-  if (!activeId) return null;
-  return files.find((f) => f.id === activeId) ?? null;
-});
+export const sourceFileAtom = atom<OpenFile | null>(null);
 
-export const sourceFileAtom = atom((get) => {
-  const files = get(openFilesAtom);
-  const sourceId = get(sourceFileIdAtom);
-  if (sourceId === null) return null;
-  return files.find((f) => f.id === sourceId) ?? null;
+export const audioBufferAtom = atom<AudioBuffer | null>((get) => {
+  const activeFile = get(activeFileAtom);
+  return activeFile?.audioBuffer ?? null;
 });
 
 export const spectrogramDataAtom = atom<SpectrogramData | null>((get) => {
@@ -150,7 +142,7 @@ export function init() {
   };
 
   if (process.env.NODE_ENV === "development") {
-    if (store.get(openFilesAtom).length === 0) {
+    if (Object.keys(store.get(openFilesAtom)).length === 0) {
       handleOpenFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/garage.mp3");
     }
   }
@@ -184,14 +176,14 @@ export function init() {
   const unsubCloseActiveFile = window.api.onCloseActiveFile(() => {
     const activeFile = store.get(activeFileAtom);
     if (activeFile) {
-      closeFile(activeFile.id);
+      closeFile(activeFile);
     }
   });
   unsubscribers.push(unsubCloseActiveFile);
 
   const unsubCloseAllFiles = window.api.onCloseAllFiles(() => {
-    store.set(openFilesAtom, []);
-    store.set(activeFileIdAtom, null);
+    store.set(openFilesAtom, {});
+    store.set(activeFileAtom, null);
   });
   unsubscribers.push(unsubCloseAllFiles);
 
@@ -216,8 +208,8 @@ export function init() {
 
   const unsubUndo = window.api.onUndoApplyState((data) => {
     const activeFile = store.get(activeFileAtom);
-    if (activeFile?.renderer?.current) {
-      activeFile.renderer.current.setFBOData(
+    if (activeFile?.rendererRef?.current) {
+      activeFile.rendererRef.current.setFBOData(
         new Float32Array(data.buffer, data.byteOffset, data.byteLength / Float32Array.BYTES_PER_ELEMENT),
       );
     }
@@ -226,11 +218,11 @@ export function init() {
 
   const unsubRequestAudioForSaving = window.api.onRequestAudioForSaving(async () => {
     const activeFile = store.get(activeFileAtom);
-    if (!activeFile?.renderer?.current) {
+    if (!activeFile?.rendererRef?.current) {
       return;
     }
 
-    const processedData = activeFile.renderer.current.getFBOData();
+    const processedData = activeFile.rendererRef.current.getFBOData();
     const spectrogramData = activeFile.spectrogramData;
     if (!processedData || !spectrogramData) {
       return;
@@ -275,19 +267,18 @@ export function destroy() {
   unsubscribers.forEach((unsub) => unsub());
   unsubscribers = [];
 
-  store.set(openFilesAtom, []);
-  store.set(activeFileIdAtom, null);
-  store.set(sourceFileIdAtom, null);
+  store.set(openFilesAtom, {});
+  store.set(activeFileAtom, null);
+  store.set(sourceFileAtom, null);
 }
 
 export function addFile(filePath: string, payload: AnalysisPayloadForRenderer) {
   const openFiles = store.get(openFilesAtom);
-  if (openFiles.some((file) => file.filePath === filePath)) {
+  if (filePath in openFiles) {
     return;
   }
 
   const newFile = {
-    id: crypto.randomUUID(),
     filePath,
     spectrogramData: {
       packedData: new Float32Array(payload.data.buffer, payload.data.byteOffset, payload.data.byteLength / 4),
@@ -314,65 +305,16 @@ export function addFile(filePath: string, payload: AnalysisPayloadForRenderer) {
         bandLengths: payload.bandLengths,
       },
     },
+    rendererRef: createRef<FileRendererHandle>(),
+    viewRef: createRef<HTMLDivElement>(),
   };
 
-  store.set(openFilesAtom, [...store.get(openFilesAtom), newFile]);
-  store.set(activeFileIdAtom, newFile.id);
+  store.set(openFilesAtom, (openFiles) => ({ ...openFiles, [newFile.filePath]: newFile }));
+  store.set(activeFileAtom, newFile);
 
   window.api.clearUndoState();
 }
 
-export function closeFile(fileId: string) {
-  store.set(
-    openFilesAtom,
-    store.get(openFilesAtom).filter((f) => f.id !== fileId),
-  );
+export function closeFile(file: OpenFile) {
+  store.set(openFilesAtom, (openFiles) => omit(openFiles, file.filePath));
 }
-
-export const runSynthesis = async (processedData: Float32Array | null): Promise<void> => {
-  try {
-    const originalAnalysis = store.get(spectrogramDataAtom);
-    const normalize = store.get(normalizeAtom);
-
-    if (!processedData || !originalAnalysis) {
-      console.error("No processed data available to synthesize.");
-      alert("Please process the spectrogram (by changing a parameter) before synthesizing.");
-      return;
-    }
-
-    // Assemble the payload for the main process
-    const payload = {
-      processedData: processedData.buffer,
-      analysisMetadata: {
-        numFrames: originalAnalysis.numFrames,
-        numChannels: originalAnalysis.numChannels,
-        numBands: originalAnalysis.numBands,
-        ...originalAnalysis.synthesisMetadata,
-      },
-    };
-
-    const analysisParams = {
-      bandsPerOctave: store.get(bandsPerOctaveAtom),
-      fmin: store.get(fminAtom),
-    };
-    const audioBufferArray: Float32Array = await window.api.synthesizeAudio(payload, analysisParams, normalize);
-
-    const audioContext = Tone.getContext().rawContext;
-    const numFrames = audioBufferArray.length / originalAnalysis.numChannels;
-
-    const audioBuffer = audioContext.createBuffer(originalAnalysis.numChannels, numFrames, originalAnalysis.sampleRate);
-
-    // For each channel, copy the samples from the interleaved array
-    for (let c = 0; c < originalAnalysis.numChannels; c++) {
-      const channelData = audioBuffer.getChannelData(c);
-      for (let i = 0; i < numFrames; i++) {
-        // Pick samples from the interleaved array
-        channelData[i] = audioBufferArray[i * originalAnalysis.numChannels + c];
-      }
-    }
-
-    store.set(audioBufferAtom, audioBuffer);
-  } catch (error) {
-    console.error("Error running synthesis:", error);
-  }
-};

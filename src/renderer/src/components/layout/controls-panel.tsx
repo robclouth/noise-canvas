@@ -20,8 +20,8 @@ import {
   scaleTypeAtom,
   snapXAtom,
   snapYAtom,
-  sourceFileIdAtom,
   store,
+  sourceFileAtom,
 } from "@/store";
 import { Flex, Switch, Divider, Select } from "@mantine/core";
 import { useAtom, useAtomValue } from "jotai";
@@ -48,7 +48,7 @@ export function ControlsPanel() {
   const [bandsPerOctave, setBandsPerOctave] = useAtom(bandsPerOctaveAtom);
   const activeFile = useAtomValue(activeFileAtom);
   const files = useAtomValue(openFilesAtom);
-  const [sourceFileId, setSourceFileId] = useAtom(sourceFileIdAtom);
+  const [sourceFile, setSourceFile] = useAtom(sourceFileAtom);
   const brushType = useAtomValue(brushTypeAtom);
 
   const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -125,11 +125,11 @@ export function ControlsPanel() {
         size="xs"
         label="File"
         placeholder="Self"
-        value={sourceFileId}
-        onChange={setSourceFileId}
+        value={sourceFile?.filePath}
+        onChange={(value) => setSourceFile(value ? files[value] : null)}
         disabled={!supportsSource}
-        data={files.map((file) => ({
-          value: file.id,
+        data={Object.values(files).map((file) => ({
+          value: file.filePath,
           label: file.filePath.split("/").pop() || file.filePath,
         }))}
         clearable

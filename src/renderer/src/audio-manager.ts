@@ -1,18 +1,73 @@
 import { atom } from "jotai";
 import * as Tone from "tone";
-import { isPlayingAtom, loopAtom, store } from "./store";
+import {
+  activeFileAtom,
+  audioBufferAtom,
+  bandsPerOctaveAtom,
+  fminAtom,
+  isPlayingAtom,
+  loopAtom,
+  normalizeAtom,
+  OpenFile,
+  openFilesAtom,
+  store,
+} from "./store";
 
-// Atom to hold the synthesized audio buffer
-export const audioBufferAtom = atom<AudioBuffer | null>(null);
 export const playbackTimeAtom = atom(0);
+export const isSynthesizingAtom = atom(false);
 
 const player = new Tone.Player().toDestination();
 let animationFrameId: number;
 
+export const runSynthesis = async (file: OpenFile, processedData: Float32Array): Promise<void> => {
+  try {
+    const originalAnalysis = file.spectrogramData;
+    const normalize = store.get(normalizeAtom);
+
+    // Assemble the payload for the main process
+    const payload = {
+      processedData: processedData.buffer,
+      analysisMetadata: {
+        numFrames: originalAnalysis.numFrames,
+        numChannels: originalAnalysis.numChannels,
+        numBands: originalAnalysis.numBands,
+        ...originalAnalysis.synthesisMetadata,
+      },
+    };
+
+    const analysisParams = {
+      bandsPerOctave: store.get(bandsPerOctaveAtom),
+      fmin: store.get(fminAtom),
+    };
+    const audioBufferArray: Float32Array = await window.api.synthesizeAudio(payload, analysisParams, normalize);
+
+    const audioContext = Tone.getContext().rawContext;
+    const numFrames = audioBufferArray.length / originalAnalysis.numChannels;
+
+    const audioBuffer = audioContext.createBuffer(originalAnalysis.numChannels, numFrames, originalAnalysis.sampleRate);
+
+    // For each channel, copy the samples from the interleaved array
+    for (let c = 0; c < originalAnalysis.numChannels; c++) {
+      const channelData = audioBuffer.getChannelData(c);
+      for (let i = 0; i < numFrames; i++) {
+        // Pick samples from the interleaved array
+        channelData[i] = audioBufferArray[i * originalAnalysis.numChannels + c];
+      }
+    }
+
+    store.set(openFilesAtom, (openFiles) => ({ ...openFiles, [file.filePath]: { ...file, audioBuffer } }));
+  } catch (error) {
+    console.error("Error running synthesis:", error);
+  } finally {
+    store.set(isSynthesizingAtom, false);
+  }
+};
+
 const updatePlaybackTime = () => {
   const loop = store.get(loopAtom);
   const buffer = store.get(audioBufferAtom);
-  let currentTime = Tone.Transport.seconds;
+  let currentTime = Tone.getTransport().seconds;
+
   if (loop && buffer && player.state === "started") {
     currentTime %= buffer.duration;
   }
@@ -20,28 +75,34 @@ const updatePlaybackTime = () => {
   animationFrameId = requestAnimationFrame(updatePlaybackTime);
 };
 
-export const playAudio = async () => {
-  const buffer = store.get(audioBufferAtom);
-  if (buffer) {
+export const togglePlayback = async () => {
+  const isCurrentlyPlaying = store.get(isPlayingAtom);
+  if (isCurrentlyPlaying) {
+    stopAudio();
+    return;
+  }
+
+  const activeFile = store.get(activeFileAtom);
+
+  if (activeFile?.audioBuffer) {
     if (Tone.getContext().rawContext.state !== "running") {
       await Tone.start();
     }
-    Tone.Transport.cancel(0); // Clear any previously scheduled events
-    player.buffer = new Tone.ToneAudioBuffer(buffer);
-
+    player.buffer = new Tone.ToneAudioBuffer(activeFile.audioBuffer);
     const loop = store.get(loopAtom);
     player.loop = loop;
-
     player.sync().start(0);
 
-    // Schedule the transport to stop at the end of the buffer ONLY if not looping
+    const transport = Tone.getTransport();
+
     if (!loop) {
-      Tone.Transport.scheduleOnce(() => {
+      transport.scheduleOnce(() => {
         stopAudio();
-      }, buffer.duration);
+      }, activeFile.audioBuffer.duration);
     }
 
-    Tone.Transport.start();
+    transport.start();
+    store.set(isPlayingAtom, true);
     updatePlaybackTime();
   } else {
     console.error("No audio buffer available to play.");
@@ -49,9 +110,10 @@ export const playAudio = async () => {
 };
 
 export const stopAudio = () => {
-  if (Tone.Transport.state === "started") {
-    Tone.Transport.stop();
-    Tone.Transport.cancel(0); // Clear scheduled events
+  if (Tone.getTransport().state === "started") {
+    const transport = Tone.getTransport();
+    transport.stop();
+    transport.cancel(0); // Clear scheduled events
     cancelAnimationFrame(animationFrameId);
     store.set(playbackTimeAtom, 0);
     store.set(isPlayingAtom, false);

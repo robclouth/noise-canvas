@@ -1,7 +1,7 @@
 import { shaderMaterial } from "@react-three/drei";
 import { code, uniforms } from "./brushes/common";
 
-const DisplayMaterial = shaderMaterial(
+export const DisplayMaterial = shaderMaterial(
   {
     ...uniforms,
     minDb: -70.0,
@@ -87,5 +87,3 @@ void main() {
 }
 `,
 );
-
-export const displayMaterial = new DisplayMaterial();

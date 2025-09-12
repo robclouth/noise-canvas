@@ -13,7 +13,6 @@ import {
   offsetYAtom,
   OpenFile,
   panAtom,
-  runSynthesis,
   scrollAtom,
   store,
   zoomPowerAtom,
@@ -21,12 +20,14 @@ import {
 import { useFBO, View } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useAtomValue } from "jotai";
+import { debounce } from "lodash-es";
 import { forwardRef, RefObject, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { brushes } from "./brushes";
 import { unitsToUv } from "./brushes/common";
 import { copyMaterial } from "./copy-material";
-import { displayMaterial } from "./display-material";
+import { DisplayMaterial } from "./display-material";
+import { isSynthesizingAtom, runSynthesis } from "@renderer/audio-manager";
 
 interface FileRendererProps {
   file: OpenFile;
@@ -35,8 +36,7 @@ interface FileRendererProps {
 
 export interface FileRendererHandle {
   renderStroke: (x: number, y: number) => void;
-  triggerSynthesis: () => Promise<void>;
-  getFBOData: () => Float32Array | null;
+  getFBOData: () => Float32Array;
   setFBOData: (data: Float32Array) => void;
   getFBO: () => THREE.WebGLRenderTarget | null;
 }
@@ -71,6 +71,8 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
   const offsetX = useAtomValue(offsetXAtom);
   const offsetY = useAtomValue(offsetYAtom);
   const pan = useAtomValue(panAtom);
+
+  const displayMaterial = useMemo(() => new DisplayMaterial(), []);
 
   const mesh = useRef<THREE.Mesh>(null!);
   const { scene: fboScene, mesh: fboMesh } = useMemo(() => {
@@ -132,6 +134,14 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     };
   }, [spectrogramData]);
 
+  const debouncedSynthesis = useMemo(() => debounce(runSynthesis, 500, { leading: true, trailing: true }), []);
+
+  useEffect(() => {
+    return () => {
+      debouncedSynthesis.cancel();
+    };
+  }, [debouncedSynthesis]);
+
   useFrame(({ gl, camera }) => {
     if (!fboMesh || !spectrogramData || !packedDataTex || !inverseMapTex || !metadataTex || !fbo1 || !fbo2) return;
 
@@ -190,6 +200,10 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
 
       pingPong.current = 1 - pingPong.current;
       strokeParams.current = null; // Reset stroke params
+
+      store.set(isSynthesizingAtom, true);
+      const buffer = getFBOData();
+      debouncedSynthesis(file, buffer);
     }
 
     // Update display material
@@ -233,8 +247,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     invalidate();
   });
 
-  const getFBOData = (): Float32Array | null => {
-    if (!spectrogramData || !fbo1 || !fbo2) return null;
+  const getFBOData = (): Float32Array => {
     const { packedTextureSize } = spectrogramData;
     const fboToRead = pingPong.current === 0 ? fbo1 : fbo2;
     const buffer = new Float32Array(packedTextureSize.x * packedTextureSize.y * 4);
@@ -272,18 +285,10 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     return pingPong.current === 0 ? fbo1 : fbo2;
   };
 
-  const triggerSynthesis = async (): Promise<void> => {
-    const buffer = getFBOData();
-    if (buffer) {
-      await runSynthesis(buffer);
-    }
-  };
-
   useImperativeHandle(ref, () => ({
     renderStroke: (x: number, y: number) => {
       strokeParams.current = { x, y };
     },
-    triggerSynthesis,
     getFBOData,
     setFBOData,
     getFBO,

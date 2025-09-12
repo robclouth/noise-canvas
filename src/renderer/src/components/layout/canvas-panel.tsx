@@ -1,11 +1,10 @@
-import { FileRenderer, FileRendererHandle } from "@/components/file-renderer";
+import { FileRenderer } from "@/components/file-renderer";
 import { ActionIcon, Flex, NumberInput, Paper, ScrollArea, Text } from "@mantine/core";
 import { Canvas } from "@react-three/fiber";
 import { useAtom, useAtomValue } from "jotai";
 import { Play, Repeat, Square } from "lucide-react";
-import { createRef, useEffect, useMemo } from "react";
-import { playAudio, playbackTimeAtom, stopAudio } from "../../audio-manager";
-import { activeFileAtom, bpmAtom, isPlayingAtom, loopAtom, openFilesAtom } from "../../store";
+import { isSynthesizingAtom, playbackTimeAtom, togglePlayback } from "@/audio-manager";
+import { bpmAtom, isPlayingAtom, loopAtom, openFilesAtom } from "@/store";
 import { FileView } from "../file-view";
 
 const formatTime = (seconds: number): string => {
@@ -26,51 +25,11 @@ const formatTime = (seconds: number): string => {
 
 export const CanvasPanel = () => {
   const playbackTime = useAtomValue(playbackTimeAtom);
-  const [isPlaying, setIsPlaying] = useAtom(isPlayingAtom);
+  const isPlaying = useAtomValue(isPlayingAtom);
   const [bpm, setBpm] = useAtom(bpmAtom);
   const [loop, setLoop] = useAtom(loopAtom);
-  const [openFiles, setOpenFiles] = useAtom(openFilesAtom);
-  const activeFile = useAtomValue(activeFileAtom);
-
-  const viewRefs = useMemo(
-    () =>
-      Array(openFiles.length)
-        .fill(0)
-        .map(() => createRef<HTMLDivElement>()),
-    [openFiles.length],
-  );
-
-  const rendererRefs = useMemo(
-    () =>
-      Array(openFiles.length)
-        .fill(0)
-        .map(() => createRef<FileRendererHandle>()),
-    [openFiles.length],
-  );
-
-  useEffect(() => {
-    // Only update if the refs haven't been assigned yet
-    if (openFiles.length > 0 && !openFiles[0].renderer) {
-      setOpenFiles(
-        openFiles.map((file, index) => ({
-          ...file,
-          renderer: rendererRefs[index],
-        })),
-      );
-    }
-  }, [openFiles, rendererRefs, setOpenFiles]);
-
-  const handleTogglePlay = async (): Promise<void> => {
-    if (isPlaying) {
-      stopAudio();
-    } else {
-      if (activeFile?.renderer?.current) {
-        await activeFile.renderer.current.triggerSynthesis();
-        await playAudio();
-        setIsPlaying(true);
-      }
-    }
-  };
+  const openFiles = useAtomValue(openFilesAtom);
+  const isSynthesizing = useAtomValue(isSynthesizingAtom);
 
   return (
     <Flex direction="column" flex={1} pos="relative">
@@ -79,20 +38,20 @@ export const CanvasPanel = () => {
         eventSource={document.getElementById("root")!}
         frameloop="demand"
       >
-        {openFiles.map((file, index) => (
-          <FileRenderer key={file.id} file={file} viewRef={viewRefs[index]} ref={rendererRefs[index]} />
+        {Object.values(openFiles).map((file) => (
+          <FileRenderer key={file.filePath} file={file} viewRef={file.viewRef} ref={file.rendererRef} />
         ))}
       </Canvas>
       <ScrollArea flex={1} pos="relative">
-        {openFiles.map((file, index) => (
-          <FileView key={file.id} file={file} viewRef={viewRefs[index]} rendererRef={rendererRefs[index]} />
+        {Object.values(openFiles).map((file) => (
+          <FileView key={file.filePath} file={file} viewRef={file.viewRef} rendererRef={file.rendererRef} />
         ))}
       </ScrollArea>
 
       <Paper h={80} p="md" radius={0} bg="dark.7">
         <Flex align="center" justify="center" gap="md">
           <NumberInput w={100} value={bpm} onChange={(val) => setBpm(Number(val))} />
-          <ActionIcon onClick={handleTogglePlay} size="lg">
+          <ActionIcon onClick={togglePlayback} size="lg" disabled={isSynthesizing}>
             {isPlaying ? <Square /> : <Play />}
           </ActionIcon>
           <ActionIcon onClick={() => setLoop(!loop)} size="lg" variant={loop ? "filled" : "outline"}>
