@@ -56,6 +56,35 @@ export const runSynthesis = async (file: OpenFile, processedData: Float32Array):
     }
 
     store.set(openFilesAtom, (openFiles) => ({ ...openFiles, [file.filePath]: { ...file, audioBuffer } }));
+
+    const isPlaying = store.get(isPlayingAtom);
+    const activeFile = store.get(activeFileAtom);
+
+    if (isPlaying && activeFile && activeFile.filePath === file.filePath && activeFile.audioBuffer) {
+      const transport = Tone.getTransport();
+      let currentTime = transport.seconds;
+      const loop = store.get(loopAtom);
+      const newDuration = activeFile.audioBuffer.duration;
+
+      if (loop) {
+        currentTime %= newDuration;
+      } else if (currentTime >= newDuration) {
+        stopAudio();
+        return;
+      }
+
+      transport.cancel(0);
+
+      player.buffer = new Tone.ToneAudioBuffer(activeFile.audioBuffer);
+      player.loop = loop;
+
+      if (!loop) {
+        transport.scheduleOnce(() => {
+          stopAudio();
+        }, newDuration);
+      }
+      player.seek(currentTime);
+    }
   } catch (error) {
     console.error("Error running synthesis:", error);
   } finally {

@@ -1,6 +1,6 @@
 import {
-  activeFilePathAtom,
   activeFileAtom,
+  activeFilePathAtom,
   bandsPerOctaveAtom,
   bpmAtom,
   brushHeightAtom,
@@ -23,7 +23,6 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { X } from "lucide-react";
 import { CSSProperties, MouseEventHandler, RefObject, useRef, useState } from "react";
 import { Vector2 } from "three";
-import { stopAudio } from "../audio-manager";
 import { screenToZoomed, unitsToUv, zoomedToScreen } from "./brushes/common";
 import { FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
@@ -197,7 +196,6 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
   return (
     <Box
       onClick={() => {
-        stopAudio();
         setActiveFilePath(file.filePath);
       }}
       pos="relative"
