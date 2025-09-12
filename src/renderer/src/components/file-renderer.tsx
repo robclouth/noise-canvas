@@ -50,6 +50,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
   const [metadataTex, setMetadataTex] = useState<THREE.DataTexture | null>(null);
   const mouseUv = useRef<THREE.Vector2 | null>(null);
   const displayMode = useRef<"preview" | "committed">("committed");
+  const applyStroke = useRef(false);
 
   useEffect(() => {
     const unsub = store.sub(mouseUvAtom, () => {
@@ -97,10 +98,6 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
   const isInitialized = useRef(false);
 
   const strokeParams = useRef<{ x: number; y: number; preview: boolean } | null>(null);
-
-  const swapFBOs = () => {
-    pingPong.current = 1 - pingPong.current;
-  };
 
   useEffect(() => {
     if (!spectrogramData) return;
@@ -166,7 +163,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     }
 
     // Render stroke
-    if (strokeParams.current) {
+    if (strokeParams.current && applyStroke.current) {
       const source = pingPong.current === 0 ? fbo1 : fbo2;
       const destination = pingPong.current === 0 ? fbo2 : fbo1;
       const { x, y, preview } = strokeParams.current;
@@ -205,7 +202,6 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
       gl.render(fboScene, camera);
       gl.setRenderTarget(null);
 
-      strokeParams.current = null; // Reset stroke params
       if (!preview) {
         pingPong.current = 1 - pingPong.current;
         displayMode.current = "committed";
@@ -257,6 +253,9 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
       }
     }
     invalidate();
+    if (applyStroke.current) {
+      applyStroke.current = false;
+    }
   });
 
   const getFBOData = (): Float32Array => {
@@ -271,7 +270,8 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
   const setFBOData = (data: Float32Array) => {
     if (!spectrogramData || !fbo1 || !fbo2 || !fboMesh) return;
     const { packedTextureSize } = spectrogramData;
-    const destination = pingPong.current === 0 ? fbo1 : fbo2;
+
+    const currentFBO = pingPong.current === 0 ? fbo1 : fbo2;
 
     const dataTex = new THREE.DataTexture(
       data,
@@ -285,15 +285,14 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     fboMesh.material = copyMaterial;
     copyMaterial.uniforms.inputTex.value = dataTex;
 
-    gl.setRenderTarget(destination);
+    gl.setRenderTarget(currentFBO);
     gl.render(fboScene, camera);
     gl.setRenderTarget(null);
 
     dataTex.dispose();
+    applyStroke.current = true;
+    displayMode.current = "preview";
 
-    store.set(isSynthesizingAtom, true);
-    debouncedSynthesis(file, data);
-    swapFBOs();
     invalidate();
   };
 
@@ -308,6 +307,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
       if (preview) {
         displayMode.current = "preview";
       }
+      applyStroke.current = true;
     },
     getFBOData,
     setFBOData,
