@@ -5,6 +5,13 @@ import { SwitchControl } from "./switch-control";
 
 export const ParameterControl = ({ parameter }: { parameter: BrushParameter }) => {
   if (parameter.type === "slider") {
+    // The new types on BrushParameter allow us to discriminate
+    // based on the presence of the `values` property.
+    if (parameter.values) {
+      return (
+        <SliderControl label={parameter.label} atom={parameter.atom} unit={parameter.unit} values={parameter.values} />
+      );
+    }
     return (
       <SliderControl
         label={parameter.label}

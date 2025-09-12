@@ -13,8 +13,6 @@ import {
   offsetYAtom,
   OpenFile,
   scrollAtom,
-  snapXAtom,
-  snapYAtom,
   store,
   zoomPowerAtom,
 } from "@/store";
@@ -53,12 +51,11 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>): [number
   let snappedX = zoomedUv.x;
   let snappedY = zoomedUv.y;
 
-  const snapX = store.get(snapXAtom);
   const bpm = store.get(bpmAtom);
   const gridSize = store.get(gridSizeAtom);
   const brushWidth = store.get(brushWidthAtom);
 
-  if (snapX) {
+  if (gridSize > 0) {
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
     const gridIntervalSeconds = (60 / bpm) * gridSize;
     const currentTime = zoomedUv.x * totalDuration;
@@ -72,10 +69,9 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>): [number
     snappedX = snappedCenterTime / totalDuration;
   }
 
-  const snapY = store.get(snapYAtom);
   const gridSizeY = store.get(gridSizeYAtom);
 
-  if (snapY) {
+  if (gridSizeY > 0) {
     const bandsPerOctave = store.get(bandsPerOctaveAtom);
     const bandsPerSemitone = bandsPerOctave / 12;
     const gridIntervalBands = gridSizeY * bandsPerSemitone;

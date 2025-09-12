@@ -18,18 +18,17 @@ import {
   panAtom,
   scaleRootAtom,
   scaleTypeAtom,
-  snapXAtom,
-  snapYAtom,
   sourceFileAtom,
   store,
 } from "@/store";
-import { Divider, Flex, Select } from "@mantine/core";
+import { Divider, Flex, Select, Text } from "@mantine/core";
 import { atom, useAtom, useAtomValue } from "jotai";
 import { RESET } from "jotai/utils";
 import { brushes } from "../brushes";
 import { SelectControl } from "../controls/select-control";
 import { SliderControl } from "../controls/slider-control";
 import { SwitchControl } from "../controls/switch-control";
+import { beatValues } from "@/lib/constants";
 
 const brushIntensityPercentAtom = atom(
   (get) => get(brushIntensityAtom) * 100,
@@ -37,6 +36,15 @@ const brushIntensityPercentAtom = atom(
     set(brushIntensityAtom, newValue === RESET ? RESET : newValue / 100);
   },
 );
+
+const Section = ({ children, label }: { children: React.ReactNode; label: string }) => {
+  return (
+    <Flex direction="column" gap={2}>
+      <Divider my={0} label={label} labelPosition="center" />
+      {children}
+    </Flex>
+  );
+};
 
 export function ControlsPanel() {
   const [bandsPerOctave, setBandsPerOctave] = useAtom(bandsPerOctaveAtom);
@@ -64,59 +72,81 @@ export function ControlsPanel() {
   };
 
   return (
-    <Flex direction="column" w={300} p="xs" gap="xs">
-      <Divider my="sm" label="Analysis" labelPosition="center" />
-      <Select
-        label="Bands per octave"
-        size="xs"
-        value={bandsPerOctave.toString()}
-        onChange={handleAnalysisParamsChange}
-        data={["12", "24", "36", "48", "60", "72", "84", "96"]}
-        disabled={!activeFile}
-      />
-      <Divider my="sm" label="Brush" labelPosition="center" />
-      <SliderControl label="Width" atom={brushWidthAtom} min={1 / 64} max={32} step={1 / 64} isLog unit=" beats" />
-      <SliderControl label="Height" atom={brushHeightAtom} min={0.1} max={48} step={0.1} unit=" semi" />
-      <SliderControl label="Intensity" atom={brushIntensityPercentAtom} min={0} max={100} step={1} unit="%" />
-      <SliderControl label="Pan" atom={panAtom} min={-1} max={1} step={0.01} />
-      <SliderControl label="Feather Time" atom={featherXAtom} min={0} max={100} step={1} unit="%" />
-      <SliderControl label="Feather Pitch" atom={featherYAtom} min={0} max={100} step={1} unit="%" />
-      <Divider my="sm" label="Source" labelPosition="center" />
-      <Select
-        size="xs"
-        label="File"
-        placeholder="Self"
-        value={sourceFile?.filePath}
-        onChange={(value) => setSourceFile(value ? files[value] : null)}
-        disabled={!supportsSource}
-        data={Object.values(files).map((file) => ({
-          value: file.filePath,
-          label: file.filePath.split("/").pop() || file.filePath,
-        }))}
-        clearable
-      />
-      <SliderControl label="Time" atom={offsetXAtom} min={-4} max={4} step={1 / 16} unit=" beats" />
-      <SliderControl label="Pitch" atom={offsetYAtom} min={-12} max={12} step={0.1} unit=" semi" />
-      <SwitchControl label="Lock Offset" atom={offsetLockAtom} />
-      <Divider my="sm" label="Grid & Snap" labelPosition="center" />
-      <SwitchControl label="Snap Time" atom={snapXAtom} />
-      <SliderControl
-        label="Grid Time"
-        atom={gridSizeAtom}
-        min={1 / 64}
-        max={4}
-        step={1 / 64}
-        isLog
-        logStep={1}
-        unit=" beats"
-      />
-      <SwitchControl label="Snap Pitch" atom={snapYAtom} />
-      <SliderControl label="Grid Pitch" atom={gridSizeYAtom} min={0.1} max={12} step={0.1} unit=" semi" />
-      <Divider my="sm" label="Musical" labelPosition="center" />
-      <SelectControl label="Root" atom={scaleRootAtom} data={noteNames} />
-      <SelectControl label="Scale" atom={scaleTypeAtom} data={scaleNames} />
-      <Divider my="sm" label="Output" labelPosition="center" />
-      <SwitchControl label="Normalize" atom={normalizeAtom} />
+    <Flex direction="column" w={300} p="xs" gap={"md"}>
+      <Section label="Analysis">
+        <Select
+          label="Bands per octave"
+          size="xs"
+          value={bandsPerOctave.toString()}
+          onChange={handleAnalysisParamsChange}
+          data={["12", "24", "36", "48", "60", "72", "84", "96"]}
+          disabled={!activeFile}
+        />
+      </Section>
+      <Section label="Brush">
+        <SliderControl label="Width" atom={brushWidthAtom} values={beatValues} />
+        <SliderControl label="Height" atom={brushHeightAtom} min={1} max={128} step={1} unit=" semis" />
+        <SliderControl label="Intensity" atom={brushIntensityPercentAtom} min={0} max={100} step={1} unit="%" />
+        <SliderControl label="Pan" atom={panAtom} min={-1} max={1} step={0.01} />
+        <Text c="dimmed" size="xs" fs={"italic"}>
+          Feather
+        </Text>
+        <SliderControl label="Time" atom={featherXAtom} min={0} max={100} step={1} unit="%" />
+        <SliderControl label="Pitch" atom={featherYAtom} min={0} max={100} step={1} unit="%" />
+      </Section>
+      <Section label="Source">
+        <Select
+          size="xs"
+          label="File"
+          placeholder="Self"
+          value={sourceFile?.filePath}
+          onChange={(value) => setSourceFile(value ? files[value] : null)}
+          disabled={!supportsSource}
+          data={Object.values(files).map((file) => ({
+            value: file.filePath,
+            label: file.filePath.split("/").pop() || file.filePath,
+          }))}
+          clearable
+        />
+        <SliderControl
+          label="Time"
+          atom={offsetXAtom}
+          values={[
+            ...beatValues.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
+            { label: "0 beats", value: 0 },
+            ...beatValues,
+          ]}
+        />
+        <SliderControl label="Pitch" atom={offsetYAtom} min={-48} max={48} step={1} unit=" semis" />
+        <SwitchControl label="Lock Offset" atom={offsetLockAtom} />
+      </Section>
+      <Section label="Grid">
+        <SliderControl label="Time" atom={gridSizeAtom} values={[{ label: "Off", value: 0 }, ...beatValues]} />
+        <SliderControl
+          label="Pitch"
+          atom={gridSizeYAtom}
+          values={[
+            { label: "Off", value: 0 },
+            { label: "1 semi", value: 1 },
+            { label: "2 semis", value: 2 },
+            { label: "3 semis", value: 3 },
+            { label: "4 semis", value: 4 },
+            { label: "6 semis", value: 6 },
+            { label: "8 semis", value: 8 },
+            { label: "12 semis", value: 12 },
+            { label: "16 semis", value: 16 },
+            { label: "24 semis", value: 24 },
+            { label: "32 semis", value: 32 },
+          ]}
+        />
+      </Section>
+      <Section label="Musical">
+        <SelectControl label="Root" atom={scaleRootAtom} data={noteNames} />
+        <SelectControl label="Scale" atom={scaleTypeAtom} data={scaleNames} />
+      </Section>
+      <Section label="Output">
+        <SwitchControl label="Normalize" atom={normalizeAtom} />
+      </Section>
     </Flex>
   );
 }

@@ -33,15 +33,34 @@ type BaseParameter<T, A> = {
   propName: string;
 };
 
-export type SliderParameter = BaseParameter<number, SetStateActionWithReset<number>> & {
+export type SliderValue = {
+  value: number;
+  label: string;
+};
+
+type BaseSliderParameter = BaseParameter<number, SetStateActionWithReset<number>> & {
   type: "slider";
+  isLog?: boolean;
+  unit?: string;
+};
+
+export type ContinuousSliderParameter = BaseSliderParameter & {
   min: number;
   max: number;
   step: number;
   formatValue: (value: number) => string;
-  isLog?: boolean;
-  unit?: string;
+  values?: never;
 };
+
+export type SteppedSliderParameter = BaseSliderParameter & {
+  values: SliderValue[];
+  min?: never;
+  max?: never;
+  step?: never;
+  formatValue?: never;
+};
+
+export type SliderParameter = ContinuousSliderParameter | SteppedSliderParameter;
 
 export type SelectParameter<T extends string = string> = BaseParameter<T, SetStateActionWithReset<T>> & {
   type: "select";

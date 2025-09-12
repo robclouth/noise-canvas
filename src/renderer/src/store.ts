@@ -105,8 +105,6 @@ export const bpmAtom = atomWithStorage("bpm", 120);
 export const normalizeAtom = atomWithStorage("normalize", true);
 
 // Brush snapping
-export const snapXAtom = atomWithStorage("snapX", true);
-export const snapYAtom = atomWithStorage("snapY", true);
 export const gridSizeAtom = atomWithStorage("gridSize", 0.25); // in beats
 export const gridSizeYAtom = atomWithStorage("gridSizeY", 1); // in semitones
 

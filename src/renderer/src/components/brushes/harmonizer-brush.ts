@@ -118,6 +118,7 @@ class HarmonizerBrush extends BaseBrush {
         min: 0,
         max: 1,
         step: 0.01,
+        formatValue: (v) => `${(v * 100).toFixed(0)}%`,
       },
     ];
   }

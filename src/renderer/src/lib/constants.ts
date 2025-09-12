@@ -1,0 +1,18 @@
+export const beatValues = [
+  { value: 1 / 64, label: "1/64 beats" },
+  { value: 1 / 32, label: "1/32 beats" },
+  { value: 1 / 16, label: "1/16 beats" },
+  { value: 1 / 8, label: "1/8 beats" },
+  { value: 1 / 4, label: "1/4 beats" },
+  { value: 1 / 2, label: "1/2 beats" },
+  { value: 1, label: "1 beats" },
+  { value: 2, label: "2 beats" },
+  { value: 3, label: "3 beats" },
+  { value: 4, label: "4 beats" },
+  { value: 6, label: "6 beats" },
+  { value: 8, label: "8 beats" },
+  { value: 12, label: "12 beats" },
+  { value: 16, label: "16 beats" },
+  { value: 24, label: "24 beats" },
+  { value: 32, label: "32 beats" },
+];
