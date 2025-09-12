@@ -70,6 +70,62 @@ void main() {
         color = mix(color, vec3(1.0), 0.2);
     }
 
+    // --- Brush Visualization ---
+    if (brushCenterUv.x >= 0.0) {
+        // Draw Brush Rectangle
+        vec2 rectCenter = brushCenterUv;
+        
+        // Handle full width/height for rectangle
+        vec2 correctedRectCenter = rectCenter;
+        vec2 correctedBrushSize = brushSizeUv;
+        if (brushSizeUv.x == 0.0) {
+            correctedRectCenter.x = 0.5;
+            correctedBrushSize.x = 1.0;
+        }
+        if (brushSizeUv.y == 0.0) {
+            correctedRectCenter.y = 0.5;
+            correctedBrushSize.y = 1.0;
+        }
+
+        vec2 halfSize = correctedBrushSize / 2.0;
+        vec2 d = abs(zoomedUv - correctedRectCenter) - halfSize;
+        float outside_dist = length(max(d, 0.0));
+        float inside_dist = min(max(d.x, d.y), 0.0);
+        float dist_to_border = outside_dist + inside_dist;
+
+        float strokeWidthUv = fwidth(zoomedUv.x) * 1.5;
+
+        float rect_alpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(dist_to_border));
+        if (rect_alpha > 0.0) {
+            color = mix(color, vec3(1.0), rect_alpha);
+        }
+
+        // Draw source rectangle (faint)
+        vec2 effectiveOffset = offsetUv;
+        if (brushSizeUv.x == 0.0) {
+            effectiveOffset.x = 0.0;
+        }
+        if (brushSizeUv.y == 0.0) {
+            effectiveOffset.y = 0.0;
+        }
+        vec2 sourceCenter = correctedRectCenter + effectiveOffset;
+        vec2 sourceCenterScreen = zoomedToScreen(sourceCenter);
+
+        if (sourceCenterScreen.x >= 0.0 && sourceCenterScreen.x <= 1.0 &&
+            sourceCenterScreen.y >= 0.0 && sourceCenterScreen.y <= 1.0) {
+            
+            vec2 d_source = abs(zoomedUv - sourceCenter) - halfSize; // reuse halfSize from brush rect
+            float outside_dist_source = length(max(d_source, 0.0));
+            float inside_dist_source = min(max(d_source.x, d_source.y), 0.0);
+            float dist_to_border_source = outside_dist_source + inside_dist_source;
+
+            float source_rect_alpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(dist_to_border_source));
+            if (source_rect_alpha > 0.0) {
+                color = mix(color, vec3(1.0), source_rect_alpha * 0.3); // Fainter
+            }
+        }
+    }
+
     gl_FragColor = vec4(color, 1.0);
 }
 `,

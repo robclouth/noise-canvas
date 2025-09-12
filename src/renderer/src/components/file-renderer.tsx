@@ -254,6 +254,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
         displayMaterial.uniforms.brushCenterUv.value.copy(mouseUv.current);
         displayMaterial.uniforms.brushSizeUv.value.copy(brushSizeUv);
       } else {
+        displayMaterial.uniforms.brushCenterUv.value.set(-1, -1);
         displayMaterial.uniforms.brushSizeUv.value.set(0, 0);
       }
     }
