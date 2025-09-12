@@ -39,20 +39,20 @@ export const runSynthesis = async (file: OpenFile, processedData: Float32Array):
       bandsPerOctave: store.get(bandsPerOctaveAtom),
       fmin: store.get(fminAtom),
     };
-    const audioBufferArray: Float32Array = await window.api.synthesizeAudio(payload, analysisParams, normalize);
+    const audioBufferChannels = await window.api.synthesizeAudio(payload, analysisParams, normalize);
+
+    if (audioBufferChannels.length === 0) {
+      throw new Error("Synthesis returned no audio channels.");
+    }
+
+    const numChannels = audioBufferChannels.length;
+    const numFrames = audioBufferChannels[0].length;
 
     const audioContext = Tone.getContext().rawContext;
-    const numFrames = audioBufferArray.length / originalAnalysis.numChannels;
+    const audioBuffer = audioContext.createBuffer(numChannels, numFrames, originalAnalysis.sampleRate);
 
-    const audioBuffer = audioContext.createBuffer(originalAnalysis.numChannels, numFrames, originalAnalysis.sampleRate);
-
-    // For each channel, copy the samples from the interleaved array
-    for (let c = 0; c < originalAnalysis.numChannels; c++) {
-      const channelData = audioBuffer.getChannelData(c);
-      for (let i = 0; i < numFrames; i++) {
-        // Pick samples from the interleaved array
-        channelData[i] = audioBufferArray[i * originalAnalysis.numChannels + c];
-      }
+    for (let c = 0; c < numChannels; c++) {
+      audioBuffer.copyToChannel(audioBufferChannels[c], c);
     }
 
     store.set(openFilesAtom, (openFiles) => ({ ...openFiles, [file.filePath]: { ...file, audioBuffer } }));

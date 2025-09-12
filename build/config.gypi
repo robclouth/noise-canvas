@@ -488,15 +488,6 @@
     "nodedir": "/Users/rob/Library/Caches/node-gyp/24.2.0",
     "python": "/Users/rob/miniconda3/bin/python3",
     "standalone_static_library": 1,
-    "prefix": "/opt/homebrew",
-    "user_agent": "npm/11.3.0 node/v24.2.0 darwin arm64 workspaces/false",
-    "cache": "/Users/rob/.npm",
-    "node_gyp": "/opt/homebrew/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js",
-    "npm_version": "11.3.0",
-    "init_module": "/Users/rob/.npm-init.js",
-    "userconfig": "/Users/rob/.npmrc",
-    "globalconfig": "/opt/homebrew/etc/npmrc",
-    "local_prefix": "/Users/rob/Documents/Projects/Music/Tools/Noise Canvas",
-    "global_prefix": "/opt/homebrew"
+    "yes": "true"
   }
 }

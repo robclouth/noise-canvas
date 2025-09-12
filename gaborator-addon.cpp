@@ -250,16 +250,19 @@ Napi::Value synthesize(const Napi::CallbackInfo& info) {
         }
     }
 
-    size_t numSamplesInterleaved = numFrames * channels;
-    Napi::Float32Array outputBuffer = Napi::Float32Array::New(env, numSamplesInterleaved);
-    
-    // Apply the normalization factor while interleaving the final buffer.
-    for (size_t i = 0; i < numFrames; ++i) {
-        for (int ch = 0; ch < channels; ++ch) {
-            outputBuffer[i * channels + ch] = audioChannels[ch][i] * normalization_factor;
+    Napi::Array outputChannels = Napi::Array::New(env, channels);
+    for (int ch = 0; ch < channels; ++ch) {
+        Napi::Float32Array channelBuffer = Napi::Float32Array::New(env, numFrames);
+        if (normalize) {
+            for (size_t i = 0; i < numFrames; ++i) {
+                channelBuffer[i] = audioChannels[ch][i] * normalization_factor;
+            }
+        } else {
+            memcpy(channelBuffer.Data(), audioChannels[ch].data(), numFrames * sizeof(float));
         }
+        outputChannels[ch] = channelBuffer;
     }
-    return outputBuffer;
+    return outputChannels;
 }
 
 Napi::Object init(Napi::Env env, Napi::Object exports) {
