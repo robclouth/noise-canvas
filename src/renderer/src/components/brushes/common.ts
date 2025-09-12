@@ -112,6 +112,10 @@ float getFeatherWeight(vec2 logicalUv) {
     return weightX * weightY;
 }
 
+float unwrapPhase(float phaseDelta) {
+    return mod(phaseDelta + pi, 2.0 * pi) - pi;
+}
+
 vec2 unwrapPhase(vec2 phaseDelta) {
     return mod(phaseDelta + pi, 2.0 * pi) - pi;
 }
@@ -155,6 +159,63 @@ vec4 sampleSpectrogramPoint(vec2 logicalUv, sampler2D data, sampler2D meta, vec2
   float packedX = mod(linearPixelIndex, texSize.x);
   vec2 packedUv = (vec2(packedX, packedY) + 0.5) / texSize;
   return texture2D(data, packedUv);
+}
+
+vec4 sampleSpectrogramPointInterpolated(vec2 logicalUv, sampler2D data, sampler2D meta, vec2 texSize, float nFrames, float nBands, float sRate) {
+  float bandIndex = floor((1.0 - logicalUv.y) * nBands);
+  vec2 metaUv = vec2((bandIndex + 0.5) / nBands, 0.5);
+  vec3 metaData = texture2D(meta, metaUv).rgb;
+  float bandOffset = metaData.r;
+  float bandLength = metaData.g;
+  float bandScaleExp = metaData.b;
+  float timeSample = logicalUv.x * nFrames;
+  float timeInBand = timeSample / exp2(bandScaleExp);
+
+  float coefIndexInBandBase = floor(timeInBand);
+  float xFrac = fract(timeInBand);
+
+  if (coefIndexInBandBase < 0.0 || coefIndexInBandBase + 1.0 >= bandLength) {
+    if (coefIndexInBandBase < 0.0 || coefIndexInBandBase >= bandLength) return vec4(0.0);
+    float linearPixelIndex = bandOffset + coefIndexInBandBase;
+    float packedY = floor(linearPixelIndex / texSize.x);
+    float packedX = mod(linearPixelIndex, texSize.x);
+    vec2 packedUv = (vec2(packedX, packedY) + 0.5) / texSize;
+    return texture2D(data, packedUv);
+  }
+
+  float linearPixelIndex1 = bandOffset + coefIndexInBandBase;
+  float packedY1 = floor(linearPixelIndex1 / texSize.x);
+  float packedX1 = mod(linearPixelIndex1, texSize.x);
+  vec2 packedUv1 = (vec2(packedX1, packedY1) + 0.5) / texSize;
+  vec4 s1 = texture2D(data, packedUv1);
+
+  float linearPixelIndex2 = bandOffset + coefIndexInBandBase + 1.0;
+  float packedY2 = floor(linearPixelIndex2 / texSize.x);
+  float packedX2 = mod(linearPixelIndex2, texSize.x);
+  vec2 packedUv2 = (vec2(packedX2, packedY2) + 0.5) / texSize;
+  vec4 s2 = texture2D(data, packedUv2);
+
+  // Left channel
+  float mag1_L = length(s1.rg);
+  float phase1_L = atan(s1.g, s1.r);
+  float mag2_L = length(s2.rg);
+  float phase2_L = atan(s2.g, s2.r);
+  float mag_L = mix(mag1_L, mag2_L, xFrac);
+  float phase_delta_L = unwrapPhase(phase2_L - phase1_L);
+  float phase_L = phase1_L + xFrac * phase_delta_L;
+  vec2 c_L = mag_L * vec2(cos(phase_L), sin(phase_L));
+
+  // Right channel
+  float mag1_R = length(s1.ba);
+  float phase1_R = atan(s1.a, s1.b);
+  float mag2_R = length(s2.ba);
+  float phase2_R = atan(s2.a, s2.b);
+  float mag_R = mix(mag1_R, mag2_R, xFrac);
+  float phase_delta_R = unwrapPhase(phase2_R - phase1_R);
+  float phase_R = phase1_R + xFrac * phase_delta_R;
+  vec2 c_R = mag_R * vec2(cos(phase_R), sin(phase_R));
+
+  return vec4(c_L, c_R);
 }
 
 vec4 sampleFromSource(vec2 logicalUv) {
@@ -243,7 +304,7 @@ vec4 sampleSpectrogramTransformed(vec2 sourceUv, vec2 targetUv) {
 
 // Convenience wrapper for display
 vec4 samplePointFromScreen(vec2 screenUv) {
-    return sampleSpectrogramPoint(screenToZoomed(screenUv), packedDataTex, metadataTex, packedTextureSize, numFrames, numBands, sampleRate);
+    return sampleSpectrogramPointInterpolated(screenToZoomed(screenUv), packedDataTex, metadataTex, packedTextureSize, numFrames, numBands, sampleRate);
 }
 `;
 
