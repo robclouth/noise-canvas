@@ -71,6 +71,7 @@ export interface IpcApi {
   onRequestAudioForSaving: (callback: () => void) => () => void;
   onCloseActiveFile: (callback: () => void) => () => void;
   onCloseAllFiles: (callback: () => void) => () => void;
+  onRestoreOriginal: (callback: () => void) => () => void;
 }
 
 export interface IpcMainHandlers {

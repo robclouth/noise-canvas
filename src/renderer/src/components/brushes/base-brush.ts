@@ -10,6 +10,7 @@ export interface UpdateUniformsProps {
   brushCenterUv: THREE.Vector2;
   brushSizeUv: THREE.Vector2;
   sourceTexture: THREE.Texture;
+  originalPackedDataTex: THREE.Texture | null;
   inverseMapTex: THREE.Texture;
   metadataTex: THREE.Texture;
   zoomPower: number;
@@ -91,6 +92,7 @@ export abstract class BaseBrush {
       sourceTexture,
       inverseMapTex,
       metadataTex,
+      originalPackedDataTex,
     } = props;
     const uniforms = this.material.uniforms;
     const activeFile = store.get(activeFileAtom);
@@ -99,6 +101,7 @@ export abstract class BaseBrush {
     const spectrogramData = activeFile.spectrogramData;
 
     uniforms.packedDataTex.value = sourceTexture;
+    uniforms.originalPackedDataTex.value = originalPackedDataTex;
     uniforms.inverseMapTex.value = inverseMapTex;
     uniforms.metadataTex.value = metadataTex;
     uniforms.numFrames.value = spectrogramData.numFrames;

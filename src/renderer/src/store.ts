@@ -264,6 +264,14 @@ export function init() {
     }
   });
   unsubscribers.push(unsubRequestAudioForSaving);
+
+  const unsubRestore = window.api.onRestoreOriginal(() => {
+    const activeFile = store.get(activeFileAtom);
+    if (activeFile?.rendererRef?.current) {
+      activeFile.rendererRef.current.restoreOriginal();
+    }
+  });
+  unsubscribers.push(unsubRestore);
 }
 
 export function destroy() {

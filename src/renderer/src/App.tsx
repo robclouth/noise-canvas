@@ -7,6 +7,7 @@ import { Flex } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { useCallback, useEffect } from "react";
 import { togglePlayback } from "./audio-manager";
+import { Notifications } from "@mantine/notifications";
 
 function App(): React.JSX.Element {
   useEffect(() => {
@@ -37,6 +38,7 @@ function App(): React.JSX.Element {
         <TransportPanel />
       </Flex>
       <ControlsPanel />
+      <Notifications />
     </Flex>
   );
 }

@@ -86,6 +86,13 @@ const api: IpcApi = {
       ipcRenderer.removeListener("close-all-files", handler);
     };
   },
+  onRestoreOriginal: (callback: () => void): (() => void) => {
+    const handler = (): void => callback();
+    ipcRenderer.on("restore-original", handler);
+    return () => {
+      ipcRenderer.removeListener("restore-original", handler);
+    };
+  },
 };
 
 // Use `contextBridge` APIs to expose Electron APIs to

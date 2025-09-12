@@ -7,9 +7,11 @@ import { transientShaperBrush } from "./transient-shaper";
 import { dynamicsBrush } from "./dynamics-brush";
 import { convolveBrush } from "./convolve-brush";
 import { harmonizerBrush } from "./harmonizer-brush";
+import { restoreBrush } from "./restore-brush";
 
 export const brushes = {
   gain: gainBrush,
+  restore: restoreBrush,
   blur: blurBrush,
   "pitch shift": pitchShiftBrush,
   transform: transformBrush,

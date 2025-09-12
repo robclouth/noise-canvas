@@ -39,6 +39,7 @@ export interface FileRendererHandle {
   getFBOData: () => Float32Array;
   setFBOData: (data: Float32Array) => void;
   getFBO: () => THREE.WebGLRenderTarget | null;
+  restoreOriginal: () => void;
 }
 
 export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({ file, viewRef }, ref) => {
@@ -46,6 +47,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
   const { gl, camera, invalidate } = useThree();
 
   const [packedDataTex, setPackedDataTex] = useState<THREE.DataTexture | null>(null);
+  const [originalPackedDataTex, setOriginalPackedDataTex] = useState<THREE.DataTexture | null>(null);
   const [inverseMapTex, setInverseMapTex] = useState<THREE.DataTexture | null>(null);
   const [metadataTex, setMetadataTex] = useState<THREE.DataTexture | null>(null);
   const mouseUv = useRef<THREE.Vector2 | null>(null);
@@ -123,6 +125,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     meta.needsUpdate = true;
 
     setPackedDataTex(packed);
+    setOriginalPackedDataTex(packed.clone());
     setInverseMapTex(inverse);
     setMetadataTex(meta);
 
@@ -131,6 +134,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
       inverse.dispose();
       meta.dispose();
       setPackedDataTex(null);
+      setOriginalPackedDataTex(null);
       setInverseMapTex(null);
       setMetadataTex(null);
     };
@@ -187,6 +191,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
         brushCenterUv,
         brushSizeUv,
         sourceTexture: source.texture,
+        originalPackedDataTex,
         inverseMapTex,
         metadataTex,
         zoomPower,
@@ -301,6 +306,22 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     return pingPong.current === 0 ? fbo1 : fbo2;
   };
 
+  const restoreOriginal = () => {
+    if (!spectrogramData || !fbo1 || !fbo2 || !fboMesh || !originalPackedDataTex) return;
+
+    pingPong.current = 0;
+
+    fboMesh.material = copyMaterial;
+    copyMaterial.uniforms.inputTex.value = originalPackedDataTex;
+
+    gl.setRenderTarget(fbo1);
+    gl.render(fboScene, camera);
+    gl.setRenderTarget(null);
+
+    invalidate();
+    debouncedSynthesis(file, getFBOData());
+  };
+
   useImperativeHandle(ref, () => ({
     renderStroke: (x: number, y: number, preview: boolean) => {
       strokeParams.current = { x, y, preview };
@@ -312,6 +333,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     getFBOData,
     setFBOData,
     getFBO,
+    restoreOriginal,
   }));
 
   if (!spectrogramData) {

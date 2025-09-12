@@ -19,6 +19,7 @@ export const code = /* glsl */ `
 // Uniforms
 //------------------------------------------------------------------------------
 uniform sampler2D packedDataTex;
+uniform sampler2D originalPackedDataTex;
 uniform sampler2D metadataTex;
 uniform sampler2D inverseMapTex;
 uniform vec2 packedTextureSize;
@@ -310,6 +311,7 @@ vec4 samplePointFromScreen(vec2 screenUv) {
 
 export const uniforms = {
   packedDataTex: new Texture(),
+  originalPackedDataTex: new Texture(),
   inverseMapTex: new Texture(),
   metadataTex: new Texture(),
   numFrames: 0,
