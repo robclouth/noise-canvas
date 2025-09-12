@@ -1,12 +1,16 @@
 import {
+  activeFilePathAtom,
   activeFileAtom,
   bandsPerOctaveAtom,
   bpmAtom,
+  brushHeightAtom,
   brushWidthAtom,
   closeFile,
   gridSizeAtom,
   gridSizeYAtom,
   mouseUvAtom,
+  offsetXAtom,
+  offsetYAtom,
   OpenFile,
   scrollAtom,
   snapXAtom,
@@ -17,17 +21,17 @@ import {
 import { ActionIcon, Box, Flex, Title } from "@mantine/core";
 import { useAtomValue, useSetAtom } from "jotai";
 import { X } from "lucide-react";
-import { ForwardedRef, MouseEventHandler, RefObject, useRef } from "react";
+import { CSSProperties, MouseEventHandler, RefObject, useRef, useState } from "react";
 import { Vector2 } from "three";
 import { stopAudio } from "../audio-manager";
-import { screenToZoomed } from "./brushes/common";
+import { screenToZoomed, unitsToUv, zoomedToScreen } from "./brushes/common";
 import { FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
 
 interface FileViewProps {
   file: OpenFile;
   viewRef: RefObject<HTMLDivElement | null>;
-  rendererRef: ForwardedRef<FileRendererHandle | null>;
+  rendererRef: RefObject<FileRendererHandle | null>;
 }
 
 function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>): [number, number] | null {
@@ -87,23 +91,10 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>): [number
 export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
   const activeFile = useAtomValue(activeFileAtom);
   const setMouseUv = useSetAtom(mouseUvAtom);
-  const setActiveFile = useSetAtom(activeFileAtom);
+  const setActiveFilePath = useSetAtom(activeFilePathAtom);
+  const [sourceRectStyle, setSourceRectStyle] = useState<CSSProperties>({ display: "none" });
 
   const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
-
-  const performBrushStroke = (snappedX: number, snappedY: number, force = false): void => {
-    if (typeof rendererRef === "function" || !rendererRef?.current) return;
-
-    if (
-      force ||
-      !lastSnappedPositionRef.current ||
-      lastSnappedPositionRef.current.x !== snappedX ||
-      lastSnappedPositionRef.current.y !== snappedY
-    ) {
-      rendererRef.current.renderStroke(snappedX, snappedY);
-      lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
-    }
-  };
 
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
     const coords = getSnappedCoordinates(event);
@@ -112,13 +103,62 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
 
     setMouseUv(new Vector2(snappedX, 1 - snappedY));
 
-    if (event.buttons === 1) {
-      performBrushStroke(snappedX, snappedY);
+    if (
+      rendererRef.current &&
+      (!lastSnappedPositionRef.current ||
+        lastSnappedPositionRef.current.x !== snappedX ||
+        lastSnappedPositionRef.current.y !== snappedY)
+    ) {
+      rendererRef.current.renderStroke(snappedX, snappedY, event.buttons !== 1);
+      lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
     }
+
+    const { spectrogramData } = store.get(activeFileAtom)!;
+    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+    const bpm = store.get(bpmAtom);
+    const brushWidth = store.get(brushWidthAtom);
+    const brushHeight = store.get(brushHeightAtom);
+    const bandsPerOctave = store.get(bandsPerOctaveAtom);
+
+    const brushSizeUv = unitsToUv(
+      brushWidth,
+      brushHeight,
+      bpm,
+      totalDuration,
+      bandsPerOctave,
+      spectrogramData.numBands,
+    );
+
+    const offsetX = store.get(offsetXAtom);
+    const offsetY = store.get(offsetYAtom);
+    const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
+
+    const zoomPower = store.get(zoomPowerAtom);
+    const scroll = store.get(scrollAtom);
+
+    const sourceCenterUv = new Vector2(snappedX, snappedY).add(offsetUv);
+    const topLeftUv = new Vector2(sourceCenterUv.x - brushSizeUv.x / 2, sourceCenterUv.y - brushSizeUv.y / 2);
+    const bottomRightUv = new Vector2(sourceCenterUv.x + brushSizeUv.x / 2, sourceCenterUv.y + brushSizeUv.y / 2);
+
+    const topLeftScreen = zoomedToScreen(topLeftUv, zoomPower, scroll);
+    const bottomRightScreen = zoomedToScreen(bottomRightUv, zoomPower, scroll);
+
+    setSourceRectStyle({
+      display: "block",
+      position: "absolute",
+      border: "1px solid white",
+      left: `${topLeftScreen.x * 100}%`,
+      top: `${topLeftScreen.y * 100}%`,
+      width: `${(bottomRightScreen.x - topLeftScreen.x) * 100}%`,
+      height: `${(bottomRightScreen.y - topLeftScreen.y) * 100}%`,
+      pointerEvents: "none",
+      zIndex: 1,
+    });
   };
 
   const handleMouseLeave = () => {
     setMouseUv(null);
+    setSourceRectStyle({ display: "none" });
   };
 
   const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
@@ -132,7 +172,7 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
 
       const coords = getSnappedCoordinates(event);
       if (coords) {
-        performBrushStroke(coords[0], coords[1], true);
+        rendererRef.current!.renderStroke(coords[0], coords[1], false);
       }
     }
   };
@@ -158,7 +198,7 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
     <Box
       onClick={() => {
         stopAudio();
-        setActiveFile(file);
+        setActiveFilePath(file.filePath);
       }}
       pos="relative"
       bd={activeFile?.filePath === file.filePath ? "2px solid orange" : "2px solid transparent"}
@@ -175,15 +215,17 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
           <X />
         </ActionIcon>
       </Flex>
-      <Box
-        ref={viewRef}
-        h={400}
-        pos="relative"
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
-        onMouseDown={handleCanvasMouseDown}
-        onMouseUp={handleCanvasMouseUp}
-      />
+      <Box pos="relative">
+        <Box
+          ref={viewRef}
+          h={400}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+          onMouseDown={handleCanvasMouseDown}
+          onMouseUp={handleCanvasMouseUp}
+        />
+        <div style={sourceRectStyle} />
+      </Box>
       {activeFile?.filePath === file.filePath && <PlaybackLine file={file} containerRef={viewRef} />}
     </Box>
   );

@@ -68,7 +68,12 @@ export interface SynthesisPayload {
 // --- Jotai Atoms ---
 
 export const openFilesAtom = atom<Record<string, OpenFile>>({});
-export const activeFileAtom = atom<OpenFile | null>(null);
+export const activeFilePathAtom = atom<string | null>(null);
+export const activeFileAtom = atom<OpenFile | null>((get) => {
+  const activeFilePath = get(activeFilePathAtom);
+  const openFiles = get(openFilesAtom);
+  return openFiles[activeFilePath ?? ""] ?? null;
+});
 
 export const sourceFileAtom = atom<OpenFile | null>(null);
 
@@ -183,7 +188,7 @@ export function init() {
 
   const unsubCloseAllFiles = window.api.onCloseAllFiles(() => {
     store.set(openFilesAtom, {});
-    store.set(activeFileAtom, null);
+    store.set(activeFilePathAtom, null);
   });
   unsubscribers.push(unsubCloseAllFiles);
 
@@ -268,7 +273,7 @@ export function destroy() {
   unsubscribers = [];
 
   store.set(openFilesAtom, {});
-  store.set(activeFileAtom, null);
+  store.set(activeFilePathAtom, null);
   store.set(sourceFileAtom, null);
 }
 
@@ -310,11 +315,20 @@ export function addFile(filePath: string, payload: AnalysisPayloadForRenderer) {
   };
 
   store.set(openFilesAtom, (openFiles) => ({ ...openFiles, [newFile.filePath]: newFile }));
-  store.set(activeFileAtom, newFile);
+  store.set(activeFilePathAtom, newFile.filePath);
 
   window.api.clearUndoState();
 }
 
 export function closeFile(file: OpenFile) {
   store.set(openFilesAtom, (openFiles) => omit(openFiles, file.filePath));
+  const openFiles = store.get(openFilesAtom);
+  const filePaths = Object.keys(openFiles);
+
+  if (filePaths.length > 0) {
+    const lastFilePath = filePaths[filePaths.length - 1];
+    store.set(activeFilePathAtom, lastFilePath);
+  } else {
+    store.set(activeFilePathAtom, null);
+  }
 }

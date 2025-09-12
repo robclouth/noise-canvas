@@ -78,7 +78,7 @@ vec2 getUnpackedUvFromPackedUv(vec2 packedUv) {
 Coords getCoords(vec2 packedUv) {
     Coords c;
     c.dest = getUnpackedUvFromPackedUv(packedUv);
-    c.source = c.dest - offsetUv;
+    c.source = c.dest + offsetUv;
     return c;
 }
 
@@ -259,7 +259,6 @@ export const uniforms = {
   pi: Math.PI,
   minFreq: 20.0,
   bandsPerOctave: 24.0,
-
   brushCenterUv: new Vector2(0.5, 0.5),
   brushSizeUv: new Vector2(0.1, 0.1),
   zoomPower: 0.0,

@@ -37,7 +37,6 @@ float magnitudeToDb(float mag) {
 }
 
 void main() {
-    // UPDATED: Use the new, fast point-sampler for display.
     vec4 packedValue = samplePointFromScreen(vUv);
 
     vec2 leftComplex = packedValue.rg;
@@ -69,18 +68,6 @@ void main() {
 
     if (line < lineThicknessUv) {
         color = mix(color, vec3(1.0), 0.2);
-    }
-
-    // Brush feather visualization
-    float featherWeight = getFeatherWeight(zoomedUv);
-    if (featherWeight > 0.0) {
-        color = mix(color, vec3(1.0), featherWeight * 0.15);
-    }
-
-    // Offset brush visualization
-    float offsetFeatherWeight = getFeatherWeight(zoomedUv + offsetUv);
-    if (offsetFeatherWeight > 0.0) {
-        color = mix(color, vec3(1.0, 0.5, 0.5), offsetFeatherWeight * 0.15);
     }
 
     gl_FragColor = vec4(color, 1.0);
