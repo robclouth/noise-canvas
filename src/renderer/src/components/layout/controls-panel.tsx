@@ -28,7 +28,7 @@ import { brushes } from "../brushes";
 import { SelectControl } from "../controls/select-control";
 import { SliderControl } from "../controls/slider-control";
 import { SwitchControl } from "../controls/switch-control";
-import { beatValues } from "@/lib/constants";
+import { beatValues, pitchValues } from "@/lib/constants";
 
 const brushIntensityPercentAtom = atom(
   (get) => get(brushIntensityAtom) * 100,
@@ -84,8 +84,8 @@ export function ControlsPanel() {
         />
       </Section>
       <Section label="Brush">
-        <SliderControl label="Width" atom={brushWidthAtom} values={beatValues} />
-        <SliderControl label="Height" atom={brushHeightAtom} min={1} max={128} step={1} unit=" semis" />
+        <SliderControl label="Width" atom={brushWidthAtom} values={[...beatValues, { label: "Full", value: 0 }]} />
+        <SliderControl label="Height" atom={brushHeightAtom} values={[...pitchValues, { label: "Full", value: 0 }]} />
         <SliderControl label="Intensity" atom={brushIntensityPercentAtom} min={0} max={100} step={1} unit="%" />
         <SliderControl label="Pan" atom={panAtom} min={-1} max={1} step={0.01} />
         <Text c="dimmed" size="xs" fs={"italic"}>

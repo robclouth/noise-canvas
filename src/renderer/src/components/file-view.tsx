@@ -132,8 +132,14 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
     const scroll = store.get(scrollAtom);
 
     const sourceCenterUv = new Vector2(snappedX, snappedY).add(offsetUv);
-    const topLeftUv = new Vector2(sourceCenterUv.x - brushSizeUv.x / 2, sourceCenterUv.y - brushSizeUv.y / 2);
-    const bottomRightUv = new Vector2(sourceCenterUv.x + brushSizeUv.x / 2, sourceCenterUv.y + brushSizeUv.y / 2);
+    const topLeftUv = new Vector2(
+      brushWidth === 0 ? 0 : sourceCenterUv.x - brushSizeUv.x / 2,
+      brushHeight === 0 ? 0 : sourceCenterUv.y - brushSizeUv.y / 2,
+    );
+    const bottomRightUv = new Vector2(
+      brushWidth === 0 ? 1 : sourceCenterUv.x + brushSizeUv.x / 2,
+      brushHeight === 0 ? 1 : sourceCenterUv.y + brushSizeUv.y / 2,
+    );
 
     const topLeftScreen = zoomedToScreen(topLeftUv, zoomPower, scroll);
     const bottomRightScreen = zoomedToScreen(bottomRightUv, zoomPower, scroll);

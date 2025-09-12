@@ -100,16 +100,26 @@ vec4 applyBrushEffect(vec4 original, vec4 modified, float weight) {
 
 bool isInBrush(vec2 logicalUv) {
     vec2 diff = abs(logicalUv - brushCenterUv);
-    return (diff.x < brushSizeUv.x / 2.0 && diff.y < brushSizeUv.y / 2.0);
+    bool inX = brushSizeUv.x == 0.0 || diff.x < brushSizeUv.x / 2.0;
+    bool inY = brushSizeUv.y == 0.0 || diff.y < brushSizeUv.y / 2.0;
+    return inX && inY;
 }
 
 float getFeatherWeight(vec2 logicalUv) {
     if (!isInBrush(logicalUv)) { return 0.0; }
-    vec2 diff = abs(logicalUv - brushCenterUv) / brushSizeUv;
-    float featherZoneX = 0.5 * featherX;
-    float featherZoneY = 0.5 * featherY;
-    float weightX = smoothstep(0.5, 0.5 - featherZoneX, diff.x);
-    float weightY = smoothstep(0.5, 0.5 - featherZoneY, diff.y);
+    vec2 diff = abs(logicalUv - brushCenterUv);
+    
+    float weightX = 1.0;
+    if (brushSizeUv.x > 0.0) {
+        float featherZoneX = 0.5 * featherX;
+        weightX = smoothstep(0.5, 0.5 - featherZoneX, diff.x / brushSizeUv.x);
+    }
+
+    float weightY = 1.0;
+    if (brushSizeUv.y > 0.0) {
+        float featherZoneY = 0.5 * featherY;
+        weightY = smoothstep(0.5, 0.5 - featherZoneY, diff.y / brushSizeUv.y);
+    }
     return weightX * weightY;
 }
 

@@ -16,3 +16,26 @@ export const beatValues = [
   { value: 24, label: "24 beats" },
   { value: 32, label: "32 beats" },
 ];
+
+export const pitchValues = [
+  { value: 1, label: "1 semi" },
+  { value: 2, label: "2 semis" },
+  { value: 3, label: "3 semis" },
+  { value: 4, label: "4 semis" },
+  { value: 5, label: "5 semis" },
+  { value: 6, label: "6 semis" },
+  { value: 7, label: "7 semis" },
+  { value: 8, label: "8 semis" },
+  { value: 9, label: "9 semis" },
+  { value: 10, label: "10 semis" },
+  { value: 11, label: "11 semis" },
+  { value: 12, label: "12 semis" },
+  { value: 18, label: "18 semis" },
+  { value: 24, label: "24 semis" },
+  { value: 36, label: "36 semis" },
+  { value: 48, label: "48 semis" },
+  { value: 60, label: "60 semis" },
+  { value: 72, label: "72 semis" },
+  { value: 84, label: "84 semis" },
+  { value: 96, label: "96 semis" },
+];
