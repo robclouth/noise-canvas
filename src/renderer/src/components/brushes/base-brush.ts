@@ -48,11 +48,8 @@ export type SelectParameter<T extends string = string> = BaseParameter<T, SetSta
   options: readonly T[];
 };
 
-export type SwitchParameter = {
+export type SwitchParameter = BaseParameter<boolean, SetStateActionWithReset<boolean>> & {
   type: "switch";
-  atom: WritableAtom<boolean, [typeof RESET], void> | WritableAtom<boolean, [SetStateAction<boolean>], void>;
-  label: string;
-  propName: string;
 };
 
 export type BrushParameter = SliderParameter | SelectParameter<any> | SwitchParameter;

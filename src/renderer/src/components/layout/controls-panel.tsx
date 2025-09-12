@@ -7,7 +7,6 @@ import {
   brushWidthAtom,
   featherXAtom,
   featherYAtom,
-  openFilesAtom,
   fminAtom,
   gridSizeAtom,
   gridSizeYAtom,
@@ -15,36 +14,31 @@ import {
   offsetLockAtom,
   offsetXAtom,
   offsetYAtom,
+  openFilesAtom,
   panAtom,
   scaleRootAtom,
   scaleTypeAtom,
   snapXAtom,
   snapYAtom,
-  store,
   sourceFileAtom,
+  store,
 } from "@/store";
-import { Flex, Switch, Divider, Select } from "@mantine/core";
-import { useAtom, useAtomValue } from "jotai";
+import { Divider, Flex, Select } from "@mantine/core";
+import { atom, useAtom, useAtomValue } from "jotai";
+import { RESET } from "jotai/utils";
 import { brushes } from "../brushes";
-import { LabeledSlider } from "../controls/slider-control";
+import { SelectControl } from "../controls/select-control";
+import { SliderControl } from "../controls/slider-control";
+import { SwitchControl } from "../controls/switch-control";
+
+const brushIntensityPercentAtom = atom(
+  (get) => get(brushIntensityAtom) * 100,
+  (_get, set, newValue: number | typeof RESET) => {
+    set(brushIntensityAtom, newValue === RESET ? RESET : newValue / 100);
+  },
+);
 
 export function ControlsPanel() {
-  const [snapX, setSnapX] = useAtom(snapXAtom);
-  const [snapY, setSnapY] = useAtom(snapYAtom);
-  const [gridSize, setGridSize] = useAtom(gridSizeAtom);
-  const [gridSizeY, setGridSizeY] = useAtom(gridSizeYAtom);
-  const [normalize, setNormalize] = useAtom(normalizeAtom);
-  const [offsetX, setOffsetX] = useAtom(offsetXAtom);
-  const [offsetY, setOffsetY] = useAtom(offsetYAtom);
-  const [offsetLock, setOffsetLock] = useAtom(offsetLockAtom);
-  const [brushWidth, setBrushWidth] = useAtom(brushWidthAtom);
-  const [brushHeight, setBrushHeight] = useAtom(brushHeightAtom);
-  const [featherX, setFeatherX] = useAtom(featherXAtom);
-  const [featherY, setFeatherY] = useAtom(featherYAtom);
-  const [brushIntensity, setBrushIntensity] = useAtom(brushIntensityAtom);
-  const [pan, setPan] = useAtom(panAtom);
-  const [scaleRoot, setScaleRoot] = useAtom(scaleRootAtom);
-  const [scaleType, setScaleType] = useAtom(scaleTypeAtom);
   const [bandsPerOctave, setBandsPerOctave] = useAtom(bandsPerOctaveAtom);
   const activeFile = useAtomValue(activeFileAtom);
   const files = useAtomValue(openFilesAtom);
@@ -81,45 +75,12 @@ export function ControlsPanel() {
         disabled={!activeFile}
       />
       <Divider my="sm" label="Brush" labelPosition="center" />
-      <LabeledSlider
-        label="Width"
-        value={brushWidth}
-        onChange={setBrushWidth}
-        min={1 / 64}
-        max={32}
-        step={1 / 64}
-        isLog
-        unit=" beats"
-      />
-      <LabeledSlider
-        label="Height"
-        value={brushHeight}
-        onChange={setBrushHeight}
-        min={0.1}
-        max={48}
-        step={0.1}
-        unit=" semi"
-      />
-      <LabeledSlider
-        label="Intensity"
-        value={brushIntensity * 100}
-        onChange={(v) => setBrushIntensity(v / 100)}
-        min={0}
-        max={100}
-        step={1}
-        unit="%"
-      />
-      <LabeledSlider label="Pan" value={pan} onChange={setPan} min={-1} max={1} step={0.01} />
-      <LabeledSlider label="Feather Time" value={featherX} onChange={setFeatherX} min={0} max={100} step={1} unit="%" />
-      <LabeledSlider
-        label="Feather Pitch"
-        value={featherY}
-        onChange={setFeatherY}
-        min={0}
-        max={100}
-        step={1}
-        unit="%"
-      />
+      <SliderControl label="Width" atom={brushWidthAtom} min={1 / 64} max={32} step={1 / 64} isLog unit=" beats" />
+      <SliderControl label="Height" atom={brushHeightAtom} min={0.1} max={48} step={0.1} unit=" semi" />
+      <SliderControl label="Intensity" atom={brushIntensityPercentAtom} min={0} max={100} step={1} unit="%" />
+      <SliderControl label="Pan" atom={panAtom} min={-1} max={1} step={0.01} />
+      <SliderControl label="Feather Time" atom={featherXAtom} min={0} max={100} step={1} unit="%" />
+      <SliderControl label="Feather Pitch" atom={featherYAtom} min={0} max={100} step={1} unit="%" />
       <Divider my="sm" label="Source" labelPosition="center" />
       <Select
         size="xs"
@@ -134,20 +95,14 @@ export function ControlsPanel() {
         }))}
         clearable
       />
-      <LabeledSlider label="Time" value={offsetX} onChange={setOffsetX} min={-4} max={4} step={1 / 16} unit=" beats" />
-      <LabeledSlider label="Pitch" value={offsetY} onChange={setOffsetY} min={-12} max={12} step={0.1} unit=" semi" />
-      <Switch
-        size="xs"
-        label="Lock Offset"
-        checked={offsetLock}
-        onChange={(e) => setOffsetLock(e.currentTarget.checked)}
-      />
+      <SliderControl label="Time" atom={offsetXAtom} min={-4} max={4} step={1 / 16} unit=" beats" />
+      <SliderControl label="Pitch" atom={offsetYAtom} min={-12} max={12} step={0.1} unit=" semi" />
+      <SwitchControl label="Lock Offset" atom={offsetLockAtom} />
       <Divider my="sm" label="Grid & Snap" labelPosition="center" />
-      <Switch size="xs" label="Snap Time" checked={snapX} onChange={(e) => setSnapX(e.currentTarget.checked)} />
-      <LabeledSlider
+      <SwitchControl label="Snap Time" atom={snapXAtom} />
+      <SliderControl
         label="Grid Time"
-        value={gridSize}
-        onChange={setGridSize}
+        atom={gridSizeAtom}
         min={1 / 64}
         max={4}
         step={1 / 64}
@@ -155,33 +110,13 @@ export function ControlsPanel() {
         logStep={1}
         unit=" beats"
       />
-      <Switch size="xs" label="Snap Pitch" checked={snapY} onChange={(e) => setSnapY(e.currentTarget.checked)} />
-      <LabeledSlider
-        label="Grid Pitch"
-        value={gridSizeY}
-        onChange={setGridSizeY}
-        min={0.1}
-        max={12}
-        step={0.1}
-        unit=" semi"
-      />
+      <SwitchControl label="Snap Pitch" atom={snapYAtom} />
+      <SliderControl label="Grid Pitch" atom={gridSizeYAtom} min={0.1} max={12} step={0.1} unit=" semi" />
       <Divider my="sm" label="Musical" labelPosition="center" />
-      <Select
-        label="Root"
-        size="xs"
-        value={scaleRoot}
-        onChange={(value) => setScaleRoot(value || "C")}
-        data={noteNames}
-      />
-      <Select
-        label="Scale"
-        size="xs"
-        value={scaleType}
-        onChange={(value) => setScaleType(value || "Major")}
-        data={scaleNames}
-      />
+      <SelectControl label="Root" atom={scaleRootAtom} data={noteNames} />
+      <SelectControl label="Scale" atom={scaleTypeAtom} data={scaleNames} />
       <Divider my="sm" label="Output" labelPosition="center" />
-      <Switch size="xs" label="Normalize" checked={normalize} onChange={(e) => setNormalize(e.currentTarget.checked)} />
+      <SwitchControl label="Normalize" atom={normalizeAtom} />
     </Flex>
   );
 }

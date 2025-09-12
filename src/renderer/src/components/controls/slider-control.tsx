@@ -1,13 +1,10 @@
 import { Group, NumberInput, Slider, Text } from "@mantine/core";
-import { useAtom } from "jotai";
-import { SliderParameter } from "@/components/brushes/base-brush";
-import { RESET } from "jotai/utils";
+import { WritableAtom, useAtom } from "jotai";
+import { RESET, useResetAtom } from "jotai/utils";
 
-export const LabeledSlider = ({
+export const SliderControl = ({
   label,
-  value,
-  onChange,
-  onDoubleClick,
+  atom,
   min,
   max,
   step,
@@ -17,9 +14,7 @@ export const LabeledSlider = ({
   logStep,
 }: {
   label: string;
-  value: number;
-  onChange: (value: number) => void;
-  onDoubleClick?: () => void;
+  atom: WritableAtom<number, [arg: number | typeof RESET], void>;
   min: number;
   max: number;
   step: number;
@@ -28,9 +23,11 @@ export const LabeledSlider = ({
   labelWidth?: number;
   logStep?: number;
 }) => {
+  const reset = useResetAtom(atom);
+  const [value, onChange] = useAtom(atom);
   return (
-    <Group gap="sm" wrap="nowrap" onDoubleClick={onDoubleClick}>
-      <Text size="xs" w={labelWidth}>
+    <Group gap="sm" wrap="nowrap">
+      <Text size="xs" w={labelWidth} onDoubleClick={() => reset()}>
         {label}
       </Text>
       <Slider
@@ -57,22 +54,5 @@ export const LabeledSlider = ({
         step={step}
       />
     </Group>
-  );
-};
-
-export const SliderControl = ({ parameter }: { parameter: SliderParameter }) => {
-  const [value, setValue] = useAtom(parameter.atom);
-  return (
-    <LabeledSlider
-      label={parameter.label}
-      value={value}
-      onChange={setValue}
-      onDoubleClick={() => setValue(RESET)}
-      min={parameter.min}
-      max={parameter.max}
-      step={parameter.step}
-      unit={parameter.unit}
-      isLog={parameter.isLog}
-    />
   );
 };

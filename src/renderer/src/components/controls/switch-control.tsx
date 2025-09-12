@@ -1,14 +1,22 @@
 import { Group, Switch, Text } from "@mantine/core";
-import { useAtom } from "jotai";
-import { SwitchParameter } from "@/components/brushes/base-brush";
-import { RESET } from "jotai/utils";
+import { WritableAtom, useAtom } from "jotai";
+import { RESET, useResetAtom } from "jotai/utils";
 
-export const SwitchControl = ({ parameter }: { parameter: SwitchParameter }) => {
-  const [value, setValue] = useAtom(parameter.atom);
+export const SwitchControl = ({
+  label,
+  atom,
+  labelWidth = 50,
+}: {
+  label: string;
+  atom: WritableAtom<boolean, [arg: boolean | typeof RESET], void>;
+  labelWidth?: number;
+}) => {
+  const [value, setValue] = useAtom(atom);
+  const reset = useResetAtom(atom);
   return (
-    <Group gap="sm" wrap="nowrap" onDoubleClick={() => setValue(RESET)}>
-      <Text size="xs" w={50}>
-        {parameter.label}
+    <Group gap="sm" wrap="nowrap">
+      <Text size="xs" w={labelWidth} onDoubleClick={() => reset()}>
+        {label}
       </Text>
       <Switch checked={value} onChange={(e) => setValue(e.currentTarget.checked)} />
     </Group>

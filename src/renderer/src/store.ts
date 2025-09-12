@@ -102,7 +102,7 @@ export const brushHeightAtom = atomWithStorage("brushHeight", 1); // in semitone
 export const bpmAtom = atomWithStorage("bpm", 120);
 
 // Controls whether the output of the synthesis is normalized
-export const normalizeAtom = atom(true);
+export const normalizeAtom = atomWithStorage("normalize", true);
 
 // Brush snapping
 export const snapXAtom = atomWithStorage("snapX", true);

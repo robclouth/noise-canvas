@@ -1,28 +1,25 @@
 import { Group, Select, Text } from "@mantine/core";
-import { useAtom } from "jotai";
-import { SelectParameter } from "@/components/brushes/base-brush";
-import { RESET } from "jotai/utils";
-
-export const SelectControl = ({ parameter }: { parameter: SelectParameter }) => {
-  const [value, setValue] = useAtom(parameter.atom);
-  const data = parameter.options.map((key) => ({
-    value: key,
-    label: key.charAt(0).toUpperCase() + key.slice(1),
-  }));
-
+import { WritableAtom, useAtom } from "jotai";
+import { RESET, useResetAtom } from "jotai/utils";
+export const SelectControl = <T extends string>({
+  label,
+  atom,
+  data,
+  labelWidth = 50,
+}: {
+  label: string;
+  atom: WritableAtom<T, [arg: T | typeof RESET], void>;
+  data: (T | { value: T; label: string })[];
+  labelWidth?: number;
+}) => {
+  const [value, setValue] = useAtom(atom);
+  const reset = useResetAtom(atom);
   return (
-    <Group key={parameter.label} gap="sm" wrap="nowrap" onDoubleClick={() => setValue(RESET)}>
-      <Text size="xs" w={50}>
-        {parameter.label}
+    <Group key={label} gap="sm" wrap="nowrap">
+      <Text size="xs" w={labelWidth} onDoubleClick={() => reset()}>
+        {label}
       </Text>
-      <Select
-        size="xs"
-        flex={1}
-        key={parameter.label}
-        data={data}
-        value={value}
-        onChange={(val) => setValue(val || parameter.options[0])}
-      />
+      <Select size="xs" flex={1} key={label} data={data} value={value} onChange={(val) => setValue(val as T)} />
     </Group>
   );
 };
