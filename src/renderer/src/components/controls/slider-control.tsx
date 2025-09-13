@@ -76,7 +76,7 @@ export const SliderControl = (props: SliderControlProps) => {
         size="xs"
         hideControls
         suffix={unit}
-        value={parseFloat(value.toString())}
+        value={parseFloat((value ?? 0).toString())}
         onChange={(val) => onChange(parseFloat(val ? val.toString() : "0"))}
         min={min}
         max={max}

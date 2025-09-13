@@ -1,17 +1,17 @@
-import { BrushType, brushes } from "@/components/brushes";
+import { brushes } from "@/components/brushes";
+import { ParameterControl } from "@/components/controls/parameter-control";
+import { SelectControl } from "@/components/controls/select-control";
 import { brushTypeAtom } from "@/store";
-import { Flex, Select } from "@mantine/core";
+import { Flex } from "@mantine/core";
 import { useAtom } from "jotai";
-import { ParameterControl } from "../controls/parameter-control";
 
 export function BrushPanel() {
-  const [brushType, setBrushType] = useAtom(brushTypeAtom);
+  const [brushType] = useAtom(brushTypeAtom);
   return (
     <Flex direction="column" w={300} p="xs" gap={0}>
-      <Select
-        size="xs"
-        value={brushType}
-        onChange={(value) => setBrushType(value as BrushType)}
+      <SelectControl
+        label="Brush Type"
+        atom={brushTypeAtom}
         data={Object.keys(brushes).map((key) => ({
           value: key,
           label: key.charAt(0).toUpperCase() + key.slice(1),
