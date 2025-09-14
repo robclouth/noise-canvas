@@ -43,21 +43,6 @@ export function createMenu(window: BrowserWindow, undoService: UndoService) {
     {
       label: "Edit",
       submenu: [
-        { role: "undo" },
-        { role: "redo" },
-        { type: "separator" },
-        {
-          label: "Restore Original",
-          click: () => {
-            window.webContents.send("restore-original");
-          },
-        },
-      ],
-    },
-    // { role: 'viewMenu' }
-    {
-      label: "Edit",
-      submenu: [
         {
           label: "Undo",
           accelerator: "CmdOrCtrl+Z",
@@ -75,6 +60,13 @@ export function createMenu(window: BrowserWindow, undoService: UndoService) {
             undoService?.redo();
           },
           id: "redo",
+        },
+        { type: "separator" },
+        {
+          label: "Restore Original",
+          click: () => {
+            window.webContents.send("restore-original");
+          },
         },
       ],
     },
