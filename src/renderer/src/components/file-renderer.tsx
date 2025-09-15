@@ -8,6 +8,7 @@ import {
   featherXAtom,
   featherYAtom,
   gridSizeAtom,
+  minFreqAtom,
   mouseUvAtom,
   offsetXAtom,
   offsetYAtom,
@@ -19,7 +20,7 @@ import {
 } from "@/store";
 import { useFBO, View } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
-import { useAtomValue } from "jotai";
+import { isSynthesizingAtom, runSynthesis } from "@renderer/audio-manager";
 import { debounce } from "lodash-es";
 import { forwardRef, RefObject, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -27,7 +28,6 @@ import { brushes } from "./brushes";
 import { unitsToUv } from "./brushes/common";
 import { copyMaterial } from "./copy-material";
 import { DisplayMaterial } from "./display-material";
-import { isSynthesizingAtom, runSynthesis } from "@renderer/audio-manager";
 
 interface FileRendererProps {
   file: OpenFile;
@@ -60,21 +60,6 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     });
     return unsub;
   }, []);
-
-  const brushWidth = useAtomValue(brushWidthAtom);
-  const brushHeight = useAtomValue(brushHeightAtom);
-  const brushType = useAtomValue(brushTypeAtom);
-  const bpm = useAtomValue(bpmAtom);
-  const gridSize = useAtomValue(gridSizeAtom);
-  const zoomPower = useAtomValue(zoomPowerAtom);
-  const scroll = useAtomValue(scrollAtom);
-  const featherX = useAtomValue(featherXAtom);
-  const featherY = useAtomValue(featherYAtom);
-  const bandsPerOctave = useAtomValue(bandsPerOctaveAtom);
-  const brushIntensity = useAtomValue(brushIntensityAtom);
-  const offsetX = useAtomValue(offsetXAtom);
-  const offsetY = useAtomValue(offsetYAtom);
-  const pan = useAtomValue(panAtom);
 
   const displayMaterial = useMemo(() => new DisplayMaterial(), []);
 
@@ -166,6 +151,22 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
       debouncedSynthesis(file, getFBOData());
     }
 
+    const brushType = store.get(brushTypeAtom);
+    const bpm = store.get(bpmAtom);
+    const gridSize = store.get(gridSizeAtom);
+    const zoomPower = store.get(zoomPowerAtom);
+    const scroll = store.get(scrollAtom);
+    const minFreq = store.get(minFreqAtom);
+    const bandsPerOctave = store.get(bandsPerOctaveAtom);
+    const pan = store.get(panAtom);
+    const brushIntensity = store.get(brushIntensityAtom);
+    const offsetX = store.get(offsetXAtom);
+    const offsetY = store.get(offsetYAtom);
+    const featherX = store.get(featherXAtom);
+    const featherY = store.get(featherYAtom);
+    const brushWidth = store.get(brushWidthAtom);
+    const brushHeight = store.get(brushHeightAtom);
+
     // Render stroke
     if (strokeParams.current && applyStroke.current) {
       const source = pingPong.current === 0 ? fbo1 : fbo2;
@@ -188,6 +189,8 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
       fboMesh.material = brush.material;
 
       brush.updateUniforms({
+        minFreq,
+        bandsPerOctave,
         brushCenterUv,
         brushSizeUv,
         sourceTexture: source.texture,

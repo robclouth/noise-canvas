@@ -117,8 +117,8 @@ export const featherYAtom = atomWithStorage("featherY", 0.5);
 export const brushIntensityAtom = atomWithStorage("brushIntensity", 1.0);
 export const panAtom = atomWithStorage("pan", 0.0);
 
-export const scaleRootAtom = atomWithStorage("scaleRoot", "C");
-export const scaleTypeAtom = atomWithStorage("scaleType", "Major");
+export const scaleTonicAtom = atomWithStorage("scaleTonic", "C");
+export const scaleTypeAtom = atomWithStorage("scaleType", "major");
 
 export const offsetXAtom = atomWithStorage("offsetX", 0.0);
 export const offsetYAtom = atomWithStorage("offsetY", 0.0);
@@ -127,7 +127,7 @@ export const offsetLockAtom = atomWithStorage("offsetLock", false);
 export const mouseUvAtom = atom<Vector2 | null>(null);
 
 export const bandsPerOctaveAtom = atomWithStorage("bandsPerOctave", 48);
-export const fminAtom = atomWithStorage("fmin", 20.0);
+export const minFreqAtom = atomWithStorage("minFreq", 20.0);
 
 // --- Core Functions ---
 
@@ -139,7 +139,7 @@ export function init() {
     currentFilePath = filePath;
     const params = {
       bandsPerOctave: store.get(bandsPerOctaveAtom),
-      fmin: store.get(fminAtom),
+      fmin: store.get(minFreqAtom),
     };
     window.api.loadFile(filePath, params);
   };
@@ -159,7 +159,7 @@ export function init() {
     try {
       const analysisParams = {
         bandsPerOctave: store.get(bandsPerOctaveAtom),
-        fmin: store.get(fminAtom),
+        fmin: store.get(minFreqAtom),
       };
       const result = await window.api.openFileAndAnalyze(analysisParams);
       if (result && result.filePath) {
@@ -233,7 +233,7 @@ export function init() {
 
     const analysisParams = {
       bandsPerOctave: store.get(bandsPerOctaveAtom),
-      fmin: store.get(fminAtom),
+      fmin: store.get(minFreqAtom),
     };
     const payload = {
       processedData: processedData.buffer,

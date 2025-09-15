@@ -7,7 +7,7 @@ import {
   brushWidthAtom,
   featherXAtom,
   featherYAtom,
-  fminAtom,
+  minFreqAtom,
   gridSizeAtom,
   gridSizeYAtom,
   normalizeAtom,
@@ -16,7 +16,7 @@ import {
   offsetYAtom,
   openFilesAtom,
   panAtom,
-  scaleRootAtom,
+  scaleTonicAtom,
   scaleTypeAtom,
   sourceFileAtom,
   store,
@@ -29,6 +29,8 @@ import { SelectControl } from "../controls/select-control";
 import { SliderControl } from "../controls/slider-control";
 import { SwitchControl } from "../controls/switch-control";
 import { beatValues, pitchValues } from "@/lib/constants";
+import { ScaleType } from "tonal";
+import { startCase } from "lodash-es";
 
 const brushIntensityPercentAtom = atom(
   (get) => get(brushIntensityAtom) * 100,
@@ -54,7 +56,6 @@ export function ControlsPanel() {
   const brushType = useAtomValue(brushTypeAtom);
 
   const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-  const scaleNames = ["Major", "Minor", "Pentatonic Major", "Pentatonic Minor", "Blues"];
 
   const brush = brushes[brushType];
   const supportsSource = brush && "sourceTexture" in brush.material.uniforms;
@@ -65,7 +66,7 @@ export function ControlsPanel() {
       setBandsPerOctave(newBandsPerOctave);
       const params = {
         bandsPerOctave: newBandsPerOctave,
-        fmin: store.get(fminAtom),
+        fmin: store.get(minFreqAtom),
       };
       window.api.reanalyzeCurrentFile(params);
     }
@@ -140,9 +141,16 @@ export function ControlsPanel() {
           ]}
         />
       </Section>
-      <Section label="Musical">
-        <SelectControl label="Root" atom={scaleRootAtom} data={noteNames} />
-        <SelectControl label="Scale" atom={scaleTypeAtom} data={scaleNames} />
+      <Section label="Scale">
+        <SelectControl label="Root" atom={scaleTonicAtom} data={noteNames} />
+        <SelectControl
+          label="Scale"
+          atom={scaleTypeAtom}
+          data={ScaleType.all().map(({ name }) => ({
+            value: name,
+            label: startCase(name),
+          }))}
+        />
       </Section>
       <Section label="Output">
         <SwitchControl label="Normalize" atom={normalizeAtom} />

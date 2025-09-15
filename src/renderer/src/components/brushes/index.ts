@@ -8,8 +8,10 @@ import { dynamicsBrush } from "./dynamics-brush";
 import { convolveBrush } from "./convolve-brush";
 import { harmonizerBrush } from "./harmonizer-brush";
 import { restoreBrush } from "./restore-brush";
+import { scaleBrush } from "./scale-brush";
+import { BaseBrush } from "./base-brush";
 
-export const brushes = {
+export const brushes: Record<string, BaseBrush> = {
   gain: gainBrush,
   restore: restoreBrush,
   blur: blurBrush,
@@ -19,6 +21,7 @@ export const brushes = {
   dynamics: dynamicsBrush,
   convolve: convolveBrush,
   harmonizer: harmonizerBrush,
+  scale: scaleBrush,
 };
 
 export type BrushType = keyof typeof brushes;

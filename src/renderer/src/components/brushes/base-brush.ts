@@ -20,6 +20,8 @@ export interface UpdateUniformsProps {
   brushIntensity: number;
   offsetUv: THREE.Vector2;
   pan: number;
+  minFreq: number;
+  bandsPerOctave: number;
 }
 
 export interface BrushUniforms {
@@ -93,6 +95,8 @@ export abstract class BaseBrush {
       inverseMapTex,
       metadataTex,
       originalPackedDataTex,
+      minFreq,
+      bandsPerOctave,
     } = props;
     const uniforms = this.material.uniforms;
     const activeFile = store.get(activeFileAtom);
@@ -118,5 +122,7 @@ export abstract class BaseBrush {
     uniforms.brushIntensity.value = brushIntensity;
     uniforms.offsetUv.value.copy(offsetUv);
     uniforms.pan.value = pan;
+    uniforms.minFreq.value = minFreq;
+    uniforms.bandsPerOctave.value = bandsPerOctave;
   }
 }

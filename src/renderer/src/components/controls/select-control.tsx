@@ -1,7 +1,7 @@
 import { Group, Select, Text } from "@mantine/core";
 import { WritableAtom, useAtom } from "jotai";
 import { RESET, useResetAtom } from "jotai/utils";
-import { memo } from "react";
+import { memo, useCallback } from "react";
 
 export const SelectControl = memo(
   <T extends string>({
@@ -17,15 +17,17 @@ export const SelectControl = memo(
   }) => {
     const [value, setValue] = useAtom(atom);
     const reset = useResetAtom(atom);
-    console.log("SelectControl", label, value);
 
-    const handleChange = (val: T | null) => {
-      if (val != null) {
-        setValue(val);
-      } else {
-        reset();
-      }
-    };
+    const handleChange = useCallback(
+      (val: string | null) => {
+        if (val !== null) {
+          setValue(val as T);
+        } else {
+          reset();
+        }
+      },
+      [reset, setValue],
+    );
 
     return (
       <Group key={label} gap="sm" wrap="nowrap">

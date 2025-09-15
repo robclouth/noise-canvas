@@ -4,7 +4,7 @@ import {
   activeFileAtom,
   audioBufferAtom,
   bandsPerOctaveAtom,
-  fminAtom,
+  minFreqAtom,
   isPlayingAtom,
   loopAtom,
   normalizeAtom,
@@ -37,7 +37,7 @@ export const runSynthesis = async (file: OpenFile, processedData: Float32Array):
 
     const analysisParams = {
       bandsPerOctave: store.get(bandsPerOctaveAtom),
-      fmin: store.get(fminAtom),
+      fmin: store.get(minFreqAtom),
     };
     const audioBufferChannels = await window.api.synthesizeAudio(payload, analysisParams, normalize);
 

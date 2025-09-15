@@ -1,7 +1,7 @@
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
 import * as THREE from "three";
-import { bandsPerOctaveAtom, bpmAtom, fminAtom, spectrogramDataAtom, store } from "../../store";
+import { bandsPerOctaveAtom, bpmAtom, minFreqAtom, spectrogramDataAtom, store } from "../../store";
 import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
 import { code, uniforms, unitsToUv, vertexShader } from "./common";
 
@@ -168,7 +168,7 @@ class TransformBrush extends BaseBrush {
     const spectrogramData = store.get(spectrogramDataAtom);
     const bpm = store.get(bpmAtom);
     const bandsPerOctave = store.get(bandsPerOctaveAtom);
-    const minFreq = store.get(fminAtom);
+    const minFreq = store.get(minFreqAtom);
 
     if (!spectrogramData) return;
 

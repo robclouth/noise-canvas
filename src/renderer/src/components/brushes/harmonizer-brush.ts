@@ -1,7 +1,7 @@
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
 import * as THREE from "three";
-import { scaleRootAtom, scaleTypeAtom, store } from "../../store";
+import { scaleTonicAtom, scaleTypeAtom, store } from "../../store";
 import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
 import { code, uniforms, vertexShader } from "./common";
 
@@ -131,7 +131,7 @@ class HarmonizerBrush extends BaseBrush {
     const scaleMask = scales[scaleType] || scales.Major;
     this.material.uniforms.scaleMask.value = scaleMask;
 
-    const rootNoteName = store.get(scaleRootAtom);
+    const rootNoteName = store.get(scaleTonicAtom);
     const rootNote = noteNames.indexOf(rootNoteName);
     this.material.uniforms.rootNote.value = rootNote >= 0 ? rootNote : 0;
   }
