@@ -91,12 +91,12 @@ const TransformMaterial = shaderMaterial(
 );
 
 class TransformBrush extends BaseBrush {
-  material: THREE.ShaderMaterial;
+  materials: THREE.ShaderMaterial[];
   parameters: BrushParameter[];
 
   constructor() {
     super();
-    this.material = new TransformMaterial();
+    this.materials = [new TransformMaterial()];
     this.parameters = [
       {
         type: "slider",
@@ -163,33 +163,30 @@ class TransformBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps): void {
-    super.updateUniforms(props);
-    const spectrogramData = store.get(spectrogramDataAtom);
+  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+    super.updateUniforms(props, passIndex);
     const bpm = store.get(bpmAtom);
+    const activeFile = store.get(activeFileAtom);
+    if (!activeFile) return;
+    const { spectrogramData } = activeFile;
     const bandsPerOctave = store.get(bandsPerOctaveAtom);
-    const minFreq = store.get(minFreqAtom);
-
-    if (!spectrogramData) return;
-
-    // Update new uniforms for pitch shifting
-    this.material.uniforms.minFreq.value = minFreq;
-    this.material.uniforms.bandsPerOctave.value = bandsPerOctave;
-
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-    const shiftUv = unitsToUv(
-      store.get(shiftXAtom),
-      store.get(shiftYCentsAtom) / 100,
-      bpm,
-      totalDuration,
-      bandsPerOctave,
-      spectrogramData.numBands,
-    );
+    const shiftX = store.get(shiftXAtom);
+    const shiftYCents = store.get(shiftYCentsAtom);
+    const scaleX = store.get(scaleXAtom);
+    const scaleY = store.get(scaleYAtom);
+    const rotation = store.get(rotationAtom);
+    const boundaryMode = store.get(boundaryModeAtom);
 
-    this.material.uniforms.shiftUv.value.copy(shiftUv);
-    this.material.uniforms.scale.value.set(store.get(scaleXAtom), store.get(scaleYAtom));
-    this.material.uniforms.rotation.value = store.get(rotationAtom);
-    this.material.uniforms.boundaryMode.value = boundaryModes.indexOf(store.get(boundaryModeAtom));
+    const shiftUv = unitsToUv(shiftX, shiftYCents / 100, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
+
+    const material = this.materials[passIndex];
+    if (!material) return;
+
+    material.uniforms.shiftUv.value.copy(shiftUv);
+    material.uniforms.scale.value.set(scaleX, scaleY);
+    material.uniforms.rotation.value = (rotation * Math.PI) / 180;
+    material.uniforms.boundaryMode.value = boundaryModes.indexOf(boundaryMode);
   }
 }
 

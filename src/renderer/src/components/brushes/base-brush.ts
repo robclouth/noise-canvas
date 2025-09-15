@@ -77,10 +77,10 @@ export type SwitchParameter = BaseParameter<boolean, SetStateActionWithReset<boo
 export type BrushParameter = SliderParameter | SelectParameter<any> | SwitchParameter;
 
 export abstract class BaseBrush {
-  abstract material: THREE.ShaderMaterial;
+  abstract materials: THREE.ShaderMaterial[];
   abstract parameters: BrushParameter[];
 
-  updateUniforms(props: UpdateUniformsProps): void {
+  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
     const {
       brushCenterUv,
       brushSizeUv,
@@ -98,7 +98,11 @@ export abstract class BaseBrush {
       minFreq,
       bandsPerOctave,
     } = props;
-    const uniforms = this.material.uniforms;
+
+    const material = this.materials[passIndex];
+    if (!material) return;
+
+    const uniforms = material.uniforms;
     const activeFile = store.get(activeFileAtom);
 
     if (!activeFile) return;

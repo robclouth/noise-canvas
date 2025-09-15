@@ -5,6 +5,7 @@ import { store } from "../../store";
 import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
 import { code, uniforms, vertexShader } from "./common";
 import kernelUrl from "../../assets/test.png";
+import { ConvolveIr } from "@/../../src/main/lib/types";
 
 export const convolveAmountAtom = atomWithStorage("convolveAmount", 0.5);
 export const convolveScaleXAtom = atomWithStorage("convolveScaleX", 1.0);
@@ -78,12 +79,13 @@ const ConvolveMaterial = shaderMaterial(
 );
 
 class ConvolveBrush extends BaseBrush {
-  material: THREE.ShaderMaterial;
+  materials: THREE.ShaderMaterial[];
   parameters: BrushParameter[];
+  irLut: THREE.DataTexture | null = null;
 
   constructor() {
     super();
-    this.material = new ConvolveMaterial();
+    this.materials = [new ConvolveMaterial()];
     this.parameters = [
       {
         type: "slider",
@@ -118,10 +120,24 @@ class ConvolveBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps): void {
-    super.updateUniforms(props);
-    this.material.uniforms.amount.value = store.get(convolveAmountAtom);
-    this.material.uniforms.kernelScale.value.set(store.get(convolveScaleXAtom), store.get(convolveScaleYAtom));
+  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+    super.updateUniforms(props, passIndex);
+    this.materials[passIndex].uniforms.amount.value = store.get(convolveAmountAtom);
+    this.materials[passIndex].uniforms.kernelScale.value.set(
+      store.get(convolveScaleXAtom),
+      store.get(convolveScaleYAtom),
+    );
+  }
+
+  async setIr(irName: ConvolveIr) {
+    const res = await fetch(`/impulse-responses/${irName}.json`);
+    const ir = await res.json();
+    const irTex = new THREE.DataTexture(ir, 1, 1, THREE.RGBAFormat);
+    irTex.needsUpdate = true;
+    this.irLut = irTex;
+    this.irLut.needsUpdate = true;
+    this.materials[0].uniforms.irLut.value = this.irLut;
+    this.materials[0].uniforms.irLength.value = ir.length;
   }
 }
 

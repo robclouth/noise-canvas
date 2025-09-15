@@ -103,12 +103,12 @@ const HarmonizerMaterial = shaderMaterial(
 );
 
 class HarmonizerBrush extends BaseBrush {
-  material: THREE.ShaderMaterial;
+  materials: THREE.ShaderMaterial[];
   parameters: BrushParameter[];
 
   constructor() {
     super();
-    this.material = new HarmonizerMaterial();
+    this.materials = [new HarmonizerMaterial()];
     this.parameters = [
       {
         type: "slider",
@@ -123,17 +123,20 @@ class HarmonizerBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps): void {
-    super.updateUniforms(props);
-    this.material.uniforms.amount.value = store.get(harmonizerAmountAtom);
+  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+    super.updateUniforms(props, passIndex);
+    const material = this.materials[passIndex];
+    if (!material) return;
+
+    material.uniforms.amount.value = store.get(harmonizerAmountAtom);
 
     const scaleType = store.get(scaleTypeAtom) as keyof typeof scales;
     const scaleMask = scales[scaleType] || scales.Major;
-    this.material.uniforms.scaleMask.value = scaleMask;
+    material.uniforms.scaleMask.value = scaleMask;
 
     const rootNoteName = store.get(scaleTonicAtom);
     const rootNote = noteNames.indexOf(rootNoteName);
-    this.material.uniforms.rootNote.value = rootNote >= 0 ? rootNote : 0;
+    material.uniforms.rootNote.value = rootNote >= 0 ? rootNote : 0;
   }
 }
 

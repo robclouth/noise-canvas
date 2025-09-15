@@ -1,15 +1,15 @@
+import { beatValues, pitchValues } from "@/lib/constants";
 import {
   activeFileAtom,
   bandsPerOctaveAtom,
   brushHeightAtom,
   brushIntensityAtom,
-  brushTypeAtom,
   brushWidthAtom,
   featherXAtom,
   featherYAtom,
-  minFreqAtom,
   gridSizeAtom,
   gridSizeYAtom,
+  minFreqAtom,
   normalizeAtom,
   offsetLockAtom,
   offsetXAtom,
@@ -24,13 +24,11 @@ import {
 import { Divider, Flex, Select, Text } from "@mantine/core";
 import { atom, useAtom, useAtomValue } from "jotai";
 import { RESET } from "jotai/utils";
-import { brushes } from "../brushes";
+import { startCase } from "lodash-es";
+import { ScaleType } from "tonal";
 import { SelectControl } from "../controls/select-control";
 import { SliderControl } from "../controls/slider-control";
 import { SwitchControl } from "../controls/switch-control";
-import { beatValues, pitchValues } from "@/lib/constants";
-import { ScaleType } from "tonal";
-import { startCase } from "lodash-es";
 
 const brushIntensityPercentAtom = atom(
   (get) => get(brushIntensityAtom) * 100,
@@ -53,12 +51,10 @@ export function ControlsPanel() {
   const activeFile = useAtomValue(activeFileAtom);
   const files = useAtomValue(openFilesAtom);
   const [sourceFile, setSourceFile] = useAtom(sourceFileAtom);
-  const brushType = useAtomValue(brushTypeAtom);
 
   const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
-  const brush = brushes[brushType];
-  const supportsSource = brush && "sourceTexture" in brush.material.uniforms;
+  const supportsSource = true;
 
   const handleAnalysisParamsChange = (value: string | null) => {
     if (value && activeFile) {

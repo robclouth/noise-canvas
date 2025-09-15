@@ -32,12 +32,17 @@ const RestoreMaterial = shaderMaterial(
 );
 
 class RestoreBrush extends BaseBrush {
-  material: THREE.ShaderMaterial;
-  parameters: BrushParameter[] = [];
+  materials: THREE.ShaderMaterial[];
+  parameters: BrushParameter[];
 
   constructor() {
     super();
-    this.material = new RestoreMaterial();
+    this.materials = [new RestoreMaterial()];
+    this.parameters = [];
+  }
+
+  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+    super.updateUniforms(props, passIndex);
   }
 }
 

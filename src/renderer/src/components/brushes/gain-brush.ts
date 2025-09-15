@@ -41,12 +41,12 @@ const GainMaterial = shaderMaterial(
 );
 
 class GainBrush extends BaseBrush {
-  material: THREE.ShaderMaterial;
+  materials: THREE.ShaderMaterial[];
   parameters: BrushParameter[];
 
   constructor() {
     super();
-    this.material = new GainMaterial();
+    this.materials = [new GainMaterial()];
     this.parameters = [
       {
         type: "slider",
@@ -62,9 +62,9 @@ class GainBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps) {
-    super.updateUniforms(props);
-    this.material.uniforms.gainDb.value = store.get(gainDbAtom);
+  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+    super.updateUniforms(props, passIndex);
+    this.materials[passIndex].uniforms.gainDb.value = store.get(gainDbAtom);
   }
 }
 

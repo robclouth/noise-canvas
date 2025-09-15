@@ -81,6 +81,11 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     type: THREE.FloatType,
   });
 
+  const passFbo = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+    format: THREE.RGBAFormat,
+    type: THREE.FloatType,
+  });
+
   const pingPong = useRef(0);
   const isInitialized = useRef(false);
 
@@ -186,28 +191,49 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
       const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
 
       const brush = brushes[brushType];
-      fboMesh.material = brush.material;
+      const numPasses = brush.materials.length;
 
-      brush.updateUniforms({
-        minFreq,
-        bandsPerOctave,
-        brushCenterUv,
-        brushSizeUv,
-        sourceTexture: source.texture,
-        originalPackedDataTex,
-        inverseMapTex,
-        metadataTex,
-        zoomPower,
-        scroll,
-        featherX: featherX / 100,
-        featherY: featherY / 100,
-        brushIntensity,
-        offsetUv,
-        pan,
-      });
+      let readBuffer = source;
+      let writeBuffer = passFbo;
 
-      gl.setRenderTarget(destination);
-      gl.render(fboScene, camera);
+      for (let i = 0; i < numPasses; i++) {
+        const material = brush.materials[i];
+        fboMesh.material = material;
+
+        // The final pass always writes to the main destination buffer.
+        // For a single-pass effect, this is met on the first iteration.
+        if (i === numPasses - 1) {
+          writeBuffer = destination;
+        }
+
+        brush.updateUniforms(
+          {
+            minFreq,
+            bandsPerOctave,
+            brushCenterUv,
+            brushSizeUv,
+            sourceTexture: readBuffer.texture,
+            originalPackedDataTex,
+            inverseMapTex,
+            metadataTex,
+            zoomPower,
+            scroll,
+            featherX: featherX / 100,
+            featherY: featherY / 100,
+            brushIntensity,
+            offsetUv,
+            pan,
+          },
+          i,
+        );
+
+        gl.setRenderTarget(writeBuffer);
+        gl.render(fboScene, camera);
+
+        // Swap buffers for the next pass
+        [readBuffer, writeBuffer] = [writeBuffer, readBuffer];
+      }
+
       gl.setRenderTarget(null);
 
       if (!preview) {

@@ -63,13 +63,13 @@ const ScaleMaterial = shaderMaterial(
 );
 
 class ScaleBrush extends BaseBrush {
-  material: THREE.ShaderMaterial;
+  materials: THREE.ShaderMaterial[];
   parameters: BrushParameter[];
   gainLut: THREE.DataTexture | null = null;
 
   constructor() {
     super();
-    this.material = new ScaleMaterial();
+    this.materials = [new ScaleMaterial()];
     this.parameters = [
       {
         type: "slider",
@@ -85,9 +85,13 @@ class ScaleBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps): void {
-    super.updateUniforms(props);
+  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+    super.updateUniforms(props, passIndex);
+    this.updateGainLut();
+    this.materials[passIndex].uniforms.gainLut.value = this.gainLut;
+  }
 
+  updateGainLut() {
     const spectrogramData = store.get(spectrogramDataAtom);
     if (!spectrogramData) return;
 
@@ -146,7 +150,6 @@ class ScaleBrush extends BaseBrush {
       (this.gainLut.image.data as Float32Array).set(gainLutData);
     }
     this.gainLut.needsUpdate = true;
-    this.material.uniforms.gainLut.value = this.gainLut;
   }
 }
 

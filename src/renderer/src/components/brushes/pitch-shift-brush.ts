@@ -74,12 +74,12 @@ const PitchShiftMaterial = shaderMaterial(
 );
 
 class PitchShiftBrush extends BaseBrush {
-  material: THREE.ShaderMaterial;
+  materials: THREE.ShaderMaterial[];
   parameters: BrushParameter[];
 
   constructor() {
     super();
-    this.material = new PitchShiftMaterial();
+    this.materials = [new PitchShiftMaterial()];
     this.parameters = [
       {
         type: "slider",
@@ -106,27 +106,22 @@ class PitchShiftBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps): void {
-    super.updateUniforms(props);
-    const activeFile = store.get(activeFileAtom);
-    const bpm = store.get(bpmAtom);
-    if (!activeFile) return;
-    const spectrogramData = activeFile.spectrogramData;
-
-    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-    const bandsPerOctave = store.get(bandsPerOctaveAtom);
+  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+    super.updateUniforms(props, passIndex);
+    const material = this.materials[passIndex];
+    if (!material) return;
 
     const pitchShiftUv = unitsToUv(
-      0, // No time shift
+      0,
       store.get(pitchShiftSemitonesAtom),
-      bpm,
-      totalDuration,
-      bandsPerOctave,
-      spectrogramData.numBands,
+      store.get(bpmAtom),
+      props.sourceTexture.image.height,
+      store.get(bandsPerOctaveAtom),
+      store.get(activeFileAtom)?.spectrogramData.numBands ?? 0,
     );
 
-    this.material.uniforms.pitchShiftUv.value.copy(pitchShiftUv);
-    this.material.uniforms.formantPreservation.value = store.get(formantPreservationAtom);
+    material.uniforms.pitchShiftUv.value.copy(pitchShiftUv);
+    material.uniforms.formantPreservation.value = store.get(formantPreservationAtom);
   }
 }
 

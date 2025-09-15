@@ -112,12 +112,12 @@ const DynamicsMaterial = shaderMaterial(
 );
 
 class DynamicsBrush extends BaseBrush {
-  material: THREE.ShaderMaterial;
+  materials: THREE.ShaderMaterial[];
   parameters: BrushParameter[];
 
   constructor() {
     super();
-    this.material = new DynamicsMaterial();
+    this.materials = [new DynamicsMaterial()];
     this.parameters = [
       {
         type: "slider",
@@ -186,18 +186,18 @@ class DynamicsBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps): void {
-    super.updateUniforms(props);
-    this.material.uniforms.threshold.value = store.get(dynamicsThresholdAtom);
+  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+    super.updateUniforms(props, passIndex);
+    this.materials[passIndex].uniforms.threshold.value = store.get(dynamicsThresholdAtom);
     let ratio = store.get(dynamicsRatioAtom);
     if (ratio >= 99) {
       ratio = 1000.0; // A very high number for "infinity"
     }
-    this.material.uniforms.ratio.value = ratio;
-    this.material.uniforms.makeupGain.value = store.get(dynamicsMakeupGainAtom);
-    this.material.uniforms.attack.value = store.get(dynamicsAttackAtom);
-    this.material.uniforms.release.value = store.get(dynamicsReleaseAtom);
-    this.material.uniforms.knee.value = store.get(dynamicsKneeAtom);
+    this.materials[passIndex].uniforms.ratio.value = ratio;
+    this.materials[passIndex].uniforms.makeupGain.value = store.get(dynamicsMakeupGainAtom);
+    this.materials[passIndex].uniforms.attack.value = store.get(dynamicsAttackAtom);
+    this.materials[passIndex].uniforms.release.value = store.get(dynamicsReleaseAtom);
+    this.materials[passIndex].uniforms.knee.value = store.get(dynamicsKneeAtom);
   }
 }
 

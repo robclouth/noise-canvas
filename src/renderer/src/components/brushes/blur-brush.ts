@@ -8,61 +8,72 @@ import { store, activeFileAtom, bpmAtom, bandsPerOctaveAtom } from "../../store"
 export const blurXAtom = atomWithStorage("blurX", 0.0625); // in beats
 export const blurYCentsAtom = atomWithStorage("blurYCents", 100); // in cents
 
-const BlurMaterial = shaderMaterial(
+const blurShader = (direction: "x" | "y") => /*glsl*/ `
+  precision highp float;
+  varying vec2 vUv;
+
+  uniform vec2 blurSizeUv;
+
+  ${code}
+  
+  void main() {
+      Coords coords = getCoords(vUv);
+      vec4 originalTexel = texture2D(packedDataTex, vUv);
+
+      if (isInBrush(coords.dest)) {
+          vec4 blurredTexel = vec4(0.0);
+          float totalWeight = 0.0;
+          
+          const int kernelRadius = 8;
+
+          for (int i = -kernelRadius; i <= kernelRadius; i++) {
+              vec2 offset = ${direction === "x" ? "vec2(float(i), 0.0)" : "vec2(0.0, float(i))"} * blurSizeUv / float(kernelRadius);
+              vec2 sampleUv = coords.source + offset;
+              
+              if (isInBrush(sampleUv + offsetUv)) {
+                  blurredTexel += sampleFromSource(sampleUv);
+                  totalWeight += 1.0;
+              }
+          }
+
+          if (totalWeight > 0.0) {
+            vec4 finalBlur = blurredTexel / totalWeight;
+            float weight = getFeatherWeight(coords.dest);
+            gl_FragColor = applyBrushEffect(originalTexel, finalBlur, weight);
+          } else {
+            gl_FragColor = originalTexel;
+          }
+      } else {
+          gl_FragColor = originalTexel;
+      }
+  }
+`;
+
+const BlurMaterialX = shaderMaterial(
   {
     ...uniforms,
     blurSizeUv: new THREE.Vector2(0.01, 0.01),
   },
   vertexShader,
-  /*glsl*/ `
-    precision highp float;
-    varying vec2 vUv;
+  blurShader("x"),
+);
 
-    uniform vec2 blurSizeUv;
-
-    ${code}
-    
-    void main() {
-        Coords coords = getCoords(vUv);
-        vec4 originalTexel = texture2D(packedDataTex, vUv);
-
-        if (isInBrush(coords.dest)) {
-            vec4 blurredTexel = vec4(0.0);
-            float totalWeight = 0.0;
-            // Simple box blur
-            for (int x = -2; x <= 2; x++) {
-                for (int y = -2; y <= 2; y++) {
-                    vec2 offset = vec2(float(x), float(y)) * blurSizeUv;
-                    vec2 sampleUv = coords.source + offset;
-                    
-                    // Check if the ORIGINAL location of this sample is in the brush
-                    if (isInBrush(sampleUv + offsetUv)) {
-                        blurredTexel += sampleFromSource(sampleUv);
-                        totalWeight += 1.0;
-                    }
-                }
-            }
-            if (totalWeight > 0.0) {
-              vec4 finalBlur = blurredTexel / totalWeight;
-              float weight = getFeatherWeight(coords.dest);
-              gl_FragColor = applyBrushEffect(originalTexel, finalBlur, weight);
-            } else {
-              gl_FragColor = originalTexel;
-            }
-        } else {
-            gl_FragColor = originalTexel;
-        }
-    }
-  `,
+const BlurMaterialY = shaderMaterial(
+  {
+    ...uniforms,
+    blurSizeUv: new THREE.Vector2(0.01, 0.01),
+  },
+  vertexShader,
+  blurShader("y"),
 );
 
 class BlurBrush extends BaseBrush {
-  material: THREE.ShaderMaterial;
+  materials: THREE.ShaderMaterial[];
   parameters: BrushParameter[];
 
   constructor() {
     super();
-    this.material = new BlurMaterial();
+    this.materials = [new BlurMaterialX(), new BlurMaterialY()];
     this.parameters = [
       {
         type: "slider",
@@ -90,8 +101,8 @@ class BlurBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps): void {
-    super.updateUniforms(props);
+  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+    super.updateUniforms(props, passIndex);
 
     const activeFile = store.get(activeFileAtom);
     const bpm = store.get(bpmAtom);
@@ -112,7 +123,7 @@ class BlurBrush extends BaseBrush {
       spectrogramData.numBands,
     );
 
-    this.material.uniforms.blurSizeUv.value.copy(blurSizeUv);
+    this.materials[passIndex].uniforms.blurSizeUv.value.copy(blurSizeUv);
   }
 }
 
