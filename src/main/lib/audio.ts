@@ -3,11 +3,15 @@ import ffmpegPath from "ffmpeg-static";
 import ffprobePath from "ffprobe-static";
 import ffmpeg from "fluent-ffmpeg";
 import { join } from "path";
-import { Readable, Writable } from "stream";
+import { Readable } from "stream";
+import { Worker } from "worker_threads";
 import { ipcMainHandle, ipcMainOn, webContentsSend } from "./ipc-typed";
 import type { AnalysisPayloadForRenderer, GaboratorAnalysisResult, GaboratorParams } from "./types";
 
-let gaborator;
+const gaboratorPath = app.isPackaged
+  ? join(process.resourcesPath, "app.asar.unpacked/build/Release/gaborator_addon.node")
+  : join(__dirname, "../../build/Release/gaborator_addon.node");
+
 let currentSampleRate = 44100;
 let currentFilePath: string | null = null;
 let currentChannels = 2;
@@ -17,14 +21,6 @@ let currentMetadata: {
 } | null = null;
 
 export function setupAudio() {
-  // Load the native addon
-  const gaboratorPath = app.isPackaged
-    ? join(process.resourcesPath, "app.asar.unpacked/build/Release/gaborator_addon.node")
-    : join(__dirname, "../../build/Release/gaborator_addon.node");
-
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  gaborator = require(gaboratorPath);
-
   const correctFfmpegPath = app.isPackaged ? ffmpegPath!.replace("app.asar", "app.asar.unpacked") : ffmpegPath!;
   const correctFfprobePath = app.isPackaged
     ? ffprobePath.path.replace("app.asar", "app.asar.unpacked")
@@ -41,66 +37,122 @@ export function saveAudioFile(window: BrowserWindow) {
   webContentsSend(window, "request-audio-for-saving");
 }
 
-export async function analyzeAudio(filePath: string, params: GaboratorParams): Promise<AnalysisPayloadForRenderer> {
-  const metadata = await new Promise<ffmpeg.FfprobeData>((resolve, reject) => {
-    ffmpeg.ffprobe(filePath, (err, data) => {
-      if (err) return reject(err);
-      resolve(data);
+function runAnalysisInWorker(filePath: string, params: GaboratorParams): Promise<AnalysisPayloadForRenderer> {
+  return new Promise((resolve, reject) => {
+    const workerPath = join(__dirname, "analysis-worker.js");
+    const correctFfmpegPath = app.isPackaged ? ffmpegPath!.replace("app.asar", "app.asar.unpacked") : ffmpegPath!;
+    const correctFfprobePath = app.isPackaged
+      ? ffprobePath.path.replace("app.asar", "app.asar.unpacked")
+      : ffprobePath.path;
+
+    const worker = new Worker(workerPath, {
+      workerData: { gaboratorPath, ffmpegPath: correctFfmpegPath, ffprobePath: correctFfprobePath },
     });
-  });
 
-  const audioStreamInfo = metadata.streams.find((s) => s.codec_type === "audio");
-  if (!audioStreamInfo || !audioStreamInfo.sample_rate) {
-    throw new Error("Could not determine sample rate from audio file.");
+    worker.on("message", (message) => {
+      if (message.error) {
+        reject(message.error);
+      } else {
+        const result = message.result as GaboratorAnalysisResult & {
+          sampleRate: number;
+          format: string;
+          codec: string;
+          channels: number;
+        };
+
+        currentSampleRate = result.sampleRate;
+        currentChannels = result.channels;
+        currentMetadata = {
+          format: result.format,
+          codec: result.codec,
+        };
+
+        const payload: AnalysisPayloadForRenderer = {
+          ...result,
+          data: Buffer.from(result.data.buffer),
+          inverseMap: Buffer.from(result.inverseMap.buffer),
+          metadataTexture: Buffer.from(result.metadataTexture.buffer),
+        };
+
+        resolve(payload);
+      }
+      worker.terminate();
+    });
+
+    worker.on("error", (err) => {
+      reject(err);
+      worker.terminate();
+    });
+
+    worker.on("exit", (code) => {
+      if (code !== 0) {
+        reject(new Error(`Worker stopped with exit code ${code}`));
+      }
+    });
+
+    worker.postMessage({ filePath, params });
+  });
+}
+
+function runSynthesisInWorker(
+  payload: { processedData: Buffer; analysisMetadata: any },
+  params: GaboratorParams,
+  normalize: boolean,
+): Promise<Float32Array[]> {
+  return new Promise((resolve, reject) => {
+    const workerPath = join(__dirname, "synthesis-worker.js");
+    const worker = new Worker(workerPath, {
+      workerData: { gaboratorPath },
+    });
+
+    worker.on("message", (message) => {
+      if (message.error) {
+        reject(message.error);
+      } else {
+        resolve(message.result as Float32Array[]);
+      }
+      worker.terminate();
+    });
+
+    worker.on("error", (err) => {
+      reject(err);
+      worker.terminate();
+    });
+
+    worker.on("exit", (code) => {
+      if (code !== 0) {
+        reject(new Error(`Worker stopped with exit code ${code}`));
+      }
+    });
+    const processedData = payload.processedData;
+
+    worker.postMessage(
+      {
+        processedData: processedData,
+        analysisMetadata: payload.analysisMetadata,
+        sampleRate: currentSampleRate,
+        params,
+        normalize,
+      },
+      [processedData.buffer as ArrayBuffer],
+    );
+  });
+}
+
+function interleave(channels: Float32Array[]): Float32Array {
+  if (channels.length === 0) {
+    return new Float32Array(0);
   }
+  const numChannels = channels.length;
+  const numFrames = channels[0].length;
+  const interleaved = new Float32Array(numChannels * numFrames);
 
-  currentMetadata = {
-    format: metadata.format.format_name?.split(",")[0] || "wav",
-    codec: audioStreamInfo.codec_name || "pcm_s32le",
-  };
-
-  const sampleRate = audioStreamInfo.sample_rate;
-  currentSampleRate = sampleRate;
-  const channels = audioStreamInfo.channels || 1;
-  currentChannels = channels;
-
-  const concatenatedBuffer = await new Promise<Buffer>((resolve, reject) => {
-    const audioChunks: Buffer[] = [];
-    ffmpeg(filePath)
-      .toFormat("f32le")
-      .audioChannels(channels)
-      .audioFrequency(sampleRate)
-      .on("error", (err) => reject(new Error(`FFmpeg error: ${err.message}`)))
-      .stream(
-        new Writable({
-          write(chunk, _encoding, callback) {
-            audioChunks.push(chunk);
-            callback();
-          },
-        }),
-      )
-      .on("finish", () => {
-        resolve(Buffer.concat(audioChunks));
-      });
-  });
-
-  const audioVector = new Float32Array(
-    concatenatedBuffer.buffer,
-    concatenatedBuffer.byteOffset,
-    concatenatedBuffer.length / Float32Array.BYTES_PER_ELEMENT,
-  );
-
-  const analysisResult: GaboratorAnalysisResult = await gaborator.analyze(audioVector, channels, sampleRate, params);
-
-  const payload: AnalysisPayloadForRenderer = {
-    ...analysisResult,
-    sampleRate,
-    data: Buffer.from(analysisResult.data.buffer),
-    inverseMap: Buffer.from(analysisResult.inverseMap.buffer),
-    metadataTexture: Buffer.from(analysisResult.metadataTexture.buffer),
-  };
-
-  return payload;
+  for (let i = 0; i < numFrames; i++) {
+    for (let j = 0; j < numChannels; j++) {
+      interleaved[i * numChannels + j] = channels[j][i];
+    }
+  }
+  return interleaved;
 }
 
 export function registerAudioIpcHandlers(window: BrowserWindow) {
@@ -117,7 +169,7 @@ export function registerAudioIpcHandlers(window: BrowserWindow) {
     currentFilePath = filePath;
 
     try {
-      const payload = await analyzeAudio(filePath, params);
+      const payload = await runAnalysisInWorker(filePath, params);
       webContentsSend(window, "analysis-complete", payload);
       return { canceled: false, filePath };
     } catch (error) {
@@ -128,20 +180,7 @@ export function registerAudioIpcHandlers(window: BrowserWindow) {
   });
 
   ipcMainHandle("synthesize-audio", async (_, payload, params, normalize) => {
-    const processedDataArray = new Float32Array(
-      payload.processedData.buffer,
-      payload.processedData.byteOffset,
-      payload.processedData.byteLength / Float32Array.BYTES_PER_ELEMENT,
-    );
-
-    const audioVector = await gaborator.synthesize(
-      processedDataArray,
-      payload.analysisMetadata,
-      currentSampleRate,
-      params,
-      normalize,
-    );
-    return audioVector;
+    return runSynthesisInWorker(payload, params, normalize);
   });
 
   ipcMainHandle("save-audio-data", async (_, payload, params, normalize) => {
@@ -149,23 +188,12 @@ export function registerAudioIpcHandlers(window: BrowserWindow) {
       throw new Error("No file path specified for saving.");
     }
 
-    const processedDataArray = new Float32Array(
-      payload.processedData.buffer,
-      payload.processedData.byteOffset,
-      payload.processedData.byteLength / Float32Array.BYTES_PER_ELEMENT,
-    );
-
-    const audioVector: Float32Array = await gaborator.synthesize(
-      processedDataArray,
-      payload.analysisMetadata,
-      currentSampleRate,
-      params,
-      normalize,
-    );
+    const audioChannels = await runSynthesisInWorker(payload, params, normalize);
+    const interleavedAudio = interleave(audioChannels);
 
     const readable = new Readable();
     readable._read = () => {}; // _read is required but we push data manually
-    readable.push(Buffer.from(audioVector.buffer));
+    readable.push(Buffer.from(interleavedAudio.buffer));
     readable.push(null);
 
     return new Promise<void>((resolve, reject) => {
@@ -191,7 +219,7 @@ export function registerAudioIpcHandlers(window: BrowserWindow) {
     currentFilePath = filePath;
 
     try {
-      const payload = await analyzeAudio(filePath, params);
+      const payload = await runAnalysisInWorker(filePath, params);
       webContentsSend(window, "analysis-complete", payload);
     } catch (error) {
       console.error("Analysis failed:", error);

@@ -9,6 +9,15 @@ export default defineConfig({
         exclude: ["gaborator_addon"],
       }),
     ],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, "src/main/index.ts"),
+          "synthesis-worker": resolve(__dirname, "src/main/lib/synthesis-worker.ts"),
+          "analysis-worker": resolve(__dirname, "src/main/lib/analysis-worker.ts"),
+        },
+      },
+    },
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
