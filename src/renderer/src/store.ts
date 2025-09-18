@@ -215,6 +215,7 @@ export function init() {
       activeFile.rendererRef.current.setFBOData(
         new Float32Array(data.buffer, data.byteOffset, data.byteLength / Float32Array.BYTES_PER_ELEMENT),
       );
+      activeFile.rendererRef.current.synthesize();
     }
   });
   unsubscribers.push(unsubUndo);

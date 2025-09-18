@@ -40,6 +40,7 @@ export interface FileRendererHandle {
   setFBOData: (data: Float32Array) => void;
   getFBO: () => THREE.WebGLRenderTarget | null;
   restoreOriginal: () => void;
+  synthesize: () => void;
 }
 
 export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({ file, viewRef }, ref) => {
@@ -354,6 +355,12 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     debouncedSynthesis(file, getFBOData());
   };
 
+  const synthesize = () => {
+    store.set(isSynthesizingAtom, true);
+    const buffer = getFBOData();
+    debouncedSynthesis(file, buffer);
+  };
+
   useImperativeHandle(ref, () => ({
     renderStroke: (x: number, y: number, preview: boolean) => {
       strokeParams.current = { x, y, preview };
@@ -366,6 +373,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     setFBOData,
     getFBO,
     restoreOriginal,
+    synthesize,
   }));
 
   if (!spectrogramData) {
