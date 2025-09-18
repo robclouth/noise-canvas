@@ -68,18 +68,17 @@ const TransientShaperMaterial = shaderMaterial(
 );
 
 class TransientShaperBrush extends BaseBrush {
-  material: THREE.ShaderMaterial;
+  materials: THREE.ShaderMaterial[];
   parameters: BrushParameter[];
 
   constructor() {
     super();
-    this.material = new TransientShaperMaterial();
+    this.materials = [new TransientShaperMaterial()];
     this.parameters = [
       {
         type: "slider",
         atom: transientIntensityAtom,
         label: "Intensity",
-        propName: "intensity",
         min: 0,
         max: 5,
         step: 0.01,
@@ -89,7 +88,6 @@ class TransientShaperBrush extends BaseBrush {
         type: "slider",
         atom: transientThresholdAtom,
         label: "Threshold",
-        propName: "threshold",
         min: 0,
         max: 1,
         step: 0.01,
@@ -98,16 +96,15 @@ class TransientShaperBrush extends BaseBrush {
         type: "switch",
         atom: alignPhasesAtom,
         label: "Align Phases",
-        propName: "alignPhases",
       },
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps): void {
-    super.updateUniforms(props);
-    this.material.uniforms.intensity.value = store.get(transientIntensityAtom);
-    this.material.uniforms.threshold.value = store.get(transientThresholdAtom);
-    this.material.uniforms.alignPhases.value = store.get(alignPhasesAtom);
+  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+    super.updateUniforms(props, passIndex);
+    this.materials[passIndex].uniforms.intensity.value = store.get(transientIntensityAtom);
+    this.materials[passIndex].uniforms.threshold.value = store.get(transientThresholdAtom);
+    this.materials[passIndex].uniforms.alignPhases.value = store.get(alignPhasesAtom);
   }
 }
 

@@ -5,7 +5,6 @@ import { store } from "../../store";
 import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
 import { code, uniforms, vertexShader } from "./common";
 import kernelUrl from "../../assets/test.png";
-import { ConvolveIr } from "@/../../src/main/lib/types";
 
 export const convolveAmountAtom = atomWithStorage("convolveAmount", 0.5);
 export const convolveScaleXAtom = atomWithStorage("convolveScaleX", 1.0);
@@ -91,31 +90,25 @@ class ConvolveBrush extends BaseBrush {
         type: "slider",
         atom: convolveAmountAtom,
         label: "Amount",
-        propName: "amount",
         min: 0,
         max: 1,
         step: 0.01,
-        formatValue: (v) => `${(v * 100).toFixed(0)}%`,
       },
       {
         type: "slider",
         atom: convolveScaleXAtom,
         label: "Time Scale",
-        propName: "scaleX",
         min: 0,
         max: 5,
         step: 0.01,
-        formatValue: (v) => v.toFixed(2),
       },
       {
         type: "slider",
         atom: convolveScaleYAtom,
         label: "Freq Scale",
-        propName: "scaleY",
         min: 0,
         max: 5,
         step: 0.01,
-        formatValue: (v) => v.toFixed(2),
       },
     ];
   }
@@ -129,7 +122,7 @@ class ConvolveBrush extends BaseBrush {
     );
   }
 
-  async setIr(irName: ConvolveIr) {
+  async setIr(irName: any) {
     const res = await fetch(`/impulse-responses/${irName}.json`);
     const ir = await res.json();
     const irTex = new THREE.DataTexture(ir, 1, 1, THREE.RGBAFormat);

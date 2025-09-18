@@ -5,8 +5,8 @@ import { code, unitsToUv, uniforms, vertexShader } from "./common";
 import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
 import { store, activeFileAtom, bpmAtom, bandsPerOctaveAtom } from "../../store";
 
-export const blurXAtom = atomWithStorage("blurX", 0.0625); // in beats
-export const blurYCentsAtom = atomWithStorage("blurYCents", 100); // in cents
+export const blurTimeAtom = atomWithStorage("blurTime", 1 / 64); // in beats
+export const blurPitchAtom = atomWithStorage("blurPitch", 100); // in cents
 
 const blurShader = (direction: "x" | "y") => /*glsl*/ `
   precision highp float;
@@ -21,17 +21,30 @@ const blurShader = (direction: "x" | "y") => /*glsl*/ `
       vec4 originalTexel = texture2D(packedDataTex, vUv);
 
       if (isInBrush(coords.dest)) {
+          // The spectrogram has a multi-resolution time representation. To achieve a uniform
+          // blur in terms of musical time, we must scale the blur's UV-space radius based
+          // on the time resolution of the current frequency band.
+          float bandIndex = floor((1.0 - coords.dest.y) * numBands);
+          vec2 metaUv = vec2((bandIndex + 0.5) / numBands, 0.5);
+          vec3 metaData = texture2D(metadataTex, metaUv).rgb;
+          float bandScaleExp = metaData.b; // This exponent encodes the time resolution.
+
+          // Scale the blur size. A larger bandScaleExp means lower time resolution (fewer
+          // coefficients per second), so we need a larger UV step to cover the same duration.
+          vec2 bandCorrectedBlurSizeUv = blurSizeUv;
+          bandCorrectedBlurSizeUv.x *= exp2(bandScaleExp) * 0.01;
+
           vec4 blurredTexel = vec4(0.0);
           float totalWeight = 0.0;
           
           const int kernelRadius = 8;
 
           for (int i = -kernelRadius; i <= kernelRadius; i++) {
-              vec2 offset = ${direction === "x" ? "vec2(float(i), 0.0)" : "vec2(0.0, float(i))"} * blurSizeUv / float(kernelRadius);
+              vec2 offset = ${direction === "x" ? "vec2(float(i), 0.0)" : "vec2(0.0, float(i))"} * bandCorrectedBlurSizeUv / float(kernelRadius);
               vec2 sampleUv = coords.source + offset;
               
               if (isInBrush(sampleUv + offsetUv)) {
-                  blurredTexel += sampleFromSource(sampleUv);
+                  blurredTexel += sampleSpectrogramPointInterpolated(sampleUv);
                   totalWeight += 1.0;
               }
           }
@@ -77,26 +90,21 @@ class BlurBrush extends BaseBrush {
     this.parameters = [
       {
         type: "slider",
-        atom: blurXAtom,
-        label: "Blur X",
-        propName: "blurX",
-        min: -6,
-        max: 0,
-        step: 1,
-        unit: "beats",
-        formatValue: (value) => `${value < 1 ? `1/${1 / value}` : value}`,
-        isLog: true,
+        atom: blurTimeAtom,
+        label: "Time",
+        min: 0,
+        max: 1,
+        step: 1 / 64,
+        unit: " beats",
       },
       {
         type: "slider",
-        atom: blurYCentsAtom,
-        label: "Blur Y",
-        propName: "blurY",
+        atom: blurPitchAtom,
+        label: "Pitch",
         min: 0,
-        max: 2400,
+        max: 100,
         step: 1,
-        unit: "cents",
-        formatValue: (value) => `${value.toFixed(0)}`,
+        unit: " cents",
       },
     ];
   }
@@ -106,8 +114,8 @@ class BlurBrush extends BaseBrush {
 
     const activeFile = store.get(activeFileAtom);
     const bpm = store.get(bpmAtom);
-    const blurX = store.get(blurXAtom);
-    const blurYCents = store.get(blurYCentsAtom);
+    const blurX = store.get(blurTimeAtom);
+    const blurYCents = store.get(blurPitchAtom);
 
     if (!activeFile) return;
     const spectrogramData = activeFile.spectrogramData;

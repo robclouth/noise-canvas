@@ -52,12 +52,10 @@ class GainBrush extends BaseBrush {
         type: "slider",
         atom: gainDbAtom,
         label: "Gain",
-        propName: "gainDb",
-        min: -60,
-        max: 6,
+        min: -24,
+        max: 24,
         step: 0.1,
         unit: "dB",
-        formatValue: (value) => `${value.toFixed(1)}`,
       },
     ];
   }

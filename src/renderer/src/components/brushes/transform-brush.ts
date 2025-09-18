@@ -1,7 +1,7 @@
+import { activeFileAtom, bandsPerOctaveAtom, bpmAtom, store } from "@/store";
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
 import * as THREE from "three";
-import { bandsPerOctaveAtom, bpmAtom, minFreqAtom, spectrogramDataAtom, store } from "../../store";
 import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
 import { code, uniforms, unitsToUv, vertexShader } from "./common";
 
@@ -102,62 +102,51 @@ class TransformBrush extends BaseBrush {
         type: "slider",
         atom: shiftXAtom,
         label: "Shift X",
-        propName: "shiftX",
         min: 0.0,
         max: 1.0,
         step: 1 / 16,
         unit: " beats",
-        formatValue: (v) => `${v.toFixed(2)}`,
       },
       {
         type: "slider",
         atom: shiftYCentsAtom,
         label: "Shift Y",
-        propName: "shiftYCents",
         min: -1200,
         max: 1200,
         step: 10,
         unit: " cents",
-        formatValue: (v) => `${v.toFixed(0)}`,
       },
       {
         type: "slider",
         atom: scaleXAtom,
         label: "Scale X",
-        propName: "scaleX",
         min: -4.0,
         max: 4.0,
         step: 0.01,
         unit: "%",
-        formatValue: (v) => `${(v * 100).toFixed(0)}`,
       },
       {
         type: "slider",
         atom: scaleYAtom,
         label: "Scale Y",
-        propName: "scaleY",
         min: -4.0,
         max: 4.0,
         step: 0.01,
         unit: "%",
-        formatValue: (v) => `${(v * 100).toFixed(0)}`,
       },
       {
         type: "slider",
         atom: rotationAtom,
         label: "Rotation",
-        propName: "rotation",
         min: -180,
         max: 180,
         step: 1,
         unit: "°",
-        formatValue: (v) => `${v.toFixed(0)}`,
       },
       {
         type: "select",
         atom: boundaryModeAtom,
         label: "Boundary",
-        propName: "boundaryMode",
         options: boundaryModes,
       },
     ];

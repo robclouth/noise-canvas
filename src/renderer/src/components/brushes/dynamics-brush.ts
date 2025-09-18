@@ -123,7 +123,6 @@ class DynamicsBrush extends BaseBrush {
         type: "slider",
         atom: dynamicsThresholdAtom,
         label: "Threshold",
-        propName: "threshold",
         min: -60,
         max: 0,
         step: 0.1,
@@ -133,21 +132,14 @@ class DynamicsBrush extends BaseBrush {
         type: "slider",
         atom: dynamicsRatioAtom,
         label: "Ratio",
-        propName: "ratio",
         min: 0.1,
         max: 100,
         step: 0.1,
-        formatValue: (v) => {
-          if (v >= 99) return "Inf";
-          if (v < 1) return `1:${(1 / v).toFixed(1)}`;
-          return `${v.toFixed(1)}:1`;
-        },
       },
       {
         type: "slider",
         atom: dynamicsMakeupGainAtom,
         label: "Makeup",
-        propName: "makeupGain",
         min: 0,
         max: 30,
         step: 0.1,
@@ -157,7 +149,6 @@ class DynamicsBrush extends BaseBrush {
         type: "slider",
         atom: dynamicsAttackAtom,
         label: "Attack",
-        propName: "attack",
         min: 0.001,
         max: 0.2,
         step: 0.001,
@@ -167,7 +158,6 @@ class DynamicsBrush extends BaseBrush {
         type: "slider",
         atom: dynamicsReleaseAtom,
         label: "Release",
-        propName: "release",
         min: 0.01,
         max: 1.0,
         step: 0.01,
@@ -177,7 +167,6 @@ class DynamicsBrush extends BaseBrush {
         type: "slider",
         atom: dynamicsKneeAtom,
         label: "Knee",
-        propName: "knee",
         min: 0,
         max: 20,
         step: 0.1,

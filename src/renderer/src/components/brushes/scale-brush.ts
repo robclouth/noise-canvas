@@ -75,12 +75,10 @@ class ScaleBrush extends BaseBrush {
         type: "slider",
         atom: scaleAmountAtom,
         label: "Amount",
-        propName: "scaleAmount",
         min: -100,
         max: 100,
         step: 1,
         unit: "%",
-        formatValue: (v) => v.toFixed(0),
       },
     ];
   }

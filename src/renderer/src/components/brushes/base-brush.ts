@@ -33,7 +33,6 @@ export type ParameterType = "slider" | "select";
 type BaseParameter<T, A> = {
   atom: WritableAtom<T, [A], void>;
   label: string;
-  propName: string;
 };
 
 export type SliderValue = {
@@ -51,7 +50,6 @@ export type ContinuousSliderParameter = BaseSliderParameter & {
   min: number;
   max: number;
   step: number;
-  formatValue: (value: number) => string;
   values?: never;
 };
 
@@ -60,7 +58,6 @@ export type SteppedSliderParameter = BaseSliderParameter & {
   min?: never;
   max?: never;
   step?: never;
-  formatValue?: never;
 };
 
 export type SliderParameter = ContinuousSliderParameter | SteppedSliderParameter;

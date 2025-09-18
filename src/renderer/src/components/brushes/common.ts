@@ -154,7 +154,7 @@ float hzToUv(float hz) {
 // Core Sampling Logic (Final Version)
 //------------------------------------------------------------------------------
 
-vec4 sampleSpectrogramPoint(vec2 logicalUv, sampler2D data, sampler2D meta, vec2 texSize, float nFrames, float nBands, float sRate) {
+vec4 _sampleSpectrogramPoint(vec2 logicalUv, sampler2D data, sampler2D meta, vec2 texSize, float nFrames, float nBands, float sRate) {
   float bandIndex = floor((1.0 - logicalUv.y) * nBands);
   vec2 metaUv = vec2((bandIndex + 0.5) / nBands, 0.5);
   vec3 metaData = texture2D(meta, metaUv).rgb;
@@ -172,7 +172,7 @@ vec4 sampleSpectrogramPoint(vec2 logicalUv, sampler2D data, sampler2D meta, vec2
   return texture2D(data, packedUv);
 }
 
-vec4 sampleSpectrogramPointInterpolated(vec2 logicalUv, sampler2D data, sampler2D meta, vec2 texSize, float nFrames, float nBands, float sRate) {
+vec4 _sampleSpectrogramPointInterpolated(vec2 logicalUv, sampler2D data, sampler2D meta, vec2 texSize, float nFrames, float nBands, float sRate) {
   float bandIndex = floor((1.0 - logicalUv.y) * nBands);
   vec2 metaUv = vec2((bandIndex + 0.5) / nBands, 0.5);
   vec3 metaData = texture2D(meta, metaUv).rgb;
@@ -229,8 +229,20 @@ vec4 sampleSpectrogramPointInterpolated(vec2 logicalUv, sampler2D data, sampler2
   return vec4(c_L, c_R);
 }
 
+vec4 sampleSpectrogramPoint(vec2 logicalUv) {
+    return _sampleSpectrogramPoint(logicalUv, packedDataTex, metadataTex, packedTextureSize, numFrames, numBands, sampleRate);
+}
+
+vec4 sampleSpectrogramPointInterpolated(vec2 logicalUv) {
+    return _sampleSpectrogramPointInterpolated(logicalUv, packedDataTex, metadataTex, packedTextureSize, numFrames, numBands, sampleRate);
+}
+
 vec4 sampleFromSource(vec2 logicalUv) {
-    return sampleSpectrogramPoint(logicalUv, packedDataTex, metadataTex, packedTextureSize, numFrames, numBands, sampleRate);
+    return sampleSpectrogramPointInterpolated(logicalUv);
+}
+
+vec4 sampleFromOriginal(vec2 logicalUv) {
+    return _sampleSpectrogramPointInterpolated(logicalUv, originalPackedDataTex, metadataTex, packedTextureSize, numFrames, numBands, sampleRate);
 }
 
 
@@ -265,10 +277,10 @@ vec4 _performTransformation(vec2 sourceUv, vec2 targetUv,
     uvF.y = 1.0 - (bandIndexBase + 1.0 + 0.5) / srcNBands;
     vec2 uvTf = uvF + vec2(localTimeStepUv, 0.0);
 
-    vec4 dataBase = sampleSpectrogramPoint(uvBase, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
-    vec4 dataT = sampleSpectrogramPoint(uvT, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
-    vec4 dataF = sampleSpectrogramPoint(uvF, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
-    vec4 dataTf = sampleSpectrogramPoint(uvTf, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
+    vec4 dataBase = _sampleSpectrogramPoint(uvBase, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
+    vec4 dataT = _sampleSpectrogramPoint(uvT, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
+    vec4 dataF = _sampleSpectrogramPoint(uvF, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
+    vec4 dataTf = _sampleSpectrogramPoint(uvTf, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
 
     vec2 magBase = vec2(length(dataBase.rg), length(dataBase.ba));
     vec2 magT = vec2(length(dataT.rg), length(dataT.ba));
@@ -315,7 +327,7 @@ vec4 sampleSpectrogramTransformed(vec2 sourceUv, vec2 targetUv) {
 
 // Convenience wrapper for display
 vec4 samplePointFromScreen(vec2 screenUv) {
-    return sampleSpectrogramPointInterpolated(screenToZoomed(screenUv), packedDataTex, metadataTex, packedTextureSize, numFrames, numBands, sampleRate);
+    return sampleSpectrogramPointInterpolated(screenToZoomed(screenUv));
 }
 `;
 
