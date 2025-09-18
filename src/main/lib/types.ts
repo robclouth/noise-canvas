@@ -54,7 +54,8 @@ export interface IpcApi {
   onAnalysisError: (callback: (error: string) => void) => () => void;
   onUndoApplyState: (callback: (data: Buffer) => void) => () => void;
   loadFile: (filePath: string, params: GaboratorParams) => void;
-  addUndoState: (args: { before: ArrayBufferLike; after: ArrayBufferLike }) => void;
+  addUndoState: (args: { after: ArrayBufferLike }) => void;
+  setInitialState: (args: { state: ArrayBufferLike }) => void;
   clearUndoState: () => void;
   synthesizeAudio: (
     payload: Omit<SynthesisPayload, "processedData"> & { processedData: ArrayBufferLike },
@@ -76,7 +77,8 @@ export interface IpcApi {
 
 export interface IpcMainHandlers {
   "load-file": (event: Electron.IpcMainEvent, filePath: string, params: GaboratorParams) => void;
-  "add-undo-state": (event: Electron.IpcMainEvent, args: { before: Buffer; after: Buffer }) => void;
+  "add-undo-state": (event: Electron.IpcMainEvent, args: { after: Buffer }) => void;
+  "set-initial-undo-state": (event: Electron.IpcMainEvent, args: { state: Buffer }) => void;
   "clear-undo-state": (event: Electron.IpcMainEvent) => void;
   "reanalyze-current-file": (event: Electron.IpcMainInvokeEvent, params: GaboratorParams) => Promise<void>;
   "open-file-and-analyze": (

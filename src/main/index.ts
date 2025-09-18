@@ -117,7 +117,11 @@ app.whenReady().then(() => {
 });
 
 ipcMainOn("add-undo-state", (_, args) => {
-  undoService?.addState(args.before, args.after);
+  undoService?.addState(args.after);
+});
+
+ipcMainOn("set-initial-undo-state", (_, args) => {
+  undoService?.setInitialState(args.state);
 });
 
 ipcMainOn("clear-undo-state", () => {

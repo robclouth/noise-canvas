@@ -26,20 +26,24 @@ const api: IpcApi = {
   },
   onUndoApplyState: (callback) => {
     const handler = (_event, value) => callback(value);
-    ipcRenderer.on("undo:apply-state", handler);
-    return () => ipcRenderer.removeListener("undo:apply-state", handler);
+    ipcRenderer.on("apply-undo-state", handler);
+    return () => ipcRenderer.removeListener("apply-undo-state", handler);
   },
   loadFile: (filePath: string, params: GaboratorParams) => {
     ipcRenderer.send("load-file", filePath, params);
   },
-  addUndoState: (args: { before: ArrayBufferLike; after: ArrayBufferLike }) => {
-    ipcRenderer.send("undo:add-state", {
-      before: Buffer.from(args.before as ArrayBuffer),
+  addUndoState: (args: { after: ArrayBufferLike }) => {
+    ipcRenderer.send("add-undo-state", {
       after: Buffer.from(args.after as ArrayBuffer),
     });
   },
+  setInitialState: (args: { state: ArrayBufferLike }) => {
+    ipcRenderer.send("set-initial-undo-state", {
+      state: Buffer.from(args.state as ArrayBuffer),
+    });
+  },
   clearUndoState: () => {
-    ipcRenderer.send("undo:clear");
+    ipcRenderer.send("clear-undo-state");
   },
   synthesizeAudio: (payload, params, normalize) => {
     return ipcRenderer.invoke(

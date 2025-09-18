@@ -153,7 +153,9 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
       isInitialized.current = true;
       pingPong.current = 0;
 
-      debouncedSynthesis(file, getFBOData());
+      const initialState = getFBOData();
+      window.api.setInitialState({ state: initialState.buffer });
+      debouncedSynthesis(file, initialState);
     }
 
     const brushType = store.get(brushTypeAtom);

@@ -7,8 +7,8 @@ import { webContentsSend } from "./ipc-typed";
 
 export class UndoService {
   private tempDir: string;
-  private undoStack: { undoPath: string; redoPath: string }[] = [];
-  private redoStack: { undoPath: string; redoPath: string }[] = [];
+  private timeline: string[] = [];
+  private head = -1;
   private readonly MAX_HISTORY = 20;
 
   constructor(private window: BrowserWindow) {
@@ -16,8 +16,8 @@ export class UndoService {
   }
 
   private updateState() {
-    const canUndo = this.undoStack.length > 0;
-    const canRedo = this.redoStack.length > 0;
+    const canUndo = this.head > 0;
+    const canRedo = this.head < this.timeline.length - 1;
 
     // Update renderer UI state
     webContentsSend(this.window, "undo-state-changed", { canUndo, canRedo });
@@ -32,37 +32,49 @@ export class UndoService {
     }
   }
 
-  addState(before: Buffer, after: Buffer) {
-    const timestamp = Date.now();
-    const beforePath = join(this.tempDir, `state-${timestamp}-before.lz4`);
-    const afterPath = join(this.tempDir, `state-${timestamp}-after.lz4`);
+  private saveState(buffer: Buffer): string {
+    const timestamp = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    const path = join(this.tempDir, `state-${timestamp}.lz4`);
+    writeFileSync(path, compressSync(Buffer.from(buffer)));
+    return path;
+  }
 
-    writeFileSync(beforePath, compressSync(Buffer.from(before)));
-    writeFileSync(afterPath, compressSync(Buffer.from(after)));
-
-    this.undoStack.push({ undoPath: beforePath, redoPath: afterPath });
-    this.redoStack = []; // Clear redo stack on new action
-
-    // Enforce history limit
-    if (this.undoStack.length > this.MAX_HISTORY) {
-      const oldest = this.undoStack.shift();
-      if (oldest) {
+  addState(state: Buffer) {
+    // Truncate redo history
+    if (this.head < this.timeline.length - 1) {
+      const toDelete = this.timeline.splice(this.head + 1);
+      for (const path of toDelete) {
         try {
-          rmSync(oldest.undoPath);
-          rmSync(oldest.redoPath);
+          rmSync(path);
         } catch (e) {
-          console.error("Failed to delete old undo files:", e);
+          console.error("Failed to delete old redo file:", e);
         }
       }
+    }
+
+    this.timeline.push(this.saveState(state));
+    this.head++;
+
+    // Enforce history limit
+    if (this.timeline.length > this.MAX_HISTORY) {
+      const oldest = this.timeline.shift();
+      if (oldest) {
+        try {
+          rmSync(oldest);
+        } catch (e) {
+          console.error("Failed to delete old undo file:", e);
+        }
+      }
+      this.head--;
     }
     this.updateState();
   }
 
   undo() {
-    const state = this.undoStack.pop();
-    if (state) {
-      this.redoStack.push(state);
-      const buffer = readFileSync(state.undoPath);
+    if (this.head > 0) {
+      this.head--;
+      const statePath = this.timeline[this.head];
+      const buffer = readFileSync(statePath);
       const decompressed = uncompressSync(buffer);
       webContentsSend(this.window, "apply-undo-state", decompressed);
     }
@@ -70,10 +82,10 @@ export class UndoService {
   }
 
   redo() {
-    const state = this.redoStack.pop();
-    if (state) {
-      this.undoStack.push(state);
-      const buffer = readFileSync(state.redoPath);
+    if (this.head < this.timeline.length - 1) {
+      this.head++;
+      const statePath = this.timeline[this.head];
+      const buffer = readFileSync(statePath);
       const decompressed = uncompressSync(buffer);
       webContentsSend(this.window, "apply-undo-state", decompressed);
     }
@@ -81,11 +93,18 @@ export class UndoService {
   }
 
   clear() {
-    this.undoStack = [];
-    this.redoStack = [];
+    this.timeline = [];
+    this.head = -1;
     for (const file of readdirSync(this.tempDir)) {
       rmSync(join(this.tempDir, file));
     }
+    this.updateState();
+  }
+
+  setInitialState(state: Buffer) {
+    this.clear();
+    this.timeline.push(this.saveState(state));
+    this.head = 0;
     this.updateState();
   }
 

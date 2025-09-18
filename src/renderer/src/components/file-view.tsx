@@ -111,13 +111,6 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
 
   const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
     if (event.button === 0 && file.rendererRef?.current) {
-      // Left mouse button down
-      const beforeState = file.rendererRef.current.getFBOData();
-      if (beforeState) {
-        // We'll capture the 'after' state on mouse up
-        (event.currentTarget as any)._undoBeforeState = beforeState;
-      }
-
       const coords = getSnappedCoordinates(event);
       if (coords) {
         rendererRef.current!.renderStroke(coords[0], coords[1], false);
@@ -128,16 +121,11 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
   const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = (event) => {
     if (event.button === 0 && file.rendererRef?.current) {
       // Left mouse button up
-      const beforeState = (event.currentTarget as any)._undoBeforeState;
-      if (beforeState) {
-        const afterState = file.rendererRef.current.getFBOData();
-        if (afterState) {
-          window.api.addUndoState({
-            before: beforeState.buffer,
-            after: afterState.buffer,
-          });
-        }
-        delete (event.currentTarget as any)._undoBeforeState;
+      const afterState = file.rendererRef.current.getFBOData();
+      if (afterState) {
+        window.api.addUndoState({
+          after: afterState.buffer,
+        });
       }
     }
   };
