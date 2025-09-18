@@ -11,7 +11,7 @@ export function createMenu(window: BrowserWindow, undoService: UndoService) {
           label: "Open...",
           accelerator: "CmdOrCtrl+O",
           click: () => {
-            window.webContents.send("trigger-open-file");
+            window.webContents.send("open-and-analyze");
           },
         },
         {

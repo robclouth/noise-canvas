@@ -50,7 +50,7 @@ export interface GaboratorParams {
 
 export interface IpcApi {
   onOpenFile: (callback: (path: string) => void) => () => void;
-  onTriggerOpenFile: (callback: () => void) => () => void;
+  onOpenAndAnalyze: (callback: () => void) => () => void;
   onAnalysisComplete: (callback: (payload: AnalysisPayloadForRenderer) => void) => () => void;
   onAnalysisError: (callback: (error: string) => void) => () => void;
   onUndoApplyState: (callback: (data: Buffer) => void) => () => void;
@@ -63,7 +63,7 @@ export interface IpcApi {
     params: GaboratorParams,
     normalize: boolean,
   ) => Promise<Float32Array[]>;
-  openFileAndAnalyze: (params: GaboratorParams) => Promise<{ canceled: boolean; filePath?: string }>;
+  openAndAnalyze: (params: GaboratorParams) => void;
   reanalyzeCurrentFile: (params: GaboratorParams) => Promise<void>;
   saveAudioData: (
     payload: Omit<SynthesisPayload, "processedData"> & { processedData: ArrayBufferLike },
@@ -81,11 +81,8 @@ export interface IpcMainHandlers {
   "add-undo-state": (event: Electron.IpcMainEvent, args: { after: Buffer }) => void;
   "set-initial-undo-state": (event: Electron.IpcMainEvent, args: { state: Buffer }) => void;
   "clear-undo-state": (event: Electron.IpcMainEvent) => void;
+  "open-and-analyze": (event: Electron.IpcMainEvent, params: GaboratorParams) => void;
   "reanalyze-current-file": (event: Electron.IpcMainInvokeEvent, params: GaboratorParams) => Promise<void>;
-  "open-file-and-analyze": (
-    event: Electron.IpcMainInvokeEvent,
-    params: GaboratorParams,
-  ) => Promise<{ canceled: boolean; filePath?: string }>;
   "synthesize-audio": (
     event: Electron.IpcMainInvokeEvent,
     payload: SynthesisPayload,
@@ -109,4 +106,5 @@ export interface IpcRendererEvents {
   "undo-state-changed": (state: { canUndo: boolean; canRedo: boolean }) => void;
   "close-active-file": () => void;
   "close-all-files": () => void;
+  "open-and-analyze": () => void;
 }

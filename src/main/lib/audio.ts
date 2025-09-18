@@ -157,13 +157,13 @@ function interleave(channels: Float32Array[]): Float32Array {
 }
 
 export function registerAudioIpcHandlers(window: BrowserWindow) {
-  ipcMainHandle("open-file-and-analyze", async (_event, params) => {
+  ipcMainOn("open-and-analyze", async (_event, params) => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       properties: ["openFile"],
       filters: [{ name: "Audio Files", extensions: ["mp3", "wav", "ogg", "flac", "aac", "m4a", "wma", "aiff"] }],
     });
     if (canceled || filePaths.length === 0) {
-      return { canceled: true };
+      return;
     }
 
     const filePath = filePaths[0];
@@ -172,11 +172,9 @@ export function registerAudioIpcHandlers(window: BrowserWindow) {
     try {
       const payload = await runAnalysisInWorker(filePath, params);
       webContentsSend(window, "analysis-complete", payload);
-      return { canceled: false, filePath };
     } catch (error) {
       console.error("Analysis failed:", error);
       webContentsSend(window, "analysis-error", error instanceof Error ? error.message : "Unknown error");
-      throw error; // re-throw to be caught in renderer
     }
   });
 

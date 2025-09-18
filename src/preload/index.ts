@@ -9,10 +9,10 @@ const api: IpcApi = {
     ipcRenderer.on("open-file", handler);
     return () => ipcRenderer.removeListener("open-file", handler);
   },
-  onTriggerOpenFile: (callback) => {
+  onOpenAndAnalyze: (callback) => {
     const handler = () => callback();
-    ipcRenderer.on("trigger-open-file", handler);
-    return () => ipcRenderer.removeListener("trigger-open-file", handler);
+    ipcRenderer.on("open-and-analyze", handler);
+    return () => ipcRenderer.removeListener("open-and-analyze", handler);
   },
   onAnalysisComplete: (callback) => {
     const handler = (_event, value) => callback(value);
@@ -57,7 +57,7 @@ const api: IpcApi = {
     );
   },
   reanalyzeCurrentFile: (params) => ipcRenderer.invoke("reanalyze-current-file", params),
-  openFileAndAnalyze: (params) => ipcRenderer.invoke("open-file-and-analyze", params),
+  openAndAnalyze: (params) => ipcRenderer.send("open-and-analyze", params),
   saveAudioData: (payload, params, normalize) => {
     return ipcRenderer.invoke(
       "save-audio-data",

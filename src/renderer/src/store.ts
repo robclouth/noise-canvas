@@ -146,26 +146,14 @@ export function init() {
   });
   unsubscribers.push(unsubOpenFile);
 
-  const unsubTriggerOpenFile = window.api.onTriggerOpenFile(async () => {
-    try {
-      const analysisParams = {
-        bandsPerOctave: store.get(bandsPerOctaveAtom),
-        fmin: store.get(minFreqAtom),
-      };
-      const result = await window.api.openFileAndAnalyze(analysisParams);
-      if (result && result.filePath) {
-        openFile(result.filePath);
-      }
-    } catch (error) {
-      console.error("Error opening file:", error);
-      notifications.show({
-        title: "Analysis Error",
-        message: "An error occurred while analyzing the audio.",
-        color: "red",
-      });
-    }
+  const unsubOpenAndAnalyze = window.api.onOpenAndAnalyze(() => {
+    const analysisParams = {
+      bandsPerOctave: store.get(bandsPerOctaveAtom),
+      fmin: store.get(minFreqAtom),
+    };
+    window.api.openAndAnalyze(analysisParams);
   });
-  unsubscribers.push(unsubTriggerOpenFile);
+  unsubscribers.push(unsubOpenAndAnalyze);
 
   const unsubCloseActiveFile = window.api.onCloseActiveFile(() => {
     const activeFile = store.get(activeFileAtom);
