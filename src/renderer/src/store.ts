@@ -132,26 +132,17 @@ export const minFreqAtom = atomWithStorage("minFreq", 20.0);
 // --- Core Functions ---
 
 let unsubscribers: (() => void)[] = [];
-let currentFilePath: string | null = null;
 
 export function init() {
-  const handleOpenFile = (filePath: string) => {
-    currentFilePath = filePath;
-    const params = {
-      bandsPerOctave: store.get(bandsPerOctaveAtom),
-      fmin: store.get(minFreqAtom),
-    };
-    window.api.loadFile(filePath, params);
-  };
-
   if (process.env.NODE_ENV === "development") {
     if (Object.keys(store.get(openFilesAtom)).length === 0) {
-      handleOpenFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/garage.mp3");
+      openFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/garage.mp3");
+      openFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/voice.wav");
     }
   }
 
   const unsubOpenFile = window.api.onOpenFile((path) => {
-    handleOpenFile(path);
+    openFile(path);
   });
   unsubscribers.push(unsubOpenFile);
 
@@ -163,7 +154,7 @@ export function init() {
       };
       const result = await window.api.openFileAndAnalyze(analysisParams);
       if (result && result.filePath) {
-        handleOpenFile(result.filePath);
+        openFile(result.filePath);
       }
     } catch (error) {
       console.error("Error opening file:", error);
@@ -191,12 +182,7 @@ export function init() {
   unsubscribers.push(unsubCloseAllFiles);
 
   const unsubAnalysisComplete = window.api.onAnalysisComplete((payload) => {
-    if (!currentFilePath) {
-      console.error("Analysis completed but no file path is set.");
-      return;
-    }
-
-    addFile(currentFilePath, payload);
+    addFile(payload);
   });
   unsubscribers.push(unsubAnalysisComplete);
 
@@ -284,14 +270,14 @@ export function destroy() {
   store.set(sourceFileAtom, null);
 }
 
-export function addFile(filePath: string, payload: AnalysisPayloadForRenderer) {
+export function addFile(payload: AnalysisPayloadForRenderer) {
   const openFiles = store.get(openFilesAtom);
-  if (filePath in openFiles) {
+  if (payload.filePath in openFiles) {
     return;
   }
 
   const newFile = {
-    filePath,
+    filePath: payload.filePath,
     spectrogramData: {
       packedData: new Float32Array(payload.data.buffer, payload.data.byteOffset, payload.data.byteLength / 4),
       inverseMap: new Float32Array(
@@ -325,6 +311,14 @@ export function addFile(filePath: string, payload: AnalysisPayloadForRenderer) {
   store.set(activeFilePathAtom, newFile.filePath);
 
   window.api.clearUndoState();
+}
+
+function openFile(filePath: string) {
+  const params = {
+    bandsPerOctave: store.get(bandsPerOctaveAtom),
+    fmin: store.get(minFreqAtom),
+  };
+  window.api.loadFile(filePath, params);
 }
 
 export function closeFile(file: OpenFile) {

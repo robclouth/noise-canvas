@@ -69,6 +69,7 @@ function runAnalysisInWorker(filePath: string, params: GaboratorParams): Promise
 
         const payload: AnalysisPayloadForRenderer = {
           ...result,
+          filePath,
           data: Buffer.from(result.data.buffer),
           inverseMap: Buffer.from(result.inverseMap.buffer),
           metadataTexture: Buffer.from(result.metadataTexture.buffer),

@@ -15,6 +15,7 @@ export interface GaboratorAnalysisResult {
 
 // Describes the payload sent to the renderer process via IPC. Large arrays are Buffers.
 export interface AnalysisPayloadForRenderer {
+  filePath: string;
   data: Buffer;
   inverseMap: Buffer;
   metadataTexture: Buffer;
