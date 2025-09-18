@@ -116,11 +116,11 @@ app.whenReady().then(() => {
   });
 });
 
-ipcMainOn("undo:add-state", (_, args) => {
+ipcMainOn("add-undo-state", (_, args) => {
   undoService?.addState(args.before, args.after);
 });
 
-ipcMainOn("undo:clear", () => {
+ipcMainOn("clear-undo-state", () => {
   undoService?.clear();
 });
 

@@ -20,7 +20,7 @@ export class UndoService {
     const canRedo = this.redoStack.length > 0;
 
     // Update renderer UI state
-    webContentsSend(this.window, "undo:state-changed", { canUndo, canRedo });
+    webContentsSend(this.window, "undo-state-changed", { canUndo, canRedo });
 
     // Update native menu
     const menu = Menu.getApplicationMenu();
@@ -64,7 +64,7 @@ export class UndoService {
       this.redoStack.push(state);
       const buffer = readFileSync(state.undoPath);
       const decompressed = uncompressSync(buffer);
-      webContentsSend(this.window, "undo:apply-state", decompressed);
+      webContentsSend(this.window, "apply-undo-state", decompressed);
     }
     this.updateState();
   }
@@ -75,7 +75,7 @@ export class UndoService {
       this.undoStack.push(state);
       const buffer = readFileSync(state.redoPath);
       const decompressed = uncompressSync(buffer);
-      webContentsSend(this.window, "undo:apply-state", decompressed);
+      webContentsSend(this.window, "apply-undo-state", decompressed);
     }
     this.updateState();
   }

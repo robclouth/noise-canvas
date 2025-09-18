@@ -41,70 +41,66 @@ export function saveAudioFile(window: BrowserWindow) {
   webContentsSend(window, "request-audio-for-saving");
 }
 
-export function analyzeAudio(filePath: string, params: GaboratorParams): Promise<AnalysisPayloadForRenderer> {
-  return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(filePath, (err, metadata) => {
+export async function analyzeAudio(filePath: string, params: GaboratorParams): Promise<AnalysisPayloadForRenderer> {
+  const metadata = await new Promise<ffmpeg.FfprobeData>((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, data) => {
       if (err) return reject(err);
-      const audioStreamInfo = metadata.streams.find((s) => s.codec_type === "audio");
-      if (!audioStreamInfo || !audioStreamInfo.sample_rate) {
-        return reject(new Error("Could not determine sample rate from audio file."));
-      }
-
-      currentMetadata = {
-        format: metadata.format.format_name?.split(",")[0] || "wav",
-        codec: audioStreamInfo.codec_name || "pcm_s32le",
-      };
-
-      const sampleRate = audioStreamInfo.sample_rate;
-      currentSampleRate = sampleRate;
-      const channels = audioStreamInfo.channels || 1;
-      currentChannels = channels;
-
-      const audioChunks: Buffer[] = [];
-      ffmpeg(filePath)
-        .toFormat("f32le")
-        .audioChannels(channels)
-        .audioFrequency(sampleRate)
-        .on("error", (err) => reject(new Error(`FFmpeg error: ${err.message}`)))
-        .stream(
-          new Writable({
-            write(chunk, _encoding, callback) {
-              audioChunks.push(chunk);
-              callback();
-            },
-          }),
-        )
-        .on("finish", () => {
-          try {
-            const concatenatedBuffer = Buffer.concat(audioChunks);
-            const audioVector = new Float32Array(
-              concatenatedBuffer.buffer,
-              concatenatedBuffer.byteOffset,
-              concatenatedBuffer.length / Float32Array.BYTES_PER_ELEMENT,
-            );
-
-            const analysisResult: GaboratorAnalysisResult = gaborator.analyze(
-              audioVector,
-              channels,
-              sampleRate,
-              params,
-            );
-
-            const payload: AnalysisPayloadForRenderer = {
-              ...analysisResult,
-              sampleRate,
-              data: Buffer.from(analysisResult.data.buffer),
-              inverseMap: Buffer.from(analysisResult.inverseMap.buffer),
-              metadataTexture: Buffer.from(analysisResult.metadataTexture.buffer),
-            };
-
-            resolve(payload);
-          } catch (e) {
-            reject(e);
-          }
-        });
+      resolve(data);
     });
   });
+
+  const audioStreamInfo = metadata.streams.find((s) => s.codec_type === "audio");
+  if (!audioStreamInfo || !audioStreamInfo.sample_rate) {
+    throw new Error("Could not determine sample rate from audio file.");
+  }
+
+  currentMetadata = {
+    format: metadata.format.format_name?.split(",")[0] || "wav",
+    codec: audioStreamInfo.codec_name || "pcm_s32le",
+  };
+
+  const sampleRate = audioStreamInfo.sample_rate;
+  currentSampleRate = sampleRate;
+  const channels = audioStreamInfo.channels || 1;
+  currentChannels = channels;
+
+  const concatenatedBuffer = await new Promise<Buffer>((resolve, reject) => {
+    const audioChunks: Buffer[] = [];
+    ffmpeg(filePath)
+      .toFormat("f32le")
+      .audioChannels(channels)
+      .audioFrequency(sampleRate)
+      .on("error", (err) => reject(new Error(`FFmpeg error: ${err.message}`)))
+      .stream(
+        new Writable({
+          write(chunk, _encoding, callback) {
+            audioChunks.push(chunk);
+            callback();
+          },
+        }),
+      )
+      .on("finish", () => {
+        resolve(Buffer.concat(audioChunks));
+      });
+  });
+
+  const audioVector = new Float32Array(
+    concatenatedBuffer.buffer,
+    concatenatedBuffer.byteOffset,
+    concatenatedBuffer.length / Float32Array.BYTES_PER_ELEMENT,
+  );
+
+  const analysisResult: GaboratorAnalysisResult = await gaborator.analyze(audioVector, channels, sampleRate, params);
+
+  const payload: AnalysisPayloadForRenderer = {
+    ...analysisResult,
+    sampleRate,
+    data: Buffer.from(analysisResult.data.buffer),
+    inverseMap: Buffer.from(analysisResult.inverseMap.buffer),
+    metadataTexture: Buffer.from(analysisResult.metadataTexture.buffer),
+  };
+
+  return payload;
 }
 
 export function registerAudioIpcHandlers(window: BrowserWindow) {
@@ -131,21 +127,6 @@ export function registerAudioIpcHandlers(window: BrowserWindow) {
     }
   });
 
-  ipcMainHandle("reanalyze-current-file", async (_event, params) => {
-    if (!currentFilePath) {
-      console.warn("No file to re-analyze.");
-      return;
-    }
-    try {
-      const payload = await analyzeAudio(currentFilePath, params);
-      webContentsSend(window, "analysis-complete", payload);
-    } catch (error) {
-      console.error("Re-analysis failed:", error);
-      webContentsSend(window, "analysis-error", error instanceof Error ? error.message : "Unknown error");
-      throw error;
-    }
-  });
-
   ipcMainHandle("synthesize-audio", async (_, payload, params, normalize) => {
     const processedDataArray = new Float32Array(
       payload.processedData.buffer,
@@ -153,7 +134,7 @@ export function registerAudioIpcHandlers(window: BrowserWindow) {
       payload.processedData.byteLength / Float32Array.BYTES_PER_ELEMENT,
     );
 
-    const audioVector = gaborator.synthesize(
+    const audioVector = await gaborator.synthesize(
       processedDataArray,
       payload.analysisMetadata,
       currentSampleRate,
@@ -174,7 +155,7 @@ export function registerAudioIpcHandlers(window: BrowserWindow) {
       payload.processedData.byteLength / Float32Array.BYTES_PER_ELEMENT,
     );
 
-    const audioVector: Float32Array = gaborator.synthesize(
+    const audioVector: Float32Array = await gaborator.synthesize(
       processedDataArray,
       payload.analysisMetadata,
       currentSampleRate,

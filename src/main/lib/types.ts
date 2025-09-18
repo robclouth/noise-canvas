@@ -76,8 +76,8 @@ export interface IpcApi {
 
 export interface IpcMainHandlers {
   "load-file": (event: Electron.IpcMainEvent, filePath: string, params: GaboratorParams) => void;
-  "undo:add-state": (event: Electron.IpcMainEvent, args: { before: Buffer; after: Buffer }) => void;
-  "undo:clear": (event: Electron.IpcMainEvent) => void;
+  "add-undo-state": (event: Electron.IpcMainEvent, args: { before: Buffer; after: Buffer }) => void;
+  "clear-undo-state": (event: Electron.IpcMainEvent) => void;
   "reanalyze-current-file": (event: Electron.IpcMainInvokeEvent, params: GaboratorParams) => Promise<void>;
   "open-file-and-analyze": (
     event: Electron.IpcMainInvokeEvent,
@@ -102,8 +102,8 @@ export interface IpcRendererEvents {
   "analysis-complete": (payload: AnalysisPayloadForRenderer) => void;
   "analysis-error": (error: string) => void;
   "request-audio-for-saving": () => void;
-  "undo:apply-state": (data: Buffer) => void;
-  "undo:state-changed": (state: { canUndo: boolean; canRedo: boolean }) => void;
+  "apply-undo-state": (data: Buffer) => void;
+  "undo-state-changed": (state: { canUndo: boolean; canRedo: boolean }) => void;
   "close-active-file": () => void;
   "close-all-files": () => void;
 }
