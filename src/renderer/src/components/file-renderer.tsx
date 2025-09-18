@@ -131,7 +131,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     };
   }, [spectrogramData]);
 
-  const debouncedSynthesis = useMemo(() => debounce(runSynthesis, 500, { leading: true, trailing: true }), []);
+  const debouncedSynthesis = useMemo(() => debounce(runSynthesis, 500, { leading: false, trailing: true }), []);
 
   useEffect(() => {
     return () => {
