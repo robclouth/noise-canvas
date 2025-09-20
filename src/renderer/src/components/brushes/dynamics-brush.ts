@@ -3,7 +3,7 @@ import { atomWithStorage } from "jotai/utils";
 import { ShaderMaterial } from "three";
 import { store } from "../../store";
 import { BaseBrush, BrushParameter } from "./base-brush";
-import { code, CommonUniforms, defaultValues, vertexShader } from "./common";
+import { brushMain, code, CommonUniforms, defaultValues, vertexShader } from "./common";
 
 export const dynamicsThresholdAtom = atomWithStorage("dynamicsThreshold", -20.0);
 export const dynamicsRatioAtom = atomWithStorage("dynamicsRatio", 4.0);
@@ -24,9 +24,6 @@ const DynamicsMaterial = shaderMaterial(
   },
   vertexShader,
   /*glsl*/ `
-    precision highp float;
-    varying vec2 vUv;
-
     uniform float threshold;
     uniform float ratio;
     uniform float makeupGain;
@@ -46,15 +43,15 @@ const DynamicsMaterial = shaderMaterial(
 
     // Level detection with simulated attack/release
     float detectLevel(vec2 uv, float attack, float release) {
-        float attackSamples = attack * sampleRate;
-        float releaseSamples = release * sampleRate;
+        float attackSamples = attack * sourceSampleRate;
+        float releaseSamples = release * sourceSampleRate;
 
         float avgMag = 0.0;
         float totalWeight = 0.0;
 
         // Simplified: sample a few points in a window
         for (float i = -3.0; i <= 3.0; i++) {
-            float timeOffset = i * (1.0 / numFrames);
+            float timeOffset = i * (1.0 / sourceFrameCount);
             vec4 texel = sampleFromSource(uv + vec2(timeOffset, 0.0));
             float mag = length(texel.rg) + length(texel.ba);
 
@@ -69,45 +66,36 @@ const DynamicsMaterial = shaderMaterial(
         return (totalWeight > 0.0) ? avgMag / totalWeight : 0.0;
     }
 
-    void main() {
-        Coords coords = getCoords(vUv);
-        vec4 originalTexel = texture2D(packedDataTex, vUv);
+    vec4 applyBrushStroke(vec4 sourceTexel, Coords coords) {
+        float currentMag = length(sourceTexel.rg) + length(sourceTexel.ba);
+        float inputDb = linToDb(currentMag);
 
-        if (isInBrush(coords.dest)) {
-            vec4 currentTexel = sampleFromSource(coords.source);
-            float currentMag = length(currentTexel.rg) + length(currentTexel.ba);
-            float inputDb = linToDb(currentMag);
+        float overage = inputDb - threshold;
+        float gainReductionDb = 0.0;
 
-            float overage = inputDb - threshold;
-            float gainReductionDb = 0.0;
-
-            // Compression / Expansion logic
-            if (ratio >= 1.0) { // Compression
-                if (overage > 0.0) {
-                    gainReductionDb = overage * (1.0 - 1.0 / ratio);
-                }
-            } else { // Expansion
-                if (overage < 0.0) {
-                    gainReductionDb = overage * (1.0 - 1.0 / ratio);
-                }
+        // Compression / Expansion logic
+        if (ratio >= 1.0) { // Compression
+            if (overage > 0.0) {
+                gainReductionDb = overage * (1.0 - 1.0 / ratio);
             }
-            
-            // Apply knee
-            float kneeZone = knee / 2.0;
-            if (abs(overage) < kneeZone) {
-                float kneeAmount = (overage + kneeZone) / knee;
-                gainReductionDb *= kneeAmount * kneeAmount;
+        } else { // Expansion
+            if (overage < 0.0) {
+                gainReductionDb = overage * (1.0 - 1.0 / ratio);
             }
-
-            float gain = dbToLin(-gainReductionDb + makeupGain);
-            vec4 modifiedTexel = currentTexel * gain;
-
-            float weight = getFeatherWeight(coords.dest);
-            gl_FragColor = applyBrushEffect(originalTexel, modifiedTexel, weight);
-        } else {
-            gl_FragColor = originalTexel;
         }
+        
+        // Apply knee
+        float kneeZone = knee / 2.0;
+        if (abs(overage) < kneeZone) {
+            float kneeAmount = (overage + kneeZone) / knee;
+            gainReductionDb *= kneeAmount * kneeAmount;
+        }
+
+        float gain = dbToLin(-gainReductionDb + makeupGain);
+        return sourceTexel * gain;
     }
+    
+    ${brushMain}
   `,
 );
 

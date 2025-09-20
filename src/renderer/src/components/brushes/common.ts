@@ -36,8 +36,8 @@ uniform float sourceBandsPerOctave;
 // Brush & View Uniforms
 uniform vec2 brushCenterUv;
 uniform vec2 brushSizeUv;
-uniform float zoomPower;
-uniform float scroll;
+uniform float viewZoomPower;
+uniform float viewOffset;
 uniform float featherX;
 uniform float featherY;
 uniform vec2 offsetUv;
@@ -53,18 +53,18 @@ struct Coords {
 };
 
 vec2 screenToZoomed(vec2 screenUv) {
-  float zoom = pow(2.0, zoomPower);
+  float zoom = pow(2.0, viewZoomPower);
   if (zoom <= 1.0) { return screenUv; }
   float viewWidth = 1.0 / zoom;
-  float viewStartX = scroll * (1.0 - viewWidth);
+  float viewStartX = viewOffset * (1.0 - viewWidth);
   return vec2(viewStartX + screenUv.x * viewWidth, screenUv.y);
 }
 
 vec2 zoomedToScreen(vec2 zoomedUv) {
-    float zoom = pow(2.0, zoomPower);
+    float zoom = pow(2.0, viewZoomPower);
     if (zoom <= 1.0) { return zoomedUv; }
     float viewWidth = 1.0 / zoom;
-    float viewStartX = scroll * (1.0 - viewWidth);
+    float viewStartX = viewOffset * (1.0 - viewWidth);
     return vec2((zoomedUv.x - viewStartX) / viewWidth, zoomedUv.y);
 }
 
@@ -331,6 +331,28 @@ vec4 samplePointFromScreen(vec2 screenUv) {
 }
 `;
 
+export const brushMain = /* glsl */ `
+precision highp float;
+varying vec2 vUv;
+
+// This function must be implemented by the specific brush shader.
+vec4 applyBrushStroke(vec4 sourceTexel, Coords coords);
+
+void main() {
+    Coords coords = getCoords(vUv);
+    vec4 originalTexel = sampleSpectrogramPointInterpolated(coords.dest);
+
+    if (isInBrush(coords.dest)) {
+        float weight = getFeatherWeight(coords.dest);
+        vec4 sourceTexel = sampleSpectrogramTransformed(coords.source, coords.dest);
+        vec4 modifiedTexel = applyBrushStroke(sourceTexel, coords);
+        gl_FragColor = applyBrushEffect(originalTexel, modifiedTexel, weight);
+    } else {
+        gl_FragColor = originalTexel;
+    }
+}
+`;
+
 export type CommonUniforms = {
   sourceSpectrogramTex: Texture;
   sourceSpectrogramTextureSize: Vector2;
@@ -345,8 +367,8 @@ export type CommonUniforms = {
   originalSpectrogramTex: Texture | null;
   brushCenterUv: Vector2;
   brushSizeUv: Vector2;
-  zoomPower: number;
-  scroll: number;
+  viewZoomPower: number;
+  viewOffset: number;
   featherX: number;
   featherY: number;
   brushIntensity: number;
@@ -369,8 +391,8 @@ export const defaultValues: CommonUniforms = {
   sourceBandsPerOctave: 24.0,
   brushCenterUv: new Vector2(0.5, 0.5),
   brushSizeUv: new Vector2(0.1, 0.1),
-  zoomPower: 0.0,
-  scroll: 0.0,
+  viewZoomPower: 0.0,
+  viewOffset: 0.0,
   featherX: 0.5,
   featherY: 0.5,
   brushIntensity: 1.0,
@@ -413,22 +435,22 @@ export const uvToUnits = (
   return [beats, semitones];
 };
 
-export const screenToZoomed = (screenUv: Vector2, zoomPower: number, scroll: number): Vector2 => {
-  const zoom = Math.pow(2, zoomPower);
+export const screenToZoomed = (screenUv: Vector2, viewZoomPower: number, viewOffset: number): Vector2 => {
+  const zoom = Math.pow(2, viewZoomPower);
   if (zoom <= 1) {
     return screenUv.clone();
   }
   const viewWidth = 1.0 / zoom;
-  const viewStartX = scroll * (1.0 - viewWidth);
+  const viewStartX = viewOffset * (1.0 - viewWidth);
   return new Vector2(viewStartX + screenUv.x * viewWidth, screenUv.y);
 };
 
-export const zoomedToScreen = (zoomedUv: Vector2, zoomPower: number, scroll: number): Vector2 => {
-  const zoom = Math.pow(2, zoomPower);
+export const zoomedToScreen = (zoomedUv: Vector2, viewZoomPower: number, viewOffset: number): Vector2 => {
+  const zoom = Math.pow(2, viewZoomPower);
   if (zoom <= 1) {
     return zoomedUv.clone();
   }
   const viewWidth = 1.0 / zoom;
-  const viewStartX = scroll * (1.0 - viewWidth);
+  const viewStartX = viewOffset * (1.0 - viewWidth);
   return new Vector2((zoomedUv.x - viewStartX) / viewWidth, zoomedUv.y);
 };

@@ -1,7 +1,7 @@
 import { shaderMaterial } from "@react-three/drei";
 import { ShaderMaterial } from "three";
 import { BaseBrush, BrushParameter } from "./base-brush";
-import { code, CommonUniforms, defaultValues, vertexShader } from "./common";
+import { brushMain, code, CommonUniforms, defaultValues, vertexShader } from "./common";
 
 const RestoreMaterial = shaderMaterial(
   {
@@ -9,25 +9,13 @@ const RestoreMaterial = shaderMaterial(
   },
   vertexShader,
   /*glsl*/ `
-    precision highp float;
-    varying vec2 vUv;
-
     ${code}
 
-    void main() {
-        Coords coords = getCoords(vUv);
-        vec4 currentTexel = texture2D(packedDataTex, vUv);
-
-        if (isInBrush(coords.dest)) {
-            float weight = getFeatherWeight(coords.dest);
-            
-            vec4 restoredTexel = sampleFromOriginal(coords.dest);
-
-            gl_FragColor = applyBrushEffect(currentTexel, restoredTexel, weight);
-        } else {
-            gl_FragColor = currentTexel;
-        }
+    vec4 applyBrushStroke(vec4 sourceTexel, Coords coords) {
+      return sampleFromOriginal(coords.dest);
     }
+
+    ${brushMain}
   `,
 );
 

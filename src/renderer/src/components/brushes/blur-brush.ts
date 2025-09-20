@@ -3,63 +3,53 @@ import { atomWithStorage } from "jotai/utils";
 import { ShaderMaterial, Vector2 } from "three";
 import { activeFileAtom, bandsPerOctaveAtom, bpmAtom, store } from "../../store";
 import { BaseBrush, BrushParameter } from "./base-brush";
-import { code, CommonUniforms, defaultValues, unitsToUv, vertexShader } from "./common";
+import { brushMain, code, CommonUniforms, defaultValues, unitsToUv, vertexShader } from "./common";
 
 export const blurTimeAtom = atomWithStorage("blurTime", 1 / 64); // in beats
 export const blurPitchAtom = atomWithStorage("blurPitch", 100); // in cents
 
 const blurShader = (direction: "x" | "y") => /*glsl*/ `
-  precision highp float;
-  varying vec2 vUv;
-
   uniform vec2 blurSizeUv;
 
   ${code}
   
-  void main() {
-      Coords coords = getCoords(vUv);
-      vec4 originalTexel = texture2D(packedDataTex, vUv);
+  vec4 applyBrushStroke(vec4 sourceTexel, Coords coords) {
+    // The spectrogram has a multi-resolution time representation. To achieve a uniform
+    // blur in terms of musical time, we must scale the blur's UV-space radius based
+    // on the time resolution of the current frequency band.
+    float bandIndex = floor((1.0 - coords.dest.y) * sourceBandCount);
+    vec2 metaUv = vec2((bandIndex + 0.5) / sourceBandCount, 0.5);
+    vec3 metaData = texture2D(sourceMetadataTex, metaUv).rgb;
+    float bandScaleExp = metaData.b; // This exponent encodes the time resolution.
 
-      if (isInBrush(coords.dest)) {
-          // The spectrogram has a multi-resolution time representation. To achieve a uniform
-          // blur in terms of musical time, we must scale the blur's UV-space radius based
-          // on the time resolution of the current frequency band.
-          float bandIndex = floor((1.0 - coords.dest.y) * numBands);
-          vec2 metaUv = vec2((bandIndex + 0.5) / numBands, 0.5);
-          vec3 metaData = texture2D(metadataTex, metaUv).rgb;
-          float bandScaleExp = metaData.b; // This exponent encodes the time resolution.
+    // Scale the blur size. A larger bandScaleExp means lower time resolution (fewer
+    // coefficients per second), so we need a larger UV step to cover the same duration.
+    vec2 bandCorrectedBlurSizeUv = blurSizeUv;
+    bandCorrectedBlurSizeUv.x *= exp2(bandScaleExp) * 0.01;
 
-          // Scale the blur size. A larger bandScaleExp means lower time resolution (fewer
-          // coefficients per second), so we need a larger UV step to cover the same duration.
-          vec2 bandCorrectedBlurSizeUv = blurSizeUv;
-          bandCorrectedBlurSizeUv.x *= exp2(bandScaleExp) * 0.01;
+    vec4 blurredTexel = vec4(0.0);
+    float totalWeight = 0.0;
+    
+    const int kernelRadius = 8;
 
-          vec4 blurredTexel = vec4(0.0);
-          float totalWeight = 0.0;
-          
-          const int kernelRadius = 8;
+    for (int i = -kernelRadius; i <= kernelRadius; i++) {
+        vec2 offset = ${direction === "x" ? "vec2(float(i), 0.0)" : "vec2(0.0, float(i))"} * bandCorrectedBlurSizeUv / float(kernelRadius);
+        vec2 sampleUv = coords.source + offset;
+        
+        if (isInBrush(sampleUv + offsetUv)) {
+            blurredTexel += sampleSpectrogramPointInterpolated(sampleUv);
+            totalWeight += 1.0;
+        }
+    }
 
-          for (int i = -kernelRadius; i <= kernelRadius; i++) {
-              vec2 offset = ${direction === "x" ? "vec2(float(i), 0.0)" : "vec2(0.0, float(i))"} * bandCorrectedBlurSizeUv / float(kernelRadius);
-              vec2 sampleUv = coords.source + offset;
-              
-              if (isInBrush(sampleUv + offsetUv)) {
-                  blurredTexel += sampleSpectrogramPointInterpolated(sampleUv);
-                  totalWeight += 1.0;
-              }
-          }
-
-          if (totalWeight > 0.0) {
-            vec4 finalBlur = blurredTexel / totalWeight;
-            float weight = getFeatherWeight(coords.dest);
-            gl_FragColor = applyBrushEffect(originalTexel, finalBlur, weight);
-          } else {
-            gl_FragColor = originalTexel;
-          }
-      } else {
-          gl_FragColor = originalTexel;
-      }
+    if (totalWeight > 0.0) {
+      return blurredTexel / totalWeight;
+    } else {
+      return sourceTexel;
+    }
   }
+
+  ${brushMain}
 `;
 
 const BlurMaterialX = shaderMaterial(

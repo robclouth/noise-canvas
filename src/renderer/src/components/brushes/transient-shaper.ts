@@ -3,7 +3,7 @@ import { atomWithStorage } from "jotai/utils";
 import { ShaderMaterial } from "three";
 import { store } from "../../store";
 import { BaseBrush, BrushParameter } from "./base-brush";
-import { code, CommonUniforms, defaultValues, vertexShader } from "./common";
+import { brushMain, code, CommonUniforms, defaultValues, vertexShader } from "./common";
 
 export const transientIntensityAtom = atomWithStorage("transientIntensity", 0.5);
 export const transientThresholdAtom = atomWithStorage("transientThreshold", 0.01);
@@ -18,52 +18,42 @@ const TransientShaperMaterial = shaderMaterial(
   },
   vertexShader,
   /*glsl*/ `
-    precision highp float;
-    varying vec2 vUv;
-
     uniform float intensity;
     uniform float threshold;
     uniform bool alignPhases;
 
     ${code}
 
-    void main() {
-        Coords coords = getCoords(vUv);
-        vec4 originalTexel = texture2D(packedDataTex, vUv);
+    vec4 applyBrushStroke(vec4 sourceTexel, Coords coords) {
+        vec2 timeStep = vec2(1.0 / sourceFrameCount, 0.0);
 
-        if (isInBrush(coords.dest)) {
-            vec2 timeStep = vec2(1.0 / numFrames, 0.0);
+        vec4 prevTexel = sampleFromSource(coords.source - timeStep);
+        
+        float prevMag = length(prevTexel.rg) + length(prevTexel.ba);
+        float currentMag = length(sourceTexel.rg) + length(sourceTexel.ba);
 
-            vec4 prevTexel = sampleFromSource(coords.source - timeStep);
-            vec4 currentTexel = sampleFromSource(coords.source);
+        // Spectral flux based transient detection
+        float spectralFlux = currentMag - prevMag;
 
-            float prevMag = length(prevTexel.rg) + length(prevTexel.ba);
-            float currentMag = length(currentTexel.rg) + length(currentTexel.ba);
+        vec4 modifiedTexel = sourceTexel;
 
-            // Spectral flux based transient detection
-            float spectralFlux = currentMag - prevMag;
+        if (spectralFlux > threshold) {
+            // Apply intensity
+            float boost = 1.0 + spectralFlux * intensity;
+            modifiedTexel = sourceTexel * boost;
 
-            vec4 modifiedTexel = currentTexel;
-
-            if (spectralFlux > threshold) {
-                // Apply intensity
-                float boost = 1.0 + spectralFlux * intensity;
-                modifiedTexel = currentTexel * boost;
-
-                // Align phases if toggled
-                if (alignPhases) {
-                    vec2 magL = vec2(length(modifiedTexel.rg), 0.0);
-                    vec2 magR = vec2(length(modifiedTexel.ba), 0.0);
-                    modifiedTexel = vec4(magL, magR);
-                }
+            // Align phases if toggled
+            if (alignPhases) {
+                vec2 magL = vec2(length(modifiedTexel.rg), 0.0);
+                vec2 magR = vec2(length(modifiedTexel.ba), 0.0);
+                modifiedTexel = vec4(magL, magR);
             }
-
-            float weight = getFeatherWeight(coords.dest);
-            gl_FragColor = applyBrushEffect(originalTexel, modifiedTexel, weight);
-        } else {
-            gl_FragColor = originalTexel;
         }
+
+        return modifiedTexel;
     }
+
+    ${brushMain}
   `,
 );
 

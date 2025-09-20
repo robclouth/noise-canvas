@@ -188,8 +188,8 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
       sourceChannelCount: spectrogramData.numChannels,
       sourceSampleRate: spectrogramData.sampleRate,
       originalSpectrogramTex: originalPackedDataTex,
-      zoomPower: zoomPower,
-      scroll: scroll,
+      viewZoomPower: zoomPower,
+      viewOffset: scroll,
       brushCenterUv: mouseUv.current || new THREE.Vector2(-1, -1),
       brushSizeUv: mouseUv.current
         ? unitsToUv(brushWidth, brushHeight, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands)

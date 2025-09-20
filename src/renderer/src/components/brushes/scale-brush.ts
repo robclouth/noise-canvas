@@ -11,7 +11,7 @@ import {
   store,
 } from "../../store";
 import { BaseBrush, BrushParameter } from "./base-brush";
-import { code, CommonUniforms, defaultValues, vertexShader } from "./common";
+import { brushMain, code, CommonUniforms, defaultValues, vertexShader } from "./common";
 
 export const scaleAmountAtom = atomWithStorage("scaleAmount", 100);
 
@@ -22,43 +22,19 @@ const ScaleMaterial = shaderMaterial(
   },
   vertexShader,
   /*glsl*/ `
-    precision highp float;
-    varying vec2 vUv;
-
     uniform sampler2D gainLut;
 
     ${code}
 
-    void main() {
-        Coords coords = getCoords(vUv);
-        vec4 originalTexel = texture2D(packedDataTex, vUv);
-
-        if (isInBrush(coords.dest)) {
-          float bandIndex = floor((1.0 - coords.dest.y) * numBands);
-          vec2 lutUv = vec2((bandIndex + 0.5) / numBands, 0.5);
-          float gainFactor = texture2D(gainLut, lutUv).r;
-          
-          vec2 originalL = originalTexel.rg;
-          vec2 originalR = originalTexel.ba;
-
-          float ampL = length(originalL);
-          float phaseL = atan(originalL.y, originalL.x);
-          float ampR = length(originalR);
-          float phaseR = atan(originalR.y, originalR.x);
-
-          float newAmpL = ampL * gainFactor;
-          float newAmpR = ampR * gainFactor;
-
-          vec2 modifiedL = vec2(cos(phaseL), sin(phaseL)) * newAmpL;
-          vec2 modifiedR = vec2(cos(phaseR), sin(phaseR)) * newAmpR;
-          vec4 modifiedTexel = vec4(modifiedL, modifiedR);
-
-          float weight = getFeatherWeight(coords.dest);
-          gl_FragColor = applyBrushEffect(originalTexel, modifiedTexel, weight);
-        } else {
-            gl_FragColor = originalTexel;
-        }
+    vec4 applyBrushStroke(vec4 sourceTexel, Coords coords) {
+      float bandIndex = floor((1.0 - coords.dest.y) * sourceBandCount);
+      vec2 lutUv = vec2((bandIndex + 0.5) / sourceBandCount, 0.5);
+      float gainFactor = texture2D(gainLut, lutUv).r;
+      
+      return sourceTexel * gainFactor;
     }
+
+    ${brushMain}
   `,
 );
 
