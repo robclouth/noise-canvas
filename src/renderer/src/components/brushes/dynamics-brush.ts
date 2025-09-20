@@ -1,9 +1,9 @@
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
-import * as THREE from "three";
+import { ShaderMaterial } from "three";
 import { store } from "../../store";
-import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
-import { code, uniforms, vertexShader } from "./common";
+import { BaseBrush, BrushParameter } from "./base-brush";
+import { code, CommonUniforms, defaultValues, vertexShader } from "./common";
 
 export const dynamicsThresholdAtom = atomWithStorage("dynamicsThreshold", -20.0);
 export const dynamicsRatioAtom = atomWithStorage("dynamicsRatio", 4.0);
@@ -14,7 +14,7 @@ export const dynamicsKneeAtom = atomWithStorage("dynamicsKnee", 10.0);
 
 const DynamicsMaterial = shaderMaterial(
   {
-    ...uniforms,
+    ...defaultValues,
     threshold: -20.0,
     ratio: 4.0,
     makeupGain: 0.0,
@@ -112,7 +112,7 @@ const DynamicsMaterial = shaderMaterial(
 );
 
 class DynamicsBrush extends BaseBrush {
-  materials: THREE.ShaderMaterial[];
+  materials: ShaderMaterial[];
   parameters: BrushParameter[];
 
   constructor() {
@@ -175,7 +175,7 @@ class DynamicsBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+  updateUniforms(props: CommonUniforms, passIndex: number): void {
     super.updateUniforms(props, passIndex);
     this.materials[passIndex].uniforms.threshold.value = store.get(dynamicsThresholdAtom);
     let ratio = store.get(dynamicsRatioAtom);

@@ -18,20 +18,20 @@ export const code = /* glsl */ `
 //------------------------------------------------------------------------------
 // Uniforms
 //------------------------------------------------------------------------------
-uniform sampler2D packedDataTex;
-uniform sampler2D originalPackedDataTex;
-uniform sampler2D metadataTex;
-uniform sampler2D inverseMapTex;
-uniform vec2 packedTextureSize;
-uniform float numFrames;
-uniform float numBands;
-uniform int numChannels;
-uniform float sampleRate;
+uniform sampler2D sourceSpectrogramTex;
+uniform sampler2D originalSpectrogramTex;
+uniform sampler2D sourceMetadataTex;
+uniform sampler2D sourceInverseMapTex;
+uniform vec2 sourceSpectrogramTextureSize;
+uniform float sourceFrameCount;
+uniform float sourceBandCount;
+uniform int sourceChannelCount;
+uniform float sourceSampleRate;
 uniform float pi;
 
 // New uniforms required for true pitch shifting
-uniform float minFreq;
-uniform float bandsPerOctave;
+uniform float sourceMinFreq;
+uniform float sourceBandsPerOctave;
 
 // Brush & View Uniforms
 uniform vec2 brushCenterUv;
@@ -69,10 +69,10 @@ vec2 zoomedToScreen(vec2 zoomedUv) {
 }
 
 vec2 getUnpackedUvFromPackedUv(vec2 packedUv) {
-    vec2 rawUnpacked = texture2D(inverseMapTex, packedUv).rg;
+    vec2 rawUnpacked = texture2D(sourceInverseMapTex, packedUv).rg;
     vec2 unpackedUv;
-    unpackedUv.x = rawUnpacked.x / numFrames;
-    unpackedUv.y = 1.0 - (rawUnpacked.y + 0.5) / numBands;
+    unpackedUv.x = rawUnpacked.x / sourceFrameCount;
+    unpackedUv.y = 1.0 - (rawUnpacked.y + 0.5) / sourceBandCount;
     return unpackedUv;
 }
 
@@ -135,18 +135,18 @@ vec2 unwrapPhase(vec2 phaseDelta) {
  * Converts a vertical logical UV coordinate to its corresponding frequency in Hz.
  */
 float uvToHz(float v) {
-    float totalOctaves = numBands / bandsPerOctave;
+    float totalOctaves = sourceBandCount / sourceBandsPerOctave;
     float octave = (1.0 - v) * totalOctaves;
-    return minFreq * pow(2.0, octave);
+    return sourceMinFreq * pow(2.0, octave);
 }
 
 /**
  * Converts a frequency in Hz to its corresponding vertical logical UV coordinate.
  */
 float hzToUv(float hz) {
-    if (hz < minFreq) return 1.0;
-    float octave = log2(hz / minFreq);
-    float totalOctaves = numBands / bandsPerOctave;
+    if (hz < sourceMinFreq) return 1.0;
+    float octave = log2(hz / sourceMinFreq);
+    float totalOctaves = sourceBandCount / sourceBandsPerOctave;
     return 1.0 - (octave / totalOctaves);
 }
 
@@ -230,11 +230,11 @@ vec4 _sampleSpectrogramPointInterpolated(vec2 logicalUv, sampler2D data, sampler
 }
 
 vec4 sampleSpectrogramPoint(vec2 logicalUv) {
-    return _sampleSpectrogramPoint(logicalUv, packedDataTex, metadataTex, packedTextureSize, numFrames, numBands, sampleRate);
+    return _sampleSpectrogramPoint(logicalUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount, sourceSampleRate);
 }
 
 vec4 sampleSpectrogramPointInterpolated(vec2 logicalUv) {
-    return _sampleSpectrogramPointInterpolated(logicalUv, packedDataTex, metadataTex, packedTextureSize, numFrames, numBands, sampleRate);
+    return _sampleSpectrogramPointInterpolated(logicalUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount, sourceSampleRate);
 }
 
 vec4 sampleFromSource(vec2 logicalUv) {
@@ -242,7 +242,7 @@ vec4 sampleFromSource(vec2 logicalUv) {
 }
 
 vec4 sampleFromOriginal(vec2 logicalUv) {
-    return _sampleSpectrogramPointInterpolated(logicalUv, originalPackedDataTex, metadataTex, packedTextureSize, numFrames, numBands, sampleRate);
+    return _sampleSpectrogramPointInterpolated(logicalUv, originalSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount, sourceSampleRate);
 }
 
 
@@ -320,9 +320,9 @@ vec4 _performTransformation(vec2 sourceUv, vec2 targetUv,
  */
 vec4 sampleSpectrogramTransformed(vec2 sourceUv, vec2 targetUv) {
     return _performTransformation(sourceUv, targetUv,
-                                 numBands, bandsPerOctave, minFreq, numFrames,
-                                 metadataTex, packedDataTex, packedTextureSize, sampleRate,
-                                 numBands, bandsPerOctave, minFreq);
+                                 sourceBandCount, sourceBandsPerOctave, sourceMinFreq, sourceFrameCount,
+                                 sourceMetadataTex, sourceSpectrogramTex, sourceSpectrogramTextureSize, sourceSampleRate,
+                                 sourceBandCount, sourceBandsPerOctave, sourceMinFreq);
 }
 
 // Convenience wrapper for display
@@ -331,19 +331,42 @@ vec4 samplePointFromScreen(vec2 screenUv) {
 }
 `;
 
-export const uniforms = {
-  packedDataTex: new Texture(),
-  originalPackedDataTex: new Texture(),
-  inverseMapTex: new Texture(),
-  metadataTex: new Texture(),
-  numFrames: 0,
-  numBands: 0,
-  packedTextureSize: new Vector2(0, 0),
-  numChannels: 1,
-  sampleRate: 44100.0,
-  pi: Math.PI,
-  minFreq: 20.0,
-  bandsPerOctave: 24.0,
+export type CommonUniforms = {
+  sourceSpectrogramTex: Texture;
+  sourceSpectrogramTextureSize: Vector2;
+  sourceInverseMapTex: Texture;
+  sourceMetadataTex: Texture;
+  sourceMinFreq: number;
+  sourceBandsPerOctave: number;
+  sourceFrameCount: number;
+  sourceBandCount: number;
+  sourceChannelCount: number;
+  sourceSampleRate: number;
+  originalSpectrogramTex: Texture | null;
+  brushCenterUv: Vector2;
+  brushSizeUv: Vector2;
+  zoomPower: number;
+  scroll: number;
+  featherX: number;
+  featherY: number;
+  brushIntensity: number;
+  offsetUv: Vector2;
+  pan: number;
+  pi: number;
+};
+
+export const defaultValues: CommonUniforms = {
+  sourceSpectrogramTex: new Texture(),
+  originalSpectrogramTex: new Texture(),
+  sourceInverseMapTex: new Texture(),
+  sourceMetadataTex: new Texture(),
+  sourceFrameCount: 0,
+  sourceBandCount: 0,
+  sourceSpectrogramTextureSize: new Vector2(0, 0),
+  sourceChannelCount: 1,
+  sourceSampleRate: 44100.0,
+  sourceMinFreq: 20.0,
+  sourceBandsPerOctave: 24.0,
   brushCenterUv: new Vector2(0.5, 0.5),
   brushSizeUv: new Vector2(0.1, 0.1),
   zoomPower: 0.0,
@@ -353,6 +376,7 @@ export const uniforms = {
   brushIntensity: 1.0,
   offsetUv: new Vector2(0, 0),
   pan: 0.0,
+  pi: Math.PI,
 };
 
 export const unitsToUv = (

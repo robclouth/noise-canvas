@@ -1,11 +1,11 @@
 import { shaderMaterial } from "@react-three/drei";
-import * as THREE from "three";
-import { code, uniforms, vertexShader } from "./common";
-import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
+import { ShaderMaterial } from "three";
+import { BaseBrush, BrushParameter } from "./base-brush";
+import { code, CommonUniforms, defaultValues, vertexShader } from "./common";
 
 const RestoreMaterial = shaderMaterial(
   {
-    ...uniforms,
+    ...defaultValues,
   },
   vertexShader,
   /*glsl*/ `
@@ -32,7 +32,7 @@ const RestoreMaterial = shaderMaterial(
 );
 
 class RestoreBrush extends BaseBrush {
-  materials: THREE.ShaderMaterial[];
+  materials: ShaderMaterial[];
   parameters: BrushParameter[];
 
   constructor() {
@@ -41,7 +41,7 @@ class RestoreBrush extends BaseBrush {
     this.parameters = [];
   }
 
-  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+  updateUniforms(props: CommonUniforms, passIndex: number): void {
     super.updateUniforms(props, passIndex);
   }
 }

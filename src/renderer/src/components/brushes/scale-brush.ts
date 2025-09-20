@@ -1,6 +1,6 @@
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
-import * as THREE from "three";
+import { DataTexture, FloatType, RedFormat, ShaderMaterial } from "three";
 import { Note, Scale } from "tonal";
 import {
   bandsPerOctaveAtom,
@@ -10,14 +10,14 @@ import {
   spectrogramDataAtom,
   store,
 } from "../../store";
-import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
-import { code, uniforms, vertexShader } from "./common";
+import { BaseBrush, BrushParameter } from "./base-brush";
+import { code, CommonUniforms, defaultValues, vertexShader } from "./common";
 
 export const scaleAmountAtom = atomWithStorage("scaleAmount", 100);
 
 const ScaleMaterial = shaderMaterial(
   {
-    ...uniforms,
+    ...defaultValues,
     gainLut: null,
   },
   vertexShader,
@@ -63,9 +63,9 @@ const ScaleMaterial = shaderMaterial(
 );
 
 class ScaleBrush extends BaseBrush {
-  materials: THREE.ShaderMaterial[];
+  materials: ShaderMaterial[];
   parameters: BrushParameter[];
-  gainLut: THREE.DataTexture | null = null;
+  gainLut: DataTexture | null = null;
 
   constructor() {
     super();
@@ -83,7 +83,7 @@ class ScaleBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+  updateUniforms(props: CommonUniforms, passIndex: number): void {
     super.updateUniforms(props, passIndex);
     this.updateGainLut();
     this.materials[passIndex].uniforms.gainLut.value = this.gainLut;
@@ -143,7 +143,7 @@ class ScaleBrush extends BaseBrush {
     }
 
     if (!this.gainLut || this.gainLut.image.width !== numBands) {
-      this.gainLut = new THREE.DataTexture(gainLutData, numBands, 1, THREE.RedFormat, THREE.FloatType);
+      this.gainLut = new DataTexture(gainLutData, numBands, 1, RedFormat, FloatType);
     } else {
       (this.gainLut.image.data as Float32Array).set(gainLutData);
     }

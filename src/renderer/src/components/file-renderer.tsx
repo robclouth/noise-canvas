@@ -25,7 +25,7 @@ import { debounce } from "lodash-es";
 import { forwardRef, RefObject, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { brushes } from "./brushes";
-import { unitsToUv } from "./brushes/common";
+import { CommonUniforms, unitsToUv } from "./brushes/common";
 import { copyMaterial } from "./copy-material";
 import { DisplayMaterial } from "./display-material";
 
@@ -38,7 +38,7 @@ export interface FileRendererHandle {
   renderStroke: (x: number, y: number, preview: boolean) => void;
   getFBOData: () => Float32Array;
   setFBOData: (data: Float32Array) => void;
-  getFBO: () => THREE.WebGLRenderTarget | null;
+  getCurrentFBO: () => THREE.WebGLRenderTarget | null;
   restoreOriginal: () => void;
   synthesize: () => void;
 }
@@ -174,24 +174,39 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     const featherY = store.get(featherYAtom);
     const brushWidth = store.get(brushWidthAtom);
     const brushHeight = store.get(brushHeightAtom);
+    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+
+    const commonUniforms: CommonUniforms = {
+      sourceSpectrogramTex: packedDataTex,
+      sourceSpectrogramTextureSize: spectrogramData.packedTextureSize,
+      sourceInverseMapTex: inverseMapTex,
+      sourceMetadataTex: metadataTex,
+      sourceMinFreq: minFreq,
+      sourceBandsPerOctave: bandsPerOctave,
+      sourceFrameCount: spectrogramData.numFrames,
+      sourceBandCount: spectrogramData.numBands,
+      sourceChannelCount: spectrogramData.numChannels,
+      sourceSampleRate: spectrogramData.sampleRate,
+      originalSpectrogramTex: originalPackedDataTex,
+      zoomPower: zoomPower,
+      scroll: scroll,
+      brushCenterUv: mouseUv.current || new THREE.Vector2(-1, -1),
+      brushSizeUv: mouseUv.current
+        ? unitsToUv(brushWidth, brushHeight, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands)
+        : new THREE.Vector2(0, 0),
+      featherX: featherX / 100,
+      featherY: featherY / 100,
+      brushIntensity: brushIntensity,
+      pan,
+      offsetUv: unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands),
+      pi: Math.PI,
+    };
 
     // Render stroke
     if (strokeParams.current && applyStroke.current) {
       const source = pingPong.current === 0 ? fbo1 : fbo2;
       const destination = pingPong.current === 0 ? fbo2 : fbo1;
-      const { x, y, preview } = strokeParams.current;
-
-      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-      const brushSizeUv = unitsToUv(
-        brushWidth,
-        brushHeight,
-        bpm,
-        totalDuration,
-        bandsPerOctave,
-        spectrogramData.numBands,
-      );
-      const brushCenterUv = new THREE.Vector2(x, 1 - y);
-      const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
+      const { preview } = strokeParams.current;
 
       const brush = brushes[brushType];
       const numPasses = brush.materials.length;
@@ -209,26 +224,8 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
           writeBuffer = destination;
         }
 
-        brush.updateUniforms(
-          {
-            minFreq,
-            bandsPerOctave,
-            brushCenterUv,
-            brushSizeUv,
-            sourceTexture: readBuffer.texture,
-            originalPackedDataTex,
-            inverseMapTex,
-            metadataTex,
-            zoomPower,
-            scroll,
-            featherX: featherX / 100,
-            featherY: featherY / 100,
-            brushIntensity,
-            offsetUv,
-            pan,
-          },
-          i,
-        );
+        commonUniforms.sourceSpectrogramTex = readBuffer.texture;
+        brush.updateUniforms(commonUniforms, i);
 
         gl.setRenderTarget(writeBuffer);
         gl.render(fboScene, camera);
@@ -252,48 +249,20 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     // Update display material
     const currentFBO = pingPong.current === 0 ? fbo1 : fbo2;
     const nextFBO = pingPong.current === 0 ? fbo2 : fbo1;
-    displayMaterial.uniforms.packedDataTex.value =
-      displayMode.current === "committed" ? currentFBO.texture : nextFBO.texture;
 
-    if (inverseMapTex && metadataTex) {
-      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-      const offsetUv = unitsToUv(offsetX, offsetY, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
+    const displayUniforms = {
+      ...commonUniforms,
+      sourceSpectrogramTex: displayMode.current === "committed" ? currentFBO.texture : nextFBO.texture,
+      gridSize,
+    };
 
-      displayMaterial.uniforms.inverseMapTex.value = inverseMapTex;
-      displayMaterial.uniforms.metadataTex.value = metadataTex;
-      displayMaterial.uniforms.numFrames.value = spectrogramData.numFrames;
-      displayMaterial.uniforms.numBands.value = spectrogramData.numBands;
-      displayMaterial.uniforms.numChannels.value = spectrogramData.numChannels;
-      displayMaterial.uniforms.packedTextureSize.value = spectrogramData.packedTextureSize;
-      displayMaterial.uniforms.bpm.value = bpm;
-      displayMaterial.uniforms.gridSize.value = gridSize;
-      displayMaterial.uniforms.sampleRate.value = spectrogramData.sampleRate;
-      displayMaterial.uniforms.zoomPower.value = zoomPower;
-      displayMaterial.uniforms.scroll.value = scroll;
-      displayMaterial.uniforms.featherX.value = featherX / 100;
-      displayMaterial.uniforms.featherY.value = featherY / 100;
-      displayMaterial.uniforms.offsetUv.value.copy(offsetUv);
-
-      if (mouseUv.current) {
-        const brushSizeUv = unitsToUv(
-          brushWidth,
-          brushHeight,
-          bpm,
-          totalDuration,
-          bandsPerOctave,
-          spectrogramData.numBands,
-        );
-        displayMaterial.uniforms.brushCenterUv.value.copy(mouseUv.current);
-        displayMaterial.uniforms.brushSizeUv.value.copy(brushSizeUv);
-      } else {
-        displayMaterial.uniforms.brushCenterUv.value.set(-1, -1);
-        displayMaterial.uniforms.brushSizeUv.value.set(0, 0);
+    for (const [key, value] of Object.entries(displayUniforms)) {
+      if (key in displayMaterial) {
+        displayMaterial.uniforms[key].value = value;
       }
     }
-    invalidate();
-    if (applyStroke.current) {
-      applyStroke.current = false;
-    }
+
+    if (applyStroke.current) applyStroke.current = false;
   });
 
   const getFBOData = (): Float32Array => {
@@ -334,7 +303,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     invalidate();
   };
 
-  const getFBO = (): THREE.WebGLRenderTarget | null => {
+  const getCurrentFBO = (): THREE.WebGLRenderTarget | null => {
     if (!fbo1 || !fbo2) return null;
     return pingPong.current === 0 ? fbo1 : fbo2;
   };
@@ -368,10 +337,12 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
         displayMode.current = "preview";
       }
       applyStroke.current = true;
+
+      invalidate();
     },
     getFBOData,
     setFBOData,
-    getFBO,
+    getCurrentFBO,
     restoreOriginal,
     synthesize,
   }));

@@ -18,7 +18,7 @@ import {
   panAtom,
   scaleTonicAtom,
   scaleTypeAtom,
-  sourceFileAtom,
+  sourceFilePathAtom,
   store,
 } from "@/store";
 import { Divider, Flex, Select, Text } from "@mantine/core";
@@ -50,7 +50,7 @@ export function ControlsPanel() {
   const [bandsPerOctave, setBandsPerOctave] = useAtom(bandsPerOctaveAtom);
   const activeFile = useAtomValue(activeFileAtom);
   const files = useAtomValue(openFilesAtom);
-  const [sourceFile, setSourceFile] = useAtom(sourceFileAtom);
+  const [sourceFilePath, setSourceFilePath] = useAtom(sourceFilePathAtom);
 
   const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
@@ -96,8 +96,8 @@ export function ControlsPanel() {
           size="xs"
           label="File"
           placeholder="Self"
-          value={sourceFile?.filePath}
-          onChange={(value) => setSourceFile(value ? files[value] : null)}
+          value={sourceFilePath}
+          onChange={(value) => setSourceFilePath(value)}
           disabled={!supportsSource}
           data={Object.values(files).map((file) => ({
             value: file.filePath,

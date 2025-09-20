@@ -1,9 +1,9 @@
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
-import * as THREE from "three";
-import { code, unitsToUv, uniforms, vertexShader } from "./common";
-import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
-import { store, activeFileAtom, bpmAtom, bandsPerOctaveAtom } from "../../store";
+import { ShaderMaterial, Vector2 } from "three";
+import { activeFileAtom, bandsPerOctaveAtom, bpmAtom, store } from "../../store";
+import { BaseBrush, BrushParameter } from "./base-brush";
+import { code, CommonUniforms, defaultValues, unitsToUv, vertexShader } from "./common";
 
 export const blurTimeAtom = atomWithStorage("blurTime", 1 / 64); // in beats
 export const blurPitchAtom = atomWithStorage("blurPitch", 100); // in cents
@@ -64,8 +64,8 @@ const blurShader = (direction: "x" | "y") => /*glsl*/ `
 
 const BlurMaterialX = shaderMaterial(
   {
-    ...uniforms,
-    blurSizeUv: new THREE.Vector2(0.01, 0.01),
+    ...defaultValues,
+    blurSizeUv: new Vector2(0.01, 0.01),
   },
   vertexShader,
   blurShader("x"),
@@ -73,15 +73,15 @@ const BlurMaterialX = shaderMaterial(
 
 const BlurMaterialY = shaderMaterial(
   {
-    ...uniforms,
-    blurSizeUv: new THREE.Vector2(0.01, 0.01),
+    ...defaultValues,
+    blurSizeUv: new Vector2(0.01, 0.01),
   },
   vertexShader,
   blurShader("y"),
 );
 
 class BlurBrush extends BaseBrush {
-  materials: THREE.ShaderMaterial[];
+  materials: ShaderMaterial[];
   parameters: BrushParameter[];
 
   constructor() {
@@ -109,7 +109,7 @@ class BlurBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+  updateUniforms(props: CommonUniforms, passIndex: number): void {
     super.updateUniforms(props, passIndex);
 
     const activeFile = store.get(activeFileAtom);

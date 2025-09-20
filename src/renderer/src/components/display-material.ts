@@ -1,9 +1,9 @@
 import { shaderMaterial } from "@react-three/drei";
-import { code, uniforms } from "./brushes/common";
+import { code, defaultValues } from "./brushes/common";
 
 export const DisplayMaterial = shaderMaterial(
   {
-    ...uniforms,
+    ...defaultValues,
     minDb: -70.0,
     maxDb: 0.0,
     bpm: 120.0,
@@ -44,7 +44,7 @@ void main() {
     float leftDb = magnitudeToDb(leftMag);
     
     vec3 color;
-    if (numChannels == 1) {
+    if (sourceChannelCount == 1) {
         color = vec3(leftDb);
     } else {
         vec2 rightComplex = packedValue.ba;
@@ -58,7 +58,7 @@ void main() {
 
     // Grid lines
     float gridIntervalSeconds = (60.0 / bpm) * gridSize;
-    float totalDuration = numFrames / sampleRate;
+    float totalDuration = sourceFrameCount / sourceSampleRate;
     float gridWidthUv = gridIntervalSeconds / totalDuration;
     
     vec2 zoomedUv = screenToZoomed(vUv);
@@ -89,15 +89,15 @@ void main() {
 
         vec2 halfSize = correctedBrushSize / 2.0;
         vec2 d = abs(zoomedUv - correctedRectCenter) - halfSize;
-        float outside_dist = length(max(d, 0.0));
-        float inside_dist = min(max(d.x, d.y), 0.0);
-        float dist_to_border = outside_dist + inside_dist;
+        float outsideDist = length(max(d, 0.0));
+        float insideDist = min(max(d.x, d.y), 0.0);
+        float distToBorder = outsideDist + insideDist;
 
         float strokeWidthUv = fwidth(zoomedUv.x) * 1.5;
 
-        float rect_alpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(dist_to_border));
-        if (rect_alpha > 0.0) {
-            color = mix(color, vec3(1.0), rect_alpha);
+        float rectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(distToBorder));
+        if (rectAlpha > 0.0) {
+            color = mix(color, vec3(1.0), rectAlpha);
         }
 
         // Draw source rectangle (faint)
@@ -114,14 +114,14 @@ void main() {
         if (sourceCenterScreen.x >= 0.0 && sourceCenterScreen.x <= 1.0 &&
             sourceCenterScreen.y >= 0.0 && sourceCenterScreen.y <= 1.0) {
             
-            vec2 d_source = abs(zoomedUv - sourceCenter) - halfSize; // reuse halfSize from brush rect
-            float outside_dist_source = length(max(d_source, 0.0));
-            float inside_dist_source = min(max(d_source.x, d_source.y), 0.0);
-            float dist_to_border_source = outside_dist_source + inside_dist_source;
+            vec2 dSource = abs(zoomedUv - sourceCenter) - halfSize; // reuse halfSize from brush rect
+            float outsideDistSource = length(max(dSource, 0.0));
+            float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
+            float distToBorderSource = outsideDistSource + insideDistSource;
 
-            float source_rect_alpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(dist_to_border_source));
-            if (source_rect_alpha > 0.0) {
-                color = mix(color, vec3(1.0), source_rect_alpha * 0.3); // Fainter
+            float sourceRectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(distToBorderSource));
+            if (sourceRectAlpha > 0.0) {
+                color = mix(color, vec3(1.0), sourceRectAlpha * 0.3); // Fainter
             }
         }
     }

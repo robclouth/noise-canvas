@@ -75,7 +75,14 @@ export const activeFileAtom = atom<OpenFile | null>((get) => {
   return openFiles[activeFilePath ?? ""] ?? null;
 });
 
-export const sourceFileAtom = atom<OpenFile | null>(null);
+export const sourceFilePathAtom = atomWithStorage<string | null>("sourceFilePath", null);
+
+export const sourceFileAtom = atom<OpenFile | null>((get) => {
+  const sourceFilePath = get(sourceFilePathAtom);
+  if (!sourceFilePath) return get(activeFileAtom);
+  const openFiles = get(openFilesAtom);
+  return openFiles[sourceFilePath ?? ""] ?? null;
+});
 
 export const audioBufferAtom = atom<AudioBuffer | null>((get) => {
   const activeFile = get(activeFileAtom);
@@ -255,7 +262,7 @@ export function destroy() {
 
   store.set(openFilesAtom, {});
   store.set(activeFilePathAtom, null);
-  store.set(sourceFileAtom, null);
+  store.set(sourceFilePathAtom, null);
 }
 
 export function addFile(payload: AnalysisPayloadForRenderer) {

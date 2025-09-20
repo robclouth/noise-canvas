@@ -1,9 +1,9 @@
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
-import * as THREE from "three";
+import { ShaderMaterial } from "three";
 import { store } from "../../store";
-import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
-import { code, uniforms, vertexShader } from "./common";
+import { BaseBrush, BrushParameter } from "./base-brush";
+import { code, CommonUniforms, defaultValues, vertexShader } from "./common";
 
 export const transientIntensityAtom = atomWithStorage("transientIntensity", 0.5);
 export const transientThresholdAtom = atomWithStorage("transientThreshold", 0.01);
@@ -11,7 +11,7 @@ export const alignPhasesAtom = atomWithStorage("alignPhases", false);
 
 const TransientShaperMaterial = shaderMaterial(
   {
-    ...uniforms,
+    ...defaultValues,
     intensity: 0.5,
     threshold: 0.01,
     alignPhases: false,
@@ -68,7 +68,7 @@ const TransientShaperMaterial = shaderMaterial(
 );
 
 class TransientShaperBrush extends BaseBrush {
-  materials: THREE.ShaderMaterial[];
+  materials: ShaderMaterial[];
   parameters: BrushParameter[];
 
   constructor() {
@@ -100,7 +100,7 @@ class TransientShaperBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+  updateUniforms(props: CommonUniforms, passIndex: number): void {
     super.updateUniforms(props, passIndex);
     this.materials[passIndex].uniforms.intensity.value = store.get(transientIntensityAtom);
     this.materials[passIndex].uniforms.threshold.value = store.get(transientThresholdAtom);

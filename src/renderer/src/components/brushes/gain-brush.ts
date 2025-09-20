@@ -1,15 +1,19 @@
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
-import * as THREE from "three";
-import { code, uniforms, vertexShader } from "./common";
-import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
+import { ShaderMaterial } from "three";
 import { store } from "../../store";
+import { BaseBrush, BrushParameter } from "./base-brush";
+import { code, CommonUniforms, defaultValues, vertexShader } from "./common";
 
 export const gainDbAtom = atomWithStorage("gainDb", 0.0);
 
-const GainMaterial = shaderMaterial(
+type Uniforms = CommonUniforms & {
+  gainDb: number;
+};
+
+const GainMaterial = shaderMaterial<Uniforms, ShaderMaterial & Uniforms>(
   {
-    ...uniforms,
+    ...defaultValues,
     gainDb: 0.0,
   },
   vertexShader,
@@ -23,7 +27,7 @@ const GainMaterial = shaderMaterial(
 
     void main() {
         Coords coords = getCoords(vUv);
-        vec4 originalTexel = texture2D(packedDataTex, vUv);
+        vec4 originalTexel = sampleSpectrogramPointInterpolated(coords.dest);
 
         if (isInBrush(coords.dest)) {
             float weight = getFeatherWeight(coords.dest);
@@ -41,7 +45,7 @@ const GainMaterial = shaderMaterial(
 );
 
 class GainBrush extends BaseBrush {
-  materials: THREE.ShaderMaterial[];
+  materials: ShaderMaterial[];
   parameters: BrushParameter[];
 
   constructor() {
@@ -60,9 +64,9 @@ class GainBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+  updateUniforms(props: CommonUniforms, passIndex: number): void {
     super.updateUniforms(props, passIndex);
-    this.materials[passIndex].uniforms.gainDb.value = store.get(gainDbAtom);
+    Object.assign(this.materials[passIndex], { ...props, gainDb: store.get(gainDbAtom) });
   }
 }
 

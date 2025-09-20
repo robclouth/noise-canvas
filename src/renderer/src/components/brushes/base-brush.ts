@@ -2,27 +2,8 @@ import { SetStateAction, WritableAtom } from "jotai";
 import { RESET } from "jotai/utils";
 import * as THREE from "three";
 import { IUniform } from "three";
-import { activeFileAtom, store } from "../../store";
-
+import { CommonUniforms } from "./common";
 export type SetStateActionWithReset<Value> = SetStateAction<Value> | typeof RESET;
-
-export interface UpdateUniformsProps {
-  brushCenterUv: THREE.Vector2;
-  brushSizeUv: THREE.Vector2;
-  sourceTexture: THREE.Texture;
-  originalPackedDataTex: THREE.Texture | null;
-  inverseMapTex: THREE.Texture;
-  metadataTex: THREE.Texture;
-  zoomPower: number;
-  scroll: number;
-  featherX: number;
-  featherY: number;
-  brushIntensity: number;
-  offsetUv: THREE.Vector2;
-  pan: number;
-  minFreq: number;
-  bandsPerOctave: number;
-}
 
 export interface BrushUniforms {
   [uniform: string]: IUniform;
@@ -77,53 +58,14 @@ export abstract class BaseBrush {
   abstract materials: THREE.ShaderMaterial[];
   abstract parameters: BrushParameter[];
 
-  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
-    const {
-      brushCenterUv,
-      brushSizeUv,
-      zoomPower,
-      scroll,
-      featherX,
-      featherY,
-      brushIntensity,
-      offsetUv,
-      pan,
-      sourceTexture,
-      inverseMapTex,
-      metadataTex,
-      originalPackedDataTex,
-      minFreq,
-      bandsPerOctave,
-    } = props;
-
+  updateUniforms(props: CommonUniforms, passIndex: number): void {
     const material = this.materials[passIndex];
     if (!material) return;
 
-    const uniforms = material.uniforms;
-    const activeFile = store.get(activeFileAtom);
-
-    if (!activeFile) return;
-    const spectrogramData = activeFile.spectrogramData;
-
-    uniforms.packedDataTex.value = sourceTexture;
-    uniforms.originalPackedDataTex.value = originalPackedDataTex;
-    uniforms.inverseMapTex.value = inverseMapTex;
-    uniforms.metadataTex.value = metadataTex;
-    uniforms.numFrames.value = spectrogramData.numFrames;
-    uniforms.numBands.value = spectrogramData.numBands;
-    uniforms.numChannels.value = spectrogramData.numChannels;
-    uniforms.packedTextureSize.value = spectrogramData.packedTextureSize;
-    uniforms.sampleRate.value = spectrogramData.sampleRate;
-    uniforms.brushCenterUv.value.copy(brushCenterUv);
-    uniforms.brushSizeUv.value.copy(brushSizeUv);
-    uniforms.zoomPower.value = zoomPower;
-    uniforms.scroll.value = scroll;
-    uniforms.featherX.value = featherX;
-    uniforms.featherY.value = featherY;
-    uniforms.brushIntensity.value = brushIntensity;
-    uniforms.offsetUv.value.copy(offsetUv);
-    uniforms.pan.value = pan;
-    uniforms.minFreq.value = minFreq;
-    uniforms.bandsPerOctave.value = bandsPerOctave;
+    for (const key in props) {
+      if (key in material) {
+        material.uniforms[key].value = props[key];
+      }
+    }
   }
 }

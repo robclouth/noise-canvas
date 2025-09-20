@@ -1,9 +1,9 @@
 import { activeFileAtom, bandsPerOctaveAtom, bpmAtom, store } from "@/store";
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
-import * as THREE from "three";
-import { BaseBrush, BrushParameter, UpdateUniformsProps } from "./base-brush";
-import { code, uniforms, unitsToUv, vertexShader } from "./common";
+import { ShaderMaterial, Vector2 } from "three";
+import { BaseBrush, BrushParameter } from "./base-brush";
+import { code, CommonUniforms, defaultValues, unitsToUv, vertexShader } from "./common";
 
 export const boundaryModes = ["smear", "cut", "wrap"] as const;
 export type BoundaryMode = (typeof boundaryModes)[number];
@@ -17,9 +17,9 @@ export const boundaryModeAtom = atomWithStorage<BoundaryMode>("boundaryMode", "c
 
 const TransformMaterial = shaderMaterial(
   {
-    ...uniforms,
-    shiftUv: new THREE.Vector2(0.0, 0.0),
-    scale: new THREE.Vector2(1.0, 1.0),
+    ...defaultValues,
+    shiftUv: new Vector2(0.0, 0.0),
+    scale: new Vector2(1.0, 1.0),
     rotation: 0.0,
     boundaryMode: 0,
   },
@@ -91,7 +91,7 @@ const TransformMaterial = shaderMaterial(
 );
 
 class TransformBrush extends BaseBrush {
-  materials: THREE.ShaderMaterial[];
+  materials: ShaderMaterial[];
   parameters: BrushParameter[];
 
   constructor() {
@@ -152,7 +152,7 @@ class TransformBrush extends BaseBrush {
     ];
   }
 
-  updateUniforms(props: UpdateUniformsProps, passIndex: number): void {
+  updateUniforms(props: CommonUniforms, passIndex: number): void {
     super.updateUniforms(props, passIndex);
     const bpm = store.get(bpmAtom);
     const activeFile = store.get(activeFileAtom);
