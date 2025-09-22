@@ -5,8 +5,8 @@ import ffmpeg from "fluent-ffmpeg";
 import { join } from "path";
 import { Readable } from "stream";
 import { Worker } from "worker_threads";
-import { ipcMainHandle, ipcMainOn, webContentsSend } from "./ipc-typed";
 import type { AnalysisPayloadForRenderer, GaboratorAnalysisResult, GaboratorParams } from "./types";
+import { ipcMainHandle, ipcMainOn, webContentsSend } from "./types";
 
 const gaboratorPath = app.isPackaged
   ? join(process.resourcesPath, "app.asar.unpacked/build/Release/gaborator_addon.node")

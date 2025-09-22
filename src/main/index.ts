@@ -3,12 +3,13 @@ import { app, BrowserWindow, shell } from "electron";
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
 import { registerAudioIpcHandlers, setupAudio } from "./lib/audio";
-import { ipcMainOn, webContentsSend } from "./lib/ipc-typed";
 import { createMenu } from "./lib/menu";
+import { ipcMainOn, webContentsSend } from "./lib/types";
 import { UndoService } from "./lib/undo";
 
 let mainWindow: BrowserWindow | null = null;
-let undoService: UndoService | null = null;
+const undoServices = new Map<string, UndoService>();
+let activeFilePath: string | null = null;
 
 const gotTheLock = app.requestSingleInstanceLock();
 let pendingPath: string | null = null;
@@ -86,8 +87,18 @@ function createWindow(): void {
     mainWindow.webContents.openDevTools();
   }
 
-  undoService = new UndoService(mainWindow);
-  createMenu(mainWindow, undoService);
+  createMenu(mainWindow, {
+    onUndo: () => {
+      if (activeFilePath) {
+        undoServices.get(activeFilePath)?.undo();
+      }
+    },
+    onRedo: () => {
+      if (activeFilePath) {
+        undoServices.get(activeFilePath)?.redo();
+      }
+    },
+  });
 }
 
 app.whenReady().then(() => {
@@ -116,20 +127,51 @@ app.whenReady().then(() => {
   });
 });
 
-ipcMainOn("add-undo-state", (_, args) => {
-  undoService?.addState(args.after);
+ipcMainOn("add-undo-state", (_event, { data, filePath }) => {
+  const service = undoServices.get(filePath);
+  if (service) {
+    service.addState({ data, filePath });
+  }
 });
 
-ipcMainOn("set-initial-undo-state", (_, args) => {
-  undoService?.setInitialState(args.state);
+ipcMainOn("set-active-file", (_event, filePath) => {
+  activeFilePath = filePath;
+  const service = undoServices.get(filePath);
+  if (service) {
+    service.updateState();
+  }
+});
+
+ipcMainOn("file-opened", (_event, filePath) => {
+  if (mainWindow && !undoServices.has(filePath)) {
+    undoServices.set(filePath, new UndoService(mainWindow));
+  }
+});
+
+ipcMainOn("file-closed", (_event, filePath) => {
+  const service = undoServices.get(filePath);
+  if (service) {
+    service.destroy();
+    undoServices.delete(filePath);
+  }
+  if (activeFilePath === filePath) {
+    activeFilePath = null;
+  }
 });
 
 ipcMainOn("clear-undo-state", () => {
-  undoService?.clear();
+  // This might need to be revisited. Should it clear for active file or all?
+  // For now, let's assume it clears for the active file.
+  if (activeFilePath) {
+    const service = undoServices.get(activeFilePath);
+    service?.clear();
+  }
 });
 
 app.on("will-quit", () => {
-  undoService?.destroy();
+  for (const service of undoServices.values()) {
+    service.destroy();
+  }
 });
 
 app.on("window-all-closed", () => {

@@ -154,9 +154,10 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
       isInitialized.current = true;
       pingPong.current = 0;
 
-      const initialState = getFBOData();
-      window.api.setInitialState({ state: initialState.buffer });
-      debouncedSynthesis(file, initialState);
+      invalidate();
+
+      window.api.addUndoState({ data: spectrogramData.packedData.buffer, filePath: file.filePath });
+      debouncedSynthesis(file, spectrogramData.packedData);
     }
 
     const brushType = store.get(brushTypeAtom);
@@ -278,7 +279,7 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     if (!spectrogramData || !fbo1 || !fbo2 || !fboMesh) return;
     const { packedTextureSize } = spectrogramData;
 
-    const currentFBO = pingPong.current === 0 ? fbo1 : fbo2;
+    pingPong.current = 0;
 
     const dataTex = new THREE.DataTexture(
       data,
@@ -289,16 +290,19 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     );
     dataTex.needsUpdate = true;
 
+    gl.initTexture(dataTex);
+
     fboMesh.material = copyMaterial;
     copyMaterial.uniforms.inputTex.value = dataTex;
 
-    gl.setRenderTarget(currentFBO);
+    gl.setRenderTarget(fbo1);
     gl.render(fboScene, camera);
     gl.setRenderTarget(null);
 
     dataTex.dispose();
-    applyStroke.current = true;
-    displayMode.current = "preview";
+
+    applyStroke.current = false;
+    displayMode.current = "committed";
 
     invalidate();
   };
@@ -319,6 +323,8 @@ export const FileRenderer = forwardRef<FileRendererHandle, FileRendererProps>(({
     gl.setRenderTarget(fbo1);
     gl.render(fboScene, camera);
     gl.setRenderTarget(null);
+
+    isInitialized.current = false;
 
     invalidate();
     debouncedSynthesis(file, getFBOData());

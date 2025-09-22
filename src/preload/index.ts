@@ -32,15 +32,20 @@ const api: IpcApi = {
   loadFile: (filePath: string, params: GaboratorParams) => {
     ipcRenderer.send("load-file", filePath, params);
   },
-  addUndoState: (args: { after: ArrayBufferLike }) => {
+  addUndoState: (args: { filePath: string; data: ArrayBufferLike }) => {
     ipcRenderer.send("add-undo-state", {
-      after: Buffer.from(args.after as ArrayBuffer),
+      data: Buffer.from(args.data),
+      filePath: args.filePath,
     });
   },
-  setInitialState: (args: { state: ArrayBufferLike }) => {
-    ipcRenderer.send("set-initial-undo-state", {
-      state: Buffer.from(args.state as ArrayBuffer),
-    });
+  fileOpened: (filePath: string) => {
+    ipcRenderer.send("file-opened", filePath);
+  },
+  fileClosed: (filePath: string) => {
+    ipcRenderer.send("file-closed", filePath);
+  },
+  setActiveFile: (filePath: string | null) => {
+    ipcRenderer.send("set-active-file", filePath);
   },
   clearUndoState: () => {
     ipcRenderer.send("clear-undo-state");

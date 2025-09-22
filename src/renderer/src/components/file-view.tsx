@@ -121,10 +121,11 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
   const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = (event) => {
     if (event.button === 0 && file.rendererRef?.current) {
       // Left mouse button up
-      const afterState = file.rendererRef.current.getFBOData();
-      if (afterState) {
+      const data = file.rendererRef.current.getFBOData();
+      if (data) {
         window.api.addUndoState({
-          after: afterState.buffer,
+          data: data.buffer,
+          filePath: file.filePath,
         });
       }
     }

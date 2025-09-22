@@ -1,3 +1,4 @@
+import { BrowserWindow, ipcMain } from "electron";
 // Describes the flat object returned directly from the C++ addon
 export interface GaboratorAnalysisResult {
   data: Float32Array;
@@ -48,15 +49,22 @@ export interface GaboratorParams {
   fmin: number;
 }
 
+export interface UndoState {
+  data: Buffer;
+  filePath: string;
+}
+
 export interface IpcApi {
   onOpenFile: (callback: (path: string) => void) => () => void;
   onOpenAndAnalyze: (callback: () => void) => () => void;
   onAnalysisComplete: (callback: (payload: AnalysisPayloadForRenderer) => void) => () => void;
   onAnalysisError: (callback: (error: string) => void) => () => void;
-  onUndoApplyState: (callback: (data: Buffer) => void) => () => void;
+  onUndoApplyState: (callback: (state: UndoState) => void) => () => void;
   loadFile: (filePath: string, params: GaboratorParams) => void;
-  addUndoState: (args: { after: ArrayBufferLike }) => void;
-  setInitialState: (args: { state: ArrayBufferLike }) => void;
+  addUndoState: (args: { filePath: string; data: ArrayBufferLike }) => void;
+  fileOpened: (filePath: string) => void;
+  fileClosed: (filePath: string) => void;
+  setActiveFile: (filePath: string | null) => void;
   clearUndoState: () => void;
   synthesizeAudio: (
     payload: Omit<SynthesisPayload, "processedData"> & { processedData: ArrayBufferLike },
@@ -78,8 +86,7 @@ export interface IpcApi {
 
 export interface IpcMainHandlers {
   "load-file": (event: Electron.IpcMainEvent, filePath: string, params: GaboratorParams) => void;
-  "add-undo-state": (event: Electron.IpcMainEvent, args: { after: Buffer }) => void;
-  "set-initial-undo-state": (event: Electron.IpcMainEvent, args: { state: Buffer }) => void;
+  "add-undo-state": (event: Electron.IpcMainEvent, args: { data: Buffer; filePath: string }) => void;
   "clear-undo-state": (event: Electron.IpcMainEvent) => void;
   "open-and-analyze": (event: Electron.IpcMainEvent, params: GaboratorParams) => void;
   "reanalyze-current-file": (event: Electron.IpcMainInvokeEvent, params: GaboratorParams) => Promise<void>;
@@ -95,6 +102,9 @@ export interface IpcMainHandlers {
     params: GaboratorParams,
     normalize: boolean,
   ) => Promise<void>;
+  "set-active-file": (event: Electron.IpcMainEvent, filePath: string) => void;
+  "file-opened": (event: Electron.IpcMainEvent, filePath: string) => void;
+  "file-closed": (event: Electron.IpcMainEvent, filePath: string) => void;
 }
 
 export interface IpcRendererEvents {
@@ -102,9 +112,29 @@ export interface IpcRendererEvents {
   "analysis-complete": (payload: AnalysisPayloadForRenderer) => void;
   "analysis-error": (error: string) => void;
   "request-audio-for-saving": () => void;
-  "apply-undo-state": (data: Buffer) => void;
+  "apply-undo-state": (state: { data: Buffer; filePath: string }) => void;
   "undo-state-changed": (state: { canUndo: boolean; canRedo: boolean }) => void;
   "close-active-file": () => void;
   "close-all-files": () => void;
   "open-and-analyze": () => void;
+}
+
+type IpcMainHandlerKeysWithPromise = {
+  [K in keyof IpcMainHandlers]: IpcMainHandlers[K] extends (...args: any[]) => Promise<any> ? K : never;
+}[keyof IpcMainHandlers];
+
+export function ipcMainOn<K extends keyof IpcMainHandlers>(channel: K, listener: IpcMainHandlers[K]): void {
+  ipcMain.on(channel, listener as any);
+}
+
+export function ipcMainHandle<K extends IpcMainHandlerKeysWithPromise>(channel: K, listener: IpcMainHandlers[K]): void {
+  ipcMain.handle(channel, listener as any);
+}
+
+export function webContentsSend<K extends keyof IpcRendererEvents>(
+  window: BrowserWindow,
+  channel: K,
+  ...args: Parameters<IpcRendererEvents[K]>
+): void {
+  window.webContents.send(channel, ...args);
 }

@@ -3,11 +3,11 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "f
 import { compressSync, uncompressSync } from "lz4-napi";
 import { tmpdir } from "os";
 import { join } from "path";
-import { webContentsSend } from "./ipc-typed";
+import { UndoState, webContentsSend } from "./types";
 
 export class UndoService {
   private tempDir: string;
-  private timeline: string[] = [];
+  private timeline: { dataPath: string; state: UndoState }[] = [];
   private head = -1;
   private readonly MAX_HISTORY = 20;
 
@@ -15,7 +15,7 @@ export class UndoService {
     this.tempDir = mkdtempSync(join(tmpdir(), "noise-canvas-undo-"));
   }
 
-  private updateState() {
+  updateState() {
     const canUndo = this.head > 0;
     const canRedo = this.head < this.timeline.length - 1;
 
@@ -32,27 +32,27 @@ export class UndoService {
     }
   }
 
-  private saveState(buffer: Buffer): string {
+  private saveState({ data }: UndoState) {
     const timestamp = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     const path = join(this.tempDir, `state-${timestamp}.lz4`);
-    writeFileSync(path, compressSync(Buffer.from(buffer)));
+    writeFileSync(path, compressSync(Buffer.from(data)));
     return path;
   }
 
-  addState(state: Buffer) {
+  addState(state: UndoState) {
     // Truncate redo history
     if (this.head < this.timeline.length - 1) {
       const toDelete = this.timeline.splice(this.head + 1);
-      for (const path of toDelete) {
+      for (const { dataPath } of toDelete) {
         try {
-          rmSync(path);
+          rmSync(dataPath);
         } catch (e) {
           console.error("Failed to delete old redo file:", e);
         }
       }
     }
 
-    this.timeline.push(this.saveState(state));
+    this.timeline.push({ dataPath: this.saveState(state), state });
     this.head++;
 
     // Enforce history limit
@@ -60,7 +60,7 @@ export class UndoService {
       const oldest = this.timeline.shift();
       if (oldest) {
         try {
-          rmSync(oldest);
+          rmSync(oldest.dataPath);
         } catch (e) {
           console.error("Failed to delete old undo file:", e);
         }
@@ -73,10 +73,10 @@ export class UndoService {
   undo() {
     if (this.head > 0) {
       this.head--;
-      const statePath = this.timeline[this.head];
-      const buffer = readFileSync(statePath);
+      const { dataPath, state } = this.timeline[this.head];
+      const buffer = readFileSync(dataPath);
       const decompressed = uncompressSync(buffer);
-      webContentsSend(this.window, "apply-undo-state", decompressed);
+      webContentsSend(this.window, "apply-undo-state", { data: decompressed, filePath: state.filePath });
     }
     this.updateState();
   }
@@ -84,10 +84,10 @@ export class UndoService {
   redo() {
     if (this.head < this.timeline.length - 1) {
       this.head++;
-      const statePath = this.timeline[this.head];
-      const buffer = readFileSync(statePath);
+      const { dataPath, state } = this.timeline[this.head];
+      const buffer = readFileSync(dataPath);
       const decompressed = uncompressSync(buffer);
-      webContentsSend(this.window, "apply-undo-state", decompressed);
+      webContentsSend(this.window, "apply-undo-state", { data: decompressed, filePath: state.filePath });
     }
     this.updateState();
   }
@@ -98,13 +98,6 @@ export class UndoService {
     for (const file of readdirSync(this.tempDir)) {
       rmSync(join(this.tempDir, file));
     }
-    this.updateState();
-  }
-
-  setInitialState(state: Buffer) {
-    this.clear();
-    this.timeline.push(this.saveState(state));
-    this.head = 0;
     this.updateState();
   }
 

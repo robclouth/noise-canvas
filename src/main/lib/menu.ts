@@ -1,8 +1,13 @@
 import { app, BrowserWindow, Menu } from "electron";
 import { saveAudioFile } from "./audio";
-import { UndoService } from "./undo";
 
-export function createMenu(window: BrowserWindow, undoService: UndoService) {
+export function createMenu(
+  window: BrowserWindow,
+  actions: {
+    onUndo: () => void;
+    onRedo: () => void;
+  },
+) {
   const template: (Electron.MenuItemConstructorOptions | Electron.MenuItem)[] = [
     {
       label: "File",
@@ -47,18 +52,14 @@ export function createMenu(window: BrowserWindow, undoService: UndoService) {
           label: "Undo",
           accelerator: "CmdOrCtrl+Z",
           enabled: false,
-          click: () => {
-            undoService?.undo();
-          },
+          click: actions.onUndo,
           id: "undo",
         },
         {
           label: "Redo",
           accelerator: "Shift+CmdOrCtrl+Z",
           enabled: false,
-          click: () => {
-            undoService?.redo();
-          },
+          click: actions.onRedo,
           id: "redo",
         },
         { type: "separator" },

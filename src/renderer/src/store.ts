@@ -190,8 +190,8 @@ export function init() {
   });
   unsubscribers.push(unsubAnalysisError);
 
-  const unsubUndo = window.api.onUndoApplyState((data) => {
-    const activeFile = store.get(activeFileAtom);
+  const unsubUndo = window.api.onUndoApplyState(({ filePath, data }) => {
+    const activeFile = store.get(openFilesAtom)[filePath];
     if (activeFile?.rendererRef?.current) {
       activeFile.rendererRef.current.setFBOData(
         new Float32Array(data.buffer, data.byteOffset, data.byteLength / Float32Array.BYTES_PER_ELEMENT),
@@ -254,6 +254,11 @@ export function init() {
     }
   });
   unsubscribers.push(unsubRestore);
+
+  store.sub(activeFilePathAtom, () => {
+    const newPath = store.get(activeFilePathAtom);
+    window.api.setActiveFile(newPath);
+  });
 }
 
 export function destroy() {
@@ -304,8 +309,7 @@ export function addFile(payload: AnalysisPayloadForRenderer) {
 
   store.set(openFilesAtom, (openFiles) => ({ ...openFiles, [newFile.filePath]: newFile }));
   store.set(activeFilePathAtom, newFile.filePath);
-
-  window.api.clearUndoState();
+  window.api.fileOpened(newFile.filePath);
 }
 
 function openFile(filePath: string) {
@@ -318,6 +322,7 @@ function openFile(filePath: string) {
 
 export function closeFile(file: OpenFile) {
   store.set(openFilesAtom, (openFiles) => omit(openFiles, file.filePath));
+  window.api.fileClosed(file.filePath);
   const openFiles = store.get(openFilesAtom);
   const filePaths = Object.keys(openFiles);
 
