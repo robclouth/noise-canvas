@@ -10,7 +10,6 @@ import {
   mousePosAtom,
   offsetXAtom,
   offsetYAtom,
-  OpenFile,
   panAtom,
   scrollAtom,
   sourceFileAtom,
@@ -20,6 +19,7 @@ import {
 import { useFBO, View } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { isSynthesizingAtom, runSynthesis } from "@renderer/audio-manager";
+import type { OpenFile } from "@renderer/types";
 import { debounce } from "lodash-es";
 import { forwardRef, memo, RefObject, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -180,6 +180,7 @@ export const FileRenderer = memo(
         setInverseMapTex(null);
         setMetadataTex(null);
       };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
       spectrogramData.packedData,
       spectrogramData.inverseMap,
@@ -281,8 +282,9 @@ export const FileRenderer = memo(
           : new THREE.Vector2(0, 0),
         featherX: featherX / 100,
         featherY: featherY / 100,
-        brushIntensity: brushIntensity,
+        brushIntensity,
         pan,
+        bpm,
         offsetUv: unitsToUv(
           offsetX,
           offsetY,

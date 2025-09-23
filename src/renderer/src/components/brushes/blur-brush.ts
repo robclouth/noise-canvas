@@ -1,7 +1,7 @@
+import { activeFileAtom, bandsPerOctaveAtom, store } from "@/store";
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
 import { ShaderMaterial, Vector2 } from "three";
-import { activeFileAtom, bandsPerOctaveAtom, bpmAtom, store } from "../../store";
 import { BaseBrush, BrushParameter } from "./base-brush";
 import { brushMain, code, CommonUniforms, defaultValues, unitsToUv, vertexShader } from "./common";
 
@@ -103,19 +103,19 @@ class BlurBrush extends BaseBrush {
     super.updateUniforms(props, passIndex);
 
     const activeFile = store.get(activeFileAtom);
-    const bpm = store.get(bpmAtom);
+    if (!activeFile) return;
+
+    const { spectrogramData } = activeFile;
     const blurX = store.get(blurTimeAtom);
     const blurYCents = store.get(blurPitchAtom);
 
-    if (!activeFile) return;
-    const spectrogramData = activeFile.spectrogramData;
+    const bandsPerOctave = store.get(bandsPerOctaveAtom);
 
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-    const bandsPerOctave = store.get(bandsPerOctaveAtom);
     const blurSizeUv = unitsToUv(
       blurX,
       blurYCents / 100, // convert cents to semitones
-      bpm,
+      props.bpm,
       totalDuration,
       bandsPerOctave,
       spectrogramData.numBands,

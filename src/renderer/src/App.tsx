@@ -2,12 +2,12 @@ import { BrushPanel } from "@/components/layout/brush-panel";
 import { CanvasPanel } from "@/components/layout/canvas-panel";
 import { ControlsPanel } from "@/components/layout/controls-panel";
 import { TransportPanel } from "@/components/layout/transport-panel";
-import { destroy, init } from "@/store";
 import { Flex } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
+import { Notifications } from "@mantine/notifications";
+import { destroy, init } from "@renderer/api";
 import { useCallback, useEffect } from "react";
 import { togglePlayback } from "./audio-manager";
-import { Notifications } from "@mantine/notifications";
 
 function App(): React.JSX.Element {
   useEffect(() => {

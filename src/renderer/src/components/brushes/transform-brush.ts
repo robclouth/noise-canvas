@@ -1,4 +1,4 @@
-import { activeFileAtom, bandsPerOctaveAtom, bpmAtom, store } from "@/store";
+import { activeFileAtom, bandsPerOctaveAtom, store } from "@/store";
 import { shaderMaterial } from "@react-three/drei";
 import { atomWithStorage } from "jotai/utils";
 import { ShaderMaterial, Vector2 } from "three";
@@ -145,11 +145,11 @@ class TransformBrush extends BaseBrush {
 
   updateUniforms(props: CommonUniforms, passIndex: number): void {
     super.updateUniforms(props, passIndex);
-    const bpm = store.get(bpmAtom);
     const activeFile = store.get(activeFileAtom);
     if (!activeFile) return;
-    const { spectrogramData } = activeFile;
+
     const bandsPerOctave = store.get(bandsPerOctaveAtom);
+    const { spectrogramData } = activeFile;
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
     const shiftX = store.get(shiftXAtom);
     const shiftYCents = store.get(shiftYCentsAtom);
@@ -158,7 +158,14 @@ class TransformBrush extends BaseBrush {
     const rotation = store.get(rotationAtom);
     const boundaryMode = store.get(boundaryModeAtom);
 
-    const shiftUv = unitsToUv(shiftX, shiftYCents / 100, bpm, totalDuration, bandsPerOctave, spectrogramData.numBands);
+    const shiftUv = unitsToUv(
+      shiftX,
+      shiftYCents / 100,
+      props.bpm,
+      totalDuration,
+      bandsPerOctave,
+      spectrogramData.numBands,
+    );
 
     const material = this.materials[passIndex];
     if (!material) return;

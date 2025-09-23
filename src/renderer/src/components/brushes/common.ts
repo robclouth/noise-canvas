@@ -401,6 +401,7 @@ export type CommonUniforms = {
   brushIntensity: number;
   offsetUv: Vector2;
   pan: number;
+  bpm: number;
   pi: number;
 };
 
@@ -435,6 +436,7 @@ export const defaultValues: CommonUniforms = {
   brushIntensity: 1.0,
   offsetUv: new Vector2(0, 0),
   pan: 0.0,
+  bpm: 120.0,
   pi: Math.PI,
 };
 

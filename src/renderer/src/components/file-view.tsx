@@ -3,17 +3,17 @@ import {
   activeFilePathAtom,
   bandsPerOctaveAtom,
   brushWidthAtom,
-  closeFile,
   filesBpmAtom,
   gridSizeAtom,
   gridSizeYAtom,
   mousePosAtom,
-  OpenFile,
   scrollAtom,
   store,
   zoomPowerAtom,
 } from "@/store";
 import { ActionIcon, Box, Flex, NumberInput, Title } from "@mantine/core";
+import { closeFile } from "@renderer/api";
+import type { OpenFile } from "@renderer/types";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { X } from "lucide-react";
 import { memo, MouseEventHandler, RefObject, useRef } from "react";

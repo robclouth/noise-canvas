@@ -8,10 +8,10 @@ import {
   loopAtom,
   minFreqAtom,
   normalizeAtom,
-  OpenFile,
   openFilesAtom,
   store,
 } from "./store";
+import type { OpenFile } from "./types";
 
 export const playbackTimeAtom = atom(0);
 export const isSynthesizingAtom = atom(false);

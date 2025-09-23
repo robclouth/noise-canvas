@@ -29,8 +29,8 @@ export interface AnalysisPayloadForRenderer {
   bandStepLog2s: Int32Array;
   bandLengths: Uint32Array;
   sampleRate: number;
-  bandsPerOctave: number;
   minFreq: number;
+  bandsPerOctave: number;
 }
 
 // Describes the payload received from the renderer when requesting synthesis
@@ -46,10 +46,10 @@ export interface SynthesisPayload {
   };
 }
 
-export interface GaboratorParams {
+export type GaboratorParams = {
   bandsPerOctave: number;
   minFreq: number;
-}
+};
 
 export interface UndoState {
   data: Buffer;
