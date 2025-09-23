@@ -251,7 +251,7 @@ vec4 sampleFromSource(vec2 logicalUv) {
 }
 
 vec4 sampleFromOriginal(vec2 logicalUv) {
-    return _sampleSpectrogramPointInterpolated(logicalUv, originalSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount, sourceSampleRate);
+    return _sampleSpectrogramPointInterpolated(logicalUv, originalSpectrogramTex, destMetadataTex, destSpectrogramTextureSize, destFrameCount, destBandCount, destSampleRate);
 }
 
 
