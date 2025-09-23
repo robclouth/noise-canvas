@@ -2,9 +2,9 @@ import {
   activeFileAtom,
   activeFilePathAtom,
   bandsPerOctaveAtom,
-  bpmAtom,
   brushWidthAtom,
   closeFile,
+  filesBpmAtom,
   gridSizeAtom,
   gridSizeYAtom,
   mouseUvAtom,
@@ -13,10 +13,10 @@ import {
   store,
   zoomPowerAtom,
 } from "@/store";
-import { ActionIcon, Box, Flex, Title } from "@mantine/core";
-import { useAtomValue, useSetAtom } from "jotai";
+import { ActionIcon, Box, Flex, NumberInput, Title } from "@mantine/core";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { X } from "lucide-react";
-import { MouseEventHandler, RefObject, useRef } from "react";
+import { memo, MouseEventHandler, RefObject, useRef } from "react";
 import { Vector2 } from "three";
 import { screenToZoomed } from "./brushes/common";
 import { FileRendererHandle } from "./file-renderer";
@@ -28,7 +28,7 @@ interface FileViewProps {
   rendererRef: RefObject<FileRendererHandle | null>;
 }
 
-function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>): [number, number] | null {
+function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>, bpm: number): [number, number] | null {
   const rect = event.currentTarget.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) {
     return null;
@@ -48,7 +48,6 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>): [number
   let snappedX = zoomedUv.x;
   let snappedY = zoomedUv.y;
 
-  const bpm = store.get(bpmAtom);
   const gridSize = store.get(gridSizeAtom);
   const brushWidth = store.get(brushWidthAtom);
 
@@ -80,15 +79,23 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>): [number
   return [snappedX, snappedY];
 }
 
-export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
+export const FileView = memo(({ file, viewRef, rendererRef }: FileViewProps) => {
   const activeFile = useAtomValue(activeFileAtom);
   const setMouseUv = useSetAtom(mouseUvAtom);
   const setActiveFilePath = useSetAtom(activeFilePathAtom);
+  const [bpms, setBpms] = useAtom(filesBpmAtom);
+  const bpm = bpms[file.filePath] || 120;
+  const setBpm = (newBpm: number) => {
+    setBpms((currentBpms) => ({
+      ...currentBpms,
+      [file.filePath]: newBpm,
+    }));
+  };
 
   const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
 
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
-    const coords = getSnappedCoordinates(event);
+    const coords = getSnappedCoordinates(event, bpm);
     if (!coords) return;
     const [snappedX, snappedY] = coords;
 
@@ -111,7 +118,7 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
 
   const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
     if (event.button === 0 && file.rendererRef?.current) {
-      const coords = getSnappedCoordinates(event);
+      const coords = getSnappedCoordinates(event, bpm);
       if (coords) {
         rendererRef.current!.renderStroke(coords[0], coords[1], false);
       }
@@ -141,15 +148,18 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
     >
       <Flex justify="space-between" align="center" p="xs">
         <Title order={6}>{file.filePath.split("/").pop() || file.filePath}</Title>
-        <ActionIcon
-          size="xs"
-          onClick={(e) => {
-            e.stopPropagation();
-            closeFile(file);
-          }}
-        >
-          <X />
-        </ActionIcon>
+        <Flex align="center" gap="xs">
+          <NumberInput w={60} value={bpm} onChange={(val) => setBpm(Number(val))} size="xs" max={999} min={10} />
+          <ActionIcon
+            size="xs"
+            onClick={(e) => {
+              e.stopPropagation();
+              closeFile(file);
+            }}
+          >
+            <X />
+          </ActionIcon>
+        </Flex>
       </Flex>
       <Box
         style={{ cursor: "none" }}
@@ -164,4 +174,6 @@ export const FileView = ({ file, viewRef, rendererRef }: FileViewProps) => {
       {activeFile?.filePath === file.filePath && <PlaybackLine file={file} containerRef={viewRef} />}
     </Box>
   );
-};
+});
+
+FileView.displayName = "FileView";

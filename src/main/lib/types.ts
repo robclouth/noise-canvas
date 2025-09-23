@@ -28,7 +28,9 @@ export interface AnalysisPayloadForRenderer {
   bandOffsets: Uint32Array;
   bandStepLog2s: Int32Array;
   bandLengths: Uint32Array;
-  sampleRate: number; // Pass sample rate through
+  sampleRate: number;
+  bandsPerOctave: number;
+  minFreq: number;
 }
 
 // Describes the payload received from the renderer when requesting synthesis

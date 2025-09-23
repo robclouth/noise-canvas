@@ -1,6 +1,6 @@
 import { isSynthesizingAtom, playbackTimeAtom, togglePlayback } from "@/audio-manager";
-import { bpmAtom, isPlayingAtom, loopAtom } from "@/store";
-import { ActionIcon, Flex, NumberInput, Text } from "@mantine/core";
+import { isPlayingAtom, loopAtom } from "@/store";
+import { ActionIcon, Flex, Text } from "@mantine/core";
 import { useAtom, useAtomValue } from "jotai";
 import { Play, Repeat, Square } from "lucide-react";
 
@@ -23,13 +23,11 @@ const formatTime = (seconds: number): string => {
 export const TransportPanel = () => {
   const playbackTime = useAtomValue(playbackTimeAtom);
   const isPlaying = useAtomValue(isPlayingAtom);
-  const [bpm, setBpm] = useAtom(bpmAtom);
   const [loop, setLoop] = useAtom(loopAtom);
   const isSynthesizing = useAtomValue(isSynthesizingAtom);
 
   return (
     <Flex align="center" justify="center" gap="md" p="md">
-      <NumberInput w={100} value={bpm} onChange={(val) => setBpm(Number(val))} />
       <ActionIcon onClick={togglePlayback} size="lg" disabled={isSynthesizing}>
         {isPlaying ? <Square /> : <Play />}
       </ActionIcon>

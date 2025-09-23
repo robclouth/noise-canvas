@@ -36,6 +36,8 @@ export interface SpectrogramData {
   numChannels: number;
   sampleRate: number;
   packedTextureSize: Vector2;
+  minFreq: number;
+  bandsPerOctave: number;
   // Store the raw metadata needed for synthesis separately for clarity
   synthesisMetadata: {
     bandOffsets: Uint32Array;
@@ -68,6 +70,7 @@ export interface SynthesisPayload {
 // --- Jotai Atoms ---
 
 export const openFilesAtom = atom<Record<string, OpenFile>>({});
+export const filesBpmAtom = atomWithStorage<Record<string, number>>("filesBpm", {});
 export const activeFilePathAtom = atom<string | null>(null);
 export const activeFileAtom = atom<OpenFile | null>((get) => {
   const activeFilePath = get(activeFilePathAtom);
@@ -157,6 +160,7 @@ export function init() {
     const analysisParams = {
       bandsPerOctave: store.get(bandsPerOctaveAtom),
       fmin: store.get(minFreqAtom),
+      bpm: store.get(bpmAtom),
     };
     window.api.openAndAnalyze(analysisParams);
   });
@@ -214,8 +218,8 @@ export function init() {
     }
 
     const analysisParams = {
-      bandsPerOctave: store.get(bandsPerOctaveAtom),
-      fmin: store.get(minFreqAtom),
+      bandsPerOctave: activeFile.spectrogramData.bandsPerOctave,
+      fmin: activeFile.spectrogramData.minFreq,
     };
     const payload = {
       processedData: processedData.buffer,
@@ -297,6 +301,8 @@ export function addFile(payload: AnalysisPayloadForRenderer) {
       numChannels: payload.numChannels,
       sampleRate: payload.sampleRate,
       packedTextureSize: new Vector2(payload.textureWidth, payload.textureHeight),
+      minFreq: payload.minFreq,
+      bandsPerOctave: payload.bandsPerOctave,
       synthesisMetadata: {
         bandOffsets: payload.bandOffsets,
         bandStepLog2s: payload.bandStepLog2s,
@@ -308,6 +314,8 @@ export function addFile(payload: AnalysisPayloadForRenderer) {
   };
 
   store.set(openFilesAtom, (openFiles) => ({ ...openFiles, [newFile.filePath]: newFile }));
+  if (!store.get(filesBpmAtom)[newFile.filePath])
+    store.set(filesBpmAtom, (bpms) => ({ ...bpms, [newFile.filePath]: 120 }));
   store.set(activeFilePathAtom, newFile.filePath);
   window.api.fileOpened(newFile.filePath);
 }
@@ -316,12 +324,14 @@ function openFile(filePath: string) {
   const params = {
     bandsPerOctave: store.get(bandsPerOctaveAtom),
     fmin: store.get(minFreqAtom),
+    bpm: store.get(bpmAtom),
   };
   window.api.loadFile(filePath, params);
 }
 
 export function closeFile(file: OpenFile) {
   store.set(openFilesAtom, (openFiles) => omit(openFiles, file.filePath));
+  store.set(filesBpmAtom, (bpms) => omit(bpms, file.filePath));
   window.api.fileClosed(file.filePath);
   const openFiles = store.get(openFilesAtom);
   const filePaths = Object.keys(openFiles);

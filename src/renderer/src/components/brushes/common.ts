@@ -9,29 +9,30 @@ export const vertexShader = /*glsl*/ `
 `;
 
 export const code = /* glsl */ `
-/**
- * =============================================================================
- * Common Spectrogram GLSL Utilities (Pitch-Shift Aware)
- * =============================================================================
- */
-
-//------------------------------------------------------------------------------
-// Uniforms
-//------------------------------------------------------------------------------
 uniform sampler2D sourceSpectrogramTex;
-uniform sampler2D originalSpectrogramTex;
 uniform sampler2D sourceMetadataTex;
 uniform sampler2D sourceInverseMapTex;
 uniform vec2 sourceSpectrogramTextureSize;
 uniform float sourceFrameCount;
 uniform float sourceBandCount;
 uniform int sourceChannelCount;
-uniform float sourceSampleRate;
-uniform float pi;
-
-// New uniforms required for true pitch shifting
 uniform float sourceMinFreq;
 uniform float sourceBandsPerOctave;
+uniform float sourceSampleRate;
+
+uniform sampler2D destSpectrogramTex;
+uniform sampler2D destMetadataTex;
+uniform sampler2D destInverseMapTex;
+uniform vec2 destSpectrogramTextureSize;
+uniform float destFrameCount;
+uniform float destBandCount;
+uniform int destChannelCount;
+uniform float destSampleRate;
+uniform float destMinFreq;
+uniform float destBandsPerOctave;
+
+uniform sampler2D originalSpectrogramTex;
+uniform float pi;
 
 // Brush & View Uniforms
 uniform vec2 brushCenterUv;
@@ -76,9 +77,17 @@ vec2 getUnpackedUvFromPackedUv(vec2 packedUv) {
     return unpackedUv;
 }
 
+vec2 getUnpackedUvFromPackedUvDest(vec2 packedUv) {
+    vec2 rawUnpacked = texture2D(destInverseMapTex, packedUv).rg;
+    vec2 unpackedUv;
+    unpackedUv.x = rawUnpacked.x / destFrameCount;
+    unpackedUv.y = 1.0 - (rawUnpacked.y + 0.5) / destBandCount;
+    return unpackedUv;
+}
+
 Coords getCoords(vec2 packedUv) {
     Coords c;
-    c.dest = getUnpackedUvFromPackedUv(packedUv);
+    c.dest = getUnpackedUvFromPackedUvDest(packedUv);
     c.source = c.dest + offsetUv;
     return c;
 }
@@ -322,7 +331,7 @@ vec4 sampleSpectrogramTransformed(vec2 sourceUv, vec2 targetUv) {
     return _performTransformation(sourceUv, targetUv,
                                  sourceBandCount, sourceBandsPerOctave, sourceMinFreq, sourceFrameCount,
                                  sourceMetadataTex, sourceSpectrogramTex, sourceSpectrogramTextureSize, sourceSampleRate,
-                                 sourceBandCount, sourceBandsPerOctave, sourceMinFreq);
+                                 destBandCount, destBandsPerOctave, destMinFreq);
 }
 
 // Convenience wrapper for display
@@ -340,7 +349,15 @@ vec4 applyBrushStroke(vec4 sourceTexel, Coords coords);
 
 void main() {
     Coords coords = getCoords(vUv);
-    vec4 originalTexel = sampleSpectrogramPointInterpolated(coords.dest);
+    vec4 originalTexel = _sampleSpectrogramPointInterpolated(
+      coords.dest, 
+      destSpectrogramTex, 
+      destMetadataTex, 
+      destSpectrogramTextureSize, 
+      destFrameCount, 
+      destBandCount, 
+      destSampleRate
+    );
 
     if (isInBrush(coords.dest)) {
         float weight = getFeatherWeight(coords.dest);
@@ -364,6 +381,16 @@ export type CommonUniforms = {
   sourceBandCount: number;
   sourceChannelCount: number;
   sourceSampleRate: number;
+  destSpectrogramTex: Texture;
+  destSpectrogramTextureSize: Vector2;
+  destInverseMapTex: Texture;
+  destMetadataTex: Texture;
+  destMinFreq: number;
+  destBandsPerOctave: number;
+  destFrameCount: number;
+  destBandCount: number;
+  destChannelCount: number;
+  destSampleRate: number;
   originalSpectrogramTex: Texture | null;
   brushCenterUv: Vector2;
   brushSizeUv: Vector2;
@@ -379,7 +406,6 @@ export type CommonUniforms = {
 
 export const defaultValues: CommonUniforms = {
   sourceSpectrogramTex: new Texture(),
-  originalSpectrogramTex: new Texture(),
   sourceInverseMapTex: new Texture(),
   sourceMetadataTex: new Texture(),
   sourceFrameCount: 0,
@@ -389,6 +415,17 @@ export const defaultValues: CommonUniforms = {
   sourceSampleRate: 44100.0,
   sourceMinFreq: 20.0,
   sourceBandsPerOctave: 24.0,
+  destSpectrogramTex: new Texture(),
+  destInverseMapTex: new Texture(),
+  destMetadataTex: new Texture(),
+  destFrameCount: 0,
+  destBandCount: 0,
+  destSpectrogramTextureSize: new Vector2(0, 0),
+  destChannelCount: 1,
+  destSampleRate: 44100.0,
+  destMinFreq: 20.0,
+  destBandsPerOctave: 24.0,
+  originalSpectrogramTex: new Texture(),
   brushCenterUv: new Vector2(0.5, 0.5),
   brushSizeUv: new Vector2(0.1, 0.1),
   viewZoomPower: 0.0,
@@ -401,39 +438,40 @@ export const defaultValues: CommonUniforms = {
   pi: Math.PI,
 };
 
-export const unitsToUv = (
+export function unitsToUv(
   beats: number,
   semitones: number,
   bpm: number,
   totalDuration: number,
   bandsPerOctave: number,
-  totalBands: number,
-): Vector2 => {
-  const uv = new Vector2();
+  numBands: number,
+): Vector2 {
   const seconds = beats * (60.0 / bpm);
-  uv.x = seconds / totalDuration;
-  const bandsPerSemitone = bandsPerOctave / 12.0;
-  const shiftInBands = semitones * bandsPerSemitone;
-  uv.y = shiftInBands / totalBands;
-  return uv;
-};
+  const u = seconds / totalDuration;
 
-export const uvToUnits = (
-  uv: Vector2,
+  const bandsPerSemitone = bandsPerOctave / 12;
+  const shiftInBands = semitones * bandsPerSemitone;
+  const v = shiftInBands / numBands;
+
+  return new Vector2(u, v);
+}
+
+export function uvToUnits(
+  u: number,
+  v: number,
   bpm: number,
   totalDuration: number,
   bandsPerOctave: number,
-  totalBands: number,
-): [number, number] => {
-  const seconds = uv.x * totalDuration;
+  numBands: number,
+) {
+  const seconds = u * totalDuration;
   const beats = seconds / (60.0 / bpm);
 
-  const bandsPerSemitone = bandsPerOctave / 12.0;
-  const shiftedBands = uv.y * totalBands;
-  const semitones = shiftedBands / bandsPerSemitone;
+  const bandsPerSemitone = bandsPerOctave / 12;
+  const semitones = (v * numBands) / bandsPerSemitone;
 
   return [beats, semitones];
-};
+}
 
 export const screenToZoomed = (screenUv: Vector2, viewZoomPower: number, viewOffset: number): Vector2 => {
   const zoom = Math.pow(2, viewZoomPower);
