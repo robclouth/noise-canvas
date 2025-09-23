@@ -74,7 +74,7 @@ function runAnalysisInWorker(filePath: string, params: GaboratorParams): Promise
           inverseMap: Buffer.from(result.inverseMap.buffer),
           metadataTexture: Buffer.from(result.metadataTexture.buffer),
           bandsPerOctave: params.bandsPerOctave,
-          minFreq: params.fmin,
+          minFreq: params.minFreq,
         };
 
         resolve(payload);

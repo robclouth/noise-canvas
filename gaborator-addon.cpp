@@ -15,7 +15,7 @@ public:
         
         interleavedData.assign(inputBuffer.Data(), inputBuffer.Data() + inputBuffer.ElementLength());
         bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
-        fminHz = paramsJs.Get("fmin").As<Napi::Number>().DoubleValue();
+        fminHz = paramsJs.Get("minFreq").As<Napi::Number>().DoubleValue();
     }
 
     ~AnalyzeWorker() {}
@@ -194,6 +194,15 @@ Napi::Value AnalyzeAsync(const Napi::CallbackInfo& info) {
     double sampleRate = info[2].As<Napi::Number>().DoubleValue();
     Napi::Object paramsJs = info[3].As<Napi::Object>();
 
+    if (!paramsJs.Has("bandsPerOctave") || !paramsJs.Get("bandsPerOctave").IsNumber()) {
+        Napi::TypeError::New(env, "params.bandsPerOctave is missing or not a number").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    if (!paramsJs.Has("minFreq") || !paramsJs.Get("minFreq").IsNumber()) {
+        Napi::TypeError::New(env, "params.minFreq is missing or not a number").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
     if (channels <= 0 || channels > 2) {
         Napi::TypeError::New(env, "Number of channels must be 1 or 2.").ThrowAsJavaScriptException();
         return env.Null();
@@ -230,7 +239,7 @@ public:
         bandStepLog2s.assign(bandStepLog2sJs.Data(), bandStepLog2sJs.Data() + bandStepLog2sJs.ElementLength());
 
         bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
-        fminHz = paramsJs.Get("fmin").As<Napi::Number>().DoubleValue();
+        fminHz = paramsJs.Get("minFreq").As<Napi::Number>().DoubleValue();
     }
 
     ~SynthesizeWorker() {}
@@ -342,6 +351,15 @@ Napi::Value SynthesizeAsync(const Napi::CallbackInfo& info) {
     double sampleRate = info[2].As<Napi::Number>().DoubleValue();
     Napi::Object paramsJs = info[3].As<Napi::Object>();
     bool normalize = info[4].As<Napi::Boolean>().Value();
+
+    if (!paramsJs.Has("bandsPerOctave") || !paramsJs.Get("bandsPerOctave").IsNumber()) {
+        Napi::TypeError::New(env, "params.bandsPerOctave is missing or not a number").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    if (!paramsJs.Has("minFreq") || !paramsJs.Get("minFreq").IsNumber()) {
+        Napi::TypeError::New(env, "params.minFreq is missing or not a number").ThrowAsJavaScriptException();
+        return env.Null();
+    }
 
     SynthesizeWorker* worker = new SynthesizeWorker(env, inputDataJs, analysisObj, sampleRate, paramsJs, normalize);
     worker->Queue();

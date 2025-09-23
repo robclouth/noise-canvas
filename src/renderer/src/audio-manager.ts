@@ -4,9 +4,9 @@ import {
   activeFileAtom,
   audioBufferAtom,
   bandsPerOctaveAtom,
-  minFreqAtom,
   isPlayingAtom,
   loopAtom,
+  minFreqAtom,
   normalizeAtom,
   OpenFile,
   openFilesAtom,
@@ -37,7 +37,7 @@ export const runSynthesis = async (file: OpenFile, processedData: Float32Array):
 
     const analysisParams = {
       bandsPerOctave: store.get(bandsPerOctaveAtom),
-      fmin: store.get(minFreqAtom),
+      minFreq: store.get(minFreqAtom),
     };
     const audioBufferChannels = await window.api.synthesizeAudio(payload, analysisParams, normalize);
 
@@ -52,7 +52,7 @@ export const runSynthesis = async (file: OpenFile, processedData: Float32Array):
     const audioBuffer = audioContext.createBuffer(numChannels, numFrames, originalAnalysis.sampleRate);
 
     for (let c = 0; c < numChannels; c++) {
-      audioBuffer.copyToChannel(audioBufferChannels[c], c);
+      audioBuffer.copyToChannel(new Float32Array(audioBufferChannels[c]), c);
     }
 
     store.set(openFilesAtom, (openFiles) => ({ ...openFiles, [file.filePath]: { ...file, audioBuffer } }));

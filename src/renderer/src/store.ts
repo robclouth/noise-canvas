@@ -134,10 +134,10 @@ export const offsetXAtom = atomWithStorage("offsetX", 0.0);
 export const offsetYAtom = atomWithStorage("offsetY", 0.0);
 export const offsetLockAtom = atomWithStorage("offsetLock", false);
 
-export const mouseUvAtom = atom<Vector2 | null>(null);
+export const mousePosAtom = atom<Vector2 | null>(null);
 
 export const bandsPerOctaveAtom = atomWithStorage("bandsPerOctave", 48);
-export const minFreqAtom = atomWithStorage("minFreq", 20.0);
+export const minFreqAtom = atomWithStorage("minFreq", 8.1758); // MIDI note 0
 
 // --- Core Functions ---
 
@@ -146,8 +146,12 @@ let unsubscribers: (() => void)[] = [];
 export function init() {
   if (process.env.NODE_ENV === "development") {
     if (Object.keys(store.get(openFilesAtom)).length === 0) {
-      openFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/garage.mp3");
-      openFile("/Users/rob/Documents/Projects/Music/Tools/Noise Canvas Python/input/voice.wav");
+      openFile(
+        "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
+      );
+      openFile(
+        "/Users/rob/Splice/sounds/packs/The Jungle Drummer - Breakbeat Culture/Test_Press_-_The_Jungle_Drummer_-_Breakbeat_Culture/Loops/Layered_Breaks/TSP_TJD_172_break_layered_2snare_junglism.wav",
+      );
     }
   }
 
@@ -159,7 +163,7 @@ export function init() {
   const unsubOpenAndAnalyze = window.api.onOpenAndAnalyze(() => {
     const analysisParams = {
       bandsPerOctave: store.get(bandsPerOctaveAtom),
-      fmin: store.get(minFreqAtom),
+      minFreq: store.get(minFreqAtom),
       bpm: store.get(bpmAtom),
     };
     window.api.openAndAnalyze(analysisParams);
@@ -219,7 +223,7 @@ export function init() {
 
     const analysisParams = {
       bandsPerOctave: activeFile.spectrogramData.bandsPerOctave,
-      fmin: activeFile.spectrogramData.minFreq,
+      minFreq: activeFile.spectrogramData.minFreq,
     };
     const payload = {
       processedData: processedData.buffer,
@@ -323,7 +327,7 @@ export function addFile(payload: AnalysisPayloadForRenderer) {
 function openFile(filePath: string) {
   const params = {
     bandsPerOctave: store.get(bandsPerOctaveAtom),
-    fmin: store.get(minFreqAtom),
+    minFreq: store.get(minFreqAtom),
     bpm: store.get(bpmAtom),
   };
   window.api.loadFile(filePath, params);

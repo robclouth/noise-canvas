@@ -48,7 +48,7 @@ export interface SynthesisPayload {
 
 export interface GaboratorParams {
   bandsPerOctave: number;
-  fmin: number;
+  minFreq: number;
 }
 
 export interface UndoState {

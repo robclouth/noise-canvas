@@ -55,13 +55,13 @@ CFLAGS_OBJC_Debug :=
 CFLAGS_OBJCC_Debug :=
 
 INCS_Debug := \
-	-I/Users/rob/.electron-gyp/37.4.0/include/node \
-	-I/Users/rob/.electron-gyp/37.4.0/src \
-	-I/Users/rob/.electron-gyp/37.4.0/deps/openssl/config \
-	-I/Users/rob/.electron-gyp/37.4.0/deps/openssl/openssl/include \
-	-I/Users/rob/.electron-gyp/37.4.0/deps/uv/include \
-	-I/Users/rob/.electron-gyp/37.4.0/deps/zlib \
-	-I/Users/rob/.electron-gyp/37.4.0/deps/v8/include \
+	-I/Users/rob/Library/Caches/node-gyp/37.2.3/include/node \
+	-I/Users/rob/Library/Caches/node-gyp/37.2.3/src \
+	-I/Users/rob/Library/Caches/node-gyp/37.2.3/deps/openssl/config \
+	-I/Users/rob/Library/Caches/node-gyp/37.2.3/deps/openssl/openssl/include \
+	-I/Users/rob/Library/Caches/node-gyp/37.2.3/deps/uv/include \
+	-I/Users/rob/Library/Caches/node-gyp/37.2.3/deps/zlib \
+	-I/Users/rob/Library/Caches/node-gyp/37.2.3/deps/v8/include \
 	-I$(srcdir)/node_modules/node-addon-api \
 	-I$(srcdir)/Gaborator-2.1
 
@@ -116,13 +116,13 @@ CFLAGS_OBJC_Release :=
 CFLAGS_OBJCC_Release :=
 
 INCS_Release := \
-	-I/Users/rob/.electron-gyp/37.4.0/include/node \
-	-I/Users/rob/.electron-gyp/37.4.0/src \
-	-I/Users/rob/.electron-gyp/37.4.0/deps/openssl/config \
-	-I/Users/rob/.electron-gyp/37.4.0/deps/openssl/openssl/include \
-	-I/Users/rob/.electron-gyp/37.4.0/deps/uv/include \
-	-I/Users/rob/.electron-gyp/37.4.0/deps/zlib \
-	-I/Users/rob/.electron-gyp/37.4.0/deps/v8/include \
+	-I/Users/rob/Library/Caches/node-gyp/37.2.3/include/node \
+	-I/Users/rob/Library/Caches/node-gyp/37.2.3/src \
+	-I/Users/rob/Library/Caches/node-gyp/37.2.3/deps/openssl/config \
+	-I/Users/rob/Library/Caches/node-gyp/37.2.3/deps/openssl/openssl/include \
+	-I/Users/rob/Library/Caches/node-gyp/37.2.3/deps/uv/include \
+	-I/Users/rob/Library/Caches/node-gyp/37.2.3/deps/zlib \
+	-I/Users/rob/Library/Caches/node-gyp/37.2.3/deps/v8/include \
 	-I$(srcdir)/node_modules/node-addon-api \
 	-I$(srcdir)/Gaborator-2.1
 

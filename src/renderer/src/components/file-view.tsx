@@ -7,7 +7,7 @@ import {
   filesBpmAtom,
   gridSizeAtom,
   gridSizeYAtom,
-  mouseUvAtom,
+  mousePosAtom,
   OpenFile,
   scrollAtom,
   store,
@@ -81,7 +81,7 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>, bpm: num
 
 export const FileView = memo(({ file, viewRef, rendererRef }: FileViewProps) => {
   const activeFile = useAtomValue(activeFileAtom);
-  const setMouseUv = useSetAtom(mouseUvAtom);
+  const setMousePos = useSetAtom(mousePosAtom);
   const setActiveFilePath = useSetAtom(activeFilePathAtom);
   const [bpms, setBpms] = useAtom(filesBpmAtom);
   const bpm = bpms[file.filePath] || 120;
@@ -99,7 +99,7 @@ export const FileView = memo(({ file, viewRef, rendererRef }: FileViewProps) => 
     if (!coords) return;
     const [snappedX, snappedY] = coords;
 
-    setMouseUv(new Vector2(snappedX, 1 - snappedY));
+    setMousePos(new Vector2(snappedX, 1 - snappedY));
 
     if (
       rendererRef.current &&
@@ -113,7 +113,7 @@ export const FileView = memo(({ file, viewRef, rendererRef }: FileViewProps) => 
   };
 
   const handleMouseLeave = () => {
-    setMouseUv(null);
+    setMousePos(null);
   };
 
   const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {

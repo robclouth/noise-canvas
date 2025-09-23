@@ -7,7 +7,7 @@ import {
   featherYAtom,
   filesBpmAtom,
   gridSizeAtom,
-  mouseUvAtom,
+  mousePosAtom,
   offsetXAtom,
   offsetYAtom,
   OpenFile,
@@ -53,13 +53,6 @@ export const FileRenderer = memo(
 
     const [sourceFile, setSourceFile] = useState(() => store.get(sourceFileAtom));
 
-    useEffect(() => {
-      const unsub = store.sub(sourceFileAtom, () => {
-        setSourceFile(store.get(sourceFileAtom));
-      });
-      return unsub;
-    }, []);
-
     const [packedDataTex, setPackedDataTex] = useState<THREE.DataTexture | null>(null);
     const [originalPackedDataTex, setOriginalPackedDataTex] = useState<THREE.DataTexture | null>(null);
     const [inverseMapTex, setInverseMapTex] = useState<THREE.DataTexture | null>(null);
@@ -75,17 +68,21 @@ export const FileRenderer = memo(
     const applyStroke = useRef(false);
 
     useEffect(() => {
-      const unsubMouseUv = store.sub(mouseUvAtom, () => {
-        mouseUv.current = store.get(mouseUvAtom);
+      const unsubMouseUv = store.sub(mousePosAtom, () => {
+        mouseUv.current = store.get(mousePosAtom);
       });
       const unsubBpms = store.sub(filesBpmAtom, () => {
         invalidate();
       });
+      const unsubSourceFile = store.sub(sourceFileAtom, () => {
+        setSourceFile(store.get(sourceFileAtom));
+      });
       return () => {
         unsubMouseUv();
         unsubBpms();
+        unsubSourceFile();
       };
-    }, []);
+    }, [invalidate]);
 
     const displayMaterial = useMemo(() => new DisplayMaterial(), []);
 
