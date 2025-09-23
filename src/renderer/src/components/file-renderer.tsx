@@ -28,31 +28,53 @@ import { CommonUniforms, unitsToUv } from "./brushes/common";
 import { copyMaterial } from "./copy-material";
 import { DisplayMaterial } from "./display-material";
 
+/**
+ * Props for the FileRenderer component.
+ * @param file - The open file to render.
+ * @param viewRef - A reference to the view container element.
+ */
 interface FileRendererProps {
   file: OpenFile;
   viewRef: RefObject<HTMLDivElement | null>;
 }
 
+/**
+ * Handle for the FileRenderer component, exposing methods to parent components.
+ */
 export interface FileRendererHandle {
+  /** Renders a brush stroke at the given coordinates. */
   renderStroke: (x: number, y: number, preview: boolean) => void;
+  /** Gets the raw data from the current frame buffer object. */
   getFBOData: () => Float32Array;
+  /** Sets the data of the frame buffer object. */
   setFBOData: (data: Float32Array) => void;
+  /** Returns the textures used for rendering. */
   getTextures: () => {
     packed: THREE.WebGLRenderTarget;
     inverse: THREE.DataTexture;
     metadata: THREE.DataTexture;
   } | null;
+  /** Restores the spectrogram to its original state. */
   restoreOriginal: () => void;
+  /** Triggers audio synthesis from the current spectrogram data. */
   synthesize: () => void;
 }
 
+/**
+ * The `FileRenderer` component is responsible for rendering the spectrogram of an audio file
+ * and handling real-time brush interactions for editing the spectrogram data.
+ * It uses `react-three-fiber` for rendering and manages textures and frame buffer objects (FBOs)
+ * for processing and displaying the spectrogram.
+ */
 export const FileRenderer = memo(
   forwardRef<FileRendererHandle, FileRendererProps>(({ file, viewRef }, ref) => {
     const { spectrogramData } = file;
     const { gl, camera, invalidate } = useThree();
 
+    // Component state and refs
     const [sourceFile, setSourceFile] = useState(() => store.get(sourceFileAtom));
 
+    // Textures for spectrogram data
     const [packedDataTex, setPackedDataTex] = useState<THREE.DataTexture | null>(null);
     const [originalPackedDataTex, setOriginalPackedDataTex] = useState<THREE.DataTexture | null>(null);
     const [inverseMapTex, setInverseMapTex] = useState<THREE.DataTexture | null>(null);
@@ -63,10 +85,12 @@ export const FileRenderer = memo(
       meta?: THREE.DataTexture;
     }>({});
 
+    // Interaction state
     const mouseUv = useRef<THREE.Vector2 | null>(null);
     const displayMode = useRef<"preview" | "committed">("committed");
     const applyStroke = useRef(false);
 
+    // Subscriptions to global state
     useEffect(() => {
       const unsubMouseUv = store.sub(mousePosAtom, () => {
         mouseUv.current = store.get(mousePosAtom);
@@ -84,6 +108,7 @@ export const FileRenderer = memo(
       };
     }, [invalidate]);
 
+    // Materials and scene objects for rendering
     const displayMaterial = useMemo(() => new DisplayMaterial(), []);
 
     const mesh = useRef<THREE.Mesh>(null!);
@@ -94,6 +119,7 @@ export const FileRenderer = memo(
       return { scene, mesh };
     }, []);
 
+    // Frame Buffer Objects for ping-pong rendering
     const fbo1 = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, {
       format: THREE.RGBAFormat,
       type: THREE.FloatType,
@@ -109,11 +135,13 @@ export const FileRenderer = memo(
       type: THREE.FloatType,
     });
 
+    // Rendering state
     const pingPong = useRef(0);
     const isInitialized = useRef(false);
 
     const strokeParams = useRef<{ x: number; y: number; preview: boolean } | null>(null);
 
+    // Effect to create textures for the source file when it changes
     useEffect(() => {
       if (sourceFile && sourceFile.filePath !== file.filePath) {
         const { packedData, metadata, textureWidth, textureHeight, numBands } = sourceFile.spectrogramData;
@@ -144,6 +172,7 @@ export const FileRenderer = memo(
       };
     }, [sourceFile, file.filePath]);
 
+    // Effect to create and manage spectrogram textures
     useEffect(() => {
       isInitialized.current = false;
       const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
@@ -198,10 +227,14 @@ export const FileRenderer = memo(
       };
     }, [debouncedSynthesis]);
 
+    /**
+     * The main render loop, called on every frame.
+     * This handles initialization, brush stroke application, and updating the display material.
+     */
     useFrame(({ gl, camera }) => {
       if (!fboMesh || !spectrogramData || !packedDataTex || !inverseMapTex || !metadataTex || !fbo1 || !fbo2) return;
 
-      // Initial copy
+      // Initial copy of the spectrogram data to the FBO
       if (!isInitialized.current) {
         fboMesh.material = copyMaterial;
         copyMaterial.uniforms.inputTex.value = packedDataTex;
@@ -221,6 +254,7 @@ export const FileRenderer = memo(
 
       if (!sourceFile) return;
 
+      // Get current brush and view parameters from the global store
       const brushType = store.get(brushTypeAtom);
       const gridSize = store.get(gridSizeAtom);
       const zoomPower = store.get(zoomPowerAtom);
@@ -240,11 +274,13 @@ export const FileRenderer = memo(
 
       if (!textures) return;
 
+      // Determine the current FBO for reading
       const currentReadFBO = pingPong.current === 0 ? fbo1 : fbo2;
       const bpms = store.get(filesBpmAtom);
       const bpm = bpms[file.filePath] || 120;
       const sourceBpm = bpms[sourceFile.filePath] || 120;
 
+      // Set up common uniforms for the brush shaders
       const commonUniforms: CommonUniforms = {
         sourceSpectrogramTex: textures.packed.texture,
         sourceSpectrogramTextureSize: sourceFile.spectrogramData.packedTextureSize,
@@ -296,7 +332,7 @@ export const FileRenderer = memo(
         pi: Math.PI,
       };
 
-      // Render stroke
+      // Render brush stroke if requested
       if (strokeParams.current && applyStroke.current) {
         const source = textures.packed;
 
@@ -309,6 +345,7 @@ export const FileRenderer = memo(
         let readBuffer = source;
         let writeBuffer = passFbo;
 
+        // Multi-pass rendering for complex brushes
         for (let i = 0; i < numPasses; i++) {
           const material = brush.materials[i];
           fboMesh.material = material;
@@ -331,6 +368,7 @@ export const FileRenderer = memo(
 
         gl.setRenderTarget(null);
 
+        // If the stroke is not a preview, commit the changes
         if (!preview) {
           pingPong.current = 1 - pingPong.current;
           displayMode.current = "committed";
@@ -341,7 +379,7 @@ export const FileRenderer = memo(
         }
       }
 
-      // Update display material
+      // Update the display material with the latest FBO texture and uniforms
       const currentFBO = pingPong.current === 0 ? fbo1 : fbo2;
       const nextFBO = pingPong.current === 0 ? fbo2 : fbo1;
 
@@ -372,6 +410,9 @@ export const FileRenderer = memo(
       if (applyStroke.current) applyStroke.current = false;
     });
 
+    /**
+     * Reads the pixel data from the current FBO.
+     */
     const getFBOData = (): Float32Array => {
       const { packedTextureSize } = spectrogramData;
       const fboToRead = pingPong.current === 0 ? fbo1 : fbo2;
@@ -381,6 +422,9 @@ export const FileRenderer = memo(
       return buffer;
     };
 
+    /**
+     * Sets the FBO data from an external source (e.g., for undo/redo).
+     */
     const setFBOData = (data: Float32Array) => {
       if (!spectrogramData || !fbo1 || !fbo2 || !fboMesh) return;
       const { packedTextureSize } = spectrogramData;
@@ -413,6 +457,9 @@ export const FileRenderer = memo(
       invalidate();
     };
 
+    /**
+     * Returns the current set of textures.
+     */
     const getTextures = (): {
       packed: THREE.WebGLRenderTarget;
       inverse: THREE.DataTexture;
@@ -426,6 +473,9 @@ export const FileRenderer = memo(
       };
     };
 
+    /**
+     * Restores the spectrogram to its original, unmodified state.
+     */
     const restoreOriginal = () => {
       if (!spectrogramData || !fbo1 || !fbo2 || !fboMesh || !originalPackedDataTex) return;
 
@@ -444,12 +494,18 @@ export const FileRenderer = memo(
       debouncedSynthesis(file, getFBOData());
     };
 
+    /**
+     * Triggers audio synthesis for the current state of the spectrogram.
+     */
     const synthesize = () => {
       store.set(isSynthesizingAtom, true);
       const buffer = getFBOData();
       debouncedSynthesis(file, buffer);
     };
 
+    /**
+     * Exposes component methods to the parent through a ref.
+     */
     useImperativeHandle(ref, () => ({
       renderStroke: (x: number, y: number, preview: boolean) => {
         strokeParams.current = { x, y, preview };
@@ -471,6 +527,8 @@ export const FileRenderer = memo(
       return null;
     }
 
+    // The component renders a `View` from `drei` which contains a mesh
+    // with a plane geometry and the custom `displayMaterial`.
     return (
       <View track={viewRef as RefObject<HTMLElement>}>
         <mesh ref={mesh}>
