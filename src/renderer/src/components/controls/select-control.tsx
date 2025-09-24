@@ -1,43 +1,60 @@
 import { Group, Select, Text } from "@mantine/core";
 import { WritableAtom, useAtom } from "jotai";
 import { RESET, useResetAtom } from "jotai/utils";
-import { memo, useCallback } from "react";
 
-export const SelectControl = memo(
-  <T extends string>({
-    label,
-    atom,
-    data,
-    labelWidth = 50,
-  }: {
-    label: string;
-    atom: WritableAtom<T, [arg: T | typeof RESET], void>;
-    data: (T | { value: T; label: string })[];
-    labelWidth?: number;
-  }) => {
-    const [value, setValue] = useAtom(atom);
-    const reset = useResetAtom(atom);
+type SelectControlProps<T extends string | number> = {
+  label: string;
+  atom: WritableAtom<T, [arg: T | typeof RESET], void>;
+  data: readonly (T | { value: T; label: string })[];
+  labelWidth?: number;
+};
 
-    const handleChange = useCallback(
-      (val: string | null) => {
-        if (val !== null) {
-          setValue(val as T);
+export const SelectControl = <T extends string | number>({
+  label,
+  atom,
+  data,
+  labelWidth = 50,
+}: SelectControlProps<T>) => {
+  const [value, setValue] = useAtom(atom);
+  const reset = useResetAtom(atom);
+
+  const handleChange = (val: string | null) => {
+    if (val !== null) {
+      const originalItem = data.find((item) => {
+        const itemValue = typeof item === "object" ? item.value : item;
+        return itemValue.toString() === val;
+      });
+
+      if (originalItem !== undefined) {
+        const originalValue = typeof originalItem === "object" ? originalItem.value : originalItem;
+        if (typeof value === "number") {
+          setValue(parseFloat(originalValue.toString()) as T);
         } else {
-          reset();
+          setValue(originalValue as T);
         }
-      },
-      [reset, setValue],
-    );
+      }
+    }
+  };
 
-    return (
-      <Group key={label} gap="sm" wrap="nowrap">
-        <Text size="xs" w={labelWidth} onDoubleClick={() => reset()}>
-          {label}
-        </Text>
-        <Select variant="unstyled" size="xs" flex={1} key={label} data={data} value={value} onChange={handleChange} />
-      </Group>
-    );
-  },
-);
+  const selectData = data.map((item) =>
+    typeof item === "object"
+      ? { value: item.value.toString(), label: item.label }
+      : { value: item.toString(), label: item.toString() },
+  );
 
-SelectControl.displayName = "SelectControl";
+  return (
+    <Group gap={"xs"} wrap="nowrap" h={25}>
+      <Text size="xs" w={labelWidth} lh={1.2} onDoubleClick={() => reset()}>
+        {label}
+      </Text>
+      <Select
+        size="xs"
+        variant="unstyled"
+        flex={1}
+        data={selectData}
+        value={value.toString()}
+        onChange={handleChange}
+      />
+    </Group>
+  );
+};

@@ -1,18 +1,22 @@
+import { createTheme, MantineProvider } from "@mantine/core";
+import "@mantine/core/styles.css";
+import { Notifications } from "@mantine/notifications";
+import "@mantine/notifications/styles.css";
+import { Provider as JotaiProvider } from "jotai";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { MantineProvider } from "@mantine/core";
-import { Notifications } from "@mantine/notifications";
 import App from "./app";
 import "./assets/main.css";
-import "@mantine/core/styles.css";
-import "@mantine/notifications/styles.css";
 import { store } from "./store";
-import { Provider as JotaiProvider } from "jotai";
+
+const theme = createTheme({
+  primaryColor: "orange",
+});
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <JotaiProvider store={store}>
-      <MantineProvider forceColorScheme="dark" theme={{ primaryColor: "orange" }}>
+      <MantineProvider forceColorScheme="dark" theme={theme}>
         <Notifications />
         <App />
       </MantineProvider>

@@ -1,17 +1,14 @@
 import { beatValues } from "@/lib/constants";
 import {
-  activeFileAtom,
   bandsPerOctaveAtom,
   brushHeightAtom,
   brushSizeLockedToGridAtom,
   brushWidthAtom,
   gridSizeAtom,
   gridSizeYAtom,
-  minFreqAtom,
   normalizeAtom,
   scaleTonicAtom,
   scaleTypeAtom,
-  store,
 } from "@/store";
 import { Flex } from "@mantine/core";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
@@ -24,9 +21,6 @@ import { SwitchControl } from "../controls/switch-control";
 import { Section } from "../section";
 
 export function ControlsPanel() {
-  const [bandsPerOctave, setBandsPerOctave] = useAtom(bandsPerOctaveAtom);
-  const activeFile = useAtomValue(activeFileAtom);
-
   const brushSizeLocked = useAtomValue(brushSizeLockedToGridAtom);
   const [gridSize] = useAtom(gridSizeAtom);
   const [gridSizeY] = useAtom(gridSizeYAtom);
@@ -42,27 +36,15 @@ export function ControlsPanel() {
     }
   }, [brushSizeLocked, gridSize, gridSizeY, setBrushWidth, setBrushHeight]);
 
-  const handleAnalysisParamsChange = (value: string | null) => {
-    if (value && activeFile) {
-      const newBandsPerOctave = parseInt(value, 10);
-      setBandsPerOctave(newBandsPerOctave);
-      const params = {
-        bandsPerOctave: newBandsPerOctave,
-        fmin: store.get(minFreqAtom),
-      };
-      window.api.reanalyzeCurrentFile(params);
-    }
-  };
-
   return (
     <Flex direction="column" w={300} p="xs">
       <Section label="Analysis">
         <SelectControl
           label="Bands/oct"
           atom={bandsPerOctaveAtom}
-          data={["12", "24", "36", "48", "60", "72", "84", "96"].map((value) => ({
+          data={[12, 24, 36, 48, 60, 72, 84, 96].map((value) => ({
             value,
-            label: value,
+            label: value.toString(),
           }))}
         />
       </Section>
