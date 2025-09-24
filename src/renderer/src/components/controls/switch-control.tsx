@@ -18,7 +18,7 @@ export const SwitchControl = ({
       <Text size="xs" w={labelWidth} onDoubleClick={() => reset()}>
         {label}
       </Text>
-      <Switch checked={value} onChange={(e) => setValue(e.currentTarget.checked)} />
+      <Switch variant="unstyled" checked={value} onChange={(e) => setValue(e.currentTarget.checked)} />
     </Group>
   );
 };

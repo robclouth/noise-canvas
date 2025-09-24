@@ -61,7 +61,7 @@ export const scrollAtom = atom(0);
 export const featherXAtom = atomWithStorage("featherX", 0, undefined, { getOnInit: true });
 export const featherYAtom = atomWithStorage("featherY", 0, undefined, { getOnInit: true });
 
-export const brushIntensityAtom = atomWithStorage("brushIntensity", 1.0, undefined, { getOnInit: true });
+export const brushIntensityAtom = atomWithStorage("brushIntensity", 100, undefined, { getOnInit: true });
 export const panAtom = atomWithStorage("pan", 0.0, undefined, { getOnInit: true });
 
 export const scaleTonicAtom = atomWithStorage("scaleTonic", "C", undefined, { getOnInit: true });

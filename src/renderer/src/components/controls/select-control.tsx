@@ -34,7 +34,7 @@ export const SelectControl = memo(
         <Text size="xs" w={labelWidth} onDoubleClick={() => reset()}>
           {label}
         </Text>
-        <Select size="xs" flex={1} key={label} data={data} value={value} onChange={handleChange} />
+        <Select variant="unstyled" size="xs" flex={1} key={label} data={data} value={value} onChange={handleChange} />
       </Group>
     );
   },
