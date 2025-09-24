@@ -80,6 +80,9 @@ export const featherXAtom = atomWithStorage("featherX", 0, undefined, { getOnIni
 export const featherYAtom = atomWithStorage("featherY", 0, undefined, { getOnInit: true });
 
 export const brushIntensityAtom = atomWithStorage("brushIntensity", 100, undefined, { getOnInit: true });
+export const brushIntensityModAtom = atomWithStorage("brushIntensityMod", 0, undefined, {
+  getOnInit: true,
+});
 export const panAtom = atomWithStorage("pan", 0.0, undefined, { getOnInit: true });
 
 export const scaleTonicAtom = atomWithStorage("scaleTonic", "C", undefined, { getOnInit: true });
@@ -97,5 +100,21 @@ export const minFreqAtom = atomWithStorage("minFreq", 8.1758, undefined, { getOn
 export const blendModeAtom = atomWithStorage<
   "Normal" | "Maximum" | "Minimum" | "Dissolve" | "Multiply" | "Difference" | "Subtract" | "Divide"
 >("blendMode", "Normal", undefined, {
+  getOnInit: true,
+});
+
+// Modulator
+
+export const modulatorModeAtom = atomWithStorage<number>("modulatorMode", 0, undefined, { getOnInit: true });
+export const modulatorPatternShapeAtom = atomWithStorage<number>("modulatorPatternShape", 0, undefined, {
+  getOnInit: true,
+});
+export const modulatorPatternRateBeatsAtom = atomWithStorage("modulatorPatternRateBeats", 1, undefined, {
+  getOnInit: true,
+});
+export const modulatorPatternRateCentsAtom = atomWithStorage("modulatorPatternRateCents", 0, undefined, {
+  getOnInit: true,
+});
+export const modulatorPatternRadialAtom = atomWithStorage("modulatorPatternRadial", false, undefined, {
   getOnInit: true,
 });

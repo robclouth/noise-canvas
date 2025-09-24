@@ -1,4 +1,4 @@
-export const beatValues = [
+export const BEAT_VALUES = [
   { value: 1 / 64, label: "1/64 beats" },
   { value: 1 / 32, label: "1/32 beats" },
   { value: 1 / 16, label: "1/16 beats" },
@@ -17,7 +17,7 @@ export const beatValues = [
   { value: 32, label: "32 beats" },
 ];
 
-export const pitchValues = [
+export const PITCH_VALUES = [
   { value: 1, label: "1 semi" },
   { value: 2, label: "2 semis" },
   { value: 3, label: "3 semis" },
@@ -39,3 +39,16 @@ export const pitchValues = [
   { value: 84, label: "84 semis" },
   { value: 96, label: "96 semis" },
 ];
+
+export const MODULATOR_MODE = {
+  LFO: 0,
+} as const;
+
+export const PATTERN_SHAPE = {
+  SINE: 0,
+  TRIANGLE: 1,
+  SQUARE: 2,
+  SAWTOOTH: 3,
+  PULSE: 4,
+  RANDOM: 5,
+} as const;

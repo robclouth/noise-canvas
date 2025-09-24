@@ -1,4 +1,4 @@
-import { beatValues } from "@/lib/constants";
+import { BEAT_VALUES } from "@/lib/constants";
 import {
   bandsPerOctaveAtom,
   brushHeightAtom,
@@ -10,7 +10,7 @@ import {
   scaleTonicAtom,
   scaleTypeAtom,
 } from "@/store";
-import { Flex } from "@mantine/core";
+import { Stack } from "@mantine/core";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { startCase } from "lodash-es";
 import { useEffect } from "react";
@@ -37,7 +37,7 @@ export function ControlsPanel() {
   }, [brushSizeLocked, gridSize, gridSizeY, setBrushWidth, setBrushHeight]);
 
   return (
-    <Flex direction="column" w={300} p="xs">
+    <Stack w={300} miw={300} p="xs">
       <Section label="Analysis">
         <SelectControl
           label="Bands/oct"
@@ -49,7 +49,7 @@ export function ControlsPanel() {
         />
       </Section>
       <Section label="Grid">
-        <SliderControl label="Time" atom={gridSizeAtom} values={[{ label: "Off", value: 0 }, ...beatValues]} />
+        <SliderControl label="Time" atom={gridSizeAtom} values={[{ label: "Off", value: 0 }, ...BEAT_VALUES]} />
         <SliderControl
           label="Pitch"
           atom={gridSizeYAtom}
@@ -82,6 +82,6 @@ export function ControlsPanel() {
       <Section label="Output">
         <SwitchControl label="Normalize" atom={normalizeAtom} />
       </Section>
-    </Flex>
+    </Stack>
   );
 }

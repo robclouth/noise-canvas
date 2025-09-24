@@ -1,6 +1,7 @@
-import { Group, NumberInput, Slider, Text } from "@mantine/core";
+import { Group, NumberInput, Popover, Slider, Text } from "@mantine/core";
 import { WritableAtom, useAtom } from "jotai";
 import { RESET, useResetAtom } from "jotai/utils";
+import { ChevronDown } from "lucide-react";
 import { SliderValue } from "../brushes/base-brush";
 
 type SliderControlPropsBase = {
@@ -9,6 +10,8 @@ type SliderControlPropsBase = {
   unit?: string;
   labelWidth?: number;
   disabled?: boolean;
+  modulatable?: boolean;
+  modulatorAtom?: WritableAtom<number, [arg: number | typeof RESET], void>;
 };
 
 type ContinuousSliderProps = SliderControlPropsBase & {
@@ -32,7 +35,7 @@ type SteppedSliderProps = SliderControlPropsBase & {
 type SliderControlProps = ContinuousSliderProps | SteppedSliderProps;
 
 export const SliderControl = (props: SliderControlProps) => {
-  const { label, atom, unit = "", labelWidth = 50, disabled } = props;
+  const { label, atom, unit = "", labelWidth = 50, disabled, modulatable, modulatorAtom } = props;
   const reset = useResetAtom(atom);
   const [value, onChange] = useAtom(atom);
 
@@ -74,7 +77,7 @@ export const SliderControl = (props: SliderControlProps) => {
     rightComponent = (
       <NumberInput
         variant="unstyled"
-        h={25}
+        h={20}
         w={70}
         size="xs"
         hideControls
@@ -89,11 +92,29 @@ export const SliderControl = (props: SliderControlProps) => {
     );
   }
 
+  const labelComponent = (
+    <Text size="xs" w={labelWidth} lh={1.2} onDoubleClick={() => reset()}>
+      {label}
+    </Text>
+  );
+
   return (
-    <Group gap={"xs"} wrap="nowrap" h={25}>
-      <Text size="xs" w={labelWidth} lh={1.2} onDoubleClick={() => reset()}>
-        {label}
-      </Text>
+    <Group gap={"xs"} wrap="nowrap" h={25} align="center">
+      {modulatable && modulatorAtom ? (
+        <Popover withArrow shadow="md">
+          <Popover.Target>
+            <Group gap={2} style={{ cursor: "pointer" }}>
+              {labelComponent}
+              <ChevronDown size={12} />
+            </Group>
+          </Popover.Target>
+          <Popover.Dropdown p={2} w={300}>
+            <SliderControl label="Mod" min={-100} max={100} step={1} unit="%" atom={modulatorAtom} />
+          </Popover.Dropdown>
+        </Popover>
+      ) : (
+        labelComponent
+      )}
       <Slider mx={0} flex={1} size="xs" label={null} {...sliderProps} />
       {rightComponent}
     </Group>

@@ -32,7 +32,7 @@ uniform float destMinFreq;
 uniform float destBandsPerOctave;
 
 uniform sampler2D originalSpectrogramTex;
-uniform float pi;
+
 
 // Brush & View Uniforms
 uniform vec2 brushCenterUv;
@@ -44,7 +44,16 @@ uniform float featherY;
 uniform vec2 offsetUv;
 uniform float pan;
 uniform float brushIntensity;
+uniform float brushIntensityMod;
 uniform int blendMode; // 0: Normal, 1: Maximum, 2: Minimum
+
+uniform int modulatorMode;
+uniform int modulatorPatternShape;
+uniform float modulatorPatternRateBeats;
+uniform float modulatorPatternRateCents;
+uniform bool modulatorPatternRadial;
+
+#define PI 3.141592653589793
 
 //------------------------------------------------------------------------------
 // Coordinate System & Helpers
@@ -189,11 +198,11 @@ float getFeatherWeight(vec2 logicalUv) {
 }
 
 float unwrapPhase(float phaseDelta) {
-    return mod(phaseDelta + pi, 2.0 * pi) - pi;
+    return mod(phaseDelta + PI, 2.0 * PI) - PI;
 }
 
 vec2 unwrapPhase(vec2 phaseDelta) {
-    return mod(phaseDelta + pi, 2.0 * pi) - pi;
+    return mod(phaseDelta + PI, 2.0 * PI) - PI;
 }
 
 /**
@@ -455,11 +464,16 @@ export type CommonUniforms = {
   featherX: number;
   featherY: number;
   brushIntensity: number;
+  brushIntensityMod: number;
   offsetUv: Vector2;
   pan: number;
   bpm: number;
-  pi: number;
   blendMode: number;
+  modulatorMode: number;
+  modulatorPatternShape: number;
+  modulatorPatternRateBeats: number;
+  modulatorPatternRateCents: number;
+  modulatorPatternRadial: boolean;
 };
 
 export const defaultValues: CommonUniforms = {
@@ -491,11 +505,16 @@ export const defaultValues: CommonUniforms = {
   featherX: 0.5,
   featherY: 0.5,
   brushIntensity: 1.0,
+  brushIntensityMod: 0.0,
   offsetUv: new Vector2(0, 0),
   pan: 0.0,
   bpm: 120.0,
-  pi: Math.PI,
   blendMode: 0,
+  modulatorMode: 0,
+  modulatorPatternShape: 0,
+  modulatorPatternRateBeats: 1.0,
+  modulatorPatternRateCents: 0.0,
+  modulatorPatternRadial: false,
 };
 
 export function unitsToUv(

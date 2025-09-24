@@ -1,11 +1,12 @@
 import { brushes } from "@/components/brushes";
 import { ParameterControl } from "@/components/controls/parameter-control";
 import { SelectControl } from "@/components/controls/select-control";
-import { beatValues, pitchValues } from "@/lib/constants";
+import { BEAT_VALUES, PITCH_VALUES } from "@/lib/constants";
 import {
   blendModeAtom,
   brushHeightAtom,
   brushIntensityAtom,
+  brushIntensityModAtom,
   brushSizeLockedToGridAtom,
   brushTypeAtom,
   brushWidthAtom,
@@ -18,7 +19,7 @@ import {
   offsetYAtom,
   panAtom,
 } from "@/store";
-import { Flex } from "@mantine/core";
+import { Stack } from "@mantine/core";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useEffect } from "react";
 import { SliderControl } from "../controls/slider-control";
@@ -44,24 +45,33 @@ export function BrushPanel() {
 
   const brush = brushes[brushType];
   return (
-    <Flex direction="column" w={300} p="xs">
+    <Stack w={300} miw={300} p="xs">
       <Section label="Size">
         <SliderControl
           label="Width"
           atom={brushWidthAtom}
-          values={[...beatValues, { label: "Full", value: 0 }]}
+          values={[...BEAT_VALUES, { label: "Full", value: 0 }]}
           disabled={brushSizeLocked}
         />
         <SliderControl
           label="Height"
           atom={brushHeightAtom}
-          values={[...pitchValues, { label: "Full", value: 0 }]}
+          values={[...PITCH_VALUES, { label: "Full", value: 0 }]}
           disabled={brushSizeLocked}
         />
         <SwitchControl label="Use grid" atom={brushSizeLockedToGridAtom} />
       </Section>
       <Section label="Output">
-        <SliderControl label="Intensity" atom={brushIntensityAtom} min={0} max={100} step={1} unit="%" />
+        <SliderControl
+          label="Intensity"
+          atom={brushIntensityAtom}
+          min={0}
+          max={100}
+          step={1}
+          unit="%"
+          modulatable
+          modulatorAtom={brushIntensityModAtom}
+        />
         <SliderControl label="Pan" atom={panAtom} min={-1} max={1} step={0.01} />
         <SelectControl
           label="Blend"
@@ -78,9 +88,9 @@ export function BrushPanel() {
           label="Time"
           atom={offsetXAtom}
           values={[
-            ...beatValues.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
+            ...BEAT_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
             { label: "0 beats", value: 0 },
-            ...beatValues,
+            ...BEAT_VALUES,
           ]}
         />
         <SliderControl label="Pitch" atom={offsetYAtom} min={-48} max={48} step={1} unit=" semis" />
@@ -100,6 +110,6 @@ export function BrushPanel() {
       <Section label="Modulator">
         <ModulatorView />
       </Section>
-    </Flex>
+    </Stack>
   );
 }

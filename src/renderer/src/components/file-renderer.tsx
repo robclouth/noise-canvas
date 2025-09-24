@@ -3,12 +3,18 @@ import {
   blendModeAtom,
   brushHeightAtom,
   brushIntensityAtom,
+  brushIntensityModAtom,
   brushTypeAtom,
   brushWidthAtom,
   featherXAtom,
   featherYAtom,
   filesBpmAtom,
   gridSizeAtom,
+  modulatorModeAtom,
+  modulatorPatternRadialAtom,
+  modulatorPatternRateBeatsAtom,
+  modulatorPatternRateCentsAtom,
+  modulatorPatternShapeAtom,
   mousePosAtom,
   offsetXAtom,
   offsetYAtom,
@@ -285,6 +291,7 @@ export const FileRenderer = memo(
       const scroll = store.get(scrollAtom);
       const pan = store.get(panAtom);
       const brushIntensity = store.get(brushIntensityAtom);
+      const brushIntensityMod = store.get(brushIntensityModAtom);
       const offsetX = store.get(offsetXAtom);
       const offsetY = store.get(offsetYAtom);
       const featherX = store.get(featherXAtom);
@@ -294,6 +301,12 @@ export const FileRenderer = memo(
       const blendMode = store.get(blendModeAtom);
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
       const sourceTotalDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
+
+      const modulatorMode = store.get(modulatorModeAtom);
+      const modulatorPatternShape = store.get(modulatorPatternShapeAtom);
+      const modulatorPatternRateBeats = store.get(modulatorPatternRateBeatsAtom);
+      const modulatorPatternRateCents = store.get(modulatorPatternRateCentsAtom);
+      const modulatorPatternRadial = store.get(modulatorPatternRadialAtom);
 
       const sourceRendererRef = rendererRefs[sourceFile.filePath];
 
@@ -344,7 +357,8 @@ export const FileRenderer = memo(
           : new THREE.Vector2(0, 0),
         featherX: featherX / 100,
         featherY: featherY / 100,
-        brushIntensity,
+        brushIntensity: brushIntensity / 100,
+        brushIntensityMod: brushIntensityMod / 100,
         pan,
         bpm,
         offsetUv: unitsToUv(
@@ -355,8 +369,12 @@ export const FileRenderer = memo(
           sourceFile.spectrogramData.bandsPerOctave,
           sourceFile.spectrogramData.numBands,
         ),
-        pi: Math.PI,
         blendMode: blendModeMap[blendMode],
+        modulatorMode,
+        modulatorPatternShape,
+        modulatorPatternRateBeats,
+        modulatorPatternRateCents,
+        modulatorPatternRadial,
       };
 
       // Render brush stroke if requested
