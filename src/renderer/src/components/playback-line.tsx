@@ -1,16 +1,15 @@
 import { playbackTimeAtom } from "@/audio-manager";
 import { isPlayingAtom, scrollAtom, store, zoomPowerAtom } from "@/store";
-import type { OpenFile } from "@renderer/types";
 import { useAtomValue } from "jotai";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { zoomedToScreen } from "./brushes/common";
 
 interface PlaybackLineProps {
-  file: OpenFile;
+  duration: number;
 }
 
-export const PlaybackLine = ({ file }: PlaybackLineProps) => {
+export const PlaybackLine = ({ duration }: PlaybackLineProps) => {
   const lineRef = useRef<HTMLDivElement>(null);
   const isPlaying = useAtomValue(isPlayingAtom);
   const animationFrameIdRef = useRef<number | null>(null);
@@ -18,13 +17,11 @@ export const PlaybackLine = ({ file }: PlaybackLineProps) => {
   useEffect(() => {
     const animate = () => {
       if (lineRef.current) {
-        const { spectrogramData } = file;
         const zoomPower = store.get(zoomPowerAtom);
         const scroll = store.get(scrollAtom);
         const playbackTime = store.get(playbackTimeAtom);
 
-        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const progress = playbackTime / totalDuration;
+        const progress = playbackTime / duration;
         const screenCoords = zoomedToScreen(new THREE.Vector2(progress, 0), zoomPower, scroll);
 
         lineRef.current.style.display = "block";
@@ -43,7 +40,7 @@ export const PlaybackLine = ({ file }: PlaybackLineProps) => {
     return () => {
       if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
     };
-  }, [isPlaying, file]);
+  }, [isPlaying, duration]);
 
   return (
     <div

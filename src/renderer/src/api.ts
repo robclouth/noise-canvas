@@ -20,7 +20,7 @@ let unsubscribers: (() => void)[] = [];
 
 export function init() {
   if (process.env.NODE_ENV === "development") {
-    if (Object.keys(store.get(openFilesAtom)).length === 0) {
+    if (store.get(openFilesAtom).length === 0) {
       openFile(
         "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
       );
@@ -47,13 +47,13 @@ export function init() {
   const unsubCloseActiveFile = window.api.onCloseActiveFile(() => {
     const activeFile = store.get(activeFileAtom);
     if (activeFile) {
-      closeFile(activeFile);
+      closeFile(activeFile.filePath);
     }
   });
   unsubscribers.push(unsubCloseActiveFile);
 
   const unsubCloseAllFiles = window.api.onCloseAllFiles(() => {
-    store.set(openFilesAtom, {});
+    store.set(openFilesAtom, []);
     store.set(activeFilePathAtom, null);
   });
   unsubscribers.push(unsubCloseAllFiles);
@@ -153,18 +153,17 @@ export function destroy() {
   unsubscribers.forEach((unsub) => unsub());
   unsubscribers = [];
 
-  store.set(openFilesAtom, {});
+  store.set(openFilesAtom, []);
   store.set(activeFilePathAtom, null);
   store.set(sourceFilePathAtom, null);
 }
 
 export function addFile(payload: AnalysisPayloadForRenderer) {
-  const openFiles = store.get(openFilesAtom);
-  if (payload.filePath in openFiles) {
+  if (store.get(openFilesAtom).some((f) => f.filePath === payload.filePath)) {
     return;
   }
 
-  const newFile = {
+  const newFile: OpenFile = {
     filePath: payload.filePath,
     spectrogramData: {
       packedData: new Float32Array(payload.data.buffer, payload.data.byteOffset, payload.data.byteLength / 4),
@@ -195,7 +194,7 @@ export function addFile(payload: AnalysisPayloadForRenderer) {
     },
   };
 
-  store.set(openFilesAtom, (openFiles) => ({ ...openFiles, [newFile.filePath]: newFile }));
+  store.set(openFilesAtom, (openFiles) => [...openFiles, newFile]);
   if (!store.get(filesBpmAtom)[newFile.filePath]) {
     store.set(filesBpmAtom, (bpms) => ({ ...bpms, [newFile.filePath]: 120 }));
   }
@@ -211,13 +210,13 @@ function openFile(filePath: string) {
   window.api.loadFile(filePath, params);
 }
 
-export function closeFile(file: OpenFile) {
-  const isClosingSource = store.get(sourceFilePathAtom) === file.filePath;
-  store.set(openFilesAtom, (openFiles) => omit(openFiles, file.filePath));
-  store.set(filesBpmAtom, (bpms) => omit(bpms, file.filePath));
-  window.api.fileClosed(file.filePath);
+export function closeFile(filePath: string) {
+  const isClosingSource = store.get(sourceFilePathAtom) === filePath;
+  store.set(openFilesAtom, (openFiles) => openFiles.filter((f) => f.filePath !== filePath));
+  store.set(filesBpmAtom, (bpms) => omit(bpms, filePath));
+  window.api.fileClosed(filePath);
   const openFiles = store.get(openFilesAtom);
-  const filePaths = Object.keys(openFiles);
+  const filePaths = openFiles.map((f) => f.filePath);
 
   let newActiveFilePath: string | null = null;
   if (filePaths.length > 0) {

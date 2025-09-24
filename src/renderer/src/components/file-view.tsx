@@ -3,11 +3,10 @@ import {
   activeFilePathAtom,
   bandsPerOctaveAtom,
   brushWidthAtom,
-  filesBpmAtom,
+  fileBpmAtom,
   gridSizeAtom,
   gridSizeYAtom,
   mousePosAtom,
-  openFilesAtom,
   rendererRefs,
   scrollAtom,
   sourceFilePathAtom,
@@ -17,16 +16,18 @@ import {
 import { ActionIcon, Box, Button, Flex, NumberInput, Title } from "@mantine/core";
 import { View } from "@react-three/drei";
 import { closeFile } from "@renderer/api";
-import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { OpenFile } from "@renderer/types";
+import { Atom, useAtom, useAtomValue, useSetAtom } from "jotai";
+import { selectAtom } from "jotai/utils";
 import { X } from "lucide-react";
-import { memo, MouseEventHandler, useEffect, useRef } from "react";
+import { memo, MouseEventHandler, useEffect, useMemo, useRef } from "react";
 import { Vector2 } from "three";
 import { screenToZoomed } from "./brushes/common";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
 
-interface FileViewProps {
-  filePath: string;
+export interface FileViewProps {
+  fileAtom: Atom<OpenFile>;
 }
 
 function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>, bpm: number): [number, number] | null {
@@ -80,22 +81,26 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>, bpm: num
   return [snappedX, snappedY];
 }
 
-export const FileView = memo(({ filePath }: FileViewProps) => {
-  const files = useAtomValue(openFilesAtom);
-  const file = files[filePath];
+export const FileView = memo(({ fileAtom }: FileViewProps) => {
+  const filePathAtom = useMemo(() => selectAtom(fileAtom, (f) => f.filePath), [fileAtom]);
+  const filePath = useAtomValue(filePathAtom);
+
+  const spectrogramDataAtom = useMemo(() => selectAtom(fileAtom, (f) => f.spectrogramData), [fileAtom]);
+  const spectrogramData = useAtomValue(spectrogramDataAtom);
+
+  const file = useMemo(() => ({ filePath, spectrogramData }) as OpenFile, [filePath, spectrogramData]);
+
   const activeFile = useAtomValue(activeFileAtom);
+  const isActive = activeFile?.filePath === filePath;
   const setMousePos = useSetAtom(mousePosAtom);
   const setActiveFilePath = useSetAtom(activeFilePathAtom);
-  const [bpms, setBpms] = useAtom(filesBpmAtom);
-  const [sourceFilePath, setSourceFilePath] = useAtom(sourceFilePathAtom);
+  const sourceFilePath = useAtomValue(sourceFilePathAtom);
+  const setSourceFilePath = useSetAtom(sourceFilePathAtom);
+
   const isSource = sourceFilePath === filePath;
-  const bpm = bpms[filePath] || 120;
-  const setBpm = (newBpm: number) => {
-    setBpms((currentBpms) => ({
-      ...currentBpms,
-      [file.filePath]: newBpm,
-    }));
-  };
+
+  const bpmAtom = useMemo(() => fileBpmAtom(filePath), [filePath]);
+  const [bpm, setBpm] = useAtom(bpmAtom);
 
   const rendererRef = useRef<FileRendererHandle>(null);
 
@@ -113,7 +118,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
 
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
-    if (activeFile?.filePath !== file.filePath) return;
+    if (!isActive) return;
     const coords = getSnappedCoordinates(event, bpm);
     if (!coords) return;
     const [snappedX, snappedY] = coords;
@@ -132,13 +137,13 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   };
 
   const handleMouseLeave = () => {
-    if (activeFile?.filePath !== file.filePath) return;
+    if (!isActive) return;
     setMousePos(null);
     rendererRef.current?.clearPreview();
   };
 
   const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
-    if (activeFile?.filePath !== file.filePath) return;
+    if (!isActive) return;
     if (event.button === 0 && rendererRef?.current) {
       const coords = getSnappedCoordinates(event, bpm);
       if (coords) {
@@ -148,14 +153,14 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   };
 
   const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = (event) => {
-    if (activeFile?.filePath !== file.filePath) return;
+    if (!isActive) return;
     if (event.button === 0 && rendererRef?.current) {
       // Left mouse button up
       const data = rendererRef.current.getFBOData();
       if (data) {
         window.api.addUndoState({
           data: data.buffer,
-          filePath: file.filePath,
+          filePath,
         });
       }
     }
@@ -164,13 +169,13 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   return (
     <Box
       onClick={() => {
-        setActiveFilePath(file.filePath);
+        setActiveFilePath(filePath);
       }}
       pos="relative"
-      bd={activeFile?.filePath === file.filePath ? "2px solid orange" : "2px solid transparent"}
+      bd={isActive ? "2px solid orange" : "2px solid transparent"}
     >
       <Flex justify="space-between" align="center" p="xs">
-        <Title order={6}>{file.filePath.split("/").pop() || file.filePath}</Title>
+        <Title order={6}>{filePath.split("/").pop() || filePath}</Title>
         <Flex align="center" gap="xs">
           <NumberInput w={60} value={bpm} onChange={(val) => setBpm(Number(val))} size="xs" max={999} min={10} />
           <Button
@@ -178,7 +183,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
             variant="filled"
             onClick={(e) => {
               e.stopPropagation();
-              setSourceFilePath(isSource ? null : file.filePath);
+              setSourceFilePath(isSource ? null : filePath);
             }}
             color={isSource ? "orange" : "gray"}
           >
@@ -190,7 +195,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
             size="xs"
             onClick={(e) => {
               e.stopPropagation();
-              closeFile(file);
+              closeFile(filePath);
             }}
           >
             <X />
@@ -199,7 +204,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
       </Flex>
       <Box
         h={400}
-        style={{ cursor: activeFile?.filePath === file.filePath ? "none" : "auto" }}
+        style={{ cursor: isActive ? "none" : "auto" }}
         pos="relative"
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
@@ -211,7 +216,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
         </View>
       </Box>
 
-      {activeFile?.filePath === file.filePath && <PlaybackLine file={file} />}
+      {isActive && <PlaybackLine duration={spectrogramData.numFrames / spectrogramData.sampleRate} />}
     </Box>
   );
 });

@@ -55,7 +55,9 @@ export const runSynthesis = async (file: OpenFile, processedData: Float32Array):
       audioBuffer.copyToChannel(new Float32Array(audioBufferChannels[c]), c);
     }
 
-    store.set(openFilesAtom, (openFiles) => ({ ...openFiles, [file.filePath]: { ...file, audioBuffer } }));
+    store.set(openFilesAtom, (openFiles) =>
+      openFiles.map((f) => (f.filePath === file.filePath ? { ...f, audioBuffer } : f)),
+    );
 
     const isPlaying = store.get(isPlayingAtom);
     const activeFile = store.get(activeFileAtom);
