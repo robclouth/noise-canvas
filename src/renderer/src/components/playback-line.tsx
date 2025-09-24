@@ -1,45 +1,34 @@
-import { RefObject, useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
-import { useAtomValue } from "jotai";
-import * as THREE from "three";
-import { isPlayingAtom, scrollAtom, zoomPowerAtom, store, OpenFile } from "@/store";
 import { playbackTimeAtom } from "@/audio-manager";
+import { isPlayingAtom, scrollAtom, store, zoomPowerAtom } from "@/store";
+import type { OpenFile } from "@renderer/types";
+import { useAtomValue } from "jotai";
+import { useEffect, useRef } from "react";
+import * as THREE from "three";
 import { zoomedToScreen } from "./brushes/common";
 
 interface PlaybackLineProps {
   file: OpenFile;
-  containerRef: RefObject<HTMLDivElement | null>;
 }
 
-export const PlaybackLine = ({ file, containerRef }: PlaybackLineProps) => {
+export const PlaybackLine = ({ file }: PlaybackLineProps) => {
   const lineRef = useRef<HTMLDivElement>(null);
   const isPlaying = useAtomValue(isPlayingAtom);
   const animationFrameIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     const animate = () => {
-      if (lineRef.current && containerRef.current) {
+      if (lineRef.current) {
         const { spectrogramData } = file;
         const zoomPower = store.get(zoomPowerAtom);
         const scroll = store.get(scrollAtom);
         const playbackTime = store.get(playbackTimeAtom);
-        const containerWidth = containerRef.current.clientWidth;
 
-        if (containerWidth > 0) {
-          const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-          const progress = playbackTime / totalDuration;
-          const screenCoords = zoomedToScreen(new THREE.Vector2(progress, 0), zoomPower, scroll);
-          const left = screenCoords.x * containerWidth;
+        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+        const progress = playbackTime / totalDuration;
+        const screenCoords = zoomedToScreen(new THREE.Vector2(progress, 0), zoomPower, scroll);
 
-          if (left < 0 || left > containerWidth) {
-            lineRef.current.style.display = "none";
-          } else {
-            lineRef.current.style.display = "block";
-            lineRef.current.style.left = `${left}px`;
-          }
-        } else {
-          lineRef.current.style.display = "none";
-        }
+        lineRef.current.style.display = "block";
+        lineRef.current.style.left = `${screenCoords.x * 100}%`;
       }
       animationFrameIdRef.current = requestAnimationFrame(animate);
     };
@@ -54,11 +43,9 @@ export const PlaybackLine = ({ file, containerRef }: PlaybackLineProps) => {
     return () => {
       if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
     };
-  }, [isPlaying, file, containerRef]);
+  }, [isPlaying, file]);
 
-  if (!containerRef.current) return null;
-
-  return createPortal(
+  return (
     <div
       ref={lineRef}
       style={{
@@ -70,7 +57,6 @@ export const PlaybackLine = ({ file, containerRef }: PlaybackLineProps) => {
         pointerEvents: "none",
         display: "none",
       }}
-    />,
-    containerRef.current,
+    />
   );
 };

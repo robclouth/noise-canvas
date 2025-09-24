@@ -1,9 +1,13 @@
 import { atom, createStore } from "jotai";
 import { atomWithStorage } from "jotai/utils";
+import { RefObject } from "react";
 import { Vector2 } from "three";
+import { FileRendererHandle } from "./components/file-renderer";
 import type { OpenFile, SpectrogramData } from "./types";
 
 export const store = createStore();
+
+export const rendererRefs: Record<string, RefObject<FileRendererHandle | null>> = {};
 
 export const openFilesAtom = atom<Record<string, OpenFile>>({});
 export const filesBpmAtom = atomWithStorage<Record<string, number>>("filesBpm", {}, undefined, { getOnInit: true });

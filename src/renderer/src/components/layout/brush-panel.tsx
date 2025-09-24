@@ -23,6 +23,7 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useEffect } from "react";
 import { SliderControl } from "../controls/slider-control";
 import { SwitchControl } from "../controls/switch-control";
+import { ModulatorView } from "../modulator-view";
 import { Section } from "../section";
 
 export function BrushPanel() {
@@ -45,7 +46,6 @@ export function BrushPanel() {
   return (
     <Flex direction="column" w={300} p="xs">
       <Section label="Size">
-        <SwitchControl label="Grid" atom={brushSizeLockedToGridAtom} />
         <SliderControl
           label="Width"
           atom={brushWidthAtom}
@@ -58,6 +58,7 @@ export function BrushPanel() {
           values={[...pitchValues, { label: "Full", value: 0 }]}
           disabled={brushSizeLocked}
         />
+        <SwitchControl label="Use grid" atom={brushSizeLockedToGridAtom} />
       </Section>
       <Section label="Output">
         <SliderControl label="Intensity" atom={brushIntensityAtom} min={0} max={100} step={1} unit="%" />
@@ -95,6 +96,9 @@ export function BrushPanel() {
           }))}
         />
         {brush ? brush.parameters.map((param) => <ParameterControl key={param.label} parameter={param} />) : null}
+      </Section>
+      <Section label="Modulator">
+        <ModulatorView />
       </Section>
     </Flex>
   );

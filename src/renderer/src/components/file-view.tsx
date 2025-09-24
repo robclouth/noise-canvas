@@ -7,26 +7,26 @@ import {
   gridSizeAtom,
   gridSizeYAtom,
   mousePosAtom,
+  openFilesAtom,
+  rendererRefs,
   scrollAtom,
   sourceFilePathAtom,
   store,
   zoomPowerAtom,
 } from "@/store";
 import { ActionIcon, Box, Button, Flex, NumberInput, Title } from "@mantine/core";
+import { View } from "@react-three/drei";
 import { closeFile } from "@renderer/api";
-import type { OpenFile } from "@renderer/types";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { X } from "lucide-react";
-import { memo, MouseEventHandler, RefObject, useRef } from "react";
+import { memo, MouseEventHandler, useEffect, useRef } from "react";
 import { Vector2 } from "three";
 import { screenToZoomed } from "./brushes/common";
-import { FileRendererHandle } from "./file-renderer";
+import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
 
 interface FileViewProps {
-  file: OpenFile;
-  viewRef: RefObject<HTMLDivElement | null>;
-  rendererRef: RefObject<FileRendererHandle | null>;
+  filePath: string;
 }
 
 function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>, bpm: number): [number, number] | null {
@@ -80,20 +80,35 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>, bpm: num
   return [snappedX, snappedY];
 }
 
-export const FileView = memo(({ file, viewRef, rendererRef }: FileViewProps) => {
+export const FileView = memo(({ filePath }: FileViewProps) => {
+  const files = useAtomValue(openFilesAtom);
+  const file = files[filePath];
   const activeFile = useAtomValue(activeFileAtom);
   const setMousePos = useSetAtom(mousePosAtom);
   const setActiveFilePath = useSetAtom(activeFilePathAtom);
   const [bpms, setBpms] = useAtom(filesBpmAtom);
   const [sourceFilePath, setSourceFilePath] = useAtom(sourceFilePathAtom);
-  const isSource = sourceFilePath === file.filePath;
-  const bpm = bpms[file.filePath] || 120;
+  const isSource = sourceFilePath === filePath;
+  const bpm = bpms[filePath] || 120;
   const setBpm = (newBpm: number) => {
     setBpms((currentBpms) => ({
       ...currentBpms,
       [file.filePath]: newBpm,
     }));
   };
+
+  const rendererRef = useRef<FileRendererHandle>(null);
+
+  // Use an effect to manage adding/removing the ref from the global map
+  useEffect(() => {
+    // Add the ref to the map when the component mounts
+    rendererRefs[filePath] = rendererRef;
+
+    // Return a cleanup function to remove it when the component unmounts
+    return () => {
+      delete rendererRefs[filePath];
+    };
+  }, [filePath]); // This effect runs once per file path
 
   const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -124,7 +139,7 @@ export const FileView = memo(({ file, viewRef, rendererRef }: FileViewProps) => 
 
   const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
     if (activeFile?.filePath !== file.filePath) return;
-    if (event.button === 0 && file.rendererRef?.current) {
+    if (event.button === 0 && rendererRef?.current) {
       const coords = getSnappedCoordinates(event, bpm);
       if (coords) {
         rendererRef.current!.renderStroke(coords[0], coords[1], false);
@@ -134,9 +149,9 @@ export const FileView = memo(({ file, viewRef, rendererRef }: FileViewProps) => 
 
   const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = (event) => {
     if (activeFile?.filePath !== file.filePath) return;
-    if (event.button === 0 && file.rendererRef?.current) {
+    if (event.button === 0 && rendererRef?.current) {
       // Left mouse button up
-      const data = file.rendererRef.current.getFBOData();
+      const data = rendererRef.current.getFBOData();
       if (data) {
         window.api.addUndoState({
           data: data.buffer,
@@ -183,16 +198,20 @@ export const FileView = memo(({ file, viewRef, rendererRef }: FileViewProps) => 
         </Flex>
       </Flex>
       <Box
-        style={{ cursor: activeFile?.filePath === file.filePath ? "none" : "auto" }}
-        ref={viewRef}
         h={400}
+        style={{ cursor: activeFile?.filePath === file.filePath ? "none" : "auto" }}
+        pos="relative"
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         onMouseDown={handleCanvasMouseDown}
         onMouseUp={handleCanvasMouseUp}
-      />
+      >
+        <View style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}>
+          <FileRenderer file={file} ref={rendererRef} />
+        </View>
+      </Box>
 
-      {activeFile?.filePath === file.filePath && <PlaybackLine file={file} containerRef={viewRef} />}
+      {activeFile?.filePath === file.filePath && <PlaybackLine file={file} />}
     </Box>
   );
 });

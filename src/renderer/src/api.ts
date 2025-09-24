@@ -1,9 +1,7 @@
 import { notifications } from "@mantine/notifications";
 import { omit } from "lodash-es";
-import { createRef } from "react";
 import type { AnalysisPayloadForRenderer } from "src/main/lib/types";
 import { Vector2 } from "three";
-import type { FileRendererHandle } from "./components/file-renderer";
 import {
   activeFileAtom,
   activeFilePathAtom,
@@ -12,6 +10,7 @@ import {
   minFreqAtom,
   normalizeAtom,
   openFilesAtom,
+  rendererRefs,
   sourceFilePathAtom,
   store,
 } from "./store";
@@ -74,23 +73,23 @@ export function init() {
   unsubscribers.push(unsubAnalysisError);
 
   const unsubUndo = window.api.onUndoApplyState(({ filePath, data }) => {
-    const activeFile = store.get(openFilesAtom)[filePath];
-    if (activeFile?.rendererRef?.current) {
-      activeFile.rendererRef.current.setFBOData(
-        new Float32Array(data.buffer, data.byteOffset, data.byteLength / Float32Array.BYTES_PER_ELEMENT),
-      );
-      activeFile.rendererRef.current.synthesize();
-    }
+    const rendererRef = rendererRefs[filePath];
+    if (!rendererRef?.current) return;
+    rendererRef.current.setFBOData(
+      new Float32Array(data.buffer, data.byteOffset, data.byteLength / Float32Array.BYTES_PER_ELEMENT),
+    );
+    rendererRef.current.synthesize();
   });
   unsubscribers.push(unsubUndo);
 
   const unsubRequestAudioForSaving = window.api.onRequestAudioForSaving(async () => {
     const activeFile = store.get(activeFileAtom);
-    if (!activeFile?.rendererRef?.current) {
-      return;
-    }
 
-    const processedData = activeFile.rendererRef.current.getFBOData();
+    if (!activeFile) return;
+    const rendererRef = rendererRefs[activeFile?.filePath];
+    if (!rendererRef?.current) return;
+
+    const processedData = rendererRef.current.getFBOData();
     const spectrogramData = activeFile.spectrogramData;
     if (!processedData || !spectrogramData) {
       return;
@@ -132,9 +131,12 @@ export function init() {
 
   const unsubRestore = window.api.onRestoreOriginal(() => {
     const activeFile = store.get(activeFileAtom);
-    if (activeFile?.rendererRef?.current) {
-      activeFile.rendererRef.current.restoreOriginal();
-    }
+    if (!activeFile) return;
+    const rendererRef = rendererRefs[activeFile?.filePath]; // Get the ref from the map
+
+    if (!rendererRef?.current) return;
+
+    rendererRef.current.restoreOriginal();
   });
   unsubscribers.push(unsubRestore);
 
@@ -191,8 +193,6 @@ export function addFile(payload: AnalysisPayloadForRenderer) {
         bandLengths: payload.bandLengths,
       },
     },
-    rendererRef: createRef<FileRendererHandle>(),
-    viewRef: createRef<HTMLDivElement>(),
   };
 
   store.set(openFilesAtom, (openFiles) => ({ ...openFiles, [newFile.filePath]: newFile }));

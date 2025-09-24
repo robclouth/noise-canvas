@@ -13,17 +13,18 @@ import {
   offsetXAtom,
   offsetYAtom,
   panAtom,
+  rendererRefs,
   scrollAtom,
   sourceFileAtom,
   store,
   zoomPowerAtom,
 } from "@/store";
-import { useFBO, View } from "@react-three/drei";
+import { useFBO } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { isSynthesizingAtom, runSynthesis } from "@renderer/audio-manager";
 import type { OpenFile } from "@renderer/types";
 import { debounce } from "lodash-es";
-import { forwardRef, memo, RefObject, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, memo, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { brushes } from "./brushes";
 import { CommonUniforms, unitsToUv } from "./brushes/common";
@@ -33,11 +34,9 @@ import { DisplayMaterial } from "./display-material";
 /**
  * Props for the FileRenderer component.
  * @param file - The open file to render.
- * @param viewRef - A reference to the view container element.
  */
 interface FileRendererProps {
   file: OpenFile;
-  viewRef: RefObject<HTMLDivElement | null>;
 }
 
 /**
@@ -82,7 +81,7 @@ const blendModeMap = {
  * for processing and displaying the spectrogram.
  */
 export const FileRenderer = memo(
-  forwardRef<FileRendererHandle, FileRendererProps>(({ file, viewRef }, ref) => {
+  forwardRef<FileRendererHandle, FileRendererProps>(({ file }, ref) => {
     const { spectrogramData } = file;
     const { gl, camera, invalidate } = useThree();
 
@@ -192,9 +191,13 @@ export const FileRenderer = memo(
       };
     }, [sourceFile, file.filePath]);
 
-    // Effect to create and manage spectrogram textures
     useEffect(() => {
       isInitialized.current = false;
+      invalidate(); // Request a render to trigger the initialization in useFrame
+    }, [file.filePath, invalidate]);
+
+    // Effect to create and manage spectrogram textures
+    useEffect(() => {
       const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
 
       const packed = new THREE.DataTexture(packedData, textureWidth, textureHeight, THREE.RGBAFormat, THREE.FloatType);
@@ -256,6 +259,7 @@ export const FileRenderer = memo(
 
       // Initial copy of the spectrogram data to the FBO
       if (!isInitialized.current) {
+        console.log(`initialize called for ${file.filePath}`);
         fboMesh.material = copyMaterial;
         copyMaterial.uniforms.inputTex.value = packedDataTex;
 
@@ -291,8 +295,9 @@ export const FileRenderer = memo(
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
       const sourceTotalDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
 
-      const textures = sourceFile.rendererRef.current?.getTextures();
+      const sourceRendererRef = rendererRefs[sourceFile.filePath];
 
+      const textures = sourceRendererRef?.current?.getTextures();
       if (!textures) return;
 
       // Determine the current FBO for reading
@@ -560,15 +565,12 @@ export const FileRenderer = memo(
       invalidate();
     };
 
-    // The component renders a `View` from `drei` which contains a mesh
-    // with a plane geometry and the custom `displayMaterial`.
+    // The component renders a mesh with a plane geometry and the custom `displayMaterial`.
     return (
-      <View track={viewRef as RefObject<HTMLElement>}>
-        <mesh ref={mesh}>
-          <planeGeometry args={[2, 2]} />
-          <primitive object={displayMaterial} attach="material" />
-        </mesh>
-      </View>
+      <mesh ref={mesh}>
+        <planeGeometry args={[2, 2]} />
+        <primitive object={displayMaterial} attach="material" />
+      </mesh>
     );
   }),
 );

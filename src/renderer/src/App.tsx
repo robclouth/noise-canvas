@@ -5,6 +5,8 @@ import { TransportPanel } from "@/components/layout/transport-panel";
 import { Flex } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { Notifications } from "@mantine/notifications";
+import { View } from "@react-three/drei";
+import { Canvas } from "@react-three/fiber";
 import { destroy, init } from "@renderer/api";
 import { useCallback, useEffect } from "react";
 import { togglePlayback } from "./audio-manager";
@@ -39,6 +41,13 @@ function App(): React.JSX.Element {
       </Flex>
       <ControlsPanel />
       <Notifications />
+      <Canvas
+        style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}
+        eventSource={document.getElementById("root")!}
+        frameloop="demand"
+      >
+        <View.Port />
+      </Canvas>
     </Flex>
   );
 }
