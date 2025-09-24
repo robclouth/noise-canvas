@@ -265,7 +265,6 @@ export const FileRenderer = memo(
 
       // Initial copy of the spectrogram data to the FBO
       if (!isInitialized.current) {
-        console.log(`initialize called for ${file.filePath}`);
         fboMesh.material = copyMaterial;
         copyMaterial.uniforms.inputTex.value = packedDataTex;
 
@@ -524,17 +523,6 @@ export const FileRenderer = memo(
      * Restores the spectrogram to its original, unmodified state.
      */
     const restoreOriginal = () => {
-      if (!spectrogramData || !fbo1 || !fbo2 || !fboMesh || !originalPackedDataTex) return;
-
-      pingPong.current = 0;
-
-      fboMesh.material = copyMaterial;
-      copyMaterial.uniforms.inputTex.value = originalPackedDataTex;
-
-      gl.setRenderTarget(fbo1);
-      gl.render(fboScene, camera);
-      gl.setRenderTarget(null);
-
       isInitialized.current = false;
 
       invalidate();
