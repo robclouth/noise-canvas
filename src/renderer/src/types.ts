@@ -40,7 +40,6 @@ export interface SpectrogramData {
 export interface OpenFile {
   filePath: string;
   spectrogramData: SpectrogramData;
-  audioBuffer?: AudioBuffer | null;
 }
 
 // Describes the payload sent back to the main process for synthesis

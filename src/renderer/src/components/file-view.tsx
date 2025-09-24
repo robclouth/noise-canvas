@@ -18,7 +18,6 @@ import { View } from "@react-three/drei";
 import { closeFile } from "@renderer/api";
 import { OpenFile } from "@renderer/types";
 import { Atom, useAtom, useAtomValue, useSetAtom } from "jotai";
-import { selectAtom } from "jotai/utils";
 import { X } from "lucide-react";
 import { memo, MouseEventHandler, useEffect, useMemo, useRef } from "react";
 import { Vector2 } from "three";
@@ -27,7 +26,7 @@ import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
 
 export interface FileViewProps {
-  fileAtom: Atom<OpenFile>;
+  fileAtom: Atom<OpenFile | null>;
 }
 
 function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>, bpm: number): [number, number] | null {
@@ -82,30 +81,26 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>, bpm: num
 }
 
 export const FileView = memo(({ fileAtom }: FileViewProps) => {
-  const filePathAtom = useMemo(() => selectAtom(fileAtom, (f) => f.filePath), [fileAtom]);
-  const filePath = useAtomValue(filePathAtom);
-
-  const spectrogramDataAtom = useMemo(() => selectAtom(fileAtom, (f) => f.spectrogramData), [fileAtom]);
-  const spectrogramData = useAtomValue(spectrogramDataAtom);
-
-  const file = useMemo(() => ({ filePath, spectrogramData }) as OpenFile, [filePath, spectrogramData]);
+  const file = useAtomValue(fileAtom);
 
   const activeFile = useAtomValue(activeFileAtom);
-  const isActive = activeFile?.filePath === filePath;
+  const isActive = activeFile?.filePath === file?.filePath;
   const setMousePos = useSetAtom(mousePosAtom);
   const setActiveFilePath = useSetAtom(activeFilePathAtom);
   const sourceFilePath = useAtomValue(sourceFilePathAtom);
   const setSourceFilePath = useSetAtom(sourceFilePathAtom);
 
-  const isSource = sourceFilePath === filePath;
+  const isSource = sourceFilePath === file?.filePath;
 
-  const bpmAtom = useMemo(() => fileBpmAtom(filePath), [filePath]);
+  const bpmAtom = useMemo(() => fileBpmAtom(file!.filePath), [file]);
   const [bpm, setBpm] = useAtom(bpmAtom);
 
   const rendererRef = useRef<FileRendererHandle>(null);
 
   // Use an effect to manage adding/removing the ref from the global map
   useEffect(() => {
+    if (!file) return;
+    const { filePath } = file;
     // Add the ref to the map when the component mounts
     rendererRefs[filePath] = rendererRef;
 
@@ -113,7 +108,7 @@ export const FileView = memo(({ fileAtom }: FileViewProps) => {
     return () => {
       delete rendererRefs[filePath];
     };
-  }, [filePath]); // This effect runs once per file path
+  }, [file?.filePath]); // This effect runs once per file path
 
   const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -160,22 +155,26 @@ export const FileView = memo(({ fileAtom }: FileViewProps) => {
       if (data) {
         window.api.addUndoState({
           data: data.buffer,
-          filePath,
+          filePath: file!.filePath,
         });
       }
     }
   };
 
+  if (!file) {
+    return null;
+  }
+
   return (
     <Box
       onClick={() => {
-        setActiveFilePath(filePath);
+        setActiveFilePath(file.filePath);
       }}
       pos="relative"
       bd={isActive ? "2px solid orange" : "2px solid transparent"}
     >
       <Flex justify="space-between" align="center" p="xs">
-        <Title order={6}>{filePath.split("/").pop() || filePath}</Title>
+        <Title order={6}>{file.filePath.split("/").pop() || file.filePath}</Title>
         <Flex align="center" gap="xs">
           <NumberInput w={60} value={bpm} onChange={(val) => setBpm(Number(val))} size="xs" max={999} min={10} />
           <Button
@@ -183,7 +182,7 @@ export const FileView = memo(({ fileAtom }: FileViewProps) => {
             variant="filled"
             onClick={(e) => {
               e.stopPropagation();
-              setSourceFilePath(isSource ? null : filePath);
+              setSourceFilePath(isSource ? null : file.filePath);
             }}
             color={isSource ? "orange" : "gray"}
           >
@@ -195,7 +194,7 @@ export const FileView = memo(({ fileAtom }: FileViewProps) => {
             size="xs"
             onClick={(e) => {
               e.stopPropagation();
-              closeFile(filePath);
+              closeFile(file.filePath);
             }}
           >
             <X />
@@ -216,7 +215,7 @@ export const FileView = memo(({ fileAtom }: FileViewProps) => {
         </View>
       </Box>
 
-      {isActive && <PlaybackLine duration={spectrogramData.numFrames / spectrogramData.sampleRate} />}
+      {isActive && <PlaybackLine duration={file.spectrogramData.numFrames / file.spectrogramData.sampleRate} />}
     </Box>
   );
 });

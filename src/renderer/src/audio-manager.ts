@@ -3,12 +3,12 @@ import * as Tone from "tone";
 import {
   activeFileAtom,
   audioBufferAtom,
+  audioBufferFamily,
   bandsPerOctaveAtom,
   isPlayingAtom,
   loopAtom,
   minFreqAtom,
   normalizeAtom,
-  openFilesAtom,
   store,
 } from "./store";
 import type { OpenFile } from "./types";
@@ -55,18 +55,16 @@ export const runSynthesis = async (file: OpenFile, processedData: Float32Array):
       audioBuffer.copyToChannel(new Float32Array(audioBufferChannels[c]), c);
     }
 
-    store.set(openFilesAtom, (openFiles) =>
-      openFiles.map((f) => (f.filePath === file.filePath ? { ...f, audioBuffer } : f)),
-    );
+    store.set(audioBufferFamily(file.filePath), audioBuffer);
 
     const isPlaying = store.get(isPlayingAtom);
     const activeFile = store.get(activeFileAtom);
 
-    if (isPlaying && activeFile && activeFile.filePath === file.filePath && activeFile.audioBuffer) {
+    if (isPlaying && activeFile && activeFile.filePath === file.filePath) {
       const transport = Tone.getTransport();
       let currentTime = transport.seconds;
       const loop = store.get(loopAtom);
-      const newDuration = activeFile.audioBuffer.duration;
+      const newDuration = audioBuffer.duration;
 
       if (loop) {
         currentTime %= newDuration;
@@ -77,7 +75,7 @@ export const runSynthesis = async (file: OpenFile, processedData: Float32Array):
 
       transport.cancel(0);
 
-      player.buffer = new Tone.ToneAudioBuffer(activeFile.audioBuffer);
+      player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
       player.loop = loop;
 
       if (!loop) {
@@ -113,13 +111,13 @@ export const togglePlayback = async () => {
     return;
   }
 
-  const activeFile = store.get(activeFileAtom);
+  const audioBuffer = store.get(audioBufferAtom);
 
-  if (activeFile?.audioBuffer) {
+  if (audioBuffer) {
     if (Tone.getContext().rawContext.state !== "running") {
       await Tone.start();
     }
-    player.buffer = new Tone.ToneAudioBuffer(activeFile.audioBuffer);
+    player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
     const loop = store.get(loopAtom);
     player.loop = loop;
     player.sync().start(0);
@@ -129,7 +127,7 @@ export const togglePlayback = async () => {
     if (!loop) {
       transport.scheduleOnce(() => {
         stopAudio();
-      }, activeFile.audioBuffer.duration);
+      }, audioBuffer.duration);
     }
 
     transport.start();

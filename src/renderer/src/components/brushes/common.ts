@@ -8,6 +8,76 @@ export const vertexShader = /*glsl*/ `
   }
 `;
 
+export const modulatorCode = /* glsl */ `
+float random(vec2 st) {
+    return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+}
+
+float getModulation(vec2 uv) {
+  float v = 0.0;
+  if (modulatorMode == 0) { // LFO
+    vec2 rates = vec2(1.0 / modulatorPatternRateBeats, 1200.0 / modulatorPatternRateCents);
+    vec2 cartesianPos = uv * rates;
+    vec2 centeredUv = uv - 0.5;
+    float dist = length(centeredUv * 2.0);
+    float radialRate = 1.0 / modulatorPatternRateBeats;
+
+    if (modulatorPatternShape == 0) { // SINE
+      if (modulatorPatternRadial) {
+        v = sin(dist * radialRate * PI);
+      } else {
+        v = (sin(cartesianPos.x * 2.0 * PI) + sin(cartesianPos.y * 2.0 * PI)) / 2.0;
+      }
+    } else if (modulatorPatternShape == 1) { // TRIANGLE
+      if (modulatorPatternRadial) {
+        float p = fract(dist * radialRate);
+        v = (1.0 - abs(p * 2.0 - 1.0)) * 2.0 - 1.0;
+      } else {
+        vec2 p = fract(cartesianPos);
+        float tx = 1.0 - abs(p.x * 2.0 - 1.0);
+        float ty = 1.0 - abs(p.y * 2.0 - 1.0);
+        v = (tx * ty) * 2.0 - 1.0;
+      }
+    } else if (modulatorPatternShape == 2) { // SQUARE
+      if (modulatorPatternRadial) {
+        float p = fract(dist * radialRate);
+        v = step(0.5, p) * 2.0 - 1.0;
+      } else {
+        vec2 p = fract(cartesianPos);
+        v = (pow(step(0.5, p.x) - step(0.5, p.y), 2.0)) * 2.0 - 1.0;
+      }
+    } else if (modulatorPatternShape == 3) { // SAWTOOTH
+      if (modulatorPatternRadial) {
+        v = fract(dist * radialRate) * 2.0 - 1.0;
+      } else {
+        vec2 p = fract(cartesianPos);
+        v = (p.x * p.y) * 2.0 - 1.0;
+      }
+    } else if (modulatorPatternShape == 4) { // PULSE
+      if (modulatorPatternRadial) {
+        v = (1.0 - step(0.2, fract(dist * radialRate))) * 2.0 - 1.0;
+      } else {
+        vec2 p = fract(cartesianPos);
+        v = (max(1.0 - step(0.2, p.x), 1.0 - step(0.2, p.y))) * 2.0 - 1.0;
+      }
+    } else if (modulatorPatternShape == 5) { // RANDOM
+      if (modulatorPatternRadial) {
+        float d = floor(dist * radialRate);
+        v = random(vec2(d, d)) * 2.0 - 1.0;
+      } else {
+        v = random(floor(cartesianPos)) * 2.0 - 1.0;
+      }
+    }
+  }
+  return v;
+}
+
+float applyModulation(float value, float modulationAmount, vec2 uv) {
+  float modulation = getModulation(uv);
+  return value + modulation * modulationAmount;
+}
+`;
+
 export const code = /* glsl */ `
 uniform sampler2D sourceSpectrogramTex;
 uniform sampler2D sourceMetadataTex;
@@ -55,6 +125,8 @@ uniform bool modulatorPatternRadial;
 
 #define PI 3.141592653589793
 
+${modulatorCode}
+
 //------------------------------------------------------------------------------
 // Coordinate System & Helpers
 //------------------------------------------------------------------------------
@@ -63,9 +135,6 @@ struct Coords {
     vec2 source;
 };
 
-float random(vec2 st) {
-    return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
-}
 
 vec2 screenToZoomed(vec2 screenUv) {
   float zoom = pow(2.0, viewZoomPower);
@@ -106,7 +175,7 @@ Coords getCoords(vec2 packedUv) {
     return c;
 }
 
-vec4 applyBrushEffect(vec4 original, vec4 modified, float weight) {
+vec4 applyBrushEffect(vec4 original, vec4 modified, float weight, Coords coords) {
     vec2 originalL = original.rg;
     vec2 originalR = original.ba;
     vec2 modifiedL = modified.rg;
@@ -114,10 +183,12 @@ vec4 applyBrushEffect(vec4 original, vec4 modified, float weight) {
     vec2 finalL;
     vec2 finalR;
 
+    float brushIntensityMod = applyModulation(brushIntensity, brushIntensityMod, coords.dest);
+
     float leftWeight = clamp(1.0 - pan, 0.0, 1.0);
     float rightWeight = clamp(1.0 + pan, 0.0, 1.0);
-    float effectiveWeightL = weight * brushIntensity * leftWeight;
-    float effectiveWeightR = weight * brushIntensity * rightWeight;
+    float effectiveWeightL = weight * brushIntensityMod * leftWeight;
+    float effectiveWeightR = weight * brushIntensityMod * rightWeight;
 
     if (blendMode == 3) { // Dissolve
         if (random(originalL + modifiedL) < effectiveWeightL) {
@@ -428,7 +499,7 @@ void main() {
         float weight = getFeatherWeight(coords.dest);
         vec4 sourceTexel = sampleSpectrogramTransformed(coords.source, coords.dest);
         vec4 modifiedTexel = applyBrushStroke(sourceTexel, coords);
-        gl_FragColor = applyBrushEffect(originalTexel, modifiedTexel, weight);
+        gl_FragColor = applyBrushEffect(originalTexel, modifiedTexel, weight, coords);
     } else {
         gl_FragColor = originalTexel;
     }

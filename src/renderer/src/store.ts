@@ -1,5 +1,5 @@
 import { atom, createStore } from "jotai";
-import { atomWithStorage, splitAtom } from "jotai/utils";
+import { atomFamily, atomWithStorage } from "jotai/utils";
 import { RefObject } from "react";
 import { Vector2 } from "three";
 import { FileRendererHandle } from "./components/file-renderer";
@@ -9,8 +9,20 @@ export const store = createStore();
 
 export const rendererRefs: Record<string, RefObject<FileRendererHandle | null>> = {};
 
-export const openFilesAtom = atom<OpenFile[]>([]);
-export const openFileAtomsAtom = splitAtom(openFilesAtom);
+export const openFilePathsAtom = atom<string[]>([]);
+
+export const fileAtomFamily = atomFamily(() => atom<OpenFile | null>(null));
+export const audioBufferFamily = atomFamily(() => atom<AudioBuffer | null>(null));
+
+export const openFilesAtom = atom<OpenFile[]>((get) => {
+  const filePaths = get(openFilePathsAtom);
+  return filePaths.map((filePath) => get(fileAtomFamily(filePath))).filter((file): file is OpenFile => file !== null);
+});
+
+export const openFileAtomsAtom = atom((get) => {
+  const filePaths = get(openFilePathsAtom);
+  return filePaths.map((filePath) => fileAtomFamily(filePath));
+});
 
 export const filesBpmAtom = atomWithStorage<Record<string, number>>("filesBpm", {}, undefined, { getOnInit: true });
 
@@ -28,8 +40,8 @@ export const fileBpmAtom = (filePath: string) =>
 export const activeFilePathAtom = atom<string | null>(null);
 export const activeFileAtom = atom<OpenFile | null>((get) => {
   const activeFilePath = get(activeFilePathAtom);
-  const openFiles = get(openFilesAtom);
-  return openFiles.find((f) => f.filePath === activeFilePath) ?? null;
+  if (!activeFilePath) return null;
+  return get(fileAtomFamily(activeFilePath));
 });
 
 export const sourceFilePathAtom = atomWithStorage<string | null>("sourceFilePath", null, undefined, {
@@ -38,14 +50,15 @@ export const sourceFilePathAtom = atomWithStorage<string | null>("sourceFilePath
 
 export const sourceFileAtom = atom<OpenFile | null>((get) => {
   const sourceFilePath = get(sourceFilePathAtom);
-  if (!sourceFilePath) return get(activeFileAtom);
-  const openFiles = get(openFilesAtom);
-  return openFiles.find((f) => f.filePath === sourceFilePath) ?? null;
+  const activeFile = get(activeFileAtom);
+  if (!sourceFilePath) return activeFile;
+  return get(fileAtomFamily(sourceFilePath));
 });
 
 export const audioBufferAtom = atom<AudioBuffer | null>((get) => {
   const activeFile = get(activeFileAtom);
-  return activeFile?.audioBuffer ?? null;
+  if (!activeFile) return null;
+  return get(audioBufferFamily(activeFile.filePath));
 });
 
 export const spectrogramDataAtom = atom<SpectrogramData | null>((get) => {

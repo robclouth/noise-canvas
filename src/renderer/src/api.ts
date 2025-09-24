@@ -5,11 +5,13 @@ import { Vector2 } from "three";
 import {
   activeFileAtom,
   activeFilePathAtom,
+  audioBufferFamily,
   bandsPerOctaveAtom,
+  fileAtomFamily,
   filesBpmAtom,
   minFreqAtom,
   normalizeAtom,
-  openFilesAtom,
+  openFilePathsAtom,
   rendererRefs,
   sourceFilePathAtom,
   store,
@@ -20,7 +22,7 @@ let unsubscribers: (() => void)[] = [];
 
 export function init() {
   if (process.env.NODE_ENV === "development") {
-    if (store.get(openFilesAtom).length === 0) {
+    if (store.get(openFilePathsAtom).length === 0) {
       openFile(
         "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
       );
@@ -53,7 +55,11 @@ export function init() {
   unsubscribers.push(unsubCloseActiveFile);
 
   const unsubCloseAllFiles = window.api.onCloseAllFiles(() => {
-    store.set(openFilesAtom, []);
+    store.get(openFilePathsAtom).forEach((path) => {
+      fileAtomFamily.remove(path);
+      audioBufferFamily.remove(path);
+    });
+    store.set(openFilePathsAtom, []);
     store.set(activeFilePathAtom, null);
   });
   unsubscribers.push(unsubCloseAllFiles);
@@ -153,13 +159,17 @@ export function destroy() {
   unsubscribers.forEach((unsub) => unsub());
   unsubscribers = [];
 
-  store.set(openFilesAtom, []);
+  store.get(openFilePathsAtom).forEach((path) => {
+    fileAtomFamily.remove(path);
+    audioBufferFamily.remove(path);
+  });
+  store.set(openFilePathsAtom, []);
   store.set(activeFilePathAtom, null);
   store.set(sourceFilePathAtom, null);
 }
 
 export function addFile(payload: AnalysisPayloadForRenderer) {
-  if (store.get(openFilesAtom).some((f) => f.filePath === payload.filePath)) {
+  if (store.get(openFilePathsAtom).includes(payload.filePath)) {
     return;
   }
 
@@ -194,7 +204,10 @@ export function addFile(payload: AnalysisPayloadForRenderer) {
     },
   };
 
-  store.set(openFilesAtom, (openFiles) => [...openFiles, newFile]);
+  store.set(fileAtomFamily(newFile.filePath), newFile);
+  store.set(audioBufferFamily(newFile.filePath), null);
+  store.set(openFilePathsAtom, (paths) => [...paths, newFile.filePath]);
+
   if (!store.get(filesBpmAtom)[newFile.filePath]) {
     store.set(filesBpmAtom, (bpms) => ({ ...bpms, [newFile.filePath]: 120 }));
   }
@@ -212,15 +225,17 @@ function openFile(filePath: string) {
 
 export function closeFile(filePath: string) {
   const isClosingSource = store.get(sourceFilePathAtom) === filePath;
-  store.set(openFilesAtom, (openFiles) => openFiles.filter((f) => f.filePath !== filePath));
+  store.set(openFilePathsAtom, (paths) => paths.filter((p) => p !== filePath));
+  fileAtomFamily.remove(filePath);
+  audioBufferFamily.remove(filePath);
+
   store.set(filesBpmAtom, (bpms) => omit(bpms, filePath));
   window.api.fileClosed(filePath);
-  const openFiles = store.get(openFilesAtom);
-  const filePaths = openFiles.map((f) => f.filePath);
+  const openFilesPaths = store.get(openFilePathsAtom);
 
   let newActiveFilePath: string | null = null;
-  if (filePaths.length > 0) {
-    newActiveFilePath = filePaths[filePaths.length - 1];
+  if (openFilesPaths.length > 0) {
+    newActiveFilePath = openFilesPaths[openFilesPaths.length - 1];
     store.set(activeFilePathAtom, newActiveFilePath);
   } else {
     store.set(activeFilePathAtom, null);
