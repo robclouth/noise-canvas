@@ -8,10 +8,11 @@ import {
   gridSizeYAtom,
   mousePosAtom,
   scrollAtom,
+  sourceFilePathAtom,
   store,
   zoomPowerAtom,
 } from "@/store";
-import { ActionIcon, Box, Flex, NumberInput, Title } from "@mantine/core";
+import { ActionIcon, Box, Button, Flex, NumberInput, Title } from "@mantine/core";
 import { closeFile } from "@renderer/api";
 import type { OpenFile } from "@renderer/types";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
@@ -84,6 +85,8 @@ export const FileView = memo(({ file, viewRef, rendererRef }: FileViewProps) => 
   const setMousePos = useSetAtom(mousePosAtom);
   const setActiveFilePath = useSetAtom(activeFilePathAtom);
   const [bpms, setBpms] = useAtom(filesBpmAtom);
+  const [sourceFilePath, setSourceFilePath] = useAtom(sourceFilePathAtom);
+  const isSource = sourceFilePath === file.filePath;
   const bpm = bpms[file.filePath] || 120;
   const setBpm = (newBpm: number) => {
     setBpms((currentBpms) => ({
@@ -95,6 +98,7 @@ export const FileView = memo(({ file, viewRef, rendererRef }: FileViewProps) => 
   const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
 
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
+    if (activeFile?.filePath !== file.filePath) return;
     const coords = getSnappedCoordinates(event, bpm);
     if (!coords) return;
     const [snappedX, snappedY] = coords;
@@ -113,10 +117,13 @@ export const FileView = memo(({ file, viewRef, rendererRef }: FileViewProps) => 
   };
 
   const handleMouseLeave = () => {
+    if (activeFile?.filePath !== file.filePath) return;
     setMousePos(null);
+    rendererRef.current?.clearPreview();
   };
 
   const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
+    if (activeFile?.filePath !== file.filePath) return;
     if (event.button === 0 && file.rendererRef?.current) {
       const coords = getSnappedCoordinates(event, bpm);
       if (coords) {
@@ -126,6 +133,7 @@ export const FileView = memo(({ file, viewRef, rendererRef }: FileViewProps) => 
   };
 
   const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = (event) => {
+    if (activeFile?.filePath !== file.filePath) return;
     if (event.button === 0 && file.rendererRef?.current) {
       // Left mouse button up
       const data = file.rendererRef.current.getFBOData();
@@ -150,7 +158,20 @@ export const FileView = memo(({ file, viewRef, rendererRef }: FileViewProps) => 
         <Title order={6}>{file.filePath.split("/").pop() || file.filePath}</Title>
         <Flex align="center" gap="xs">
           <NumberInput w={60} value={bpm} onChange={(val) => setBpm(Number(val))} size="xs" max={999} min={10} />
+          <Button
+            size="xs"
+            variant="filled"
+            onClick={(e) => {
+              e.stopPropagation();
+              setSourceFilePath(isSource ? null : file.filePath);
+            }}
+            color={isSource ? "orange" : "gray"}
+          >
+            Source
+          </Button>
           <ActionIcon
+            variant="transparent"
+            color="white"
             size="xs"
             onClick={(e) => {
               e.stopPropagation();
@@ -162,7 +183,7 @@ export const FileView = memo(({ file, viewRef, rendererRef }: FileViewProps) => 
         </Flex>
       </Flex>
       <Box
-        style={{ cursor: "none" }}
+        style={{ cursor: activeFile?.filePath === file.filePath ? "none" : "auto" }}
         ref={viewRef}
         h={400}
         onMouseMove={handleMouseMove}

@@ -8,6 +8,8 @@ export const DisplayMaterial = shaderMaterial(
     maxDb: 0.0,
     bpm: 120.0,
     gridSize: 0.25,
+    isSourceFile: true,
+    isTargetFile: true,
   },
   /*glsl*/ `
 varying vec2 vUv;
@@ -27,6 +29,9 @@ uniform float minDb;
 uniform float maxDb;
 uniform float bpm;
 uniform float gridSize;
+
+uniform bool isSourceFile;
+uniform bool isTargetFile;
 
 varying vec2 vUv;
 
@@ -72,10 +77,9 @@ void main() {
 
     // --- Brush Visualization ---
     if (brushCenterUv.x >= 0.0) {
-        // Draw Brush Rectangle
+        // Common calculations for both rectangles
         vec2 rectCenter = brushCenterUv;
         
-        // Handle full width/height for rectangle
         vec2 correctedRectCenter = rectCenter;
         vec2 correctedBrushSize = brushSizeUv;
         if (brushSizeUv.x == 0.0) {
@@ -88,41 +92,46 @@ void main() {
         }
 
         vec2 halfSize = correctedBrushSize / 2.0;
-        vec2 d = abs(zoomedUv - correctedRectCenter) - halfSize;
-        float outsideDist = length(max(d, 0.0));
-        float insideDist = min(max(d.x, d.y), 0.0);
-        float distToBorder = outsideDist + insideDist;
-
         float strokeWidthUv = fwidth(zoomedUv.x) * 1.5;
 
-        float rectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(distToBorder));
-        if (rectAlpha > 0.0) {
-            color = mix(color, vec3(1.0), rectAlpha);
-        }
+        // Draw Brush Rectangle (only if this is the active file)
+        if (isTargetFile) {
+            vec2 d = abs(zoomedUv - correctedRectCenter) - halfSize;
+            float outsideDist = length(max(d, 0.0));
+            float insideDist = min(max(d.x, d.y), 0.0);
+            float distToBorder = outsideDist + insideDist;
 
-        // Draw source rectangle (faint)
-        vec2 effectiveOffset = offsetUv;
-        if (brushSizeUv.x == 0.0) {
-            effectiveOffset.x = 0.0;
-        }
-        if (brushSizeUv.y == 0.0) {
-            effectiveOffset.y = 0.0;
-        }
-        vec2 sourceCenter = correctedRectCenter + effectiveOffset;
-        vec2 sourceCenterScreen = zoomedToScreen(sourceCenter);
-
-        if (sourceCenterScreen.x >= 0.0 && sourceCenterScreen.x <= 1.0 &&
-            sourceCenterScreen.y >= 0.0 && sourceCenterScreen.y <= 1.0) {
-            
-            vec2 dSource = abs(zoomedUv - sourceCenter) - halfSize; // reuse halfSize from brush rect
-            float outsideDistSource = length(max(dSource, 0.0));
-            float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
-            float distToBorderSource = outsideDistSource + insideDistSource;
-
-            float sourceRectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(distToBorderSource));
-            if (sourceRectAlpha > 0.0) {
-                color = mix(color, vec3(1.0), sourceRectAlpha * 0.3); // Fainter
+            float rectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(distToBorder));
+            if (rectAlpha > 0.0) {
+                color = mix(color, vec3(1.0), rectAlpha);
             }
+        }
+
+        if (isSourceFile) {
+          // Draw source rectangle (faint)
+          vec2 effectiveOffset = offsetUv;
+          if (brushSizeUv.x == 0.0) {
+            effectiveOffset.x = 0.0;
+          }
+          if (brushSizeUv.y == 0.0) {
+            effectiveOffset.y = 0.0;
+          }
+          vec2 sourceCenter = correctedRectCenter + effectiveOffset;
+          vec2 sourceCenterScreen = zoomedToScreen(sourceCenter);
+
+          if (sourceCenterScreen.x >= 0.0 && sourceCenterScreen.x <= 1.0 &&
+              sourceCenterScreen.y >= 0.0 && sourceCenterScreen.y <= 1.0) {
+              
+              vec2 dSource = abs(zoomedUv - sourceCenter) - halfSize; // reuse halfSize from brush rect
+              float outsideDistSource = length(max(dSource, 0.0));
+              float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
+              float distToBorderSource = outsideDistSource + insideDistSource;
+
+              float sourceRectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(distToBorderSource));
+              if (sourceRectAlpha > 0.0) {
+                  color = mix(color, vec3(1.0), sourceRectAlpha * 0.3); // Fainter
+              }
+          }
         }
     }
 

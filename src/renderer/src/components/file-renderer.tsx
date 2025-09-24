@@ -1,4 +1,5 @@
 import {
+  activeFileAtom,
   brushHeightAtom,
   brushIntensityAtom,
   brushTypeAtom,
@@ -58,6 +59,8 @@ export interface FileRendererHandle {
   restoreOriginal: () => void;
   /** Triggers audio synthesis from the current spectrogram data. */
   synthesize: () => void;
+  /** Clears the stroke preview. */
+  clearPreview: () => void;
 }
 
 /**
@@ -73,6 +76,7 @@ export const FileRenderer = memo(
 
     // Component state and refs
     const [sourceFile, setSourceFile] = useState(() => store.get(sourceFileAtom));
+    const [activeFile, setActiveFile] = useState(() => store.get(activeFileAtom));
 
     // Textures for spectrogram data
     const [packedDataTex, setPackedDataTex] = useState<THREE.DataTexture | null>(null);
@@ -101,10 +105,14 @@ export const FileRenderer = memo(
       const unsubSourceFile = store.sub(sourceFileAtom, () => {
         setSourceFile(store.get(sourceFileAtom));
       });
+      const unsubActiveFile = store.sub(activeFileAtom, () => {
+        setActiveFile(store.get(activeFileAtom));
+      });
       return () => {
         unsubMouseUv();
         unsubBpms();
         unsubSourceFile();
+        unsubActiveFile();
       };
     }, [invalidate]);
 
@@ -397,6 +405,8 @@ export const FileRenderer = memo(
         sourceSpectrogramTextureSize: spectrogramData.packedTextureSize,
         gridSize: gridSize,
         bpm: bpm,
+        isSourceFile: sourceFile?.filePath === file.filePath,
+        isTargetFile: activeFile?.filePath === file.filePath,
       };
 
       displayUniforms.bpm = bpm;
@@ -521,11 +531,20 @@ export const FileRenderer = memo(
       getTextures,
       restoreOriginal,
       synthesize,
+      clearPreview,
     }));
 
     if (!spectrogramData) {
       return null;
     }
+
+    /**
+     * Clears the stroke preview from the display.
+     */
+    const clearPreview = () => {
+      displayMode.current = "committed";
+      invalidate();
+    };
 
     // The component renders a `View` from `drei` which contains a mesh
     // with a plane geometry and the custom `displayMaterial`.

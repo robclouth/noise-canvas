@@ -140,6 +140,9 @@ export function init() {
 
   store.sub(activeFilePathAtom, () => {
     const newPath = store.get(activeFilePathAtom);
+    if (newPath && !store.get(sourceFilePathAtom)) {
+      store.set(sourceFilePathAtom, newPath);
+    }
     window.api.setActiveFile(newPath);
   });
 }
@@ -209,16 +212,22 @@ function openFile(filePath: string) {
 }
 
 export function closeFile(file: OpenFile) {
+  const isClosingSource = store.get(sourceFilePathAtom) === file.filePath;
   store.set(openFilesAtom, (openFiles) => omit(openFiles, file.filePath));
   store.set(filesBpmAtom, (bpms) => omit(bpms, file.filePath));
   window.api.fileClosed(file.filePath);
   const openFiles = store.get(openFilesAtom);
   const filePaths = Object.keys(openFiles);
 
+  let newActiveFilePath: string | null = null;
   if (filePaths.length > 0) {
-    const lastFilePath = filePaths[filePaths.length - 1];
-    store.set(activeFilePathAtom, lastFilePath);
+    newActiveFilePath = filePaths[filePaths.length - 1];
+    store.set(activeFilePathAtom, newActiveFilePath);
   } else {
     store.set(activeFilePathAtom, null);
+  }
+
+  if (isClosingSource) {
+    store.set(sourceFilePathAtom, newActiveFilePath);
   }
 }
