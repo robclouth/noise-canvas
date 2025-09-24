@@ -46,6 +46,7 @@ export const brushTypeAtom = atomWithStorage<string>("brushType", "gain", undefi
 // Brush dimensions
 export const brushWidthAtom = atomWithStorage("brushWidth", 0.25, undefined, { getOnInit: true }); // in beats
 export const brushHeightAtom = atomWithStorage("brushHeight", 1, undefined, { getOnInit: true }); // in semitones
+export const brushSizeLockedToGridAtom = atomWithStorage("brushSizeLockedToGrid", true, undefined, { getOnInit: true });
 
 // Controls whether the output of the synthesis is normalized
 export const normalizeAtom = atomWithStorage("normalize", true, undefined, { getOnInit: true });
@@ -74,3 +75,9 @@ export const mousePosAtom = atom<Vector2 | null>(null);
 
 export const bandsPerOctaveAtom = atomWithStorage("bandsPerOctave", 24, undefined, { getOnInit: true });
 export const minFreqAtom = atomWithStorage("minFreq", 8.1758, undefined, { getOnInit: true }); // MIDI note 0
+
+export const blendModeAtom = atomWithStorage<
+  "Normal" | "Maximum" | "Minimum" | "Dissolve" | "Multiply" | "Difference" | "Subtract" | "Divide"
+>("blendMode", "Normal", undefined, {
+  getOnInit: true,
+});

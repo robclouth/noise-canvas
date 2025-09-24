@@ -44,6 +44,7 @@ uniform float featherY;
 uniform vec2 offsetUv;
 uniform float pan;
 uniform float brushIntensity;
+uniform int blendMode; // 0: Normal, 1: Maximum, 2: Minimum
 
 //------------------------------------------------------------------------------
 // Coordinate System & Helpers
@@ -52,6 +53,10 @@ struct Coords {
     vec2 dest;
     vec2 source;
 };
+
+float random(vec2 st) {
+    return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+}
 
 vec2 screenToZoomed(vec2 screenUv) {
   float zoom = pow(2.0, viewZoomPower);
@@ -97,12 +102,63 @@ vec4 applyBrushEffect(vec4 original, vec4 modified, float weight) {
     vec2 originalR = original.ba;
     vec2 modifiedL = modified.rg;
     vec2 modifiedR = modified.ba;
+    vec2 finalL;
+    vec2 finalR;
 
     float leftWeight = clamp(1.0 - pan, 0.0, 1.0);
     float rightWeight = clamp(1.0 + pan, 0.0, 1.0);
+    float effectiveWeightL = weight * brushIntensity * leftWeight;
+    float effectiveWeightR = weight * brushIntensity * rightWeight;
 
-    vec2 finalL = mix(originalL, modifiedL, weight * brushIntensity * leftWeight);
-    vec2 finalR = mix(originalR, modifiedR, weight * brushIntensity * rightWeight);
+    if (blendMode == 3) { // Dissolve
+        if (random(originalL + modifiedL) < effectiveWeightL) {
+            finalL = modifiedL;
+        } else {
+            finalL = originalL;
+        }
+        if (random(originalR + modifiedR + vec2(0.1, -0.1)) < effectiveWeightR) {
+            finalR = modifiedR;
+        } else {
+            finalR = originalR;
+        }
+        return vec4(finalL, finalR);
+    }
+
+    vec2 blendedL, blendedR;
+
+    if (blendMode == 1) { // Maximum
+        blendedL = length(modifiedL) > length(originalL) ? modifiedL : originalL;
+        blendedR = length(modifiedR) > length(originalR) ? modifiedR : originalR;
+    } else if (blendMode == 2) { // Minimum
+        blendedL = length(modifiedL) < length(originalL) ? modifiedL : originalL;
+        blendedR = length(modifiedR) < length(originalR) ? modifiedR : originalR;
+    } else if (blendMode == 4) { // Multiply
+        float magL = length(originalL) * length(modifiedL);
+        blendedL = (length(originalL) > 1e-6) ? magL * normalize(originalL) : vec2(0.0);
+        float magR = length(originalR) * length(modifiedR);
+        blendedR = (length(originalR) > 1e-6) ? magR * normalize(originalR) : vec2(0.0);
+    } else if (blendMode == 5) { // Difference
+        float magL = abs(length(originalL) - length(modifiedL));
+        blendedL = (length(originalL) > 1e-6) ? magL * normalize(originalL) : vec2(0.0);
+        float magR = abs(length(originalR) - length(modifiedR));
+        blendedR = (length(originalR) > 1e-6) ? magR * normalize(originalR) : vec2(0.0);
+    } else if (blendMode == 6) { // Subtract
+        float magL = max(length(originalL) - length(modifiedL), 0.0);
+        blendedL = (length(originalL) > 1e-6) ? magL * normalize(originalL) : vec2(0.0);
+        float magR = max(length(originalR) - length(modifiedR), 0.0);
+        blendedR = (length(originalR) > 1e-6) ? magR * normalize(originalR) : vec2(0.0);
+    } else if (blendMode == 7) { // Divide
+        float magL = length(originalL) / (length(modifiedL) + 1e-6);
+        blendedL = (length(originalL) > 1e-6) ? magL * normalize(originalL) : vec2(0.0);
+        float magR = length(originalR) / (length(modifiedR) + 1e-6);
+        blendedR = (length(originalR) > 1e-6) ? magR * normalize(originalR) : vec2(0.0);
+    } else { // Normal (blendMode == 0)
+        blendedL = modifiedL;
+        blendedR = modifiedR;
+    }
+
+    finalL = mix(originalL, blendedL, effectiveWeightL);
+    finalR = mix(originalR, blendedR, effectiveWeightR);
 
     return vec4(finalL, finalR);
 }
@@ -403,6 +459,7 @@ export type CommonUniforms = {
   pan: number;
   bpm: number;
   pi: number;
+  blendMode: number;
 };
 
 export const defaultValues: CommonUniforms = {
@@ -438,6 +495,7 @@ export const defaultValues: CommonUniforms = {
   pan: 0.0,
   bpm: 120.0,
   pi: Math.PI,
+  blendMode: 0,
 };
 
 export function unitsToUv(

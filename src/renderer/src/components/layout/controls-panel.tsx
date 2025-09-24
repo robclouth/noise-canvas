@@ -2,8 +2,10 @@ import { beatValues, pitchValues } from "@/lib/constants";
 import {
   activeFileAtom,
   bandsPerOctaveAtom,
+  blendModeAtom,
   brushHeightAtom,
   brushIntensityAtom,
+  brushSizeLockedToGridAtom,
   brushWidthAtom,
   featherXAtom,
   featherYAtom,
@@ -22,9 +24,10 @@ import {
   store,
 } from "@/store";
 import { Divider, Flex, Select, Text } from "@mantine/core";
-import { atom, useAtom, useAtomValue } from "jotai";
+import { atom, useAtom, useAtomValue, useSetAtom } from "jotai";
 import { RESET } from "jotai/utils";
 import { startCase } from "lodash-es";
+import { useEffect } from "react";
 import { ScaleType } from "tonal";
 import { SelectControl } from "../controls/select-control";
 import { SliderControl } from "../controls/slider-control";
@@ -51,8 +54,20 @@ export function ControlsPanel() {
   const activeFile = useAtomValue(activeFileAtom);
   const files = useAtomValue(openFilesAtom);
   const [sourceFilePath, setSourceFilePath] = useAtom(sourceFilePathAtom);
+  const brushSizeLocked = useAtomValue(brushSizeLockedToGridAtom);
+  const [gridSize] = useAtom(gridSizeAtom);
+  const [gridSizeY] = useAtom(gridSizeYAtom);
+  const setBrushWidth = useSetAtom(brushWidthAtom);
+  const setBrushHeight = useSetAtom(brushHeightAtom);
 
   const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+  useEffect(() => {
+    if (brushSizeLocked) {
+      setBrushWidth(gridSize);
+      setBrushHeight(gridSizeY);
+    }
+  }, [brushSizeLocked, gridSize, gridSizeY, setBrushWidth, setBrushHeight]);
 
   const supportsSource = true;
 
@@ -81,10 +96,26 @@ export function ControlsPanel() {
         />
       </Section>
       <Section label="Brush">
-        <SliderControl label="Width" atom={brushWidthAtom} values={[...beatValues, { label: "Full", value: 0 }]} />
-        <SliderControl label="Height" atom={brushHeightAtom} values={[...pitchValues, { label: "Full", value: 0 }]} />
+        <SwitchControl label="Lock to Grid" atom={brushSizeLockedToGridAtom} />
+        <SliderControl
+          label="Width"
+          atom={brushWidthAtom}
+          values={[...beatValues, { label: "Full", value: 0 }]}
+          disabled={brushSizeLocked}
+        />
+        <SliderControl
+          label="Height"
+          atom={brushHeightAtom}
+          values={[...pitchValues, { label: "Full", value: 0 }]}
+          disabled={brushSizeLocked}
+        />
         <SliderControl label="Intensity" atom={brushIntensityPercentAtom} min={0} max={100} step={1} unit="%" />
         <SliderControl label="Pan" atom={panAtom} min={-1} max={1} step={0.01} />
+        <SelectControl
+          label="Blend Mode"
+          atom={blendModeAtom}
+          data={["Normal", "Maximum", "Minimum", "Dissolve", "Multiply", "Difference", "Subtract", "Divide"]}
+        />
         <Text c="dimmed" size="xs" fs={"italic"}>
           Feather
         </Text>

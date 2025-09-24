@@ -1,5 +1,6 @@
 import {
   activeFileAtom,
+  blendModeAtom,
   brushHeightAtom,
   brushIntensityAtom,
   brushTypeAtom,
@@ -62,6 +63,17 @@ export interface FileRendererHandle {
   /** Clears the stroke preview. */
   clearPreview: () => void;
 }
+
+const blendModeMap = {
+  Normal: 0,
+  Maximum: 1,
+  Minimum: 2,
+  Dissolve: 3,
+  Multiply: 4,
+  Difference: 5,
+  Subtract: 6,
+  Divide: 7,
+};
 
 /**
  * The `FileRenderer` component is responsible for rendering the spectrogram of an audio file
@@ -275,6 +287,7 @@ export const FileRenderer = memo(
       const featherY = store.get(featherYAtom);
       const brushWidth = store.get(brushWidthAtom);
       const brushHeight = store.get(brushHeightAtom);
+      const blendMode = store.get(blendModeAtom);
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
       const sourceTotalDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
 
@@ -338,6 +351,7 @@ export const FileRenderer = memo(
           sourceFile.spectrogramData.numBands,
         ),
         pi: Math.PI,
+        blendMode: blendModeMap[blendMode],
       };
 
       // Render brush stroke if requested

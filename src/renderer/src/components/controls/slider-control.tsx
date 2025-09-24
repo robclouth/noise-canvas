@@ -8,6 +8,7 @@ type SliderControlPropsBase = {
   atom: WritableAtom<number, [arg: number | typeof RESET], void>;
   unit?: string;
   labelWidth?: number;
+  disabled?: boolean;
 };
 
 type ContinuousSliderProps = SliderControlPropsBase & {
@@ -31,7 +32,7 @@ type SteppedSliderProps = SliderControlPropsBase & {
 type SliderControlProps = ContinuousSliderProps | SteppedSliderProps;
 
 export const SliderControl = (props: SliderControlProps) => {
-  const { label, atom, unit = "", labelWidth = 50 } = props;
+  const { label, atom, unit = "", labelWidth = 50, disabled } = props;
   const reset = useResetAtom(atom);
   const [value, onChange] = useAtom(atom);
 
@@ -51,6 +52,7 @@ export const SliderControl = (props: SliderControlProps) => {
       value: valueIndex,
       onChange: (val: number) => onChange(values[val].value),
       restrictToMarks: true,
+      disabled,
     };
 
     rightComponent = (
@@ -66,6 +68,7 @@ export const SliderControl = (props: SliderControlProps) => {
       step: isLog ? (logStep ?? 0.001) : step,
       value: isLog ? Math.log2(value) : value,
       onChange: (val: number) => onChange(isLog ? Math.pow(2, val) : val),
+      disabled,
     };
 
     rightComponent = (
@@ -81,6 +84,7 @@ export const SliderControl = (props: SliderControlProps) => {
         min={min}
         max={max}
         step={step}
+        disabled={disabled}
       />
     );
   }
