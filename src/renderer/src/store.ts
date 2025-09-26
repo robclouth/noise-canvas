@@ -246,7 +246,7 @@ export const useStore = create<State>()(
           },
           brushSizeLockedToGrid: {
             name: "Lock Brush Size to Grid",
-            label: "Grid Lock",
+            label: "Grid",
             value: true,
             ...createSetters("brushSizeLockedToGrid", true),
           },
@@ -631,6 +631,8 @@ export const useStore = create<State>()(
             (acc, [key, value]) => {
               if (typeof value === "object" && value !== null && "value" in value) {
                 acc[key] = { value: (value as Parameter<unknown>).value };
+              } else if (["filesBpm"].includes(key)) {
+                acc[key] = value;
               }
               return acc;
             },
