@@ -51,11 +51,11 @@ export const SliderControl = (props: SliderControlProps) => {
         flex={1}
         size="xs"
         label={null}
-        value={valueIndex}
+        value={marks ? (valueIndex ?? 0) : value}
         onChange={marks ? (val) => setValue(marks[val].value) : setValue}
         min={min}
         max={max}
-        step={1}
+        step={marks ? 1 : step}
         restrictToMarks={!!marks}
         disabled={disabled}
       />

@@ -19,6 +19,7 @@ import {
   DiscreteNumberParameter,
   OpenFile,
   OptionsParameter,
+  Parameter,
 } from "./types";
 
 export const openFiles: Record<string, OpenFile> = {};
@@ -59,7 +60,7 @@ export type State = {
   modulatorMode: OptionsParameter<number>;
   modulatorPatternShape: OptionsParameter<number>;
   modulatorPatternRateBeats: DiscreteNumberParameter;
-  modulatorPatternRateCents: DiscreteNumberParameter;
+  modulatorPatternRateSemis: DiscreteNumberParameter;
   modulatorPatternRadial: BooleanParameter;
 
   // Gain Brush
@@ -231,7 +232,6 @@ export const useStore = create<State>()(
               value: value.value,
               label: value.label,
             })),
-            unit: " beats",
             ...createSetters("brushWidthBeats", 1),
           },
           brushHeightSemis: {
@@ -242,7 +242,6 @@ export const useStore = create<State>()(
               value: value.value,
               label: value.label,
             })),
-            unit: " semis",
             ...createSetters("brushHeightSemis", 12),
           },
           brushSizeLockedToGrid: {
@@ -274,7 +273,6 @@ export const useStore = create<State>()(
             label: "Beats",
             value: 0.25,
             values: BEAT_VALUES.map((value) => ({ value: value.value, label: value.label })),
-            unit: " beats",
             ...createSetters("gridSizeBeats", 0.25),
           },
           gridSizeSemis: {
@@ -282,7 +280,6 @@ export const useStore = create<State>()(
             label: "Semis",
             value: 1,
             values: PITCH_VALUES.map((value) => ({ value: value.value, label: value.label })),
-            unit: " semis",
             ...createSetters("gridSizeSemis", 1),
           },
 
@@ -362,20 +359,24 @@ export const useStore = create<State>()(
             ...createSetters("modulatorPatternShape", 0),
           },
           modulatorPatternRateBeats: {
-            name: "Modulator Rate (beats)",
-            label: "Rate (beats)",
+            name: "Modulator Rate Beats",
+            label: "Beats",
             value: 1,
-            values: BEAT_VALUES.map((value) => ({ value: value.value, label: value.label })),
-            unit: " beats",
+            values: [
+              { value: 0, label: "0 beats" },
+              ...BEAT_VALUES.map((value) => ({ value: value.value, label: value.label })),
+            ],
             ...createSetters("modulatorPatternRateBeats", 1),
           },
-          modulatorPatternRateCents: {
-            name: "Modulator Rate (cents)",
-            label: "Rate (cents)",
+          modulatorPatternRateSemis: {
+            name: "Modulator Rate Semis",
+            label: "Semis",
             value: 0,
-            values: PITCH_VALUES.map((value) => ({ value: value.value, label: value.label })),
-            unit: " cents",
-            ...createSetters("modulatorPatternRateCents", 0),
+            values: [
+              { value: 0, label: "0 semis" },
+              ...PITCH_VALUES.map((value) => ({ value: value.value, label: value.label })),
+            ],
+            ...createSetters("modulatorPatternRateSemis", 0),
           },
           modulatorPatternRadial: {
             name: "Modulator Radial",
@@ -628,14 +629,8 @@ export const useStore = create<State>()(
         partialize: (state) => {
           return Object.entries(state).reduce(
             (acc, [key, value]) => {
-              if (
-                typeof value === "object" &&
-                value !== null &&
-                "key" in value &&
-                "value" in value &&
-                (value as { key?: unknown }).key
-              ) {
-                acc[key] = { value: (value as { value: unknown }).value };
+              if (typeof value === "object" && value !== null && "value" in value) {
+                acc[key] = { value: (value as Parameter<unknown>).value };
               }
               return acc;
             },

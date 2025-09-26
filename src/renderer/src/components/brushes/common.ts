@@ -16,7 +16,7 @@ float random(vec2 st) {
 float getModulation(vec2 uv) {
   float v = 0.0;
   if (modulatorMode == 0) { // LFO
-    vec2 rates = vec2(1.0 / modulatorPatternRateBeats, 1200.0 / modulatorPatternRateCents);
+    vec2 rates = vec2(1.0 / modulatorPatternRateBeats, 1.0 / modulatorPatternRateSemis);
     vec2 cartesianPos = uv * rates;
     vec2 centeredUv = uv - 0.5;
     float dist = length(centeredUv * 2.0);
@@ -26,7 +26,7 @@ float getModulation(vec2 uv) {
       if (modulatorPatternRadial) {
         v = sin(dist * radialRate * PI);
       } else {
-        v = (sin(cartesianPos.x * 2.0 * PI) + sin(cartesianPos.y * 2.0 * PI)) / 2.0;
+        v = (sin(cartesianPos.x * 2.0 * PI) + sin(cartesianPos.y * 2.0 * PI));
       }
     } else if (modulatorPatternShape == 1) { // TRIANGLE
       if (modulatorPatternRadial) {
@@ -120,7 +120,7 @@ uniform int blendMode; // 0: Normal, 1: Maximum, 2: Minimum
 uniform int modulatorMode;
 uniform int modulatorPatternShape;
 uniform float modulatorPatternRateBeats;
-uniform float modulatorPatternRateCents;
+uniform float modulatorPatternRateSemis;
 uniform bool modulatorPatternRadial;
 
 #define PI 3.141592653589793
@@ -543,7 +543,7 @@ export type CommonUniforms = {
   modulatorMode: number;
   modulatorPatternShape: number;
   modulatorPatternRateBeats: number;
-  modulatorPatternRateCents: number;
+  modulatorPatternRateSemis: number;
   modulatorPatternRadial: boolean;
 };
 
@@ -584,7 +584,7 @@ export const defaultValues: CommonUniforms = {
   modulatorMode: 0,
   modulatorPatternShape: 0,
   modulatorPatternRateBeats: 1.0,
-  modulatorPatternRateCents: 0.0,
+  modulatorPatternRateSemis: 0.0,
   modulatorPatternRadial: false,
 };
 

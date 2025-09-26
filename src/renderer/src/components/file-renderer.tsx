@@ -271,7 +271,7 @@ export const FileRenderer = memo(
         modulatorMode: state.modulatorMode.value,
         modulatorPatternShape: state.modulatorPatternShape.value,
         modulatorPatternRateBeats: state.modulatorPatternRateBeats.value,
-        modulatorPatternRateCents: state.modulatorPatternRateCents.value,
+        modulatorPatternRateSemis: state.modulatorPatternRateSemis.value,
         modulatorPatternRadial: state.modulatorPatternRadial.value,
       };
 

@@ -10,7 +10,7 @@ const modulatorMaterial = shaderMaterial(
     modulatorMode: 0,
     modulatorPatternShape: 0,
     modulatorPatternRateBeats: 1,
-    modulatorPatternRateCents: 1,
+    modulatorPatternRateSemis: 1,
     amplitude: 1,
     modulatorPatternRadial: false as boolean,
   },
@@ -24,14 +24,14 @@ const modulatorMaterial = shaderMaterial(
   uniform int modulatorMode;
   uniform int modulatorPatternShape;
   uniform float modulatorPatternRateBeats;
-  uniform float modulatorPatternRateCents;
+  uniform float modulatorPatternRateSemis;
   uniform float amplitude;
   uniform bool modulatorPatternRadial;
 
   ${modulatorCode}
 
   void main() {
-    float v = getModulation(vUv);
+    float v = getModulation(vUv * vec2(16.0, 48.0));
     float displayV = (v + 1.0) / 2.0;
     gl_FragColor = vec4(vec3(displayV * amplitude), 1.0);
   }
@@ -43,7 +43,7 @@ const ModulatorMaterial = extend(modulatorMaterial);
 const Scene = () => {
   const modulatorPatternShape = useStore((state) => state.modulatorPatternShape.value);
   const modulatorPatternRateBeats = useStore((state) => state.modulatorPatternRateBeats.value);
-  const modulatorPatternRateCents = useStore((state) => state.modulatorPatternRateCents.value);
+  const modulatorPatternRateSemis = useStore((state) => state.modulatorPatternRateSemis.value);
   const modulatorPatternRadial = useStore((state) => state.modulatorPatternRadial.value);
 
   return (
@@ -52,7 +52,7 @@ const Scene = () => {
       <ModulatorMaterial
         modulatorPatternShape={modulatorPatternShape}
         modulatorPatternRateBeats={modulatorPatternRateBeats}
-        modulatorPatternRateCents={modulatorPatternRateCents}
+        modulatorPatternRateSemis={modulatorPatternRateSemis}
         modulatorPatternRadial={modulatorPatternRadial}
       />
     </mesh>
@@ -65,7 +65,7 @@ export const ModulatorView = () => {
       <ParameterControl paramKey="modulatorMode" />
       <ParameterControl paramKey="modulatorPatternShape" />
       <ParameterControl paramKey="modulatorPatternRateBeats" />
-      <ParameterControl paramKey="modulatorPatternRateCents" />
+      <ParameterControl paramKey="modulatorPatternRateSemis" />
       <ParameterControl paramKey="modulatorPatternRadial" />
 
       <View style={{ height: 128, marginTop: 6 }}>
