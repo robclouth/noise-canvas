@@ -1,7 +1,6 @@
 import { RefObject } from "react";
 import { Vector2 } from "three";
 import { FileRendererHandle } from "./components/file-renderer";
-import type { State } from "./store";
 
 // This interface matches the flattened payload received from the Electron main process
 export interface AnalysisPayload {
@@ -61,7 +60,6 @@ export interface SynthesisPayload {
 }
 
 export type Parameter<T> = {
-  key: keyof State;
   name: string;
   label: string;
   unit?: string;

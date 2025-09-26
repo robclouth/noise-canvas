@@ -6,10 +6,10 @@ import { Section } from "../section";
 
 export function ControlsPanel() {
   const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid.value);
-  const gridSize = useStore((state) => state.gridSize.value);
-  const gridSizeY = useStore((state) => state.gridSizeY.value);
-  const setBrushWidth = useStore((state) => state.brushWidth.setValue);
-  const setBrushHeight = useStore((state) => state.brushHeight.setValue);
+  const gridSize = useStore((state) => state.gridSizeBeats.value);
+  const gridSizeY = useStore((state) => state.gridSizeSemis.value);
+  const setBrushWidth = useStore((state) => state.brushWidthBeats.setValue);
+  const setBrushHeight = useStore((state) => state.brushHeightSemis.setValue);
 
   useEffect(() => {
     if (brushSizeLockedToGrid) {
@@ -24,8 +24,8 @@ export function ControlsPanel() {
         <ParameterControl paramKey="bandsPerOctave" />
       </Section>
       <Section label="Grid">
-        <ParameterControl paramKey="gridSize" />
-        <ParameterControl paramKey="gridSizeY" />
+        <ParameterControl paramKey="gridSizeBeats" />
+        <ParameterControl paramKey="gridSizeSemis" />
       </Section>
       <Section label="Scale">
         <ParameterControl paramKey="scaleTonic" />

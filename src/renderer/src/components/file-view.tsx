@@ -13,7 +13,15 @@ export interface FileViewProps {
 }
 
 function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>, bpm: number): [number, number] | null {
-  const { zoomPower, scroll, activeFilePath, gridSize, brushWidth, gridSizeY, bandsPerOctave } = useStore.getState();
+  const {
+    zoomPower,
+    scroll,
+    activeFilePath,
+    gridSizeBeats: gridSize,
+    brushWidthBeats: brushWidth,
+    gridSizeSemis: gridSizeY,
+    bandsPerOctave,
+  } = useStore.getState();
   const rect = event.currentTarget.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) {
     return null;

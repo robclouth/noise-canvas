@@ -9,19 +9,12 @@ export function BrushPanel() {
   const brushType = useStore((state) => state.brushType.value);
   const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid.value);
 
-  // useEffect(() => {
-  //   if (brushSizeLockedToGrid) {
-  //     setBrushWidth(gridSize);
-  //     setBrushHeight(gridSizeY);
-  //   }
-  // }, [brushSizeLockedToGrid, gridSize, gridSizeY, setBrushWidth, setBrushHeight]);
-
   const brush = brushes[brushType];
   return (
     <Stack w={300} miw={300} p="xs">
       <Section label="Size">
-        <ParameterControl paramKey="brushWidth" disabled={brushSizeLockedToGrid} />
-        <ParameterControl paramKey="brushHeight" disabled={brushSizeLockedToGrid} />
+        <ParameterControl paramKey="brushWidthBeats" disabled={brushSizeLockedToGrid} />
+        <ParameterControl paramKey="brushHeightSemis" disabled={brushSizeLockedToGrid} />
         <ParameterControl paramKey="brushSizeLockedToGrid" />
       </Section>
       <Section label="Output">
@@ -30,13 +23,13 @@ export function BrushPanel() {
         <ParameterControl paramKey="blendMode" />
       </Section>
       <Section label="Feather">
-        <ParameterControl paramKey="featherX" />
-        <ParameterControl paramKey="featherY" />
+        <ParameterControl paramKey="featherTime" />
+        <ParameterControl paramKey="featherPitch" />
       </Section>
       <Section label="Offset">
-        <ParameterControl paramKey="offsetX" />
-        <ParameterControl paramKey="offsetY" />
-        <ParameterControl paramKey="offsetLock" />
+        <ParameterControl paramKey="sourceOffsetBeats" />
+        <ParameterControl paramKey="sourceOffsetSemis" />
+        <ParameterControl paramKey="sourceOffsetLock" />
       </Section>
       <Section label="Brush">
         <ParameterControl paramKey="brushType" />
