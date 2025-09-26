@@ -78,7 +78,6 @@ export const FileRenderer = memo(
         (state) => state.filesBpm[filePath],
         () => {
           invalidate();
-          console.log("invalidated");
         },
       );
 
@@ -341,7 +340,7 @@ export const FileRenderer = memo(
         sourceChannelCount: spectrogramData.numChannels,
         sourceSampleRate: spectrogramData.sampleRate,
         sourceSpectrogramTextureSize: spectrogramData.packedTextureSize,
-        gridSize: state.gridSize,
+        gridSize: state.gridSize.value,
         bpm,
         isSourceFile: sourceFile?.filePath === filePath,
         isTargetFile: state.activeFilePath === filePath,

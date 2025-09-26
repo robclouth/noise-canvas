@@ -27,6 +27,8 @@ export const SliderControl = (props: SliderControlProps) => {
     </Text>
   );
 
+  const valueIndex = marks?.findIndex((v) => v.value === value);
+
   return (
     <Group gap={"xs"} wrap="nowrap" h={25} align="center">
       {modulatable && modulatorParam ? (
@@ -49,29 +51,34 @@ export const SliderControl = (props: SliderControlProps) => {
         flex={1}
         size="xs"
         label={null}
-        value={value}
-        onChange={setValue}
+        value={valueIndex}
+        onChange={marks ? (val) => setValue(marks[val].value) : setValue}
         min={min}
         max={max}
-        step={step}
-        marks={marks?.map((m) => ({ value: m.value, label: "" }))}
+        step={1}
         restrictToMarks={!!marks}
         disabled={disabled}
       />
-      <NumberInput
-        variant="unstyled"
-        h={20}
-        w={70}
-        size="xs"
-        hideControls
-        suffix={unit}
-        value={parseFloat(value.toString())}
-        onChange={(val) => setValue(val as number)}
-        min={min}
-        max={max}
-        step={step}
-        disabled={disabled}
-      />
+      {marks ? (
+        <Text size="xs" w={70}>
+          {marks?.[valueIndex ?? 0]?.label}
+        </Text>
+      ) : (
+        <NumberInput
+          variant="unstyled"
+          h={20}
+          w={70}
+          size="xs"
+          hideControls
+          suffix={unit}
+          value={parseFloat(value.toString())}
+          onChange={(val) => setValue(val as number)}
+          min={min}
+          max={max}
+          step={step}
+          disabled={disabled}
+        />
+      )}
     </Group>
   );
 };

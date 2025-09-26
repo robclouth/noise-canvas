@@ -230,7 +230,10 @@ export const useStore = create<State>()(
             name: "Brush Width",
             label: "Width",
             value: 0.25,
-            values: BEAT_VALUES.map((value) => ({ value: value.value, label: value.label })),
+            values: [...BEAT_VALUES, { value: 0, label: "Full" }].map((value) => ({
+              value: value.value,
+              label: value.label,
+            })),
             unit: " beats",
             ...createSetters("brushWidth", 0.25),
           },
@@ -239,7 +242,10 @@ export const useStore = create<State>()(
             name: "Brush Height",
             label: "Height",
             value: 1,
-            values: PITCH_VALUES.map((value) => ({ value: value.value, label: value.label })),
+            values: [...PITCH_VALUES, { value: 0, label: "Full" }].map((value) => ({
+              value: value.value,
+              label: value.label,
+            })),
             unit: " semis",
             ...createSetters("brushHeight", 1),
           },

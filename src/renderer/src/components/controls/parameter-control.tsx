@@ -65,8 +65,8 @@ export const ParameterControl = (props: ParameterControlProps) => {
         value={parameter.value}
         setValue={parameter.setValue}
         resetValue={parameter.resetValue}
-        min={parameter.values[0].value}
-        max={parameter.values[parameter.values.length - 1].value}
+        min={0}
+        max={parameter.values.length - 1}
         marks={parameter.values.map((v) => ({ value: v.value, label: v.label }))}
         unit={parameter.unit}
         disabled={props.disabled}
