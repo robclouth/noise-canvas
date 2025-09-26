@@ -1,5 +1,5 @@
 import { shaderMaterial } from "@react-three/drei";
-import { code, defaultValues } from "./brushes/common";
+import { common, defaultValues } from "./brushes/common";
 
 export const DisplayMaterial = shaderMaterial(
   {
@@ -21,8 +21,7 @@ void main(){
   /*glsl*/ `
 precision highp float;
 
-// The refactored common code with new function names
-${code}
+${common}
 
 // Uniforms specific to this display material
 uniform float minDb;

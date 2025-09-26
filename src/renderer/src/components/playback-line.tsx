@@ -1,44 +1,27 @@
-import { playbackTimeAtom } from "@/audio-manager";
-import { isPlayingAtom, scrollAtom, store, zoomPowerAtom } from "@/store";
-import { useAtomValue } from "jotai";
+import { openFiles, useStore } from "@/store";
 import { useEffect, useRef } from "react";
-import * as THREE from "three";
-import { zoomedToScreen } from "./brushes/common";
 
 interface PlaybackLineProps {
-  duration: number;
+  filePath: string;
 }
 
-export const PlaybackLine = ({ duration }: PlaybackLineProps) => {
+export const PlaybackLine = ({ filePath }: PlaybackLineProps) => {
   const lineRef = useRef<HTMLDivElement>(null);
-  const isPlaying = useAtomValue(isPlayingAtom);
-  const animationFrameIdRef = useRef<number | null>(null);
+  const isPlaying = useStore((state) => state.isPlaying);
+  const duration = openFiles[filePath].spectrogramData.numFrames / openFiles[filePath].spectrogramData.sampleRate;
 
   useEffect(() => {
-    const animate = () => {
-      if (lineRef.current) {
-        const zoomPower = store.get(zoomPowerAtom);
-        const scroll = store.get(scrollAtom);
-        const playbackTime = store.get(playbackTimeAtom);
-
-        const progress = playbackTime / duration;
-        const screenCoords = zoomedToScreen(new THREE.Vector2(progress, 0), zoomPower, scroll);
-
-        lineRef.current.style.display = "block";
-        lineRef.current.style.left = `${screenCoords.x * 100}%`;
-      }
-      animationFrameIdRef.current = requestAnimationFrame(animate);
-    };
-
-    if (isPlaying) {
-      animationFrameIdRef.current = requestAnimationFrame(animate);
-    } else {
-      if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
-      if (lineRef.current) lineRef.current.style.display = "none";
-    }
+    const unsubPlaybackTime = useStore.subscribe(
+      (state) => state.playbackTime,
+      (playbackTime) => {
+        if (lineRef.current) {
+          lineRef.current.style.left = `${(playbackTime / duration) * 100}%`;
+        }
+      },
+    );
 
     return () => {
-      if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
+      unsubPlaybackTime();
     };
   }, [isPlaying, duration]);
 
@@ -52,7 +35,8 @@ export const PlaybackLine = ({ duration }: PlaybackLineProps) => {
         backgroundColor: "white",
         height: "100%",
         pointerEvents: "none",
-        display: "none",
+        display: isPlaying ? "block" : "none",
+        zIndex: 1000,
       }}
     />
   );

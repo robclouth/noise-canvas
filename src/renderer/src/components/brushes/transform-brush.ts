@@ -1,19 +1,11 @@
-import { activeFileAtom, bandsPerOctaveAtom, store } from "@/store";
+import { openFiles, State, useStore } from "@/store";
 import { shaderMaterial } from "@react-three/drei";
-import { atomWithStorage } from "jotai/utils";
 import { ShaderMaterial, Vector2 } from "three";
-import { BaseBrush, BrushParameter } from "./base-brush";
-import { brushMain, code, CommonUniforms, defaultValues, unitsToUv, vertexShader } from "./common";
+import { BaseBrush } from "./base-brush";
+import { brushMain, common, CommonUniforms, defaultValues, unitsToUv, vertexShader } from "./common";
 
 export const boundaryModes = ["smear", "cut", "wrap"] as const;
 export type BoundaryMode = (typeof boundaryModes)[number];
-
-export const shiftXAtom = atomWithStorage("shiftX", 0.0);
-export const shiftYCentsAtom = atomWithStorage("shiftYCents", 0.0);
-export const scaleXAtom = atomWithStorage("scaleX", 1.0);
-export const scaleYAtom = atomWithStorage("scaleY", 1.0);
-export const rotationAtom = atomWithStorage("rotation", 0.0);
-export const boundaryModeAtom = atomWithStorage<BoundaryMode>("boundaryMode", "cut");
 
 const TransformMaterial = shaderMaterial(
   {
@@ -30,7 +22,7 @@ const TransformMaterial = shaderMaterial(
     uniform float rotation;
     uniform int boundaryMode;
 
-    ${code}
+    ${common}
 
     vec4 applyBrushStroke(vec4 sourceTexel, Coords coords) {
         // The origin for all transforms is the brush center.
@@ -83,87 +75,30 @@ const TransformMaterial = shaderMaterial(
 
 class TransformBrush extends BaseBrush {
   materials: ShaderMaterial[];
-  parameters: BrushParameter[];
+  parameters: (keyof State)[];
 
   constructor() {
     super();
     this.materials = [new TransformMaterial()];
-    this.parameters = [
-      {
-        type: "slider",
-        atom: shiftXAtom,
-        label: "Shift X",
-        min: 0.0,
-        max: 1.0,
-        step: 1 / 16,
-        unit: " beats",
-      },
-      {
-        type: "slider",
-        atom: shiftYCentsAtom,
-        label: "Shift Y",
-        min: -1200,
-        max: 1200,
-        step: 10,
-        unit: " cents",
-      },
-      {
-        type: "slider",
-        atom: scaleXAtom,
-        label: "Scale X",
-        min: -4.0,
-        max: 4.0,
-        step: 0.01,
-        unit: "%",
-      },
-      {
-        type: "slider",
-        atom: scaleYAtom,
-        label: "Scale Y",
-        min: -4.0,
-        max: 4.0,
-        step: 0.01,
-        unit: "%",
-      },
-      {
-        type: "slider",
-        atom: rotationAtom,
-        label: "Rotation",
-        min: -180,
-        max: 180,
-        step: 1,
-        unit: "°",
-      },
-      {
-        type: "select",
-        atom: boundaryModeAtom,
-        label: "Boundary",
-        options: boundaryModes,
-      },
-    ];
+    this.parameters = ["shiftX", "shiftYCents", "scaleX", "scaleY", "rotation", "boundaryMode"];
   }
 
   updateUniforms(props: CommonUniforms, passIndex: number): void {
     super.updateUniforms(props, passIndex);
-    const activeFile = store.get(activeFileAtom);
+    const { activeFilePath, bandsPerOctave, shiftX, shiftYCents, scaleX, scaleY, rotation, boundaryMode } =
+      useStore.getState();
+    const activeFile = activeFilePath ? openFiles[activeFilePath] : null;
     if (!activeFile) return;
 
-    const bandsPerOctave = store.get(bandsPerOctaveAtom);
     const { spectrogramData } = activeFile;
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-    const shiftX = store.get(shiftXAtom);
-    const shiftYCents = store.get(shiftYCentsAtom);
-    const scaleX = store.get(scaleXAtom);
-    const scaleY = store.get(scaleYAtom);
-    const rotation = store.get(rotationAtom);
-    const boundaryMode = store.get(boundaryModeAtom);
 
     const shiftUv = unitsToUv(
-      shiftX,
-      shiftYCents / 100,
+      shiftX.value,
+      shiftYCents.value / 100,
       props.bpm,
       totalDuration,
-      bandsPerOctave,
+      bandsPerOctave.value,
       spectrogramData.numBands,
     );
 
@@ -171,9 +106,9 @@ class TransformBrush extends BaseBrush {
     if (!material) return;
 
     material.uniforms.shiftUv.value.copy(shiftUv);
-    material.uniforms.scale.value.set(scaleX, scaleY);
-    material.uniforms.rotation.value = (rotation * Math.PI) / 180;
-    material.uniforms.boundaryMode.value = boundaryModes.indexOf(boundaryMode);
+    material.uniforms.scale.value.set(scaleX.value, scaleY.value);
+    material.uniforms.rotation.value = rotation.value;
+    material.uniforms.boundaryMode.value = boundaryMode.value;
   }
 }
 

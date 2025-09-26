@@ -1,4 +1,7 @@
+import { RefObject } from "react";
 import { Vector2 } from "three";
+import { FileRendererHandle } from "./components/file-renderer";
+import type { State } from "./store";
 
 // This interface matches the flattened payload received from the Electron main process
 export interface AnalysisPayload {
@@ -40,6 +43,8 @@ export interface SpectrogramData {
 export interface OpenFile {
   filePath: string;
   spectrogramData: SpectrogramData;
+  rendererRef?: RefObject<FileRendererHandle | null>;
+  audioBuffer?: AudioBuffer;
 }
 
 // Describes the payload sent back to the main process for synthesis
@@ -54,3 +59,35 @@ export interface SynthesisPayload {
     bandLengths: Uint32Array;
   };
 }
+
+export type Parameter<T> = {
+  key: keyof State;
+  name: string;
+  label: string;
+  unit?: string;
+  value: T;
+  setValue: (value: T) => void;
+  resetValue: () => void;
+};
+
+export type ContinuousNumberParameter = Parameter<number> & {
+  min: number;
+  max: number;
+  step: number;
+};
+
+export type DiscreteNumberParameter = Parameter<number> & {
+  values: readonly { value: number; label: string }[];
+};
+
+export type OptionsParameter<T> = Parameter<T> & {
+  options: { value: T; label: string }[];
+};
+
+export type BooleanParameter = Parameter<boolean>;
+
+export type AnyParameter<T> =
+  | ContinuousNumberParameter
+  | OptionsParameter<T>
+  | BooleanParameter
+  | DiscreteNumberParameter;

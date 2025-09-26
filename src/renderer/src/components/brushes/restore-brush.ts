@@ -1,7 +1,7 @@
 import { shaderMaterial } from "@react-three/drei";
 import { ShaderMaterial } from "three";
 import { BaseBrush, BrushParameter } from "./base-brush";
-import { brushMain, code, CommonUniforms, defaultValues, vertexShader } from "./common";
+import { brushMain, common, CommonUniforms, defaultValues, vertexShader } from "./common";
 
 const RestoreMaterial = shaderMaterial(
   {
@@ -9,7 +9,7 @@ const RestoreMaterial = shaderMaterial(
   },
   vertexShader,
   /*glsl*/ `
-    ${code}
+    ${common}
 
     vec4 applyBrushStroke(vec4 sourceTexel, Coords coords) {
       return sampleFromOriginal(coords.dest);

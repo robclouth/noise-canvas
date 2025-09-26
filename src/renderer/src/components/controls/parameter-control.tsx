@@ -1,38 +1,86 @@
-import { BrushParameter } from "@/components/brushes/base-brush";
+import { State, useStore } from "@/store";
+import { AnyParameter, ContinuousNumberParameter, DiscreteNumberParameter, OptionsParameter } from "@/types";
 import { SelectControl } from "./select-control";
 import { SliderControl } from "./slider-control";
 import { SwitchControl } from "./switch-control";
 
-export const ParameterControl = ({ parameter }: { parameter: BrushParameter }) => {
-  if (parameter.type === "slider") {
-    // The new types on BrushParameter allow us to discriminate
-    // based on the presence of the `values` property.
-    if (parameter.values) {
-      return (
-        <SliderControl label={parameter.label} atom={parameter.atom} unit={parameter.unit} values={parameter.values} />
-      );
-    }
+function isOptionsParameter<T>(p: AnyParameter<T>): p is OptionsParameter<T> {
+  return "options" in p;
+}
+
+function isContinuousNumberParameter(p: AnyParameter<any>): p is ContinuousNumberParameter {
+  return "min" in p;
+}
+
+function isDiscreteNumberParameter(p: AnyParameter<any>): p is DiscreteNumberParameter {
+  return "values" in p;
+}
+
+export type ParameterControlProps = {
+  paramKey: keyof State;
+  labelWidth?: number;
+  disabled?: boolean;
+  modulatable?: boolean;
+  modulatorParam?: keyof State;
+};
+
+export const ParameterControl = (props: ParameterControlProps) => {
+  const parameter = useStore((state) => state[props.paramKey]) as AnyParameter<any>;
+
+  if (!parameter) return null;
+
+  if (isOptionsParameter(parameter)) {
+    return (
+      <SelectControl
+        label={parameter.label}
+        value={parameter.value}
+        options={parameter.options}
+        setValue={parameter.setValue}
+        resetValue={parameter.resetValue}
+      />
+    );
+  }
+
+  if (isContinuousNumberParameter(parameter)) {
     return (
       <SliderControl
         label={parameter.label}
-        atom={parameter.atom}
+        value={parameter.value}
+        setValue={parameter.setValue}
+        resetValue={parameter.resetValue}
         min={parameter.min}
         max={parameter.max}
         step={parameter.step}
         unit={parameter.unit}
-        isLog={parameter.isLog}
+        disabled={props.disabled}
+        modulatable={props.modulatable}
+        modulatorParam={props.modulatorParam}
       />
     );
-  } else if (parameter.type === "select") {
-    const data = parameter.options.map((key) => ({
-      value: key,
-      label: key.charAt(0).toUpperCase() + key.slice(1),
-    }));
-
-    return <SelectControl label={parameter.label} atom={parameter.atom} data={data} />;
-  } else if (parameter.type === "switch") {
-    return <SwitchControl label={parameter.label} atom={parameter.atom} />;
-  } else {
-    return null;
   }
+  if (isDiscreteNumberParameter(parameter)) {
+    return (
+      <SliderControl
+        label={parameter.label}
+        value={parameter.value}
+        setValue={parameter.setValue}
+        resetValue={parameter.resetValue}
+        min={parameter.values[0].value}
+        max={parameter.values[parameter.values.length - 1].value}
+        marks={parameter.values.map((v) => ({ value: v.value, label: v.label }))}
+        unit={parameter.unit}
+        disabled={props.disabled}
+        modulatable={props.modulatable}
+        modulatorParam={props.modulatorParam}
+      />
+    );
+  }
+  return (
+    <SwitchControl
+      label={parameter.label}
+      value={parameter.value}
+      setValue={parameter.setValue}
+      resetValue={parameter.resetValue}
+    />
+  );
 };

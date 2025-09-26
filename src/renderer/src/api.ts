@@ -1,28 +1,14 @@
 import { notifications } from "@mantine/notifications";
-import { omit } from "lodash-es";
 import type { AnalysisPayloadForRenderer } from "src/main/lib/types";
 import { Vector2 } from "three";
-import {
-  activeFileAtom,
-  activeFilePathAtom,
-  audioBufferFamily,
-  bandsPerOctaveAtom,
-  fileAtomFamily,
-  filesBpmAtom,
-  minFreqAtom,
-  normalizeAtom,
-  openFilePathsAtom,
-  rendererRefs,
-  sourceFilePathAtom,
-  store,
-} from "./store";
+import { openFiles, useStore } from "./store";
 import type { OpenFile } from "./types";
 
 let unsubscribers: (() => void)[] = [];
 
 export function init() {
   if (process.env.NODE_ENV === "development") {
-    if (store.get(openFilePathsAtom).length === 0) {
+    if (Object.keys(useStore.getState().openFilePaths).length === 0) {
       openFile(
         "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
       );
@@ -38,29 +24,29 @@ export function init() {
   unsubscribers.push(unsubOpenFile);
 
   const unsubOpenAndAnalyze = window.api.onOpenAndAnalyze(() => {
+    const { bandsPerOctave, minFreq } = useStore.getState();
     const analysisParams = {
-      bandsPerOctave: store.get(bandsPerOctaveAtom),
-      minFreq: store.get(minFreqAtom),
+      bandsPerOctave: bandsPerOctave.value,
+      minFreq: minFreq.value,
     };
     window.api.openAndAnalyze(analysisParams);
   });
   unsubscribers.push(unsubOpenAndAnalyze);
 
   const unsubCloseActiveFile = window.api.onCloseActiveFile(() => {
-    const activeFile = store.get(activeFileAtom);
-    if (activeFile) {
-      closeFile(activeFile.filePath);
+    const { activeFilePath } = useStore.getState();
+    if (activeFilePath) {
+      closeFile(activeFilePath);
     }
   });
   unsubscribers.push(unsubCloseActiveFile);
 
   const unsubCloseAllFiles = window.api.onCloseAllFiles(() => {
-    store.get(openFilePathsAtom).forEach((path) => {
-      fileAtomFamily.remove(path);
-      audioBufferFamily.remove(path);
+    const { closeFile, setActiveFilePath } = useStore.getState();
+    Object.keys(openFiles).forEach((path) => {
+      closeFile(path);
     });
-    store.set(openFilePathsAtom, []);
-    store.set(activeFilePathAtom, null);
+    setActiveFilePath(null);
   });
   unsubscribers.push(unsubCloseAllFiles);
 
@@ -79,20 +65,21 @@ export function init() {
   unsubscribers.push(unsubAnalysisError);
 
   const unsubUndo = window.api.onUndoApplyState(({ filePath, data }) => {
-    const rendererRef = rendererRefs[filePath];
-    if (!rendererRef?.current) return;
-    rendererRef.current.setFBOData(
+    const file = openFiles[filePath];
+    if (!file?.rendererRef?.current) return;
+    file.rendererRef.current.setFBOData(
       new Float32Array(data.buffer, data.byteOffset, data.byteLength / Float32Array.BYTES_PER_ELEMENT),
     );
-    rendererRef.current.synthesize();
+    file.rendererRef.current.synthesize();
   });
   unsubscribers.push(unsubUndo);
 
   const unsubRequestAudioForSaving = window.api.onRequestAudioForSaving(async () => {
-    const activeFile = store.get(activeFileAtom);
+    const { activeFilePath, normalize } = useStore.getState();
+    const activeFile = activeFilePath ? openFiles[activeFilePath] : null;
 
     if (!activeFile) return;
-    const rendererRef = rendererRefs[activeFile?.filePath];
+    const rendererRef = activeFile.rendererRef;
     if (!rendererRef?.current) return;
 
     const processedData = rendererRef.current.getFBOData();
@@ -114,10 +101,9 @@ export function init() {
         ...spectrogramData.synthesisMetadata,
       },
     };
-    const normalize = store.get(normalizeAtom);
 
     try {
-      await window.api.saveAudioData(payload, analysisParams, normalize);
+      await window.api.saveAudioData(payload, analysisParams, normalize.value);
       notifications.show({
         title: "Success",
         message: "File saved successfully!",
@@ -136,40 +122,41 @@ export function init() {
   unsubscribers.push(unsubRequestAudioForSaving);
 
   const unsubRestore = window.api.onRestoreOriginal(() => {
-    const activeFile = store.get(activeFileAtom);
-    if (!activeFile) return;
-    const rendererRef = rendererRefs[activeFile?.filePath]; // Get the ref from the map
+    const { activeFilePath } = useStore.getState();
+    if (!activeFilePath) return;
+    const file = openFiles[activeFilePath]; // Get the ref from the map
 
-    if (!rendererRef?.current) return;
+    if (!file?.rendererRef?.current) return;
 
-    rendererRef.current.restoreOriginal();
+    file.rendererRef.current.restoreOriginal();
   });
   unsubscribers.push(unsubRestore);
 
-  store.sub(activeFilePathAtom, () => {
-    const newPath = store.get(activeFilePathAtom);
-    if (newPath && !store.get(sourceFilePathAtom)) {
-      store.set(sourceFilePathAtom, newPath);
+  useStore.subscribe((state, prevState) => {
+    if (state.activeFilePath !== prevState.activeFilePath) {
+      const newPath = state.activeFilePath;
+      if (newPath) {
+        if (!state.sourceFilePath) {
+          useStore.getState().setSourceFilePath(newPath);
+        }
+        window.api.setActiveFile(newPath);
+      }
     }
-    window.api.setActiveFile(newPath);
   });
 }
 
 export function destroy() {
   unsubscribers.forEach((unsub) => unsub());
   unsubscribers = [];
-
-  store.get(openFilePathsAtom).forEach((path) => {
-    fileAtomFamily.remove(path);
-    audioBufferFamily.remove(path);
-  });
-  store.set(openFilePathsAtom, []);
-  store.set(activeFilePathAtom, null);
-  store.set(sourceFilePathAtom, null);
+  const { closeAllFiles, setActiveFilePath, setSourceFilePath } = useStore.getState();
+  closeAllFiles();
+  setActiveFilePath(null);
+  setSourceFilePath(null);
 }
 
 export function addFile(payload: AnalysisPayloadForRenderer) {
-  if (store.get(openFilePathsAtom).includes(payload.filePath)) {
+  const { openFile, filesBpm, setFileBpm, setActiveFilePath } = useStore.getState();
+  if (openFiles[payload.filePath]) {
     return;
   }
 
@@ -203,45 +190,41 @@ export function addFile(payload: AnalysisPayloadForRenderer) {
       },
     },
   };
-
-  store.set(fileAtomFamily(newFile.filePath), newFile);
-  store.set(audioBufferFamily(newFile.filePath), null);
-  store.set(openFilePathsAtom, (paths) => [...paths, newFile.filePath]);
-
-  if (!store.get(filesBpmAtom)[newFile.filePath]) {
-    store.set(filesBpmAtom, (bpms) => ({ ...bpms, [newFile.filePath]: 120 }));
+  openFile(newFile);
+  if (!filesBpm[newFile.filePath]) {
+    setFileBpm(newFile.filePath, 120);
   }
-  store.set(activeFilePathAtom, newFile.filePath);
+  setActiveFilePath(newFile.filePath);
   window.api.fileOpened(newFile.filePath);
 }
 
 function openFile(filePath: string) {
+  const { bandsPerOctave, minFreq } = useStore.getState();
   const params = {
-    bandsPerOctave: store.get(bandsPerOctaveAtom),
-    minFreq: store.get(minFreqAtom),
+    bandsPerOctave: bandsPerOctave.value,
+    minFreq: minFreq.value,
   };
   window.api.loadFile(filePath, params);
 }
 
 export function closeFile(filePath: string) {
-  const isClosingSource = store.get(sourceFilePathAtom) === filePath;
-  store.set(openFilePathsAtom, (paths) => paths.filter((p) => p !== filePath));
-  fileAtomFamily.remove(filePath);
-  audioBufferFamily.remove(filePath);
+  const { sourceFilePath, closeFile, setFileBpm, setActiveFilePath, setSourceFilePath } = useStore.getState();
+  const isClosingSource = sourceFilePath === filePath;
+  closeFile(filePath);
 
-  store.set(filesBpmAtom, (bpms) => omit(bpms, filePath));
+  setFileBpm(filePath, undefined);
   window.api.fileClosed(filePath);
-  const openFilesPaths = store.get(openFilePathsAtom);
+  const openFilePaths = Object.keys(openFiles);
 
   let newActiveFilePath: string | null = null;
-  if (openFilesPaths.length > 0) {
-    newActiveFilePath = openFilesPaths[openFilesPaths.length - 1];
-    store.set(activeFilePathAtom, newActiveFilePath);
+  if (openFilePaths.length > 0) {
+    newActiveFilePath = openFilePaths[openFilePaths.length - 1];
+    setActiveFilePath(newActiveFilePath);
   } else {
-    store.set(activeFilePathAtom, null);
+    setActiveFilePath(null);
   }
 
   if (isClosingSource) {
-    store.set(sourceFilePathAtom, newActiveFilePath);
+    setSourceFilePath(newActiveFilePath);
   }
 }

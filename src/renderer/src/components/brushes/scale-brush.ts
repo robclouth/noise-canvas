@@ -1,19 +1,9 @@
 import { shaderMaterial } from "@react-three/drei";
-import { atomWithStorage } from "jotai/utils";
 import { DataTexture, FloatType, RedFormat, ShaderMaterial } from "three";
 import { Note, Scale } from "tonal";
-import {
-  bandsPerOctaveAtom,
-  minFreqAtom,
-  scaleTonicAtom,
-  scaleTypeAtom,
-  spectrogramDataAtom,
-  store,
-} from "../../store";
-import { BaseBrush, BrushParameter } from "./base-brush";
-import { brushMain, code, CommonUniforms, defaultValues, vertexShader } from "./common";
-
-export const scaleAmountAtom = atomWithStorage("scaleAmount", 100);
+import { openFiles, State, useStore } from "../../store";
+import { BaseBrush } from "./base-brush";
+import { brushMain, common, CommonUniforms, defaultValues, vertexShader } from "./common";
 
 const ScaleMaterial = shaderMaterial(
   {
@@ -24,7 +14,7 @@ const ScaleMaterial = shaderMaterial(
   /*glsl*/ `
     uniform sampler2D gainLut;
 
-    ${code}
+    ${common}
 
     vec4 applyBrushStroke(vec4 sourceTexel, Coords coords) {
       float bandIndex = floor((1.0 - coords.dest.y) * sourceBandCount);
@@ -40,23 +30,13 @@ const ScaleMaterial = shaderMaterial(
 
 class ScaleBrush extends BaseBrush {
   materials: ShaderMaterial[];
-  parameters: BrushParameter[];
+  parameters: (keyof State)[];
   gainLut: DataTexture | null = null;
 
   constructor() {
     super();
     this.materials = [new ScaleMaterial()];
-    this.parameters = [
-      {
-        type: "slider",
-        atom: scaleAmountAtom,
-        label: "Amount",
-        min: -100,
-        max: 100,
-        step: 1,
-        unit: "%",
-      },
-    ];
+    this.parameters = ["scaleAmount"];
   }
 
   updateUniforms(props: CommonUniforms, passIndex: number): void {
@@ -66,17 +46,14 @@ class ScaleBrush extends BaseBrush {
   }
 
   updateGainLut() {
-    const spectrogramData = store.get(spectrogramDataAtom);
+    const { activeFilePath, bandsPerOctave, minFreq, scaleAmount, scaleTonic, scaleType } = useStore.getState();
+    const activeFile = activeFilePath ? openFiles[activeFilePath] : null;
+    const spectrogramData = activeFile?.spectrogramData;
     if (!spectrogramData) return;
 
     const { numBands } = spectrogramData;
-    const bandsPerOctave = store.get(bandsPerOctaveAtom);
-    const minFreq = store.get(minFreqAtom);
-    const scaleAmount = store.get(scaleAmountAtom);
-    const tonic = store.get(scaleTonicAtom);
-    const type = store.get(scaleTypeAtom);
 
-    const scale = Scale.get(`${tonic} ${type}`);
+    const scale = Scale.get(`${scaleTonic.value} ${scaleType.value}`);
     const chroma = scale.chroma
       .split("")
       .map(Number)
@@ -84,14 +61,14 @@ class ScaleBrush extends BaseBrush {
 
     if (chroma.length !== 12) return;
 
-    const totalOctaves = numBands / bandsPerOctave;
+    const totalOctaves = numBands / bandsPerOctave.value;
     const referenceMidi = Note.midi("A4") || 69;
     const referenceFreq = Note.freq("A4") || 440;
     const gainLutData = new Float32Array(numBands);
 
     for (let i = 0; i < numBands; i++) {
       const v = 1.0 - (i + 0.5) / numBands;
-      const currentFreq = minFreq * Math.pow(2.0, v * totalOctaves);
+      const currentFreq = minFreq.value * Math.pow(2.0, v * totalOctaves);
 
       if (currentFreq <= 0) {
         gainLutData[i] = 1.0;
@@ -104,13 +81,13 @@ class ScaleBrush extends BaseBrush {
       const isInScale = chroma[chromaIndex];
 
       let gainFactor = 1.0;
-      if (scaleAmount >= 0) {
-        const amount = scaleAmount / 100.0;
+      if (scaleAmount.value >= 0) {
+        const amount = scaleAmount.value / 100.0;
         if (isInScale === 0) {
           gainFactor = 1.0 - amount;
         }
       } else {
-        const amount = -scaleAmount / 100.0;
+        const amount = -scaleAmount.value / 100.0;
         if (isInScale === 1) {
           gainFactor = 1.0 - amount;
         }

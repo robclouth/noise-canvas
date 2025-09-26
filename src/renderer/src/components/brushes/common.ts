@@ -78,7 +78,7 @@ float applyModulation(float value, float modulationAmount, vec2 uv) {
 }
 `;
 
-export const code = /* glsl */ `
+export const common = /* glsl */ `
 uniform sampler2D sourceSpectrogramTex;
 uniform sampler2D sourceMetadataTex;
 uniform sampler2D sourceInverseMapTex;

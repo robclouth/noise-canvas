@@ -1,17 +1,13 @@
-import { activeFileAtom, bandsPerOctaveAtom, store } from "@/store";
+import { openFiles, State, useStore } from "@/store";
 import { shaderMaterial } from "@react-three/drei";
-import { atomWithStorage } from "jotai/utils";
 import { ShaderMaterial, Vector2 } from "three";
-import { BaseBrush, BrushParameter } from "./base-brush";
-import { brushMain, code, CommonUniforms, defaultValues, unitsToUv, vertexShader } from "./common";
-
-export const blurTimeAtom = atomWithStorage("blurTime", 1 / 64); // in beats
-export const blurPitchAtom = atomWithStorage("blurPitch", 100); // in cents
+import { BaseBrush } from "./base-brush";
+import { brushMain, common, CommonUniforms, defaultValues, unitsToUv, vertexShader } from "./common";
 
 const blurShader = (direction: "x" | "y") => /*glsl*/ `
   uniform vec2 blurSizeUv;
 
-  ${code}
+  ${common}
   
   vec4 applyBrushStroke(vec4 sourceTexel, Coords coords) {
     // The spectrogram has a multi-resolution time representation. To achieve a uniform
@@ -72,52 +68,30 @@ const BlurMaterialY = shaderMaterial(
 
 class BlurBrush extends BaseBrush {
   materials: ShaderMaterial[];
-  parameters: BrushParameter[];
+  parameters: (keyof State)[];
 
   constructor() {
     super();
     this.materials = [new BlurMaterialX(), new BlurMaterialY()];
-    this.parameters = [
-      {
-        type: "slider",
-        atom: blurTimeAtom,
-        label: "Time",
-        min: 0,
-        max: 1,
-        step: 1 / 64,
-        unit: " beats",
-      },
-      {
-        type: "slider",
-        atom: blurPitchAtom,
-        label: "Pitch",
-        min: 0,
-        max: 100,
-        step: 1,
-        unit: " cents",
-      },
-    ];
+    this.parameters = ["blurTime", "blurPitch"];
   }
 
   updateUniforms(props: CommonUniforms, passIndex: number): void {
     super.updateUniforms(props, passIndex);
 
-    const activeFile = store.get(activeFileAtom);
+    const { activeFilePath, blurTime, blurPitch, bandsPerOctave } = useStore.getState();
+    const activeFile = activeFilePath ? openFiles[activeFilePath] : null;
     if (!activeFile) return;
 
     const { spectrogramData } = activeFile;
-    const blurX = store.get(blurTimeAtom);
-    const blurYCents = store.get(blurPitchAtom);
-
-    const bandsPerOctave = store.get(bandsPerOctaveAtom);
 
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
     const blurSizeUv = unitsToUv(
-      blurX,
-      blurYCents / 100, // convert cents to semitones
+      blurTime.value,
+      blurPitch.value / 100, // convert cents to semitones
       props.bpm,
       totalDuration,
-      bandsPerOctave,
+      bandsPerOctave.value,
       spectrogramData.numBands,
     );
 

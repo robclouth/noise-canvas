@@ -1,29 +1,25 @@
 import { shaderMaterial } from "@react-three/drei";
-import { atomWithStorage } from "jotai/utils";
 import { ShaderMaterial } from "three";
-import { store } from "../../store";
-import { BaseBrush, BrushParameter } from "./base-brush";
-import { brushMain, code, CommonUniforms, defaultValues, vertexShader } from "./common";
-
-export const gainDbAtom = atomWithStorage("gainDb", 0.0);
+import { useStore } from "../../store";
+import { BaseBrush } from "./base-brush";
+import { brushMain, common, CommonUniforms, defaultValues, vertexShader } from "./common";
 
 type Uniforms = CommonUniforms & {
-  gainDb: number;
+  gain: number;
 };
 
 const GainMaterial = shaderMaterial<Uniforms, ShaderMaterial & Uniforms>(
   {
     ...defaultValues,
-    gainDb: 0.0,
+    gain: 0.0,
   },
   vertexShader,
   /*glsl*/ `
-    uniform float gainDb;
+    uniform float gain;
 
-    ${code}
+    ${common}
 
     vec4 applyBrushStroke(vec4 sourceTexel, Coords coords) {
-      float gain = pow(10.0, gainDb / 20.0);
       return sourceTexel * gain;
     }
 
@@ -32,28 +28,16 @@ const GainMaterial = shaderMaterial<Uniforms, ShaderMaterial & Uniforms>(
 );
 
 class GainBrush extends BaseBrush {
-  materials: ShaderMaterial[];
-  parameters: BrushParameter[];
-
   constructor() {
     super();
     this.materials = [new GainMaterial()];
-    this.parameters = [
-      {
-        type: "slider",
-        atom: gainDbAtom,
-        label: "Gain",
-        min: -24,
-        max: 24,
-        step: 0.1,
-        unit: "dB",
-      },
-    ];
+    this.parameters = ["gainDb"];
   }
 
   updateUniforms(props: CommonUniforms, passIndex: number): void {
     super.updateUniforms(props, passIndex);
-    Object.assign(this.materials[passIndex], { ...props, gainDb: store.get(gainDbAtom) });
+    const { gainDb } = useStore.getState();
+    this.materials[passIndex].uniforms.gain.value = Math.pow(10.0, gainDb.value / 20.0);
   }
 }
 

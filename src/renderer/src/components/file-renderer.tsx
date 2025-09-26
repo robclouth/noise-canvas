@@ -1,34 +1,7 @@
-import {
-  activeFileAtom,
-  blendModeAtom,
-  brushHeightAtom,
-  brushIntensityAtom,
-  brushIntensityModAtom,
-  brushTypeAtom,
-  brushWidthAtom,
-  featherXAtom,
-  featherYAtom,
-  filesBpmAtom,
-  gridSizeAtom,
-  modulatorModeAtom,
-  modulatorPatternRadialAtom,
-  modulatorPatternRateBeatsAtom,
-  modulatorPatternRateCentsAtom,
-  modulatorPatternShapeAtom,
-  mousePosAtom,
-  offsetXAtom,
-  offsetYAtom,
-  panAtom,
-  rendererRefs,
-  scrollAtom,
-  sourceFileAtom,
-  store,
-  zoomPowerAtom,
-} from "@/store";
+import { openFiles, useStore } from "@/store";
 import { useFBO } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
-import { isSynthesizingAtom, runSynthesis } from "@renderer/audio-manager";
-import type { OpenFile } from "@renderer/types";
+import { runSynthesis } from "@renderer/audio-manager";
 import { debounce } from "lodash-es";
 import { forwardRef, memo, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -42,7 +15,7 @@ import { DisplayMaterial } from "./display-material";
  * @param file - The open file to render.
  */
 interface FileRendererProps {
-  file: OpenFile;
+  filePath: string;
 }
 
 /**
@@ -69,17 +42,6 @@ export interface FileRendererHandle {
   clearPreview: () => void;
 }
 
-const blendModeMap = {
-  Normal: 0,
-  Maximum: 1,
-  Minimum: 2,
-  Dissolve: 3,
-  Multiply: 4,
-  Difference: 5,
-  Subtract: 6,
-  Divide: 7,
-};
-
 /**
  * The `FileRenderer` component is responsible for rendering the spectrogram of an audio file
  * and handling real-time brush interactions for editing the spectrogram data.
@@ -87,13 +49,9 @@ const blendModeMap = {
  * for processing and displaying the spectrogram.
  */
 export const FileRenderer = memo(
-  forwardRef<FileRendererHandle, FileRendererProps>(({ file }, ref) => {
-    const { spectrogramData } = file;
+  forwardRef<FileRendererHandle, FileRendererProps>(({ filePath }, ref) => {
+    const { spectrogramData } = openFiles[filePath];
     const { gl, camera, invalidate } = useThree();
-
-    // Component state and refs
-    const [sourceFile, setSourceFile] = useState(() => store.get(sourceFileAtom));
-    const [activeFile, setActiveFile] = useState(() => store.get(activeFileAtom));
 
     // Textures for spectrogram data
     const [packedDataTex, setPackedDataTex] = useState<THREE.DataTexture | null>(null);
@@ -101,37 +59,34 @@ export const FileRenderer = memo(
     const [inverseMapTex, setInverseMapTex] = useState<THREE.DataTexture | null>(null);
     const [metadataTex, setMetadataTex] = useState<THREE.DataTexture | null>(null);
 
-    const sourceFileData = useRef<{
-      packed?: THREE.DataTexture;
-      meta?: THREE.DataTexture;
-    }>({});
-
     // Interaction state
     const mouseUv = useRef<THREE.Vector2 | null>(null);
     const displayMode = useRef<"preview" | "committed">("committed");
     const applyStroke = useRef(false);
 
+    console.log("file renderer");
+
     // Subscriptions to global state
     useEffect(() => {
-      const unsubMouseUv = store.sub(mousePosAtom, () => {
-        mouseUv.current = store.get(mousePosAtom);
-      });
-      const unsubBpms = store.sub(filesBpmAtom, () => {
-        invalidate();
-      });
-      const unsubSourceFile = store.sub(sourceFileAtom, () => {
-        setSourceFile(store.get(sourceFileAtom));
-      });
-      const unsubActiveFile = store.sub(activeFileAtom, () => {
-        setActiveFile(store.get(activeFileAtom));
-      });
+      const unsubMouseUv = useStore.subscribe(
+        (state) => state.mousePos,
+        (mousePos) => {
+          mouseUv.current = mousePos;
+        },
+      );
+      const unsubBpms = useStore.subscribe(
+        (state) => state.filesBpm[filePath],
+        () => {
+          invalidate();
+          console.log("invalidated");
+        },
+      );
+
       return () => {
         unsubMouseUv();
         unsubBpms();
-        unsubSourceFile();
-        unsubActiveFile();
       };
-    }, [invalidate]);
+    }, [filePath, invalidate]);
 
     // Materials and scene objects for rendering
     const displayMaterial = useMemo(() => new DisplayMaterial(), []);
@@ -165,42 +120,6 @@ export const FileRenderer = memo(
     const isInitialized = useRef(false);
 
     const strokeParams = useRef<{ x: number; y: number; preview: boolean } | null>(null);
-
-    // Effect to create textures for the source file when it changes
-    useEffect(() => {
-      if (sourceFile && sourceFile.filePath !== file.filePath) {
-        const { packedData, metadata, textureWidth, textureHeight, numBands } = sourceFile.spectrogramData;
-        const packed = new THREE.DataTexture(
-          packedData,
-          textureWidth,
-          textureHeight,
-          THREE.RGBAFormat,
-          THREE.FloatType,
-        );
-        packed.internalFormat = "RGBA32F";
-        packed.minFilter = THREE.NearestFilter;
-        packed.magFilter = THREE.NearestFilter;
-        packed.needsUpdate = true;
-        const meta = new THREE.DataTexture(metadata, numBands, 1, THREE.RGBFormat, THREE.FloatType);
-        meta.internalFormat = "RGB32F";
-        meta.minFilter = THREE.NearestFilter;
-        meta.magFilter = THREE.NearestFilter;
-        meta.needsUpdate = true;
-        sourceFileData.current = { packed, meta };
-      } else {
-        sourceFileData.current = {};
-      }
-
-      return () => {
-        sourceFileData.current.packed?.dispose();
-        sourceFileData.current.meta?.dispose();
-      };
-    }, [sourceFile, file.filePath]);
-
-    useEffect(() => {
-      isInitialized.current = false;
-      invalidate(); // Request a render to trigger the initialization in useFrame
-    }, [file.filePath, invalidate]);
 
     // Effect to create and manage spectrogram textures
     useEffect(() => {
@@ -277,46 +196,27 @@ export const FileRenderer = memo(
 
         invalidate();
 
-        window.api.addUndoState({ data: spectrogramData.packedData.buffer, filePath: file.filePath });
-        debouncedSynthesis(file, spectrogramData.packedData);
+        window.api.addUndoState({ data: spectrogramData.packedData.buffer, filePath });
+        debouncedSynthesis(filePath, spectrogramData.packedData);
       }
+      const state = useStore.getState();
 
+      const sourceFile = state.sourceFilePath ? openFiles[state.sourceFilePath] : null;
       if (!sourceFile) return;
 
       // Get current brush and view parameters from the global store
-      const brushType = store.get(brushTypeAtom);
-      const gridSize = store.get(gridSizeAtom);
-      const zoomPower = store.get(zoomPowerAtom);
-      const scroll = store.get(scrollAtom);
-      const pan = store.get(panAtom);
-      const brushIntensity = store.get(brushIntensityAtom);
-      const brushIntensityMod = store.get(brushIntensityModAtom);
-      const offsetX = store.get(offsetXAtom);
-      const offsetY = store.get(offsetYAtom);
-      const featherX = store.get(featherXAtom);
-      const featherY = store.get(featherYAtom);
-      const brushWidth = store.get(brushWidthAtom);
-      const brushHeight = store.get(brushHeightAtom);
-      const blendMode = store.get(blendModeAtom);
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
       const sourceTotalDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
 
-      const modulatorMode = store.get(modulatorModeAtom);
-      const modulatorPatternShape = store.get(modulatorPatternShapeAtom);
-      const modulatorPatternRateBeats = store.get(modulatorPatternRateBeatsAtom);
-      const modulatorPatternRateCents = store.get(modulatorPatternRateCentsAtom);
-      const modulatorPatternRadial = store.get(modulatorPatternRadialAtom);
-
-      const sourceRendererRef = rendererRefs[sourceFile.filePath];
+      const sourceRendererRef = openFiles[sourceFile.filePath].rendererRef;
 
       const textures = sourceRendererRef?.current?.getTextures();
       if (!textures) return;
 
       // Determine the current FBO for reading
       const currentReadFBO = pingPong.current === 0 ? fbo1 : fbo2;
-      const bpms = store.get(filesBpmAtom);
-      const bpm = bpms[file.filePath] || 120;
-      const sourceBpm = bpms[sourceFile.filePath] || 120;
+      const bpm = state.filesBpm[filePath] || 120;
+      const sourceBpm = state.filesBpm[sourceFile.filePath] || 120;
 
       // Set up common uniforms for the brush shaders
       const commonUniforms: CommonUniforms = {
@@ -341,40 +241,42 @@ export const FileRenderer = memo(
         destChannelCount: spectrogramData.numChannels,
         destSampleRate: spectrogramData.sampleRate,
         originalSpectrogramTex: originalPackedDataTex,
-        viewZoomPower: zoomPower,
-        viewOffset: scroll,
+        viewZoomPower: state.zoomPower.value,
+        viewOffset: state.scroll.value,
         brushCenterUv: mouseUv.current || new THREE.Vector2(-1, -1),
         brushSizeUv: mouseUv.current
           ? unitsToUv(
-              brushWidth,
-              brushHeight,
+              state.brushWidth.value,
+              state.brushHeight.value,
               bpm,
               totalDuration,
               spectrogramData.bandsPerOctave,
               spectrogramData.numBands,
             )
           : new THREE.Vector2(0, 0),
-        featherX: featherX / 100,
-        featherY: featherY / 100,
-        brushIntensity: brushIntensity / 100,
-        brushIntensityMod: brushIntensityMod / 100,
-        pan,
+        featherX: state.featherX.value / 100,
+        featherY: state.featherY.value / 100,
+        brushIntensity: state.brushIntensity.value / 100,
+        brushIntensityMod: state.brushIntensityMod.value / 100,
+        pan: state.pan.value,
         bpm,
         offsetUv: unitsToUv(
-          offsetX,
-          offsetY,
+          state.offsetX.value,
+          state.offsetY.value,
           sourceBpm,
           sourceTotalDuration,
           sourceFile.spectrogramData.bandsPerOctave,
           sourceFile.spectrogramData.numBands,
         ),
-        blendMode: blendModeMap[blendMode],
-        modulatorMode,
-        modulatorPatternShape,
-        modulatorPatternRateBeats,
-        modulatorPatternRateCents,
-        modulatorPatternRadial,
+        blendMode: state.blendMode.value,
+        modulatorMode: state.modulatorMode.value,
+        modulatorPatternShape: state.modulatorPatternShape.value,
+        modulatorPatternRateBeats: state.modulatorPatternRateBeats.value,
+        modulatorPatternRateCents: state.modulatorPatternRateCents.value,
+        modulatorPatternRadial: state.modulatorPatternRadial.value,
       };
+
+      console.log("use frame");
 
       // Render brush stroke if requested
       if (strokeParams.current && applyStroke.current) {
@@ -383,7 +285,7 @@ export const FileRenderer = memo(
         const destination = pingPong.current === 0 ? fbo2 : fbo1;
         const { preview } = strokeParams.current;
 
-        const brush = brushes[brushType];
+        const brush = brushes[state.brushType.value];
         const numPasses = brush.materials.length;
 
         let readBuffer = source;
@@ -417,9 +319,9 @@ export const FileRenderer = memo(
           pingPong.current = 1 - pingPong.current;
           displayMode.current = "committed";
 
-          store.set(isSynthesizingAtom, true);
+          useStore.getState().setIsSynthesizing(true);
           const buffer = getFBOData();
-          debouncedSynthesis(file, buffer);
+          debouncedSynthesis(filePath, buffer);
         }
       }
 
@@ -439,13 +341,11 @@ export const FileRenderer = memo(
         sourceChannelCount: spectrogramData.numChannels,
         sourceSampleRate: spectrogramData.sampleRate,
         sourceSpectrogramTextureSize: spectrogramData.packedTextureSize,
-        gridSize: gridSize,
-        bpm: bpm,
-        isSourceFile: sourceFile?.filePath === file.filePath,
-        isTargetFile: activeFile?.filePath === file.filePath,
+        gridSize: state.gridSize,
+        bpm,
+        isSourceFile: sourceFile?.filePath === filePath,
+        isTargetFile: state.activeFilePath === filePath,
       };
-
-      displayUniforms.bpm = bpm;
 
       for (const [key, value] of Object.entries(displayUniforms)) {
         if (displayMaterial.uniforms[key]) {
@@ -526,16 +426,16 @@ export const FileRenderer = memo(
       isInitialized.current = false;
 
       invalidate();
-      debouncedSynthesis(file, getFBOData());
+      debouncedSynthesis(filePath, getFBOData());
     };
 
     /**
      * Triggers audio synthesis for the current state of the spectrogram.
      */
     const synthesize = () => {
-      store.set(isSynthesizingAtom, true);
+      useStore.getState().setIsSynthesizing(true);
       const buffer = getFBOData();
-      debouncedSynthesis(file, buffer);
+      debouncedSynthesis(filePath, buffer);
     };
 
     /**
@@ -548,7 +448,6 @@ export const FileRenderer = memo(
           displayMode.current = "preview";
         }
         applyStroke.current = true;
-
         invalidate();
       },
       getFBOData,

@@ -40,15 +40,41 @@ export const PITCH_VALUES = [
   { value: 96, label: "96 semis" },
 ];
 
-export const MODULATOR_MODE = {
-  LFO: 0,
-} as const;
+export const BANDS_PER_OCTAVE_VALUES = [
+  { value: 12, label: "12" },
+  { value: 24, label: "24" },
+  { value: 36, label: "36" },
+  { value: 48, label: "48" },
+  { value: 60, label: "60" },
+  { value: 72, label: "72" },
+  { value: 84, label: "84" },
+  { value: 96, label: "96" },
+];
 
-export const PATTERN_SHAPE = {
-  SINE: 0,
-  TRIANGLE: 1,
-  SQUARE: 2,
-  SAWTOOTH: 3,
-  PULSE: 4,
-  RANDOM: 5,
-} as const;
+export const BLEND_MODES = [
+  { value: 0, label: "Normal" },
+  { value: 1, label: "Maximum" },
+  { value: 2, label: "Minimum" },
+  { value: 3, label: "Dissolve" },
+  { value: 4, label: "Multiply" },
+  { value: 5, label: "Difference" },
+  { value: 6, label: "Subtract" },
+  { value: 7, label: "Divide" },
+];
+
+export const MODULATOR_MODES = [{ value: 0, label: "LFO" }];
+
+export const PATTERN_SHAPES = [
+  { value: 0, label: "Sine" },
+  { value: 1, label: "Triangle" },
+  { value: 2, label: "Square" },
+  { value: 3, label: "Sawtooth" },
+  { value: 4, label: "Pulse" },
+  { value: 5, label: "Random" },
+];
+
+export const BOUNDARY_MODES = [
+  { value: 0, label: "Smear" },
+  { value: 1, label: "Cut" },
+  { value: 2, label: "Wrap" },
+];

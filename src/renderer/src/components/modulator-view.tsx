@@ -1,25 +1,14 @@
 import { Stack } from "@mantine/core";
 import { shaderMaterial, View } from "@react-three/drei";
 import { extend } from "@react-three/fiber";
-import { MODULATOR_MODE, PATTERN_SHAPE } from "@renderer/lib/constants";
-import {
-  modulatorModeAtom,
-  modulatorPatternRadialAtom,
-  modulatorPatternRateBeatsAtom,
-  modulatorPatternRateCentsAtom,
-  modulatorPatternShapeAtom,
-} from "@renderer/store";
-import { useAtomValue } from "jotai";
-import { startCase } from "lodash-es";
+import { useStore } from "@renderer/store";
 import { modulatorCode, vertexShader } from "./brushes/common";
-import { SelectControl } from "./controls/select-control";
-import { SliderControl } from "./controls/slider-control";
-import { SwitchControl } from "./controls/switch-control";
+import { ParameterControl } from "./controls/parameter-control";
 
 const modulatorMaterial = shaderMaterial(
   {
-    modulatorMode: MODULATOR_MODE.LFO as number,
-    modulatorPatternShape: PATTERN_SHAPE.SINE as number,
+    modulatorMode: 0,
+    modulatorPatternShape: 0,
     modulatorPatternRateBeats: 1,
     modulatorPatternRateCents: 1,
     amplitude: 1,
@@ -51,19 +40,12 @@ const modulatorMaterial = shaderMaterial(
 
 const ModulatorMaterial = extend(modulatorMaterial);
 
-type SceneProps = {
-  modulatorPatternShape: number;
-  modulatorPatternRateBeats: number;
-  modulatorPatternRateCents: number;
-  modulatorPatternRadial: boolean;
-};
+const Scene = () => {
+  const modulatorPatternShape = useStore((state) => state.modulatorPatternShape.value);
+  const modulatorPatternRateBeats = useStore((state) => state.modulatorPatternRateBeats.value);
+  const modulatorPatternRateCents = useStore((state) => state.modulatorPatternRateCents.value);
+  const modulatorPatternRadial = useStore((state) => state.modulatorPatternRadial.value);
 
-const Scene = ({
-  modulatorPatternShape,
-  modulatorPatternRateBeats,
-  modulatorPatternRateCents,
-  modulatorPatternRadial,
-}: SceneProps) => {
   return (
     <mesh>
       <planeGeometry args={[2, 2]} />
@@ -78,39 +60,16 @@ const Scene = ({
 };
 
 export const ModulatorView = () => {
-  const modulatorPatternShape = useAtomValue(modulatorPatternShapeAtom);
-  const modulatorPatternRateBeats = useAtomValue(modulatorPatternRateBeatsAtom);
-  const modulatorPatternRateCents = useAtomValue(modulatorPatternRateCentsAtom);
-  const modulatorPatternRadial = useAtomValue(modulatorPatternRadialAtom);
-
   return (
     <Stack gap={2}>
-      <SelectControl
-        label="Mode"
-        atom={modulatorModeAtom}
-        data={Object.entries(MODULATOR_MODE).map(([label, value]) => ({
-          label: startCase(label.toLowerCase()),
-          value,
-        }))}
-      />
-      <SelectControl
-        label="Shape"
-        atom={modulatorPatternShapeAtom}
-        data={Object.entries(PATTERN_SHAPE).map(([label, value]) => ({
-          label: startCase(label.toLowerCase()),
-          value,
-        }))}
-      />
-      <SliderControl label="Rate" atom={modulatorPatternRateBeatsAtom} min={0.1} max={16} step={0.1} />
-      <SliderControl label="Pitch" atom={modulatorPatternRateCentsAtom} min={1} max={1200} step={1} />
-      <SwitchControl label="Radial" atom={modulatorPatternRadialAtom} />
+      <ParameterControl paramKey="modulatorMode" />
+      <ParameterControl paramKey="modulatorPatternShape" />
+      <ParameterControl paramKey="modulatorPatternRateBeats" />
+      <ParameterControl paramKey="modulatorPatternRateCents" />
+      <ParameterControl paramKey="modulatorPatternRadial" />
+
       <View style={{ height: 128, marginTop: 6 }}>
-        <Scene
-          modulatorPatternShape={modulatorPatternShape}
-          modulatorPatternRateBeats={modulatorPatternRateBeats}
-          modulatorPatternRateCents={modulatorPatternRateCents}
-          modulatorPatternRadial={modulatorPatternRadial}
-        />
+        <Scene />
       </View>
     </Stack>
   );

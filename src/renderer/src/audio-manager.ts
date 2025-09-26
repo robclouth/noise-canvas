@@ -1,28 +1,19 @@
-import { atom } from "jotai";
 import * as Tone from "tone";
-import {
-  activeFileAtom,
-  audioBufferAtom,
-  audioBufferFamily,
-  bandsPerOctaveAtom,
-  isPlayingAtom,
-  loopAtom,
-  minFreqAtom,
-  normalizeAtom,
-  store,
-} from "./store";
-import type { OpenFile } from "./types";
-
-export const playbackTimeAtom = atom(0);
-export const isSynthesizingAtom = atom(false);
+import { openFiles, useStore } from "./store";
 
 const player = new Tone.Player().toDestination();
 let animationFrameId: number;
 
-export const runSynthesis = async (file: OpenFile, processedData: Float32Array): Promise<void> => {
+export const runSynthesis = async (filePath: string, processedData: Float32Array): Promise<void> => {
   try {
+    console.log("runSynthesis");
+    const { normalize, bandsPerOctave, minFreq, isPlaying, activeFilePath, loop } = useStore.getState();
+    const file = openFiles[filePath];
+    if (!file) {
+      return;
+    }
+
     const originalAnalysis = file.spectrogramData;
-    const normalize = store.get(normalizeAtom);
 
     // Assemble the payload for the main process
     const payload = {
@@ -36,10 +27,10 @@ export const runSynthesis = async (file: OpenFile, processedData: Float32Array):
     };
 
     const analysisParams = {
-      bandsPerOctave: store.get(bandsPerOctaveAtom),
-      minFreq: store.get(minFreqAtom),
+      bandsPerOctave: bandsPerOctave.value,
+      minFreq: minFreq.value,
     };
-    const audioBufferChannels = await window.api.synthesizeAudio(payload, analysisParams, normalize);
+    const audioBufferChannels = await window.api.synthesizeAudio(payload, analysisParams, normalize.value);
 
     if (audioBufferChannels.length === 0) {
       throw new Error("Synthesis returned no audio channels.");
@@ -55,15 +46,11 @@ export const runSynthesis = async (file: OpenFile, processedData: Float32Array):
       audioBuffer.copyToChannel(new Float32Array(audioBufferChannels[c]), c);
     }
 
-    store.set(audioBufferFamily(file.filePath), audioBuffer);
+    file.audioBuffer = audioBuffer;
 
-    const isPlaying = store.get(isPlayingAtom);
-    const activeFile = store.get(activeFileAtom);
-
-    if (isPlaying && activeFile && activeFile.filePath === file.filePath) {
+    if (isPlaying && activeFilePath && activeFilePath === filePath) {
       const transport = Tone.getTransport();
       let currentTime = transport.seconds;
-      const loop = store.get(loopAtom);
       const newDuration = audioBuffer.duration;
 
       if (loop) {
@@ -88,37 +75,37 @@ export const runSynthesis = async (file: OpenFile, processedData: Float32Array):
   } catch (error) {
     console.error("Error running synthesis:", error);
   } finally {
-    store.set(isSynthesizingAtom, false);
+    useStore.getState().setIsSynthesizing(false);
   }
 };
 
 const updatePlaybackTime = () => {
-  const loop = store.get(loopAtom);
-  const buffer = store.get(audioBufferAtom);
+  const { loop, activeFilePath, setPlaybackTime } = useStore.getState();
+  const file = activeFilePath ? openFiles[activeFilePath] : undefined;
+  const audioBuffer = file?.audioBuffer;
   let currentTime = Tone.getTransport().seconds;
 
-  if (loop && buffer && player.state === "started") {
-    currentTime %= buffer.duration;
+  if (loop && audioBuffer && player.state === "started") {
+    currentTime %= audioBuffer.duration;
   }
-  store.set(playbackTimeAtom, currentTime);
+  setPlaybackTime(currentTime);
   animationFrameId = requestAnimationFrame(updatePlaybackTime);
 };
 
 export const togglePlayback = async () => {
-  const isCurrentlyPlaying = store.get(isPlayingAtom);
-  if (isCurrentlyPlaying) {
+  const { isPlaying, activeFilePath, loop, setIsPlaying } = useStore.getState();
+  if (isPlaying) {
     stopAudio();
     return;
   }
-
-  const audioBuffer = store.get(audioBufferAtom);
+  const file = activeFilePath ? openFiles[activeFilePath] : undefined;
+  const audioBuffer = file?.audioBuffer;
 
   if (audioBuffer) {
     if (Tone.getContext().rawContext.state !== "running") {
       await Tone.start();
     }
     player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
-    const loop = store.get(loopAtom);
     player.loop = loop;
     player.sync().start(0);
 
@@ -131,7 +118,7 @@ export const togglePlayback = async () => {
     }
 
     transport.start();
-    store.set(isPlayingAtom, true);
+    setIsPlaying(true);
     updatePlaybackTime();
   } else {
     console.error("No audio buffer available to play.");
@@ -140,11 +127,12 @@ export const togglePlayback = async () => {
 
 export const stopAudio = () => {
   if (Tone.getTransport().state === "started") {
+    const { setPlaybackTime, setIsPlaying } = useStore.getState();
     const transport = Tone.getTransport();
     transport.stop();
     transport.cancel(0); // Clear scheduled events
     cancelAnimationFrame(animationFrameId);
-    store.set(playbackTimeAtom, 0);
-    store.set(isPlayingAtom, false);
+    setPlaybackTime(0);
+    setIsPlaying(false);
   }
 };

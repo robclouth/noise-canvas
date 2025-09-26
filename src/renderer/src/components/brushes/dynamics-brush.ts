@@ -1,16 +1,8 @@
 import { shaderMaterial } from "@react-three/drei";
-import { atomWithStorage } from "jotai/utils";
 import { ShaderMaterial } from "three";
-import { store } from "../../store";
+import { useStore } from "../../store";
 import { BaseBrush, BrushParameter } from "./base-brush";
-import { brushMain, code, CommonUniforms, defaultValues, vertexShader } from "./common";
-
-export const dynamicsThresholdAtom = atomWithStorage("dynamicsThreshold", -20.0);
-export const dynamicsRatioAtom = atomWithStorage("dynamicsRatio", 4.0);
-export const dynamicsMakeupGainAtom = atomWithStorage("dynamicsMakeupGain", 0.0);
-export const dynamicsAttackAtom = atomWithStorage("dynamicsAttack", 0.01);
-export const dynamicsReleaseAtom = atomWithStorage("dynamicsRelease", 0.1);
-export const dynamicsKneeAtom = atomWithStorage("dynamicsKnee", 10.0);
+import { brushMain, common, CommonUniforms, defaultValues, vertexShader } from "./common";
 
 const DynamicsMaterial = shaderMaterial(
   {
@@ -31,7 +23,7 @@ const DynamicsMaterial = shaderMaterial(
     uniform float release;
     uniform float knee;
 
-    ${code}
+    ${common}
 
     float dbToLin(float db) {
         return pow(10.0, db / 20.0);
@@ -109,7 +101,7 @@ class DynamicsBrush extends BaseBrush {
     this.parameters = [
       {
         type: "slider",
-        atom: dynamicsThresholdAtom,
+        param: "dynamicsThreshold",
         label: "Threshold",
         min: -60,
         max: 0,
@@ -118,7 +110,7 @@ class DynamicsBrush extends BaseBrush {
       },
       {
         type: "slider",
-        atom: dynamicsRatioAtom,
+        param: "dynamicsRatio",
         label: "Ratio",
         min: 0.1,
         max: 100,
@@ -126,7 +118,7 @@ class DynamicsBrush extends BaseBrush {
       },
       {
         type: "slider",
-        atom: dynamicsMakeupGainAtom,
+        param: "dynamicsMakeupGain",
         label: "Makeup",
         min: 0,
         max: 30,
@@ -135,7 +127,7 @@ class DynamicsBrush extends BaseBrush {
       },
       {
         type: "slider",
-        atom: dynamicsAttackAtom,
+        param: "dynamicsAttack",
         label: "Attack",
         min: 0.001,
         max: 0.2,
@@ -144,7 +136,7 @@ class DynamicsBrush extends BaseBrush {
       },
       {
         type: "slider",
-        atom: dynamicsReleaseAtom,
+        param: "dynamicsRelease",
         label: "Release",
         min: 0.01,
         max: 1.0,
@@ -153,7 +145,7 @@ class DynamicsBrush extends BaseBrush {
       },
       {
         type: "slider",
-        atom: dynamicsKneeAtom,
+        param: "dynamicsKnee",
         label: "Knee",
         min: 0,
         max: 20,
@@ -165,16 +157,18 @@ class DynamicsBrush extends BaseBrush {
 
   updateUniforms(props: CommonUniforms, passIndex: number): void {
     super.updateUniforms(props, passIndex);
-    this.materials[passIndex].uniforms.threshold.value = store.get(dynamicsThresholdAtom);
-    let ratio = store.get(dynamicsRatioAtom);
+    const { dynamicsThreshold, dynamicsRatio, dynamicsMakeupGain, dynamicsAttack, dynamicsRelease, dynamicsKnee } =
+      useStore.getState();
+    this.materials[passIndex].uniforms.threshold.value = dynamicsThreshold;
+    let ratio = dynamicsRatio;
     if (ratio >= 99) {
       ratio = 1000.0; // A very high number for "infinity"
     }
     this.materials[passIndex].uniforms.ratio.value = ratio;
-    this.materials[passIndex].uniforms.makeupGain.value = store.get(dynamicsMakeupGainAtom);
-    this.materials[passIndex].uniforms.attack.value = store.get(dynamicsAttackAtom);
-    this.materials[passIndex].uniforms.release.value = store.get(dynamicsReleaseAtom);
-    this.materials[passIndex].uniforms.knee.value = store.get(dynamicsKneeAtom);
+    this.materials[passIndex].uniforms.makeupGain.value = dynamicsMakeupGain;
+    this.materials[passIndex].uniforms.attack.value = dynamicsAttack;
+    this.materials[passIndex].uniforms.release.value = dynamicsRelease;
+    this.materials[passIndex].uniforms.knee.value = dynamicsKnee;
   }
 }
 

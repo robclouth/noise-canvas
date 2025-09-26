@@ -1,13 +1,8 @@
 import { shaderMaterial } from "@react-three/drei";
-import { atomWithStorage } from "jotai/utils";
 import { ShaderMaterial } from "three";
-import { store } from "../../store";
+import { useStore } from "../../store";
 import { BaseBrush, BrushParameter } from "./base-brush";
-import { brushMain, code, CommonUniforms, defaultValues, vertexShader } from "./common";
-
-export const transientIntensityAtom = atomWithStorage("transientIntensity", 0.5);
-export const transientThresholdAtom = atomWithStorage("transientThreshold", 0.01);
-export const alignPhasesAtom = atomWithStorage("alignPhases", false);
+import { brushMain, common, CommonUniforms, defaultValues, vertexShader } from "./common";
 
 const TransientShaperMaterial = shaderMaterial(
   {
@@ -22,7 +17,7 @@ const TransientShaperMaterial = shaderMaterial(
     uniform float threshold;
     uniform bool alignPhases;
 
-    ${code}
+    ${common}
 
     vec4 applyBrushStroke(vec4 sourceTexel, Coords coords) {
         vec2 timeStep = vec2(1.0 / sourceFrameCount, 0.0);
@@ -67,7 +62,7 @@ class TransientShaperBrush extends BaseBrush {
     this.parameters = [
       {
         type: "slider",
-        atom: transientIntensityAtom,
+        param: "transientIntensity",
         label: "Intensity",
         min: 0,
         max: 5,
@@ -76,7 +71,7 @@ class TransientShaperBrush extends BaseBrush {
       },
       {
         type: "slider",
-        atom: transientThresholdAtom,
+        param: "transientThreshold",
         label: "Threshold",
         min: 0,
         max: 1,
@@ -84,7 +79,7 @@ class TransientShaperBrush extends BaseBrush {
       },
       {
         type: "switch",
-        atom: alignPhasesAtom,
+        param: "alignPhases",
         label: "Align Phases",
       },
     ];
@@ -92,9 +87,10 @@ class TransientShaperBrush extends BaseBrush {
 
   updateUniforms(props: CommonUniforms, passIndex: number): void {
     super.updateUniforms(props, passIndex);
-    this.materials[passIndex].uniforms.intensity.value = store.get(transientIntensityAtom);
-    this.materials[passIndex].uniforms.threshold.value = store.get(transientThresholdAtom);
-    this.materials[passIndex].uniforms.alignPhases.value = store.get(alignPhasesAtom);
+    const { transientIntensity, transientThreshold, alignPhases } = useStore.getState();
+    this.materials[passIndex].uniforms.intensity.value = transientIntensity;
+    this.materials[passIndex].uniforms.threshold.value = transientThreshold;
+    this.materials[passIndex].uniforms.alignPhases.value = alignPhases;
   }
 }
 
