@@ -2,6 +2,8 @@
 uniform int modulatorMode;
 uniform int modulatorPatternShape;
 uniform vec2 modulatorPatternRate;
+uniform float modulatorAmplitude;
+uniform float modulatorRotation;
 
 float random(vec2 st) {
     return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
@@ -11,7 +13,14 @@ float getModulation(vec2 uv) {
   float v = 0.0;
   if (modulatorMode == 0) { // LFO
     vec2 rates = vec2(1.0 / modulatorPatternRate.x, 1.0 / modulatorPatternRate.y);
-    vec2 pos = uv * rates;
+
+    float rot = modulatorRotation * PI / 180.0;
+    float s = sin(rot);
+    float c = cos(rot);
+    mat2 m = mat2(c, -s, s, c);
+    vec2 rotatedUv = m * (uv - 0.5) + 0.5;
+
+    vec2 pos = rotatedUv * rates;
 
     if (modulatorPatternShape == 0) { // SINE
       v = (sin(pos.x * 2.0 * PI) + sin(pos.y * 2.0 * PI)) / 4.0 + 0.5;
@@ -33,7 +42,7 @@ float getModulation(vec2 uv) {
       v = random(floor(pos));
     }
   }
-  return v;
+  return mix(0.5 - modulatorAmplitude / 2.0, 0.5 + modulatorAmplitude / 2.0, v);
 }
 
 float applyModulation(float value, float minValue, float maxValue, float modulationAmount, vec2 uv) {

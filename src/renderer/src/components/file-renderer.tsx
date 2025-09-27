@@ -284,6 +284,8 @@ export const FileRenderer = memo(
           spectrogramData.numBands,
         ),
         modulatorPatternRadial: state.modulatorPatternRadial.value,
+        modulatorAmplitude: state.modulatorAmplitude.value / 100,
+        modulatorRotation: state.modulatorRotation.value,
       };
 
       console.log("use frame");

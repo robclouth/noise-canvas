@@ -13,7 +13,8 @@ const modulatorMaterial = shaderMaterial(
     modulatorMode: 0,
     modulatorPatternShape: 0,
     modulatorPatternRate: new Vector2(1, 1),
-    amplitude: 1,
+    modulatorAmplitude: 1,
+    modulatorRotation: 0,
   },
   vertexShader,
   modulatorFrag,
@@ -25,6 +26,8 @@ const Scene = () => {
   const modulatorPatternShape = useStore((state) => state.modulatorPatternShape.value);
   const modulatorPatternRateBeats = useStore((state) => state.modulatorPatternRateBeats.value);
   const modulatorPatternRateSemis = useStore((state) => state.modulatorPatternRateSemis.value);
+  const modulatorAmplitude = useStore((state) => state.modulatorAmplitude.value);
+  const modulatorRotation = useStore((state) => state.modulatorRotation.value);
 
   return (
     <mesh>
@@ -32,6 +35,8 @@ const Scene = () => {
       <ModulatorMaterial
         modulatorPatternShape={modulatorPatternShape}
         modulatorPatternRate={unitsToUv(modulatorPatternRateBeats, modulatorPatternRateSemis, 120, 0.1, 24, 4)}
+        modulatorAmplitude={modulatorAmplitude / 100}
+        modulatorRotation={modulatorRotation}
       />
     </mesh>
   );
@@ -44,7 +49,8 @@ export const ModulatorView = () => {
       <ParameterControl paramKey="modulatorPatternShape" />
       <ParameterControl paramKey="modulatorPatternRateBeats" />
       <ParameterControl paramKey="modulatorPatternRateSemis" />
-
+      <ParameterControl paramKey="modulatorAmplitude" />
+      <ParameterControl paramKey="modulatorRotation" />
       <View style={{ height: 128, marginTop: 6 }}>
         <Scene />
       </View>

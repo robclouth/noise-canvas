@@ -45,6 +45,8 @@ export type CommonUniforms = {
   modulatorPatternShape: number;
   modulatorPatternRate: Vector2;
   modulatorPatternRadial: boolean;
+  modulatorAmplitude: number;
+  modulatorRotation: number;
 };
 
 export const defaultValues: CommonUniforms = {
@@ -90,6 +92,8 @@ export const defaultValues: CommonUniforms = {
   modulatorPatternShape: 0,
   modulatorPatternRate: new Vector2(1.0, 1.0),
   modulatorPatternRadial: false,
+  modulatorAmplitude: 1.0,
+  modulatorRotation: 0.0,
 };
 
 export function unitsToUv(
