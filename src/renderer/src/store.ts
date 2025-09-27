@@ -214,10 +214,9 @@ export const useStore = create<State>()(
             value: 0,
             values: [
               ...BEAT_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
-              { label: "0 beats", value: 0 },
+              { label: "0", value: 0 },
               ...BEAT_VALUES,
             ],
-            unit: " beats",
             ...createSetters("sourceOffsetBeats", 0),
           },
           sourceOffsetSemis: {
@@ -226,10 +225,9 @@ export const useStore = create<State>()(
             value: 0.0,
             values: [
               ...PITCH_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
-              { label: "0 semis", value: 0 },
+              { label: "0", value: 0 },
               ...PITCH_VALUES,
             ],
-            unit: " semi",
             ...createSetters("sourceOffsetSemis", 0),
           },
           sourceOffsetLock: {
@@ -392,7 +390,7 @@ export const useStore = create<State>()(
             label: "Beats",
             value: 1,
             values: [
-              { value: 0, label: "0 beats" },
+              { value: 0, label: "0" },
               ...BEAT_VALUES.map((value) => ({ value: value.value, label: value.label })),
             ],
             ...createSetters("modulatorPatternRateBeats", 1),
@@ -402,7 +400,7 @@ export const useStore = create<State>()(
             label: "Semis",
             value: 0,
             values: [
-              { value: 0, label: "0 semis" },
+              { value: 0, label: "0" },
               ...PITCH_VALUES.map((value) => ({ value: value.value, label: value.label })),
             ],
             ...createSetters("modulatorPatternRateSemis", 0),
