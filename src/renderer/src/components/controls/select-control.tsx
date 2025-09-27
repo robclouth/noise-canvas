@@ -6,12 +6,14 @@ export const SelectControl = <T,>({
   value,
   setValue,
   resetValue,
+  labelWidth,
 }: {
   label: string;
   value: T;
   options: readonly { value: T; label: string }[];
   setValue: (value: T) => void;
   resetValue: () => void;
+  labelWidth?: number;
 }) => {
   const handleChange = (val: string | null) => {
     if (val !== null) {
@@ -24,7 +26,7 @@ export const SelectControl = <T,>({
 
   return (
     <Group gap={"xs"} wrap="nowrap" h={25}>
-      <Text size="xs" w={50} lh={1.2} onDoubleClick={() => resetValue()}>
+      <Text size="xs" w={labelWidth} lineClamp={1} truncate="end" onDoubleClick={() => resetValue()}>
         {label}
       </Text>
       <Select

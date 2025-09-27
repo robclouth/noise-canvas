@@ -20,8 +20,7 @@ export type ParameterControlProps = {
   paramKey: keyof State;
   labelWidth?: number;
   disabled?: boolean;
-  modulatable?: boolean;
-  modulatorParam?: keyof State;
+  color?: string;
 };
 
 export const ParameterControl = (props: ParameterControlProps) => {
@@ -37,6 +36,7 @@ export const ParameterControl = (props: ParameterControlProps) => {
         options={parameter.options}
         setValue={parameter.setValue}
         resetValue={parameter.resetValue}
+        labelWidth={60}
       />
     );
   }
@@ -53,8 +53,9 @@ export const ParameterControl = (props: ParameterControlProps) => {
         step={parameter.step}
         unit={parameter.unit}
         disabled={props.disabled}
-        modulatable={props.modulatable}
-        modulatorParam={props.modulatorParam}
+        modulatorParamKey={parameter.modulatorParamKey}
+        color={props.color}
+        labelWidth={60}
       />
     );
   }
@@ -70,8 +71,7 @@ export const ParameterControl = (props: ParameterControlProps) => {
         marks={parameter.values.map((v) => ({ value: v.value, label: v.label }))}
         unit={parameter.unit}
         disabled={props.disabled}
-        modulatable={props.modulatable}
-        modulatorParam={props.modulatorParam}
+        labelWidth={60}
       />
     );
   }
@@ -81,6 +81,7 @@ export const ParameterControl = (props: ParameterControlProps) => {
       value={parameter.value}
       setValue={parameter.setValue}
       resetValue={parameter.resetValue}
+      labelWidth={60}
     />
   );
 };

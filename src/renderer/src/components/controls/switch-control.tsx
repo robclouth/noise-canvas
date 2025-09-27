@@ -5,6 +5,7 @@ export const SwitchControl = ({
   value,
   setValue,
   resetValue,
+  labelWidth,
 }: {
   label: string;
   value: boolean;
@@ -14,7 +15,7 @@ export const SwitchControl = ({
 }) => {
   return (
     <Group gap="sm" wrap="nowrap">
-      <Text size="xs" w={50} onDoubleClick={() => resetValue()}>
+      <Text size="xs" w={labelWidth} lineClamp={1} truncate="end" onDoubleClick={() => resetValue()}>
         {label}
       </Text>
       <Switch variant="unstyled" checked={value} onChange={(e) => setValue(e.currentTarget.checked)} />

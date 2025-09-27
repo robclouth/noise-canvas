@@ -257,7 +257,8 @@ export const FileRenderer = memo(
         featherY: state.featherPitch.value / 100,
         brushIntensity: state.brushIntensity.value / 100,
         brushIntensityMod: state.brushIntensityMod.value / 100,
-        pan: state.pan.value,
+        pan: state.pan.value / 100,
+        panMod: state.panMod.value / 100,
         bpm,
         offsetUv: unitsToUv(
           state.sourceOffsetBeats.value,

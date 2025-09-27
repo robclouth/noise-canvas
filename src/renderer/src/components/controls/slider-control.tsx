@@ -1,10 +1,12 @@
 import { State } from "@/store";
 import { Group, NumberInput, Popover, Slider, Text } from "@mantine/core";
 import { ChevronDown } from "lucide-react";
+import { ParameterControl } from "./parameter-control";
 
 type SliderControlProps = {
   label: string;
   value: number;
+  color?: string;
   setValue: (value: number) => void;
   resetValue: () => void;
   min: number;
@@ -13,16 +15,29 @@ type SliderControlProps = {
   marks?: { value: number; label: string }[];
   unit?: string;
   disabled?: boolean;
-  modulatable?: boolean;
-  modulatorParam?: keyof State;
+  modulatorParamKey?: keyof State;
+  labelWidth?: number;
 };
 
 export const SliderControl = (props: SliderControlProps) => {
-  const { label, value, setValue, resetValue, min, max, step, marks, unit, disabled, modulatable, modulatorParam } =
-    props;
+  const {
+    label,
+    value,
+    setValue,
+    resetValue,
+    min,
+    max,
+    step,
+    marks,
+    unit,
+    disabled,
+    modulatorParamKey,
+    color,
+    labelWidth,
+  } = props;
 
   const labelComponent = (
-    <Text size="xs" w={50} lh={1.2} onDoubleClick={() => resetValue()}>
+    <Text size="xs" w={labelWidth} lineClamp={1} truncate="end" onDoubleClick={() => resetValue()}>
       {label}
     </Text>
   );
@@ -31,16 +46,16 @@ export const SliderControl = (props: SliderControlProps) => {
 
   return (
     <Group gap={"xs"} wrap="nowrap" h={25} align="center">
-      {modulatable && modulatorParam ? (
-        <Popover withArrow shadow="md">
+      {modulatorParamKey ? (
+        <Popover shadow="md">
           <Popover.Target>
-            <Group gap={2} style={{ cursor: "pointer" }}>
+            <Group gap={2} w={60} style={{ cursor: "pointer" }} wrap="nowrap">
               {labelComponent}
               <ChevronDown size={12} />
             </Group>
           </Popover.Target>
-          <Popover.Dropdown p={2} w={300}>
-            {/* <ContinuousSliderControl label="Mod" min={-1} max={1} step={0.01} unit="%"  /> */}
+          <Popover.Dropdown py={2} px={8} w={300}>
+            <ParameterControl paramKey={modulatorParamKey} color={"blue"} />
           </Popover.Dropdown>
         </Popover>
       ) : (
@@ -58,16 +73,16 @@ export const SliderControl = (props: SliderControlProps) => {
         step={marks ? 1 : step}
         restrictToMarks={!!marks}
         disabled={disabled}
+        color={color}
       />
       {marks ? (
-        <Text size="xs" w={70}>
+        <Text size="xs" w={60} lineClamp={1} truncate="end">
           {marks?.[valueIndex ?? 0]?.label}
         </Text>
       ) : (
         <NumberInput
           variant="unstyled"
-          h={20}
-          w={70}
+          w={60}
           size="xs"
           hideControls
           suffix={unit}

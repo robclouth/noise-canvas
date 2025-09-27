@@ -27,7 +27,9 @@ export const openFiles: Record<string, OpenFile> = {};
 export type State = {
   // Brush Parameters
   brushIntensity: ContinuousNumberParameter;
+  brushIntensityMod: ContinuousNumberParameter;
   pan: ContinuousNumberParameter;
+  panMod: ContinuousNumberParameter;
   featherTime: ContinuousNumberParameter;
   featherPitch: ContinuousNumberParameter;
   sourceOffsetBeats: DiscreteNumberParameter;
@@ -94,8 +96,6 @@ export type State = {
   transientThreshold: ContinuousNumberParameter;
   alignPhases: BooleanParameter;
 
-  brushIntensityMod: ContinuousNumberParameter;
-
   // Audio Playback
   isPlaying: boolean;
   setIsPlaying: (isPlaying: boolean) => void;
@@ -138,6 +138,18 @@ export const useStore = create<State>()(
           setValue: (value: State[K]["value"]) => set((state) => ({ [key]: { ...state[key], value } })),
           resetValue: () => set((state) => ({ [key]: { ...state[key], value: initialValue } })),
         });
+
+        const createModulator = ({ name, key }: { name: string; key: ParameterKey }) => ({
+          name,
+          label: "Mod",
+          value: 0,
+          min: -100,
+          max: 100,
+          step: 1,
+          unit: "%",
+          ...createSetters(key, 0),
+        });
+
         return {
           brushIntensity: {
             name: "Brush Intensity",
@@ -147,18 +159,22 @@ export const useStore = create<State>()(
             max: 100,
             step: 1,
             unit: "%",
+            modulatorParamKey: "brushIntensityMod",
             ...createSetters("brushIntensity", 100),
           },
+          brushIntensityMod: createModulator({ name: "Brush Intensity Mod Amount", key: "brushIntensityMod" }),
           pan: {
             name: "Pan",
             label: "Pan",
             value: 0.0,
-            min: -1,
-            max: 1,
-            step: 0.01,
-            unit: "",
+            min: -100,
+            max: 100,
+            step: 1,
+            unit: "%",
+            modulatorParamKey: "panMod",
             ...createSetters("pan", 0.0),
           },
+          panMod: createModulator({ name: "Pan Mod Amount", key: "panMod" }),
           featherTime: {
             name: "Feather Time",
             label: "Time",
@@ -561,15 +577,6 @@ export const useStore = create<State>()(
             label: "Align Phases",
             value: false,
             ...createSetters("alignPhases", false),
-          },
-          brushIntensityMod: {
-            name: "Brush Intensity Mod",
-            label: "Brush Intensity Mod",
-            value: 0,
-            min: -1,
-            max: 1,
-            step: 0.01,
-            ...createSetters("brushIntensityMod", 0),
           },
           openFilePaths: [],
           openFile: (file) =>

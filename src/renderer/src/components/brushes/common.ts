@@ -538,6 +538,7 @@ export type CommonUniforms = {
   brushIntensityMod: number;
   offsetUv: Vector2;
   pan: number;
+  panMod: number;
   bpm: number;
   blendMode: number;
   modulatorMode: number;
@@ -579,6 +580,7 @@ export const defaultValues: CommonUniforms = {
   brushIntensityMod: 0.0,
   offsetUv: new Vector2(0, 0),
   pan: 0.0,
+  panMod: 0.0,
   bpm: 120.0,
   blendMode: 0,
   modulatorMode: 0,
