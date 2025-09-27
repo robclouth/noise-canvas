@@ -7,49 +7,7 @@ export type ParameterUniform = {
   modulationAmount: number;
 };
 
-export type CommonUniforms = {
-  sourceSpectrogramTex: Texture;
-  sourceSpectrogramTextureSize: Vector2;
-  sourceInverseMapTex: Texture;
-  sourceMetadataTex: Texture;
-  sourceMinFreq: number;
-  sourceBandsPerOctave: number;
-  sourceFrameCount: number;
-  sourceBandCount: number;
-  sourceChannelCount: number;
-  sourceSampleRate: number;
-  destSpectrogramTex: Texture;
-  destSpectrogramTextureSize: Vector2;
-  destInverseMapTex: Texture;
-  destMetadataTex: Texture;
-  destMinFreq: number;
-  destBandsPerOctave: number;
-  destFrameCount: number;
-  destBandCount: number;
-  destChannelCount: number;
-  destSampleRate: number;
-  originalSpectrogramTex: Texture | null;
-  brushCenterUv: Vector2;
-  brushSizeUv: Vector2;
-  viewZoomPower: number;
-  viewOffset: number;
-  featherX: number;
-  featherY: number;
-  brushIntensity: ParameterUniform;
-  offsetUv: Vector2;
-  pan: number;
-  panMod: number;
-  bpm: number;
-  blendMode: number;
-  modulatorMode: number;
-  modulatorPatternShape: number;
-  modulatorPatternRate: Vector2;
-  modulatorPatternRadial: boolean;
-  modulatorAmplitude: number;
-  modulatorRotation: number;
-};
-
-export const defaultValues: CommonUniforms = {
+export const defaultValues = {
   sourceSpectrogramTex: new Texture(),
   sourceInverseMapTex: new Texture(),
   sourceMetadataTex: new Texture(),
@@ -84,8 +42,12 @@ export const defaultValues: CommonUniforms = {
     modulationAmount: 0.0,
   },
   offsetUv: new Vector2(0, 0),
-  pan: 0.0,
-  panMod: 0.0,
+  brushPan: {
+    value: 0.0,
+    minValue: 0.0,
+    maxValue: 1.0,
+    modulationAmount: 0.0,
+  },
   bpm: 120.0,
   blendMode: 0,
   modulatorMode: 0,
@@ -95,6 +57,8 @@ export const defaultValues: CommonUniforms = {
   modulatorAmplitude: 1.0,
   modulatorRotation: 0.0,
 };
+
+export type CommonUniforms = typeof defaultValues;
 
 export function unitsToUv(
   beats: number,

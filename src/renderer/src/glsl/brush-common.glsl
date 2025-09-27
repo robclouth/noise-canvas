@@ -41,7 +41,7 @@ uniform float viewOffset;
 uniform float featherX;
 uniform float featherY;
 uniform vec2 offsetUv;
-uniform float pan;
+uniform Parameter brushPan;
 uniform Parameter brushIntensity;
 uniform int blendMode;
 
@@ -351,16 +351,26 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
     vec2 modifiedL = modified.rg;
     vec2 modifiedR = modified.ba;
 
-    // Calculate final brush weight including intensity modulation and panning
+    // Calculate modulation values
+    float pan = applyModulation(brushPan.value, brushPan.minValue, brushPan.maxValue, brushPan.modulationAmount, destUv);
     float intensity = applyModulation(brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue, brushIntensity.modulationAmount, destUv);
-    float effectiveWeightL = weight * intensity * clamp(1.0 - pan, 0.0, 1.0);
-    float effectiveWeightR = weight * intensity * clamp(1.0 + pan, 0.0, 1.0);
+
+    // Apply panning to the modified signal by scaling its magnitude.
+    // A simple component-wise multiplication works because scaling a complex number (a, b)
+    // by a real k results in (ka, kb), which corresponds to scaling its magnitude by k
+    // while keeping the phase unchanged.
+    vec2 pannedModifiedL = modifiedL * clamp(1.0 - pan, 0.0, 1.0);
+    vec2 pannedModifiedR = modifiedR * clamp(1.0 + pan, 0.0, 1.0);
+
+    // Calculate final brush weight
+    float effectiveWeight = weight * intensity;
+
 
     // --- 2. Handle Special "Dissolve" Mode ---
     // This mode doesn't blend, it replaces pixels randomly.
     if (blendMode == 8) {
-        vec2 finalL = (random(destUv.xy) < effectiveWeightL) ? modifiedL : originalL;
-        vec2 finalR = (random(destUv.yx) < effectiveWeightR) ? modifiedR : originalR;
+        vec2 finalL = (random(destUv.xy) < effectiveWeight) ? pannedModifiedL : originalL;
+        vec2 finalR = (random(destUv.yx) < effectiveWeight) ? pannedModifiedR : originalR;
         return vec4(finalL, finalR);
     }
 
@@ -368,31 +378,31 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
     // For all other modes, we first determine the 100% blended result ("target"),
     // and then interpolate towards it based on the effective weight.
     float magOriginalL = getMag(originalL);
-    float magModifiedL = getMag(modifiedL);
+    float magModifiedL = getMag(pannedModifiedL); // Use panned magnitude
     float phaseOriginalL = getPhase(originalL);
 
     float magOriginalR = getMag(originalR);
-    float magModifiedR = getMag(modifiedR);
+    float magModifiedR = getMag(pannedModifiedR); // Use panned magnitude
     float phaseOriginalR = getPhase(originalR);
 
     vec2 finalL = originalL;
     vec2 finalR = originalR;
 
     if (blendMode == 0) { // Mix
-        finalL = interpolateComplex(originalL, modifiedL, effectiveWeightL);
-        finalR = interpolateComplex(originalR, modifiedR, effectiveWeightR);
+        finalL = interpolateComplex(originalL, pannedModifiedL, effectiveWeight);
+        finalR = interpolateComplex(originalR, pannedModifiedR, effectiveWeight);
     } else if (blendMode == 1) { // Add
-        finalL = fromPolar(magOriginalL + magModifiedL * effectiveWeightL, phaseOriginalL);
-        finalR = fromPolar(magOriginalR + magModifiedR * effectiveWeightR, phaseOriginalR);
+        finalL = fromPolar(magOriginalL + magModifiedL * effectiveWeight, phaseOriginalL);
+        finalR = fromPolar(magOriginalR + magModifiedR * effectiveWeight, phaseOriginalR);
     } else if (blendMode == 2) { // Subtract
-        finalL = fromPolar(max(0.0, magOriginalL - magModifiedL * effectiveWeightL), phaseOriginalL);
-        finalR = fromPolar(max(0.0, magOriginalR - magModifiedR * effectiveWeightR), phaseOriginalR);
+        finalL = fromPolar(max(0.0, magOriginalL - magModifiedL * effectiveWeight), phaseOriginalL);
+        finalR = fromPolar(max(0.0, magOriginalR - magModifiedR * effectiveWeight), phaseOriginalR);
     } else if (blendMode == 3) { // Multiply
-        finalL = fromPolar(magOriginalL * mix(1.0, magModifiedL, effectiveWeightL), phaseOriginalL);
-        finalR = fromPolar(magOriginalR * mix(1.0, magModifiedR, effectiveWeightR), phaseOriginalR);
+        finalL = fromPolar(magOriginalL * mix(1.0, magModifiedL, effectiveWeight), phaseOriginalL);
+        finalR = fromPolar(magOriginalR * mix(1.0, magModifiedR, effectiveWeight), phaseOriginalR);
     } else if (blendMode == 4) { // Divide
-        float divisorL = mix(1.0, magModifiedL, effectiveWeightL);
-        float divisorR = mix(1.0, magModifiedR, effectiveWeightR);
+        float divisorL = mix(1.0, magModifiedL, effectiveWeight);
+        float divisorR = mix(1.0, magModifiedR, effectiveWeight);
         finalL = fromPolar(magOriginalL / max(1e-6, divisorL), phaseOriginalL);
         finalR = fromPolar(magOriginalR / max(1e-6, divisorR), phaseOriginalR);
     } else {
@@ -401,12 +411,12 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
 
         if (blendMode == 5) {
             // Choose the complex number with the greater magnitude
-            targetL = (magModifiedL > magOriginalL) ? modifiedL : originalL;
-            targetR = (magModifiedR > magOriginalR) ? modifiedR : originalR;
+            targetL = (magModifiedL > magOriginalL) ? pannedModifiedL : originalL;
+            targetR = (magModifiedR > magOriginalR) ? pannedModifiedR : originalR;
         } else if (blendMode == 6) {
             // Choose the complex number with the lesser magnitude
-            targetL = (magModifiedL < magOriginalL) ? modifiedL : originalL;
-            targetR = (magModifiedR < magOriginalR) ? modifiedR : originalR;
+            targetL = (magModifiedL < magOriginalL) ? pannedModifiedL : originalL;
+            targetR = (magModifiedR < magOriginalR) ? pannedModifiedR : originalR;
         } else if (blendMode == 7) {
             // Take the absolute difference of magnitudes, keep original phase
             targetL = fromPolar(abs(magOriginalL - magModifiedL), phaseOriginalL);
@@ -417,8 +427,8 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
             targetR = originalR;
         }
 
-        finalL = interpolateComplex(originalL, targetL, effectiveWeightL);
-        finalR = interpolateComplex(originalR, targetR, effectiveWeightR);
+        finalL = interpolateComplex(originalL, targetL, effectiveWeight);
+        finalR = interpolateComplex(originalR, targetR, effectiveWeight);
     }
 
     return vec4(finalL, finalR);

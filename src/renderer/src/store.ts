@@ -29,8 +29,8 @@ export type State = {
   brushIntensity: ContinuousNumberParameter;
   brushIterations: ContinuousNumberParameter;
   brushIntensityMod: ContinuousNumberParameter;
-  pan: ContinuousNumberParameter;
-  panMod: ContinuousNumberParameter;
+  brushPan: ContinuousNumberParameter;
+  brushPanMod: ContinuousNumberParameter;
   featherTime: ContinuousNumberParameter;
   featherPitch: ContinuousNumberParameter;
   sourceOffsetBeats: DiscreteNumberParameter;
@@ -176,7 +176,7 @@ export const useStore = create<State>()(
             step: 1,
             ...createSetters("brushIterations", 1),
           },
-          pan: {
+          brushPan: {
             name: "Pan",
             label: "Pan",
             value: 0.0,
@@ -184,10 +184,10 @@ export const useStore = create<State>()(
             max: 100,
             step: 1,
             unit: "%",
-            modulatorParamKey: "panMod",
-            ...createSetters("pan", 0.0),
+            modulatorParamKey: "brushPanMod",
+            ...createSetters("brushPan", 0.0),
           },
-          panMod: createModulator({ name: "Pan Mod Amount", key: "panMod" }),
+          brushPanMod: createModulator({ name: "Pan Mod Amount", key: "brushPanMod" }),
           featherTime: {
             name: "Feather Time",
             label: "Time",

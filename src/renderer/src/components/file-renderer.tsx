@@ -184,7 +184,17 @@ export const FileRenderer = memo(
      * This handles initialization, brush stroke application, and updating the display material.
      */
     useFrame(({ gl, camera }) => {
-      if (!fboMesh || !spectrogramData || !packedDataTex || !inverseMapTex || !metadataTex || !fbo1 || !fbo2) return;
+      if (
+        !fboMesh ||
+        !spectrogramData ||
+        !packedDataTex ||
+        !inverseMapTex ||
+        !metadataTex ||
+        !fbo1 ||
+        !fbo2 ||
+        !originalPackedDataTex
+      )
+        return;
 
       // Initial copy of the spectrogram data to the FBO
       if (!isInitialized.current) {
@@ -266,8 +276,12 @@ export const FileRenderer = memo(
           maxValue: state.brushIntensity.max / 100,
           modulationAmount: state.brushIntensityMod.value / 100,
         },
-        pan: state.pan.value / 100,
-        panMod: state.panMod.value / 100,
+        brushPan: {
+          value: state.brushPan.value / 100,
+          minValue: state.brushPan.min / 100,
+          maxValue: state.brushPan.max / 100,
+          modulationAmount: state.brushPanMod.value / 100,
+        },
         bpm,
         offsetUv: unitsToUv(
           state.sourceOffsetBeats.value,

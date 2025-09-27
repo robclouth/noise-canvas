@@ -41,15 +41,15 @@ float getModulation(vec2 uv) {
       vec2 p = fract(pos);
       v = max(1.0 - step(0.2, p.x), 1.0 - step(0.2, p.y));
     } else if (modulatorPatternShape == 5) { // RANDOM
-      v = random(floor(pos));
+      v = random(floor(pos)) ;
     } else if (modulatorPatternShape == 6) { // SNOISE
-      v = snoise(pos);
+      v = snoise(pos) * 0.5 + 0.5;
     } else if (modulatorPatternShape == 7) { // FBM
-      v = fbm(pos);
+      v = fbm(pos) * 0.5 + 0.5;
     } else if (modulatorPatternShape == 8) { // VORONOI
       v = voronoi(pos).x;
     } else if (modulatorPatternShape == 9) { // WAVELET
-      v = wavelet(pos);
+      v = wavelet(pos) * 0.5 + 0.5;
     } else if (modulatorPatternShape == 10) { // WORLEY
       v = worley(pos);
     }
