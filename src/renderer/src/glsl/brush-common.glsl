@@ -40,7 +40,8 @@ uniform float viewZoomPower;
 uniform float viewOffset;
 uniform float featherX;
 uniform float featherY;
-uniform vec2 offsetUv;
+uniform Parameter sourceOffsetX;
+uniform Parameter sourceOffsetY;
 uniform Parameter brushPan;
 uniform Parameter brushIntensity;
 uniform int blendMode;
@@ -89,6 +90,9 @@ vec2 packedToUnpackedUv(sampler2D inverseMapTex, vec2 packedUv, float frameCount
 ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
     ProcessingUvs uvs;
     uvs.dest = packedToUnpackedUv(destInverseMapTex, destPackedUv, destFrameCount, destBandCount);
+    float sourceOffsetX = applyModulation(sourceOffsetX.value, sourceOffsetX.minValue, sourceOffsetX.maxValue, sourceOffsetX.modulationAmount, uvs.dest);
+    float sourceOffsetY = applyModulation(sourceOffsetY.value, sourceOffsetY.minValue, sourceOffsetY.maxValue, sourceOffsetY.modulationAmount, uvs.dest);
+    vec2 offsetUv = vec2(sourceOffsetX, sourceOffsetY);
     uvs.source = uvs.dest + offsetUv;
     return uvs;
 }

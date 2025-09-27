@@ -34,7 +34,9 @@ export type State = {
   featherTime: ContinuousNumberParameter;
   featherPitch: ContinuousNumberParameter;
   sourceOffsetBeats: DiscreteNumberParameter;
+  sourceOffsetBeatsMod: ContinuousNumberParameter;
   sourceOffsetSemis: DiscreteNumberParameter;
+  sourceOffsetSemisMod: ContinuousNumberParameter;
   sourceOffsetLock: BooleanParameter;
 
   // Brush Options
@@ -217,8 +219,10 @@ export const useStore = create<State>()(
               { label: "0", value: 0 },
               ...BEAT_VALUES,
             ],
+            modulatorParamKey: "sourceOffsetBeatsMod",
             ...createSetters("sourceOffsetBeats", 0),
           },
+          sourceOffsetBeatsMod: createModulator({ name: "Offset Beats Mod Amount", key: "sourceOffsetBeatsMod" }),
           sourceOffsetSemis: {
             name: "Offset Semis",
             label: "Semis",
@@ -228,8 +232,10 @@ export const useStore = create<State>()(
               { label: "0", value: 0 },
               ...PITCH_VALUES,
             ],
+            modulatorParamKey: "sourceOffsetSemisMod",
             ...createSetters("sourceOffsetSemis", 0),
           },
+          sourceOffsetSemisMod: createModulator({ name: "Offset Semis Mod Amount", key: "sourceOffsetSemisMod" }),
           sourceOffsetLock: {
             name: "Offset Lock",
             label: "Lock",

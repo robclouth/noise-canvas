@@ -71,6 +71,8 @@ export const ParameterControl = (props: ParameterControlProps) => {
         marks={parameter.values.map((v) => ({ value: v.value, label: v.label }))}
         unit={parameter.unit}
         disabled={props.disabled}
+        modulatorParamKey={parameter.modulatorParamKey}
+        color={props.color}
         labelWidth={60}
       />
     );

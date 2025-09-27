@@ -86,7 +86,7 @@ void main() {
 
         if (isSourceFile) {
           // Draw source rectangle (faint)
-          vec2 effectiveOffset = offsetUv;
+          vec2 effectiveOffset = vec2(sourceOffsetX.value, sourceOffsetY.value);
           if (brushSizeUv.x == 0.0) {
             effectiveOffset.x = 0.0;
           }

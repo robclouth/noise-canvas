@@ -232,6 +232,15 @@ export const FileRenderer = memo(
       const bpm = state.filesBpm[filePath] || 120;
       const sourceBpm = state.filesBpm[sourceFile.filePath] || 120;
 
+      const sourceOffsetUv = unitsToUv(
+        state.sourceOffsetBeats.value,
+        state.sourceOffsetSemis.value,
+        sourceBpm,
+        sourceTotalDuration,
+        sourceFile.spectrogramData.bandsPerOctave,
+        sourceFile.spectrogramData.numBands,
+      );
+
       // Set up common uniforms for the brush shaders
       const commonUniforms: CommonUniforms = {
         sourceSpectrogramTex: textures.packed.texture,
@@ -283,14 +292,18 @@ export const FileRenderer = memo(
           modulationAmount: state.brushPanMod.value / 100,
         },
         bpm,
-        offsetUv: unitsToUv(
-          state.sourceOffsetBeats.value,
-          state.sourceOffsetSemis.value,
-          sourceBpm,
-          sourceTotalDuration,
-          sourceFile.spectrogramData.bandsPerOctave,
-          sourceFile.spectrogramData.numBands,
-        ),
+        sourceOffsetX: {
+          value: sourceOffsetUv.x,
+          minValue: 0.0,
+          maxValue: 1.0,
+          modulationAmount: state.sourceOffsetBeatsMod.value / 100,
+        },
+        sourceOffsetY: {
+          value: sourceOffsetUv.y,
+          minValue: 0.0,
+          maxValue: 1.0,
+          modulationAmount: state.sourceOffsetSemisMod.value / 100,
+        },
         blendMode: state.blendMode.value,
         modulatorMode: state.modulatorMode.value,
         modulatorPatternShape: state.modulatorPatternShape.value,

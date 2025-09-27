@@ -41,7 +41,18 @@ export const defaultValues = {
     maxValue: 1.0,
     modulationAmount: 0.0,
   },
-  offsetUv: new Vector2(0, 0),
+  sourceOffsetX: {
+    value: 0.0,
+    minValue: 0.0,
+    maxValue: 1.0,
+    modulationAmount: 0.0,
+  },
+  sourceOffsetY: {
+    value: 0.0,
+    minValue: 0.0,
+    maxValue: 1.0,
+    modulationAmount: 0.0,
+  },
   brushPan: {
     value: 0.0,
     minValue: 0.0,
