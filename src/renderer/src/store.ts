@@ -67,6 +67,7 @@ export type State = {
 
   // Gain Brush
   gainDb: ContinuousNumberParameter;
+  gainDbMod: ContinuousNumberParameter;
 
   // Blur Brush
   blurTime: ContinuousNumberParameter; // in beats
@@ -408,8 +409,10 @@ export const useStore = create<State>()(
             max: 24,
             step: 0.1,
             unit: "dB",
+            modulatorParamKey: "gainDbMod",
             ...createSetters("gainDb", 0.0),
           },
+          gainDbMod: createModulator({ name: "Gain Mod Amount", key: "gainDbMod" }),
           blurTime: {
             name: "Blur Time",
             label: "Time",

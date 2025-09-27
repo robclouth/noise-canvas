@@ -1,4 +1,4 @@
-import { State } from "@/store";
+import { State, useStore } from "@/store";
 import { Group, NumberInput, Popover, Slider, Text } from "@mantine/core";
 import { ChevronDown } from "lucide-react";
 import { ParameterControl } from "./parameter-control";
@@ -36,8 +36,19 @@ export const SliderControl = (props: SliderControlProps) => {
     labelWidth,
   } = props;
 
+  const modulator = useStore((state) => (modulatorParamKey ? state[modulatorParamKey] : undefined));
+  const isModulated = modulator && typeof modulator === "object" && "value" in modulator && modulator.value !== 0;
+
   const labelComponent = (
-    <Text size="xs" w={labelWidth} lineClamp={1} truncate="end" onDoubleClick={() => resetValue()}>
+    <Text
+      size="xs"
+      w={labelWidth}
+      lineClamp={1}
+      truncate="end"
+      onDoubleClick={() => resetValue()}
+      c={isModulated ? "blue" : "normal"}
+      fw={isModulated ? "bold" : "normal"}
+    >
       {label}
     </Text>
   );

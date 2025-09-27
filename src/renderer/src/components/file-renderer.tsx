@@ -257,8 +257,8 @@ export const FileRenderer = memo(
         featherY: state.featherPitch.value / 100,
         brushIntensity: {
           value: state.brushIntensity.value / 100,
-          minValue: state.brushIntensity.min,
-          maxValue: state.brushIntensity.max,
+          minValue: state.brushIntensity.min / 100,
+          maxValue: state.brushIntensity.max / 100,
           modulationAmount: state.brushIntensityMod.value / 100,
         },
         pan: state.pan.value / 100,

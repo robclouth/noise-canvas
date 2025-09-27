@@ -38,5 +38,16 @@ float getModulation(vec2 uv) {
 
 float applyModulation(float value, float minValue, float maxValue, float modulationAmount, vec2 uv) {
   float modulation = getModulation(uv);
-  return mix(value, mix(minValue, maxValue, modulation), modulationAmount);
+
+  float minV = minValue;
+  float maxV = maxValue;
+
+  if (modulationAmount < 0.0) {
+    minV = maxValue;
+    maxV = minValue;
+  }
+
+  float modulatedValue = mix(minV, maxV, modulation);
+
+  return mix(value, modulatedValue, abs(modulationAmount));
 }

@@ -4,16 +4,21 @@ import gainBrushFrag from "../glsl/gain-brush.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useStore } from "../store";
 import { BaseBrush } from "./base-brush";
-import { CommonUniforms, defaultValues } from "./common";
+import { CommonUniforms, defaultValues, ParameterUniform } from "./common";
 
 type Uniforms = CommonUniforms & {
-  gain: number;
+  gainDb: ParameterUniform;
 };
 
 const GainMaterial = shaderMaterial<Uniforms, ShaderMaterial & Uniforms>(
   {
     ...defaultValues,
-    gain: 0.0,
+    gainDb: {
+      value: 0.0,
+      minValue: -24,
+      maxValue: 24,
+      modulationAmount: 0,
+    },
   },
   passThroughVert,
   gainBrushFrag,
@@ -28,8 +33,13 @@ class GainBrush extends BaseBrush {
 
   updateUniforms(props: CommonUniforms, passIndex: number): void {
     super.updateUniforms(props, passIndex);
-    const { gainDb } = useStore.getState();
-    this.materials[passIndex].uniforms.gain.value = Math.pow(10.0, gainDb.value / 20.0);
+    const { gainDb, gainDbMod } = useStore.getState();
+    this.materials[passIndex].uniforms.gainDb.value = {
+      value: gainDb.value,
+      minValue: gainDb.min,
+      maxValue: gainDb.max,
+      modulationAmount: gainDbMod.value / 100,
+    };
   }
 }
 
