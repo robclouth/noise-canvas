@@ -6,6 +6,6 @@ varying vec2 vUv;
 
 uniform float gain;
 
-vec4 applyBrushStroke(vec4 sourceTexel, Coords coords) {
+vec4 applyBrushStroke(vec4 sourceTexel, ProcessingUvs coords) {
   return sourceTexel * gain;
 }

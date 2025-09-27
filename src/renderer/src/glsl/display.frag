@@ -20,7 +20,7 @@ float magnitudeToDb(float mag) {
 }
 
 void main() {
-    vec4 packedValue = samplePointFromScreen(vUv);
+    vec4 packedValue = getSourceSample(vUv);
 
     vec2 leftComplex = packedValue.rg;
     float leftMag = length(leftComplex);
@@ -44,10 +44,9 @@ void main() {
     float totalDuration = sourceFrameCount / sourceSampleRate;
     float gridWidthUv = gridIntervalSeconds / totalDuration;
     
-    vec2 zoomedUv = screenToZoomed(vUv);
-    float line = mod(zoomedUv.x, gridWidthUv);
+    float line = mod(vUv.x, gridWidthUv);
 
-    float lineThicknessUv = fwidth(zoomedUv.x);
+    float lineThicknessUv = fwidth(vUv.x);
 
     if (line < lineThicknessUv) {
         color = mix(color, vec3(1.0), 0.2);
@@ -70,11 +69,11 @@ void main() {
         }
 
         vec2 halfSize = correctedBrushSize / 2.0;
-        float strokeWidthUv = fwidth(zoomedUv.x) * 1.5;
+        float strokeWidthUv = fwidth(vUv.x) * 1.5;
 
         // Draw Brush Rectangle (only if this is the active file)
         if (isTargetFile) {
-            vec2 d = abs(zoomedUv - correctedRectCenter) - halfSize;
+            vec2 d = abs(vUv - correctedRectCenter) - halfSize;
             float outsideDist = length(max(d, 0.0));
             float insideDist = min(max(d.x, d.y), 0.0);
             float distToBorder = outsideDist + insideDist;
@@ -95,12 +94,12 @@ void main() {
             effectiveOffset.y = 0.0;
           }
           vec2 sourceCenter = correctedRectCenter + effectiveOffset;
-          vec2 sourceCenterScreen = zoomedToScreen(sourceCenter);
+          vec2 sourceCenterScreen = sourceCenter;
 
           if (sourceCenterScreen.x >= 0.0 && sourceCenterScreen.x <= 1.0 &&
               sourceCenterScreen.y >= 0.0 && sourceCenterScreen.y <= 1.0) {
               
-              vec2 dSource = abs(zoomedUv - sourceCenter) - halfSize; // reuse halfSize from brush rect
+              vec2 dSource = abs(vUv - sourceCenter) - halfSize; // reuse halfSize from brush rect
               float outsideDistSource = length(max(dSource, 0.0));
               float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
               float distToBorderSource = outsideDistSource + insideDistSource;

@@ -4,7 +4,6 @@ import { View } from "@react-three/drei";
 import { X } from "lucide-react";
 import { memo, MouseEventHandler, useCallback, useRef } from "react";
 import { Vector2 } from "three";
-import { screenToZoomed } from "../brushes/common";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
 
@@ -14,8 +13,6 @@ export interface FileViewProps {
 
 function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>, bpm: number): [number, number] | null {
   const {
-    zoomPower,
-    scroll,
     activeFilePath,
     gridSizeBeats: gridSize,
     brushWidthBeats: brushWidth,
@@ -29,21 +26,21 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>, bpm: num
   const x = (event.clientX - rect.left) / rect.width;
   const y = (event.clientY - rect.top) / rect.height;
 
-  const zoomedUv = screenToZoomed(new Vector2(x, y), zoomPower.value, scroll.value);
+  const uv = new Vector2(x, y);
 
   const activeFile = activeFilePath ? openFiles[activeFilePath] : null;
   const { spectrogramData } = activeFile ?? {};
   if (!spectrogramData) {
-    return [zoomedUv.x, zoomedUv.y];
+    return [uv.x, uv.y];
   }
 
-  let snappedX = zoomedUv.x;
-  let snappedY = zoomedUv.y;
+  let snappedX = uv.x;
+  let snappedY = uv.y;
 
   if (gridSize.value > 0) {
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
     const gridIntervalSeconds = (60 / bpm) * gridSize.value;
-    const currentTime = zoomedUv.x * totalDuration;
+    const currentTime = uv.x * totalDuration;
 
     const brushWidthSeconds = brushWidth.value * (60.0 / bpm);
     const startTime = currentTime - brushWidthSeconds / 2.0;
@@ -57,7 +54,7 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>, bpm: num
   if (gridSizeY.value > 0) {
     const bandsPerSemitone = bandsPerOctave.value / 12;
     const gridIntervalBands = gridSizeY.value * bandsPerSemitone;
-    const currentBand = zoomedUv.y * spectrogramData.numBands;
+    const currentBand = uv.y * spectrogramData.numBands;
     const snappedBand = Math.round(currentBand / gridIntervalBands) * gridIntervalBands;
     snappedY = snappedBand / spectrogramData.numBands;
   }

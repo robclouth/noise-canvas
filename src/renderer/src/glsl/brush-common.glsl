@@ -1,3 +1,8 @@
+// ============================================================================
+// UNIFORMS & STRUCTS
+// ============================================================================
+
+// (Structs and Uniforms are unchanged)
 struct Parameter {
     float value;
     float minValue;
@@ -29,8 +34,6 @@ uniform float destBandsPerOctave;
 
 uniform sampler2D originalSpectrogramTex;
 
-
-// Brush & View Uniforms
 uniform vec2 brushCenterUv;
 uniform vec2 brushSizeUv;
 uniform float viewZoomPower;
@@ -40,154 +43,27 @@ uniform float featherY;
 uniform vec2 offsetUv;
 uniform float pan;
 uniform Parameter brushIntensity;
-uniform int blendMode; // 0: Normal, 1: Maximum, 2: Minimum
+uniform int blendMode;
+
+// ============================================================================
+// DEFINES & HELPERS
+// ============================================================================
 
 #define PI 3.141592653589793
 
-#include "modulation-common.glsl";
+// Blend Modes
+#define BLEND_NORMAL 0
+#define BLEND_MAXIMUM 1
+#define BLEND_MINIMUM 2
+#define BLEND_DISSOLVE 3
+#define BLEND_MULTIPLY 4
+#define BLEND_DIFFERENCE 5
+#define BLEND_SUBTRACT 6
+#define BLEND_DIVIDE 7
 
+#include "modulation-common.glsl"; // Contains modulation and random functions
 
-//------------------------------------------------------------------------------
-// Coordinate System & Helpers
-//------------------------------------------------------------------------------
-struct Coords {
-    vec2 dest;
-    vec2 source;
-};
-
-
-vec2 screenToZoomed(vec2 screenUv) {
-  float zoom = pow(2.0, viewZoomPower);
-  if (zoom <= 1.0) { return screenUv; }
-  float viewWidth = 1.0 / zoom;
-  float viewStartX = viewOffset * (1.0 - viewWidth);
-  return vec2(viewStartX + screenUv.x * viewWidth, screenUv.y);
-}
-
-vec2 zoomedToScreen(vec2 zoomedUv) {
-    float zoom = pow(2.0, viewZoomPower);
-    if (zoom <= 1.0) { return zoomedUv; }
-    float viewWidth = 1.0 / zoom;
-    float viewStartX = viewOffset * (1.0 - viewWidth);
-    return vec2((zoomedUv.x - viewStartX) / viewWidth, zoomedUv.y);
-}
-
-vec2 getUnpackedUvFromPackedUv(vec2 packedUv) {
-    vec2 rawUnpacked = texture2D(sourceInverseMapTex, packedUv).rg;
-    vec2 unpackedUv;
-    unpackedUv.x = rawUnpacked.x / sourceFrameCount;
-    unpackedUv.y = 1.0 - (rawUnpacked.y + 0.5) / sourceBandCount;
-    return unpackedUv;
-}
-
-vec2 getUnpackedUvFromPackedUvDest(vec2 packedUv) {
-    vec2 rawUnpacked = texture2D(destInverseMapTex, packedUv).rg;
-    vec2 unpackedUv;
-    unpackedUv.x = rawUnpacked.x / destFrameCount;
-    unpackedUv.y = 1.0 - (rawUnpacked.y + 0.5) / destBandCount;
-    return unpackedUv;
-}
-
-Coords getCoords(vec2 packedUv) {
-    Coords c;
-    c.dest = getUnpackedUvFromPackedUvDest(packedUv);
-    c.source = c.dest + offsetUv;
-    return c;
-}
-
-vec4 applyBrushEffect(vec4 original, vec4 modified, float weight, Coords coords) {
-    vec2 originalL = original.rg;
-    vec2 originalR = original.ba;
-    vec2 modifiedL = modified.rg;
-    vec2 modifiedR = modified.ba;
-    vec2 finalL;
-    vec2 finalR;
-
-    float brushIntensityMod = applyModulation(brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue, brushIntensity.modulationAmount, coords.dest);
-
-    float leftWeight = clamp(1.0 - pan, 0.0, 1.0);
-    float rightWeight = clamp(1.0 + pan, 0.0, 1.0);
-    float effectiveWeightL = weight * brushIntensityMod * leftWeight;
-    float effectiveWeightR = weight * brushIntensityMod * rightWeight;
-
-    if (blendMode == 3) { // Dissolve
-        if (random(originalL + modifiedL) < effectiveWeightL) {
-            finalL = modifiedL;
-        } else {
-            finalL = originalL;
-        }
-        if (random(originalR + modifiedR + vec2(0.1, -0.1)) < effectiveWeightR) {
-            finalR = modifiedR;
-        } else {
-            finalR = originalR;
-        }
-        return vec4(finalL, finalR);
-    }
-
-    vec2 blendedL, blendedR;
-
-    if (blendMode == 1) { // Maximum
-        blendedL = length(modifiedL) > length(originalL) ? modifiedL : originalL;
-        blendedR = length(modifiedR) > length(originalR) ? modifiedR : originalR;
-    } else if (blendMode == 2) { // Minimum
-        blendedL = length(modifiedL) < length(originalL) ? modifiedL : originalL;
-        blendedR = length(modifiedR) < length(originalR) ? modifiedR : originalR;
-    } else if (blendMode == 4) { // Multiply
-        float magL = length(originalL) * length(modifiedL);
-        blendedL = (length(originalL) > 1e-6) ? magL * normalize(originalL) : vec2(0.0);
-        float magR = length(originalR) * length(modifiedR);
-        blendedR = (length(originalR) > 1e-6) ? magR * normalize(originalR) : vec2(0.0);
-    } else if (blendMode == 5) { // Difference
-        float magL = abs(length(originalL) - length(modifiedL));
-        blendedL = (length(originalL) > 1e-6) ? magL * normalize(originalL) : vec2(0.0);
-        float magR = abs(length(originalR) - length(modifiedR));
-        blendedR = (length(originalR) > 1e-6) ? magR * normalize(originalR) : vec2(0.0);
-    } else if (blendMode == 6) { // Subtract
-        float magL = max(length(originalL) - length(modifiedL), 0.0);
-        blendedL = (length(originalL) > 1e-6) ? magL * normalize(originalL) : vec2(0.0);
-        float magR = max(length(originalR) - length(modifiedR), 0.0);
-        blendedR = (length(originalR) > 1e-6) ? magR * normalize(originalR) : vec2(0.0);
-    } else if (blendMode == 7) { // Divide
-        float magL = length(originalL) / (length(modifiedL) + 1e-6);
-        blendedL = (length(originalL) > 1e-6) ? magL * normalize(originalL) : vec2(0.0);
-        float magR = length(originalR) / (length(modifiedR) + 1e-6);
-        blendedR = (length(originalR) > 1e-6) ? magR * normalize(originalR) : vec2(0.0);
-    } else { // Normal (blendMode == 0)
-        blendedL = modifiedL;
-        blendedR = modifiedR;
-    }
-
-    finalL = mix(originalL, blendedL, effectiveWeightL);
-    finalR = mix(originalR, blendedR, effectiveWeightR);
-
-    return vec4(finalL, finalR);
-}
-
-bool isInBrush(vec2 logicalUv) {
-    vec2 diff = abs(logicalUv - brushCenterUv);
-    bool inX = brushSizeUv.x == 0.0 || diff.x < brushSizeUv.x / 2.0;
-    bool inY = brushSizeUv.y == 0.0 || diff.y < brushSizeUv.y / 2.0;
-    return inX && inY;
-}
-
-float getFeatherWeight(vec2 logicalUv) {
-    if (!isInBrush(logicalUv)) { return 0.0; }
-    vec2 diff = abs(logicalUv - brushCenterUv);
-    
-    float weightX = 1.0;
-    if (brushSizeUv.x > 0.0) {
-        float featherZoneX = 0.5 * featherX;
-        weightX = smoothstep(0.5, 0.5 - featherZoneX, diff.x / brushSizeUv.x);
-    }
-
-    float weightY = 1.0;
-    if (brushSizeUv.y > 0.0) {
-        float featherZoneY = 0.5 * featherY;
-        weightY = smoothstep(0.5, 0.5 - featherZoneY, diff.y / brushSizeUv.y);
-    }
-    return weightX * weightY;
-}
-
+// Unwraps a phase angle to the range [-PI, PI].
 float unwrapPhase(float phaseDelta) {
     return mod(phaseDelta + PI, 2.0 * PI) - PI;
 }
@@ -196,201 +72,327 @@ vec2 unwrapPhase(vec2 phaseDelta) {
     return mod(phaseDelta + PI, 2.0 * PI) - PI;
 }
 
+// ============================================================================
+// COORDINATE UTILITIES
+// ============================================================================
+// Functions for converting between different coordinate systems:
+// - Packed UV: The UV coordinates of the compressed texture we read from/write to.
+// - Unpacked UV: The logical UV coordinates of the full spectrogram (time vs. frequency).
+// - Screen UV: The UV coordinates of the visible portion on the screen.
+
+// A struct to hold the coordinates for a processing operation.
+struct ProcessingUvs {
+    vec2 dest;   // The unpacked UV coordinate we are writing TO.
+    vec2 source; // The unpacked UV coordinate we are sampling FROM.
+};
+
+// Converts a packed texture UV to an unpacked spectrogram UV.
+vec2 packedToUnpackedUv(sampler2D inverseMapTex, vec2 packedUv, float frameCount, float bandCount) {
+    vec2 unpackedPixelCoords = texture2D(inverseMapTex, packedUv).rg;
+    float u = unpackedPixelCoords.x / frameCount;
+    float v = 1.0 - (unpackedPixelCoords.y + 0.5) / bandCount;
+    return vec2(u, v);
+}
+
+// Calculates the destination and source UVs for the current fragment shader invocation.
+ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
+    ProcessingUvs uvs;
+    uvs.dest = packedToUnpackedUv(destInverseMapTex, destPackedUv, destFrameCount, destBandCount);
+    uvs.source = uvs.dest + offsetUv;
+    return uvs;
+}
+
+
+// ============================================================================
+// SPECTROGRAM SAMPLING
+// ============================================================================
+// This section deals with reading complex number data from the packed texture format.
+
 /**
- * Converts a vertical logical UV coordinate to its corresponding frequency in Hz.
+ * Core logic to read a single complex value pair (stereo) from a packed spectrogram
+ * at a specific unpacked UV. This is a point sample with no interpolation.
  */
-float uvToHz(float v) {
-    float totalOctaves = sourceBandCount / sourceBandsPerOctave;
-    float octave = (1.0 - v) * totalOctaves;
-    return sourceMinFreq * pow(2.0, octave);
-}
+vec4 readPackedData(vec2 unpackedUv, sampler2D dataTex, sampler2D metaTex, vec2 packedTexSize, float frameCount, float bandCount) {
+  // 1. Find the frequency band corresponding to the vertical UV coordinate.
+  float bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
 
-/**
- * Converts a frequency in Hz to its corresponding vertical logical UV coordinate.
- */
-float hzToUv(float hz) {
-    if (hz < sourceMinFreq) return 1.0;
-    float octave = log2(hz / sourceMinFreq);
-    float totalOctaves = sourceBandCount / sourceBandsPerOctave;
-    return 1.0 - (octave / totalOctaves);
-}
+  // 2. Look up metadata for this band (offset, length, time scaling).
+  vec2 metaUv = vec2((bandIndex + 0.5) / bandCount, 0.5);
+  vec3 meta = texture2D(metaTex, metaUv).rgb;
+  float bandStartOffset = meta.r;
+  float bandLength = meta.g;
+  float bandTimeScaleExp = meta.b;
 
-//------------------------------------------------------------------------------
-// Core Sampling Logic (Final Version)
-//------------------------------------------------------------------------------
+  // 3. Calculate the time index within this specific band.
+  float timeInFrames = unpackedUv.x * frameCount;
+  float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
+  float timeIndexInBand = floor(scaledTime);
 
-vec4 _sampleSpectrogramPoint(vec2 logicalUv, sampler2D data, sampler2D meta, vec2 texSize, float nFrames, float nBands, float sRate) {
-  float bandIndex = floor((1.0 - logicalUv.y) * nBands);
-  vec2 metaUv = vec2((bandIndex + 0.5) / nBands, 0.5);
-  vec3 metaData = texture2D(meta, metaUv).rgb;
-  float bandOffset = metaData.r;
-  float bandLength = metaData.g;
-  float bandScaleExp = metaData.b;
-  float timeSample = logicalUv.x * nFrames;
-  float timeInBand = timeSample / exp2(bandScaleExp);
-  float coefIndexInBand = floor(timeInBand);
-  if (coefIndexInBand < 0.0 || coefIndexInBand >= bandLength) { return vec4(0.0); }
-  float linearPixelIndex = bandOffset + coefIndexInBand;
-  float packedY = floor(linearPixelIndex / texSize.x);
-  float packedX = mod(linearPixelIndex, texSize.x);
-  vec2 packedUv = (vec2(packedX, packedY) + 0.5) / texSize;
-  return texture2D(data, packedUv);
-}
-
-vec4 _sampleSpectrogramPointInterpolated(vec2 logicalUv, sampler2D data, sampler2D meta, vec2 texSize, float nFrames, float nBands, float sRate) {
-  float bandIndex = floor((1.0 - logicalUv.y) * nBands);
-  vec2 metaUv = vec2((bandIndex + 0.5) / nBands, 0.5);
-  vec3 metaData = texture2D(meta, metaUv).rgb;
-  float bandOffset = metaData.r;
-  float bandLength = metaData.g;
-  float bandScaleExp = metaData.b;
-  float timeSample = logicalUv.x * nFrames;
-  float timeInBand = timeSample / exp2(bandScaleExp);
-
-  float coefIndexInBandBase = floor(timeInBand);
-  float xFrac = fract(timeInBand);
-
-  if (coefIndexInBandBase < 0.0 || coefIndexInBandBase + 1.0 >= bandLength) {
-    if (coefIndexInBandBase < 0.0 || coefIndexInBandBase >= bandLength) return vec4(0.0);
-    float linearPixelIndex = bandOffset + coefIndexInBandBase;
-    float packedY = floor(linearPixelIndex / texSize.x);
-    float packedX = mod(linearPixelIndex, texSize.x);
-    vec2 packedUv = (vec2(packedX, packedY) + 0.5) / texSize;
-    return texture2D(data, packedUv);
+  // 4. If out of bounds for this band, return zero.
+  if (timeIndexInBand < 0.0 || timeIndexInBand >= bandLength) {
+      return vec4(0.0);
   }
 
-  float linearPixelIndex1 = bandOffset + coefIndexInBandBase;
-  float packedY1 = floor(linearPixelIndex1 / texSize.x);
-  float packedX1 = mod(linearPixelIndex1, texSize.x);
-  vec2 packedUv1 = (vec2(packedX1, packedY1) + 0.5) / texSize;
-  vec4 s1 = texture2D(data, packedUv1);
+  // 5. Convert the 1D band index into a 2D packed texture coordinate.
+  float linearPixelIndex = bandStartOffset + timeIndexInBand;
+  float packedY = floor(linearPixelIndex / packedTexSize.x);
+  float packedX = mod(linearPixelIndex, packedTexSize.x);
+  vec2 packedUv = (vec2(packedX, packedY) + 0.5) / packedTexSize;
 
-  float linearPixelIndex2 = bandOffset + coefIndexInBandBase + 1.0;
-  float packedY2 = floor(linearPixelIndex2 / texSize.x);
-  float packedX2 = mod(linearPixelIndex2, texSize.x);
-  vec2 packedUv2 = (vec2(packedX2, packedY2) + 0.5) / texSize;
-  vec4 s2 = texture2D(data, packedUv2);
-
-  // Left channel
-  float mag1_L = length(s1.rg);
-  float phase1_L = atan(s1.g, s1.r);
-  float mag2_L = length(s2.rg);
-  float phase2_L = atan(s2.g, s2.r);
-  float mag_L = mix(mag1_L, mag2_L, xFrac);
-  float phase_delta_L = unwrapPhase(phase2_L - phase1_L);
-  float phase_L = phase1_L + xFrac * phase_delta_L;
-  vec2 c_L = mag_L * vec2(cos(phase_L), sin(phase_L));
-
-  // Right channel
-  float mag1_R = length(s1.ba);
-  float phase1_R = atan(s1.a, s1.b);
-  float mag2_R = length(s2.ba);
-  float phase2_R = atan(s2.a, s2.b);
-  float mag_R = mix(mag1_R, mag2_R, xFrac);
-  float phase_delta_R = unwrapPhase(phase2_R - phase1_R);
-  float phase_R = phase1_R + xFrac * phase_delta_R;
-  vec2 c_R = mag_R * vec2(cos(phase_R), sin(phase_R));
-
-  return vec4(c_L, c_R);
+  // 6. Read the data.
+  return texture2D(dataTex, packedUv);
 }
 
-vec4 sampleSpectrogramPoint(vec2 logicalUv) {
-    return _sampleSpectrogramPoint(logicalUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount, sourceSampleRate);
+// Helper for interpolating between two complex numbers (represented as vec2).
+vec2 interpolateComplex(vec2 c1, vec2 c2, float amount) {
+    float mag1 = length(c1);
+    float phase1 = atan(c1.y, c1.x);
+    float mag2 = length(c2);
+    float phase2 = atan(c2.y, c2.x);
+
+    float mag = mix(mag1, mag2, amount);
+    float phaseDelta = unwrapPhase(phase2 - phase1);
+    float phase = phase1 + amount * phaseDelta;
+
+    return mag * vec2(cos(phase), sin(phase));
 }
 
-vec4 sampleSpectrogramPointInterpolated(vec2 logicalUv) {
-    return _sampleSpectrogramPointInterpolated(logicalUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount, sourceSampleRate);
+// Reads and linearly interpolates a complex value pair (stereo) from a packed spectrogram.
+vec4 readPackedDataInterpolated(vec2 unpackedUv, sampler2D dataTex, sampler2D metaTex, vec2 packedTexSize, float frameCount, float bandCount) {
+  float bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
+  vec2 metaUv = vec2((bandIndex + 0.5) / bandCount, 0.5);
+  vec3 meta = texture2D(metaTex, metaUv).rgb;
+  float bandStartOffset = meta.r;
+  float bandLength = meta.g;
+  float bandTimeScaleExp = meta.b;
+
+  float timeInFrames = unpackedUv.x * frameCount;
+  float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
+  float timeIndexFloor = floor(scaledTime);
+  float timeFraction = fract(scaledTime);
+
+  if (timeIndexFloor < 0.0 || timeIndexFloor + 1.0 >= bandLength) {
+      return readPackedData(unpackedUv, dataTex, metaTex, packedTexSize, frameCount, bandCount);
+  }
+
+  float linearPixelIndex1 = bandStartOffset + timeIndexFloor;
+  vec2 packedUv1 = (vec2(mod(linearPixelIndex1, packedTexSize.x), floor(linearPixelIndex1 / packedTexSize.x)) + 0.5) / packedTexSize;
+  vec4 sample1 = texture2D(dataTex, packedUv1);
+
+  float linearPixelIndex2 = bandStartOffset + timeIndexFloor + 1.0;
+  vec2 packedUv2 = (vec2(mod(linearPixelIndex2, packedTexSize.x), floor(linearPixelIndex2 / packedTexSize.x)) + 0.5) / packedTexSize;
+  vec4 sample2 = texture2D(dataTex, packedUv2);
+
+  vec2 complexL = interpolateComplex(sample1.rg, sample2.rg, timeFraction);
+  vec2 complexR = interpolateComplex(sample1.ba, sample2.ba, timeFraction);
+
+  return vec4(complexL, complexR);
 }
 
-vec4 sampleFromSource(vec2 logicalUv) {
-    return sampleSpectrogramPointInterpolated(logicalUv);
-}
-
-vec4 sampleFromOriginal(vec2 logicalUv) {
-    return _sampleSpectrogramPointInterpolated(logicalUv, originalSpectrogramTex, destMetadataTex, destSpectrogramTextureSize, destFrameCount, destBandCount, destSampleRate);
-}
-
-
-vec4 _performTransformation(vec2 sourceUv, vec2 targetUv,
-                           float srcNBands, float srcBPerOctave, float srcMFreq, float srcNFrames,
-                           sampler2D srcMeta, sampler2D srcData, vec2 srcTexSize, float srcSRate,
-                           float dstNBands, float dstBPerOctave, float dstMFreq) {
-    float sourceFreq = srcMFreq * pow(2.0, (1.0 - sourceUv.y) * srcNBands / srcBPerOctave);
-    float targetFreq = dstMFreq * pow(2.0, (1.0 - targetUv.y) * dstNBands / dstBPerOctave);
-    float pitchRatio = (sourceFreq > 1.0e-5) ? targetFreq / sourceFreq : 1.0;
-
-    float bandNumFloat = (1.0 - sourceUv.y) * srcNBands;
-    float bandIndexBase = floor(bandNumFloat);
-    float yFrac = fract(bandNumFloat);
-
-    vec2 metaUvBase = vec2((bandIndexBase + 0.5) / srcNBands, 0.5);
-    vec3 metaBase = texture2D(srcMeta, metaUvBase).rgb;
-    float bandScaleExpBase = metaBase.b;
-
-    float timeSample = sourceUv.x * srcNFrames;
-    float timeInBand = timeSample / exp2(bandScaleExpBase);
-    float coefIndexInBandBase = floor(timeInBand);
-    float xFrac = fract(timeInBand);
-
-    float localTimeStepUv = exp2(bandScaleExpBase) / srcNFrames;
-
-    vec2 uvBase;
-    uvBase.x = (coefIndexInBandBase * exp2(bandScaleExpBase)) / srcNFrames;
-    uvBase.y = 1.0 - (bandIndexBase + 0.5) / srcNBands;
-    vec2 uvT = uvBase + vec2(localTimeStepUv, 0.0);
-    vec2 uvF = uvBase;
-    uvF.y = 1.0 - (bandIndexBase + 1.0 + 0.5) / srcNBands;
-    vec2 uvTf = uvF + vec2(localTimeStepUv, 0.0);
-
-    vec4 dataBase = _sampleSpectrogramPoint(uvBase, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
-    vec4 dataT = _sampleSpectrogramPoint(uvT, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
-    vec4 dataF = _sampleSpectrogramPoint(uvF, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
-    vec4 dataTf = _sampleSpectrogramPoint(uvTf, srcData, srcMeta, srcTexSize, srcNFrames, srcNBands, srcSRate);
-
-    vec2 magBase = vec2(length(dataBase.rg), length(dataBase.ba));
-    vec2 magT = vec2(length(dataT.rg), length(dataT.ba));
-    vec2 magF = vec2(length(dataF.rg), length(dataF.ba));
-    vec2 magTf = vec2(length(dataTf.rg), length(dataTf.ba));
-
-    vec2 phaseBase = vec2(atan(dataBase.g, dataBase.r), atan(dataBase.a, dataBase.b));
-    vec2 phaseT = vec2(atan(dataT.g, dataT.r), atan(dataT.a, dataT.b));
-    vec2 phaseF = vec2(atan(dataF.g, dataF.r), atan(dataF.a, dataF.b));
-
-    vec2 phaseDeltaT = unwrapPhase(phaseT - phaseBase);
-    vec2 phaseDeltaF = unwrapPhase(phaseF - phaseBase);
-
-    // *** THE CRITICAL PITCH SHIFT CORRECTION ***
-    vec2 correctedPhaseDeltaT = phaseDeltaT * pitchRatio;
-
-    vec2 fracCoord = vec2(xFrac, yFrac);
-    vec2 phaseGradientCh1 = vec2(correctedPhaseDeltaT.x, phaseDeltaF.x);
-    vec2 phaseGradientCh2 = vec2(correctedPhaseDeltaT.y, phaseDeltaF.y);
-    vec2 newPhase = phaseBase + vec2(dot(phaseGradientCh1, fracCoord), dot(phaseGradientCh2, fracCoord));
-
-    vec2 magInterpBottom = mix(magBase, magT, fracCoord.x);
-    vec2 magInterpTop = mix(magF, magTf, fracCoord.x);
-    vec2 newMag = mix(magInterpBottom, magInterpTop, fracCoord.y);
-
-    vec2 newComplexCh1 = newMag.x * vec2(cos(newPhase.x), sin(newPhase.x));
-    vec2 newComplexCh2 = newMag.y * vec2(cos(newPhase.y), sin(newPhase.y));
-
-    return vec4(newComplexCh1, newComplexCh2);
-}
-
+// --- Public Sampling API ---
 
 /**
- * HIGH QUALITY (PITCH-AWARE): Performs true pitch-shifting and time-stretching.
- * @param sourceUv The logical UV coordinate to sample FROM.
- * @param targetUv The logical UV coordinate of the pixel we are writing TO.
+ * Samples from the source spectrogram at a precise point with NO interpolation.
+ * This is faster but can sound less smooth for time-stretching.
  */
-vec4 sampleSpectrogramTransformed(vec2 sourceUv, vec2 targetUv) {
-    return _performTransformation(sourceUv, targetUv,
-                                 sourceBandCount, sourceBandsPerOctave, sourceMinFreq, sourceFrameCount,
-                                 sourceMetadataTex, sourceSpectrogramTex, sourceSpectrogramTextureSize, sourceSampleRate,
-                                 destBandCount, destBandsPerOctave, destMinFreq);
+vec4 getSourceSamplePoint(vec2 sourceUv) {
+    return readPackedData(sourceUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount);
 }
 
-// Convenience wrapper for display
-vec4 samplePointFromScreen(vec2 screenUv) {
-    return sampleSpectrogramPointInterpolated(screenToZoomed(screenUv));
+/**
+ * Samples from the source spectrogram with linear interpolation in time.
+ * This provides smoother results for time-stretching.
+ */
+vec4 getSourceSample(vec2 sourceUv) {
+    return readPackedDataInterpolated(sourceUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount);
+}
+
+/**
+ * Samples from the original, unmodified destination spectrogram with interpolation.
+ * Used for blending the brush effect against the initial state.
+ */
+vec4 getOriginalDestSample(vec2 destUv) {
+    return readPackedDataInterpolated(destUv, originalSpectrogramTex, destMetadataTex, destSpectrogramTextureSize, destFrameCount, destBandCount);
+}
+
+// ============================================================================
+// PHASE VOCODER TRANSFORMATION
+// ============================================================================
+/**
+ * HIGH QUALITY (PITCH-AWARE): Performs true pitch-shifting and time-stretching.
+ * This version correctly handles the non-uniform time/frequency grid of the
+ * spectrogram, preventing both vertical drift and horizontal artifacts.
+ * @param sourceUv The logical UV coordinate to sample FROM.
+ * @param destUv The logical UV coordinate of the pixel we are writing TO.
+ */
+vec4 getTransformedSample(vec2 sourceUv, vec2 destUv) {
+    // --- Frequency and Pitch Calculation ---
+    float sourceFreq = sourceMinFreq * pow(2.0, (1.0 - sourceUv.y) * sourceBandCount / sourceBandsPerOctave);
+    float destFreq = destMinFreq * pow(2.0, (1.0 - destUv.y) * destBandCount / destBandsPerOctave);
+    float pitchRatio = (sourceFreq > 1e-5) ? destFreq / sourceFreq : 1.0;
+
+    // --- Vertical (Frequency) Sampling Grid ---
+    float bandNumFloat = (1.0 - sourceUv.y) * sourceBandCount - 0.5;
+    float bandIndex = floor(bandNumFloat);
+    float freqFraction = fract(bandNumFloat);
+
+    if (bandIndex < 0.0 || bandIndex + 1.0 >= sourceBandCount) {
+        return getSourceSample(sourceUv); // Fallback at top/bottom edges
+    }
+
+    // --- Get Metadata for BOTH Bands ---
+    vec2 metaUv_base = vec2((bandIndex + 0.5) / sourceBandCount, 0.5);
+    vec3 meta_base = texture2D(sourceMetadataTex, metaUv_base).rgb;
+    float bandLength_base = meta_base.g;
+    float bandTimeScaleExp_base = meta_base.b;
+
+    vec2 metaUv_freq = vec2((bandIndex + 1.5) / sourceBandCount, 0.5);
+    vec3 meta_freq = texture2D(sourceMetadataTex, metaUv_freq).rgb;
+    float bandLength_freq = meta_freq.g;
+    float bandTimeScaleExp_freq = meta_freq.b;
+
+    // --- Horizontal (Time) Calculations for EACH Band INDEPENDENTLY ---
+    float timeInFrames = sourceUv.x * sourceFrameCount;
+
+    // Lower band time calculations
+    float scaledTime_base = timeInFrames / exp2(bandTimeScaleExp_base);
+    float timeIndex_base = floor(scaledTime_base);
+    float timeFraction_base = fract(scaledTime_base);
+
+    // Upper band time calculations
+    float scaledTime_freq = timeInFrames / exp2(bandTimeScaleExp_freq);
+    float timeIndex_freq = floor(scaledTime_freq);
+    float timeFraction_freq = fract(scaledTime_freq);
+
+    // **FIX**: Robust boundary check for both bands. This prevents black bands.
+    if (timeIndex_base + 1.0 >= bandLength_base || timeIndex_freq + 1.0 >= bandLength_freq) {
+        return getSourceSample(sourceUv); // Fallback at time edges
+    }
+
+    // --- Gather Four Surrounding Data Points ---
+    // Lower band samples
+    float linearPixelIndex_base0 = meta_base.r + timeIndex_base;
+    vec2 packedUv_base0 = (vec2(mod(linearPixelIndex_base0, sourceSpectrogramTextureSize.x), floor(linearPixelIndex_base0 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
+    vec4 s_base = texture2D(sourceSpectrogramTex, packedUv_base0);
+
+    float linearPixelIndex_base1 = meta_base.r + timeIndex_base + 1.0;
+    vec2 packedUv_base1 = (vec2(mod(linearPixelIndex_base1, sourceSpectrogramTextureSize.x), floor(linearPixelIndex_base1 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
+    vec4 s_time = texture2D(sourceSpectrogramTex, packedUv_base1);
+
+    // Upper band samples
+    float linearPixelIndex_freq0 = meta_freq.r + timeIndex_freq;
+    vec2 packedUv_freq0 = (vec2(mod(linearPixelIndex_freq0, sourceSpectrogramTextureSize.x), floor(linearPixelIndex_freq0 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
+    vec4 s_freq = texture2D(sourceSpectrogramTex, packedUv_freq0);
+
+    float linearPixelIndex_freq1 = meta_freq.r + timeIndex_freq + 1.0;
+    vec2 packedUv_freq1 = (vec2(mod(linearPixelIndex_freq1, sourceSpectrogramTextureSize.x), floor(linearPixelIndex_freq1 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
+    vec4 s_time_freq = texture2D(sourceSpectrogramTex, packedUv_freq1);
+
+    // --- Two-Stage Bilinear Interpolation ---
+    // Stage 1: Horizontal (time) interpolation for each band separately.
+    // We must apply the pitch correction to the phase difference before interpolating.
+
+    // Lower band interpolation
+    vec2 phase_base_L = vec2(atan(s_base.g, s_base.r), atan(s_time.g, s_time.r));
+    vec2 phase_base_R = vec2(atan(s_base.a, s_base.b), atan(s_time.a, s_time.b));
+    float correctedPhase_base_L = phase_base_L.x + unwrapPhase(phase_base_L.y - phase_base_L.x) * pitchRatio * timeFraction_base;
+    float correctedPhase_base_R = phase_base_R.x + unwrapPhase(phase_base_R.y - phase_base_R.x) * pitchRatio * timeFraction_base;
+    float mag_interp_base_L = mix(length(s_base.rg), length(s_time.rg), timeFraction_base);
+    float mag_interp_base_R = mix(length(s_base.ba), length(s_time.ba), timeFraction_base);
+    vec4 interp_base = vec4(mag_interp_base_L * cos(correctedPhase_base_L), mag_interp_base_L * sin(correctedPhase_base_L),
+                            mag_interp_base_R * cos(correctedPhase_base_R), mag_interp_base_R * sin(correctedPhase_base_R));
+
+    // Upper band interpolation
+    vec2 phase_freq_L = vec2(atan(s_freq.g, s_freq.r), atan(s_time_freq.g, s_time_freq.r));
+    vec2 phase_freq_R = vec2(atan(s_freq.a, s_freq.b), atan(s_time_freq.a, s_time_freq.b));
+    float correctedPhase_freq_L = phase_freq_L.x + unwrapPhase(phase_freq_L.y - phase_freq_L.x) * pitchRatio * timeFraction_freq;
+    float correctedPhase_freq_R = phase_freq_R.x + unwrapPhase(phase_freq_R.y - phase_freq_R.x) * pitchRatio * timeFraction_freq;
+    float mag_interp_freq_L = mix(length(s_freq.rg), length(s_time_freq.rg), timeFraction_freq);
+    float mag_interp_freq_R = mix(length(s_freq.ba), length(s_time_freq.ba), timeFraction_freq);
+    vec4 interp_freq = vec4(mag_interp_freq_L * cos(correctedPhase_freq_L), mag_interp_freq_L * sin(correctedPhase_freq_L),
+                            mag_interp_freq_R * cos(correctedPhase_freq_R), mag_interp_freq_R * sin(correctedPhase_freq_R));
+
+    // Stage 2: Vertical (frequency) interpolation between the two results.
+    vec2 final_L = interpolateComplex(interp_base.rg, interp_freq.rg, freqFraction);
+    vec2 final_R = interpolateComplex(interp_base.ba, interp_freq.ba, freqFraction);
+
+    return vec4(final_L, final_R);
+}
+
+// ============================================================================
+// BRUSH & BLENDING LOGIC
+// ============================================================================
+
+// Determines the brush's influence at a given coordinate, including feathering.
+float getBrushWeight(vec2 unpackedUv) {
+    vec2 diff = abs(unpackedUv - brushCenterUv);
+    vec2 halfSize = brushSizeUv / 2.0;
+
+    if ((brushSizeUv.x > 0.0 && diff.x >= halfSize.x) ||
+        (brushSizeUv.y > 0.0 && diff.y >= halfSize.y)) {
+        return 0.0;
+    }
+
+    float weightX = 1.0;
+    if (brushSizeUv.x > 0.0) {
+        float featherZoneX = halfSize.x * featherX;
+        weightX = smoothstep(halfSize.x, halfSize.x - featherZoneX, diff.x);
+    }
+
+    float weightY = 1.0;
+    if (brushSizeUv.y > 0.0) {
+        float featherZoneY = halfSize.y * featherY;
+        weightY = smoothstep(halfSize.y, halfSize.y - featherZoneY, diff.y);
+    }
+    return weightX * weightY;
+}
+
+// Blends the magnitude of two complex numbers based on the selected blend mode.
+float blendMagnitude(float magOriginal, float magModifier, int mode) {
+    if (mode == BLEND_MAXIMUM) return max(magOriginal, magModifier);
+    if (mode == BLEND_MINIMUM) return min(magOriginal, magModifier);
+    if (mode == BLEND_MULTIPLY) return magOriginal * magModifier;
+    if (mode == BLEND_DIFFERENCE) return abs(magOriginal - magModifier);
+    if (mode == BLEND_SUBTRACT) return max(magOriginal - magModifier, 0.0);
+    if (mode == BLEND_DIVIDE) return magOriginal / (magModifier + 1e-6);
+    return magModifier;
+}
+
+// Applies the final brush effect, combining original and modified data.
+vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
+    vec2 originalL = original.rg;
+    vec2 originalR = original.ba;
+    vec2 modifiedL = modified.rg;
+    vec2 modifiedR = modified.ba;
+
+    float intensity = applyModulation(brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue, brushIntensity.modulationAmount, destUv);
+    float effectiveWeightL = weight * intensity * clamp(1.0 - pan, 0.0, 1.0);
+    float effectiveWeightR = weight * intensity * clamp(1.0 + pan, 0.0, 1.0);
+
+    if (blendMode == BLEND_DISSOLVE) {
+        vec2 finalL = (random(originalL + modifiedL) < effectiveWeightL) ? modifiedL : originalL;
+        vec2 finalR = (random(originalR + modifiedR) < effectiveWeightR) ? modifiedR : originalR;
+        return vec4(finalL, finalR);
+    }
+
+    vec2 blendedL, blendedR;
+    if (blendMode == BLEND_NORMAL) {
+        blendedL = modifiedL;
+        blendedR = modifiedR;
+    } else {
+        float magOriginalL = length(originalL);
+        float magModifiedL = length(modifiedL);
+        float magBlendedL = blendMagnitude(magOriginalL, magModifiedL, blendMode);
+        blendedL = (magOriginalL > 1e-6) ? magBlendedL * normalize(originalL) : vec2(0.0);
+
+        float magOriginalR = length(originalR);
+        float magModifiedR = length(modifiedR);
+        float magBlendedR = blendMagnitude(magOriginalR, magModifiedR, blendMode);
+        blendedR = (magOriginalR > 1e-6) ? magBlendedR * normalize(originalR) : vec2(0.0);
+    }
+
+    vec2 finalL = mix(originalL, blendedL, effectiveWeightL);
+    vec2 finalR = mix(originalR, blendedR, effectiveWeightR);
+
+    return vec4(finalL, finalR);
 }
