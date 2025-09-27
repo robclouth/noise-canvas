@@ -1,6 +1,6 @@
 import { shaderMaterial } from "@react-three/drei";
 import { ShaderMaterial } from "three";
-import { useStore } from "../../store";
+import { useStore } from "../store";
 import { BaseBrush, BrushParameter } from "./base-brush";
 import { brushMain, common, CommonUniforms, defaultValues, vertexShader } from "./common";
 

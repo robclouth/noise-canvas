@@ -1,84 +1,10 @@
-import { Texture, Vector2 } from "three";
+struct Parameter {
+    float value;
+    float minValue;
+    float maxValue;
+    float modulationAmount;
+};
 
-export const vertexShader = /*glsl*/ `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = vec4(position, 1.0);
-  }
-`;
-
-export const modulatorCode = /* glsl */ `
-float random(vec2 st) {
-    return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
-}
-
-float getModulation(vec2 uv) {
-  float v = 0.0;
-  if (modulatorMode == 0) { // LFO
-    vec2 rates = vec2(1.0 / modulatorPatternRateBeats, 1.0 / modulatorPatternRateSemis);
-    vec2 cartesianPos = uv * rates;
-    vec2 centeredUv = uv - 0.5;
-    float dist = length(centeredUv * 2.0);
-    float radialRate = 1.0 / modulatorPatternRateBeats;
-
-    if (modulatorPatternShape == 0) { // SINE
-      if (modulatorPatternRadial) {
-        v = sin(dist * radialRate * PI);
-      } else {
-        v = (sin(cartesianPos.x * 2.0 * PI) + sin(cartesianPos.y * 2.0 * PI));
-      }
-    } else if (modulatorPatternShape == 1) { // TRIANGLE
-      if (modulatorPatternRadial) {
-        float p = fract(dist * radialRate);
-        v = (1.0 - abs(p * 2.0 - 1.0)) * 2.0 - 1.0;
-      } else {
-        vec2 p = fract(cartesianPos);
-        float tx = 1.0 - abs(p.x * 2.0 - 1.0);
-        float ty = 1.0 - abs(p.y * 2.0 - 1.0);
-        v = (tx * ty) * 2.0 - 1.0;
-      }
-    } else if (modulatorPatternShape == 2) { // SQUARE
-      if (modulatorPatternRadial) {
-        float p = fract(dist * radialRate);
-        v = step(0.5, p) * 2.0 - 1.0;
-      } else {
-        vec2 p = fract(cartesianPos);
-        v = (pow(step(0.5, p.x) - step(0.5, p.y), 2.0)) * 2.0 - 1.0;
-      }
-    } else if (modulatorPatternShape == 3) { // SAWTOOTH
-      if (modulatorPatternRadial) {
-        v = fract(dist * radialRate) * 2.0 - 1.0;
-      } else {
-        vec2 p = fract(cartesianPos);
-        v = (p.x * p.y) * 2.0 - 1.0;
-      }
-    } else if (modulatorPatternShape == 4) { // PULSE
-      if (modulatorPatternRadial) {
-        v = (1.0 - step(0.2, fract(dist * radialRate))) * 2.0 - 1.0;
-      } else {
-        vec2 p = fract(cartesianPos);
-        v = (max(1.0 - step(0.2, p.x), 1.0 - step(0.2, p.y))) * 2.0 - 1.0;
-      }
-    } else if (modulatorPatternShape == 5) { // RANDOM
-      if (modulatorPatternRadial) {
-        float d = floor(dist * radialRate);
-        v = random(vec2(d, d)) * 2.0 - 1.0;
-      } else {
-        v = random(floor(cartesianPos)) * 2.0 - 1.0;
-      }
-    }
-  }
-  return v;
-}
-
-float applyModulation(float value, float modulationAmount, vec2 uv) {
-  float modulation = getModulation(uv);
-  return value + modulation * modulationAmount;
-}
-`;
-
-export const common = /* glsl */ `
 uniform sampler2D sourceSpectrogramTex;
 uniform sampler2D sourceMetadataTex;
 uniform sampler2D sourceInverseMapTex;
@@ -113,19 +39,13 @@ uniform float featherX;
 uniform float featherY;
 uniform vec2 offsetUv;
 uniform float pan;
-uniform float brushIntensity;
-uniform float brushIntensityMod;
+uniform Parameter brushIntensity;
 uniform int blendMode; // 0: Normal, 1: Maximum, 2: Minimum
-
-uniform int modulatorMode;
-uniform int modulatorPatternShape;
-uniform float modulatorPatternRateBeats;
-uniform float modulatorPatternRateSemis;
-uniform bool modulatorPatternRadial;
 
 #define PI 3.141592653589793
 
-${modulatorCode}
+#include "modulation-common.glsl";
+
 
 //------------------------------------------------------------------------------
 // Coordinate System & Helpers
@@ -183,7 +103,7 @@ vec4 applyBrushEffect(vec4 original, vec4 modified, float weight, Coords coords)
     vec2 finalL;
     vec2 finalR;
 
-    float brushIntensityMod = applyModulation(brushIntensity, brushIntensityMod, coords.dest);
+    float brushIntensityMod = applyModulation(brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue, brushIntensity.modulationAmount, coords.dest);
 
     float leftWeight = clamp(1.0 - pan, 0.0, 1.0);
     float rightWeight = clamp(1.0 + pan, 0.0, 1.0);
@@ -474,173 +394,3 @@ vec4 sampleSpectrogramTransformed(vec2 sourceUv, vec2 targetUv) {
 vec4 samplePointFromScreen(vec2 screenUv) {
     return sampleSpectrogramPointInterpolated(screenToZoomed(screenUv));
 }
-`;
-
-export const brushMain = /* glsl */ `
-precision highp float;
-varying vec2 vUv;
-
-// This function must be implemented by the specific brush shader.
-vec4 applyBrushStroke(vec4 sourceTexel, Coords coords);
-
-void main() {
-    Coords coords = getCoords(vUv);
-    vec4 originalTexel = _sampleSpectrogramPointInterpolated(
-      coords.dest, 
-      destSpectrogramTex, 
-      destMetadataTex, 
-      destSpectrogramTextureSize, 
-      destFrameCount, 
-      destBandCount, 
-      destSampleRate
-    );
-
-    if (isInBrush(coords.dest)) {
-        float weight = getFeatherWeight(coords.dest);
-        vec4 sourceTexel = sampleSpectrogramTransformed(coords.source, coords.dest);
-        vec4 modifiedTexel = applyBrushStroke(sourceTexel, coords);
-        gl_FragColor = applyBrushEffect(originalTexel, modifiedTexel, weight, coords);
-    } else {
-        gl_FragColor = originalTexel;
-    }
-}
-`;
-
-export type CommonUniforms = {
-  sourceSpectrogramTex: Texture;
-  sourceSpectrogramTextureSize: Vector2;
-  sourceInverseMapTex: Texture;
-  sourceMetadataTex: Texture;
-  sourceMinFreq: number;
-  sourceBandsPerOctave: number;
-  sourceFrameCount: number;
-  sourceBandCount: number;
-  sourceChannelCount: number;
-  sourceSampleRate: number;
-  destSpectrogramTex: Texture;
-  destSpectrogramTextureSize: Vector2;
-  destInverseMapTex: Texture;
-  destMetadataTex: Texture;
-  destMinFreq: number;
-  destBandsPerOctave: number;
-  destFrameCount: number;
-  destBandCount: number;
-  destChannelCount: number;
-  destSampleRate: number;
-  originalSpectrogramTex: Texture | null;
-  brushCenterUv: Vector2;
-  brushSizeUv: Vector2;
-  viewZoomPower: number;
-  viewOffset: number;
-  featherX: number;
-  featherY: number;
-  brushIntensity: number;
-  brushIntensityMod: number;
-  offsetUv: Vector2;
-  pan: number;
-  panMod: number;
-  bpm: number;
-  blendMode: number;
-  modulatorMode: number;
-  modulatorPatternShape: number;
-  modulatorPatternRateBeats: number;
-  modulatorPatternRateSemis: number;
-  modulatorPatternRadial: boolean;
-};
-
-export const defaultValues: CommonUniforms = {
-  sourceSpectrogramTex: new Texture(),
-  sourceInverseMapTex: new Texture(),
-  sourceMetadataTex: new Texture(),
-  sourceFrameCount: 0,
-  sourceBandCount: 0,
-  sourceSpectrogramTextureSize: new Vector2(0, 0),
-  sourceChannelCount: 1,
-  sourceSampleRate: 44100.0,
-  sourceMinFreq: 20.0,
-  sourceBandsPerOctave: 24.0,
-  destSpectrogramTex: new Texture(),
-  destInverseMapTex: new Texture(),
-  destMetadataTex: new Texture(),
-  destFrameCount: 0,
-  destBandCount: 0,
-  destSpectrogramTextureSize: new Vector2(0, 0),
-  destChannelCount: 1,
-  destSampleRate: 44100.0,
-  destMinFreq: 20.0,
-  destBandsPerOctave: 24.0,
-  originalSpectrogramTex: new Texture(),
-  brushCenterUv: new Vector2(0.5, 0.5),
-  brushSizeUv: new Vector2(0.1, 0.1),
-  viewZoomPower: 0.0,
-  viewOffset: 0.0,
-  featherX: 0.5,
-  featherY: 0.5,
-  brushIntensity: 1.0,
-  brushIntensityMod: 0.0,
-  offsetUv: new Vector2(0, 0),
-  pan: 0.0,
-  panMod: 0.0,
-  bpm: 120.0,
-  blendMode: 0,
-  modulatorMode: 0,
-  modulatorPatternShape: 0,
-  modulatorPatternRateBeats: 1.0,
-  modulatorPatternRateSemis: 0.0,
-  modulatorPatternRadial: false,
-};
-
-export function unitsToUv(
-  beats: number,
-  semitones: number,
-  bpm: number,
-  totalDuration: number,
-  bandsPerOctave: number,
-  numBands: number,
-): Vector2 {
-  const seconds = beats * (60.0 / bpm);
-  const u = seconds / totalDuration;
-
-  const bandsPerSemitone = bandsPerOctave / 12;
-  const shiftInBands = semitones * bandsPerSemitone;
-  const v = shiftInBands / numBands;
-
-  return new Vector2(u, v);
-}
-
-export function uvToUnits(
-  u: number,
-  v: number,
-  bpm: number,
-  totalDuration: number,
-  bandsPerOctave: number,
-  numBands: number,
-) {
-  const seconds = u * totalDuration;
-  const beats = seconds / (60.0 / bpm);
-
-  const bandsPerSemitone = bandsPerOctave / 12;
-  const semitones = (v * numBands) / bandsPerSemitone;
-
-  return [beats, semitones];
-}
-
-export const screenToZoomed = (screenUv: Vector2, viewZoomPower: number, viewOffset: number): Vector2 => {
-  const zoom = Math.pow(2, viewZoomPower);
-  if (zoom <= 1) {
-    return screenUv.clone();
-  }
-  const viewWidth = 1.0 / zoom;
-  const viewStartX = viewOffset * (1.0 - viewWidth);
-  return new Vector2(viewStartX + screenUv.x * viewWidth, screenUv.y);
-};
-
-export const zoomedToScreen = (zoomedUv: Vector2, viewZoomPower: number, viewOffset: number): Vector2 => {
-  const zoom = Math.pow(2, viewZoomPower);
-  if (zoom <= 1) {
-    return zoomedUv.clone();
-  }
-  const viewWidth = 1.0 / zoom;
-  const viewStartX = viewOffset * (1.0 - viewWidth);
-  return new Vector2((zoomedUv.x - viewStartX) / viewWidth, zoomedUv.y);
-};

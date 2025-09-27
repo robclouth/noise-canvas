@@ -18,6 +18,9 @@
       "@/*": [
         "src/renderer/src/*"
       ]
-    }
+    },
+    "types": [
+      "vite-plugin-glsl/ext"
+    ]
   }
 }

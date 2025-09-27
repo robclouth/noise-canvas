@@ -1,8 +1,10 @@
 import { shaderMaterial } from "@react-three/drei";
 import { ShaderMaterial } from "three";
-import { useStore } from "../../store";
+import gainBrushFrag from "../glsl/gain-brush.frag";
+import passThroughVert from "../glsl/pass-through.vert";
+import { useStore } from "../store";
 import { BaseBrush } from "./base-brush";
-import { brushMain, common, CommonUniforms, defaultValues, vertexShader } from "./common";
+import { CommonUniforms, defaultValues } from "./common";
 
 type Uniforms = CommonUniforms & {
   gain: number;
@@ -13,18 +15,8 @@ const GainMaterial = shaderMaterial<Uniforms, ShaderMaterial & Uniforms>(
     ...defaultValues,
     gain: 0.0,
   },
-  vertexShader,
-  /*glsl*/ `
-    uniform float gain;
-
-    ${common}
-
-    vec4 applyBrushStroke(vec4 sourceTexel, Coords coords) {
-      return sourceTexel * gain;
-    }
-
-    ${brushMain}
-  `,
+  passThroughVert,
+  gainBrushFrag,
 );
 
 class GainBrush extends BaseBrush {

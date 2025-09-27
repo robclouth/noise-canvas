@@ -5,8 +5,8 @@ import { runSynthesis } from "@renderer/audio-manager";
 import { debounce } from "lodash-es";
 import { forwardRef, memo, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { brushes } from "./brushes";
-import { CommonUniforms, unitsToUv } from "./brushes/common";
+import { brushes } from "../brushes";
+import { CommonUniforms, unitsToUv } from "../brushes/common";
 import { copyMaterial } from "./copy-material";
 import { DisplayMaterial } from "./display-material";
 
@@ -255,8 +255,12 @@ export const FileRenderer = memo(
           : new THREE.Vector2(0, 0),
         featherX: state.featherTime.value / 100,
         featherY: state.featherPitch.value / 100,
-        brushIntensity: state.brushIntensity.value / 100,
-        brushIntensityMod: state.brushIntensityMod.value / 100,
+        brushIntensity: {
+          value: state.brushIntensity.value / 100,
+          minValue: state.brushIntensity.min,
+          maxValue: state.brushIntensity.max,
+          modulationAmount: state.brushIntensityMod.value / 100,
+        },
         pan: state.pan.value / 100,
         panMod: state.panMod.value / 100,
         bpm,
@@ -271,8 +275,14 @@ export const FileRenderer = memo(
         blendMode: state.blendMode.value,
         modulatorMode: state.modulatorMode.value,
         modulatorPatternShape: state.modulatorPatternShape.value,
-        modulatorPatternRateBeats: state.modulatorPatternRateBeats.value,
-        modulatorPatternRateSemis: state.modulatorPatternRateSemis.value,
+        modulatorPatternRate: unitsToUv(
+          state.modulatorPatternRateBeats.value,
+          state.modulatorPatternRateSemis.value,
+          bpm,
+          totalDuration,
+          spectrogramData.bandsPerOctave,
+          spectrogramData.numBands,
+        ),
         modulatorPatternRadial: state.modulatorPatternRadial.value,
       };
 

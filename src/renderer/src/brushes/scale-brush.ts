@@ -1,7 +1,7 @@
 import { shaderMaterial } from "@react-three/drei";
 import { DataTexture, FloatType, RedFormat, ShaderMaterial } from "three";
 import { Note, Scale } from "tonal";
-import { openFiles, State, useStore } from "../../store";
+import { openFiles, State, useStore } from "../store";
 import { BaseBrush } from "./base-brush";
 import { brushMain, common, CommonUniforms, defaultValues, vertexShader } from "./common";
 

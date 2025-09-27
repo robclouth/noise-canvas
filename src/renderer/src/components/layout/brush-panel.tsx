@@ -1,6 +1,6 @@
-import { brushes } from "@/components/brushes";
 import { useStore } from "@/store";
 import { Stack } from "@mantine/core";
+import { brushes } from "@renderer/brushes";
 import { ParameterControl } from "../controls/parameter-control";
 import { ModulatorView } from "../modulator-view";
 import { Section } from "../section";

@@ -4,7 +4,7 @@ import { View } from "@react-three/drei";
 import { X } from "lucide-react";
 import { memo, MouseEventHandler, useCallback, useRef } from "react";
 import { Vector2 } from "three";
-import { screenToZoomed } from "./brushes/common";
+import { screenToZoomed } from "../brushes/common";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
 
