@@ -46,7 +46,7 @@ export const SliderControl = (props: SliderControlProps) => {
       lineClamp={1}
       truncate="end"
       onDoubleClick={() => resetValue()}
-      c={isModulated ? "blue" : "normal"}
+      c={isModulated ? "blue" : "white"}
       fw={isModulated ? "bold" : "normal"}
     >
       {label}
@@ -58,7 +58,7 @@ export const SliderControl = (props: SliderControlProps) => {
   return (
     <Group gap={"xs"} wrap="nowrap" h={25} align="center">
       {modulatorParamKey ? (
-        <Popover shadow="md">
+        <Popover withArrow shadow="lg">
           <Popover.Target>
             <Group gap={2} w={60} style={{ cursor: "pointer" }} wrap="nowrap">
               {labelComponent}

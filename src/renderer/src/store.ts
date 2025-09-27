@@ -27,6 +27,7 @@ export const openFiles: Record<string, OpenFile> = {};
 export type State = {
   // Brush Parameters
   brushIntensity: ContinuousNumberParameter;
+  brushIterations: ContinuousNumberParameter;
   brushIntensityMod: ContinuousNumberParameter;
   pan: ContinuousNumberParameter;
   panMod: ContinuousNumberParameter;
@@ -166,6 +167,15 @@ export const useStore = create<State>()(
             ...createSetters("brushIntensity", 100),
           },
           brushIntensityMod: createModulator({ name: "Brush Intensity Mod Amount", key: "brushIntensityMod" }),
+          brushIterations: {
+            name: "Brush Iterations",
+            label: "Iterations",
+            value: 1,
+            min: 1,
+            max: 20,
+            step: 1,
+            ...createSetters("brushIterations", 1),
+          },
           pan: {
             name: "Pan",
             label: "Pan",

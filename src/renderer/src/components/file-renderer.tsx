@@ -109,7 +109,12 @@ export const FileRenderer = memo(
       type: THREE.FloatType,
     });
 
-    const passFbo = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+    const passFbo1 = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+      format: THREE.RGBAFormat,
+      type: THREE.FloatType,
+    });
+
+    const passFbo2 = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, {
       format: THREE.RGBAFormat,
       type: THREE.FloatType,
     });
@@ -292,36 +297,68 @@ export const FileRenderer = memo(
 
       // Render brush stroke if requested
       if (strokeParams.current && applyStroke.current) {
-        const source = textures.packed;
-
-        const destination = pingPong.current === 0 ? fbo2 : fbo1;
+        const sourceFbo = textures.packed; // The original, unmodified source FBO
+        const destinationFbo = pingPong.current === 0 ? fbo2 : fbo1;
         const { preview } = strokeParams.current;
 
         const brush = brushes[state.brushType.value];
         const numPasses = brush.materials.length;
 
-        let readBuffer = source;
-        let writeBuffer = passFbo;
+        // Create the uniform set for iterative passes (j > 0).
+        // This tells the shader to interpret the input texture using the destination's metadata.
+        const iterativeUniforms = {
+          ...commonUniforms,
+          sourceInverseMapTex: commonUniforms.destInverseMapTex,
+          sourceMetadataTex: commonUniforms.destMetadataTex,
+          sourceMinFreq: commonUniforms.destMinFreq,
+          sourceBandsPerOctave: commonUniforms.destBandsPerOctave,
+          sourceFrameCount: commonUniforms.destFrameCount,
+          sourceBandCount: commonUniforms.destBandCount,
+          sourceChannelCount: commonUniforms.destChannelCount,
+          sourceSampleRate: commonUniforms.destSampleRate,
+          sourceSpectrogramTextureSize: commonUniforms.destSpectrogramTextureSize,
+        };
 
-        // Multi-pass rendering for complex brushes
-        for (let i = 0; i < numPasses; i++) {
-          const material = brush.materials[i];
-          fboMesh.material = material;
+        let tempFboA = passFbo1;
+        let tempFboB = passFbo2;
 
-          // The final pass always writes to the main destination buffer.
-          // For a single-pass effect, this is met on the first iteration.
-          if (i === numPasses - 1) {
-            writeBuffer = destination;
+        // The input for the very first pass is always the original source data.
+        let currentReadFbo = sourceFbo;
+
+        for (let j = 0; j < state.brushIterations.value; j++) {
+          const uniformsForThisIteration = j === 0 ? commonUniforms : iterativeUniforms;
+
+          for (let i = 0; i < numPasses; i++) {
+            const material = brush.materials[i];
+            fboMesh.material = material;
+
+            const isFinalPass = j === state.brushIterations.value - 1 && i === numPasses - 1;
+            const currentWriteFbo = isFinalPass ? destinationFbo : tempFboA;
+
+            // --- START: THE FINAL FIX ---
+
+            const inputTexture = currentReadFbo.texture;
+
+            // The "source" is always the result of the previous pass.
+            uniformsForThisIteration.sourceSpectrogramTex = inputTexture;
+
+            // The "destination" (for blending) is the original target on the first pass.
+            // For all subsequent iterative passes, the destination IS the source (self-modification).
+            uniformsForThisIteration.destSpectrogramTex = j === 0 ? commonUniforms.destSpectrogramTex : inputTexture;
+
+            // --- END: THE FINAL FIX ---
+
+            brush.updateUniforms(uniformsForThisIteration, i);
+
+            gl.setRenderTarget(currentWriteFbo);
+            gl.render(fboScene, camera);
+
+            currentReadFbo = currentWriteFbo;
+
+            if (!isFinalPass) {
+              [tempFboA, tempFboB] = [tempFboB, tempFboA];
+            }
           }
-
-          commonUniforms.sourceSpectrogramTex = readBuffer.texture;
-          brush.updateUniforms(commonUniforms, i);
-
-          gl.setRenderTarget(writeBuffer);
-          gl.render(fboScene, camera);
-
-          // Swap buffers for the next pass
-          [readBuffer, writeBuffer] = [writeBuffer, readBuffer];
         }
 
         gl.setRenderTarget(null);

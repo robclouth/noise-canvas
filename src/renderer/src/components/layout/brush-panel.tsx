@@ -19,6 +19,7 @@ export function BrushPanel() {
       </Section>
       <Section label="Output">
         <ParameterControl paramKey="brushIntensity" />
+        <ParameterControl paramKey="brushIterations" />
         <ParameterControl paramKey="pan" />
         <ParameterControl paramKey="blendMode" />
       </Section>
