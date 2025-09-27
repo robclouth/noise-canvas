@@ -51,16 +51,6 @@ uniform int blendMode;
 
 #define PI 3.141592653589793
 
-// Blend Modes
-#define BLEND_NORMAL 0
-#define BLEND_MAXIMUM 1
-#define BLEND_MINIMUM 2
-#define BLEND_DISSOLVE 3
-#define BLEND_MULTIPLY 4
-#define BLEND_DIFFERENCE 5
-#define BLEND_SUBTRACT 6
-#define BLEND_DIVIDE 7
-
 #include "modulation-common.glsl"; // Contains modulation and random functions
 
 // Unwraps a phase angle to the range [-PI, PI].
@@ -71,6 +61,7 @@ float unwrapPhase(float phaseDelta) {
 vec2 unwrapPhase(vec2 phaseDelta) {
     return mod(phaseDelta + PI, 2.0 * PI) - PI;
 }
+
 
 // ============================================================================
 // COORDINATE UTILITIES
@@ -323,6 +314,11 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv) {
 // BRUSH & BLENDING LOGIC
 // ============================================================================
 
+// --- Complex Number & Polar Helpers ---
+float getMag(vec2 c) { return length(c); }
+float getPhase(vec2 c) { return atan(c.y, c.x); }
+vec2 fromPolar(float mag, float phase) { return mag * vec2(cos(phase), sin(phase)); }
+
 // Determines the brush's influence at a given coordinate, including feathering.
 float getBrushWeight(vec2 unpackedUv) {
     vec2 diff = abs(unpackedUv - brushCenterUv);
@@ -347,52 +343,83 @@ float getBrushWeight(vec2 unpackedUv) {
     return weightX * weightY;
 }
 
-// Blends the magnitude of two complex numbers based on the selected blend mode.
-float blendMagnitude(float magOriginal, float magModifier, int mode) {
-    if (mode == BLEND_MAXIMUM) return max(magOriginal, magModifier);
-    if (mode == BLEND_MINIMUM) return min(magOriginal, magModifier);
-    if (mode == BLEND_MULTIPLY) return magOriginal * magModifier;
-    if (mode == BLEND_DIFFERENCE) return abs(magOriginal - magModifier);
-    if (mode == BLEND_SUBTRACT) return max(magOriginal - magModifier, 0.0);
-    if (mode == BLEND_DIVIDE) return magOriginal / (magModifier + 1e-6);
-    return magModifier;
-}
-
 // Applies the final brush effect, combining original and modified data.
 vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
+    // --- 1. Initial Setup ---
     vec2 originalL = original.rg;
     vec2 originalR = original.ba;
     vec2 modifiedL = modified.rg;
     vec2 modifiedR = modified.ba;
 
+    // Calculate final brush weight including intensity modulation and panning
     float intensity = applyModulation(brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue, brushIntensity.modulationAmount, destUv);
     float effectiveWeightL = weight * intensity * clamp(1.0 - pan, 0.0, 1.0);
     float effectiveWeightR = weight * intensity * clamp(1.0 + pan, 0.0, 1.0);
 
-    if (blendMode == BLEND_DISSOLVE) {
-        vec2 finalL = (random(originalL + modifiedL) < effectiveWeightL) ? modifiedL : originalL;
-        vec2 finalR = (random(originalR + modifiedR) < effectiveWeightR) ? modifiedR : originalR;
+    // --- 2. Handle Special "Dissolve" Mode ---
+    // This mode doesn't blend, it replaces pixels randomly.
+    if (blendMode == 8) {
+        vec2 finalL = (random(destUv.xy) < effectiveWeightL) ? modifiedL : originalL;
+        vec2 finalR = (random(destUv.yx) < effectiveWeightR) ? modifiedR : originalR;
         return vec4(finalL, finalR);
     }
 
-    vec2 blendedL, blendedR;
-    if (blendMode == BLEND_NORMAL) {
-        blendedL = modifiedL;
-        blendedR = modifiedR;
+    // --- 3. Calculate the "Target" Value for Blending ---
+    // For all other modes, we first determine the 100% blended result ("target"),
+    // and then interpolate towards it based on the effective weight.
+    float magOriginalL = getMag(originalL);
+    float magModifiedL = getMag(modifiedL);
+    float phaseOriginalL = getPhase(originalL);
+
+    float magOriginalR = getMag(originalR);
+    float magModifiedR = getMag(modifiedR);
+    float phaseOriginalR = getPhase(originalR);
+
+    vec2 finalL = originalL;
+    vec2 finalR = originalR;
+
+    if (blendMode == 0) { // Mix
+        finalL = interpolateComplex(originalL, modifiedL, effectiveWeightL);
+        finalR = interpolateComplex(originalR, modifiedR, effectiveWeightR);
+    } else if (blendMode == 1) { // Add
+        finalL = fromPolar(magOriginalL + magModifiedL * effectiveWeightL, phaseOriginalL);
+        finalR = fromPolar(magOriginalR + magModifiedR * effectiveWeightR, phaseOriginalR);
+    } else if (blendMode == 2) { // Subtract
+        finalL = fromPolar(max(0.0, magOriginalL - magModifiedL * effectiveWeightL), phaseOriginalL);
+        finalR = fromPolar(max(0.0, magOriginalR - magModifiedR * effectiveWeightR), phaseOriginalR);
+    } else if (blendMode == 3) { // Multiply
+        finalL = fromPolar(magOriginalL * mix(1.0, magModifiedL, effectiveWeightL), phaseOriginalL);
+        finalR = fromPolar(magOriginalR * mix(1.0, magModifiedR, effectiveWeightR), phaseOriginalR);
+    } else if (blendMode == 4) { // Divide
+        float divisorL = mix(1.0, magModifiedL, effectiveWeightL);
+        float divisorR = mix(1.0, magModifiedR, effectiveWeightR);
+        finalL = fromPolar(magOriginalL / max(1e-6, divisorL), phaseOriginalL);
+        finalR = fromPolar(magOriginalR / max(1e-6, divisorR), phaseOriginalR);
     } else {
-        float magOriginalL = length(originalL);
-        float magModifiedL = length(modifiedL);
-        float magBlendedL = blendMagnitude(magOriginalL, magModifiedL, blendMode);
-        blendedL = (magOriginalL > 1e-6) ? magBlendedL * normalize(originalL) : vec2(0.0);
+        // --- Fallback to interpolation for other modes ---
+        vec2 targetL, targetR;
 
-        float magOriginalR = length(originalR);
-        float magModifiedR = length(modifiedR);
-        float magBlendedR = blendMagnitude(magOriginalR, magModifiedR, blendMode);
-        blendedR = (magOriginalR > 1e-6) ? magBlendedR * normalize(originalR) : vec2(0.0);
+        if (blendMode == 5) {
+            // Choose the complex number with the greater magnitude
+            targetL = (magModifiedL > magOriginalL) ? modifiedL : originalL;
+            targetR = (magModifiedR > magOriginalR) ? modifiedR : originalR;
+        } else if (blendMode == 6) {
+            // Choose the complex number with the lesser magnitude
+            targetL = (magModifiedL < magOriginalL) ? modifiedL : originalL;
+            targetR = (magModifiedR < magOriginalR) ? modifiedR : originalR;
+        } else if (blendMode == 7) {
+            // Take the absolute difference of magnitudes, keep original phase
+            targetL = fromPolar(abs(magOriginalL - magModifiedL), phaseOriginalL);
+            targetR = fromPolar(abs(magOriginalR - magModifiedR), phaseOriginalR);
+        } else {
+            // Default case: do nothing
+            targetL = originalL;
+            targetR = originalR;
+        }
+
+        finalL = interpolateComplex(originalL, targetL, effectiveWeightL);
+        finalR = interpolateComplex(originalR, targetR, effectiveWeightR);
     }
-
-    vec2 finalL = mix(originalL, blendedL, effectiveWeightL);
-    vec2 finalR = mix(originalR, blendedR, effectiveWeightR);
 
     return vec4(finalL, finalR);
 }

@@ -52,14 +52,15 @@ export const BANDS_PER_OCTAVE_VALUES = [
 ];
 
 export const BLEND_MODES = [
-  { value: 0, label: "Normal" },
-  { value: 1, label: "Maximum" },
-  { value: 2, label: "Minimum" },
-  { value: 3, label: "Dissolve" },
-  { value: 4, label: "Multiply" },
-  { value: 5, label: "Difference" },
-  { value: 6, label: "Subtract" },
-  { value: 7, label: "Divide" },
+  { value: 0, label: "Mix" },
+  { value: 1, label: "Add" },
+  { value: 2, label: "Subtract" },
+  { value: 3, label: "Multiply" },
+  { value: 4, label: "Divide" },
+  { value: 5, label: "Maximum" },
+  { value: 6, label: "Minimum" },
+  { value: 7, label: "Difference" },
+  { value: 8, label: "Dissolve" },
 ];
 
 export const MODULATOR_MODES = [{ value: 0, label: "LFO" }];
