@@ -10,5 +10,8 @@
   },
   "editor.codeActionsOnSave": {
     "source.organizeImports": "explicit"
+  },
+  "files.exclude": {
+    "**/lygia/**": true
   }
 }
