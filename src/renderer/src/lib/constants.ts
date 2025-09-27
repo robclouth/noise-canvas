@@ -72,6 +72,11 @@ export const PATTERN_SHAPES = [
   { value: 3, label: "Sawtooth" },
   { value: 4, label: "Pulse" },
   { value: 5, label: "Random" },
+  { value: 6, label: "Smooth Noise" },
+  { value: 7, label: "Cloud Noise" },
+  { value: 8, label: "Glass Noise" },
+  { value: 9, label: "Silky Noise" },
+  { value: 10, label: "Bubble Noise" },
 ];
 
 export const BOUNDARY_MODES = [

@@ -1,13 +1,15 @@
+#include "../../lygia/generative/snoise.glsl"
+#include "../../lygia/generative/random.glsl"
+#include "../../lygia/generative/fbm.glsl"
+#include "../../lygia/generative/voronoi.glsl"
+#include "../../lygia/generative/wavelet.glsl"
+#include "../../lygia/generative/worley.glsl"
 
 uniform int modulatorMode;
 uniform int modulatorPatternShape;
 uniform vec2 modulatorPatternRate;
 uniform float modulatorAmplitude;
 uniform float modulatorRotation;
-
-float random(vec2 st) {
-    return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
-}
 
 float getModulation(vec2 uv) {
   float v = 0.0;
@@ -40,6 +42,16 @@ float getModulation(vec2 uv) {
       v = max(1.0 - step(0.2, p.x), 1.0 - step(0.2, p.y));
     } else if (modulatorPatternShape == 5) { // RANDOM
       v = random(floor(pos));
+    } else if (modulatorPatternShape == 6) { // SNOISE
+      v = snoise(pos);
+    } else if (modulatorPatternShape == 7) { // FBM
+      v = fbm(pos);
+    } else if (modulatorPatternShape == 8) { // VORONOI
+      v = voronoi(pos).x;
+    } else if (modulatorPatternShape == 9) { // WAVELET
+      v = wavelet(pos);
+    } else if (modulatorPatternShape == 10) { // WORLEY
+      v = worley(pos);
     }
   }
   return mix(0.5 - modulatorAmplitude / 2.0, 0.5 + modulatorAmplitude / 2.0, v);

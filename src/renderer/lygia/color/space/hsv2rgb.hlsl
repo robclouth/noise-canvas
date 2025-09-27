@@ -1,0 +1,13 @@
+#include "hue2rgb.hlsl"
+/*
+contributors: Inigo Quiles
+description: |
+    Convert from HSV to linear RGB
+use: <float3|float4> hsv2rgb(<float3|float4> hsv)
+*/
+
+#ifndef FNC_HSV2RGB
+#define FNC_HSV2RGB
+float3 hsv2rgb(in float3 hsv) { return ((hue2rgb(hsv.x) - 1.0) * hsv.y + 1.0) * hsv.z; }
+float4 hsv2rgb(in float4 hsv) { return float4(hsv2rgb(hsv.rgb), hsv.a); }
+#endif
