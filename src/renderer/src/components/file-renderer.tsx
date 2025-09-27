@@ -7,6 +7,7 @@ import { forwardRef, memo, useEffect, useImperativeHandle, useMemo, useRef, useS
 import * as THREE from "three";
 import { brushes } from "../brushes";
 import { CommonUniforms, unitsToUv } from "../brushes/common";
+import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { copyMaterial } from "./copy-material";
 import { DisplayMaterial } from "./display-material";
 
@@ -52,6 +53,8 @@ export const FileRenderer = memo(
   forwardRef<FileRendererHandle, FileRendererProps>(({ filePath }, ref) => {
     const { spectrogramData } = openFiles[filePath];
     const { gl, camera, invalidate } = useThree();
+
+    const modulatorScaleLut = useModulatorScaleLut();
 
     // Textures for spectrogram data
     const [packedDataTex, setPackedDataTex] = useState<THREE.DataTexture | null>(null);
@@ -316,8 +319,9 @@ export const FileRenderer = memo(
           spectrogramData.numBands,
         ),
         modulatorPatternRadial: state.modulatorPatternRadial.value,
-        modulatorAmplitude: state.modulatorAmplitude.value / 100,
+        modulatorStrength: state.modulatorStrength.value / 100,
         modulatorRotation: state.modulatorRotation.value,
+        gainLut: modulatorScaleLut || new THREE.Texture(),
       };
 
       console.log("use frame");

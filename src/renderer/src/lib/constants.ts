@@ -89,6 +89,7 @@ export const PATTERN_SHAPES = [
   { value: 8, label: "Glass Noise" },
   { value: 9, label: "Ghost Noise" },
   { value: 10, label: "Bubble Noise" },
+  { value: 11, label: "Selected Scale" },
 ];
 
 export const BOUNDARY_MODES = [

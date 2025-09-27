@@ -67,7 +67,7 @@ export type State = {
   modulatorPatternRateBeats: DiscreteNumberParameter;
   modulatorPatternRateSemis: DiscreteNumberParameter;
   modulatorPatternRadial: BooleanParameter;
-  modulatorAmplitude: ContinuousNumberParameter;
+  modulatorStrength: ContinuousNumberParameter;
   modulatorRotation: ContinuousNumberParameter;
 
   // Gain Brush
@@ -417,15 +417,15 @@ export const useStore = create<State>()(
             value: false,
             ...createSetters("modulatorPatternRadial", false),
           },
-          modulatorAmplitude: {
-            name: "Modulator Amplitude",
-            label: "Amp",
+          modulatorStrength: {
+            name: "Modulator Strength",
+            label: "Strength",
             value: 100,
             min: -100,
             max: 100,
             step: 1,
             unit: "%",
-            ...createSetters("modulatorAmplitude", 100),
+            ...createSetters("modulatorStrength", 100),
           },
           modulatorRotation: {
             name: "Modulator Rotation",
@@ -437,6 +437,7 @@ export const useStore = create<State>()(
             unit: "°",
             ...createSetters("modulatorRotation", 0),
           },
+
           gainDb: {
             name: "Gain",
             label: "Gain",

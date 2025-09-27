@@ -65,8 +65,9 @@ export const defaultValues = {
   modulatorPatternShape: 0,
   modulatorPatternRate: new Vector2(1.0, 1.0),
   modulatorPatternRadial: false,
-  modulatorAmplitude: 1.0,
+  modulatorStrength: 1.0,
   modulatorRotation: 0.0,
+  gainLut: new Texture(),
 };
 
 export type CommonUniforms = typeof defaultValues;
