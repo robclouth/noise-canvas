@@ -32,8 +32,10 @@ export type State = {
   brushIntensityMod: ContinuousNumberParameter;
   brushPan: ContinuousNumberParameter;
   brushPanMod: ContinuousNumberParameter;
-  featherTime: ContinuousNumberParameter;
-  featherPitch: ContinuousNumberParameter;
+  brushFeatherTime: ContinuousNumberParameter;
+  brushFeatherPitch: ContinuousNumberParameter;
+  brushFeatherSlopeTime: ContinuousNumberParameter;
+  brushFeatherSlopePitch: ContinuousNumberParameter;
   sourceOffsetBeats: DiscreteNumberParameter;
   sourceOffsetBeatsMod: ContinuousNumberParameter;
   sourceOffsetSemis: DiscreteNumberParameter;
@@ -185,27 +187,51 @@ export const useStore = create<State>()(
             ...createSetters("brushPan", 0.0),
           },
           brushPanMod: createModulator({ name: "Pan Mod Amount", key: "brushPanMod" }),
-          featherTime: {
+          brushFeatherTime: {
             name: "Feather Time",
-            label: "Time",
+            label: "Amount H",
             description: "Softens the brush effect at the edges of the time selection.",
             value: 0,
             min: 0,
             max: 100,
             step: 1,
             unit: "%",
-            ...createSetters("featherTime", 0),
+            ...createSetters("brushFeatherTime", 0),
           },
-          featherPitch: {
+          brushFeatherPitch: {
             name: "Feather Pitch",
-            label: "Pitch",
+            label: "Amount V",
             description: "Softens the brush effect at the edges of the pitch selection.",
             value: 0,
             min: 0,
             max: 100,
             step: 1,
             unit: "%",
-            ...createSetters("featherPitch", 0),
+            ...createSetters("brushFeatherPitch", 0),
+          },
+          brushFeatherSlopeTime: {
+            name: "Feather Slope Time",
+            label: "Slope H",
+            description:
+              "Controls the slope of the time feathering. -100 is fast initial rise, long tail, 100 is slow attack, fast finish.",
+            value: 0,
+            min: -100,
+            max: 100,
+            step: 1,
+            unit: "%",
+            ...createSetters("brushFeatherSlopeTime", 0),
+          },
+          brushFeatherSlopePitch: {
+            name: "Feather Slope Pitch",
+            label: "Slope V",
+            description:
+              "Controls the slope of the pitch feathering. -100 is fast initial rise, long tail, 100 is slow attack, fast finish.",
+            value: 0,
+            min: -100,
+            max: 100,
+            step: 1,
+            unit: "%",
+            ...createSetters("brushFeatherSlopePitch", 0),
           },
           sourceOffsetBeats: {
             name: "Offset Beats",
@@ -250,11 +276,7 @@ export const useStore = create<State>()(
             options: [
               { value: "gain", label: "Gain" },
               { value: "restore", label: "Restore" },
-              { value: "blur", label: "Blur" },
               { value: "transform", label: "Transform" },
-              { value: "transient shaper", label: "Transient Shaper" },
-              { value: "dynamics", label: "Dynamics" },
-              { value: "scale", label: "Scale" },
             ],
             ...createSetters("brushType", "gain"),
           },

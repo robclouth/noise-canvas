@@ -283,8 +283,10 @@ export const FileRenderer = memo(
         viewOffset: state.scroll.value,
         brushCenterUv: mouseUv.current || new THREE.Vector2(-1, -1),
         brushSizeUv,
-        featherX: state.featherTime.value / 100,
-        featherY: state.featherPitch.value / 100,
+        featherX: state.brushFeatherTime.value / 100,
+        featherY: state.brushFeatherPitch.value / 100,
+        featherSlopeTime: state.brushFeatherSlopeTime.value / 100,
+        featherSlopePitch: state.brushFeatherSlopePitch.value / 100,
         brushIntensity: {
           value: state.brushIntensity.value / 100,
           minValue: state.brushIntensity.min / 100,

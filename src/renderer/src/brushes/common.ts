@@ -35,6 +35,8 @@ export const defaultValues = {
   viewOffset: 0.0,
   featherX: 0.5,
   featherY: 0.5,
+  featherSlopeTime: 0.0,
+  featherSlopePitch: 0.0,
   brushIntensity: {
     value: 1.0,
     minValue: 0.0,

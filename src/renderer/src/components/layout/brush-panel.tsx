@@ -29,8 +29,10 @@ export function BrushPanel() {
         <ParameterControl paramKey="blendMode" />
       </Section>
       <Section label="Feather">
-        <ParameterControl paramKey="featherTime" />
-        <ParameterControl paramKey="featherPitch" />
+        <ParameterControl paramKey="brushFeatherTime" />
+        <ParameterControl paramKey="brushFeatherPitch" />
+        <ParameterControl paramKey="brushFeatherSlopeTime" />
+        <ParameterControl paramKey="brushFeatherSlopePitch" />
       </Section>
       <Section label="Offset">
         <ParameterControl paramKey="sourceOffsetBeats" />

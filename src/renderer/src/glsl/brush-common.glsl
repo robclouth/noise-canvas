@@ -39,6 +39,8 @@ uniform float viewZoomPower;
 uniform float viewOffset;
 uniform float featherX;
 uniform float featherY;
+uniform float featherSlopeTime;
+uniform float featherSlopePitch;
 uniform Parameter sourceOffsetX;
 uniform Parameter sourceOffsetY;
 uniform Parameter brushPan;
@@ -324,25 +326,28 @@ vec2 fromPolar(float mag, float phase) { return mag * vec2(cos(phase), sin(phase
 
 // Determines the brush's influence at a given coordinate, including feathering.
 float getBrushWeight(vec2 unpackedUv) {
-    vec2 diff = abs(unpackedUv - brushCenterUv);
     vec2 halfSize = brushSizeUv / 2.0;
-
-    if ((brushSizeUv.x > 0.0 && diff.x >= halfSize.x) ||
-        (brushSizeUv.y > 0.0 && diff.y >= halfSize.y)) {
-        return 0.0;
-    }
+    vec2 localUv = (unpackedUv - brushCenterUv + halfSize) / brushSizeUv;
+    vec2 slopeNormalized = (vec2(featherSlopeTime, featherSlopePitch) / 2.0 + 0.5);
 
     float weightX = 1.0;
-    if (brushSizeUv.x > 0.0) {
-        float featherZoneX = halfSize.x * featherX;
-        weightX = smoothstep(halfSize.x, halfSize.x - featherZoneX, diff.x);
-    }
+
+    if (localUv.x < slopeNormalized.x) {
+        weightX = smoothstep(0.0, slopeNormalized.x * featherX, localUv.x);
+    } 
+    else if (localUv.x > slopeNormalized.x ) {
+        weightX = 1.0 - smoothstep(slopeNormalized.x * featherX + (1.0 - featherX), 1.0, localUv.x);
+    } 
 
     float weightY = 1.0;
-    if (brushSizeUv.y > 0.0) {
-        float featherZoneY = halfSize.y * featherY;
-        weightY = smoothstep(halfSize.y, halfSize.y - featherZoneY, diff.y);
-    }
+
+    if (localUv.y < slopeNormalized.y) {
+        weightY = smoothstep(0.0, slopeNormalized.y * featherY, localUv.y);
+    } 
+    else if (localUv.y > slopeNormalized.y ) {
+        weightY = 1.0 - smoothstep(slopeNormalized.y * featherY + (1.0 - featherY), 1.0, localUv.y);
+    } 
+    
     return weightX * weightY;
 }
 
