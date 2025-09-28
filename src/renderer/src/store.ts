@@ -75,10 +75,6 @@ export type State = {
   gainDb: ContinuousNumberParameter;
   gainDbMod: ContinuousNumberParameter;
 
-  // Blur Brush
-  blurTime: ContinuousNumberParameter; // in beats
-  blurPitch: ContinuousNumberParameter; // in cents
-
   // Transform Brush
   transformShiftBeats: DiscreteNumberParameter;
   transformShiftBeatsMod: ContinuousNumberParameter;
@@ -92,21 +88,9 @@ export type State = {
   transformRotationMod: ContinuousNumberParameter;
   transformEdgeMode: OptionsParameter<number>;
 
-  // Dynamics Brush
-  dynamicsThreshold: ContinuousNumberParameter;
-  dynamicsRatio: ContinuousNumberParameter;
-  dynamicsMakeupGain: ContinuousNumberParameter;
-  dynamicsAttack: ContinuousNumberParameter;
-  dynamicsRelease: ContinuousNumberParameter;
-  dynamicsKnee: ContinuousNumberParameter;
-
-  // Scale Brush
-  scaleAmount: ContinuousNumberParameter;
-
-  // Transient Shaper Brush
-  transientIntensity: ContinuousNumberParameter;
-  transientThreshold: ContinuousNumberParameter;
-  alignPhases: BooleanParameter;
+  // Blur Brush
+  blurTime: ContinuousNumberParameter; // in beats
+  blurPitch: ContinuousNumberParameter; // in cents
 
   // Audio Playback
   isPlaying: boolean;
@@ -166,6 +150,7 @@ export const useStore = create<State>()(
           brushIntensity: {
             name: "Brush Intensity",
             label: "Amount",
+            description: "Controls the strength of the brush.",
             value: 100,
             min: 0,
             max: 100,
@@ -178,6 +163,7 @@ export const useStore = create<State>()(
           brushIterations: {
             name: "Brush Iterations",
             label: "Iterations",
+            description: "How many times to apply the brush effect.",
             value: 1,
             min: 1,
             max: 20,
@@ -187,6 +173,7 @@ export const useStore = create<State>()(
           brushPan: {
             name: "Pan",
             label: "Pan",
+            description: "Pans the brush effect left or right.",
             value: 0.0,
             min: -100,
             max: 100,
@@ -199,6 +186,7 @@ export const useStore = create<State>()(
           featherTime: {
             name: "Feather Time",
             label: "Time",
+            description: "Softens the brush effect at the edges of the time selection.",
             value: 0,
             min: 0,
             max: 100,
@@ -209,6 +197,7 @@ export const useStore = create<State>()(
           featherPitch: {
             name: "Feather Pitch",
             label: "Pitch",
+            description: "Softens the brush effect at the edges of the pitch selection.",
             value: 0,
             min: 0,
             max: 100,
@@ -219,6 +208,7 @@ export const useStore = create<State>()(
           sourceOffsetBeats: {
             name: "Offset Beats",
             label: "Offset H",
+            description: "Offsets the source horizontally by a number of beats.",
             value: 0,
             values: [
               ...BEAT_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
@@ -232,6 +222,7 @@ export const useStore = create<State>()(
           sourceOffsetSemis: {
             name: "Offset Semis",
             label: "Offset V",
+            description: "Offsets the source vertically by a number of semitones.",
             value: 0.0,
             values: [
               ...PITCH_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
@@ -245,12 +236,14 @@ export const useStore = create<State>()(
           sourceOffsetLock: {
             name: "Offset Lock",
             label: "Lock",
+            description: "Locks the source offset to the brush position.",
             value: false,
             ...createSetters("sourceOffsetLock", false),
           },
           brushType: {
             name: "Brush Type",
             label: "Type",
+            description: "The type of brush to use.",
             value: "gain",
             options: [
               { value: "gain", label: "Gain" },
@@ -266,6 +259,7 @@ export const useStore = create<State>()(
           brushWidthBeats: {
             name: "Brush Width",
             label: "Width",
+            description: "The width of the brush in beats.",
             value: 1,
             values: [...BEAT_VALUES, { value: 0, label: "Full" }].map((value) => ({
               value: value.value,
@@ -276,6 +270,7 @@ export const useStore = create<State>()(
           brushHeightSemis: {
             name: "Brush Height",
             label: "Height",
+            description: "The height of the brush in semitones.",
             value: 12,
             values: [...PITCH_VALUES, { value: 0, label: "Full" }].map((value) => ({
               value: value.value,
@@ -286,12 +281,14 @@ export const useStore = create<State>()(
           brushSizeLockedToGrid: {
             name: "Lock Brush Size to Grid",
             label: "Grid",
+            description: "Locks the brush size to the grid size.",
             value: true,
             ...createSetters("brushSizeLockedToGrid", true),
           },
           zoomPower: {
             name: "Zoom",
             label: "Zoom",
+            description: "Controls the zoom level of the spectrogram.",
             value: 0,
             min: -10,
             max: 10,
@@ -301,6 +298,7 @@ export const useStore = create<State>()(
           scroll: {
             name: "Scroll",
             label: "Scroll",
+            description: "Scrolls the spectrogram horizontally.",
             value: 0,
             min: 0,
             max: 1,
@@ -310,6 +308,7 @@ export const useStore = create<State>()(
           gridSizeBeats: {
             name: "Grid Size Beats",
             label: "Beats",
+            description: "The horizontal grid size in beats.",
             value: 0.25,
             values: [{ value: 0, label: "Off" }, ...BEAT_VALUES].map((value) => ({
               value: value.value,
@@ -320,6 +319,7 @@ export const useStore = create<State>()(
           gridSizeSemis: {
             name: "Grid Size Semis",
             label: "Semis",
+            description: "The vertical grid size in semitones.",
             value: 1,
             values: [{ value: 0, label: "Off" }, ...PITCH_VALUES].map((value) => ({
               value: value.value,
@@ -331,12 +331,14 @@ export const useStore = create<State>()(
           normalize: {
             name: "Normalize",
             label: "Normalize",
+            description: "Normalizes the audio output.",
             value: true,
             ...createSetters("normalize", true),
           },
           scaleTonic: {
             name: "Scale Tonic",
             label: "Tonic",
+            description: "The root note of the scale.",
             value: "C",
             options: [
               { value: "C", label: "C" },
@@ -357,6 +359,7 @@ export const useStore = create<State>()(
           scaleType: {
             name: "Scale Type",
             label: "Type",
+            description: "The type of scale to use.",
             value: "major",
             options: ScaleType.all().map(({ name }) => ({
               value: name,
@@ -367,6 +370,7 @@ export const useStore = create<State>()(
           bandsPerOctave: {
             name: "Bands Per Octave",
             label: "Bands",
+            description: "The number of frequency bands per octave.",
             value: 24,
             values: BANDS_PER_OCTAVE_VALUES.map((value) => ({ value: value.value, label: value.label })),
             ...createSetters("bandsPerOctave", 24),
@@ -374,6 +378,7 @@ export const useStore = create<State>()(
           minFreq: {
             name: "Minimum Frequency",
             label: "Min. Freq.",
+            description: "The minimum frequency of the spectrogram.",
             value: 16.3516,
             min: 10,
             max: 100,
@@ -384,6 +389,7 @@ export const useStore = create<State>()(
           blendMode: {
             name: "Blend Mode",
             label: "Blend",
+            description: "The blend mode to use when applying the brush.",
             value: 0,
             options: BLEND_MODES,
             ...createSetters("blendMode", 0),
@@ -391,6 +397,7 @@ export const useStore = create<State>()(
           modulatorMode: {
             name: "Modulator Mode",
             label: "Mode",
+            description: "The mode of the modulator.",
             value: 0,
             options: MODULATOR_MODES,
             ...createSetters("modulatorMode", 0),
@@ -399,6 +406,7 @@ export const useStore = create<State>()(
           modulatorPatternShape: {
             name: "Modulator Pattern Shape",
             label: "Shape",
+            description: "The shape of the modulator pattern.",
             value: 0,
             options: PATTERN_SHAPES,
             ...createSetters("modulatorPatternShape", 0),
@@ -406,6 +414,7 @@ export const useStore = create<State>()(
           modulatorPatternRateBeats: {
             name: "Modulator Rate Beats",
             label: "Beats",
+            description: "The rate of the modulator pattern in beats.",
             value: 1,
             values: [
               { value: 0, label: "0" },
@@ -416,6 +425,7 @@ export const useStore = create<State>()(
           modulatorPatternRateSemis: {
             name: "Modulator Rate Semis",
             label: "Semis",
+            description: "The rate of the modulator pattern in semitones.",
             value: 0,
             values: [
               { value: 0, label: "0" },
@@ -426,12 +436,14 @@ export const useStore = create<State>()(
           modulatorPatternRadial: {
             name: "Modulator Radial",
             label: "Radial",
+            description: "If true, the modulator pattern is applied radially.",
             value: false,
             ...createSetters("modulatorPatternRadial", false),
           },
           modulatorStrength: {
             name: "Modulator Strength",
             label: "Strength",
+            description: "The strength of the modulator.",
             value: 100,
             min: -100,
             max: 100,
@@ -442,6 +454,7 @@ export const useStore = create<State>()(
           modulatorRotation: {
             name: "Modulator Rotation",
             label: "Rot",
+            description: "The rotation of the modulator pattern.",
             value: 0,
             min: 0,
             max: 360,
@@ -453,6 +466,7 @@ export const useStore = create<State>()(
           gainDb: {
             name: "Gain",
             label: "Gain",
+            description: "The amount of gain to apply in decibels.",
             value: 0.0,
             min: -24,
             max: 24,
@@ -465,6 +479,7 @@ export const useStore = create<State>()(
           blurTime: {
             name: "Blur Time",
             label: "Time",
+            description: "The amount of blur to apply over time.",
             value: 1 / 64,
             min: 0,
             max: 1,
@@ -475,6 +490,7 @@ export const useStore = create<State>()(
           blurPitch: {
             name: "Blur Pitch",
             label: "Pitch",
+            description: "The amount of blur to apply over pitch.",
             value: 100,
             min: 0,
             max: 1200,
@@ -485,6 +501,7 @@ export const useStore = create<State>()(
           transformShiftBeats: {
             name: "Shift Beats",
             label: "Shift H",
+            description: "Shifts the content horizontally by a number of beats.",
             value: 0,
             values: [
               ...BEAT_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
@@ -498,6 +515,7 @@ export const useStore = create<State>()(
           transformShiftSemis: {
             name: "Shift Semis",
             label: "Shift V",
+            description: "Shifts the content vertically by a number of semitones.",
             value: 0.0,
             values: [
               ...PITCH_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
@@ -511,6 +529,7 @@ export const useStore = create<State>()(
           transformScaleTime: {
             name: "Scale Time",
             label: "Scale H",
+            description: "Scales the content horizontally.",
             value: 1.0,
             values: [
               ...MULTIPLIER_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
@@ -523,6 +542,7 @@ export const useStore = create<State>()(
           transformScalePitch: {
             name: "Scale Pitch",
             label: "Scale V",
+            description: "Scales the content vertically.",
             value: 1.0,
             values: [
               ...MULTIPLIER_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
@@ -535,6 +555,7 @@ export const useStore = create<State>()(
           transformRotation: {
             name: "Rotation",
             label: "Rotation",
+            description: "Rotates the content.",
             value: 0.0,
             min: -180,
             max: 180,
@@ -547,102 +568,10 @@ export const useStore = create<State>()(
           transformEdgeMode: {
             name: "Edge Mode",
             label: "Edge",
+            description: "How to handle edges when transforming.",
             value: 1,
             options: EDGE_MODE,
             ...createSetters("transformEdgeMode", 1),
-          },
-          dynamicsThreshold: {
-            name: "Dynamics Threshold",
-            label: "Threshold",
-            value: -20.0,
-            min: -100,
-            max: 0,
-            step: 0.1,
-            unit: "dB",
-            ...createSetters("dynamicsThreshold", -20.0),
-          },
-          dynamicsRatio: {
-            name: "Dynamics Ratio",
-            label: "Ratio",
-            value: 4.0,
-            min: 1,
-            max: 20,
-            step: 0.1,
-            ...createSetters("dynamicsRatio", 4.0),
-          },
-          dynamicsMakeupGain: {
-            name: "Dynamics Makeup Gain",
-            label: "Makeup Gain",
-            value: 0.0,
-            min: 0,
-            max: 20,
-            step: 0.1,
-            unit: "dB",
-            ...createSetters("dynamicsMakeupGain", 0.0),
-          },
-          dynamicsAttack: {
-            name: "Dynamics Attack",
-            label: "Attack",
-            value: 0.01,
-            min: 0,
-            max: 1,
-            step: 0.001,
-            unit: "s",
-            ...createSetters("dynamicsAttack", 0.01),
-          },
-          dynamicsRelease: {
-            name: "Dynamics Release",
-            label: "Release",
-            value: 0.1,
-            min: 0,
-            max: 1,
-            step: 0.001,
-            unit: "s",
-            ...createSetters("dynamicsRelease", 0.1),
-          },
-          dynamicsKnee: {
-            name: "Dynamics Knee",
-            label: "Knee",
-            value: 10.0,
-            min: 0,
-            max: 40,
-            step: 0.1,
-            unit: "dB",
-            ...createSetters("dynamicsKnee", 10.0),
-          },
-          scaleAmount: {
-            name: "Scale Amount",
-            label: "Scale Amount",
-            value: 100,
-            min: 0,
-            max: 100,
-            step: 1,
-            unit: "%",
-            ...createSetters("scaleAmount", 100),
-          },
-          transientIntensity: {
-            name: "Transient Intensity",
-            label: "Transient Intensity",
-            value: 0.5,
-            min: 0,
-            max: 1,
-            step: 0.01,
-            ...createSetters("transientIntensity", 0.5),
-          },
-          transientThreshold: {
-            name: "Transient Threshold",
-            label: "Transient Threshold",
-            value: 0.01,
-            min: 0,
-            max: 1,
-            step: 0.001,
-            ...createSetters("transientThreshold", 0.01),
-          },
-          alignPhases: {
-            name: "Align Phases",
-            label: "Align Phases",
-            value: false,
-            ...createSetters("alignPhases", false),
           },
           openFilePaths: [],
           openFile: (file) =>

@@ -32,6 +32,7 @@ export const ParameterControl = (props: ParameterControlProps) => {
     return (
       <SelectControl
         label={parameter.label}
+        description={parameter.description}
         value={parameter.value}
         options={parameter.options}
         setValue={parameter.setValue}
@@ -45,6 +46,7 @@ export const ParameterControl = (props: ParameterControlProps) => {
     return (
       <SliderControl
         label={parameter.label}
+        description={parameter.description}
         value={parameter.value}
         setValue={parameter.setValue}
         resetValue={parameter.resetValue}
@@ -63,6 +65,7 @@ export const ParameterControl = (props: ParameterControlProps) => {
     return (
       <SliderControl
         label={parameter.label}
+        description={parameter.description}
         value={parameter.value}
         setValue={parameter.setValue}
         resetValue={parameter.resetValue}
@@ -80,6 +83,7 @@ export const ParameterControl = (props: ParameterControlProps) => {
   return (
     <SwitchControl
       label={parameter.label}
+      description={parameter.description}
       value={parameter.value}
       setValue={parameter.setValue}
       resetValue={parameter.resetValue}

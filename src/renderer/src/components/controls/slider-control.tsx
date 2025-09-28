@@ -1,10 +1,12 @@
 import { State, useStore } from "@/store";
 import { Group, NumberInput, Popover, Slider, Text } from "@mantine/core";
 import { ChevronDown } from "lucide-react";
+import { Tooltip } from "../tooltip";
 import { ParameterControl } from "./parameter-control";
 
 type SliderControlProps = {
   label: string;
+  description?: string;
   value: number;
   color?: string;
   setValue: (value: number) => void;
@@ -22,6 +24,7 @@ type SliderControlProps = {
 export const SliderControl = (props: SliderControlProps) => {
   const {
     label,
+    description,
     value,
     setValue,
     resetValue,
@@ -40,16 +43,18 @@ export const SliderControl = (props: SliderControlProps) => {
   const isModulated = modulator && typeof modulator === "object" && "value" in modulator && modulator.value !== 0;
 
   const labelComponent = (
-    <Text
-      size="xs"
-      w={labelWidth}
-      lineClamp={1}
-      truncate="end"
-      onDoubleClick={() => resetValue()}
-      c={isModulated ? "blue" : "white"}
-    >
-      {label}
-    </Text>
+    <Tooltip label={description} disabled={!description}>
+      <Text
+        size="xs"
+        w={labelWidth}
+        lineClamp={1}
+        truncate="end"
+        onDoubleClick={() => resetValue()}
+        c={isModulated ? "blue" : "white"}
+      >
+        {label}
+      </Text>
+    </Tooltip>
   );
 
   const valueIndex = marks?.findIndex((v) => v.value === value);

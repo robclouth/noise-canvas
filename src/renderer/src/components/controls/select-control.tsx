@@ -1,7 +1,9 @@
 import { Group, Select, Text } from "@mantine/core";
+import { Tooltip } from "../tooltip";
 
 export const SelectControl = <T,>({
   label,
+  description,
   options,
   value,
   setValue,
@@ -9,6 +11,7 @@ export const SelectControl = <T,>({
   labelWidth,
 }: {
   label: string;
+  description?: string;
   value: T;
   options: readonly { value: T; label: string }[];
   setValue: (value: T) => void;
@@ -26,9 +29,11 @@ export const SelectControl = <T,>({
 
   return (
     <Group gap={"xs"} wrap="nowrap" h={25}>
-      <Text size="xs" w={labelWidth} lineClamp={1} truncate="end" onDoubleClick={() => resetValue()}>
-        {label}
-      </Text>
+      <Tooltip label={description} disabled={!description}>
+        <Text size="xs" w={labelWidth} lineClamp={1} truncate="end" onDoubleClick={() => resetValue()}>
+          {label}
+        </Text>
+      </Tooltip>
       <Select
         size="xs"
         variant="unstyled"
