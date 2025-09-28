@@ -1,11 +1,12 @@
 import { BaseBrush } from "./base-brush";
 import { gainBrush } from "./gain-brush";
+import { restoreBrush } from "./restore-brush";
 import { transformBrush } from "./transform-brush";
 
 export const brushes: Record<string, BaseBrush> = {
   gain: gainBrush,
   transform: transformBrush,
-  // restore: restoreBrush,
+  restore: restoreBrush,
   // blur: blurBrush,
   // "transient shaper": transientShaperBrush,
   // dynamics: dynamicsBrush,
