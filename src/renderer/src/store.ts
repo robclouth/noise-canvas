@@ -81,10 +81,15 @@ export type State = {
 
   // Transform Brush
   transformShiftBeats: DiscreteNumberParameter;
+  transformShiftBeatsMod: ContinuousNumberParameter;
   transformShiftSemis: DiscreteNumberParameter;
+  transformShiftSemisMod: ContinuousNumberParameter;
   transformScaleTime: DiscreteNumberParameter;
+  transformScaleTimeMod: ContinuousNumberParameter;
   transformScalePitch: DiscreteNumberParameter;
+  transformScalePitchMod: ContinuousNumberParameter;
   transformRotation: ContinuousNumberParameter;
+  transformRotationMod: ContinuousNumberParameter;
   transformEdgeMode: OptionsParameter<number>;
 
   // Dynamics Brush
@@ -486,8 +491,10 @@ export const useStore = create<State>()(
               { label: "0", value: 0 },
               ...BEAT_VALUES,
             ],
+            modulatorParamKey: "transformShiftBeatsMod",
             ...createSetters("transformShiftBeats", 0.0),
           },
+          transformShiftBeatsMod: createModulator({ name: "Shift Beats Mod Amount", key: "transformShiftBeatsMod" }),
           transformShiftSemis: {
             name: "Shift Semis",
             label: "Shift V",
@@ -497,8 +504,10 @@ export const useStore = create<State>()(
               { label: "0", value: 0 },
               ...PITCH_VALUES,
             ],
+            modulatorParamKey: "transformShiftSemisMod",
             ...createSetters("transformShiftSemis", 0.0),
           },
+          transformShiftSemisMod: createModulator({ name: "Shift Semis Mod Amount", key: "transformShiftSemisMod" }),
           transformScaleTime: {
             name: "Scale Time",
             label: "Scale H",
@@ -507,8 +516,10 @@ export const useStore = create<State>()(
               ...MULTIPLIER_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
               ...MULTIPLIER_VALUES,
             ],
+            modulatorParamKey: "transformScaleTimeMod",
             ...createSetters("transformScaleTime", 1.0),
           },
+          transformScaleTimeMod: createModulator({ name: "Scale Time Mod Amount", key: "transformScaleTimeMod" }),
           transformScalePitch: {
             name: "Scale Pitch",
             label: "Scale V",
@@ -517,8 +528,10 @@ export const useStore = create<State>()(
               ...MULTIPLIER_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
               ...MULTIPLIER_VALUES,
             ],
+            modulatorParamKey: "transformScalePitchMod",
             ...createSetters("transformScalePitch", 1.0),
           },
+          transformScalePitchMod: createModulator({ name: "Scale Pitch Mod Amount", key: "transformScalePitchMod" }),
           transformRotation: {
             name: "Rotation",
             label: "Rotation",
@@ -527,8 +540,10 @@ export const useStore = create<State>()(
             max: 180,
             step: 1,
             unit: "°",
+            modulatorParamKey: "transformRotationMod",
             ...createSetters("transformRotation", 0.0),
           },
+          transformRotationMod: createModulator({ name: "Rotation Mod Amount", key: "transformRotationMod" }),
           transformEdgeMode: {
             name: "Edge Mode",
             label: "Edge",

@@ -3,16 +3,17 @@ varying vec2 vUv;
 
 #include "brush-common.glsl"
 
-uniform vec2 shiftUv;
-uniform vec2 scale;
-uniform float rotation;
+uniform Parameter shiftX;
+uniform Parameter shiftY;
+uniform Parameter scaleX;
+uniform Parameter scaleY;
+uniform Parameter rotation;
 uniform int boundaryMode;
 
 void main() {
     ProcessingUvs coords = getProcessingUvs(vUv);
 
     if (isInsideBrush(coords.dest)) {
-        float weight = getBrushWeight(coords.dest);
         
         vec4 originalTexel = texture2D(destSpectrogramTex, vUv);
 
@@ -26,33 +27,38 @@ void main() {
         vec2 relativeUv = coords.dest - pivot;
 
         // 3. Apply INVERSE Rotation around the new origin (0,0).
-        float rad = radians(-rotation);
+        float rotationValue = applyModulation(rotation.value, rotation.minValue, rotation.maxValue, rotation.modulationAmount, coords.dest);
+        float rad = radians(-rotationValue);
         mat2 rotMat = mat2(cos(rad), -sin(rad), sin(rad), cos(rad));
         vec2 rotatedUv = rotMat * relativeUv;
 
         // 4. Apply INVERSE Scale around the new origin (0,0).
         vec2 scaledUv = rotatedUv;
-        if (abs(scale.x) > 1e-5 && abs(scale.y) > 1e-5) {
-          scaledUv /= scale;
+        float scaleXValue = applyModulation(scaleX.value, scaleX.minValue, scaleX.maxValue, scaleX.modulationAmount, coords.dest);
+        float scaleYValue = applyModulation(scaleY.value, scaleY.minValue, scaleY.maxValue, scaleY.modulationAmount, coords.dest);
+        if (abs(scaleXValue) > 1e-5 && abs(scaleYValue) > 1e-5) {
+          scaledUv /= vec2(scaleXValue, scaleYValue);
         }
 
         // 5. Translate back from the pivot's space.
         vec2 transformedUv = scaledUv + pivot;
-        if(scale.x < 0.0) {
+        if(scaleXValue < 0.0) {
             transformedUv.x += brushSizeUv.x;
         }
-        if(scale.y < 0.0) {
+        if(scaleYValue < 0.0) {
             transformedUv.y += brushSizeUv.y;
         }
 
         // 6. Apply the final shift to get the source UV to sample from.
-        vec2 finalSourceUv = transformedUv - vec2(shiftUv.x * sign(scale.x), shiftUv.y * sign(scale.y));
+        float shiftXValue = applyModulation(shiftX.value, shiftX.minValue, shiftX.maxValue, shiftX.modulationAmount, coords.dest);
+        float shiftYValue = applyModulation(shiftY.value, shiftY.minValue, shiftY.maxValue, shiftY.modulationAmount, coords.dest);
+        vec2 finalSourceUv = transformedUv - vec2(shiftXValue * sign(scaleXValue), shiftYValue * sign(scaleYValue));
 
         bool inBrush = isInsideBrush(finalSourceUv);
 
         vec4 transformedTexel  = vec4(0.0);
 
-        bool isTimeReversed = scale.x < 0.0;
+        bool isTimeReversed = scaleXValue < 0.0;
 
         if( boundaryMode == 0) { // Cut
             if(inBrush) {
@@ -91,6 +97,7 @@ void main() {
             transformedTexel.a = -transformedTexel.a;
         }
 
+        float weight = getBrushWeight(coords.dest);
         gl_FragColor = applyBrush(originalTexel, transformedTexel, weight, coords.dest);
     } else {
         gl_FragColor = texture2D(destSpectrogramTex, vUv);
