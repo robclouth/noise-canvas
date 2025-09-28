@@ -89,6 +89,7 @@ Noise Canvas has a modulation system that lets you animate parameters in time an
 - Standard waveforms: sine, square, triangle, etc.
 - Random and noise-based modulators: different flavors of unpredictable movement.
 - Scale-based modulation: constrain modulation to a given scale, so only in-scale frequencies are affected. This makes modulation musically aware.
+- Modulatable parameters have a little arrow next to the name.
 
 By combining modulation with iterations, offsets, pan, and blend modes, you can generate highly complex evolving sounds with only a few strokes.
 

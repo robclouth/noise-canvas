@@ -143,6 +143,8 @@ export const useStore = create<State>()(
           max: 100,
           step: 1,
           unit: "%",
+          description:
+            "The amount of modulation to apply. 0% is no modulation and only the value of the parameter is used, 100% is full modulation and the current value of the modulated parameter is ignored.",
           ...createSetters(key, 0),
         });
 
