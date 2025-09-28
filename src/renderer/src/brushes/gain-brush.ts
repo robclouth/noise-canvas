@@ -1,4 +1,5 @@
 import { shaderMaterial } from "@react-three/drei";
+import { OpenFile } from "@renderer/types";
 import { ShaderMaterial } from "three";
 import gainBrushFrag from "../glsl/gain-brush.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -31,10 +32,10 @@ class GainBrush extends BaseBrush {
     this.parameters = ["gainDb"];
   }
 
-  updateUniforms(props: CommonUniforms, passIndex: number): void {
-    super.updateUniforms(props, passIndex);
+  updateBrushUniforms(props: { commonUniforms: CommonUniforms; passIndex: number; file: OpenFile }): void {
+    this.updateCommonUniforms(props);
     const { gainDb, gainDbMod } = useStore.getState();
-    this.materials[passIndex].uniforms.gainDb.value = {
+    this.materials[props.passIndex].uniforms.gainDb.value = {
       value: gainDb.value,
       minValue: gainDb.min,
       maxValue: gainDb.max,

@@ -11,14 +11,12 @@ export interface FileViewProps {
   filePath: string;
 }
 
-function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>, bpm: number): [number, number] | null {
-  const {
-    activeFilePath,
-    gridSizeBeats: gridSize,
-    brushWidthBeats: brushWidth,
-    gridSizeSemis: gridSizeY,
-    bandsPerOctave,
-  } = useStore.getState();
+function getSnappedCoordinates(
+  event: React.MouseEvent<HTMLDivElement>,
+  filePath: string,
+  bpm: number,
+): [number, number] | null {
+  const { gridSizeBeats, brushWidthBeats, gridSizeSemis, brushHeightSemis, bandsPerOctave } = useStore.getState();
   const rect = event.currentTarget.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) {
     return null;
@@ -28,35 +26,39 @@ function getSnappedCoordinates(event: React.MouseEvent<HTMLDivElement>, bpm: num
 
   const uv = new Vector2(x, y);
 
-  const activeFile = activeFilePath ? openFiles[activeFilePath] : null;
-  const { spectrogramData } = activeFile ?? {};
-  if (!spectrogramData) {
-    return [uv.x, uv.y];
-  }
+  const { spectrogramData } = openFiles[filePath];
 
   let snappedX = uv.x;
   let snappedY = uv.y;
 
-  if (gridSize.value > 0) {
-    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-    const gridIntervalSeconds = (60 / bpm) * gridSize.value;
-    const currentTime = uv.x * totalDuration;
+  if (gridSizeBeats.value > 0) {
+    if (brushWidthBeats.value > 0) {
+      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+      const gridIntervalSeconds = (60 / bpm) * gridSizeBeats.value;
+      const currentTime = uv.x * totalDuration;
 
-    const brushWidthSeconds = brushWidth.value * (60.0 / bpm);
-    const startTime = currentTime - brushWidthSeconds / 2.0;
+      const brushWidthSeconds = brushWidthBeats.value * (60.0 / bpm);
+      const startTime = currentTime - brushWidthSeconds / 2.0;
 
-    const snappedStartTime = Math.round(startTime / gridIntervalSeconds) * gridIntervalSeconds;
-    const snappedCenterTime = snappedStartTime + brushWidthSeconds / 2.0;
+      const snappedStartTime = Math.round(startTime / gridIntervalSeconds) * gridIntervalSeconds;
+      const snappedCenterTime = snappedStartTime + brushWidthSeconds / 2.0;
 
-    snappedX = snappedCenterTime / totalDuration;
+      snappedX = snappedCenterTime / totalDuration;
+    } else {
+      snappedX = 0.5;
+    }
   }
 
-  if (gridSizeY.value > 0) {
-    const bandsPerSemitone = bandsPerOctave.value / 12;
-    const gridIntervalBands = gridSizeY.value * bandsPerSemitone;
-    const currentBand = uv.y * spectrogramData.numBands;
-    const snappedBand = Math.round(currentBand / gridIntervalBands) * gridIntervalBands;
-    snappedY = snappedBand / spectrogramData.numBands;
+  if (gridSizeSemis.value > 0) {
+    if (brushHeightSemis.value > 0) {
+      const bandsPerSemitone = bandsPerOctave.value / 12;
+      const gridIntervalBands = gridSizeSemis.value * bandsPerSemitone;
+      const currentBand = uv.y * spectrogramData.numBands;
+      const snappedBand = Math.round(currentBand / gridIntervalBands) * gridIntervalBands;
+      snappedY = snappedBand / spectrogramData.numBands;
+    } else {
+      snappedY = 0.5;
+    }
   }
 
   return [snappedX, snappedY];
@@ -136,7 +138,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
     if (!isActive) return;
     const bpm = useStore.getState().filesBpm[filePath] ?? 120;
-    const coords = getSnappedCoordinates(event, bpm);
+    const coords = getSnappedCoordinates(event, filePath, bpm);
     if (!coords) return;
     const [snappedX, snappedY] = coords;
 
@@ -162,7 +164,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
     if (!isActive) return;
     if (event.button === 0 && rendererRef?.current) {
       const bpm = useStore.getState().filesBpm[filePath] ?? 120;
-      const coords = getSnappedCoordinates(event, bpm);
+      const coords = getSnappedCoordinates(event, filePath, bpm);
       if (coords) {
         rendererRef.current!.renderStroke(coords[0], coords[1], false);
       }

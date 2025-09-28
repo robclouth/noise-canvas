@@ -30,6 +30,9 @@ export const BEAT_VALUES = [
 ].sort((a, b) => a.value - b.value);
 
 export const PITCH_VALUES = [
+  { value: 1 / 8, label: "1/8" },
+  { value: 1 / 4, label: "1/4" },
+  { value: 1 / 2, label: "1/2" },
   { value: 1, label: "1" },
   { value: 2, label: "2" },
   { value: 3, label: "3" },
@@ -50,6 +53,36 @@ export const PITCH_VALUES = [
   { value: 72, label: "72" },
   { value: 84, label: "84" },
   { value: 96, label: "96" },
+];
+
+export const MULTIPLIER_VALUES = [
+  { value: 1 / 128, label: "x 1/128" },
+  { value: 1 / 64, label: "x 1/64" },
+  { value: 1 / 32, label: "x 1/32" },
+  { value: 1 / 16, label: "x 1/16" },
+  { value: 1 / 8, label: "x 1/8" },
+  { value: 1 / 4, label: "x 1/4" },
+  { value: 1 / 3, label: "x 1/3" },
+  { value: 1 / 2, label: "x 1/2" },
+  { value: 2 / 3, label: "x 2/3" },
+  { value: 3 / 4, label: "x 3/4" },
+  { value: 1, label: "x 1" },
+  { value: 1.5, label: "x 1.5" },
+  { value: 2, label: "x 2" },
+  { value: 3, label: "x 3" },
+  { value: 4, label: "x 4" },
+  { value: 6, label: "x 6" },
+  { value: 8, label: "x 8" },
+  { value: 12, label: "x 12" },
+  { value: 16, label: "x 116" },
+  { value: 24, label: "x 124" },
+  { value: 32, label: "x 132" },
+  { value: 48, label: "x 148" },
+  { value: 64, label: "x 164" },
+  { value: 96, label: "x 196" },
+  { value: 128, label: "x 128" },
+  { value: 192, label: "x 192" },
+  { value: 256, label: "x 256" },
 ];
 
 export const BANDS_PER_OCTAVE_VALUES = [
@@ -92,8 +125,9 @@ export const PATTERN_SHAPES = [
   { value: 11, label: "Selected Scale" },
 ];
 
-export const BOUNDARY_MODES = [
-  { value: 0, label: "Smear" },
-  { value: 1, label: "Cut" },
+export const EDGE_MODE = [
+  { value: 0, label: "Cut" },
+  { value: 1, label: "Bleed" },
   { value: 2, label: "Wrap" },
+  { value: 3, label: "Mirror" },
 ];

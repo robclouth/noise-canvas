@@ -8,8 +8,9 @@ import {
   BANDS_PER_OCTAVE_VALUES,
   BEAT_VALUES,
   BLEND_MODES,
-  BOUNDARY_MODES,
+  EDGE_MODE,
   MODULATOR_MODES,
+  MULTIPLIER_VALUES,
   PATTERN_SHAPES,
   PITCH_VALUES,
 } from "./lib/constants";
@@ -79,12 +80,12 @@ export type State = {
   blurPitch: ContinuousNumberParameter; // in cents
 
   // Transform Brush
-  shiftX: ContinuousNumberParameter;
-  shiftYCents: ContinuousNumberParameter;
-  scaleX: ContinuousNumberParameter;
-  scaleY: ContinuousNumberParameter;
-  rotation: ContinuousNumberParameter;
-  boundaryMode: OptionsParameter<number>;
+  transformShiftBeats: DiscreteNumberParameter;
+  transformShiftSemis: DiscreteNumberParameter;
+  transformScaleTime: DiscreteNumberParameter;
+  transformScalePitch: DiscreteNumberParameter;
+  transformRotation: ContinuousNumberParameter;
+  transformEdgeMode: OptionsParameter<number>;
 
   // Dynamics Brush
   dynamicsThreshold: ContinuousNumberParameter;
@@ -159,7 +160,7 @@ export const useStore = create<State>()(
         return {
           brushIntensity: {
             name: "Brush Intensity",
-            label: "Intensity",
+            label: "Amount",
             value: 100,
             min: 0,
             max: 100,
@@ -212,7 +213,7 @@ export const useStore = create<State>()(
           },
           sourceOffsetBeats: {
             name: "Offset Beats",
-            label: "Beats",
+            label: "Offset H",
             value: 0,
             values: [
               ...BEAT_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
@@ -225,7 +226,7 @@ export const useStore = create<State>()(
           sourceOffsetBeatsMod: createModulator({ name: "Offset Beats Mod Amount", key: "sourceOffsetBeatsMod" }),
           sourceOffsetSemis: {
             name: "Offset Semis",
-            label: "Semis",
+            label: "Offset V",
             value: 0.0,
             values: [
               ...PITCH_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
@@ -305,14 +306,20 @@ export const useStore = create<State>()(
             name: "Grid Size Beats",
             label: "Beats",
             value: 0.25,
-            values: BEAT_VALUES.map((value) => ({ value: value.value, label: value.label })),
+            values: [{ value: 0, label: "Off" }, ...BEAT_VALUES].map((value) => ({
+              value: value.value,
+              label: value.label,
+            })),
             ...createSetters("gridSizeBeats", 0.25),
           },
           gridSizeSemis: {
             name: "Grid Size Semis",
             label: "Semis",
             value: 1,
-            values: PITCH_VALUES.map((value) => ({ value: value.value, label: value.label })),
+            values: [{ value: 0, label: "Off" }, ...PITCH_VALUES].map((value) => ({
+              value: value.value,
+              label: value.label,
+            })),
             ...createSetters("gridSizeSemis", 1),
           },
 
@@ -470,45 +477,49 @@ export const useStore = create<State>()(
             unit: "cents",
             ...createSetters("blurPitch", 100),
           },
-          shiftX: {
-            name: "Shift X",
-            label: "X",
+          transformShiftBeats: {
+            name: "Shift Beats",
+            label: "Shift H",
+            value: 0,
+            values: [
+              ...BEAT_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
+              { label: "0", value: 0 },
+              ...BEAT_VALUES,
+            ],
+            ...createSetters("transformShiftBeats", 0.0),
+          },
+          transformShiftSemis: {
+            name: "Shift Semis",
+            label: "Shift V",
             value: 0.0,
-            min: -4,
-            max: 4,
-            step: 0.01,
-            unit: "beats",
-            ...createSetters("shiftX", 0.0),
+            values: [
+              ...PITCH_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
+              { label: "0", value: 0 },
+              ...PITCH_VALUES,
+            ],
+            ...createSetters("transformShiftSemis", 0.0),
           },
-          shiftYCents: {
-            name: "Shift Y",
-            label: "Y",
-            value: 0.0,
-            min: -1200,
-            max: 1200,
-            step: 1,
-            unit: "cents",
-            ...createSetters("shiftYCents", 0.0),
-          },
-          scaleX: {
-            name: "Scale X",
-            label: "X",
+          transformScaleTime: {
+            name: "Scale Time",
+            label: "Scale H",
             value: 1.0,
-            min: 0,
-            max: 4,
-            step: 0.01,
-            ...createSetters("scaleX", 1.0),
+            values: [
+              ...MULTIPLIER_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
+              ...MULTIPLIER_VALUES,
+            ],
+            ...createSetters("transformScaleTime", 1.0),
           },
-          scaleY: {
-            name: "Scale Y",
-            label: "Y",
+          transformScalePitch: {
+            name: "Scale Pitch",
+            label: "Scale V",
             value: 1.0,
-            min: 0,
-            max: 4,
-            step: 0.01,
-            ...createSetters("scaleY", 1.0),
+            values: [
+              ...MULTIPLIER_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
+              ...MULTIPLIER_VALUES,
+            ],
+            ...createSetters("transformScalePitch", 1.0),
           },
-          rotation: {
+          transformRotation: {
             name: "Rotation",
             label: "Rotation",
             value: 0.0,
@@ -516,14 +527,14 @@ export const useStore = create<State>()(
             max: 180,
             step: 1,
             unit: "°",
-            ...createSetters("rotation", 0.0),
+            ...createSetters("transformRotation", 0.0),
           },
-          boundaryMode: {
-            name: "Boundary Mode",
-            label: "Boundary",
+          transformEdgeMode: {
+            name: "Edge Mode",
+            label: "Edge",
             value: 1,
-            options: BOUNDARY_MODES,
-            ...createSetters("boundaryMode", 1),
+            options: EDGE_MODE,
+            ...createSetters("transformEdgeMode", 1),
           },
           dynamicsThreshold: {
             name: "Dynamics Threshold",
@@ -625,6 +636,7 @@ export const useStore = create<State>()(
                 return state;
               }
               openFiles[file.filePath] = file;
+              set({ activeFilePath: file.filePath });
               return { openFilePaths: [...state.openFilePaths, file.filePath] };
             }),
           closeFile: (filePath) =>

@@ -2,7 +2,6 @@
 // UNIFORMS & STRUCTS
 // ============================================================================
 
-// (Structs and Uniforms are unchanged)
 struct Parameter {
     float value;
     float minValue;
@@ -345,6 +344,17 @@ float getBrushWeight(vec2 unpackedUv) {
         weightY = smoothstep(halfSize.y, halfSize.y - featherZoneY, diff.y);
     }
     return weightX * weightY;
+}
+
+bool isInsideBrush(vec2 unpackedUv) {
+    vec2 diff = abs(unpackedUv - brushCenterUv);
+    vec2 halfSize = brushSizeUv / 2.0;
+
+    if ((brushSizeUv.x > 0.0 && diff.x >= halfSize.x) ||
+        (brushSizeUv.y > 0.0 && diff.y >= halfSize.y)) {
+        return false;
+    }
+    return true;
 }
 
 // Applies the final brush effect, combining original and modified data.

@@ -59,15 +59,7 @@ void main() {
         
         vec2 correctedRectCenter = rectCenter;
         vec2 correctedBrushSize = brushSizeUv;
-        if (brushSizeUv.x == 0.0) {
-            correctedRectCenter.x = 0.5;
-            correctedBrushSize.x = 1.0;
-        }
-        if (brushSizeUv.y == 0.0) {
-            correctedRectCenter.y = 0.5;
-            correctedBrushSize.y = 1.0;
-        }
-
+       
         vec2 halfSize = correctedBrushSize / 2.0;
         float strokeWidthUv = fwidth(vUv.x) * 1.5;
 
@@ -87,12 +79,7 @@ void main() {
         if (isSourceFile) {
           // Draw source rectangle (faint)
           vec2 effectiveOffset = vec2(sourceOffsetX.value, sourceOffsetY.value);
-          if (brushSizeUv.x == 0.0) {
-            effectiveOffset.x = 0.0;
-          }
-          if (brushSizeUv.y == 0.0) {
-            effectiveOffset.y = 0.0;
-          }
+
           vec2 sourceCenter = correctedRectCenter + effectiveOffset;
           vec2 sourceCenterScreen = sourceCenter;
 

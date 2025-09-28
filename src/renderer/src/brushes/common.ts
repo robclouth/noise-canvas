@@ -80,12 +80,14 @@ export function unitsToUv(
   bandsPerOctave: number,
   numBands: number,
 ): Vector2 {
-  const seconds = beats * (60.0 / bpm);
-  const u = seconds / totalDuration;
+  // Convert musical units to normalized UV offsets without imposing a floor at 0.
+  // This allows both positive and negative offsets, and zero maps to zero offset.
+  const safeTotalDuration = totalDuration > 0 ? totalDuration : 1.0;
+  const u = (beats * (60.0 / bpm)) / safeTotalDuration;
 
   const bandsPerSemitone = bandsPerOctave / 12;
-  const shiftInBands = semitones * bandsPerSemitone;
-  const v = shiftInBands / numBands;
+  const safeNumBands = numBands > 0 ? numBands : 1.0;
+  const v = (semitones * bandsPerSemitone) / safeNumBands;
 
   return new Vector2(u, v);
 }

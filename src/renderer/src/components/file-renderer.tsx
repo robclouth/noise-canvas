@@ -244,6 +244,18 @@ export const FileRenderer = memo(
         sourceFile.spectrogramData.numBands,
       );
 
+      const brushSizeUv = unitsToUv(
+        state.brushWidthBeats.value,
+        state.brushHeightSemis.value,
+        bpm,
+        totalDuration,
+        spectrogramData.bandsPerOctave,
+        spectrogramData.numBands,
+      );
+      // Handle full brush size (when brush width or height is 0)
+      brushSizeUv.x = state.brushWidthBeats.value > 0 ? brushSizeUv.x : 1;
+      brushSizeUv.y = state.brushHeightSemis.value > 0 ? brushSizeUv.y : 1;
+
       // Set up common uniforms for the brush shaders
       const commonUniforms: CommonUniforms = {
         sourceSpectrogramTex: textures.packed.texture,
@@ -270,16 +282,7 @@ export const FileRenderer = memo(
         viewZoomPower: state.zoomPower.value,
         viewOffset: state.scroll.value,
         brushCenterUv: mouseUv.current || new THREE.Vector2(-1, -1),
-        brushSizeUv: mouseUv.current
-          ? unitsToUv(
-              state.brushWidthBeats.value,
-              state.brushHeightSemis.value,
-              bpm,
-              totalDuration,
-              spectrogramData.bandsPerOctave,
-              spectrogramData.numBands,
-            )
-          : new THREE.Vector2(0, 0),
+        brushSizeUv,
         featherX: state.featherTime.value / 100,
         featherY: state.featherPitch.value / 100,
         brushIntensity: {
@@ -366,20 +369,16 @@ export const FileRenderer = memo(
             const isFinalPass = j === state.brushIterations.value - 1 && i === numPasses - 1;
             const currentWriteFbo = isFinalPass ? destinationFbo : tempFboA;
 
-            // --- START: THE FINAL FIX ---
-
             const inputTexture = currentReadFbo.texture;
 
             // The "source" is always the result of the previous pass.
             uniformsForThisIteration.sourceSpectrogramTex = inputTexture;
 
             // The "destination" (for blending) is the original target on the first pass.
-            // For all subsequent iterative passes, the destination IS the source (self-modification).
+            // For all subsequent iterative passes, the destination is the source (self-modification).
             uniformsForThisIteration.destSpectrogramTex = j === 0 ? commonUniforms.destSpectrogramTex : inputTexture;
 
-            // --- END: THE FINAL FIX ---
-
-            brush.updateUniforms(uniformsForThisIteration, i);
+            brush.updateBrushUniforms({ commonUniforms: uniformsForThisIteration, passIndex: i, file: sourceFile });
 
             gl.setRenderTarget(currentWriteFbo);
             gl.render(fboScene, camera);

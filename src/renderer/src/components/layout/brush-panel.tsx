@@ -1,15 +1,20 @@
 import { useStore } from "@/store";
 import { Stack } from "@mantine/core";
-import { brushes } from "@renderer/brushes";
+import { GainBrush } from "../brush-views/gain-brush";
+import { TransformBrush } from "../brush-views/transform-brush";
 import { ParameterControl } from "../controls/parameter-control";
 import { ModulatorView } from "../modulator-view";
 import { Section } from "../section";
+
+const BRUSH_VIEWS = {
+  gain: <GainBrush />,
+  transform: <TransformBrush />,
+};
 
 export function BrushPanel() {
   const brushType = useStore((state) => state.brushType.value);
   const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid.value);
 
-  const brush = brushes[brushType];
   return (
     <Stack w={300} miw={300} p="xs">
       <Section label="Size">
@@ -34,9 +39,9 @@ export function BrushPanel() {
       </Section>
       <Section label="Brush">
         <ParameterControl paramKey="brushType" />
-        {brush ? brush.parameters.map((param) => <ParameterControl key={param} paramKey={param} />) : null}
+        {BRUSH_VIEWS[brushType] ? BRUSH_VIEWS[brushType] : null}
       </Section>
-      <Section label="Modulator">
+      <Section label="Modulation">
         <ModulatorView />
       </Section>
     </Stack>

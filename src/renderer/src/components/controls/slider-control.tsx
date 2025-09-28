@@ -47,7 +47,6 @@ export const SliderControl = (props: SliderControlProps) => {
       truncate="end"
       onDoubleClick={() => resetValue()}
       c={isModulated ? "blue" : "white"}
-      fw={isModulated ? "bold" : "normal"}
     >
       {label}
     </Text>
