@@ -101,6 +101,12 @@ export type State = {
   blurNoisePitchMod: ContinuousNumberParameter;
   blurBleed: BooleanParameter;
 
+  // Sharpen Brush
+  sharpenAmountTime: ContinuousNumberParameter;
+  sharpenAmountTimeMod: ContinuousNumberParameter;
+  sharpenAmountPitch: ContinuousNumberParameter;
+  sharpenAmountPitchMod: ContinuousNumberParameter;
+
   // Audio Playback
   isPlaying: boolean;
   setIsPlaying: (isPlaying: boolean) => void;
@@ -285,6 +291,7 @@ export const useStore = create<State>()(
               { value: "restore", label: "Restore" },
               { value: "transform", label: "Transform" },
               { value: "blur", label: "Smooth" },
+              // { value: "sharpen", label: "Sharpen" },
             ],
             ...createSetters("brushType", "gain"),
           },
@@ -567,6 +574,32 @@ export const useStore = create<State>()(
             value: true,
             ...createSetters("blurBleed", true),
           },
+          sharpenAmountTime: {
+            name: "Sharpen Time",
+            label: "Sharpen H",
+            description: "The amount of sharpening to apply over time.",
+            value: 0,
+            min: 0,
+            max: 100,
+            step: 1,
+            unit: "%",
+            modulatorParamKey: "sharpenAmountTimeMod",
+            ...createSetters("sharpenAmountTime", 0),
+          },
+          sharpenAmountTimeMod: createModulator({ name: "Sharpen Time Mod Amount", key: "sharpenAmountTimeMod" }),
+          sharpenAmountPitch: {
+            name: "Sharpen Pitch",
+            label: "Sharpen V",
+            description: "The amount of sharpening to apply over pitch.",
+            value: 0,
+            min: 0,
+            max: 100,
+            step: 1,
+            unit: "%",
+            modulatorParamKey: "sharpenAmountPitchMod",
+            ...createSetters("sharpenAmountPitch", 0),
+          },
+          sharpenAmountPitchMod: createModulator({ name: "Sharpen Pitch Mod Amount", key: "sharpenAmountPitchMod" }),
           transformShiftBeats: {
             name: "Shift Beats",
             label: "Shift H",
