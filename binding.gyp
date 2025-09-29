@@ -5,7 +5,7 @@
       "sources": [ "gaborator-addon.cpp" ],
       "include_dirs": [
         "node_modules/node-addon-api",
-        "Gaborator-2.1"
+        "gaborator-2.1"
       ],
       "cflags!": [ "-fno-exceptions" ],
       "cflags_cc!": [ "-fno-exceptions" ],
