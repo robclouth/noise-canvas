@@ -124,9 +124,9 @@ vec4 readPackedData(vec2 unpackedUv, sampler2D dataTex, sampler2D metaTex, vec2 
   float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
   float timeIndexInBand = floor(scaledTime);
 
-  // 4. If out of bounds for this band, return zero.
+  // 4. If out of bounds for this band, clamp to the edge.
   if (timeIndexInBand < 0.0 || timeIndexInBand >= bandLength) {
-      return vec4(0.0);
+      timeIndexInBand = clamp(timeIndexInBand, 0.0, bandLength - 1.0);
   }
 
   // 5. Convert the 1D band index into a 2D packed texture coordinate.
