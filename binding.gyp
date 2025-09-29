@@ -3,7 +3,6 @@
     {
       "target_name": "gaborator_addon",
       "sources": [ "gaborator-addon.cpp" ],
-
       "include_dirs": [
         "node_modules/node-addon-api",
         "gaborator-2.1"
@@ -13,6 +12,7 @@
       ],
       "cflags!": [ "-fno-exceptions" ],
       "cflags_cc!": [ "-fno-exceptions" ],
+      "cflags_cc": [ "-frtti" ],
       "defines": [ "NAPI_DISABLE_CPP_EXCEPTIONS" ],
       "xcode_settings": {
         "GCC_ENABLE_CPP_EXCEPTIONS": "YES",
@@ -24,6 +24,7 @@
       "msvs_settings": {
         "VCCLCompilerTool": {
           "ExceptionHandling": 1,
+          "RuntimeTypeInfo": "true",
           "AdditionalOptions": [ "/std:c++17" ]
         }
       },
