@@ -90,7 +90,7 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
           variant="filled"
           onClick={(e) => {
             e.stopPropagation();
-            setSourceFilePath(isSource ? null : filePath);
+            setSourceFilePath(filePath);
           }}
           color={isSource ? "orange" : "gray"}
         >
