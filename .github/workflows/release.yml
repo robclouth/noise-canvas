@@ -30,19 +30,22 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build application
-        # Use the correct build script based on the operating system
-        run: |
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            npm run build:win
-          elif [ "$RUNNER_OS" == "macOS" ]; then
-            npm run build:mac
-          else
-            npm run build:linux
-          fi
+      - name: Build application on Windows
+        if: runner.os == 'Windows'
+        run: npm run build:win
         env:
-          # This is required for electron-builder on macOS and Linux
-          # It prevents it from trying to sign the app
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Build application on macOS
+        if: runner.os == 'macOS'
+        run: npm run build:mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Build application on Linux
+        if: runner.os == 'Linux'
+        run: npm run build:linux
+        env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload artifact
