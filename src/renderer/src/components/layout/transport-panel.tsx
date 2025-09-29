@@ -1,6 +1,6 @@
 import { togglePlayback } from "@/audio-manager";
 import { useStore } from "@/store";
-import { ActionIcon, Flex, Text } from "@mantine/core";
+import { ActionIcon, Group, Text } from "@mantine/core";
 import { Play, Repeat, Square } from "lucide-react";
 import { memo, useEffect, useRef } from "react";
 
@@ -47,7 +47,7 @@ export const TransportPanel = memo(() => {
   }, []);
 
   return (
-    <Flex align="center" justify="center" gap="md" p="md">
+    <Group align="center" justify="center" gap="md" p="md" bg="dark.7" style={{ zIndex: 1000 }}>
       <ActionIcon onClick={togglePlayback} size="lg" ref={playButtonRef}>
         {isPlaying ? <Square /> : <Play />}
       </ActionIcon>
@@ -57,7 +57,7 @@ export const TransportPanel = memo(() => {
       <Text ff="monospace" size="xl" ref={timeRef}>
         {formatTime(0)}
       </Text>
-    </Flex>
+    </Group>
   );
 });
 

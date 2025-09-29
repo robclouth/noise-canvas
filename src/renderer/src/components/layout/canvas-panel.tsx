@@ -1,5 +1,5 @@
 import { useStore } from "@/store";
-import { Flex, ScrollArea } from "@mantine/core";
+import { Stack } from "@mantine/core";
 import { memo } from "react";
 import { FileView } from "../file-view";
 
@@ -9,13 +9,11 @@ export const CanvasPanel = memo(() => {
   console.log("openFilePaths", openFilePaths);
 
   return (
-    <Flex direction="column" flex={1} pos="relative" bg="dark.9">
-      <ScrollArea flex={1} pos="relative">
-        {openFilePaths.map((filePath) => (
-          <FileView key={filePath} filePath={filePath} />
-        ))}
-      </ScrollArea>
-    </Flex>
+    <Stack pos="relative" gap={0}>
+      {openFilePaths.map((filePath) => (
+        <FileView key={filePath} filePath={filePath} />
+      ))}
+    </Stack>
   );
 });
 

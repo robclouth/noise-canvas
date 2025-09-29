@@ -1,17 +1,29 @@
 import { BrushPanel } from "@/components/layout/brush-panel";
-import { Flex } from "@mantine/core";
+import { Group, ScrollArea, Stack } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { Notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
-import { Canvas } from "@react-three/fiber";
-import { useCallback, useEffect } from "react";
+import { Canvas, RootState, useThree } from "@react-three/fiber";
+import { useCallback, useEffect, useRef } from "react";
 import { destroy, init } from "./api";
 import { togglePlayback } from "./audio-manager";
 import { CanvasPanel } from "./components/layout/canvas-panel";
 import { ControlsPanel } from "./components/layout/controls-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
 
+type Invalidator = RootState["invalidate"];
+
+const CanvasInvalidator = ({ onReady }: { onReady: (invalidate: Invalidator) => void }) => {
+  const invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    onReady(invalidate);
+  }, [invalidate, onReady]);
+  return null;
+};
+
 function App(): React.JSX.Element {
+  const invalidateRef = useRef<Invalidator | null>(null);
+
   useEffect(() => {
     init();
     return () => {
@@ -33,22 +45,29 @@ function App(): React.JSX.Element {
   useWindowEvent("keydown", handleKeyDown);
 
   return (
-    <Flex h="100vh" w="100vw" bg="dark.8" c="gray.2">
-      <BrushPanel />
-      <Flex direction="column" flex={1}>
-        <CanvasPanel />
-        <TransportPanel />
-      </Flex>
-      <ControlsPanel />
-      <Notifications />
+    <Group h="100vh" w="100vw" wrap="nowrap" gap={0}>
       <Canvas
         style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}
         eventSource={document.getElementById("root")!}
         frameloop="demand"
       >
         <View.Port />
+        <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
       </Canvas>
-    </Flex>
+      <ScrollArea w={300} miw={300} h="100%" onScrollPositionChange={() => invalidateRef.current?.()}>
+        <BrushPanel />
+      </ScrollArea>
+      <Stack flex={1} h="100%" gap={0}>
+        <ScrollArea flex={1} w="100%" onScrollPositionChange={() => invalidateRef.current?.()}>
+          <CanvasPanel />
+        </ScrollArea>
+        <TransportPanel />
+      </Stack>
+      <ScrollArea w={300} miw={300} h="100%" onScrollPositionChange={() => invalidateRef.current?.()}>
+        <ControlsPanel />
+      </ScrollArea>
+      <Notifications />
+    </Group>
   );
 }
 

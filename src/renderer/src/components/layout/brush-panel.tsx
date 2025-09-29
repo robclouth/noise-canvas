@@ -16,7 +16,7 @@ export function BrushPanel() {
   const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid.value);
 
   return (
-    <Stack w={300} miw={300} p="xs">
+    <Stack p="xs">
       <Section label="Size">
         <ParameterControl paramKey="brushWidthBeats" disabled={brushSizeLockedToGrid} />
         <ParameterControl paramKey="brushHeightSemis" disabled={brushSizeLockedToGrid} />

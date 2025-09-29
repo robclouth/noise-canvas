@@ -19,7 +19,7 @@ export function ControlsPanel() {
   }, [brushSizeLockedToGrid, gridSize, gridSizeY, setBrushWidth, setBrushHeight]);
 
   return (
-    <Stack w={300} miw={300} p="xs">
+    <Stack h="100%" w="100%" p="xs">
       <Section label="Analysis">
         <ParameterControl paramKey="bandsPerOctave" />
       </Section>

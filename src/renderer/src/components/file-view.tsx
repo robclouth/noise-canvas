@@ -203,7 +203,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
         onMouseDown={handleCanvasMouseDown}
         onMouseUp={handleCanvasMouseUp}
       >
-        <View style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}>
+        <View style={{ width: "100%", height: "100%", zIndex: 1 }}>
           <FileRenderer filePath={filePath} ref={refCallback} />
         </View>
       </Box>
