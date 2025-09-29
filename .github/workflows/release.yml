@@ -1,0 +1,85 @@
+name: Build and Release
+
+# This workflow runs on pushes to tags that look like a version number (e.g., v1.0.0, v1.2.3)
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  # Define a build matrix to run the build on Windows, macOS, and Linux
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20 # Use a recent LTS version of Node.js
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build application
+        # Use the correct build script based on the operating system
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            npm run build:win
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            npm run build:mac
+          else
+            npm run build:linux
+          fi
+        env:
+          # This is required for electron-builder on macOS and Linux
+          # It prevents it from trying to sign the app
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-build
+          # electron-builder's default output directory is 'dist'
+          # It might be 'release/build' depending on your config.
+          # Check your electron-builder config if this path is incorrect.
+          path: dist/
+
+  # This job runs after all 'build' jobs have successfully completed
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    # This permission is required to create a GitHub Release and upload assets
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # The path where artifacts will be downloaded
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # The release will be created from the tag that triggered the workflow
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          # 'true' creates a draft release, 'false' publishes it immediately
+          draft: false
+          # 'false' will not mark it as a pre-release
+          prerelease: false
+          # Upload all files from the artifacts directory to the release
+          files: |
+            artifacts/**/*
