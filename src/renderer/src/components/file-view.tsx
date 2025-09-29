@@ -92,7 +92,7 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
             e.stopPropagation();
             setSourceFilePath(filePath);
           }}
-          color={isSource ? "orange" : "gray"}
+          color={isSource ? "orange" : "dark.5"}
         >
           Source
         </Button>
