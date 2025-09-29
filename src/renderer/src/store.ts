@@ -240,7 +240,7 @@ export const useStore = create<State>()(
             value: 0,
             values: [
               ...BEAT_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
-              { label: "0", value: 0 },
+              { label: "0 beats", value: 0 },
               ...BEAT_VALUES,
             ],
             modulatorParamKey: "sourceOffsetBeatsMod",
@@ -254,7 +254,7 @@ export const useStore = create<State>()(
             value: 0.0,
             values: [
               ...PITCH_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
-              { label: "0", value: 0 },
+              { label: "0 semis", value: 0 },
               ...PITCH_VALUES,
             ],
             modulatorParamKey: "sourceOffsetSemisMod",
@@ -437,22 +437,22 @@ export const useStore = create<State>()(
           },
           modulatorPatternRateBeats: {
             name: "Modulator Rate Beats",
-            label: "Beats",
+            label: "Rate H",
             description: "The rate of the modulator pattern in beats.",
             value: 1,
             values: [
-              { value: 0, label: "0" },
+              { value: 0, label: "0 beats" },
               ...BEAT_VALUES.map((value) => ({ value: value.value, label: value.label })),
             ],
             ...createSetters("modulatorPatternRateBeats", 1),
           },
           modulatorPatternRateSemis: {
             name: "Modulator Rate Semis",
-            label: "Semis",
+            label: "Rate V",
             description: "The rate of the modulator pattern in semitones.",
             value: 0,
             values: [
-              { value: 0, label: "0" },
+              { value: 0, label: "0 semis" },
               ...PITCH_VALUES.map((value) => ({ value: value.value, label: value.label })),
             ],
             ...createSetters("modulatorPatternRateSemis", 0),
@@ -477,7 +477,7 @@ export const useStore = create<State>()(
           },
           modulatorRotation: {
             name: "Modulator Rotation",
-            label: "Rot",
+            label: "Rotation",
             description: "The rotation of the modulator pattern.",
             value: 0,
             min: 0,
@@ -529,7 +529,7 @@ export const useStore = create<State>()(
             value: 0,
             values: [
               ...BEAT_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
-              { label: "0", value: 0 },
+              { label: "0 beats", value: 0 },
               ...BEAT_VALUES,
             ],
             modulatorParamKey: "transformShiftBeatsMod",
@@ -543,7 +543,7 @@ export const useStore = create<State>()(
             value: 0.0,
             values: [
               ...PITCH_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
-              { label: "0", value: 0 },
+              { label: "0 semis", value: 0 },
               ...PITCH_VALUES,
             ],
             modulatorParamKey: "transformShiftSemisMod",
