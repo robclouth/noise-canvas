@@ -1,69 +1,44 @@
-import { openFiles, State, useStore } from "@/store";
+import { State, useStore } from "@/store";
 import { shaderMaterial } from "@react-three/drei";
+import { OpenFile } from "@renderer/types";
 import { ShaderMaterial, Vector2 } from "three";
+import blurBrushFrag from "../glsl/blur-brush.frag";
+import passThroughVert from "../glsl/pass-through.vert";
 import { BaseBrush } from "./base-brush";
-import { brushMain, common, CommonUniforms, defaultValues, unitsToUv, vertexShader } from "./common";
+import { CommonUniforms, defaultValues, unitsToUv } from "./common";
 
-const blurShader = (direction: "x" | "y") => /*glsl*/ `
-  uniform vec2 blurSizeUv;
-
-  ${common}
-  
-  vec4 applyBrushStroke(vec4 sourceTexel, Coords coords) {
-    // The spectrogram has a multi-resolution time representation. To achieve a uniform
-    // blur in terms of musical time, we must scale the blur's UV-space radius based
-    // on the time resolution of the current frequency band.
-    float bandIndex = floor((1.0 - coords.dest.y) * sourceBandCount);
-    vec2 metaUv = vec2((bandIndex + 0.5) / sourceBandCount, 0.5);
-    vec3 metaData = texture2D(sourceMetadataTex, metaUv).rgb;
-    float bandScaleExp = metaData.b; // This exponent encodes the time resolution.
-
-    // Scale the blur size. A larger bandScaleExp means lower time resolution (fewer
-    // coefficients per second), so we need a larger UV step to cover the same duration.
-    vec2 bandCorrectedBlurSizeUv = blurSizeUv;
-    bandCorrectedBlurSizeUv.x *= exp2(bandScaleExp) * 0.01;
-
-    vec4 blurredTexel = vec4(0.0);
-    float totalWeight = 0.0;
-    
-    const int kernelRadius = 8;
-
-    for (int i = -kernelRadius; i <= kernelRadius; i++) {
-        vec2 offset = ${direction === "x" ? "vec2(float(i), 0.0)" : "vec2(0.0, float(i))"} * bandCorrectedBlurSizeUv / float(kernelRadius);
-        vec2 sampleUv = coords.source + offset;
-        
-        if (isInBrush(sampleUv + offsetUv)) {
-            blurredTexel += sampleSpectrogramPointInterpolated(sampleUv);
-            totalWeight += 1.0;
-        }
-    }
-
-    if (totalWeight > 0.0) {
-      return blurredTexel / totalWeight;
-    } else {
-      return sourceTexel;
-    }
-  }
-
-  ${brushMain}
-`;
-
-const BlurMaterialX = shaderMaterial(
+const BlurMaterial = shaderMaterial(
   {
     ...defaultValues,
-    blurSizeUv: new Vector2(0.01, 0.01),
+    blurSizeX: {
+      value: 0.01,
+      minValue: 0,
+      maxValue: 100,
+      modulationAmount: 0,
+    },
+    blurSizeY: {
+      value: 0.01,
+      minValue: 0,
+      maxValue: 100,
+      modulationAmount: 0,
+    },
+    blurNoiseX: {
+      value: 0.01,
+      minValue: 0,
+      maxValue: 100,
+      modulationAmount: 0,
+    },
+    blurNoiseY: {
+      value: 0.01,
+      minValue: 0,
+      maxValue: 100,
+      modulationAmount: 0,
+    },
+    blurDirection: new Vector2(1, 0),
+    bleed: true,
   },
-  vertexShader,
-  blurShader("x"),
-);
-
-const BlurMaterialY = shaderMaterial(
-  {
-    ...defaultValues,
-    blurSizeUv: new Vector2(0.01, 0.01),
-  },
-  vertexShader,
-  blurShader("y"),
+  passThroughVert,
+  blurBrushFrag,
 );
 
 class BlurBrush extends BaseBrush {
@@ -72,30 +47,75 @@ class BlurBrush extends BaseBrush {
 
   constructor() {
     super();
-    this.materials = [new BlurMaterialX(), new BlurMaterialY()];
-    this.parameters = ["blurTime", "blurPitch"];
+    this.materials = [new BlurMaterial(), new BlurMaterial()];
+    this.materials[1].uniforms.blurDirection.value = new Vector2(0, 1);
+    this.parameters = ["blurAmountTime", "blurAmountPitch", "blurNoiseTime", "blurNoisePitch", "blurBleed"];
   }
 
-  updateUniforms(props: CommonUniforms, passIndex: number): void {
-    super.updateUniforms(props, passIndex);
+  updateBrushUniforms(props: { commonUniforms: CommonUniforms; passIndex: number; file: OpenFile }): void {
+    this.updateCommonUniforms(props);
 
-    const { activeFilePath, blurTime, blurPitch, bandsPerOctave } = useStore.getState();
-    const activeFile = activeFilePath ? openFiles[activeFilePath] : null;
-    if (!activeFile) return;
+    const { file, passIndex } = props;
 
-    const { spectrogramData } = activeFile;
+    const material = this.materials[passIndex];
+    if (!material) return;
 
-    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+    const {
+      blurAmountTime,
+      blurAmountPitch,
+      blurAmountTimeMod,
+      blurAmountPitchMod,
+      blurNoiseTime,
+      blurNoisePitch,
+      blurNoiseTimeMod,
+      blurNoisePitchMod,
+      blurBleed,
+    } = useStore.getState();
+    const { spectrogramData } = file;
+
     const blurSizeUv = unitsToUv(
-      blurTime.value,
-      blurPitch.value / 100, // convert cents to semitones
-      props.bpm,
-      totalDuration,
-      bandsPerOctave.value,
+      blurAmountTime.value / 100,
+      (blurAmountPitch.value / 100) * 12,
+      props.commonUniforms.bpm,
+      spectrogramData.numFrames / spectrogramData.sampleRate,
+      spectrogramData.bandsPerOctave,
       spectrogramData.numBands,
     );
 
-    this.materials[passIndex].uniforms.blurSizeUv.value.copy(blurSizeUv);
+    const blurNoiseUv = unitsToUv(
+      blurNoiseTime.value / 100,
+      (blurNoisePitch.value / 100) * 12,
+      props.commonUniforms.bpm,
+      spectrogramData.numFrames / spectrogramData.sampleRate,
+      spectrogramData.bandsPerOctave,
+      spectrogramData.numBands,
+    );
+
+    material.uniforms.blurSizeX.value = {
+      value: blurSizeUv.x,
+      minValue: 0,
+      maxValue: 0.1,
+      modulationAmount: blurAmountTimeMod.value / 100,
+    };
+    material.uniforms.blurSizeY.value = {
+      value: blurSizeUv.y,
+      minValue: 0,
+      maxValue: 0.1,
+      modulationAmount: blurAmountPitchMod.value / 100,
+    };
+    material.uniforms.blurNoiseX.value = {
+      value: blurNoiseUv.x / 10,
+      minValue: 0,
+      maxValue: 0.1,
+      modulationAmount: blurNoiseTimeMod.value / 100,
+    };
+    material.uniforms.blurNoiseY.value = {
+      value: blurNoiseUv.y / 10,
+      minValue: 0,
+      maxValue: 0.1,
+      modulationAmount: blurNoisePitchMod.value / 100,
+    };
+    material.uniforms.bleed.value = blurBleed.value;
   }
 }
 

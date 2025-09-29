@@ -1,28 +1,18 @@
-import { Group, Switch, Text } from "@mantine/core";
-import { Tooltip } from "../tooltip";
+import { Group, Switch } from "@mantine/core";
+import { ReactNode } from "react";
 
 export const SwitchControl = ({
-  label,
-  description,
+  labelComponent,
   value,
   setValue,
-  resetValue,
-  labelWidth,
 }: {
-  label: string;
-  description?: string;
+  labelComponent: ReactNode;
   value: boolean;
   setValue: (value: boolean) => void;
-  resetValue: () => void;
-  labelWidth?: number;
 }) => {
   return (
     <Group gap="sm" wrap="nowrap">
-      <Tooltip label={description} disabled={!description}>
-        <Text size="xs" w={labelWidth} lineClamp={1} truncate="end" onDoubleClick={() => resetValue()}>
-          {label}
-        </Text>
-      </Tooltip>
+      {labelComponent}
       <Switch variant="unstyled" checked={value} onChange={(e) => setValue(e.currentTarget.checked)} />
     </Group>
   );

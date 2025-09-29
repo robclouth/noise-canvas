@@ -1,17 +1,14 @@
-import { Group, Select, Text } from "@mantine/core";
-import { Tooltip } from "../tooltip";
+import { Group, Select } from "@mantine/core";
+import { ReactNode } from "react";
 
 export const SelectControl = <T,>({
-  label,
-  description,
+  labelComponent,
+
   options,
   value,
   setValue,
-  resetValue,
-  labelWidth,
 }: {
-  label: string;
-  description?: string;
+  labelComponent: ReactNode;
   value: T;
   options: readonly { value: T; label: string }[];
   setValue: (value: T) => void;
@@ -29,11 +26,7 @@ export const SelectControl = <T,>({
 
   return (
     <Group gap={"xs"} wrap="nowrap" h={25}>
-      <Tooltip label={description} disabled={!description}>
-        <Text size="xs" w={labelWidth} lineClamp={1} truncate="end" onDoubleClick={() => resetValue()}>
-          {label}
-        </Text>
-      </Tooltip>
+      {labelComponent}
       <Select
         size="xs"
         variant="unstyled"

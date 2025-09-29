@@ -361,14 +361,14 @@ export const FileRenderer = memo(
         // The input for the very first pass is always the original source data.
         let currentReadFbo = sourceFbo;
 
-        for (let j = 0; j < state.brushIterations.value; j++) {
-          const uniformsForThisIteration = j === 0 ? commonUniforms : iterativeUniforms;
+        for (let i = 0; i < state.brushIterations.value; i++) {
+          for (let p = 0; p < numPasses; p++) {
+            const uniformsForThisIteration = p === 0 && i === 0 ? { ...commonUniforms } : { ...iterativeUniforms };
 
-          for (let i = 0; i < numPasses; i++) {
-            const material = brush.materials[i];
+            const material = brush.materials[p];
             fboMesh.material = material;
 
-            const isFinalPass = j === state.brushIterations.value - 1 && i === numPasses - 1;
+            const isFinalPass = i === state.brushIterations.value - 1 && p === numPasses - 1;
             const currentWriteFbo = isFinalPass ? destinationFbo : tempFboA;
 
             const inputTexture = currentReadFbo.texture;
@@ -378,9 +378,9 @@ export const FileRenderer = memo(
 
             // The "destination" (for blending) is the original target on the first pass.
             // For all subsequent iterative passes, the destination is the source (self-modification).
-            uniformsForThisIteration.destSpectrogramTex = j === 0 ? commonUniforms.destSpectrogramTex : inputTexture;
+            uniformsForThisIteration.destSpectrogramTex = i === 0 ? commonUniforms.destSpectrogramTex : inputTexture;
 
-            brush.updateBrushUniforms({ commonUniforms: uniformsForThisIteration, passIndex: i, file: sourceFile });
+            brush.updateBrushUniforms({ commonUniforms: uniformsForThisIteration, passIndex: p, file: sourceFile });
 
             gl.setRenderTarget(currentWriteFbo);
             gl.render(fboScene, camera);

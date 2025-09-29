@@ -91,8 +91,15 @@ export type State = {
   transformEdgeMode: OptionsParameter<number>;
 
   // Blur Brush
-  blurTime: ContinuousNumberParameter; // in beats
-  blurPitch: ContinuousNumberParameter; // in cents
+  blurAmountTime: ContinuousNumberParameter;
+  blurAmountTimeMod: ContinuousNumberParameter;
+  blurAmountPitch: ContinuousNumberParameter;
+  blurAmountPitchMod: ContinuousNumberParameter;
+  blurNoiseTime: ContinuousNumberParameter;
+  blurNoiseTimeMod: ContinuousNumberParameter;
+  blurNoisePitch: ContinuousNumberParameter;
+  blurNoisePitchMod: ContinuousNumberParameter;
+  blurBleed: BooleanParameter;
 
   // Audio Playback
   isPlaying: boolean;
@@ -277,6 +284,7 @@ export const useStore = create<State>()(
               { value: "gain", label: "Gain" },
               { value: "restore", label: "Restore" },
               { value: "transform", label: "Transform" },
+              { value: "blur", label: "Smooth" },
             ],
             ...createSetters("brushType", "gain"),
           },
@@ -500,27 +508,64 @@ export const useStore = create<State>()(
             ...createSetters("gainDb", 0.0),
           },
           gainDbMod: createModulator({ name: "Gain Mod Amount", key: "gainDbMod" }),
-          blurTime: {
-            name: "Blur Time",
-            label: "Time",
+          blurAmountTime: {
+            name: "Blur Amount Time",
+            label: "Blur H",
             description: "The amount of blur to apply over time.",
-            value: 1 / 64,
+            value: 0,
             min: 0,
-            max: 1,
-            step: 0.001,
-            unit: "beats",
-            ...createSetters("blurTime", 1 / 64),
-          },
-          blurPitch: {
-            name: "Blur Pitch",
-            label: "Pitch",
-            description: "The amount of blur to apply over pitch.",
-            value: 100,
-            min: 0,
-            max: 1200,
+            max: 100,
             step: 1,
-            unit: "cents",
-            ...createSetters("blurPitch", 100),
+            unit: "%",
+            modulatorParamKey: "blurAmountTimeMod",
+            ...createSetters("blurAmountTime", 0),
+          },
+          blurAmountTimeMod: createModulator({ name: "Blur Amount Time Mod Amount", key: "blurAmountTimeMod" }),
+          blurAmountPitch: {
+            name: "Blur Amount Pitch",
+            label: "Blur V",
+            description: "The amount of blur to apply over pitch.",
+            value: 0,
+            min: 0,
+            max: 100,
+            step: 1,
+            unit: "%",
+            modulatorParamKey: "blurAmountPitchMod",
+            ...createSetters("blurAmountPitch", 0),
+          },
+          blurAmountPitchMod: createModulator({ name: "Blur Amount Pitch Mod Amount", key: "blurAmountPitchMod" }),
+          blurNoiseTime: {
+            name: "Blur Noise Time",
+            label: "Noise H",
+            description: "The amount of noise to apply over time.",
+            value: 0,
+            min: 0,
+            max: 100,
+            step: 1,
+            unit: "%",
+            modulatorParamKey: "blurNoiseTimeMod",
+            ...createSetters("blurNoiseTime", 0),
+          },
+          blurNoiseTimeMod: createModulator({ name: "Blur Noise Time Mod Amount", key: "blurNoiseTimeMod" }),
+          blurNoisePitch: {
+            name: "Blur Noise Pitch",
+            label: "Noise V",
+            description: "The amount of noise to apply over pitch.",
+            value: 0,
+            min: 0,
+            max: 100,
+            step: 1,
+            unit: "%",
+            modulatorParamKey: "blurNoisePitchMod",
+            ...createSetters("blurNoisePitch", 0),
+          },
+          blurNoisePitchMod: createModulator({ name: "Blur Noise Pitch Mod Amount", key: "blurNoisePitchMod" }),
+          blurBleed: {
+            name: "Blur Bleed",
+            label: "Bleed",
+            description: "Allows the blur to sample from outside the brush bounds making a more smoothing.",
+            value: true,
+            ...createSetters("blurBleed", true),
           },
           transformShiftBeats: {
             name: "Shift Beats",

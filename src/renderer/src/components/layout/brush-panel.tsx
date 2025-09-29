@@ -1,5 +1,6 @@
 import { useStore } from "@/store";
 import { Stack } from "@mantine/core";
+import { BlurBrush } from "../brush-views/blur-brush";
 import { GainBrush } from "../brush-views/gain-brush";
 import { TransformBrush } from "../brush-views/transform-brush";
 import { ParameterControl } from "../controls/parameter-control";
@@ -9,6 +10,7 @@ import { Section } from "../section";
 const BRUSH_VIEWS = {
   gain: <GainBrush />,
   transform: <TransformBrush />,
+  blur: <BlurBrush />,
 };
 
 export function BrushPanel() {
