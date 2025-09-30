@@ -55,6 +55,8 @@ export const PITCH_VALUES = [
   { value: 96, label: "96 semis" },
 ];
 
+export const PITCH_VALUES_NO_FRACTIONS = PITCH_VALUES.filter((v) => v.value >= 1);
+
 export const MULTIPLIER_VALUES = [
   { value: 1 / 128, label: "x 1/128" },
   { value: 1 / 64, label: "x 1/64" },

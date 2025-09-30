@@ -3,6 +3,7 @@ import { Stack } from "@mantine/core";
 import { BlurBrush } from "../brush-views/blur-brush";
 import { GainBrush } from "../brush-views/gain-brush";
 import { SharpenBrush } from "../brush-views/sharpen-brush";
+import { SynthesizeBrush } from "../brush-views/synthesize-brush";
 import { TransformBrush } from "../brush-views/transform-brush";
 import { ParameterControl } from "../controls/parameter-control";
 import { ModulatorView } from "../modulator-view";
@@ -13,6 +14,7 @@ const BRUSH_VIEWS = {
   transform: <TransformBrush />,
   blur: <BlurBrush />,
   sharpen: <SharpenBrush />,
+  synthesize: <SynthesizeBrush />,
 };
 
 export function BrushPanel() {

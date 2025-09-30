@@ -13,6 +13,7 @@ import {
   MULTIPLIER_VALUES,
   PATTERN_SHAPES,
   PITCH_VALUES,
+  PITCH_VALUES_NO_FRACTIONS,
 } from "./lib/constants";
 import {
   BooleanParameter,
@@ -89,6 +90,9 @@ export type State = {
   transformRotation: ContinuousNumberParameter;
   transformRotationMod: ContinuousNumberParameter;
   transformEdgeMode: OptionsParameter<number>;
+
+  // Synthesize Brush
+  synthesizeBrushType: OptionsParameter<string>;
 
   // Blur Brush
   blurAmountTime: ContinuousNumberParameter;
@@ -291,6 +295,7 @@ export const useStore = create<State>()(
               { value: "restore", label: "Restore" },
               { value: "transform", label: "Transform" },
               { value: "blur", label: "Smooth" },
+              { value: "synthesize", label: "Synthesize" },
               // { value: "sharpen", label: "Sharpen" },
             ],
             ...createSetters("brushType", "gain"),
@@ -311,7 +316,7 @@ export const useStore = create<State>()(
             label: "Height",
             description: "The height of the brush in semitones.",
             value: 12,
-            values: [...PITCH_VALUES, { value: 0, label: "Full" }].map((value) => ({
+            values: [...PITCH_VALUES_NO_FRACTIONS, { value: 0, label: "Full" }].map((value) => ({
               value: value.value,
               label: value.label,
             })),
@@ -674,6 +679,17 @@ export const useStore = create<State>()(
             value: 1,
             options: EDGE_MODE,
             ...createSetters("transformEdgeMode", 1),
+          },
+          synthesizeBrushType: {
+            name: "Synthesize Type",
+            label: "Type",
+            description: "The type of synthesis to use.",
+            value: "noise",
+            options: [
+              { value: "noise", label: "Noise" },
+              { value: "sine", label: "Sine" },
+            ],
+            ...createSetters("synthesizeBrushType", "noise"),
           },
           openFilePaths: [],
           openFile: (file) =>

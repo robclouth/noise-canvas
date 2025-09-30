@@ -260,7 +260,6 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv) {
     float timeIndex_freq = floor(scaledTime_freq);
     float timeFraction_freq = fract(scaledTime_freq);
 
-    // **FIX**: Robust boundary check for both bands. This prevents black bands.
     if (timeIndex_base + 1.0 >= bandLength_base || timeIndex_freq + 1.0 >= bandLength_freq) {
         return getSourceSample(sourceUv); // Fallback at time edges
     }
