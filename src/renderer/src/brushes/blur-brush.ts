@@ -104,13 +104,13 @@ class BlurBrush extends BaseBrush {
       modulationAmount: blurAmountPitchMod.value / 100,
     };
     material.uniforms.blurNoiseX.value = {
-      value: blurNoiseUv.x / 10,
+      value: blurNoiseUv.x / 5,
       minValue: 0,
       maxValue: 0.1,
       modulationAmount: blurNoiseTimeMod.value / 100,
     };
     material.uniforms.blurNoiseY.value = {
-      value: blurNoiseUv.y / 10,
+      value: blurNoiseUv.y / 5,
       minValue: 0,
       maxValue: 0.1,
       modulationAmount: blurNoisePitchMod.value / 100,
