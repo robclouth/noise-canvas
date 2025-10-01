@@ -111,6 +111,14 @@ export type State = {
   sharpenAmountPitch: ContinuousNumberParameter;
   sharpenAmountPitchMod: ContinuousNumberParameter;
 
+  // Harmonics Brush
+  harmonicsPower: ContinuousNumberParameter;
+  harmonicsPowerMod: ContinuousNumberParameter;
+  harmonicsFalloff: ContinuousNumberParameter;
+  harmonicsFalloffMod: ContinuousNumberParameter;
+  harmonicsOddEven: ContinuousNumberParameter;
+  harmonicsOddEvenMod: ContinuousNumberParameter;
+
   // Audio Playback
   isPlaying: boolean;
   setIsPlaying: (isPlaying: boolean) => void;
@@ -294,6 +302,7 @@ export const useStore = create<State>()(
               { value: "gain", label: "Gain" },
               { value: "restore", label: "Restore" },
               { value: "transform", label: "Transform" },
+              { value: "harmonics", label: "Harmonics" },
               { value: "blur", label: "Smooth" },
               { value: "synthesize", label: "Synthesize" },
               // { value: "sharpen", label: "Sharpen" },
@@ -605,6 +614,44 @@ export const useStore = create<State>()(
             ...createSetters("sharpenAmountPitch", 0),
           },
           sharpenAmountPitchMod: createModulator({ name: "Sharpen Pitch Mod Amount", key: "sharpenAmountPitchMod" }),
+          harmonicsPower: {
+            name: "Harmonic Power",
+            label: "Power",
+            description: "Controls the spacing of harmonics.",
+            value: 1.0,
+            min: 0.1,
+            max: 4.0,
+            step: 0.01,
+            modulatorParamKey: "harmonicsPowerMod",
+            ...createSetters("harmonicsPower", 1.0),
+          },
+          harmonicsPowerMod: createModulator({ name: "Harmonic Power Mod Amount", key: "harmonicsPowerMod" }),
+          harmonicsFalloff: {
+            name: "Harmonic Falloff",
+            label: "Falloff",
+            description: "Controls the amplitude falloff of harmonics.",
+            value: 10.0,
+            min: -100,
+            max: 100,
+            step: 1,
+            unit: "%",
+            modulatorParamKey: "harmonicsFalloffMod",
+            ...createSetters("harmonicsFalloff", 10.0),
+          },
+          harmonicsFalloffMod: createModulator({ name: "Harmonic Falloff Mod Amount", key: "harmonicsFalloffMod" }),
+          harmonicsOddEven: {
+            name: "Odd/Even Harmonics",
+            label: "Odd/Even",
+            description: "Controls the balance of odd and even harmonics.",
+            value: 0,
+            min: -100,
+            max: 100,
+            step: 1,
+            unit: "%",
+            modulatorParamKey: "harmonicsOddEvenMod",
+            ...createSetters("harmonicsOddEven", 0),
+          },
+          harmonicsOddEvenMod: createModulator({ name: "Odd/Even Harmonics Mod Amount", key: "harmonicsOddEvenMod" }),
           transformShiftBeats: {
             name: "Shift Beats",
             label: "Shift H",

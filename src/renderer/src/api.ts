@@ -15,6 +15,8 @@ export function init() {
       openFile(
         "/Users/rob/Splice/sounds/packs/Indian Vocal Pack (Mitika Kanwar)/Indian_Vocal_Pack/Loops/Resampled/JMK_IVP_124_indian_vocal_female_hook_humming_dance_resampled_pitched_A#m.wav",
       );
+      // openFile("/Users/rob/Desktop/tone2.wav");
+      // openFile("/Users/rob/Desktop/tone2-sat.wav");
     }
   }
 
