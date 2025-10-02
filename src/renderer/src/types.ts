@@ -1,7 +1,6 @@
 import { RefObject } from "react";
 import { Vector2 } from "three";
 import { FileRendererHandle } from "./components/file-renderer";
-import { State } from "./store";
 
 // This interface matches the flattened payload received from the Electron main process
 export interface AnalysisPayload {
@@ -60,13 +59,20 @@ export interface SynthesisPayload {
   };
 }
 
+export type ParameterUniform = {
+  value: number;
+  minValue: number;
+  maxValue: number;
+  modulationAmounts: number[];
+};
+
 export type Parameter<T> = {
   name: string;
   label: string;
   description: string;
   unit?: string;
   value: T;
-  modulatorParamKey?: keyof State;
+  modulators?: ContinuousNumberParameter[];
   setValue: (value: T) => void;
   resetValue: () => void;
 };

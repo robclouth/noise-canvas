@@ -1,6 +1,7 @@
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, shell } from "electron";
 import { join } from "path";
+import { Vector2 } from "three";
 import icon from "../../resources/icon.png?asset";
 import { registerAudioIpcHandlers, setupAudio } from "./lib/audio";
 import { createMenu } from "./lib/menu";
@@ -112,7 +113,13 @@ app.whenReady().then(() => {
   createWindow();
 
   if (mainWindow) {
-    registerAudioIpcHandlers(mainWindow);
+    registerAudioIpcHandlers(mainWindow, (result) => {
+      // The result from the worker is not a THREE.Vector2, so we need to convert it.
+      if (result?.packedTextureSize) {
+        result.packedTextureSize = new Vector2(result.packedTextureSize.x, result.packedTextureSize.y);
+      }
+      return result;
+    });
 
     mainWindow.webContents.on("did-finish-load", () => {
       if (pendingPath) {

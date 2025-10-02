@@ -2,14 +2,17 @@ import { openFiles, useStore } from "@/store";
 import { useFBO } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { runSynthesis } from "@renderer/audio-manager";
+import { CommonUniforms, defaultValues } from "@renderer/brushes/base-brush";
 import { debounce } from "lodash-es";
 import { forwardRef, memo, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import { ShaderMaterial, UniformsUtils } from "three";
 import { brushes } from "../brushes";
-import { CommonUniforms, unitsToUv } from "../brushes/common";
+import displayFrag from "../glsl/display.frag";
+import passThroughVert from "../glsl/pass-through.vert";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
+import { unitsToUv } from "../lib/utils";
 import { copyMaterial } from "./copy-material";
-import { DisplayMaterial } from "./display-material";
 
 /**
  * Props for the FileRenderer component.
@@ -91,7 +94,23 @@ export const FileRenderer = memo(
     }, [filePath, invalidate]);
 
     // Materials and scene objects for rendering
-    const displayMaterial = useMemo(() => new DisplayMaterial(), []);
+    const displayMaterial = useMemo(
+      () =>
+        new ShaderMaterial({
+          uniforms: {
+            ...UniformsUtils.clone(defaultValues),
+            minDb: { value: -70.0 },
+            maxDb: { value: 0.0 },
+            bpm: { value: 120.0 },
+            gridSize: { value: 0.25 },
+            isSourceFile: { value: true },
+            isTargetFile: { value: true },
+          },
+          vertexShader: passThroughVert,
+          fragmentShader: displayFrag,
+        }),
+      [],
+    );
 
     const mesh = useRef<THREE.Mesh>(null!);
     const { scene: fboScene, mesh: fboMesh } = useMemo(() => {
@@ -258,75 +277,105 @@ export const FileRenderer = memo(
 
       // Set up common uniforms for the brush shaders
       const commonUniforms: CommonUniforms = {
-        sourceSpectrogramTex: textures.packed.texture,
-        sourceSpectrogramTextureSize: sourceFile.spectrogramData.packedTextureSize,
-        sourceInverseMapTex: textures.inverse,
-        sourceMetadataTex: textures.metadata,
-        sourceMinFreq: sourceFile.spectrogramData.minFreq,
-        sourceBandsPerOctave: sourceFile.spectrogramData.bandsPerOctave,
-        sourceFrameCount: sourceFile.spectrogramData.numFrames,
-        sourceBandCount: sourceFile.spectrogramData.numBands,
-        sourceChannelCount: sourceFile.spectrogramData.numChannels,
-        sourceSampleRate: sourceFile.spectrogramData.sampleRate,
-        destSpectrogramTex: currentReadFBO.texture,
-        destSpectrogramTextureSize: spectrogramData.packedTextureSize,
-        destInverseMapTex: inverseMapTex,
-        destMetadataTex: metadataTex,
-        destMinFreq: spectrogramData.minFreq,
-        destBandsPerOctave: spectrogramData.bandsPerOctave,
-        destFrameCount: spectrogramData.numFrames,
-        destBandCount: spectrogramData.numBands,
-        destChannelCount: spectrogramData.numChannels,
-        destSampleRate: spectrogramData.sampleRate,
-        originalSpectrogramTex: originalPackedDataTex,
-        viewZoomPower: state.zoomPower.value,
-        viewOffset: state.scroll.value,
-        brushCenterUv: mouseUv.current || new THREE.Vector2(-1, -1),
-        brushSizeUv,
-        featherX: state.brushFeatherTime.value / 100,
-        featherY: state.brushFeatherPitch.value / 100,
-        featherSlopeTime: state.brushFeatherSlopeTime.value / 100,
-        featherSlopePitch: state.brushFeatherSlopePitch.value / 100,
+        sourceSpectrogramTex: { value: textures.packed.texture },
+        sourceSpectrogramTextureSize: { value: sourceFile.spectrogramData.packedTextureSize },
+        sourceInverseMapTex: { value: textures.inverse },
+        sourceMetadataTex: { value: textures.metadata },
+        sourceMinFreq: { value: sourceFile.spectrogramData.minFreq },
+        sourceBandsPerOctave: { value: sourceFile.spectrogramData.bandsPerOctave },
+        sourceFrameCount: { value: sourceFile.spectrogramData.numFrames },
+        sourceBandCount: { value: sourceFile.spectrogramData.numBands },
+        sourceChannelCount: { value: sourceFile.spectrogramData.numChannels },
+        sourceSampleRate: { value: sourceFile.spectrogramData.sampleRate },
+        destSpectrogramTex: { value: currentReadFBO.texture },
+        destSpectrogramTextureSize: { value: spectrogramData.packedTextureSize },
+        destInverseMapTex: { value: inverseMapTex },
+        destMetadataTex: { value: metadataTex },
+        destMinFreq: { value: spectrogramData.minFreq },
+        destBandsPerOctave: { value: spectrogramData.bandsPerOctave },
+        destFrameCount: { value: spectrogramData.numFrames },
+        destBandCount: { value: spectrogramData.numBands },
+        destChannelCount: { value: spectrogramData.numChannels },
+        destSampleRate: { value: spectrogramData.sampleRate },
+        originalSpectrogramTex: { value: originalPackedDataTex },
+        viewZoomPower: { value: state.zoomPower.value },
+        viewOffset: { value: state.scroll.value },
+        brushCenterUv: { value: mouseUv.current || new THREE.Vector2(-1, -1) },
+        brushSizeUv: { value: brushSizeUv },
+        featherX: { value: state.brushFeatherTime.value / 100 },
+        featherY: { value: state.brushFeatherPitch.value / 100 },
+        featherSlopeTime: { value: state.brushFeatherSlopeTime.value / 100 },
+        featherSlopePitch: { value: state.brushFeatherSlopePitch.value / 100 },
         brushIntensity: {
-          value: state.brushIntensity.value / 100,
-          minValue: state.brushIntensity.min / 100,
-          maxValue: state.brushIntensity.max / 100,
-          modulationAmount: state.brushIntensityMod.value / 100,
+          value: {
+            value: state.brushIntensity.value / 100,
+            minValue: state.brushIntensity.min / 100,
+            maxValue: state.brushIntensity.max / 100,
+            modulationAmounts:
+              state.brushIntensity.modulators?.map((modulationAmount) => modulationAmount.value / 100) || [],
+          },
         },
         brushPan: {
-          value: state.brushPan.value / 100,
-          minValue: state.brushPan.min / 100,
-          maxValue: state.brushPan.max / 100,
-          modulationAmount: state.brushPanMod.value / 100,
+          value: {
+            value: state.brushPan.value / 100,
+            minValue: state.brushPan.min / 100,
+            maxValue: state.brushPan.max / 100,
+            modulationAmounts: state.brushPan.modulators?.map((modulationAmount) => modulationAmount.value / 100) || [],
+          },
         },
-        bpm,
+        bpm: { value: bpm },
         sourceOffsetX: {
-          value: sourceOffsetUv.x,
-          minValue: 0.0,
-          maxValue: 1.0,
-          modulationAmount: state.sourceOffsetBeatsMod.value / 100,
+          value: {
+            value: sourceOffsetUv.x,
+            minValue: 0.0,
+            maxValue: 1.0,
+            modulationAmounts:
+              state.sourceOffsetBeats.modulators?.map((modulationAmount) => modulationAmount.value / 100) || [],
+          },
         },
+
         sourceOffsetY: {
-          value: sourceOffsetUv.y,
-          minValue: 0.0,
-          maxValue: 1.0,
-          modulationAmount: state.sourceOffsetSemisMod.value / 100,
+          value: {
+            value: sourceOffsetUv.y,
+            minValue: 0.0,
+            maxValue: 1.0,
+            modulationAmounts:
+              state.sourceOffsetSemis.modulators?.map((modulationAmount) => modulationAmount.value / 100) || [],
+          },
         },
-        blendMode: state.blendMode.value,
-        modulatorMode: state.modulatorMode.value,
-        modulatorPatternShape: state.modulatorPatternShape.value,
-        modulatorPatternRate: unitsToUv(
-          state.modulatorPatternRateBeats.value,
-          state.modulatorPatternRateSemis.value,
-          bpm,
-          totalDuration,
-          spectrogramData.bandsPerOctave,
-          spectrogramData.numBands,
-        ),
-        modulatorPatternRadial: state.modulatorPatternRadial.value,
-        modulatorStrength: state.modulatorStrength.value / 100,
-        modulatorRotation: state.modulatorRotation.value,
-        gainLut: modulatorScaleLut || new THREE.Texture(),
+        blendMode: { value: state.blendMode.value },
+        modulators: {
+          value: state.modulators.map(
+            ({
+              modulatorMode,
+              modulatorPatternShape,
+              modulatorPatternRateBeats,
+              modulatorPatternRateSemis,
+              modulatorPatternRadial,
+              modulatorStrength,
+              modulatorRotation,
+            }) => {
+              const modulatorPatternRate = unitsToUv(
+                modulatorPatternRateBeats.value,
+                modulatorPatternRateSemis.value,
+                bpm,
+                totalDuration,
+                spectrogramData.bandsPerOctave,
+                spectrogramData.numBands,
+              );
+              return {
+                modulatorMode: modulatorMode.value,
+                modulatorPatternShape: modulatorPatternShape.value,
+                modulatorPatternRateX: modulatorPatternRate.x,
+                modulatorPatternRateY: modulatorPatternRate.y,
+                modulatorPatternRadial: modulatorPatternRadial.value,
+                modulatorStrength: modulatorStrength.value / 100,
+                modulatorRotation: modulatorRotation.value,
+              };
+            },
+          ),
+        },
+        gainLut: { value: modulatorScaleLut || new THREE.Texture() },
       };
 
       console.log("use frame");
@@ -374,11 +423,13 @@ export const FileRenderer = memo(
             const inputTexture = currentReadFbo.texture;
 
             // The "source" is always the result of the previous pass.
-            uniformsForThisIteration.sourceSpectrogramTex = inputTexture;
+            uniformsForThisIteration.sourceSpectrogramTex = { value: inputTexture };
 
             // The "destination" (for blending) is the original target on the first pass.
             // For all subsequent iterative passes, the destination is the source (self-modification).
-            uniformsForThisIteration.destSpectrogramTex = i === 0 ? commonUniforms.destSpectrogramTex : inputTexture;
+            uniformsForThisIteration.destSpectrogramTex = {
+              value: i === 0 ? commonUniforms.destSpectrogramTex.value : inputTexture,
+            };
 
             brush.updateBrushUniforms({ commonUniforms: uniformsForThisIteration, passIndex: p, file: sourceFile });
 
@@ -412,25 +463,25 @@ export const FileRenderer = memo(
 
       const displayUniforms = {
         ...commonUniforms,
-        sourceSpectrogramTex: displayMode.current === "committed" ? currentFBO.texture : nextFBO.texture,
-        sourceInverseMapTex: inverseMapTex,
-        sourceMetadataTex: metadataTex,
-        sourceMinFreq: spectrogramData.minFreq,
-        sourceBandsPerOctave: spectrogramData.bandsPerOctave,
-        sourceFrameCount: spectrogramData.numFrames,
-        sourceBandCount: spectrogramData.numBands,
-        sourceChannelCount: spectrogramData.numChannels,
-        sourceSampleRate: spectrogramData.sampleRate,
-        sourceSpectrogramTextureSize: spectrogramData.packedTextureSize,
-        gridSize: state.gridSizeBeats.value,
-        bpm,
-        isSourceFile: sourceFile?.filePath === filePath,
-        isTargetFile: state.activeFilePath === filePath,
+        sourceSpectrogramTex: { value: displayMode.current === "committed" ? currentFBO.texture : nextFBO.texture },
+        sourceInverseMapTex: { value: inverseMapTex },
+        sourceMetadataTex: { value: metadataTex },
+        sourceMinFreq: { value: spectrogramData.minFreq },
+        sourceBandsPerOctave: { value: spectrogramData.bandsPerOctave },
+        sourceFrameCount: { value: spectrogramData.numFrames },
+        sourceBandCount: { value: spectrogramData.numBands },
+        sourceChannelCount: { value: spectrogramData.numChannels },
+        sourceSampleRate: { value: spectrogramData.sampleRate },
+        sourceSpectrogramTextureSize: { value: spectrogramData.packedTextureSize },
+        gridSize: { value: state.gridSizeBeats.value },
+        bpm: { value: bpm },
+        isSourceFile: { value: sourceFile?.filePath === filePath },
+        isTargetFile: { value: state.activeFilePath === filePath },
       };
 
-      for (const [key, value] of Object.entries(displayUniforms)) {
-        if (displayMaterial.uniforms[key]) {
-          displayMaterial.uniforms[key].value = value;
+      for (const key in displayUniforms) {
+        if (key in displayMaterial.uniforms) {
+          displayMaterial.uniforms[key].value = displayUniforms[key].value;
         }
       }
 

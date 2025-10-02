@@ -5,34 +5,45 @@ import { ParameterControl } from "../controls/parameter-control";
 import { Section } from "../section";
 
 export function ControlsPanel() {
+  const gridSizeBeatsParameter = useStore((state) => state.gridSizeBeats);
+  const gridSizeSemisParameter = useStore((state) => state.gridSizeSemis);
+  const scaleTonicParameter = useStore((state) => state.scaleTonic);
+  const scaleTypeParameter = useStore((state) => state.scaleType);
+  const normalizeParameter = useStore((state) => state.normalize);
   const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid.value);
-  const gridSize = useStore((state) => state.gridSizeBeats.value);
-  const gridSizeY = useStore((state) => state.gridSizeSemis.value);
+  const bandsPerOctaveParameter = useStore((state) => state.bandsPerOctave);
+
   const setBrushWidth = useStore((state) => state.brushWidthBeats.setValue);
   const setBrushHeight = useStore((state) => state.brushHeightSemis.setValue);
 
   useEffect(() => {
     if (brushSizeLockedToGrid) {
-      setBrushWidth(gridSize);
-      setBrushHeight(gridSizeY);
+      setBrushWidth(gridSizeBeatsParameter.value);
+      setBrushHeight(gridSizeSemisParameter.value);
     }
-  }, [brushSizeLockedToGrid, gridSize, gridSizeY, setBrushWidth, setBrushHeight]);
+  }, [
+    brushSizeLockedToGrid,
+    gridSizeBeatsParameter.value,
+    gridSizeSemisParameter.value,
+    setBrushWidth,
+    setBrushHeight,
+  ]);
 
   return (
     <Stack h="100%" w="100%" p="xs">
       <Section label="Analysis">
-        <ParameterControl paramKey="bandsPerOctave" />
+        <ParameterControl parameter={bandsPerOctaveParameter} />
       </Section>
       <Section label="Grid">
-        <ParameterControl paramKey="gridSizeBeats" />
-        <ParameterControl paramKey="gridSizeSemis" />
+        <ParameterControl parameter={gridSizeBeatsParameter} />
+        <ParameterControl parameter={gridSizeSemisParameter} />
       </Section>
       <Section label="Scale">
-        <ParameterControl paramKey="scaleTonic" />
-        <ParameterControl paramKey="scaleType" />
+        <ParameterControl parameter={scaleTonicParameter} />
+        <ParameterControl parameter={scaleTypeParameter} />
       </Section>
       <Section label="Output">
-        <ParameterControl paramKey="normalize" />
+        <ParameterControl parameter={normalizeParameter} />
       </Section>
     </Stack>
   );

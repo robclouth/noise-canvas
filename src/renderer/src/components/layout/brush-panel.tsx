@@ -21,38 +21,51 @@ const BRUSH_VIEWS = {
 };
 
 export function BrushPanel() {
-  const brushType = useStore((state) => state.brushType.value);
-  const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid.value);
+  const brushTypeParameter = useStore((state) => state.brushType);
+  const brushSizeLockedToGridParameter = useStore((state) => state.brushSizeLockedToGrid);
+  const brushWidthBeatsParameter = useStore((state) => state.brushWidthBeats);
+  const brushHeightSemisParameter = useStore((state) => state.brushHeightSemis);
+  const brushIntensityParameter = useStore((state) => state.brushIntensity);
+  const brushIterationsParameter = useStore((state) => state.brushIterations);
+  const brushPanParameter = useStore((state) => state.brushPan);
+  const brushFeatherTimeParameter = useStore((state) => state.brushFeatherTime);
+  const brushFeatherPitchParameter = useStore((state) => state.brushFeatherPitch);
+  const brushFeatherSlopeTimeParameter = useStore((state) => state.brushFeatherSlopeTime);
+  const brushFeatherSlopePitchParameter = useStore((state) => state.brushFeatherSlopePitch);
+  const sourceOffsetBeatsParameter = useStore((state) => state.sourceOffsetBeats);
+  const sourceOffsetSemisParameter = useStore((state) => state.sourceOffsetSemis);
+  const sourceOffsetLockParameter = useStore((state) => state.sourceOffsetLock);
+  const blendModeParameterParameter = useStore((state) => state.blendMode);
 
   return (
     <Stack p="xs">
       <Section label="Size">
-        <ParameterControl paramKey="brushWidthBeats" disabled={brushSizeLockedToGrid} />
-        <ParameterControl paramKey="brushHeightSemis" disabled={brushSizeLockedToGrid} />
-        <ParameterControl paramKey="brushSizeLockedToGrid" />
+        <ParameterControl parameter={brushWidthBeatsParameter} disabled={brushSizeLockedToGridParameter.value} />
+        <ParameterControl parameter={brushHeightSemisParameter} disabled={brushSizeLockedToGridParameter.value} />
+        <ParameterControl parameter={brushSizeLockedToGridParameter} />
       </Section>
       <Section label="Output">
-        <ParameterControl paramKey="brushIntensity" />
-        <ParameterControl paramKey="brushIterations" />
-        <ParameterControl paramKey="brushPan" />
-        <ParameterControl paramKey="blendMode" />
+        <ParameterControl parameter={brushIntensityParameter} />
+        <ParameterControl parameter={brushIterationsParameter} />
+        <ParameterControl parameter={brushPanParameter} />
+        <ParameterControl parameter={blendModeParameterParameter} />
       </Section>
       <Section label="Feather">
-        <ParameterControl paramKey="brushFeatherTime" />
-        <ParameterControl paramKey="brushFeatherPitch" />
-        <ParameterControl paramKey="brushFeatherSlopeTime" />
-        <ParameterControl paramKey="brushFeatherSlopePitch" />
+        <ParameterControl parameter={brushFeatherTimeParameter} />
+        <ParameterControl parameter={brushFeatherPitchParameter} />
+        <ParameterControl parameter={brushFeatherSlopeTimeParameter} />
+        <ParameterControl parameter={brushFeatherSlopePitchParameter} />
       </Section>
       <Section label="Offset">
-        <ParameterControl paramKey="sourceOffsetBeats" />
-        <ParameterControl paramKey="sourceOffsetSemis" />
-        <ParameterControl paramKey="sourceOffsetLock" />
+        <ParameterControl parameter={sourceOffsetBeatsParameter} />
+        <ParameterControl parameter={sourceOffsetSemisParameter} />
+        <ParameterControl parameter={sourceOffsetLockParameter} />
       </Section>
       <Section label="Brush">
-        <ParameterControl paramKey="brushType" />
-        {BRUSH_VIEWS[brushType] ? BRUSH_VIEWS[brushType] : null}
+        <ParameterControl parameter={brushTypeParameter} />
+        {BRUSH_VIEWS[brushTypeParameter.value] ? BRUSH_VIEWS[brushTypeParameter.value] : null}
       </Section>
-      <Section label="Modulation">
+      <Section label="Modulators">
         <ModulatorView />
       </Section>
     </Stack>

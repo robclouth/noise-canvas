@@ -1,4 +1,3 @@
-import { State, useStore } from "@/store";
 import { AnyParameter, ContinuousNumberParameter, DiscreteNumberParameter, OptionsParameter } from "@/types";
 import { Text } from "@mantine/core";
 import { Tooltip } from "../tooltip";
@@ -18,17 +17,15 @@ function isDiscreteNumberParameter(p: AnyParameter<any>): p is DiscreteNumberPar
   return "values" in p;
 }
 
-export type ParameterControlProps = {
-  paramKey: keyof State;
+export type ParameterControlProps<T> = {
+  parameter: AnyParameter<T>;
   labelWidth?: number;
   disabled?: boolean;
   color?: string;
 };
 
-export const ParameterControl = ({ labelWidth = 60, disabled, color, paramKey }: ParameterControlProps) => {
-  const parameter = useStore((state) => state[paramKey]) as AnyParameter<any>;
-  const modulator = useStore((state) => (parameter.modulatorParamKey ? state[parameter.modulatorParamKey] : undefined));
-  const isModulated = modulator && typeof modulator === "object" && "value" in modulator && modulator.value !== 0;
+export const ParameterControl = <T,>({ labelWidth = 60, disabled, color, parameter }: ParameterControlProps<T>) => {
+  const isModulated = parameter.modulators?.some((m) => m.value !== 0);
 
   if (!parameter) return null;
 
@@ -71,7 +68,7 @@ export const ParameterControl = ({ labelWidth = 60, disabled, color, paramKey }:
         step={parameter.step}
         unit={parameter.unit}
         disabled={disabled}
-        modulatorParamKey={parameter.modulatorParamKey}
+        modulators={parameter.modulators}
         color={color}
       />
     );
@@ -87,7 +84,7 @@ export const ParameterControl = ({ labelWidth = 60, disabled, color, paramKey }:
         marks={parameter.values.map((v) => ({ value: v.value, label: v.label }))}
         unit={parameter.unit}
         disabled={disabled}
-        modulatorParamKey={parameter.modulatorParamKey}
+        modulators={parameter.modulators}
         color={color}
       />
     );

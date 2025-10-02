@@ -1,14 +1,22 @@
+import { useStore } from "@renderer/store";
 import { ParameterControl } from "../controls/parameter-control";
 
 export const TransformBrush = () => {
+  const transformShiftBeatsParameter = useStore((state) => state.transformShiftBeats);
+  const transformShiftSemisParameter = useStore((state) => state.transformShiftSemis);
+  const transformScaleTimeParameter = useStore((state) => state.transformScaleTime);
+  const transformScalePitchParameter = useStore((state) => state.transformScalePitch);
+  const transformRotationParameter = useStore((state) => state.transformRotation);
+  const transformEdgeModeParameter = useStore((state) => state.transformEdgeMode);
+
   return (
     <>
-      <ParameterControl key="transformShiftBeats" paramKey="transformShiftBeats" />
-      <ParameterControl key="transformShiftSemis" paramKey="transformShiftSemis" />
-      <ParameterControl key="transformScaleTime" paramKey="transformScaleTime" />
-      <ParameterControl key="transformScalePitch" paramKey="transformScalePitch" />
-      <ParameterControl key="transformRotation" paramKey="transformRotation" />
-      <ParameterControl key="transformEdgeMode" paramKey="transformEdgeMode" />
+      <ParameterControl parameter={transformShiftBeatsParameter} />
+      <ParameterControl parameter={transformShiftSemisParameter} />
+      <ParameterControl parameter={transformScaleTimeParameter} />
+      <ParameterControl parameter={transformScalePitchParameter} />
+      <ParameterControl parameter={transformRotationParameter} />
+      <ParameterControl parameter={transformEdgeModeParameter} />
     </>
   );
 };

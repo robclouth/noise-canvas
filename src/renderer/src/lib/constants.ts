@@ -133,3 +133,5 @@ export const EDGE_MODE = [
   { value: 2, label: "Wrap" },
   { value: 3, label: "Mirror" },
 ];
+
+export const NUM_MODULATORS = 3;

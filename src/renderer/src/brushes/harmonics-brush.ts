@@ -1,49 +1,11 @@
-import { shaderMaterial } from "@react-three/drei";
 import { OpenFile } from "@renderer/types";
 import { DataTexture, FloatType, RedFormat, ShaderMaterial } from "three";
 import harmonicsBrushFrag from "../glsl/harmonics-brush.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useStore } from "../store";
-import { BaseBrush } from "./base-brush";
-import { CommonUniforms, defaultValues, ParameterUniform } from "./common";
+import { BaseBrush, CommonUniforms, defaultValues } from "./base-brush";
 
 const KERNEL_SIZE = 512;
-
-type Uniforms = CommonUniforms & {
-  harmonicsPower: ParameterUniform;
-  harmonicsFalloff: ParameterUniform;
-  harmonicsOddEven: ParameterUniform;
-  harmonicsKernel: { value: DataTexture };
-  kernelSize: { value: number };
-};
-
-const HarmonicsMaterial = shaderMaterial<Uniforms, ShaderMaterial & Uniforms>(
-  {
-    ...defaultValues,
-    harmonicsPower: {
-      value: 1.0,
-      minValue: 0.1,
-      maxValue: 4.0,
-      modulationAmount: 0,
-    },
-    harmonicsFalloff: {
-      value: 10.0,
-      minValue: -100,
-      maxValue: 100,
-      modulationAmount: 0,
-    },
-    harmonicsOddEven: {
-      value: 0.0,
-      minValue: -100,
-      maxValue: 100,
-      modulationAmount: 0,
-    },
-    harmonicsKernel: { value: new DataTexture(new Float32Array(KERNEL_SIZE), KERNEL_SIZE, 1, RedFormat, FloatType) },
-    kernelSize: { value: KERNEL_SIZE },
-  },
-  passThroughVert,
-  harmonicsBrushFrag,
-);
 
 class HarmonicsBrush extends BaseBrush {
   private harmonicsKernel: DataTexture;
@@ -51,8 +13,44 @@ class HarmonicsBrush extends BaseBrush {
 
   constructor() {
     super();
-    this.materials = [new HarmonicsMaterial()];
-    this.parameters = ["harmonicsPower", "harmonicsFalloff", "harmonicsOddEven"];
+    this.materials = [
+      new ShaderMaterial({
+        uniforms: {
+          ...defaultValues,
+          harmonicsPower: {
+            value: {
+              value: 1.0,
+              minValue: 0.1,
+              maxValue: 4.0,
+              modulationAmounts: [],
+            },
+          },
+          harmonicsFalloff: {
+            value: {
+              value: 10.0,
+              minValue: -100,
+              maxValue: 100,
+              modulationAmounts: [],
+            },
+          },
+          harmonicsOddEven: {
+            value: {
+              value: 0.0,
+              minValue: -100,
+              maxValue: 100,
+              modulationAmounts: [],
+            },
+          },
+          harmonicsKernel: {
+            value: new DataTexture(new Float32Array(KERNEL_SIZE), KERNEL_SIZE, 1, RedFormat, FloatType),
+          },
+          kernelSize: { value: KERNEL_SIZE },
+        },
+        vertexShader: passThroughVert,
+        fragmentShader: harmonicsBrushFrag,
+      }),
+    ];
+
     this.harmonicsKernel = new DataTexture(new Float32Array(KERNEL_SIZE), KERNEL_SIZE, 1, RedFormat, FloatType);
     this.lastParams = "";
   }
@@ -113,15 +111,15 @@ class HarmonicsBrush extends BaseBrush {
       bandsPerOctave: props.file.spectrogramData.bandsPerOctave,
     });
 
-    const material = this.materials[props.passIndex] as Uniforms;
+    const material = this.materials[props.passIndex];
     if (needsUpdate) {
       material.uniforms.harmonicsKernel.value = this.harmonicsKernel;
     }
 
     // Set simple parameter uniforms
-    (material.uniforms.harmonicsPower.value as ParameterUniform).value = harmonicsPower.value;
-    (material.uniforms.harmonicsFalloff.value as ParameterUniform).value = harmonicsFalloff.value;
-    (material.uniforms.harmonicsOddEven.value as ParameterUniform).value = harmonicsOddEven.value;
+    material.uniforms.harmonicsPower.value = harmonicsPower.value;
+    material.uniforms.harmonicsFalloff.value = harmonicsFalloff.value;
+    material.uniforms.harmonicsOddEven.value = harmonicsOddEven.value;
   }
 }
 
