@@ -1,11 +1,18 @@
-import { AnyParameter, ContinuousNumberParameter, DiscreteNumberParameter, OptionsParameter } from "@/types";
+import {
+  AnyParameter,
+  BooleanParameter,
+  ContinuousNumberParameter,
+  DiscreteNumberParameter,
+  OptionsParameter,
+} from "@/types";
 import { Text } from "@mantine/core";
+import { ParameterKey, useStore } from "@renderer/store";
 import { Tooltip } from "../tooltip";
 import { SelectControl } from "./select-control";
 import { SliderControl } from "./slider-control";
 import { SwitchControl } from "./switch-control";
 
-function isOptionsParameter<T>(p: AnyParameter<T>): p is OptionsParameter<T> {
+function isOptionsParameter(p: AnyParameter<any>): p is OptionsParameter<any> {
   return "options" in p;
 }
 
@@ -17,29 +24,41 @@ function isDiscreteNumberParameter(p: AnyParameter<any>): p is DiscreteNumberPar
   return "values" in p;
 }
 
-export type ParameterControlProps<T> = {
-  parameter: AnyParameter<T>;
+function isBooleanParameter(p: AnyParameter<any>): p is BooleanParameter {
+  return typeof p.value === "boolean";
+}
+
+export type ParameterControlProps = {
+  paramKey: ParameterKey;
   labelWidth?: number;
   disabled?: boolean;
   color?: string;
 };
 
-export const ParameterControl = <T,>({ labelWidth = 60, disabled, color, parameter }: ParameterControlProps<T>) => {
-  const isModulated = parameter.modulators?.some((m) => m.value !== 0);
+export const ParameterControl = ({ labelWidth = 60, disabled, color, paramKey }: ParameterControlProps) => {
+  const isModulated = useStore((state) => {
+    return state[paramKey]?.modulatorParamKeys
+      ?.map((key) => {
+        return state[key].value;
+      })
+      .some((amount) => amount !== 0);
+  });
 
+  const parameter = useStore((state) => state[paramKey]);
   if (!parameter) return null;
+  const { description, label, resetValue } = parameter;
 
   const labelComponent = (
-    <Tooltip label={parameter.description}>
+    <Tooltip label={description}>
       <Text
         size="xs"
         w={labelWidth}
         lineClamp={1}
         truncate="end"
-        onDoubleClick={() => parameter.resetValue()}
+        onDoubleClick={() => resetValue()}
         c={isModulated ? "blue" : "dark.0"}
       >
-        {parameter.label}
+        {label}
       </Text>
     </Tooltip>
   );
@@ -68,7 +87,7 @@ export const ParameterControl = <T,>({ labelWidth = 60, disabled, color, paramet
         step={parameter.step}
         unit={parameter.unit}
         disabled={disabled}
-        modulators={parameter.modulators}
+        modulatorParamKeys={parameter.modulatorParamKeys}
         color={color}
       />
     );
@@ -84,10 +103,13 @@ export const ParameterControl = <T,>({ labelWidth = 60, disabled, color, paramet
         marks={parameter.values.map((v) => ({ value: v.value, label: v.label }))}
         unit={parameter.unit}
         disabled={disabled}
-        modulators={parameter.modulators}
+        modulatorParamKeys={parameter.modulatorParamKeys}
         color={color}
       />
     );
   }
-  return <SwitchControl labelComponent={labelComponent} value={parameter.value} setValue={parameter.setValue} />;
+  if (isBooleanParameter(parameter)) {
+    return <SwitchControl labelComponent={labelComponent} value={parameter.value} setValue={parameter.setValue} />;
+  }
+  return null;
 };

@@ -1,4 +1,4 @@
-import { OpenFile } from "@renderer/types";
+import { ContinuousNumberParameter, OpenFile } from "@renderer/types";
 import { DataTexture, FloatType, RedFormat, ShaderMaterial } from "three";
 import harmonicsBrushFrag from "../glsl/harmonics-brush.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -102,7 +102,8 @@ class HarmonicsBrush extends BaseBrush {
 
   updateBrushUniforms(props: { commonUniforms: CommonUniforms; passIndex: number; file: OpenFile }): void {
     this.updateCommonUniforms(props);
-    const { harmonicsPower, harmonicsFalloff, harmonicsOddEven } = useStore.getState();
+    const state = useStore.getState();
+    const { harmonicsPower, harmonicsFalloff, harmonicsOddEven } = state;
 
     const needsUpdate = this.updateKernel({
       power: harmonicsPower.value,
@@ -116,10 +117,34 @@ class HarmonicsBrush extends BaseBrush {
       material.uniforms.harmonicsKernel.value = this.harmonicsKernel;
     }
 
-    // Set simple parameter uniforms
-    material.uniforms.harmonicsPower.value = harmonicsPower.value;
-    material.uniforms.harmonicsFalloff.value = harmonicsFalloff.value;
-    material.uniforms.harmonicsOddEven.value = harmonicsOddEven.value;
+    // Set parameter uniforms
+    material.uniforms.harmonicsPower.value = {
+      value: harmonicsPower.value,
+      minValue: harmonicsPower.min,
+      maxValue: harmonicsPower.max,
+      modulationAmounts:
+        harmonicsPower.modulatorParamKeys?.map(
+          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+        ) || [],
+    };
+    material.uniforms.harmonicsFalloff.value = {
+      value: harmonicsFalloff.value,
+      minValue: harmonicsFalloff.min,
+      maxValue: harmonicsFalloff.max,
+      modulationAmounts:
+        harmonicsFalloff.modulatorParamKeys?.map(
+          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+        ) || [],
+    };
+    material.uniforms.harmonicsOddEven.value = {
+      value: harmonicsOddEven.value,
+      minValue: harmonicsOddEven.min,
+      maxValue: harmonicsOddEven.max,
+      modulationAmounts:
+        harmonicsOddEven.modulatorParamKeys?.map(
+          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+        ) || [],
+    };
   }
 }
 

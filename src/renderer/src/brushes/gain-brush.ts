@@ -1,4 +1,4 @@
-import { OpenFile } from "@renderer/types";
+import { ContinuousNumberParameter, OpenFile } from "@renderer/types";
 import { ShaderMaterial } from "three";
 import gainBrushFrag from "../glsl/gain-brush.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -29,12 +29,14 @@ class GainBrush extends BaseBrush {
 
   updateBrushUniforms(props: { commonUniforms: CommonUniforms; passIndex: number; file: OpenFile }): void {
     this.updateCommonUniforms(props);
-    const { gainDb } = useStore.getState();
+    const state = useStore.getState();
+    const gainDb = state.gainDb;
     this.materials[props.passIndex].uniforms.gainDb.value = {
       value: gainDb.value,
       minValue: gainDb.min,
       maxValue: gainDb.max,
-      modulationAmounts: gainDb.modulators?.map((modulationAmount) => modulationAmount.value / 100),
+      modulationAmounts:
+        gainDb.modulatorParamKeys?.map((paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100) || [],
     };
   }
 }

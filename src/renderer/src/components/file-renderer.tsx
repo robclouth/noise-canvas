@@ -3,6 +3,8 @@ import { useFBO } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { runSynthesis } from "@renderer/audio-manager";
 import { CommonUniforms, defaultValues } from "@renderer/brushes/base-brush";
+import { NUM_MODULATORS } from "@renderer/lib/constants";
+import { ContinuousNumberParameter } from "@renderer/types";
 import { debounce } from "lodash-es";
 import { forwardRef, memo, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -312,7 +314,9 @@ export const FileRenderer = memo(
             minValue: state.brushIntensity.min / 100,
             maxValue: state.brushIntensity.max / 100,
             modulationAmounts:
-              state.brushIntensity.modulators?.map((modulationAmount) => modulationAmount.value / 100) || [],
+              state.brushIntensity.modulatorParamKeys?.map(
+                (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+              ) || [],
           },
         },
         brushPan: {
@@ -320,7 +324,10 @@ export const FileRenderer = memo(
             value: state.brushPan.value / 100,
             minValue: state.brushPan.min / 100,
             maxValue: state.brushPan.max / 100,
-            modulationAmounts: state.brushPan.modulators?.map((modulationAmount) => modulationAmount.value / 100) || [],
+            modulationAmounts:
+              state.brushPan.modulatorParamKeys?.map(
+                (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+              ) || [],
           },
         },
         bpm: { value: bpm },
@@ -330,7 +337,9 @@ export const FileRenderer = memo(
             minValue: 0.0,
             maxValue: 1.0,
             modulationAmounts:
-              state.sourceOffsetBeats.modulators?.map((modulationAmount) => modulationAmount.value / 100) || [],
+              state.sourceOffsetBeats.modulatorParamKeys?.map(
+                (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+              ) || [],
           },
         },
 
@@ -340,40 +349,31 @@ export const FileRenderer = memo(
             minValue: 0.0,
             maxValue: 1.0,
             modulationAmounts:
-              state.sourceOffsetSemis.modulators?.map((modulationAmount) => modulationAmount.value / 100) || [],
+              state.sourceOffsetSemis.modulatorParamKeys?.map(
+                (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+              ) || [],
           },
         },
         blendMode: { value: state.blendMode.value },
         modulators: {
-          value: state.modulators.map(
-            ({
-              modulatorMode,
-              modulatorPatternShape,
-              modulatorPatternRateBeats,
-              modulatorPatternRateSemis,
-              modulatorPatternRadial,
-              modulatorStrength,
-              modulatorRotation,
-            }) => {
-              const modulatorPatternRate = unitsToUv(
-                modulatorPatternRateBeats.value,
-                modulatorPatternRateSemis.value,
-                bpm,
-                totalDuration,
-                spectrogramData.bandsPerOctave,
-                spectrogramData.numBands,
-              );
-              return {
-                modulatorMode: modulatorMode.value,
-                modulatorPatternShape: modulatorPatternShape.value,
-                modulatorPatternRateX: modulatorPatternRate.x,
-                modulatorPatternRateY: modulatorPatternRate.y,
-                modulatorPatternRadial: modulatorPatternRadial.value,
-                modulatorStrength: modulatorStrength.value / 100,
-                modulatorRotation: modulatorRotation.value,
-              };
-            },
-          ),
+          value: Array.from({ length: NUM_MODULATORS }).map((_, i) => {
+            const modulatorPatternRate = unitsToUv(
+              state[`modulator${i + 1}PatternRateBeats`].value,
+              state[`modulator${i + 1}PatternRateSemis`].value,
+              bpm,
+              totalDuration,
+              spectrogramData.bandsPerOctave,
+              spectrogramData.numBands,
+            );
+            return {
+              modulatorMode: state[`modulator${i + 1}Mode`].value,
+              modulatorPatternShape: state[`modulator${i + 1}PatternShape`].value,
+              modulatorPatternRateX: modulatorPatternRate.x,
+              modulatorPatternRateY: modulatorPatternRate.y,
+              modulatorStrength: state[`modulator${i + 1}Strength`].value / 100,
+              modulatorRotation: state[`modulator${i + 1}Rotation`].value,
+            };
+          }),
         },
         gainLut: { value: modulatorScaleLut || new THREE.Texture() },
       };

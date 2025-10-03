@@ -1,5 +1,5 @@
-import { ContinuousNumberParameter } from "@/types";
 import { Group, NumberInput, Popover, Slider, Text } from "@mantine/core";
+import { ParameterKey } from "@renderer/store";
 import { ChevronDown } from "lucide-react";
 import { ReactNode } from "react";
 import { ParameterControl } from "./parameter-control";
@@ -15,17 +15,17 @@ type SliderControlProps = {
   marks?: { value: number; label: string }[];
   unit?: string;
   disabled?: boolean;
-  modulators?: ContinuousNumberParameter[];
+  modulatorParamKeys?: ParameterKey[];
 };
 
 export const SliderControl = (props: SliderControlProps) => {
-  const { labelComponent, value, setValue, min, max, step, marks, unit, disabled, modulators, color } = props;
+  const { labelComponent, value, setValue, min, max, step, marks, unit, disabled, modulatorParamKeys, color } = props;
 
   const valueIndex = marks?.findIndex((v) => v.value === value);
 
   return (
     <Group gap={"xs"} wrap="nowrap" h={25} align="center">
-      {modulators ? (
+      {modulatorParamKeys ? (
         <Popover withArrow shadow="lg">
           <Popover.Target>
             <Group gap={2} w={60} style={{ cursor: "pointer" }} wrap="nowrap">
@@ -34,9 +34,9 @@ export const SliderControl = (props: SliderControlProps) => {
             </Group>
           </Popover.Target>
           <Popover.Dropdown py={2} px={8} w={300}>
-            {modulators.map((modulator) => (
-              <ParameterControl key={modulator.name} parameter={modulator} color={"blue"} />
-            ))}
+            {modulatorParamKeys.map((modulatorParamKey) => {
+              return <ParameterControl key={modulatorParamKey} paramKey={modulatorParamKey} color={"blue"} />;
+            })}
           </Popover.Dropdown>
         </Popover>
       ) : (

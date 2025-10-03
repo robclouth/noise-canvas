@@ -1,4 +1,4 @@
-import { OpenFile } from "@renderer/types";
+import { ContinuousNumberParameter, OpenFile } from "@renderer/types";
 import { ShaderMaterial } from "three";
 import { useStore } from "../store";
 import { BaseBrush, CommonUniforms, defaultValues } from "./base-brush";
@@ -25,12 +25,16 @@ class SynthesizeBrush extends BaseBrush {
 
   updateBrushUniforms(props: { commonUniforms: CommonUniforms; passIndex: number; file: OpenFile }): void {
     this.updateCommonUniforms(props);
-    const { synthesizeBrushType } = useStore.getState();
+    const state = useStore.getState();
+    const { synthesizeBrushType } = state;
     this.materials[props.passIndex].uniforms.synthesizeType.value = {
       value: synthesizeBrushType.value,
       minValue: 0,
       maxValue: synthesizeBrushType.options.length - 1,
-      modulationAmounts: synthesizeBrushType.modulators?.map((modulationAmount) => modulationAmount.value / 100) || [],
+      modulationAmounts:
+        synthesizeBrushType.modulatorParamKeys?.map(
+          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+        ) || [],
     };
   }
 }

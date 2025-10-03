@@ -7,7 +7,6 @@ export type Modulator = {
   modulatorPatternShape: number;
   modulatorPatternRateX: number;
   modulatorPatternRateY: number;
-  modulatorPatternRadial: boolean;
   modulatorStrength: number;
   modulatorRotation: number;
 };

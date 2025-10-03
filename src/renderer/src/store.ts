@@ -1,3 +1,4 @@
+import { deepMerge } from "@mantine/core";
 import { startCase } from "lodash-es";
 import { Vector2 } from "three";
 import { ScaleType } from "tonal";
@@ -15,25 +16,62 @@ import {
   PITCH_VALUES,
   PITCH_VALUES_NO_FRACTIONS,
 } from "./lib/constants";
+import { Parameter } from "./Parameter";
 import {
   BooleanParameter,
   ContinuousNumberParameter,
   DiscreteNumberParameter,
   OpenFile,
   OptionsParameter,
-  Parameter,
 } from "./types";
 
 export const openFiles: Record<string, OpenFile> = {};
 
-export type ModulatorParameters = {
-  modulatorMode: OptionsParameter<number>;
-  modulatorPatternShape: OptionsParameter<number>;
-  modulatorPatternRateBeats: DiscreteNumberParameter;
-  modulatorPatternRateSemis: DiscreteNumberParameter;
-  modulatorPatternRadial: BooleanParameter;
-  modulatorStrength: ContinuousNumberParameter;
-  modulatorRotation: ContinuousNumberParameter;
+type Enumerate<N extends number, Acc extends number[] = []> = Acc["length"] extends N
+  ? Acc[number]
+  : Enumerate<N, [...Acc, Acc["length"]]>;
+
+type Range<F extends number, T extends number> = Exclude<Enumerate<T>, Enumerate<F>>;
+
+type ModulatableParameterKey =
+  | "brushIntensity"
+  | "brushPan"
+  | "sourceOffsetBeats"
+  | "sourceOffsetSemis"
+  | "gainDb"
+  | "blurAmountTime"
+  | "blurAmountPitch"
+  | "blurNoiseTime"
+  | "blurNoisePitch"
+  | "sharpenAmountTime"
+  | "sharpenAmountPitch"
+  | "harmonicsPower"
+  | "harmonicsFalloff"
+  | "harmonicsOddEven"
+  | "transformShiftBeats"
+  | "transformShiftSemis"
+  | "transformScaleTime"
+  | "transformScalePitch"
+  | "transformRotation";
+
+type ModulatorAmountParameters = {
+  [K in ModulatableParameterKey as `${K}Mod${Range<1, 4>}Amount`]: ContinuousNumberParameter;
+};
+
+type ModulatorParameters = {
+  [K in Range<1, 4> as `modulator${K}Mode`]: OptionsParameter<number>;
+} & {
+  [K in Range<1, 4> as `modulator${K}PatternShape`]: OptionsParameter<number>;
+} & {
+  [K in Range<1, 4> as `modulator${K}PatternRateBeats`]: DiscreteNumberParameter;
+} & {
+  [K in Range<1, 4> as `modulator${K}PatternRateSemis`]: DiscreteNumberParameter;
+} & {
+  [K in Range<1, 4> as `modulator${K}PatternRadial`]: BooleanParameter;
+} & {
+  [K in Range<1, 4> as `modulator${K}Strength`]: ContinuousNumberParameter;
+} & {
+  [K in Range<1, 4> as `modulator${K}Rotation`]: ContinuousNumberParameter;
 };
 
 export type State = {
@@ -70,9 +108,6 @@ export type State = {
   bandsPerOctave: DiscreteNumberParameter;
   minFreq: ContinuousNumberParameter;
   blendMode: OptionsParameter<number>;
-
-  // Modulator
-  modulators: ModulatorParameters[];
 
   // Gain Brush
   gainDb: ContinuousNumberParameter;
@@ -131,10 +166,11 @@ export type State = {
   setActiveFilePath: (activeFilePath: string | null) => void;
   sourceFilePath: string | null;
   setSourceFilePath: (sourceFilePath: string | null) => void;
-};
+} & ModulatorAmountParameters &
+  ModulatorParameters;
 
 // Helper type to extract keys of state that are parameters
-type ParameterKey = keyof {
+export type ParameterKey = keyof {
   [K in keyof State as State[K] extends { value: unknown } ? K : never]: State[K];
 };
 
@@ -144,49 +180,180 @@ function createParameter<T extends { value: unknown }>(
   set: ZustandSet,
   key: ParameterKey,
   parameter: T,
-  initialValue: T["value"],
   modulatable: boolean,
 ) {
-  return {
-    ...parameter,
-    setValue: (value: T["value"]) => set((state) => ({ [key]: { ...state[key], value } })),
-    resetValue: () => set((state) => ({ [key]: { ...state[key], value: initialValue } })),
-    modulators: modulatable ? createModulators(set, key) : undefined,
+  let params = {
+    [key]: {
+      ...parameter,
+      setValue: (value: T["value"]) => set((state) => ({ [key]: { ...state[key], value } })),
+      resetValue: () => set((state) => ({ [key]: { ...state[key], value: parameter.value } })),
+      modulatorParamKeys: modulatable
+        ? Array.from({ length: NUM_MODULATORS }).map(
+            (_, i) => `${key}Mod${i + 1}Amount` as keyof ModulatorAmountParameters,
+          )
+        : undefined,
+    },
   };
+
+  if (modulatable) {
+    params = {
+      ...params,
+      ...createModulatorParamsForParameter(set, key),
+    };
+  }
+
+  return params;
 }
 
-function createModulators(set: ZustandSet, key: ParameterKey) {
-  return Array.from({ length: NUM_MODULATORS }).map((_, i) => ({
-    name: `Mod ${i + 1} Amount`,
-    label: `Mod ${i + 1}`,
-    value: 0,
-    min: -100,
-    max: 100,
-    step: 1,
-    unit: "%",
-    description:
-      "The amount of modulation to apply. 0% is no modulation and only the value of the parameter is used, 100% is full modulation and the current value of the modulated parameter is ignored.",
-    setValue: (value: number) =>
-      set((state) => {
-        const param = state[key];
-        const newModulators = param.modulators?.map((m, idx) => (idx === i ? { ...m, value } : m));
-        return { [key]: { ...param, modulators: newModulators } };
-      }),
-    resetValue: () =>
-      set((state) => {
-        const param = state[key];
-        const newModulators = param.modulators?.map((m, idx) => (idx === i ? { ...m, value: 0 } : m));
-        return { [key]: { ...param, modulators: newModulators } };
-      }),
-  }));
+function createModulatorParamsForParameter(set: ZustandSet, key: ParameterKey) {
+  let params = {} as any;
+  for (let i = 0; i < NUM_MODULATORS; i++) {
+    const paramKey = `${key}Mod${i + 1}Amount` as keyof ModulatorAmountParameters;
+    params = {
+      ...params,
+      ...createParameter(
+        set,
+        paramKey,
+        {
+          name: `Mod ${i + 1} Amount`,
+          label: `Mod ${i + 1}`,
+          value: 0,
+          min: -100,
+          max: 100,
+          step: 1,
+          unit: "%",
+          description:
+            "The amount of modulation to apply. 0% is no modulation and only the value of the parameter is used, 100% is full modulation and the current value of the modulated parameter is ignored.",
+        },
+
+        false,
+      ),
+    };
+  }
+  return params;
+}
+
+function createModulatorParams(set: ZustandSet): ModulatorParameters {
+  let params = {} as any;
+  for (let i = 0; i < NUM_MODULATORS; i++) {
+    let paramKey = `modulator${i + 1}Mode` as ParameterKey;
+    params = {
+      ...params,
+      ...createParameter(
+        set,
+        paramKey,
+        {
+          name: `Modulator Mode ${i + 1}`,
+          label: "Mode",
+          description: "The mode of the modulator.",
+          value: 0,
+          options: MODULATOR_MODES,
+        },
+        false,
+      ),
+    };
+    paramKey = `modulator${i + 1}PatternShape` as ParameterKey;
+    params = {
+      ...params,
+      ...createParameter(
+        set,
+        paramKey,
+        {
+          name: `Modulator Pattern Shape ${i + 1}`,
+          label: "Shape",
+          description: "The shape of the modulator pattern.",
+          value: 0,
+          options: PATTERN_SHAPES,
+        },
+        false,
+      ),
+    };
+    paramKey = `modulator${i + 1}Strength` as ParameterKey;
+    params = {
+      ...params,
+      ...createParameter(
+        set,
+        paramKey,
+        {
+          name: `Modulator Strength ${i + 1}`,
+          label: "Strength",
+          description: "The strength of the modulator.",
+          value: 100,
+          min: -100,
+          max: 100,
+          step: 1,
+          unit: "%",
+        },
+        false,
+      ),
+    };
+    paramKey = `modulator${i + 1}PatternRateBeats` as ParameterKey;
+    params = {
+      ...params,
+      ...createParameter(
+        set,
+        paramKey,
+        {
+          name: `Modulator Pattern Rate Beats ${i + 1}`,
+          label: "Rate",
+          description: "The rate of the modulator pattern.",
+          value: 0,
+          values: [{ value: 0, label: "Off" }, ...BEAT_VALUES].map((value) => ({
+            value: value.value,
+            label: value.label,
+          })),
+        },
+        false,
+      ),
+    };
+    paramKey = `modulator${i + 1}PatternRateSemis` as ParameterKey;
+    params = {
+      ...params,
+      ...createParameter(
+        set,
+        paramKey,
+        {
+          name: `Modulator Pattern Rate Semis ${i + 1}`,
+          label: "Rate",
+          description: "The rate of the modulator pattern.",
+          value: 0,
+          values: [{ value: 0, label: "Off" }, ...PITCH_VALUES].map((value) => ({
+            value: value.value,
+            label: value.label,
+          })),
+        },
+        false,
+      ),
+    };
+    paramKey = `modulator${i + 1}Rotation` as ParameterKey;
+    params = {
+      ...params,
+      ...createParameter(
+        set,
+        paramKey,
+        {
+          name: `Modulator Rotation ${i + 1}`,
+          label: "Rotation",
+          description: "The rotation of the modulator pattern.",
+          value: 0,
+          min: 0,
+          max: 360,
+          step: 1,
+          unit: "°",
+        },
+        false,
+      ),
+    };
+  }
+  return params;
 }
 
 export const useStore = create<State>()(
   subscribeWithSelector(
     persist(
       (set) => {
-        return {
-          brushIntensity: createParameter(
+        const initialState = {
+          ...createParameter(
             set,
             "brushIntensity",
             {
@@ -199,10 +366,10 @@ export const useStore = create<State>()(
               step: 1,
               unit: "%",
             },
-            100,
+
             true,
           ),
-          brushIterations: createParameter(
+          ...createParameter(
             set,
             "brushIterations",
             {
@@ -214,10 +381,9 @@ export const useStore = create<State>()(
               max: 20,
               step: 1,
             },
-            1,
             false,
           ),
-          brushPan: createParameter(
+          ...createParameter(
             set,
             "brushPan",
             {
@@ -230,10 +396,9 @@ export const useStore = create<State>()(
               step: 1,
               unit: "%",
             },
-            0.0,
             true,
           ),
-          brushFeatherTime: createParameter(
+          ...createParameter(
             set,
             "brushFeatherTime",
             {
@@ -246,10 +411,10 @@ export const useStore = create<State>()(
               step: 1,
               unit: "%",
             },
-            0,
+
             false,
           ),
-          brushFeatherPitch: createParameter(
+          ...createParameter(
             set,
             "brushFeatherPitch",
             {
@@ -262,10 +427,9 @@ export const useStore = create<State>()(
               step: 1,
               unit: "%",
             },
-            0,
             false,
           ),
-          brushFeatherSlopeTime: createParameter(
+          ...createParameter(
             set,
             "brushFeatherSlopeTime",
             {
@@ -279,10 +443,9 @@ export const useStore = create<State>()(
               step: 1,
               unit: "%",
             },
-            0,
             false,
           ),
-          brushFeatherSlopePitch: createParameter(
+          ...createParameter(
             set,
             "brushFeatherSlopePitch",
             {
@@ -296,10 +459,10 @@ export const useStore = create<State>()(
               step: 1,
               unit: "%",
             },
-            0,
+
             false,
           ),
-          sourceOffsetBeats: createParameter(
+          ...createParameter(
             set,
             "sourceOffsetBeats",
             {
@@ -313,10 +476,10 @@ export const useStore = create<State>()(
                 ...BEAT_VALUES,
               ],
             },
-            0,
             true,
           ),
-          sourceOffsetSemis: createParameter(
+
+          ...createParameter(
             set,
             "sourceOffsetSemis",
             {
@@ -330,10 +493,9 @@ export const useStore = create<State>()(
                 ...PITCH_VALUES,
               ],
             },
-            0,
             true,
           ),
-          sourceOffsetLock: createParameter(
+          ...createParameter(
             set,
             "sourceOffsetLock",
             {
@@ -343,9 +505,8 @@ export const useStore = create<State>()(
               value: false as boolean,
             },
             false,
-            false,
           ),
-          brushType: createParameter(
+          ...createParameter(
             set,
             "brushType",
             {
@@ -363,10 +524,9 @@ export const useStore = create<State>()(
                 // { value: "sharpen", label: "Sharpen" },
               ],
             },
-            "gain",
             false,
           ),
-          brushWidthBeats: createParameter(
+          ...createParameter(
             set,
             "brushWidthBeats",
             {
@@ -379,10 +539,9 @@ export const useStore = create<State>()(
                 label: value.label,
               })),
             },
-            1,
             false,
           ),
-          brushHeightSemis: createParameter(
+          ...createParameter(
             set,
             "brushHeightSemis",
             {
@@ -395,10 +554,9 @@ export const useStore = create<State>()(
                 label: value.label,
               })),
             },
-            12,
             false,
           ),
-          brushSizeLockedToGrid: createParameter(
+          ...createParameter(
             set,
             "brushSizeLockedToGrid",
             {
@@ -407,10 +565,10 @@ export const useStore = create<State>()(
               description: "Locks the brush size to the grid size.",
               value: true as boolean,
             },
-            true,
+
             false,
           ),
-          zoomPower: createParameter(
+          ...createParameter(
             set,
             "zoomPower",
             {
@@ -422,10 +580,9 @@ export const useStore = create<State>()(
               max: 10,
               step: 1,
             },
-            0,
             false,
           ),
-          scroll: createParameter(
+          ...createParameter(
             set,
             "scroll",
             {
@@ -437,43 +594,40 @@ export const useStore = create<State>()(
               max: 1,
               step: 0.01,
             },
-            0,
             false,
           ),
-          gridSizeBeats: createParameter(
+          ...createParameter(
             set,
             "gridSizeBeats",
             {
               name: "Grid Size Beats",
               label: "Beats",
               description: "The horizontal grid size in beats.",
-              value: 0.25,
+              value: 1,
               values: [{ value: 0, label: "Off" }, ...BEAT_VALUES].map((value) => ({
                 value: value.value,
                 label: value.label,
               })),
             },
-            0.25,
+
             false,
           ),
-          gridSizeSemis: createParameter(
+          ...createParameter(
             set,
             "gridSizeSemis",
             {
               name: "Grid Size Semis",
               label: "Semis",
               description: "The vertical grid size in semitones.",
-              value: 1,
+              value: 24,
               values: [{ value: 0, label: "Off" }, ...PITCH_VALUES].map((value) => ({
                 value: value.value,
                 label: value.label,
               })),
             },
-            1,
             false,
           ),
-
-          normalize: createParameter(
+          ...createParameter(
             set,
             "normalize",
             {
@@ -482,10 +636,10 @@ export const useStore = create<State>()(
               description: "Normalizes the audio output.",
               value: true as boolean,
             },
-            true,
+
             false,
           ),
-          scaleTonic: createParameter(
+          ...createParameter(
             set,
             "scaleTonic",
             {
@@ -508,10 +662,9 @@ export const useStore = create<State>()(
                 { value: "B", label: "B" },
               ],
             },
-            "C",
             false,
           ),
-          scaleType: createParameter(
+          ...createParameter(
             set,
             "scaleType",
             {
@@ -524,10 +677,9 @@ export const useStore = create<State>()(
                 label: startCase(name),
               })),
             },
-            "major",
             false,
           ),
-          bandsPerOctave: createParameter(
+          ...createParameter(
             set,
             "bandsPerOctave",
             {
@@ -537,26 +689,24 @@ export const useStore = create<State>()(
               value: 24,
               values: BANDS_PER_OCTAVE_VALUES.map((value) => ({ value: value.value, label: value.label })),
             },
-            24,
             false,
           ),
-          minFreq: createParameter(
+          ...createParameter(
             set,
             "minFreq",
             {
               name: "Minimum Frequency",
               label: "Min. Freq.",
               description: "The minimum frequency of the spectrogram.",
-              value: 16.3516,
+              value: 16.3516, // C0
               min: 10,
               max: 100,
               step: 0.01,
               unit: "Hz",
             },
-            16.3516,
             false,
           ),
-          blendMode: createParameter(
+          ...createParameter(
             set,
             "blendMode",
             {
@@ -566,213 +716,9 @@ export const useStore = create<State>()(
               value: 0,
               options: BLEND_MODES,
             },
-            0,
             false,
           ),
-          modulators: Array.from({ length: NUM_MODULATORS }).map((_, i) => ({
-            modulatorMode: {
-              name: "Modulator Mode",
-              label: "Mode",
-              description: "The mode of the modulator.",
-              value: 0,
-              options: MODULATOR_MODES,
-              setValue: (value: number) =>
-                set((state) => ({
-                  modulators: state.modulators.map((modulator, index) => ({
-                    ...modulator,
-                    modulatorMode: {
-                      ...modulator.modulatorMode,
-                      value: index === i ? value : modulator.modulatorMode.value,
-                    },
-                  })),
-                })),
-              resetValue: () =>
-                set((state) => ({
-                  modulators: state.modulators.map((modulator, index) => ({
-                    ...modulator,
-                    modulatorMode: {
-                      ...modulator.modulatorMode,
-                      value: index === i ? 0 : modulator.modulatorMode.value,
-                    },
-                  })),
-                })),
-            },
-
-            modulatorPatternShape: {
-              name: "Modulator Pattern Shape",
-              label: "Shape",
-              description: "The shape of the modulator pattern.",
-              value: 0,
-              options: PATTERN_SHAPES,
-              setValue: (value: number) =>
-                set((state) => ({
-                  modulators: state.modulators.map((modulator, index) => ({
-                    ...modulator,
-                    modulatorPatternShape: {
-                      ...modulator.modulatorPatternShape,
-                      value: index === i ? value : modulator.modulatorPatternShape.value,
-                    },
-                  })),
-                })),
-              resetValue: () =>
-                set((state) => ({
-                  modulators: state.modulators.map((modulator, index) => ({
-                    ...modulator,
-                    modulatorPatternShape: {
-                      ...modulator.modulatorPatternShape,
-                      value: index === i ? 0 : modulator.modulatorPatternShape.value,
-                    },
-                  })),
-                })),
-            },
-            modulatorPatternRateBeats: {
-              name: "Modulator Rate Beats",
-              label: "Rate H",
-              description: "The rate of the modulator pattern in beats.",
-              value: 1,
-              values: [
-                { value: 0, label: "0 beats" },
-                ...BEAT_VALUES.map((value) => ({ value: value.value, label: value.label })),
-              ],
-              setValue: (value: number) =>
-                set((state) => ({
-                  modulators: state.modulators.map((modulator, index) => ({
-                    ...modulator,
-                    modulatorPatternRateBeats: {
-                      ...modulator.modulatorPatternRateBeats,
-                      value: index === i ? value : modulator.modulatorPatternRateBeats.value,
-                    },
-                  })),
-                })),
-              resetValue: () =>
-                set((state) => ({
-                  modulators: state.modulators.map((modulator, index) => ({
-                    ...modulator,
-                    modulatorPatternRateBeats: {
-                      ...modulator.modulatorPatternRateBeats,
-                      value: index === i ? 1 : modulator.modulatorPatternRateBeats.value,
-                    },
-                  })),
-                })),
-            },
-            modulatorPatternRateSemis: {
-              name: "Modulator Rate Semis",
-              label: "Rate V",
-              description: "The rate of the modulator pattern in semitones.",
-              value: 0,
-              values: [
-                { value: 0, label: "0 semis" },
-                ...PITCH_VALUES.map((value) => ({ value: value.value, label: value.label })),
-              ],
-              setValue: (value: number) =>
-                set((state) => ({
-                  modulators: state.modulators.map((modulator, index) => ({
-                    ...modulator,
-                    modulatorPatternRateSemis: {
-                      ...modulator.modulatorPatternRateSemis,
-                      value: index === i ? value : modulator.modulatorPatternRateSemis.value,
-                    },
-                  })),
-                })),
-              resetValue: () =>
-                set((state) => ({
-                  modulators: state.modulators.map((modulator, index) => ({
-                    ...modulator,
-                    modulatorPatternRateSemis: {
-                      ...modulator.modulatorPatternRateSemis,
-                      value: index === i ? 0 : modulator.modulatorPatternRateSemis.value,
-                    },
-                  })),
-                })),
-            },
-            modulatorPatternRadial: {
-              name: "Modulator Radial",
-              label: "Radial",
-              description: "If true, the modulator pattern is applied radially.",
-              value: false,
-              setValue: (value: boolean) =>
-                set((state) => ({
-                  modulators: state.modulators.map((modulator, index) => ({
-                    ...modulator,
-                    modulatorPatternRadial: {
-                      ...modulator.modulatorPatternRadial,
-                      value: index === i ? value : modulator.modulatorPatternRadial.value,
-                    },
-                  })),
-                })),
-              resetValue: () =>
-                set((state) => ({
-                  modulators: state.modulators.map((modulator, index) => ({
-                    ...modulator,
-                    modulatorPatternRadial: {
-                      ...modulator.modulatorPatternRadial,
-                      value: index === i ? false : modulator.modulatorPatternRadial.value,
-                    },
-                  })),
-                })),
-            },
-            modulatorStrength: {
-              name: "Modulator Strength",
-              label: "Strength",
-              description: "The strength of the modulator.",
-              value: 100,
-              min: -100,
-              max: 100,
-              step: 1,
-              unit: "%",
-              setValue: (value: number) =>
-                set((state) => ({
-                  modulators: state.modulators.map((modulator, index) => ({
-                    ...modulator,
-                    modulatorStrength: {
-                      ...modulator.modulatorStrength,
-                      value: index === i ? value : modulator.modulatorStrength.value,
-                    },
-                  })),
-                })),
-              resetValue: () =>
-                set((state) => ({
-                  modulators: state.modulators.map((modulator, index) => ({
-                    ...modulator,
-                    modulatorStrength: {
-                      ...modulator.modulatorStrength,
-                      value: index === i ? 100 : modulator.modulatorStrength.value,
-                    },
-                  })),
-                })),
-            },
-            modulatorRotation: {
-              name: "Modulator Rotation",
-              label: "Rotation",
-              description: "The rotation of the modulator pattern.",
-              value: 0,
-              min: 0,
-              max: 360,
-              step: 1,
-              unit: "°",
-              setValue: (value: number) =>
-                set((state) => ({
-                  modulators: state.modulators.map((modulator, index) => ({
-                    ...modulator,
-                    modulatorRotation: {
-                      ...modulator.modulatorRotation,
-                      value: index === i ? value : modulator.modulatorRotation.value,
-                    },
-                  })),
-                })),
-              resetValue: () =>
-                set((state) => ({
-                  modulators: state.modulators.map((modulator, index) => ({
-                    ...modulator,
-                    modulatorRotation: {
-                      ...modulator.modulatorRotation,
-                      value: index === i ? 0 : modulator.modulatorRotation.value,
-                    },
-                  })),
-                })),
-            },
-          })),
-          gainDb: createParameter(
+          ...createParameter(
             set,
             "gainDb",
             {
@@ -785,10 +731,9 @@ export const useStore = create<State>()(
               step: 0.1,
               unit: "dB",
             },
-            0.0,
             true,
           ),
-          blurAmountTime: createParameter(
+          ...createParameter(
             set,
             "blurAmountTime",
             {
@@ -801,10 +746,9 @@ export const useStore = create<State>()(
               step: 1,
               unit: "%",
             },
-            0,
             true,
           ),
-          blurAmountPitch: createParameter(
+          ...createParameter(
             set,
             "blurAmountPitch",
             {
@@ -817,10 +761,9 @@ export const useStore = create<State>()(
               step: 1,
               unit: "%",
             },
-            0,
             true,
           ),
-          blurNoiseTime: createParameter(
+          ...createParameter(
             set,
             "blurNoiseTime",
             {
@@ -833,10 +776,9 @@ export const useStore = create<State>()(
               step: 1,
               unit: "%",
             },
-            0,
             true,
           ),
-          blurNoisePitch: createParameter(
+          ...createParameter(
             set,
             "blurNoisePitch",
             {
@@ -849,10 +791,9 @@ export const useStore = create<State>()(
               step: 1,
               unit: "%",
             },
-            0,
             true,
           ),
-          blurBleed: createParameter(
+          ...createParameter(
             set,
             "blurBleed",
             {
@@ -861,10 +802,9 @@ export const useStore = create<State>()(
               description: "Allows the blur to sample from outside the brush bounds making a more smoothing.",
               value: true as boolean,
             },
-            true,
             false,
           ),
-          sharpenAmountTime: createParameter(
+          ...createParameter(
             set,
             "sharpenAmountTime",
             {
@@ -877,10 +817,10 @@ export const useStore = create<State>()(
               step: 1,
               unit: "%",
             },
-            0,
+
             true,
           ),
-          sharpenAmountPitch: createParameter(
+          ...createParameter(
             set,
             "sharpenAmountPitch",
             {
@@ -893,10 +833,9 @@ export const useStore = create<State>()(
               step: 1,
               unit: "%",
             },
-            0,
             true,
           ),
-          harmonicsPower: createParameter(
+          ...createParameter(
             set,
             "harmonicsPower",
             {
@@ -908,10 +847,10 @@ export const useStore = create<State>()(
               max: 4.0,
               step: 0.01,
             },
-            1.0,
+
             true,
           ),
-          harmonicsFalloff: createParameter(
+          ...createParameter(
             set,
             "harmonicsFalloff",
             {
@@ -924,10 +863,9 @@ export const useStore = create<State>()(
               step: 1,
               unit: "%",
             },
-            10.0,
             true,
           ),
-          harmonicsOddEven: createParameter(
+          ...createParameter(
             set,
             "harmonicsOddEven",
             {
@@ -940,10 +878,9 @@ export const useStore = create<State>()(
               step: 1,
               unit: "%",
             },
-            0,
             true,
           ),
-          transformShiftBeats: createParameter(
+          ...createParameter(
             set,
             "transformShiftBeats",
             {
@@ -957,10 +894,9 @@ export const useStore = create<State>()(
                 ...BEAT_VALUES,
               ],
             },
-            0.0,
             true,
           ),
-          transformShiftSemis: createParameter(
+          ...createParameter(
             set,
             "transformShiftSemis",
             {
@@ -974,10 +910,9 @@ export const useStore = create<State>()(
                 ...PITCH_VALUES,
               ],
             },
-            0.0,
             true,
           ),
-          transformScaleTime: createParameter(
+          ...createParameter(
             set,
             "transformScaleTime",
             {
@@ -990,10 +925,9 @@ export const useStore = create<State>()(
                 ...MULTIPLIER_VALUES,
               ],
             },
-            1.0,
             true,
           ),
-          transformScalePitch: createParameter(
+          ...createParameter(
             set,
             "transformScalePitch",
             {
@@ -1006,10 +940,9 @@ export const useStore = create<State>()(
                 ...MULTIPLIER_VALUES,
               ],
             },
-            1.0,
             true,
           ),
-          transformRotation: createParameter(
+          ...createParameter(
             set,
             "transformRotation",
             {
@@ -1022,10 +955,10 @@ export const useStore = create<State>()(
               step: 1,
               unit: "°",
             },
-            0.0,
+
             true,
           ),
-          transformEdgeMode: createParameter(
+          ...createParameter(
             set,
             "transformEdgeMode",
             {
@@ -1035,10 +968,9 @@ export const useStore = create<State>()(
               value: 1,
               options: EDGE_MODE,
             },
-            1,
             false,
           ),
-          synthesizeBrushType: createParameter(
+          ...createParameter(
             set,
             "synthesizeBrushType",
             {
@@ -1051,9 +983,9 @@ export const useStore = create<State>()(
                 { value: "sine", label: "Sine" },
               ],
             },
-            "noise",
             false,
           ),
+          ...createModulatorParams(set),
           openFilePaths: [],
           openFile: (file) =>
             set((state) => {
@@ -1107,27 +1039,15 @@ export const useStore = create<State>()(
           mousePos: null,
           setMousePos: (mousePos) => set({ mousePos }),
         };
+        return initialState as unknown as State;
       },
       {
         name: "noise-canvas-storage",
         partialize: (state) => {
           return Object.entries(state).reduce(
             (acc, [key, value]) => {
-              if (key === "modulators") {
-                acc[key] = (value as ModulatorParameters[]).map((modulator) => {
-                  const persistedModulator: Record<string, { value: unknown }> = {};
-                  for (const [paramKey, paramValue] of Object.entries(modulator)) {
-                    persistedModulator[paramKey] = { value: (paramValue as { value: unknown }).value };
-                  }
-                  return persistedModulator;
-                });
-              } else if (typeof value === "object" && value !== null && "value" in value) {
-                const param = value as Parameter<unknown> & { modulators?: { value: number }[] };
-                const persistedParam: { value: unknown; modulators?: { value: number }[] } = { value: param.value };
-                if (param.modulators) {
-                  persistedParam.modulators = param.modulators.map((m) => ({ value: m.value }));
-                }
-                acc[key] = persistedParam;
+              if (typeof value === "object" && value !== null && "value" in value) {
+                acc[key] = { value: (value as Parameter<unknown>).value };
               } else if (["filesBpm"].includes(key)) {
                 acc[key] = value;
               }
@@ -1136,47 +1056,19 @@ export const useStore = create<State>()(
             {} as Record<string, any>,
           );
         },
-        merge: (persistedState, currentState) => {
-          const customMerge = (current: any, persisted: any): any => {
-            const result = { ...current };
-            for (const key in persisted) {
-              if (Object.prototype.hasOwnProperty.call(persisted, key)) {
-                const currentValue = current[key];
-                const persistedValue = persisted[key];
-
-                if (
-                  typeof currentValue === "object" &&
-                  currentValue !== null &&
-                  !Array.isArray(currentValue) &&
-                  typeof persistedValue === "object" &&
-                  persistedValue !== null &&
-                  !Array.isArray(persistedValue)
-                ) {
-                  result[key] = customMerge(currentValue, persistedValue);
-                } else if (Array.isArray(currentValue) && Array.isArray(persistedValue)) {
-                  result[key] = currentValue.map((item, index) => {
-                    const persistedItem = persistedValue[index];
-                    if (
-                      typeof item === "object" &&
-                      item !== null &&
-                      typeof persistedItem === "object" &&
-                      persistedItem !== null
-                    ) {
-                      return customMerge(item, persistedItem);
-                    }
-                    return persistedItem ?? item;
-                  });
-                } else {
-                  result[key] = persistedValue;
-                }
-              }
-            }
-            return result;
-          };
-
-          return customMerge(currentState, persistedState as State);
-        },
+        merge: (persistedState, currentState) => deepMerge(currentState, persistedState),
       },
     ),
   ),
 );
+
+export function getModulator(index: number) {
+  return {
+    modulatorMode: useStore.getState()[`modulator${index}Mode` as ParameterKey],
+    modulatorPatternShape: useStore.getState()[`modulator${index}PatternShape` as ParameterKey],
+    modulatorPatternRateBeats: useStore.getState()[`modulator${index}PatternRateBeats` as ParameterKey],
+    modulatorPatternRateSemis: useStore.getState()[`modulator${index}PatternRateSemis` as ParameterKey],
+    modulatorStrength: useStore.getState()[`modulator${index}Strength` as ParameterKey],
+    modulatorRotation: useStore.getState()[`modulator${index}Rotation` as ParameterKey],
+  };
+}

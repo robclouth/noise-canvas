@@ -27,15 +27,15 @@ void main() {
         vec2 relativeUv = coords.dest - pivot;
 
         // 3. Apply INVERSE Rotation around the new origin (0,0).
-        float rotationValue = applyModulation(rotation.value, rotation.minValue, rotation.maxValue, rotation.modulationAmount, coords.dest);
+        float rotationValue = applyModulation(rotation.value, rotation.minValue, rotation.maxValue, rotation.modulationAmounts, coords.dest);
         float rad = radians(-rotationValue);
         mat2 rotMat = mat2(cos(rad), -sin(rad), sin(rad), cos(rad));
         vec2 rotatedUv = rotMat * relativeUv;
 
         // 4. Apply INVERSE Scale around the new origin (0,0).
         vec2 scaledUv = rotatedUv;
-        float scaleXValue = applyModulation(scaleX.value, scaleX.minValue, scaleX.maxValue, scaleX.modulationAmount, coords.dest);
-        float scaleYValue = applyModulation(scaleY.value, scaleY.minValue, scaleY.maxValue, scaleY.modulationAmount, coords.dest);
+        float scaleXValue = applyModulation(scaleX.value, scaleX.minValue, scaleX.maxValue, scaleX.modulationAmounts, coords.dest);
+        float scaleYValue = applyModulation(scaleY.value, scaleY.minValue, scaleY.maxValue, scaleY.modulationAmounts, coords.dest);
         if (abs(scaleXValue) > 1e-5 && abs(scaleYValue) > 1e-5) {
           scaledUv /= vec2(scaleXValue, scaleYValue);
         }
@@ -50,8 +50,8 @@ void main() {
         }
 
         // 6. Apply the final shift to get the source UV to sample from.
-        float shiftXValue = applyModulation(shiftX.value, shiftX.minValue, shiftX.maxValue, shiftX.modulationAmount, coords.dest);
-        float shiftYValue = applyModulation(shiftY.value, shiftY.minValue, shiftY.maxValue, shiftY.modulationAmount, coords.dest);
+        float shiftXValue = applyModulation(shiftX.value, shiftX.minValue, shiftX.maxValue, shiftX.modulationAmounts, coords.dest);
+        float shiftYValue = applyModulation(shiftY.value, shiftY.minValue, shiftY.maxValue, shiftY.modulationAmounts, coords.dest);
         vec2 finalSourceUv = transformedUv - vec2(shiftXValue * sign(scaleXValue), shiftYValue * sign(scaleYValue));
 
         bool inBrush = isInsideBrush(finalSourceUv);

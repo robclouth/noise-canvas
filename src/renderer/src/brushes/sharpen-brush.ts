@@ -1,6 +1,6 @@
 import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
-import { OpenFile } from "@renderer/types";
+import { ContinuousNumberParameter, OpenFile } from "@renderer/types";
 import { ShaderMaterial, Vector2 } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import sharpenBrushFrag from "../glsl/sharpen-brush.frag";
@@ -13,7 +13,7 @@ const uniforms = {
       value: 0.01,
       minValue: 0,
       maxValue: 100,
-      modulationAmount: 0,
+      modulationAmounts: [],
     },
   },
   sharpenAmountY: {
@@ -21,7 +21,7 @@ const uniforms = {
       value: 0.01,
       minValue: 0,
       maxValue: 100,
-      modulationAmount: 0,
+      modulationAmounts: [],
     },
   },
   sharpenDirection: {
@@ -68,7 +68,8 @@ class SharpenBrush extends BaseBrush {
     const material = this.materials[passIndex];
     if (!material) return;
 
-    const { sharpenAmountTime, sharpenAmountPitch } = useStore.getState();
+    const state = useStore.getState();
+    const { sharpenAmountTime, sharpenAmountPitch } = state;
     const { spectrogramData } = file;
 
     const sharpenAmountUv = unitsToUv(
@@ -84,13 +85,19 @@ class SharpenBrush extends BaseBrush {
       value: sharpenAmountUv.x,
       minValue: 0,
       maxValue: 0.1,
-      modulationAmounts: sharpenAmountTime.modulators?.map((modulationAmount) => modulationAmount.value / 100) || [],
+      modulationAmounts:
+        sharpenAmountTime.modulatorParamKeys?.map(
+          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+        ) || [],
     };
     material.uniforms.sharpenAmountY.value = {
       value: sharpenAmountUv.y,
       minValue: 0,
       maxValue: 0.1,
-      modulationAmounts: sharpenAmountPitch.modulators?.map((modulationAmount) => modulationAmount.value / 100) || [],
+      modulationAmounts:
+        sharpenAmountPitch.modulatorParamKeys?.map(
+          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+        ) || [],
     };
   }
 }
