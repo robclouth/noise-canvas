@@ -5,45 +5,40 @@ import { ParameterControl } from "../controls/parameter-control";
 import { Section } from "../section";
 
 export function ControlsPanel() {
-  const gridSizeBeatsParameter = useStore((state) => state.gridSizeBeats);
-  const gridSizeSemisParameter = useStore((state) => state.gridSizeSemis);
-  const scaleTonicParameter = useStore((state) => state.scaleTonic);
-  const scaleTypeParameter = useStore((state) => state.scaleType);
-  const normalizeParameter = useStore((state) => state.normalize);
-  const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid.value);
-  const bandsPerOctaveParameter = useStore((state) => state.bandsPerOctave);
-
-  const setBrushWidth = useStore((state) => state.brushWidthBeats.setValue);
-  const setBrushHeight = useStore((state) => state.brushHeightSemis.setValue);
-
   useEffect(() => {
-    if (brushSizeLockedToGrid) {
-      setBrushWidth(gridSizeBeatsParameter.value);
-      setBrushHeight(gridSizeSemisParameter.value);
-    }
-  }, [
-    brushSizeLockedToGrid,
-    gridSizeBeatsParameter.value,
-    gridSizeSemisParameter.value,
-    setBrushWidth,
-    setBrushHeight,
-  ]);
+    const unsubscribe = useStore.subscribe(
+      (state) => ({
+        brushSizeLockedToGrid: state.brushSizeLockedToGrid.value,
+        gridSizeBeats: state.gridSizeBeats.value,
+        gridSizeSemis: state.gridSizeSemis.value,
+        setBrushWidthBeats: state.brushWidthBeats.setValue,
+        setBrushHeightSemis: state.brushHeightSemis.setValue,
+      }),
+      ({ brushSizeLockedToGrid, gridSizeBeats, gridSizeSemis, setBrushWidthBeats, setBrushHeightSemis }) => {
+        if (brushSizeLockedToGrid) {
+          setBrushWidthBeats(gridSizeBeats);
+          setBrushHeightSemis(gridSizeSemis);
+        }
+      },
+    );
+    return () => unsubscribe();
+  }, []);
 
   return (
     <Stack h="100%" w="100%" p="xs">
       <Section label="Analysis">
-        <ParameterControl parameter={bandsPerOctaveParameter} />
+        <ParameterControl paramKey="bandsPerOctave" />
       </Section>
       <Section label="Grid">
-        <ParameterControl parameter={gridSizeBeatsParameter} />
-        <ParameterControl parameter={gridSizeSemisParameter} />
+        <ParameterControl paramKey="gridSizeBeats" />
+        <ParameterControl paramKey="gridSizeSemis" />
       </Section>
       <Section label="Scale">
-        <ParameterControl parameter={scaleTonicParameter} />
-        <ParameterControl parameter={scaleTypeParameter} />
+        <ParameterControl paramKey="scaleTonic" />
+        <ParameterControl paramKey="scaleType" />
       </Section>
       <Section label="Output">
-        <ParameterControl parameter={normalizeParameter} />
+        <ParameterControl paramKey="normalize" />
       </Section>
     </Stack>
   );
