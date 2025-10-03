@@ -12,7 +12,8 @@ import { ParameterControl } from "./controls/parameter-control";
 
 const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
   const { invalidate } = useThree();
-  const modulatorScaleLut = useModulatorScaleLut();
+  const activeFilePath = useStore((state) => state.activeFilePath);
+  const modulatorScaleLut = useModulatorScaleLut(activeFilePath || "");
 
   const material = useMemo(() => {
     const state = useStore.getState();

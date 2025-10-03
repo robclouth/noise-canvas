@@ -2,15 +2,14 @@ import { DataTexture, FloatType, RedFormat } from "three";
 import { Note, Scale } from "tonal";
 import { openFiles, useStore } from "../store";
 
-export const useModulatorScaleLut = () => {
-  const activeFilePath = useStore((state) => state.activeFilePath);
+export const useModulatorScaleLut = (filePath: string) => {
   const bandsPerOctave = useStore((state) => state.bandsPerOctave.value);
   const minFreq = useStore((state) => state.minFreq.value);
   const scaleTonic = useStore((state) => state.scaleTonic.value);
   const scaleType = useStore((state) => state.scaleType.value);
 
-  const activeFile = activeFilePath ? openFiles[activeFilePath] : null;
-  const spectrogramData = activeFile?.spectrogramData;
+  const file = openFiles[filePath];
+  const spectrogramData = file?.spectrogramData;
   if (!spectrogramData) return null;
 
   const { numBands } = spectrogramData;

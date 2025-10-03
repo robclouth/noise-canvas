@@ -59,7 +59,7 @@ export const FileRenderer = memo(
     const { spectrogramData } = openFiles[filePath];
     const { gl, camera, invalidate } = useThree();
 
-    const modulatorScaleLut = useModulatorScaleLut();
+    const modulatorScaleLut = useModulatorScaleLut(filePath);
 
     // Textures for spectrogram data
     const [packedDataTex, setPackedDataTex] = useState<THREE.DataTexture | null>(null);
