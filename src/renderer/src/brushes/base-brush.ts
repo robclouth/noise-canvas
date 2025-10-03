@@ -1,14 +1,14 @@
-import { OpenFile } from "@renderer/types";
+import { OpenFile, ParameterUniform } from "@renderer/types";
 import * as THREE from "three";
 import { Texture, Vector2 } from "three";
 
 export type Modulator = {
   modulatorMode: number;
   modulatorPatternShape: number;
-  modulatorPatternRateX: number;
-  modulatorPatternRateY: number;
-  modulatorStrength: number;
-  modulatorRotation: number;
+  modulatorPatternRateX: ParameterUniform;
+  modulatorPatternRateY: ParameterUniform;
+  modulatorStrength: ParameterUniform;
+  modulatorRotation: ParameterUniform;
 };
 
 export type CommonUniforms = {
@@ -43,38 +43,18 @@ export type CommonUniforms = {
   featherSlopePitch: { value: number };
   modulators: { value: Modulator[] };
   brushIntensity: {
-    value: {
-      value: number;
-      minValue: number;
-      maxValue: number;
-      modulationAmounts: number[];
-    };
+    value: ParameterUniform;
   };
   sourceOffsetX: {
-    value: {
-      value: number;
-      minValue: number;
-      maxValue: number;
-      modulationAmounts: number[];
-    };
+    value: ParameterUniform;
   };
 
   sourceOffsetY: {
-    value: {
-      value: number;
-      minValue: number;
-      maxValue: number;
-      modulationAmounts: number[];
-    };
+    value: ParameterUniform;
   };
 
   brushPan: {
-    value: {
-      value: number;
-      minValue: number;
-      maxValue: number;
-      modulationAmounts: number[];
-    };
+    value: ParameterUniform;
   };
 
   bpm: { value: number };

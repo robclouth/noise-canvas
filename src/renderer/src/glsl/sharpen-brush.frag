@@ -23,8 +23,8 @@ void main() {
         float referencePhaseL = getPhase(sourceCenterTexel.rg);
         float referencePhaseR = getPhase(sourceCenterTexel.ba);
 
-        float sharpenAmountXValue = applyModulation(sharpenAmountX.value, sharpenAmountX.minValue, sharpenAmountX.maxValue, sharpenAmountX.modulationAmount, coords.dest);
-        float sharpenAmountYValue = applyModulation(sharpenAmountY.value, sharpenAmountY.minValue, sharpenAmountY.maxValue, sharpenAmountY.modulationAmount, coords.dest);
+        float sharpenAmountXValue = applyModulation(sharpenAmountX.value, sharpenAmountX.minValue, sharpenAmountX.maxValue, sharpenAmountX.modulationAmount, coords.dest, 0);
+        float sharpenAmountYValue = applyModulation(sharpenAmountY.value, sharpenAmountY.minValue, sharpenAmountY.maxValue, sharpenAmountY.modulationAmount, coords.dest, 0);
 
         float sharpenAmount = sharpenDirection.x > 0.0 ? sharpenAmountXValue : sharpenAmountYValue;
         

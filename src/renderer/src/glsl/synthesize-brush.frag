@@ -4,13 +4,13 @@ varying vec2 vUv;
 #include "brush-common.glsl";
 #include "brush-wrapper.glsl"
 
-uniform float synthesizeType;
+uniform int synthesizeType;
 
 vec4 applyBrushStroke(vec4 sourceTexel, ProcessingUvs coords) {
   vec2 complexValueL;
   vec2 complexValueR;
 
-  if (synthesizeType < 0.5) { // Noise
+  if (synthesizeType == 0) { // Noise
     // Use a small offset to de-correlate multiple random calls
     vec2 seed1 = coords.dest;
     vec2 seed2 = coords.dest + vec2(12.34, 56.78);
@@ -26,11 +26,15 @@ vec4 applyBrushStroke(vec4 sourceTexel, ProcessingUvs coords) {
     float amplitudeR = random(seed1.yx + random(seed2.yx));
     float phaseR = (random(seed3.yx + random(seed4.yx)) * 2.0 - 1.0) * PI;
     complexValueR = fromPolar(amplitudeR, phaseR);
-  } else { // Sine
+  } else if (synthesizeType == 1) { // Sine
     float amplitude = 1.0;
     float phase = 0.0;
     complexValueL = fromPolar(amplitude, phase);
     complexValueR = fromPolar(amplitude, phase);
+  }
+  else {
+    complexValueL = vec2(0.0, 0.0);
+    complexValueR = vec2(0.0, 0.0);
   }
 
   return vec4(complexValueL, complexValueR);

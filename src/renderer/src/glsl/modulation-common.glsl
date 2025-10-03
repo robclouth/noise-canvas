@@ -10,34 +10,36 @@
 struct Modulator {
   int modulatorMode;
   int modulatorPatternShape;
-  float modulatorPatternRateX;
-  float modulatorPatternRateY;
-  float modulatorStrength;
-  float modulatorRotation;
+  Parameter modulatorPatternRateX;
+  Parameter modulatorPatternRateY;
+  Parameter modulatorStrength;
+  Parameter modulatorRotation;
 };
 
 uniform Modulator[NUM_MODULATORS] modulators;
 uniform sampler2D gainLut;
 
-float getModulation(vec2 uv, int modulatorIndex) {
+// Base version that doesn't apply modulation to modulator parameters
+// This is used internally to avoid recursion
+float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float patternRateY, float strength, float rotation) {
   float v = 0.0;
 
   Modulator modulator = modulators[modulatorIndex];
 
   vec2 rates = vec2(
-    modulator.modulatorPatternRateX == 0.0 ? 0.0 : 1.0 / modulator.modulatorPatternRateX,
-    modulator.modulatorPatternRateY == 0.0 ? 0.0 : 1.0 / modulator.modulatorPatternRateY
+    patternRateX == 0.0 ? 0.0 : 1.0 / patternRateX,
+    patternRateY == 0.0 ? 0.0 : 1.0 / patternRateY
   );
 
-  float rot = modulator.modulatorRotation * PI / 180.0;
+  float rot = rotation * PI / 180.0;
   float s = sin(rot);
   float c = cos(rot);
   mat2 m = mat2(c, -s, s, c);
   vec2 rotatedUv = m * (uv - 0.5) + 0.5;
 
   vec2 pos = rotatedUv * rates;
-  bool x_zero = modulator.modulatorPatternRateX == 0.0;
-  bool y_zero = modulator.modulatorPatternRateY == 0.0;
+  bool x_zero = patternRateX == 0.0;
+  bool y_zero = patternRateY == 0.0;
 
   if (modulator.modulatorPatternShape == 0) { // SINE
     float sx = sin(pos.x * 2.0 * PI);
@@ -105,12 +107,82 @@ float getModulation(vec2 uv, int modulatorIndex) {
     v = texture2D(gainLut, vec2(rotatedUv.y, 0.5)).r;
   }
 
-  return mix(0.5 - modulator.modulatorStrength / 2.0, 0.5 + modulator.modulatorStrength / 2.0, v);
+  return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
 }
 
-float applyModulation(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, vec2 uv) {
+// Version with modulated parameters (calls base version with computed params)
+float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation) {
+  Modulator modulator = modulators[modulatorIndex];
+  
+  float patternRateX = modulator.modulatorPatternRateX.value;
+  float patternRateY = modulator.modulatorPatternRateY.value;
+  float strength = modulator.modulatorStrength.value;
+  float rotation = modulator.modulatorRotation.value;
+  
+  // Only apply modulation to modulator parameters if we're at depth 0 (not nested)
+  if (allowNestedModulation) {
+    // Apply one level of modulation to each parameter
+    for (int i = 0; i < NUM_MODULATORS; i++) {
+      float modAmount = modulator.modulatorPatternRateX.modulationAmounts[i];
+      if (modAmount != 0.0) {
+        float mod = getModulationBase(uv, i, 
+          modulators[i].modulatorPatternRateX.value,
+          modulators[i].modulatorPatternRateY.value,
+          modulators[i].modulatorStrength.value,
+          modulators[i].modulatorRotation.value);
+        float minV = modAmount < 0.0 ? modulator.modulatorPatternRateX.maxValue : modulator.modulatorPatternRateX.minValue;
+        float maxV = modAmount < 0.0 ? modulator.modulatorPatternRateX.minValue : modulator.modulatorPatternRateX.maxValue;
+        patternRateX = mix(patternRateX, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
+      }
+      
+      modAmount = modulator.modulatorPatternRateY.modulationAmounts[i];
+      if (modAmount != 0.0) {
+        float mod = getModulationBase(uv, i,
+          modulators[i].modulatorPatternRateX.value,
+          modulators[i].modulatorPatternRateY.value,
+          modulators[i].modulatorStrength.value,
+          modulators[i].modulatorRotation.value);
+        float minV = modAmount < 0.0 ? modulator.modulatorPatternRateY.maxValue : modulator.modulatorPatternRateY.minValue;
+        float maxV = modAmount < 0.0 ? modulator.modulatorPatternRateY.minValue : modulator.modulatorPatternRateY.maxValue;
+        patternRateY = mix(patternRateY, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
+      }
+      
+      modAmount = modulator.modulatorStrength.modulationAmounts[i];
+      if (modAmount != 0.0) {
+        float mod = getModulationBase(uv, i,
+          modulators[i].modulatorPatternRateX.value,
+          modulators[i].modulatorPatternRateY.value,
+          modulators[i].modulatorStrength.value,
+          modulators[i].modulatorRotation.value);
+        float minV = modAmount < 0.0 ? modulator.modulatorStrength.maxValue : modulator.modulatorStrength.minValue;
+        float maxV = modAmount < 0.0 ? modulator.modulatorStrength.minValue : modulator.modulatorStrength.maxValue;
+        strength = mix(strength, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
+      }
+      
+      modAmount = modulator.modulatorRotation.modulationAmounts[i];
+      if (modAmount != 0.0) {
+        float mod = getModulationBase(uv, i,
+          modulators[i].modulatorPatternRateX.value,
+          modulators[i].modulatorPatternRateY.value,
+          modulators[i].modulatorStrength.value,
+          modulators[i].modulatorRotation.value);
+        float minV = modAmount < 0.0 ? modulator.modulatorRotation.maxValue : modulator.modulatorRotation.minValue;
+        float maxV = modAmount < 0.0 ? modulator.modulatorRotation.minValue : modulator.modulatorRotation.maxValue;
+        rotation = mix(rotation, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
+      }
+    }
+  }
+  
+  return getModulationBase(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation);
+}
+
+float applyModulation(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, vec2 uv, int depth) {
   float totalModulation = 0.0;
   float totalModulationAmount = 0.0;
+
+  // depth 0 = brush parameters (allow nested modulation)
+  // depth 1+ = modulator parameters (no nested modulation)
+  bool allowNested = (depth == 0);
 
   for (int i = 0; i < NUM_MODULATORS; i++) {
     float modulationAmount = modulationAmounts[i];
@@ -118,7 +190,7 @@ float applyModulation(float value, float minValue, float maxValue, float[NUM_MOD
       continue;
     }
 
-    float modulation = getModulation(uv, i);
+    float modulation = getModulation(uv, i, allowNested);
 
     float minV = minValue;
     float maxV = maxValue;

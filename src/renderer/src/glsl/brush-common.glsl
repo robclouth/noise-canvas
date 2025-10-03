@@ -2,12 +2,7 @@
 // UNIFORMS & STRUCTS
 // ============================================================================
 
-struct Parameter {
-    float value;
-    float minValue;
-    float maxValue;
-    float modulationAmounts[3];
-};
+#include "common.glsl"
 
 uniform sampler2D sourceSpectrogramTex;
 uniform sampler2D sourceMetadataTex;
@@ -51,8 +46,6 @@ uniform int blendMode;
 // DEFINES & HELPERS
 // ============================================================================
 
-#define PI 3.141592653589793
-
 #include "modulation-common.glsl"; // Contains modulation and random functions
 
 // Unwraps a phase angle to the range [-PI, PI].
@@ -91,8 +84,8 @@ vec2 packedToUnpackedUv(sampler2D inverseMapTex, vec2 packedUv, float frameCount
 ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
     ProcessingUvs uvs;
     uvs.dest = packedToUnpackedUv(destInverseMapTex, destPackedUv, destFrameCount, destBandCount);
-    float sourceOffsetX = applyModulation(sourceOffsetX.value, sourceOffsetX.minValue, sourceOffsetX.maxValue, sourceOffsetX.modulationAmounts, uvs.dest);
-    float sourceOffsetY = applyModulation(sourceOffsetY.value, sourceOffsetY.minValue, sourceOffsetY.maxValue, sourceOffsetY.modulationAmounts, uvs.dest);
+    float sourceOffsetX = applyModulation(sourceOffsetX.value, sourceOffsetX.minValue, sourceOffsetX.maxValue, sourceOffsetX.modulationAmounts, uvs.dest, 0);
+    float sourceOffsetY = applyModulation(sourceOffsetY.value, sourceOffsetY.minValue, sourceOffsetY.maxValue, sourceOffsetY.modulationAmounts, uvs.dest, 0);
     vec2 offsetUv = vec2(sourceOffsetX, sourceOffsetY);
     uvs.source = uvs.dest + offsetUv;
     return uvs;
@@ -370,8 +363,8 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
     vec2 modifiedR = modified.ba;
 
     // Calculate modulation values
-    float pan = applyModulation(brushPan.value, brushPan.minValue, brushPan.maxValue, brushPan.modulationAmounts, destUv);
-    float intensity = applyModulation(brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue, brushIntensity.modulationAmounts, destUv);
+    float pan = applyModulation(brushPan.value, brushPan.minValue, brushPan.maxValue, brushPan.modulationAmounts, destUv, 0);
+    float intensity = applyModulation(brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue, brushIntensity.modulationAmounts, destUv, 0);
 
     // Apply panning to the modified signal by scaling its magnitude.
     // A simple component-wise multiplication works because scaling a complex number (a, b)

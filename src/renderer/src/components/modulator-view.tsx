@@ -5,7 +5,6 @@ import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { ParameterKey, useStore } from "@renderer/store";
 import { useEffect, useMemo, useState } from "react";
 import { ShaderMaterial } from "three";
-import { useShallow } from "zustand/react/shallow";
 import modulatorFrag from "../glsl/modulator.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
@@ -14,35 +13,50 @@ import { ParameterControl } from "./controls/parameter-control";
 const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
   const { invalidate } = useThree();
   const modulatorScaleLut = useModulatorScaleLut();
-  const modulatorValues = useStore(
-    useShallow((state) => {
-      const values: Record<string, number> = {};
-      for (let i = 0; i < NUM_MODULATORS; i++) {
-        values[`modulator${i + 1}Mode`] = state[`modulator${i + 1}Mode`].value;
-        values[`modulator${i + 1}PatternShape`] = state[`modulator${i + 1}PatternShape`].value;
-        values[`modulator${i + 1}PatternRateBeats`] = state[`modulator${i + 1}PatternRateBeats`].value;
-        values[`modulator${i + 1}PatternRateSemis`] = state[`modulator${i + 1}PatternRateSemis`].value;
-        values[`modulator${i + 1}Strength`] = state[`modulator${i + 1}Strength`].value / 100.0;
-        values[`modulator${i + 1}Rotation`] = state[`modulator${i + 1}Rotation`].value;
-      }
-      return values;
-    }),
-  );
-
-  const modulators = useMemo(
-    () =>
-      Array.from({ length: NUM_MODULATORS }).map((_, i) => ({
-        modulatorMode: modulatorValues[`modulator${i + 1}Mode`],
-        modulatorPatternShape: modulatorValues[`modulator${i + 1}PatternShape`],
-        modulatorPatternRateX: modulatorValues[`modulator${i + 1}PatternRateBeats`],
-        modulatorPatternRateY: modulatorValues[`modulator${i + 1}PatternRateSemis`],
-        modulatorStrength: modulatorValues[`modulator${i + 1}Strength`],
-        modulatorRotation: modulatorValues[`modulator${i + 1}Rotation`],
-      })),
-    [modulatorValues],
-  );
 
   const material = useMemo(() => {
+    const state = useStore.getState();
+    const modulators = Array.from({ length: NUM_MODULATORS }).map((_, i) => ({
+      modulatorMode: state[`modulator${i + 1}Mode`].value,
+      modulatorPatternShape: state[`modulator${i + 1}PatternShape`].value,
+      modulatorPatternRateX: {
+        value: state[`modulator${i + 1}PatternRateBeats`].value,
+        minValue: 0.0,
+        maxValue: 64.0,
+        modulationAmounts:
+          state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map(
+            (paramKey) => (state[paramKey] as any).value / 100,
+          ) || [],
+      },
+      modulatorPatternRateY: {
+        value: state[`modulator${i + 1}PatternRateSemis`].value,
+        minValue: 0.0,
+        maxValue: 96.0,
+        modulationAmounts:
+          state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map(
+            (paramKey) => (state[paramKey] as any).value / 100,
+          ) || [],
+      },
+      modulatorStrength: {
+        value: state[`modulator${i + 1}Strength`].value / 100.0,
+        minValue: -1.0,
+        maxValue: 1.0,
+        modulationAmounts:
+          state[`modulator${i + 1}Strength`].modulatorParamKeys?.map(
+            (paramKey) => (state[paramKey] as any).value / 100,
+          ) || [],
+      },
+      modulatorRotation: {
+        value: state[`modulator${i + 1}Rotation`].value,
+        minValue: 0.0,
+        maxValue: 360.0,
+        modulationAmounts:
+          state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map(
+            (paramKey) => (state[paramKey] as any).value / 100,
+          ) || [],
+      },
+    }));
+
     return new ShaderMaterial({
       uniforms: {
         modulatorIndex: { value: modulatorIndex },
@@ -56,11 +70,61 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
   }, []);
 
   useEffect(() => {
-    material.uniforms.modulators.value = modulators;
     material.uniforms.modulatorIndex.value = modulatorIndex;
     material.uniforms.gainLut.value = modulatorScaleLut;
     invalidate();
-  }, [material, modulators, modulatorIndex, modulatorScaleLut, invalidate]);
+  }, [material, modulatorIndex, modulatorScaleLut, invalidate]);
+
+  useEffect(() => {
+    // Subscribe to store changes and update uniforms
+    const unsubscribe = useStore.subscribe((state) => {
+      const modulators = Array.from({ length: NUM_MODULATORS }).map((_, i) => ({
+        modulatorMode: state[`modulator${i + 1}Mode`].value,
+        modulatorPatternShape: state[`modulator${i + 1}PatternShape`].value,
+        modulatorPatternRateX: {
+          value: state[`modulator${i + 1}PatternRateBeats`].value,
+          minValue: 0.0,
+          maxValue: 64.0,
+          modulationAmounts:
+            state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map(
+              (paramKey) => (state[paramKey] as any).value / 100,
+            ) || [],
+        },
+        modulatorPatternRateY: {
+          value: state[`modulator${i + 1}PatternRateSemis`].value,
+          minValue: 0.0,
+          maxValue: 96.0,
+          modulationAmounts:
+            state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map(
+              (paramKey) => (state[paramKey] as any).value / 100,
+            ) || [],
+        },
+        modulatorStrength: {
+          value: state[`modulator${i + 1}Strength`].value / 100.0,
+          minValue: -1.0,
+          maxValue: 1.0,
+          modulationAmounts:
+            state[`modulator${i + 1}Strength`].modulatorParamKeys?.map(
+              (paramKey) => (state[paramKey] as any).value / 100,
+            ) || [],
+        },
+        modulatorRotation: {
+          value: state[`modulator${i + 1}Rotation`].value,
+          minValue: 0.0,
+          maxValue: 360.0,
+          modulationAmounts:
+            state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map(
+              (paramKey) => (state[paramKey] as any).value / 100,
+            ) || [],
+        },
+      }));
+
+      material.uniforms.modulators.value = modulators;
+      invalidate();
+    });
+
+    return () => unsubscribe();
+  }, [material, invalidate]);
 
   return (
     <mesh>

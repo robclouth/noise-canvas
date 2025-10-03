@@ -15,6 +15,7 @@ import {
   PATTERN_SHAPES,
   PITCH_VALUES,
   PITCH_VALUES_NO_FRACTIONS,
+  SYNTHESIZE_TYPES,
 } from "./lib/constants";
 import { Parameter } from "./Parameter";
 import {
@@ -121,7 +122,7 @@ export type State = {
   transformEdgeMode: OptionsParameter<number>;
 
   // Synthesize Brush
-  synthesizeBrushType: OptionsParameter<string>;
+  synthesizeBrushType: OptionsParameter<number>;
 
   // Blur Brush
   blurAmountTime: ContinuousNumberParameter;
@@ -284,7 +285,7 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
           step: 1,
           unit: "%",
         },
-        false,
+        true,
       ),
     };
     paramKey = `modulator${i + 1}PatternRateBeats` as ParameterKey;
@@ -295,15 +296,15 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
         paramKey,
         {
           name: `Modulator Pattern Rate Beats ${i + 1}`,
-          label: "Rate",
+          label: "Rate H",
           description: "The rate of the modulator pattern.",
-          value: 0,
+          value: 1,
           values: [{ value: 0, label: "Off" }, ...BEAT_VALUES].map((value) => ({
             value: value.value,
             label: value.label,
           })),
         },
-        false,
+        true,
       ),
     };
     paramKey = `modulator${i + 1}PatternRateSemis` as ParameterKey;
@@ -314,15 +315,15 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
         paramKey,
         {
           name: `Modulator Pattern Rate Semis ${i + 1}`,
-          label: "Rate",
+          label: "Rate V",
           description: "The rate of the modulator pattern.",
-          value: 0,
+          value: 12,
           values: [{ value: 0, label: "Off" }, ...PITCH_VALUES].map((value) => ({
             value: value.value,
             label: value.label,
           })),
         },
-        false,
+        true,
       ),
     };
     paramKey = `modulator${i + 1}Rotation` as ParameterKey;
@@ -341,7 +342,7 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
           step: 1,
           unit: "°",
         },
-        false,
+        true,
       ),
     };
   }
@@ -511,7 +512,7 @@ export const useStore = create<State>()(
             "brushType",
             {
               name: "Brush Type",
-              label: "Type",
+              label: "Brush",
               description: "The type of brush to use.",
               value: "gain",
               options: [
@@ -977,11 +978,8 @@ export const useStore = create<State>()(
               name: "Synthesize Type",
               label: "Type",
               description: "The type of synthesis to use.",
-              value: "noise",
-              options: [
-                { value: "noise", label: "Noise" },
-                { value: "sine", label: "Sine" },
-              ],
+              value: 0,
+              options: SYNTHESIZE_TYPES,
             },
             false,
           ),

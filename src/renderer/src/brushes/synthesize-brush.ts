@@ -1,5 +1,7 @@
-import { ContinuousNumberParameter, OpenFile } from "@renderer/types";
+import { OpenFile } from "@renderer/types";
 import { ShaderMaterial } from "three";
+import passThroughVert from "../glsl/pass-through.vert";
+import synthesizeBrushFrag from "../glsl/synthesize-brush.frag";
 import { useStore } from "../store";
 import { BaseBrush, CommonUniforms, defaultValues } from "./base-brush";
 
@@ -10,15 +12,10 @@ class SynthesizeBrush extends BaseBrush {
       new ShaderMaterial({
         uniforms: {
           ...defaultValues,
-          synthesizeType: {
-            value: {
-              value: 0.0,
-              minValue: 0,
-              maxValue: 0,
-              modulationAmounts: [],
-            },
-          },
+          synthesizeType: { value: 0 },
         },
+        vertexShader: passThroughVert,
+        fragmentShader: synthesizeBrushFrag,
       }),
     ];
   }
@@ -27,15 +24,7 @@ class SynthesizeBrush extends BaseBrush {
     this.updateCommonUniforms(props);
     const state = useStore.getState();
     const { synthesizeBrushType } = state;
-    this.materials[props.passIndex].uniforms.synthesizeType.value = {
-      value: synthesizeBrushType.value,
-      minValue: 0,
-      maxValue: synthesizeBrushType.options.length - 1,
-      modulationAmounts:
-        synthesizeBrushType.modulatorParamKeys?.map(
-          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-        ) || [],
-    };
+    this.materials[props.passIndex].uniforms.synthesizeType.value = synthesizeBrushType.value;
   }
 }
 

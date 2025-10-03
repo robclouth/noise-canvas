@@ -134,4 +134,9 @@ export const EDGE_MODE = [
   { value: 3, label: "Mirror" },
 ];
 
+export const SYNTHESIZE_TYPES = [
+  { value: 0, label: "Noise" },
+  { value: 1, label: "Sine" },
+];
+
 export const NUM_MODULATORS = 3;

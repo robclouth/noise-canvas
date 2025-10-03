@@ -365,13 +365,58 @@ export const FileRenderer = memo(
               spectrogramData.bandsPerOctave,
               spectrogramData.numBands,
             );
+
+            // Calculate min/max for pattern rates in UV space
+            const maxBeats = 64; // Maximum beat value from BEAT_VALUES
+            const maxSemis = 96; // Maximum semitone value from PITCH_VALUES
+            const maxRateUv = unitsToUv(
+              maxBeats,
+              maxSemis,
+              bpm,
+              totalDuration,
+              spectrogramData.bandsPerOctave,
+              spectrogramData.numBands,
+            );
+
             return {
               modulatorMode: state[`modulator${i + 1}Mode`].value,
               modulatorPatternShape: state[`modulator${i + 1}PatternShape`].value,
-              modulatorPatternRateX: modulatorPatternRate.x,
-              modulatorPatternRateY: modulatorPatternRate.y,
-              modulatorStrength: state[`modulator${i + 1}Strength`].value / 100,
-              modulatorRotation: state[`modulator${i + 1}Rotation`].value,
+              modulatorPatternRateX: {
+                value: modulatorPatternRate.x,
+                minValue: 0.0,
+                maxValue: maxRateUv.x,
+                modulationAmounts:
+                  state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map(
+                    (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+                  ) || [],
+              },
+              modulatorPatternRateY: {
+                value: modulatorPatternRate.y,
+                minValue: 0.0,
+                maxValue: maxRateUv.y,
+                modulationAmounts:
+                  state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map(
+                    (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+                  ) || [],
+              },
+              modulatorStrength: {
+                value: state[`modulator${i + 1}Strength`].value / 100,
+                minValue: -1.0,
+                maxValue: 1.0,
+                modulationAmounts:
+                  state[`modulator${i + 1}Strength`].modulatorParamKeys?.map(
+                    (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+                  ) || [],
+              },
+              modulatorRotation: {
+                value: state[`modulator${i + 1}Rotation`].value,
+                minValue: 0.0,
+                maxValue: 360.0,
+                modulationAmounts:
+                  state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map(
+                    (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+                  ) || [],
+              },
             };
           }),
         },
