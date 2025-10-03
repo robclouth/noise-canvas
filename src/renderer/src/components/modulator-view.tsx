@@ -76,52 +76,86 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
   }, [material, modulatorIndex, modulatorScaleLut, invalidate]);
 
   useEffect(() => {
-    // Subscribe to store changes and update uniforms
-    const unsubscribe = useStore.subscribe((state) => {
-      const modulators = Array.from({ length: NUM_MODULATORS }).map((_, i) => ({
-        modulatorMode: state[`modulator${i + 1}Mode`].value,
-        modulatorPatternShape: state[`modulator${i + 1}PatternShape`].value,
-        modulatorPatternRateX: {
-          value: state[`modulator${i + 1}PatternRateBeats`].value,
-          minValue: 0.0,
-          maxValue: 64.0,
-          modulationAmounts:
-            state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map(
-              (paramKey) => (state[paramKey] as any).value / 100,
-            ) || [],
-        },
-        modulatorPatternRateY: {
-          value: state[`modulator${i + 1}PatternRateSemis`].value,
-          minValue: 0.0,
-          maxValue: 96.0,
-          modulationAmounts:
-            state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map(
-              (paramKey) => (state[paramKey] as any).value / 100,
-            ) || [],
-        },
-        modulatorStrength: {
-          value: state[`modulator${i + 1}Strength`].value / 100.0,
-          minValue: -1.0,
-          maxValue: 1.0,
-          modulationAmounts:
-            state[`modulator${i + 1}Strength`].modulatorParamKeys?.map(
-              (paramKey) => (state[paramKey] as any).value / 100,
-            ) || [],
-        },
-        modulatorRotation: {
-          value: state[`modulator${i + 1}Rotation`].value,
-          minValue: 0.0,
-          maxValue: 360.0,
-          modulationAmounts:
-            state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map(
-              (paramKey) => (state[paramKey] as any).value / 100,
-            ) || [],
-        },
-      }));
+    // Subscribe to modulator-related state changes and update uniforms
+    // Create a selector that only responds to modulator parameter changes
+    const getModulatorState = (state) => {
+      // Build a minimal state object containing only modulator-related values
+      const modulatorState = {};
+      for (let i = 0; i < NUM_MODULATORS; i++) {
+        modulatorState[`modulator${i + 1}Mode`] = state[`modulator${i + 1}Mode`].value;
+        modulatorState[`modulator${i + 1}PatternShape`] = state[`modulator${i + 1}PatternShape`].value;
+        modulatorState[`modulator${i + 1}PatternRateBeats`] = state[`modulator${i + 1}PatternRateBeats`].value;
+        modulatorState[`modulator${i + 1}PatternRateSemis`] = state[`modulator${i + 1}PatternRateSemis`].value;
+        modulatorState[`modulator${i + 1}Strength`] = state[`modulator${i + 1}Strength`].value;
+        modulatorState[`modulator${i + 1}Rotation`] = state[`modulator${i + 1}Rotation`].value;
 
-      material.uniforms.modulators.value = modulators;
-      invalidate();
-    });
+        // Include modulation amounts for all parameters
+        state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.forEach((paramKey) => {
+          modulatorState[paramKey] = state[paramKey].value;
+        });
+        state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.forEach((paramKey) => {
+          modulatorState[paramKey] = state[paramKey].value;
+        });
+        state[`modulator${i + 1}Strength`].modulatorParamKeys?.forEach((paramKey) => {
+          modulatorState[paramKey] = state[paramKey].value;
+        });
+        state[`modulator${i + 1}Rotation`].modulatorParamKeys?.forEach((paramKey) => {
+          modulatorState[paramKey] = state[paramKey].value;
+        });
+      }
+      return modulatorState;
+    };
+
+    const unsubscribe = useStore.subscribe(
+      getModulatorState,
+      () => {
+        const state = useStore.getState();
+        const modulators = Array.from({ length: NUM_MODULATORS }).map((_, i) => ({
+          modulatorMode: state[`modulator${i + 1}Mode`].value,
+          modulatorPatternShape: state[`modulator${i + 1}PatternShape`].value,
+          modulatorPatternRateX: {
+            value: state[`modulator${i + 1}PatternRateBeats`].value,
+            minValue: 0.0,
+            maxValue: 64.0,
+            modulationAmounts:
+              state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map(
+                (paramKey) => (state[paramKey] as any).value / 100,
+              ) || [],
+          },
+          modulatorPatternRateY: {
+            value: state[`modulator${i + 1}PatternRateSemis`].value,
+            minValue: 0.0,
+            maxValue: 96.0,
+            modulationAmounts:
+              state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map(
+                (paramKey) => (state[paramKey] as any).value / 100,
+              ) || [],
+          },
+          modulatorStrength: {
+            value: state[`modulator${i + 1}Strength`].value / 100.0,
+            minValue: -1.0,
+            maxValue: 1.0,
+            modulationAmounts:
+              state[`modulator${i + 1}Strength`].modulatorParamKeys?.map(
+                (paramKey) => (state[paramKey] as any).value / 100,
+              ) || [],
+          },
+          modulatorRotation: {
+            value: state[`modulator${i + 1}Rotation`].value,
+            minValue: 0.0,
+            maxValue: 360.0,
+            modulationAmounts:
+              state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map(
+                (paramKey) => (state[paramKey] as any).value / 100,
+              ) || [],
+          },
+        }));
+
+        material.uniforms.modulators.value = modulators;
+        invalidate();
+      },
+      { equalityFn: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
+    );
 
     return () => unsubscribe();
   }, [material, invalidate]);
