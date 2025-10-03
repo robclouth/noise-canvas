@@ -176,6 +176,9 @@ export const FileRenderer = memo(
       setInverseMapTex(inverse);
       setMetadataTex(meta);
 
+      // Reset render tracking when textures change
+      isInitialized.current = false;
+
       return () => {
         packed.dispose();
         inverse.dispose();
@@ -221,7 +224,8 @@ export const FileRenderer = memo(
         return;
 
       // Initial copy of the spectrogram data to the FBO
-      if (!isInitialized.current) {
+      const needsInitialization = !isInitialized.current;
+      if (needsInitialization) {
         fboMesh.material = copyMaterial;
         copyMaterial.uniforms.inputTex.value = packedDataTex;
 
@@ -229,15 +233,23 @@ export const FileRenderer = memo(
         gl.render(fboScene, camera);
         gl.setRenderTarget(null);
 
-        isInitialized.current = true;
         pingPong.current = 0;
-
-        invalidate();
 
         window.api.addUndoState({ data: spectrogramData.packedData.buffer, filePath });
         debouncedSynthesis(filePath, spectrogramData.packedData);
+        // Continue to initial render - don't skip on first frame
       }
+
       const state = useStore.getState();
+
+      // After first render, only update if this file is the active file or the source file
+      if (isInitialized.current) {
+        const isActiveFile = state.activeFilePath === filePath;
+        const isSourceFile = state.sourceFilePath === filePath;
+        if (!isActiveFile && !isSourceFile) {
+          return;
+        }
+      }
 
       const sourceFile = state.sourceFilePath ? openFiles[state.sourceFilePath] : null;
       if (!sourceFile) return;
@@ -531,6 +543,9 @@ export const FileRenderer = memo(
       }
 
       if (applyStroke.current) applyStroke.current = false;
+
+      // Mark that we've completed at least one full render (including initialization if needed)
+      isInitialized.current = true;
     });
 
     /**
