@@ -4,6 +4,8 @@ import { memo } from "react";
 import { FileView } from "../file-view";
 
 export const CanvasPanel = memo(() => {
+  console.log("CanvasPanel render");
+
   const openFilePaths = useStore((state) => state.openFilePaths);
 
   console.log("openFilePaths", openFilePaths);

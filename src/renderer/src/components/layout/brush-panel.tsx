@@ -1,27 +1,11 @@
 import { useStore } from "@/store";
 import { Stack } from "@mantine/core";
-import { BlurBrush } from "../brush-views/blur-brush";
-import { GainBrush } from "../brush-views/gain-brush";
-import { HarmonicsBrush } from "../brush-views/harmonics-brush";
-import { SharpenBrush } from "../brush-views/sharpen-brush";
-import { SynthesizeBrush } from "../brush-views/synthesize-brush";
-import { TransformBrush } from "../brush-views/transform-brush";
 import { ParameterControl } from "../controls/parameter-control";
+import { EffectsList } from "../effects-list";
 import { ModulatorView } from "../modulator-view";
 import { Section } from "../section";
 
-const BRUSH_VIEWS = {
-  gain: <GainBrush />,
-  transform: <TransformBrush />,
-  harmonics: <HarmonicsBrush />,
-  blur: <BlurBrush />,
-  sharpen: <SharpenBrush />,
-  synthesize: <SynthesizeBrush />,
-  restore: <></>,
-};
-
 export function BrushPanel() {
-  const brushType = useStore((state) => state.brushType.value);
   const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid.value);
 
   return (
@@ -48,10 +32,11 @@ export function BrushPanel() {
         <ParameterControl paramKey="sourceOffsetSemis" />
         <ParameterControl paramKey="sourceOffsetLock" />
       </Section>
-      <Section label="Brush">
-        <ParameterControl paramKey="brushType" />
-        {BRUSH_VIEWS[brushType] ? BRUSH_VIEWS[brushType] : null}
+
+      <Section label="Effects">
+        <EffectsList />
       </Section>
+
       <Section label="Modulators">
         <ModulatorView />
       </Section>

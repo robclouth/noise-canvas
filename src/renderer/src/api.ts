@@ -15,8 +15,8 @@ export function init() {
       openFile(
         "/Users/rob/Splice/sounds/packs/Indian Vocal Pack (Mitika Kanwar)/Indian_Vocal_Pack/Loops/Resampled/JMK_IVP_124_indian_vocal_female_hook_humming_dance_resampled_pitched_A#m.wav",
       );
-      // openFile("/Users/rob/Desktop/tone2.wav");
-      // openFile("/Users/rob/Desktop/tone2-sat.wav");
+      openFile("/Users/rob/Desktop/tone2.wav");
+      openFile("/Users/rob/Desktop/tone2-sat.wav");
     }
   }
 
@@ -138,8 +138,8 @@ export function init() {
     if (state.activeFilePath !== prevState.activeFilePath) {
       const newPath = state.activeFilePath;
       if (newPath) {
-        if (!state.sourceFilePath) {
-          useStore.getState().setSourceFilePath(newPath);
+        if (!state.sourceFile) {
+          useStore.getState().setSourceFile({ path: newPath, mode: "current" });
         }
         window.api.setActiveFile(newPath);
       }
@@ -150,10 +150,10 @@ export function init() {
 export function destroy() {
   unsubscribers.forEach((unsub) => unsub());
   unsubscribers = [];
-  const { closeAllFiles, setActiveFilePath, setSourceFilePath } = useStore.getState();
+  const { closeAllFiles, setActiveFilePath, setSourceFile } = useStore.getState();
   closeAllFiles();
   setActiveFilePath(null);
-  setSourceFilePath(null);
+  setSourceFile(null);
 }
 
 export function addFile(payload: AnalysisPayloadForRenderer) {
@@ -210,8 +210,8 @@ function openFile(filePath: string) {
 }
 
 export function closeFile(filePath: string) {
-  const { sourceFilePath, closeFile, setFileBpm, setActiveFilePath, setSourceFilePath } = useStore.getState();
-  const isClosingSource = sourceFilePath === filePath;
+  const { sourceFile, closeFile, setFileBpm, setActiveFilePath, setSourceFile } = useStore.getState();
+  const isClosingSource = sourceFile?.path === filePath;
   closeFile(filePath);
 
   setFileBpm(filePath, undefined);
@@ -227,6 +227,6 @@ export function closeFile(filePath: string) {
   }
 
   if (isClosingSource) {
-    setSourceFilePath(newActiveFilePath);
+    setSourceFile(newActiveFilePath ? { path: newActiveFilePath, mode: sourceFile?.mode ?? "current" } : null);
   }
 }

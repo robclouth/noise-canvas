@@ -1,7 +1,7 @@
 precision highp float;
 varying vec2 vUv;
 
-#include "brush-common.glsl";
+#include "effect-common.glsl";
 
 // Uniforms specific to this display material
 uniform float minDb;
@@ -52,7 +52,7 @@ void main() {
         color = mix(color, vec3(1.0), 0.2);
     }
 
-    // --- Brush Visualization ---
+    // --- Brush Area Visualization ---
     if (brushCenterUv.x >= 0.0) {
         // Common calculations for both rectangles
         vec2 rectCenter = brushCenterUv;
@@ -63,7 +63,7 @@ void main() {
         vec2 halfSize = correctedBrushSize / 2.0;
         float strokeWidthUv = fwidth(vUv.x) * 1.5;
 
-        // Draw Brush Rectangle (only if this is the active file)
+        // Draw Brush Area Rectangle (only if this is the active file)
         if (isTargetFile) {
             vec2 d = abs(vUv - correctedRectCenter) - halfSize;
             float outsideDist = length(max(d, 0.0));

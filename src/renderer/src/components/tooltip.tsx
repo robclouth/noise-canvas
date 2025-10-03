@@ -8,7 +8,11 @@ type TooltipProps = {
 export const Tooltip = ({ label, children, ...props }: TooltipProps) => {
   return (
     <MantineTooltip
-      label={<Text size="xs">{label}</Text>}
+      label={
+        <Text size="xs" style={{ wordBreak: "break-word" }}>
+          {label}
+        </Text>
+      }
       color="gray"
       openDelay={1000}
       multiline

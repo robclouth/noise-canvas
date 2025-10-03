@@ -89,10 +89,19 @@ export type State = {
   sourceOffsetLock: BooleanParameter;
 
   // Brush Options
-  brushType: OptionsParameter<string>;
   brushWidthBeats: DiscreteNumberParameter; // in beats
   brushHeightSemis: DiscreteNumberParameter; // in semitones
   brushSizeLockedToGrid: BooleanParameter;
+
+  // Effect Order and Enabled States
+  effectOrder: string[];
+  setEffectOrder: (effectOrder: string[]) => void;
+  effectsEnabled: Record<string, boolean>;
+  setEffectEnabled: (effect: string, enabled: boolean) => void;
+
+  // Section Collapse States
+  sectionCollapsed: Record<string, boolean>;
+  setSectionCollapsed: (section: string, collapsed: boolean) => void;
 
   // View Controls
   zoomPower: ContinuousNumberParameter;
@@ -165,8 +174,8 @@ export type State = {
   setFileBpm: (filePath: string, bpm: number | undefined) => void;
   activeFilePath: string | null;
   setActiveFilePath: (activeFilePath: string | null) => void;
-  sourceFilePath: string | null;
-  setSourceFilePath: (sourceFilePath: string | null) => void;
+  sourceFile: { path: string; mode: "current" | "original" } | null;
+  setSourceFile: (sourceFile: { path: string; mode: "current" | "original" } | null) => void;
 } & ModulatorAmountParameters &
   ModulatorParameters;
 
@@ -504,26 +513,6 @@ export const useStore = create<State>()(
               label: "Lock",
               description: "Locks the source offset to the brush position.",
               value: false as boolean,
-            },
-            false,
-          ),
-          ...createParameter(
-            set,
-            "brushType",
-            {
-              name: "Brush Type",
-              label: "Brush",
-              description: "The type of brush to use.",
-              value: "gain",
-              options: [
-                { value: "gain", label: "Gain" },
-                { value: "restore", label: "Restore" },
-                { value: "transform", label: "Transform" },
-                { value: "harmonics", label: "Harmonics" },
-                { value: "blur", label: "Smooth" },
-                { value: "synthesize", label: "Synthesize" },
-                // { value: "sharpen", label: "Sharpen" },
-              ],
             },
             false,
           ),
@@ -1024,8 +1013,8 @@ export const useStore = create<State>()(
             }),
           activeFilePath: null,
           setActiveFilePath: (activeFilePath) => set({ activeFilePath }),
-          sourceFilePath: null,
-          setSourceFilePath: (sourceFilePath) => set({ sourceFilePath }),
+          sourceFile: null,
+          setSourceFile: (sourceFile) => set({ sourceFile }),
           isPlaying: false,
           setIsPlaying: (isPlaying) => set({ isPlaying }),
           loop: false,
@@ -1036,6 +1025,25 @@ export const useStore = create<State>()(
           setIsSynthesizing: (isSynthesizing) => set({ isSynthesizing }),
           mousePos: null,
           setMousePos: (mousePos) => set({ mousePos }),
+          effectOrder: ["gain", "transform", "harmonics", "blur", "synthesize", "sharpen"],
+          setEffectOrder: (effectOrder) => set({ effectOrder }),
+          effectsEnabled: {
+            gain: true,
+            transform: false,
+            harmonics: false,
+            blur: false,
+            synthesize: false,
+            sharpen: false,
+          },
+          setEffectEnabled: (effect, enabled) =>
+            set((state) => ({
+              effectsEnabled: { ...state.effectsEnabled, [effect]: enabled },
+            })),
+          sectionCollapsed: {},
+          setSectionCollapsed: (section, collapsed) =>
+            set((state) => ({
+              sectionCollapsed: { ...state.sectionCollapsed, [section]: collapsed },
+            })),
         };
         return initialState as unknown as State;
       },
@@ -1046,7 +1054,7 @@ export const useStore = create<State>()(
             (acc, [key, value]) => {
               if (typeof value === "object" && value !== null && "value" in value) {
                 acc[key] = { value: (value as Parameter<unknown>).value };
-              } else if (["filesBpm"].includes(key)) {
+              } else if (["filesBpm", "effectOrder", "effectsEnabled", "sectionCollapsed"].includes(key)) {
                 acc[key] = value;
               }
               return acc;

@@ -6,6 +6,7 @@ import { memo, MouseEventHandler, useCallback, useRef } from "react";
 import { Vector2 } from "three";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
+import { Tooltip } from "./tooltip";
 
 export interface FileViewProps {
   filePath: string;
@@ -65,37 +66,59 @@ function getSnappedCoordinates(
 }
 
 const Header = memo(function Header({ filePath }: FileViewProps) {
-  const setSourceFilePath = useStore((state) => state.setSourceFilePath);
+  const setSourceFile = useStore((state) => state.setSourceFile);
   const bpm = useStore((state) => state.filesBpm[filePath] ?? 120);
   const setFileBpm = useStore((state) => state.setFileBpm);
   const closeFile = useStore((state) => state.closeFile);
-  const sourceFilePath = useStore((state) => state.sourceFilePath);
+  const sourceFile = useStore((state) => state.sourceFile);
 
-  const isSource = sourceFilePath === filePath;
+  const isSource = sourceFile?.path === filePath;
+  const sourceMode = sourceFile?.mode ?? "current";
 
   return (
     <Group justify="space-between" align="center" p="xs" wrap="nowrap">
-      <Title order={6}>{filePath.split("/").pop() || filePath}</Title>
+      <Tooltip label={filePath}>
+        <Title order={6}>{filePath.split("/").pop() || filePath}</Title>
+      </Tooltip>
       <Group align="center" gap="xs" wrap="nowrap">
-        <NumberInput
-          w={60}
-          value={bpm}
-          onChange={(val) => setFileBpm(filePath, Number(val))}
-          size="xs"
-          max={999}
-          min={10}
-        />
-        <Button
-          size="xs"
-          variant="filled"
-          onClick={(e) => {
-            e.stopPropagation();
-            setSourceFilePath(filePath);
-          }}
-          color={isSource ? "orange" : "dark.5"}
-        >
-          Source
-        </Button>
+        <Tooltip label="The tempo of this file in beats per minute (BPM). Used for grid snapping and time-based effects.">
+          <NumberInput
+            w={60}
+            value={bpm}
+            onChange={(val) => setFileBpm(filePath, Number(val))}
+            size="xs"
+            max={999}
+            min={10}
+          />
+        </Tooltip>
+        <Button.Group>
+          <Tooltip label="Use this file's current (modified) state as the source for painting onto other files.">
+            <Button
+              size="xs"
+              variant="filled"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSourceFile({ path: filePath, mode: "current" });
+              }}
+              color={isSource && sourceMode === "current" ? "orange" : "dark.5"}
+            >
+              Current
+            </Button>
+          </Tooltip>
+          <Tooltip label="Use this file's original (unmodified) state as the source for painting onto other files.">
+            <Button
+              size="xs"
+              variant="filled"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSourceFile({ path: filePath, mode: "original" });
+              }}
+              color={isSource && sourceMode === "original" ? "orange" : "dark.5"}
+            >
+              Original
+            </Button>
+          </Tooltip>
+        </Button.Group>
         <ActionIcon
           variant="transparent"
           color="white"
@@ -113,11 +136,9 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
 });
 
 export const FileView = memo(({ filePath }: FileViewProps) => {
+  console.log("FileView render", filePath);
+
   const activeFilePath = useStore((state) => state.activeFilePath);
-
-  const setActiveFilePath = useStore((state) => state.setActiveFilePath);
-  const setMousePos = useStore((state) => state.setMousePos);
-
   const isActive = activeFilePath === filePath;
 
   const rendererRef = useRef<FileRendererHandle>(null);
@@ -148,7 +169,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
         lastSnappedPositionRef.current.x !== snappedX ||
         lastSnappedPositionRef.current.y !== snappedY)
     ) {
-      setMousePos(new Vector2(snappedX, 1 - snappedY));
+      useStore.getState().setMousePos(new Vector2(snappedX, 1 - snappedY));
       rendererRef.current.renderStroke(snappedX, snappedY, event.buttons !== 1);
       lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
     }
@@ -156,7 +177,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
 
   const handleMouseLeave = () => {
     if (!isActive) return;
-    setMousePos(null);
+    useStore.getState().setMousePos(null);
     rendererRef.current?.clearPreview();
   };
 
@@ -188,7 +209,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   return (
     <Box
       onClick={() => {
-        setActiveFilePath(filePath);
+        useStore.getState().setActiveFilePath(filePath);
       }}
       pos="relative"
       bd={isActive ? "2px solid orange" : "2px solid transparent"}

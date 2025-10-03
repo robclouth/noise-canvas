@@ -2,14 +2,14 @@ import { openFiles, useStore } from "@/store";
 import { useFBO } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { runSynthesis } from "@renderer/audio-manager";
-import { CommonUniforms, defaultValues } from "@renderer/brushes/base-brush";
+import { CommonUniforms, defaultValues } from "@renderer/effects/base-effect";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { ContinuousNumberParameter } from "@renderer/types";
 import { debounce } from "lodash-es";
 import { forwardRef, memo, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { ShaderMaterial, UniformsUtils } from "three";
-import { brushes } from "../brushes";
+import { effects } from "../effects";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
@@ -39,6 +39,7 @@ export interface FileRendererHandle {
     packed: THREE.WebGLRenderTarget;
     inverse: THREE.DataTexture;
     metadata: THREE.DataTexture;
+    original: THREE.DataTexture;
   } | null;
   /** Restores the spectrogram to its original state. */
   restoreOriginal: () => void;
@@ -72,7 +73,7 @@ export const FileRenderer = memo(
     const displayMode = useRef<"preview" | "committed">("committed");
     const applyStroke = useRef(false);
 
-    console.log("file renderer");
+    console.log("FileRenderer rendered");
 
     // Subscriptions to global state
     useEffect(() => {
@@ -223,6 +224,8 @@ export const FileRenderer = memo(
       )
         return;
 
+      const state = useStore.getState();
+
       // Initial copy of the spectrogram data to the FBO
       const needsInitialization = !isInitialized.current;
       if (needsInitialization) {
@@ -240,18 +243,33 @@ export const FileRenderer = memo(
         // Continue to initial render - don't skip on first frame
       }
 
-      const state = useStore.getState();
-
       // After first render, only update if this file is the active file or the source file
       if (isInitialized.current) {
         const isActiveFile = state.activeFilePath === filePath;
-        const isSourceFile = state.sourceFilePath === filePath;
+        const isSourceFile = state.sourceFile?.path === filePath;
         if (!isActiveFile && !isSourceFile) {
+          return;
+        }
+
+        // If no stroke to apply and already initialized, skip expensive uniform building
+        if (!applyStroke.current) {
+          // Only update display uniforms
+          const currentFBO = pingPong.current === 0 ? fbo1 : fbo2;
+          const nextFBO = pingPong.current === 0 ? fbo2 : fbo1;
+          const bpm = state.filesBpm[filePath] || 120;
+
+          displayMaterial.uniforms.sourceSpectrogramTex.value =
+            displayMode.current === "committed" ? currentFBO.texture : nextFBO.texture;
+          displayMaterial.uniforms.gridSize.value = state.gridSizeBeats.value;
+          displayMaterial.uniforms.bpm.value = bpm;
+          displayMaterial.uniforms.isSourceFile.value = state.sourceFile?.path === filePath;
+          displayMaterial.uniforms.isTargetFile.value = isActiveFile;
+          displayMaterial.uniforms.brushCenterUv.value = mouseUv.current || new THREE.Vector2(-1, -1);
           return;
         }
       }
 
-      const sourceFile = state.sourceFilePath ? openFiles[state.sourceFilePath] : null;
+      const sourceFile = state.sourceFile?.path ? openFiles[state.sourceFile.path] : null;
       if (!sourceFile) return;
 
       // Get current brush and view parameters from the global store
@@ -435,16 +453,35 @@ export const FileRenderer = memo(
         gainLut: { value: modulatorScaleLut || new THREE.Texture() },
       };
 
-      console.log("use frame");
+      console.log("useFrame called");
 
       // Render brush stroke if requested
       if (strokeParams.current && applyStroke.current) {
-        const sourceFbo = textures.packed; // The original, unmodified source FBO
         const destinationFbo = pingPong.current === 0 ? fbo2 : fbo1;
+        const currentFbo = pingPong.current === 0 ? fbo1 : fbo2;
         const { preview } = strokeParams.current;
 
-        const brush = brushes[state.brushType.value];
-        const numPasses = brush.materials.length;
+        // Get enabled effects in order
+        const enabledEffects = state.effectOrder.filter((effectId) => state.effectsEnabled[effectId]);
+
+        // If no effects are enabled, add a passthrough effect to properly handle metadata conversion
+        if (enabledEffects.length === 0) {
+          enabledEffects.push("passthrough");
+        }
+
+        // Determine the source FBO based on sourceMode and which file is the source
+        // "current" means we read from the current modified spectrogram
+        // "original" means we read from the original unmodified source
+        const isSameFile = sourceFile.filePath === filePath;
+        const sourceFbo =
+          state.sourceFile?.mode === "original"
+            ? { texture: textures.original } // Use original unmodified data
+            : isSameFile
+              ? currentFbo // Same file: use our own current modified FBO
+              : textures.packed; // Different file: use their current modified FBO
+
+        // Override the source texture in commonUniforms to use the correct source
+        commonUniforms.sourceSpectrogramTex.value = sourceFbo.texture;
 
         // Create the uniform set for iterative passes (j > 0).
         // This tells the shader to interpret the input texture using the destination's metadata.
@@ -467,36 +504,54 @@ export const FileRenderer = memo(
         // The input for the very first pass is always the original source data.
         let currentReadFbo = sourceFbo;
 
-        for (let i = 0; i < state.brushIterations.value; i++) {
-          for (let p = 0; p < numPasses; p++) {
-            const uniformsForThisIteration = p === 0 && i === 0 ? { ...commonUniforms } : { ...iterativeUniforms };
+        // Apply each enabled effect in order, with iterations
+        for (let effectIndex = 0; effectIndex < enabledEffects.length; effectIndex++) {
+          const effectId = enabledEffects[effectIndex];
+          const effect = effects[effectId];
+          const numPasses = effect.materials.length;
 
-            const material = brush.materials[p];
-            fboMesh.material = material;
+          for (let i = 0; i < state.brushIterations.value; i++) {
+            for (let p = 0; p < numPasses; p++) {
+              const isFirstEffect = effectIndex === 0;
+              const isFirstIteration = i === 0;
+              const isFirstPass = p === 0;
+              const uniformsForThisIteration =
+                isFirstEffect && isFirstIteration && isFirstPass ? { ...commonUniforms } : { ...iterativeUniforms };
 
-            const isFinalPass = i === state.brushIterations.value - 1 && p === numPasses - 1;
-            const currentWriteFbo = isFinalPass ? destinationFbo : tempFboA;
+              const material = effect.materials[p];
+              fboMesh.material = material;
 
-            const inputTexture = currentReadFbo.texture;
+              const isLastEffect = effectIndex === enabledEffects.length - 1;
+              const isLastIteration = i === state.brushIterations.value - 1;
+              const isLastPass = p === numPasses - 1;
+              const isFinalPass = isLastEffect && isLastIteration && isLastPass;
+              const currentWriteFbo = isFinalPass ? destinationFbo : tempFboA;
 
-            // The "source" is always the result of the previous pass.
-            uniformsForThisIteration.sourceSpectrogramTex = { value: inputTexture };
+              const inputTexture = currentReadFbo.texture;
 
-            // The "destination" (for blending) is the original target on the first pass.
-            // For all subsequent iterative passes, the destination is the source (self-modification).
-            uniformsForThisIteration.destSpectrogramTex = {
-              value: i === 0 ? commonUniforms.destSpectrogramTex.value : inputTexture,
-            };
+              // The "source" is always the result of the previous pass.
+              uniformsForThisIteration.sourceSpectrogramTex = { value: inputTexture };
 
-            brush.updateBrushUniforms({ commonUniforms: uniformsForThisIteration, passIndex: p, file: sourceFile });
+              // The "destination" (for blending) is the original target on the first pass.
+              // For all subsequent iterative passes, the destination is the source (self-modification).
+              uniformsForThisIteration.destSpectrogramTex = {
+                value: isFirstEffect && isFirstIteration ? commonUniforms.destSpectrogramTex.value : inputTexture,
+              };
 
-            gl.setRenderTarget(currentWriteFbo);
-            gl.render(fboScene, camera);
+              effect.updateEffectUniforms({
+                commonUniforms: uniformsForThisIteration,
+                passIndex: p,
+                file: sourceFile,
+              });
 
-            currentReadFbo = currentWriteFbo;
+              gl.setRenderTarget(currentWriteFbo);
+              gl.render(fboScene, camera);
 
-            if (!isFinalPass) {
-              [tempFboA, tempFboB] = [tempFboB, tempFboA];
+              currentReadFbo = currentWriteFbo;
+
+              if (!isFinalPass) {
+                [tempFboA, tempFboB] = [tempFboB, tempFboA];
+              }
             }
           }
         }
@@ -602,12 +657,14 @@ export const FileRenderer = memo(
       packed: THREE.WebGLRenderTarget;
       inverse: THREE.DataTexture;
       metadata: THREE.DataTexture;
+      original: THREE.DataTexture;
     } | null => {
-      if (!fbo1 || !fbo2 || !inverseMapTex || !metadataTex) return null;
+      if (!fbo1 || !fbo2 || !inverseMapTex || !metadataTex || !originalPackedDataTex) return null;
       return {
         packed: pingPong.current === 0 ? fbo1 : fbo2,
         inverse: inverseMapTex,
         metadata: metadataTex,
+        original: originalPackedDataTex,
       };
     };
 
