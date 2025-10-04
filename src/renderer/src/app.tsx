@@ -71,14 +71,14 @@ function App(): React.JSX.Element {
     }
 
     // Toggle set position mode with Control key
-    if (event.key === "Control" || event.key === "Meta") {
+    if (event.key === "Control") {
       useStore.getState().setIsSettingPosition(true);
     }
   }, []);
 
   const handleKeyUp = useCallback((event: KeyboardEvent) => {
     // Turn off set position mode when Control is released
-    if (event.key === "Control" || event.key === "Meta") {
+    if (event.key === "Control") {
       useStore.getState().setIsSettingPosition(false);
     }
   }, []);

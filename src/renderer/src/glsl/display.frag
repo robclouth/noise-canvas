@@ -9,8 +9,8 @@ uniform float maxDb;
 uniform float bpm;
 uniform float gridSize;
 
-uniform bool isSourceFile;
-uniform bool isTargetFile;
+uniform bool showTargetRectangle;
+uniform bool showSourceRectangle;
 
 // Pre-calculated grid values
 uniform float gridWidthUv;        // Width of each beat in UV coordinates
@@ -75,49 +75,48 @@ void main() {
     }
 
     // --- Brush Area Visualization ---
-    if (brushCenterUv.x >= 0.0) {
-        // Common calculations for both rectangles
-        vec2 rectCenter = brushCenterUv;
-        
-        vec2 correctedRectCenter = rectCenter;
-        vec2 correctedBrushSize = brushSizeUv;
-       
-        vec2 halfSize = correctedBrushSize / 2.0;
-        float strokeWidthUv = fwidth(vUv.x) * 1.5;
 
-        // Draw Brush Area Rectangle (only if this is the active file)
-        if (isTargetFile) {
-            vec2 d = abs(vUv - correctedRectCenter) - halfSize;
-            float outsideDist = length(max(d, 0.0));
-            float insideDist = min(max(d.x, d.y), 0.0);
-            float distToBorder = outsideDist + insideDist;
+    // Common calculations for both rectangles
+    vec2 rectCenter = brushCenterUv;
+    
+    vec2 correctedRectCenter = rectCenter;
+    vec2 correctedBrushSize = brushSizeUv;
+    
+    vec2 halfSize = correctedBrushSize / 2.0;
+    float strokeWidthUv = fwidth(vUv.x) * 1.5;
 
-            float rectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(distToBorder));
-            if (rectAlpha > 0.0) {
-                color = mix(color, vec3(1.0), rectAlpha);
-            }
+    // Draw Brush Area Rectangle (only if this is the active file)
+    if (showTargetRectangle) {
+        vec2 d = abs(vUv - correctedRectCenter) - halfSize;
+        float outsideDist = length(max(d, 0.0));
+        float insideDist = min(max(d.x, d.y), 0.0);
+        float distToBorder = outsideDist + insideDist;
+
+        float rectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(distToBorder));
+        if (rectAlpha > 0.0) {
+            color = mix(color, vec3(1.0), rectAlpha);
         }
+    }
 
-        if (isSourceFile) {
-          // Draw source rectangle (faint)
-          vec2 effectiveOffset = vec2(sourceOffsetX, sourceOffsetY);
+    if (showSourceRectangle) {
+        // Draw source rectangle (faint)
+        vec2 effectiveOffset = vec2(sourceOffsetX, sourceOffsetY);
 
-          vec2 sourceCenter = correctedRectCenter + effectiveOffset;
-          vec2 sourceCenterScreen = sourceCenter;
+        vec2 sourceCenter = correctedRectCenter + effectiveOffset;
+        vec2 sourceCenterScreen = sourceCenter;
 
-          if (sourceCenterScreen.x >= 0.0 && sourceCenterScreen.x <= 1.0 &&
-              sourceCenterScreen.y >= 0.0 && sourceCenterScreen.y <= 1.0) {
-              
-              vec2 dSource = abs(vUv - sourceCenter) - halfSize; // reuse halfSize from brush rect
-              float outsideDistSource = length(max(dSource, 0.0));
-              float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
-              float distToBorderSource = outsideDistSource + insideDistSource;
+        if (sourceCenterScreen.x >= 0.0 && sourceCenterScreen.x <= 1.0 &&
+            sourceCenterScreen.y >= 0.0 && sourceCenterScreen.y <= 1.0) {
+            
+            vec2 dSource = abs(vUv - sourceCenter) - halfSize; // reuse halfSize from brush rect
+            float outsideDistSource = length(max(dSource, 0.0));
+            float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
+            float distToBorderSource = outsideDistSource + insideDistSource;
 
-              float sourceRectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(distToBorderSource));
-              if (sourceRectAlpha > 0.0) {
-                  color = mix(color, vec3(1.0), sourceRectAlpha * 0.3); // Fainter
-              }
-          }
+            float sourceRectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(distToBorderSource));
+            if (sourceRectAlpha > 0.0) {
+                color = mix(color, vec3(1.0), sourceRectAlpha * 0.3); // Fainter
+            }
         }
     }
 

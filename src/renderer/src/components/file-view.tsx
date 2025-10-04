@@ -300,7 +300,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
       <Header filePath={filePath} />
       <Box
         h={400}
-        style={{ cursor: isSettingPosition ? "crosshair" : isActive ? "none" : "auto" }}
+        style={{ cursor: isSettingPosition ? "crosshair" : "none" }}
         pos="relative"
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}

@@ -69,7 +69,6 @@ export const FileRenderer = memo(
     const [metadataTex, setMetadataTex] = useState<THREE.DataTexture | null>(null);
 
     // Interaction state
-    const mouseUv = useRef<THREE.Vector2 | null>(null);
     const displayMode = useRef<"preview" | "committed">("committed");
     const applyStroke = useRef(false);
 
@@ -77,12 +76,6 @@ export const FileRenderer = memo(
 
     // Subscriptions to global state
     useEffect(() => {
-      const unsubMouseUv = useStore.subscribe(
-        (state) => state.mousePos,
-        (mousePos) => {
-          mouseUv.current = mousePos;
-        },
-      );
       const unsubBpms = useStore.subscribe(
         (state) => state.filesBpm[filePath],
         () => {
@@ -103,7 +96,6 @@ export const FileRenderer = memo(
       );
 
       return () => {
-        unsubMouseUv();
         unsubBpms();
         unsubGridBeats();
         unsubGridSemis();
@@ -120,13 +112,13 @@ export const FileRenderer = memo(
             maxDb: { value: 0.0 },
             bpm: { value: 120.0 },
             gridSize: { value: 0.25 },
-            isSourceFile: { value: true },
-            isTargetFile: { value: true },
             gridWidthUv: { value: 0.0 },
             gridHeightUv: { value: 0.0 },
             barWidthUv: { value: 0.0 },
             showHorizontalGrid: { value: true },
             showVerticalGrid: { value: true },
+            showTargetRectangle: { value: false },
+            showSourceRectangle: { value: false },
           },
           vertexShader: passThroughVert,
           fragmentShader: displayFrag,
@@ -262,10 +254,13 @@ export const FileRenderer = memo(
         // Continue to initial render - don't skip on first frame
       }
 
+      const mousePos = state.mousePos;
+
       // Determine file state for rendering logic
       const isActiveFile = state.activeFilePath === filePath;
       const isSourceFile = state.sourceFile?.path === filePath;
-      const isMouseOver = mouseUv.current && mouseUv.current.x >= 0;
+      const isMouseOver = Boolean(mousePos && mousePos.x >= 0 && state.hoveredFilePath === filePath);
+      const isMouseOverAnyFile = Boolean(mousePos && state.hoveredFilePath);
 
       // After first render, only update if this file is active, source, or mouse is hovering over it
       if (isInitialized.current) {
@@ -291,9 +286,9 @@ export const FileRenderer = memo(
           displayMaterial.uniforms.sourceSpectrogramTex.value = displaySourceTexture;
           displayMaterial.uniforms.gridSize.value = state.gridSizeBeats.value;
           displayMaterial.uniforms.bpm.value = bpm;
-          displayMaterial.uniforms.isSourceFile.value = isSourceFile;
-          displayMaterial.uniforms.isTargetFile.value = isActiveFile;
-          displayMaterial.uniforms.brushCenterUv.value = mouseUv.current || new THREE.Vector2(-1, -1);
+          displayMaterial.uniforms.brushCenterUv.value = mousePos || new THREE.Vector2(0, 0);
+          displayMaterial.uniforms.showTargetRectangle.value = isMouseOver;
+          displayMaterial.uniforms.showSourceRectangle.value = isSourceFile && isMouseOverAnyFile;
 
           // Calculate grid values
           const gridSizeBeats = state.gridSizeBeats.value;
@@ -348,7 +343,7 @@ export const FileRenderer = memo(
               // Calculate source offset (same logic as in main rendering)
               let sourceOffsetUv = new THREE.Vector2(0, 0);
 
-              if (state.sourcePosition && mouseUv.current) {
+              if (state.sourcePosition && mousePos) {
                 const mode = state.sourcePositionMode.value;
 
                 // Calculate brush size in the SOURCE file's coordinate space
@@ -388,7 +383,7 @@ export const FileRenderer = memo(
                   sourceFileData.spectrogramData.numBands,
                 );
                 const sourcePositionUv = sourcePositionBottomLeftUv.clone().add(halfBrushSizeUvSource);
-                const currentBrushUv = mouseUv.current.clone();
+                const currentBrushUv = mousePos.clone();
 
                 if (mode === "fixed") {
                   sourceOffsetUv = sourcePositionUv.clone().sub(currentBrushUv);
@@ -433,7 +428,7 @@ export const FileRenderer = memo(
         }
 
         // Only process actual strokes on active or source files
-        if (!isActiveFile && !isSourceFile) {
+        if (!isActiveFile && !isSourceFile && !isMouseOver) {
           return;
         }
       }
@@ -460,7 +455,7 @@ export const FileRenderer = memo(
       // Calculate source offset based on position mode
       let sourceOffsetUv = new THREE.Vector2(0, 0);
 
-      if (state.sourcePosition && mouseUv.current) {
+      if (state.sourcePosition && mousePos) {
         const mode = state.sourcePositionMode.value;
 
         // Get brush size in UV for adjustment (positions are stored relative to bottom-left)
@@ -488,7 +483,7 @@ export const FileRenderer = memo(
         const sourcePositionUv = sourcePositionBottomLeftUv.clone().add(halfBrushSizeUv);
 
         // Convert current brush position to UV coordinates in the target file
-        const currentBrushUv = mouseUv.current.clone();
+        const currentBrushUv = mousePos.clone();
 
         if (mode === "fixed") {
           // Fixed: Always read from the source position, regardless of brush position
@@ -584,7 +579,7 @@ export const FileRenderer = memo(
         originalSpectrogramTex: { value: originalPackedDataTex },
         viewZoomPower: { value: state.zoomPower.value },
         viewOffset: { value: state.scroll.value },
-        brushCenterUv: { value: mouseUv.current || new THREE.Vector2(-1, -1) },
+        brushCenterUv: { value: mousePos || new THREE.Vector2(-1, -1) },
         brushSizeUv: { value: brushSizeUv },
         featherX: { value: state.brushFeatherTime.value / 100 },
         featherY: { value: state.brushFeatherPitch.value / 100 },
@@ -819,8 +814,8 @@ export const FileRenderer = memo(
         sourceSpectrogramTextureSize: { value: spectrogramData.packedTextureSize },
         gridSize: { value: state.gridSizeBeats.value },
         bpm: { value: bpm },
-        isSourceFile: { value: sourceFile?.filePath === filePath },
-        isTargetFile: { value: state.activeFilePath === filePath },
+        showSourceRectangle: { value: isSourceFile && isMouseOverAnyFile },
+        showTargetRectangle: { value: isMouseOver },
       };
 
       for (const key in displayUniforms) {
