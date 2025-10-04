@@ -91,12 +91,12 @@ function createWindow(): void {
   createMenu(mainWindow, {
     onUndo: () => {
       if (activeFilePath) {
-        undoServices.get(activeFilePath)?.undo();
+        undoServices.get(activeFilePath)?.undo().catch(console.error);
       }
     },
     onRedo: () => {
       if (activeFilePath) {
-        undoServices.get(activeFilePath)?.redo();
+        undoServices.get(activeFilePath)?.redo().catch(console.error);
       }
     },
   });
@@ -135,10 +135,10 @@ app.whenReady().then(async () => {
   });
 });
 
-ipcMainOn("add-undo-state", (_event, { data, filePath }) => {
+ipcMainOn("add-undo-state", async (_event, { data, filePath }) => {
   const service = undoServices.get(filePath);
   if (service) {
-    service.addState({ data, filePath });
+    await service.addState({ data, filePath });
   }
 });
 
@@ -156,10 +156,10 @@ ipcMainOn("file-opened", (_event, filePath) => {
   }
 });
 
-ipcMainOn("file-closed", (_event, filePath) => {
+ipcMainOn("file-closed", async (_event, filePath) => {
   const service = undoServices.get(filePath);
   if (service) {
-    service.destroy();
+    await service.destroy();
     undoServices.delete(filePath);
   }
   if (activeFilePath === filePath) {
@@ -167,19 +167,21 @@ ipcMainOn("file-closed", (_event, filePath) => {
   }
 });
 
-ipcMainOn("clear-undo-state", () => {
+ipcMainOn("clear-undo-state", async () => {
   // This might need to be revisited. Should it clear for active file or all?
   // For now, let's assume it clears for the active file.
   if (activeFilePath) {
     const service = undoServices.get(activeFilePath);
-    service?.clear();
+    await service?.clear();
   }
 });
 
-app.on("will-quit", () => {
+app.on("will-quit", async () => {
+  const promises: Promise<void>[] = [];
   for (const service of undoServices.values()) {
-    service.destroy();
+    promises.push(service.destroy());
   }
+  await Promise.all(promises);
 });
 
 app.on("window-all-closed", () => {
