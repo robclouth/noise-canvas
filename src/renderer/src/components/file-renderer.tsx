@@ -219,6 +219,107 @@ export const FileRenderer = memo(
     }, [debouncedSynthesis]);
 
     /**
+     * Helper function to calculate source offset based on position mode.
+     * This consolidates the logic used for both stroke rendering and display.
+     */
+    const calculateSourceOffset = (
+      state: ReturnType<typeof useStore.getState>,
+      mousePos: THREE.Vector2 | null,
+      sourceBpm: number,
+      sourceTotalDuration: number,
+      sourceSpectrogramData: typeof spectrogramData,
+      bpm: number,
+      totalDuration: number,
+    ): THREE.Vector2 => {
+      const sourceOffsetUv = new THREE.Vector2(0, 0);
+
+      if (!state.sourcePosition || !mousePos) {
+        return sourceOffsetUv;
+      }
+
+      const mode = state.sourcePositionMode.value;
+
+      // Calculate brush size in the SOURCE file's coordinate space
+      const brushSizeUvSource = unitsToUv(
+        state.brushWidthBeats.value,
+        state.brushHeightSemis.value,
+        sourceBpm,
+        sourceTotalDuration,
+        sourceSpectrogramData.bandsPerOctave,
+        sourceSpectrogramData.numBands,
+      );
+      const halfBrushSizeUvSource = new THREE.Vector2(brushSizeUvSource.x / 2, brushSizeUvSource.y / 2);
+
+      // Calculate brush size in the CURRENT file's coordinate space
+      const brushSizeUvCurrent = unitsToUv(
+        state.brushWidthBeats.value,
+        state.brushHeightSemis.value,
+        bpm,
+        totalDuration,
+        spectrogramData.bandsPerOctave,
+        spectrogramData.numBands,
+      );
+      const halfBrushSizeUvCurrent = new THREE.Vector2(brushSizeUvCurrent.x / 2, brushSizeUvCurrent.y / 2);
+
+      // Convert source position (bottom-left) to UV coordinates in the source file
+      const sourcePositionBottomLeftUv = unitsToUv(
+        state.sourcePosition.beats,
+        state.sourcePosition.pitch,
+        sourceBpm,
+        sourceTotalDuration,
+        sourceSpectrogramData.bandsPerOctave,
+        sourceSpectrogramData.numBands,
+      );
+      const sourcePositionUv = sourcePositionBottomLeftUv.clone().add(halfBrushSizeUvSource);
+      const currentBrushUv = mousePos.clone();
+
+      if (mode === "fixed") {
+        return sourcePositionUv.clone().sub(currentBrushUv);
+      } else if (mode === "anchored") {
+        if (state.brushStartPosition) {
+          const brushStartBottomLeftUv = unitsToUv(
+            state.brushStartPosition.beats,
+            state.brushStartPosition.pitch,
+            bpm,
+            totalDuration,
+            spectrogramData.bandsPerOctave,
+            spectrogramData.numBands,
+          );
+          const brushStartUv = brushStartBottomLeftUv.clone().add(halfBrushSizeUvCurrent);
+          return sourcePositionUv.clone().sub(brushStartUv);
+        } else {
+          return sourcePositionUv.clone().sub(currentBrushUv);
+        }
+      } else if (mode === "offset") {
+        if (state.lockedOffset) {
+          return unitsToUv(
+            state.lockedOffset.beats,
+            state.lockedOffset.pitch,
+            sourceBpm,
+            sourceTotalDuration,
+            sourceSpectrogramData.bandsPerOctave,
+            sourceSpectrogramData.numBands,
+          );
+        } else if (state.brushStartPosition) {
+          const brushStartBottomLeftUv = unitsToUv(
+            state.brushStartPosition.beats,
+            state.brushStartPosition.pitch,
+            bpm,
+            totalDuration,
+            spectrogramData.bandsPerOctave,
+            spectrogramData.numBands,
+          );
+          const brushStartUv = brushStartBottomLeftUv.clone().add(halfBrushSizeUvCurrent);
+          return sourcePositionUv.clone().sub(brushStartUv);
+        } else {
+          return sourcePositionUv.clone().sub(currentBrushUv);
+        }
+      }
+
+      return sourceOffsetUv;
+    };
+
+    /**
      * The main render loop, called on every frame.
      * This handles initialization, brush stroke application, and updating the display material.
      */
@@ -236,24 +337,6 @@ export const FileRenderer = memo(
         return;
 
       const state = useStore.getState();
-
-      // Initial copy of the spectrogram data to the FBO
-      const needsInitialization = !isInitialized.current;
-      if (needsInitialization) {
-        fboMesh.material = copyMaterial;
-        copyMaterial.uniforms.inputTex.value = packedDataTex;
-
-        gl.setRenderTarget(fbo1);
-        gl.render(fboScene, camera);
-        gl.setRenderTarget(null);
-
-        pingPong.current = 0;
-
-        window.api.addUndoState({ data: spectrogramData.packedData.buffer, filePath });
-        debouncedSynthesis(filePath, spectrogramData.packedData);
-        // Continue to initial render - don't skip on first frame
-      }
-
       const mousePos = state.mousePos;
 
       // Determine file state for rendering logic
@@ -262,286 +345,33 @@ export const FileRenderer = memo(
       const isMouseOver = Boolean(mousePos && mousePos.x >= 0 && state.hoveredFilePath === filePath);
       const isMouseOverAnyFile = Boolean(mousePos && state.hoveredFilePath);
 
-      // After first render, only update if this file is active, source, or mouse is hovering over it
-      if (isInitialized.current) {
-        if (!isActiveFile && !isSourceFile && !isMouseOver) {
-          return;
-        }
+      // Initial copy of the spectrogram data to the FBO
+      if (!isInitialized.current) {
+        fboMesh.material = copyMaterial;
+        copyMaterial.uniforms.inputTex.value = packedDataTex;
 
-        // If no stroke to apply and already initialized
-        if (!applyStroke.current) {
-          // Update display uniforms
-          const currentFBO = pingPong.current === 0 ? fbo1 : fbo2;
-          const nextFBO = pingPong.current === 0 ? fbo2 : fbo1;
-          const bpm = state.filesBpm[filePath] || 120;
-          const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+        gl.setRenderTarget(fbo1);
+        gl.render(fboScene, camera);
+        gl.setRenderTarget(null);
 
-          // For the display, we need to show the current file's own texture for normal viewing
-          // But when we have a source position set and are hovering (preview mode),
-          // the source rectangle should read from the source file
-          const displaySourceTexture = displayMode.current === "committed" ? currentFBO.texture : nextFBO.texture;
+        pingPong.current = 0;
+        isInitialized.current = true;
 
-          // If this is NOT the source file and we have a source position, we show our own texture
-          // The shader will handle drawing the source rectangle using the source uniforms
-          displayMaterial.uniforms.sourceSpectrogramTex.value = displaySourceTexture;
-          displayMaterial.uniforms.gridSize.value = state.gridSizeBeats.value;
-          displayMaterial.uniforms.bpm.value = bpm;
-          displayMaterial.uniforms.brushCenterUv.value = mousePos || new THREE.Vector2(0, 0);
-          displayMaterial.uniforms.showTargetRectangle.value = isMouseOver;
-          displayMaterial.uniforms.showSourceRectangle.value = isSourceFile && isMouseOverAnyFile;
-
-          // Calculate grid values
-          const gridSizeBeats = state.gridSizeBeats.value;
-          const gridSizeSemis = state.gridSizeSemis.value;
-
-          // Horizontal grid (time/beats)
-          const beatDurationSeconds = 60.0 / bpm;
-          const gridIntervalSeconds = beatDurationSeconds * gridSizeBeats;
-          const gridWidthUv = gridSizeBeats > 0 ? gridIntervalSeconds / totalDuration : 0;
-          const barWidthUv = gridSizeBeats > 0 ? (beatDurationSeconds * 4.0) / totalDuration : 0;
-
-          // Vertical grid (frequency/semitones)
-          const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
-          const gridIntervalBands = gridSizeSemis * bandsPerSemitone;
-          const gridHeightUv = gridSizeSemis > 0 ? gridIntervalBands / spectrogramData.numBands : 0;
-
-          // Determine if grid lines should be shown based on spacing
-          // Don't show if grid lines would be less than ~3 pixels apart
-          const MIN_GRID_SPACING_PX = 10;
-          const viewportWidth = gl.domElement.width;
-          const viewportHeight = gl.domElement.height;
-          const gridWidthPx = gridWidthUv * viewportWidth;
-          const gridHeightPx = gridHeightUv * viewportHeight;
-
-          displayMaterial.uniforms.gridWidthUv.value = gridWidthUv;
-          displayMaterial.uniforms.gridHeightUv.value = gridHeightUv;
-          displayMaterial.uniforms.barWidthUv.value = barWidthUv;
-          displayMaterial.uniforms.showHorizontalGrid.value = gridWidthPx >= MIN_GRID_SPACING_PX && gridSizeBeats > 0;
-          displayMaterial.uniforms.showVerticalGrid.value = gridHeightPx >= MIN_GRID_SPACING_PX && gridSizeSemis > 0;
-
-          // Update brush size for proper rectangle display
-          const brushSizeUvForDisplay = unitsToUv(
-            state.brushWidthBeats.value,
-            state.brushHeightSemis.value,
-            bpm,
-            totalDuration,
-            spectrogramData.bandsPerOctave,
-            spectrogramData.numBands,
-          );
-          brushSizeUvForDisplay.x = state.brushWidthBeats.value > 0 ? brushSizeUvForDisplay.x : 1;
-          brushSizeUvForDisplay.y = state.brushHeightSemis.value > 0 ? brushSizeUvForDisplay.y : 1;
-          displayMaterial.uniforms.brushSizeUv.value = brushSizeUvForDisplay;
-
-          // Update source offset for display (so source rectangle shows correctly)
-          if (state.sourceFile?.path) {
-            const sourceFileData = openFiles[state.sourceFile.path];
-            if (sourceFileData) {
-              const sourceBpm = state.filesBpm[state.sourceFile.path] || 120;
-              const sourceTotalDuration =
-                sourceFileData.spectrogramData.numFrames / sourceFileData.spectrogramData.sampleRate;
-
-              // Calculate source offset (same logic as in main rendering)
-              let sourceOffsetUv = new THREE.Vector2(0, 0);
-
-              if (state.sourcePosition && mousePos) {
-                const mode = state.sourcePositionMode.value;
-
-                // Calculate brush size in the SOURCE file's coordinate space
-                const brushSizeUvForSourceCalc = unitsToUv(
-                  state.brushWidthBeats.value,
-                  state.brushHeightSemis.value,
-                  sourceBpm,
-                  sourceTotalDuration,
-                  sourceFileData.spectrogramData.bandsPerOctave,
-                  sourceFileData.spectrogramData.numBands,
-                );
-                const halfBrushSizeUvSource = new THREE.Vector2(
-                  brushSizeUvForSourceCalc.x / 2,
-                  brushSizeUvForSourceCalc.y / 2,
-                );
-
-                // Calculate brush size in the CURRENT file's coordinate space
-                const brushSizeUvForCurrentCalc = unitsToUv(
-                  state.brushWidthBeats.value,
-                  state.brushHeightSemis.value,
-                  bpm,
-                  totalDuration,
-                  spectrogramData.bandsPerOctave,
-                  spectrogramData.numBands,
-                );
-                const halfBrushSizeUvCurrent = new THREE.Vector2(
-                  brushSizeUvForCurrentCalc.x / 2,
-                  brushSizeUvForCurrentCalc.y / 2,
-                );
-
-                const sourcePositionBottomLeftUv = unitsToUv(
-                  state.sourcePosition.beats,
-                  state.sourcePosition.pitch,
-                  sourceBpm,
-                  sourceTotalDuration,
-                  sourceFileData.spectrogramData.bandsPerOctave,
-                  sourceFileData.spectrogramData.numBands,
-                );
-                const sourcePositionUv = sourcePositionBottomLeftUv.clone().add(halfBrushSizeUvSource);
-                const currentBrushUv = mousePos.clone();
-
-                if (mode === "fixed") {
-                  sourceOffsetUv = sourcePositionUv.clone().sub(currentBrushUv);
-                } else if (mode === "anchored") {
-                  if (state.brushStartPosition) {
-                    const brushStartBottomLeftUv = unitsToUv(
-                      state.brushStartPosition.beats,
-                      state.brushStartPosition.pitch,
-                      bpm,
-                      totalDuration,
-                      spectrogramData.bandsPerOctave,
-                      spectrogramData.numBands,
-                    );
-                    const brushStartUv = brushStartBottomLeftUv.clone().add(halfBrushSizeUvCurrent);
-                    sourceOffsetUv = sourcePositionUv.clone().sub(brushStartUv);
-                  } else {
-                    sourceOffsetUv = sourcePositionUv.clone().sub(currentBrushUv);
-                  }
-                } else if (mode === "offset") {
-                  if (state.lockedOffset) {
-                    const lockedOffsetUv = unitsToUv(
-                      state.lockedOffset.beats,
-                      state.lockedOffset.pitch,
-                      sourceBpm,
-                      sourceTotalDuration,
-                      sourceFileData.spectrogramData.bandsPerOctave,
-                      sourceFileData.spectrogramData.numBands,
-                    );
-                    sourceOffsetUv = lockedOffsetUv;
-                  } else {
-                    sourceOffsetUv = sourcePositionUv.clone().sub(currentBrushUv);
-                  }
-                }
-              }
-
-              displayMaterial.uniforms.sourceOffsetX.value = sourceOffsetUv.x;
-              displayMaterial.uniforms.sourceOffsetY.value = sourceOffsetUv.y;
-            }
-          }
-
-          return;
-        }
-
-        // Only process actual strokes on active or source files
-        if (!isActiveFile && !isSourceFile && !isMouseOver) {
-          return;
-        }
+        window.api.addUndoState({ data: spectrogramData.packedData.buffer, filePath });
+        debouncedSynthesis(filePath, spectrogramData.packedData);
+        invalidate(); // Trigger another render to update display
+        return;
       }
 
-      // Get totalDuration for this file (needed for both display and stroke rendering)
+      // After initialization, only update if this file is active, source, or mouse is hovering over it
+      if (!isActiveFile && !isSourceFile && !isMouseOver) {
+        return;
+      }
+
+      const bpm = state.filesBpm[filePath] || 120;
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
-      const sourceFile = state.sourceFile?.path ? openFiles[state.sourceFile.path] : null;
-      if (!sourceFile) return;
-
-      // Get current brush and view parameters from the global store
-      const sourceTotalDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
-
-      const sourceRendererRef = openFiles[sourceFile.filePath].rendererRef;
-
-      const textures = sourceRendererRef?.current?.getTextures();
-      if (!textures) return;
-
-      // Determine the current FBO for reading
-      const currentReadFBO = pingPong.current === 0 ? fbo1 : fbo2;
-      const bpm = state.filesBpm[filePath] || 120;
-      const sourceBpm = state.filesBpm[sourceFile.filePath] || 120;
-
-      // Calculate source offset based on position mode
-      let sourceOffsetUv = new THREE.Vector2(0, 0);
-
-      if (state.sourcePosition && mousePos) {
-        const mode = state.sourcePositionMode.value;
-
-        // Get brush size in UV for adjustment (positions are stored relative to bottom-left)
-        const brushSizeUvForCalc = unitsToUv(
-          state.brushWidthBeats.value,
-          state.brushHeightSemis.value,
-          bpm,
-          totalDuration,
-          spectrogramData.bandsPerOctave,
-          spectrogramData.numBands,
-        );
-        const halfBrushSizeUv = new THREE.Vector2(brushSizeUvForCalc.x / 2, brushSizeUvForCalc.y / 2);
-
-        // Convert source position (bottom-left) to UV coordinates in the source file
-        // The source position beats/pitch are in absolute musical units, so we interpret them
-        // in the current source file's coordinate space
-        const sourcePositionBottomLeftUv = unitsToUv(
-          state.sourcePosition.beats,
-          state.sourcePosition.pitch,
-          sourceBpm,
-          sourceTotalDuration,
-          sourceFile.spectrogramData.bandsPerOctave,
-          sourceFile.spectrogramData.numBands,
-        );
-        const sourcePositionUv = sourcePositionBottomLeftUv.clone().add(halfBrushSizeUv);
-
-        // Convert current brush position to UV coordinates in the target file
-        const currentBrushUv = mousePos.clone();
-
-        if (mode === "fixed") {
-          // Fixed: Always read from the source position, regardless of brush position
-          sourceOffsetUv = sourcePositionUv.clone().sub(currentBrushUv);
-        } else if (mode === "anchored") {
-          // Anchored: Each stroke starts from source position, offset recalculated per stroke
-          if (state.brushStartPosition) {
-            // Convert brush start position (bottom-left) to UV, add half brush size
-            const brushStartBottomLeftUv = unitsToUv(
-              state.brushStartPosition.beats,
-              state.brushStartPosition.pitch,
-              bpm,
-              totalDuration,
-              spectrogramData.bandsPerOctave,
-              spectrogramData.numBands,
-            );
-            const brushStartUv = brushStartBottomLeftUv.clone().add(halfBrushSizeUv);
-
-            // Calculate offset: where to read relative to current brush position
-            // This offset stays constant during the stroke
-            sourceOffsetUv = sourcePositionUv.clone().sub(brushStartUv);
-          } else {
-            // No stroke started yet, use source position
-            sourceOffsetUv = sourcePositionUv.clone().sub(currentBrushUv);
-          }
-        } else if (mode === "offset") {
-          // Offset: Locked offset that persists across all strokes (clone stamp)
-          if (state.lockedOffset) {
-            // Use the locked offset directly (it's already in beats/pitch units)
-            const lockedOffsetUv = unitsToUv(
-              state.lockedOffset.beats,
-              state.lockedOffset.pitch,
-              sourceBpm,
-              sourceTotalDuration,
-              sourceFile.spectrogramData.bandsPerOctave,
-              sourceFile.spectrogramData.numBands,
-            );
-            sourceOffsetUv = lockedOffsetUv;
-          } else if (state.brushStartPosition) {
-            // First stroke - calculate and lock the offset
-            const brushStartBottomLeftUv = unitsToUv(
-              state.brushStartPosition.beats,
-              state.brushStartPosition.pitch,
-              bpm,
-              totalDuration,
-              spectrogramData.bandsPerOctave,
-              spectrogramData.numBands,
-            );
-            const brushStartUv = brushStartBottomLeftUv.clone().add(halfBrushSizeUv);
-            const offset = sourcePositionUv.clone().sub(brushStartUv);
-            sourceOffsetUv = offset;
-          } else {
-            // No stroke started yet, preview mode
-            sourceOffsetUv = sourcePositionUv.clone().sub(currentBrushUv);
-          }
-        }
-      }
-
+      // Calculate brush size for display
       const brushSizeUv = unitsToUv(
         state.brushWidthBeats.value,
         state.brushHeightSemis.value,
@@ -554,136 +384,157 @@ export const FileRenderer = memo(
       brushSizeUv.x = state.brushWidthBeats.value > 0 ? brushSizeUv.x : 1;
       brushSizeUv.y = state.brushHeightSemis.value > 0 ? brushSizeUv.y : 1;
 
-      // Set up common uniforms for the brush shaders
-      const commonUniforms: CommonUniforms = {
-        sourceSpectrogramTex: { value: textures.packed.texture },
-        sourceSpectrogramTextureSize: { value: sourceFile.spectrogramData.packedTextureSize },
-        sourceInverseMapTex: { value: textures.inverse },
-        sourceMetadataTex: { value: textures.metadata },
-        sourceMinFreq: { value: sourceFile.spectrogramData.minFreq },
-        sourceBandsPerOctave: { value: sourceFile.spectrogramData.bandsPerOctave },
-        sourceFrameCount: { value: sourceFile.spectrogramData.numFrames },
-        sourceBandCount: { value: sourceFile.spectrogramData.numBands },
-        sourceChannelCount: { value: sourceFile.spectrogramData.numChannels },
-        sourceSampleRate: { value: sourceFile.spectrogramData.sampleRate },
-        destSpectrogramTex: { value: currentReadFBO.texture },
-        destSpectrogramTextureSize: { value: spectrogramData.packedTextureSize },
-        destInverseMapTex: { value: inverseMapTex },
-        destMetadataTex: { value: metadataTex },
-        destMinFreq: { value: spectrogramData.minFreq },
-        destBandsPerOctave: { value: spectrogramData.bandsPerOctave },
-        destFrameCount: { value: spectrogramData.numFrames },
-        destBandCount: { value: spectrogramData.numBands },
-        destChannelCount: { value: spectrogramData.numChannels },
-        destSampleRate: { value: spectrogramData.sampleRate },
-        originalSpectrogramTex: { value: originalPackedDataTex },
-        viewZoomPower: { value: state.zoomPower.value },
-        viewOffset: { value: state.scroll.value },
-        brushCenterUv: { value: mousePos || new THREE.Vector2(-1, -1) },
-        brushSizeUv: { value: brushSizeUv },
-        featherX: { value: state.brushFeatherTime.value / 100 },
-        featherY: { value: state.brushFeatherPitch.value / 100 },
-        featherSlopeTime: { value: state.brushFeatherSlopeTime.value / 100 },
-        featherSlopePitch: { value: state.brushFeatherSlopePitch.value / 100 },
-        brushIntensity: {
-          value: {
-            value: state.brushIntensity.value / 100,
-            minValue: state.brushIntensity.min / 100,
-            maxValue: state.brushIntensity.max / 100,
-            modulationAmounts:
-              state.brushIntensity.modulatorParamKeys?.map(
-                (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-              ) || [],
-          },
-        },
-        brushPan: {
-          value: {
-            value: state.brushPan.value / 100,
-            minValue: state.brushPan.min / 100,
-            maxValue: state.brushPan.max / 100,
-            modulationAmounts:
-              state.brushPan.modulatorParamKeys?.map(
-                (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-              ) || [],
-          },
-        },
-        bpm: { value: bpm },
-        sourceOffsetX: { value: sourceOffsetUv.x },
-        sourceOffsetY: { value: sourceOffsetUv.y },
-        blendMode: { value: state.blendMode.value },
-        modulators: {
-          value: Array.from({ length: NUM_MODULATORS }).map((_, i) => {
-            const modulatorPatternRate = unitsToUv(
-              state[`modulator${i + 1}PatternRateBeats`].value,
-              state[`modulator${i + 1}PatternRateSemis`].value,
-              bpm,
-              totalDuration,
-              spectrogramData.bandsPerOctave,
-              spectrogramData.numBands,
-            );
-
-            // Calculate min/max for pattern rates in UV space
-            const maxBeats = 64; // Maximum beat value from BEAT_VALUES
-            const maxSemis = 96; // Maximum semitone value from PITCH_VALUES
-            const maxRateUv = unitsToUv(
-              maxBeats,
-              maxSemis,
-              bpm,
-              totalDuration,
-              spectrogramData.bandsPerOctave,
-              spectrogramData.numBands,
-            );
-
-            return {
-              modulatorMode: state[`modulator${i + 1}Mode`].value,
-              modulatorPatternShape: state[`modulator${i + 1}PatternShape`].value,
-              modulatorPatternRateX: {
-                value: modulatorPatternRate.x,
-                minValue: 0.0,
-                maxValue: maxRateUv.x,
-                modulationAmounts:
-                  state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map(
-                    (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-                  ) || [],
-              },
-              modulatorPatternRateY: {
-                value: modulatorPatternRate.y,
-                minValue: 0.0,
-                maxValue: maxRateUv.y,
-                modulationAmounts:
-                  state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map(
-                    (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-                  ) || [],
-              },
-              modulatorStrength: {
-                value: state[`modulator${i + 1}Strength`].value / 100,
-                minValue: -1.0,
-                maxValue: 1.0,
-                modulationAmounts:
-                  state[`modulator${i + 1}Strength`].modulatorParamKeys?.map(
-                    (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-                  ) || [],
-              },
-              modulatorRotation: {
-                value: state[`modulator${i + 1}Rotation`].value,
-                minValue: 0.0,
-                maxValue: 360.0,
-                modulationAmounts:
-                  state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map(
-                    (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-                  ) || [],
-              },
-            };
-          }),
-        },
-        gainLut: { value: modulatorScaleLut || new THREE.Texture() },
-      };
-
       // Render brush stroke if requested
       if (strokeParams.current && applyStroke.current) {
+        const sourceFile = state.sourceFile?.path ? openFiles[state.sourceFile.path] : null;
+        if (!sourceFile) return;
+
+        const sourceRendererRef = openFiles[sourceFile.filePath].rendererRef;
+        const textures = sourceRendererRef?.current?.getTextures();
+        if (!textures) return;
+
+        const sourceBpm = state.filesBpm[sourceFile.filePath] || 120;
+        const sourceTotalDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
+
+        // Calculate source offset using the helper function
+        const sourceOffsetUv = calculateSourceOffset(
+          state,
+          mousePos,
+          sourceBpm,
+          sourceTotalDuration,
+          sourceFile.spectrogramData,
+          bpm,
+          totalDuration,
+        );
+
+        const currentReadFBO = pingPong.current === 0 ? fbo1 : fbo2;
         const destinationFbo = pingPong.current === 0 ? fbo2 : fbo1;
-        const currentFbo = pingPong.current === 0 ? fbo1 : fbo2;
         const { preview } = strokeParams.current;
+
+        // Set up common uniforms for the brush shaders
+        const commonUniforms: CommonUniforms = {
+          sourceSpectrogramTex: { value: textures.packed.texture },
+          sourceSpectrogramTextureSize: { value: sourceFile.spectrogramData.packedTextureSize },
+          sourceInverseMapTex: { value: textures.inverse },
+          sourceMetadataTex: { value: textures.metadata },
+          sourceMinFreq: { value: sourceFile.spectrogramData.minFreq },
+          sourceBandsPerOctave: { value: sourceFile.spectrogramData.bandsPerOctave },
+          sourceFrameCount: { value: sourceFile.spectrogramData.numFrames },
+          sourceBandCount: { value: sourceFile.spectrogramData.numBands },
+          sourceChannelCount: { value: sourceFile.spectrogramData.numChannels },
+          sourceSampleRate: { value: sourceFile.spectrogramData.sampleRate },
+          destSpectrogramTex: { value: currentReadFBO.texture },
+          destSpectrogramTextureSize: { value: spectrogramData.packedTextureSize },
+          destInverseMapTex: { value: inverseMapTex },
+          destMetadataTex: { value: metadataTex },
+          destMinFreq: { value: spectrogramData.minFreq },
+          destBandsPerOctave: { value: spectrogramData.bandsPerOctave },
+          destFrameCount: { value: spectrogramData.numFrames },
+          destBandCount: { value: spectrogramData.numBands },
+          destChannelCount: { value: spectrogramData.numChannels },
+          destSampleRate: { value: spectrogramData.sampleRate },
+          originalSpectrogramTex: { value: originalPackedDataTex },
+          viewZoomPower: { value: state.zoomPower.value },
+          viewOffset: { value: state.scroll.value },
+          brushCenterUv: { value: mousePos || new THREE.Vector2(-1, -1) },
+          brushSizeUv: { value: brushSizeUv },
+          featherX: { value: state.brushFeatherTime.value / 100 },
+          featherY: { value: state.brushFeatherPitch.value / 100 },
+          featherSlopeTime: { value: state.brushFeatherSlopeTime.value / 100 },
+          featherSlopePitch: { value: state.brushFeatherSlopePitch.value / 100 },
+          brushIntensity: {
+            value: {
+              value: state.brushIntensity.value / 100,
+              minValue: state.brushIntensity.min / 100,
+              maxValue: state.brushIntensity.max / 100,
+              modulationAmounts:
+                state.brushIntensity.modulatorParamKeys?.map(
+                  (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+                ) || [],
+            },
+          },
+          brushPan: {
+            value: {
+              value: state.brushPan.value / 100,
+              minValue: state.brushPan.min / 100,
+              maxValue: state.brushPan.max / 100,
+              modulationAmounts:
+                state.brushPan.modulatorParamKeys?.map(
+                  (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+                ) || [],
+            },
+          },
+          bpm: { value: bpm },
+          sourceOffsetX: { value: sourceOffsetUv.x },
+          sourceOffsetY: { value: sourceOffsetUv.y },
+          blendMode: { value: state.blendMode.value },
+          modulators: {
+            value: Array.from({ length: NUM_MODULATORS }).map((_, i) => {
+              const modulatorPatternRate = unitsToUv(
+                state[`modulator${i + 1}PatternRateBeats`].value,
+                state[`modulator${i + 1}PatternRateSemis`].value,
+                bpm,
+                totalDuration,
+                spectrogramData.bandsPerOctave,
+                spectrogramData.numBands,
+              );
+
+              // Calculate min/max for pattern rates in UV space
+              const maxBeats = 64; // Maximum beat value from BEAT_VALUES
+              const maxSemis = 96; // Maximum semitone value from PITCH_VALUES
+              const maxRateUv = unitsToUv(
+                maxBeats,
+                maxSemis,
+                bpm,
+                totalDuration,
+                spectrogramData.bandsPerOctave,
+                spectrogramData.numBands,
+              );
+
+              return {
+                modulatorMode: state[`modulator${i + 1}Mode`].value,
+                modulatorPatternShape: state[`modulator${i + 1}PatternShape`].value,
+                modulatorPatternRateX: {
+                  value: modulatorPatternRate.x,
+                  minValue: 0.0,
+                  maxValue: maxRateUv.x,
+                  modulationAmounts:
+                    state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map(
+                      (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+                    ) || [],
+                },
+                modulatorPatternRateY: {
+                  value: modulatorPatternRate.y,
+                  minValue: 0.0,
+                  maxValue: maxRateUv.y,
+                  modulationAmounts:
+                    state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map(
+                      (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+                    ) || [],
+                },
+                modulatorStrength: {
+                  value: state[`modulator${i + 1}Strength`].value / 100,
+                  minValue: -1.0,
+                  maxValue: 1.0,
+                  modulationAmounts:
+                    state[`modulator${i + 1}Strength`].modulatorParamKeys?.map(
+                      (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+                    ) || [],
+                },
+                modulatorRotation: {
+                  value: state[`modulator${i + 1}Rotation`].value,
+                  minValue: 0.0,
+                  maxValue: 360.0,
+                  modulationAmounts:
+                    state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map(
+                      (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+                    ) || [],
+                },
+              };
+            }),
+          },
+          gainLut: { value: modulatorScaleLut || new THREE.Texture() },
+        };
 
         // Get enabled effects in order
         const enabledEffects = state.effectOrder.filter((effectId) => state.effectsEnabled[effectId]);
@@ -701,7 +552,7 @@ export const FileRenderer = memo(
           state.sourceFile?.mode === "original"
             ? { texture: textures.original } // Use original unmodified data
             : isSameFile
-              ? currentFbo // Same file: use our own current modified FBO
+              ? currentReadFBO // Same file: use our own current modified FBO
               : textures.packed; // Different file: use their current modified FBO
 
         // Override the source texture in commonUniforms to use the correct source
@@ -794,43 +645,81 @@ export const FileRenderer = memo(
           const buffer = getFBOData();
           debouncedSynthesis(filePath, buffer);
         }
+
+        applyStroke.current = false;
       }
 
-      // Update the display material with the latest FBO texture and uniforms
+      // Update display material uniforms (once per frame at the end)
       const currentFBO = pingPong.current === 0 ? fbo1 : fbo2;
       const nextFBO = pingPong.current === 0 ? fbo2 : fbo1;
+      const displayTexture = displayMode.current === "committed" ? currentFBO.texture : nextFBO.texture;
 
-      const displayUniforms = {
-        ...commonUniforms,
-        sourceSpectrogramTex: { value: displayMode.current === "committed" ? currentFBO.texture : nextFBO.texture },
-        sourceInverseMapTex: { value: inverseMapTex },
-        sourceMetadataTex: { value: metadataTex },
-        sourceMinFreq: { value: spectrogramData.minFreq },
-        sourceBandsPerOctave: { value: spectrogramData.bandsPerOctave },
-        sourceFrameCount: { value: spectrogramData.numFrames },
-        sourceBandCount: { value: spectrogramData.numBands },
-        sourceChannelCount: { value: spectrogramData.numChannels },
-        sourceSampleRate: { value: spectrogramData.sampleRate },
-        sourceSpectrogramTextureSize: { value: spectrogramData.packedTextureSize },
-        gridSize: { value: state.gridSizeBeats.value },
-        bpm: { value: bpm },
-        showSourceRectangle: { value: isSourceFile && isMouseOverAnyFile },
-        showTargetRectangle: { value: isMouseOver },
-      };
+      displayMaterial.uniforms.sourceSpectrogramTex.value = displayTexture;
+      displayMaterial.uniforms.sourceInverseMapTex.value = inverseMapTex;
+      displayMaterial.uniforms.sourceMetadataTex.value = metadataTex;
+      displayMaterial.uniforms.sourceMinFreq.value = spectrogramData.minFreq;
+      displayMaterial.uniforms.sourceBandsPerOctave.value = spectrogramData.bandsPerOctave;
+      displayMaterial.uniforms.sourceFrameCount.value = spectrogramData.numFrames;
+      displayMaterial.uniforms.sourceBandCount.value = spectrogramData.numBands;
+      displayMaterial.uniforms.sourceChannelCount.value = spectrogramData.numChannels;
+      displayMaterial.uniforms.sourceSampleRate.value = spectrogramData.sampleRate;
+      displayMaterial.uniforms.sourceSpectrogramTextureSize.value = spectrogramData.packedTextureSize;
+      displayMaterial.uniforms.gridSize.value = state.gridSizeBeats.value;
+      displayMaterial.uniforms.bpm.value = bpm;
+      displayMaterial.uniforms.brushCenterUv.value = mousePos || new THREE.Vector2(0, 0);
+      displayMaterial.uniforms.brushSizeUv.value = brushSizeUv;
+      displayMaterial.uniforms.showTargetRectangle.value = isMouseOver;
+      displayMaterial.uniforms.showSourceRectangle.value = isSourceFile && isMouseOverAnyFile;
 
-      for (const key in displayUniforms) {
-        if (key in displayMaterial.uniforms) {
-          displayMaterial.uniforms[key].value = displayUniforms[key].value;
+      // Calculate and update grid values
+      const gridSizeBeats = state.gridSizeBeats.value;
+      const gridSizeSemis = state.gridSizeSemis.value;
+
+      // Horizontal grid (time/beats)
+      const beatDurationSeconds = 60.0 / bpm;
+      const gridIntervalSeconds = beatDurationSeconds * gridSizeBeats;
+      const gridWidthUv = gridSizeBeats > 0 ? gridIntervalSeconds / totalDuration : 0;
+      const barWidthUv = gridSizeBeats > 0 ? (beatDurationSeconds * 4.0) / totalDuration : 0;
+
+      // Vertical grid (frequency/semitones)
+      const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
+      const gridIntervalBands = gridSizeSemis * bandsPerSemitone;
+      const gridHeightUv = gridSizeSemis > 0 ? gridIntervalBands / spectrogramData.numBands : 0;
+
+      // Determine if grid lines should be shown based on spacing (min 10 pixels apart)
+      const MIN_GRID_SPACING_PX = 10;
+      const viewportWidth = gl.domElement.width;
+      const viewportHeight = gl.domElement.height;
+      const gridWidthPx = gridWidthUv * viewportWidth;
+      const gridHeightPx = gridHeightUv * viewportHeight;
+
+      displayMaterial.uniforms.gridWidthUv.value = gridWidthUv;
+      displayMaterial.uniforms.gridHeightUv.value = gridHeightUv;
+      displayMaterial.uniforms.barWidthUv.value = barWidthUv;
+      displayMaterial.uniforms.showHorizontalGrid.value = gridWidthPx >= MIN_GRID_SPACING_PX && gridSizeBeats > 0;
+      displayMaterial.uniforms.showVerticalGrid.value = gridHeightPx >= MIN_GRID_SPACING_PX && gridSizeSemis > 0;
+
+      // Update source offset for display (so source rectangle shows correctly)
+      if (state.sourceFile?.path) {
+        const sourceFileData = openFiles[state.sourceFile.path];
+        if (sourceFileData) {
+          const sourceBpm = state.filesBpm[state.sourceFile.path] || 120;
+          const sourceTotalDuration =
+            sourceFileData.spectrogramData.numFrames / sourceFileData.spectrogramData.sampleRate;
+
+          const sourceOffsetUv = calculateSourceOffset(
+            state,
+            mousePos,
+            sourceBpm,
+            sourceTotalDuration,
+            sourceFileData.spectrogramData,
+            bpm,
+            totalDuration,
+          );
+
+          displayMaterial.uniforms.sourceOffsetX.value = sourceOffsetUv.x;
+          displayMaterial.uniforms.sourceOffsetY.value = sourceOffsetUv.y;
         }
-      }
-
-      if (applyStroke.current) applyStroke.current = false;
-
-      // Mark that we've completed at least one full render (including initialization if needed)
-      if (!isInitialized.current) {
-        isInitialized.current = true;
-        // Trigger another render to update display uniforms with grid values
-        invalidate();
       }
     });
 
