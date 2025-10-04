@@ -181,7 +181,10 @@ export function registerAudioIpcHandlers(window: BrowserWindow) {
   });
 
   ipcMainHandle("synthesize-audio", async (_, payload, params, normalize) => {
-    return runSynthesisInWorker(payload, params, normalize);
+    const audioChannels = await runSynthesisInWorker(payload, params, normalize);
+
+    // Convert Float32Arrays to Buffers for efficient IPC transfer
+    return audioChannels.map((channel) => Buffer.from(channel.buffer, channel.byteOffset, channel.byteLength));
   });
 
   ipcMainHandle("save-audio-data", async (_, payload, params, normalize) => {

@@ -6,6 +6,7 @@ let animationFrameId: number;
 
 export const runSynthesis = async (filePath: string): Promise<void> => {
   try {
+    const totalStart = performance.now();
     console.log("runSynthesis");
     const { normalize, bandsPerOctave, minFreq, isPlaying, activeFilePath, loop } = useStore.getState();
     const file = openFiles[filePath];
@@ -31,7 +32,11 @@ export const runSynthesis = async (filePath: string): Promise<void> => {
       bandsPerOctave: bandsPerOctave.value,
       minFreq: minFreq.value,
     };
+
+    const ipcStart = performance.now();
     const audioBufferChannels = await window.api.synthesizeAudio(payload, analysisParams, normalize.value);
+    const ipcTime = performance.now() - ipcStart;
+    console.log("IPC transfer took:", ipcTime.toFixed(2), "ms");
 
     if (audioBufferChannels.length === 0) {
       throw new Error("Synthesis returned no audio channels.");
@@ -43,9 +48,45 @@ export const runSynthesis = async (filePath: string): Promise<void> => {
     const audioContext = Tone.getContext().rawContext;
     const audioBuffer = audioContext.createBuffer(numChannels, numFrames, originalAnalysis.sampleRate);
 
-    for (let c = 0; c < numChannels; c++) {
-      audioBuffer.copyToChannel(new Float32Array(audioBufferChannels[c]), c);
-    }
+    // Copy channels in a non-blocking way using async iteration
+    const copyStart = performance.now();
+    await new Promise<void>((resolve) => {
+      let channelIndex = 0;
+
+      const copyNextChannel = () => {
+        if (channelIndex < numChannels) {
+          // Convert Buffer to Float32Array efficiently
+          const channelBuffer = audioBufferChannels[channelIndex] as any;
+          let channelData: Float32Array;
+
+          if (channelBuffer instanceof Float32Array) {
+            channelData = channelBuffer;
+          } else if (ArrayBuffer.isView(channelBuffer)) {
+            // It's a Buffer or typed array view - create a view without copying
+            channelData = new Float32Array(
+              channelBuffer.buffer as ArrayBuffer,
+              channelBuffer.byteOffset as number,
+              (channelBuffer.byteLength as number) / Float32Array.BYTES_PER_ELEMENT,
+            );
+          } else {
+            // Fallback for plain array
+            channelData = new Float32Array(channelBuffer);
+          }
+
+          audioBuffer.copyToChannel(channelData as Float32Array<ArrayBuffer>, channelIndex);
+          channelIndex++;
+
+          // Yield to the event loop between channels
+          setTimeout(copyNextChannel, 0);
+        } else {
+          resolve();
+        }
+      };
+
+      copyNextChannel();
+    });
+    const copyTime = performance.now() - copyStart;
+    console.log("Channel copy took:", copyTime.toFixed(2), "ms");
 
     file.audioBuffer = audioBuffer;
 
@@ -73,6 +114,9 @@ export const runSynthesis = async (filePath: string): Promise<void> => {
       }
       player.seek(currentTime);
     }
+
+    const totalTime = performance.now() - totalStart;
+    console.log("Total synthesis took:", totalTime.toFixed(2), "ms");
   } catch (error) {
     console.error("Error running synthesis:", error);
   } finally {

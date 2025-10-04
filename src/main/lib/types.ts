@@ -102,7 +102,7 @@ export interface IpcMainHandlers {
     payload: SynthesisPayload,
     params: GaboratorParams,
     normalize: boolean,
-  ) => Promise<Float32Array[]>;
+  ) => Promise<Buffer[]>;
   "save-audio-data": (
     event: Electron.IpcMainInvokeEvent,
     payload: SynthesisPayload,

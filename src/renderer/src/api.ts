@@ -10,12 +10,13 @@ let unsubscribers: (() => void)[] = [];
 export function init() {
   if (process.env.NODE_ENV === "development") {
     if (Object.keys(useStore.getState().openFilePaths).length === 0) {
-      openFile(
-        "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
-      );
-      openFile(
-        "/Users/rob/Splice/sounds/packs/Indian Vocal Pack (Mitika Kanwar)/Indian_Vocal_Pack/Loops/Resampled/JMK_IVP_124_indian_vocal_female_hook_humming_dance_resampled_pitched_A#m.wav",
-      );
+      // openFile(
+      //   "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
+      // );
+      // openFile(
+      //   "/Users/rob/Splice/sounds/packs/Indian Vocal Pack (Mitika Kanwar)/Indian_Vocal_Pack/Loops/Resampled/JMK_IVP_124_indian_vocal_female_hook_humming_dance_resampled_pitched_A#m.wav",
+      // );
+      openFile("/Users/rob/Desktop/test.wav");
       // openFile("/Users/rob/Desktop/tone2.wav");
       // openFile("/Users/rob/Desktop/tone2-sat.wav");
     }
