@@ -194,9 +194,21 @@ export type ParameterKey = keyof {
 
 type ZustandSet = (partial: State | Partial<State> | ((state: State) => State | Partial<State>)) => void;
 
-function createParameter<T extends { value: unknown }>(
+// Extract the base parameter type (without setValue/resetValue/modulatorParamKeys)
+type BaseParameterType<K extends ParameterKey> = State[K] extends ContinuousNumberParameter
+  ? Omit<ContinuousNumberParameter, "setValue" | "resetValue" | "modulatorParamKeys">
+  : State[K] extends DiscreteNumberParameter
+    ? Omit<DiscreteNumberParameter, "setValue" | "resetValue" | "modulatorParamKeys">
+    : State[K] extends OptionsParameter<infer T>
+      ? Omit<OptionsParameter<T>, "setValue" | "resetValue" | "modulatorParamKeys">
+      : State[K] extends BooleanParameter
+        ? Omit<BooleanParameter, "setValue" | "resetValue" | "modulatorParamKeys">
+        : never;
+
+// Internal helper for creating parameters without type constraints (used for dynamic modulator params)
+function createParameterInternal<T extends { value: unknown }>(
   set: ZustandSet,
-  key: ParameterKey,
+  key: string,
   parameter: T,
   modulatable: boolean,
 ) {
@@ -223,13 +235,23 @@ function createParameter<T extends { value: unknown }>(
   return params;
 }
 
-function createModulatorParamsForParameter(set: ZustandSet, key: ParameterKey) {
+// Type-safe createParameter that enforces the parameter structure matches the State type
+function createParameter<K extends ParameterKey>(
+  set: ZustandSet,
+  key: K,
+  parameter: BaseParameterType<K>,
+  modulatable: boolean,
+) {
+  return createParameterInternal(set, key as string, parameter as any, modulatable);
+}
+
+function createModulatorParamsForParameter(set: ZustandSet, key: string) {
   let params = {} as any;
   for (let i = 0; i < NUM_MODULATORS; i++) {
-    const paramKey = `${key}Mod${i + 1}Amount` as keyof ModulatorAmountParameters;
+    const paramKey = `${key}Mod${i + 1}Amount`;
     params = {
       ...params,
-      ...createParameter(
+      ...createParameterInternal(
         set,
         paramKey,
         {
@@ -243,7 +265,6 @@ function createModulatorParamsForParameter(set: ZustandSet, key: ParameterKey) {
           description:
             "The amount of modulation to apply. 0% is no modulation and only the value of the parameter is used, 100% is full modulation and the current value of the modulated parameter is ignored.",
         },
-
         false,
       ),
     };
@@ -254,10 +275,10 @@ function createModulatorParamsForParameter(set: ZustandSet, key: ParameterKey) {
 function createModulatorParams(set: ZustandSet): ModulatorParameters {
   let params = {} as any;
   for (let i = 0; i < NUM_MODULATORS; i++) {
-    let paramKey = `modulator${i + 1}Mode` as ParameterKey;
+    let paramKey = `modulator${i + 1}Mode`;
     params = {
       ...params,
-      ...createParameter(
+      ...createParameterInternal(
         set,
         paramKey,
         {
@@ -270,10 +291,10 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
         false,
       ),
     };
-    paramKey = `modulator${i + 1}PatternShape` as ParameterKey;
+    paramKey = `modulator${i + 1}PatternShape`;
     params = {
       ...params,
-      ...createParameter(
+      ...createParameterInternal(
         set,
         paramKey,
         {
@@ -286,10 +307,10 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
         false,
       ),
     };
-    paramKey = `modulator${i + 1}Strength` as ParameterKey;
+    paramKey = `modulator${i + 1}Strength`;
     params = {
       ...params,
-      ...createParameter(
+      ...createParameterInternal(
         set,
         paramKey,
         {
@@ -305,10 +326,10 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
         true,
       ),
     };
-    paramKey = `modulator${i + 1}PatternRateBeats` as ParameterKey;
+    paramKey = `modulator${i + 1}PatternRateBeats`;
     params = {
       ...params,
-      ...createParameter(
+      ...createParameterInternal(
         set,
         paramKey,
         {
@@ -324,10 +345,10 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
         true,
       ),
     };
-    paramKey = `modulator${i + 1}PatternRateSemis` as ParameterKey;
+    paramKey = `modulator${i + 1}PatternRateSemis`;
     params = {
       ...params,
-      ...createParameter(
+      ...createParameterInternal(
         set,
         paramKey,
         {
@@ -343,10 +364,10 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
         true,
       ),
     };
-    paramKey = `modulator${i + 1}Rotation` as ParameterKey;
+    paramKey = `modulator${i + 1}Rotation`;
     params = {
       ...params,
-      ...createParameter(
+      ...createParameterInternal(
         set,
         paramKey,
         {
