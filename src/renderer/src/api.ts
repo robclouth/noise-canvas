@@ -96,7 +96,7 @@ export function init() {
     const rendererRef = activeFile.rendererRef;
     if (!rendererRef?.current) return;
 
-    const processedData = rendererRef.current.getFBOData();
+    const processedData = await rendererRef.current.getFBOData();
     const spectrogramData = activeFile.spectrogramData;
     if (!processedData || !spectrogramData) {
       return;

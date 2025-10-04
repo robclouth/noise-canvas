@@ -11,6 +11,7 @@ import { ShaderMaterial, UniformsUtils } from "three";
 import { effects } from "../effects";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
+import { readRenderTargetPixelsAsync } from "../lib/async-readpixels";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { unitsToUv } from "../lib/utils";
 import { copyMaterial } from "./copy-material";
@@ -29,8 +30,8 @@ interface FileRendererProps {
 export interface FileRendererHandle {
   /** Renders a brush stroke at the given coordinates. */
   renderStroke: (x: number, y: number, preview: boolean) => void;
-  /** Gets the raw data from the current frame buffer object. */
-  getFBOData: () => Float32Array;
+  /** Gets the raw data from the current frame buffer object asynchronously. */
+  getFBOData: () => Promise<Float32Array>;
   /** Sets the data of the frame buffer object. */
   setFBOData: (data: Float32Array) => void;
   /** Returns the textures used for rendering. */
@@ -197,6 +198,10 @@ export const FileRenderer = memo(
 
     const strokeParams = useRef<{ x: number; y: number; preview: boolean } | null>(null);
 
+    // FBO data cache to avoid redundant GPU readbacks
+    const fboDataCache = useRef<Float32Array | null>(null);
+    const fboDataDirty = useRef(true);
+
     // Effect to create and manage spectrogram textures
     useEffect(() => {
       const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
@@ -226,6 +231,9 @@ export const FileRenderer = memo(
 
       // Reset render tracking when textures change
       isInitialized.current = false;
+
+      // Invalidate cache since textures have changed
+      fboDataDirty.current = true;
 
       return () => {
         packed.dispose();
@@ -400,8 +408,11 @@ export const FileRenderer = memo(
         pingPong.current = 0;
         isInitialized.current = true;
 
+        // Invalidate cache since FBO has been initialized
+        fboDataDirty.current = true;
+
         window.api.addUndoState({ data: spectrogramData.packedData.buffer, filePath });
-        debouncedSynthesis(filePath, spectrogramData.packedData);
+        debouncedSynthesis(filePath);
         invalidate(); // Trigger another render to update display
         return;
       }
@@ -684,9 +695,11 @@ export const FileRenderer = memo(
           pingPong.current = 1 - pingPong.current;
           displayMode.current = "committed";
 
+          // Mark FBO data cache as dirty since we've modified the buffer
+          fboDataDirty.current = true;
+
           useStore.getState().setIsSynthesizing(true);
-          const buffer = getFBOData();
-          debouncedSynthesis(filePath, buffer);
+          debouncedSynthesis(filePath);
         }
 
         applyStroke.current = false;
@@ -767,15 +780,32 @@ export const FileRenderer = memo(
     });
 
     /**
-     * Reads the pixel data from the current FBO.
+     * Reads the pixel data from the current FBO asynchronously using WebGL2 PBO.
+     * Results are cached to avoid redundant GPU readbacks until the data changes.
      */
-    const getFBOData = (): Float32Array => {
+    const getFBOData = async (): Promise<Float32Array> => {
+      // Return cached data if available and not dirty
+      if (fboDataCache.current && !fboDataDirty.current) {
+        console.log("getFBOData: returning cached data");
+        return fboDataCache.current;
+      }
+
       const { packedTextureSize } = spectrogramData;
       const fboToRead = pingPong.current === 0 ? fbo1 : fbo2;
-      const buffer = new Float32Array(packedTextureSize.x * packedTextureSize.y * 4);
-      glRef.current.getContext().finish();
-      glRef.current.readRenderTargetPixels(fboToRead, 0, 0, packedTextureSize.x, packedTextureSize.y, buffer);
-      return buffer;
+      const data = await readRenderTargetPixelsAsync(
+        glRef.current,
+        fboToRead,
+        0,
+        0,
+        packedTextureSize.x,
+        packedTextureSize.y,
+      );
+
+      // Cache the result and mark as clean
+      fboDataCache.current = data;
+      fboDataDirty.current = false;
+
+      return data;
     };
 
     /**
@@ -810,6 +840,9 @@ export const FileRenderer = memo(
       applyStroke.current = false;
       displayMode.current = "committed";
 
+      // Invalidate cache since FBO data has changed
+      fboDataDirty.current = true;
+
       invalidateRef.current();
     };
 
@@ -837,8 +870,11 @@ export const FileRenderer = memo(
     const restoreOriginal = () => {
       isInitialized.current = false;
 
+      // Invalidate cache since FBO data will be reset
+      fboDataDirty.current = true;
+
       invalidateRef.current();
-      debouncedSynthesis(filePath, getFBOData());
+      debouncedSynthesis(filePath);
     };
 
     /**
@@ -846,8 +882,7 @@ export const FileRenderer = memo(
      */
     const synthesize = () => {
       useStore.getState().setIsSynthesizing(true);
-      const buffer = getFBOData();
-      debouncedSynthesis(filePath, buffer);
+      debouncedSynthesis(filePath);
     };
 
     /**
@@ -890,6 +925,9 @@ export const FileRenderer = memo(
       // Reset render tracking
       isInitialized.current = false;
       pingPong.current = 0;
+
+      // Invalidate cache since textures have been reloaded
+      fboDataDirty.current = true;
 
       invalidateRef.current();
     };

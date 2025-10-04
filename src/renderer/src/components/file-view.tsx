@@ -324,14 +324,14 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
     }
   };
 
-  const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = (event) => {
+  const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = async (event) => {
     if (!isActive) return;
     if (event.button === 0 && rendererRef?.current) {
       // Clear brush start position when stroke ends
       useStore.getState().setBrushStartPosition(null);
 
       // Left mouse button up
-      const data = rendererRef.current.getFBOData();
+      const data = await rendererRef.current.getFBOData();
       if (data) {
         window.api.addUndoState({
           data: data.buffer,

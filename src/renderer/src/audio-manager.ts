@@ -4,20 +4,21 @@ import { openFiles, useStore } from "./store";
 const player = new Tone.Player().toDestination();
 let animationFrameId: number;
 
-export const runSynthesis = async (filePath: string, processedData: Float32Array): Promise<void> => {
+export const runSynthesis = async (filePath: string): Promise<void> => {
   try {
     console.log("runSynthesis");
     const { normalize, bandsPerOctave, minFreq, isPlaying, activeFilePath, loop } = useStore.getState();
     const file = openFiles[filePath];
-    if (!file) {
+    if (!file || !file.rendererRef?.current) {
       return;
     }
 
     const originalAnalysis = file.spectrogramData;
 
     // Assemble the payload for the main process
+    const fboData = await file.rendererRef.current.getFBOData();
     const payload = {
-      processedData: processedData.buffer,
+      processedData: fboData.buffer,
       analysisMetadata: {
         numFrames: originalAnalysis.numFrames,
         numChannels: originalAnalysis.numChannels,
