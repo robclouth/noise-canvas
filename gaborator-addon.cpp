@@ -63,8 +63,8 @@ public:
             totalComplexCoefficients += len;
         }
 
-        const int maxWidth = 8192;
-        const int maxHeight = 8192;
+        const int maxWidth = 4096;
+        const int maxHeight = 4096;
         textureWidth = std::min((size_t)maxWidth, totalComplexCoefficients);
         textureHeight = (totalComplexCoefficients > 0) ? (totalComplexCoefficients + textureWidth - 1) / textureWidth : 0;
         
@@ -76,7 +76,7 @@ public:
         if (this->isClamped) {
             textureHeight = maxHeight;
             clampedComplexCoefficients = (size_t)maxWidth * maxHeight;
-            // Calculate the actual duration that fits in the 8K x 8K texture
+            // Calculate the actual duration that fits in the texture
             // The ratio of clamped coefficients to total gives us the proportion of the file kept
             double ratio = (double)clampedComplexCoefficients / (double)totalComplexCoefficients;
             this->clampedDurationSeconds = ratio * ((double)numFrames / sampleRate);
