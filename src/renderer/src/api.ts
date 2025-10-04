@@ -283,6 +283,16 @@ export function addFile(payload: AnalysisPayloadForRenderer) {
 
     window.api.fileOpened(newFile.filePath);
   }
+
+  // Show notification if the file was clamped due to texture size limits
+  if (payload.isClamped) {
+    notifications.show({
+      title: "File Duration Clamped",
+      message: `File exceeded 8K x 8K texture limit and was clamped to ${payload.clampedDurationSeconds.toFixed(2)} seconds.`,
+      color: "yellow",
+      autoClose: 8000,
+    });
+  }
 }
 
 function openFile(filePath: string) {

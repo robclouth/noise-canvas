@@ -64,8 +64,23 @@ public:
         }
 
         const int maxWidth = 8192;
+        const int maxHeight = 8192;
         textureWidth = std::min((size_t)maxWidth, totalComplexCoefficients);
         textureHeight = (totalComplexCoefficients > 0) ? (totalComplexCoefficients + textureWidth - 1) / textureWidth : 0;
+        
+        // Check if we need to clamp the texture height
+        this->isClamped = textureHeight > maxHeight;
+        this->clampedDurationSeconds = 0.0;
+        size_t clampedComplexCoefficients = totalComplexCoefficients;
+        
+        if (this->isClamped) {
+            textureHeight = maxHeight;
+            clampedComplexCoefficients = (size_t)maxWidth * maxHeight;
+            // Calculate the actual duration that fits in the 8K x 8K texture
+            // The ratio of clamped coefficients to total gives us the proportion of the file kept
+            double ratio = (double)clampedComplexCoefficients / (double)totalComplexCoefficients;
+            this->clampedDurationSeconds = ratio * ((double)numFrames / sampleRate);
+        }
 
         size_t floatsPerPixel = 4;
         size_t paddedDataFloatCount = (size_t)textureWidth * textureHeight * floatsPerPixel;
@@ -75,6 +90,25 @@ public:
         size_t paddedMapFloatCount = (size_t)textureWidth * textureHeight * floatsPerMapPixel;
         paddedInverseMap.assign(paddedMapFloatCount, 0.0f);
 
+        size_t maxPixelIndex = (size_t)textureWidth * textureHeight;
+        
+        // If clamped, update bandLengths and numFrames to reflect actual stored data
+        if (this->isClamped) {
+            for (int bandIdx = 0; bandIdx < numBands; ++bandIdx) {
+                size_t bandStart = bandOffsets[bandIdx];
+                size_t bandEnd = bandStart + bandLengths[bandIdx];
+                if (bandEnd > maxPixelIndex) {
+                    if (bandStart >= maxPixelIndex) {
+                        bandLengths[bandIdx] = 0;
+                    } else {
+                        bandLengths[bandIdx] = static_cast<uint32_t>(maxPixelIndex - bandStart);
+                    }
+                }
+            }
+            // Update numFrames to reflect the clamped duration
+            numFrames = static_cast<size_t>(this->clampedDurationSeconds * sampleRate);
+        }
+        
         size_t floatsPerMetaPixel = 3;
         size_t metadataFloatCount = (size_t)numBands * floatsPerMetaPixel;
         metadataTexture.resize(metadataFloatCount);
@@ -84,7 +118,7 @@ public:
             metadataTexture[i * 3 + 1] = static_cast<float>(bandLengths[i]);
             metadataTexture[i * 3 + 2] = static_cast<float>(bandStepLog2s[i]);
         }
-
+        
         for (int bandIdx = 0; bandIdx < numBands; ++bandIdx) {
             uint64_t timeStep = 1ULL << bandStepLog2s[bandIdx];
             for (uint32_t i = 0; i < bandLengths[bandIdx]; ++i) {
@@ -106,6 +140,8 @@ public:
                     int64_t tInBand = t >> bandStepLog2s[bandIdx];
                     if (tInBand < 0 || (size_t)tInBand >= bandLengths[bandIdx]) return;
                     size_t baseOffset = bandOffsets[bandIdx] + tInBand;
+                    // Only write if within the clamped texture bounds
+                    if (baseOffset >= maxPixelIndex) return;
                     size_t writeOffset = baseOffset * floatsPerPixel;
                     paddedData[writeOffset + ch * 2 + 0] = coef.real();
                     paddedData[writeOffset + ch * 2 + 1] = coef.imag();
@@ -151,6 +187,9 @@ public:
         memcpy(bandLengthsJs.Data(), bandLengths.data(), bandLengths.size() * sizeof(uint32_t));
         resultJs.Set("bandLengths", bandLengthsJs);
 
+        resultJs.Set("isClamped", Napi::Boolean::New(env, isClamped));
+        resultJs.Set("clampedDurationSeconds", Napi::Number::New(env, clampedDurationSeconds));
+
         deferred.Resolve(resultJs);
     }
 
@@ -179,6 +218,8 @@ private:
     std::vector<uint32_t> bandOffsets;
     std::vector<int32_t> bandStepLog2s;
     std::vector<uint32_t> bandLengths;
+    bool isClamped;
+    double clampedDurationSeconds;
 };
 
 Napi::Value AnalyzeAsync(const Napi::CallbackInfo& info) {

@@ -12,6 +12,8 @@ export interface GaboratorAnalysisResult {
   bandOffsets: Uint32Array;
   bandStepLog2s: Int32Array;
   bandLengths: Uint32Array;
+  isClamped: boolean;
+  clampedDurationSeconds: number;
 }
 
 // Describes the payload sent to the renderer process via IPC. Large arrays are Buffers.
@@ -31,6 +33,8 @@ export interface AnalysisPayloadForRenderer {
   sampleRate: number;
   minFreq: number;
   bandsPerOctave: number;
+  isClamped: boolean;
+  clampedDurationSeconds: number;
 }
 
 // Describes the payload received from the renderer when requesting synthesis

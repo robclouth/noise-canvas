@@ -1,6 +1,6 @@
-import { parentPort, workerData } from "worker_threads";
 import ffmpeg from "fluent-ffmpeg";
 import { Writable } from "stream";
+import { parentPort, workerData } from "worker_threads";
 import type { GaboratorAnalysisResult, GaboratorParams } from "./types";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
