@@ -12,6 +12,13 @@ uniform float gridSize;
 uniform bool isSourceFile;
 uniform bool isTargetFile;
 
+// Pre-calculated grid values
+uniform float gridWidthUv;        // Width of each beat in UV coordinates
+uniform float gridHeightUv;       // Height of each semitone in UV coordinates
+uniform float barWidthUv;         // Width of each bar (4 beats) in UV coordinates
+uniform bool showHorizontalGrid;  // Whether to show horizontal grid lines
+uniform bool showVerticalGrid;    // Whether to show vertical grid lines
+
 
 float magnitudeToDb(float mag) {
     float logMag = 20.0 * log(mag + 1.0e-7) / log(10.0);
@@ -40,16 +47,31 @@ void main() {
     }
 
     // Grid lines
-    float gridIntervalSeconds = (60.0 / bpm) * gridSize;
-    float totalDuration = sourceFrameCount / sourceSampleRate;
-    float gridWidthUv = gridIntervalSeconds / totalDuration;
-    
-    float line = mod(vUv.x, gridWidthUv);
-
     float lineThicknessUv = fwidth(vUv.x);
-
-    if (line < lineThicknessUv) {
-        color = mix(color, vec3(1.0), 0.2);
+    
+    // Horizontal grid lines (time)
+    if (showHorizontalGrid) {
+        float line = mod(vUv.x, gridWidthUv);
+        
+        // Check if this is the first beat of a bar (4/4 timing)
+        float barLine = mod(vUv.x, barWidthUv);
+        bool isBarStart = barLine < gridWidthUv;
+        
+        if (line < lineThicknessUv) {
+            // Make the first beat of the bar brighter
+            float brightness = isBarStart ? 0.3 : 0.2;
+            color = mix(color, vec3(1.0), brightness);
+        }
+    }
+    
+    // Vertical grid lines (frequency)
+    if (showVerticalGrid && gridHeightUv > 0.0) {
+        float verticalLine = mod(vUv.y, gridHeightUv);
+        float verticalLineThicknessUv = fwidth(vUv.y);
+        
+        if (verticalLine < verticalLineThicknessUv) {
+            color = mix(color, vec3(1.0), 0.15);
+        }
     }
 
     // --- Brush Area Visualization ---

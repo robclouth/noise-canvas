@@ -89,10 +89,24 @@ export const FileRenderer = memo(
           invalidate();
         },
       );
+      const unsubGridBeats = useStore.subscribe(
+        (state) => state.gridSizeBeats.value,
+        () => {
+          invalidate();
+        },
+      );
+      const unsubGridSemis = useStore.subscribe(
+        (state) => state.gridSizeSemis.value,
+        () => {
+          invalidate();
+        },
+      );
 
       return () => {
         unsubMouseUv();
         unsubBpms();
+        unsubGridBeats();
+        unsubGridSemis();
       };
     }, [filePath, invalidate]);
 
@@ -108,6 +122,11 @@ export const FileRenderer = memo(
             gridSize: { value: 0.25 },
             isSourceFile: { value: true },
             isTargetFile: { value: true },
+            gridWidthUv: { value: 0.0 },
+            gridHeightUv: { value: 0.0 },
+            barWidthUv: { value: 0.0 },
+            showHorizontalGrid: { value: true },
+            showVerticalGrid: { value: true },
           },
           vertexShader: passThroughVert,
           fragmentShader: displayFrag,
@@ -243,12 +262,13 @@ export const FileRenderer = memo(
         // Continue to initial render - don't skip on first frame
       }
 
+      // Determine file state for rendering logic
+      const isActiveFile = state.activeFilePath === filePath;
+      const isSourceFile = state.sourceFile?.path === filePath;
+      const isMouseOver = mouseUv.current && mouseUv.current.x >= 0;
+
       // After first render, only update if this file is active, source, or mouse is hovering over it
       if (isInitialized.current) {
-        const isActiveFile = state.activeFilePath === filePath;
-        const isSourceFile = state.sourceFile?.path === filePath;
-        const isMouseOver = mouseUv.current && mouseUv.current.x >= 0;
-
         if (!isActiveFile && !isSourceFile && !isMouseOver) {
           return;
         }
@@ -274,6 +294,35 @@ export const FileRenderer = memo(
           displayMaterial.uniforms.isSourceFile.value = isSourceFile;
           displayMaterial.uniforms.isTargetFile.value = isActiveFile;
           displayMaterial.uniforms.brushCenterUv.value = mouseUv.current || new THREE.Vector2(-1, -1);
+
+          // Calculate grid values
+          const gridSizeBeats = state.gridSizeBeats.value;
+          const gridSizeSemis = state.gridSizeSemis.value;
+
+          // Horizontal grid (time/beats)
+          const beatDurationSeconds = 60.0 / bpm;
+          const gridIntervalSeconds = beatDurationSeconds * gridSizeBeats;
+          const gridWidthUv = gridSizeBeats > 0 ? gridIntervalSeconds / totalDuration : 0;
+          const barWidthUv = gridSizeBeats > 0 ? (beatDurationSeconds * 4.0) / totalDuration : 0;
+
+          // Vertical grid (frequency/semitones)
+          const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
+          const gridIntervalBands = gridSizeSemis * bandsPerSemitone;
+          const gridHeightUv = gridSizeSemis > 0 ? gridIntervalBands / spectrogramData.numBands : 0;
+
+          // Determine if grid lines should be shown based on spacing
+          // Don't show if grid lines would be less than ~3 pixels apart
+          const MIN_GRID_SPACING_PX = 10;
+          const viewportWidth = gl.domElement.width;
+          const viewportHeight = gl.domElement.height;
+          const gridWidthPx = gridWidthUv * viewportWidth;
+          const gridHeightPx = gridHeightUv * viewportHeight;
+
+          displayMaterial.uniforms.gridWidthUv.value = gridWidthUv;
+          displayMaterial.uniforms.gridHeightUv.value = gridHeightUv;
+          displayMaterial.uniforms.barWidthUv.value = barWidthUv;
+          displayMaterial.uniforms.showHorizontalGrid.value = gridWidthPx >= MIN_GRID_SPACING_PX && gridSizeBeats > 0;
+          displayMaterial.uniforms.showVerticalGrid.value = gridHeightPx >= MIN_GRID_SPACING_PX && gridSizeSemis > 0;
 
           // Update brush size for proper rectangle display
           const brushSizeUvForDisplay = unitsToUv(
@@ -783,7 +832,11 @@ export const FileRenderer = memo(
       if (applyStroke.current) applyStroke.current = false;
 
       // Mark that we've completed at least one full render (including initialization if needed)
-      isInitialized.current = true;
+      if (!isInitialized.current) {
+        isInitialized.current = true;
+        // Trigger another render to update display uniforms with grid values
+        invalidate();
+      }
     });
 
     /**

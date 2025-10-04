@@ -54,9 +54,16 @@ function getSnappedCoordinates(
     if (brushHeightSemis.value > 0) {
       const bandsPerSemitone = bandsPerOctave.value / 12;
       const gridIntervalBands = gridSizeSemis.value * bandsPerSemitone;
-      const currentBand = uv.y * spectrogramData.numBands;
-      const snappedBand = Math.round(currentBand / gridIntervalBands) * gridIntervalBands;
-      snappedY = snappedBand / spectrogramData.numBands;
+      // Note: Band coordinates are inverted - band 0 is low frequency (bottom of screen at y=1)
+      const currentBand = (1.0 - uv.y) * spectrogramData.numBands;
+
+      const brushHeightBands = brushHeightSemis.value * bandsPerSemitone;
+      const bottomBand = currentBand - brushHeightBands / 2.0;
+
+      const snappedBottomBand = Math.round(bottomBand / gridIntervalBands) * gridIntervalBands;
+      const snappedCenterBand = snappedBottomBand + brushHeightBands / 2.0;
+
+      snappedY = 1.0 - snappedCenterBand / spectrogramData.numBands;
     } else {
       snappedY = 0.5;
     }

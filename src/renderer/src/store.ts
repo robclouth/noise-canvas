@@ -992,13 +992,14 @@ export const useStore = create<State>()(
           setFileBpm: (filePath, bpm) =>
             set((state) => {
               if (!openFiles[filePath]) return state;
+              const newFilesBpm = { ...state.filesBpm };
               if (bpm) {
-                state.filesBpm[filePath] = bpm;
+                newFilesBpm[filePath] = bpm;
               } else {
-                delete state.filesBpm[filePath];
+                delete newFilesBpm[filePath];
               }
 
-              return state;
+              return { filesBpm: newFilesBpm };
             }),
           activeFilePath: null,
           setActiveFilePath: (activeFilePath) => set({ activeFilePath }),
