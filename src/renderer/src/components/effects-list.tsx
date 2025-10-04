@@ -63,12 +63,11 @@ export function EffectsList() {
                   <Box
                     ref={provided.innerRef}
                     {...provided.draggableProps}
-                    mb="xs"
-                    py={2}
+                    py={6}
                     style={{
                       ...provided.draggableProps.style,
                       ...(snapshot.isDragging && {
-                        boxShadow: "0 8px 24px rgba(0, 0, 0, 0.4)",
+                        boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)",
                       }),
                     }}
                   >
