@@ -69,9 +69,22 @@ function App(): React.JSX.Element {
       event.preventDefault();
       togglePlayback();
     }
+
+    // Toggle set position mode with Control key
+    if (event.key === "Control" || event.key === "Meta") {
+      useStore.getState().setIsSettingPosition(true);
+    }
+  }, []);
+
+  const handleKeyUp = useCallback((event: KeyboardEvent) => {
+    // Turn off set position mode when Control is released
+    if (event.key === "Control" || event.key === "Meta") {
+      useStore.getState().setIsSettingPosition(false);
+    }
   }, []);
 
   useWindowEvent("keydown", handleKeyDown);
+  useWindowEvent("keyup", handleKeyUp);
 
   return (
     <Group h="100vh" w="100vw" wrap="nowrap" gap={0}>

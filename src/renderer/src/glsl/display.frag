@@ -78,7 +78,7 @@ void main() {
 
         if (isSourceFile) {
           // Draw source rectangle (faint)
-          vec2 effectiveOffset = vec2(sourceOffsetX.value, sourceOffsetY.value);
+          vec2 effectiveOffset = vec2(sourceOffsetX, sourceOffsetY);
 
           vec2 sourceCenter = correctedRectCenter + effectiveOffset;
           vec2 sourceCenterScreen = sourceCenter;

@@ -46,11 +46,11 @@ export type CommonUniforms = {
     value: ParameterUniform;
   };
   sourceOffsetX: {
-    value: ParameterUniform;
+    value: number;
   };
 
   sourceOffsetY: {
-    value: ParameterUniform;
+    value: number;
   };
 
   brushPan: {
@@ -101,20 +101,10 @@ export const defaultValues: CommonUniforms = {
     },
   },
   sourceOffsetX: {
-    value: {
-      value: 0.0,
-      minValue: 0.0,
-      maxValue: 1.0,
-      modulationAmounts: [],
-    },
+    value: 0,
   },
   sourceOffsetY: {
-    value: {
-      value: 0.0,
-      minValue: 0.0,
-      maxValue: 1.0,
-      modulationAmounts: [],
-    },
+    value: 0,
   },
   brushPan: {
     value: {

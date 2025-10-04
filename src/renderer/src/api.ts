@@ -15,10 +15,21 @@ export function init() {
       openFile(
         "/Users/rob/Splice/sounds/packs/Indian Vocal Pack (Mitika Kanwar)/Indian_Vocal_Pack/Loops/Resampled/JMK_IVP_124_indian_vocal_female_hook_humming_dance_resampled_pitched_A#m.wav",
       );
-      openFile("/Users/rob/Desktop/tone2.wav");
-      openFile("/Users/rob/Desktop/tone2-sat.wav");
+      // openFile("/Users/rob/Desktop/tone2.wav");
+      // openFile("/Users/rob/Desktop/tone2-sat.wav");
     }
   }
+
+  // Clear locked offset when switching away from offset mode
+  const unsubModeChange = useStore.subscribe(
+    (state) => state.sourcePositionMode.value,
+    (mode, prevMode) => {
+      if (prevMode === "offset" && mode !== "offset") {
+        useStore.getState().setLockedOffset(null);
+      }
+    },
+  );
+  unsubscribers.push(unsubModeChange);
 
   const unsubOpenFile = window.api.onOpenFile((path) => {
     openFile(path);
@@ -134,11 +145,11 @@ export function init() {
   });
   unsubscribers.push(unsubRestore);
 
+  // Subscribe to active file changes to notify the main process
   useStore.subscribe((state, prevState) => {
     if (state.activeFilePath !== prevState.activeFilePath) {
       const newPath = state.activeFilePath;
       if (newPath) {
-        useStore.getState().setSourceFile({ path: newPath, mode: "current" });
         window.api.setActiveFile(newPath);
       }
     }
@@ -155,7 +166,7 @@ export function destroy() {
 }
 
 export function addFile(payload: AnalysisPayloadForRenderer) {
-  const { openFile, filesBpm, setFileBpm, setActiveFilePath } = useStore.getState();
+  const { openFile, filesBpm, setFileBpm, setActiveFilePath, sourceFile, setSourceFile } = useStore.getState();
   if (openFiles[payload.filePath]) {
     return;
   }
@@ -195,6 +206,12 @@ export function addFile(payload: AnalysisPayloadForRenderer) {
     setFileBpm(newFile.filePath, 120);
   }
   setActiveFilePath(newFile.filePath);
+
+  // If no source file is set, set this file as the source
+  if (!sourceFile) {
+    setSourceFile({ path: newFile.filePath, mode: "current" });
+  }
+
   window.api.fileOpened(newFile.filePath);
 }
 
@@ -208,23 +225,40 @@ function openFile(filePath: string) {
 }
 
 export function closeFile(filePath: string) {
-  const { sourceFile, closeFile, setFileBpm, setActiveFilePath, setSourceFile } = useStore.getState();
+  const { sourceFile, closeFile, setFileBpm, setActiveFilePath, setSourceFile, openFilePaths } = useStore.getState();
   const isClosingSource = sourceFile?.path === filePath;
+
+  // Get the index of the file being closed before we close it
+  const closingFileIndex = openFilePaths.indexOf(filePath);
+
   closeFile(filePath);
+  delete openFiles[filePath];
 
   setFileBpm(filePath, undefined);
   window.api.fileClosed(filePath);
-  const openFilePaths = Object.keys(openFiles);
+  const remainingOpenFiles = Object.keys(openFiles);
 
   let newActiveFilePath: string | null = null;
-  if (openFilePaths.length > 0) {
-    newActiveFilePath = openFilePaths[openFilePaths.length - 1];
+  let newSourceFilePath: string | null = null;
+
+  if (remainingOpenFiles.length > 0) {
+    // For active file, use the last one
+    newActiveFilePath = remainingOpenFiles[remainingOpenFiles.length - 1];
     setActiveFilePath(newActiveFilePath);
+
+    // For source file, use the file before the one being closed, or the first available
+    if (isClosingSource) {
+      if (closingFileIndex > 0 && remainingOpenFiles[closingFileIndex - 1]) {
+        newSourceFilePath = remainingOpenFiles[closingFileIndex - 1];
+      } else {
+        newSourceFilePath = remainingOpenFiles[0];
+      }
+      setSourceFile({ path: newSourceFilePath, mode: sourceFile?.mode ?? "current" });
+    }
   } else {
     setActiveFilePath(null);
-  }
-
-  if (isClosingSource) {
-    setSourceFile(newActiveFilePath ? { path: newActiveFilePath, mode: sourceFile?.mode ?? "current" } : null);
+    if (isClosingSource) {
+      setSourceFile(null);
+    }
   }
 }

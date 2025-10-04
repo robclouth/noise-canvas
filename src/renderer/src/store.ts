@@ -37,8 +37,6 @@ type Range<F extends number, T extends number> = Exclude<Enumerate<T>, Enumerate
 type ModulatableParameterKey =
   | "brushIntensity"
   | "brushPan"
-  | "sourceOffsetBeats"
-  | "sourceOffsetSemis"
   | "gainDb"
   | "blurAmountTime"
   | "blurAmountPitch"
@@ -84,9 +82,17 @@ export type State = {
   brushFeatherPitch: ContinuousNumberParameter;
   brushFeatherSlopeTime: ContinuousNumberParameter;
   brushFeatherSlopePitch: ContinuousNumberParameter;
-  sourceOffsetBeats: DiscreteNumberParameter;
-  sourceOffsetSemis: DiscreteNumberParameter;
-  sourceOffsetLock: BooleanParameter;
+
+  // Source Position
+  sourcePosition: { beats: number; pitch: number; filePath: string } | null;
+  setSourcePosition: (position: { beats: number; pitch: number; filePath: string } | null) => void;
+  sourcePositionMode: OptionsParameter<string>;
+  isSettingPosition: boolean;
+  setIsSettingPosition: (value: boolean) => void;
+  brushStartPosition: { beats: number; pitch: number } | null;
+  setBrushStartPosition: (position: { beats: number; pitch: number } | null) => void;
+  lockedOffset: { beats: number; pitch: number } | null;
+  setLockedOffset: (offset: { beats: number; pitch: number } | null) => void;
 
   // Brush Options
   brushWidthBeats: DiscreteNumberParameter; // in beats
@@ -162,6 +168,8 @@ export type State = {
   // UI State
   mousePos: Vector2 | null;
   setMousePos: (mousePos: Vector2 | null) => void;
+  hoveredFilePath: string | null;
+  setHoveredFilePath: (filePath: string | null) => void;
 
   // Files
   openFilePaths: string[];
@@ -472,50 +480,31 @@ export const useStore = create<State>()(
 
             false,
           ),
+          // Source Position
+          sourcePosition: null,
+          setSourcePosition: (position) => set({ sourcePosition: position, lockedOffset: null }),
           ...createParameter(
             set,
-            "sourceOffsetBeats",
+            "sourcePositionMode",
             {
-              name: "Offset Beats",
-              label: "Offset H",
-              description: "Offsets the source horizontally by a number of beats.",
-              value: 0,
-              values: [
-                ...BEAT_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
-                { label: "0 beats", value: 0 },
-                ...BEAT_VALUES,
+              name: "Source Position Mode",
+              label: "Mode",
+              description: "How the source position is used when painting.",
+              value: "anchored" as string,
+              options: [
+                { value: "fixed", label: "Fixed" },
+                { value: "anchored", label: "Anchored" },
+                { value: "offset", label: "Offset" },
               ],
-            },
-            true,
-          ),
-
-          ...createParameter(
-            set,
-            "sourceOffsetSemis",
-            {
-              name: "Offset Semis",
-              label: "Offset V",
-              description: "Offsets the source vertically by a number of semitones.",
-              value: 0.0,
-              values: [
-                ...PITCH_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse(),
-                { label: "0 semis", value: 0 },
-                ...PITCH_VALUES,
-              ],
-            },
-            true,
-          ),
-          ...createParameter(
-            set,
-            "sourceOffsetLock",
-            {
-              name: "Offset Lock",
-              label: "Lock",
-              description: "Locks the source offset to the brush position.",
-              value: false as boolean,
             },
             false,
           ),
+          isSettingPosition: false,
+          setIsSettingPosition: (value) => set({ isSettingPosition: value }),
+          brushStartPosition: null,
+          setBrushStartPosition: (position) => set({ brushStartPosition: position }),
+          lockedOffset: null,
+          setLockedOffset: (offset) => set({ lockedOffset: offset }),
           ...createParameter(
             set,
             "brushWidthBeats",
@@ -1025,6 +1014,8 @@ export const useStore = create<State>()(
           setIsSynthesizing: (isSynthesizing) => set({ isSynthesizing }),
           mousePos: null,
           setMousePos: (mousePos) => set({ mousePos }),
+          hoveredFilePath: null,
+          setHoveredFilePath: (filePath) => set({ hoveredFilePath: filePath }),
           effectOrder: ["gain", "transform", "harmonics", "blur", "synthesize", "sharpen"],
           setEffectOrder: (effectOrder) => set({ effectOrder }),
           effectsEnabled: {

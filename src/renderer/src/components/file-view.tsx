@@ -140,6 +140,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
 
   const activeFilePath = useStore((state) => state.activeFilePath);
   const isActive = activeFilePath === filePath;
+  const isSettingPosition = useStore((state) => state.isSettingPosition);
 
   const rendererRef = useRef<FileRendererHandle>(null);
 
@@ -156,8 +157,42 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
 
   const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
 
+  // Helper to convert UV coordinates to beats and pitch
+  // Position is relative to bottom-left corner of brush
+  const uvToBeatsAndPitch = useCallback(
+    (uvX: number, uvY: number) => {
+      const state = useStore.getState();
+      const { spectrogramData } = openFiles[filePath];
+      const bpm = state.filesBpm[filePath] ?? 120;
+      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+
+      // Get brush size to calculate bottom-left corner
+      const brushWidthBeats = state.brushWidthBeats.value;
+      const brushHeightSemis = state.brushHeightSemis.value;
+
+      // Convert UV to time in seconds, then to beats
+      const timeSeconds = uvX * totalDuration;
+      const centerBeats = (timeSeconds / 60) * bpm;
+
+      // Adjust to bottom-left corner (subtract half width)
+      const beats = brushWidthBeats > 0 ? centerBeats - brushWidthBeats / 2 : centerBeats;
+
+      // Convert UV to band index, then to semitones
+      // UV y=0 is top (high pitch), y=1 is bottom (low pitch)
+      const bandIndex = (1 - uvY) * spectrogramData.numBands;
+      const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
+      const centerPitch = bandIndex / bandsPerSemitone;
+
+      // Adjust to bottom-left corner (subtract half height)
+      const pitch = brushHeightSemis > 0 ? centerPitch - brushHeightSemis / 2 : centerPitch;
+
+      return { beats, pitch };
+    },
+    [filePath],
+  );
+
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
-    if (!isActive) return;
+    // Allow mouse position tracking on all files (for setting position and preview)
     const bpm = useStore.getState().filesBpm[filePath] ?? 120;
     const coords = getSnappedCoordinates(event, filePath, bpm);
     if (!coords) return;
@@ -169,32 +204,71 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
         lastSnappedPositionRef.current.x !== snappedX ||
         lastSnappedPositionRef.current.y !== snappedY)
     ) {
-      useStore.getState().setMousePos(new Vector2(snappedX, 1 - snappedY));
-      rendererRef.current.renderStroke(snappedX, snappedY, event.buttons !== 1);
+      const state = useStore.getState();
+      state.setMousePos(new Vector2(snappedX, 1 - snappedY));
+      state.setHoveredFilePath(filePath); // Track which file is being hovered
+      // Render stroke preview on all files, but only actual strokes on active file
+      const isPreview = !isActive || event.buttons !== 1;
+      rendererRef.current.renderStroke(snappedX, snappedY, isPreview);
       lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
     }
   };
 
   const handleMouseLeave = () => {
-    if (!isActive) return;
-    useStore.getState().setMousePos(null);
+    const state = useStore.getState();
+    state.setMousePos(null);
+    state.setHoveredFilePath(null);
     rendererRef.current?.clearPreview();
   };
 
   const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
-    if (!isActive) return;
-    if (event.button === 0 && rendererRef?.current) {
-      const bpm = useStore.getState().filesBpm[filePath] ?? 120;
-      const coords = getSnappedCoordinates(event, filePath, bpm);
-      if (coords) {
-        rendererRef.current!.renderStroke(coords[0], coords[1], false);
+    if (event.button !== 0) return;
+
+    const bpm = useStore.getState().filesBpm[filePath] ?? 120;
+    const coords = getSnappedCoordinates(event, filePath, bpm);
+    if (!coords) return;
+
+    // If in set position mode, capture the position and set source file
+    if (isSettingPosition) {
+      const state = useStore.getState();
+      const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
+      state.setSourcePosition({ beats, pitch, filePath });
+      state.setIsSettingPosition(false);
+
+      // Set this file as the source file (in "current" mode)
+      state.setSourceFile({ path: filePath, mode: "current" });
+      return;
+    }
+
+    // Make this the active file if it isn't already
+    const state = useStore.getState();
+    if (!isActive) {
+      state.setActiveFilePath(filePath);
+    }
+
+    // Normal painting behavior
+    if (rendererRef?.current) {
+      // Record the start position of this stroke
+      const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
+      state.setBrushStartPosition({ beats, pitch });
+
+      // In Offset mode, lock the offset on first stroke
+      if (state.sourcePositionMode.value === "offset" && !state.lockedOffset && state.sourcePosition) {
+        const offsetBeats = state.sourcePosition.beats - beats;
+        const offsetPitch = state.sourcePosition.pitch - pitch;
+        state.setLockedOffset({ beats: offsetBeats, pitch: offsetPitch });
       }
+
+      rendererRef.current.renderStroke(coords[0], coords[1], false);
     }
   };
 
   const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = (event) => {
     if (!isActive) return;
     if (event.button === 0 && rendererRef?.current) {
+      // Clear brush start position when stroke ends
+      useStore.getState().setBrushStartPosition(null);
+
       // Left mouse button up
       const data = rendererRef.current.getFBOData();
       if (data) {
@@ -208,16 +282,18 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
 
   return (
     <Box
-      onClick={() => {
-        useStore.getState().setActiveFilePath(filePath);
-      }}
       pos="relative"
       bd={isActive ? "2px solid orange" : "2px solid transparent"}
+      onClick={() => {
+        if (!isActive) {
+          useStore.getState().setActiveFilePath(filePath);
+        }
+      }}
     >
       <Header filePath={filePath} />
       <Box
         h={400}
-        style={{ cursor: isActive ? "none" : "auto" }}
+        style={{ cursor: isSettingPosition ? "crosshair" : isActive ? "none" : "auto" }}
         pos="relative"
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}

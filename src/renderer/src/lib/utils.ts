@@ -62,3 +62,15 @@ export const zoomedToScreen = (zoomedUv: Vector2, viewZoomPower: number, viewOff
   const viewStartX = viewOffset * (1.0 - viewWidth);
   return new Vector2((zoomedUv.x - viewStartX) / viewWidth, zoomedUv.y);
 };
+
+// Convert beats to bars:beats:ticks format (480 ticks per beat, 4 beats per bar)
+export function formatBeats(totalBeats: number, showSign: boolean = false): string {
+  const sign = showSign ? (totalBeats >= 0 ? "+" : "") : "";
+  const absBeats = Math.abs(totalBeats);
+
+  const bars = Math.floor(absBeats / 4);
+  const beats = Math.floor(absBeats % 4);
+  const ticks = Math.floor((absBeats % 1) * 480);
+
+  return `${sign}${totalBeats < 0 ? "-" : ""}${bars}:${beats}:${ticks}`;
+}
