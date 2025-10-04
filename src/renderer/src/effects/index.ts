@@ -3,7 +3,6 @@ import { blurEffect } from "./blur-effect";
 import { gainEffect } from "./gain-effect";
 import { harmonicsEffect } from "./harmonics-effect";
 import { passThroughEffect } from "./passthrough-effect";
-import { restoreEffect } from "./restore-effect";
 import { sharpenEffect } from "./sharpen-effect";
 import { synthesizeEffect } from "./synthesize-effect";
 import { transformEffect } from "./transform-effect";
@@ -12,7 +11,6 @@ export const effects: Record<string, BaseEffect> = {
   gain: gainEffect,
   transform: transformEffect,
   harmonics: harmonicsEffect,
-  restore: restoreEffect,
   blur: blurEffect,
   synthesize: synthesizeEffect,
   sharpen: sharpenEffect,
