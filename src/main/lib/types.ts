@@ -84,6 +84,7 @@ export interface IpcApi {
   onCloseActiveFile: (callback: () => void) => () => void;
   onCloseAllFiles: (callback: () => void) => () => void;
   onRestoreOriginal: (callback: () => void) => () => void;
+  onReanalyzeActiveFile: (callback: () => void) => () => void;
 }
 
 export interface IpcMainHandlers {
@@ -119,6 +120,7 @@ export interface IpcRendererEvents {
   "close-active-file": () => void;
   "close-all-files": () => void;
   "open-and-analyze": () => void;
+  "reanalyze-active-file": () => void;
 }
 
 type IpcMainHandlerKeysWithPromise = {

@@ -69,6 +69,12 @@ export function createMenu(
             window.webContents.send("restore-original");
           },
         },
+        {
+          label: "Re-analyze Active File",
+          click: () => {
+            window.webContents.send("reanalyze-active-file");
+          },
+        },
       ],
     },
   ];

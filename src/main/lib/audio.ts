@@ -227,4 +227,19 @@ export function registerAudioIpcHandlers(window: BrowserWindow) {
       webContentsSend(window, "analysis-error", error instanceof Error ? error.message : "Unknown error");
     }
   });
+
+  ipcMainHandle("reanalyze-current-file", async (_, params) => {
+    if (!currentFilePath) {
+      throw new Error("No file is currently loaded");
+    }
+
+    try {
+      const payload = await runAnalysisInWorker(currentFilePath, params);
+      webContentsSend(window, "analysis-complete", payload);
+    } catch (error) {
+      console.error("Re-analysis failed:", error);
+      webContentsSend(window, "analysis-error", error instanceof Error ? error.message : "Unknown error");
+      throw error;
+    }
+  });
 }

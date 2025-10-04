@@ -1,3 +1,4 @@
+import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import type { AnalysisPayloadForRenderer } from "src/main/lib/types";
 import { Vector2 } from "three";
@@ -145,6 +146,52 @@ export function init() {
   });
   unsubscribers.push(unsubRestore);
 
+  const unsubReanalyze = window.api.onReanalyzeActiveFile(() => {
+    const { activeFilePath, bandsPerOctave, minFreq } = useStore.getState();
+    if (!activeFilePath) {
+      notifications.show({
+        title: "No Active File",
+        message: "Please select a file to re-analyze.",
+        color: "yellow",
+      });
+      return;
+    }
+
+    const file = openFiles[activeFilePath];
+    if (!file) return;
+
+    const currentResolution = bandsPerOctave.value;
+    const currentMinFreq = minFreq.value;
+
+    modals.openConfirmModal({
+      title: "Re-analyze File",
+      children: `This will re-analyze the file with the new settings. All edits will be lost.`,
+      labels: { confirm: "Re-analyze", cancel: "Cancel" },
+      confirmProps: { color: "red", size: "xs" },
+      cancelProps: { size: "xs" },
+      styles: {
+        title: { fontSize: "var(--mantine-font-size-sm)", fontWeight: 600 },
+        body: { fontSize: "var(--mantine-font-size-sm)" },
+      },
+      onConfirm: async () => {
+        try {
+          const analysisParams = {
+            bandsPerOctave: currentResolution,
+            minFreq: currentMinFreq,
+          };
+          await window.api.reanalyzeCurrentFile(analysisParams);
+        } catch (error) {
+          notifications.show({
+            title: "Re-analysis Failed",
+            message: error instanceof Error ? error.message : "An unknown error occurred.",
+            color: "red",
+          });
+        }
+      },
+    });
+  });
+  unsubscribers.push(unsubReanalyze);
+
   // Subscribe to active file changes to notify the main process
   useStore.subscribe((state, prevState) => {
     if (state.activeFilePath !== prevState.activeFilePath) {
@@ -166,53 +213,76 @@ export function destroy() {
 }
 
 export function addFile(payload: AnalysisPayloadForRenderer) {
-  const { openFile, filesBpm, setFileBpm, setActiveFilePath, sourceFile, setSourceFile } = useStore.getState();
-  if (openFiles[payload.filePath]) {
-    return;
-  }
+  const { openFile, filesBpm, setFileBpm, setActiveFilePath, sourceFile, setSourceFile, setFileResolution } =
+    useStore.getState();
 
-  const newFile: OpenFile = {
-    filePath: payload.filePath,
-    spectrogramData: {
-      packedData: new Float32Array(payload.data.buffer, payload.data.byteOffset, payload.data.byteLength / 4),
-      inverseMap: new Float32Array(
-        payload.inverseMap.buffer,
-        payload.inverseMap.byteOffset,
-        payload.inverseMap.byteLength / 4,
-      ),
-      metadata: new Float32Array(
-        payload.metadataTexture.buffer,
-        payload.metadataTexture.byteOffset,
-        payload.metadataTexture.byteLength / 4,
-      ),
-      textureWidth: payload.textureWidth,
-      textureHeight: payload.textureHeight,
-      numFrames: payload.numFrames,
-      numBands: payload.numBands,
-      numChannels: payload.numChannels,
-      sampleRate: payload.sampleRate,
-      packedTextureSize: new Vector2(payload.textureWidth, payload.textureHeight),
-      minFreq: payload.minFreq,
-      bandsPerOctave: payload.bandsPerOctave,
-      synthesisMetadata: {
-        bandOffsets: payload.bandOffsets,
-        bandStepLog2s: payload.bandStepLog2s,
-        bandLengths: payload.bandLengths,
-      },
+  const isReanalysis = !!openFiles[payload.filePath];
+
+  const spectrogramData = {
+    packedData: new Float32Array(payload.data.buffer, payload.data.byteOffset, payload.data.byteLength / 4),
+    inverseMap: new Float32Array(
+      payload.inverseMap.buffer,
+      payload.inverseMap.byteOffset,
+      payload.inverseMap.byteLength / 4,
+    ),
+    metadata: new Float32Array(
+      payload.metadataTexture.buffer,
+      payload.metadataTexture.byteOffset,
+      payload.metadataTexture.byteLength / 4,
+    ),
+    textureWidth: payload.textureWidth,
+    textureHeight: payload.textureHeight,
+    numFrames: payload.numFrames,
+    numBands: payload.numBands,
+    numChannels: payload.numChannels,
+    sampleRate: payload.sampleRate,
+    packedTextureSize: new Vector2(payload.textureWidth, payload.textureHeight),
+    minFreq: payload.minFreq,
+    bandsPerOctave: payload.bandsPerOctave,
+    synthesisMetadata: {
+      bandOffsets: payload.bandOffsets,
+      bandStepLog2s: payload.bandStepLog2s,
+      bandLengths: payload.bandLengths,
     },
   };
-  openFile(newFile);
-  if (!filesBpm[newFile.filePath]) {
-    setFileBpm(newFile.filePath, 120);
-  }
-  setActiveFilePath(newFile.filePath);
 
-  // If no source file is set, set this file as the source
-  if (!sourceFile) {
-    setSourceFile({ path: newFile.filePath, mode: "current" });
-  }
+  if (isReanalysis) {
+    // Update the existing file's data
+    const existingFile = openFiles[payload.filePath];
+    existingFile.spectrogramData = spectrogramData;
+    delete existingFile.audioBuffer; // Clear cached audio
 
-  window.api.fileOpened(newFile.filePath);
+    // Clear undo history for this file
+    window.api.clearUndoState();
+
+    // Update the resolution in the store (reactive)
+    const { setFileResolution } = useStore.getState();
+    setFileResolution(payload.filePath, payload.bandsPerOctave);
+
+    // Call reloadTextures on the renderer to update with new data
+    if (existingFile.rendererRef?.current) {
+      existingFile.rendererRef.current.reloadTextures();
+    }
+  } else {
+    // Create new file
+    const newFile: OpenFile = {
+      filePath: payload.filePath,
+      spectrogramData,
+    };
+    openFile(newFile);
+    if (!filesBpm[newFile.filePath]) {
+      setFileBpm(newFile.filePath, 120);
+    }
+    setFileResolution(newFile.filePath, payload.bandsPerOctave);
+    setActiveFilePath(newFile.filePath);
+
+    // If no source file is set, set this file as the source
+    if (!sourceFile) {
+      setSourceFile({ path: newFile.filePath, mode: "current" });
+    }
+
+    window.api.fileOpened(newFile.filePath);
+  }
 }
 
 function openFile(filePath: string) {

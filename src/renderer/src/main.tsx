@@ -1,5 +1,6 @@
 import { createTheme, Input, MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
+import { ModalsProvider } from "@mantine/modals";
 import { Notifications } from "@mantine/notifications";
 import "@mantine/notifications/styles.css";
 import React from "react";
@@ -29,8 +30,10 @@ const theme = createTheme({
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <MantineProvider forceColorScheme="dark" theme={theme}>
-      <Notifications />
-      <App />
+      <ModalsProvider modalProps={{ zIndex: 1000, size: "xs" }}>
+        <Notifications zIndex={1000} />
+        <App />
+      </ModalsProvider>
     </MantineProvider>
   </React.StrictMode>,
 );

@@ -5,7 +5,6 @@ import { ScaleType } from "tonal";
 import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
 import {
-  BANDS_PER_OCTAVE_VALUES,
   BEAT_VALUES,
   BLEND_MODES,
   EDGE_MODE,
@@ -121,7 +120,7 @@ export type State = {
   normalize: BooleanParameter;
   scaleTonic: OptionsParameter<string>;
   scaleType: OptionsParameter<string>;
-  bandsPerOctave: DiscreteNumberParameter;
+  bandsPerOctave: OptionsParameter<number>;
   minFreq: ContinuousNumberParameter;
   blendMode: OptionsParameter<number>;
 
@@ -180,6 +179,8 @@ export type State = {
   setAudioBuffers: (audioBuffers: Record<string, AudioBuffer>) => void;
   filesBpm: Record<string, number>;
   setFileBpm: (filePath: string, bpm: number | undefined) => void;
+  filesResolution: Record<string, number>;
+  setFileResolution: (filePath: string, resolution: number) => void;
   activeFilePath: string | null;
   setActiveFilePath: (activeFilePath: string | null) => void;
   sourceFile: { path: string; mode: "current" | "original" } | null;
@@ -683,11 +684,18 @@ export const useStore = create<State>()(
             set,
             "bandsPerOctave",
             {
-              name: "Bands Per Octave",
-              label: "Bands",
-              description: "The number of frequency bands per octave.",
-              value: 24,
-              values: BANDS_PER_OCTAVE_VALUES.map((value) => ({ value: value.value, label: value.label })),
+              name: "Resolution Mode",
+              label: "Resolution",
+              description:
+                "Balance between time and frequency resolution. Time resolution gives sharper transients, frequency resolution gives more precise pitch detail.",
+              value: 36,
+              options: [
+                { value: 12, label: "Best Time" },
+                { value: 24, label: "Better Time" },
+                { value: 36, label: "Balanced" },
+                { value: 48, label: "Better Pitch" },
+                { value: 60, label: "Best Pitch" },
+              ],
             },
             false,
           ),
@@ -1021,6 +1029,13 @@ export const useStore = create<State>()(
               }
 
               return { filesBpm: newFilesBpm };
+            }),
+          filesResolution: {},
+          setFileResolution: (filePath, resolution) =>
+            set((state) => {
+              const newFilesResolution = { ...state.filesResolution };
+              newFilesResolution[filePath] = resolution;
+              return { filesResolution: newFilesResolution };
             }),
           activeFilePath: null,
           setActiveFilePath: (activeFilePath) => set({ activeFilePath }),

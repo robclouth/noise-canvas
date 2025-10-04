@@ -47,6 +47,8 @@ export interface FileRendererHandle {
   synthesize: () => void;
   /** Clears the stroke preview. */
   clearPreview: () => void;
+  /** Reloads all textures from the current spectrogramData (used after re-analysis). */
+  reloadTextures: () => void;
 }
 
 /**
@@ -808,6 +810,50 @@ export const FileRenderer = memo(
     };
 
     /**
+     * Reloads all textures from the current spectrogramData.
+     * Used when the file is re-analyzed with different parameters.
+     */
+    const reloadTextures = () => {
+      const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
+
+      // Dispose old textures
+      if (packedDataTex) packedDataTex.dispose();
+      if (originalPackedDataTex) originalPackedDataTex.dispose();
+      if (inverseMapTex) inverseMapTex.dispose();
+      if (metadataTex) metadataTex.dispose();
+
+      // Create new textures
+      const packed = new THREE.DataTexture(packedData, textureWidth, textureHeight, THREE.RGBAFormat, THREE.FloatType);
+      packed.internalFormat = "RGBA32F";
+      packed.minFilter = THREE.NearestFilter;
+      packed.magFilter = THREE.NearestFilter;
+      packed.needsUpdate = true;
+
+      const inverse = new THREE.DataTexture(inverseMap, textureWidth, textureHeight, THREE.RGFormat, THREE.FloatType);
+      inverse.internalFormat = "RG32F";
+      inverse.minFilter = THREE.NearestFilter;
+      inverse.magFilter = THREE.NearestFilter;
+      inverse.needsUpdate = true;
+
+      const meta = new THREE.DataTexture(metadata, numBands, 1, THREE.RGBFormat, THREE.FloatType);
+      meta.internalFormat = "RGB32F";
+      meta.minFilter = THREE.NearestFilter;
+      meta.magFilter = THREE.NearestFilter;
+      meta.needsUpdate = true;
+
+      setPackedDataTex(packed);
+      setOriginalPackedDataTex(packed.clone());
+      setInverseMapTex(inverse);
+      setMetadataTex(meta);
+
+      // Reset render tracking
+      isInitialized.current = false;
+      pingPong.current = 0;
+
+      invalidate();
+    };
+
+    /**
      * Exposes component methods to the parent through a ref.
      */
     useImperativeHandle(ref, () => ({
@@ -825,6 +871,7 @@ export const FileRenderer = memo(
       restoreOriginal,
       synthesize,
       clearPreview,
+      reloadTextures,
     }));
 
     if (!spectrogramData) {

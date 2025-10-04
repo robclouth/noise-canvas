@@ -1,5 +1,6 @@
 import { openFiles, useStore } from "@/store";
-import { ActionIcon, Box, Button, Group, NumberInput, Title } from "@mantine/core";
+import { ActionIcon, Badge, Box, Button, Group, NumberInput } from "@mantine/core";
+import { MiddleTruncate } from "@re-dev/react-truncate";
 import { View } from "@react-three/drei";
 import { X } from "lucide-react";
 import { memo, MouseEventHandler, useCallback, useRef } from "react";
@@ -7,6 +8,44 @@ import { Vector2 } from "three";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
 import { Tooltip } from "./tooltip";
+
+// Helper to get resolution label from bands per octave value
+function getResolutionLabel(bpo: number): string {
+  switch (bpo) {
+    case 12:
+      return "Best Time";
+    case 24:
+      return "Better Time";
+    case 36:
+      return "Balanced";
+    case 48:
+      return "Better Pitch";
+    case 60:
+      return "Best Pitch";
+    default:
+      return `${bpo} BPO`;
+  }
+}
+
+// Component to display filename with middle truncation
+const TruncatedFilename = memo(({ filePath }: { filePath: string }) => {
+  const filename = filePath.split("/").pop() || filePath;
+
+  return (
+    <Box
+      style={{
+        minWidth: 0,
+        width: "100%",
+        fontSize: "var(--mantine-font-size-sm)",
+        fontWeight: 600,
+      }}
+    >
+      <MiddleTruncate>{filename}</MiddleTruncate>
+    </Box>
+  );
+});
+
+TruncatedFilename.displayName = "TruncatedFilename";
 
 export interface FileViewProps {
   filePath: string;
@@ -78,16 +117,26 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
   const setFileBpm = useStore((state) => state.setFileBpm);
   const closeFile = useStore((state) => state.closeFile);
   const sourceFile = useStore((state) => state.sourceFile);
+  const resolution = useStore((state) => state.filesResolution[filePath]);
 
   const isSource = sourceFile?.path === filePath;
   const sourceMode = sourceFile?.mode ?? "current";
 
   return (
     <Group justify="space-between" align="center" p="xs" wrap="nowrap">
-      <Tooltip label={filePath}>
-        <Title order={6}>{filePath.split("/").pop() || filePath}</Title>
-      </Tooltip>
-      <Group align="center" gap="xs" wrap="nowrap">
+      <Group gap="xs" style={{ minWidth: 0, flex: 1 }}>
+        <Tooltip label={filePath}>
+          <Box style={{ minWidth: 0, flex: 1 }}>
+            <TruncatedFilename filePath={filePath} />
+          </Box>
+        </Tooltip>
+        {resolution && (
+          <Badge size="sm" variant="light" color="orange" style={{ flexShrink: 0 }}>
+            {getResolutionLabel(resolution)}
+          </Badge>
+        )}
+      </Group>
+      <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
         <Tooltip label="The tempo of this file in beats per minute (BPM). Used for grid snapping and time-based effects.">
           <NumberInput
             w={60}

@@ -102,6 +102,13 @@ const api: IpcApi = {
       ipcRenderer.removeListener("restore-original", handler);
     };
   },
+  onReanalyzeActiveFile: (callback: () => void): (() => void) => {
+    const handler = (): void => callback();
+    ipcRenderer.on("reanalyze-active-file", handler);
+    return () => {
+      ipcRenderer.removeListener("reanalyze-active-file", handler);
+    };
+  },
 };
 
 // Use `contextBridge` APIs to expose Electron APIs to

@@ -1,5 +1,5 @@
 import { useStore } from "@/store";
-import { Stack } from "@mantine/core";
+import { Stack, Text } from "@mantine/core";
 import { useEffect } from "react";
 import { ParameterControl } from "../controls/parameter-control";
 import { Section } from "../section";
@@ -27,6 +27,9 @@ export function ControlsPanel() {
   return (
     <Stack h="100%" w="100%" p="xs">
       <Section label="Analysis">
+        <Text size="xs" c="dimmed" fs="italic" mb="xs">
+          Applies to newly loaded files only
+        </Text>
         <ParameterControl paramKey="bandsPerOctave" />
       </Section>
       <Section label="Grid">
