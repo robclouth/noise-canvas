@@ -1,6 +1,5 @@
 import { openFiles, useStore } from "@/store";
-import { useFBO } from "@react-three/drei";
-import { useFrame, useThree } from "@react-three/fiber";
+import { useFrame } from "@react-three/fiber";
 import { runSynthesis } from "@renderer/audio-manager";
 import { CommonUniforms, defaultValues } from "@renderer/effects/base-effect";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
@@ -60,7 +59,11 @@ export interface FileRendererHandle {
 export const FileRenderer = memo(
   forwardRef<FileRendererHandle, FileRendererProps>(({ filePath }, ref) => {
     const { spectrogramData } = openFiles[filePath];
-    const { gl, camera, invalidate } = useThree();
+
+    // Don't subscribe to these during render - access them via refs or useFrame instead
+    const glRef = useRef<THREE.WebGLRenderer>(null!);
+    const cameraRef = useRef<THREE.Camera>(null!);
+    const invalidateRef = useRef<() => void>(null!);
 
     const modulatorScaleLut = useModulatorScaleLut(filePath);
 
@@ -81,19 +84,19 @@ export const FileRenderer = memo(
       const unsubBpms = useStore.subscribe(
         (state) => state.filesBpm[filePath],
         () => {
-          invalidate();
+          invalidateRef.current?.();
         },
       );
       const unsubGridBeats = useStore.subscribe(
         (state) => state.gridSizeBeats.value,
         () => {
-          invalidate();
+          invalidateRef.current?.();
         },
       );
       const unsubGridSemis = useStore.subscribe(
         (state) => state.gridSizeSemis.value,
         () => {
-          invalidate();
+          invalidateRef.current?.();
         },
       );
 
@@ -102,7 +105,7 @@ export const FileRenderer = memo(
         unsubGridBeats();
         unsubGridSemis();
       };
-    }, [filePath, invalidate]);
+    }, [filePath]);
 
     // Materials and scene objects for rendering
     const displayMaterial = useMemo(
@@ -137,25 +140,56 @@ export const FileRenderer = memo(
     }, []);
 
     // Frame Buffer Objects for ping-pong rendering
-    const fbo1 = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, {
-      format: THREE.RGBAFormat,
-      type: THREE.FloatType,
-    });
+    // Create FBOs manually to avoid useFBO's internal canvas size subscriptions
+    const fbo1 = useMemo(() => {
+      const fbo = new THREE.WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+        format: THREE.RGBAFormat,
+        type: THREE.FloatType,
+        minFilter: THREE.NearestFilter,
+        magFilter: THREE.NearestFilter,
+      });
+      return fbo;
+    }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
 
-    const fbo2 = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, {
-      format: THREE.RGBAFormat,
-      type: THREE.FloatType,
-    });
+    const fbo2 = useMemo(() => {
+      const fbo = new THREE.WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+        format: THREE.RGBAFormat,
+        type: THREE.FloatType,
+        minFilter: THREE.NearestFilter,
+        magFilter: THREE.NearestFilter,
+      });
+      return fbo;
+    }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
 
-    const passFbo1 = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, {
-      format: THREE.RGBAFormat,
-      type: THREE.FloatType,
-    });
+    const passFbo1 = useMemo(() => {
+      const fbo = new THREE.WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+        format: THREE.RGBAFormat,
+        type: THREE.FloatType,
+        minFilter: THREE.NearestFilter,
+        magFilter: THREE.NearestFilter,
+      });
+      return fbo;
+    }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
 
-    const passFbo2 = useFBO(spectrogramData.textureWidth, spectrogramData.textureHeight, {
-      format: THREE.RGBAFormat,
-      type: THREE.FloatType,
-    });
+    const passFbo2 = useMemo(() => {
+      const fbo = new THREE.WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+        format: THREE.RGBAFormat,
+        type: THREE.FloatType,
+        minFilter: THREE.NearestFilter,
+        magFilter: THREE.NearestFilter,
+      });
+      return fbo;
+    }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
+
+    // Cleanup FBOs on unmount or dimension change
+    useEffect(() => {
+      return () => {
+        fbo1.dispose();
+        fbo2.dispose();
+        passFbo1.dispose();
+        passFbo2.dispose();
+      };
+    }, [fbo1, fbo2, passFbo1, passFbo2]);
 
     // Rendering state
     const pingPong = useRef(0);
@@ -325,7 +359,14 @@ export const FileRenderer = memo(
      * The main render loop, called on every frame.
      * This handles initialization, brush stroke application, and updating the display material.
      */
-    useFrame(({ gl, camera }) => {
+    useFrame(({ gl, camera, invalidate }) => {
+      // Capture refs for use outside of useFrame
+      glRef.current = gl;
+      cameraRef.current = camera;
+      if (!invalidateRef.current) {
+        invalidateRef.current = invalidate;
+      }
+
       if (
         !fboMesh ||
         !spectrogramData ||
@@ -732,8 +773,8 @@ export const FileRenderer = memo(
       const { packedTextureSize } = spectrogramData;
       const fboToRead = pingPong.current === 0 ? fbo1 : fbo2;
       const buffer = new Float32Array(packedTextureSize.x * packedTextureSize.y * 4);
-      gl.getContext().finish();
-      gl.readRenderTargetPixels(fboToRead, 0, 0, packedTextureSize.x, packedTextureSize.y, buffer);
+      glRef.current.getContext().finish();
+      glRef.current.readRenderTargetPixels(fboToRead, 0, 0, packedTextureSize.x, packedTextureSize.y, buffer);
       return buffer;
     };
 
@@ -755,21 +796,21 @@ export const FileRenderer = memo(
       );
       dataTex.needsUpdate = true;
 
-      gl.initTexture(dataTex);
+      glRef.current.initTexture(dataTex);
 
       fboMesh.material = copyMaterial;
       copyMaterial.uniforms.inputTex.value = dataTex;
 
-      gl.setRenderTarget(fbo1);
-      gl.render(fboScene, camera);
-      gl.setRenderTarget(null);
+      glRef.current.setRenderTarget(fbo1);
+      glRef.current.render(fboScene, cameraRef.current);
+      glRef.current.setRenderTarget(null);
 
       dataTex.dispose();
 
       applyStroke.current = false;
       displayMode.current = "committed";
 
-      invalidate();
+      invalidateRef.current();
     };
 
     /**
@@ -796,7 +837,7 @@ export const FileRenderer = memo(
     const restoreOriginal = () => {
       isInitialized.current = false;
 
-      invalidate();
+      invalidateRef.current();
       debouncedSynthesis(filePath, getFBOData());
     };
 
@@ -850,7 +891,7 @@ export const FileRenderer = memo(
       isInitialized.current = false;
       pingPong.current = 0;
 
-      invalidate();
+      invalidateRef.current();
     };
 
     /**
@@ -863,7 +904,7 @@ export const FileRenderer = memo(
           displayMode.current = "preview";
         }
         applyStroke.current = true;
-        invalidate();
+        invalidateRef.current();
       },
       getFBOData,
       setFBOData,
@@ -883,7 +924,7 @@ export const FileRenderer = memo(
      */
     const clearPreview = () => {
       displayMode.current = "committed";
-      invalidate();
+      invalidateRef.current();
     };
 
     // The component renders a mesh with a plane geometry and the custom `displayMaterial`.

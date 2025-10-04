@@ -3,7 +3,7 @@ import { ActionIcon, Badge, Box, Button, Group, NumberInput } from "@mantine/cor
 import { MiddleTruncate } from "@re-dev/react-truncate";
 import { View } from "@react-three/drei";
 import { X } from "lucide-react";
-import { memo, MouseEventHandler, useCallback, useRef } from "react";
+import { memo, MouseEventHandler, useCallback, useMemo, useRef } from "react";
 import { Vector2 } from "three";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
@@ -38,6 +38,7 @@ const TruncatedFilename = memo(({ filePath }: { filePath: string }) => {
         width: "100%",
         fontSize: "var(--mantine-font-size-sm)",
         fontWeight: 600,
+        whiteSpace: "nowrap",
       }}
     >
       <MiddleTruncate>{filename}</MiddleTruncate>
@@ -50,6 +51,8 @@ TruncatedFilename.displayName = "TruncatedFilename";
 export interface FileViewProps {
   filePath: string;
 }
+
+const viewStyle = { width: "100%", height: "100%", zIndex: 1 };
 
 function getSnappedCoordinates(
   event: React.MouseEvent<HTMLDivElement>,
@@ -197,6 +200,8 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   const activeFilePath = useStore((state) => state.activeFilePath);
   const isActive = activeFilePath === filePath;
   const isSettingPosition = useStore((state) => state.isSettingPosition);
+
+  const cursorStyle = useMemo(() => ({ cursor: isSettingPosition ? "crosshair" : "none" }), [isSettingPosition]);
 
   const rendererRef = useRef<FileRendererHandle>(null);
 
@@ -349,14 +354,14 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
       <Header filePath={filePath} />
       <Box
         h={400}
-        style={{ cursor: isSettingPosition ? "crosshair" : "none" }}
+        style={cursorStyle}
         pos="relative"
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         onMouseDown={handleCanvasMouseDown}
         onMouseUp={handleCanvasMouseUp}
       >
-        <View style={{ width: "100%", height: "100%", zIndex: 1 }}>
+        <View style={viewStyle}>
           <FileRenderer filePath={filePath} ref={refCallback} />
         </View>
       </Box>
