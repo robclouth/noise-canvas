@@ -138,9 +138,7 @@ export function init() {
     if (state.activeFilePath !== prevState.activeFilePath) {
       const newPath = state.activeFilePath;
       if (newPath) {
-        if (!state.sourceFile) {
-          useStore.getState().setSourceFile({ path: newPath, mode: "current" });
-        }
+        useStore.getState().setSourceFile({ path: newPath, mode: "current" });
         window.api.setActiveFile(newPath);
       }
     }
