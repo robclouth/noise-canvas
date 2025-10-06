@@ -317,7 +317,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
       state.setIsSettingPosition(false);
 
       // Set this file as the source file (in "current" mode)
-      state.setSourceFile({ path: filePath, mode: "current" });
+      state.setSourceFile({ path: filePath, mode: state.sourceFile?.mode ?? "current" });
       return;
     }
 
