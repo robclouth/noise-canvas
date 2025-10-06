@@ -11,13 +11,12 @@ export function ControlsPanel() {
         brushSizeLockedToGrid: state.brushSizeLockedToGrid.value,
         gridSizeBeats: state.gridSizeBeats.value,
         gridSizeSemis: state.gridSizeSemis.value,
-        setBrushWidthBeats: state.brushWidthBeats.setValue,
-        setBrushHeightSemis: state.brushHeightSemis.setValue,
       }),
-      ({ brushSizeLockedToGrid, gridSizeBeats, gridSizeSemis, setBrushWidthBeats, setBrushHeightSemis }) => {
+      ({ brushSizeLockedToGrid, gridSizeBeats, gridSizeSemis }) => {
         if (brushSizeLockedToGrid) {
-          setBrushWidthBeats(gridSizeBeats);
-          setBrushHeightSemis(gridSizeSemis);
+          const state = useStore.getState();
+          state.brushWidthBeats.setValue(gridSizeBeats);
+          state.brushHeightSemis.setValue(gridSizeSemis);
         }
       },
     );

@@ -4,7 +4,6 @@ import { runSynthesis } from "@renderer/audio-manager";
 import { CommonUniforms, defaultValues } from "@renderer/effects/base-effect";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { ContinuousNumberParameter } from "@renderer/types";
-import { debounce } from "lodash-es";
 import { forwardRef, memo, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { ShaderMaterial, UniformsUtils } from "three";
@@ -43,8 +42,6 @@ export interface FileRendererHandle {
   } | null;
   /** Restores the spectrogram to its original state. */
   restoreOriginal: () => void;
-  /** Triggers audio synthesis from the current spectrogram data. */
-  synthesize: () => void;
   /** Clears the stroke preview. */
   clearPreview: () => void;
   /** Reloads all textures from the current spectrogramData (used after re-analysis). */
@@ -254,14 +251,6 @@ export const FileRenderer = memo(
       spectrogramData.numBands,
     ]);
 
-    const debouncedSynthesis = useMemo(() => debounce(runSynthesis, 500, { leading: false, trailing: true }), []);
-
-    useEffect(() => {
-      return () => {
-        debouncedSynthesis.cancel();
-      };
-    }, [debouncedSynthesis]);
-
     /**
      * Helper function to calculate source offset based on position mode.
      * This consolidates the logic used for both stroke rendering and display.
@@ -412,7 +401,7 @@ export const FileRenderer = memo(
         fboDataDirty.current = true;
 
         window.api.addUndoState({ data: spectrogramData.packedData.buffer, filePath });
-        debouncedSynthesis(filePath);
+        runSynthesis(filePath);
         invalidate(); // Trigger another render to update display
         return;
       }
@@ -697,9 +686,6 @@ export const FileRenderer = memo(
 
           // Mark FBO data cache as dirty since we've modified the buffer
           fboDataDirty.current = true;
-
-          useStore.getState().setIsSynthesizing(true);
-          debouncedSynthesis(filePath);
         }
 
         applyStroke.current = false;
@@ -874,15 +860,7 @@ export const FileRenderer = memo(
       fboDataDirty.current = true;
 
       invalidateRef.current();
-      debouncedSynthesis(filePath);
-    };
-
-    /**
-     * Triggers audio synthesis for the current state of the spectrogram.
-     */
-    const synthesize = () => {
-      useStore.getState().setIsSynthesizing(true);
-      debouncedSynthesis(filePath);
+      runSynthesis(filePath);
     };
 
     /**
@@ -948,7 +926,6 @@ export const FileRenderer = memo(
       setFBOData,
       getTextures,
       restoreOriginal,
-      synthesize,
       clearPreview,
       reloadTextures,
     }));

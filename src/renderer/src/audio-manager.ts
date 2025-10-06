@@ -33,10 +33,27 @@ export const runSynthesis = async (filePath: string): Promise<void> => {
       minFreq: minFreq.value,
     };
 
-    const ipcStart = performance.now();
-    const audioBufferChannels = await window.api.synthesizeAudio(payload, analysisParams, normalize.value);
-    const ipcTime = performance.now() - ipcStart;
-    console.log("IPC transfer took:", ipcTime.toFixed(2), "ms");
+    const synthesisStart = performance.now();
+    // Use direct gaborator API (no IPC transfer)
+    if (!window.gaborator) {
+      throw new Error("Direct gaborator API not available. Make sure contextIsolation is disabled.");
+    }
+
+    const processedDataArray = new Float32Array(
+      payload.processedData,
+      0,
+      payload.processedData.byteLength / Float32Array.BYTES_PER_ELEMENT,
+    );
+
+    const audioBufferChannels = await window.gaborator.synthesize(
+      processedDataArray,
+      payload.analysisMetadata,
+      originalAnalysis.sampleRate,
+      analysisParams,
+      normalize.value,
+    );
+    const synthesisTime = performance.now() - synthesisStart;
+    console.log("Direct synthesis took:", synthesisTime.toFixed(2), "ms");
 
     if (audioBufferChannels.length === 0) {
       throw new Error("Synthesis returned no audio channels.");
@@ -119,8 +136,6 @@ export const runSynthesis = async (filePath: string): Promise<void> => {
     console.log("Total synthesis took:", totalTime.toFixed(2), "ms");
   } catch (error) {
     console.error("Error running synthesis:", error);
-  } finally {
-    useStore.getState().setIsSynthesizing(false);
   }
 };
 

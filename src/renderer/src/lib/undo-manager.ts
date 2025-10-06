@@ -1,0 +1,242 @@
+// Direct undo manager for renderer (no IPC)
+// Uses direct access to fs, compression, and path utilities
+
+import { runSynthesis } from "@renderer/audio-manager";
+import { openFiles } from "@renderer/store";
+
+interface UndoState {
+  dataPath: string;
+  filePath: string;
+  compressed: boolean;
+}
+
+class UndoManager {
+  private tempDir: string | null = null;
+  private timeline: UndoState[] = [];
+  private head = -1;
+  private readonly MAX_HISTORY = 20;
+  private useCompression: boolean;
+  private initialized = false;
+
+  constructor(useCompression: boolean = false) {
+    this.useCompression = useCompression;
+  }
+
+  private async init() {
+    if (this.initialized) return;
+    this.initialized = true;
+    await this.initTempDir();
+  }
+
+  private notifyStateChange() {
+    window.api.updateMenuState(this.canUndo(), this.canRedo());
+  }
+
+  private async initTempDir() {
+    if (!window.nodeOs || !window.nodePath || !window.nodeFs) {
+      console.error("Node utilities not available");
+      return;
+    }
+
+    try {
+      const tmpdir = window.nodeOs.tmpdir();
+      this.tempDir = await window.nodeFs.mkdtemp(window.nodePath.join(tmpdir, "noise-canvas-undo-"));
+      console.log("Undo temp directory created:", this.tempDir);
+    } catch (error) {
+      console.error("Failed to create temp directory:", error);
+    }
+  }
+
+  async addState(data: Float32Array, filePath: string) {
+    await this.init();
+    if (!this.tempDir || !window.nodeFs || !window.nodePath) {
+      console.error("Undo manager not properly initialized");
+      return;
+    }
+
+    // Check if compression is available and enabled
+    const shouldCompress = this.useCompression && window.compression;
+
+    try {
+      // Truncate redo history
+      if (this.head < this.timeline.length - 1) {
+        const toDelete = this.timeline.splice(this.head + 1);
+        for (const { dataPath } of toDelete) {
+          try {
+            await window.nodeFs.rm(dataPath);
+          } catch (e) {
+            console.error("Failed to delete old redo file:", e);
+          }
+        }
+      }
+
+      // Save state (with optional compression)
+      const timestamp = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      const extension = shouldCompress ? ".lz4" : ".bin";
+      const dataPath = window.nodePath.join(this.tempDir, `state-${timestamp}${extension}`);
+
+      const buffer = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+      const dataToWrite = shouldCompress ? window.compression!.compress(buffer) : buffer;
+      await window.nodeFs.writeFile(dataPath, dataToWrite);
+
+      this.timeline.push({ dataPath, filePath, compressed: !!shouldCompress });
+      this.head++;
+
+      // Enforce history limit
+      if (this.timeline.length > this.MAX_HISTORY) {
+        const oldest = this.timeline.shift();
+        if (oldest) {
+          try {
+            await window.nodeFs.rm(oldest.dataPath);
+          } catch (e) {
+            console.error("Failed to delete old undo file:", e);
+          }
+        }
+        this.head--;
+      }
+
+      console.log(`Undo state added for ${filePath}, history size: ${this.timeline.length}, head: ${this.head}`);
+      this.notifyStateChange();
+    } catch (error) {
+      console.error("Failed to add undo state:", error);
+    }
+  }
+
+  canUndo(): boolean {
+    return this.head > 0;
+  }
+
+  canRedo(): boolean {
+    return this.head < this.timeline.length - 1;
+  }
+
+  async undo(): Promise<void> {
+    await this.init();
+    if (!this.canUndo() || !window.nodeFs) {
+      return;
+    }
+
+    try {
+      this.head--;
+      const { dataPath, filePath, compressed } = this.timeline[this.head];
+
+      const fileData = await window.nodeFs.readFile(dataPath);
+
+      // Decompress only if the state was compressed
+      let buffer: Buffer;
+      if (compressed && window.compression) {
+        buffer = window.compression.uncompress(fileData);
+      } else {
+        buffer = fileData;
+      }
+
+      const data = new Float32Array(
+        buffer.buffer,
+        buffer.byteOffset,
+        buffer.byteLength / Float32Array.BYTES_PER_ELEMENT,
+      );
+
+      console.log(`Undo to state ${this.head} for ${filePath}`);
+      this.notifyStateChange();
+
+      openFiles[filePath]?.rendererRef?.current?.setFBOData(data);
+      runSynthesis(filePath);
+    } catch (error) {
+      console.error("Failed to undo:", error);
+    }
+  }
+
+  async redo(): Promise<{ data: Float32Array; filePath: string } | null> {
+    await this.init();
+    if (!this.canRedo() || !window.nodeFs) {
+      return null;
+    }
+
+    try {
+      this.head++;
+      const { dataPath, filePath, compressed } = this.timeline[this.head];
+
+      const fileData = await window.nodeFs.readFile(dataPath);
+
+      // Decompress only if the state was compressed
+      let buffer: Buffer;
+      if (compressed && window.compression) {
+        buffer = window.compression.uncompress(fileData);
+      } else {
+        buffer = fileData;
+      }
+
+      const data = new Float32Array(
+        buffer.buffer,
+        buffer.byteOffset,
+        buffer.byteLength / Float32Array.BYTES_PER_ELEMENT,
+      );
+
+      console.log(`Redo to state ${this.head} for ${filePath}`);
+      this.notifyStateChange();
+      return { data, filePath };
+    } catch (error) {
+      console.error("Failed to redo:", error);
+      return null;
+    }
+  }
+
+  async clear() {
+    await this.init();
+    if (!this.tempDir || !window.nodeFs) return;
+
+    try {
+      const files = await window.nodeFs.readdir(this.tempDir);
+      for (const file of files) {
+        try {
+          await window.nodeFs.rm(window.nodePath!.join(this.tempDir, file));
+        } catch (e) {
+          console.error("Failed to delete file during clear:", e);
+        }
+      }
+      this.timeline = [];
+      this.head = -1;
+      console.log("Undo history cleared");
+      this.notifyStateChange();
+    } catch (error) {
+      console.error("Failed to clear undo history:", error);
+    }
+  }
+
+  async destroy() {
+    await this.init();
+    if (!this.tempDir || !window.nodeFs) return;
+
+    try {
+      await window.nodeFs.rm(this.tempDir, { recursive: true, force: true });
+      console.log("Undo temp directory destroyed");
+    } catch (error) {
+      console.error("Failed to clean up undo directory:", error);
+    }
+  }
+}
+
+// Global undo manager instance per file
+const undoManagers = new Map<string, UndoManager>();
+
+export function getUndoManager(filePath: string, useCompression: boolean = false): UndoManager {
+  if (!undoManagers.has(filePath)) {
+    undoManagers.set(filePath, new UndoManager(useCompression));
+  }
+  return undoManagers.get(filePath)!;
+}
+
+export async function destroyUndoManager(filePath: string) {
+  const manager = undoManagers.get(filePath);
+  if (manager) {
+    await manager.destroy();
+    undoManagers.delete(filePath);
+  }
+}
+
+export async function clearAllUndoManagers() {
+  for (const manager of undoManagers.values()) {
+    await manager.destroy();
+  }
+  undoManagers.clear();
+}

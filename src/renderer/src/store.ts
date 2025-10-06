@@ -1,4 +1,6 @@
 import { deepMerge } from "@mantine/core";
+import { modals } from "@mantine/modals";
+import { produce } from "immer";
 import { startCase } from "lodash-es";
 import { Vector2 } from "three";
 import { ScaleType } from "tonal";
@@ -16,6 +18,7 @@ import {
   PITCH_VALUES_NO_FRACTIONS,
   SYNTHESIZE_TYPES,
 } from "./lib/constants";
+import { getUndoManager } from "./lib/undo-manager";
 import { Parameter } from "./Parameter";
 import {
   BooleanParameter,
@@ -24,7 +27,6 @@ import {
   OpenFile,
   OptionsParameter,
 } from "./types";
-
 export const openFiles: Record<string, OpenFile> = {};
 
 type Enumerate<N extends number, Acc extends number[] = []> = Acc["length"] extends N
@@ -71,6 +73,14 @@ type ModulatorParameters = {
 } & {
   [K in Range<1, 4> as `modulator${K}Rotation`]: ContinuousNumberParameter;
 };
+
+const persistedKeys: (keyof State)[] = [
+  "filesBpm",
+  "filesResolution",
+  "effectOrder",
+  "effectsEnabled",
+  "sectionCollapsed",
+];
 
 export type State = {
   // Brush Parameters
@@ -161,8 +171,6 @@ export type State = {
   setLoop: (loop: boolean) => void;
   playbackTime: number;
   setPlaybackTime: (playbackTime: number) => void;
-  isSynthesizing: boolean;
-  setIsSynthesizing: (isSynthesizing: boolean) => void;
 
   // UI State
   mousePos: Vector2 | null;
@@ -172,9 +180,10 @@ export type State = {
 
   // Files
   openFilePaths: string[];
-  openFile: (file: OpenFile) => void;
-  closeFile: (filePath: string) => void;
-  closeAllFiles: () => void;
+  openFilePath: (filePath: string) => Promise<void>;
+  closeFilePath: (filePath: string) => void;
+  closeAllFilePaths: () => void;
+  reanalyzeActiveFile: () => Promise<void>;
   audioBuffers: Record<string, AudioBuffer>;
   setAudioBuffers: (audioBuffers: Record<string, AudioBuffer>) => void;
   filesBpm: Record<string, number>;
@@ -243,7 +252,7 @@ function createParameter<K extends ParameterKey>(
   parameter: BaseParameterType<K>,
   modulatable: boolean,
 ) {
-  return createParameterInternal(set, key as string, parameter as any, modulatable);
+  return createParameterInternal(set, key as string, parameter as any, modulatable) as any;
 }
 
 function createModulatorParamsForParameter(set: ZustandSet, key: string) {
@@ -391,7 +400,7 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
 export const useStore = create<State>()(
   subscribeWithSelector(
     persist(
-      (set) => {
+      (set, get) => {
         const initialState = {
           ...createParameter(
             set,
@@ -504,7 +513,8 @@ export const useStore = create<State>()(
           ),
           // Source Position
           sourcePosition: null,
-          setSourcePosition: (position) => set({ sourcePosition: position, lockedOffset: null }),
+          setSourcePosition: (position: { beats: number; pitch: number; filePath: string } | null) =>
+            set({ sourcePosition: position, lockedOffset: null }),
           ...createParameter(
             set,
             "sourcePositionMode",
@@ -522,11 +532,12 @@ export const useStore = create<State>()(
             false,
           ),
           isSettingPosition: false,
-          setIsSettingPosition: (value) => set({ isSettingPosition: value }),
+          setIsSettingPosition: (value: boolean) => set({ isSettingPosition: value }),
           brushStartPosition: null,
-          setBrushStartPosition: (position) => set({ brushStartPosition: position }),
+          setBrushStartPosition: (position: { beats: number; pitch: number } | null) =>
+            set({ brushStartPosition: position }),
           lockedOffset: null,
-          setLockedOffset: (offset) => set({ lockedOffset: offset }),
+          setLockedOffset: (offset: { beats: number; pitch: number } | null) => set({ lockedOffset: offset }),
           ...createParameter(
             set,
             "brushWidthBeats",
@@ -564,7 +575,7 @@ export const useStore = create<State>()(
               name: "Lock Brush Size to Grid",
               label: "Grid",
               description: "Locks the brush size to the grid size.",
-              value: true as boolean,
+              value: false as boolean,
             },
 
             false,
@@ -992,44 +1003,172 @@ export const useStore = create<State>()(
           ),
           ...createModulatorParams(set),
           openFilePaths: [],
-          openFile: (file) =>
-            set((state) => {
-              if (openFiles[file.filePath]) {
-                return state;
-              }
-              openFiles[file.filePath] = file;
-              set({ activeFilePath: file.filePath });
-              return { openFilePaths: [...state.openFilePaths, file.filePath] };
-            }),
-          closeFile: (filePath) =>
-            set((state) => {
-              if (openFiles[filePath]) {
-                delete openFiles[filePath];
-                return { openFilePaths: state.openFilePaths.filter((path) => path !== filePath) };
-              }
-              return state;
-            }),
-          closeAllFiles: () => {
-            for (const key in openFiles) {
-              delete openFiles[key];
+          openFilePath: async (filePath: string) => {
+            const state = get();
+            const fileAlreadyOpen = state.openFilePaths.includes(filePath);
+            if (!fileAlreadyOpen) {
+              console.log("Starting analysis...");
+              const result = await window.gaborator!.analyze(filePath, {
+                bandsPerOctave: state.bandsPerOctave.value,
+                minFreq: state.minFreq.value,
+              });
+              console.log("Analysis complete:", result);
+
+              const spectrogramData = {
+                packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+                inverseMap: new Float32Array(
+                  result.inverseMap.buffer,
+                  result.inverseMap.byteOffset,
+                  result.inverseMap.byteLength / 4,
+                ),
+                metadata: new Float32Array(
+                  result.metadataTexture.buffer,
+                  result.metadataTexture.byteOffset,
+                  result.metadataTexture.byteLength / 4,
+                ),
+                textureWidth: result.textureWidth,
+                textureHeight: result.textureHeight,
+                numFrames: result.numFrames,
+                numBands: result.numBands,
+                numChannels: result.numChannels,
+                sampleRate: result.sampleRate,
+                packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
+                minFreq: state.minFreq.value,
+                bandsPerOctave: state.bandsPerOctave.value,
+                synthesisMetadata: {
+                  bandOffsets: result.bandOffsets,
+                  bandStepLog2s: result.bandStepLog2s,
+                  bandLengths: result.bandLengths,
+                },
+              };
+              openFiles[filePath] = {
+                filePath,
+                spectrogramData,
+              };
+
+              console.log(openFiles);
+
+              return set((state) => {
+                const newState: Partial<State> = { openFilePaths: [...state.openFilePaths, filePath] };
+                if (!state.filesBpm[filePath]) newState.filesBpm = { ...state.filesBpm, [filePath]: 120 };
+                if (!state.filesResolution[filePath])
+                  newState.filesResolution = { ...state.filesResolution, [filePath]: state.bandsPerOctave.value };
+                if (!state.sourceFile) newState.sourceFile = { path: filePath, mode: "current" };
+                newState.activeFilePath = filePath;
+
+                return newState;
+              });
             }
-            return set({ openFilePaths: [] });
+            return state;
+          },
+          closeFilePath: (filePath: string) =>
+            set(
+              produce((state: State) => {
+                const openFile = openFiles[filePath];
+                if (openFile) {
+                  state.openFilePaths = state.openFilePaths.filter((path) => path !== filePath);
+                  delete state.filesBpm[filePath];
+
+                  const nextFilePath = state.openFilePaths[state.openFilePaths.length - 1] || null;
+                  state.activeFilePath = nextFilePath || null;
+
+                  // If the file being closed is the source file, set the source file to the next file
+                  if (!nextFilePath) state.sourceFile = null;
+                  else if (state.sourceFile?.path === filePath) {
+                    state.sourceFile = {
+                      path: nextFilePath,
+                      mode: "current",
+                    };
+                  }
+                }
+              }),
+            ),
+          closeAllFilePaths: () => {
+            return set({
+              openFilePaths: [],
+              filesBpm: {},
+              filesResolution: {},
+              activeFilePath: null,
+              sourceFile: null,
+            });
+          },
+          reanalyzeActiveFile: () => {
+            const state = get();
+            if (!state.activeFilePath) return;
+            const file = openFiles[state.activeFilePath];
+
+            modals.openConfirmModal({
+              title: "Re-analyze File",
+              children: `This will re-analyze the file with the new settings. All edits will be lost.`,
+              labels: { confirm: "Re-analyze", cancel: "Cancel" },
+              confirmProps: { color: "red", size: "xs" },
+              cancelProps: { size: "xs" },
+              styles: {
+                title: { fontSize: "var(--mantine-font-size-sm)", fontWeight: 600 },
+                body: { fontSize: "var(--mantine-font-size-sm)" },
+              },
+              onConfirm: async () => {
+                if (!state.activeFilePath) return;
+
+                const result = await window.gaborator!.analyze(state.activeFilePath, {
+                  bandsPerOctave: state.bandsPerOctave.value,
+                  minFreq: state.minFreq.value,
+                });
+
+                const spectrogramData = {
+                  packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+                  inverseMap: new Float32Array(
+                    result.inverseMap.buffer,
+                    result.inverseMap.byteOffset,
+                    result.inverseMap.byteLength / 4,
+                  ),
+                  metadata: new Float32Array(
+                    result.metadataTexture.buffer,
+                    result.metadataTexture.byteOffset,
+                    result.metadataTexture.byteLength / 4,
+                  ),
+                  textureWidth: result.textureWidth,
+                  textureHeight: result.textureHeight,
+                  numFrames: result.numFrames,
+                  numBands: result.numBands,
+                  numChannels: result.numChannels,
+                  sampleRate: result.sampleRate,
+                  packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
+                  minFreq: state.minFreq.value,
+                  bandsPerOctave: state.bandsPerOctave.value,
+                  synthesisMetadata: {
+                    bandOffsets: result.bandOffsets,
+                    bandStepLog2s: result.bandStepLog2s,
+                    bandLengths: result.bandLengths,
+                  },
+                };
+
+                file.spectrogramData = spectrogramData;
+
+                file.rendererRef?.current?.reloadTextures();
+
+                const undoManager = getUndoManager(state.activeFilePath);
+                undoManager.clear();
+
+                return set({
+                  filesResolution: { ...state.filesResolution, [state.activeFilePath]: state.bandsPerOctave.value },
+                });
+              },
+            });
           },
           audioBuffers: {},
           setAudioBuffers: (audioBuffers) => set({ audioBuffers }),
           filesBpm: {},
           setFileBpm: (filePath, bpm) =>
-            set((state) => {
-              if (!openFiles[filePath]) return state;
-              const newFilesBpm = { ...state.filesBpm };
-              if (bpm) {
-                newFilesBpm[filePath] = bpm;
-              } else {
-                delete newFilesBpm[filePath];
-              }
-
-              return { filesBpm: newFilesBpm };
-            }),
+            set(
+              produce((state: State) => {
+                if (bpm) {
+                  state.filesBpm[filePath] = bpm;
+                } else {
+                  delete state.filesBpm[filePath];
+                }
+              }),
+            ),
           filesResolution: {},
           setFileResolution: (filePath, resolution) =>
             set((state) => {
@@ -1047,8 +1186,6 @@ export const useStore = create<State>()(
           setLoop: (loop) => set({ loop }),
           playbackTime: 0,
           setPlaybackTime: (playbackTime) => set({ playbackTime }),
-          isSynthesizing: false,
-          setIsSynthesizing: (isSynthesizing) => set({ isSynthesizing }),
           mousePos: null,
           setMousePos: (mousePos) => set({ mousePos }),
           hoveredFilePath: null,
@@ -1072,8 +1209,8 @@ export const useStore = create<State>()(
             set((state) => ({
               sectionCollapsed: { ...state.sectionCollapsed, [section]: collapsed },
             })),
-        };
-        return initialState as unknown as State;
+        } satisfies State;
+        return initialState;
       },
       {
         name: "noise-canvas-storage",
@@ -1082,7 +1219,7 @@ export const useStore = create<State>()(
             (acc, [key, value]) => {
               if (typeof value === "object" && value !== null && "value" in value) {
                 acc[key] = { value: (value as Parameter<unknown>).value };
-              } else if (["filesBpm", "effectOrder", "effectsEnabled", "sectionCollapsed"].includes(key)) {
+              } else if (persistedKeys.includes(key as keyof State)) {
                 acc[key] = value;
               }
               return acc;

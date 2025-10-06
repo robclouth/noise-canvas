@@ -1,16 +1,13 @@
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { app, BrowserWindow, shell } from "electron";
-import { installExtension, REACT_DEVELOPER_TOOLS } from "electron-devtools-installer";
+import { app, BrowserWindow, Menu, shell } from "electron";
+import { installExtension, REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS } from "electron-devtools-installer";
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
-import { registerAudioIpcHandlers, setupAudio } from "./lib/audio";
+import { registerAudioIpcHandlers, setupAudio } from "./lib/audio2";
 import { createMenu } from "./lib/menu";
 import { ipcMainOn, webContentsSend } from "./lib/types";
-import { UndoService } from "./lib/undo";
 
 let mainWindow: BrowserWindow | null = null;
-const undoServices = new Map<string, UndoService>();
-let activeFilePath: string | null = null;
 
 const gotTheLock = app.requestSingleInstanceLock();
 let pendingPath: string | null = null;
@@ -67,7 +64,7 @@ function createWindow(): void {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
       nodeIntegration: true,
-      contextIsolation: true,
+      contextIsolation: false,
     },
   });
 
@@ -88,18 +85,7 @@ function createWindow(): void {
     // mainWindow.webContents.openDevTools();
   }
 
-  createMenu(mainWindow, {
-    onUndo: () => {
-      if (activeFilePath) {
-        undoServices.get(activeFilePath)?.undo().catch(console.error);
-      }
-    },
-    onRedo: () => {
-      if (activeFilePath) {
-        undoServices.get(activeFilePath)?.redo().catch(console.error);
-      }
-    },
-  });
+  createMenu(mainWindow!);
 }
 
 app.whenReady().then(async () => {
@@ -115,7 +101,7 @@ app.whenReady().then(async () => {
   if (mainWindow) {
     registerAudioIpcHandlers(mainWindow);
 
-    await installExtension(REACT_DEVELOPER_TOOLS);
+    await installExtension([REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS]);
 
     process.env.NODE_ENV === "development" &&
       setTimeout(() => {
@@ -135,54 +121,18 @@ app.whenReady().then(async () => {
   });
 });
 
-ipcMainOn("add-undo-state", async (_event, { data, filePath }) => {
-  const service = undoServices.get(filePath);
-  if (service) {
-    await service.addState({ data, filePath });
+// Update menu items based on undo/redo state from renderer
+ipcMainOn("update-menu-state", (_, canUndo: boolean, canRedo: boolean) => {
+  const menu = Menu.getApplicationMenu();
+  if (menu) {
+    const undoItem = menu.getMenuItemById("undo");
+    if (undoItem) undoItem.enabled = canUndo;
+    const redoItem = menu.getMenuItemById("redo");
+    if (redoItem) redoItem.enabled = canRedo;
   }
 });
 
-ipcMainOn("set-active-file", (_event, filePath) => {
-  activeFilePath = filePath;
-  const service = undoServices.get(filePath);
-  if (service) {
-    service.updateState();
-  }
-});
-
-ipcMainOn("file-opened", (_event, filePath) => {
-  if (mainWindow && !undoServices.has(filePath)) {
-    undoServices.set(filePath, new UndoService(mainWindow));
-  }
-});
-
-ipcMainOn("file-closed", async (_event, filePath) => {
-  const service = undoServices.get(filePath);
-  if (service) {
-    await service.destroy();
-    undoServices.delete(filePath);
-  }
-  if (activeFilePath === filePath) {
-    activeFilePath = null;
-  }
-});
-
-ipcMainOn("clear-undo-state", async () => {
-  // This might need to be revisited. Should it clear for active file or all?
-  // For now, let's assume it clears for the active file.
-  if (activeFilePath) {
-    const service = undoServices.get(activeFilePath);
-    await service?.clear();
-  }
-});
-
-app.on("will-quit", async () => {
-  const promises: Promise<void>[] = [];
-  for (const service of undoServices.values()) {
-    promises.push(service.destroy());
-  }
-  await Promise.all(promises);
-});
+app.on("will-quit", async () => {});
 
 app.on("window-all-closed", () => {
   app.quit();

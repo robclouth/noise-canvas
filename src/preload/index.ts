@@ -1,5 +1,10 @@
 import { electronAPI } from "@electron-toolkit/preload";
 import { contextBridge, ipcRenderer } from "electron";
+import * as fs from "fs/promises";
+import { compressSync, uncompressSync } from "lz4-napi";
+import * as os from "os";
+import * as path from "path";
+import * as directGaborator from "../main/lib/audio";
 import type { GaboratorParams, IpcApi } from "../main/lib/types";
 
 // Custom APIs for renderer
@@ -24,19 +29,8 @@ const api: IpcApi = {
     ipcRenderer.on("analysis-error", handler);
     return () => ipcRenderer.removeListener("analysis-error", handler);
   },
-  onUndoApplyState: (callback) => {
-    const handler = (_event, value) => callback(value);
-    ipcRenderer.on("apply-undo-state", handler);
-    return () => ipcRenderer.removeListener("apply-undo-state", handler);
-  },
   loadFile: (filePath: string, params: GaboratorParams) => {
     ipcRenderer.send("load-file", filePath, params);
-  },
-  addUndoState: (args: { filePath: string; data: ArrayBufferLike }) => {
-    ipcRenderer.send("add-undo-state", {
-      data: Buffer.from(args.data),
-      filePath: args.filePath,
-    });
   },
   fileOpened: (filePath: string) => {
     ipcRenderer.send("file-opened", filePath);
@@ -63,22 +57,36 @@ const api: IpcApi = {
   },
   reanalyzeCurrentFile: (params) => ipcRenderer.invoke("reanalyze-current-file", params),
   openAndAnalyze: (params) => ipcRenderer.send("open-and-analyze", params),
-  saveAudioData: (payload, params, normalize) => {
-    return ipcRenderer.invoke(
-      "save-audio-data",
-      {
-        ...payload,
-        processedData: Buffer.from(payload.processedData),
-      },
-      params,
-      normalize,
-    );
+  saveAudioData: (audioChannels) => {
+    // Convert Float32Arrays to Buffers for IPC transfer
+    const buffers = audioChannels.map((channel) => Buffer.from(channel.buffer, channel.byteOffset, channel.byteLength));
+    return ipcRenderer.invoke("save-audio-data", buffers);
+  },
+  setFileMetadata: (metadata) => {
+    ipcRenderer.send("set-file-metadata", metadata);
+  },
+  updateMenuState: (canUndo, canRedo) => {
+    ipcRenderer.send("update-menu-state", canUndo, canRedo);
   },
   onRequestAudioForSaving: (callback) => {
     const handler = () => callback();
     ipcRenderer.on("request-audio-for-saving", handler);
     return () => {
       ipcRenderer.removeListener("request-audio-for-saving", handler);
+    };
+  },
+  onUndo: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("undo", handler);
+    return () => {
+      ipcRenderer.removeListener("undo", handler);
+    };
+  },
+  onRedo: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("redo", handler);
+    return () => {
+      ipcRenderer.removeListener("redo", handler);
     };
   },
   onCloseActiveFile: (callback) => {
@@ -126,4 +134,27 @@ if (process.contextIsolated) {
   window.electron = electronAPI;
   // @ts-ignore (define in dts)
   window.api = api;
+
+  // Expose direct gaborator functions for no-IPC access
+  // @ts-ignore (define in dts)
+  window.gaborator = {
+    analyze: directGaborator.analyzeAudio,
+    synthesize: directGaborator.synthesizeAudio,
+    loadGaborator: directGaborator.loadGaborator,
+  };
+
+  // Expose compression utilities for undo
+  // @ts-ignore (define in dts)
+  window.compression = {
+    compress: compressSync,
+    uncompress: uncompressSync,
+  };
+
+  // Expose Node.js utilities for direct filesystem access
+  // @ts-ignore (define in dts)
+  window.nodeFs = fs;
+  // @ts-ignore (define in dts)
+  window.nodePath = path;
+  // @ts-ignore (define in dts)
+  window.nodeOs = os;
 }

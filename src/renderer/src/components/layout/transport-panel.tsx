@@ -34,15 +34,9 @@ export const TransportPanel = memo(() => {
         if (timeRef.current) timeRef.current.innerText = formatTime(time);
       },
     );
-    const unsubSynth = useStore.subscribe(
-      (state) => state.isSynthesizing,
-      (isSynthesizing) => {
-        if (playButtonRef.current) playButtonRef.current.disabled = isSynthesizing;
-      },
-    );
+
     return () => {
       unsubTime();
-      unsubSynth();
     };
   }, []);
 

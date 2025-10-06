@@ -1,13 +1,7 @@
 import { app, BrowserWindow, Menu } from "electron";
-import { saveAudioFile } from "./audio";
+import { saveAudioFile } from "./audio2";
 
-export function createMenu(
-  window: BrowserWindow,
-  actions: {
-    onUndo: () => void;
-    onRedo: () => void;
-  },
-) {
+export function createMenu(window: BrowserWindow) {
   const template: (Electron.MenuItemConstructorOptions | Electron.MenuItem)[] = [
     {
       label: "File",
@@ -52,14 +46,18 @@ export function createMenu(
           label: "Undo",
           accelerator: "CmdOrCtrl+Z",
           enabled: false,
-          click: actions.onUndo,
+          click: () => {
+            window.webContents.send("undo");
+          },
           id: "undo",
         },
         {
           label: "Redo",
           accelerator: "Shift+CmdOrCtrl+Z",
           enabled: false,
-          click: actions.onRedo,
+          click: () => {
+            window.webContents.send("redo");
+          },
           id: "redo",
         },
         { type: "separator" },

@@ -2,9 +2,11 @@ import { openFiles, useStore } from "@/store";
 import { ActionIcon, Badge, Box, Button, Group, NumberInput } from "@mantine/core";
 import { MiddleTruncate } from "@re-dev/react-truncate";
 import { View } from "@react-three/drei";
+import { runSynthesis } from "@renderer/audio-manager";
 import { X } from "lucide-react";
 import { memo, MouseEventHandler, useCallback, useMemo, useRef } from "react";
 import { Vector2 } from "three";
+import { getUndoManager } from "../lib/undo-manager";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
 import { Tooltip } from "./tooltip";
@@ -118,7 +120,7 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
   const setSourceFile = useStore((state) => state.setSourceFile);
   const bpm = useStore((state) => state.filesBpm[filePath] ?? 120);
   const setFileBpm = useStore((state) => state.setFileBpm);
-  const closeFile = useStore((state) => state.closeFile);
+  const closeFilePath = useStore((state) => state.closeFilePath);
   const sourceFile = useStore((state) => state.sourceFile);
   const resolution = useStore((state) => state.filesResolution[filePath]);
 
@@ -184,7 +186,7 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
           size="xs"
           onClick={(e) => {
             e.stopPropagation();
-            closeFile(filePath);
+            closeFilePath(filePath);
           }}
         >
           <X />
@@ -330,13 +332,14 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
       // Clear brush start position when stroke ends
       useStore.getState().setBrushStartPosition(null);
 
-      // Left mouse button up
+      // Left mouse button up - save undo state and run synthesis (no IPC)
       const data = await rendererRef.current.getFBOData();
       if (data) {
-        window.api.addUndoState({
-          data: data.buffer,
-          filePath,
-        });
+        const undoManager = getUndoManager(filePath);
+        await undoManager.addState(data, filePath);
+
+        // Run synthesis now that the stroke is finished
+        runSynthesis(filePath);
       }
     }
   };

@@ -14,9 +14,6 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, "src/main/index.ts"),
-          "synthesis-worker": resolve(__dirname, "src/main/lib/synthesis-worker.ts"),
-          "analysis-worker": resolve(__dirname, "src/main/lib/analysis-worker.ts"),
-          "undo-worker": resolve(__dirname, "src/main/lib/undo-worker.ts"),
         },
       },
     },
