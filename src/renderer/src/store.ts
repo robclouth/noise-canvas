@@ -771,7 +771,7 @@ export const useStore = create<State>()(
               label: "Gain",
               description: "The amount of gain to apply in decibels.",
               value: 0.0,
-              min: -24,
+              min: -80,
               max: 24,
               step: 0.1,
               unit: "dB",

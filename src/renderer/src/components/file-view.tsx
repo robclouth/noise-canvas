@@ -202,7 +202,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   const isActive = activeFilePath === filePath;
   const isSettingPosition = useStore((state) => state.isSettingPosition);
 
-  const cursorStyle = useMemo(() => ({ cursor: isSettingPosition ? "crosshair" : "none" }), [isSettingPosition]);
+  const cursorStyle = useMemo(() => ({ cursor: isSettingPosition ? "crosshair" : "crosshair" }), [isSettingPosition]);
 
   const rendererRef = useRef<FileRendererHandle>(null);
 
@@ -276,11 +276,30 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
     }
   };
 
+  const handleMouseEnter: MouseEventHandler<HTMLDivElement> = (event) => {
+    // When mouse enters, immediately update position and trigger render
+    const bpm = useStore.getState().filesBpm[filePath] ?? 120;
+    const coords = getSnappedCoordinates(event, filePath, bpm);
+    if (!coords) return;
+    const [snappedX, snappedY] = coords;
+
+    if (rendererRef.current) {
+      const state = useStore.getState();
+      state.setMousePos(new Vector2(snappedX, 1 - snappedY));
+      state.setHoveredFilePath(filePath);
+      // Render stroke preview
+      const isPreview = !isActive || event.buttons !== 1;
+      rendererRef.current.renderStroke(snappedX, snappedY, isPreview);
+      lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
+    }
+  };
+
   const handleMouseLeave = () => {
     const state = useStore.getState();
     state.setMousePos(null);
     state.setHoveredFilePath(null);
     rendererRef.current?.clearPreview();
+    lastSnappedPositionRef.current = null;
   };
 
   const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
@@ -359,6 +378,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
         h={400}
         style={cursorStyle}
         pos="relative"
+        onMouseEnter={handleMouseEnter}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         onMouseDown={handleCanvasMouseDown}
