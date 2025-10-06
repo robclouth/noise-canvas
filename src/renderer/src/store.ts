@@ -7,6 +7,7 @@ import { ScaleType } from "tonal";
 import * as Tone from "tone";
 import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
+import { effects, EffectType } from "./effects";
 import {
   BEAT_VALUES,
   BLEND_MODES,
@@ -111,10 +112,10 @@ export type State = {
   brushSizeLockedToGrid: BooleanParameter;
 
   // Effect Order and Enabled States
-  effectOrder: string[];
-  setEffectOrder: (effectOrder: string[]) => void;
-  effectsEnabled: Record<string, boolean>;
-  setEffectEnabled: (effect: string, enabled: boolean) => void;
+  effectOrder: EffectType[];
+  setEffectOrder: (effectOrder: EffectType[]) => void;
+  effectsEnabled: Record<EffectType, boolean>;
+  setEffectEnabled: (effect: EffectType, enabled: boolean) => void;
 
   // Section Collapse States
   sectionCollapsed: Record<string, boolean>;
@@ -138,6 +139,12 @@ export type State = {
 
   // Gain Brush
   gainDb: ContinuousNumberParameter;
+
+  // Dynamics Brush
+  dynamicsThresholdDb: ContinuousNumberParameter;
+  dynamicsUpperRatio: ContinuousNumberParameter;
+  dynamicsLowerRatio: ContinuousNumberParameter;
+  dynamicsKnee: ContinuousNumberParameter;
 
   // Transform Brush
   transformShiftBeats: DiscreteNumberParameter;
@@ -773,6 +780,69 @@ export const useStore = create<State>()(
           ),
           ...createParameter(
             set,
+            "dynamicsThresholdDb",
+            {
+              name: "Threshold",
+              label: "Threshold",
+              description: "The threshold level for dynamics processing in decibels.",
+              value: -20.0,
+              min: -60,
+              max: 0,
+              step: 0.1,
+              unit: "dB",
+            },
+            true,
+          ),
+          ...createParameter(
+            set,
+            "dynamicsUpperRatio",
+            {
+              name: "Upper Ratio",
+              label: "Upper",
+              description:
+                "Gain multiplier for signals above threshold. 1=unity, 0.5=compress, 2=expand, 0=gate, -1=invert.",
+              value: 1.0,
+              min: -8.0,
+              max: 8.0,
+              step: 0.1,
+              unit: "×",
+            },
+            true,
+          ),
+          ...createParameter(
+            set,
+            "dynamicsLowerRatio",
+            {
+              name: "Lower Ratio",
+              label: "Lower",
+              description:
+                "Gain multiplier for signals below threshold. 1=unity, 0.5=compress, 2=expand, 0=gate, -1=invert.",
+              value: 1.0,
+              min: -8.0,
+              max: 8.0,
+              step: 0.1,
+              unit: "×",
+            },
+            true,
+          ),
+          ...createParameter(
+            set,
+            "dynamicsKnee",
+            {
+              name: "Knee",
+              label: "Knee",
+              description:
+                "Width of the transition zone around the threshold. 0 = hard/sharp, higher = softer/smoother.",
+              value: 6.0,
+              min: 0.0,
+              max: 48.0,
+              step: 0.5,
+              unit: "dB",
+            },
+            true,
+          ),
+          ...createParameter(
+            set,
             "blurAmountTime",
             {
               name: "Blur Amount Time",
@@ -1366,10 +1436,11 @@ export const useStore = create<State>()(
           setMousePos: (mousePos) => set({ mousePos }),
           hoveredFilePath: null,
           setHoveredFilePath: (filePath) => set({ hoveredFilePath: filePath }),
-          effectOrder: ["gain", "transform", "harmonics", "blur", "synthesize", "sharpen"],
+          effectOrder: ["gain", "dynamics", "transform", "harmonics", "blur", "synthesize", "sharpen"],
           setEffectOrder: (effectOrder) => set({ effectOrder }),
           effectsEnabled: {
             gain: true,
+            dynamics: false,
             transform: false,
             harmonics: false,
             blur: false,
@@ -1488,6 +1559,29 @@ export const useStore = create<State>()(
           );
         },
         merge: (persistedState, currentState) => deepMerge(currentState, persistedState),
+        onRehydrateStorage: () => (state) => {
+          if (state) {
+            // Get all available effect types (excluding passthrough which is internal)
+            const allEffects = (Object.keys(effects) as EffectType[]).filter((key) => key !== "passthrough");
+            const currentOrder = state.effectOrder;
+            const missingEffects = allEffects.filter((effect) => !currentOrder.includes(effect));
+
+            if (missingEffects.length > 0) {
+              // Add missing effects to the end
+              const newOrder = [...currentOrder, ...missingEffects];
+              state.setEffectOrder(newOrder);
+
+              // Initialize missing effects as disabled in effectsEnabled
+              const updatedEnabled = { ...state.effectsEnabled };
+              missingEffects.forEach((effect) => {
+                if (!(effect in updatedEnabled)) {
+                  updatedEnabled[effect] = false;
+                }
+              });
+              state.effectsEnabled = updatedEnabled;
+            }
+          }
+        },
       },
     ),
   ),

@@ -21,6 +21,10 @@ export const PRESET_KEYS = [
   "blendMode",
   // Effect parameters
   "gainDb",
+  "dynamicsThresholdDb",
+  "dynamicsUpperRatio",
+  "dynamicsLowerRatio",
+  "dynamicsKnee",
   "blurAmountTime",
   "blurAmountPitch",
   "blurNoiseTime",
@@ -159,6 +163,12 @@ export const defaultPresets: BrushPreset[] = [
     // Effect parameters
     gainDb: 0.0,
 
+    // Dynamics parameters
+    dynamicsThresholdDb: -20.0,
+    dynamicsUpperRatio: 1.0,
+    dynamicsLowerRatio: 1.0,
+    dynamicsKnee: 6.0,
+
     // Blur parameters
     blurAmountTime: 0,
     blurAmountPitch: 0,
@@ -187,9 +197,10 @@ export const defaultPresets: BrushPreset[] = [
     synthesizeBrushType: 0,
 
     // Effect order and enabled states
-    effectOrder: ["gain", "transform", "harmonics", "blur", "synthesize", "sharpen"],
+    effectOrder: ["gain", "dynamics", "transform", "harmonics", "blur", "synthesize", "sharpen"],
     effectsEnabled: {
       gain: true,
+      dynamics: false,
       transform: false,
       harmonics: false,
       blur: false,
