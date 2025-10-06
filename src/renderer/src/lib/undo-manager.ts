@@ -14,7 +14,7 @@ class UndoManager {
   private tempDir: string | null = null;
   private timeline: UndoState[] = [];
   private head = -1;
-  private readonly MAX_HISTORY = 20;
+  private readonly MAX_HISTORY = 50;
   private useCompression: boolean;
   private initialized = false;
 
