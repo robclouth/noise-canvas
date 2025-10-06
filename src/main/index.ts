@@ -96,14 +96,31 @@ app.whenReady().then(async () => {
 
   createWindow();
 
-  if (mainWindow) {
-    await installExtension([REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS]);
+  if (mainWindow && is.dev) {
+    // Install DevTools extensions in development mode
+    // Temporarily suppress deprecation and extension warnings
+    const noDeprecation = process.noDeprecation;
+    process.noDeprecation = true;
+    process.removeAllListeners("warning");
 
-    process.env.NODE_ENV === "development" &&
+    try {
+      await installExtension([REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS], {
+        loadExtensionOptions: { allowFileAccess: true },
+      });
+    } catch (error) {
+      console.log("DevTools extensions failed to install:", error);
+    } finally {
+      process.noDeprecation = noDeprecation;
+    }
+
+    if (process.env.NODE_ENV === "development") {
       setTimeout(() => {
         mainWindow!.reload();
       }, 500);
+    }
+  }
 
+  if (mainWindow) {
     mainWindow.webContents.on("did-finish-load", () => {
       if (pendingPath) {
         webContentsSend(mainWindow!, "open-file", pendingPath);

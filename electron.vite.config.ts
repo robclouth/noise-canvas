@@ -28,6 +28,11 @@ export default defineConfig({
         "@": resolve("src/renderer/src"),
       },
     },
-    plugins: [react(), glsl()],
+    plugins: [
+      react(),
+      glsl({
+        warnDuplicatedImports: false, // Suppress duplicate import warnings (lygia files have include guards)
+      }),
+    ],
   },
 });
