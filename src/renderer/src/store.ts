@@ -1113,7 +1113,7 @@ export const useStore = create<State>()(
             try {
               const totalStart = performance.now();
               console.log("runSynthesis");
-              const { normalize, bandsPerOctave, minFreq, isPlaying, loop } = useStore.getState();
+              const { normalize, bandsPerOctave, minFreq, isPlaying } = useStore.getState();
               const file = openFiles[filePath];
               if (!file || !file.rendererRef?.current) {
                 return;
@@ -1214,27 +1214,9 @@ export const useStore = create<State>()(
 
               if (isPlaying && state.activeFilePath && state.activeFilePath === filePath) {
                 const transport = Tone.getTransport();
-                let currentTime = transport.seconds;
-                const newDuration = audioBuffer.duration;
-
-                if (loop) {
-                  currentTime %= newDuration;
-                } else if (currentTime >= newDuration) {
-                  state.stopAudio();
-                  return;
-                }
-
                 transport.cancel(0);
-
                 player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
-                player.loop = loop;
-
-                if (!loop) {
-                  transport.scheduleOnce(() => {
-                    state.stopAudio();
-                  }, newDuration);
-                }
-                player.seek(currentTime);
+                player.seek(transport.seconds);
               }
 
               const totalTime = performance.now() - totalStart;
