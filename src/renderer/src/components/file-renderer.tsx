@@ -265,102 +265,105 @@ export const FileRenderer = memo(
      * Helper function to calculate source offset based on position mode.
      * This consolidates the logic used for both stroke rendering and display.
      */
-    const calculateSourceOffset = (
-      state: ReturnType<typeof useStore.getState>,
-      mousePos: THREE.Vector2 | null,
-      sourceBpm: number,
-      sourceTotalDuration: number,
-      sourceSpectrogramData: typeof spectrogramData,
-      bpm: number,
-      totalDuration: number,
-    ): THREE.Vector2 => {
-      const sourceOffsetUv = new THREE.Vector2(0, 0);
+    const calculateSourceOffset = useCallback(
+      (
+        state: ReturnType<typeof useStore.getState>,
+        mousePos: THREE.Vector2 | null,
+        sourceBpm: number,
+        sourceTotalDuration: number,
+        sourceSpectrogramData: typeof spectrogramData,
+        bpm: number,
+        totalDuration: number,
+      ): THREE.Vector2 => {
+        const sourceOffsetUv = new THREE.Vector2(0, 0);
 
-      if (!state.sourcePosition || !mousePos) {
+        if (!state.sourcePosition || !mousePos) {
+          return sourceOffsetUv;
+        }
+
+        const mode = state.sourcePositionMode.value;
+
+        // Calculate brush size in the SOURCE file's coordinate space
+        const brushSizeUvSource = unitsToUv(
+          state.brushWidthBeats.value,
+          state.brushHeightSemis.value,
+          sourceBpm,
+          sourceTotalDuration,
+          sourceSpectrogramData.bandsPerOctave,
+          sourceSpectrogramData.numBands,
+        );
+        const halfBrushSizeUvSource = new THREE.Vector2(brushSizeUvSource.x / 2, brushSizeUvSource.y / 2);
+
+        // Calculate brush size in the CURRENT file's coordinate space
+        const brushSizeUvCurrent = unitsToUv(
+          state.brushWidthBeats.value,
+          state.brushHeightSemis.value,
+          bpm,
+          totalDuration,
+          spectrogramData.bandsPerOctave,
+          spectrogramData.numBands,
+        );
+        const halfBrushSizeUvCurrent = new THREE.Vector2(brushSizeUvCurrent.x / 2, brushSizeUvCurrent.y / 2);
+
+        // Convert source position (bottom-left) to UV coordinates in the source file
+        const sourcePositionBottomLeftUv = unitsToUv(
+          state.sourcePosition.beats,
+          state.sourcePosition.pitch,
+          sourceBpm,
+          sourceTotalDuration,
+          sourceSpectrogramData.bandsPerOctave,
+          sourceSpectrogramData.numBands,
+        );
+        const sourcePositionUv = sourcePositionBottomLeftUv.clone().add(halfBrushSizeUvSource);
+        const currentBrushUv = mousePos.clone();
+
+        if (mode === "fixed") {
+          return sourcePositionUv.clone().sub(currentBrushUv);
+        } else if (mode === "anchored") {
+          if (state.brushStartPosition) {
+            const brushStartBottomLeftUv = unitsToUv(
+              state.brushStartPosition.beats,
+              state.brushStartPosition.pitch,
+              bpm,
+              totalDuration,
+              spectrogramData.bandsPerOctave,
+              spectrogramData.numBands,
+            );
+            const brushStartUv = brushStartBottomLeftUv.clone().add(halfBrushSizeUvCurrent);
+            return sourcePositionUv.clone().sub(brushStartUv);
+          } else {
+            return sourcePositionUv.clone().sub(currentBrushUv);
+          }
+        } else if (mode === "offset") {
+          if (state.lockedOffset) {
+            return unitsToUv(
+              state.lockedOffset.beats,
+              state.lockedOffset.pitch,
+              sourceBpm,
+              sourceTotalDuration,
+              sourceSpectrogramData.bandsPerOctave,
+              sourceSpectrogramData.numBands,
+            );
+          } else if (state.brushStartPosition) {
+            const brushStartBottomLeftUv = unitsToUv(
+              state.brushStartPosition.beats,
+              state.brushStartPosition.pitch,
+              bpm,
+              totalDuration,
+              spectrogramData.bandsPerOctave,
+              spectrogramData.numBands,
+            );
+            const brushStartUv = brushStartBottomLeftUv.clone().add(halfBrushSizeUvCurrent);
+            return sourcePositionUv.clone().sub(brushStartUv);
+          } else {
+            return sourcePositionUv.clone().sub(currentBrushUv);
+          }
+        }
+
         return sourceOffsetUv;
-      }
-
-      const mode = state.sourcePositionMode.value;
-
-      // Calculate brush size in the SOURCE file's coordinate space
-      const brushSizeUvSource = unitsToUv(
-        state.brushWidthBeats.value,
-        state.brushHeightSemis.value,
-        sourceBpm,
-        sourceTotalDuration,
-        sourceSpectrogramData.bandsPerOctave,
-        sourceSpectrogramData.numBands,
-      );
-      const halfBrushSizeUvSource = new THREE.Vector2(brushSizeUvSource.x / 2, brushSizeUvSource.y / 2);
-
-      // Calculate brush size in the CURRENT file's coordinate space
-      const brushSizeUvCurrent = unitsToUv(
-        state.brushWidthBeats.value,
-        state.brushHeightSemis.value,
-        bpm,
-        totalDuration,
-        spectrogramData.bandsPerOctave,
-        spectrogramData.numBands,
-      );
-      const halfBrushSizeUvCurrent = new THREE.Vector2(brushSizeUvCurrent.x / 2, brushSizeUvCurrent.y / 2);
-
-      // Convert source position (bottom-left) to UV coordinates in the source file
-      const sourcePositionBottomLeftUv = unitsToUv(
-        state.sourcePosition.beats,
-        state.sourcePosition.pitch,
-        sourceBpm,
-        sourceTotalDuration,
-        sourceSpectrogramData.bandsPerOctave,
-        sourceSpectrogramData.numBands,
-      );
-      const sourcePositionUv = sourcePositionBottomLeftUv.clone().add(halfBrushSizeUvSource);
-      const currentBrushUv = mousePos.clone();
-
-      if (mode === "fixed") {
-        return sourcePositionUv.clone().sub(currentBrushUv);
-      } else if (mode === "anchored") {
-        if (state.brushStartPosition) {
-          const brushStartBottomLeftUv = unitsToUv(
-            state.brushStartPosition.beats,
-            state.brushStartPosition.pitch,
-            bpm,
-            totalDuration,
-            spectrogramData.bandsPerOctave,
-            spectrogramData.numBands,
-          );
-          const brushStartUv = brushStartBottomLeftUv.clone().add(halfBrushSizeUvCurrent);
-          return sourcePositionUv.clone().sub(brushStartUv);
-        } else {
-          return sourcePositionUv.clone().sub(currentBrushUv);
-        }
-      } else if (mode === "offset") {
-        if (state.lockedOffset) {
-          return unitsToUv(
-            state.lockedOffset.beats,
-            state.lockedOffset.pitch,
-            sourceBpm,
-            sourceTotalDuration,
-            sourceSpectrogramData.bandsPerOctave,
-            sourceSpectrogramData.numBands,
-          );
-        } else if (state.brushStartPosition) {
-          const brushStartBottomLeftUv = unitsToUv(
-            state.brushStartPosition.beats,
-            state.brushStartPosition.pitch,
-            bpm,
-            totalDuration,
-            spectrogramData.bandsPerOctave,
-            spectrogramData.numBands,
-          );
-          const brushStartUv = brushStartBottomLeftUv.clone().add(halfBrushSizeUvCurrent);
-          return sourcePositionUv.clone().sub(brushStartUv);
-        } else {
-          return sourcePositionUv.clone().sub(currentBrushUv);
-        }
-      }
-
-      return sourceOffsetUv;
-    };
+      },
+      [spectrogramData.bandsPerOctave, spectrogramData.numBands],
+    );
 
     /**
      * The main render loop, called on every frame.
