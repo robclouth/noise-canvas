@@ -3,7 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import { CommonUniforms, defaultValues } from "@renderer/effects/base-effect";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { ContinuousNumberParameter } from "@renderer/types";
-import { forwardRef, memo, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { ShaderMaterial, UniformsUtils } from "three";
 import { effects } from "../effects";
@@ -11,6 +11,7 @@ import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { readRenderTargetPixelsAsync } from "../lib/async-readpixels";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
+import { getUndoManager } from "../lib/undo-manager";
 import { unitsToUv } from "../lib/utils";
 import { copyMaterial } from "./copy-material";
 
@@ -198,8 +199,11 @@ export const FileRenderer = memo(
     const fboDataCache = useRef<Float32Array | null>(null);
     const fboDataDirty = useRef(true);
 
-    // Effect to create and manage spectrogram textures
-    useEffect(() => {
+    /**
+     * Creates DataTextures from spectrogram data.
+     * Used both on initial load and when reloading textures.
+     */
+    const createTextures = useCallback(() => {
       const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
 
       const packed = new THREE.DataTexture(packedData, textureWidth, textureHeight, THREE.RGBAFormat, THREE.FloatType);
@@ -219,6 +223,21 @@ export const FileRenderer = memo(
       meta.minFilter = THREE.NearestFilter;
       meta.magFilter = THREE.NearestFilter;
       meta.needsUpdate = true;
+
+      return { packed, inverse, meta };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+      spectrogramData.packedData,
+      spectrogramData.inverseMap,
+      spectrogramData.metadata,
+      spectrogramData.textureWidth,
+      spectrogramData.textureHeight,
+      spectrogramData.numBands,
+    ]);
+
+    // Effect to create and manage spectrogram textures
+    useEffect(() => {
+      const { packed, inverse, meta } = createTextures();
 
       setPackedDataTex(packed);
       setOriginalPackedDataTex(packed.clone());
@@ -240,15 +259,7 @@ export const FileRenderer = memo(
         setInverseMapTex(null);
         setMetadataTex(null);
       };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [
-      spectrogramData.packedData,
-      spectrogramData.inverseMap,
-      spectrogramData.metadata,
-      spectrogramData.textureWidth,
-      spectrogramData.textureHeight,
-      spectrogramData.numBands,
-    ]);
+    }, [createTextures]);
 
     /**
      * Helper function to calculate source offset based on position mode.
@@ -399,9 +410,11 @@ export const FileRenderer = memo(
         // Invalidate cache since FBO has been initialized
         fboDataDirty.current = true;
 
-        // Note: Initial undo state is now handled by the UndoManager directly
-        // when user makes first edit, not on initialization
         state.synthesizeFilePath(filePath);
+
+        const undoManager = getUndoManager(filePath);
+        undoManager.addState(spectrogramData.packedData, filePath);
+
         invalidate(); // Trigger another render to update display
         return;
       }
@@ -868,32 +881,14 @@ export const FileRenderer = memo(
      * Used when the file is re-analyzed with different parameters.
      */
     const reloadTextures = () => {
-      const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
-
       // Dispose old textures
       if (packedDataTex) packedDataTex.dispose();
       if (originalPackedDataTex) originalPackedDataTex.dispose();
       if (inverseMapTex) inverseMapTex.dispose();
       if (metadataTex) metadataTex.dispose();
 
-      // Create new textures
-      const packed = new THREE.DataTexture(packedData, textureWidth, textureHeight, THREE.RGBAFormat, THREE.FloatType);
-      packed.internalFormat = "RGBA32F";
-      packed.minFilter = THREE.NearestFilter;
-      packed.magFilter = THREE.NearestFilter;
-      packed.needsUpdate = true;
-
-      const inverse = new THREE.DataTexture(inverseMap, textureWidth, textureHeight, THREE.RGFormat, THREE.FloatType);
-      inverse.internalFormat = "RG32F";
-      inverse.minFilter = THREE.NearestFilter;
-      inverse.magFilter = THREE.NearestFilter;
-      inverse.needsUpdate = true;
-
-      const meta = new THREE.DataTexture(metadata, numBands, 1, THREE.RGBFormat, THREE.FloatType);
-      meta.internalFormat = "RGB32F";
-      meta.minFilter = THREE.NearestFilter;
-      meta.magFilter = THREE.NearestFilter;
-      meta.needsUpdate = true;
+      // Create new textures using shared helper
+      const { packed, inverse, meta } = createTextures();
 
       setPackedDataTex(packed);
       setOriginalPackedDataTex(packed.clone());
