@@ -15,8 +15,8 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords) {
         float offsetV = float(i) / destBandCount;
         
         // Sample the source spectrogram at the offset position
-        vec4 sampleColor = getSourceSample(coords.source + vec2(0.0, -offsetV));
-        
+        vec4 sampleColor = getSourceSample(coords.source + vec2(0.0, offsetV));
+
         // Get the corresponding weight from the kernel texture
         float kernelUvX = (float(i) + float(radius)) / float(kernelSize);
         float kernelWeight = texture2D(harmonicsKernel, vec2(kernelUvX, 0.5)).r;

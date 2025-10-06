@@ -32,9 +32,10 @@ function App(): React.JSX.Element {
     if (process.env.NODE_ENV === "development") {
       const { openFilePath, openFilePaths } = useStore.getState();
       if (openFilePaths.length === 0) {
-        openFilePath(
-          "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
-        );
+        // openFilePath(
+        //   "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
+        // );
+        openFilePath("/Users/rob/Desktop/up-tones.wav");
       }
     }
 
