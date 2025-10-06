@@ -1,5 +1,6 @@
-import { app, BrowserWindow, Menu } from "electron";
-import { saveAudioFile } from "./audio2";
+import { app, BrowserWindow, dialog, Menu } from "electron";
+import { allowedExtensions } from "./audio-analysis";
+import { webContentsSend } from "./types";
 
 export function createMenu(window: BrowserWindow) {
   const template: (Electron.MenuItemConstructorOptions | Electron.MenuItem)[] = [
@@ -9,15 +10,28 @@ export function createMenu(window: BrowserWindow) {
         {
           label: "Open...",
           accelerator: "CmdOrCtrl+O",
-          click: () => {
-            window.webContents.send("open-and-analyze");
+          click: async () => {
+            const result = await dialog.showOpenDialog(window, {
+              properties: ["openFile"],
+              filters: [
+                {
+                  name: "Audio Files",
+                  extensions: allowedExtensions,
+                },
+                { name: "All Files", extensions: ["*"] },
+              ],
+            });
+
+            if (!result.canceled && result.filePaths.length > 0) {
+              webContentsSend(window, "open-file", result.filePaths[0]);
+            }
           },
         },
         {
           label: "Save",
           accelerator: "CmdOrCtrl+S",
           click: () => {
-            saveAudioFile(window);
+            webContentsSend(window, "save-active-file");
           },
         },
         { type: "separator" },
@@ -25,14 +39,14 @@ export function createMenu(window: BrowserWindow) {
           label: "Close Active",
           accelerator: "CmdOrCtrl+W",
           click: () => {
-            window.webContents.send("close-active-file");
+            webContentsSend(window, "close-active-file");
           },
         },
         {
           label: "Close All",
           accelerator: "CmdOrCtrl+Shift+W",
           click: () => {
-            window.webContents.send("close-all-files");
+            webContentsSend(window, "close-all-files");
           },
         },
         { type: "separator" },
@@ -47,7 +61,7 @@ export function createMenu(window: BrowserWindow) {
           accelerator: "CmdOrCtrl+Z",
           enabled: false,
           click: () => {
-            window.webContents.send("undo");
+            webContentsSend(window, "undo");
           },
           id: "undo",
         },
@@ -56,7 +70,7 @@ export function createMenu(window: BrowserWindow) {
           accelerator: "Shift+CmdOrCtrl+Z",
           enabled: false,
           click: () => {
-            window.webContents.send("redo");
+            webContentsSend(window, "redo");
           },
           id: "redo",
         },
@@ -64,13 +78,13 @@ export function createMenu(window: BrowserWindow) {
         {
           label: "Restore Original",
           click: () => {
-            window.webContents.send("restore-original");
+            webContentsSend(window, "restore-original");
           },
         },
         {
           label: "Re-analyze Active File",
           click: () => {
-            window.webContents.send("reanalyze-active-file");
+            webContentsSend(window, "reanalyze-active-file");
           },
         },
       ],

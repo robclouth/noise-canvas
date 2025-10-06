@@ -4,9 +4,11 @@ import ffprobePath from "ffprobe-static";
 import ffmpeg from "fluent-ffmpeg";
 import { join } from "path";
 import { Writable } from "stream";
-import type { GaboratorAnalysisResult, GaboratorParams } from "./types";
+import type { AnalysisParams, GaboratorAnalysisResult } from "./types";
 
 let gaborator: any = null;
+
+export const allowedExtensions = ["wav", "mp3", "ogg", "flac", "m4a", "aac", "wma", "aiff", "ape", "wv", "mka"];
 
 export function getGaboratorPath(): string {
   // Check if we're running from an asar archive (packaged app)
@@ -21,7 +23,7 @@ export function getGaboratorPath(): string {
   }
 }
 
-export function loadGaborator() {
+export function init() {
   if (!gaborator) {
     const path = getGaboratorPath();
     console.log("Loading gaborator from:", path);
@@ -41,8 +43,8 @@ export function setupFfmpeg() {
   ffmpeg.setFfprobePath(correctFfprobePath);
 }
 
-export async function analyzeAudio(filePath: string, params: GaboratorParams) {
-  const gab = loadGaborator();
+export async function analyze(filePath: string, params: AnalysisParams) {
+  const gab = init();
   setupFfmpeg();
 
   const metadata = await new Promise<ffmpeg.FfprobeData>((resolve, reject) => {
@@ -61,6 +63,10 @@ export async function analyzeAudio(filePath: string, params: GaboratorParams) {
   const codec = audioStreamInfo.codec_name || "pcm_s32le";
   const sampleRate = audioStreamInfo.sample_rate;
   const channels = audioStreamInfo.channels || 1;
+
+  if (!allowedExtensions.includes(format.toLowerCase())) {
+    throw new Error(`Unsupported file format: ${format}`);
+  }
 
   const concatenatedBuffer = await new Promise<Buffer>((resolve, reject) => {
     const audioChunks: Buffer[] = [];
@@ -99,13 +105,13 @@ export async function analyzeAudio(filePath: string, params: GaboratorParams) {
   };
 }
 
-export async function synthesizeAudio(
+export async function synthesize(
   processedData: Float32Array,
   analysisMetadata: any,
   sampleRate: number,
-  params: GaboratorParams,
+  params: AnalysisParams,
   normalize: boolean,
 ): Promise<Float32Array[]> {
-  const gab = loadGaborator();
+  const gab = init();
   return await gab.synthesize(processedData, analysisMetadata, sampleRate, params, normalize);
 }

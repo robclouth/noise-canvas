@@ -1,6 +1,5 @@
 import { openFiles, useStore } from "@/store";
 import { useFrame } from "@react-three/fiber";
-import { runSynthesis } from "@renderer/audio-manager";
 import { CommonUniforms, defaultValues } from "@renderer/effects/base-effect";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { ContinuousNumberParameter } from "@renderer/types";
@@ -400,8 +399,9 @@ export const FileRenderer = memo(
         // Invalidate cache since FBO has been initialized
         fboDataDirty.current = true;
 
-        window.api.addUndoState({ data: spectrogramData.packedData.buffer, filePath });
-        runSynthesis(filePath);
+        // Note: Initial undo state is now handled by the UndoManager directly
+        // when user makes first edit, not on initialization
+        state.synthesizeFilePath(filePath);
         invalidate(); // Trigger another render to update display
         return;
       }
@@ -860,7 +860,7 @@ export const FileRenderer = memo(
       fboDataDirty.current = true;
 
       invalidateRef.current();
-      runSynthesis(filePath);
+      useStore.getState().synthesizeFilePath(filePath);
     };
 
     /**

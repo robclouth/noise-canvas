@@ -3,7 +3,6 @@ import { app, BrowserWindow, Menu, shell } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS } from "electron-devtools-installer";
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
-import { registerAudioIpcHandlers, setupAudio } from "./lib/audio2";
 import { createMenu } from "./lib/menu";
 import { ipcMainOn, webContentsSend } from "./lib/types";
 
@@ -95,12 +94,9 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window);
   });
 
-  setupAudio();
   createWindow();
 
   if (mainWindow) {
-    registerAudioIpcHandlers(mainWindow);
-
     await installExtension([REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS]);
 
     process.env.NODE_ENV === "development" &&

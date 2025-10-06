@@ -1,16 +1,16 @@
 import { BrushPanel } from "@/components/layout/brush-panel";
-import { useStore } from "@/store";
+import { openFiles, useStore } from "@/store";
 import { Group, ScrollArea, Stack } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { Notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
 import { Canvas, RootState, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useRef } from "react";
-import { destroy, init } from "./api";
-import { togglePlayback } from "./audio-manager";
 import { CanvasPanel } from "./components/layout/canvas-panel";
 import { ControlsPanel } from "./components/layout/controls-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
+import { ipcOn } from "./lib/ipc";
+import { getUndoManager } from "./lib/undo-manager";
 
 type Invalidator = RootState["invalidate"];
 
@@ -26,9 +26,93 @@ function App(): React.JSX.Element {
   const invalidateRef = useRef<Invalidator | null>(null);
 
   useEffect(() => {
-    init();
+    const unsubscribers: (() => void)[] = [];
+
+    // Development file loading
+    if (process.env.NODE_ENV === "development") {
+      const { openFilePath, openFilePaths } = useStore.getState();
+      if (openFilePaths.length === 0) {
+        openFilePath(
+          "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
+        );
+      }
+    }
+
+    // Clear locked offset when switching away from offset mode
+    const unsubModeChange = useStore.subscribe(
+      (state) => state.sourcePositionMode.value,
+      (mode, prevMode) => {
+        if (prevMode === "offset" && mode !== "offset") {
+          useStore.getState().setLockedOffset(null);
+        }
+      },
+    );
+    unsubscribers.push(unsubModeChange);
+
+    // IPC event listeners - type-safe direct communication
+    const unsubOpenFile = ipcOn("open-file", async (_event, path) => {
+      const { openFilePath } = useStore.getState();
+      await openFilePath(path);
+    });
+    unsubscribers.push(unsubOpenFile);
+
+    const unsubSaveActiveFile = ipcOn("save-active-file", () => {
+      const { saveActiveFile } = useStore.getState();
+      saveActiveFile();
+    });
+    unsubscribers.push(unsubSaveActiveFile);
+
+    const unsubCloseActiveFile = ipcOn("close-active-file", () => {
+      const { activeFilePath, closeFilePath: closeFile } = useStore.getState();
+      if (activeFilePath) {
+        closeFile(activeFilePath);
+      }
+    });
+    unsubscribers.push(unsubCloseActiveFile);
+
+    const unsubCloseAllFiles = ipcOn("close-all-files", () => {
+      const { closeAllFilePaths } = useStore.getState();
+      closeAllFilePaths();
+    });
+    unsubscribers.push(unsubCloseAllFiles);
+
+    const unsubUndo = ipcOn("undo", async () => {
+      const { activeFilePath } = useStore.getState();
+      if (!activeFilePath) return;
+      const undoManager = getUndoManager(activeFilePath);
+      await undoManager.undo();
+    });
+    unsubscribers.push(unsubUndo);
+
+    const unsubRedo = ipcOn("redo", async () => {
+      const { activeFilePath } = useStore.getState();
+      if (!activeFilePath) return;
+      const undoManager = getUndoManager(activeFilePath);
+      await undoManager.redo();
+    });
+    unsubscribers.push(unsubRedo);
+
+    const unsubRestoreOriginal = ipcOn("restore-original", () => {
+      const { activeFilePath } = useStore.getState();
+      if (!activeFilePath) return;
+      const file = openFiles[activeFilePath];
+
+      if (!file?.rendererRef?.current) return;
+
+      file.rendererRef.current.restoreOriginal();
+    });
+    unsubscribers.push(unsubRestoreOriginal);
+
+    const unsubReanalyzeActiveFile = ipcOn("reanalyze-active-file", () => {
+      const { reanalyzeActiveFile } = useStore.getState();
+      reanalyzeActiveFile();
+    });
+    unsubscribers.push(unsubReanalyzeActiveFile);
+
     return () => {
-      destroy();
+      unsubscribers.forEach((unsub) => unsub());
+      const { closeAllFilePaths } = useStore.getState();
+      closeAllFilePaths();
     };
   }, []);
 
@@ -67,7 +151,7 @@ function App(): React.JSX.Element {
       !(event.target instanceof HTMLTextAreaElement)
     ) {
       event.preventDefault();
-      togglePlayback();
+      useStore.getState().togglePlayback();
     }
 
     // Toggle set position mode with Control key

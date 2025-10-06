@@ -4,6 +4,7 @@ import { produce } from "immer";
 import { startCase } from "lodash-es";
 import { Vector2 } from "three";
 import { ScaleType } from "tonal";
+import * as Tone from "tone";
 import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
 import {
@@ -27,7 +28,6 @@ import {
   OpenFile,
   OptionsParameter,
 } from "./types";
-export const openFiles: Record<string, OpenFile> = {};
 
 type Enumerate<N extends number, Acc extends number[] = []> = Acc["length"] extends N
   ? Acc[number]
@@ -164,14 +164,6 @@ export type State = {
   harmonicsFalloff: ContinuousNumberParameter;
   harmonicsOddEven: ContinuousNumberParameter;
 
-  // Audio Playback
-  isPlaying: boolean;
-  setIsPlaying: (isPlaying: boolean) => void;
-  loop: boolean;
-  setLoop: (loop: boolean) => void;
-  playbackTime: number;
-  setPlaybackTime: (playbackTime: number) => void;
-
   // UI State
   mousePos: Vector2 | null;
   setMousePos: (mousePos: Vector2 | null) => void;
@@ -181,9 +173,11 @@ export type State = {
   // Files
   openFilePaths: string[];
   openFilePath: (filePath: string) => Promise<void>;
+  saveActiveFile: () => void;
   closeFilePath: (filePath: string) => void;
   closeAllFilePaths: () => void;
   reanalyzeActiveFile: () => Promise<void>;
+  synthesizeFilePath: (filePath: string) => Promise<void>;
   audioBuffers: Record<string, AudioBuffer>;
   setAudioBuffers: (audioBuffers: Record<string, AudioBuffer>) => void;
   filesBpm: Record<string, number>;
@@ -194,6 +188,16 @@ export type State = {
   setActiveFilePath: (activeFilePath: string | null) => void;
   sourceFile: { path: string; mode: "current" | "original" } | null;
   setSourceFile: (sourceFile: { path: string; mode: "current" | "original" } | null) => void;
+
+  // Audio Playback
+  isPlaying: boolean;
+  setIsPlaying: (isPlaying: boolean) => void;
+  loop: boolean;
+  setLoop: (loop: boolean) => void;
+  playbackTime: number;
+  setPlaybackTime: (playbackTime: number) => void;
+  togglePlayback: () => Promise<void>;
+  stopAudio: () => void;
 } & ModulatorAmountParameters &
   ModulatorParameters;
 
@@ -396,6 +400,10 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
   }
   return params;
 }
+
+export const openFiles: Record<string, OpenFile> = {};
+
+export const player = new Tone.Player().toDestination();
 
 export const useStore = create<State>()(
   subscribeWithSelector(
@@ -1008,7 +1016,7 @@ export const useStore = create<State>()(
             const fileAlreadyOpen = state.openFilePaths.includes(filePath);
             if (!fileAlreadyOpen) {
               console.log("Starting analysis...");
-              const result = await window.gaborator!.analyze(filePath, {
+              const result = await window.audioAnalysis.analyze(filePath, {
                 bandsPerOctave: state.bandsPerOctave.value,
                 minFreq: state.minFreq.value,
               });
@@ -1061,6 +1069,12 @@ export const useStore = create<State>()(
             }
             return state;
           },
+          saveActiveFile: () => {
+            const state = get();
+            if (!state.activeFilePath) return;
+            const file = openFiles[state.activeFilePath];
+            if (!file) return;
+          },
           closeFilePath: (filePath: string) =>
             set(
               produce((state: State) => {
@@ -1092,6 +1106,143 @@ export const useStore = create<State>()(
               sourceFile: null,
             });
           },
+          synthesizeFilePath: async (filePath: string) => {
+            const state = get();
+            if (!state.activeFilePath) return;
+
+            try {
+              const totalStart = performance.now();
+              console.log("runSynthesis");
+              const { normalize, bandsPerOctave, minFreq, isPlaying, loop } = useStore.getState();
+              const file = openFiles[filePath];
+              if (!file || !file.rendererRef?.current) {
+                return;
+              }
+
+              const originalAnalysis = file.spectrogramData;
+
+              // Assemble the payload for the main process
+              const fboData = await file.rendererRef.current.getFBOData();
+              const payload = {
+                processedData: fboData.buffer,
+                analysisMetadata: {
+                  numFrames: originalAnalysis.numFrames,
+                  numChannels: originalAnalysis.numChannels,
+                  numBands: originalAnalysis.numBands,
+                  ...originalAnalysis.synthesisMetadata,
+                },
+              };
+
+              const analysisParams = {
+                bandsPerOctave: bandsPerOctave.value,
+                minFreq: minFreq.value,
+              };
+
+              const synthesisStart = performance.now();
+              // Use direct gaborator API (no IPC transfer)
+              if (!window.audioAnalysis) {
+                throw new Error("Direct gaborator API not available. Make sure contextIsolation is disabled.");
+              }
+
+              const processedDataArray = new Float32Array(
+                payload.processedData,
+                0,
+                payload.processedData.byteLength / Float32Array.BYTES_PER_ELEMENT,
+              );
+
+              const audioBufferChannels = await window.audioAnalysis.synthesize(
+                processedDataArray,
+                payload.analysisMetadata,
+                originalAnalysis.sampleRate,
+                analysisParams,
+                normalize.value,
+              );
+              const synthesisTime = performance.now() - synthesisStart;
+              console.log("Direct synthesis took:", synthesisTime.toFixed(2), "ms");
+
+              if (audioBufferChannels.length === 0) {
+                throw new Error("Synthesis returned no audio channels.");
+              }
+
+              const numChannels = audioBufferChannels.length;
+              const numFrames = audioBufferChannels[0].length;
+
+              const audioContext = Tone.getContext().rawContext;
+              const audioBuffer = audioContext.createBuffer(numChannels, numFrames, originalAnalysis.sampleRate);
+
+              // Copy channels in a non-blocking way using async iteration
+              const copyStart = performance.now();
+              await new Promise<void>((resolve) => {
+                let channelIndex = 0;
+
+                const copyNextChannel = () => {
+                  if (channelIndex < numChannels) {
+                    // Convert Buffer to Float32Array efficiently
+                    const channelBuffer = audioBufferChannels[channelIndex] as any;
+                    let channelData: Float32Array;
+
+                    if (channelBuffer instanceof Float32Array) {
+                      channelData = channelBuffer;
+                    } else if (ArrayBuffer.isView(channelBuffer)) {
+                      // It's a Buffer or typed array view - create a view without copying
+                      channelData = new Float32Array(
+                        channelBuffer.buffer as ArrayBuffer,
+                        channelBuffer.byteOffset as number,
+                        (channelBuffer.byteLength as number) / Float32Array.BYTES_PER_ELEMENT,
+                      );
+                    } else {
+                      // Fallback for plain array
+                      channelData = new Float32Array(channelBuffer);
+                    }
+
+                    audioBuffer.copyToChannel(channelData as Float32Array<ArrayBuffer>, channelIndex);
+                    channelIndex++;
+
+                    // Yield to the event loop between channels
+                    setTimeout(copyNextChannel, 0);
+                  } else {
+                    resolve();
+                  }
+                };
+
+                copyNextChannel();
+              });
+              const copyTime = performance.now() - copyStart;
+              console.log("Channel copy took:", copyTime.toFixed(2), "ms");
+
+              file.audioBuffer = audioBuffer;
+
+              if (isPlaying && state.activeFilePath && state.activeFilePath === filePath) {
+                const transport = Tone.getTransport();
+                let currentTime = transport.seconds;
+                const newDuration = audioBuffer.duration;
+
+                if (loop) {
+                  currentTime %= newDuration;
+                } else if (currentTime >= newDuration) {
+                  state.stopAudio();
+                  return;
+                }
+
+                transport.cancel(0);
+
+                player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
+                player.loop = loop;
+
+                if (!loop) {
+                  transport.scheduleOnce(() => {
+                    state.stopAudio();
+                  }, newDuration);
+                }
+                player.seek(currentTime);
+              }
+
+              const totalTime = performance.now() - totalStart;
+              console.log("Total synthesis took:", totalTime.toFixed(2), "ms");
+            } catch (error) {
+              console.error("Error running synthesis:", error);
+            }
+          },
           reanalyzeActiveFile: () => {
             const state = get();
             if (!state.activeFilePath) return;
@@ -1110,7 +1261,7 @@ export const useStore = create<State>()(
               onConfirm: async () => {
                 if (!state.activeFilePath) return;
 
-                const result = await window.gaborator!.analyze(state.activeFilePath, {
+                const result = await window.audioAnalysis.analyze(state.activeFilePath, {
                   bandsPerOctave: state.bandsPerOctave.value,
                   minFreq: state.minFreq.value,
                 });
@@ -1180,12 +1331,44 @@ export const useStore = create<State>()(
           setActiveFilePath: (activeFilePath) => set({ activeFilePath }),
           sourceFile: null,
           setSourceFile: (sourceFile) => set({ sourceFile }),
+          togglePlayback: async () => {
+            const { isPlaying, activeFilePath, loop } = get();
+            if (isPlaying) {
+              const transport = Tone.getTransport();
+              transport.stop();
+              transport.cancel(0);
+
+              return set({ playbackTime: 0, isPlaying: false });
+            }
+            const file = activeFilePath ? openFiles[activeFilePath] : undefined;
+            const audioBuffer = file?.audioBuffer;
+
+            if (audioBuffer) {
+              if (Tone.getContext().rawContext.state !== "running") {
+                await Tone.start();
+              }
+              player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
+              player.loop = loop;
+              player.sync().start(0);
+
+              const transport = Tone.getTransport();
+
+              transport.start();
+
+              // updatePlaybackTime();
+              return set({ playbackTime: 0, isPlaying: true });
+            } else {
+              console.error("No audio buffer available to play.");
+              return;
+            }
+          },
           isPlaying: false,
           setIsPlaying: (isPlaying) => set({ isPlaying }),
           loop: false,
           setLoop: (loop) => set({ loop }),
           playbackTime: 0,
           setPlaybackTime: (playbackTime) => set({ playbackTime }),
+
           mousePos: null,
           setMousePos: (mousePos) => set({ mousePos }),
           hoveredFilePath: null,

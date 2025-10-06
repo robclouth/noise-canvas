@@ -1,8 +1,8 @@
 // Direct undo manager for renderer (no IPC)
 // Uses direct access to fs, compression, and path utilities
 
-import { runSynthesis } from "@renderer/audio-manager";
-import { openFiles } from "@renderer/store";
+import { openFiles, useStore } from "@renderer/store";
+import { ipcSend } from "./ipc";
 
 interface UndoState {
   dataPath: string;
@@ -29,7 +29,7 @@ class UndoManager {
   }
 
   private notifyStateChange() {
-    window.api.updateMenuState(this.canUndo(), this.canRedo());
+    ipcSend("update-menu-state", this.canUndo(), this.canRedo());
   }
 
   private async initTempDir() {
@@ -140,16 +140,18 @@ class UndoManager {
       this.notifyStateChange();
 
       openFiles[filePath]?.rendererRef?.current?.setFBOData(data);
-      runSynthesis(filePath);
+
+      const { synthesizeFilePath } = useStore.getState();
+      synthesizeFilePath(filePath);
     } catch (error) {
       console.error("Failed to undo:", error);
     }
   }
 
-  async redo(): Promise<{ data: Float32Array; filePath: string } | null> {
+  async redo(): Promise<void> {
     await this.init();
     if (!this.canRedo() || !window.nodeFs) {
-      return null;
+      return;
     }
 
     try {
@@ -174,10 +176,13 @@ class UndoManager {
 
       console.log(`Redo to state ${this.head} for ${filePath}`);
       this.notifyStateChange();
-      return { data, filePath };
+
+      openFiles[filePath]?.rendererRef?.current?.setFBOData(data);
+
+      const { synthesizeFilePath } = useStore.getState();
+      synthesizeFilePath(filePath);
     } catch (error) {
       console.error("Failed to redo:", error);
-      return null;
     }
   }
 

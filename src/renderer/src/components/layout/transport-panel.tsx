@@ -1,4 +1,3 @@
-import { togglePlayback } from "@/audio-manager";
 import { useStore } from "@/store";
 import { ActionIcon, Group, Text } from "@mantine/core";
 import { Play, Repeat, Square } from "lucide-react";
@@ -24,6 +23,7 @@ export const TransportPanel = memo(() => {
   const isPlaying = useStore((state) => state.isPlaying);
   const loop = useStore((state) => state.loop);
   const setLoop = useStore((state) => state.setLoop);
+  const togglePlayback = useStore((state) => state.togglePlayback);
   const timeRef = useRef<HTMLParagraphElement>(null);
   const playButtonRef = useRef<HTMLButtonElement>(null);
 

@@ -1,15 +1,18 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
-import { GaboratorParams, IpcApi } from "../main/lib/types";
+import type { IpcRenderer } from "electron";
+import { AnalysisParams } from "../main/lib/types";
+
+// Type definitions for window globals
 
 declare global {
   interface Window {
     electron: ElectronAPI;
-    api: IpcApi;
-    // Direct gaborator access (no IPC)
-    gaborator?: {
+    // Direct IPC access (exposed to avoid Vite bundling issues)
+    ipcRenderer: IpcRenderer;
+    audioAnalysis: {
       analyze: (
         filePath: string,
-        params: GaboratorParams,
+        params: AnalysisParams,
       ) => Promise<{
         data: Float32Array;
         inverseMap: Float32Array;
@@ -33,19 +36,17 @@ declare global {
         processedData: Float32Array,
         analysisMetadata: any,
         sampleRate: number,
-        params: GaboratorParams,
+        params: AnalysisParams,
         normalize: boolean,
       ) => Promise<Float32Array[]>;
-      loadGaborator: () => any;
+      init: () => void;
     };
-    // Direct compression access for undo
-    compression?: {
+    compression: {
       compress: (data: Buffer) => Buffer;
       uncompress: (data: Buffer) => Buffer;
     };
-    // Node.js utilities for direct access
-    nodeFs?: typeof import("fs/promises");
-    nodePath?: typeof import("path");
-    nodeOs?: typeof import("os");
+    nodeFs: typeof import("fs/promises");
+    nodePath: typeof import("path");
+    nodeOs: typeof import("os");
   }
 }

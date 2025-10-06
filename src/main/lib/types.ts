@@ -50,7 +50,7 @@ export interface SynthesisPayload {
   };
 }
 
-export type GaboratorParams = {
+export type AnalysisParams = {
   bandsPerOctave: number;
   minFreq: number;
 };
@@ -60,47 +60,15 @@ export interface UndoState {
   filePath: string;
 }
 
-export interface IpcApi {
-  onOpenFile: (callback: (path: string) => void) => () => void;
-  onOpenAndAnalyze: (callback: () => void) => () => void;
-  onAnalysisComplete: (callback: (payload: AnalysisPayloadForRenderer) => void) => () => void;
-  onAnalysisError: (callback: (error: string) => void) => () => void;
-  loadFile: (filePath: string, params: GaboratorParams) => void;
-  fileOpened: (filePath: string) => void;
-  fileClosed: (filePath: string) => void;
-  setActiveFile: (filePath: string | null) => void;
-  clearUndoState: () => void;
-  synthesizeAudio: (
-    payload: Omit<SynthesisPayload, "processedData"> & { processedData: ArrayBufferLike },
-    params: GaboratorParams,
-    normalize: boolean,
-  ) => Promise<Float32Array[]>;
-  openAndAnalyze: (params: GaboratorParams) => void;
-  reanalyzeCurrentFile: (params: GaboratorParams) => Promise<void>;
-  saveAudioData: (audioChannels: Float32Array[]) => Promise<void>;
-  setFileMetadata: (metadata: { sampleRate: number; channels: number; format: string; codec: string }) => void;
-  updateMenuState: (canUndo: boolean, canRedo: boolean) => void;
-  onUndo: (callback: () => void) => () => void;
-  onRedo: (callback: () => void) => () => void;
-  onRequestAudioForSaving: (callback: () => void) => () => void;
-  onCloseActiveFile: (callback: () => void) => () => void;
-  onCloseAllFiles: (callback: () => void) => () => void;
-  onRestoreOriginal: (callback: () => void) => () => void;
-  onReanalyzeActiveFile: (callback: () => void) => () => void;
-}
+// Legacy type kept for reference - no longer used
+// Renderer now uses ipcRenderer directly instead of this wrapper API
 
 export interface IpcMainHandlers {
-  "load-file": (event: Electron.IpcMainEvent, filePath: string, params: GaboratorParams) => void;
+  "load-file": (event: Electron.IpcMainEvent, filePath: string, params: AnalysisParams) => void;
   "add-undo-state": (event: Electron.IpcMainEvent, args: { data: Buffer; filePath: string }) => void;
   "clear-undo-state": (event: Electron.IpcMainEvent) => void;
-  "open-and-analyze": (event: Electron.IpcMainEvent, params: GaboratorParams) => void;
-  "reanalyze-current-file": (event: Electron.IpcMainInvokeEvent, params: GaboratorParams) => Promise<void>;
-  "synthesize-audio": (
-    event: Electron.IpcMainInvokeEvent,
-    payload: SynthesisPayload,
-    params: GaboratorParams,
-    normalize: boolean,
-  ) => Promise<Buffer[]>;
+  "open-and-analyze": (event: Electron.IpcMainEvent, params: AnalysisParams) => void;
+  "reanalyze-current-file": (event: Electron.IpcMainInvokeEvent, params: AnalysisParams) => Promise<void>;
   "save-audio-data": (event: Electron.IpcMainInvokeEvent, audioChannelsBuffers: Buffer[]) => Promise<void>;
   "set-file-metadata": (
     event: Electron.IpcMainEvent,
@@ -116,13 +84,12 @@ export interface IpcRendererEvents {
   "open-file": (path: string) => void;
   "analysis-complete": (payload: AnalysisPayloadForRenderer) => void;
   "analysis-error": (error: string) => void;
-  "request-audio-for-saving": () => void;
-  "apply-undo-state": (state: { filePath: string }) => void;
-  "apply-redo-state": (state: { filePath: string }) => void;
-  "undo-state-changed": (state: { canUndo: boolean; canRedo: boolean }) => void;
+  "save-active-file": () => void;
+  undo: () => void;
+  redo: () => void;
+  "restore-original": () => void;
   "close-active-file": () => void;
   "close-all-files": () => void;
-  "open-and-analyze": () => void;
   "reanalyze-active-file": () => void;
 }
 

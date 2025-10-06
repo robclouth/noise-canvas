@@ -2,7 +2,6 @@ import { openFiles, useStore } from "@/store";
 import { ActionIcon, Badge, Box, Button, Group, NumberInput } from "@mantine/core";
 import { MiddleTruncate } from "@re-dev/react-truncate";
 import { View } from "@react-three/drei";
-import { runSynthesis } from "@renderer/audio-manager";
 import { X } from "lucide-react";
 import { memo, MouseEventHandler, useCallback, useMemo, useRef } from "react";
 import { Vector2 } from "three";
@@ -329,8 +328,9 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = async (event) => {
     if (!isActive) return;
     if (event.button === 0 && rendererRef?.current) {
+      const { synthesizeFilePath, setBrushStartPosition } = useStore.getState();
       // Clear brush start position when stroke ends
-      useStore.getState().setBrushStartPosition(null);
+      setBrushStartPosition(null);
 
       // Left mouse button up - save undo state and run synthesis (no IPC)
       const data = await rendererRef.current.getFBOData();
@@ -339,7 +339,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
         await undoManager.addState(data, filePath);
 
         // Run synthesis now that the stroke is finished
-        runSynthesis(filePath);
+        synthesizeFilePath(filePath);
       }
     }
   };
