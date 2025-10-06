@@ -19,6 +19,8 @@ import {
   PITCH_VALUES_NO_FRACTIONS,
   SYNTHESIZE_TYPES,
 } from "./lib/constants";
+import { getPresetManager } from "./lib/preset-manager";
+import { BrushPreset, defaultPresets, PRESET_KEYS } from "./lib/presets";
 import { getUndoManager } from "./lib/undo-manager";
 import { Parameter } from "./Parameter";
 import {
@@ -199,7 +201,16 @@ export type State = {
   togglePlayback: () => Promise<void>;
   stopAudio: () => void;
 } & ModulatorAmountParameters &
-  ModulatorParameters;
+  ModulatorParameters & {
+    // Presets
+    currentPresetId: string | null;
+    availablePresets: BrushPreset[];
+    setCurrentPresetId: (presetId: string | null) => void;
+    loadPresets: () => Promise<void>;
+    loadPreset: (presetId: string) => void;
+    savePreset: (name: string, presetId?: string) => Promise<void>;
+    deletePreset: (presetId: string) => Promise<void>;
+  };
 
 // Helper type to extract keys of state that are parameters
 export type ParameterKey = keyof {
@@ -1374,6 +1385,90 @@ export const useStore = create<State>()(
             set((state) => ({
               sectionCollapsed: { ...state.sectionCollapsed, [section]: collapsed },
             })),
+
+          // Preset management
+          currentPresetId: "default",
+          availablePresets: [...defaultPresets],
+          setCurrentPresetId: (presetId) => set({ currentPresetId: presetId }),
+          loadPresets: async () => {
+            const presetManager = getPresetManager();
+            const presets = await presetManager.loadPresets();
+            set({ availablePresets: presets });
+          },
+          loadPreset: (presetId: string) => {
+            const state = get();
+            const preset = state.availablePresets.find((p) => p.id === presetId);
+            if (!preset) {
+              console.error("Preset not found:", presetId);
+              return;
+            }
+
+            // Dynamically build the update object from preset keys
+            const updates: any = { currentPresetId: presetId };
+
+            for (const key of PRESET_KEYS) {
+              const stateValue = state[key];
+              const presetValue = preset[key];
+
+              // For parameters (objects with .value), preserve the parameter structure
+              if (stateValue && typeof stateValue === "object" && "value" in stateValue) {
+                updates[key] = { ...stateValue, value: presetValue };
+              } else {
+                // For non-parameter values (effectOrder, effectsEnabled), just copy directly
+                updates[key] = presetValue;
+              }
+            }
+
+            set(updates);
+          },
+          savePreset: async (name: string, presetId?: string) => {
+            const state = get();
+            const presetManager = getPresetManager();
+
+            // Generate ID if not provided
+            const id = presetId || `preset-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+            // Dynamically build preset from current state
+            const preset: any = {
+              id,
+              name,
+              isDefault: false,
+            };
+
+            for (const key of PRESET_KEYS) {
+              const stateValue = state[key];
+              // For parameters (objects with .value), extract the value
+              if (stateValue && typeof stateValue === "object" && "value" in stateValue) {
+                preset[key] = stateValue.value;
+              } else {
+                // For non-parameter values (effectOrder, effectsEnabled), copy directly
+                preset[key] = stateValue;
+              }
+            }
+
+            // Save to file
+            await presetManager.savePreset(preset as BrushPreset);
+
+            // Reload presets
+            await state.loadPresets();
+
+            // Set as current preset
+            set({ currentPresetId: id });
+          },
+          deletePreset: async (presetId: string) => {
+            const state = get();
+            const presetManager = getPresetManager();
+
+            await presetManager.deletePreset(presetId);
+
+            // Reload presets
+            await state.loadPresets();
+
+            // If we deleted the current preset, switch to default
+            if (state.currentPresetId === presetId) {
+              set({ currentPresetId: "default" });
+            }
+          },
         } satisfies State;
         return initialState;
       },

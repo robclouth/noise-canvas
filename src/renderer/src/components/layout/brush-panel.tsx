@@ -1,6 +1,7 @@
 import { useStore } from "@/store";
 import { Stack } from "@mantine/core";
 import { ParameterControl } from "../controls/parameter-control";
+import { PresetSelector } from "../controls/preset-selector";
 import { SourcePositionControl } from "../controls/source-position-control";
 import { EffectsList } from "../effects-list";
 import { ModulatorView } from "../modulator-view";
@@ -11,6 +12,9 @@ export function BrushPanel() {
 
   return (
     <Stack p="xs">
+      <Section label="Preset">
+        <PresetSelector />
+      </Section>
       <Section label="Size">
         <ParameterControl paramKey="brushWidthBeats" disabled={brushSizeLockedToGrid} />
         <ParameterControl paramKey="brushHeightSemis" disabled={brushSizeLockedToGrid} />
