@@ -5,23 +5,17 @@ import { ParameterControl } from "../controls/parameter-control";
 import { Section } from "../section";
 
 export function ControlsPanel() {
+  const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid.value);
+  const gridSizeBeats = useStore((state) => state.gridSizeBeats.value);
+  const gridSizeSemis = useStore((state) => state.gridSizeSemis.value);
+
   useEffect(() => {
-    const unsubscribe = useStore.subscribe(
-      (state) => ({
-        brushSizeLockedToGrid: state.brushSizeLockedToGrid.value,
-        gridSizeBeats: state.gridSizeBeats.value,
-        gridSizeSemis: state.gridSizeSemis.value,
-      }),
-      ({ brushSizeLockedToGrid, gridSizeBeats, gridSizeSemis }) => {
-        if (brushSizeLockedToGrid) {
-          const state = useStore.getState();
-          state.brushWidthBeats.setValue(gridSizeBeats);
-          state.brushHeightSemis.setValue(gridSizeSemis);
-        }
-      },
-    );
-    return () => unsubscribe();
-  }, []);
+    if (brushSizeLockedToGrid) {
+      const state = useStore.getState();
+      state.brushWidthBeats.setValue(gridSizeBeats);
+      state.brushHeightSemis.setValue(gridSizeSemis);
+    }
+  }, [brushSizeLockedToGrid, gridSizeBeats, gridSizeSemis]);
 
   return (
     <Stack h="100%" w="100%" p="xs">
