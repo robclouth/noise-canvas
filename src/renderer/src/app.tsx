@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { CanvasPanel } from "./components/layout/canvas-panel";
 import { ControlsPanel } from "./components/layout/controls-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
-import { ipcOn } from "./lib/ipc";
+import { ipcOn, ipcSend } from "./lib/ipc";
 import { getUndoManager } from "./lib/undo-manager";
 
 type Invalidator = RootState["invalidate"];
@@ -32,10 +32,10 @@ function App(): React.JSX.Element {
     if (process.env.NODE_ENV === "development") {
       const { openFilePath, openFilePaths } = useStore.getState();
       if (openFilePaths.length === 0) {
-        openFilePath(
-          "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
-        );
-        // openFilePath("/Users/rob/Desktop/up-tones.wav");
+        // openFilePath(
+        //   "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
+        // );
+        openFilePath("/Users/rob/Desktop/up-tones.wav");
       }
     }
 
@@ -50,6 +50,18 @@ function App(): React.JSX.Element {
     );
     unsubscribers.push(unsubModeChange);
 
+    // Update save menu state when active file's dirty state changes
+    const unsubDirtyState = useStore.subscribe(
+      (state) => {
+        const activeFilePath = state.activeFilePath;
+        return activeFilePath ? state.filesDirty[activeFilePath] || false : false;
+      },
+      (isDirty) => {
+        ipcSend("update-save-state", isDirty);
+      },
+    );
+    unsubscribers.push(unsubDirtyState);
+
     // IPC event listeners - type-safe direct communication
     const unsubOpenFile = ipcOn("open-file", async (_event, path) => {
       const { openFilePath } = useStore.getState();
@@ -62,6 +74,18 @@ function App(): React.JSX.Element {
       saveActiveFile();
     });
     unsubscribers.push(unsubSaveActiveFile);
+
+    const unsubSaveActiveFileAs = ipcOn("save-active-file-as", () => {
+      const { saveActiveFileAs } = useStore.getState();
+      saveActiveFileAs();
+    });
+    unsubscribers.push(unsubSaveActiveFileAs);
+
+    const unsubSaveActiveFileVersion = ipcOn("save-active-file-version", () => {
+      const { saveActiveFileVersion } = useStore.getState();
+      saveActiveFileVersion();
+    });
+    unsubscribers.push(unsubSaveActiveFileVersion);
 
     const unsubCloseActiveFile = ipcOn("close-active-file", () => {
       const { activeFilePath, closeFilePath: closeFile } = useStore.getState();

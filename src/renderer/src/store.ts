@@ -1,5 +1,6 @@
 import { deepMerge } from "@mantine/core";
 import { modals } from "@mantine/modals";
+import { notifications } from "@mantine/notifications";
 import { produce } from "immer";
 import { startCase } from "lodash-es";
 import { Vector2 } from "three";
@@ -136,6 +137,10 @@ export type State = {
   setFileZoom: (filePath: string, zoom: number) => void;
   setFileOffset: (filePath: string, offset: number) => void;
 
+  // Per-file Dirty State (not persisted)
+  filesDirty: Record<string, boolean>;
+  setFileDirty: (filePath: string, dirty: boolean) => void;
+
   // Display Controls
   displayMinDb: ContinuousNumberParameter;
   displayMaxDb: ContinuousNumberParameter;
@@ -197,7 +202,9 @@ export type State = {
   // Files
   openFilePaths: string[];
   openFilePath: (filePath: string) => Promise<void>;
-  saveActiveFile: () => void;
+  saveActiveFile: () => Promise<void>;
+  saveActiveFileAs: () => Promise<void>;
+  saveActiveFileVersion: () => Promise<void>;
   closeFilePath: (filePath: string) => void;
   closeAllFilePaths: () => void;
   reanalyzeActiveFile: () => Promise<void>;
@@ -671,6 +678,13 @@ export const useStore = create<State>()(
           setFileOffset: (filePath: string, offset: number) => {
             set((state) => ({
               filesOffset: { ...state.filesOffset, [filePath]: Math.max(0, Math.min(1, offset)) },
+            }));
+          },
+          // Per-file dirty state (not persisted)
+          filesDirty: {},
+          setFileDirty: (filePath: string, dirty: boolean) => {
+            set((state) => ({
+              filesDirty: { ...state.filesDirty, [filePath]: dirty },
             }));
           },
           ...createParameter(
@@ -1222,11 +1236,190 @@ export const useStore = create<State>()(
             }
             return state;
           },
-          saveActiveFile: () => {
+          saveActiveFile: async () => {
             const state = get();
             if (!state.activeFilePath) return;
             const file = openFiles[state.activeFilePath];
-            if (!file) return;
+            if (!file || !file.audioBuffer) return;
+
+            const filePath = state.activeFilePath;
+            const fileName = window.nodePath.basename(filePath);
+
+            // Show confirmation modal
+            return new Promise<void>((resolve) => {
+              modals.openConfirmModal({
+                title: "Overwrite File",
+                children: `Do you want to overwrite "${fileName}"?`,
+                labels: { confirm: "Overwrite", cancel: "Cancel" },
+                confirmProps: { color: "red", size: "xs" },
+                cancelProps: { size: "xs" },
+                styles: {
+                  title: { fontSize: "var(--mantine-font-size-sm)", fontWeight: 600 },
+                  body: { fontSize: "var(--mantine-font-size-sm)" },
+                },
+                onConfirm: async () => {
+                  try {
+                    // Extract audio channels from AudioBuffer
+                    const numChannels = file.audioBuffer!.numberOfChannels;
+                    const audioChannels: Float32Array[] = [];
+                    for (let i = 0; i < numChannels; i++) {
+                      audioChannels.push(file.audioBuffer!.getChannelData(i));
+                    }
+
+                    // Determine format from file extension
+                    const ext = window.nodePath.extname(filePath).slice(1).toLowerCase();
+                    const format = ext || "wav";
+
+                    // Export the audio
+                    await window.audioAnalysis.exportAudio(
+                      audioChannels,
+                      filePath,
+                      file.audioBuffer!.sampleRate,
+                      format,
+                    );
+
+                    // Mark as not dirty
+                    get().setFileDirty(filePath, false);
+                    console.log("File saved successfully:", filePath);
+
+                    // Show success notification
+                    notifications.show({
+                      title: "File saved",
+                      message: `Successfully saved ${fileName}`,
+                    });
+                  } catch (error) {
+                    console.error("Error saving file:", error);
+                    // Show error notification
+                    notifications.show({
+                      title: "Save failed",
+                      message: `Failed to save ${fileName}: ${error instanceof Error ? error.message : "Unknown error"}`,
+                      color: "red",
+                    });
+                  }
+                  resolve();
+                },
+                onCancel: () => resolve(),
+              });
+            });
+          },
+          saveActiveFileAs: async () => {
+            const state = get();
+            if (!state.activeFilePath) return;
+            const file = openFiles[state.activeFilePath];
+            if (!file || !file.audioBuffer) return;
+
+            const currentFilePath = state.activeFilePath;
+            const currentFileName = window.nodePath.basename(currentFilePath);
+            const currentDir = window.nodePath.dirname(currentFilePath);
+
+            // Show save dialog (we'll need to add this to IPC)
+            const result = await window.ipcRenderer.invoke("show-save-dialog", {
+              defaultPath: window.nodePath.join(currentDir, currentFileName),
+              filters: [
+                { name: "Audio Files", extensions: ["wav", "flac", "mp3"] },
+                { name: "All Files", extensions: ["*"] },
+              ],
+            });
+
+            if (result.canceled || !result.filePath) return;
+
+            const outputPath = result.filePath;
+
+            try {
+              // Extract audio channels from AudioBuffer
+              const numChannels = file.audioBuffer.numberOfChannels;
+              const audioChannels: Float32Array[] = [];
+              for (let i = 0; i < numChannels; i++) {
+                audioChannels.push(file.audioBuffer.getChannelData(i));
+              }
+
+              // Determine format from file extension
+              const ext = window.nodePath.extname(outputPath).slice(1).toLowerCase();
+              const format = ext || "wav";
+
+              // Export the audio
+              await window.audioAnalysis.exportAudio(audioChannels, outputPath, file.audioBuffer.sampleRate, format);
+
+              // Mark as not dirty
+              get().setFileDirty(currentFilePath, false);
+              console.log("File saved as:", outputPath);
+
+              // Show success notification
+              const savedFileName = window.nodePath.basename(outputPath);
+              notifications.show({
+                title: "File saved",
+                message: `Successfully saved as ${savedFileName}`,
+              });
+            } catch (error) {
+              console.error("Error saving file as:", error);
+              // Show error notification
+              notifications.show({
+                title: "Save failed",
+                message: `Failed to save file: ${error instanceof Error ? error.message : "Unknown error"}`,
+                color: "red",
+              });
+            }
+          },
+          saveActiveFileVersion: async () => {
+            const state = get();
+            if (!state.activeFilePath) return;
+            const file = openFiles[state.activeFilePath];
+            if (!file || !file.audioBuffer) return;
+
+            const currentFilePath = state.activeFilePath;
+            const dir = window.nodePath.dirname(currentFilePath);
+            const ext = window.nodePath.extname(currentFilePath);
+            const baseName = window.nodePath.basename(currentFilePath, ext);
+
+            // Check if filename ends with _NUMBER
+            const versionMatch = baseName.match(/^(.+)_(\d+)$/);
+            let newFileName: string;
+
+            if (versionMatch) {
+              // Increment existing version number
+              const nameWithoutVersion = versionMatch[1];
+              const currentVersion = parseInt(versionMatch[2], 10);
+              const newVersion = currentVersion + 1;
+              newFileName = `${nameWithoutVersion}_${newVersion}${ext}`;
+            } else {
+              // Add _1 to the filename
+              newFileName = `${baseName}_1${ext}`;
+            }
+
+            const outputPath = window.nodePath.join(dir, newFileName);
+
+            try {
+              // Extract audio channels from AudioBuffer
+              const numChannels = file.audioBuffer.numberOfChannels;
+              const audioChannels: Float32Array[] = [];
+              for (let i = 0; i < numChannels; i++) {
+                audioChannels.push(file.audioBuffer.getChannelData(i));
+              }
+
+              // Determine format from file extension
+              const format = ext.slice(1).toLowerCase() || "wav";
+
+              // Export the audio
+              await window.audioAnalysis.exportAudio(audioChannels, outputPath, file.audioBuffer.sampleRate, format);
+
+              // Mark as not dirty
+              get().setFileDirty(currentFilePath, false);
+              console.log("File version saved:", outputPath);
+
+              // Show success notification
+              notifications.show({
+                title: "Version saved",
+                message: `Successfully saved as ${newFileName}`,
+              });
+            } catch (error) {
+              console.error("Error saving file version:", error);
+              // Show error notification
+              notifications.show({
+                title: "Save failed",
+                message: `Failed to save version: ${error instanceof Error ? error.message : "Unknown error"}`,
+                color: "red",
+              });
+            }
           },
           closeFilePath: (filePath: string) =>
             set(
@@ -1368,6 +1561,9 @@ export const useStore = create<State>()(
               console.log("Channel copy took:", copyTime.toFixed(2), "ms");
 
               file.audioBuffer = audioBuffer;
+
+              // Mark file as dirty after synthesis
+              get().setFileDirty(filePath, true);
 
               if (isPlaying && state.activeFilePath && state.activeFilePath === filePath) {
                 const transport = Tone.getTransport();

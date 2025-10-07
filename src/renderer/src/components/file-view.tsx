@@ -30,7 +30,7 @@ function getResolutionLabel(bpo: number): string {
 }
 
 // Component to display filename with middle truncation
-const TruncatedFilename = memo(({ filePath }: { filePath: string }) => {
+const TruncatedFilename = memo(({ filePath, isDirty }: { filePath: string; isDirty: boolean }) => {
   const filename = filePath.split("/").pop() || filePath;
 
   return (
@@ -40,6 +40,7 @@ const TruncatedFilename = memo(({ filePath }: { filePath: string }) => {
         width: "100%",
         fontSize: "var(--mantine-font-size-sm)",
         fontWeight: 600,
+        fontStyle: isDirty ? "italic" : "normal",
         whiteSpace: "nowrap",
       }}
     >
@@ -133,6 +134,7 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
   const closeFilePath = useStore((state) => state.closeFilePath);
   const sourceFile = useStore((state) => state.sourceFile);
   const resolution = useStore((state) => state.filesResolution[filePath]);
+  const isDirty = useStore((state) => state.filesDirty[filePath] ?? false);
 
   const isSource = sourceFile?.path === filePath;
   const sourceMode = sourceFile?.mode ?? "current";
@@ -152,7 +154,7 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
       <Group gap="xs" style={{ minWidth: 0, flex: 1 }}>
         <Tooltip label={filePath}>
           <Box style={{ minWidth: 0, flex: 1 }}>
-            <TruncatedFilename filePath={filePath} />
+            <TruncatedFilename filePath={filePath} isDirty={isDirty} />
           </Box>
         </Tooltip>
         {resolution && (

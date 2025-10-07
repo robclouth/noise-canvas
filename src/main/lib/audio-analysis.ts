@@ -2,6 +2,8 @@
 import ffmpegPath from "ffmpeg-static";
 import ffprobePath from "ffprobe-static";
 import ffmpeg from "fluent-ffmpeg";
+import { unlinkSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import { Writable } from "stream";
 import type { AnalysisParams, GaboratorAnalysisResult } from "./types";
@@ -114,4 +116,78 @@ export async function synthesize(
 ): Promise<Float32Array[]> {
   const gab = init();
   return await gab.synthesize(processedData, analysisMetadata, sampleRate, params, normalize);
+}
+
+/**
+ * Export audio channels to a file using ffmpeg
+ * @param audioChannels Array of Float32Array channels
+ * @param outputPath Path to save the file
+ * @param sampleRate Sample rate of the audio
+ * @param format Output format (wav, flac, mp3, etc)
+ */
+export async function exportAudio(
+  audioChannels: Float32Array[],
+  outputPath: string,
+  sampleRate: number,
+  format: string = "wav",
+): Promise<void> {
+  setupFfmpeg();
+
+  const numChannels = audioChannels.length;
+  const numFrames = audioChannels[0].length;
+
+  // Interleave channels into a single buffer
+  const interleavedBuffer = Buffer.allocUnsafe(numChannels * numFrames * 4); // 4 bytes per float32
+  const interleavedView = new Float32Array(
+    interleavedBuffer.buffer,
+    interleavedBuffer.byteOffset,
+    numChannels * numFrames,
+  );
+
+  for (let frame = 0; frame < numFrames; frame++) {
+    for (let channel = 0; channel < numChannels; channel++) {
+      interleavedView[frame * numChannels + channel] = audioChannels[channel][frame];
+    }
+  }
+
+  // Write to a temporary raw file first, then convert with ffmpeg
+  const tempFile = join(tmpdir(), `audio-export-${Date.now()}.raw`);
+
+  return new Promise<void>((resolve, reject) => {
+    try {
+      // Write interleaved buffer to temp file
+      writeFileSync(tempFile, interleavedBuffer);
+
+      // Convert temp file to output format
+      ffmpeg(tempFile)
+        .inputFormat("f32le")
+        .inputOptions([`-ar ${sampleRate}`, `-ac ${numChannels}`])
+        .audioCodec(format === "wav" ? "pcm_f32le" : format === "flac" ? "flac" : "libmp3lame")
+        .toFormat(format)
+        .on("error", (err) => {
+          try {
+            unlinkSync(tempFile);
+          } catch {
+            // Ignore cleanup errors
+          }
+          reject(new Error(`FFmpeg export error: ${err.message}`));
+        })
+        .on("end", () => {
+          try {
+            unlinkSync(tempFile);
+          } catch {
+            // Ignore cleanup errors
+          }
+          resolve();
+        })
+        .save(outputPath);
+    } catch (error) {
+      try {
+        unlinkSync(tempFile);
+      } catch {
+        // Ignore cleanup errors
+      }
+      reject(error);
+    }
+  });
 }

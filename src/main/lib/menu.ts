@@ -30,8 +30,24 @@ export function createMenu(window: BrowserWindow) {
         {
           label: "Save",
           accelerator: "CmdOrCtrl+S",
+          enabled: false,
+          id: "save",
           click: () => {
             webContentsSend(window, "save-active-file");
+          },
+        },
+        {
+          label: "Save As...",
+          accelerator: "CmdOrCtrl+Shift+S",
+          click: () => {
+            webContentsSend(window, "save-active-file-as");
+          },
+        },
+        {
+          label: "Save Version",
+          accelerator: "CmdOrCtrl+Alt+S",
+          click: () => {
+            webContentsSend(window, "save-active-file-version");
           },
         },
         { type: "separator" },

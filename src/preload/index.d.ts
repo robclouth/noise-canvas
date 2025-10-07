@@ -39,6 +39,12 @@ declare global {
         params: AnalysisParams,
         normalize: boolean,
       ) => Promise<Float32Array[]>;
+      exportAudio: (
+        audioChannels: Float32Array[],
+        outputPath: string,
+        sampleRate: number,
+        format?: string,
+      ) => Promise<void>;
       init: () => void;
     };
     compression: {

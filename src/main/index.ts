@@ -1,5 +1,5 @@
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { app, BrowserWindow, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS } from "electron-devtools-installer";
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
@@ -144,6 +144,21 @@ ipcMainOn("update-menu-state", (_, canUndo: boolean, canRedo: boolean) => {
     const redoItem = menu.getMenuItemById("redo");
     if (redoItem) redoItem.enabled = canRedo;
   }
+});
+
+// Update save menu item based on dirty state from renderer
+ipcMainOn("update-save-state", (_, isDirty: boolean) => {
+  const menu = Menu.getApplicationMenu();
+  if (menu) {
+    const saveItem = menu.getMenuItemById("save");
+    if (saveItem) saveItem.enabled = isDirty;
+  }
+});
+
+// Handle save dialog from renderer
+ipcMain.handle("show-save-dialog", async (_event, options) => {
+  if (!mainWindow) return { canceled: true };
+  return await dialog.showSaveDialog(mainWindow, options);
 });
 
 app.on("will-quit", async () => {});
