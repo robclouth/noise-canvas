@@ -158,6 +158,7 @@ export const FileRenderer = memo(
           showSourceRectangle: { value: false },
           viewZoomPower: { value: 0.0 },
           viewOffset: { value: 0.0 },
+          wrapMode: { value: 0 },
         },
         vertexShader: passThroughVert,
         fragmentShader: displayFrag,
@@ -566,6 +567,7 @@ export const FileRenderer = memo(
           sourceOffsetX: { value: sourceOffsetUv.x },
           sourceOffsetY: { value: sourceOffsetUv.y },
           blendMode: { value: state.blendMode.value },
+          wrapMode: { value: state.brushWrapMode.value },
           modulators: {
             value: Array.from({ length: NUM_MODULATORS }).map((_, i) => {
               const modulatorPatternRate = unitsToUv(
@@ -775,6 +777,7 @@ export const FileRenderer = memo(
       displayMaterial.uniforms.showSourceRectangle.value = isSourceFile && isMouseOverAnyFile;
       displayMaterial.uniforms.viewZoomPower.value = viewZoomPower;
       displayMaterial.uniforms.viewOffset.value = viewOffset;
+      displayMaterial.uniforms.wrapMode.value = state.brushWrapMode.value;
 
       // Calculate and update grid values
       const gridSizeBeats = state.gridSizeBeats.value;

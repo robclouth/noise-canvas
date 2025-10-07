@@ -19,6 +19,7 @@ import {
   PITCH_VALUES,
   PITCH_VALUES_NO_FRACTIONS,
   SYNTHESIZE_TYPES,
+  WRAP_MODES,
 } from "./lib/constants";
 import { getPresetManager } from "./lib/preset-manager";
 import { BrushPreset, defaultPresets, PRESET_KEYS } from "./lib/presets";
@@ -117,6 +118,7 @@ export type State = {
   brushWidthBeats: DiscreteNumberParameter; // in beats
   brushHeightSemis: DiscreteNumberParameter; // in semitones
   brushSizeLockedToGrid: BooleanParameter;
+  brushWrapMode: OptionsParameter<number>;
 
   // Effect Order and Enabled States
   effectOrder: EffectType[];
@@ -643,6 +645,18 @@ export const useStore = create<State>()(
               value: false as boolean,
             },
 
+            false,
+          ),
+          ...createParameter(
+            set,
+            "brushWrapMode",
+            {
+              name: "Wrap Mode",
+              label: "Wrap",
+              description: "Controls whether the brush wraps around the edges of the canvas.",
+              value: 0,
+              options: WRAP_MODES,
+            },
             false,
           ),
           // Per-file zoom and offset state

@@ -16,6 +16,7 @@ export function BrushPanel() {
         <ParameterControl paramKey="brushWidthBeats" disabled={brushSizeLockedToGrid} />
         <ParameterControl paramKey="brushHeightSemis" disabled={brushSizeLockedToGrid} />
         <ParameterControl paramKey="brushSizeLockedToGrid" />
+        <ParameterControl paramKey="brushWrapMode" />
       </Section>
       <Section label="Output">
         <ParameterControl paramKey="brushIntensity" />

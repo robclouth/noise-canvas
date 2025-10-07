@@ -140,4 +140,11 @@ export const SYNTHESIZE_TYPES = [
   { value: 1, label: "Sine" },
 ];
 
+export const WRAP_MODES = [
+  { value: 0, label: "Off" },
+  { value: 1, label: "X" },
+  { value: 2, label: "Y" },
+  { value: 3, label: "X & Y" },
+];
+
 export const NUM_MODULATORS = 3;

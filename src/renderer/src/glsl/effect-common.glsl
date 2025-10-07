@@ -41,6 +41,7 @@ uniform float sourceOffsetY;
 uniform Parameter brushPan;
 uniform Parameter brushIntensity;
 uniform int blendMode;
+uniform int wrapMode; // 0=Off, 1=Wrap X, 2=Wrap Y, 3=Wrap Both
 
 // ============================================================================
 // DEFINES & HELPERS
@@ -55,6 +56,23 @@ float unwrapPhase(float phaseDelta) {
 
 vec2 unwrapPhase(vec2 phaseDelta) {
     return mod(phaseDelta + PI, 2.0 * PI) - PI;
+}
+
+// Wraps UV coordinates based on the wrap mode
+vec2 wrapUv(vec2 uv) {
+    vec2 wrapped = uv;
+    
+    // Wrap X if mode is 1 (Wrap X) or 3 (Wrap Both)
+    if (wrapMode == 1 || wrapMode == 3) {
+        wrapped.x = fract(uv.x);
+    }
+    
+    // Wrap Y if mode is 2 (Wrap Y) or 3 (Wrap Both)
+    if (wrapMode == 2 || wrapMode == 3) {
+        wrapped.y = fract(uv.y);
+    }
+    
+    return wrapped;
 }
 
 
@@ -183,7 +201,8 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv, sampler2D dataTex, sampler2D me
  * This is faster but can sound less smooth for time-stretching.
  */
 vec4 getSourceSamplePoint(vec2 sourceUv) {
-    return readPackedData(sourceUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount);
+    vec2 wrappedUv = wrapUv(sourceUv);
+    return readPackedData(wrappedUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount);
 }
 
 /**
@@ -191,7 +210,8 @@ vec4 getSourceSamplePoint(vec2 sourceUv) {
  * This provides smoother results for time-stretching.
  */
 vec4 getSourceSample(vec2 sourceUv) {
-    return readPackedDataInterpolated(sourceUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount);
+    vec2 wrappedUv = wrapUv(sourceUv);
+    return readPackedDataInterpolated(wrappedUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount);
 }
 
 /**
@@ -199,7 +219,8 @@ vec4 getSourceSample(vec2 sourceUv) {
  * Used for blending the brush effect against the initial state.
  */
 vec4 getOriginalDestSample(vec2 destUv) {
-    return readPackedDataInterpolated(destUv, originalSpectrogramTex, destMetadataTex, destSpectrogramTextureSize, destFrameCount, destBandCount);
+    vec2 wrappedUv = wrapUv(destUv);
+    return readPackedDataInterpolated(wrappedUv, originalSpectrogramTex, destMetadataTex, destSpectrogramTextureSize, destFrameCount, destBandCount);
 }
 
 // ============================================================================
@@ -213,18 +234,21 @@ vec4 getOriginalDestSample(vec2 destUv) {
  * @param destUv The logical UV coordinate of the pixel we are writing TO.
  */
 vec4 getTransformedSample(vec2 sourceUv, vec2 destUv) {
+    // Apply wrapping to source UV
+    vec2 wrappedSourceUv = wrapUv(sourceUv);
+    
     // --- Frequency and Pitch Calculation ---
-    float sourceFreq = sourceMinFreq * pow(2.0, (1.0 - sourceUv.y) * sourceBandCount / sourceBandsPerOctave);
+    float sourceFreq = sourceMinFreq * pow(2.0, (1.0 - wrappedSourceUv.y) * sourceBandCount / sourceBandsPerOctave);
     float destFreq = destMinFreq * pow(2.0, (1.0 - destUv.y) * destBandCount / destBandsPerOctave);
     float pitchRatio = (sourceFreq > 1e-5) ? destFreq / sourceFreq : 1.0;
 
     // --- Vertical (Frequency) Sampling Grid ---
-    float bandNumFloat = (1.0 - sourceUv.y) * sourceBandCount - 0.5;
+    float bandNumFloat = (1.0 - wrappedSourceUv.y) * sourceBandCount - 0.5;
     float bandIndex = floor(bandNumFloat);
     float freqFraction = fract(bandNumFloat);
 
     if (bandIndex < 0.0 || bandIndex + 1.0 >= sourceBandCount) {
-        return getSourceSample(sourceUv); // Fallback at top/bottom edges
+        return getSourceSample(wrappedSourceUv); // Fallback at top/bottom edges
     }
 
     // --- Get Metadata for BOTH Bands ---
@@ -239,7 +263,7 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv) {
     float bandTimeScaleExp_freq = meta_freq.b;
 
     // --- Horizontal (Time) Calculations for EACH Band INDEPENDENTLY ---
-    float timeInFrames = sourceUv.x * sourceFrameCount;
+    float timeInFrames = wrappedSourceUv.x * sourceFrameCount;
 
     // Lower band time calculations
     float scaledTime_base = timeInFrames / exp2(bandTimeScaleExp_base);
@@ -252,7 +276,7 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv) {
     float timeFraction_freq = fract(scaledTime_freq);
 
     if (timeIndex_base + 1.0 >= bandLength_base || timeIndex_freq + 1.0 >= bandLength_freq) {
-        return getSourceSample(sourceUv); // Fallback at time edges
+        return getSourceSample(wrappedSourceUv); // Fallback at time edges
     }
 
     // --- Gather Four Surrounding Data Points ---
@@ -314,10 +338,49 @@ float getMag(vec2 c) { return length(c); }
 float getPhase(vec2 c) { return atan(c.y, c.x); }
 vec2 fromPolar(float mag, float phase) { return mag * vec2(cos(phase), sin(phase)); }
 
+// Calculate wrapped distance between two points on an axis
+float wrappedDistance(float a, float b, bool shouldWrap) {
+    if (!shouldWrap) {
+        return abs(a - b);
+    }
+    
+    float dist = abs(a - b);
+    float wrappedDist = 1.0 - dist;
+    return min(dist, wrappedDist);
+}
+
+// Get the effective brush center considering wrapping
+vec2 getEffectiveBrushOffset(vec2 unpackedUv) {
+    vec2 offset = unpackedUv - brushCenterUv;
+    
+    // Handle X wrapping
+    if (wrapMode == 1 || wrapMode == 3) {
+        float dist = abs(offset.x);
+        float wrappedDist = 1.0 - dist;
+        if (wrappedDist < dist) {
+            // Use wrapped distance
+            offset.x = offset.x > 0.0 ? -(1.0 - offset.x) : (1.0 + offset.x);
+        }
+    }
+    
+    // Handle Y wrapping
+    if (wrapMode == 2 || wrapMode == 3) {
+        float dist = abs(offset.y);
+        float wrappedDist = 1.0 - dist;
+        if (wrappedDist < dist) {
+            // Use wrapped distance
+            offset.y = offset.y > 0.0 ? -(1.0 - offset.y) : (1.0 + offset.y);
+        }
+    }
+    
+    return offset;
+}
+
 // Determines the brush's influence at a given coordinate, including feathering.
 float getBrushWeight(vec2 unpackedUv) {
     vec2 halfSize = brushSizeUv / 2.0;
-    vec2 localUv = (unpackedUv - brushCenterUv + halfSize) / brushSizeUv;
+    vec2 offset = getEffectiveBrushOffset(unpackedUv);
+    vec2 localUv = (offset + halfSize) / brushSizeUv;
     vec2 slopeNormalized = (vec2(featherSlopeTime, featherSlopePitch) / 2.0 + 0.5);
 
     float weightX = 1.0;
@@ -342,7 +405,8 @@ float getBrushWeight(vec2 unpackedUv) {
 }
 
 bool isInsideBrush(vec2 unpackedUv) {
-    vec2 diff = abs(unpackedUv - brushCenterUv);
+    vec2 offset = getEffectiveBrushOffset(unpackedUv);
+    vec2 diff = abs(offset);
     vec2 halfSize = brushSizeUv / 2.0;
 
     if ((brushSizeUv.x > 0.0 && diff.x >= halfSize.x) ||
