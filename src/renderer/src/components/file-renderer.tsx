@@ -85,6 +85,18 @@ export const FileRenderer = memo(
           invalidateRef.current?.();
         },
       );
+      const unsubZoom = useStore.subscribe(
+        (state) => state.filesZoom[filePath],
+        () => {
+          invalidateRef.current?.();
+        },
+      );
+      const unsubOffset = useStore.subscribe(
+        (state) => state.filesOffset[filePath],
+        () => {
+          invalidateRef.current?.();
+        },
+      );
       const unsubGridBeats = useStore.subscribe(
         (state) => state.gridSizeBeats.value,
         () => {
@@ -112,6 +124,8 @@ export const FileRenderer = memo(
 
       return () => {
         unsubBpms();
+        unsubZoom();
+        unsubOffset();
         unsubGridBeats();
         unsubGridSemis();
         unsubDisplayMinDb();
@@ -136,6 +150,8 @@ export const FileRenderer = memo(
           showVerticalGrid: { value: true },
           showTargetRectangle: { value: false },
           showSourceRectangle: { value: false },
+          viewZoomPower: { value: 0.0 },
+          viewOffset: { value: 0.0 },
         },
         vertexShader: passThroughVert,
         fragmentShader: displayFrag,
@@ -443,6 +459,10 @@ export const FileRenderer = memo(
       const bpm = state.filesBpm[filePath] || 120;
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
+      // Get per-file zoom and offset from store
+      const viewZoomPower = state.filesZoom[filePath] ?? 0;
+      const viewOffset = state.filesOffset[filePath] ?? 0;
+
       // Calculate brush size for display
       const brushSizeUv = unitsToUv(
         state.brushWidthBeats.value,
@@ -506,8 +526,8 @@ export const FileRenderer = memo(
           destChannelCount: { value: spectrogramData.numChannels },
           destSampleRate: { value: spectrogramData.sampleRate },
           originalSpectrogramTex: { value: originalPackedDataTex },
-          viewZoomPower: { value: state.zoomPower.value },
-          viewOffset: { value: state.scroll.value },
+          viewZoomPower: { value: viewZoomPower },
+          viewOffset: { value: viewOffset },
           brushCenterUv: { value: mousePos || new THREE.Vector2(-1, -1) },
           brushSizeUv: { value: brushSizeUv },
           featherX: { value: state.brushFeatherTime.value / 100 },
@@ -743,6 +763,8 @@ export const FileRenderer = memo(
       displayMaterial.uniforms.brushSizeUv.value = brushSizeUv;
       displayMaterial.uniforms.showTargetRectangle.value = isMouseOver;
       displayMaterial.uniforms.showSourceRectangle.value = isSourceFile && isMouseOverAnyFile;
+      displayMaterial.uniforms.viewZoomPower.value = viewZoomPower;
+      displayMaterial.uniforms.viewOffset.value = viewOffset;
 
       // Calculate and update grid values
       const gridSizeBeats = state.gridSizeBeats.value;

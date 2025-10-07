@@ -1,5 +1,7 @@
+import { zoomedToScreen } from "@/lib/utils";
 import { openFiles, player, useStore } from "@/store";
 import { useEffect, useRef } from "react";
+import { Vector2 } from "three";
 import * as Tone from "tone";
 
 interface PlaybackLineProps {
@@ -32,7 +34,24 @@ export const PlaybackLine = ({ filePath }: PlaybackLineProps) => {
       }
 
       if (lineRef.current) {
-        lineRef.current.style.left = `${(currentTime / duration) * 100}%`;
+        // Convert time to UV coordinate (zoomed space)
+        const zoomedUv = new Vector2(currentTime / duration, 0.5);
+
+        // Get per-file zoom and offset from store
+        const state = useStore.getState();
+        const zoom = state.filesZoom[filePath] ?? 0;
+        const offset = state.filesOffset[filePath] ?? 0;
+
+        // Convert from zoomed coordinates to screen coordinates
+        const screenUv = zoomedToScreen(zoomedUv, zoom, offset);
+
+        // Update position - hide if outside visible range
+        if (screenUv.x >= 0 && screenUv.x <= 1) {
+          lineRef.current.style.left = `${screenUv.x * 100}%`;
+          lineRef.current.style.display = "block";
+        } else {
+          lineRef.current.style.display = "none";
+        }
       }
 
       animationFrameId.current = requestAnimationFrame(updatePlaybackPosition);

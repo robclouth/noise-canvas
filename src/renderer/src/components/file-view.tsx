@@ -2,10 +2,11 @@ import { openFiles, useStore } from "@/store";
 import { ActionIcon, Badge, Box, Button, Group, NumberInput } from "@mantine/core";
 import { MiddleTruncate } from "@re-dev/react-truncate";
 import { View } from "@react-three/drei";
-import { X } from "lucide-react";
+import { X, ZoomIn, ZoomOut } from "lucide-react";
 import { memo, MouseEventHandler, useCallback, useMemo, useRef } from "react";
 import { Vector2 } from "three";
 import { getUndoManager } from "../lib/undo-manager";
+import { screenToZoomed } from "../lib/utils";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
 import { Tooltip } from "./tooltip";
@@ -60,7 +61,8 @@ function getSnappedCoordinates(
   filePath: string,
   bpm: number,
 ): [number, number] | null {
-  const { gridSizeBeats, brushWidthBeats, gridSizeSemis, brushHeightSemis, bandsPerOctave } = useStore.getState();
+  const state = useStore.getState();
+  const { gridSizeBeats, brushWidthBeats, gridSizeSemis, brushHeightSemis, bandsPerOctave } = state;
   const rect = event.currentTarget.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) {
     return null;
@@ -68,7 +70,14 @@ function getSnappedCoordinates(
   const x = (event.clientX - rect.left) / rect.width;
   const y = (event.clientY - rect.top) / rect.height;
 
-  const uv = new Vector2(x, y);
+  const screenUv = new Vector2(x, y);
+
+  // Get per-file zoom and offset from store
+  const zoom = state.filesZoom[filePath] ?? 0;
+  const offset = state.filesOffset[filePath] ?? 0;
+
+  // Convert from screen coordinates to zoomed coordinates
+  const uv = screenToZoomed(screenUv, zoom, offset);
 
   const { spectrogramData } = openFiles[filePath];
 
@@ -119,12 +128,24 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
   const setSourceFile = useStore((state) => state.setSourceFile);
   const bpm = useStore((state) => state.filesBpm[filePath] ?? 120);
   const setFileBpm = useStore((state) => state.setFileBpm);
+  const setFileZoom = useStore((state) => state.setFileZoom);
+  const zoom = useStore((state) => state.filesZoom[filePath] ?? 0);
   const closeFilePath = useStore((state) => state.closeFilePath);
   const sourceFile = useStore((state) => state.sourceFile);
   const resolution = useStore((state) => state.filesResolution[filePath]);
 
   const isSource = sourceFile?.path === filePath;
   const sourceMode = sourceFile?.mode ?? "current";
+
+  const handleZoomIn = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFileZoom(filePath, zoom + 1);
+  };
+
+  const handleZoomOut = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFileZoom(filePath, zoom - 1);
+  };
 
   return (
     <Group justify="space-between" align="center" p="xs" wrap="nowrap">
@@ -141,6 +162,18 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
         )}
       </Group>
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+        <Button.Group>
+          <Tooltip label="Zoom out">
+            <Button size="xs" variant="filled" color="dark.5" onClick={handleZoomOut} disabled={zoom <= 0} p={4}>
+              <ZoomOut size={16} />
+            </Button>
+          </Tooltip>
+          <Tooltip label="Zoom in">
+            <Button size="xs" variant="filled" color="dark.5" onClick={handleZoomIn} disabled={zoom >= 10} p={4}>
+              <ZoomIn size={16} />
+            </Button>
+          </Tooltip>
+        </Button.Group>
         <Tooltip label="The tempo of this file in beats per minute (BPM). Used for grid snapping and time-based effects.">
           <NumberInput
             w={60}
@@ -201,6 +234,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   const activeFilePath = useStore((state) => state.activeFilePath);
   const isActive = activeFilePath === filePath;
   const isSettingPosition = useStore((state) => state.isSettingPosition);
+  const zoom = useStore((state) => state.filesZoom[filePath] ?? 0);
 
   const cursorStyle = useMemo(() => ({ cursor: isSettingPosition ? "crosshair" : "crosshair" }), [isSettingPosition]);
 
@@ -387,6 +421,32 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
         <View style={viewStyle}>
           <FileRenderer filePath={filePath} ref={refCallback} />
         </View>
+      </Box>
+      <Box
+        style={{
+          width: "100%",
+          overflowX: "scroll",
+          overflowY: "hidden",
+        }}
+        onScroll={(e) => {
+          const target = e.currentTarget;
+          const scrollWidth = target.scrollWidth - target.clientWidth;
+          if (scrollWidth > 0) {
+            const offset = target.scrollLeft / scrollWidth;
+            useStore.getState().setFileOffset(filePath, offset);
+          } else {
+            // No scrolling needed, reset to 0
+            useStore.getState().setFileOffset(filePath, 0);
+          }
+        }}
+      >
+        {/* Fake scrollable content - expands with zoom to create scrollbar */}
+        <Box
+          h={1}
+          style={{
+            width: `${Math.max(100, Math.pow(2, zoom) * 100)}%`,
+          }}
+        />
       </Box>
 
       {isActive && <PlaybackLine filePath={filePath} />}

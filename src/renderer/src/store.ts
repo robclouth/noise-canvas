@@ -79,6 +79,8 @@ type ModulatorParameters = {
 const persistedKeys: (keyof State)[] = [
   "filesBpm",
   "filesResolution",
+  "filesZoom",
+  "filesOffset",
   "effectOrder",
   "effectsEnabled",
   "sectionCollapsed",
@@ -120,9 +122,11 @@ export type State = {
   sectionCollapsed: Record<string, boolean>;
   setSectionCollapsed: (section: string, collapsed: boolean) => void;
 
-  // View Controls
-  zoomPower: ContinuousNumberParameter;
-  scroll: ContinuousNumberParameter;
+  // Per-file View Controls
+  filesZoom: Record<string, number>;
+  filesOffset: Record<string, number>;
+  setFileZoom: (filePath: string, zoom: number) => void;
+  setFileOffset: (filePath: string, offset: number) => void;
 
   // Display Controls
   displayMinDb: ContinuousNumberParameter;
@@ -608,34 +612,19 @@ export const useStore = create<State>()(
 
             false,
           ),
-          ...createParameter(
-            set,
-            "zoomPower",
-            {
-              name: "Zoom",
-              label: "Zoom",
-              description: "Controls the zoom level of the spectrogram.",
-              value: 0,
-              min: -10,
-              max: 10,
-              step: 1,
-            },
-            false,
-          ),
-          ...createParameter(
-            set,
-            "scroll",
-            {
-              name: "Scroll",
-              label: "Scroll",
-              description: "Scrolls the spectrogram horizontally.",
-              value: 0,
-              min: 0,
-              max: 1,
-              step: 0.01,
-            },
-            false,
-          ),
+          // Per-file zoom and offset state
+          filesZoom: {},
+          filesOffset: {},
+          setFileZoom: (filePath: string, zoom: number) => {
+            set((state) => ({
+              filesZoom: { ...state.filesZoom, [filePath]: Math.max(0, Math.min(10, zoom)) },
+            }));
+          },
+          setFileOffset: (filePath: string, offset: number) => {
+            set((state) => ({
+              filesOffset: { ...state.filesOffset, [filePath]: Math.max(0, Math.min(1, offset)) },
+            }));
+          },
           ...createParameter(
             set,
             "displayMinDb",
@@ -1159,6 +1148,8 @@ export const useStore = create<State>()(
                 if (!state.filesBpm[filePath]) newState.filesBpm = { ...state.filesBpm, [filePath]: 120 };
                 if (!state.filesResolution[filePath])
                   newState.filesResolution = { ...state.filesResolution, [filePath]: state.bandsPerOctave.value };
+                if (!state.filesZoom[filePath]) newState.filesZoom = { ...state.filesZoom, [filePath]: 0 };
+                if (!state.filesOffset[filePath]) newState.filesOffset = { ...state.filesOffset, [filePath]: 0 };
                 if (!state.sourceFile) newState.sourceFile = { path: filePath, mode: "current" };
                 newState.activeFilePath = filePath;
 
@@ -1180,6 +1171,8 @@ export const useStore = create<State>()(
                 if (openFile) {
                   state.openFilePaths = state.openFilePaths.filter((path) => path !== filePath);
                   delete state.filesBpm[filePath];
+                  delete state.filesZoom[filePath];
+                  delete state.filesOffset[filePath];
 
                   const nextFilePath = state.openFilePaths[state.openFilePaths.length - 1] || null;
                   state.activeFilePath = nextFilePath || null;
@@ -1200,6 +1193,8 @@ export const useStore = create<State>()(
               openFilePaths: [],
               filesBpm: {},
               filesResolution: {},
+              filesZoom: {},
+              filesOffset: {},
               activeFilePath: null,
               sourceFile: null,
             });

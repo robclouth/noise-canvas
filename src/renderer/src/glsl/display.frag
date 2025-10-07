@@ -19,6 +19,27 @@ uniform float barWidthUv;         // Width of each bar (4 beats) in UV coordinat
 uniform bool showHorizontalGrid;  // Whether to show horizontal grid lines
 uniform bool showVerticalGrid;    // Whether to show vertical grid lines
 
+// Convert screen UV (what we see) to zoomed UV (actual data coordinates)
+vec2 screenToZoomed(vec2 screenUv, float zoomPower, float offset) {
+    float zoom = pow(2.0, zoomPower);
+    if (zoom <= 1.0) {
+        return screenUv;
+    }
+    float viewWidth = 1.0 / zoom;
+    float viewStartX = offset * (1.0 - viewWidth);
+    return vec2(viewStartX + screenUv.x * viewWidth, screenUv.y);
+}
+
+// Convert zoomed UV (actual data coordinates) to screen UV (what we see)
+vec2 zoomedToScreen(vec2 zoomedUv, float zoomPower, float offset) {
+    float zoom = pow(2.0, zoomPower);
+    if (zoom <= 1.0) {
+        return zoomedUv;
+    }
+    float viewWidth = 1.0 / zoom;
+    float viewStartX = offset * (1.0 - viewWidth);
+    return vec2((zoomedUv.x - viewStartX) / viewWidth, zoomedUv.y);
+}
 
 float magnitudeToDb(float mag) {
     float logMag = 20.0 * log(mag + 1.0e-7) / log(10.0);
@@ -27,7 +48,10 @@ float magnitudeToDb(float mag) {
 }
 
 void main() {
-    vec4 packedValue = getSourceSample(vUv);
+    // Convert screen UV to zoomed UV (actual data coordinates)
+    vec2 zoomedUv = screenToZoomed(vUv, viewZoomPower, viewOffset);
+    
+    vec4 packedValue = getSourceSample(zoomedUv);
 
     vec2 leftComplex = packedValue.rg;
     float leftMag = length(leftComplex);
@@ -46,15 +70,15 @@ void main() {
         color = leftColor + rightColor;
     }
 
-    // Grid lines
-    float lineThicknessUv = fwidth(vUv.x);
+    // Grid lines (in zoomed coordinates)
+    float lineThicknessUv = fwidth(zoomedUv.x);
     
     // Horizontal grid lines (time)
     if (showHorizontalGrid) {
-        float line = mod(vUv.x, gridWidthUv);
+        float line = mod(zoomedUv.x, gridWidthUv);
         
         // Check if this is the first beat of a bar (4/4 timing)
-        float barLine = mod(vUv.x, barWidthUv);
+        float barLine = mod(zoomedUv.x, barWidthUv);
         bool isBarStart = barLine < gridWidthUv;
         
         if (line < lineThicknessUv) {
@@ -66,8 +90,8 @@ void main() {
     
     // Vertical grid lines (frequency)
     if (showVerticalGrid && gridHeightUv > 0.0) {
-        float verticalLine = mod(vUv.y, gridHeightUv);
-        float verticalLineThicknessUv = fwidth(vUv.y);
+        float verticalLine = mod(zoomedUv.y, gridHeightUv);
+        float verticalLineThicknessUv = fwidth(zoomedUv.y);
         
         if (verticalLine < verticalLineThicknessUv) {
             color = mix(color, vec3(1.0), 0.15);
@@ -77,17 +101,18 @@ void main() {
     // --- Brush Area Visualization ---
 
     // Common calculations for both rectangles
+    // Brush center is already in zoomed coordinates
     vec2 rectCenter = brushCenterUv;
     
     vec2 correctedRectCenter = rectCenter;
     vec2 correctedBrushSize = brushSizeUv;
     
     vec2 halfSize = correctedBrushSize / 2.0;
-    float strokeWidthUv = fwidth(vUv.x) * 1.5;
+    float strokeWidthUv = fwidth(zoomedUv.x) * 1.5;
 
     // Draw Brush Area Rectangle (only if this is the active file)
     if (showTargetRectangle) {
-        vec2 d = abs(vUv - correctedRectCenter) - halfSize;
+        vec2 d = abs(zoomedUv - correctedRectCenter) - halfSize;
         float outsideDist = length(max(d, 0.0));
         float insideDist = min(max(d.x, d.y), 0.0);
         float distToBorder = outsideDist + insideDist;
@@ -108,7 +133,7 @@ void main() {
         if (sourceCenterScreen.x >= 0.0 && sourceCenterScreen.x <= 1.0 &&
             sourceCenterScreen.y >= 0.0 && sourceCenterScreen.y <= 1.0) {
             
-            vec2 dSource = abs(vUv - sourceCenter) - halfSize; // reuse halfSize from brush rect
+            vec2 dSource = abs(zoomedUv - sourceCenter) - halfSize; // reuse halfSize from brush rect
             float outsideDistSource = length(max(dSource, 0.0));
             float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
             float distToBorderSource = outsideDistSource + insideDistSource;
