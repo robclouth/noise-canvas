@@ -8,6 +8,7 @@ export const BlurEffect = () => {
       <ParameterControl paramKey="blurNoiseTime" />
       <ParameterControl paramKey="blurNoisePitch" />
       <ParameterControl paramKey="blurBleed" />
+      <ParameterControl paramKey="blurOrigin" />
     </>
   );
 };

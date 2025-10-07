@@ -31,6 +31,7 @@ export const PRESET_KEYS = [
   "blurNoiseTime",
   "blurNoisePitch",
   "blurBleed",
+  "blurOrigin",
   "sharpenAmountTime",
   "sharpenAmountPitch",
   "harmonicsPower",
@@ -176,6 +177,7 @@ export const defaultPresets: BrushPreset[] = [
     blurNoiseTime: 0,
     blurNoisePitch: 0,
     blurBleed: true,
+    blurOrigin: 0,
 
     // Sharpen parameters
     sharpenAmountTime: 0,

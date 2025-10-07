@@ -46,6 +46,9 @@ const uniforms = {
   bleed: {
     value: true,
   },
+  blurOrigin: {
+    value: 0,
+  },
 };
 
 class BlurEffect extends BaseEffect {
@@ -86,7 +89,7 @@ class BlurEffect extends BaseEffect {
     if (!material) return;
 
     const state = useStore.getState();
-    const { blurAmountTime, blurAmountPitch, blurNoiseTime, blurNoisePitch, blurBleed } = state;
+    const { blurAmountTime, blurAmountPitch, blurNoiseTime, blurNoisePitch, blurBleed, blurOrigin } = state;
     const { spectrogramData } = file;
 
     const blurSizeUv = unitsToUv(
@@ -144,6 +147,7 @@ class BlurEffect extends BaseEffect {
         ) || [],
     };
     material.uniforms.bleed.value = blurBleed.value;
+    material.uniforms.blurOrigin.value = blurOrigin.value;
   }
 }
 

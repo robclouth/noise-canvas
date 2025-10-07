@@ -9,6 +9,7 @@ uniform Parameter blurNoiseX;
 uniform Parameter blurNoiseY;
 uniform vec2 blurDirection; // (1, 0) for horizontal, (0, 1) for vertical
 uniform bool bleed;
+uniform int blurOrigin; // 0=left, 1=middle, 2=right
 
 const int KERNEL_RADIUS = 8;
 const int KERNEL_SIZE = KERNEL_RADIUS * 2 + 1;
@@ -40,12 +41,42 @@ void main() {
         vec2 blurSizeUv = vec2(blurSizeXValue, blurSizeYValue);
 
         for (int i = -KERNEL_RADIUS; i <= KERNEL_RADIUS; i++) {
-            vec2 offset = blurDirection * float(i) * blurSizeUv / float(KERNEL_RADIUS);
-            vec2 noiseOffset = vec2((random(coords.dest) * 2.0 - 1.0) * blurNoiseXValue, (random(coords.dest) * 2.0 - 1.0) * blurNoiseYValue) * blurDirection;
+            // Determine actual offset and kernel index based on origin
+            int actualOffset;
+            int kernelIdx;
+            
+            if (blurOrigin == 0) { // Left origin - blur extends to the right
+                if (i > 0) continue; // Skip positive offsets
+                actualOffset = i;
+                kernelIdx = i + KERNEL_RADIUS; // Maps -8->0, 0->8
+            } else if (blurOrigin == 1) { // Middle origin - blur extends both ways (default)
+                actualOffset = i;
+                kernelIdx = i + KERNEL_RADIUS; // Maps -8->0, 0->8, 8->16
+            } else { // Right origin - blur extends to the left
+                if (i < 0) continue; // Skip negative offsets
+                actualOffset = i;
+                kernelIdx = i + KERNEL_RADIUS; // Maps 0->8, 1->9, ..., 8->16
+            }
+            
+            vec2 offset = blurDirection * float(actualOffset) * blurSizeUv / float(KERNEL_RADIUS);
+            
+            // Apply noise offset respecting the origin direction
+            float noiseRangeX, noiseRangeY;
+            if (blurOrigin == 0) { // Left origin - noise should only be negative
+                noiseRangeX = -random(coords.dest) * blurNoiseXValue;
+                noiseRangeY = -random(coords.dest) * blurNoiseYValue;
+            } else if (blurOrigin == 1) { // Middle origin - noise can be both directions
+                noiseRangeX = (random(coords.dest) * 2.0 - 1.0) * blurNoiseXValue;
+                noiseRangeY = (random(coords.dest) * 2.0 - 1.0) * blurNoiseYValue;
+            } else { // Right origin - noise should only be positive
+                noiseRangeX = random(coords.dest) * blurNoiseXValue;
+                noiseRangeY = random(coords.dest) * blurNoiseYValue;
+            }
+            vec2 noiseOffset = vec2(noiseRangeX, noiseRangeY) * blurDirection;
             vec2 sampleUv = coords.source + offset + noiseOffset;
             
             if (bleed || isInsideBrush(sampleUv)) {
-                float weight = gaussianKernel[i + KERNEL_RADIUS];
+                float weight = gaussianKernel[kernelIdx];
                 vec4 sampleTexel = getTransformedSample(sampleUv, coords.dest);
                 
                 blurredMagL += getMag(sampleTexel.rg) * weight;

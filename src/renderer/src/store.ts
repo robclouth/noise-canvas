@@ -178,6 +178,7 @@ export type State = {
   blurNoiseTime: ContinuousNumberParameter;
   blurNoisePitch: ContinuousNumberParameter;
   blurBleed: BooleanParameter;
+  blurOrigin: OptionsParameter<number>;
 
   // Sharpen Brush
   sharpenAmountTime: ContinuousNumberParameter;
@@ -977,6 +978,22 @@ export const useStore = create<State>()(
               label: "Bleed",
               description: "Allows the blur to sample from outside the brush bounds making a more smoothing.",
               value: true as boolean,
+            },
+            false,
+          ),
+          ...createParameter(
+            set,
+            "blurOrigin",
+            {
+              name: "Blur Origin",
+              label: "Origin",
+              description: "Controls where the convolution starts. Left is useful for reverbs to blur forward in time.",
+              value: 0,
+              options: [
+                { value: 0, label: "Left" },
+                { value: 1, label: "Middle" },
+                { value: 2, label: "Right" },
+              ],
             },
             false,
           ),
