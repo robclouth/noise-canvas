@@ -1508,29 +1508,8 @@ export const useStore = create<State>()(
             const state = get();
             const presetManager = getPresetManager();
 
-            // Generate ID if not provided
-            const id = presetId || `preset-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-
-            // Dynamically build preset from current state
-            const preset: any = {
-              id,
-              name,
-              isDefault: false,
-            };
-
-            for (const key of PRESET_KEYS) {
-              const stateValue = state[key];
-              // For parameters (objects with .value), extract the value
-              if (stateValue && typeof stateValue === "object" && "value" in stateValue) {
-                preset[key] = stateValue.value;
-              } else {
-                // For non-parameter values (effectOrder, effectsEnabled), copy directly
-                preset[key] = stateValue;
-              }
-            }
-
-            // Save to file
-            await presetManager.savePreset(preset as BrushPreset);
+            // Save preset from state (preset manager handles all the logic)
+            const id = await presetManager.savePresetFromState(state, name, presetId);
 
             // Reload presets
             await state.loadPresets();

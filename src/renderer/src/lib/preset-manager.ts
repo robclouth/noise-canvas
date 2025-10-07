@@ -1,14 +1,48 @@
 // Preset manager for loading and saving brush presets
 // Uses direct access to fs and path utilities (similar to undo-manager)
 
-import { BrushPreset, defaultPresets } from "./presets";
+import { State } from "@renderer/store";
+import { BrushPreset, defaultPresets, PRESET_KEYS } from "./presets";
 
 const PRESETS_FOLDER_NAME = "Noise Canvas";
-const PRESETS_FILE_NAME = "presets.json";
+const PRESETS_SUBFOLDER_NAME = "Presets";
+
+/**
+ * Generate a filename-safe ID from a preset name
+ * Removes/replaces special characters and ensures uniqueness with timestamp
+ */
+function generateFilenameId(name: string, existingIds: Set<string> = new Set()): string {
+  // Remove or replace unsafe characters
+  // Keep only alphanumeric, spaces, hyphens, and underscores
+  let safeName = name
+    .replace(/[^a-zA-Z0-9\s\-_]/g, "") // Remove unsafe chars
+    .replace(/\s+/g, "-") // Replace spaces with hyphens
+    .replace(/-+/g, "-") // Replace multiple hyphens with single
+    .replace(/^-|-$/g, "") // Remove leading/trailing hyphens
+    .toLowerCase();
+
+  // Ensure it's not empty
+  if (!safeName) {
+    safeName = "preset";
+  }
+
+  // Make it unique with timestamp
+  const timestamp = Date.now();
+  let id = `${safeName}-${timestamp}`;
+
+  // If somehow still collides, add a counter
+  let counter = 1;
+  while (existingIds.has(id)) {
+    id = `${safeName}-${timestamp}-${counter}`;
+    counter++;
+  }
+
+  return id;
+}
 
 class PresetManager {
+  private appDir: string | null = null;
   private presetsDir: string | null = null;
-  private presetsFilePath: string | null = null;
   private initialized = false;
 
   private async init() {
@@ -25,19 +59,40 @@ class PresetManager {
 
     try {
       const homeDir = window.nodeOs.homedir();
-      const documentsDir = window.nodePath.join(homeDir, "Documents");
-      this.presetsDir = window.nodePath.join(documentsDir, PRESETS_FOLDER_NAME);
-      this.presetsFilePath = window.nodePath.join(this.presetsDir, PRESETS_FILE_NAME);
+      let documentsDir: string;
 
-      // Create directory if it doesn't exist
-      try {
-        await window.nodeFs.mkdir(this.presetsDir, { recursive: true });
-        console.log("Presets directory created/verified:", this.presetsDir);
-      } catch (error: any) {
-        if (error.code !== "EEXIST") {
-          throw error;
+      // Cross-platform Documents folder detection
+      if (process.platform === "win32") {
+        // Windows: Use Documents folder (standard location)
+        documentsDir = window.nodePath.join(homeDir, "Documents");
+      } else if (process.platform === "darwin") {
+        // macOS: Use Documents folder (standard location)
+        documentsDir = window.nodePath.join(homeDir, "Documents");
+      } else {
+        // Linux: Try XDG Documents dir first, fallback to ~/.config or ~/Documents
+        const xdgDocuments = process.env.XDG_DOCUMENTS_DIR;
+        if (xdgDocuments) {
+          documentsDir = xdgDocuments;
+        } else {
+          // Try to create Documents, but fallback to .config if it fails
+          const potentialDocuments = window.nodePath.join(homeDir, "Documents");
+          try {
+            await window.nodeFs.access(potentialDocuments);
+            documentsDir = potentialDocuments;
+          } catch {
+            // Documents doesn't exist, use .config instead (XDG Base Directory spec)
+            const configDir = process.env.XDG_CONFIG_HOME || window.nodePath.join(homeDir, ".config");
+            documentsDir = configDir;
+          }
         }
       }
+
+      this.appDir = window.nodePath.join(documentsDir, PRESETS_FOLDER_NAME);
+      this.presetsDir = window.nodePath.join(this.appDir, PRESETS_SUBFOLDER_NAME);
+
+      // Create directories if they don't exist (recursive: true handles nested creation)
+      await window.nodeFs.mkdir(this.presetsDir, { recursive: true });
+      console.log("Presets directory created/verified:", this.presetsDir);
     } catch (error) {
       console.error("Failed to initialize presets directory:", error);
     }
@@ -48,22 +103,36 @@ class PresetManager {
    */
   async loadPresets(): Promise<BrushPreset[]> {
     await this.init();
-    if (!this.presetsFilePath || !window.nodeFs) {
+    if (!this.presetsDir || !window.nodeFs || !window.nodePath) {
       console.error("Preset manager not properly initialized");
       return [...defaultPresets];
     }
 
     try {
-      // Try to read user presets
-      const fileContent = await window.nodeFs.readFile(this.presetsFilePath, "utf-8");
-      const userPresets: BrushPreset[] = JSON.parse(fileContent);
+      // Read all files from the presets directory
+      const files = await window.nodeFs.readdir(this.presetsDir);
+      const userPresets: BrushPreset[] = [];
+
+      // Load each JSON file
+      for (const file of files) {
+        if (file.endsWith(".json")) {
+          try {
+            const filePath = window.nodePath.join(this.presetsDir, file);
+            const fileContent = await window.nodeFs.readFile(filePath, "utf-8");
+            const preset: BrushPreset = JSON.parse(fileContent);
+            userPresets.push(preset);
+          } catch (error) {
+            console.error(`Failed to load preset file ${file}:`, error);
+          }
+        }
+      }
 
       // Combine default presets with user presets
       return [...defaultPresets, ...userPresets];
     } catch (error: any) {
       if (error.code === "ENOENT") {
-        // File doesn't exist yet, return only default presets
-        console.log("No user presets file found, using defaults only");
+        // Directory doesn't exist yet, return only default presets
+        console.log("No user presets directory found, using defaults only");
         return [...defaultPresets];
       }
       console.error("Failed to load user presets:", error);
@@ -72,11 +141,76 @@ class PresetManager {
   }
 
   /**
-   * Save a new preset or update an existing user preset
+   * Build a preset from the current state
+   */
+  private buildPresetFromState(state: State, name: string, id: string): BrushPreset {
+    const preset: any = {
+      id,
+      name,
+      isDefault: false,
+    };
+
+    for (const key of PRESET_KEYS) {
+      const stateValue = state[key];
+      // For parameters (objects with .value), extract the value
+      if (stateValue && typeof stateValue === "object" && "value" in stateValue) {
+        preset[key] = stateValue.value;
+      } else {
+        // For non-parameter values (effectOrder, effectsEnabled), copy directly
+        preset[key] = stateValue;
+      }
+    }
+
+    return preset as BrushPreset;
+  }
+
+  /**
+   * Save a preset from the current state
+   */
+  async savePresetFromState(state: State, name: string, presetId?: string): Promise<string> {
+    await this.init();
+    if (!this.presetsDir || !window.nodeFs || !window.nodePath) {
+      console.error("Preset manager not properly initialized");
+      throw new Error("Preset manager not initialized");
+    }
+
+    // Generate ID if not provided
+    let id = presetId;
+    if (!id) {
+      // Get existing IDs to avoid collisions
+      const existingPresets = await this.loadPresets();
+      const existingIds = new Set(existingPresets.map((p) => p.id));
+      id = generateFilenameId(name, existingIds);
+    }
+
+    // Build preset from state
+    const preset = this.buildPresetFromState(state, name, id);
+
+    // Don't allow saving over default presets
+    if (preset.isDefault) {
+      throw new Error("Cannot save over default presets");
+    }
+
+    try {
+      // Save as individual JSON file
+      const fileName = `${id}.json`;
+      const filePath = window.nodePath.join(this.presetsDir, fileName);
+      await window.nodeFs.writeFile(filePath, JSON.stringify(preset, null, 2), "utf-8");
+
+      console.log("Preset saved:", preset.name, "at", filePath);
+      return id;
+    } catch (error) {
+      console.error("Failed to save preset:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Save a new preset or update an existing user preset (legacy method for direct preset objects)
    */
   async savePreset(preset: BrushPreset): Promise<void> {
     await this.init();
-    if (!this.presetsFilePath || !window.nodeFs) {
+    if (!this.presetsDir || !window.nodeFs || !window.nodePath) {
       console.error("Preset manager not properly initialized");
       return;
     }
@@ -87,29 +221,12 @@ class PresetManager {
     }
 
     try {
-      // Load existing user presets
-      let userPresets: BrushPreset[] = [];
-      try {
-        const fileContent = await window.nodeFs.readFile(this.presetsFilePath, "utf-8");
-        userPresets = JSON.parse(fileContent);
-      } catch (error: any) {
-        if (error.code !== "ENOENT") {
-          throw error;
-        }
-      }
+      // Save as individual JSON file
+      const fileName = `${preset.id}.json`;
+      const filePath = window.nodePath.join(this.presetsDir, fileName);
+      await window.nodeFs.writeFile(filePath, JSON.stringify(preset, null, 2), "utf-8");
 
-      // Update or add preset
-      const existingIndex = userPresets.findIndex((p) => p.id === preset.id);
-      if (existingIndex >= 0) {
-        userPresets[existingIndex] = preset;
-      } else {
-        userPresets.push(preset);
-      }
-
-      // Save to file
-      await window.nodeFs.writeFile(this.presetsFilePath, JSON.stringify(userPresets, null, 2), "utf-8");
-
-      console.log("Preset saved:", preset.name);
+      console.log("Preset saved:", preset.name, "at", filePath);
     } catch (error) {
       console.error("Failed to save preset:", error);
       throw error;
@@ -121,7 +238,7 @@ class PresetManager {
    */
   async deletePreset(presetId: string): Promise<void> {
     await this.init();
-    if (!this.presetsFilePath || !window.nodeFs) {
+    if (!this.presetsDir || !window.nodeFs || !window.nodePath) {
       console.error("Preset manager not properly initialized");
       return;
     }
@@ -133,20 +250,16 @@ class PresetManager {
     }
 
     try {
-      // Load existing user presets
-      const fileContent = await window.nodeFs.readFile(this.presetsFilePath, "utf-8");
-      let userPresets: BrushPreset[] = JSON.parse(fileContent);
-
-      // Remove preset
-      userPresets = userPresets.filter((p) => p.id !== presetId);
-
-      // Save to file
-      await window.nodeFs.writeFile(this.presetsFilePath, JSON.stringify(userPresets, null, 2), "utf-8");
+      // Delete the individual JSON file
+      const fileName = `${presetId}.json`;
+      const filePath = window.nodePath.join(this.presetsDir, fileName);
+      await window.nodeFs.unlink(filePath);
 
       console.log("Preset deleted:", presetId);
     } catch (error: any) {
       if (error.code === "ENOENT") {
         // File doesn't exist, nothing to delete
+        console.log("Preset file not found:", presetId);
         return;
       }
       console.error("Failed to delete preset:", error);
