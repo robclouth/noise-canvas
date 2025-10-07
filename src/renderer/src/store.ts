@@ -124,6 +124,10 @@ export type State = {
   zoomPower: ContinuousNumberParameter;
   scroll: ContinuousNumberParameter;
 
+  // Display Controls
+  displayMinDb: ContinuousNumberParameter;
+  displayMaxDb: ContinuousNumberParameter;
+
   // Grid and Snapping
   gridSizeBeats: DiscreteNumberParameter; // in beats
   gridSizeSemis: DiscreteNumberParameter; // in semitones
@@ -629,6 +633,36 @@ export const useStore = create<State>()(
               min: 0,
               max: 1,
               step: 0.01,
+            },
+            false,
+          ),
+          ...createParameter(
+            set,
+            "displayMinDb",
+            {
+              name: "Display Min dB",
+              label: "Min dB",
+              description: "The minimum decibel level displayed in the spectrogram.",
+              value: -70.0,
+              min: -120,
+              max: 0,
+              step: 1,
+              unit: "dB",
+            },
+            false,
+          ),
+          ...createParameter(
+            set,
+            "displayMaxDb",
+            {
+              name: "Display Max dB",
+              label: "Max dB",
+              description: "The maximum decibel level displayed in the spectrogram.",
+              value: 0.0,
+              min: -120,
+              max: 24,
+              step: 1,
+              unit: "dB",
             },
             false,
           ),

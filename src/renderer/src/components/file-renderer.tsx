@@ -97,37 +97,50 @@ export const FileRenderer = memo(
           invalidateRef.current?.();
         },
       );
+      const unsubDisplayMinDb = useStore.subscribe(
+        (state) => state.displayMinDb.value,
+        () => {
+          invalidateRef.current?.();
+        },
+      );
+      const unsubDisplayMaxDb = useStore.subscribe(
+        (state) => state.displayMaxDb.value,
+        () => {
+          invalidateRef.current?.();
+        },
+      );
 
       return () => {
         unsubBpms();
         unsubGridBeats();
         unsubGridSemis();
+        unsubDisplayMinDb();
+        unsubDisplayMaxDb();
       };
     }, [filePath]);
 
     // Materials and scene objects for rendering
-    const displayMaterial = useMemo(
-      () =>
-        new ShaderMaterial({
-          uniforms: {
-            ...UniformsUtils.clone(defaultValues),
-            minDb: { value: -70.0 },
-            maxDb: { value: 0.0 },
-            bpm: { value: 120.0 },
-            gridSize: { value: 0.25 },
-            gridWidthUv: { value: 0.0 },
-            gridHeightUv: { value: 0.0 },
-            barWidthUv: { value: 0.0 },
-            showHorizontalGrid: { value: true },
-            showVerticalGrid: { value: true },
-            showTargetRectangle: { value: false },
-            showSourceRectangle: { value: false },
-          },
-          vertexShader: passThroughVert,
-          fragmentShader: displayFrag,
-        }),
-      [],
-    );
+    const displayMaterial = useMemo(() => {
+      const state = useStore.getState();
+      return new ShaderMaterial({
+        uniforms: {
+          ...UniformsUtils.clone(defaultValues),
+          minDb: { value: state.displayMinDb.value },
+          maxDb: { value: state.displayMaxDb.value },
+          bpm: { value: 120.0 },
+          gridSize: { value: 0.25 },
+          gridWidthUv: { value: 0.0 },
+          gridHeightUv: { value: 0.0 },
+          barWidthUv: { value: 0.0 },
+          showHorizontalGrid: { value: true },
+          showVerticalGrid: { value: true },
+          showTargetRectangle: { value: false },
+          showSourceRectangle: { value: false },
+        },
+        vertexShader: passThroughVert,
+        fragmentShader: displayFrag,
+      });
+    }, []);
 
     const mesh = useRef<THREE.Mesh>(null!);
     const { scene: fboScene, mesh: fboMesh } = useMemo(() => {
@@ -724,6 +737,8 @@ export const FileRenderer = memo(
       displayMaterial.uniforms.sourceSpectrogramTextureSize.value = spectrogramData.packedTextureSize;
       displayMaterial.uniforms.gridSize.value = state.gridSizeBeats.value;
       displayMaterial.uniforms.bpm.value = bpm;
+      displayMaterial.uniforms.minDb.value = state.displayMinDb.value;
+      displayMaterial.uniforms.maxDb.value = state.displayMaxDb.value;
       displayMaterial.uniforms.brushCenterUv.value = mousePos || new THREE.Vector2(0, 0);
       displayMaterial.uniforms.brushSizeUv.value = brushSizeUv;
       displayMaterial.uniforms.showTargetRectangle.value = isMouseOver;

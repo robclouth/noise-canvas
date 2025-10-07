@@ -30,6 +30,10 @@ export function ControlsPanel() {
         <ParameterControl paramKey="gridSizeBeats" />
         <ParameterControl paramKey="gridSizeSemis" />
       </Section>
+      <Section label="Display">
+        <ParameterControl paramKey="displayMinDb" />
+        <ParameterControl paramKey="displayMaxDb" />
+      </Section>
       <Section label="Source Position">
         <SourcePositionControl />
       </Section>
