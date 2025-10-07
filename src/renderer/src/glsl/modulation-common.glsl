@@ -18,6 +18,9 @@ struct Modulator {
 
 uniform Modulator[NUM_MODULATORS] modulators;
 uniform sampler2D gainLut;
+uniform sampler2D modulator1ImageTex;
+uniform sampler2D modulator2ImageTex;
+uniform sampler2D modulator3ImageTex;
 
 // Base version that doesn't apply modulation to modulator parameters
 // This is used internally to avoid recursion
@@ -105,6 +108,16 @@ float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float p
     v = worley(pos);
   } else if (modulator.modulatorPatternShape == 11) { // SCALE
     v = texture2D(gainLut, vec2(rotatedUv.y, 0.5)).r;
+  } else if (modulator.modulatorPatternShape == 12) { // IMAGE
+    // Sample from the appropriate image texture based on modulator index
+    // Use rate-scaled position for tiling control
+    if (modulatorIndex == 0) {
+      v = texture2D(modulator1ImageTex, pos).r;
+    } else if (modulatorIndex == 1) {
+      v = texture2D(modulator2ImageTex, pos).r;
+    } else if (modulatorIndex == 2) {
+      v = texture2D(modulator3ImageTex, pos).r;
+    }
   }
 
   return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);

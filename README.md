@@ -97,7 +97,7 @@ By combining modulation with iterations, offsets, pan, and blend modes, you can 
 
 ## Spectrograms and Analysis
 
-Spectrograms are generated using the [Gabberator](https://github.com/gabberator) library, based on the **Constant-Q Transform (CQT)**.
+Spectrograms are generated using the [Gaborator](https://gaborator.com/) library, based on the **Constant-Q Transform (CQT)**.
 
 Unlike FFT, CQT adjusts time resolution depending on frequency:
 
@@ -147,6 +147,11 @@ Current tasks, bugs, and ideas can be found here:
 Contributions are welcome woth caveats. If you’d like to get involved, reach out to discuss features and direction so efforts stay aligned. Alternatively, fork the project and explore your own path but on the main fork I'll have the final say.
 
 ---
+
+## Credits
+
+- [3dtextures.me](https://3dtextures.me/) for the textures.
+- [Gaborator](https://gaborator.com/) for the analysis.
 
 ## License
 

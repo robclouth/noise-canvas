@@ -4,16 +4,23 @@ import { useThree } from "@react-three/fiber";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { ParameterKey, useStore } from "@renderer/store";
 import { useEffect, useMemo, useState } from "react";
-import { ShaderMaterial } from "three";
+import { ShaderMaterial, Texture } from "three";
 import modulatorFrag from "../glsl/modulator.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
+import { useModulatorTexture } from "../lib/textures";
+import { ModulatorShapeControl } from "./controls/modulator-shape-control";
 import { ParameterControl } from "./controls/parameter-control";
 
 const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
   const { invalidate } = useThree();
   const activeFilePath = useStore((state) => state.activeFilePath);
   const modulatorScaleLut = useModulatorScaleLut(activeFilePath || "");
+
+  // Load image textures for all modulators
+  const modulator1ImageTexture = useModulatorTexture(0);
+  const modulator2ImageTexture = useModulatorTexture(1);
+  const modulator3ImageTexture = useModulatorTexture(2);
 
   const material = useMemo(() => {
     const state = useStore.getState();
@@ -58,11 +65,17 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
       },
     }));
 
+    // Create placeholder texture for modulators without images
+    const placeholderTexture = new Texture();
+
     return new ShaderMaterial({
       uniforms: {
         modulatorIndex: { value: modulatorIndex },
         modulators: { value: modulators },
         gainLut: { value: modulatorScaleLut },
+        modulator1ImageTex: { value: placeholderTexture },
+        modulator2ImageTex: { value: placeholderTexture },
+        modulator3ImageTex: { value: placeholderTexture },
       },
       vertexShader: passThroughVert,
       fragmentShader: modulatorFrag,
@@ -75,6 +88,20 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
     material.uniforms.gainLut.value = modulatorScaleLut;
     invalidate();
   }, [material, modulatorIndex, modulatorScaleLut, invalidate]);
+
+  // Update image texture uniforms when textures change
+  useEffect(() => {
+    if (modulator1ImageTexture) {
+      material.uniforms.modulator1ImageTex.value = modulator1ImageTexture;
+    }
+    if (modulator2ImageTexture) {
+      material.uniforms.modulator2ImageTex.value = modulator2ImageTexture;
+    }
+    if (modulator3ImageTexture) {
+      material.uniforms.modulator3ImageTex.value = modulator3ImageTexture;
+    }
+    invalidate();
+  }, [material, modulator1ImageTexture, modulator2ImageTexture, modulator3ImageTexture, invalidate]);
 
   useEffect(() => {
     // Subscribe to modulator-related state changes and update uniforms
@@ -175,6 +202,8 @@ export const ModulatorView = () => {
     (state) => state[`modulator${parseInt(viewedModulatorIndex) + 1}PatternShape` as ParameterKey].value,
   );
 
+  const isScaleMode = modulatorPatternShape === 11;
+
   return (
     <Stack gap={2}>
       <SegmentedControl
@@ -186,14 +215,17 @@ export const ModulatorView = () => {
           value: index.toString(),
         }))}
       />
-      <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternShape` as ParameterKey} />
+      <ModulatorShapeControl
+        paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternShape` as ParameterKey}
+        modulatorIndex={parseInt(viewedModulatorIndex) + 1}
+      />
       <ParameterControl
         paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternRateBeats` as ParameterKey}
-        disabled={modulatorPatternShape === 11}
+        disabled={isScaleMode}
       />
       <ParameterControl
         paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternRateSemis` as ParameterKey}
-        disabled={modulatorPatternShape === 11}
+        disabled={isScaleMode}
       />
       <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Strength` as ParameterKey} />
       <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Rotation` as ParameterKey} />

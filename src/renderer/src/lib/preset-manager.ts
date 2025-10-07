@@ -2,10 +2,8 @@
 // Uses direct access to fs and path utilities (similar to undo-manager)
 
 import { State } from "@renderer/store";
+import { getFolders } from "./folders";
 import { BrushPreset, defaultPresets, PRESET_KEYS } from "./presets";
-
-const PRESETS_FOLDER_NAME = "Noise Canvas";
-const PRESETS_SUBFOLDER_NAME = "Presets";
 
 /**
  * Generate a filename-safe ID from a preset name
@@ -48,54 +46,9 @@ class PresetManager {
   private async init() {
     if (this.initialized) return;
     this.initialized = true;
-    await this.initPresetsDir();
-  }
-
-  private async initPresetsDir() {
-    if (!window.nodeOs || !window.nodePath || !window.nodeFs) {
-      console.error("Node utilities not available");
-      return;
-    }
-
-    try {
-      const homeDir = window.nodeOs.homedir();
-      let documentsDir: string;
-
-      // Cross-platform Documents folder detection
-      if (process.platform === "win32") {
-        // Windows: Use Documents folder (standard location)
-        documentsDir = window.nodePath.join(homeDir, "Documents");
-      } else if (process.platform === "darwin") {
-        // macOS: Use Documents folder (standard location)
-        documentsDir = window.nodePath.join(homeDir, "Documents");
-      } else {
-        // Linux: Try XDG Documents dir first, fallback to ~/.config or ~/Documents
-        const xdgDocuments = process.env.XDG_DOCUMENTS_DIR;
-        if (xdgDocuments) {
-          documentsDir = xdgDocuments;
-        } else {
-          // Try to create Documents, but fallback to .config if it fails
-          const potentialDocuments = window.nodePath.join(homeDir, "Documents");
-          try {
-            await window.nodeFs.access(potentialDocuments);
-            documentsDir = potentialDocuments;
-          } catch {
-            // Documents doesn't exist, use .config instead (XDG Base Directory spec)
-            const configDir = process.env.XDG_CONFIG_HOME || window.nodePath.join(homeDir, ".config");
-            documentsDir = configDir;
-          }
-        }
-      }
-
-      this.appDir = window.nodePath.join(documentsDir, PRESETS_FOLDER_NAME);
-      this.presetsDir = window.nodePath.join(this.appDir, PRESETS_SUBFOLDER_NAME);
-
-      // Create directories if they don't exist (recursive: true handles nested creation)
-      await window.nodeFs.mkdir(this.presetsDir, { recursive: true });
-      console.log("Presets directory created/verified:", this.presetsDir);
-    } catch (error) {
-      console.error("Failed to initialize presets directory:", error);
-    }
+    const { appDir, presetsDir } = await getFolders();
+    this.appDir = appDir;
+    this.presetsDir = presetsDir;
   }
 
   /**

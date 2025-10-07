@@ -11,6 +11,7 @@ import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { readRenderTargetPixelsAsync } from "../lib/async-readpixels";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
+import { useModulatorTexture } from "../lib/textures";
 import { getUndoManager } from "../lib/undo-manager";
 import { unitsToUv } from "../lib/utils";
 import { copyMaterial } from "./copy-material";
@@ -64,6 +65,11 @@ export const FileRenderer = memo(
     const invalidateRef = useRef<() => void>(null!);
 
     const modulatorScaleLut = useModulatorScaleLut(filePath);
+
+    // Load image textures for all modulators
+    const modulator1ImageTexture = useModulatorTexture(0);
+    const modulator2ImageTexture = useModulatorTexture(1);
+    const modulator3ImageTexture = useModulatorTexture(2);
 
     // Textures for spectrogram data
     const [packedDataTex, setPackedDataTex] = useState<THREE.DataTexture | null>(null);
@@ -626,6 +632,9 @@ export const FileRenderer = memo(
             }),
           },
           gainLut: { value: modulatorScaleLut || new THREE.Texture() },
+          modulator1ImageTex: { value: modulator1ImageTexture || new THREE.Texture() },
+          modulator2ImageTex: { value: modulator2ImageTexture || new THREE.Texture() },
+          modulator3ImageTex: { value: modulator3ImageTexture || new THREE.Texture() },
         };
 
         // Get enabled effects in order

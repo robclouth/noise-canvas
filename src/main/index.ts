@@ -64,6 +64,7 @@ function createWindow(): void {
       sandbox: false,
       nodeIntegration: true,
       contextIsolation: false,
+      webSecurity: false, // Allow loading local files
     },
   });
 

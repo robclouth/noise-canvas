@@ -60,6 +60,9 @@ export type CommonUniforms = {
   bpm: { value: number };
   blendMode: { value: number };
   gainLut: { value: Texture };
+  modulator1ImageTex: { value: Texture };
+  modulator2ImageTex: { value: Texture };
+  modulator3ImageTex: { value: Texture };
 };
 
 export const defaultValues: CommonUniforms = {
@@ -118,6 +121,9 @@ export const defaultValues: CommonUniforms = {
   blendMode: { value: 0 },
   modulators: { value: [] },
   gainLut: { value: new Texture() },
+  modulator1ImageTex: { value: new Texture() },
+  modulator2ImageTex: { value: new Texture() },
+  modulator3ImageTex: { value: new Texture() },
 };
 
 export abstract class BaseEffect {

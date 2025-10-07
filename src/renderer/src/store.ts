@@ -74,6 +74,10 @@ type ModulatorParameters = {
   [K in Range<1, 4> as `modulator${K}Strength`]: ContinuousNumberParameter;
 } & {
   [K in Range<1, 4> as `modulator${K}Rotation`]: ContinuousNumberParameter;
+} & {
+  [K in Range<1, 4> as `modulator${K}ImagePath`]: string | null;
+} & {
+  [K in Range<1, 4> as `setModulator${K}ImagePath`]: (path: string | null) => void;
 };
 
 const persistedKeys: (keyof State)[] = [
@@ -420,6 +424,14 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
         },
         true,
       ),
+    };
+    // Add image path as plain string (not a parameter)
+    const imagePathKey = `modulator${i + 1}ImagePath`;
+    const setterKey = `setModulator${i + 1}ImagePath`;
+    params = {
+      ...params,
+      [imagePathKey]: "",
+      [setterKey]: (path: string) => set({ [imagePathKey]: path }),
     };
   }
   return params;
