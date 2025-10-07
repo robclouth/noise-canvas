@@ -34,7 +34,6 @@ export const PRESET_KEYS = [
   "sharpenAmountPitch",
   "harmonicsPower",
   "harmonicsFalloff",
-  "harmonicsOddEven",
   "transformShiftBeats",
   "transformShiftSemis",
   "transformScaleTime",
@@ -98,9 +97,6 @@ export const PRESET_KEYS = [
   "harmonicsFalloffMod1Amount",
   "harmonicsFalloffMod2Amount",
   "harmonicsFalloffMod3Amount",
-  "harmonicsOddEvenMod1Amount",
-  "harmonicsOddEvenMod2Amount",
-  "harmonicsOddEvenMod3Amount",
   "transformShiftBeatsMod1Amount",
   "transformShiftBeatsMod2Amount",
   "transformShiftBeatsMod3Amount",
@@ -183,7 +179,6 @@ export const defaultPresets: BrushPreset[] = [
     // Harmonics parameters
     harmonicsPower: 1.0,
     harmonicsFalloff: 10.0,
-    harmonicsOddEven: 0,
 
     // Transform parameters
     transformShiftBeats: 0,
@@ -264,9 +259,6 @@ export const defaultPresets: BrushPreset[] = [
     harmonicsFalloffMod1Amount: 0,
     harmonicsFalloffMod2Amount: 0,
     harmonicsFalloffMod3Amount: 0,
-    harmonicsOddEvenMod1Amount: 0,
-    harmonicsOddEvenMod2Amount: 0,
-    harmonicsOddEvenMod3Amount: 0,
     transformShiftBeatsMod1Amount: 0,
     transformShiftBeatsMod2Amount: 0,
     transformShiftBeatsMod3Amount: 0,
