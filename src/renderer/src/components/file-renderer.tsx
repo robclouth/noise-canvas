@@ -592,6 +592,7 @@ export const FileRenderer = memo(
               return {
                 modulatorMode: state[`modulator${i + 1}Mode`].value,
                 modulatorPatternShape: state[`modulator${i + 1}PatternShape`].value,
+                modulatorPhaseMode: state[`modulator${i + 1}PhaseMode`].value,
                 modulatorPatternRateX: {
                   value: modulatorPatternRate.x,
                   minValue: 0.0,

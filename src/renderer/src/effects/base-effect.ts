@@ -5,6 +5,7 @@ import { Texture, Vector2 } from "three";
 export type Modulator = {
   modulatorMode: number;
   modulatorPatternShape: number;
+  modulatorPhaseMode: number;
   modulatorPatternRateX: ParameterUniform;
   modulatorPatternRateY: ParameterUniform;
   modulatorStrength: ParameterUniform;

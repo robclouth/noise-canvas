@@ -78,6 +78,8 @@ type ModulatorParameters = {
   [K in Range<1, 4> as `modulator${K}ImagePath`]: string | null;
 } & {
   [K in Range<1, 4> as `setModulator${K}ImagePath`]: (path: string | null) => void;
+} & {
+  [K in Range<1, 4> as `modulator${K}PhaseMode`]: OptionsParameter<number>;
 };
 
 const persistedKeys: (keyof State)[] = [
@@ -432,6 +434,25 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
       ...params,
       [imagePathKey]: "",
       [setterKey]: (path: string) => set({ [imagePathKey]: path }),
+    };
+    paramKey = `modulator${i + 1}PhaseMode`;
+    params = {
+      ...params,
+      ...createParameterInternal(
+        set,
+        paramKey,
+        {
+          name: `Modulator Phase Mode ${i + 1}`,
+          label: "Phase",
+          description: "Whether the phase is anchored to the canvas or the brush position.",
+          value: 0,
+          options: [
+            { value: 0, label: "Canvas" },
+            { value: 1, label: "Brush" },
+          ],
+        },
+        false,
+      ),
     };
   }
   return params;
@@ -1598,5 +1619,7 @@ export function getModulator(index: number) {
     modulatorPatternRateSemis: useStore.getState()[`modulator${index}PatternRateSemis` as ParameterKey],
     modulatorStrength: useStore.getState()[`modulator${index}Strength` as ParameterKey],
     modulatorRotation: useStore.getState()[`modulator${index}Rotation` as ParameterKey],
+    modulatorRateMode: useStore.getState()[`modulator${index}RateMode` as ParameterKey],
+    modulatorPhaseMode: useStore.getState()[`modulator${index}PhaseMode` as ParameterKey],
   };
 }

@@ -10,6 +10,7 @@
 struct Modulator {
   int modulatorMode;
   int modulatorPatternShape;
+  int modulatorPhaseMode;
   Parameter modulatorPatternRateX;
   Parameter modulatorPatternRateY;
   Parameter modulatorStrength;
@@ -29,6 +30,13 @@ float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float p
 
   Modulator modulator = modulators[modulatorIndex];
 
+  // Apply phase mode: adjust UV based on canvas or brush space
+  vec2 adjustedUv = uv;
+  if (modulator.modulatorPhaseMode == 1) { // Brush mode
+    // Convert to brush-relative coordinates (centered at brush center)
+    adjustedUv = (uv - brushCenterUv) / max(brushSizeUv, vec2(0.0001)) + 0.5;
+  }
+
   vec2 rates = vec2(
     patternRateX == 0.0 ? 0.0 : 1.0 / patternRateX,
     patternRateY == 0.0 ? 0.0 : 1.0 / patternRateY
@@ -38,7 +46,7 @@ float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float p
   float s = sin(rot);
   float c = cos(rot);
   mat2 m = mat2(c, -s, s, c);
-  vec2 rotatedUv = m * (uv - 0.5) + 0.5;
+  vec2 rotatedUv = m * (adjustedUv - 0.5) + 0.5;
 
   vec2 pos = rotatedUv * rates;
   bool x_zero = patternRateX == 0.0;

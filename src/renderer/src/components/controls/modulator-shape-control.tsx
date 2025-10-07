@@ -35,26 +35,28 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
   >([]);
 
   useEffect(() => {
-    getTextures().then((textures) => {
-      const groups: Array<{ group: string; items: Array<{ value: string; label: string }> }> = [
-        { group: "Standard", items: STANDARD_SHAPES },
-        {
-          group: "Factory Textures",
-          items: textures.factory.map((texture) => ({ value: `texture:${texture.path}`, label: texture.filename })),
-        },
-      ];
+    if (optionGroups.length === 0) {
+      getTextures().then((textures) => {
+        const groups: Array<{ group: string; items: Array<{ value: string; label: string }> }> = [
+          { group: "Standard", items: STANDARD_SHAPES },
+          {
+            group: "Factory Textures",
+            items: textures.factory.map((texture) => ({ value: `texture:${texture.path}`, label: texture.filename })),
+          },
+        ];
 
-      // Only add user group if there are user textures
-      if (textures.user.length > 0) {
-        groups.push({
-          group: "User",
-          items: textures.user.map((texture) => ({ value: `texture:${texture.path}`, label: texture.filename })),
-        });
-      }
+        // Only add user group if there are user textures
+        if (textures.user.length > 0) {
+          groups.push({
+            group: "User",
+            items: textures.user.map((texture) => ({ value: `texture:${texture.path}`, label: texture.filename })),
+          });
+        }
 
-      setOptionGroups(groups);
-    });
-  }, []);
+        setOptionGroups(groups);
+      });
+    }
+  }, [optionGroups.length]);
 
   // Get current select value
   const getCurrentValue = () => {

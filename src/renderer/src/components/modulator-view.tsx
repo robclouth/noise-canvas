@@ -4,7 +4,7 @@ import { useThree } from "@react-three/fiber";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { ParameterKey, useStore } from "@renderer/store";
 import { useEffect, useMemo, useState } from "react";
-import { ShaderMaterial, Texture } from "three";
+import { ShaderMaterial, Texture, Vector2 } from "three";
 import modulatorFrag from "../glsl/modulator.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
@@ -27,6 +27,7 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
     const modulators = Array.from({ length: NUM_MODULATORS }).map((_, i) => ({
       modulatorMode: state[`modulator${i + 1}Mode`].value,
       modulatorPatternShape: state[`modulator${i + 1}PatternShape`].value,
+      modulatorPhaseMode: state[`modulator${i + 1}PhaseMode`].value,
       modulatorPatternRateX: {
         value: state[`modulator${i + 1}PatternRateBeats`].value,
         minValue: 0.0,
@@ -76,6 +77,8 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
         modulator1ImageTex: { value: placeholderTexture },
         modulator2ImageTex: { value: placeholderTexture },
         modulator3ImageTex: { value: placeholderTexture },
+        brushCenterUv: { value: new Vector2(0.5, 0.5) },
+        brushSizeUv: { value: new Vector2(1, 1) },
       },
       vertexShader: passThroughVert,
       fragmentShader: modulatorFrag,
@@ -112,6 +115,7 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
       for (let i = 0; i < NUM_MODULATORS; i++) {
         modulatorState[`modulator${i + 1}Mode`] = state[`modulator${i + 1}Mode`].value;
         modulatorState[`modulator${i + 1}PatternShape`] = state[`modulator${i + 1}PatternShape`].value;
+        modulatorState[`modulator${i + 1}PhaseMode`] = state[`modulator${i + 1}PhaseMode`].value;
         modulatorState[`modulator${i + 1}PatternRateBeats`] = state[`modulator${i + 1}PatternRateBeats`].value;
         modulatorState[`modulator${i + 1}PatternRateSemis`] = state[`modulator${i + 1}PatternRateSemis`].value;
         modulatorState[`modulator${i + 1}Strength`] = state[`modulator${i + 1}Strength`].value;
@@ -141,6 +145,7 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
         const modulators = Array.from({ length: NUM_MODULATORS }).map((_, i) => ({
           modulatorMode: state[`modulator${i + 1}Mode`].value,
           modulatorPatternShape: state[`modulator${i + 1}PatternShape`].value,
+          modulatorPhaseMode: state[`modulator${i + 1}PhaseMode`].value,
           modulatorPatternRateX: {
             value: state[`modulator${i + 1}PatternRateBeats`].value,
             minValue: 0.0,
@@ -225,8 +230,9 @@ export const ModulatorView = () => {
       />
       <ParameterControl
         paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternRateSemis` as ParameterKey}
-        disabled={isScaleMode}
+        disabled={modulatorPatternShape === 11}
       />
+      <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseMode` as ParameterKey} />
       <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Strength` as ParameterKey} />
       <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Rotation` as ParameterKey} />
       <View style={{ height: 128, marginTop: 6 }}>
