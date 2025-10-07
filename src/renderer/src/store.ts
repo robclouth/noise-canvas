@@ -50,7 +50,6 @@ type ModulatableParameterKey =
   | "sharpenAmountPitch"
   | "harmonicsPower"
   | "harmonicsFalloff"
-  | "harmonicsOddEven"
   | "transformShiftBeats"
   | "transformShiftSemis"
   | "transformScaleTime"
@@ -171,7 +170,6 @@ export type State = {
   // Harmonics Brush
   harmonicsPower: ContinuousNumberParameter;
   harmonicsFalloff: ContinuousNumberParameter;
-  harmonicsOddEven: ContinuousNumberParameter;
 
   // UI State
   mousePos: Vector2 | null;
@@ -966,22 +964,7 @@ export const useStore = create<State>()(
               label: "Falloff",
               description: "Controls the amplitude falloff of harmonics.",
               value: 10.0,
-              min: -100,
-              max: 100,
-              step: 1,
-              unit: "%",
-            },
-            true,
-          ),
-          ...createParameter(
-            set,
-            "harmonicsOddEven",
-            {
-              name: "Odd/Even Harmonics",
-              label: "Odd/Even",
-              description: "Controls the balance of odd and even harmonics.",
-              value: 0,
-              min: -100,
+              min: 0,
               max: 100,
               step: 1,
               unit: "%",

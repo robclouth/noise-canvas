@@ -5,7 +5,6 @@ export const HarmonicsEffect = () => {
     <>
       <ParameterControl paramKey="harmonicsPower" />
       <ParameterControl paramKey="harmonicsFalloff" />
-      <ParameterControl paramKey="harmonicsOddEven" />
     </>
   );
 };
