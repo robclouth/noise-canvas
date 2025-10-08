@@ -27,3 +27,10 @@ window.nodeFs = fs;
 window.nodePath = path;
 // @ts-ignore (define in dts)
 window.nodeOs = os;
+
+// @ts-ignore (define in dts)
+window.updater = {
+  checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
+  downloadUpdate: () => ipcRenderer.invoke("download-update"),
+  quitAndInstall: () => ipcRenderer.invoke("quit-and-install"),
+};

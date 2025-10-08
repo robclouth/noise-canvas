@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, Menu } from "electron";
+import { autoUpdater } from "electron-updater";
 import { allowedExtensions } from "./audio-analysis";
 import { webContentsSend } from "./types";
 
@@ -112,6 +113,21 @@ export function createMenu(window: BrowserWindow) {
       label: app.getName(),
       submenu: [
         { role: "about" },
+        {
+          label: "Check for Updates...",
+          click: async () => {
+            try {
+              const update = await autoUpdater.checkForUpdates();
+              if (update) {
+                webContentsSend(window, "update-available", update);
+              } else {
+                webContentsSend(window, "update-not-available");
+              }
+            } catch (error) {
+              console.error("Failed to check for updates:", error);
+            }
+          },
+        },
         { type: "separator" },
         { role: "services", submenu: [] },
         { type: "separator" },
@@ -119,6 +135,25 @@ export function createMenu(window: BrowserWindow) {
         { role: "unhide" },
         { type: "separator" },
         { role: "quit" },
+      ],
+    });
+  }
+
+  // Add Help menu for non-macOS platforms
+  if (process.platform !== "darwin") {
+    template.push({
+      label: "Help",
+      submenu: [
+        {
+          label: "Check for Updates...",
+          click: async () => {
+            try {
+              await autoUpdater.checkForUpdates();
+            } catch (error) {
+              console.error("Failed to check for updates:", error);
+            }
+          },
+        },
       ],
     });
   }

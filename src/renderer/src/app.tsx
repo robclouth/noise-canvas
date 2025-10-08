@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { CanvasPanel } from "./components/layout/canvas-panel";
 import { ControlsPanel } from "./components/layout/controls-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
+import { UpdateNotification } from "./components/update-notification";
 import { ipcOn, ipcSend } from "./lib/ipc";
 import { getUndoManager } from "./lib/undo-manager";
 
@@ -218,6 +219,7 @@ function App(): React.JSX.Element {
         <ControlsPanel />
       </ScrollArea>
       <Notifications />
+      <UpdateNotification />
     </Group>
   );
 }

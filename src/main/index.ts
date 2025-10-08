@@ -1,6 +1,7 @@
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS } from "electron-devtools-installer";
+import { autoUpdater } from "electron-updater";
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
 import { createMenu } from "./lib/menu";
@@ -88,6 +89,85 @@ function createWindow(): void {
   createMenu(mainWindow!);
 }
 
+// Configure auto-updater
+function setupAutoUpdater(): void {
+  // Configure updater settings
+  autoUpdater.autoDownload = false; // Don't auto-download, ask user first
+  autoUpdater.autoInstallOnAppQuit = true; // Install when app quits
+
+  // Log for debugging
+  autoUpdater.logger = {
+    info: (msg) => console.log("[Updater]", msg),
+    warn: (msg) => console.warn("[Updater]", msg),
+    error: (msg) => console.error("[Updater]", msg),
+    debug: (msg) => console.debug("[Updater]", msg),
+  };
+
+  // Update available
+  autoUpdater.on("update-available", (info) => {
+    console.log("Update available:", info);
+    if (mainWindow) {
+      webContentsSend(mainWindow, "update-available", info);
+    }
+  });
+
+  // No update available
+  autoUpdater.on("update-not-available", (info) => {
+    console.log("Update not available:", info);
+    if (mainWindow) {
+      webContentsSend(mainWindow, "update-not-available");
+    }
+  });
+
+  // Update downloaded
+  autoUpdater.on("update-downloaded", (info) => {
+    console.log("Update downloaded:", info);
+    if (mainWindow) {
+      webContentsSend(mainWindow, "update-downloaded", info);
+    }
+  });
+
+  // Download progress
+  autoUpdater.on("download-progress", (progressInfo) => {
+    if (mainWindow) {
+      webContentsSend(mainWindow, "download-progress", progressInfo);
+    }
+  });
+
+  // Error occurred
+  autoUpdater.on("error", (error) => {
+    console.error("Update error:", error);
+    if (mainWindow) {
+      webContentsSend(mainWindow, "update-error", error.message);
+    }
+  });
+
+  // IPC handlers for update actions
+  ipcMain.handle("check-for-updates", async () => {
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      return result;
+    } catch (error) {
+      console.error("Error checking for updates:", error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("download-update", async () => {
+    try {
+      await autoUpdater.downloadUpdate();
+      return true;
+    } catch (error) {
+      console.error("Error downloading update:", error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle("quit-and-install", () => {
+    autoUpdater.quitAndInstall(false, true);
+  });
+}
+
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId("com.electron");
 
@@ -128,6 +208,18 @@ app.whenReady().then(async () => {
         pendingPath = null;
       }
     });
+  }
+
+  // Setup auto-updater (only in production)
+  if (!is.dev) {
+    setupAutoUpdater();
+
+    // Check for updates on startup after a short delay
+    setTimeout(() => {
+      autoUpdater.checkForUpdates().catch((error) => {
+        console.error("Failed to check for updates:", error);
+      });
+    }, 3000);
   }
 
   app.on("activate", function () {

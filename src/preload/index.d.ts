@@ -54,5 +54,10 @@ declare global {
     nodeFs: typeof import("fs/promises");
     nodePath: typeof import("path");
     nodeOs: typeof import("os");
+    updater: {
+      checkForUpdates: () => Promise<any>;
+      downloadUpdate: () => Promise<boolean>;
+      quitAndInstall: () => void;
+    };
   }
 }

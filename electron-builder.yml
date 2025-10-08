@@ -43,5 +43,12 @@ appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
 publish:
-  provider: generic
-  url: https://example.com/auto-updates
+  # For GitHub releases (recommended)
+  - provider: github
+    owner: robclouth
+    repo: noise-canvas
+    private: false
+  # For custom server (alternative)
+  # - provider: generic
+  #   url: https://your-server.com/releases
+  #   channel: latest

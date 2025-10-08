@@ -37,6 +37,11 @@ export interface IpcRendererEvents {
   "close-active-file": () => void;
   "close-all-files": () => void;
   "reanalyze-active-file": () => void;
+  "update-available": (info: any) => void;
+  "update-not-available": () => void;
+  "update-downloaded": (info: any) => void;
+  "download-progress": (progressInfo: any) => void;
+  "update-error": (message: string) => void;
 }
 
 export function ipcMainOn<K extends keyof IpcMainHandlers>(channel: K, listener: IpcMainHandlers[K]): void {
