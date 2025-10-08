@@ -92,7 +92,6 @@ const persistedKeys: (keyof State)[] = [
   "effectOrder",
   "effectsEnabled",
   "sectionCollapsed",
-  "openFileIds",
 ];
 
 // Helper to generate unique file IDs

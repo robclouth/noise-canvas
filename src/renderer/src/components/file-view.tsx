@@ -294,115 +294,129 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
     [fileId],
   );
 
-  const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
-    // Allow mouse position tracking on all files (for setting position and preview)
-    const bpm = useStore.getState().filesBpm[fileId] ?? 120;
-    const coords = getSnappedCoordinates(event, fileId, bpm);
-    if (!coords) return;
-    const [snappedX, snappedY] = coords;
+  const handleMouseMove: MouseEventHandler<HTMLDivElement> = useCallback(
+    (event) => {
+      // Allow mouse position tracking on all files (for setting position and preview)
+      const bpm = useStore.getState().filesBpm[fileId] ?? 120;
+      const coords = getSnappedCoordinates(event, fileId, bpm);
+      if (!coords) return;
+      const [snappedX, snappedY] = coords;
 
-    if (
-      rendererRef.current &&
-      (!lastSnappedPositionRef.current ||
-        lastSnappedPositionRef.current.x !== snappedX ||
-        lastSnappedPositionRef.current.y !== snappedY)
-    ) {
-      const state = useStore.getState();
-      state.setMousePos(new Vector2(snappedX, 1 - snappedY));
-      state.setHoveredFile(fileId); // Track which file is being hovered
-      // Render stroke preview on all files, but only actual strokes on active file
-      const isPreview = !isActive || event.buttons !== 1;
-      rendererRef.current.renderStroke(snappedX, snappedY, isPreview);
-      lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
-    }
-  };
+      if (
+        rendererRef.current &&
+        (!lastSnappedPositionRef.current ||
+          lastSnappedPositionRef.current.x !== snappedX ||
+          lastSnappedPositionRef.current.y !== snappedY)
+      ) {
+        const state = useStore.getState();
+        state.setMousePos(new Vector2(snappedX, 1 - snappedY));
+        state.setHoveredFile(fileId); // Track which file is being hovered
+        // Render stroke preview on all files, but only actual strokes on active file
+        const isPreview = !isActive || event.buttons !== 1;
+        rendererRef.current.renderStroke(snappedX, snappedY, isPreview);
+        lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
+      }
+    },
+    [fileId, isActive],
+  );
 
-  const handleMouseEnter: MouseEventHandler<HTMLDivElement> = (event) => {
-    // When mouse enters, immediately update position and trigger render
-    const bpm = useStore.getState().filesBpm[fileId] ?? 120;
-    const coords = getSnappedCoordinates(event, fileId, bpm);
-    if (!coords) return;
-    const [snappedX, snappedY] = coords;
+  const handleMouseEnter: MouseEventHandler<HTMLDivElement> = useCallback(
+    (event) => {
+      // When mouse enters, immediately update position and trigger render
+      const bpm = useStore.getState().filesBpm[fileId] ?? 120;
+      const coords = getSnappedCoordinates(event, fileId, bpm);
+      if (!coords) return;
+      const [snappedX, snappedY] = coords;
 
-    if (rendererRef.current) {
-      const state = useStore.getState();
-      state.setMousePos(new Vector2(snappedX, 1 - snappedY));
-      state.setHoveredFile(fileId);
-      // Render stroke preview
-      const isPreview = !isActive || event.buttons !== 1;
-      rendererRef.current.renderStroke(snappedX, snappedY, isPreview);
-      lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
-    }
-  };
+      if (rendererRef.current) {
+        const state = useStore.getState();
+        state.setMousePos(new Vector2(snappedX, 1 - snappedY));
+        state.setHoveredFile(fileId);
+        // Render stroke preview
+        const isPreview = !isActive || event.buttons !== 1;
+        rendererRef.current.renderStroke(snappedX, snappedY, isPreview);
+        lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
+      }
+    },
+    [fileId, isActive],
+  );
 
-  const handleMouseLeave = () => {
+  const handleMouseLeave = useCallback(() => {
     const state = useStore.getState();
     state.setMousePos(null);
     state.setHoveredFile(null);
     rendererRef.current?.clearPreview();
     lastSnappedPositionRef.current = null;
-  };
+  }, []);
 
-  const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
-    if (event.button !== 0) return;
+  const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = useCallback(
+    (event) => {
+      if (event.button !== 0) return;
 
-    const bpm = useStore.getState().filesBpm[fileId] ?? 120;
-    const coords = getSnappedCoordinates(event, fileId, bpm);
-    if (!coords) return;
+      const bpm = useStore.getState().filesBpm[fileId] ?? 120;
+      const coords = getSnappedCoordinates(event, fileId, bpm);
+      if (!coords) return;
 
-    // If in set position mode, capture the position and set source file
-    if (isSettingPosition) {
+      // If in set position mode, capture the position and set source file
+      if (isSettingPosition) {
+        const state = useStore.getState();
+        const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
+        state.setSourcePosition({ beats, pitch, fileId });
+        state.setIsSettingPosition(false);
+
+        // Set this file as the source file (in "current" mode)
+        state.setSourceFile({ id: fileId, mode: state.sourceFile?.mode ?? "current" });
+        return;
+      }
+
+      // Make this the active file if it isn't already
       const state = useStore.getState();
-      const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
-      state.setSourcePosition({ beats, pitch, fileId });
-      state.setIsSettingPosition(false);
-
-      // Set this file as the source file (in "current" mode)
-      state.setSourceFile({ id: fileId, mode: state.sourceFile?.mode ?? "current" });
-      return;
-    }
-
-    // Make this the active file if it isn't already
-    const state = useStore.getState();
-    if (!isActive) {
-      state.setActiveFileId(fileId);
-    }
-
-    // Normal painting behavior
-    if (rendererRef?.current) {
-      // Record the start position of this stroke
-      const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
-      state.setBrushStartPosition({ beats, pitch });
-
-      // In Offset mode, lock the offset on first stroke
-      if (state.sourcePositionMode.value === "offset" && !state.lockedOffset && state.sourcePosition) {
-        const offsetBeats = state.sourcePosition.beats - beats;
-        const offsetPitch = state.sourcePosition.pitch - pitch;
-        state.setLockedOffset({ beats: offsetBeats, pitch: offsetPitch });
+      if (!isActive) {
+        state.setActiveFileId(fileId);
       }
 
-      rendererRef.current.renderStroke(coords[0], coords[1], false);
-    }
-  };
+      // Normal painting behavior
+      if (rendererRef?.current) {
+        // Record the start position of this stroke
+        const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
+        state.setBrushStartPosition({ beats, pitch });
 
-  const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = async (event) => {
-    if (!isActive) return;
-    if (event.button === 0 && rendererRef?.current) {
-      const { synthesizeFile, setBrushStartPosition } = useStore.getState();
-      // Clear brush start position when stroke ends
-      setBrushStartPosition(null);
+        // In Offset mode, lock the offset on first stroke
+        if (state.sourcePositionMode.value === "offset" && !state.lockedOffset && state.sourcePosition) {
+          const offsetBeats = state.sourcePosition.beats - beats;
+          const offsetPitch = state.sourcePosition.pitch - pitch;
+          state.setLockedOffset({ beats: offsetBeats, pitch: offsetPitch });
+        }
 
-      // Left mouse button up - save undo state and run synthesis (no IPC)
-      const data = await rendererRef.current.getFBOData();
-      if (data) {
-        const undoManager = getUndoManager(fileId);
-        await undoManager.addState(data, fileId);
-
-        // Run synthesis now that the stroke is finished
-        synthesizeFile(fileId);
+        rendererRef.current.renderStroke(coords[0], coords[1], false);
       }
-    }
-  };
+    },
+    [fileId, isActive, isSettingPosition, uvToBeatsAndPitch],
+  );
+
+  const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = useCallback(
+    async (event) => {
+      if (!isActive) return;
+      if (event.button === 0 && rendererRef?.current) {
+        const { synthesizeFile, setBrushStartPosition } = useStore.getState();
+        // Clear brush start position when stroke ends
+        setBrushStartPosition(null);
+
+        // Left mouse button up - save undo state and run synthesis (no IPC)
+        const data = await rendererRef.current.getFBOData();
+        if (data) {
+          const undoManager = getUndoManager(fileId);
+          await undoManager.addState(data, fileId);
+
+          // Run synthesis now that the stroke is finished
+          synthesizeFile(fileId);
+        }
+      }
+    },
+    [fileId, isActive],
+  );
+
+  if (!file) return null;
 
   return (
     <Box
