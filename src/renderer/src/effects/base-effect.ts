@@ -10,6 +10,8 @@ export type Modulator = {
   modulatorPatternRateY: ParameterUniform;
   modulatorStrength: ParameterUniform;
   modulatorRotation: ParameterUniform;
+  modulatorEnvelopeMinDb: number;
+  modulatorEnvelopeMaxDb: number;
 };
 
 export type CommonUniforms = {

@@ -54,6 +54,8 @@ export const PRESET_KEYS = [
   "modulator1PatternRateSemis",
   "modulator1Strength",
   "modulator1Rotation",
+  "modulator1EnvelopeMinDb",
+  "modulator1EnvelopeMaxDb",
   "modulator2Mode",
   "modulator2PatternShape",
   "modulator2PhaseMode",
@@ -61,6 +63,8 @@ export const PRESET_KEYS = [
   "modulator2PatternRateSemis",
   "modulator2Strength",
   "modulator2Rotation",
+  "modulator2EnvelopeMinDb",
+  "modulator2EnvelopeMaxDb",
   "modulator3Mode",
   "modulator3PatternShape",
   "modulator3PhaseMode",
@@ -68,6 +72,8 @@ export const PRESET_KEYS = [
   "modulator3PatternRateSemis",
   "modulator3Strength",
   "modulator3Rotation",
+  "modulator3EnvelopeMinDb",
+  "modulator3EnvelopeMaxDb",
   // Modulator amounts
   "brushIntensityMod1Amount",
   "brushIntensityMod2Amount",
@@ -218,6 +224,8 @@ export const defaultPresets: BrushPreset[] = [
     modulator1PatternRateSemis: 12,
     modulator1Strength: 100,
     modulator1Rotation: 0,
+    modulator1EnvelopeMinDb: -60,
+    modulator1EnvelopeMaxDb: 0,
 
     modulator2Mode: 0,
     modulator2PatternShape: 0,
@@ -226,6 +234,8 @@ export const defaultPresets: BrushPreset[] = [
     modulator2PatternRateSemis: 12,
     modulator2Strength: 100,
     modulator2Rotation: 0,
+    modulator2EnvelopeMinDb: -60,
+    modulator2EnvelopeMaxDb: 0,
 
     modulator3Mode: 0,
     modulator3PatternShape: 0,
@@ -234,6 +244,8 @@ export const defaultPresets: BrushPreset[] = [
     modulator3PatternRateSemis: 12,
     modulator3Strength: 100,
     modulator3Rotation: 0,
+    modulator3EnvelopeMinDb: -60,
+    modulator3EnvelopeMaxDb: 0,
 
     // All modulator amounts default to 0
     brushIntensityMod1Amount: 0,

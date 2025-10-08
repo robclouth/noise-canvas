@@ -6,10 +6,10 @@ varying vec2 vUv;
 uniform Parameter harmonicsPower;
 uniform Parameter harmonicsFalloff;
 
-vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords) {
+vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelDb) {
     // Apply modulation to get the actual parameter values for this pixel
-    float power = applyModulation(harmonicsPower.value, harmonicsPower.minValue, harmonicsPower.maxValue, harmonicsPower.modulationAmounts, coords.dest, 0);
-    float falloff = applyModulation(harmonicsFalloff.value, harmonicsFalloff.minValue, harmonicsFalloff.maxValue, harmonicsFalloff.modulationAmounts, coords.dest, 0);
+    float power = applyModulation(harmonicsPower.value, harmonicsPower.minValue, harmonicsPower.maxValue, harmonicsPower.modulationAmounts, coords.dest, 0, audioLevelDb);
+    float falloff = applyModulation(harmonicsFalloff.value, harmonicsFalloff.minValue, harmonicsFalloff.maxValue, harmonicsFalloff.modulationAmounts, coords.dest, 0, audioLevelDb);
     
     // Threshold for ignoring weak harmonics
     const float AMPLITUDE_THRESHOLD = 0.001;

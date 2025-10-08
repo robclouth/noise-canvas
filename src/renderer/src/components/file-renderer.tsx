@@ -632,6 +632,8 @@ export const FileRenderer = memo(
                       (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
                     ) || [],
                 },
+                modulatorEnvelopeMinDb: state[`modulator${i + 1}EnvelopeMinDb`].value,
+                modulatorEnvelopeMaxDb: state[`modulator${i + 1}EnvelopeMaxDb`].value,
               };
             }),
           },

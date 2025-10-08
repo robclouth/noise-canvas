@@ -82,6 +82,10 @@ type ModulatorParameters = {
   [K in Range<1, 4> as `setModulator${K}ImagePath`]: (path: string | null) => void;
 } & {
   [K in Range<1, 4> as `modulator${K}PhaseMode`]: OptionsParameter<number>;
+} & {
+  [K in Range<1, 4> as `modulator${K}EnvelopeMinDb`]: ContinuousNumberParameter;
+} & {
+  [K in Range<1, 4> as `modulator${K}EnvelopeMaxDb`]: ContinuousNumberParameter;
 };
 
 const persistedKeys: (keyof State)[] = [
@@ -467,6 +471,44 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
           ],
         },
         false,
+      ),
+    };
+    paramKey = `modulator${i + 1}EnvelopeMinDb`;
+    params = {
+      ...params,
+      ...createParameterInternal(
+        set,
+        paramKey,
+        {
+          name: `Modulator Envelope Min ${i + 1}`,
+          label: "Min dB",
+          description: "The minimum gain in dB for the envelope follower.",
+          value: -60,
+          min: -120,
+          max: 0,
+          step: 1,
+          unit: "dB",
+        },
+        true,
+      ),
+    };
+    paramKey = `modulator${i + 1}EnvelopeMaxDb`;
+    params = {
+      ...params,
+      ...createParameterInternal(
+        set,
+        paramKey,
+        {
+          name: `Modulator Envelope Max ${i + 1}`,
+          label: "Max dB",
+          description: "The maximum gain in dB for the envelope follower.",
+          value: 0,
+          min: -120,
+          max: 0,
+          step: 1,
+          unit: "dB",
+        },
+        true,
       ),
     };
   }

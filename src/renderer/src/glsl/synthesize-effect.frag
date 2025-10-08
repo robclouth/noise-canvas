@@ -6,7 +6,7 @@ varying vec2 vUv;
 
 uniform int synthesizeType;
 
-vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords) {
+vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelDb) {
   vec2 complexValueL;
   vec2 complexValueR;
 

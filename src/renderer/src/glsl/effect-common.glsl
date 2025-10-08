@@ -215,6 +215,34 @@ vec4 getSourceSample(vec2 sourceUv) {
 }
 
 /**
+ * Calculate audio level in dB from the spectrogram at a given position.
+ * Used by envelope follower modulation to react to audio amplitude.
+ */
+float getAudioLevelDb(vec2 uv) {
+    // Sample the source spectrogram
+    vec4 sourceTexel = getSourceSample(uv);
+    
+    // Extract complex values for left and right channels
+    vec2 complexL = sourceTexel.rg; // Left channel (real, imaginary)
+    vec2 complexR = sourceTexel.ba; // Right channel (real, imaginary)
+    
+    // Calculate magnitude for each channel
+    float magnitudeL = length(complexL);
+    float magnitudeR = length(complexR);
+    
+    // Average the two channels
+    float avgMagnitude = (magnitudeL + magnitudeR) * 0.5;
+    
+    // Avoid log(0) by clamping to a small value
+    avgMagnitude = max(avgMagnitude, 0.000001);
+    
+    // Convert to dB: 20 * log10(magnitude)
+    float levelDb = 20.0 * log(avgMagnitude) / log(10.0);
+    
+    return levelDb;
+}
+
+/**
  * Samples from the original, unmodified destination spectrogram with interpolation.
  * Used for blending the brush effect against the initial state.
  */
@@ -424,9 +452,12 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
     vec2 modifiedL = modified.rg;
     vec2 modifiedR = modified.ba;
 
+    // Calculate audio level for envelope follower modulation
+    float audioLevelDb = getAudioLevelDb(destUv);
+
     // Calculate modulation values
-    float pan = applyModulation(brushPan.value, brushPan.minValue, brushPan.maxValue, brushPan.modulationAmounts, destUv, 0);
-    float intensity = applyModulation(brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue, brushIntensity.modulationAmounts, destUv, 0);
+    float pan = applyModulation(brushPan.value, brushPan.minValue, brushPan.maxValue, brushPan.modulationAmounts, destUv, 0, audioLevelDb);
+    float intensity = applyModulation(brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue, brushIntensity.modulationAmounts, destUv, 0, audioLevelDb);
 
     // Apply panning to the modified signal by scaling its magnitude.
     // A simple component-wise multiplication works because scaling a complex number (a, b)

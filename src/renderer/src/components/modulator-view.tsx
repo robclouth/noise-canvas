@@ -1,5 +1,6 @@
+import test from "@/assets/textures/Alien Metal.jpg";
 import { SegmentedControl, Stack } from "@mantine/core";
-import { View } from "@react-three/drei";
+import { useTexture, View } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { ParameterKey, useStore } from "@renderer/store";
@@ -21,6 +22,8 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
   const modulator1ImageTexture = useModulatorTexture(0);
   const modulator2ImageTexture = useModulatorTexture(1);
   const modulator3ImageTexture = useModulatorTexture(2);
+
+  const testTexture = useTexture(test);
 
   const material = useMemo(() => {
     const state = useStore.getState();
@@ -64,6 +67,8 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
             (paramKey) => (state[paramKey] as any).value / 100,
           ) || [],
       },
+      modulatorEnvelopeMinDb: state[`modulator${i + 1}EnvelopeMinDb`].value,
+      modulatorEnvelopeMaxDb: state[`modulator${i + 1}EnvelopeMaxDb`].value,
     }));
 
     // Create placeholder texture for modulators without images
@@ -79,6 +84,7 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
         modulator3ImageTex: { value: placeholderTexture },
         brushCenterUv: { value: new Vector2(0.5, 0.5) },
         brushSizeUv: { value: new Vector2(1, 1) },
+        testTexture: { value: testTexture },
       },
       vertexShader: passThroughVert,
       fragmentShader: modulatorFrag,
@@ -120,6 +126,8 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
         modulatorState[`modulator${i + 1}PatternRateSemis`] = state[`modulator${i + 1}PatternRateSemis`].value;
         modulatorState[`modulator${i + 1}Strength`] = state[`modulator${i + 1}Strength`].value;
         modulatorState[`modulator${i + 1}Rotation`] = state[`modulator${i + 1}Rotation`].value;
+        modulatorState[`modulator${i + 1}EnvelopeMinDb`] = state[`modulator${i + 1}EnvelopeMinDb`].value;
+        modulatorState[`modulator${i + 1}EnvelopeMaxDb`] = state[`modulator${i + 1}EnvelopeMaxDb`].value;
 
         // Include modulation amounts for all parameters
         state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.forEach((paramKey) => {
@@ -182,6 +190,8 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
                 (paramKey) => (state[paramKey] as any).value / 100,
               ) || [],
           },
+          modulatorEnvelopeMinDb: state[`modulator${i + 1}EnvelopeMinDb`].value,
+          modulatorEnvelopeMaxDb: state[`modulator${i + 1}EnvelopeMaxDb`].value,
         }));
 
         material.uniforms.modulators.value = modulators;
@@ -203,10 +213,15 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
 
 export const ModulatorView = () => {
   const [viewedModulatorIndex, setViewedModulatorIndex] = useState("0");
+  const modulatorMode = useStore(
+    (state) => state[`modulator${parseInt(viewedModulatorIndex) + 1}Mode` as ParameterKey].value,
+  );
   const modulatorPatternShape = useStore(
     (state) => state[`modulator${parseInt(viewedModulatorIndex) + 1}PatternShape` as ParameterKey].value,
   );
 
+  const isPatternMode = modulatorMode === 0;
+  const isEnvelopeFollowerMode = modulatorMode === 1;
   const isScaleMode = modulatorPatternShape === 11;
 
   return (
@@ -220,21 +235,38 @@ export const ModulatorView = () => {
           value: index.toString(),
         }))}
       />
-      <ModulatorShapeControl
-        paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternShape` as ParameterKey}
-        modulatorIndex={parseInt(viewedModulatorIndex) + 1}
-      />
-      <ParameterControl
-        paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternRateBeats` as ParameterKey}
-        disabled={isScaleMode}
-      />
-      <ParameterControl
-        paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternRateSemis` as ParameterKey}
-        disabled={modulatorPatternShape === 11}
-      />
-      <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseMode` as ParameterKey} />
+      <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Mode` as ParameterKey} />
+      {isPatternMode && (
+        <>
+          <ModulatorShapeControl
+            paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternShape` as ParameterKey}
+            modulatorIndex={parseInt(viewedModulatorIndex) + 1}
+          />
+          {!isScaleMode && (
+            <>
+              <ParameterControl
+                paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternRateBeats` as ParameterKey}
+              />
+              <ParameterControl
+                paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternRateSemis` as ParameterKey}
+              />
+            </>
+          )}
+        </>
+      )}
+      {isEnvelopeFollowerMode && (
+        <>
+          <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}EnvelopeMinDb` as ParameterKey} />
+          <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}EnvelopeMaxDb` as ParameterKey} />
+        </>
+      )}
+      {!isPatternMode && !isEnvelopeFollowerMode && (
+        <>
+          <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseMode` as ParameterKey} />
+          <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Rotation` as ParameterKey} />
+        </>
+      )}
       <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Strength` as ParameterKey} />
-      <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Rotation` as ParameterKey} />
       <View style={{ height: 128, marginTop: 6 }}>
         <Scene modulatorIndex={parseInt(viewedModulatorIndex)} />
       </View>

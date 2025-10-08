@@ -60,12 +60,12 @@ float applyDynamics(float inputDb, float thresholdDbValue, float upperRatioValue
   return gainMultiplier;
 }
 
-vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords) {
+vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelDb) {
   // Get modulated parameters
-  float thresholdDbValue = applyModulation(thresholdDb.value, thresholdDb.minValue, thresholdDb.maxValue, thresholdDb.modulationAmounts, coords.dest, 0);
-  float upperRatioValue = applyModulation(upperRatio.value, upperRatio.minValue, upperRatio.maxValue, upperRatio.modulationAmounts, coords.dest, 0);
-  float lowerRatioValue = applyModulation(lowerRatio.value, lowerRatio.minValue, lowerRatio.maxValue, lowerRatio.modulationAmounts, coords.dest, 0);
-  float kneeValue = applyModulation(knee.value, knee.minValue, knee.maxValue, knee.modulationAmounts, coords.dest, 0);
+  float thresholdDbValue = applyModulation(thresholdDb.value, thresholdDb.minValue, thresholdDb.maxValue, thresholdDb.modulationAmounts, coords.dest, 0, audioLevelDb);
+  float upperRatioValue = applyModulation(upperRatio.value, upperRatio.minValue, upperRatio.maxValue, upperRatio.modulationAmounts, coords.dest, 0, audioLevelDb);
+  float lowerRatioValue = applyModulation(lowerRatio.value, lowerRatio.minValue, lowerRatio.maxValue, lowerRatio.modulationAmounts, coords.dest, 0, audioLevelDb);
+  float kneeValue = applyModulation(knee.value, knee.minValue, knee.maxValue, knee.modulationAmounts, coords.dest, 0, audioLevelDb);
   
   // Extract left and right complex values
   vec2 complexL = sourceTexel.rg; // Left channel (real, imaginary)

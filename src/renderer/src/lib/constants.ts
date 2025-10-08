@@ -110,7 +110,10 @@ export const BLEND_MODES = [
   { value: 8, label: "Dissolve" },
 ];
 
-export const MODULATOR_MODES = [{ value: 0, label: "Shape" }];
+export const MODULATOR_MODES = [
+  { value: 0, label: "Pattern" },
+  { value: 1, label: "Envelope Follower" },
+];
 
 export const PATTERN_SHAPES = [
   { value: 0, label: "Sine" },

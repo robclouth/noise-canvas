@@ -15,6 +15,8 @@ struct Modulator {
   Parameter modulatorPatternRateY;
   Parameter modulatorStrength;
   Parameter modulatorRotation;
+  float modulatorEnvelopeMinDb;
+  float modulatorEnvelopeMaxDb;
 };
 
 uniform Modulator[NUM_MODULATORS] modulators;
@@ -25,11 +27,21 @@ uniform sampler2D modulator3ImageTex;
 
 // Base version that doesn't apply modulation to modulator parameters
 // This is used internally to avoid recursion
-float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float patternRateY, float strength, float rotation) {
+float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float patternRateY, float strength, float rotation, float audioLevelDb) {
   float v = 0.0;
 
   Modulator modulator = modulators[modulatorIndex];
 
+  // Handle envelope follower mode
+  if (modulator.modulatorMode == 1) { // Envelope Follower mode
+    // Map audio level from [minDb, maxDb] to [0, 1]
+    float minDb = modulator.modulatorEnvelopeMinDb;
+    float maxDb = modulator.modulatorEnvelopeMaxDb;
+    v = clamp((audioLevelDb - minDb) / (maxDb - minDb), 0.0, 1.0);
+    return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
+  }
+
+  // Pattern mode (mode 0) - continue with pattern generation
   // Apply phase mode: adjust UV based on canvas or brush space
   vec2 adjustedUv = uv;
   if (modulator.modulatorPhaseMode == 1) { // Brush mode
@@ -132,7 +144,7 @@ float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float p
 }
 
 // Version with modulated parameters (calls base version with computed params)
-float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation) {
+float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, float audioLevelDb) {
   Modulator modulator = modulators[modulatorIndex];
   
   float patternRateX = modulator.modulatorPatternRateX.value;
@@ -150,7 +162,8 @@ float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation) {
           modulators[i].modulatorPatternRateX.value,
           modulators[i].modulatorPatternRateY.value,
           modulators[i].modulatorStrength.value,
-          modulators[i].modulatorRotation.value);
+          modulators[i].modulatorRotation.value,
+          audioLevelDb);
         float minV = modAmount < 0.0 ? modulator.modulatorPatternRateX.maxValue : modulator.modulatorPatternRateX.minValue;
         float maxV = modAmount < 0.0 ? modulator.modulatorPatternRateX.minValue : modulator.modulatorPatternRateX.maxValue;
         patternRateX = mix(patternRateX, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
@@ -162,7 +175,8 @@ float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation) {
           modulators[i].modulatorPatternRateX.value,
           modulators[i].modulatorPatternRateY.value,
           modulators[i].modulatorStrength.value,
-          modulators[i].modulatorRotation.value);
+          modulators[i].modulatorRotation.value,
+          audioLevelDb);
         float minV = modAmount < 0.0 ? modulator.modulatorPatternRateY.maxValue : modulator.modulatorPatternRateY.minValue;
         float maxV = modAmount < 0.0 ? modulator.modulatorPatternRateY.minValue : modulator.modulatorPatternRateY.maxValue;
         patternRateY = mix(patternRateY, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
@@ -174,7 +188,8 @@ float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation) {
           modulators[i].modulatorPatternRateX.value,
           modulators[i].modulatorPatternRateY.value,
           modulators[i].modulatorStrength.value,
-          modulators[i].modulatorRotation.value);
+          modulators[i].modulatorRotation.value,
+          audioLevelDb);
         float minV = modAmount < 0.0 ? modulator.modulatorStrength.maxValue : modulator.modulatorStrength.minValue;
         float maxV = modAmount < 0.0 ? modulator.modulatorStrength.minValue : modulator.modulatorStrength.maxValue;
         strength = mix(strength, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
@@ -186,7 +201,8 @@ float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation) {
           modulators[i].modulatorPatternRateX.value,
           modulators[i].modulatorPatternRateY.value,
           modulators[i].modulatorStrength.value,
-          modulators[i].modulatorRotation.value);
+          modulators[i].modulatorRotation.value,
+          audioLevelDb);
         float minV = modAmount < 0.0 ? modulator.modulatorRotation.maxValue : modulator.modulatorRotation.minValue;
         float maxV = modAmount < 0.0 ? modulator.modulatorRotation.minValue : modulator.modulatorRotation.maxValue;
         rotation = mix(rotation, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
@@ -194,10 +210,10 @@ float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation) {
     }
   }
   
-  return getModulationBase(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation);
+  return getModulationBase(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, audioLevelDb);
 }
 
-float applyModulation(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, vec2 uv, int depth) {
+float applyModulation(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, vec2 uv, int depth, float audioLevelDb) {
   float totalModulation = 0.0;
   float totalModulationAmount = 0.0;
 
@@ -211,7 +227,7 @@ float applyModulation(float value, float minValue, float maxValue, float[NUM_MOD
       continue;
     }
 
-    float modulation = getModulation(uv, i, allowNested);
+    float modulation = getModulation(uv, i, allowNested, audioLevelDb);
 
     float minV = minValue;
     float maxV = maxValue;
