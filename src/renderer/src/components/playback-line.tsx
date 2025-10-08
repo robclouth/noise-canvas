@@ -5,15 +5,15 @@ import { Vector2 } from "three";
 import * as Tone from "tone";
 
 interface PlaybackLineProps {
-  filePath: string;
+  fileId: string;
 }
 
-export const PlaybackLine = ({ filePath }: PlaybackLineProps) => {
+export const PlaybackLine = ({ fileId }: PlaybackLineProps) => {
   const lineRef = useRef<HTMLDivElement>(null);
   const animationFrameId = useRef<number | null>(null);
   const isPlaying = useStore((state) => state.isPlaying);
   const loop = useStore((state) => state.loop);
-  const duration = openFiles[filePath].spectrogramData.numFrames / openFiles[filePath].spectrogramData.sampleRate;
+  const duration = openFiles[fileId].spectrogramData.numFrames / openFiles[fileId].spectrogramData.sampleRate;
 
   useEffect(() => {
     if (!isPlaying) {
@@ -25,7 +25,7 @@ export const PlaybackLine = ({ filePath }: PlaybackLineProps) => {
     }
 
     const updatePlaybackPosition = () => {
-      const file = openFiles[filePath];
+      const file = openFiles[fileId];
       const audioBuffer = file?.audioBuffer;
       let currentTime = Tone.getTransport().seconds;
 
@@ -39,8 +39,8 @@ export const PlaybackLine = ({ filePath }: PlaybackLineProps) => {
 
         // Get per-file zoom and offset from store
         const state = useStore.getState();
-        const zoom = state.filesZoom[filePath] ?? 0;
-        const offset = state.filesOffset[filePath] ?? 0;
+        const zoom = state.filesZoom[fileId] ?? 0;
+        const offset = state.filesOffset[fileId] ?? 0;
 
         // Convert from zoomed coordinates to screen coordinates
         const screenUv = zoomedToScreen(zoomedUv, zoom, offset);
@@ -65,7 +65,7 @@ export const PlaybackLine = ({ filePath }: PlaybackLineProps) => {
         animationFrameId.current = null;
       }
     };
-  }, [isPlaying, loop, duration, filePath]);
+  }, [isPlaying, loop, duration, fileId]);
 
   return (
     <div

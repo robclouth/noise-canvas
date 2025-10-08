@@ -98,7 +98,7 @@ class TransformEffect extends BaseEffect {
     const shiftUv = unitsToUv(
       transformShiftBeats.value,
       transformShiftSemis.value,
-      filesBpm[file.filePath],
+      filesBpm[file.id],
       totalDuration,
       spectrogramData.bandsPerOctave,
       spectrogramData.numBands,

@@ -26,7 +26,7 @@ export function SourcePositionControl() {
       return null;
     }
 
-    const file = openFiles[sourcePosition.filePath];
+    const file = openFiles[sourcePosition.fileId];
     if (!file) {
       return null;
     }

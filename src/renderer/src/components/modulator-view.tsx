@@ -14,8 +14,8 @@ import { ParameterControl } from "./controls/parameter-control";
 
 const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
   const { invalidate } = useThree();
-  const activeFilePath = useStore((state) => state.activeFilePath);
-  const modulatorScaleLut = useModulatorScaleLut(activeFilePath || "");
+  const activeFileId = useStore((state) => state.activeFileId);
+  const modulatorScaleLut = useModulatorScaleLut(activeFileId || "");
 
   // Load image textures for all modulators
   const modulator1ImageTexture = useModulatorTexture(0);

@@ -30,8 +30,8 @@ function App(): React.JSX.Element {
 
     // Development file loading
     if (process.env.NODE_ENV === "development") {
-      const { openFilePath, openFilePaths } = useStore.getState();
-      if (openFilePaths.length === 0) {
+      const { openFilePath, openFileIds } = useStore.getState();
+      if (openFileIds.length === 0) {
         // openFilePath(
         //   "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
         // );
@@ -53,8 +53,8 @@ function App(): React.JSX.Element {
     // Update save menu state when active file's dirty state changes
     const unsubDirtyState = useStore.subscribe(
       (state) => {
-        const activeFilePath = state.activeFilePath;
-        return activeFilePath ? state.filesDirty[activeFilePath] || false : false;
+        const activeFileId = state.activeFileId;
+        return activeFileId ? state.filesDirty[activeFileId] || false : false;
       },
       (isDirty) => {
         ipcSend("update-save-state", isDirty);
@@ -88,39 +88,39 @@ function App(): React.JSX.Element {
     unsubscribers.push(unsubSaveActiveFileVersion);
 
     const unsubCloseActiveFile = ipcOn("close-active-file", () => {
-      const { activeFilePath, closeFilePath: closeFile } = useStore.getState();
-      if (activeFilePath) {
-        closeFile(activeFilePath);
+      const { activeFileId, closeFile } = useStore.getState();
+      if (activeFileId) {
+        closeFile(activeFileId);
       }
     });
     unsubscribers.push(unsubCloseActiveFile);
 
     const unsubCloseAllFiles = ipcOn("close-all-files", () => {
-      const { closeAllFilePaths } = useStore.getState();
-      closeAllFilePaths();
+      const { closeAllFiles } = useStore.getState();
+      closeAllFiles();
     });
     unsubscribers.push(unsubCloseAllFiles);
 
     const unsubUndo = ipcOn("undo", async () => {
-      const { activeFilePath } = useStore.getState();
-      if (!activeFilePath) return;
-      const undoManager = getUndoManager(activeFilePath);
+      const { activeFileId } = useStore.getState();
+      if (!activeFileId) return;
+      const undoManager = getUndoManager(activeFileId);
       await undoManager.undo();
     });
     unsubscribers.push(unsubUndo);
 
     const unsubRedo = ipcOn("redo", async () => {
-      const { activeFilePath } = useStore.getState();
-      if (!activeFilePath) return;
-      const undoManager = getUndoManager(activeFilePath);
+      const { activeFileId } = useStore.getState();
+      if (!activeFileId) return;
+      const undoManager = getUndoManager(activeFileId);
       await undoManager.redo();
     });
     unsubscribers.push(unsubRedo);
 
     const unsubRestoreOriginal = ipcOn("restore-original", () => {
-      const { activeFilePath } = useStore.getState();
-      if (!activeFilePath) return;
-      const file = openFiles[activeFilePath];
+      const { activeFileId } = useStore.getState();
+      if (!activeFileId) return;
+      const file = openFiles[activeFileId];
 
       if (!file?.rendererRef?.current) return;
 
@@ -136,8 +136,8 @@ function App(): React.JSX.Element {
 
     return () => {
       unsubscribers.forEach((unsub) => unsub());
-      const { closeAllFilePaths } = useStore.getState();
-      closeAllFilePaths();
+      const { closeAllFiles } = useStore.getState();
+      closeAllFiles();
     };
   }, []);
 

@@ -41,6 +41,7 @@ export interface SpectrogramData {
 }
 
 export interface OpenFile {
+  id: string;
   filePath: string;
   spectrogramData: SpectrogramData;
   rendererRef?: RefObject<FileRendererHandle | null>;

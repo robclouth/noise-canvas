@@ -92,7 +92,13 @@ const persistedKeys: (keyof State)[] = [
   "effectOrder",
   "effectsEnabled",
   "sectionCollapsed",
+  "openFileIds",
 ];
+
+// Helper to generate unique file IDs
+function generateFileId(): string {
+  return `file_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+}
 
 export type State = {
   // Brush Parameters
@@ -105,8 +111,8 @@ export type State = {
   brushFeatherSlopePitch: ContinuousNumberParameter;
 
   // Source Position
-  sourcePosition: { beats: number; pitch: number; filePath: string } | null;
-  setSourcePosition: (position: { beats: number; pitch: number; filePath: string } | null) => void;
+  sourcePosition: { beats: number; pitch: number; fileId: string } | null;
+  setSourcePosition: (position: { beats: number; pitch: number; fileId: string } | null) => void;
   sourcePositionMode: OptionsParameter<string>;
   isSettingPosition: boolean;
   setIsSettingPosition: (value: boolean) => void;
@@ -131,15 +137,15 @@ export type State = {
   sectionCollapsed: Record<string, boolean>;
   setSectionCollapsed: (section: string, collapsed: boolean) => void;
 
-  // Per-file View Controls
+  // Per-file View Controls (keyed by file ID)
   filesZoom: Record<string, number>;
   filesOffset: Record<string, number>;
-  setFileZoom: (filePath: string, zoom: number) => void;
-  setFileOffset: (filePath: string, offset: number) => void;
+  setFileZoom: (fileId: string, zoom: number) => void;
+  setFileOffset: (fileId: string, offset: number) => void;
 
-  // Per-file Dirty State (not persisted)
+  // Per-file Dirty State (not persisted, keyed by file ID)
   filesDirty: Record<string, boolean>;
-  setFileDirty: (filePath: string, dirty: boolean) => void;
+  setFileDirty: (fileId: string, dirty: boolean) => void;
 
   // Display Controls
   displayMinDb: ContinuousNumberParameter;
@@ -196,29 +202,29 @@ export type State = {
   // UI State
   mousePos: Vector2 | null;
   setMousePos: (mousePos: Vector2 | null) => void;
-  hoveredFilePath: string | null;
-  setHoveredFilePath: (filePath: string | null) => void;
+  hoveredFile: string | null;
+  setHoveredFile: (fileId: string | null) => void;
 
-  // Files
-  openFilePaths: string[];
+  // Files (keyed by file ID)
+  openFileIds: string[];
   openFilePath: (filePath: string) => Promise<void>;
   saveActiveFile: () => Promise<void>;
   saveActiveFileAs: () => Promise<void>;
   saveActiveFileVersion: () => Promise<void>;
-  closeFilePath: (filePath: string) => void;
-  closeAllFilePaths: () => void;
+  closeFile: (fileId: string) => void;
+  closeAllFiles: () => void;
   reanalyzeActiveFile: () => Promise<void>;
-  synthesizeFilePath: (filePath: string) => Promise<void>;
+  synthesizeFile: (fileId: string) => Promise<void>;
   audioBuffers: Record<string, AudioBuffer>;
   setAudioBuffers: (audioBuffers: Record<string, AudioBuffer>) => void;
   filesBpm: Record<string, number>;
-  setFileBpm: (filePath: string, bpm: number | undefined) => void;
+  setFileBpm: (fileId: string, bpm: number | undefined) => void;
   filesResolution: Record<string, number>;
-  setFileResolution: (filePath: string, resolution: number) => void;
-  activeFilePath: string | null;
-  setActiveFilePath: (activeFilePath: string | null) => void;
-  sourceFile: { path: string; mode: "current" | "original" } | null;
-  setSourceFile: (sourceFile: { path: string; mode: "current" | "original" } | null) => void;
+  setFileResolution: (fileId: string, resolution: number) => void;
+  activeFileId: string | null;
+  setActiveFileId: (activeFileId: string | null) => void;
+  sourceFile: { id: string; mode: "current" | "original" } | null;
+  setSourceFile: (sourceFile: { id: string; mode: "current" | "original" } | null) => void;
 
   // Audio Playback
   isPlaying: boolean;
@@ -468,7 +474,18 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
   return params;
 }
 
+// Open files keyed by file ID
 export const openFiles: Record<string, OpenFile> = {};
+
+// Helper to get file by ID
+export function getFileById(fileId: string): OpenFile | undefined {
+  return openFiles[fileId];
+}
+
+// Helper to find file ID by path
+export function getFileIdByPath(filePath: string): string | undefined {
+  return Object.keys(openFiles).find((id) => openFiles[id].filePath === filePath);
+}
 
 export const player = new Tone.Player().toDestination();
 
@@ -588,7 +605,7 @@ export const useStore = create<State>()(
           ),
           // Source Position
           sourcePosition: null,
-          setSourcePosition: (position: { beats: number; pitch: number; filePath: string } | null) =>
+          setSourcePosition: (position: { beats: number; pitch: number; fileId: string } | null) =>
             set({ sourcePosition: position, lockedOffset: null }),
           ...createParameter(
             set,
@@ -670,21 +687,21 @@ export const useStore = create<State>()(
           // Per-file zoom and offset state
           filesZoom: {},
           filesOffset: {},
-          setFileZoom: (filePath: string, zoom: number) => {
+          setFileZoom: (fileId: string, zoom: number) => {
             set((state) => ({
-              filesZoom: { ...state.filesZoom, [filePath]: Math.max(0, Math.min(10, zoom)) },
+              filesZoom: { ...state.filesZoom, [fileId]: Math.max(0, Math.min(10, zoom)) },
             }));
           },
-          setFileOffset: (filePath: string, offset: number) => {
+          setFileOffset: (fileId: string, offset: number) => {
             set((state) => ({
-              filesOffset: { ...state.filesOffset, [filePath]: Math.max(0, Math.min(1, offset)) },
+              filesOffset: { ...state.filesOffset, [fileId]: Math.max(0, Math.min(1, offset)) },
             }));
           },
           // Per-file dirty state (not persisted)
           filesDirty: {},
-          setFileDirty: (filePath: string, dirty: boolean) => {
+          setFileDirty: (fileId: string, dirty: boolean) => {
             set((state) => ({
-              filesDirty: { ...state.filesDirty, [filePath]: dirty },
+              filesDirty: { ...state.filesDirty, [fileId]: dirty },
             }));
           },
           ...createParameter(
@@ -1175,74 +1192,82 @@ export const useStore = create<State>()(
             false,
           ),
           ...createModulatorParams(set),
-          openFilePaths: [],
+          openFileIds: [],
           openFilePath: async (filePath: string) => {
             const state = get();
-            const fileAlreadyOpen = state.openFilePaths.includes(filePath);
-            if (!fileAlreadyOpen) {
-              console.log("Starting analysis...");
-              const result = await window.audioAnalysis.analyze(filePath, {
-                bandsPerOctave: state.bandsPerOctave.value,
-                minFreq: state.minFreq.value,
-              });
-              console.log("Analysis complete:", result);
-
-              const spectrogramData = {
-                packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-                inverseMap: new Float32Array(
-                  result.inverseMap.buffer,
-                  result.inverseMap.byteOffset,
-                  result.inverseMap.byteLength / 4,
-                ),
-                metadata: new Float32Array(
-                  result.metadataTexture.buffer,
-                  result.metadataTexture.byteOffset,
-                  result.metadataTexture.byteLength / 4,
-                ),
-                textureWidth: result.textureWidth,
-                textureHeight: result.textureHeight,
-                numFrames: result.numFrames,
-                numBands: result.numBands,
-                numChannels: result.numChannels,
-                sampleRate: result.sampleRate,
-                packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-                minFreq: state.minFreq.value,
-                bandsPerOctave: state.bandsPerOctave.value,
-                synthesisMetadata: {
-                  bandOffsets: result.bandOffsets,
-                  bandStepLog2s: result.bandStepLog2s,
-                  bandLengths: result.bandLengths,
-                },
-              };
-              openFiles[filePath] = {
-                filePath,
-                spectrogramData,
-              };
-
-              console.log(openFiles);
-
-              return set((state) => {
-                const newState: Partial<State> = { openFilePaths: [...state.openFilePaths, filePath] };
-                if (!state.filesBpm[filePath]) newState.filesBpm = { ...state.filesBpm, [filePath]: 120 };
-                if (!state.filesResolution[filePath])
-                  newState.filesResolution = { ...state.filesResolution, [filePath]: state.bandsPerOctave.value };
-                if (!state.filesZoom[filePath]) newState.filesZoom = { ...state.filesZoom, [filePath]: 0 };
-                if (!state.filesOffset[filePath]) newState.filesOffset = { ...state.filesOffset, [filePath]: 0 };
-                if (!state.sourceFile) newState.sourceFile = { path: filePath, mode: "current" };
-                newState.activeFilePath = filePath;
-
-                return newState;
-              });
+            // Check if file is already open by path
+            const existingFileId = getFileIdByPath(filePath);
+            if (existingFileId) {
+              // File already open, just activate it
+              set({ activeFileId: existingFileId });
+              return state;
             }
-            return state;
+
+            console.log("Starting analysis...");
+            const result = await window.audioAnalysis.analyze(filePath, {
+              bandsPerOctave: state.bandsPerOctave.value,
+              minFreq: state.minFreq.value,
+            });
+            console.log("Analysis complete:", result);
+
+            const spectrogramData = {
+              packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+              inverseMap: new Float32Array(
+                result.inverseMap.buffer,
+                result.inverseMap.byteOffset,
+                result.inverseMap.byteLength / 4,
+              ),
+              metadata: new Float32Array(
+                result.metadataTexture.buffer,
+                result.metadataTexture.byteOffset,
+                result.metadataTexture.byteLength / 4,
+              ),
+              textureWidth: result.textureWidth,
+              textureHeight: result.textureHeight,
+              numFrames: result.numFrames,
+              numBands: result.numBands,
+              numChannels: result.numChannels,
+              sampleRate: result.sampleRate,
+              packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
+              minFreq: state.minFreq.value,
+              bandsPerOctave: state.bandsPerOctave.value,
+              synthesisMetadata: {
+                bandOffsets: result.bandOffsets,
+                bandStepLog2s: result.bandStepLog2s,
+                bandLengths: result.bandLengths,
+              },
+            };
+
+            // Generate unique file ID
+            const fileId = generateFileId();
+            openFiles[fileId] = {
+              id: fileId,
+              filePath,
+              spectrogramData,
+            };
+
+            console.log(openFiles);
+
+            return set((state) => {
+              const newState: Partial<State> = { openFileIds: [...state.openFileIds, fileId] };
+              if (!state.filesBpm[fileId]) newState.filesBpm = { ...state.filesBpm, [fileId]: 120 };
+              if (!state.filesResolution[fileId])
+                newState.filesResolution = { ...state.filesResolution, [fileId]: state.bandsPerOctave.value };
+              if (!state.filesZoom[fileId]) newState.filesZoom = { ...state.filesZoom, [fileId]: 0 };
+              if (!state.filesOffset[fileId]) newState.filesOffset = { ...state.filesOffset, [fileId]: 0 };
+              if (!state.sourceFile) newState.sourceFile = { id: fileId, mode: "current" };
+              newState.activeFileId = fileId;
+
+              return newState;
+            });
           },
           saveActiveFile: async () => {
             const state = get();
-            if (!state.activeFilePath) return;
-            const file = openFiles[state.activeFilePath];
+            if (!state.activeFileId) return;
+            const file = openFiles[state.activeFileId];
             if (!file || !file.audioBuffer) return;
 
-            const filePath = state.activeFilePath;
+            const filePath = file.filePath;
             const fileName = window.nodePath.basename(filePath);
 
             // Show confirmation modal
@@ -1279,7 +1304,7 @@ export const useStore = create<State>()(
                     );
 
                     // Mark as not dirty
-                    get().setFileDirty(filePath, false);
+                    get().setFileDirty(state.activeFileId!, false);
                     console.log("File saved successfully:", filePath);
 
                     // Show success notification
@@ -1304,11 +1329,11 @@ export const useStore = create<State>()(
           },
           saveActiveFileAs: async () => {
             const state = get();
-            if (!state.activeFilePath) return;
-            const file = openFiles[state.activeFilePath];
+            if (!state.activeFileId) return;
+            const file = openFiles[state.activeFileId];
             if (!file || !file.audioBuffer) return;
 
-            const currentFilePath = state.activeFilePath;
+            const currentFilePath = file.filePath;
             const currentFileName = window.nodePath.basename(currentFilePath);
             const currentDir = window.nodePath.dirname(currentFilePath);
 
@@ -1340,8 +1365,11 @@ export const useStore = create<State>()(
               // Export the audio
               await window.audioAnalysis.exportAudio(audioChannels, outputPath, file.audioBuffer.sampleRate, format);
 
+              // Update file path in openFiles
+              file.filePath = outputPath;
+
               // Mark as not dirty
-              get().setFileDirty(currentFilePath, false);
+              get().setFileDirty(state.activeFileId!, false);
               console.log("File saved as:", outputPath);
 
               // Show success notification
@@ -1362,11 +1390,11 @@ export const useStore = create<State>()(
           },
           saveActiveFileVersion: async () => {
             const state = get();
-            if (!state.activeFilePath) return;
-            const file = openFiles[state.activeFilePath];
+            if (!state.activeFileId) return;
+            const file = openFiles[state.activeFileId];
             if (!file || !file.audioBuffer) return;
 
-            const currentFilePath = state.activeFilePath;
+            const currentFilePath = file.filePath;
             const dir = window.nodePath.dirname(currentFilePath);
             const ext = window.nodePath.extname(currentFilePath);
             const baseName = window.nodePath.basename(currentFilePath, ext);
@@ -1402,8 +1430,11 @@ export const useStore = create<State>()(
               // Export the audio
               await window.audioAnalysis.exportAudio(audioChannels, outputPath, file.audioBuffer.sampleRate, format);
 
+              // Update file path in openFiles
+              file.filePath = outputPath;
+
               // Mark as not dirty
-              get().setFileDirty(currentFilePath, false);
+              get().setFileDirty(state.activeFileId!, false);
               console.log("File version saved:", outputPath);
 
               // Show success notification
@@ -1421,50 +1452,59 @@ export const useStore = create<State>()(
               });
             }
           },
-          closeFilePath: (filePath: string) =>
+          closeFile: (fileId: string) =>
             set(
               produce((state: State) => {
-                const openFile = openFiles[filePath];
+                const openFile = openFiles[fileId];
                 if (openFile) {
-                  state.openFilePaths = state.openFilePaths.filter((path) => path !== filePath);
-                  delete state.filesBpm[filePath];
-                  delete state.filesZoom[filePath];
-                  delete state.filesOffset[filePath];
+                  state.openFileIds = state.openFileIds.filter((id) => id !== fileId);
+                  delete state.filesBpm[fileId];
+                  delete state.filesZoom[fileId];
+                  delete state.filesOffset[fileId];
+                  delete state.filesDirty[fileId];
+                  delete state.filesResolution[fileId];
+                  delete openFiles[fileId];
 
-                  const nextFilePath = state.openFilePaths[state.openFilePaths.length - 1] || null;
-                  state.activeFilePath = nextFilePath || null;
+                  const nextFileId = state.openFileIds[state.openFileIds.length - 1] || null;
+                  state.activeFileId = nextFileId || null;
 
                   // If the file being closed is the source file, set the source file to the next file
-                  if (!nextFilePath) state.sourceFile = null;
-                  else if (state.sourceFile?.path === filePath) {
+                  if (!nextFileId) state.sourceFile = null;
+                  else if (state.sourceFile?.id === fileId) {
                     state.sourceFile = {
-                      path: nextFilePath,
+                      id: nextFileId,
                       mode: "current",
                     };
                   }
                 }
               }),
             ),
-          closeAllFilePaths: () => {
+          closeAllFiles: () => {
+            // Clear the openFiles object
+            Object.keys(openFiles).forEach((fileId) => {
+              delete openFiles[fileId];
+            });
+
             return set({
-              openFilePaths: [],
+              openFileIds: [],
               filesBpm: {},
               filesResolution: {},
               filesZoom: {},
               filesOffset: {},
-              activeFilePath: null,
+              filesDirty: {},
+              activeFileId: null,
               sourceFile: null,
             });
           },
-          synthesizeFilePath: async (filePath: string) => {
+          synthesizeFile: async (fileId: string) => {
             const state = get();
-            if (!state.activeFilePath) return;
+            if (!state.activeFileId) return;
 
             try {
               const totalStart = performance.now();
               console.log("runSynthesis");
               const { normalize, bandsPerOctave, minFreq, isPlaying } = useStore.getState();
-              const file = openFiles[filePath];
+              const file = openFiles[fileId];
               if (!file || !file.rendererRef?.current) {
                 return;
               }
@@ -1563,9 +1603,9 @@ export const useStore = create<State>()(
               file.audioBuffer = audioBuffer;
 
               // Mark file as dirty after synthesis
-              get().setFileDirty(filePath, true);
+              get().setFileDirty(fileId, true);
 
-              if (isPlaying && state.activeFilePath && state.activeFilePath === filePath) {
+              if (isPlaying && state.activeFileId && state.activeFileId === fileId) {
                 const transport = Tone.getTransport();
                 transport.cancel(0);
                 player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
@@ -1580,8 +1620,8 @@ export const useStore = create<State>()(
           },
           reanalyzeActiveFile: () => {
             const state = get();
-            if (!state.activeFilePath) return;
-            const file = openFiles[state.activeFilePath];
+            if (!state.activeFileId) return;
+            const file = openFiles[state.activeFileId];
 
             modals.openConfirmModal({
               title: "Re-analyze File",
@@ -1594,9 +1634,9 @@ export const useStore = create<State>()(
                 body: { fontSize: "var(--mantine-font-size-sm)" },
               },
               onConfirm: async () => {
-                if (!state.activeFilePath) return;
+                if (!state.activeFileId) return;
 
-                const result = await window.audioAnalysis.analyze(state.activeFilePath, {
+                const result = await window.audioAnalysis.analyze(file.filePath, {
                   bandsPerOctave: state.bandsPerOctave.value,
                   minFreq: state.minFreq.value,
                 });
@@ -1633,11 +1673,11 @@ export const useStore = create<State>()(
 
                 file.rendererRef?.current?.reloadTextures();
 
-                const undoManager = getUndoManager(state.activeFilePath);
+                const undoManager = getUndoManager(state.activeFileId);
                 undoManager.clear();
 
                 return set({
-                  filesResolution: { ...state.filesResolution, [state.activeFilePath]: state.bandsPerOctave.value },
+                  filesResolution: { ...state.filesResolution, [state.activeFileId]: state.bandsPerOctave.value },
                 });
               },
             });
@@ -1645,29 +1685,29 @@ export const useStore = create<State>()(
           audioBuffers: {},
           setAudioBuffers: (audioBuffers) => set({ audioBuffers }),
           filesBpm: {},
-          setFileBpm: (filePath, bpm) =>
+          setFileBpm: (fileId, bpm) =>
             set(
               produce((state: State) => {
                 if (bpm) {
-                  state.filesBpm[filePath] = bpm;
+                  state.filesBpm[fileId] = bpm;
                 } else {
-                  delete state.filesBpm[filePath];
+                  delete state.filesBpm[fileId];
                 }
               }),
             ),
           filesResolution: {},
-          setFileResolution: (filePath, resolution) =>
+          setFileResolution: (fileId, resolution) =>
             set((state) => {
               const newFilesResolution = { ...state.filesResolution };
-              newFilesResolution[filePath] = resolution;
+              newFilesResolution[fileId] = resolution;
               return { filesResolution: newFilesResolution };
             }),
-          activeFilePath: null,
-          setActiveFilePath: (activeFilePath) => set({ activeFilePath }),
+          activeFileId: null,
+          setActiveFileId: (activeFileId) => set({ activeFileId }),
           sourceFile: null,
           setSourceFile: (sourceFile) => set({ sourceFile }),
           togglePlayback: async () => {
-            const { isPlaying, activeFilePath, loop } = get();
+            const { isPlaying, activeFileId, loop } = get();
             if (isPlaying) {
               const transport = Tone.getTransport();
               transport.stop();
@@ -1675,7 +1715,7 @@ export const useStore = create<State>()(
 
               return set({ playbackTime: 0, isPlaying: false });
             }
-            const file = activeFilePath ? openFiles[activeFilePath] : undefined;
+            const file = activeFileId ? openFiles[activeFileId] : undefined;
             const audioBuffer = file?.audioBuffer;
 
             if (audioBuffer) {
@@ -1706,8 +1746,8 @@ export const useStore = create<State>()(
 
           mousePos: null,
           setMousePos: (mousePos) => set({ mousePos }),
-          hoveredFilePath: null,
-          setHoveredFilePath: (filePath) => set({ hoveredFilePath: filePath }),
+          hoveredFile: null,
+          setHoveredFile: (fileId) => set({ hoveredFile: fileId }),
           effectOrder: ["gain", "dynamics", "transform", "harmonics", "blur", "synthesize", "sharpen"],
           setEffectOrder: (effectOrder) => set({ effectOrder }),
           effectsEnabled: {

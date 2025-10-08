@@ -6,14 +6,14 @@ import { FileView } from "../file-view";
 export const CanvasPanel = memo(() => {
   console.log("CanvasPanel render");
 
-  const openFilePaths = useStore((state) => state.openFilePaths);
+  const openFileIds = useStore((state) => state.openFileIds);
 
-  console.log("openFilePaths", openFilePaths);
+  console.log("openFileIds", openFileIds);
 
   return (
     <Stack pos="relative" gap={0}>
-      {openFilePaths.map((filePath) => (
-        <FileView key={filePath} filePath={filePath} />
+      {openFileIds.map((fileId) => (
+        <FileView key={fileId} fileId={fileId} />
       ))}
     </Stack>
   );

@@ -52,14 +52,14 @@ const TruncatedFilename = memo(({ filePath, isDirty }: { filePath: string; isDir
 TruncatedFilename.displayName = "TruncatedFilename";
 
 export interface FileViewProps {
-  filePath: string;
+  fileId: string;
 }
 
 const viewStyle = { width: "100%", height: "100%", zIndex: 1 };
 
 function getSnappedCoordinates(
   event: React.MouseEvent<HTMLDivElement>,
-  filePath: string,
+  fileId: string,
   bpm: number,
 ): [number, number] | null {
   const state = useStore.getState();
@@ -74,13 +74,13 @@ function getSnappedCoordinates(
   const screenUv = new Vector2(x, y);
 
   // Get per-file zoom and offset from store
-  const zoom = state.filesZoom[filePath] ?? 0;
-  const offset = state.filesOffset[filePath] ?? 0;
+  const zoom = state.filesZoom[fileId] ?? 0;
+  const offset = state.filesOffset[fileId] ?? 0;
 
   // Convert from screen coordinates to zoomed coordinates
   const uv = screenToZoomed(screenUv, zoom, offset);
 
-  const { spectrogramData } = openFiles[filePath];
+  const { spectrogramData } = openFiles[fileId];
 
   let snappedX = uv.x;
   let snappedY = uv.y;
@@ -125,28 +125,31 @@ function getSnappedCoordinates(
   return [snappedX, snappedY];
 }
 
-const Header = memo(function Header({ filePath }: FileViewProps) {
+const Header = memo(function Header({ fileId }: FileViewProps) {
   const setSourceFile = useStore((state) => state.setSourceFile);
-  const bpm = useStore((state) => state.filesBpm[filePath] ?? 120);
+  const bpm = useStore((state) => state.filesBpm[fileId] ?? 120);
   const setFileBpm = useStore((state) => state.setFileBpm);
   const setFileZoom = useStore((state) => state.setFileZoom);
-  const zoom = useStore((state) => state.filesZoom[filePath] ?? 0);
-  const closeFilePath = useStore((state) => state.closeFilePath);
+  const zoom = useStore((state) => state.filesZoom[fileId] ?? 0);
+  const closeFile = useStore((state) => state.closeFile);
   const sourceFile = useStore((state) => state.sourceFile);
-  const resolution = useStore((state) => state.filesResolution[filePath]);
-  const isDirty = useStore((state) => state.filesDirty[filePath] ?? false);
+  const resolution = useStore((state) => state.filesResolution[fileId]);
+  const isDirty = useStore((state) => state.filesDirty[fileId] ?? false);
 
-  const isSource = sourceFile?.path === filePath;
+  const file = openFiles[fileId];
+  const filePath = file?.filePath || "";
+
+  const isSource = sourceFile?.id === fileId;
   const sourceMode = sourceFile?.mode ?? "current";
 
   const handleZoomIn = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setFileZoom(filePath, zoom + 1);
+    setFileZoom(fileId, zoom + 1);
   };
 
   const handleZoomOut = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setFileZoom(filePath, zoom - 1);
+    setFileZoom(fileId, zoom - 1);
   };
 
   return (
@@ -180,7 +183,7 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
           <NumberInput
             w={60}
             value={bpm}
-            onChange={(val) => setFileBpm(filePath, Number(val))}
+            onChange={(val) => setFileBpm(fileId, Number(val))}
             size="xs"
             max={999}
             min={10}
@@ -193,7 +196,7 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
               variant="filled"
               onClick={(e) => {
                 e.stopPropagation();
-                setSourceFile({ path: filePath, mode: "current" });
+                setSourceFile({ id: fileId, mode: "current" });
               }}
               color={isSource && sourceMode === "current" ? "orange" : "dark.5"}
             >
@@ -206,7 +209,7 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
               variant="filled"
               onClick={(e) => {
                 e.stopPropagation();
-                setSourceFile({ path: filePath, mode: "original" });
+                setSourceFile({ id: fileId, mode: "original" });
               }}
               color={isSource && sourceMode === "original" ? "orange" : "dark.5"}
             >
@@ -220,7 +223,7 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
           size="xs"
           onClick={(e) => {
             e.stopPropagation();
-            closeFilePath(filePath);
+            closeFile(fileId);
           }}
         >
           <X />
@@ -230,13 +233,15 @@ const Header = memo(function Header({ filePath }: FileViewProps) {
   );
 });
 
-export const FileView = memo(({ filePath }: FileViewProps) => {
-  console.log("FileView render", filePath);
+export const FileView = memo(({ fileId }: FileViewProps) => {
+  const file = openFiles[fileId];
+  const filePath = file?.filePath || "";
+  console.log("FileView render", fileId, filePath);
 
-  const activeFilePath = useStore((state) => state.activeFilePath);
-  const isActive = activeFilePath === filePath;
+  const activeFileId = useStore((state) => state.activeFileId);
+  const isActive = activeFileId === fileId;
   const isSettingPosition = useStore((state) => state.isSettingPosition);
-  const zoom = useStore((state) => state.filesZoom[filePath] ?? 0);
+  const zoom = useStore((state) => state.filesZoom[fileId] ?? 0);
 
   const cursorStyle = useMemo(() => ({ cursor: isSettingPosition ? "crosshair" : "crosshair" }), [isSettingPosition]);
 
@@ -245,12 +250,12 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   const refCallback = useCallback(
     (handle: FileRendererHandle | null) => {
       rendererRef.current = handle;
-      const file = openFiles[filePath];
+      const file = openFiles[fileId];
       if (handle && file) {
         file.rendererRef = rendererRef;
       }
     },
-    [filePath],
+    [fileId],
   );
 
   const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
@@ -260,8 +265,8 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   const uvToBeatsAndPitch = useCallback(
     (uvX: number, uvY: number) => {
       const state = useStore.getState();
-      const { spectrogramData } = openFiles[filePath];
-      const bpm = state.filesBpm[filePath] ?? 120;
+      const { spectrogramData } = openFiles[fileId];
+      const bpm = state.filesBpm[fileId] ?? 120;
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
       // Get brush size to calculate bottom-left corner
@@ -286,13 +291,13 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
 
       return { beats, pitch };
     },
-    [filePath],
+    [fileId],
   );
 
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = (event) => {
     // Allow mouse position tracking on all files (for setting position and preview)
-    const bpm = useStore.getState().filesBpm[filePath] ?? 120;
-    const coords = getSnappedCoordinates(event, filePath, bpm);
+    const bpm = useStore.getState().filesBpm[fileId] ?? 120;
+    const coords = getSnappedCoordinates(event, fileId, bpm);
     if (!coords) return;
     const [snappedX, snappedY] = coords;
 
@@ -304,7 +309,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
     ) {
       const state = useStore.getState();
       state.setMousePos(new Vector2(snappedX, 1 - snappedY));
-      state.setHoveredFilePath(filePath); // Track which file is being hovered
+      state.setHoveredFile(fileId); // Track which file is being hovered
       // Render stroke preview on all files, but only actual strokes on active file
       const isPreview = !isActive || event.buttons !== 1;
       rendererRef.current.renderStroke(snappedX, snappedY, isPreview);
@@ -314,15 +319,15 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
 
   const handleMouseEnter: MouseEventHandler<HTMLDivElement> = (event) => {
     // When mouse enters, immediately update position and trigger render
-    const bpm = useStore.getState().filesBpm[filePath] ?? 120;
-    const coords = getSnappedCoordinates(event, filePath, bpm);
+    const bpm = useStore.getState().filesBpm[fileId] ?? 120;
+    const coords = getSnappedCoordinates(event, fileId, bpm);
     if (!coords) return;
     const [snappedX, snappedY] = coords;
 
     if (rendererRef.current) {
       const state = useStore.getState();
       state.setMousePos(new Vector2(snappedX, 1 - snappedY));
-      state.setHoveredFilePath(filePath);
+      state.setHoveredFile(fileId);
       // Render stroke preview
       const isPreview = !isActive || event.buttons !== 1;
       rendererRef.current.renderStroke(snappedX, snappedY, isPreview);
@@ -333,7 +338,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   const handleMouseLeave = () => {
     const state = useStore.getState();
     state.setMousePos(null);
-    state.setHoveredFilePath(null);
+    state.setHoveredFile(null);
     rendererRef.current?.clearPreview();
     lastSnappedPositionRef.current = null;
   };
@@ -341,26 +346,26 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = (event) => {
     if (event.button !== 0) return;
 
-    const bpm = useStore.getState().filesBpm[filePath] ?? 120;
-    const coords = getSnappedCoordinates(event, filePath, bpm);
+    const bpm = useStore.getState().filesBpm[fileId] ?? 120;
+    const coords = getSnappedCoordinates(event, fileId, bpm);
     if (!coords) return;
 
     // If in set position mode, capture the position and set source file
     if (isSettingPosition) {
       const state = useStore.getState();
       const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
-      state.setSourcePosition({ beats, pitch, filePath });
+      state.setSourcePosition({ beats, pitch, fileId });
       state.setIsSettingPosition(false);
 
       // Set this file as the source file (in "current" mode)
-      state.setSourceFile({ path: filePath, mode: state.sourceFile?.mode ?? "current" });
+      state.setSourceFile({ id: fileId, mode: state.sourceFile?.mode ?? "current" });
       return;
     }
 
     // Make this the active file if it isn't already
     const state = useStore.getState();
     if (!isActive) {
-      state.setActiveFilePath(filePath);
+      state.setActiveFileId(fileId);
     }
 
     // Normal painting behavior
@@ -383,18 +388,18 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
   const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = async (event) => {
     if (!isActive) return;
     if (event.button === 0 && rendererRef?.current) {
-      const { synthesizeFilePath, setBrushStartPosition } = useStore.getState();
+      const { synthesizeFile, setBrushStartPosition } = useStore.getState();
       // Clear brush start position when stroke ends
       setBrushStartPosition(null);
 
       // Left mouse button up - save undo state and run synthesis (no IPC)
       const data = await rendererRef.current.getFBOData();
       if (data) {
-        const undoManager = getUndoManager(filePath);
-        await undoManager.addState(data, filePath);
+        const undoManager = getUndoManager(fileId);
+        await undoManager.addState(data, fileId);
 
         // Run synthesis now that the stroke is finished
-        synthesizeFilePath(filePath);
+        synthesizeFile(fileId);
       }
     }
   };
@@ -405,11 +410,11 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
       bd={isActive ? "2px solid orange" : "2px solid transparent"}
       onClick={() => {
         if (!isActive) {
-          useStore.getState().setActiveFilePath(filePath);
+          useStore.getState().setActiveFileId(fileId);
         }
       }}
     >
-      <Header filePath={filePath} />
+      <Header fileId={fileId} />
       <Box
         h={400}
         style={cursorStyle}
@@ -421,7 +426,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
         onMouseUp={handleCanvasMouseUp}
       >
         <View style={viewStyle}>
-          <FileRenderer filePath={filePath} ref={refCallback} />
+          <FileRenderer fileId={fileId} ref={refCallback} />
         </View>
       </Box>
       <Box
@@ -435,10 +440,10 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
           const scrollWidth = target.scrollWidth - target.clientWidth;
           if (scrollWidth > 0) {
             const offset = target.scrollLeft / scrollWidth;
-            useStore.getState().setFileOffset(filePath, offset);
+            useStore.getState().setFileOffset(fileId, offset);
           } else {
             // No scrolling needed, reset to 0
-            useStore.getState().setFileOffset(filePath, 0);
+            useStore.getState().setFileOffset(fileId, 0);
           }
         }}
       >
@@ -451,7 +456,7 @@ export const FileView = memo(({ filePath }: FileViewProps) => {
         />
       </Box>
 
-      {isActive && <PlaybackLine filePath={filePath} />}
+      {isActive && <PlaybackLine fileId={fileId} />}
     </Box>
   );
 });

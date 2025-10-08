@@ -6,7 +6,7 @@ import { ipcSend } from "./ipc";
 
 interface UndoState {
   dataPath: string;
-  filePath: string;
+  fileId: string;
   compressed: boolean;
 }
 
@@ -47,7 +47,7 @@ class UndoManager {
     }
   }
 
-  async addState(data: Float32Array, filePath: string) {
+  async addState(data: Float32Array, fileId: string) {
     await this.init();
     if (!this.tempDir || !window.nodeFs || !window.nodePath) {
       console.error("Undo manager not properly initialized");
@@ -79,7 +79,7 @@ class UndoManager {
       const dataToWrite = shouldCompress ? window.compression!.compress(buffer) : buffer;
       await window.nodeFs.writeFile(dataPath, dataToWrite);
 
-      this.timeline.push({ dataPath, filePath, compressed: !!shouldCompress });
+      this.timeline.push({ dataPath, fileId, compressed: !!shouldCompress });
       this.head++;
 
       // Enforce history limit
@@ -95,7 +95,7 @@ class UndoManager {
         this.head--;
       }
 
-      console.log(`Undo state added for ${filePath}, history size: ${this.timeline.length}, head: ${this.head}`);
+      console.log(`Undo state added for ${fileId}, history size: ${this.timeline.length}, head: ${this.head}`);
       this.notifyStateChange();
     } catch (error) {
       console.error("Failed to add undo state:", error);
@@ -118,7 +118,7 @@ class UndoManager {
 
     try {
       this.head--;
-      const { dataPath, filePath, compressed } = this.timeline[this.head];
+      const { dataPath, fileId, compressed } = this.timeline[this.head];
 
       const fileData = await window.nodeFs.readFile(dataPath);
 
@@ -136,13 +136,13 @@ class UndoManager {
         buffer.byteLength / Float32Array.BYTES_PER_ELEMENT,
       );
 
-      console.log(`Undo to state ${this.head} for ${filePath}`);
+      console.log(`Undo to state ${this.head} for ${fileId}`);
       this.notifyStateChange();
 
-      openFiles[filePath]?.rendererRef?.current?.setFBOData(data);
+      openFiles[fileId]?.rendererRef?.current?.setFBOData(data);
 
-      const { synthesizeFilePath } = useStore.getState();
-      synthesizeFilePath(filePath);
+      const { synthesizeFile } = useStore.getState();
+      synthesizeFile(fileId);
     } catch (error) {
       console.error("Failed to undo:", error);
     }
@@ -156,7 +156,7 @@ class UndoManager {
 
     try {
       this.head++;
-      const { dataPath, filePath, compressed } = this.timeline[this.head];
+      const { dataPath, fileId, compressed } = this.timeline[this.head];
 
       const fileData = await window.nodeFs.readFile(dataPath);
 
@@ -174,13 +174,13 @@ class UndoManager {
         buffer.byteLength / Float32Array.BYTES_PER_ELEMENT,
       );
 
-      console.log(`Redo to state ${this.head} for ${filePath}`);
+      console.log(`Redo to state ${this.head} for ${fileId}`);
       this.notifyStateChange();
 
-      openFiles[filePath]?.rendererRef?.current?.setFBOData(data);
+      openFiles[fileId]?.rendererRef?.current?.setFBOData(data);
 
-      const { synthesizeFilePath } = useStore.getState();
-      synthesizeFilePath(filePath);
+      const { synthesizeFile } = useStore.getState();
+      synthesizeFile(fileId);
     } catch (error) {
       console.error("Failed to redo:", error);
     }
@@ -221,21 +221,21 @@ class UndoManager {
   }
 }
 
-// Global undo manager instance per file
+// Global undo manager instance per file (keyed by file ID)
 const undoManagers = new Map<string, UndoManager>();
 
-export function getUndoManager(filePath: string, useCompression: boolean = false): UndoManager {
-  if (!undoManagers.has(filePath)) {
-    undoManagers.set(filePath, new UndoManager(useCompression));
+export function getUndoManager(fileId: string, useCompression: boolean = false): UndoManager {
+  if (!undoManagers.has(fileId)) {
+    undoManagers.set(fileId, new UndoManager(useCompression));
   }
-  return undoManagers.get(filePath)!;
+  return undoManagers.get(fileId)!;
 }
 
-export async function destroyUndoManager(filePath: string) {
-  const manager = undoManagers.get(filePath);
+export async function destroyUndoManager(fileId: string) {
+  const manager = undoManagers.get(fileId);
   if (manager) {
     await manager.destroy();
-    undoManagers.delete(filePath);
+    undoManagers.delete(fileId);
   }
 }
 

@@ -21,7 +21,7 @@ import { copyMaterial } from "./copy-material";
  * @param file - The open file to render.
  */
 interface FileRendererProps {
-  filePath: string;
+  fileId: string;
 }
 
 /**
@@ -56,15 +56,15 @@ export interface FileRendererHandle {
  * for processing and displaying the spectrogram.
  */
 export const FileRenderer = memo(
-  forwardRef<FileRendererHandle, FileRendererProps>(({ filePath }, ref) => {
-    const { spectrogramData } = openFiles[filePath];
+  forwardRef<FileRendererHandle, FileRendererProps>(({ fileId }, ref) => {
+    const { spectrogramData } = openFiles[fileId];
 
     // Don't subscribe to these during render - access them via refs or useFrame instead
     const glRef = useRef<THREE.WebGLRenderer>(null!);
     const cameraRef = useRef<THREE.Camera>(null!);
     const invalidateRef = useRef<() => void>(null!);
 
-    const modulatorScaleLut = useModulatorScaleLut(filePath);
+    const modulatorScaleLut = useModulatorScaleLut(fileId);
 
     // Load image textures for all modulators
     const modulator1ImageTexture = useModulatorTexture(0);
@@ -86,19 +86,19 @@ export const FileRenderer = memo(
     // Subscriptions to global state
     useEffect(() => {
       const unsubBpms = useStore.subscribe(
-        (state) => state.filesBpm[filePath],
+        (state) => state.filesBpm[fileId],
         () => {
           invalidateRef.current?.();
         },
       );
       const unsubZoom = useStore.subscribe(
-        (state) => state.filesZoom[filePath],
+        (state) => state.filesZoom[fileId],
         () => {
           invalidateRef.current?.();
         },
       );
       const unsubOffset = useStore.subscribe(
-        (state) => state.filesOffset[filePath],
+        (state) => state.filesOffset[fileId],
         () => {
           invalidateRef.current?.();
         },
@@ -137,7 +137,7 @@ export const FileRenderer = memo(
         unsubDisplayMinDb();
         unsubDisplayMaxDb();
       };
-    }, [filePath]);
+    }, [fileId]);
 
     // Materials and scene objects for rendering
     const displayMaterial = useMemo(() => {
@@ -429,10 +429,11 @@ export const FileRenderer = memo(
       const mousePos = state.mousePos;
 
       // Determine file state for rendering logic
-      const isActiveFile = state.activeFilePath === filePath;
-      const isSourceFile = state.sourceFile?.path === filePath;
-      const isMouseOver = Boolean(mousePos && mousePos.x >= 0 && state.hoveredFilePath === filePath);
-      const isMouseOverAnyFile = Boolean(mousePos && state.hoveredFilePath);
+      const isActiveFile = state.activeFileId === fileId;
+      const isSourceFile = state.sourceFile?.id === fileId;
+      const file = openFiles[fileId];
+      const isMouseOver = Boolean(mousePos && mousePos.x >= 0 && file && state.hoveredFile === file.id);
+      const isMouseOverAnyFile = Boolean(mousePos && state.hoveredFile);
 
       // Initial copy of the spectrogram data to the FBO
       if (!isInitialized.current) {
@@ -449,10 +450,10 @@ export const FileRenderer = memo(
         // Invalidate cache since FBO has been initialized
         fboDataDirty.current = true;
 
-        state.synthesizeFilePath(filePath);
+        state.synthesizeFile(fileId);
 
-        const undoManager = getUndoManager(filePath);
-        undoManager.addState(spectrogramData.packedData, filePath);
+        const undoManager = getUndoManager(fileId);
+        undoManager.addState(spectrogramData.packedData, fileId);
 
         invalidate(); // Trigger another render to update display
         return;
@@ -463,12 +464,12 @@ export const FileRenderer = memo(
         return;
       }
 
-      const bpm = state.filesBpm[filePath] || 120;
+      const bpm = state.filesBpm[fileId] || 120;
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
       // Get per-file zoom and offset from store
-      const viewZoomPower = state.filesZoom[filePath] ?? 0;
-      const viewOffset = state.filesOffset[filePath] ?? 0;
+      const viewZoomPower = state.filesZoom[fileId] ?? 0;
+      const viewOffset = state.filesOffset[fileId] ?? 0;
 
       // Calculate brush size for display
       const brushSizeUv = unitsToUv(
@@ -485,14 +486,14 @@ export const FileRenderer = memo(
 
       // Render brush stroke if requested
       if (strokeParams.current && applyStroke.current) {
-        const sourceFile = state.sourceFile?.path ? openFiles[state.sourceFile.path] : null;
+        const sourceFile = state.sourceFile?.id ? openFiles[state.sourceFile.id] : null;
         if (!sourceFile) return;
 
-        const sourceRendererRef = openFiles[sourceFile.filePath].rendererRef;
+        const sourceRendererRef = sourceFile.rendererRef;
         const textures = sourceRendererRef?.current?.getTextures();
         if (!textures) return;
 
-        const sourceBpm = state.filesBpm[sourceFile.filePath] || 120;
+        const sourceBpm = state.filesBpm[state.sourceFile!.id] || 120;
         const sourceTotalDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
 
         // Calculate source offset using the helper function
@@ -651,7 +652,7 @@ export const FileRenderer = memo(
         // Determine the source FBO based on sourceMode and which file is the source
         // "current" means we read from the current modified spectrogram
         // "original" means we read from the original unmodified source
-        const isSameFile = sourceFile.filePath === filePath;
+        const isSameFile = sourceFile.id === fileId;
         const sourceFbo =
           state.sourceFile?.mode === "original"
             ? { texture: textures.original } // Use original unmodified data
@@ -808,10 +809,10 @@ export const FileRenderer = memo(
       displayMaterial.uniforms.showVerticalGrid.value = gridHeightPx >= MIN_GRID_SPACING_PX && gridSizeSemis > 0;
 
       // Update source offset for display (so source rectangle shows correctly)
-      if (state.sourceFile?.path) {
-        const sourceFileData = openFiles[state.sourceFile.path];
+      if (state.sourceFile?.id) {
+        const sourceFileData = openFiles[state.sourceFile.id];
         if (sourceFileData) {
-          const sourceBpm = state.filesBpm[state.sourceFile.path] || 120;
+          const sourceBpm = state.filesBpm[state.sourceFile.id] || 120;
           const sourceTotalDuration =
             sourceFileData.spectrogramData.numFrames / sourceFileData.spectrogramData.sampleRate;
 
@@ -926,7 +927,7 @@ export const FileRenderer = memo(
       fboDataDirty.current = true;
 
       invalidateRef.current();
-      useStore.getState().synthesizeFilePath(filePath);
+      useStore.getState().synthesizeFile(fileId);
     };
 
     /**
