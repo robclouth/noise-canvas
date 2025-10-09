@@ -15,12 +15,7 @@ class UndoManager {
   private timeline: UndoState[] = [];
   private head = -1;
   private readonly MAX_HISTORY = 50;
-  private useCompression: boolean;
   private initialized = false;
-
-  constructor(useCompression: boolean = false) {
-    this.useCompression = useCompression;
-  }
 
   private async init() {
     if (this.initialized) return;
@@ -54,9 +49,6 @@ class UndoManager {
       return;
     }
 
-    // Check if compression is available and enabled
-    const shouldCompress = this.useCompression && window.compression;
-
     try {
       // Truncate redo history
       if (this.head < this.timeline.length - 1) {
@@ -72,14 +64,14 @@ class UndoManager {
 
       // Save state (with optional compression)
       const timestamp = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-      const extension = shouldCompress ? ".lz4" : ".bin";
+      const extension = ".bin";
       const dataPath = window.nodePath.join(this.tempDir, `state-${timestamp}${extension}`);
 
       const buffer = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
-      const dataToWrite = shouldCompress ? window.compression!.compress(buffer) : buffer;
+      const dataToWrite = buffer;
       await window.nodeFs.writeFile(dataPath, dataToWrite);
 
-      this.timeline.push({ dataPath, fileId, compressed: !!shouldCompress });
+      this.timeline.push({ dataPath, fileId, compressed: false });
       this.head++;
 
       // Enforce history limit
@@ -118,17 +110,9 @@ class UndoManager {
 
     try {
       this.head--;
-      const { dataPath, fileId, compressed } = this.timeline[this.head];
+      const { dataPath, fileId } = this.timeline[this.head];
 
-      const fileData = await window.nodeFs.readFile(dataPath);
-
-      // Decompress only if the state was compressed
-      let buffer: Buffer;
-      if (compressed && window.compression) {
-        buffer = window.compression.uncompress(fileData);
-      } else {
-        buffer = fileData;
-      }
+      const buffer = await window.nodeFs.readFile(dataPath);
 
       const data = new Float32Array(
         buffer.buffer,
@@ -156,17 +140,9 @@ class UndoManager {
 
     try {
       this.head++;
-      const { dataPath, fileId, compressed } = this.timeline[this.head];
+      const { dataPath, fileId } = this.timeline[this.head];
 
-      const fileData = await window.nodeFs.readFile(dataPath);
-
-      // Decompress only if the state was compressed
-      let buffer: Buffer;
-      if (compressed && window.compression) {
-        buffer = window.compression.uncompress(fileData);
-      } else {
-        buffer = fileData;
-      }
+      const buffer = await window.nodeFs.readFile(dataPath);
 
       const data = new Float32Array(
         buffer.buffer,
@@ -224,9 +200,9 @@ class UndoManager {
 // Global undo manager instance per file (keyed by file ID)
 const undoManagers = new Map<string, UndoManager>();
 
-export function getUndoManager(fileId: string, useCompression: boolean = false): UndoManager {
+export function getUndoManager(fileId: string): UndoManager {
   if (!undoManagers.has(fileId)) {
-    undoManagers.set(fileId, new UndoManager(useCompression));
+    undoManagers.set(fileId, new UndoManager());
   }
   return undoManagers.get(fileId)!;
 }

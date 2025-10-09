@@ -16,6 +16,7 @@ asarUnpack:
   - "**/node_modules/ffmpeg-static/**"
   - "**/node_modules/ffprobe-static/**"
 win:
+  icon: resources/icon.png
   executableName: "Noise Canvas"
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
@@ -23,16 +24,19 @@ nsis:
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
-  entitlementsInherit: build/entitlements.mac.plist
+  icon: resources/icon.png
+  entitlementsInherit: resources/entitlements.mac.plist
   extendInfo:
-    - NSCameraUsageDescription: Application requests access to the device's camera.
     - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
+  identity: "-"
 dmg:
   artifactName: ${name}-${version}.${ext}
+  icon: resources/icon.png
 linux:
+  icon: resources/icon.png
   target:
     - AppImage
     - snap
