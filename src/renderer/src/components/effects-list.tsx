@@ -6,7 +6,6 @@ import { BlurEffect } from "./effect-views/blur-effect";
 import { DynamicsEffect } from "./effect-views/dynamics-effect";
 import { GainEffect } from "./effect-views/gain-effect";
 import { HarmonicsEffect } from "./effect-views/harmonics-effect";
-import { SharpenEffect } from "./effect-views/sharpen-effect";
 import { SynthesizeEffect } from "./effect-views/synthesize-effect";
 import { TransformEffect } from "./effect-views/transform-effect";
 
@@ -16,7 +15,6 @@ const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
   transform: <TransformEffect />,
   harmonics: <HarmonicsEffect />,
   blur: <BlurEffect />,
-  sharpen: <SharpenEffect />,
   synthesize: <SynthesizeEffect />,
 };
 
@@ -26,7 +24,6 @@ const EFFECT_LABELS: Record<string, string> = {
   transform: "Transform",
   harmonics: "Harmonics",
   blur: "Smooth",
-  sharpen: "Sharpen",
   synthesize: "Synthesize",
 };
 
@@ -36,7 +33,6 @@ const EFFECT_DESCRIPTIONS: Record<string, string> = {
   transform: "Shift, scale, and rotate the spectrogram content in time and frequency.",
   harmonics: "Add or modify harmonic overtones to create richer timbres.",
   blur: "Smooth and blend frequencies over time and pitch for softer transitions.",
-  sharpen: "Enhance frequency definition by increasing contrast between adjacent bins.",
   synthesize: "Generate new audio content from scratch (noise, sine waves, etc.).",
 };
 

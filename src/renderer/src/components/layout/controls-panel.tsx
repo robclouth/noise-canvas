@@ -29,6 +29,7 @@ export function ControlsPanel() {
       <Section label="Grid">
         <ParameterControl paramKey="gridSizeBeats" />
         <ParameterControl paramKey="gridSizeSemis" />
+        <ParameterControl paramKey="brushSizeLockedToGrid" />
       </Section>
       <Section label="Display">
         <ParameterControl paramKey="displayMinDb" />

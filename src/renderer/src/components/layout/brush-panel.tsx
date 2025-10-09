@@ -12,19 +12,14 @@ export function BrushPanel() {
   return (
     <Stack p="xs" gap="xs">
       <PresetSelector />
-      <Section label="Size">
+      <Section label="Brush">
         <ParameterControl paramKey="brushWidthBeats" disabled={brushSizeLockedToGrid} />
         <ParameterControl paramKey="brushHeightSemis" disabled={brushSizeLockedToGrid} />
-        <ParameterControl paramKey="brushSizeLockedToGrid" />
-        <ParameterControl paramKey="brushWrapMode" />
-      </Section>
-      <Section label="Output">
         <ParameterControl paramKey="brushIntensity" />
-        <ParameterControl paramKey="brushIterations" />
-        <ParameterControl paramKey="brushPan" />
         <ParameterControl paramKey="blendMode" />
-      </Section>
-      <Section label="Feather">
+        <ParameterControl paramKey="brushPan" />
+        <ParameterControl paramKey="brushIterations" />
+        <ParameterControl paramKey="brushWrapMode" />
         <ParameterControl paramKey="brushFeatherTime" />
         <ParameterControl paramKey="brushFeatherPitch" />
         <ParameterControl paramKey="brushFeatherSlopeTime" />

@@ -9,6 +9,13 @@ import "./assets/main.css";
 
 const theme = createTheme({
   primaryColor: "orange",
+  fontSizes: {
+    xs: "11px",
+    sm: "14px",
+    md: "16px",
+    lg: "16px",
+    xl: "18px",
+  },
   components: {
     Input: Input.extend({
       vars: (_theme, props) => {

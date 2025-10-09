@@ -35,7 +35,7 @@ export type ParameterControlProps = {
   color?: string;
 };
 
-export const ParameterControl = ({ labelWidth = 60, disabled, color, paramKey }: ParameterControlProps) => {
+export const ParameterControl = ({ labelWidth = 70, disabled, color, paramKey }: ParameterControlProps) => {
   const isModulated = useStore((state) => {
     return state[paramKey]?.modulatorParamKeys
       ?.map((key) => {

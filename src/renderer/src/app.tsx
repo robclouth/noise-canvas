@@ -206,7 +206,7 @@ function App(): React.JSX.Element {
         <View.Port />
         <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
       </Canvas>
-      <ScrollArea w={300} miw={300} h="100%" onScrollPositionChange={() => invalidateRef.current?.()}>
+      <ScrollArea w={350} miw={350} h="100%" onScrollPositionChange={() => invalidateRef.current?.()}>
         <BrushPanel />
       </ScrollArea>
       <Stack flex={1} h="100%" gap={0}>
@@ -215,7 +215,7 @@ function App(): React.JSX.Element {
         </ScrollArea>
         <TransportPanel />
       </Stack>
-      <ScrollArea w={300} miw={300} h="100%" onScrollPositionChange={() => invalidateRef.current?.()}>
+      <ScrollArea w={350} miw={350} h="100%" onScrollPositionChange={() => invalidateRef.current?.()}>
         <ControlsPanel />
       </ScrollArea>
       <Notifications />

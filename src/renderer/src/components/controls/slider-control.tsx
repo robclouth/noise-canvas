@@ -28,7 +28,7 @@ export const SliderControl = (props: SliderControlProps) => {
       {modulatorParamKeys ? (
         <Popover withArrow shadow="lg">
           <Popover.Target>
-            <Group gap={2} w={60} style={{ cursor: "pointer" }} wrap="nowrap">
+            <Group gap={2} w={70} style={{ cursor: "pointer" }} wrap="nowrap">
               {labelComponent}
               <ChevronDown size={12} />
             </Group>

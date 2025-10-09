@@ -377,9 +377,9 @@ function createModulatorParams(set: ZustandSet): ModulatorParameters {
         set,
         paramKey,
         {
-          name: `Modulator Strength ${i + 1}`,
-          label: "Strength",
-          description: "The strength of the modulator.",
+          name: `Modulator Depth ${i + 1}`,
+          label: "Depth",
+          description: "The depth of the modulator.",
           value: 100,
           min: -100,
           max: 100,
@@ -539,8 +539,8 @@ export const useStore = create<State>()(
             set,
             "brushIntensity",
             {
-              name: "Brush Intensity",
-              label: "Amount",
+              name: "Brush Strength",
+              label: "Strength",
               description: "Controls the strength of the brush.",
               value: 100,
               min: 0,
@@ -585,7 +585,7 @@ export const useStore = create<State>()(
             "brushFeatherTime",
             {
               name: "Feather Time",
-              label: "Amount H",
+              label: "Feather H",
               description: "Softens the brush effect at the edges of the time selection.",
               value: 0,
               min: 0,
@@ -601,7 +601,7 @@ export const useStore = create<State>()(
             "brushFeatherPitch",
             {
               name: "Feather Pitch",
-              label: "Amount V",
+              label: "Feather V",
               description: "Softens the brush effect at the edges of the pitch selection.",
               value: 0,
               min: 0,
@@ -706,7 +706,7 @@ export const useStore = create<State>()(
             "brushSizeLockedToGrid",
             {
               name: "Lock Brush Size to Grid",
-              label: "Grid",
+              label: "Lock size",
               description: "Locks the brush size to the grid size.",
               value: false as boolean,
             },
@@ -897,7 +897,7 @@ export const useStore = create<State>()(
             "blendMode",
             {
               name: "Blend Mode",
-              label: "Blend",
+              label: "Blend mode",
               description: "The blend mode to use when applying the brush.",
               value: 0,
               options: BLEND_MODES,
@@ -1789,7 +1789,7 @@ export const useStore = create<State>()(
           setMousePos: (mousePos) => set({ mousePos }),
           hoveredFile: null,
           setHoveredFile: (fileId) => set({ hoveredFile: fileId }),
-          effectOrder: ["gain", "dynamics", "transform", "harmonics", "blur", "synthesize", "sharpen"],
+          effectOrder: ["synthesize", "gain", "dynamics", "transform", "harmonics", "blur"],
           setEffectOrder: (effectOrder) => set({ effectOrder }),
           effectsEnabled: {
             gain: true,
@@ -1798,7 +1798,6 @@ export const useStore = create<State>()(
             harmonics: false,
             blur: false,
             synthesize: false,
-            sharpen: false,
           },
           setEffectEnabled: (effect, enabled) =>
             set((state) => ({

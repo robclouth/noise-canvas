@@ -4,7 +4,6 @@ import { dynamicsEffect } from "./dynamics-effect";
 import { gainEffect } from "./gain-effect";
 import { harmonicsEffect } from "./harmonics-effect";
 import { passThroughEffect } from "./passthrough-effect";
-import { sharpenEffect } from "./sharpen-effect";
 import { synthesizeEffect } from "./synthesize-effect";
 import { transformEffect } from "./transform-effect";
 
@@ -15,7 +14,6 @@ export const effects: Record<string, BaseEffect> = {
   harmonics: harmonicsEffect,
   blur: blurEffect,
   synthesize: synthesizeEffect,
-  sharpen: sharpenEffect,
   passthrough: passThroughEffect,
 };
 
