@@ -1,6 +1,6 @@
 import { BrushPanel } from "@/components/layout/brush-panel";
 import { openFiles, useStore } from "@/store";
-import { Group, ScrollArea, Stack } from "@mantine/core";
+import { Box, Group, ScrollArea, Stack } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { Notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
@@ -209,7 +209,9 @@ function App(): React.JSX.Element {
       <ScrollArea w={350} miw={350} h="100%" onScrollPositionChange={() => invalidateRef.current?.()}>
         <BrushPanel />
       </ScrollArea>
-      <Stack flex={1} h="100%" gap={0}>
+      <Stack pos="relative" flex={1} h="100%" gap={0}>
+        <Box pos="absolute" top={0} bottom={0} left={0} right={0} bg="dark.9" style={{ zIndex: -1 }} />
+
         <ScrollArea flex={1} w="100%" onScrollPositionChange={() => invalidateRef.current?.()}>
           <CanvasPanel />
         </ScrollArea>

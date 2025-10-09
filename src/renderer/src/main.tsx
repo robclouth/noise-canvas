@@ -1,3 +1,4 @@
+import "@fontsource-variable/inter";
 import { createTheme, Input, MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import { ModalsProvider } from "@mantine/modals";
@@ -16,6 +17,7 @@ const theme = createTheme({
     lg: "16px",
     xl: "18px",
   },
+  fontFamily: "Inter Variable, sans-serif",
   components: {
     Input: Input.extend({
       vars: (_theme, props) => {

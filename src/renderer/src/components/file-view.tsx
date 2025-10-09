@@ -39,7 +39,6 @@ const TruncatedFilename = memo(({ filePath, isDirty }: { filePath: string; isDir
         minWidth: 0,
         width: "100%",
         fontSize: "var(--mantine-font-size-sm)",
-        fontWeight: 600,
         fontStyle: isDirty ? "italic" : "normal",
         whiteSpace: "nowrap",
       }}
@@ -153,7 +152,7 @@ const Header = memo(function Header({ fileId }: FileViewProps) {
   };
 
   return (
-    <Group justify="space-between" align="center" p="xs" wrap="nowrap">
+    <Group justify="space-between" align="center" p="xs" wrap="nowrap" bg="dark.7">
       <Group gap="xs" style={{ minWidth: 0, flex: 1 }}>
         <Tooltip label={filePath}>
           <Box style={{ minWidth: 0, flex: 1 }}>
