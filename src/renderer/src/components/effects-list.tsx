@@ -4,13 +4,11 @@ import { Box, Stack } from "@mantine/core";
 import { CollapsibleEffectSection } from "./collapsible-effect-section";
 import { BlurEffect } from "./effect-views/blur-effect";
 import { DynamicsEffect } from "./effect-views/dynamics-effect";
-import { GainEffect } from "./effect-views/gain-effect";
 import { HarmonicsEffect } from "./effect-views/harmonics-effect";
 import { SynthesizeEffect } from "./effect-views/synthesize-effect";
 import { TransformEffect } from "./effect-views/transform-effect";
 
 const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
-  gain: <GainEffect />,
   dynamics: <DynamicsEffect />,
   transform: <TransformEffect />,
   harmonics: <HarmonicsEffect />,
@@ -19,7 +17,6 @@ const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
 };
 
 const EFFECT_LABELS: Record<string, string> = {
-  gain: "Gain",
   dynamics: "Dynamics",
   transform: "Transform",
   harmonics: "Harmonics",
@@ -28,7 +25,6 @@ const EFFECT_LABELS: Record<string, string> = {
 };
 
 const EFFECT_DESCRIPTIONS: Record<string, string> = {
-  gain: "Adjust the volume/amplitude of the selected region in decibels.",
   dynamics: "Control dynamic range with compression, expansion, gating, and inversion.",
   transform: "Shift, scale, and rotate the spectrogram content in time and frequency.",
   harmonics: "Add or modify harmonic overtones to create richer timbres.",

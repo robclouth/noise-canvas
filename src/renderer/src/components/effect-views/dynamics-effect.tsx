@@ -7,6 +7,7 @@ export const DynamicsEffect = () => {
       <ParameterControl paramKey="dynamicsUpperRatio" />
       <ParameterControl paramKey="dynamicsLowerRatio" />
       <ParameterControl paramKey="dynamicsKnee" />
+      <ParameterControl paramKey="dynamicsGainDb" />
     </>
   );
 };

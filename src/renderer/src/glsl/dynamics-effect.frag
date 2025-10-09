@@ -8,10 +8,11 @@ uniform Parameter thresholdDb;
 uniform Parameter upperRatio;
 uniform Parameter lowerRatio;
 uniform Parameter knee;
+uniform Parameter gainDb;
 
 // Helper function to apply dynamics to a single channel
 // Returns the gain multiplier (not dB)
-float applyDynamics(float inputDb, float thresholdDbValue, float upperRatioValue, float lowerRatioValue, float kneeValue) {
+float applyDynamics(float inputDb, float thresholdDbValue, float upperRatioValue, float lowerRatioValue, float kneeValue, float gainDbValue) {
   float overThreshold = inputDb - thresholdDbValue;
   float ratio;
   
@@ -55,7 +56,7 @@ float applyDynamics(float inputDb, float thresholdDbValue, float upperRatioValue
   }
   
   // Convert dB change to linear gain multiplier
-  float gainMultiplier = pow(10.0, (outputDb - inputDb) / 20.0);
+  float gainMultiplier = pow(10.0, (outputDb - inputDb + gainDbValue) / 20.0);
   
   return gainMultiplier;
 }
@@ -66,7 +67,8 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
   float upperRatioValue = applyModulation(upperRatio.value, upperRatio.minValue, upperRatio.maxValue, upperRatio.modulationAmounts, coords.dest, 0, audioLevelDb);
   float lowerRatioValue = applyModulation(lowerRatio.value, lowerRatio.minValue, lowerRatio.maxValue, lowerRatio.modulationAmounts, coords.dest, 0, audioLevelDb);
   float kneeValue = applyModulation(knee.value, knee.minValue, knee.maxValue, knee.modulationAmounts, coords.dest, 0, audioLevelDb);
-  
+  float gainDbValue = applyModulation(gainDb.value, gainDb.minValue, gainDb.maxValue, gainDb.modulationAmounts, coords.dest, 0, audioLevelDb);
+
   // Extract left and right complex values
   vec2 complexL = sourceTexel.rg; // Left channel (real, imaginary)
   vec2 complexR = sourceTexel.ba; // Right channel (real, imaginary)
@@ -84,8 +86,8 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
   float inputDbR = 20.0 * log(amplitudeR) / log(10.0);
   
   // Apply dynamics to each channel (returns gain multiplier)
-  float gainFactorL = applyDynamics(inputDbL, thresholdDbValue, upperRatioValue, lowerRatioValue, kneeValue);
-  float gainFactorR = applyDynamics(inputDbR, thresholdDbValue, upperRatioValue, lowerRatioValue, kneeValue);
+  float gainFactorL = applyDynamics(inputDbL, thresholdDbValue, upperRatioValue, lowerRatioValue, kneeValue, gainDbValue);
+  float gainFactorR = applyDynamics(inputDbR, thresholdDbValue, upperRatioValue, lowerRatioValue, kneeValue, gainDbValue);
   
   // Apply gain to complex values
   vec2 outputComplexL = complexL * gainFactorL;

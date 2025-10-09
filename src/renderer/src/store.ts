@@ -43,7 +43,11 @@ type Range<F extends number, T extends number> = Exclude<Enumerate<T>, Enumerate
 type ModulatableParameterKey =
   | "brushIntensity"
   | "brushPan"
-  | "gainDb"
+  | "dynamicsThresholdDb"
+  | "dynamicsUpperRatio"
+  | "dynamicsLowerRatio"
+  | "dynamicsKnee"
+  | "dynamicsGainDb"
   | "blurAmountTime"
   | "blurAmountPitch"
   | "blurNoiseTime"
@@ -166,14 +170,12 @@ export type State = {
   minFreq: ContinuousNumberParameter;
   blendMode: OptionsParameter<number>;
 
-  // Gain Brush
-  gainDb: ContinuousNumberParameter;
-
   // Dynamics Brush
   dynamicsThresholdDb: ContinuousNumberParameter;
   dynamicsUpperRatio: ContinuousNumberParameter;
   dynamicsLowerRatio: ContinuousNumberParameter;
   dynamicsKnee: ContinuousNumberParameter;
+  dynamicsGainDb: ContinuousNumberParameter;
 
   // Transform Brush
   transformShiftBeats: DiscreteNumberParameter;
@@ -904,21 +906,7 @@ export const useStore = create<State>()(
             },
             false,
           ),
-          ...createParameter(
-            set,
-            "gainDb",
-            {
-              name: "Gain",
-              label: "Gain",
-              description: "The amount of gain to apply in decibels.",
-              value: 0.0,
-              min: -80,
-              max: 24,
-              step: 0.1,
-              unit: "dB",
-            },
-            true,
-          ),
+
           ...createParameter(
             set,
             "dynamicsThresholdDb",
@@ -978,6 +966,21 @@ export const useStore = create<State>()(
               min: 0.0,
               max: 48.0,
               step: 0.5,
+              unit: "dB",
+            },
+            true,
+          ),
+          ...createParameter(
+            set,
+            "dynamicsGainDb",
+            {
+              name: "Gain",
+              label: "Gain",
+              description: "The amount of gain to apply in decibels.",
+              value: 0.0,
+              min: -80,
+              max: 24,
+              step: 0.1,
               unit: "dB",
             },
             true,
@@ -1789,7 +1792,7 @@ export const useStore = create<State>()(
           setMousePos: (mousePos) => set({ mousePos }),
           hoveredFile: null,
           setHoveredFile: (fileId) => set({ hoveredFile: fileId }),
-          effectOrder: ["synthesize", "gain", "dynamics", "transform", "harmonics", "blur"],
+          effectOrder: ["synthesize", "dynamics", "transform", "harmonics", "blur"] satisfies EffectType[],
           setEffectOrder: (effectOrder) => set({ effectOrder }),
           effectsEnabled: {
             gain: true,

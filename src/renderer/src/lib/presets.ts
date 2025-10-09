@@ -21,11 +21,12 @@ export const PRESET_KEYS = [
   // Blend mode
   "blendMode",
   // Effect parameters
-  "gainDb",
+
   "dynamicsThresholdDb",
   "dynamicsUpperRatio",
   "dynamicsLowerRatio",
   "dynamicsKnee",
+  "dynamicsGainDb",
   "blurAmountTime",
   "blurAmountPitch",
   "blurNoiseTime",
@@ -81,9 +82,21 @@ export const PRESET_KEYS = [
   "brushPanMod1Amount",
   "brushPanMod2Amount",
   "brushPanMod3Amount",
-  "gainDbMod1Amount",
-  "gainDbMod2Amount",
-  "gainDbMod3Amount",
+  "dynamicsGainDbMod1Amount",
+  "dynamicsGainDbMod2Amount",
+  "dynamicsGainDbMod3Amount",
+  "dynamicsThresholdDbMod1Amount",
+  "dynamicsThresholdDbMod2Amount",
+  "dynamicsThresholdDbMod3Amount",
+  "dynamicsUpperRatioMod1Amount",
+  "dynamicsUpperRatioMod2Amount",
+  "dynamicsUpperRatioMod3Amount",
+  "dynamicsLowerRatioMod1Amount",
+  "dynamicsLowerRatioMod2Amount",
+  "dynamicsLowerRatioMod3Amount",
+  "dynamicsKneeMod1Amount",
+  "dynamicsKneeMod2Amount",
+  "dynamicsKneeMod3Amount",
   "blurAmountTimeMod1Amount",
   "blurAmountTimeMod2Amount",
   "blurAmountTimeMod3Amount",
@@ -96,12 +109,6 @@ export const PRESET_KEYS = [
   "blurNoisePitchMod1Amount",
   "blurNoisePitchMod2Amount",
   "blurNoisePitchMod3Amount",
-  "sharpenAmountTimeMod1Amount",
-  "sharpenAmountTimeMod2Amount",
-  "sharpenAmountTimeMod3Amount",
-  "sharpenAmountPitchMod1Amount",
-  "sharpenAmountPitchMod2Amount",
-  "sharpenAmountPitchMod3Amount",
   "harmonicsPowerMod1Amount",
   "harmonicsPowerMod2Amount",
   "harmonicsPowerMod3Amount",
@@ -123,7 +130,7 @@ export const PRESET_KEYS = [
   "transformRotationMod1Amount",
   "transformRotationMod2Amount",
   "transformRotationMod3Amount",
-] as const;
+] as const satisfies (keyof State)[];
 
 // Extract the specific keys from PRESET_KEYS
 export type PresetKey = (typeof PRESET_KEYS)[number];
@@ -168,14 +175,12 @@ export const defaultPresets: BrushPreset[] = [
     // Blend mode
     blendMode: 0,
 
-    // Effect parameters
-    gainDb: 0.0,
-
     // Dynamics parameters
     dynamicsThresholdDb: -20.0,
     dynamicsUpperRatio: 1.0,
     dynamicsLowerRatio: 1.0,
     dynamicsKnee: 6.0,
+    dynamicsGainDb: 0.0,
 
     // Blur parameters
     blurAmountTime: 0,
@@ -205,15 +210,13 @@ export const defaultPresets: BrushPreset[] = [
     synthesizeBrushType: 0,
 
     // Effect order and enabled states
-    effectOrder: ["gain", "dynamics", "transform", "harmonics", "blur", "synthesize", "sharpen"],
+    effectOrder: ["synthesize", "dynamics", "transform", "harmonics", "blur"],
     effectsEnabled: {
-      gain: true,
-      dynamics: false,
+      dynamics: true,
+      synthesize: false,
       transform: false,
       harmonics: false,
       blur: false,
-      synthesize: false,
-      sharpen: false,
     },
 
     // Modulator parameters
@@ -254,9 +257,21 @@ export const defaultPresets: BrushPreset[] = [
     brushPanMod1Amount: 0,
     brushPanMod2Amount: 0,
     brushPanMod3Amount: 0,
-    gainDbMod1Amount: 0,
-    gainDbMod2Amount: 0,
-    gainDbMod3Amount: 0,
+    dynamicsGainDbMod1Amount: 0,
+    dynamicsGainDbMod2Amount: 0,
+    dynamicsGainDbMod3Amount: 0,
+    dynamicsThresholdDbMod1Amount: 0,
+    dynamicsThresholdDbMod2Amount: 0,
+    dynamicsThresholdDbMod3Amount: 0,
+    dynamicsUpperRatioMod1Amount: 0,
+    dynamicsUpperRatioMod2Amount: 0,
+    dynamicsUpperRatioMod3Amount: 0,
+    dynamicsLowerRatioMod1Amount: 0,
+    dynamicsLowerRatioMod2Amount: 0,
+    dynamicsLowerRatioMod3Amount: 0,
+    dynamicsKneeMod1Amount: 0,
+    dynamicsKneeMod2Amount: 0,
+    dynamicsKneeMod3Amount: 0,
     blurAmountTimeMod1Amount: 0,
     blurAmountTimeMod2Amount: 0,
     blurAmountTimeMod3Amount: 0,
@@ -269,12 +284,6 @@ export const defaultPresets: BrushPreset[] = [
     blurNoisePitchMod1Amount: 0,
     blurNoisePitchMod2Amount: 0,
     blurNoisePitchMod3Amount: 0,
-    sharpenAmountTimeMod1Amount: 0,
-    sharpenAmountTimeMod2Amount: 0,
-    sharpenAmountTimeMod3Amount: 0,
-    sharpenAmountPitchMod1Amount: 0,
-    sharpenAmountPitchMod2Amount: 0,
-    sharpenAmountPitchMod3Amount: 0,
     harmonicsPowerMod1Amount: 0,
     harmonicsPowerMod2Amount: 0,
     harmonicsPowerMod3Amount: 0,

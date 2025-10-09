@@ -44,6 +44,14 @@ class DynamicsEffect extends BaseEffect {
               modulationAmounts: [],
             },
           },
+          gainDb: {
+            value: {
+              value: 0.0,
+              minValue: -80,
+              maxValue: 24,
+              modulationAmounts: [],
+            },
+          },
         },
         vertexShader: passThroughVert,
         fragmentShader: dynamicsEffectFrag,
@@ -92,6 +100,15 @@ class DynamicsEffect extends BaseEffect {
       maxValue: knee.max,
       modulationAmounts:
         knee.modulatorParamKeys?.map((paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100) || [],
+    };
+
+    const gainDb = state.dynamicsGainDb;
+    this.materials[props.passIndex].uniforms.gainDb.value = {
+      value: gainDb.value,
+      minValue: gainDb.min,
+      maxValue: gainDb.max,
+      modulationAmounts:
+        gainDb.modulatorParamKeys?.map((paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100) || [],
     };
   }
 }
