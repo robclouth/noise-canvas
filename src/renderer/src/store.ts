@@ -2,7 +2,7 @@ import { deepMerge } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { produce } from "immer";
-import { startCase } from "lodash-es";
+import { isEqual, startCase } from "lodash-es";
 import { Vector2 } from "three";
 import { ScaleType } from "tonal";
 import * as Tone from "tone";
@@ -23,7 +23,8 @@ import {
   WRAP_MODES,
 } from "./lib/constants";
 import { getPresetManager } from "./lib/preset-manager";
-import { BrushPreset, defaultPresets, PRESET_KEYS } from "./lib/presets";
+import { BrushPresetType } from "./lib/preset-schema";
+import { defaultPresets, PRESET_KEYS } from "./lib/presets";
 import { getUndoManager } from "./lib/undo-manager";
 import { Parameter } from "./Parameter";
 import {
@@ -100,6 +101,7 @@ const persistedKeys: (keyof State)[] = [
   "effectOrder",
   "effectsEnabled",
   "sectionCollapsed",
+  "presetHotkeys",
 ];
 
 // Helper to generate unique file IDs
@@ -244,15 +246,17 @@ export type State = {
   ModulatorParameters & {
     // Presets
     currentPresetId: string | null;
-    availablePresets: BrushPreset[];
+    availablePresets: BrushPresetType[];
     setCurrentPresetId: (presetId: string | null) => void;
     loadPresets: () => Promise<void>;
     loadPreset: (presetId: string) => void;
     savePreset: (name: string, presetId?: string) => Promise<void>;
     deletePreset: (presetId: string) => Promise<void>;
+    assignHotkeyToPreset: (presetId: string, hotkey: string) => void;
+    presetHotkeys: Record<string, string>;
   };
 
-// Helper type to extract keys of state that are parameters
+// Helpproduce(er type to extract keys of state that are parameters
 export type ParameterKey = keyof {
   [K in keyof State as State[K] extends { value: unknown } ? K : never]: State[K];
 };
@@ -1795,7 +1799,6 @@ export const useStore = create<State>()(
           effectOrder: ["synthesize", "dynamics", "transform", "harmonics", "blur"] satisfies EffectType[],
           setEffectOrder: (effectOrder) => set({ effectOrder }),
           effectsEnabled: {
-            gain: true,
             dynamics: false,
             transform: false,
             harmonics: false,
@@ -1823,9 +1826,19 @@ export const useStore = create<State>()(
           },
           loadPreset: (presetId: string) => {
             const state = get();
+
+            if (presetId === state.currentPresetId) {
+              return;
+            }
+
             const preset = state.availablePresets.find((p) => p.id === presetId);
             if (!preset) {
-              console.error("Preset not found:", presetId);
+              notifications.show({
+                title: "Preset not found",
+                message: `Preset ${presetId} not found`,
+                color: "red",
+              });
+              set({ currentPresetId: "default" });
               return;
             }
 
@@ -1836,43 +1849,86 @@ export const useStore = create<State>()(
               const stateValue = state[key];
               const presetValue = preset[key];
 
-              // For parameters (objects with .value), preserve the parameter structure
+              // For parameters (objects with .value), compare the actual values
               if (stateValue && typeof stateValue === "object" && "value" in stateValue) {
-                updates[key] = { ...stateValue, value: presetValue };
+                if (stateValue.value !== presetValue) {
+                  updates[key] = { ...stateValue, value: presetValue };
+                }
               } else {
-                // For non-parameter values (effectOrder, effectsEnabled), just copy directly
-                updates[key] = presetValue;
+                // For non-parameter values, use deep comparison for objects
+                if (!isEqual(stateValue, presetValue)) {
+                  updates[key] = presetValue;
+                }
               }
             }
 
             set(updates);
           },
           savePreset: async (name: string, presetId?: string) => {
-            const state = get();
-            const presetManager = getPresetManager();
+            try {
+              const state = get();
+              const presetManager = getPresetManager();
 
-            // Save preset from state (preset manager handles all the logic)
-            const id = await presetManager.savePresetFromState(state, name, presetId);
+              // Save preset from state (preset manager handles all the logic)
+              const id = await presetManager.savePresetFromState(state, name, presetId);
 
-            // Reload presets
-            await state.loadPresets();
+              // Reload presets
+              await state.loadPresets();
 
-            // Set as current preset
-            set({ currentPresetId: id });
+              // Set as current preset
+              set({ currentPresetId: id });
+            } catch (error) {
+              console.error("Error saving preset:", error);
+              notifications.show({
+                title: "Save failed",
+                message: `${error instanceof Error ? error.message : "Unknown error"}`,
+                color: "red",
+              });
+            }
           },
           deletePreset: async (presetId: string) => {
-            const state = get();
-            const presetManager = getPresetManager();
+            try {
+              const state = get();
+              const presetManager = getPresetManager();
 
-            await presetManager.deletePreset(presetId);
+              await presetManager.deletePreset(presetId);
 
-            // Reload presets
-            await state.loadPresets();
+              // Reload presets
+              await state.loadPresets();
 
-            // If we deleted the current preset, switch to default
-            if (state.currentPresetId === presetId) {
-              set({ currentPresetId: "default" });
+              // If we deleted the current preset, switch to default
+              if (state.currentPresetId === presetId) {
+                set({ currentPresetId: "default" });
+              }
+            } catch (error) {
+              console.error("Error deleting preset:", error);
+              notifications.show({
+                title: "Delete failed",
+                message: `${error instanceof Error ? error.message : "Unknown error"}`,
+                color: "red",
+              });
             }
+          },
+          presetHotkeys: {},
+          assignHotkeyToPreset: async (presetId: string, hotkey: string) => {
+            const preset = get().availablePresets.find((p) => p.id === presetId);
+            if (!preset) return;
+
+            set(
+              produce((state: State) => {
+                Object.entries(state.presetHotkeys).forEach(([key, id]) => {
+                  if (id === presetId) {
+                    delete state.presetHotkeys[key];
+                  }
+                });
+                state.presetHotkeys[hotkey] = presetId;
+              }),
+            );
+
+            notifications.show({
+              title: "Hotkey assigned",
+              message: `Hotkey ${hotkey} assigned to ${preset.name}`,
+            });
           },
         } satisfies State;
         return initialState;

@@ -1,5 +1,5 @@
 import "@fontsource-variable/inter";
-import { createTheme, Input, MantineProvider } from "@mantine/core";
+import { createTheme, Input, MantineProvider, Modal } from "@mantine/core";
 import "@mantine/core/styles.css";
 import { ModalsProvider } from "@mantine/modals";
 import { Notifications } from "@mantine/notifications";
@@ -12,13 +12,27 @@ const theme = createTheme({
   primaryColor: "orange",
   fontSizes: {
     xs: "11px",
-    sm: "14px",
+    sm: "11px",
     md: "16px",
     lg: "16px",
     xl: "18px",
   },
+  spacing: {
+    xs: "8px",
+    sm: "8px",
+    md: "16px",
+    lg: "24px",
+    xl: "32px",
+  },
   fontFamily: "Inter Variable, sans-serif",
   components: {
+    Modal: Modal.extend({
+      vars: () => {
+        return {
+          root: {},
+        };
+      },
+    }),
     Input: Input.extend({
       vars: (_theme, props) => {
         if (props.size === "xs") {

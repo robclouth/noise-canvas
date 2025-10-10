@@ -38,7 +38,7 @@ const TruncatedFilename = memo(({ filePath, isDirty }: { filePath: string; isDir
       style={{
         minWidth: 0,
         width: "100%",
-        fontSize: "var(--mantine-font-size-sm)",
+        fontSize: 13,
         fontStyle: isDirty ? "italic" : "normal",
         whiteSpace: "nowrap",
       }}

@@ -1,9 +1,11 @@
 // Preset manager for loading and saving brush presets
 // Uses direct access to fs and path utilities (similar to undo-manager)
 
+import { notifications } from "@mantine/notifications";
 import { State } from "@renderer/store";
 import { getFolders } from "./folders";
-import { BrushPreset, defaultPresets, PRESET_KEYS } from "./presets";
+import { validatePreset, type BrushPresetType } from "./preset-schema";
+import { defaultPresets, PRESET_KEYS } from "./presets";
 
 /**
  * Generate a filename-safe ID from a preset name
@@ -39,22 +41,20 @@ function generateFilenameId(name: string, existingIds: Set<string> = new Set()):
 }
 
 class PresetManager {
-  private appDir: string | null = null;
   private presetsDir: string | null = null;
   private initialized = false;
 
   private async init() {
     if (this.initialized) return;
     this.initialized = true;
-    const { appDir, presetsDir } = await getFolders();
-    this.appDir = appDir;
+    const { presetsDir } = await getFolders();
     this.presetsDir = presetsDir;
   }
 
   /**
    * Load all presets (both default and user-created)
    */
-  async loadPresets(): Promise<BrushPreset[]> {
+  async loadPresets(): Promise<BrushPresetType[]> {
     await this.init();
     if (!this.presetsDir || !window.nodeFs || !window.nodePath) {
       console.error("Preset manager not properly initialized");
@@ -64,7 +64,7 @@ class PresetManager {
     try {
       // Read all files from the presets directory
       const files = await window.nodeFs.readdir(this.presetsDir);
-      const userPresets: BrushPreset[] = [];
+      const userPresets: BrushPresetType[] = [];
 
       // Load each JSON file
       for (const file of files) {
@@ -72,31 +72,74 @@ class PresetManager {
           try {
             const filePath = window.nodePath.join(this.presetsDir, file);
             const fileContent = await window.nodeFs.readFile(filePath, "utf-8");
-            const preset: BrushPreset = JSON.parse(fileContent);
-            userPresets.push(preset);
+            const rawPreset = JSON.parse(fileContent);
+
+            // Validate the preset against the schema
+            const validationResult = validatePreset(rawPreset);
+            if (validationResult.success) {
+              userPresets.push(validationResult.data);
+            } else {
+              notifications.show({
+                title: "Invalid preset",
+                message: `Invalid preset ${file}`,
+                color: "red",
+                autoClose: 5000,
+              });
+            }
           } catch (error) {
             console.error(`Failed to load preset file ${file}:`, error);
           }
         }
       }
 
-      // Combine default presets with user presets
-      return [...defaultPresets, ...userPresets];
+      // Validate default presets as well
+      const validatedDefaultPresets: BrushPresetType[] = [];
+      for (const preset of defaultPresets) {
+        const validationResult = validatePreset(preset);
+        if (validationResult.success) {
+          validatedDefaultPresets.push(validationResult.data);
+        } else {
+          console.error(`Invalid default preset ${preset.id}:`, validationResult.errors);
+          // This should never happen with properly defined default presets
+        }
+      }
+
+      // Combine validated default presets with user presets
+      return [...validatedDefaultPresets, ...userPresets];
     } catch (error: any) {
       if (error.code === "ENOENT") {
-        // Directory doesn't exist yet, return only default presets
+        // Directory doesn't exist yet, return only validated default presets
         console.log("No user presets directory found, using defaults only");
-        return [...defaultPresets];
+        const validatedDefaultPresets: BrushPresetType[] = [];
+        for (const preset of defaultPresets) {
+          const validationResult = validatePreset(preset);
+          if (validationResult.success) {
+            validatedDefaultPresets.push(validationResult.data);
+          } else {
+            console.error(`Invalid default preset ${preset.id}:`, validationResult.errors);
+          }
+        }
+        return validatedDefaultPresets;
       }
       console.error("Failed to load user presets:", error);
-      return [...defaultPresets];
+      // Return validated default presets as fallback
+      const validatedDefaultPresets: BrushPresetType[] = [];
+      for (const preset of defaultPresets) {
+        const validationResult = validatePreset(preset);
+        if (validationResult.success) {
+          validatedDefaultPresets.push(validationResult.data);
+        } else {
+          console.error(`Invalid default preset ${preset.id}:`, validationResult.errors);
+        }
+      }
+      return validatedDefaultPresets;
     }
   }
 
   /**
    * Build a preset from the current state
    */
-  private buildPresetFromState(state: State, name: string, id: string): BrushPreset {
+  private buildPresetFromState(state: State, name: string, id: string): BrushPresetType {
     const preset: any = {
       id,
       name,
@@ -114,7 +157,7 @@ class PresetManager {
       }
     }
 
-    return preset as BrushPreset;
+    return preset as BrushPresetType;
   }
 
   /**
@@ -139,6 +182,13 @@ class PresetManager {
     // Build preset from state
     const preset = this.buildPresetFromState(state, name, id);
 
+    // Validate the preset before saving
+    const validationResult = validatePreset(preset);
+    if (!validationResult.success) {
+      console.error("Invalid preset data:", validationResult.errors);
+      throw new Error(`Invalid preset data: ${validationResult.errors.join(", ")}`);
+    }
+
     // Don't allow saving over default presets
     if (preset.isDefault) {
       throw new Error("Cannot save over default presets");
@@ -161,11 +211,18 @@ class PresetManager {
   /**
    * Save a new preset or update an existing user preset (legacy method for direct preset objects)
    */
-  async savePreset(preset: BrushPreset): Promise<void> {
+  async savePreset(preset: BrushPresetType): Promise<void> {
     await this.init();
     if (!this.presetsDir || !window.nodeFs || !window.nodePath) {
       console.error("Preset manager not properly initialized");
       return;
+    }
+
+    // Validate the preset before saving
+    const validationResult = validatePreset(preset);
+    if (!validationResult.success) {
+      console.error("Invalid preset data:", validationResult.errors);
+      throw new Error(`Invalid preset data: ${validationResult.errors.join(", ")}`);
     }
 
     // Don't allow saving over default presets

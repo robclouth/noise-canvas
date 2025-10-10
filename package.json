@@ -53,7 +53,8 @@
     "sonner": "^2.0.7",
     "three": "^0.179.1",
     "tonal": "^6.4.2",
-    "tone": "^15.1.22"
+    "tone": "^15.1.22",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",

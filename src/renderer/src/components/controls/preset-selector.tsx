@@ -1,8 +1,10 @@
 import { useStore } from "@/store";
-import { ActionIcon, Group, Select, Stack, Text, TextInput, Tooltip } from "@mantine/core";
+import { ActionIcon, Group, Select, Stack, Text, TextInput } from "@mantine/core";
+import { useWindowEvent } from "@mantine/hooks";
 import { modals } from "@mantine/modals";
-import { Plus, Save, Trash2 } from "lucide-react";
-import { useEffect } from "react";
+import { Keyboard, Plus, Save, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Tooltip } from "../tooltip";
 
 export function PresetSelector() {
   const currentPresetId = useStore((state) => state.currentPresetId);
@@ -12,12 +14,17 @@ export function PresetSelector() {
   const deletePreset = useStore((state) => state.deletePreset);
   const loadPresets = useStore((state) => state.loadPresets);
 
+  const [hotkeyAssignMode, setHotkeyAssignMode] = useState(false);
+  const presetHotkeys = useStore((state) => state.presetHotkeys);
   // Load presets on mount
   useEffect(() => {
     loadPresets();
   }, [loadPresets]);
 
   const currentPreset = availablePresets.find((p) => p.id === currentPresetId);
+  const currentPresetHotkey = currentPresetId
+    ? Object.entries(presetHotkeys).find(([, id]) => id === currentPresetId)?.[0]
+    : undefined;
 
   const handlePresetChange = (value: string | null) => {
     if (value) {
@@ -93,12 +100,50 @@ export function PresetSelector() {
     });
   };
 
+  const handleKeyDown = (event: KeyboardEvent) => {
+    // Only process keys that are numbers or letters
+    if (!/^[a-zA-Z0-9]$/.test(event.key)) {
+      return;
+    }
+
+    // No modifier keys should be pressed
+    if (event.ctrlKey || event.altKey || event.shiftKey || event.metaKey) {
+      return;
+    }
+
+    // Don't interfere if user is typing in an input field
+    const target = event.target as HTMLElement;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.contentEditable === "true")) {
+      return;
+    }
+
+    event.preventDefault();
+    const state = useStore.getState();
+    if (hotkeyAssignMode) {
+      if (currentPresetId) {
+        state.assignHotkeyToPreset(currentPresetId, event.key);
+      }
+    } else {
+      const presetId = state.presetHotkeys[event.key];
+      if (presetId) {
+        handlePresetChange(presetId);
+      }
+    }
+  };
+
+  const handleToggleHotkeyMode = () => {
+    setHotkeyAssignMode(!hotkeyAssignMode);
+  };
+
+  useWindowEvent("keydown", handleKeyDown);
+
   // Group presets by default/user
   const defaultPresetOptions = availablePresets
     .filter((p) => p.isDefault)
     .map((p) => ({
       value: p.id,
       label: p.name,
+      hotkey: Object.entries(presetHotkeys).find(([, id]) => id === p.id)?.[0],
     }));
 
   const userPresetOptions = availablePresets
@@ -106,11 +151,12 @@ export function PresetSelector() {
     .map((p) => ({
       value: p.id,
       label: p.name,
+      hotkey: Object.entries(presetHotkeys).find(([, id]) => id === p.id)?.[0],
     }));
 
   // Create grouped data for Select
   const selectData = [
-    ...(defaultPresetOptions.length > 0 ? [{ group: "Default Presets", items: defaultPresetOptions }] : []),
+    ...(defaultPresetOptions.length > 0 ? [{ group: "Factory Presets", items: defaultPresetOptions }] : []),
     ...(userPresetOptions.length > 0 ? [{ group: "User Presets", items: userPresetOptions }] : []),
   ];
 
@@ -124,59 +170,71 @@ export function PresetSelector() {
         styles={{
           input: {
             fontSize: "var(--mantine-font-size-xs)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
           },
         }}
         comboboxProps={{
           withinPortal: true,
         }}
         w="100%"
-        renderOption={({ option }) => {
-          const preset = availablePresets.find((p) => p.id === option.value);
+        renderOption={({ option }: any) => {
           return (
-            <Group justify="space-between" wrap="nowrap">
-              <Text size="xs">{option.label}</Text>
-              {preset?.isDefault && (
-                <Text size="xs" c="dimmed" fs="italic">
-                  default
+            <Group justify="space-between" flex={1} wrap="nowrap">
+              <Text size="xs" flex={1}>
+                {option.label}
+              </Text>
+              {option.hotkey && (
+                <Text size="xs" fw={600}>
+                  {option.hotkey}
                 </Text>
               )}
             </Group>
           );
         }}
+        leftSection={
+          currentPresetHotkey ? (
+            <Text size="xs" fw={600} c="dimmed" style={{ minWidth: "16px", textAlign: "center" }}>
+              {currentPresetHotkey}
+            </Text>
+          ) : undefined
+        }
       />
       <Group gap={4} wrap="nowrap">
-        <Tooltip label="Save as new preset" position="top" withArrow>
-          <ActionIcon size="sm" variant="default" onClick={handleSaveNew}>
+        <Tooltip label="Save as new preset">
+          <ActionIcon size="sm" color="dark.5" onClick={handleSaveNew}>
             <Plus size={14} />
           </ActionIcon>
         </Tooltip>
-        <Tooltip
-          label={currentPreset?.isDefault ? "Cannot save over default presets" : "Save over current preset"}
-          position="top"
-          withArrow
-        >
+        <Tooltip label={currentPreset?.isDefault ? "Cannot save over default presets" : "Save over current preset"}>
           <ActionIcon
             size="sm"
-            variant="default"
+            color="dark.5"
             onClick={handleSaveOver}
             disabled={!currentPreset || currentPreset.isDefault}
           >
             <Save size={14} />
           </ActionIcon>
         </Tooltip>
-        <Tooltip
-          label={currentPreset?.isDefault ? "Cannot delete default presets" : "Delete current preset"}
-          position="top"
-          withArrow
-        >
+        <Tooltip label={currentPreset?.isDefault ? "Cannot delete default presets" : "Delete current preset"}>
           <ActionIcon
             size="sm"
-            variant="default"
-            color="red"
+            color="dark.5"
             onClick={handleDelete}
             disabled={!currentPreset || currentPreset.isDefault}
           >
             <Trash2 size={14} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="Toggle hotkey assign mode. When enabled, pressing a key will assign it to the current preset.">
+          <ActionIcon
+            size="sm"
+            onClick={handleToggleHotkeyMode}
+            disabled={!currentPreset}
+            color={hotkeyAssignMode ? "orange" : "dark.5"}
+          >
+            <Keyboard size={14} />
           </ActionIcon>
         </Tooltip>
       </Group>

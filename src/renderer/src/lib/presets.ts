@@ -1,6 +1,7 @@
 // Preset types and default presets for Noise Canvas
 
 import { State } from "@renderer/store";
+import { BrushPresetType } from "./preset-schema";
 
 // List of all state keys that are included in presets
 // Note: This is a const array - TypeScript will infer the exact keys from the values
@@ -132,26 +133,8 @@ export const PRESET_KEYS = [
   "transformRotationMod3Amount",
 ] as const satisfies (keyof State)[];
 
-// Extract the specific keys from PRESET_KEYS
-export type PresetKey = (typeof PRESET_KEYS)[number];
-
-// Helper type to extract the value from a parameter or return the type directly
-type ExtractValue<T> = T extends { value: infer V } ? V : T;
-
-// Automatically generate the preset data type from State based on the exact PRESET_KEYS
-type PresetData = {
-  [K in PresetKey]: K extends keyof State ? ExtractValue<State[K]> : never;
-};
-
-// BrushPreset combines metadata with the extracted preset values
-export interface BrushPreset extends PresetData {
-  id: string;
-  name: string;
-  isDefault: boolean;
-}
-
 // Default presets
-export const defaultPresets: BrushPreset[] = [
+export const defaultPresets: BrushPresetType[] = [
   {
     id: "default",
     name: "Default",
