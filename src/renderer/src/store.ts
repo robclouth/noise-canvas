@@ -238,7 +238,6 @@ export type State = {
   setIsPlaying: (isPlaying: boolean) => void;
   loop: boolean;
   setLoop: (loop: boolean) => void;
-  playbackTime: number;
   setPlaybackTime: (playbackTime: number) => void;
   togglePlayback: () => Promise<void>;
   stopAudio: () => void;
@@ -535,6 +534,14 @@ export function getFileIdByPath(filePath: string): string | undefined {
 }
 
 export const player = new Tone.Player().toDestination();
+
+// Set up event listener for when playback ends
+player.onstop = () => {
+  const state = useStore.getState();
+  if (state.isPlaying && !state.loop) {
+    state.stopAudio();
+  }
+};
 
 export const useStore = create<State>()(
   subscribeWithSelector(
@@ -1761,7 +1768,7 @@ export const useStore = create<State>()(
               transport.stop();
               transport.cancel(0);
 
-              return set({ playbackTime: 0, isPlaying: false });
+              return set({ isPlaying: false });
             }
             const file = activeFileId ? openFiles[activeFileId] : undefined;
             const audioBuffer = file?.audioBuffer;
@@ -1778,8 +1785,7 @@ export const useStore = create<State>()(
 
               transport.start();
 
-              // updatePlaybackTime();
-              return set({ playbackTime: 0, isPlaying: true });
+              return set({ isPlaying: true });
             } else {
               console.error("No audio buffer available to play.");
               return;
@@ -1789,8 +1795,17 @@ export const useStore = create<State>()(
           setIsPlaying: (isPlaying) => set({ isPlaying }),
           loop: false,
           setLoop: (loop) => set({ loop }),
-          playbackTime: 0,
-          setPlaybackTime: (playbackTime) => set({ playbackTime }),
+          setPlaybackTime: (playbackTime) => {
+            const transport = Tone.getTransport();
+            transport.seconds = playbackTime;
+          },
+          stopAudio: () => {
+            const transport = Tone.getTransport();
+            transport.stop();
+            transport.cancel(0);
+            player.stop();
+            set({ isPlaying: false });
+          },
 
           mousePos: null,
           setMousePos: (mousePos) => set({ mousePos }),
