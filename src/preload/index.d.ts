@@ -32,6 +32,28 @@ declare global {
         isClamped: boolean;
         clampedDurationSeconds: number;
       }>;
+      analyseBuffer: (
+        audioBuffer: AudioBuffer,
+        params: AnalysisParams,
+      ) => Promise<{
+        data: Float32Array;
+        inverseMap: Float32Array;
+        metadataTexture: Float32Array;
+        textureWidth: number;
+        textureHeight: number;
+        numFrames: number;
+        numChannels: number;
+        numBands: number;
+        bandOffsets: Uint32Array;
+        bandStepLog2s: Int32Array;
+        bandLengths: Uint32Array;
+        sampleRate: number;
+        format: string;
+        codec: string;
+        channels: number;
+        isClamped: boolean;
+        clampedDurationSeconds: number;
+      }>;
       synthesize: (
         processedData: Float32Array,
         analysisMetadata: any,

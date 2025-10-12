@@ -10,6 +10,8 @@ import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
 import { effects, EffectType } from "./effects";
 import {
+  ALGORITHMS,
+  BANDS_PER_OCTAVE_VALUES,
   BEAT_VALUES,
   BLEND_MODES,
   EDGE_MODE,
@@ -171,6 +173,7 @@ export type State = {
   bandsPerOctave: OptionsParameter<number>;
   minFreq: ContinuousNumberParameter;
   blendMode: OptionsParameter<number>;
+  algorithm: OptionsParameter<number>;
 
   // Dynamics Brush
   dynamicsThresholdDb: ContinuousNumberParameter;
@@ -880,13 +883,7 @@ export const useStore = create<State>()(
               description:
                 "Balance between time and frequency resolution. Time resolution gives sharper transients, frequency resolution gives more precise pitch detail.",
               value: 36,
-              options: [
-                { value: 12, label: "Best Time" },
-                { value: 24, label: "Better Time" },
-                { value: 36, label: "Balanced" },
-                { value: 48, label: "Better Pitch" },
-                { value: 60, label: "Best Pitch" },
-              ],
+              options: BANDS_PER_OCTAVE_VALUES,
             },
             false,
           ),
@@ -902,6 +899,18 @@ export const useStore = create<State>()(
               max: 100,
               step: 0.01,
               unit: "Hz",
+            },
+            false,
+          ),
+          ...createParameter(
+            set,
+            "algorithm",
+            {
+              name: "Algorithm",
+              label: "Algorithm",
+              description: "The algorithm to use when transforming the spectrogram.",
+              value: 0,
+              options: ALGORITHMS,
             },
             false,
           ),
@@ -1690,11 +1699,17 @@ export const useStore = create<State>()(
               },
               onConfirm: async () => {
                 if (!state.activeFileId) return;
-
-                const result = await window.audioAnalysis.analyze(file.filePath, {
-                  bandsPerOctave: state.bandsPerOctave.value,
-                  minFreq: state.minFreq.value,
-                });
+                const audioBuffer = file?.audioBuffer;
+                console.log(window.audioAnalysis);
+                const result = audioBuffer
+                  ? await window.audioAnalysis.analyseBuffer(audioBuffer, {
+                      bandsPerOctave: state.bandsPerOctave.value,
+                      minFreq: state.minFreq.value,
+                    })
+                  : await window.audioAnalysis.analyze(file.filePath, {
+                      bandsPerOctave: state.bandsPerOctave.value,
+                      minFreq: state.minFreq.value,
+                    });
 
                 const spectrogramData = {
                   packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),

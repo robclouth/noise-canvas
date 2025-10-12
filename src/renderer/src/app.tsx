@@ -33,10 +33,18 @@ function App(): React.JSX.Element {
     if (process.env.NODE_ENV === "development") {
       const { openFilePath, openFileIds } = useStore.getState();
       if (openFileIds.length === 0) {
+        // openFilePath(
+        //   "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
+        // );
+        // openFilePath(
+        //   "/Users/rob/Splice/sounds/packs/lofi crates./Origin_Sound__-_lofi_crates/loops/vocals_loops/OS_LFC_80_vocal_backing_honey_A#m.wav",
+        // );
         openFilePath(
-          "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
+          "/Users/rob/Splice/sounds/packs/Voice of Wind Audrey Phrases/100_Dark/G#/SI_AH_Vocals_phrase_one_shot_Dark_100_dark_G#.wav",
         );
-        // openFilePath("/Users/rob/Desktop/up-tones.wav");
+        openFilePath(
+          "/Users/rob/Splice/sounds/packs/The Jungle Drummer - Breakbeat Culture/Test_Press_-_The_Jungle_Drummer_-_Breakbeat_Culture/Loops/Layered_Breaks/TSP_TJD_172_break_layered_2snare_junglism.wav",
+        );
       }
     }
 

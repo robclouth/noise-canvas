@@ -90,19 +90,47 @@ export async function analyze(filePath: string, params: AnalysisParams) {
       });
   });
 
-  const audioVector = new Float32Array(
+  const audioBuffer = new Float32Array(
     concatenatedBuffer.buffer,
     concatenatedBuffer.byteOffset,
     concatenatedBuffer.length / Float32Array.BYTES_PER_ELEMENT,
   );
 
-  const analysisResult: GaboratorAnalysisResult = await gab.analyze(audioVector, channels, sampleRate, params);
+  const analysisResult: GaboratorAnalysisResult = await gab.analyze(audioBuffer, channels, sampleRate, params);
 
   return {
     ...analysisResult,
     sampleRate,
     format,
     codec,
+    channels,
+  };
+}
+
+export async function analyseBuffer(audioBuffer: AudioBuffer, params: AnalysisParams) {
+  const gab = init();
+
+  const sampleRate = audioBuffer.sampleRate;
+  const channels = audioBuffer.numberOfChannels;
+  const length = audioBuffer.length;
+
+  // Interleave the audio channels into a single Float32Array
+  const audioVector = new Float32Array(channels * length);
+
+  for (let channel = 0; channel < channels; channel++) {
+    const channelData = audioBuffer.getChannelData(channel);
+    for (let i = 0; i < length; i++) {
+      audioVector[i * channels + channel] = channelData[i];
+    }
+  }
+
+  const analysisResult: GaboratorAnalysisResult = await gab.analyze(audioVector, channels, sampleRate, params);
+
+  return {
+    ...analysisResult,
+    sampleRate,
+    format: "wav", // AudioBuffer is always PCM data
+    codec: "pcm_f32le", // AudioBuffer uses 32-bit float PCM
     channels,
   };
 }

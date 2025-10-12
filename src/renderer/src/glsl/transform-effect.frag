@@ -63,12 +63,12 @@ void main() {
 
         if( boundaryMode == 0) { // Cut
             if(inBrush) {
-                transformedTexel = getTransformedSample(finalSourceUv, coords.dest);
+                transformedTexel = getTransformedSample(finalSourceUv, coords.dest, scaleXValue);
             } else {
                 transformedTexel = vec4(0.0);
             }
         } else if(boundaryMode == 1) { // Bleed
-            transformedTexel = getTransformedSample(finalSourceUv, coords.dest);
+            transformedTexel = getTransformedSample(finalSourceUv, coords.dest, scaleXValue);
         } else if(boundaryMode == 2) { // Wrap
             // Tile the sampled region within the brush bounds
             vec2 brushBottomLeft = brushCenterUv - brushSizeUv * 0.5;
@@ -76,7 +76,7 @@ void main() {
             vec2 local = finalSourceUv - brushBottomLeft;
             vec2 wrappedLocal = fract(local / safeSize) * safeSize;
             vec2 wrappedUv = brushBottomLeft + wrappedLocal;
-            transformedTexel = getTransformedSample(wrappedUv, coords.dest);
+            transformedTexel = getTransformedSample(wrappedUv, coords.dest, scaleXValue);
         } else if(boundaryMode == 3) { // Ping Pong
             vec2 brushBottomLeft = brushCenterUv - brushSizeUv * 0.5;
 
@@ -89,7 +89,7 @@ void main() {
 
             isTimeReversed = pingPong.x < 0.5;
 
-            transformedTexel = getTransformedSample(pingPongUv, coords.dest);
+            transformedTexel = getTransformedSample(pingPongUv, coords.dest, scaleXValue);
         }
 
         // Handle negative time scaling by flipping the phase (complex conjugate)

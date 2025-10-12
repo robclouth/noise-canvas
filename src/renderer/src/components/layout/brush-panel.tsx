@@ -20,6 +20,7 @@ export function BrushPanel() {
         <ParameterControl paramKey="brushPan" />
         <ParameterControl paramKey="brushIterations" />
         <ParameterControl paramKey="brushWrapMode" />
+        <ParameterControl paramKey="algorithm" />
         <ParameterControl paramKey="brushFeatherTime" />
         <ParameterControl paramKey="brushFeatherPitch" />
         <ParameterControl paramKey="brushFeatherSlopeTime" />

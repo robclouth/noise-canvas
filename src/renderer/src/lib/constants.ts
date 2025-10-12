@@ -88,14 +88,11 @@ export const MULTIPLIER_VALUES = [
 ];
 
 export const BANDS_PER_OCTAVE_VALUES = [
-  { value: 12, label: "12" },
-  { value: 24, label: "24" },
-  { value: 36, label: "36" },
-  { value: 48, label: "48" },
-  { value: 60, label: "60" },
-  { value: 72, label: "72" },
-  { value: 84, label: "84" },
-  { value: 96, label: "96" },
+  { value: 12, label: "Best Time" },
+  { value: 24, label: "Better Time" },
+  { value: 36, label: "Balanced" },
+  { value: 48, label: "Better Pitch" },
+  { value: 60, label: "Best Pitch" },
 ];
 
 export const BLEND_MODES = [
@@ -151,3 +148,12 @@ export const WRAP_MODES = [
 ];
 
 export const NUM_MODULATORS = 3;
+
+export const ALGORITHMS = [
+  { value: 0, label: "Glitchy" },
+  { value: 1, label: "Tonal" },
+  { value: 2, label: "New" },
+  { value: 3, label: "New2" },
+  { value: 4, label: "No interpolation" },
+  { value: 5, label: "Simple interpolation" },
+];
