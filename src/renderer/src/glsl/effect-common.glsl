@@ -59,6 +59,22 @@ vec2 unwrapPhase(vec2 phaseDelta) {
     return mod(phaseDelta + PI, 2.0 * PI) - PI;
 }
 
+// --- Complex Number & Polar Helpers ---
+float getMag(vec2 c) { return length(c); }
+float getPhase(vec2 c) { return atan(c.y, c.x); }
+vec2 fromPolar(float mag, float phase) { return mag * vec2(cos(phase), sin(phase)); }
+
+// Calculate wrapped distance between two points on an axis
+float wrappedDistance(float a, float b, bool shouldWrap) {
+    if (!shouldWrap) {
+        return abs(a - b);
+    }
+    
+    float dist = abs(a - b);
+    float wrappedDist = 1.0 - dist;
+    return min(dist, wrappedDist);
+}
+
 // Wraps UV coordinates based on the wrap mode
 vec2 wrapUv(vec2 uv) {
     vec2 wrapped = uv;
@@ -146,22 +162,39 @@ vec4 readPackedData(vec2 unpackedUv, sampler2D dataTex, sampler2D metaTex, vec2 
   vec2 packedUv = (vec2(packedX, packedY) + 0.5) / packedTexSize;
 
   // 6. Read the data.
-  return texture2D(dataTex, packedUv);
+  vec4 result = texture2D(dataTex, packedUv);
+
+  return result;
 }
+
+
+// --- Public Sampling API ---
+
+/**
+ * Samples from the source spectrogram at a precise point with NO interpolation.
+ * This is faster but can sound less smooth for time-stretching.
+ */
+vec4 getSourceSamplePoint(vec2 sourceUv) {
+    vec2 wrappedUv = wrapUv(sourceUv);
+    return readPackedData(wrappedUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount);
+}
+
 
 // Helper for interpolating between two complex numbers (represented as vec2).
 vec2 interpolateComplex(vec2 c1, vec2 c2, float amount) {
-    float mag1 = length(c1);
-    float phase1 = atan(c1.y, c1.x);
-    float mag2 = length(c2);
-    float phase2 = atan(c2.y, c2.x);
+    float mag1 = getMag(c1);
+    float mag2 = getMag(c2);
+    float magMix = exp(mix(log(mag1), log(mag2), amount));
 
-    float mag = mix(mag1, mag2, amount);
+    float phase1 = getPhase(c1);
+    float phase2 = getPhase(c2);
+
     float phaseDelta = unwrapPhase(phase2 - phase1);
     float phase = phase1 + amount * phaseDelta;
 
-    return mag * vec2(cos(phase), sin(phase));
+    return fromPolar(magMix, phase);
 }
+
 
 // Reads and linearly interpolates a complex value pair (stereo) from a packed spectrogram.
 vec4 readPackedDataInterpolated(vec2 unpackedUv, sampler2D dataTex, sampler2D metaTex, vec2 packedTexSize, float frameCount, float bandCount) {
@@ -195,16 +228,6 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv, sampler2D dataTex, sampler2D me
   return vec4(complexL, complexR);
 }
 
-// --- Public Sampling API ---
-
-/**
- * Samples from the source spectrogram at a precise point with NO interpolation.
- * This is faster but can sound less smooth for time-stretching.
- */
-vec4 getSourceSamplePoint(vec2 sourceUv) {
-    vec2 wrappedUv = wrapUv(sourceUv);
-    return readPackedData(wrappedUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount);
-}
 
 /**
  * Samples from the source spectrogram with linear interpolation in time.
@@ -252,31 +275,20 @@ vec4 getOriginalDestSample(vec2 destUv) {
     return readPackedDataInterpolated(wrappedUv, originalSpectrogramTex, destMetadataTex, destSpectrogramTextureSize, destFrameCount, destBandCount);
 }
 
-vec2 complexInterp(vec2 z0, vec2 z1, float t) {
-    float m0 = max(length(z0), 1e-12);
-    float m1 = max(length(z1), 1e-12);
-    float logm = mix(log(m0), log(m1), t);
+vec2 randomisePhase(vec2 complex, vec2 uv) {
+    vec2 seed1 = uv;
+    vec2 seed2 = uv + vec2(12.34, 56.78);
 
-    // ratio r = z1 / z0
-    vec2 z0c = vec2(z0.x, -z0.y);
-    float denom = m0 * m0;
-    vec2 r = vec2(
-        (z1.x*z0c.x - z1.y*z0c.y) / denom,
-        (z1.x*z0c.y + z1.y*z0c.x) / denom
-    );
+    float phase = random(seed1 + random(seed2));
 
-    float dphi = atan(r.y, r.x);                 // unwrap via atan2
-    float phi0 = atan(z0.y, z0.x);
-    float phi  = phi0 + dphi * t;
-
-    float mag = exp(logm);
-    return mag * vec2(cos(phi), sin(phi));
+    float mag = getMag(complex);
+    return fromPolar(mag, phase * TWO_PI);
 }
 
-vec4 getTransformedSample(vec2 sourceUv) {
-    vec2 wrappedSourceUv = wrapUv(sourceUv);
 
-    float bandIndex = floor((1.0 - wrappedSourceUv.y) * sourceBandCount);
+vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase) {
+
+    float bandIndex = floor((1.0 - sourceUv.y) * sourceBandCount);
 
     // Get band metadata
     vec2 metaUv = vec2((bandIndex + 0.5) / sourceBandCount, 0.5);
@@ -285,7 +297,7 @@ vec4 getTransformedSample(vec2 sourceUv) {
     float bandLength = meta.g;
     float bandTimeScaleExp = meta.b;
 
-    float timeInFrames = wrappedSourceUv.x * sourceFrameCount;
+    float timeInFrames = sourceUv.x * sourceFrameCount;
     float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
     float timeIndexFloor = floor(scaledTime);
     float timeFraction = fract(scaledTime);
@@ -307,31 +319,34 @@ vec4 getTransformedSample(vec2 sourceUv) {
     vec2 complex1R = sample1.ba;
     
     // Interpolate using complex interpolation
-    vec2 correctedL = complexInterp(complex0L, complex1L, timeFraction);
-    vec2 correctedR = complexInterp(complex0R, complex1R, timeFraction);
+    vec2 correctedL = interpolateComplex(complex0L, complex1L, timeFraction);
+    vec2 correctedR = interpolateComplex(complex0R, complex1R, timeFraction);
+
+    if (shouldRandomisePhase) {
+        correctedL = randomisePhase(correctedL, packedUv1);
+        correctedR = randomisePhase(correctedR, packedUv2);
+    }
 
     return vec4(correctedL, correctedR);
+}
+
+
+vec4 getTransformedSample(vec2 sourceUv) {
+    vec2 wrappedSourceUv = wrapUv(sourceUv);
+
+    if (algorithm == 0) {
+        return getTransformedSampleBasic(wrappedSourceUv, false);
+    } else if (algorithm == 1) {
+        return getTransformedSampleBasic(wrappedSourceUv, true);
+    } 
+    return vec4(0.0);
 }
 
 // ============================================================================
 // BRUSH & BLENDING LOGIC
 // ============================================================================
 
-// --- Complex Number & Polar Helpers ---
-float getMag(vec2 c) { return length(c); }
-float getPhase(vec2 c) { return atan(c.y, c.x); }
-vec2 fromPolar(float mag, float phase) { return mag * vec2(cos(phase), sin(phase)); }
 
-// Calculate wrapped distance between two points on an axis
-float wrappedDistance(float a, float b, bool shouldWrap) {
-    if (!shouldWrap) {
-        return abs(a - b);
-    }
-    
-    float dist = abs(a - b);
-    float wrappedDist = 1.0 - dist;
-    return min(dist, wrappedDist);
-}
 
 // Get the effective brush center considering wrapping
 vec2 getEffectiveBrushOffset(vec2 unpackedUv) {

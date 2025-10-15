@@ -907,7 +907,7 @@ export const useStore = create<State>()(
             "algorithm",
             {
               name: "Algorithm",
-              label: "Algorithm",
+              label: "Stretch mode",
               description: "The algorithm to use when transforming the spectrogram.",
               value: 0,
               options: ALGORITHMS,

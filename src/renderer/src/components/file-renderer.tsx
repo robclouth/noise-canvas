@@ -246,18 +246,27 @@ export const FileRenderer = memo(
       packed.internalFormat = "RGBA32F";
       packed.minFilter = THREE.NearestFilter;
       packed.magFilter = THREE.NearestFilter;
+      packed.wrapS = THREE.ClampToEdgeWrapping;
+      packed.wrapT = THREE.ClampToEdgeWrapping;
+      packed.generateMipmaps = false;
       packed.needsUpdate = true;
 
       const inverse = new THREE.DataTexture(inverseMap, textureWidth, textureHeight, THREE.RGFormat, THREE.FloatType);
       inverse.internalFormat = "RG32F";
       inverse.minFilter = THREE.NearestFilter;
       inverse.magFilter = THREE.NearestFilter;
+      inverse.wrapS = THREE.ClampToEdgeWrapping;
+      inverse.wrapT = THREE.ClampToEdgeWrapping;
+      inverse.generateMipmaps = false;
       inverse.needsUpdate = true;
 
       const meta = new THREE.DataTexture(metadata, numBands, 1, THREE.RGBAFormat, THREE.FloatType);
       meta.internalFormat = "RGBA32F";
       meta.minFilter = THREE.NearestFilter;
       meta.magFilter = THREE.NearestFilter;
+      meta.wrapS = THREE.ClampToEdgeWrapping;
+      meta.wrapT = THREE.ClampToEdgeWrapping;
+      meta.generateMipmaps = false;
       meta.needsUpdate = true;
 
       return { packed, inverse, meta };

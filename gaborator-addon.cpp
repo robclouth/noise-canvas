@@ -8,6 +8,8 @@
 #include <algorithm>
 #include "gaborator/gaborator.h"
 
+#define OVERLAP 0.7
+
 class AnalyzeWorker : public Napi::AsyncWorker
 {
 public:
@@ -43,8 +45,7 @@ public:
 
         double fminFrac = fminHz / sampleRate;
         gaborator::log_fq_scale scale(bandsPerOctave, fminFrac);
-        double overlap = 0.8;
-        gaborator::parameters params(scale, overlap);
+        gaborator::parameters params(scale, OVERLAP);
         params.phase = gaborator::coef_phase::global;
         gaborator::analyzer<float> analyzer(params);
 
@@ -330,8 +331,7 @@ public:
     {
         double fminFrac = fminHz / sampleRate;
         gaborator::log_fq_scale scale(bandsPerOctave, fminFrac);
-        double overlap = 0.8;
-        gaborator::parameters params(scale, overlap);
+        gaborator::parameters params(scale, OVERLAP);
         params.phase = gaborator::coef_phase::global;
         gaborator::analyzer<float> analyzer(params);
 

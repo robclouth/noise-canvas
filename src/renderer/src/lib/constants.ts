@@ -149,4 +149,7 @@ export const WRAP_MODES = [
 
 export const NUM_MODULATORS = 3;
 
-export const ALGORITHMS = [{ value: 0, label: "Default" }];
+export const ALGORITHMS = [
+  { value: 0, label: "Resonant" },
+  { value: 1, label: "Noise" },
+];
