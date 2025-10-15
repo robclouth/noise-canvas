@@ -19,7 +19,7 @@ void main() {
         float sharpenedPhaseL = 0.0;
         float sharpenedPhaseR = 0.0;
         
-        vec4 sourceCenterTexel = getTransformedSample(coords.source, coords.dest);
+        vec4 sourceCenterTexel = getTransformedSample(coords.source);
         float referencePhaseL = getPhase(sourceCenterTexel.rg);
         float referencePhaseR = getPhase(sourceCenterTexel.ba);
 
@@ -52,7 +52,7 @@ void main() {
                 weight = -sharpenAmount;
             }
 
-            vec4 sampleTexel = getTransformedSample(sampleUv, coords.dest);
+            vec4 sampleTexel = getTransformedSample(sampleUv);
             
             sharpenedMagL += getMag(sampleTexel.rg) * weight;
             sharpenedMagR += getMag(sampleTexel.ba) * weight;

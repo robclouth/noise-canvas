@@ -149,11 +149,4 @@ export const WRAP_MODES = [
 
 export const NUM_MODULATORS = 3;
 
-export const ALGORITHMS = [
-  { value: 0, label: "Glitchy" },
-  { value: 1, label: "Tonal" },
-  { value: 2, label: "New" },
-  { value: 3, label: "New2" },
-  { value: 4, label: "No interpolation" },
-  { value: 5, label: "Simple interpolation" },
-];
+export const ALGORITHMS = [{ value: 0, label: "Default" }];

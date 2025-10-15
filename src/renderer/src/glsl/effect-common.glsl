@@ -252,419 +252,65 @@ vec4 getOriginalDestSample(vec2 destUv) {
     return readPackedDataInterpolated(wrappedUv, originalSpectrogramTex, destMetadataTex, destSpectrogramTextureSize, destFrameCount, destBandCount);
 }
 
-/**
- * Reads packed data at a specific integer (band, time) coordinate from the source.
- * This is the key to building a coherent rectangular sampling cell.
- */
-vec4 readPackedDataAtIndex(float bandIndex, float timeIndex) {
-    // 1. Look up metadata for this band.
+vec2 complexInterp(vec2 z0, vec2 z1, float t) {
+    float m0 = max(length(z0), 1e-12);
+    float m1 = max(length(z1), 1e-12);
+    float logm = mix(log(m0), log(m1), t);
+
+    // ratio r = z1 / z0
+    vec2 z0c = vec2(z0.x, -z0.y);
+    float denom = m0 * m0;
+    vec2 r = vec2(
+        (z1.x*z0c.x - z1.y*z0c.y) / denom,
+        (z1.x*z0c.y + z1.y*z0c.x) / denom
+    );
+
+    float dphi = atan(r.y, r.x);                 // unwrap via atan2
+    float phi0 = atan(z0.y, z0.x);
+    float phi  = phi0 + dphi * t;
+
+    float mag = exp(logm);
+    return mag * vec2(cos(phi), sin(phi));
+}
+
+vec4 getTransformedSample(vec2 sourceUv) {
+    vec2 wrappedSourceUv = wrapUv(sourceUv);
+
+    float bandIndex = floor((1.0 - wrappedSourceUv.y) * sourceBandCount);
+
+    // Get band metadata
     vec2 metaUv = vec2((bandIndex + 0.5) / sourceBandCount, 0.5);
-    vec3 meta = texture2D(sourceMetadataTex, metaUv).rgb;
+    vec4 meta = texture2D(sourceMetadataTex, metaUv);
     float bandStartOffset = meta.r;
     float bandLength = meta.g;
-
-    // 2. Clamp the time index to be within the valid range for this band.
-    float clampedTimeIndex = clamp(timeIndex, 0.0, bandLength - 1.0);
-
-    // 3. Convert the 1D band index into a 2D packed texture coordinate.
-    float linearPixelIndex = bandStartOffset + clampedTimeIndex;
-    float packedY = floor(linearPixelIndex / sourceSpectrogramTextureSize.x);
-    float packedX = mod(linearPixelIndex, sourceSpectrogramTextureSize.x);
-    vec2 packedUv = (vec2(packedX + 1.0, packedY) + 0.5) / sourceSpectrogramTextureSize;
-
-    // 4. Read the data.
-    return texture2D(sourceSpectrogramTex, packedUv);
-}
-
-vec4 getTransformedSampleNew(vec2 sourceUv, vec2 destUv, float scaleX) {
-     // Sample the complex values with interpolation
-    vec4 currentSample = getSourceSample(sourceUv);
-    
-    float bandIndex = floor((1.0 - sourceUv.y) * sourceBandCount);
-    
-    // Get band metadata
-    vec2 metaUv = vec2((bandIndex + 0.5) / sourceBandCount, 0.5);
-    vec3 meta = texture2D(sourceMetadataTex, metaUv).rgb;
     float bandTimeScaleExp = meta.b;
-    
-    // Calculate center frequency for this band
-    float centerFreq = sourceMinFreq * pow(2.0, bandIndex / sourceBandsPerOctave);
-    
-    // For phase vocoder, we need to calculate phase based on the OUTPUT position
-    // not the input position. This prevents banding.
-    
-    // Calculate source time in frames
-    float sourceTimeInFrames = sourceUv.x * sourceFrameCount;
-    float scaledSourceTime = sourceTimeInFrames / exp2(bandTimeScaleExp);
-    
-    // Calculate destination time in frames
-    float destTimeInFrames = destUv.x * destFrameCount;
-    
-    // The key insight: phase advance should be based on the DESTINATION timeline
-    // Expected phase for a pure sinusoid at centerFreq over the destination time
-    float expectedPhase = TWO_PI * centerFreq * destTimeInFrames / destSampleRate;
-    
-    // Now sample the neighboring source frames to get instantaneous frequency
-    float currentTimeIndex = floor(scaledSourceTime);
-    float prevTimeIndex = currentTimeIndex - 1.0;
 
-    // Read frames for instantaneous frequency measurement
-    vec4 prevSample = readPackedDataAtIndex(bandIndex, prevTimeIndex);
-    vec4 currSamplePoint = readPackedDataAtIndex(bandIndex, currentTimeIndex);
+    float timeInFrames = wrappedSourceUv.x * sourceFrameCount;
+    float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
+    float timeIndexFloor = floor(scaledTime);
+    float timeFraction = fract(scaledTime);
+
+    // Get the value at the integer time before the continuous time 
+    float linearPixelIndex1 = bandStartOffset + timeIndexFloor;
+    vec2 packedUv1 = (vec2(mod(linearPixelIndex1, sourceSpectrogramTextureSize.x), floor(linearPixelIndex1 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
+    vec4 sample0 = texture2D(sourceSpectrogramTex, packedUv1);
+
+    // Get the value at the integer time after the continuous time
+    float linearPixelIndex2 = bandStartOffset + timeIndexFloor + 1.0;
+    vec2 packedUv2 = (vec2(mod(linearPixelIndex2, sourceSpectrogramTextureSize.x), floor(linearPixelIndex2 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
+    vec4 sample1 = texture2D(sourceSpectrogramTex, packedUv2);
     
     // Extract complex values
-    vec2 prevL = prevSample.rg;
-    vec2 prevR = prevSample.ba;
-    vec2 currL = currSamplePoint.rg;
-    vec2 currR = currSamplePoint.ba;
+    vec2 complex0L = sample0.rg;
+    vec2 complex1L = sample1.rg;
+    vec2 complex0R = sample0.ba;
+    vec2 complex1R = sample1.ba;
+    
+    // Interpolate using complex interpolation
+    vec2 correctedL = complexInterp(complex0L, complex1L, timeFraction);
+    vec2 correctedR = complexInterp(complex0R, complex1R, timeFraction);
 
-    // Calculate phase advance in the SOURCE
-    float prevPhaseL = atan(prevL.y, prevL.x);
-    float currPhaseL = atan(currL.y, currL.x);
-    float prevPhaseR = atan(prevR.y, prevR.x);
-    float currPhaseR = atan(currR.y, currR.x);
-    
-    float phaseDeltaL = unwrapPhase(currPhaseL - prevPhaseL);
-    float phaseDeltaR = unwrapPhase(currPhaseR - prevPhaseR);
-    
-    // Expected phase advance per source frame at center frequency
-    // Note: we need to account for the variable time resolution
-    float sourceFrameDuration = exp2(bandTimeScaleExp) / sourceSampleRate;
-    float expectedSourcePhaseAdvance = TWO_PI * centerFreq * sourceFrameDuration;
-    
-    // Instantaneous frequency (in Hz)
-    float instFreqL = centerFreq + (phaseDeltaL - expectedSourcePhaseAdvance) / (TWO_PI * sourceFrameDuration);
-    float instFreqR = centerFreq + (phaseDeltaR - expectedSourcePhaseAdvance) / (TWO_PI * sourceFrameDuration);
-    
-    // Calculate what the phase SHOULD be at this destination time
-    // using the measured instantaneous frequency
-    float outputPhaseL = TWO_PI * instFreqL * destTimeInFrames / destSampleRate;
-    float outputPhaseR = TWO_PI * instFreqR * destTimeInFrames / destSampleRate;
-    
-    // Use magnitude from interpolated sample, but corrected phase
-    vec2 complexL = currentSample.rg;
-    vec2 complexR = currentSample.ba;
-    float magL = length(complexL);
-    float magR = length(complexR);
-    
-    // Reconstruct with phase based on OUTPUT timeline
-    vec2 correctedL = magL * vec2(cos(outputPhaseL), sin(outputPhaseL));
-    vec2 correctedR = magR * vec2(cos(outputPhaseR), sin(outputPhaseR));
-    
     return vec4(correctedL, correctedR);
-}
-
-vec4 getTransformedSampleBand(vec2 sourceUv, vec2 destUv, float bandIndex, float scaleX) {
-    // Get band metadata
-    vec2 metaUv = vec2((bandIndex + 0.5) / sourceBandCount, 0.5);
-    vec3 meta = texture2D(sourceMetadataTex, metaUv).rgb;
-    float bandTimeScaleExp = meta.b;
-    
-    // Calculate center frequency for band
-    float centerFreq = sourceMinFreq * pow(2.0, bandIndex / sourceBandsPerOctave);
-    
-    // For phase vocoder, we need to calculate phase based on the OUTPUT position
-    // not the input position. This prevents banding.
-    
-    // Calculate source time in frames
-    float sourceTimeInFrames = sourceUv.x * sourceFrameCount;
-    float scaledSourceTime = sourceTimeInFrames / exp2(bandTimeScaleExp);
-    
-    // Calculate destination time in frames
-    float destTimeInFrames = destUv.x * destFrameCount;
-    
-    // The key insight: phase advance should be based on the DESTINATION timeline
-    // Expected phase for a pure sinusoid at centerFreq over the destination time
-    float expectedPhase = TWO_PI * centerFreq * destTimeInFrames / destSampleRate;
-
-    // Now sample the neighboring source frames to get instantaneous frequency
-    float currentTimeIndex = floor(scaledSourceTime);
-    float prevTimeIndex = currentTimeIndex - 1.0;
-    
-    // Read frames for instantaneous frequency measurement
-    vec4 prevSample = readPackedDataAtIndex(bandIndex, prevTimeIndex);
-    vec4 currSample = readPackedDataAtIndex(bandIndex, currentTimeIndex);
-
-    // Extract complex values
-    vec2 prevL = prevSample.rg;
-    vec2 currL = currSample.rg;
-    vec2 currR = currSample.ba;
-    vec2 prevR = prevSample.ba;
-
-    // Calculate phase advance in the SOURCE
-    float prevPhaseL = atan(prevL.y, prevL.x);
-    float currPhaseL = atan(currL.y, currL.x);
-    float prevPhaseR = atan(prevR.y, prevR.x);
-    float currPhaseR = atan(currR.y, currR.x);
-
-    float phaseDeltaL = unwrapPhase(currPhaseL - prevPhaseL);
-    float phaseDeltaR = unwrapPhase(currPhaseR - prevPhaseR);
-
-    // Expected phase advance per source frame at center frequency
-    // Note: we need to account for the variable time resolution
-    float sourceFrameDuration = exp2(bandTimeScaleExp) / sourceSampleRate;
-    float expectedSourcePhaseAdvance = TWO_PI * centerFreq * sourceFrameDuration;
-    
-    // Instantaneous frequency (in Hz)
-    float instFreqL = phaseDeltaL / (TWO_PI * sourceFrameDuration);
-    float instFreqR = phaseDeltaR / (TWO_PI * sourceFrameDuration);
-
-    // Calculate what the phase SHOULD be at this destination time
-    // using the measured instantaneous frequency
-    float timeIndexFraction = fract(scaledSourceTime);
-
-    float scaleAbs = abs(scaleX);
-    float outputPhaseL = TWO_PI * instFreqL * destTimeInFrames / destSampleRate;
-    float outputPhaseLSimple = prevPhaseL + timeIndexFraction * phaseDeltaL;
-    outputPhaseL = mix(outputPhaseLSimple, outputPhaseL, (scaleAbs - 1.0) / 8.0);
-
-    float outputPhaseR = TWO_PI * instFreqR * destTimeInFrames / destSampleRate;
-    float outputPhaseRSimple = prevPhaseR + timeIndexFraction * phaseDeltaR;
-    outputPhaseR = mix(outputPhaseRSimple, outputPhaseR, (scaleAbs - 1.0) / 8.0);
-
-    // Use magnitude from interpolated sample, but corrected phase
-    float magL = mix(length(prevL), length(currL), timeIndexFraction);
-    float magR = mix(length(prevR), length(currR), timeIndexFraction);
-
-    // Reconstruct with phase based on OUTPUT timeline
-    vec2 correctedL = magL * vec2(cos(outputPhaseL), sin(outputPhaseL));
-    vec2 correctedR = magR * vec2(cos(outputPhaseR), sin(outputPhaseR));
-    return vec4(correctedL, correctedR);
-}
-
-
-vec4 getTransformedSampleNew2(vec2 sourceUv, vec2 destUv, float scaleX) {
-    vec2 wrappedSourceUv = wrapUv(sourceUv);
-
-    float bandNumFloat = (1.0 - wrappedSourceUv.y) * sourceBandCount - 0.5;
-    float bandIndex0 = floor(bandNumFloat);
-    float bandIndex1 = bandIndex0 + 1.0;
-    float bandIndexFraction = fract(bandNumFloat);
-
-    vec4 sample0 = getTransformedSampleBand(wrappedSourceUv, destUv, bandIndex0, scaleX);
-    vec4 sample1 = getTransformedSampleBand(wrappedSourceUv, destUv, bandIndex1, scaleX);
-
-    vec2 complexL = interpolateComplex(sample0.rg, sample1.rg, bandIndexFraction);
-    vec2 complexR = interpolateComplex(sample0.ba, sample1.ba, bandIndexFraction);
-
-    return vec4(complexL, complexR);
-}
-
-
-vec4 getTransformedSampleGlitchy(vec2 sourceUv, vec2 destUv, float scaleX) {
-    // Apply wrapping to source UV
-    vec2 wrappedSourceUv = wrapUv(sourceUv);
-    
-    // --- Frequency and Pitch Calculation ---
-    float sourceFreq = sourceMinFreq * pow(2.0, (1.0 - wrappedSourceUv.y) * sourceBandCount / sourceBandsPerOctave);
-    float destFreq = destMinFreq * pow(2.0, (1.0 - destUv.y) * destBandCount / destBandsPerOctave);
-    float pitchRatio = (sourceFreq > 1e-5) ? destFreq / sourceFreq : 1.0;
-
-    // --- Vertical (Frequency) Sampling Grid ---
-    float bandNumFloat = (1.0 - wrappedSourceUv.y) * sourceBandCount - 0.5;
-    float bandIndex = floor(bandNumFloat);
-    float freqFraction = fract(bandNumFloat);
-
-    if (bandIndex < 0.0 || bandIndex + 1.0 >= sourceBandCount) {
-        return getSourceSample(wrappedSourceUv); // Fallback at top/bottom edges
-    }
-
-    // --- Metadata and Time Calculations (same as before) ---
-    vec2 metaUv_base = vec2((bandIndex + 0.5) / sourceBandCount, 0.5);
-    vec3 meta_base = texture2D(sourceMetadataTex, metaUv_base).rgb;
-    float bandLength_base = meta_base.g;
-    float bandTimeScaleExp_base = meta_base.b;
-    vec2 metaUv_freq = vec2((bandIndex + 1.5) / sourceBandCount, 0.5);
-    vec3 meta_freq = texture2D(sourceMetadataTex, metaUv_freq).rgb;
-    float bandLength_freq = meta_freq.g;
-    float bandTimeScaleExp_freq = meta_freq.b;
-    float timeInFrames = wrappedSourceUv.x * sourceFrameCount;
-    float scaledTime_base = timeInFrames / exp2(bandTimeScaleExp_base);
-    float timeIndex_base = floor(scaledTime_base);
-    float timeFraction_base = fract(scaledTime_base);
-    float scaledTime_freq = timeInFrames / exp2(bandTimeScaleExp_freq);
-    float timeIndex_freq = floor(scaledTime_freq);
-
-    if (timeIndex_base + 1.0 >= bandLength_base || timeIndex_freq + 1.0 >= bandLength_freq) {
-        return getSourceSample(wrappedSourceUv);
-    }
-
-    // --- Gather Four Surrounding Data Points (same as before) ---
-    float linearPixelIndex_base0 = meta_base.r + timeIndex_base;
-    vec2 packedUv_base0 = (vec2(mod(linearPixelIndex_base0, sourceSpectrogramTextureSize.x), floor(linearPixelIndex_base0 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
-    vec4 s_base = texture2D(sourceSpectrogramTex, packedUv_base0);
-    float linearPixelIndex_base1 = meta_base.r + timeIndex_base + 1.0;
-    vec2 packedUv_base1 = (vec2(mod(linearPixelIndex_base1, sourceSpectrogramTextureSize.x), floor(linearPixelIndex_base1 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
-    vec4 s_time = texture2D(sourceSpectrogramTex, packedUv_base1);
-    float linearPixelIndex_freq0 = meta_freq.r + timeIndex_freq;
-    vec2 packedUv_freq0 = (vec2(mod(linearPixelIndex_freq0, sourceSpectrogramTextureSize.x), floor(linearPixelIndex_freq0 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
-    vec4 s_freq = texture2D(sourceSpectrogramTex, packedUv_freq0);
-    float linearPixelIndex_freq1 = meta_freq.r + timeIndex_freq + 1.0;
-    vec2 packedUv_freq1 = (vec2(mod(linearPixelIndex_freq1, sourceSpectrogramTextureSize.x), floor(linearPixelIndex_freq1 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
-    vec4 s_time_freq = texture2D(sourceSpectrogramTex, packedUv_freq1);
-
-    // --- 1. GATHER AND INTERPOLATE MAGNITUDE (same as before) ---
-    const float LOG_MIN = 1e-7;
-    vec2 mag_base = vec2(log(max(LOG_MIN, length(s_base.rg))), log(max(LOG_MIN, length(s_base.ba))));
-    vec2 mag_time = vec2(log(max(LOG_MIN, length(s_time.rg))), log(max(LOG_MIN, length(s_time.ba))));
-    vec2 mag_freq = vec2(log(max(LOG_MIN, length(s_freq.rg))), log(max(LOG_MIN, length(s_freq.ba))));
-    vec2 mag_time_freq = vec2(log(max(LOG_MIN, length(s_time_freq.rg))), log(max(LOG_MIN, length(s_time_freq.ba))));
-    vec2 mag_interp_base = mix(mag_base, mag_time, timeFraction_base);
-    vec2 mag_interp_freq = mix(mag_freq, mag_time_freq, timeFraction_base);
-    vec2 final_mag_log = mix(mag_interp_base, mag_interp_freq, freqFraction);
-    vec2 final_mag = exp(final_mag_log);
-
-    // --- 2. GATHER AND INTERPOLATE PHASE COMPONENTS (same as before) ---
-    vec2 phase0_base = vec2(atan(s_base.g, s_base.r), atan(s_base.a, s_base.b));
-    vec2 phase0_freq = vec2(atan(s_freq.g, s_freq.r), atan(s_freq.a, s_freq.b));
-    float sourceFreq_base_hz = sourceMinFreq * pow(2.0, (bandIndex + 0.5) / sourceBandsPerOctave);
-    float timeStep_base_s = exp2(bandTimeScaleExp_base) / sourceSampleRate;
-    float expectedDelta_base = TWO_PI * sourceFreq_base_hz * timeStep_base_s;
-    vec2 measuredDelta_base = vec2(unwrapPhase(atan(s_time.g, s_time.r) - phase0_base.x), unwrapPhase(atan(s_time.a, s_time.b) - phase0_base.y));
-    vec2 deviation_base = measuredDelta_base - expectedDelta_base;
-    float sourceFreq_freq_hz = sourceMinFreq * pow(2.0, (bandIndex + 1.5) / sourceBandsPerOctave);
-    float timeStep_freq_s = exp2(bandTimeScaleExp_freq) / sourceSampleRate;
-    float expectedDelta_freq = TWO_PI * sourceFreq_freq_hz * timeStep_freq_s;
-    vec2 measuredDelta_freq = vec2(unwrapPhase(atan(s_time_freq.g, s_time_freq.r) - phase0_freq.x), unwrapPhase(atan(s_time_freq.a, s_time_freq.b) - phase0_freq.y));
-    vec2 deviation_freq = measuredDelta_freq - expectedDelta_freq;
-    vec2 phase0_interp = phase0_base + unwrapPhase(phase0_freq - phase0_base) * freqFraction;
-    vec2 deviation_interp = mix(deviation_base, deviation_freq, freqFraction);
-    float expectedDelta_interp = mix(expectedDelta_base, expectedDelta_freq, freqFraction);
-
-    // --- 3. CONSTRUCT FINAL PHASE WITH CORRECT TIME STRETCH SCALING ---
-    // This is the critical fix. We scale the rate of phase change by the stretch factor.
-    vec2 phase_advance_rate = (expectedDelta_interp * pitchRatio + deviation_interp);
-    vec2 final_phase = phase0_interp + phase_advance_rate * scaleX * timeFraction_base;
-
-    // --- 4. RECONSTRUCT COMPLEX NUMBER (same as before) ---
-    vec2 final_L = final_mag.x * vec2(cos(final_phase.x), sin(final_phase.x));
-    vec2 final_R = final_mag.y * vec2(cos(final_phase.y), sin(final_phase.y));
-
-    return vec4(final_L, final_R);
-}
-
-vec4 getTransformedSampleTonal(vec2 sourceUv, vec2 destUv, float scaleX) {
-    // Apply wrapping to source UV
-    vec2 wrappedSourceUv = wrapUv(sourceUv);
-    
-    // --- Frequency and Pitch Calculation ---
-    float sourceFreq = sourceMinFreq * pow(2.0, (1.0 - wrappedSourceUv.y) * sourceBandCount / sourceBandsPerOctave);
-    float destFreq = destMinFreq * pow(2.0, (1.0 - destUv.y) * destBandCount / destBandsPerOctave);
-    float pitchRatio = (sourceFreq > 1e-5) ? destFreq / sourceFreq : 1.0;
-
-    // --- Vertical (Frequency) Sampling Grid ---
-    float bandNumFloat = (1.0 - wrappedSourceUv.y) * sourceBandCount - 0.5;
-    float bandIndex = floor(bandNumFloat);
-    float freqFraction = fract(bandNumFloat);
-
-    if (bandIndex < 0.0 || bandIndex + 1.0 >= sourceBandCount) {
-        return getSourceSample(wrappedSourceUv); // Fallback at top/bottom edges
-    }
-
-    // --- Get Metadata for BOTH Bands ---
-    vec2 metaUv_base = vec2((bandIndex + 0.5) / sourceBandCount, 0.5);
-    vec3 meta_base = texture2D(sourceMetadataTex, metaUv_base).rgb;
-    float bandLength_base = meta_base.g;
-    float bandTimeScaleExp_base = meta_base.b;
-
-    vec2 metaUv_freq = vec2((bandIndex + 1.5) / sourceBandCount, 0.5);
-    vec3 meta_freq = texture2D(sourceMetadataTex, metaUv_freq).rgb;
-    float bandLength_freq = meta_freq.g;
-    float bandTimeScaleExp_freq = meta_freq.b;
-
-    // --- Horizontal (Time) Calculations for EACH Band INDEPENDENTLY ---
-    float timeInFrames = wrappedSourceUv.x * sourceFrameCount;
-
-    // Lower band time calculations
-    float scaledTime_base = timeInFrames / exp2(bandTimeScaleExp_base);
-    float timeIndex_base = floor(scaledTime_base);
-    float timeFraction_base = fract(scaledTime_base);
-
-    // Upper band time calculations
-    float scaledTime_freq = timeInFrames / exp2(bandTimeScaleExp_freq);
-    float timeIndex_freq = floor(scaledTime_freq);
-    float timeFraction_freq = fract(scaledTime_freq);
-
-    if (timeIndex_base + 1.0 >= bandLength_base || timeIndex_freq + 1.0 >= bandLength_freq) {
-        return getSourceSample(wrappedSourceUv); // Fallback at time edges
-    }
-
-    // --- Gather Four Surrounding Data Points ---
-    // Lower band samples
-    float linearPixelIndex_base0 = meta_base.r + timeIndex_base;
-    vec2 packedUv_base0 = (vec2(mod(linearPixelIndex_base0, sourceSpectrogramTextureSize.x), floor(linearPixelIndex_base0 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
-    vec4 s_base = texture2D(sourceSpectrogramTex, packedUv_base0);
-
-    float linearPixelIndex_base1 = meta_base.r + timeIndex_base + 1.0;
-    vec2 packedUv_base1 = (vec2(mod(linearPixelIndex_base1, sourceSpectrogramTextureSize.x), floor(linearPixelIndex_base1 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
-    vec4 s_time = texture2D(sourceSpectrogramTex, packedUv_base1);
-
-    // Upper band samples
-    float linearPixelIndex_freq0 = meta_freq.r + timeIndex_freq;
-    vec2 packedUv_freq0 = (vec2(mod(linearPixelIndex_freq0, sourceSpectrogramTextureSize.x), floor(linearPixelIndex_freq0 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
-    vec4 s_freq = texture2D(sourceSpectrogramTex, packedUv_freq0);
-
-    float linearPixelIndex_freq1 = meta_freq.r + timeIndex_freq + 1.0;
-    vec2 packedUv_freq1 = (vec2(mod(linearPixelIndex_freq1, sourceSpectrogramTextureSize.x), floor(linearPixelIndex_freq1 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
-    vec4 s_time_freq = texture2D(sourceSpectrogramTex, packedUv_freq1);
-
-    // --- Two-Stage Bilinear Interpolation ---
-    // Stage 1: Horizontal (time) interpolation for each band separately.
-    // We must apply the pitch correction to the phase difference before interpolating.
-
-    // Lower band interpolation
-    vec2 phase_base_L = vec2(atan(s_base.g, s_base.r), atan(s_time.g, s_time.r));
-    vec2 phase_base_R = vec2(atan(s_base.a, s_base.b), atan(s_time.a, s_time.b));
-    float correctedPhase_base_L = phase_base_L.x + unwrapPhase(phase_base_L.y - phase_base_L.x) * pitchRatio * timeFraction_base;
-    float correctedPhase_base_R = phase_base_R.x + unwrapPhase(phase_base_R.y - phase_base_R.x) * pitchRatio * timeFraction_base;
-    float mag_interp_base_L = mix(length(s_base.rg), length(s_time.rg), timeFraction_base);
-    float mag_interp_base_R = mix(length(s_base.ba), length(s_time.ba), timeFraction_base);
-    vec4 interp_base = vec4(mag_interp_base_L * cos(correctedPhase_base_L), mag_interp_base_L * sin(correctedPhase_base_L),
-                            mag_interp_base_R * cos(correctedPhase_base_R), mag_interp_base_R * sin(correctedPhase_base_R));
-
-    // Upper band interpolation
-    vec2 phase_freq_L = vec2(atan(s_freq.g, s_freq.r), atan(s_time_freq.g, s_time_freq.r));
-    vec2 phase_freq_R = vec2(atan(s_freq.a, s_freq.b), atan(s_time_freq.a, s_time_freq.b));
-    float correctedPhase_freq_L = phase_freq_L.x + unwrapPhase(phase_freq_L.y - phase_freq_L.x) * pitchRatio * timeFraction_freq;
-    float correctedPhase_freq_R = phase_freq_R.x + unwrapPhase(phase_freq_R.y - phase_freq_R.x) * pitchRatio * timeFraction_freq;
-    float mag_interp_freq_L = mix(length(s_freq.rg), length(s_time_freq.rg), timeFraction_freq);
-    float mag_interp_freq_R = mix(length(s_freq.ba), length(s_time_freq.ba), timeFraction_freq);
-    vec4 interp_freq = vec4(mag_interp_freq_L * cos(correctedPhase_freq_L), mag_interp_freq_L * sin(correctedPhase_freq_L),
-                            mag_interp_freq_R * cos(correctedPhase_freq_R), mag_interp_freq_R * sin(correctedPhase_freq_R));
-
-    // Stage 2: Vertical (frequency) interpolation between the two results.
-    vec2 final_L = interpolateComplex(interp_base.rg, interp_freq.rg, freqFraction);
-    vec2 final_R = interpolateComplex(interp_base.ba, interp_freq.ba, freqFraction);
-
-    return vec4(final_L, final_R);
-}
-
-// ============================================================================
-// PHASE VOCODER TRANSFORMATION
-// ============================================================================
-/**
- * HIGH QUALITY (PITCH-AWARE): Performs true pitch-shifting and time-stretching.
- * This version correctly handles the non-uniform time/frequency grid of the
- * spectrogram, preventing both vertical drift and horizontal artifacts.
- * @param sourceUv The logical UV coordinate to sample FROM.
- * @param destUv The logical UV coordinate of the pixel we are writing TO.
- */
-
-vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX) {
-    if (algorithm == 0) {
-        return getTransformedSampleGlitchy(sourceUv, destUv, scaleX);
-    } else if (algorithm == 1) {
-        return getTransformedSampleTonal(sourceUv, destUv, scaleX);
-    } else if (algorithm == 2) {
-        return getTransformedSampleNew(sourceUv, destUv, scaleX);
-    } else if (algorithm == 3) {
-        return getTransformedSampleNew2(sourceUv, destUv, scaleX);
-    } else if (algorithm == 4) {
-        return getSourceSamplePoint(sourceUv);
-    } else if (algorithm == 5) {
-        return getSourceSample(sourceUv);
-    }
-    return vec4(0.0);
 }
 
 // ============================================================================

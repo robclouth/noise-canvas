@@ -254,8 +254,8 @@ export const FileRenderer = memo(
       inverse.magFilter = THREE.NearestFilter;
       inverse.needsUpdate = true;
 
-      const meta = new THREE.DataTexture(metadata, numBands, 1, THREE.RGBFormat, THREE.FloatType);
-      meta.internalFormat = "RGB32F";
+      const meta = new THREE.DataTexture(metadata, numBands, 1, THREE.RGBAFormat, THREE.FloatType);
+      meta.internalFormat = "RGBA32F";
       meta.minFilter = THREE.NearestFilter;
       meta.magFilter = THREE.NearestFilter;
       meta.needsUpdate = true;

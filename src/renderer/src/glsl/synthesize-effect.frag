@@ -33,8 +33,8 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
     complexValueR = fromPolar(amplitude, phase);
   }
   else {
-    complexValueL = vec2(0.0, 0.0);
-    complexValueR = vec2(0.0, 0.0);
+    complexValueL = fromPolar(1.0, 0.0);
+    complexValueR = fromPolar(1.0, 0.0);
   }
 
   return vec4(complexValueL, complexValueR);
