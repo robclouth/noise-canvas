@@ -150,7 +150,7 @@ vec4 readPackedData(vec2 unpackedUv, sampler2D dataTex, sampler2D metaTex, vec2 
   float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
   float timeIndexInBand = floor(scaledTime);
 
-  // 4. If out of bounds for this band, clamp to the edge.
+  // 4. If out of bounds for this band, clamp to the
   if (timeIndexInBand < 0.0 || timeIndexInBand >= bandLength) {
       timeIndexInBand = clamp(timeIndexInBand, 0.0, bandLength - 1.0);
   }
@@ -275,18 +275,66 @@ vec4 getOriginalDestSample(vec2 destUv) {
     return readPackedDataInterpolated(wrappedUv, originalSpectrogramTex, destMetadataTex, destSpectrogramTextureSize, destFrameCount, destBandCount);
 }
 
-vec2 randomisePhase(vec2 complex, vec2 uv) {
-    vec2 seed1 = uv;
-    vec2 seed2 = uv + vec2(12.34, 56.78);
-
-    float phase = random(seed1 + random(seed2));
-
+vec2 modifyPhase(vec2 complex, vec2 uv, bool shouldRandomise) {
     float mag = getMag(complex);
-    return fromPolar(mag, phase * TWO_PI);
+    float phase = getPhase(complex);
+
+    if(shouldRandomise) {
+        vec2 seed1 = uv;
+        vec2 seed2 = uv + vec2(12.34, 56.78);
+        phase = random(seed1 + random(seed2)) * TWO_PI;
+        return fromPolar(mag, phase);
+    }
+
+    return fromPolar(mag, phase);
 }
 
 
-vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase) {
+vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, vec2 destUv) {
+    float bandIndex = floor((1.0 - sourceUv.y) * sourceBandCount);
+
+    // Get band metadata
+    vec2 metaUv = vec2((bandIndex + 0.5) / sourceBandCount, 0.5);
+    vec4 meta = texture2D(sourceMetadataTex, metaUv);
+    float bandStartOffset = meta.r;
+    float bandLength = meta.g;
+    float bandTimeScaleExp = meta.b;
+
+    float timeInFrames = sourceUv.x * sourceFrameCount;
+    float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
+    float timeIndexFloor = floor(scaledTime);
+    float timeFraction = fract(scaledTime);
+
+    // Get the value at the integer time before the continuous time 
+    float linearPixelIndex1 = bandStartOffset + timeIndexFloor;
+    vec2 packedUv1 = (vec2(mod(linearPixelIndex1, sourceSpectrogramTextureSize.x), floor(linearPixelIndex1 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
+    vec4 sample0 = texture2D(sourceSpectrogramTex, packedUv1);
+
+    // Get the value at the integer time after the continuous time
+    float linearPixelIndex2 = bandStartOffset + timeIndexFloor + 1.0;
+    vec2 packedUv2 = (vec2(mod(linearPixelIndex2, sourceSpectrogramTextureSize.x), floor(linearPixelIndex2 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
+    vec4 sample1 = texture2D(sourceSpectrogramTex, packedUv2);
+    
+    // Extract complex values
+    vec2 complex0L = sample0.rg;
+    vec2 complex1L = sample1.rg;
+    vec2 complex0R = sample0.ba;
+    vec2 complex1R = sample1.ba;
+
+    // Interpolate using complex interpolation
+    vec2 correctedL = interpolateComplex(complex0L, complex1L, timeFraction);
+    vec2 correctedR = interpolateComplex(complex0R, complex1R, timeFraction);
+
+    correctedL = modifyPhase(correctedL, packedUv1, shouldRandomisePhase);
+    correctedR = modifyPhase(correctedR, packedUv1, shouldRandomisePhase);
+
+    return vec4(correctedL, correctedR);
+}
+
+vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 destUv) {
+    vec4 original = getSourceSamplePoint(destUv);
+    float originalPhaseL = getPhase(original.rg);
+    float originalPhaseR = getPhase(original.ba);
 
     float bandIndex = floor((1.0 - sourceUv.y) * sourceBandCount);
 
@@ -317,28 +365,30 @@ vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase) {
     vec2 complex1L = sample1.rg;
     vec2 complex0R = sample0.ba;
     vec2 complex1R = sample1.ba;
-    
-    // Interpolate using complex interpolation
-    vec2 correctedL = interpolateComplex(complex0L, complex1L, timeFraction);
-    vec2 correctedR = interpolateComplex(complex0R, complex1R, timeFraction);
 
-    if (shouldRandomisePhase) {
-        correctedL = randomisePhase(correctedL, packedUv1);
-        correctedR = randomisePhase(correctedR, packedUv2);
-    }
+    float magL = mix(getMag(complex0L), getMag(complex1L), timeFraction);
+    float magR = mix(getMag(complex0R), getMag(complex1R), timeFraction);
+    float phaseL = unwrapPhase(getPhase(complex1L) - getPhase(complex0L)) + originalPhaseL;
+    float phaseR = unwrapPhase(getPhase(complex1R) - getPhase(complex0R)) + originalPhaseR;
+
+    vec2 correctedL = fromPolar(magL, phaseL);
+    vec2 correctedR = fromPolar(magR, phaseR);
 
     return vec4(correctedL, correctedR);
 }
 
 
-vec4 getTransformedSample(vec2 sourceUv) {
+
+vec4 getTransformedSample(vec2 sourceUv, vec2 destUv) {
     vec2 wrappedSourceUv = wrapUv(sourceUv);
 
     if (algorithm == 0) {
-        return getTransformedSampleBasic(wrappedSourceUv, false);
+        return getTransformedSampleBasic(wrappedSourceUv, false, destUv);
     } else if (algorithm == 1) {
-        return getTransformedSampleBasic(wrappedSourceUv, true);
-    } 
+        return getTransformedSampleBasic(wrappedSourceUv, true, destUv);
+    } else if (algorithm == 2) {
+        return getTransformedSampleSnappy(wrappedSourceUv, true, destUv);
+    }
     return vec4(0.0);
 }
 

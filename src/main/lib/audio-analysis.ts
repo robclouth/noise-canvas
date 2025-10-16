@@ -143,6 +143,11 @@ export async function synthesize(
   normalize: boolean,
 ): Promise<Float32Array[]> {
   const gab = init();
+  for (let i = 0; i < processedData.length; i++) {
+    if (isNaN(processedData[i]) || !isFinite(processedData[i])) {
+      throw new Error(`Invalid value in processed data at index ${i}: ${processedData[i]}`);
+    }
+  }
   return await gab.synthesize(processedData, analysisMetadata, sampleRate, params, normalize);
 }
 
