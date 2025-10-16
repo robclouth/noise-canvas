@@ -924,9 +924,9 @@ export const useStore = create<State>()(
             set,
             "algorithm",
             {
-              name: "Algorithm",
-              label: "Stretch mode",
-              description: "The algorithm to use when transforming the spectrogram.",
+              name: "Warp Algorithm",
+              label: "Warp algo",
+              description: "The algorithm to use when warping the spectrogram.",
               value: 0,
               options: ALGORITHMS,
             },
