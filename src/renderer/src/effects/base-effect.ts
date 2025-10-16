@@ -15,9 +15,9 @@ export type Modulator = {
 };
 
 export type CommonUniforms = {
-  sourceSpectrogramTex: { value: Texture };
-  sourceInverseMapTex: { value: Texture };
-  sourceMetadataTex: { value: Texture };
+  sourceSpectrogramTex: { value: Texture | null };
+  sourceInverseMapTex: { value: Texture | null };
+  sourceMetadataTex: { value: Texture | null };
   sourceFrameCount: { value: number };
   sourceBandCount: { value: number };
   sourceSpectrogramTextureSize: { value: Vector2 };
@@ -25,9 +25,9 @@ export type CommonUniforms = {
   sourceSampleRate: { value: number };
   sourceMinFreq: { value: number };
   sourceBandsPerOctave: { value: number };
-  destSpectrogramTex: { value: Texture };
-  destInverseMapTex: { value: Texture };
-  destMetadataTex: { value: Texture };
+  destSpectrogramTex: { value: Texture | null };
+  destInverseMapTex: { value: Texture | null };
+  destMetadataTex: { value: Texture | null };
   destFrameCount: { value: number };
   destBandCount: { value: number };
   destSpectrogramTextureSize: { value: Vector2 };
@@ -35,7 +35,7 @@ export type CommonUniforms = {
   destSampleRate: { value: number };
   destMinFreq: { value: number };
   destBandsPerOctave: { value: number };
-  originalSpectrogramTex: { value: Texture };
+  originalSpectrogramTex: { value: Texture | null };
   brushCenterUv: { value: Vector2 };
   brushSizeUv: { value: Vector2 };
   viewZoomPower: { value: number };
@@ -65,16 +65,16 @@ export type CommonUniforms = {
   wrapMode: { value: number };
   algorithm: { value: number };
   magnitudeLimit: { value: number };
-  gainLut: { value: Texture };
-  modulator1ImageTex: { value: Texture };
-  modulator2ImageTex: { value: Texture };
-  modulator3ImageTex: { value: Texture };
+  gainLut: { value: Texture | null };
+  modulator1ImageTex: { value: Texture | null };
+  modulator2ImageTex: { value: Texture | null };
+  modulator3ImageTex: { value: Texture | null };
 };
 
 export const defaultValues: CommonUniforms = {
-  sourceSpectrogramTex: { value: new Texture() },
-  sourceInverseMapTex: { value: new Texture() },
-  sourceMetadataTex: { value: new Texture() },
+  sourceSpectrogramTex: { value: null },
+  sourceInverseMapTex: { value: null },
+  sourceMetadataTex: { value: null },
   sourceFrameCount: { value: 0 },
   sourceBandCount: { value: 0 },
   sourceSpectrogramTextureSize: { value: new Vector2(0, 0) },
@@ -82,9 +82,9 @@ export const defaultValues: CommonUniforms = {
   sourceSampleRate: { value: 44100.0 },
   sourceMinFreq: { value: 20.0 },
   sourceBandsPerOctave: { value: 24.0 },
-  destSpectrogramTex: { value: new Texture() },
-  destInverseMapTex: { value: new Texture() },
-  destMetadataTex: { value: new Texture() },
+  destSpectrogramTex: { value: null },
+  destInverseMapTex: { value: null },
+  destMetadataTex: { value: null },
   destFrameCount: { value: 0 },
   destBandCount: { value: 0 },
   destSpectrogramTextureSize: { value: new Vector2(0, 0) },
@@ -92,7 +92,7 @@ export const defaultValues: CommonUniforms = {
   destSampleRate: { value: 44100.0 },
   destMinFreq: { value: 20.0 },
   destBandsPerOctave: { value: 24.0 },
-  originalSpectrogramTex: { value: new Texture() },
+  originalSpectrogramTex: { value: null },
   brushCenterUv: { value: new Vector2(0.5, 0.5) },
   brushSizeUv: { value: new Vector2(0.1, 0.1) },
   viewZoomPower: { value: 0.0 },
@@ -129,10 +129,10 @@ export const defaultValues: CommonUniforms = {
   wrapMode: { value: 0 },
   algorithm: { value: 0 },
   modulators: { value: [] },
-  gainLut: { value: new Texture() },
-  modulator1ImageTex: { value: new Texture() },
-  modulator2ImageTex: { value: new Texture() },
-  modulator3ImageTex: { value: new Texture() },
+  gainLut: { value: null },
+  modulator1ImageTex: { value: null },
+  modulator2ImageTex: { value: null },
+  modulator3ImageTex: { value: null },
 };
 
 export abstract class BaseEffect {
