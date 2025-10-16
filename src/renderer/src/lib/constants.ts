@@ -150,7 +150,8 @@ export const WRAP_MODES = [
 export const NUM_MODULATORS = 3;
 
 export const ALGORITHMS = [
+  { value: 2, label: "Percussive" },
   { value: 0, label: "Resonant" },
   { value: 1, label: "Noise" },
-  { value: 2, label: "Snappy" },
+  // { value: 3, label: "Neutral" },
 ];
