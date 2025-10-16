@@ -64,6 +64,7 @@ export type CommonUniforms = {
   blendMode: { value: number };
   wrapMode: { value: number };
   algorithm: { value: number };
+  magnitudeLimit: { value: number };
   gainLut: { value: Texture };
   modulator1ImageTex: { value: Texture };
   modulator2ImageTex: { value: Texture };
@@ -124,6 +125,7 @@ export const defaultValues: CommonUniforms = {
   },
   bpm: { value: 120.0 },
   blendMode: { value: 0 },
+  magnitudeLimit: { value: 1.0 },
   wrapMode: { value: 0 },
   algorithm: { value: 0 },
   modulators: { value: [] },

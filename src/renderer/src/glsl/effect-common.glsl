@@ -44,6 +44,10 @@ uniform int blendMode;
 uniform int wrapMode; // 0=Off, 1=Wrap X, 2=Wrap Y, 3=Wrap Both
 uniform int algorithm;
 
+// New uniform to prevent runaway feedback. Set to > 0 to enable.
+// A value of 1.0 is a good starting point.
+uniform float magnitudeLimit;
+
 // ============================================================================
 // DEFINES & HELPERS
 // ============================================================================
@@ -63,6 +67,38 @@ vec2 unwrapPhase(vec2 phaseDelta) {
 float getMag(vec2 c) { return length(c); }
 float getPhase(vec2 c) { return atan(c.y, c.x); }
 vec2 fromPolar(float mag, float phase) { return mag * vec2(cos(phase), sin(phase)); }
+
+/**
+ * Applies a soft-clipping saturation curve to the magnitude of a complex number
+ * to prevent runaway values and harsh digital clipping.
+ * This function is designed to sound more natural than a hard clamp.
+ */
+vec2 limitMagnitude(vec2 complexValue) {
+    // If no limit is set, or it's non-positive, do nothing.
+    if (magnitudeLimit <= 0.0) {
+        return complexValue;
+    }
+
+    float mag = getMag(complexValue);
+
+    // If the magnitude is already within the limit, no need to process further.
+    if (mag <= magnitudeLimit) {
+        return complexValue;
+    }
+
+    // Soft-clipping using tanh. As the input magnitude exceeds the limit,
+    // the output magnitude will smoothly approach the limit instead of clipping abruptly.
+    // We calculate the excess magnitude and apply the curve only to that part.
+    float excessMag = mag - magnitudeLimit;
+    float saturatedExcess = magnitudeLimit * tanh(excessMag / magnitudeLimit);
+    float newMag = magnitudeLimit + saturatedExcess;
+
+    // Reconstruct the complex number with the new, limited magnitude and original phase.
+    // We divide by the original magnitude to get a unit vector for the phase,
+    // then scale by the new magnitude. Add a small epsilon to avoid division by zero.
+    return complexValue * (newMag / (mag + 1e-9));
+}
+
 
 // Calculate wrapped distance between two points on an axis
 float wrappedDistance(float a, float b, bool shouldWrap) {
@@ -110,8 +146,9 @@ struct ProcessingUvs {
 // Converts a packed texture UV to an unpacked spectrogram UV.
 vec2 packedToUnpackedUv(sampler2D inverseMapTex, vec2 packedUv, float frameCount, float bandCount) {
     vec2 unpackedPixelCoords = texture2D(inverseMapTex, packedUv).rg;
-    float u = unpackedPixelCoords.x / frameCount;
-    float v = 1.0 - (unpackedPixelCoords.y + 0.5) / bandCount;
+    // Guard against division by zero if frameCount or bandCount is 0.
+    float u = unpackedPixelCoords.x / max(1.0, frameCount);
+    float v = 1.0 - (unpackedPixelCoords.y + 0.5) / max(1.0, bandCount);
     return vec2(u, v);
 }
 
@@ -135,36 +172,32 @@ ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
  * at a specific unpacked UV. This is a point sample with no interpolation.
  */
 vec4 readPackedData(vec2 unpackedUv, sampler2D dataTex, sampler2D metaTex, vec2 packedTexSize, float frameCount, float bandCount) {
-  // 1. Find the frequency band corresponding to the vertical UV coordinate.
   float bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
 
-  // 2. Look up metadata for this band (offset, length, time scaling).
-  vec2 metaUv = vec2((bandIndex + 0.5) / bandCount, 0.5);
+  // Guard against division by zero if bandCount is 0.
+  vec2 metaUv = vec2((bandIndex + 0.5) / max(1.0, bandCount), 0.5);
   vec3 meta = texture2D(metaTex, metaUv).rgb;
   float bandStartOffset = meta.r;
   float bandLength = meta.g;
   float bandTimeScaleExp = meta.b;
 
-  // 3. Calculate the time index within this specific band.
   float timeInFrames = unpackedUv.x * frameCount;
   float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
   float timeIndexInBand = floor(scaledTime);
 
-  // 4. If out of bounds for this band, clamp to the
   if (timeIndexInBand < 0.0 || timeIndexInBand >= bandLength) {
       timeIndexInBand = clamp(timeIndexInBand, 0.0, bandLength - 1.0);
   }
 
-  // 5. Convert the 1D band index into a 2D packed texture coordinate.
+  // Guard against division by zero if texture dimensions are 0.
+  float safeTexWidth = max(1.0, packedTexSize.x);
+  vec2 safeTexSize = max(vec2(1.0), packedTexSize);
   float linearPixelIndex = bandStartOffset + timeIndexInBand;
-  float packedY = floor(linearPixelIndex / packedTexSize.x);
-  float packedX = mod(linearPixelIndex, packedTexSize.x);
-  vec2 packedUv = (vec2(packedX, packedY) + 0.5) / packedTexSize;
+  float packedY = floor(linearPixelIndex / safeTexWidth);
+  float packedX = mod(linearPixelIndex, safeTexWidth);
+  vec2 packedUv = (vec2(packedX, packedY) + 0.5) / safeTexSize;
 
-  // 6. Read the data.
-  vec4 result = texture2D(dataTex, packedUv);
-
-  return result;
+  return texture2D(dataTex, packedUv);
 }
 
 
@@ -172,7 +205,6 @@ vec4 readPackedData(vec2 unpackedUv, sampler2D dataTex, sampler2D metaTex, vec2 
 
 /**
  * Samples from the source spectrogram at a precise point with NO interpolation.
- * This is faster but can sound less smooth for time-stretching.
  */
 vec4 getSourceSamplePoint(vec2 sourceUv) {
     vec2 wrappedUv = wrapUv(sourceUv);
@@ -184,6 +216,7 @@ vec4 getSourceSamplePoint(vec2 sourceUv) {
 vec2 interpolateComplex(vec2 c1, vec2 c2, float amount) {
     float mag1 = getMag(c1);
     float mag2 = getMag(c2);
+    // log(0) is safe, it produces -inf, and exp(-inf) is 0.
     float magMix = exp(mix(log(mag1), log(mag2), amount));
 
     float phase1 = getPhase(c1);
@@ -199,7 +232,8 @@ vec2 interpolateComplex(vec2 c1, vec2 c2, float amount) {
 // Reads and linearly interpolates a complex value pair (stereo) from a packed spectrogram.
 vec4 readPackedDataInterpolated(vec2 unpackedUv, sampler2D dataTex, sampler2D metaTex, vec2 packedTexSize, float frameCount, float bandCount) {
   float bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
-  vec2 metaUv = vec2((bandIndex + 0.5) / bandCount, 0.5);
+  // Guard against division by zero if bandCount is 0.
+  vec2 metaUv = vec2((bandIndex + 0.5) / max(1.0, bandCount), 0.5);
   vec3 meta = texture2D(metaTex, metaUv).rgb;
   float bandStartOffset = meta.r;
   float bandLength = meta.g;
@@ -214,12 +248,16 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv, sampler2D dataTex, sampler2D me
       return readPackedData(unpackedUv, dataTex, metaTex, packedTexSize, frameCount, bandCount);
   }
 
+  // Guard against division by zero if texture dimensions are 0.
+  float safeTexWidth = max(1.0, packedTexSize.x);
+  vec2 safeTexSize = max(vec2(1.0), packedTexSize);
+
   float linearPixelIndex1 = bandStartOffset + timeIndexFloor;
-  vec2 packedUv1 = (vec2(mod(linearPixelIndex1, packedTexSize.x), floor(linearPixelIndex1 / packedTexSize.x)) + 0.5) / packedTexSize;
+  vec2 packedUv1 = (vec2(mod(linearPixelIndex1, safeTexWidth), floor(linearPixelIndex1 / safeTexWidth)) + 0.5) / safeTexSize;
   vec4 sample1 = texture2D(dataTex, packedUv1);
 
   float linearPixelIndex2 = bandStartOffset + timeIndexFloor + 1.0;
-  vec2 packedUv2 = (vec2(mod(linearPixelIndex2, packedTexSize.x), floor(linearPixelIndex2 / packedTexSize.x)) + 0.5) / packedTexSize;
+  vec2 packedUv2 = (vec2(mod(linearPixelIndex2, safeTexWidth), floor(linearPixelIndex2 / safeTexWidth)) + 0.5) / safeTexSize;
   vec4 sample2 = texture2D(dataTex, packedUv2);
 
   vec2 complexL = interpolateComplex(sample1.rg, sample2.rg, timeFraction);
@@ -231,7 +269,6 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv, sampler2D dataTex, sampler2D me
 
 /**
  * Samples from the source spectrogram with linear interpolation in time.
- * This provides smoother results for time-stretching.
  */
 vec4 getSourceSample(vec2 sourceUv) {
     vec2 wrappedUv = wrapUv(sourceUv);
@@ -240,35 +277,21 @@ vec4 getSourceSample(vec2 sourceUv) {
 
 /**
  * Calculate audio level in dB from the spectrogram at a given position.
- * Used by envelope follower modulation to react to audio amplitude.
  */
 float getAudioLevelDb(vec2 uv) {
-    // Sample the source spectrogram
     vec4 sourceTexel = getSourceSample(uv);
-    
-    // Extract complex values for left and right channels
-    vec2 complexL = sourceTexel.rg; // Left channel (real, imaginary)
-    vec2 complexR = sourceTexel.ba; // Right channel (real, imaginary)
-    
-    // Calculate magnitude for each channel
+    vec2 complexL = sourceTexel.rg;
+    vec2 complexR = sourceTexel.ba;
     float magnitudeL = length(complexL);
     float magnitudeR = length(complexR);
-    
-    // Average the two channels
     float avgMagnitude = (magnitudeL + magnitudeR) * 0.5;
-    
-    // Avoid log(0) by clamping to a small value
-    avgMagnitude = max(avgMagnitude, 0.000001);
-    
-    // Convert to dB: 20 * log10(magnitude)
-    float levelDb = 20.0 * log(avgMagnitude) / log(10.0);
-    
-    return levelDb;
+    // Avoid log(0) by clamping to a small positive value. This prevents NaN.
+    avgMagnitude = max(avgMagnitude, 1e-6);
+    return 20.0 * log(avgMagnitude) / log(10.0);
 }
 
 /**
  * Samples from the original, unmodified destination spectrogram with interpolation.
- * Used for blending the brush effect against the initial state.
  */
 vec4 getOriginalDestSample(vec2 destUv) {
     vec2 wrappedUv = wrapUv(destUv);
@@ -292,9 +315,7 @@ vec2 modifyPhase(vec2 complex, vec2 uv, bool shouldRandomise) {
 
 vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, vec2 destUv) {
     float bandIndex = floor((1.0 - sourceUv.y) * sourceBandCount);
-
-    // Get band metadata
-    vec2 metaUv = vec2((bandIndex + 0.5) / sourceBandCount, 0.5);
+    vec2 metaUv = vec2((bandIndex + 0.5) / max(1.0, sourceBandCount), 0.5);
     vec4 meta = texture2D(sourceMetadataTex, metaUv);
     float bandStartOffset = meta.r;
     float bandLength = meta.g;
@@ -305,23 +326,22 @@ vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, vec2 de
     float timeIndexFloor = floor(scaledTime);
     float timeFraction = fract(scaledTime);
 
-    // Get the value at the integer time before the continuous time 
+    float safeTexWidth = max(1.0, sourceSpectrogramTextureSize.x);
+    vec2 safeTexSize = max(vec2(1.0), sourceSpectrogramTextureSize);
+
     float linearPixelIndex1 = bandStartOffset + timeIndexFloor;
-    vec2 packedUv1 = (vec2(mod(linearPixelIndex1, sourceSpectrogramTextureSize.x), floor(linearPixelIndex1 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
+    vec2 packedUv1 = (vec2(mod(linearPixelIndex1, safeTexWidth), floor(linearPixelIndex1 / safeTexWidth)) + 0.5) / safeTexSize;
     vec4 sample0 = texture2D(sourceSpectrogramTex, packedUv1);
 
-    // Get the value at the integer time after the continuous time
     float linearPixelIndex2 = bandStartOffset + timeIndexFloor + 1.0;
-    vec2 packedUv2 = (vec2(mod(linearPixelIndex2, sourceSpectrogramTextureSize.x), floor(linearPixelIndex2 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
+    vec2 packedUv2 = (vec2(mod(linearPixelIndex2, safeTexWidth), floor(linearPixelIndex2 / safeTexWidth)) + 0.5) / safeTexSize;
     vec4 sample1 = texture2D(sourceSpectrogramTex, packedUv2);
     
-    // Extract complex values
     vec2 complex0L = sample0.rg;
     vec2 complex1L = sample1.rg;
     vec2 complex0R = sample0.ba;
     vec2 complex1R = sample1.ba;
 
-    // Interpolate using complex interpolation
     vec2 correctedL = interpolateComplex(complex0L, complex1L, timeFraction);
     vec2 correctedR = interpolateComplex(complex0R, complex1R, timeFraction);
 
@@ -337,9 +357,7 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 d
     float originalPhaseR = getPhase(original.ba);
 
     float bandIndex = floor((1.0 - sourceUv.y) * sourceBandCount);
-
-    // Get band metadata
-    vec2 metaUv = vec2((bandIndex + 0.5) / sourceBandCount, 0.5);
+    vec2 metaUv = vec2((bandIndex + 0.5) / max(1.0, sourceBandCount), 0.5);
     vec4 meta = texture2D(sourceMetadataTex, metaUv);
     float bandStartOffset = meta.r;
     float bandLength = meta.g;
@@ -350,17 +368,17 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 d
     float timeIndexFloor = floor(scaledTime);
     float timeFraction = fract(scaledTime);
 
-    // Get the value at the integer time before the continuous time 
+    float safeTexWidth = max(1.0, sourceSpectrogramTextureSize.x);
+    vec2 safeTexSize = max(vec2(1.0), sourceSpectrogramTextureSize);
+
     float linearPixelIndex1 = bandStartOffset + timeIndexFloor;
-    vec2 packedUv1 = (vec2(mod(linearPixelIndex1, sourceSpectrogramTextureSize.x), floor(linearPixelIndex1 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
+    vec2 packedUv1 = (vec2(mod(linearPixelIndex1, safeTexWidth), floor(linearPixelIndex1 / safeTexWidth)) + 0.5) / safeTexSize;
     vec4 sample0 = texture2D(sourceSpectrogramTex, packedUv1);
 
-    // Get the value at the integer time after the continuous time
     float linearPixelIndex2 = bandStartOffset + timeIndexFloor + 1.0;
-    vec2 packedUv2 = (vec2(mod(linearPixelIndex2, sourceSpectrogramTextureSize.x), floor(linearPixelIndex2 / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
+    vec2 packedUv2 = (vec2(mod(linearPixelIndex2, safeTexWidth), floor(linearPixelIndex2 / safeTexWidth)) + 0.5) / safeTexSize;
     vec4 sample1 = texture2D(sourceSpectrogramTex, packedUv2);
     
-    // Extract complex values
     vec2 complex0L = sample0.rg;
     vec2 complex1L = sample1.rg;
     vec2 complex0R = sample0.ba;
@@ -376,8 +394,6 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 d
 
     return vec4(correctedL, correctedR);
 }
-
-
 
 vec4 getTransformedSample(vec2 sourceUv, vec2 destUv) {
     vec2 wrappedSourceUv = wrapUv(sourceUv);
@@ -396,29 +412,21 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv) {
 // BRUSH & BLENDING LOGIC
 // ============================================================================
 
-
-
 // Get the effective brush center considering wrapping
 vec2 getEffectiveBrushOffset(vec2 unpackedUv) {
     vec2 offset = unpackedUv - brushCenterUv;
     
-    // Handle X wrapping
     if (wrapMode == 1 || wrapMode == 3) {
         float dist = abs(offset.x);
-        float wrappedDist = 1.0 - dist;
-        if (wrappedDist < dist) {
-            // Use wrapped distance
-            offset.x = offset.x > 0.0 ? -(1.0 - offset.x) : (1.0 + offset.x);
+        if (dist > 0.5) {
+            offset.x = offset.x > 0.0 ? offset.x - 1.0 : offset.x + 1.0;
         }
     }
     
-    // Handle Y wrapping
     if (wrapMode == 2 || wrapMode == 3) {
         float dist = abs(offset.y);
-        float wrappedDist = 1.0 - dist;
-        if (wrappedDist < dist) {
-            // Use wrapped distance
-            offset.y = offset.y > 0.0 ? -(1.0 - offset.y) : (1.0 + offset.y);
+        if (dist > 0.5) {
+            offset.y = offset.y > 0.0 ? offset.y - 1.0 : offset.y + 1.0;
         }
     }
     
@@ -429,24 +437,21 @@ vec2 getEffectiveBrushOffset(vec2 unpackedUv) {
 float getBrushWeight(vec2 unpackedUv) {
     vec2 halfSize = brushSizeUv / 2.0;
     vec2 offset = getEffectiveBrushOffset(unpackedUv);
-    vec2 localUv = (offset + halfSize) / brushSizeUv;
+    // Guard against division by zero if brush size is zero to prevent NaN.
+    vec2 localUv = (offset + halfSize) / max(vec2(1e-6), brushSizeUv);
     vec2 slopeNormalized = (vec2(featherSlopeTime, featherSlopePitch) / 2.0 + 0.5);
 
     float weightX = 1.0;
-
     if (localUv.x < slopeNormalized.x) {
         weightX = smoothstep(0.0, slopeNormalized.x * featherX, localUv.x);
-    } 
-    else if (localUv.x > slopeNormalized.x ) {
+    } else if (localUv.x > slopeNormalized.x ) {
         weightX = 1.0 - smoothstep(slopeNormalized.x * featherX + (1.0 - featherX), 1.0, localUv.x);
     } 
 
     float weightY = 1.0;
-
     if (localUv.y < slopeNormalized.y) {
         weightY = smoothstep(0.0, slopeNormalized.y * featherY, localUv.y);
-    } 
-    else if (localUv.y > slopeNormalized.y ) {
+    } else if (localUv.y > slopeNormalized.y ) {
         weightY = 1.0 - smoothstep(slopeNormalized.y * featherY + (1.0 - featherY), 1.0, localUv.y);
     } 
     
@@ -473,41 +478,31 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
     vec2 modifiedL = modified.rg;
     vec2 modifiedR = modified.ba;
 
-    // Calculate audio level for envelope follower modulation
     float audioLevelDb = getAudioLevelDb(destUv);
-
-    // Calculate modulation values
     float pan = applyModulation(brushPan.value, brushPan.minValue, brushPan.maxValue, brushPan.modulationAmounts, destUv, 0, audioLevelDb);
     float intensity = applyModulation(brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue, brushIntensity.modulationAmounts, destUv, 0, audioLevelDb);
 
-    // Apply panning to the modified signal by scaling its magnitude.
-    // A simple component-wise multiplication works because scaling a complex number (a, b)
-    // by a real k results in (ka, kb), which corresponds to scaling its magnitude by k
-    // while keeping the phase unchanged.
     vec2 pannedModifiedL = modifiedL * clamp(1.0 - pan, 0.0, 1.0);
     vec2 pannedModifiedR = modifiedR * clamp(1.0 + pan, 0.0, 1.0);
-
-    // Calculate final brush weight
     float effectiveWeight = weight * intensity;
 
-
     // --- 2. Handle Special "Dissolve" Mode ---
-    // This mode doesn't blend, it replaces pixels randomly.
     if (blendMode == 8) {
         vec2 finalL = (random(destUv.xy) < effectiveWeight) ? pannedModifiedL : originalL;
         vec2 finalR = (random(destUv.yx) < effectiveWeight) ? pannedModifiedR : originalR;
+        // Apply limiter even in dissolve mode to handle loud source samples
+        finalL = limitMagnitude(finalL);
+        finalR = limitMagnitude(finalR);
         return vec4(finalL, finalR);
     }
 
     // --- 3. Calculate the "Target" Value for Blending ---
-    // For all other modes, we first determine the 100% blended result ("target"),
-    // and then interpolate towards it based on the effective weight.
     float magOriginalL = getMag(originalL);
-    float magModifiedL = getMag(pannedModifiedL); // Use panned magnitude
+    float magModifiedL = getMag(pannedModifiedL);
     float phaseOriginalL = getPhase(originalL);
 
     float magOriginalR = getMag(originalR);
-    float magModifiedR = getMag(pannedModifiedR); // Use panned magnitude
+    float magModifiedR = getMag(pannedModifiedR);
     float phaseOriginalR = getPhase(originalR);
 
     vec2 finalL = originalL;
@@ -528,33 +523,33 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
     } else if (blendMode == 4) { // Divide
         float divisorL = mix(1.0, magModifiedL, effectiveWeight);
         float divisorR = mix(1.0, magModifiedR, effectiveWeight);
+        // Guard against division by zero.
         finalL = fromPolar(magOriginalL / max(1e-6, divisorL), phaseOriginalL);
         finalR = fromPolar(magOriginalR / max(1e-6, divisorR), phaseOriginalR);
     } else {
-        // --- Fallback to interpolation for other modes ---
         vec2 targetL, targetR;
-
-        if (blendMode == 5) {
-            // Choose the complex number with the greater magnitude
+        if (blendMode == 5) { // Lighten
             targetL = (magModifiedL > magOriginalL) ? pannedModifiedL : originalL;
             targetR = (magModifiedR > magOriginalR) ? pannedModifiedR : originalR;
-        } else if (blendMode == 6) {
-            // Choose the complex number with the lesser magnitude
+        } else if (blendMode == 6) { // Darken
             targetL = (magModifiedL < magOriginalL) ? pannedModifiedL : originalL;
             targetR = (magModifiedR < magOriginalR) ? pannedModifiedR : originalR;
-        } else if (blendMode == 7) {
-            // Take the absolute difference of magnitudes, keep original phase
+        } else if (blendMode == 7) { // Difference
             targetL = fromPolar(abs(magOriginalL - magModifiedL), phaseOriginalL);
             targetR = fromPolar(abs(magOriginalR - magModifiedR), phaseOriginalR);
         } else {
-            // Default case: do nothing
             targetL = originalL;
             targetR = originalR;
         }
-
         finalL = interpolateComplex(originalL, targetL, effectiveWeight);
         finalR = interpolateComplex(originalR, targetR, effectiveWeight);
     }
+
+    // --- 4. FINAL LIMITING STAGE ---
+    // Apply the soft-clipping limiter to the final calculated values.
+    // This is the crucial step to prevent runaway feedback and infinity values.
+    finalL = limitMagnitude(finalL);
+    finalR = limitMagnitude(finalR);
 
     return vec4(finalL, finalR);
 }

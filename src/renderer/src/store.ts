@@ -162,6 +162,9 @@ export type State = {
   displayMinDb: ContinuousNumberParameter;
   displayMaxDb: ContinuousNumberParameter;
 
+  // Magnitude Limit
+  magnitudeLimit: ContinuousNumberParameter;
+
   // Grid and Snapping
   gridSizeBeats: DiscreteNumberParameter; // in beats
   gridSizeSemis: DiscreteNumberParameter; // in semitones
@@ -899,6 +902,21 @@ export const useStore = create<State>()(
               max: 100,
               step: 0.01,
               unit: "Hz",
+            },
+            false,
+          ),
+          ...createParameter(
+            set,
+            "magnitudeLimit",
+            {
+              name: "Magnitude Limit",
+              label: "Mag. Limit",
+              description: "The maximum magnitude limit for the spectrogram.",
+              value: 1.0,
+              min: 0.0,
+              max: 2.0,
+              step: 0.01,
+              unit: "x",
             },
             false,
           ),

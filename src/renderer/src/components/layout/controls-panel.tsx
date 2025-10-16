@@ -44,6 +44,7 @@ export function ControlsPanel() {
         <ParameterControl paramKey="scaleType" />
       </Section>
       <Section label="Output">
+        <ParameterControl paramKey="magnitudeLimit" />
         <ParameterControl paramKey="normalize" />
       </Section>
     </Stack>

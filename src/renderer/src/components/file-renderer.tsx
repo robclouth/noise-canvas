@@ -578,6 +578,7 @@ export const FileRenderer = memo(
           sourceOffsetY: { value: sourceOffsetUv.y },
           blendMode: { value: state.blendMode.value },
           algorithm: { value: state.algorithm.value },
+          magnitudeLimit: { value: state.magnitudeLimit.value },
           wrapMode: { value: state.brushWrapMode.value },
           modulators: {
             value: Array.from({ length: NUM_MODULATORS }).map((_, i) => {
