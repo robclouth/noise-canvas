@@ -73,8 +73,7 @@ function getSnappedCoordinates(
   const screenUv = new Vector2(x, y);
 
   // Get per-file zoom and offset from store
-  const zoom = state.filesZoom[fileId] ?? 0;
-  const offset = state.filesOffset[fileId] ?? 0;
+  const { zoom, offset } = state.fileSettings[openFiles[fileId].filePath];
 
   // Convert from screen coordinates to zoomed coordinates
   const uv = screenToZoomed(screenUv, zoom, offset);
@@ -125,17 +124,17 @@ function getSnappedCoordinates(
 }
 
 const Header = memo(function Header({ fileId }: FileViewProps) {
+  const file = openFiles[fileId];
   const setSourceFile = useStore((state) => state.setSourceFile);
-  const bpm = useStore((state) => state.filesBpm[fileId] ?? 120);
+  const bpm = useStore((state) => state.fileSettings[file.filePath].bpm ?? 120);
   const setFileBpm = useStore((state) => state.setFileBpm);
   const setFileZoom = useStore((state) => state.setFileZoom);
-  const zoom = useStore((state) => state.filesZoom[fileId] ?? 0);
+  const zoom = useStore((state) => state.fileSettings[file.filePath].zoom ?? 0);
   const closeFile = useStore((state) => state.closeFile);
   const sourceFile = useStore((state) => state.sourceFile);
-  const resolution = useStore((state) => state.filesResolution[fileId]);
+  const resolution = useStore((state) => state.fileSettings[file.filePath].bandsPerOctave);
   const isDirty = useStore((state) => state.filesDirty[fileId] ?? false);
 
-  const file = openFiles[fileId];
   const filePath = file?.filePath || "";
 
   const isSource = sourceFile?.id === fileId;
@@ -240,7 +239,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   const activeFileId = useStore((state) => state.activeFileId);
   const isActive = activeFileId === fileId;
   const isSettingPosition = useStore((state) => state.isSettingPosition);
-  const zoom = useStore((state) => state.filesZoom[fileId] ?? 0);
+  const zoom = useStore((state) => state.fileSettings[file.filePath].zoom ?? 0);
 
   const cursorStyle = useMemo(() => ({ cursor: isSettingPosition ? "crosshair" : "crosshair" }), [isSettingPosition]);
 
@@ -265,7 +264,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
     (uvX: number, uvY: number) => {
       const state = useStore.getState();
       const { spectrogramData } = openFiles[fileId];
-      const bpm = state.filesBpm[fileId] ?? 120;
+      const bpm = state.fileSettings[openFiles[fileId].filePath].bpm;
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
       // Get brush size to calculate bottom-left corner
@@ -296,7 +295,8 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = useCallback(
     (event) => {
       // Allow mouse position tracking on all files (for setting position and preview)
-      const bpm = useStore.getState().filesBpm[fileId] ?? 120;
+      const state = useStore.getState();
+      const bpm = state.fileSettings[openFiles[fileId].filePath].bpm;
       const coords = getSnappedCoordinates(event, fileId, bpm);
       if (!coords) return;
       const [snappedX, snappedY] = coords;
@@ -307,7 +307,6 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
           lastSnappedPositionRef.current.x !== snappedX ||
           lastSnappedPositionRef.current.y !== snappedY)
       ) {
-        const state = useStore.getState();
         state.setMousePos(new Vector2(snappedX, 1 - snappedY));
         state.setHoveredFile(fileId); // Track which file is being hovered
         // Render stroke preview on all files, but only actual strokes on active file
@@ -322,13 +321,13 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   const handleMouseEnter: MouseEventHandler<HTMLDivElement> = useCallback(
     (event) => {
       // When mouse enters, immediately update position and trigger render
-      const bpm = useStore.getState().filesBpm[fileId] ?? 120;
+      const state = useStore.getState();
+      const bpm = state.fileSettings[openFiles[fileId].filePath].bpm;
       const coords = getSnappedCoordinates(event, fileId, bpm);
       if (!coords) return;
       const [snappedX, snappedY] = coords;
 
       if (rendererRef.current) {
-        const state = useStore.getState();
         state.setMousePos(new Vector2(snappedX, 1 - snappedY));
         state.setHoveredFile(fileId);
         // Render stroke preview
@@ -352,13 +351,13 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
     (event) => {
       if (event.button !== 0) return;
 
-      const bpm = useStore.getState().filesBpm[fileId] ?? 120;
+      const state = useStore.getState();
+      const bpm = state.fileSettings[openFiles[fileId].filePath].bpm;
       const coords = getSnappedCoordinates(event, fileId, bpm);
       if (!coords) return;
 
       // If in set position mode, capture the position and set source file
       if (isSettingPosition) {
-        const state = useStore.getState();
         const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
         state.setSourcePosition({ beats, pitch, fileId });
         state.setIsSettingPosition(false);
@@ -369,7 +368,6 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       }
 
       // Make this the active file if it isn't already
-      const state = useStore.getState();
       if (!isActive) {
         state.setActiveFileId(fileId);
       }
@@ -445,6 +443,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       <Box
         style={{
           width: "100%",
+          height: 20,
           overflowX: "scroll",
           overflowY: "hidden",
         }}

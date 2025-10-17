@@ -100,3 +100,10 @@ export type AnyParameter<T> =
   | OptionsParameter<T>
   | BooleanParameter
   | DiscreteNumberParameter;
+
+export type FileSettings = {
+  bpm: number;
+  bandsPerOctave: number;
+  zoom: number;
+  offset: number;
+};

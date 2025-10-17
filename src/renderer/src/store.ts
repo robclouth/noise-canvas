@@ -28,13 +28,14 @@ import { getPresetManager } from "./lib/preset-manager";
 import { BrushPresetType } from "./lib/preset-schema";
 import { defaultPresets, PRESET_KEYS } from "./lib/presets";
 import { getUndoManager } from "./lib/undo-manager";
-import { Parameter } from "./Parameter";
 import {
   BooleanParameter,
   ContinuousNumberParameter,
   DiscreteNumberParameter,
+  FileSettings,
   OpenFile,
   OptionsParameter,
+  Parameter,
 } from "./types";
 
 type Enumerate<N extends number, Acc extends number[] = []> = Acc["length"] extends N
@@ -96,14 +97,12 @@ type ModulatorParameters = {
 };
 
 const persistedKeys: (keyof State)[] = [
-  "filesBpm",
-  "filesResolution",
-  "filesZoom",
-  "filesOffset",
+  "fileSettings",
   "effectOrder",
   "effectsEnabled",
   "sectionCollapsed",
   "presetHotkeys",
+  "loop",
 ];
 
 // Helper to generate unique file IDs
@@ -148,9 +147,6 @@ export type State = {
   sectionCollapsed: Record<string, boolean>;
   setSectionCollapsed: (section: string, collapsed: boolean) => void;
 
-  // Per-file View Controls (keyed by file ID)
-  filesZoom: Record<string, number>;
-  filesOffset: Record<string, number>;
   setFileZoom: (fileId: string, zoom: number) => void;
   setFileOffset: (fileId: string, offset: number) => void;
 
@@ -228,11 +224,8 @@ export type State = {
   closeAllFiles: () => void;
   reanalyzeActiveFile: () => Promise<void>;
   synthesizeFile: (fileId: string) => Promise<void>;
-  audioBuffers: Record<string, AudioBuffer>;
-  setAudioBuffers: (audioBuffers: Record<string, AudioBuffer>) => void;
-  filesBpm: Record<string, number>;
-  setFileBpm: (fileId: string, bpm: number | undefined) => void;
-  filesResolution: Record<string, number>;
+  fileSettings: Record<string, FileSettings>;
+  setFileBpm: (fileId: string, bpm: number) => void;
   setFileResolution: (fileId: string, resolution: number) => void;
   activeFileId: string | null;
   setActiveFileId: (activeFileId: string | null) => void;
@@ -747,16 +740,24 @@ export const useStore = create<State>()(
           // Per-file zoom and offset state
           filesZoom: {},
           filesOffset: {},
-          setFileZoom: (fileId: string, zoom: number) => {
-            set((state) => ({
-              filesZoom: { ...state.filesZoom, [fileId]: Math.max(0, Math.min(10, zoom)) },
-            }));
-          },
-          setFileOffset: (fileId: string, offset: number) => {
-            set((state) => ({
-              filesOffset: { ...state.filesOffset, [fileId]: Math.max(0, Math.min(1, offset)) },
-            }));
-          },
+          setFileZoom: (fileId: string, zoom: number) =>
+            set(
+              produce((state: State) => {
+                const file = openFiles[fileId];
+                if (file) {
+                  state.fileSettings[file.filePath].zoom = zoom;
+                }
+              }),
+            ),
+          setFileOffset: (fileId: string, offset: number) =>
+            set(
+              produce((state: State) => {
+                const file = openFiles[fileId];
+                if (file) {
+                  state.fileSettings[file.filePath].offset = offset;
+                }
+              }),
+            ),
           // Per-file dirty state (not persisted)
           filesDirty: {},
           setFileDirty: (fileId: string, dirty: boolean) => {
@@ -1330,18 +1331,22 @@ export const useStore = create<State>()(
 
             console.log(openFiles);
 
-            return set((state) => {
-              const newState: Partial<State> = { openFileIds: [...state.openFileIds, fileId] };
-              if (!state.filesBpm[fileId]) newState.filesBpm = { ...state.filesBpm, [fileId]: 120 };
-              if (!state.filesResolution[fileId])
-                newState.filesResolution = { ...state.filesResolution, [fileId]: state.bandsPerOctave.value };
-              if (!state.filesZoom[fileId]) newState.filesZoom = { ...state.filesZoom, [fileId]: 0 };
-              if (!state.filesOffset[fileId]) newState.filesOffset = { ...state.filesOffset, [fileId]: 0 };
-              if (!state.sourceFile) newState.sourceFile = { id: fileId, mode: "current" };
-              newState.activeFileId = fileId;
+            return set(
+              produce((state: State) => {
+                state.openFileIds.push(fileId);
+                const fileSettings = state.fileSettings[filePath] || {};
 
-              return newState;
-            });
+                if (!fileSettings.bpm) fileSettings.bpm = 120;
+                if (!fileSettings.bandsPerOctave) fileSettings.bandsPerOctave = state.bandsPerOctave.value;
+                if (!fileSettings.zoom) fileSettings.zoom = 0;
+                if (!fileSettings.offset) fileSettings.offset = 0;
+
+                state.fileSettings[filePath] = fileSettings;
+
+                if (!state.sourceFile) state.sourceFile = { id: fileId, mode: "current" };
+                state.activeFileId = fileId;
+              }),
+            );
           },
           saveActiveFile: async () => {
             const state = get();
@@ -1540,11 +1545,8 @@ export const useStore = create<State>()(
                 const openFile = openFiles[fileId];
                 if (openFile) {
                   state.openFileIds = state.openFileIds.filter((id) => id !== fileId);
-                  delete state.filesBpm[fileId];
-                  delete state.filesZoom[fileId];
-                  delete state.filesOffset[fileId];
+                  delete state.fileSettings[openFile.filePath];
                   delete state.filesDirty[fileId];
-                  delete state.filesResolution[fileId];
                   delete openFiles[fileId];
 
                   const nextFileId = state.openFileIds[state.openFileIds.length - 1] || null;
@@ -1569,10 +1571,6 @@ export const useStore = create<State>()(
 
             return set({
               openFileIds: [],
-              filesBpm: {},
-              filesResolution: {},
-              filesZoom: {},
-              filesOffset: {},
               filesDirty: {},
               activeFileId: null,
               sourceFile: null,
@@ -1764,38 +1762,59 @@ export const useStore = create<State>()(
                 const undoManager = getUndoManager(state.activeFileId);
                 undoManager.clear();
 
-                return set({
-                  filesResolution: { ...state.filesResolution, [state.activeFileId]: state.bandsPerOctave.value },
-                });
+                return set(
+                  produce((state: State) => {
+                    const file = state.activeFileId && openFiles[state.activeFileId];
+                    if (file) {
+                      state.fileSettings[file.filePath].bandsPerOctave = state.bandsPerOctave.value;
+                    }
+                  }),
+                );
               },
             });
           },
-          audioBuffers: {},
-          setAudioBuffers: (audioBuffers) => set({ audioBuffers }),
-          filesBpm: {},
+          fileSettings: {},
           setFileBpm: (fileId, bpm) =>
             set(
               produce((state: State) => {
-                if (bpm) {
-                  state.filesBpm[fileId] = bpm;
-                } else {
-                  delete state.filesBpm[fileId];
+                if (state.activeFileId === fileId && bpm) {
+                  Tone.getTransport().bpm.value = bpm;
+                }
+
+                const file = openFiles[fileId];
+                if (file) state.fileSettings[file.filePath].bpm = bpm;
+              }),
+            ),
+          setFileResolution: (fileId, resolution) =>
+            set(
+              produce((state: State) => {
+                const file = openFiles[fileId];
+                if (file) {
+                  state.fileSettings[file.filePath].bandsPerOctave = resolution;
                 }
               }),
             ),
-          filesResolution: {},
-          setFileResolution: (fileId, resolution) =>
-            set((state) => {
-              const newFilesResolution = { ...state.filesResolution };
-              newFilesResolution[fileId] = resolution;
-              return { filesResolution: newFilesResolution };
-            }),
           activeFileId: null,
-          setActiveFileId: (activeFileId) => set({ activeFileId }),
+          setActiveFileId: (activeFileId) => {
+            if (activeFileId && openFiles[activeFileId]) {
+              const file = openFiles[activeFileId];
+              const { fileSettings } = get();
+              const transport = Tone.getTransport();
+              transport.bpm.value = fileSettings[file.filePath].bpm;
+
+              if (file.audioBuffer) {
+                transport.setLoopPoints(0, file.audioBuffer.duration);
+                player.buffer = new Tone.ToneAudioBuffer(file.audioBuffer);
+              }
+
+              get().stopAudio();
+            }
+            set({ activeFileId });
+          },
           sourceFile: null,
           setSourceFile: (sourceFile) => set({ sourceFile }),
           togglePlayback: async () => {
-            const { isPlaying, activeFileId, loop } = get();
+            const { isPlaying, activeFileId, loop, fileSettings } = get();
             if (isPlaying) {
               const transport = Tone.getTransport();
               transport.stop();
@@ -1811,11 +1830,14 @@ export const useStore = create<State>()(
                 await Tone.start();
               }
               player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
-              player.loop = loop;
+              player.fadeIn = 0.01;
+              player.fadeOut = 0.01;
               player.sync().start(0);
 
               const transport = Tone.getTransport();
-
+              transport.bpm.value = fileSettings[file.filePath].bpm;
+              transport.setLoopPoints(0, audioBuffer.duration);
+              transport.loop = loop;
               transport.start();
 
               return set({ isPlaying: true });
@@ -1827,7 +1849,10 @@ export const useStore = create<State>()(
           isPlaying: false,
           setIsPlaying: (isPlaying) => set({ isPlaying }),
           loop: false,
-          setLoop: (loop) => set({ loop }),
+          setLoop: (loop) => {
+            Tone.getTransport().loop = loop;
+            set({ loop });
+          },
           setPlaybackTime: (playbackTime) => {
             const transport = Tone.getTransport();
             transport.seconds = playbackTime;
@@ -1835,7 +1860,6 @@ export const useStore = create<State>()(
           stopAudio: () => {
             const transport = Tone.getTransport();
             transport.stop();
-            transport.cancel(0);
             player.stop();
             set({ isPlaying: false });
           },
