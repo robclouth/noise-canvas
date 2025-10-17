@@ -72,7 +72,7 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
         }
         
         // Sample the harmonic from the source
-        vec4 harmonicColor = getSourceSample(harmonicUv);
+        vec4 harmonicColor = sampleSourceInterp(harmonicUv);
         
         float harmonicMagL = getMag(harmonicColor.rg);
         float harmonicMagR = getMag(harmonicColor.ba);

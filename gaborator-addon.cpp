@@ -154,6 +154,18 @@ public:
 
         std::vector<gaborator::coefs<float>> allCoefs;
         allCoefs.reserve(channels);
+
+        // Phase accumulation storage: [channel][band][time]
+        std::vector<std::vector<std::vector<float>>> previousPhases(channels);
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            previousPhases[ch].resize(numBands);
+            for (int bandIdx = 0; bandIdx < numBands; ++bandIdx)
+            {
+                previousPhases[ch][bandIdx].resize(bandLengths[bandIdx], 0.0f);
+            }
+        }
+
         for (int ch = 0; ch < channels; ++ch)
         {
             allCoefs.emplace_back(analyzer);
@@ -171,9 +183,31 @@ public:
                     // Only write if within the clamped texture bounds
                     if (baseOffset >= maxPixelIndex)
                         return;
+
+                    // Convert to magnitude and phase
+                    float magnitude = std::abs(coef);
+                    float phase = std::arg(coef);
+
+                    // Unwrap phase: accumulate phase changes
+                    float unwrappedPhase = phase;
+                    if (tInBand > 0)
+                    {
+                        float prevPhase = previousPhases[ch][bandIdx][tInBand - 1];
+                        float phaseDiff = phase - std::fmod(prevPhase, 2.0f * M_PI);
+
+                        // Normalize phase difference to [-pi, pi]
+                        while (phaseDiff > M_PI)
+                            phaseDiff -= 2.0f * M_PI;
+                        while (phaseDiff < -M_PI)
+                            phaseDiff += 2.0f * M_PI;
+
+                        unwrappedPhase = prevPhase + phaseDiff;
+                    }
+                    previousPhases[ch][bandIdx][tInBand] = unwrappedPhase;
+
                     size_t writeOffset = baseOffset * floatsPerPixel;
-                    paddedData[writeOffset + ch * 2 + 0] = coef.real();
-                    paddedData[writeOffset + ch * 2 + 1] = coef.imag();
+                    paddedData[writeOffset + ch * 2 + 0] = magnitude;
+                    paddedData[writeOffset + ch * 2 + 1] = unwrappedPhase;
                 },
                 bandBegin, analyzer.bandpass_bands_end(), 0, numFrames, allCoefs[ch]);
         }
@@ -361,8 +395,17 @@ public:
                     }
                     size_t base_offset = bandOffsets[band_idx] + t_in_band;
                     size_t readOffset = base_offset * floatsPerPixel;
-                    coef.real(inputData[readOffset + ch * 2 + 0]);
-                    coef.imag(inputData[readOffset + ch * 2 + 1]);
+
+                    // Read magnitude and unwrapped phase
+                    float magnitude = inputData[readOffset + ch * 2 + 0];
+                    float unwrappedPhase = inputData[readOffset + ch * 2 + 1];
+
+                    // Convert back to real and imaginary
+                    float real = magnitude * std::cos(unwrappedPhase);
+                    float imag = magnitude * std::sin(unwrappedPhase);
+
+                    coef.real(real);
+                    coef.imag(imag);
                 },
                 band_begin, band_end, 0, numFrames, channelCoefs);
             audioChannels[ch].resize(numFrames);

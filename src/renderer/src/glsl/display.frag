@@ -51,18 +51,19 @@ void main() {
     // Convert screen UV to zoomed UV (actual data coordinates)
     vec2 zoomedUv = screenToZoomed(vUv, viewZoomPower, viewOffset);
     
-    vec4 packedValue = getSourceSample(zoomedUv);
+    vec4 packedValue = sampleSourceInterp(zoomedUv);
 
-    vec2 leftComplex = packedValue.rg;
-    float leftMag = length(leftComplex);
+    // packedValue stores [leftMagnitude, leftPhase, rightMagnitude, rightPhase]
+    vec2 leftMagPhase = packedValue.rg;
+    float leftMag = leftMagPhase.x;
     float leftDb = magnitudeToDb(leftMag);
     
     vec3 color;
     if (sourceChannelCount == 1) {
         color = vec3(leftDb);
     } else {
-        vec2 rightComplex = packedValue.ba;
-        float rightMag = length(rightComplex);
+        vec2 rightMagPhase = packedValue.ba;
+        float rightMag = rightMagPhase.x;
         float rightDb = magnitudeToDb(rightMag);
         
         vec3 leftColor = vec3(leftDb, leftDb * 0.5, 0.0);

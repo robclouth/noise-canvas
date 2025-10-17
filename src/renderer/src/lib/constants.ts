@@ -153,5 +153,5 @@ export const ALGORITHMS = [
   { value: 2, label: "Percussive" },
   { value: 0, label: "Resonant" },
   { value: 1, label: "Noise" },
-  // { value: 3, label: "Neutral" },
+  { value: 3, label: "Neutral" },
 ];

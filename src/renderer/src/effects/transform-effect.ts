@@ -88,7 +88,7 @@ class TransformEffect extends BaseEffect {
       transformScalePitch,
       transformRotation,
       transformEdgeMode,
-      filesBpm,
+      fileSettings,
     } = state;
 
     const { file, passIndex } = props;
@@ -98,7 +98,7 @@ class TransformEffect extends BaseEffect {
     const shiftUv = unitsToUv(
       transformShiftBeats.value,
       transformShiftSemis.value,
-      filesBpm[file.id],
+      fileSettings[file.filePath].bpm,
       totalDuration,
       spectrogramData.bandsPerOctave,
       spectrogramData.numBands,

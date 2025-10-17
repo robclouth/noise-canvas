@@ -86,19 +86,19 @@ export const FileRenderer = memo(
     // Subscriptions to global state
     useEffect(() => {
       const unsubBpms = useStore.subscribe(
-        (state) => state.fileSettings[openFiles[fileId].filePath].bpm,
+        (state) => state.getFileSettings(fileId)?.bpm,
         () => {
           invalidateRef.current?.();
         },
       );
       const unsubZoom = useStore.subscribe(
-        (state) => state.fileSettings[openFiles[fileId].filePath].bpm,
+        (state) => state.getFileSettings(fileId)?.bpm,
         () => {
           invalidateRef.current?.();
         },
       );
       const unsubOffset = useStore.subscribe(
-        (state) => state.fileSettings[openFiles[fileId].filePath].offset,
+        (state) => state.getFileSettings(fileId)?.offset,
         () => {
           invalidateRef.current?.();
         },
@@ -473,12 +473,12 @@ export const FileRenderer = memo(
         return;
       }
 
-      const bpm = state.fileSettings[openFiles[fileId].filePath].bpm;
+      const bpm = state.getFileSettings(fileId)!.bpm;
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
       // Get per-file zoom and offset from store
-      const viewZoomPower = state.fileSettings[openFiles[fileId].filePath].zoom;
-      const viewOffset = state.fileSettings[openFiles[fileId].filePath].offset;
+      const viewZoomPower = state.getFileSettings(fileId)!.zoom;
+      const viewOffset = state.getFileSettings(fileId)!.offset;
 
       // Calculate brush size for display
       const brushSizeUv = unitsToUv(
@@ -502,7 +502,7 @@ export const FileRenderer = memo(
         const textures = sourceRendererRef?.current?.getTextures();
         if (!textures) return;
 
-        const sourceBpm = state.fileSettings[openFiles[fileId].filePath].bpm;
+        const sourceBpm = state.getFileSettings(sourceFile.id)!.bpm;
         const sourceTotalDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
 
         // Calculate source offset using the helper function
@@ -825,7 +825,7 @@ export const FileRenderer = memo(
       if (state.sourceFile?.id) {
         const sourceFileData = openFiles[state.sourceFile.id];
         if (sourceFileData) {
-          const sourceBpm = state.fileSettings[openFiles[fileId].filePath].bpm;
+          const sourceBpm = state.getFileSettings(state.sourceFile.id)!.bpm;
           const sourceTotalDuration =
             sourceFileData.spectrogramData.numFrames / sourceFileData.spectrogramData.sampleRate;
 

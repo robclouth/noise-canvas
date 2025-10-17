@@ -225,6 +225,7 @@ export type State = {
   reanalyzeActiveFile: () => Promise<void>;
   synthesizeFile: (fileId: string) => Promise<void>;
   fileSettings: Record<string, FileSettings>;
+  getFileSettings: (fileId: string) => FileSettings | null;
   setFileBpm: (fileId: string, bpm: number) => void;
   setFileResolution: (fileId: string, resolution: number) => void;
   activeFileId: string | null;
@@ -1774,6 +1775,11 @@ export const useStore = create<State>()(
             });
           },
           fileSettings: {},
+          getFileSettings: (fileId: string) => {
+            const file = openFiles[fileId];
+            if (file) return get().fileSettings[file.filePath];
+            return null;
+          },
           setFileBpm: (fileId, bpm) =>
             set(
               produce((state: State) => {
