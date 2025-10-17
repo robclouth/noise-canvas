@@ -214,6 +214,19 @@ vec4 sampleSourceNoInterp(vec2 sourceUv) {
 }
 
 
+vec4 getSourceMetadata(vec2 uv){
+    float bandIndex = floor((1.0 - uv.y) * sourceBandCount);
+    vec2 metaUv = vec2((bandIndex + 0.5) / max(1.0, sourceBandCount), 0.5);
+    return texture2D(sourceMetadataTex, metaUv);
+}
+
+vec4 readSourceAtTimeIndex(float timeIndex, float bandStartOffset){
+    float linearPixelIndex = bandStartOffset + timeIndex;
+    vec2 packedUv = (vec2(mod(linearPixelIndex, sourceSpectrogramTextureSize.x), floor(linearPixelIndex / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
+    return texture2D(sourceSpectrogramTex, packedUv);
+}
+
+
 // Helper for interpolating between two magnitude/phase pairs.
 vec2 interpolateComplex(vec2 magPhase1, vec2 magPhase2, float amount) {
     float magMix = exp(mix(log(magPhase1.x + 1e-9), log(magPhase2.x + 1e-9), amount));
@@ -404,24 +417,10 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 d
     return vec4(correctedL, correctedR);
 }
 
-vec4 getSourceMetadata(vec2 uv){
-    float bandIndex = floor((1.0 - uv.y) * sourceBandCount);
-    vec2 metaUv = vec2((bandIndex + 0.5) / max(1.0, sourceBandCount), 0.5);
-    return texture2D(sourceMetadataTex, metaUv);
-}
-
-vec4 readSourceAtTimeIndex(float timeIndex, float bandStartOffset){
-    float linearPixelIndex = bandStartOffset + timeIndex;
-    vec2 packedUv = (vec2(mod(linearPixelIndex, sourceSpectrogramTextureSize.x), floor(linearPixelIndex / sourceSpectrogramTextureSize.x)) + 0.5) / sourceSpectrogramTextureSize;
-    return texture2D(sourceSpectrogramTex, packedUv);
-}
 
 vec4 getTransformedSampleNeutral(vec2 uv, float scaleX) {
     vec4 magPhase = sampleSourceInterp(uv);
-
-    vec2 phase = vec2(magPhase.y, magPhase.w) * abs(scaleX);
-
-    return vec4(vec2(magPhase.x, phase.x), vec2(magPhase.z, phase.y));
+    return vec4(vec2(magPhase.x, magPhase.y * abs(scaleX)), vec2(magPhase.z, magPhase.w * abs(scaleX)));
 }
 
 vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX) {
