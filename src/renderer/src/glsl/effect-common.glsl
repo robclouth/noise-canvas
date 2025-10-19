@@ -215,9 +215,17 @@ vec4 sampleSourceNoInterp(vec2 sourceUv) {
 
 
 vec4 getSourceMetadata(vec2 uv){
-    float bandIndex = floor((1.0 - uv.y) * sourceBandCount);
-    vec2 metaUv = vec2((bandIndex + 0.5) / max(1.0, sourceBandCount), 0.5);
+    float rawIndex = (1.0 - uv.y) * sourceBandCount;
+    float clampedIndex = clamp(floor(rawIndex), 0.0, max(0.0, sourceBandCount - 1.0));
+    vec2 metaUv = vec2((clampedIndex + 0.5) / max(1.0, sourceBandCount), 0.5);
     return texture2D(sourceMetadataTex, metaUv);
+}
+
+vec4 getDestMetadata(vec2 uv){
+    float rawIndex = (1.0 - uv.y) * destBandCount;
+    float clampedIndex = clamp(floor(rawIndex), 0.0, max(0.0, destBandCount - 1.0));
+    vec2 metaUv = vec2((clampedIndex + 0.5) / max(1.0, destBandCount), 0.5);
+    return texture2D(destMetadataTex, metaUv);
 }
 
 vec4 readSourceAtTimeIndex(float timeIndex, float bandStartOffset){
@@ -418,12 +426,42 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 d
 }
 
 
-vec4 getTransformedSampleNeutral(vec2 uv, float scaleX) {
-    vec4 magPhase = sampleSourceInterp(uv);
-    return vec4(vec2(magPhase.x, magPhase.y * abs(scaleX)), vec2(magPhase.z, magPhase.w * abs(scaleX)));
+vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, float shiftX, float shiftY) {
+    vec4 magPhase = sampleSourceInterp(sourceUv);
+    
+    // Apply time scaling to phase
+    magPhase.y *= scaleX;
+    magPhase.w *= scaleX;
+
+    // Read metadata from the SAMPLED position (sourceUv already includes the shift)
+    float sourceBandFreqHz = getSourceMetadata(sourceUv).a;
+    float destBandFreqHz = getDestMetadata(destUv).a;
+
+    // Adjust phase for frequency scaling
+    float freqRatio = destBandFreqHz / sourceBandFreqHz;
+    magPhase.y *= freqRatio;
+    magPhase.w *= freqRatio;
+
+    // Convert the applied shift (already included in sourceUv) to time in seconds
+    float timeDiffSeconds = shiftX * sourceFrameCount / sourceSampleRate;
+
+    // Phase correction based on original implementation
+    float phaseCorrection = TWO_PI * sourceBandFreqHz * timeDiffSeconds * scaleX * freqRatio;
+
+    // Adjust phase correction for reversing
+    if(scaleX < 0.0){
+        float totalDuration = (sourceFrameCount - 1.0) / sourceSampleRate;
+        phaseCorrection += -TWO_PI * sourceBandFreqHz * totalDuration;
+    }
+
+    // Apply phase correction
+    magPhase.y += phaseCorrection;
+    magPhase.w += phaseCorrection;
+    
+    return magPhase;
 }
 
-vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX) {
+vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, float shiftX, float shiftY) {
     vec2 wrappedSourceUv = wrapUv(sourceUv);
 
     if (algorithm == 0) {
@@ -433,7 +471,7 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX) {
     } else if (algorithm == 2) {
         return getTransformedSampleSnappy(wrappedSourceUv, true, destUv);
     } else if (algorithm == 3) {
-        return getTransformedSampleNeutral(wrappedSourceUv, scaleX);
+        return getTransformedSampleNeutral(sourceUv, destUv, scaleX, scaleY, shiftX, shiftY);
     }
     return vec4(0.0);
 }
