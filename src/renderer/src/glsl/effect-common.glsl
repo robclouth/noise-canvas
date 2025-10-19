@@ -427,25 +427,48 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 d
 
 
 vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, float shiftX, float shiftY) {
-    vec4 magPhase = sampleSourceInterp(sourceUv);
+    vec2 sampleUv = sourceUv;
+    bool needsWrap = (wrapMode != 0) && (sampleUv.x < 0.0 || sampleUv.x > 1.0 || sampleUv.y < 0.0 || sampleUv.y > 1.0);
+    if (needsWrap) {
+        sampleUv = wrapUv(sampleUv);
+    }
+
+    vec4 magPhase = sampleSourceInterp(sampleUv);
     
     // Apply time scaling to phase
     magPhase.y *= scaleX;
     magPhase.w *= scaleX;
 
-    // Read metadata from the SAMPLED position (sourceUv already includes the shift)
-    float sourceBandFreqHz = getSourceMetadata(sourceUv).a;
-    float destBandFreqHz = getDestMetadata(destUv).a;
+    vec4 sourceMeta = getSourceMetadata(sampleUv);
+    vec4 destMeta = getDestMetadata(destUv);
+    float sourceBandFreqHz = sourceMeta.a;
+    float destBandFreqHz = destMeta.a;
+    float sourceTimeScaleExp = sourceMeta.b;
+    float destTimeScaleExp = destMeta.b;
+
+    float safeSourceFreqHz = max(sourceBandFreqHz, 1e-6);
+    float safeDestFreqHz = max(destBandFreqHz, 1e-6);
+
+    // Measure how much the transform deviates from a pure horizontal slide so we can smoothly blend logic paths.
+    float scaleXInfluence = clamp(abs(scaleX - 1.0) * 4.0, 0.0, 1.0);
+    float scaleYInfluence = clamp(abs(scaleY - 1.0) * 4.0, 0.0, 1.0);
+    float verticalShiftInfluence = clamp(abs(shiftY) * destBandCount, 0.0, 1.0);
+    float reverseInfluence = scaleX < 0.0 ? 1.0 : 0.0;
+    float complexMix = clamp(max(scaleXInfluence, reverseInfluence) + max(scaleYInfluence, verticalShiftInfluence), 0.0, 1.0);
 
     // Adjust phase for frequency scaling
-    float freqRatio = destBandFreqHz / sourceBandFreqHz;
+    float freqRatio = (safeSourceFreqHz > 0.0) ? safeDestFreqHz / safeSourceFreqHz : 1.0;
     magPhase.y *= freqRatio;
     magPhase.w *= freqRatio;
 
-    // Convert the applied shift (already included in sourceUv) to time in seconds
-    float timeDiffSeconds = shiftX * sourceFrameCount / sourceSampleRate;
+    // Convert the applied shift (already included in sourceUv) to time in seconds using the band's stride
+    float framesShift = shiftX * sourceFrameCount;
+    float bandStride = exp2(sourceTimeScaleExp);
+    float linearSeconds = framesShift / sourceSampleRate;
+    float strideSeconds = framesShift * bandStride / sourceSampleRate;
+    float timeDiffSeconds = mix(linearSeconds, strideSeconds, complexMix);
 
-    // Phase correction based on original implementation
+    // Phase correction based on original implementation with band-aware timing
     float phaseCorrection = TWO_PI * sourceBandFreqHz * timeDiffSeconds * scaleX * freqRatio;
 
     // Adjust phase correction for reversing
@@ -454,9 +477,19 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
         phaseCorrection += -TWO_PI * sourceBandFreqHz * totalDuration;
     }
 
-    // Apply phase correction
     magPhase.y += phaseCorrection;
     magPhase.w += phaseCorrection;
+
+    // Blend toward the original destination phase based on band resolution to reduce smear
+    if (complexMix > 1e-5) {
+        vec4 originalDest = getOriginalDestSample(destUv);
+        float destStride = exp2(destTimeScaleExp);
+        float originalPhaseWeight = clamp(destStride / (destStride + 1.0), 0.0, 0.95);
+        originalPhaseWeight *= complexMix;
+        float newPhaseWeight = 1.0 - originalPhaseWeight;
+        magPhase.y = newPhaseWeight * magPhase.y + originalPhaseWeight * originalDest.g;
+        magPhase.w = newPhaseWeight * magPhase.w + originalPhaseWeight * originalDest.a;
+    }
     
     return magPhase;
 }
