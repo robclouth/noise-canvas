@@ -929,7 +929,7 @@ export const useStore = create<State>()(
               name: "Warp Algorithm",
               label: "Warp algo",
               description: "The algorithm to use when warping the spectrogram.",
-              value: 0,
+              value: 3,
               options: ALGORITHMS,
             },
             false,
