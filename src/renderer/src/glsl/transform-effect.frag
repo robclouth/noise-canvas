@@ -51,9 +51,11 @@ void main() {
         }
 
         // 6. Apply the final shift to get the source UV to sample from.
-        float shiftXValue = applyModulation(shiftX.value, shiftX.minValue, shiftX.maxValue, shiftX.modulationAmounts, coords.dest, 0, audioLevelDb);
-        float shiftYValue = applyModulation(shiftY.value, shiftY.minValue, shiftY.maxValue, shiftY.modulationAmounts, coords.dest, 0, audioLevelDb);
-        vec2 finalSourceUv = transformedUv - vec2(shiftXValue * sign(scaleXValue), shiftYValue * sign(scaleYValue));
+    float rawShiftX = applyModulation(shiftX.value, shiftX.minValue, shiftX.maxValue, shiftX.modulationAmounts, coords.dest, 0, audioLevelDb);
+    float rawShiftY = applyModulation(shiftY.value, shiftY.minValue, shiftY.maxValue, shiftY.modulationAmounts, coords.dest, 0, audioLevelDb);
+    float appliedShiftX = -rawShiftX;
+    float appliedShiftY = -rawShiftY;
+    vec2 finalSourceUv = transformedUv + vec2(appliedShiftX, appliedShiftY);
 
         bool inBrush = isInsideBrush(finalSourceUv);
 
@@ -63,12 +65,12 @@ void main() {
 
         if( boundaryMode == 0) { // Cut
             if(inBrush) {
-                transformedTexel = getTransformedSample(finalSourceUv, coords.dest, scaleXValue);
+                transformedTexel = getTransformedSample(finalSourceUv, coords.dest, scaleXValue, scaleYValue, appliedShiftX, appliedShiftY);
             } else {
                 transformedTexel = vec4(0.0);
             }
         } else if(boundaryMode == 1) { // Bleed
-            transformedTexel = getTransformedSample(finalSourceUv, coords.dest, scaleXValue);
+            transformedTexel = getTransformedSample(finalSourceUv, coords.dest, scaleXValue, scaleYValue, appliedShiftX, appliedShiftY);
         } else if(boundaryMode == 2) { // Wrap
             // Tile the sampled region within the brush bounds
             vec2 brushBottomLeft = brushCenterUv - brushSizeUv * 0.5;
@@ -76,7 +78,7 @@ void main() {
             vec2 local = finalSourceUv - brushBottomLeft;
             vec2 wrappedLocal = fract(local / safeSize) * safeSize;
             vec2 wrappedUv = brushBottomLeft + wrappedLocal;
-            transformedTexel = getTransformedSample(wrappedUv, coords.dest, scaleXValue);
+            transformedTexel = getTransformedSample(wrappedUv, coords.dest, scaleXValue, scaleYValue, appliedShiftX, appliedShiftY);
         } else if(boundaryMode == 3) { // Ping Pong
             vec2 brushBottomLeft = brushCenterUv - brushSizeUv * 0.5;
 
@@ -89,7 +91,7 @@ void main() {
 
             isTimeReversed = pingPong.x < 0.5;
 
-            transformedTexel = getTransformedSample(pingPongUv, coords.dest, scaleXValue);
+            transformedTexel = getTransformedSample(pingPongUv, coords.dest, scaleXValue, scaleYValue, appliedShiftX, appliedShiftY);
         }
 
         // Handle negative time scaling by flipping the phase 
