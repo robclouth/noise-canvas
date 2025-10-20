@@ -139,6 +139,7 @@ export const defaultPresets: BrushPresetType[] = [
     id: "default",
     name: "Default",
     isDefault: true,
+    version: 1,
 
     // Brush parameters
     brushIntensity: 100,
