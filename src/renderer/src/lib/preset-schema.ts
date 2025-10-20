@@ -27,8 +27,8 @@ export const BrushPresetSchema = z.object({
   brushFeatherSlopePitch: z.number().min(-100).max(100),
 
   // Brush size
-  brushWidthBeats: z.number().int().min(0),
-  brushHeightSemis: z.number().int().min(0),
+  brushWidthBeats: z.number().min(0),
+  brushHeightSemis: z.number().min(0),
   brushSizeLockedToGrid: z.boolean(),
   brushWrapMode: z.number().int().min(0),
 
@@ -59,7 +59,7 @@ export const BrushPresetSchema = z.object({
   harmonicsFalloff: z.number().min(0).max(100),
 
   // Transform parameters
-  transformShiftBeats: z.number().int(),
+  transformShiftBeats: z.number(),
   transformShiftSemis: z.number(),
   transformScaleTime: z.number(),
   transformScalePitch: z.number(),
@@ -77,8 +77,8 @@ export const BrushPresetSchema = z.object({
   modulator1Mode: z.number().int().min(0),
   modulator1PatternShape: z.number().int().min(0),
   modulator1PhaseMode: z.number().int().min(0).max(1),
-  modulator1PatternRateBeats: z.number().int().min(0),
-  modulator1PatternRateSemis: z.number().int().min(0),
+  modulator1PatternRateBeats: z.number().min(0),
+  modulator1PatternRateSemis: z.number().min(0),
   modulator1Strength: z.number().min(-100).max(100),
   modulator1Rotation: z.number().min(0).max(360),
   modulator1EnvelopeMinDb: z.number().min(-120).max(0),
@@ -87,8 +87,8 @@ export const BrushPresetSchema = z.object({
   modulator2Mode: z.number().int().min(0),
   modulator2PatternShape: z.number().int().min(0),
   modulator2PhaseMode: z.number().int().min(0).max(1),
-  modulator2PatternRateBeats: z.number().int().min(0),
-  modulator2PatternRateSemis: z.number().int().min(0),
+  modulator2PatternRateBeats: z.number().min(0),
+  modulator2PatternRateSemis: z.number().min(0),
   modulator2Strength: z.number().min(-100).max(100),
   modulator2Rotation: z.number().min(0).max(360),
   modulator2EnvelopeMinDb: z.number().min(-120).max(0),
@@ -97,8 +97,8 @@ export const BrushPresetSchema = z.object({
   modulator3Mode: z.number().int().min(0),
   modulator3PatternShape: z.number().int().min(0),
   modulator3PhaseMode: z.number().int().min(0).max(1),
-  modulator3PatternRateBeats: z.number().int().min(0),
-  modulator3PatternRateSemis: z.number().int().min(0),
+  modulator3PatternRateBeats: z.number().min(0),
+  modulator3PatternRateSemis: z.number().min(0),
   modulator3Strength: z.number().min(-100).max(100),
   modulator3Rotation: z.number().min(0).max(360),
   modulator3EnvelopeMinDb: z.number().min(-120).max(0),
