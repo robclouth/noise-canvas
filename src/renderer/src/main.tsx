@@ -10,6 +10,7 @@ import "./assets/main.css";
 
 const theme = createTheme({
   primaryColor: "orange",
+  focusRing: "never",
   fontSizes: {
     xs: "11px",
     sm: "11px",

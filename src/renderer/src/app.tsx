@@ -201,8 +201,41 @@ function App(): React.JSX.Element {
     }
   }, []);
 
+  // Remove focus from buttons/controls after mouse clicks to prevent space bar from triggering them
+  const handleMouseDown = useCallback((event: MouseEvent) => {
+    const target = event.target as HTMLElement;
+    // Check if the target is a button or other interactive control
+    const isInteractiveControl =
+      target.tagName === "BUTTON" ||
+      target.tagName === "SELECT" ||
+      target.closest("button") ||
+      target.closest("[role='combobox']") ||
+      target.closest("[role='option']") ||
+      target.closest("[role='menu']") ||
+      target.closest("[role='menuitem']") ||
+      target.getAttribute("role") === "button" ||
+      target.getAttribute("role") === "checkbox" ||
+      target.getAttribute("role") === "radio" ||
+      target.getAttribute("role") === "switch" ||
+      target.getAttribute("role") === "combobox" ||
+      target.getAttribute("role") === "option" ||
+      target.classList.contains("mantine-Select-input") ||
+      target.classList.contains("mantine-NativeSelect-input") ||
+      target.classList.contains("mantine-Menu-item");
+
+    if (isInteractiveControl) {
+      // Blur after a short delay to allow the click to register first
+      setTimeout(() => {
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+      }, 0);
+    }
+  }, []);
+
   useWindowEvent("keydown", handleKeyDown);
   useWindowEvent("keyup", handleKeyUp);
+  useWindowEvent("mousedown", handleMouseDown);
 
   return (
     <Group h="100vh" w="100vw" wrap="nowrap" gap={0}>
