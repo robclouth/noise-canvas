@@ -535,8 +535,16 @@ export function getFileIdByPath(filePath: string): string | undefined {
 
 export const player = new Tone.Player().toDestination();
 
+// Track pending stop events during buffer swaps to avoid spurious stop handling
+let pendingSwapStops = 0;
+
 // Set up event listener for when playback ends
 player.onstop = () => {
+  if (pendingSwapStops > 0) {
+    pendingSwapStops -= 1;
+    return;
+  }
+
   const state = useStore.getState();
   if (state.isPlaying && !state.loop) {
     state.stopAudio();
@@ -1688,9 +1696,27 @@ export const useStore = create<State>()(
 
               if (isPlaying && state.activeFileId && state.activeFileId === fileId) {
                 const transport = Tone.getTransport();
-                transport.cancel(0);
+                const currentTime = transport.seconds;
+
+                // This will trigger the onstop handler, so we increment the counter
+                pendingSwapStops += 1;
+                player.stop();
+
+                // Update to new buffer
                 player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
-                player.seek(transport.seconds);
+
+                // Restart the player. Since it's still synced, it will pick up
+                // at the correct transport time. We just need to provide the offset.
+                const newDuration = player.buffer.duration;
+                player.start(undefined, currentTime % newDuration);
+
+                // Update loop points with new buffer duration
+                transport.setLoopPoints(0, newDuration);
+
+                // Make sure transport continues running
+                if (transport.state !== "started") {
+                  transport.start();
+                }
               }
 
               const totalTime = performance.now() - totalStart;
