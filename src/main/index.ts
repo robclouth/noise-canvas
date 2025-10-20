@@ -95,6 +95,11 @@ function setupAutoUpdater(): void {
   autoUpdater.autoDownload = false; // Don't auto-download, ask user first
   autoUpdater.autoInstallOnAppQuit = true; // Install when app quits
 
+  // Enable dev mode for testing (reads from dev-app-update.yml)
+  if (is.dev) {
+    autoUpdater.forceDevUpdateConfig = true;
+  }
+
   // Log for debugging
   autoUpdater.logger = {
     info: (msg) => console.log("[Updater]", msg),
@@ -138,7 +143,13 @@ function setupAutoUpdater(): void {
   autoUpdater.on("error", (error) => {
     console.error("Update error:", error);
     if (mainWindow) {
-      webContentsSend(mainWindow, "update-error", error.message);
+      // Don't send raw error messages that might contain HTML
+      // Extract meaningful error info or use a generic message
+      const errorMessage =
+        error.message?.includes("<html") || error.message?.includes("<!DOCTYPE")
+          ? "Failed to check for updates. Please try again later."
+          : error.message || "An unknown error occurred while checking for updates.";
+      webContentsSend(mainWindow, "update-error", errorMessage);
     }
   });
 
@@ -147,9 +158,14 @@ function setupAutoUpdater(): void {
     try {
       const result = await autoUpdater.checkForUpdates();
       return result;
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error checking for updates:", error);
-      throw error;
+      // Return a user-friendly error instead of throwing
+      const errorMessage =
+        error.message?.includes("<html") || error.message?.includes("<!DOCTYPE")
+          ? "Failed to check for updates. Please try again later."
+          : error.message || "An unknown error occurred while checking for updates.";
+      return { error: errorMessage };
     }
   });
 
@@ -210,14 +226,15 @@ app.whenReady().then(async () => {
     });
   }
 
-  // Setup auto-updater (only in production)
-  if (!is.dev) {
-    setupAutoUpdater();
+  // Setup auto-updater
+  setupAutoUpdater();
 
-    // Check for updates on startup after a short delay
+  // Check for updates on startup after a short delay (only in production)
+  if (!is.dev) {
     setTimeout(() => {
       autoUpdater.checkForUpdates().catch((error) => {
         console.error("Failed to check for updates:", error);
+        // Silently fail on startup - don't bother user with update check errors
       });
     }, 3000);
   }
