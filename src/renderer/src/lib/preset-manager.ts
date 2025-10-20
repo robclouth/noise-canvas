@@ -4,7 +4,7 @@
 import { notifications } from "@mantine/notifications";
 import { State } from "@renderer/store";
 import { getFolders } from "./folders";
-import { validatePreset, type BrushPresetType } from "./preset-schema";
+import { CURRENT_PRESET_VERSION, validatePreset, type BrushPresetType } from "./preset-schema";
 import { defaultPresets, PRESET_KEYS } from "./presets";
 
 /**
@@ -74,7 +74,7 @@ class PresetManager {
             const fileContent = await window.nodeFs.readFile(filePath, "utf-8");
             const rawPreset = JSON.parse(fileContent);
 
-            // Validate the preset against the schema
+            // Validate the preset against the schema (includes migration)
             const validationResult = validatePreset(rawPreset);
             if (validationResult.success) {
               userPresets.push(validationResult.data);
@@ -144,6 +144,7 @@ class PresetManager {
       id,
       name,
       isDefault: false,
+      version: CURRENT_PRESET_VERSION, // Always save with current version
     };
 
     for (const key of PRESET_KEYS) {

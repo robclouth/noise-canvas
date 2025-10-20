@@ -10,12 +10,16 @@ const EffectOrderSchema = z.array(EffectTypeSchema);
 // Schema for effects enabled object
 const EffectsEnabledSchema = z.record(EffectTypeSchema, z.boolean());
 
+// Current preset version
+export const CURRENT_PRESET_VERSION = 1;
+
 // Main preset schema
 export const BrushPresetSchema = z.object({
   // Metadata
   id: z.string().min(1, "ID is required"),
   name: z.string().min(1, "Name is required"),
   isDefault: z.boolean(),
+  version: z.number().int().min(1).optional().default(1),
 
   // Brush parameters
   brushIntensity: z.number().min(0).max(100),
@@ -164,12 +168,47 @@ export const BrushPresetSchema = z.object({
 // Type inference from schema
 export type BrushPresetType = z.infer<typeof BrushPresetSchema>;
 
-// Validation function with detailed error reporting
+/**
+ * Migrate a preset from an older version to the current version
+ * This ensures backwards compatibility when preset structure changes
+ */
+export function migratePreset(data: any): any {
+  const migratedData = { ...data };
+
+  // Set version to current if not set
+  if (!migratedData.version) {
+    migratedData.version = CURRENT_PRESET_VERSION;
+  }
+
+  // Add migration logic here as versions increase
+  // Example for future versions:
+  // if (migratedData.version < 2) {
+  //   // Migrate from v1 to v2
+  //   migratedData.newField = defaultValue;
+  //   migratedData.version = 2;
+  // }
+  // if (migratedData.version < 3) {
+  //   // Migrate from v2 to v3
+  //   if (migratedData.oldFieldName !== undefined) {
+  //     migratedData.newFieldName = migratedData.oldFieldName;
+  //     delete migratedData.oldFieldName;
+  //   }
+  //   migratedData.version = 3;
+  // }
+
+  return migratedData;
+}
+
+// Validation function with detailed error reporting and migration support
 export function validatePreset(
   data: unknown,
 ): { success: true; data: BrushPresetType } | { success: false; errors: string[] } {
   try {
-    const validatedData = BrushPresetSchema.parse(data);
+    // First, try to migrate the data if needed
+    const migratedData = migratePreset(data);
+
+    // Then validate against the schema
+    const validatedData = BrushPresetSchema.parse(migratedData);
     return { success: true, data: validatedData };
   } catch (error) {
     if (error instanceof z.ZodError) {
