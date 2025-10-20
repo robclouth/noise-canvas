@@ -29,7 +29,7 @@ void main() {
         float blurredPhaseR = 0.0;
         float totalWeight = 0.0;
         
-        vec4 sourceCenterTexel = getTransformedSample(coords.source, coords.dest, 1.0);
+        vec4 sourceCenterTexel = getTransformedSample(coords.source, coords.dest, 1.0, 1.0, sourceOffsetX, sourceOffsetY);
         float referencePhaseL = getPhase(sourceCenterTexel.rg);
         float referencePhaseR = getPhase(sourceCenterTexel.ba);
 
@@ -78,7 +78,9 @@ void main() {
             
             if (bleed || isInsideBrush(sampleUv)) {
                 float weight = gaussianKernel[kernelIdx];
-                vec4 sampleTexel = getTransformedSample(sampleUv, coords.dest, 1.0);
+                // Total shift from dest is sourceOffset + offset + noise
+                vec2 totalShift = vec2(sourceOffsetX, sourceOffsetY) + offset + noiseOffset;
+                vec4 sampleTexel = getTransformedSample(sampleUv, coords.dest, 1.0, 1.0, totalShift.x, totalShift.y);
                 
                 blurredMagL += getMag(sampleTexel.rg) * weight;
                 blurredMagR += getMag(sampleTexel.ba) * weight;

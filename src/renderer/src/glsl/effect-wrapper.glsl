@@ -6,7 +6,7 @@ void main() {
 
     if (isInsideBrush(coords.dest)) {
         vec4 originalTexel = texture2D(destSpectrogramTex, vUv);
-        vec4 sourceTexel = getTransformedSample(coords.source, coords.dest, 1.0);
+        vec4 sourceTexel = getTransformedSample(coords.source, coords.dest, 1.0, 1.0, sourceOffsetX, sourceOffsetY);
         float audioLevelDb = getAudioLevelDb(coords.dest);
         vec4 modifiedTexel = applyEffectStroke(sourceTexel, coords, audioLevelDb);
         float weight = getBrushWeight(coords.dest);
