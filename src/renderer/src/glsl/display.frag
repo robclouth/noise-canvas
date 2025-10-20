@@ -83,9 +83,13 @@ void main() {
         bool isBarStart = barLine < gridWidthUv;
         
         if (line < lineThicknessUv) {
-            // Make the first beat of the bar brighter
-            float brightness = isBarStart ? 0.3 : 0.2;
-            color = mix(color, vec3(1.0), brightness);
+            // Invert color with subtle contrast
+            float strength = isBarStart ? 0.35 : 0.25;
+            vec3 inverted = vec3(1.0) - color;
+            // Push inverted color away from middle gray for better visibility
+            inverted = inverted * 1.3 - 0.15;
+            inverted = clamp(inverted, 0.0, 1.0);
+            color = mix(color, inverted, strength);
         }
     }
     
@@ -95,7 +99,12 @@ void main() {
         float verticalLineThicknessUv = fwidth(zoomedUv.y);
         
         if (verticalLine < verticalLineThicknessUv) {
-            color = mix(color, vec3(1.0), 0.15);
+            // Invert color with subtle contrast
+            vec3 inverted = vec3(1.0) - color;
+            // Push inverted color away from middle gray for better visibility
+            inverted = inverted * 1.3 - 0.15;
+            inverted = clamp(inverted, 0.0, 1.0);
+            color = mix(color, inverted, 0.25);
         }
     }
 
@@ -120,7 +129,11 @@ void main() {
 
         float rectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(distToBorder));
         if (rectAlpha > 0.0) {
-            color = mix(color, vec3(1.0), rectAlpha);
+            // Invert color with enhanced contrast
+            vec3 inverted = vec3(1.0) - color;
+            inverted = inverted * 1.5 - 0.25;
+            inverted = clamp(inverted, 0.0, 1.0);
+            color = mix(color, inverted, rectAlpha);
         }
     }
 
@@ -141,7 +154,11 @@ void main() {
 
             float sourceRectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(distToBorderSource));
             if (sourceRectAlpha > 0.0) {
-                color = mix(color, vec3(1.0), sourceRectAlpha * 0.3); // Fainter
+                // Invert color with enhanced contrast (fainter for source)
+                vec3 inverted = vec3(1.0) - color;
+                inverted = inverted * 1.5 - 0.25;
+                inverted = clamp(inverted, 0.0, 1.0);
+                color = mix(color, inverted, sourceRectAlpha * 0.3);
             }
         }
     }

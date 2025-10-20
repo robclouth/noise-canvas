@@ -106,4 +106,5 @@ export type FileSettings = {
   bandsPerOctave: number;
   zoom: number;
   offset: number;
+  playbackStartTime: number; // In seconds
 };

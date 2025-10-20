@@ -9,6 +9,8 @@ import { getUndoManager } from "../lib/undo-manager";
 import { screenToZoomed } from "../lib/utils";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
+import { PlaybackStartLine } from "./playback-start-line";
+import { TimeLegend } from "./time-legend";
 import { Tooltip } from "./tooltip";
 
 // Helper to get resolution label from bands per octave value
@@ -395,9 +397,14 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
     async (event) => {
       if (!isActive) return;
       if (event.button === 0 && rendererRef?.current) {
-        const { synthesizeFile, setBrushStartPosition } = useStore.getState();
-        // Clear brush start position when stroke ends
-        setBrushStartPosition(null);
+        const state = useStore.getState();
+        const {
+          synthesizeFile,
+          setBrushStartPosition,
+          brushStartPosition,
+          autoPlaybackPaintedRegion,
+          brushWidthBeats,
+        } = state;
 
         // Left mouse button up - save undo state and run synthesis (no IPC)
         const data = await rendererRef.current.getFBOData();
@@ -405,9 +412,29 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
           const undoManager = getUndoManager(fileId);
           await undoManager.addState(data, fileId);
 
-          // Run synthesis now that the stroke is finished
-          synthesizeFile(fileId);
+          // Prepare auto-playback parameters if enabled
+          let autoPlaybackParams: { startTimeSeconds: number; endTimeSeconds: number } | null = null;
+          if (autoPlaybackPaintedRegion && brushStartPosition && brushWidthBeats.value > 0) {
+            const file = openFiles[fileId];
+            const bpm = state.fileSettings[file.filePath].bpm;
+
+            // brushStartPosition.beats is the bottom-left corner of the brush
+            const startTimeSeconds = (brushStartPosition.beats / bpm) * 60;
+            const brushWidthSeconds = (brushWidthBeats.value / bpm) * 60;
+            const endTimeSeconds = startTimeSeconds + brushWidthSeconds;
+
+            autoPlaybackParams = {
+              startTimeSeconds,
+              endTimeSeconds,
+            };
+          }
+
+          // Run synthesis
+          await synthesizeFile(fileId, autoPlaybackParams);
         }
+
+        // Clear brush start position after processing
+        setBrushStartPosition(null);
       }
     },
     [fileId, isActive],
@@ -439,7 +466,10 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         <View style={viewStyle}>
           <FileRenderer fileId={fileId} ref={refCallback} />
         </View>
+        {isActive && <PlaybackLine fileId={fileId} />}
+        {isActive && <PlaybackStartLine fileId={fileId} />}
       </Box>
+      <TimeLegend fileId={fileId} />
       <Box
         style={{
           width: "100%",
@@ -467,8 +497,6 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
           }}
         />
       </Box>
-
-      {isActive && <PlaybackLine fileId={fileId} />}
     </Box>
   );
 });

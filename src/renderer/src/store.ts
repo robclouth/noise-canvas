@@ -103,6 +103,7 @@ const persistedKeys: (keyof State)[] = [
   "sectionCollapsed",
   "presetHotkeys",
   "loop",
+  "autoPlaybackPaintedRegion",
 ];
 
 // Helper to generate unique file IDs
@@ -223,7 +224,10 @@ export type State = {
   closeFile: (fileId: string) => void;
   closeAllFiles: () => void;
   reanalyzeActiveFile: () => Promise<void>;
-  synthesizeFile: (fileId: string) => Promise<void>;
+  synthesizeFile: (
+    fileId: string,
+    autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
+  ) => Promise<void>;
   fileSettings: Record<string, FileSettings>;
   getFileSettings: (fileId: string) => FileSettings | null;
   setFileBpm: (fileId: string, bpm: number) => void;
@@ -238,7 +242,12 @@ export type State = {
   setIsPlaying: (isPlaying: boolean) => void;
   loop: boolean;
   setLoop: (loop: boolean) => void;
+  autoPlaybackPaintedRegion: boolean;
+  setAutoPlaybackPaintedRegion: (value: boolean) => void;
+  autoPlaybackEndTime: number | null;
+  setAutoPlaybackEndTime: (time: number | null) => void;
   setPlaybackTime: (playbackTime: number) => void;
+  setFilePlaybackStartTime: (fileId: string, time: number) => void;
   togglePlayback: () => Promise<void>;
   stopAudio: () => void;
 } & ModulatorAmountParameters &
@@ -534,22 +543,6 @@ export function getFileIdByPath(filePath: string): string | undefined {
 }
 
 export const player = new Tone.Player().toDestination();
-
-// Track pending stop events during buffer swaps to avoid spurious stop handling
-let pendingSwapStops = 0;
-
-// Set up event listener for when playback ends
-player.onstop = () => {
-  if (pendingSwapStops > 0) {
-    pendingSwapStops -= 1;
-    return;
-  }
-
-  const state = useStore.getState();
-  if (state.isPlaying && !state.loop) {
-    state.stopAudio();
-  }
-};
 
 export const useStore = create<State>()(
   subscribeWithSelector(
@@ -1349,6 +1342,7 @@ export const useStore = create<State>()(
                 if (!fileSettings.bandsPerOctave) fileSettings.bandsPerOctave = state.bandsPerOctave.value;
                 if (!fileSettings.zoom) fileSettings.zoom = 0;
                 if (!fileSettings.offset) fileSettings.offset = 0;
+                if (!fileSettings.playbackStartTime) fileSettings.playbackStartTime = 0;
 
                 state.fileSettings[filePath] = fileSettings;
 
@@ -1585,7 +1579,10 @@ export const useStore = create<State>()(
               sourceFile: null,
             });
           },
-          synthesizeFile: async (fileId: string) => {
+          synthesizeFile: async (
+            fileId: string,
+            autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
+          ) => {
             const state = get();
             if (!state.activeFileId) return;
 
@@ -1698,8 +1695,6 @@ export const useStore = create<State>()(
                 const transport = Tone.getTransport();
                 const currentTime = transport.seconds;
 
-                // This will trigger the onstop handler, so we increment the counter
-                pendingSwapStops += 1;
                 player.stop();
 
                 // Update to new buffer
@@ -1713,6 +1708,24 @@ export const useStore = create<State>()(
                 // Update loop points with new buffer duration
                 transport.setLoopPoints(0, newDuration);
 
+                // Reschedule stop if not looping
+                const { loop, autoPlaybackEndTime } = get();
+                if (!loop) {
+                  // Cancel any existing scheduled events
+                  transport.cancel();
+
+                  // Schedule new stop at either autoPlaybackEndTime or buffer end
+                  const stopTime = autoPlaybackEndTime !== null ? autoPlaybackEndTime : newDuration;
+
+                  transport.stop(stopTime);
+                  player.stop(stopTime);
+
+                  // Schedule state update when transport stops
+                  transport.schedule(() => {
+                    set({ isPlaying: false, autoPlaybackEndTime: null });
+                  }, stopTime);
+                }
+
                 // Make sure transport continues running
                 if (transport.state !== "started") {
                   transport.start();
@@ -1721,6 +1734,26 @@ export const useStore = create<State>()(
 
               const totalTime = performance.now() - totalStart;
               console.log("Total synthesis took:", totalTime.toFixed(2), "ms");
+
+              // Trigger auto-playback if parameters were provided
+              if (autoPlaybackParams) {
+                const state = get();
+                const { startTimeSeconds, endTimeSeconds } = autoPlaybackParams;
+
+                // Set playback start time to the beginning of the painted region
+                state.setFilePlaybackStartTime(fileId, startTimeSeconds);
+
+                // Set the auto-playback end time
+                state.setAutoPlaybackEndTime(endTimeSeconds);
+
+                // If already playing, restart. Otherwise, start playback
+                if (state.isPlaying) {
+                  await state.togglePlayback(); // Stop
+                  await state.togglePlayback(); // Start from new position
+                } else {
+                  await state.togglePlayback(); // Start playing
+                }
+              }
             } catch (error) {
               console.error("Error running synthesis:", error);
             }
@@ -1846,12 +1879,11 @@ export const useStore = create<State>()(
           sourceFile: null,
           setSourceFile: (sourceFile) => set({ sourceFile }),
           togglePlayback: async () => {
-            const { isPlaying, activeFileId, loop, fileSettings } = get();
+            const { isPlaying, activeFileId, loop, fileSettings, autoPlaybackEndTime } = get();
             if (isPlaying) {
               const transport = Tone.getTransport();
               transport.stop();
-              transport.cancel(0);
-
+              transport.cancel();
               return set({ isPlaying: false });
             }
             const file = activeFileId ? openFiles[activeFileId] : undefined;
@@ -1862,15 +1894,31 @@ export const useStore = create<State>()(
                 await Tone.start();
               }
               player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
-              player.fadeIn = 0.01;
-              player.fadeOut = 0.01;
-              player.sync().start(0);
 
               const transport = Tone.getTransport();
               transport.bpm.value = fileSettings[file.filePath].bpm;
               transport.setLoopPoints(0, audioBuffer.duration);
               transport.loop = loop;
+
+              transport.cancel();
+
+              // Start from the playback start time
+              const startTime = fileSettings[file.filePath].playbackStartTime || 0;
+              transport.seconds = startTime;
+
+              player.sync().start(0);
               transport.start();
+
+              // Schedule stop at end of playback if not looping
+              if (!loop) {
+                const stopTime = autoPlaybackEndTime !== null ? autoPlaybackEndTime : audioBuffer.duration;
+
+                transport.schedule(() => {
+                  set({ isPlaying: false, autoPlaybackEndTime: null });
+                }, stopTime);
+
+                transport.stop(stopTime);
+              }
 
               return set({ isPlaying: true });
             } else {
@@ -1883,19 +1931,60 @@ export const useStore = create<State>()(
           loop: false,
           setLoop: (loop) => {
             Tone.getTransport().loop = loop;
-            set({ loop });
+            // Clear auto-playback end time when enabling loop mode
+            set({ loop, autoPlaybackEndTime: loop ? null : get().autoPlaybackEndTime });
           },
+          autoPlaybackPaintedRegion: false,
+          setAutoPlaybackPaintedRegion: (value) => set({ autoPlaybackPaintedRegion: value }),
+          autoPlaybackEndTime: null,
+          setAutoPlaybackEndTime: (time) => set({ autoPlaybackEndTime: time }),
           setPlaybackTime: (playbackTime) => {
+            const { loop, activeFileId, isPlaying, autoPlaybackEndTime } = get();
+
+            if (activeFileId === null) return;
+
+            const file = openFiles[activeFileId];
+            if (!file || !file.audioBuffer) return;
+
             const transport = Tone.getTransport();
+            transport.cancel();
             transport.seconds = playbackTime;
+
+            transport.start();
+
+            const stopTime = autoPlaybackEndTime !== null ? autoPlaybackEndTime : file.audioBuffer.duration;
+
+            transport.schedule(() => {
+              set({ isPlaying: false, autoPlaybackEndTime: null });
+            }, stopTime);
+
+            transport.stop(stopTime);
           },
+          setFilePlaybackStartTime: (fileId, time) =>
+            set(
+              produce((state: State) => {
+                const file = openFiles[fileId];
+                if (file) {
+                  state.fileSettings[file.filePath].playbackStartTime = time;
+                }
+              }),
+            ),
           stopAudio: () => {
             const transport = Tone.getTransport();
             transport.stop();
-            transport.seconds = 0; // Reset position to beginning
+            transport.cancel();
+
+            const { activeFileId, fileSettings } = get();
+            if (activeFileId && openFiles[activeFileId]) {
+              const file = openFiles[activeFileId];
+              // Reset to playback start time instead of 0
+              transport.seconds = fileSettings[file.filePath].playbackStartTime || 0;
+            } else {
+              transport.seconds = 0;
+            }
             player.unsync(); // Unsync from transport
             player.stop();
-            set({ isPlaying: false });
+            set({ isPlaying: false, autoPlaybackEndTime: null });
           },
 
           mousePos: null,
