@@ -1866,6 +1866,8 @@ export const useStore = create<State>()(
           stopAudio: () => {
             const transport = Tone.getTransport();
             transport.stop();
+            transport.seconds = 0; // Reset position to beginning
+            player.unsync(); // Unsync from transport
             player.stop();
             set({ isPlaying: false });
           },
