@@ -224,6 +224,7 @@ export interface FilesState {
   getFileSettings: (fileId: string) => FileSettings | null;
   setFileBpm: (fileId: string, bpm: number) => void;
   setFileResolution: (fileId: string, resolution: number) => void;
+  setFileZoomAndOffset: (fileId: string, zoom: number, offset: number) => void;
   setFileZoom: (fileId: string, zoom: number) => void;
   setFileOffset: (fileId: string, offset: number) => void;
   filesDirty: Record<string, boolean>;

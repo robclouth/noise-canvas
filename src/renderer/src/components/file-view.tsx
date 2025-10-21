@@ -2,7 +2,8 @@ import { useStore } from "@/store";
 import { Box } from "@mantine/core";
 import { View } from "@react-three/drei";
 import { openFiles } from "@renderer/store/files";
-import { memo, MouseEventHandler, useCallback, useMemo, useRef } from "react";
+import { useGesture } from "@use-gesture/react";
+import { memo, MouseEventHandler, useCallback, useMemo, useRef, useState } from "react";
 import { Vector2 } from "three";
 import { getUndoManager } from "../lib/undo-manager";
 import { screenToZoomed } from "../lib/utils";
@@ -18,6 +19,7 @@ export interface FileViewProps {
 
 const viewStyle = { width: "100%", height: "100%", zIndex: 1 };
 
+// This function remains the same
 function getSnappedCoordinates(
   event: React.MouseEvent<HTMLDivElement>,
   fileId: string,
@@ -34,12 +36,8 @@ function getSnappedCoordinates(
 
   const screenUv = new Vector2(x, y);
 
-  // Get per-file zoom and offset from store
   const { zoom, offset } = state.fileSettings[openFiles[fileId].filePath];
-
-  // Convert from screen coordinates to zoomed coordinates
   const uv = screenToZoomed(screenUv, zoom, offset);
-
   const { spectrogramData } = openFiles[fileId];
 
   let snappedX = uv.x;
@@ -50,13 +48,10 @@ function getSnappedCoordinates(
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
       const gridIntervalSeconds = (60 / bpm) * gridSizeBeats.value;
       const currentTime = uv.x * totalDuration;
-
       const brushWidthSeconds = brushWidthBeats.value * (60.0 / bpm);
       const startTime = currentTime - brushWidthSeconds / 2.0;
-
       const snappedStartTime = Math.round(startTime / gridIntervalSeconds) * gridIntervalSeconds;
       const snappedCenterTime = snappedStartTime + brushWidthSeconds / 2.0;
-
       snappedX = snappedCenterTime / totalDuration;
     } else {
       snappedX = 0.5;
@@ -67,15 +62,11 @@ function getSnappedCoordinates(
     if (brushHeightSemis.value > 0) {
       const bandsPerSemitone = bandsPerOctave.value / 12;
       const gridIntervalBands = gridSizeSemis.value * bandsPerSemitone;
-      // Note: Band coordinates are inverted - band 0 is low frequency (bottom of screen at y=1)
       const currentBand = (1.0 - uv.y) * spectrogramData.numBands;
-
       const brushHeightBands = brushHeightSemis.value * bandsPerSemitone;
       const bottomBand = currentBand - brushHeightBands / 2.0;
-
       const snappedBottomBand = Math.round(bottomBand / gridIntervalBands) * gridIntervalBands;
       const snappedCenterBand = snappedBottomBand + brushHeightBands / 2.0;
-
       snappedY = 1.0 - snappedCenterBand / spectrogramData.numBands;
     } else {
       snappedY = 0.5;
@@ -93,12 +84,110 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   const activeFileId = useStore((state) => state.activeFileId);
   const isActive = activeFileId === fileId;
   const isSettingPosition = useStore((state) => state.isSettingPosition);
-  const zoom = useStore((state) => state.fileSettings[file.filePath].zoom ?? 0);
+  const { zoom, offset } = useStore((state) => state.fileSettings[file.filePath] ?? { zoom: 0, offset: 0 });
 
-  const cursorStyle = useMemo(() => ({ cursor: isSettingPosition ? "crosshair" : "crosshair" }), [isSettingPosition]);
+  const [isPanning, setIsPanning] = useState(false);
+
+  const cursorStyle = useMemo(() => {
+    if (isPanning) return { cursor: "grabbing" };
+    if (isSettingPosition) return { cursor: "crosshair" };
+    return { cursor: "crosshair" };
+  }, [isSettingPosition, isPanning]);
 
   const rendererRef = useRef<FileRendererHandle>(null);
   const strokeTimeRangeRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
+  const viewRef = useRef<HTMLDivElement>(null);
+
+  useGesture(
+    {
+      onDrag: ({ event, dragging, delta: [dx] }) => {
+        // Right button only (configured below). Pan in screen space.
+        event.preventDefault();
+        setIsPanning(dragging ?? false);
+
+        const rect = viewRef.current?.getBoundingClientRect();
+        if (!rect || rect.width === 0) return;
+
+        const Z = Math.pow(2, zoom);
+        const viewWidth = 1 / Z;
+
+        // No panning when zoomed fully out
+        if (Z <= 1 + 1e-9) return;
+
+        // Current viewStart from offset (must match screenToZoomed)
+        const viewStart = offset * (1 - viewWidth);
+
+        // Screen-space delta in [0,1]
+        const ds = dx / rect.width;
+
+        // Pan: moving the mouse right should decrease viewStart (content moves left)
+        let newViewStart = viewStart - ds * viewWidth;
+
+        // Clamp viewStart to [0, 1 - viewWidth]
+        newViewStart = Math.max(0, Math.min(1 - viewWidth, newViewStart));
+
+        // Convert back to offset
+        const denom = 1 - viewWidth;
+        const newOffset = denom > 0 ? newViewStart / denom : 0;
+
+        useStore.getState().setFileOffset(fileId, newOffset);
+      },
+      onWheel: ({ event, delta: [, dy] }) => {
+        event.preventDefault();
+        const rect = viewRef.current?.getBoundingClientRect();
+        if (!rect || rect.width === 0) return;
+
+        const { setFileZoomAndOffset } = useStore.getState();
+
+        // wheel → zoomPower
+        const sensitivity = 0.01;
+        const oldPower = zoom;
+        const newPower = Math.max(-0, Math.min(oldPower - dy * sensitivity, 7)); // clamp as you like
+
+        const oldZ = Math.pow(2, oldPower);
+        const newZ = Math.pow(2, newPower);
+
+        const s = (event.clientX - rect.left) / rect.width; // cursor in [0,1]
+
+        // From screenToZoomed:
+        // viewWidth = 1/z
+        // viewStart = offset * (1 - viewWidth)
+        const oldViewWidth = 1 / oldZ;
+        const newViewWidth = 1 / newZ;
+
+        // Current world u under the cursor, keep this constant after zoom.
+        const oldViewStart = offset * (1 - oldViewWidth);
+        const u = oldViewStart + s * oldViewWidth;
+
+        // Solve for new viewStart' so that u = viewStart' + s * newViewWidth
+        const newViewStart = u - s * newViewWidth;
+
+        // Convert back to offset' via viewStart' = offset' * (1 - newViewWidth)
+        let newOffset: number;
+
+        if (newZ <= 1 + 1e-9) {
+          // Fully zoomed out — offset is irrelevant; pin to 0 for stability.
+          newOffset = 0;
+        } else {
+          const denom = 1 - newViewWidth;
+          newOffset = denom > 0 ? newViewStart / denom : 0;
+          // Keep viewStart in-bounds => offset in [0,1]
+          newOffset = Math.max(0, Math.min(1, newOffset));
+        }
+
+        setFileZoomAndOffset(fileId, newPower, newOffset);
+      },
+    },
+    {
+      target: viewRef,
+      eventOptions: { passive: false },
+      drag: {
+        pointer: { buttons: [2], mouse: true }, // right click
+        from: () => [0, 0],
+        filterTaps: true,
+      },
+    },
+  );
 
   const refCallback = useCallback(
     (handle: FileRendererHandle | null) => {
@@ -135,23 +224,21 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
 
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = useCallback(
     (event) => {
+      if (isPanning) return;
       const state = useStore.getState();
       const bpm = state.fileSettings[openFiles[fileId].filePath].bpm;
       const coords = getSnappedCoordinates(event, fileId, bpm);
       if (!coords) return;
       const [snappedX, snappedY] = coords;
 
-      // If dragging, update the local ref with the total range of the stroke
       if (isActive && event.buttons === 1 && strokeTimeRangeRef.current.min !== null) {
         const { spectrogramData } = file;
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
         const brushWidthBeats = state.brushWidthBeats.value;
         const brushWidthSeconds = (brushWidthBeats / bpm) * 60;
         const brushHalfWidthSeconds = brushWidthSeconds / 2;
-
         const currentBrushStart = snappedX * totalDuration - brushHalfWidthSeconds;
         const currentBrushEnd = snappedX * totalDuration + brushHalfWidthSeconds;
-
         strokeTimeRangeRef.current.min = Math.min(strokeTimeRangeRef.current.min!, currentBrushStart);
         strokeTimeRangeRef.current.max = Math.max(strokeTimeRangeRef.current.max!, currentBrushEnd);
       }
@@ -169,11 +256,12 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
       }
     },
-    [fileId, isActive, file],
+    [fileId, isActive, file, isPanning],
   );
 
   const handleMouseEnter: MouseEventHandler<HTMLDivElement> = useCallback(
     (event) => {
+      if (isPanning) return;
       const state = useStore.getState();
       const bpm = state.fileSettings[openFiles[fileId].filePath].bpm;
       const coords = getSnappedCoordinates(event, fileId, bpm);
@@ -188,7 +276,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
       }
     },
-    [fileId, isActive],
+    [fileId, isActive, isPanning],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -224,14 +312,12 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
         state.setBrushStartPosition({ beats, pitch });
 
-        // Initialize the local stroke tracking ref on mouse down
         const { spectrogramData } = file;
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
         const brushWidthBeats = state.brushWidthBeats.value;
         const brushWidthSeconds = (brushWidthBeats / bpm) * 60;
         const brushHalfWidthSeconds = brushWidthSeconds / 2;
         const centerTimeSeconds = coords[0] * totalDuration;
-
         const initialBrushStart = centerTimeSeconds - brushHalfWidthSeconds;
         const initialBrushEnd = centerTimeSeconds + brushHalfWidthSeconds;
         strokeTimeRangeRef.current = { min: initialBrushStart, max: initialBrushEnd };
@@ -266,18 +352,13 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
 
           if (finalRange.min !== null && finalRange.max !== null) {
             const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
-            // Clamp the final range to the audio duration
             const clampedStart = Math.max(0, finalRange.min);
             const clampedEnd = Math.min(totalDuration, finalRange.max);
 
             if (autoPlayStroke) {
               setFilePlaybackStartTime(fileId, clampedStart);
               setAutoPlayEndTime(clampedEnd);
-
-              autoPlaybackParams = {
-                startTimeSeconds: clampedStart,
-                endTimeSeconds: clampedEnd,
-              };
+              autoPlaybackParams = { startTimeSeconds: clampedStart, endTimeSeconds: clampedEnd };
             }
           }
 
@@ -285,7 +366,6 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         }
 
         setBrushStartPosition(null);
-        // Reset the local ref for the next stroke.
         strokeTimeRangeRef.current = { min: null, max: null };
       }
     },
@@ -306,6 +386,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
     >
       <FileHeader fileId={fileId} />
       <Box
+        ref={viewRef}
         h={400}
         style={cursorStyle}
         pos="relative"
@@ -314,6 +395,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         onMouseLeave={handleMouseLeave}
         onMouseDown={handleCanvasMouseDown}
         onMouseUp={handleCanvasMouseUp}
+        onContextMenu={(e) => e.preventDefault()}
       >
         <View style={viewStyle}>
           <FileRenderer fileId={fileId} ref={refCallback} />
@@ -322,31 +404,6 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         {isActive && <PlaybackStartLine fileId={fileId} />}
       </Box>
       <TimeLegend fileId={fileId} />
-      <Box
-        style={{
-          width: "100%",
-          height: 20,
-          overflowX: "scroll",
-          overflowY: "hidden",
-        }}
-        onScroll={(e) => {
-          const target = e.currentTarget;
-          const scrollWidth = target.scrollWidth - target.clientWidth;
-          if (scrollWidth > 0) {
-            const offset = target.scrollLeft / scrollWidth;
-            useStore.getState().setFileOffset(fileId, offset);
-          } else {
-            useStore.getState().setFileOffset(fileId, 0);
-          }
-        }}
-      >
-        <Box
-          h={1}
-          style={{
-            width: `${Math.max(100, Math.pow(2, zoom) * 100)}%`,
-          }}
-        />
-      </Box>
     </Box>
   );
 });

@@ -2,7 +2,7 @@ import { useStore } from "@/store";
 import { ActionIcon, Badge, Box, Button, Group, NumberInput } from "@mantine/core";
 import { MiddleTruncate } from "@re-dev/react-truncate";
 import { openFiles } from "@renderer/store/files";
-import { X, ZoomIn, ZoomOut } from "lucide-react";
+import { X } from "lucide-react";
 import { memo } from "react";
 import { Tooltip } from "./tooltip";
 
@@ -52,29 +52,17 @@ const TruncatedFilename = memo(function TruncatedFilename({
 export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const file = openFiles[fileId];
   const setSourceFile = useStore((state) => state.setSourceFile);
-  const bpm = useStore((state) => state.fileSettings[file.filePath].bpm ?? 120);
+  const bpm = useStore((state) => state.getFileSettings(fileId)?.bpm);
   const setFileBpm = useStore((state) => state.setFileBpm);
-  const setFileZoom = useStore((state) => state.setFileZoom);
-  const zoom = useStore((state) => state.fileSettings[file.filePath].zoom ?? 0);
   const closeFile = useStore((state) => state.closeFile);
   const sourceFile = useStore((state) => state.sourceFile);
-  const resolution = useStore((state) => state.fileSettings[file.filePath].bandsPerOctave);
+  const resolution = useStore((state) => state.getFileSettings(fileId)?.bandsPerOctave);
   const isDirty = useStore((state) => state.filesDirty[fileId] ?? false);
 
   const filePath = file?.filePath || "";
 
   const isSource = sourceFile?.id === fileId;
   const sourceMode = sourceFile?.mode ?? "current";
-
-  const handleZoomIn = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setFileZoom(fileId, zoom + 1);
-  };
-
-  const handleZoomOut = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setFileZoom(fileId, zoom - 1);
-  };
 
   return (
     <Group justify="space-between" align="center" p="xs" wrap="nowrap" bg="dark.7">
@@ -91,18 +79,6 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         )}
       </Group>
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-        <Button.Group>
-          <Tooltip label="Zoom out">
-            <Button size="xs" variant="filled" color="dark.5" onClick={handleZoomOut} disabled={zoom <= 0} p={4}>
-              <ZoomOut size={16} />
-            </Button>
-          </Tooltip>
-          <Tooltip label="Zoom in">
-            <Button size="xs" variant="filled" color="dark.5" onClick={handleZoomIn} disabled={zoom >= 10} p={4}>
-              <ZoomIn size={16} />
-            </Button>
-          </Tooltip>
-        </Button.Group>
         <Tooltip label="The tempo of this file in beats per minute (BPM). Used for grid snapping and time-based effects.">
           <NumberInput
             w={60}

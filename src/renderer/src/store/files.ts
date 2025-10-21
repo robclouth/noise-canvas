@@ -501,6 +501,22 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (file) return get().fileSettings[file.filePath];
     return null;
   },
+  setFileZoomAndOffset: (fileId, zoom, offset) => {
+    set((state) => {
+      const file = openFiles[fileId];
+      if (!file) return {};
+      return {
+        fileSettings: {
+          ...state.fileSettings,
+          [file.filePath]: {
+            ...state.fileSettings[file.filePath],
+            zoom,
+            offset,
+          },
+        },
+      };
+    });
+  },
   setFileBpm: (fileId, bpm) =>
     set(
       produce((state: State) => {
