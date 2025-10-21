@@ -2,13 +2,9 @@ import { useStore } from "@/store";
 import { ActionIcon, Group, Text } from "@mantine/core";
 import { Brush, Play, Repeat, Square } from "lucide-react";
 import { memo, useEffect, useRef } from "react";
-import * as Tone from "tone";
 import { Tooltip } from "../tooltip";
 
 const formatTime = (seconds: number): string => {
-  const h = Math.floor(seconds / 3600)
-    .toString()
-    .padStart(2, "0");
   const m = Math.floor((seconds % 3600) / 60)
     .toString()
     .padStart(2, "0");
@@ -18,15 +14,15 @@ const formatTime = (seconds: number): string => {
   const ms = Math.floor((seconds % 1) * 1000)
     .toString()
     .padStart(3, "0");
-  return `${h}:${m}:${s}:${ms}`;
+  return `${m}:${s}:${ms}`;
 };
 
 export const TransportPanel = memo(() => {
   const isPlaying = useStore((state) => state.isPlaying);
   const loop = useStore((state) => state.loop);
   const setLoop = useStore((state) => state.setLoop);
-  const autoPlaybackPaintedRegion = useStore((state) => state.autoPlaybackPaintedRegion);
-  const setAutoPlaybackPaintedRegion = useStore((state) => state.setAutoPlaybackPaintedRegion);
+  const autoPlayStroke = useStore((state) => state.autoPlayStroke);
+  const setAutoPlayStroke = useStore((state) => state.setAutoPlayStroke);
   const togglePlayback = useStore((state) => state.togglePlayback);
   const timeRef = useRef<HTMLParagraphElement>(null);
   const playButtonRef = useRef<HTMLButtonElement>(null);
@@ -42,7 +38,7 @@ export const TransportPanel = memo(() => {
     }
 
     const updatePlaybackTime = () => {
-      if (timeRef.current) timeRef.current.innerText = Tone.getTransport().position.toString();
+      if (timeRef.current) timeRef.current.innerText = formatTime(useStore.getState().getPlaybackTime());
 
       animationFrameId.current = requestAnimationFrame(updatePlaybackTime);
     };
@@ -68,9 +64,9 @@ export const TransportPanel = memo(() => {
         </ActionIcon>
         <Tooltip label="Automatically play back the region you just painted after finishing a stroke">
           <ActionIcon
-            onClick={() => setAutoPlaybackPaintedRegion(!autoPlaybackPaintedRegion)}
+            onClick={() => setAutoPlayStroke(!autoPlayStroke)}
             size="lg"
-            color={autoPlaybackPaintedRegion ? "orange" : "dark.5"}
+            color={autoPlayStroke ? "orange" : "dark.5"}
           >
             <Brush size={20} />
           </ActionIcon>

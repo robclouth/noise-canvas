@@ -4,19 +4,26 @@ import { produce } from "immer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
 import { getUndoManager } from "../lib/undo-manager";
-import {
-  getFileById as getFileByIdHelper,
-  getFileIdByPath as getFileIdByPathHelper,
-  openFiles,
-  player,
-} from "./shared";
 import type { FilesState, State, ZustandGet, ZustandSet } from "./types";
 import { generateFileId } from "./utils";
 
-// Re-export helpers
-export { openFiles };
-export const getFileById = getFileByIdHelper;
-export const getFileIdByPath = getFileIdByPathHelper;
+import type { OpenFile } from "./types";
+
+// Open files keyed by file ID
+export const openFiles: Record<string, OpenFile> = {};
+
+// Tone.js player for audio playback
+export const player = new Tone.Player().toDestination();
+
+// Helper to get file by ID
+export function getFileById(fileId: string): OpenFile | undefined {
+  return openFiles[fileId];
+}
+
+// Helper to find file ID by path
+export function getFileIdByPath(filePath: string): string | undefined {
+  return Object.keys(openFiles).find((id) => openFiles[id].filePath === filePath);
+}
 
 export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState => ({
   openFileIds: [],
@@ -316,11 +323,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     fileId: string,
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
   ) => {
-    const state = get();
-    if (!state.activeFileId) return;
+    const { normalize, activeFileId, bandsPerOctave, minFreq, isPlaying, getPlayer } = get();
+    if (!activeFileId) return;
 
     try {
-      const totalStart = performance.now();
       const file = openFiles[fileId];
       if (!file || !file.rendererRef?.current) {
         return;
@@ -343,15 +349,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       };
 
       const analysisParams = {
-        bandsPerOctave: state.bandsPerOctave?.value ?? 36,
-        minFreq: state.minFreq?.value ?? 16.3516,
+        bandsPerOctave: bandsPerOctave.value,
+        minFreq: minFreq.value,
       };
 
       const synthesisStart = performance.now();
-      // Use direct gaborator API (no IPC transfer)
-      if (!window.audioAnalysis) {
-        throw new Error("Direct gaborator API not available. Make sure contextIsolation is disabled.");
-      }
 
       const processedDataArray = new Float32Array(
         payload.processedData,
@@ -364,129 +366,56 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         payload.analysisMetadata,
         originalAnalysis.sampleRate,
         analysisParams,
-        state.normalize?.value ?? true,
+        normalize.value,
       );
-      const synthesisTime = performance.now() - synthesisStart;
-      console.log("Direct synthesis took:", synthesisTime.toFixed(2), "ms");
 
-      if (audioBufferChannels.length === 0) {
-        throw new Error("Synthesis returned no audio channels.");
-      }
+      const synthesisTime = performance.now() - synthesisStart;
+      console.log("Synthesis took:", synthesisTime.toFixed(2), "ms");
 
       const numChannels = audioBufferChannels.length;
       const numFrames = audioBufferChannels[0].length;
 
       const audioContext = Tone.getContext().rawContext;
       const audioBuffer = audioContext.createBuffer(numChannels, numFrames, originalAnalysis.sampleRate);
+      for (let i = 0; i < numChannels; i++) {
+        const channelBuffer = audioBufferChannels[i];
 
-      // Copy channels in a non-blocking way using async iteration
-      const copyStart = performance.now();
-      await new Promise<void>((resolve) => {
-        let channelIndex = 0;
+        audioBuffer.copyToChannel(channelBuffer as Float32Array<ArrayBuffer>, i);
+      }
 
-        const copyNextChannel = () => {
-          if (channelIndex < numChannels) {
-            // Convert Buffer to Float32Array efficiently
-            const channelBuffer = audioBufferChannels[channelIndex] as any;
-            let channelData: Float32Array;
-
-            if (channelBuffer instanceof Float32Array) {
-              channelData = channelBuffer;
-            } else if (ArrayBuffer.isView(channelBuffer)) {
-              // It's a Buffer or typed array view - create a view without copying
-              channelData = new Float32Array(
-                channelBuffer.buffer as ArrayBuffer,
-                channelBuffer.byteOffset as number,
-                (channelBuffer.byteLength as number) / Float32Array.BYTES_PER_ELEMENT,
-              );
-            } else {
-              // Fallback for plain array
-              channelData = new Float32Array(channelBuffer);
-            }
-
-            audioBuffer.copyToChannel(channelData as Float32Array<ArrayBuffer>, channelIndex);
-            channelIndex++;
-
-            // Yield to the event loop between channels
-            setTimeout(copyNextChannel, 0);
-          } else {
-            resolve();
-          }
-        };
-
-        copyNextChannel();
-      });
-      const copyTime = performance.now() - copyStart;
-      console.log("Channel copy took:", copyTime.toFixed(2), "ms");
+      // Mark file as dirty if it's not the first synthesis
+      get().setFileDirty(fileId, file.audioBuffer !== undefined);
 
       file.audioBuffer = audioBuffer;
 
-      // Mark file as dirty after synthesis
-      get().setFileDirty(fileId, true);
-
-      // Handle playback state
-      if (state.isPlaying && state.activeFileId && state.activeFileId === fileId) {
-        const transport = Tone.getTransport();
-        const currentTime = transport.seconds;
-
-        player.stop();
-
-        // Update to new buffer
-        player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
-
-        // Restart the player. Since it's still synced, it will pick up
-        // at the correct transport time. We just need to provide the offset.
-        const newDuration = player.buffer.duration;
-        player.start(undefined, currentTime % newDuration);
-
-        // Update loop points with new buffer duration
-        transport.setLoopPoints(0, newDuration);
-
-        // Reschedule stop if not looping
-        if (!state.loop) {
-          // Cancel any existing scheduled events
-          transport.cancel();
-
-          // Schedule new stop at either autoPlaybackEndTime or buffer end
-          const stopTime = state.autoPlaybackEndTime !== null ? state.autoPlaybackEndTime : newDuration;
-
-          transport.stop(stopTime);
-          player.stop(stopTime);
-
-          // Schedule state update when transport stops
-          transport.schedule(() => {
-            set({ isPlaying: false, autoPlaybackEndTime: null });
-          }, stopTime);
-        }
-
-        // Make sure transport continues running
-        if (transport.state !== "started") {
-          transport.start();
-        }
-      }
-
-      const totalTime = performance.now() - totalStart;
-      console.log("Total synthesis took:", totalTime.toFixed(2), "ms");
-
-      // Trigger auto-playback if parameters were provided
       if (autoPlaybackParams) {
-        const state = get();
+        // --- Handle auto-playback of the painted region ---
         const { startTimeSeconds, endTimeSeconds } = autoPlaybackParams;
 
-        // Set playback start time to the beginning of the painted region
-        state.setFilePlaybackStartTime(fileId, startTimeSeconds);
-
-        // Set the auto-playback end time
-        state.setAutoPlaybackEndTime(endTimeSeconds);
-
-        // If already playing, restart. Otherwise, start playback
-        if (state.isPlaying) {
-          await state.togglePlayback(); // Stop
-          await state.togglePlayback(); // Start from new position
-        } else {
-          await state.togglePlayback(); // Start playing
+        // If already playing, stop it first. togglePlayback is async.
+        if (get().isPlaying) {
+          await get().togglePlayback();
         }
+
+        // Set the special one-shot playback boundaries
+        get().setAutoPlayEndTime(endTimeSeconds);
+        get().setFilePlaybackStartTime(fileId, startTimeSeconds);
+
+        // Now, toggle playback ON. It will use the start/end times we just set.
+        await get().togglePlayback();
+      } else if (isPlaying && activeFileId === fileId) {
+        // --- Handle standard buffer hot-swap while playing ---
+        const player = getPlayer();
+        const t = get().getPlaybackTime(); // Get time BEFORE swapping
+
+        // Swap the buffer in the player
+        player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
+
+        // Use setPlaybackTime to correctly restart the player from the same spot
+        // with the new buffer and correct loop settings.
+        get().setPlaybackTime(t);
       }
+      // If not playing and not auto-playing, do nothing. The new buffer is ready for the next time the user hits play.
     } catch (error) {
       console.error("Error running synthesis:", error);
     }
@@ -498,7 +427,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     modals.openConfirmModal({
       title: "Re-analyze File",
-      children: `This will re-analyze the file with the new settings. All edits will be lost.`,
+      children: `This will re-analyze the file with the new settings. You will lose the undo history.`,
       labels: { confirm: "Re-analyze", cancel: "Cancel" },
       confirmProps: { color: "red", size: "xs" },
       cancelProps: { size: "xs" },
@@ -626,7 +555,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
       if (file.audioBuffer) {
         transport.setLoopPoints(0, file.audioBuffer.duration);
-        player.buffer = new Tone.ToneAudioBuffer(file.audioBuffer);
       }
 
       get().stopAudio();

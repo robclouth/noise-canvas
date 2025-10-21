@@ -1,5 +1,6 @@
 import { zoomedToScreen } from "@/lib/utils";
-import { openFiles, useStore } from "@/store";
+import { useStore } from "@/store";
+import { openFiles } from "@renderer/store/files";
 import { useEffect, useRef } from "react";
 import { Vector2 } from "three";
 

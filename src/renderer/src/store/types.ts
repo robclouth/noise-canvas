@@ -1,4 +1,5 @@
 import { Vector2 } from "three";
+import * as Tone from "tone";
 import { EffectType } from "../effects";
 import { BrushPresetType } from "../lib/preset-schema";
 
@@ -233,15 +234,26 @@ export interface FilesState {
   setSourceFile: (sourceFile: { id: string; mode: "current" | "original" } | null) => void;
 }
 
+export type PlayerClock = {
+  startAt: number | null; // Tone.now() when (re)started
+  startOffset: number; // seconds into buffer at (re)start
+  loopStart: number; // active loop start
+  loopEnd: number; // active loop end
+};
+
 export interface AudioState {
+  playerClock: PlayerClock;
+  player: Tone.Player | null;
+  getPlaybackTime: () => number;
+  getPlayer: () => Tone.Player;
   isPlaying: boolean;
   setIsPlaying: (isPlaying: boolean) => void;
   loop: boolean;
   setLoop: (loop: boolean) => void;
-  autoPlaybackPaintedRegion: boolean;
-  setAutoPlaybackPaintedRegion: (value: boolean) => void;
-  autoPlaybackEndTime: number | null;
-  setAutoPlaybackEndTime: (time: number | null) => void;
+  autoPlayStroke: boolean;
+  setAutoPlayStroke: (value: boolean) => void;
+  autoPlayEndTime: number | null;
+  setAutoPlayEndTime: (time: number | null) => void;
   setPlaybackTime: (playbackTime: number) => void;
   setFilePlaybackStartTime: (fileId: string, time: number) => void;
   togglePlayback: () => Promise<void>;

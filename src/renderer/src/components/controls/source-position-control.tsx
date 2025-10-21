@@ -1,6 +1,7 @@
 import { formatBeats } from "@/lib/utils";
-import { openFiles, useStore } from "@/store";
+import { useStore } from "@/store";
 import { Button, Group, Stack } from "@mantine/core";
+import { openFiles } from "@renderer/store/files";
 import { X } from "lucide-react";
 import { ParameterControl } from "./parameter-control";
 

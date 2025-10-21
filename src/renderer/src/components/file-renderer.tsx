@@ -1,7 +1,8 @@
-import { openFiles, useStore } from "@/store";
+import { useStore } from "@/store";
 import { useFrame } from "@react-three/fiber";
 import { CommonUniforms, defaultValues } from "@renderer/effects/base-effect";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
+import { openFiles } from "@renderer/store/files";
 import { ContinuousNumberParameter } from "@renderer/types";
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";

@@ -12,8 +12,6 @@ import { createPresetsSlice } from "./presets";
 import type { Parameter, ParameterKey, State } from "./types";
 import { persistedKeys } from "./utils";
 
-// Re-export commonly used items
-export { getFileById, getFileIdByPath, openFiles, player } from "./shared";
 export type {
   AudioState,
   BooleanParameter,

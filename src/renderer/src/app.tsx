@@ -1,5 +1,5 @@
 import { BrushPanel } from "@/components/layout/brush-panel";
-import { openFiles, useStore } from "@/store";
+import { useStore } from "@/store";
 import { Box, Group, ScrollArea, Stack } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { Notifications } from "@mantine/notifications";
@@ -12,6 +12,7 @@ import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
 import { ipcOn, ipcSend } from "./lib/ipc";
 import { getUndoManager } from "./lib/undo-manager";
+import { openFiles } from "./store/files";
 
 type Invalidator = RootState["invalidate"];
 

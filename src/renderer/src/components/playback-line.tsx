@@ -1,8 +1,8 @@
 import { zoomedToScreen } from "@/lib/utils";
-import { openFiles, player, useStore } from "@/store";
+import { useStore } from "@/store";
+import { openFiles } from "@renderer/store/files";
 import { useEffect, useRef } from "react";
 import { Vector2 } from "three";
-import * as Tone from "tone";
 
 interface PlaybackLineProps {
   fileId: string;
@@ -25,13 +25,7 @@ export const PlaybackLine = ({ fileId }: PlaybackLineProps) => {
     }
 
     const updatePlaybackPosition = () => {
-      const file = openFiles[fileId];
-      const audioBuffer = file?.audioBuffer;
-      let currentTime = Tone.getTransport().seconds;
-
-      if (loop && audioBuffer && player.state === "started") {
-        currentTime %= audioBuffer.duration;
-      }
+      const currentTime = useStore.getState().getPlaybackTime();
 
       if (lineRef.current) {
         // Convert time to UV coordinate (zoomed space)

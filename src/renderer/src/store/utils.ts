@@ -8,7 +8,7 @@ export const persistedKeys: (keyof State)[] = [
   "sectionCollapsed",
   "presetHotkeys",
   "loop",
-  "autoPlaybackPaintedRegion",
+  "autoPlayStroke",
 ];
 
 // Helper to generate unique file IDs

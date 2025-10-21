@@ -1,7 +1,8 @@
+import { openFiles } from "@renderer/store/files";
 import { useMemo } from "react";
 import { DataTexture, FloatType, RedFormat } from "three";
 import { Note, Scale } from "tonal";
-import { openFiles, useStore } from "../store";
+import { useStore } from "../store";
 
 export const useModulatorScaleLut = (fileId: string) => {
   const bandsPerOctave = useStore((state) => state.bandsPerOctave.value);

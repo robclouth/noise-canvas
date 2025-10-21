@@ -1,7 +1,8 @@
-import { openFiles, useStore } from "@/store";
+import { useStore } from "@/store";
 import { ActionIcon, Badge, Box, Button, Group, NumberInput } from "@mantine/core";
 import { MiddleTruncate } from "@re-dev/react-truncate";
 import { View } from "@react-three/drei";
+import { openFiles } from "@renderer/store/files";
 import { X, ZoomIn, ZoomOut } from "lucide-react";
 import { memo, MouseEventHandler, useCallback, useMemo, useRef } from "react";
 import { Vector2 } from "three";
@@ -246,6 +247,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   const cursorStyle = useMemo(() => ({ cursor: isSettingPosition ? "crosshair" : "crosshair" }), [isSettingPosition]);
 
   const rendererRef = useRef<FileRendererHandle>(null);
+  const strokeTimeRangeRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
 
   const refCallback = useCallback(
     (handle: FileRendererHandle | null) => {
@@ -260,35 +262,21 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
 
   const lastSnappedPositionRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Helper to convert UV coordinates to beats and pitch
-  // Position is relative to bottom-left corner of brush
   const uvToBeatsAndPitch = useCallback(
     (uvX: number, uvY: number) => {
       const state = useStore.getState();
       const { spectrogramData } = openFiles[fileId];
       const bpm = state.fileSettings[openFiles[fileId].filePath].bpm;
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-
-      // Get brush size to calculate bottom-left corner
       const brushWidthBeats = state.brushWidthBeats.value;
       const brushHeightSemis = state.brushHeightSemis.value;
-
-      // Convert UV to time in seconds, then to beats
       const timeSeconds = uvX * totalDuration;
       const centerBeats = (timeSeconds / 60) * bpm;
-
-      // Adjust to bottom-left corner (subtract half width)
       const beats = brushWidthBeats > 0 ? centerBeats - brushWidthBeats / 2 : centerBeats;
-
-      // Convert UV to band index, then to semitones
-      // UV y=0 is top (high pitch), y=1 is bottom (low pitch)
       const bandIndex = (1 - uvY) * spectrogramData.numBands;
       const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
       const centerPitch = bandIndex / bandsPerSemitone;
-
-      // Adjust to bottom-left corner (subtract half height)
       const pitch = brushHeightSemis > 0 ? centerPitch - brushHeightSemis / 2 : centerPitch;
-
       return { beats, pitch };
     },
     [fileId],
@@ -296,12 +284,26 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
 
   const handleMouseMove: MouseEventHandler<HTMLDivElement> = useCallback(
     (event) => {
-      // Allow mouse position tracking on all files (for setting position and preview)
       const state = useStore.getState();
       const bpm = state.fileSettings[openFiles[fileId].filePath].bpm;
       const coords = getSnappedCoordinates(event, fileId, bpm);
       if (!coords) return;
       const [snappedX, snappedY] = coords;
+
+      // If dragging, update the local ref with the total range of the stroke
+      if (isActive && event.buttons === 1 && strokeTimeRangeRef.current.min !== null) {
+        const { spectrogramData } = file;
+        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+        const brushWidthBeats = state.brushWidthBeats.value;
+        const brushWidthSeconds = (brushWidthBeats / bpm) * 60;
+        const brushHalfWidthSeconds = brushWidthSeconds / 2;
+
+        const currentBrushStart = snappedX * totalDuration - brushHalfWidthSeconds;
+        const currentBrushEnd = snappedX * totalDuration + brushHalfWidthSeconds;
+
+        strokeTimeRangeRef.current.min = Math.min(strokeTimeRangeRef.current.min!, currentBrushStart);
+        strokeTimeRangeRef.current.max = Math.max(strokeTimeRangeRef.current.max!, currentBrushEnd);
+      }
 
       if (
         rendererRef.current &&
@@ -310,19 +312,17 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
           lastSnappedPositionRef.current.y !== snappedY)
       ) {
         state.setMousePos(new Vector2(snappedX, 1 - snappedY));
-        state.setHoveredFile(fileId); // Track which file is being hovered
-        // Render stroke preview on all files, but only actual strokes on active file
+        state.setHoveredFile(fileId);
         const isPreview = !isActive || event.buttons !== 1;
         rendererRef.current.renderStroke(snappedX, snappedY, isPreview);
         lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
       }
     },
-    [fileId, isActive],
+    [fileId, isActive, file],
   );
 
   const handleMouseEnter: MouseEventHandler<HTMLDivElement> = useCallback(
     (event) => {
-      // When mouse enters, immediately update position and trigger render
       const state = useStore.getState();
       const bpm = state.fileSettings[openFiles[fileId].filePath].bpm;
       const coords = getSnappedCoordinates(event, fileId, bpm);
@@ -332,7 +332,6 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       if (rendererRef.current) {
         state.setMousePos(new Vector2(snappedX, 1 - snappedY));
         state.setHoveredFile(fileId);
-        // Render stroke preview
         const isPreview = !isActive || event.buttons !== 1;
         rendererRef.current.renderStroke(snappedX, snappedY, isPreview);
         lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
@@ -358,29 +357,34 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       const coords = getSnappedCoordinates(event, fileId, bpm);
       if (!coords) return;
 
-      // If in set position mode, capture the position and set source file
       if (isSettingPosition) {
         const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
         state.setSourcePosition({ beats, pitch, fileId });
         state.setIsSettingPosition(false);
-
-        // Set this file as the source file (in "current" mode)
         state.setSourceFile({ id: fileId, mode: state.sourceFile?.mode ?? "current" });
         return;
       }
 
-      // Make this the active file if it isn't already
       if (!isActive) {
         state.setActiveFileId(fileId);
       }
 
-      // Normal painting behavior
       if (rendererRef?.current) {
-        // Record the start position of this stroke
         const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
         state.setBrushStartPosition({ beats, pitch });
 
-        // In Offset mode, lock the offset on first stroke
+        // Initialize the local stroke tracking ref on mouse down
+        const { spectrogramData } = file;
+        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+        const brushWidthBeats = state.brushWidthBeats.value;
+        const brushWidthSeconds = (brushWidthBeats / bpm) * 60;
+        const brushHalfWidthSeconds = brushWidthSeconds / 2;
+        const centerTimeSeconds = coords[0] * totalDuration;
+
+        const initialBrushStart = centerTimeSeconds - brushHalfWidthSeconds;
+        const initialBrushEnd = centerTimeSeconds + brushHalfWidthSeconds;
+        strokeTimeRangeRef.current = { min: initialBrushStart, max: initialBrushEnd };
+
         if (state.sourcePositionMode.value === "offset" && !state.lockedOffset && state.sourcePosition) {
           const offsetBeats = state.sourcePosition.beats - beats;
           const offsetPitch = state.sourcePosition.pitch - pitch;
@@ -390,7 +394,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         rendererRef.current.renderStroke(coords[0], coords[1], false);
       }
     },
-    [fileId, isActive, isSettingPosition, uvToBeatsAndPitch],
+    [fileId, isActive, isSettingPosition, uvToBeatsAndPitch, file],
   );
 
   const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = useCallback(
@@ -398,46 +402,43 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       if (!isActive) return;
       if (event.button === 0 && rendererRef?.current) {
         const state = useStore.getState();
-        const {
-          synthesizeFile,
-          setBrushStartPosition,
-          brushStartPosition,
-          autoPlaybackPaintedRegion,
-          brushWidthBeats,
-        } = state;
+        const { synthesizeFile, setBrushStartPosition, autoPlayStroke, setFilePlaybackStartTime, setAutoPlayEndTime } =
+          state;
 
-        // Left mouse button up - save undo state and run synthesis (no IPC)
         const data = await rendererRef.current.getFBOData();
         if (data) {
           const undoManager = getUndoManager(fileId);
           await undoManager.addState(data, fileId);
 
-          // Prepare auto-playback parameters if enabled
+          const finalRange = strokeTimeRangeRef.current;
           let autoPlaybackParams: { startTimeSeconds: number; endTimeSeconds: number } | null = null;
-          if (autoPlaybackPaintedRegion && brushStartPosition && brushWidthBeats.value > 0) {
-            const file = openFiles[fileId];
-            const bpm = state.fileSettings[file.filePath].bpm;
 
-            // brushStartPosition.beats is the bottom-left corner of the brush
-            const startTimeSeconds = (brushStartPosition.beats / bpm) * 60;
-            const brushWidthSeconds = (brushWidthBeats.value / bpm) * 60;
-            const endTimeSeconds = startTimeSeconds + brushWidthSeconds;
+          if (finalRange.min !== null && finalRange.max !== null) {
+            const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
+            // Clamp the final range to the audio duration
+            const clampedStart = Math.max(0, finalRange.min);
+            const clampedEnd = Math.min(totalDuration, finalRange.max);
 
-            autoPlaybackParams = {
-              startTimeSeconds,
-              endTimeSeconds,
-            };
+            if (autoPlayStroke) {
+              setFilePlaybackStartTime(fileId, clampedStart);
+              setAutoPlayEndTime(clampedEnd);
+
+              autoPlaybackParams = {
+                startTimeSeconds: clampedStart,
+                endTimeSeconds: clampedEnd,
+              };
+            }
           }
 
-          // Run synthesis
           await synthesizeFile(fileId, autoPlaybackParams);
         }
 
-        // Clear brush start position after processing
         setBrushStartPosition(null);
+        // Reset the local ref for the next stroke.
+        strokeTimeRangeRef.current = { min: null, max: null };
       }
     },
-    [fileId, isActive],
+    [fileId, isActive, file],
   );
 
   if (!file) return null;
@@ -484,12 +485,10 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
             const offset = target.scrollLeft / scrollWidth;
             useStore.getState().setFileOffset(fileId, offset);
           } else {
-            // No scrolling needed, reset to 0
             useStore.getState().setFileOffset(fileId, 0);
           }
         }}
       >
-        {/* Fake scrollable content - expands with zoom to create scrollbar */}
         <Box
           h={1}
           style={{

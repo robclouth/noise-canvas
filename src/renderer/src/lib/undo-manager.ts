@@ -1,7 +1,5 @@
-// Direct undo manager for renderer (no IPC)
-// Uses direct access to fs, compression, and path utilities
-
-import { openFiles, useStore } from "@renderer/store";
+import { useStore } from "@renderer/store";
+import { openFiles } from "@renderer/store/files";
 import { ipcSend } from "./ipc";
 
 interface UndoState {

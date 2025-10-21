@@ -1,5 +1,6 @@
-import { openFiles, useStore } from "@/store";
+import { useStore } from "@/store";
 import { Box } from "@mantine/core";
+import { openFiles } from "@renderer/store/files";
 import { memo, MouseEventHandler, useCallback } from "react";
 import { Vector2 } from "three";
 import { screenToZoomed } from "../lib/utils";
@@ -50,7 +51,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
       setFilePlaybackStartTime(fileId, clickTime);
 
       // Clear auto-playback end time since this is manual playback
-      useStore.getState().setAutoPlaybackEndTime(null);
+      useStore.getState().setAutoPlayEndTime(null);
 
       // If this is the active file and already playing
       if (activeFileId === fileId && isPlaying) {
