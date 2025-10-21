@@ -1,57 +1,16 @@
 import { useStore } from "@/store";
-import { ActionIcon, Badge, Box, Button, Group, NumberInput } from "@mantine/core";
-import { MiddleTruncate } from "@re-dev/react-truncate";
+import { Box } from "@mantine/core";
 import { View } from "@react-three/drei";
 import { openFiles } from "@renderer/store/files";
-import { X, ZoomIn, ZoomOut } from "lucide-react";
 import { memo, MouseEventHandler, useCallback, useMemo, useRef } from "react";
 import { Vector2 } from "three";
 import { getUndoManager } from "../lib/undo-manager";
 import { screenToZoomed } from "../lib/utils";
+import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { PlaybackLine } from "./playback-line";
 import { PlaybackStartLine } from "./playback-start-line";
 import { TimeLegend } from "./time-legend";
-import { Tooltip } from "./tooltip";
-
-// Helper to get resolution label from bands per octave value
-function getResolutionLabel(bpo: number): string {
-  switch (bpo) {
-    case 12:
-      return "Best Time";
-    case 24:
-      return "Better Time";
-    case 36:
-      return "Balanced";
-    case 48:
-      return "Better Pitch";
-    case 60:
-      return "Best Pitch";
-    default:
-      return `${bpo} BPO`;
-  }
-}
-
-// Component to display filename with middle truncation
-const TruncatedFilename = memo(({ filePath, isDirty }: { filePath: string; isDirty: boolean }) => {
-  const filename = filePath.split("/").pop() || filePath;
-
-  return (
-    <Box
-      style={{
-        minWidth: 0,
-        width: "100%",
-        fontSize: 13,
-        fontStyle: isDirty ? "italic" : "normal",
-        whiteSpace: "nowrap",
-      }}
-    >
-      <MiddleTruncate>{filename}</MiddleTruncate>
-    </Box>
-  );
-});
-
-TruncatedFilename.displayName = "TruncatedFilename";
 
 export interface FileViewProps {
   fileId: string;
@@ -125,114 +84,6 @@ function getSnappedCoordinates(
 
   return [snappedX, snappedY];
 }
-
-const Header = memo(function Header({ fileId }: FileViewProps) {
-  const file = openFiles[fileId];
-  const setSourceFile = useStore((state) => state.setSourceFile);
-  const bpm = useStore((state) => state.fileSettings[file.filePath].bpm ?? 120);
-  const setFileBpm = useStore((state) => state.setFileBpm);
-  const setFileZoom = useStore((state) => state.setFileZoom);
-  const zoom = useStore((state) => state.fileSettings[file.filePath].zoom ?? 0);
-  const closeFile = useStore((state) => state.closeFile);
-  const sourceFile = useStore((state) => state.sourceFile);
-  const resolution = useStore((state) => state.fileSettings[file.filePath].bandsPerOctave);
-  const isDirty = useStore((state) => state.filesDirty[fileId] ?? false);
-
-  const filePath = file?.filePath || "";
-
-  const isSource = sourceFile?.id === fileId;
-  const sourceMode = sourceFile?.mode ?? "current";
-
-  const handleZoomIn = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setFileZoom(fileId, zoom + 1);
-  };
-
-  const handleZoomOut = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setFileZoom(fileId, zoom - 1);
-  };
-
-  return (
-    <Group justify="space-between" align="center" p="xs" wrap="nowrap" bg="dark.7">
-      <Group gap="xs" style={{ minWidth: 0, flex: 1 }}>
-        <Tooltip label={filePath}>
-          <Box style={{ minWidth: 0, flex: 1 }}>
-            <TruncatedFilename filePath={filePath} isDirty={isDirty} />
-          </Box>
-        </Tooltip>
-        {resolution && (
-          <Badge size="sm" variant="light" color="orange" style={{ flexShrink: 0 }}>
-            {getResolutionLabel(resolution)}
-          </Badge>
-        )}
-      </Group>
-      <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-        <Button.Group>
-          <Tooltip label="Zoom out">
-            <Button size="xs" variant="filled" color="dark.5" onClick={handleZoomOut} disabled={zoom <= 0} p={4}>
-              <ZoomOut size={16} />
-            </Button>
-          </Tooltip>
-          <Tooltip label="Zoom in">
-            <Button size="xs" variant="filled" color="dark.5" onClick={handleZoomIn} disabled={zoom >= 10} p={4}>
-              <ZoomIn size={16} />
-            </Button>
-          </Tooltip>
-        </Button.Group>
-        <Tooltip label="The tempo of this file in beats per minute (BPM). Used for grid snapping and time-based effects.">
-          <NumberInput
-            w={60}
-            value={bpm}
-            onChange={(val) => setFileBpm(fileId, Number(val))}
-            size="xs"
-            max={999}
-            min={10}
-          />
-        </Tooltip>
-        <Button.Group>
-          <Tooltip label="Use this file's current (modified) state as the source for painting onto other files.">
-            <Button
-              size="xs"
-              variant="filled"
-              onClick={(e) => {
-                e.stopPropagation();
-                setSourceFile({ id: fileId, mode: "current" });
-              }}
-              color={isSource && sourceMode === "current" ? "orange" : "dark.5"}
-            >
-              Current
-            </Button>
-          </Tooltip>
-          <Tooltip label="Use this file's original (unmodified) state as the source for painting onto other files.">
-            <Button
-              size="xs"
-              variant="filled"
-              onClick={(e) => {
-                e.stopPropagation();
-                setSourceFile({ id: fileId, mode: "original" });
-              }}
-              color={isSource && sourceMode === "original" ? "orange" : "dark.5"}
-            >
-              Original
-            </Button>
-          </Tooltip>
-        </Button.Group>
-        <ActionIcon
-          variant="transparent"
-          color="white"
-          size="xs"
-          onClick={(e) => {
-            e.stopPropagation();
-            closeFile(fileId);
-          }}
-        >
-          <X />
-        </ActionIcon>
-      </Group>
-    </Group>
-  );
-});
 
 export const FileView = memo(({ fileId }: FileViewProps) => {
   const file = openFiles[fileId];
@@ -453,7 +304,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         }
       }}
     >
-      <Header fileId={fileId} />
+      <FileHeader fileId={fileId} />
       <Box
         h={400}
         style={cursorStyle}
