@@ -4,8 +4,8 @@
 import { notifications } from "@mantine/notifications";
 import { State } from "@renderer/store/types";
 import { getFolders } from "./folders";
-import { CURRENT_PRESET_VERSION, validatePreset, type BrushPresetType } from "./preset-schema";
-import { defaultPresets, PRESET_KEYS } from "./presets";
+import { BrushPresetSchema, CURRENT_PRESET_VERSION, validatePreset, type BrushPresetType } from "./preset-schema";
+import { defaultPresets } from "./presets";
 
 /**
  * Generate a filename-safe ID from a preset name
@@ -147,10 +147,12 @@ class PresetManager {
       version: CURRENT_PRESET_VERSION, // Always save with current version
     };
 
-    for (const key of PRESET_KEYS) {
+    for (const key of Object.keys(BrushPresetSchema.shape)) {
       const stateValue = state[key];
+      if (stateValue === undefined) continue;
+
       // For parameters (objects with .value), extract the value
-      if (stateValue && typeof stateValue === "object" && "value" in stateValue) {
+      if (typeof stateValue === "object" && "value" in stateValue) {
         preset[key] = stateValue.value;
       } else {
         // For non-parameter values (effectOrder, effectsEnabled), copy directly

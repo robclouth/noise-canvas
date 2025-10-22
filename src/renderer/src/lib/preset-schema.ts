@@ -30,6 +30,8 @@ export const BrushPresetSchema = z.object({
   brushFeatherSlopeTime: z.number().min(-100).max(100),
   brushFeatherSlopePitch: z.number().min(-100).max(100),
 
+  algorithm: z.number().int().min(0).max(3),
+
   // Brush size
   brushWidthBeats: z.number().min(0),
   brushHeightSemis: z.number().min(0),

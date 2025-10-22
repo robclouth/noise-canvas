@@ -2,7 +2,7 @@ import { notifications } from "@mantine/notifications";
 import { produce } from "immer";
 import { isEqual } from "lodash-es";
 import { getPresetManager } from "../lib/preset-manager";
-import { defaultPresets, PRESET_KEYS } from "../lib/presets";
+import { defaultPresets } from "../lib/presets";
 import type { PresetsState, State, ZustandGet, ZustandSet } from "./types";
 
 export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsState => ({
@@ -33,10 +33,12 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     }
 
     // Dynamically build the update object from preset keys
-    const updates: any = { currentPresetId: presetId };
+    const updates: Partial<State> = { currentPresetId: presetId };
 
-    for (const key of PRESET_KEYS) {
+    for (const key of Object.keys(preset)) {
       const stateValue = state[key];
+      if (stateValue === undefined) continue;
+
       const presetValue = preset[key];
 
       // For parameters (objects with .value), compare the actual values
