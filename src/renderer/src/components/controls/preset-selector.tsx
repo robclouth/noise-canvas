@@ -2,7 +2,7 @@ import { useStore } from "@/store";
 import { ActionIcon, Group, Select, Stack, Text, TextInput } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { modals } from "@mantine/modals";
-import { Keyboard, Plus, Save, Trash2 } from "lucide-react";
+import { ChevronDown, Keyboard, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Tooltip } from "../tooltip";
 
@@ -175,9 +175,6 @@ export function PresetSelector() {
             justifyContent: "space-between",
           },
         }}
-        comboboxProps={{
-          withinPortal: true,
-        }}
         w="100%"
         renderOption={({ option }: any) => {
           return (
@@ -200,6 +197,8 @@ export function PresetSelector() {
             </Text>
           ) : undefined
         }
+        scrollAreaProps={{ type: "always" }}
+        rightSection={<ChevronDown size={10} color="var(--mantine-color-text)" />}
       />
       <Group gap={4} wrap="nowrap">
         <Tooltip label="Save as new preset">

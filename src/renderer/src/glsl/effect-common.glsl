@@ -584,8 +584,8 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
     float intensity = applyModulation(brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue, brushIntensity.modulationAmounts, destUv, 0, audioLevelDb);
 
     // Pan is applied by scaling magnitude
-    vec2 pannedModifiedL = fromPolar(getMag(modifiedL) * clamp(1.0 - pan, 0.0, 1.0), getPhase(modifiedL));
-    vec2 pannedModifiedR = fromPolar(getMag(modifiedR) * clamp(1.0 + pan, 0.0, 1.0), getPhase(modifiedR));
+    vec2 pannedModifiedL = fromPolar(getMag(modifiedL) * clamp(pan, 0.0, 1.0), getPhase(modifiedL));
+    vec2 pannedModifiedR = fromPolar(getMag(modifiedR) * clamp(1.0 - pan, 0.0, 1.0), getPhase(modifiedR));
     float effectiveWeight = weight * intensity;
 
     // --- 2. Handle Special "Dissolve" Mode ---

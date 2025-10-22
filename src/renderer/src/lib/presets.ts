@@ -1,6 +1,6 @@
 // Preset types and default presets for Noise Canvas
 
-import { State } from "@renderer/store";
+import { State } from "@renderer/store/types";
 import { BrushPresetType } from "./preset-schema";
 
 // List of all state keys that are included in presets

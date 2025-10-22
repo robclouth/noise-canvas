@@ -1,4 +1,4 @@
-import { ContinuousNumberParameter, OpenFile } from "@renderer/types";
+import { OpenFile } from "@renderer/store/types";
 import { ShaderMaterial } from "three";
 import harmonicsBrushFrag from "../glsl/harmonics-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -47,19 +47,13 @@ class HarmonicsEffect extends BaseEffect {
       value: harmonicsPower.value,
       minValue: harmonicsPower.min,
       maxValue: harmonicsPower.max,
-      modulationAmounts:
-        harmonicsPower.modulatorParamKeys?.map(
-          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-        ) || [],
+      modulationAmounts: harmonicsPower.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
     material.uniforms.harmonicsFalloff.value = {
       value: harmonicsFalloff.value,
       minValue: harmonicsFalloff.min,
       maxValue: harmonicsFalloff.max,
-      modulationAmounts:
-        harmonicsFalloff.modulatorParamKeys?.map(
-          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-        ) || [],
+      modulationAmounts: harmonicsFalloff.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
   }
 }

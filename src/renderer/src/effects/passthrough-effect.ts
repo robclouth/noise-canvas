@@ -1,4 +1,4 @@
-import { OpenFile } from "@renderer/types";
+import { OpenFile } from "@renderer/store/types";
 import { ShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import passthroughFrag from "../glsl/passthrough-effect.frag";

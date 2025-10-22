@@ -3,7 +3,6 @@ import { useFrame } from "@react-three/fiber";
 import { CommonUniforms, defaultValues } from "@renderer/effects/base-effect";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { openFiles } from "@renderer/store/files";
-import { ContinuousNumberParameter } from "@renderer/types";
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { ShaderMaterial, UniformsUtils } from "three";
@@ -548,30 +547,26 @@ export const FileRenderer = memo(
           viewOffset: { value: viewOffset },
           brushCenterUv: { value: mousePos || new THREE.Vector2(-1, -1) },
           brushSizeUv: { value: brushSizeUv },
-          featherX: { value: state.brushFeatherTime.value / 100 },
-          featherY: { value: state.brushFeatherPitch.value / 100 },
-          featherSlopeTime: { value: state.brushFeatherSlopeTime.value / 100 },
-          featherSlopePitch: { value: state.brushFeatherSlopePitch.value / 100 },
+          featherX: { value: state.brushFeatherTime.toNormalized() },
+          featherY: { value: state.brushFeatherPitch.toNormalized() },
+          featherSlopeTime: { value: state.brushFeatherSlopeTime.toNormalized() },
+          featherSlopePitch: { value: state.brushFeatherSlopePitch.toNormalized() },
           brushIntensity: {
             value: {
-              value: state.brushIntensity.value / 100,
-              minValue: state.brushIntensity.min / 100,
-              maxValue: state.brushIntensity.max / 100,
+              value: state.brushIntensity.toNormalized(),
+              minValue: 0,
+              maxValue: 1,
               modulationAmounts:
-                state.brushIntensity.modulatorParamKeys?.map(
-                  (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-                ) || [],
+                state.brushIntensity.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
             },
           },
           brushPan: {
             value: {
-              value: state.brushPan.value / 100,
-              minValue: state.brushPan.min / 100,
-              maxValue: state.brushPan.max / 100,
+              value: state.brushPan.toNormalized(),
+              minValue: 0,
+              maxValue: 1,
               modulationAmounts:
-                state.brushPan.modulatorParamKeys?.map(
-                  (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-                ) || [],
+                state.brushPan.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
             },
           },
           bpm: { value: bpm },
@@ -613,8 +608,8 @@ export const FileRenderer = memo(
                   minValue: 0.0,
                   maxValue: maxRateUv.x,
                   modulationAmounts:
-                    state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map(
-                      (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+                    state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map((paramKey) =>
+                      state[paramKey].toNormalized(),
                     ) || [],
                 },
                 modulatorPatternRateY: {
@@ -622,8 +617,8 @@ export const FileRenderer = memo(
                   minValue: 0.0,
                   maxValue: maxRateUv.y,
                   modulationAmounts:
-                    state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map(
-                      (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+                    state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map((paramKey) =>
+                      state[paramKey].toNormalized(),
                     ) || [],
                 },
                 modulatorStrength: {
@@ -631,8 +626,8 @@ export const FileRenderer = memo(
                   minValue: -1.0,
                   maxValue: 1.0,
                   modulationAmounts:
-                    state[`modulator${i + 1}Strength`].modulatorParamKeys?.map(
-                      (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+                    state[`modulator${i + 1}Strength`].modulatorParamKeys?.map((paramKey) =>
+                      state[paramKey].toNormalized(),
                     ) || [],
                 },
                 modulatorRotation: {
@@ -640,8 +635,8 @@ export const FileRenderer = memo(
                   minValue: 0.0,
                   maxValue: 360.0,
                   modulationAmounts:
-                    state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map(
-                      (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
+                    state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map((paramKey) =>
+                      state[paramKey].toNormalized(),
                     ) || [],
                 },
                 modulatorEnvelopeMinDb: state[`modulator${i + 1}EnvelopeMinDb`].value,

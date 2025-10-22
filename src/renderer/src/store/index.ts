@@ -1,7 +1,7 @@
 import { deepMerge } from "@mantine/core";
+import { effects, EffectType } from "@renderer/effects";
 import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
-import { effects, EffectType } from "../effects";
 import { createAudioSlice } from "./audio";
 import { createBrushSlice } from "./brush";
 import { createDisplaySlice } from "./display";
@@ -10,38 +10,27 @@ import { createFilesSlice } from "./files";
 import { createModulatorsSlice } from "./modulators";
 import { createPresetsSlice } from "./presets";
 import type { Parameter, ParameterKey, State } from "./types";
-import { persistedKeys } from "./utils";
 
-export type {
-  AudioState,
-  BooleanParameter,
-  BrushState,
-  ContinuousNumberParameter,
-  DiscreteNumberParameter,
-  DisplayState,
-  EffectsState,
-  FileSettings,
-  FilesState,
-  ModulatorsState,
-  OpenFile,
-  OptionsParameter,
-  Parameter,
-  ParameterKey,
-  PresetsState,
-  SpectrogramData,
-  State,
-} from "./types";
+export const PERSISTED_KEYS: (keyof State)[] = [
+  "fileSettings",
+  "effectOrder",
+  "effectsEnabled",
+  "sectionCollapsed",
+  "presetHotkeys",
+  "loop",
+  "autoPlayStroke",
+];
 
 export const useStore = create<State>()(
   subscribeWithSelector(
     persist(
       (set, get) => ({
-        ...createBrushSlice(set),
-        ...createEffectsSlice(set),
-        ...createModulatorsSlice(set),
+        ...createBrushSlice(set, get),
+        ...createEffectsSlice(set, get),
+        ...createModulatorsSlice(set, get),
         ...createFilesSlice(set, get),
         ...createAudioSlice(set, get),
-        ...createDisplaySlice(set),
+        ...createDisplaySlice(set, get),
         ...createPresetsSlice(set, get),
       }),
       {
@@ -51,7 +40,7 @@ export const useStore = create<State>()(
             (acc, [key, value]) => {
               if (typeof value === "object" && value !== null && "value" in value) {
                 acc[key] = { value: (value as Parameter<unknown>).value };
-              } else if (persistedKeys.includes(key as keyof State)) {
+              } else if (PERSISTED_KEYS.includes(key as keyof State)) {
                 acc[key] = value;
               }
               return acc;

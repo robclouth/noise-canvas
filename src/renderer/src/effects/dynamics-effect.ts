@@ -1,4 +1,4 @@
-import { ContinuousNumberParameter, OpenFile } from "@renderer/types";
+import { OpenFile } from "@renderer/store/types";
 import { ShaderMaterial } from "three";
 import dynamicsEffectFrag from "../glsl/dynamics-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -68,9 +68,7 @@ class DynamicsEffect extends BaseEffect {
       value: thresholdDb.value,
       minValue: thresholdDb.min,
       maxValue: thresholdDb.max,
-      modulationAmounts:
-        thresholdDb.modulatorParamKeys?.map((paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100) ||
-        [],
+      modulationAmounts: thresholdDb.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
 
     const upperRatio = state.dynamicsUpperRatio;
@@ -78,9 +76,7 @@ class DynamicsEffect extends BaseEffect {
       value: upperRatio.value,
       minValue: upperRatio.min,
       maxValue: upperRatio.max,
-      modulationAmounts:
-        upperRatio.modulatorParamKeys?.map((paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100) ||
-        [],
+      modulationAmounts: upperRatio.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
 
     const lowerRatio = state.dynamicsLowerRatio;
@@ -88,9 +84,7 @@ class DynamicsEffect extends BaseEffect {
       value: lowerRatio.value,
       minValue: lowerRatio.min,
       maxValue: lowerRatio.max,
-      modulationAmounts:
-        lowerRatio.modulatorParamKeys?.map((paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100) ||
-        [],
+      modulationAmounts: lowerRatio.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
 
     const knee = state.dynamicsKnee;
@@ -98,8 +92,7 @@ class DynamicsEffect extends BaseEffect {
       value: knee.value,
       minValue: knee.min,
       maxValue: knee.max,
-      modulationAmounts:
-        knee.modulatorParamKeys?.map((paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100) || [],
+      modulationAmounts: knee.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
 
     const gainDb = state.dynamicsGainDb;
@@ -107,8 +100,7 @@ class DynamicsEffect extends BaseEffect {
       value: gainDb.value,
       minValue: gainDb.min,
       maxValue: gainDb.max,
-      modulationAmounts:
-        gainDb.modulatorParamKeys?.map((paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100) || [],
+      modulationAmounts: gainDb.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
   }
 }

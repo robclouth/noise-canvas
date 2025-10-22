@@ -1,6 +1,8 @@
 import { Group, Select, Text } from "@mantine/core";
 import { getTextures } from "@renderer/lib/textures";
-import { ParameterKey, useStore } from "@renderer/store";
+import { useStore } from "@renderer/store";
+import type { ParameterKey } from "@renderer/store/types";
+import { ChevronDown } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Tooltip } from "../tooltip";
 
@@ -90,19 +92,21 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
   return (
     <Group gap={"xs"} wrap="nowrap" h={25}>
       <Tooltip label={parameter.description}>
-        <Text size="xs" w={60} lineClamp={1} truncate="end" onDoubleClick={() => parameter.resetValue()}>
+        <Text size="xs" w={70} lineClamp={1} truncate="end" onDoubleClick={() => parameter.resetValue()}>
           {parameter.label}
         </Text>
       </Tooltip>
       <Select
         size="xs"
         variant="unstyled"
-        flex={1}
+        width={190}
         data={optionGroups}
         value={getCurrentValue()}
         onChange={handleChange}
-        searchable
         maxDropdownHeight={400}
+        scrollAreaProps={{ type: "always" }}
+        rightSection={<ChevronDown size={10} color="var(--mantine-color-text)" />}
+        style={{ width: 190 }}
       />
     </Group>
   );

@@ -1,12 +1,6 @@
-import {
-  AnyParameter,
-  BooleanParameter,
-  ContinuousNumberParameter,
-  DiscreteNumberParameter,
-  OptionsParameter,
-} from "@/types";
+import type { AnyParameter, BooleanParameter, NumberParameter, OptionsParameter, ParameterKey } from "@/store/types";
 import { Text } from "@mantine/core";
-import { ParameterKey, useStore } from "@renderer/store";
+import { useStore } from "@renderer/store";
 import { Tooltip } from "../tooltip";
 import { SelectControl } from "./select-control";
 import { SliderControl } from "./slider-control";
@@ -16,12 +10,8 @@ function isOptionsParameter(p: AnyParameter<any>): p is OptionsParameter<any> {
   return "options" in p;
 }
 
-function isContinuousNumberParameter(p: AnyParameter<any>): p is ContinuousNumberParameter {
+function isNumberParameter(p: AnyParameter<any>): p is NumberParameter {
   return "min" in p;
-}
-
-function isDiscreteNumberParameter(p: AnyParameter<any>): p is DiscreteNumberParameter {
-  return "values" in p;
 }
 
 function isBooleanParameter(p: AnyParameter<any>): p is BooleanParameter {
@@ -37,11 +27,14 @@ export type ParameterControlProps = {
 
 export const ParameterControl = ({ labelWidth = 70, disabled, color, paramKey }: ParameterControlProps) => {
   const isModulated = useStore((state) => {
-    return state[paramKey]?.modulatorParamKeys
-      ?.map((key) => {
-        return state[key].value;
-      })
-      .some((amount) => amount !== 0);
+    return (
+      isNumberParameter(state[paramKey]) &&
+      state[paramKey]?.modulatorParamKeys
+        ?.map((key) => {
+          return state[key].value;
+        })
+        .some((amount) => amount !== 0)
+    );
   });
 
   const parameter = useStore((state) => state[paramKey]);
@@ -76,7 +69,7 @@ export const ParameterControl = ({ labelWidth = 70, disabled, color, paramKey }:
     );
   }
 
-  if (isContinuousNumberParameter(parameter)) {
+  if (isNumberParameter(parameter)) {
     return (
       <SliderControl
         labelComponent={labelComponent}
@@ -86,28 +79,18 @@ export const ParameterControl = ({ labelWidth = 70, disabled, color, paramKey }:
         max={parameter.max}
         step={parameter.step}
         unit={parameter.unit}
+        marks={parameter.marks}
         disabled={disabled}
         modulatorParamKeys={parameter.modulatorParamKeys}
         color={color}
+        leftValue={parameter.leftValue}
+        rightValue={parameter.rightValue}
+        fromNormalized={parameter.fromNormalized}
+        toNormalized={parameter.toNormalized}
       />
     );
   }
-  if (isDiscreteNumberParameter(parameter)) {
-    return (
-      <SliderControl
-        labelComponent={labelComponent}
-        value={parameter.value}
-        setValue={parameter.setValue}
-        min={0}
-        max={parameter.values.length - 1}
-        marks={parameter.values.map((v) => ({ value: v.value, label: v.label }))}
-        unit={parameter.unit}
-        disabled={disabled}
-        modulatorParamKeys={parameter.modulatorParamKeys}
-        color={color}
-      />
-    );
-  }
+
   if (isBooleanParameter(parameter)) {
     return <SwitchControl labelComponent={labelComponent} value={parameter.value} setValue={parameter.setValue} />;
   }

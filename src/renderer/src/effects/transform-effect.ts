@@ -1,6 +1,6 @@
-import { State, useStore } from "@/store";
+import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
-import { ContinuousNumberParameter, OpenFile } from "@renderer/types";
+import { EffectsState, OpenFile } from "@renderer/store/types";
 import { ShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import transformEffectFrag from "../glsl/transform-effect.frag";
@@ -11,7 +11,7 @@ export type BoundaryMode = (typeof boundaryModes)[number];
 
 class TransformEffect extends BaseEffect {
   materials: ShaderMaterial[];
-  parameters: (keyof State)[];
+  parameters: (keyof EffectsState)[];
 
   constructor() {
     super();
@@ -112,45 +112,33 @@ class TransformEffect extends BaseEffect {
       minValue: -0.5,
       maxValue: 0.5,
       modulationAmounts:
-        transformShiftBeats.modulatorParamKeys?.map(
-          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-        ) || [],
+        transformShiftBeats.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
     material.uniforms.shiftY.value = {
       value: shiftUv.y,
       minValue: -0.5,
       maxValue: 0.5,
       modulationAmounts:
-        transformShiftSemis.modulatorParamKeys?.map(
-          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-        ) || [],
+        transformShiftSemis.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
     material.uniforms.scaleX.value = {
       value: transformScaleTime.value,
       minValue: -4,
       maxValue: 4,
-      modulationAmounts:
-        transformScaleTime.modulatorParamKeys?.map(
-          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-        ) || [],
+      modulationAmounts: transformScaleTime.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
     material.uniforms.scaleY.value = {
       value: transformScalePitch.value,
       minValue: -4,
       maxValue: 4,
       modulationAmounts:
-        transformScalePitch.modulatorParamKeys?.map(
-          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-        ) || [],
+        transformScalePitch.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
     material.uniforms.rotation.value = {
       value: transformRotation.value,
       minValue: -180,
       maxValue: 180,
-      modulationAmounts:
-        transformRotation.modulatorParamKeys?.map(
-          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-        ) || [],
+      modulationAmounts: transformRotation.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
     material.uniforms.boundaryMode.value = transformEdgeMode.value;
   }

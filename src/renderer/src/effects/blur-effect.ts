@@ -1,6 +1,6 @@
 import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
-import { ContinuousNumberParameter, OpenFile } from "@renderer/types";
+import { OpenFile } from "@renderer/store/types";
 import { ShaderMaterial, Vector2 } from "three";
 import blurBrushFrag from "../glsl/blur-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -93,8 +93,8 @@ class BlurEffect extends BaseEffect {
     const { spectrogramData } = file;
 
     const blurSizeUv = unitsToUv(
-      blurAmountTime.value / 100,
-      (blurAmountPitch.value / 100) * 12,
+      blurAmountTime.toNormalized(),
+      blurAmountPitch.toNormalized() * 12,
       props.commonUniforms.bpm.value,
       spectrogramData.numFrames / spectrogramData.sampleRate,
       spectrogramData.bandsPerOctave,
@@ -102,8 +102,8 @@ class BlurEffect extends BaseEffect {
     );
 
     const blurNoiseUv = unitsToUv(
-      blurNoiseTime.value / 100,
-      (blurNoisePitch.value / 100) * 12,
+      blurNoiseTime.toNormalized(),
+      blurNoisePitch.toNormalized() * 12,
       props.commonUniforms.bpm.value,
       spectrogramData.numFrames / spectrogramData.sampleRate,
       spectrogramData.bandsPerOctave,
@@ -114,37 +114,25 @@ class BlurEffect extends BaseEffect {
       value: blurSizeUv.x,
       minValue: 0,
       maxValue: 0.1,
-      modulationAmounts:
-        blurAmountTime.modulatorParamKeys?.map(
-          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-        ) || [],
+      modulationAmounts: blurAmountTime.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
     material.uniforms.blurSizeY.value = {
       value: blurSizeUv.y,
       minValue: 0,
       maxValue: 0.1,
-      modulationAmounts:
-        blurAmountPitch.modulatorParamKeys?.map(
-          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-        ) || [],
+      modulationAmounts: blurAmountPitch.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
     material.uniforms.blurNoiseX.value = {
       value: blurNoiseUv.x / 5,
       minValue: 0,
       maxValue: 0.1,
-      modulationAmounts:
-        blurNoiseTime.modulatorParamKeys?.map(
-          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-        ) || [],
+      modulationAmounts: blurNoiseTime.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
     material.uniforms.blurNoiseY.value = {
       value: blurNoiseUv.y / 5,
       minValue: 0,
       maxValue: 0.1,
-      modulationAmounts:
-        blurNoisePitch.modulatorParamKeys?.map(
-          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-        ) || [],
+      modulationAmounts: blurNoisePitch.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
     material.uniforms.bleed.value = blurBleed.value;
     material.uniforms.blurOrigin.value = blurOrigin.value;

@@ -1,4 +1,5 @@
-import { OpenFile, ParameterUniform } from "@renderer/types";
+import { OpenFile } from "@renderer/store/types";
+import { ParameterUniform } from "@renderer/types";
 import * as THREE from "three";
 import { Texture, Vector2 } from "three";
 

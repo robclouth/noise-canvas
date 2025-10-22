@@ -3,7 +3,8 @@ import { SegmentedControl, Stack } from "@mantine/core";
 import { useTexture, View } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
-import { ParameterKey, useStore } from "@renderer/store";
+import { useStore } from "@renderer/store";
+import { ParameterKey } from "@renderer/store/types";
 import { useEffect, useMemo, useState } from "react";
 import { ShaderMaterial, Texture, Vector2 } from "three";
 import modulatorFrag from "../glsl/modulator.frag";
@@ -36,8 +37,8 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
         minValue: 0.0,
         maxValue: 64.0,
         modulationAmounts:
-          state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map(
-            (paramKey) => (state[paramKey] as any).value / 100,
+          state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map((paramKey) =>
+            state[paramKey].toNormalized(),
           ) || [],
       },
       modulatorPatternRateY: {
@@ -45,8 +46,8 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
         minValue: 0.0,
         maxValue: 96.0,
         modulationAmounts:
-          state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map(
-            (paramKey) => (state[paramKey] as any).value / 100,
+          state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map((paramKey) =>
+            state[paramKey].toNormalized(),
           ) || [],
       },
       modulatorStrength: {
@@ -54,18 +55,16 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
         minValue: -1.0,
         maxValue: 1.0,
         modulationAmounts:
-          state[`modulator${i + 1}Strength`].modulatorParamKeys?.map(
-            (paramKey) => (state[paramKey] as any).value / 100,
-          ) || [],
+          state[`modulator${i + 1}Strength`].modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) ||
+          [],
       },
       modulatorRotation: {
         value: state[`modulator${i + 1}Rotation`].value,
         minValue: 0.0,
         maxValue: 360.0,
         modulationAmounts:
-          state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map(
-            (paramKey) => (state[paramKey] as any).value / 100,
-          ) || [],
+          state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) ||
+          [],
       },
       modulatorEnvelopeMinDb: state[`modulator${i + 1}EnvelopeMinDb`].value,
       modulatorEnvelopeMaxDb: state[`modulator${i + 1}EnvelopeMaxDb`].value,
@@ -159,8 +158,8 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
             minValue: 0.0,
             maxValue: 64.0,
             modulationAmounts:
-              state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map(
-                (paramKey) => (state[paramKey] as any).value / 100,
+              state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map((paramKey) =>
+                state[paramKey].toNormalized(),
               ) || [],
           },
           modulatorPatternRateY: {
@@ -168,8 +167,8 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
             minValue: 0.0,
             maxValue: 96.0,
             modulationAmounts:
-              state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map(
-                (paramKey) => (state[paramKey] as any).value / 100,
+              state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map((paramKey) =>
+                state[paramKey].toNormalized(),
               ) || [],
           },
           modulatorStrength: {
@@ -177,8 +176,8 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
             minValue: -1.0,
             maxValue: 1.0,
             modulationAmounts:
-              state[`modulator${i + 1}Strength`].modulatorParamKeys?.map(
-                (paramKey) => (state[paramKey] as any).value / 100,
+              state[`modulator${i + 1}Strength`].modulatorParamKeys?.map((paramKey) =>
+                state[paramKey].toNormalized(),
               ) || [],
           },
           modulatorRotation: {
@@ -186,8 +185,8 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
             minValue: 0.0,
             maxValue: 360.0,
             modulationAmounts:
-              state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map(
-                (paramKey) => (state[paramKey] as any).value / 100,
+              state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map((paramKey) =>
+                state[paramKey].toNormalized(),
               ) || [],
           },
           modulatorEnvelopeMinDb: state[`modulator${i + 1}EnvelopeMinDb`].value,

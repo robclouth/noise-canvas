@@ -1,6 +1,6 @@
 import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
-import { ContinuousNumberParameter, OpenFile } from "@renderer/types";
+import { OpenFile } from "@renderer/store/types";
 import { ShaderMaterial, Vector2 } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import sharpenBrushFrag from "../glsl/sharpen-effect.frag";
@@ -73,8 +73,8 @@ class SharpenEffect extends BaseEffect {
     const { spectrogramData } = file;
 
     const sharpenAmountUv = unitsToUv(
-      sharpenAmountTime.value / 100,
-      (sharpenAmountPitch.value / 100) * 12,
+      sharpenAmountTime.toNormalized(),
+      sharpenAmountPitch.toNormalized() * 12,
       props.commonUniforms.bpm.value,
       spectrogramData.numFrames / spectrogramData.sampleRate,
       spectrogramData.bandsPerOctave,
@@ -85,19 +85,13 @@ class SharpenEffect extends BaseEffect {
       value: sharpenAmountUv.x,
       minValue: 0,
       maxValue: 0.1,
-      modulationAmounts:
-        sharpenAmountTime.modulatorParamKeys?.map(
-          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-        ) || [],
+      modulationAmounts: sharpenAmountTime.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
     material.uniforms.sharpenAmountY.value = {
       value: sharpenAmountUv.y,
       minValue: 0,
       maxValue: 0.1,
-      modulationAmounts:
-        sharpenAmountPitch.modulatorParamKeys?.map(
-          (paramKey) => (state[paramKey] as ContinuousNumberParameter).value / 100,
-        ) || [],
+      modulationAmounts: sharpenAmountPitch.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
     };
   }
 }

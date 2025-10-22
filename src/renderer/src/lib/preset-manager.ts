@@ -2,7 +2,7 @@
 // Uses direct access to fs and path utilities (similar to undo-manager)
 
 import { notifications } from "@mantine/notifications";
-import { State } from "@renderer/store";
+import { State } from "@renderer/store/types";
 import { getFolders } from "./folders";
 import { CURRENT_PRESET_VERSION, validatePreset, type BrushPresetType } from "./preset-schema";
 import { defaultPresets, PRESET_KEYS } from "./presets";

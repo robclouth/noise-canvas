@@ -32,7 +32,7 @@ export type ModulatableParameterKey =
   | "transformRotation";
 
 export type ModulatorAmountParameters = {
-  [K in ModulatableParameterKey as `${K}Mod${Range<1, 4>}Amount`]: ContinuousNumberParameter;
+  [K in ModulatableParameterKey as `${K}Mod${Range<1, 4>}Amount`]: NumberParameter;
 };
 
 export type ModulatorParameters = {
@@ -40,15 +40,15 @@ export type ModulatorParameters = {
 } & {
   [K in Range<1, 4> as `modulator${K}PatternShape`]: OptionsParameter<number>;
 } & {
-  [K in Range<1, 4> as `modulator${K}PatternRateBeats`]: DiscreteNumberParameter;
+  [K in Range<1, 4> as `modulator${K}PatternRateBeats`]: NumberParameter;
 } & {
-  [K in Range<1, 4> as `modulator${K}PatternRateSemis`]: DiscreteNumberParameter;
+  [K in Range<1, 4> as `modulator${K}PatternRateSemis`]: NumberParameter;
 } & {
   [K in Range<1, 4> as `modulator${K}PatternRadial`]: BooleanParameter;
 } & {
-  [K in Range<1, 4> as `modulator${K}Strength`]: ContinuousNumberParameter;
+  [K in Range<1, 4> as `modulator${K}Strength`]: NumberParameter;
 } & {
-  [K in Range<1, 4> as `modulator${K}Rotation`]: ContinuousNumberParameter;
+  [K in Range<1, 4> as `modulator${K}Rotation`]: NumberParameter;
 } & {
   [K in Range<1, 4> as `modulator${K}ImagePath`]: string | null;
 } & {
@@ -56,62 +56,65 @@ export type ModulatorParameters = {
 } & {
   [K in Range<1, 4> as `modulator${K}PhaseMode`]: OptionsParameter<number>;
 } & {
-  [K in Range<1, 4> as `modulator${K}EnvelopeMinDb`]: ContinuousNumberParameter;
+  [K in Range<1, 4> as `modulator${K}EnvelopeMinDb`]: NumberParameter;
 } & {
-  [K in Range<1, 4> as `modulator${K}EnvelopeMaxDb`]: ContinuousNumberParameter;
+  [K in Range<1, 4> as `modulator${K}EnvelopeMaxDb`]: NumberParameter;
 };
 
-export type BooleanParameter = {
-  name: string;
-  label: string;
-  description: string;
-  value: boolean;
-  setValue: (value: boolean) => void;
-  resetValue: () => void;
-  modulatorParamKeys?: (keyof ModulatorAmountParameters)[];
-};
+export type SliderScale = "linear" | "log" | "logBipolar";
 
-export type ContinuousNumberParameter = {
+export type SliderMark = { value: number; label: string };
+
+export interface Normalizable<T = number> {
+  toNormalized: (value?: T) => number;
+  fromNormalized: (normalized: number) => T;
+}
+
+export interface NumberParameter extends Normalizable<number> {
   name: string;
   label: string;
-  description: string;
+  description?: string;
   value: number;
   min: number;
   max: number;
-  step: number;
+  step?: number;
   unit?: string;
-  setValue: (value: number) => void;
-  resetValue: () => void;
-  modulatorParamKeys?: (keyof ModulatorAmountParameters)[];
-};
 
-export type DiscreteNumberParameter = {
+  scale?: SliderScale;
+  marks?: SliderMark[];
+  leftValue?: SliderMark;
+  rightValue?: SliderMark;
+  setValue: (v: number) => void;
+  resetValue: () => void;
+
+  modulatorParamKeys?: (keyof ModulatorAmountParameters)[];
+}
+
+export interface BooleanParameter extends Normalizable<boolean> {
   name: string;
   label: string;
-  description: string;
-  value: number;
-  values: { value: number; label: string }[];
-  unit?: string;
-  setValue: (value: number) => void;
+  description?: string;
+  value: boolean;
+  setValue: (v: boolean) => void;
   resetValue: () => void;
-  modulatorParamKeys?: (keyof ModulatorAmountParameters)[];
-};
+}
 
-export type OptionsParameter<T> = {
+export interface OptionsParameter<T = string> {
   name: string;
   label: string;
-  description: string;
+  description?: string;
   value: T;
   options: { value: T; label: string }[];
-  setValue: (value: T) => void;
+  setValue: (v: T) => void;
   resetValue: () => void;
-  modulatorParamKeys?: (keyof ModulatorAmountParameters)[];
-};
+}
+
+export type AnyParameter<T> = NumberParameter | OptionsParameter<T> | BooleanParameter;
 
 export type Parameter<T> = T extends boolean
   ? BooleanParameter
   : T extends number
-    ? ContinuousNumberParameter | DiscreteNumberParameter
+    ? NumberParameter
     : T extends string
       ? OptionsParameter<string>
       : OptionsParameter<T>;
@@ -154,13 +157,13 @@ export type OpenFile = {
 
 // Slice state interfaces
 export interface BrushState {
-  brushIntensity: ContinuousNumberParameter;
-  brushIterations: ContinuousNumberParameter;
-  brushPan: ContinuousNumberParameter;
-  brushFeatherTime: ContinuousNumberParameter;
-  brushFeatherPitch: ContinuousNumberParameter;
-  brushFeatherSlopeTime: ContinuousNumberParameter;
-  brushFeatherSlopePitch: ContinuousNumberParameter;
+  brushIntensity: NumberParameter;
+  brushIterations: NumberParameter;
+  brushPan: NumberParameter;
+  brushFeatherTime: NumberParameter;
+  brushFeatherPitch: NumberParameter;
+  brushFeatherSlopeTime: NumberParameter;
+  brushFeatherSlopePitch: NumberParameter;
   sourcePosition: { beats: number; pitch: number; fileId: string } | null;
   setSourcePosition: (position: { beats: number; pitch: number; fileId: string } | null) => void;
   sourcePositionMode: OptionsParameter<string>;
@@ -170,35 +173,35 @@ export interface BrushState {
   setBrushStartPosition: (position: { beats: number; pitch: number } | null) => void;
   lockedOffset: { beats: number; pitch: number } | null;
   setLockedOffset: (offset: { beats: number; pitch: number } | null) => void;
-  brushWidthBeats: DiscreteNumberParameter;
-  brushHeightSemis: DiscreteNumberParameter;
+  brushWidthBeats: NumberParameter;
+  brushHeightSemis: NumberParameter;
   brushSizeLockedToGrid: BooleanParameter;
   brushWrapMode: OptionsParameter<number>;
 }
 
 export interface EffectsState {
-  dynamicsThresholdDb: ContinuousNumberParameter;
-  dynamicsUpperRatio: ContinuousNumberParameter;
-  dynamicsLowerRatio: ContinuousNumberParameter;
-  dynamicsKnee: ContinuousNumberParameter;
-  dynamicsGainDb: ContinuousNumberParameter;
-  transformShiftBeats: DiscreteNumberParameter;
-  transformShiftSemis: DiscreteNumberParameter;
-  transformScaleTime: DiscreteNumberParameter;
-  transformScalePitch: DiscreteNumberParameter;
-  transformRotation: ContinuousNumberParameter;
+  dynamicsThresholdDb: NumberParameter;
+  dynamicsUpperRatio: NumberParameter;
+  dynamicsLowerRatio: NumberParameter;
+  dynamicsKnee: NumberParameter;
+  dynamicsGainDb: NumberParameter;
+  transformShiftBeats: NumberParameter;
+  transformShiftSemis: NumberParameter;
+  transformScaleTime: NumberParameter;
+  transformScalePitch: NumberParameter;
+  transformRotation: NumberParameter;
   transformEdgeMode: OptionsParameter<number>;
   synthesizeBrushType: OptionsParameter<number>;
-  blurAmountTime: ContinuousNumberParameter;
-  blurAmountPitch: ContinuousNumberParameter;
-  blurNoiseTime: ContinuousNumberParameter;
-  blurNoisePitch: ContinuousNumberParameter;
+  blurAmountTime: NumberParameter;
+  blurAmountPitch: NumberParameter;
+  blurNoiseTime: NumberParameter;
+  blurNoisePitch: NumberParameter;
   blurBleed: BooleanParameter;
   blurOrigin: OptionsParameter<number>;
-  sharpenAmountTime: ContinuousNumberParameter;
-  sharpenAmountPitch: ContinuousNumberParameter;
-  harmonicsPower: ContinuousNumberParameter;
-  harmonicsFalloff: ContinuousNumberParameter;
+  sharpenAmountTime: NumberParameter;
+  sharpenAmountPitch: NumberParameter;
+  harmonicsPower: NumberParameter;
+  harmonicsFalloff: NumberParameter;
   effectOrder: EffectType[];
   setEffectOrder: (effectOrder: EffectType[]) => void;
   effectsEnabled: Record<EffectType, boolean>;
@@ -262,16 +265,16 @@ export interface AudioState {
 }
 
 export interface DisplayState {
-  displayMinDb: ContinuousNumberParameter;
-  displayMaxDb: ContinuousNumberParameter;
-  magnitudeLimit: ContinuousNumberParameter;
-  gridSizeBeats: DiscreteNumberParameter;
-  gridSizeSemis: DiscreteNumberParameter;
+  displayMinDb: NumberParameter;
+  displayMaxDb: NumberParameter;
+  magnitudeLimit: NumberParameter;
+  gridSizeBeats: NumberParameter;
+  gridSizeSemis: NumberParameter;
   normalize: BooleanParameter;
   scaleTonic: OptionsParameter<string>;
   scaleType: OptionsParameter<string>;
   bandsPerOctave: OptionsParameter<number>;
-  minFreq: ContinuousNumberParameter;
+  minFreq: NumberParameter;
   blendMode: OptionsParameter<number>;
   algorithm: OptionsParameter<number>;
   mousePos: Vector2 | null;
@@ -302,15 +305,13 @@ export type ParameterKey = keyof {
 };
 
 // Extract the base parameter type (without setValue/resetValue/modulatorParamKeys)
-export type BaseParameterType<K extends ParameterKey> = State[K] extends ContinuousNumberParameter
-  ? Omit<ContinuousNumberParameter, "setValue" | "resetValue" | "modulatorParamKeys">
-  : State[K] extends DiscreteNumberParameter
-    ? Omit<DiscreteNumberParameter, "setValue" | "resetValue" | "modulatorParamKeys">
-    : State[K] extends OptionsParameter<infer T>
-      ? Omit<OptionsParameter<T>, "setValue" | "resetValue" | "modulatorParamKeys">
-      : State[K] extends BooleanParameter
-        ? Omit<BooleanParameter, "setValue" | "resetValue" | "modulatorParamKeys">
-        : never;
+export type BaseParameterType<K extends ParameterKey> = State[K] extends NumberParameter
+  ? Omit<NumberParameter, "setValue" | "resetValue" | "modulatorParamKeys">
+  : State[K] extends OptionsParameter<infer T>
+    ? Omit<OptionsParameter<T>, "setValue" | "resetValue" | "modulatorParamKeys">
+    : State[K] extends BooleanParameter
+      ? Omit<BooleanParameter, "setValue" | "resetValue" | "modulatorParamKeys">
+      : never;
 
 export type ZustandSet = (partial: State | Partial<State> | ((state: State) => State | Partial<State>)) => void;
 export type ZustandGet = () => State;

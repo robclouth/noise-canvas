@@ -1,29 +1,3 @@
-import type {
-  BooleanParameter,
-  ContinuousNumberParameter,
-  DiscreteNumberParameter,
-  FileSettings,
-  OpenFile,
-  OptionsParameter,
-  Parameter,
-  ParameterKey,
-  SpectrogramData,
-} from "./store/types";
-
-// Re-export types from store for convenience
-export type {
-  BooleanParameter,
-  ContinuousNumberParameter,
-  DiscreteNumberParameter,
-  FileSettings,
-  OpenFile,
-  OptionsParameter,
-  Parameter,
-  ParameterKey,
-  SpectrogramData,
-};
-
-// This interface matches the flattened payload received from the Electron main process
 export interface AnalysisPayload {
   data: Buffer;
   inverseMap: Buffer;
@@ -39,7 +13,6 @@ export interface AnalysisPayload {
   sampleRate: number; // Pass sample rate through
 }
 
-// Describes the payload sent back to the main process for synthesis
 export interface SynthesisPayload {
   processedData: Buffer;
   analysisMetadata: {
@@ -58,9 +31,3 @@ export type ParameterUniform = {
   maxValue: number;
   modulationAmounts: number[];
 };
-
-export type AnyParameter<T> =
-  | ContinuousNumberParameter
-  | OptionsParameter<T>
-  | BooleanParameter
-  | DiscreteNumberParameter;

@@ -1,9 +1,9 @@
 import { Group, Select } from "@mantine/core";
+import { ChevronDown } from "lucide-react";
 import { ReactNode } from "react";
 
 export const SelectControl = <T,>({
   labelComponent,
-
   options,
   value,
   setValue,
@@ -30,10 +30,12 @@ export const SelectControl = <T,>({
       <Select
         size="xs"
         variant="unstyled"
-        flex={1}
+        w={190}
         data={options.map((o) => ({ value: String(o.value), label: o.label }))}
         value={String(value)}
         onChange={handleChange}
+        scrollAreaProps={{ type: "always" }}
+        rightSection={<ChevronDown size={10} color="var(--mantine-color-text)" />}
       />
     </Group>
   );
