@@ -58,7 +58,6 @@ function App(): React.JSX.Element {
     );
     unsubscribers.push(unsubModeChange);
 
-    // Update save menu state when active file's dirty state changes
     const unsubDirtyState = useStore.subscribe(
       (state) => {
         const activeFileId = state.activeFileId;
@@ -70,7 +69,12 @@ function App(): React.JSX.Element {
     );
     unsubscribers.push(unsubDirtyState);
 
-    // IPC event listeners - type-safe direct communication
+    const unsubNewFile = ipcOn("new-file", async () => {
+      const { newFile } = useStore.getState();
+      await newFile();
+    });
+    unsubscribers.push(unsubNewFile);
+
     const unsubOpenFile = ipcOn("open-file", async (_event, path) => {
       const { openFilePath } = useStore.getState();
       await openFilePath(path);
@@ -251,8 +255,7 @@ function App(): React.JSX.Element {
       </ScrollArea>
       <Stack pos="relative" flex={1} h="100%" gap={0}>
         <Box pos="absolute" top={0} bottom={0} left={0} right={0} bg="dark.9" style={{ zIndex: -1 }} />
-
-        <ScrollArea flex={1} w="100%" onScrollPositionChange={() => invalidateRef.current?.()}>
+        <ScrollArea flex={1} w="100%" onScrollPositionChange={() => invalidateRef.current?.()} type="always">
           <CanvasPanel />
         </ScrollArea>
         <TransportPanel />

@@ -9,6 +9,13 @@ export function createMenu(window: BrowserWindow) {
       label: "File",
       submenu: [
         {
+          label: "New",
+          accelerator: "CmdOrCtrl+N",
+          click: () => {
+            webContentsSend(window, "new-file");
+          },
+        },
+        {
           label: "Open...",
           accelerator: "CmdOrCtrl+O",
           click: async () => {

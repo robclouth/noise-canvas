@@ -44,10 +44,6 @@ export function PresetSelector() {
       labels: { confirm: "Save", cancel: "Cancel" },
       confirmProps: { size: "xs" },
       cancelProps: { size: "xs" },
-      styles: {
-        title: { fontSize: "var(--mantine-font-size-sm)", fontWeight: 600 },
-        body: { fontSize: "var(--mantine-font-size-sm)" },
-      },
       onConfirm: async () => {
         const input = document.getElementById("preset-name-input") as HTMLInputElement;
         const name = input?.value?.trim();
@@ -69,10 +65,7 @@ export function PresetSelector() {
       labels: { confirm: "Save", cancel: "Cancel" },
       confirmProps: { color: "blue", size: "xs" },
       cancelProps: { size: "xs" },
-      styles: {
-        title: { fontSize: "var(--mantine-font-size-sm)", fontWeight: 600 },
-        body: { fontSize: "var(--mantine-font-size-sm)" },
-      },
+
       onConfirm: async () => {
         await savePreset(currentPreset.name, currentPreset.id);
       },
@@ -90,10 +83,6 @@ export function PresetSelector() {
       labels: { confirm: "Delete", cancel: "Cancel" },
       confirmProps: { color: "red", size: "xs" },
       cancelProps: { size: "xs" },
-      styles: {
-        title: { fontSize: "var(--mantine-font-size-sm)", fontWeight: 600 },
-        body: { fontSize: "var(--mantine-font-size-sm)" },
-      },
       onConfirm: async () => {
         await deletePreset(currentPreset.id);
       },

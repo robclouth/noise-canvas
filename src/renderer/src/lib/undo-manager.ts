@@ -26,15 +26,9 @@ class UndoManager {
   }
 
   private async initTempDir() {
-    if (!window.nodeOs || !window.nodePath || !window.nodeFs) {
-      console.error("Node utilities not available");
-      return;
-    }
-
     try {
       const tmpdir = window.nodeOs.tmpdir();
       this.tempDir = await window.nodeFs.mkdtemp(window.nodePath.join(tmpdir, "noise-canvas-undo-"));
-      console.log("Undo temp directory created:", this.tempDir);
     } catch (error) {
       console.error("Failed to create temp directory:", error);
     }

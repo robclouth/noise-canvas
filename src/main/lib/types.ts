@@ -25,6 +25,7 @@ export interface IpcMainHandlers {
 }
 
 export interface IpcRendererEvents {
+  "new-file": () => void;
   "open-file": (path: string) => void;
   "save-active-file": () => void;
   "save-active-file-as": () => void;

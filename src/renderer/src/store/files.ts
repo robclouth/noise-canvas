@@ -1,4 +1,4 @@
-import { modals } from "@mantine/modals";
+import { modals, openContextModal } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { produce } from "immer";
 import { Vector2 } from "three";
@@ -10,6 +10,7 @@ import { generateFileId } from "./utils";
 import type { OpenFile } from "./types";
 
 export interface FilesState {
+  newFile: () => Promise<void>;
   openFileIds: string[];
   openFilePath: (filePath: string) => Promise<void>;
   duplicateFile: (fileId: string) => Promise<void>;
@@ -58,14 +59,102 @@ export function getFileIdByPath(filePath: string): string | undefined {
 }
 
 export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState => ({
+  newFile: async () => {
+    const { sampleRate, bpm, lengthBeats } = await new Promise<{
+      sampleRate: number;
+      bpm: number;
+      lengthBeats: number;
+    }>((resolve) => {
+      openContextModal({
+        modal: "newFile",
+        title: "New File",
+        innerProps: {
+          resolve,
+        },
+      });
+    });
+
+    const state = get();
+
+    try {
+      const lengthSeconds = (60 / bpm) * lengthBeats;
+      const audioBuffer = new AudioBuffer({
+        length: lengthSeconds * sampleRate,
+        sampleRate,
+        numberOfChannels: 2,
+      });
+      const result = await window.audioAnalysis.analyseBuffer(audioBuffer, {
+        bandsPerOctave: state.bandsPerOctave.value,
+        minFreq: state.minFreq.value,
+      });
+
+      const spectrogramData = {
+        packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+        inverseMap: new Float32Array(
+          result.inverseMap.buffer,
+          result.inverseMap.byteOffset,
+          result.inverseMap.byteLength / 4,
+        ),
+        metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
+        textureWidth: result.textureWidth,
+        textureHeight: result.textureHeight,
+        numFrames: result.numFrames,
+        numBands: result.numBands,
+        numChannels: result.numChannels,
+        sampleRate: result.sampleRate,
+        packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
+        minFreq: state.minFreq.value,
+        bandsPerOctave: state.bandsPerOctave.value,
+        synthesisMetadata: {
+          bandOffsets: result.bandOffsets,
+          bandStepLog2s: result.bandStepLog2s,
+          bandLengths: result.bandLengths,
+        },
+      };
+
+      const tempPath = await window.nodeFs.mkdtemp(window.nodePath.join(window.nodeOs.tmpdir(), "noise-canvas-files-"));
+      const filepath = window.nodePath.join(tempPath, `${Date.now()}.wav`);
+
+      const fileId = generateFileId();
+      openFiles[fileId] = {
+        id: fileId,
+
+        filePath: filepath,
+        spectrogramData,
+      };
+
+      return set(
+        produce((state: State) => {
+          state.openFileIds.push(fileId);
+          state.filepathsBpm[filepath] = bpm;
+          state.filesBandsPerOctave[fileId] = state.bandsPerOctave.value;
+          state.filesZoom[fileId] = 0;
+          state.filesOffset[fileId] = 0;
+          state.filesPlaybackStartTime[fileId] = 0;
+
+          if (!state.sourceFile) state.sourceFile = { id: fileId, mode: "current" };
+          state.activeFileId = fileId;
+        }),
+      );
+    } catch (error) {
+      console.error("Error opening file:", error);
+      notifications.show({
+        title: `Failed to create file`,
+        message: `${error instanceof Error ? error.message : "Unknown error"}`,
+        color: "red",
+      });
+    }
+
+    console.log("Creating new file with:", { sampleRate, bpm, length });
+  },
   openFileIds: [],
   openFilePath: async (filepath: string) => {
     const state = get();
 
     try {
       const result = await window.audioAnalysis.analyze(filepath, {
-        bandsPerOctave: state.bandsPerOctave?.value ?? 36,
-        minFreq: state.minFreq?.value ?? 16.3516,
+        bandsPerOctave: state.bandsPerOctave.value,
+        minFreq: state.minFreq.value,
       });
 
       const spectrogramData = {
@@ -181,10 +270,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         labels: { confirm: "Overwrite", cancel: "Cancel" },
         confirmProps: { color: "red", size: "xs" },
         cancelProps: { size: "xs" },
-        styles: {
-          title: { fontSize: "var(--mantine-font-size-sm)", fontWeight: 600 },
-          body: { fontSize: "var(--mantine-font-size-sm)" },
-        },
         onConfirm: async () => {
           try {
             // Extract audio channels from AudioBuffer
@@ -363,10 +448,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           labels: { confirm: "Close", cancel: "Cancel" },
           confirmProps: { color: "red", size: "xs" },
           cancelProps: { size: "xs" },
-          styles: {
-            title: { fontSize: "var(--mantine-font-size-sm)", fontWeight: 600 },
-            body: { fontSize: "var(--mantine-font-size-sm)" },
-          },
           onConfirm: async () => {
             state.closeFile(fileId);
             resolve();
@@ -516,10 +597,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       labels: { confirm: "Re-analyze", cancel: "Cancel" },
       confirmProps: { color: "red", size: "xs" },
       cancelProps: { size: "xs" },
-      styles: {
-        title: { fontSize: "var(--mantine-font-size-sm)", fontWeight: 600 },
-        body: { fontSize: "var(--mantine-font-size-sm)" },
-      },
       onConfirm: async () => {
         if (!state.activeFileId) return;
         const audioBuffer = file?.audioBuffer;

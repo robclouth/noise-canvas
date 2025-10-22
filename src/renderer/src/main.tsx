@@ -1,5 +1,5 @@
 import "@fontsource-variable/inter";
-import { createTheme, Input, MantineProvider, Modal } from "@mantine/core";
+import { createTheme, Input, MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import { ModalsProvider } from "@mantine/modals";
 import { Notifications } from "@mantine/notifications";
@@ -7,6 +7,7 @@ import "@mantine/notifications/styles.css";
 import ReactDOM from "react-dom/client";
 import App from "./app";
 import "./assets/main.css";
+import { modals } from "./components/modals";
 
 const theme = createTheme({
   primaryColor: "orange",
@@ -27,13 +28,13 @@ const theme = createTheme({
   },
   fontFamily: "Inter Variable, sans-serif",
   components: {
-    Modal: Modal.extend({
-      vars: () => {
-        return {
-          root: {},
-        };
-      },
-    }),
+    // Modal: Modal.extend({
+    //   vars: () => {
+    //     return {
+    //       root: {},
+    //     };
+    //   },
+    // }),
     Input: Input.extend({
       vars: (_theme, props) => {
         if (props.size === "xs") {
@@ -52,7 +53,17 @@ const theme = createTheme({
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <MantineProvider forceColorScheme="dark" theme={theme}>
-    <ModalsProvider modalProps={{ zIndex: 1000, size: "xs" }}>
+    <ModalsProvider
+      modals={modals}
+      modalProps={{
+        zIndex: 1000,
+        size: "xs",
+        styles: {
+          title: { fontSize: 14, fontWeight: 600 },
+          body: { fontSize: "var(--mantine-font-size-sm)" },
+        },
+      }}
+    >
       <Notifications zIndex={1000} />
       <App />
     </ModalsProvider>
