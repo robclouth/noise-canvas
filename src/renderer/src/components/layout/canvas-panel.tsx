@@ -11,7 +11,7 @@ export const CanvasPanel = memo(() => {
   console.log("openFileIds", openFileIds);
 
   return (
-    <Stack pos="relative" gap={0}>
+    <Stack pos="relative" gap={"xs"}>
       {openFileIds.map((fileId) => (
         <FileView key={fileId} fileId={fileId} />
       ))}

@@ -255,7 +255,7 @@ function App(): React.JSX.Element {
       </ScrollArea>
       <Stack pos="relative" flex={1} h="100%" gap={0}>
         <Box pos="absolute" top={0} bottom={0} left={0} right={0} bg="dark.9" style={{ zIndex: -1 }} />
-        <ScrollArea flex={1} w="100%" onScrollPositionChange={() => invalidateRef.current?.()} type="always">
+        <ScrollArea offsetScrollbars flex={1} w="100%" onScrollPositionChange={() => invalidateRef.current?.()} p="xs">
           <CanvasPanel />
         </ScrollArea>
         <TransportPanel />

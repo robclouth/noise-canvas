@@ -380,7 +380,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   return (
     <Box
       pos="relative"
-      bd={isActive ? "2px solid orange" : "2px solid dark.3"}
+      bd={isActive ? "2px solid orange" : "2px solid dark.7"}
       onClick={() => {
         if (!isActive) {
           useStore.getState().setActiveFileId(fileId);
