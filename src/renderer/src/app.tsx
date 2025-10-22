@@ -250,17 +250,38 @@ function App(): React.JSX.Element {
         <View.Port />
         <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
       </Canvas>
-      <ScrollArea w={350} miw={350} h="100%" onScrollPositionChange={() => invalidateRef.current?.()}>
+      <ScrollArea
+        scrollbarSize={4}
+        type="auto"
+        w={350}
+        miw={350}
+        h="100%"
+        onScrollPositionChange={() => invalidateRef.current?.()}
+      >
         <BrushPanel />
       </ScrollArea>
       <Stack pos="relative" flex={1} h="100%" gap={0}>
         <Box pos="absolute" top={0} bottom={0} left={0} right={0} bg="dark.9" style={{ zIndex: -1 }} />
-        <ScrollArea offsetScrollbars flex={1} w="100%" onScrollPositionChange={() => invalidateRef.current?.()} p="xs">
+        <ScrollArea
+          scrollbarSize={4}
+          type="auto"
+          flex={1}
+          w="100%"
+          onScrollPositionChange={() => invalidateRef.current?.()}
+          p="xs"
+        >
           <CanvasPanel />
         </ScrollArea>
         <TransportPanel />
       </Stack>
-      <ScrollArea w={350} miw={350} h="100%" onScrollPositionChange={() => invalidateRef.current?.()}>
+      <ScrollArea
+        scrollbarSize={4}
+        type="auto"
+        w={350}
+        miw={350}
+        h="100%"
+        onScrollPositionChange={() => invalidateRef.current?.()}
+      >
         <ControlsPanel />
       </ScrollArea>
       <Notifications />
