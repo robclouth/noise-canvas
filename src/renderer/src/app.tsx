@@ -37,10 +37,10 @@ function App(): React.JSX.Element {
         // openFilePath(
         //   "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav",
         // );
-        // openFilePath(
-        //   "/Users/rob/Splice/sounds/packs/lofi crates./Origin_Sound__-_lofi_crates/loops/vocals_loops/OS_LFC_80_vocal_backing_honey_A#m.wav",
-        // );
-        openFilePath("/Users/rob/Documents/Projects/Music/Samples/local women singing at the clinic.mp3");
+        openFilePath(
+          "/Users/rob/Splice/sounds/packs/lofi crates./Origin_Sound__-_lofi_crates/loops/vocals_loops/OS_LFC_80_vocal_backing_honey_A#m.wav",
+        );
+        // openFilePath("/Users/rob/Documents/Projects/Music/Samples/local women singing at the clinic.mp3");
         openFilePath(
           "/Users/rob/Splice/sounds/packs/The Jungle Drummer - Breakbeat Culture/Test_Press_-_The_Jungle_Drummer_-_Breakbeat_Culture/Loops/Layered_Breaks/TSP_TJD_172_break_layered_2snare_junglism.wav",
         );

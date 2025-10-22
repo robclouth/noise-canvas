@@ -148,9 +148,9 @@ export const SYNTHESIZE_TYPES = [
 
 export const WRAP_MODES = [
   { value: 0, label: "Off" },
-  { value: 1, label: "X" },
-  { value: 2, label: "Y" },
-  { value: 3, label: "X & Y" },
+  { value: 1, label: "Time" },
+  { value: 2, label: "Pitch" },
+  { value: 3, label: "Time & Pitch" },
 ];
 
 export const NUM_MODULATORS = 3;

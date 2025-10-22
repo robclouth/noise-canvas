@@ -69,18 +69,10 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
   float kneeValue = applyModulation(knee.value, knee.minValue, knee.maxValue, knee.modulationAmounts, coords.dest, 0, audioLevelDb);
   float gainDbValue = applyModulation(gainDb.value, gainDb.minValue, gainDb.maxValue, gainDb.modulationAmounts, coords.dest, 0, audioLevelDb);
 
-  // Extract left and right complex values
-  vec2 complexL = sourceTexel.rg; // Left channel (real, imaginary)
-  vec2 complexR = sourceTexel.ba; // Right channel (real, imaginary)
-  
   // Calculate amplitude for each channel
-  float amplitudeL = length(complexL);
-  float amplitudeR = length(complexR);
-  
-  // Avoid log(0)
-  amplitudeL = max(amplitudeL, EPSILON);
-  amplitudeR = max(amplitudeR, EPSILON);
-  
+  float amplitudeL = max(sourceTexel.x, EPSILON);
+  float amplitudeR = max(sourceTexel.z, EPSILON);
+
   // Convert to dB
   float inputDbL = 20.0 * log(amplitudeL) / log(10.0);
   float inputDbR = 20.0 * log(amplitudeR) / log(10.0);
@@ -88,10 +80,6 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
   // Apply dynamics to each channel (returns gain multiplier)
   float gainFactorL = applyDynamics(inputDbL, thresholdDbValue, upperRatioValue, lowerRatioValue, kneeValue, gainDbValue);
   float gainFactorR = applyDynamics(inputDbR, thresholdDbValue, upperRatioValue, lowerRatioValue, kneeValue, gainDbValue);
-  
-  // Apply gain to complex values
-  vec2 outputComplexL = complexL * gainFactorL;
-  vec2 outputComplexR = complexR * gainFactorR;
-  
-  return vec4(outputComplexL, outputComplexR);
+
+  return vec4(vec2(sourceTexel.x * gainFactorL, sourceTexel.y), vec2(sourceTexel.z * gainFactorR, sourceTexel.w));
 }

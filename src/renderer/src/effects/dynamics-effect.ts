@@ -68,7 +68,7 @@ class DynamicsEffect extends BaseEffect {
       value: thresholdDb.value,
       minValue: thresholdDb.min,
       maxValue: thresholdDb.max,
-      modulationAmounts: thresholdDb.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
+      modulationAmounts: thresholdDb.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
     };
 
     const upperRatio = state.dynamicsUpperRatio;
@@ -76,7 +76,7 @@ class DynamicsEffect extends BaseEffect {
       value: upperRatio.value,
       minValue: upperRatio.min,
       maxValue: upperRatio.max,
-      modulationAmounts: upperRatio.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
+      modulationAmounts: upperRatio.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
     };
 
     const lowerRatio = state.dynamicsLowerRatio;
@@ -84,7 +84,7 @@ class DynamicsEffect extends BaseEffect {
       value: lowerRatio.value,
       minValue: lowerRatio.min,
       maxValue: lowerRatio.max,
-      modulationAmounts: lowerRatio.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
+      modulationAmounts: lowerRatio.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
     };
 
     const knee = state.dynamicsKnee;
@@ -92,7 +92,7 @@ class DynamicsEffect extends BaseEffect {
       value: knee.value,
       minValue: knee.min,
       maxValue: knee.max,
-      modulationAmounts: knee.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
+      modulationAmounts: knee.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
     };
 
     const gainDb = state.dynamicsGainDb;
@@ -100,7 +100,7 @@ class DynamicsEffect extends BaseEffect {
       value: gainDb.value,
       minValue: gainDb.min,
       maxValue: gainDb.max,
-      modulationAmounts: gainDb.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
+      modulationAmounts: gainDb.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
     };
   }
 }

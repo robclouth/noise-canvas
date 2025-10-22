@@ -42,18 +42,17 @@ class HarmonicsEffect extends BaseEffect {
 
     const material = this.materials[props.passIndex];
 
-    // Set parameter uniforms with modulation support
     material.uniforms.harmonicsPower.value = {
       value: harmonicsPower.value,
       minValue: harmonicsPower.min,
       maxValue: harmonicsPower.max,
-      modulationAmounts: harmonicsPower.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
+      modulationAmounts: harmonicsPower.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
     };
     material.uniforms.harmonicsFalloff.value = {
       value: harmonicsFalloff.value,
       minValue: harmonicsFalloff.min,
       maxValue: harmonicsFalloff.max,
-      modulationAmounts: harmonicsFalloff.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
+      modulationAmounts: harmonicsFalloff.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
     };
   }
 }

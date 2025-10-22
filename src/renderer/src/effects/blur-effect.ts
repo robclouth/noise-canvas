@@ -93,8 +93,8 @@ class BlurEffect extends BaseEffect {
     const { spectrogramData } = file;
 
     const blurSizeUv = unitsToUv(
-      blurAmountTime.toNormalized(),
-      blurAmountPitch.toNormalized() * 12,
+      (blurAmountTime.value * 4) / 100,
+      (blurAmountPitch.value / 100) * 12,
       props.commonUniforms.bpm.value,
       spectrogramData.numFrames / spectrogramData.sampleRate,
       spectrogramData.bandsPerOctave,
@@ -102,8 +102,8 @@ class BlurEffect extends BaseEffect {
     );
 
     const blurNoiseUv = unitsToUv(
-      blurNoiseTime.toNormalized(),
-      blurNoisePitch.toNormalized() * 12,
+      (blurNoiseTime.value * 4) / 100,
+      (blurNoisePitch.value / 100) * 12,
       props.commonUniforms.bpm.value,
       spectrogramData.numFrames / spectrogramData.sampleRate,
       spectrogramData.bandsPerOctave,
@@ -114,25 +114,25 @@ class BlurEffect extends BaseEffect {
       value: blurSizeUv.x,
       minValue: 0,
       maxValue: 0.1,
-      modulationAmounts: blurAmountTime.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
+      modulationAmounts: blurAmountTime.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
     };
     material.uniforms.blurSizeY.value = {
       value: blurSizeUv.y,
       minValue: 0,
       maxValue: 0.1,
-      modulationAmounts: blurAmountPitch.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
+      modulationAmounts: blurAmountPitch.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
     };
     material.uniforms.blurNoiseX.value = {
       value: blurNoiseUv.x / 5,
       minValue: 0,
       maxValue: 0.1,
-      modulationAmounts: blurNoiseTime.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
+      modulationAmounts: blurNoiseTime.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
     };
     material.uniforms.blurNoiseY.value = {
       value: blurNoiseUv.y / 5,
       minValue: 0,
       maxValue: 0.1,
-      modulationAmounts: blurNoisePitch.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
+      modulationAmounts: blurNoisePitch.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
     };
     material.uniforms.bleed.value = blurBleed.value;
     material.uniforms.blurOrigin.value = blurOrigin.value;

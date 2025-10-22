@@ -2,7 +2,7 @@ import { Combobox, Group, NumberInput, Popover, ScrollArea, Slider, Text, useCom
 import { useWindowEvent } from "@mantine/hooks";
 import type { ParameterKey, SliderMark } from "@renderer/store/types";
 import { ChevronDown } from "lucide-react";
-import { KeyboardEventHandler, useCallback, useRef, useState } from "react";
+import { KeyboardEventHandler, useCallback, useEffect, useRef, useState } from "react";
 import { ParameterControl } from "./parameter-control";
 
 type SliderControlProps = {
@@ -47,6 +47,11 @@ export const SliderControl = (props: SliderControlProps) => {
   const combobox = useCombobox();
 
   const numberBoxRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    handleSliderChange(toNormalized(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const nearestMark = useCallback(
     (position: number) => {
