@@ -1,7 +1,9 @@
+import { FileRendererHandle } from "@renderer/components/file-renderer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
 import { EffectType } from "../effects";
 import { BrushPresetType } from "../lib/preset-schema";
+import { FilesState } from "./files";
 
 type Enumerate<N extends number, Acc extends number[] = []> = Acc["length"] extends N
   ? Acc[number]
@@ -152,7 +154,7 @@ export type OpenFile = {
   filePath: string;
   spectrogramData: SpectrogramData;
   audioBuffer?: AudioBuffer;
-  rendererRef?: React.RefObject<any>;
+  rendererRef?: React.RefObject<FileRendererHandle | null>;
 };
 
 // Slice state interfaces
@@ -212,34 +214,6 @@ export interface EffectsState {
 
 export interface ModulatorsState extends ModulatorAmountParameters, ModulatorParameters {}
 
-export interface FilesState {
-  openFileIds: string[];
-  openFilePath: (filePath: string) => Promise<void>;
-  saveActiveFile: () => Promise<void>;
-  saveActiveFileAs: () => Promise<void>;
-  saveActiveFileVersion: () => Promise<void>;
-  closeFile: (fileId: string) => void;
-  closeAllFiles: () => void;
-  reanalyzeActiveFile: () => Promise<void>;
-  synthesizeFile: (
-    fileId: string,
-    autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
-  ) => Promise<void>;
-  fileSettings: Record<string, FileSettings>;
-  getFileSettings: (fileId: string) => FileSettings | null;
-  setFileBpm: (fileId: string, bpm: number) => void;
-  setFileResolution: (fileId: string, resolution: number) => void;
-  setFileZoomAndOffset: (fileId: string, zoom: number, offset: number) => void;
-  setFileZoom: (fileId: string, zoom: number) => void;
-  setFileOffset: (fileId: string, offset: number) => void;
-  filesDirty: Record<string, boolean>;
-  setFileDirty: (fileId: string, dirty: boolean) => void;
-  activeFileId: string | null;
-  setActiveFileId: (activeFileId: string | null) => Promise<void>;
-  sourceFile: { id: string; mode: "current" | "original" } | null;
-  setSourceFile: (sourceFile: { id: string; mode: "current" | "original" } | null) => void;
-}
-
 export type PlayerClock = {
   startAt: number | null; // Tone.now() when (re)started
   startOffset: number; // seconds into buffer at (re)start
@@ -261,7 +235,6 @@ export interface AudioState {
   autoPlayEndTime: number | null;
   setAutoPlayEndTime: (time: number | null) => void;
   setPlaybackTime: (playbackTime: number) => void;
-  setFilePlaybackStartTime: (fileId: string, time: number) => void;
   togglePlayback: () => Promise<void>;
   stopAudio: () => void;
 }

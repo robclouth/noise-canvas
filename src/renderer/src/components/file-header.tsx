@@ -2,7 +2,7 @@ import { useStore } from "@/store";
 import { ActionIcon, Badge, Box, Button, Group, NumberInput } from "@mantine/core";
 import { MiddleTruncate } from "@re-dev/react-truncate";
 import { openFiles } from "@renderer/store/files";
-import { X } from "lucide-react";
+import { Copy, X } from "lucide-react";
 import { memo } from "react";
 import { Tooltip } from "./tooltip";
 
@@ -51,15 +51,11 @@ const TruncatedFilename = memo(function TruncatedFilename({
 
 export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const file = openFiles[fileId];
-  const setSourceFile = useStore((state) => state.setSourceFile);
-  const bpm = useStore((state) => state.getFileSettings(fileId)?.bpm);
-  const setFileBpm = useStore((state) => state.setFileBpm);
-  const closeFile = useStore((state) => state.closeFile);
+  const filePath = file.filePath;
+  const bpm = useStore((state) => state.filepathsBpm[filePath]);
   const sourceFile = useStore((state) => state.sourceFile);
-  const resolution = useStore((state) => state.getFileSettings(fileId)?.bandsPerOctave);
+  const bandsPerOctave = useStore((state) => state.filesBandsPerOctave[fileId]);
   const isDirty = useStore((state) => state.filesDirty[fileId] ?? false);
-
-  const filePath = file?.filePath || "";
 
   const isSource = sourceFile?.id === fileId;
   const sourceMode = sourceFile?.mode ?? "current";
@@ -72,18 +68,29 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
             <TruncatedFilename filePath={filePath} isDirty={isDirty} />
           </Box>
         </Tooltip>
-        {resolution && (
+        {bandsPerOctave && (
           <Badge size="sm" variant="light" color="orange" style={{ flexShrink: 0 }}>
-            {getResolutionLabel(resolution)}
+            {getResolutionLabel(bandsPerOctave)}
           </Badge>
         )}
       </Group>
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+        <Tooltip label="Use this file's original (unmodified) state as the source for painting onto other files.">
+          <ActionIcon
+            color="dark.5"
+            onClick={(e) => {
+              e.stopPropagation();
+              useStore.getState().duplicateFile(fileId);
+            }}
+          >
+            <Copy size={16} />
+          </ActionIcon>
+        </Tooltip>
         <Tooltip label="The tempo of this file in beats per minute (BPM). Used for grid snapping and time-based effects.">
           <NumberInput
             w={60}
             value={bpm}
-            onChange={(val) => setFileBpm(fileId, Number(val))}
+            onChange={(val) => useStore.getState().setFilepathBpm(filePath, Number(val))}
             size="xs"
             max={999}
             min={10}
@@ -96,7 +103,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
               variant="filled"
               onClick={(e) => {
                 e.stopPropagation();
-                setSourceFile({ id: fileId, mode: "current" });
+                useStore.getState().setSourceFile({ id: fileId, mode: "current" });
               }}
               color={isSource && sourceMode === "current" ? "orange" : "dark.5"}
             >
@@ -109,7 +116,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
               variant="filled"
               onClick={(e) => {
                 e.stopPropagation();
-                setSourceFile({ id: fileId, mode: "original" });
+                useStore.getState().setSourceFile({ id: fileId, mode: "original" });
               }}
               color={isSource && sourceMode === "original" ? "orange" : "dark.5"}
             >
@@ -123,7 +130,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
           size="xs"
           onClick={(e) => {
             e.stopPropagation();
-            closeFile(fileId);
+            useStore.getState().tryCloseFile(fileId);
           }}
         >
           <X />

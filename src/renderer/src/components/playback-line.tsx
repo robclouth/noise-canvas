@@ -33,8 +33,8 @@ export const PlaybackLine = ({ fileId }: PlaybackLineProps) => {
 
         // Get per-file zoom and offset from store
         const state = useStore.getState();
-        const zoom = state.fileSettings[openFiles[fileId].filePath].zoom;
-        const offset = state.fileSettings[openFiles[fileId].filePath].offset;
+        const zoom = state.filesZoom[fileId];
+        const offset = state.filesOffset[fileId];
 
         // Convert from zoomed coordinates to screen coordinates
         const screenUv = zoomedToScreen(zoomedUv, zoom, offset);

@@ -59,13 +59,6 @@ export function createMenu(window: BrowserWindow) {
             webContentsSend(window, "close-active-file");
           },
         },
-        {
-          label: "Close All",
-          accelerator: "CmdOrCtrl+Shift+W",
-          click: () => {
-            webContentsSend(window, "close-all-files");
-          },
-        },
         { type: "separator" },
         { role: "quit" },
       ],

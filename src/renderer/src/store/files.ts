@@ -4,10 +4,42 @@ import { produce } from "immer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
 import { getUndoManager } from "../lib/undo-manager";
-import type { FilesState, State, ZustandGet, ZustandSet } from "./types";
+import type { State, ZustandGet, ZustandSet } from "./types";
 import { generateFileId } from "./utils";
 
 import type { OpenFile } from "./types";
+
+export interface FilesState {
+  openFileIds: string[];
+  openFilePath: (filePath: string) => Promise<void>;
+  duplicateFile: (fileId: string) => Promise<void>;
+  saveActiveFile: () => Promise<void>;
+  saveActiveFileAs: () => Promise<void>;
+  saveActiveFileVersion: () => Promise<void>;
+  tryCloseFile: (fileId: string) => Promise<void>;
+  closeFile: (fileId: string) => void;
+  reanalyzeActiveFile: () => Promise<void>;
+  synthesizeFile: (
+    fileId: string,
+    autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
+  ) => Promise<void>;
+  filepathsBpm: Record<string, number>;
+  setFilepathBpm: (fileId: string, bpm: number) => void;
+  filesBandsPerOctave: Record<string, number>;
+  setFileBandsPerOctave: (fileId: string, bandsPerOctave: number) => void;
+  filesZoom: Record<string, number>;
+  setFileZoom: (fileId: string, zoom: number) => void;
+  filesOffset: Record<string, number>;
+  setFileOffset: (fileId: string, offset: number) => void;
+  filesPlaybackStartTime: Record<string, number>;
+  setFilePlaybackStartTime: (fileId: string, playbackStartTime: number) => void;
+  filesDirty: Record<string, boolean>;
+  setFileDirty: (fileId: string, dirty: boolean) => void;
+  activeFileId: string | null;
+  setActiveFileId: (activeFileId: string | null) => Promise<void>;
+  sourceFile: { id: string; mode: "current" | "original" } | null;
+  setSourceFile: (sourceFile: { id: string; mode: "current" | "original" } | null) => void;
+}
 
 // Open files keyed by file ID
 export const openFiles: Record<string, OpenFile> = {};
@@ -27,18 +59,11 @@ export function getFileIdByPath(filePath: string): string | undefined {
 
 export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState => ({
   openFileIds: [],
-  openFilePath: async (filePath: string) => {
+  openFilePath: async (filepath: string) => {
     const state = get();
-    // Check if file is already open by path
-    const existingFileId = getFileIdByPath(filePath);
-    if (existingFileId) {
-      // File already open, just activate it
-      set({ activeFileId: existingFileId });
-      return;
-    }
 
     try {
-      const result = await window.audioAnalysis.analyze(filePath, {
+      const result = await window.audioAnalysis.analyze(filepath, {
         bandsPerOctave: state.bandsPerOctave?.value ?? 36,
         minFreq: state.minFreq?.value ?? 16.3516,
       });
@@ -71,22 +96,18 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const fileId = generateFileId();
       openFiles[fileId] = {
         id: fileId,
-        filePath,
+        filePath: filepath,
         spectrogramData,
       };
 
       return set(
         produce((state: State) => {
           state.openFileIds.push(fileId);
-          const fileSettings = state.fileSettings[filePath] || {};
-
-          if (!fileSettings.bpm) fileSettings.bpm = 120;
-          if (!fileSettings.bandsPerOctave) fileSettings.bandsPerOctave = state.bandsPerOctave.value;
-          if (!fileSettings.zoom) fileSettings.zoom = 0;
-          if (!fileSettings.offset) fileSettings.offset = 0;
-          if (!fileSettings.playbackStartTime) fileSettings.playbackStartTime = 0;
-
-          state.fileSettings[filePath] = fileSettings;
+          state.filepathsBpm[filepath] ??= 120;
+          state.filesBandsPerOctave[fileId] = state.bandsPerOctave.value;
+          state.filesZoom[fileId] = 0;
+          state.filesOffset[fileId] = 0;
+          state.filesPlaybackStartTime[fileId] = 0;
 
           if (!state.sourceFile) state.sourceFile = { id: fileId, mode: "current" };
           state.activeFileId = fileId;
@@ -95,11 +116,53 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     } catch (error) {
       console.error("Error opening file:", error);
       notifications.show({
-        title: `Failed to open file '${window.nodePath.basename(filePath)}'`,
+        title: `Failed to open file '${window.nodePath.basename(filepath)}'`,
         message: `${error instanceof Error ? error.message : "Unknown error"}`,
         color: "red",
       });
     }
+  },
+  duplicateFile: async (fileId: string) => {
+    const originalFile = openFiles[fileId];
+    if (!originalFile) return;
+
+    const fboData = await originalFile.rendererRef?.current?.getFBOData();
+    if (!fboData) {
+      console.error("Failed to duplicate file: could not get FBO data");
+      return;
+    }
+
+    const newFileId = generateFileId();
+
+    const newFile: OpenFile = {
+      id: newFileId,
+      filePath: originalFile.filePath,
+      spectrogramData: {
+        ...originalFile.spectrogramData,
+        packedData: fboData,
+        inverseMap: originalFile.spectrogramData.inverseMap.slice(),
+        metadata: originalFile.spectrogramData.metadata.slice(),
+        synthesisMetadata: {
+          bandLengths: originalFile.spectrogramData.synthesisMetadata.bandLengths.slice(),
+          bandOffsets: originalFile.spectrogramData.synthesisMetadata.bandOffsets.slice(),
+          bandStepLog2s: originalFile.spectrogramData.synthesisMetadata.bandStepLog2s.slice(),
+        },
+      },
+    };
+
+    openFiles[newFileId] = newFile;
+
+    set(
+      produce((state: State) => {
+        state.openFileIds.push(newFileId);
+        state.activeFileId = newFileId;
+        state.filesBandsPerOctave[newFileId] = state.filesBandsPerOctave[fileId];
+        state.filesZoom[newFileId] = state.filesZoom[fileId];
+        state.filesOffset[newFileId] = state.filesOffset[fileId];
+        state.filesPlaybackStartTime[newFileId] = state.filesPlaybackStartTime[fileId];
+        state.filesDirty[newFileId] = false;
+      }),
+    );
   },
   saveActiveFile: async () => {
     const state = get();
@@ -287,13 +350,43 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       });
     }
   },
+  tryCloseFile: async (fileId: string) => {
+    const state = get();
+    const file = openFiles[fileId];
+    if (!file) return;
+
+    if (state.filesDirty[fileId]) {
+      await new Promise<void>((resolve) => {
+        modals.openConfirmModal({
+          title: "Unsaved Changes",
+          children: `Are you sure you want to close this file without saving?`,
+          labels: { confirm: "Close", cancel: "Cancel" },
+          confirmProps: { color: "red", size: "xs" },
+          cancelProps: { size: "xs" },
+          styles: {
+            title: { fontSize: "var(--mantine-font-size-sm)", fontWeight: 600 },
+            body: { fontSize: "var(--mantine-font-size-sm)" },
+          },
+          onConfirm: async () => {
+            state.closeFile(fileId);
+            resolve();
+          },
+          onCancel: () => resolve(),
+        });
+      });
+    } else state.closeFile(fileId);
+  },
   closeFile: (fileId: string) =>
     set(
       produce((state: State) => {
         const openFile = openFiles[fileId];
+
         if (openFile) {
           state.openFileIds = state.openFileIds.filter((id) => id !== fileId);
-          delete state.fileSettings[openFile.filePath];
+          delete state.filesBandsPerOctave[fileId];
+          delete state.filesZoom[fileId];
+          delete state.filesOffset[fileId];
+          delete state.filesPlaybackStartTime[fileId];
           delete state.filesDirty[fileId];
           delete openFiles[fileId];
 
@@ -311,19 +404,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         }
       }),
     ),
-  closeAllFiles: () => {
-    // Clear the openFiles object
-    Object.keys(openFiles).forEach((fileId) => {
-      delete openFiles[fileId];
-    });
-
-    return set({
-      openFileIds: [],
-      filesDirty: {},
-      activeFileId: null,
-      sourceFile: null,
-    });
-  },
   synthesizeFile: async (
     fileId: string,
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
@@ -492,10 +572,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
           return set(
             produce((state: State) => {
-              const file = state.activeFileId && openFiles[state.activeFileId];
-              if (file) {
-                state.fileSettings[file.filePath].bandsPerOctave = state.bandsPerOctave.value;
-              }
+              state.filesBandsPerOctave[state.activeFileId!] = state.bandsPerOctave.value;
             }),
           );
         } catch (error) {
@@ -510,64 +587,39 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       },
     });
   },
-  fileSettings: {},
-  getFileSettings: (fileId: string) => {
-    const file = openFiles[fileId];
-    if (file) return get().fileSettings[file.filePath];
-    return null;
-  },
-  setFileZoomAndOffset: (fileId, zoom, offset) => {
-    set((state) => {
-      const file = openFiles[fileId];
-      if (!file) return {};
-      return {
-        fileSettings: {
-          ...state.fileSettings,
-          [file.filePath]: {
-            ...state.fileSettings[file.filePath],
-            zoom,
-            offset,
-          },
-        },
-      };
-    });
-  },
-  setFileBpm: (fileId, bpm) =>
+  filepathsBpm: {},
+  setFilepathBpm: (filepath, bpm) =>
     set(
       produce((state: State) => {
-        if (state.activeFileId === fileId && bpm) {
-          Tone.getTransport().bpm.value = bpm;
-        }
-
-        const file = openFiles[fileId];
-        if (file) state.fileSettings[file.filePath].bpm = bpm;
+        state.filepathsBpm[filepath] = bpm;
       }),
     ),
-  setFileResolution: (fileId, resolution) =>
+  filesBandsPerOctave: {},
+  setFileBandsPerOctave: (fileId, bandsPerOctave) =>
     set(
       produce((state: State) => {
-        const file = openFiles[fileId];
-        if (file) {
-          state.fileSettings[file.filePath].bandsPerOctave = resolution;
-        }
+        state.filesBandsPerOctave[fileId] = bandsPerOctave;
       }),
     ),
+  filesZoom: {},
   setFileZoom: (fileId: string, zoom: number) =>
     set(
       produce((state: State) => {
-        const file = openFiles[fileId];
-        if (file) {
-          state.fileSettings[file.filePath].zoom = zoom;
-        }
+        state.filesZoom[fileId] = zoom;
       }),
     ),
+  filesOffset: {},
   setFileOffset: (fileId: string, offset: number) =>
     set(
       produce((state: State) => {
-        const file = openFiles[fileId];
-        if (file) {
-          state.fileSettings[file.filePath].offset = offset;
-        }
+        state.filesOffset[fileId] = offset;
+      }),
+    ),
+  filesPlaybackStartTime: {},
+  setFilePlaybackStartTime: (fileId, time) =>
+    set(
+      produce((state: State) => {
+        state.filesPlaybackStartTime[fileId] = time;
       }),
     ),
   filesDirty: {},
@@ -580,9 +632,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   setActiveFileId: async (activeFileId) => {
     if (activeFileId && openFiles[activeFileId]) {
       const file = openFiles[activeFileId];
-      const { fileSettings } = get();
       const transport = Tone.getTransport();
-      transport.bpm.value = fileSettings[file.filePath].bpm;
+      transport.bpm.value = get().filepathsBpm[file.filePath];
 
       if (file.audioBuffer) {
         transport.setLoopPoints(0, file.audioBuffer.duration);

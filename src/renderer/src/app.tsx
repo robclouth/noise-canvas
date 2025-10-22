@@ -103,12 +103,6 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubCloseActiveFile);
 
-    const unsubCloseAllFiles = ipcOn("close-all-files", () => {
-      const { closeAllFiles } = useStore.getState();
-      closeAllFiles();
-    });
-    unsubscribers.push(unsubCloseAllFiles);
-
     const unsubUndo = ipcOn("undo", async () => {
       const { activeFileId } = useStore.getState();
       if (!activeFileId) return;
@@ -144,8 +138,6 @@ function App(): React.JSX.Element {
 
     return () => {
       unsubscribers.forEach((unsub) => unsub());
-      const { closeAllFiles } = useStore.getState();
-      closeAllFiles();
     };
   }, []);
 

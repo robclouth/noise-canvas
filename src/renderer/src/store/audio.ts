@@ -150,26 +150,19 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     }
   },
 
-  setFilePlaybackStartTime: (fileId, time) =>
-    set((state) => ({
-      fileSettings: {
-        ...state.fileSettings,
-        [openFiles[fileId]?.filePath]: {
-          ...state.fileSettings[openFiles[fileId]?.filePath],
-          playbackStartTime: time,
-        },
-      },
-    })),
-
   togglePlayback: async () => {
     const state = get();
-    const { isPlaying, activeFileId, loop, fileSettings, autoPlayEndTime, getPlayer } = state;
+    const { isPlaying, activeFileId, loop, filesPlaybackStartTime, autoPlayEndTime, getPlayer } = state;
+
+    if (!activeFileId) {
+      return;
+    }
 
     if (isPlaying) {
       return state.stopAudio();
     }
 
-    const file = activeFileId ? openFiles[activeFileId] : undefined;
+    const file = openFiles[activeFileId];
     const buffer = file?.audioBuffer;
     if (!buffer) {
       console.error("No audio buffer available to play.");
@@ -183,7 +176,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     const player = getPlayer();
     player.buffer = new Tone.ToneAudioBuffer(buffer);
 
-    const startTime = fileSettings[file!.filePath].playbackStartTime || 0;
+    const startTime = filesPlaybackStartTime[activeFileId];
     const end = autoPlayEndTime ?? buffer.duration;
     const offset = Math.min(Math.max(startTime, 0), end);
 
@@ -210,15 +203,14 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
   },
 
   stopAudio: () => {
-    const { getPlayer, activeFileId, fileSettings } = get();
+    const { getPlayer, activeFileId, filesPlaybackStartTime } = get();
+
+    if (!activeFileId) {
+      return;
+    }
+
     const player = getPlayer();
     player.stop();
-
-    let restartOffset = 0;
-    if (activeFileId && openFiles[activeFileId]) {
-      const file = openFiles[activeFileId];
-      restartOffset = fileSettings[file.filePath]?.playbackStartTime || 0;
-    }
 
     set((s) => ({
       isPlaying: false,
@@ -226,7 +218,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
       playerClock: {
         ...s.playerClock,
         startAt: null,
-        startOffset: restartOffset,
+        startOffset: filesPlaybackStartTime[activeFileId],
       },
     }));
   },

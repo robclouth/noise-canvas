@@ -11,10 +11,9 @@ interface PlaybackStartLineProps {
 export const PlaybackStartLine = ({ fileId }: PlaybackStartLineProps) => {
   const lineRef = useRef<HTMLDivElement>(null);
   const file = openFiles[fileId];
-  const filePath = file?.filePath;
-  const playbackStartTime = useStore((state) => (filePath ? state.fileSettings[filePath]?.playbackStartTime : 0));
-  const zoom = useStore((state) => (filePath ? state.fileSettings[filePath]?.zoom : 0));
-  const offset = useStore((state) => (filePath ? state.fileSettings[filePath]?.offset : 0));
+  const playbackStartTime = useStore((state) => state.filesPlaybackStartTime[fileId]);
+  const zoom = useStore((state) => state.filesZoom[fileId]);
+  const offset = useStore((state) => state.filesOffset[fileId]);
 
   useEffect(() => {
     if (!lineRef.current || !file) return;

@@ -12,7 +12,7 @@ import { createPresetsSlice } from "./presets";
 import type { Parameter, ParameterKey, State } from "./types";
 
 export const PERSISTED_KEYS: (keyof State)[] = [
-  "fileSettings",
+  "filepathsBpm",
   "effectOrder",
   "effectsEnabled",
   "sectionCollapsed",

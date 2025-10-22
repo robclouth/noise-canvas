@@ -12,9 +12,9 @@ interface TimeLegendProps {
 export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
   const file = openFiles[fileId];
   const filePath = file?.filePath;
-  const bpm = useStore((state) => (filePath ? (state.fileSettings[filePath]?.bpm ?? 120) : 120));
-  const zoom = useStore((state) => (filePath ? (state.fileSettings[filePath]?.zoom ?? 0) : 0));
-  const offset = useStore((state) => (filePath ? (state.fileSettings[filePath]?.offset ?? 0) : 0));
+  const bpm = useStore((state) => state.filepathsBpm[filePath]);
+  const zoom = useStore((state) => state.filesZoom[fileId]);
+  const offset = useStore((state) => state.filesOffset[fileId]);
   const gridSizeBeats = useStore((state) => state.gridSizeBeats.value);
   const setFilePlaybackStartTime = useStore((state) => state.setFilePlaybackStartTime);
   const togglePlayback = useStore((state) => state.togglePlayback);

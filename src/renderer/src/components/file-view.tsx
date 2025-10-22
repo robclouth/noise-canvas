@@ -36,7 +36,8 @@ function getSnappedCoordinates(
 
   const screenUv = new Vector2(x, y);
 
-  const { zoom, offset } = state.fileSettings[openFiles[fileId].filePath];
+  const zoom = state.filesZoom[fileId];
+  const offset = state.filesOffset[fileId];
   const uv = screenToZoomed(screenUv, zoom, offset);
   const { spectrogramData } = openFiles[fileId];
 
@@ -84,7 +85,8 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   const activeFileId = useStore((state) => state.activeFileId);
   const isActive = activeFileId === fileId;
   const isSettingPosition = useStore((state) => state.isSettingPosition);
-  const { zoom, offset } = useStore((state) => state.fileSettings[file.filePath] ?? { zoom: 0, offset: 0 });
+  const zoom = useStore((state) => state.filesZoom[fileId]);
+  const offset = useStore((state) => state.filesOffset[fileId]);
 
   const [isPanning, setIsPanning] = useState(false);
 
@@ -137,7 +139,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         const rect = viewRef.current?.getBoundingClientRect();
         if (!rect || rect.width === 0) return;
 
-        const { setFileZoomAndOffset } = useStore.getState();
+        const { setFileZoom, setFileOffset } = useStore.getState();
 
         // wheel → zoomPower
         const sensitivity = 0.01;
@@ -175,7 +177,8 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
           newOffset = Math.max(0, Math.min(1, newOffset));
         }
 
-        setFileZoomAndOffset(fileId, newPower, newOffset);
+        setFileZoom(fileId, newPower);
+        setFileOffset(fileId, newOffset);
       },
     },
     {
@@ -205,8 +208,8 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   const uvToBeatsAndPitch = useCallback(
     (uvX: number, uvY: number) => {
       const state = useStore.getState();
-      const { spectrogramData } = openFiles[fileId];
-      const bpm = state.fileSettings[openFiles[fileId].filePath].bpm;
+      const { filePath, spectrogramData } = openFiles[fileId];
+      const bpm = state.filepathsBpm[filePath];
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
       const brushWidthBeats = state.brushWidthBeats.value;
       const brushHeightSemis = state.brushHeightSemis.value;
@@ -226,7 +229,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
     (event) => {
       if (isPanning) return;
       const state = useStore.getState();
-      const bpm = state.fileSettings[openFiles[fileId].filePath].bpm;
+      const bpm = state.filepathsBpm[openFiles[fileId].filePath];
       const coords = getSnappedCoordinates(event, fileId, bpm);
       if (!coords) return;
       const [snappedX, snappedY] = coords;
@@ -263,7 +266,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
     (event) => {
       if (isPanning) return;
       const state = useStore.getState();
-      const bpm = state.fileSettings[openFiles[fileId].filePath].bpm;
+      const bpm = state.filepathsBpm[openFiles[fileId].filePath];
       const coords = getSnappedCoordinates(event, fileId, bpm);
       if (!coords) return;
       const [snappedX, snappedY] = coords;
@@ -292,7 +295,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       if (event.button !== 0) return;
 
       const state = useStore.getState();
-      const bpm = state.fileSettings[openFiles[fileId].filePath].bpm;
+      const bpm = state.filepathsBpm[openFiles[fileId].filePath];
       const coords = getSnappedCoordinates(event, fileId, bpm);
       if (!coords) return;
 
