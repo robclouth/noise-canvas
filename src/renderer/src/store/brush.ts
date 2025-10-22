@@ -1,5 +1,5 @@
 // createBrushSlice.ts
-import { BEAT_VALUES, PITCH_VALUES_NO_FRACTIONS, WRAP_MODES } from "../lib/constants";
+import { ALGORITHMS, BEAT_VALUES, BLEND_MODES, PITCH_VALUES_NO_FRACTIONS, WRAP_MODES } from "../lib/constants";
 import type { BrushState, ZustandGet, ZustandSet } from "./types";
 import { makeCreateParameter } from "./utils";
 
@@ -143,6 +143,24 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       max: 100,
       step: 1,
       unit: "%",
+    }),
+
+    ...param("blendMode", {
+      kind: "options",
+      name: "Blend Mode",
+      label: "Blend mode",
+      description: "The blend mode to use when applying the brush.",
+      value: 0,
+      options: BLEND_MODES,
+    }),
+
+    ...param("algorithm", {
+      kind: "options",
+      name: "Warp Algorithm",
+      label: "Warp algo",
+      description: "The algorithm to use when warping the spectrogram.",
+      value: 3,
+      options: ALGORITHMS,
     }),
 
     ...param("sourcePositionMode", {

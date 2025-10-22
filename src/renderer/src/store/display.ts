@@ -1,6 +1,6 @@
 import { startCase } from "lodash-es";
 import { ScaleType } from "tonal";
-import { ALGORITHMS, BANDS_PER_OCTAVE_VALUES, BEAT_VALUES, BLEND_MODES, PITCH_VALUES } from "../lib/constants";
+import { BANDS_PER_OCTAVE_VALUES, BEAT_VALUES, PITCH_VALUES } from "../lib/constants";
 import type { DisplayState, ZustandGet, ZustandSet } from "./types";
 import { makeCreateParameter } from "./utils";
 
@@ -130,24 +130,6 @@ export const createDisplaySlice = (set: ZustandSet, get: ZustandGet): DisplaySta
         "Balance between time and frequency resolution. Time resolution gives sharper transients, frequency resolution gives more precise pitch detail.",
       value: 36,
       options: BANDS_PER_OCTAVE_VALUES,
-    }),
-
-    ...param("blendMode", {
-      kind: "options",
-      name: "Blend Mode",
-      label: "Blend mode",
-      description: "The blend mode to use when applying the brush.",
-      value: 0,
-      options: BLEND_MODES,
-    }),
-
-    ...param("algorithm", {
-      kind: "options",
-      name: "Warp Algorithm",
-      label: "Warp algo",
-      description: "The algorithm to use when warping the spectrogram.",
-      value: 3,
-      options: ALGORITHMS,
     }),
 
     // ---------------- Plain state fields ----------------

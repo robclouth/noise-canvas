@@ -7,8 +7,8 @@ varying vec2 vUv;
 uniform int synthesizeType;
 
 vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelDb) {
-  vec2 complexValueL;
-  vec2 complexValueR;
+  vec2 polarValueL;
+  vec2 polarValueR;
 
   if (synthesizeType == 0) { // Noise
     // Use a small offset to de-correlate multiple random calls
@@ -20,22 +20,22 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
     // Left Channel
     float amplitudeL = random(seed1 + random(seed2));
     float phaseL = (random(seed3 + random(seed4)) * 2.0 - 1.0) * PI;
-    complexValueL = fromPolar(amplitudeL, phaseL);
+    polarValueL = vec2(amplitudeL, phaseL);
 
     // Right Channel - use swizzled seeds for stereo separation
     float amplitudeR = random(seed1.yx + random(seed2.yx));
     float phaseR = (random(seed3.yx + random(seed4.yx)) * 2.0 - 1.0) * PI;
-    complexValueR = fromPolar(amplitudeR, phaseR);
+    polarValueR = vec2(amplitudeR, phaseR);
   } else if (synthesizeType == 1) { // Sine
     float amplitude = 1.0;
     float phase = 0.0;
-    complexValueL = fromPolar(amplitude, phase);
-    complexValueR = fromPolar(amplitude, phase);
+    polarValueL = vec2(amplitude, phase);
+    polarValueR = vec2(amplitude, phase);
   }
   else {
-    complexValueL = fromPolar(1.0, 0.0);
-    complexValueR = fromPolar(1.0, 0.0);
+    polarValueL = vec2(1.0, 0.0);
+    polarValueR = vec2(1.0, 0.0);
   }
 
-  return vec4(complexValueL, complexValueR);
+  return vec4(polarValueL, polarValueR);
 }

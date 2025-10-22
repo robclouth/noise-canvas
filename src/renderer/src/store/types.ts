@@ -177,6 +177,8 @@ export interface BrushState {
   brushHeightSemis: NumberParameter;
   brushSizeLockedToGrid: BooleanParameter;
   brushWrapMode: OptionsParameter<number>;
+  blendMode: OptionsParameter<number>;
+  algorithm: OptionsParameter<number>;
 }
 
 export interface EffectsState {
@@ -275,8 +277,7 @@ export interface DisplayState {
   scaleType: OptionsParameter<string>;
   bandsPerOctave: OptionsParameter<number>;
   minFreq: NumberParameter;
-  blendMode: OptionsParameter<number>;
-  algorithm: OptionsParameter<number>;
+
   mousePos: Vector2 | null;
   setMousePos: (mousePos: Vector2 | null) => void;
   hoveredFile: string | null;

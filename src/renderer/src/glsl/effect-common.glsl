@@ -536,10 +536,12 @@ vec2 getEffectiveBrushOffset(vec2 unpackedUv) {
 
 // Determines the brush's influence at a given coordinate, including feathering.
 float getBrushWeight(vec2 unpackedUv) {
+    vec4 meta = getDestMetadata(unpackedUv);
     vec2 halfSize = brushSizeUv / 2.0;
-    vec2 offset = getEffectiveBrushOffset(unpackedUv);
+    vec2 offset = getEffectiveBrushOffset(unpackedUv) + vec2(exp2(meta.b) / destFrameCount * 0.5, 0.0);
+    
     // Guard against division by zero if brush size is zero to prevent NaN.
-    vec2 localUv = (offset + halfSize) / max(vec2(1e-6), brushSizeUv);
+    vec2 localUv = (offset + halfSize) / max(vec2(EPSILON), brushSizeUv);
     vec2 slopeNormalized = (vec2(featherSlopeTime, featherSlopePitch) / 2.0 + 0.5);
 
     float weightX = 1.0;

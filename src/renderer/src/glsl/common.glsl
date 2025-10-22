@@ -8,5 +8,5 @@ struct Parameter {
 #define PI 3.141592653589793
 #define TWO_PI 6.28318530718
 
-#define EPSILON 1e-10
+#define EPSILON 1e-6
 
