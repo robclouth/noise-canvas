@@ -189,7 +189,7 @@ export const SliderControl = (props: SliderControlProps) => {
               <ChevronDown style={{ flexShrink: 0 }} size={10} />
             </Group>
           </Popover.Target>
-          <Popover.Dropdown py={2} px={8} w={300}>
+          <Popover.Dropdown py={2} px={8} w={341}>
             {modulatorParamKeys.map((k) => (
               <ParameterControl key={k} paramKey={k} color={"blue"} />
             ))}
