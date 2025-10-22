@@ -13,5 +13,9 @@
   },
   "files.exclude": {
     "**/lygia/**": true
+  },
+  "files.associations": {
+    "*.dbclient-js": "javascript",
+    "vector": "cpp"
   }
 }

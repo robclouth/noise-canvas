@@ -6,9 +6,13 @@
 #include <numeric>
 #include <cmath>
 #include <algorithm>
+#include <string>  // For std::string
+#include <sstream> // For std::stringstream
+#include <iomanip> // For std::fixed, std::setprecision
 #include "gaborator/gaborator.h"
 
 #define OVERLAP 0.7
+#define MAX_TEXTURE_SIZE 4096
 
 class AnalyzeWorker : public Napi::AsyncWorker
 {
@@ -62,11 +66,13 @@ public:
         bandLengths.resize(numBands);
         bandFreqsHz.resize(numBands);
         size_t totalComplexCoefficients = 0;
+        double coefficientDensity = 0.0; // Sum of (1 / time_step) for each band
 
         for (int i = 0; i < numBands; ++i)
         {
             int gbno = bandBegin + i;
             int stepLog2 = analyzer.band_step_log2(gbno);
+            coefficientDensity += 1.0 / (double)(1ULL << stepLog2);
             double centerFreq = analyzer.bandpass_band_ff(gbno) * sampleRate;
             size_t len = (numFrames > 0) ? ((numFrames - 1) >> stepLog2) + 1 : 0;
             bandOffsets[i] = static_cast<uint32_t>(totalComplexCoefficients);
@@ -76,69 +82,50 @@ public:
             totalComplexCoefficients += len;
         }
 
-        const int maxWidth = 4096;
-        const int maxHeight = 4096;
+        const int maxWidth = MAX_TEXTURE_SIZE;
+        const int maxHeight = MAX_TEXTURE_SIZE;
         textureWidth = std::min((size_t)maxWidth, totalComplexCoefficients);
         textureHeight = (totalComplexCoefficients > 0) ? (totalComplexCoefficients + textureWidth - 1) / textureWidth : 0;
 
-        // Check if we need to clamp the texture height
-        this->isClamped = textureHeight > maxHeight;
-        this->clampedDurationSeconds = 0.0;
-        size_t clampedComplexCoefficients = totalComplexCoefficients;
-
-        if (this->isClamped)
+        if (textureHeight > maxHeight)
         {
-            textureHeight = maxHeight;
-            clampedComplexCoefficients = (size_t)maxWidth * maxHeight;
-            // Calculate the actual duration that fits in the texture
-            // The ratio of clamped coefficients to total gives us the proportion of the file kept
-            double ratio = (double)clampedComplexCoefficients / (double)totalComplexCoefficients;
-            this->clampedDurationSeconds = ratio * ((double)numFrames / sampleRate);
+            if (coefficientDensity > 1e-9)
+            { // Check for non-zero density to avoid division by zero
+                size_t maxCoefficients = (size_t)maxWidth * maxHeight;
+                double maxFrames = (double)maxCoefficients / coefficientDensity;
+                double maxSeconds = maxFrames / sampleRate;
+
+                std::stringstream ss;
+                ss << "The maximum audio duration with these settings is " << std::fixed << std::setprecision(0) << maxSeconds << " seconds.";
+                SetError(ss.str().c_str());
+            }
+            else
+            {
+                SetError("The audio file is too long.");
+            }
+            return;
         }
 
         size_t floatsPerPixel = 4;
-        size_t paddedDataFloatCount = (size_t)textureWidth * textureHeight * floatsPerPixel;
-        paddedData.assign(paddedDataFloatCount, 0.0f);
+        size_t dataFloatCount = (size_t)textureWidth * textureHeight * floatsPerPixel;
+        data.assign(dataFloatCount, 0.0f);
 
         size_t floatsPerMapPixel = 2;
         size_t paddedMapFloatCount = (size_t)textureWidth * textureHeight * floatsPerMapPixel;
-        paddedInverseMap.assign(paddedMapFloatCount, 0.0f);
+        inverseMap.assign(paddedMapFloatCount, 0.0f);
 
         size_t maxPixelIndex = (size_t)textureWidth * textureHeight;
 
-        // If clamped, update bandLengths and numFrames to reflect actual stored data
-        if (this->isClamped)
-        {
-            for (int bandIdx = 0; bandIdx < numBands; ++bandIdx)
-            {
-                size_t bandStart = bandOffsets[bandIdx];
-                size_t bandEnd = bandStart + bandLengths[bandIdx];
-                if (bandEnd > maxPixelIndex)
-                {
-                    if (bandStart >= maxPixelIndex)
-                    {
-                        bandLengths[bandIdx] = 0;
-                    }
-                    else
-                    {
-                        bandLengths[bandIdx] = static_cast<uint32_t>(maxPixelIndex - bandStart);
-                    }
-                }
-            }
-            // Update numFrames to reflect the clamped duration
-            numFrames = static_cast<size_t>(this->clampedDurationSeconds * sampleRate);
-        }
-
         size_t floatsPerMetaPixel = 4;
         size_t metadataFloatCount = (size_t)numBands * floatsPerMetaPixel;
-        metadataTexture.resize(metadataFloatCount);
+        metadata.resize(metadataFloatCount);
 
         for (int i = 0; i < numBands; ++i)
         {
-            metadataTexture[i * floatsPerMetaPixel + 0] = static_cast<float>(bandOffsets[i]);
-            metadataTexture[i * floatsPerMetaPixel + 1] = static_cast<float>(bandLengths[i]);
-            metadataTexture[i * floatsPerMetaPixel + 2] = static_cast<float>(bandStepLog2s[i]);
-            metadataTexture[i * floatsPerMetaPixel + 3] = bandFreqsHz[i];
+            metadata[i * floatsPerMetaPixel + 0] = static_cast<float>(bandOffsets[i]);
+            metadata[i * floatsPerMetaPixel + 1] = static_cast<float>(bandLengths[i]);
+            metadata[i * floatsPerMetaPixel + 2] = static_cast<float>(bandStepLog2s[i]);
+            metadata[i * floatsPerMetaPixel + 3] = bandFreqsHz[i];
         }
 
         for (int bandIdx = 0; bandIdx < numBands; ++bandIdx)
@@ -147,8 +134,8 @@ public:
             for (uint32_t i = 0; i < bandLengths[bandIdx]; ++i)
             {
                 size_t linearPixelIndex = bandOffsets[bandIdx] + i;
-                paddedInverseMap[linearPixelIndex * 2 + 0] = static_cast<float>(i * timeStep);
-                paddedInverseMap[linearPixelIndex * 2 + 1] = static_cast<float>(bandIdx);
+                inverseMap[linearPixelIndex * 2 + 0] = static_cast<float>(i * timeStep);
+                inverseMap[linearPixelIndex * 2 + 1] = static_cast<float>(bandIdx);
             }
         }
 
@@ -206,8 +193,8 @@ public:
                     previousPhases[ch][bandIdx][tInBand] = unwrappedPhase;
 
                     size_t writeOffset = baseOffset * floatsPerPixel;
-                    paddedData[writeOffset + ch * 2 + 0] = magnitude;
-                    paddedData[writeOffset + ch * 2 + 1] = unwrappedPhase;
+                    data[writeOffset + ch * 2 + 0] = magnitude;
+                    data[writeOffset + ch * 2 + 1] = unwrappedPhase;
                 },
                 bandBegin, analyzer.bandpass_bands_end(), 0, numFrames, allCoefs[ch]);
         }
@@ -219,17 +206,17 @@ public:
         Napi::HandleScope scope(env);
         Napi::Object resultJs = Napi::Object::New(env);
 
-        Napi::Float32Array dataJs = Napi::Float32Array::New(env, paddedData.size());
-        memcpy(dataJs.Data(), paddedData.data(), paddedData.size() * sizeof(float));
+        Napi::Float32Array dataJs = Napi::Float32Array::New(env, data.size());
+        memcpy(dataJs.Data(), data.data(), data.size() * sizeof(float));
         resultJs.Set("data", dataJs);
 
-        Napi::Float32Array inverseMapJs = Napi::Float32Array::New(env, paddedInverseMap.size());
-        memcpy(inverseMapJs.Data(), paddedInverseMap.data(), paddedInverseMap.size() * sizeof(float));
+        Napi::Float32Array inverseMapJs = Napi::Float32Array::New(env, inverseMap.size());
+        memcpy(inverseMapJs.Data(), inverseMap.data(), inverseMap.size() * sizeof(float));
         resultJs.Set("inverseMap", inverseMapJs);
 
-        Napi::Float32Array metadataTextureJs = Napi::Float32Array::New(env, metadataTexture.size());
-        memcpy(metadataTextureJs.Data(), metadataTexture.data(), metadataTexture.size() * sizeof(float));
-        resultJs.Set("metadataTexture", metadataTextureJs);
+        Napi::Float32Array metadataJs = Napi::Float32Array::New(env, metadata.size());
+        memcpy(metadataJs.Data(), metadata.data(), metadata.size() * sizeof(float));
+        resultJs.Set("metadata", metadataJs);
 
         resultJs.Set("textureWidth", Napi::Number::New(env, textureWidth));
         resultJs.Set("textureHeight", Napi::Number::New(env, textureHeight));
@@ -254,9 +241,6 @@ public:
         memcpy(bandLengthsJs.Data(), bandLengths.data(), bandLengths.size() * sizeof(uint32_t));
         resultJs.Set("bandLengths", bandLengthsJs);
 
-        resultJs.Set("isClamped", Napi::Boolean::New(env, isClamped));
-        resultJs.Set("clampedDurationSeconds", Napi::Number::New(env, clampedDurationSeconds));
-
         deferred.Resolve(resultJs);
     }
 
@@ -276,9 +260,9 @@ private:
     double fminHz;
 
     // Results
-    std::vector<float> paddedData;
-    std::vector<float> paddedInverseMap;
-    std::vector<float> metadataTexture;
+    std::vector<float> data;
+    std::vector<float> inverseMap;
+    std::vector<float> metadata;
     int textureWidth;
     int textureHeight;
     size_t numFrames;
@@ -287,8 +271,6 @@ private:
     std::vector<int32_t> bandStepLog2s;
     std::vector<uint32_t> bandLengths;
     std::vector<float> bandFreqsHz;
-    bool isClamped;
-    double clampedDurationSeconds;
 };
 
 Napi::Value AnalyzeAsync(const Napi::CallbackInfo &info)

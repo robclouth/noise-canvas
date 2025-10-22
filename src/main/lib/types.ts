@@ -3,7 +3,7 @@ import { BrowserWindow, ipcMain } from "electron";
 export interface GaboratorAnalysisResult {
   data: Float32Array;
   inverseMap: Float32Array;
-  metadataTexture: Float32Array;
+  metadata: Float32Array;
   textureWidth: number;
   textureHeight: number;
   numFrames: number;
@@ -12,8 +12,6 @@ export interface GaboratorAnalysisResult {
   bandOffsets: Uint32Array;
   bandStepLog2s: Int32Array;
   bandLengths: Uint32Array;
-  isClamped: boolean;
-  clampedDurationSeconds: number;
 }
 
 export type AnalysisParams = {

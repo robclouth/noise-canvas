@@ -16,7 +16,7 @@ declare global {
       ) => Promise<{
         data: Float32Array;
         inverseMap: Float32Array;
-        metadataTexture: Float32Array;
+        metadata: Float32Array;
         textureWidth: number;
         textureHeight: number;
         numFrames: number;
@@ -29,8 +29,6 @@ declare global {
         format: string;
         codec: string;
         channels: number;
-        isClamped: boolean;
-        clampedDurationSeconds: number;
       }>;
       analyseBuffer: (
         audioBuffer: AudioBuffer,
@@ -38,7 +36,7 @@ declare global {
       ) => Promise<{
         data: Float32Array;
         inverseMap: Float32Array;
-        metadataTexture: Float32Array;
+        metadata: Float32Array;
         textureWidth: number;
         textureHeight: number;
         numFrames: number;
@@ -51,8 +49,6 @@ declare global {
         format: string;
         codec: string;
         channels: number;
-        isClamped: boolean;
-        clampedDurationSeconds: number;
       }>;
       synthesize: (
         processedData: Float32Array,

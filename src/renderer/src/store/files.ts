@@ -37,64 +37,69 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       return;
     }
 
-    const result = await window.audioAnalysis.analyze(filePath, {
-      bandsPerOctave: state.bandsPerOctave?.value ?? 36,
-      minFreq: state.minFreq?.value ?? 16.3516,
-    });
+    try {
+      const result = await window.audioAnalysis.analyze(filePath, {
+        bandsPerOctave: state.bandsPerOctave?.value ?? 36,
+        minFreq: state.minFreq?.value ?? 16.3516,
+      });
 
-    const spectrogramData = {
-      packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-      inverseMap: new Float32Array(
-        result.inverseMap.buffer,
-        result.inverseMap.byteOffset,
-        result.inverseMap.byteLength / 4,
-      ),
-      metadata: new Float32Array(
-        result.metadataTexture.buffer,
-        result.metadataTexture.byteOffset,
-        result.metadataTexture.byteLength / 4,
-      ),
-      textureWidth: result.textureWidth,
-      textureHeight: result.textureHeight,
-      numFrames: result.numFrames,
-      numBands: result.numBands,
-      numChannels: result.numChannels,
-      sampleRate: result.sampleRate,
-      packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-      minFreq: state.minFreq.value,
-      bandsPerOctave: state.bandsPerOctave.value,
-      synthesisMetadata: {
-        bandOffsets: result.bandOffsets,
-        bandStepLog2s: result.bandStepLog2s,
-        bandLengths: result.bandLengths,
-      },
-    };
+      const spectrogramData = {
+        packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+        inverseMap: new Float32Array(
+          result.inverseMap.buffer,
+          result.inverseMap.byteOffset,
+          result.inverseMap.byteLength / 4,
+        ),
+        metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
+        textureWidth: result.textureWidth,
+        textureHeight: result.textureHeight,
+        numFrames: result.numFrames,
+        numBands: result.numBands,
+        numChannels: result.numChannels,
+        sampleRate: result.sampleRate,
+        packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
+        minFreq: state.minFreq.value,
+        bandsPerOctave: state.bandsPerOctave.value,
+        synthesisMetadata: {
+          bandOffsets: result.bandOffsets,
+          bandStepLog2s: result.bandStepLog2s,
+          bandLengths: result.bandLengths,
+        },
+      };
 
-    // Generate unique file ID
-    const fileId = generateFileId();
-    openFiles[fileId] = {
-      id: fileId,
-      filePath,
-      spectrogramData,
-    };
+      // Generate unique file ID
+      const fileId = generateFileId();
+      openFiles[fileId] = {
+        id: fileId,
+        filePath,
+        spectrogramData,
+      };
 
-    return set(
-      produce((state: State) => {
-        state.openFileIds.push(fileId);
-        const fileSettings = state.fileSettings[filePath] || {};
+      return set(
+        produce((state: State) => {
+          state.openFileIds.push(fileId);
+          const fileSettings = state.fileSettings[filePath] || {};
 
-        if (!fileSettings.bpm) fileSettings.bpm = 120;
-        if (!fileSettings.bandsPerOctave) fileSettings.bandsPerOctave = state.bandsPerOctave.value;
-        if (!fileSettings.zoom) fileSettings.zoom = 0;
-        if (!fileSettings.offset) fileSettings.offset = 0;
-        if (!fileSettings.playbackStartTime) fileSettings.playbackStartTime = 0;
+          if (!fileSettings.bpm) fileSettings.bpm = 120;
+          if (!fileSettings.bandsPerOctave) fileSettings.bandsPerOctave = state.bandsPerOctave.value;
+          if (!fileSettings.zoom) fileSettings.zoom = 0;
+          if (!fileSettings.offset) fileSettings.offset = 0;
+          if (!fileSettings.playbackStartTime) fileSettings.playbackStartTime = 0;
 
-        state.fileSettings[filePath] = fileSettings;
+          state.fileSettings[filePath] = fileSettings;
 
-        if (!state.sourceFile) state.sourceFile = { id: fileId, mode: "current" };
-        state.activeFileId = fileId;
-      }),
-    );
+          if (!state.sourceFile) state.sourceFile = { id: fileId, mode: "current" };
+          state.activeFileId = fileId;
+        }),
+      );
+    } catch (error) {
+      console.error("Error opening file:", error);
+      notifications.show({
+        title: `Failed to open file '${window.nodePath.basename(filePath)}'`,
+        message: `${error instanceof Error ? error.message : "Unknown error"}`,
+        color: "red",
+      });
+    }
   },
   saveActiveFile: async () => {
     const state = get();
@@ -438,60 +443,70 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       onConfirm: async () => {
         if (!state.activeFileId) return;
         const audioBuffer = file?.audioBuffer;
-        console.log(window.audioAnalysis);
-        const result = audioBuffer
-          ? await window.audioAnalysis.analyseBuffer(audioBuffer, {
-              bandsPerOctave: state.bandsPerOctave.value,
-              minFreq: state.minFreq.value,
-            })
-          : await window.audioAnalysis.analyze(file.filePath, {
-              bandsPerOctave: state.bandsPerOctave.value,
-              minFreq: state.minFreq.value,
-            });
 
-        const spectrogramData = {
-          packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-          inverseMap: new Float32Array(
-            result.inverseMap.buffer,
-            result.inverseMap.byteOffset,
-            result.inverseMap.byteLength / 4,
-          ),
-          metadata: new Float32Array(
-            result.metadataTexture.buffer,
-            result.metadataTexture.byteOffset,
-            result.metadataTexture.byteLength / 4,
-          ),
-          textureWidth: result.textureWidth,
-          textureHeight: result.textureHeight,
-          numFrames: result.numFrames,
-          numBands: result.numBands,
-          numChannels: result.numChannels,
-          sampleRate: result.sampleRate,
-          packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-          minFreq: state.minFreq.value,
-          bandsPerOctave: state.bandsPerOctave.value,
-          synthesisMetadata: {
-            bandOffsets: result.bandOffsets,
-            bandStepLog2s: result.bandStepLog2s,
-            bandLengths: result.bandLengths,
-          },
-        };
+        try {
+          const result = audioBuffer
+            ? await window.audioAnalysis.analyseBuffer(audioBuffer, {
+                bandsPerOctave: state.bandsPerOctave.value,
+                minFreq: state.minFreq.value,
+              })
+            : await window.audioAnalysis.analyze(file.filePath, {
+                bandsPerOctave: state.bandsPerOctave.value,
+                minFreq: state.minFreq.value,
+              });
 
-        file.spectrogramData = spectrogramData;
+          const spectrogramData = {
+            packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+            inverseMap: new Float32Array(
+              result.inverseMap.buffer,
+              result.inverseMap.byteOffset,
+              result.inverseMap.byteLength / 4,
+            ),
+            metadata: new Float32Array(
+              result.metadata.buffer,
+              result.metadata.byteOffset,
+              result.metadata.byteLength / 4,
+            ),
+            textureWidth: result.textureWidth,
+            textureHeight: result.textureHeight,
+            numFrames: result.numFrames,
+            numBands: result.numBands,
+            numChannels: result.numChannels,
+            sampleRate: result.sampleRate,
+            packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
+            minFreq: state.minFreq.value,
+            bandsPerOctave: state.bandsPerOctave.value,
+            synthesisMetadata: {
+              bandOffsets: result.bandOffsets,
+              bandStepLog2s: result.bandStepLog2s,
+              bandLengths: result.bandLengths,
+            },
+          };
 
-        file.rendererRef?.current?.reloadTextures();
+          file.spectrogramData = spectrogramData;
 
-        const undoManager = getUndoManager(state.activeFileId);
-        undoManager.clear();
+          file.rendererRef?.current?.reloadTextures();
 
-        return set(
-          produce((state: State) => {
-            const file = state.activeFileId && openFiles[state.activeFileId];
-            if (file) {
-              state.fileSettings[file.filePath].bandsPerOctave = state.bandsPerOctave.value;
-            }
-          }),
-        );
+          const undoManager = getUndoManager(state.activeFileId);
+          undoManager.clear();
+
+          return set(
+            produce((state: State) => {
+              const file = state.activeFileId && openFiles[state.activeFileId];
+              if (file) {
+                state.fileSettings[file.filePath].bandsPerOctave = state.bandsPerOctave.value;
+              }
+            }),
+          );
+        } catch (error) {
+          console.error("Error during re-analysis:", error);
+          notifications.show({
+            title: "Re-analysis failed",
+            message: `${error instanceof Error ? error.message : "Unknown error"}`,
+            color: "red",
+          });
+          return;
+        }
       },
     });
   },
