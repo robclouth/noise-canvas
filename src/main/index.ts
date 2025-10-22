@@ -1,11 +1,14 @@
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, systemPreferences } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS } from "electron-devtools-installer";
 import { autoUpdater } from "electron-updater";
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
 import { createMenu } from "./lib/menu";
 import { ipcMainOn, webContentsSend } from "./lib/types";
+
+systemPreferences.setUserDefault("NSDisabledDictationMenuItem", "boolean", true);
+systemPreferences.setUserDefault("NSDisabledCharacterPaletteMenuItem", "boolean", true);
 
 let mainWindow: BrowserWindow | null = null;
 

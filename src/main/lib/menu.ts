@@ -118,7 +118,6 @@ export function createMenu(window: BrowserWindow) {
     template.unshift({
       label: app.getName(),
       submenu: [
-        { role: "about" },
         {
           label: "Check for Updates...",
           click: async () => {
@@ -134,13 +133,6 @@ export function createMenu(window: BrowserWindow) {
             }
           },
         },
-        { type: "separator" },
-        { role: "services", submenu: [] },
-        { type: "separator" },
-        { role: "hide" },
-        { role: "unhide" },
-        { type: "separator" },
-        { role: "quit" },
       ],
     });
   }

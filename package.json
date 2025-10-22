@@ -1,6 +1,7 @@
 {
   "name": "noise-canvas",
   "version": "0.1.2",
+  "productName": "Noise Canvas",
   "description": "Photoshop for sound",
   "main": "./out/main/index.js",
   "author": "Rob Clouth",
