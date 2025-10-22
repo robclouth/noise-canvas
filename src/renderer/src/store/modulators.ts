@@ -1,4 +1,12 @@
-import { BEAT_VALUES, MODULATOR_MODES, NUM_MODULATORS, PATTERN_SHAPES, PITCH_VALUES } from "../lib/constants";
+import {
+  BEAT_UNIT,
+  BEAT_VALUES,
+  MODULATOR_MODES,
+  NUM_MODULATORS,
+  PATTERN_SHAPES,
+  PITCH_VALUES,
+  SEMITONE_UNIT,
+} from "../lib/constants";
 import type { ModulatorsState, ZustandGet, ZustandSet } from "./types";
 import { makeCreateParameter } from "./utils";
 
@@ -83,6 +91,7 @@ function createModulatorParams(set: ZustandSet, get: ZustandGet): ModulatorsStat
             step: 0.0001,
             marks: beatMarksWithOff,
             scale: "log",
+            unit: BEAT_UNIT,
           },
           { modulatable: true },
         ),
@@ -105,6 +114,7 @@ function createModulatorParams(set: ZustandSet, get: ZustandGet): ModulatorsStat
             max: 96,
             step: 1,
             marks: semitoneMarksWithOff,
+            unit: SEMITONE_UNIT,
           },
           { modulatable: true },
         ),

@@ -1,7 +1,6 @@
 import { useStore } from "@/store";
 import { useFrame } from "@react-three/fiber";
 import { CommonUniforms, defaultValues } from "@renderer/effects/base-effect";
-import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { openFiles } from "@renderer/store/files";
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -10,7 +9,7 @@ import { effects } from "../effects";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { readRenderTargetPixelsAsync } from "../lib/async-readpixels";
-import { useModulatorScaleLut } from "../lib/modulator-utils";
+import { buildModulatorUniforms, useModulatorScaleLut } from "../lib/modulator-utils";
 import { useModulatorTexture } from "../lib/textures";
 import { getUndoManager } from "../lib/undo-manager";
 import { unitsToUv } from "../lib/utils";
@@ -547,26 +546,26 @@ export const FileRenderer = memo(
           viewOffset: { value: viewOffset },
           brushCenterUv: { value: mousePos || new THREE.Vector2(-1, -1) },
           brushSizeUv: { value: brushSizeUv },
-          featherX: { value: state.brushFeatherTime.toNormalized() },
-          featherY: { value: state.brushFeatherPitch.toNormalized() },
-          featherSlopeTime: { value: state.brushFeatherSlopeTime.toNormalized() },
-          featherSlopePitch: { value: state.brushFeatherSlopePitch.toNormalized() },
+          featherX: { value: state.brushFeatherTime.value / 100 },
+          featherY: { value: state.brushFeatherPitch.value / 100 },
+          featherSlopeTime: { value: state.brushFeatherSlopeTime.value / 100 },
+          featherSlopePitch: { value: state.brushFeatherSlopePitch.value / 100 },
           brushIntensity: {
             value: {
-              value: state.brushIntensity.toNormalized(),
+              value: state.brushIntensity.value / 100,
               minValue: 0,
               maxValue: 1,
               modulationAmounts:
-                state.brushIntensity.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
+                state.brushIntensity.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
             },
           },
           brushPan: {
             value: {
-              value: state.brushPan.toNormalized(),
-              minValue: 0,
+              value: state.brushPan.value / 100,
+              minValue: -1,
               maxValue: 1,
               modulationAmounts:
-                state.brushPan.modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) || [],
+                state.brushPan.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
             },
           },
           bpm: { value: bpm },
@@ -577,72 +576,7 @@ export const FileRenderer = memo(
           magnitudeLimit: { value: state.magnitudeLimit.value },
           wrapMode: { value: state.brushWrapMode.value },
           modulators: {
-            value: Array.from({ length: NUM_MODULATORS }).map((_, i) => {
-              const modulatorPatternRate = unitsToUv(
-                state[`modulator${i + 1}PatternRateBeats`].value,
-                state[`modulator${i + 1}PatternRateSemis`].value,
-                bpm,
-                totalDuration,
-                spectrogramData.bandsPerOctave,
-                spectrogramData.numBands,
-              );
-
-              // Calculate min/max for pattern rates in UV space
-              const maxBeats = 64; // Maximum beat value from BEAT_VALUES
-              const maxSemis = 96; // Maximum semitone value from PITCH_VALUES
-              const maxRateUv = unitsToUv(
-                maxBeats,
-                maxSemis,
-                bpm,
-                totalDuration,
-                spectrogramData.bandsPerOctave,
-                spectrogramData.numBands,
-              );
-
-              return {
-                modulatorMode: state[`modulator${i + 1}Mode`].value,
-                modulatorPatternShape: state[`modulator${i + 1}PatternShape`].value,
-                modulatorPhaseMode: state[`modulator${i + 1}PhaseMode`].value,
-                modulatorPatternRateX: {
-                  value: modulatorPatternRate.x,
-                  minValue: 0.0,
-                  maxValue: maxRateUv.x,
-                  modulationAmounts:
-                    state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map((paramKey) =>
-                      state[paramKey].toNormalized(),
-                    ) || [],
-                },
-                modulatorPatternRateY: {
-                  value: modulatorPatternRate.y,
-                  minValue: 0.0,
-                  maxValue: maxRateUv.y,
-                  modulationAmounts:
-                    state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map((paramKey) =>
-                      state[paramKey].toNormalized(),
-                    ) || [],
-                },
-                modulatorStrength: {
-                  value: state[`modulator${i + 1}Strength`].value / 100,
-                  minValue: -1.0,
-                  maxValue: 1.0,
-                  modulationAmounts:
-                    state[`modulator${i + 1}Strength`].modulatorParamKeys?.map((paramKey) =>
-                      state[paramKey].toNormalized(),
-                    ) || [],
-                },
-                modulatorRotation: {
-                  value: state[`modulator${i + 1}Rotation`].value,
-                  minValue: 0.0,
-                  maxValue: 360.0,
-                  modulationAmounts:
-                    state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map((paramKey) =>
-                      state[paramKey].toNormalized(),
-                    ) || [],
-                },
-                modulatorEnvelopeMinDb: state[`modulator${i + 1}EnvelopeMinDb`].value,
-                modulatorEnvelopeMaxDb: state[`modulator${i + 1}EnvelopeMaxDb`].value,
-              };
-            }),
+            value: buildModulatorUniforms(bpm, totalDuration, spectrogramData.bandsPerOctave, spectrogramData.numBands),
           },
           gainLut: { value: modulatorScaleLut || new THREE.Texture() },
           modulator1ImageTex: { value: modulator1ImageTexture || new THREE.Texture() },

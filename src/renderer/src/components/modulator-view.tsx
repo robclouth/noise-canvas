@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ShaderMaterial, Texture, Vector2 } from "three";
 import modulatorFrag from "../glsl/modulator.frag";
 import passThroughVert from "../glsl/pass-through.vert";
-import { useModulatorScaleLut } from "../lib/modulator-utils";
+import { buildModulatorUniforms, useModulatorScaleLut } from "../lib/modulator-utils";
 import { useModulatorTexture } from "../lib/textures";
 import { ModulatorShapeControl } from "./controls/modulator-shape-control";
 import { ParameterControl } from "./controls/parameter-control";
@@ -27,48 +27,7 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
   const testTexture = useTexture(test);
 
   const material = useMemo(() => {
-    const state = useStore.getState();
-    const modulators = Array.from({ length: NUM_MODULATORS }).map((_, i) => ({
-      modulatorMode: state[`modulator${i + 1}Mode`].value,
-      modulatorPatternShape: state[`modulator${i + 1}PatternShape`].value,
-      modulatorPhaseMode: state[`modulator${i + 1}PhaseMode`].value,
-      modulatorPatternRateX: {
-        value: state[`modulator${i + 1}PatternRateBeats`].value,
-        minValue: 0.0,
-        maxValue: 64.0,
-        modulationAmounts:
-          state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map((paramKey) =>
-            state[paramKey].toNormalized(),
-          ) || [],
-      },
-      modulatorPatternRateY: {
-        value: state[`modulator${i + 1}PatternRateSemis`].value,
-        minValue: 0.0,
-        maxValue: 96.0,
-        modulationAmounts:
-          state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map((paramKey) =>
-            state[paramKey].toNormalized(),
-          ) || [],
-      },
-      modulatorStrength: {
-        value: state[`modulator${i + 1}Strength`].value / 100.0,
-        minValue: -1.0,
-        maxValue: 1.0,
-        modulationAmounts:
-          state[`modulator${i + 1}Strength`].modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) ||
-          [],
-      },
-      modulatorRotation: {
-        value: state[`modulator${i + 1}Rotation`].value,
-        minValue: 0.0,
-        maxValue: 360.0,
-        modulationAmounts:
-          state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map((paramKey) => state[paramKey].toNormalized()) ||
-          [],
-      },
-      modulatorEnvelopeMinDb: state[`modulator${i + 1}EnvelopeMinDb`].value,
-      modulatorEnvelopeMaxDb: state[`modulator${i + 1}EnvelopeMaxDb`].value,
-    }));
+    const modulators = buildModulatorUniforms(120, 10, 12, 96);
 
     // Create placeholder texture for modulators without images
     const placeholderTexture = new Texture();
@@ -112,87 +71,9 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
   }, [material, modulator1ImageTexture, modulator2ImageTexture, modulator3ImageTexture, invalidate]);
 
   useEffect(() => {
-    // Subscribe to modulator-related state changes and update uniforms
-    // Create a selector that only responds to modulator parameter changes
-    const getModulatorState = (state) => {
-      // Build a minimal state object containing only modulator-related values
-      const modulatorState = {};
-      for (let i = 0; i < NUM_MODULATORS; i++) {
-        modulatorState[`modulator${i + 1}Mode`] = state[`modulator${i + 1}Mode`].value;
-        modulatorState[`modulator${i + 1}PatternShape`] = state[`modulator${i + 1}PatternShape`].value;
-        modulatorState[`modulator${i + 1}PhaseMode`] = state[`modulator${i + 1}PhaseMode`].value;
-        modulatorState[`modulator${i + 1}PatternRateBeats`] = state[`modulator${i + 1}PatternRateBeats`].value;
-        modulatorState[`modulator${i + 1}PatternRateSemis`] = state[`modulator${i + 1}PatternRateSemis`].value;
-        modulatorState[`modulator${i + 1}Strength`] = state[`modulator${i + 1}Strength`].value;
-        modulatorState[`modulator${i + 1}Rotation`] = state[`modulator${i + 1}Rotation`].value;
-        modulatorState[`modulator${i + 1}EnvelopeMinDb`] = state[`modulator${i + 1}EnvelopeMinDb`].value;
-        modulatorState[`modulator${i + 1}EnvelopeMaxDb`] = state[`modulator${i + 1}EnvelopeMaxDb`].value;
-
-        // Include modulation amounts for all parameters
-        state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.forEach((paramKey) => {
-          modulatorState[paramKey] = state[paramKey].value;
-        });
-        state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.forEach((paramKey) => {
-          modulatorState[paramKey] = state[paramKey].value;
-        });
-        state[`modulator${i + 1}Strength`].modulatorParamKeys?.forEach((paramKey) => {
-          modulatorState[paramKey] = state[paramKey].value;
-        });
-        state[`modulator${i + 1}Rotation`].modulatorParamKeys?.forEach((paramKey) => {
-          modulatorState[paramKey] = state[paramKey].value;
-        });
-      }
-      return modulatorState;
-    };
-
     const unsubscribe = useStore.subscribe(
-      getModulatorState,
-      () => {
-        const state = useStore.getState();
-        const modulators = Array.from({ length: NUM_MODULATORS }).map((_, i) => ({
-          modulatorMode: state[`modulator${i + 1}Mode`].value,
-          modulatorPatternShape: state[`modulator${i + 1}PatternShape`].value,
-          modulatorPhaseMode: state[`modulator${i + 1}PhaseMode`].value,
-          modulatorPatternRateX: {
-            value: state[`modulator${i + 1}PatternRateBeats`].value,
-            minValue: 0.0,
-            maxValue: 64.0,
-            modulationAmounts:
-              state[`modulator${i + 1}PatternRateBeats`].modulatorParamKeys?.map((paramKey) =>
-                state[paramKey].toNormalized(),
-              ) || [],
-          },
-          modulatorPatternRateY: {
-            value: state[`modulator${i + 1}PatternRateSemis`].value,
-            minValue: 0.0,
-            maxValue: 96.0,
-            modulationAmounts:
-              state[`modulator${i + 1}PatternRateSemis`].modulatorParamKeys?.map((paramKey) =>
-                state[paramKey].toNormalized(),
-              ) || [],
-          },
-          modulatorStrength: {
-            value: state[`modulator${i + 1}Strength`].value / 100.0,
-            minValue: -1.0,
-            maxValue: 1.0,
-            modulationAmounts:
-              state[`modulator${i + 1}Strength`].modulatorParamKeys?.map((paramKey) =>
-                state[paramKey].toNormalized(),
-              ) || [],
-          },
-          modulatorRotation: {
-            value: state[`modulator${i + 1}Rotation`].value,
-            minValue: 0.0,
-            maxValue: 360.0,
-            modulationAmounts:
-              state[`modulator${i + 1}Rotation`].modulatorParamKeys?.map((paramKey) =>
-                state[paramKey].toNormalized(),
-              ) || [],
-          },
-          modulatorEnvelopeMinDb: state[`modulator${i + 1}EnvelopeMinDb`].value,
-          modulatorEnvelopeMaxDb: state[`modulator${i + 1}EnvelopeMaxDb`].value,
-        }));
-
+      () => buildModulatorUniforms(120, 10, 12, 96),
+      (modulators) => {
         material.uniforms.modulators.value = modulators;
         invalidate();
       },

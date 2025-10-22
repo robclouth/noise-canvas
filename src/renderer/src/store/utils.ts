@@ -129,9 +129,10 @@ type ModOpts = { modulatable?: boolean };
 export function makeCreateParameter<S extends Record<string, any>>(set: ZustandSet, get: ZustandGet) {
   function createModulatorAmountParams(baseKey: string) {
     const o: Record<string, any> = {};
+    const { toNormalized, fromNormalized } = makeNormalizersNumber({ min: -100, max: 100 });
     for (let i = 0; i < NUM_MODULATORS; i++) {
-      const k = `${baseKey}Mod${i + 1}Amount`;
-      o[k] = {
+      const key = `${baseKey}Mod${i + 1}Amount`;
+      o[key] = {
         kind: "number" as const,
         name: `Mod ${i + 1} Amount`,
         label: `Mod ${i + 1}`,
@@ -142,15 +143,10 @@ export function makeCreateParameter<S extends Record<string, any>>(set: ZustandS
         max: 100,
         step: 0.1,
         unit: "%",
-
-        toNormalized: (v?: number) => {
-          const x = typeof v === "number" ? v : 0;
-          return x * 100;
-        },
-        fromNormalized: (n: number) => n * 100,
-
-        setValue: (v: number) => set((state: any) => ({ [k]: { ...state[k], value: v } })),
-        resetValue: () => set((state: any) => ({ [k]: { ...state[k], value: 0 } })),
+        toNormalized: (value?: number) => toNormalized(value ?? get()[key as any].value),
+        fromNormalized: (normalizedValue: number) => fromNormalized(normalizedValue),
+        setValue: (v: number) => set((state: any) => ({ [key]: { ...state[key], value: v } })),
+        resetValue: () => set((state: any) => ({ [key]: { ...state[key], value: 0 } })),
       };
     }
     return o;

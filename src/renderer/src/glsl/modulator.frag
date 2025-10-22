@@ -21,6 +21,6 @@ void main() {
   float audioLevel = texture2D(testTexture, vUv).r;
 float audioLevelDb = 20.0 * log(audioLevel + 0.000001) / log(10.0);
   
-  float v = getModulation(vUv * multiplier, modulatorIndex, true, audioLevelDb);
+  float v = getModulation(vUv, modulatorIndex, true, audioLevelDb);
   gl_FragColor = vec4(vec3(v), 1.0);
 }

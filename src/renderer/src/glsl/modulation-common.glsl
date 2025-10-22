@@ -143,7 +143,6 @@ float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float p
   return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
 }
 
-// Version with modulated parameters (calls base version with computed params)
 float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, float audioLevelDb) {
   Modulator modulator = modulators[modulatorIndex];
   
