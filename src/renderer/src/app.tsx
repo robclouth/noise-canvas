@@ -95,10 +95,18 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubSaveActiveFileVersion);
 
-    const unsubCloseActiveFile = ipcOn("close-active-file", () => {
-      const { activeFileId, closeFile } = useStore.getState();
+    const unsubDuplicateActiveFile = ipcOn("duplicate-active-file", () => {
+      const { activeFileId, duplicateFile } = useStore.getState();
       if (activeFileId) {
-        closeFile(activeFileId);
+        duplicateFile(activeFileId);
+      }
+    });
+    unsubscribers.push(unsubDuplicateActiveFile);
+
+    const unsubCloseActiveFile = ipcOn("close-active-file", () => {
+      const { activeFileId, tryCloseFile } = useStore.getState();
+      if (activeFileId) {
+        tryCloseFile(activeFileId);
       }
     });
     unsubscribers.push(unsubCloseActiveFile);

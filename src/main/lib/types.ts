@@ -32,8 +32,8 @@ export interface IpcRendererEvents {
   undo: () => void;
   redo: () => void;
   "restore-original": () => void;
+  "duplicate-active-file": () => void;
   "close-active-file": () => void;
-  "close-all-files": () => void;
   "reanalyze-active-file": () => void;
   "update-available": (info: any) => void;
   "update-not-available": () => void;

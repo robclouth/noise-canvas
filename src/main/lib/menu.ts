@@ -51,9 +51,8 @@ export function createMenu(window: BrowserWindow) {
             webContentsSend(window, "save-active-file-version");
           },
         },
-        { type: "separator" },
         {
-          label: "Close Active",
+          label: "Close File",
           accelerator: "CmdOrCtrl+W",
           click: () => {
             webContentsSend(window, "close-active-file");
@@ -92,9 +91,16 @@ export function createMenu(window: BrowserWindow) {
           },
         },
         {
-          label: "Re-analyze Active File",
+          label: "Re-analyze File",
           click: () => {
             webContentsSend(window, "reanalyze-active-file");
+          },
+        },
+        {
+          label: "Duplicate File",
+          accelerator: "CmdOrCtrl+D",
+          click: () => {
+            webContentsSend(window, "duplicate-active-file");
           },
         },
       ],
