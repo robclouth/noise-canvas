@@ -266,11 +266,12 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv, sampler2D dataTex, sampler2D me
     vec4 meta = texture2D(metaTex, metaUv);
     float bandStartOffset = meta.r;      // Where this band starts in the packed texture
     float bandLength = meta.g;           // Number of time samples in this band
-    float bandTimeScaleExp = meta.b;     // Time-stretching exponent for this band
+    float bandTimeScale = exp2(meta.b);     // Time-stretching exponent for this band
+    float binWidth = bandTimeScale / frameCount;
 
     // Convert UV time coordinate to frame index and apply band-specific time scaling
     float timeInFrames = unpackedUv.x * frameCount;
-    float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
+    float scaledTime = timeInFrames / bandTimeScale; 
     
     // Get the two adjacent time indices for interpolation
     float timeIndexFloor = clamp(floor(scaledTime), 0.0, bandLength - 1.0);
@@ -534,14 +535,31 @@ vec2 getEffectiveBrushOffset(vec2 unpackedUv) {
     return offset;
 }
 
+float horizontalCoverage(vec2 unpackedUv, float binWidth) {
+    float halfBinWidth  = 0.5 * binWidth;
+
+    vec2 halfBrush = brushSizeUv * 0.5;
+    vec2 off = getEffectiveBrushOffset(unpackedUv);
+    float binCx  = brushCenterUv.x + off.x + halfBinWidth;
+
+    float bx0 = brushCenterUv.x - halfBrush.x;
+    float bx1 = brushCenterUv.x + halfBrush.x;
+    float x0  = binCx - halfBinWidth;
+    float x1  = binCx + halfBinWidth;
+
+    float overlap = max(0.0, min(bx1, x1) - max(bx0, x0));
+    return overlap / (2.0 * halfBinWidth);
+}
+
 // Determines the brush's influence at a given coordinate, including feathering.
 float getBrushWeight(vec2 unpackedUv) {
     vec4 meta = getDestMetadata(unpackedUv);
-    vec2 halfSize = brushSizeUv / 2.0;
-    vec2 offset = getEffectiveBrushOffset(unpackedUv) + vec2(exp2(meta.b) / destFrameCount * 0.5, 0.0);
+    float binWidth = exp2(meta.b) / destFrameCount;
+    vec2 halfBrushSizeUv = brushSizeUv / 2.0;
+    vec2 offset = getEffectiveBrushOffset(unpackedUv) + vec2(binWidth, 0.0);
     
     // Guard against division by zero if brush size is zero to prevent NaN.
-    vec2 localUv = (offset + halfSize) / max(vec2(EPSILON), brushSizeUv);
+    vec2 localUv = (offset + halfBrushSizeUv) / max(vec2(EPSILON), brushSizeUv + vec2(binWidth, 0.0));
     vec2 slopeNormalized = (vec2(featherSlopeTime, featherSlopePitch) / 2.0 + 0.5);
 
     float weightX = 1.0;
@@ -550,6 +568,8 @@ float getBrushWeight(vec2 unpackedUv) {
     } else if (localUv.x > slopeNormalized.x ) {
         weightX = 1.0 - smoothstep(slopeNormalized.x * featherX + (1.0 - featherX), 1.0, localUv.x);
     } 
+
+    weightX *= horizontalCoverage(unpackedUv, binWidth);
 
     float weightY = 1.0;
     if (localUv.y < slopeNormalized.y) {
