@@ -257,7 +257,7 @@ vec2 interpolateComplex(vec2 magPhase1, vec2 magPhase2, float amount) {
  * @param bandCount The total number of frequency bands in the spectrogram
  * @return vec4 containing left channel (rg) and right channel (ba) as magnitude/phase pairs
  */
-vec4 readPackedDataInterpolated(vec2 unpackedUv, sampler2D dataTex, sampler2D metaTex, vec2 packedTexSize, float frameCount, float bandCount) {
+vec4 readPackedDataInterpolated(vec2 unpackedUv, sampler2D dataTex, sampler2D metaTex, vec2 packedTexSize, float frameCount, float bandCount, bool centerBins) {
     // Determine which frequency band we're sampling from (0 = lowest frequency)
     float bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
 
@@ -267,14 +267,16 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv, sampler2D dataTex, sampler2D me
     float bandStartOffset = meta.r;      // Where this band starts in the packed texture
     float bandLength = meta.g;           // Number of time samples in this band
     float bandTimeScale = exp2(meta.b);     // Time-stretching exponent for this band
-    float binWidth = bandTimeScale / frameCount;
 
     // Convert UV time coordinate to frame index and apply band-specific time scaling
     float timeInFrames = unpackedUv.x * frameCount;
+    if(centerBins){
+        timeInFrames -= bandTimeScale / 2.0;
+    }
     float scaledTime = timeInFrames / bandTimeScale; 
     
     // Get the two adjacent time indices for interpolation
-    float timeIndexFloor = clamp(floor(scaledTime), 0.0, bandLength - 1.0);
+    float timeIndexFloor = floor(scaledTime);
     float timeFraction = fract(scaledTime);  // Interpolation amount (0.0 to 1.0)
 
     // Calculate packed texture coordinates for the first sample
@@ -300,7 +302,11 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv, sampler2D dataTex, sampler2D me
  * Samples from the source spectrogram with linear interpolation in time.
  */
 vec4 sampleSourceInterp(vec2 sourceUv) {
-    return readPackedDataInterpolated(sourceUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount);
+    return readPackedDataInterpolated(sourceUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount, false);
+}
+
+vec4 sampleSourceInterpCentered(vec2 sourceUv) {
+    return readPackedDataInterpolated(sourceUv, sourceSpectrogramTex, sourceMetadataTex, sourceSpectrogramTextureSize, sourceFrameCount, sourceBandCount, true);
 }
 
 /**
@@ -323,7 +329,7 @@ float getAudioLevelDb(vec2 uv) {
  */
 vec4 getOriginalDestSample(vec2 destUv) {
     vec2 wrappedUv = wrapUv(destUv);
-    return readPackedDataInterpolated(wrappedUv, originalSpectrogramTex, destMetadataTex, destSpectrogramTextureSize, destFrameCount, destBandCount);
+    return readPackedDataInterpolated(wrappedUv, originalSpectrogramTex, destMetadataTex, destSpectrogramTextureSize, destFrameCount, destBandCount, false);
 }
 
 vec2 modifyPhase(vec2 magPhase, vec2 uv, bool shouldRandomise) {
