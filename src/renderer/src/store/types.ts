@@ -1,8 +1,8 @@
 import { FileRendererHandle } from "@renderer/components/file-renderer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
-import { EffectType } from "../effects";
 import { BrushPresetType } from "../lib/preset-schema";
+import { EffectsState } from "./effects";
 import { FilesState } from "./files";
 
 type Enumerate<N extends number, Acc extends number[] = []> = Acc["length"] extends N
@@ -181,35 +181,6 @@ export interface BrushState {
   brushWrapMode: OptionsParameter<number>;
   blendMode: OptionsParameter<number>;
   algorithm: OptionsParameter<number>;
-}
-
-export interface EffectsState {
-  dynamicsThresholdDb: NumberParameter;
-  dynamicsUpperRatio: NumberParameter;
-  dynamicsLowerRatio: NumberParameter;
-  dynamicsKnee: NumberParameter;
-  dynamicsGainDb: NumberParameter;
-  transformShiftBeats: NumberParameter;
-  transformShiftSemis: NumberParameter;
-  transformScaleTime: NumberParameter;
-  transformScalePitch: NumberParameter;
-  transformRotation: NumberParameter;
-  transformEdgeMode: OptionsParameter<number>;
-  synthesizeBrushType: OptionsParameter<number>;
-  blurAmountTime: NumberParameter;
-  blurAmountPitch: NumberParameter;
-  blurNoiseTime: NumberParameter;
-  blurNoisePitch: NumberParameter;
-  blurBleed: BooleanParameter;
-  blurOrigin: OptionsParameter<number>;
-  sharpenAmountTime: NumberParameter;
-  sharpenAmountPitch: NumberParameter;
-  harmonicsPower: NumberParameter;
-  harmonicsFalloff: NumberParameter;
-  effectOrder: EffectType[];
-  setEffectOrder: (effectOrder: EffectType[]) => void;
-  effectsEnabled: Record<EffectType, boolean>;
-  setEffectEnabled: (effect: EffectType, enabled: boolean) => void;
 }
 
 export interface ModulatorsState extends ModulatorAmountParameters, ModulatorParameters {}

@@ -1,4 +1,5 @@
-import { EffectType } from "../effects";
+import { effects, EffectType } from "../effects";
+import { shapes } from "../effects/overtones-shapes";
 import {
   BEAT_UNIT,
   BEAT_VALUES,
@@ -9,8 +10,39 @@ import {
   SEMITONE_UNIT,
   SYNTHESIZE_TYPES,
 } from "../lib/constants";
-import type { EffectsState, ZustandGet, ZustandSet } from "./types";
+import type { BooleanParameter, NumberParameter, OptionsParameter, ZustandGet, ZustandSet } from "./types";
 import { makeCreateParameter } from "./utils";
+
+export interface EffectsState {
+  dynamicsThresholdDb: NumberParameter;
+  dynamicsUpperRatio: NumberParameter;
+  dynamicsLowerRatio: NumberParameter;
+  dynamicsKnee: NumberParameter;
+  dynamicsGainDb: NumberParameter;
+  transformShiftBeats: NumberParameter;
+  transformShiftSemis: NumberParameter;
+  transformScaleTime: NumberParameter;
+  transformScalePitch: NumberParameter;
+  transformRotation: NumberParameter;
+  transformEdgeMode: OptionsParameter<number>;
+  synthesizeBrushType: OptionsParameter<number>;
+  blurAmountTime: NumberParameter;
+  blurAmountPitch: NumberParameter;
+  blurNoiseTime: NumberParameter;
+  blurNoisePitch: NumberParameter;
+  blurBleed: BooleanParameter;
+  blurOrigin: OptionsParameter<number>;
+  sharpenAmountTime: NumberParameter;
+  sharpenAmountPitch: NumberParameter;
+  overtonesCount: NumberParameter;
+  overtonesScale: NumberParameter;
+  overtonesDecay: NumberParameter;
+  overtonesShape: OptionsParameter<keyof typeof shapes>;
+  effectOrder: EffectType[];
+  setEffectOrder: (effectOrder: EffectType[]) => void;
+  effectsEnabled: Record<EffectType, boolean>;
+  setEffectEnabled: (effect: EffectType, enabled: boolean) => void;
+}
 
 // helpers to mirror constants into negative/zero/positive marks
 const negBeatMarks = BEAT_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse();
@@ -325,37 +357,63 @@ export const createEffectsSlice = (set: ZustandSet, get: ZustandGet): EffectsSta
       { modulatable: true },
     ),
 
-    // ---------------- Harmonics ----------------
+    // ---------------- Overtones ----------------
     ...param(
-      "harmonicsPower",
+      "overtonesCount",
       {
         kind: "number",
-        name: "Harmonic Power",
-        label: "Power",
-        description: "Controls the spacing of harmonics.",
-        value: 1.0,
-        min: 0.1,
-        max: 4.0,
+        name: "Overtones Count",
+        label: "Count",
+        description: "Controls the number of overtones.",
+        value: 32,
+        min: 1,
+        max: 64,
+        step: 1,
+      },
+      { modulatable: false },
+    ),
+
+    ...param(
+      "overtonesScale",
+      {
+        kind: "number",
+        name: "Vertical Scale",
+        label: "Scale",
+        description: "Scalees the overtones vertically.",
+        value: 1,
+        min: -4,
+        max: 4,
         step: 0.01,
+        unit: MULTIPLIER_UNIT,
+        marks: Array.from({ length: 9 }, (_, i) => i - 4).map((v) => ({ value: v, label: v.toString() + "x" })),
       },
       { modulatable: true },
     ),
 
     ...param(
-      "harmonicsFalloff",
+      "overtonesDecay",
       {
         kind: "number",
-        name: "Harmonic Falloff",
-        label: "Falloff",
-        description: "Controls the amplitude falloff of harmonics.",
-        value: 10.0,
+        name: "Decay",
+        label: "Decay",
+        description: "Controls the amplitude decay of overtones.",
+        value: 0.0,
         min: 0,
         max: 100,
-        step: 1,
+        step: 0.1,
         unit: "%",
       },
       { modulatable: true },
     ),
+
+    ...param("overtonesShape", {
+      kind: "options",
+      name: "Overtones Shape",
+      label: "Shape",
+      description: "Controls the shape of the overtones.",
+      value: "logarithmic",
+      options: Object.entries(shapes).map(([key, shape]) => ({ value: key, label: shape.label })),
+    }),
 
     // ---------------- Synthesize ----------------
     ...param("synthesizeBrushType", {
@@ -368,16 +426,15 @@ export const createEffectsSlice = (set: ZustandSet, get: ZustandGet): EffectsSta
     }),
 
     // ---------------- Effect order & toggles ----------------
-    effectOrder: ["synthesize", "dynamics", "transform", "harmonics", "blur"] satisfies EffectType[],
+    effectOrder: Object.keys(effects).filter((key) => key !== "passthrough") as EffectType[],
     setEffectOrder: (effectOrder) => set({ effectOrder }),
-
-    effectsEnabled: {
-      dynamics: false,
-      transform: false,
-      harmonics: false,
-      blur: false,
-      synthesize: false,
-    },
+    effectsEnabled: Object.keys(effects).reduce(
+      (acc, key) => {
+        acc[key] = false;
+        return acc;
+      },
+      {} as Record<EffectType, boolean>,
+    ),
     setEffectEnabled: (effect, enabled) =>
       set((state) => ({
         effectsEnabled: { ...state.effectsEnabled, [effect]: enabled },

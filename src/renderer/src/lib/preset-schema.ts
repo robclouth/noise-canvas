@@ -2,7 +2,7 @@
 import { z } from "zod";
 
 // Define the effect types enum
-const EffectTypeSchema = z.enum(["synthesize", "dynamics", "transform", "harmonics", "blur"]);
+const EffectTypeSchema = z.enum(["synthesize", "dynamics", "transform", "overtones", "blur"]);
 
 // Schema for effect order array
 const EffectOrderSchema = z.array(EffectTypeSchema);
@@ -60,9 +60,11 @@ export const BrushPresetSchema = z.object({
   sharpenAmountTime: z.number().min(0).max(100),
   sharpenAmountPitch: z.number().min(0).max(100),
 
-  // Harmonics parameters
-  harmonicsPower: z.number().min(0.1).max(4),
-  harmonicsFalloff: z.number().min(0).max(100),
+  // Overtones parameters
+  overtonesCount: z.number().int().min(1).max(64),
+  overtonesScale: z.number().min(0).max(100),
+  overtonesDecay: z.number().min(0).max(100),
+  overtonesShape: z.string(),
 
   // Transform parameters
   transformShiftBeats: z.number(),

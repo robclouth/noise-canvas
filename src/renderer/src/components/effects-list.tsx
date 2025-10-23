@@ -4,14 +4,14 @@ import { Box, Stack } from "@mantine/core";
 import { CollapsibleEffectSection } from "./collapsible-effect-section";
 import { BlurEffect } from "./effect-views/blur-effect";
 import { DynamicsEffect } from "./effect-views/dynamics-effect";
-import { HarmonicsEffect } from "./effect-views/harmonics-effect";
+import { HarmonicsEffect } from "./effect-views/overtones-effect";
 import { SynthesizeEffect } from "./effect-views/synthesize-effect";
 import { TransformEffect } from "./effect-views/transform-effect";
 
 const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
   dynamics: <DynamicsEffect />,
   transform: <TransformEffect />,
-  harmonics: <HarmonicsEffect />,
+  overtones: <HarmonicsEffect />,
   blur: <BlurEffect />,
   synthesize: <SynthesizeEffect />,
 };
@@ -19,7 +19,7 @@ const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
 const EFFECT_LABELS: Record<string, string> = {
   dynamics: "Dynamics",
   transform: "Transform",
-  harmonics: "Harmonics",
+  overtones: "Overtones",
   blur: "Smooth",
   synthesize: "Synthesize",
 };
@@ -27,7 +27,7 @@ const EFFECT_LABELS: Record<string, string> = {
 const EFFECT_DESCRIPTIONS: Record<string, string> = {
   dynamics: "Control dynamic range with compression, expansion, gating, and inversion.",
   transform: "Shift, scale, and rotate the spectrogram content in time and frequency.",
-  harmonics: "Add or modify harmonic overtones to create richer timbres.",
+  overtones: "Add overtones to create richer timbres.",
   blur: "Smooth and blend frequencies over time and pitch for softer transitions.",
   synthesize: "Generate new audio content from scratch (noise, sine waves, etc.).",
 };

@@ -45,9 +45,11 @@ export const defaultPresets: BrushPresetType[] = [
     sharpenAmountTime: 0,
     sharpenAmountPitch: 0,
 
-    // Harmonics parameters
-    harmonicsPower: 1.0,
-    harmonicsFalloff: 10.0,
+    // Overtones parameters
+    overtonesCount: 16,
+    overtonesScale: 50,
+    overtonesDecay: 50,
+    overtonesShape: "linear",
 
     // Transform parameters
     transformShiftBeats: 0,
@@ -61,12 +63,12 @@ export const defaultPresets: BrushPresetType[] = [
     synthesizeBrushType: 0,
 
     // Effect order and enabled states
-    effectOrder: ["synthesize", "dynamics", "transform", "harmonics", "blur"],
+    effectOrder: ["synthesize", "dynamics", "transform", "overtones", "blur"],
     effectsEnabled: {
       dynamics: true,
       synthesize: false,
       transform: false,
-      harmonics: false,
+      overtones: false,
       blur: false,
     },
 

@@ -78,13 +78,14 @@ export const useStore = create<State>()(
 );
 
 export function getModulator(index: number) {
+  const state = useStore.getState();
   return {
-    modulatorMode: useStore.getState()[`modulator${index}Mode` as ParameterKey],
-    modulatorPatternShape: useStore.getState()[`modulator${index}PatternShape` as ParameterKey],
-    modulatorPatternRateBeats: useStore.getState()[`modulator${index}PatternRateBeats` as ParameterKey],
-    modulatorPatternRateSemis: useStore.getState()[`modulator${index}PatternRateSemis` as ParameterKey],
-    modulatorStrength: useStore.getState()[`modulator${index}Strength` as ParameterKey],
-    modulatorRotation: useStore.getState()[`modulator${index}Rotation` as ParameterKey],
-    modulatorPhaseMode: useStore.getState()[`modulator${index}PhaseMode` as ParameterKey],
+    modulatorMode: state[`modulator${index}Mode` as ParameterKey],
+    modulatorPatternShape: state[`modulator${index}PatternShape` as ParameterKey],
+    modulatorPatternRateBeats: state[`modulator${index}PatternRateBeats` as ParameterKey],
+    modulatorPatternRateSemis: state[`modulator${index}PatternRateSemis` as ParameterKey],
+    modulatorStrength: state[`modulator${index}Strength` as ParameterKey],
+    modulatorRotation: state[`modulator${index}Rotation` as ParameterKey],
+    modulatorPhaseMode: state[`modulator${index}PhaseMode` as ParameterKey],
   };
 }
