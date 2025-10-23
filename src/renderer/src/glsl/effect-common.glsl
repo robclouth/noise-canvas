@@ -187,9 +187,7 @@ vec4 readPackedData(vec2 unpackedUv, sampler2D dataTex, sampler2D metaTex, vec2 
   float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
   float timeIndexInBand = floor(scaledTime);
 
-  if (timeIndexInBand < 0.0 || timeIndexInBand >= bandLength) {
-      timeIndexInBand = clamp(timeIndexInBand, 0.0, bandLength - 1.0);
-  }
+  timeIndexInBand = clamp(timeIndexInBand, 0.0, bandLength - 1.0);
 
   // Guard against division by zero if texture dimensions are 0.
   float safeTexWidth = max(1.0, packedTexSize.x);
@@ -274,6 +272,8 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv, sampler2D dataTex, sampler2D me
         timeInFrames -= bandTimeScale / 2.0;
     }
     float scaledTime = timeInFrames / bandTimeScale; 
+
+    scaledTime = clamp(scaledTime, 0.0, bandLength - 1.0);
     
     // Get the two adjacent time indices for interpolation
     float timeIndexFloor = floor(scaledTime);
@@ -635,45 +635,45 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
     float magModifiedR = getMag(pannedModifiedR);
     float phaseOriginalR = getPhase(originalR);
 
+    float averagePhaseL = (originalL.y + modifiedL.y) / 2.0;
+    float averagePhaseR = (originalR.y + modifiedR.y) / 2.0;
+
     vec2 finalL = originalL;
     vec2 finalR = originalR;
 
+    vec2 targetL, targetR;
+
     if (blendMode == 0) { // Mix
-        finalL = interpolateComplex(originalL, pannedModifiedL, effectiveWeight);
-        finalR = interpolateComplex(originalR, pannedModifiedR, effectiveWeight);
+        targetL = pannedModifiedL;
+        targetR = pannedModifiedR;
     } else if (blendMode == 1) { // Add
-        finalL = fromPolar(magOriginalL + magModifiedL * effectiveWeight, phaseOriginalL);
-        finalR = fromPolar(magOriginalR + magModifiedR * effectiveWeight, phaseOriginalR);
+        targetL = fromPolar((magOriginalL + magModifiedL), averagePhaseL);
+        targetR = fromPolar((magOriginalR + magModifiedR), averagePhaseR);
     } else if (blendMode == 2) { // Subtract
-        finalL = fromPolar(max(0.0, magOriginalL - magModifiedL * effectiveWeight), phaseOriginalL);
-        finalR = fromPolar(max(0.0, magOriginalR - magModifiedR * effectiveWeight), phaseOriginalR);
+        targetL = fromPolar((magOriginalL - magModifiedL), averagePhaseL);
+        targetR = fromPolar((magOriginalR - magModifiedR), averagePhaseR);
     } else if (blendMode == 3) { // Multiply
-        finalL = fromPolar(magOriginalL * mix(1.0, magModifiedL, effectiveWeight), phaseOriginalL);
-        finalR = fromPolar(magOriginalR * mix(1.0, magModifiedR, effectiveWeight), phaseOriginalR);
+        targetL = fromPolar((magOriginalL * magModifiedL * 4.0), averagePhaseL);
+        targetR = fromPolar((magOriginalR * magModifiedR * 4.0), averagePhaseR);
     } else if (blendMode == 4) { // Divide
-        float divisorL = mix(1.0, magModifiedL, effectiveWeight);
-        float divisorR = mix(1.0, magModifiedR, effectiveWeight);
-        // Guard against division by zero.
-        finalL = fromPolar(magOriginalL / max(1e-6, divisorL), phaseOriginalL);
-        finalR = fromPolar(magOriginalR / max(1e-6, divisorR), phaseOriginalR);
+        targetL = fromPolar((magOriginalL / (magModifiedL + EPSILON)), averagePhaseL);
+        targetR = fromPolar((magOriginalR / (magModifiedR + EPSILON)), averagePhaseR);
+    } else if (blendMode == 5) { // Lighten
+        targetL = (magModifiedL > magOriginalL) ? modifiedL : originalL;
+        targetR = (magModifiedR > magOriginalR) ? modifiedR : originalR;
+    } else if (blendMode == 6) { // Darken
+        targetL = (magModifiedL < magOriginalL) ? modifiedL : originalL;
+        targetR = (magModifiedR < magOriginalR) ? modifiedR : originalR;
+    } else if (blendMode == 7) { // Difference
+        targetL = fromPolar(abs(magOriginalL - magModifiedL), averagePhaseL);
+        targetR = fromPolar(abs(magOriginalR - magModifiedR), averagePhaseR);
     } else {
-        vec2 targetL, targetR;
-        if (blendMode == 5) { // Lighten
-            targetL = (magModifiedL > magOriginalL) ? pannedModifiedL : originalL;
-            targetR = (magModifiedR > magOriginalR) ? pannedModifiedR : originalR;
-        } else if (blendMode == 6) { // Darken
-            targetL = (magModifiedL < magOriginalL) ? pannedModifiedL : originalL;
-            targetR = (magModifiedR < magOriginalR) ? pannedModifiedR : originalR;
-        } else if (blendMode == 7) { // Difference
-            targetL = fromPolar(abs(magOriginalL - magModifiedL), phaseOriginalL);
-            targetR = fromPolar(abs(magOriginalR - magModifiedR), phaseOriginalR);
-        } else {
-            targetL = originalL;
-            targetR = originalR;
-        }
-        finalL = interpolateComplex(originalL, targetL, effectiveWeight);
-        finalR = interpolateComplex(originalR, targetR, effectiveWeight);
+        targetL = originalL;
+        targetR = originalR;
     }
+
+    finalL = interpolateComplex(originalL, targetL, effectiveWeight);
+    finalR = interpolateComplex(originalR, targetR, effectiveWeight);
 
     // --- 4. FINAL LIMITING STAGE ---
     // Apply the soft-clipping limiter to the final calculated values.

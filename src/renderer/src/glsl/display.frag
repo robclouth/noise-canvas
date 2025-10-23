@@ -51,7 +51,7 @@ void main() {
     // Convert screen UV to zoomed UV (actual data coordinates)
     vec2 zoomedUv = screenToZoomed(vUv, viewZoomPower, viewOffset);
     
-    vec4 packedValue = sampleSourceInterpCentered(zoomedUv);
+    vec4 packedValue = sampleSourceInterp(zoomedUv);
 
     // packedValue stores [leftMagnitude, leftPhase, rightMagnitude, rightPhase]
     vec2 leftMagPhase = packedValue.rg;
