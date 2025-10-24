@@ -1,14 +1,17 @@
+import { EFFECT_COLORS } from "@renderer/lib/constants";
 import { ParameterControl } from "../controls/parameter-control";
+
+const COLOR = EFFECT_COLORS.transform;
 
 export const TransformEffect = () => {
   return (
     <>
-      <ParameterControl paramKey="transformShiftBeats" />
-      <ParameterControl paramKey="transformShiftSemis" />
-      <ParameterControl paramKey="transformScaleTime" />
-      <ParameterControl paramKey="transformScalePitch" />
-      <ParameterControl paramKey="transformRotation" />
-      <ParameterControl paramKey="transformEdgeMode" />
+      <ParameterControl paramKey="transformShiftBeats" color={COLOR} />
+      <ParameterControl paramKey="transformShiftSemis" color={COLOR} />
+      <ParameterControl paramKey="transformScaleTime" color={COLOR} />
+      <ParameterControl paramKey="transformScalePitch" color={COLOR} />
+      <ParameterControl paramKey="transformRotation" color={COLOR} />
+      <ParameterControl paramKey="transformEdgeMode" color={COLOR} />
     </>
   );
 };

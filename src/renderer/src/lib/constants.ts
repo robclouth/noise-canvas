@@ -161,3 +161,11 @@ export const ALGORITHMS = [
   { value: 1, label: "Noisey" },
   { value: 3, label: "Neutralish" },
 ];
+
+export const EFFECT_COLORS: Record<string, string> = {
+  dynamics: "grape",
+  transform: "red",
+  overtones: "yellow",
+  blur: "green",
+  synthesize: "purple",
+};

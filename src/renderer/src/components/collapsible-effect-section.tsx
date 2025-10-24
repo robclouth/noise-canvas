@@ -10,10 +10,19 @@ export type CollapsibleEffectSectionProps = {
   enabled: boolean;
   onEnabledChange: (enabled: boolean) => void;
   dragHandleProps?: any;
+  color?: string;
 };
 
 export const CollapsibleEffectSection = memo(
-  ({ label, description, children, enabled, onEnabledChange, dragHandleProps }: CollapsibleEffectSectionProps) => {
+  ({
+    label,
+    description,
+    children,
+    enabled,
+    onEnabledChange,
+    dragHandleProps,
+    color,
+  }: CollapsibleEffectSectionProps) => {
     return (
       <Paper>
         <Stack gap="xs">
@@ -23,6 +32,7 @@ export const CollapsibleEffectSection = memo(
               onChange={(event) => onEnabledChange(event.currentTarget.checked)}
               onClick={(e) => e.stopPropagation()}
               size="xs"
+              color={color}
             />
             <Tooltip label={description}>
               <Text flex={1} size="xs">

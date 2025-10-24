@@ -24,6 +24,8 @@ export interface FilesState {
     fileId: string,
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
   ) => Promise<void>;
+  mostRecentBpm: number | null;
+  setMostRecentBpm: (bpm: number) => void;
   filepathsBpm: Record<string, number>;
   setFilepathBpm: (fileId: string, bpm: number) => void;
   filesBandsPerOctave: Record<string, number>;
@@ -193,7 +195,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       return set(
         produce((state: State) => {
           state.openFileIds.push(fileId);
-          state.filepathsBpm[filepath] ??= 120;
+          state.filepathsBpm[filepath] ??= state.mostRecentBpm ?? 120;
           state.filesBandsPerOctave[fileId] = state.bandsPerOctave.value;
           state.filesZoom[fileId] = 0;
           state.filesOffset[fileId] = 0;
@@ -670,8 +672,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     set(
       produce((state: State) => {
         state.filepathsBpm[filepath] = bpm;
+        state.mostRecentBpm = bpm;
       }),
     ),
+  mostRecentBpm: null,
+  setMostRecentBpm: (bpm: number) => set({ mostRecentBpm: bpm }),
   filesBandsPerOctave: {},
   setFileBandsPerOctave: (fileId, bandsPerOctave) =>
     set(

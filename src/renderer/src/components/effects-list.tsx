@@ -1,6 +1,7 @@
 import { useStore } from "@/store";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
 import { Box, Stack } from "@mantine/core";
+import { EFFECT_COLORS } from "@renderer/lib/constants";
 import { CollapsibleEffectSection } from "./collapsible-effect-section";
 import { BlurEffect } from "./effect-views/blur-effect";
 import { DynamicsEffect } from "./effect-views/dynamics-effect";
@@ -73,6 +74,7 @@ export function EffectsList() {
                       enabled={effectsEnabled[effectId] ?? false}
                       onEnabledChange={(enabled) => setEffectEnabled(effectId, enabled)}
                       dragHandleProps={provided.dragHandleProps}
+                      color={EFFECT_COLORS[effectId] || "gray"}
                     >
                       {EFFECT_COMPONENTS[effectId] || null}
                     </CollapsibleEffectSection>
