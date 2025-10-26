@@ -1,6 +1,6 @@
 // createBrushSlice.ts
-import { parameterDefs } from "@renderer/parameters";
-import type { ZustandGet, ZustandSet } from "./types";
+import { getParameterDef } from "@renderer/parameters";
+import type { ZustandSet } from "./types";
 
 export interface BrushState {
   brushIntensity: number;
@@ -26,25 +26,23 @@ export interface BrushState {
   blendMode: number;
   algorithm: number;
 }
-
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState => {
+export const createBrushSlice = (set: ZustandSet): BrushState => {
   return {
-    brushWidthBeats: parameterDefs.brushWidthBeats.default,
-    brushHeightSemis: parameterDefs.brushHeightSemis.default,
-    brushSizeLockedToGrid: parameterDefs.brushSizeLockedToGrid.default,
-    brushWrapMode: parameterDefs.brushWrapMode.default,
-    brushIntensity: parameterDefs.brushIntensity.default,
-
-    brushIterations: parameterDefs.brushIterations.default,
-    brushPan: parameterDefs.brushPan.default,
-    brushFeatherTime: parameterDefs.brushFeatherTime.default,
-    brushFeatherPitch: parameterDefs.brushFeatherPitch.default,
-    brushFeatherSlopeTime: parameterDefs.brushFeatherSlopeTime.default,
-    brushFeatherSlopePitch: parameterDefs.brushFeatherSlopePitch.default,
-    blendMode: parameterDefs.blendMode.default,
-    algorithm: parameterDefs.algorithm.default,
-    sourcePositionMode: parameterDefs.sourcePositionMode.default,
+    brushWidthBeats: getParameterDef("brushWidthBeats").default,
+    brushHeightSemis: getParameterDef("brushHeightSemis").default,
+    brushSizeLockedToGrid: getParameterDef("brushSizeLockedToGrid").default,
+    brushWrapMode: getParameterDef("brushWrapMode").default,
+    brushIntensity: getParameterDef("brushIntensity").default,
+    brushIterations: getParameterDef("brushIterations").default,
+    brushPan: getParameterDef("brushPan").default,
+    brushFeatherTime: getParameterDef("brushFeatherTime").default,
+    brushFeatherPitch: getParameterDef("brushFeatherPitch").default,
+    brushFeatherSlopeTime: getParameterDef("brushFeatherSlopeTime").default,
+    brushFeatherSlopePitch: getParameterDef("brushFeatherSlopePitch").default,
+    blendMode: getParameterDef("blendMode").default,
+    algorithm: getParameterDef("algorithm").default,
+    sourcePositionMode: getParameterDef("sourcePositionMode").default,
     sourcePosition: null,
     setSourcePosition: (position) => set({ sourcePosition: position, lockedOffset: null }),
     isSettingPosition: false,

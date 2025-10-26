@@ -23,12 +23,12 @@ export const useStore = create<State>()(
   subscribeWithSelector(
     persist(
       (set, get) => ({
-        ...createBrushSlice(set, get),
-        ...createEffectsSlice(set, get),
-        ...createModulatorsSlice(set, get),
+        ...createBrushSlice(set),
+        ...createEffectsSlice(),
+        ...createModulatorsSlice(),
         ...createFilesSlice(set, get),
         ...createAudioSlice(set, get),
-        ...createAppSlice(set, get),
+        ...createAppSlice(set),
         ...createPresetsSlice(set, get),
         setParameter: (key: ParameterKey, value: any) => {
           set({ [key]: value });

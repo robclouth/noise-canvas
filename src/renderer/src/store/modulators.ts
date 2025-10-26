@@ -1,70 +1,127 @@
-import { parameterDefs } from "@renderer/parameters";
+import {
+  getNumberParameterDef,
+  getOptionsParameterDef,
+  getStringParameterDef,
+  parameterDefs,
+} from "@renderer/parameters";
 import { NUM_MODULATORS } from "../lib/constants";
-import type { ZustandGet, ZustandSet } from "./types";
+import type { ParameterKey } from "./types";
 
-export type ModulatorsState = any;
+type Enumerate<N extends number, Acc extends number[] = []> = Acc["length"] extends N
+  ? Acc[number]
+  : Enumerate<N, [...Acc, Acc["length"]]>;
+
+type Range<F extends number, T extends number> = Exclude<Enumerate<T>, Enumerate<F>>;
+
+export type ModulatableParameterKey =
+  | "brushIntensity"
+  | "brushPan"
+  | "dynamicsThresholdDb"
+  | "dynamicsUpperRatio"
+  | "dynamicsLowerRatio"
+  | "dynamicsKnee"
+  | "dynamicsGainDb"
+  | "blurAmountTime"
+  | "blurAmountPitch"
+  | "blurNoiseTime"
+  | "blurNoisePitch"
+  | "harmonicsPower"
+  | "harmonicsFalloff"
+  | "transformShiftBeats"
+  | "transformShiftSemis"
+  | "transformScaleTime"
+  | "transformScalePitch"
+  | "transformRotation";
+
+export type ModulatorAmountParameters = {
+  [K in ModulatableParameterKey as `${K}Mod${Range<1, 4>}Amount`]: number;
+};
+
+export type ModulatorParameters = {
+  [K in Range<1, 4> as `modulator${K}Mode`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}PatternShape`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}PatternRateBeats`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}PatternRateSemis`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}PatternRadial`]: boolean;
+} & {
+  [K in Range<1, 4> as `modulator${K}Strength`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}Rotation`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}ImagePath`]: string | null;
+} & {
+  [K in Range<1, 4> as `setModulator${K}ImagePath`]: (path: string | null) => void;
+} & {
+  [K in Range<1, 4> as `modulator${K}PhaseMode`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}EnvelopeMinDb`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}EnvelopeMaxDb`]: number;
+};
+
+export interface ModulatorsState extends ModulatorParameters, ModulatorAmountParameters {}
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-function createModulatorParams(set: ZustandSet, get: ZustandGet): any {
-  const params: Record<string, any> = {};
-
-  for (let i = 0; i < NUM_MODULATORS; i++) {
-    const idx = i + 1;
-
-    {
-      const key = `modulator${idx}Mode` as keyof ModulatorsState;
-      params[key] = parameterDefs[key].default;
-    }
-
-    {
-      const key = `modulator${idx}PatternShape` as keyof ModulatorsState;
-      params[key] = parameterDefs[key].default;
-    }
-
-    {
-      const key = `modulator${idx}Strength` as keyof ModulatorsState;
-      params[key] = parameterDefs[key].default;
-    }
-
-    {
-      const key = `modulator${idx}PatternRateBeats` as keyof ModulatorsState;
-      params[key] = parameterDefs[key].default;
-    }
-
-    {
-      const key = `modulator${idx}PatternRateSemis` as keyof ModulatorsState;
-      params[key] = parameterDefs[key].default;
-    }
-
-    {
-      const key = `modulator${idx}Rotation` as keyof ModulatorsState;
-      params[key] = parameterDefs[key].default;
-    }
-
-    {
-      const key = `modulator${idx}TexturePath` as keyof ModulatorsState;
-      params[key] = parameterDefs[key].default;
-    }
-
-    {
-      const key = `modulator${idx}PhaseMode` as keyof ModulatorsState;
-      params[key] = parameterDefs[key].default;
-    }
-
-    {
-      const key = `modulator${idx}EnvelopeMinDb` as keyof ModulatorsState;
-      params[key] = parameterDefs[key].default;
-    }
-
-    {
-      const key = `modulator${idx}EnvelopeMaxDb` as keyof ModulatorsState;
-      params[key] = parameterDefs[key].default;
-    }
-  }
+function createModulatorParams(): ModulatorsState {
+  const params: ModulatorsState = {
+    ...Array.from({ length: NUM_MODULATORS }, (_, i) => i + 1).reduce((acc, idx) => {
+      return {
+        ...acc,
+        [`modulator${idx}Mode`]: getOptionsParameterDef<number>(`modulator${idx}Mode` as keyof ModulatorsState).default,
+        [`modulator${idx}PatternShape`]: getOptionsParameterDef<number>(
+          `modulator${idx}PatternShape` as keyof ModulatorsState,
+        ).default,
+        [`modulator${idx}PatternRateBeats`]: getNumberParameterDef(
+          `modulator${idx}PatternRateBeats` as keyof ModulatorsState,
+        ).default,
+        [`modulator${idx}PatternRateSemis`]: getNumberParameterDef(
+          `modulator${idx}PatternRateSemis` as keyof ModulatorsState,
+        ).default,
+        [`modulator${idx}Strength`]: getNumberParameterDef(`modulator${idx}Strength` as keyof ModulatorsState).default,
+        [`modulator${idx}Rotation`]: getNumberParameterDef(`modulator${idx}Rotation` as keyof ModulatorsState).default,
+        [`modulator${idx}TexturePath`]: getStringParameterDef(`modulator${idx}TexturePath` as keyof ModulatorsState)
+          .default,
+        [`modulator${idx}PhaseMode`]: getOptionsParameterDef<number>(
+          `modulator${idx}PhaseMode` as keyof ModulatorsState,
+        ).default,
+        [`modulator${idx}EnvelopeMinDb`]: getNumberParameterDef(`modulator${idx}EnvelopeMinDb` as keyof ModulatorsState)
+          .default,
+        [`modulator${idx}EnvelopeMaxDb`]: getNumberParameterDef(`modulator${idx}EnvelopeMaxDb` as keyof ModulatorsState)
+          .default,
+      };
+    }, {} as ModulatorsState),
+    ...Object.entries(parameterDefs).reduce((acc, [key, def]) => {
+      if (def.kind === "number" && def.modulatable) {
+        return {
+          ...acc,
+          ...getModAmountParamKeys(key as ParameterKey).reduce((obj, key) => {
+            return {
+              ...obj,
+              [key]: 0,
+            };
+          }, {} as ModulatorAmountParameters),
+        };
+      } else return acc;
+    }, {} as ModulatorsState),
+  };
 
   return params;
 }
 
-export const createModulatorsSlice = (set: ZustandSet, get: ZustandGet): ModulatorsState => ({
-  ...createModulatorParams(set, get),
+export function getModAmountParamKeys(paramKey: ParameterKey) {
+  return Array.from({ length: NUM_MODULATORS }, (_, i) => i + 1).map(
+    (modIdx) => `${paramKey}Mod${modIdx}Amount`,
+  ) as ParameterKey[];
+}
+
+export function getModAmountValuesNormalized(state: ModulatorsState, paramKey: ParameterKey) {
+  return getModAmountParamKeys(paramKey).map((key) => (state[key] as number) / 100);
+}
+
+export const createModulatorsSlice = (): ModulatorsState => ({
+  ...createModulatorParams(),
 });

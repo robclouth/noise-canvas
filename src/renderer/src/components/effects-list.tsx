@@ -2,7 +2,7 @@ import { useStore } from "@/store";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
 import { Box, Stack } from "@mantine/core";
 import { EFFECT_COLORS } from "@renderer/lib/constants";
-import { CollapsibleEffectSection } from "./collapsible-effect-section";
+import { EffectSection } from "./effect-section";
 import { BlurEffect } from "./effect-views/blur-effect";
 import { DynamicsEffect } from "./effect-views/dynamics-effect";
 import { HarmonicsEffect } from "./effect-views/overtones-effect";
@@ -66,7 +66,7 @@ export function EffectsList() {
                       }),
                     }}
                   >
-                    <CollapsibleEffectSection
+                    <EffectSection
                       label={EFFECT_LABELS[effect] || effect}
                       description={EFFECT_DESCRIPTIONS[effect] || ""}
                       enabled={enabled}
@@ -80,7 +80,7 @@ export function EffectsList() {
                       color={EFFECT_COLORS[effect] || "gray"}
                     >
                       {EFFECT_COMPONENTS[effect] || null}
-                    </CollapsibleEffectSection>
+                    </EffectSection>
                   </Box>
                 )}
               </Draggable>

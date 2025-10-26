@@ -1,9 +1,9 @@
-import { Checkbox, Collapse, Group, Paper, Stack, Text } from "@mantine/core";
+import { Checkbox, Group, Paper, Stack, Text } from "@mantine/core";
 import { GripVertical } from "lucide-react";
 import { memo } from "react";
 import { Tooltip } from "./tooltip";
 
-export type CollapsibleEffectSectionProps = {
+export type EffectSectionProps = {
   label: string;
   description: string;
   children: React.ReactNode;
@@ -13,16 +13,8 @@ export type CollapsibleEffectSectionProps = {
   color?: string;
 };
 
-export const CollapsibleEffectSection = memo(
-  ({
-    label,
-    description,
-    children,
-    enabled,
-    onEnabledChange,
-    dragHandleProps,
-    color,
-  }: CollapsibleEffectSectionProps) => {
+export const EffectSection = memo(
+  ({ label, description, children, enabled, onEnabledChange, dragHandleProps, color }: EffectSectionProps) => {
     return (
       <Paper>
         <Stack gap="xs">
@@ -43,13 +35,11 @@ export const CollapsibleEffectSection = memo(
               <GripVertical size={16} />
             </div>
           </Group>
-          <Collapse in={enabled}>
-            <Stack gap={2}>{children}</Stack>
-          </Collapse>
+          <Stack gap={2}>{children}</Stack>
         </Stack>
       </Paper>
     );
   },
 );
 
-CollapsibleEffectSection.displayName = "CollapsibleEffectSection";
+EffectSection.displayName = "CollapsibleEffectSection";

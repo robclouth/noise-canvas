@@ -32,10 +32,7 @@ export interface ParameterBase {
   includeInPresets?: boolean;
 }
 
-// --- Concrete Parameter Interfaces ---
-
-// Base properties for all number parameters
-interface NumberParameterBase extends ParameterBase {
+export interface NumberParameter extends ParameterBase {
   kind: "number";
   default: number;
   min: number;
@@ -46,20 +43,8 @@ interface NumberParameterBase extends ParameterBase {
   leftValue?: { value: number; label: string };
   rightValue?: { value: number; label: string };
   marks?: Array<{ value: number; label: string }>;
+  modulatable?: boolean;
 }
-
-// By creating a discriminated union, if you check `param.modulatable === true`,
-// TypeScript will know that `param.modulatorParamKeys` is a guaranteed `ParameterKey[]`.
-export type NumberParameter =
-  | (NumberParameterBase & {
-      modulatable?: false;
-      modulatorParamKeys?: never; // Explicitly forbid this key on non-modulatable numbers
-    })
-  | (NumberParameterBase & {
-      modulatable: true;
-      modulatorParamKeys: ParameterKey[]; // This is now REQUIRED when modulatable is true
-    });
-
 export interface BooleanParameter extends ParameterBase {
   kind: "boolean";
   default: boolean;
@@ -76,18 +61,9 @@ export interface OptionsParameter<T = any> extends ParameterBase {
   options: { value: T; label: string }[];
 }
 
-// --- Union Type for all Definitions ---
-
 export type ParameterDef = NumberParameter | BooleanParameter | OptionsParameter | StringParameter;
 
-// A looser type for the initial definitions before the builder script runs
-type ParameterDefInput =
-  | Omit<NumberParameter, "modulatorParamKeys">
-  | BooleanParameter
-  | OptionsParameter
-  | StringParameter;
-
-// --- Mark Helpers (unchanged) ---
+type ParameterDefInput = NumberParameter | BooleanParameter | OptionsParameter | StringParameter;
 
 const negBeatMarks = BEAT_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse();
 const zeroBeatMark = { value: 0, label: "0" };
@@ -229,7 +205,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
 }
 
 // --- Base Definitions (Brush, Effects, App) ---
-const baseParameterDefs: Record<string, ParameterDefInput> = {
+const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   // --- Brush Parameters ---
   brushWidthBeats: {
     kind: "number",
@@ -812,12 +788,12 @@ const baseParameterDefs: Record<string, ParameterDefInput> = {
 
 // --- Final Parameter Definitions Builder ---
 
-const combinedDefs: Record<string, ParameterDefInput> = {
+const combinedDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   ...baseParameterDefs,
   ...modulatorDefs,
 };
 
-const finalParameterDefs: Record<string, ParameterDef> = { ...combinedDefs } as any;
+const finalParameterDefs: Partial<Record<ParameterKey, ParameterDef>> = { ...combinedDefs };
 
 for (const [key, def] of Object.entries(combinedDefs)) {
   if (def.kind === "number" && def.modulatable) {
@@ -841,9 +817,6 @@ for (const [key, def] of Object.entries(combinedDefs)) {
         includeInPresets: true,
       };
     }
-
-    // This is where we satisfy the strict `NumberParameter` type
-    (finalParameterDefs[key] as NumberParameter).modulatorParamKeys = modKeys;
   }
 }
 
@@ -852,12 +825,16 @@ export const parameterDefs = finalParameterDefs;
 export const getParameterDef = (key: ParameterKey): ParameterDef => {
   const parameterDef = parameterDefs[key];
 
-  if (parameterDef.kind === "number") return parameterDef as NumberParameter;
+  if (!parameterDef) {
+    throw new Error(`Parameter ${key} is not defined.`);
+  }
+
   return parameterDef;
 };
 
 export const getNumberParameterDef = (key: ParameterKey): NumberParameter => {
-  const parameterDef = parameterDefs[key];
+  const parameterDef = getParameterDef(key);
+
   if (parameterDef.kind !== "number") {
     throw new Error(`Parameter ${key} is not a number parameter.`);
   }
@@ -865,7 +842,8 @@ export const getNumberParameterDef = (key: ParameterKey): NumberParameter => {
 };
 
 export const getBooleanParameterDef = (key: ParameterKey): BooleanParameter => {
-  const parameterDef = parameterDefs[key];
+  const parameterDef = getParameterDef(key);
+
   if (parameterDef.kind !== "boolean") {
     throw new Error(`Parameter ${key} is not a boolean parameter.`);
   }
@@ -873,7 +851,8 @@ export const getBooleanParameterDef = (key: ParameterKey): BooleanParameter => {
 };
 
 export const getOptionsParameterDef = <T>(key: ParameterKey): OptionsParameter<T> => {
-  const parameterDef = parameterDefs[key];
+  const parameterDef = getParameterDef(key);
+
   if (parameterDef.kind !== "options") {
     throw new Error(`Parameter ${key} is not an options parameter.`);
   }
@@ -881,7 +860,8 @@ export const getOptionsParameterDef = <T>(key: ParameterKey): OptionsParameter<T
 };
 
 export const getStringParameterDef = (key: ParameterKey): StringParameter => {
-  const parameterDef = parameterDefs[key];
+  const parameterDef = getParameterDef(key);
+
   if (parameterDef.kind !== "string") {
     throw new Error(`Parameter ${key} is not a string parameter.`);
   }

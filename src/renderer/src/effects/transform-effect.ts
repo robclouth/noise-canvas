@@ -1,7 +1,7 @@
 import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
-import { getNumberParameterDef } from "@renderer/parameters";
 import type { EffectsState } from "@renderer/store/effects";
+import { getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { OpenFile } from "@renderer/store/types";
 import { ShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -93,12 +93,6 @@ class TransformEffect extends BaseEffect {
       filepathsBpm,
     } = state;
 
-    const transformShiftBeatsDef = getNumberParameterDef("transformShiftBeats");
-    const transformShiftSemisDef = getNumberParameterDef("transformShiftSemis");
-    const transformScaleTimeDef = getNumberParameterDef("transformScaleTime");
-    const transformScalePitchDef = getNumberParameterDef("transformScalePitch");
-    const transformRotationDef = getNumberParameterDef("transformRotation");
-
     const { file, passIndex } = props;
     const { spectrogramData } = file;
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
@@ -119,36 +113,31 @@ class TransformEffect extends BaseEffect {
       value: shiftUv.x,
       minValue: -0.5,
       maxValue: 0.5,
-      modulationAmounts:
-        transformShiftBeatsDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+      modulationAmounts: getModAmountValuesNormalized(state, "transformShiftBeats"),
     };
     material.uniforms.shiftY.value = {
       value: shiftUv.y,
       minValue: -0.5,
       maxValue: 0.5,
-      modulationAmounts:
-        transformShiftSemisDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+      modulationAmounts: getModAmountValuesNormalized(state, "transformShiftSemis"),
     };
     material.uniforms.scaleX.value = {
       value: transformScaleTime,
       minValue: -4,
       maxValue: 4,
-      modulationAmounts:
-        transformScaleTimeDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+      modulationAmounts: getModAmountValuesNormalized(state, "transformScaleTime"),
     };
     material.uniforms.scaleY.value = {
       value: transformScalePitch,
       minValue: -4,
       maxValue: 4,
-      modulationAmounts:
-        transformScalePitchDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+      modulationAmounts: getModAmountValuesNormalized(state, "transformScalePitch"),
     };
     material.uniforms.rotation.value = {
       value: transformRotation,
       minValue: -180,
       maxValue: 180,
-      modulationAmounts:
-        transformRotationDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+      modulationAmounts: getModAmountValuesNormalized(state, "transformRotation"),
     };
     material.uniforms.boundaryMode.value = transformEdgeMode;
   }

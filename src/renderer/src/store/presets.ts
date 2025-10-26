@@ -133,9 +133,10 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
 
       const presetValue = preset.parameters[key];
 
-      if (presetValue === undefined) updates[key] = parameterDef.default;
-      else if (value !== presetValue) {
-        updates[key] = presetValue;
+      const newValue = presetValue === undefined ? parameterDef.default : presetValue;
+
+      if (value !== newValue) {
+        updates[key] = newValue;
       }
     }
 

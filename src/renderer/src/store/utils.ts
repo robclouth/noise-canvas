@@ -1,4 +1,4 @@
-import { parameterDefs } from "@renderer/parameters";
+import { getNumberParameterDef } from "@renderer/parameters";
 import type { ParameterKey } from "./types";
 
 // utils/normalizers.ts
@@ -10,10 +10,7 @@ export function generateFileId(): string {
 }
 
 export function normalizeParameterValue(paramKey: ParameterKey, value: number): number {
-  const parameterDef = parameterDefs[paramKey];
-  if (parameterDef.kind !== "number") {
-    throw new Error(`Parameter ${paramKey} is not a number parameter`);
-  }
+  const parameterDef = getNumberParameterDef(paramKey);
 
   const { min, max, scale = "linear", leftValue, rightValue } = parameterDef;
   if (leftValue && value === leftValue.value) return 0;
@@ -50,10 +47,7 @@ export function normalizeParameterValue(paramKey: ParameterKey, value: number): 
 }
 
 export function denormalizeParameterValue(paramKey: ParameterKey, normalizedValue: number): number {
-  const parameterDef = parameterDefs[paramKey];
-  if (parameterDef.kind !== "number") {
-    throw new Error(`Parameter ${paramKey} is not a number parameter`);
-  }
+  const parameterDef = getNumberParameterDef(paramKey);
 
   const { min, max, scale = "linear", leftValue, rightValue } = parameterDef;
 

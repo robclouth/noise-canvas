@@ -1,5 +1,7 @@
 import { NumberParameter, parameterDefs } from "@renderer/parameters";
 import { openFiles } from "@renderer/store/files";
+import { getModAmountValuesNormalized } from "@renderer/store/modulators";
+import { ParameterKey } from "@renderer/store/types";
 import { useMemo } from "react";
 import { DataTexture, FloatType, RedFormat } from "three";
 import { Note, Scale } from "tonal";
@@ -29,7 +31,6 @@ export const buildModulatorUniforms = (
 
     const rateBeatsDef = parameterDefs[`modulator${i + 1}PatternRateBeats`] as NumberParameter;
     const rateSemisDef = parameterDefs[`modulator${i + 1}PatternRateSemis`] as NumberParameter;
-    const strengthDef = parameterDefs[`modulator${i + 1}Strength`] as NumberParameter;
     const rotationDef = parameterDefs[`modulator${i + 1}Rotation`] as NumberParameter;
 
     const maxRateUv = unitsToUv(rateBeatsDef.max, rateSemisDef.max, bpm, totalDuration, bandsPerOctave, numBands);
@@ -42,25 +43,25 @@ export const buildModulatorUniforms = (
         value: modulatorPatternRate.x,
         minValue: 0.0,
         maxValue: maxRateUv.x,
-        modulationAmounts: rateBeatsDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+        modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}PatternRateBeats` as ParameterKey),
       },
       modulatorPatternRateY: {
         value: modulatorPatternRate.y,
         minValue: 0.0,
         maxValue: maxRateUv.y,
-        modulationAmounts: rateSemisDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+        modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}PatternRateSemis` as ParameterKey),
       },
       modulatorStrength: {
         value: strength / 100,
         minValue: 0.0,
         maxValue: 1.0,
-        modulationAmounts: strengthDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+        modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}Strength` as ParameterKey),
       },
       modulatorRotation: {
         value: rotation,
         minValue: rotationDef.min,
         maxValue: rotationDef.max,
-        modulationAmounts: rotationDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+        modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}Rotation` as ParameterKey),
       },
       modulatorEnvelopeMinDb: envelopeMinDb,
       modulatorEnvelopeMaxDb: envelopeMaxDb,

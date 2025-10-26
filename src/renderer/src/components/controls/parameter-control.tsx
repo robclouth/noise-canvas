@@ -1,7 +1,8 @@
 import type { ParameterKey } from "@/store/types";
 import { Text } from "@mantine/core";
-import { NumberParameter, parameterDefs } from "@renderer/parameters";
+import { getParameterDef } from "@renderer/parameters";
 import { useStore } from "@renderer/store";
+import { getModAmountParamKeys } from "@renderer/store/modulators";
 import { denormalizeParameterValue, normalizeParameterValue } from "@renderer/store/utils";
 import { Tooltip } from "../tooltip";
 import { SelectControl } from "./select-control";
@@ -16,15 +17,15 @@ export type ParameterControlProps = {
 };
 
 export const ParameterControl = ({ labelWidth = 70, disabled, color, paramKey }: ParameterControlProps) => {
-  const parameter = parameterDefs[paramKey];
+  const parameter = getParameterDef(paramKey);
   const { kind, default: defaultValue, label, description } = parameter;
   const isModulatable = kind === "number" && "modulatable" in parameter && parameter.modulatable;
 
   const isModulated = useStore((state) => {
     return (
       isModulatable &&
-      (parameterDefs[paramKey] as NumberParameter).modulatorParamKeys
-        ?.map((key) => {
+      getModAmountParamKeys(paramKey)
+        .map((key) => {
           return state[key];
         })
         .some((amount) => amount !== 0)
@@ -73,7 +74,7 @@ export const ParameterControl = ({ labelWidth = 70, disabled, color, paramKey }:
         unit={parameter.unit}
         marks={parameter.marks}
         disabled={disabled}
-        modulatorParamKeys={isModulatable ? parameter.modulatorParamKeys : undefined}
+        modulatorParamKeys={isModulatable ? getModAmountParamKeys(paramKey) : undefined}
         color={color}
         rightValue={parameter.rightValue}
         fromNormalized={(value) => denormalizeParameterValue(paramKey, value)}
@@ -88,6 +89,7 @@ export const ParameterControl = ({ labelWidth = 70, disabled, color, paramKey }:
         labelComponent={labelComponent}
         value={parameterValue as boolean}
         setValue={(value) => setParameter(paramKey, value)}
+        color={color}
       />
     );
   }

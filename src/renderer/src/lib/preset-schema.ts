@@ -1,28 +1,45 @@
 // Zod schema for validating brush presets
+import { effects } from "@renderer/effects";
 import { parameterDefs } from "@renderer/parameters";
+import { ParameterKey } from "@renderer/store/types";
 import { z } from "zod";
 
 // Current preset version
 export const CURRENT_PRESET_VERSION = 1;
 
 export function createSchema() {
-  return z.object({
+  return z.strictObject({
     id: z.string(),
     name: z.string(),
     isFactory: z.boolean(),
     version: z.number().int().min(1).optional().default(1),
-    parameters: z.object(
+    parameters: z.strictObject(
       Object.entries(parameterDefs).reduce(
         (acc, [key, parameterDef]) => {
           if (parameterDef.includeInPresets === true) {
             if (parameterDef.kind === "number") {
-              acc[key] = z.number().min(parameterDef.min).max(parameterDef.max).optional();
+              acc[key] = z.number().optional();
             } else if (parameterDef.kind === "boolean") {
               acc[key] = z.boolean().optional();
             } else if (parameterDef.kind === "options") {
-              acc[key] = z.any().refine((value) => parameterDef.options.some((opt) => opt.value === value), {
-                message: `Invalid option for parameter ${key}`,
-              });
+              acc[key] = z.any().refine(
+                (value) => {
+                  if (value === undefined) return true;
+                  if ((key as ParameterKey) === "effectOrder")
+                    return (
+                      Array.isArray(value) &&
+                      value.every(
+                        ({ effect, enabled }) => Object.keys(effects).includes(effect) && typeof enabled === "boolean",
+                      )
+                    );
+                  return value === undefined || parameterDef.options.some((opt) => opt.value === value);
+                },
+                {
+                  message: `Invalid option for parameter ${key}`,
+                },
+              );
+            } else if (parameterDef.kind === "string") {
+              acc[key] = z.string().optional();
             }
           }
           return acc;

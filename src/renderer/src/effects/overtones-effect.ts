@@ -1,4 +1,5 @@
 import { getNumberParameterDef } from "@renderer/parameters";
+import { getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { OpenFile } from "@renderer/store/types";
 import { ClampToEdgeWrapping, DataTexture, FloatType, NearestFilter, RedFormat, ShaderMaterial } from "three";
 import overtonesFrag from "../glsl/overtones-effect.frag";
@@ -77,15 +78,13 @@ class OvertonesEffect extends BaseEffect {
       value: overtonesScale,
       minValue: overtonesScaleDef.min,
       maxValue: overtonesScaleDef.max,
-      modulationAmounts:
-        overtonesScaleDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+      modulationAmounts: getModAmountValuesNormalized(state, "overtonesScale"),
     };
     material.uniforms.overtonesDecay.value = {
       value: overtonesDecay / 100,
       minValue: overtonesDecayDef.min / 100,
       maxValue: overtonesDecayDef.max / 100,
-      modulationAmounts:
-        overtonesDecayDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+      modulationAmounts: getModAmountValuesNormalized(state, "overtonesDecay"),
     };
     material.uniforms.shapeTexture = { value: shapeTexture };
   }

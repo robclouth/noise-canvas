@@ -1,4 +1,5 @@
 import { getNumberParameterDef } from "@renderer/parameters";
+import { getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { OpenFile } from "@renderer/store/types";
 import { ShaderMaterial } from "three";
 import dynamicsEffectFrag from "../glsl/dynamics-effect.frag";
@@ -70,7 +71,7 @@ class DynamicsEffect extends BaseEffect {
       value: thresholdDb,
       minValue: thresholdDbDef.min,
       maxValue: thresholdDbDef.max,
-      modulationAmounts: thresholdDbDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+      modulationAmounts: getModAmountValuesNormalized(state, "dynamicsThresholdDb"),
     };
 
     const upperRatio = state.dynamicsUpperRatio;
@@ -79,7 +80,7 @@ class DynamicsEffect extends BaseEffect {
       value: upperRatio,
       minValue: upperRatioDef.min,
       maxValue: upperRatioDef.max,
-      modulationAmounts: upperRatioDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+      modulationAmounts: getModAmountValuesNormalized(state, "dynamicsUpperRatio"),
     };
 
     const lowerRatio = state.dynamicsLowerRatio;
@@ -88,7 +89,7 @@ class DynamicsEffect extends BaseEffect {
       value: lowerRatio,
       minValue: lowerRatioDef.min,
       maxValue: lowerRatioDef.max,
-      modulationAmounts: lowerRatioDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+      modulationAmounts: getModAmountValuesNormalized(state, "dynamicsLowerRatio"),
     };
 
     const knee = state.dynamicsKnee;
@@ -97,7 +98,7 @@ class DynamicsEffect extends BaseEffect {
       value: knee,
       minValue: kneeDef.min,
       maxValue: kneeDef.max,
-      modulationAmounts: kneeDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+      modulationAmounts: getModAmountValuesNormalized(state, "dynamicsKnee"),
     };
 
     const gainDb = state.dynamicsGainDb;
@@ -106,7 +107,7 @@ class DynamicsEffect extends BaseEffect {
       value: gainDb,
       minValue: gainDbDef.min,
       maxValue: gainDbDef.max,
-      modulationAmounts: gainDbDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
+      modulationAmounts: getModAmountValuesNormalized(state, "dynamicsGainDb"),
     };
   }
 }

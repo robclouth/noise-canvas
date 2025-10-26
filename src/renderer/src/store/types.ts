@@ -12,67 +12,6 @@ export type SliderScale = "linear" | "log" | "logBipolar";
 
 export type SliderMark = { value: number; label: string };
 
-export interface Normalizable<T = number> {
-  toNormalized: (value?: T) => number;
-  fromNormalized: (normalized: number) => T;
-}
-
-export interface NumberParameter extends Normalizable<number> {
-  name: string;
-  label: string;
-  description?: string;
-  value: number;
-  default: number;
-  min: number;
-  max: number;
-  step?: number;
-  unit?: string;
-
-  scale?: SliderScale;
-  marks?: SliderMark[];
-  leftValue?: SliderMark;
-  rightValue?: SliderMark;
-  setValue: (v: number) => void;
-  resetValue: () => void;
-
-  modulatorParamKeys?: (keyof ModulatorAmountParameters)[];
-
-  includeInPresets: boolean;
-}
-
-export interface BooleanParameter extends Normalizable<boolean> {
-  name: string;
-  label: string;
-  description?: string;
-  value: boolean;
-  default: boolean;
-  setValue: (v: boolean) => void;
-  resetValue: () => void;
-
-  includeInPresets: boolean;
-}
-
-export interface OptionsParameter<T = string> {
-  name: string;
-  label: string;
-  description?: string;
-  value: T;
-  default: T;
-  options: { value: T; label: string }[];
-  setValue: (v: T) => void;
-  resetValue: () => void;
-
-  includeInPresets: boolean;
-}
-
-export type Parameter<T> = T extends boolean
-  ? BooleanParameter
-  : T extends number
-    ? NumberParameter
-    : T extends string
-      ? OptionsParameter<string>
-      : OptionsParameter<T>;
-
 export type FileSettings = {
   bpm: number;
   bandsPerOctave: number;

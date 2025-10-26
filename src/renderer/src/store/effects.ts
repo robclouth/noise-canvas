@@ -1,7 +1,6 @@
-import { parameterDefs } from "@renderer/parameters";
+import { getParameterDef } from "@renderer/parameters";
 import { effects, EffectType } from "../effects";
 import { shapes } from "../effects/overtones-shapes";
-import type { ZustandGet, ZustandSet } from "./types";
 
 export interface EffectsState {
   dynamicsThresholdDb: number;
@@ -34,39 +33,39 @@ const DEFAULT_EFFECT_ORDER = Object.keys(effects)
   .map((k) => ({ effect: k as EffectType, enabled: false }));
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const createEffectsSlice = (set: ZustandSet, get: ZustandGet): EffectsState => {
+export const createEffectsSlice = (): EffectsState => {
   return {
     // ---------------- Dynamics ----------------
-    dynamicsThresholdDb: parameterDefs.dynamicsThresholdDb.default,
-    dynamicsUpperRatio: parameterDefs.dynamicsUpperRatio.default,
-    dynamicsLowerRatio: parameterDefs.dynamicsLowerRatio.default,
-    dynamicsKnee: parameterDefs.dynamicsKnee.default,
-    dynamicsGainDb: parameterDefs.dynamicsGainDb.default,
+    dynamicsThresholdDb: getParameterDef("dynamicsThresholdDb").default,
+    dynamicsUpperRatio: getParameterDef("dynamicsUpperRatio").default,
+    dynamicsLowerRatio: getParameterDef("dynamicsLowerRatio").default,
+    dynamicsKnee: getParameterDef("dynamicsKnee").default,
+    dynamicsGainDb: getParameterDef("dynamicsGainDb").default,
 
     // ---------------- Transform ----------------
-    transformShiftBeats: parameterDefs.transformShiftBeats.default,
-    transformShiftSemis: parameterDefs.transformShiftSemis.default,
-    transformScaleTime: parameterDefs.transformScaleTime.default,
-    transformScalePitch: parameterDefs.transformScalePitch.default,
-    transformRotation: parameterDefs.transformRotation.default,
-    transformEdgeMode: parameterDefs.transformEdgeMode.default,
+    transformShiftBeats: getParameterDef("transformShiftBeats").default,
+    transformShiftSemis: getParameterDef("transformShiftSemis").default,
+    transformScaleTime: getParameterDef("transformScaleTime").default,
+    transformScalePitch: getParameterDef("transformScalePitch").default,
+    transformRotation: getParameterDef("transformRotation").default,
+    transformEdgeMode: getParameterDef("transformEdgeMode").default,
 
     // ---------------- Blur ----------------
-    blurAmountTime: parameterDefs.blurAmountTime.default,
-    blurAmountPitch: parameterDefs.blurAmountPitch.default,
-    blurNoiseTime: parameterDefs.blurNoiseTime.default,
-    blurNoisePitch: parameterDefs.blurNoisePitch.default,
-    blurBleed: parameterDefs.blurBleed.default,
-    blurOrigin: parameterDefs.blurOrigin.default,
+    blurAmountTime: getParameterDef("blurAmountTime").default,
+    blurAmountPitch: getParameterDef("blurAmountPitch").default,
+    blurNoiseTime: getParameterDef("blurNoiseTime").default,
+    blurNoisePitch: getParameterDef("blurNoisePitch").default,
+    blurBleed: getParameterDef("blurBleed").default,
+    blurOrigin: getParameterDef("blurOrigin").default,
 
     // ---------------- Overtones ----------------
-    overtonesCount: parameterDefs.overtonesCount.default,
-    overtonesScale: parameterDefs.overtonesScale.default,
-    overtonesDecay: parameterDefs.overtonesDecay.default,
-    overtonesShape: parameterDefs.overtonesShape.default,
+    overtonesCount: getParameterDef("overtonesCount").default,
+    overtonesScale: getParameterDef("overtonesScale").default,
+    overtonesDecay: getParameterDef("overtonesDecay").default,
+    overtonesShape: getParameterDef("overtonesShape").default,
 
     // ---------------- Synthesize ----------------
-    synthesizeBrushType: parameterDefs.synthesizeBrushType.default,
+    synthesizeBrushType: getParameterDef("synthesizeBrushType").default,
 
     // ---------------- Effect order ----------------
     effectOrder: DEFAULT_EFFECT_ORDER,

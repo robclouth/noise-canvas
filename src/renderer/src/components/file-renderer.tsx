@@ -1,8 +1,8 @@
 import { useStore } from "@/store";
 import { useFrame } from "@react-three/fiber";
 import { CommonUniforms, defaultValues } from "@renderer/effects/base-effect";
-import { NumberParameter, parameterDefs } from "@renderer/parameters";
 import { openFiles } from "@renderer/store/files";
+import { getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { ShaderMaterial, UniformsUtils } from "three";
@@ -559,10 +559,7 @@ export const FileRenderer = memo(
               value: state.brushIntensity / 100,
               minValue: 0,
               maxValue: 1,
-              modulationAmounts:
-                (parameterDefs.brushIntensity as NumberParameter).modulatorParamKeys?.map(
-                  (paramKey) => (state[paramKey] as number) / 100,
-                ) || [],
+              modulationAmounts: getModAmountValuesNormalized(state, "brushIntensity"),
             },
           },
           brushPan: {
@@ -570,10 +567,7 @@ export const FileRenderer = memo(
               value: state.brushPan / 100,
               minValue: -1,
               maxValue: 1,
-              modulationAmounts:
-                (parameterDefs.brushPan as NumberParameter).modulatorParamKeys?.map(
-                  (paramKey) => (state[paramKey] as number) / 100,
-                ) || [],
+              modulationAmounts: getModAmountValuesNormalized(state, "brushPan"),
             },
           },
           bpm: { value: bpm },

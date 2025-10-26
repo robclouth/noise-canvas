@@ -1,6 +1,6 @@
-import { parameterDefs } from "@renderer/parameters";
+import { getParameterDef } from "@renderer/parameters";
 import { Vector2 } from "three";
-import type { ZustandGet, ZustandSet } from "./types";
+import type { ZustandSet } from "./types";
 
 export interface AppState {
   displayMinDb: number;
@@ -23,18 +23,18 @@ export interface AppState {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
+export const createAppSlice = (set: ZustandSet): AppState => {
   return {
-    displayMinDb: parameterDefs.displayMinDb.default,
-    displayMaxDb: parameterDefs.displayMaxDb.default,
-    magnitudeLimit: parameterDefs.magnitudeLimit.default,
-    gridSizeBeats: parameterDefs.gridSizeBeats.default,
-    gridSizeSemis: parameterDefs.gridSizeSemis.default,
-    normalize: parameterDefs.normalize.default,
-    scaleTonic: parameterDefs.scaleTonic.default,
-    scaleType: parameterDefs.scaleType.default,
-    bandsPerOctave: parameterDefs.bandsPerOctave.default,
-    minFreq: parameterDefs.minFreq.default,
+    displayMinDb: getParameterDef("displayMinDb").default,
+    displayMaxDb: getParameterDef("displayMaxDb").default,
+    magnitudeLimit: getParameterDef("magnitudeLimit").default,
+    gridSizeBeats: getParameterDef("gridSizeBeats").default,
+    gridSizeSemis: getParameterDef("gridSizeSemis").default,
+    normalize: getParameterDef("normalize").default,
+    scaleTonic: getParameterDef("scaleTonic").default,
+    scaleType: getParameterDef("scaleType").default,
+    bandsPerOctave: getParameterDef("bandsPerOctave").default,
+    minFreq: getParameterDef("minFreq").default,
 
     // ---------------- Plain state fields ----------------
     mousePos: null,
