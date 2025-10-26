@@ -1,5 +1,5 @@
 import { deepMerge } from "@mantine/core";
-import { effects, EffectType } from "@renderer/effects";
+import { parameterDefs } from "@renderer/parameters";
 import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
 import { createAppSlice } from "./app";
@@ -9,7 +9,7 @@ import { createEffectsSlice } from "./effects";
 import { createFilesSlice } from "./files";
 import { createModulatorsSlice } from "./modulators";
 import { createPresetsSlice } from "./presets";
-import type { Parameter, ParameterKey, State } from "./types";
+import type { ParameterKey, State } from "./types";
 
 export const PERSISTED_KEYS: (keyof State)[] = [
   "filepathsBpm",
@@ -30,15 +30,16 @@ export const useStore = create<State>()(
         ...createAudioSlice(set, get),
         ...createAppSlice(set, get),
         ...createPresetsSlice(set, get),
+        setParameter: (key: ParameterKey, value: any) => {
+          set({ [key]: value });
+        },
       }),
       {
         name: "noise-canvas-storage",
         partialize: (state) => {
           return Object.entries(state).reduce(
             (acc, [key, value]) => {
-              if (typeof value === "object" && value !== null && "value" in value) {
-                acc[key] = { value: (value as Parameter<unknown>).value };
-              } else if (PERSISTED_KEYS.includes(key as keyof State)) {
+              if (key in parameterDefs || PERSISTED_KEYS.includes(key as keyof State)) {
                 acc[key] = value;
               }
               return acc;
@@ -47,22 +48,6 @@ export const useStore = create<State>()(
           );
         },
         merge: (persistedState, currentState) => deepMerge(currentState, persistedState),
-        onRehydrateStorage: () => (state) => {
-          if (state) {
-            // Get all available effect types (excluding passthrough which is internal)
-            const allEffects = (Object.keys(effects) as EffectType[]).filter((key) => key !== "passthrough");
-            const currentOrder = state.effectOrder;
-            const missingEffects = allEffects.filter(
-              (effect) => !currentOrder.value.map((o) => o.effect).includes(effect),
-            );
-
-            if (missingEffects.length > 0) {
-              // Add missing effects to the end
-              const newOrder = [...currentOrder.value, ...missingEffects.map((effect) => ({ effect, enabled: false }))];
-              currentOrder.setValue(newOrder);
-            }
-          }
-        },
       },
     ),
   ),

@@ -35,15 +35,16 @@ const EFFECT_DESCRIPTIONS: Record<string, string> = {
 
 export function EffectsList() {
   const effectOrder = useStore((state) => state.effectOrder);
+  const setParameter = useStore((state) => state.setParameter);
 
   const handleDragEnd = (result: any) => {
     if (!result.destination) return;
 
-    const items = [...effectOrder.value];
+    const items = [...effectOrder];
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
 
-    effectOrder.setValue(items);
+    setParameter("effectOrder", items);
   };
 
   return (
@@ -51,7 +52,7 @@ export function EffectsList() {
       <Droppable droppableId="effects">
         {(provided) => (
           <Stack gap={0} {...provided.droppableProps} ref={provided.innerRef}>
-            {effectOrder.value.map(({ effect, enabled }, index) => (
+            {effectOrder.map(({ effect, enabled }, index) => (
               <Draggable key={effect} draggableId={effect} index={index}>
                 {(provided, snapshot) => (
                   <Box
@@ -70,8 +71,9 @@ export function EffectsList() {
                       description={EFFECT_DESCRIPTIONS[effect] || ""}
                       enabled={enabled}
                       onEnabledChange={(enabled) =>
-                        effectOrder.setValue(
-                          effectOrder.value.map((item, i) => (i === index ? { ...item, enabled } : item)),
+                        setParameter(
+                          "effectOrder",
+                          effectOrder.map((item, i) => (i === index ? { ...item, enabled } : item)),
                         )
                       }
                       dragHandleProps={provided.dragHandleProps}

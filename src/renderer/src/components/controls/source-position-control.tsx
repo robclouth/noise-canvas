@@ -9,7 +9,7 @@ export function SourcePositionControl() {
   const sourcePosition = useStore((state) => state.sourcePosition);
   const isSettingPosition = useStore((state) => state.isSettingPosition);
   const setIsSettingPosition = useStore((state) => state.setIsSettingPosition);
-  const mode = useStore((state) => state.sourcePositionMode.value);
+  const mode = useStore((state) => state.sourcePositionMode);
   const lockedOffset = useStore((state) => state.lockedOffset);
 
   // Format position or offset for display

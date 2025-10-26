@@ -24,7 +24,7 @@ class SynthesizeEffect extends BaseEffect {
     this.updateCommonUniforms(props);
     const state = useStore.getState();
     const { synthesizeBrushType } = state;
-    this.materials[props.passIndex].uniforms.synthesizeType.value = synthesizeBrushType.value;
+    this.materials[props.passIndex].uniforms.synthesizeType.value = synthesizeBrushType;
   }
 }
 

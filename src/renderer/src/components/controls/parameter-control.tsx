@@ -1,7 +1,8 @@
 import type { ParameterKey } from "@/store/types";
 import { Text } from "@mantine/core";
+import { NumberParameter, parameterDefs } from "@renderer/parameters";
 import { useStore } from "@renderer/store";
-import { isBooleanParameter, isNumberParameter, isOptionsParameter } from "@renderer/store/utils";
+import { denormalizeParameterValue, normalizeParameterValue } from "@renderer/store/utils";
 import { Tooltip } from "../tooltip";
 import { SelectControl } from "./select-control";
 import { SliderControl } from "./slider-control";
@@ -15,20 +16,23 @@ export type ParameterControlProps = {
 };
 
 export const ParameterControl = ({ labelWidth = 70, disabled, color, paramKey }: ParameterControlProps) => {
+  const parameter = parameterDefs[paramKey];
+  const { kind, default: defaultValue, label, description } = parameter;
+  const isModulatable = kind === "number" && "modulatable" in parameter && parameter.modulatable;
+
   const isModulated = useStore((state) => {
     return (
-      isNumberParameter(state[paramKey]) &&
-      state[paramKey]?.modulatorParamKeys
+      isModulatable &&
+      (parameterDefs[paramKey] as NumberParameter).modulatorParamKeys
         ?.map((key) => {
-          return state[key].value;
+          return state[key];
         })
         .some((amount) => amount !== 0)
     );
   });
 
-  const parameter = useStore((state) => state[paramKey]);
-  if (!parameter) return null;
-  const { description, label, resetValue } = parameter;
+  const parameterValue = useStore((state) => state[paramKey]);
+  const setParameter = useStore((state) => state.setParameter);
 
   const labelComponent = (
     <Tooltip label={description}>
@@ -37,7 +41,7 @@ export const ParameterControl = ({ labelWidth = 70, disabled, color, paramKey }:
         w={labelWidth}
         lineClamp={1}
         truncate="end"
-        onDoubleClick={() => resetValue()}
+        onDoubleClick={() => setParameter(paramKey, defaultValue)}
         c={isModulated ? "blue" : "dark.0"}
       >
         {label}
@@ -45,43 +49,47 @@ export const ParameterControl = ({ labelWidth = 70, disabled, color, paramKey }:
     </Tooltip>
   );
 
-  if (isOptionsParameter(parameter)) {
+  if (kind === "options") {
     return (
       <SelectControl
         labelComponent={labelComponent}
-        value={parameter.value}
+        value={parameterValue}
         options={parameter.options}
-        setValue={parameter.setValue}
-        resetValue={parameter.resetValue}
+        setValue={(value) => setParameter(paramKey, value)}
         labelWidth={60}
       />
     );
   }
 
-  if (isNumberParameter(parameter)) {
+  if (kind === "number") {
     return (
       <SliderControl
         labelComponent={labelComponent}
-        value={parameter.value}
-        setValue={parameter.setValue}
+        value={parameterValue as number}
+        setValue={(value) => setParameter(paramKey, value)}
         min={parameter.min}
         max={parameter.max}
         step={parameter.step}
         unit={parameter.unit}
         marks={parameter.marks}
         disabled={disabled}
-        modulatorParamKeys={parameter.modulatorParamKeys}
+        modulatorParamKeys={isModulatable ? parameter.modulatorParamKeys : undefined}
         color={color}
-        leftValue={parameter.leftValue}
         rightValue={parameter.rightValue}
-        fromNormalized={parameter.fromNormalized}
-        toNormalized={parameter.toNormalized}
+        fromNormalized={(value) => denormalizeParameterValue(paramKey, value)}
+        toNormalized={(value) => normalizeParameterValue(paramKey, value)}
       />
     );
   }
 
-  if (isBooleanParameter(parameter)) {
-    return <SwitchControl labelComponent={labelComponent} value={parameter.value} setValue={parameter.setValue} />;
+  if (kind === "boolean") {
+    return (
+      <SwitchControl
+        labelComponent={labelComponent}
+        value={parameterValue as boolean}
+        setValue={(value) => setParameter(paramKey, value)}
+      />
+    );
   }
   return null;
 };

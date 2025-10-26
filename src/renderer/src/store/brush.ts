@@ -1,209 +1,50 @@
 // createBrushSlice.ts
-import { ALGORITHMS, BEAT_VALUES, BLEND_MODES, PITCH_VALUES_NO_FRACTIONS, WRAP_MODES } from "../lib/constants";
-import type { BrushState, ZustandGet, ZustandSet } from "./types";
-import { makeCreateParameter } from "./utils";
+import { parameterDefs } from "@renderer/parameters";
+import type { ZustandGet, ZustandSet } from "./types";
 
+export interface BrushState {
+  brushIntensity: number;
+  brushIterations: number;
+  brushPan: number;
+  brushFeatherTime: number;
+  brushFeatherPitch: number;
+  brushFeatherSlopeTime: number;
+  brushFeatherSlopePitch: number;
+  sourcePosition: { beats: number; pitch: number; fileId: string } | null;
+  setSourcePosition: (position: { beats: number; pitch: number; fileId: string } | null) => void;
+  sourcePositionMode: string;
+  isSettingPosition: boolean;
+  setIsSettingPosition: (value: boolean) => void;
+  brushStartPosition: { beats: number; pitch: number } | null;
+  setBrushStartPosition: (position: { beats: number; pitch: number } | null) => void;
+  lockedOffset: { beats: number; pitch: number } | null;
+  setLockedOffset: (offset: { beats: number; pitch: number } | null) => void;
+  brushWidthBeats: number;
+  brushHeightSemis: number;
+  brushSizeLockedToGrid: boolean;
+  brushWrapMode: number;
+  blendMode: number;
+  algorithm: number;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState => {
-  const param = makeCreateParameter<BrushState>(set, get);
-
   return {
-    ...param("brushWidthBeats", {
-      kind: "number",
-      name: "Brush Width",
-      label: "Width",
-      description: "The width of the brush in beats.",
-      value: 1,
-      default: 1,
-      min: 1 / 64,
-      max: 32,
-      unit: " b",
-      scale: "log",
-      rightValue: { value: 0, label: "Full" },
-      marks: [...BEAT_VALUES, { value: 0, label: "Full" }],
-      includeInPresets: true,
-    }),
+    brushWidthBeats: parameterDefs.brushWidthBeats.default,
+    brushHeightSemis: parameterDefs.brushHeightSemis.default,
+    brushSizeLockedToGrid: parameterDefs.brushSizeLockedToGrid.default,
+    brushWrapMode: parameterDefs.brushWrapMode.default,
+    brushIntensity: parameterDefs.brushIntensity.default,
 
-    ...param("brushHeightSemis", {
-      kind: "number",
-      name: "Brush Height",
-      label: "Height",
-      description: "The height of the brush in semitones.",
-      value: 48,
-      default: 48,
-      min: 1,
-      max: 96,
-      step: 1,
-      unit: " st",
-      rightValue: { value: 0, label: "Full" },
-      marks: [...PITCH_VALUES_NO_FRACTIONS, { value: 0, label: "Full" }],
-      includeInPresets: true,
-    }),
-
-    ...param("brushSizeLockedToGrid", {
-      kind: "boolean",
-      name: "Lock Brush Size to Grid",
-      label: "Lock size",
-      description: "Locks the brush size to the grid size.",
-      value: false,
-      default: false,
-      includeInPresets: true,
-    }),
-
-    ...param("brushWrapMode", {
-      kind: "options",
-      name: "Wrap Mode",
-      label: "Wrap",
-      description: "Controls whether the brush wraps around the edges of the canvas.",
-      value: 0,
-      default: 0,
-      options: WRAP_MODES,
-      includeInPresets: true,
-    }),
-
-    ...param(
-      "brushIntensity",
-      {
-        kind: "number",
-        name: "Brush Strength",
-        label: "Strength",
-        description: "Controls the strength of the brush.",
-        value: 100,
-        default: 100,
-        min: 0,
-        max: 100,
-        step: 1,
-        unit: "%",
-        includeInPresets: true,
-      },
-      { modulatable: true },
-    ),
-
-    ...param("brushIterations", {
-      kind: "number",
-      name: "Brush Iterations",
-      label: "Iterations",
-      description: "How many times to apply the brush effect.",
-      value: 1,
-      default: 1,
-      min: 1,
-      max: 20,
-      step: 1,
-      includeInPresets: true,
-    }),
-
-    ...param(
-      "brushPan",
-      {
-        kind: "number",
-        name: "Pan",
-        label: "Pan",
-        description: "Pans the brush effect left or right.",
-        value: 0,
-        default: 0,
-        min: -100,
-        max: 100,
-        step: 1,
-        unit: "%",
-        includeInPresets: true,
-      },
-      { modulatable: true },
-    ),
-
-    ...param("brushFeatherTime", {
-      kind: "number",
-      name: "Feather Time",
-      label: "Feather H",
-      description: "Softens the brush effect at the edges of the time selection.",
-      value: 0,
-      default: 0,
-      min: 0,
-      max: 100,
-      step: 1,
-      unit: "%",
-      includeInPresets: true,
-    }),
-
-    ...param("brushFeatherPitch", {
-      kind: "number",
-      name: "Feather Pitch",
-      label: "Feather V",
-      description: "Softens the brush effect at the edges of the pitch selection.",
-      value: 0,
-      default: 0,
-      min: 0,
-      max: 100,
-      step: 1,
-      unit: "%",
-      includeInPresets: true,
-    }),
-
-    ...param("brushFeatherSlopeTime", {
-      kind: "number",
-      name: "Feather Slope Time",
-      label: "Slope H",
-      description:
-        "Controls the slope of the time feathering. -100 is fast initial rise, long tail, 100 is slow attack, fast finish.",
-      value: 0,
-      default: 0,
-      min: -100,
-      max: 100,
-      step: 1,
-      unit: "%",
-      includeInPresets: true,
-    }),
-
-    ...param("brushFeatherSlopePitch", {
-      kind: "number",
-      name: "Feather Slope Pitch",
-      label: "Slope V",
-      description:
-        "Controls the slope of the pitch feathering. -100 is fast initial rise, long tail, 100 is slow attack, fast finish.",
-      value: 0,
-      default: 0,
-      min: -100,
-      max: 100,
-      step: 1,
-      unit: "%",
-      includeInPresets: true,
-    }),
-
-    ...param("blendMode", {
-      kind: "options",
-      name: "Blend Mode",
-      label: "Blend mode",
-      description: "The blend mode to use when applying the brush.",
-      value: 0,
-      default: 0,
-      options: BLEND_MODES,
-      includeInPresets: true,
-    }),
-
-    ...param("algorithm", {
-      kind: "options",
-      name: "Warp Algorithm",
-      label: "Warp algo",
-      description: "The algorithm to use when warping the spectrogram.",
-      value: 3,
-      default: 3,
-      options: ALGORITHMS,
-      includeInPresets: true,
-    }),
-
-    ...param("sourcePositionMode", {
-      kind: "options",
-      name: "Source Position Mode",
-      label: "Mode",
-      description: "How the source position is used when painting.",
-      value: "anchored" as const,
-      default: "anchored" as const,
-      options: [
-        { value: "fixed", label: "Fixed" },
-        { value: "anchored", label: "Anchored" },
-        { value: "offset", label: "Offset" },
-      ],
-      includeInPresets: true,
-    }),
-
+    brushIterations: parameterDefs.brushIterations.default,
+    brushPan: parameterDefs.brushPan.default,
+    brushFeatherTime: parameterDefs.brushFeatherTime.default,
+    brushFeatherPitch: parameterDefs.brushFeatherPitch.default,
+    brushFeatherSlopeTime: parameterDefs.brushFeatherSlopeTime.default,
+    brushFeatherSlopePitch: parameterDefs.brushFeatherSlopePitch.default,
+    blendMode: parameterDefs.blendMode.default,
+    algorithm: parameterDefs.algorithm.default,
+    sourcePositionMode: parameterDefs.sourcePositionMode.default,
     sourcePosition: null,
     setSourcePosition: (position) => set({ sourcePosition: position, lockedOffset: null }),
     isSettingPosition: false,

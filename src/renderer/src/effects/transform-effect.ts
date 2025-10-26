@@ -1,5 +1,6 @@
 import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
+import { getNumberParameterDef } from "@renderer/parameters";
 import type { EffectsState } from "@renderer/store/effects";
 import { OpenFile } from "@renderer/store/types";
 import { ShaderMaterial } from "three";
@@ -92,13 +93,19 @@ class TransformEffect extends BaseEffect {
       filepathsBpm,
     } = state;
 
+    const transformShiftBeatsDef = getNumberParameterDef("transformShiftBeats");
+    const transformShiftSemisDef = getNumberParameterDef("transformShiftSemis");
+    const transformScaleTimeDef = getNumberParameterDef("transformScaleTime");
+    const transformScalePitchDef = getNumberParameterDef("transformScalePitch");
+    const transformRotationDef = getNumberParameterDef("transformRotation");
+
     const { file, passIndex } = props;
     const { spectrogramData } = file;
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
     const shiftUv = unitsToUv(
-      transformShiftBeats.value,
-      transformShiftSemis.value,
+      transformShiftBeats,
+      transformShiftSemis,
       filepathsBpm[file.filePath],
       totalDuration,
       spectrogramData.bandsPerOctave,
@@ -112,33 +119,38 @@ class TransformEffect extends BaseEffect {
       value: shiftUv.x,
       minValue: -0.5,
       maxValue: 0.5,
-      modulationAmounts: transformShiftBeats.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
+      modulationAmounts:
+        transformShiftBeatsDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
     };
     material.uniforms.shiftY.value = {
       value: shiftUv.y,
       minValue: -0.5,
       maxValue: 0.5,
-      modulationAmounts: transformShiftSemis.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
+      modulationAmounts:
+        transformShiftSemisDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
     };
     material.uniforms.scaleX.value = {
-      value: transformScaleTime.value,
+      value: transformScaleTime,
       minValue: -4,
       maxValue: 4,
-      modulationAmounts: transformScaleTime.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
+      modulationAmounts:
+        transformScaleTimeDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
     };
     material.uniforms.scaleY.value = {
-      value: transformScalePitch.value,
+      value: transformScalePitch,
       minValue: -4,
       maxValue: 4,
-      modulationAmounts: transformScalePitch.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
+      modulationAmounts:
+        transformScalePitchDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
     };
     material.uniforms.rotation.value = {
-      value: transformRotation.value,
+      value: transformRotation,
       minValue: -180,
       maxValue: 180,
-      modulationAmounts: transformRotation.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
+      modulationAmounts:
+        transformRotationDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
     };
-    material.uniforms.boundaryMode.value = transformEdgeMode.value;
+    material.uniforms.boundaryMode.value = transformEdgeMode;
   }
 }
 

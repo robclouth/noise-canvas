@@ -1,5 +1,5 @@
+import { NumberParameter, parameterDefs } from "@renderer/parameters";
 import { openFiles } from "@renderer/store/files";
-import { NumberParameter, OptionsParameter, ParameterKey } from "@renderer/store/types";
 import { useMemo } from "react";
 import { DataTexture, FloatType, RedFormat } from "three";
 import { Note, Scale } from "tonal";
@@ -15,57 +15,55 @@ export const buildModulatorUniforms = (
 ) => {
   const state = useStore.getState();
   const modulators = Array.from({ length: NUM_MODULATORS }).map((_, i) => {
-    const mode = state[`modulator${i + 1}Mode` as ParameterKey] as OptionsParameter<number>;
-    const shape = state[`modulator${i + 1}PatternShape` as ParameterKey] as OptionsParameter<number>;
-    const phaseMode = state[`modulator${i + 1}PhaseMode` as ParameterKey] as OptionsParameter<number>;
-    const rateBeats = state[`modulator${i + 1}PatternRateBeats` as ParameterKey] as NumberParameter;
-    const rateSemis = state[`modulator${i + 1}PatternRateSemis` as ParameterKey] as NumberParameter;
-    const strength = state[`modulator${i + 1}Strength` as ParameterKey] as NumberParameter;
-    const rotation = state[`modulator${i + 1}Rotation` as ParameterKey] as NumberParameter;
-    const envelopeMinDb = state[`modulator${i + 1}EnvelopeMinDb` as ParameterKey] as NumberParameter;
-    const envelopeMaxDb = state[`modulator${i + 1}EnvelopeMaxDb` as ParameterKey] as NumberParameter;
+    const mode = state[`modulator${i + 1}Mode`] as number;
+    const shape = state[`modulator${i + 1}PatternShape`] as number;
+    const phaseMode = state[`modulator${i + 1}PhaseMode`] as number;
+    const rateBeats = state[`modulator${i + 1}PatternRateBeats`] as number;
+    const rateSemis = state[`modulator${i + 1}PatternRateSemis`] as number;
+    const strength = state[`modulator${i + 1}Strength`] as number;
+    const rotation = state[`modulator${i + 1}Rotation`] as number;
+    const envelopeMinDb = state[`modulator${i + 1}EnvelopeMinDb`] as number;
+    const envelopeMaxDb = state[`modulator${i + 1}EnvelopeMaxDb`] as number;
 
-    const modulatorPatternRate = unitsToUv(
-      rateBeats.value,
-      rateSemis.value,
-      bpm,
-      totalDuration,
-      bandsPerOctave,
-      numBands,
-    );
+    const modulatorPatternRate = unitsToUv(rateBeats, rateSemis, bpm, totalDuration, bandsPerOctave, numBands);
 
-    const maxRateUv = unitsToUv(rateBeats.max, rateSemis.max, bpm, totalDuration, bandsPerOctave, numBands);
+    const rateBeatsDef = parameterDefs[`modulator${i + 1}PatternRateBeats`] as NumberParameter;
+    const rateSemisDef = parameterDefs[`modulator${i + 1}PatternRateSemis`] as NumberParameter;
+    const strengthDef = parameterDefs[`modulator${i + 1}Strength`] as NumberParameter;
+    const rotationDef = parameterDefs[`modulator${i + 1}Rotation`] as NumberParameter;
+
+    const maxRateUv = unitsToUv(rateBeatsDef.max, rateSemisDef.max, bpm, totalDuration, bandsPerOctave, numBands);
 
     return {
-      modulatorMode: mode.value,
-      modulatorPatternShape: shape.value,
-      modulatorPhaseMode: phaseMode.value,
+      modulatorMode: mode,
+      modulatorPatternShape: shape,
+      modulatorPhaseMode: phaseMode,
       modulatorPatternRateX: {
         value: modulatorPatternRate.x,
         minValue: 0.0,
         maxValue: maxRateUv.x,
-        modulationAmounts: rateBeats.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
+        modulationAmounts: rateBeatsDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
       },
       modulatorPatternRateY: {
         value: modulatorPatternRate.y,
         minValue: 0.0,
         maxValue: maxRateUv.y,
-        modulationAmounts: rateSemis.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
+        modulationAmounts: rateSemisDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
       },
       modulatorStrength: {
-        value: strength.value / 100,
+        value: strength / 100,
         minValue: 0.0,
         maxValue: 1.0,
-        modulationAmounts: strength.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
+        modulationAmounts: strengthDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
       },
       modulatorRotation: {
-        value: rotation.value,
-        minValue: rotation.min,
-        maxValue: rotation.max,
-        modulationAmounts: rotation.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
+        value: rotation,
+        minValue: rotationDef.min,
+        maxValue: rotationDef.max,
+        modulationAmounts: rotationDef.modulatorParamKeys?.map((paramKey) => (state[paramKey] as number) / 100) || [],
       },
-      modulatorEnvelopeMinDb: envelopeMinDb.value,
-      modulatorEnvelopeMaxDb: envelopeMaxDb.value,
+      modulatorEnvelopeMinDb: envelopeMinDb,
+      modulatorEnvelopeMaxDb: envelopeMaxDb,
     };
   });
 
@@ -73,10 +71,10 @@ export const buildModulatorUniforms = (
 };
 
 export const useModulatorScaleLut = (fileId: string) => {
-  const bandsPerOctave = useStore((state) => state.bandsPerOctave.value);
-  const minFreq = useStore((state) => state.minFreq.value);
-  const scaleTonic = useStore((state) => state.scaleTonic.value);
-  const scaleType = useStore((state) => state.scaleType.value);
+  const bandsPerOctave = useStore((state) => state.bandsPerOctave);
+  const minFreq = useStore((state) => state.minFreq);
+  const scaleTonic = useStore((state) => state.scaleTonic);
+  const scaleType = useStore((state) => state.scaleType);
 
   const file = openFiles[fileId];
   const spectrogramData = file?.spectrogramData;

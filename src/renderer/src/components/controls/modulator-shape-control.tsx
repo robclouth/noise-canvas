@@ -1,5 +1,6 @@
 import { Group, Select, Text } from "@mantine/core";
 import { getTextures } from "@renderer/lib/textures";
+import { getOptionsParameterDef } from "@renderer/parameters";
 import { useStore } from "@renderer/store";
 import type { ParameterKey } from "@renderer/store/types";
 import { ChevronDown } from "lucide-react";
@@ -27,7 +28,8 @@ const STANDARD_SHAPES = [
 ];
 
 export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorShapeControlProps) => {
-  const parameter = useStore((state) => state[paramKey]);
+  const shape = useStore((state) => state[paramKey]);
+  const shapeDef = getOptionsParameterDef(paramKey);
   const imagePath = useStore((state) => state[`modulator${modulatorIndex}ImagePath` as keyof typeof state] as string);
   const setImagePath = useStore(
     (state) => state[`setModulator${modulatorIndex}ImagePath` as keyof typeof state] as (path: string | null) => void,
@@ -62,38 +64,41 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
 
   // Get current select value
   const getCurrentValue = () => {
-    if (parameter.value === 12 && imagePath) {
+    if (shape === 12 && imagePath) {
       return `texture:${imagePath}`;
     }
-    return String(parameter.value);
+    return String(shape);
   };
 
   // Handle selection change
   const handleChange = (value: string | null) => {
-    if (!value || !parameter) return;
+    if (!value) return;
+
+    const setParameter = useStore.getState().setParameter;
 
     if (value.startsWith("texture:")) {
       // Image selected
       const imagePathValue = value.replace("texture:", "");
-      (parameter.setValue as (value: number) => void)(12);
+      setParameter(paramKey, 12);
       setImagePath(imagePathValue);
     } else {
       // Standard shape selected
-      (parameter.setValue as (value: number) => void)(parseInt(value));
+      setParameter(paramKey, parseInt(value));
       setImagePath(null);
     }
   };
 
-  // Safety check - don't render if parameter isn't loaded
-  if (!parameter) {
-    return null;
-  }
-
   return (
     <Group gap={"xs"} wrap="nowrap" h={25}>
-      <Tooltip label={parameter.description}>
-        <Text size="xs" w={70} lineClamp={1} truncate="end" onDoubleClick={() => parameter.resetValue()}>
-          {parameter.label}
+      <Tooltip label={shapeDef.description}>
+        <Text
+          size="xs"
+          w={70}
+          lineClamp={1}
+          truncate="end"
+          onDoubleClick={() => useStore.getState().setParameter(paramKey, shapeDef.default)}
+        >
+          {shapeDef.label}
         </Text>
       </Tooltip>
       <Select

@@ -50,7 +50,7 @@ function App(): React.JSX.Element {
 
     // Clear locked offset when switching away from offset mode
     const unsubModeChange = useStore.subscribe(
-      (state) => state.sourcePositionMode.value,
+      (state) => state.sourcePositionMode,
       (mode, prevMode) => {
         if (prevMode === "offset" && mode !== "offset") {
           useStore.getState().setLockedOffset(null);
@@ -156,7 +156,7 @@ function App(): React.JSX.Element {
 
   // Invalidate canvas when layout changes (sections collapse/expand)
   const sectionCollapsed = useStore((state) => state.sectionCollapsed);
-  const effectsEnabled = useStore((state) => state.effectOrder.value);
+  const effectsEnabled = useStore((state) => state.effectOrder);
 
   useEffect(() => {
     // Invalidate multiple times during the animation for smooth updates
