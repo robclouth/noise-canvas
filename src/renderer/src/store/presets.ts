@@ -290,7 +290,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     const state = get();
     const parameters = state.quickSlots[slotIndex];
     if (!parameters) return;
-    set(state.recallState(parameters));
+    set({ ...state.recallState(parameters), currentPresetId: null });
   },
   clearQuickSlot: (slotIndex: number) => {
     set(

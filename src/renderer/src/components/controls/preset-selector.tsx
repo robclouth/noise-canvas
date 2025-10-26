@@ -90,8 +90,8 @@ export function PresetSelector() {
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
-    // Only process keys that are numbers or letters
-    if (!/^[a-zA-Z0-9]$/.test(event.key)) {
+    // Only process keys that are letters
+    if (!/^[a-z]$/.test(event.key)) {
       return;
     }
 
