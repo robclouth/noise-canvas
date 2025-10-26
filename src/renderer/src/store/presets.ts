@@ -1,10 +1,10 @@
 import { notifications } from "@mantine/notifications";
 import { getFolders } from "@renderer/lib/folders";
 import { CURRENT_PRESET_VERSION, PresetType, validatePreset } from "@renderer/lib/preset-schema";
+import { parameterDefs } from "@renderer/parameters";
 import { produce } from "immer";
 import { factoryPresets } from "../lib/factory-presets";
 import type { State, ZustandGet, ZustandSet } from "./types";
-import { isParameter } from "./utils";
 
 export interface PresetsState {
   presetsDir: string | null;
@@ -77,7 +77,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
             const rawPreset = JSON.parse(fileContent);
 
             // Validate the preset against the schema (includes migration)
-            const validationResult = validatePreset(rawPreset, get());
+            const validationResult = validatePreset(rawPreset);
             if (validationResult.success) {
               userPresets.push(validationResult.data);
             } else {
@@ -126,15 +126,17 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
 
     const updates: Partial<State> = { currentPresetId: presetId };
 
-    for (const key of Object.keys(state)) {
-      const stateValue = state[key as keyof State];
-      if (!isParameter(stateValue)) continue;
+    for (const [key, parameterDef] of Object.entries(parameterDefs)) {
+      if (!parameterDef.includeInPresets) continue;
+
+      const value = state[key as keyof State];
 
       const presetValue = preset.parameters[key];
 
-      if (presetValue === undefined) updates[key] = { ...stateValue, value: stateValue.default };
-      else if (stateValue.value !== presetValue) {
-        updates[key] = { ...stateValue, value: presetValue };
+      const newValue = presetValue === undefined ? parameterDef.default : presetValue;
+
+      if (value !== newValue) {
+        updates[key] = newValue;
       }
     }
 
@@ -161,15 +163,15 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
         parameters: {},
       };
 
-      for (const key of Object.keys(state)) {
-        const stateValue = state[key as keyof State];
-        if (!isParameter(stateValue) || !stateValue.includeInPresets) continue;
+      for (const [key, parameterDef] of Object.entries(parameterDefs)) {
+        if (!parameterDef.includeInPresets) continue;
+        const value = state[key as keyof State];
 
-        if (stateValue.value === stateValue.default) continue; // Skip default values
-        preset.parameters[key] = stateValue.value;
+        if (value === parameterDef.default) continue; // Skip default values
+        preset.parameters[key] = value;
       }
 
-      const { success } = validatePreset(preset, state);
+      const { success } = validatePreset(preset);
 
       if (!success) {
         throw new Error("Preset is invalid");

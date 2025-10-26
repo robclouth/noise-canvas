@@ -1,3 +1,5 @@
+import { getNumberParameterDef } from "@renderer/parameters";
+import { getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { OpenFile } from "@renderer/store/types";
 import { ClampToEdgeWrapping, DataTexture, FloatType, NearestFilter, RedFormat, ShaderMaterial } from "three";
 import overtonesFrag from "../glsl/overtones-effect.frag";
@@ -65,21 +67,24 @@ class OvertonesEffect extends BaseEffect {
     const state = useStore.getState();
     const { overtonesCount, overtonesShape, overtonesScale, overtonesDecay } = state;
 
-    const shapeTexture = this.getShapeTexture(overtonesShape.value, overtonesCount.value);
+    const overtonesScaleDef = getNumberParameterDef("overtonesScale");
+    const overtonesDecayDef = getNumberParameterDef("overtonesDecay");
+
+    const shapeTexture = this.getShapeTexture(overtonesShape, overtonesCount);
 
     const material = this.materials[props.passIndex];
 
     material.uniforms.overtonesScale.value = {
-      value: overtonesScale.value,
-      minValue: overtonesScale.min,
-      maxValue: overtonesScale.max,
-      modulationAmounts: overtonesScale.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
+      value: overtonesScale,
+      minValue: overtonesScaleDef.min,
+      maxValue: overtonesScaleDef.max,
+      modulationAmounts: getModAmountValuesNormalized(state, "overtonesScale"),
     };
     material.uniforms.overtonesDecay.value = {
-      value: overtonesDecay.value / 100,
-      minValue: overtonesDecay.min / 100,
-      maxValue: overtonesDecay.max / 100,
-      modulationAmounts: overtonesDecay.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
+      value: overtonesDecay / 100,
+      minValue: overtonesDecayDef.min / 100,
+      maxValue: overtonesDecayDef.max / 100,
+      modulationAmounts: getModAmountValuesNormalized(state, "overtonesDecay"),
     };
     material.uniforms.shapeTexture = { value: shapeTexture };
   }

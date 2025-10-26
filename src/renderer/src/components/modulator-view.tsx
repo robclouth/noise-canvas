@@ -94,10 +94,10 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
 export const ModulatorView = () => {
   const [viewedModulatorIndex, setViewedModulatorIndex] = useState("0");
   const modulatorMode = useStore(
-    (state) => state[`modulator${parseInt(viewedModulatorIndex) + 1}Mode` as ParameterKey].value,
+    (state) => state[`modulator${parseInt(viewedModulatorIndex) + 1}Mode` as ParameterKey],
   );
   const modulatorPatternShape = useStore(
-    (state) => state[`modulator${parseInt(viewedModulatorIndex) + 1}PatternShape` as ParameterKey].value,
+    (state) => state[`modulator${parseInt(viewedModulatorIndex) + 1}PatternShape` as ParameterKey],
   );
 
   const isPatternMode = modulatorMode === 0;

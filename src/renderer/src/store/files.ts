@@ -86,8 +86,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         numberOfChannels: 2,
       });
       const result = await window.audioAnalysis.analyseBuffer(audioBuffer, {
-        bandsPerOctave: state.bandsPerOctave.value,
-        minFreq: state.minFreq.value,
+        bandsPerOctave: state.bandsPerOctave,
+        minFreq: state.minFreq,
       });
 
       const spectrogramData = {
@@ -105,8 +105,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         numChannels: result.numChannels,
         sampleRate: result.sampleRate,
         packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-        minFreq: state.minFreq.value,
-        bandsPerOctave: state.bandsPerOctave.value,
+        minFreq: state.minFreq,
+        bandsPerOctave: state.bandsPerOctave,
         synthesisMetadata: {
           bandOffsets: result.bandOffsets,
           bandStepLog2s: result.bandStepLog2s,
@@ -129,7 +129,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         produce((state: State) => {
           state.openFileIds.push(fileId);
           state.filepathsBpm[filepath] = bpm;
-          state.filesBandsPerOctave[fileId] = state.bandsPerOctave.value;
+          state.filesBandsPerOctave[fileId] = state.bandsPerOctave;
           state.filesZoom[fileId] = 0;
           state.filesOffset[fileId] = 0;
           state.filesPlaybackStartTime[fileId] = 0;
@@ -156,8 +156,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     try {
       const result = await window.audioAnalysis.analyze(filepath, {
-        bandsPerOctave: state.bandsPerOctave.value,
-        minFreq: state.minFreq.value,
+        bandsPerOctave: state.bandsPerOctave,
+        minFreq: state.minFreq,
       });
 
       const spectrogramData = {
@@ -175,8 +175,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         numChannels: result.numChannels,
         sampleRate: result.sampleRate,
         packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-        minFreq: state.minFreq.value,
-        bandsPerOctave: state.bandsPerOctave.value,
+        minFreq: state.minFreq,
+        bandsPerOctave: state.bandsPerOctave,
         synthesisMetadata: {
           bandOffsets: result.bandOffsets,
           bandStepLog2s: result.bandStepLog2s,
@@ -196,7 +196,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         produce((state: State) => {
           state.openFileIds.push(fileId);
           state.filepathsBpm[filepath] ??= state.mostRecentBpm ?? 120;
-          state.filesBandsPerOctave[fileId] = state.bandsPerOctave.value;
+          state.filesBandsPerOctave[fileId] = state.bandsPerOctave;
           state.filesZoom[fileId] = 0;
           state.filesOffset[fileId] = 0;
           state.filesPlaybackStartTime[fileId] = 0;
@@ -518,8 +518,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       };
 
       const analysisParams = {
-        bandsPerOctave: bandsPerOctave.value,
-        minFreq: minFreq.value,
+        bandsPerOctave: bandsPerOctave,
+        minFreq: minFreq,
       };
 
       const synthesisStart = performance.now();
@@ -535,7 +535,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         payload.analysisMetadata,
         originalAnalysis.sampleRate,
         analysisParams,
-        normalize.value,
+        normalize,
       );
 
       const synthesisTime = performance.now() - synthesisStart;
@@ -607,12 +607,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         try {
           const result = audioBuffer
             ? await window.audioAnalysis.analyseBuffer(audioBuffer, {
-                bandsPerOctave: state.bandsPerOctave.value,
-                minFreq: state.minFreq.value,
+                bandsPerOctave: state.bandsPerOctave,
+                minFreq: state.minFreq,
               })
             : await window.audioAnalysis.analyze(file.filePath, {
-                bandsPerOctave: state.bandsPerOctave.value,
-                minFreq: state.minFreq.value,
+                bandsPerOctave: state.bandsPerOctave,
+                minFreq: state.minFreq,
               });
 
           const spectrogramData = {
@@ -634,8 +634,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             numChannels: result.numChannels,
             sampleRate: result.sampleRate,
             packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-            minFreq: state.minFreq.value,
-            bandsPerOctave: state.bandsPerOctave.value,
+            minFreq: state.minFreq,
+            bandsPerOctave: state.bandsPerOctave,
             synthesisMetadata: {
               bandOffsets: result.bandOffsets,
               bandStepLog2s: result.bandStepLog2s,
@@ -652,7 +652,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
           return set(
             produce((state: State) => {
-              state.filesBandsPerOctave[state.activeFileId!] = state.bandsPerOctave.value;
+              state.filesBandsPerOctave[state.activeFileId!] = state.bandsPerOctave;
             }),
           );
         } catch (error) {

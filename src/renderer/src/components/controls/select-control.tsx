@@ -12,7 +12,6 @@ export const SelectControl = <T,>({
   value: T;
   options: readonly { value: T; label: string }[];
   setValue: (value: T) => void;
-  resetValue: () => void;
   labelWidth?: number;
 }) => {
   const handleChange = (val: string | null) => {

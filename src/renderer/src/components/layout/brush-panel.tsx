@@ -7,7 +7,7 @@ import { ModulatorView } from "../modulator-view";
 import { Section } from "../section";
 
 export function BrushPanel() {
-  const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid.value);
+  const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid);
 
   return (
     <Stack p="xs" gap="xs">

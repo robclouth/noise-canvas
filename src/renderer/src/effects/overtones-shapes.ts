@@ -23,8 +23,8 @@ export const shapes: Record<string, Shape> = {
     label: "Selected Scale",
     create: (count) => {
       const state = useStore.getState();
-      const scaleTonic = state.scaleTonic.value;
-      const scaleType = state.scaleType.value;
+      const scaleTonic = state.scaleTonic;
+      const scaleType = state.scaleType;
       const scale = Scale.get(`${scaleTonic} ${scaleType}`);
       const chroma = scale.chroma.split("").map(Number);
 

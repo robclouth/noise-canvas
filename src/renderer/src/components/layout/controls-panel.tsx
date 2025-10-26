@@ -6,15 +6,15 @@ import { SourcePositionControl } from "../controls/source-position-control";
 import { Section } from "../section";
 
 export function ControlsPanel() {
-  const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid.value);
-  const gridSizeBeats = useStore((state) => state.gridSizeBeats.value);
-  const gridSizeSemis = useStore((state) => state.gridSizeSemis.value);
+  const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid);
+  const gridSizeBeats = useStore((state) => state.gridSizeBeats);
+  const gridSizeSemis = useStore((state) => state.gridSizeSemis);
 
   useEffect(() => {
     if (brushSizeLockedToGrid) {
-      const state = useStore.getState();
-      state.brushWidthBeats.setValue(gridSizeBeats);
-      state.brushHeightSemis.setValue(gridSizeSemis);
+      const setParameter = useStore.getState().setParameter;
+      setParameter("brushWidthBeats", gridSizeBeats);
+      setParameter("brushHeightSemis", gridSizeSemis);
     }
   }, [brushSizeLockedToGrid, gridSizeBeats, gridSizeSemis]);
 

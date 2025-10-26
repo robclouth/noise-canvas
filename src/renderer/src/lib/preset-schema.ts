@@ -1,43 +1,45 @@
 // Zod schema for validating brush presets
-import { State } from "@renderer/store/types";
-import { isBooleanParameter, isNumberParameter, isOptionsParameter } from "@renderer/store/utils";
+import { effects } from "@renderer/effects";
+import { parameterDefs } from "@renderer/parameters";
+import { ParameterKey } from "@renderer/store/types";
 import { z } from "zod";
 
 // Current preset version
 export const CURRENT_PRESET_VERSION = 1;
 
-export function createSchema(state: State) {
-  return z.object({
+export function createSchema() {
+  return z.strictObject({
     id: z.string(),
     name: z.string(),
     isFactory: z.boolean(),
     version: z.number().int().min(1).optional().default(1),
-    parameters: z.object(
-      Object.entries(state).reduce(
-        (acc, [key, parameter]) => {
-          if (
-            parameter &&
-            typeof parameter === "object" &&
-            "value" in parameter &&
-            "includeInPresets" in parameter &&
-            parameter.includeInPresets === true
-          ) {
-            if (isNumberParameter(parameter)) {
-              acc[key] = z.number().min(parameter.min).max(parameter.max).optional();
-            } else if (isBooleanParameter(parameter)) {
+    parameters: z.strictObject(
+      Object.entries(parameterDefs).reduce(
+        (acc, [key, parameterDef]) => {
+          if (parameterDef.includeInPresets === true) {
+            if (parameterDef.kind === "number") {
+              acc[key] = z.number().optional();
+            } else if (parameterDef.kind === "boolean") {
               acc[key] = z.boolean().optional();
-            } else if (isOptionsParameter(parameter)) {
-              if (Array.isArray(parameter.value)) {
-                acc[key] = z.array(z.any()).optional();
-              } else {
-                acc[key] = Number.isInteger(parameter.value)
-                  ? z
-                      .number()
-                      .min(0)
-                      .max(parameter.options.length - 1)
-                      .optional()
-                  : z.string().optional();
-              }
+            } else if (parameterDef.kind === "options") {
+              acc[key] = z.any().refine(
+                (value) => {
+                  if (value === undefined) return true;
+                  if ((key as ParameterKey) === "effectOrder")
+                    return (
+                      Array.isArray(value) &&
+                      value.every(
+                        ({ effect, enabled }) => Object.keys(effects).includes(effect) && typeof enabled === "boolean",
+                      )
+                    );
+                  return value === undefined || parameterDef.options.some((opt) => opt.value === value);
+                },
+                {
+                  message: `Invalid option for parameter ${key}`,
+                },
+              );
+            } else if (parameterDef.kind === "string") {
+              acc[key] = z.string().optional();
             }
           }
           return acc;
@@ -84,14 +86,13 @@ export function migratePreset(data: any): any {
 // Validation function with detailed error reporting and migration support
 export function validatePreset(
   data: unknown,
-  state: State,
 ): { success: true; data: PresetType } | { success: false; errors: string[] } {
   try {
     // First, try to migrate the data if needed
     const migratedData = migratePreset(data);
 
     // Then validate against the schema
-    const PresetSchema = createSchema(state);
+    const PresetSchema = createSchema();
     const validatedData = PresetSchema.parse(migratedData);
     return { success: true, data: validatedData };
   } catch (error) {

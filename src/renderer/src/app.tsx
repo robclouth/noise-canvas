@@ -50,7 +50,7 @@ function App(): React.JSX.Element {
 
     // Clear locked offset when switching away from offset mode
     const unsubModeChange = useStore.subscribe(
-      (state) => state.sourcePositionMode.value,
+      (state) => state.sourcePositionMode,
       (mode, prevMode) => {
         if (prevMode === "offset" && mode !== "offset") {
           useStore.getState().setLockedOffset(null);
@@ -153,34 +153,6 @@ function App(): React.JSX.Element {
       unsubscribers.forEach((unsub) => unsub());
     };
   }, []);
-
-  // Invalidate canvas when layout changes (sections collapse/expand)
-  const sectionCollapsed = useStore((state) => state.sectionCollapsed);
-  const effectsEnabled = useStore((state) => state.effectOrder.value);
-
-  useEffect(() => {
-    // Invalidate multiple times during the animation for smooth updates
-    const invalidate = () => invalidateRef.current?.();
-
-    invalidate(); // Immediate
-    requestAnimationFrame(() => {
-      invalidate();
-      requestAnimationFrame(invalidate);
-    });
-
-    // Continue invalidating every frame during the animation
-    const startTime = Date.now();
-    const animationDuration = 200; // Mantine Collapse default
-
-    const intervalId = setInterval(() => {
-      if (Date.now() - startTime > animationDuration) {
-        clearInterval(intervalId);
-      }
-      invalidate();
-    }, 16); // ~60fps
-
-    return () => clearInterval(intervalId);
-  }, [sectionCollapsed, effectsEnabled]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     if (

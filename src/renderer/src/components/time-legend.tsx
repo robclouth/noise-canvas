@@ -15,7 +15,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
   const bpm = useStore((state) => state.filepathsBpm[filePath]);
   const zoom = useStore((state) => state.filesZoom[fileId]);
   const offset = useStore((state) => state.filesOffset[fileId]);
-  const gridSizeBeats = useStore((state) => state.gridSizeBeats.value);
+  const gridSizeBeats = useStore((state) => state.gridSizeBeats);
   const setFilePlaybackStartTime = useStore((state) => state.setFilePlaybackStartTime);
   const togglePlayback = useStore((state) => state.togglePlayback);
   const isPlaying = useStore((state) => state.isPlaying);

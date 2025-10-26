@@ -2,6 +2,7 @@ import { useStore } from "@/store";
 import { useFrame } from "@react-three/fiber";
 import { CommonUniforms, defaultValues } from "@renderer/effects/base-effect";
 import { openFiles } from "@renderer/store/files";
+import { getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { ShaderMaterial, UniformsUtils } from "three";
@@ -106,25 +107,25 @@ export const FileRenderer = memo(
         },
       );
       const unsubGridBeats = useStore.subscribe(
-        (state) => state.gridSizeBeats.value,
+        (state) => state.gridSizeBeats,
         () => {
           invalidateRef.current?.();
         },
       );
       const unsubGridSemis = useStore.subscribe(
-        (state) => state.gridSizeSemis.value,
+        (state) => state.gridSizeSemis,
         () => {
           invalidateRef.current?.();
         },
       );
       const unsubDisplayMinDb = useStore.subscribe(
-        (state) => state.displayMinDb.value,
+        (state) => state.displayMinDb,
         () => {
           invalidateRef.current?.();
         },
       );
       const unsubDisplayMaxDb = useStore.subscribe(
-        (state) => state.displayMaxDb.value,
+        (state) => state.displayMaxDb,
         () => {
           invalidateRef.current?.();
         },
@@ -147,8 +148,8 @@ export const FileRenderer = memo(
       return new ShaderMaterial({
         uniforms: {
           ...UniformsUtils.clone(defaultValues),
-          minDb: { value: state.displayMinDb.value },
-          maxDb: { value: state.displayMaxDb.value },
+          minDb: { value: state.displayMinDb },
+          maxDb: { value: state.displayMaxDb },
           bpm: { value: 120.0 },
           gridSize: { value: 0.25 },
           gridWidthUv: { value: 0.0 },
@@ -328,12 +329,12 @@ export const FileRenderer = memo(
           return sourceOffsetUv;
         }
 
-        const mode = state.sourcePositionMode.value;
+        const mode = state.sourcePositionMode;
 
         // Calculate brush size in the SOURCE file's coordinate space
         const brushSizeUvSource = unitsToUv(
-          state.brushWidthBeats.value,
-          state.brushHeightSemis.value,
+          state.brushWidthBeats,
+          state.brushHeightSemis,
           sourceBpm,
           sourceTotalDuration,
           sourceSpectrogramData.bandsPerOctave,
@@ -343,8 +344,8 @@ export const FileRenderer = memo(
 
         // Calculate brush size in the CURRENT file's coordinate space
         const brushSizeUvCurrent = unitsToUv(
-          state.brushWidthBeats.value,
-          state.brushHeightSemis.value,
+          state.brushWidthBeats,
+          state.brushHeightSemis,
           bpm,
           totalDuration,
           spectrogramData.bandsPerOctave,
@@ -484,16 +485,16 @@ export const FileRenderer = memo(
 
       // Calculate brush size for display
       const brushSizeUv = unitsToUv(
-        state.brushWidthBeats.value,
-        state.brushHeightSemis.value,
+        state.brushWidthBeats,
+        state.brushHeightSemis,
         bpm,
         totalDuration,
         spectrogramData.bandsPerOctave,
         spectrogramData.numBands,
       );
       // Handle full brush size (when brush width or height is 0)
-      brushSizeUv.x = state.brushWidthBeats.value > 0 ? brushSizeUv.x : 1;
-      brushSizeUv.y = state.brushHeightSemis.value > 0 ? brushSizeUv.y : 1;
+      brushSizeUv.x = state.brushWidthBeats > 0 ? brushSizeUv.x : 1;
+      brushSizeUv.y = state.brushHeightSemis > 0 ? brushSizeUv.y : 1;
 
       // Render brush stroke if requested
       if (strokeParams.current && applyStroke.current) {
@@ -549,35 +550,33 @@ export const FileRenderer = memo(
           viewOffset: { value: viewOffset },
           brushCenterUv: { value: mousePos || new THREE.Vector2(-1, -1) },
           brushSizeUv: { value: brushSizeUv },
-          featherX: { value: state.brushFeatherTime.value / 100 },
-          featherY: { value: state.brushFeatherPitch.value / 100 },
-          featherSlopeTime: { value: state.brushFeatherSlopeTime.value / 100 },
-          featherSlopePitch: { value: state.brushFeatherSlopePitch.value / 100 },
+          featherX: { value: state.brushFeatherTime / 100 },
+          featherY: { value: state.brushFeatherPitch / 100 },
+          featherSlopeTime: { value: state.brushFeatherSlopeTime / 100 },
+          featherSlopePitch: { value: state.brushFeatherSlopePitch / 100 },
           brushIntensity: {
             value: {
-              value: state.brushIntensity.value / 100,
+              value: state.brushIntensity / 100,
               minValue: 0,
               maxValue: 1,
-              modulationAmounts:
-                state.brushIntensity.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
+              modulationAmounts: getModAmountValuesNormalized(state, "brushIntensity"),
             },
           },
           brushPan: {
             value: {
-              value: state.brushPan.value / 100,
+              value: state.brushPan / 100,
               minValue: -1,
               maxValue: 1,
-              modulationAmounts:
-                state.brushPan.modulatorParamKeys?.map((paramKey) => state[paramKey].value / 100) || [],
+              modulationAmounts: getModAmountValuesNormalized(state, "brushPan"),
             },
           },
           bpm: { value: bpm },
           sourceOffsetX: { value: sourceOffsetUv.x },
           sourceOffsetY: { value: sourceOffsetUv.y },
-          blendMode: { value: state.blendMode.value },
-          algorithm: { value: state.algorithm.value },
-          magnitudeLimit: { value: state.magnitudeLimit.value },
-          wrapMode: { value: state.brushWrapMode.value },
+          blendMode: { value: state.blendMode },
+          algorithm: { value: state.algorithm },
+          magnitudeLimit: { value: state.magnitudeLimit },
+          wrapMode: { value: state.brushWrapMode },
           modulators: {
             value: buildModulatorUniforms(bpm, totalDuration, spectrogramData.bandsPerOctave, spectrogramData.numBands),
           },
@@ -588,7 +587,7 @@ export const FileRenderer = memo(
         };
 
         // Get enabled effects in order
-        const enabledEffects = state.effectOrder.value.filter(({ enabled }) => enabled).map(({ effect }) => effect);
+        const enabledEffects = state.effectOrder.filter(({ enabled }) => enabled).map(({ effect }) => effect);
 
         // If no effects are enabled, add a passthrough effect to properly handle metadata conversion
         if (enabledEffects.length === 0) {
@@ -639,7 +638,7 @@ export const FileRenderer = memo(
           const effect = effects[effectId];
           const numPasses = effect.materials.length;
 
-          for (let i = 0; i < state.brushIterations.value; i++) {
+          for (let i = 0; i < state.brushIterations; i++) {
             for (let p = 0; p < numPasses; p++) {
               const isFirstEffect = effectIndex === 0;
               const isFirstIteration = i === 0;
@@ -651,7 +650,7 @@ export const FileRenderer = memo(
               fboMesh.material = material;
 
               const isLastEffect = effectIndex === enabledEffects.length - 1;
-              const isLastIteration = i === state.brushIterations.value - 1;
+              const isLastIteration = i === state.brushIterations - 1;
               const isLastPass = p === numPasses - 1;
               const isFinalPass = isLastEffect && isLastIteration && isLastPass;
               const currentWriteFbo = isFinalPass ? destinationFbo : tempFboA;
@@ -714,21 +713,21 @@ export const FileRenderer = memo(
       displayMaterial.uniforms.sourceChannelCount.value = spectrogramData.numChannels;
       displayMaterial.uniforms.sourceSampleRate.value = spectrogramData.sampleRate;
       displayMaterial.uniforms.sourceSpectrogramTextureSize.value = spectrogramData.packedTextureSize;
-      displayMaterial.uniforms.gridSize.value = state.gridSizeBeats.value;
+      displayMaterial.uniforms.gridSize.value = state.gridSizeBeats;
       displayMaterial.uniforms.bpm.value = bpm;
-      displayMaterial.uniforms.minDb.value = state.displayMinDb.value;
-      displayMaterial.uniforms.maxDb.value = state.displayMaxDb.value;
+      displayMaterial.uniforms.minDb.value = state.displayMinDb;
+      displayMaterial.uniforms.maxDb.value = state.displayMaxDb;
       displayMaterial.uniforms.brushCenterUv.value = mousePos || new THREE.Vector2(0, 0);
       displayMaterial.uniforms.brushSizeUv.value = brushSizeUv;
       displayMaterial.uniforms.showTargetRectangle.value = isMouseOver;
       displayMaterial.uniforms.showSourceRectangle.value = isSourceFile && isMouseOverAnyFile;
       displayMaterial.uniforms.viewZoomPower.value = viewZoomPower;
       displayMaterial.uniforms.viewOffset.value = viewOffset;
-      displayMaterial.uniforms.wrapMode.value = state.brushWrapMode.value;
+      displayMaterial.uniforms.wrapMode.value = state.brushWrapMode;
 
       // Calculate and update grid values
-      const gridSizeBeats = state.gridSizeBeats.value;
-      const gridSizeSemis = state.gridSizeSemis.value;
+      const gridSizeBeats = state.gridSizeBeats;
+      const gridSizeSemis = state.gridSizeSemis;
 
       // Horizontal grid (time/beats)
       const beatDurationSeconds = 60.0 / bpm;

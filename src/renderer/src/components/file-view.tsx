@@ -45,12 +45,12 @@ function getSnappedCoordinates(
   let snappedX = uv.x;
   let snappedY = uv.y;
 
-  if (gridSizeBeats.value > 0) {
-    if (brushWidthBeats.value > 0) {
+  if (gridSizeBeats > 0) {
+    if (brushWidthBeats > 0) {
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-      const gridIntervalSeconds = (60 / bpm) * gridSizeBeats.value;
+      const gridIntervalSeconds = (60 / bpm) * gridSizeBeats;
       const currentTime = uv.x * totalDuration;
-      const brushWidthSeconds = brushWidthBeats.value * (60.0 / bpm);
+      const brushWidthSeconds = brushWidthBeats * (60.0 / bpm);
       const startTime = currentTime - brushWidthSeconds / 2.0;
       const snappedStartTime = Math.round(startTime / gridIntervalSeconds) * gridIntervalSeconds;
       const snappedCenterTime = snappedStartTime + brushWidthSeconds / 2.0;
@@ -60,12 +60,12 @@ function getSnappedCoordinates(
     }
   }
 
-  if (gridSizeSemis.value > 0) {
-    if (brushHeightSemis.value > 0) {
-      const bandsPerSemitone = bandsPerOctave.value / 12;
-      const gridIntervalBands = gridSizeSemis.value * bandsPerSemitone;
+  if (gridSizeSemis > 0) {
+    if (brushHeightSemis > 0) {
+      const bandsPerSemitone = bandsPerOctave / 12;
+      const gridIntervalBands = gridSizeSemis * bandsPerSemitone;
       const currentBand = (1.0 - uv.y) * spectrogramData.numBands;
-      const brushHeightBands = brushHeightSemis.value * bandsPerSemitone;
+      const brushHeightBands = brushHeightSemis * bandsPerSemitone;
       const bottomBand = currentBand - brushHeightBands / 2.0;
       const snappedBottomBand = Math.round(bottomBand / gridIntervalBands) * gridIntervalBands;
       const snappedCenterBand = snappedBottomBand + brushHeightBands / 2.0;
@@ -227,8 +227,8 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       const { filePath, spectrogramData } = openFiles[fileId];
       const bpm = state.filepathsBpm[filePath];
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-      const brushWidthBeats = state.brushWidthBeats.value;
-      const brushHeightSemis = state.brushHeightSemis.value;
+      const brushWidthBeats = state.brushWidthBeats;
+      const brushHeightSemis = state.brushHeightSemis;
       const timeSeconds = uvX * totalDuration;
       const centerBeats = (timeSeconds / 60) * bpm;
       const beats = brushWidthBeats > 0 ? centerBeats - brushWidthBeats / 2 : centerBeats;
@@ -253,7 +253,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       if (isActive && event.buttons === 1 && strokeTimeRangeRef.current.min !== null) {
         const { spectrogramData } = file;
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const brushWidthBeats = state.brushWidthBeats.value;
+        const brushWidthBeats = state.brushWidthBeats;
         const brushWidthSeconds = (brushWidthBeats / bpm) * 60;
         const brushHalfWidthSeconds = brushWidthSeconds / 2;
         const currentBrushStart = snappedX * totalDuration - brushHalfWidthSeconds;
@@ -333,7 +333,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
 
         const { spectrogramData } = file;
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const brushWidthBeats = state.brushWidthBeats.value;
+        const brushWidthBeats = state.brushWidthBeats;
         const brushWidthSeconds = (brushWidthBeats / bpm) * 60;
         const brushHalfWidthSeconds = brushWidthSeconds / 2;
         const centerTimeSeconds = coords[0] * totalDuration;
@@ -341,7 +341,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         const initialBrushEnd = centerTimeSeconds + brushHalfWidthSeconds;
         strokeTimeRangeRef.current = { min: initialBrushStart, max: initialBrushEnd };
 
-        if (state.sourcePositionMode.value === "offset" && !state.lockedOffset && state.sourcePosition) {
+        if (state.sourcePositionMode === "offset" && !state.lockedOffset && state.sourcePosition) {
           const offsetBeats = state.sourcePosition.beats - beats;
           const offsetPitch = state.sourcePosition.pitch - pitch;
           state.setLockedOffset({ beats: offsetBeats, pitch: offsetPitch });
