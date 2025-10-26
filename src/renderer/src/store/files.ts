@@ -203,7 +203,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           state.filesOffset[fileId] = 0;
           state.filesPlaybackStartTime[fileId] = 0;
 
-          if (!state.sourceFile) state.sourceFile = { id: fileId, mode: "current" };
+          state.sourceFile = { id: fileId, mode: "current" };
           state.activeFileId = fileId;
         }),
       );
