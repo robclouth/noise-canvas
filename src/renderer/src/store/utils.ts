@@ -4,6 +4,7 @@ import type {
   ModulatorAmountParameters,
   NumberParameter,
   OptionsParameter,
+  Parameter,
   SliderScale,
   ZustandGet,
   ZustandSet,
@@ -139,6 +140,7 @@ export function makeCreateParameter<S extends Record<string, any>>(set: ZustandS
         description:
           "The amount of modulation to apply. 0% is no modulation and only the value of the parameter is used, 100% is full modulation and the current value of the modulated parameter is ignored.",
         value: 0,
+        default: 0,
         min: -100,
         max: 100,
         step: 0.1,
@@ -228,4 +230,20 @@ export function makeCreateParameter<S extends Record<string, any>>(set: ZustandS
   }
 
   return createParam;
+}
+
+export function isParameter(p: any): p is Parameter<any> {
+  return p && typeof p === "object" && "value" in p;
+}
+
+export function isOptionsParameter(p: Parameter<any>): p is OptionsParameter<any> {
+  return "options" in p;
+}
+
+export function isNumberParameter(p: Parameter<any>): p is NumberParameter {
+  return "min" in p;
+}
+
+export function isBooleanParameter(p: Parameter<any>): p is BooleanParameter {
+  return typeof p.value === "boolean";
 }

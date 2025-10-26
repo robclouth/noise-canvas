@@ -42,10 +42,14 @@ export async function getFolders() {
 
   appDir = window.nodePath.join(documentsDir, PRESETS_FOLDER_NAME);
   presetsDir = window.nodePath.join(appDir, PRESETS_SUBFOLDER_NAME);
-  await window.nodeFs.mkdir(presetsDir, { recursive: true });
-
   texturesDir = window.nodePath.join(appDir, TEXTURES_SUBFOLDER_NAME);
-  await window.nodeFs.mkdir(texturesDir, { recursive: true });
+
+  console.log("App directories:", { appDir, presetsDir, texturesDir });
+
+  await Promise.all([
+    window.nodeFs.mkdir(presetsDir, { recursive: true }),
+    window.nodeFs.mkdir(texturesDir, { recursive: true }),
+  ]);
 
   return { appDir, presetsDir, texturesDir };
 }

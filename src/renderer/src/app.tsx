@@ -156,7 +156,7 @@ function App(): React.JSX.Element {
 
   // Invalidate canvas when layout changes (sections collapse/expand)
   const sectionCollapsed = useStore((state) => state.sectionCollapsed);
-  const effectsEnabled = useStore((state) => state.effectsEnabled);
+  const effectsEnabled = useStore((state) => state.effectOrder.value);
 
   useEffect(() => {
     // Invalidate multiple times during the animation for smooth updates

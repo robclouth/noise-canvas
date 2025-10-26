@@ -1,6 +1,7 @@
 import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
-import { EffectsState, OpenFile } from "@renderer/store/types";
+import type { EffectsState } from "@renderer/store/effects";
+import { OpenFile } from "@renderer/store/types";
 import { ShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import transformEffectFrag from "../glsl/transform-effect.frag";

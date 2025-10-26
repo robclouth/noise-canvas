@@ -35,18 +35,15 @@ const EFFECT_DESCRIPTIONS: Record<string, string> = {
 
 export function EffectsList() {
   const effectOrder = useStore((state) => state.effectOrder);
-  const setEffectOrder = useStore((state) => state.setEffectOrder);
-  const effectsEnabled = useStore((state) => state.effectsEnabled);
-  const setEffectEnabled = useStore((state) => state.setEffectEnabled);
 
   const handleDragEnd = (result: any) => {
     if (!result.destination) return;
 
-    const items = Array.from(effectOrder);
+    const items = [...effectOrder.value];
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
 
-    setEffectOrder(items);
+    effectOrder.setValue(items);
   };
 
   return (
@@ -54,8 +51,8 @@ export function EffectsList() {
       <Droppable droppableId="effects">
         {(provided) => (
           <Stack gap={0} {...provided.droppableProps} ref={provided.innerRef}>
-            {effectOrder.map((effectId, index) => (
-              <Draggable key={effectId} draggableId={effectId} index={index}>
+            {effectOrder.value.map(({ effect, enabled }, index) => (
+              <Draggable key={effect} draggableId={effect} index={index}>
                 {(provided, snapshot) => (
                   <Box
                     ref={provided.innerRef}
@@ -69,14 +66,18 @@ export function EffectsList() {
                     }}
                   >
                     <CollapsibleEffectSection
-                      label={EFFECT_LABELS[effectId] || effectId}
-                      description={EFFECT_DESCRIPTIONS[effectId] || ""}
-                      enabled={effectsEnabled[effectId] ?? false}
-                      onEnabledChange={(enabled) => setEffectEnabled(effectId, enabled)}
+                      label={EFFECT_LABELS[effect] || effect}
+                      description={EFFECT_DESCRIPTIONS[effect] || ""}
+                      enabled={enabled}
+                      onEnabledChange={(enabled) =>
+                        effectOrder.setValue(
+                          effectOrder.value.map((item, i) => (i === index ? { ...item, enabled } : item)),
+                        )
+                      }
                       dragHandleProps={provided.dragHandleProps}
-                      color={EFFECT_COLORS[effectId] || "gray"}
+                      color={EFFECT_COLORS[effect] || "gray"}
                     >
-                      {EFFECT_COMPONENTS[effectId] || null}
+                      {EFFECT_COMPONENTS[effect] || null}
                     </CollapsibleEffectSection>
                   </Box>
                 )}

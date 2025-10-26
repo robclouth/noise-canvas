@@ -1,22 +1,11 @@
-import type { AnyParameter, BooleanParameter, NumberParameter, OptionsParameter, ParameterKey } from "@/store/types";
+import type { ParameterKey } from "@/store/types";
 import { Text } from "@mantine/core";
 import { useStore } from "@renderer/store";
+import { isBooleanParameter, isNumberParameter, isOptionsParameter } from "@renderer/store/utils";
 import { Tooltip } from "../tooltip";
 import { SelectControl } from "./select-control";
 import { SliderControl } from "./slider-control";
 import { SwitchControl } from "./switch-control";
-
-function isOptionsParameter(p: AnyParameter<any>): p is OptionsParameter<any> {
-  return "options" in p;
-}
-
-function isNumberParameter(p: AnyParameter<any>): p is NumberParameter {
-  return "min" in p;
-}
-
-function isBooleanParameter(p: AnyParameter<any>): p is BooleanParameter {
-  return typeof p.value === "boolean";
-}
 
 export type ParameterControlProps = {
   paramKey: ParameterKey;

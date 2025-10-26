@@ -12,14 +12,14 @@ export function PresetSelector() {
   const loadPreset = useStore((state) => state.loadPreset);
   const savePreset = useStore((state) => state.savePreset);
   const deletePreset = useStore((state) => state.deletePreset);
-  const loadPresets = useStore((state) => state.loadPresets);
 
   const [hotkeyAssignMode, setHotkeyAssignMode] = useState(false);
   const presetHotkeys = useStore((state) => state.presetHotkeys);
-  // Load presets on mount
+
+  // Init presets on mount
   useEffect(() => {
-    loadPresets();
-  }, [loadPresets]);
+    useStore.getState().init();
+  }, []);
 
   const currentPreset = availablePresets.find((p) => p.id === currentPresetId);
   const currentPresetHotkey = currentPresetId
@@ -55,7 +55,7 @@ export function PresetSelector() {
   };
 
   const handleSaveOver = () => {
-    if (!currentPreset || currentPreset.isDefault) {
+    if (!currentPreset || currentPreset.isFactory) {
       return;
     }
 
@@ -73,7 +73,7 @@ export function PresetSelector() {
   };
 
   const handleDelete = () => {
-    if (!currentPreset || currentPreset.isDefault) {
+    if (!currentPreset || currentPreset.isFactory) {
       return;
     }
 
@@ -128,7 +128,7 @@ export function PresetSelector() {
 
   // Group presets by default/user
   const defaultPresetOptions = availablePresets
-    .filter((p) => p.isDefault)
+    .filter((p) => p.isFactory)
     .map((p) => ({
       value: p.id,
       label: p.name,
@@ -136,7 +136,7 @@ export function PresetSelector() {
     }));
 
   const userPresetOptions = availablePresets
-    .filter((p) => !p.isDefault)
+    .filter((p) => !p.isFactory)
     .map((p) => ({
       value: p.id,
       label: p.name,
@@ -195,22 +195,22 @@ export function PresetSelector() {
             <Plus size={14} />
           </ActionIcon>
         </Tooltip>
-        <Tooltip label={currentPreset?.isDefault ? "Cannot save over default presets" : "Save over current preset"}>
+        <Tooltip label={currentPreset?.isFactory ? "Cannot save over default presets" : "Save over current preset"}>
           <ActionIcon
             size="sm"
             color="dark.5"
             onClick={handleSaveOver}
-            disabled={!currentPreset || currentPreset.isDefault}
+            disabled={!currentPreset || currentPreset.isFactory}
           >
             <Save size={14} />
           </ActionIcon>
         </Tooltip>
-        <Tooltip label={currentPreset?.isDefault ? "Cannot delete default presets" : "Delete current preset"}>
+        <Tooltip label={currentPreset?.isFactory ? "Cannot delete default presets" : "Delete current preset"}>
           <ActionIcon
             size="sm"
             color="dark.5"
             onClick={handleDelete}
-            disabled={!currentPreset || currentPreset.isDefault}
+            disabled={!currentPreset || currentPreset.isFactory}
           >
             <Trash2 size={14} />
           </ActionIcon>

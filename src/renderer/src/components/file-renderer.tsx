@@ -588,7 +588,7 @@ export const FileRenderer = memo(
         };
 
         // Get enabled effects in order
-        const enabledEffects = state.effectOrder.filter((effectId) => state.effectsEnabled[effectId]);
+        const enabledEffects = state.effectOrder.value.filter(({ enabled }) => enabled).map(({ effect }) => effect);
 
         // If no effects are enabled, add a passthrough effect to properly handle metadata conversion
         if (enabledEffects.length === 0) {

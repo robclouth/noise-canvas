@@ -1,6 +1,24 @@
 import * as Tone from "tone";
 import { openFiles } from "./files";
-import type { AudioState, PlayerClock, ZustandGet, ZustandSet } from "./types";
+import type { PlayerClock, ZustandGet, ZustandSet } from "./types";
+
+export interface AudioState {
+  playerClock: PlayerClock;
+  player: Tone.Player | null;
+  getPlaybackTime: () => number;
+  getPlayer: () => Tone.Player;
+  isPlaying: boolean;
+  setIsPlaying: (isPlaying: boolean) => void;
+  loop: boolean;
+  setLoop: (loop: boolean) => void;
+  autoPlayStroke: boolean;
+  setAutoPlayStroke: (value: boolean) => void;
+  autoPlayEndTime: number | null;
+  setAutoPlayEndTime: (time: number | null) => void;
+  setPlaybackTime: (playbackTime: number) => void;
+  togglePlayback: () => Promise<void>;
+  stopAudio: () => void;
+}
 
 export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState => ({
   player: null,

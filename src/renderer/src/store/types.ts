@@ -1,9 +1,10 @@
 import { FileRendererHandle } from "@renderer/components/file-renderer";
 import { Vector2 } from "three";
-import * as Tone from "tone";
-import { BrushPresetType } from "../lib/preset-schema";
+import { AppState } from "./app";
+import { AudioState } from "./audio";
 import { EffectsState } from "./effects";
 import { FilesState } from "./files";
+import { PresetsState } from "./presets";
 
 type Enumerate<N extends number, Acc extends number[] = []> = Acc["length"] extends N
   ? Acc[number]
@@ -77,6 +78,7 @@ export interface NumberParameter extends Normalizable<number> {
   label: string;
   description?: string;
   value: number;
+  default: number;
   min: number;
   max: number;
   step?: number;
@@ -90,6 +92,8 @@ export interface NumberParameter extends Normalizable<number> {
   resetValue: () => void;
 
   modulatorParamKeys?: (keyof ModulatorAmountParameters)[];
+
+  includeInPresets: boolean;
 }
 
 export interface BooleanParameter extends Normalizable<boolean> {
@@ -97,8 +101,11 @@ export interface BooleanParameter extends Normalizable<boolean> {
   label: string;
   description?: string;
   value: boolean;
+  default: boolean;
   setValue: (v: boolean) => void;
   resetValue: () => void;
+
+  includeInPresets: boolean;
 }
 
 export interface OptionsParameter<T = string> {
@@ -106,12 +113,13 @@ export interface OptionsParameter<T = string> {
   label: string;
   description?: string;
   value: T;
+  default: T;
   options: { value: T; label: string }[];
   setValue: (v: T) => void;
   resetValue: () => void;
-}
 
-export type AnyParameter<T> = NumberParameter | OptionsParameter<T> | BooleanParameter;
+  includeInPresets: boolean;
+}
 
 export type Parameter<T> = T extends boolean
   ? BooleanParameter
@@ -192,57 +200,7 @@ export type PlayerClock = {
   loopEnd: number; // active loop end
 };
 
-export interface AudioState {
-  playerClock: PlayerClock;
-  player: Tone.Player | null;
-  getPlaybackTime: () => number;
-  getPlayer: () => Tone.Player;
-  isPlaying: boolean;
-  setIsPlaying: (isPlaying: boolean) => void;
-  loop: boolean;
-  setLoop: (loop: boolean) => void;
-  autoPlayStroke: boolean;
-  setAutoPlayStroke: (value: boolean) => void;
-  autoPlayEndTime: number | null;
-  setAutoPlayEndTime: (time: number | null) => void;
-  setPlaybackTime: (playbackTime: number) => void;
-  togglePlayback: () => Promise<void>;
-  stopAudio: () => void;
-}
-
-export interface DisplayState {
-  displayMinDb: NumberParameter;
-  displayMaxDb: NumberParameter;
-  magnitudeLimit: NumberParameter;
-  gridSizeBeats: NumberParameter;
-  gridSizeSemis: NumberParameter;
-  normalize: BooleanParameter;
-  scaleTonic: OptionsParameter<string>;
-  scaleType: OptionsParameter<string>;
-  bandsPerOctave: OptionsParameter<number>;
-  minFreq: NumberParameter;
-
-  mousePos: Vector2 | null;
-  setMousePos: (mousePos: Vector2 | null) => void;
-  hoveredFile: string | null;
-  setHoveredFile: (fileId: string | null) => void;
-  sectionCollapsed: Record<string, boolean>;
-  setSectionCollapsed: (section: string, collapsed: boolean) => void;
-}
-
-export interface PresetsState {
-  currentPresetId: string | null;
-  availablePresets: BrushPresetType[];
-  setCurrentPresetId: (presetId: string | null) => void;
-  loadPresets: () => Promise<void>;
-  loadPreset: (presetId: string) => void;
-  savePreset: (name: string, presetId?: string) => Promise<void>;
-  deletePreset: (presetId: string) => Promise<void>;
-  assignHotkeyToPreset: (presetId: string, hotkey: string) => void;
-  presetHotkeys: Record<string, string>;
-}
-
-export type State = BrushState & EffectsState & ModulatorsState & FilesState & AudioState & DisplayState & PresetsState;
+export type State = BrushState & EffectsState & ModulatorsState & FilesState & AudioState & AppState & PresetsState;
 
 // Helper type to extract parameter keys from state
 export type ParameterKey = keyof {
