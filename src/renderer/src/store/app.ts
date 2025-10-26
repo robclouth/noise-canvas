@@ -18,11 +18,8 @@ export interface AppState {
   setMousePos: (mousePos: Vector2 | null) => void;
   hoveredFile: string | null;
   setHoveredFile: (fileId: string | null) => void;
-  sectionCollapsed: Record<string, boolean>;
-  setSectionCollapsed: (section: string, collapsed: boolean) => void;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const createAppSlice = (set: ZustandSet): AppState => {
   return {
     displayMinDb: getParameterDef("displayMinDb").default,
@@ -36,15 +33,9 @@ export const createAppSlice = (set: ZustandSet): AppState => {
     bandsPerOctave: getParameterDef("bandsPerOctave").default,
     minFreq: getParameterDef("minFreq").default,
 
-    // ---------------- Plain state fields ----------------
     mousePos: null,
     setMousePos: (mousePos) => set({ mousePos }),
     hoveredFile: null,
     setHoveredFile: (fileId) => set({ hoveredFile: fileId }),
-    sectionCollapsed: {},
-    setSectionCollapsed: (section, collapsed) =>
-      set((state) => ({
-        sectionCollapsed: { ...state.sectionCollapsed, [section]: collapsed },
-      })),
   };
 };

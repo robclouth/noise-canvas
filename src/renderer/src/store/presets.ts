@@ -7,17 +7,23 @@ import { factoryPresets } from "../lib/factory-presets";
 import type { State, ZustandGet, ZustandSet } from "./types";
 
 export interface PresetsState {
+  isInitialized: boolean;
+  init: () => Promise<void>;
   presetsDir: string | null;
   currentPresetId: string | null;
   availablePresets: PresetType[];
-  isInitialized: boolean;
-  init: () => Promise<void>;
   setCurrentPresetId: (presetId: string | null) => void;
+  captureState: () => Partial<State>;
+  recallState: (parameters: Partial<State>) => Partial<State>;
   loadPreset: (presetId: string) => void;
   savePreset: (name: string, presetId?: string) => Promise<void>;
   deletePreset: (presetId: string) => Promise<void>;
   assignHotkeyToPreset: (presetId: string, hotkey: string) => void;
   presetHotkeys: Record<string, string>;
+  quickSlots: Record<number, Partial<State>>;
+  setQuickSlot: (slotIndex: number) => void;
+  recallQuickSlot: (slotIndex: number) => void;
+  clearQuickSlot: (slotIndex: number) => void;
 }
 
 /**
@@ -52,6 +58,8 @@ function generateFilenameId(name: string, existingIds: Set<string> = new Set()):
 
   return id;
 }
+
+export const PRESETS_PERSISTED_KEYS = ["quickSlots", "presetHotkeys"] as const;
 
 export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsState => ({
   presetsDir: null,
@@ -106,6 +114,36 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
   },
   availablePresets: [...factoryPresets],
   setCurrentPresetId: (presetId) => set({ currentPresetId: presetId }),
+  recallState: (parameters: Partial<State>) => {
+    const state = get();
+    const updates: Partial<State> = {};
+
+    for (const [key, parameterDef] of Object.entries(parameterDefs)) {
+      if (!parameterDef.includeInPresets) continue;
+
+      const value = state[key as keyof State];
+      const presetValue = parameters[key];
+      const newValue = presetValue === undefined ? parameterDef.default : presetValue;
+
+      if (value !== newValue) {
+        updates[key] = newValue;
+      }
+    }
+
+    return updates;
+  },
+  captureState: () => {
+    const state = get();
+    const parameters: Partial<State> = {};
+    for (const [key, parameterDef] of Object.entries(parameterDefs)) {
+      if (!parameterDef.includeInPresets) continue;
+      const value = state[key as keyof State];
+
+      if (value === parameterDef.default) continue; // Skip default values
+      parameters[key] = value;
+    }
+    return parameters;
+  },
   loadPreset: (presetId: string) => {
     const state = get();
 
@@ -124,23 +162,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       return;
     }
 
-    const updates: Partial<State> = { currentPresetId: presetId };
-
-    for (const [key, parameterDef] of Object.entries(parameterDefs)) {
-      if (!parameterDef.includeInPresets) continue;
-
-      const value = state[key as keyof State];
-
-      const presetValue = preset.parameters[key];
-
-      const newValue = presetValue === undefined ? parameterDef.default : presetValue;
-
-      if (value !== newValue) {
-        updates[key] = newValue;
-      }
-    }
-
-    set(updates);
+    set({ currentPresetId: presetId, ...state.recallState(preset.parameters) });
   },
   savePreset: async (name: string, presetId?: string) => {
     try {
@@ -160,22 +182,8 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
         name,
         isFactory: false,
         version: CURRENT_PRESET_VERSION,
-        parameters: {},
+        parameters: state.captureState(),
       };
-
-      for (const [key, parameterDef] of Object.entries(parameterDefs)) {
-        if (!parameterDef.includeInPresets) continue;
-        const value = state[key as keyof State];
-
-        if (value === parameterDef.default) continue; // Skip default values
-        preset.parameters[key] = value;
-      }
-
-      const { success } = validatePreset(preset);
-
-      if (!success) {
-        throw new Error("Preset is invalid");
-      }
 
       // Don't allow saving over default presets
       if (preset.isFactory) {
@@ -269,5 +277,26 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       title: "Hotkey assigned",
       message: `Hotkey ${hotkey} assigned to ${preset.name}`,
     });
+  },
+  quickSlots: {},
+  setQuickSlot: (slotIndex: number) => {
+    set(
+      produce((state: State) => {
+        state.quickSlots[slotIndex] = state.captureState();
+      }),
+    );
+  },
+  recallQuickSlot: (slotIndex: number) => {
+    const state = get();
+    const parameters = state.quickSlots[slotIndex];
+    if (!parameters) return;
+    set(state.recallState(parameters));
+  },
+  clearQuickSlot: (slotIndex: number) => {
+    set(
+      produce((state: State) => {
+        delete state.quickSlots[slotIndex];
+      }),
+    );
   },
 });

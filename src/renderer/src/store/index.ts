@@ -3,20 +3,18 @@ import { parameterDefs } from "@renderer/parameters";
 import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
 import { createAppSlice } from "./app";
-import { createAudioSlice } from "./audio";
+import { AUDIO_PERSISTED_KEYS, createAudioSlice } from "./audio";
 import { createBrushSlice } from "./brush";
 import { createEffectsSlice } from "./effects";
-import { createFilesSlice } from "./files";
+import { createFilesSlice, FILES_PERSISTED_KEYS } from "./files";
 import { createModulatorsSlice } from "./modulators";
-import { createPresetsSlice } from "./presets";
+import { createPresetsSlice, PRESETS_PERSISTED_KEYS } from "./presets";
 import type { ParameterKey, State } from "./types";
 
-export const PERSISTED_KEYS: (keyof State)[] = [
-  "filepathsBpm",
-  "sectionCollapsed",
-  "presetHotkeys",
-  "loop",
-  "autoPlayStroke",
+export const ALL_PERSISTED_KEYS: (keyof State)[] = [
+  ...FILES_PERSISTED_KEYS,
+  ...AUDIO_PERSISTED_KEYS,
+  ...PRESETS_PERSISTED_KEYS,
 ];
 
 export const useStore = create<State>()(
@@ -39,7 +37,7 @@ export const useStore = create<State>()(
         partialize: (state) => {
           return Object.entries(state).reduce(
             (acc, [key, value]) => {
-              if (key in parameterDefs || PERSISTED_KEYS.includes(key as keyof State)) {
+              if (key in parameterDefs || ALL_PERSISTED_KEYS.includes(key as keyof State)) {
                 acc[key] = value;
               }
               return acc;

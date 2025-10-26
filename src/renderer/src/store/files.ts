@@ -60,6 +60,8 @@ export function getFileIdByPath(filePath: string): string | undefined {
   return Object.keys(openFiles).find((id) => openFiles[id].filePath === filePath);
 }
 
+export const FILES_PERSISTED_KEYS = ["filepathsBpm"] as const;
+
 export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState => ({
   newFile: async () => {
     const { sampleRate, bpm, lengthBeats } = await new Promise<{

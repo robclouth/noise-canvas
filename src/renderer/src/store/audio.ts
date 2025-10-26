@@ -20,6 +20,8 @@ export interface AudioState {
   stopAudio: () => void;
 }
 
+export const AUDIO_PERSISTED_KEYS = ["autoPlayStroke", "loop"] as const;
+
 export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState => ({
   player: null,
   playerClock: {

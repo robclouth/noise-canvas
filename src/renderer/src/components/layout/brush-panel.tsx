@@ -2,6 +2,7 @@ import { useStore } from "@/store";
 import { Stack } from "@mantine/core";
 import { ParameterControl } from "../controls/parameter-control";
 import { PresetSelector } from "../controls/preset-selector";
+import { QuickSlots } from "../controls/quick-slots";
 import { EffectsList } from "../effects-list";
 import { ModulatorView } from "../modulator-view";
 import { Section } from "../section";
@@ -12,6 +13,7 @@ export function BrushPanel() {
   return (
     <Stack p="xs" gap="xs">
       <PresetSelector />
+      <QuickSlots />
       <Section label="Brush">
         <ParameterControl paramKey="brushWidthBeats" disabled={brushSizeLockedToGrid} />
         <ParameterControl paramKey="brushHeightSemis" disabled={brushSizeLockedToGrid} />
