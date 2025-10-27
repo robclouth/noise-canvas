@@ -229,6 +229,8 @@ function App(): React.JSX.Element {
     },
     multiple: false,
     accept: { "audio/*": [] },
+    noClick: true,
+    noKeyboard: true,
   });
 
   return (
