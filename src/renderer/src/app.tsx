@@ -6,6 +6,7 @@ import { Notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
 import { Canvas, RootState, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useRef } from "react";
+import { useDropzone } from "react-dropzone";
 import { CanvasPanel } from "./components/layout/canvas-panel";
 import { ControlsPanel } from "./components/layout/controls-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
@@ -213,8 +214,38 @@ function App(): React.JSX.Element {
   useWindowEvent("keyup", handleKeyUp);
   useWindowEvent("mousedown", handleMouseDown);
 
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    if (acceptedFiles.length === 0) {
+      return;
+    }
+    const filePath = window.electron.webUtils.getPathForFile(acceptedFiles[0]);
+    useStore.getState().openFilePath(filePath);
+  }, []);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    getFilesFromEvent: async (event) => {
+      return Array.from((event as any).dataTransfer.files);
+    },
+    multiple: false,
+    accept: { "audio/*": [] },
+  });
+
   return (
-    <Group h="100vh" w="100vw" wrap="nowrap" gap={0}>
+    <Group h="100vh" w="100vw" wrap="nowrap" gap={0} {...getRootProps()}>
+      {isDragActive && (
+        <Box
+          pos="absolute"
+          top={0}
+          left={0}
+          right={0}
+          bottom={0}
+          bg="transparent"
+          bd="2px solid orange"
+          style={{ zIndex: 10000 }}
+        />
+      )}
+      <input {...getInputProps()} />
       <Canvas
         style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}
         eventSource={document.getElementById("root")!}
