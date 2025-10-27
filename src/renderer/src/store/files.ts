@@ -1,13 +1,12 @@
 import { modals, openContextModal } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
+import truncateMiddle from "@stdlib/string-truncate-middle";
 import { produce } from "immer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
 import { getUndoManager } from "../lib/undo-manager";
-import type { State, ZustandGet, ZustandSet } from "./types";
+import type { OpenFile, State, ZustandGet, ZustandSet } from "./types";
 import { generateFileId } from "./utils";
-
-import type { OpenFile } from "./types";
 
 export interface FilesState {
   newFile: () => Promise<void>;
@@ -210,7 +209,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     } catch (error) {
       console.error("Error opening file:", error);
       notifications.show({
-        title: `Failed to open file '${window.nodePath.basename(filepath)}'`,
+        title: `Failed to open file '${truncateMiddle(window.nodePath.basename(filepath), 50)}'`,
         message: `${error instanceof Error ? error.message : "Unknown error"}`,
         color: "red",
       });
@@ -271,7 +270,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     return new Promise<void>((resolve) => {
       modals.openConfirmModal({
         title: "Overwrite File",
-        children: `Do you want to overwrite "${fileName}"?`,
+        children: `Do you want to overwrite "${truncateMiddle(fileName, 50)}"?`,
         labels: { confirm: "Overwrite", cancel: "Cancel" },
         confirmProps: { color: "red", size: "xs" },
         cancelProps: { size: "xs" },
@@ -298,14 +297,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             // Show success notification
             notifications.show({
               title: "File saved",
-              message: `Successfully saved ${fileName}`,
+              message: `Successfully saved ${truncateMiddle(fileName, 50)}`,
             });
           } catch (error) {
             console.error("Error saving file:", error);
             // Show error notification
             notifications.show({
               title: "Save failed",
-              message: `Failed to save ${fileName}: ${error instanceof Error ? error.message : "Unknown error"}`,
+              message: `Failed to save ${truncateMiddle(fileName, 50)}: ${error instanceof Error ? error.message : "Unknown error"}`,
               color: "red",
             });
           }
@@ -364,7 +363,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const savedFileName = window.nodePath.basename(outputPath);
       notifications.show({
         title: "File saved",
-        message: `Successfully saved as ${savedFileName}`,
+        message: `Successfully saved as ${truncateMiddle(savedFileName, 50)}`,
       });
     } catch (error) {
       console.error("Error saving file as:", error);
@@ -428,7 +427,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // Show success notification
       notifications.show({
         title: "Version saved",
-        message: `Successfully saved as ${newFileName}`,
+        message: `Successfully saved as ${truncateMiddle(newFileName, 50)}`,
       });
     } catch (error) {
       console.error("Error saving file version:", error);

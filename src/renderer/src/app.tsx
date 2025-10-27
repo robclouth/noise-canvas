@@ -196,6 +196,7 @@ function App(): React.JSX.Element {
       target.getAttribute("role") === "option" ||
       target.classList.contains("mantine-Select-input") ||
       target.classList.contains("mantine-NativeSelect-input") ||
+      target.classList.contains("mantine-Checkbox-input") ||
       target.classList.contains("mantine-Menu-item");
 
     if (isInteractiveControl) {

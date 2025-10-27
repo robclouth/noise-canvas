@@ -1,7 +1,7 @@
 import { useStore } from "@/store";
 import { ActionIcon, Badge, Box, Button, Group, NumberInput } from "@mantine/core";
-import { MiddleTruncate } from "@re-dev/react-truncate";
 import { openFiles } from "@renderer/store/files";
+import truncateMiddle from "@stdlib/string-truncate-middle";
 import { Copy, X } from "lucide-react";
 import { memo } from "react";
 import { Tooltip } from "./tooltip";
@@ -44,7 +44,7 @@ const TruncatedFilename = memo(function TruncatedFilename({
         whiteSpace: "nowrap",
       }}
     >
-      <MiddleTruncate>{filename}</MiddleTruncate>
+      {truncateMiddle(filename, 50)}
     </Box>
   );
 });
