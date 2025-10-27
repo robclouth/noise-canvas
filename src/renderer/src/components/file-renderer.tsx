@@ -5,7 +5,7 @@ import { openFiles } from "@renderer/store/files";
 import { getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { ShaderMaterial, UniformsUtils } from "three";
+import { ShaderMaterial, UniformsUtils, Vector2 } from "three";
 import { effects } from "../effects";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -149,6 +149,7 @@ export const FileRenderer = memo(
       return new ShaderMaterial({
         uniforms: {
           ...UniformsUtils.clone(defaultValues),
+          sourceBrushSizeUv: { value: new Vector2(0.1, 0.1) },
           minDb: { value: state.displayMinDb },
           maxDb: { value: state.displayMaxDb },
           bpm: { value: 120.0 },
@@ -458,7 +459,6 @@ export const FileRenderer = memo(
         gl.setRenderTarget(null);
 
         pingPong.current = 0;
-        isInitialized.current = true;
 
         // Invalidate cache since FBO has been initialized
         fboDataDirty.current = true;
@@ -467,20 +467,19 @@ export const FileRenderer = memo(
 
         const undoManager = getUndoManager(fileId);
         undoManager.addState(spectrogramData.packedData, fileId);
-
-        invalidate(); // Trigger another render to update display
-        return;
       }
 
       // After initialization, only update if this file is active, source, or mouse is hovering over it
-      if (!isActiveFile && !isSourceFile && !isMouseOver && !clearingPreview.current) {
+      if (!isActiveFile && !isSourceFile && !isMouseOver && !clearingPreview.current && isInitialized.current) {
         return;
       }
+
+      isInitialized.current = true;
 
       clearingPreview.current = false;
 
       const bpm = state.filepathsBpm[file.filePath];
-      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+      const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
 
       // Get per-file zoom and offset from store
       const viewZoomPower = state.filesZoom[fileId];
@@ -501,22 +500,16 @@ export const FileRenderer = memo(
 
       // Render brush stroke if requested
       if (strokeParams.current && applyStroke.current) {
-        const sourceFile = state.sourceFile?.id ? openFiles[state.sourceFile.id] : null;
-        if (!sourceFile) return;
-
+        const sourceFile = openFiles[state.sourceFile!.id!];
         const sourceRendererRef = sourceFile.rendererRef;
         const textures = sourceRendererRef?.current?.getTextures();
-        if (!textures) return;
-
-        const sourceBpm = state.filepathsBpm[sourceFile.filePath];
-        const sourceTotalDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
 
         // Calculate source offset using the helper function
         const sourceOffsetUv = calculateSourceOffset(
           state,
           mousePos,
-          sourceBpm,
-          sourceTotalDuration,
+          bpm,
+          totalDuration,
           sourceFile.spectrogramData,
           bpm,
           totalDuration,
@@ -528,10 +521,10 @@ export const FileRenderer = memo(
 
         // Set up common uniforms for the brush shaders
         const commonUniforms: CommonUniforms = {
-          sourceSpectrogramTex: { value: textures.packed.texture },
+          sourceSpectrogramTex: { value: textures!.packed.texture },
           sourceSpectrogramTextureSize: { value: sourceFile.spectrogramData.packedTextureSize },
-          sourceInverseMapTex: { value: textures.inverse },
-          sourceMetadataTex: { value: textures.metadata },
+          sourceInverseMapTex: { value: textures!.inverse },
+          sourceMetadataTex: { value: textures!.metadata },
           sourceMinFreq: { value: sourceFile.spectrogramData.minFreq },
           sourceBandsPerOctave: { value: sourceFile.spectrogramData.bandsPerOctave },
           sourceFrameCount: { value: sourceFile.spectrogramData.numFrames },
@@ -603,10 +596,10 @@ export const FileRenderer = memo(
         const isSameFile = sourceFile.id === fileId;
         const sourceFbo =
           state.sourceFile?.mode === "original"
-            ? { texture: textures.original } // Use original unmodified data
+            ? { texture: textures!.original } // Use original unmodified data
             : isSameFile
               ? currentReadFBO // Same file: use our own current modified FBO
-              : textures.packed; // Different file: use their current modified FBO
+              : textures!.packed; // Different file: use their current modified FBO
 
         // Override the source texture in commonUniforms to use the correct source
         commonUniforms.sourceSpectrogramTex.value = sourceFbo.texture;
@@ -706,6 +699,8 @@ export const FileRenderer = memo(
       const nextFBO = pingPong.current === 0 ? fbo2 : fbo1;
       const displayTexture = displayMode.current === "committed" ? currentFBO.texture : nextFBO.texture;
 
+      const hoveredFile = state.hoveredFile ? openFiles[state.hoveredFile] : null;
+
       displayMaterial.uniforms.sourceSpectrogramTex.value = displayTexture;
       displayMaterial.uniforms.sourceInverseMapTex.value = inverseMapTex;
       displayMaterial.uniforms.sourceMetadataTex.value = metadataTex;
@@ -722,6 +717,16 @@ export const FileRenderer = memo(
       displayMaterial.uniforms.maxDb.value = state.displayMaxDb;
       displayMaterial.uniforms.brushCenterUv.value = mousePos || new THREE.Vector2(0, 0);
       displayMaterial.uniforms.brushSizeUv.value = brushSizeUv;
+      displayMaterial.uniforms.sourceBrushSizeUv.value = hoveredFile
+        ? unitsToUv(
+            state.brushWidthBeats,
+            state.brushHeightSemis,
+            state.filepathsBpm[hoveredFile.filePath],
+            hoveredFile.spectrogramData.numFrames / hoveredFile.spectrogramData.sampleRate,
+            hoveredFile.spectrogramData.bandsPerOctave,
+            hoveredFile.spectrogramData.numBands,
+          )
+        : new Vector2(0.1, 0.1);
       displayMaterial.uniforms.showTargetRectangle.value = isMouseOver;
       displayMaterial.uniforms.showSourceRectangle.value = isSourceFile && isMouseOverAnyFile;
       displayMaterial.uniforms.viewZoomPower.value = viewZoomPower;

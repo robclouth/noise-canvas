@@ -12,6 +12,8 @@ uniform float gridSize;
 uniform bool showTargetRectangle;
 uniform bool showSourceRectangle;
 
+uniform vec2 sourceBrushSizeUv; // Size of the brush in UV coordinates for the source file
+
 // Pre-calculated grid values
 uniform float gridWidthUv;        // Width of each beat in UV coordinates
 uniform float gridHeightUv;       // Height of each semitone in UV coordinates
@@ -131,8 +133,8 @@ void main() {
 
         if (sourceCenterScreen.x >= 0.0 && sourceCenterScreen.x <= 1.0 &&
             sourceCenterScreen.y >= 0.0 && sourceCenterScreen.y <= 1.0) {
-            
-            vec2 dSource = abs(zoomedUv - sourceCenter) - halfSize + strokeWidthUv; // reuse halfSize from brush rect
+
+            vec2 dSource = abs(zoomedUv - sourceCenter) - sourceBrushSizeUv * 0.5 + strokeWidthUv; // reuse halfSize from brush rect
             float outsideDistSource = length(max(dSource, 0.0));
             float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
             float distToBorderSource = outsideDistSource + insideDistSource;
