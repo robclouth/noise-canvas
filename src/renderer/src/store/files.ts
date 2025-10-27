@@ -461,12 +461,20 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       });
     } else state.closeFile(fileId);
   },
-  closeFile: (fileId: string) =>
-    set(
-      produce((state: State) => {
-        const openFile = openFiles[fileId];
+  closeFile: (fileId: string) => {
+    const openFile = openFiles[fileId];
+    const state = get();
+    if (state.isPlaying && state.activeFileId === fileId) {
+      state.stopAudio();
+    }
 
+    return set(
+      produce((state: State) => {
         if (openFile) {
+          if (state.isPlaying && state.activeFileId === fileId) {
+            state.stopAudio();
+          }
+
           state.openFileIds = state.openFileIds.filter((id) => id !== fileId);
           delete state.filesBandsPerOctave[fileId];
           delete state.filesZoom[fileId];
@@ -488,7 +496,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           }
         }
       }),
-    ),
+    );
+  },
   synthesizeFile: async (
     fileId: string,
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
