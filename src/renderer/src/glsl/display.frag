@@ -83,13 +83,7 @@ void main() {
         bool isBarStart = barLine < gridWidthUv;
         
         if (line < lineThicknessUv) {
-            // Invert color with subtle contrast
-            float strength = isBarStart ? 0.35 : 0.25;
-            vec3 inverted = vec3(1.0) - color;
-            // Push inverted color away from middle gray for better visibility
-            inverted = inverted * 1.3 - 0.15;
-            inverted = clamp(inverted, 0.0, 1.0);
-            color = mix(color, inverted, strength);
+            color = fract(color + 0.3);
         }
     }
     
@@ -99,12 +93,7 @@ void main() {
         float verticalLineThicknessUv = fwidth(zoomedUv.y);
         
         if (verticalLine < verticalLineThicknessUv) {
-            // Invert color with subtle contrast
-            vec3 inverted = vec3(1.0) - color;
-            // Push inverted color away from middle gray for better visibility
-            inverted = inverted * 1.3 - 0.15;
-            inverted = clamp(inverted, 0.0, 1.0);
-            color = mix(color, inverted, 0.25);
+            color = fract(color + 0.3);
         }
     }
 
@@ -118,7 +107,7 @@ void main() {
     vec2 correctedBrushSize = brushSizeUv;
     
     vec2 halfSize = correctedBrushSize / 2.0;
-    float strokeWidthUv = fwidth(zoomedUv.x) * 1.5;
+    vec2 strokeWidthUv = fwidth(zoomedUv) * 1.5;
 
     // Draw Brush Area Rectangle (only if this is the active file)
     if (showTargetRectangle) {
@@ -127,13 +116,9 @@ void main() {
         float insideDist = min(max(d.x, d.y), 0.0);
         float distToBorder = outsideDist + insideDist;
 
-        float rectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(distToBorder));
+        float rectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv.x, abs(distToBorder));
         if (rectAlpha > 0.0) {
-            // Invert color with enhanced contrast
-            vec3 inverted = vec3(1.0) - color;
-            inverted = inverted * 1.5 - 0.25;
-            inverted = clamp(inverted, 0.0, 1.0);
-            color = mix(color, inverted, rectAlpha);
+            color = fract(color + 0.5);
         }
     }
 
@@ -147,18 +132,14 @@ void main() {
         if (sourceCenterScreen.x >= 0.0 && sourceCenterScreen.x <= 1.0 &&
             sourceCenterScreen.y >= 0.0 && sourceCenterScreen.y <= 1.0) {
             
-            vec2 dSource = abs(zoomedUv - sourceCenter) - halfSize; // reuse halfSize from brush rect
+            vec2 dSource = abs(zoomedUv - sourceCenter) - halfSize + strokeWidthUv; // reuse halfSize from brush rect
             float outsideDistSource = length(max(dSource, 0.0));
             float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
             float distToBorderSource = outsideDistSource + insideDistSource;
 
-            float sourceRectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv, abs(distToBorderSource));
+            float sourceRectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv.x, abs(distToBorderSource));
             if (sourceRectAlpha > 0.0) {
-                // Invert color with enhanced contrast (fainter for source)
-                vec3 inverted = vec3(1.0) - color;
-                inverted = inverted * 1.5 - 0.25;
-                inverted = clamp(inverted, 0.0, 1.0);
-                color = mix(color, inverted, sourceRectAlpha * 0.3);
+                color = fract(color + 0.5);
             }
         }
     }
