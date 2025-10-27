@@ -80,6 +80,7 @@ export const FileRenderer = memo(
     // Interaction state
     const displayMode = useRef<"preview" | "committed">("committed");
     const applyStroke = useRef(false);
+    const clearingPreview = useRef(false);
 
     console.log("FileRenderer rendered");
 
@@ -472,9 +473,11 @@ export const FileRenderer = memo(
       }
 
       // After initialization, only update if this file is active, source, or mouse is hovering over it
-      if (!isActiveFile && !isSourceFile && !isMouseOver) {
+      if (!isActiveFile && !isSourceFile && !isMouseOver && !clearingPreview.current) {
         return;
       }
+
+      clearingPreview.current = false;
 
       const bpm = state.filepathsBpm[file.filePath];
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
@@ -933,6 +936,7 @@ export const FileRenderer = memo(
      */
     const clearPreview = () => {
       displayMode.current = "committed";
+      clearingPreview.current = true;
       invalidateRef.current();
     };
 
