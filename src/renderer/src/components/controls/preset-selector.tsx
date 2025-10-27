@@ -102,9 +102,8 @@ export function PresetSelector() {
 
     // Don't interfere if user is typing in an input field
     const target = event.target as HTMLElement;
-    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.contentEditable === "true")) {
-      return;
-    }
+    // Ignore if focused on input/textarea
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
 
     event.preventDefault();
     const state = useStore.getState();

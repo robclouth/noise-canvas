@@ -111,6 +111,9 @@ export function QuickSlots() {
   }, []);
 
   useWindowEvent("keydown", (event) => {
+    // Ignore if focused on input/textarea
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+
     if (KEYS[event.key] !== undefined) {
       event.preventDefault();
       const slotIndex = KEYS[event.key];

@@ -155,11 +155,10 @@ function App(): React.JSX.Element {
   }, []);
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
-    if (
-      event.code === "Space" &&
-      !(event.target instanceof HTMLInputElement) &&
-      !(event.target instanceof HTMLTextAreaElement)
-    ) {
+    // Ignore if focused on input/textarea
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+
+    if (event.code === "Space") {
       event.preventDefault();
       useStore.getState().togglePlayback();
     }
