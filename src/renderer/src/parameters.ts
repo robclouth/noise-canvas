@@ -523,7 +523,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     name: "Blur Amount Time",
     label: "Blur H",
     description: "The amount of blur to apply over time.",
-    default: 0,
+    default: 100,
     min: 0,
     max: 100,
     step: 1,
