@@ -94,6 +94,12 @@ export function QuickSlots() {
       useStore.getState().clearQuickSlot(slotIndex);
       return;
     } else {
+      if (!slot) {
+        useStore.getState().setQuickSlot(slotIndex);
+        setActiveSlot(slotIndex);
+        setModified(false);
+        return;
+      }
       useStore.getState().recallQuickSlot(slotIndex);
       setActiveSlot(slotIndex);
       setModified(false);

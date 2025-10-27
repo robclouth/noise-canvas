@@ -610,19 +610,10 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
     float audioLevelDb = getAudioLevelDb(destUv);
     float intensity = applyModulation(brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue, brushIntensity.modulationAmounts, destUv, 0, audioLevelDb);
 
-    float pan = applyModulation(
-        brushPan.value, brushPan.minValue, brushPan.maxValue,
-        brushPan.modulationAmounts, destUv, 0, audioLevelDb
-    );
-
-    // Map to [0,1] and compute equal-power gains
-    float t  = 0.5 * (pan + 1.0);   // 0 = hard L, 0.5 = center, 1 = hard R
-    float gL = cos(t * 0.5 * PI);
-    float gR = sin(t * 0.5 * PI);
-
-    // Apply gains in polar space (keep phases untouched)
-    vec2 pannedModifiedL = fromPolar(getMag(modifiedL) * gL, getPhase(modifiedL)); // (r,g)
-    vec2 pannedModifiedR = fromPolar(getMag(modifiedR) * gR, getPhase(modifiedR)); // (b,a)
+    // Pan is applied by scaling magnitude
+    float pan = applyModulation(brushPan.value, brushPan.minValue, brushPan.maxValue, brushPan.modulationAmounts, destUv, 0, audioLevelDb);
+    vec2 pannedModifiedL = fromPolar(getMag(modifiedL) * clamp(1.0 - pan, 0.0, 1.0), getPhase(modifiedL));
+    vec2 pannedModifiedR = fromPolar(getMag(modifiedR) * clamp(1.0 + pan, 0.0, 1.0), getPhase(modifiedR));
     
     float effectiveWeight = weight * intensity;
 

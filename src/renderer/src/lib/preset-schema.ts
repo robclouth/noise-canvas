@@ -50,7 +50,9 @@ export function createSchema() {
   });
 }
 
-export type PresetType = z.infer<ReturnType<typeof createSchema>>;
+export type PresetType = Omit<z.infer<ReturnType<typeof createSchema>>, "parameters"> & {
+  parameters: Partial<Record<ParameterKey, any>>;
+};
 
 /**
  * Migrate a preset from an older version to the current version
