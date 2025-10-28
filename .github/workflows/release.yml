@@ -1,15 +1,12 @@
 name: Build and Release
 
-# This workflow runs on pushes to tags that look like a version number (e.g., v1.0.0, v1.2.3)
 on:
   push:
     tags:
       - "v*.*.*"
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
 jobs:
-  # Define a build matrix to run the build on Windows, macOS, and Linux
   build:
     strategy:
       matrix:
@@ -24,45 +21,50 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22 # Use a recent LTS version of Node.js
+          node-version: 22
           cache: "npm"
 
       - name: Install dependencies
         run: npm install
-
       - name: Build application on Windows
         if: runner.os == 'Windows'
-        run: npm run build:win
+        run: npm run build:win -- --publish=never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Build application on macOS
         if: runner.os == 'macOS'
-        run: npm run build:mac
+        run: npm run build:mac -- --publish=never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Build application on Linux
         if: runner.os == 'Linux'
-        run: npm run build:linux
+        run: npm run build:linux -- --publish=never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Upload artifact
+      # Upload ONLY the distributable installer-ish artifacts for each OS.
+      # (We do not upload the entire app bundle contents.)
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}-build
-          # electron-builder's default output directory is 'dist'
-          # It might be 'release/build' depending on your config.
-          # Check your electron-builder config if this path is incorrect.
-          path: dist/
+          name: ${{ matrix.os }}-dist
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*-setup.exe
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+            dist/latest*.yml
+          if-no-files-found: warn
 
-  # This job runs after all 'build' jobs have successfully completed
   release:
     needs: build
     runs-on: ubuntu-latest
 
-    # This permission is required to create a GitHub Release and upload assets
+    # This lets us create a Release and upload assets.
     permissions:
       contents: write
 
@@ -70,19 +72,26 @@ jobs:
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
-          # The path where artifacts will be downloaded
           path: artifacts
 
+      # Create/publish the GitHub Release from the tag, attach installers.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # The release will be created from the tag that triggered the workflow
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
-          # 'true' creates a draft release, 'false' publishes it immediately
           draft: false
-          # 'false' will not mark it as a pre-release
           prerelease: false
-          # Upload all files from the artifacts directory to the release
+
+          # Avoid failing if e.g. Linux didn't build .deb, etc.
+          fail_on_unmatched_files: false
+
+          # Only attach installer files + update manifests, not raw bundle internals.
           files: |
-            artifacts/**/*
+            artifacts/**/dist/*.dmg
+            artifacts/**/dist/*.zip
+            artifacts/**/dist/*-setup.exe
+            artifacts/**/dist/*.exe
+            artifacts/**/dist/*.AppImage
+            artifacts/**/dist/*.deb
+            artifacts/**/dist/latest*.yml
