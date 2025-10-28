@@ -3,18 +3,28 @@ productName: "Noise Canvas"
 directories:
   buildResources: build
 files:
-  - "out/**"
-  - "!**/.vscode/*"
-  - "!src/*"
-  - "!electron.vite.config.{js,ts,mjs,cjs}"
-  - "!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}"
-  - "!{.env,.env.*,.npmrc,pnpm-lock.yaml}"
-  - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
+  - out/**
+  - package.json
+  # strip cruft everywhere (incl. node_modules)
+  - "!**/*.map"
+  - "!**/*.ts"
+  - "!**/*.tsx"
+  - "!**/*.md"
+  - "!**/README*"
+  - "!**/CHANGELOG*"
+  - "!**/docs{,/**}"
+  - "!**/test{,/**}"
+  - "!**/tests{,/**}"
+  - "!**/example{,/**}"
+  - "!**/examples{,/**}"
+  - "!**/demo{,/**}"
+  - "!node_modules/**/{benchmark,benchmarks}"
   - "build/Release/gaborator_addon.node"
+
+asar: true
 asarUnpack:
-  - "**/*.node"
-  - "**/node_modules/ffmpeg-static/**"
-  - "**/node_modules/ffprobe-static/**"
+  - "**/*.node" # only native modules
+  - "**/node_modules/ffmpeg-static/ffmpeg*"
 win:
   icon: resources/icon.png
   executableName: "Noise Canvas"

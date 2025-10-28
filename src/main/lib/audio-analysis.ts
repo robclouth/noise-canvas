@@ -1,11 +1,5 @@
-// Direct access module for gaborator - to be used from renderer with nodeIntegration
-import ffmpegPath from "ffmpeg-static";
-import ffprobePath from "ffprobe-static";
-import ffmpeg from "fluent-ffmpeg";
-import { unlinkSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
 import { join } from "path";
-import { Writable } from "stream";
+import { decodeAudioFile, encodeBufferToAudioFile, probeAudioFile } from "./ffmpeg";
 import type { AnalysisParams, GaboratorAnalysisResult } from "./types";
 
 let gaborator: any = null;
@@ -37,64 +31,16 @@ export function init() {
   return gaborator;
 }
 
-export function setupFfmpeg() {
-  const isPackaged = __dirname.includes("app.asar");
-  const correctFfmpegPath = isPackaged ? ffmpegPath!.replace("app.asar", "app.asar.unpacked") : ffmpegPath!;
-  const correctFfprobePath = isPackaged ? ffprobePath.path.replace("app.asar", "app.asar.unpacked") : ffprobePath.path;
-  ffmpeg.setFfmpegPath(correctFfmpegPath);
-  ffmpeg.setFfprobePath(correctFfprobePath);
-}
-
 export async function analyze(filePath: string, params: AnalysisParams) {
   const gab = init();
-  setupFfmpeg();
 
-  const metadata = await new Promise<ffmpeg.FfprobeData>((resolve, reject) => {
-    ffmpeg.ffprobe(filePath, (err, data) => {
-      if (err) return reject(err);
-      resolve(data);
-    });
-  });
-
-  const audioStreamInfo = metadata.streams.find((s) => s.codec_type === "audio");
-  if (!audioStreamInfo || !audioStreamInfo.sample_rate) {
-    throw new Error("Could not determine sample rate from audio file.");
-  }
-
-  const format = metadata.format.format_name?.split(",")[0] || "wav";
-  const codec = audioStreamInfo.codec_name || "pcm_s32le";
-  const sampleRate = audioStreamInfo.sample_rate;
-  const channels = audioStreamInfo.channels || 1;
+  const { sampleRate, channels, format, codec } = await probeAudioFile(filePath);
 
   if (!allowedExtensions.includes(format.toLowerCase())) {
     throw new Error(`Unsupported file format: ${format}`);
   }
 
-  const concatenatedBuffer = await new Promise<Buffer>((resolve, reject) => {
-    const audioChunks: Buffer[] = [];
-    ffmpeg(filePath)
-      .toFormat("f32le")
-      .audioChannels(channels)
-      .audioFrequency(sampleRate)
-      .on("error", (err) => reject(new Error(`FFmpeg error: ${err.message}`)))
-      .stream(
-        new Writable({
-          write(chunk, _encoding, callback) {
-            audioChunks.push(chunk);
-            callback();
-          },
-        }),
-      )
-      .on("finish", () => {
-        resolve(Buffer.concat(audioChunks));
-      });
-  });
-
-  const audioBuffer = new Float32Array(
-    concatenatedBuffer.buffer,
-    concatenatedBuffer.byteOffset,
-    concatenatedBuffer.length / Float32Array.BYTES_PER_ELEMENT,
-  );
+  const audioBuffer = await decodeAudioFile(filePath, sampleRate, channels);
 
   const analysisResult: GaboratorAnalysisResult = await gab.analyze(audioBuffer, channels, sampleRate, params);
 
@@ -172,63 +118,5 @@ export async function exportAudio(
   sampleRate: number,
   format: string = "wav",
 ): Promise<void> {
-  setupFfmpeg();
-
-  const numChannels = audioChannels.length;
-  const numFrames = audioChannels[0].length;
-
-  // Interleave channels into a single buffer
-  const interleavedBuffer = Buffer.allocUnsafe(numChannels * numFrames * 4); // 4 bytes per float32
-  const interleavedView = new Float32Array(
-    interleavedBuffer.buffer,
-    interleavedBuffer.byteOffset,
-    numChannels * numFrames,
-  );
-
-  for (let frame = 0; frame < numFrames; frame++) {
-    for (let channel = 0; channel < numChannels; channel++) {
-      interleavedView[frame * numChannels + channel] = audioChannels[channel][frame];
-    }
-  }
-
-  // Write to a temporary raw file first, then convert with ffmpeg
-  const tempFile = join(tmpdir(), `audio-export-${Date.now()}.raw`);
-
-  return new Promise<void>((resolve, reject) => {
-    try {
-      // Write interleaved buffer to temp file
-      writeFileSync(tempFile, interleavedBuffer);
-
-      // Convert temp file to output format
-      ffmpeg(tempFile)
-        .inputFormat("f32le")
-        .inputOptions([`-ar ${sampleRate}`, `-ac ${numChannels}`])
-        .audioCodec(format === "wav" ? "pcm_f32le" : format === "flac" ? "flac" : "libmp3lame")
-        .toFormat(format)
-        .on("error", (err) => {
-          try {
-            unlinkSync(tempFile);
-          } catch {
-            // Ignore cleanup errors
-          }
-          reject(new Error(`FFmpeg export error: ${err.message}`));
-        })
-        .on("end", () => {
-          try {
-            unlinkSync(tempFile);
-          } catch {
-            // Ignore cleanup errors
-          }
-          resolve();
-        })
-        .save(outputPath);
-    } catch (error) {
-      try {
-        unlinkSync(tempFile);
-      } catch {
-        // Ignore cleanup errors
-      }
-      reject(error);
-    }
-  });
+  await encodeBufferToAudioFile(audioChannels, outputPath, sampleRate, format);
 }
