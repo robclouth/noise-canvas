@@ -88,7 +88,7 @@ function createWindow(): void {
     mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
-    // mainWindow.webContents.openDevTools();
+    mainWindow.webContents.openDevTools();
   }
 
   createMenu(mainWindow!);
