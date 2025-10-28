@@ -20,7 +20,6 @@
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && dotenv -e .env -- electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
-    "publish": "dotenv -e .env && npm run build && electron-builder --publish always",
     "version": "git add -A",
     "postversion": "git push && git push --tags",
     "release:patch": "npm version patch -m 'Release v%s'",
