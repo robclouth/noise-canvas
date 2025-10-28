@@ -92,7 +92,6 @@ jobs:
             artifacts/**/*.dmg
             artifacts/**/*.zip
             artifacts/**/*-setup.exe
-            artifacts/**/*.exe
             artifacts/**/*.AppImage
             artifacts/**/*.deb
             artifacts/**/latest*.yml
