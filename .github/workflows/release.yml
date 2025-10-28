@@ -28,19 +28,19 @@ jobs:
         run: npm install
       - name: Build application on Windows
         if: runner.os == 'Windows'
-        run: npm run build:win -- --publish=never
+        run: npm run build:win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Build application on macOS
         if: runner.os == 'macOS'
-        run: npm run build:mac -- --publish=never
+        run: npm run build:mac
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Build application on Linux
         if: runner.os == 'Linux'
-        run: npm run build:linux -- --publish=never
+        run: npm run build:linux
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
