@@ -20,9 +20,9 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
   const modulatorScaleLut = useModulatorScaleLut(activeFileId || "");
 
   // Load image textures for all modulators
-  const modulator1ImageTexture = useModulatorTexture(0);
-  const modulator2ImageTexture = useModulatorTexture(1);
-  const modulator3ImageTexture = useModulatorTexture(2);
+  const modulator1Texture = useModulatorTexture(0);
+  const modulator2Texture = useModulatorTexture(1);
+  const modulator3Texture = useModulatorTexture(2);
 
   const testTexture = useTexture(test);
 
@@ -58,17 +58,17 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
 
   // Update image texture uniforms when textures change
   useEffect(() => {
-    if (modulator1ImageTexture) {
-      material.uniforms.modulator1ImageTex.value = modulator1ImageTexture;
+    if (modulator1Texture) {
+      material.uniforms.modulator1ImageTex.value = modulator1Texture;
     }
-    if (modulator2ImageTexture) {
-      material.uniforms.modulator2ImageTex.value = modulator2ImageTexture;
+    if (modulator2Texture) {
+      material.uniforms.modulator2ImageTex.value = modulator2Texture;
     }
-    if (modulator3ImageTexture) {
-      material.uniforms.modulator3ImageTex.value = modulator3ImageTexture;
+    if (modulator3Texture) {
+      material.uniforms.modulator3ImageTex.value = modulator3Texture;
     }
     invalidate();
-  }, [material, modulator1ImageTexture, modulator2ImageTexture, modulator3ImageTexture, invalidate]);
+  }, [material, modulator1Texture, modulator2Texture, modulator3Texture, invalidate]);
 
   useEffect(() => {
     const unsubscribe = useStore.subscribe(

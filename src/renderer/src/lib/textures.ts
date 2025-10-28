@@ -24,9 +24,9 @@ import tubes from "@/assets/textures/Tubes.jpg";
 import water1 from "@/assets/textures/Water 1.jpg";
 import water2 from "@/assets/textures/Water 2.jpg";
 import water3 from "@/assets/textures/Water 3.jpg";
-import { useTexture } from "@react-three/drei";
 import { useStore } from "@renderer/store";
-import { LinearFilter, RepeatWrapping } from "three";
+import { useEffect, useState } from "react";
+import { LinearFilter, RepeatWrapping, Texture, TextureLoader } from "three";
 import { getFolders } from "./folders";
 
 const TEXTURE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
@@ -111,14 +111,46 @@ export async function getTextures() {
   return allTextures;
 }
 
-export function useModulatorTexture(modulatorIndex: number) {
-  const modulatorImagePath = useStore((state) => state[`modulator${modulatorIndex + 1}ImagePath`]);
+const textureLoader = new TextureLoader();
 
-  const texture = useTexture(modulatorImagePath ? `${modulatorImagePath}` : alienMetal);
+const configureTexture = (texture: Texture): void => {
   texture.wrapS = RepeatWrapping;
   texture.wrapT = RepeatWrapping;
   texture.generateMipmaps = false;
   texture.minFilter = LinearFilter;
   texture.magFilter = LinearFilter;
+};
+
+export function useModulatorTexture(modulatorIndex: number) {
+  const modulatorTexturePath = useStore((state) => state[`modulator${modulatorIndex + 1}TexturePath`] || alienMetal);
+
+  const [texture, setTexture] = useState<Texture | null>(null);
+
+  useEffect(() => {
+    if (!modulatorTexturePath) {
+      setTexture(null);
+      return;
+    }
+
+    let isCancelled = false;
+
+    textureLoader.load(
+      modulatorTexturePath,
+      (loadedTexture) => {
+        if (isCancelled) return;
+        configureTexture(loadedTexture);
+        setTexture(loadedTexture);
+      },
+      undefined,
+      (error) => {
+        if (isCancelled) return;
+        console.error(`Failed to load texture at: ${modulatorTexturePath}`, error);
+      },
+    );
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [modulatorTexturePath]);
   return texture;
 }

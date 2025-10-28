@@ -30,10 +30,10 @@ const STANDARD_SHAPES = [
 export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorShapeControlProps) => {
   const shape = useStore((state) => state[paramKey]);
   const shapeDef = getOptionsParameterDef(paramKey);
-  const imagePath = useStore((state) => state[`modulator${modulatorIndex}ImagePath` as keyof typeof state] as string);
-  const setImagePath = useStore(
-    (state) => state[`setModulator${modulatorIndex}ImagePath` as keyof typeof state] as (path: string | null) => void,
-  );
+
+  const textureParamKey = `modulator${modulatorIndex}TexturePath` as ParameterKey;
+  const texturePath = useStore((state) => state[textureParamKey] as string);
+
   const [optionGroups, setOptionGroups] = useState<
     Array<{ group: string; items: Array<{ value: string; label: string }> }>
   >([]);
@@ -64,8 +64,8 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
 
   // Get current select value
   const getCurrentValue = () => {
-    if (shape === 12 && imagePath) {
-      return `texture:${imagePath}`;
+    if (shape === 12 && texturePath) {
+      return `texture:${texturePath}`;
     }
     return String(shape);
   };
@@ -77,14 +77,14 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
     const setParameter = useStore.getState().setParameter;
 
     if (value.startsWith("texture:")) {
-      // Image selected
-      const imagePathValue = value.replace("texture:", "");
+      // Texture selected
+      const texturePathValue = value.replace("texture:", "");
       setParameter(paramKey, 12);
-      setImagePath(imagePathValue);
+      setParameter(textureParamKey, texturePathValue);
     } else {
       // Standard shape selected
       setParameter(paramKey, parseInt(value));
-      setImagePath(null);
+      setParameter(textureParamKey, null);
     }
   };
 

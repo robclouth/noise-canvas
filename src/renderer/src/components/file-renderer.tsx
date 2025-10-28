@@ -67,9 +67,9 @@ export const FileRenderer = memo(
     const modulatorScaleLut = useModulatorScaleLut(fileId);
 
     // Load image textures for all modulators
-    const modulator1ImageTexture = useModulatorTexture(0);
-    const modulator2ImageTexture = useModulatorTexture(1);
-    const modulator3ImageTexture = useModulatorTexture(2);
+    const modulator1Texture = useModulatorTexture(0);
+    const modulator2Texture = useModulatorTexture(1);
+    const modulator3Texture = useModulatorTexture(2);
 
     // Textures for spectrogram data
     const [packedDataTex, setPackedDataTex] = useState<THREE.DataTexture | null>(null);
@@ -577,9 +577,9 @@ export const FileRenderer = memo(
             value: buildModulatorUniforms(bpm, totalDuration, spectrogramData.bandsPerOctave, spectrogramData.numBands),
           },
           gainLut: { value: modulatorScaleLut || new THREE.Texture() },
-          modulator1ImageTex: { value: modulator1ImageTexture || new THREE.Texture() },
-          modulator2ImageTex: { value: modulator2ImageTexture || new THREE.Texture() },
-          modulator3ImageTex: { value: modulator3ImageTexture || new THREE.Texture() },
+          modulator1ImageTex: { value: modulator1Texture || new THREE.Texture() },
+          modulator2ImageTex: { value: modulator2Texture || new THREE.Texture() },
+          modulator3ImageTex: { value: modulator3Texture || new THREE.Texture() },
         };
 
         // Get enabled effects in order
