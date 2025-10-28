@@ -82,16 +82,18 @@ jobs:
           name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
+          generate_release_notes: true
+          # discussion_category_name: Announcements
 
           # Avoid failing if e.g. Linux didn't build .deb, etc.
           fail_on_unmatched_files: false
 
           # Only attach installer files + update manifests, not raw bundle internals.
           files: |
-            artifacts/**/dist/*.dmg
-            artifacts/**/dist/*.zip
-            artifacts/**/dist/*-setup.exe
-            artifacts/**/dist/*.exe
-            artifacts/**/dist/*.AppImage
-            artifacts/**/dist/*.deb
-            artifacts/**/dist/latest*.yml
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
+            artifacts/**/*-setup.exe
+            artifacts/**/*.exe
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            artifacts/**/latest*.yml
