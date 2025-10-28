@@ -11,7 +11,6 @@ import { modals } from "./components/modals";
 
 const theme = createTheme({
   primaryColor: "orange",
-  focusRing: "never",
   fontSizes: {
     xs: "11px",
     sm: "11px",
@@ -27,14 +26,8 @@ const theme = createTheme({
     xl: "32px",
   },
   fontFamily: "Inter Variable, sans-serif",
+  focusClassName: "",
   components: {
-    // Modal: Modal.extend({
-    //   vars: () => {
-    //     return {
-    //       root: {},
-    //     };
-    //   },
-    // }),
     Input: Input.extend({
       vars: (_theme, props) => {
         if (props.size === "xs") {
