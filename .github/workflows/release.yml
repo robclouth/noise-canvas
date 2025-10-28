@@ -54,7 +54,6 @@ jobs:
             dist/*.dmg
             dist/*.zip
             dist/*-setup.exe
-            dist/*.exe
             dist/*.AppImage
             dist/*.deb
             dist/latest*.yml
