@@ -6,8 +6,11 @@ import icon from "../../resources/icon.png?asset";
 import { createMenu } from "./lib/menu";
 import { ipcMainOn, webContentsSend } from "./lib/types";
 
-systemPreferences.setUserDefault("NSDisabledDictationMenuItem", "boolean", true);
-systemPreferences.setUserDefault("NSDisabledCharacterPaletteMenuItem", "boolean", true);
+// Remove dictation and character palette menu items on macOS
+if (process.platform === "darwin") {
+  systemPreferences.setUserDefault("NSDisabledDictationMenuItem", "boolean", true);
+  systemPreferences.setUserDefault("NSDisabledCharacterPaletteMenuItem", "boolean", true);
+}
 
 let mainWindow: BrowserWindow | null = null;
 
