@@ -304,8 +304,17 @@ export const FileRenderer = memo(
     useEffect(() => {
       const { packed, inverse, meta } = createTextures();
 
+      const original = packed.clone();
+
+      original.wrapS = ClampToEdgeWrapping;
+      original.wrapT = ClampToEdgeWrapping;
+      original.minFilter = NearestFilter;
+      original.magFilter = NearestFilter;
+      original.generateMipmaps = false;
+      original.needsUpdate = true;
+
       setPackedDataTex(packed);
-      setOriginalPackedDataTex(packed.clone());
+      setOriginalPackedDataTex(original);
       setInverseMapTex(inverse);
       setMetadataTex(meta);
 

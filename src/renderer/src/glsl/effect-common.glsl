@@ -260,7 +260,7 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv, sampler2D dataTex, sampler2D me
     float bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
 
     // Read metadata for this band to understand its packing layout
-    vec2 metaUv = vec2((bandIndex + 0.5) / bandCount, 0.5);
+    vec2 metaUv = vec2((bandIndex + 0.5) / max(1.0, bandCount), 0.5);
     vec4 meta = texture2D(metaTex, metaUv);
     float bandStartOffset = meta.r;      // Where this band starts in the packed texture
     float bandLength = meta.g;           // Number of time samples in this band
