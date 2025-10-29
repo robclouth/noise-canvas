@@ -569,19 +569,21 @@ float getBrushWeight(vec2 unpackedUv) {
     vec2 slopeNormalized = (vec2(featherSlopeTime, featherSlopePitch) / 2.0 + 0.5);
 
     float weightX = 1.0;
+    float safeFeatherX = max(featherX, EPSILON);
     if (localUv.x < slopeNormalized.x) {
-        weightX = smoothstep(0.0, slopeNormalized.x * featherX, localUv.x);
+        weightX = smoothstep(0.0, slopeNormalized.x * safeFeatherX, localUv.x);
     } else if (localUv.x > slopeNormalized.x ) {
-        weightX = 1.0 - smoothstep(slopeNormalized.x * featherX + (1.0 - featherX), 1.0, localUv.x);
+        weightX = 1.0 - smoothstep(slopeNormalized.x * safeFeatherX + (1.0 - safeFeatherX), 1.0, localUv.x);
     } 
 
     weightX *= horizontalCoverage(unpackedUv, binWidth);
 
     float weightY = 1.0;
+    float safeFeatherY = max(featherY, EPSILON);
     if (localUv.y < slopeNormalized.y) {
-        weightY = smoothstep(0.0, slopeNormalized.y * featherY, localUv.y);
+        weightY = smoothstep(0.0, slopeNormalized.y * safeFeatherY, localUv.y);
     } else if (localUv.y > slopeNormalized.y ) {
-        weightY = 1.0 - smoothstep(slopeNormalized.y * featherY + (1.0 - featherY), 1.0, localUv.y);
+        weightY = 1.0 - smoothstep(slopeNormalized.y * safeFeatherY + (1.0 - safeFeatherY), 1.0, localUv.y);
     } 
     
     return weightX * weightY;

@@ -112,7 +112,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "%",
     includeInPresets: true,
-    modulatable: true,
+    modulatable: false,
   };
   modulatorDefs[`modulator${idx}PatternRateBeats`] = {
     kind: "number",
@@ -127,7 +127,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     scale: "log",
     unit: BEAT_UNIT,
     includeInPresets: true,
-    modulatable: true,
+    modulatable: false,
   };
   modulatorDefs[`modulator${idx}PatternRateSemis`] = {
     kind: "number",
@@ -141,7 +141,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     marks: semitoneMarksWithOff,
     unit: SEMITONE_UNIT,
     includeInPresets: true,
-    modulatable: true,
+    modulatable: false,
   };
   modulatorDefs[`modulator${idx}Rotation`] = {
     kind: "number",
@@ -154,7 +154,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "°",
     includeInPresets: true,
-    modulatable: true,
+    modulatable: false,
   };
   modulatorDefs[`modulator${idx}PhaseMode`] = {
     kind: "options",
@@ -166,7 +166,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
       { value: 0, label: "Canvas" },
       { value: 1, label: "Brush" },
     ],
-    includeInPresets: true,
+    includeInPresets: false,
   };
   modulatorDefs[`modulator${idx}EnvelopeMinDb`] = {
     kind: "number",
@@ -179,7 +179,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "dB",
     includeInPresets: true,
-    modulatable: true,
+    modulatable: false,
   };
   modulatorDefs[`modulator${idx}EnvelopeMaxDb`] = {
     kind: "number",
@@ -192,7 +192,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "dB",
     includeInPresets: true,
-    modulatable: true,
+    modulatable: false,
   };
   modulatorDefs[`modulator${idx}TexturePath`] = {
     kind: "string",
