@@ -4,14 +4,29 @@ import { CommonUniforms, defaultValues } from "@renderer/effects/base-effect";
 import { openFiles } from "@renderer/store/files";
 import { getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import * as THREE from "three";
-import { ShaderMaterial, UniformsUtils, Vector2 } from "three";
+import {
+  Camera,
+  ClampToEdgeWrapping,
+  DataTexture,
+  FloatType,
+  Mesh,
+  NearestFilter,
+  PlaneGeometry,
+  RGBAFormat,
+  RGFormat,
+  Scene,
+  ShaderMaterial,
+  UniformsUtils,
+  Vector2,
+  WebGLRenderer,
+  WebGLRenderTarget,
+} from "three";
 import { effects } from "../effects";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { readRenderTargetPixelsAsync } from "../lib/async-readpixels";
 import { buildModulatorUniforms, useModulatorScaleLut } from "../lib/modulator-utils";
-import { useModulatorTexture } from "../lib/textures";
+import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import { getUndoManager } from "../lib/undo-manager";
 import { unitsToUv } from "../lib/utils";
 import { copyMaterial } from "./copy-material";
@@ -36,10 +51,10 @@ export interface FileRendererHandle {
   setFBOData: (data: Float32Array) => void;
   /** Returns the textures used for rendering. */
   getTextures: () => {
-    packed: THREE.WebGLRenderTarget;
-    inverse: THREE.DataTexture;
-    metadata: THREE.DataTexture;
-    original: THREE.DataTexture;
+    packed: WebGLRenderTarget;
+    inverse: DataTexture;
+    metadata: DataTexture;
+    original: DataTexture;
   } | null;
   /** Restores the spectrogram to its original state. */
   restoreOriginal: () => void;
@@ -60,8 +75,8 @@ export const FileRenderer = memo(
     const { spectrogramData } = openFiles[fileId];
 
     // Don't subscribe to these during render - access them via refs or useFrame instead
-    const glRef = useRef<THREE.WebGLRenderer>(null!);
-    const cameraRef = useRef<THREE.Camera>(null!);
+    const glRef = useRef<WebGLRenderer>(null!);
+    const cameraRef = useRef<Camera>(null!);
     const invalidateRef = useRef<() => void>(null!);
 
     const modulatorScaleLut = useModulatorScaleLut(fileId);
@@ -72,10 +87,10 @@ export const FileRenderer = memo(
     const modulator3Texture = useModulatorTexture(2);
 
     // Textures for spectrogram data
-    const [packedDataTex, setPackedDataTex] = useState<THREE.DataTexture | null>(null);
-    const [originalPackedDataTex, setOriginalPackedDataTex] = useState<THREE.DataTexture | null>(null);
-    const [inverseMapTex, setInverseMapTex] = useState<THREE.DataTexture | null>(null);
-    const [metadataTex, setMetadataTex] = useState<THREE.DataTexture | null>(null);
+    const [packedDataTex, setPackedDataTex] = useState<DataTexture | null>(null);
+    const [originalPackedDataTex, setOriginalPackedDataTex] = useState<DataTexture | null>(null);
+    const [inverseMapTex, setInverseMapTex] = useState<DataTexture | null>(null);
+    const [metadataTex, setMetadataTex] = useState<DataTexture | null>(null);
 
     // Interaction state
     const displayMode = useRef<"preview" | "committed">("committed");
@@ -170,10 +185,10 @@ export const FileRenderer = memo(
       });
     }, []);
 
-    const mesh = useRef<THREE.Mesh>(null!);
+    const mesh = useRef<Mesh>(null!);
     const { scene: fboScene, mesh: fboMesh } = useMemo(() => {
-      const scene = new THREE.Scene();
-      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
+      const scene = new Scene();
+      const mesh = new Mesh(new PlaneGeometry(2, 2));
       scene.add(mesh);
       return { scene, mesh };
     }, []);
@@ -181,41 +196,41 @@ export const FileRenderer = memo(
     // Frame Buffer Objects for ping-pong rendering
     // Create FBOs manually to avoid useFBO's internal canvas size subscriptions
     const fbo1 = useMemo(() => {
-      const fbo = new THREE.WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
-        format: THREE.RGBAFormat,
-        type: THREE.FloatType,
-        minFilter: THREE.NearestFilter,
-        magFilter: THREE.NearestFilter,
+      const fbo = new WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+        format: RGBAFormat,
+        type: FloatType,
+        minFilter: NearestFilter,
+        magFilter: NearestFilter,
       });
       return fbo;
     }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
 
     const fbo2 = useMemo(() => {
-      const fbo = new THREE.WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
-        format: THREE.RGBAFormat,
-        type: THREE.FloatType,
-        minFilter: THREE.NearestFilter,
-        magFilter: THREE.NearestFilter,
+      const fbo = new WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+        format: RGBAFormat,
+        type: FloatType,
+        minFilter: NearestFilter,
+        magFilter: NearestFilter,
       });
       return fbo;
     }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
 
     const passFbo1 = useMemo(() => {
-      const fbo = new THREE.WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
-        format: THREE.RGBAFormat,
-        type: THREE.FloatType,
-        minFilter: THREE.NearestFilter,
-        magFilter: THREE.NearestFilter,
+      const fbo = new WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+        format: RGBAFormat,
+        type: FloatType,
+        minFilter: NearestFilter,
+        magFilter: NearestFilter,
       });
       return fbo;
     }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
 
     const passFbo2 = useMemo(() => {
-      const fbo = new THREE.WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
-        format: THREE.RGBAFormat,
-        type: THREE.FloatType,
-        minFilter: THREE.NearestFilter,
-        magFilter: THREE.NearestFilter,
+      const fbo = new WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+        format: RGBAFormat,
+        type: FloatType,
+        minFilter: NearestFilter,
+        magFilter: NearestFilter,
       });
       return fbo;
     }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
@@ -247,30 +262,30 @@ export const FileRenderer = memo(
     const createTextures = useCallback(() => {
       const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
 
-      const packed = new THREE.DataTexture(packedData, textureWidth, textureHeight, THREE.RGBAFormat, THREE.FloatType);
+      const packed = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
       packed.internalFormat = "RGBA32F";
-      packed.minFilter = THREE.NearestFilter;
-      packed.magFilter = THREE.NearestFilter;
-      packed.wrapS = THREE.ClampToEdgeWrapping;
-      packed.wrapT = THREE.ClampToEdgeWrapping;
+      packed.minFilter = NearestFilter;
+      packed.magFilter = NearestFilter;
+      packed.wrapS = ClampToEdgeWrapping;
+      packed.wrapT = ClampToEdgeWrapping;
       packed.generateMipmaps = false;
       packed.needsUpdate = true;
 
-      const inverse = new THREE.DataTexture(inverseMap, textureWidth, textureHeight, THREE.RGFormat, THREE.FloatType);
+      const inverse = new DataTexture(inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
       inverse.internalFormat = "RG32F";
-      inverse.minFilter = THREE.NearestFilter;
-      inverse.magFilter = THREE.NearestFilter;
-      inverse.wrapS = THREE.ClampToEdgeWrapping;
-      inverse.wrapT = THREE.ClampToEdgeWrapping;
+      inverse.minFilter = NearestFilter;
+      inverse.magFilter = NearestFilter;
+      inverse.wrapS = ClampToEdgeWrapping;
+      inverse.wrapT = ClampToEdgeWrapping;
       inverse.generateMipmaps = false;
       inverse.needsUpdate = true;
 
-      const meta = new THREE.DataTexture(metadata, numBands, 1, THREE.RGBAFormat, THREE.FloatType);
+      const meta = new DataTexture(metadata, numBands, 1, RGBAFormat, FloatType);
       meta.internalFormat = "RGBA32F";
-      meta.minFilter = THREE.NearestFilter;
-      meta.magFilter = THREE.NearestFilter;
-      meta.wrapS = THREE.ClampToEdgeWrapping;
-      meta.wrapT = THREE.ClampToEdgeWrapping;
+      meta.minFilter = NearestFilter;
+      meta.magFilter = NearestFilter;
+      meta.wrapS = ClampToEdgeWrapping;
+      meta.wrapT = ClampToEdgeWrapping;
       meta.generateMipmaps = false;
       meta.needsUpdate = true;
 
@@ -318,14 +333,14 @@ export const FileRenderer = memo(
     const calculateSourceOffset = useCallback(
       (
         state: ReturnType<typeof useStore.getState>,
-        mousePos: THREE.Vector2 | null,
+        mousePos: Vector2 | null,
         sourceBpm: number,
         sourceTotalDuration: number,
         sourceSpectrogramData: typeof spectrogramData,
         bpm: number,
         totalDuration: number,
-      ): THREE.Vector2 => {
-        const sourceOffsetUv = new THREE.Vector2(0, 0);
+      ): Vector2 => {
+        const sourceOffsetUv = new Vector2(0, 0);
 
         if (!state.sourcePosition || !mousePos) {
           return sourceOffsetUv;
@@ -342,7 +357,7 @@ export const FileRenderer = memo(
           sourceSpectrogramData.bandsPerOctave,
           sourceSpectrogramData.numBands,
         );
-        const halfBrushSizeUvSource = new THREE.Vector2(brushSizeUvSource.x / 2, brushSizeUvSource.y / 2);
+        const halfBrushSizeUvSource = new Vector2(brushSizeUvSource.x / 2, brushSizeUvSource.y / 2);
 
         // Calculate brush size in the CURRENT file's coordinate space
         const brushSizeUvCurrent = unitsToUv(
@@ -353,7 +368,7 @@ export const FileRenderer = memo(
           spectrogramData.bandsPerOctave,
           spectrogramData.numBands,
         );
-        const halfBrushSizeUvCurrent = new THREE.Vector2(brushSizeUvCurrent.x / 2, brushSizeUvCurrent.y / 2);
+        const halfBrushSizeUvCurrent = new Vector2(brushSizeUvCurrent.x / 2, brushSizeUvCurrent.y / 2);
 
         // Convert source position (bottom-left) to UV coordinates in the source file
         const sourcePositionBottomLeftUv = unitsToUv(
@@ -414,6 +429,8 @@ export const FileRenderer = memo(
       },
       [spectrogramData.bandsPerOctave, spectrogramData.numBands],
     );
+
+    const placeholderTexture = usePlaceholderTexture();
 
     /**
      * The main render loop, called on every frame.
@@ -504,6 +521,10 @@ export const FileRenderer = memo(
         const sourceRendererRef = sourceFile.rendererRef;
         const textures = sourceRendererRef?.current?.getTextures();
 
+        if (!textures) {
+          return;
+        }
+
         // Calculate source offset using the helper function
         const sourceOffsetUv = calculateSourceOffset(
           state,
@@ -521,30 +542,30 @@ export const FileRenderer = memo(
 
         // Set up common uniforms for the brush shaders
         const commonUniforms: CommonUniforms = {
-          sourceSpectrogramTex: { value: textures!.packed.texture },
+          sourceSpectrogramTex: { value: textures.packed.texture || placeholderTexture },
           sourceSpectrogramTextureSize: { value: sourceFile.spectrogramData.packedTextureSize },
-          sourceInverseMapTex: { value: textures!.inverse },
-          sourceMetadataTex: { value: textures!.metadata },
+          sourceInverseMapTex: { value: textures.inverse || placeholderTexture },
+          sourceMetadataTex: { value: textures.metadata || placeholderTexture },
           sourceMinFreq: { value: sourceFile.spectrogramData.minFreq },
           sourceBandsPerOctave: { value: sourceFile.spectrogramData.bandsPerOctave },
           sourceFrameCount: { value: sourceFile.spectrogramData.numFrames },
           sourceBandCount: { value: sourceFile.spectrogramData.numBands },
           sourceChannelCount: { value: sourceFile.spectrogramData.numChannels },
           sourceSampleRate: { value: sourceFile.spectrogramData.sampleRate },
-          destSpectrogramTex: { value: currentReadFBO.texture },
+          destSpectrogramTex: { value: currentReadFBO.texture || placeholderTexture },
           destSpectrogramTextureSize: { value: spectrogramData.packedTextureSize },
-          destInverseMapTex: { value: inverseMapTex },
-          destMetadataTex: { value: metadataTex },
+          destInverseMapTex: { value: inverseMapTex || placeholderTexture },
+          destMetadataTex: { value: metadataTex || placeholderTexture },
           destMinFreq: { value: spectrogramData.minFreq },
           destBandsPerOctave: { value: spectrogramData.bandsPerOctave },
           destFrameCount: { value: spectrogramData.numFrames },
           destBandCount: { value: spectrogramData.numBands },
           destChannelCount: { value: spectrogramData.numChannels },
           destSampleRate: { value: spectrogramData.sampleRate },
-          originalSpectrogramTex: { value: originalPackedDataTex },
+          originalSpectrogramTex: { value: originalPackedDataTex || placeholderTexture },
           viewZoomPower: { value: viewZoomPower },
           viewOffset: { value: viewOffset },
-          brushCenterUv: { value: mousePos || new THREE.Vector2(-1, -1) },
+          brushCenterUv: { value: mousePos || new Vector2(-1, -1) },
           brushSizeUv: { value: brushSizeUv },
           featherX: { value: state.brushFeatherTime / 100 },
           featherY: { value: state.brushFeatherPitch / 100 },
@@ -576,10 +597,10 @@ export const FileRenderer = memo(
           modulators: {
             value: buildModulatorUniforms(bpm, totalDuration, spectrogramData.bandsPerOctave, spectrogramData.numBands),
           },
-          gainLut: { value: modulatorScaleLut || new THREE.Texture() },
-          modulator1ImageTex: { value: modulator1Texture || new THREE.Texture() },
-          modulator2ImageTex: { value: modulator2Texture || new THREE.Texture() },
-          modulator3ImageTex: { value: modulator3Texture || new THREE.Texture() },
+          gainLut: { value: modulatorScaleLut || placeholderTexture },
+          modulator1ImageTex: { value: modulator1Texture || placeholderTexture },
+          modulator2ImageTex: { value: modulator2Texture || placeholderTexture },
+          modulator3ImageTex: { value: modulator3Texture || placeholderTexture },
         };
 
         // Get enabled effects in order
@@ -701,9 +722,9 @@ export const FileRenderer = memo(
 
       const hoveredFile = state.hoveredFile ? openFiles[state.hoveredFile] : null;
 
-      displayMaterial.uniforms.sourceSpectrogramTex.value = displayTexture;
-      displayMaterial.uniforms.sourceInverseMapTex.value = inverseMapTex;
-      displayMaterial.uniforms.sourceMetadataTex.value = metadataTex;
+      displayMaterial.uniforms.sourceSpectrogramTex.value = displayTexture || placeholderTexture;
+      displayMaterial.uniforms.sourceInverseMapTex.value = inverseMapTex || placeholderTexture;
+      displayMaterial.uniforms.sourceMetadataTex.value = metadataTex || placeholderTexture;
       displayMaterial.uniforms.sourceMinFreq.value = spectrogramData.minFreq;
       displayMaterial.uniforms.sourceBandsPerOctave.value = spectrogramData.bandsPerOctave;
       displayMaterial.uniforms.sourceFrameCount.value = spectrogramData.numFrames;
@@ -715,7 +736,7 @@ export const FileRenderer = memo(
       displayMaterial.uniforms.bpm.value = bpm;
       displayMaterial.uniforms.minDb.value = state.displayMinDb;
       displayMaterial.uniforms.maxDb.value = state.displayMaxDb;
-      displayMaterial.uniforms.brushCenterUv.value = mousePos || new THREE.Vector2(0, 0);
+      displayMaterial.uniforms.brushCenterUv.value = mousePos || new Vector2(0, 0);
       displayMaterial.uniforms.brushSizeUv.value = brushSizeUv;
       displayMaterial.uniforms.sourceBrushSizeUv.value = hoveredFile
         ? unitsToUv(
@@ -823,13 +844,7 @@ export const FileRenderer = memo(
 
       pingPong.current = 0;
 
-      const dataTex = new THREE.DataTexture(
-        data,
-        packedTextureSize.x,
-        packedTextureSize.y,
-        THREE.RGBAFormat,
-        THREE.FloatType,
-      );
+      const dataTex = new DataTexture(data, packedTextureSize.x, packedTextureSize.y, RGBAFormat, FloatType);
       dataTex.needsUpdate = true;
 
       glRef.current.initTexture(dataTex);
@@ -856,10 +871,10 @@ export const FileRenderer = memo(
      * Returns the current set of textures.
      */
     const getTextures = (): {
-      packed: THREE.WebGLRenderTarget;
-      inverse: THREE.DataTexture;
-      metadata: THREE.DataTexture;
-      original: THREE.DataTexture;
+      packed: WebGLRenderTarget;
+      inverse: DataTexture;
+      metadata: DataTexture;
+      original: DataTexture;
     } | null => {
       if (!fbo1 || !fbo2 || !inverseMapTex || !metadataTex || !originalPackedDataTex) return null;
       return {

@@ -25,8 +25,18 @@ import water1 from "@/assets/textures/Water 1.jpg";
 import water2 from "@/assets/textures/Water 2.jpg";
 import water3 from "@/assets/textures/Water 3.jpg";
 import { useStore } from "@renderer/store";
-import { useEffect, useState } from "react";
-import { LinearFilter, RepeatWrapping, Texture, TextureLoader } from "three";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ClampToEdgeWrapping,
+  DataTexture,
+  FloatType,
+  LinearFilter,
+  NearestFilter,
+  RepeatWrapping,
+  RGBAFormat,
+  Texture,
+  TextureLoader,
+} from "three";
 import { getFolders } from "./folders";
 
 const TEXTURE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
@@ -153,4 +163,22 @@ export function useModulatorTexture(modulatorIndex: number) {
     };
   }, [modulatorTexturePath]);
   return texture;
+}
+
+export function usePlaceholderTexture() {
+  function makeSafePlaceholderRGBA32F(): DataTexture {
+    const data = new Float32Array(4); // [0,0,0,0]
+    const tex = new DataTexture(data, 1, 1, RGBAFormat, FloatType);
+    tex.needsUpdate = true;
+    tex.wrapS = ClampToEdgeWrapping;
+    tex.wrapT = ClampToEdgeWrapping;
+    tex.minFilter = NearestFilter;
+    tex.magFilter = NearestFilter;
+    tex.generateMipmaps = false;
+    return tex;
+  }
+
+  // create once (outside component or memo it)
+  const safePlaceholder = useMemo(() => makeSafePlaceholderRGBA32F(), []);
+  return safePlaceholder;
 }

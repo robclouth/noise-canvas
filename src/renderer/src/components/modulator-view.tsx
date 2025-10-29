@@ -6,17 +6,18 @@ import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
 import { useEffect, useMemo, useState } from "react";
-import { ShaderMaterial, Texture, Vector2 } from "three";
+import { ShaderMaterial, Vector2 } from "three";
 import modulatorFrag from "../glsl/modulator.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { buildModulatorUniforms, useModulatorScaleLut } from "../lib/modulator-utils";
-import { useModulatorTexture } from "../lib/textures";
+import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import { ModulatorShapeControl } from "./controls/modulator-shape-control";
 import { ParameterControl } from "./controls/parameter-control";
 
 const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
   const { invalidate } = useThree();
   const activeFileId = useStore((state) => state.activeFileId);
+  const placeholderTexture = usePlaceholderTexture();
   const modulatorScaleLut = useModulatorScaleLut(activeFileId || "");
 
   // Load image textures for all modulators
@@ -28,9 +29,6 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
 
   const material = useMemo(() => {
     const modulators = buildModulatorUniforms(120, 10, 12, 96);
-
-    // Create placeholder texture for modulators without images
-    const placeholderTexture = new Texture();
 
     return new ShaderMaterial({
       uniforms: {
@@ -52,23 +50,23 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
 
   useEffect(() => {
     material.uniforms.modulatorIndex.value = modulatorIndex;
-    material.uniforms.gainLut.value = modulatorScaleLut;
+    material.uniforms.gainLut.value = modulatorScaleLut || placeholderTexture;
     invalidate();
-  }, [material, modulatorIndex, modulatorScaleLut, invalidate]);
+  }, [material, modulatorIndex, modulatorScaleLut, invalidate, placeholderTexture]);
 
   // Update image texture uniforms when textures change
   useEffect(() => {
     if (modulator1Texture) {
-      material.uniforms.modulator1ImageTex.value = modulator1Texture;
+      material.uniforms.modulator1ImageTex.value = modulator1Texture || placeholderTexture;
     }
     if (modulator2Texture) {
-      material.uniforms.modulator2ImageTex.value = modulator2Texture;
+      material.uniforms.modulator2ImageTex.value = modulator2Texture || placeholderTexture;
     }
     if (modulator3Texture) {
-      material.uniforms.modulator3ImageTex.value = modulator3Texture;
+      material.uniforms.modulator3ImageTex.value = modulator3Texture || placeholderTexture;
     }
     invalidate();
-  }, [material, modulator1Texture, modulator2Texture, modulator3Texture, invalidate]);
+  }, [material, modulator1Texture, modulator2Texture, modulator3Texture, invalidate, placeholderTexture]);
 
   useEffect(() => {
     const unsubscribe = useStore.subscribe(
