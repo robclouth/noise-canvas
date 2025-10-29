@@ -148,6 +148,13 @@ Contributions are welcome woth caveats. If you’d like to get involved, reach o
 
 ---
 
+## Building
+
+On Mac and Linux you should just be able to clone the repo then `npm i`.
+On Windows run the official node.js installer, and make you sure choose to auto install the native build tools. Search for 'Visual Studio Installer', open it and nodifying the build tools installation. Make sure Windows 11 SDK is installed on the right-hand panel. Then `npm i`. God I hate Windows.
+
+---
+
 ## Credits
 
 - [3dtextures.me](https://3dtextures.me/) for the textures.
