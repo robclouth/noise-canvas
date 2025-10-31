@@ -219,10 +219,19 @@ How the processed data merges with the original spectrogram:
 
 ## Modulation
 
-Noise Canvas includes a modulation system that allows parameters to move over time or pitch.
+Noise Canvas has a flexible modulation system for automating parameters in time and pitch.  
+Anywhere you see a small dropdown icon on a parameter label, that parameter is modulatable. You can run up to **three modulators** at once.
 
-Any parameter label with a small dropdown icon can be modulated.
-Up to **three modulators** can be active at once.
+### How Modulation Amount Works
+
+This isn’t an “add some LFO on top” system. Think of it as **crossfading between the parameter’s slider value and a fully modulated value that is always clamped to the parameter’s legal range**.
+
+- **Amount = 0%** → The parameter is **exactly** the value you set on its slider. No modulation is applied.
+- **Amount = +100%** → The parameter ignores the slider and takes **pure modulation**, mapped from **that parameter’s minimum up to its maximum**. It **never** goes out of range.
+- **Amount = −100%** → Same as +100% but **inverted**: the modulator is mapped from **maximum down to minimum**.
+- **Amounts between −100% and +100%** blend between the slider value and the modulated value.
+
+In other words, **Amount** controls “how much of the original slider value vs how much of the fully ranged modulation” you hear.
 
 ### Modes
 
