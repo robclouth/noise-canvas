@@ -15,7 +15,7 @@ if (process.platform === "darwin") {
 let mainWindow: BrowserWindow | null = null;
 
 const gotTheLock = app.requestSingleInstanceLock();
-let pendingPath: string | null = null;
+let pendingPath: string | null = getOpenedPathFromArgv(process.argv);
 
 app.on("open-file", (event, path) => {
   event.preventDefault();
@@ -28,13 +28,8 @@ app.on("open-file", (event, path) => {
   }
 });
 
-const fileArgIndex = app.isPackaged ? 1 : 2;
-const args = process.argv.slice(fileArgIndex);
-for (const arg of args) {
-  if (!arg.startsWith("--")) {
-    pendingPath = arg;
-    break;
-  }
+function getOpenedPathFromArgv(argv: string[]): string | null {
+  return argv?.slice(-1)[0] || null;
 }
 
 if (!gotTheLock) {
@@ -47,12 +42,10 @@ if (!gotTheLock) {
       }
       mainWindow.focus();
 
-      const newFileArgs = argv.slice(fileArgIndex);
-      for (const arg of newFileArgs) {
-        if (!arg.startsWith("--") && mainWindow) {
-          webContentsSend(mainWindow, "open-file", arg);
-          break;
-        }
+      const openedFilePath = getOpenedPathFromArgv(argv);
+
+      if (openedFilePath && mainWindow) {
+        webContentsSend(mainWindow, "open-file", openedFilePath);
       }
     }
   });
