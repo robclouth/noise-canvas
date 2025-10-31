@@ -1,5 +1,5 @@
 import { useStore } from "@/store";
-import { Box } from "@mantine/core";
+import { Box, Loader } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { View } from "@react-three/drei";
 import { openFiles } from "@renderer/store/files";
@@ -88,6 +88,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   const isSettingPosition = useStore((state) => state.isSettingPosition);
   const zoom = useStore((state) => state.filesZoom[fileId]);
   const offset = useStore((state) => state.filesOffset[fileId]);
+  const isSynthesizing = useStore((state) => state.filesSynthesizing[fileId]);
 
   const [isPanning, setIsPanning] = useState(false);
   const [isZooming, setZooming] = useState(false);
@@ -423,6 +424,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         {isActive && <PlaybackStartLine fileId={fileId} />}
       </Box>
       <TimeLegend fileId={fileId} />
+      {isSynthesizing && <Loader size="xs" pos="absolute" bottom={25} right={10} />}
     </Box>
   );
 });

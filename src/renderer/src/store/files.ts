@@ -37,6 +37,8 @@ export interface FilesState {
   setFilePlaybackStartTime: (fileId: string, playbackStartTime: number) => void;
   filesDirty: Record<string, boolean>;
   setFileDirty: (fileId: string, dirty: boolean) => void;
+  filesSynthesizing: Record<string, boolean>;
+  setFileSynthesizing: (fileId: string, synthesizing: boolean) => void;
   activeFileId: string | null;
   setActiveFileId: (activeFileId: string | null) => Promise<void>;
   sourceFile: { id: string; mode: "current" | "original" } | null;
@@ -505,7 +507,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     fileId: string,
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
   ) => {
-    const { normalize, activeFileId, bandsPerOctave, minFreq, isPlaying, getPlayer } = get();
+    const { normalize, activeFileId, bandsPerOctave, minFreq, isPlaying, getPlayer, setFileSynthesizing } = get();
     if (!activeFileId) return;
 
     try {
@@ -513,6 +515,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       if (!file || !file.rendererRef?.current) {
         return;
       }
+
+      setFileSynthesizing(fileId, true);
 
       const originalAnalysis = file.spectrogramData;
 
@@ -600,6 +604,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // If not playing and not auto-playing, do nothing. The new buffer is ready for the next time the user hits play.
     } catch (error) {
       console.error("Error running synthesis:", error);
+    } finally {
+      setFileSynthesizing(fileId, false);
     }
   },
   reanalyzeActiveFile: async () => {
@@ -722,6 +728,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   setFileDirty: (fileId: string, dirty: boolean) => {
     set((state) => ({
       filesDirty: { ...state.filesDirty, [fileId]: dirty },
+    }));
+  },
+  filesSynthesizing: {},
+  setFileSynthesizing: (fileId: string, synthesizing: boolean) => {
+    set((state) => ({
+      filesSynthesizing: { ...state.filesSynthesizing, [fileId]: synthesizing },
     }));
   },
   activeFileId: null,
