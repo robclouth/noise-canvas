@@ -114,7 +114,17 @@ float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float p
     v = random(floor(pos)) ;
   } else if (modulator.modulatorPatternShape == 6) { // SNOISE
     v = snoise(pos) * 0.5 + 0.5;
-  } 
+  } else if (modulator.modulatorPatternShape == 12) { // IMAGE
+    // Sample from the appropriate image texture based on modulator index
+    // Use rate-scaled position for tiling control
+    if (modulatorIndex == 0) {
+      v = texture(modulator1ImageTex, pos).r;
+    } else if (modulatorIndex == 1) {
+      v = texture(modulator2ImageTex, pos).r;
+    } else if (modulatorIndex == 2) {
+      v = texture(modulator3ImageTex, pos).r;
+    }
+  }
 
   return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
 }

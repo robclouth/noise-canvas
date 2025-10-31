@@ -1,5 +1,6 @@
 precision highp float;
-varying vec2 vUv;
+in vec2 vUv;
+out vec4 fragColor;
 
 #include "effect-common.glsl";
 
@@ -146,5 +147,5 @@ void main() {
         }
     }
 
-    gl_FragColor = vec4(color, 1.0);
+    fragColor = vec4(color, 1.0);
 }

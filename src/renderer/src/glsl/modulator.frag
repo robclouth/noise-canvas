@@ -1,5 +1,6 @@
 precision highp float;
-varying vec2 vUv;
+in vec2 vUv;
+out vec4 fragColor;
 
 #include "common.glsl"
 
@@ -18,9 +19,9 @@ void main() {
   vec2 multiplier = vec2(shape == 11 ? 1.0 : 16.0, shape == 11 ? 1.0 / 12.0 : 48.0);
   
   // Use the texture to get the audio level
-  float audioLevel = texture2D(testTexture, vUv).r;
-float audioLevelDb = 20.0 * log(audioLevel + 0.000001) / log(10.0);
+  float audioLevel = texture(testTexture, vUv).r;
+  float audioLevelDb = 20.0 * log(audioLevel + 0.000001) / log(10.0);
   
   float v = getModulation(vUv, modulatorIndex, true, audioLevelDb);
-  gl_FragColor = vec4(vec3(v), 1.0);
+  fragColor = vec4(vec3(v), 1.0);
 }

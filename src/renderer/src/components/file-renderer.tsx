@@ -9,6 +9,7 @@ import {
   ClampToEdgeWrapping,
   DataTexture,
   FloatType,
+  GLSL3,
   Mesh,
   NearestFilter,
   PlaneGeometry,
@@ -182,6 +183,7 @@ export const FileRenderer = memo(
         },
         vertexShader: passThroughVert,
         fragmentShader: displayFrag,
+        glslVersion: GLSL3,
       });
     }, []);
 

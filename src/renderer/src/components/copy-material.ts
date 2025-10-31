@@ -1,26 +1,26 @@
-import { shaderMaterial } from "@react-three/drei";
-import * as THREE from "three";
+import { GLSL3, ShaderMaterial } from "three";
 
-const CopyMaterial = shaderMaterial(
-  {
-    inputTex: new THREE.Texture(),
+export const copyMaterial = new ShaderMaterial({
+  uniforms: {
+    inputTex: { value: null },
   },
-  /*glsl*/ `
-    varying vec2 vUv;
+  vertexShader: /*glsl*/ `
+    out vec2 vUv;
+
     void main() {
       vUv = uv;
       gl_Position = vec4(position, 1.0);
     }
   `,
-  /*glsl*/ `
+  fragmentShader: /*glsl*/ `    
     precision highp float;
-    varying vec2 vUv;
+    in vec2 vUv;
     uniform sampler2D inputTex;
+    out vec4 fragColor;
 
     void main() {
-      gl_FragColor = texture2D(inputTex, vUv);
+      fragColor = texture(inputTex, vUv);
     }
   `,
-);
-
-export const copyMaterial = new CopyMaterial();
+  glslVersion: GLSL3,
+});

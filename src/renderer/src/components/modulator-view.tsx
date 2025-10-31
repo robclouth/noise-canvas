@@ -6,7 +6,7 @@ import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
 import { useEffect, useMemo, useState } from "react";
-import { ShaderMaterial, Vector2 } from "three";
+import { GLSL3, ShaderMaterial, Vector2 } from "three";
 import modulatorFrag from "../glsl/modulator.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { buildModulatorUniforms, useModulatorScaleLut } from "../lib/modulator-utils";
@@ -44,6 +44,7 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
       },
       vertexShader: passThroughVert,
       fragmentShader: modulatorFrag,
+      glslVersion: GLSL3,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -1,5 +1,5 @@
 precision highp float;
-varying vec2 vUv;
+in vec2 vUv;
 
 #include "effect-common.glsl"
 
@@ -20,7 +20,7 @@ const float gaussianKernel[KERNEL_SIZE] = float[](
 
 void main() {
     ProcessingUvs coords = getProcessingUvs(vUv);
-    vec4 originalTexel = texture2D(destSpectrogramTex, vUv);
+    vec4 originalTexel = texture(destSpectrogramTex, vUv);
     float weight = getBrushWeight(coords.dest);
     if( weight <= 0.0 ) {
         gl_FragColor = originalTexel;
