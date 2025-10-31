@@ -239,6 +239,15 @@ function App(): React.JSX.Element {
         style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}
         eventSource={document.getElementById("root")!}
         frameloop="demand"
+        gl={{
+          alpha: false,
+          antialias: false,
+          depth: false,
+          stencil: false,
+          premultipliedAlpha: false,
+          preserveDrawingBuffer: false,
+          powerPreference: "high-performance",
+        }}
       >
         <View.Port />
         <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
