@@ -1,4 +1,5 @@
 import { Group, Select, Text } from "@mantine/core";
+import { PATTERN_SHAPES } from "@renderer/lib/constants";
 import { getTextures } from "@renderer/lib/textures";
 import { getOptionsParameterDef } from "@renderer/parameters";
 import { useStore } from "@renderer/store";
@@ -11,21 +12,6 @@ interface ModulatorShapeControlProps {
   paramKey: ParameterKey;
   modulatorIndex: number; // 1, 2, or 3
 }
-
-const STANDARD_SHAPES = [
-  { value: "0", label: "Sine" },
-  { value: "1", label: "Triangle" },
-  { value: "2", label: "Square" },
-  { value: "3", label: "Sawtooth" },
-  { value: "4", label: "Pulse" },
-  { value: "5", label: "Random" },
-  { value: "6", label: "Smooth Noise" },
-  { value: "7", label: "Cloud Noise" },
-  { value: "8", label: "Glass Noise" },
-  { value: "9", label: "Ghost Noise" },
-  { value: "10", label: "Bubble Noise" },
-  { value: "11", label: "Selected Scale" },
-];
 
 export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorShapeControlProps) => {
   const shape = useStore((state) => state[paramKey]);
@@ -42,7 +28,7 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
     if (optionGroups.length === 0) {
       getTextures().then((textures) => {
         const groups: Array<{ group: string; items: Array<{ value: string; label: string }> }> = [
-          { group: "Standard", items: STANDARD_SHAPES },
+          { group: "Standard", items: PATTERN_SHAPES.map(({ value, label }) => ({ label, value: value.toString() })) },
           {
             group: "Factory Textures",
             items: textures.factory.map((texture) => ({ value: `texture:${texture.path}`, label: texture.filename })),

@@ -126,10 +126,10 @@ export const PATTERN_SHAPES = [
   { value: 4, label: "Pulse" },
   { value: 5, label: "Random" },
   { value: 6, label: "Smooth Noise" },
-  { value: 7, label: "Cloud Noise" },
-  { value: 8, label: "Glass Noise" },
-  { value: 9, label: "Ghost Noise" },
-  { value: 10, label: "Bubble Noise" },
+  // { value: 7, label: "Cloud Noise" },
+  // { value: 8, label: "Glass Noise" },
+  // { value: 9, label: "Ghost Noise" },
+  // { value: 10, label: "Bubble Noise" },
   { value: 11, label: "Selected Scale" },
   // Note: value 12 is reserved for "Image" mode (handled separately in UI)
 ];

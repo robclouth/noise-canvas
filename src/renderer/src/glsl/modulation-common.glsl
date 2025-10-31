@@ -1,9 +1,5 @@
 #include "../../lygia/generative/snoise.glsl"
 #include "../../lygia/generative/random.glsl"
-#include "../../lygia/generative/fbm.glsl"
-#include "../../lygia/generative/voronoi.glsl"
-#include "../../lygia/generative/wavelet.glsl"
-#include "../../lygia/generative/worley.glsl"
 
 #define NUM_MODULATORS 3
 
@@ -118,27 +114,7 @@ float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float p
     v = random(floor(pos)) ;
   } else if (modulator.modulatorPatternShape == 6) { // SNOISE
     v = snoise(pos) * 0.5 + 0.5;
-  } else if (modulator.modulatorPatternShape == 7) { // FBM
-    v = fbm(pos) * 0.5 + 0.5;
-  } else if (modulator.modulatorPatternShape == 8) { // VORONOI
-    v = voronoi(pos).x;
-  } else if (modulator.modulatorPatternShape == 9) { // WAVELET
-    v = wavelet(pos) * 0.5 + 0.5;
-  } else if (modulator.modulatorPatternShape == 10) { // WORLEY
-    v = worley(pos);
-  } else if (modulator.modulatorPatternShape == 11) { // SCALE
-    v = texture2D(gainLut, vec2(rotatedUv.y, 0.5)).r;
-  } else if (modulator.modulatorPatternShape == 12) { // IMAGE
-    // Sample from the appropriate image texture based on modulator index
-    // Use rate-scaled position for tiling control
-    if (modulatorIndex == 0) {
-      v = texture2D(modulator1ImageTex, pos).r;
-    } else if (modulatorIndex == 1) {
-      v = texture2D(modulator2ImageTex, pos).r;
-    } else if (modulatorIndex == 2) {
-      v = texture2D(modulator3ImageTex, pos).r;
-    }
-  }
+  } 
 
   return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
 }
