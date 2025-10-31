@@ -240,10 +240,8 @@ function App(): React.JSX.Element {
         eventSource={document.getElementById("root")!}
         frameloop="demand"
         gl={{
-          alpha: false,
           antialias: false,
           depth: false,
-          stencil: false,
           premultipliedAlpha: false,
           preserveDrawingBuffer: false,
           powerPreference: "high-performance",
