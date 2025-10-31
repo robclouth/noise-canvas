@@ -13,35 +13,11 @@ Otherwise just open it up and play around. All the parameters have got tooltips.
 
 ---
 
-## Table of Contents
-
-1. [Core Concepts](#core-concepts)
-2. [Brushes and Effects](#brushes-and-effects)
-   - [Shared Brush Parameters](#shared-brush-parameters)
-   - [Available Effects](#available-effects)
-   - [Blend Modes](#blend-modes)
-
-3. [Modulation](#modulation)
-4. [Presets and Quick Slots](#presets-and-quick-slots)
-5. [Working with Multiple Files](#working-with-multiple-files)
-6. [Analysis and Display](#analysis-and-display)
-7. [Output and Playback](#output-and-playback)
-8. [File Menu](#file-menu)
-9. [Integration with Ableton Live](#integration-with-ableton-live)
-10. [Technical Overview](#technical-overview)
-11. [Status](#status)
-12. [Contributing](#contributing)
-13. [Building](#building)
-14. [Credits](#credits)
-15. [License](#license)
-
----
-
 ## Getting Started
 
 Go to the **Releases** section on GitHub, and download the file for your platform.
 
-Once installed, you can open audio files, paint effects directly onto their spectrograms, and hear the results instantly.
+Once installed, you can open audio files, paint effects directly onto their spectrograms, and hear the results instantly. It should be fairly intuitive.
 
 ### Important: Code Signing, Certificates, and “Scary” OS Warnings
 
@@ -75,6 +51,30 @@ After that, it’ll open fine forever.
 If you trust me — great! If you don’t, I'm not exactly anonymous. If Noise Canvas does something dodgy you can trash me on instagram. Also the code is visible to all so you can see I'm not doing anything bad.
 
 Eventually I might pay for a certificate and sign the binary properly, but for now you’ll just have to live with it if you want those sick spectral sounds. Sorry!
+
+---
+
+## Table of Contents
+
+1. [Core Concepts](#core-concepts)
+2. [Brushes and Effects](#brushes-and-effects)
+   - [Shared Brush Parameters](#shared-brush-parameters)
+   - [Available Effects](#available-effects)
+   - [Blend Modes](#blend-modes)
+
+3. [Modulation](#modulation)
+4. [Presets and Quick Slots](#presets-and-quick-slots)
+5. [Working with Multiple Files](#working-with-multiple-files)
+6. [Analysis and Display](#analysis-and-display)
+7. [Output and Playback](#output-and-playback)
+8. [File Menu](#file-menu)
+9. [Integration with Ableton Live](#integration-with-ableton-live)
+10. [Technical Overview](#technical-overview)
+11. [Status](#status)
+12. [Contributing](#contributing)
+13. [Building](#building)
+14. [Credits](#credits)
+15. [License](#license)
 
 ---
 
