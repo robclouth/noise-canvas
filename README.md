@@ -59,13 +59,20 @@ Eventually I might pay for a certificate and sign the binary properly, but for n
 1. [Core Concepts](#core-concepts)
 2. [Brushes and Effects](#brushes-and-effects)
    - [Shared Brush Parameters](#shared-brush-parameters)
+   - [Parameter Controls and Shortcuts](#parameter-controls-and-shortcuts)
    - [Available Effects](#available-effects)
    - [Blend Modes](#blend-modes)
-
 3. [Modulation](#modulation)
+   - [How Modulation Amount Works](#how-modulation-amount-works)
+   - [Modes](#modes)
+   - [Modulator Inputs](#modulator-inputs)
+   - [Modulator Controls](#modulator-controls)
 4. [Presets and Quick Slots](#presets-and-quick-slots)
+   - [Assigning Keys](#assigning-keys)
+   - [Quick Slots](#quick-slots)
 5. [Working with Multiple Files](#working-with-multiple-files)
 6. [Analysis and Display](#analysis-and-display)
+   - [Source Position (Clone Stamp)](#source-position-clone-stamp)
 7. [Output and Playback](#output-and-playback)
 8. [File Menu](#file-menu)
 9. [Integration with Ableton Live](#integration-with-ableton-live)
@@ -139,6 +146,29 @@ All brushes and effects share a set of core controls:
     - -100%: fades from top to bottom.
     - 0%: symmetrical fade.
     - +100%: fades from bottom to top.
+
+---
+
+### Parameter Controls and Shortcuts
+
+Noise Canvas has a few useful shortcuts for working with sliders and parameters more efficiently.
+
+#### Snapping to Preset Values
+
+Many sliders have **preset values** — musically meaningful or commonly used settings (like specific beat divisions or semitone steps).  
+When a slider supports presets, you’ll see a **small dropdown icon** next to its numeric value.
+
+- **Click the dropdown icon** to open the full list of available preset values.
+- **Hold Shift and drag** on the slider to **snap** between those preset values instead of moving smoothly.  
+  This makes it easy to land precisely on useful values without fine-tuning manually.
+
+#### Resetting Parameters
+
+If you ever want to reset a parameter back to its default:
+
+- **Double-click the label** of the parameter — it will instantly reset to its default value.
+
+This works for almost all numeric parameters and makes experimentation less risky — if you make a mess, just double-click to go back.
 
 ---
 
