@@ -153,6 +153,7 @@ export async function encodeBufferToAudioFile(
   // 3. Spawn ffmpeg, feed stdin, capture errors
   await new Promise<void>((resolve, reject) => {
     const args = [
+      "-y",
       "-hide_banner",
       "-f",
       "f32le",

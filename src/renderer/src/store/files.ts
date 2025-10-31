@@ -144,7 +144,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       console.error("Error opening file:", error);
       notifications.show({
         title: `Failed to create file`,
-        message: `${error instanceof Error ? error.message : "Unknown error"}`,
+        message: `Creating the new file failed.`,
         color: "red",
       });
     }
@@ -209,8 +209,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     } catch (error) {
       console.error("Error opening file:", error);
       notifications.show({
-        title: `Failed to open file '${truncateMiddle(window.nodePath.basename(filepath), 50)}'`,
-        message: `${error instanceof Error ? error.message : "Unknown error"}`,
+        title: `Failed to open file`,
+        message: `Opening '${truncateMiddle(window.nodePath.basename(filepath), 50)}' failed.`,
         color: "red",
       });
     }
@@ -304,7 +304,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             // Show error notification
             notifications.show({
               title: "Save failed",
-              message: `Failed to save ${truncateMiddle(fileName, 50)}: ${error instanceof Error ? error.message : "Unknown error"}`,
+              message: `Failed to save file '${truncateMiddle(fileName, 50)}'.`,
               color: "red",
             });
           }
@@ -336,6 +336,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (result.canceled || !result.filePath) return;
 
     const outputPath = result.filePath;
+    const savedFileName = window.nodePath.basename(outputPath);
+    const truncatedFileName = truncateMiddle(savedFileName, 50);
 
     try {
       // Extract audio channels from AudioBuffer
@@ -360,17 +362,17 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       console.log("File saved as:", outputPath);
 
       // Show success notification
-      const savedFileName = window.nodePath.basename(outputPath);
+
       notifications.show({
         title: "File saved",
-        message: `Successfully saved as ${truncateMiddle(savedFileName, 50)}`,
+        message: `Successfully saved as ${truncatedFileName}`,
       });
     } catch (error) {
       console.error("Error saving file as:", error);
       // Show error notification
       notifications.show({
         title: "Save failed",
-        message: `Failed to save file: ${error instanceof Error ? error.message : "Unknown error"}`,
+        message: `Failed to save file '${truncatedFileName}'.`,
         color: "red",
       });
     }
@@ -402,6 +404,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     const outputPath = window.nodePath.join(dir, newFileName);
+    const truncatedFileName = truncateMiddle(newFileName, 50);
 
     try {
       // Extract audio channels from AudioBuffer
@@ -427,14 +430,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // Show success notification
       notifications.show({
         title: "Version saved",
-        message: `Successfully saved as ${truncateMiddle(newFileName, 50)}`,
+        message: `Successfully saved as ${truncatedFileName}`,
       });
     } catch (error) {
       console.error("Error saving file version:", error);
       // Show error notification
       notifications.show({
         title: "Save failed",
-        message: `Failed to save version: ${error instanceof Error ? error.message : "Unknown error"}`,
+        message: `Failed to save file '${truncatedFileName}'.`,
         color: "red",
       });
     }
