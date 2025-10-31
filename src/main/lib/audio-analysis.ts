@@ -90,18 +90,6 @@ export async function synthesize(
 ): Promise<Float32Array[]> {
   const gab = init();
 
-  let containsNan = false;
-  for (let i = 0; i < processedData.length; i++) {
-    if (isNaN(processedData[i]) || !isFinite(processedData[i])) {
-      processedData[i] = 0;
-      containsNan = true;
-    }
-  }
-
-  if (containsNan) {
-    console.warn("Processed data contained NaN or infinite values; they have been replaced with zeros.");
-  }
-
   return await gab.synthesize(processedData, analysisMetadata, sampleRate, params, normalize);
 }
 
