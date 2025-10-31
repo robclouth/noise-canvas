@@ -1,3 +1,11 @@
+precision highp float;
+precision highp sampler2D;
+precision highp int;
+
+in vec2 vUv;
+
+out vec4 outColor;
+
 struct Parameter {
     float value;
     float minValue;

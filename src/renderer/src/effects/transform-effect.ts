@@ -3,7 +3,7 @@ import { unitsToUv } from "@renderer/lib/utils";
 import type { EffectsState } from "@renderer/store/effects";
 import { getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { OpenFile } from "@renderer/store/types";
-import { ShaderMaterial } from "three";
+import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import transformEffectFrag from "../glsl/transform-effect.frag";
 import { BaseEffect, CommonUniforms, defaultValues } from "./base-effect";
@@ -12,13 +12,13 @@ export const boundaryModes = ["smear", "cut", "wrap"] as const;
 export type BoundaryMode = (typeof boundaryModes)[number];
 
 class TransformEffect extends BaseEffect {
-  materials: ShaderMaterial[];
+  materials: RawShaderMaterial[];
   parameters: (keyof EffectsState)[];
 
   constructor() {
     super();
     this.materials = [
-      new ShaderMaterial({
+      new RawShaderMaterial({
         uniforms: {
           ...defaultValues,
           shiftX: {
@@ -68,6 +68,7 @@ class TransformEffect extends BaseEffect {
         },
         vertexShader: passThroughVert,
         fragmentShader: transformEffectFrag,
+        glslVersion: GLSL3,
       }),
     ];
     this.parameters = [

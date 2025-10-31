@@ -1,7 +1,7 @@
 import { getNumberParameterDef } from "@renderer/parameters";
 import { getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { OpenFile } from "@renderer/store/types";
-import { ClampToEdgeWrapping, DataTexture, FloatType, NearestFilter, RedFormat, ShaderMaterial } from "three";
+import { ClampToEdgeWrapping, DataTexture, FloatType, GLSL3, NearestFilter, RawShaderMaterial, RedFormat } from "three";
 import overtonesFrag from "../glsl/overtones-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useStore } from "../store";
@@ -15,7 +15,7 @@ class OvertonesEffect extends BaseEffect {
   constructor() {
     super();
     this.materials = [
-      new ShaderMaterial({
+      new RawShaderMaterial({
         uniforms: {
           ...defaultValues,
           overtonesScale: {
@@ -38,6 +38,7 @@ class OvertonesEffect extends BaseEffect {
         },
         vertexShader: passThroughVert,
         fragmentShader: overtonesFrag,
+        glslVersion: GLSL3,
       }),
     ];
   }

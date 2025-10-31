@@ -1,10 +1,17 @@
-import { GLSL3, ShaderMaterial } from "three";
+import { GLSL3, RawShaderMaterial } from "three";
 
-export const copyMaterial = new ShaderMaterial({
+export const copyMaterial = new RawShaderMaterial({
   uniforms: {
     inputTex: { value: null },
   },
   vertexShader: /*glsl*/ `
+    precision highp float;
+    precision highp sampler2D;
+    precision highp int;
+
+    in vec3 position;
+    in vec2 uv;
+
     out vec2 vUv;
 
     void main() {
@@ -14,12 +21,16 @@ export const copyMaterial = new ShaderMaterial({
   `,
   fragmentShader: /*glsl*/ `    
     precision highp float;
+    precision highp sampler2D;
+    precision highp int;
+
     in vec2 vUv;
+
     uniform sampler2D inputTex;
-    out vec4 fragColor;
+    out vec4 outColor;
 
     void main() {
-      fragColor = texture(inputTex, vUv);
+      outColor = texture(inputTex, vUv);
     }
   `,
   glslVersion: GLSL3,

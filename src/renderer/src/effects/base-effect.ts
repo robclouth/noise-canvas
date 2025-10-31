@@ -137,7 +137,7 @@ export const defaultValues: CommonUniforms = {
 };
 
 export abstract class BaseEffect {
-  materials: THREE.ShaderMaterial[] = [];
+  materials: THREE.RawShaderMaterial[] = [];
 
   abstract updateEffectUniforms(props: { commonUniforms: CommonUniforms; passIndex: number; file: OpenFile }): void;
 

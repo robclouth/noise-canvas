@@ -1,6 +1,3 @@
-precision highp float;
-in vec2 vUv;
-
 #include "effect-common.glsl";
 #include "effect-wrapper.glsl"
 

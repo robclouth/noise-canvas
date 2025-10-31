@@ -1,7 +1,3 @@
-precision highp float;
-in vec2 vUv;
-out vec4 fragColor;
-
 #include "effect-common.glsl";
 
 // Uniforms specific to this display material
@@ -147,5 +143,5 @@ void main() {
         }
     }
 
-    fragColor = vec4(color, 1.0);
+    outColor = vec4(color, 1.0);
 }

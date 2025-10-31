@@ -1,5 +1,5 @@
 import { OpenFile } from "@renderer/store/types";
-import { ShaderMaterial } from "three";
+import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import synthesizeBrushFrag from "../glsl/synthesize-effect.frag";
 import { useStore } from "../store";
@@ -9,13 +9,14 @@ class SynthesizeEffect extends BaseEffect {
   constructor() {
     super();
     this.materials = [
-      new ShaderMaterial({
+      new RawShaderMaterial({
         uniforms: {
           ...defaultValues,
           synthesizeType: { value: 0 },
         },
         vertexShader: passThroughVert,
         fragmentShader: synthesizeBrushFrag,
+        glslVersion: GLSL3,
       }),
     ];
   }

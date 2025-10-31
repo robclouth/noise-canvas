@@ -1,7 +1,3 @@
-precision highp float;
-in vec2 vUv;
-out vec4 fragColor;
-
 #include "common.glsl"
 
 uniform vec2 brushCenterUv;
@@ -23,5 +19,5 @@ void main() {
   float audioLevelDb = 20.0 * log(audioLevel + 0.000001) / log(10.0);
   
   float v = getModulation(vUv, modulatorIndex, true, audioLevelDb);
-  fragColor = vec4(vec3(v), 1.0);
+  outColor = vec4(vec3(v), 1.0);
 }

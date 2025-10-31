@@ -2,7 +2,7 @@ import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
 import { getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { OpenFile } from "@renderer/store/types";
-import { ShaderMaterial, Vector2 } from "three";
+import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import blurBrushFrag from "../glsl/blur-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { BaseEffect, CommonUniforms, defaultValues } from "./base-effect";
@@ -53,12 +53,12 @@ const uniforms = {
 };
 
 class BlurEffect extends BaseEffect {
-  materials: ShaderMaterial[];
+  materials: RawShaderMaterial[];
 
   constructor() {
     super();
     this.materials = [
-      new ShaderMaterial({
+      new RawShaderMaterial({
         uniforms: {
           ...uniforms,
           blurDirection: {
@@ -67,8 +67,9 @@ class BlurEffect extends BaseEffect {
         },
         vertexShader: passThroughVert,
         fragmentShader: blurBrushFrag,
+        glslVersion: GLSL3,
       }),
-      new ShaderMaterial({
+      new RawShaderMaterial({
         uniforms: {
           ...uniforms,
           blurDirection: {
@@ -77,6 +78,7 @@ class BlurEffect extends BaseEffect {
         },
         vertexShader: passThroughVert,
         fragmentShader: blurBrushFrag,
+        glslVersion: GLSL3,
       }),
     ];
   }

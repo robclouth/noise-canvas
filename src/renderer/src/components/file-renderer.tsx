@@ -13,10 +13,10 @@ import {
   Mesh,
   NearestFilter,
   PlaneGeometry,
+  RawShaderMaterial,
   RGBAFormat,
   RGFormat,
   Scene,
-  ShaderMaterial,
   UniformsUtils,
   Vector2,
   WebGLRenderer,
@@ -162,7 +162,7 @@ export const FileRenderer = memo(
     // Materials and scene objects for rendering
     const displayMaterial = useMemo(() => {
       const state = useStore.getState();
-      return new ShaderMaterial({
+      return new RawShaderMaterial({
         uniforms: {
           ...UniformsUtils.clone(defaultValues),
           sourceBrushSizeUv: { value: new Vector2(0.1, 0.1) },

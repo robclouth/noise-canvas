@@ -1,5 +1,5 @@
 import { OpenFile } from "@renderer/store/types";
-import { ShaderMaterial } from "three";
+import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import passthroughFrag from "../glsl/passthrough-effect.frag";
 import { BaseEffect, CommonUniforms, defaultValues } from "./base-effect";
@@ -12,12 +12,13 @@ class PassthroughEffect extends BaseEffect {
   constructor() {
     super();
     this.materials = [
-      new ShaderMaterial({
+      new RawShaderMaterial({
         uniforms: {
           ...defaultValues,
         },
         vertexShader: passThroughVert,
         fragmentShader: passthroughFrag,
+        glslVersion: GLSL3,
       }),
     ];
   }

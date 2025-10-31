@@ -6,7 +6,7 @@ import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
 import { useEffect, useMemo, useState } from "react";
-import { GLSL3, ShaderMaterial, Vector2 } from "three";
+import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import modulatorFrag from "../glsl/modulator.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { buildModulatorUniforms, useModulatorScaleLut } from "../lib/modulator-utils";
@@ -30,7 +30,7 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
   const material = useMemo(() => {
     const modulators = buildModulatorUniforms(120, 10, 12, 96);
 
-    return new ShaderMaterial({
+    return new RawShaderMaterial({
       uniforms: {
         modulatorIndex: { value: modulatorIndex },
         modulators: { value: modulators },

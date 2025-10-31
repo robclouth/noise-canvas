@@ -1,7 +1,7 @@
 import { getNumberParameterDef } from "@renderer/parameters";
 import { getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { OpenFile } from "@renderer/store/types";
-import { ShaderMaterial } from "three";
+import { GLSL3, RawShaderMaterial } from "three";
 import dynamicsEffectFrag from "../glsl/dynamics-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useStore } from "../store";
@@ -11,7 +11,7 @@ class DynamicsEffect extends BaseEffect {
   constructor() {
     super();
     this.materials = [
-      new ShaderMaterial({
+      new RawShaderMaterial({
         uniforms: {
           ...defaultValues,
           thresholdDb: {
@@ -57,6 +57,7 @@ class DynamicsEffect extends BaseEffect {
         },
         vertexShader: passThroughVert,
         fragmentShader: dynamicsEffectFrag,
+        glslVersion: GLSL3,
       }),
     ];
   }

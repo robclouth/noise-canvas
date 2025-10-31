@@ -1,6 +1,3 @@
-precision highp float;
-in vec2 vUv;
-
 #include "effect-common.glsl"
 
 uniform Parameter blurSizeX;
@@ -23,7 +20,7 @@ void main() {
     vec4 originalTexel = texture(destSpectrogramTex, vUv);
     float weight = getBrushWeight(coords.dest);
     if( weight <= 0.0 ) {
-        gl_FragColor = originalTexel;
+        outColor = originalTexel;
         return;
     } 
 
@@ -116,5 +113,5 @@ void main() {
         resultTexel = originalTexel;
     }
     
-    gl_FragColor = applyBrush(originalTexel, resultTexel, weight, coords.dest);
+    outColor = applyBrush(originalTexel, resultTexel, weight, coords.dest);
 }

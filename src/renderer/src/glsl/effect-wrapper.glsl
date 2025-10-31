@@ -6,12 +6,12 @@ void main() {
     vec4 originalTexel = texture(destSpectrogramTex, vUv);
     float weight = getBrushWeight(coords.dest);
     if(weight <= 0.0) {
-        gl_FragColor = originalTexel;
+        outColor = originalTexel;
         return;
     } 
 
     vec4 sourceTexel = getTransformedSample(coords.source, coords.dest, 1.0, 1.0, sourceOffsetX, sourceOffsetY);
     float audioLevelDb = getAudioLevelDb(coords.dest);
     vec4 modifiedTexel = applyEffectStroke(sourceTexel, coords, audioLevelDb);
-    gl_FragColor = applyBrush(originalTexel, modifiedTexel, weight, coords.dest);
+    outColor = applyBrush(originalTexel, modifiedTexel, weight, coords.dest);
 }
