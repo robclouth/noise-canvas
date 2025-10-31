@@ -598,5 +598,11 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
   finalL = limitMagnitude(finalL);
   finalR = limitMagnitude(finalR);
 
-  return vec4(finalL, finalR);
+  vec4 final = vec4(finalL, finalR);
+
+  if (any(isnan(final)) || any(isinf(final))) {
+    return vec4(0.0);
+  }
+
+  return final;
 }
