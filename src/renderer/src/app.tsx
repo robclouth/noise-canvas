@@ -1,17 +1,18 @@
 import { BrushPanel } from "@/components/layout/brush-panel";
 import { useStore } from "@/store";
-import { Box, Group, ScrollArea, Stack } from "@mantine/core";
+import { Box, Group, LoadingOverlay, ScrollArea, Stack } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { Notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
 import { Canvas, RootState, useThree } from "@react-three/fiber";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { CanvasPanel } from "./components/layout/canvas-panel";
 import { ControlsPanel } from "./components/layout/controls-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
 import { ipcOn, ipcSend } from "./lib/ipc";
+import { precompileAllShaders } from "./lib/precompile-shaders";
 import { getUndoManager } from "./lib/undo-manager";
 import { openFiles } from "./store/files";
 
@@ -25,7 +26,17 @@ const CanvasInvalidator = ({ onReady }: { onReady: (invalidate: Invalidator) => 
   return null;
 };
 
+const ShaderCompiler = ({ onFinish }: { onFinish: () => void }) => {
+  const gl = useThree((s) => s.gl);
+  useEffect(() => {
+    precompileAllShaders(gl).then(onFinish);
+  }, []);
+  return null;
+};
+
 function App(): React.JSX.Element {
+  const [isReady, setIsReady] = useState(false);
+
   const invalidateRef = useRef<Invalidator | null>(null);
 
   useEffect(() => {
@@ -192,6 +203,10 @@ function App(): React.JSX.Element {
     useStore.getState().openFilePath(filePath);
   }, []);
 
+  const handleShaderCompileFinish = () => {
+    setIsReady(true);
+  };
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     getFilesFromEvent: async (event) => {
@@ -205,6 +220,7 @@ function App(): React.JSX.Element {
 
   return (
     <Group h="100vh" w="100vw" wrap="nowrap" gap={0} {...getRootProps()}>
+      <LoadingOverlay visible={!isReady} />
       {isDragActive && (
         <Box
           pos="absolute"
@@ -226,6 +242,7 @@ function App(): React.JSX.Element {
       >
         <View.Port />
         <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
+        <ShaderCompiler onFinish={handleShaderCompileFinish} />
       </Canvas>
       <ScrollArea
         scrollbarSize={4}
