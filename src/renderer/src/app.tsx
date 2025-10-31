@@ -219,6 +219,7 @@ function App(): React.JSX.Element {
       )}
       <input {...getInputProps()} />
       <Canvas
+        dpr={1}
         style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}
         eventSource={document.getElementById("root")!}
         frameloop="demand"

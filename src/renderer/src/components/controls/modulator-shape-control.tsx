@@ -38,7 +38,7 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
         // Only add user group if there are user textures
         if (textures.user.length > 0) {
           groups.push({
-            group: "User",
+            group: "User Textures",
             items: textures.user.map((texture) => ({ value: `texture:${texture.path}`, label: texture.filename })),
           });
         }
