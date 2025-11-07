@@ -370,6 +370,18 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     ],
     includeInPresets: true,
   },
+  sourceDataMode: {
+    kind: "options",
+    name: "Source Data Mode",
+    label: "Source",
+    description: "Whether to use the current (modified) or original (unmodified) data from the source file.",
+    default: "current" as const,
+    options: [
+      { value: "current", label: "Current" },
+      { value: "original", label: "Original" },
+    ],
+    includeInPresets: true,
+  },
 
   // --- Effect Parameters ---
   dynamicsThresholdDb: {

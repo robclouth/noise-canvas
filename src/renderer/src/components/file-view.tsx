@@ -320,7 +320,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
         state.setSourcePosition({ beats, pitch, fileId });
         state.setIsSettingPosition(false);
-        state.setSourceFile({ id: fileId, mode: state.sourceFile?.mode ?? "current" });
+        state.setSourceFile(fileId);
         return;
       }
 

@@ -57,8 +57,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const bandsPerOctave = useStore((state) => state.filesBandsPerOctave[fileId]);
   const isDirty = useStore((state) => state.filesDirty[fileId] ?? false);
 
-  const isSource = sourceFile?.id === fileId;
-  const sourceMode = sourceFile?.mode ?? "current";
+  const isSource = sourceFile === fileId;
 
   return (
     <Group justify="space-between" align="center" p="xs" wrap="nowrap" bg="dark.7">
@@ -75,7 +74,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         )}
       </Group>
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-        <Tooltip label="Use this file's original (unmodified) state as the source for painting onto other files.">
+        <Tooltip label="Duplicate this file to create an editable copy.">
           <ActionIcon
             color="dark.5"
             onClick={(e) => {
@@ -96,34 +95,19 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
             min={10}
           />
         </Tooltip>
-        <Button.Group>
-          <Tooltip label="Use this file's current (modified) state as the source for painting onto other files.">
-            <Button
-              size="xs"
-              variant="filled"
-              onClick={(e) => {
-                e.stopPropagation();
-                useStore.getState().setSourceFile({ id: fileId, mode: "current" });
-              }}
-              color={isSource && sourceMode === "current" ? "orange" : "dark.5"}
-            >
-              Current
-            </Button>
-          </Tooltip>
-          <Tooltip label="Use this file's original (unmodified) state as the source for painting onto other files.">
-            <Button
-              size="xs"
-              variant="filled"
-              onClick={(e) => {
-                e.stopPropagation();
-                useStore.getState().setSourceFile({ id: fileId, mode: "original" });
-              }}
-              color={isSource && sourceMode === "original" ? "orange" : "dark.5"}
-            >
-              Original
-            </Button>
-          </Tooltip>
-        </Button.Group>
+        <Tooltip label="Use this file as the source for painting onto other files. Use the Source Data Mode in the brush panel to choose between current (modified) and original (unmodified) data.">
+          <Button
+            size="xs"
+            variant="filled"
+            onClick={(e) => {
+              e.stopPropagation();
+              useStore.getState().setSourceFile(fileId);
+            }}
+            color={isSource ? "orange" : "dark.5"}
+          >
+            Source
+          </Button>
+        </Tooltip>
         <ActionIcon
           variant="transparent"
           color="white"

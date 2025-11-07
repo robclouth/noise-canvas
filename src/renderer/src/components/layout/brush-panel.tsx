@@ -27,6 +27,7 @@ export function BrushPanel() {
         <ParameterControl paramKey="brushFeatherPitch" />
         <ParameterControl paramKey="brushFeatherSlopeTime" />
         <ParameterControl paramKey="brushFeatherSlopePitch" />
+        <ParameterControl paramKey="sourceDataMode" />
       </Section>
 
       <Section label="Effects">

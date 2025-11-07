@@ -41,8 +41,8 @@ export interface FilesState {
   setFileSynthesizing: (fileId: string, synthesizing: boolean) => void;
   activeFileId: string | null;
   setActiveFileId: (activeFileId: string | null) => Promise<void>;
-  sourceFile: { id: string; mode: "current" | "original" } | null;
-  setSourceFile: (sourceFile: { id: string; mode: "current" | "original" } | null) => void;
+  sourceFile: string | null;
+  setSourceFile: (sourceFile: string | null) => void;
 }
 
 // Open files keyed by file ID
@@ -138,7 +138,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           state.filesPlaybackStartTime[fileId] = 0;
           state.filesDirty[fileId] = true;
 
-          if (!state.sourceFile) state.sourceFile = { id: fileId, mode: "current" };
+          if (!state.sourceFile) state.sourceFile = fileId;
           state.activeFileId = fileId;
         }),
       );
@@ -204,7 +204,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           state.filesOffset[fileId] = 0;
           state.filesPlaybackStartTime[fileId] = 0;
 
-          state.sourceFile = { id: fileId, mode: "current" };
+          state.sourceFile = fileId;
           state.activeFileId = fileId;
         }),
       );
@@ -493,11 +493,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
           // If the file being closed is the source file, set the source file to the next file
           if (!nextFileId) state.sourceFile = null;
-          else if (state.sourceFile?.id === fileId) {
-            state.sourceFile = {
-              id: nextFileId,
-              mode: "current",
-            };
+          else if (state.sourceFile === fileId) {
+            state.sourceFile = nextFileId;
           }
         }
       }),

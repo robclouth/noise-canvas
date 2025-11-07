@@ -472,7 +472,7 @@ export const FileRenderer = memo(
 
       // Determine file state for rendering logic
       const isActiveFile = state.activeFileId === fileId;
-      const isSourceFile = state.sourceFile?.id === fileId;
+      const isSourceFile = state.sourceFile === fileId;
       const file = openFiles[fileId];
       const isMouseOver = Boolean(mousePos && mousePos.x >= 0 && file && state.hoveredFile === file.id);
       const isMouseOverAnyFile = Boolean(mousePos && state.hoveredFile);
@@ -528,7 +528,7 @@ export const FileRenderer = memo(
 
       // Render brush stroke if requested
       if (strokeParams.current && applyStroke.current) {
-        const sourceFile = openFiles[state.sourceFile!.id!];
+        const sourceFile = openFiles[state.sourceFile!];
         const sourceRendererRef = sourceFile.rendererRef;
         const textures = sourceRendererRef?.current?.getTextures();
 
@@ -622,12 +622,12 @@ export const FileRenderer = memo(
           enabledEffects.push("passthrough");
         }
 
-        // Determine the source FBO based on sourceMode and which file is the source
+        // Determine the source FBO based on sourceDataMode and which file is the source
         // "current" means we read from the current modified spectrogram
         // "original" means we read from the original unmodified source
         const isSameFile = sourceFile.id === fileId;
         const sourceFbo =
-          state.sourceFile?.mode === "original"
+          state.sourceDataMode === "original"
             ? { texture: textures!.original } // Use original unmodified data
             : isSameFile
               ? currentReadFBO // Same file: use our own current modified FBO
@@ -794,8 +794,8 @@ export const FileRenderer = memo(
       displayMaterial.uniforms.showVerticalGrid.value = gridHeightPx >= MIN_GRID_SPACING_PX && gridSizeSemis > 0;
 
       // Update source offset for display (so source rectangle shows correctly)
-      if (state.sourceFile?.id) {
-        const sourceFileData = openFiles[state.sourceFile.id];
+      if (state.sourceFile) {
+        const sourceFileData = openFiles[state.sourceFile];
         if (sourceFileData) {
           const sourceBpm = state.filepathsBpm[sourceFileData.filePath];
           const sourceTotalDuration =

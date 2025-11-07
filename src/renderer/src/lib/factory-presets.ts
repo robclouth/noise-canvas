@@ -40,6 +40,16 @@ export const factoryPresets: PresetType[] = [
     },
   },
   {
+    id: "restore",
+    name: "Restore",
+    isFactory: true,
+    version: 1,
+    parameters: {
+      sourceDataMode: "original",
+      blendMode: 0, // Replace blend mode
+    },
+  },
+  {
     id: "stereo-widening",
     name: "Stereo Widening",
     isFactory: true,

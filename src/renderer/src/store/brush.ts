@@ -13,6 +13,7 @@ export interface BrushState {
   sourcePosition: { beats: number; pitch: number; fileId: string } | null;
   setSourcePosition: (position: { beats: number; pitch: number; fileId: string } | null) => void;
   sourcePositionMode: string;
+  sourceDataMode: string;
   isSettingPosition: boolean;
   setIsSettingPosition: (value: boolean) => void;
   brushStartPosition: { beats: number; pitch: number } | null;
@@ -26,7 +27,7 @@ export interface BrushState {
   blendMode: number;
   algorithm: number;
 }
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+
 export const createBrushSlice = (set: ZustandSet): BrushState => {
   return {
     brushWidthBeats: getParameterDef("brushWidthBeats").default,
@@ -43,6 +44,7 @@ export const createBrushSlice = (set: ZustandSet): BrushState => {
     blendMode: getParameterDef("blendMode").default,
     algorithm: getParameterDef("algorithm").default,
     sourcePositionMode: getParameterDef("sourcePositionMode").default,
+    sourceDataMode: getParameterDef("sourceDataMode").default,
     sourcePosition: null,
     setSourcePosition: (position) => set({ sourcePosition: position, lockedOffset: null }),
     isSettingPosition: false,
