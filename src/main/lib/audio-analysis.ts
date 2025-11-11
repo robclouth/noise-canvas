@@ -37,7 +37,9 @@ export async function analyze(filePath: string, params: AnalysisParams) {
   const { sampleRate, channels, format, codec } = await probeAudioFile(filePath);
 
   if (!allowedExtensions.includes(format.toLowerCase())) {
-    throw new Error(`Unsupported file format: ${format}`);
+    throw new Error(
+      `The file format '${format}' is not supported. Please use ${allowedExtensions.slice(0, -1).join(", ")}, or ${allowedExtensions[allowedExtensions.length - 1]}.`,
+    );
   }
 
   const audioBuffer = await decodeAudioFile(filePath, sampleRate, channels);

@@ -146,7 +146,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       console.error("Error opening file:", error);
       notifications.show({
         title: `Failed to create file`,
-        message: `Creating the new file failed.`,
+        message: `Creating the new file failed. ${error instanceof Error ? error.message : ""}`,
         color: "red",
       });
     }
@@ -212,7 +212,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       console.error("Error opening file:", error);
       notifications.show({
         title: `Failed to open file`,
-        message: `Opening '${truncateMiddle(window.nodePath.basename(filepath), 50)}' failed.`,
+        message: `Opening '${truncateMiddle(window.nodePath.basename(filepath), 50)}' failed. ${error instanceof Error ? error.message : ""}`,
         color: "red",
       });
     }
@@ -306,7 +306,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             // Show error notification
             notifications.show({
               title: "Save failed",
-              message: `Failed to save file '${truncateMiddle(fileName, 50)}'.`,
+              message: `Failed to save file '${truncateMiddle(fileName, 50)}'. ${error instanceof Error ? error.message : ""}`,
               color: "red",
             });
           }
@@ -374,7 +374,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // Show error notification
       notifications.show({
         title: "Save failed",
-        message: `Failed to save file '${truncatedFileName}'.`,
+        message: `Failed to save file '${truncatedFileName}'. ${error instanceof Error ? error.message : ""}`,
         color: "red",
       });
     }
@@ -439,7 +439,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // Show error notification
       notifications.show({
         title: "Save failed",
-        message: `Failed to save file '${truncatedFileName}'.`,
+        message: `Failed to save file '${truncatedFileName}'. ${error instanceof Error ? error.message : ""}`,
         color: "red",
       });
     }

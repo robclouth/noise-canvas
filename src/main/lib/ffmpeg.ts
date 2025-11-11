@@ -23,7 +23,9 @@ export function probeAudioFile(inputPath: string): Promise<BasicAudioMetadata> {
       stderr += d.toString();
     });
 
-    child.on("error", (err) => reject(err));
+    child.on("error", () => {
+      reject(new Error("Failed to inspect audio file. The application may be corrupted."));
+    });
 
     child.on("close", () => {
       const inputMatch = stderr.match(/Input #0,\s*([^,]+),\s*from/);
@@ -31,7 +33,7 @@ export function probeAudioFile(inputPath: string): Promise<BasicAudioMetadata> {
 
       const streamMatch = stderr.match(/Stream #0:0.*Audio:\s*([^\s,]+),\s*(\d+)\s*Hz,\s*([^,]+)/);
       if (!streamMatch) {
-        return reject(new Error("Could not parse audio stream metadata from ffmpeg output."));
+        return reject(new Error("The file does not contain a valid audio stream or is corrupted."));
       }
 
       const codec = streamMatch[1];
@@ -86,16 +88,15 @@ export async function decodeAudioFile(
       chunks.push(chunk);
     });
 
-    let errText = "";
-    child.stderr.on("data", (d) => {
-      errText += d.toString();
+    child.on("error", () => {
+      reject(new Error("Failed to start audio decoder. The application may be corrupted."));
     });
-
-    child.on("error", (err) => reject(err));
 
     child.on("close", (code) => {
       if (code !== 0) {
-        return reject(new Error("ffmpeg decode failed: " + errText));
+        return reject(
+          new Error("The audio file could not be decoded. It may be corrupted or in an unsupported format."),
+        );
       }
       const buf = Buffer.concat(chunks);
       const floatView = new Float32Array(buf.buffer, buf.byteOffset, buf.length / Float32Array.BYTES_PER_ELEMENT);
@@ -169,24 +170,17 @@ export async function encodeBufferToAudioFile(
 
     const child = spawn(ffmpegPath, args, { windowsHide: true });
 
-    let errText = "";
-
-    // ffmpeg logs to stderr
-    child.stderr.on("data", (d) => {
-      errText += d.toString();
-    });
-
     // write interleaved PCM directly into ffmpeg stdin
     child.stdin.write(interleavedBuffer);
     child.stdin.end();
 
-    child.on("error", (err) => {
-      reject(err);
+    child.on("error", () => {
+      reject(new Error("Failed to start audio encoder. The application may be corrupted."));
     });
 
     child.on("close", (code) => {
       if (code !== 0) {
-        return reject(new Error("ffmpeg export failed: " + errText));
+        return reject(new Error("The audio file could not be saved. Please check if the destination is writable."));
       }
       resolve();
     });
