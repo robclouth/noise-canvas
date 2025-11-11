@@ -105,13 +105,13 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   const viewRef = useRef<HTMLDivElement>(null);
 
   useWindowEvent("keydown", (event) => {
-    if (event.key === "Meta" || event.key === "Alt") {
+    if (event.key === "Meta" || event.key === "Control") {
       setZooming(true);
     }
   });
 
   useWindowEvent("keyup", (event) => {
-    if (event.key === "Meta" || event.key === "Alt") {
+    if (event.key === "Meta" || event.key === "Control") {
       setZooming(false);
     }
   });
