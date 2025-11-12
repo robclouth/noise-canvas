@@ -35,6 +35,7 @@ nsis:
   createDesktopShortcut: always
 mac:
   icon: resources/icon.png
+  artifactName: ${name}-${version}-${arch}.${ext}
   entitlementsInherit: resources/entitlements.mac.plist
   extendInfo:
     - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
@@ -43,7 +44,7 @@ mac:
   notarize: false
   identity: "-"
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: ${name}-${version}-${arch}.${ext}
   icon: resources/icon.png
 linux:
   icon: resources/icon.png
