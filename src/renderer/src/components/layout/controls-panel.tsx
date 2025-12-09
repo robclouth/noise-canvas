@@ -1,23 +1,9 @@
-import { useStore } from "@/store";
 import { Stack, Text } from "@mantine/core";
-import { useEffect } from "react";
 import { ParameterControl } from "../controls/parameter-control";
 import { SourcePositionControl } from "../controls/source-position-control";
 import { Section } from "../section";
 
 export function ControlsPanel() {
-  const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid);
-  const gridSizeBeats = useStore((state) => state.gridSizeBeats);
-  const gridSizeSemis = useStore((state) => state.gridSizeSemis);
-
-  useEffect(() => {
-    if (brushSizeLockedToGrid) {
-      const setParameter = useStore.getState().setParameter;
-      setParameter("brushWidthBeats", gridSizeBeats);
-      setParameter("brushHeightSemis", gridSizeSemis);
-    }
-  }, [brushSizeLockedToGrid, gridSizeBeats, gridSizeSemis]);
-
   return (
     <Stack h="100%" w="100%" p="xs" gap="xs">
       <Section label="Analysis">
@@ -29,7 +15,6 @@ export function ControlsPanel() {
       <Section label="Grid">
         <ParameterControl paramKey="gridSizeBeats" />
         <ParameterControl paramKey="gridSizeSemis" />
-        <ParameterControl paramKey="brushSizeLockedToGrid" />
       </Section>
       <Section label="Display">
         <ParameterControl paramKey="displayMinDb" />

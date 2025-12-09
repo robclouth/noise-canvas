@@ -32,6 +32,60 @@ import { getUndoManager } from "../lib/undo-manager";
 import { unitsToUv } from "../lib/utils";
 import { copyMaterial } from "./copy-material";
 
+// Helper function to calculate normalized envelope stage boundaries
+// Returns absolute UV values for each stage
+function calculateEnvelopeBoundaries(
+  delay: number,
+  attack: number,
+  sustain: number,
+  release: number,
+  bpm: number,
+  totalDuration: number,
+  bandsPerOctave: number,
+  numBands: number,
+  isTime: boolean,
+): {
+  d: number;
+  a: number;
+  s: number;
+  r: number;
+  delayEnd: number;
+  attackEnd: number;
+  sustainEnd: number;
+  releaseEnd: number;
+} {
+  let d: number, a: number, s: number, r: number;
+
+  // Convert from beats/semitones to absolute UV using unitsToUv
+  if (isTime) {
+    d = unitsToUv(delay, 0, bpm, totalDuration, bandsPerOctave, numBands).x;
+    a = unitsToUv(attack, 0, bpm, totalDuration, bandsPerOctave, numBands).x;
+    s = unitsToUv(sustain, 0, bpm, totalDuration, bandsPerOctave, numBands).x;
+    r = unitsToUv(release, 0, bpm, totalDuration, bandsPerOctave, numBands).x;
+  } else {
+    d = unitsToUv(0, delay, bpm, totalDuration, bandsPerOctave, numBands).y;
+    a = unitsToUv(0, attack, bpm, totalDuration, bandsPerOctave, numBands).y;
+    s = unitsToUv(0, sustain, bpm, totalDuration, bandsPerOctave, numBands).y;
+    r = unitsToUv(0, release, bpm, totalDuration, bandsPerOctave, numBands).y;
+  }
+
+  // Calculate total brush size from envelope
+  const brushSize = d + a + s + r;
+
+  // Calculate cumulative positions as fractions of brush size (normalized 0-1)
+  const safeSize = Math.max(brushSize, 0.0001);
+  return {
+    d,
+    a,
+    s,
+    r,
+    delayEnd: d / safeSize,
+    attackEnd: (d + a) / safeSize,
+    sustainEnd: (d + a + s) / safeSize,
+    releaseEnd: (d + a + s + r) / safeSize,
+  };
+}
+
 /**
  * Props for the FileRenderer component.
  * @param file - The open file to render.
@@ -359,26 +413,56 @@ export const FileRenderer = memo(
 
         const mode = state.sourcePositionMode;
 
-        // Calculate brush size in the SOURCE file's coordinate space
-        const brushSizeUvSource = unitsToUv(
-          state.brushWidthBeats,
-          state.brushHeightSemis,
+        // Calculate brush size from envelope in the SOURCE file's coordinate space
+        const envelopeTimeUvSource = unitsToUv(
+          state.brushEnvelopeDelayTime +
+            state.brushEnvelopeAttackTime +
+            state.brushEnvelopeSustainTime +
+            state.brushEnvelopeReleaseTime,
+          0,
           sourceBpm,
           sourceTotalDuration,
           sourceSpectrogramData.bandsPerOctave,
           sourceSpectrogramData.numBands,
         );
+        const envelopePitchUvSource = unitsToUv(
+          0,
+          state.brushEnvelopeDelayPitch +
+            state.brushEnvelopeAttackPitch +
+            state.brushEnvelopeSustainPitch +
+            state.brushEnvelopeReleasePitch,
+          sourceBpm,
+          sourceTotalDuration,
+          sourceSpectrogramData.bandsPerOctave,
+          sourceSpectrogramData.numBands,
+        );
+        const brushSizeUvSource = new Vector2(envelopeTimeUvSource.x || 1, envelopePitchUvSource.y || 1);
         const halfBrushSizeUvSource = new Vector2(brushSizeUvSource.x / 2, brushSizeUvSource.y / 2);
 
-        // Calculate brush size in the CURRENT file's coordinate space
-        const brushSizeUvCurrent = unitsToUv(
-          state.brushWidthBeats,
-          state.brushHeightSemis,
+        // Calculate brush size from envelope in the CURRENT file's coordinate space
+        const envelopeTimeUvCurrent = unitsToUv(
+          state.brushEnvelopeDelayTime +
+            state.brushEnvelopeAttackTime +
+            state.brushEnvelopeSustainTime +
+            state.brushEnvelopeReleaseTime,
+          0,
           bpm,
           totalDuration,
           spectrogramData.bandsPerOctave,
           spectrogramData.numBands,
         );
+        const envelopePitchUvCurrent = unitsToUv(
+          0,
+          state.brushEnvelopeDelayPitch +
+            state.brushEnvelopeAttackPitch +
+            state.brushEnvelopeSustainPitch +
+            state.brushEnvelopeReleasePitch,
+          bpm,
+          totalDuration,
+          spectrogramData.bandsPerOctave,
+          spectrogramData.numBands,
+        );
+        const brushSizeUvCurrent = new Vector2(envelopeTimeUvCurrent.x || 1, envelopePitchUvCurrent.y || 1);
         const halfBrushSizeUvCurrent = new Vector2(brushSizeUvCurrent.x / 2, brushSizeUvCurrent.y / 2);
 
         // Convert source position (bottom-left) to UV coordinates in the source file
@@ -513,18 +597,30 @@ export const FileRenderer = memo(
       const viewZoomPower = state.filesZoom[fileId];
       const viewOffset = state.filesOffset[fileId];
 
-      // Calculate brush size for display
-      const brushSizeUv = unitsToUv(
-        state.brushWidthBeats,
-        state.brushHeightSemis,
+      // Calculate brush size from envelope (sum of DASR values)
+      const envelopeTimeUv = unitsToUv(
+        state.brushEnvelopeDelayTime +
+          state.brushEnvelopeAttackTime +
+          state.brushEnvelopeSustainTime +
+          state.brushEnvelopeReleaseTime,
+        0,
         bpm,
         totalDuration,
         spectrogramData.bandsPerOctave,
         spectrogramData.numBands,
       );
-      // Handle full brush size (when brush width or height is 0)
-      brushSizeUv.x = state.brushWidthBeats > 0 ? brushSizeUv.x : 1;
-      brushSizeUv.y = state.brushHeightSemis > 0 ? brushSizeUv.y : 1;
+      const envelopePitchUv = unitsToUv(
+        0,
+        state.brushEnvelopeDelayPitch +
+          state.brushEnvelopeAttackPitch +
+          state.brushEnvelopeSustainPitch +
+          state.brushEnvelopeReleasePitch,
+        bpm,
+        totalDuration,
+        spectrogramData.bandsPerOctave,
+        spectrogramData.numBands,
+      );
+      const brushSizeUv = new Vector2(envelopeTimeUv.x, envelopePitchUv.y);
 
       // Render brush stroke if requested
       if (strokeParams.current && applyStroke.current) {
@@ -576,12 +672,43 @@ export const FileRenderer = memo(
           originalSpectrogramTex: { value: originalPackedDataTex || placeholderTexture },
           viewZoomPower: { value: viewZoomPower },
           viewOffset: { value: viewOffset },
-          brushCenterUv: { value: mousePos || new Vector2(-1, -1) },
+          brushBottomLeftUv: { value: mousePos || new Vector2(-1, -1) },
           brushSizeUv: { value: brushSizeUv },
-          featherX: { value: state.brushFeatherTime / 100 },
-          featherY: { value: state.brushFeatherPitch / 100 },
-          featherSlopeTime: { value: state.brushFeatherSlopeTime / 100 },
-          featherSlopePitch: { value: state.brushFeatherSlopePitch / 100 },
+          ...(() => {
+            // Calculate envelope boundaries on CPU
+            const envelopeX = calculateEnvelopeBoundaries(
+              state.brushEnvelopeDelayTime,
+              state.brushEnvelopeAttackTime,
+              state.brushEnvelopeSustainTime,
+              state.brushEnvelopeReleaseTime,
+              bpm,
+              totalDuration,
+              spectrogramData.bandsPerOctave,
+              spectrogramData.numBands,
+              true,
+            );
+            const envelopeY = calculateEnvelopeBoundaries(
+              state.brushEnvelopeDelayPitch,
+              state.brushEnvelopeAttackPitch,
+              state.brushEnvelopeSustainPitch,
+              state.brushEnvelopeReleasePitch,
+              bpm,
+              totalDuration,
+              spectrogramData.bandsPerOctave,
+              spectrogramData.numBands,
+              false,
+            );
+            return {
+              envelopeDelayEndX: { value: envelopeX.delayEnd },
+              envelopeAttackEndX: { value: envelopeX.attackEnd },
+              envelopeSustainEndX: { value: envelopeX.sustainEnd },
+              envelopeReleaseEndX: { value: envelopeX.releaseEnd },
+              envelopeDelayEndY: { value: envelopeY.delayEnd },
+              envelopeAttackEndY: { value: envelopeY.attackEnd },
+              envelopeSustainEndY: { value: envelopeY.sustainEnd },
+              envelopeReleaseEndY: { value: envelopeY.releaseEnd },
+            };
+          })(),
           brushIntensity: {
             value: {
               value: state.brushIntensity / 100,
@@ -747,17 +874,36 @@ export const FileRenderer = memo(
       displayMaterial.uniforms.bpm.value = bpm;
       displayMaterial.uniforms.minDb.value = state.displayMinDb;
       displayMaterial.uniforms.maxDb.value = state.displayMaxDb;
-      displayMaterial.uniforms.brushCenterUv.value = mousePos || new Vector2(0, 0);
+      displayMaterial.uniforms.brushBottomLeftUv.value = mousePos || new Vector2(0, 0);
       displayMaterial.uniforms.brushSizeUv.value = brushSizeUv;
       displayMaterial.uniforms.sourceBrushSizeUv.value = hoveredFile
-        ? unitsToUv(
-            state.brushWidthBeats,
-            state.brushHeightSemis,
-            state.filepathsBpm[hoveredFile.filePath],
-            hoveredFile.spectrogramData.numFrames / hoveredFile.spectrogramData.sampleRate,
-            hoveredFile.spectrogramData.bandsPerOctave,
-            hoveredFile.spectrogramData.numBands,
-          )
+        ? (() => {
+            const hoveredBpm = state.filepathsBpm[hoveredFile.filePath];
+            const hoveredDuration = hoveredFile.spectrogramData.numFrames / hoveredFile.spectrogramData.sampleRate;
+            const timeUv = unitsToUv(
+              state.brushEnvelopeDelayTime +
+                state.brushEnvelopeAttackTime +
+                state.brushEnvelopeSustainTime +
+                state.brushEnvelopeReleaseTime,
+              0,
+              hoveredBpm,
+              hoveredDuration,
+              hoveredFile.spectrogramData.bandsPerOctave,
+              hoveredFile.spectrogramData.numBands,
+            );
+            const pitchUv = unitsToUv(
+              0,
+              state.brushEnvelopeDelayPitch +
+                state.brushEnvelopeAttackPitch +
+                state.brushEnvelopeSustainPitch +
+                state.brushEnvelopeReleasePitch,
+              hoveredBpm,
+              hoveredDuration,
+              hoveredFile.spectrogramData.bandsPerOctave,
+              hoveredFile.spectrogramData.numBands,
+            );
+            return new Vector2(timeUv.x, pitchUv.y);
+          })()
         : new Vector2(0.1, 0.1);
       displayMaterial.uniforms.showTargetRectangle.value = isMouseOver;
       displayMaterial.uniforms.showSourceRectangle.value = isSourceFile && isMouseOverAnyFile;

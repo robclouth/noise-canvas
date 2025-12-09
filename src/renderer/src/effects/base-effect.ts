@@ -37,14 +37,18 @@ export type CommonUniforms = {
   destMinFreq: { value: number };
   destBandsPerOctave: { value: number };
   originalSpectrogramTex: { value: Texture | null };
-  brushCenterUv: { value: Vector2 };
+  brushBottomLeftUv: { value: Vector2 };
   brushSizeUv: { value: Vector2 };
   viewZoomPower: { value: number };
   viewOffset: { value: number };
-  featherX: { value: number };
-  featherY: { value: number };
-  featherSlopeTime: { value: number };
-  featherSlopePitch: { value: number };
+  envelopeDelayEndX: { value: number };
+  envelopeAttackEndX: { value: number };
+  envelopeSustainEndX: { value: number };
+  envelopeReleaseEndX: { value: number };
+  envelopeDelayEndY: { value: number };
+  envelopeAttackEndY: { value: number };
+  envelopeSustainEndY: { value: number };
+  envelopeReleaseEndY: { value: number };
   modulators: { value: Modulator[] };
   brushIntensity: {
     value: ParameterUniform;
@@ -94,14 +98,18 @@ export const defaultValues: CommonUniforms = {
   destMinFreq: { value: 20.0 },
   destBandsPerOctave: { value: 24.0 },
   originalSpectrogramTex: { value: null },
-  brushCenterUv: { value: new Vector2(0.5, 0.5) },
+  brushBottomLeftUv: { value: new Vector2(0.0, 0.0) },
   brushSizeUv: { value: new Vector2(0.1, 0.1) },
   viewZoomPower: { value: 0.0 },
   viewOffset: { value: 0.0 },
-  featherX: { value: 0.5 },
-  featherY: { value: 0.5 },
-  featherSlopeTime: { value: 0.0 },
-  featherSlopePitch: { value: 0.0 },
+  envelopeDelayEndX: { value: 0.0 },
+  envelopeAttackEndX: { value: 0.0 },
+  envelopeSustainEndX: { value: 1.0 },
+  envelopeReleaseEndX: { value: 1.0 },
+  envelopeDelayEndY: { value: 0.0 },
+  envelopeAttackEndY: { value: 0.0 },
+  envelopeSustainEndY: { value: 1.0 },
+  envelopeReleaseEndY: { value: 1.0 },
   brushIntensity: {
     value: {
       value: 1.0,

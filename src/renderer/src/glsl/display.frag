@@ -99,18 +99,18 @@ void main() {
     // --- Brush Area Visualization ---
 
     // Common calculations for both rectangles
-    // Brush center is already in zoomed coordinates
-    vec2 rectCenter = brushCenterUv;
-    
-    vec2 correctedRectCenter = rectCenter;
-    vec2 correctedBrushSize = brushSizeUv;
-    
-    vec2 halfSize = correctedBrushSize / 2.0;
+    // brushBottomLeftUv is already in zoomed coordinates
     vec2 strokeWidthUv = fwidth(zoomedUv) * 1.5;
 
     // Draw Brush Area Rectangle (only if this is the active file)
     if (showTargetRectangle) {
-        vec2 d = abs(zoomedUv - correctedRectCenter) - halfSize;
+        // Calculate distance from rectangle edges (bottom-left origin)
+        vec2 rectMin = brushBottomLeftUv;
+        vec2 rectMax = brushBottomLeftUv + brushSizeUv;
+        vec2 rectCenter = (rectMin + rectMax) * 0.5;
+        vec2 halfSize = brushSizeUv * 0.5;
+        
+        vec2 d = abs(zoomedUv - rectCenter) - halfSize;
         float outsideDist = length(max(d, 0.0));
         float insideDist = min(max(d.x, d.y), 0.0);
         float distToBorder = outsideDist + insideDist;
@@ -124,14 +124,13 @@ void main() {
     if (showSourceRectangle) {
         // Draw source rectangle (faint)
         vec2 effectiveOffset = vec2(sourceOffsetX, sourceOffsetY);
+        vec2 sourceBottomLeft = brushBottomLeftUv + effectiveOffset;
+        vec2 sourceCenter = sourceBottomLeft + sourceBrushSizeUv * 0.5;
 
-        vec2 sourceCenter = correctedRectCenter + effectiveOffset;
-        vec2 sourceCenterScreen = sourceCenter;
+        if (sourceCenter.x >= 0.0 && sourceCenter.x <= 1.0 &&
+            sourceCenter.y >= 0.0 && sourceCenter.y <= 1.0) {
 
-        if (sourceCenterScreen.x >= 0.0 && sourceCenterScreen.x <= 1.0 &&
-            sourceCenterScreen.y >= 0.0 && sourceCenterScreen.y <= 1.0) {
-
-            vec2 dSource = abs(zoomedUv - sourceCenter) - sourceBrushSizeUv * 0.5 + strokeWidthUv; // reuse halfSize from brush rect
+            vec2 dSource = abs(zoomedUv - sourceCenter) - sourceBrushSizeUv * 0.5 + strokeWidthUv;
             float outsideDistSource = length(max(dSource, 0.0));
             float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
             float distToBorderSource = outsideDistSource + insideDistSource;

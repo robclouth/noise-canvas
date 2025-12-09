@@ -16,11 +16,8 @@ void main() {
         return;
     } 
 
-    // 1. Define the pivot point based on scale direction.
-    vec2 brushHalfSize = brushSizeUv * 0.5;
-    vec2 brushBottomLeft = brushCenterUv - brushHalfSize;
-
-    vec2 pivot = brushBottomLeft;
+    // 1. Define the pivot point based on scale direction (bottom-left corner).
+    vec2 pivot = brushBottomLeftUv;
 
     // 2. Translate to be relative to the pivot.
     // Start from coords.source which already includes sourceOffset
@@ -63,11 +60,10 @@ void main() {
 
     // For cut mode, we need to check if finalSourceUv is inside the source brush bounds
     // The source brush is offset from the destination brush by sourceOffset
-    vec2 sourceBrushCenter = brushCenterUv + vec2(sourceOffsetX, sourceOffsetY);
-    vec2 offsetFromSourceBrush = finalSourceUv - sourceBrushCenter;
-    vec2 halfSize = brushSizeUv / 2.0;
-    bool inSourceBrush = (brushSizeUv.x == 0.0 || abs(offsetFromSourceBrush.x) < halfSize.x) &&
-                            (brushSizeUv.y == 0.0 || abs(offsetFromSourceBrush.y) < halfSize.y);
+    vec2 sourceBrushBottomLeft = brushBottomLeftUv + vec2(sourceOffsetX, sourceOffsetY);
+    vec2 offsetFromSourceBrush = finalSourceUv - sourceBrushBottomLeft;
+    bool inSourceBrush = (brushSizeUv.x == 0.0 || (offsetFromSourceBrush.x >= 0.0 && offsetFromSourceBrush.x < brushSizeUv.x)) &&
+                         (brushSizeUv.y == 0.0 || (offsetFromSourceBrush.y >= 0.0 && offsetFromSourceBrush.y < brushSizeUv.y));
 
     vec4 transformedTexel  = vec4(0.0);
 
@@ -83,21 +79,18 @@ void main() {
         transformedTexel = getTransformedSample(finalSourceUv, coords.dest, scaleXValue, scaleYValue, totalShiftX, totalShiftY);
     } else if(boundaryMode == 2) { // Wrap
         // Tile the sampled region within the brush bounds
-        vec2 brushBottomLeft = brushCenterUv - brushSizeUv * 0.5;
         vec2 safeSize = max(brushSizeUv, vec2(1e-6));
-        vec2 local = finalSourceUv - brushBottomLeft;
+        vec2 local = finalSourceUv - brushBottomLeftUv;
         vec2 wrappedLocal = fract(local / safeSize) * safeSize;
-        vec2 wrappedUv = brushBottomLeft + wrappedLocal;
+        vec2 wrappedUv = brushBottomLeftUv + wrappedLocal;
         transformedTexel = getTransformedSample(wrappedUv, coords.dest, scaleXValue, scaleYValue, totalShiftX, totalShiftY);
     } else if(boundaryMode == 3) { // Ping Pong
-        vec2 brushBottomLeft = brushCenterUv - brushSizeUv * 0.5;
-
         // Mirror (ping-pong) tiling within the brush bounds
         vec2 safeSize = max(brushSizeUv * 2.0, vec2(1e-6));
-        vec2 local = finalSourceUv - brushBottomLeft;
+        vec2 local = finalSourceUv - brushBottomLeftUv;
         vec2 t = fract(local / safeSize);
         vec2 pingPong = 1.0 - abs(2.0 * t - 1.0);
-        vec2 pingPongUv = brushBottomLeft + pingPong * safeSize * 0.5;
+        vec2 pingPongUv = brushBottomLeftUv + pingPong * safeSize * 0.5;
 
         isTimeReversed = pingPong.x < 0.5;
 

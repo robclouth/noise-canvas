@@ -41,8 +41,8 @@ float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float p
   // Apply phase mode: adjust UV based on canvas or brush space
   vec2 adjustedUv = uv;
   if (modulator.modulatorPhaseMode == 1) { // Brush mode
-    // Convert to brush-relative coordinates (centered at brush center)
-    adjustedUv = (uv - brushCenterUv) / max(brushSizeUv, vec2(0.0001)) + 0.5;
+    // Convert to brush-relative coordinates (bottom-left is origin)
+    adjustedUv = (uv - brushBottomLeftUv) / max(brushSizeUv, vec2(0.0001));
   }
 
   vec2 rates = vec2(

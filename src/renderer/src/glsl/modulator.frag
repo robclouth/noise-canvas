@@ -1,6 +1,6 @@
 #include "common.glsl"
 
-uniform vec2 brushCenterUv;
+uniform vec2 brushBottomLeftUv;
 uniform vec2 brushSizeUv;
 
 #include "modulation-common.glsl"

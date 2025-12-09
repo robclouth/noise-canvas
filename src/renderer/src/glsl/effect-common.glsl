@@ -28,14 +28,18 @@ uniform float     destBandsPerOctave;
 
 uniform sampler2D originalSpectrogramTex;
 
-uniform vec2  brushCenterUv;
+uniform vec2  brushBottomLeftUv;
 uniform vec2  brushSizeUv;
 uniform float viewZoomPower;
 uniform float viewOffset;
-uniform float featherX;
-uniform float featherY;
-uniform float featherSlopeTime;
-uniform float featherSlopePitch;
+uniform float envelopeDelayEndX;
+uniform float envelopeAttackEndX;
+uniform float envelopeSustainEndX;
+uniform float envelopeReleaseEndX;
+uniform float envelopeDelayEndY;
+uniform float envelopeAttackEndY;
+uniform float envelopeSustainEndY;
+uniform float envelopeReleaseEndY;
 uniform float sourceOffsetX;
 uniform float sourceOffsetY;
 uniform Parameter brushPan;
@@ -461,7 +465,7 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY
 // ============================================================================
 
 vec2 getEffectiveBrushOffset(vec2 unpackedUv) {
-  vec2 offset = unpackedUv - brushCenterUv;
+  vec2 offset = unpackedUv - brushBottomLeftUv;
 
   if (wrapMode == 1 || wrapMode == 3) {
     float dist = abs(offset.x);
@@ -477,12 +481,11 @@ vec2 getEffectiveBrushOffset(vec2 unpackedUv) {
 float horizontalCoverage(vec2 unpackedUv, float binWidth) {
   float halfBinWidth = 0.5 * binWidth;
 
-  vec2 halfBrush = brushSizeUv * 0.5;
   vec2 off       = getEffectiveBrushOffset(unpackedUv);
-  float binCx    = brushCenterUv.x + off.x + halfBinWidth;
+  float binCx    = brushBottomLeftUv.x + off.x + halfBinWidth;
 
-  float bx0 = brushCenterUv.x - halfBrush.x;
-  float bx1 = brushCenterUv.x + halfBrush.x;
+  float bx0 = brushBottomLeftUv.x;
+  float bx1 = brushBottomLeftUv.x + brushSizeUv.x;
   float x0  = binCx - halfBinWidth;
   float x1  = binCx + halfBinWidth;
 
@@ -490,33 +493,70 @@ float horizontalCoverage(vec2 unpackedUv, float binWidth) {
   return overlap / (2.0 * halfBinWidth);
 }
 
+// Calculate envelope gain for a single dimension using pre-calculated stage boundaries
+float calculateEnvelopeGain(float localPos, float delayEnd, float attackEnd, float sustainEnd, float releaseEnd) {
+  float gain = 0.0;
+  
+  if (localPos < delayEnd) {
+    // Delay phase: gain = 0
+    gain = 0.0;
+  } else if (localPos < attackEnd) {
+    // Attack phase: ramp from 0 to 1
+    float attackDuration = attackEnd - delayEnd;
+    if (attackDuration > EPSILON) {
+      float attackProgress = (localPos - delayEnd) / attackDuration;
+      gain = smoothstep(0.0, 1.0, attackProgress);
+    } else {
+      gain = 1.0;
+    }
+  } else if (localPos < sustainEnd) {
+    // Sustain phase: gain = 1
+    gain = 1.0;
+  } else if (localPos < releaseEnd) {
+    // Release phase: ramp from 1 to 0
+    float releaseDuration = releaseEnd - sustainEnd;
+    if (releaseDuration > EPSILON) {
+      float releaseProgress = (localPos - sustainEnd) / releaseDuration;
+      gain = 1.0 - smoothstep(0.0, 1.0, releaseProgress);
+    } else {
+      gain = 0.0;
+    }
+  } else {
+    // Beyond envelope
+    gain = 0.0;
+  }
+  
+  return gain;
+}
+
 float getBrushWeight(vec2 unpackedUv) {
   vec4 meta = getDestMetadata(unpackedUv);
   float binWidth = exp2(meta.b) / destFrameCount;
-  vec2 halfBrushSizeUv = brushSizeUv / 2.0;
   vec2 offset = getEffectiveBrushOffset(unpackedUv) + vec2(binWidth, 0.0);
 
-  vec2 safeBrush = max(vec2(EPSILON), brushSizeUv + vec2(binWidth, 0.0));
-  vec2 localUv   = (offset + halfBrushSizeUv) / safeBrush;
-  vec2 slopeNormalized = (vec2(featherSlopeTime, featherSlopePitch) / 2.0 + 0.5);
-
-  float weightX = 1.0;
-  float safeFeatherX = max(featherX, EPSILON);
-  if (localUv.x < slopeNormalized.x) {
-    weightX = smoothstep(0.0, slopeNormalized.x * safeFeatherX, localUv.x);
-  } else if (localUv.x > slopeNormalized.x) {
-    weightX = 1.0 - smoothstep(slopeNormalized.x * safeFeatherX + (1.0 - safeFeatherX), 1.0, localUv.x);
-  }
+  // Normalize offset to [0, 1] within brush size (bottom-left is origin)
+  vec2 safeBrush = max(vec2(EPSILON), brushSizeUv);
+  vec2 localUv = offset / safeBrush;
+  
+  // Calculate envelope gain for X (time) dimension using pre-calculated boundaries
+  float weightX = calculateEnvelopeGain(
+    localUv.x,
+    envelopeDelayEndX,
+    envelopeAttackEndX,
+    envelopeSustainEndX,
+    envelopeReleaseEndX
+  );
   weightX *= horizontalCoverage(unpackedUv, binWidth);
-
-  float weightY = 1.0;
-  float safeFeatherY = max(featherY, EPSILON);
-  if (localUv.y < slopeNormalized.y) {
-    weightY = smoothstep(0.0, slopeNormalized.y * safeFeatherY, localUv.y);
-  } else if (localUv.y > slopeNormalized.y) {
-    weightY = 1.0 - smoothstep(slopeNormalized.y * safeFeatherY + (1.0 - safeFeatherY), 1.0, localUv.y);
-  }
-
+  
+  // Calculate envelope gain for Y (pitch) dimension using pre-calculated boundaries
+  float weightY = calculateEnvelopeGain(
+    localUv.y,
+    envelopeDelayEndY,
+    envelopeAttackEndY,
+    envelopeSustainEndY,
+    envelopeReleaseEndY
+  );
+  
   return weightX * weightY;
 }
 

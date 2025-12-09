@@ -6,10 +6,14 @@ export interface BrushState {
   brushIntensity: number;
   brushIterations: number;
   brushPan: number;
-  brushFeatherTime: number;
-  brushFeatherPitch: number;
-  brushFeatherSlopeTime: number;
-  brushFeatherSlopePitch: number;
+  brushEnvelopeDelayTime: number;
+  brushEnvelopeAttackTime: number;
+  brushEnvelopeSustainTime: number;
+  brushEnvelopeReleaseTime: number;
+  brushEnvelopeDelayPitch: number;
+  brushEnvelopeAttackPitch: number;
+  brushEnvelopeSustainPitch: number;
+  brushEnvelopeReleasePitch: number;
   sourcePosition: { beats: number; pitch: number; fileId: string } | null;
   setSourcePosition: (position: { beats: number; pitch: number; fileId: string } | null) => void;
   sourcePositionMode: string;
@@ -20,9 +24,6 @@ export interface BrushState {
   setBrushStartPosition: (position: { beats: number; pitch: number } | null) => void;
   lockedOffset: { beats: number; pitch: number } | null;
   setLockedOffset: (offset: { beats: number; pitch: number } | null) => void;
-  brushWidthBeats: number;
-  brushHeightSemis: number;
-  brushSizeLockedToGrid: boolean;
   brushWrapMode: number;
   blendMode: number;
   algorithm: number;
@@ -30,17 +31,18 @@ export interface BrushState {
 
 export const createBrushSlice = (set: ZustandSet): BrushState => {
   return {
-    brushWidthBeats: getParameterDef("brushWidthBeats").default,
-    brushHeightSemis: getParameterDef("brushHeightSemis").default,
-    brushSizeLockedToGrid: getParameterDef("brushSizeLockedToGrid").default,
     brushWrapMode: getParameterDef("brushWrapMode").default,
     brushIntensity: getParameterDef("brushIntensity").default,
     brushIterations: getParameterDef("brushIterations").default,
     brushPan: getParameterDef("brushPan").default,
-    brushFeatherTime: getParameterDef("brushFeatherTime").default,
-    brushFeatherPitch: getParameterDef("brushFeatherPitch").default,
-    brushFeatherSlopeTime: getParameterDef("brushFeatherSlopeTime").default,
-    brushFeatherSlopePitch: getParameterDef("brushFeatherSlopePitch").default,
+    brushEnvelopeDelayTime: getParameterDef("brushEnvelopeDelayTime").default,
+    brushEnvelopeAttackTime: getParameterDef("brushEnvelopeAttackTime").default,
+    brushEnvelopeSustainTime: getParameterDef("brushEnvelopeSustainTime").default,
+    brushEnvelopeReleaseTime: getParameterDef("brushEnvelopeReleaseTime").default,
+    brushEnvelopeDelayPitch: getParameterDef("brushEnvelopeDelayPitch").default,
+    brushEnvelopeAttackPitch: getParameterDef("brushEnvelopeAttackPitch").default,
+    brushEnvelopeSustainPitch: getParameterDef("brushEnvelopeSustainPitch").default,
+    brushEnvelopeReleasePitch: getParameterDef("brushEnvelopeReleasePitch").default,
     blendMode: getParameterDef("blendMode").default,
     algorithm: getParameterDef("algorithm").default,
     sourcePositionMode: getParameterDef("sourcePositionMode").default,

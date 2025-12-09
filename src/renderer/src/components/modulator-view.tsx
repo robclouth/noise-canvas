@@ -38,7 +38,7 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
         modulator1ImageTex: { value: placeholderTexture },
         modulator2ImageTex: { value: placeholderTexture },
         modulator3ImageTex: { value: placeholderTexture },
-        brushCenterUv: { value: new Vector2(0.5, 0.5) },
+        brushBottomLeftUv: { value: new Vector2(0.0, 0.0) },
         brushSizeUv: { value: new Vector2(1, 1) },
         testTexture: { value: testTexture },
       },

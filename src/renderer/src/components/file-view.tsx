@@ -27,7 +27,7 @@ function getSnappedCoordinates(
   bpm: number,
 ): [number, number] | null {
   const state = useStore.getState();
-  const { gridSizeBeats, brushWidthBeats, gridSizeSemis, brushHeightSemis, bandsPerOctave } = state;
+  const { gridSizeBeats, gridSizeSemis, bandsPerOctave } = state;
   const rect = event.currentTarget.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) {
     return null;
@@ -46,33 +46,23 @@ function getSnappedCoordinates(
   let snappedY = uv.y;
 
   if (gridSizeBeats > 0) {
-    if (brushWidthBeats > 0) {
-      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-      const gridIntervalSeconds = (60 / bpm) * gridSizeBeats;
-      const currentTime = uv.x * totalDuration;
-      const brushWidthSeconds = brushWidthBeats * (60.0 / bpm);
-      const startTime = currentTime - brushWidthSeconds / 2.0;
-      const snappedStartTime = Math.round(startTime / gridIntervalSeconds) * gridIntervalSeconds;
-      const snappedCenterTime = snappedStartTime + brushWidthSeconds / 2.0;
-      snappedX = snappedCenterTime / totalDuration;
-    } else {
-      snappedX = 0.5;
-    }
+    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+    const gridIntervalSeconds = (60 / bpm) * gridSizeBeats;
+    const currentTime = uv.x * totalDuration;
+    // Floor to get the start of the current cell
+    const cellIndex = Math.floor(currentTime / gridIntervalSeconds);
+    const snappedCenterTime = cellIndex * gridIntervalSeconds;
+    snappedX = snappedCenterTime / totalDuration;
   }
 
   if (gridSizeSemis > 0) {
-    if (brushHeightSemis > 0) {
-      const bandsPerSemitone = bandsPerOctave / 12;
-      const gridIntervalBands = gridSizeSemis * bandsPerSemitone;
-      const currentBand = (1.0 - uv.y) * spectrogramData.numBands;
-      const brushHeightBands = brushHeightSemis * bandsPerSemitone;
-      const bottomBand = currentBand - brushHeightBands / 2.0;
-      const snappedBottomBand = Math.round(bottomBand / gridIntervalBands) * gridIntervalBands;
-      const snappedCenterBand = snappedBottomBand + brushHeightBands / 2.0;
-      snappedY = 1.0 - snappedCenterBand / spectrogramData.numBands;
-    } else {
-      snappedY = 0.5;
-    }
+    const bandsPerSemitone = bandsPerOctave / 12;
+    const gridIntervalBands = gridSizeSemis * bandsPerSemitone;
+    const currentBand = (1.0 - uv.y) * spectrogramData.numBands;
+    // Floor to get the start of the current cell
+    const cellIndex = Math.floor(currentBand / gridIntervalBands);
+    const snappedCenterBand = cellIndex * gridIntervalBands;
+    snappedY = 1.0 - snappedCenterBand / spectrogramData.numBands;
   }
 
   return [snappedX, snappedY];
@@ -228,15 +218,14 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       const { filePath, spectrogramData } = openFiles[fileId];
       const bpm = state.filepathsBpm[filePath];
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-      const brushWidthBeats = state.brushWidthBeats;
-      const brushHeightSemis = state.brushHeightSemis;
+
       const timeSeconds = uvX * totalDuration;
       const centerBeats = (timeSeconds / 60) * bpm;
-      const beats = brushWidthBeats > 0 ? centerBeats - brushWidthBeats / 2 : centerBeats;
+      const beats = centerBeats;
       const bandIndex = (1 - uvY) * spectrogramData.numBands;
       const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
       const centerPitch = bandIndex / bandsPerSemitone;
-      const pitch = brushHeightSemis > 0 ? centerPitch - brushHeightSemis / 2 : centerPitch;
+      const pitch = centerPitch;
       return { beats, pitch };
     },
     [fileId],
@@ -254,11 +243,8 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       if (isActive && event.buttons === 1 && strokeTimeRangeRef.current.min !== null) {
         const { spectrogramData } = file;
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const brushWidthBeats = state.brushWidthBeats;
-        const brushWidthSeconds = (brushWidthBeats / bpm) * 60;
-        const brushHalfWidthSeconds = brushWidthSeconds / 2;
-        const currentBrushStart = snappedX * totalDuration - brushHalfWidthSeconds;
-        const currentBrushEnd = snappedX * totalDuration + brushHalfWidthSeconds;
+        const currentBrushStart = snappedX * totalDuration;
+        const currentBrushEnd = snappedX * totalDuration;
         strokeTimeRangeRef.current.min = Math.min(strokeTimeRangeRef.current.min!, currentBrushStart);
         strokeTimeRangeRef.current.max = Math.max(strokeTimeRangeRef.current.max!, currentBrushEnd);
       }
@@ -334,12 +320,9 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
 
         const { spectrogramData } = file;
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const brushWidthBeats = state.brushWidthBeats;
-        const brushWidthSeconds = (brushWidthBeats / bpm) * 60;
-        const brushHalfWidthSeconds = brushWidthSeconds / 2;
         const centerTimeSeconds = coords[0] * totalDuration;
-        const initialBrushStart = centerTimeSeconds - brushHalfWidthSeconds;
-        const initialBrushEnd = centerTimeSeconds + brushHalfWidthSeconds;
+        const initialBrushStart = centerTimeSeconds;
+        const initialBrushEnd = centerTimeSeconds;
         strokeTimeRangeRef.current = { min: initialBrushStart, max: initialBrushEnd };
 
         if (state.sourcePositionMode === "offset" && !state.lockedOffset && state.sourcePosition) {

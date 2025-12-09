@@ -254,8 +254,8 @@ function App(): React.JSX.Element {
       <ScrollArea
         scrollbarSize={4}
         type="auto"
-        w={350}
-        miw={350}
+        w={700}
+        miw={700}
         h="100%"
         onScrollPositionChange={() => invalidateRef.current?.()}
       >

@@ -1,5 +1,5 @@
-import { useStore } from "@/store";
-import { Stack } from "@mantine/core";
+import { Group, Stack } from "@mantine/core";
+import { EnvelopeControl } from "../controls/envelope-control";
 import { ParameterControl } from "../controls/parameter-control";
 import { PresetSelector } from "../controls/preset-selector";
 import { QuickSlots } from "../controls/quick-slots";
@@ -8,35 +8,37 @@ import { ModulatorView } from "../modulator-view";
 import { Section } from "../section";
 
 export function BrushPanel() {
-  const brushSizeLockedToGrid = useStore((state) => state.brushSizeLockedToGrid);
-
   return (
-    <Stack p="xs" gap="xs">
-      <PresetSelector />
-      <QuickSlots />
-      <Section label="Brush">
-        <ParameterControl paramKey="brushWidthBeats" disabled={brushSizeLockedToGrid} />
-        <ParameterControl paramKey="brushHeightSemis" disabled={brushSizeLockedToGrid} />
-        <ParameterControl paramKey="brushIntensity" />
-        <ParameterControl paramKey="blendMode" />
-        <ParameterControl paramKey="brushPan" />
-        <ParameterControl paramKey="brushIterations" />
-        <ParameterControl paramKey="brushWrapMode" />
-        <ParameterControl paramKey="algorithm" />
-        <ParameterControl paramKey="brushFeatherTime" />
-        <ParameterControl paramKey="brushFeatherPitch" />
-        <ParameterControl paramKey="brushFeatherSlopeTime" />
-        <ParameterControl paramKey="brushFeatherSlopePitch" />
-        <ParameterControl paramKey="sourceDataMode" />
-      </Section>
+    <Stack gap="xs">
+      <Stack p="xs" gap="xs">
+        <PresetSelector />
+        <QuickSlots />
+      </Stack>
+      <Group wrap="nowrap" align="start">
+        <Stack p="xs" gap="xs">
+          <Section label="Envelope">
+            <EnvelopeControl />
+          </Section>
 
-      <Section label="Effects">
-        <EffectsList />
-      </Section>
+          <Section label="Brush">
+            <ParameterControl paramKey="blendMode" />
+            <ParameterControl paramKey="brushPan" />
+            <ParameterControl paramKey="brushIterations" />
+            <ParameterControl paramKey="brushWrapMode" />
+            <ParameterControl paramKey="algorithm" />
+            <ParameterControl paramKey="sourceDataMode" />
+          </Section>
 
-      <Section label="Modulators">
-        <ModulatorView />
-      </Section>
+          <Section label="Modulators">
+            <ModulatorView />
+          </Section>
+        </Stack>
+        <Stack p="xs" gap="xs">
+          <Section label="Effects">
+            <EffectsList />
+          </Section>
+        </Stack>
+      </Group>
     </Stack>
   );
 }
