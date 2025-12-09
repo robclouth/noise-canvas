@@ -32,10 +32,8 @@ const theme = createTheme({
       vars: (_theme, props) => {
         if (props.size === "xs") {
           return {
-            root: {
-              "--input-height": "1.25rem",
-            },
-            wrapper: {},
+            root: {},
+            wrapper: { "--input-height": "20px", "--input-color": "#fff", "--input-padding-inline-start": "2px" },
           };
         }
         return { root: {}, wrapper: {} };

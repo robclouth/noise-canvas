@@ -251,14 +251,7 @@ function App(): React.JSX.Element {
         <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
         <ShaderCompiler onFinish={handleShaderCompileFinish} />
       </Canvas>
-      <ScrollArea
-        scrollbarSize={4}
-        type="auto"
-        w={700}
-        miw={700}
-        h="100%"
-        onScrollPositionChange={() => invalidateRef.current?.()}
-      >
+      <ScrollArea scrollbarSize={4} type="auto" h="100%" onScrollPositionChange={() => invalidateRef.current?.()}>
         <BrushPanel />
       </ScrollArea>
       <Stack pos="relative" flex={1} h="100%" gap={0}>
@@ -278,8 +271,8 @@ function App(): React.JSX.Element {
       <ScrollArea
         scrollbarSize={4}
         type="auto"
-        w={350}
-        miw={350}
+        w={170}
+        miw={170}
         h="100%"
         onScrollPositionChange={() => invalidateRef.current?.()}
       >

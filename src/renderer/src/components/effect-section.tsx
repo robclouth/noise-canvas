@@ -1,4 +1,4 @@
-import { Checkbox, Group, Paper, Stack, Text } from "@mantine/core";
+import { Checkbox, Group, Paper, SimpleGrid, Stack, Text } from "@mantine/core";
 import { GripVertical } from "lucide-react";
 import { memo } from "react";
 import { Tooltip } from "./tooltip";
@@ -35,7 +35,9 @@ export const EffectSection = memo(
               <GripVertical size={16} />
             </div>
           </Group>
-          <Stack gap={2}>{children}</Stack>
+          <SimpleGrid cols={2} spacing={"xs"} verticalSpacing={0}>
+            {children}
+          </SimpleGrid>
         </Stack>
       </Paper>
     );

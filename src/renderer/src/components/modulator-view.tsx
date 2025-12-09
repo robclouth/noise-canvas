@@ -1,5 +1,5 @@
 import test from "@/assets/textures/Alien Metal.jpg";
-import { SegmentedControl, Stack } from "@mantine/core";
+import { SegmentedControl, SimpleGrid, Stack } from "@mantine/core";
 import { useTexture, View } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
@@ -114,38 +114,44 @@ export const ModulatorView = () => {
           value: index.toString(),
         }))}
       />
-      <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Mode` as ParameterKey} />
-      {isPatternMode && (
-        <>
-          <ModulatorShapeControl
-            paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternShape` as ParameterKey}
-            modulatorIndex={parseInt(viewedModulatorIndex) + 1}
-          />
-          {!isScaleMode && (
-            <>
-              <ParameterControl
-                paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternRateBeats` as ParameterKey}
-              />
-              <ParameterControl
-                paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternRateSemis` as ParameterKey}
-              />
-            </>
-          )}
-        </>
-      )}
-      {isEnvelopeFollowerMode && (
-        <>
-          <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}EnvelopeMinDb` as ParameterKey} />
-          <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}EnvelopeMaxDb` as ParameterKey} />
-        </>
-      )}
-      {!isPatternMode && !isEnvelopeFollowerMode && (
-        <>
-          <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseMode` as ParameterKey} />
-          <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Rotation` as ParameterKey} />
-        </>
-      )}
-      <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Strength` as ParameterKey} />
+      <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
+        <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Mode` as ParameterKey} />
+        {isPatternMode && (
+          <>
+            <ModulatorShapeControl
+              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternShape` as ParameterKey}
+              modulatorIndex={parseInt(viewedModulatorIndex) + 1}
+            />
+            {!isScaleMode && (
+              <>
+                <ParameterControl
+                  paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternRateBeats` as ParameterKey}
+                />
+                <ParameterControl
+                  paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternRateSemis` as ParameterKey}
+                />
+              </>
+            )}
+          </>
+        )}
+        {isEnvelopeFollowerMode && (
+          <>
+            <ParameterControl
+              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}EnvelopeMinDb` as ParameterKey}
+            />
+            <ParameterControl
+              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}EnvelopeMaxDb` as ParameterKey}
+            />
+          </>
+        )}
+        {!isPatternMode && !isEnvelopeFollowerMode && (
+          <>
+            <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseMode` as ParameterKey} />
+            <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Rotation` as ParameterKey} />
+          </>
+        )}
+        <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Strength` as ParameterKey} />
+      </SimpleGrid>
       <View style={{ height: 128, marginTop: 6 }}>
         <Scene modulatorIndex={parseInt(viewedModulatorIndex)} />
       </View>

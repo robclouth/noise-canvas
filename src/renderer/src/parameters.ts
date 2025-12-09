@@ -294,7 +294,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: BEAT_UNIT,
     scale: "log",
     marks: beatMarksWithZero,
-    rightValue: { value: 0, label: "Full" },
     includeInPresets: true,
   },
   brushEnvelopeReleaseTime: {
@@ -344,11 +343,10 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "Sustain pitch at full gain (vertical, in semitones).",
     default: 48,
     min: 0,
-    max: 96,
+    max: 128,
     step: 0.1,
     unit: SEMITONE_UNIT,
     marks: semitoneMarksWithZero,
-    rightValue: { value: 0, label: "Full" },
     includeInPresets: true,
   },
   brushEnvelopeReleasePitch: {

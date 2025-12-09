@@ -31,9 +31,7 @@ export const BEAT_VALUES = [
   { value: 16, label: "16" },
   { value: 24, label: "24" },
   { value: 32, label: "32" },
-]
-  .sort((a, b) => a.value - b.value)
-  .map((v) => ({ value: v.value, label: v.label + BEAT_UNIT }));
+].sort((a, b) => a.value - b.value);
 
 export const PITCH_VALUES = [
   { value: 1 / 8, label: "1/8" },
@@ -59,7 +57,7 @@ export const PITCH_VALUES = [
   { value: 72, label: "72" },
   { value: 84, label: "84" },
   { value: 96, label: "96" },
-].map((v) => ({ value: v.value, label: v.label + SEMITONE_UNIT }));
+];
 
 export const PITCH_VALUES_NO_FRACTIONS = PITCH_VALUES.filter((v) => v.value >= 1);
 
@@ -91,7 +89,7 @@ export const MULTIPLIER_VALUES = [
   { value: 128, label: "128" },
   { value: 192, label: "192" },
   { value: 256, label: "256" },
-].map((v) => ({ value: v.value, label: v.label + MULTIPLIER_UNIT }));
+];
 
 export const BANDS_PER_OCTAVE_VALUES = [
   { value: 12, label: "Best Time" },

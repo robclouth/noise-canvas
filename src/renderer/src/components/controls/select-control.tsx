@@ -24,16 +24,19 @@ export const SelectControl = <T,>({
   };
 
   return (
-    <Group gap={"xs"} wrap="nowrap" h={25}>
+    <Group gap={"xs"} wrap="nowrap" h={24}>
       {labelComponent}
       <Select
         size="xs"
         variant="unstyled"
-        w={190}
+        style={{ borderRadius: 2, border: `1px solid #666`, backgroundColor: "#2c2c2c" }}
+        w={70}
         data={options.map((o) => ({ value: String(o.value), label: o.label }))}
         value={String(value)}
         onChange={handleChange}
         scrollAreaProps={{ type: "always" }}
+        comboboxProps={{ width: 120 }}
+        rightSectionWidth={12}
         rightSection={<ChevronDown size={10} color="var(--mantine-color-text)" />}
       />
     </Group>

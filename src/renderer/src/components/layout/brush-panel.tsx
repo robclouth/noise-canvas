@@ -1,4 +1,4 @@
-import { Group, Stack } from "@mantine/core";
+import { Group, SimpleGrid, Stack } from "@mantine/core";
 import { EnvelopeControl } from "../controls/envelope-control";
 import { ParameterControl } from "../controls/parameter-control";
 import { PresetSelector } from "../controls/preset-selector";
@@ -18,17 +18,15 @@ export function BrushPanel() {
         <Stack p="xs" gap="xs">
           <Section label="Envelope">
             <EnvelopeControl />
+            <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
+              <ParameterControl paramKey="blendMode" />
+              <ParameterControl paramKey="brushPan" />
+              <ParameterControl paramKey="brushIterations" />
+              <ParameterControl paramKey="brushWrapMode" />
+              <ParameterControl paramKey="algorithm" />
+              <ParameterControl paramKey="sourceDataMode" />
+            </SimpleGrid>
           </Section>
-
-          <Section label="Brush">
-            <ParameterControl paramKey="blendMode" />
-            <ParameterControl paramKey="brushPan" />
-            <ParameterControl paramKey="brushIterations" />
-            <ParameterControl paramKey="brushWrapMode" />
-            <ParameterControl paramKey="algorithm" />
-            <ParameterControl paramKey="sourceDataMode" />
-          </Section>
-
           <Section label="Modulators">
             <ModulatorView />
           </Section>

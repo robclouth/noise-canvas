@@ -82,6 +82,7 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
           w={70}
           lineClamp={1}
           truncate="end"
+          ta="right"
           onDoubleClick={() => useStore.getState().setParameter(paramKey, shapeDef.default)}
         >
           {shapeDef.label}
@@ -90,14 +91,16 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
       <Select
         size="xs"
         variant="unstyled"
-        width={190}
+        style={{ width: 70, borderRadius: 2, border: `1px solid #666`, backgroundColor: "#2c2c2c" }}
+        width={70}
         data={optionGroups}
         value={getCurrentValue()}
         onChange={handleChange}
         maxDropdownHeight={400}
+        comboboxProps={{ width: 120 }}
         scrollAreaProps={{ type: "always" }}
+        rightSectionWidth={12}
         rightSection={<ChevronDown size={10} color="var(--mantine-color-text)" />}
-        style={{ width: 190 }}
       />
     </Group>
   );

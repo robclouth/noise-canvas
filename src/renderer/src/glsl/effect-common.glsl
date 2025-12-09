@@ -466,16 +466,13 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY
 
 vec2 getEffectiveBrushOffset(vec2 unpackedUv) {
   vec2 offset = unpackedUv - brushBottomLeftUv;
+  vec2 wrappedOffset = fract(offset);
 
-  if (wrapMode == 1 || wrapMode == 3) {
-    float dist = abs(offset.x);
-    if (dist > 0.5) offset.x = offset.x > 0.0 ? offset.x - 1.0 : offset.x + 1.0;
-  }
-  if (wrapMode == 2 || wrapMode == 3) {
-    float dist = abs(offset.y);
-    if (dist > 0.5) offset.y = offset.y > 0.0 ? offset.y - 1.0 : offset.y + 1.0;
-  }
-  return offset;
+  if(wrapMode == 0) return offset;
+  else if(wrapMode == 1) return vec2(wrappedOffset.x, offset.y);
+  else if(wrapMode == 2) return vec2(offset.x, wrappedOffset.y);
+  
+  return vec2(wrappedOffset.x, wrappedOffset.y);
 }
 
 float horizontalCoverage(vec2 unpackedUv, float binWidth) {
@@ -562,11 +559,10 @@ float getBrushWeight(vec2 unpackedUv) {
 
 bool isInsideBrush(vec2 unpackedUv) {
   vec2 offset = getEffectiveBrushOffset(unpackedUv);
-  vec2 diff   = abs(offset);
-  vec2 halfSize = brushSizeUv / 2.0;
-
-  if ((brushSizeUv.x > 0.0 && diff.x >= halfSize.x) ||
-      (brushSizeUv.y > 0.0 && diff.y >= halfSize.y)) {
+  
+  // With bottom-left reference, offset should be between 0 and brushSizeUv
+  if ((brushSizeUv.x > 0.0 && (offset.x < 0.0 || offset.x >= brushSizeUv.x)) ||
+      (brushSizeUv.y > 0.0 && (offset.y < 0.0 || offset.y >= brushSizeUv.y))) {
     return false;
   }
   return true;

@@ -5,8 +5,8 @@ import { useStore } from "@renderer/store";
 import { getModAmountParamKeys } from "@renderer/store/modulators";
 import { denormalizeParameterValue, normalizeParameterValue } from "@renderer/store/utils";
 import { Tooltip } from "../tooltip";
+import { NumboxControl } from "./numbox-control";
 import { SelectControl } from "./select-control";
-import { SliderControl } from "./slider-control";
 import { SwitchControl } from "./switch-control";
 
 export type ParameterControlProps = {
@@ -14,9 +14,16 @@ export type ParameterControlProps = {
   labelWidth?: number;
   disabled?: boolean;
   color?: string;
+  labelPosition?: "left" | "top";
 };
 
-export const ParameterControl = ({ labelWidth = 70, disabled, color, paramKey }: ParameterControlProps) => {
+export const ParameterControl = ({
+  labelWidth = 70,
+  disabled,
+  color,
+  paramKey,
+  labelPosition,
+}: ParameterControlProps) => {
   const parameter = getParameterDef(paramKey);
   const { kind, default: defaultValue, label, description } = parameter;
   const isModulatable = kind === "number" && "modulatable" in parameter && parameter.modulatable;
@@ -44,6 +51,7 @@ export const ParameterControl = ({ labelWidth = 70, disabled, color, paramKey }:
         truncate="end"
         onDoubleClick={() => setParameter(paramKey, defaultValue)}
         c={isModulated ? "blue" : "dark.0"}
+        ta="right"
       >
         {label}
       </Text>
@@ -64,8 +72,9 @@ export const ParameterControl = ({ labelWidth = 70, disabled, color, paramKey }:
 
   if (kind === "number") {
     return (
-      <SliderControl
+      <NumboxControl
         labelComponent={labelComponent}
+        labelPosition={labelPosition}
         value={parameterValue as number}
         setValue={(value) => setParameter(paramKey, value)}
         min={parameter.min}
