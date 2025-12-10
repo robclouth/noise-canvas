@@ -1,8 +1,10 @@
-import { useStore } from "@/store";
+import { createStepStateView, useStore } from "@/store";
 import { useFrame } from "@react-three/fiber";
+import { EffectType } from "@renderer/effects";
 import { CommonUniforms, defaultValues } from "@renderer/effects/base-effect";
 import { openFiles } from "@renderer/store/files";
 import { getModAmountValuesNormalized } from "@renderer/store/modulators";
+import { State } from "@renderer/store/types";
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
   Camera,
@@ -597,69 +599,55 @@ export const FileRenderer = memo(
       const viewZoomPower = state.filesZoom[fileId];
       const viewOffset = state.filesOffset[fileId];
 
-      // Calculate brush size from envelope (sum of DASR values)
-      const envelopeTimeUv = unitsToUv(
-        state.brushEnvelopeDelayTime +
-          state.brushEnvelopeAttackTime +
-          state.brushEnvelopeSustainTime +
-          state.brushEnvelopeReleaseTime,
-        0,
-        bpm,
-        totalDuration,
-        spectrogramData.bandsPerOctave,
-        spectrogramData.numBands,
-      );
-      const envelopePitchUv = unitsToUv(
-        0,
-        state.brushEnvelopeDelayPitch +
-          state.brushEnvelopeAttackPitch +
-          state.brushEnvelopeSustainPitch +
-          state.brushEnvelopeReleasePitch,
-        bpm,
-        totalDuration,
-        spectrogramData.bandsPerOctave,
-        spectrogramData.numBands,
-      );
-      const brushSizeUv = new Vector2(envelopeTimeUv.x, envelopePitchUv.y);
-
-      // Render brush stroke if requested
-      if (strokeParams.current && applyStroke.current) {
-        const sourceFile = openFiles[state.sourceFile!];
-        const sourceRendererRef = sourceFile.rendererRef;
-        const textures = sourceRendererRef?.current?.getTextures();
-
-        if (!textures) {
-          return;
-        }
-
-        // Calculate source offset using the helper function
-        const sourceOffsetUv = calculateSourceOffset(
-          state,
-          mousePos,
+      // Helper to calculate brush size from a step state
+      const calculateBrushSizeUv = (stepState: State) => {
+        const envelopeTimeUv = unitsToUv(
+          stepState.brushEnvelopeDelayTime +
+            stepState.brushEnvelopeAttackTime +
+            stepState.brushEnvelopeSustainTime +
+            stepState.brushEnvelopeReleaseTime,
+          0,
           bpm,
           totalDuration,
-          sourceFile.spectrogramData,
-          bpm,
-          totalDuration,
+          spectrogramData.bandsPerOctave,
+          spectrogramData.numBands,
         );
+        const envelopePitchUv = unitsToUv(
+          0,
+          stepState.brushEnvelopeDelayPitch +
+            stepState.brushEnvelopeAttackPitch +
+            stepState.brushEnvelopeSustainPitch +
+            stepState.brushEnvelopeReleasePitch,
+          bpm,
+          totalDuration,
+          spectrogramData.bandsPerOctave,
+          spectrogramData.numBands,
+        );
+        return new Vector2(envelopeTimeUv.x, envelopePitchUv.y);
+      };
 
-        const currentReadFBO = pingPong.current === 0 ? fbo1 : fbo2;
-        const destinationFbo = pingPong.current === 0 ? fbo2 : fbo1;
-        const { preview } = strokeParams.current;
+      // Helper to build common uniforms for a specific step
+      const buildStepUniforms = (
+        stepState: State,
+        brushSizeUv: Vector2,
+        sourceOffsetUv: Vector2,
+        destTexture: WebGLRenderTarget | { texture: DataTexture },
+      ): CommonUniforms => {
+        const sourceFile = openFiles[state.sourceFile!];
+        const textures = sourceFile.rendererRef?.current?.getTextures();
 
-        // Set up common uniforms for the brush shaders
-        const commonUniforms: CommonUniforms = {
-          sourceSpectrogramTex: { value: textures.packed.texture || placeholderTexture },
+        return {
+          sourceSpectrogramTex: { value: textures?.packed.texture || placeholderTexture },
           sourceSpectrogramTextureSize: { value: sourceFile.spectrogramData.packedTextureSize },
-          sourceInverseMapTex: { value: textures.inverse || placeholderTexture },
-          sourceMetadataTex: { value: textures.metadata || placeholderTexture },
+          sourceInverseMapTex: { value: textures?.inverse || placeholderTexture },
+          sourceMetadataTex: { value: textures?.metadata || placeholderTexture },
           sourceMinFreq: { value: sourceFile.spectrogramData.minFreq },
           sourceBandsPerOctave: { value: sourceFile.spectrogramData.bandsPerOctave },
           sourceFrameCount: { value: sourceFile.spectrogramData.numFrames },
           sourceBandCount: { value: sourceFile.spectrogramData.numBands },
           sourceChannelCount: { value: sourceFile.spectrogramData.numChannels },
           sourceSampleRate: { value: sourceFile.spectrogramData.sampleRate },
-          destSpectrogramTex: { value: currentReadFBO.texture || placeholderTexture },
+          destSpectrogramTex: { value: destTexture.texture || placeholderTexture },
           destSpectrogramTextureSize: { value: spectrogramData.packedTextureSize },
           destInverseMapTex: { value: inverseMapTex || placeholderTexture },
           destMetadataTex: { value: metadataTex || placeholderTexture },
@@ -677,10 +665,10 @@ export const FileRenderer = memo(
           ...(() => {
             // Calculate envelope boundaries on CPU
             const envelopeX = calculateEnvelopeBoundaries(
-              state.brushEnvelopeDelayTime,
-              state.brushEnvelopeAttackTime,
-              state.brushEnvelopeSustainTime,
-              state.brushEnvelopeReleaseTime,
+              stepState.brushEnvelopeDelayTime,
+              stepState.brushEnvelopeAttackTime,
+              stepState.brushEnvelopeSustainTime,
+              stepState.brushEnvelopeReleaseTime,
               bpm,
               totalDuration,
               spectrogramData.bandsPerOctave,
@@ -688,10 +676,10 @@ export const FileRenderer = memo(
               true,
             );
             const envelopeY = calculateEnvelopeBoundaries(
-              state.brushEnvelopeDelayPitch,
-              state.brushEnvelopeAttackPitch,
-              state.brushEnvelopeSustainPitch,
-              state.brushEnvelopeReleasePitch,
+              stepState.brushEnvelopeDelayPitch,
+              stepState.brushEnvelopeAttackPitch,
+              stepState.brushEnvelopeSustainPitch,
+              stepState.brushEnvelopeReleasePitch,
               bpm,
               totalDuration,
               spectrogramData.bandsPerOctave,
@@ -711,132 +699,212 @@ export const FileRenderer = memo(
           })(),
           brushIntensity: {
             value: {
-              value: state.brushIntensity / 100,
+              value: stepState.brushIntensity / 100,
               minValue: 0,
               maxValue: 1,
-              modulationAmounts: getModAmountValuesNormalized(state, "brushIntensity"),
+              modulationAmounts: getModAmountValuesNormalized(stepState, "brushIntensity"),
             },
           },
           brushPan: {
             value: {
-              value: state.brushPan / 100,
+              value: stepState.brushPan / 100,
               minValue: -1,
               maxValue: 1,
-              modulationAmounts: getModAmountValuesNormalized(state, "brushPan"),
+              modulationAmounts: getModAmountValuesNormalized(stepState, "brushPan"),
             },
           },
           bpm: { value: bpm },
           sourceOffsetX: { value: sourceOffsetUv.x },
           sourceOffsetY: { value: sourceOffsetUv.y },
-          blendMode: { value: state.blendMode },
-          algorithm: { value: state.algorithm },
+          blendMode: { value: stepState.blendMode },
+          algorithm: { value: stepState.algorithm },
           magnitudeLimit: { value: state.magnitudeLimit },
-          wrapMode: { value: state.brushWrapMode },
+          wrapMode: { value: stepState.brushWrapMode },
           modulators: {
-            value: buildModulatorUniforms(bpm, totalDuration, spectrogramData.bandsPerOctave, spectrogramData.numBands),
+            value: buildModulatorUniforms(
+              bpm,
+              totalDuration,
+              spectrogramData.bandsPerOctave,
+              spectrogramData.numBands,
+              stepState,
+            ),
           },
           gainLut: { value: modulatorScaleLut || placeholderTexture },
           modulator1ImageTex: { value: modulator1Texture || placeholderTexture },
           modulator2ImageTex: { value: modulator2Texture || placeholderTexture },
           modulator3ImageTex: { value: modulator3Texture || placeholderTexture },
         };
+      };
 
-        // Get enabled effects in order
-        const enabledEffects = state.effectOrder.filter(({ enabled }) => enabled).map(({ effect }) => effect);
+      // Calculate maximum brush size across all steps (for display purposes)
+      // This ensures the preview shows the full extent of all steps
+      const activeStepState = createStepStateView(state, state.activeStepIndex);
+      const brushSizeUv = new Vector2(0, 0);
+      for (let i = 0; i < state.steps.length; i++) {
+        const stepState = createStepStateView(state, i);
+        const stepBrushSize = calculateBrushSizeUv(stepState);
+        brushSizeUv.x = Math.max(brushSizeUv.x, stepBrushSize.x);
+        brushSizeUv.y = Math.max(brushSizeUv.y, stepBrushSize.y);
+      }
 
-        // If no effects are enabled, add a passthrough effect to properly handle metadata conversion
-        if (enabledEffects.length === 0) {
-          enabledEffects.push("passthrough");
+      // Render brush stroke if requested
+      if (strokeParams.current && applyStroke.current) {
+        const sourceFile = openFiles[state.sourceFile!];
+        const sourceRendererRef = sourceFile.rendererRef;
+        const textures = sourceRendererRef?.current?.getTextures();
+
+        if (!textures) {
+          return;
         }
 
-        // Determine the source FBO based on sourceDataMode and which file is the source
-        // "current" means we read from the current modified spectrogram
-        // "original" means we read from the original unmodified source
+        // Calculate source offset using the helper function (using active step for envelope values)
+        const sourceOffsetUv = calculateSourceOffset(
+          activeStepState,
+          mousePos,
+          bpm,
+          totalDuration,
+          sourceFile.spectrogramData,
+          bpm,
+          totalDuration,
+        );
+
+        const currentReadFBO = pingPong.current === 0 ? fbo1 : fbo2;
+        const destinationFbo = pingPong.current === 0 ? fbo2 : fbo1;
+        const { preview } = strokeParams.current;
+
+        // Determine the initial source FBO based on sourceDataMode and which file is the source
+        // Use active step's sourceDataMode for the initial determination
         const isSameFile = sourceFile.id === fileId;
-        const sourceFbo =
-          state.sourceDataMode === "original"
-            ? { texture: textures!.original } // Use original unmodified data
+        const initialSourceFbo =
+          activeStepState.sourceDataMode === "original"
+            ? { texture: textures!.original }
             : isSameFile
-              ? currentReadFBO // Same file: use our own current modified FBO
-              : textures!.packed; // Different file: use their current modified FBO
-
-        // Override the source texture in commonUniforms to use the correct source
-        commonUniforms.sourceSpectrogramTex.value = sourceFbo.texture;
-
-        // Create the uniform set for iterative passes (j > 0).
-        // This tells the shader to interpret the input texture using the destination's metadata.
-        // For iterative passes, there's no offset since we're reading from our own coordinate space
-        const iterativeUniforms = {
-          ...commonUniforms,
-          sourceInverseMapTex: commonUniforms.destInverseMapTex,
-          sourceMetadataTex: commonUniforms.destMetadataTex,
-          sourceMinFreq: commonUniforms.destMinFreq,
-          sourceBandsPerOctave: commonUniforms.destBandsPerOctave,
-          sourceFrameCount: commonUniforms.destFrameCount,
-          sourceBandCount: commonUniforms.destBandCount,
-          sourceChannelCount: commonUniforms.destChannelCount,
-          sourceSampleRate: commonUniforms.destSampleRate,
-          sourceSpectrogramTextureSize: commonUniforms.destSpectrogramTextureSize,
-          sourceOffsetX: { value: 0 },
-          sourceOffsetY: { value: 0 },
-        };
+              ? currentReadFBO
+              : textures!.packed;
 
         let tempFboA = passFbo1;
         let tempFboB = passFbo2;
 
-        // The input for the very first pass is always the original source data.
-        let currentReadFbo = sourceFbo;
+        // For multi-step rendering, we iterate through all steps sequentially
+        // The output of one step becomes the input for the next
+        let stepInputFbo: WebGLRenderTarget | { texture: DataTexture } = initialSourceFbo;
+        const numSteps = state.steps.length;
 
-        // Apply each enabled effect in order, with iterations
-        for (let effectIndex = 0; effectIndex < enabledEffects.length; effectIndex++) {
-          const effectId = enabledEffects[effectIndex];
-          const effect = effects[effectId];
-          const numPasses = effect.materials.length;
+        for (let stepIndex = 0; stepIndex < numSteps; stepIndex++) {
+          const stepState = createStepStateView(state, stepIndex);
+          const stepBrushSizeUv = calculateBrushSizeUv(stepState);
 
-          for (let i = 0; i < state.brushIterations; i++) {
-            for (let p = 0; p < numPasses; p++) {
-              const isFirstEffect = effectIndex === 0;
-              const isFirstIteration = i === 0;
-              const isFirstPass = p === 0;
-              const uniformsForThisIteration =
-                isFirstEffect && isFirstIteration && isFirstPass ? { ...commonUniforms } : { ...iterativeUniforms };
+          // Determine the blend destination for this step
+          // Step 1 blends with the original canvas state
+          // Subsequent steps blend with the previous step's output so that
+          // pixels outside their envelope preserve the previous step's changes
+          const blendDestFbo = stepIndex === 0 ? currentReadFBO : stepInputFbo;
 
-              const material = effect.materials[p];
-              fboMesh.material = material;
+          // Build common uniforms for this step
+          const commonUniforms = buildStepUniforms(stepState, stepBrushSizeUv, sourceOffsetUv, blendDestFbo);
 
-              const isLastEffect = effectIndex === enabledEffects.length - 1;
-              const isLastIteration = i === state.brushIterations - 1;
-              const isLastPass = p === numPasses - 1;
-              const isFinalPass = isLastEffect && isLastIteration && isLastPass;
-              const currentWriteFbo = isFinalPass ? destinationFbo : tempFboA;
+          // Determine source texture based on this step's sourceDataMode
+          // "original" = read from original source file spectrogram
+          // "current" = read from previous step's output (or initial source for step 1)
+          const stepSourceDataMode = stepState.sourceDataMode;
+          const stepSourceFbo =
+            stepSourceDataMode === "original"
+              ? { texture: textures!.original } // Use original unmodified source data
+              : stepInputFbo; // Use previous step's output (or initial source for step 1)
 
-              const inputTexture = currentReadFbo.texture;
+          // Override the source texture to use the correct input for this step
+          commonUniforms.sourceSpectrogramTex.value = stepSourceFbo.texture;
 
-              // The "source" is always the result of the previous pass.
-              uniformsForThisIteration.sourceSpectrogramTex = { value: inputTexture };
+          // Get enabled effects in order for this step
+          const stepEffectOrder = stepState.effectOrder as { effect: EffectType; enabled: boolean }[];
+          const enabledEffects = stepEffectOrder.filter(({ enabled }) => enabled).map(({ effect }) => effect);
 
-              // The "destination" (for blending) is the original target on the first pass.
-              // For all subsequent iterative passes, the destination is the source (self-modification).
-              uniformsForThisIteration.destSpectrogramTex = {
-                value: isFirstEffect && isFirstIteration ? commonUniforms.destSpectrogramTex.value : inputTexture,
-              };
+          // If no effects are enabled, add a passthrough effect
+          if (enabledEffects.length === 0) {
+            enabledEffects.push("passthrough");
+          }
 
-              effect.updateEffectUniforms({
-                commonUniforms: uniformsForThisIteration,
-                passIndex: p,
-                file: sourceFile,
-              });
+          // Create the iterative uniforms set for subsequent passes
+          const iterativeUniforms = {
+            ...commonUniforms,
+            sourceInverseMapTex: commonUniforms.destInverseMapTex,
+            sourceMetadataTex: commonUniforms.destMetadataTex,
+            sourceMinFreq: commonUniforms.destMinFreq,
+            sourceBandsPerOctave: commonUniforms.destBandsPerOctave,
+            sourceFrameCount: commonUniforms.destFrameCount,
+            sourceBandCount: commonUniforms.destBandCount,
+            sourceChannelCount: commonUniforms.destChannelCount,
+            sourceSampleRate: commonUniforms.destSampleRate,
+            sourceSpectrogramTextureSize: commonUniforms.destSpectrogramTextureSize,
+            sourceOffsetX: { value: 0 },
+            sourceOffsetY: { value: 0 },
+          };
 
-              gl.setRenderTarget(currentWriteFbo);
-              gl.render(fboScene, camera);
+          // Reset currentReadFbo to the step's input for effect processing
+          let currentReadFbo = stepInputFbo;
 
-              currentReadFbo = currentWriteFbo;
+          const isLastStep = stepIndex === numSteps - 1;
 
-              if (!isFinalPass) {
-                [tempFboA, tempFboB] = [tempFboB, tempFboA];
+          // Apply each enabled effect in order, with iterations
+          for (let effectIndex = 0; effectIndex < enabledEffects.length; effectIndex++) {
+            const effectId = enabledEffects[effectIndex];
+            const effect = effects[effectId];
+            const numPasses = effect.materials.length;
+            const brushIterations = stepState.brushIterations as number;
+
+            for (let i = 0; i < brushIterations; i++) {
+              for (let p = 0; p < numPasses; p++) {
+                const isFirstEffect = effectIndex === 0;
+                const isFirstIteration = i === 0;
+                const isFirstPass = p === 0;
+                const uniformsForThisIteration =
+                  isFirstEffect && isFirstIteration && isFirstPass ? { ...commonUniforms } : { ...iterativeUniforms };
+
+                const material = effect.materials[p];
+                fboMesh.material = material;
+
+                const isLastEffect = effectIndex === enabledEffects.length - 1;
+                const isLastIteration = i === brushIterations - 1;
+                const isLastPass = p === numPasses - 1;
+                const isFinalPassOfStep = isLastEffect && isLastIteration && isLastPass;
+                const isFinalPass = isFinalPassOfStep && isLastStep;
+                const currentWriteFbo = isFinalPass ? destinationFbo : tempFboA;
+
+                const inputTexture = currentReadFbo.texture;
+
+                // The "source" on the first effect/iteration/pass is already set correctly in commonUniforms
+                // (respecting sourceDataMode). For subsequent passes, use the previous pass output.
+                if (!(isFirstEffect && isFirstIteration && isFirstPass)) {
+                  uniformsForThisIteration.sourceSpectrogramTex = { value: inputTexture };
+                }
+
+                // The "destination" (for blending) is the original target on the first pass.
+                // For all subsequent iterative passes, the destination is the source (self-modification).
+                uniformsForThisIteration.destSpectrogramTex = {
+                  value: isFirstEffect && isFirstIteration ? commonUniforms.destSpectrogramTex.value : inputTexture,
+                };
+
+                effect.updateEffectUniforms({
+                  commonUniforms: uniformsForThisIteration,
+                  passIndex: p,
+                  file: sourceFile,
+                  state: stepState,
+                });
+
+                gl.setRenderTarget(currentWriteFbo);
+                gl.render(fboScene, camera);
+
+                currentReadFbo = currentWriteFbo;
+
+                if (!isFinalPass) {
+                  [tempFboA, tempFboB] = [tempFboB, tempFboA];
+                }
               }
             }
           }
+
+          // The output of this step becomes the input for the next step
+          stepInputFbo = currentReadFbo;
         }
 
         gl.setRenderTarget(null);
@@ -880,36 +948,44 @@ export const FileRenderer = memo(
         ? (() => {
             const hoveredBpm = state.filepathsBpm[hoveredFile.filePath];
             const hoveredDuration = hoveredFile.spectrogramData.numFrames / hoveredFile.spectrogramData.sampleRate;
-            const timeUv = unitsToUv(
-              state.brushEnvelopeDelayTime +
-                state.brushEnvelopeAttackTime +
-                state.brushEnvelopeSustainTime +
-                state.brushEnvelopeReleaseTime,
-              0,
-              hoveredBpm,
-              hoveredDuration,
-              hoveredFile.spectrogramData.bandsPerOctave,
-              hoveredFile.spectrogramData.numBands,
-            );
-            const pitchUv = unitsToUv(
-              0,
-              state.brushEnvelopeDelayPitch +
-                state.brushEnvelopeAttackPitch +
-                state.brushEnvelopeSustainPitch +
-                state.brushEnvelopeReleasePitch,
-              hoveredBpm,
-              hoveredDuration,
-              hoveredFile.spectrogramData.bandsPerOctave,
-              hoveredFile.spectrogramData.numBands,
-            );
-            return new Vector2(timeUv.x, pitchUv.y);
+            // Calculate maximum brush size across all steps for the hovered file
+            let maxTimeUv = 0;
+            let maxPitchUv = 0;
+            for (let i = 0; i < state.steps.length; i++) {
+              const stepState = createStepStateView(state, i);
+              const timeUv = unitsToUv(
+                stepState.brushEnvelopeDelayTime +
+                  stepState.brushEnvelopeAttackTime +
+                  stepState.brushEnvelopeSustainTime +
+                  stepState.brushEnvelopeReleaseTime,
+                0,
+                hoveredBpm,
+                hoveredDuration,
+                hoveredFile.spectrogramData.bandsPerOctave,
+                hoveredFile.spectrogramData.numBands,
+              );
+              const pitchUv = unitsToUv(
+                0,
+                stepState.brushEnvelopeDelayPitch +
+                  stepState.brushEnvelopeAttackPitch +
+                  stepState.brushEnvelopeSustainPitch +
+                  stepState.brushEnvelopeReleasePitch,
+                hoveredBpm,
+                hoveredDuration,
+                hoveredFile.spectrogramData.bandsPerOctave,
+                hoveredFile.spectrogramData.numBands,
+              );
+              maxTimeUv = Math.max(maxTimeUv, timeUv.x);
+              maxPitchUv = Math.max(maxPitchUv, pitchUv.y);
+            }
+            return new Vector2(maxTimeUv, maxPitchUv);
           })()
         : new Vector2(0.1, 0.1);
       displayMaterial.uniforms.showTargetRectangle.value = isMouseOver;
       displayMaterial.uniforms.showSourceRectangle.value = isSourceFile && isMouseOverAnyFile;
       displayMaterial.uniforms.viewZoomPower.value = viewZoomPower;
       displayMaterial.uniforms.viewOffset.value = viewOffset;
-      displayMaterial.uniforms.wrapMode.value = state.brushWrapMode;
+      displayMaterial.uniforms.wrapMode.value = activeStepState.brushWrapMode;
 
       // Calculate and update grid values
       const gridSizeBeats = state.gridSizeBeats;
@@ -948,7 +1024,7 @@ export const FileRenderer = memo(
             sourceFileData.spectrogramData.numFrames / sourceFileData.spectrogramData.sampleRate;
 
           const sourceOffsetUv = calculateSourceOffset(
-            state,
+            activeStepState,
             mousePos,
             sourceBpm,
             sourceTotalDuration,

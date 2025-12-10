@@ -1,4 +1,4 @@
-import { OpenFile } from "@renderer/store/types";
+import { OpenFile, State } from "@renderer/store/types";
 import { ParameterUniform } from "@renderer/types";
 import * as THREE from "three";
 import { Texture, Vector2 } from "three";
@@ -144,10 +144,17 @@ export const defaultValues: CommonUniforms = {
   modulator3ImageTex: { value: null },
 };
 
+export type UpdateEffectUniformsProps = {
+  commonUniforms: CommonUniforms;
+  passIndex: number;
+  file: OpenFile;
+  state?: State;
+};
+
 export abstract class BaseEffect {
   materials: THREE.RawShaderMaterial[] = [];
 
-  abstract updateEffectUniforms(props: { commonUniforms: CommonUniforms; passIndex: number; file: OpenFile }): void;
+  abstract updateEffectUniforms(props: UpdateEffectUniformsProps): void;
 
   updateCommonUniforms({ commonUniforms, passIndex }: { commonUniforms: CommonUniforms; passIndex: number }): void {
     const material = this.materials[passIndex];

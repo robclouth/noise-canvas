@@ -7,6 +7,7 @@ import type { EffectsState } from "./effects";
 import type { FilesState } from "./files";
 import { ModulatorsState } from "./modulators";
 import type { PresetsState } from "./presets";
+import type { StepsState } from "./steps";
 
 export type SliderScale = "linear" | "log" | "logBipolar";
 
@@ -61,7 +62,8 @@ export type State = BrushState &
   FilesState &
   AudioState &
   AppState &
-  PresetsState & {
+  PresetsState &
+  StepsState & {
     setParameter: (key: ParameterKey, value: any) => void;
   };
 

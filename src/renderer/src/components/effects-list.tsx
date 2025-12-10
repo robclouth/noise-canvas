@@ -1,6 +1,7 @@
-import { useStore } from "@/store";
+import { selectParameter, useStore } from "@/store";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
 import { Box, Stack } from "@mantine/core";
+import { EffectType } from "@renderer/effects";
 import { EFFECT_COLORS } from "@renderer/lib/constants";
 import { EffectSection } from "./effect-section";
 import { BlurEffect } from "./effect-views/blur-effect";
@@ -34,7 +35,7 @@ const EFFECT_DESCRIPTIONS: Record<string, string> = {
 };
 
 export function EffectsList() {
-  const effectOrder = useStore((state) => state.effectOrder);
+  const effectOrder = useStore(selectParameter("effectOrder")) as { effect: EffectType; enabled: boolean }[];
   const setParameter = useStore((state) => state.setParameter);
 
   const handleDragEnd = (result: any) => {

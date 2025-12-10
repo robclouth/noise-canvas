@@ -1,7 +1,7 @@
 import type { ParameterKey } from "@/store/types";
 import { Text } from "@mantine/core";
 import { getParameterDef } from "@renderer/parameters";
-import { useStore } from "@renderer/store";
+import { selectParameter, useStore } from "@renderer/store";
 import { getModAmountParamKeys } from "@renderer/store/modulators";
 import { denormalizeParameterValue, normalizeParameterValue } from "@renderer/store/utils";
 import { Tooltip } from "../tooltip";
@@ -33,13 +33,13 @@ export const ParameterControl = ({
       isModulatable &&
       getModAmountParamKeys(paramKey)
         .map((key) => {
-          return state[key];
+          return selectParameter(key)(state);
         })
         .some((amount) => amount !== 0)
     );
   });
 
-  const parameterValue = useStore((state) => state[paramKey]);
+  const parameterValue = useStore(selectParameter(paramKey));
   const setParameter = useStore((state) => state.setParameter);
 
   const labelComponent = (

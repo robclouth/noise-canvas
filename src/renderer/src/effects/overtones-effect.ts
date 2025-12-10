@@ -1,11 +1,10 @@
 import { getNumberParameterDef } from "@renderer/parameters";
 import { getModAmountValuesNormalized } from "@renderer/store/modulators";
-import { OpenFile } from "@renderer/store/types";
 import { ClampToEdgeWrapping, DataTexture, FloatType, GLSL3, NearestFilter, RawShaderMaterial, RedFormat } from "three";
 import overtonesFrag from "../glsl/overtones-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useStore } from "../store";
-import { BaseEffect, CommonUniforms, defaultValues } from "./base-effect";
+import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
 import { shapes } from "./overtones-shapes";
 
 class OvertonesEffect extends BaseEffect {
@@ -63,9 +62,9 @@ class OvertonesEffect extends BaseEffect {
     return texture;
   }
 
-  updateEffectUniforms(props: { commonUniforms: CommonUniforms; passIndex: number; file: OpenFile }): void {
+  updateEffectUniforms(props: UpdateEffectUniformsProps): void {
     this.updateCommonUniforms(props);
-    const state = useStore.getState();
+    const state = props.state ?? useStore.getState();
     const { overtonesCount, overtonesShape, overtonesScale, overtonesDecay } = state;
 
     const overtonesScaleDef = getNumberParameterDef("overtonesScale");

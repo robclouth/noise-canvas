@@ -2,11 +2,10 @@ import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
 import type { EffectsState } from "@renderer/store/effects";
 import { getModAmountValuesNormalized } from "@renderer/store/modulators";
-import { OpenFile } from "@renderer/store/types";
 import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import transformEffectFrag from "../glsl/transform-effect.frag";
-import { BaseEffect, CommonUniforms, defaultValues } from "./base-effect";
+import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
 
 export const boundaryModes = ["smear", "cut", "wrap"] as const;
 export type BoundaryMode = (typeof boundaryModes)[number];
@@ -81,9 +80,9 @@ class TransformEffect extends BaseEffect {
     ];
   }
 
-  updateEffectUniforms(props: { commonUniforms: CommonUniforms; passIndex: number; file: OpenFile }): void {
+  updateEffectUniforms(props: UpdateEffectUniformsProps): void {
     this.updateCommonUniforms(props);
-    const state = useStore.getState();
+    const state = props.state ?? useStore.getState();
     const {
       transformShiftBeats,
       transformShiftSemis,

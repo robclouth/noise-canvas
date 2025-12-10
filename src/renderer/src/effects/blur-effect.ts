@@ -1,11 +1,10 @@
 import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
 import { getModAmountValuesNormalized } from "@renderer/store/modulators";
-import { OpenFile } from "@renderer/store/types";
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import blurBrushFrag from "../glsl/blur-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
-import { BaseEffect, CommonUniforms, defaultValues } from "./base-effect";
+import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
 
 const uniforms = {
   ...defaultValues,
@@ -83,7 +82,7 @@ class BlurEffect extends BaseEffect {
     ];
   }
 
-  updateEffectUniforms(props: { commonUniforms: CommonUniforms; passIndex: number; file: OpenFile }): void {
+  updateEffectUniforms(props: UpdateEffectUniformsProps): void {
     this.updateCommonUniforms(props);
 
     const { file, passIndex } = props;
@@ -91,7 +90,7 @@ class BlurEffect extends BaseEffect {
     const material = this.materials[passIndex];
     if (!material) return;
 
-    const state = useStore.getState();
+    const state = props.state ?? useStore.getState();
     const { blurAmountTime, blurAmountPitch, blurNoiseTime, blurNoisePitch, blurBleed, blurOrigin, filepathsBpm } =
       state;
     const { spectrogramData, filePath } = file;

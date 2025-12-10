@@ -1,5 +1,5 @@
 import { Box } from "@mantine/core";
-import { useStore } from "@renderer/store";
+import { selectParameter, useStore } from "@renderer/store";
 import { useMemo } from "react";
 
 interface EnvelopeVisualizerProps {
@@ -56,16 +56,16 @@ function generateEnvelopeGradient(
 }
 
 export const EnvelopeVisualizer = ({ height = 80 }: EnvelopeVisualizerProps) => {
-  // Subscribe to envelope parameters
-  const delayTime = useStore((state) => state.brushEnvelopeDelayTime);
-  const attackTime = useStore((state) => state.brushEnvelopeAttackTime);
-  const sustainTime = useStore((state) => state.brushEnvelopeSustainTime);
-  const releaseTime = useStore((state) => state.brushEnvelopeReleaseTime);
-  const delayPitch = useStore((state) => state.brushEnvelopeDelayPitch);
-  const attackPitch = useStore((state) => state.brushEnvelopeAttackPitch);
-  const sustainPitch = useStore((state) => state.brushEnvelopeSustainPitch);
-  const releasePitch = useStore((state) => state.brushEnvelopeReleasePitch);
-  const intensity = useStore((state) => state.brushIntensity);
+  // Subscribe to envelope parameters from active step
+  const delayTime = useStore(selectParameter("brushEnvelopeDelayTime")) as number;
+  const attackTime = useStore(selectParameter("brushEnvelopeAttackTime")) as number;
+  const sustainTime = useStore(selectParameter("brushEnvelopeSustainTime")) as number;
+  const releaseTime = useStore(selectParameter("brushEnvelopeReleaseTime")) as number;
+  const delayPitch = useStore(selectParameter("brushEnvelopeDelayPitch")) as number;
+  const attackPitch = useStore(selectParameter("brushEnvelopeAttackPitch")) as number;
+  const sustainPitch = useStore(selectParameter("brushEnvelopeSustainPitch")) as number;
+  const releasePitch = useStore(selectParameter("brushEnvelopeReleasePitch")) as number;
+  const intensity = useStore(selectParameter("brushIntensity")) as number;
 
   // Generate gradients
   const horizontalGradient = useMemo(() => {

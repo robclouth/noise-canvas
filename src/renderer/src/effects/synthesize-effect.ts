@@ -1,9 +1,8 @@
-import { OpenFile } from "@renderer/store/types";
 import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import synthesizeBrushFrag from "../glsl/synthesize-effect.frag";
 import { useStore } from "../store";
-import { BaseEffect, CommonUniforms, defaultValues } from "./base-effect";
+import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
 
 class SynthesizeEffect extends BaseEffect {
   constructor() {
@@ -21,9 +20,9 @@ class SynthesizeEffect extends BaseEffect {
     ];
   }
 
-  updateEffectUniforms(props: { commonUniforms: CommonUniforms; passIndex: number; file: OpenFile }): void {
+  updateEffectUniforms(props: UpdateEffectUniformsProps): void {
     this.updateCommonUniforms(props);
-    const state = useStore.getState();
+    const state = props.state ?? useStore.getState();
     const { synthesizeBrushType } = state;
     this.materials[props.passIndex].uniforms.synthesizeType.value = synthesizeBrushType;
   }

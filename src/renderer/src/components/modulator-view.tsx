@@ -3,7 +3,7 @@ import { SegmentedControl, SimpleGrid, Stack } from "@mantine/core";
 import { useTexture, View } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
-import { useStore } from "@renderer/store";
+import { createStepStateView, selectParameter, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
 import { useEffect, useMemo, useState } from "react";
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
@@ -28,7 +28,9 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
   const testTexture = useTexture(test);
 
   const material = useMemo(() => {
-    const modulators = buildModulatorUniforms(120, 10, 12, 96);
+    const state = useStore.getState();
+    const stepState = createStepStateView(state, state.activeStepIndex);
+    const modulators = buildModulatorUniforms(120, 10, 12, 96, stepState);
 
     return new RawShaderMaterial({
       uniforms: {
@@ -71,7 +73,10 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
 
   useEffect(() => {
     const unsubscribe = useStore.subscribe(
-      () => buildModulatorUniforms(120, 10, 12, 96),
+      (state) => {
+        const stepState = createStepStateView(state, state.activeStepIndex);
+        return buildModulatorUniforms(120, 10, 12, 96, stepState);
+      },
       (modulators) => {
         material.uniforms.modulators.value = modulators;
         invalidate();
@@ -92,12 +97,10 @@ const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
 
 export const ModulatorView = () => {
   const [viewedModulatorIndex, setViewedModulatorIndex] = useState("0");
-  const modulatorMode = useStore(
-    (state) => state[`modulator${parseInt(viewedModulatorIndex) + 1}Mode` as ParameterKey],
-  );
-  const modulatorPatternShape = useStore(
-    (state) => state[`modulator${parseInt(viewedModulatorIndex) + 1}PatternShape` as ParameterKey],
-  );
+  const modulatorModeKey = `modulator${parseInt(viewedModulatorIndex) + 1}Mode` as ParameterKey;
+  const modulatorPatternShapeKey = `modulator${parseInt(viewedModulatorIndex) + 1}PatternShape` as ParameterKey;
+  const modulatorMode = useStore(selectParameter(modulatorModeKey));
+  const modulatorPatternShape = useStore(selectParameter(modulatorPatternShapeKey));
 
   const isPatternMode = modulatorMode === 0;
   const isEnvelopeFollowerMode = modulatorMode === 1;

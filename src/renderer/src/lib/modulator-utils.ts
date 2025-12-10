@@ -1,7 +1,7 @@
 import { NumberParameter, parameterDefs } from "@renderer/parameters";
 import { openFiles } from "@renderer/store/files";
 import { getModAmountValuesNormalized } from "@renderer/store/modulators";
-import { ParameterKey } from "@renderer/store/types";
+import { ParameterKey, State } from "@renderer/store/types";
 import { useMemo } from "react";
 import { DataTexture, FloatType, RedFormat } from "three";
 import { Note, Scale } from "tonal";
@@ -14,8 +14,9 @@ export const buildModulatorUniforms = (
   totalDuration: number,
   bandsPerOctave: number,
   numBands: number,
+  stateOverride?: State,
 ) => {
-  const state = useStore.getState();
+  const state = stateOverride ?? useStore.getState();
   const modulators = Array.from({ length: NUM_MODULATORS }).map((_, i) => {
     const mode = state[`modulator${i + 1}Mode`] as number;
     const shape = state[`modulator${i + 1}PatternShape`] as number;

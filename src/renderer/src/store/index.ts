@@ -1,5 +1,6 @@
 import { deepMerge } from "@mantine/core";
-import { parameterDefs } from "@renderer/parameters";
+import { isStepParameter, parameterDefs } from "@renderer/parameters";
+import { produce } from "immer";
 import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
 import { createAppSlice } from "./app";
@@ -9,12 +10,14 @@ import { createEffectsSlice } from "./effects";
 import { createFilesSlice, FILES_PERSISTED_KEYS } from "./files";
 import { createModulatorsSlice } from "./modulators";
 import { createPresetsSlice, PRESETS_PERSISTED_KEYS } from "./presets";
+import { createStepsSlice, STEPS_PERSISTED_KEYS } from "./steps";
 import type { ParameterKey, State } from "./types";
 
 export const ALL_PERSISTED_KEYS: (keyof State)[] = [
   ...FILES_PERSISTED_KEYS,
   ...AUDIO_PERSISTED_KEYS,
   ...PRESETS_PERSISTED_KEYS,
+  ...STEPS_PERSISTED_KEYS,
 ];
 
 export const useStore = create<State>()(
@@ -28,8 +31,20 @@ export const useStore = create<State>()(
         ...createAudioSlice(set, get),
         ...createAppSlice(set),
         ...createPresetsSlice(set, get),
+        ...createStepsSlice(set, get),
         setParameter: (key: ParameterKey, value: any) => {
-          set({ [key]: value });
+          // If this is a step parameter, update the active step
+          if (isStepParameter(key)) {
+            set(
+              produce((draft: State) => {
+                if (draft.steps[draft.activeStepIndex]) {
+                  draft.steps[draft.activeStepIndex][key] = value;
+                }
+              }),
+            );
+          } else {
+            set({ [key]: value });
+          }
         },
       }),
       {
@@ -62,4 +77,69 @@ export function getModulator(index: number) {
     modulatorRotation: state[`modulator${index}Rotation` as ParameterKey],
     modulatorPhaseMode: state[`modulator${index}PhaseMode` as ParameterKey],
   };
+}
+
+/**
+ * Get a parameter value, respecting step parameters.
+ * For step parameters, returns the value from the active step.
+ * For non-step parameters, returns the value from state directly.
+ * Falls back to parameter defaults if the step doesn't have a value.
+ */
+export function getParameterValue(state: State, key: ParameterKey): any {
+  if (isStepParameter(key)) {
+    const activeStep = state.steps[state.activeStepIndex];
+    if (activeStep && key in activeStep) {
+      return activeStep[key];
+    }
+    // Fall back to parameter default
+    const def = parameterDefs[key];
+    if (def) {
+      return def.default;
+    }
+  }
+  return state[key];
+}
+
+/**
+ * Get a parameter value from a specific step.
+ * For step parameters, returns the value from the specified step.
+ * For non-step parameters, returns the value from state directly.
+ */
+export function getStepParameterValue(state: State, stepIndex: number, key: ParameterKey): any {
+  if (isStepParameter(key)) {
+    const step = state.steps[stepIndex];
+    return step?.[key];
+  }
+  return state[key];
+}
+
+/**
+ * Selector for use with useStore to get a step-aware parameter value
+ */
+export function selectParameter(key: ParameterKey) {
+  return (state: State) => getParameterValue(state, key);
+}
+
+/**
+ * Creates a proxy state object that returns step parameter values from a specific step.
+ * This allows existing code that reads from state to work with step-aware values.
+ * Falls back to parameter defaults if the step doesn't have a value.
+ */
+export function createStepStateView(state: State, stepIndex: number): State {
+  return new Proxy(state, {
+    get(target, prop: string) {
+      if (isStepParameter(prop as ParameterKey)) {
+        const step = target.steps[stepIndex];
+        if (step && prop in step) {
+          return step[prop as ParameterKey];
+        }
+        // Fall back to parameter default if not in step
+        const def = parameterDefs[prop as ParameterKey];
+        if (def) {
+          return def.default;
+        }
+      }
+      return target[prop as keyof State];
+    },
+  }) as State;
 }

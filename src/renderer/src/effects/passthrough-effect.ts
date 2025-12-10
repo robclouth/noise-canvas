@@ -1,8 +1,7 @@
-import { OpenFile } from "@renderer/store/types";
 import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import passthroughFrag from "../glsl/passthrough-effect.frag";
-import { BaseEffect, CommonUniforms, defaultValues } from "./base-effect";
+import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
 
 /**
  * A passthrough effect that just copies the source to the destination
@@ -23,7 +22,7 @@ class PassthroughEffect extends BaseEffect {
     ];
   }
 
-  updateEffectUniforms(props: { commonUniforms: CommonUniforms; passIndex: number; file: OpenFile }): void {
+  updateEffectUniforms(props: UpdateEffectUniformsProps): void {
     this.updateCommonUniforms(props);
   }
 }

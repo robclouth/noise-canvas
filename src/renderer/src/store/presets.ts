@@ -118,8 +118,17 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     const state = get();
     const updates: Partial<State> = {};
 
+    // Handle steps array if present in preset
+    if (parameters.steps && Array.isArray(parameters.steps)) {
+      updates.steps = parameters.steps;
+      updates.activeStepIndex = 0;
+    }
+
+    // Handle non-step parameters
     for (const [key, parameterDef] of Object.entries(parameterDefs)) {
       if (!parameterDef.includeInPresets) continue;
+      // Skip step parameters as they're handled by the steps array
+      if (parameterDef.includeInStep) continue;
 
       const value = state[key as keyof State];
       const presetValue = parameters[key];
@@ -135,10 +144,17 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
   captureState: () => {
     const state = get();
     const parameters: Partial<State> = {};
+
+    // Save the steps array
+    parameters.steps = state.steps;
+
+    // Save non-step parameters that are marked for presets
     for (const [key, parameterDef] of Object.entries(parameterDefs)) {
       if (!parameterDef.includeInPresets) continue;
-      const value = state[key as keyof State];
+      // Skip step parameters as they're saved in the steps array
+      if (parameterDef.includeInStep) continue;
 
+      const value = state[key as keyof State];
       if (value === parameterDef.default) continue; // Skip default values
       parameters[key] = value;
     }

@@ -29,6 +29,7 @@ export interface ParameterBase {
   label: string;
   description: string;
   includeInPresets?: boolean;
+  includeInStep?: boolean;
 }
 
 export interface NumberParameter extends ParameterBase {
@@ -92,6 +93,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     default: 0,
     options: MODULATOR_MODES,
     includeInPresets: true,
+    includeInStep: true,
   };
   modulatorDefs[`modulator${idx}PatternShape`] = {
     kind: "options",
@@ -101,6 +103,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     default: 0,
     options: PATTERN_SHAPES,
     includeInPresets: true,
+    includeInStep: true,
   };
   modulatorDefs[`modulator${idx}Strength`] = {
     kind: "number",
@@ -113,6 +116,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "%",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: false,
   };
   modulatorDefs[`modulator${idx}PatternRateBeats`] = {
@@ -128,6 +132,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     scale: "log",
     unit: BEAT_UNIT,
     includeInPresets: true,
+    includeInStep: true,
     modulatable: false,
   };
   modulatorDefs[`modulator${idx}PatternRateSemis`] = {
@@ -142,6 +147,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     marks: semitoneMarksWithOff,
     unit: SEMITONE_UNIT,
     includeInPresets: true,
+    includeInStep: true,
     modulatable: false,
   };
   modulatorDefs[`modulator${idx}Rotation`] = {
@@ -155,6 +161,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "°",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: false,
   };
   modulatorDefs[`modulator${idx}PhaseMode`] = {
@@ -168,6 +175,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
       { value: 1, label: "Brush" },
     ],
     includeInPresets: false,
+    includeInStep: true,
   };
   modulatorDefs[`modulator${idx}EnvelopeMinDb`] = {
     kind: "number",
@@ -180,6 +188,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "dB",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: false,
   };
   modulatorDefs[`modulator${idx}EnvelopeMaxDb`] = {
@@ -193,6 +202,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "dB",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: false,
   };
   modulatorDefs[`modulator${idx}TexturePath`] = {
@@ -202,6 +212,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     description: "The texture path for the modulator.",
     default: "",
     includeInPresets: true,
+    includeInStep: true,
   };
 }
 
@@ -216,6 +227,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     default: 0,
     options: WRAP_MODES,
     includeInPresets: true,
+    includeInStep: true,
   },
   brushIntensity: {
     kind: "number",
@@ -228,6 +240,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 1,
     unit: "%",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   brushIterations: {
@@ -240,6 +253,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 20,
     step: 1,
     includeInPresets: true,
+    includeInStep: true,
   },
   brushPan: {
     kind: "number",
@@ -252,6 +266,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 1,
     unit: "%",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   brushEnvelopeDelayTime: {
@@ -267,6 +282,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     scale: "log",
     marks: beatMarksWithZero,
     includeInPresets: true,
+    includeInStep: true,
   },
   brushEnvelopeAttackTime: {
     kind: "number",
@@ -281,6 +297,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     scale: "log",
     marks: beatMarksWithZero,
     includeInPresets: true,
+    includeInStep: true,
   },
   brushEnvelopeSustainTime: {
     kind: "number",
@@ -295,6 +312,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     scale: "log",
     marks: beatMarksWithZero,
     includeInPresets: true,
+    includeInStep: true,
   },
   brushEnvelopeReleaseTime: {
     kind: "number",
@@ -309,6 +327,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     scale: "log",
     marks: beatMarksWithZero,
     includeInPresets: true,
+    includeInStep: true,
   },
   brushEnvelopeDelayPitch: {
     kind: "number",
@@ -322,6 +341,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: SEMITONE_UNIT,
     marks: semitoneMarksWithZero,
     includeInPresets: true,
+    includeInStep: true,
   },
   brushEnvelopeAttackPitch: {
     kind: "number",
@@ -335,6 +355,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: SEMITONE_UNIT,
     marks: semitoneMarksWithZero,
     includeInPresets: true,
+    includeInStep: true,
   },
   brushEnvelopeSustainPitch: {
     kind: "number",
@@ -348,6 +369,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: SEMITONE_UNIT,
     marks: semitoneMarksWithZero,
     includeInPresets: true,
+    includeInStep: true,
   },
   brushEnvelopeReleasePitch: {
     kind: "number",
@@ -361,6 +383,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: SEMITONE_UNIT,
     marks: semitoneMarksWithZero,
     includeInPresets: true,
+    includeInStep: true,
   },
   blendMode: {
     kind: "options",
@@ -370,6 +393,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     default: 0,
     options: BLEND_MODES,
     includeInPresets: true,
+    includeInStep: true,
   },
   algorithm: {
     kind: "options",
@@ -379,6 +403,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     default: 3,
     options: ALGORITHMS,
     includeInPresets: true,
+    includeInStep: true,
   },
   sourcePositionMode: {
     kind: "options",
@@ -404,6 +429,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       { value: "original", label: "Original" },
     ],
     includeInPresets: true,
+    includeInStep: true,
   },
 
   // --- Effect Parameters ---
@@ -418,6 +444,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 0.1,
     unit: "dB",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   dynamicsUpperRatio: {
@@ -431,6 +458,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 0.1,
     unit: "×",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   dynamicsLowerRatio: {
@@ -444,6 +472,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 0.1,
     unit: "×",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   dynamicsKnee: {
@@ -457,6 +486,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 0.5,
     unit: "dB",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   dynamicsGainDb: {
@@ -470,6 +500,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 0.1,
     unit: "dB",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   transformShiftBeats: {
@@ -485,6 +516,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: BEAT_UNIT,
     marks: [...negBeatMarks, zeroBeatMark, ...posBeatMarks],
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   transformShiftSemis: {
@@ -499,6 +531,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: SEMITONE_UNIT,
     marks: [...negPitchMarks, zeroPitchMark, ...posPitchMarks],
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   transformScaleTime: {
@@ -514,6 +547,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: MULTIPLIER_UNIT,
     marks: [...negMultMarks, ...posMultMarks],
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   transformScalePitch: {
@@ -529,6 +563,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: MULTIPLIER_UNIT,
     marks: [...negMultMarks, ...posMultMarks],
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   transformRotation: {
@@ -542,6 +577,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 0.1,
     unit: "°",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   transformEdgeMode: {
@@ -552,6 +588,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     default: 1,
     options: EDGE_MODE,
     includeInPresets: true,
+    includeInStep: true,
   },
   blurAmountTime: {
     kind: "number",
@@ -564,6 +601,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 1,
     unit: "%",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   blurAmountPitch: {
@@ -577,6 +615,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 1,
     unit: "%",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   blurNoiseTime: {
@@ -590,6 +629,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 1,
     unit: "%",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   blurNoisePitch: {
@@ -603,6 +643,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 1,
     unit: "%",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   blurBleed: {
@@ -612,6 +653,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "Allows the blur to sample from outside the brush bounds making a more smoothing.",
     default: true,
     includeInPresets: true,
+    includeInStep: true,
   },
   blurOrigin: {
     kind: "options",
@@ -625,6 +667,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       { value: 2, label: "Right" },
     ],
     includeInPresets: true,
+    includeInStep: true,
   },
   overtonesCount: {
     kind: "number",
@@ -636,6 +679,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 64,
     step: 1,
     includeInPresets: true,
+    includeInStep: true,
     modulatable: false,
   },
   overtonesScale: {
@@ -650,6 +694,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: MULTIPLIER_UNIT,
     marks: Array.from({ length: 9 }, (_, i) => i - 4).map((v) => ({ value: v, label: v.toString() + "x" })),
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   overtonesDecay: {
@@ -663,6 +708,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 0.1,
     unit: "%",
     includeInPresets: true,
+    includeInStep: true,
     modulatable: true,
   },
   overtonesShape: {
@@ -673,6 +719,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     default: "logarithmic",
     options: Object.entries(shapes).map(([key, shape]) => ({ value: key, label: shape.label })),
     includeInPresets: true,
+    includeInStep: true,
   },
   synthesizeBrushType: {
     kind: "options",
@@ -682,6 +729,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     default: 0,
     options: SYNTHESIZE_TYPES,
     includeInPresets: true,
+    includeInStep: true,
   },
   effectOrder: {
     kind: "options",
@@ -691,6 +739,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     default: DEFAULT_EFFECT_ORDER,
     options: [],
     includeInPresets: true,
+    includeInStep: true,
   },
 
   // --- App/UI Parameters ---
@@ -850,6 +899,7 @@ for (const [key, def] of Object.entries(combinedDefs)) {
         step: 0.1,
         unit: "%",
         includeInPresets: true,
+        includeInStep: true,
       };
     }
   }
@@ -901,4 +951,35 @@ export const getStringParameterDef = (key: ParameterKey): StringParameter => {
     throw new Error(`Parameter ${key} is not a string parameter.`);
   }
   return parameterDef as StringParameter;
+};
+
+// --- Step Parameter Helpers ---
+
+/** Returns all parameter keys where includeInStep is true */
+export const getStepParameterKeys = (): ParameterKey[] => {
+  return Object.entries(parameterDefs)
+    .filter(([, def]) => def.includeInStep)
+    .map(([key]) => key as ParameterKey);
+};
+
+/** Type for a brush step - contains only step-scoped parameters */
+export type BrushStep = {
+  [K in ParameterKey]?: (typeof parameterDefs)[K] extends { default: infer D } ? D : never;
+};
+
+/** Creates a default step with all step parameter defaults */
+export const createDefaultStep = (): BrushStep => {
+  const step: BrushStep = {};
+  for (const [key, def] of Object.entries(parameterDefs)) {
+    if (def.includeInStep) {
+      step[key as ParameterKey] = def.default;
+    }
+  }
+  return step;
+};
+
+/** Check if a parameter key is a step parameter */
+export const isStepParameter = (key: ParameterKey): boolean => {
+  const def = parameterDefs[key];
+  return def?.includeInStep === true;
 };

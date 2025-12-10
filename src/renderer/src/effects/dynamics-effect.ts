@@ -1,11 +1,10 @@
 import { getNumberParameterDef } from "@renderer/parameters";
 import { getModAmountValuesNormalized } from "@renderer/store/modulators";
-import { OpenFile } from "@renderer/store/types";
 import { GLSL3, RawShaderMaterial } from "three";
 import dynamicsEffectFrag from "../glsl/dynamics-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useStore } from "../store";
-import { BaseEffect, CommonUniforms, defaultValues } from "./base-effect";
+import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
 
 class DynamicsEffect extends BaseEffect {
   constructor() {
@@ -62,9 +61,9 @@ class DynamicsEffect extends BaseEffect {
     ];
   }
 
-  updateEffectUniforms(props: { commonUniforms: CommonUniforms; passIndex: number; file: OpenFile }): void {
+  updateEffectUniforms(props: UpdateEffectUniformsProps): void {
     this.updateCommonUniforms(props);
-    const state = useStore.getState();
+    const state = props.state ?? useStore.getState();
 
     const thresholdDb = state.dynamicsThresholdDb;
     const thresholdDbDef = getNumberParameterDef("dynamicsThresholdDb");
