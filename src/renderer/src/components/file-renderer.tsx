@@ -415,32 +415,6 @@ export const FileRenderer = memo(
 
         const mode = state.sourcePositionMode;
 
-        // Calculate brush size from envelope in the SOURCE file's coordinate space
-        const envelopeTimeUvSource = unitsToUv(
-          state.brushEnvelopeDelayTime +
-            state.brushEnvelopeAttackTime +
-            state.brushEnvelopeSustainTime +
-            state.brushEnvelopeReleaseTime,
-          0,
-          sourceBpm,
-          sourceTotalDuration,
-          sourceSpectrogramData.bandsPerOctave,
-          sourceSpectrogramData.numBands,
-        );
-        const envelopePitchUvSource = unitsToUv(
-          0,
-          state.brushEnvelopeDelayPitch +
-            state.brushEnvelopeAttackPitch +
-            state.brushEnvelopeSustainPitch +
-            state.brushEnvelopeReleasePitch,
-          sourceBpm,
-          sourceTotalDuration,
-          sourceSpectrogramData.bandsPerOctave,
-          sourceSpectrogramData.numBands,
-        );
-        const brushSizeUvSource = new Vector2(envelopeTimeUvSource.x || 1, envelopePitchUvSource.y || 1);
-        const halfBrushSizeUvSource = new Vector2(brushSizeUvSource.x / 2, brushSizeUvSource.y / 2);
-
         // Calculate brush size from envelope in the CURRENT file's coordinate space
         const envelopeTimeUvCurrent = unitsToUv(
           state.brushEnvelopeDelayTime +
@@ -476,7 +450,7 @@ export const FileRenderer = memo(
           sourceSpectrogramData.bandsPerOctave,
           sourceSpectrogramData.numBands,
         );
-        const sourcePositionUv = sourcePositionBottomLeftUv.clone().add(halfBrushSizeUvSource);
+        const sourcePositionUv = sourcePositionBottomLeftUv.clone();
         const currentBrushUv = mousePos.clone();
 
         if (mode === "fixed") {
@@ -491,7 +465,7 @@ export const FileRenderer = memo(
               spectrogramData.bandsPerOctave,
               spectrogramData.numBands,
             );
-            const brushStartUv = brushStartBottomLeftUv.clone().add(halfBrushSizeUvCurrent);
+            const brushStartUv = brushStartBottomLeftUv.clone();
             return sourcePositionUv.clone().sub(brushStartUv);
           } else {
             return sourcePositionUv.clone().sub(currentBrushUv);
