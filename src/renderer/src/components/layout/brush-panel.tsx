@@ -1,4 +1,4 @@
-import { Box, Group, SimpleGrid, Stack } from "@mantine/core";
+import { SimpleGrid, Stack } from "@mantine/core";
 import { EnvelopeControl } from "../controls/envelope-control";
 import { ParameterControl } from "../controls/parameter-control";
 import { PresetSelector } from "../controls/preset-selector";
@@ -15,12 +15,10 @@ export function BrushPanel() {
         <PresetSelector />
         <QuickSlots />
       </Stack>
-      <Box px="xs">
-        <StepTabs />
-      </Box>
-      <Group wrap="nowrap" align="start">
-        <Stack p="xs" gap="xs">
-          <Section label="Envelope">
+      <StepTabs />
+      <Stack px="xs" gap="xs">
+        <Section label="Envelope">
+          <Stack gap="xs">
             <EnvelopeControl />
             <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
               <ParameterControl paramKey="blendMode" />
@@ -30,17 +28,15 @@ export function BrushPanel() {
               <ParameterControl paramKey="algorithm" />
               <ParameterControl paramKey="sourceDataMode" />
             </SimpleGrid>
-          </Section>
-          <Section label="Modulators">
-            <ModulatorView />
-          </Section>
-        </Stack>
-        <Stack p="xs" gap="xs">
-          <Section label="Effects">
-            <EffectsList />
-          </Section>
-        </Stack>
-      </Group>
+          </Stack>
+        </Section>
+        <Section label="Effects">
+          <EffectsList />
+        </Section>
+        <Section label="Modulators">
+          <ModulatorView />
+        </Section>
+      </Stack>
     </Stack>
   );
 }

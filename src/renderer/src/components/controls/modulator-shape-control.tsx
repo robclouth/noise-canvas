@@ -2,10 +2,10 @@ import { Group, Select, Text } from "@mantine/core";
 import { PATTERN_SHAPES } from "@renderer/lib/constants";
 import { getTextures } from "@renderer/lib/textures";
 import { getOptionsParameterDef } from "@renderer/parameters";
-import { useStore } from "@renderer/store";
+import { selectParameter, useStore } from "@renderer/store";
 import type { ParameterKey } from "@renderer/store/types";
 import { ChevronDown } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Tooltip } from "../tooltip";
 
 interface ModulatorShapeControlProps {
@@ -14,11 +14,11 @@ interface ModulatorShapeControlProps {
 }
 
 export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorShapeControlProps) => {
-  const shape = useStore((state) => state[paramKey]);
+  const shape = useStore(selectParameter(paramKey));
   const shapeDef = getOptionsParameterDef(paramKey);
 
   const textureParamKey = `modulator${modulatorIndex}TexturePath` as ParameterKey;
-  const texturePath = useStore((state) => state[textureParamKey] as string);
+  const texturePath = useStore(selectParameter(textureParamKey));
 
   const [optionGroups, setOptionGroups] = useState<
     Array<{ group: string; items: Array<{ value: string; label: string }> }>
@@ -48,13 +48,13 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
     }
   }, [optionGroups.length]);
 
-  // Get current select value
-  const getCurrentValue = () => {
+  // Get current select value - memoized to ensure proper reactivity
+  const currentValue = useMemo(() => {
     if (shape === 12 && texturePath) {
       return `texture:${texturePath}`;
     }
     return String(shape);
-  };
+  }, [shape, texturePath]);
 
   // Handle selection change
   const handleChange = (value: string | null) => {
@@ -94,7 +94,7 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
         style={{ width: 70, borderRadius: 2, border: `1px solid #666`, backgroundColor: "#2c2c2c" }}
         width={70}
         data={optionGroups}
-        value={getCurrentValue()}
+        value={currentValue}
         onChange={handleChange}
         maxDropdownHeight={400}
         comboboxProps={{ width: 120 }}

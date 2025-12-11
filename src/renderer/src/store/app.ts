@@ -18,6 +18,8 @@ export interface AppState {
   setMousePos: (mousePos: Vector2 | null) => void;
   hoveredFile: string | null;
   setHoveredFile: (fileId: string | null) => void;
+  sectionCollapsed: Record<string, boolean>;
+  setSectionCollapsed: (label: string, collapsed: boolean) => void;
 }
 
 export const createAppSlice = (set: ZustandSet): AppState => {
@@ -37,5 +39,10 @@ export const createAppSlice = (set: ZustandSet): AppState => {
     setMousePos: (mousePos) => set({ mousePos }),
     hoveredFile: null,
     setHoveredFile: (fileId) => set({ hoveredFile: fileId }),
+    sectionCollapsed: {},
+    setSectionCollapsed: (label, collapsed) =>
+      set((state) => ({
+        sectionCollapsed: { ...state.sectionCollapsed, [label]: collapsed },
+      })),
   };
 };

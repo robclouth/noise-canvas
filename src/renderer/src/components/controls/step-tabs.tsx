@@ -35,9 +35,6 @@ export function StepTabs() {
           fontWeight: 500,
           minWidth: 32,
           height: 26,
-          "&[data-active]": {
-            borderBottomColor: "transparent",
-          },
         },
       }}
     >
@@ -71,13 +68,11 @@ export function StepTabs() {
             <Plus size={14} />
           </ActionIcon>
         )}
-        {steps.length > 1 && (
-          <Group gap={4} ml="auto" align="center">
-            <Text size="xs" c="dimmed">
-              {steps.length} steps
-            </Text>
-          </Group>
-        )}
+        <Group gap={4} ml="auto" mr="xs" align="center">
+          <Text size="xs" c="dimmed">
+            {`${steps.length} step${steps.length > 1 ? "s" : ""}`}
+          </Text>
+        </Group>
       </Tabs.List>
     </Tabs>
   );

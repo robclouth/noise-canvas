@@ -227,16 +227,22 @@ export const NumboxControl = (props: NumboxControlProps) => {
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       // Single click to focus for editing
-      if (e.button === 0 && !isDragging && !disabled) {
-        setIsEditing(true);
-        setActiveMark(null);
-        setTimeout(() => {
-          numberBoxRef.current?.focus();
-          numberBoxRef.current?.select();
-        }, 0);
+      if (!isDragging && !disabled) {
+        if (e.button === 0 && !isEditing) {
+          e.preventDefault();
+          setIsEditing(true);
+          setActiveMark(null);
+          setTimeout(() => {
+            numberBoxRef.current?.focus();
+            numberBoxRef.current?.select();
+          }, 0);
+        } else if (e.button === 2 && marks) {
+          e.preventDefault();
+          combobox.toggleDropdown();
+        }
       }
     },
-    [isDragging, disabled],
+    [isDragging, disabled, combobox, marks, isEditing],
   );
 
   const handleBlur = useCallback(() => {
@@ -252,12 +258,6 @@ export const NumboxControl = (props: NumboxControlProps) => {
       ref={containerRef}
       onMouseDown={handleMouseDown}
       onClick={handleClick}
-      onContextMenu={(e) => {
-        if (marks) {
-          e.preventDefault();
-          combobox.toggleDropdown();
-        }
-      }}
       style={{
         position: "relative",
         width: 70,
@@ -279,7 +279,6 @@ export const NumboxControl = (props: NumboxControlProps) => {
           left: 0,
           width: `${position * 100}%`,
           height: 2,
-          transition: isDragging ? "none" : "width 0.1s ease",
         }}
       />
 

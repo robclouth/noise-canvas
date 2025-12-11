@@ -30,7 +30,7 @@ const ShaderCompiler = ({ onFinish }: { onFinish: () => void }) => {
   const gl = useThree((s) => s.gl);
   useEffect(() => {
     precompileAllShaders(gl).then(onFinish);
-  }, []);
+  }, [gl, onFinish]);
   return null;
 };
 
@@ -249,6 +249,7 @@ function App(): React.JSX.Element {
       >
         <View.Port />
         <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
+
         <ShaderCompiler onFinish={handleShaderCompileFinish} />
       </Canvas>
       <ScrollArea scrollbarSize={4} type="auto" h="100%" onScrollPositionChange={() => invalidateRef.current?.()}>

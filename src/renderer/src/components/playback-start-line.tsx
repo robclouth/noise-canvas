@@ -46,7 +46,7 @@ export const PlaybackStartLine = ({ fileId }: PlaybackStartLineProps) => {
         height: "100%",
         pointerEvents: "none",
         display: "none",
-        zIndex: 999,
+        zIndex: 50,
         borderLeft: "1px dashed rgba(150, 150, 255, 0.8)",
         backgroundImage: "none",
       }}

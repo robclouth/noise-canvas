@@ -122,7 +122,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
   modulatorDefs[`modulator${idx}PatternRateBeats`] = {
     kind: "number",
     name: `Modulator Pattern Rate Beats ${idx}`,
-    label: "Rate H",
+    label: "Rate ↔",
     description: "The rate of the modulator pattern (horizontal).",
     default: 1,
     min: 0,
@@ -138,7 +138,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
   modulatorDefs[`modulator${idx}PatternRateSemis`] = {
     kind: "number",
     name: `Modulator Pattern Rate Semis ${idx}`,
-    label: "Rate V",
+    label: "Rate ↕",
     description: "The rate of the modulator pattern (vertical).",
     default: 12,
     min: 0,
@@ -272,7 +272,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   brushEnvelopeDelayTime: {
     kind: "number",
     name: "Envelope Delay Time",
-    label: "Delay H",
+    label: "Delay ↔",
     description: "Delay time before the attack phase begins (horizontal, in beats).",
     default: 0,
     min: 0,
@@ -287,7 +287,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   brushEnvelopeAttackTime: {
     kind: "number",
     name: "Envelope Attack Time",
-    label: "Attack H",
+    label: "Attack ↔",
     description: "Attack time to reach full gain (horizontal, in beats).",
     default: 0,
     min: 0,
@@ -302,7 +302,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   brushEnvelopeSustainTime: {
     kind: "number",
     name: "Envelope Sustain Time",
-    label: "Sustain H",
+    label: "Sustain ↔",
     description: "Sustain time at full gain (horizontal, in beats).",
     default: 1,
     min: 0,
@@ -317,7 +317,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   brushEnvelopeReleaseTime: {
     kind: "number",
     name: "Envelope Release Time",
-    label: "Release H",
+    label: "Release ↔",
     description: "Release time to fade to zero (horizontal, in beats).",
     default: 0,
     min: 0,
@@ -332,7 +332,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   brushEnvelopeDelayPitch: {
     kind: "number",
     name: "Envelope Delay Pitch",
-    label: "Delay V",
+    label: "Delay ↕",
     description: "Delay pitch before the attack phase begins (vertical, in semitones).",
     default: 0,
     min: 0,
@@ -346,7 +346,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   brushEnvelopeAttackPitch: {
     kind: "number",
     name: "Envelope Attack Pitch",
-    label: "Attack V",
+    label: "Attack ↕",
     description: "Attack pitch to reach full gain (vertical, in semitones).",
     default: 0,
     min: 0,
@@ -360,7 +360,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   brushEnvelopeSustainPitch: {
     kind: "number",
     name: "Envelope Sustain Pitch",
-    label: "Sustain V",
+    label: "Sustain ↕",
     description: "Sustain pitch at full gain (vertical, in semitones).",
     default: 48,
     min: 0,
@@ -374,7 +374,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   brushEnvelopeReleasePitch: {
     kind: "number",
     name: "Envelope Release Pitch",
-    label: "Release V",
+    label: "Release ↕",
     description: "Release pitch to fade to zero (vertical, in semitones).",
     default: 0,
     min: 0,
@@ -506,7 +506,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   transformShiftBeats: {
     kind: "number",
     name: "Shift Beats",
-    label: "Shift H",
+    label: "Shift ↔",
     description: "Shifts the content horizontally by a number of beats.",
     default: 0,
     min: -32,
@@ -522,7 +522,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   transformShiftSemis: {
     kind: "number",
     name: "Shift Semis",
-    label: "Shift V",
+    label: "Shift ↕",
     description: "Shifts the content vertically by a number of semitones.",
     default: 0.0,
     min: -96,
@@ -537,7 +537,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   transformScaleTime: {
     kind: "number",
     name: "Scale Time",
-    label: "Scale H",
+    label: "Scale ↔",
     description: "Scales the content horizontally.",
     default: 1.0,
     min: -256,
@@ -553,7 +553,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   transformScalePitch: {
     kind: "number",
     name: "Scale Pitch",
-    label: "Scale V",
+    label: "Scale ↕",
     description: "Scales the content vertically.",
     default: 1.0,
     min: -256,
@@ -593,7 +593,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   blurAmountTime: {
     kind: "number",
     name: "Blur Amount Time",
-    label: "Blur H",
+    label: "Blur ↔",
     description: "The amount of blur to apply over time.",
     default: 100,
     min: 0,
@@ -607,7 +607,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   blurAmountPitch: {
     kind: "number",
     name: "Blur Amount Pitch",
-    label: "Blur V",
+    label: "Blur ↕",
     description: "The amount of blur to apply over pitch.",
     default: 0,
     min: 0,
@@ -621,7 +621,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   blurNoiseTime: {
     kind: "number",
     name: "Blur Noise Time",
-    label: "Noise H",
+    label: "Noise ↔",
     description: "The amount of noise to apply over time.",
     default: 0,
     min: 0,
@@ -635,7 +635,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   blurNoisePitch: {
     kind: "number",
     name: "Blur Noise Pitch",
-    label: "Noise V",
+    label: "Noise ↕",
     description: "The amount of noise to apply over pitch.",
     default: 0,
     min: 0,

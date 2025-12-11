@@ -33,7 +33,7 @@ const theme = createTheme({
         if (props.size === "xs") {
           return {
             root: {},
-            wrapper: { "--input-height": "20px", "--input-color": "#fff", "--input-padding-inline-start": "2px" },
+            wrapper: { "--input-height": "19px", "--input-color": "#fff", "--input-padding-inline-start": "3px" },
           };
         }
         return { root: {}, wrapper: {} };

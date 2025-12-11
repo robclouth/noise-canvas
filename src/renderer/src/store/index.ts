@@ -121,25 +121,31 @@ export function selectParameter(key: ParameterKey) {
 }
 
 /**
- * Creates a proxy state object that returns step parameter values from a specific step.
+ * Creates a view state object that returns step parameter values from a specific step.
  * This allows existing code that reads from state to work with step-aware values.
  * Falls back to parameter defaults if the step doesn't have a value.
  */
 export function createStepStateView(state: State, stepIndex: number): State {
-  return new Proxy(state, {
-    get(target, prop: string) {
-      if (isStepParameter(prop as ParameterKey)) {
-        const step = target.steps[stepIndex];
-        if (step && prop in step) {
-          return step[prop as ParameterKey];
-        }
-        // Fall back to parameter default if not in step
-        const def = parameterDefs[prop as ParameterKey];
-        if (def) {
-          return def.default;
+  // Create a shallow copy to avoid proxy-on-proxy issues
+  const view = { ...state } as Record<string, unknown>;
+
+  // Override step parameters with values from the specific step
+  const step = state.steps[stepIndex];
+  if (step) {
+    Object.keys(parameterDefs).forEach((key) => {
+      if (isStepParameter(key as ParameterKey)) {
+        if (key in step) {
+          view[key] = step[key as ParameterKey];
+        } else {
+          // Fall back to parameter default if not in step
+          const def = parameterDefs[key as ParameterKey];
+          if (def) {
+            view[key] = def.default;
+          }
         }
       }
-      return target[prop as keyof State];
-    },
-  }) as State;
+    });
+  }
+
+  return view as unknown as State;
 }

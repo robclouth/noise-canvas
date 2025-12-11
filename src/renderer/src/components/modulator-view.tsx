@@ -5,7 +5,7 @@ import { useThree } from "@react-three/fiber";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { createStepStateView, selectParameter, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import modulatorFrag from "../glsl/modulator.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -14,8 +14,21 @@ import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import { ModulatorShapeControl } from "./controls/modulator-shape-control";
 import { ParameterControl } from "./controls/parameter-control";
 
-const Scene = ({ modulatorIndex }: { modulatorIndex: number }) => {
+const Scene = ({
+  modulatorIndex,
+  onInvalidateReady,
+}: {
+  modulatorIndex: number;
+  onInvalidateReady?: (invalidate: () => void) => void;
+}) => {
   const { invalidate } = useThree();
+
+  // Pass invalidate function to parent
+  useEffect(() => {
+    if (onInvalidateReady) {
+      onInvalidateReady(invalidate);
+    }
+  }, [invalidate, onInvalidateReady]);
   const activeFileId = useStore((state) => state.activeFileId);
   const placeholderTexture = usePlaceholderTexture();
   const modulatorScaleLut = useModulatorScaleLut(activeFileId || "");
@@ -106,6 +119,53 @@ export const ModulatorView = () => {
   const isEnvelopeFollowerMode = modulatorMode === 1;
   const isScaleMode = modulatorPatternShape === 11;
 
+  const viewRef = useRef<HTMLDivElement>(null);
+  const invalidateRef = useRef<(() => void) | null>(null);
+  const lastPositionRef = useRef<{ top: number; left: number } | null>(null);
+
+  // Store invalidate function from the Scene
+  const handleInvalidateReady = (invalidate: () => void) => {
+    invalidateRef.current = invalidate;
+  };
+
+  // Watch for position changes by checking element position on every animation frame
+  useEffect(() => {
+    const element = viewRef.current;
+    if (!element) {
+      return;
+    }
+
+    let animationFrameId: number;
+    let isRunning = true;
+
+    const checkPosition = () => {
+      if (!isRunning) return;
+
+      const rect = element.getBoundingClientRect();
+      const currentPosition = { top: rect.top, left: rect.left };
+
+      if (lastPositionRef.current) {
+        const topChanged = lastPositionRef.current.top !== currentPosition.top;
+        const leftChanged = lastPositionRef.current.left !== currentPosition.left;
+
+        if (topChanged || leftChanged) {
+          invalidateRef.current?.();
+        }
+      }
+
+      lastPositionRef.current = currentPosition;
+      animationFrameId = requestAnimationFrame(checkPosition);
+    };
+
+    // Start monitoring
+    animationFrameId = requestAnimationFrame(checkPosition);
+
+    return () => {
+      isRunning = false;
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, []);
+
   return (
     <Stack gap={2}>
       <SegmentedControl
@@ -155,8 +215,8 @@ export const ModulatorView = () => {
         )}
         <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Strength` as ParameterKey} />
       </SimpleGrid>
-      <View style={{ height: 128, marginTop: 6 }}>
-        <Scene modulatorIndex={parseInt(viewedModulatorIndex)} />
+      <View ref={viewRef} style={{ height: 100, marginTop: 6 }}>
+        <Scene modulatorIndex={parseInt(viewedModulatorIndex)} onInvalidateReady={handleInvalidateReady} />
       </View>
     </Stack>
   );
