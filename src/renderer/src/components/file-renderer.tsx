@@ -119,6 +119,7 @@ export interface FileRendererHandle {
   clearPreview: () => void;
   /** Reloads all textures from the current spectrogramData (used after re-analysis). */
   reloadTextures: () => void;
+  applyStroke: () => void;
 }
 
 /**
@@ -203,6 +204,52 @@ export const FileRenderer = memo(
           invalidateRef.current?.();
         },
       );
+      const unsubCursorPosition = useStore.subscribe(
+        (state) => state.cursorPosition,
+        () => {
+          invalidateRef.current?.();
+        },
+      );
+      const unsubCursorVisible = useStore.subscribe(
+        (state) => state.cursorVisible,
+        () => {
+          invalidateRef.current?.();
+        },
+      );
+      const unsubActiveFileId = useStore.subscribe(
+        (state) => state.activeFileId,
+        (activeId) => {
+          if (activeId !== fileId) {
+            // Became inactive: clear any preview
+            clearPreview();
+          } else {
+            // Became active: if cursor is visible, trigger a preview render
+            // We need to wait for the state update to propagate
+            const state = useStore.getState();
+            const currentFile = openFiles[fileId];
+            if (state.cursorVisible && state.cursorPosition && currentFile) {
+              const bpm = state.filepathsBpm[currentFile.filePath] || 120;
+              const totalDuration = currentFile.spectrogramData.numFrames / currentFile.spectrogramData.sampleRate;
+              const uvPos = unitsToUv(
+                state.cursorPosition.beats,
+                state.cursorPosition.pitch,
+                bpm,
+                totalDuration,
+                spectrogramData.bandsPerOctave,
+                spectrogramData.numBands
+              );
+              
+              // Simulate renderStroke
+              strokeParams.current = { x: uvPos.x, y: uvPos.y, preview: true };
+              displayMode.current = "preview";
+              applyStroke.current = true;
+              invalidateRef.current?.();
+            } else {
+              invalidateRef.current?.();
+            }
+          }
+        },
+      );
 
       return () => {
         unsubBpms();
@@ -212,6 +259,9 @@ export const FileRenderer = memo(
         unsubGridSemis();
         unsubDisplayMinDb();
         unsubDisplayMaxDb();
+        unsubCursorPosition();
+        unsubCursorVisible();
+        unsubActiveFileId();
       };
     }, [fileId]);
 
@@ -456,10 +506,10 @@ export const FileRenderer = memo(
         if (mode === "fixed") {
           return sourcePositionUv.clone().sub(currentBrushUv);
         } else if (mode === "anchored") {
-          if (state.brushStartPosition) {
+          if (state.cursorPosition) {
             const brushStartBottomLeftUv = unitsToUv(
-              state.brushStartPosition.beats,
-              state.brushStartPosition.pitch,
+              state.cursorPosition.beats,
+              state.cursorPosition.pitch,
               bpm,
               totalDuration,
               spectrogramData.bandsPerOctave,
@@ -480,10 +530,10 @@ export const FileRenderer = memo(
               sourceSpectrogramData.bandsPerOctave,
               sourceSpectrogramData.numBands,
             );
-          } else if (state.brushStartPosition) {
+          } else if (state.cursorPosition) {
             const brushStartBottomLeftUv = unitsToUv(
-              state.brushStartPosition.beats,
-              state.brushStartPosition.pitch,
+              state.cursorPosition.beats,
+              state.cursorPosition.pitch,
               bpm,
               totalDuration,
               spectrogramData.bandsPerOctave,
@@ -528,14 +578,31 @@ export const FileRenderer = memo(
         return;
 
       const state = useStore.getState();
-      const mousePos = state.mousePos;
+
+      const file = openFiles[fileId];
+      if (!file) return;
+
+      const bpm = state.filepathsBpm[file.filePath] || 120;
+      const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
+
+      // Determine cursor position in UV
+      let cursorPos = new Vector2(-1, -1);
+      
+      if ((state.activeFileId === fileId || state.hoveredFile === fileId) && state.cursorPosition) {
+        cursorPos = unitsToUv(
+          state.cursorPosition.beats,
+          state.cursorPosition.pitch,
+          bpm,
+          totalDuration,
+          spectrogramData.bandsPerOctave,
+          spectrogramData.numBands
+        );
+      }
 
       // Determine file state for rendering logic
       const isActiveFile = state.activeFileId === fileId;
       const isSourceFile = state.sourceFile === fileId;
-      const file = openFiles[fileId];
-      const isMouseOver = Boolean(mousePos && mousePos.x >= 0 && file && state.hoveredFile === file.id);
-      const isMouseOverAnyFile = Boolean(mousePos && state.hoveredFile);
+      const isMouseOverAnyFile = Boolean(state.cursorVisible && state.cursorPosition && state.hoveredFile);
 
       // Initial copy of the spectrogram data to the FBO
       if (!isInitialized.current) {
@@ -557,17 +624,14 @@ export const FileRenderer = memo(
         undoManager.addState(spectrogramData.packedData, fileId);
       }
 
-      // After initialization, only update if this file is active, source, or mouse is hovering over it
-      if (!isActiveFile && !isSourceFile && !isMouseOver && !clearingPreview.current && isInitialized.current) {
+      // After initialization, only update if this file is active, source, or cursor is present
+      if (!isActiveFile && !isSourceFile && !(state.cursorVisible && state.cursorPosition) && !clearingPreview.current && isInitialized.current) {
         return;
       }
 
       isInitialized.current = true;
 
       clearingPreview.current = false;
-
-      const bpm = state.filepathsBpm[file.filePath];
-      const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
 
       // Get per-file zoom and offset from store
       const viewZoomPower = state.filesZoom[fileId];
@@ -634,7 +698,7 @@ export const FileRenderer = memo(
           originalSpectrogramTex: { value: originalPackedDataTex || placeholderTexture },
           viewZoomPower: { value: viewZoomPower },
           viewOffset: { value: viewOffset },
-          brushBottomLeftUv: { value: mousePos || new Vector2(-1, -1) },
+          brushBottomLeftUv: { value: cursorPos },
           brushSizeUv: { value: brushSizeUv },
           ...(() => {
             // Calculate envelope boundaries on CPU
@@ -722,7 +786,7 @@ export const FileRenderer = memo(
       }
 
       // Render brush stroke if requested
-      if (strokeParams.current && applyStroke.current) {
+      if (applyStroke.current && cursorPos.x >= 0) {
         const sourceFile = openFiles[state.sourceFile!];
         const sourceRendererRef = sourceFile.rendererRef;
         const textures = sourceRendererRef?.current?.getTextures();
@@ -734,7 +798,7 @@ export const FileRenderer = memo(
         // Calculate source offset using the helper function (using active step for envelope values)
         const sourceOffsetUv = calculateSourceOffset(
           activeStepState,
-          mousePos,
+          cursorPos,
           bpm,
           totalDuration,
           sourceFile.spectrogramData,
@@ -744,7 +808,7 @@ export const FileRenderer = memo(
 
         const currentReadFBO = pingPong.current === 0 ? fbo1 : fbo2;
         const destinationFbo = pingPong.current === 0 ? fbo2 : fbo1;
-        const { preview } = strokeParams.current;
+        const preview = strokeParams.current?.preview ?? false;
 
         // Determine the initial source FBO based on sourceDataMode and which file is the source
         // Use active step's sourceDataMode for the initial determination
@@ -916,47 +980,51 @@ export const FileRenderer = memo(
       displayMaterial.uniforms.bpm.value = bpm;
       displayMaterial.uniforms.minDb.value = state.displayMinDb;
       displayMaterial.uniforms.maxDb.value = state.displayMaxDb;
-      displayMaterial.uniforms.brushBottomLeftUv.value = mousePos || new Vector2(0, 0);
+      displayMaterial.uniforms.brushBottomLeftUv.value = cursorPos;
       displayMaterial.uniforms.brushSizeUv.value = brushSizeUv;
-      displayMaterial.uniforms.sourceBrushSizeUv.value = hoveredFile
-        ? (() => {
-            const hoveredBpm = state.filepathsBpm[hoveredFile.filePath];
-            const hoveredDuration = hoveredFile.spectrogramData.numFrames / hoveredFile.spectrogramData.sampleRate;
-            // Calculate maximum brush size across all steps for the hovered file
-            let maxTimeUv = 0;
-            let maxPitchUv = 0;
-            for (let i = 0; i < state.steps.length; i++) {
-              const stepState = createStepStateView(state, i);
-              const timeUv = unitsToUv(
-                stepState.brushEnvelopeDelayTime +
-                  stepState.brushEnvelopeAttackTime +
-                  stepState.brushEnvelopeSustainTime +
-                  stepState.brushEnvelopeReleaseTime,
-                0,
-                hoveredBpm,
-                hoveredDuration,
-                hoveredFile.spectrogramData.bandsPerOctave,
-                hoveredFile.spectrogramData.numBands,
-              );
-              const pitchUv = unitsToUv(
-                0,
-                stepState.brushEnvelopeDelayPitch +
-                  stepState.brushEnvelopeAttackPitch +
-                  stepState.brushEnvelopeSustainPitch +
-                  stepState.brushEnvelopeReleasePitch,
-                hoveredBpm,
-                hoveredDuration,
-                hoveredFile.spectrogramData.bandsPerOctave,
-                hoveredFile.spectrogramData.numBands,
-              );
-              maxTimeUv = Math.max(maxTimeUv, timeUv.x);
-              maxPitchUv = Math.max(maxPitchUv, pitchUv.y);
-            }
-            return new Vector2(maxTimeUv, maxPitchUv);
-          })()
-        : new Vector2(0.1, 0.1);
-      displayMaterial.uniforms.showTargetRectangle.value = isMouseOver;
-      displayMaterial.uniforms.showSourceRectangle.value = isSourceFile && isMouseOverAnyFile;
+      displayMaterial.uniforms.sourceBrushSizeUv.value = (() => {
+        const targetFile = hoveredFile || file;
+        const targetBpm = state.filepathsBpm[targetFile.filePath] || 120;
+        const targetDuration = targetFile.spectrogramData.numFrames / targetFile.spectrogramData.sampleRate;
+        
+        let maxTimeUv = 0;
+        let maxPitchUv = 0;
+        for (let i = 0; i < state.steps.length; i++) {
+          const stepState = createStepStateView(state, i);
+          const timeUv = unitsToUv(
+            stepState.brushEnvelopeDelayTime +
+              stepState.brushEnvelopeAttackTime +
+              stepState.brushEnvelopeSustainTime +
+              stepState.brushEnvelopeReleaseTime,
+            0,
+            targetBpm,
+            targetDuration,
+            targetFile.spectrogramData.bandsPerOctave,
+            targetFile.spectrogramData.numBands,
+          );
+          const pitchUv = unitsToUv(
+            0,
+            stepState.brushEnvelopeDelayPitch +
+              stepState.brushEnvelopeAttackPitch +
+              stepState.brushEnvelopeSustainPitch +
+              stepState.brushEnvelopeReleasePitch,
+            targetBpm,
+            targetDuration,
+            targetFile.spectrogramData.bandsPerOctave,
+            targetFile.spectrogramData.numBands,
+          );
+          maxTimeUv = Math.max(maxTimeUv, timeUv.x);
+          maxPitchUv = Math.max(maxPitchUv, pitchUv.y);
+        }
+        return new Vector2(maxTimeUv || 0.1, maxPitchUv || 0.1);
+      })();
+
+      displayMaterial.uniforms.showTargetRectangle.value = Boolean(
+        state.cursorVisible && cursorPos.x >= 0 && (isMouseOverAnyFile || isActiveFile),
+      );
+      displayMaterial.uniforms.showSourceRectangle.value = Boolean(
+        state.cursorVisible && isSourceFile && (isMouseOverAnyFile || cursorPos.x >= 0),
+      );
       displayMaterial.uniforms.viewZoomPower.value = viewZoomPower;
       displayMaterial.uniforms.viewOffset.value = viewOffset;
       displayMaterial.uniforms.wrapMode.value = activeStepState.brushWrapMode;
@@ -999,7 +1067,7 @@ export const FileRenderer = memo(
 
           const sourceOffsetUv = calculateSourceOffset(
             activeStepState,
-            mousePos,
+            cursorPos,
             sourceBpm,
             sourceTotalDuration,
             sourceFileData.spectrogramData,
@@ -1152,6 +1220,11 @@ export const FileRenderer = memo(
       restoreOriginal,
       clearPreview,
       reloadTextures,
+      applyStroke: () => {
+        // strokeParams are optional, cursorPos is used for position
+        applyStroke.current = true;
+        invalidateRef.current?.();
+      },
     }));
 
     if (!spectrogramData) {

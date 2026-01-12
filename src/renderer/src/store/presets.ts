@@ -20,6 +20,10 @@ export interface PresetsState {
   deletePreset: (presetId: string) => Promise<void>;
   assignHotkeyToPreset: (presetId: string, hotkey: string) => void;
   presetHotkeys: Record<string, string>;
+  activeQuickSlot: number | null;
+  setActiveQuickSlot: (slotIndex: number | null) => void;
+  quickSlotModifierMode: boolean; // True if shift is held (for updating/clearing slots)
+  setQuickSlotModifierMode: (isHeld: boolean) => void;
   quickSlots: Record<number, Partial<State>>;
   setQuickSlot: (slotIndex: number) => void;
   recallQuickSlot: (slotIndex: number) => void;
@@ -295,10 +299,16 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     });
   },
   quickSlots: {},
+  activeQuickSlot: null,
+  setActiveQuickSlot: (slotIndex) => set({ activeQuickSlot: slotIndex }),
+  quickSlotModifierMode: false,
+  setQuickSlotModifierMode: (isHeld) => set({ quickSlotModifierMode: isHeld }),
+
   setQuickSlot: (slotIndex: number) => {
     set(
       produce((state: State) => {
         state.quickSlots[slotIndex] = state.captureState();
+        state.activeQuickSlot = slotIndex;
       }),
     );
   },
@@ -306,12 +316,15 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     const state = get();
     const parameters = state.quickSlots[slotIndex];
     if (!parameters) return;
-    set({ ...state.recallState(parameters), currentPresetId: null });
+    set({ ...state.recallState(parameters), currentPresetId: null, activeQuickSlot: slotIndex });
   },
   clearQuickSlot: (slotIndex: number) => {
     set(
       produce((state: State) => {
         delete state.quickSlots[slotIndex];
+        if (state.activeQuickSlot === slotIndex) {
+          state.activeQuickSlot = null;
+        }
       }),
     );
   },

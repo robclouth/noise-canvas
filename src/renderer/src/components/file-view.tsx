@@ -6,7 +6,6 @@ import { openFiles } from "@renderer/store/files";
 import { useGesture } from "@use-gesture/react";
 import { memo, MouseEventHandler, useCallback, useMemo, useRef, useState } from "react";
 import { Vector2 } from "three";
-import { getUndoManager } from "../lib/undo-manager";
 import { screenToZoomed } from "../lib/utils";
 import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
@@ -240,6 +239,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       if (!coords) return;
       const [snappedX, snappedY] = coords;
 
+      // Track time range when dragging
       if (isActive && event.buttons === 1 && strokeTimeRangeRef.current.min !== null) {
         const { spectrogramData } = file;
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
@@ -249,20 +249,28 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         strokeTimeRangeRef.current.max = Math.max(strokeTimeRangeRef.current.max!, currentBrushEnd);
       }
 
+      // Only update if position actually changed
       if (
-        rendererRef.current &&
-        (!lastSnappedPositionRef.current ||
-          lastSnappedPositionRef.current.x !== snappedX ||
-          lastSnappedPositionRef.current.y !== snappedY)
+        !lastSnappedPositionRef.current ||
+        lastSnappedPositionRef.current.x !== snappedX ||
+        lastSnappedPositionRef.current.y !== snappedY
       ) {
-        state.setMousePos(new Vector2(snappedX, 1 - snappedY));
+        // Convert to beats/pitch and update cursor position
+        const { beats, pitch } = uvToBeatsAndPitch(snappedX, snappedY);
+        state.setCursorPosition({ beats, pitch });
+        state.setCursorVisible(true);
         state.setHoveredFile(fileId);
-        const isPreview = !isActive || event.buttons !== 1;
-        rendererRef.current.renderStroke(snappedX, snappedY, isPreview);
         lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
+
+        // Only call renderStroke when actually dragging (applying stroke)
+        // Preview is handled by the renderer watching cursorPosition
+        if (rendererRef.current) {
+          const isDragging = isActive && event.buttons === 1;
+          rendererRef.current.renderStroke(snappedX, snappedY, !isDragging);
+        }
       }
     },
-    [fileId, isActive, file, isPanning],
+    [fileId, isActive, file, isPanning, uvToBeatsAndPitch],
   );
 
   const handleMouseEnter: MouseEventHandler<HTMLDivElement> = useCallback(
@@ -274,20 +282,23 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       if (!coords) return;
       const [snappedX, snappedY] = coords;
 
+      const { beats, pitch } = uvToBeatsAndPitch(snappedX, snappedY);
+      state.setCursorPosition({ beats, pitch });
+      state.setCursorVisible(true);
+      state.setHoveredFile(fileId);
+      lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
+
       if (rendererRef.current) {
-        state.setMousePos(new Vector2(snappedX, 1 - snappedY));
-        state.setHoveredFile(fileId);
-        const isPreview = !isActive || event.buttons !== 1;
-        rendererRef.current.renderStroke(snappedX, snappedY, isPreview);
-        lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
+        rendererRef.current.renderStroke(snappedX, snappedY, true);
       }
     },
-    [fileId, isActive, isPanning],
+    [fileId, isPanning, uvToBeatsAndPitch],
   );
 
   const handleMouseLeave = useCallback(() => {
     const state = useStore.getState();
-    state.setMousePos(null);
+    // Hide cursor when mouse leaves, but keep position so keyboard can resume from here
+    state.setCursorVisible(false);
     state.setHoveredFile(null);
     rendererRef.current?.clearPreview();
     lastSnappedPositionRef.current = null;
@@ -316,7 +327,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
 
       if (rendererRef?.current) {
         const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
-        state.setBrushStartPosition({ beats, pitch });
+        state.setCursorPosition({ beats, pitch });
 
         const { spectrogramData } = file;
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
@@ -340,39 +351,22 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = useCallback(
     async (event) => {
       if (!isActive) return;
-      if (event.button === 0 && rendererRef?.current) {
+      if (event.button === 0) {
         const state = useStore.getState();
-        const { synthesizeFile, setBrushStartPosition, autoPlayStroke, setFilePlaybackStartTime, setAutoPlayEndTime } =
-          state;
-
-        const data = await rendererRef.current.getFBOData();
-        if (data) {
-          const undoManager = getUndoManager(fileId);
-          await undoManager.addState(data, fileId);
-
-          const finalRange = strokeTimeRangeRef.current;
-          let autoPlaybackParams: { startTimeSeconds: number; endTimeSeconds: number } | null = null;
-
-          if (finalRange.min !== null && finalRange.max !== null) {
-            const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
-            const clampedStart = Math.max(0, finalRange.min);
-            const clampedEnd = Math.min(totalDuration, finalRange.max);
-
-            if (autoPlayStroke) {
-              setFilePlaybackStartTime(fileId, clampedStart);
-              setAutoPlayEndTime(clampedEnd);
-              autoPlaybackParams = { startTimeSeconds: clampedStart, endTimeSeconds: clampedEnd };
-            }
-          }
-
-          await synthesizeFile(fileId, autoPlaybackParams);
+        const finalRange = strokeTimeRangeRef.current;
+        
+        // Use unified action with time range
+        if (finalRange.min !== null && finalRange.max !== null) {
+          await state.applyStrokeAtPosition(undefined, { min: finalRange.min, max: finalRange.max });
+        } else {
+          await state.applyStrokeAtPosition();
         }
 
-        setBrushStartPosition(null);
+        state.setCursorPosition(null);
         strokeTimeRangeRef.current = { min: null, max: null };
       }
     },
-    [fileId, isActive, file],
+    [isActive],
   );
 
   if (!file) return null;

@@ -43,6 +43,8 @@ export interface FilesState {
   setActiveFileId: (activeFileId: string | null) => Promise<void>;
   sourceFile: string | null;
   setSourceFile: (sourceFile: string | null) => void;
+  switchToNextFile: () => void;
+  switchToPreviousFile: () => void;
 }
 
 // Open files keyed by file ID
@@ -750,4 +752,18 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   },
   sourceFile: null,
   setSourceFile: (sourceFile) => set({ sourceFile }),
+  switchToNextFile: () => {
+    const { openFileIds, activeFileId, setActiveFileId } = get();
+    if (openFileIds.length <= 1 || !activeFileId) return;
+    const currentIndex = openFileIds.indexOf(activeFileId);
+    const nextIndex = (currentIndex + 1) % openFileIds.length;
+    setActiveFileId(openFileIds[nextIndex]);
+  },
+  switchToPreviousFile: () => {
+    const { openFileIds, activeFileId, setActiveFileId } = get();
+    if (openFileIds.length <= 1 || !activeFileId) return;
+    const currentIndex = openFileIds.indexOf(activeFileId);
+    const prevIndex = (currentIndex - 1 + openFileIds.length) % openFileIds.length;
+    setActiveFileId(openFileIds[prevIndex]);
+  },
 });

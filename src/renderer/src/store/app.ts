@@ -1,6 +1,7 @@
+import { BEAT_VALUES, PITCH_VALUES } from "@renderer/lib/constants";
 import { getParameterDef } from "@renderer/parameters";
 import { Vector2 } from "three";
-import type { ZustandSet } from "./types";
+import type { ZustandGet, ZustandSet } from "./types";
 
 export interface AppState {
   displayMinDb: number;
@@ -20,9 +21,11 @@ export interface AppState {
   setHoveredFile: (fileId: string | null) => void;
   sectionCollapsed: Record<string, boolean>;
   setSectionCollapsed: (label: string, collapsed: boolean) => void;
+  cycleHorizontalGrid: (direction: 1 | -1) => void;
+  cycleVerticalGrid: (direction: 1 | -1) => void;
 }
 
-export const createAppSlice = (set: ZustandSet): AppState => {
+export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
   return {
     displayMinDb: getParameterDef("displayMinDb").default,
     displayMaxDb: getParameterDef("displayMaxDb").default,
@@ -44,5 +47,21 @@ export const createAppSlice = (set: ZustandSet): AppState => {
       set((state) => ({
         sectionCollapsed: { ...state.sectionCollapsed, [label]: collapsed },
       })),
+    cycleHorizontalGrid: (direction) => {
+      const { gridSizeBeats } = get();
+      const currentIndex = BEAT_VALUES.findIndex((v) => Math.abs(v.value - gridSizeBeats) < 0.0001);
+      let nextIndex = currentIndex + direction;
+      if (nextIndex < 0) nextIndex = BEAT_VALUES.length - 1;
+      if (nextIndex >= BEAT_VALUES.length) nextIndex = 0;
+      set({ gridSizeBeats: BEAT_VALUES[nextIndex].value });
+    },
+    cycleVerticalGrid: (direction) => {
+      const { gridSizeSemis } = get();
+      const currentIndex = PITCH_VALUES.findIndex((v) => Math.abs(v.value - gridSizeSemis) < 0.0001);
+      let nextIndex = currentIndex + direction;
+      if (nextIndex < 0) nextIndex = PITCH_VALUES.length - 1;
+      if (nextIndex >= PITCH_VALUES.length) nextIndex = 0;
+      set({ gridSizeSemis: PITCH_VALUES[nextIndex].value });
+    },
   };
 };

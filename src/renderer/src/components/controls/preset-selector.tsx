@@ -2,8 +2,10 @@ import { useStore } from "@/store";
 import { ActionIcon, Group, Select, Stack, Text, TextInput } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { modals } from "@mantine/modals";
+import { notifications } from "@mantine/notifications";
 import { ChevronDown, Keyboard, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { RESERVED_KEYS } from "../../lib/useShortcuts";
 import { Tooltip } from "../tooltip";
 
 export function PresetSelector() {
@@ -105,17 +107,26 @@ export function PresetSelector() {
     // Ignore if focused on input/textarea
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
 
+    // If we're not in assign mode, let the global handler (useShortcuts) handle it
+    if (!hotkeyAssignMode) {
+      return;
+    }
+
     event.preventDefault();
+    event.stopImmediatePropagation();
+
     const state = useStore.getState();
-    if (hotkeyAssignMode) {
-      if (currentPresetId) {
-        state.assignHotkeyToPreset(currentPresetId, event.key);
-      }
-    } else {
-      const presetId = state.presetHotkeys[event.key];
-      if (presetId) {
-        handlePresetChange(presetId);
-      }
+    if (RESERVED_KEYS.has(event.key)) {
+      notifications.show({
+        title: "Reserved Key",
+        message: `'${event.key}' is reserved for global shortcuts and cannot be assigned to a preset.`,
+        color: "red",
+      });
+      return;
+    }
+    if (currentPresetId) {
+      state.assignHotkeyToPreset(currentPresetId, event.key);
+      setHotkeyAssignMode(false);
     }
   };
 

@@ -1,7 +1,6 @@
 import { BrushPanel } from "@/components/layout/brush-panel";
 import { useStore } from "@/store";
 import { Box, Group, LoadingOverlay, ScrollArea, Stack } from "@mantine/core";
-import { useWindowEvent } from "@mantine/hooks";
 import { Notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
 import { Canvas, RootState, useThree } from "@react-three/fiber";
@@ -15,6 +14,7 @@ import { UpdateNotification } from "./components/update-notification";
 import { ipcOn, ipcSend } from "./lib/ipc";
 import { precompileAllShaders } from "./lib/precompile-shaders";
 import { getUndoManager } from "./lib/undo-manager";
+import { useShortcuts } from "./lib/useShortcuts";
 import { openFiles } from "./store/files";
 
 type Invalidator = RootState["invalidate"];
@@ -36,6 +36,7 @@ const ShaderCompiler = ({ onFinish }: { onFinish: () => void }) => {
 };
 
 function App(): React.JSX.Element {
+  useShortcuts();
   const [isReady, setIsReady] = useState(false);
   const openFileIds = useStore((state) => state.openFileIds);
 
@@ -167,35 +168,6 @@ function App(): React.JSX.Element {
       unsubscribers.forEach((unsub) => unsub());
     };
   }, []);
-
-  const handleKeyDown = useCallback((event: KeyboardEvent) => {
-    // Ignore if focused on input/textarea
-    if (
-      (event.target instanceof HTMLInputElement && event.target.type === "text") ||
-      event.target instanceof HTMLTextAreaElement
-    )
-      return;
-
-    if (event.code === "Space") {
-      event.preventDefault();
-      useStore.getState().togglePlayback();
-    }
-
-    // Toggle set position mode with Control key
-    if (event.key === "Control") {
-      useStore.getState().setIsSettingPosition(true);
-    }
-  }, []);
-
-  const handleKeyUp = useCallback((event: KeyboardEvent) => {
-    // Turn off set position mode when Control is released
-    if (event.key === "Control") {
-      useStore.getState().setIsSettingPosition(false);
-    }
-  }, []);
-
-  useWindowEvent("keydown", handleKeyDown);
-  useWindowEvent("keyup", handleKeyUp);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) {
