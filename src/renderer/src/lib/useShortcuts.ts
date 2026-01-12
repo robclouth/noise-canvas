@@ -39,29 +39,44 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   { key: "Tab", action: ShortcutAction.NextFile },
   { key: "Tab", shift: true, action: ShortcutAction.PreviousFile },
   { key: " ", action: ShortcutAction.TogglePlayback },
-  { key: "Control", action: ShortcutAction.SetSourceMode },
+  { key: "Shift", action: ShortcutAction.SetSourceMode },
 ];
 
 export const RESERVED_KEYS = new Set(SHORTCUTS.map((s) => s.key));
 
 export function useShortcuts() {
   const handleKeyDown = (event: KeyboardEvent) => {
-    // Ignore if focused on input/textarea
-    if (
-      event.target instanceof HTMLInputElement ||
-      event.target instanceof HTMLTextAreaElement
-    ) {
-      return;
-    }
-
-    // Special handling for Control (hold)
-    if (event.key === "Control") {
+    // Special handling for Shift (hold)
+    // 1. Set Source Mode (Canvas)
+    // 2. Set Quick Slot Mode (Number keys)
+    if (event.key === "Shift") {
+      useStore.getState().setQuickSlotModifierMode(true);
       useStore.getState().setIsSettingPosition(true);
       return;
     }
-    
-    if (event.key === "Shift") {
-      useStore.getState().setQuickSlotModifierMode(true);
+
+    // Platform-specific Zoom Modifier (Meta on Mac, Control on Windows/Linux)
+    const isMac = window.platform === "darwin";
+    const zoomKey = isMac ? "Meta" : "Control";
+
+    if (event.key === zoomKey) {
+        useStore.getState().setIsZooming(true);
+        // Note: We don't return here because Meta/Control might be used for other shortcuts 
+        // (though we blocked them for "Set Source", usually they are modifiers for keys like "S", "Z", etc.)
+        // However, standard Zoom logic (wheel) relies on this state.
+    }
+
+    // Ignore if focused on input/textarea/select/combobox
+    const target = event.target as HTMLElement;
+    if (
+      target.tagName === "INPUT" || 
+      target.tagName === "BUTTON" ||
+      target.tagName === "TEXTAREA" ||
+      target.tagName === "SELECT" ||
+      target.isContentEditable ||
+      target.getAttribute("role") === "combobox" ||
+      target.getAttribute("role") === "slider"
+    ) {
       return;
     }
 
@@ -158,11 +173,16 @@ export function useShortcuts() {
   };
 
   const handleKeyUp = (event: KeyboardEvent) => {
-    if (event.key === "Control") {
-      useStore.getState().setIsSettingPosition(false);
-    }
     if (event.key === "Shift") {
       useStore.getState().setQuickSlotModifierMode(false);
+      useStore.getState().setIsSettingPosition(false);
+    }
+    
+    // Platform-specific Zoom Reset
+    const isMac = window.platform === "darwin";
+    const zoomKey = isMac ? "Meta" : "Control";
+    if (event.key === zoomKey) {
+        useStore.getState().setIsZooming(false);
     }
   };
 

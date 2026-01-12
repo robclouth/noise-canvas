@@ -1,5 +1,5 @@
-import { Box, Combobox, Group, NumberInput, Popover, ScrollArea, Stack, Text, useCombobox } from "@mantine/core";
-import { useWindowEvent } from "@mantine/hooks";
+import { Box, Combobox, Group, NumberInput, Popover, ScrollArea, Stack, Text, useCombobox, useMantineTheme } from "@mantine/core";
+import { useFocusWithin, useMergedRef, useWindowEvent } from "@mantine/hooks";
 import type { ParameterKey, SliderMark } from "@renderer/store/types";
 import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -46,6 +46,10 @@ export const NumboxControl = (props: NumboxControlProps) => {
     toNormalized,
     fromNormalized,
   } = props;
+  
+  const theme = useMantineTheme();
+  // Resolve color from theme or use raw value if not found
+  const themeColor = theme.colors[color]?.[6] || color;
 
   const [activeMark, setActiveMark] = useState<SliderMark | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -58,6 +62,8 @@ export const NumboxControl = (props: NumboxControlProps) => {
   const combobox = useCombobox();
   const numberBoxRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const { ref: focusRef, focused } = useFocusWithin();
+  const mergedRef = useMergedRef(containerRef, focusRef);
 
   useEffect(() => {
     const position = toNormalized(value);
@@ -161,6 +167,9 @@ export const NumboxControl = (props: NumboxControlProps) => {
         dragStartValue.current = currentPosition;
         virtualPositionRef.current = currentPosition; // Initialize virtual position
 
+        // Explicitly focus the container so global shortcuts are blocked and visual focus is clear
+        containerRef.current?.focus();
+
         // Prevent text selection
         document.body.style.userSelect = "none";
       }
@@ -255,7 +264,11 @@ export const NumboxControl = (props: NumboxControlProps) => {
 
   const numboxContent = (
     <Box
-      ref={containerRef}
+      ref={mergedRef}
+      role="slider"
+      aria-valuenow={value}
+      aria-valuemin={min}
+      aria-valuemax={max}
       onMouseDown={handleMouseDown}
       onClick={handleClick}
       style={{
@@ -265,8 +278,9 @@ export const NumboxControl = (props: NumboxControlProps) => {
         cursor: isDragging ? "ns-resize" : disabled ? "default" : "pointer",
         overflow: "hidden",
         borderRadius: 2,
-        border: `1px solid ${disabled ? "#444" : "#666"}`,
+        border: `1px solid ${focused || isDragging ? themeColor : disabled ? "#444" : "#666"}`,
         backgroundColor: "#2c2c2c",
+        outline: "none",
       }}
       tabIndex={disabled ? -1 : 0}
     >

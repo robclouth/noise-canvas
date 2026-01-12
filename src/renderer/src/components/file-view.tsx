@@ -1,6 +1,5 @@
 import { useStore } from "@/store";
 import { Box, Loader } from "@mantine/core";
-import { useWindowEvent } from "@mantine/hooks";
 import { View } from "@react-three/drei";
 import { openFiles } from "@renderer/store/files";
 import { useGesture } from "@use-gesture/react";
@@ -75,12 +74,12 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   const activeFileId = useStore((state) => state.activeFileId);
   const isActive = activeFileId === fileId;
   const isSettingPosition = useStore((state) => state.isSettingPosition);
+  const isZooming = useStore((state) => state.isZooming);
   const zoom = useStore((state) => state.filesZoom[fileId]);
   const offset = useStore((state) => state.filesOffset[fileId]);
   const isSynthesizing = useStore((state) => state.filesSynthesizing[fileId]);
 
   const [isPanning, setIsPanning] = useState(false);
-  const [isZooming, setZooming] = useState(false);
 
   const cursorStyle = useMemo(() => {
     if (isPanning) return { cursor: "grabbing" };
@@ -93,17 +92,6 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   const strokeTimeRangeRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
   const viewRef = useRef<HTMLDivElement>(null);
 
-  useWindowEvent("keydown", (event) => {
-    if (event.key === "Meta" || event.key === "Control") {
-      setZooming(true);
-    }
-  });
-
-  useWindowEvent("keyup", (event) => {
-    if (event.key === "Meta" || event.key === "Control") {
-      setZooming(false);
-    }
-  });
 
   useGesture(
     {

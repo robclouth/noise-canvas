@@ -23,6 +23,8 @@ export interface AppState {
   setSectionCollapsed: (label: string, collapsed: boolean) => void;
   cycleHorizontalGrid: (direction: 1 | -1) => void;
   cycleVerticalGrid: (direction: 1 | -1) => void;
+  isZooming: boolean;
+  setIsZooming: (isZooming: boolean) => void;
 }
 
 export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
@@ -63,5 +65,7 @@ export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
       if (nextIndex >= PITCH_VALUES.length) nextIndex = 0;
       set({ gridSizeSemis: PITCH_VALUES[nextIndex].value });
     },
+    isZooming: false,
+    setIsZooming: (isZooming) => set({ isZooming }),
   };
 };

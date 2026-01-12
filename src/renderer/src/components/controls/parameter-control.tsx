@@ -66,6 +66,7 @@ export const ParameterControl = ({
         options={parameter.options}
         setValue={(value) => setParameter(paramKey, value)}
         labelWidth={60}
+        color={color}
       />
     );
   }
