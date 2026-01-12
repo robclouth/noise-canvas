@@ -7,6 +7,7 @@ import { View } from "@react-three/drei";
 import { Canvas, RootState, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
+import { EmptyState } from "./components/empty-state";
 import { CanvasPanel } from "./components/layout/canvas-panel";
 import { ControlsPanel } from "./components/layout/controls-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
@@ -36,6 +37,7 @@ const ShaderCompiler = ({ onFinish }: { onFinish: () => void }) => {
 
 function App(): React.JSX.Element {
   const [isReady, setIsReady] = useState(false);
+  const openFileIds = useStore((state) => state.openFileIds);
 
   const invalidateRef = useRef<Invalidator | null>(null);
 
@@ -263,16 +265,20 @@ function App(): React.JSX.Element {
       </ScrollArea>
       <Stack pos="relative" flex={1} h="100%" gap={0}>
         <Box pos="absolute" top={0} bottom={0} left={0} right={0} bg="dark.9" style={{ zIndex: -1 }} />
-        <ScrollArea
-          scrollbarSize={4}
-          type="auto"
-          flex={1}
-          w="100%"
-          onScrollPositionChange={() => invalidateRef.current?.()}
-          p="xs"
-        >
-          <CanvasPanel />
-        </ScrollArea>
+        {openFileIds.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <ScrollArea
+            scrollbarSize={4}
+            type="auto"
+            flex={1}
+            w="100%"
+            onScrollPositionChange={() => invalidateRef.current?.()}
+            p="xs"
+          >
+            <CanvasPanel />
+          </ScrollArea>
+        )}
         <TransportPanel />
       </Stack>
       <ScrollArea

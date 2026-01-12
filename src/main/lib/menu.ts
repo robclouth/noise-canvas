@@ -3,6 +3,23 @@ import { autoUpdater } from "electron-updater";
 import { allowedExtensions } from "./audio-analysis";
 import { webContentsSend } from "./types";
 
+export async function openFileDialog(window: BrowserWindow) {
+  const result = await dialog.showOpenDialog(window, {
+    properties: ["openFile"],
+    filters: [
+      {
+        name: "Audio Files",
+        extensions: allowedExtensions,
+      },
+      { name: "All Files", extensions: ["*"] },
+    ],
+  });
+
+  if (!result.canceled && result.filePaths.length > 0) {
+    webContentsSend(window, "open-file", result.filePaths[0]);
+  }
+}
+
 export function createMenu(window: BrowserWindow) {
   const template: (Electron.MenuItemConstructorOptions | Electron.MenuItem)[] = [
     {
@@ -18,22 +35,7 @@ export function createMenu(window: BrowserWindow) {
         {
           label: "Open...",
           accelerator: "CmdOrCtrl+O",
-          click: async () => {
-            const result = await dialog.showOpenDialog(window, {
-              properties: ["openFile"],
-              filters: [
-                {
-                  name: "Audio Files",
-                  extensions: allowedExtensions,
-                },
-                { name: "All Files", extensions: ["*"] },
-              ],
-            });
-
-            if (!result.canceled && result.filePaths.length > 0) {
-              webContentsSend(window, "open-file", result.filePaths[0]);
-            }
-          },
+          click: () => openFileDialog(window),
         },
         {
           label: "Save",

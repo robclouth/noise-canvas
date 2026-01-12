@@ -22,6 +22,7 @@ export type AnalysisParams = {
 export interface IpcMainHandlers {
   "update-menu-state": (event: Electron.IpcMainEvent, canUndo: boolean, canRedo: boolean) => void;
   "update-save-state": (event: Electron.IpcMainEvent, isDirty: boolean) => void;
+  "trigger-open-file": (event: Electron.IpcMainEvent) => void;
 }
 
 export interface IpcRendererEvents {

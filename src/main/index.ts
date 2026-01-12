@@ -3,7 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, shell, systemPreferences } f
 import { installExtension, REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS } from "electron-devtools-installer";
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
-import { createMenu } from "./lib/menu";
+import { createMenu, openFileDialog } from "./lib/menu";
 import { ipcMainOn, webContentsSend } from "./lib/types";
 
 // Remove dictation and character palette menu items on macOS
@@ -152,6 +152,12 @@ ipcMainOn("update-save-state", (_, isDirty: boolean) => {
   if (menu) {
     const saveItem = menu.getMenuItemById("save");
     if (saveItem) saveItem.enabled = isDirty;
+  }
+});
+
+ipcMainOn("trigger-open-file", () => {
+  if (mainWindow) {
+    openFileDialog(mainWindow);
   }
 });
 
