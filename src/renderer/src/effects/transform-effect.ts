@@ -1,7 +1,7 @@
 import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
 import type { EffectsState } from "@renderer/store/effects";
-import { getModAmountValuesNormalized } from "@renderer/store/modulators";
+import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import transformEffectFrag from "../glsl/transform-effect.frag";
@@ -26,6 +26,7 @@ class TransformEffect extends BaseEffect {
               minValue: -1.0,
               maxValue: 1.0,
               modulationAmounts: [],
+              contextualModAmounts: [],
             },
           },
 
@@ -35,6 +36,7 @@ class TransformEffect extends BaseEffect {
               minValue: -1.0,
               maxValue: 1.0,
               modulationAmounts: [],
+              contextualModAmounts: [],
             },
           },
           scaleX: {
@@ -43,6 +45,7 @@ class TransformEffect extends BaseEffect {
               minValue: -4.0,
               maxValue: 4.0,
               modulationAmounts: [],
+              contextualModAmounts: [],
             },
           },
           scaleY: {
@@ -51,6 +54,7 @@ class TransformEffect extends BaseEffect {
               minValue: -4.0,
               maxValue: 4.0,
               modulationAmounts: [],
+              contextualModAmounts: [],
             },
           },
           rotation: {
@@ -59,6 +63,7 @@ class TransformEffect extends BaseEffect {
               minValue: -180.0,
               maxValue: 180.0,
               modulationAmounts: [],
+              contextualModAmounts: [],
             },
           },
           boundaryMode: {
@@ -114,30 +119,35 @@ class TransformEffect extends BaseEffect {
       minValue: -0.5,
       maxValue: 0.5,
       modulationAmounts: getModAmountValuesNormalized(state, "transformShiftBeats"),
+      contextualModAmounts: getContextualModAmountsNormalized(state, "transformShiftBeats"),
     };
     material.uniforms.shiftY.value = {
       value: shiftUv.y,
       minValue: -0.5,
       maxValue: 0.5,
       modulationAmounts: getModAmountValuesNormalized(state, "transformShiftSemis"),
+      contextualModAmounts: getContextualModAmountsNormalized(state, "transformShiftSemis"),
     };
     material.uniforms.scaleX.value = {
       value: transformScaleTime,
       minValue: -4,
       maxValue: 4,
       modulationAmounts: getModAmountValuesNormalized(state, "transformScaleTime"),
+      contextualModAmounts: getContextualModAmountsNormalized(state, "transformScaleTime"),
     };
     material.uniforms.scaleY.value = {
       value: transformScalePitch,
       minValue: -4,
       maxValue: 4,
       modulationAmounts: getModAmountValuesNormalized(state, "transformScalePitch"),
+      contextualModAmounts: getContextualModAmountsNormalized(state, "transformScalePitch"),
     };
     material.uniforms.rotation.value = {
       value: transformRotation,
       minValue: -180,
       maxValue: 180,
       modulationAmounts: getModAmountValuesNormalized(state, "transformRotation"),
+      contextualModAmounts: getContextualModAmountsNormalized(state, "transformRotation"),
     };
     material.uniforms.boundaryMode.value = transformEdgeMode;
   }

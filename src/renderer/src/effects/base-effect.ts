@@ -74,6 +74,12 @@ export type CommonUniforms = {
   modulator1ImageTex: { value: Texture | null };
   modulator2ImageTex: { value: Texture | null };
   modulator3ImageTex: { value: Texture | null };
+  // Contextual stroke uniforms for contextual modulation sources
+  strokeIterationNormalized?: { value: number };
+  strokeTimePosition?: { value: number };
+  strokePitchPosition?: { value: number };
+  strokeRandom?: { value: number };
+  strokeStepNormalized?: { value: number };
 };
 
 export const defaultValues: CommonUniforms = {
@@ -116,6 +122,7 @@ export const defaultValues: CommonUniforms = {
       minValue: 0.0,
       maxValue: 1.0,
       modulationAmounts: [],
+      contextualModAmounts: [],
     },
   },
   sourceOffsetX: {
@@ -130,6 +137,7 @@ export const defaultValues: CommonUniforms = {
       minValue: 0.0,
       maxValue: 1.0,
       modulationAmounts: [],
+      contextualModAmounts: [],
     },
   },
   bpm: { value: 120.0 },
@@ -142,6 +150,11 @@ export const defaultValues: CommonUniforms = {
   modulator1ImageTex: { value: null },
   modulator2ImageTex: { value: null },
   modulator3ImageTex: { value: null },
+  strokeIterationNormalized: { value: 0 },
+  strokeTimePosition: { value: 0 },
+  strokePitchPosition: { value: 0 },
+  strokeRandom: { value: 0 },
+  strokeStepNormalized: { value: 0 },
 };
 
 export type UpdateEffectUniformsProps = {

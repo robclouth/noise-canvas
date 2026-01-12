@@ -60,11 +60,11 @@ float applyDynamics(float inputDb, float thresholdDbValue, float upperRatioValue
 
 vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelDb) {
   // Get modulated parameters
-  float thresholdDbValue = applyModulation(thresholdDb.value, thresholdDb.minValue, thresholdDb.maxValue, thresholdDb.modulationAmounts, coords.dest, 0, audioLevelDb);
-  float upperRatioValue = applyModulation(upperRatio.value, upperRatio.minValue, upperRatio.maxValue, upperRatio.modulationAmounts, coords.dest, 0, audioLevelDb);
-  float lowerRatioValue = applyModulation(lowerRatio.value, lowerRatio.minValue, lowerRatio.maxValue, lowerRatio.modulationAmounts, coords.dest, 0, audioLevelDb);
-  float kneeValue = applyModulation(knee.value, knee.minValue, knee.maxValue, knee.modulationAmounts, coords.dest, 0, audioLevelDb);
-  float gainDbValue = applyModulation(gainDb.value, gainDb.minValue, gainDb.maxValue, gainDb.modulationAmounts, coords.dest, 0, audioLevelDb);
+  float thresholdDbValue = applyModulation(thresholdDb.value, thresholdDb.minValue, thresholdDb.maxValue, thresholdDb.modulationAmounts, thresholdDb.contextualModAmounts, coords.dest, 0, audioLevelDb);
+  float upperRatioValue = applyModulation(upperRatio.value, upperRatio.minValue, upperRatio.maxValue, upperRatio.modulationAmounts, upperRatio.contextualModAmounts, coords.dest, 0, audioLevelDb);
+  float lowerRatioValue = applyModulation(lowerRatio.value, lowerRatio.minValue, lowerRatio.maxValue, lowerRatio.modulationAmounts, lowerRatio.contextualModAmounts, coords.dest, 0, audioLevelDb);
+  float kneeValue = applyModulation(knee.value, knee.minValue, knee.maxValue, knee.modulationAmounts, knee.contextualModAmounts, coords.dest, 0, audioLevelDb);
+  float gainDbValue = applyModulation(gainDb.value, gainDb.minValue, gainDb.maxValue, gainDb.modulationAmounts, gainDb.contextualModAmounts, coords.dest, 0, audioLevelDb);
 
   // Calculate amplitude for each channel
   float amplitudeL = max(sourceTexel.x, EPSILON);

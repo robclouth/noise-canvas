@@ -30,4 +30,5 @@ export type ParameterUniform = {
   minValue: number;
   maxValue: number;
   modulationAmounts: number[];
+  contextualModAmounts: number[]; // [iteration, time, pitch, random, step]
 };

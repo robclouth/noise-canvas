@@ -16,6 +16,7 @@ type SliderControlProps = {
   unit?: string;
   disabled?: boolean;
   modulatorParamKeys?: ParameterKey[];
+  contextualModParamKeys?: ParameterKey[];
   marks?: SliderMark[];
   leftValue?: SliderMark;
   rightValue?: SliderMark;
@@ -34,6 +35,7 @@ export const SliderControl = (props: SliderControlProps) => {
     unit,
     disabled,
     modulatorParamKeys,
+    contextualModParamKeys,
     color,
     marks,
     leftValue,
@@ -186,7 +188,7 @@ export const SliderControl = (props: SliderControlProps) => {
 
   return (
     <Group gap={"xs"} wrap="nowrap" h={25} align="center">
-      {modulatorParamKeys ? (
+      {modulatorParamKeys || contextualModParamKeys ? (
         <Popover withArrow shadow="lg">
           <Popover.Target>
             <Group gap={2} w={70} style={{ cursor: "pointer" }} wrap="nowrap">
@@ -195,8 +197,11 @@ export const SliderControl = (props: SliderControlProps) => {
             </Group>
           </Popover.Target>
           <Popover.Dropdown py={2} px={8} w={341}>
-            {modulatorParamKeys.map((k) => (
+            {modulatorParamKeys?.map((k) => (
               <ParameterControl key={k} paramKey={k} color={"blue"} />
+            ))}
+            {contextualModParamKeys?.map((k) => (
+              <ParameterControl key={k} paramKey={k} color={"green"} />
             ))}
           </Popover.Dropdown>
         </Popover>

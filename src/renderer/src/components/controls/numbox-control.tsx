@@ -1,4 +1,15 @@
-import { Box, Combobox, Group, NumberInput, Popover, ScrollArea, Stack, Text, useCombobox, useMantineTheme } from "@mantine/core";
+import {
+  Box,
+  Combobox,
+  Group,
+  NumberInput,
+  Popover,
+  ScrollArea,
+  Stack,
+  Text,
+  useCombobox,
+  useMantineTheme,
+} from "@mantine/core";
 import { useFocusWithin, useMergedRef, useWindowEvent } from "@mantine/hooks";
 import type { ParameterKey, SliderMark } from "@renderer/store/types";
 import { ChevronDown } from "lucide-react";
@@ -20,6 +31,7 @@ type NumboxControlProps = {
   unit?: string;
   disabled?: boolean;
   modulatorParamKeys?: ParameterKey[];
+  contextualModParamKeys?: ParameterKey[];
   marks?: SliderMark[];
   leftValue?: SliderMark;
   rightValue?: SliderMark;
@@ -39,6 +51,7 @@ export const NumboxControl = (props: NumboxControlProps) => {
     unit,
     disabled,
     modulatorParamKeys,
+    contextualModParamKeys,
     color = "orange",
     marks,
     leftValue,
@@ -46,7 +59,7 @@ export const NumboxControl = (props: NumboxControlProps) => {
     toNormalized,
     fromNormalized,
   } = props;
-  
+
   const theme = useMantineTheme();
   // Resolve color from theme or use raw value if not found
   const themeColor = theme.colors[color]?.[6] || color;
@@ -390,7 +403,8 @@ export const NumboxControl = (props: NumboxControlProps) => {
     </Box>
   );
 
-  const labelWithModulators = modulatorParamKeys ? (
+  const hasModulators = modulatorParamKeys || contextualModParamKeys;
+  const labelWithModulators = hasModulators ? (
     <Popover withArrow shadow="lg">
       <Popover.Target>
         <Group gap={2} w={70} style={{ cursor: "pointer" }} wrap="nowrap">
@@ -399,8 +413,11 @@ export const NumboxControl = (props: NumboxControlProps) => {
         </Group>
       </Popover.Target>
       <Popover.Dropdown py={2} px={4}>
-        {modulatorParamKeys.map((k) => (
+        {modulatorParamKeys?.map((k) => (
           <ParameterControl labelWidth={40} key={k} paramKey={k} color={"blue"} />
+        ))}
+        {contextualModParamKeys?.map((k) => (
+          <ParameterControl labelWidth={40} key={k} paramKey={k} color={"green"} />
         ))}
       </Popover.Dropdown>
     </Popover>

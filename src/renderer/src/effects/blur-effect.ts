@@ -1,6 +1,6 @@
 import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
-import { getModAmountValuesNormalized } from "@renderer/store/modulators";
+import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import blurBrushFrag from "../glsl/blur-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -14,6 +14,7 @@ const uniforms = {
       minValue: 0,
       maxValue: 100,
       modulationAmounts: [],
+      contextualModAmounts: [],
     },
   },
   blurSizeY: {
@@ -22,6 +23,7 @@ const uniforms = {
       minValue: 0,
       maxValue: 100,
       modulationAmounts: [],
+      contextualModAmounts: [],
     },
   },
   blurNoiseX: {
@@ -30,6 +32,7 @@ const uniforms = {
       minValue: 0,
       maxValue: 100,
       modulationAmounts: [],
+      contextualModAmounts: [],
     },
   },
   blurNoiseY: {
@@ -38,6 +41,7 @@ const uniforms = {
       minValue: 0,
       maxValue: 100,
       modulationAmounts: [],
+      contextualModAmounts: [],
     },
   },
   blurDirection: {
@@ -120,24 +124,28 @@ class BlurEffect extends BaseEffect {
       minValue: 0,
       maxValue: 0.1,
       modulationAmounts: getModAmountValuesNormalized(state, "blurAmountTime"),
+      contextualModAmounts: getContextualModAmountsNormalized(state, "blurAmountTime"),
     };
     material.uniforms.blurSizeY.value = {
       value: blurSizeUv.y,
       minValue: 0,
       maxValue: 0.1,
       modulationAmounts: getModAmountValuesNormalized(state, "blurAmountPitch"),
+      contextualModAmounts: getContextualModAmountsNormalized(state, "blurAmountPitch"),
     };
     material.uniforms.blurNoiseX.value = {
       value: blurNoiseUv.x / 5,
       minValue: 0,
       maxValue: 0.1,
       modulationAmounts: getModAmountValuesNormalized(state, "blurNoiseTime"),
+      contextualModAmounts: getContextualModAmountsNormalized(state, "blurNoiseTime"),
     };
     material.uniforms.blurNoiseY.value = {
       value: blurNoiseUv.y / 5,
       minValue: 0,
       maxValue: 0.1,
       modulationAmounts: getModAmountValuesNormalized(state, "blurNoisePitch"),
+      contextualModAmounts: getContextualModAmountsNormalized(state, "blurNoisePitch"),
     };
     material.uniforms.bleed.value = blurBleed;
     material.uniforms.blurOrigin.value = blurOrigin;

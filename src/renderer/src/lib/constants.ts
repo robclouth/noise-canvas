@@ -153,6 +153,16 @@ export const WRAP_MODES = [
 
 export const NUM_MODULATORS = 3;
 
+// Contextual modulation sources - stroke properties that can modulate parameters
+export const CONTEXTUAL_MOD_SOURCES = [
+  { key: "Iteration", label: "Iter", description: "Iteration index (0-1 across brush iterations)" },
+  { key: "Time", label: "Time", description: "Time position (0-1 across file duration)" },
+  { key: "Pitch", label: "Pitch", description: "Pitch position (0-1 across frequency range)" },
+  { key: "Random", label: "Rand", description: "Random value per stroke (0-1)" },
+  { key: "Step", label: "Step", description: "Step index (0-1 across steps)" },
+] as const;
+export const NUM_CONTEXTUAL_MOD_SOURCES = CONTEXTUAL_MOD_SOURCES.length;
+
 export const ALGORITHMS = [
   { value: 2, label: "Percussive" },
   { value: 0, label: "Flangey" },

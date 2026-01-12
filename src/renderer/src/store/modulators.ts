@@ -4,8 +4,11 @@ import {
   getStringParameterDef,
   parameterDefs,
 } from "@renderer/parameters";
-import { NUM_MODULATORS } from "../lib/constants";
+import { CONTEXTUAL_MOD_SOURCES, NUM_MODULATORS } from "../lib/constants";
 import type { ParameterKey } from "./types";
+
+// Type for contextual mod source keys
+export type ContextualModSourceKey = (typeof CONTEXTUAL_MOD_SOURCES)[number]["key"];
 
 type Enumerate<N extends number, Acc extends number[] = []> = Acc["length"] extends N
   ? Acc[number]
@@ -37,6 +40,11 @@ export type ModulatorAmountParameters = {
   [K in ModulatableParameterKey as `${K}Mod${Range<1, 4>}Amount`]: number;
 };
 
+// Contextual modulation amount parameters (iteration, time, pitch, random, step)
+export type ContextualModAmountParameters = {
+  [K in ModulatableParameterKey as `${K}Mod${ContextualModSourceKey}`]: number;
+};
+
 export type ModulatorParameters = {
   [K in Range<1, 4> as `modulator${K}Mode`]: number;
 } & {
@@ -63,7 +71,10 @@ export type ModulatorParameters = {
   [K in Range<1, 4> as `modulator${K}EnvelopeMaxDb`]: number;
 };
 
-export interface ModulatorsState extends ModulatorParameters, ModulatorAmountParameters {}
+export interface ModulatorsState
+  extends ModulatorParameters,
+    ModulatorAmountParameters,
+    ContextualModAmountParameters {}
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function createModulatorParams(): ModulatorsState {
@@ -120,6 +131,16 @@ export function getModAmountParamKeys(paramKey: ParameterKey) {
 
 export function getModAmountValuesNormalized(state: ModulatorsState, paramKey: ParameterKey) {
   return getModAmountParamKeys(paramKey).map((key) => (state[key] as number) / 100);
+}
+
+// Get contextual mod amount parameter keys for a given parameter
+export function getContextualModAmountParamKeys(paramKey: ParameterKey) {
+  return CONTEXTUAL_MOD_SOURCES.map((source) => `${paramKey}Mod${source.key}`) as ParameterKey[];
+}
+
+// Get normalized contextual mod amounts as an array [iteration, time, pitch, random, step]
+export function getContextualModAmountsNormalized(state: ModulatorsState, paramKey: ParameterKey) {
+  return getContextualModAmountParamKeys(paramKey).map((key) => (state[key] as number) / 100);
 }
 
 export const createModulatorsSlice = (): ModulatorsState => ({

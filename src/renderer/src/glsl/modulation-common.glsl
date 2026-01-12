@@ -140,7 +140,7 @@ float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, flo
   return getModulationBase(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, audioLevelDb);
 }
 
-float applyModulation(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, vec2 uv, int depth, float audioLevelDb) {
+float applyModulation(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float[NUM_CONTEXTUAL_MOD_SOURCES] contextualModAmounts, vec2 uv, int depth, float audioLevelDb) {
   float totalModulation = 0.0;
   float totalModulationAmount = 0.0;
 
@@ -148,6 +148,7 @@ float applyModulation(float value, float minValue, float maxValue, float[NUM_MOD
   // depth 1+ = modulator parameters (no nested modulation)
   bool allowNested = (depth == 0);
 
+  // Apply pattern modulator sources
   for (int i = 0; i < NUM_MODULATORS; i++) {
     float modulationAmount = modulationAmounts[i];
     if (modulationAmount == 0.0) {
@@ -155,6 +156,38 @@ float applyModulation(float value, float minValue, float maxValue, float[NUM_MOD
     }
 
     float modulation = getModulation(uv, i, allowNested, audioLevelDb);
+
+    float minV = minValue;
+    float maxV = maxValue;
+
+    if (modulationAmount < 0.0) {
+      minV = maxValue;
+      maxV = minValue;
+    }
+
+    float modulatedValue = mix(minV, maxV, modulation);
+
+    totalModulation += modulatedValue * modulationAmount;
+    totalModulationAmount += abs(modulationAmount);
+  }
+
+  // Apply contextual modulation sources
+  // Order: iteration, time, pitch, random, step
+  float contextualValues[NUM_CONTEXTUAL_MOD_SOURCES] = float[NUM_CONTEXTUAL_MOD_SOURCES](
+    strokeIterationNormalized,
+    strokeTimePosition,
+    strokePitchPosition,
+    strokeRandom,
+    strokeStepNormalized
+  );
+
+  for (int i = 0; i < NUM_CONTEXTUAL_MOD_SOURCES; i++) {
+    float modulationAmount = contextualModAmounts[i];
+    if (modulationAmount == 0.0) {
+      continue;
+    }
+
+    float modulation = contextualValues[i];  // Already 0-1
 
     float minV = minValue;
     float maxV = maxValue;

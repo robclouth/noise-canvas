@@ -8,6 +8,7 @@ import {
   BEAT_UNIT,
   BEAT_VALUES,
   BLEND_MODES,
+  CONTEXTUAL_MOD_SOURCES,
   EDGE_MODE,
   MODULATOR_MODES,
   MULTIPLIER_UNIT,
@@ -883,6 +884,7 @@ for (const [key, def] of Object.entries(combinedDefs)) {
   if (def.kind === "number" && def.modulatable) {
     const modKeys: ParameterKey[] = [];
 
+    // Generate pattern modulator amounts (Mod1, Mod2, Mod3)
     for (let i = 0; i < NUM_MODULATORS; i++) {
       const modIndex = i + 1;
       const modAmountKey = `${key}Mod${modIndex}Amount` as ParameterKey;
@@ -893,6 +895,25 @@ for (const [key, def] of Object.entries(combinedDefs)) {
         name: `${def.name} Mod ${modIndex} Amount`,
         label: `Mod ${modIndex}`,
         description: `Modulation amount from Modulator ${modIndex} for ${def.name}.`,
+        default: 0,
+        min: -100,
+        max: 100,
+        step: 0.1,
+        unit: "%",
+        includeInPresets: true,
+        includeInStep: true,
+      };
+    }
+
+    // Generate contextual modulation amounts (Iteration, Time, Pitch, Random, Step)
+    for (const source of CONTEXTUAL_MOD_SOURCES) {
+      const contextModKey = `${key}Mod${source.key}` as ParameterKey;
+
+      finalParameterDefs[contextModKey] = {
+        kind: "number",
+        name: `${def.name} Mod ${source.key}`,
+        label: source.label,
+        description: `${source.description} modulation amount for ${def.name}.`,
         default: 0,
         min: -100,
         max: 100,

@@ -2,7 +2,7 @@ import type { ParameterKey } from "@/store/types";
 import { Text } from "@mantine/core";
 import { getParameterDef } from "@renderer/parameters";
 import { selectParameter, useStore } from "@renderer/store";
-import { getModAmountParamKeys } from "@renderer/store/modulators";
+import { getContextualModAmountParamKeys, getModAmountParamKeys } from "@renderer/store/modulators";
 import { denormalizeParameterValue, normalizeParameterValue } from "@renderer/store/utils";
 import { Tooltip } from "../tooltip";
 import { NumboxControl } from "./numbox-control";
@@ -29,14 +29,20 @@ export const ParameterControl = ({
   const isModulatable = kind === "number" && "modulatable" in parameter && parameter.modulatable;
 
   const isModulated = useStore((state) => {
-    return (
-      isModulatable &&
-      getModAmountParamKeys(paramKey)
-        .map((key) => {
-          return selectParameter(key)(state);
-        })
-        .some((amount) => amount !== 0)
-    );
+    if (!isModulatable) return false;
+    // Check pattern modulator amounts
+    const patternModulated = getModAmountParamKeys(paramKey)
+      .map((key) => {
+        return selectParameter(key)(state);
+      })
+      .some((amount) => amount !== 0);
+    // Check contextual modulator amounts
+    const contextualModulated = getContextualModAmountParamKeys(paramKey)
+      .map((key) => {
+        return selectParameter(key)(state);
+      })
+      .some((amount) => amount !== 0);
+    return patternModulated || contextualModulated;
   });
 
   const parameterValue = useStore(selectParameter(paramKey));
@@ -85,6 +91,7 @@ export const ParameterControl = ({
         marks={parameter.marks}
         disabled={disabled}
         modulatorParamKeys={isModulatable ? getModAmountParamKeys(paramKey) : undefined}
+        contextualModParamKeys={isModulatable ? getContextualModAmountParamKeys(paramKey) : undefined}
         color={color}
         rightValue={parameter.rightValue}
         fromNormalized={(value) => denormalizeParameterValue(paramKey, value)}

@@ -578,12 +578,12 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
   float audioLevelDb = getAudioLevelDb(destUv);
   float intensity = applyModulation(
     brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue,
-    brushIntensity.modulationAmounts, destUv, 0, audioLevelDb
+    brushIntensity.modulationAmounts, brushIntensity.contextualModAmounts, destUv, 0, audioLevelDb
   );
 
   float pan = applyModulation(
     brushPan.value, brushPan.minValue, brushPan.maxValue,
-    brushPan.modulationAmounts, destUv, 0, audioLevelDb
+    brushPan.modulationAmounts, brushPan.contextualModAmounts, destUv, 0, audioLevelDb
   );
 
   vec2 pannedModifiedL = fromPolar(getMag(modifiedL) * clamp(1.0 - pan, 0.0, 1.0), getPhase(modifiedL));

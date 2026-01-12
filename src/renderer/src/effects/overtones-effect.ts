@@ -1,5 +1,5 @@
 import { getNumberParameterDef } from "@renderer/parameters";
-import { getModAmountValuesNormalized } from "@renderer/store/modulators";
+import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { ClampToEdgeWrapping, DataTexture, FloatType, GLSL3, NearestFilter, RawShaderMaterial, RedFormat } from "three";
 import overtonesFrag from "../glsl/overtones-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -23,6 +23,7 @@ class OvertonesEffect extends BaseEffect {
               minValue: -4.0,
               maxValue: 4.0,
               modulationAmounts: [],
+              contextualModAmounts: [],
             },
           },
           overtonesDecay: {
@@ -31,6 +32,7 @@ class OvertonesEffect extends BaseEffect {
               minValue: 0,
               maxValue: 1,
               modulationAmounts: [],
+              contextualModAmounts: [],
             },
           },
           shapeTexture: { value: null },
@@ -79,12 +81,14 @@ class OvertonesEffect extends BaseEffect {
       minValue: overtonesScaleDef.min,
       maxValue: overtonesScaleDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "overtonesScale"),
+      contextualModAmounts: getContextualModAmountsNormalized(state, "overtonesScale"),
     };
     material.uniforms.overtonesDecay.value = {
       value: overtonesDecay / 100,
       minValue: overtonesDecayDef.min / 100,
       maxValue: overtonesDecayDef.max / 100,
       modulationAmounts: getModAmountValuesNormalized(state, "overtonesDecay"),
+      contextualModAmounts: getContextualModAmountsNormalized(state, "overtonesDecay"),
     };
     material.uniforms.shapeTexture = { value: shapeTexture };
   }

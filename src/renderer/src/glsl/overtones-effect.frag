@@ -5,8 +5,8 @@ uniform Parameter overtonesDecay;
 uniform sampler2D shapeTexture;
 
 vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelDb) {
-    float scale = applyModulation(overtonesScale.value, overtonesScale.minValue, overtonesScale.maxValue, overtonesScale.modulationAmounts, coords.dest, 0, audioLevelDb);
-    float decay = applyModulation(overtonesDecay.value, overtonesDecay.minValue, overtonesDecay.maxValue, overtonesDecay.modulationAmounts, coords.dest, 0, audioLevelDb);
+    float scale = applyModulation(overtonesScale.value, overtonesScale.minValue, overtonesScale.maxValue, overtonesScale.modulationAmounts, overtonesScale.contextualModAmounts, coords.dest, 0, audioLevelDb);
+    float decay = applyModulation(overtonesDecay.value, overtonesDecay.minValue, overtonesDecay.maxValue, overtonesDecay.modulationAmounts, overtonesDecay.contextualModAmounts, coords.dest, 0, audioLevelDb);
   
     // Separate accumulators for magnitude and phase
     float sumMagL = 0.0;

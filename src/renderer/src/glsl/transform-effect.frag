@@ -25,15 +25,15 @@ void main() {
 
     // 3. Apply INVERSE Rotation around the new origin (0,0).
     float audioLevelDb = getAudioLevelDb(coords.dest);
-    float rotationValue = applyModulation(rotation.value, rotation.minValue, rotation.maxValue, rotation.modulationAmounts, coords.dest, 0, audioLevelDb);
+    float rotationValue = applyModulation(rotation.value, rotation.minValue, rotation.maxValue, rotation.modulationAmounts, rotation.contextualModAmounts, coords.dest, 0, audioLevelDb);
     float rad = radians(-rotationValue);
     mat2 rotMat = mat2(cos(rad), -sin(rad), sin(rad), cos(rad));
     vec2 rotatedUv = rotMat * relativeUv;
 
     // 4. Apply INVERSE Scale around the new origin (0,0).
     vec2 scaledUv = rotatedUv;
-    float scaleXValue = applyModulation(scaleX.value, scaleX.minValue, scaleX.maxValue, scaleX.modulationAmounts, coords.dest, 0, audioLevelDb);
-    float scaleYValue = applyModulation(scaleY.value, scaleY.minValue, scaleY.maxValue, scaleY.modulationAmounts, coords.dest, 0, audioLevelDb);
+    float scaleXValue = applyModulation(scaleX.value, scaleX.minValue, scaleX.maxValue, scaleX.modulationAmounts, scaleX.contextualModAmounts, coords.dest, 0, audioLevelDb);
+    float scaleYValue = applyModulation(scaleY.value, scaleY.minValue, scaleY.maxValue, scaleY.modulationAmounts, scaleY.contextualModAmounts, coords.dest, 0, audioLevelDb);
     if (abs(scaleXValue) > 1e-5 && abs(scaleYValue) > 1e-5) {
         scaledUv /= vec2(scaleXValue, scaleYValue);
     }
@@ -48,8 +48,8 @@ void main() {
     }
 
     // 6. Apply the final shift to get the source UV to sample from.
-    float rawShiftX = applyModulation(shiftX.value, shiftX.minValue, shiftX.maxValue, shiftX.modulationAmounts, coords.dest, 0, audioLevelDb);
-    float rawShiftY = applyModulation(shiftY.value, shiftY.minValue, shiftY.maxValue, shiftY.modulationAmounts, coords.dest, 0, audioLevelDb);
+    float rawShiftX = applyModulation(shiftX.value, shiftX.minValue, shiftX.maxValue, shiftX.modulationAmounts, shiftX.contextualModAmounts, coords.dest, 0, audioLevelDb);
+    float rawShiftY = applyModulation(shiftY.value, shiftY.minValue, shiftY.maxValue, shiftY.modulationAmounts, shiftY.contextualModAmounts, coords.dest, 0, audioLevelDb);
     float appliedShiftX = -rawShiftX;
     float appliedShiftY = -rawShiftY;
     vec2 finalSourceUv = transformedUv + vec2(appliedShiftX, appliedShiftY);

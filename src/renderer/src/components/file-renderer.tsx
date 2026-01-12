@@ -3,9 +3,10 @@ import { useFrame } from "@react-three/fiber";
 import { EffectType } from "@renderer/effects";
 import { CommonUniforms, defaultValues } from "@renderer/effects/base-effect";
 import { openFiles } from "@renderer/store/files";
-import { getModAmountValuesNormalized } from "@renderer/store/modulators";
+import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { State } from "@renderer/store/types";
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { createNoise2D } from "simplex-noise";
 import {
   Camera,
   ClampToEdgeWrapping,
@@ -33,6 +34,8 @@ import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import { getUndoManager } from "../lib/undo-manager";
 import { unitsToUv } from "../lib/utils";
 import { copyMaterial } from "./copy-material";
+
+const noise2D = createNoise2D();
 
 // Helper function to calculate normalized envelope stage boundaries
 // Returns absolute UV values for each stage
@@ -236,9 +239,9 @@ export const FileRenderer = memo(
                 bpm,
                 totalDuration,
                 spectrogramData.bandsPerOctave,
-                spectrogramData.numBands
+                spectrogramData.numBands,
               );
-              
+
               // Simulate renderStroke
               strokeParams.current = { x: uvPos.x, y: uvPos.y, preview: true };
               displayMode.current = "preview";
@@ -587,7 +590,7 @@ export const FileRenderer = memo(
 
       // Determine cursor position in UV
       let cursorPos = new Vector2(-1, -1);
-      
+
       if ((state.activeFileId === fileId || state.hoveredFile === fileId) && state.cursorPosition) {
         cursorPos = unitsToUv(
           state.cursorPosition.beats,
@@ -595,7 +598,7 @@ export const FileRenderer = memo(
           bpm,
           totalDuration,
           spectrogramData.bandsPerOctave,
-          spectrogramData.numBands
+          spectrogramData.numBands,
         );
       }
 
@@ -625,7 +628,13 @@ export const FileRenderer = memo(
       }
 
       // After initialization, only update if this file is active, source, or cursor is present
-      if (!isActiveFile && !isSourceFile && !(state.cursorVisible && state.cursorPosition) && !clearingPreview.current && isInitialized.current) {
+      if (
+        !isActiveFile &&
+        !isSourceFile &&
+        !(state.cursorVisible && state.cursorPosition) &&
+        !clearingPreview.current &&
+        isInitialized.current
+      ) {
         return;
       }
 
@@ -741,6 +750,7 @@ export const FileRenderer = memo(
               minValue: 0,
               maxValue: 1,
               modulationAmounts: getModAmountValuesNormalized(stepState, "brushIntensity"),
+              contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushIntensity"),
             },
           },
           brushPan: {
@@ -749,6 +759,7 @@ export const FileRenderer = memo(
               minValue: -1,
               maxValue: 1,
               modulationAmounts: getModAmountValuesNormalized(stepState, "brushPan"),
+              contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushPan"),
             },
           },
           bpm: { value: bpm },
@@ -828,12 +839,13 @@ export const FileRenderer = memo(
         let stepInputFbo: WebGLRenderTarget | { texture: DataTexture } = initialSourceFbo;
         const numSteps = state.steps.length;
 
+        // Generate random value seeded by position using Perlin noise
+        const strokeRandom = (noise2D(cursorPos.x * 50, cursorPos.y * 50) + 1) / 2;
         for (let stepIndex = 0; stepIndex < numSteps; stepIndex++) {
           const stepState = createStepStateView(state, stepIndex);
           const stepBrushSizeUv = calculateBrushSizeUv(stepState);
 
           // Determine the blend destination for this step
-          // Step 1 blends with the original canvas state
           // Subsequent steps blend with the previous step's output so that
           // pixels outside their envelope preserve the previous step's changes
           const blendDestFbo = stepIndex === 0 ? currentReadFBO : stepInputFbo;
@@ -897,6 +909,21 @@ export const FileRenderer = memo(
                 const isFirstPass = p === 0;
                 const uniformsForThisIteration =
                   isFirstEffect && isFirstIteration && isFirstPass ? { ...commonUniforms } : { ...iterativeUniforms };
+
+                // Add contextual modulation uniforms for this iteration/step
+                const cursorPos = commonUniforms.brushBottomLeftUv.value as Vector2;
+                const brushSizeUv = commonUniforms.brushSizeUv.value as Vector2;
+                const brushCenterTime = cursorPos.x + brushSizeUv.x / 2;
+                const brushCenterPitch = cursorPos.y + brushSizeUv.y / 2;
+                uniformsForThisIteration.strokeIterationNormalized = {
+                  value: brushIterations > 1 ? i / (brushIterations - 1) : 0,
+                };
+                uniformsForThisIteration.strokeTimePosition = { value: brushCenterTime };
+                uniformsForThisIteration.strokePitchPosition = { value: brushCenterPitch };
+                uniformsForThisIteration.strokeRandom = { value: strokeRandom };
+                uniformsForThisIteration.strokeStepNormalized = {
+                  value: numSteps > 1 ? stepIndex / (numSteps - 1) : 0,
+                };
 
                 const material = effect.materials[p];
                 fboMesh.material = material;
@@ -986,7 +1013,7 @@ export const FileRenderer = memo(
         const targetFile = hoveredFile || file;
         const targetBpm = state.filepathsBpm[targetFile.filePath] || 120;
         const targetDuration = targetFile.spectrogramData.numFrames / targetFile.spectrogramData.sampleRate;
-        
+
         let maxTimeUv = 0;
         let maxPitchUv = 0;
         for (let i = 0; i < state.steps.length; i++) {

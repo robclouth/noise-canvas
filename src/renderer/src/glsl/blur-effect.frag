@@ -35,10 +35,10 @@ void main() {
     float referencePhaseR = getPhase(sourceCenterTexel.ba);
 
     float audioLevelDb = getAudioLevelDb(coords.dest);
-    float blurSizeXValue = applyModulation(blurSizeX.value, blurSizeX.minValue, blurSizeX.maxValue, blurSizeX.modulationAmounts, coords.dest, 0, audioLevelDb);
-    float blurSizeYValue = applyModulation(blurSizeY.value, blurSizeY.minValue, blurSizeY.maxValue, blurSizeY.modulationAmounts, coords.dest, 0, audioLevelDb);
-    float blurNoiseXValue = applyModulation(blurNoiseX.value, blurNoiseX.minValue, blurNoiseX.maxValue, blurNoiseX.modulationAmounts, coords.dest, 0, audioLevelDb);
-    float blurNoiseYValue = applyModulation(blurNoiseY.value, blurNoiseY.minValue, blurNoiseY.maxValue, blurNoiseY.modulationAmounts, coords.dest, 0, audioLevelDb);
+    float blurSizeXValue = applyModulation(blurSizeX.value, blurSizeX.minValue, blurSizeX.maxValue, blurSizeX.modulationAmounts, blurSizeX.contextualModAmounts, coords.dest, 0, audioLevelDb);
+    float blurSizeYValue = applyModulation(blurSizeY.value, blurSizeY.minValue, blurSizeY.maxValue, blurSizeY.modulationAmounts, blurSizeY.contextualModAmounts, coords.dest, 0, audioLevelDb);
+    float blurNoiseXValue = applyModulation(blurNoiseX.value, blurNoiseX.minValue, blurNoiseX.maxValue, blurNoiseX.modulationAmounts, blurNoiseX.contextualModAmounts, coords.dest, 0, audioLevelDb);
+    float blurNoiseYValue = applyModulation(blurNoiseY.value, blurNoiseY.minValue, blurNoiseY.maxValue, blurNoiseY.modulationAmounts, blurNoiseY.contextualModAmounts, coords.dest, 0, audioLevelDb);
 
     vec2 blurSizeUv = vec2(blurSizeXValue, blurSizeYValue);
 

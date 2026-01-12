@@ -1,6 +1,6 @@
 import { NumberParameter, parameterDefs } from "@renderer/parameters";
 import { openFiles } from "@renderer/store/files";
-import { getModAmountValuesNormalized } from "@renderer/store/modulators";
+import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { ParameterKey, State } from "@renderer/store/types";
 import { useMemo } from "react";
 import { DataTexture, FloatType, RedFormat } from "three";
@@ -45,24 +45,34 @@ export const buildModulatorUniforms = (
         minValue: 0.0,
         maxValue: maxRateUv.x,
         modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}PatternRateBeats` as ParameterKey),
+        contextualModAmounts: getContextualModAmountsNormalized(
+          state,
+          `modulator${i + 1}PatternRateBeats` as ParameterKey,
+        ),
       },
       modulatorPatternRateY: {
         value: modulatorPatternRate.y,
         minValue: 0.0,
         maxValue: maxRateUv.y,
         modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}PatternRateSemis` as ParameterKey),
+        contextualModAmounts: getContextualModAmountsNormalized(
+          state,
+          `modulator${i + 1}PatternRateSemis` as ParameterKey,
+        ),
       },
       modulatorStrength: {
         value: strength / 100,
         minValue: 0.0,
         maxValue: 1.0,
         modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}Strength` as ParameterKey),
+        contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}Strength` as ParameterKey),
       },
       modulatorRotation: {
         value: rotation,
         minValue: rotationDef.min,
         maxValue: rotationDef.max,
         modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}Rotation` as ParameterKey),
+        contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}Rotation` as ParameterKey),
       },
       modulatorEnvelopeMinDb: envelopeMinDb,
       modulatorEnvelopeMaxDb: envelopeMaxDb,
