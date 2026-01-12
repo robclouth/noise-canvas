@@ -174,7 +174,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
       { value: 0, label: "Canvas" },
       { value: 1, label: "Brush" },
     ],
-    includeInPresets: false,
+    includeInPresets: true,
     includeInStep: true,
   };
   modulatorDefs[`modulator${idx}EnvelopeMinDb`] = {
