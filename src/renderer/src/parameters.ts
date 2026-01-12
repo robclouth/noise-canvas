@@ -964,18 +964,24 @@ export const getStepParameterKeys = (): ParameterKey[] => {
 
 /** Type for a brush step - contains only step-scoped parameters */
 export type BrushStep = {
+  id: string;
+  name: string;
+} & {
   [K in ParameterKey]?: (typeof parameterDefs)[K] extends { default: infer D } ? D : never;
 };
 
 /** Creates a default step with all step parameter defaults */
-export const createDefaultStep = (): BrushStep => {
-  const step: BrushStep = {};
+export const createDefaultStep = (name = "Step 1"): BrushStep => {
+  const step: any = {
+    id: crypto.randomUUID(),
+    name,
+  };
   for (const [key, def] of Object.entries(parameterDefs)) {
     if (def.includeInStep) {
       step[key as ParameterKey] = def.default;
     }
   }
-  return step;
+  return step as BrushStep;
 };
 
 /** Check if a parameter key is a step parameter */

@@ -3,7 +3,7 @@ import { EnvelopeControl } from "../controls/envelope-control";
 import { ParameterControl } from "../controls/parameter-control";
 import { PresetSelector } from "../controls/preset-selector";
 import { QuickSlots } from "../controls/quick-slots";
-import { StepTabs } from "../controls/step-tabs";
+import { Steps } from "../controls/steps";
 import { EffectsList } from "../effects-list";
 import { ModulatorView } from "../modulator-view";
 import { Section } from "../section";
@@ -15,7 +15,7 @@ export function BrushPanel() {
         <PresetSelector />
         <QuickSlots />
       </Stack>
-      <StepTabs />
+      <Steps />
       <Stack px="xs" gap="xs">
         <Section label="Envelope">
           <Stack gap="xs">

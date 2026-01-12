@@ -252,7 +252,13 @@ function App(): React.JSX.Element {
 
         <ShaderCompiler onFinish={handleShaderCompileFinish} />
       </Canvas>
-      <ScrollArea scrollbarSize={4} type="auto" h="100%" onScrollPositionChange={() => invalidateRef.current?.()}>
+      <ScrollArea
+        scrollbarSize={4}
+        type="auto"
+        h="100%"
+        w={320}
+        onScrollPositionChange={() => invalidateRef.current?.()}
+      >
         <BrushPanel />
       </ScrollArea>
       <Stack pos="relative" flex={1} h="100%" gap={0}>
