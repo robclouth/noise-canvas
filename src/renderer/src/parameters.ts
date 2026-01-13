@@ -793,6 +793,14 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     scale: "log",
     includeInPresets: false,
   },
+  cumulativeStrokes: {
+    kind: "boolean",
+    name: "Cumulative Strokes",
+    label: "Cumulative",
+    description: "If enabled, painting over the same area adds to the existing effect. If disabled, logic prevents self-overlap within a stroke.",
+    default: false,
+    includeInPresets: false,
+  },
   gridSizeSemis: {
     kind: "number",
     name: "Grid Size Semis",

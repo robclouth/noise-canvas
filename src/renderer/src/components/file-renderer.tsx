@@ -10,6 +10,7 @@ import { createNoise2D } from "simplex-noise";
 import {
   Camera,
   ClampToEdgeWrapping,
+  Color,
   DataTexture,
   FloatType,
   GLSL3,
@@ -17,16 +18,19 @@ import {
   NearestFilter,
   PlaneGeometry,
   RawShaderMaterial,
+  RedFormat,
   RGBAFormat,
   RGFormat,
   Scene,
+  Texture,
   UniformsUtils,
   Vector2,
   WebGLRenderer,
-  WebGLRenderTarget,
+  WebGLRenderTarget
 } from "three";
 import { effects } from "../effects";
 import displayFrag from "../glsl/display.frag";
+import maskUpdateFrag from "../glsl/mask-update.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { readRenderTargetPixelsAsync } from "../lib/async-readpixels";
 import { buildModulatorUniforms, useModulatorScaleLut } from "../lib/modulator-utils";
@@ -123,6 +127,8 @@ export interface FileRendererHandle {
   /** Reloads all textures from the current spectrogramData (used after re-analysis). */
   reloadTextures: () => void;
   applyStroke: () => void;
+  beginStroke: () => void;
+  endStroke: () => void;
 }
 
 /**
@@ -296,6 +302,33 @@ export const FileRenderer = memo(
       });
     }, []);
 
+    const maskMaterial = useMemo(() => {
+      return new RawShaderMaterial({
+        uniforms: {
+          ...UniformsUtils.clone(defaultValues),
+          currentMaskTex: { value: null },
+          destMetadataTex: { value: null },
+          destInverseMapTex: { value: null },
+          destSpectrogramTextureSize: { value: new Vector2(1, 1) },
+          destFrameCount: { value: 0 },
+          destBandCount: { value: 0 },
+          brushBottomLeftUv: { value: new Vector2(0, 0) },
+          brushSizeUv: { value: new Vector2(0, 0) },
+          envelopeDelayEndX: { value: 0 },
+          envelopeAttackEndX: { value: 0 },
+          envelopeSustainEndX: { value: 0 },
+          envelopeReleaseEndX: { value: 0 },
+          envelopeDelayEndY: { value: 0 },
+          envelopeAttackEndY: { value: 0 },
+          envelopeSustainEndY: { value: 0 },
+          envelopeReleaseEndY: { value: 0 },
+        },
+        vertexShader: passThroughVert,
+        fragmentShader: maskUpdateFrag,
+        glslVersion: GLSL3,
+      });
+    }, []);
+
     const mesh = useRef<Mesh>(null!);
     const { scene: fboScene, mesh: fboMesh } = useMemo(() => {
       const scene = new Scene();
@@ -344,6 +377,40 @@ export const FileRenderer = memo(
         magFilter: NearestFilter,
       });
       return fbo;
+      return fbo;
+    }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
+
+    // Stroke Mask FBO
+    const strokeMaskFbo = useMemo(() => {
+      const fbo = new WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+        format: RedFormat,
+        type: FloatType,
+        minFilter: NearestFilter,
+        magFilter: NearestFilter,
+      });
+      return fbo;
+    }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
+
+    // Second Stroke Mask FBO for ping-pong rendering
+    const strokeMaskFbo2 = useMemo(() => {
+      const fbo = new WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+        format: RedFormat,
+        type: FloatType,
+        minFilter: NearestFilter,
+        magFilter: NearestFilter,
+      });
+      return fbo;
+    }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
+
+    // Stroke Start FBO (Snapshot of canvas at start of stroke)
+    const strokeStartFbo = useMemo(() => {
+      const fbo = new WebGLRenderTarget(spectrogramData.textureWidth, spectrogramData.textureHeight, {
+        format: RGBAFormat,
+        type: FloatType,
+        minFilter: NearestFilter,
+        magFilter: NearestFilter,
+      });
+      return fbo;
     }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
 
     // Cleanup FBOs on unmount or dimension change
@@ -353,11 +420,15 @@ export const FileRenderer = memo(
         fbo2.dispose();
         passFbo1.dispose();
         passFbo2.dispose();
+        strokeMaskFbo.dispose();
+        strokeMaskFbo2.dispose();
+        strokeStartFbo.dispose();
       };
-    }, [fbo1, fbo2, passFbo1, passFbo2]);
+    }, [fbo1, fbo2, passFbo1, passFbo2, strokeMaskFbo, strokeMaskFbo2, strokeStartFbo]);
 
     // Rendering state
     const pingPong = useRef(0);
+    const maskPingPong = useRef(0);
     const isInitialized = useRef(false);
 
     const strokeParams = useRef<{ x: number; y: number; preview: boolean } | null>(null);
@@ -365,6 +436,30 @@ export const FileRenderer = memo(
     // FBO data cache to avoid redundant GPU readbacks
     const fboDataCache = useRef<Float32Array | null>(null);
     const fboDataDirty = useRef(true);
+
+    /**
+     * Helper to snapshot the current FBO state to the strokeStartFbo.
+     * This ensures that when a new stroke starts (especially in Single Stroke mode),
+     * we have a clean copy of the "before" state to use as a source.
+     */
+    const snapshotToStrokeStart = useCallback((sourceTexture: Texture) => {
+        const gl = glRef.current;
+        if (!fboMesh || !strokeStartFbo || !gl || !copyMaterial) return;
+
+        // Save previous material
+        const prevMaterial = fboMesh.material;
+        
+        fboMesh.material = copyMaterial;
+        copyMaterial.uniforms.inputTex.value = sourceTexture;
+
+        const oldTarget = gl.getRenderTarget();
+        gl.setRenderTarget(strokeStartFbo);
+        gl.render(fboScene, cameraRef.current);
+        gl.setRenderTarget(oldTarget);
+
+        // Restore material (though usually it's reset elsewhere, good safety)
+        fboMesh.material = prevMaterial;
+    }, [fboMesh, strokeStartFbo, fboScene]);
 
     /**
      * Creates DataTextures from spectrogram data.
@@ -618,6 +713,22 @@ export const FileRenderer = memo(
 
         pingPong.current = 0;
 
+        // Clear both mask FBOs on init
+        const oldClearColor = new Color();
+        gl.getClearColor(oldClearColor);
+        const oldClearAlpha = gl.getClearAlpha();
+        gl.setClearColor(0x000000, 0);
+        gl.setRenderTarget(strokeMaskFbo);
+        gl.clear(true, false, false);
+        gl.setRenderTarget(strokeMaskFbo2);
+        gl.clear(true, false, false);
+        gl.setRenderTarget(null);
+        gl.setClearColor(oldClearColor, oldClearAlpha);
+        maskPingPong.current = 0;
+
+        // Snapshot initial state to strokeStartFbo
+        snapshotToStrokeStart(fbo1.texture);
+
         // Invalidate cache since FBO has been initialized
         fboDataDirty.current = true;
 
@@ -824,7 +935,7 @@ export const FileRenderer = memo(
         // Determine the initial source FBO based on sourceDataMode and which file is the source
         // Use active step's sourceDataMode for the initial determination
         const isSameFile = sourceFile.id === fileId;
-        const initialSourceFbo =
+        let initialSourceFbo =
           activeStepState.sourceDataMode === "original"
             ? { texture: textures!.original }
             : isSameFile
@@ -837,6 +948,13 @@ export const FileRenderer = memo(
         // For multi-step rendering, we iterate through all steps sequentially
         // The output of one step becomes the input for the next
         let stepInputFbo: WebGLRenderTarget | { texture: DataTexture } = initialSourceFbo;
+        
+        // Non-cumulative strokes: use snapshot as source to prevent self-feedback
+        if (!state.cumulativeStrokes && isSameFile && activeStepState.sourceDataMode !== "original") {
+          stepInputFbo = strokeStartFbo;
+          initialSourceFbo = strokeStartFbo;
+        }
+        
         const numSteps = state.steps.length;
 
         // Generate random value seeded by position using Perlin noise
@@ -949,6 +1067,17 @@ export const FileRenderer = memo(
                   value: isFirstEffect && isFirstIteration ? commonUniforms.destSpectrogramTex.value : inputTexture,
                 };
 
+                // Pass the mask if enabled (non-cumulative mode)
+                if (!state.cumulativeStrokes) {
+                  const currentMaskFbo = maskPingPong.current === 0 ? strokeMaskFbo : strokeMaskFbo2;
+                  (uniformsForThisIteration as any).useStrokeMask = { value: true };
+                  (uniformsForThisIteration as any).strokeMaskTex = { value: currentMaskFbo.texture };
+                } else {
+                  (uniformsForThisIteration as any).useStrokeMask = { value: false };
+                  (uniformsForThisIteration as any).strokeMaskTex = { value: placeholderTexture };
+                }
+
+
                 effect.updateEffectUniforms({
                   commonUniforms: uniformsForThisIteration,
                   passIndex: p,
@@ -978,6 +1107,58 @@ export const FileRenderer = memo(
         if (!preview) {
           pingPong.current = 1 - pingPong.current;
           displayMode.current = "committed";
+
+          // Update stroke mask for non-cumulative mode using ping-pong
+          if (!state.cumulativeStrokes) {
+             // Ping-pong: read from current mask, write to the other
+             const currentMaskFbo = maskPingPong.current === 0 ? strokeMaskFbo : strokeMaskFbo2;
+             const nextMaskFbo = maskPingPong.current === 0 ? strokeMaskFbo2 : strokeMaskFbo;
+
+             const activeStep = createStepStateView(state, state.activeStepIndex);
+             const brushSizeUv = calculateBrushSizeUv(activeStep);
+             
+             maskMaterial.uniforms.currentMaskTex.value = currentMaskFbo.texture;
+             maskMaterial.uniforms.destMetadataTex.value = metadataTex;
+             maskMaterial.uniforms.destInverseMapTex.value = inverseMapTex;
+             maskMaterial.uniforms.destSpectrogramTextureSize.value = spectrogramData.packedTextureSize;
+             maskMaterial.uniforms.destFrameCount.value = spectrogramData.numFrames;
+             maskMaterial.uniforms.destBandCount.value = spectrogramData.numBands;
+             maskMaterial.uniforms.brushBottomLeftUv.value = cursorPos;
+             maskMaterial.uniforms.brushSizeUv.value = brushSizeUv;
+             maskMaterial.uniforms.brushIntensity.value = {
+               value: activeStep.brushIntensity / 100,
+               minValue: 0,
+               maxValue: 1,
+               modulationAmounts: [0, 0, 0],
+               contextualModAmounts: [0, 0, 0, 0, 0],
+             };
+             
+             const envelopeX = calculateEnvelopeBoundaries(
+               activeStep.brushEnvelopeDelayTime, activeStep.brushEnvelopeAttackTime, activeStep.brushEnvelopeSustainTime, activeStep.brushEnvelopeReleaseTime,
+               bpm, totalDuration, spectrogramData.bandsPerOctave, spectrogramData.numBands, true
+             );
+             const envelopeY = calculateEnvelopeBoundaries(
+               activeStep.brushEnvelopeDelayPitch, activeStep.brushEnvelopeAttackPitch, activeStep.brushEnvelopeSustainPitch, activeStep.brushEnvelopeReleasePitch,
+               bpm, totalDuration, spectrogramData.bandsPerOctave, spectrogramData.numBands, false
+             );
+
+             maskMaterial.uniforms.envelopeDelayEndX.value = envelopeX.delayEnd;
+             maskMaterial.uniforms.envelopeAttackEndX.value = envelopeX.attackEnd;
+             maskMaterial.uniforms.envelopeSustainEndX.value = envelopeX.sustainEnd;
+             maskMaterial.uniforms.envelopeReleaseEndX.value = envelopeX.releaseEnd;
+             maskMaterial.uniforms.envelopeDelayEndY.value = envelopeY.delayEnd;
+             maskMaterial.uniforms.envelopeAttackEndY.value = envelopeY.attackEnd;
+             maskMaterial.uniforms.envelopeSustainEndY.value = envelopeY.sustainEnd;
+             maskMaterial.uniforms.envelopeReleaseEndY.value = envelopeY.releaseEnd;
+
+             fboMesh.material = maskMaterial;
+             gl.setRenderTarget(nextMaskFbo);
+             gl.render(fboScene, camera);
+             gl.setRenderTarget(null);
+
+             // Flip ping-pong for next frame
+             maskPingPong.current = 1 - maskPingPong.current;
+          }
 
           // Mark FBO data cache as dirty since we've modified the buffer
           fboDataDirty.current = true;
@@ -1158,6 +1339,11 @@ export const FileRenderer = memo(
       glRef.current.render(fboScene, cameraRef.current);
       glRef.current.setRenderTarget(null);
 
+      // Also snapshot this new state to strokeStartFbo
+      // This ensures that if the user starts a stroke immediately after undo/redo,
+      // the stroke source is correct.
+      snapshotToStrokeStart(fbo1.texture);
+
       dataTex.dispose();
 
       applyStroke.current = false;
@@ -1229,6 +1415,38 @@ export const FileRenderer = memo(
       invalidateRef.current();
     };
 
+    const beginStroke = () => {
+      // Logic moved to initialization and endStroke to ensure consistency
+      // The strokeStartFbo is now always kept up to date as "the state before the current action"
+    };
+
+    const endStroke = () => {
+       const gl = glRef.current;
+       if (!gl || !strokeMaskFbo || !strokeMaskFbo2 || !strokeStartFbo || !fboMesh) return;
+       
+       // 1. Snapshot the RESULT of the stroke (current FBO) to strokeStartFbo
+       // This prepares it for the NEXT stroke.
+       const currentReadFBO = pingPong.current === 0 ? fbo1 : fbo2;
+       snapshotToStrokeStart(currentReadFBO.texture);
+
+       // 2. Clear both Mask FBOs and reset ping-pong
+       const oldClearColor = new Color();
+       gl.getClearColor(oldClearColor);
+       const oldClearAlpha = gl.getClearAlpha();
+       gl.setClearColor(0x000000, 0);
+
+       gl.setRenderTarget(strokeMaskFbo);
+       gl.clear(true, false, false);
+       gl.setRenderTarget(strokeMaskFbo2);
+       gl.clear(true, false, false);
+       gl.setRenderTarget(null);
+
+       gl.setClearColor(oldClearColor, oldClearAlpha);
+       maskPingPong.current = 0;
+
+       invalidateRef.current?.();
+    };
+
     /**
      * Exposes component methods to the parent through a ref.
      */
@@ -1247,6 +1465,8 @@ export const FileRenderer = memo(
       restoreOriginal,
       clearPreview,
       reloadTextures,
+      beginStroke,
+      endStroke,
       applyStroke: () => {
         // strokeParams are optional, cursorPos is used for position
         applyStroke.current = true;

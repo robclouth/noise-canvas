@@ -314,6 +314,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       }
 
       if (rendererRef?.current) {
+        rendererRef.current.beginStroke();
         const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
         state.setCursorPosition({ beats, pitch });
 
@@ -349,8 +350,8 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         } else {
           await state.applyStrokeAtPosition();
         }
+        rendererRef.current?.endStroke();
 
-        state.setCursorPosition(null);
         strokeTimeRangeRef.current = { min: null, max: null };
       }
     },

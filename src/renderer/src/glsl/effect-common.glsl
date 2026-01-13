@@ -52,6 +52,9 @@ uniform int   algorithm;
 // A value of 1.0 is a good starting point.
 uniform float magnitudeLimit;
 
+uniform sampler2D strokeMaskTex;
+uniform bool useStrokeMask;
+
 // ============================================================================
 // DEFINES & HELPERS
 // ============================================================================
@@ -576,6 +579,7 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
   vec2 modifiedR = modified.ba;
 
   float audioLevelDb = getAudioLevelDb(destUv);
+ 
   float intensity = applyModulation(
     brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue,
     brushIntensity.modulationAmounts, brushIntensity.contextualModAmounts, destUv, 0, audioLevelDb
@@ -590,6 +594,16 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
   vec2 pannedModifiedR = fromPolar(getMag(modifiedR) * clamp(1.0 + pan, 0.0, 1.0), getPhase(modifiedR));
 
   float effectiveWeight = weight * intensity;
+
+  // Non-cumulative stroke: use the max weight seen at this pixel
+  // Since we always blend from strokeStart, using max(current, stored) ensures:
+  // - Gradual reveal as we paint (weight increases)
+  // - No accumulation beyond intensity (mask caps the weight)
+  // - Consistent result when re-painting same area (same blend from strokeStart)
+  if (useStrokeMask) {
+    float maskValue = texture(strokeMaskTex, destUv).r;
+    effectiveWeight = max(effectiveWeight, maskValue);
+  }
 
   // Dissolve (stochastic)
   if (blendMode == 8) {

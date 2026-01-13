@@ -14,6 +14,7 @@ export interface AppState {
   scaleType: string;
   bandsPerOctave: number;
   minFreq: number;
+  cumulativeStrokes: boolean;
 
   mousePos: Vector2 | null;
   setMousePos: (mousePos: Vector2 | null) => void;
@@ -39,6 +40,7 @@ export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
     scaleType: getParameterDef("scaleType").default,
     bandsPerOctave: getParameterDef("bandsPerOctave").default,
     minFreq: getParameterDef("minFreq").default,
+    cumulativeStrokes: getParameterDef("cumulativeStrokes").default,
 
     mousePos: null,
     setMousePos: (mousePos) => set({ mousePos }),

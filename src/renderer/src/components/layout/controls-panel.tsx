@@ -28,6 +28,9 @@ export function ControlsPanel() {
         <ParameterControl paramKey="scaleTonic" />
         <ParameterControl paramKey="scaleType" />
       </Section>
+      <Section label="Brush">
+        <ParameterControl paramKey="cumulativeStrokes" />
+      </Section>
       <Section label="Output">
         <ParameterControl paramKey="magnitudeLimit" />
         <ParameterControl paramKey="normalize" />

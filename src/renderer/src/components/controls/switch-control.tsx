@@ -1,4 +1,4 @@
-import { Box, Group, Text } from "@mantine/core";
+import { Box, Group, Text, useMantineTheme } from "@mantine/core";
 import { ReactNode } from "react";
 
 export const SwitchControl = ({
@@ -12,6 +12,9 @@ export const SwitchControl = ({
   setValue: (value: boolean) => void;
   color?: string;
 }) => {
+    const theme = useMantineTheme();
+    const themeColor = theme.colors[color]?.[6] || color;
+
   return (
     <Group gap={"xs"} wrap="nowrap" h={24} align="center">
       {labelComponent}
@@ -25,7 +28,7 @@ export const SwitchControl = ({
           overflow: "hidden",
           borderRadius: 2,
           border: `1px solid #666`,
-          backgroundColor: value ? color : "#2c2c2c",
+          backgroundColor: value ? themeColor : "#2c2c2c",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
