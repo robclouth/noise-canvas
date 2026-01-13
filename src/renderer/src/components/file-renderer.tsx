@@ -26,7 +26,7 @@ import {
   UniformsUtils,
   Vector2,
   WebGLRenderer,
-  WebGLRenderTarget
+  WebGLRenderTarget,
 } from "three";
 import { effects } from "../effects";
 import displayFrag from "../glsl/display.frag";
@@ -442,13 +442,14 @@ export const FileRenderer = memo(
      * This ensures that when a new stroke starts (especially in Single Stroke mode),
      * we have a clean copy of the "before" state to use as a source.
      */
-    const snapshotToStrokeStart = useCallback((sourceTexture: Texture) => {
+    const snapshotToStrokeStart = useCallback(
+      (sourceTexture: Texture) => {
         const gl = glRef.current;
         if (!fboMesh || !strokeStartFbo || !gl || !copyMaterial) return;
 
         // Save previous material
         const prevMaterial = fboMesh.material;
-        
+
         fboMesh.material = copyMaterial;
         copyMaterial.uniforms.inputTex.value = sourceTexture;
 
@@ -459,7 +460,9 @@ export const FileRenderer = memo(
 
         // Restore material (though usually it's reset elsewhere, good safety)
         fboMesh.material = prevMaterial;
-    }, [fboMesh, strokeStartFbo, fboScene]);
+      },
+      [fboMesh, strokeStartFbo, fboScene],
+    );
 
     /**
      * Creates DataTextures from spectrogram data.
@@ -948,13 +951,13 @@ export const FileRenderer = memo(
         // For multi-step rendering, we iterate through all steps sequentially
         // The output of one step becomes the input for the next
         let stepInputFbo: WebGLRenderTarget | { texture: DataTexture } = initialSourceFbo;
-        
+
         // Non-cumulative strokes: use snapshot as source to prevent self-feedback
         if (!state.cumulativeStrokes && isSameFile && activeStepState.sourceDataMode !== "original") {
           stepInputFbo = strokeStartFbo;
           initialSourceFbo = strokeStartFbo;
         }
-        
+
         const numSteps = state.steps.length;
 
         // Generate random value seeded by position using Perlin noise
@@ -1077,7 +1080,6 @@ export const FileRenderer = memo(
                   (uniformsForThisIteration as any).strokeMaskTex = { value: placeholderTexture };
                 }
 
-
                 effect.updateEffectUniforms({
                   commonUniforms: uniformsForThisIteration,
                   passIndex: p,
@@ -1110,54 +1112,68 @@ export const FileRenderer = memo(
 
           // Update stroke mask for non-cumulative mode using ping-pong
           if (!state.cumulativeStrokes) {
-             // Ping-pong: read from current mask, write to the other
-             const currentMaskFbo = maskPingPong.current === 0 ? strokeMaskFbo : strokeMaskFbo2;
-             const nextMaskFbo = maskPingPong.current === 0 ? strokeMaskFbo2 : strokeMaskFbo;
+            // Ping-pong: read from current mask, write to the other
+            const currentMaskFbo = maskPingPong.current === 0 ? strokeMaskFbo : strokeMaskFbo2;
+            const nextMaskFbo = maskPingPong.current === 0 ? strokeMaskFbo2 : strokeMaskFbo;
 
-             const activeStep = createStepStateView(state, state.activeStepIndex);
-             const brushSizeUv = calculateBrushSizeUv(activeStep);
-             
-             maskMaterial.uniforms.currentMaskTex.value = currentMaskFbo.texture;
-             maskMaterial.uniforms.destMetadataTex.value = metadataTex;
-             maskMaterial.uniforms.destInverseMapTex.value = inverseMapTex;
-             maskMaterial.uniforms.destSpectrogramTextureSize.value = spectrogramData.packedTextureSize;
-             maskMaterial.uniforms.destFrameCount.value = spectrogramData.numFrames;
-             maskMaterial.uniforms.destBandCount.value = spectrogramData.numBands;
-             maskMaterial.uniforms.brushBottomLeftUv.value = cursorPos;
-             maskMaterial.uniforms.brushSizeUv.value = brushSizeUv;
-             maskMaterial.uniforms.brushIntensity.value = {
-               value: activeStep.brushIntensity / 100,
-               minValue: 0,
-               maxValue: 1,
-               modulationAmounts: [0, 0, 0],
-               contextualModAmounts: [0, 0, 0, 0, 0],
-             };
-             
-             const envelopeX = calculateEnvelopeBoundaries(
-               activeStep.brushEnvelopeDelayTime, activeStep.brushEnvelopeAttackTime, activeStep.brushEnvelopeSustainTime, activeStep.brushEnvelopeReleaseTime,
-               bpm, totalDuration, spectrogramData.bandsPerOctave, spectrogramData.numBands, true
-             );
-             const envelopeY = calculateEnvelopeBoundaries(
-               activeStep.brushEnvelopeDelayPitch, activeStep.brushEnvelopeAttackPitch, activeStep.brushEnvelopeSustainPitch, activeStep.brushEnvelopeReleasePitch,
-               bpm, totalDuration, spectrogramData.bandsPerOctave, spectrogramData.numBands, false
-             );
+            const activeStep = createStepStateView(state, state.activeStepIndex);
+            const brushSizeUv = calculateBrushSizeUv(activeStep);
 
-             maskMaterial.uniforms.envelopeDelayEndX.value = envelopeX.delayEnd;
-             maskMaterial.uniforms.envelopeAttackEndX.value = envelopeX.attackEnd;
-             maskMaterial.uniforms.envelopeSustainEndX.value = envelopeX.sustainEnd;
-             maskMaterial.uniforms.envelopeReleaseEndX.value = envelopeX.releaseEnd;
-             maskMaterial.uniforms.envelopeDelayEndY.value = envelopeY.delayEnd;
-             maskMaterial.uniforms.envelopeAttackEndY.value = envelopeY.attackEnd;
-             maskMaterial.uniforms.envelopeSustainEndY.value = envelopeY.sustainEnd;
-             maskMaterial.uniforms.envelopeReleaseEndY.value = envelopeY.releaseEnd;
+            maskMaterial.uniforms.currentMaskTex.value = currentMaskFbo.texture;
+            maskMaterial.uniforms.destMetadataTex.value = metadataTex;
+            maskMaterial.uniforms.destInverseMapTex.value = inverseMapTex;
+            maskMaterial.uniforms.destSpectrogramTextureSize.value = spectrogramData.packedTextureSize;
+            maskMaterial.uniforms.destFrameCount.value = spectrogramData.numFrames;
+            maskMaterial.uniforms.destBandCount.value = spectrogramData.numBands;
+            maskMaterial.uniforms.brushBottomLeftUv.value = cursorPos;
+            maskMaterial.uniforms.brushSizeUv.value = brushSizeUv;
+            maskMaterial.uniforms.brushIntensity.value = {
+              value: activeStep.brushIntensity / 100,
+              minValue: 0,
+              maxValue: 1,
+              modulationAmounts: [0, 0, 0],
+              contextualModAmounts: [0, 0, 0, 0, 0],
+            };
 
-             fboMesh.material = maskMaterial;
-             gl.setRenderTarget(nextMaskFbo);
-             gl.render(fboScene, camera);
-             gl.setRenderTarget(null);
+            const envelopeX = calculateEnvelopeBoundaries(
+              activeStep.brushEnvelopeDelayTime,
+              activeStep.brushEnvelopeAttackTime,
+              activeStep.brushEnvelopeSustainTime,
+              activeStep.brushEnvelopeReleaseTime,
+              bpm,
+              totalDuration,
+              spectrogramData.bandsPerOctave,
+              spectrogramData.numBands,
+              true,
+            );
+            const envelopeY = calculateEnvelopeBoundaries(
+              activeStep.brushEnvelopeDelayPitch,
+              activeStep.brushEnvelopeAttackPitch,
+              activeStep.brushEnvelopeSustainPitch,
+              activeStep.brushEnvelopeReleasePitch,
+              bpm,
+              totalDuration,
+              spectrogramData.bandsPerOctave,
+              spectrogramData.numBands,
+              false,
+            );
 
-             // Flip ping-pong for next frame
-             maskPingPong.current = 1 - maskPingPong.current;
+            maskMaterial.uniforms.envelopeDelayEndX.value = envelopeX.delayEnd;
+            maskMaterial.uniforms.envelopeAttackEndX.value = envelopeX.attackEnd;
+            maskMaterial.uniforms.envelopeSustainEndX.value = envelopeX.sustainEnd;
+            maskMaterial.uniforms.envelopeReleaseEndX.value = envelopeX.releaseEnd;
+            maskMaterial.uniforms.envelopeDelayEndY.value = envelopeY.delayEnd;
+            maskMaterial.uniforms.envelopeAttackEndY.value = envelopeY.attackEnd;
+            maskMaterial.uniforms.envelopeSustainEndY.value = envelopeY.sustainEnd;
+            maskMaterial.uniforms.envelopeReleaseEndY.value = envelopeY.releaseEnd;
+
+            fboMesh.material = maskMaterial;
+            gl.setRenderTarget(nextMaskFbo);
+            gl.render(fboScene, camera);
+            gl.setRenderTarget(null);
+
+            // Flip ping-pong for next frame
+            maskPingPong.current = 1 - maskPingPong.current;
           }
 
           // Mark FBO data cache as dirty since we've modified the buffer
@@ -1421,30 +1437,30 @@ export const FileRenderer = memo(
     };
 
     const endStroke = () => {
-       const gl = glRef.current;
-       if (!gl || !strokeMaskFbo || !strokeMaskFbo2 || !strokeStartFbo || !fboMesh) return;
-       
-       // 1. Snapshot the RESULT of the stroke (current FBO) to strokeStartFbo
-       // This prepares it for the NEXT stroke.
-       const currentReadFBO = pingPong.current === 0 ? fbo1 : fbo2;
-       snapshotToStrokeStart(currentReadFBO.texture);
+      const gl = glRef.current;
+      if (!gl || !strokeMaskFbo || !strokeMaskFbo2 || !strokeStartFbo || !fboMesh) return;
 
-       // 2. Clear both Mask FBOs and reset ping-pong
-       const oldClearColor = new Color();
-       gl.getClearColor(oldClearColor);
-       const oldClearAlpha = gl.getClearAlpha();
-       gl.setClearColor(0x000000, 0);
+      // 1. Snapshot the RESULT of the stroke (current FBO) to strokeStartFbo
+      // This prepares it for the NEXT stroke.
+      const currentReadFBO = pingPong.current === 0 ? fbo1 : fbo2;
+      snapshotToStrokeStart(currentReadFBO.texture);
 
-       gl.setRenderTarget(strokeMaskFbo);
-       gl.clear(true, false, false);
-       gl.setRenderTarget(strokeMaskFbo2);
-       gl.clear(true, false, false);
-       gl.setRenderTarget(null);
+      // 2. Clear both Mask FBOs and reset ping-pong
+      const oldClearColor = new Color();
+      gl.getClearColor(oldClearColor);
+      const oldClearAlpha = gl.getClearAlpha();
+      gl.setClearColor(0x000000, 0);
 
-       gl.setClearColor(oldClearColor, oldClearAlpha);
-       maskPingPong.current = 0;
+      gl.setRenderTarget(strokeMaskFbo);
+      gl.clear(true, false, false);
+      gl.setRenderTarget(strokeMaskFbo2);
+      gl.clear(true, false, false);
+      gl.setRenderTarget(null);
 
-       invalidateRef.current?.();
+      gl.setClearColor(oldClearColor, oldClearAlpha);
+      maskPingPong.current = 0;
+
+      invalidateRef.current?.();
     };
 
     /**

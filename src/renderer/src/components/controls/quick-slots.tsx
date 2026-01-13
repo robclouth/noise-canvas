@@ -6,7 +6,6 @@ import { Tooltip } from "../tooltip";
 
 const NUM_QUICK_SLOTS = 10;
 
-
 const QuickSlot = memo(function QuickSlot({
   slotIndex,
   onClick,

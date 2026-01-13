@@ -20,7 +20,7 @@ export const SelectControl = <T,>({
   const { ref, focused } = useFocusWithin();
   const theme = useMantineTheme();
   const themeColor = theme.colors[color]?.[6] || color;
-  
+
   const handleChange = (val: string | null) => {
     if (val !== null) {
       const option = options.find((o) => String(o.value) === val);
@@ -38,10 +38,10 @@ export const SelectControl = <T,>({
           color={color}
           size="xs"
           variant="unstyled"
-          style={{ 
-            borderRadius: 2, 
-            border: `1px solid ${focused ? themeColor : "#666"}`, 
-            backgroundColor: "#2c2c2c" 
+          style={{
+            borderRadius: 2,
+            border: `1px solid ${focused ? themeColor : "#666"}`,
+            backgroundColor: "#2c2c2c",
           }}
           w={70}
           data={options.map((o) => ({ value: String(o.value), label: o.label }))}
