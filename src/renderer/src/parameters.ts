@@ -78,8 +78,6 @@ const beatMarksWithOff = [{ value: 0, label: "Off" }, ...BEAT_VALUES];
 const beatMarksWithZero = [{ value: 0, label: "0" }, ...BEAT_VALUES];
 const semitoneMarksWithOff = [{ value: 0, label: "Off" }, ...PITCH_VALUES];
 const semitoneMarksWithZero = [{ value: 0, label: "0" }, ...PITCH_VALUES];
-const beatMarksWithNegatives = [...negBeatMarks, zeroBeatMark, ...posBeatMarks];
-const semitoneMarksWithNegatives = [...negPitchMarks, zeroPitchMark, ...posPitchMarks];
 const DEFAULT_EFFECT_ORDER = Object.keys(effects)
   .filter((key) => key !== "passthrough")
   .map((k) => ({ effect: k as EffectType, enabled: false }));
@@ -278,12 +276,12 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     label: "Delay ↔",
     description: "Delay time before the attack phase begins (horizontal, in beats).",
     default: 0,
-    min: -32,
+    min: 0,
     max: 32,
     step: 0.01,
     unit: BEAT_UNIT,
-    scale: "logBipolar",
-    marks: beatMarksWithNegatives,
+    scale: "log",
+    marks: beatMarksWithZero,
     includeInPresets: true,
     includeInStep: true,
   },
@@ -338,11 +336,11 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     label: "Delay ↕",
     description: "Delay pitch before the attack phase begins (vertical, in semitones).",
     default: 0,
-    min: -96,
+    min: 0,
     max: 96,
     step: 0.1,
     unit: SEMITONE_UNIT,
-    marks: semitoneMarksWithNegatives,
+    marks: semitoneMarksWithZero,
     includeInPresets: true,
     includeInStep: true,
   },

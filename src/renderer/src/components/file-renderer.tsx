@@ -569,9 +569,9 @@ export const FileRenderer = memo(
         // Calculate brush size from envelope in the CURRENT file's coordinate space
         const envelopeTimeUvCurrent = unitsToUv(
           state.brushEnvelopeDelayTime +
-            state.brushEnvelopeAttackTime +
-            state.brushEnvelopeSustainTime +
-            state.brushEnvelopeReleaseTime,
+          state.brushEnvelopeAttackTime +
+          state.brushEnvelopeSustainTime +
+          state.brushEnvelopeReleaseTime,
           0,
           bpm,
           totalDuration,
@@ -581,9 +581,9 @@ export const FileRenderer = memo(
         const envelopePitchUvCurrent = unitsToUv(
           0,
           state.brushEnvelopeDelayPitch +
-            state.brushEnvelopeAttackPitch +
-            state.brushEnvelopeSustainPitch +
-            state.brushEnvelopeReleasePitch,
+          state.brushEnvelopeAttackPitch +
+          state.brushEnvelopeSustainPitch +
+          state.brushEnvelopeReleasePitch,
           bpm,
           totalDuration,
           spectrogramData.bandsPerOctave,
@@ -764,9 +764,9 @@ export const FileRenderer = memo(
       const calculateBrushSizeUv = (stepState: State) => {
         const envelopeTimeUv = unitsToUv(
           stepState.brushEnvelopeDelayTime +
-            stepState.brushEnvelopeAttackTime +
-            stepState.brushEnvelopeSustainTime +
-            stepState.brushEnvelopeReleaseTime,
+          stepState.brushEnvelopeAttackTime +
+          stepState.brushEnvelopeSustainTime +
+          stepState.brushEnvelopeReleaseTime,
           0,
           bpm,
           totalDuration,
@@ -776,9 +776,9 @@ export const FileRenderer = memo(
         const envelopePitchUv = unitsToUv(
           0,
           stepState.brushEnvelopeDelayPitch +
-            stepState.brushEnvelopeAttackPitch +
-            stepState.brushEnvelopeSustainPitch +
-            stepState.brushEnvelopeReleasePitch,
+          stepState.brushEnvelopeAttackPitch +
+          stepState.brushEnvelopeSustainPitch +
+          stepState.brushEnvelopeReleasePitch,
           bpm,
           totalDuration,
           spectrogramData.bandsPerOctave,
@@ -821,8 +821,6 @@ export const FileRenderer = memo(
           originalSpectrogramTex: { value: originalPackedDataTex || placeholderTexture },
           viewZoomPower: { value: viewZoomPower },
           viewOffset: { value: viewOffset },
-          brushBottomLeftUv: { value: cursorPos },
-          brushSizeUv: { value: brushSizeUv },
           ...(() => {
             // Calculate envelope boundaries on CPU
             const envelopeX = calculateEnvelopeBoundaries(
@@ -847,7 +845,9 @@ export const FileRenderer = memo(
               spectrogramData.numBands,
               false,
             );
+
             return {
+              brushBottomLeftUv: { value: cursorPos },
               envelopeDelayEndX: { value: envelopeX.delayEnd },
               envelopeAttackEndX: { value: envelopeX.attackEnd },
               envelopeSustainEndX: { value: envelopeX.sustainEnd },
@@ -858,6 +858,7 @@ export const FileRenderer = memo(
               envelopeReleaseEndY: { value: envelopeY.releaseEnd },
             };
           })(),
+          brushSizeUv: { value: brushSizeUv },
           brushIntensity: {
             value: {
               value: stepState.brushIntensity / 100,
@@ -1125,7 +1126,6 @@ export const FileRenderer = memo(
             maskMaterial.uniforms.destSpectrogramTextureSize.value = spectrogramData.packedTextureSize;
             maskMaterial.uniforms.destFrameCount.value = spectrogramData.numFrames;
             maskMaterial.uniforms.destBandCount.value = spectrogramData.numBands;
-            maskMaterial.uniforms.brushBottomLeftUv.value = cursorPos;
             maskMaterial.uniforms.brushSizeUv.value = brushSizeUv;
             maskMaterial.uniforms.brushIntensity.value = {
               value: activeStep.brushIntensity / 100,
@@ -1157,6 +1157,8 @@ export const FileRenderer = memo(
               spectrogramData.numBands,
               false,
             );
+
+            maskMaterial.uniforms.brushBottomLeftUv.value = cursorPos;
 
             maskMaterial.uniforms.envelopeDelayEndX.value = envelopeX.delayEnd;
             maskMaterial.uniforms.envelopeAttackEndX.value = envelopeX.attackEnd;
@@ -1204,6 +1206,7 @@ export const FileRenderer = memo(
       displayMaterial.uniforms.bpm.value = bpm;
       displayMaterial.uniforms.minDb.value = state.displayMinDb;
       displayMaterial.uniforms.maxDb.value = state.displayMaxDb;
+
       displayMaterial.uniforms.brushBottomLeftUv.value = cursorPos;
       displayMaterial.uniforms.brushSizeUv.value = brushSizeUv;
       displayMaterial.uniforms.sourceBrushSizeUv.value = (() => {
@@ -1217,9 +1220,9 @@ export const FileRenderer = memo(
           const stepState = createStepStateView(state, i);
           const timeUv = unitsToUv(
             stepState.brushEnvelopeDelayTime +
-              stepState.brushEnvelopeAttackTime +
-              stepState.brushEnvelopeSustainTime +
-              stepState.brushEnvelopeReleaseTime,
+            stepState.brushEnvelopeAttackTime +
+            stepState.brushEnvelopeSustainTime +
+            stepState.brushEnvelopeReleaseTime,
             0,
             targetBpm,
             targetDuration,
@@ -1229,9 +1232,9 @@ export const FileRenderer = memo(
           const pitchUv = unitsToUv(
             0,
             stepState.brushEnvelopeDelayPitch +
-              stepState.brushEnvelopeAttackPitch +
-              stepState.brushEnvelopeSustainPitch +
-              stepState.brushEnvelopeReleasePitch,
+            stepState.brushEnvelopeAttackPitch +
+            stepState.brushEnvelopeSustainPitch +
+            stepState.brushEnvelopeReleasePitch,
             targetBpm,
             targetDuration,
             targetFile.spectrogramData.bandsPerOctave,
