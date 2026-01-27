@@ -1,4 +1,5 @@
 import { deepMerge } from "@mantine/core";
+import { CONTEXTUAL_MOD_SOURCES, NUM_MODULATORS } from "@renderer/lib/constants";
 import { isStepParameter, parameterDefs } from "@renderer/parameters";
 import { produce } from "immer";
 import { create } from "zustand";
@@ -18,6 +19,9 @@ export const ALL_PERSISTED_KEYS: (keyof State)[] = [
   ...AUDIO_PERSISTED_KEYS,
   ...PRESETS_PERSISTED_KEYS,
   ...STEPS_PERSISTED_KEYS,
+  "randomizationAmounts",
+  "excludedFromRandomization",
+  "linkedParams",
 ];
 
 export const useStore = create<State>()(
@@ -33,18 +37,76 @@ export const useStore = create<State>()(
         ...createPresetsSlice(set, get),
         ...createStepsSlice(set, get),
         setParameter: (key: ParameterKey, value: any) => {
-          // If this is a step parameter, update the active step
+          const state = get();
+          const isLinked = state.linkedParams.includes(key as string);
+          
+          // If this is a step parameter, update the active step (or all steps if linked)
           if (isStepParameter(key)) {
             set(
               produce((draft: State) => {
-                if (draft.steps[draft.activeStepIndex]) {
-                  draft.steps[draft.activeStepIndex][key] = value;
+                if (isLinked) {
+                  // Propagate to all steps when linked
+                  draft.steps.forEach((step) => {
+                    step[key] = value;
+                  });
+                } else {
+                  // Only update active step
+                  if (draft.steps[draft.activeStepIndex]) {
+                    draft.steps[draft.activeStepIndex][key] = value;
+                  }
                 }
               }),
             );
           } else {
             set({ [key]: value });
           }
+        },
+        randomizationAmounts: {},
+        setRandomizationAmount: (key: string, amount: number) => {
+          set(
+            produce((draft: State) => {
+              if (amount === 0) {
+                delete draft.randomizationAmounts[key];
+              } else {
+                draft.randomizationAmounts[key] = amount;
+              }
+            }),
+          );
+        },
+        excludedFromRandomization: [],
+        linkedParams: [],
+        setParamExcluded: (key: ParameterKey, excluded: boolean) => {
+          set(
+            produce((draft: State) => {
+              const keyStr = key as string;
+              const index = draft.excludedFromRandomization.indexOf(keyStr);
+              if (excluded && index === -1) {
+                draft.excludedFromRandomization.push(keyStr);
+              } else if (!excluded && index !== -1) {
+                draft.excludedFromRandomization.splice(index, 1);
+              }
+            }),
+          );
+        },
+        setParamLinked: (key: ParameterKey, linked: boolean) => {
+          set(
+            produce((draft: State) => {
+              const keyStr = key as string;
+              const index = draft.linkedParams.indexOf(keyStr);
+              if (linked && index === -1) {
+                draft.linkedParams.push(keyStr);
+                // When enabling linking, sync current value to all steps
+                if (isStepParameter(key)) {
+                  const currentValue = draft.steps[draft.activeStepIndex]?.[key];
+                  draft.steps.forEach((step) => {
+                    step[key] = currentValue;
+                  });
+                }
+              } else if (!linked && index !== -1) {
+                draft.linkedParams.splice(index, 1);
+              }
+            }),
+          );
         },
       }),
       {
@@ -100,6 +162,27 @@ export function getParameterValue(state: State, key: ParameterKey): any {
   return state[key];
 }
 
+
+/**
+ * Get modulation amount parameter keys for a given parameter
+ * Returns keys like: brushIntensityMod1Amount, brushIntensityMod2Amount, etc.
+ */
+export function getModulationParamKeys(paramKey: ParameterKey): ParameterKey[] {
+  const keys: ParameterKey[] = [];
+
+  // Modulator amounts (Mod1Amount, Mod2Amount, Mod3Amount)
+  for (let i = 1; i <= NUM_MODULATORS; i++) {
+    keys.push(`${paramKey}Mod${i}Amount` as ParameterKey);
+  }
+
+  // Contextual mod amounts (ModIteration, ModTime, ModPitch, ModRandom, ModStep)
+  for (const source of CONTEXTUAL_MOD_SOURCES) {
+    keys.push(`${paramKey}Mod${source.key}` as ParameterKey);
+  }
+
+  return keys;
+}
+
 /**
  * Get a parameter value from a specific step.
  * For step parameters, returns the value from the specified step.
@@ -149,3 +232,4 @@ export function createStepStateView(state: State, stepIndex: number): State {
 
   return view as unknown as State;
 }
+

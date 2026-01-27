@@ -3,7 +3,6 @@ import {
   Combobox,
   Group,
   NumberInput,
-  Popover,
   ScrollArea,
   Stack,
   Text,
@@ -11,10 +10,9 @@ import {
   useMantineTheme,
 } from "@mantine/core";
 import { useFocusWithin, useMergedRef, useWindowEvent } from "@mantine/hooks";
-import type { ParameterKey, SliderMark } from "@renderer/store/types";
+import type { SliderMark } from "@renderer/store/types";
 import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ParameterControl } from "./parameter-control";
 
 const BASE_SENSITIVITY = 1 / 200;
 const SHIFT_SENSITIVITY = 1 / 600;
@@ -30,8 +28,6 @@ type NumboxControlProps = {
   step?: number;
   unit?: string;
   disabled?: boolean;
-  modulatorParamKeys?: ParameterKey[];
-  contextualModParamKeys?: ParameterKey[];
   marks?: SliderMark[];
   leftValue?: SliderMark;
   rightValue?: SliderMark;
@@ -50,8 +46,6 @@ export const NumboxControl = (props: NumboxControlProps) => {
     step,
     unit,
     disabled,
-    modulatorParamKeys,
-    contextualModParamKeys,
     color = "orange",
     marks,
     leftValue,
@@ -79,10 +73,25 @@ export const NumboxControl = (props: NumboxControlProps) => {
   const mergedRef = useMergedRef(containerRef, focusRef);
 
   useEffect(() => {
-    const position = toNormalized(value);
-    updateActiveMark(position);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // Check if the current value matches any mark exactly
+    if (marks?.length) {
+      const matchingMark = marks.find((m) => m.value === value);
+      if (matchingMark) {
+        setActiveMark(matchingMark);
+        return;
+      }
+    }
+    if (leftValue && value === leftValue.value) {
+      setActiveMark(leftValue);
+      return;
+    }
+    if (rightValue && value === rightValue.value) {
+      setActiveMark(rightValue);
+      return;
+    }
+    // No exact mark match - clear activeMark
+    setActiveMark(null);
+  }, [value, marks, leftValue, rightValue]);
 
   const nearestMark = useCallback(
     (position: number) => {
@@ -403,27 +412,8 @@ export const NumboxControl = (props: NumboxControlProps) => {
     </Box>
   );
 
-  const hasModulators = modulatorParamKeys || contextualModParamKeys;
-  const labelWithModulators = hasModulators ? (
-    <Popover withArrow shadow="lg">
-      <Popover.Target>
-        <Group gap={2} w={70} style={{ cursor: "pointer" }} wrap="nowrap">
-          {labelComponent}
-          <ChevronDown style={{ flexShrink: 0 }} size={10} />
-        </Group>
-      </Popover.Target>
-      <Popover.Dropdown py={2} px={4}>
-        {modulatorParamKeys?.map((k) => (
-          <ParameterControl labelWidth={40} key={k} paramKey={k} color={"blue"} />
-        ))}
-        {contextualModParamKeys?.map((k) => (
-          <ParameterControl labelWidth={40} key={k} paramKey={k} color={"green"} />
-        ))}
-      </Popover.Dropdown>
-    </Popover>
-  ) : (
-    labelComponent
-  );
+  // Just use labelComponent directly (ParamMenu or other wrapper handles modulation display)
+  const labelWithModulators = labelComponent;
 
   const numboxWithCombobox = marks ? (
     <Combobox

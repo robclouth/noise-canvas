@@ -34,6 +34,23 @@ const EFFECT_DESCRIPTIONS: Record<string, string> = {
   synthesize: "Generate new audio content from scratch (noise, sine waves, etc.).",
 };
 
+import { ParameterKey } from "@/store/types";
+
+const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
+  dynamics: ["dynamicsThresholdDb", "dynamicsUpperRatio", "dynamicsLowerRatio", "dynamicsKnee", "dynamicsGainDb"],
+  transform: [
+    "transformShiftBeats",
+    "transformShiftSemis",
+    "transformScaleTime",
+    "transformScalePitch",
+    "transformRotation",
+    "transformEdgeMode",
+  ],
+  overtones: ["overtonesCount", "overtonesScale", "overtonesDecay", "overtonesShape"],
+  blur: ["blurAmountTime", "blurAmountPitch", "blurNoiseTime", "blurNoisePitch", "blurBleed", "blurOrigin"],
+  synthesize: ["synthesizeBrushType"],
+};
+
 export function EffectsList() {
   const effectOrder = useStore(selectParameter("effectOrder")) as { effect: EffectType; enabled: boolean }[];
   const setParameter = useStore((state) => state.setParameter);
@@ -79,6 +96,7 @@ export function EffectsList() {
                       }
                       dragHandleProps={provided.dragHandleProps}
                       color={EFFECT_COLORS[effect] || "gray"}
+                      parameterKeys={EFFECT_PARAMS[effect]}
                     >
                       {EFFECT_COMPONENTS[effect] || null}
                     </EffectSection>

@@ -1,11 +1,10 @@
 import type { ParameterKey } from "@/store/types";
-import { Text } from "@mantine/core";
 import { getParameterDef } from "@renderer/parameters";
 import { selectParameter, useStore } from "@renderer/store";
 import { getContextualModAmountParamKeys, getModAmountParamKeys } from "@renderer/store/modulators";
 import { denormalizeParameterValue, normalizeParameterValue } from "@renderer/store/utils";
-import { Tooltip } from "../tooltip";
 import { NumboxControl } from "./numbox-control";
+import { ParamMenu } from "./param-menu";
 import { SelectControl } from "./select-control";
 import { SwitchControl } from "./switch-control";
 
@@ -25,7 +24,7 @@ export const ParameterControl = ({
   labelPosition,
 }: ParameterControlProps) => {
   const parameter = getParameterDef(paramKey);
-  const { kind, default: defaultValue, label, description } = parameter;
+  const { kind } = parameter;
   const isModulatable = kind === "number" && "modulatable" in parameter && parameter.modulatable;
 
   const isModulated = useStore((state) => {
@@ -48,20 +47,11 @@ export const ParameterControl = ({
   const parameterValue = useStore(selectParameter(paramKey));
   const setParameter = useStore((state) => state.setParameter);
 
+  // Use ParamMenu as the label component (it handles the label rendering internally)
   const labelComponent = (
-    <Tooltip label={description}>
-      <Text
-        size="xs"
-        w={labelWidth}
-        lineClamp={1}
-        truncate="end"
-        onDoubleClick={() => setParameter(paramKey, defaultValue)}
-        c={isModulated ? "blue" : "dark.0"}
-        ta="right"
-      >
-        {label}
-      </Text>
-    </Tooltip>
+    <ParamMenu paramKey={paramKey} labelWidth={labelWidth} isModulated={isModulated}>
+      {parameter.label}
+    </ParamMenu>
   );
 
   if (kind === "options") {
@@ -71,7 +61,7 @@ export const ParameterControl = ({
         value={parameterValue}
         options={parameter.options}
         setValue={(value) => setParameter(paramKey, value)}
-        labelWidth={60}
+        labelWidth={labelWidth}
         color={color}
       />
     );
@@ -90,8 +80,6 @@ export const ParameterControl = ({
         unit={parameter.unit}
         marks={parameter.marks}
         disabled={disabled}
-        modulatorParamKeys={isModulatable ? getModAmountParamKeys(paramKey) : undefined}
-        contextualModParamKeys={isModulatable ? getContextualModAmountParamKeys(paramKey) : undefined}
         color={color}
         rightValue={parameter.rightValue}
         fromNormalized={(value) => denormalizeParameterValue(paramKey, value)}

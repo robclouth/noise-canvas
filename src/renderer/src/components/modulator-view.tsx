@@ -1,5 +1,5 @@
 import test from "@/assets/textures/Alien Metal.jpg";
-import { SegmentedControl, SimpleGrid, Stack } from "@mantine/core";
+import { Group, SegmentedControl, SimpleGrid, Stack } from "@mantine/core";
 import { useTexture, View } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
@@ -13,6 +13,7 @@ import { buildModulatorUniforms, useModulatorScaleLut } from "../lib/modulator-u
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import { ModulatorShapeControl } from "./controls/modulator-shape-control";
 import { ParameterControl } from "./controls/parameter-control";
+import { SectionMenu } from "./controls/section-menu";
 
 const Scene = ({
   modulatorIndex,
@@ -108,6 +109,22 @@ const Scene = ({
   );
 };
 
+// Get all parameter keys for a specific modulator
+const getModulatorParamKeys = (modulatorIndex: number): ParameterKey[] => {
+  const idx = modulatorIndex + 1;
+  return [
+    `modulator${idx}Mode`,
+    `modulator${idx}PatternShape`,
+    `modulator${idx}PatternRateBeats`,
+    `modulator${idx}PatternRateSemis`,
+    `modulator${idx}Rotation`,
+    `modulator${idx}PhaseMode`,
+    `modulator${idx}Strength`,
+    `modulator${idx}EnvelopeMinDb`,
+    `modulator${idx}EnvelopeMaxDb`,
+  ] as ParameterKey[];
+};
+
 export const ModulatorView = () => {
   const [viewedModulatorIndex, setViewedModulatorIndex] = useState("0");
   const modulatorModeKey = `modulator${parseInt(viewedModulatorIndex) + 1}Mode` as ParameterKey;
@@ -118,6 +135,8 @@ export const ModulatorView = () => {
   const isPatternMode = modulatorMode === 0;
   const isEnvelopeFollowerMode = modulatorMode === 1;
   const isScaleMode = modulatorPatternShape === 11;
+
+  const currentModulatorParams = getModulatorParamKeys(parseInt(viewedModulatorIndex));
 
   const viewRef = useRef<HTMLDivElement>(null);
   const invalidateRef = useRef<(() => void) | null>(null);
@@ -168,15 +187,22 @@ export const ModulatorView = () => {
 
   return (
     <Stack gap={2}>
-      <SegmentedControl
-        size="xs"
-        value={viewedModulatorIndex}
-        onChange={setViewedModulatorIndex}
-        data={Array.from({ length: NUM_MODULATORS }).map((_, index) => ({
-          label: `${index + 1}`,
-          value: index.toString(),
-        }))}
-      />
+      <Group gap={4} wrap="nowrap" align="center" h={24}>
+        <SegmentedControl
+          size="xs"
+          value={viewedModulatorIndex}
+          onChange={setViewedModulatorIndex}
+          data={Array.from({ length: NUM_MODULATORS }).map((_, index) => ({
+            label: `${index + 1}`,
+            value: index.toString(),
+          }))}
+          style={{ flex: 1 }}
+        />
+        <SectionMenu
+          storageKey={`modulator-${viewedModulatorIndex}`}
+          parameterKeys={currentModulatorParams}
+        />
+      </Group>
       <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
         <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Mode` as ParameterKey} />
         {isPatternMode && (
@@ -221,3 +247,6 @@ export const ModulatorView = () => {
     </Stack>
   );
 };
+
+
+
