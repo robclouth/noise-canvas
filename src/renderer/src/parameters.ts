@@ -168,7 +168,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
   modulatorDefs[`modulator${idx}PhaseMode`] = {
     kind: "options",
     name: `Modulator Phase Mode ${idx}`,
-    label: "Phase",
+    label: "Phase Mode",
     description: "Whether the phase is anchored to the canvas or the brush position.",
     default: 0,
     options: [
@@ -177,6 +177,34 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     ],
     includeInPresets: true,
     includeInStep: true,
+  };
+  modulatorDefs[`modulator${idx}PhaseX`] = {
+    kind: "number",
+    name: `Modulator Phase X ${idx}`,
+    label: "Phase ↔",
+    description: "The horizontal phase offset of the modulator pattern.",
+    default: 0,
+    min: 0,
+    max: 100,
+    step: 1,
+    unit: "%",
+    includeInPresets: true,
+    includeInStep: true,
+    modulatable: false,
+  };
+  modulatorDefs[`modulator${idx}PhaseY`] = {
+    kind: "number",
+    name: `Modulator Phase Y ${idx}`,
+    label: "Phase ↕",
+    description: "The vertical phase offset of the modulator pattern.",
+    default: 0,
+    min: 0,
+    max: 100,
+    step: 1,
+    unit: "%",
+    includeInPresets: true,
+    includeInStep: true,
+    modulatable: false,
   };
   modulatorDefs[`modulator${idx}EnvelopeMinDb`] = {
     kind: "number",

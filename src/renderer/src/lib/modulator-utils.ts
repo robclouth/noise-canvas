@@ -21,6 +21,8 @@ export const buildModulatorUniforms = (
     const mode = state[`modulator${i + 1}Mode`] as number;
     const shape = state[`modulator${i + 1}PatternShape`] as number;
     const phaseMode = state[`modulator${i + 1}PhaseMode`] as number;
+    const phaseX = state[`modulator${i + 1}PhaseX`] as number;
+    const phaseY = state[`modulator${i + 1}PhaseY`] as number;
     const rateBeats = state[`modulator${i + 1}PatternRateBeats`] as number;
     const rateSemis = state[`modulator${i + 1}PatternRateSemis`] as number;
     const strength = state[`modulator${i + 1}Strength`] as number;
@@ -40,6 +42,20 @@ export const buildModulatorUniforms = (
       modulatorMode: mode,
       modulatorPatternShape: shape,
       modulatorPhaseMode: phaseMode,
+      modulatorPhaseX: {
+        value: phaseX / 100,
+        minValue: 0.0,
+        maxValue: 1.0,
+        modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}PhaseX` as ParameterKey),
+        contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}PhaseX` as ParameterKey),
+      },
+      modulatorPhaseY: {
+        value: phaseY / 100,
+        minValue: 0.0,
+        maxValue: 1.0,
+        modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}PhaseY` as ParameterKey),
+        contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}PhaseY` as ParameterKey),
+      },
       modulatorPatternRateX: {
         value: modulatorPatternRate.x,
         minValue: 0.0,

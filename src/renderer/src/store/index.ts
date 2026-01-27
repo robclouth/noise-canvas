@@ -138,6 +138,8 @@ export function getModulator(index: number) {
     modulatorStrength: state[`modulator${index}Strength` as ParameterKey],
     modulatorRotation: state[`modulator${index}Rotation` as ParameterKey],
     modulatorPhaseMode: state[`modulator${index}PhaseMode` as ParameterKey],
+    modulatorPhaseX: state[`modulator${index}PhaseX` as ParameterKey],
+    modulatorPhaseY: state[`modulator${index}PhaseY` as ParameterKey],
   };
 }
 

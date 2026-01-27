@@ -119,6 +119,8 @@ const getModulatorParamKeys = (modulatorIndex: number): ParameterKey[] => {
     `modulator${idx}PatternRateSemis`,
     `modulator${idx}Rotation`,
     `modulator${idx}PhaseMode`,
+    `modulator${idx}PhaseX`,
+    `modulator${idx}PhaseY`,
     `modulator${idx}Strength`,
     `modulator${idx}EnvelopeMinDb`,
     `modulator${idx}EnvelopeMaxDb`,
@@ -218,6 +220,12 @@ export const ModulatorView = () => {
                 />
                 <ParameterControl
                   paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternRateSemis` as ParameterKey}
+                />
+                <ParameterControl
+                  paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseX` as ParameterKey}
+                />
+                <ParameterControl
+                  paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseY` as ParameterKey}
                 />
                 <ParameterControl
                   paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseMode` as ParameterKey}

@@ -7,6 +7,8 @@ struct Modulator {
   int modulatorMode;
   int modulatorPatternShape;
   int modulatorPhaseMode;
+  Parameter modulatorPhaseX;
+  Parameter modulatorPhaseY;
   Parameter modulatorPatternRateX;
   Parameter modulatorPatternRateY;
   Parameter modulatorStrength;
@@ -23,7 +25,9 @@ uniform sampler2D modulator3ImageTex;
 
 // Base version that doesn't apply modulation to modulator parameters
 // This is used internally to avoid recursion
-float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float patternRateY, float strength, float rotation, float audioLevelDb) {
+// Base version that doesn't apply modulation to modulator parameters
+// This is used internally to avoid recursion
+float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float patternRateY, float strength, float rotation, float phaseX, float phaseY, float audioLevelDb) {
   float v = 0.0;
 
   Modulator modulator = modulators[modulatorIndex];
@@ -57,6 +61,10 @@ float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float p
   vec2 rotatedUv = m * (adjustedUv - 0.5) + 0.5;
 
   vec2 pos = rotatedUv * rates;
+  
+  // Apply phase offset
+  pos += vec2(phaseX, phaseY);
+  
   bool x_zero = patternRateX == 0.0;
   bool y_zero = patternRateY == 0.0;
 
@@ -136,8 +144,10 @@ float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, flo
   float patternRateY = modulator.modulatorPatternRateY.value;
   float strength = modulator.modulatorStrength.value;
   float rotation = modulator.modulatorRotation.value;
+  float phaseX = modulator.modulatorPhaseX.value;
+  float phaseY = modulator.modulatorPhaseY.value;
   
-  return getModulationBase(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, audioLevelDb);
+  return getModulationBase(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, audioLevelDb);
 }
 
 float applyModulation(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float[NUM_CONTEXTUAL_MOD_SOURCES] contextualModAmounts, vec2 uv, int depth, float audioLevelDb) {
