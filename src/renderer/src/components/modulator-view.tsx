@@ -219,6 +219,12 @@ export const ModulatorView = () => {
                 <ParameterControl
                   paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternRateSemis` as ParameterKey}
                 />
+                <ParameterControl
+                  paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseMode` as ParameterKey}
+                />
+                <ParameterControl
+                  paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Rotation` as ParameterKey}
+                />
               </>
             )}
           </>
@@ -231,12 +237,6 @@ export const ModulatorView = () => {
             <ParameterControl
               paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}EnvelopeMaxDb` as ParameterKey}
             />
-          </>
-        )}
-        {!isPatternMode && !isEnvelopeFollowerMode && (
-          <>
-            <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseMode` as ParameterKey} />
-            <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Rotation` as ParameterKey} />
           </>
         )}
         <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Strength` as ParameterKey} />
