@@ -1,7 +1,7 @@
 import { notifications } from "@mantine/notifications";
 import { getFolders } from "@renderer/lib/folders";
 import { CURRENT_PRESET_VERSION, PresetType, validatePreset } from "@renderer/lib/preset-schema";
-import { parameterDefs } from "@renderer/parameters";
+import { BrushStep, createDefaultStep, parameterDefs } from "@renderer/parameters";
 import { produce } from "immer";
 import { factoryPresets } from "../lib/factory-presets";
 import type { State, ZustandGet, ZustandSet } from "./types";
@@ -11,6 +11,8 @@ export interface PresetsState {
   init: () => Promise<void>;
   presetsDir: string | null;
   currentPresetId: string | null;
+  isPresetDirty: boolean;
+  setPresetDirty: (dirty: boolean) => void;
   availablePresets: PresetType[];
   setCurrentPresetId: (presetId: string | null) => void;
   captureState: () => Partial<State>;
@@ -117,6 +119,8 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     }
   },
   availablePresets: [...factoryPresets],
+  isPresetDirty: false,
+  setPresetDirty: (dirty: boolean) => set({ isPresetDirty: dirty }),
   setCurrentPresetId: (presetId) => set({ currentPresetId: presetId }),
   recallState: (parameters: Partial<State>) => {
     const state = get();
@@ -124,7 +128,20 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
 
     // Handle steps array if present in preset
     if (parameters.steps && Array.isArray(parameters.steps)) {
-      updates.steps = parameters.steps;
+      // Merge each preset step with default step values to ensure all parameters are filled
+      updates.steps = parameters.steps.map((presetStep: any, index: number) => {
+        const defaultStep = createDefaultStep(presetStep.name || `Step ${index + 1}`);
+        return {
+          ...defaultStep,
+          ...presetStep,
+          // Preserve the preset's step ID if it exists, otherwise use the generated one
+          id: presetStep.id || defaultStep.id,
+        } as BrushStep;
+      });
+      updates.activeStepIndex = 0;
+    } else {
+      // If no steps in preset, reset to a single default step
+      updates.steps = [createDefaultStep("Step 1")];
       updates.activeStepIndex = 0;
     }
 
@@ -167,9 +184,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
   loadPreset: (presetId: string) => {
     const state = get();
 
-    if (presetId === state.currentPresetId) {
-      return;
-    }
+    // Allow re-selecting the same preset to reload/reset it
 
     const preset = state.availablePresets.find((p) => p.id === presetId);
     if (!preset) {
@@ -182,7 +197,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       return;
     }
 
-    set({ currentPresetId: presetId, ...state.recallState(preset.parameters) });
+    set({ currentPresetId: presetId, isPresetDirty: false, ...state.recallState({ ...preset.parameters, steps: preset.steps }) });
   },
   savePreset: async (name: string, presetId?: string) => {
     try {
@@ -216,7 +231,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
         const filePath = window.nodePath.join(presetsDir!, fileName);
         await window.nodeFs.writeFile(filePath, JSON.stringify(preset, null, 2), "utf-8");
 
-        set({ currentPresetId: id, availablePresets: [...availablePresets.filter((p) => p.id !== id), preset] });
+        set({ currentPresetId: id, isPresetDirty: false, availablePresets: [...availablePresets.filter((p) => p.id !== id), preset] });
 
         console.log("Preset saved:", preset.name, "at", filePath);
         notifications.show({

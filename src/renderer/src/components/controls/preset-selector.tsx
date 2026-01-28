@@ -14,6 +14,7 @@ export function PresetSelector() {
   const loadPreset = useStore((state) => state.loadPreset);
   const savePreset = useStore((state) => state.savePreset);
   const deletePreset = useStore((state) => state.deletePreset);
+  const isDirty = useStore((state) => state.isPresetDirty);
 
   const [hotkeyAssignMode, setHotkeyAssignMode] = useState(false);
   const presetHotkeys = useStore((state) => state.presetHotkeys);
@@ -164,7 +165,7 @@ export function PresetSelector() {
       <Select
         size="xs"
         value={currentPresetId}
-        onChange={handlePresetChange}
+        onOptionSubmit={handlePresetChange}
         data={selectData}
         styles={{
           input: {
@@ -172,6 +173,7 @@ export function PresetSelector() {
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
+            fontStyle: isDirty ? "italic" : "normal",
           },
         }}
         w="100%"

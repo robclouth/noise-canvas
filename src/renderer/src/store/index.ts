@@ -44,6 +44,7 @@ export const useStore = create<State>()(
           if (isStepParameter(key)) {
             set(
               produce((draft: State) => {
+                draft.isPresetDirty = true;
                 if (isLinked) {
                   // Propagate to all steps when linked
                   draft.steps.forEach((step) => {
@@ -58,7 +59,7 @@ export const useStore = create<State>()(
               }),
             );
           } else {
-            set({ [key]: value });
+            set({ [key]: value, isPresetDirty: true });
           }
         },
         randomizationAmounts: {},
