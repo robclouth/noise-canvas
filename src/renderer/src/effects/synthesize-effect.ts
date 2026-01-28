@@ -1,6 +1,7 @@
 import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import synthesizeBrushFrag from "../glsl/synthesize-effect.frag";
+import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
 import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
 
@@ -14,7 +15,7 @@ class SynthesizeEffect extends BaseEffect {
           synthesizeType: { value: 0 },
         },
         vertexShader: passThroughVert,
-        fragmentShader: synthesizeBrushFrag,
+        fragmentShader: withPlatformDefines(synthesizeBrushFrag),
         glslVersion: GLSL3,
       }),
     ];

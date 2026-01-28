@@ -10,6 +10,7 @@ import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import modulatorFrag from "../glsl/modulator.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { buildModulatorUniforms, useModulatorScaleLut } from "../lib/modulator-utils";
+import { withPlatformDefines } from "../lib/shader-utils";
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import { ModulatorShapeControl } from "./controls/modulator-shape-control";
 import { ParameterControl } from "./controls/parameter-control";
@@ -59,7 +60,7 @@ const Scene = ({
         testTexture: { value: testTexture },
       },
       vertexShader: passThroughVert,
-      fragmentShader: modulatorFrag,
+      fragmentShader: withPlatformDefines(modulatorFrag),
       glslVersion: GLSL3,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

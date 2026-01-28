@@ -3,6 +3,7 @@ import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from 
 import { ClampToEdgeWrapping, DataTexture, FloatType, GLSL3, NearestFilter, RawShaderMaterial, RedFormat } from "three";
 import overtonesFrag from "../glsl/overtones-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
+import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
 import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
 import { shapes } from "./overtones-shapes";
@@ -38,7 +39,7 @@ class OvertonesEffect extends BaseEffect {
           shapeTexture: { value: null },
         },
         vertexShader: passThroughVert,
-        fragmentShader: overtonesFrag,
+        fragmentShader: withPlatformDefines(overtonesFrag),
         glslVersion: GLSL3,
       }),
     ];

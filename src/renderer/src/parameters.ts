@@ -3,22 +3,22 @@ import { ScaleType } from "tonal";
 import { effects, EffectType } from "./effects";
 import { shapes } from "./effects/overtones-shapes";
 import {
-  ALGORITHMS,
-  BANDS_PER_OCTAVE_VALUES,
-  BEAT_UNIT,
-  BEAT_VALUES,
-  BLEND_MODES,
-  CONTEXTUAL_MOD_SOURCES,
-  EDGE_MODE,
-  MODULATOR_MODES,
-  MULTIPLIER_UNIT,
-  MULTIPLIER_VALUES,
-  NUM_MODULATORS,
-  PATTERN_SHAPES,
-  PITCH_VALUES,
-  SEMITONE_UNIT,
-  SYNTHESIZE_TYPES,
-  WRAP_MODES,
+    ALGORITHMS,
+    BANDS_PER_OCTAVE_VALUES,
+    BEAT_UNIT,
+    BEAT_VALUES,
+    BLEND_MODES,
+    CONTEXTUAL_MOD_SOURCES,
+    EDGE_MODE,
+    MODULATOR_MODES,
+    MULTIPLIER_UNIT,
+    MULTIPLIER_VALUES,
+    NUM_MODULATORS,
+    PATTERN_SHAPES,
+    PITCH_VALUES,
+    SEMITONE_UNIT,
+    SYNTHESIZE_TYPES,
+    WRAP_MODES,
 } from "./lib/constants";
 import { ParameterKey } from "./store/types";
 
@@ -83,6 +83,9 @@ const DEFAULT_EFFECT_ORDER = Object.keys(effects)
   .map((k) => ({ effect: k as EffectType, enabled: false }));
 
 // --- Modulator Definitions ---
+// Nested modulation (modulating modulator parameters) is disabled on Windows
+// due to shader compilation performance issues with unrolled loops
+const isWindows = typeof window !== "undefined" && window.platform === "win32";
 const modulatorDefs: Record<string, ParameterDefInput> = {};
 for (let i = 0; i < NUM_MODULATORS; i++) {
   const idx = i + 1;
@@ -118,7 +121,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     unit: "%",
     includeInPresets: true,
     includeInStep: true,
-    modulatable: false,
+    modulatable: !isWindows,
   };
   modulatorDefs[`modulator${idx}PatternRateBeats`] = {
     kind: "number",
@@ -134,7 +137,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     unit: BEAT_UNIT,
     includeInPresets: true,
     includeInStep: true,
-    modulatable: false,
+    modulatable: !isWindows,
   };
   modulatorDefs[`modulator${idx}PatternRateSemis`] = {
     kind: "number",
@@ -149,7 +152,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     unit: SEMITONE_UNIT,
     includeInPresets: true,
     includeInStep: true,
-    modulatable: false,
+    modulatable: !isWindows,
   };
   modulatorDefs[`modulator${idx}Rotation`] = {
     kind: "number",
@@ -163,7 +166,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     unit: "°",
     includeInPresets: true,
     includeInStep: true,
-    modulatable: false,
+    modulatable: !isWindows,
   };
   modulatorDefs[`modulator${idx}PhaseMode`] = {
     kind: "options",
@@ -190,7 +193,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     unit: "%",
     includeInPresets: true,
     includeInStep: true,
-    modulatable: false,
+    modulatable: !isWindows,
   };
   modulatorDefs[`modulator${idx}PhaseY`] = {
     kind: "number",
@@ -204,7 +207,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     unit: "%",
     includeInPresets: true,
     includeInStep: true,
-    modulatable: false,
+    modulatable: !isWindows,
   };
   modulatorDefs[`modulator${idx}EnvelopeMinDb`] = {
     kind: "number",
@@ -218,7 +221,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     unit: "dB",
     includeInPresets: true,
     includeInStep: true,
-    modulatable: false,
+    modulatable: !isWindows,
   };
   modulatorDefs[`modulator${idx}EnvelopeMaxDb`] = {
     kind: "number",
@@ -232,7 +235,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     unit: "dB",
     includeInPresets: true,
     includeInStep: true,
-    modulatable: false,
+    modulatable: !isWindows,
   };
   modulatorDefs[`modulator${idx}TexturePath`] = {
     kind: "string",

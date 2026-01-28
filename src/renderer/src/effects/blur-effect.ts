@@ -4,6 +4,7 @@ import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from 
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import blurBrushFrag from "../glsl/blur-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
+import { withPlatformDefines } from "../lib/shader-utils";
 import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
 
 const uniforms = {
@@ -69,7 +70,7 @@ class BlurEffect extends BaseEffect {
           },
         },
         vertexShader: passThroughVert,
-        fragmentShader: blurBrushFrag,
+        fragmentShader: withPlatformDefines(blurBrushFrag),
         glslVersion: GLSL3,
       }),
       new RawShaderMaterial({
@@ -80,7 +81,7 @@ class BlurEffect extends BaseEffect {
           },
         },
         vertexShader: passThroughVert,
-        fragmentShader: blurBrushFrag,
+        fragmentShader: withPlatformDefines(blurBrushFrag),
         glslVersion: GLSL3,
       }),
     ];

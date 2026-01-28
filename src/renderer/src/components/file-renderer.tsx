@@ -34,6 +34,7 @@ import maskUpdateFrag from "../glsl/mask-update.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { readRenderTargetPixelsAsync } from "../lib/async-readpixels";
 import { buildModulatorUniforms, useModulatorScaleLut } from "../lib/modulator-utils";
+import { withPlatformDefines } from "../lib/shader-utils";
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import { getUndoManager } from "../lib/undo-manager";
 import { unitsToUv } from "../lib/utils";
@@ -297,7 +298,7 @@ export const FileRenderer = memo(
           wrapMode: { value: 0 },
         },
         vertexShader: passThroughVert,
-        fragmentShader: displayFrag,
+        fragmentShader: withPlatformDefines(displayFrag),
         glslVersion: GLSL3,
       });
     }, []);
@@ -324,7 +325,7 @@ export const FileRenderer = memo(
           envelopeReleaseEndY: { value: 0 },
         },
         vertexShader: passThroughVert,
-        fragmentShader: maskUpdateFrag,
+        fragmentShader: withPlatformDefines(maskUpdateFrag),
         glslVersion: GLSL3,
       });
     }, []);

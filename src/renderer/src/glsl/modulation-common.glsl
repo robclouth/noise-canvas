@@ -147,6 +147,75 @@ float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, flo
   float phaseX = modulator.modulatorPhaseX.value;
   float phaseY = modulator.modulatorPhaseY.value;
   
+  // Only apply modulation to modulator parameters if we're at depth 0 (not nested)
+  // This is disabled on Windows due to shader compilation performance issues
+  #ifndef DISABLE_NESTED_MODULATION
+  if (allowNestedModulation) {
+    // Apply one level of modulation to each parameter
+    for (int i = 0; i < NUM_MODULATORS; i++) {
+      float modAmount = modulator.modulatorPatternRateX.modulationAmounts[i];
+      if (modAmount != 0.0) {
+        float mod = getModulationBase(uv, i, 
+          modulators[i].modulatorPatternRateX.value,
+          modulators[i].modulatorPatternRateY.value,
+          modulators[i].modulatorStrength.value,
+          modulators[i].modulatorRotation.value,
+          modulators[i].modulatorPhaseX.value,
+          modulators[i].modulatorPhaseY.value,
+          audioLevelDb);
+        float minV = modAmount < 0.0 ? modulator.modulatorPatternRateX.maxValue : modulator.modulatorPatternRateX.minValue;
+        float maxV = modAmount < 0.0 ? modulator.modulatorPatternRateX.minValue : modulator.modulatorPatternRateX.maxValue;
+        patternRateX = mix(patternRateX, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
+      }
+      
+      modAmount = modulator.modulatorPatternRateY.modulationAmounts[i];
+      if (modAmount != 0.0) {
+        float mod = getModulationBase(uv, i,
+          modulators[i].modulatorPatternRateX.value,
+          modulators[i].modulatorPatternRateY.value,
+          modulators[i].modulatorStrength.value,
+          modulators[i].modulatorRotation.value,
+          modulators[i].modulatorPhaseX.value,
+          modulators[i].modulatorPhaseY.value,
+          audioLevelDb);
+        float minV = modAmount < 0.0 ? modulator.modulatorPatternRateY.maxValue : modulator.modulatorPatternRateY.minValue;
+        float maxV = modAmount < 0.0 ? modulator.modulatorPatternRateY.minValue : modulator.modulatorPatternRateY.maxValue;
+        patternRateY = mix(patternRateY, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
+      }
+      
+      modAmount = modulator.modulatorStrength.modulationAmounts[i];
+      if (modAmount != 0.0) {
+        float mod = getModulationBase(uv, i,
+          modulators[i].modulatorPatternRateX.value,
+          modulators[i].modulatorPatternRateY.value,
+          modulators[i].modulatorStrength.value,
+          modulators[i].modulatorRotation.value,
+          modulators[i].modulatorPhaseX.value,
+          modulators[i].modulatorPhaseY.value,
+          audioLevelDb);
+        float minV = modAmount < 0.0 ? modulator.modulatorStrength.maxValue : modulator.modulatorStrength.minValue;
+        float maxV = modAmount < 0.0 ? modulator.modulatorStrength.minValue : modulator.modulatorStrength.maxValue;
+        strength = mix(strength, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
+      }
+      
+      modAmount = modulator.modulatorRotation.modulationAmounts[i];
+      if (modAmount != 0.0) {
+        float mod = getModulationBase(uv, i,
+          modulators[i].modulatorPatternRateX.value,
+          modulators[i].modulatorPatternRateY.value,
+          modulators[i].modulatorStrength.value,
+          modulators[i].modulatorRotation.value,
+          modulators[i].modulatorPhaseX.value,
+          modulators[i].modulatorPhaseY.value,
+          audioLevelDb);
+        float minV = modAmount < 0.0 ? modulator.modulatorRotation.maxValue : modulator.modulatorRotation.minValue;
+        float maxV = modAmount < 0.0 ? modulator.modulatorRotation.minValue : modulator.modulatorRotation.maxValue;
+        rotation = mix(rotation, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
+      }
+    }
+  }
+  #endif
+  
   return getModulationBase(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, audioLevelDb);
 }
 

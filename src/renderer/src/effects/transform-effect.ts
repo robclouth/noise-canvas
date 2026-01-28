@@ -5,6 +5,7 @@ import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from 
 import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import transformEffectFrag from "../glsl/transform-effect.frag";
+import { withPlatformDefines } from "../lib/shader-utils";
 import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
 
 export const boundaryModes = ["smear", "cut", "wrap"] as const;
@@ -71,7 +72,7 @@ class TransformEffect extends BaseEffect {
           },
         },
         vertexShader: passThroughVert,
-        fragmentShader: transformEffectFrag,
+        fragmentShader: withPlatformDefines(transformEffectFrag),
         glslVersion: GLSL3,
       }),
     ];
