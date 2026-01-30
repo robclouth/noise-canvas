@@ -1,5 +1,5 @@
 import test from "@/assets/textures/Alien Metal.jpg";
-import { Group, SegmentedControl, SimpleGrid, Stack } from "@mantine/core";
+import { Box, Group, SegmentedControl, SimpleGrid, Stack } from "@mantine/core";
 import { useTexture, View } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
@@ -15,6 +15,7 @@ import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import { ModulatorShapeControl } from "./controls/modulator-shape-control";
 import { ParameterControl } from "./controls/parameter-control";
 import { SectionMenu } from "./controls/section-menu";
+import { SequencerGrid } from "./controls/sequencer-grid";
 
 const Scene = ({
   modulatorIndex,
@@ -55,6 +56,9 @@ const Scene = ({
         modulator1ImageTex: { value: placeholderTexture },
         modulator2ImageTex: { value: placeholderTexture },
         modulator3ImageTex: { value: placeholderTexture },
+        modulator1SeqDataTex: { value: placeholderTexture },
+        modulator2SeqDataTex: { value: placeholderTexture },
+        modulator3SeqDataTex: { value: placeholderTexture },
         brushBottomLeftUv: { value: new Vector2(0.0, 0.0) },
         brushSizeUv: { value: new Vector2(1, 1) },
         testTexture: { value: testTexture },
@@ -94,6 +98,16 @@ const Scene = ({
       },
       (modulators) => {
         material.uniforms.modulators.value = modulators;
+        // Update seqDataTex uniforms from the modulators
+        if (modulators[0]?.seqDataTex) {
+          material.uniforms.modulator1SeqDataTex.value = modulators[0].seqDataTex;
+        }
+        if (modulators[1]?.seqDataTex) {
+          material.uniforms.modulator2SeqDataTex.value = modulators[1].seqDataTex;
+        }
+        if (modulators[2]?.seqDataTex) {
+          material.uniforms.modulator3SeqDataTex.value = modulators[2].seqDataTex;
+        }
         invalidate();
       },
       { equalityFn: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
@@ -137,6 +151,7 @@ export const ModulatorView = () => {
 
   const isPatternMode = modulatorMode === 0;
   const isEnvelopeFollowerMode = modulatorMode === 1;
+  const isSequencerMode = modulatorMode === 2;
   const isScaleMode = modulatorPatternShape === 11;
 
   const currentModulatorParams = getModulatorParamKeys(parseInt(viewedModulatorIndex));
@@ -248,8 +263,31 @@ export const ModulatorView = () => {
             />
           </>
         )}
+        {isSequencerMode && (
+          <>
+            <Box />
+            <ParameterControl
+              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqStepsX` as ParameterKey}
+            />
+            <ParameterControl
+              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqStepsY` as ParameterKey}
+            />
+            <ParameterControl
+              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqLoopBeats` as ParameterKey}
+            />
+            <ParameterControl
+              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqLoopSemis` as ParameterKey}
+            />
+            <ParameterControl
+              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqSwing` as ParameterKey}
+            />
+          </>
+        )}
         <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Strength` as ParameterKey} />
       </SimpleGrid>
+      {isSequencerMode && (
+        <SequencerGrid modulatorIndex={parseInt(viewedModulatorIndex) + 1} />
+      )}
       <View ref={viewRef} style={{ height: 100, marginTop: 6 }}>
         <Scene modulatorIndex={parseInt(viewedModulatorIndex)} onInvalidateReady={handleInvalidateReady} />
       </View>

@@ -13,6 +13,13 @@ export type Modulator = {
   modulatorRotation: ParameterUniform;
   modulatorEnvelopeMinDb: number;
   modulatorEnvelopeMaxDb: number;
+  // Sequencer fields
+  seqStepsX: number;
+  seqStepsY: number;
+  seqLoopX: ParameterUniform;
+  seqLoopY: ParameterUniform;
+  seqSwing: ParameterUniform;
+  seqDataTex: THREE.DataTexture | null;
 };
 
 export type CommonUniforms = {
@@ -74,6 +81,9 @@ export type CommonUniforms = {
   modulator1ImageTex: { value: Texture | null };
   modulator2ImageTex: { value: Texture | null };
   modulator3ImageTex: { value: Texture | null };
+  modulator1SeqDataTex: { value: Texture | null };
+  modulator2SeqDataTex: { value: Texture | null };
+  modulator3SeqDataTex: { value: Texture | null };
   // Contextual stroke uniforms for contextual modulation sources
   strokeIterationNormalized?: { value: number };
   strokeTimePosition?: { value: number };
@@ -150,6 +160,9 @@ export const defaultValues: CommonUniforms = {
   modulator1ImageTex: { value: null },
   modulator2ImageTex: { value: null },
   modulator3ImageTex: { value: null },
+  modulator1SeqDataTex: { value: null },
+  modulator2SeqDataTex: { value: null },
+  modulator3SeqDataTex: { value: null },
   strokeIterationNormalized: { value: 0 },
   strokeTimePosition: { value: 0 },
   strokePitchPosition: { value: 0 },

@@ -113,8 +113,14 @@ export const BLEND_MODES = [
 
 export const MODULATOR_MODES = [
   { value: 0, label: "Pattern" },
-  { value: 1, label: "Envelope Follower" },
+  { value: 1, label: "Envelope" },
+  { value: 2, label: "Sequencer" },
 ];
+
+// Sequencer constants (using DataTexture so no uniform limit issues)
+export const MAX_SEQ_STEPS_X = 16;
+export const MAX_SEQ_STEPS_Y = 16;
+export const MAX_SEQ_SIZE = MAX_SEQ_STEPS_X * MAX_SEQ_STEPS_Y;
 
 export const PATTERN_SHAPES = [
   { value: 0, label: "Sine" },

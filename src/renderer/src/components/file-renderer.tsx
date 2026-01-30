@@ -885,19 +885,25 @@ export const FileRenderer = memo(
           algorithm: { value: stepState.algorithm },
           magnitudeLimit: { value: state.magnitudeLimit },
           wrapMode: { value: stepState.brushWrapMode },
-          modulators: {
-            value: buildModulatorUniforms(
+          ...(() => {
+            const modulatorUniforms = buildModulatorUniforms(
               bpm,
               totalDuration,
               spectrogramData.bandsPerOctave,
               spectrogramData.numBands,
               stepState,
-            ),
-          },
-          gainLut: { value: modulatorScaleLut || placeholderTexture },
-          modulator1ImageTex: { value: modulator1Texture || placeholderTexture },
-          modulator2ImageTex: { value: modulator2Texture || placeholderTexture },
-          modulator3ImageTex: { value: modulator3Texture || placeholderTexture },
+            );
+            return {
+              modulators: { value: modulatorUniforms },
+              gainLut: { value: modulatorScaleLut || placeholderTexture },
+              modulator1ImageTex: { value: modulator1Texture || placeholderTexture },
+              modulator2ImageTex: { value: modulator2Texture || placeholderTexture },
+              modulator3ImageTex: { value: modulator3Texture || placeholderTexture },
+              modulator1SeqDataTex: { value: modulatorUniforms[0]?.seqDataTex || placeholderTexture },
+              modulator2SeqDataTex: { value: modulatorUniforms[1]?.seqDataTex || placeholderTexture },
+              modulator3SeqDataTex: { value: modulatorUniforms[2]?.seqDataTex || placeholderTexture },
+            };
+          })(),
         };
       };
 

@@ -2,6 +2,9 @@
 #include "../../lygia/generative/random.glsl"
 
 #define NUM_MODULATORS 3
+// Using DataTexture for seq data (no uniform limit issues)
+#define MAX_SEQ_STEPS_X 16
+#define MAX_SEQ_STEPS_Y 16
 
 struct Modulator {
   int modulatorMode;
@@ -15,6 +18,12 @@ struct Modulator {
   Parameter modulatorRotation;
   float modulatorEnvelopeMinDb;
   float modulatorEnvelopeMaxDb;
+  // Sequencer parameters
+  int seqStepsX;
+  int seqStepsY;
+  Parameter seqLoopX;
+  Parameter seqLoopY;
+  Parameter seqSwing;
 };
 
 uniform Modulator[NUM_MODULATORS] modulators;
@@ -23,11 +32,24 @@ uniform sampler2D modulator1ImageTex;
 uniform sampler2D modulator2ImageTex;
 uniform sampler2D modulator3ImageTex;
 
+// Sequencer data textures (values: 16x16)
+uniform sampler2D modulator1SeqDataTex;
+uniform sampler2D modulator2SeqDataTex;
+uniform sampler2D modulator3SeqDataTex;
+
+// Helper to get sequencer data value by modulator index (samples from texture)
+float getSeqDataValue(int modulatorIndex, int stepX, int stepY) {
+  // Convert step indices to texture UV coordinates (center of texel)
+  float u = (float(stepX) + 0.5) / float(MAX_SEQ_STEPS_X);
+  float v = (float(stepY) + 0.5) / float(MAX_SEQ_STEPS_Y);
+  if (modulatorIndex == 0) return texture(modulator1SeqDataTex, vec2(u, v)).r;
+  if (modulatorIndex == 1) return texture(modulator2SeqDataTex, vec2(u, v)).r;
+  return texture(modulator3SeqDataTex, vec2(u, v)).r;
+}
+
 // Base version that doesn't apply modulation to modulator parameters
 // This is used internally to avoid recursion
-// Base version that doesn't apply modulation to modulator parameters
-// This is used internally to avoid recursion
-float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float patternRateY, float strength, float rotation, float phaseX, float phaseY, float audioLevelDb) {
+float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float patternRateY, float strength, float rotation, float phaseX, float phaseY, float seqLoopX, float seqLoopY, float seqSwing, float audioLevelDb) {
   float v = 0.0;
 
   Modulator modulator = modulators[modulatorIndex];
@@ -38,6 +60,41 @@ float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float p
     float minDb = modulator.modulatorEnvelopeMinDb;
     float maxDb = modulator.modulatorEnvelopeMaxDb;
     v = clamp((audioLevelDb - minDb) / (maxDb - minDb), 0.0, 1.0);
+    return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
+  }
+
+  // Handle sequencer mode
+  if (modulator.modulatorMode == 2) { // Sequencer mode
+    // Apply phase mode: adjust UV based on canvas or brush space
+    vec2 adjustedUv = uv;
+    if (modulator.modulatorPhaseMode == 1) { // Brush mode
+      adjustedUv = (uv - brushBottomLeftUv) / max(brushSizeUv, vec2(0.0001));
+    }
+    
+    int stepsX = modulator.seqStepsX;
+    int stepsY = modulator.seqStepsY;
+    float loopX = seqLoopX;
+    float loopY = seqLoopY;
+    float swing = seqSwing;
+    
+    // Calculate horizontal position
+    float posX = loopX > 0.0 ? mod(adjustedUv.x, loopX) / loopX : 0.0;
+    int stepX = int(floor(posX * float(stepsX)));
+    
+    // Apply swing to odd steps
+    float swingOffset = mod(float(stepX), 2.0) * swing * (1.0 / float(stepsX));
+    posX = mod(posX + swingOffset, 1.0);
+    stepX = int(floor(posX * float(stepsX)));
+    stepX = clamp(stepX, 0, stepsX - 1);
+    
+    // Calculate vertical position
+    float posY = loopY > 0.0 ? mod(adjustedUv.y, loopY) / loopY : 0.0;
+    int stepY = int(floor(posY * float(stepsY)));
+    stepY = clamp(stepY, 0, stepsY - 1);
+    
+    // Sample from data texture
+    v = getSeqDataValue(modulatorIndex, stepX, stepY);
+    
     return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
   }
 
@@ -146,6 +203,9 @@ float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, flo
   float rotation = modulator.modulatorRotation.value;
   float phaseX = modulator.modulatorPhaseX.value;
   float phaseY = modulator.modulatorPhaseY.value;
+  float seqLoopX = modulator.seqLoopX.value;
+  float seqLoopY = modulator.seqLoopY.value;
+  float seqSwing = modulator.seqSwing.value;
   
   // Only apply modulation to modulator parameters if we're at depth 0 (not nested)
   // This is disabled on Windows due to shader compilation performance issues
@@ -162,6 +222,9 @@ float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, flo
           modulators[i].modulatorRotation.value,
           modulators[i].modulatorPhaseX.value,
           modulators[i].modulatorPhaseY.value,
+          modulators[i].seqLoopX.value,
+          modulators[i].seqLoopY.value,
+          modulators[i].seqSwing.value,
           audioLevelDb);
         float minV = modAmount < 0.0 ? modulator.modulatorPatternRateX.maxValue : modulator.modulatorPatternRateX.minValue;
         float maxV = modAmount < 0.0 ? modulator.modulatorPatternRateX.minValue : modulator.modulatorPatternRateX.maxValue;
@@ -177,6 +240,9 @@ float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, flo
           modulators[i].modulatorRotation.value,
           modulators[i].modulatorPhaseX.value,
           modulators[i].modulatorPhaseY.value,
+          modulators[i].seqLoopX.value,
+          modulators[i].seqLoopY.value,
+          modulators[i].seqSwing.value,
           audioLevelDb);
         float minV = modAmount < 0.0 ? modulator.modulatorPatternRateY.maxValue : modulator.modulatorPatternRateY.minValue;
         float maxV = modAmount < 0.0 ? modulator.modulatorPatternRateY.minValue : modulator.modulatorPatternRateY.maxValue;
@@ -192,6 +258,9 @@ float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, flo
           modulators[i].modulatorRotation.value,
           modulators[i].modulatorPhaseX.value,
           modulators[i].modulatorPhaseY.value,
+          modulators[i].seqLoopX.value,
+          modulators[i].seqLoopY.value,
+          modulators[i].seqSwing.value,
           audioLevelDb);
         float minV = modAmount < 0.0 ? modulator.modulatorStrength.maxValue : modulator.modulatorStrength.minValue;
         float maxV = modAmount < 0.0 ? modulator.modulatorStrength.minValue : modulator.modulatorStrength.maxValue;
@@ -207,16 +276,72 @@ float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, flo
           modulators[i].modulatorRotation.value,
           modulators[i].modulatorPhaseX.value,
           modulators[i].modulatorPhaseY.value,
+          modulators[i].seqLoopX.value,
+          modulators[i].seqLoopY.value,
+          modulators[i].seqSwing.value,
           audioLevelDb);
         float minV = modAmount < 0.0 ? modulator.modulatorRotation.maxValue : modulator.modulatorRotation.minValue;
         float maxV = modAmount < 0.0 ? modulator.modulatorRotation.minValue : modulator.modulatorRotation.maxValue;
         rotation = mix(rotation, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
       }
+      modAmount = modulator.seqLoopX.modulationAmounts[i];
+      if (modAmount != 0.0) {
+        float mod = getModulationBase(uv, i,
+          modulators[i].modulatorPatternRateX.value,
+          modulators[i].modulatorPatternRateY.value,
+          modulators[i].modulatorStrength.value,
+          modulators[i].modulatorRotation.value,
+          modulators[i].modulatorPhaseX.value,
+          modulators[i].modulatorPhaseY.value,
+          modulators[i].seqLoopX.value,
+          modulators[i].seqLoopY.value,
+          modulators[i].seqSwing.value,
+          audioLevelDb);
+        float minV = modAmount < 0.0 ? modulator.seqLoopX.maxValue : modulator.seqLoopX.minValue;
+        float maxV = modAmount < 0.0 ? modulator.seqLoopX.minValue : modulator.seqLoopX.maxValue;
+        seqLoopX = mix(seqLoopX, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
+      }
+      
+      modAmount = modulator.seqLoopY.modulationAmounts[i];
+      if (modAmount != 0.0) {
+        float mod = getModulationBase(uv, i,
+          modulators[i].modulatorPatternRateX.value,
+          modulators[i].modulatorPatternRateY.value,
+          modulators[i].modulatorStrength.value,
+          modulators[i].modulatorRotation.value,
+          modulators[i].modulatorPhaseX.value,
+          modulators[i].modulatorPhaseY.value,
+          modulators[i].seqLoopX.value,
+          modulators[i].seqLoopY.value,
+          modulators[i].seqSwing.value,
+          audioLevelDb);
+        float minV = modAmount < 0.0 ? modulator.seqLoopY.maxValue : modulator.seqLoopY.minValue;
+        float maxV = modAmount < 0.0 ? modulator.seqLoopY.minValue : modulator.seqLoopY.maxValue;
+        seqLoopY = mix(seqLoopY, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
+      }
+      
+      modAmount = modulator.seqSwing.modulationAmounts[i];
+      if (modAmount != 0.0) {
+        float mod = getModulationBase(uv, i,
+          modulators[i].modulatorPatternRateX.value,
+          modulators[i].modulatorPatternRateY.value,
+          modulators[i].modulatorStrength.value,
+          modulators[i].modulatorRotation.value,
+          modulators[i].modulatorPhaseX.value,
+          modulators[i].modulatorPhaseY.value,
+          modulators[i].seqLoopX.value,
+          modulators[i].seqLoopY.value,
+          modulators[i].seqSwing.value,
+          audioLevelDb);
+        float minV = modAmount < 0.0 ? modulator.seqSwing.maxValue : modulator.seqSwing.minValue;
+        float maxV = modAmount < 0.0 ? modulator.seqSwing.minValue : modulator.seqSwing.maxValue;
+        seqSwing = mix(seqSwing, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
+      }
     }
   }
   #endif
   
-  return getModulationBase(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, audioLevelDb);
+  return getModulationBase(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, seqLoopX, seqLoopY, seqSwing, audioLevelDb);
 }
 
 float applyModulation(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float[NUM_CONTEXTUAL_MOD_SOURCES] contextualModAmounts, vec2 uv, int depth, float audioLevelDb) {

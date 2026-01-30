@@ -6,8 +6,37 @@ import { useMemo } from "react";
 import { DataTexture, FloatType, RedFormat } from "three";
 import { Note, Scale } from "tonal";
 import { useStore } from "../store";
-import { NUM_MODULATORS } from "./constants";
+import { MAX_SEQ_SIZE, MAX_SEQ_STEPS_X, MAX_SEQ_STEPS_Y, NUM_MODULATORS } from "./constants";
 import { unitsToUv } from "./utils";
+
+// Helper to parse sequencer data and create DataTexture
+function createSeqDataTexture(seqDataStr: string): DataTexture {
+  let parsed: { values?: number[][] } = {};
+  try {
+    parsed = JSON.parse(seqDataStr);
+  } catch {
+    parsed = {};
+  }
+
+  // Create 16x16 Float32Array for seq values
+  const valuesData = new Float32Array(MAX_SEQ_SIZE);
+  if (parsed.values && Array.isArray(parsed.values)) {
+    for (let row = 0; row < Math.min(parsed.values.length, MAX_SEQ_STEPS_Y); row++) {
+      const rowData = parsed.values[row];
+      if (Array.isArray(rowData)) {
+        for (let col = 0; col < Math.min(rowData.length, MAX_SEQ_STEPS_X); col++) {
+          valuesData[row * MAX_SEQ_STEPS_X + col] = rowData[col] || 0;
+        }
+      }
+    }
+  }
+
+  // Create DataTexture (16x16, RedFormat, FloatType)
+  const seqDataTex = new DataTexture(valuesData, MAX_SEQ_STEPS_X, MAX_SEQ_STEPS_Y, RedFormat, FloatType);
+  seqDataTex.needsUpdate = true;
+
+  return seqDataTex;
+}
 
 export const buildModulatorUniforms = (
   bpm: number,
@@ -92,6 +121,50 @@ export const buildModulatorUniforms = (
       },
       modulatorEnvelopeMinDb: envelopeMinDb,
       modulatorEnvelopeMaxDb: envelopeMaxDb,
+      // Sequencer parameters
+      seqStepsX: state[`modulator${i + 1}SeqStepsX`] as number || 8,
+      seqStepsY: state[`modulator${i + 1}SeqStepsY`] as number || 4,
+      seqLoopY: (() => {
+        const loopSemis = state[`modulator${i + 1}SeqLoopSemis`] as number || 12;
+        const loopSemisDef = parameterDefs[`modulator${i + 1}SeqLoopSemis`] as NumberParameter;
+        // Convert semitones to UV space
+        const loopYUv = loopSemis / (bandsPerOctave * (numBands / bandsPerOctave));
+        const maxLoopYUv = (loopSemisDef?.max || 96) / (bandsPerOctave * (numBands / bandsPerOctave));
+        return {
+          value: loopYUv,
+          minValue: 1 / (bandsPerOctave * (numBands / bandsPerOctave)),
+          maxValue: maxLoopYUv,
+          modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}SeqLoopSemis` as ParameterKey),
+          contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}SeqLoopSemis` as ParameterKey),
+        };
+      })(),
+      seqSwing: {
+        value: (state[`modulator${i + 1}SeqSwing`] as number || 0) / 100,
+        minValue: 0.0,
+        maxValue: 1.0,
+        modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}SeqSwing` as ParameterKey),
+        contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}SeqSwing` as ParameterKey),
+      },
+      seqLoopX: (() => {
+        const loopBeats = state[`modulator${i + 1}SeqLoopBeats`] as number || 1;
+        const loopBeatsDef = parameterDefs[`modulator${i + 1}SeqLoopBeats`] as NumberParameter;
+        // Convert beats to UV space
+        const seconds = (loopBeats * 60) / bpm;
+        const loopXUv = seconds / totalDuration;
+        const maxSeconds = ((loopBeatsDef?.max || 32) * 60) / bpm;
+        const maxLoopXUv = maxSeconds / totalDuration;
+        return {
+          value: loopXUv,
+          minValue: (((loopBeatsDef?.min || 1/64) * 60) / bpm) / totalDuration,
+          maxValue: maxLoopXUv,
+          modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}SeqLoopBeats` as ParameterKey),
+          contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}SeqLoopBeats` as ParameterKey),
+        };
+      })(),
+      seqDataTex: (() => {
+        const seqDataStr = state[`modulator${i + 1}SeqData`] as string || '{}';
+        return createSeqDataTexture(seqDataStr);
+      })(),
     };
   });
 
