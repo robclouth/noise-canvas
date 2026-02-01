@@ -39,27 +39,34 @@ export const useStore = create<State>()(
         setParameter: (key: ParameterKey, value: any) => {
           const state = get();
           const isLinked = state.linkedParams.includes(key as string);
-          
+
           // If this is a step parameter, update the active step (or all steps if linked)
           if (isStepParameter(key)) {
             set(
               produce((draft: State) => {
-                draft.isPresetDirty = true;
+                draft.slotDirty[draft.activeSlotIndex] = true;
+                const steps = draft.slots[draft.activeSlotIndex];
+                if (!steps) return;
                 if (isLinked) {
                   // Propagate to all steps when linked
-                  draft.steps.forEach((step) => {
+                  steps.forEach((step) => {
                     step[key] = value;
                   });
                 } else {
                   // Only update active step
-                  if (draft.steps[draft.activeStepIndex]) {
-                    draft.steps[draft.activeStepIndex][key] = value;
+                  if (steps[draft.activeStepIndex]) {
+                    steps[draft.activeStepIndex][key] = value;
                   }
                 }
               }),
             );
           } else {
-            set({ [key]: value, isPresetDirty: true });
+            set(
+              produce((draft: State) => {
+                draft[key] = value;
+                draft.slotDirty[draft.activeSlotIndex] = true;
+              }),
+            );
           }
         },
         randomizationAmounts: {},
@@ -98,10 +105,13 @@ export const useStore = create<State>()(
                 draft.linkedParams.push(keyStr);
                 // When enabling linking, sync current value to all steps
                 if (isStepParameter(key)) {
-                  const currentValue = draft.steps[draft.activeStepIndex]?.[key];
-                  draft.steps.forEach((step) => {
-                    step[key] = currentValue;
-                  });
+                  const steps = draft.slots[draft.activeSlotIndex];
+                  if (steps) {
+                    const currentValue = steps[draft.activeStepIndex]?.[key];
+                    steps.forEach((step) => {
+                      step[key] = currentValue;
+                    });
+                  }
                 }
               } else if (!linked && index !== -1) {
                 draft.linkedParams.splice(index, 1);
@@ -146,13 +156,14 @@ export function getModulator(index: number) {
 
 /**
  * Get a parameter value, respecting step parameters.
- * For step parameters, returns the value from the active step.
+ * For step parameters, returns the value from the active step in the active slot.
  * For non-step parameters, returns the value from state directly.
  * Falls back to parameter defaults if the step doesn't have a value.
  */
 export function getParameterValue(state: State, key: ParameterKey): any {
   if (isStepParameter(key)) {
-    const activeStep = state.steps[state.activeStepIndex];
+    const steps = state.slots[state.activeSlotIndex] ?? [];
+    const activeStep = steps[state.activeStepIndex];
     if (activeStep && key in activeStep) {
       return activeStep[key];
     }
@@ -187,13 +198,14 @@ export function getModulationParamKeys(paramKey: ParameterKey): ParameterKey[] {
 }
 
 /**
- * Get a parameter value from a specific step.
+ * Get a parameter value from a specific step in the active slot.
  * For step parameters, returns the value from the specified step.
  * For non-step parameters, returns the value from state directly.
  */
 export function getStepParameterValue(state: State, stepIndex: number, key: ParameterKey): any {
   if (isStepParameter(key)) {
-    const step = state.steps[stepIndex];
+    const steps = state.slots[state.activeSlotIndex] ?? [];
+    const step = steps[stepIndex];
     return step?.[key];
   }
   return state[key];
@@ -207,7 +219,7 @@ export function selectParameter(key: ParameterKey) {
 }
 
 /**
- * Creates a view state object that returns step parameter values from a specific step.
+ * Creates a view state object that returns step parameter values from a specific step in the active slot.
  * This allows existing code that reads from state to work with step-aware values.
  * Falls back to parameter defaults if the step doesn't have a value.
  */
@@ -215,8 +227,9 @@ export function createStepStateView(state: State, stepIndex: number): State {
   // Create a shallow copy to avoid proxy-on-proxy issues
   const view = { ...state } as Record<string, unknown>;
 
-  // Override step parameters with values from the specific step
-  const step = state.steps[stepIndex];
+  // Override step parameters with values from the specific step in the active slot
+  const steps = state.slots[state.activeSlotIndex] ?? [];
+  const step = steps[stepIndex];
   if (step) {
     Object.keys(parameterDefs).forEach((key) => {
       if (isStepParameter(key as ParameterKey)) {

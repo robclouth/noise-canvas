@@ -559,8 +559,8 @@ describe("StrokeRenderer", () => {
       const state1 = createMockStateForIterations(1);
       const state5 = createMockStateForIterations(5);
 
-      expect(state1.steps[0].brushIterations).toBe(1);
-      expect(state5.steps[0].brushIterations).toBe(5);
+      expect(state1.slots[state1.activeSlotIndex][0].brushIterations).toBe(1);
+      expect(state5.slots[state5.activeSlotIndex][0].brushIterations).toBe(5);
     });
 
     it("should apply effect N times when brushIterations = N (additive test)", async () => {

@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, Copy, Plus, Trash } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 export function Steps() {
-  const steps = useStore((state) => state.steps);
+  const steps = useStore((state) => state.slots[state.activeSlotIndex] ?? []);
   const activeStepIndex = useStore((state) => state.activeStepIndex);
   const setActiveStepIndex = useStore((state) => state.setActiveStepIndex);
   const addStep = useStore((state) => state.addStep);

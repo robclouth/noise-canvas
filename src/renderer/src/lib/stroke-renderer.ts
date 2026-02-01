@@ -604,7 +604,8 @@ export class StrokeRenderer {
       initialSourceFbo = this.strokeStartFbo;
     }
 
-    const numSteps = state.steps.length;
+    const steps = state.slots[state.activeSlotIndex] ?? [];
+    const numSteps = steps.length;
 
     // Generate random value seeded by position using Perlin noise
     const strokeRandom = (noise2D(cursorPos.x * 50, cursorPos.y * 50) + 1) / 2;

@@ -9,12 +9,13 @@ import { RESERVED_KEYS } from "../../lib/useShortcuts";
 import { Tooltip } from "../tooltip";
 
 export function PresetSelector() {
-  const currentPresetId = useStore((state) => state.currentPresetId);
+  // Read directly from per-slot source of truth for correct display on app startup
+  const currentPresetId = useStore((state) => state.slotPresetIds[state.activeSlotIndex]);
   const availablePresets = useStore((state) => state.availablePresets);
   const loadPreset = useStore((state) => state.loadPreset);
   const savePreset = useStore((state) => state.savePreset);
   const deletePreset = useStore((state) => state.deletePreset);
-  const isDirty = useStore((state) => state.isPresetDirty);
+  const isDirty = useStore((state) => state.slotDirty[state.activeSlotIndex]);
 
   const [hotkeyAssignMode, setHotkeyAssignMode] = useState(false);
   const presetHotkeys = useStore((state) => state.presetHotkeys);

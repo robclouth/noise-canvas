@@ -104,9 +104,10 @@ function createStateForEffect(effectType: EffectType): State {
     },
   });
 
-  // Update the step's effectOrder
-  if (state.steps && state.steps[0]) {
-    (state.steps[0] as any).effectOrder = effectOrder;
+  // Update the step's effectOrder in the active slot
+  const activeSlot = state.slots[state.activeSlotIndex];
+  if (activeSlot && activeSlot[0]) {
+    (activeSlot[0] as any).effectOrder = effectOrder;
   }
 
   return state;
@@ -379,9 +380,10 @@ describe("Effects", () => {
           "/test/effects-test.wav": 120,
         },
       });
-      // Update the step's effectOrder
-      if (state.steps && state.steps[0]) {
-        (state.steps[0] as any).effectOrder = effectOrder;
+      // Update the step's effectOrder in the active slot
+      const activeSlot = state.slots[state.activeSlotIndex];
+      if (activeSlot && activeSlot[0]) {
+        (activeSlot[0] as any).effectOrder = effectOrder;
       }
       const sourceFile = createSourceFile(renderer);
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;

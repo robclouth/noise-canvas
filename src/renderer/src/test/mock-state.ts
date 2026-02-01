@@ -68,8 +68,9 @@ export function createMockState(overrides: Partial<State> = {}): State {
   // Create a minimal state with defaults for stroke rendering
   // Use type assertion to allow test-specific properties
   const baseState = {
-    // Steps - cast to any to allow TestBrushStep in tests
-    steps: [defaultStep] as any,
+    // Slots - source of truth for brush parameters
+    slots: { 0: [defaultStep] } as Record<number, TestBrushStep[]>,
+    activeSlotIndex: 0,
     activeStepIndex: 0,
 
     // Brush parameters (from step or global)
@@ -227,7 +228,8 @@ export function createMockStateWithSteps(
   const steps = stepConfigs.map(({ name, overrides }) => createMockStep(name, overrides));
 
   return createMockState({
-    steps: steps as any,
+    slots: { 0: steps } as Record<number, TestBrushStep[]>,
+    activeSlotIndex: 0,
     activeStepIndex: 0,
     ...stateOverrides,
   });
@@ -245,7 +247,8 @@ export function createMockStateForIterations(
   });
 
   return createMockState({
-    steps: [step] as any,
+    slots: { 0: [step] } as Record<number, TestBrushStep[]>,
+    activeSlotIndex: 0,
     ...stateOverrides,
   });
 }

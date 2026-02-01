@@ -46,11 +46,8 @@ export const RESERVED_KEYS = new Set(SHORTCUTS.map((s) => s.key));
 
 export function useShortcuts() {
   const handleKeyDown = (event: KeyboardEvent) => {
-    // Special handling for Shift (hold)
-    // 1. Set Source Mode (Canvas)
-    // 2. Set Quick Slot Mode (Number keys)
+    // Special handling for Shift (hold) - Set Source Mode (Canvas)
     if (event.key === "Shift") {
-      useStore.getState().setQuickSlotModifierMode(true);
       useStore.getState().setIsSettingPosition(true);
       return;
     }
@@ -141,8 +138,7 @@ export function useShortcuts() {
         state.loadPreset(presetId);
       }
     } else {
-      // Quick slots (0-9)
-      // Use event.code to handle Shift correctly (avoid "!", "@", etc.)
+      // Slots (0-9) - number keys switch between slots
       const code = event.code;
       let slotIndex = -1;
 
@@ -150,31 +146,19 @@ export function useShortcuts() {
         const digit = parseInt(code.replace("Digit", ""), 10);
         // Map 1-9 to 0-8, and 0 to 9
         if (!isNaN(digit)) {
-            slotIndex = digit === 0 ? 9 : digit - 1;
+          slotIndex = digit === 0 ? 9 : digit - 1;
         }
       }
 
-      if (slotIndex >= 0 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      if (slotIndex >= 0 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
         event.preventDefault();
-        const state = useStore.getState();
-        const slot = state.quickSlots[slotIndex];
-
-        if (event.shiftKey) {
-          // Shift + Number -> Always set/update Quick Slot
-          state.setQuickSlot(slotIndex);
-        } else {
-          // Number -> Recall
-          if (slot) {
-            state.recallQuickSlot(slotIndex);
-          }
-        }
+        useStore.getState().setActiveSlot(slotIndex);
       }
     }
   };
 
   const handleKeyUp = (event: KeyboardEvent) => {
     if (event.key === "Shift") {
-      useStore.getState().setQuickSlotModifierMode(false);
       useStore.getState().setIsSettingPosition(false);
     }
     

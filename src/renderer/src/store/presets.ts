@@ -10,26 +10,20 @@ export interface PresetsState {
   isInitialized: boolean;
   init: () => Promise<void>;
   presetsDir: string | null;
-  currentPresetId: string | null;
-  isPresetDirty: boolean;
-  setPresetDirty: (dirty: boolean) => void;
+  // Per-slot preset tracking
+  slotPresetIds: Record<number, string | null>;
+  slotDirty: Record<number, boolean>;
   availablePresets: PresetType[];
-  setCurrentPresetId: (presetId: string | null) => void;
   captureState: () => BrushStep[];
-  recallState: (steps: BrushStep[]) => Partial<State>;
   loadPreset: (presetId: string) => void;
   savePreset: (name: string, presetId?: string) => Promise<void>;
   deletePreset: (presetId: string) => Promise<void>;
   assignHotkeyToPreset: (presetId: string, hotkey: string) => void;
   presetHotkeys: Record<string, string>;
-  activeQuickSlot: number | null;
-  setActiveQuickSlot: (slotIndex: number | null) => void;
-  quickSlotModifierMode: boolean;
-  setQuickSlotModifierMode: (isHeld: boolean) => void;
-  quickSlots: Record<number, BrushStep[]>;
-  setQuickSlot: (slotIndex: number) => void;
-  recallQuickSlot: (slotIndex: number) => void;
-  clearQuickSlot: (slotIndex: number) => void;
+  // Slots - the source of truth for brush parameters (all 10 always exist)
+  slots: Record<number, BrushStep[]>;
+  activeSlotIndex: number;
+  setActiveSlot: (slotIndex: number) => void;
 }
 
 /**
@@ -59,11 +53,10 @@ function generateFilenameId(name: string, existingIds: Set<string> = new Set()):
   return id;
 }
 
-export const PRESETS_PERSISTED_KEYS = ["quickSlots", "presetHotkeys"] as const;
+export const PRESETS_PERSISTED_KEYS = ["slots", "activeSlotIndex", "slotPresetIds", "slotDirty", "presetHotkeys"] as const;
 
 export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsState => ({
   presetsDir: null,
-  currentPresetId: "init",
   isInitialized: false,
   init: async () => {
     if (get().isInitialized) {
@@ -110,32 +103,10 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     }
   },
   availablePresets: [...factoryPresets],
-  isPresetDirty: false,
-  setPresetDirty: (dirty: boolean) => set({ isPresetDirty: dirty }),
-  setCurrentPresetId: (presetId) => set({ currentPresetId: presetId }),
-
-  recallState: (steps: BrushStep[]): Partial<State> => {
-    const updates: Partial<State> = {};
-
-    if (steps && Array.isArray(steps) && steps.length > 0) {
-      updates.steps = steps.map((presetStep: any, index: number) => {
-        const defaultStep = createDefaultStep(presetStep.name || `Step ${index + 1}`);
-        return {
-          ...defaultStep,
-          ...presetStep,
-          id: presetStep.id || defaultStep.id,
-        } as BrushStep;
-      });
-    } else {
-      updates.steps = [createDefaultStep("Step 1")];
-    }
-    updates.activeStepIndex = 0;
-
-    return updates;
-  },
 
   captureState: (): BrushStep[] => {
-    return get().steps;
+    const state = get();
+    return state.slots[state.activeSlotIndex] ?? [createDefaultStep("Step 1")];
   },
 
   loadPreset: (presetId: string) => {
@@ -148,15 +119,31 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
         message: `Preset ${presetId} not found`,
         color: "red",
       });
-      set({ currentPresetId: "init" });
       return;
     }
 
-    set({
-      currentPresetId: presetId,
-      isPresetDirty: false,
-      ...state.recallState(preset.steps ?? []),
-    });
+    // Load preset steps into the active slot
+    const presetSteps = preset.steps ?? [];
+    const mergedSteps =
+      presetSteps.length > 0
+        ? presetSteps.map((presetStep, index) => {
+            const defaultStep = createDefaultStep(presetStep.name || `Step ${index + 1}`);
+            return {
+              ...defaultStep,
+              ...presetStep,
+              id: presetStep.id || defaultStep.id,
+            } as BrushStep;
+          })
+        : [createDefaultStep("Step 1")];
+
+    set(
+      produce((draft: State) => {
+        draft.slots[draft.activeSlotIndex] = mergedSteps;
+        draft.activeStepIndex = 0;
+        draft.slotPresetIds[draft.activeSlotIndex] = presetId;
+        draft.slotDirty[draft.activeSlotIndex] = false;
+      }),
+    );
   },
 
   savePreset: async (name: string, presetId?: string) => {
@@ -187,11 +174,13 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
         const filePath = window.nodePath.join(presetsDir!, fileName);
         await window.nodeFs.writeFile(filePath, JSON.stringify(preset, null, 2), "utf-8");
 
-        set({
-          currentPresetId: id,
-          isPresetDirty: false,
-          availablePresets: [...availablePresets.filter((p) => p.id !== id), preset],
-        });
+        set(
+          produce((draft: State) => {
+            draft.slotPresetIds[draft.activeSlotIndex] = id;
+            draft.slotDirty[draft.activeSlotIndex] = false;
+            draft.availablePresets = [...availablePresets.filter((p) => p.id !== id), preset];
+          }),
+        );
 
         console.log("Preset saved:", preset.name, "at", filePath);
         notifications.show({
@@ -202,8 +191,6 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
         console.error("Failed to save preset:", error);
         throw error;
       }
-
-      set({ currentPresetId: id });
     } catch (error) {
       console.error("Error saving preset:", error);
       notifications.show({
@@ -216,7 +203,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
 
   deletePreset: async (presetId: string) => {
     try {
-      const { presetsDir, currentPresetId } = get();
+      const { presetsDir } = get();
 
       const factoryPreset = factoryPresets.find((p) => p.id === presetId);
       if (factoryPreset) {
@@ -227,14 +214,18 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       const filePath = window.nodePath.join(presetsDir!, fileName);
       await window.nodeFs.unlink(filePath);
 
-      let newCurrentPresetId = currentPresetId;
-      if (currentPresetId === presetId) {
-        newCurrentPresetId = "init";
-      }
-      set({
-        availablePresets: get().availablePresets.filter((p) => p.id !== presetId),
-        currentPresetId: newCurrentPresetId,
-      });
+      set(
+        produce((draft: State) => {
+          draft.availablePresets = draft.availablePresets.filter((p) => p.id !== presetId);
+          // Clear preset ID from any slots that had this preset
+          Object.keys(draft.slotPresetIds).forEach((key) => {
+            const slotIndex = Number(key);
+            if (draft.slotPresetIds[slotIndex] === presetId) {
+              draft.slotPresetIds[slotIndex] = null;
+            }
+          });
+        }),
+      );
 
       console.log("Preset deleted:", presetId);
       notifications.show({
@@ -273,36 +264,21 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     });
   },
 
-  quickSlots: {},
-  activeQuickSlot: null,
-  setActiveQuickSlot: (slotIndex) => set({ activeQuickSlot: slotIndex }),
-  quickSlotModifierMode: false,
-  setQuickSlotModifierMode: (isHeld) => set({ quickSlotModifierMode: isHeld }),
+  // Slots - source of truth for brush parameters (all 10 always exist)
+  slots: Object.fromEntries(
+    Array.from({ length: 10 }, (_, i) => [i, [createDefaultStep("Step 1")]]),
+  ) as Record<number, BrushStep[]>,
+  activeSlotIndex: 0,
 
-  setQuickSlot: (slotIndex: number) => {
-    set(
-      produce((state: State) => {
-        state.quickSlots[slotIndex] = state.captureState();
-        state.activeQuickSlot = slotIndex;
-      }),
-    );
-  },
+  // Per-slot preset tracking
+  slotPresetIds: Object.fromEntries(
+    Array.from({ length: 10 }, (_, i) => [i, null]),
+  ) as Record<number, string | null>,
+  slotDirty: Object.fromEntries(
+    Array.from({ length: 10 }, (_, i) => [i, false]),
+  ) as Record<number, boolean>,
 
-  recallQuickSlot: (slotIndex: number) => {
-    const state = get();
-    const steps = state.quickSlots[slotIndex];
-    if (!steps) return;
-    set({ ...state.recallState(steps), currentPresetId: null, activeQuickSlot: slotIndex });
-  },
-
-  clearQuickSlot: (slotIndex: number) => {
-    set(
-      produce((state: State) => {
-        delete state.quickSlots[slotIndex];
-        if (state.activeQuickSlot === slotIndex) {
-          state.activeQuickSlot = null;
-        }
-      }),
-    );
+  setActiveSlot: (slotIndex: number) => {
+    set({ activeSlotIndex: slotIndex });
   },
 });

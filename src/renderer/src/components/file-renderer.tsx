@@ -570,8 +570,9 @@ export const FileRenderer = memo(
 
       // Calculate maximum brush size across all steps (for display purposes)
       const activeStepState = createStepStateView(state, state.activeStepIndex);
+      const steps = state.slots[state.activeSlotIndex] ?? [];
       const brushSizeUv = new Vector2(0, 0);
-      for (let i = 0; i < state.steps.length; i++) {
+      for (let i = 0; i < steps.length; i++) {
         const stepState = createStepStateView(state, i);
         const stepBrushSize = calculateBrushSizeUv(stepState);
         brushSizeUv.x = Math.max(brushSizeUv.x, stepBrushSize.x);
@@ -646,10 +647,11 @@ export const FileRenderer = memo(
         const targetFile = hoveredFile || file;
         const targetBpm = state.filepathsBpm[targetFile.filePath] || 120;
         const targetDuration = targetFile.spectrogramData.numFrames / targetFile.spectrogramData.sampleRate;
+        const slotSteps = state.slots[state.activeSlotIndex] ?? [];
 
         let maxTimeUv = 0;
         let maxPitchUv = 0;
-        for (let i = 0; i < state.steps.length; i++) {
+        for (let i = 0; i < slotSteps.length; i++) {
           const stepState = createStepStateView(state, i);
           const timeUv = unitsToUv(
             stepState.brushEnvelopeDelayTime +

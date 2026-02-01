@@ -4,7 +4,7 @@ import { ParameterKey } from "@renderer/store/types";
 import { EnvelopeControl } from "../controls/envelope-control";
 import { ParameterControl } from "../controls/parameter-control";
 import { PresetSelector } from "../controls/preset-selector";
-import { QuickSlots } from "../controls/quick-slots";
+import { Slots } from "../controls/slots";
 import { Steps } from "../controls/steps";
 import { EffectsList } from "../effects-list";
 import { ModulatorView } from "../modulator-view";
@@ -78,8 +78,8 @@ export function BrushPanel() {
   return (
     <Stack gap="xs">
       <Stack p="xs" gap="xs">
+        <Slots />
         <PresetSelector />
-        <QuickSlots />
       </Stack>
       <Steps />
       <Stack px="xs" gap="xs">
