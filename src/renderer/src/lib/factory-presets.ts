@@ -17,6 +17,7 @@ export const factoryPresets: PresetType[] = [
         name: "Step 1",
       },
     ],
+    linkedParams: [],
   },
   {
     id: "eraser",
@@ -34,6 +35,7 @@ export const factoryPresets: PresetType[] = [
         dynamicsGainDb: -80,
       },
     ],
+    linkedParams: [],
   },
   {
     id: "booster",
@@ -51,6 +53,7 @@ export const factoryPresets: PresetType[] = [
         dynamicsGainDb: 6,
       },
     ],
+    linkedParams: [],
   },
   {
     id: "restore",
@@ -65,6 +68,7 @@ export const factoryPresets: PresetType[] = [
         blendMode: 0, // Replace blend mode
       },
     ],
+    linkedParams: [],
   },
   {
     id: "stereo-widening",
@@ -79,5 +83,6 @@ export const factoryPresets: PresetType[] = [
         modulator1PatternRateBeats: 4,
       },
     ],
+    linkedParams: [],
   },
 ];

@@ -5,7 +5,7 @@ import { ParameterKey } from "@renderer/store/types";
 import { z } from "zod";
 
 // Current preset version
-export const CURRENT_PRESET_VERSION = 3;
+export const CURRENT_PRESET_VERSION = 4;
 
 /**
  * Create a Zod schema for step parameters (parameters with includeInStep: true)
@@ -69,11 +69,13 @@ export function createSchema() {
     isFactory: z.boolean(),
     version: z.number().int().min(1).optional().default(CURRENT_PRESET_VERSION),
     steps: z.array(createBrushStepSchema()),
+    linkedParams: z.array(z.string()).optional().default([]),
   });
 }
 
 export type PresetType = Omit<z.infer<ReturnType<typeof createSchema>>, "steps"> & {
   steps: Array<{ id: string; name: string } & Partial<Record<ParameterKey, any>>>;
+  linkedParams: string[];
 };
 
 /**
@@ -116,6 +118,12 @@ export function migratePreset(data: any): any {
   if (migratedData.version < 3) {
     delete migratedData.parameters;
     migratedData.version = 3;
+  }
+
+  // Migrate from v3 to v4: Add linkedParams field
+  if (migratedData.version < 4) {
+    migratedData.linkedParams = [];
+    migratedData.version = 4;
   }
 
   // Ensure steps array exists

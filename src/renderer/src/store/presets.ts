@@ -13,6 +13,7 @@ export interface PresetsState {
   // Per-slot preset tracking
   slotPresetIds: Record<number, string | null>;
   slotDirty: Record<number, boolean>;
+  slotLinkedParams: Record<number, string[]>;
   availablePresets: PresetType[];
   captureState: () => BrushStep[];
   loadPreset: (presetId: string) => void;
@@ -53,7 +54,7 @@ function generateFilenameId(name: string, existingIds: Set<string> = new Set()):
   return id;
 }
 
-export const PRESETS_PERSISTED_KEYS = ["slots", "activeSlotIndex", "slotPresetIds", "slotDirty", "presetHotkeys"] as const;
+export const PRESETS_PERSISTED_KEYS = ["slots", "activeSlotIndex", "slotPresetIds", "slotDirty", "slotLinkedParams", "presetHotkeys"] as const;
 
 export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsState => ({
   presetsDir: null,
@@ -142,6 +143,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
         draft.activeStepIndex = 0;
         draft.slotPresetIds[draft.activeSlotIndex] = presetId;
         draft.slotDirty[draft.activeSlotIndex] = false;
+        draft.slotLinkedParams[draft.activeSlotIndex] = preset.linkedParams ?? [];
       }),
     );
   },
@@ -163,6 +165,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
         isFactory: false,
         version: CURRENT_PRESET_VERSION,
         steps: state.captureState(),
+        linkedParams: state.slotLinkedParams[state.activeSlotIndex] ?? [],
       };
 
       if (preset.isFactory) {
@@ -277,6 +280,9 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
   slotDirty: Object.fromEntries(
     Array.from({ length: 10 }, (_, i) => [i, false]),
   ) as Record<number, boolean>,
+  slotLinkedParams: Object.fromEntries(
+    Array.from({ length: 10 }, (_, i) => [i, []]),
+  ) as Record<number, string[]>,
 
   setActiveSlot: (slotIndex: number) => {
     set({ activeSlotIndex: slotIndex });

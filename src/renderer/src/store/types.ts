@@ -68,7 +68,6 @@ export type State = BrushState &
     randomizationAmounts: Record<string, number>;
     setRandomizationAmount: (key: string, amount: number) => void;
     excludedFromRandomization: string[];
-    linkedParams: string[];
     setParamExcluded: (key: ParameterKey, excluded: boolean) => void;
     setParamLinked: (key: ParameterKey, linked: boolean) => void;
   };

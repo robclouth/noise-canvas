@@ -21,7 +21,6 @@ export const ALL_PERSISTED_KEYS: (keyof State)[] = [
   ...STEPS_PERSISTED_KEYS,
   "randomizationAmounts",
   "excludedFromRandomization",
-  "linkedParams",
 ];
 
 export const useStore = create<State>()(
@@ -38,7 +37,8 @@ export const useStore = create<State>()(
         ...createStepsSlice(set, get),
         setParameter: (key: ParameterKey, value: any) => {
           const state = get();
-          const isLinked = state.linkedParams.includes(key as string);
+          const slotLinkedParams = state.slotLinkedParams[state.activeSlotIndex] ?? [];
+          const isLinked = slotLinkedParams.includes(key as string);
 
           // If this is a step parameter, update the active step (or all steps if linked)
           if (isStepParameter(key)) {
@@ -82,7 +82,6 @@ export const useStore = create<State>()(
           );
         },
         excludedFromRandomization: [],
-        linkedParams: [],
         setParamExcluded: (key: ParameterKey, excluded: boolean) => {
           set(
             produce((draft: State) => {
@@ -100,12 +99,18 @@ export const useStore = create<State>()(
           set(
             produce((draft: State) => {
               const keyStr = key as string;
-              const index = draft.linkedParams.indexOf(keyStr);
+              const slotIndex = draft.activeSlotIndex;
+              if (!draft.slotLinkedParams[slotIndex]) {
+                draft.slotLinkedParams[slotIndex] = [];
+              }
+              const linkedParams = draft.slotLinkedParams[slotIndex];
+              const index = linkedParams.indexOf(keyStr);
               if (linked && index === -1) {
-                draft.linkedParams.push(keyStr);
+                linkedParams.push(keyStr);
+                draft.slotDirty[slotIndex] = true;
                 // When enabling linking, sync current value to all steps
                 if (isStepParameter(key)) {
-                  const steps = draft.slots[draft.activeSlotIndex];
+                  const steps = draft.slots[slotIndex];
                   if (steps) {
                     const currentValue = steps[draft.activeStepIndex]?.[key];
                     steps.forEach((step) => {
@@ -114,7 +119,8 @@ export const useStore = create<State>()(
                   }
                 }
               } else if (!linked && index !== -1) {
-                draft.linkedParams.splice(index, 1);
+                linkedParams.splice(index, 1);
+                draft.slotDirty[slotIndex] = true;
               }
             }),
           );
