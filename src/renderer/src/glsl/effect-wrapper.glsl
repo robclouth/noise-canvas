@@ -13,5 +13,5 @@ void main() {
     vec4 sourceTexel = getTransformedSample(coords.source, coords.dest, 1.0, 1.0, sourceOffsetX, sourceOffsetY);
     float audioLevelDb = getAudioLevelDb(coords.dest);
     vec4 modifiedTexel = applyEffectStroke(sourceTexel, coords, audioLevelDb);
-    outColor = applyBrush(originalTexel, modifiedTexel, weight, coords.dest);
+    outColor = applyBrush(originalTexel, modifiedTexel, weight, coords.dest, vUv);
 }

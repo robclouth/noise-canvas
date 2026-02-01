@@ -90,6 +90,10 @@ export type CommonUniforms = {
   strokePitchPosition?: { value: number };
   strokeRandom?: { value: number };
   strokeStepNormalized?: { value: number };
+  // Non-cumulative stroke uniforms for preventing accumulation
+  useStrokeMask?: { value: boolean };
+  strokeMaskTex?: { value: Texture | null };
+  blendOriginalTex?: { value: Texture | null };
 };
 
 export const defaultValues: CommonUniforms = {
@@ -168,6 +172,10 @@ export const defaultValues: CommonUniforms = {
   strokePitchPosition: { value: 0 },
   strokeRandom: { value: 0 },
   strokeStepNormalized: { value: 0 },
+  // Non-cumulative stroke uniforms
+  useStrokeMask: { value: false },
+  strokeMaskTex: { value: null },
+  blendOriginalTex: { value: null },
 };
 
 export type UpdateEffectUniformsProps = {
@@ -188,7 +196,10 @@ export abstract class BaseEffect {
 
     for (const key in commonUniforms) {
       if (key in material.uniforms) {
-        material.uniforms[key].value = commonUniforms[key].value;
+        material.uniforms[key].value = (commonUniforms as Record<string, { value: unknown }>)[key].value;
+      } else {
+        // Add uniform if it doesn't exist (needed for dynamically added uniforms like useStrokeMask)
+        material.uniforms[key] = { value: (commonUniforms as Record<string, { value: unknown }>)[key].value };
       }
     }
   }

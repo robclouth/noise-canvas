@@ -11,8 +11,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { SpectrogramData, State } from "../../store/types";
-import { createMockSpectrogramData } from "../../test/mock-spectrogram";
-import { createMockState } from "../../test/mock-state";
+import { createMockSpectrogramData, getPixelAtUv } from "../../test/mock-spectrogram";
+import { createMockState, createMockStateWithSteps } from "../../test/mock-state";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 
 /**
@@ -403,6 +403,149 @@ describe("Effects", () => {
       expect(hasNonZeroMagnitudes(outputData)).toBe(true);
 
       renderer.dispose();
+    });
+  });
+
+  describe("non-cumulative strokes with additive blend", () => {
+    it("should not accumulate when stroking back and forth with additive blend mode", async () => {
+      // Create spectrogram with constant values for predictable testing
+      const constantSpectrogramData = createMockSpectrogramData({
+        numFrames: 16,
+        numBands: 8,
+        pattern: "constant",
+        constantMagnitude: 0.5,
+      });
+
+      const constantTextures = createTexturesFromSpectrogramData(constantSpectrogramData);
+
+      const constantStrokeTextures: StrokeTextures = {
+        packedDataTex: constantTextures.packedDataTex,
+        originalPackedDataTex: constantTextures.originalPackedDataTex,
+        inverseMapTex: constantTextures.inverseMapTex,
+        metadataTex: constantTextures.metadataTex,
+        placeholderTexture,
+        modulatorScaleLut,
+        modulator1Texture: placeholderTexture,
+        modulator2Texture: placeholderTexture,
+        modulator3Texture: placeholderTexture,
+      };
+
+      const renderer = new StrokeRenderer(
+        gl,
+        constantSpectrogramData,
+        constantStrokeTextures,
+        "additive-test",
+        effects,
+      );
+      renderer.initialize();
+
+      // Create state with additive blend mode and non-cumulative strokes
+      const state = createMockStateWithSteps(
+        [
+          {
+            name: "Additive Blend Step",
+            overrides: {
+              blendMode: 1, // Additive blend mode
+              brushIntensity: 100,
+              // Use larger brush to ensure full coverage
+              brushEnvelopeDelayTime: 0,
+              brushEnvelopeAttackTime: 0,
+              brushEnvelopeSustainTime: 10, // Large sustain to cover the whole spectrogram
+              brushEnvelopeReleaseTime: 0,
+              brushEnvelopeDelayPitch: 0,
+              brushEnvelopeAttackPitch: 0,
+              brushEnvelopeSustainPitch: 100, // Large pitch to cover all bands
+              brushEnvelopeReleasePitch: 0,
+              effectOrder: [
+                { effect: "transform", enabled: false },
+                { effect: "dynamics", enabled: false },
+                { effect: "blur", enabled: false },
+                { effect: "overtones", enabled: false },
+                { effect: "synthesize", enabled: false },
+              ],
+            },
+          },
+        ],
+        {
+          cumulativeStrokes: false,
+          filepathsBpm: {
+            "/test/additive-test.wav": 120,
+          },
+        },
+      ) as State;
+
+      const totalDuration = constantSpectrogramData.numFrames / constantSpectrogramData.sampleRate;
+      const rendererTextures = renderer.getTextures();
+      const sourceFile: SourceFileInfo = {
+        id: "additive-test",
+        filePath: "/test/additive-test.wav",
+        spectrogramData: constantSpectrogramData,
+        textures: {
+          packed: rendererTextures.packed,
+          inverse: rendererTextures.inverse,
+          metadata: rendererTextures.metadata,
+          original: rendererTextures.original,
+        },
+      };
+
+      // Brush starts at bottom-left (0,0) and extends up/right
+      // Sample at a point well inside the brush area
+      const cursorPos = new Vector2(0.0, 0.0);
+      const sampleUv = new Vector2(0.5, 0.5);
+
+      // Get original magnitude
+      const originalData = await renderer.getFBOData();
+      const originalPixel = getPixelAtUv(originalData, sampleUv, constantSpectrogramData);
+      expect(originalPixel).not.toBeNull();
+      const originalMag = originalPixel![0];
+      expect(originalMag).toBeCloseTo(0.5, 2);
+
+      // Begin a stroke (captures strokeStartFbo)
+      renderer.beginStroke();
+
+      const params: StrokeParams = {
+        cursorPos,
+        preview: false,
+        bpm: 120,
+        totalDuration,
+        viewZoomPower: 0,
+        viewOffset: 0,
+      };
+
+      // First stroke
+      renderer.renderStroke(params, state, sourceFile);
+
+      const dataAfter1 = await renderer.getFBOData();
+      const pixel1 = getPixelAtUv(dataAfter1, sampleUv, constantSpectrogramData);
+      expect(pixel1).not.toBeNull();
+      const mag1 = pixel1![0];
+
+      // With additive blend: target = blendOriginal + source = 0.5 + 0.5 = 1.0
+      expect(mag1).toBeCloseTo(1.0, 1);
+
+      // Stroke again at the same position (simulating back-and-forth painting)
+      renderer.renderStroke(params, state, sourceFile);
+      const dataAfter2 = await renderer.getFBOData();
+      const pixel2 = getPixelAtUv(dataAfter2, sampleUv, constantSpectrogramData);
+      expect(pixel2).not.toBeNull();
+      const mag2 = pixel2![0];
+
+      renderer.renderStroke(params, state, sourceFile);
+      const dataAfter3 = await renderer.getFBOData();
+      const pixel3 = getPixelAtUv(dataAfter3, sampleUv, constantSpectrogramData);
+      expect(pixel3).not.toBeNull();
+      const mag3 = pixel3![0];
+
+      // In non-cumulative mode, subsequent strokes should NOT accumulate
+      expect(mag2).toBeCloseTo(mag1, 1);
+      expect(mag3).toBeCloseTo(mag1, 1);
+
+      renderer.endStroke();
+      renderer.dispose();
+      constantTextures.packedDataTex.dispose();
+      constantTextures.originalPackedDataTex.dispose();
+      constantTextures.inverseMapTex.dispose();
+      constantTextures.metadataTex.dispose();
     });
   });
 });

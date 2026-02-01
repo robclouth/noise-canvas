@@ -113,5 +113,5 @@ void main() {
         resultTexel = originalTexel;
     }
     
-    outColor = applyBrush(originalTexel, resultTexel, weight, coords.dest);
+    outColor = applyBrush(originalTexel, resultTexel, weight, coords.dest, vUv);
 }

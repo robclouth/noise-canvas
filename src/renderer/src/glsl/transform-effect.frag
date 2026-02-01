@@ -103,6 +103,6 @@ void main() {
         transformedTexel.a = -transformedTexel.a;
     }
 
-    outColor = applyBrush(originalTexel, transformedTexel, weight, coords.dest);
+    outColor = applyBrush(originalTexel, transformedTexel, weight, coords.dest, vUv);
     
 }

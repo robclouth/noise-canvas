@@ -79,6 +79,123 @@ void main() {
 }
 
 /**
+ * Creates a shader that simulates additive blend mode behavior.
+ * This reads from both source (modified data) and blendOriginal (stroke start data),
+ * then combines them additively: blendOriginal + source.
+ * This is used to test non-cumulative mode with additive blending.
+ *
+ * The key insight is that in non-cumulative mode, the blend formula should use
+ * the stroke start state (blendOriginalTex), not the current dest (destSpectrogramTex).
+ * This prevents accumulation when painting over the same area.
+ */
+function createAdditiveBlendShader(): string {
+  return `
+precision highp float;
+precision highp sampler2D;
+
+in vec2 vUv;
+out vec4 outColor;
+
+uniform sampler2D sourceSpectrogramTex;
+uniform sampler2D destSpectrogramTex;
+uniform sampler2D blendOriginalTex;
+uniform bool useStrokeMask;
+uniform vec2 brushBottomLeftUv;
+uniform vec2 brushSizeUv;
+
+void main() {
+  vec4 destTexel = texture(destSpectrogramTex, vUv);
+
+  vec2 offset = vUv - brushBottomLeftUv;
+  bool insideBrush = offset.x >= 0.0 && offset.x < brushSizeUv.x &&
+                     offset.y >= 0.0 && offset.y < brushSizeUv.y;
+
+  if (!insideBrush) {
+    outColor = destTexel;
+    return;
+  }
+
+  vec4 sourceTexel = texture(sourceSpectrogramTex, vUv);
+
+  // In non-cumulative mode, use blendOriginalTex for the blend formula
+  // to prevent accumulation when painting over the same area
+  vec4 blendOriginal = useStrokeMask ? texture(blendOriginalTex, vUv) : destTexel;
+
+  // Simulates additive blend mode: blendOriginal + source
+  outColor = vec4(
+    blendOriginal.r + sourceTexel.r,
+    sourceTexel.g,  // phase from source
+    blendOriginal.b + sourceTexel.b,
+    sourceTexel.a   // phase from source
+  );
+}
+`;
+}
+
+/**
+ * Creates an additive blend effect that simulates blend mode 1 (Add).
+ * Uses blendOriginalTex in non-cumulative mode to prevent accumulation.
+ */
+function createAdditiveBlendEffect(): BaseEffect {
+  const material = new RawShaderMaterial({
+    vertexShader: passThroughVert,
+    fragmentShader: withPlatformDefines(createAdditiveBlendShader()),
+    glslVersion: GLSL3,
+    uniforms: {
+      sourceSpectrogramTex: { value: null },
+      destSpectrogramTex: { value: null },
+      blendOriginalTex: { value: null },
+      useStrokeMask: { value: false },
+      brushBottomLeftUv: { value: new Vector2(0, 0) },
+      brushSizeUv: { value: new Vector2(1, 1) },
+    },
+  });
+
+  return {
+    materials: [material],
+    updateEffectUniforms({ commonUniforms, passIndex }: UpdateEffectUniformsProps) {
+      const mat = this.materials[passIndex];
+      if (!mat) return;
+      if (commonUniforms.sourceSpectrogramTex) {
+        mat.uniforms.sourceSpectrogramTex.value = commonUniforms.sourceSpectrogramTex.value;
+      }
+      if (commonUniforms.destSpectrogramTex) {
+        mat.uniforms.destSpectrogramTex.value = commonUniforms.destSpectrogramTex.value;
+      }
+      if ((commonUniforms as Record<string, { value: unknown }>).blendOriginalTex) {
+        mat.uniforms.blendOriginalTex.value = (commonUniforms as Record<string, { value: unknown }>).blendOriginalTex.value;
+      }
+      if ((commonUniforms as Record<string, { value: unknown }>).useStrokeMask) {
+        mat.uniforms.useStrokeMask.value = (commonUniforms as Record<string, { value: unknown }>).useStrokeMask.value;
+      }
+      if (commonUniforms.brushBottomLeftUv) {
+        mat.uniforms.brushBottomLeftUv.value = commonUniforms.brushBottomLeftUv.value;
+      }
+      if (commonUniforms.brushSizeUv) {
+        mat.uniforms.brushSizeUv.value = commonUniforms.brushSizeUv.value;
+      }
+    },
+  } as BaseEffect;
+}
+
+/**
+ * Creates a mock effects registry with additive blend effect.
+ * Used for testing non-cumulative mode with additive blending.
+ */
+function createMockEffectsWithAdditiveBlend(): EffectsRegistry {
+  const passthroughEffect = createMockPassthroughEffect();
+  const additiveBlendEffect = createAdditiveBlendEffect();
+  return {
+    dynamics: passthroughEffect,
+    transform: additiveBlendEffect, // Additive blend for testing
+    overtones: passthroughEffect,
+    blur: passthroughEffect,
+    synthesize: passthroughEffect,
+    passthrough: passthroughEffect,
+  };
+}
+
+/**
  * Creates a configurable additive effect with a specified amount.
  * Positive amounts add to magnitude, negative amounts subtract.
  */
@@ -1318,6 +1435,142 @@ describe("StrokeRenderer", () => {
       ncTextures?.inverseMapTex.dispose();
       ncTextures?.metadataTex.dispose();
       ncTextures?.placeholderTexture.dispose();
+    });
+
+    it("should not accumulate with additive blend mode when stroking back and forth", async () => {
+      // This test verifies that with non-cumulative strokes and additive blend mode,
+      // repeatedly painting over the same area within a single stroke does NOT
+      // keep accumulating the effect.
+      //
+      // We need a separate renderer with the additive blend effect (dest + source)
+      // to properly test this scenario.
+      const blendGl = new WebGLRenderer({
+        antialias: false,
+        preserveDrawingBuffer: true,
+      });
+      blendGl.setSize(512, 512);
+
+      const blendSpectrogramData = createMockSpectrogramData({
+        numFrames: 256,
+        numBands: 128,
+        pattern: "constant",
+        constantMagnitude: 0.5,
+      });
+
+      const blendDataTextures = createTexturesFromSpectrogramData(blendSpectrogramData);
+      const blendPlaceholderTexture = createPlaceholderTexture();
+
+      const blendTextures: StrokeTextures = {
+        ...blendDataTextures,
+        placeholderTexture: blendPlaceholderTexture,
+        modulatorScaleLut: null,
+        modulator1Texture: null,
+        modulator2Texture: null,
+        modulator3Texture: null,
+      };
+
+      // Use the additive blend effect (dest + source) to simulate blend mode Add
+      const additiveBlendEffects = createMockEffectsWithAdditiveBlend();
+      const blendRenderer = new StrokeRenderer(
+        blendGl,
+        blendSpectrogramData,
+        blendTextures,
+        "blend-test",
+        additiveBlendEffects,
+      );
+
+      try {
+        blendRenderer.initialize();
+
+        // Create state with non-cumulative strokes
+        const state = createMockStateForIterations(1, {
+          cumulativeStrokes: false,
+          effectOrder: [
+            { effect: "transform", enabled: true },
+            { effect: "dynamics", enabled: false },
+            { effect: "blur", enabled: false },
+            { effect: "overtones", enabled: false },
+            { effect: "synthesize", enabled: false },
+          ],
+        } as any) as State;
+
+        const totalDuration = blendSpectrogramData.numFrames / blendSpectrogramData.sampleRate;
+        const sourceFile: SourceFileInfo = {
+          id: "blend-test",
+          filePath: "/test/blend-test.wav",
+          spectrogramData: blendSpectrogramData,
+          textures: blendRenderer.getTextures(),
+        };
+
+        const sampleUv = new Vector2(0.1, 0.1);
+
+        // Get original magnitude
+        const originalData = await blendRenderer.getFBOData();
+        const originalPixel = getPixelAtUv(originalData, sampleUv, blendSpectrogramData);
+        expect(originalPixel).not.toBeNull();
+        const originalMag = originalPixel![0];
+        expect(originalMag).toBeCloseTo(0.5, 2);
+
+        // Begin a stroke
+        blendRenderer.beginStroke();
+
+        // First stroke at position A
+        const params: StrokeParams = {
+          cursorPos: new Vector2(0.0, 0.0),
+          preview: false,
+          bpm: 120,
+          totalDuration,
+          viewZoomPower: 0,
+          viewOffset: 0,
+        };
+
+        blendRenderer.renderStroke(params, state, sourceFile);
+        const dataAfter1 = await blendRenderer.getFBOData();
+        const pixel1 = getPixelAtUv(dataAfter1, sampleUv, blendSpectrogramData);
+        expect(pixel1).not.toBeNull();
+        const mag1 = pixel1![0];
+
+        // With additive blend (dest + source), first stroke should produce:
+        // dest (0.5) + source (0.5) = 1.0
+        expect(mag1).toBeCloseTo(1.0, 2);
+
+        // Now stroke back over the same position multiple times (simulating back-and-forth painting)
+        blendRenderer.renderStroke(params, state, sourceFile);
+        const dataAfter2 = await blendRenderer.getFBOData();
+        const pixel2 = getPixelAtUv(dataAfter2, sampleUv, blendSpectrogramData);
+        expect(pixel2).not.toBeNull();
+        const mag2 = pixel2![0];
+
+        blendRenderer.renderStroke(params, state, sourceFile);
+        const dataAfter3 = await blendRenderer.getFBOData();
+        const pixel3 = getPixelAtUv(dataAfter3, sampleUv, blendSpectrogramData);
+        expect(pixel3).not.toBeNull();
+        const mag3 = pixel3![0];
+
+        blendRenderer.renderStroke(params, state, sourceFile);
+        const dataAfter4 = await blendRenderer.getFBOData();
+        const pixel4 = getPixelAtUv(dataAfter4, sampleUv, blendSpectrogramData);
+        expect(pixel4).not.toBeNull();
+        const mag4 = pixel4![0];
+
+        // In non-cumulative mode, all these strokes should result in the SAME magnitude
+        // The effect should NOT keep accumulating even with additive blend mode
+        // BUG: Currently these will be ~1.5, ~2.0, ~2.5 because destSpectrogramTex
+        // points to the changing FBO instead of strokeStartFbo
+        expect(mag2).toBeCloseTo(mag1, 2);
+        expect(mag3).toBeCloseTo(mag1, 2);
+        expect(mag4).toBeCloseTo(mag1, 2);
+
+        blendRenderer.endStroke();
+      } finally {
+        blendRenderer.dispose();
+        blendGl.dispose();
+        blendTextures.packedDataTex.dispose();
+        blendTextures.originalPackedDataTex.dispose();
+        blendTextures.inverseMapTex.dispose();
+        blendTextures.metadataTex.dispose();
+        blendTextures.placeholderTexture.dispose();
+      }
     });
 
     it("should prevent double-painting in overlapping strokes with non-cumulative mode", async () => {

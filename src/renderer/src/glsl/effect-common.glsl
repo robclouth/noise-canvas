@@ -54,6 +54,7 @@ uniform float magnitudeLimit;
 
 uniform sampler2D strokeMaskTex;
 uniform bool useStrokeMask;
+uniform sampler2D blendOriginalTex;
 
 // ============================================================================
 // DEFINES & HELPERS
@@ -572,11 +573,24 @@ bool isInsideBrush(vec2 unpackedUv) {
 }
 
 // Applies the final brush effect, combining original and modified data.
-vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
+// packedUv is the raw texture coordinate (vUv), destUv is the unpacked spectrogram coordinate
+vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv, vec2 packedUv) {
   vec2 originalL = original.rg;
   vec2 originalR = original.ba;
   vec2 modifiedL = modified.rg;
   vec2 modifiedR = modified.ba;
+
+  // For non-cumulative mode with additive blend modes, use the stroke start state
+  // for blend formula calculations to prevent accumulation when painting over the same area
+  // Note: blendOriginal is only used for computing the blend target, not for the final interpolation
+  // Use packedUv for sampling textures that are in packed format
+  vec2 blendOriginalL = originalL;
+  vec2 blendOriginalR = originalR;
+  if (useStrokeMask) {
+    vec4 strokeStart = texture(blendOriginalTex, packedUv);
+    blendOriginalL = strokeStart.rg;
+    blendOriginalR = strokeStart.ba;
+  }
 
   float audioLevelDb = getAudioLevelDb(destUv);
  
@@ -600,8 +614,9 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
   // - Gradual reveal as we paint (weight increases)
   // - No accumulation beyond intensity (mask caps the weight)
   // - Consistent result when re-painting same area (same blend from strokeStart)
+  // Use packedUv to sample the mask since it's stored in packed format
   if (useStrokeMask) {
-    float maskValue = texture(strokeMaskTex, destUv).r;
+    float maskValue = texture(strokeMaskTex, packedUv).r;
     effectiveWeight = max(effectiveWeight, maskValue);
   }
 
@@ -614,35 +629,39 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv) {
     return vec4(finalL, finalR);
   }
 
-  float magOriginalL = getMag(originalL);
   float magModifiedL = getMag(pannedModifiedL);
-  float magOriginalR = getMag(originalR);
   float magModifiedR = getMag(pannedModifiedR);
 
-  float averagePhaseL = 0.5 * (originalL.y + modifiedL.y);
-  float averagePhaseR = 0.5 * (originalR.y + modifiedR.y);
+  // Use blendOriginal for blend formula calculations (prevents accumulation in non-cumulative mode)
+  float magBlendOriginalL = getMag(blendOriginalL);
+  float magBlendOriginalR = getMag(blendOriginalR);
+
+  float averagePhaseL = 0.5 * (blendOriginalL.y + modifiedL.y);
+  float averagePhaseR = 0.5 * (blendOriginalR.y + modifiedR.y);
 
   vec2 targetL, targetR;
 
   if      (blendMode == 0) { targetL = pannedModifiedL; targetR = pannedModifiedR; }
-  else if (blendMode == 1) { targetL = fromPolar(magOriginalL + magModifiedL, averagePhaseL);
-                             targetR = fromPolar(magOriginalR + magModifiedR, averagePhaseR); }
-  else if (blendMode == 2) { targetL = fromPolar(magOriginalL - magModifiedL, averagePhaseL);
-                             targetR = fromPolar(magOriginalR - magModifiedR, averagePhaseR); }
-  else if (blendMode == 3) { targetL = fromPolar(magOriginalL * magModifiedL * 4.0, averagePhaseL);
-                             targetR = fromPolar(magOriginalR * magModifiedR * 4.0, averagePhaseR); }
-  else if (blendMode == 4) { targetL = fromPolar(magOriginalL / (magModifiedL + EPSILON), averagePhaseL);
-                             targetR = fromPolar(magOriginalR / (magModifiedR + EPSILON), averagePhaseR); }
-  else if (blendMode == 5) { targetL = (magModifiedL > magOriginalL) ? modifiedL : originalL;
-                             targetR = (magModifiedR > magOriginalR) ? modifiedR : originalR; }
-  else if (blendMode == 6) { targetL = (magModifiedL < magOriginalL) ? modifiedL : originalL;
-                             targetR = (magModifiedR < magOriginalR) ? modifiedR : originalR; }
-  else if (blendMode == 7) { targetL = fromPolar(abs(magOriginalL - magModifiedL), averagePhaseL);
-                             targetR = fromPolar(abs(magOriginalR - magModifiedR), averagePhaseR); }
-  else {                     targetL = originalL; targetR = originalR; }
+  else if (blendMode == 1) { targetL = fromPolar(magBlendOriginalL + magModifiedL, averagePhaseL);
+                             targetR = fromPolar(magBlendOriginalR + magModifiedR, averagePhaseR); }
+  else if (blendMode == 2) { targetL = fromPolar(magBlendOriginalL - magModifiedL, averagePhaseL);
+                             targetR = fromPolar(magBlendOriginalR - magModifiedR, averagePhaseR); }
+  else if (blendMode == 3) { targetL = fromPolar(magBlendOriginalL * magModifiedL * 4.0, averagePhaseL);
+                             targetR = fromPolar(magBlendOriginalR * magModifiedR * 4.0, averagePhaseR); }
+  else if (blendMode == 4) { targetL = fromPolar(magBlendOriginalL / (magModifiedL + EPSILON), averagePhaseL);
+                             targetR = fromPolar(magBlendOriginalR / (magModifiedR + EPSILON), averagePhaseR); }
+  else if (blendMode == 5) { targetL = (magModifiedL > magBlendOriginalL) ? modifiedL : blendOriginalL;
+                             targetR = (magModifiedR > magBlendOriginalR) ? modifiedR : blendOriginalR; }
+  else if (blendMode == 6) { targetL = (magModifiedL < magBlendOriginalL) ? modifiedL : blendOriginalL;
+                             targetR = (magModifiedR < magBlendOriginalR) ? modifiedR : blendOriginalR; }
+  else if (blendMode == 7) { targetL = fromPolar(abs(magBlendOriginalL - magModifiedL), averagePhaseL);
+                             targetR = fromPolar(abs(magBlendOriginalR - magModifiedR), averagePhaseR); }
+  else {                     targetL = blendOriginalL; targetR = blendOriginalR; }
 
-  vec2 finalL = interpolateComplex(originalL, targetL, effectiveWeight);
-  vec2 finalR = interpolateComplex(originalR, targetR, effectiveWeight);
+  // In non-cumulative mode, interpolate from stroke start state to prevent any accumulation
+  // In cumulative mode, interpolate from current state
+  vec2 finalL = interpolateComplex(blendOriginalL, targetL, effectiveWeight);
+  vec2 finalR = interpolateComplex(blendOriginalR, targetR, effectiveWeight);
 
   // FINAL LIMITING
   finalL = limitMagnitude(finalL);

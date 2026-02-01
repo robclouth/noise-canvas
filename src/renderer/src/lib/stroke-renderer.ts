@@ -726,9 +726,12 @@ export class StrokeRenderer {
               const currentMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo : this.strokeMaskFbo2;
               (uniformsForThisIteration as any).useStrokeMask = { value: true };
               (uniformsForThisIteration as any).strokeMaskTex = { value: currentMaskFbo.texture };
+              // Pass stroke start texture for blend calculations to prevent accumulation with additive blend modes
+              (uniformsForThisIteration as any).blendOriginalTex = { value: this.strokeStartFbo.texture };
             } else {
               (uniformsForThisIteration as any).useStrokeMask = { value: false };
               (uniformsForThisIteration as any).strokeMaskTex = { value: this.textures.placeholderTexture };
+              (uniformsForThisIteration as any).blendOriginalTex = { value: this.textures.placeholderTexture };
             }
 
             effect.updateEffectUniforms({
