@@ -1,5 +1,7 @@
 import { getParameterDef } from "@renderer/parameters";
-import { effects, EffectType } from "../effects";
+// Import from types module to avoid circular dependency with effects/index
+import { DEFAULT_EFFECT_ORDER } from "../effects/types";
+import type { EffectType } from "../effects/types";
 import { shapes } from "../effects/overtones-shapes";
 
 export interface EffectsState {
@@ -27,10 +29,6 @@ export interface EffectsState {
   overtonesShape: keyof typeof shapes;
   effectOrder: { effect: EffectType; enabled: boolean }[];
 }
-
-const DEFAULT_EFFECT_ORDER = Object.keys(effects)
-  .filter((key) => key !== "passthrough")
-  .map((k) => ({ effect: k as EffectType, enabled: false }));
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const createEffectsSlice = (): EffectsState => {

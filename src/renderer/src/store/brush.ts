@@ -46,13 +46,13 @@ function positionToUv(
   bpm: number,
   totalDuration: number,
   bandsPerOctave: number,
-  numBands: number
+  numBands: number,
 ): { uvX: number; uvY: number; timeSeconds: number } {
   const timeSeconds = (position.beats / bpm) * 60;
   const uvX = timeSeconds / totalDuration;
   const bandsPerSemitone = bandsPerOctave / 12;
   const bandIndex = position.pitch * bandsPerSemitone;
-  const uvY = 1 - (bandIndex / numBands);
+  const uvY = 1 - bandIndex / numBands;
   return { uvX, uvY, timeSeconds };
 }
 
@@ -105,7 +105,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         bpm,
         totalDuration,
         spectrogramData.bandsPerOctave,
-        spectrogramData.numBands
+        spectrogramData.numBands,
       );
 
       file.rendererRef.current.renderStroke(uvX, uvY, true);
@@ -115,7 +115,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     applyStrokeAtPosition: async (position?, strokeTimeRange?) => {
       const state = get();
       const { activeFileId, synthesizeFile, autoPlayStroke, setFilePlaybackStartTime, setAutoPlayEndTime } = state;
-      
+
       const effectivePosition = position || state.cursorPosition;
       if (!activeFileId || !effectivePosition) return;
 
@@ -126,19 +126,16 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const { spectrogramData } = file;
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
-      const { uvX, uvY, timeSeconds } = positionToUv(
+      const { timeSeconds } = positionToUv(
         effectivePosition,
         bpm,
         totalDuration,
         spectrogramData.bandsPerOctave,
-        spectrogramData.numBands
+        spectrogramData.numBands,
       );
 
-      // Apply the stroke (not preview)
-      file.rendererRef.current.renderStroke(uvX, uvY, false);
-
-      // Small delay to let the render complete
-      await new Promise(resolve => setTimeout(resolve, 50));
+      // Small delay to let any pending render complete
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Get FBO data and create undo state
       const data = await file.rendererRef.current.getFBOData();

@@ -5,6 +5,10 @@ import { passThroughEffect } from "./passthrough-effect";
 import { synthesizeEffect } from "./synthesize-effect";
 import { transformEffect } from "./transform-effect";
 
+// Re-export types from the types module (which has no circular dependencies)
+export type { EffectType } from "./types";
+export { EFFECT_KEYS, DEFAULT_EFFECT_ORDER } from "./types";
+
 export const effects = {
   dynamics: dynamicsEffect,
   transform: transformEffect,
@@ -13,5 +17,3 @@ export const effects = {
   synthesize: synthesizeEffect,
   passthrough: passThroughEffect,
 };
-
-export type EffectType = keyof typeof effects;

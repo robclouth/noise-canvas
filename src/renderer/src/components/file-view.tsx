@@ -422,13 +422,19 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         strokeTimeRangeRef.current.max = Math.max(strokeTimeRangeRef.current.max!, currentBrushTime);
       }
 
+      // Check if snapped position actually changed (for grid snapping)
+      const lastPos = lastSnappedPositionRef.current;
+      const positionChanged = !lastPos || 
+        Math.abs(lastPos.x - snappedX) > 0.0001 || 
+        Math.abs(lastPos.y - snappedY) > 0.0001;
+
       // Update cursor position
       const { beats, pitch } = uvToBeatsAndPitch(snappedX, snappedY);
       state.setCursorPosition({ beats, pitch });
       lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
 
-      // Continue rendering the stroke
-      if (rendererRef.current) {
+      // Only render if position actually changed (prevents duplicate iterations at same grid cell)
+      if (positionChanged && rendererRef.current) {
         rendererRef.current.renderStroke(snappedX, snappedY, false);
       }
     };
