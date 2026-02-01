@@ -287,6 +287,7 @@ function createSourceFileInfo(
   const textures = renderer.getTextures();
   return {
     id: fileId,
+    filePath: `/test/${fileId}.wav`,
     spectrogramData,
     textures: {
       packed: textures.packed,
@@ -571,6 +572,7 @@ describe("StrokeRenderer", () => {
       const totalDuration = iterSpectrogramData.numFrames / iterSpectrogramData.sampleRate;
       const sourceFile: SourceFileInfo = {
         id: "iter-test",
+        filePath: "/test/iter-test.wav",
         spectrogramData: iterSpectrogramData,
         textures: iterRenderer.getTextures(),
       };
@@ -640,6 +642,7 @@ describe("StrokeRenderer", () => {
       const totalDuration = iterSpectrogramData.numFrames / iterSpectrogramData.sampleRate;
       const sourceFile: SourceFileInfo = {
         id: "iter-test",
+        filePath: "/test/iter-test.wav",
         spectrogramData: iterSpectrogramData,
         textures: iterRenderer.getTextures(),
       };
@@ -687,6 +690,7 @@ describe("StrokeRenderer", () => {
       const totalDuration = iterSpectrogramData.numFrames / iterSpectrogramData.sampleRate;
       const sourceFile: SourceFileInfo = {
         id: "iter-test",
+        filePath: "/test/iter-test.wav",
         spectrogramData: iterSpectrogramData,
         textures: iterRenderer.getTextures(),
       };
@@ -728,6 +732,7 @@ describe("StrokeRenderer", () => {
       const totalDuration = iterSpectrogramData.numFrames / iterSpectrogramData.sampleRate;
       const sourceFile: SourceFileInfo = {
         id: "iter-test",
+        filePath: "/test/iter-test.wav",
         spectrogramData: iterSpectrogramData,
         textures: iterRenderer.getTextures(),
       };
@@ -889,6 +894,7 @@ describe("StrokeRenderer", () => {
       const totalDuration = getSpectrogramDuration(spectrogramData);
       const sourceFile: SourceFileInfo = {
         id: "source-file",
+        filePath: "/test/source-file.wav",
         spectrogramData: sourceSpectrogramData,
         textures: sourceRenderer.getTextures(),
       };
@@ -1152,6 +1158,7 @@ describe("StrokeRenderer", () => {
       const totalDuration = multiStepSpectrogramData.numFrames / multiStepSpectrogramData.sampleRate;
       const sourceFile: SourceFileInfo = {
         id: "multi-step-test",
+        filePath: "/test/multi-step-test.wav",
         spectrogramData: multiStepSpectrogramData,
         textures: multiStepRenderer.getTextures(),
       };
@@ -1236,6 +1243,7 @@ describe("StrokeRenderer", () => {
       const totalDuration = multiStepSpectrogramData.numFrames / multiStepSpectrogramData.sampleRate;
       const sourceFile: SourceFileInfo = {
         id: "asymmetric-test",
+        filePath: "/test/asymmetric-test.wav",
         spectrogramData: multiStepSpectrogramData,
         textures: multiStepRenderer.getTextures(),
       };
@@ -1330,6 +1338,7 @@ describe("StrokeRenderer", () => {
       const totalDuration = ncSpectrogramData.numFrames / ncSpectrogramData.sampleRate;
       const sourceFile: SourceFileInfo = {
         id: "nc-test",
+        filePath: "/test/nc-test.wav",
         spectrogramData: ncSpectrogramData,
         textures: ncRenderer.getTextures(),
       };
@@ -1480,6 +1489,7 @@ describe("StrokeRenderer", () => {
       const totalDuration = outsideSpectrogramData.numFrames / outsideSpectrogramData.sampleRate;
       const sourceFile: SourceFileInfo = {
         id: "outside-test",
+        filePath: "/test/outside-test.wav",
         spectrogramData: outsideSpectrogramData,
         textures: outsideRenderer.getTextures(),
       };

@@ -1,2 +1,4 @@
 Comments should only explain the functionality of the code, not what you've changed.
 After big changes, run "npm run test:run" to run tests.
+When creating tests, you can't just duplicate all of the logic of the code that you're testing in the test. You must use the original code as much as possible.
+Never use "any" type.

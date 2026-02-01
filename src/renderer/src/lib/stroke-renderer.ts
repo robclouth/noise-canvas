@@ -120,6 +120,7 @@ export interface StrokeTextures {
  */
 export interface SourceFileInfo {
   id: string;
+  filePath: string;
   spectrogramData: SpectrogramData;
   textures: {
     packed: WebGLRenderTarget;
@@ -732,7 +733,7 @@ export class StrokeRenderer {
             effect.updateEffectUniforms({
               commonUniforms: uniformsForThisIteration,
               passIndex: p,
-              file: { id: sourceFile.id, spectrogramData: sourceFile.spectrogramData } as any,
+              file: sourceFile,
               state: stepState,
             });
 

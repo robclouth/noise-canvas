@@ -593,6 +593,7 @@ export const FileRenderer = memo(
         // Build source file info for StrokeRenderer
         const sourceFileInfo: SourceFileInfo = {
           id: sourceFile.id,
+          filePath: sourceFile.filePath,
           spectrogramData: sourceFile.spectrogramData,
           textures,
         };
