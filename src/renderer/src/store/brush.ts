@@ -150,9 +150,25 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
 
         let autoPlaybackParams: { startTimeSeconds: number; endTimeSeconds: number } | null = null;
         if (autoPlayStroke) {
-          setFilePlaybackStartTime(activeFileId, clampedStart);
-          setAutoPlayEndTime(clampedEnd);
-          autoPlaybackParams = { startTimeSeconds: clampedStart, endTimeSeconds: clampedEnd };
+          // Get envelope times in beats and convert to seconds
+          const {
+            brushEnvelopeDelayTime,
+            brushEnvelopeAttackTime,
+            brushEnvelopeSustainTime,
+            brushEnvelopeReleaseTime,
+          } = state;
+          const beatsToSeconds = 60 / bpm;
+          const delaySeconds = brushEnvelopeDelayTime * beatsToSeconds;
+          const envelopeEndSeconds =
+            (brushEnvelopeAttackTime + brushEnvelopeSustainTime + brushEnvelopeReleaseTime) * beatsToSeconds;
+
+          // Extend time range by envelope times for autoplay
+          const autoPlayStart = Math.max(0, clampedStart - delaySeconds);
+          const autoPlayEnd = Math.min(totalDuration, clampedEnd + envelopeEndSeconds);
+
+          setFilePlaybackStartTime(activeFileId, autoPlayStart);
+          setAutoPlayEndTime(autoPlayEnd);
+          autoPlaybackParams = { startTimeSeconds: autoPlayStart, endTimeSeconds: autoPlayEnd };
         }
 
         await synthesizeFile(activeFileId, autoPlaybackParams);
