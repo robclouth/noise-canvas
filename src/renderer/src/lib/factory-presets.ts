@@ -11,7 +11,6 @@ export const factoryPresets: PresetType[] = [
     name: "Init",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
-    parameters: {},
     steps: [
       {
         id: "init-step-1",
@@ -24,7 +23,6 @@ export const factoryPresets: PresetType[] = [
     name: "Eraser",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
-    parameters: {},
     steps: [
       {
         id: "eraser-step-1",
@@ -42,7 +40,6 @@ export const factoryPresets: PresetType[] = [
     name: "Booster",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
-    parameters: {},
     steps: [
       {
         id: "booster-step-1",
@@ -60,7 +57,6 @@ export const factoryPresets: PresetType[] = [
     name: "Restore",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
-    parameters: {},
     steps: [
       {
         id: "restore-step-1",
@@ -75,7 +71,6 @@ export const factoryPresets: PresetType[] = [
     name: "Stereo Widening",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
-    parameters: {},
     steps: [
       {
         id: "stereo-widening-step-1",

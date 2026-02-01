@@ -530,7 +530,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       { value: "anchored", label: "Anchored" },
       { value: "offset", label: "Offset" },
     ],
-    includeInPresets: true,
+    includeInPresets: false,
   },
   sourceDataMode: {
     kind: "options",

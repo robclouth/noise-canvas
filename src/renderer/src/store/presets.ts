@@ -1,7 +1,7 @@
 import { notifications } from "@mantine/notifications";
 import { getFolders } from "@renderer/lib/folders";
 import { CURRENT_PRESET_VERSION, PresetType, validatePreset } from "@renderer/lib/preset-schema";
-import { BrushStep, createDefaultStep, parameterDefs } from "@renderer/parameters";
+import { BrushStep, createDefaultStep } from "@renderer/parameters";
 import { produce } from "immer";
 import { factoryPresets } from "../lib/factory-presets";
 import type { State, ZustandGet, ZustandSet } from "./types";
@@ -15,8 +15,8 @@ export interface PresetsState {
   setPresetDirty: (dirty: boolean) => void;
   availablePresets: PresetType[];
   setCurrentPresetId: (presetId: string | null) => void;
-  captureState: () => Partial<State>;
-  recallState: (parameters: Partial<State>) => Partial<State>;
+  captureState: () => BrushStep[];
+  recallState: (steps: BrushStep[]) => Partial<State>;
   loadPreset: (presetId: string) => void;
   savePreset: (name: string, presetId?: string) => Promise<void>;
   deletePreset: (presetId: string) => Promise<void>;
@@ -24,9 +24,9 @@ export interface PresetsState {
   presetHotkeys: Record<string, string>;
   activeQuickSlot: number | null;
   setActiveQuickSlot: (slotIndex: number | null) => void;
-  quickSlotModifierMode: boolean; // True if shift is held (for updating/clearing slots)
+  quickSlotModifierMode: boolean;
   setQuickSlotModifierMode: (isHeld: boolean) => void;
-  quickSlots: Record<number, Partial<State>>;
+  quickSlots: Record<number, BrushStep[]>;
   setQuickSlot: (slotIndex: number) => void;
   recallQuickSlot: (slotIndex: number) => void;
   clearQuickSlot: (slotIndex: number) => void;
@@ -34,28 +34,22 @@ export interface PresetsState {
 
 /**
  * Generate a filename-safe ID from a preset name
- * Removes/replaces special characters and ensures uniqueness with timestamp
  */
 function generateFilenameId(name: string, existingIds: Set<string> = new Set()): string {
-  // Remove or replace unsafe characters
-  // Keep only alphanumeric, spaces, hyphens, and underscores
   let safeName = name
-    .replace(/[^a-zA-Z0-9\s\-_]/g, "") // Remove unsafe chars
-    .replace(/\s+/g, "-") // Replace spaces with hyphens
-    .replace(/-+/g, "-") // Replace multiple hyphens with single
-    .replace(/^-|-$/g, "") // Remove leading/trailing hyphens
+    .replace(/[^a-zA-Z0-9\s\-_]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
     .toLowerCase();
 
-  // Ensure it's not empty
   if (!safeName) {
     safeName = "preset";
   }
 
-  // Make it unique with timestamp
   const timestamp = Date.now();
   let id = `${safeName}-${timestamp}`;
 
-  // If somehow still collides, add a counter
   let counter = 1;
   while (existingIds.has(id)) {
     id = `${safeName}-${timestamp}-${counter}`;
@@ -78,11 +72,9 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     try {
       const { presetsDir } = await getFolders();
 
-      // Read all files from the presets directory
       const files = await window.nodeFs.readdir(presetsDir!);
       const userPresets: PresetType[] = [];
 
-      // Load each JSON file
       for (const file of files) {
         if (file.endsWith(".json")) {
           try {
@@ -90,7 +82,6 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
             const fileContent = await window.nodeFs.readFile(filePath, "utf-8");
             const rawPreset = JSON.parse(fileContent);
 
-            // Validate the preset against the schema (includes migration)
             const validationResult = validatePreset(rawPreset);
             if (validationResult.success) {
               userPresets.push(validationResult.data);
@@ -122,69 +113,33 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
   isPresetDirty: false,
   setPresetDirty: (dirty: boolean) => set({ isPresetDirty: dirty }),
   setCurrentPresetId: (presetId) => set({ currentPresetId: presetId }),
-  recallState: (parameters: Partial<State>) => {
-    const state = get();
+
+  recallState: (steps: BrushStep[]): Partial<State> => {
     const updates: Partial<State> = {};
 
-    // Handle steps array if present in preset
-    if (parameters.steps && Array.isArray(parameters.steps)) {
-      // Merge each preset step with default step values to ensure all parameters are filled
-      updates.steps = parameters.steps.map((presetStep: any, index: number) => {
+    if (steps && Array.isArray(steps) && steps.length > 0) {
+      updates.steps = steps.map((presetStep: any, index: number) => {
         const defaultStep = createDefaultStep(presetStep.name || `Step ${index + 1}`);
         return {
           ...defaultStep,
           ...presetStep,
-          // Preserve the preset's step ID if it exists, otherwise use the generated one
           id: presetStep.id || defaultStep.id,
         } as BrushStep;
       });
-      updates.activeStepIndex = 0;
     } else {
-      // If no steps in preset, reset to a single default step
       updates.steps = [createDefaultStep("Step 1")];
-      updates.activeStepIndex = 0;
     }
-
-    // Handle non-step parameters
-    for (const [key, parameterDef] of Object.entries(parameterDefs)) {
-      if (!parameterDef.includeInPresets) continue;
-      // Skip step parameters as they're handled by the steps array
-      if (parameterDef.includeInStep) continue;
-
-      const value = state[key as keyof State];
-      const presetValue = parameters[key];
-      const newValue = presetValue === undefined ? parameterDef.default : presetValue;
-
-      if (value !== newValue) {
-        updates[key] = newValue;
-      }
-    }
+    updates.activeStepIndex = 0;
 
     return updates;
   },
-  captureState: () => {
-    const state = get();
-    const parameters: Partial<State> = {};
 
-    // Save the steps array
-    parameters.steps = state.steps;
-
-    // Save non-step parameters that are marked for presets
-    for (const [key, parameterDef] of Object.entries(parameterDefs)) {
-      if (!parameterDef.includeInPresets) continue;
-      // Skip step parameters as they're saved in the steps array
-      if (parameterDef.includeInStep) continue;
-
-      const value = state[key as keyof State];
-      if (value === parameterDef.default) continue; // Skip default values
-      parameters[key] = value;
-    }
-    return parameters;
+  captureState: (): BrushStep[] => {
+    return get().steps;
   },
+
   loadPreset: (presetId: string) => {
     const state = get();
-
-    // Allow re-selecting the same preset to reload/reset it
 
     const preset = state.availablePresets.find((p) => p.id === presetId);
     if (!preset) {
@@ -197,41 +152,46 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       return;
     }
 
-    set({ currentPresetId: presetId, isPresetDirty: false, ...state.recallState({ ...preset.parameters, steps: preset.steps }) });
+    set({
+      currentPresetId: presetId,
+      isPresetDirty: false,
+      ...state.recallState(preset.steps ?? []),
+    });
   },
+
   savePreset: async (name: string, presetId?: string) => {
     try {
       const state = get();
       const { availablePresets, presetsDir } = state;
 
-      // Generate ID if not provided
       let id = presetId;
       if (!id) {
         const existingIds = new Set(availablePresets.map((p) => p.id));
         id = generateFilenameId(name, existingIds);
       }
 
-      // Build preset from state
       const preset: PresetType = {
         id,
         name,
         isFactory: false,
         version: CURRENT_PRESET_VERSION,
-        parameters: state.captureState(),
+        steps: state.captureState(),
       };
 
-      // Don't allow saving over default presets
       if (preset.isFactory) {
         throw new Error("Cannot save over factory presets");
       }
 
       try {
-        // Save as individual JSON file
         const fileName = `${id}.json`;
         const filePath = window.nodePath.join(presetsDir!, fileName);
         await window.nodeFs.writeFile(filePath, JSON.stringify(preset, null, 2), "utf-8");
 
-        set({ currentPresetId: id, isPresetDirty: false, availablePresets: [...availablePresets.filter((p) => p.id !== id), preset] });
+        set({
+          currentPresetId: id,
+          isPresetDirty: false,
+          availablePresets: [...availablePresets.filter((p) => p.id !== id), preset],
+        });
 
         console.log("Preset saved:", preset.name, "at", filePath);
         notifications.show({
@@ -243,7 +203,6 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
         throw error;
       }
 
-      // Set as current preset
       set({ currentPresetId: id });
     } catch (error) {
       console.error("Error saving preset:", error);
@@ -254,17 +213,16 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       });
     }
   },
+
   deletePreset: async (presetId: string) => {
     try {
       const { presetsDir, currentPresetId } = get();
 
-      // Don't allow deleting factory presets
       const factoryPreset = factoryPresets.find((p) => p.id === presetId);
       if (factoryPreset) {
         throw new Error("Cannot delete default presets");
       }
 
-      // Delete the individual JSON file
       const fileName = `${presetId}.json`;
       const filePath = window.nodePath.join(presetsDir!, fileName);
       await window.nodeFs.unlink(filePath);
@@ -292,6 +250,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       });
     }
   },
+
   presetHotkeys: {},
   assignHotkeyToPreset: async (presetId: string, hotkey: string) => {
     const preset = get().availablePresets.find((p) => p.id === presetId);
@@ -313,6 +272,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       message: `Hotkey ${hotkey} assigned to ${preset.name}`,
     });
   },
+
   quickSlots: {},
   activeQuickSlot: null,
   setActiveQuickSlot: (slotIndex) => set({ activeQuickSlot: slotIndex }),
@@ -327,12 +287,14 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       }),
     );
   },
+
   recallQuickSlot: (slotIndex: number) => {
     const state = get();
-    const parameters = state.quickSlots[slotIndex];
-    if (!parameters) return;
-    set({ ...state.recallState(parameters), currentPresetId: null, activeQuickSlot: slotIndex });
+    const steps = state.quickSlots[slotIndex];
+    if (!steps) return;
+    set({ ...state.recallState(steps), currentPresetId: null, activeQuickSlot: slotIndex });
   },
+
   clearQuickSlot: (slotIndex: number) => {
     set(
       produce((state: State) => {
