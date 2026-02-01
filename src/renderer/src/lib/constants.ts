@@ -142,7 +142,9 @@ export const EDGE_MODE = [
   { value: 0, label: "Cut" },
   { value: 1, label: "Bleed" },
   { value: 2, label: "Wrap" },
-  { value: 3, label: "Mirror" },
+  { value: 3, label: "Clamp" },
+  { value: 4, label: "Reflect" },
+  { value: 5, label: "Invert" },
 ];
 
 export const SYNTHESIZE_TYPES = [
@@ -182,4 +184,5 @@ export const EFFECT_COLORS: Record<string, string> = {
   overtones: "yellow",
   blur: "green",
   synthesize: "purple",
+  evolve: "cyan",
 };

@@ -6,6 +6,7 @@ import { EFFECT_COLORS } from "@renderer/lib/constants";
 import { EffectSection } from "./effect-section";
 import { BlurEffect } from "./effect-views/blur-effect";
 import { DynamicsEffect } from "./effect-views/dynamics-effect";
+import { EvolveEffect } from "./effect-views/evolve-effect";
 import { HarmonicsEffect } from "./effect-views/overtones-effect";
 import { SynthesizeEffect } from "./effect-views/synthesize-effect";
 import { TransformEffect } from "./effect-views/transform-effect";
@@ -16,6 +17,7 @@ const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
   overtones: <HarmonicsEffect />,
   blur: <BlurEffect />,
   synthesize: <SynthesizeEffect />,
+  evolve: <EvolveEffect />,
 };
 
 const EFFECT_LABELS: Record<string, string> = {
@@ -24,6 +26,7 @@ const EFFECT_LABELS: Record<string, string> = {
   overtones: "Overtones",
   blur: "Smooth",
   synthesize: "Synthesize",
+  evolve: "Evolve",
 };
 
 const EFFECT_DESCRIPTIONS: Record<string, string> = {
@@ -32,6 +35,7 @@ const EFFECT_DESCRIPTIONS: Record<string, string> = {
   overtones: "Add overtones to create richer timbres.",
   blur: "Smooth and blend frequencies over time and pitch for softer transitions.",
   synthesize: "Generate new audio content from scratch (noise, sine waves, etc.).",
+  evolve: "Reaction-advection-diffusion simulation for fluid, biological, and chaotic patterns.",
 };
 
 import { ParameterKey } from "@/store/types";
@@ -49,6 +53,18 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
   overtones: ["overtonesCount", "overtonesScale", "overtonesDecay", "overtonesShape"],
   blur: ["blurAmountTime", "blurAmountPitch", "blurNoiseTime", "blurNoisePitch", "blurBleed", "blurOrigin"],
   synthesize: ["synthesizeBrushType"],
+  evolve: [
+    "evolveFlow",
+    "evolveSpread",
+    "evolveGrow",
+    "evolveSwirl",
+    "evolveDriftX",
+    "evolveDriftY",
+    "evolveDecay",
+    "evolveScaleX",
+    "evolveScaleY",
+    "evolveEdgeMode",
+  ],
 };
 
 export function EffectsList() {

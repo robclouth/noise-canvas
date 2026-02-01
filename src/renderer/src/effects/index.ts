@@ -1,5 +1,6 @@
 import { blurEffect } from "./blur-effect";
 import { dynamicsEffect } from "./dynamics-effect";
+import { evolveEffect } from "./evolve-effect";
 import { overtonesEffect } from "./overtones-effect";
 import { passThroughEffect } from "./passthrough-effect";
 import { synthesizeEffect } from "./synthesize-effect";
@@ -15,5 +16,6 @@ export const effects = {
   overtones: overtonesEffect,
   blur: blurEffect,
   synthesize: synthesizeEffect,
+  evolve: evolveEffect,
   passthrough: passThroughEffect,
 };

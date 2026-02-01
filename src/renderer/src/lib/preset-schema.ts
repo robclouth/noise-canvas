@@ -1,5 +1,6 @@
 // Zod schema for validating brush presets
 import { effects } from "@renderer/effects";
+import { syncEffectOrder } from "@renderer/effects/types";
 import { parameterDefs } from "@renderer/parameters";
 import { ParameterKey } from "@renderer/store/types";
 import { z } from "zod";
@@ -130,6 +131,12 @@ export function migratePreset(data: any): any {
   if (!migratedData.steps || !Array.isArray(migratedData.steps)) {
     migratedData.steps = [{ id: crypto.randomUUID(), name: "Step 1" }];
   }
+
+  // Sync effectOrder in all steps to handle added/removed effects
+  migratedData.steps = migratedData.steps.map((step: Record<string, unknown>) => ({
+    ...step,
+    effectOrder: syncEffectOrder(step.effectOrder as { effect: string; enabled: boolean }[] | undefined),
+  }));
 
   return migratedData;
 }

@@ -27,6 +27,16 @@ export interface EffectsState {
   overtonesScale: number;
   overtonesDecay: number;
   overtonesShape: keyof typeof shapes;
+  evolveFlow: number;
+  evolveSpread: number;
+  evolveGrow: number;
+  evolveSwirl: number;
+  evolveDriftX: number;
+  evolveDriftY: number;
+  evolveDecay: number;
+  evolveScaleX: number;
+  evolveScaleY: number;
+  evolveEdgeMode: number;
   effectOrder: { effect: EffectType; enabled: boolean }[];
 }
 
@@ -64,6 +74,18 @@ export const createEffectsSlice = (): EffectsState => {
 
     // ---------------- Synthesize ----------------
     synthesizeBrushType: getParameterDef("synthesizeBrushType").default,
+
+    // ---------------- Evolve ----------------
+    evolveFlow: getParameterDef("evolveFlow").default,
+    evolveSpread: getParameterDef("evolveSpread").default,
+    evolveGrow: getParameterDef("evolveGrow").default,
+    evolveSwirl: getParameterDef("evolveSwirl").default,
+    evolveDriftX: getParameterDef("evolveDriftX").default,
+    evolveDriftY: getParameterDef("evolveDriftY").default,
+    evolveDecay: getParameterDef("evolveDecay").default,
+    evolveScaleX: getParameterDef("evolveScaleX").default,
+    evolveScaleY: getParameterDef("evolveScaleY").default,
+    evolveEdgeMode: getParameterDef("evolveEdgeMode").default,
 
     // ---------------- Effect order ----------------
     effectOrder: DEFAULT_EFFECT_ORDER,

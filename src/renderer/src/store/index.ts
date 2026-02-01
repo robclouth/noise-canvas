@@ -1,4 +1,5 @@
 import { deepMerge } from "@mantine/core";
+import { syncEffectOrder } from "@renderer/effects/types";
 import { CONTEXTUAL_MOD_SOURCES, NUM_MODULATORS } from "@renderer/lib/constants";
 import { isStepParameter, parameterDefs } from "@renderer/parameters";
 import { produce } from "immer";
@@ -139,7 +140,25 @@ export const useStore = create<State>()(
             {} as Record<string, any>,
           );
         },
-        merge: (persistedState, currentState) => deepMerge(currentState, persistedState),
+        merge: (persistedState, currentState) => {
+          const merged = deepMerge(currentState, persistedState) as State;
+
+          // Sync effectOrder in all slots/steps to handle added/removed effects
+          if (merged.slots && Array.isArray(merged.slots)) {
+            merged.slots = merged.slots.map((slot) => {
+              if (!slot || !Array.isArray(slot)) return slot;
+              return slot.map((step) => {
+                if (!step) return step;
+                return {
+                  ...step,
+                  effectOrder: syncEffectOrder(step.effectOrder),
+                };
+              });
+            });
+          }
+
+          return merged;
+        },
       },
     ),
   ),
