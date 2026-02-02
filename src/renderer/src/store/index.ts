@@ -1,7 +1,7 @@
 import { deepMerge } from "@mantine/core";
-import { syncEffectOrder } from "@renderer/effects/types";
+import { EffectItem, syncEffects } from "@renderer/effects/types";
 import { CONTEXTUAL_MOD_SOURCES, NUM_MODULATORS } from "@renderer/lib/constants";
-import { isStepParameter, parameterDefs } from "@renderer/parameters";
+import { getParameterDef, isEffectParameter, isStepParameter, parameterDefs } from "@renderer/parameters";
 import { produce } from "immer";
 import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
@@ -36,13 +36,39 @@ export const useStore = create<State>()(
         ...createAppSlice(set, get),
         ...createPresetsSlice(set, get),
         ...createStepsSlice(set, get),
-        setParameter: (key: ParameterKey, value: any) => {
+        setParameter: (key: ParameterKey, value: any, effectId?: string) => {
           const state = get();
           const slotLinkedParams = state.slotLinkedParams[state.activeSlotIndex] ?? [];
           const isLinked = slotLinkedParams.includes(key as string);
 
-          // If this is a step parameter, update the active step (or all steps if linked)
-          if (isStepParameter(key)) {
+          // If this is an effect parameter and effectId is provided, update the effect's params
+          if (effectId && isEffectParameter(key)) {
+            set(
+              produce((draft: State) => {
+                draft.slotDirty[draft.activeSlotIndex] = true;
+                const steps = draft.slots[draft.activeSlotIndex];
+                if (!steps) return;
+
+                const updateEffectParams = (step: typeof steps[0]) => {
+                  const effects = (step.effects ?? []) as EffectItem[];
+                  const effectIndex = effects.findIndex((e) => e.id === effectId);
+                  if (effectIndex >= 0) {
+                    if (!effects[effectIndex].params) {
+                      effects[effectIndex].params = {};
+                    }
+                    effects[effectIndex].params[key] = value;
+                  }
+                };
+
+                if (isLinked) {
+                  steps.forEach(updateEffectParams);
+                } else if (steps[draft.activeStepIndex]) {
+                  updateEffectParams(steps[draft.activeStepIndex]);
+                }
+              }),
+            );
+          } else if (isStepParameter(key)) {
+            // If this is a step parameter, update the active step (or all steps if linked)
             set(
               produce((draft: State) => {
                 draft.slotDirty[draft.activeSlotIndex] = true;
@@ -143,15 +169,20 @@ export const useStore = create<State>()(
         merge: (persistedState, currentState) => {
           const merged = deepMerge(currentState, persistedState) as State;
 
-          // Sync effectOrder in all slots/steps to handle added/removed effects
+          // Sync effects in all slots/steps to handle added/removed effects
+          // Also handle migration from effectOrder to effects
           if (merged.slots && Array.isArray(merged.slots)) {
             merged.slots = merged.slots.map((slot) => {
               if (!slot || !Array.isArray(slot)) return slot;
-              return slot.map((step) => {
+              return slot.map((step: Record<string, unknown>) => {
                 if (!step) return step;
+                // Handle migration from effectOrder to effects
+                const effectsData = step.effects ?? step.effectOrder;
+                const newStep = { ...step };
+                delete newStep.effectOrder;
                 return {
-                  ...step,
-                  effectOrder: syncEffectOrder(step.effectOrder),
+                  ...newStep,
+                  effects: syncEffects(effectsData as Parameters<typeof syncEffects>[0]),
                 };
               });
             });
@@ -272,5 +303,43 @@ export function createStepStateView(state: State, stepIndex: number): State {
   }
 
   return view as unknown as State;
+}
+
+/**
+ * Get an effect parameter value from a specific effect instance.
+ * Returns the value from the effect's params, or the parameter default if not set.
+ */
+export function getEffectParameterValue(state: State, effectId: string, key: ParameterKey): unknown {
+  const steps = state.slots[state.activeSlotIndex] ?? [];
+  const activeStep = steps[state.activeStepIndex];
+  if (!activeStep) return getParameterDef(key).default;
+
+  const effects = (activeStep.effects ?? []) as EffectItem[];
+  const effect = effects.find((e) => e.id === effectId);
+  if (effect?.params && key in effect.params) {
+    return effect.params[key];
+  }
+
+  // Fall back to parameter default
+  return getParameterDef(key).default;
+}
+
+/**
+ * Selector for use with useStore to get an effect parameter value
+ */
+export function selectEffectParameter(effectId: string, key: ParameterKey) {
+  return (state: State) => getEffectParameterValue(state, effectId, key);
+}
+
+/**
+ * Creates a view state object that includes effect-specific parameter values.
+ * Used by the renderer to get parameters for a specific effect instance.
+ */
+export function createEffectStateView(state: State, stepIndex: number, effectItem: EffectItem): State {
+  const stepView = createStepStateView(state, stepIndex);
+  if (!effectItem.params) return stepView;
+
+  // Merge effect params into the view
+  return { ...stepView, ...effectItem.params } as State;
 }
 

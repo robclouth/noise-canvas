@@ -11,13 +11,15 @@ export type EffectSectionProps = {
   children: React.ReactNode;
   enabled: boolean;
   onEnabledChange: (enabled: boolean) => void;
-  dragHandleProps?: any;
+  onRemove?: () => void;
+  dragHandleProps?: unknown;
   color?: string;
   parameterKeys?: ParameterKey[];
+  effectId?: string;
 };
 
 export const EffectSection = memo(
-  ({ label, description, children, enabled, onEnabledChange, dragHandleProps, color, parameterKeys }: EffectSectionProps) => {
+  ({ label, description, children, enabled, onEnabledChange, onRemove, dragHandleProps, color, parameterKeys, effectId }: EffectSectionProps) => {
 
     return (
       <Paper>
@@ -55,6 +57,8 @@ export const EffectSection = memo(
             <SectionMenu
               storageKey={`effect-${label}`}
               parameterKeys={parameterKeys}
+              onRemove={onRemove}
+              effectId={effectId}
             />
           </Group>
           <Collapse in={enabled}>

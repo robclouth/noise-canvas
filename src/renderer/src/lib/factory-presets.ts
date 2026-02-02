@@ -1,9 +1,4 @@
-import { effects, EffectType } from "@renderer/effects";
 import { CURRENT_PRESET_VERSION, PresetType } from "./preset-schema";
-
-const DEFAULT_EFFECT_ORDER = Object.keys(effects)
-  .filter((key) => key !== "passthrough")
-  .map((k) => ({ effect: k as EffectType, enabled: false }));
 
 export const factoryPresets: PresetType[] = [
   {
@@ -15,6 +10,7 @@ export const factoryPresets: PresetType[] = [
       {
         id: "init-step-1",
         name: "Step 1",
+        effects: [],
       },
     ],
     linkedParams: [],
@@ -28,11 +24,7 @@ export const factoryPresets: PresetType[] = [
       {
         id: "eraser-step-1",
         name: "Step 1",
-        effectOrder: [
-          { effect: "dynamics", enabled: true },
-          ...DEFAULT_EFFECT_ORDER.filter(({ effect }) => effect !== "dynamics"),
-        ],
-        dynamicsGainDb: -80,
+        effects: [{ id: "eraser-dynamics", effect: "dynamics", enabled: true, params: { dynamicsGainDb: -80 } }],
       },
     ],
     linkedParams: [],
@@ -46,11 +38,7 @@ export const factoryPresets: PresetType[] = [
       {
         id: "booster-step-1",
         name: "Step 1",
-        effectOrder: [
-          { effect: "dynamics", enabled: true },
-          ...DEFAULT_EFFECT_ORDER.filter(({ effect }) => effect !== "dynamics"),
-        ],
-        dynamicsGainDb: 6,
+        effects: [{ id: "booster-dynamics", effect: "dynamics", enabled: true, params: { dynamicsGainDb: 6 } }],
       },
     ],
     linkedParams: [],
@@ -64,6 +52,7 @@ export const factoryPresets: PresetType[] = [
       {
         id: "restore-step-1",
         name: "Step 1",
+        effects: [],
         sourceDataMode: "original",
         blendMode: 0, // Replace blend mode
       },
@@ -79,6 +68,7 @@ export const factoryPresets: PresetType[] = [
       {
         id: "stereo-widening-step-1",
         name: "Step 1",
+        effects: [],
         brushPanMod1Amount: 100,
         modulator1PatternRateBeats: 4,
       },

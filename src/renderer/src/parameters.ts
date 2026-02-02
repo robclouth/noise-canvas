@@ -1,6 +1,6 @@
 import { startCase } from "lodash-es";
 import { ScaleType } from "tonal";
-import { effects, EffectType } from "./effects";
+import { DEFAULT_EFFECTS, EffectParams, EffectType } from "./effects/types";
 import { shapes } from "./effects/overtones-shapes";
 import {
   ALGORITHMS,
@@ -32,6 +32,7 @@ export interface ParameterBase {
   description: string;
   includeInPresets?: boolean;
   includeInStep?: boolean;
+  effectType?: EffectType; // Which effect this parameter belongs to (for per-instance storage)
 }
 
 export interface NumberParameter extends ParameterBase {
@@ -79,9 +80,6 @@ const beatMarksWithOff = [{ value: 0, label: "Off" }, ...BEAT_VALUES];
 const beatMarksWithZero = [{ value: 0, label: "0" }, ...BEAT_VALUES];
 const semitoneMarksWithOff = [{ value: 0, label: "Off" }, ...PITCH_VALUES];
 const semitoneMarksWithZero = [{ value: 0, label: "0" }, ...PITCH_VALUES];
-const DEFAULT_EFFECT_ORDER = Object.keys(effects)
-  .filter((key) => key !== "passthrough")
-  .map((k) => ({ effect: k as EffectType, enabled: false }));
 
 // --- Modulator Definitions ---
 // Nested modulation (modulating modulator parameters) is disabled on Windows
@@ -560,6 +558,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "dynamics",
   },
   dynamicsUpperRatio: {
     kind: "number",
@@ -574,6 +573,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "dynamics",
   },
   dynamicsLowerRatio: {
     kind: "number",
@@ -588,6 +588,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "dynamics",
   },
   dynamicsKnee: {
     kind: "number",
@@ -602,6 +603,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "dynamics",
   },
   dynamicsGainDb: {
     kind: "number",
@@ -616,6 +618,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "dynamics",
   },
   transformShiftBeats: {
     kind: "number",
@@ -632,6 +635,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "transform",
   },
   transformShiftSemis: {
     kind: "number",
@@ -647,6 +651,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "transform",
   },
   transformScaleTime: {
     kind: "number",
@@ -663,6 +668,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "transform",
   },
   transformScalePitch: {
     kind: "number",
@@ -679,6 +685,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "transform",
   },
   transformRotation: {
     kind: "number",
@@ -693,6 +700,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "transform",
   },
   transformEdgeMode: {
     kind: "options",
@@ -703,6 +711,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     options: EDGE_MODE,
     includeInPresets: true,
     includeInStep: true,
+    effectType: "transform",
   },
   blurAmountTime: {
     kind: "number",
@@ -717,6 +726,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "blur",
   },
   blurAmountPitch: {
     kind: "number",
@@ -731,6 +741,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "blur",
   },
   blurNoiseTime: {
     kind: "number",
@@ -745,6 +756,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "blur",
   },
   blurNoisePitch: {
     kind: "number",
@@ -759,6 +771,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "blur",
   },
   blurBleed: {
     kind: "boolean",
@@ -768,6 +781,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     default: true,
     includeInPresets: true,
     includeInStep: true,
+    effectType: "blur",
   },
   blurOrigin: {
     kind: "options",
@@ -782,6 +796,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     ],
     includeInPresets: true,
     includeInStep: true,
+    effectType: "blur",
   },
   overtonesCount: {
     kind: "number",
@@ -795,6 +810,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: false,
+    effectType: "overtones",
   },
   overtonesScale: {
     kind: "number",
@@ -810,6 +826,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "overtones",
   },
   overtonesDecay: {
     kind: "number",
@@ -824,6 +841,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "overtones",
   },
   overtonesShape: {
     kind: "options",
@@ -834,6 +852,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     options: Object.entries(shapes).map(([key, shape]) => ({ value: key, label: shape.label })),
     includeInPresets: true,
     includeInStep: true,
+    effectType: "overtones",
   },
   synthesizeBrushType: {
     kind: "options",
@@ -844,6 +863,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     options: SYNTHESIZE_TYPES,
     includeInPresets: true,
     includeInStep: true,
+    effectType: "synthesize",
   },
   evolveFlow: {
     kind: "number",
@@ -858,6 +878,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "evolve",
   },
   evolveSpread: {
     kind: "number",
@@ -872,6 +893,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "evolve",
   },
   evolveGrow: {
     kind: "number",
@@ -886,6 +908,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "evolve",
   },
   evolveSwirl: {
     kind: "number",
@@ -900,6 +923,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "evolve",
   },
   evolveDriftX: {
     kind: "number",
@@ -914,6 +938,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "evolve",
   },
   evolveDriftY: {
     kind: "number",
@@ -928,6 +953,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "evolve",
   },
   evolveDecay: {
     kind: "number",
@@ -942,6 +968,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "evolve",
   },
   evolveScaleX: {
     kind: "number",
@@ -956,6 +983,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "evolve",
   },
   evolveScaleY: {
     kind: "number",
@@ -970,6 +998,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInPresets: true,
     includeInStep: true,
     modulatable: true,
+    effectType: "evolve",
   },
   evolveEdgeMode: {
     kind: "options",
@@ -980,13 +1009,14 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     options: EDGE_MODE,
     includeInPresets: true,
     includeInStep: true,
+    effectType: "evolve",
   },
-  effectOrder: {
+  effects: {
     kind: "options",
-    name: "Effect Order",
-    label: "Order",
-    description: "The order in which effects are applied.",
-    default: DEFAULT_EFFECT_ORDER,
+    name: "Effects",
+    label: "Effects",
+    description: "The effects to apply and their order.",
+    default: DEFAULT_EFFECTS,
     options: [],
     includeInPresets: true,
     includeInStep: true,
@@ -1160,6 +1190,7 @@ for (const [key, def] of Object.entries(combinedDefs)) {
         unit: "%",
         includeInPresets: true,
         includeInStep: true,
+        effectType: def.effectType, // Inherit effectType from parent parameter
       };
     }
 
@@ -1179,6 +1210,7 @@ for (const [key, def] of Object.entries(combinedDefs)) {
         unit: "%",
         includeInPresets: true,
         includeInStep: true,
+        effectType: def.effectType, // Inherit effectType from parent parameter
       };
     }
   }
@@ -1267,4 +1299,38 @@ export const createDefaultStep = (name = "Step 1"): BrushStep => {
 export const isStepParameter = (key: ParameterKey): boolean => {
   const def = parameterDefs[key];
   return def?.includeInStep === true;
+};
+
+// --- Effect Parameter Helpers ---
+
+/** Check if a parameter key belongs to an effect (has effectType set) */
+export const isEffectParameter = (key: ParameterKey): boolean => {
+  const def = parameterDefs[key];
+  return def?.effectType !== undefined;
+};
+
+/** Get the effect type a parameter belongs to, or undefined if not an effect parameter */
+export const getEffectType = (key: ParameterKey): EffectType | undefined => {
+  const def = parameterDefs[key];
+  return def?.effectType;
+};
+
+/** Get all parameter keys for a specific effect type */
+export const getEffectParameterKeys = (effectType: EffectType): ParameterKey[] => {
+  return Object.entries(parameterDefs)
+    .filter(([, def]) => def.effectType === effectType)
+    .map(([key]) => key as ParameterKey);
+};
+
+/** Get default parameter values for a specific effect type */
+export const getEffectParameterDefaults = (effectType: EffectType): EffectParams => {
+  const keys = getEffectParameterKeys(effectType);
+  const defaults: EffectParams = {};
+  for (const key of keys) {
+    const def = parameterDefs[key];
+    if (def) {
+      defaults[key] = def.default;
+    }
+  }
+  return defaults;
 };

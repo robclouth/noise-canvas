@@ -6,7 +6,7 @@ import { Dice5 } from "lucide-react";
 import { useCallback, useState } from "react";
 import {
   randomizeBooleanParameter,
-  randomizeEffectOrder,
+  randomizeEffects,
   randomizeNumberParameter,
   randomizeOptionsParameter,
 } from "../../lib/randomize";
@@ -15,10 +15,10 @@ import { NumboxControl } from "./numbox-control";
 type RandomizeButtonProps = {
   parameterKeys: ParameterKey[];
   storageKey: string;
-  includeEffectOrder?: boolean; // Whether to also randomize effectOrder
+  includeEffects?: boolean; // Whether to also randomize effects
 };
 
-export const RandomizeButton = ({ parameterKeys, storageKey, includeEffectOrder }: RandomizeButtonProps) => {
+export const RandomizeButton = ({ parameterKeys, storageKey, includeEffects }: RandomizeButtonProps) => {
   const [opened, setOpened] = useState(false);
 
   // Get randomization amount for this section (default to 100 if not set)
@@ -77,13 +77,13 @@ export const RandomizeButton = ({ parameterKeys, storageKey, includeEffectOrder 
       }
     });
 
-    // Randomize effect order if enabled
-    if (includeEffectOrder) {
-      const currentOrder = getParameterValue(state, "effectOrder") as { effect: string; enabled: boolean }[];
-      const newOrder = randomizeEffectOrder(currentOrder, amount);
-      setParameter("effectOrder" as ParameterKey, newOrder);
+    // Randomize effects if enabled
+    if (includeEffects) {
+      const currentEffects = getParameterValue(state, "effects") as { id: string; effect: string; enabled: boolean; params: Record<string, unknown> }[];
+      const newEffects = randomizeEffects(currentEffects, amount);
+      setParameter("effects" as ParameterKey, newEffects);
     }
-  }, [amount, parameterKeys, setParameter, modulationEnabled, includeEffectOrder]);
+  }, [amount, parameterKeys, setParameter, modulationEnabled, includeEffects]);
 
   // Calculate bar height based on amount (0-100%)
   const barHeight = (amount / 100) * 14;

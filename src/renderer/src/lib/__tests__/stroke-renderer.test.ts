@@ -662,14 +662,14 @@ describe("StrokeRenderer", () => {
      */
     function createIterTestState(iterations: number): State {
       return createMockStateForIterations(iterations, {
-        effectOrder: [
-          { effect: "transform", enabled: true },
-          { effect: "dynamics", enabled: false },
-          { effect: "blur", enabled: false },
-          { effect: "overtones", enabled: false },
-          { effect: "synthesize", enabled: false },
+        effects: [
+          { id: "test-transform", effect: "transform", enabled: true, params: {} },
+          { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
+          { id: "test-blur", effect: "blur", enabled: false, params: {} },
+          { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
+          { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
         ],
-      } as any) as State;
+      } as Partial<State>) as State;
     }
 
     it("should read brushIterations from step state correctly", async () => {
@@ -929,20 +929,20 @@ describe("StrokeRenderer", () => {
         {
           name: "Transform Step",
           overrides: {
-            effectOrder: [
-              { effect: "transform", enabled: true },
-              { effect: "dynamics", enabled: false },
+            effects: [
+              { id: "test-transform", effect: "transform", enabled: true, params: {} },
+              { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
             ],
-          } as any,
+          },
         },
         {
           name: "Dynamics Step",
           overrides: {
-            effectOrder: [
-              { effect: "transform", enabled: false },
-              { effect: "dynamics", enabled: true },
+            effects: [
+              { id: "test-transform", effect: "transform", enabled: false, params: {} },
+              { id: "test-dynamics", effect: "dynamics", enabled: true, params: {} },
             ],
-          } as any,
+          },
         },
       ]);
 
@@ -1248,27 +1248,27 @@ describe("StrokeRenderer", () => {
           name: "Add Step",
           overrides: {
             brushIterations: 2,
-            effectOrder: [
-              { effect: "transform", enabled: true },
-              { effect: "dynamics", enabled: false },
-              { effect: "blur", enabled: false },
-              { effect: "overtones", enabled: false },
-              { effect: "synthesize", enabled: false },
+            effects: [
+              { id: "test-transform", effect: "transform", enabled: true, params: {} },
+              { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
+              { id: "test-blur", effect: "blur", enabled: false, params: {} },
+              { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
+              { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
             ],
-          } as any,
+          },
         },
         {
           name: "Subtract Step",
           overrides: {
             brushIterations: 2,
-            effectOrder: [
-              { effect: "transform", enabled: false },
-              { effect: "dynamics", enabled: false },
-              { effect: "blur", enabled: true },
-              { effect: "overtones", enabled: false },
-              { effect: "synthesize", enabled: false },
+            effects: [
+              { id: "test-transform", effect: "transform", enabled: false, params: {} },
+              { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
+              { id: "test-blur", effect: "blur", enabled: true, params: {} },
+              { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
+              { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
             ],
-          } as any,
+          },
         },
       ]);
 
@@ -1339,21 +1339,21 @@ describe("StrokeRenderer", () => {
           name: "Add Step",
           overrides: {
             brushIterations: 3,
-            effectOrder: [
-              { effect: "transform", enabled: true },
-              { effect: "blur", enabled: false },
+            effects: [
+              { id: "test-transform", effect: "transform", enabled: true, params: {} },
+              { id: "test-blur", effect: "blur", enabled: false, params: {} },
             ],
-          } as any,
+          },
         },
         {
           name: "Subtract Step",
           overrides: {
             brushIterations: 1,
-            effectOrder: [
-              { effect: "transform", enabled: false },
-              { effect: "blur", enabled: true },
+            effects: [
+              { id: "test-transform", effect: "transform", enabled: false, params: {} },
+              { id: "test-blur", effect: "blur", enabled: true, params: {} },
             ],
-          } as any,
+          },
         },
       ]);
 
@@ -1485,14 +1485,14 @@ describe("StrokeRenderer", () => {
         // Create state with non-cumulative strokes
         const state = createMockStateForIterations(1, {
           cumulativeStrokes: false,
-          effectOrder: [
-            { effect: "transform", enabled: true },
-            { effect: "dynamics", enabled: false },
-            { effect: "blur", enabled: false },
-            { effect: "overtones", enabled: false },
-            { effect: "synthesize", enabled: false },
+          effects: [
+            { id: "test-transform", effect: "transform", enabled: true, params: {} },
+            { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
+            { id: "test-blur", effect: "blur", enabled: false, params: {} },
+            { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
+            { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
           ],
-        } as any) as State;
+        } as Partial<State>) as State;
 
         const totalDuration = blendSpectrogramData.numFrames / blendSpectrogramData.sampleRate;
         const sourceFile: SourceFileInfo = {
@@ -1579,14 +1579,14 @@ describe("StrokeRenderer", () => {
       // Create state with non-cumulative strokes
       const state = createMockStateForIterations(1, {
         cumulativeStrokes: false,
-        effectOrder: [
-          { effect: "transform", enabled: true },
-          { effect: "dynamics", enabled: false },
-          { effect: "blur", enabled: false },
-          { effect: "overtones", enabled: false },
-          { effect: "synthesize", enabled: false },
+        effects: [
+          { id: "test-transform", effect: "transform", enabled: true, params: {} },
+          { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
+          { id: "test-blur", effect: "blur", enabled: false, params: {} },
+          { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
+          { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
         ],
-      } as any) as State;
+      } as Partial<State>) as State;
 
       const totalDuration = ncSpectrogramData.numFrames / ncSpectrogramData.sampleRate;
       const sourceFile: SourceFileInfo = {
@@ -1730,14 +1730,14 @@ describe("StrokeRenderer", () => {
       outsideRenderer.initialize();
 
       const state = createMockStateForIterations(1, {
-        effectOrder: [
-          { effect: "transform", enabled: true },
-          { effect: "dynamics", enabled: false },
-          { effect: "blur", enabled: false },
-          { effect: "overtones", enabled: false },
-          { effect: "synthesize", enabled: false },
+        effects: [
+          { id: "test-transform", effect: "transform", enabled: true, params: {} },
+          { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
+          { id: "test-blur", effect: "blur", enabled: false, params: {} },
+          { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
+          { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
         ],
-      } as any) as State;
+      } as Partial<State>) as State;
 
       const totalDuration = outsideSpectrogramData.numFrames / outsideSpectrogramData.sampleRate;
       const sourceFile: SourceFileInfo = {

@@ -90,21 +90,21 @@ export function shuffleArray<T>(array: T[]): T[] {
 }
 
 /**
- * Randomize effect order and enabled states
- * Returns a new effectOrder array with shuffled order and randomized enabled states
+ * Randomize effects order and enabled states
+ * Returns a new effects array with shuffled order and randomized enabled states
  */
-export function randomizeEffectOrder(
-  currentOrder: { effect: string; enabled: boolean }[],
+export function randomizeEffects(
+  currentEffects: { id: string; effect: string; enabled: boolean; params: Record<string, unknown> }[],
   amount: number,
-): { effect: string; enabled: boolean }[] {
+): { id: string; effect: string; enabled: boolean; params: Record<string, unknown> }[] {
   // Shuffle order based on amount
-  let newOrder = [...currentOrder];
+  let newEffects = [...currentEffects];
   if (Math.random() * 100 < amount) {
-    newOrder = shuffleArray(newOrder);
+    newEffects = shuffleArray(newEffects);
   }
 
   // Randomize enabled states
-  return newOrder.map((item) => ({
+  return newEffects.map((item) => ({
     ...item,
     enabled: randomizeBooleanParameter(item.enabled, amount),
   }));

@@ -88,26 +88,26 @@ type EffectType = "transform" | "dynamics" | "blur" | "overtones" | "synthesize"
  * Creates a state configured for a specific effect.
  */
 function createStateForEffect(effectType: EffectType): State {
-  const effectOrder = [
-    { effect: "transform" as const, enabled: effectType === "transform" },
-    { effect: "dynamics" as const, enabled: effectType === "dynamics" },
-    { effect: "blur" as const, enabled: effectType === "blur" },
-    { effect: "overtones" as const, enabled: effectType === "overtones" },
-    { effect: "synthesize" as const, enabled: effectType === "synthesize" },
+  const effects = [
+    { id: "test-transform", effect: "transform" as const, enabled: effectType === "transform", params: {} },
+    { id: "test-dynamics", effect: "dynamics" as const, enabled: effectType === "dynamics", params: {} },
+    { id: "test-blur", effect: "blur" as const, enabled: effectType === "blur", params: {} },
+    { id: "test-overtones", effect: "overtones" as const, enabled: effectType === "overtones", params: {} },
+    { id: "test-synthesize", effect: "synthesize" as const, enabled: effectType === "synthesize", params: {} },
   ];
 
   // Use createMockState with minimal overrides - let it use the default step
   const state = createMockState({
-    effectOrder,
+    effects,
     filepathsBpm: {
       "/test/effects-test.wav": 120,
     },
   });
 
-  // Update the step's effectOrder in the active slot
+  // Update the step's effects in the active slot
   const activeSlot = state.slots[state.activeSlotIndex];
   if (activeSlot && activeSlot[0]) {
-    (activeSlot[0] as any).effectOrder = effectOrder;
+    (activeSlot[0] as Record<string, unknown>).effects = effects;
   }
 
   return state;
@@ -367,23 +367,23 @@ describe("Effects", () => {
     it("passthrough effect should not produce black output", async () => {
       const renderer = createRenderer();
       // Passthrough is used when no effects are enabled
-      const effectOrder = [
-        { effect: "transform" as const, enabled: false },
-        { effect: "dynamics" as const, enabled: false },
-        { effect: "blur" as const, enabled: false },
-        { effect: "overtones" as const, enabled: false },
-        { effect: "synthesize" as const, enabled: false },
+      const effects = [
+        { id: "test-transform", effect: "transform" as const, enabled: false, params: {} },
+        { id: "test-dynamics", effect: "dynamics" as const, enabled: false, params: {} },
+        { id: "test-blur", effect: "blur" as const, enabled: false, params: {} },
+        { id: "test-overtones", effect: "overtones" as const, enabled: false, params: {} },
+        { id: "test-synthesize", effect: "synthesize" as const, enabled: false, params: {} },
       ];
       const state = createMockState({
-        effectOrder,
+        effects,
         filepathsBpm: {
           "/test/effects-test.wav": 120,
         },
       });
-      // Update the step's effectOrder in the active slot
+      // Update the step's effects in the active slot
       const activeSlot = state.slots[state.activeSlotIndex];
       if (activeSlot && activeSlot[0]) {
-        (activeSlot[0] as any).effectOrder = effectOrder;
+        (activeSlot[0] as Record<string, unknown>).effects = effects;
       }
       const sourceFile = createSourceFile(renderer);
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
@@ -456,12 +456,12 @@ describe("Effects", () => {
               brushEnvelopeAttackPitch: 0,
               brushEnvelopeSustainPitch: 100, // Large pitch to cover all bands
               brushEnvelopeReleasePitch: 0,
-              effectOrder: [
-                { effect: "transform", enabled: false },
-                { effect: "dynamics", enabled: false },
-                { effect: "blur", enabled: false },
-                { effect: "overtones", enabled: false },
-                { effect: "synthesize", enabled: false },
+              effects: [
+                { id: "test-transform", effect: "transform", enabled: false, params: {} },
+                { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
+                { id: "test-blur", effect: "blur", enabled: false, params: {} },
+                { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
+                { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
               ],
             },
           },

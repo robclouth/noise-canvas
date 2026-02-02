@@ -23,7 +23,7 @@ import { copyMaterial } from "../components/copy-material";
 import { BaseEffect, CommonUniforms, defaultValues } from "../effects/base-effect";
 import maskUpdateFrag from "../glsl/mask-update.frag";
 import passThroughVert from "../glsl/pass-through.vert";
-import { createStepStateView } from "../store";
+import { createEffectStateView, createStepStateView } from "../store";
 import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "../store/modulators";
 import type { SpectrogramData, State } from "../store/types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
@@ -641,12 +641,12 @@ export class StrokeRenderer {
       commonUniforms.sourceSpectrogramTex.value = stepSourceFbo.texture;
 
       // Get enabled effects in order for this step
-      const stepEffectOrder = stepState.effectOrder as { effect: EffectType; enabled: boolean }[];
-      const enabledEffects = stepEffectOrder.filter(({ enabled }) => enabled).map(({ effect }) => effect);
+      const stepEffects = stepState.effects as { id: string; effect: EffectType; enabled: boolean; params: Record<string, unknown> }[];
+      const enabledEffectItems = stepEffects.filter(({ enabled }) => enabled);
 
       // If no effects are enabled, add a passthrough effect
-      if (enabledEffects.length === 0) {
-        enabledEffects.push("passthrough");
+      if (enabledEffectItems.length === 0) {
+        enabledEffectItems.push({ id: "passthrough", effect: "passthrough", enabled: true, params: {} });
       }
 
       // Create the iterative uniforms set for subsequent passes
@@ -671,9 +671,9 @@ export class StrokeRenderer {
       const isLastStep = stepIndex === numSteps - 1;
 
       // Apply each enabled effect in order, with iterations
-      for (let effectIndex = 0; effectIndex < enabledEffects.length; effectIndex++) {
-        const effectId = enabledEffects[effectIndex];
-        const effect = this.effects[effectId];
+      for (let effectIndex = 0; effectIndex < enabledEffectItems.length; effectIndex++) {
+        const effectItem = enabledEffectItems[effectIndex];
+        const effect = this.effects[effectItem.effect];
         const numPasses = effect.materials.length;
         const brushIterations = stepState.brushIterations as number;
 
@@ -702,7 +702,7 @@ export class StrokeRenderer {
             const material = effect.materials[p];
             this.fboMesh.material = material;
 
-            const isLastEffect = effectIndex === enabledEffects.length - 1;
+            const isLastEffect = effectIndex === enabledEffectItems.length - 1;
             const isLastIteration = i === brushIterations - 1;
             const isLastPass = p === numPasses - 1;
             const isFinalPassOfStep = isLastEffect && isLastIteration && isLastPass;
@@ -734,11 +734,14 @@ export class StrokeRenderer {
               (uniformsForThisIteration as any).blendOriginalTex = { value: this.textures.placeholderTexture };
             }
 
+            // Create effect-specific state view with per-instance params merged in
+            const effectState = createEffectStateView(state, stepIndex, effectItem);
+
             effect.updateEffectUniforms({
               commonUniforms: uniformsForThisIteration,
               passIndex: p,
               file: sourceFile,
-              state: stepState,
+              state: effectState,
             });
 
             this.gl.setRenderTarget(currentWriteFbo);

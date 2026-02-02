@@ -183,6 +183,6 @@ export const EFFECT_COLORS: Record<string, string> = {
   transform: "red",
   overtones: "yellow",
   blur: "green",
-  synthesize: "purple",
+  synthesize: "violet",
   evolve: "cyan",
 };

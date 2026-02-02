@@ -17,39 +17,54 @@ export const EFFECT_KEYS = [
 // Effect type derived from the keys
 export type EffectType = (typeof EFFECT_KEYS)[number];
 
-// Default effect order (excluding passthrough which is internal)
-export const DEFAULT_EFFECT_ORDER: { effect: EffectType; enabled: boolean }[] = EFFECT_KEYS.filter(
-  (key) => key !== "passthrough"
-).map((k) => ({ effect: k, enabled: false }));
+// Per-instance effect parameters
+export type EffectParams = Record<string, unknown>;
+
+// Effect item with unique ID and per-instance parameters
+export type EffectItem = {
+  id: string;
+  effect: EffectType;
+  enabled: boolean;
+  params: EffectParams;
+};
+
+// Backward compatibility alias
+export type EffectOrderItem = EffectItem;
+
+// Default effects - starts empty, user adds effects via modal
+export const DEFAULT_EFFECTS: EffectItem[] = [];
+
+// Backward compatibility alias
+export const DEFAULT_EFFECT_ORDER = DEFAULT_EFFECTS;
 
 /**
- * Synchronizes an effectOrder array with the current EFFECT_KEYS.
+ * Synchronizes an effects array with the current EFFECT_KEYS.
  * - Removes effects that no longer exist in EFFECT_KEYS
- * - Adds new effects that exist in EFFECT_KEYS but are missing from effectOrder (disabled by default)
+ * - Adds unique IDs to entries that don't have them (migration from old format)
+ * - Adds empty params object if missing
  * - Preserves the order and enabled state of existing effects
  */
-export function syncEffectOrder(
-  effectOrder: { effect: string; enabled: boolean }[] | undefined,
-): { effect: EffectType; enabled: boolean }[] {
+export function syncEffects(
+  effects: { id?: string; effect: string; enabled: boolean; params?: EffectParams }[] | undefined,
+): EffectItem[] {
   // Get valid effect keys (excluding passthrough)
   const validEffectKeys = EFFECT_KEYS.filter((key) => key !== "passthrough") as EffectType[];
 
-  // If no effectOrder provided, return default
-  if (!effectOrder || !Array.isArray(effectOrder)) {
-    return DEFAULT_EFFECT_ORDER;
+  // If no effects provided, return default (empty)
+  if (!effects || !Array.isArray(effects)) {
+    return DEFAULT_EFFECTS;
   }
 
-  // Filter out effects that no longer exist
-  const filteredOrder = effectOrder.filter(
-    (item) => validEffectKeys.includes(item.effect as EffectType),
-  ) as { effect: EffectType; enabled: boolean }[];
-
-  // Find effects that exist in EFFECT_KEYS but are missing from effectOrder
-  const existingEffects = new Set(filteredOrder.map((item) => item.effect));
-  const missingEffects = validEffectKeys.filter((key) => !existingEffects.has(key));
-
-  // Add missing effects at the end (disabled by default)
-  const newEffects = missingEffects.map((effect) => ({ effect, enabled: false }));
-
-  return [...filteredOrder, ...newEffects];
+  // Filter out effects that no longer exist and ensure all fields are present
+  return effects
+    .filter((item) => validEffectKeys.includes(item.effect as EffectType))
+    .map((item) => ({
+      id: item.id ?? crypto.randomUUID(),
+      effect: item.effect as EffectType,
+      enabled: item.enabled,
+      params: item.params ?? {},
+    }));
 }
+
+// Backward compatibility alias
+export const syncEffectOrder = syncEffects;

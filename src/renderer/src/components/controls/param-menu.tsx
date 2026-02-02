@@ -1,5 +1,5 @@
 import { Box, Button, Divider, Group, Menu, Stack, Text, useMantineTheme } from "@mantine/core";
-import { getParameterDef, parameterDefs } from "@renderer/parameters";
+import { getParameterDef, isEffectParameter, parameterDefs } from "@renderer/parameters";
 import { getModulationParamKeys, useStore } from "@renderer/store";
 import { getContextualModAmountParamKeys, getModAmountParamKeys } from "@renderer/store/modulators";
 import { ParameterKey } from "@renderer/store/types";
@@ -14,6 +14,7 @@ type ParamMenuProps = {
   paramKey: ParameterKey;
   labelWidth?: number;
   isModulated?: boolean;
+  effectId?: string;
   children?: React.ReactNode; // Not used, but accepted for flexibility
 };
 
@@ -21,7 +22,7 @@ type ParamMenuProps = {
  * ParamMenu wraps a parameter label with a click-to-open menu.
  * Shows modulation controls (if modulatable), reset, exclude from randomisation, and step linking.
  */
-export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false }: ParamMenuProps) => {
+export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false, effectId }: ParamMenuProps) => {
   const theme = useMantineTheme();
   const [opened, setOpened] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -39,12 +40,13 @@ export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false }: Pa
   const isLinked = linkedParams.includes(paramKey as string);
 
   const handleReset = () => {
-    setParameter(paramKey, parameter.default);
+    const useEffectScope = effectId && isEffectParameter(paramKey);
+    setParameter(paramKey, parameter.default, useEffectScope ? effectId : undefined);
     const modKeys = getModulationParamKeys(paramKey);
     modKeys.forEach((modKey) => {
       const modDef = parameterDefs[modKey];
       if (modDef) {
-        setParameter(modKey, modDef.default);
+        setParameter(modKey, modDef.default, useEffectScope ? effectId : undefined);
       }
     });
   };

@@ -1,12 +1,12 @@
 import { ActionIcon, Button, Divider, Menu, Stack, Text } from "@mantine/core";
-import { parameterDefs } from "@renderer/parameters";
-import { getModulationParamKeys, getParameterValue, useStore } from "@renderer/store";
+import { isEffectParameter, parameterDefs } from "@renderer/parameters";
+import { getEffectParameterValue, getModulationParamKeys, getParameterValue, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
 import { MoreVertical } from "lucide-react";
 import { useState } from "react";
 import {
   randomizeBooleanParameter,
-  randomizeEffectOrder,
+  randomizeEffects,
   randomizeNumberParameter,
   randomizeOptionsParameter,
 } from "../../lib/randomize";
@@ -16,7 +16,9 @@ import { SwitchControl } from "./switch-control";
 type SectionMenuProps = {
   storageKey: string;
   parameterKeys?: ParameterKey[];
-  includeEffectOrder?: boolean;
+  includeEffects?: boolean;
+  onRemove?: () => void;
+  effectId?: string;
 };
 
 /**
@@ -26,7 +28,9 @@ type SectionMenuProps = {
 export const SectionMenu = ({
   storageKey,
   parameterKeys,
-  includeEffectOrder,
+  includeEffects,
+  onRemove,
+  effectId,
 }: SectionMenuProps) => {
   const [opened, setOpened] = useState(false);
 
@@ -44,14 +48,15 @@ export const SectionMenu = ({
     parameterKeys.forEach((key) => {
       const def = parameterDefs[key];
       if (def) {
-        setParameter(key, def.default);
+        const useEffectScope = effectId && isEffectParameter(key);
+        setParameter(key, def.default, useEffectScope ? effectId : undefined);
         // Also reset modulation amounts for modulatable params
         if (def.kind === "number" && def.modulatable) {
           const modKeys = getModulationParamKeys(key);
           modKeys.forEach((modKey) => {
             const modDef = parameterDefs[modKey];
             if (modDef) {
-              setParameter(modKey, modDef.default);
+              setParameter(modKey, modDef.default, useEffectScope ? effectId : undefined);
             }
           });
         }
@@ -70,28 +75,31 @@ export const SectionMenu = ({
       if (!def) return;
 
       const state = useStore.getState();
-      const currentValue = getParameterValue(state, key);
+      const useEffectScope = effectId && isEffectParameter(key);
+      const currentValue = useEffectScope
+        ? getEffectParameterValue(state, effectId, key)
+        : getParameterValue(state, key);
 
-      let newValue: any;
+      let newValue: unknown;
       switch (def.kind) {
         case "number":
-          newValue = randomizeNumberParameter(currentValue, def.min, def.max, amount);
+          newValue = randomizeNumberParameter(currentValue as number, def.min, def.max, amount);
           break;
         case "options":
           newValue = randomizeOptionsParameter(
             currentValue,
-            def.options.map((o: { value: any }) => o.value),
+            def.options.map((o: { value: unknown }) => o.value),
             amount,
           );
           break;
         case "boolean":
-          newValue = randomizeBooleanParameter(currentValue, amount);
+          newValue = randomizeBooleanParameter(currentValue as boolean, amount);
           break;
         default:
           return;
       }
 
-      setParameter(key, newValue);
+      setParameter(key, newValue, useEffectScope ? effectId : undefined);
 
       // Also randomize modulation amounts if enabled and parameter is modulatable
       if (modulationEnabled && def.kind === "number" && def.modulatable) {
@@ -100,18 +108,18 @@ export const SectionMenu = ({
           const modDef = parameterDefs[modKey];
           if (modDef && modDef.kind === "number") {
             const newModValue = randomizeNumberParameter(0, modDef.min, modDef.max, amount);
-            setParameter(modKey, newModValue);
+            setParameter(modKey, newModValue, useEffectScope ? effectId : undefined);
           }
         });
       }
     });
 
-    // Randomize effect order if enabled
-    if (includeEffectOrder) {
+    // Randomize effects if enabled
+    if (includeEffects) {
       const state = useStore.getState();
-      const currentOrder = state.effectOrder as { effect: string; enabled: boolean }[];
-      const newOrder = randomizeEffectOrder(currentOrder, amount);
-      setParameter("effectOrder" as ParameterKey, newOrder);
+      const currentEffects = getParameterValue(state, "effects") as { effect: string; enabled: boolean }[];
+      const newEffects = randomizeEffects(currentEffects, amount);
+      setParameter("effects" as ParameterKey, newEffects);
     }
   };
 
@@ -177,6 +185,23 @@ export const SectionMenu = ({
                 mt={4}
               >
                 Randomize
+              </Button>
+            </>
+          )}
+          {onRemove && (
+            <>
+              <Divider my={4} />
+              <Button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpened(false);
+                  onRemove();
+                }}
+                variant="subtle"
+                color="red"
+                size="xs"
+              >
+                Remove
               </Button>
             </>
           )}

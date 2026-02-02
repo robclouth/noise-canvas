@@ -64,7 +64,7 @@ export type State = BrushState &
   AppState &
   PresetsState &
   StepsState & {
-    setParameter: (key: ParameterKey, value: any) => void;
+    setParameter: (key: ParameterKey, value: unknown, effectId?: string) => void;
     randomizationAmounts: Record<string, number>;
     setRandomizationAmount: (key: string, amount: number) => void;
     excludedFromRandomization: string[];

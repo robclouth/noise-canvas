@@ -1,8 +1,12 @@
-import { selectParameter, useStore } from "@/store";
+import { getParameterValue, selectParameter, useStore } from "@/store";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
-import { Box, Stack } from "@mantine/core";
-import { EffectType } from "@renderer/effects";
+import { Box, Button, Stack } from "@mantine/core";
+import { openContextModal } from "@mantine/modals";
+import { EffectItem, EffectType } from "@renderer/effects/types";
 import { EFFECT_COLORS } from "@renderer/lib/constants";
+import { getEffectParameterDefaults } from "@renderer/parameters";
+import { Plus } from "lucide-react";
+import { EffectProvider } from "../contexts/effect-context";
 import { EffectSection } from "./effect-section";
 import { BlurEffect } from "./effect-views/blur-effect";
 import { DynamicsEffect } from "./effect-views/dynamics-effect";
@@ -67,18 +71,49 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
   ],
 };
 
+const MAX_EFFECTS = 10;
+
 export function EffectsList() {
-  const effectOrder = useStore(selectParameter("effectOrder")) as { effect: EffectType; enabled: boolean }[];
+  const effects = useStore(selectParameter("effects")) as EffectItem[];
   const setParameter = useStore((state) => state.setParameter);
 
-  const handleDragEnd = (result: any) => {
+  const handleDragEnd = (result: { destination?: { index: number }; source: { index: number } }) => {
     if (!result.destination) return;
 
-    const items = [...effectOrder];
+    const items = [...effects];
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
 
-    setParameter("effectOrder", items);
+    setParameter("effects", items);
+  };
+
+  const handleAddEffect = () => {
+    openContextModal({
+      modal: "addEffect",
+      title: "Add Effect",
+      innerProps: {
+        resolve: (effect: EffectType) => {
+          const state = useStore.getState();
+          const currentEffects = getParameterValue(state, "effects") as EffectItem[];
+          const newItem: EffectItem = {
+            id: crypto.randomUUID(),
+            effect,
+            enabled: true,
+            params: getEffectParameterDefaults(effect),
+          };
+          setParameter("effects", [...currentEffects, newItem]);
+        },
+      },
+    });
+  };
+
+  const handleRemoveEffect = (id: string) => {
+    const state = useStore.getState();
+    const currentEffects = getParameterValue(state, "effects") as EffectItem[];
+    setParameter(
+      "effects",
+      currentEffects.filter((item) => item.id !== id),
+    );
   };
 
   return (
@@ -86,8 +121,8 @@ export function EffectsList() {
       <Droppable droppableId="effects">
         {(provided) => (
           <Stack gap={0} {...provided.droppableProps} ref={provided.innerRef}>
-            {effectOrder.map(({ effect, enabled }, index) => (
-              <Draggable key={effect} draggableId={effect} index={index}>
+            {effects.map(({ id, effect, enabled }, index) => (
+              <Draggable key={id} draggableId={id} index={index}>
                 {(provided, snapshot) => (
                   <Box
                     ref={provided.innerRef}
@@ -104,23 +139,41 @@ export function EffectsList() {
                       label={EFFECT_LABELS[effect] || effect}
                       description={EFFECT_DESCRIPTIONS[effect] || ""}
                       enabled={enabled}
-                      onEnabledChange={(enabled) =>
+                      onEnabledChange={(newEnabled) =>
                         setParameter(
-                          "effectOrder",
-                          effectOrder.map((item, i) => (i === index ? { ...item, enabled } : item)),
+                          "effects",
+                          effects.map((item, i) => (i === index ? { ...item, enabled: newEnabled } : item)),
                         )
                       }
+                      onRemove={() => handleRemoveEffect(id)}
                       dragHandleProps={provided.dragHandleProps}
                       color={EFFECT_COLORS[effect] || "gray"}
                       parameterKeys={EFFECT_PARAMS[effect]}
+                      effectId={id}
                     >
-                      {EFFECT_COMPONENTS[effect] || null}
+                      <EffectProvider effectId={id}>
+                        {EFFECT_COMPONENTS[effect] || null}
+                      </EffectProvider>
                     </EffectSection>
                   </Box>
                 )}
               </Draggable>
             ))}
             {provided.placeholder}
+            {effects.length < MAX_EFFECTS && (
+              <Box py={6}>
+                <Button
+                  variant="subtle"
+                  color="gray"
+                  size="xs"
+                  fullWidth
+                  leftSection={<Plus size={14} />}
+                  onClick={handleAddEffect}
+                >
+                  Add effect
+                </Button>
+              </Box>
+            )}
           </Stack>
         )}
       </Droppable>

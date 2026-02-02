@@ -22,8 +22,8 @@ export interface TestBrushStep {
   blendMode?: number;
   algorithm?: number;
   sourceDataMode?: string;
-  effectOrder?: Array<{ effect: string; enabled: boolean }>;
-  [key: string]: any;
+  effects?: Array<{ id: string; effect: string; enabled: boolean; params: Record<string, unknown> }>;
+  [key: string]: unknown;
 }
 
 /**
@@ -48,12 +48,12 @@ function createTestStep(name: string): TestBrushStep {
     blendMode: 0,
     algorithm: 0,
     sourceDataMode: "current",
-    effectOrder: [
-      { effect: "transform", enabled: true },
-      { effect: "dynamics", enabled: false },
-      { effect: "blur", enabled: false },
-      { effect: "overtones", enabled: false },
-      { effect: "synthesize", enabled: false },
+    effects: [
+      { id: "mock-transform", effect: "transform", enabled: true, params: {} },
+      { id: "mock-dynamics", effect: "dynamics", enabled: false, params: {} },
+      { id: "mock-blur", effect: "blur", enabled: false, params: {} },
+      { id: "mock-overtones", effect: "overtones", enabled: false, params: {} },
+      { id: "mock-synthesize", effect: "synthesize", enabled: false, params: {} },
     ],
   };
 }
@@ -97,12 +97,12 @@ export function createMockState(overrides: Partial<State> = {}): State {
     cursorPosition: null,
 
     // Effects
-    effectOrder: [
-      { effect: "transform", enabled: true },
-      { effect: "dynamics", enabled: false },
-      { effect: "blur", enabled: false },
-      { effect: "overtones", enabled: false },
-      { effect: "synthesize", enabled: false },
+    effects: [
+      { id: "mock-transform", effect: "transform", enabled: true, params: {} },
+      { id: "mock-dynamics", effect: "dynamics", enabled: false, params: {} },
+      { id: "mock-blur", effect: "blur", enabled: false, params: {} },
+      { id: "mock-overtones", effect: "overtones", enabled: false, params: {} },
+      { id: "mock-synthesize", effect: "synthesize", enabled: false, params: {} },
     ],
 
     // Modulators (minimal)

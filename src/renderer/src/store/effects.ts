@@ -1,10 +1,10 @@
+import { DEFAULT_EFFECTS, EffectItem } from "@renderer/effects/types";
 import { getParameterDef } from "@renderer/parameters";
-// Import from types module to avoid circular dependency with effects/index
-import { DEFAULT_EFFECT_ORDER } from "../effects/types";
-import type { EffectType } from "../effects/types";
 import { shapes } from "../effects/overtones-shapes";
 
 export interface EffectsState {
+  // Note: effects is stored per-step, but defined here for ParameterKey type compatibility
+  effects: EffectItem[];
   dynamicsThresholdDb: number;
   dynamicsUpperRatio: number;
   dynamicsLowerRatio: number;
@@ -37,12 +37,13 @@ export interface EffectsState {
   evolveScaleX: number;
   evolveScaleY: number;
   evolveEdgeMode: number;
-  effectOrder: { effect: EffectType; enabled: boolean }[];
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const createEffectsSlice = (): EffectsState => {
   return {
+    // Note: effects is stored per-step, this is just for type compatibility
+    effects: DEFAULT_EFFECTS,
     // ---------------- Dynamics ----------------
     dynamicsThresholdDb: getParameterDef("dynamicsThresholdDb").default,
     dynamicsUpperRatio: getParameterDef("dynamicsUpperRatio").default,
@@ -86,8 +87,5 @@ export const createEffectsSlice = (): EffectsState => {
     evolveScaleX: getParameterDef("evolveScaleX").default,
     evolveScaleY: getParameterDef("evolveScaleY").default,
     evolveEdgeMode: getParameterDef("evolveEdgeMode").default,
-
-    // ---------------- Effect order ----------------
-    effectOrder: DEFAULT_EFFECT_ORDER,
   };
 };

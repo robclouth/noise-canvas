@@ -1,12 +1,12 @@
 // Zod schema for validating brush presets
 import { effects } from "@renderer/effects";
-import { syncEffectOrder } from "@renderer/effects/types";
-import { parameterDefs } from "@renderer/parameters";
+import { syncEffects } from "@renderer/effects/types";
+import { getEffectType, isEffectParameter, parameterDefs } from "@renderer/parameters";
 import { ParameterKey } from "@renderer/store/types";
 import { z } from "zod";
 
 // Current preset version
-export const CURRENT_PRESET_VERSION = 4;
+export const CURRENT_PRESET_VERSION = 5;
 
 /**
  * Create a Zod schema for step parameters (parameters with includeInStep: true)
@@ -24,11 +24,14 @@ function createStepParametersSchema() {
             acc[key] = z.any().refine(
               (value) => {
                 if (value === undefined) return true;
-                if ((key as ParameterKey) === "effectOrder")
+                if ((key as ParameterKey) === "effects")
                   return (
                     Array.isArray(value) &&
                     value.every(
-                      ({ effect, enabled }) => Object.keys(effects).includes(effect) && typeof enabled === "boolean",
+                      ({ effect, enabled, params }: { effect: string; enabled: boolean; params?: object }) =>
+                        Object.keys(effects).includes(effect) &&
+                        typeof enabled === "boolean" &&
+                        (params === undefined || typeof params === "object"),
                     )
                   );
                 return value === undefined || parameterDef.options.some((opt) => opt.value === value);
@@ -127,15 +130,55 @@ export function migratePreset(data: any): any {
     migratedData.version = 4;
   }
 
+  // Migrate from v4 to v5: Rename effectOrder to effects, extract per-instance params
+  if (migratedData.version < 5) {
+    migratedData.steps = (migratedData.steps || []).map((step: Record<string, unknown>) => {
+      const newStep = { ...step };
+
+      // Get effectOrder array (may be undefined in old presets)
+      const effectOrder = step.effectOrder as { id?: string; effect: string; enabled: boolean }[] | undefined;
+
+      // Convert effectOrder to effects with per-instance params
+      const effects = (effectOrder || []).map((item) => {
+        const effectType = item.effect;
+        const params: Record<string, unknown> = {};
+
+        // Extract effect-specific parameters from step level into the effect's params
+        for (const [key, value] of Object.entries(step)) {
+          if (isEffectParameter(key as ParameterKey) && getEffectType(key as ParameterKey) === effectType) {
+            params[key] = value;
+            // Remove from step level
+            delete newStep[key];
+          }
+        }
+
+        return {
+          id: item.id ?? crypto.randomUUID(),
+          effect: effectType,
+          enabled: item.enabled,
+          params,
+        };
+      });
+
+      // Replace effectOrder with effects
+      delete newStep.effectOrder;
+      newStep.effects = effects;
+
+      return newStep;
+    });
+
+    migratedData.version = 5;
+  }
+
   // Ensure steps array exists
   if (!migratedData.steps || !Array.isArray(migratedData.steps)) {
     migratedData.steps = [{ id: crypto.randomUUID(), name: "Step 1" }];
   }
 
-  // Sync effectOrder in all steps to handle added/removed effects
+  // Sync effects in all steps to handle added/removed effect types
   migratedData.steps = migratedData.steps.map((step: Record<string, unknown>) => ({
     ...step,
-    effectOrder: syncEffectOrder(step.effectOrder as { effect: string; enabled: boolean }[] | undefined),
+    effects: syncEffects(step.effects as { id?: string; effect: string; enabled: boolean; params?: Record<string, unknown> }[] | undefined),
   }));
 
   return migratedData;
