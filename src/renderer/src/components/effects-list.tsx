@@ -77,7 +77,7 @@ export function EffectsList() {
   const effects = useStore(selectParameter("effects")) as EffectItem[];
   const setParameter = useStore((state) => state.setParameter);
 
-  const handleDragEnd = (result: { destination?: { index: number }; source: { index: number } }) => {
+  const handleDragEnd = (result: { destination?: { index: number } | null; source: { index: number } }) => {
     if (!result.destination) return;
 
     const items = [...effects];
@@ -151,9 +151,7 @@ export function EffectsList() {
                       parameterKeys={EFFECT_PARAMS[effect]}
                       effectId={id}
                     >
-                      <EffectProvider effectId={id}>
-                        {EFFECT_COMPONENTS[effect] || null}
-                      </EffectProvider>
+                      <EffectProvider effectId={id}>{EFFECT_COMPONENTS[effect] || null}</EffectProvider>
                     </EffectSection>
                   </Box>
                 )}

@@ -130,16 +130,18 @@ describe("Effect Order", () => {
   });
 
   describe("EffectOrderItem type", () => {
-    it("should have required fields: id, effect, enabled", () => {
+    it("should have required fields: id, effect, enabled, params", () => {
       const item: EffectOrderItem = {
         id: "test-id",
         effect: "dynamics",
         enabled: true,
+        params: {},
       };
 
       expect(item.id).toBe("test-id");
       expect(item.effect).toBe("dynamics");
       expect(item.enabled).toBe(true);
+      expect(item.params).toEqual({});
     });
   });
 });

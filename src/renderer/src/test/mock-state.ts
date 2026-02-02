@@ -1,5 +1,6 @@
 // Use type-only import to avoid triggering module execution and circular dependencies
 import type { State } from "../store/types";
+import type { BrushStep } from "../parameters";
 
 /**
  * Type for a brush step in tests.
@@ -22,6 +23,7 @@ export interface TestBrushStep {
   blendMode?: number;
   algorithm?: number;
   sourceDataMode?: string;
+  accumulate?: boolean;
   effects?: Array<{ id: string; effect: string; enabled: boolean; params: Record<string, unknown> }>;
   [key: string]: unknown;
 }
@@ -48,6 +50,7 @@ function createTestStep(name: string): TestBrushStep {
     blendMode: 0,
     algorithm: 0,
     sourceDataMode: "current",
+    accumulate: false,
     effects: [
       { id: "mock-transform", effect: "transform", enabled: true, params: {} },
       { id: "mock-dynamics", effect: "dynamics", enabled: false, params: {} },
@@ -69,7 +72,7 @@ export function createMockState(overrides: Partial<State> = {}): State {
   // Use type assertion to allow test-specific properties
   const baseState = {
     // Slots - source of truth for brush parameters
-    slots: { 0: [defaultStep] } as Record<number, TestBrushStep[]>,
+    slots: { 0: [defaultStep] } as unknown as Record<number, BrushStep[]>,
     activeSlotIndex: 0,
     activeStepIndex: 0,
 
@@ -197,7 +200,6 @@ export function createMockState(overrides: Partial<State> = {}): State {
 
     // Global settings
     magnitudeLimit: 1.0,
-    cumulativeStrokes: true,
 
     // Display (not used in stroke rendering but may be accessed)
     displayMinDb: -60,
@@ -228,7 +230,7 @@ export function createMockStateWithSteps(
   const steps = stepConfigs.map(({ name, overrides }) => createMockStep(name, overrides));
 
   return createMockState({
-    slots: { 0: steps } as Record<number, TestBrushStep[]>,
+    slots: { 0: steps } as unknown as Record<number, BrushStep[]>,
     activeSlotIndex: 0,
     activeStepIndex: 0,
     ...stateOverrides,
@@ -240,14 +242,16 @@ export function createMockStateWithSteps(
  */
 export function createMockStateForIterations(
   iterations: number,
-  stateOverrides: Partial<State> = {}
+  stateOverrides: Partial<State> = {},
+  stepOverrides: Partial<TestBrushStep> = {}
 ): State {
   const step = createMockStep("Iteration Test Step", {
     brushIterations: iterations,
+    ...stepOverrides,
   });
 
   return createMockState({
-    slots: { 0: [step] } as Record<number, TestBrushStep[]>,
+    slots: { 0: [step] } as unknown as Record<number, BrushStep[]>,
     activeSlotIndex: 0,
     ...stateOverrides,
   });

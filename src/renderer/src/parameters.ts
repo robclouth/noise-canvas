@@ -1,7 +1,7 @@
 import { startCase } from "lodash-es";
 import { ScaleType } from "tonal";
-import { DEFAULT_EFFECTS, EffectParams, EffectType } from "./effects/types";
 import { shapes } from "./effects/overtones-shapes";
+import { DEFAULT_EFFECTS, EffectParams, EffectType } from "./effects/types";
 import {
   ALGORITHMS,
   BANDS_PER_OCTAVE_VALUES,
@@ -30,9 +30,8 @@ export interface ParameterBase {
   name: string;
   label: string;
   description: string;
-  includeInPresets?: boolean;
   includeInStep?: boolean;
-  effectType?: EffectType; // Which effect this parameter belongs to (for per-instance storage)
+  effectType?: EffectType;
 }
 
 export interface NumberParameter extends ParameterBase {
@@ -95,7 +94,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     description: "The mode of the modulator.",
     default: 0,
     options: MODULATOR_MODES,
-    includeInPresets: true,
     includeInStep: true,
   };
   modulatorDefs[`modulator${idx}PatternShape`] = {
@@ -105,7 +103,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     description: "The shape of the modulator pattern.",
     default: 0,
     options: PATTERN_SHAPES,
-    includeInPresets: true,
     includeInStep: true,
   };
   modulatorDefs[`modulator${idx}Strength`] = {
@@ -118,7 +115,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: !isWindows,
   };
@@ -134,7 +130,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     marks: beatMarksWithOff,
     scale: "log",
     unit: BEAT_UNIT,
-    includeInPresets: true,
     includeInStep: true,
     modulatable: !isWindows,
   };
@@ -149,7 +144,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     marks: semitoneMarksWithOff,
     unit: SEMITONE_UNIT,
-    includeInPresets: true,
     includeInStep: true,
     modulatable: !isWindows,
   };
@@ -163,7 +157,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     max: 360,
     step: 1,
     unit: "°",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: !isWindows,
   };
@@ -177,7 +170,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
       { value: 0, label: "Canvas" },
       { value: 1, label: "Brush" },
     ],
-    includeInPresets: true,
     includeInStep: true,
   };
   modulatorDefs[`modulator${idx}PhaseX`] = {
@@ -190,7 +182,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: !isWindows,
   };
@@ -204,7 +195,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: !isWindows,
   };
@@ -218,7 +208,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     max: 0,
     step: 1,
     unit: "dB",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: !isWindows,
   };
@@ -232,7 +221,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     max: 0,
     step: 1,
     unit: "dB",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: !isWindows,
   };
@@ -242,7 +230,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     label: "Texture",
     description: "The texture path for the modulator.",
     default: "",
-    includeInPresets: true,
     includeInStep: true,
   };
   // Sequencer mode parameters
@@ -255,7 +242,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     min: 1,
     max: 16,
     step: 1,
-    includeInPresets: true,
     includeInStep: true,
   };
   modulatorDefs[`modulator${idx}SeqStepsY`] = {
@@ -267,7 +253,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     min: 1,
     max: 8,
     step: 1,
-    includeInPresets: true,
     includeInStep: true,
   };
   modulatorDefs[`modulator${idx}SeqLoopBeats`] = {
@@ -282,7 +267,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     marks: beatMarksWithOff,
     scale: "log",
     unit: BEAT_UNIT,
-    includeInPresets: true,
     includeInStep: true,
     modulatable: !isWindows,
   };
@@ -297,7 +281,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     marks: PITCH_VALUES_NO_FRACTIONS,
     unit: SEMITONE_UNIT,
-    includeInPresets: true,
     includeInStep: true,
     modulatable: !isWindows,
   };
@@ -311,7 +294,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: !isWindows,
   };
@@ -323,7 +305,6 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     default: JSON.stringify({
       values: Array.from({ length: 4 }, () => Array.from({ length: 8 }, () => 1)),
     }),
-    includeInPresets: true,
     includeInStep: true,
   };
 }
@@ -338,7 +319,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "Controls whether the brush wraps around the edges of the canvas.",
     default: 0,
     options: WRAP_MODES,
-    includeInPresets: true,
     includeInStep: true,
   },
   brushIntensity: {
@@ -351,7 +331,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
   },
@@ -364,7 +343,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     min: 1,
     max: 20,
     step: 1,
-    includeInPresets: true,
     includeInStep: true,
   },
   brushPan: {
@@ -377,7 +355,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
   },
@@ -393,7 +370,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: BEAT_UNIT,
     scale: "log",
     marks: beatMarksWithZero,
-    includeInPresets: true,
     includeInStep: true,
   },
   brushEnvelopeAttackTime: {
@@ -408,7 +384,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: BEAT_UNIT,
     scale: "log",
     marks: beatMarksWithZero,
-    includeInPresets: true,
     includeInStep: true,
   },
   brushEnvelopeSustainTime: {
@@ -423,7 +398,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: BEAT_UNIT,
     scale: "log",
     marks: beatMarksWithZero,
-    includeInPresets: true,
     includeInStep: true,
   },
   brushEnvelopeReleaseTime: {
@@ -438,7 +412,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: BEAT_UNIT,
     scale: "log",
     marks: beatMarksWithZero,
-    includeInPresets: true,
     includeInStep: true,
   },
   brushEnvelopeDelayPitch: {
@@ -452,7 +425,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 0.1,
     unit: SEMITONE_UNIT,
     marks: semitoneMarksWithZero,
-    includeInPresets: true,
     includeInStep: true,
   },
   brushEnvelopeAttackPitch: {
@@ -466,7 +438,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 0.1,
     unit: SEMITONE_UNIT,
     marks: semitoneMarksWithZero,
-    includeInPresets: true,
     includeInStep: true,
   },
   brushEnvelopeSustainPitch: {
@@ -480,7 +451,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 0.1,
     unit: SEMITONE_UNIT,
     marks: semitoneMarksWithZero,
-    includeInPresets: true,
     includeInStep: true,
   },
   brushEnvelopeReleasePitch: {
@@ -494,7 +464,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 0.1,
     unit: SEMITONE_UNIT,
     marks: semitoneMarksWithZero,
-    includeInPresets: true,
     includeInStep: true,
   },
   blendMode: {
@@ -504,7 +473,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "The blend mode to use when applying the brush.",
     default: 0,
     options: BLEND_MODES,
-    includeInPresets: true,
     includeInStep: true,
   },
   algorithm: {
@@ -514,7 +482,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "The algorithm to use when warping the spectrogram.",
     default: 3,
     options: ALGORITHMS,
-    includeInPresets: true,
     includeInStep: true,
   },
   sourcePositionMode: {
@@ -528,7 +495,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       { value: "anchored", label: "Anchored" },
       { value: "offset", label: "Offset" },
     ],
-    includeInPresets: false,
   },
   sourceDataMode: {
     kind: "options",
@@ -540,7 +506,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       { value: "current", label: "Current" },
       { value: "original", label: "Original" },
     ],
-    includeInPresets: true,
     includeInStep: true,
   },
 
@@ -555,7 +520,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 0,
     step: 0.1,
     unit: "dB",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "dynamics",
@@ -570,7 +534,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 8.0,
     step: 0.1,
     unit: "×",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "dynamics",
@@ -585,7 +548,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 8.0,
     step: 0.1,
     unit: "×",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "dynamics",
@@ -600,7 +562,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 48.0,
     step: 0.5,
     unit: "dB",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "dynamics",
@@ -615,7 +576,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 24,
     step: 0.1,
     unit: "dB",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "dynamics",
@@ -632,7 +592,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     scale: "logBipolar",
     unit: BEAT_UNIT,
     marks: [...negBeatMarks, zeroBeatMark, ...posBeatMarks],
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "transform",
@@ -648,7 +607,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 0.01,
     unit: SEMITONE_UNIT,
     marks: [...negPitchMarks, zeroPitchMark, ...posPitchMarks],
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "transform",
@@ -665,7 +623,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     scale: "logBipolar",
     unit: MULTIPLIER_UNIT,
     marks: [...negMultMarks, ...posMultMarks],
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "transform",
@@ -682,7 +639,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     scale: "logBipolar",
     unit: MULTIPLIER_UNIT,
     marks: [...negMultMarks, ...posMultMarks],
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "transform",
@@ -697,7 +653,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 180,
     step: 0.1,
     unit: "°",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "transform",
@@ -709,7 +664,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "How to handle edges when transforming.",
     default: 1,
     options: EDGE_MODE,
-    includeInPresets: true,
     includeInStep: true,
     effectType: "transform",
   },
@@ -723,7 +677,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "blur",
@@ -738,7 +691,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "blur",
@@ -753,7 +705,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "blur",
@@ -768,7 +719,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "blur",
@@ -779,7 +729,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     label: "Bleed",
     description: "Allows the blur to sample from outside the brush bounds making a more smoothing.",
     default: true,
-    includeInPresets: true,
     includeInStep: true,
     effectType: "blur",
   },
@@ -794,7 +743,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       { value: 1, label: "Middle" },
       { value: 2, label: "Right" },
     ],
-    includeInPresets: true,
     includeInStep: true,
     effectType: "blur",
   },
@@ -807,7 +755,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     min: 1,
     max: 64,
     step: 1,
-    includeInPresets: true,
     includeInStep: true,
     modulatable: false,
     effectType: "overtones",
@@ -823,7 +770,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 0.01,
     unit: MULTIPLIER_UNIT,
     marks: Array.from({ length: 9 }, (_, i) => i - 4).map((v) => ({ value: v, label: v.toString() + "x" })),
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "overtones",
@@ -838,7 +784,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 0.1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "overtones",
@@ -850,7 +795,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "Controls the shape of the overtones.",
     default: "logarithmic",
     options: Object.entries(shapes).map(([key, shape]) => ({ value: key, label: shape.label })),
-    includeInPresets: true,
     includeInStep: true,
     effectType: "overtones",
   },
@@ -861,7 +805,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "The type of synthesis to use.",
     default: 0,
     options: SYNTHESIZE_TYPES,
-    includeInPresets: true,
     includeInStep: true,
     effectType: "synthesize",
   },
@@ -875,7 +818,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "evolve",
@@ -890,7 +832,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "evolve",
@@ -905,7 +846,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "evolve",
@@ -920,7 +860,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "evolve",
@@ -935,7 +874,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "evolve",
@@ -950,7 +888,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "evolve",
@@ -965,7 +902,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "evolve",
@@ -980,7 +916,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "evolve",
@@ -995,7 +930,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 1,
     unit: "%",
-    includeInPresets: true,
     includeInStep: true,
     modulatable: true,
     effectType: "evolve",
@@ -1007,7 +941,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "How to handle edges when evolving (at brush boundary).",
     default: 1,
     options: EDGE_MODE,
-    includeInPresets: true,
     includeInStep: true,
     effectType: "evolve",
   },
@@ -1018,7 +951,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "The effects to apply and their order.",
     default: DEFAULT_EFFECTS,
     options: [],
-    includeInPresets: true,
     includeInStep: true,
   },
 
@@ -1033,7 +965,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 0,
     step: 1,
     unit: "dB",
-    includeInPresets: false,
   },
   displayMaxDb: {
     kind: "number",
@@ -1045,7 +976,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 24,
     step: 1,
     unit: "dB",
-    includeInPresets: false,
   },
   magnitudeLimit: {
     kind: "number",
@@ -1057,7 +987,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 2.0,
     step: 0.01,
     unit: "x",
-    includeInPresets: false,
   },
   gridSizeBeats: {
     kind: "number",
@@ -1070,16 +999,15 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     step: 0.0001,
     marks: [{ value: 0, label: "Off" }, ...BEAT_VALUES],
     scale: "log",
-    includeInPresets: false,
   },
-  cumulativeStrokes: {
+  accumulate: {
     kind: "boolean",
-    name: "Cumulative Strokes",
-    label: "Cumulative",
+    name: "Accumulate",
+    label: "Accumulate",
     description:
       "If enabled, painting over the same area adds to the existing effect. If disabled, logic prevents self-overlap within a stroke.",
     default: false,
-    includeInPresets: false,
+    includeInStep: true,
   },
   gridSizeSemis: {
     kind: "number",
@@ -1091,7 +1019,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 96,
     step: 1,
     marks: [{ value: 0, label: "Off" }, ...PITCH_VALUES],
-    includeInPresets: false,
   },
   minFreq: {
     kind: "number",
@@ -1103,7 +1030,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 0.01,
     unit: "Hz",
-    includeInPresets: false,
   },
   normalize: {
     kind: "boolean",
@@ -1111,7 +1037,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     label: "Normalize",
     description: "Normalizes the audio output.",
     default: true,
-    includeInPresets: false,
   },
   scaleTonic: {
     kind: "options",
@@ -1133,7 +1058,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       { value: "A#", label: "A#" },
       { value: "B", label: "B" },
     ],
-    includeInPresets: false,
   },
   scaleType: {
     kind: "options",
@@ -1145,7 +1069,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       value: name,
       label: startCase(name),
     })),
-    includeInPresets: false,
   },
   bandsPerOctave: {
     kind: "options",
@@ -1155,7 +1078,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       "Balance between time and frequency resolution. Time resolution gives sharper transients, frequency resolution gives more precise pitch detail.",
     default: 36,
     options: BANDS_PER_OCTAVE_VALUES,
-    includeInPresets: false,
   },
 };
 
@@ -1188,7 +1110,7 @@ for (const [key, def] of Object.entries(combinedDefs)) {
         max: 100,
         step: 0.1,
         unit: "%",
-        includeInPresets: true,
+
         includeInStep: true,
         effectType: def.effectType, // Inherit effectType from parent parameter
       };
@@ -1208,7 +1130,7 @@ for (const [key, def] of Object.entries(combinedDefs)) {
         max: 100,
         step: 0.1,
         unit: "%",
-        includeInPresets: true,
+
         includeInStep: true,
         effectType: def.effectType, // Inherit effectType from parent parameter
       };

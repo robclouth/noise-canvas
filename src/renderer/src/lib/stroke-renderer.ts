@@ -599,7 +599,7 @@ export class StrokeRenderer {
     let stepInputFbo: WebGLRenderTarget | { texture: DataTexture } = initialSourceFbo;
 
     // Non-cumulative strokes: use snapshot as source to prevent self-feedback
-    if (!state.cumulativeStrokes && isSameFile && activeStepState.sourceDataMode !== "original") {
+    if (!activeStepState.accumulate && isSameFile && activeStepState.sourceDataMode !== "original") {
       stepInputFbo = this.strokeStartFbo;
       initialSourceFbo = this.strokeStartFbo;
     }
@@ -722,7 +722,7 @@ export class StrokeRenderer {
             };
 
             // Pass the mask if enabled (non-cumulative mode)
-            if (!state.cumulativeStrokes) {
+            if (!stepState.accumulate) {
               const currentMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo : this.strokeMaskFbo2;
               (uniformsForThisIteration as any).useStrokeMask = { value: true };
               (uniformsForThisIteration as any).strokeMaskTex = { value: currentMaskFbo.texture };
@@ -767,7 +767,7 @@ export class StrokeRenderer {
       this.pingPong = 1 - this.pingPong;
 
       // Update stroke mask for non-cumulative mode
-      if (!state.cumulativeStrokes) {
+      if (!activeStepState.accumulate) {
         this.updateStrokeMask(state, cursorPos, bpm, totalDuration);
       }
 

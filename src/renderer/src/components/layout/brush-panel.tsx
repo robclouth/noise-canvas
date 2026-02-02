@@ -31,6 +31,7 @@ const OPTIONS_PARAMS: ParameterKey[] = [
   "brushWrapMode",
   "algorithm",
   "sourceDataMode",
+  "accumulate",
 ];
 
 const MODULATOR_PARAMS = Array.from({ length: NUM_MODULATORS }).flatMap((_, i) => {
@@ -94,6 +95,7 @@ export function BrushPanel() {
             <ParameterControl paramKey="brushWrapMode" />
             <ParameterControl paramKey="algorithm" />
             <ParameterControl paramKey="sourceDataMode" />
+            <ParameterControl paramKey="accumulate" />
           </SimpleGrid>
         </Section>
         <Section label="Effects" parameterKeys={ALL_EFFECT_PARAMS} includeEffectOrder>

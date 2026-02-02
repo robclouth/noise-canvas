@@ -36,7 +36,7 @@ export const useStore = create<State>()(
         ...createAppSlice(set, get),
         ...createPresetsSlice(set, get),
         ...createStepsSlice(set, get),
-        setParameter: (key: ParameterKey, value: any, effectId?: string) => {
+        setParameter: (key: ParameterKey, value: unknown, effectId?: string) => {
           const state = get();
           const slotLinkedParams = state.slotLinkedParams[state.activeSlotIndex] ?? [];
           const isLinked = slotLinkedParams.includes(key as string);
@@ -49,7 +49,7 @@ export const useStore = create<State>()(
                 const steps = draft.slots[draft.activeSlotIndex];
                 if (!steps) return;
 
-                const updateEffectParams = (step: typeof steps[0]) => {
+                const updateEffectParams = (step: (typeof steps)[0]) => {
                   const effects = (step.effects ?? []) as EffectItem[];
                   const effectIndex = effects.findIndex((e) => e.id === effectId);
                   if (effectIndex >= 0) {
@@ -77,12 +77,12 @@ export const useStore = create<State>()(
                 if (isLinked) {
                   // Propagate to all steps when linked
                   steps.forEach((step) => {
-                    step[key] = value;
+                    (step as Record<string, unknown>)[key] = value;
                   });
                 } else {
                   // Only update active step
                   if (steps[draft.activeStepIndex]) {
-                    steps[draft.activeStepIndex][key] = value;
+                    (steps[draft.activeStepIndex] as Record<string, unknown>)[key] = value;
                   }
                 }
               }),
@@ -90,7 +90,7 @@ export const useStore = create<State>()(
           } else {
             set(
               produce((draft: State) => {
-                draft[key] = value;
+                (draft as unknown as Record<string, unknown>)[key] = value;
                 draft.slotDirty[draft.activeSlotIndex] = true;
               }),
             );
@@ -232,7 +232,6 @@ export function getParameterValue(state: State, key: ParameterKey): any {
   return state[key];
 }
 
-
 /**
  * Get modulation amount parameter keys for a given parameter
  * Returns keys like: brushIntensityMod1Amount, brushIntensityMod2Amount, etc.
@@ -342,4 +341,3 @@ export function createEffectStateView(state: State, stepIndex: number, effectIte
   // Merge effect params into the view
   return { ...stepView, ...effectItem.params } as State;
 }
-

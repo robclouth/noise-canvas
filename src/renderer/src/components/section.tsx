@@ -44,7 +44,7 @@ export const Section = ({
           <SectionMenu
             storageKey={`section-${label}`}
             parameterKeys={parameterKeys}
-            includeEffectOrder={includeEffectOrder}
+            includeEffects={includeEffectOrder}
           />
         )}
       </Group>

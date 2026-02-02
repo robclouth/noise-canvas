@@ -38,6 +38,7 @@ export interface BrushState {
   brushWrapMode: number;
   blendMode: number;
   algorithm: number;
+  accumulate: boolean;
 }
 
 // Helper to convert position to UV coordinates
@@ -72,6 +73,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     brushEnvelopeReleasePitch: getParameterDef("brushEnvelopeReleasePitch").default,
     blendMode: getParameterDef("blendMode").default,
     algorithm: getParameterDef("algorithm").default,
+    accumulate: getParameterDef("accumulate").default,
     sourcePositionMode: getParameterDef("sourcePositionMode").default,
     sourceDataMode: getParameterDef("sourceDataMode").default,
     sourcePosition: null,

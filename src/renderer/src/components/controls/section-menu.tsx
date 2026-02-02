@@ -117,7 +117,12 @@ export const SectionMenu = ({
     // Randomize effects if enabled
     if (includeEffects) {
       const state = useStore.getState();
-      const currentEffects = getParameterValue(state, "effects") as { effect: string; enabled: boolean }[];
+      const currentEffects = getParameterValue(state, "effects") as {
+        id: string;
+        effect: string;
+        enabled: boolean;
+        params: Record<string, unknown>;
+      }[];
       const newEffects = randomizeEffects(currentEffects, amount);
       setParameter("effects" as ParameterKey, newEffects);
     }

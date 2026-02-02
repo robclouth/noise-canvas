@@ -463,11 +463,11 @@ describe("Effects", () => {
                 { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
                 { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
               ],
+              accumulate: false, // non-cumulative mode
             },
           },
         ],
         {
-          cumulativeStrokes: false,
           filepathsBpm: {
             "/test/additive-test.wav": 120,
           },

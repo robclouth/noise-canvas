@@ -21,7 +21,6 @@ export interface PresetsState {
   deletePreset: (presetId: string) => Promise<void>;
   assignHotkeyToPreset: (presetId: string, hotkey: string) => void;
   presetHotkeys: Record<string, string>;
-  // Slots - the source of truth for brush parameters (all 10 always exist)
   slots: Record<number, BrushStep[]>;
   activeSlotIndex: number;
   setActiveSlot: (slotIndex: number) => void;
@@ -54,7 +53,14 @@ function generateFilenameId(name: string, existingIds: Set<string> = new Set()):
   return id;
 }
 
-export const PRESETS_PERSISTED_KEYS = ["slots", "activeSlotIndex", "slotPresetIds", "slotDirty", "slotLinkedParams", "presetHotkeys"] as const;
+export const PRESETS_PERSISTED_KEYS = [
+  "slots",
+  "activeSlotIndex",
+  "slotPresetIds",
+  "slotDirty",
+  "slotLinkedParams",
+  "presetHotkeys",
+] as const;
 
 export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsState => ({
   presetsDir: null,
@@ -268,21 +274,16 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
   },
 
   // Slots - source of truth for brush parameters (all 10 always exist)
-  slots: Object.fromEntries(
-    Array.from({ length: 10 }, (_, i) => [i, [createDefaultStep("Step 1")]]),
-  ) as Record<number, BrushStep[]>,
+  slots: Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, [createDefaultStep("Step 1")]])) as Record<
+    number,
+    BrushStep[]
+  >,
   activeSlotIndex: 0,
 
   // Per-slot preset tracking
-  slotPresetIds: Object.fromEntries(
-    Array.from({ length: 10 }, (_, i) => [i, null]),
-  ) as Record<number, string | null>,
-  slotDirty: Object.fromEntries(
-    Array.from({ length: 10 }, (_, i) => [i, false]),
-  ) as Record<number, boolean>,
-  slotLinkedParams: Object.fromEntries(
-    Array.from({ length: 10 }, (_, i) => [i, []]),
-  ) as Record<number, string[]>,
+  slotPresetIds: Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, null])) as Record<number, string | null>,
+  slotDirty: Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, false])) as Record<number, boolean>,
+  slotLinkedParams: Object.fromEntries(Array.from({ length: 10 }, (_, i) => [i, []])) as Record<number, string[]>,
 
   setActiveSlot: (slotIndex: number) => {
     set({ activeSlotIndex: slotIndex });

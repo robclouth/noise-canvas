@@ -528,10 +528,9 @@ describe("StrokeRenderer", () => {
     it("should apply a stroke at the center of the canvas", async () => {
       renderer.initialize();
 
-      const state = createMockState({
-        brushIntensity: 100,
-        cumulativeStrokes: true,
-      });
+      const state = createMockStateWithSteps([
+        { name: "Test", overrides: { brushIntensity: 100, accumulate: true } },
+      ]);
 
       const totalDuration = getSpectrogramDuration(spectrogramData);
       const sourceFile = createSourceFileInfo(spectrogramData, "test-file-1", renderer);
@@ -550,7 +549,7 @@ describe("StrokeRenderer", () => {
       const dataBeforeCopy = new Float32Array(dataBefore);
 
       // Apply stroke
-      renderer.renderStroke(params, state as State, sourceFile);
+      renderer.renderStroke(params, state, sourceFile);
 
       // Get data after stroke
       const dataAfter = await renderer.getFBOData();
@@ -659,17 +658,23 @@ describe("StrokeRenderer", () => {
 
     /**
      * Helper to create state with transform effect enabled and specified iterations.
+     * Uses accumulate: true to allow strokes to accumulate.
      */
     function createIterTestState(iterations: number): State {
-      return createMockStateForIterations(iterations, {
-        effects: [
-          { id: "test-transform", effect: "transform", enabled: true, params: {} },
-          { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
-          { id: "test-blur", effect: "blur", enabled: false, params: {} },
-          { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
-          { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
-        ],
-      } as Partial<State>) as State;
+      return createMockStateForIterations(
+        iterations,
+        {} as Partial<State>,
+        {
+          accumulate: true,
+          effects: [
+            { id: "test-transform", effect: "transform", enabled: true, params: {} },
+            { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
+            { id: "test-blur", effect: "blur", enabled: false, params: {} },
+            { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
+            { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
+          ],
+        },
+      );
     }
 
     it("should read brushIterations from step state correctly", async () => {
@@ -1060,10 +1065,9 @@ describe("StrokeRenderer", () => {
       renderer.initialize();
 
       // First, modify the destination data by applying a stroke
-      const modifyState = createMockState({
-        brushIntensity: 100,
-        cumulativeStrokes: true,
-      });
+      const modifyState = createMockStateWithSteps([
+        { name: "Test", overrides: { brushIntensity: 100, accumulate: true } },
+      ]);
       const totalDuration = getSpectrogramDuration(spectrogramData);
       const sourceFile = createSourceFileInfo(spectrogramData, "test-file-1", renderer);
 
@@ -1077,7 +1081,7 @@ describe("StrokeRenderer", () => {
       };
 
       // Apply a stroke to modify the data
-      renderer.renderStroke(params, modifyState as State, sourceFile);
+      renderer.renderStroke(params, modifyState, sourceFile);
       const modifiedData = await renderer.getFBOData();
 
       // Now apply a stroke with sourceDataMode: "original"
@@ -1142,7 +1146,7 @@ describe("StrokeRenderer", () => {
     it("should handle beginStroke and endStroke correctly", async () => {
       renderer.initialize();
 
-      const state = createMockState({ cumulativeStrokes: false });
+      const state = createMockState(); // accumulate: false is the default
       const totalDuration = getSpectrogramDuration(spectrogramData);
       const sourceFile = createSourceFileInfo(spectrogramData, "test-file-1", renderer);
 
@@ -1159,7 +1163,7 @@ describe("StrokeRenderer", () => {
       renderer.beginStroke();
 
       // Apply stroke
-      renderer.renderStroke(params, state as State, sourceFile);
+      renderer.renderStroke(params, state, sourceFile);
 
       // End stroke
       renderer.endStroke();
@@ -1482,17 +1486,20 @@ describe("StrokeRenderer", () => {
       try {
         blendRenderer.initialize();
 
-        // Create state with non-cumulative strokes
-        const state = createMockStateForIterations(1, {
-          cumulativeStrokes: false,
-          effects: [
-            { id: "test-transform", effect: "transform", enabled: true, params: {} },
-            { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
-            { id: "test-blur", effect: "blur", enabled: false, params: {} },
-            { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
-            { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
-          ],
-        } as Partial<State>) as State;
+        // Create state with non-cumulative strokes (accumulate: false is the default)
+        const state = createMockStateForIterations(
+          1,
+          {} as Partial<State>,
+          {
+            effects: [
+              { id: "test-transform", effect: "transform", enabled: true, params: {} },
+              { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
+              { id: "test-blur", effect: "blur", enabled: false, params: {} },
+              { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
+              { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
+            ],
+          },
+        );
 
         const totalDuration = blendSpectrogramData.numFrames / blendSpectrogramData.sampleRate;
         const sourceFile: SourceFileInfo = {
@@ -1576,17 +1583,20 @@ describe("StrokeRenderer", () => {
     it("should prevent double-painting in overlapping strokes with non-cumulative mode", async () => {
       ncRenderer.initialize();
 
-      // Create state with non-cumulative strokes
-      const state = createMockStateForIterations(1, {
-        cumulativeStrokes: false,
-        effects: [
-          { id: "test-transform", effect: "transform", enabled: true, params: {} },
-          { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
-          { id: "test-blur", effect: "blur", enabled: false, params: {} },
-          { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
-          { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
-        ],
-      } as Partial<State>) as State;
+      // Create state with non-cumulative strokes (accumulate: false is the default)
+      const state = createMockStateForIterations(
+        1,
+        {} as Partial<State>,
+        {
+          effects: [
+            { id: "test-transform", effect: "transform", enabled: true, params: {} },
+            { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
+            { id: "test-blur", effect: "blur", enabled: false, params: {} },
+            { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
+            { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
+          ],
+        },
+      );
 
       const totalDuration = ncSpectrogramData.numFrames / ncSpectrogramData.sampleRate;
       const sourceFile: SourceFileInfo = {
@@ -1645,10 +1655,9 @@ describe("StrokeRenderer", () => {
     it("should preserve phase channels when applying strokes", async () => {
       renderer.initialize();
 
-      const state = createMockState({
-        brushIntensity: 100,
-        cumulativeStrokes: true,
-      });
+      const state = createMockStateWithSteps([
+        { name: "Test", overrides: { brushIntensity: 100, accumulate: true } },
+      ]);
 
       const totalDuration = getSpectrogramDuration(spectrogramData);
       const sourceFile = createSourceFileInfo(spectrogramData, "test-file-1", renderer);

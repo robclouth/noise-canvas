@@ -119,7 +119,7 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
       produce((draft: State) => {
         const draftSteps = draft.slots[draft.activeSlotIndex];
         if (draftSteps && draftSteps[draft.activeStepIndex]) {
-          draftSteps[draft.activeStepIndex][key] = value;
+          (draftSteps[draft.activeStepIndex] as Record<string, unknown>)[key] = value;
         }
       }),
     );

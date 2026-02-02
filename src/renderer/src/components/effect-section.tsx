@@ -12,22 +12,29 @@ export type EffectSectionProps = {
   enabled: boolean;
   onEnabledChange: (enabled: boolean) => void;
   onRemove?: () => void;
-  dragHandleProps?: unknown;
+  dragHandleProps?: React.HTMLAttributes<HTMLButtonElement> | null;
   color?: string;
   parameterKeys?: ParameterKey[];
   effectId?: string;
 };
 
 export const EffectSection = memo(
-  ({ label, description, children, enabled, onEnabledChange, onRemove, dragHandleProps, color, parameterKeys, effectId }: EffectSectionProps) => {
-
+  ({
+    label,
+    description,
+    children,
+    enabled,
+    onEnabledChange,
+    onRemove,
+    dragHandleProps,
+    color,
+    parameterKeys,
+    effectId,
+  }: EffectSectionProps) => {
     return (
       <Paper>
         <Stack gap="xs">
-          <Group
-            gap="xs"
-            wrap="nowrap"
-          >
+          <Group gap="xs" wrap="nowrap">
             <Checkbox
               checked={enabled}
               onChange={(event) => onEnabledChange(event.currentTarget.checked)}
@@ -42,16 +49,13 @@ export const EffectSection = memo(
               onClick={() => onEnabledChange(!enabled)}
             >
               <Tooltip label={description}>
-                <Text
-                  size="xs"
-                  fw={600}
-                >
+                <Text size="xs" fw={600}>
                   {label}
                 </Text>
               </Tooltip>
             </Group>
 
-            <ActionIcon variant="transparent" color="gray.5" size="xs" {...dragHandleProps}>
+            <ActionIcon variant="transparent" color="gray.5" size="xs" {...(dragHandleProps ?? {})}>
               <GripVertical size={16} />
             </ActionIcon>
             <SectionMenu
