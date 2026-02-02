@@ -4,7 +4,10 @@
       "Bash(npx tsc:*)",
       "Bash(npm run test:run:*)",
       "Bash(npm run typecheck:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(npm run build:addon:*)",
+      "Bash(node-gyp rebuild:*)",
+      "Bash(npx node-gyp rebuild:*)"
     ]
   }
 }

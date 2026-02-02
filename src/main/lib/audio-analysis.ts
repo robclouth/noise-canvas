@@ -42,9 +42,32 @@ export async function analyze(filePath: string, params: AnalysisParams) {
     );
   }
 
-  const audioBuffer = await decodeAudioFile(filePath, sampleRate, channels);
+  const decodeStart = performance.now();
+  const interleavedBuffer = await decodeAudioFile(filePath, sampleRate, channels);
+  const decodeTime = performance.now() - decodeStart;
+  const numFrames = interleavedBuffer.length / channels;
+  console.log(
+    `[analyze] FFmpeg decode time: ${decodeTime.toFixed(2)}ms for ${numFrames} samples × ${channels} channels`,
+  );
 
-  const analysisResult: GaboratorAnalysisResult = await gab.analyze(audioBuffer, channels, sampleRate, params);
+  // Convert interleaved to planar for optimized C++ path
+  const deinterleaveStart = performance.now();
+  const channelArrays: Float32Array[] = [];
+  for (let ch = 0; ch < channels; ch++) {
+    channelArrays.push(new Float32Array(numFrames));
+  }
+  for (let i = 0; i < numFrames; i++) {
+    for (let ch = 0; ch < channels; ch++) {
+      channelArrays[ch][i] = interleavedBuffer[i * channels + ch];
+    }
+  }
+  const deinterleaveTime = performance.now() - deinterleaveStart;
+  console.log(`[analyze] JS de-interleave time: ${deinterleaveTime.toFixed(2)}ms`);
+
+  const analyzeStart = performance.now();
+  const analysisResult: GaboratorAnalysisResult = await gab.analyze(channelArrays, channels, sampleRate, params);
+  const analyzeTime = performance.now() - analyzeStart;
+  console.log(`[analyze] Gaborator analyze time (planar): ${analyzeTime.toFixed(2)}ms`);
 
   return {
     ...analysisResult,
@@ -62,17 +85,21 @@ export async function analyseBuffer(audioBuffer: AudioBuffer, params: AnalysisPa
   const channels = audioBuffer.numberOfChannels;
   const length = audioBuffer.length;
 
-  // Interleave the audio channels into a single Float32Array
-  const audioVector = new Float32Array(channels * length);
-
-  for (let channel = 0; channel < channels; channel++) {
-    const channelData = audioBuffer.getChannelData(channel);
-    for (let i = 0; i < length; i++) {
-      audioVector[i * channels + channel] = channelData[i];
-    }
+  // Pass planar data directly - no interleaving needed
+  const startTime = performance.now();
+  const channelArrays: Float32Array[] = [];
+  for (let ch = 0; ch < channels; ch++) {
+    channelArrays.push(audioBuffer.getChannelData(ch));
   }
+  const prepTime = performance.now() - startTime;
+  console.log(
+    `[analyseBuffer] Prep time (planar): ${prepTime.toFixed(2)}ms for ${length} samples × ${channels} channels`,
+  );
 
-  const analysisResult: GaboratorAnalysisResult = await gab.analyze(audioVector, channels, sampleRate, params);
+  const analyzeStart = performance.now();
+  const analysisResult: GaboratorAnalysisResult = await gab.analyze(channelArrays, channels, sampleRate, params);
+  const analyzeTime = performance.now() - analyzeStart;
+  console.log(`[analyseBuffer] Gaborator analyze time: ${analyzeTime.toFixed(2)}ms`);
 
   return {
     ...analysisResult,

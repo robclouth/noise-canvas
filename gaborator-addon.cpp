@@ -17,11 +17,17 @@
 class AnalyzeWorker : public Napi::AsyncWorker
 {
 public:
-    AnalyzeWorker(Napi::Env env, const Napi::Float32Array &inputBuffer, int channels, double sampleRate, const Napi::Object &paramsJs)
+    AnalyzeWorker(Napi::Env env, const Napi::Array &planarInput, int channels, double sampleRate, const Napi::Object &paramsJs)
         : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), channels(channels), sampleRate(sampleRate)
     {
-
-        interleavedData.assign(inputBuffer.Data(), inputBuffer.Data() + inputBuffer.ElementLength());
+        size_t length = planarInput.Get(0u).As<Napi::Float32Array>().ElementLength();
+        audioChannels.resize(channels);
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            Napi::Float32Array channelData = planarInput.Get(static_cast<uint32_t>(ch)).As<Napi::Float32Array>();
+            audioChannels[ch].assign(channelData.Data(), channelData.Data() + length);
+        }
+        numFrames = length;
         bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
         fminHz = paramsJs.Get("minFreq").As<Napi::Number>().DoubleValue();
     }
@@ -30,21 +36,10 @@ public:
 
     void Execute()
     {
-        size_t numSamplesInterleaved = interleavedData.size();
         if (channels <= 0)
         {
             SetError("Number of channels must be positive.");
             return;
-        }
-        numFrames = numSamplesInterleaved / channels;
-
-        std::vector<std::vector<float>> audioChannels(channels, std::vector<float>(numFrames));
-        for (size_t i = 0; i < numFrames; ++i)
-        {
-            for (int ch = 0; ch < channels; ++ch)
-            {
-                audioChannels[ch][i] = interleavedData[i * channels + ch];
-            }
         }
 
         double fminFrac = fminHz / sampleRate;
@@ -66,7 +61,7 @@ public:
         bandLengths.resize(numBands);
         bandFreqsHz.resize(numBands);
         size_t totalComplexCoefficients = 0;
-        double coefficientDensity = 0.0; // Sum of (1 / time_step) for each band
+        double coefficientDensity = 0.0;
 
         for (int i = 0; i < numBands; ++i)
         {
@@ -90,7 +85,7 @@ public:
         if (textureHeight > maxHeight)
         {
             if (coefficientDensity > 1e-9)
-            { // Check for non-zero density to avoid division by zero
+            {
                 size_t maxCoefficients = (size_t)maxWidth * maxHeight;
                 double maxFrames = (double)maxCoefficients / coefficientDensity;
                 double maxSeconds = maxFrames / sampleRate;
@@ -142,7 +137,6 @@ public:
         std::vector<gaborator::coefs<float>> allCoefs;
         allCoefs.reserve(channels);
 
-        // Phase accumulation storage: [channel][band][time]
         std::vector<std::vector<std::vector<float>>> previousPhases(channels);
         for (int ch = 0; ch < channels; ++ch)
         {
@@ -156,7 +150,7 @@ public:
         for (int ch = 0; ch < channels; ++ch)
         {
             allCoefs.emplace_back(analyzer);
-            analyzer.analyze(audioChannels[ch].data(), 0, numFrames, allCoefs.back());
+            analyzer.analyze(audioChannels[ch].data(), 0, static_cast<int64_t>(numFrames), allCoefs.back());
             gaborator::process(
                 [&](int b, int64_t t, std::complex<float> &coef)
                 {
@@ -253,7 +247,7 @@ public:
 
 private:
     Napi::Promise::Deferred deferred;
-    std::vector<float> interleavedData;
+    std::vector<std::vector<float>> audioChannels;
     int channels;
     double sampleRate;
     int bandsPerOctave;
@@ -277,13 +271,13 @@ Napi::Value AnalyzeAsync(const Napi::CallbackInfo &info)
 {
     Napi::Env env = info.Env();
 
-    if (info.Length() < 4 || !info[0].IsTypedArray() || !info[1].IsNumber() || !info[2].IsNumber() || !info[3].IsObject())
+    if (info.Length() < 4 || !info[0].IsArray() || !info[1].IsNumber() || !info[2].IsNumber() || !info[3].IsObject())
     {
-        Napi::TypeError::New(env, "Expected: audioBuffer (TypedArray), channels (Number), sampleRate (Number), params (Object)").ThrowAsJavaScriptException();
+        Napi::TypeError::New(env, "Expected: channelArrays (Array of Float32Arrays), channels (Number), sampleRate (Number), params (Object)").ThrowAsJavaScriptException();
         return env.Null();
     }
 
-    Napi::Float32Array inputBuffer = info[0].As<Napi::Float32Array>();
+    Napi::Array planarInput = info[0].As<Napi::Array>();
     int channels = info[1].As<Napi::Number>().Int32Value();
     double sampleRate = info[2].As<Napi::Number>().DoubleValue();
     Napi::Object paramsJs = info[3].As<Napi::Object>();
@@ -305,7 +299,7 @@ Napi::Value AnalyzeAsync(const Napi::CallbackInfo &info)
         return env.Null();
     }
 
-    AnalyzeWorker *worker = new AnalyzeWorker(env, inputBuffer, channels, sampleRate, paramsJs);
+    AnalyzeWorker *worker = new AnalyzeWorker(env, planarInput, channels, sampleRate, paramsJs);
     worker->Queue();
     return worker->GetPromise();
 }
