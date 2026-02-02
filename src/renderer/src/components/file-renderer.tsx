@@ -102,65 +102,30 @@ export const FileRenderer = memo(
 
     console.log("FileRenderer rendered");
 
-    // Subscriptions to global state
+    // Subscriptions to global state - consolidated into fewer subscriptions for efficiency
     useEffect(() => {
-      const unsubBpms = useStore.subscribe(
+      // Consolidate display-related subscriptions that all just trigger invalidate
+      const unsubDisplay = useStore.subscribe(
         (state) => {
           const file = openFiles[fileId];
-          return file && state.filepathsBpm[file.filePath];
+          return {
+            bpm: file && state.filepathsBpm[file.filePath],
+            zoom: state.filesZoom[fileId],
+            offset: state.filesOffset[fileId],
+            gridBeats: state.gridSizeBeats,
+            gridSemis: state.gridSizeSemis,
+            minDb: state.displayMinDb,
+            maxDb: state.displayMaxDb,
+            cursorPosition: state.cursorPosition,
+            cursorVisible: state.cursorVisible,
+          };
         },
         () => {
           invalidateRef.current?.();
         },
       );
-      const unsubZoom = useStore.subscribe(
-        (state) => state.filesZoom[fileId],
-        () => {
-          invalidateRef.current?.();
-        },
-      );
-      const unsubOffset = useStore.subscribe(
-        (state) => state.filesOffset[fileId],
-        () => {
-          invalidateRef.current?.();
-        },
-      );
-      const unsubGridBeats = useStore.subscribe(
-        (state) => state.gridSizeBeats,
-        () => {
-          invalidateRef.current?.();
-        },
-      );
-      const unsubGridSemis = useStore.subscribe(
-        (state) => state.gridSizeSemis,
-        () => {
-          invalidateRef.current?.();
-        },
-      );
-      const unsubDisplayMinDb = useStore.subscribe(
-        (state) => state.displayMinDb,
-        () => {
-          invalidateRef.current?.();
-        },
-      );
-      const unsubDisplayMaxDb = useStore.subscribe(
-        (state) => state.displayMaxDb,
-        () => {
-          invalidateRef.current?.();
-        },
-      );
-      const unsubCursorPosition = useStore.subscribe(
-        (state) => state.cursorPosition,
-        () => {
-          invalidateRef.current?.();
-        },
-      );
-      const unsubCursorVisible = useStore.subscribe(
-        (state) => state.cursorVisible,
-        () => {
-          invalidateRef.current?.();
-        },
-      );
+
+      // Keep activeFileId separate due to special logic
       const unsubActiveFileId = useStore.subscribe(
         (state) => state.activeFileId,
         (activeId) => {
@@ -197,15 +162,7 @@ export const FileRenderer = memo(
       );
 
       return () => {
-        unsubBpms();
-        unsubZoom();
-        unsubOffset();
-        unsubGridBeats();
-        unsubGridSemis();
-        unsubDisplayMinDb();
-        unsubDisplayMaxDb();
-        unsubCursorPosition();
-        unsubCursorVisible();
+        unsubDisplay();
         unsubActiveFileId();
       };
     }, [fileId]);

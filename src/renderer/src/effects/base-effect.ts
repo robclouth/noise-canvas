@@ -195,11 +195,15 @@ export abstract class BaseEffect {
     if (!material) return;
 
     for (const key in commonUniforms) {
+      const newValue = (commonUniforms as Record<string, { value: unknown }>)[key].value;
       if (key in material.uniforms) {
-        material.uniforms[key].value = (commonUniforms as Record<string, { value: unknown }>)[key].value;
+        // Only update if value actually changed
+        if (material.uniforms[key].value !== newValue) {
+          material.uniforms[key].value = newValue;
+        }
       } else {
         // Add uniform if it doesn't exist (needed for dynamically added uniforms like useStrokeMask)
-        material.uniforms[key] = { value: (commonUniforms as Record<string, { value: unknown }>)[key].value };
+        material.uniforms[key] = { value: newValue };
       }
     }
   }

@@ -9,13 +9,49 @@ import { useStore } from "../store";
 import { MAX_SEQ_SIZE, MAX_SEQ_STEPS_X, MAX_SEQ_STEPS_Y, NUM_MODULATORS } from "./constants";
 import { unitsToUv } from "./utils";
 
+// Type for modulatable parameter with modulation amounts
+interface ModulatableParam {
+  value: number;
+  minValue: number;
+  maxValue: number;
+  modulationAmounts: number[];
+  contextualModAmounts: number[];
+}
+
+// Type for a single modulator's uniforms
+export interface ModulatorUniform {
+  modulatorMode: number;
+  modulatorPatternShape: number;
+  modulatorPhaseMode: number;
+  modulatorPhaseX: ModulatableParam;
+  modulatorPhaseY: ModulatableParam;
+  modulatorPatternRateX: ModulatableParam;
+  modulatorPatternRateY: ModulatableParam;
+  modulatorStrength: ModulatableParam;
+  modulatorRotation: ModulatableParam;
+  modulatorEnvelopeMinDb: number;
+  modulatorEnvelopeMaxDb: number;
+  seqStepsX: number;
+  seqStepsY: number;
+  seqLoopY: ModulatableParam;
+  seqSwing: ModulatableParam;
+  seqLoopX: ModulatableParam;
+  seqDataTex: DataTexture;
+}
+
+// Cache for parsed sequencer JSON to avoid repeated parsing
+const seqDataParseCache = new Map<string, { values?: number[][] }>();
+
 // Helper to parse sequencer data and create DataTexture
 function createSeqDataTexture(seqDataStr: string): DataTexture {
-  let parsed: { values?: number[][] } = {};
-  try {
-    parsed = JSON.parse(seqDataStr);
-  } catch {
-    parsed = {};
+  let parsed = seqDataParseCache.get(seqDataStr);
+  if (parsed === undefined) {
+    try {
+      parsed = JSON.parse(seqDataStr);
+    } catch {
+      parsed = {};
+    }
+    seqDataParseCache.set(seqDataStr, parsed);
   }
 
   // Create 16x16 Float32Array for seq values
@@ -46,7 +82,8 @@ export const buildModulatorUniforms = (
   stateOverride?: State,
 ) => {
   const state = stateOverride ?? useStore.getState();
-  const modulators = Array.from({ length: NUM_MODULATORS }).map((_, i) => {
+  const modulators: ModulatorUniform[] = [];
+  for (let i = 0; i < NUM_MODULATORS; i++) {
     const mode = state[`modulator${i + 1}Mode`] as number;
     const shape = state[`modulator${i + 1}PatternShape`] as number;
     const phaseMode = state[`modulator${i + 1}PhaseMode`] as number;
@@ -67,7 +104,7 @@ export const buildModulatorUniforms = (
 
     const maxRateUv = unitsToUv(rateBeatsDef.max, rateSemisDef.max, bpm, totalDuration, bandsPerOctave, numBands);
 
-    return {
+    modulators.push({
       modulatorMode: mode,
       modulatorPatternShape: shape,
       modulatorPhaseMode: phaseMode,
@@ -165,8 +202,8 @@ export const buildModulatorUniforms = (
         const seqDataStr = state[`modulator${i + 1}SeqData`] as string || '{}';
         return createSeqDataTexture(seqDataStr);
       })(),
-    };
-  });
+    });
+  }
 
   return modulators;
 };

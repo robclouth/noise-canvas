@@ -4,6 +4,8 @@ import { getParameterDef, isEffectParameter } from "@renderer/parameters";
 import { selectEffectParameter, selectParameter, useStore } from "@renderer/store";
 import { getContextualModAmountParamKeys, getModAmountParamKeys } from "@renderer/store/modulators";
 import { denormalizeParameterValue, normalizeParameterValue } from "@renderer/store/utils";
+import { memo } from "react";
+import { useShallow } from "zustand/shallow";
 import { NumboxControl } from "./numbox-control";
 import { ParamMenu } from "./param-menu";
 import { SelectControl } from "./select-control";
@@ -17,13 +19,13 @@ export type ParameterControlProps = {
   labelPosition?: "left" | "top";
 };
 
-export const ParameterControl = ({
+export const ParameterControl = memo(function ParameterControl({
   labelWidth = 70,
   disabled,
   color,
   paramKey,
   labelPosition,
-}: ParameterControlProps) => {
+}: ParameterControlProps) {
   const parameter = getParameterDef(paramKey);
   const { kind } = parameter;
   const isModulatable = kind === "number" && "modulatable" in parameter && parameter.modulatable;
@@ -33,38 +35,46 @@ export const ParameterControl = ({
   const isEffectParam = isEffectParameter(paramKey);
   const useEffectScope = effectId !== null && isEffectParam;
 
-  const isModulated = useStore((state) => {
-    if (!isModulatable) return false;
-    // Check pattern modulator amounts
-    const patternModulated = getModAmountParamKeys(paramKey)
-      .map((key) => {
-        if (useEffectScope) {
-          return selectEffectParameter(effectId, key)(state);
-        }
-        return selectParameter(key)(state);
-      })
-      .some((amount) => amount !== 0);
-    // Check contextual modulator amounts
-    const contextualModulated = getContextualModAmountParamKeys(paramKey)
-      .map((key) => {
-        if (useEffectScope) {
-          return selectEffectParameter(effectId, key)(state);
-        }
-        return selectParameter(key)(state);
-      })
-      .some((amount) => amount !== 0);
-    return patternModulated || contextualModulated;
-  });
+  // Combine selectors into a single subscription with shallow comparison
+  const { isModulated, parameterValue, setParameter } = useStore(
+    useShallow((state) => {
+      // Check if parameter is modulated
+      let modulated = false;
+      if (isModulatable) {
+        const patternKeys = getModAmountParamKeys(paramKey);
+        const contextualKeys = getContextualModAmountParamKeys(paramKey);
 
-  // Use effect-scoped selector when inside effect context for effect parameters
-  const parameterValue = useStore((state) => {
-    if (useEffectScope) {
-      return selectEffectParameter(effectId, paramKey)(state);
-    }
-    return selectParameter(paramKey)(state);
-  });
+        for (const key of patternKeys) {
+          const amount = useEffectScope ? selectEffectParameter(effectId, key)(state) : selectParameter(key)(state);
+          if (amount !== 0) {
+            modulated = true;
+            break;
+          }
+        }
 
-  const setParameter = useStore((state) => state.setParameter);
+        if (!modulated) {
+          for (const key of contextualKeys) {
+            const amount = useEffectScope ? selectEffectParameter(effectId, key)(state) : selectParameter(key)(state);
+            if (amount !== 0) {
+              modulated = true;
+              break;
+            }
+          }
+        }
+      }
+
+      // Get parameter value
+      const value = useEffectScope
+        ? selectEffectParameter(effectId, paramKey)(state)
+        : selectParameter(paramKey)(state);
+
+      return {
+        isModulated: modulated,
+        parameterValue: value,
+        setParameter: state.setParameter,
+      };
+    }),
+  );
 
   // Wrapper that passes effectId when appropriate
   const handleSetValue = (value: unknown) => {
@@ -127,4 +137,4 @@ export const ParameterControl = ({
     );
   }
   return null;
-};
+});

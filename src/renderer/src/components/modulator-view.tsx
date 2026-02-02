@@ -91,6 +91,45 @@ const Scene = ({
   }, [material, modulator1Texture, modulator2Texture, modulator3Texture, invalidate, placeholderTexture]);
 
   useEffect(() => {
+    // Custom equality function that compares modulator arrays efficiently
+    // without JSON.stringify overhead
+    const modulatorsEqual = (
+      a: ReturnType<typeof buildModulatorUniforms>,
+      b: ReturnType<typeof buildModulatorUniforms>,
+    ): boolean => {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        const modA = a[i];
+        const modB = b[i];
+        // Compare scalar values
+        if (
+          modA.modulatorMode !== modB.modulatorMode ||
+          modA.modulatorPatternShape !== modB.modulatorPatternShape ||
+          modA.modulatorPhaseMode !== modB.modulatorPhaseMode ||
+          modA.modulatorEnvelopeMinDb !== modB.modulatorEnvelopeMinDb ||
+          modA.modulatorEnvelopeMaxDb !== modB.modulatorEnvelopeMaxDb ||
+          modA.seqStepsX !== modB.seqStepsX ||
+          modA.seqStepsY !== modB.seqStepsY ||
+          modA.seqDataTex !== modB.seqDataTex
+        ) {
+          return false;
+        }
+        // Compare nested value objects
+        if (
+          modA.modulatorPhaseX.value !== modB.modulatorPhaseX.value ||
+          modA.modulatorPhaseY.value !== modB.modulatorPhaseY.value ||
+          modA.modulatorPatternRateX.value !== modB.modulatorPatternRateX.value ||
+          modA.modulatorPatternRateY.value !== modB.modulatorPatternRateY.value ||
+          modA.modulatorStrength.value !== modB.modulatorStrength.value ||
+          modA.modulatorRotation.value !== modB.modulatorRotation.value ||
+          modA.seqLoopY.value !== modB.seqLoopY.value
+        ) {
+          return false;
+        }
+      }
+      return true;
+    };
+
     const unsubscribe = useStore.subscribe(
       (state) => {
         const stepState = createStepStateView(state, state.activeStepIndex);
@@ -110,7 +149,7 @@ const Scene = ({
         }
         invalidate();
       },
-      { equalityFn: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
+      { equalityFn: modulatorsEqual },
     );
 
     return () => unsubscribe();
@@ -165,7 +204,7 @@ export const ModulatorView = () => {
     invalidateRef.current = invalidate;
   };
 
-  // Watch for position changes by checking element position on every animation frame
+  // Watch for position changes - necessary for Three.js View to render correctly when scrolling
   useEffect(() => {
     const element = viewRef.current;
     if (!element) {
@@ -194,7 +233,6 @@ export const ModulatorView = () => {
       animationFrameId = requestAnimationFrame(checkPosition);
     };
 
-    // Start monitoring
     animationFrameId = requestAnimationFrame(checkPosition);
 
     return () => {
@@ -216,10 +254,7 @@ export const ModulatorView = () => {
           }))}
           style={{ flex: 1 }}
         />
-        <SectionMenu
-          storageKey={`modulator-${viewedModulatorIndex}`}
-          parameterKeys={currentModulatorParams}
-        />
+        <SectionMenu storageKey={`modulator-${viewedModulatorIndex}`} parameterKeys={currentModulatorParams} />
       </Group>
       <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
         <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Mode` as ParameterKey} />
@@ -237,18 +272,12 @@ export const ModulatorView = () => {
                 <ParameterControl
                   paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PatternRateSemis` as ParameterKey}
                 />
-                <ParameterControl
-                  paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseX` as ParameterKey}
-                />
-                <ParameterControl
-                  paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseY` as ParameterKey}
-                />
+                <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseX` as ParameterKey} />
+                <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseY` as ParameterKey} />
                 <ParameterControl
                   paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}PhaseMode` as ParameterKey}
                 />
-                <ParameterControl
-                  paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Rotation` as ParameterKey}
-                />
+                <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Rotation` as ParameterKey} />
               </>
             )}
           </>
@@ -266,34 +295,19 @@ export const ModulatorView = () => {
         {isSequencerMode && (
           <>
             <Box />
-            <ParameterControl
-              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqStepsX` as ParameterKey}
-            />
-            <ParameterControl
-              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqStepsY` as ParameterKey}
-            />
-            <ParameterControl
-              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqLoopBeats` as ParameterKey}
-            />
-            <ParameterControl
-              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqLoopSemis` as ParameterKey}
-            />
-            <ParameterControl
-              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqSwing` as ParameterKey}
-            />
+            <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqStepsX` as ParameterKey} />
+            <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqStepsY` as ParameterKey} />
+            <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqLoopBeats` as ParameterKey} />
+            <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqLoopSemis` as ParameterKey} />
+            <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}SeqSwing` as ParameterKey} />
           </>
         )}
         <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Strength` as ParameterKey} />
       </SimpleGrid>
-      {isSequencerMode && (
-        <SequencerGrid modulatorIndex={parseInt(viewedModulatorIndex) + 1} />
-      )}
+      {isSequencerMode && <SequencerGrid modulatorIndex={parseInt(viewedModulatorIndex) + 1} />}
       <View ref={viewRef} style={{ height: 100, marginTop: 6 }}>
         <Scene modulatorIndex={parseInt(viewedModulatorIndex)} onInvalidateReady={handleInvalidateReady} />
       </View>
     </Stack>
   );
 };
-
-
-

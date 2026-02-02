@@ -3,16 +3,23 @@ import { useStore } from "@renderer/store";
 import { MAX_STEPS } from "@renderer/store/steps";
 import { ArrowDown, ArrowUp, Copy, Plus, Trash } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/shallow";
 
 export function Steps() {
-  const steps = useStore((state) => state.slots[state.activeSlotIndex] ?? []);
-  const activeStepIndex = useStore((state) => state.activeStepIndex);
-  const setActiveStepIndex = useStore((state) => state.setActiveStepIndex);
-  const addStep = useStore((state) => state.addStep);
-  const removeStep = useStore((state) => state.removeStep);
-  const duplicateStep = useStore((state) => state.duplicateStep);
-  const reorderSteps = useStore((state) => state.reorderSteps);
-  const setStepName = useStore((state) => state.setStepName);
+  // Consolidate store subscriptions with shallow comparison
+  const { steps, activeStepIndex, setActiveStepIndex, addStep, removeStep, duplicateStep, reorderSteps, setStepName } =
+    useStore(
+      useShallow((state) => ({
+        steps: state.slots[state.activeSlotIndex] ?? [],
+        activeStepIndex: state.activeStepIndex,
+        setActiveStepIndex: state.setActiveStepIndex,
+        addStep: state.addStep,
+        removeStep: state.removeStep,
+        duplicateStep: state.duplicateStep,
+        reorderSteps: state.reorderSteps,
+        setStepName: state.setStepName,
+      })),
+    );
 
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
