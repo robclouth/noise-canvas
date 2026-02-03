@@ -51,8 +51,9 @@ function createSeqDataTexture(seqDataStr: string): DataTexture {
     } catch {
       parsed = {};
     }
-    seqDataParseCache.set(seqDataStr, parsed);
+    seqDataParseCache.set(seqDataStr, parsed!);
   }
+  parsed = parsed!;
 
   // Create 16x16 Float32Array for seq values
   const valuesData = new Float32Array(MAX_SEQ_SIZE);

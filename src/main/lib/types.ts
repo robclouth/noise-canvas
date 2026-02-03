@@ -42,6 +42,7 @@ export interface IpcRendererEvents {
   "update-downloaded": (info: any) => void;
   "download-progress": (progressInfo: any) => void;
   "update-error": (message: string) => void;
+  "app-will-quit": () => void;
 }
 
 export function ipcMainOn<K extends keyof IpcMainHandlers>(channel: K, listener: IpcMainHandlers[K]): void {

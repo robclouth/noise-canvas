@@ -7,3 +7,4 @@ bin
 .eslintcache
 *.log*
 .env
+test-results

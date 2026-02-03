@@ -13,7 +13,7 @@ import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
 import { ipcOn, ipcSend } from "./lib/ipc";
 import { precompileAllShaders } from "./lib/precompile-shaders";
-import { getUndoManager } from "./lib/undo-manager";
+import { clearAllUndoManagers, getUndoManager } from "./lib/undo-manager";
 import { useShortcuts } from "./lib/useShortcuts";
 import { openFiles } from "./store/files";
 
@@ -163,6 +163,11 @@ function App(): React.JSX.Element {
       reanalyzeActiveFile();
     });
     unsubscribers.push(unsubReanalyzeActiveFile);
+
+    const unsubAppWillQuit = ipcOn("app-will-quit", async () => {
+      await clearAllUndoManagers();
+    });
+    unsubscribers.push(unsubAppWillQuit);
 
     return () => {
       unsubscribers.forEach((unsub) => unsub());

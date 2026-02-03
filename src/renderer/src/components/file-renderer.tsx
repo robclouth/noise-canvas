@@ -27,7 +27,6 @@ import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { SourceFileInfo, StrokeRenderer, StrokeTextures } from "../lib/stroke-renderer";
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
-import { getUndoManager } from "../lib/undo-manager";
 import { unitsToUv } from "../lib/utils";
 
 /**
@@ -319,9 +318,9 @@ export const FileRenderer = memo(
         // Calculate brush size from envelope in the CURRENT file's coordinate space
         const envelopeTimeUvCurrent = unitsToUv(
           state.brushEnvelopeDelayTime +
-          state.brushEnvelopeAttackTime +
-          state.brushEnvelopeSustainTime +
-          state.brushEnvelopeReleaseTime,
+            state.brushEnvelopeAttackTime +
+            state.brushEnvelopeSustainTime +
+            state.brushEnvelopeReleaseTime,
           0,
           bpm,
           totalDuration,
@@ -331,9 +330,9 @@ export const FileRenderer = memo(
         const envelopePitchUvCurrent = unitsToUv(
           0,
           state.brushEnvelopeDelayPitch +
-          state.brushEnvelopeAttackPitch +
-          state.brushEnvelopeSustainPitch +
-          state.brushEnvelopeReleasePitch,
+            state.brushEnvelopeAttackPitch +
+            state.brushEnvelopeSustainPitch +
+            state.brushEnvelopeReleasePitch,
           bpm,
           totalDuration,
           spectrogramData.bandsPerOctave,
@@ -416,14 +415,7 @@ export const FileRenderer = memo(
         invalidateRef.current = invalidate;
       }
 
-      if (
-        !spectrogramData ||
-        !packedDataTex ||
-        !inverseMapTex ||
-        !metadataTex ||
-        !originalPackedDataTex
-      )
-        return;
+      if (!spectrogramData || !packedDataTex || !inverseMapTex || !metadataTex || !originalPackedDataTex) return;
 
       const state = useStore.getState();
 
@@ -465,13 +457,7 @@ export const FileRenderer = memo(
           modulator2Texture,
           modulator3Texture,
         };
-        strokeRendererRef.current = new StrokeRenderer(
-          gl,
-          spectrogramData,
-          textures,
-          fileId,
-          effects,
-        );
+        strokeRendererRef.current = new StrokeRenderer(gl, spectrogramData, textures, fileId, effects);
       }
 
       const strokeRenderer = strokeRendererRef.current;
@@ -481,8 +467,10 @@ export const FileRenderer = memo(
         strokeRenderer.initialize();
         state.synthesizeFile(fileId);
 
-        const undoManager = getUndoManager(fileId);
-        undoManager.addState(spectrogramData.packedData, fileId);
+        // Save initial state for undo
+        import("@renderer/lib/undo-manager").then(({ getUndoManager }) =>
+          getUndoManager(fileId).addState(spectrogramData.packedData, fileId),
+        );
       }
 
       // After initialization, only update if this file is active, source, or cursor is present
@@ -506,9 +494,9 @@ export const FileRenderer = memo(
       const calculateBrushSizeUv = (stepState: State) => {
         const envelopeTimeUv = unitsToUv(
           stepState.brushEnvelopeDelayTime +
-          stepState.brushEnvelopeAttackTime +
-          stepState.brushEnvelopeSustainTime +
-          stepState.brushEnvelopeReleaseTime,
+            stepState.brushEnvelopeAttackTime +
+            stepState.brushEnvelopeSustainTime +
+            stepState.brushEnvelopeReleaseTime,
           0,
           bpm,
           totalDuration,
@@ -518,9 +506,9 @@ export const FileRenderer = memo(
         const envelopePitchUv = unitsToUv(
           0,
           stepState.brushEnvelopeDelayPitch +
-          stepState.brushEnvelopeAttackPitch +
-          stepState.brushEnvelopeSustainPitch +
-          stepState.brushEnvelopeReleasePitch,
+            stepState.brushEnvelopeAttackPitch +
+            stepState.brushEnvelopeSustainPitch +
+            stepState.brushEnvelopeReleasePitch,
           bpm,
           totalDuration,
           spectrogramData.bandsPerOctave,
@@ -616,9 +604,9 @@ export const FileRenderer = memo(
           const stepState = createStepStateView(state, i);
           const timeUv = unitsToUv(
             stepState.brushEnvelopeDelayTime +
-            stepState.brushEnvelopeAttackTime +
-            stepState.brushEnvelopeSustainTime +
-            stepState.brushEnvelopeReleaseTime,
+              stepState.brushEnvelopeAttackTime +
+              stepState.brushEnvelopeSustainTime +
+              stepState.brushEnvelopeReleaseTime,
             0,
             targetBpm,
             targetDuration,
@@ -628,9 +616,9 @@ export const FileRenderer = memo(
           const pitchUv = unitsToUv(
             0,
             stepState.brushEnvelopeDelayPitch +
-            stepState.brushEnvelopeAttackPitch +
-            stepState.brushEnvelopeSustainPitch +
-            stepState.brushEnvelopeReleasePitch,
+              stepState.brushEnvelopeAttackPitch +
+              stepState.brushEnvelopeSustainPitch +
+              stepState.brushEnvelopeReleasePitch,
             targetBpm,
             targetDuration,
             targetFile.spectrogramData.bandsPerOctave,

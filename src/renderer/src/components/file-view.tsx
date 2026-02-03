@@ -296,7 +296,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   }, []);
 
   const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = useCallback(
-    (event) => {
+    async (event) => {
       if (event.button !== 0) return;
 
       const state = useStore.getState();
@@ -317,12 +317,12 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       }
 
       if (rendererRef?.current) {
+        const { spectrogramData } = file;
         isStrokingRef.current = true;
         rendererRef.current.beginStroke();
         const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
         state.setCursorPosition({ beats, pitch });
 
-        const { spectrogramData } = file;
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
         const centerTimeSeconds = coords[0] * totalDuration;
         const initialBrushStart = centerTimeSeconds;
@@ -354,8 +354,6 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   // Helper to finish a stroke - used by both handleCanvasMouseUp and window mouseup
   const finishStroke = useCallback(async () => {
     if (!isStrokingRef.current) return;
-    const strokeFinishStart = performance.now();
-    console.log("[timing] finishStroke started");
     isStrokingRef.current = false;
 
     const state = useStore.getState();
@@ -370,7 +368,6 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
     rendererRef.current?.endStroke();
 
     strokeTimeRangeRef.current = { min: null, max: null };
-    console.log(`[timing] finishStroke total: ${(performance.now() - strokeFinishStart).toFixed(2)}ms`);
   }, []);
 
   // Window-level event listeners to handle mouse movements and releases outside the file view

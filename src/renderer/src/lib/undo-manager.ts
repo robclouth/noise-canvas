@@ -5,7 +5,6 @@ import { ipcSend } from "./ipc";
 interface UndoState {
   dataPath: string;
   fileId: string;
-  compressed: boolean;
 }
 
 class UndoManager {
@@ -35,7 +34,6 @@ class UndoManager {
   }
 
   async addState(data: Float32Array, fileId: string) {
-    const addStateStart = performance.now();
     await this.init();
     if (!this.tempDir || !window.nodeFs || !window.nodePath) {
       console.error("Undo manager not properly initialized");
@@ -47,45 +45,29 @@ class UndoManager {
       if (this.head < this.timeline.length - 1) {
         const toDelete = this.timeline.splice(this.head + 1);
         for (const { dataPath } of toDelete) {
-          try {
-            await window.nodeFs.rm(dataPath);
-          } catch (e) {
-            console.error("Failed to delete old redo file:", e);
-          }
+          window.nodeFs.rm(dataPath).catch(() => {});
         }
       }
 
-      // Save state (with optional compression)
+      // Save state
       const timestamp = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-      const extension = ".bin";
-      const dataPath = window.nodePath.join(this.tempDir, `state-${timestamp}${extension}`);
+      const dataPath = window.nodePath.join(this.tempDir, `state-${timestamp}.bin`);
 
-      const bufferStart = performance.now();
       const buffer = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
-      console.log(`[timing] undo Buffer.from: ${(performance.now() - bufferStart).toFixed(2)}ms (${(data.byteLength / 1024 / 1024).toFixed(2)} MB)`);
+      await window.nodeFs.writeFile(dataPath, buffer);
 
-      const writeStart = performance.now();
-      const dataToWrite = buffer;
-      await window.nodeFs.writeFile(dataPath, dataToWrite);
-      console.log(`[timing] undo writeFile: ${(performance.now() - writeStart).toFixed(2)}ms`);
-
-      this.timeline.push({ dataPath, fileId, compressed: false });
+      this.timeline.push({ dataPath, fileId });
       this.head++;
 
       // Enforce history limit
       if (this.timeline.length > this.MAX_HISTORY) {
         const oldest = this.timeline.shift();
         if (oldest) {
-          try {
-            await window.nodeFs.rm(oldest.dataPath);
-          } catch (e) {
-            console.error("Failed to delete old undo file:", e);
-          }
+          window.nodeFs.rm(oldest.dataPath).catch(() => {});
         }
         this.head--;
       }
 
-      console.log(`[timing] undo addState total: ${(performance.now() - addStateStart).toFixed(2)}ms, history size: ${this.timeline.length}`);
       this.notifyStateChange();
     } catch (error) {
       console.error("Failed to add undo state:", error);
@@ -102,23 +84,19 @@ class UndoManager {
 
   async undo(): Promise<void> {
     await this.init();
-    if (!this.canUndo() || !window.nodeFs) {
-      return;
-    }
+    if (!this.canUndo() || !window.nodeFs) return;
 
     try {
       this.head--;
       const { dataPath, fileId } = this.timeline[this.head];
 
       const buffer = await window.nodeFs.readFile(dataPath);
-
       const data = new Float32Array(
         buffer.buffer,
         buffer.byteOffset,
         buffer.byteLength / Float32Array.BYTES_PER_ELEMENT,
       );
 
-      console.log(`Undo to state ${this.head} for ${fileId}`);
       this.notifyStateChange();
 
       openFiles[fileId]?.rendererRef?.current?.setFBOData(data);
@@ -132,23 +110,19 @@ class UndoManager {
 
   async redo(): Promise<void> {
     await this.init();
-    if (!this.canRedo() || !window.nodeFs) {
-      return;
-    }
+    if (!this.canRedo() || !window.nodeFs) return;
 
     try {
       this.head++;
       const { dataPath, fileId } = this.timeline[this.head];
 
       const buffer = await window.nodeFs.readFile(dataPath);
-
       const data = new Float32Array(
         buffer.buffer,
         buffer.byteOffset,
         buffer.byteLength / Float32Array.BYTES_PER_ELEMENT,
       );
 
-      console.log(`Redo to state ${this.head} for ${fileId}`);
       this.notifyStateChange();
 
       openFiles[fileId]?.rendererRef?.current?.setFBOData(data);
@@ -167,15 +141,10 @@ class UndoManager {
     try {
       const files = await window.nodeFs.readdir(this.tempDir);
       for (const file of files) {
-        try {
-          await window.nodeFs.rm(window.nodePath!.join(this.tempDir, file));
-        } catch (e) {
-          console.error("Failed to delete file during clear:", e);
-        }
+        window.nodeFs.rm(window.nodePath!.join(this.tempDir, file)).catch(() => {});
       }
       this.timeline = [];
       this.head = -1;
-      console.log("Undo history cleared");
       this.notifyStateChange();
     } catch (error) {
       console.error("Failed to clear undo history:", error);
@@ -188,14 +157,13 @@ class UndoManager {
 
     try {
       await window.nodeFs.rm(this.tempDir, { recursive: true, force: true });
-      console.log("Undo temp directory destroyed");
     } catch (error) {
       console.error("Failed to clean up undo directory:", error);
     }
   }
 }
 
-// Global undo manager instance per file (keyed by file ID)
+// Global undo manager instance per file
 const undoManagers = new Map<string, UndoManager>();
 
 export function getUndoManager(fileId: string): UndoManager {

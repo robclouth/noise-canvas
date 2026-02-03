@@ -9,7 +9,23 @@
       "Bash(node-gyp rebuild:*)",
       "Bash(npx node-gyp rebuild:*)",
       "Bash(npx eslint:*)",
-      "Bash(npm run lint:*)"
+      "Bash(npm run lint:*)",
+      "Bash(npm install:*)",
+      "Bash(npx prettier:*)",
+      "Bash(npm run test:e2e:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(\"/Users/rob/Documents/Projects/Music/Tools/noise-canvas/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron\" --version)",
+      "Bash(DEBUG=pw:*)",
+      "Bash(npx playwright test)",
+      "WebFetch(domain:playwright.dev)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:www.electronjs.org)",
+      "Bash(DEBUG=pw:browser*)",
+      "Bash(npx playwright test:*)",
+      "Bash(npx @electron/fuses:*)",
+      "Bash(\"/Users/rob/Documents/Projects/Music/Tools/noise-canvas/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron\" --help)",
+      "Bash(git checkout:*)"
     ]
   }
 }

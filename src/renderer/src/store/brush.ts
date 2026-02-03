@@ -115,9 +115,6 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
 
     // Unified apply action - used by mouse up and Enter key
     applyStrokeAtPosition: async (position?, strokeTimeRange?) => {
-      const applyStart = performance.now();
-      console.log("[timing] applyStrokeAtPosition started");
-
       const state = get();
       const { activeFileId, synthesizeFile, autoPlayStroke, setFilePlaybackStartTime, setAutoPlayEndTime } = state;
 
@@ -139,57 +136,40 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         spectrogramData.numBands,
       );
 
-      // Get FBO data for undo state
-      const fboStart = performance.now();
-      const data = await file.rendererRef.current.getFBOData();
-      console.log(`[timing] getFBOData (for undo): ${(performance.now() - fboStart).toFixed(2)}ms`);
+      // Use provided time range or fall back to single point
+      const clampedStart = Math.max(0, strokeTimeRange?.min ?? timeSeconds);
+      const clampedEnd = Math.min(totalDuration, strokeTimeRange?.max ?? timeSeconds);
 
-      if (data) {
-        // Start undo write in background (don't block synthesis)
-        const undoPromise = (async () => {
-          const undoStart = performance.now();
-          const { getUndoManager } = await import("@renderer/lib/undo-manager");
-          const undoManager = getUndoManager(activeFileId);
-          await undoManager.addState(data, activeFileId);
-          console.log(`[timing] undo write (background): ${(performance.now() - undoStart).toFixed(2)}ms`);
-        })();
+      let autoPlaybackParams: { startTimeSeconds: number; endTimeSeconds: number } | null = null;
+      if (autoPlayStroke) {
+        // Get envelope times in beats and convert to seconds
+        const { brushEnvelopeDelayTime, brushEnvelopeAttackTime, brushEnvelopeSustainTime, brushEnvelopeReleaseTime } =
+          state;
+        const beatsToSeconds = 60 / bpm;
+        const delaySeconds = brushEnvelopeDelayTime * beatsToSeconds;
+        const envelopeEndSeconds =
+          (brushEnvelopeAttackTime + brushEnvelopeSustainTime + brushEnvelopeReleaseTime) * beatsToSeconds;
 
-        // Use provided time range or fall back to single point
-        const clampedStart = Math.max(0, strokeTimeRange?.min ?? timeSeconds);
-        const clampedEnd = Math.min(totalDuration, strokeTimeRange?.max ?? timeSeconds);
+        // Extend time range by envelope times for autoplay
+        const autoPlayStart = Math.max(0, clampedStart - delaySeconds);
+        const autoPlayEnd = Math.min(totalDuration, clampedEnd + envelopeEndSeconds);
 
-        let autoPlaybackParams: { startTimeSeconds: number; endTimeSeconds: number } | null = null;
-        if (autoPlayStroke) {
-          // Get envelope times in beats and convert to seconds
-          const {
-            brushEnvelopeDelayTime,
-            brushEnvelopeAttackTime,
-            brushEnvelopeSustainTime,
-            brushEnvelopeReleaseTime,
-          } = state;
-          const beatsToSeconds = 60 / bpm;
-          const delaySeconds = brushEnvelopeDelayTime * beatsToSeconds;
-          const envelopeEndSeconds =
-            (brushEnvelopeAttackTime + brushEnvelopeSustainTime + brushEnvelopeReleaseTime) * beatsToSeconds;
-
-          // Extend time range by envelope times for autoplay
-          const autoPlayStart = Math.max(0, clampedStart - delaySeconds);
-          const autoPlayEnd = Math.min(totalDuration, clampedEnd + envelopeEndSeconds);
-
-          setFilePlaybackStartTime(activeFileId, autoPlayStart);
-          setAutoPlayEndTime(autoPlayEnd);
-          autoPlaybackParams = { startTimeSeconds: autoPlayStart, endTimeSeconds: autoPlayEnd };
-        }
-
-        const synthesizeStart = performance.now();
-        await synthesizeFile(activeFileId, autoPlaybackParams, data);
-        console.log(`[timing] synthesizeFile call: ${(performance.now() - synthesizeStart).toFixed(2)}ms`);
-
-        // Wait for undo to complete before returning (ensures it's done before next stroke)
-        await undoPromise;
+        setFilePlaybackStartTime(activeFileId, autoPlayStart);
+        setAutoPlayEndTime(autoPlayEnd);
+        autoPlaybackParams = { startTimeSeconds: autoPlayStart, endTimeSeconds: autoPlayEnd };
       }
 
-      console.log(`[timing] applyStrokeAtPosition total: ${(performance.now() - applyStart).toFixed(2)}ms`);
+      // Get FBO data for synthesis and undo
+      const data = await file.rendererRef.current.getFBOData();
+
+      if (data) {
+        // Save state for undo (fire and forget)
+        import("@renderer/lib/undo-manager").then(({ getUndoManager }) =>
+          getUndoManager(activeFileId).addState(data, activeFileId),
+        );
+
+        await synthesizeFile(activeFileId, autoPlaybackParams, data);
+      }
     },
 
     // Helper: move brush and preview
