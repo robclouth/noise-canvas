@@ -359,8 +359,17 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // Export the audio
       await window.audioAnalysis.exportAudio(audioChannels, outputPath, file.audioBuffer.sampleRate, format);
 
-      // Update file path in openFiles
+      // Update file path in openFiles and copy BPM mapping to new path
+      const oldFilePath = file.filePath;
       file.filePath = outputPath;
+      set(
+        produce((state: State) => {
+          const oldBpm = state.filepathsBpm[oldFilePath];
+          if (oldBpm !== undefined) {
+            state.filepathsBpm[outputPath] = oldBpm;
+          }
+        }),
+      );
 
       // Mark as not dirty
       get().setFileDirty(state.activeFileId!, false);
@@ -425,8 +434,17 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // Export the audio
       await window.audioAnalysis.exportAudio(audioChannels, outputPath, file.audioBuffer.sampleRate, format);
 
-      // Update file path in openFiles
+      // Update file path in openFiles and copy BPM mapping to new path
+      const oldFilePath = file.filePath;
       file.filePath = outputPath;
+      set(
+        produce((state: State) => {
+          const oldBpm = state.filepathsBpm[oldFilePath];
+          if (oldBpm !== undefined) {
+            state.filepathsBpm[outputPath] = oldBpm;
+          }
+        }),
+      );
 
       // Mark as not dirty
       get().setFileDirty(state.activeFileId!, false);

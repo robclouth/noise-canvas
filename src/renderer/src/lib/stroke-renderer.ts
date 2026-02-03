@@ -179,18 +179,8 @@ export class StrokeRenderer {
   private fboDataCache: Float32Array | null = null;
   private fboDataDirty = true;
 
-  // Dirty region tracking for partial synthesis optimization
-  // Tracks the UV range (0-1) that has been modified since last synthesis
-  private dirtyRegionMinX = Infinity;
-  private dirtyRegionMaxX = -Infinity;
-  private dirtyRegionMinY = Infinity;
-  private dirtyRegionMaxY = -Infinity;
-
-  // Pre-allocated Vector2 instances for calculateSourceOffset to avoid GC pressure
-  private _tempSourcePosUv = new Vector2();
-  private _tempCurrentBrushUv = new Vector2();
-  private _tempBrushStartUv = new Vector2();
-  private _tempResultUv = new Vector2();
+  // Dirty region tracking for partial synthesis
+  private dirtyRegion: { startX: number; endX: number; startY: number; endY: number } | null = null;
 
   constructor(
     gl: WebGLRenderer,
@@ -398,12 +388,11 @@ export class StrokeRenderer {
       sourceSpectrogramData.bandsPerOctave,
       sourceSpectrogramData.numBands,
     );
-    // Use pre-allocated vectors to avoid GC pressure in hot path
-    this._tempSourcePosUv.copy(sourcePositionBottomLeftUv);
-    this._tempCurrentBrushUv.copy(mousePos);
+    const sourcePositionUv = sourcePositionBottomLeftUv.clone();
+    const currentBrushUv = mousePos.clone();
 
     if (mode === "fixed") {
-      return this._tempResultUv.copy(this._tempSourcePosUv).sub(this._tempCurrentBrushUv);
+      return sourcePositionUv.clone().sub(currentBrushUv);
     } else if (mode === "anchored") {
       if (state.cursorPosition) {
         const brushStartBottomLeftUv = unitsToUv(
@@ -414,10 +403,10 @@ export class StrokeRenderer {
           this.spectrogramData.bandsPerOctave,
           this.spectrogramData.numBands,
         );
-        this._tempBrushStartUv.copy(brushStartBottomLeftUv);
-        return this._tempResultUv.copy(this._tempSourcePosUv).sub(this._tempBrushStartUv);
+        const brushStartUv = brushStartBottomLeftUv.clone();
+        return sourcePositionUv.clone().sub(brushStartUv);
       } else {
-        return this._tempResultUv.copy(this._tempSourcePosUv).sub(this._tempCurrentBrushUv);
+        return sourcePositionUv.clone().sub(currentBrushUv);
       }
     } else if (mode === "offset") {
       if (state.lockedOffset) {
@@ -438,10 +427,10 @@ export class StrokeRenderer {
           this.spectrogramData.bandsPerOctave,
           this.spectrogramData.numBands,
         );
-        this._tempBrushStartUv.copy(brushStartBottomLeftUv).add(halfBrushSizeUvCurrent);
-        return this._tempResultUv.copy(this._tempSourcePosUv).sub(this._tempBrushStartUv);
+        const brushStartUv = brushStartBottomLeftUv.clone().add(halfBrushSizeUvCurrent);
+        return sourcePositionUv.clone().sub(brushStartUv);
       } else {
-        return this._tempResultUv.copy(this._tempSourcePosUv).sub(this._tempCurrentBrushUv);
+        return sourcePositionUv.clone().sub(currentBrushUv);
       }
     }
 
@@ -663,15 +652,9 @@ export class StrokeRenderer {
         enabledEffectItems.push({ id: "passthrough", effect: "passthrough", enabled: true, params: {} });
       }
 
-      // Pre-allocate reusable uniform object to avoid GC pressure in the inner loop
-      const brushSizeUv = commonUniforms.brushSizeUv.value as Vector2;
-      const brushCenterTime = cursorPos.x + brushSizeUv.x / 2;
-      const brushCenterPitch = cursorPos.y + brushSizeUv.y / 2;
-      const currentMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo : this.strokeMaskFbo2;
-
-      const passUniforms = {
+      // Create the iterative uniforms set for subsequent passes
+      const iterativeUniforms = {
         ...commonUniforms,
-        // Iterative source overrides (will be set when not first pass)
         sourceInverseMapTex: commonUniforms.destInverseMapTex,
         sourceMetadataTex: commonUniforms.destMetadataTex,
         sourceMinFreq: commonUniforms.destMinFreq,
@@ -681,20 +664,9 @@ export class StrokeRenderer {
         sourceChannelCount: commonUniforms.destChannelCount,
         sourceSampleRate: commonUniforms.destSampleRate,
         sourceSpectrogramTextureSize: commonUniforms.destSpectrogramTextureSize,
-        // Pre-allocate mutable uniform wrappers
-        strokeIterationNormalized: { value: 0 },
-        strokeTimePosition: { value: brushCenterTime },
-        strokePitchPosition: { value: brushCenterPitch },
-        strokeRandom: { value: strokeRandom },
-        strokeStepNormalized: { value: numSteps > 1 ? stepIndex / (numSteps - 1) : 0 },
-        useStrokeMask: { value: !stepState.accumulate },
-        strokeMaskTex: { value: !stepState.accumulate ? currentMaskFbo.texture : this.textures.placeholderTexture },
-        blendOriginalTex: { value: !stepState.accumulate ? this.strokeStartFbo.texture : this.textures.placeholderTexture },
+        sourceOffsetX: { value: 0 },
+        sourceOffsetY: { value: 0 },
       };
-
-      // Store original source texture for first pass restoration
-      const originalSourceTex = commonUniforms.sourceSpectrogramTex.value;
-      const originalDestTex = commonUniforms.destSpectrogramTex.value;
 
       // Reset currentReadFbo to the step's input for effect processing
       let currentReadFbo: WebGLRenderTarget | { texture: DataTexture } = stepInputFbo;
@@ -713,10 +685,22 @@ export class StrokeRenderer {
             const isFirstEffect = effectIndex === 0;
             const isFirstIteration = i === 0;
             const isFirstPass = p === 0;
-            const isFirstOverall = isFirstEffect && isFirstIteration && isFirstPass;
+            const uniformsForThisIteration =
+              isFirstEffect && isFirstIteration && isFirstPass ? { ...commonUniforms } : { ...iterativeUniforms };
 
-            // Update contextual modulation uniforms (mutate existing objects)
-            passUniforms.strokeIterationNormalized.value = brushIterations > 1 ? i / (brushIterations - 1) : 0;
+            // Add contextual modulation uniforms for this iteration/step
+            const brushSizeUv = commonUniforms.brushSizeUv.value as Vector2;
+            const brushCenterTime = cursorPos.x + brushSizeUv.x / 2;
+            const brushCenterPitch = cursorPos.y + brushSizeUv.y / 2;
+            uniformsForThisIteration.strokeIterationNormalized = {
+              value: brushIterations > 1 ? i / (brushIterations - 1) : 0,
+            };
+            uniformsForThisIteration.strokeTimePosition = { value: brushCenterTime };
+            uniformsForThisIteration.strokePitchPosition = { value: brushCenterPitch };
+            uniformsForThisIteration.strokeRandom = { value: strokeRandom };
+            uniformsForThisIteration.strokeStepNormalized = {
+              value: numSteps > 1 ? stepIndex / (numSteps - 1) : 0,
+            };
 
             const material = effect.materials[p];
             this.fboMesh.material = material;
@@ -730,25 +714,34 @@ export class StrokeRenderer {
 
             const inputTexture = currentReadFbo.texture;
 
-            // Update source/dest textures based on pass position (mutate existing objects)
-            if (isFirstOverall) {
-              passUniforms.sourceSpectrogramTex.value = originalSourceTex;
-              passUniforms.sourceOffsetX.value = sourceOffsetUv.x;
-              passUniforms.sourceOffsetY.value = sourceOffsetUv.y;
-            } else {
-              passUniforms.sourceSpectrogramTex.value = inputTexture;
-              passUniforms.sourceOffsetX.value = 0;
-              passUniforms.sourceOffsetY.value = 0;
+            // The "source" on the first effect/iteration/pass is already set correctly in commonUniforms
+            if (!(isFirstEffect && isFirstIteration && isFirstPass)) {
+              uniformsForThisIteration.sourceSpectrogramTex = { value: inputTexture };
             }
 
-            // The "destination" (for blending) is the original target on the first iteration
-            passUniforms.destSpectrogramTex.value = isFirstEffect && isFirstIteration ? originalDestTex : inputTexture;
+            // The "destination" (for blending) is the original target on the first pass
+            uniformsForThisIteration.destSpectrogramTex = {
+              value: isFirstEffect && isFirstIteration ? commonUniforms.destSpectrogramTex.value : inputTexture,
+            };
+
+            // Pass the mask if enabled (non-cumulative mode)
+            if (!stepState.accumulate) {
+              const currentMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo : this.strokeMaskFbo2;
+              (uniformsForThisIteration as any).useStrokeMask = { value: true };
+              (uniformsForThisIteration as any).strokeMaskTex = { value: currentMaskFbo.texture };
+              // Pass stroke start texture for blend calculations to prevent accumulation with additive blend modes
+              (uniformsForThisIteration as any).blendOriginalTex = { value: this.strokeStartFbo.texture };
+            } else {
+              (uniformsForThisIteration as any).useStrokeMask = { value: false };
+              (uniformsForThisIteration as any).strokeMaskTex = { value: this.textures.placeholderTexture };
+              (uniformsForThisIteration as any).blendOriginalTex = { value: this.textures.placeholderTexture };
+            }
 
             // Create effect-specific state view with per-instance params merged in
             const effectState = createEffectStateView(state, stepIndex, effectItem);
 
             effect.updateEffectUniforms({
-              commonUniforms: passUniforms,
+              commonUniforms: uniformsForThisIteration,
               passIndex: p,
               file: sourceFile,
               state: effectState,
@@ -781,39 +774,28 @@ export class StrokeRenderer {
         this.updateStrokeMask(state, cursorPos, bpm, totalDuration);
       }
 
-      this.fboDataDirty = true;
+      // Update dirty region to include this stroke's bounds
+      const brushSizeUv = this.calculateBrushSizeUv(activeStepState, bpm, totalDuration);
+      const strokeStartX = cursorPos.x;
+      const strokeEndX = cursorPos.x + brushSizeUv.x;
+      const strokeStartY = cursorPos.y;
+      const strokeEndY = cursorPos.y + brushSizeUv.y;
 
-      // Update dirty region for partial synthesis optimization
-      // Calculate the maximum brush extent across all steps
-      for (let stepIndex = 0; stepIndex < numSteps; stepIndex++) {
-        const stepState = createStepStateView(state, stepIndex);
-        const stepBrushSizeUv = this.calculateBrushSizeUv(stepState, bpm, totalDuration);
-        const wrapMode = stepState.brushWrapMode as number;
-
-        // If wrap X is enabled (modes 1 or 3), the entire width is affected
-        if (wrapMode === 1 || wrapMode === 3) {
-          this.dirtyRegionMinX = 0;
-          this.dirtyRegionMaxX = 1;
-        } else {
-          // Track the X range affected by this stroke
-          const strokeMinX = cursorPos.x;
-          const strokeMaxX = cursorPos.x + stepBrushSizeUv.x;
-          this.dirtyRegionMinX = Math.min(this.dirtyRegionMinX, strokeMinX);
-          this.dirtyRegionMaxX = Math.max(this.dirtyRegionMaxX, strokeMaxX);
-        }
-
-        // If wrap Y is enabled (modes 2 or 3), the entire height is affected
-        if (wrapMode === 2 || wrapMode === 3) {
-          this.dirtyRegionMinY = 0;
-          this.dirtyRegionMaxY = 1;
-        } else {
-          // Track the Y range affected by this stroke
-          const strokeMinY = cursorPos.y;
-          const strokeMaxY = cursorPos.y + stepBrushSizeUv.y;
-          this.dirtyRegionMinY = Math.min(this.dirtyRegionMinY, strokeMinY);
-          this.dirtyRegionMaxY = Math.max(this.dirtyRegionMaxY, strokeMaxY);
-        }
+      if (this.dirtyRegion) {
+        this.dirtyRegion.startX = Math.min(this.dirtyRegion.startX, strokeStartX);
+        this.dirtyRegion.endX = Math.max(this.dirtyRegion.endX, strokeEndX);
+        this.dirtyRegion.startY = Math.min(this.dirtyRegion.startY, strokeStartY);
+        this.dirtyRegion.endY = Math.max(this.dirtyRegion.endY, strokeEndY);
+      } else {
+        this.dirtyRegion = {
+          startX: strokeStartX,
+          endX: strokeEndX,
+          startY: strokeStartY,
+          endY: strokeEndY,
+        };
       }
+
+      this.fboDataDirty = true;
     }
   }
 
@@ -955,33 +937,6 @@ export class StrokeRenderer {
   }
 
   /**
-   * Get the dirty region (UV range that has been modified since last clear).
-   * Returns null if no modifications have been made.
-   * Returns { startX, endX, startY, endY } in UV coordinates (0-1).
-   */
-  getDirtyRegion(): { startX: number; endX: number; startY: number; endY: number } | null {
-    if (this.dirtyRegionMinX > this.dirtyRegionMaxX) {
-      return null;
-    }
-    return {
-      startX: Math.max(0, this.dirtyRegionMinX),
-      endX: Math.min(1, this.dirtyRegionMaxX),
-      startY: Math.max(0, this.dirtyRegionMinY),
-      endY: Math.min(1, this.dirtyRegionMaxY),
-    };
-  }
-
-  /**
-   * Clear the dirty region tracking (call after synthesis).
-   */
-  clearDirtyRegion(): void {
-    this.dirtyRegionMinX = Infinity;
-    this.dirtyRegionMaxX = -Infinity;
-    this.dirtyRegionMinY = Infinity;
-    this.dirtyRegionMaxY = -Infinity;
-  }
-
-  /**
    * Begin a new stroke (snapshot current state).
    */
   beginStroke(): void {
@@ -1018,6 +973,7 @@ export class StrokeRenderer {
   restoreOriginal(): void {
     this.isInitialized = false;
     this.fboDataDirty = true;
+    this.dirtyRegion = null;
   }
 
   /**
@@ -1025,6 +981,21 @@ export class StrokeRenderer {
    */
   getIsInitialized(): boolean {
     return this.isInitialized;
+  }
+
+  /**
+   * Get the dirty region (bounding box of all strokes since last clear).
+   * Returns UV coordinates (0-1 range).
+   */
+  getDirtyRegion(): { startX: number; endX: number; startY: number; endY: number } | null {
+    return this.dirtyRegion;
+  }
+
+  /**
+   * Clear the dirty region tracking.
+   */
+  clearDirtyRegion(): void {
+    this.dirtyRegion = null;
   }
 
   /**
