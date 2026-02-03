@@ -64,6 +64,10 @@ export interface FileRendererHandle {
   applyStroke: () => void;
   beginStroke: () => void;
   endStroke: () => void;
+  /** Gets the dirty region (UV range modified since last clear). Returns null if no modifications. */
+  getDirtyRegion: () => { startX: number; endX: number; startY: number; endY: number } | null;
+  /** Clears the dirty region tracking (call after synthesis). */
+  clearDirtyRegion: () => void;
 }
 
 /**
@@ -812,6 +816,8 @@ export const FileRenderer = memo(
         applyStroke.current = true;
         invalidateRef.current?.();
       },
+      getDirtyRegion: () => strokeRendererRef.current?.getDirtyRegion() ?? null,
+      clearDirtyRegion: () => strokeRendererRef.current?.clearDirtyRegion(),
     }));
 
     if (!spectrogramData) {

@@ -115,6 +115,9 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
 
     // Unified apply action - used by mouse up and Enter key
     applyStrokeAtPosition: async (position?, strokeTimeRange?) => {
+      const applyStart = performance.now();
+      console.log("[timing] applyStrokeAtPosition started");
+
       const state = get();
       const { activeFileId, synthesizeFile, autoPlayStroke, setFilePlaybackStartTime, setAutoPlayEndTime } = state;
 
@@ -136,15 +139,20 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         spectrogramData.numBands,
       );
 
-      // Small delay to let any pending render complete
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      // Get FBO data and create undo state
+      // Get FBO data for undo state
+      const fboStart = performance.now();
       const data = await file.rendererRef.current.getFBOData();
+      console.log(`[timing] getFBOData (for undo): ${(performance.now() - fboStart).toFixed(2)}ms`);
+
       if (data) {
-        const { getUndoManager } = await import("@renderer/lib/undo-manager");
-        const undoManager = getUndoManager(activeFileId);
-        await undoManager.addState(data, activeFileId);
+        // Start undo write in background (don't block synthesis)
+        const undoPromise = (async () => {
+          const undoStart = performance.now();
+          const { getUndoManager } = await import("@renderer/lib/undo-manager");
+          const undoManager = getUndoManager(activeFileId);
+          await undoManager.addState(data, activeFileId);
+          console.log(`[timing] undo write (background): ${(performance.now() - undoStart).toFixed(2)}ms`);
+        })();
 
         // Use provided time range or fall back to single point
         const clampedStart = Math.max(0, strokeTimeRange?.min ?? timeSeconds);
@@ -173,8 +181,15 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           autoPlaybackParams = { startTimeSeconds: autoPlayStart, endTimeSeconds: autoPlayEnd };
         }
 
-        await synthesizeFile(activeFileId, autoPlaybackParams);
+        const synthesizeStart = performance.now();
+        await synthesizeFile(activeFileId, autoPlaybackParams, data);
+        console.log(`[timing] synthesizeFile call: ${(performance.now() - synthesizeStart).toFixed(2)}ms`);
+
+        // Wait for undo to complete before returning (ensures it's done before next stroke)
+        await undoPromise;
       }
+
+      console.log(`[timing] applyStrokeAtPosition total: ${(performance.now() - applyStart).toFixed(2)}ms`);
     },
 
     // Helper: move brush and preview

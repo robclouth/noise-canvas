@@ -52,11 +52,25 @@ declare global {
       }>;
       synthesize: (
         processedData: Float32Array,
-        analysisMetadata: any,
+        analysisMetadata: {
+          numFrames: number;
+          numChannels: number;
+          numBands: number;
+          bandOffsets: Uint32Array;
+          bandStepLog2s: Int32Array;
+          bandLengths: Uint32Array;
+        },
         sampleRate: number,
         params: AnalysisParams,
         normalize: boolean,
-      ) => Promise<Float32Array[]>;
+        existingAudio?: Float32Array[],
+        startFrame?: number,
+        endFrame?: number,
+        startBand?: number,
+        endBand?: number,
+      ) => Promise<{
+        channels: Float32Array[];
+      }>;
       exportAudio: (
         audioChannels: Float32Array[],
         outputPath: string,

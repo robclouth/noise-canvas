@@ -179,6 +179,13 @@ export class StrokeRenderer {
   private fboDataCache: Float32Array | null = null;
   private fboDataDirty = true;
 
+  // Dirty region tracking for partial synthesis optimization
+  // Tracks the UV range (0-1) that has been modified since last synthesis
+  private dirtyRegionMinX = Infinity;
+  private dirtyRegionMaxX = -Infinity;
+  private dirtyRegionMinY = Infinity;
+  private dirtyRegionMaxY = -Infinity;
+
   // Pre-allocated Vector2 instances for calculateSourceOffset to avoid GC pressure
   private _tempSourcePosUv = new Vector2();
   private _tempCurrentBrushUv = new Vector2();
@@ -775,6 +782,38 @@ export class StrokeRenderer {
       }
 
       this.fboDataDirty = true;
+
+      // Update dirty region for partial synthesis optimization
+      // Calculate the maximum brush extent across all steps
+      for (let stepIndex = 0; stepIndex < numSteps; stepIndex++) {
+        const stepState = createStepStateView(state, stepIndex);
+        const stepBrushSizeUv = this.calculateBrushSizeUv(stepState, bpm, totalDuration);
+        const wrapMode = stepState.brushWrapMode as number;
+
+        // If wrap X is enabled (modes 1 or 3), the entire width is affected
+        if (wrapMode === 1 || wrapMode === 3) {
+          this.dirtyRegionMinX = 0;
+          this.dirtyRegionMaxX = 1;
+        } else {
+          // Track the X range affected by this stroke
+          const strokeMinX = cursorPos.x;
+          const strokeMaxX = cursorPos.x + stepBrushSizeUv.x;
+          this.dirtyRegionMinX = Math.min(this.dirtyRegionMinX, strokeMinX);
+          this.dirtyRegionMaxX = Math.max(this.dirtyRegionMaxX, strokeMaxX);
+        }
+
+        // If wrap Y is enabled (modes 2 or 3), the entire height is affected
+        if (wrapMode === 2 || wrapMode === 3) {
+          this.dirtyRegionMinY = 0;
+          this.dirtyRegionMaxY = 1;
+        } else {
+          // Track the Y range affected by this stroke
+          const strokeMinY = cursorPos.y;
+          const strokeMaxY = cursorPos.y + stepBrushSizeUv.y;
+          this.dirtyRegionMinY = Math.min(this.dirtyRegionMinY, strokeMinY);
+          this.dirtyRegionMaxY = Math.max(this.dirtyRegionMaxY, strokeMaxY);
+        }
+      }
     }
   }
 
@@ -913,6 +952,33 @@ export class StrokeRenderer {
     const currentFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
     const nextFBO = this.pingPong === 0 ? this.fbo2 : this.fbo1;
     return isPreview ? nextFBO.texture : currentFBO.texture;
+  }
+
+  /**
+   * Get the dirty region (UV range that has been modified since last clear).
+   * Returns null if no modifications have been made.
+   * Returns { startX, endX, startY, endY } in UV coordinates (0-1).
+   */
+  getDirtyRegion(): { startX: number; endX: number; startY: number; endY: number } | null {
+    if (this.dirtyRegionMinX > this.dirtyRegionMaxX) {
+      return null;
+    }
+    return {
+      startX: Math.max(0, this.dirtyRegionMinX),
+      endX: Math.min(1, this.dirtyRegionMaxX),
+      startY: Math.max(0, this.dirtyRegionMinY),
+      endY: Math.min(1, this.dirtyRegionMaxY),
+    };
+  }
+
+  /**
+   * Clear the dirty region tracking (call after synthesis).
+   */
+  clearDirtyRegion(): void {
+    this.dirtyRegionMinX = Infinity;
+    this.dirtyRegionMaxX = -Infinity;
+    this.dirtyRegionMinY = Infinity;
+    this.dirtyRegionMaxY = -Infinity;
   }
 
   /**

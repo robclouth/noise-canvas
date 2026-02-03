@@ -110,16 +110,52 @@ export async function analyseBuffer(audioBuffer: AudioBuffer, params: AnalysisPa
   };
 }
 
+export interface SynthesisResult {
+  channels: Float32Array[];
+}
+
 export async function synthesize(
   processedData: Float32Array,
-  analysisMetadata: any,
+  analysisMetadata: {
+    numFrames: number;
+    numChannels: number;
+    numBands: number;
+    bandOffsets: Uint32Array;
+    bandStepLog2s: Int32Array;
+    bandLengths: Uint32Array;
+  },
   sampleRate: number,
   params: AnalysisParams,
   normalize: boolean,
-): Promise<Float32Array[]> {
+  existingAudio?: Float32Array[],
+  startFrame?: number,
+  endFrame?: number,
+  startBand?: number,
+  endBand?: number,
+): Promise<SynthesisResult> {
   const gab = init();
 
-  return await gab.synthesize(processedData, analysisMetadata, sampleRate, params, normalize);
+  // Pass -1 for undefined to trigger full synthesis in C++
+  const start = startFrame ?? -1;
+  const end = endFrame ?? -1;
+  const bandStart = startBand ?? -1;
+  const bandEnd = endBand ?? -1;
+
+  // Pass existing audio as array or empty array if not provided
+  const existing = existingAudio ?? [];
+
+  return await gab.synthesize(
+    processedData,
+    analysisMetadata,
+    sampleRate,
+    params,
+    normalize,
+    existing,
+    start,
+    end,
+    bandStart,
+    bandEnd,
+  );
 }
 
 /**

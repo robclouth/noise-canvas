@@ -6,13 +6,24 @@
 #include <numeric>
 #include <cmath>
 #include <algorithm>
-#include <string>  // For std::string
-#include <sstream> // For std::stringstream
-#include <iomanip> // For std::fixed, std::setprecision
+#include <string>   // For std::string
+#include <sstream>  // For std::stringstream
+#include <iomanip>  // For std::fixed, std::setprecision
+#include <iostream> // For std::cerr
+#include <fstream>  // For file logging
 #include "gaborator/gaborator.h"
 
 #define OVERLAP 0.7
 #define MAX_TEXTURE_SIZE 4096
+
+// Debug logging to file
+static std::ofstream &getDebugLog()
+{
+    static std::ofstream debugLog("/tmp/gaborator_debug.log", std::ios::out | std::ios::app);
+    return debugLog;
+}
+
+#define DEBUG_LOG getDebugLog()
 
 class AnalyzeWorker : public Napi::AsyncWorker
 {
@@ -312,10 +323,15 @@ public:
                      const Napi::Object &analysisObj,
                      double sampleRate,
                      const Napi::Object &paramsJs,
-                     bool normalize)
-        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), sampleRate(sampleRate), normalize(normalize)
+                     bool normalize,
+                     const Napi::Array &existingAudioJs,
+                     int64_t startFrame,
+                     int64_t endFrame,
+                     int64_t startBand,
+                     int64_t endBand)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), sampleRate(sampleRate), normalize(normalize),
+          requestedStartFrame(startFrame), requestedEndFrame(endFrame), requestedStartBand(startBand), requestedEndBand(endBand)
     {
-
         inputData.assign(inputDataJs.Data(), inputDataJs.Data() + inputDataJs.ElementLength());
 
         numFrames = analysisObj.Get("numFrames").As<Napi::Number>().Int64Value();
@@ -333,27 +349,116 @@ public:
 
         bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
         fminHz = paramsJs.Get("minFreq").As<Napi::Number>().DoubleValue();
+
+        // Copy existing audio if provided (for partial synthesis with crossfade)
+        if (existingAudioJs.Length() > 0)
+        {
+            existingAudio.resize(existingAudioJs.Length());
+            for (uint32_t i = 0; i < existingAudioJs.Length(); i++)
+            {
+                Napi::Float32Array channelJs = existingAudioJs.Get(i).As<Napi::Float32Array>();
+                existingAudio[i].assign(channelJs.Data(), channelJs.Data() + channelJs.ElementLength());
+            }
+        }
     }
 
     ~SynthesizeWorker() {}
 
     void Execute()
     {
+        DEBUG_LOG << "[C++] Execute() started" << std::endl << std::flush;
+        DEBUG_LOG << "[C++] requestedStartFrame=" << requestedStartFrame << ", requestedEndFrame=" << requestedEndFrame << std::endl << std::flush;
+        DEBUG_LOG << "[C++] requestedStartBand=" << requestedStartBand << ", requestedEndBand=" << requestedEndBand << std::endl << std::flush;
+        DEBUG_LOG << "[C++] numFrames=" << numFrames << ", channels=" << channels << ", numBands=" << numBands << std::endl << std::flush;
+        DEBUG_LOG << "[C++] existingAudio.size()=" << existingAudio.size() << std::endl << std::flush;
+
         double fminFrac = fminHz / sampleRate;
         gaborator::log_fq_scale scale(bandsPerOctave, fminFrac);
         gaborator::parameters params(scale, OVERLAP);
         params.phase = gaborator::coef_phase::global;
         gaborator::analyzer<float> analyzer(params);
 
+        DEBUG_LOG << "[C++] Analyzer created" << std::endl << std::flush;
+
         int band_begin = analyzer.bandpass_bands_begin();
         int band_end = analyzer.bandpass_bands_end();
 
-        audioChannels.resize(channels);
+        DEBUG_LOG << "[C++] band_begin=" << band_begin << ", band_end=" << band_end << std::endl << std::flush;
+
+        // Check if we're doing partial synthesis (have existing audio and frame range specified)
+        bool isPartialSynthesis = !existingAudio.empty() && requestedStartFrame >= 0 && requestedEndFrame > requestedStartFrame;
+
+        // Calculate synthesis support based on the bands that were modified
+        int64_t synthesisSupportSamples;
+        if (isPartialSynthesis && requestedStartBand >= 0 && requestedEndBand > requestedStartBand)
+        {
+            // Use band-specific support for only the modified bands
+            double maxSupport = 0.0;
+            int actualStartBand = std::max(0, static_cast<int>(requestedStartBand));
+            int actualEndBand = std::min(numBands, static_cast<int>(requestedEndBand));
+            for (int b = actualStartBand; b < actualEndBand; b++)
+            {
+                double support = analyzer.band_synthesis_support(b + band_begin);
+                maxSupport = std::max(maxSupport, support);
+            }
+            synthesisSupportSamples = static_cast<int64_t>(std::ceil(maxSupport));
+            DEBUG_LOG << "[C++] Band-specific support for bands " << actualStartBand << "-" << actualEndBand << ": " << synthesisSupportSamples << std::endl << std::flush;
+        }
+        else
+        {
+            // Use global maximum support
+            synthesisSupportSamples = static_cast<int64_t>(std::ceil(analyzer.synthesis_support()));
+        }
+
+        // Cap synthesis support at 0.1 seconds
+        int64_t maxSupportSamples = static_cast<int64_t>(sampleRate * 0.1);
+        synthesisSupportSamples = std::min(synthesisSupportSamples, maxSupportSamples);
+        DEBUG_LOG << "[C++] synthesisSupportSamples (capped at " << maxSupportSamples << "): " << synthesisSupportSamples << std::endl << std::flush;
+
+        // Crossfade duration: 10ms
+        int64_t crossfadeSamples = static_cast<int64_t>(sampleRate * 0.01);
+        DEBUG_LOG << "[C++] crossfadeSamples: " << crossfadeSamples << std::endl << std::flush;
+
+        int64_t synthStart, synthEnd;
         size_t floatsPerPixel = 4;
+
+        if (isPartialSynthesis)
+        {
+            // Partial synthesis: synthesize just the dirty region with margin
+            synthStart = std::max(int64_t(0), requestedStartFrame - synthesisSupportSamples);
+            synthEnd = std::min(static_cast<int64_t>(numFrames), requestedEndFrame + synthesisSupportSamples);
+        }
+        else
+        {
+            // Full synthesis
+            synthStart = 0;
+            synthEnd = static_cast<int64_t>(numFrames);
+        }
+
+        DEBUG_LOG << "[C++] synthStart=" << synthStart << ", synthEnd=" << synthEnd << std::endl << std::flush;
+
+        // Calculate fill range - for partial synthesis, only fill the time range we need
+        // Add extra margin for the fill to ensure synthesis has all needed coefficients
+        int64_t fillStart = 0;
+        int64_t fillEnd = static_cast<int64_t>(numFrames);
+        if (isPartialSynthesis)
+        {
+            // Use a generous margin for fill (2x synthesis support) to ensure all needed coefficients
+            int64_t fillMargin = synthesisSupportSamples * 2;
+            fillStart = std::max(int64_t(0), synthStart - fillMargin);
+            fillEnd = std::min(static_cast<int64_t>(numFrames), synthEnd + fillMargin);
+            DEBUG_LOG << "[C++] Partial fill range: " << fillStart << " to " << fillEnd << " (vs full: 0 to " << numFrames << ")" << std::endl << std::flush;
+        }
+
+        // Fill and synthesize
+        std::vector<std::vector<float>> synthesizedBuffers(channels);
 
         for (int ch = 0; ch < channels; ++ch)
         {
+            DEBUG_LOG << "[C++] Processing channel " << ch << std::endl << std::flush;
             gaborator::coefs<float> channelCoefs(analyzer);
+
+            // Fill coefficients for the required range
             gaborator::fill(
                 [&](int b, int64_t t, std::complex<float> &coef)
                 {
@@ -372,45 +477,110 @@ public:
                     size_t base_offset = bandOffsets[band_idx] + t_in_band;
                     size_t readOffset = base_offset * floatsPerPixel;
 
-                    // Read magnitude and unwrapped phase
+                    size_t maxReadIndex = readOffset + ch * 2 + 1;
+                    if (maxReadIndex >= inputData.size())
+                    {
+                        coef = {0.0f, 0.0f};
+                        return;
+                    }
+
                     float magnitude = inputData[readOffset + ch * 2 + 0];
                     float unwrappedPhase = inputData[readOffset + ch * 2 + 1];
-
-                    // Convert back to real and imaginary
                     float real = magnitude * std::cos(unwrappedPhase);
                     float imag = magnitude * std::sin(unwrappedPhase);
-
                     coef.real(real);
                     coef.imag(imag);
                 },
-                band_begin, band_end, 0, numFrames, channelCoefs);
-            audioChannels[ch].resize(numFrames);
-            analyzer.synthesize(channelCoefs, 0, numFrames, audioChannels[ch].data());
+                band_begin, band_end, fillStart, fillEnd, channelCoefs);
+
+            // Synthesize the required range
+            size_t synthLength = static_cast<size_t>(synthEnd - synthStart);
+            synthesizedBuffers[ch].resize(synthLength);
+            analyzer.synthesize(channelCoefs, synthStart, synthEnd, synthesizedBuffers[ch].data());
+            DEBUG_LOG << "[C++] Channel " << ch << " - synthesized " << synthLength << " samples" << std::endl << std::flush;
         }
 
-        if (normalize)
+        // Prepare output
+        audioChannels.resize(channels);
+
+        if (isPartialSynthesis)
         {
-            float peak_value = 0.0f;
-            for (const auto &channel_data : audioChannels)
+            // Partial synthesis: crossfade-splice into existing audio
+            DEBUG_LOG << "[C++] Doing partial synthesis with crossfade splice" << std::endl << std::flush;
+
+            for (int ch = 0; ch < channels; ++ch)
             {
-                for (float sample : channel_data)
+                // Start with copy of existing audio
+                audioChannels[ch] = existingAudio[ch];
+
+                // Apply crossfade at boundaries
+                int64_t fadeInStart = synthStart;
+                int64_t fadeInEnd = std::min(synthStart + crossfadeSamples, synthEnd);
+                int64_t fadeOutStart = std::max(synthEnd - crossfadeSamples, synthStart);
+                int64_t fadeOutEnd = synthEnd;
+
+                for (int64_t i = synthStart; i < synthEnd; ++i)
                 {
-                    peak_value = std::max(peak_value, std::abs(sample));
+                    size_t synthIdx = static_cast<size_t>(i - synthStart);
+                    float newSample = synthesizedBuffers[ch][synthIdx];
+                    float oldSample = existingAudio[ch][i];
+
+                    float blend = 1.0f; // Default: use new sample fully
+
+                    // Fade-in at start
+                    if (i >= fadeInStart && i < fadeInEnd && fadeInEnd > fadeInStart)
+                    {
+                        float fadeProgress = static_cast<float>(i - fadeInStart) / static_cast<float>(fadeInEnd - fadeInStart);
+                        blend = fadeProgress;
+                    }
+                    // Fade-out at end
+                    else if (i >= fadeOutStart && i < fadeOutEnd && fadeOutEnd > fadeOutStart)
+                    {
+                        float fadeProgress = static_cast<float>(i - fadeOutStart) / static_cast<float>(fadeOutEnd - fadeOutStart);
+                        blend = 1.0f - fadeProgress;
+                    }
+
+                    // Crossfade blend
+                    audioChannels[ch][i] = oldSample * (1.0f - blend) + newSample * blend;
                 }
+                DEBUG_LOG << "[C++] Channel " << ch << " - crossfade splice complete" << std::endl << std::flush;
             }
-            float normalization_factor = 1.0f;
-            if (peak_value > 0.0f)
+        }
+        else
+        {
+            // Full synthesis: just use synthesized buffers directly
+            for (int ch = 0; ch < channels; ++ch)
             {
-                normalization_factor = 1.0f / peak_value;
+                audioChannels[ch] = std::move(synthesizedBuffers[ch]);
             }
-            for (auto &channel_data : audioChannels)
+
+            // Apply normalization for full synthesis
+            if (normalize)
             {
-                for (float &sample : channel_data)
+                float peak_value = 0.0f;
+                for (const auto &channel_data : audioChannels)
                 {
-                    sample *= normalization_factor;
+                    for (float sample : channel_data)
+                    {
+                        peak_value = std::max(peak_value, std::abs(sample));
+                    }
+                }
+                if (peak_value > 0.0f)
+                {
+                    float normalization_factor = 1.0f / peak_value;
+                    for (auto &channel_data : audioChannels)
+                    {
+                        for (float &sample : channel_data)
+                        {
+                            sample *= normalization_factor;
+                        }
+                    }
+                    DEBUG_LOG << "[C++] Normalized with factor: " << normalization_factor << std::endl << std::flush;
                 }
             }
         }
+
+        DEBUG_LOG << "[C++] Execute() complete" << std::endl << std::flush;
     }
 
     void OnOK()
@@ -418,14 +588,17 @@ public:
         Napi::Env env = Env();
         Napi::HandleScope scope(env);
 
+        Napi::Object result = Napi::Object::New(env);
         Napi::Array outputChannels = Napi::Array::New(env, channels);
         for (int ch = 0; ch < channels; ++ch)
         {
-            Napi::Float32Array channelBuffer = Napi::Float32Array::New(env, numFrames);
-            memcpy(channelBuffer.Data(), audioChannels[ch].data(), numFrames * sizeof(float));
+            size_t outputLength = audioChannels[ch].size();
+            Napi::Float32Array channelBuffer = Napi::Float32Array::New(env, outputLength);
+            memcpy(channelBuffer.Data(), audioChannels[ch].data(), outputLength * sizeof(float));
             outputChannels[ch] = channelBuffer;
         }
-        deferred.Resolve(outputChannels);
+        result.Set("channels", outputChannels);
+        deferred.Resolve(result);
     }
 
     void OnError(const Napi::Error &e)
@@ -450,6 +623,11 @@ private:
     std::vector<int32_t> bandStepLog2s;
     int bandsPerOctave;
     double fminHz;
+    int64_t requestedStartFrame;
+    int64_t requestedEndFrame;
+    int64_t requestedStartBand;
+    int64_t requestedEndBand;
+    std::vector<std::vector<float>> existingAudio;
 
     // Results
     std::vector<std::vector<float>> audioChannels;
@@ -459,9 +637,9 @@ Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
 {
     Napi::Env env = info.Env();
 
-    if (info.Length() < 5 || !info[0].IsTypedArray() || !info[1].IsObject() || !info[2].IsNumber() || !info[3].IsObject() || !info[4].IsBoolean())
+    if (info.Length() < 6 || !info[0].IsTypedArray() || !info[1].IsObject() || !info[2].IsNumber() || !info[3].IsObject() || !info[4].IsBoolean() || !info[5].IsArray())
     {
-        Napi::TypeError::New(env, "Expected: data (TypedArray), analysisObject (Object), sampleRate (Number), params (Object), normalize (Boolean)").ThrowAsJavaScriptException();
+        Napi::TypeError::New(env, "Expected: data (TypedArray), analysisObject (Object), sampleRate (Number), params (Object), normalize (Boolean), existingAudio (Array), [startFrame], [endFrame], [startBand], [endBand]").ThrowAsJavaScriptException();
         return env.Null();
     }
 
@@ -470,6 +648,30 @@ Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
     double sampleRate = info[2].As<Napi::Number>().DoubleValue();
     Napi::Object paramsJs = info[3].As<Napi::Object>();
     bool normalize = info[4].As<Napi::Boolean>().Value();
+    Napi::Array existingAudioJs = info[5].As<Napi::Array>();
+
+    // Optional start/end frame and band for partial synthesis (-1 means full range)
+    int64_t startFrame = -1;
+    int64_t endFrame = -1;
+    int64_t startBand = -1;
+    int64_t endBand = -1;
+
+    if (info.Length() > 6 && info[6].IsNumber())
+    {
+        startFrame = info[6].As<Napi::Number>().Int64Value();
+    }
+    if (info.Length() > 7 && info[7].IsNumber())
+    {
+        endFrame = info[7].As<Napi::Number>().Int64Value();
+    }
+    if (info.Length() > 8 && info[8].IsNumber())
+    {
+        startBand = info[8].As<Napi::Number>().Int64Value();
+    }
+    if (info.Length() > 9 && info[9].IsNumber())
+    {
+        endBand = info[9].As<Napi::Number>().Int64Value();
+    }
 
     if (!paramsJs.Has("bandsPerOctave") || !paramsJs.Get("bandsPerOctave").IsNumber())
     {
@@ -482,7 +684,7 @@ Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
         return env.Null();
     }
 
-    SynthesizeWorker *worker = new SynthesizeWorker(env, inputDataJs, analysisObj, sampleRate, paramsJs, normalize);
+    SynthesizeWorker *worker = new SynthesizeWorker(env, inputDataJs, analysisObj, sampleRate, paramsJs, normalize, existingAudioJs, startFrame, endFrame, startBand, endBand);
     worker->Queue();
     return worker->GetPromise();
 }

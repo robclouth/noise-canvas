@@ -354,6 +354,8 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
   // Helper to finish a stroke - used by both handleCanvasMouseUp and window mouseup
   const finishStroke = useCallback(async () => {
     if (!isStrokingRef.current) return;
+    const strokeFinishStart = performance.now();
+    console.log("[timing] finishStroke started");
     isStrokingRef.current = false;
 
     const state = useStore.getState();
@@ -368,6 +370,7 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
     rendererRef.current?.endStroke();
 
     strokeTimeRangeRef.current = { min: null, max: null };
+    console.log(`[timing] finishStroke total: ${(performance.now() - strokeFinishStart).toFixed(2)}ms`);
   }, []);
 
   // Window-level event listeners to handle mouse movements and releases outside the file view

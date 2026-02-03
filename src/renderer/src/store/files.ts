@@ -22,6 +22,7 @@ export interface FilesState {
   synthesizeFile: (
     fileId: string,
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
+    prefetchedFboData?: Float32Array,
   ) => Promise<void>;
   mostRecentBpm: number | null;
   setMostRecentBpm: (bpm: number) => void;
@@ -505,7 +506,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   synthesizeFile: async (
     fileId: string,
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
+    prefetchedFboData?: Float32Array,
   ) => {
+    const synthesizeFileStart = performance.now();
+    console.log("[timing] synthesizeFile started");
+
     const { normalize, activeFileId, bandsPerOctave, minFreq, isPlaying, getPlayer, setFileSynthesizing } = get();
     if (!activeFileId) return;
 
@@ -518,9 +523,19 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       setFileSynthesizing(fileId, true);
 
       const originalAnalysis = file.spectrogramData;
+      const renderer = file.rendererRef.current;
 
-      // Assemble the payload for the main process
-      const fboData = await file.rendererRef.current.getFBOData();
+      // Use prefetched FBO data if provided, otherwise fetch it
+      let fboData: Float32Array;
+      if (prefetchedFboData) {
+        console.log("[timing] using prefetched FBO data");
+        fboData = prefetchedFboData;
+      } else {
+        const fboStart = performance.now();
+        fboData = await renderer.getFBOData();
+        console.log(`[timing] getFBOData (for synthesis): ${(performance.now() - fboStart).toFixed(2)}ms`);
+      }
+
       const payload = {
         processedData: fboData.buffer,
         analysisMetadata: {
@@ -538,35 +553,88 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         minFreq: minFreq,
       };
 
-      const synthesisStart = performance.now();
-
       const processedDataArray = new Float32Array(
         payload.processedData,
         0,
         payload.processedData.byteLength / Float32Array.BYTES_PER_ELEMENT,
       );
 
-      const audioBufferChannels = await window.audioAnalysis.synthesize(
-        processedDataArray,
-        payload.analysisMetadata,
-        originalAnalysis.sampleRate,
-        analysisParams,
-        normalize,
-      );
+      // Check for dirty region to enable partial synthesis optimization
+      const dirtyRegionStart = performance.now();
+      const dirtyRegion = renderer.getDirtyRegion();
+      console.log(`[timing] getDirtyRegion: ${(performance.now() - dirtyRegionStart).toFixed(2)}ms`);
 
-      const synthesisTime = performance.now() - synthesisStart;
-      console.log("Synthesis took:", synthesisTime.toFixed(2), "ms");
+      const existingBuffer = file.audioBuffer;
+      const canDoPartialSynthesis = dirtyRegion && existingBuffer;
+      console.log("[timing] canDoPartialSynthesis:", canDoPartialSynthesis);
 
-      const numChannels = audioBufferChannels.length;
-      const numFrames = audioBufferChannels[0].length;
+      let startFrame: number | undefined;
+      let endFrame: number | undefined;
+      let startBand: number | undefined;
+      let endBand: number | undefined;
+      let existingAudio: Float32Array[] | undefined;
 
+      if (canDoPartialSynthesis) {
+        // Convert UV coordinates to sample frames
+        startFrame = Math.max(0, Math.floor(dirtyRegion.startX * originalAnalysis.numFrames));
+        endFrame = Math.min(originalAnalysis.numFrames, Math.ceil(dirtyRegion.endX * originalAnalysis.numFrames));
+
+        // Convert UV Y coordinates to band numbers (Y=0 is lowest freq, Y=1 is highest)
+        startBand = Math.max(0, Math.floor(dirtyRegion.startY * originalAnalysis.numBands));
+        endBand = Math.min(originalAnalysis.numBands, Math.ceil(dirtyRegion.endY * originalAnalysis.numBands));
+
+        // Extract existing audio channels for crossfade splicing in C++
+        const extractStart = performance.now();
+        existingAudio = [];
+        for (let i = 0; i < existingBuffer.numberOfChannels; i++) {
+          existingAudio.push(existingBuffer.getChannelData(i));
+        }
+        console.log(`[timing] extract existing audio channels: ${(performance.now() - extractStart).toFixed(2)}ms`);
+
+        console.log("[timing] Partial synthesis range:", { startFrame, endFrame, startBand, endBand });
+      }
+
+      let synthesisResult;
+      const cppSynthStart = performance.now();
+      try {
+        synthesisResult = await window.audioAnalysis.synthesize(
+          processedDataArray,
+          payload.analysisMetadata,
+          originalAnalysis.sampleRate,
+          analysisParams,
+          normalize,
+          existingAudio,
+          startFrame,
+          endFrame,
+          startBand,
+          endBand,
+        );
+      } catch (synthError) {
+        console.error("[timing] Synthesis failed:", synthError);
+        throw synthError;
+      }
+      const isPartial = startFrame !== undefined;
+      console.log(`[timing] C++ synthesis: ${(performance.now() - cppSynthStart).toFixed(2)}ms` + (isPartial ? " (partial)" : " (full)"));
+
+      if (!synthesisResult || !synthesisResult.channels) {
+        console.error("[timing] Invalid synthesis result:", synthesisResult);
+        throw new Error("Synthesis returned invalid result");
+      }
+
+      // Clear dirty region after synthesis
+      renderer.clearDirtyRegion();
+
+      // C++ now returns the full buffer (with crossfade splice done internally)
+      const audioBufferStart = performance.now();
+      const numChannels = synthesisResult.channels.length;
+      const numFrames = synthesisResult.channels[0].length;
       const audioContext = Tone.getContext().rawContext;
       const audioBuffer = audioContext.createBuffer(numChannels, numFrames, originalAnalysis.sampleRate);
       for (let i = 0; i < numChannels; i++) {
-        const channelBuffer = audioBufferChannels[i];
-
+        const channelBuffer = synthesisResult.channels[i];
         audioBuffer.copyToChannel(channelBuffer as Float32Array<ArrayBuffer>, i);
       }
+      console.log(`[timing] create AudioBuffer: ${(performance.now() - audioBufferStart).toFixed(2)}ms`);
 
       // Mark file as dirty if it's not the first synthesis
       get().setFileDirty(fileId, file.audioBuffer !== undefined);
@@ -575,6 +643,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
       if (autoPlaybackParams) {
         // --- Handle auto-playback of the painted region ---
+        const autoPlayStart = performance.now();
         const { startTimeSeconds, endTimeSeconds } = autoPlaybackParams;
 
         // If already playing, stop it first. togglePlayback is async.
@@ -588,8 +657,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
         // Now, toggle playback ON. It will use the start/end times we just set.
         await get().togglePlayback();
+        console.log(`[timing] auto-playback setup: ${(performance.now() - autoPlayStart).toFixed(2)}ms`);
       } else if (isPlaying && activeFileId === fileId) {
         // --- Handle standard buffer hot-swap while playing ---
+        const bufferSwapStart = performance.now();
         const player = getPlayer();
         const t = get().getPlaybackTime(); // Get time BEFORE swapping
 
@@ -599,8 +670,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         // Use setPlaybackTime to correctly restart the player from the same spot
         // with the new buffer and correct loop settings.
         get().setPlaybackTime(t);
+        console.log(`[timing] buffer hot-swap: ${(performance.now() - bufferSwapStart).toFixed(2)}ms`);
       }
       // If not playing and not auto-playing, do nothing. The new buffer is ready for the next time the user hits play.
+      console.log(`[timing] synthesizeFile total: ${(performance.now() - synthesizeFileStart).toFixed(2)}ms`);
     } catch (error) {
       console.error("Error running synthesis:", error);
     } finally {

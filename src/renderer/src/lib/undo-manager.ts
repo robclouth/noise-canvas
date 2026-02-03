@@ -35,6 +35,7 @@ class UndoManager {
   }
 
   async addState(data: Float32Array, fileId: string) {
+    const addStateStart = performance.now();
     await this.init();
     if (!this.tempDir || !window.nodeFs || !window.nodePath) {
       console.error("Undo manager not properly initialized");
@@ -59,9 +60,14 @@ class UndoManager {
       const extension = ".bin";
       const dataPath = window.nodePath.join(this.tempDir, `state-${timestamp}${extension}`);
 
+      const bufferStart = performance.now();
       const buffer = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+      console.log(`[timing] undo Buffer.from: ${(performance.now() - bufferStart).toFixed(2)}ms (${(data.byteLength / 1024 / 1024).toFixed(2)} MB)`);
+
+      const writeStart = performance.now();
       const dataToWrite = buffer;
       await window.nodeFs.writeFile(dataPath, dataToWrite);
+      console.log(`[timing] undo writeFile: ${(performance.now() - writeStart).toFixed(2)}ms`);
 
       this.timeline.push({ dataPath, fileId, compressed: false });
       this.head++;
@@ -79,7 +85,7 @@ class UndoManager {
         this.head--;
       }
 
-      console.log(`Undo state added for ${fileId}, history size: ${this.timeline.length}, head: ${this.head}`);
+      console.log(`[timing] undo addState total: ${(performance.now() - addStateStart).toFixed(2)}ms, history size: ${this.timeline.length}`);
       this.notifyStateChange();
     } catch (error) {
       console.error("Failed to add undo state:", error);
