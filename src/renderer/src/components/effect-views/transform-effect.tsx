@@ -1,9 +1,10 @@
 import { EFFECT_COLORS } from "@renderer/lib/constants";
+import { memo } from "react";
 import { ParameterControl } from "../controls/parameter-control";
 
 const COLOR = EFFECT_COLORS.transform;
 
-export const TransformEffect = () => {
+export const TransformEffect = memo(function TransformEffect() {
   return (
     <>
       <ParameterControl paramKey="transformShiftBeats" color={COLOR} />
@@ -14,4 +15,4 @@ export const TransformEffect = () => {
       <ParameterControl paramKey="transformEdgeMode" color={COLOR} />
     </>
   );
-};
+});

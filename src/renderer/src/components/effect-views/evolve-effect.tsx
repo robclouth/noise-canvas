@@ -1,9 +1,10 @@
 import { EFFECT_COLORS } from "@renderer/lib/constants";
+import { memo } from "react";
 import { ParameterControl } from "../controls/parameter-control";
 
 const COLOR = EFFECT_COLORS.evolve;
 
-export const EvolveEffect = () => {
+export const EvolveEffect = memo(function EvolveEffect() {
   return (
     <>
       <ParameterControl paramKey="evolveFlow" color={COLOR} />
@@ -18,4 +19,4 @@ export const EvolveEffect = () => {
       <ParameterControl paramKey="evolveEdgeMode" color={COLOR} />
     </>
   );
-};
+});

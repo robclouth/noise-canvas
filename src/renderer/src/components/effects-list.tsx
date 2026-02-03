@@ -6,6 +6,7 @@ import { EffectItem, EffectType } from "@renderer/effects/types";
 import { EFFECT_COLORS } from "@renderer/lib/constants";
 import { getEffectParameterDefaults } from "@renderer/parameters";
 import { Plus } from "lucide-react";
+import { memo, useCallback, useMemo } from "react";
 import { EffectProvider } from "../contexts/effect-context";
 import { EffectSection } from "./effect-section";
 import { BlurEffect } from "./effect-views/blur-effect";
@@ -74,20 +75,32 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
 const MAX_EFFECTS = 10;
 
 export function EffectsList() {
-  const effects = useStore(selectParameter("effects")) as EffectItem[];
+  // Subscribe to effects - memoized children prevent cascading re-renders
+  const effects = useStore((state) => selectParameter("effects")(state)) as EffectItem[];
   const setParameter = useStore((state) => state.setParameter);
 
-  const handleDragEnd = (result: { destination?: { index: number } | null; source: { index: number } }) => {
-    if (!result.destination) return;
+  // Derive structural data for rendering
+  const effectStructures = useMemo(
+    () => effects.map(({ id, effect, enabled }) => ({ id, effect, enabled })),
+    [effects],
+  );
 
-    const items = [...effects];
-    const [reorderedItem] = items.splice(result.source.index, 1);
-    items.splice(result.destination.index, 0, reorderedItem);
+  const handleDragEnd = useCallback(
+    (result: { destination?: { index: number } | null; source: { index: number } }) => {
+      if (!result.destination) return;
 
-    setParameter("effects", items);
-  };
+      const state = useStore.getState();
+      const currentEffects = getParameterValue(state, "effects") as EffectItem[];
+      const items = [...currentEffects];
+      const [reorderedItem] = items.splice(result.source.index, 1);
+      items.splice(result.destination.index, 0, reorderedItem);
 
-  const handleAddEffect = () => {
+      setParameter("effects", items);
+    },
+    [setParameter],
+  );
+
+  const handleAddEffect = useCallback(() => {
     openContextModal({
       modal: "addEffect",
       title: "Add Effect",
@@ -105,60 +118,50 @@ export function EffectsList() {
         },
       },
     });
-  };
+  }, [setParameter]);
 
-  const handleRemoveEffect = (id: string) => {
-    const state = useStore.getState();
-    const currentEffects = getParameterValue(state, "effects") as EffectItem[];
-    setParameter(
-      "effects",
-      currentEffects.filter((item) => item.id !== id),
-    );
-  };
+  const handleRemoveEffect = useCallback(
+    (id: string) => {
+      const state = useStore.getState();
+      const currentEffects = getParameterValue(state, "effects") as EffectItem[];
+      setParameter(
+        "effects",
+        currentEffects.filter((item) => item.id !== id),
+      );
+    },
+    [setParameter],
+  );
+
+  const handleEnabledChange = useCallback(
+    (id: string, newEnabled: boolean) => {
+      const state = useStore.getState();
+      const currentEffects = getParameterValue(state, "effects") as EffectItem[];
+      setParameter(
+        "effects",
+        currentEffects.map((item) => (item.id === id ? { ...item, enabled: newEnabled } : item)),
+      );
+    },
+    [setParameter],
+  );
 
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
       <Droppable droppableId="effects">
         {(provided) => (
           <Stack gap={0} {...provided.droppableProps} ref={provided.innerRef}>
-            {effects.map(({ id, effect, enabled }, index) => (
-              <Draggable key={id} draggableId={id} index={index}>
-                {(provided, snapshot) => (
-                  <Box
-                    ref={provided.innerRef}
-                    {...provided.draggableProps}
-                    py={6}
-                    style={{
-                      ...provided.draggableProps.style,
-                      ...(snapshot.isDragging && {
-                        boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)",
-                      }),
-                    }}
-                  >
-                    <EffectSection
-                      label={EFFECT_LABELS[effect] || effect}
-                      description={EFFECT_DESCRIPTIONS[effect] || ""}
-                      enabled={enabled}
-                      onEnabledChange={(newEnabled) =>
-                        setParameter(
-                          "effects",
-                          effects.map((item, i) => (i === index ? { ...item, enabled: newEnabled } : item)),
-                        )
-                      }
-                      onRemove={() => handleRemoveEffect(id)}
-                      dragHandleProps={provided.dragHandleProps}
-                      color={EFFECT_COLORS[effect] || "gray"}
-                      parameterKeys={EFFECT_PARAMS[effect]}
-                      effectId={id}
-                    >
-                      <EffectProvider effectId={id}>{EFFECT_COMPONENTS[effect] || null}</EffectProvider>
-                    </EffectSection>
-                  </Box>
-                )}
-              </Draggable>
+            {effectStructures.map(({ id, effect, enabled }, index) => (
+              <EffectListItem
+                key={id}
+                id={id}
+                effect={effect}
+                enabled={enabled}
+                index={index}
+                onEnabledChange={handleEnabledChange}
+                onRemove={handleRemoveEffect}
+              />
             ))}
             {provided.placeholder}
-            {effects.length < MAX_EFFECTS && (
+            {effectStructures.length < MAX_EFFECTS && (
               <Box py={6}>
                 <Button
                   variant="subtle"
@@ -178,3 +181,59 @@ export function EffectsList() {
     </DragDropContext>
   );
 }
+
+// Memoized individual effect item to prevent re-renders when other effects change
+const EffectListItem = memo(function EffectListItem({
+  id,
+  effect,
+  enabled,
+  index,
+  onEnabledChange,
+  onRemove,
+}: {
+  id: string;
+  effect: EffectType;
+  enabled: boolean;
+  index: number;
+  onEnabledChange: (id: string, enabled: boolean) => void;
+  onRemove: (id: string) => void;
+}) {
+  const handleEnabledChange = useCallback(
+    (newEnabled: boolean) => onEnabledChange(id, newEnabled),
+    [id, onEnabledChange],
+  );
+
+  const handleRemove = useCallback(() => onRemove(id), [id, onRemove]);
+
+  return (
+    <Draggable draggableId={id} index={index}>
+      {(provided, snapshot) => (
+        <Box
+          ref={provided.innerRef}
+          {...provided.draggableProps}
+          py={6}
+          style={{
+            ...provided.draggableProps.style,
+            ...(snapshot.isDragging && {
+              boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)",
+            }),
+          }}
+        >
+          <EffectSection
+            label={EFFECT_LABELS[effect] || effect}
+            description={EFFECT_DESCRIPTIONS[effect] || ""}
+            enabled={enabled}
+            onEnabledChange={handleEnabledChange}
+            onRemove={handleRemove}
+            dragHandleProps={provided.dragHandleProps}
+            color={EFFECT_COLORS[effect] || "gray"}
+            parameterKeys={EFFECT_PARAMS[effect]}
+            effectId={id}
+          >
+            <EffectProvider effectId={id}>{EFFECT_COMPONENTS[effect] || null}</EffectProvider>
+          </EffectSection>
+        </Box>
+      )}
+    </Draggable>
+  );
+});

@@ -1,9 +1,10 @@
 import { EFFECT_COLORS } from "@renderer/lib/constants";
+import { memo } from "react";
 import { ParameterControl } from "../controls/parameter-control";
 
 const COLOR = EFFECT_COLORS.overtones;
 
-export const HarmonicsEffect = () => {
+export const HarmonicsEffect = memo(function HarmonicsEffect() {
   return (
     <>
       <ParameterControl paramKey="overtonesCount" color={COLOR} />
@@ -12,4 +13,4 @@ export const HarmonicsEffect = () => {
       <ParameterControl paramKey="overtonesShape" color={COLOR} />
     </>
   );
-};
+});

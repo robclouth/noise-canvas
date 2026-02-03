@@ -1,9 +1,10 @@
 import { EFFECT_COLORS } from "@renderer/lib/constants";
+import { memo } from "react";
 import { ParameterControl } from "../controls/parameter-control";
 
 const COLOR = EFFECT_COLORS.blur;
 
-export const BlurEffect = () => {
+export const BlurEffect = memo(function BlurEffect() {
   return (
     <>
       <ParameterControl paramKey="blurAmountTime" color={COLOR} />
@@ -14,4 +15,4 @@ export const BlurEffect = () => {
       <ParameterControl paramKey="blurOrigin" color={COLOR} />
     </>
   );
-};
+});
