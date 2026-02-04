@@ -1,3 +1,4 @@
+import { binauralEffect } from "./binaural-effect";
 import { blurEffect } from "./blur-effect";
 import { dynamicsEffect } from "./dynamics-effect";
 import { evolveEffect } from "./evolve-effect";
@@ -18,4 +19,5 @@ export const effects = {
   synthesize: synthesizeEffect,
   evolve: evolveEffect,
   passthrough: passThroughEffect,
+  binaural: binauralEffect,
 };

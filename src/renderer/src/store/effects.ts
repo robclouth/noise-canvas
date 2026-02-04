@@ -37,6 +37,9 @@ export interface EffectsState {
   evolveScaleX: number;
   evolveScaleY: number;
   evolveEdgeMode: number;
+  binauralAzimuth: number;
+  binauralDistance: number;
+  binauralStereoAngle: number;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -87,5 +90,10 @@ export const createEffectsSlice = (): EffectsState => {
     evolveScaleX: getParameterDef("evolveScaleX").default,
     evolveScaleY: getParameterDef("evolveScaleY").default,
     evolveEdgeMode: getParameterDef("evolveEdgeMode").default,
+
+    // ---------------- Binaural ----------------
+    binauralAzimuth: getParameterDef("binauralAzimuth").default,
+    binauralDistance: getParameterDef("binauralDistance").default,
+    binauralStereoAngle: getParameterDef("binauralStereoAngle").default,
   };
 };

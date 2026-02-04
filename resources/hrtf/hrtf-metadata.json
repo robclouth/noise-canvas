@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "source": "MIT KEMAR (normal pinna)",
+  "sourceUrl": "https://sofacoustics.org/data/database/mit/mit_kemar_normal_pinna.sofa",
+  "sampleRate": 44100,
+  "fftSize": 512,
+  "elevation": 0,
+  "azimuthMin": -180,
+  "azimuthMax": 180,
+  "numAzimuths": 360,
+  "numFrequencyBands": 359,
+  "minFreq": 20,
+  "maxFreq": 20000,
+  "bandsPerOctave": 36,
+  "textureWidth": 360,
+  "textureHeight": 359,
+  "magnitudeRange": {
+    "min": 0.0075014970117191,
+    "max": 2.8117091020119758
+  },
+  "diffuseFieldEqualized": true
+}

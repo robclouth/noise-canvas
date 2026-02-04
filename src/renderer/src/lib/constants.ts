@@ -185,4 +185,5 @@ export const EFFECT_COLORS: Record<string, string> = {
   blur: "green",
   synthesize: "violet",
   evolve: "cyan",
+  binaural: "pink",
 };

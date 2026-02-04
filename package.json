@@ -72,6 +72,7 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "immer": "^10.1.3",
+    "jsfive": "^0.4.0",
     "lodash-es": "^4.17.21",
     "lucide-react": "^0.542.0",
     "lygia": "^1.3.3",

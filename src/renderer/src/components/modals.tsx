@@ -77,6 +77,7 @@ const EFFECT_LABELS: Record<string, string> = {
   blur: "Smooth",
   synthesize: "Synthesize",
   evolve: "Evolve",
+  binaural: "Binaural",
 };
 
 const EFFECT_DESCRIPTIONS: Record<string, string> = {
@@ -86,6 +87,7 @@ const EFFECT_DESCRIPTIONS: Record<string, string> = {
   blur: "Smooth and blend frequencies over time and pitch for softer transitions.",
   synthesize: "Generate new audio content from scratch (noise, sine waves, etc.).",
   evolve: "Reaction-advection-diffusion simulation for fluid, biological, and chaotic patterns.",
+  binaural: "HRTF-based binaural spatialization for 3D audio positioning.",
 };
 
 const AVAILABLE_EFFECTS = EFFECT_KEYS.filter((key) => key !== "passthrough") as Exclude<EffectType, "passthrough">[];

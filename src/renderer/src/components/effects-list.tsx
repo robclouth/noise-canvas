@@ -9,6 +9,7 @@ import { Plus } from "lucide-react";
 import { memo, useCallback, useMemo } from "react";
 import { EffectProvider } from "../contexts/effect-context";
 import { EffectSection } from "./effect-section";
+import { BinauralEffect } from "./effect-views/binaural-effect";
 import { BlurEffect } from "./effect-views/blur-effect";
 import { DynamicsEffect } from "./effect-views/dynamics-effect";
 import { EvolveEffect } from "./effect-views/evolve-effect";
@@ -23,6 +24,7 @@ const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
   blur: <BlurEffect />,
   synthesize: <SynthesizeEffect />,
   evolve: <EvolveEffect />,
+  binaural: <BinauralEffect />,
 };
 
 const EFFECT_LABELS: Record<string, string> = {
@@ -32,6 +34,7 @@ const EFFECT_LABELS: Record<string, string> = {
   blur: "Smooth",
   synthesize: "Synthesize",
   evolve: "Evolve",
+  binaural: "Binaural",
 };
 
 const EFFECT_DESCRIPTIONS: Record<string, string> = {
@@ -41,6 +44,7 @@ const EFFECT_DESCRIPTIONS: Record<string, string> = {
   blur: "Smooth and blend frequencies over time and pitch for softer transitions.",
   synthesize: "Generate new audio content from scratch (noise, sine waves, etc.).",
   evolve: "Reaction-advection-diffusion simulation for fluid, biological, and chaotic patterns.",
+  binaural: "HRTF-based binaural spatialization. Use pitch modulation on azimuth for per-band positioning.",
 };
 
 import { ParameterKey } from "@/store/types";
@@ -70,6 +74,7 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
     "evolveScaleY",
     "evolveEdgeMode",
   ],
+  binaural: ["binauralAzimuth", "binauralDistance", "binauralStereoAngle"],
 };
 
 const MAX_EFFECTS = 10;

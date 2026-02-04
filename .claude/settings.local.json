@@ -25,7 +25,12 @@
       "Bash(npx playwright test:*)",
       "Bash(npx @electron/fuses:*)",
       "Bash(\"/Users/rob/Documents/Projects/Music/Tools/noise-canvas/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron\" --help)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(npx tsx:*)",
+      "Bash(npm search:*)",
+      "WebFetch(domain:sofacoustics.org)",
+      "Bash(npm info:*)",
+      "WebFetch(domain:sound.media.mit.edu)"
     ]
   }
 }
