@@ -70,7 +70,9 @@ const ALL_EFFECT_PARAMS: ParameterKey[] = [
   "blurAmountPitch",
   "blurNoiseTime",
   "blurNoisePitch",
-  "blurBleed",
+  "blurSamplesX",
+  "blurSamplesY",
+  "blurEdgeMode",
   "blurOrigin",
   "synthesizeBrushType",
 ];

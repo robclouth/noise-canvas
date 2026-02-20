@@ -31,7 +31,7 @@ const EFFECT_LABELS: Record<string, string> = {
   dynamics: "Dynamics",
   transform: "Transform",
   overtones: "Overtones",
-  blur: "Smooth",
+  blur: "Blur",
   synthesize: "Synthesize",
   evolve: "Evolve",
   binaural: "Binaural",
@@ -60,7 +60,7 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
     "transformEdgeMode",
   ],
   overtones: ["overtonesCount", "overtonesScale", "overtonesDecay", "overtonesShape"],
-  blur: ["blurAmountTime", "blurAmountPitch", "blurNoiseTime", "blurNoisePitch", "blurBleed", "blurOrigin"],
+  blur: ["blurAmountTime", "blurAmountPitch", "blurNoiseTime", "blurNoisePitch", "blurSamplesX", "blurSamplesY", "blurEdgeMode", "blurOrigin"],
   synthesize: ["synthesizeBrushType"],
   evolve: [
     "evolveFlow",

@@ -11,72 +11,7 @@ uniform Parameter evolveScaleX;
 uniform Parameter evolveScaleY;
 uniform int evolveEdgeMode;
 
-// Apply edge mode to a source UV coordinate
-// Returns the transformed UV and flags for silence/invert
-vec2 applyEvolveEdgeMode(vec2 sourceUv, out bool useZero, out bool invertSample) {
-    useZero = false;
-    invertSample = false;
-
-    // Calculate position relative to source brush (including sourceOffset)
-    vec2 sourceBrushBottomLeft = brushBottomLeftUv + vec2(sourceOffsetX, sourceOffsetY);
-    vec2 localUv = sourceUv - sourceBrushBottomLeft;
-    vec2 safeSize = max(brushSizeUv, vec2(1e-6));
-
-    // Check if inside brush bounds
-    bool insideBrush = (brushSizeUv.x == 0.0 || (localUv.x >= 0.0 && localUv.x < brushSizeUv.x)) &&
-                       (brushSizeUv.y == 0.0 || (localUv.y >= 0.0 && localUv.y < brushSizeUv.y));
-
-    if (insideBrush) {
-        return sourceUv;
-    }
-
-    if (evolveEdgeMode == 0) {
-        // Cut: return zero for out of bounds
-        useZero = true;
-        return sourceUv;
-    } else if (evolveEdgeMode == 1) {
-        // Bleed: sample beyond brush bounds (no change)
-        return sourceUv;
-    } else if (evolveEdgeMode == 2) {
-        // Wrap: tile within brush bounds
-        vec2 wrappedLocal = fract(localUv / safeSize) * safeSize;
-        return sourceBrushBottomLeft + wrappedLocal;
-    } else if (evolveEdgeMode == 3) {
-        // Clamp: sample from nearest edge position (no-flux boundary)
-        vec2 clampedLocal = clamp(localUv, vec2(0.0), safeSize - vec2(1e-6));
-        return sourceBrushBottomLeft + clampedLocal;
-    } else if (evolveEdgeMode == 4) {
-        // Reflect: single reflection at boundary, then clamp
-        vec2 reflected = localUv;
-        if (localUv.x < 0.0) reflected.x = -localUv.x;
-        else if (localUv.x >= safeSize.x) reflected.x = 2.0 * safeSize.x - localUv.x - 1e-6;
-        if (localUv.y < 0.0) reflected.y = -localUv.y;
-        else if (localUv.y >= safeSize.y) reflected.y = 2.0 * safeSize.y - localUv.y - 1e-6;
-        reflected = clamp(reflected, vec2(0.0), safeSize - vec2(1e-6));
-        return sourceBrushBottomLeft + reflected;
-    } else if (evolveEdgeMode == 5) {
-        // Invert: sample beyond bounds but negate the result (creates interference)
-        invertSample = true;
-        return sourceUv;
-    }
-
-    return sourceUv;
-}
-
-// Sample with edge mode handling
-vec4 sampleWithEdgeMode(vec2 sourceUv, vec2 destUv, float offsetX, float offsetY) {
-    bool useZero, invertSample;
-    vec2 edgeUv = applyEvolveEdgeMode(sourceUv, useZero, invertSample);
-    if (useZero) {
-        return vec4(0.0);
-    }
-    vec4 result = getTransformedSample(edgeUv, destUv, 1.0, 1.0, offsetX, offsetY);
-    if (invertSample) {
-        // Negate sample (flips phase by 180°, creates interference patterns)
-        return -result;
-    }
-    return result;
-}
+#include "edge-mode.glsl"
 
 void main() {
     ProcessingUvs coords = getProcessingUvs(vUv);
@@ -105,11 +40,11 @@ void main() {
     float offsetY = abs(scaleY) * 0.05;
 
     // Sample neighborhood with edge mode handling
-    vec4 center = sampleWithEdgeMode(coords.source, coords.dest, sourceOffsetX, sourceOffsetY);
-    vec4 left = sampleWithEdgeMode(coords.source + vec2(-offsetX, 0.0), coords.dest, sourceOffsetX - offsetX, sourceOffsetY);
-    vec4 right = sampleWithEdgeMode(coords.source + vec2(offsetX, 0.0), coords.dest, sourceOffsetX + offsetX, sourceOffsetY);
-    vec4 up = sampleWithEdgeMode(coords.source + vec2(0.0, offsetY), coords.dest, sourceOffsetX, sourceOffsetY + offsetY);
-    vec4 down = sampleWithEdgeMode(coords.source + vec2(0.0, -offsetY), coords.dest, sourceOffsetX, sourceOffsetY - offsetY);
+    vec4 center = sampleWithEdgeMode(coords.source, coords.dest, sourceOffsetX, sourceOffsetY, evolveEdgeMode);
+    vec4 left = sampleWithEdgeMode(coords.source + vec2(-offsetX, 0.0), coords.dest, sourceOffsetX - offsetX, sourceOffsetY, evolveEdgeMode);
+    vec4 right = sampleWithEdgeMode(coords.source + vec2(offsetX, 0.0), coords.dest, sourceOffsetX + offsetX, sourceOffsetY, evolveEdgeMode);
+    vec4 up = sampleWithEdgeMode(coords.source + vec2(0.0, offsetY), coords.dest, sourceOffsetX, sourceOffsetY + offsetY, evolveEdgeMode);
+    vec4 down = sampleWithEdgeMode(coords.source + vec2(0.0, -offsetY), coords.dest, sourceOffsetX, sourceOffsetY - offsetY, evolveEdgeMode);
 
     // Calculate gradient (for advection) - based on magnitude differences
     vec2 gradientL = vec2(
@@ -135,8 +70,8 @@ void main() {
     // Advect: sample from upstream position with edge mode handling
     vec2 advectedUvL = coords.source - flowDirectionL * flow * 0.5;
     vec2 advectedUvR = coords.source - flowDirectionR * flow * 0.5;
-    vec4 advectedL = sampleWithEdgeMode(advectedUvL, coords.dest, sourceOffsetX - flowDirectionL.x * flow * 0.5, sourceOffsetY - flowDirectionL.y * flow * 0.5);
-    vec4 advectedR = sampleWithEdgeMode(advectedUvR, coords.dest, sourceOffsetX - flowDirectionR.x * flow * 0.5, sourceOffsetY - flowDirectionR.y * flow * 0.5);
+    vec4 advectedL = sampleWithEdgeMode(advectedUvL, coords.dest, sourceOffsetX - flowDirectionL.x * flow * 0.5, sourceOffsetY - flowDirectionL.y * flow * 0.5, evolveEdgeMode);
+    vec4 advectedR = sampleWithEdgeMode(advectedUvR, coords.dest, sourceOffsetX - flowDirectionR.x * flow * 0.5, sourceOffsetY - flowDirectionR.y * flow * 0.5, evolveEdgeMode);
 
     // Diffuse: Laplacian (neighbor average - center)
     float neighborAvgL = (getMag(left.rg) + getMag(right.rg) + getMag(up.rg) + getMag(down.rg)) / 4.0;

@@ -21,7 +21,9 @@ export interface EffectsState {
   blurAmountPitch: number;
   blurNoiseTime: number;
   blurNoisePitch: number;
-  blurBleed: boolean;
+  blurSamplesX: number;
+  blurSamplesY: number;
+  blurEdgeMode: number;
   blurOrigin: number;
   overtonesCount: number;
   overtonesScale: number;
@@ -40,6 +42,10 @@ export interface EffectsState {
   binauralAzimuth: number;
   binauralDistance: number;
   binauralStereoAngle: number;
+  sortDirection: number;
+  sortOrder: number;
+  sortBy: number;
+  sortStereoMode: number;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -67,7 +73,9 @@ export const createEffectsSlice = (): EffectsState => {
     blurAmountPitch: getParameterDef("blurAmountPitch").default,
     blurNoiseTime: getParameterDef("blurNoiseTime").default,
     blurNoisePitch: getParameterDef("blurNoisePitch").default,
-    blurBleed: getParameterDef("blurBleed").default,
+    blurSamplesX: getParameterDef("blurSamplesX").default,
+    blurSamplesY: getParameterDef("blurSamplesY").default,
+    blurEdgeMode: getParameterDef("blurEdgeMode").default,
     blurOrigin: getParameterDef("blurOrigin").default,
 
     // ---------------- Overtones ----------------
@@ -95,5 +103,11 @@ export const createEffectsSlice = (): EffectsState => {
     binauralAzimuth: getParameterDef("binauralAzimuth").default,
     binauralDistance: getParameterDef("binauralDistance").default,
     binauralStereoAngle: getParameterDef("binauralStereoAngle").default,
+
+    // ---------------- Sort ----------------
+    sortDirection: getParameterDef("sortDirection").default,
+    sortOrder: getParameterDef("sortOrder").default,
+    sortBy: getParameterDef("sortBy").default,
+    sortStereoMode: getParameterDef("sortStereoMode").default,
   };
 };

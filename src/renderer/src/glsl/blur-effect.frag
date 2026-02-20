@@ -1,19 +1,14 @@
 #include "effect-common.glsl"
+#include "edge-mode.glsl"
 
 uniform Parameter blurSizeX;
 uniform Parameter blurSizeY;
 uniform Parameter blurNoiseX;
 uniform Parameter blurNoiseY;
 uniform vec2 blurDirection; // (1, 0) for horizontal, (0, 1) for vertical
-uniform bool bleed;
+uniform int blurEdgeMode;
+uniform int blurSampleCount;
 uniform int blurOrigin; // 0=left, 1=middle, 2=right
-
-const int KERNEL_RADIUS = 8;
-const int KERNEL_SIZE = KERNEL_RADIUS * 2 + 1;
-const float gaussianKernel[KERNEL_SIZE] = float[](
-    0.0009, 0.0028, 0.0075, 0.0177, 0.0371, 0.0685, 0.1112, 0.1585, 0.1993, 0.1585, 0.1112, 0.0685, 0.0371, 0.0177, 0.0075, 0.0028, 0.0009
-);
-
 
 void main() {
     ProcessingUvs coords = getProcessingUvs(vUv);
@@ -42,60 +37,56 @@ void main() {
 
     vec2 blurSizeUv = vec2(blurSizeXValue, blurSizeYValue);
 
-    for (int i = -KERNEL_RADIUS; i <= KERNEL_RADIUS; i++) {
-        // Determine actual offset and kernel index based on origin
-        int actualOffset;
-        int kernelIdx;
+    // radius = half the sample count; sigma scaled so 3-sigma covers the radius
+    int radius = blurSampleCount / 2;
+    float sigma = float(max(radius, 1)) / 3.0;
+
+    // Loop up to the max possible sample count (64), breaking early once all samples are processed
+    for (int s = 0; s < 64; s++) {
+        if (s >= blurSampleCount) break;
+
+        int i = s - radius;
+
+        if (blurOrigin == 0 && i > 0) continue; // Left: causal, no future samples
+        if (blurOrigin == 2 && i < 0) continue; // Right: anti-causal, no past samples
+
+        vec2 offset = blurDirection * float(i) * blurSizeUv / float(max(radius, 1));
         
-        if (blurOrigin == 0) { // Left origin - blur extends to the right
-            if (i > 0) continue; // Skip positive offsets
-            actualOffset = i;
-            kernelIdx = i + KERNEL_RADIUS; // Maps -8->0, 0->8
-        } else if (blurOrigin == 1) { // Middle origin - blur extends both ways (default)
-            actualOffset = i;
-            kernelIdx = i + KERNEL_RADIUS; // Maps -8->0, 0->8, 8->16
-        } else { // Right origin - blur extends to the left
-            if (i < 0) continue; // Skip negative offsets
-            actualOffset = i;
-            kernelIdx = i + KERNEL_RADIUS; // Maps 0->8, 1->9, ..., 8->16
-        }
-        
-        vec2 offset = blurDirection * float(actualOffset) * blurSizeUv / float(KERNEL_RADIUS);
-        
-        // Apply noise offset respecting the origin direction
+        // Noise offset direction follows origin mode
         float noiseRangeX, noiseRangeY;
-        if (blurOrigin == 0) { // Left origin - noise should only be negative
+        if (blurOrigin == 0) {
             noiseRangeX = -random(coords.dest) * blurNoiseXValue;
             noiseRangeY = -random(coords.dest) * blurNoiseYValue;
-        } else if (blurOrigin == 1) { // Middle origin - noise can be both directions
+        } else if (blurOrigin == 1) {
             noiseRangeX = (random(coords.dest) * 2.0 - 1.0) * blurNoiseXValue;
             noiseRangeY = (random(coords.dest) * 2.0 - 1.0) * blurNoiseYValue;
-        } else { // Right origin - noise should only be positive
+        } else {
             noiseRangeX = random(coords.dest) * blurNoiseXValue;
             noiseRangeY = random(coords.dest) * blurNoiseYValue;
         }
         vec2 noiseOffset = vec2(noiseRangeX, noiseRangeY) * blurDirection;
         vec2 sampleUv = coords.source + offset + noiseOffset;
+
+        // For Cut mode, skip out-of-bounds samples entirely (no weight contribution)
+        if (blurEdgeMode == 0 && !isInsideBrush(sampleUv)) continue;
+
+        vec2 totalShift = vec2(sourceOffsetX, sourceOffsetY) + offset + noiseOffset;
+        float fi = float(i);
+        float gaussWeight = exp(-0.5 * (fi / sigma) * (fi / sigma));
+        vec4 sampleTexel = sampleWithEdgeMode(sampleUv, coords.dest, totalShift.x, totalShift.y, blurEdgeMode);
+
+        blurredMagL += getMag(sampleTexel.rg) * gaussWeight;
+        blurredMagR += getMag(sampleTexel.ba) * gaussWeight;
         
-        if (bleed || isInsideBrush(sampleUv)) {
-            float weight = gaussianKernel[kernelIdx];
-            // Total shift from dest is sourceOffset + offset + noise
-            vec2 totalShift = vec2(sourceOffsetX, sourceOffsetY) + offset + noiseOffset;
-            vec4 sampleTexel = getTransformedSample(sampleUv, coords.dest, 1.0, 1.0, totalShift.x, totalShift.y);
-            
-            blurredMagL += getMag(sampleTexel.rg) * weight;
-            blurredMagR += getMag(sampleTexel.ba) * weight;
-            
-            float samplePhaseL = getPhase(sampleTexel.rg);
-            float deltaPhaseL = samplePhaseL - referencePhaseL;
-            blurredPhaseL += (referencePhaseL + unwrapPhase(deltaPhaseL)) * weight;
+        float samplePhaseL = getPhase(sampleTexel.rg);
+        float deltaPhaseL = samplePhaseL - referencePhaseL;
+        blurredPhaseL += (referencePhaseL + unwrapPhase(deltaPhaseL)) * gaussWeight;
 
-            float samplePhaseR = getPhase(sampleTexel.ba);
-            float deltaPhaseR = samplePhaseR - referencePhaseR;
-            blurredPhaseR += (referencePhaseR + unwrapPhase(deltaPhaseR)) * weight;
+        float samplePhaseR = getPhase(sampleTexel.ba);
+        float deltaPhaseR = samplePhaseR - referencePhaseR;
+        blurredPhaseR += (referencePhaseR + unwrapPhase(deltaPhaseR)) * gaussWeight;
 
-            totalWeight += weight;
-        }
+        totalWeight += gaussWeight;
     }
 
     vec4 resultTexel;

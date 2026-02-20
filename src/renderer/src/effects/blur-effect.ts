@@ -48,8 +48,11 @@ const uniforms = {
   blurDirection: {
     value: new Vector2(1, 0),
   },
-  bleed: {
-    value: true,
+  blurEdgeMode: {
+    value: 1,
+  },
+  blurSampleCount: {
+    value: 17,
   },
   blurOrigin: {
     value: 0,
@@ -96,7 +99,7 @@ class BlurEffect extends BaseEffect {
     if (!material) return;
 
     const state = props.state ?? useStore.getState();
-    const { blurAmountTime, blurAmountPitch, blurNoiseTime, blurNoisePitch, blurBleed, blurOrigin, filepathsBpm } =
+    const { blurAmountTime, blurAmountPitch, blurNoiseTime, blurNoisePitch, blurEdgeMode, blurSamplesX, blurSamplesY, blurOrigin, filepathsBpm } =
       state;
     const { spectrogramData, filePath } = file;
 
@@ -148,7 +151,8 @@ class BlurEffect extends BaseEffect {
       modulationAmounts: getModAmountValuesNormalized(state, "blurNoisePitch"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "blurNoisePitch"),
     };
-    material.uniforms.bleed.value = blurBleed;
+    material.uniforms.blurEdgeMode.value = blurEdgeMode;
+    material.uniforms.blurSampleCount.value = passIndex === 0 ? blurSamplesX : blurSamplesY;
     material.uniforms.blurOrigin.value = blurOrigin;
   }
 }

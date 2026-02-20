@@ -13,6 +13,7 @@ export const EFFECT_KEYS = [
   "evolve",
   "passthrough",
   "binaural",
+  "sort",
 ] as const;
 
 // Effect type derived from the keys

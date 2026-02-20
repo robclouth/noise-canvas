@@ -11,7 +11,9 @@ export const BlurEffect = memo(function BlurEffect() {
       <ParameterControl paramKey="blurAmountPitch" color={COLOR} />
       <ParameterControl paramKey="blurNoiseTime" color={COLOR} />
       <ParameterControl paramKey="blurNoisePitch" color={COLOR} />
-      <ParameterControl paramKey="blurBleed" color={COLOR} />
+      <ParameterControl paramKey="blurSamplesX" color={COLOR} />
+      <ParameterControl paramKey="blurSamplesY" color={COLOR} />
+      <ParameterControl paramKey="blurEdgeMode" color={COLOR} />
       <ParameterControl paramKey="blurOrigin" color={COLOR} />
     </>
   );
