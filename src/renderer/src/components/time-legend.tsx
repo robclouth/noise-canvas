@@ -1,9 +1,9 @@
 import { useStore } from "@/store";
 import { Box } from "@mantine/core";
 import { openFiles } from "@renderer/store/files";
-import { memo, MouseEventHandler, useCallback } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import { Vector2 } from "three";
-import { screenToZoomed } from "../lib/utils";
+import { screenToZoomed, zoomedToScreen } from "../lib/utils";
 
 interface TimeLegendProps {
   fileId: string;
@@ -22,60 +22,105 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
   const activeFileId = useStore((state) => state.activeFileId);
   const setPlaybackTime = useStore((state) => state.setPlaybackTime);
 
-  const handleClick: MouseEventHandler<HTMLDivElement> = useCallback(
-    async (event) => {
-      if (!file) return;
+  const legendRef = useRef<HTMLDivElement>(null);
+  const dragPreviewRef = useRef<HTMLDivElement>(null);
+  const dragStartTimeRef = useRef<number | null>(null);
+  const isDraggingRef = useRef(false);
 
-      const rect = event.currentTarget.getBoundingClientRect();
-      if (rect.width === 0) return;
-
-      const x = (event.clientX - rect.left) / rect.width;
-      const screenUv = new Vector2(x, 0.5);
-
-      // Convert from screen coordinates to zoomed coordinates
-      const uv = screenToZoomed(screenUv, zoom, offset);
-
+  const getTimeFromX = useCallback(
+    (clientX: number, rect: DOMRect): number => {
+      if (!file) return 0;
+      const x = (clientX - rect.left) / rect.width;
+      const uv = screenToZoomed(new Vector2(x, 0.5), zoom, offset);
       const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
-      let clickTime = uv.x * totalDuration;
-
-      // Snap to grid if enabled
+      let time = uv.x * totalDuration;
       if (gridSizeBeats > 0) {
         const gridIntervalSeconds = (60 / bpm) * gridSizeBeats;
-        clickTime = Math.round(clickTime / gridIntervalSeconds) * gridIntervalSeconds;
+        time = Math.round(time / gridIntervalSeconds) * gridIntervalSeconds;
       }
-
-      // Clamp to valid range
-      clickTime = Math.max(0, Math.min(clickTime, totalDuration));
-
-      // Set the playback start time for this file
-      setFilePlaybackStartTime(fileId, clickTime);
-
-      // Clear auto-playback end time since this is manual playback
-      useStore.getState().setAutoPlayEndTime(null);
-
-      // If this is the active file and already playing
-      if (activeFileId === fileId && isPlaying) {
-        setPlaybackTime(clickTime);
-      }
-      // If not playing, just start playing from this position
-      else if (activeFileId === fileId) {
-        await togglePlayback();
-      }
+      return Math.max(0, Math.min(time, totalDuration));
     },
-    [
-      fileId,
-      file,
-      zoom,
-      offset,
-      gridSizeBeats,
-      bpm,
-      setFilePlaybackStartTime,
-      togglePlayback,
-      isPlaying,
-      activeFileId,
-      setPlaybackTime,
-    ],
+    [file, zoom, offset, gridSizeBeats, bpm],
   );
+
+  const handleMouseDown = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      const rect = event.currentTarget.getBoundingClientRect();
+      dragStartTimeRef.current = getTimeFromX(event.clientX, rect);
+      isDraggingRef.current = false;
+    },
+    [getTimeFromX],
+  );
+
+  useEffect(() => {
+    const handleWindowMouseMove = (event: MouseEvent) => {
+      if (dragStartTimeRef.current === null) return;
+      const rect = legendRef.current?.getBoundingClientRect();
+      if (!rect || !file) return;
+
+      isDraggingRef.current = true;
+
+      const startTime = dragStartTimeRef.current;
+      const currentTime = getTimeFromX(event.clientX, rect);
+      const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
+
+      const loopStart = Math.min(startTime, currentTime);
+      const loopEnd = Math.max(startTime, currentTime);
+
+      // Update drag preview overlay directly (respects zoom/offset)
+      if (dragPreviewRef.current) {
+        const { filesZoom, filesOffset } = useStore.getState();
+        const z = filesZoom[fileId];
+        const o = filesOffset[fileId];
+        const screenLeft = zoomedToScreen(new Vector2(loopStart / totalDuration, 0.5), z, o).x;
+        const screenRight = zoomedToScreen(new Vector2(loopEnd / totalDuration, 0.5), z, o).x;
+        const clampedLeft = Math.max(0, screenLeft);
+        const clampedRight = Math.min(1, screenRight);
+        dragPreviewRef.current.style.left = `${clampedLeft * 100}%`;
+        dragPreviewRef.current.style.width = `${Math.max(0, clampedRight - clampedLeft) * 100}%`;
+        dragPreviewRef.current.style.display = "block";
+      }
+    };
+
+    const handleWindowMouseUp = async (event: MouseEvent) => {
+      if (dragStartTimeRef.current === null) return;
+      const startTime = dragStartTimeRef.current;
+      dragStartTimeRef.current = null;
+
+      if (dragPreviewRef.current) dragPreviewRef.current.style.display = "none";
+
+      const rect = legendRef.current?.getBoundingClientRect();
+      if (!rect || !file) return;
+
+      if (isDraggingRef.current) {
+        isDraggingRef.current = false;
+        const endTime = getTimeFromX(event.clientX, rect);
+        const loopStart = Math.min(startTime, endTime);
+        const loopEnd = Math.max(startTime, endTime);
+        if (loopEnd > loopStart) {
+          useStore.getState().setLoopRegion({ start: loopStart, end: loopEnd });
+          setFilePlaybackStartTime(fileId, loopStart);
+        }
+      } else {
+        // It was a plain click — set playback position
+        useStore.getState().setLoopRegion(null);
+        setFilePlaybackStartTime(fileId, startTime);
+        if (activeFileId === fileId && isPlaying) {
+          setPlaybackTime(startTime);
+        } else if (activeFileId === fileId) {
+          await togglePlayback();
+        }
+      }
+    };
+
+    window.addEventListener("mousemove", handleWindowMouseMove);
+    window.addEventListener("mouseup", handleWindowMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleWindowMouseMove);
+      window.removeEventListener("mouseup", handleWindowMouseUp);
+    };
+  }, [file, fileId, getTimeFromX, setFilePlaybackStartTime, activeFileId, isPlaying, setPlaybackTime, togglePlayback]);
 
   if (!file) return null;
 
@@ -143,17 +188,32 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
 
   return (
     <Box
+      ref={legendRef}
       style={{
         width: "100%",
         height: 15,
         backgroundColor: "rgba(0, 0, 0, 0.3)",
         position: "relative",
-        cursor: "pointer",
+        cursor: "col-resize",
         borderTop: "1px solid rgba(255, 255, 255, 0.1)",
         overflow: "hidden",
+        userSelect: "none",
       }}
-      onClick={handleClick}
+      onMouseDown={handleMouseDown}
     >
+      {/* Drag preview overlay */}
+      <div
+        ref={dragPreviewRef}
+        style={{
+          position: "absolute",
+          top: 0,
+          height: "100%",
+          background: "rgba(255, 150, 0, 0.4)",
+          pointerEvents: "none",
+          display: "none",
+          zIndex: 10,
+        }}
+      />
       {markers.map((marker, i) => (
         <Box
           key={i}

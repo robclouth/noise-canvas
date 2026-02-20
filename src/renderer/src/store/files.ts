@@ -669,8 +669,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           await get().togglePlayback();
         }
 
-        // Set the special one-shot playback boundaries
-        get().setAutoPlayEndTime(endTimeSeconds);
+        // Set the loop region for this stroke's playback
+        get().setLoopRegion({ start: startTimeSeconds, end: endTimeSeconds });
         get().setFilePlaybackStartTime(fileId, startTimeSeconds);
 
         // Now, toggle playback ON. It will use the start/end times we just set.

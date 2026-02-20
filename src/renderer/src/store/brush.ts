@@ -116,7 +116,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     // Unified apply action - used by mouse up and Enter key
     applyStrokeAtPosition: async (position?, strokeTimeRange?) => {
       const state = get();
-      const { activeFileId, synthesizeFile, autoPlayStroke, setFilePlaybackStartTime, setAutoPlayEndTime } = state;
+      const { activeFileId, synthesizeFile, autoPlayStroke, setFilePlaybackStartTime, setLoopRegion } = state;
 
       const effectivePosition = position || state.cursorPosition;
       if (!activeFileId || !effectivePosition) return;
@@ -154,8 +154,8 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         const autoPlayStart = Math.max(0, clampedStart - delaySeconds);
         const autoPlayEnd = Math.min(totalDuration, clampedEnd + envelopeEndSeconds);
 
+        setLoopRegion({ start: autoPlayStart, end: autoPlayEnd });
         setFilePlaybackStartTime(activeFileId, autoPlayStart);
-        setAutoPlayEndTime(autoPlayEnd);
         autoPlaybackParams = { startTimeSeconds: autoPlayStart, endTimeSeconds: autoPlayEnd };
       }
 

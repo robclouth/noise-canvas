@@ -8,8 +8,8 @@ import { Vector2 } from "three";
 import { screenToZoomed } from "../lib/utils";
 import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
+import { LoopRegion } from "./loop-region";
 import { PlaybackLine } from "./playback-line";
-import { PlaybackStartLine } from "./playback-start-line";
 import { TimeLegend } from "./time-legend";
 
 export interface FileViewProps {
@@ -486,8 +486,8 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
         <View style={viewStyle}>
           <FileRenderer fileId={fileId} ref={refCallback} />
         </View>
+        {isActive && <LoopRegion fileId={fileId} />}
         {isActive && <PlaybackLine fileId={fileId} />}
-        {isActive && <PlaybackStartLine fileId={fileId} />}
       </Box>
       <TimeLegend fileId={fileId} />
       {isSynthesizing && <Loader size="xs" pos="absolute" bottom={25} right={10} />}

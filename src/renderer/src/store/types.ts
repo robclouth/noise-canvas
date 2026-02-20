@@ -56,6 +56,11 @@ export type PlayerClock = {
   loopEnd: number; // active loop end
 };
 
+export type LoopRegion = {
+  start: number; // seconds from start of file
+  end: number;   // seconds from start of file
+};
+
 export type State = BrushState &
   EffectsState &
   ModulatorsState &

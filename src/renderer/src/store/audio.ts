@@ -1,6 +1,6 @@
 import * as Tone from "tone";
 import { openFiles } from "./files";
-import type { PlayerClock, ZustandGet, ZustandSet } from "./types";
+import type { LoopRegion, PlayerClock, ZustandGet, ZustandSet } from "./types";
 
 export interface AudioState {
   playerClock: PlayerClock;
@@ -13,8 +13,8 @@ export interface AudioState {
   setLoop: (loop: boolean) => void;
   autoPlayStroke: boolean;
   setAutoPlayStroke: (value: boolean) => void;
-  autoPlayEndTime: number | null;
-  setAutoPlayEndTime: (time: number | null) => void;
+  loopRegion: LoopRegion | null;
+  setLoopRegion: (region: LoopRegion | null) => void;
   setPlaybackTime: (playbackTime: number) => void;
   togglePlayback: () => Promise<void>;
   stopAudio: () => void;
@@ -32,12 +32,12 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
   },
 
   getPlaybackTime: () => {
-    const { player, isPlaying, loop, autoPlayEndTime: autoPlaybackEndTime, activeFileId, playerClock } = get();
+    const { player, isPlaying, loop, loopRegion, activeFileId, playerClock } = get();
     const file = activeFileId ? openFiles[activeFileId] : undefined;
     const buffer = file?.audioBuffer;
     if (!player || !buffer) return 0;
 
-    const end = autoPlaybackEndTime ?? buffer.duration;
+    const end = loopRegion?.end ?? buffer.duration;
 
     if (!isPlaying || playerClock.startAt === null) {
       return Math.min(Math.max(playerClock.startOffset, playerClock.loopStart), end);
@@ -48,7 +48,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     let pos = playerClock.startOffset + elapsed;
 
     if (loop) {
-      const L0 = 0;
+      const L0 = loopRegion?.start ?? 0;
       const L1 = playerClock.loopEnd;
       const len = Math.max(0, L1 - L0);
       if (len <= 0) return L1;
@@ -92,7 +92,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
   loop: false,
   setLoop: (loop) => {
-    const { player, isPlaying, autoPlayEndTime, activeFileId, getPlaybackTime } = get();
+    const { player, isPlaying, loopRegion, activeFileId, getPlaybackTime } = get();
     const file = activeFileId ? openFiles[activeFileId] : undefined;
     const buffer = file?.audioBuffer;
 
@@ -103,28 +103,27 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
     const currentTime = getPlaybackTime();
     set({ loop });
-    const end = autoPlayEndTime ?? buffer.duration;
+    const end = loopRegion?.end ?? buffer.duration;
+    const loopStart = loopRegion?.start ?? 0;
 
-    // ** THE FIX **
-    // Use player.restart() to prevent audio scheduling race conditions.
-    // First, update the player's internal loop property.
     player.loop = loop;
 
     if (loop) {
-      // When starting a loop, duration is not needed.
+      player.loopStart = loopStart;
+      player.loopEnd = end;
       player.restart(Tone.now(), currentTime);
     } else {
-      // When stopping a loop, we must provide the remaining duration.
       const remainingDuration = Math.max(0, end - currentTime);
       player.restart(Tone.now(), currentTime, remainingDuration);
     }
 
-    // Resynchronize our internal clock to match the new player state.
     set((s) => ({
       playerClock: {
         ...s.playerClock,
         startAt: Tone.now(),
         startOffset: currentTime,
+        loopStart,
+        loopEnd: end,
       },
     }));
   },
@@ -132,18 +131,49 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
   autoPlayStroke: false,
   setAutoPlayStroke: (value) => set({ autoPlayStroke: value }),
 
-  autoPlayEndTime: null,
-  setAutoPlayEndTime: (time) => set({ autoPlayEndTime: time }),
+  loopRegion: null,
+  setLoopRegion: (region) => {
+    set({ loopRegion: region });
+
+    if (!region) return;
+
+    const { player, isPlaying, getPlayer, activeFileId } = get();
+    if (!isPlaying || !player) return;
+
+    const file = activeFileId ? openFiles[activeFileId] : undefined;
+    const buffer = file?.audioBuffer;
+    if (!buffer) return;
+
+    const loopStart = region.start;
+    const loopEnd = region.end;
+
+    set({ loop: true });
+    player.loop = true;
+    player.loopStart = loopStart;
+    player.loopEnd = loopEnd;
+    player.restart(Tone.now(), loopStart);
+
+    set((s) => ({
+      playerClock: {
+        ...s.playerClock,
+        startAt: Tone.now(),
+        startOffset: loopStart,
+        loopStart,
+        loopEnd,
+      },
+    }));
+  },
 
   setPlaybackTime: (playbackTime) => {
-    const { activeFileId, autoPlayEndTime, loop, getPlayer } = get();
+    const { activeFileId, loopRegion, loop, getPlayer } = get();
     if (activeFileId === null) return;
     const file = openFiles[activeFileId];
     const buf = file?.audioBuffer;
     if (!buf) return;
 
     const player = getPlayer();
-    const end = autoPlayEndTime ?? buf.duration;
+    const end = loopRegion?.end ?? buf.duration;
+    const loopStart = loopRegion?.start ?? 0;
     const offset = Math.min(Math.max(playbackTime, 0), end);
 
     set((s) => ({
@@ -151,16 +181,15 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
         ...s.playerClock,
         startAt: Tone.now(),
         startOffset: offset,
-        loopStart: 0,
+        loopStart,
         loopEnd: end,
       },
     }));
 
     if (player.state === "started") {
-      // Also use restart here for consistency and safety.
       if (loop) {
         player.loop = true;
-        player.loopStart = 0;
+        player.loopStart = loopStart;
         player.loopEnd = end;
         player.restart(Tone.now(), offset);
       } else {
@@ -172,7 +201,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
   togglePlayback: async () => {
     const state = get();
-    const { isPlaying, activeFileId, loop, filesPlaybackStartTime, autoPlayEndTime, getPlayer } = state;
+    const { isPlaying, activeFileId, loop, filesPlaybackStartTime, loopRegion, getPlayer } = state;
 
     if (!activeFileId) {
       return;
@@ -197,12 +226,13 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     player.buffer = new Tone.ToneAudioBuffer(buffer);
 
     const startTime = filesPlaybackStartTime[activeFileId];
-    const end = autoPlayEndTime ?? buffer.duration;
+    const end = loopRegion?.end ?? buffer.duration;
+    const loopStart = loopRegion?.start ?? 0;
     const offset = Math.min(Math.max(startTime, 0), end);
 
     if (loop) {
       player.loop = true;
-      player.loopStart = 0;
+      player.loopStart = loopStart;
       player.loopEnd = end;
       player.start(Tone.now(), offset);
     } else {
@@ -216,7 +246,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
       playerClock: {
         startAt: Tone.now(),
         startOffset: offset,
-        loopStart: 0,
+        loopStart,
         loopEnd: end,
       } as PlayerClock,
     });
@@ -234,7 +264,6 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
     set((s) => ({
       isPlaying: false,
-      autoPlayEndTime: null,
       playerClock: {
         ...s.playerClock,
         startAt: null,
