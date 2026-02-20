@@ -15,6 +15,7 @@ import { DynamicsEffect } from "./effect-views/dynamics-effect";
 import { EvolveEffect } from "./effect-views/evolve-effect";
 import { HarmonicsEffect } from "./effect-views/overtones-effect";
 import { SynthesizeEffect } from "./effect-views/synthesize-effect";
+import { SortEffect } from "./effect-views/sort-effect";
 import { TransformEffect } from "./effect-views/transform-effect";
 
 const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
@@ -25,6 +26,7 @@ const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
   synthesize: <SynthesizeEffect />,
   evolve: <EvolveEffect />,
   binaural: <BinauralEffect />,
+  sort: <SortEffect />,
 };
 
 const EFFECT_LABELS: Record<string, string> = {
@@ -35,6 +37,7 @@ const EFFECT_LABELS: Record<string, string> = {
   synthesize: "Synthesize",
   evolve: "Evolve",
   binaural: "Binaural",
+  sort: "Sort",
 };
 
 const EFFECT_DESCRIPTIONS: Record<string, string> = {
@@ -45,6 +48,7 @@ const EFFECT_DESCRIPTIONS: Record<string, string> = {
   synthesize: "Generate new audio content from scratch (noise, sine waves, etc.).",
   evolve: "Reaction-advection-diffusion simulation for fluid, biological, and chaotic patterns.",
   binaural: "HRTF-based binaural spatialization. Use pitch modulation on azimuth for per-band positioning.",
+  sort: "Odd-even transposition sort on spectrogram bins by magnitude or phase.",
 };
 
 import { ParameterKey } from "@/store/types";
@@ -75,6 +79,7 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
     "evolveEdgeMode",
   ],
   binaural: ["binauralAzimuth", "binauralDistance", "binauralStereoAngle"],
+  sort: ["sortDirection", "sortOrder", "sortBy", "sortStereoMode"],
 };
 
 const MAX_EFFECTS = 10;

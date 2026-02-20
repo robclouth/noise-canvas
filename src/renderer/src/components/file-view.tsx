@@ -424,9 +424,8 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
 
       // Check if snapped position actually changed (for grid snapping)
       const lastPos = lastSnappedPositionRef.current;
-      const positionChanged = !lastPos || 
-        Math.abs(lastPos.x - snappedX) > 0.0001 || 
-        Math.abs(lastPos.y - snappedY) > 0.0001;
+      const positionChanged =
+        !lastPos || Math.abs(lastPos.x - snappedX) > 0.0001 || Math.abs(lastPos.y - snappedY) > 0.0001;
 
       // Update cursor position
       const { beats, pitch } = uvToBeatsAndPitch(snappedX, snappedY);

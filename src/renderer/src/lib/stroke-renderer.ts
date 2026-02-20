@@ -719,9 +719,12 @@ export class StrokeRenderer {
               uniformsForThisIteration.sourceSpectrogramTex = { value: inputTexture };
             }
 
-            // The "destination" (for blending) is the original target on the first pass
+            // The "destination" (for blending) is the original target only on the very first pass
             uniformsForThisIteration.destSpectrogramTex = {
-              value: isFirstEffect && isFirstIteration ? commonUniforms.destSpectrogramTex.value : inputTexture,
+              value:
+                isFirstEffect && isFirstIteration && isFirstPass
+                  ? commonUniforms.destSpectrogramTex.value
+                  : inputTexture,
             };
 
             // Pass the mask if enabled (non-cumulative mode)

@@ -47,6 +47,7 @@ uniform Parameter brushIntensity;
 uniform int   blendMode;
 uniform int   wrapMode; // 0=Off, 1=Wrap X, 2=Wrap Y, 3=Wrap Both
 uniform int   algorithm;
+uniform bool  useLinearBlend;
 
 // New uniform to prevent runaway feedback. Set to > 0 to enable.
 // A value of 1.0 is a good starting point.
@@ -658,10 +659,14 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv, vec2 pa
                              targetR = fromPolar(abs(magBlendOriginalR - magModifiedR), averagePhaseR); }
   else {                     targetL = blendOriginalL; targetR = blendOriginalR; }
 
-  // In non-cumulative mode, interpolate from stroke start state to prevent any accumulation
-  // In cumulative mode, interpolate from current state
-  vec2 finalL = interpolateComplex(blendOriginalL, targetL, effectiveWeight);
-  vec2 finalR = interpolateComplex(blendOriginalR, targetR, effectiveWeight);
+  vec2 finalL, finalR;
+  if (useLinearBlend) {
+    finalL = mix(blendOriginalL, targetL, effectiveWeight);
+    finalR = mix(blendOriginalR, targetR, effectiveWeight);
+  } else {
+    finalL = interpolateComplex(blendOriginalL, targetL, effectiveWeight);
+    finalR = interpolateComplex(blendOriginalR, targetR, effectiveWeight);
+  }
 
   // FINAL LIMITING
   finalL = limitMagnitude(finalL);

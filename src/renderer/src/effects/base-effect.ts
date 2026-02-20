@@ -76,6 +76,7 @@ export type CommonUniforms = {
   blendMode: { value: number };
   wrapMode: { value: number };
   algorithm: { value: number };
+  useLinearBlend?: { value: boolean };
   magnitudeLimit: { value: number };
   gainLut: { value: Texture | null };
   modulator1ImageTex: { value: Texture | null };
@@ -159,6 +160,7 @@ export const defaultValues: CommonUniforms = {
   magnitudeLimit: { value: 1.0 },
   wrapMode: { value: 0 },
   algorithm: { value: 0 },
+  useLinearBlend: { value: false },
   modulators: { value: [] },
   gainLut: { value: null },
   modulator1ImageTex: { value: null },

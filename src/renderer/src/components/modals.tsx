@@ -78,6 +78,7 @@ const EFFECT_LABELS: Record<string, string> = {
   synthesize: "Synthesize",
   evolve: "Evolve",
   binaural: "Binaural",
+  sort: "Sort",
 };
 
 const EFFECT_DESCRIPTIONS: Record<string, string> = {
@@ -88,6 +89,7 @@ const EFFECT_DESCRIPTIONS: Record<string, string> = {
   synthesize: "Generate new audio content from scratch (noise, sine waves, etc.).",
   evolve: "Reaction-advection-diffusion simulation for fluid, biological, and chaotic patterns.",
   binaural: "HRTF-based binaural spatialization for 3D audio positioning.",
+  sort: "Odd-even transposition sort on spectrogram bins by magnitude or phase.",
 };
 
 const AVAILABLE_EFFECTS = EFFECT_KEYS.filter((key) => key !== "passthrough") as Exclude<EffectType, "passthrough">[];
