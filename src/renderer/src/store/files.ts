@@ -676,7 +676,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         // Now, toggle playback ON. It will use the start/end times we just set.
         await get().togglePlayback();
         console.log(`[timing] auto-playback setup: ${(performance.now() - autoPlayStart).toFixed(2)}ms`);
-      } else if (isPlaying && activeFileId === fileId) {
+      } else if (get().isPlaying && get().activeFileId === fileId) {
         // --- Handle standard buffer hot-swap while playing ---
         const bufferSwapStart = performance.now();
         const player = getPlayer();
