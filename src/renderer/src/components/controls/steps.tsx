@@ -61,7 +61,7 @@ export function Steps() {
   const activeStep = steps[activeStepIndex];
 
   return (
-    <Group gap="xs" px="xs" h={36} align="center">
+    <Group gap="xs" align="center">
       <Combobox
         store={combobox}
         onOptionSubmit={(val) => {
@@ -87,7 +87,7 @@ export function Steps() {
               root: { flex: 1, minWidth: 150 },
               input: {
                 fontWeight: 600,
-                height: 28,
+                height: 22,
               },
             }}
           >
@@ -191,7 +191,7 @@ export function Steps() {
       </Combobox>
 
       {canAddStep && (
-        <ActionIcon size={28} variant="subtle" color="gray" onClick={addStep} title="Add step">
+        <ActionIcon size="sm" variant="subtle" color="gray" onClick={addStep} title="Add step">
           <Plus size={14} />
         </ActionIcon>
       )}

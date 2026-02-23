@@ -1,9 +1,9 @@
 import { useStore } from "@/store";
-import { ActionIcon, Group, Select, Stack, Text, TextInput } from "@mantine/core";
+import { ActionIcon, Combobox, Group, InputBase, Stack, Text, TextInput, useCombobox } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
-import { ChevronDown, Keyboard, Plus, Save, Trash2 } from "lucide-react";
+import { Keyboard, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { RESERVED_KEYS } from "../../lib/useShortcuts";
 import { Tooltip } from "../tooltip";
@@ -19,6 +19,10 @@ export function PresetSelector() {
 
   const [hotkeyAssignMode, setHotkeyAssignMode] = useState(false);
   const presetHotkeys = useStore((state) => state.presetHotkeys);
+
+  const combobox = useCombobox({
+    onDropdownClose: () => combobox.resetSelectedOption(),
+  });
 
   // Init presets on mount
   useEffect(() => {
@@ -155,90 +159,119 @@ export function PresetSelector() {
       hotkey: Object.entries(presetHotkeys).find(([, id]) => id === p.id)?.[0],
     }));
 
-  // Create grouped data for Select
-  const selectData = [
-    ...(defaultPresetOptions.length > 0 ? [{ group: "Factory Presets", items: defaultPresetOptions }] : []),
-    ...(userPresetOptions.length > 0 ? [{ group: "User Presets", items: userPresetOptions }] : []),
-  ];
-
   return (
-    <Group gap="xs" wrap="nowrap">
-      <Select
-        size="xs"
-        value={currentPresetId}
-        onOptionSubmit={handlePresetChange}
-        data={selectData}
-        styles={{
-          input: {
-            fontSize: "var(--mantine-font-size-xs)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            fontStyle: isDirty ? "italic" : "normal",
-          },
+    <Group gap="xs" wrap="nowrap" align="center">
+      <Combobox
+        store={combobox}
+        onOptionSubmit={(value) => {
+          handlePresetChange(value);
+          combobox.closeDropdown();
         }}
-        w="100%"
-        renderOption={({ option }: any) => {
-          return (
-            <Group justify="space-between" flex={1} wrap="nowrap">
-              <Text size="xs" flex={1}>
-                {option.label}
-              </Text>
-              {option.hotkey && (
-                <Text size="xs" fw={600}>
-                  {option.hotkey}
+        withinPortal
+      >
+        <Combobox.Target>
+          <InputBase
+            component="button"
+            type="button"
+            pointer
+            onClick={() => combobox.toggleDropdown()}
+            rightSection={<Combobox.Chevron />}
+            rightSectionPointerEvents="none"
+            leftSection={
+              currentPresetHotkey ? (
+                <Text size="xs" fw={600} c="dimmed" style={{ minWidth: "16px", textAlign: "center" }}>
+                  {currentPresetHotkey}
                 </Text>
-              )}
-            </Group>
-          );
-        }}
-        leftSection={
-          currentPresetHotkey ? (
-            <Text size="xs" fw={600} c="dimmed" style={{ minWidth: "16px", textAlign: "center" }}>
-              {currentPresetHotkey}
+              ) : undefined
+            }
+            size="xs"
+            styles={{
+              root: { flex: 1 },
+              input: { fontStyle: isDirty ? "italic" : "normal", height: 22 },
+            }}
+          >
+            <Text size="xs" truncate>
+              {currentPreset?.name || "Select preset"}
             </Text>
-          ) : undefined
-        }
-        scrollAreaProps={{ type: "always" }}
-        rightSection={<ChevronDown size={10} color="var(--mantine-color-text)" />}
-      />
-      <Group gap={4} wrap="nowrap">
-        <Tooltip label="Save as new preset">
-          <ActionIcon size="sm" color="dark.5" onClick={handleSaveNew}>
-            <Plus size={14} />
-          </ActionIcon>
-        </Tooltip>
-        <Tooltip label={currentPreset?.isFactory ? "Cannot save over default presets" : "Save over current preset"}>
-          <ActionIcon
-            size="sm"
-            color="dark.5"
-            onClick={handleSaveOver}
-            disabled={!currentPreset || currentPreset.isFactory}
-          >
-            <Save size={14} />
-          </ActionIcon>
-        </Tooltip>
-        <Tooltip label={currentPreset?.isFactory ? "Cannot delete default presets" : "Delete current preset"}>
-          <ActionIcon
-            size="sm"
-            color="dark.5"
-            onClick={handleDelete}
-            disabled={!currentPreset || currentPreset.isFactory}
-          >
-            <Trash2 size={14} />
-          </ActionIcon>
-        </Tooltip>
-        <Tooltip label="Toggle hotkey assign mode. When enabled, pressing a key will assign it to the current preset.">
-          <ActionIcon
-            size="sm"
-            onClick={handleToggleHotkeyMode}
-            disabled={!currentPreset}
-            color={hotkeyAssignMode ? "orange" : "dark.5"}
-          >
-            <Keyboard size={14} />
-          </ActionIcon>
-        </Tooltip>
-      </Group>
+          </InputBase>
+        </Combobox.Target>
+        <Combobox.Dropdown>
+          <Combobox.Options>
+            {defaultPresetOptions.length > 0 && (
+              <Combobox.Group label="Factory Presets">
+                {defaultPresetOptions.map((option) => (
+                  <Combobox.Option value={option.value} key={option.value}>
+                    <Group justify="space-between" flex={1} wrap="nowrap">
+                      <Text size="xs" flex={1}>
+                        {option.label}
+                      </Text>
+                      {option.hotkey && (
+                        <Text size="xs" fw={600}>
+                          {option.hotkey}
+                        </Text>
+                      )}
+                    </Group>
+                  </Combobox.Option>
+                ))}
+              </Combobox.Group>
+            )}
+            {userPresetOptions.length > 0 && (
+              <Combobox.Group label="User Presets">
+                {userPresetOptions.map((option) => (
+                  <Combobox.Option value={option.value} key={option.value}>
+                    <Group justify="space-between" flex={1} wrap="nowrap">
+                      <Text size="xs" flex={1}>
+                        {option.label}
+                      </Text>
+                      {option.hotkey && (
+                        <Text size="xs" fw={600}>
+                          {option.hotkey}
+                        </Text>
+                      )}
+                    </Group>
+                  </Combobox.Option>
+                ))}
+              </Combobox.Group>
+            )}
+          </Combobox.Options>
+        </Combobox.Dropdown>
+      </Combobox>
+
+      <Tooltip label="Save as new preset">
+        <ActionIcon size="sm" color="dark.5" onClick={handleSaveNew}>
+          <Plus size={14} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label={currentPreset?.isFactory ? "Cannot save over default presets" : "Save over current preset"}>
+        <ActionIcon
+          size="sm"
+          color="dark.5"
+          onClick={handleSaveOver}
+          disabled={!currentPreset || currentPreset.isFactory}
+        >
+          <Save size={14} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label={currentPreset?.isFactory ? "Cannot delete default presets" : "Delete current preset"}>
+        <ActionIcon
+          size="sm"
+          color="dark.5"
+          onClick={handleDelete}
+          disabled={!currentPreset || currentPreset.isFactory}
+        >
+          <Trash2 size={14} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label="Toggle hotkey assign mode. When enabled, pressing a key will assign it to the current preset.">
+        <ActionIcon
+          size="sm"
+          onClick={handleToggleHotkeyMode}
+          disabled={!currentPreset}
+          color={hotkeyAssignMode ? "orange" : "dark.5"}
+        >
+          <Keyboard size={14} />
+        </ActionIcon>
+      </Tooltip>
     </Group>
   );
 }

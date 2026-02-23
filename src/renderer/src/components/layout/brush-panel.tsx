@@ -1,4 +1,4 @@
-import { SimpleGrid, Stack } from "@mantine/core";
+import { Divider, SimpleGrid, Stack } from "@mantine/core";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { ParameterKey } from "@renderer/store/types";
 import { EnvelopeControl } from "../controls/envelope-control";
@@ -83,9 +83,8 @@ export function BrushPanel() {
       <Stack p="xs" gap="xs">
         <Slots />
         <PresetSelector />
-      </Stack>
-      <Steps />
-      <Stack px="xs" gap="xs">
+        <Divider style={{ flex: 1 }} color="dark.4" />
+        <Steps />
         <Section label="Envelope" parameterKeys={ENVELOPE_PARAMS}>
           <EnvelopeControl />
         </Section>
