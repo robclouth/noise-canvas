@@ -44,6 +44,8 @@ export interface FilesState {
   setActiveFileId: (activeFileId: string | null) => Promise<void>;
   sourceFile: string | null;
   setSourceFile: (sourceFile: string | null) => void;
+  fullscreenFileId: string | null;
+  setFullscreenFileId: (fileId: string | null) => void;
   switchToNextFile: () => void;
   switchToPreviousFile: () => void;
 }
@@ -843,6 +845,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   },
   sourceFile: null,
   setSourceFile: (sourceFile) => set({ sourceFile }),
+  fullscreenFileId: null,
+  setFullscreenFileId: (fileId) => set({ fullscreenFileId: fileId }),
   switchToNextFile: () => {
     const { openFileIds, activeFileId, setActiveFileId } = get();
     if (openFileIds.length <= 1 || !activeFileId) return;

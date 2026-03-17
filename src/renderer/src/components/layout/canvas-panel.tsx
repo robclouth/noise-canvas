@@ -4,16 +4,15 @@ import { memo } from "react";
 import { FileView } from "../file-view";
 
 export const CanvasPanel = memo(() => {
-  console.log("CanvasPanel render");
-
   const openFileIds = useStore((state) => state.openFileIds);
+  const fullscreenFileId = useStore((state) => state.fullscreenFileId);
 
-  console.log("openFileIds", openFileIds);
+  const visibleIds = fullscreenFileId ? [fullscreenFileId] : openFileIds;
 
   return (
-    <Stack pos="relative" gap={"xs"}>
-      {openFileIds.map((fileId) => (
-        <FileView key={fileId} fileId={fileId} />
+    <Stack h={fullscreenFileId ? "100%" : undefined} pos="relative" gap={"xs"}>
+      {visibleIds.map((fileId) => (
+        <FileView key={fileId} fileId={fileId} isFullscreen={fullscreenFileId === fileId} />
       ))}
     </Stack>
   );

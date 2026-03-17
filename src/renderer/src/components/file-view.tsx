@@ -14,6 +14,7 @@ import { TimeLegend } from "./time-legend";
 
 export interface FileViewProps {
   fileId: string;
+  isFullscreen?: boolean;
 }
 
 const viewStyle = { width: "100%", height: "100%", zIndex: 1 };
@@ -66,7 +67,7 @@ function getSnappedCoordinates(
   return [snappedX, snappedY];
 }
 
-export const FileView = memo(({ fileId }: FileViewProps) => {
+export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) => {
   const file = openFiles[fileId];
   const filePath = file?.filePath || "";
   console.log("FileView render", fileId, filePath);
@@ -464,6 +465,8 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
     <Box
       pos="relative"
       bd={isActive ? "2px solid orange" : "2px solid dark.7"}
+      h={isFullscreen ? "100%" : undefined}
+      style={isFullscreen ? { display: "flex", flexDirection: "column" } : undefined}
       onClick={() => {
         if (!isActive) {
           useStore.getState().setActiveFileId(fileId);
@@ -473,8 +476,8 @@ export const FileView = memo(({ fileId }: FileViewProps) => {
       <FileHeader fileId={fileId} />
       <Box
         ref={viewRef}
-        h={400}
-        style={cursorStyle}
+        h={isFullscreen ? undefined : 400}
+        style={{ ...(isFullscreen ? { flex: 1 } : {}), ...cursorStyle }}
         pos="relative"
         onMouseEnter={handleMouseEnter}
         onMouseMove={handleMouseMove}

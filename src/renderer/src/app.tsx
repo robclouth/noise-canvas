@@ -39,8 +39,13 @@ function App(): React.JSX.Element {
   useShortcuts();
   const [isReady, setIsReady] = useState(false);
   const openFileIds = useStore((state) => state.openFileIds);
+  const fullscreenFileId = useStore((state) => state.fullscreenFileId);
 
   const invalidateRef = useRef<Invalidator | null>(null);
+
+  useEffect(() => {
+    invalidateRef.current?.();
+  }, [fullscreenFileId]);
 
   useEffect(() => {
     const unsubscribers: (() => void)[] = [];
@@ -244,6 +249,10 @@ function App(): React.JSX.Element {
         <Box pos="absolute" top={0} bottom={0} left={0} right={0} bg="dark.9" style={{ zIndex: -1 }} />
         {openFileIds.length === 0 ? (
           <EmptyState />
+        ) : fullscreenFileId ? (
+          <Box flex={1} h="100%" p="xs" style={{ minHeight: 0, overflow: "hidden" }}>
+            <CanvasPanel />
+          </Box>
         ) : (
           <ScrollArea
             scrollbarSize={4}
