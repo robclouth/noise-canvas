@@ -8,3 +8,4 @@ bin
 *.log*
 .env
 test-results
+vendor/
