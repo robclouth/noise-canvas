@@ -890,6 +890,283 @@ Napi::Value HpssAsync(const Napi::CallbackInfo &info)
     return promise;
 }
 
+// ─── AI Separation (macOS arm64 only, via ONNX Runtime C++) ─────────────────
+
+#ifdef GABORATOR_ONNX_ENABLED
+#include "vendor/onnxruntime/include/onnxruntime_cxx_api.h"
+#include <map>
+#include <mutex>
+#include <memory>
+
+static std::vector<float> aiLinearResample(const std::vector<float> &audio, double fromRate, double toRate)
+{
+    if (fromRate == toRate) return audio;
+    double ratio = fromRate / toRate;
+    size_t length = (size_t)std::round((double)audio.size() / ratio);
+    std::vector<float> result(length);
+    for (size_t i = 0; i < length; i++)
+    {
+        double pos = i * ratio;
+        size_t idx = (size_t)pos;
+        double frac = pos - idx;
+        float a = idx < audio.size() ? audio[idx] : 0.0f;
+        float b = idx + 1 < audio.size() ? audio[idx + 1] : 0.0f;
+        result[i] = (float)(a + frac * (b - a));
+    }
+    return result;
+}
+
+static std::vector<float> makeTriangularWindow(int n)
+{
+    std::vector<float> w(n);
+    double half = n / 2.0;
+    for (int i = 0; i < n; i++)
+        w[i] = (float)(i < (int)half ? (i + 1) / half : (n - i) / half);
+    return w;
+}
+
+static Ort::Env &getOrtEnv()
+{
+    static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "noise_canvas");
+    return env;
+}
+
+struct CachedSession
+{
+    std::shared_ptr<Ort::Session> session;
+    std::string inputName;
+    std::string outputName;
+};
+
+static std::map<std::string, CachedSession> gSessionCache;
+static std::mutex gSessionMutex;
+
+static CachedSession getOrCreateSession(const std::string &modelPath)
+{
+    std::lock_guard<std::mutex> lock(gSessionMutex);
+    auto it = gSessionCache.find(modelPath);
+    if (it != gSessionCache.end()) return it->second;
+
+    Ort::SessionOptions opts;
+    opts.SetIntraOpNumThreads(4);
+    opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
+    opts.DisableMemPattern();
+    opts.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
+
+    CachedSession cached;
+    cached.session = std::make_shared<Ort::Session>(getOrtEnv(), modelPath.c_str(), opts);
+
+    Ort::AllocatorWithDefaultOptions allocator;
+    cached.inputName  = cached.session->GetInputNameAllocated(0, allocator).get();
+    cached.outputName = cached.session->GetOutputNameAllocated(0, allocator).get();
+
+    gSessionCache[modelPath] = cached;
+    return cached;
+}
+
+class AiSeparateWorker : public Napi::AsyncWorker
+{
+public:
+    AiSeparateWorker(Napi::Env env,
+                     std::vector<std::vector<float>> audioChannels,
+                     double sampleRate,
+                     std::string modelPath,
+                     std::vector<std::string> stemNames)
+        : Napi::AsyncWorker(env),
+          deferred(Napi::Promise::Deferred::New(env)),
+          audioChannels(std::move(audioChannels)),
+          sampleRate(sampleRate),
+          modelPath(std::move(modelPath)),
+          stemNames(std::move(stemNames)) {}
+
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+    void Execute() override
+    {
+        try { ExecuteImpl(); }
+        catch (const Ort::Exception &e) { SetError(std::string("ORT error: ") + e.what()); }
+        catch (const std::exception &e) { SetError(std::string("Error: ") + e.what()); }
+        catch (...)                     { SetError("Unknown error during AI separation"); }
+    }
+
+    void ExecuteImpl()
+    {
+        const int    MODEL_RATE = 44100;
+        const int    SEG        = 343980;
+        const double OVERLAP_AI = 0.25;
+        const int    stride     = (int)std::floor(SEG * (1.0 - OVERLAP_AI));
+
+        auto resLeft  = aiLinearResample(audioChannels[0], sampleRate, MODEL_RATE);
+        auto resRight = audioChannels.size() > 1
+                        ? aiLinearResample(audioChannels[1], sampleRate, MODEL_RATE)
+                        : resLeft;
+
+        const int numSamples = (int)resLeft.size();
+        const int numStems   = (int)stemNames.size();
+
+        stems.resize(numStems);
+
+        CachedSession cached = getOrCreateSession(modelPath);
+        const char *inNames[]  = { cached.inputName.c_str() };
+        const char *outNames[] = { cached.outputName.c_str() };
+        auto memInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+
+        if (numSamples <= SEG)
+        {
+            // Short file: pass exact length directly, no overlap-add needed
+            std::vector<float> buf(2 * numSamples);
+            for (int i = 0; i < numSamples; i++)
+            {
+                buf[i]               = resLeft[i];
+                buf[numSamples + i]  = resRight[i];
+            }
+            const std::array<int64_t, 3> shape = {1, 2, numSamples};
+            Ort::Value tensor = Ort::Value::CreateTensor<float>(
+                memInfo, buf.data(), buf.size(), shape.data(), shape.size());
+            auto outputs = cached.session->Run(
+                Ort::RunOptions{nullptr}, inNames, &tensor, 1, outNames, 1);
+            const float *out = outputs[0].GetTensorData<float>();
+            auto outShape = outputs[0].GetTensorTypeAndShapeInfo().GetShape();
+            const int outT = (outShape.size() >= 4) ? (int)outShape[3] : numSamples;
+            for (int s = 0; s < numStems; s++)
+            {
+                std::vector<float> rawL(out + s * 2 * outT,         out + s * 2 * outT + outT);
+                std::vector<float> rawR(out + s * 2 * outT + outT,  out + s * 2 * outT + 2 * outT);
+                stems[s].first  = aiLinearResample(rawL, MODEL_RATE, sampleRate);
+                stems[s].second = aiLinearResample(rawR, MODEL_RATE, sampleRate);
+            }
+        }
+        else
+        {
+            // Long file: overlap-add chunking with triangular window
+            std::vector<std::vector<float>> accL(numStems, std::vector<float>(numSamples, 0.0f));
+            std::vector<std::vector<float>> accR(numStems, std::vector<float>(numSamples, 0.0f));
+            std::vector<float> weight(numSamples, 0.0f);
+            auto window = makeTriangularWindow(SEG);
+
+            std::vector<float> buf(2 * SEG);
+            const std::array<int64_t, 3> shape = {1, 2, SEG};
+
+            for (int start = 0; start < numSamples; start += stride)
+            {
+                int end    = std::min(start + SEG, numSamples);
+                int segLen = end - start;
+
+                std::fill(buf.begin(), buf.end(), 0.0f);
+                for (int i = 0; i < segLen; i++)
+                {
+                    buf[i]       = resLeft[start + i];
+                    buf[SEG + i] = resRight[start + i];
+                }
+
+                Ort::Value tensor = Ort::Value::CreateTensor<float>(
+                    memInfo, buf.data(), buf.size(), shape.data(), shape.size());
+                auto outputs = cached.session->Run(
+                    Ort::RunOptions{nullptr}, inNames, &tensor, 1, outNames, 1);
+                const float *out = outputs[0].GetTensorData<float>();
+                auto outShape = outputs[0].GetTensorTypeAndShapeInfo().GetShape();
+                const int outT = (outShape.size() >= 4) ? (int)outShape[3] : SEG;
+
+                for (int i = 0; i < segLen; i++)
+                {
+                    float w = window[i];
+                    for (int s = 0; s < numStems; s++)
+                    {
+                        accL[s][start + i] += out[s * 2 * outT + i]        * w;
+                        accR[s][start + i] += out[s * 2 * outT + outT + i]  * w;
+                    }
+                    weight[start + i] += w;
+                }
+            }
+
+            for (int i = 0; i < numSamples; i++)
+            {
+                float w = weight[i];
+                if (w > 0.0f)
+                    for (int s = 0; s < numStems; s++)
+                    {
+                        accL[s][i] /= w;
+                        accR[s][i] /= w;
+                    }
+            }
+
+            for (int s = 0; s < numStems; s++)
+            {
+                stems[s].first  = aiLinearResample(accL[s], MODEL_RATE, sampleRate);
+                stems[s].second = aiLinearResample(accR[s], MODEL_RATE, sampleRate);
+            }
+        } // end else (long file)
+    } // end ExecuteImpl
+
+    void OnOK() override
+    {
+        Napi::Env env = Env();
+        Napi::Object result = Napi::Object::New(env);
+
+        for (int s = 0; s < (int)stemNames.size(); s++)
+        {
+            Napi::Array ch = Napi::Array::New(env, 2);
+
+            Napi::Float32Array l = Napi::Float32Array::New(env, stems[s].first.size());
+            memcpy(l.Data(), stems[s].first.data(), stems[s].first.size() * sizeof(float));
+            ch[0u] = l;
+
+            Napi::Float32Array r = Napi::Float32Array::New(env, stems[s].second.size());
+            memcpy(r.Data(), stems[s].second.data(), stems[s].second.size() * sizeof(float));
+            ch[1u] = r;
+
+            result.Set(stemNames[s], ch);
+        }
+
+        deferred.Resolve(result);
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    std::vector<std::vector<float>> audioChannels;
+    double sampleRate;
+    std::string modelPath;
+    std::vector<std::string> stemNames;
+    std::vector<std::pair<std::vector<float>, std::vector<float>>> stems;
+};
+
+Napi::Value AiSeparateAsync(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 4 || !info[0].IsArray() || !info[1].IsNumber()
+                          || !info[2].IsString() || !info[3].IsArray())
+    {
+        Napi::TypeError::New(env, "Expected (Float32Array[] channels, number sampleRate, string modelPath, string[] stemNames)")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    Napi::Array chJs       = info[0].As<Napi::Array>();
+    double sampleRate      = info[1].As<Napi::Number>().DoubleValue();
+    std::string modelPath  = info[2].As<Napi::String>().Utf8Value();
+    Napi::Array stemNamesJs = info[3].As<Napi::Array>();
+
+    std::vector<std::vector<float>> channels;
+    for (uint32_t i = 0; i < chJs.Length(); i++)
+    {
+        Napi::Float32Array ch = chJs.Get(i).As<Napi::Float32Array>();
+        channels.emplace_back(ch.Data(), ch.Data() + ch.ElementLength());
+    }
+
+    std::vector<std::string> stemNames;
+    for (uint32_t i = 0; i < stemNamesJs.Length(); i++)
+        stemNames.push_back(stemNamesJs.Get(i).As<Napi::String>().Utf8Value());
+
+    auto *worker = new AiSeparateWorker(
+        env, std::move(channels), sampleRate, std::move(modelPath), std::move(stemNames));
+    worker->Queue();
+    return worker->GetPromise();
+}
+
+#endif // GABORATOR_ONNX_ENABLED
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 Napi::Object init(Napi::Env env, Napi::Object exports)
@@ -897,6 +1174,9 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
     exports.Set("analyze", Napi::Function::New(env, AnalyzeAsync));
     exports.Set("synthesize", Napi::Function::New(env, SynthesizeAsync));
     exports.Set("hpss", Napi::Function::New(env, HpssAsync));
+#ifdef GABORATOR_ONNX_ENABLED
+    exports.Set("aiSeparate", Napi::Function::New(env, AiSeparateAsync));
+#endif
     return exports;
 }
 

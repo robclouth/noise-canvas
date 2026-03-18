@@ -103,6 +103,15 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
             >
               Split Harmonic and Percussive (HPSS)
             </Menu.Item>
+            <Menu.Divider />
+            <Menu.Item
+              onClick={(e) => {
+                e.stopPropagation();
+                useStore.getState().aiSeparateFile(fileId);
+              }}
+            >
+              Split Drums / Bass / Other / Vocals (AI)
+            </Menu.Item>
           </Menu.Dropdown>
         </Menu>
         <Tooltip label="Duplicate this file to create an editable copy.">

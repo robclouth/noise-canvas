@@ -20,10 +20,12 @@ files:
   - "!**/demo{,/**}"
   - "!node_modules/**/{benchmark,benchmarks}"
   - "build/Release/gaborator_addon.node"
+  - "build/Release/libonnxruntime.1.24.3.dylib"
 
 asar: true
 asarUnpack:
-  - "**/*.node" # only native modules
+  - "**/*.node"
+  - "**/*.dylib"
   - "**/node_modules/ffmpeg-static/ffmpeg*"
 win:
   icon: resources/icon.png

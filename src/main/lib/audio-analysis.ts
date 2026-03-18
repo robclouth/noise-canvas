@@ -1,6 +1,16 @@
 import { join } from "path";
 import { decodeAudioFile, encodeBufferToAudioFile, probeAudioFile } from "./ffmpeg";
 import type { AnalysisParams, GaboratorAnalysisResult } from "./types";
+import { getModelPath } from "./ai-separation";
+export { isModelDownloaded, downloadModel } from "./ai-separation";
+export type { FourStemName, TwoStemName } from "./ai-separation";
+
+// Only 4-stem is available as a public ONNX — no clean 2-stem ONNX exists yet.
+// Stem order matches htdemucs output: drums(0), bass(1), other(2), vocals(3)
+const AI_MODEL = {
+  file: "htdemucs.onnx",
+  stems: ["drums", "bass", "other", "vocals"],
+} as const;
 
 let gaborator: any = null;
 
@@ -171,6 +181,20 @@ export async function hpss(
 ): Promise<{ harmonic: Float32Array; percussive: Float32Array }> {
   const gab = init();
   return await gab.hpss(packedData, analysisMetadata, kernelH, kernelV);
+}
+
+/**
+ * Separate audio (already decoded to channels) into 4 stems using htdemucs ONNX.
+ * Call with Gaborator-synthesized audio, then re-analyse each stem with Gaborator.
+ * Stems: drums, bass, other, vocals
+ */
+export async function aiSeparate(
+  audioChannels: Float32Array[],
+  sampleRate: number,
+): Promise<Record<string, Float32Array[]>> {
+  const gab = init();
+  const modelPath = getModelPath(AI_MODEL.file);
+  return gab.aiSeparate(audioChannels, sampleRate, modelPath, [...AI_MODEL.stems]);
 }
 
 /**

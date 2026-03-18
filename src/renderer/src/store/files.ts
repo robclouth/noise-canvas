@@ -14,6 +14,7 @@ export interface FilesState {
   openFilePath: (filePath: string) => Promise<void>;
   duplicateFile: (fileId: string) => Promise<void>;
   hpssFile: (fileId: string) => Promise<void>;
+  aiSeparateFile: (fileId: string) => Promise<void>;
   saveActiveFile: () => Promise<void>;
   saveActiveFileAs: () => Promise<void>;
   saveActiveFileVersion: () => Promise<void>;
@@ -351,6 +352,186 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         }),
       );
     }
+  },
+  aiSeparateFile: async (fileId: string) => {
+    const originalFile = openFiles[fileId];
+    if (!originalFile) return;
+    const { spectrogramData } = originalFile;
+    if (!spectrogramData) return;
+
+    const modelFile = "htdemucs.onnx";
+    if (!window.audioAnalysis.isModelDownloaded(modelFile)) {
+      notifications.show({
+        id: "ai-model-download",
+        title: "Downloading AI model",
+        message: "Starting download…",
+        color: "blue",
+        loading: true,
+        autoClose: false,
+      });
+      try {
+        await window.audioAnalysis.downloadModel(modelFile, (downloaded, total) => {
+          const mb = (downloaded / 1024 / 1024).toFixed(1);
+          const message =
+            total > 0
+              ? `${Math.round((downloaded / total) * 100)}%  (${mb} / ${(total / 1024 / 1024).toFixed(1)} MB)`
+              : `${mb} MB downloaded…`;
+          notifications.update({
+            id: "ai-model-download",
+            title: "Downloading AI model",
+            message,
+            color: "blue",
+            loading: true,
+            autoClose: false,
+          });
+        });
+        notifications.update({
+          id: "ai-model-download",
+          title: "AI model ready",
+          message: "Model downloaded successfully.",
+          color: "green",
+          loading: false,
+          autoClose: 3000,
+        });
+      } catch (error) {
+        notifications.update({
+          id: "ai-model-download",
+          title: "Model download failed",
+          message: `${error instanceof Error ? error.message : String(error)}`,
+          color: "red",
+          loading: false,
+          autoClose: 5000,
+        });
+        return;
+      }
+    }
+
+    const state = get();
+    const stemNames = ["drums", "bass", "other", "vocals"];
+    const stemIds = stemNames.map(() => generateFileId());
+
+    const ext = window.nodePath.extname(originalFile.filePath);
+    const base = originalFile.filePath.slice(0, originalFile.filePath.length - ext.length);
+    const sourceBpm = state.filepathsBpm[originalFile.filePath];
+
+    for (let i = 0; i < stemNames.length; i++) {
+      openFiles[stemIds[i]] = { id: stemIds[i], filePath: `${base}_${stemNames[i]}${ext}` };
+    }
+
+    set(
+      produce((state: State) => {
+        const idx = state.openFileIds.indexOf(fileId);
+        state.openFileIds.splice(idx + 1, 0, ...stemIds);
+        for (let i = 0; i < stemIds.length; i++) {
+          const id = stemIds[i];
+          state.filesBandsPerOctave[id] = state.filesBandsPerOctave[fileId];
+          state.filesZoom[id] = state.filesZoom[fileId];
+          state.filesOffset[id] = state.filesOffset[fileId];
+          state.filesPlaybackStartTime[id] = 0;
+          state.filesDirty[id] = true;
+          state.filepathsBpm[openFiles[id].filePath] = sourceBpm;
+          state.filesLoading[id] = "Separating stems (AI)…";
+        }
+      }),
+    );
+
+    try {
+      // Step 1: Synthesize the current painted state via Gaborator → get audio channels
+      const fboData = await originalFile.rendererRef?.current?.getFBOData();
+      if (!fboData) throw new Error("Could not read current spectrogram state");
+
+      const synthesisResult = await window.audioAnalysis.synthesize(
+        fboData,
+        {
+          numFrames: spectrogramData.numFrames,
+          numChannels: spectrogramData.numChannels,
+          numBands: spectrogramData.numBands,
+          bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
+          bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s,
+          bandLengths: spectrogramData.synthesisMetadata.bandLengths,
+        },
+        spectrogramData.sampleRate,
+        { bandsPerOctave: state.bandsPerOctave, minFreq: state.minFreq },
+        false, // don't normalize — preserve relative levels for separation
+      );
+
+      // Step 2: AI-separate the synthesized audio into stems
+      const stems = await window.audioAnalysis.aiSeparate(
+        synthesisResult.channels,
+        spectrogramData.sampleRate,
+      );
+
+      // Step 3: Re-analyse each stem with Gaborator → SpectrogramData → new file entry
+      const analysisParams = { bandsPerOctave: state.bandsPerOctave, minFreq: state.minFreq };
+      const audioContext = new AudioContext({ sampleRate: spectrogramData.sampleRate });
+
+      for (let i = 0; i < stemNames.length; i++) {
+        const stemChannels = stems[stemNames[i]];
+        if (!stemChannels) continue;
+
+        const numSamples = stemChannels[0].length;
+        const audioBuffer = audioContext.createBuffer(stemChannels.length, numSamples, spectrogramData.sampleRate);
+        for (let ch = 0; ch < stemChannels.length; ch++) {
+          audioBuffer.copyToChannel(new Float32Array(stemChannels[ch]), ch);
+        }
+
+        const result = await window.audioAnalysis.analyseBuffer(audioBuffer, analysisParams);
+
+        openFiles[stemIds[i]] = {
+          ...openFiles[stemIds[i]],
+          spectrogramData: {
+            packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+            inverseMap: new Float32Array(result.inverseMap.buffer, result.inverseMap.byteOffset, result.inverseMap.byteLength / 4),
+            metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
+            textureWidth: result.textureWidth,
+            textureHeight: result.textureHeight,
+            numFrames: result.numFrames,
+            numBands: result.numBands,
+            numChannels: result.numChannels,
+            sampleRate: result.sampleRate,
+            packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
+            minFreq: state.minFreq,
+            bandsPerOctave: state.bandsPerOctave,
+            synthesisMetadata: {
+              bandOffsets: result.bandOffsets,
+              bandStepLog2s: result.bandStepLog2s,
+              bandLengths: result.bandLengths,
+            },
+          },
+        };
+      }
+
+      audioContext.close();
+    } catch (error) {
+      console.error("AI separation failed:", error);
+      notifications.show({
+        title: "AI separation failed",
+        message: `${error instanceof Error ? error.message : "Unknown error"}`,
+        color: "red",
+      });
+      const idsToRemove = [...stemIds];
+      for (const id of idsToRemove) delete openFiles[id];
+      set(
+        produce((state: State) => {
+          state.openFileIds = state.openFileIds.filter((id) => !idsToRemove.includes(id));
+          for (const id of idsToRemove) {
+            delete state.filesBandsPerOctave[id];
+            delete state.filesZoom[id];
+            delete state.filesOffset[id];
+            delete state.filesPlaybackStartTime[id];
+            delete state.filesDirty[id];
+            delete state.filesLoading[id];
+          }
+        }),
+      );
+      return;
+    }
+
+    set(
+      produce((state: State) => {
+        for (const id of stemIds) delete state.filesLoading[id];
+      }),
+    );
   },
   saveActiveFile: async () => {
     const state = get();

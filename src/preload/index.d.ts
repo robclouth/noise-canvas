@@ -71,6 +71,15 @@ declare global {
       ) => Promise<{
         channels: Float32Array[];
       }>;
+      isModelDownloaded: (modelFile: string) => boolean;
+      downloadModel: (
+        modelFile: string,
+        onProgress?: (downloaded: number, total: number) => void,
+      ) => Promise<void>;
+      aiSeparate: (
+        audioChannels: Float32Array[],
+        sampleRate: number,
+      ) => Promise<Record<string, Float32Array[]>>;
       hpss: (
         packedData: Float32Array,
         analysisMetadata: {

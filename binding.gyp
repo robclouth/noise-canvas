@@ -14,8 +14,8 @@
                 "GCC_ENABLE_CPP_RTTI": "YES",
                 "CLANG_CXX_LIBRARY": "libc++",
                 "MACOSX_DEPLOYMENT_TARGET": "10.7",
-                "OTHER_CPLUSPLUSFLAGS": ["-std=c++17", "-arch x86_64", "-arch arm64"],
-                "OTHER_LDFLAGS": ["-arch x86_64", "-arch arm64"],
+                "OTHER_CPLUSPLUSFLAGS": ["-std=c++17", "-arch arm64"],
+                "OTHER_LDFLAGS": ["-arch arm64"],
             },
             "msvs_settings": {
                 "VCCLCompilerTool": {
@@ -28,8 +28,28 @@
                 [
                     'OS=="mac"',
                     {
-                        "defines": ["GABORATOR_USE_VDSP=1"],
-                        "link_settings": {"libraries": ["-framework Accelerate"]},
+                        "defines": ["GABORATOR_USE_VDSP=1", "GABORATOR_ONNX_ENABLED=1"],
+                        "include_dirs": ["vendor/onnxruntime/include"],
+                        "link_settings": {
+                            "libraries": [
+                                "-framework Accelerate",
+                                "<(module_root_dir)/vendor/onnxruntime/lib/libonnxruntime.dylib",
+                            ],
+                        },
+                        "xcode_settings": {
+                            "OTHER_LDFLAGS": [
+                                "-arch arm64",
+                                "-Wl,-rpath,@loader_path",
+                            ],
+                        },
+                        "copies": [
+                            {
+                                "destination": "<(PRODUCT_DIR)",
+                                "files": [
+                                    "<(module_root_dir)/vendor/onnxruntime/lib/libonnxruntime.1.24.3.dylib",
+                                ],
+                            },
+                        ],
                     },
                 ],
                 [
