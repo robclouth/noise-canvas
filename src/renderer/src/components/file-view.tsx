@@ -335,10 +335,16 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         const initialBrushEnd = centerTimeSeconds;
         strokeTimeRangeRef.current = { min: initialBrushStart, max: initialBrushEnd };
 
-        if (state.sourcePositionMode === "offset" && !state.lockedOffset && state.sourcePosition) {
+        if (state.sourcePosition) {
           const offsetBeats = state.sourcePosition.beats - beats;
           const offsetPitch = state.sourcePosition.pitch - pitch;
-          state.setLockedOffset({ beats: offsetBeats, pitch: offsetPitch });
+          if (state.sourcePositionMode === "anchored") {
+            // Clone stamp: reset source to sourcePosition on every stroke start.
+            state.setLockedOffset({ beats: offsetBeats, pitch: offsetPitch });
+          } else if (state.sourcePositionMode === "offset" && !state.lockedOffset) {
+            // Aligned: lock offset once on the first stroke only.
+            state.setLockedOffset({ beats: offsetBeats, pitch: offsetPitch });
+          }
         }
 
         rendererRef.current.renderStroke(coords[0], coords[1], false);

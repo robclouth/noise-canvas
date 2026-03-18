@@ -10,6 +10,7 @@ uniform bool showTargetRectangle;
 uniform bool showSourceRectangle;
 
 uniform vec2 sourceBrushSizeUv; // Size of the brush in UV coordinates for the source file
+uniform vec2 sourceSamplingBottomLeftUv; // Pre-computed sampling position on the source file
 
 // Pre-calculated grid values
 uniform float gridWidthUv;        // Width of each beat in UV coordinates
@@ -98,48 +99,39 @@ void main() {
 
     // --- Brush Area Visualization ---
 
-    // Common calculations for both rectangles
-    // brushBottomLeftUv is already in zoomed coordinates
-    vec2 strokeWidthUv = fwidth(zoomedUv) * 1.5;
+    // Draw source rectangle first so target renders on top when they overlap
+    if (showSourceRectangle) {
+        vec2 sourceCenter = sourceSamplingBottomLeftUv + brushSizeUv * 0.5;
 
-    // Draw Brush Area Rectangle (only if this is the active file)
+        if (sourceCenter.x >= 0.0 && sourceCenter.x <= 1.0 &&
+            sourceCenter.y >= 0.0 && sourceCenter.y <= 1.0) {
+
+            vec2 dSource = abs(zoomedUv - sourceCenter) - brushSizeUv * 0.5;
+            float outsideDistSource = length(max(dSource, 0.0));
+            float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
+            float distToBorderSource = outsideDistSource + insideDistSource;
+
+            float sourceRectAlpha = 1.0 - smoothstep(0.0, fwidth(distToBorderSource), abs(distToBorderSource));
+            // Mantine blue[6] #228be6
+            color = mix(color, vec3(0.133, 0.545, 0.902), sourceRectAlpha);
+        }
+    }
+
+    // Draw target rectangle on top
     if (showTargetRectangle) {
-        // Calculate distance from rectangle edges (bottom-left origin)
         vec2 rectMin = brushBottomLeftUv;
         vec2 rectMax = brushBottomLeftUv + brushSizeUv;
         vec2 rectCenter = (rectMin + rectMax) * 0.5;
         vec2 halfSize = brushSizeUv * 0.5;
-        
+
         vec2 d = abs(zoomedUv - rectCenter) - halfSize;
         float outsideDist = length(max(d, 0.0));
         float insideDist = min(max(d.x, d.y), 0.0);
         float distToBorder = outsideDist + insideDist;
 
-        float rectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv.x, abs(distToBorder));
-        if (rectAlpha > 0.0) {
-            color = fract(color + 0.5);
-        }
-    }
-
-    if (showSourceRectangle) {
-        // Draw source rectangle (faint)
-        vec2 effectiveOffset = vec2(sourceOffsetX, sourceOffsetY);
-        vec2 sourceBottomLeft = brushBottomLeftUv + effectiveOffset;
-        vec2 sourceCenter = sourceBottomLeft + sourceBrushSizeUv * 0.5;
-
-        if (sourceCenter.x >= 0.0 && sourceCenter.x <= 1.0 &&
-            sourceCenter.y >= 0.0 && sourceCenter.y <= 1.0) {
-
-            vec2 dSource = abs(zoomedUv - sourceCenter) - sourceBrushSizeUv * 0.5 + strokeWidthUv;
-            float outsideDistSource = length(max(dSource, 0.0));
-            float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
-            float distToBorderSource = outsideDistSource + insideDistSource;
-
-            float sourceRectAlpha = 1.0 - smoothstep(0.0, strokeWidthUv.x, abs(distToBorderSource));
-            if (sourceRectAlpha > 0.0) {
-                color = fract(color + 0.5);
-            }
-        }
+        float rectAlpha = 1.0 - smoothstep(0.0, fwidth(distToBorder), abs(distToBorder));
+        // Mantine orange[6] #fd7e14
+        color = mix(color, vec3(0.992, 0.494, 0.078), rectAlpha);
     }
 
     outColor = vec4(color, 1.0);

@@ -394,17 +394,15 @@ export class StrokeRenderer {
     if (mode === "fixed") {
       return sourcePositionUv.clone().sub(currentBrushUv);
     } else if (mode === "anchored") {
-      if (state.cursorPosition) {
-        const brushStartBottomLeftUv = unitsToUv(
-          state.cursorPosition.beats,
-          state.cursorPosition.pitch,
-          bpm,
-          totalDuration,
-          this.spectrogramData.bandsPerOctave,
-          this.spectrogramData.numBands,
+      if (state.lockedOffset) {
+        return unitsToUv(
+          state.lockedOffset.beats,
+          state.lockedOffset.pitch,
+          sourceBpm,
+          sourceTotalDuration,
+          sourceSpectrogramData.bandsPerOctave,
+          sourceSpectrogramData.numBands,
         );
-        const brushStartUv = brushStartBottomLeftUv.clone();
-        return sourcePositionUv.clone().sub(brushStartUv);
       } else {
         return sourcePositionUv.clone().sub(currentBrushUv);
       }

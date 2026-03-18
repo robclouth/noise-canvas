@@ -188,6 +188,7 @@ export const FileRenderer = memo(
           showVerticalGrid: { value: true },
           showTargetRectangle: { value: false },
           showSourceRectangle: { value: false },
+          sourceSamplingBottomLeftUv: { value: new Vector2(-1, -1) },
           viewZoomPower: { value: 0.0 },
           viewOffset: { value: 0.0 },
           wrapMode: { value: 0 },
@@ -356,17 +357,15 @@ export const FileRenderer = memo(
         if (mode === "fixed") {
           return sourcePositionUv.clone().sub(currentBrushUv);
         } else if (mode === "anchored") {
-          if (state.cursorPosition) {
-            const brushStartBottomLeftUv = unitsToUv(
-              state.cursorPosition.beats,
-              state.cursorPosition.pitch,
-              bpm,
-              totalDuration,
-              spectrogramData.bandsPerOctave,
-              spectrogramData.numBands,
+          if (state.lockedOffset) {
+            return unitsToUv(
+              state.lockedOffset.beats,
+              state.lockedOffset.pitch,
+              sourceBpm,
+              sourceTotalDuration,
+              sourceSpectrogramData.bandsPerOctave,
+              sourceSpectrogramData.numBands,
             );
-            const brushStartUv = brushStartBottomLeftUv.clone();
-            return sourcePositionUv.clone().sub(brushStartUv);
           } else {
             return sourcePositionUv.clone().sub(currentBrushUv);
           }
@@ -528,6 +527,36 @@ export const FileRenderer = memo(
         brushSizeUv.y = Math.max(brushSizeUv.y, stepBrushSize.y);
       }
 
+      // For source file: compute the sampling position in this file's UV space.
+      // Uses the active file's cursor (converted via its metadata) plus the offset,
+      // which simplifies to sourcePosition_sourceUV for fixed/anchored modes.
+      let sourceDisplayPos = new Vector2(-1, -1);
+      if (isSourceFile && state.cursorPosition && state.activeFileId) {
+        const activeFile = openFiles[state.activeFileId];
+        if (activeFile?.spectrogramData) {
+          const activeBpm = state.filepathsBpm[activeFile.filePath] || 120;
+          const activeDuration = activeFile.spectrogramData.numFrames / activeFile.spectrogramData.sampleRate;
+          const activeCursorUV = unitsToUv(
+            state.cursorPosition.beats,
+            state.cursorPosition.pitch,
+            activeBpm,
+            activeDuration,
+            activeFile.spectrogramData.bandsPerOctave,
+            activeFile.spectrogramData.numBands,
+          );
+          const offset = calculateSourceOffset(
+            activeStepState,
+            activeCursorUV,
+            bpm,
+            totalDuration,
+            spectrogramData,
+            activeBpm,
+            activeDuration,
+          );
+          sourceDisplayPos = activeCursorUV.clone().add(offset);
+        }
+      }
+
       // Render brush stroke if requested
       if (applyStroke.current && cursorPos.x >= 0) {
         const sourceFile = openFiles[state.sourceFile!];
@@ -591,6 +620,7 @@ export const FileRenderer = memo(
       displayMaterial.uniforms.maxDb.value = state.displayMaxDb;
 
       displayMaterial.uniforms.brushBottomLeftUv.value = cursorPos;
+      displayMaterial.uniforms.sourceSamplingBottomLeftUv.value = sourceDisplayPos;
       displayMaterial.uniforms.brushSizeUv.value = brushSizeUv;
       displayMaterial.uniforms.sourceBrushSizeUv.value = (() => {
         const targetFile = hoveredFile || file;
@@ -631,10 +661,10 @@ export const FileRenderer = memo(
       })();
 
       displayMaterial.uniforms.showTargetRectangle.value = Boolean(
-        state.cursorVisible && cursorPos.x >= 0 && (isMouseOverAnyFile || isActiveFile),
+        state.cursorVisible && state.hoveredFile === fileId,
       );
       displayMaterial.uniforms.showSourceRectangle.value = Boolean(
-        state.cursorVisible && isSourceFile && (isMouseOverAnyFile || cursorPos.x >= 0),
+        state.cursorVisible && isSourceFile && isMouseOverAnyFile,
       );
       displayMaterial.uniforms.viewZoomPower.value = viewZoomPower;
       displayMaterial.uniforms.viewOffset.value = viewOffset;
@@ -668,7 +698,7 @@ export const FileRenderer = memo(
       displayMaterial.uniforms.showHorizontalGrid.value = gridWidthPx >= MIN_GRID_SPACING_PX && gridSizeBeats > 0;
       displayMaterial.uniforms.showVerticalGrid.value = gridHeightPx >= MIN_GRID_SPACING_PX && gridSizeSemis > 0;
 
-      // Update source offset for display (so source rectangle shows correctly)
+      // Update source offset uniforms (used by effect shaders via effect-common.glsl)
       if (state.sourceFile) {
         const sourceFileData = openFiles[state.sourceFile];
         if (sourceFileData) {
