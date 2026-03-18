@@ -1,8 +1,8 @@
 import { useStore } from "@/store";
-import { ActionIcon, Badge, Box, Group, NumberInput } from "@mantine/core";
+import { ActionIcon, Badge, Box, Group, Menu, NumberInput } from "@mantine/core";
 import { openFiles } from "@renderer/store/files";
 import truncateMiddle from "@stdlib/string-truncate-middle";
-import { Copy, Maximize2, Minimize2, Pipette, X } from "lucide-react";
+import { Copy, Maximize2, Minimize2, Pipette, Scissors, X } from "lucide-react";
 import { memo } from "react";
 import { Tooltip } from "./tooltip";
 
@@ -86,6 +86,25 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
             min={10}
           />
         </Tooltip>
+        <Menu position="bottom-end" withinPortal>
+          <Tooltip label="Split this file into separate components.">
+            <Menu.Target>
+              <ActionIcon color="dark.5" onClick={(e) => e.stopPropagation()}>
+                <Scissors size={16} />
+              </ActionIcon>
+            </Menu.Target>
+          </Tooltip>
+          <Menu.Dropdown>
+            <Menu.Item
+              onClick={(e) => {
+                e.stopPropagation();
+                useStore.getState().hpssFile(fileId);
+              }}
+            >
+              Split Harmonic and Percussive (HPSS)
+            </Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
         <Tooltip label="Duplicate this file to create an editable copy.">
           <ActionIcon
             color="dark.5"

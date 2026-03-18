@@ -158,6 +158,21 @@ export async function synthesize(
   );
 }
 
+export async function hpss(
+  packedData: Float32Array,
+  analysisMetadata: {
+    numBands: number;
+    numChannels: number;
+    bandOffsets: Uint32Array;
+    bandLengths: Uint32Array;
+  },
+  kernelH = 31,
+  kernelV = 31,
+): Promise<{ harmonic: Float32Array; percussive: Float32Array }> {
+  const gab = init();
+  return await gab.hpss(packedData, analysisMetadata, kernelH, kernelV);
+}
+
 /**
  * Export audio channels to a file using ffmpeg
  * @param audioChannels Array of Float32Array channels

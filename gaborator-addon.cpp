@@ -689,10 +689,214 @@ Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
     return worker->GetPromise();
 }
 
+// ─── HPSS helpers ────────────────────────────────────────────────────────────
+
+// O(n) median via nth_element; modifies v in-place
+static float medianInPlace(std::vector<float> &v)
+{
+    if (v.empty())
+        return 0.0f;
+    size_t mid = v.size() / 2;
+    std::nth_element(v.begin(), v.begin() + mid, v.end());
+    if (v.size() % 2 == 1)
+        return v[mid];
+    float hi = v[mid];
+    std::nth_element(v.begin(), v.begin() + mid - 1, v.end());
+    return (v[mid - 1] + hi) * 0.5f;
+}
+
+// Sliding-window 1-D median filter along the time axis for a single band.
+// Boundary condition: clamp (reflect-zero).
+static std::vector<float> timeMedianFilter(const std::vector<float> &band, int kernel)
+{
+    int L = (int)band.size();
+    int half = kernel / 2;
+    std::vector<float> result(L);
+    std::vector<float> window;
+    window.reserve(kernel);
+    for (int t = 0; t < L; ++t)
+    {
+        window.clear();
+        for (int dt = -half; dt <= half; ++dt)
+        {
+            int idx = std::max(0, std::min(L - 1, t + dt));
+            window.push_back(band[idx]);
+        }
+        result[t] = medianInPlace(window);
+    }
+    return result;
+}
+
+// Median filter across adjacent frequency bands at each time position.
+// Adjacent bands are aligned by normalised time (0-1) and nearest-sample lookup.
+static std::vector<std::vector<float>> freqMedianFilter(
+    const std::vector<std::vector<float>> &mags,
+    const std::vector<uint32_t> &bandLengths,
+    int numBands, int kernel)
+{
+    int half = kernel / 2;
+    std::vector<std::vector<float>> P(numBands);
+    std::vector<float> window;
+    window.reserve(kernel);
+
+    for (int b = 0; b < numBands; ++b)
+    {
+        int L = (int)bandLengths[b];
+        P[b].resize(L);
+        for (int t = 0; t < L; ++t)
+        {
+            float normTime = (L > 1) ? (float)t / (float)(L - 1) : 0.0f;
+            window.clear();
+            for (int db = -half; db <= half; ++db)
+            {
+                int nb = b + db;
+                if (nb < 0 || nb >= numBands)
+                    continue;
+                int nbL = (int)bandLengths[nb];
+                int nbT = (nbL > 1)
+                              ? std::min((int)std::round(normTime * (float)(nbL - 1)), nbL - 1)
+                              : 0;
+                window.push_back(mags[nb][nbT]);
+            }
+            P[b][t] = medianInPlace(window);
+        }
+    }
+    return P;
+}
+
+// ─── HpssWorker ──────────────────────────────────────────────────────────────
+
+class HpssWorker : public Napi::AsyncWorker
+{
+public:
+    HpssWorker(Napi::Env env,
+               Napi::Float32Array packedDataJs,
+               Napi::Object metaJs,
+               int kernelH, int kernelV)
+        : Napi::AsyncWorker(env),
+          deferred(Napi::Promise::Deferred::New(env)),
+          kernelH(kernelH), kernelV(kernelV)
+    {
+        packedData.assign(packedDataJs.Data(),
+                          packedDataJs.Data() + packedDataJs.ElementLength());
+
+        numBands    = metaJs.Get("numBands").As<Napi::Number>().Int32Value();
+        numChannels = metaJs.Get("numChannels").As<Napi::Number>().Int32Value();
+
+        Napi::Uint32Array bo = metaJs.Get("bandOffsets").As<Napi::Uint32Array>();
+        bandOffsets.assign(bo.Data(), bo.Data() + bo.ElementLength());
+
+        Napi::Uint32Array bl = metaJs.Get("bandLengths").As<Napi::Uint32Array>();
+        bandLengths.assign(bl.Data(), bl.Data() + bl.ElementLength());
+    }
+
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+    void Execute() override
+    {
+        const int floatsPerPixel = 4;
+        // Start with full copies — phase channels are preserved untouched
+        harmonicData   = packedData;
+        percussiveData = packedData;
+
+        const float eps = 1e-10f;
+
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            int magOff = ch * 2; // 0 for left channel, 2 for right
+
+            // Extract magnitude per band
+            std::vector<std::vector<float>> mags(numBands);
+            for (int b = 0; b < numBands; ++b)
+            {
+                int L = (int)bandLengths[b];
+                mags[b].resize(L);
+                for (int t = 0; t < L; ++t)
+                {
+                    size_t fi = ((size_t)bandOffsets[b] + t) * floatsPerPixel + magOff;
+                    mags[b][t] = packedData[fi];
+                }
+            }
+
+            // H: time-axis median → captures content stable over time (harmonic)
+            std::vector<std::vector<float>> H(numBands);
+            for (int b = 0; b < numBands; ++b)
+                H[b] = timeMedianFilter(mags[b], kernelH);
+
+            // P: frequency-axis median → captures broadband transients (percussive)
+            std::vector<std::vector<float>> P =
+                freqMedianFilter(mags, bandLengths, numBands, kernelV);
+
+            // Wiener soft masks applied to magnitude channels only
+            for (int b = 0; b < numBands; ++b)
+            {
+                int L = (int)bandLengths[b];
+                for (int t = 0; t < L; ++t)
+                {
+                    size_t fi = ((size_t)bandOffsets[b] + t) * floatsPerPixel + magOff;
+                    float h = H[b][t], p = P[b][t];
+                    float h2 = h * h, p2 = p * p, denom = h2 + p2 + eps;
+                    harmonicData[fi]   = packedData[fi] * (h2 / denom);
+                    percussiveData[fi] = packedData[fi] * (p2 / denom);
+                }
+            }
+        }
+    }
+
+    void OnOK() override
+    {
+        Napi::Env env = Env();
+        Napi::Object result = Napi::Object::New(env);
+
+        Napi::Float32Array hJs = Napi::Float32Array::New(env, harmonicData.size());
+        memcpy(hJs.Data(), harmonicData.data(), harmonicData.size() * sizeof(float));
+        result.Set("harmonic", hJs);
+
+        Napi::Float32Array pJs = Napi::Float32Array::New(env, percussiveData.size());
+        memcpy(pJs.Data(), percussiveData.data(), percussiveData.size() * sizeof(float));
+        result.Set("percussive", pJs);
+
+        deferred.Resolve(result);
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    std::vector<float>    packedData, harmonicData, percussiveData;
+    std::vector<uint32_t> bandOffsets, bandLengths;
+    int numBands, numChannels, kernelH, kernelV;
+};
+
+Napi::Value HpssAsync(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 2 || !info[0].IsTypedArray() || !info[1].IsObject())
+    {
+        Napi::TypeError::New(env,
+            "Expected (Float32Array packedData, Object meta[, number kernelH, number kernelV])")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    int kernelH = (info.Length() > 2 && info[2].IsNumber()) ? info[2].As<Napi::Number>().Int32Value() : 31;
+    int kernelV = (info.Length() > 3 && info[3].IsNumber()) ? info[3].As<Napi::Number>().Int32Value() : 31;
+
+    auto *worker = new HpssWorker(env,
+        info[0].As<Napi::Float32Array>(),
+        info[1].As<Napi::Object>(),
+        kernelH, kernelV);
+    auto promise = worker->GetPromise();
+    worker->Queue();
+    return promise;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 Napi::Object init(Napi::Env env, Napi::Object exports)
 {
     exports.Set("analyze", Napi::Function::New(env, AnalyzeAsync));
     exports.Set("synthesize", Napi::Function::New(env, SynthesizeAsync));
+    exports.Set("hpss", Napi::Function::New(env, HpssAsync));
     return exports;
 }
 

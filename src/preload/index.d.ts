@@ -71,6 +71,17 @@ declare global {
       ) => Promise<{
         channels: Float32Array[];
       }>;
+      hpss: (
+        packedData: Float32Array,
+        analysisMetadata: {
+          numBands: number;
+          numChannels: number;
+          bandOffsets: Uint32Array;
+          bandLengths: Uint32Array;
+        },
+        kernelH?: number,
+        kernelV?: number,
+      ) => Promise<{ harmonic: Float32Array; percussive: Float32Array }>;
       exportAudio: (
         audioChannels: Float32Array[],
         outputPath: string,

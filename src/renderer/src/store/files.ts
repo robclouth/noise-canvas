@@ -13,6 +13,7 @@ export interface FilesState {
   openFileIds: string[];
   openFilePath: (filePath: string) => Promise<void>;
   duplicateFile: (fileId: string) => Promise<void>;
+  hpssFile: (fileId: string) => Promise<void>;
   saveActiveFile: () => Promise<void>;
   saveActiveFileAs: () => Promise<void>;
   saveActiveFileVersion: () => Promise<void>;
@@ -40,6 +41,8 @@ export interface FilesState {
   setFileDirty: (fileId: string, dirty: boolean) => void;
   filesSynthesizing: Record<string, boolean>;
   setFileSynthesizing: (fileId: string, synthesizing: boolean) => void;
+  filesLoading: Record<string, string>;
+  setFileLoading: (fileId: string, message: string | undefined) => void;
   activeFileId: string | null;
   setActiveFileId: (activeFileId: string | null) => Promise<void>;
   sourceFile: string | null;
@@ -161,6 +164,21 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   openFileIds: [],
   openFilePath: async (filepath: string) => {
     const state = get();
+    const fileId = generateFileId();
+
+    // Add a placeholder immediately so the file appears in the UI with a loading state
+    openFiles[fileId] = { id: fileId, filePath: filepath };
+    set(
+      produce((state: State) => {
+        state.openFileIds.push(fileId);
+        state.filepathsBpm[filepath] ??= state.mostRecentBpm ?? 120;
+        state.filesBandsPerOctave[fileId] = state.bandsPerOctave;
+        state.filesZoom[fileId] = 0;
+        state.filesOffset[fileId] = 0;
+        state.filesPlaybackStartTime[fileId] = 0;
+        state.filesLoading[fileId] = "Analysing audio...";
+      }),
+    );
 
     try {
       const result = await window.audioAnalysis.analyze(filepath, {
@@ -192,28 +210,28 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         },
       };
 
-      // Generate unique file ID
-      const fileId = generateFileId();
-      openFiles[fileId] = {
-        id: fileId,
-        filePath: filepath,
-        spectrogramData,
-      };
+      openFiles[fileId] = { ...openFiles[fileId], spectrogramData };
 
-      return set(
+      set(
         produce((state: State) => {
-          state.openFileIds.push(fileId);
-          state.filepathsBpm[filepath] ??= state.mostRecentBpm ?? 120;
-          state.filesBandsPerOctave[fileId] = state.bandsPerOctave;
-          state.filesZoom[fileId] = 0;
-          state.filesOffset[fileId] = 0;
-          state.filesPlaybackStartTime[fileId] = 0;
-
+          delete state.filesLoading[fileId];
           state.sourceFile = fileId;
           state.activeFileId = fileId;
         }),
       );
     } catch (error) {
+      // Remove the placeholder on failure
+      delete openFiles[fileId];
+      set(
+        produce((state: State) => {
+          state.openFileIds = state.openFileIds.filter((id) => id !== fileId);
+          delete state.filesLoading[fileId];
+          delete state.filesBandsPerOctave[fileId];
+          delete state.filesZoom[fileId];
+          delete state.filesOffset[fileId];
+          delete state.filesPlaybackStartTime[fileId];
+        }),
+      );
       console.error("Error opening file:", error);
       notifications.show({
         title: `Failed to open file`,
@@ -263,6 +281,76 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesDirty[newFileId] = false;
       }),
     );
+  },
+  hpssFile: async (fileId: string) => {
+    const originalFile = openFiles[fileId];
+    if (!originalFile) return;
+
+    const fboData = await originalFile.rendererRef?.current?.getFBOData();
+    if (!fboData) return;
+
+    const { spectrogramData } = originalFile;
+    if (!spectrogramData) return;
+
+    const ext = window.nodePath.extname(originalFile.filePath);
+    const base = originalFile.filePath.slice(0, originalFile.filePath.length - ext.length);
+
+    const harmonicId = generateFileId();
+    const percussiveId = generateFileId();
+
+    // Add placeholder files immediately so they appear in the UI with a loading state
+    openFiles[harmonicId] = { id: harmonicId, filePath: `${base}_harmonic${ext}` };
+    openFiles[percussiveId] = { id: percussiveId, filePath: `${base}_percussive${ext}` };
+
+    const sourceBpm = get().filepathsBpm[originalFile.filePath];
+
+    set(
+      produce((state: State) => {
+        const idx = state.openFileIds.indexOf(fileId);
+        state.openFileIds.splice(idx + 1, 0, harmonicId, percussiveId);
+        for (const id of [harmonicId, percussiveId]) {
+          const newPath = openFiles[id].filePath;
+          state.filesBandsPerOctave[id] = state.filesBandsPerOctave[fileId];
+          state.filesZoom[id] = state.filesZoom[fileId];
+          state.filesOffset[id] = state.filesOffset[fileId];
+          state.filesPlaybackStartTime[id] = 0;
+          state.filesDirty[id] = true;
+          state.filepathsBpm[newPath] = sourceBpm;
+          state.filesLoading[id] = "Separating harmonic and percussive...";
+        }
+      }),
+    );
+
+    try {
+      const { harmonic, percussive } = await window.audioAnalysis.hpss(fboData, {
+        numBands: spectrogramData.numBands,
+        numChannels: spectrogramData.numChannels,
+        bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
+        bandLengths: spectrogramData.synthesisMetadata.bandLengths,
+      });
+
+      const makeSpectrogramData = (data: Float32Array) => ({
+        ...spectrogramData,
+        packedData: data,
+        inverseMap: spectrogramData.inverseMap.slice(),
+        metadata: spectrogramData.metadata.slice(),
+        synthesisMetadata: {
+          bandLengths: spectrogramData.synthesisMetadata.bandLengths.slice(),
+          bandOffsets: spectrogramData.synthesisMetadata.bandOffsets.slice(),
+          bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s.slice(),
+        },
+      });
+
+      openFiles[harmonicId] = { ...openFiles[harmonicId], spectrogramData: makeSpectrogramData(harmonic) };
+      openFiles[percussiveId] = { ...openFiles[percussiveId], spectrogramData: makeSpectrogramData(percussive) };
+    } finally {
+      set(
+        produce((state: State) => {
+          delete state.filesLoading[harmonicId];
+          delete state.filesLoading[percussiveId];
+        }),
+      );
+    }
   },
   saveActiveFile: async () => {
     const state = get();
@@ -827,6 +915,18 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     set((state) => ({
       filesSynthesizing: { ...state.filesSynthesizing, [fileId]: synthesizing },
     }));
+  },
+  filesLoading: {},
+  setFileLoading: (fileId: string, message: string | undefined) => {
+    set(
+      produce((state: State) => {
+        if (message === undefined) {
+          delete state.filesLoading[fileId];
+        } else {
+          state.filesLoading[fileId] = message;
+        }
+      }),
+    );
   },
   activeFileId: null,
   setActiveFileId: async (activeFileId) => {

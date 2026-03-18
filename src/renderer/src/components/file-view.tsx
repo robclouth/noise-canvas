@@ -1,5 +1,5 @@
 import { useStore } from "@/store";
-import { Box, Loader } from "@mantine/core";
+import { Box, Loader, Text } from "@mantine/core";
 import { View } from "@react-three/drei";
 import { openFiles } from "@renderer/store/files";
 import { useGesture } from "@use-gesture/react";
@@ -39,7 +39,8 @@ function getSnappedCoordinates(
   const zoom = state.filesZoom[fileId];
   const offset = state.filesOffset[fileId];
   const uv = screenToZoomed(screenUv, zoom, offset);
-  const { spectrogramData } = openFiles[fileId];
+  const spectrogramData = openFiles[fileId]?.spectrogramData;
+  if (!spectrogramData) return null;
 
   let snappedX = uv.x;
   let snappedY = uv.y;
@@ -79,6 +80,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const zoom = useStore((state) => state.filesZoom[fileId]);
   const offset = useStore((state) => state.filesOffset[fileId]);
   const isSynthesizing = useStore((state) => state.filesSynthesizing[fileId]);
+  const loadingMessage = useStore((state) => state.filesLoading[fileId]);
 
   const [isPanning, setIsPanning] = useState(false);
 
@@ -204,6 +206,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     (uvX: number, uvY: number) => {
       const state = useStore.getState();
       const { filePath, spectrogramData } = openFiles[fileId];
+      if (!spectrogramData) return { beats: 0, pitch: 0 };
       const bpm = state.filepathsBpm[filePath];
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
@@ -231,6 +234,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       // Track time range when dragging
       if (isStrokingRef.current && strokeTimeRangeRef.current.min !== null) {
         const { spectrogramData } = file;
+        if (!spectrogramData) return;
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
         const currentBrushStart = snappedX * totalDuration;
         const currentBrushEnd = snappedX * totalDuration;
@@ -319,6 +323,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
       if (rendererRef?.current) {
         const { spectrogramData } = file;
+        if (!spectrogramData) return;
         isStrokingRef.current = true;
         rendererRef.current.beginStroke();
         const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
@@ -391,7 +396,8 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
       // Apply snapping
       const { gridSizeBeats, gridSizeSemis, bandsPerOctave } = state;
-      const { spectrogramData } = openFiles[fileId];
+      const spectrogramData = openFiles[fileId]?.spectrogramData;
+      if (!spectrogramData) return;
       const bpm = state.filepathsBpm[openFiles[fileId].filePath];
 
       let snappedX = uv.x;
@@ -474,25 +480,49 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       }}
     >
       <FileHeader fileId={fileId} />
-      <Box
-        ref={viewRef}
-        h={isFullscreen ? undefined : 400}
-        style={{ ...(isFullscreen ? { flex: 1 } : {}), ...cursorStyle }}
-        pos="relative"
-        onMouseEnter={handleMouseEnter}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
-        onMouseDown={handleCanvasMouseDown}
-        onMouseUp={handleCanvasMouseUp}
-        onContextMenu={(e) => e.preventDefault()}
-      >
-        <View style={viewStyle}>
-          <FileRenderer fileId={fileId} ref={refCallback} />
-        </View>
-        {isActive && <LoopRegion fileId={fileId} />}
-        {isActive && <PlaybackLine fileId={fileId} />}
-      </Box>
-      <TimeLegend fileId={fileId} />
+      {loadingMessage || !file.spectrogramData ? (
+        <Box
+          h={isFullscreen ? undefined : 400}
+          style={{
+            ...(isFullscreen ? { flex: 1 } : {}),
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+          }}
+          pos="relative"
+        >
+          <Loader size="sm" />
+          {loadingMessage && (
+            <Text size="xs" c="dimmed">
+              {loadingMessage}
+            </Text>
+          )}
+        </Box>
+      ) : (
+        <>
+          <Box
+            ref={viewRef}
+            h={isFullscreen ? undefined : 400}
+            style={{ ...(isFullscreen ? { flex: 1 } : {}), ...cursorStyle }}
+            pos="relative"
+            onMouseEnter={handleMouseEnter}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+            onMouseDown={handleCanvasMouseDown}
+            onMouseUp={handleCanvasMouseUp}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <View style={viewStyle}>
+              <FileRenderer fileId={fileId} ref={refCallback} />
+            </View>
+            {isActive && <LoopRegion fileId={fileId} />}
+            {isActive && <PlaybackLine fileId={fileId} />}
+          </Box>
+          <TimeLegend fileId={fileId} />
+        </>
+      )}
       {isSynthesizing && <Loader size="xs" pos="absolute" bottom={25} right={10} />}
     </Box>
   );

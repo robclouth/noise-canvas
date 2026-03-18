@@ -44,7 +44,7 @@ export type SpectrogramData = {
 export type OpenFile = {
   id: string;
   filePath: string;
-  spectrogramData: SpectrogramData;
+  spectrogramData?: SpectrogramData;
   audioBuffer?: AudioBuffer;
   rendererRef?: React.RefObject<FileRendererHandle | null>;
 };
