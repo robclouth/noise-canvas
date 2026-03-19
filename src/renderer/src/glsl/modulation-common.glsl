@@ -16,6 +16,8 @@ struct Modulator {
   Parameter modulatorPatternRateY;
   Parameter modulatorStrength;
   Parameter modulatorRotation;
+  float modulatorEnvelopeSmoothing; // UV half-width of the averaging window
+  int modulatorEnvelopeSource; // 0=Amplitude, 1=Phase, 2=Panning
   float modulatorEnvelopeMinDb;
   float modulatorEnvelopeMaxDb;
   // Sequencer parameters
@@ -47,6 +49,42 @@ float getSeqDataValue(int modulatorIndex, int stepX, int stepY) {
   return texture(modulator3SeqDataTex, vec2(u, v)).r;
 }
 
+// Number of samples used when envelope smoothing is active.
+#define NUM_ENVELOPE_SMOOTH_SAMPLES 8
+
+// Returns the envelope value [0, 1] at a given UV for the specified source type.
+// Falls back gracefully when spectrogram sampling is not available (e.g. preview shader).
+float sampleEnvelopeAtUv(int src, vec2 sampleUv, float audioLevelDb, float minDb, float maxDb) {
+  if (src == 1) { // Phase: normalize [-PI, PI] to [0, 1]
+    #ifdef HAS_SPECTROGRAM_SAMPLING
+      vec4 s = sampleSourceInterp(sampleUv);
+      return (getPhase(s.rg) + PI) / (2.0 * PI);
+    #else
+      return 0.5;
+    #endif
+  } else if (src == 2) { // Panning: normalize [-1, 1] to [0, 1]
+    #ifdef HAS_SPECTROGRAM_SAMPLING
+      vec4 s = sampleSourceInterp(sampleUv);
+      float mL = getMag(s.rg);
+      float mR = getMag(s.ba);
+      return (mR - mL) / max(mR + mL, EPSILON) * 0.5 + 0.5;
+    #else
+      return 0.5;
+    #endif
+  } else { // Amplitude: map [minDb, maxDb] to [0, 1]
+    #ifdef HAS_SPECTROGRAM_SAMPLING
+      vec4 s = sampleSourceInterp(sampleUv);
+      float mL = getMag(s.rg);
+      float mR = getMag(s.ba);
+      float avgMag = max(0.5 * (mL + mR), 1e-6);
+      float levelDb = 20.0 * log(avgMag) / log(10.0);
+      return clamp((levelDb - minDb) / (maxDb - minDb), 0.0, 1.0);
+    #else
+      return clamp((audioLevelDb - minDb) / (maxDb - minDb), 0.0, 1.0);
+    #endif
+  }
+}
+
 // Base version that doesn't apply modulation to modulator parameters
 // This is used internally to avoid recursion
 float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float patternRateY, float strength, float rotation, float phaseX, float phaseY, float seqLoopX, float seqLoopY, float seqSwing, float audioLevelDb) {
@@ -56,10 +94,21 @@ float getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float p
 
   // Handle envelope follower mode
   if (modulator.modulatorMode == 1) { // Envelope Follower mode
-    // Map audio level from [minDb, maxDb] to [0, 1]
+    int src = modulator.modulatorEnvelopeSource;
     float minDb = modulator.modulatorEnvelopeMinDb;
     float maxDb = modulator.modulatorEnvelopeMaxDb;
-    v = clamp((audioLevelDb - minDb) / (maxDb - minDb), 0.0, 1.0);
+    float smoothing = modulator.modulatorEnvelopeSmoothing;
+    if (smoothing > EPSILON) {
+      float total = 0.0;
+      for (int i = 0; i < NUM_ENVELOPE_SMOOTH_SAMPLES; i++) {
+        float t = (float(i) + 0.5) / float(NUM_ENVELOPE_SMOOTH_SAMPLES);
+        vec2 sampleUv = vec2(clamp(uv.x + (t - 0.5) * 2.0 * smoothing, 0.0, 1.0), uv.y);
+        total += sampleEnvelopeAtUv(src, sampleUv, audioLevelDb, minDb, maxDb);
+      }
+      v = total / float(NUM_ENVELOPE_SMOOTH_SAMPLES);
+    } else {
+      v = sampleEnvelopeAtUv(src, uv, audioLevelDb, minDb, maxDb);
+    }
     return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
   }
 

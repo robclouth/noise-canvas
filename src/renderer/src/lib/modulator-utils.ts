@@ -29,6 +29,8 @@ export interface ModulatorUniform {
   modulatorPatternRateY: ModulatableParam;
   modulatorStrength: ModulatableParam;
   modulatorRotation: ModulatableParam;
+  modulatorEnvelopeSmoothing: number;
+  modulatorEnvelopeSource: number;
   modulatorEnvelopeMinDb: number;
   modulatorEnvelopeMaxDb: number;
   seqStepsX: number;
@@ -94,8 +96,12 @@ export const buildModulatorUniforms = (
     const rateSemis = state[`modulator${i + 1}PatternRateSemis`] as number;
     const strength = state[`modulator${i + 1}Strength`] as number;
     const rotation = state[`modulator${i + 1}Rotation`] as number;
+    const envelopeSmoothingBeats = state[`modulator${i + 1}EnvelopeSmoothingBeats`] as number;
+    const envelopeSource = state[`modulator${i + 1}EnvelopeSource`] as number;
     const envelopeMinDb = state[`modulator${i + 1}EnvelopeMinDb`] as number;
     const envelopeMaxDb = state[`modulator${i + 1}EnvelopeMaxDb`] as number;
+    // Convert smoothing beats to UV half-width
+    const envelopeSmoothingUv = ((envelopeSmoothingBeats * 60) / bpm) / totalDuration / 2;
 
     const modulatorPatternRate = unitsToUv(rateBeats, rateSemis, bpm, totalDuration, bandsPerOctave, numBands);
 
@@ -157,6 +163,8 @@ export const buildModulatorUniforms = (
         modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}Rotation` as ParameterKey),
         contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}Rotation` as ParameterKey),
       },
+      modulatorEnvelopeSmoothing: envelopeSmoothingUv,
+      modulatorEnvelopeSource: envelopeSource,
       modulatorEnvelopeMinDb: envelopeMinDb,
       modulatorEnvelopeMaxDb: envelopeMaxDb,
       // Sequencer parameters

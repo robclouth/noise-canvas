@@ -106,6 +106,8 @@ const Scene = ({
           modA.modulatorMode !== modB.modulatorMode ||
           modA.modulatorPatternShape !== modB.modulatorPatternShape ||
           modA.modulatorPhaseMode !== modB.modulatorPhaseMode ||
+          modA.modulatorEnvelopeSmoothing !== modB.modulatorEnvelopeSmoothing ||
+          modA.modulatorEnvelopeSource !== modB.modulatorEnvelopeSource ||
           modA.modulatorEnvelopeMinDb !== modB.modulatorEnvelopeMinDb ||
           modA.modulatorEnvelopeMaxDb !== modB.modulatorEnvelopeMaxDb ||
           modA.seqStepsX !== modB.seqStepsX ||
@@ -176,6 +178,8 @@ const getModulatorParamKeys = (modulatorIndex: number): ParameterKey[] => {
     `modulator${idx}PhaseX`,
     `modulator${idx}PhaseY`,
     `modulator${idx}Strength`,
+    `modulator${idx}EnvelopeSmoothingBeats`,
+    `modulator${idx}EnvelopeSource`,
     `modulator${idx}EnvelopeMinDb`,
     `modulator${idx}EnvelopeMaxDb`,
   ] as ParameterKey[];
@@ -185,12 +189,15 @@ export const ModulatorView = () => {
   const [viewedModulatorIndex, setViewedModulatorIndex] = useState("0");
   const modulatorModeKey = `modulator${parseInt(viewedModulatorIndex) + 1}Mode` as ParameterKey;
   const modulatorPatternShapeKey = `modulator${parseInt(viewedModulatorIndex) + 1}PatternShape` as ParameterKey;
+  const modulatorEnvelopeSourceKey = `modulator${parseInt(viewedModulatorIndex) + 1}EnvelopeSource` as ParameterKey;
   const modulatorMode = useStore(selectParameter(modulatorModeKey));
   const modulatorPatternShape = useStore(selectParameter(modulatorPatternShapeKey));
+  const modulatorEnvelopeSource = useStore(selectParameter(modulatorEnvelopeSourceKey));
 
   const isPatternMode = modulatorMode === 0;
   const isEnvelopeFollowerMode = modulatorMode === 1;
   const isSequencerMode = modulatorMode === 2;
+  const isAmplitudeEnvelope = modulatorEnvelopeSource === 0;
   const isScaleMode = modulatorPatternShape === 11;
 
   const currentModulatorParams = getModulatorParamKeys(parseInt(viewedModulatorIndex));
@@ -285,11 +292,21 @@ export const ModulatorView = () => {
         {isEnvelopeFollowerMode && (
           <>
             <ParameterControl
-              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}EnvelopeMinDb` as ParameterKey}
+              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}EnvelopeSmoothingBeats` as ParameterKey}
             />
             <ParameterControl
-              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}EnvelopeMaxDb` as ParameterKey}
+              paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}EnvelopeSource` as ParameterKey}
             />
+            {isAmplitudeEnvelope && (
+              <>
+                <ParameterControl
+                  paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}EnvelopeMinDb` as ParameterKey}
+                />
+                <ParameterControl
+                  paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}EnvelopeMaxDb` as ParameterKey}
+                />
+              </>
+            )}
           </>
         )}
         {isSequencerMode && (

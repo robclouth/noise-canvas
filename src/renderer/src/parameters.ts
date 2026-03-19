@@ -198,6 +198,33 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     includeInStep: true,
     modulatable: !isWindows,
   };
+  modulatorDefs[`modulator${idx}EnvelopeSmoothingBeats`] = {
+    kind: "number",
+    name: `Modulator Envelope Smoothing ${idx}`,
+    label: "Smooth",
+    description: "Averages the envelope signal over this window of time to reduce fast transients.",
+    default: 0,
+    min: 0,
+    max: 4,
+    step: 0.01,
+    unit: BEAT_UNIT,
+    scale: "log",
+    marks: beatMarksWithZero,
+    includeInStep: true,
+  };
+  modulatorDefs[`modulator${idx}EnvelopeSource`] = {
+    kind: "options",
+    name: `Modulator Envelope Source ${idx}`,
+    label: "Source",
+    description: "The signal property the envelope follower tracks.",
+    default: 0,
+    options: [
+      { value: 0, label: "Amplitude" },
+      { value: 1, label: "Phase" },
+      { value: 2, label: "Panning" },
+    ],
+    includeInStep: true,
+  };
   modulatorDefs[`modulator${idx}EnvelopeMinDb`] = {
     kind: "number",
     name: `Modulator Envelope Min ${idx}`,

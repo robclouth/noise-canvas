@@ -66,6 +66,10 @@ export type ModulatorParameters = {
 } & {
   [K in Range<1, 4> as `modulator${K}PhaseMode`]: number;
 } & {
+  [K in Range<1, 4> as `modulator${K}EnvelopeSmoothingBeats`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}EnvelopeSource`]: number;
+} & {
   [K in Range<1, 4> as `modulator${K}EnvelopeMinDb`]: number;
 } & {
   [K in Range<1, 4> as `modulator${K}EnvelopeMaxDb`]: number;
@@ -98,6 +102,12 @@ function createModulatorParams(): ModulatorsState {
           .default,
         [`modulator${idx}PhaseMode`]: getOptionsParameterDef<number>(
           `modulator${idx}PhaseMode` as keyof ModulatorsState,
+        ).default,
+        [`modulator${idx}EnvelopeSmoothingBeats`]: getNumberParameterDef(
+          `modulator${idx}EnvelopeSmoothingBeats` as keyof ModulatorsState,
+        ).default,
+        [`modulator${idx}EnvelopeSource`]: getOptionsParameterDef<number>(
+          `modulator${idx}EnvelopeSource` as keyof ModulatorsState,
         ).default,
         [`modulator${idx}EnvelopeMinDb`]: getNumberParameterDef(`modulator${idx}EnvelopeMinDb` as keyof ModulatorsState)
           .default,

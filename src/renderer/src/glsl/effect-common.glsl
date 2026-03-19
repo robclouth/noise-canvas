@@ -61,8 +61,6 @@ uniform sampler2D blendOriginalTex;
 // DEFINES & HELPERS
 // ============================================================================
 
-#include "modulation-common.glsl" // Contains modulation and random functions
-
 // Unwraps a phase angle to the range [-PI, PI].
 float unwrapPhase(float phaseDelta) {
   return mod(phaseDelta + PI, 2.0 * PI) - PI;
@@ -286,6 +284,11 @@ float getAudioLevelDb(vec2 uv) {
   float avgMagnitude = max(0.5 * (magnitudeL + magnitudeR), 1e-6);
   return 20.0 * log(avgMagnitude) / log(10.0);
 }
+
+// Sampling functions are now available; include modulation helpers so the
+// envelope follower can directly sample phase/panning from the spectrogram.
+#define HAS_SPECTROGRAM_SAMPLING
+#include "modulation-common.glsl"
 
 /**
  * Samples from the original, unmodified destination spectrogram with interpolation.
