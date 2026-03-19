@@ -1,7 +1,7 @@
 import { Box, Button, NumberInput, SimpleGrid, Stack, Text, UnstyledButton } from "@mantine/core";
 import { ContextModalProps } from "@mantine/modals";
 import { EffectType, EFFECT_KEYS } from "@renderer/effects/types";
-import { EFFECT_COLORS } from "@renderer/lib/constants";
+import { EFFECT_COLORS, EFFECT_DESCRIPTIONS, EFFECT_LABELS } from "@renderer/lib/constants";
 import { useRef } from "react";
 
 export const NewFileModal = ({
@@ -70,29 +70,9 @@ export const NewFileModal = ({
   );
 };
 
-const EFFECT_LABELS: Record<string, string> = {
-  dynamics: "Dynamics",
-  transform: "Transform",
-  overtones: "Overtones",
-  blur: "Smooth",
-  synthesize: "Synthesize",
-  evolve: "Evolve",
-  binaural: "Binaural",
-  sort: "Sort",
-};
 
-const EFFECT_DESCRIPTIONS: Record<string, string> = {
-  dynamics: "Control dynamic range with compression, expansion, gating, and inversion.",
-  transform: "Shift, scale, and rotate the spectrogram content in time and frequency.",
-  overtones: "Add overtones to create richer timbres.",
-  blur: "Smooth and blend frequencies over time and pitch for softer transitions.",
-  synthesize: "Generate new audio content from scratch (noise, sine waves, etc.).",
-  evolve: "Reaction-advection-diffusion simulation for fluid, biological, and chaotic patterns.",
-  binaural: "HRTF-based binaural spatialization for 3D audio positioning.",
-  sort: "Odd-even transposition sort on spectrogram bins by magnitude or phase.",
-};
-
-const AVAILABLE_EFFECTS = EFFECT_KEYS.filter((key) => key !== "passthrough") as Exclude<EffectType, "passthrough">[];
+const HIDDEN_EFFECTS = new Set(["sort", "transmute", "waveshape"]);
+const AVAILABLE_EFFECTS = EFFECT_KEYS.filter((key) => key !== "passthrough" && !HIDDEN_EFFECTS.has(key)) as Exclude<EffectType, "passthrough">[];
 
 export const AddEffectModal = ({
   context,

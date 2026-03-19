@@ -3,7 +3,7 @@ import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
 import { Box, Button, Stack } from "@mantine/core";
 import { openContextModal } from "@mantine/modals";
 import { EffectItem, EffectType } from "@renderer/effects/types";
-import { EFFECT_COLORS } from "@renderer/lib/constants";
+import { EFFECT_COLORS, EFFECT_DESCRIPTIONS, EFFECT_LABELS } from "@renderer/lib/constants";
 import { getEffectParameterDefaults } from "@renderer/parameters";
 import { Plus } from "lucide-react";
 import { memo, useCallback, useMemo } from "react";
@@ -17,6 +17,8 @@ import { HarmonicsEffect } from "./effect-views/overtones-effect";
 import { SynthesizeEffect } from "./effect-views/synthesize-effect";
 import { SortEffect } from "./effect-views/sort-effect";
 import { TransformEffect } from "./effect-views/transform-effect";
+import { TransmuteEffect } from "./effect-views/transmute-effect";
+import { WaveshapeEffect } from "./effect-views/waveshape-effect";
 
 const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
   dynamics: <DynamicsEffect />,
@@ -27,28 +29,8 @@ const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
   evolve: <EvolveEffect />,
   binaural: <BinauralEffect />,
   sort: <SortEffect />,
-};
-
-const EFFECT_LABELS: Record<string, string> = {
-  dynamics: "Dynamics",
-  transform: "Transform",
-  overtones: "Overtones",
-  blur: "Blur",
-  synthesize: "Synthesize",
-  evolve: "Evolve",
-  binaural: "Binaural",
-  sort: "Sort",
-};
-
-const EFFECT_DESCRIPTIONS: Record<string, string> = {
-  dynamics: "Control dynamic range with compression, expansion, gating, and inversion.",
-  transform: "Shift, scale, and rotate the spectrogram content in time and frequency.",
-  overtones: "Add overtones to create richer timbres.",
-  blur: "Smooth and blend frequencies over time and pitch for softer transitions.",
-  synthesize: "Generate new audio content from scratch (noise, sine waves, etc.).",
-  evolve: "Reaction-advection-diffusion simulation for fluid, biological, and chaotic patterns.",
-  binaural: "HRTF-based binaural spatialization. Use pitch modulation on azimuth for per-band positioning.",
-  sort: "Odd-even transposition sort on spectrogram bins by magnitude or phase.",
+  transmute: <TransmuteEffect />,
+  waveshape: <WaveshapeEffect />,
 };
 
 import { ParameterKey } from "@/store/types";
@@ -80,6 +62,8 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
   ],
   binaural: ["binauralAzimuth", "binauralDistance", "binauralStereoAngle"],
   sort: ["sortDirection", "sortOrder", "sortBy", "sortStereoMode"],
+  transmute: ["transmuteMode", "transmuteAmount", "transmuteCurve"],
+  waveshape: ["waveshapeMode", "waveshapeDrive", "waveshapeTilt"],
 };
 
 const MAX_EFFECTS = 10;
@@ -154,6 +138,26 @@ export function EffectsList() {
     [setParameter],
   );
 
+  const handleCopyEffect = useCallback(
+    (id: string) => {
+      const state = useStore.getState();
+      const currentEffects = getParameterValue(state, "effects") as EffectItem[];
+      const source = currentEffects.find((item) => item.id === id);
+      if (!source) return;
+      const copy: EffectItem = {
+        id: crypto.randomUUID(),
+        effect: source.effect,
+        enabled: source.enabled,
+        params: { ...source.params },
+      };
+      const sourceIndex = currentEffects.indexOf(source);
+      const newEffects = [...currentEffects];
+      newEffects.splice(sourceIndex + 1, 0, copy);
+      setParameter("effects", newEffects);
+    },
+    [setParameter],
+  );
+
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
       <Droppable droppableId="effects">
@@ -168,6 +172,7 @@ export function EffectsList() {
                 index={index}
                 onEnabledChange={handleEnabledChange}
                 onRemove={handleRemoveEffect}
+                onCopy={handleCopyEffect}
               />
             ))}
             {provided.placeholder}
@@ -200,6 +205,7 @@ const EffectListItem = memo(function EffectListItem({
   index,
   onEnabledChange,
   onRemove,
+  onCopy,
 }: {
   id: string;
   effect: EffectType;
@@ -207,6 +213,7 @@ const EffectListItem = memo(function EffectListItem({
   index: number;
   onEnabledChange: (id: string, enabled: boolean) => void;
   onRemove: (id: string) => void;
+  onCopy: (id: string) => void;
 }) {
   const handleEnabledChange = useCallback(
     (newEnabled: boolean) => onEnabledChange(id, newEnabled),
@@ -214,6 +221,7 @@ const EffectListItem = memo(function EffectListItem({
   );
 
   const handleRemove = useCallback(() => onRemove(id), [id, onRemove]);
+  const handleCopy = useCallback(() => onCopy(id), [id, onCopy]);
 
   return (
     <Draggable draggableId={id} index={index}>
@@ -235,6 +243,7 @@ const EffectListItem = memo(function EffectListItem({
             enabled={enabled}
             onEnabledChange={handleEnabledChange}
             onRemove={handleRemove}
+            onCopy={handleCopy}
             dragHandleProps={provided.dragHandleProps}
             color={EFFECT_COLORS[effect] || "gray"}
             parameterKeys={EFFECT_PARAMS[effect]}

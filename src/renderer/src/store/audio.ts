@@ -225,6 +225,10 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     const player = getPlayer();
     player.buffer = new Tone.ToneAudioBuffer(buffer);
 
+    const peak = file?.audioPeak ?? 1;
+    const normalize = get().normalize;
+    player.volume.value = normalize && peak > 0 ? Tone.gainToDb(1 / peak) : 0;
+
     const startTime = filesPlaybackStartTime[activeFileId];
     const end = loopRegion?.end ?? buffer.duration;
     const loopStart = loopRegion?.start ?? 0;

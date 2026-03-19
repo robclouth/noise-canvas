@@ -122,6 +122,7 @@ export async function analyseBuffer(audioBuffer: AudioBuffer, params: AnalysisPa
 
 export interface SynthesisResult {
   channels: Float32Array[];
+  peak: number;
 }
 
 export async function synthesize(

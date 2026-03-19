@@ -46,6 +46,12 @@ export interface EffectsState {
   sortOrder: number;
   sortBy: number;
   sortStereoMode: number;
+  transmuteMode: number;
+  transmuteAmount: number;
+  transmuteCurve: number;
+  waveshapeMode: number;
+  waveshapeDrive: number;
+  waveshapeTilt: number;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -109,5 +115,15 @@ export const createEffectsSlice = (): EffectsState => {
     sortOrder: getParameterDef("sortOrder").default,
     sortBy: getParameterDef("sortBy").default,
     sortStereoMode: getParameterDef("sortStereoMode").default,
+
+    // ---------------- Transmute ----------------
+    transmuteMode: getParameterDef("transmuteMode").default,
+    transmuteAmount: getParameterDef("transmuteAmount").default,
+    transmuteCurve: getParameterDef("transmuteCurve").default,
+
+    // ---------------- Waveshape ----------------
+    waveshapeMode: getParameterDef("waveshapeMode").default,
+    waveshapeDrive: getParameterDef("waveshapeDrive").default,
+    waveshapeTilt: getParameterDef("waveshapeTilt").default,
   };
 };

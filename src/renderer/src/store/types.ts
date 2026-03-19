@@ -46,6 +46,7 @@ export type OpenFile = {
   filePath: string;
   spectrogramData?: SpectrogramData;
   audioBuffer?: AudioBuffer;
+  audioPeak?: number;
   rendererRef?: React.RefObject<FileRendererHandle | null>;
 };
 

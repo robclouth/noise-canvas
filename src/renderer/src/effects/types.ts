@@ -14,6 +14,8 @@ export const EFFECT_KEYS = [
   "passthrough",
   "binaural",
   "sort",
+  "transmute",
+  "waveshape",
 ] as const;
 
 // Effect type derived from the keys

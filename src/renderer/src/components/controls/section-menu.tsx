@@ -1,9 +1,10 @@
-import { ActionIcon, Button, Divider, Menu, Stack, Text } from "@mantine/core";
+import { ActionIcon, Button, Divider, Group, Menu, Stack, Text } from "@mantine/core";
 import { isEffectParameter, parameterDefs } from "@renderer/parameters";
 import { getEffectParameterValue, getModulationParamKeys, getParameterValue, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
-import { MoreVertical } from "lucide-react";
+import { Copy, MoreVertical, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { Tooltip } from "../tooltip";
 import {
   randomizeBooleanParameter,
   randomizeEffects,
@@ -18,6 +19,7 @@ type SectionMenuProps = {
   parameterKeys?: ParameterKey[];
   includeEffects?: boolean;
   onRemove?: () => void;
+  onCopy?: () => void;
   effectId?: string;
 };
 
@@ -30,6 +32,7 @@ export const SectionMenu = ({
   parameterKeys,
   includeEffects,
   onRemove,
+  onCopy,
   effectId,
 }: SectionMenuProps) => {
   const [opened, setOpened] = useState(false);
@@ -144,20 +147,58 @@ export const SectionMenu = ({
         </ActionIcon>
       </Menu.Target>
 
-      <Menu.Dropdown p={8} >
+      <Menu.Dropdown p={8}>
         <Stack gap={2}>
-          {/* Reset button */}
-          <Button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleReset();
-            }}
-            variant="subtle"
-            color="gray"
-            size="xs"
-          >
-            Reset
-          </Button>
+          {/* Action icons row */}
+          <Group gap={4} justify="space-between" mb={2}>
+            <Group gap={4}>
+              {onCopy && (
+                <Tooltip label="Duplicate">
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOpened(false);
+                      onCopy();
+                    }}
+                  >
+                    <Copy size={14} />
+                  </ActionIcon>
+                </Tooltip>
+              )}
+              <Tooltip label="Reset to defaults">
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleReset();
+                  }}
+                >
+                  <RotateCcw size={14} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
+            {onRemove && (
+              <Tooltip label="Remove">
+                <ActionIcon
+                  variant="subtle"
+                  color="red"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpened(false);
+                    onRemove();
+                  }}
+                >
+                  <Trash2 size={14} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+          </Group>
 
           {/* Randomize section */}
           {parameterKeys && (
@@ -190,23 +231,6 @@ export const SectionMenu = ({
                 mt={4}
               >
                 Randomize
-              </Button>
-            </>
-          )}
-          {onRemove && (
-            <>
-              <Divider my={4} />
-              <Button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setOpened(false);
-                  onRemove();
-                }}
-                variant="subtle"
-                color="red"
-                size="xs"
-              >
-                Remove
               </Button>
             </>
           )}

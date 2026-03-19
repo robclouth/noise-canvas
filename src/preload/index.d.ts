@@ -70,6 +70,7 @@ declare global {
         endBand?: number,
       ) => Promise<{
         channels: Float32Array[];
+        peak: number;
       }>;
       isModelDownloaded: (modelFile: string) => boolean;
       downloadModel: (

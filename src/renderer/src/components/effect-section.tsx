@@ -1,5 +1,5 @@
 import { ParameterKey } from "@/store/types";
-import { ActionIcon, Checkbox, Collapse, Group, Paper, SimpleGrid, Stack, Text } from "@mantine/core";
+import { ActionIcon, Checkbox, Collapse, Group, Paper, Stack, Text } from "@mantine/core";
 import { GripVertical } from "lucide-react";
 import { memo } from "react";
 import { SectionMenu } from "./controls/section-menu";
@@ -12,6 +12,7 @@ export type EffectSectionProps = {
   enabled: boolean;
   onEnabledChange: (enabled: boolean) => void;
   onRemove?: () => void;
+  onCopy?: () => void;
   dragHandleProps?: React.HTMLAttributes<HTMLButtonElement> | null;
   color?: string;
   parameterKeys?: ParameterKey[];
@@ -26,6 +27,7 @@ export const EffectSection = memo(
     enabled,
     onEnabledChange,
     onRemove,
+    onCopy,
     dragHandleProps,
     color,
     parameterKeys,
@@ -62,13 +64,12 @@ export const EffectSection = memo(
               storageKey={`effect-${label}`}
               parameterKeys={parameterKeys}
               onRemove={onRemove}
+              onCopy={onCopy}
               effectId={effectId}
             />
           </Group>
           <Collapse in={enabled}>
-            <SimpleGrid cols={2} spacing={"xs"} verticalSpacing={0}>
-              {children}
-            </SimpleGrid>
+            {children}
           </Collapse>
         </Stack>
       </Paper>

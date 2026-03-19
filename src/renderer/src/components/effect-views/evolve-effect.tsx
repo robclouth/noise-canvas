@@ -1,3 +1,4 @@
+import { SimpleGrid } from "@mantine/core";
 import { EFFECT_COLORS } from "@renderer/lib/constants";
 import { memo } from "react";
 import { ParameterControl } from "../controls/parameter-control";
@@ -6,7 +7,7 @@ const COLOR = EFFECT_COLORS.evolve;
 
 export const EvolveEffect = memo(function EvolveEffect() {
   return (
-    <>
+    <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
       <ParameterControl paramKey="evolveFlow" color={COLOR} />
       <ParameterControl paramKey="evolveSpread" color={COLOR} />
       <ParameterControl paramKey="evolveGrow" color={COLOR} />
@@ -17,6 +18,6 @@ export const EvolveEffect = memo(function EvolveEffect() {
       <ParameterControl paramKey="evolveScaleX" color={COLOR} />
       <ParameterControl paramKey="evolveScaleY" color={COLOR} />
       <ParameterControl paramKey="evolveEdgeMode" color={COLOR} />
-    </>
+    </SimpleGrid>
   );
 });

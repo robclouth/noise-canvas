@@ -7,6 +7,8 @@ import { passThroughEffect } from "./passthrough-effect";
 import { sortEffect } from "./sort-effect";
 import { synthesizeEffect } from "./synthesize-effect";
 import { transformEffect } from "./transform-effect";
+import { transmuteEffect } from "./transmute-effect";
+import { waveshapeEffect } from "./waveshape-effect";
 
 // Re-export types from the types module (which has no circular dependencies)
 export { DEFAULT_EFFECT_ORDER, EFFECT_KEYS } from "./types";
@@ -22,4 +24,6 @@ export const effects = {
   passthrough: passThroughEffect,
   binaural: binauralEffect,
   sort: sortEffect,
+  transmute: transmuteEffect,
+  waveshape: waveshapeEffect,
 };

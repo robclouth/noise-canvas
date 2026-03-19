@@ -187,4 +187,34 @@ export const EFFECT_COLORS: Record<string, string> = {
   evolve: "cyan",
   binaural: "pink",
   sort: "orange",
+  transmute: "indigo",
+  waveshape: "teal",
+};
+
+export const EFFECT_LABELS: Record<string, string> = {
+  dynamics: "Dynamics",
+  transform: "Transform",
+  overtones: "Overtones",
+  blur: "Blur",
+  synthesize: "Synthesize",
+  evolve: "Evolve",
+  binaural: "Binaural",
+  sort: "Sort",
+  transmute: "Transmute",
+  waveshape: "Waveshape",
+};
+
+export const EFFECT_DESCRIPTIONS: Record<string, string> = {
+  dynamics: "Control dynamic range with compression, expansion, gating, and inversion.",
+  transform: "Shift, scale, and rotate the spectrogram content in time and frequency.",
+  overtones: "Add overtones to create richer timbres.",
+  blur: "Smooth and blend frequencies over time and pitch for softer transitions.",
+  synthesize: "Generate new audio content from scratch (noise, sine waves, etc.).",
+  evolve: "Reaction-advection-diffusion simulation for fluid, biological, and chaotic patterns.",
+  binaural: "HRTF-based binaural spatialization for 3D audio positioning.",
+  sort: "Odd-even transposition sort on spectrogram bins by magnitude or phase.",
+  transmute:
+    "Low-level polar operations on raw magnitude and phase: swap, complex power, phase rotate, quantize, stereo cross, and phase gate.",
+  waveshape:
+    "Waveshaper distortion on rectangular spectral bins: soft clip, hard clip, rectify, and boundary modes (fold, wrap, invert, cut).",
 };

@@ -554,9 +554,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           try {
             // Extract audio channels from AudioBuffer
             const numChannels = file.audioBuffer!.numberOfChannels;
+            const normalize = get().normalize;
+            const gain = (normalize && file.audioPeak && file.audioPeak > 0) ? 1 / file.audioPeak : 1;
             const audioChannels: Float32Array[] = [];
             for (let i = 0; i < numChannels; i++) {
-              audioChannels.push(file.audioBuffer!.getChannelData(i));
+              const src = file.audioBuffer!.getChannelData(i);
+              const dst = new Float32Array(src.length);
+              for (let j = 0; j < src.length; j++) dst[j] = src[j] * gain;
+              audioChannels.push(dst);
             }
 
             // Determine format from file extension
@@ -891,7 +896,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           payload.analysisMetadata,
           originalAnalysis.sampleRate,
           analysisParams,
-          normalize,
+          false,
           existingAudio,
           startFrame,
           endFrame,
@@ -929,6 +934,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       get().setFileDirty(fileId, file.audioBuffer !== undefined);
 
       file.audioBuffer = audioBuffer;
+      file.audioPeak = synthesisResult.peak > 0 ? synthesisResult.peak : 1;
 
       if (autoPlaybackParams) {
         // --- Handle auto-playback of the painted region ---

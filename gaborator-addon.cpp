@@ -553,32 +553,19 @@ public:
             {
                 audioChannels[ch] = std::move(synthesizedBuffers[ch]);
             }
+        }
 
-            // Apply normalization for full synthesis
-            if (normalize)
+        // Compute peak of the complete buffer (full or partial) so the JS layer
+        // can apply a normalize gain at playback/export time without re-synthesizing.
+        peakValue = 0.0f;
+        for (const auto &channel_data : audioChannels)
+        {
+            for (float sample : channel_data)
             {
-                float peak_value = 0.0f;
-                for (const auto &channel_data : audioChannels)
-                {
-                    for (float sample : channel_data)
-                    {
-                        peak_value = std::max(peak_value, std::abs(sample));
-                    }
-                }
-                if (peak_value > 0.0f)
-                {
-                    float normalization_factor = 1.0f / peak_value;
-                    for (auto &channel_data : audioChannels)
-                    {
-                        for (float &sample : channel_data)
-                        {
-                            sample *= normalization_factor;
-                        }
-                    }
-                    DEBUG_LOG << "[C++] Normalized with factor: " << normalization_factor << std::endl << std::flush;
-                }
+                peakValue = std::max(peakValue, std::abs(sample));
             }
         }
+        DEBUG_LOG << "[C++] Peak value: " << peakValue << std::endl << std::flush;
 
         DEBUG_LOG << "[C++] Execute() complete" << std::endl << std::flush;
     }
@@ -598,6 +585,7 @@ public:
             outputChannels[ch] = channelBuffer;
         }
         result.Set("channels", outputChannels);
+        result.Set("peak", Napi::Number::New(env, peakValue));
         deferred.Resolve(result);
     }
 
@@ -631,6 +619,7 @@ private:
 
     // Results
     std::vector<std::vector<float>> audioChannels;
+    float peakValue = 0.0f;
 };
 
 Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
