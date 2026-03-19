@@ -286,6 +286,73 @@ function rubberbandStretch(inputPath, outputPath, timeRatio, pitchSemitones = 0)
 // We use nearest-neighbour sampling for simplicity.
 // phaseTransform(srcPhase, freq, srcUv, dstUv, T_total) → dstPhase
 
+// Pitch shift: move each band's data to the band at freq × freqRatio
+// phaseTransformFn(srcPhase, srcFreqHz, dstFreqHz, time) → dstPhase
+function applyPitchShift(data, ar, freqRatio, phaseTransformFn) {
+  const { bandOffsets, bandLengths, bandStepLog2s, bandFreqsHz, numFrames, sampleRate } = ar;
+  const T_total = (numFrames - 1) / sampleRate;
+  const dest = new Float32Array(data.length);
+
+  // Build a mapping: for each destination band, find the source band
+  for (let bDst = 0; bDst < bandLengths.length; bDst++) {
+    const dstFreq = bandFreqsHz[bDst];
+    const srcFreq = dstFreq / freqRatio; // what source frequency maps here
+
+    // Find closest source band
+    let bSrc = 0;
+    for (let i = 1; i < bandFreqsHz.length; i++) {
+      if (Math.abs(bandFreqsHz[i] - srcFreq) < Math.abs(bandFreqsHz[bSrc] - srcFreq)) bSrc = i;
+    }
+
+    const srcOffset = bandOffsets[bSrc];
+    const srcLen = bandLengths[bSrc];
+    const srcStep = 1 << bandStepLog2s[bSrc];
+    const srcFreqActual = bandFreqsHz[bSrc];
+
+    const dstOffset = bandOffsets[bDst];
+    const dstLen = bandLengths[bDst];
+    const dstStep = 1 << bandStepLog2s[bDst];
+
+    for (let kDst = 0; kDst < dstLen; kDst++) {
+      // Map destination frame to source frame (same time position)
+      const dstTime = (kDst * dstStep) / (numFrames - 1); // UV 0-1
+      const srcKFloat = (dstTime * (numFrames - 1)) / srcStep;
+      const srcK0 = Math.floor(srcKFloat);
+      const srcK1 = Math.min(srcK0 + 1, srcLen - 1);
+      const frac = srcKFloat - srcK0;
+
+      if (srcK0 < 0 || srcK0 >= srcLen) continue;
+
+      const idx0 = (srcOffset + srcK0) * FPIX;
+      const idx1 = (srcOffset + srcK1) * FPIX;
+      const dstIdx = (dstOffset + kDst) * FPIX;
+
+      // Interpolate magnitude
+      dest[dstIdx + 0] = data[idx0 + 0] * (1 - frac) + data[idx1 + 0] * frac;
+      dest[dstIdx + 2] = data[idx0 + 2] * (1 - frac) + data[idx1 + 2] * frac;
+
+      // Interpolate phase
+      const srcPhaseL = data[idx0 + 1] * (1 - frac) + data[idx1 + 1] * frac;
+      const srcPhaseR = data[idx0 + 3] * (1 - frac) + data[idx1 + 3] * frac;
+
+      const t = dstTime * T_total;
+      dest[dstIdx + 1] = phaseTransformFn(srcPhaseL, srcFreqActual, dstFreq, t);
+      dest[dstIdx + 3] = phaseTransformFn(srcPhaseR, srcFreqActual, dstFreq, t);
+    }
+  }
+  return dest;
+}
+
+// Shift a spectral profile by N bands (for comparing pitch-shifted output)
+function shiftProfile(profile, shiftBands) {
+  const shifted = new Float64Array(profile.length);
+  for (let i = 0; i < profile.length; i++) {
+    const srcI = i - shiftBands;
+    if (srcI >= 0 && srcI < profile.length) shifted[i] = profile[srcI];
+  }
+  return shifted;
+}
+
 // Nearest-neighbour stretch with arbitrary phase transform
 function applyTimeStretchNN(data, ar, scaleX, phaseTransformFn) {
   const { bandOffsets, bandLengths, bandStepLog2s, bandFreqsHz, numFrames, sampleRate } = ar;
@@ -972,6 +1039,138 @@ async function main() {
   writeWav("test-out-stretch-rubberband.wav", rbStretched.samples, SR);
   try { unlinkSync(tmpIn); } catch {}
   try { unlinkSync(tmpOut); } catch {}
+
+  // ─── TEST 5: Pitch shift — compare against rubberband ─────────────────────
+  const PITCH_SEMITONES = [7, 12, -12]; // fifth up, octave up, octave down
+  console.log(`\n=== TEST 5: Pitch shift — rubberband as reference ===\n`);
+
+  // Sine sanity check: 440Hz → 880Hz (+12 semitones)
+  {
+    console.log("  --- Sine pitch shift: 440Hz → 880Hz (+12 st) ---");
+    const target880 = new Float32Array(sineLen);
+    for (let i = 0; i < sineLen; i++) target880[i] = Math.sin(TWO_PI * 880 * i / SR);
+
+    const strategies880 = [
+      { name: "identity", fn: (p) => p },
+      { name: "band-freq: φ+2π(f_src-f_dst)t", fn: (p, fS, fD, t) => p + TWO_PI * (fS - fD) * t },
+      { name: "scale phase: φ·(f_dst/f_src)", fn: (p, fS, fD) => p * (fD / fS) },
+    ];
+    // Phase-invariant correlation: sqrt(r_sin² + r_cos²)
+    const cos880 = new Float32Array(sineLen);
+    for (let i = 0; i < sineLen; i++) cos880[i] = Math.cos(TWO_PI * 880 * i / SR);
+
+    for (const s of strategies880) {
+      const pitched = applyPitchShift(sineAr.data, sineAr, 2.0, s.fn);
+      const synth = await synthesize(pitched, sineAr, SR);
+      const rSin = pearsonCorrelation(synth, target880);
+      const rCos = pearsonCorrelation(synth, cos880);
+      const rEnv = Math.sqrt(rSin * rSin + rCos * rCos); // phase-invariant amplitude
+      console.log(`    r_env=${rEnv.toFixed(6)} (sin=${rSin.toFixed(3)}, cos=${rCos.toFixed(3)})  ${s.name}${rEnv > 0.9 ? " ✓✓✓" : ""}`);
+
+      if (s.name === "scale phase: φ·(f_dst/f_src)") {
+        // Check output properties
+        let rms = 0;
+        for (let i = 0; i < synth.length; i++) rms += synth[i] * synth[i];
+        rms = Math.sqrt(rms / synth.length);
+        console.log(`      RMS=${rms.toFixed(6)} (target RMS=${(1 / Math.sqrt(2)).toFixed(6)})`);
+        console.log(`      First 10 samples: [${Array.from(synth.slice(0, 10)).map(v => v.toFixed(4)).join(", ")}]`);
+
+        // Re-analyze the output to see where energy is
+        const reAr = await addon.analyze([synth], 1, SR, { bandsPerOctave: BANDS_PER_OCTAVE, minFreq: MIN_FREQ });
+        const top5 = [];
+        for (let b = 0; b < reAr.bandLengths.length; b++) {
+          let sum = 0;
+          const off = reAr.bandOffsets[b];
+          for (let k = 0; k < reAr.bandLengths[b]; k++) sum += reAr.data[(off + k) * FPIX];
+          top5.push({ b, freq: reAr.bandFreqsHz[b], avg: sum / reAr.bandLengths[b] });
+        }
+        top5.sort((a, b) => b.avg - a.avg);
+        console.log(`      Top 5 bands in re-analysis:`);
+        for (let i = 0; i < 5; i++) {
+          console.log(`        band ${top5[i].b}: ${top5[i].freq.toFixed(1)}Hz  avg=${top5[i].avg.toFixed(4)}`);
+        }
+        writeWav("test-out-pitch-sine-880-scaled.wav", synth, SR);
+      }
+      if (s.name === "identity") {
+        // Debug: find where energy ended up
+        let maxMag = 0, maxBand = 0;
+        for (let b = 0; b < sineAr.bandLengths.length; b++) {
+          let sum = 0;
+          const off = sineAr.bandOffsets[b];
+          for (let k = 0; k < sineAr.bandLengths[b]; k++) sum += pitched[(off + k) * FPIX];
+          const avg = sum / sineAr.bandLengths[b];
+          if (avg > maxMag) { maxMag = avg; maxBand = b; }
+        }
+        console.log(`    → Energy peak: band ${maxBand}, freq ${sineAr.bandFreqsHz[maxBand].toFixed(1)}Hz, avgMag=${maxMag.toFixed(4)}`);
+
+        // What does the 880Hz analysis look like?
+        const ar880 = await addon.analyze([target880], 1, SR, { bandsPerOctave: BANDS_PER_OCTAVE, minFreq: MIN_FREQ });
+        let maxMag880 = 0, maxBand880 = 0;
+        for (let b = 0; b < ar880.bandLengths.length; b++) {
+          let sum = 0;
+          const off = ar880.bandOffsets[b];
+          for (let k = 0; k < ar880.bandLengths[b]; k++) sum += ar880.data[(off + k) * FPIX];
+          const avg = sum / ar880.bandLengths[b];
+          if (avg > maxMag880) { maxMag880 = avg; maxBand880 = b; }
+        }
+        console.log(`    → 880Hz ref:   band ${maxBand880}, freq ${ar880.bandFreqsHz[maxBand880].toFixed(1)}Hz, avgMag=${maxMag880.toFixed(4)}`);
+        writeWav("test-out-pitch-sine-880-identity.wav", synth, SR);
+        writeWav("test-out-pitch-sine-880-target.wav", target880, SR);
+      }
+    }
+    console.log();
+  }
+
+  for (const semitones of PITCH_SEMITONES) {
+    const freqRatio = Math.pow(2, semitones / 12);
+    console.log(`  --- ${semitones > 0 ? "+" : ""}${semitones} semitones (freq ×${freqRatio.toFixed(4)}) ---`);
+
+    // Rubberband reference
+    writeWav(tmpIn, signal, SR);
+    const rbPitched = rubberbandStretch(tmpIn, tmpOut, 1.0, semitones);
+    try { unlinkSync(tmpIn); } catch {}
+    try { unlinkSync(tmpOut); } catch {}
+
+    // Gaborator pitch shift: move each band's data to the band at freq × freqRatio
+    // phaseTransformFn(srcPhase, srcFreqHz, dstFreqHz, t) → dstPhase
+    const strategies = [
+      {
+        name: "identity (copy phase)",
+        fn: (p) => p,
+      },
+      {
+        name: "band-freq correction: φ + 2π·(f_src-f_dst)·t",
+        fn: (p, fSrc, fDst, t) => p + TWO_PI * (fSrc - fDst) * t,
+      },
+      {
+        name: "scale phase by ratio: φ·(f_dst/f_src)",
+        fn: (p, fSrc, fDst) => p * (fDst / fSrc),
+      },
+    ];
+
+    for (const s of strategies) {
+      const pitched = applyPitchShift(ar.data, ar, freqRatio, s.fn);
+      const synth = await synthesize(pitched, ar, SR);
+
+      const minLen = Math.min(synth.length, rbPitched.samples.length);
+      const rRB = pearsonCorrelation(synth.slice(0, minLen), rbPitched.samples.slice(0, minLen));
+
+      // Re-analyze to check spectral shape
+      const reAr = await addon.analyze([synth], 1, SR, { bandsPerOctave: BANDS_PER_OCTAVE, minFreq: MIN_FREQ });
+      const reProfile = spectralProfile(reAr.data, reAr);
+      // Compare against a shifted version of the original profile
+      // Gaborator bands go high→low freq, so pitch UP = shift to LOWER indices = negative shiftBands
+      const shiftedOrigProfile = shiftProfile(origProfile, -Math.round((BANDS_PER_OCTAVE * semitones) / 12));
+      const rSpec = pearsonCorrelation(reProfile, shiftedOrigProfile);
+
+      const tag = rRB > 0.8 ? "✓✓✓" : rRB > 0.5 ? "✓✓" : rRB > 0.3 ? "✓" : "";
+      console.log(`    rb=${rRB.toFixed(4)} spec=${rSpec.toFixed(4)}  ${s.name}  ${tag}`);
+      const safeName = `pitch_${semitones}_${s.name.slice(0, 15).replace(/[^a-z0-9]/gi, "_")}`;
+      writeWav(`test-out-${safeName}.wav`, synth, SR);
+    }
+    writeWav(`test-out-pitch_${semitones}_rubberband.wav`, rbPitched.samples, SR);
+    console.log();
+  }
 
   // ─── WAV output ──────────────────────────────────────────────────────────────
   console.log("\nWriting WAVs...");
