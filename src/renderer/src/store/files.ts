@@ -962,6 +962,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         // Swap the buffer in the player
         player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
 
+        // Update volume for new peak
+        const peak = file.audioPeak ?? 1;
+        const normalize = get().normalize;
+        player.volume.value = normalize && peak > 0 ? Tone.gainToDb(1 / peak) : 0;
+
         // Use setPlaybackTime to correctly restart the player from the same spot
         // with the new buffer and correct loop settings.
         get().setPlaybackTime(t);
