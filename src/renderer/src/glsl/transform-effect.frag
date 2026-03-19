@@ -67,8 +67,6 @@ void main() {
 
     vec4 transformedTexel  = vec4(0.0);
 
-    bool isTimeReversed = scaleXValue < 0.0;
-
     if( boundaryMode == 0) { // Cut
         if(inSourceBrush) {
             transformedTexel = getTransformedSample(finalSourceUv, coords.dest, scaleXValue, scaleYValue, totalShiftX, totalShiftY);
@@ -92,15 +90,9 @@ void main() {
         vec2 pingPong = 1.0 - abs(2.0 * t - 1.0);
         vec2 pingPongUv = brushBottomLeftUv + pingPong * safeSize * 0.5;
 
-        isTimeReversed = pingPong.x < 0.5;
-
-        transformedTexel = getTransformedSample(pingPongUv, coords.dest, scaleXValue, scaleYValue, totalShiftX, totalShiftY);
-    }
-
-    // Handle negative time scaling by flipping the phase 
-    if (isTimeReversed) {
-        transformedTexel.g = -transformedTexel.g;
-        transformedTexel.a = -transformedTexel.a;
+        // Segments where pingPong.x < 0.5 are time-reversed relative to the source.
+        float pingPongScaleX = pingPong.x < 0.5 ? -abs(scaleXValue) : abs(scaleXValue);
+        transformedTexel = getTransformedSample(pingPongUv, coords.dest, pingPongScaleX, scaleYValue, totalShiftX, totalShiftY);
     }
 
     outColor = applyBrush(originalTexel, transformedTexel, weight, coords.dest, vUv);

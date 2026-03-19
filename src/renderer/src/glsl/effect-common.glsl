@@ -310,7 +310,7 @@ vec2 modifyPhase(vec2 magPhase, vec2 uv, bool shouldRandomise) {
   return magPhase;
 }
 
-vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase) {
+vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float scaleX, vec2 destUv) {
   float bandIndex = floor((1.0 - sourceUv.y) * sourceBandCount);
   vec4 meta = fetchBandMetadata(sourceMetadataTex, bandIndex);
   float bandStartOffset  = meta.r;
@@ -345,10 +345,19 @@ vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase) {
   correctedL = modifyPhase(correctedL, vec2(px1, py1), shouldRandomisePhase);
   correctedR = modifyPhase(correctedR, vec2(px1, py1), shouldRandomisePhase);
 
+  // Time reversal: dest_phase = -src_phase - 2π·f·T
+  // Derived from: C_rev(tc, f) = exp(-i·2π·f·T) · conj( C_src(T−tc, f) )
+  if (scaleX < 0.0) {
+    float destFreqHz = getDestMetadata(destUv).a;
+    float phaseShift = TWO_PI * destFreqHz * (destFrameCount - 1.0) / destSampleRate;
+    correctedL.y = -correctedL.y - phaseShift;
+    correctedR.y = -correctedR.y - phaseShift;
+  }
+
   return vec4(correctedL, correctedR);
 }
 
-vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 destUv) {
+vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 destUv, float scaleX) {
   vec4 original = sampleSourceNoInterp(destUv);
   float originalPhaseL = getPhase(original.rg);
   float originalPhaseR = getPhase(original.ba);
@@ -389,6 +398,15 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 d
 
   vec2 correctedL = fromPolar(magL, originalPhaseL + phaseDiffL);
   vec2 correctedR = fromPolar(magR, originalPhaseR + phaseDiffR);
+
+  // Time reversal: dest_phase = -src_phase - 2π·f·T
+  // Derived from: C_rev(tc, f) = exp(-i·2π·f·T) · conj( C_src(T−tc, f) )
+  if (scaleX < 0.0) {
+    float destFreqHz = getDestMetadata(destUv).a;
+    float phaseShift = TWO_PI * destFreqHz * (destFrameCount - 1.0) / destSampleRate;
+    correctedL.y = -correctedL.y - phaseShift;
+    correctedR.y = -correctedR.y - phaseShift;
+  }
 
   return vec4(correctedL, correctedR);
 }
@@ -453,17 +471,46 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
   return magPhase;
 }
 
+/**
+ * Algorithm 4 — Neutral
+ *
+ * Unified phase formula derived from the Gaborator global-phase convention.
+ * Handles time shift and reversal with a single expression:
+ *
+ *   φ_dest = sign(scaleX) · φ_src + 2π · f · (sign(scaleX) · t_src − t_dest)
+ *
+ * where t = uv.x · T_total.  For a shift (scaleX > 0) this corrects for the
+ * carrier phase accumulated between source and destination.  For a reversal
+ * (scaleX < 0) it conjugates the phase and accounts for the absolute brush
+ * position — so the result is correct regardless of where the brush is placed.
+ */
+vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX) {
+  vec4 magPhase = sampleSourceInterp(wrapUv(sourceUv));
+
+  float scaleXSign = scaleX < 0.0 ? -1.0 : 1.0;
+  float T_total    = (destFrameCount - 1.0) / destSampleRate;
+  float destFreqHz = getDestMetadata(destUv).a;
+
+  float phaseShift = TWO_PI * destFreqHz * (scaleXSign * sourceUv.x - destUv.x) * T_total;
+  magPhase.y = scaleXSign * magPhase.y + phaseShift;
+  magPhase.w = scaleXSign * magPhase.w + phaseShift;
+
+  return magPhase;
+}
+
 vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, float shiftX, float shiftY) {
   vec2 wrappedSourceUv = wrapUv(sourceUv);
 
   if (algorithm == 0) {
-    return getTransformedSampleBasic(wrappedSourceUv, false);
+    return getTransformedSampleBasic(wrappedSourceUv, false, scaleX, destUv);
   } else if (algorithm == 1) {
-    return getTransformedSampleBasic(wrappedSourceUv, true);
+    return getTransformedSampleBasic(wrappedSourceUv, true, scaleX, destUv);
   } else if (algorithm == 2) {
-    return getTransformedSampleSnappy(wrappedSourceUv, true, destUv);
+    return getTransformedSampleSnappy(wrappedSourceUv, true, destUv, scaleX);
   } else if (algorithm == 3) {
     return getTransformedSampleNeutral(sourceUv, destUv, scaleX, scaleY, shiftX, shiftY);
+  } else if (algorithm == 4) {
+    return getTransformedSampleNeutralV2(sourceUv, destUv, scaleX);
   }
   return vec4(0.0);
 }

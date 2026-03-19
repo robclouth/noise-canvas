@@ -176,6 +176,7 @@ export const ALGORITHMS = [
   { value: 0, label: "Flangey" },
   { value: 1, label: "Noisey" },
   { value: 3, label: "Neutralish" },
+  { value: 4, label: "Neutral" },
 ];
 
 export const EFFECT_COLORS: Record<string, string> = {
