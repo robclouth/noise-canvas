@@ -249,21 +249,20 @@ function App(): React.JSX.Element {
         <Box pos="absolute" top={0} bottom={0} left={0} right={0} bg="dark.9" style={{ zIndex: -1 }} />
         {openFileIds.length === 0 ? (
           <EmptyState />
-        ) : fullscreenFileId ? (
-          <Box flex={1} h="100%" p="xs" style={{ minHeight: 0, overflow: "hidden" }}>
-            <CanvasPanel />
-          </Box>
         ) : (
-          <ScrollArea
-            scrollbarSize={4}
-            type="auto"
+          <Box
             flex={1}
-            w="100%"
-            onScrollPositionChange={() => invalidateRef.current?.()}
+            h="100%"
             p="xs"
+            style={{
+              minHeight: 0,
+              overflowX: "hidden",
+              overflowY: fullscreenFileId ? "hidden" : "auto",
+            }}
+            onScroll={() => invalidateRef.current?.()}
           >
             <CanvasPanel />
-          </ScrollArea>
+          </Box>
         )}
         <TransportPanel />
       </Stack>
