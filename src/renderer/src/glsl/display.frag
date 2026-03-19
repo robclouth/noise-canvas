@@ -51,7 +51,16 @@ void main() {
     // Convert screen UV to zoomed UV (actual data coordinates)
     vec2 zoomedUv = screenToZoomed(vUv, viewZoomPower, viewOffset);
     
-    vec4 packedValue = sampleSourceInterp(zoomedUv);
+    // Vertical interpolation between adjacent frequency bands, with center-aligned bins
+    float bandIndexF = (1.0 - zoomedUv.y) * sourceBandCount;
+    float b0 = floor(bandIndexF);
+    float b1 = min(b0 + 1.0, sourceBandCount - 1.0);
+    float bandFrac = fract(bandIndexF);
+
+    vec2 uv0 = vec2(zoomedUv.x, 1.0 - (b0 + 0.5) / sourceBandCount);
+    vec2 uv1 = vec2(zoomedUv.x, 1.0 - (b1 + 0.5) / sourceBandCount);
+
+    vec4 packedValue = mix(sampleSourceInterpCentered(uv0), sampleSourceInterpCentered(uv1), bandFrac);
 
     // packedValue stores [leftMagnitude, leftPhase, rightMagnitude, rightPhase]
     vec2 leftMagPhase = packedValue.rg;

@@ -483,21 +483,6 @@ vec2 getEffectiveBrushOffset(vec2 unpackedUv) {
   return vec2(wrappedOffset.x, wrappedOffset.y);
 }
 
-float horizontalCoverage(vec2 unpackedUv, float binWidth) {
-  float halfBinWidth = 0.5 * binWidth;
-
-  vec2 off       = getEffectiveBrushOffset(unpackedUv);
-  float binCx    = brushBottomLeftUv.x + off.x + halfBinWidth;
-
-  float bx0 = brushBottomLeftUv.x;
-  float bx1 = brushBottomLeftUv.x + brushSizeUv.x;
-  float x0  = binCx - halfBinWidth;
-  float x1  = binCx + halfBinWidth;
-
-  float overlap = max(0.0, min(bx1, x1) - max(bx0, x0));
-  return overlap / (2.0 * halfBinWidth);
-}
-
 // Calculate envelope gain for a single dimension using pre-calculated stage boundaries
 float calculateEnvelopeGain(float localPos, float delayEnd, float attackEnd, float sustainEnd, float releaseEnd) {
   float gain = 0.0;
@@ -537,31 +522,32 @@ float calculateEnvelopeGain(float localPos, float delayEnd, float attackEnd, flo
 float getBrushWeight(vec2 unpackedUv) {
   vec4 meta = getDestMetadata(unpackedUv);
   float binWidth = exp2(meta.b) / destFrameCount;
-  vec2 offset = getEffectiveBrushOffset(unpackedUv) + vec2(binWidth, 0.0);
 
-  // Normalize offset to [0, 1] within brush size (bottom-left is origin)
+  vec2 off = getEffectiveBrushOffset(unpackedUv);
   vec2 safeBrush = max(vec2(EPSILON), brushSizeUv);
-  vec2 localUv = offset / safeBrush;
-  
-  // Calculate envelope gain for X (time) dimension using pre-calculated boundaries
-  float weightX = calculateEnvelopeGain(
-    localUv.x,
-    envelopeDelayEndX,
-    envelopeAttackEndX,
-    envelopeSustainEndX,
-    envelopeReleaseEndX
+
+  // X (time): compute overlap between bin [off.x, off.x+binWidth] and brush [0, brushSizeUv.x].
+  // Evaluate the envelope at the center of the overlap region rather than the bin center.
+  // This ensures a brush narrower than half a bin still affects bins it overlaps.
+  float overlapLeft  = max(0.0, off.x);
+  float overlapRight = min(brushSizeUv.x, off.x + binWidth);
+  float overlap      = max(0.0, overlapRight - overlapLeft);
+  float coverage     = overlap / binWidth;
+
+  float weightX = 0.0;
+  if (coverage > 0.0) {
+    float localX = (overlapLeft + overlapRight) * 0.5 / safeBrush.x;
+    weightX = calculateEnvelopeGain(localX,
+      envelopeDelayEndX, envelopeAttackEndX, envelopeSustainEndX, envelopeReleaseEndX
+    ) * coverage;
+  }
+
+  // Y (pitch): use band center position relative to brush (unchanged)
+  float localY = off.y / safeBrush.y;
+  float weightY = calculateEnvelopeGain(localY,
+    envelopeDelayEndY, envelopeAttackEndY, envelopeSustainEndY, envelopeReleaseEndY
   );
-  weightX *= horizontalCoverage(unpackedUv, binWidth);
-  
-  // Calculate envelope gain for Y (pitch) dimension using pre-calculated boundaries
-  float weightY = calculateEnvelopeGain(
-    localUv.y,
-    envelopeDelayEndY,
-    envelopeAttackEndY,
-    envelopeSustainEndY,
-    envelopeReleaseEndY
-  );
-  
+
   return weightX * weightY;
 }
 
