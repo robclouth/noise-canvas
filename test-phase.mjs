@@ -353,6 +353,146 @@ function shiftProfile(profile, shiftBands) {
   return shifted;
 }
 
+// ─── Unified 2D transform ────────────────────────────────────────────────────
+//
+// General transform: any combination of scaleX, scaleY, shiftX, shiftY.
+//
+// The phase formula composes:
+//   1. Frequency ratio r = f_dst / f_src: scale phase to match new frequency
+//   2. Sign of scaleX: negate phase for reversal
+//   3. Time shift: band-freq correction
+//   4. Time stretch: IF correction
+//   5. Sign of scaleY: negate phase for vertical flip
+//   6. Reverse+stretch: add expectedAdvance to IF correction
+//
+// Combined: φ_dest = r · (signX · signY · φ_src + timeShiftCorr) + timeStretchCorr_scaled
+//
+function applyUnified2D(data, ar, scaleX, scaleY, shiftXUv, shiftYUv) {
+  const { bandOffsets, bandLengths, bandStepLog2s, bandFreqsHz, numFrames, sampleRate } = ar;
+  const T_total = (numFrames - 1) / sampleRate;
+  const dest = new Float32Array(data.length);
+  const signX = scaleX < 0 ? -1 : 1;
+  const signY = scaleY < 0 ? -1 : 1;
+  const absScaleX = Math.abs(scaleX);
+  const absScaleY = Math.abs(scaleY);
+
+  for (let bDst = 0; bDst < bandLengths.length; bDst++) {
+    const dstFreq = bandFreqsHz[bDst];
+    const dstOffset = bandOffsets[bDst];
+    const dstLen = bandLengths[bDst];
+    const dstStep = 1 << bandStepLog2s[bDst];
+
+    // Find source band: invert the Y transform
+    // In UV space, Y goes from 0 (high freq) to 1 (low freq)
+    // scaleY > 1 compresses source → higher destination frequencies
+    // scaleY < 0 flips + scales
+    // For log-freq CQ: source freq = dest freq / |scaleY|
+    // (scaleY sign handled by signY on the phase)
+    const srcFreqTarget = dstFreq / absScaleY;
+    if (srcFreqTarget <= 0 || srcFreqTarget < MIN_FREQ) continue;
+
+    // Find closest source band
+    let bSrc = 0;
+    for (let i = 1; i < bandFreqsHz.length; i++) {
+      if (Math.abs(bandFreqsHz[i] - srcFreqTarget) < Math.abs(bandFreqsHz[bSrc] - srcFreqTarget)) bSrc = i;
+    }
+
+    const srcFreq = bandFreqsHz[bSrc];
+    const srcOffset = bandOffsets[bSrc];
+    const srcLen = bandLengths[bSrc];
+    const srcStep = 1 << bandStepLog2s[bSrc];
+
+    // Frequency ratio for phase scaling
+    const freqRatio = dstFreq / srcFreq;
+
+    for (let ch = 0; ch < 2; ch++) {
+      const phaseOff = ch === 0 ? 1 : 3;
+      const magOff = ch === 0 ? 0 : 2;
+
+      // Pre-compute source phase derivatives for IF estimation
+      const dphi = new Float64Array(srcLen);
+      for (let k = 0; k < srcLen - 1; k++) {
+        const i0 = (srcOffset + k) * FPIX;
+        const i1 = (srcOffset + k + 1) * FPIX;
+        dphi[k] = data[i1 + phaseOff] - data[i0 + phaseOff];
+      }
+      dphi[srcLen - 1] = dphi[Math.max(0, srcLen - 2)];
+
+      for (let kDst = 0; kDst < dstLen; kDst++) {
+        const dstTimeUv = (kDst * dstStep) / (numFrames - 1);
+
+        // Invert X transform: mirrors shader's pivot/scale/offset logic
+        // For whole-file brush (pivot=0, brushSize=1):
+        //   sourceUv = dstUv / scaleX + (scaleX < 0 ? 1 : 0) + shiftXUv
+        const srcTimeUv = dstTimeUv / scaleX + (scaleX < 0 ? 1.0 : 0.0) + shiftXUv;
+        if (srcTimeUv < -0.01 || srcTimeUv > 1.01) continue;
+
+        // Map to source frame
+        const srcKFloat = (srcTimeUv * (numFrames - 1)) / srcStep;
+        const srcK0 = Math.floor(srcKFloat);
+        const srcK1 = Math.min(srcK0 + 1, srcLen - 1);
+        const frac = srcKFloat - srcK0;
+
+        if (srcK0 < 0 || srcK0 >= srcLen) continue;
+
+        const idx0 = (srcOffset + srcK0) * FPIX;
+        const idx1 = (srcOffset + srcK1) * FPIX;
+        const dstIdx = (dstOffset + kDst) * FPIX;
+
+        // Interpolate magnitude
+        dest[dstIdx + magOff] = data[idx0 + magOff] * (1 - frac) + data[idx1 + magOff] * frac;
+
+        // Interpolate source phase and phase derivative
+        const srcPhase = data[idx0 + phaseOff] * (1 - frac) + data[idx1 + phaseOff] * frac;
+        const srcDphi = dphi[srcK0] * (1 - frac) + dphi[Math.min(srcK1, srcLen - 2)] * frac;
+
+        // === Compose phase corrections ===
+        //
+        // The formula builds up in this order:
+        //   1. Start with source phase, apply sign flips for reversal
+        //   2. Add band-freq correction for time shift/reversal
+        //   3. Add IF correction for time stretch
+        //   4. Multiply everything by freq ratio for pitch change
+        //
+        // Step 4 wraps around all corrections — this ensures the IF
+        // at the destination is scaled by the pitch ratio.
+
+        // 1. Sign (reversal in X and/or Y)
+        let phase = signX * signY * srcPhase;
+
+        // 2. Time shift/reversal correction (band-freq based)
+        if (signX > 0) {
+          // Shift: 2π·f·shiftOffset·T where shiftOffset is the constant part
+          const shiftOffset = srcTimeUv - dstTimeUv / scaleX;
+          phase += TWO_PI * srcFreq * shiftOffset * T_total;
+        } else {
+          // Reversal: -2π·f·(srcUv + dstUv)·T
+          phase += -TWO_PI * srcFreq * (srcTimeUv + dstTimeUv) * T_total;
+        }
+
+        // 3. Time stretch IF correction (when |scaleX| ≠ 1)
+        if (absScaleX > 1e-5 && Math.abs(absScaleX - 1) > 1e-5) {
+          let effectiveDphi = srcDphi;
+          if (signX < 0) {
+            // Reversal+stretch needs the extra band-freq advance term
+            const expectedAdvance = TWO_PI * srcFreq * srcStep / sampleRate;
+            effectiveDphi += expectedAdvance;
+          }
+          // Brush-relative stretch frames
+          const stretchFrames = dstTimeUv * (1 - 1 / absScaleX) * (numFrames - 1) / srcStep;
+          phase += effectiveDphi * stretchFrames;
+        }
+
+        // 4. Frequency ratio scaling (pitch change)
+        phase *= freqRatio;
+
+        dest[dstIdx + phaseOff] = phase;
+      }
+    }
+  }
+  return dest;
+}
+
 // Nearest-neighbour stretch with arbitrary phase transform
 function applyTimeStretchNN(data, ar, scaleX, phaseTransformFn) {
   const { bandOffsets, bandLengths, bandStepLog2s, bandFreqsHz, numFrames, sampleRate } = ar;
@@ -1040,136 +1180,123 @@ async function main() {
   try { unlinkSync(tmpIn); } catch {}
   try { unlinkSync(tmpOut); } catch {}
 
-  // ─── TEST 5: Pitch shift — compare against rubberband ─────────────────────
-  const PITCH_SEMITONES = [7, 12, -12]; // fifth up, octave up, octave down
-  console.log(`\n=== TEST 5: Pitch shift — rubberband as reference ===\n`);
+  // ─── TEST 5: Unified 2D transform — all combinations ─────────────────────
+  console.log(`\n=== TEST 5: Unified 2D transform ===\n`);
 
-  // Sine sanity check: 440Hz → 880Hz (+12 semitones)
-  {
-    console.log("  --- Sine pitch shift: 440Hz → 880Hz (+12 st) ---");
-    const target880 = new Float32Array(sineLen);
-    for (let i = 0; i < sineLen; i++) target880[i] = Math.sin(TWO_PI * 880 * i / SR);
-
-    const strategies880 = [
-      { name: "identity", fn: (p) => p },
-      { name: "band-freq: φ+2π(f_src-f_dst)t", fn: (p, fS, fD, t) => p + TWO_PI * (fS - fD) * t },
-      { name: "scale phase: φ·(f_dst/f_src)", fn: (p, fS, fD) => p * (fD / fS) },
-    ];
-    // Phase-invariant correlation: sqrt(r_sin² + r_cos²)
-    const cos880 = new Float32Array(sineLen);
-    for (let i = 0; i < sineLen; i++) cos880[i] = Math.cos(TWO_PI * 880 * i / SR);
-
-    for (const s of strategies880) {
-      const pitched = applyPitchShift(sineAr.data, sineAr, 2.0, s.fn);
-      const synth = await synthesize(pitched, sineAr, SR);
-      const rSin = pearsonCorrelation(synth, target880);
-      const rCos = pearsonCorrelation(synth, cos880);
-      const rEnv = Math.sqrt(rSin * rSin + rCos * rCos); // phase-invariant amplitude
-      console.log(`    r_env=${rEnv.toFixed(6)} (sin=${rSin.toFixed(3)}, cos=${rCos.toFixed(3)})  ${s.name}${rEnv > 0.9 ? " ✓✓✓" : ""}`);
-
-      if (s.name === "scale phase: φ·(f_dst/f_src)") {
-        // Check output properties
-        let rms = 0;
-        for (let i = 0; i < synth.length; i++) rms += synth[i] * synth[i];
-        rms = Math.sqrt(rms / synth.length);
-        console.log(`      RMS=${rms.toFixed(6)} (target RMS=${(1 / Math.sqrt(2)).toFixed(6)})`);
-        console.log(`      First 10 samples: [${Array.from(synth.slice(0, 10)).map(v => v.toFixed(4)).join(", ")}]`);
-
-        // Re-analyze the output to see where energy is
-        const reAr = await addon.analyze([synth], 1, SR, { bandsPerOctave: BANDS_PER_OCTAVE, minFreq: MIN_FREQ });
-        const top5 = [];
-        for (let b = 0; b < reAr.bandLengths.length; b++) {
-          let sum = 0;
-          const off = reAr.bandOffsets[b];
-          for (let k = 0; k < reAr.bandLengths[b]; k++) sum += reAr.data[(off + k) * FPIX];
-          top5.push({ b, freq: reAr.bandFreqsHz[b], avg: sum / reAr.bandLengths[b] });
-        }
-        top5.sort((a, b) => b.avg - a.avg);
-        console.log(`      Top 5 bands in re-analysis:`);
-        for (let i = 0; i < 5; i++) {
-          console.log(`        band ${top5[i].b}: ${top5[i].freq.toFixed(1)}Hz  avg=${top5[i].avg.toFixed(4)}`);
-        }
-        writeWav("test-out-pitch-sine-880-scaled.wav", synth, SR);
-      }
-      if (s.name === "identity") {
-        // Debug: find where energy ended up
-        let maxMag = 0, maxBand = 0;
-        for (let b = 0; b < sineAr.bandLengths.length; b++) {
-          let sum = 0;
-          const off = sineAr.bandOffsets[b];
-          for (let k = 0; k < sineAr.bandLengths[b]; k++) sum += pitched[(off + k) * FPIX];
-          const avg = sum / sineAr.bandLengths[b];
-          if (avg > maxMag) { maxMag = avg; maxBand = b; }
-        }
-        console.log(`    → Energy peak: band ${maxBand}, freq ${sineAr.bandFreqsHz[maxBand].toFixed(1)}Hz, avgMag=${maxMag.toFixed(4)}`);
-
-        // What does the 880Hz analysis look like?
-        const ar880 = await addon.analyze([target880], 1, SR, { bandsPerOctave: BANDS_PER_OCTAVE, minFreq: MIN_FREQ });
-        let maxMag880 = 0, maxBand880 = 0;
-        for (let b = 0; b < ar880.bandLengths.length; b++) {
-          let sum = 0;
-          const off = ar880.bandOffsets[b];
-          for (let k = 0; k < ar880.bandLengths[b]; k++) sum += ar880.data[(off + k) * FPIX];
-          const avg = sum / ar880.bandLengths[b];
-          if (avg > maxMag880) { maxMag880 = avg; maxBand880 = b; }
-        }
-        console.log(`    → 880Hz ref:   band ${maxBand880}, freq ${ar880.bandFreqsHz[maxBand880].toFixed(1)}Hz, avgMag=${maxMag880.toFixed(4)}`);
-        writeWav("test-out-pitch-sine-880-identity.wav", synth, SR);
-        writeWav("test-out-pitch-sine-880-target.wav", target880, SR);
-      }
-    }
-    console.log();
+  // Phase-invariant correlation helper (handles constant phase offset)
+  function phaseInvariantCorr(a, b, freqHz) {
+    const rSin = pearsonCorrelation(a, b);
+    // Generate cos version of target
+    const cosTarget = new Float32Array(b.length);
+    for (let i = 0; i < b.length; i++) cosTarget[i] = Math.cos(TWO_PI * freqHz * i / SR);
+    const rCos = pearsonCorrelation(a, cosTarget);
+    return Math.sqrt(rSin * rSin + rCos * rCos);
   }
 
-  for (const semitones of PITCH_SEMITONES) {
-    const freqRatio = Math.pow(2, semitones / 12);
-    console.log(`  --- ${semitones > 0 ? "+" : ""}${semitones} semitones (freq ×${freqRatio.toFixed(4)}) ---`);
+  // Helper: evaluate unified2D and compute respec + rb correlation
+  async function evalUnified(label, scaleX, scaleY, shiftXUv, shiftYUv, rbRef) {
+    const result = applyUnified2D(ar.data, ar, scaleX, scaleY, shiftXUv, shiftYUv);
+    const synth = await synthesize(result, ar, SR);
 
-    // Rubberband reference
-    writeWav(tmpIn, signal, SR);
-    const rbPitched = rubberbandStretch(tmpIn, tmpOut, 1.0, semitones);
-    try { unlinkSync(tmpIn); } catch {}
-    try { unlinkSync(tmpOut); } catch {}
+    // Spectral preservation (re-analyze)
+    const reAr = await addon.analyze([synth], 1, SR, { bandsPerOctave: BANDS_PER_OCTAVE, minFreq: MIN_FREQ });
+    const reProfile = spectralProfile(reAr.data, reAr);
+    // Shift the reference profile to account for pitch change
+    const pitchBands = Math.abs(scaleY) !== 1 ? -Math.round(BANDS_PER_OCTAVE * Math.log2(Math.abs(scaleY))) : 0;
+    const shiftedProfile = pitchBands !== 0 ? shiftProfile(origProfile, pitchBands) : origProfile;
+    const rSpec = pearsonCorrelation(reProfile, shiftedProfile);
 
-    // Gaborator pitch shift: move each band's data to the band at freq × freqRatio
-    // phaseTransformFn(srcPhase, srcFreqHz, dstFreqHz, t) → dstPhase
-    const strategies = [
-      {
-        name: "identity (copy phase)",
-        fn: (p) => p,
-      },
-      {
-        name: "band-freq correction: φ + 2π·(f_src-f_dst)·t",
-        fn: (p, fSrc, fDst, t) => p + TWO_PI * (fSrc - fDst) * t,
-      },
-      {
-        name: "scale phase by ratio: φ·(f_dst/f_src)",
-        fn: (p, fSrc, fDst) => p * (fDst / fSrc),
-      },
-    ];
-
-    for (const s of strategies) {
-      const pitched = applyPitchShift(ar.data, ar, freqRatio, s.fn);
-      const synth = await synthesize(pitched, ar, SR);
-
-      const minLen = Math.min(synth.length, rbPitched.samples.length);
-      const rRB = pearsonCorrelation(synth.slice(0, minLen), rbPitched.samples.slice(0, minLen));
-
-      // Re-analyze to check spectral shape
-      const reAr = await addon.analyze([synth], 1, SR, { bandsPerOctave: BANDS_PER_OCTAVE, minFreq: MIN_FREQ });
-      const reProfile = spectralProfile(reAr.data, reAr);
-      // Compare against a shifted version of the original profile
-      // Gaborator bands go high→low freq, so pitch UP = shift to LOWER indices = negative shiftBands
-      const shiftedOrigProfile = shiftProfile(origProfile, -Math.round((BANDS_PER_OCTAVE * semitones) / 12));
-      const rSpec = pearsonCorrelation(reProfile, shiftedOrigProfile);
-
-      const tag = rRB > 0.8 ? "✓✓✓" : rRB > 0.5 ? "✓✓" : rRB > 0.3 ? "✓" : "";
-      console.log(`    rb=${rRB.toFixed(4)} spec=${rSpec.toFixed(4)}  ${s.name}  ${tag}`);
-      const safeName = `pitch_${semitones}_${s.name.slice(0, 15).replace(/[^a-z0-9]/gi, "_")}`;
-      writeWav(`test-out-${safeName}.wav`, synth, SR);
+    let rbStr = "";
+    if (rbRef) {
+      const minLen = Math.min(synth.length, rbRef.length);
+      const rRB = pearsonCorrelation(synth.slice(0, minLen), rbRef.slice(0, minLen));
+      rbStr = ` rb=${rRB.toFixed(4)}`;
     }
-    writeWav(`test-out-pitch_${semitones}_rubberband.wav`, rbPitched.samples, SR);
-    console.log();
+
+    const tag = rSpec > 0.95 ? "✓✓" : rSpec > 0.9 ? "✓" : "";
+    console.log(`  respec=${rSpec.toFixed(4)}${rbStr}  ${label}  ${tag}`);
+    writeWav(`test-out-unified-${label.slice(0, 30).replace(/[^a-z0-9]/gi, "_")}.wav`, synth, SR);
+    return { synth, rSpec };
+  }
+
+  // --- Sine sanity checks ---
+  console.log("  --- Sine sanity checks (phase-invariant) ---");
+  {
+    // Pure pitch: 440 → 880 (+12st)
+    const sine440data = applyUnified2D(sineAr.data, sineAr, 1, 2, 0, 0);
+    const sine880synth = await synthesize(sine440data, sineAr, SR);
+    const target880 = new Float32Array(sineLen);
+    for (let i = 0; i < sineLen; i++) target880[i] = Math.sin(TWO_PI * 880 * i / SR);
+    const r880 = phaseInvariantCorr(sine880synth, target880, 880);
+    console.log(`    440→880 (pitch×2):     r_env=${r880.toFixed(4)}${r880 > 0.9 ? " ✓✓✓" : ""}`);
+
+    // Pure pitch: 440 → 220 (-12st)
+    const sine220data = applyUnified2D(sineAr.data, sineAr, 1, 0.5, 0, 0);
+    const sine220synth = await synthesize(sine220data, sineAr, SR);
+    const target220 = new Float32Array(sineLen);
+    for (let i = 0; i < sineLen; i++) target220[i] = Math.sin(TWO_PI * 220 * i / SR);
+    const r220 = phaseInvariantCorr(sine220synth, target220, 220);
+    console.log(`    440→220 (pitch×0.5):   r_env=${r220.toFixed(4)}${r220 > 0.9 ? " ✓✓✓" : ""}`);
+
+    // Pure time stretch: 440Hz, 2× stretch should still be 440Hz
+    const sine2xdata = applyUnified2D(sineAr.data, sineAr, 2, 1, 0, 0);
+    const sine2xsynth = await synthesize(sine2xdata, sineAr, SR);
+    const r440stretch = phaseInvariantCorr(sine2xsynth, sineSignal, 440);
+    console.log(`    440Hz 2× stretch:      r_env=${r440stretch.toFixed(4)}${r440stretch > 0.9 ? " ✓✓✓" : ""}`);
+
+    // Pitch + stretch: 440→880 and 2× stretch
+    const sinePSdata = applyUnified2D(sineAr.data, sineAr, 2, 2, 0, 0);
+    const sinePSsynth = await synthesize(sinePSdata, sineAr, SR);
+    const rPS = phaseInvariantCorr(sinePSsynth, target880, 880);
+    console.log(`    440→880 + 2× stretch:  r_env=${rPS.toFixed(4)}${rPS > 0.9 ? " ✓✓✓" : ""}`);
+
+    // Reverse: 440Hz reversed should still be 440Hz
+    const sineRevdata = applyUnified2D(sineAr.data, sineAr, -1, 1, 0, 0);
+    const sineRevsynth = await synthesize(sineRevdata, sineAr, SR);
+    const rRev = phaseInvariantCorr(sineRevsynth, sineSignal, 440);
+    console.log(`    440Hz reversed:        r_env=${rRev.toFixed(4)}${rRev > 0.9 ? " ✓✓✓" : ""}`);
+
+    // Rev + stretch: 440Hz, scaleX=-2
+    const sineRS = applyUnified2D(sineAr.data, sineAr, -2, 1, 0, 0);
+    const sineRSsynth = await synthesize(sineRS, sineAr, SR);
+    const rRS = phaseInvariantCorr(sineRSsynth, sineSignal, 440);
+    console.log(`    440Hz rev+2× stretch:  r_env=${rRS.toFixed(4)}${rRS > 0.9 ? " ✓✓✓" : ""}`);
+
+    // Pitch flip: scaleY=-1 should mirror frequencies
+    const sineFlipY = applyUnified2D(sineAr.data, sineAr, 1, -1, 0, 0);
+    const sineFlipSynth = await synthesize(sineFlipY, sineAr, SR);
+    const rFlipY = phaseInvariantCorr(sineFlipSynth, sineSignal, 440);
+    console.log(`    440Hz pitch flip Y:    r_env=${rFlipY.toFixed(4)}${rFlipY > 0.9 ? " ✓✓✓" : ""}`);
+  }
+
+  // --- Drum loop: spectral preservation for each transform ---
+  console.log("\n  --- Drum loop spectral preservation ---");
+
+  await evalUnified("scaleX=2 (stretch)", 2, 1, 0, 0);
+  await evalUnified("scaleX=-1 (reverse)", -1, 1, 0, 0);
+  await evalUnified("scaleX=-2 (rev+stretch)", -2, 1, 0, 0);
+  await evalUnified("scaleY=2 (pitch up octave)", 1, 2, 0, 0);
+  await evalUnified("scaleY=0.5 (pitch down octave)", 1, 0.5, 0, 0);
+  await evalUnified("scaleY=-1 (pitch flip)", 1, -1, 0, 0);
+  await evalUnified("scaleX=2 scaleY=2 (stretch+pitch)", 2, 2, 0, 0);
+  await evalUnified("scaleX=-2 scaleY=2 (rev+str+pitch)", -2, 2, 0, 0);
+  await evalUnified("scaleX=2 scaleY=-1 (stretch+flip)", 2, -1, 0, 0);
+
+  // Shift test: compare only the destination chunk region (whole-file function
+  // fills beyond the chunk, which is correct — the shader limits via brush weight)
+  console.log("\n  --- Unified: shift regression (chunk region only) ---");
+  for (const dstLeft of DST_POSITIONS) {
+    const shiftUv = SRC_L - dstLeft;
+    const result = applyUnified2D(ar.data, ar, 1, 1, shiftUv, 0);
+    const synth = await synthesize(result, ar, SR);
+    const gt = timeDomainShift(signal, SRC_L, SRC_R, dstLeft);
+    // Compare only the destination chunk region
+    const dStart = Math.round(dstLeft * signal.length);
+    const dEnd = Math.round((dstLeft + (SRC_R - SRC_L)) * signal.length);
+    const synthChunk = synth.slice(dStart, dEnd);
+    const gtChunk = gt.slice(dStart, dEnd);
+    const r = pearsonCorrelation(synthChunk, gtChunk);
+    console.log(`  shift [${SRC_L},${SRC_R}]→${dstLeft}: r=${r.toFixed(4)}`);
   }
 
   // ─── WAV output ──────────────────────────────────────────────────────────────
