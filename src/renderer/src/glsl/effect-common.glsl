@@ -474,26 +474,86 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
 /**
  * Algorithm 4 — Neutral
  *
- * Unified phase formula derived from the Gaborator global-phase convention.
- * Handles time shift and reversal with a single expression:
+ * Phase correction decomposes into two independent parts:
  *
- *   φ_dest = sign(scaleX) · φ_src + 2π · f · (sign(scaleX) · t_src − t_dest)
+ * 1. SHIFT correction (band-frequency based):
+ *    Compensates for the carrier phase difference when content is moved
+ *    to a different time position.  Uses band center frequency f_b.
+ *    shiftCorrection = 2π · f_b · shiftOffset · T_total
+ *    where shiftOffset = sourceUv.x − destUv.x / scaleX  (the constant
+ *    offset that remains after removing the scale component)
  *
- * where t = uv.x · T_total.  For a shift (scaleX > 0) this corrects for the
- * carrier phase accumulated between source and destination.  For a reversal
- * (scaleX < 0) it conjugates the phase and accounts for the absolute brush
- * position — so the result is correct regardless of where the brush is placed.
+ * 2. STRETCH correction (IF-based):
+ *    Compensates for the phase drift when content is time-stretched.
+ *    Uses the instantaneous frequency offset (phase derivative), NOT the
+ *    band center frequency.  Using f_b here would cause energy to collapse
+ *    into certain bands (banding artifact).
+ *    stretchCorrection = dφ/dk × stretchFrames
+ *    where stretchFrames = (destUv.x − brushLeft) × (1 − 1/scaleX) × framesPerUv
+ *
+ * For reversal (scaleX < 0): negates source phase + uses band-freq correction
+ * for the full UV difference (proven correct for reversal).
  */
 vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX) {
   vec4 magPhase = sampleSourceInterp(wrapUv(sourceUv));
 
   float scaleXSign = scaleX < 0.0 ? -1.0 : 1.0;
-  float T_total    = (destFrameCount - 1.0) / destSampleRate;
-  float destFreqHz = getDestMetadata(destUv).a;
+  float absScaleX = abs(scaleX);
 
-  float phaseShift = TWO_PI * destFreqHz * (scaleXSign * sourceUv.x - destUv.x) * T_total;
-  magPhase.y = scaleXSign * magPhase.y + phaseShift;
-  magPhase.w = scaleXSign * magPhase.w + phaseShift;
+  vec4 destMeta = getDestMetadata(destUv);
+  float destFreqHz = destMeta.a;
+  float bandStep = exp2(destMeta.b);
+  float T_total = (destFrameCount - 1.0) / destSampleRate;
+
+  // === Step 1: Shift/Reversal correction (band-frequency based) ===
+  float shiftCorr;
+  if (scaleX < 0.0) {
+    // Reversal: -2π·f·(srcUv + dstUv)·T
+    shiftCorr = -TWO_PI * destFreqHz * (sourceUv.x + destUv.x) * T_total;
+  } else {
+    // Shift: 2π·f·shiftOffset·T where shiftOffset = srcUv - dstUv/scaleX
+    float shiftOffset = sourceUv.x - destUv.x / max(scaleX, 1e-5);
+    shiftCorr = TWO_PI * destFreqHz * shiftOffset * T_total;
+  }
+
+  // === Step 2: Stretch correction (applies to BOTH signs when |scaleX| ≠ 1) ===
+  //
+  // For positive scaleX: correction = dphi × stretchFrames
+  //   (uses IF offset only — band-center components need no correction)
+  //
+  // For negative scaleX: correction = (dphi + expectedAdvance) × stretchFrames
+  //   (the reversal correction's time-varying part introduces an f_b term that
+  //    doesn't cancel when |S|≠1, so we add the expected phase advance per
+  //    coefficient frame: 2π·f_b·bandStep/SR)
+  //
+  float stretchCorrL = 0.0;
+  float stretchCorrR = 0.0;
+  if (absScaleX > 1e-5 && abs(absScaleX - 1.0) > 1e-5) {
+    // Estimate phase derivative from adjacent source coefficient frame
+    float dtUv = bandStep / (sourceFrameCount - 1.0);
+    vec4 magPhaseNext = sampleSourceInterp(wrapUv(sourceUv + vec2(dtUv, 0.0)));
+    float dphiL = magPhaseNext.y - magPhase.y;
+    float dphiR = magPhaseNext.w - magPhase.w;
+
+    // For reversal, add the expected phase advance at band center frequency
+    if (scaleX < 0.0) {
+      float expectedAdvance = TWO_PI * destFreqHz * bandStep / destSampleRate;
+      dphiL += expectedAdvance;
+      dphiR += expectedAdvance;
+    }
+
+    // Extra frames from stretching (brush-relative position)
+    float destRelative = destUv.x - brushBottomLeftUv.x;
+    float stretchFrames = destRelative * (1.0 - 1.0 / absScaleX)
+                        * (destFrameCount - 1.0) / bandStep;
+
+    stretchCorrL = dphiL * stretchFrames;
+    stretchCorrR = dphiR * stretchFrames;
+  }
+
+  // === Combine: sign × phase + shift + stretch ===
+  magPhase.y = scaleXSign * magPhase.y + shiftCorr + stretchCorrL;
+  magPhase.w = scaleXSign * magPhase.w + shiftCorr + stretchCorrR;
 
   return magPhase;
 }
