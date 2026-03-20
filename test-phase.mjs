@@ -269,6 +269,116 @@ const makeReversalPhase = (brushLeft, brushRight) =>
 const makeShiftPhase = (srcLeft, dstLeft) =>
   (p, f, T) => p + TWO_PI * f * (srcLeft - dstLeft) * T;
 
+// ─── Phase derivative (centered difference) ─────────────────────────────────
+
+// 4-frame wide centered difference: (phase[k+2] - phase[k-2]) / 4
+function computeWideDphi(data, offset, len, phaseOff) {
+  const dphi = new Float64Array(len);
+  for (let k = 2; k < len - 2; k++) {
+    const iPrev = (offset + k - 2) * FPIX;
+    const iNext = (offset + k + 2) * FPIX;
+    dphi[k] = (data[iNext + phaseOff] - data[iPrev + phaseOff]) * 0.25;
+  }
+  // Edges: fall back to narrower estimates
+  if (len >= 2) {
+    dphi[0] = data[(offset + 1) * FPIX + phaseOff] - data[(offset + 0) * FPIX + phaseOff];
+    dphi[len - 1] = data[(offset + len - 1) * FPIX + phaseOff] - data[(offset + len - 2) * FPIX + phaseOff];
+  }
+  if (len >= 3) {
+    dphi[1] = (data[(offset + 2) * FPIX + phaseOff] - data[(offset + 0) * FPIX + phaseOff]) * 0.5;
+    dphi[len - 2] = (data[(offset + len - 1) * FPIX + phaseOff] - data[(offset + len - 3) * FPIX + phaseOff]) * 0.5;
+  }
+  return dphi;
+}
+
+// Compute phase stability: |d²φ/dk²| — how much dphi changes between frames.
+// High values = transient or noise (IF changing rapidly). Low = tonal (stable IF).
+function computePhaseStability(dphi) {
+  const stability = new Float64Array(dphi.length);
+  for (let k = 1; k < dphi.length - 1; k++) {
+    const d2phi = Math.abs(dphi[k + 1] - dphi[k - 1]) * 0.5;
+    stability[k] = d2phi;
+  }
+  stability[0] = stability[Math.min(1, dphi.length - 1)];
+  stability[dphi.length - 1] = stability[Math.max(0, dphi.length - 2)];
+  return stability;
+}
+
+// Backward difference: dphi[k] = phase[k] - phase[k-1]
+// Causal — only looks at the past. Onsets don't bleed backward.
+function computeBackwardDphi(data, offset, len, phaseOff) {
+  const dphi = new Float64Array(len);
+  for (let k = 1; k < len; k++) {
+    const iPrev = (offset + k - 1) * FPIX;
+    const iCurr = (offset + k) * FPIX;
+    dphi[k] = data[iCurr + phaseOff] - data[iPrev + phaseOff];
+  }
+  dphi[0] = dphi[Math.min(1, len - 1)];
+  return dphi;
+}
+
+// Smooth dphi: box-filter the centered dphi over a window of N frames.
+// Preserves the average IF offset (prevents band-center pull) while
+// removing transient noise (prevents swooping).
+function computeSmoothedDphi(data, offset, len, phaseOff, windowSize) {
+  const raw = computeCenteredDphi(data, offset, len, phaseOff);
+  const smoothed = new Float64Array(len);
+  const half = Math.floor(windowSize / 2);
+  for (let k = 0; k < len; k++) {
+    let sum = 0, count = 0;
+    for (let j = k - half; j <= k + half; j++) {
+      if (j >= 0 && j < len) { sum += raw[j]; count++; }
+    }
+    smoothed[k] = sum / count;
+  }
+  return smoothed;
+}
+
+// Wide finite difference: dphi = (phase[k+R] - phase[k-R]) / (2R)
+// Same as smooth box filter for linear phase, but only needs 2 samples.
+// This is what can be done in the shader with no extra texture reads.
+function computeWideFiniteDphi(data, offset, len, phaseOff, radius) {
+  const dphi = new Float64Array(len);
+  for (let k = 0; k < len; k++) {
+    const lo = Math.max(0, k - radius);
+    const hi = Math.min(len - 1, k + radius);
+    const iLo = (offset + lo) * FPIX;
+    const iHi = (offset + hi) * FPIX;
+    dphi[k] = (data[iHi + phaseOff] - data[iLo + phaseOff]) / (hi - lo);
+  }
+  return dphi;
+}
+
+function computeForwardDphi(data, offset, len, phaseOff) {
+  const dphi = new Float64Array(len);
+  for (let k = 0; k < len - 1; k++) {
+    const i0 = (offset + k) * FPIX;
+    const i1 = (offset + k + 1) * FPIX;
+    dphi[k] = data[i1 + phaseOff] - data[i0 + phaseOff];
+  }
+  dphi[len - 1] = dphi[Math.max(0, len - 2)];
+  return dphi;
+}
+
+function computeCenteredDphi(data, offset, len, phaseOff) {
+  const dphi = new Float64Array(len);
+  for (let k = 1; k < len - 1; k++) {
+    const iPrev = (offset + k - 1) * FPIX;
+    const iNext = (offset + k + 1) * FPIX;
+    dphi[k] = (data[iNext + phaseOff] - data[iPrev + phaseOff]) * 0.5;
+  }
+  // Edges: use forward/backward difference
+  if (len >= 2) {
+    const i0 = (offset + 0) * FPIX;
+    const i1 = (offset + 1) * FPIX;
+    dphi[0] = data[i1 + phaseOff] - data[i0 + phaseOff];
+    const iN2 = (offset + len - 2) * FPIX;
+    const iN1 = (offset + len - 1) * FPIX;
+    dphi[len - 1] = data[iN1 + phaseOff] - data[iN2 + phaseOff];
+  }
+  return dphi;
+}
+
 // ─── Rubberband reference ────────────────────────────────────────────────────
 
 function rubberbandStretch(inputPath, outputPath, timeRatio, pitchSemitones = 0) {
@@ -367,7 +477,10 @@ function shiftProfile(profile, shiftBands) {
 //
 // Combined: φ_dest = r · (signX · signY · φ_src + timeShiftCorr) + timeStretchCorr_scaled
 //
-function applyUnified2D(data, ar, scaleX, scaleY, shiftXUv, shiftYUv) {
+// dphi modes: "forward", "centered", "wide4", "backward"
+// confidence modes: "none", "mag", "stability", "both"
+// anchorInterval: reset IF correction every N source frames (0 = no reset)
+function applyUnified2D(data, ar, scaleX, scaleY, shiftXUv, shiftYUv, dphiMode = "centered", confMode = "none", anchorInterval = 0) {
   const { bandOffsets, bandLengths, bandStepLog2s, bandFreqsHz, numFrames, sampleRate } = ar;
   const T_total = (numFrames - 1) / sampleRate;
   const dest = new Float32Array(data.length);
@@ -409,14 +522,20 @@ function applyUnified2D(data, ar, scaleX, scaleY, shiftXUv, shiftYUv) {
       const phaseOff = ch === 0 ? 1 : 3;
       const magOff = ch === 0 ? 0 : 2;
 
-      // Pre-compute source phase derivatives for IF estimation
-      const dphi = new Float64Array(srcLen);
-      for (let k = 0; k < srcLen - 1; k++) {
-        const i0 = (srcOffset + k) * FPIX;
-        const i1 = (srcOffset + k + 1) * FPIX;
-        dphi[k] = data[i1 + phaseOff] - data[i0 + phaseOff];
-      }
-      dphi[srcLen - 1] = dphi[Math.max(0, srcLen - 2)];
+      let dphi;
+      if (dphiMode === "wide4") dphi = computeWideDphi(data, srcOffset, srcLen, phaseOff);
+      else if (dphiMode === "forward") dphi = computeForwardDphi(data, srcOffset, srcLen, phaseOff);
+      else if (dphiMode === "backward") dphi = computeBackwardDphi(data, srcOffset, srcLen, phaseOff);
+      else if (dphiMode.startsWith("smooth")) {
+        const w = parseInt(dphiMode.slice(6)) || 8;
+        dphi = computeSmoothedDphi(data, srcOffset, srcLen, phaseOff, w);
+      } else if (dphiMode.startsWith("wf")) {
+        const r = parseInt(dphiMode.slice(2)) || 16;
+        dphi = computeWideFiniteDphi(data, srcOffset, srcLen, phaseOff, r);
+      } else dphi = computeCenteredDphi(data, srcOffset, srcLen, phaseOff);
+      const phaseStab = (confMode === "stability" || confMode === "both")
+        ? computePhaseStability(dphi)
+        : null;
 
       for (let kDst = 0; kDst < dstLen; kDst++) {
         const dstTimeUv = (kDst * dstStep) / (numFrames - 1);
@@ -479,8 +598,29 @@ function applyUnified2D(data, ar, scaleX, scaleY, shiftXUv, shiftYUv) {
             effectiveDphi += expectedAdvance;
           }
           // Brush-relative stretch frames
-          const stretchFrames = dstTimeUv * (1 - 1 / absScaleX) * (numFrames - 1) / srcStep;
-          phase += effectiveDphi * stretchFrames;
+          let stretchFrames = dstTimeUv * (1 - 1 / absScaleX) * (numFrames - 1) / srcStep;
+
+          // Limit correction accumulation
+          if (anchorInterval === -1) {
+            stretchFrames = 0; // identity: no IF correction
+          } else if (anchorInterval > 0) {
+            // Soft clamp: correction stops growing beyond maxFrames
+            stretchFrames = Math.min(stretchFrames, anchorInterval);
+          }
+
+          // Confidence: weight correction by signal reliability
+          let confidence = 1.0;
+          if (confMode === "mag" || confMode === "both") {
+            const srcMag = dest[dstIdx + magOff];
+            confidence *= Math.min(srcMag / 0.01, 1.0);
+          }
+          if ((confMode === "stability" || confMode === "both") && phaseStab) {
+            const stab = phaseStab[srcK0] * (1 - frac) + phaseStab[Math.min(srcK1, srcLen - 2)] * frac;
+            const stabThreshold = 0.5;
+            confidence *= Math.max(0, 1.0 - stab / stabThreshold);
+          }
+
+          phase += effectiveDphi * stretchFrames * confidence;
         }
 
         // 4. Frequency ratio scaling (pitch change)
@@ -599,14 +739,7 @@ function applyUnifiedPhaseCorrection(data, ar, scaleX, srcLeftUv, srcRightUv, ds
       const phaseOff = ch === 0 ? 1 : 3;
       const magOff = ch === 0 ? 0 : 2;
 
-      // Pre-compute phase differences
-      const dphi = new Float64Array(len);
-      for (let k = 0; k < len - 1; k++) {
-        const i0 = (offset + k) * FPIX;
-        const i1 = (offset + k + 1) * FPIX;
-        dphi[k] = data[i1 + phaseOff] - data[i0 + phaseOff];
-      }
-      dphi[len - 1] = dphi[Math.max(0, len - 2)];
+      const dphi = computeCenteredDphi(data, offset, len, phaseOff);
 
       // Shift correction: band-freq for the constant shift offset
       const shiftConst = srcLeftUv - dstLeftUv / scaleX;
@@ -670,14 +803,7 @@ function applyTimeStretchIFCorrected(data, ar, scaleX) {
       const phaseOff = ch === 0 ? 1 : 3;
       const magOff = ch === 0 ? 0 : 2;
 
-      // Pre-compute phase differences between adjacent source frames
-      const dphi = new Float64Array(len);
-      for (let k = 0; k < len - 1; k++) {
-        const i0 = (offset + k) * FPIX;
-        const i1 = (offset + k + 1) * FPIX;
-        dphi[k] = data[i1 + phaseOff] - data[i0 + phaseOff];
-      }
-      dphi[len - 1] = dphi[Math.max(0, len - 2)];
+      const dphi = computeCenteredDphi(data, offset, len, phaseOff);
 
       for (let k = 0; k < len; k++) {
         const srcKFloat = k / scaleX;
@@ -1269,18 +1395,50 @@ async function main() {
     console.log(`    440Hz pitch flip Y:    r_env=${rFlipY.toFixed(4)}${rFlipY > 0.9 ? " ✓✓✓" : ""}`);
   }
 
-  // --- Drum loop: spectral preservation for each transform ---
-  console.log("\n  --- Drum loop spectral preservation ---");
+  // --- Drum loop: compare IF estimation and confidence strategies ---
+  console.log("\n  --- Drum loop: dphi estimation × confidence strategies ---");
 
-  await evalUnified("scaleX=2 (stretch)", 2, 1, 0, 0);
-  await evalUnified("scaleX=-1 (reverse)", -1, 1, 0, 0);
-  await evalUnified("scaleX=-2 (rev+stretch)", -2, 1, 0, 0);
-  await evalUnified("scaleY=2 (pitch up octave)", 1, 2, 0, 0);
-  await evalUnified("scaleY=0.5 (pitch down octave)", 1, 0.5, 0, 0);
-  await evalUnified("scaleY=-1 (pitch flip)", 1, -1, 0, 0);
-  await evalUnified("scaleX=2 scaleY=2 (stretch+pitch)", 2, 2, 0, 0);
-  await evalUnified("scaleX=-2 scaleY=2 (rev+str+pitch)", -2, 2, 0, 0);
-  await evalUnified("scaleX=2 scaleY=-1 (stretch+flip)", 2, -1, 0, 0);
+  const variants = [
+    ["identity (no IF)", "centered", "none", -1],
+    ["ctr (raw, 1-frame)", "centered", "none", 0],
+    ["smooth32 (box filter)", "smooth32", "none", 0],
+    ["wf16 (wide finite ±16)", "wf16", "none", 0],
+    ["wf32 (wide finite ±32)", "wf32", "none", 0],
+    ["wf64 (wide finite ±64)", "wf64", "none", 0],
+  ];
+
+  // Focus on stretch (where IF correction matters most)
+  const stretchTests = [
+    ["scaleX=2", 2, 1],
+    ["scaleX=-2", -2, 1],
+    ["scaleX=2 scaleY=2", 2, 2],
+  ];
+
+  async function synthAndProfile(synthData, sy) {
+    const synth = await synthesize(synthData, ar, SR);
+    const reAr = await addon.analyze([synth], 1, SR, { bandsPerOctave: BANDS_PER_OCTAVE, minFreq: MIN_FREQ });
+    const pitchBands = Math.abs(sy) !== 1 ? -Math.round(BANDS_PER_OCTAVE * Math.log2(Math.abs(sy))) : 0;
+    const refProfile = pitchBands !== 0 ? shiftProfile(origProfile, pitchBands) : origProfile;
+    const rSpec = pearsonCorrelation(spectralProfile(reAr.data, reAr), refProfile);
+    return { synth, rSpec };
+  }
+
+  for (const [label, sx, sy] of stretchTests) {
+    console.log(`\n  ${label}:`);
+    for (const [vName, dMode, cMode, anchor] of variants) {
+      let d;
+      if (anchor === -1) {
+        // Identity: no IF correction at all (anchorInterval=1 effectively zeros it)
+        d = applyUnified2D(ar.data, ar, sx, sy, 0, 0, dMode, cMode, 1);
+      } else {
+        d = applyUnified2D(ar.data, ar, sx, sy, 0, 0, dMode, cMode, anchor);
+      }
+      const { synth, rSpec } = await synthAndProfile(d, sy);
+      console.log(`    respec=${rSpec.toFixed(4)}  ${vName}`);
+      const safe = `${label}_${vName}`.replace(/[^a-z0-9]/gi, "_");
+      writeWav(`test-out-v-${safe}.wav`, synth, SR);
+    }
+  }
 
   // Shift test: compare only the destination chunk region (whole-file function
   // fills beyond the chunk, which is correct — the shader limits via brush weight)

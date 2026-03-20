@@ -532,10 +532,16 @@ vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX, flo
   // derivative, then applies a per-frame correction to maintain correct
   // frequency during time stretching.
   if (absScaleX > 1e-5 && abs(absScaleX - 1.0) > 1e-5) {
-    float dtUv = srcBandStep / (sourceFrameCount - 1.0);
+    // Wide finite difference: average IF over ±32 coefficient frames.
+    // Equivalent to smoothing the dphi estimate but with just 2 texture reads.
+    // Prevents swooping artifacts from noisy per-frame dphi while maintaining
+    // correct average IF to prevent band-center frequency pull.
+    float smoothRadius = 32.0;
+    float dtUv = srcBandStep * smoothRadius / (sourceFrameCount - 1.0);
+    vec4 magPhasePrev = sampleSourceInterp(wrapUv(sourceUv - vec2(dtUv, 0.0)));
     vec4 magPhaseNext = sampleSourceInterp(wrapUv(sourceUv + vec2(dtUv, 0.0)));
-    float dphiL = magPhaseNext.y - magPhase.y;
-    float dphiR = magPhaseNext.w - magPhase.w;
+    float dphiL = (magPhaseNext.y - magPhasePrev.y) / (2.0 * smoothRadius);
+    float dphiR = (magPhaseNext.w - magPhasePrev.w) / (2.0 * smoothRadius);
 
     // For reversal+stretch: the reversal correction's time-varying part
     // introduces an f_b drift that doesn't cancel when |S|≠1.
