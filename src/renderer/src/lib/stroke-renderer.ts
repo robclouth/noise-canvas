@@ -16,6 +16,7 @@ import {
   Texture,
   UniformsUtils,
   Vector2,
+  Vector4,
   WebGLRenderer,
   WebGLRenderTarget,
 } from "three";
@@ -31,11 +32,12 @@ import { buildModulatorUniforms } from "./modulator-utils";
 import { withPlatformDefines } from "./shader-utils";
 import { unitsToUv } from "./utils";
 
-// Define EffectType locally to avoid circular dependency
-export type EffectType = "dynamics" | "transform" | "overtones" | "blur" | "synthesize" | "passthrough";
+// Import EffectType from the dependency-free types module
+import type { EffectType } from "../effects/types";
+export type { EffectType };
 
 // Effects registry type
-export type EffectsRegistry = Record<EffectType, BaseEffect>;
+export type EffectsRegistry = Record<string, BaseEffect>;
 
 const noise2D = createNoise2D();
 
@@ -240,6 +242,27 @@ export class StrokeRenderer {
       fragmentShader: withPlatformDefines(maskUpdateFrag),
       glslVersion: GLSL3,
     });
+  }
+
+  /**
+   * Hardware blit between two FBOs using WebGL2 blitFramebuffer (GPU DMA copy).
+   */
+  private blitFBO(src: WebGLRenderTarget, dst: WebGLRenderTarget): void {
+    const gl2 = this.gl.getContext() as WebGL2RenderingContext;
+    // Force Three.js to initialize the framebuffers by binding them
+    this.gl.setRenderTarget(src);
+    this.gl.setRenderTarget(dst);
+    // Access internal framebuffer handles
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const props = (this.gl as any).properties as { get(obj: unknown): Record<string, unknown> };
+    const srcFb = props.get(src).__webglFramebuffer as WebGLFramebuffer;
+    const dstFb = props.get(dst).__webglFramebuffer as WebGLFramebuffer;
+    const w = src.width;
+    const h = src.height;
+    gl2.bindFramebuffer(gl2.READ_FRAMEBUFFER, srcFb);
+    gl2.bindFramebuffer(gl2.DRAW_FRAMEBUFFER, dstFb);
+    gl2.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl2.COLOR_BUFFER_BIT, gl2.NEAREST);
+    this.gl.setRenderTarget(null);
   }
 
   private createFBO(width: number, height: number, format: typeof RGBAFormat | typeof RedFormat): WebGLRenderTarget {
@@ -557,6 +580,44 @@ export class StrokeRenderer {
   }
 
   /**
+   * Calculate the scissor row range in the packed texture for a given brush UV extent.
+   * Returns null if scissoring wouldn't help (brush covers most of the texture).
+   */
+  calculateScissorRows(
+    brushBottomLeftUv: Vector2,
+    brushSizeUv: Vector2,
+  ): { rowStart: number; rowCount: number } | null {
+    const { numBands, textureWidth, textureHeight, metadata } = this.spectrogramData;
+
+    // Convert brush UV Y range to band range
+    // bandIndex = floor((1 - uv.y) * bandCount), so lower uv.y = higher band index
+    const brushTopY = brushBottomLeftUv.y;
+    const brushBottomY = brushBottomLeftUv.y + brushSizeUv.y;
+
+    // Add margin for effects that sample neighboring bands
+    const margin = 4;
+    const highBand = Math.min(numBands - 1, Math.floor((1 - brushTopY) * numBands) + margin);
+    const lowBand = Math.max(0, Math.floor((1 - brushBottomY) * numBands) - margin);
+
+    // If brush covers most of the bands, don't bother with scissor
+    const bandSpan = highBand - lowBand + 1;
+    if (bandSpan >= numBands * 0.8) {
+      return null;
+    }
+
+    // Get pixel range from metadata (bandStartOffset is at metadata[band * 4])
+    const firstPixel = metadata[lowBand * 4];
+    const lastBandOffset = metadata[highBand * 4];
+    const lastBandLength = metadata[highBand * 4 + 1];
+    const lastPixel = lastBandOffset + lastBandLength;
+
+    const rowStart = Math.max(0, Math.floor(firstPixel / textureWidth));
+    const rowEnd = Math.min(textureHeight, Math.ceil(lastPixel / textureWidth));
+
+    return { rowStart, rowCount: rowEnd - rowStart };
+  }
+
+  /**
    * Render a brush stroke.
    */
   renderStroke(params: StrokeParams, state: State, sourceFile: SourceFileInfo): void {
@@ -607,6 +668,35 @@ export class StrokeRenderer {
 
     const steps = state.slots[state.activeSlotIndex] ?? [];
     const numSteps = steps.length;
+
+    // Calculate scissor rows from maximum brush extent across all steps
+    let maxBrushSizeUv = new Vector2(0, 0);
+    for (let i = 0; i < numSteps; i++) {
+      const s = createStepStateView(state, i);
+      const sz = this.calculateBrushSizeUv(s, bpm, totalDuration);
+      maxBrushSizeUv.x = Math.max(maxBrushSizeUv.x, sz.x);
+      maxBrushSizeUv.y = Math.max(maxBrushSizeUv.y, sz.y);
+    }
+    const scissorRows = this.calculateScissorRows(cursorPos, maxBrushSizeUv);
+
+    // If scissoring, blit full texture to destinationFbo so non-scissored rows are correct,
+    // then set scissor on all FBOs that will be rendered to.
+    if (scissorRows) {
+      this.blitFBO(currentReadFBO, destinationFbo);
+
+      const scissorVec = new Vector4(
+        0,
+        scissorRows.rowStart,
+        this.spectrogramData.textureWidth,
+        scissorRows.rowCount,
+      );
+      destinationFbo.scissor.copy(scissorVec);
+      destinationFbo.scissorTest = true;
+      tempFboA.scissor.copy(scissorVec);
+      tempFboA.scissorTest = true;
+      tempFboB.scissor.copy(scissorVec);
+      tempFboB.scissorTest = true;
+    }
 
     // Generate random value seeded by position using Perlin noise
     const strokeRandom = (noise2D(cursorPos.x * 50, cursorPos.y * 50) + 1) / 2;
@@ -675,6 +765,7 @@ export class StrokeRenderer {
       for (let effectIndex = 0; effectIndex < enabledEffectItems.length; effectIndex++) {
         const effectItem = enabledEffectItems[effectIndex];
         const effect = this.effects[effectItem.effect];
+        if (!effect) continue;
         const numPasses = effect.materials.length;
         const brushIterations = stepState.brushIterations as number;
 
@@ -765,6 +856,13 @@ export class StrokeRenderer {
     }
 
     this.gl.setRenderTarget(null);
+
+    // Reset scissor on FBOs if it was enabled
+    if (scissorRows) {
+      destinationFbo.scissorTest = false;
+      this.passFbo1.scissorTest = false;
+      this.passFbo2.scissorTest = false;
+    }
 
     // If the stroke is not a preview, commit the changes
     if (!preview) {

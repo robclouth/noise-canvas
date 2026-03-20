@@ -36,6 +36,14 @@ import {
   StrokeTextures,
 } from "../stroke-renderer";
 
+// Mock shaders check brush bounds in packed UV space, which doesn't align with
+// the scissor's unpacked band-index row calculation. Disable scissor for tests.
+function createTestStrokeRenderer(...args: ConstructorParameters<typeof StrokeRenderer>): StrokeRenderer {
+  const r = new StrokeRenderer(...args);
+  r.calculateScissorRows = () => null;
+  return r;
+}
+
 /**
  * Creates a configurable additive effect shader fragment.
  * The amount can be positive (add) or negative (subtract).
@@ -452,7 +460,7 @@ describe("StrokeRenderer", () => {
 
     // Create renderer with additive effects so tests see actual changes
     const mockEffects = createMockEffectsWithAdditive();
-    renderer = new StrokeRenderer(gl, spectrogramData, textures, "test-file-1", mockEffects);
+    renderer = createTestStrokeRenderer(gl, spectrogramData, textures, "test-file-1", mockEffects);
   });
 
   afterEach(() => {
@@ -644,7 +652,7 @@ describe("StrokeRenderer", () => {
 
       // Create renderer with ADDITIVE effect
       const additiveEffects = createMockEffectsWithAdditive();
-      iterRenderer = new StrokeRenderer(gl, iterSpectrogramData, iterTextures, "iter-test", additiveEffects);
+      iterRenderer = createTestStrokeRenderer(gl, iterSpectrogramData, iterTextures, "iter-test", additiveEffects);
     });
 
     afterEach(() => {
@@ -992,7 +1000,7 @@ describe("StrokeRenderer", () => {
       const sourceGl = new WebGLRenderer({ preserveDrawingBuffer: true });
       sourceGl.setSize(512, 512);
 
-      const sourceRenderer = new StrokeRenderer(
+      const sourceRenderer = createTestStrokeRenderer(
         sourceGl,
         sourceSpectrogramData,
         {
@@ -1234,7 +1242,7 @@ describe("StrokeRenderer", () => {
         passthrough: passthroughEffect,
       };
 
-      multiStepRenderer = new StrokeRenderer(
+      multiStepRenderer = createTestStrokeRenderer(
         multiStepGl,
         multiStepSpectrogramData,
         multiStepTextures,
@@ -1329,7 +1337,7 @@ describe("StrokeRenderer", () => {
         passthrough: passthroughEffect,
       };
 
-      multiStepRenderer = new StrokeRenderer(
+      multiStepRenderer = createTestStrokeRenderer(
         multiStepGl,
         multiStepSpectrogramData,
         multiStepTextures,
@@ -1428,7 +1436,7 @@ describe("StrokeRenderer", () => {
       };
 
       const additiveEffects = createMockEffectsWithAdditive();
-      ncRenderer = new StrokeRenderer(ncGl, ncSpectrogramData, ncTextures, "nc-test", additiveEffects);
+      ncRenderer = createTestStrokeRenderer(ncGl, ncSpectrogramData, ncTextures, "nc-test", additiveEffects);
     });
 
     afterEach(() => {
@@ -1475,7 +1483,7 @@ describe("StrokeRenderer", () => {
 
       // Use the additive blend effect (dest + source) to simulate blend mode Add
       const additiveBlendEffects = createMockEffectsWithAdditiveBlend();
-      const blendRenderer = new StrokeRenderer(
+      const blendRenderer = createTestStrokeRenderer(
         blendGl,
         blendSpectrogramData,
         blendTextures,
@@ -1716,7 +1724,7 @@ describe("StrokeRenderer", () => {
       };
 
       const additiveEffects = createMockEffectsWithAdditive();
-      outsideRenderer = new StrokeRenderer(
+      outsideRenderer = createTestStrokeRenderer(
         outsideGl,
         outsideSpectrogramData,
         outsideTextures,
@@ -1785,5 +1793,31 @@ describe("StrokeRenderer", () => {
       expect(outsidePixelAfter![2]).toBeCloseTo(outsidePixelBefore![2], 5);
       expect(outsidePixelAfter![3]).toBeCloseTo(outsidePixelBefore![3], 5);
     });
+  });
+
+  describe("scissor optimization", () => {
+    // Call the real calculateScissorRows via prototype (bypasses the test override)
+    function realScissorRows(brushPos: Vector2, brushSize: Vector2) {
+      return StrokeRenderer.prototype.calculateScissorRows.call(
+        { spectrogramData } as unknown as StrokeRenderer,
+        brushPos,
+        brushSize,
+      );
+    }
+
+    it("should calculate scissor rows for a small brush", () => {
+      const rows = realScissorRows(new Vector2(0.3, 0.3), new Vector2(0.1, 0.1));
+
+      expect(rows).not.toBeNull();
+      expect(rows!.rowStart).toBeGreaterThanOrEqual(0);
+      expect(rows!.rowCount).toBeGreaterThan(0);
+      expect(rows!.rowCount).toBeLessThan(spectrogramData.textureHeight);
+    });
+
+    it("should return null for a brush covering most bands", () => {
+      const rows = realScissorRows(new Vector2(0.0, 0.05), new Vector2(1.0, 0.9));
+      expect(rows).toBeNull();
+    });
+
   });
 });
