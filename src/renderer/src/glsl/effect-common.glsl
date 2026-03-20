@@ -474,22 +474,27 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
 /**
  * Algorithm 4 — Neutral
  *
- * Unified phase formula for arbitrary 2D spectrogram transforms:
- * time shift, time stretch, time reversal, pitch shift, pitch scale, pitch flip,
- * and any combination thereof.
+ * Unified phase formula for arbitrary 2D spectrogram transforms.
+ * Handles any combination of: time stretch, time reversal, pitch shift,
+ * pitch flip, and time/pitch translation.
  *
- * The formula composes four steps:
+ * Core formula:  φ_dest = scaleX × signY × φ_src × freqRatio
  *
- *   1. signX × signY × φ_src          (sign flips for X/Y reversal)
- *   2. + band-freq shift correction    (compensates synthesis carrier time offset)
- *   3. + IF stretch correction         (preserves frequency during time stretch)
- *   4. × freqRatio                     (scales everything for pitch change)
+ * Why this works: for a component at frequency f₀ = f_b + Δf, the source
+ * global phase is φ_src = φ₀ + 2π·Δf·t_src. Multiplying by scaleX:
  *
- * Step 4 wraps around 1–3 because pitch change is multiplicative on phase:
- * all phase advance rates (including corrections) scale by the frequency ratio.
+ *   scaleX × φ_src(t_dest/|S|) = scaleX·φ₀ + signX·2π·Δf·t_dest
  *
- * Key insight: time stretch correction uses the IF offset (dφ/dk), NOT the band
- * center frequency. Using f_b overcorrects and causes banding artifacts.
+ * The synthesis adds 2π·f_b·t_dest, giving total frequency f_b + Δf = f₀.
+ * The scale handles BOTH sign (reversal) and magnitude (stretch) in one
+ * operation — no per-frame IF estimation, no error accumulation, every
+ * pixel computed independently.
+ *
+ * For pitch change, multiplying by freqRatio = f_dst/f_src scales all
+ * phase advance rates to match the target frequency.
+ *
+ * For time shift, a band-frequency carrier correction is added to
+ * compensate for the synthesis happening at a different absolute time.
  */
 vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
   vec4 magPhase = sampleSourceInterp(wrapUv(sourceUv));
@@ -498,71 +503,45 @@ vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX, flo
   float signY = scaleY < 0.0 ? -1.0 : 1.0;
   float absScaleX = abs(scaleX);
 
-  // Source and destination band metadata
+  // Frequency ratio for pitch scaling
   vec4 srcMeta  = getSourceMetadata(sourceUv);
-  vec4 destMeta = getDestMetadata(destUv);
-  float srcFreqHz  = srcMeta.a;
-  float srcBandStep = exp2(srcMeta.b);
-  float destFreqHz = destMeta.a;
-  float destBandStep = exp2(destMeta.b);
+  float srcFreqHz = srcMeta.a;
+  float destFreqHz = getDestMetadata(destUv).a;
+  float freqRatio = (srcFreqHz > 1e-3) ? destFreqHz / srcFreqHz : 1.0;
   float T_total = (destFrameCount - 1.0) / destSampleRate;
 
-  // Frequency ratio for pitch scaling (step 4)
-  float freqRatio = (srcFreqHz > 1e-3) ? destFreqHz / srcFreqHz : 1.0;
+  // Two approaches, blended by how far |scaleX| is from 1:
+  //
+  // Additive (proven for |scaleX|=1): precise carrier correction for
+  // shift/reversal, but IF correction accumulates error during stretch.
+  //
+  // Scale-by-S (proven for |scaleX|≠1): no error accumulation, every
+  // pixel independent, but loses inter-band phase alignment at |scaleX|=1.
 
-  // === Step 1: Sign flips for reversal ===
-  float phaseL = signX * signY * magPhase.y;
-  float phaseR = signX * signY * magPhase.w;
-
-  // === Step 2: Time shift/reversal correction (band-frequency based) ===
-  // Uses the SOURCE band frequency (f_src) since we're correcting for the
-  // carrier phase difference at the source position.
-  float shiftCorr;
+  // Additive phase: signX × signY × φ + carrier correction
+  float addL = signX * signY * magPhase.y;
+  float addR = signX * signY * magPhase.w;
   if (scaleX < 0.0) {
-    shiftCorr = -TWO_PI * srcFreqHz * (sourceUv.x + destUv.x) * T_total;
+    float corr = -TWO_PI * srcFreqHz * (sourceUv.x + destUv.x) * T_total;
+    addL += corr;
+    addR += corr;
   } else {
     float shiftOffset = sourceUv.x - destUv.x / max(scaleX, 1e-5);
-    shiftCorr = TWO_PI * srcFreqHz * shiftOffset * T_total;
-  }
-  phaseL += shiftCorr;
-  phaseR += shiftCorr;
-
-  // === Step 3: Time stretch IF correction (when |scaleX| ≠ 1) ===
-  // Estimates the instantaneous frequency offset from the source phase
-  // derivative, then applies a per-frame correction to maintain correct
-  // frequency during time stretching.
-  if (absScaleX > 1e-5 && abs(absScaleX - 1.0) > 1e-5) {
-    // Wide finite difference: average IF over ±32 coefficient frames.
-    // Equivalent to smoothing the dphi estimate but with just 2 texture reads.
-    // Prevents swooping artifacts from noisy per-frame dphi while maintaining
-    // correct average IF to prevent band-center frequency pull.
-    float smoothRadius = 32.0;
-    float dtUv = srcBandStep * smoothRadius / (sourceFrameCount - 1.0);
-    vec4 magPhasePrev = sampleSourceInterp(wrapUv(sourceUv - vec2(dtUv, 0.0)));
-    vec4 magPhaseNext = sampleSourceInterp(wrapUv(sourceUv + vec2(dtUv, 0.0)));
-    float dphiL = (magPhaseNext.y - magPhasePrev.y) / (2.0 * smoothRadius);
-    float dphiR = (magPhaseNext.w - magPhasePrev.w) / (2.0 * smoothRadius);
-
-    // For reversal+stretch: the reversal correction's time-varying part
-    // introduces an f_b drift that doesn't cancel when |S|≠1.
-    // Add the expected phase advance per coefficient frame to compensate.
-    if (scaleX < 0.0) {
-      float expectedAdvance = TWO_PI * srcFreqHz * srcBandStep / sourceSampleRate;
-      dphiL += expectedAdvance;
-      dphiR += expectedAdvance;
-    }
-
-    float destRelative = destUv.x - brushBottomLeftUv.x;
-    float stretchFrames = destRelative * (1.0 - 1.0 / absScaleX)
-                        * (destFrameCount - 1.0) / srcBandStep;
-
-    phaseL += dphiL * stretchFrames;
-    phaseR += dphiR * stretchFrames;
+    float corr = TWO_PI * srcFreqHz * shiftOffset * T_total;
+    addL += corr;
+    addR += corr;
   }
 
-  // === Step 4: Pitch ratio scaling ===
-  // Multiplies the entire phase (including time corrections) by the frequency
-  // ratio. This scales all phase advance rates to match the new pitch.
+  // Scale-by-S phase: scaleX × signY × φ (handles stretch + reversal)
+  float sclL = scaleX * signY * magPhase.y;
+  float sclR = scaleX * signY * magPhase.w;
+
+  // Blend: use additive near |scaleX|=1, scale-by-S when stretching
+  float stretchAmount = clamp(abs(absScaleX - 1.0) * 4.0, 0.0, 1.0);
+  float phaseL = mix(addL, sclL, stretchAmount);
+  float phaseR = mix(addR, sclR, stretchAmount);
+
+  // Pitch ratio scaling
   phaseL *= freqRatio;
   phaseR *= freqRatio;
 

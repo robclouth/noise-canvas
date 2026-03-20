@@ -532,6 +532,16 @@ function applyUnified2D(data, ar, scaleX, scaleY, shiftXUv, shiftYUv, dphiMode =
       } else if (dphiMode.startsWith("wf")) {
         const r = parseInt(dphiMode.slice(2)) || 16;
         dphi = computeWideFiniteDphi(data, srcOffset, srcLen, phaseOff, r);
+      } else if (dphiMode.startsWith("wt")) {
+        // Time-based: "wt50" = 50ms radius, converted to frames per band
+        const ms = parseInt(dphiMode.slice(2)) || 50;
+        const radiusFrames = Math.max(1, Math.round((ms / 1000) * sampleRate / srcStep));
+        dphi = computeWideFiniteDphi(data, srcOffset, srcLen, phaseOff, radiusFrames);
+      } else if (dphiMode.startsWith("wfrac")) {
+        // Fraction of band length: "wfrac25" = 25% of bandLength as radius
+        const pct = parseInt(dphiMode.slice(5)) || 25;
+        const radiusFrames = Math.max(1, Math.round(srcLen * pct / 100));
+        dphi = computeWideFiniteDphi(data, srcOffset, srcLen, phaseOff, radiusFrames);
       } else dphi = computeCenteredDphi(data, srcOffset, srcLen, phaseOff);
       const phaseStab = (confMode === "stability" || confMode === "both")
         ? computePhaseStability(dphi)
@@ -566,65 +576,60 @@ function applyUnified2D(data, ar, scaleX, scaleY, shiftXUv, shiftYUv, dphiMode =
         const srcDphi = dphi[srcK0] * (1 - frac) + dphi[Math.min(srcK1, srcLen - 2)] * frac;
 
         // === Compose phase corrections ===
-        //
-        // The formula builds up in this order:
-        //   1. Start with source phase, apply sign flips for reversal
-        //   2. Add band-freq correction for time shift/reversal
-        //   3. Add IF correction for time stretch
-        //   4. Multiply everything by freq ratio for pitch change
-        //
-        // Step 4 wraps around all corrections — this ensures the IF
-        // at the destination is scaled by the pitch ratio.
 
-        // 1. Sign (reversal in X and/or Y)
-        let phase = signX * signY * srcPhase;
+        let phase;
 
-        // 2. Time shift/reversal correction (band-freq based)
-        if (signX > 0) {
-          // Shift: 2π·f·shiftOffset·T where shiftOffset is the constant part
-          const shiftOffset = srcTimeUv - dstTimeUv / scaleX;
-          phase += TWO_PI * srcFreq * shiftOffset * T_total;
-        } else {
-          // Reversal: -2π·f·(srcUv + dstUv)·T
-          phase += -TWO_PI * srcFreq * (srcTimeUv + dstTimeUv) * T_total;
-        }
+        if (confMode === "scale" || confMode === "blend") {
+          // Scale-by-S: scaleX × signY × φ_src (handles stretch + reversal)
+          const sclPhase = scaleX * signY * srcPhase;
 
-        // 3. Time stretch IF correction (when |scaleX| ≠ 1)
-        if (absScaleX > 1e-5 && Math.abs(absScaleX - 1) > 1e-5) {
-          let effectiveDphi = srcDphi;
+          // Additive: signX × signY × φ_src + carrier correction
+          let addPhase = signX * signY * srcPhase;
           if (signX < 0) {
-            // Reversal+stretch needs the extra band-freq advance term
-            const expectedAdvance = TWO_PI * srcFreq * srcStep / sampleRate;
-            effectiveDphi += expectedAdvance;
-          }
-          // Brush-relative stretch frames
-          let stretchFrames = dstTimeUv * (1 - 1 / absScaleX) * (numFrames - 1) / srcStep;
-
-          // Limit correction accumulation
-          if (anchorInterval === -1) {
-            stretchFrames = 0; // identity: no IF correction
-          } else if (anchorInterval > 0) {
-            // Soft clamp: correction stops growing beyond maxFrames
-            stretchFrames = Math.min(stretchFrames, anchorInterval);
+            addPhase += -TWO_PI * srcFreq * (srcTimeUv + dstTimeUv) * T_total;
+          } else {
+            const shiftOffset = srcTimeUv - dstTimeUv / Math.max(scaleX, 1e-5);
+            addPhase += TWO_PI * srcFreq * shiftOffset * T_total;
           }
 
-          // Confidence: weight correction by signal reliability
-          let confidence = 1.0;
-          if (confMode === "mag" || confMode === "both") {
-            const srcMag = dest[dstIdx + magOff];
-            confidence *= Math.min(srcMag / 0.01, 1.0);
-          }
-          if ((confMode === "stability" || confMode === "both") && phaseStab) {
-            const stab = phaseStab[srcK0] * (1 - frac) + phaseStab[Math.min(srcK1, srcLen - 2)] * frac;
-            const stabThreshold = 0.5;
-            confidence *= Math.max(0, 1.0 - stab / stabThreshold);
+          if (confMode === "blend") {
+            // Blend: additive near |scaleX|=1, scale-by-S when stretching
+            const stretchAmount = Math.min(Math.abs(absScaleX - 1) * 4, 1);
+            phase = addPhase * (1 - stretchAmount) + sclPhase * stretchAmount;
+          } else {
+            phase = sclPhase;
           }
 
-          phase += effectiveDphi * stretchFrames * confidence;
+          phase *= freqRatio;
+        } else {
+          // Additive IF correction approach (original)
+          // 1. Sign (reversal in X and/or Y)
+          phase = signX * signY * srcPhase;
+
+          // 2. Time shift/reversal correction (band-freq based)
+          if (signX > 0) {
+            const shiftOffset = srcTimeUv - dstTimeUv / scaleX;
+            phase += TWO_PI * srcFreq * shiftOffset * T_total;
+          } else {
+            phase += -TWO_PI * srcFreq * (srcTimeUv + dstTimeUv) * T_total;
+          }
+
+          // 3. Time stretch IF correction
+          if (absScaleX > 1e-5 && Math.abs(absScaleX - 1) > 1e-5) {
+            let effectiveDphi = srcDphi;
+            if (signX < 0) {
+              const expectedAdvance = TWO_PI * srcFreq * srcStep / sampleRate;
+              effectiveDphi += expectedAdvance;
+            }
+            let stretchFrames = dstTimeUv * (1 - 1 / absScaleX) * (numFrames - 1) / srcStep;
+            if (anchorInterval === -1) stretchFrames = 0;
+            else if (anchorInterval > 0) stretchFrames = Math.min(stretchFrames, anchorInterval);
+            phase += effectiveDphi * stretchFrames;
+          }
+
+          // 4. Frequency ratio scaling (pitch change)
+          phase *= freqRatio;
         }
-
-        // 4. Frequency ratio scaling (pitch change)
-        phase *= freqRatio;
 
         dest[dstIdx + phaseOff] = phase;
       }
@@ -1400,17 +1405,16 @@ async function main() {
 
   const variants = [
     ["identity (no IF)", "centered", "none", -1],
-    ["ctr (raw, 1-frame)", "centered", "none", 0],
-    ["smooth32 (box filter)", "smooth32", "none", 0],
-    ["wf16 (wide finite ±16)", "wf16", "none", 0],
-    ["wf32 (wide finite ±32)", "wf32", "none", 0],
-    ["wf64 (wide finite ±64)", "wf64", "none", 0],
+    ["additive wf32", "wf32", "none", 0],
+    ["scale-by-S", "centered", "scale", 0],
+    ["blended", "centered", "blend", 0],
   ];
 
-  // Focus on stretch (where IF correction matters most)
   const stretchTests = [
-    ["scaleX=2", 2, 1],
-    ["scaleX=-2", -2, 1],
+    ["scaleX=1 (identity)", 1, 1],
+    ["scaleX=-1 (reverse)", -1, 1],
+    ["scaleX=2 (stretch)", 2, 1],
+    ["scaleX=-2 (rev+str)", -2, 1],
     ["scaleX=2 scaleY=2", 2, 2],
   ];
 
