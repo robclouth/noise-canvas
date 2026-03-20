@@ -1,6 +1,6 @@
 import { Box, Button, NumberInput, SimpleGrid, Stack, Text, UnstyledButton } from "@mantine/core";
 import { ContextModalProps } from "@mantine/modals";
-import { EffectType, EFFECT_KEYS } from "@renderer/effects/types";
+import { EFFECT_KEYS, EffectType } from "@renderer/effects/types";
 import { EFFECT_COLORS, EFFECT_DESCRIPTIONS, EFFECT_LABELS } from "@renderer/lib/constants";
 import { useRef } from "react";
 
@@ -70,9 +70,11 @@ export const NewFileModal = ({
   );
 };
 
-
-const HIDDEN_EFFECTS = new Set(["sort", "transmute", "waveshape"]);
-const AVAILABLE_EFFECTS = EFFECT_KEYS.filter((key) => key !== "passthrough" && !HIDDEN_EFFECTS.has(key)) as Exclude<EffectType, "passthrough">[];
+const HIDDEN_EFFECTS = new Set(["transmute", "waveshape"]);
+const AVAILABLE_EFFECTS = EFFECT_KEYS.filter((key) => key !== "passthrough" && !HIDDEN_EFFECTS.has(key)) as Exclude<
+  EffectType,
+  "passthrough"
+>[];
 
 export const AddEffectModal = ({
   context,
