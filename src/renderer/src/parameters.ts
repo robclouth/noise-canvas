@@ -732,6 +732,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       { value: 1, label: "Phase" },
       { value: 2, label: "dB" },
       { value: 3, label: "Frequency" },
+      { value: 4, label: "Pan" },
     ],
     includeInStep: true,
     effectType: "sort",

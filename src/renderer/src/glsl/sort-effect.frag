@@ -11,11 +11,25 @@ uniform int passIndexOffset; // 0=even pairs, 1=odd pairs
 // metric == 1: phase
 // metric == 2: dB (log magnitude, 20/ln(10) ≈ 8.68589)
 // metric == 3: instantaneous frequency deviation (pre-computed, passed as extraMetric)
+// metric == 4: pan (normalized L-R magnitude, computed from full stereo texel)
 float getMetric(vec2 texelPolar, int metric, float extraMetric) {
   if (metric == 0) return getMag(texelPolar);
   if (metric == 1) return getPhase(texelPolar);
   if (metric == 2) return log(getMag(texelPolar) + 1e-9) * 8.68589;
   return extraMetric;
+}
+
+// Pan requires both channels; returns a value in [-1, +1].
+float getPanMetric(vec4 fullTexel) {
+    float L = getMag(fullTexel.rg);
+    float R = getMag(fullTexel.ba);
+    return (L - R) / (L + R + 1e-9);
+}
+
+// Linked-mode metric: averages L and R, or returns pan for metric 4.
+float getLinkedMetric(vec4 fullTexel, int metric, float extraMetric) {
+    if (metric == 4) return getPanMetric(fullTexel);
+    return (getMetric(fullTexel.rg, metric, extraMetric) + getMetric(fullTexel.ba, metric, extraMetric)) / 2.0;
 }
 
 bool shouldSwap(float metricA, float metricB, int order) {
@@ -138,9 +152,9 @@ void main() {
                 ? computeInstFreqDev(neighborTexel, neighborLinear, bandIndex, bandHz, timeStep, neighborTimeIdx, texSize)
                 : 0.0;
 
-            if (sortStereoMode == 0) {
-                float myMetric = (getMetric(currentTexel.rg, sortBy, myInstFreqDev) + getMetric(currentTexel.ba, sortBy, myInstFreqDev)) / 2.0;
-                float neighborMetric = (getMetric(neighborTexel.rg, sortBy, neighborInstFreqDev) + getMetric(neighborTexel.ba, sortBy, neighborInstFreqDev)) / 2.0;
+            if (sortStereoMode == 0 || sortBy == 4) {
+                float myMetric = getLinkedMetric(currentTexel, sortBy, myInstFreqDev);
+                float neighborMetric = getLinkedMetric(neighborTexel, sortBy, neighborInstFreqDev);
                 bool swap = isLeft
                     ? shouldSwap(myMetric, neighborMetric, sortOrder)
                     : shouldSwap(neighborMetric, myMetric, sortOrder);
@@ -192,9 +206,9 @@ void main() {
                 ? computeInstFreqDev(neighborTexel, neighborLinear, neighborBandIdx, neighborMeta.a, exp2(neighborMeta.b), neighborTimeIdx, texSize)
                 : 0.0;
 
-            if (sortStereoMode == 0) {
-                float myMetric = (getMetric(currentTexel.rg, sortBy, myInstFreqDev) + getMetric(currentTexel.ba, sortBy, myInstFreqDev)) / 2.0;
-                float neighborMetric = (getMetric(neighborTexel.rg, sortBy, neighborInstFreqDev) + getMetric(neighborTexel.ba, sortBy, neighborInstFreqDev)) / 2.0;
+            if (sortStereoMode == 0 || sortBy == 4) {
+                float myMetric = getLinkedMetric(currentTexel, sortBy, myInstFreqDev);
+                float neighborMetric = getLinkedMetric(neighborTexel, sortBy, neighborInstFreqDev);
                 bool swap = isLeft
                     ? shouldSwap(myMetric, neighborMetric, sortOrder)
                     : shouldSwap(neighborMetric, myMetric, sortOrder);
