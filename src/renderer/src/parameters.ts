@@ -507,7 +507,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     name: "Warp Algorithm",
     label: "Warp algo",
     description: "The algorithm to use when warping the spectrogram.",
-    default: 3,
+    default: 4,
     options: ALGORITHMS,
     includeInStep: true,
   },

@@ -172,11 +172,11 @@ export const CONTEXTUAL_MOD_SOURCES = [
 export const NUM_CONTEXTUAL_MOD_SOURCES = CONTEXTUAL_MOD_SOURCES.length;
 
 export const ALGORITHMS = [
+  { value: 4, label: "Neutral" },
+  { value: 3, label: "Neutralish" },
   { value: 2, label: "Percussive" },
   { value: 0, label: "Flangey" },
   { value: 1, label: "Noisey" },
-  { value: 3, label: "Neutralish" },
-  { value: 4, label: "Neutral" },
 ];
 
 export const EFFECT_COLORS: Record<string, string> = {
