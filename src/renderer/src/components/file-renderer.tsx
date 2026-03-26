@@ -26,6 +26,7 @@ import passThroughVert from "../glsl/pass-through.vert";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { SourceFileInfo, StrokeRenderer, StrokeTextures } from "../lib/stroke-renderer";
+import { penState } from "../lib/pen-state";
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import { unitsToUv } from "../lib/utils";
 
@@ -586,6 +587,9 @@ export const FileRenderer = memo(
             totalDuration,
             viewZoomPower,
             viewOffset,
+            pressure: penState.pressure,
+            tiltX: penState.tiltX,
+            tiltY: penState.tiltY,
           },
           state,
           sourceFileInfo,

@@ -550,6 +550,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       // Get data before stroke
@@ -581,6 +584,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       const dataBefore = await renderer.getFBOData();
@@ -609,6 +615,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       // Apply stroke with intensity
@@ -715,6 +724,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       // Get original data
@@ -785,6 +797,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       const sampleUv = new Vector2(0.1, 0.1);
@@ -832,6 +847,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       const sampleUv = new Vector2(0.1, 0.1);
@@ -877,6 +895,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       // Render at the same position multiple times (simulating mouse move without grid change)
@@ -923,6 +944,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       const dataBefore = await renderer.getFBOData();
@@ -969,6 +993,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       const dataBefore = await renderer.getFBOData();
@@ -1037,6 +1064,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       // Destination starts with constant 0.5 magnitude
@@ -1086,6 +1116,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       // Apply a stroke to modify the data
@@ -1165,6 +1198,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       // Begin stroke
@@ -1299,6 +1335,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       const sampleUv = new Vector2(0.1, 0.1);
@@ -1384,6 +1423,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       const sampleUv = new Vector2(0.1, 0.1);
@@ -1627,6 +1669,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       ncRenderer.renderStroke(params1, state, sourceFile);
@@ -1643,6 +1688,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       ncRenderer.renderStroke(params2, state, sourceFile);
@@ -1677,6 +1725,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       const dataBefore = await renderer.getFBOData();
@@ -1772,6 +1823,9 @@ describe("StrokeRenderer", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       const dataBefore = await outsideRenderer.getFBOData();

@@ -259,6 +259,9 @@ describe("Effects", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       renderer.renderStroke(params, state, sourceFile);
@@ -285,6 +288,9 @@ describe("Effects", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       renderer.renderStroke(params, state, sourceFile);
@@ -308,6 +314,9 @@ describe("Effects", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       renderer.renderStroke(params, state, sourceFile);
@@ -331,6 +340,9 @@ describe("Effects", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       renderer.renderStroke(params, state, sourceFile);
@@ -354,6 +366,9 @@ describe("Effects", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       renderer.renderStroke(params, state, sourceFile);
@@ -395,6 +410,9 @@ describe("Effects", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       renderer.renderStroke(params, state, sourceFile);

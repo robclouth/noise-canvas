@@ -3,8 +3,9 @@ import { Box, Loader, Text } from "@mantine/core";
 import { View } from "@react-three/drei";
 import { openFiles } from "@renderer/store/files";
 import { useGesture } from "@use-gesture/react";
-import { memo, MouseEventHandler, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, PointerEventHandler, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Vector2 } from "three";
+import { penState } from "../lib/pen-state";
 import { screenToZoomed } from "../lib/utils";
 import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
@@ -222,9 +223,12 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     [fileId],
   );
 
-  const handleMouseMove: MouseEventHandler<HTMLDivElement> = useCallback(
+  const handleMouseMove: PointerEventHandler<HTMLDivElement> = useCallback(
     (event) => {
       if (isPanning) return;
+      penState.pressure = event.pressure;
+      penState.tiltX = event.tiltX;
+      penState.tiltY = event.tiltY;
       const state = useStore.getState();
       const bpm = state.filepathsBpm[openFiles[fileId].filePath];
       const coords = getSnappedCoordinates(event, fileId, bpm);
@@ -266,7 +270,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     [fileId, isActive, file, isPanning, uvToBeatsAndPitch],
   );
 
-  const handleMouseEnter: MouseEventHandler<HTMLDivElement> = useCallback(
+  const handleMouseEnter: PointerEventHandler<HTMLDivElement> = useCallback(
     (event) => {
       if (isPanning) return;
       const state = useStore.getState();
@@ -300,7 +304,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     lastSnappedPositionRef.current = null;
   }, []);
 
-  const handleCanvasMouseDown: MouseEventHandler<HTMLDivElement> = useCallback(
+  const handleCanvasMouseDown: PointerEventHandler<HTMLDivElement> = useCallback(
     async (event) => {
       if (event.button !== 0) return;
 
@@ -353,7 +357,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     [fileId, isActive, isSettingPosition, uvToBeatsAndPitch, file],
   );
 
-  const handleCanvasMouseUp: MouseEventHandler<HTMLDivElement> = useCallback(
+  const handleCanvasMouseUp: PointerEventHandler<HTMLDivElement> = useCallback(
     async (event) => {
       if (!isActive) return;
       if (event.button === 0) {
@@ -513,11 +517,11 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
             h={isFullscreen ? undefined : 400}
             style={{ ...(isFullscreen ? { flex: 1 } : {}), ...cursorStyle }}
             pos="relative"
-            onMouseEnter={handleMouseEnter}
-            onMouseMove={handleMouseMove}
-            onMouseLeave={handleMouseLeave}
-            onMouseDown={handleCanvasMouseDown}
-            onMouseUp={handleCanvasMouseUp}
+            onPointerEnter={handleMouseEnter}
+            onPointerMove={handleMouseMove}
+            onPointerLeave={handleMouseLeave}
+            onPointerDown={handleCanvasMouseDown}
+            onPointerUp={handleCanvasMouseUp}
             onContextMenu={(e) => e.preventDefault()}
           >
             <View style={viewStyle}>

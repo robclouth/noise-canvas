@@ -163,11 +163,14 @@ export const NUM_MODULATORS = 3;
 
 // Contextual modulation sources - stroke properties that can modulate parameters
 export const CONTEXTUAL_MOD_SOURCES = [
-  { key: "Iteration", label: "Iter", description: "Iteration index (0-1 across brush iterations)" },
-  { key: "Time", label: "Time", description: "Time position (0-1 across file duration)" },
-  { key: "Pitch", label: "Pitch", description: "Pitch position (0-1 across frequency range)" },
-  { key: "Random", label: "Rand", description: "Random value per stroke (0-1)" },
+  { key: "Iteration", label: "Iteration", description: "Iteration index (0-1 across brush iterations)" },
+  { key: "Time", label: "Time Pos.", description: "Time position (0-1 across file duration)" },
+  { key: "Pitch", label: "Pitch Pos.", description: "Pitch position (0-1 across frequency range)" },
+  { key: "Random", label: "Randomize", description: "Random value per stroke (0-1)" },
   { key: "Step", label: "Step", description: "Step index (0-1 across steps)" },
+  { key: "Pressure", label: "Pressure", description: "Pen pressure (0-1)" },
+  { key: "TiltX", label: "Tilt X", description: "Pen tilt X (0-1, center=0.5)" },
+  { key: "TiltY", label: "Tilt Y", description: "Pen tilt Y (0-1, center=0.5)" },
 ] as const;
 export const NUM_CONTEXTUAL_MOD_SOURCES = CONTEXTUAL_MOD_SOURCES.length;
 

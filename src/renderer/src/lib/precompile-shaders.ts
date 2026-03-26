@@ -5,9 +5,11 @@ const DUMMY_GEOMETRY = new PlaneGeometry(1, 1);
 
 /**
  * Pre-compiles all shader materials from the effects registry.
+ * Uses synchronous compile() to avoid compileAsync() polling hangs that
+ * occur when the page is reloaded mid-compilation (e.g. Electron dev reload).
  * @param renderer The main WebGLRenderer instance.
  */
-export async function precompileAllShaders(renderer: WebGLRenderer) {
+export function precompileAllShaders(renderer: WebGLRenderer) {
   console.log("Starting shader pre-compilation...");
 
   const dummyScene = new Scene();
@@ -21,5 +23,5 @@ export async function precompileAllShaders(renderer: WebGLRenderer) {
     });
   });
 
-  await renderer.compileAsync(dummyScene, dummyCamera);
+  renderer.compile(dummyScene, dummyCamera);
 }

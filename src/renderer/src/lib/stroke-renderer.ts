@@ -142,6 +142,9 @@ export interface StrokeParams {
   totalDuration: number;
   viewZoomPower: number;
   viewOffset: number;
+  pressure: number;
+  tiltX: number;
+  tiltY: number;
 }
 
 /**
@@ -625,7 +628,7 @@ export class StrokeRenderer {
       this.initialize();
     }
 
-    const { cursorPos, preview, bpm, totalDuration, viewZoomPower, viewOffset } = params;
+    const { cursorPos, preview, bpm, totalDuration, viewZoomPower, viewOffset, pressure, tiltX, tiltY } = params;
 
     if (cursorPos.x < 0) return;
 
@@ -790,6 +793,10 @@ export class StrokeRenderer {
             uniformsForThisIteration.strokeStepNormalized = {
               value: numSteps > 1 ? stepIndex / (numSteps - 1) : 0,
             };
+            uniformsForThisIteration.strokePressure = { value: pressure };
+            // Normalize tilt from [-90,90] degrees to [0,1] range (center=0.5)
+            uniformsForThisIteration.strokeTiltX = { value: (tiltX + 90) / 180 };
+            uniformsForThisIteration.strokeTiltY = { value: (tiltY + 90) / 180 };
 
             const material = effect.materials[p];
             this.fboMesh.material = material;

@@ -425,13 +425,16 @@ float applyModulation(float value, float minValue, float maxValue, float[NUM_MOD
   }
 
   // Apply contextual modulation sources
-  // Order: iteration, time, pitch, random, step
+  // Order: iteration, time, pitch, random, step, pressure, tiltX, tiltY
   float contextualValues[NUM_CONTEXTUAL_MOD_SOURCES] = float[NUM_CONTEXTUAL_MOD_SOURCES](
     strokeIterationNormalized,
     strokeTimePosition,
     strokePitchPosition,
     strokeRandom,
-    strokeStepNormalized
+    strokeStepNormalized,
+    strokePressure,
+    strokeTiltX,
+    strokeTiltY
   );
 
   for (int i = 0; i < NUM_CONTEXTUAL_MOD_SOURCES; i++) {

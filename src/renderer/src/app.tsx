@@ -30,7 +30,12 @@ const CanvasInvalidator = ({ onReady }: { onReady: (invalidate: Invalidator) => 
 const ShaderCompiler = ({ onFinish }: { onFinish: () => void }) => {
   const gl = useThree((s) => s.gl);
   useEffect(() => {
-    precompileAllShaders(gl).then(onFinish);
+    try {
+      precompileAllShaders(gl);
+    } catch (err) {
+      console.error("Shader pre-compilation failed:", err);
+    }
+    onFinish();
   }, [gl, onFinish]);
   return null;
 };
@@ -187,9 +192,9 @@ function App(): React.JSX.Element {
     useStore.getState().openFilePath(filePath);
   }, []);
 
-  const handleShaderCompileFinish = () => {
+  const handleShaderCompileFinish = useCallback(() => {
     setIsReady(true);
-  };
+  }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,

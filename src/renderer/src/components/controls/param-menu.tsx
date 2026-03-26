@@ -4,7 +4,7 @@ import { getModulationParamKeys, useStore } from "@renderer/store";
 import { getContextualModAmountParamKeys, getModAmountParamKeys } from "@renderer/store/modulators";
 import { ParameterKey } from "@renderer/store/types";
 import { Link2 } from "lucide-react";
-import { useState } from "react";
+import React, { useState } from "react";
 import { Tooltip } from "../tooltip";
 import { ParameterControl } from "./parameter-control";
 import { SectionMenu } from "./section-menu";
@@ -110,27 +110,27 @@ export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false, effe
             Reset
           </Button>
 
-          {/* Exclude from randomisation toggle */}
-          <SwitchControl
-            labelComponent={
-              <Text size="xs" w={70}>
-                Randomise
-              </Text>
-            }
-            value={!isExcluded}
-            setValue={(value) => setParamExcluded(paramKey, !value)}
-          />
-
-          {/* Step Linked toggle */}
-          <SwitchControl
-            labelComponent={
-              <Text size="xs" w={70}>
-                Step Linked
-              </Text>
-            }
-            value={isLinked}
-            setValue={(value) => setParamLinked(paramKey, value)}
-          />
+          {/* Randomise and Step Linked toggles */}
+          <Group gap={8} wrap="nowrap">
+            <SwitchControl
+              labelComponent={
+                <Text size="xs" w={70}>
+                  Randomise
+                </Text>
+              }
+              value={!isExcluded}
+              setValue={(value) => setParamExcluded(paramKey, !value)}
+            />
+            <SwitchControl
+              labelComponent={
+                <Text size="xs" w={70}>
+                  Step Linked
+                </Text>
+              }
+              value={isLinked}
+              setValue={(value) => setParamLinked(paramKey, value)}
+            />
+          </Group>
 
           {/* Modulation section (if applicable) */}
           {isModulatable && modulatorParamKeys && contextualModParamKeys && (
@@ -145,14 +145,52 @@ export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false, effe
                   parameterKeys={[...modulatorParamKeys, ...contextualModParamKeys]}
                 />
               </Group>
-              <Stack gap={2}>
-                {modulatorParamKeys.map((k) => (
-                  <ParameterControl key={k} paramKey={k} labelWidth={70} color="blue" />
-                ))}
-                {contextualModParamKeys.map((k) => (
-                  <ParameterControl key={k} paramKey={k} labelWidth={70} color="green" />
-                ))}
-              </Stack>
+              <Box style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
+                {/* Row 1-3: Modulators | Pen */}
+                {modulatorParamKeys.map((k, i) => {
+                  const penKeys = contextualModParamKeys.filter((ck) =>
+                    ck.endsWith("ModPressure") || ck.endsWith("ModTiltX") || ck.endsWith("ModTiltY"),
+                  );
+                  return (
+                    <React.Fragment key={k}>
+                      <ParameterControl paramKey={k} labelWidth={70} color="blue" />
+                      {penKeys[i] ? (
+                        <ParameterControl paramKey={penKeys[i]} labelWidth={70} color="violet" />
+                      ) : (
+                        <div />
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+                {/* Row 4: Iteration | Step */}
+                {contextualModParamKeys
+                  .filter((k) => k.endsWith("ModIteration"))
+                  .map((k) => (
+                    <ParameterControl key={k} paramKey={k} labelWidth={70} color="green" />
+                  ))}
+                {contextualModParamKeys
+                  .filter((k) => k.endsWith("ModStep"))
+                  .map((k) => (
+                    <ParameterControl key={k} paramKey={k} labelWidth={70} color="green" />
+                  ))}
+                {/* Row 5: Time Pos. | Pitch Pos. */}
+                {contextualModParamKeys
+                  .filter((k) => k.endsWith("ModTime"))
+                  .map((k) => (
+                    <ParameterControl key={k} paramKey={k} labelWidth={70} color="green" />
+                  ))}
+                {contextualModParamKeys
+                  .filter((k) => k.endsWith("ModPitch"))
+                  .map((k) => (
+                    <ParameterControl key={k} paramKey={k} labelWidth={70} color="green" />
+                  ))}
+                {/* Row 6: Randomize | (empty) */}
+                {contextualModParamKeys
+                  .filter((k) => k.endsWith("ModRandom"))
+                  .map((k) => (
+                    <ParameterControl key={k} paramKey={k} labelWidth={70} color="green" />
+                  ))}
+              </Box>
             </>
           )}
         </Stack>
