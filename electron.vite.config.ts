@@ -7,7 +7,7 @@ export default defineConfig({
   main: {
     plugins: [
       externalizeDepsPlugin({
-        exclude: ["gaborator_addon"],
+        exclude: ["gaborator_addon", "link_addon"],
       }),
     ],
     build: {

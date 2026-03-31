@@ -1326,6 +1326,17 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     default: 36,
     options: BANDS_PER_OCTAVE_VALUES,
   },
+  linkLatencyMs: {
+    kind: "number",
+    name: "Link Latency",
+    label: "Link Latency",
+    description: "Latency compensation for Ableton Link sync. Positive values shift playback ahead.",
+    default: 0,
+    min: -500,
+    max: 500,
+    step: 1,
+    unit: "ms",
+  },
 };
 
 // --- Final Parameter Definitions Builder ---

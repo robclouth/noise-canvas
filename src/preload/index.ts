@@ -4,6 +4,7 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import * as audioAnalysis from "../main/lib/audio-analysis";
+import * as linkAddon from "../main/lib/link";
 
 // @ts-ignore (define in dts)
 window.electron = electronAPI;
@@ -22,6 +23,8 @@ window.nodePath = path;
 window.nodeOs = os;
 // @ts-ignore (define in dts)
 window.platform = process.platform;
+// @ts-ignore (define in dts)
+window.linkAddon = linkAddon;
 
 // @ts-ignore (define in dts)
 window.updater = {

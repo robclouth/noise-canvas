@@ -1,6 +1,6 @@
 import { useStore } from "@/store";
 import { ActionIcon, Group, Text } from "@mantine/core";
-import { Brush, Play, Repeat, Square } from "lucide-react";
+import { Brush, Link2, Play, Repeat, Square } from "lucide-react";
 import { memo, useEffect, useRef } from "react";
 import { Tooltip } from "../tooltip";
 
@@ -24,6 +24,9 @@ export const TransportPanel = memo(() => {
   const autoPlayStroke = useStore((state) => state.autoPlayStroke);
   const setAutoPlayStroke = useStore((state) => state.setAutoPlayStroke);
   const togglePlayback = useStore((state) => state.togglePlayback);
+  const linkEnabled = useStore((state) => state.linkEnabled);
+  const setLinkEnabled = useStore((state) => state.setLinkEnabled);
+  const linkNumPeers = useStore((state) => state.linkNumPeers);
   const timeRef = useRef<HTMLParagraphElement>(null);
   const playButtonRef = useRef<HTMLButtonElement>(null);
   const animationFrameId = useRef<number | null>(null);
@@ -56,6 +59,15 @@ export const TransportPanel = memo(() => {
   return (
     <Group align="center" justify="center" gap="md" p="md" bg="dark.7" style={{ zIndex: 1000 }}>
       <Group w={300}>
+        <Tooltip label={linkEnabled ? `Ableton Link (${linkNumPeers} peer${linkNumPeers !== 1 ? "s" : ""})` : "Enable Ableton Link"}>
+          <ActionIcon
+            onClick={() => setLinkEnabled(!linkEnabled)}
+            size="lg"
+            color={linkEnabled ? "orange" : "dark.5"}
+          >
+            <Link2 size={20} />
+          </ActionIcon>
+        </Tooltip>
         <ActionIcon onClick={togglePlayback} size="lg" ref={playButtonRef} color={isPlaying ? "orange" : "dark.5"}>
           {isPlaying ? <Square size={20} fill="white" /> : <Play size={20} fill="white" />}
         </ActionIcon>

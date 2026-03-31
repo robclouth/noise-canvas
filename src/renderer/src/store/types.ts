@@ -6,6 +6,7 @@ import type { BrushState } from "./brush";
 import type { EffectsState } from "./effects";
 import type { FilesState } from "./files";
 import { ModulatorsState } from "./modulators";
+import type { LinkState } from "./link";
 import type { PresetsState } from "./presets";
 import type { StepsState } from "./steps";
 
@@ -69,7 +70,8 @@ export type State = BrushState &
   AudioState &
   AppState &
   PresetsState &
-  StepsState & {
+  StepsState &
+  LinkState & {
     setParameter: (key: ParameterKey, value: unknown, effectId?: string) => void;
     randomizationAmounts: Record<string, number>;
     setRandomizationAmount: (key: string, amount: number) => void;

@@ -45,7 +45,8 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
     const now = Tone.now();
     const elapsed = Math.max(0, now - playerClock.startAt);
-    let pos = playerClock.startOffset + elapsed;
+    const rate = player.playbackRate ?? 1;
+    let pos = playerClock.startOffset + elapsed * rate;
 
     if (loop) {
       const L0 = loopRegion?.start ?? 0;
@@ -229,9 +230,73 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     const normalize = get().normalize;
     player.volume.value = normalize && peak > 0 ? Tone.gainToDb(1 / peak) : 0;
 
-    const startTime = filesPlaybackStartTime[activeFileId];
     const end = loopRegion?.end ?? buffer.duration;
     const loopStart = loopRegion?.start ?? 0;
+
+    // When Link is enabled and active, phase-align and adjust playback rate
+    const { linkEnabled, linkTempo, linkQuantum, filepathsBpm, linkLatencyMs } = get();
+    const linkActive = linkEnabled && typeof window !== "undefined" && window.linkAddon?.isEnabled?.();
+
+    if (linkActive) {
+      const fileBpm = filepathsBpm[file.filePath] ?? 120;
+      player.playbackRate = linkTempo / fileBpm;
+
+      if (loop) {
+        player.loop = true;
+        player.loopStart = loopStart;
+        player.loopEnd = end;
+      } else {
+        player.loop = false;
+      }
+
+      try {
+        const ctx = Tone.getContext().rawContext;
+        const linkState = window.linkAddon.captureState(linkQuantum);
+        const actualTempo = linkState.tempo;
+        const rate = actualTempo / fileBpm;
+        player.playbackRate = rate;
+
+        // Add latency as a simple beat offset
+        const latencyBeats = (linkLatencyMs / 1000) * (actualTempo / 60);
+        const adjustedBeat = linkState.beat + latencyBeats;
+
+        const secondsPerBeat = 60 / fileBpm;
+
+        let offset: number;
+        if (loop && loopRegion) {
+          const loopLen = loopRegion.end - loopRegion.start;
+          const loopLenBeats = loopLen / secondsPerBeat;
+          const posInLoopBeats = ((adjustedBeat % loopLenBeats) + loopLenBeats) % loopLenBeats;
+          offset = loopRegion.start + posInLoopBeats * secondsPerBeat;
+        } else {
+          const durationBeats = buffer.duration / secondsPerBeat;
+          const posBeats = ((adjustedBeat % durationBeats) + durationBeats) % durationBeats;
+          offset = posBeats * secondsPerBeat;
+        }
+
+        const startTime = ctx.currentTime + 0.001;
+        if (loop) {
+          player.start(startTime, offset);
+        } else {
+          player.start(startTime, offset, Math.max(0, end - offset));
+        }
+
+        return set({
+          isPlaying: true,
+          player,
+          playerClock: {
+            startAt: Tone.now(),
+            startOffset: offset,
+            loopStart,
+            loopEnd: end,
+          } as PlayerClock,
+        });
+      } catch {
+        // Link not ready, fall through to normal start
+      }
+    }
+
+    const startTime = filesPlaybackStartTime[activeFileId];
     const offset = Math.min(Math.max(startTime, 0), end);
 
     if (loop) {

@@ -100,6 +100,30 @@ declare global {
       ) => Promise<void>;
       init: () => void;
     };
+    linkAddon: {
+      create: (bpm: number) => void;
+      destroy: () => void;
+      setCallbacks: (callbacks: {
+        onTempoChanged: (tempo: number) => void;
+        onStartStopChanged: (isPlaying: boolean) => void;
+        onNumPeersChanged: (numPeers: number) => void;
+      }) => void;
+      enable: () => void;
+      disable: () => void;
+      isEnabled: () => boolean;
+      enableStartStopSync: (enable: boolean) => void;
+      setIsPlaying: (isPlaying: boolean) => void;
+      setTempo: (bpm: number) => void;
+      requestBeatAtTime: (beat: number, quantum: number) => void;
+      captureState: (quantum: number) => {
+        tempo: number;
+        beat: number;
+        phase: number;
+        isPlaying: boolean;
+        numPeers: number;
+      };
+      init: () => void;
+    };
     compression: {
       compress: (data: Buffer) => Buffer;
       uncompress: (data: Buffer) => Buffer;

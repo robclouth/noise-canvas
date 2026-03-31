@@ -14,6 +14,7 @@ import { UpdateNotification } from "./components/update-notification";
 import { ipcOn, ipcSend } from "./lib/ipc";
 import { precompileAllShaders } from "./lib/precompile-shaders";
 import { clearAllUndoManagers, getUndoManager } from "./lib/undo-manager";
+import { useLinkSync } from "./lib/use-link-sync";
 import { useShortcuts } from "./lib/useShortcuts";
 import { openFiles } from "./store/files";
 
@@ -42,6 +43,7 @@ const ShaderCompiler = ({ onFinish }: { onFinish: () => void }) => {
 
 function App(): React.JSX.Element {
   useShortcuts();
+  useLinkSync();
   const [isReady, setIsReady] = useState(false);
   const openFileIds = useStore((state) => state.openFileIds);
   const fullscreenFileId = useStore((state) => state.fullscreenFileId);
