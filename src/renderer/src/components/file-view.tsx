@@ -226,7 +226,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const handleMouseMove: PointerEventHandler<HTMLDivElement> = useCallback(
     (event) => {
       if (isPanning) return;
-      penState.pressure = event.pressure;
+      penState.pressure = event.pointerType === "pen" ? event.pressure : 1;
       penState.tiltX = event.tiltX;
       penState.tiltY = event.tiltY;
       const state = useStore.getState();
