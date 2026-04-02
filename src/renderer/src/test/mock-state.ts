@@ -92,11 +92,10 @@ export function createMockState(overrides: Partial<State> = {}): State {
     blendMode: 0,
     algorithm: 0,
 
-    // Source position
-    sourcePosition: null,
+    // Source
+    sourceFile: null,
     sourcePositionMode: "fixed",
     sourceDataMode: "current",
-    lockedOffset: null,
     cursorPosition: null,
 
     // Effects

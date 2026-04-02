@@ -29,9 +29,9 @@ function createPlaceholderHrtfTexture(): DataTexture {
 }
 
 class BinauralEffect extends BaseEffect {
-  private hrtfTexture: DataTexture;
-  private hrtfMetadata: HrtfMetadata;
-  private hrtfLoaded = false;
+  hrtfTexture: DataTexture;
+  hrtfMetadata: HrtfMetadata;
+  hrtfLoaded = false;
 
   constructor() {
     super();
@@ -89,7 +89,7 @@ class BinauralEffect extends BaseEffect {
     this.loadHrtf();
   }
 
-  private async loadHrtf(): Promise<void> {
+  async loadHrtf(): Promise<void> {
     try {
       const { texture, metadata } = await loadHrtfData();
       this.hrtfTexture = texture;

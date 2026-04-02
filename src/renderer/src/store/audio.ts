@@ -138,7 +138,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
     if (!region) return;
 
-    const { player, isPlaying, getPlayer, activeFileId } = get();
+    const { player, isPlaying, activeFileId } = get();
     if (!isPlaying || !player) return;
 
     const file = activeFileId ? openFiles[activeFileId] : undefined;

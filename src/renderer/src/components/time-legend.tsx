@@ -29,7 +29,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
 
   const getTimeFromX = useCallback(
     (clientX: number, rect: DOMRect): number => {
-      if (!file) return 0;
+      if (!file?.spectrogramData) return 0;
       const x = (clientX - rect.left) / rect.width;
       const uv = screenToZoomed(new Vector2(x, 0.5), zoom, offset);
       const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
@@ -57,7 +57,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
     const handleWindowMouseMove = (event: MouseEvent) => {
       if (dragStartTimeRef.current === null) return;
       const rect = legendRef.current?.getBoundingClientRect();
-      if (!rect || !file) return;
+      if (!rect || !file?.spectrogramData) return;
 
       isDraggingRef.current = true;
 
@@ -122,7 +122,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
     };
   }, [file, fileId, getTimeFromX, setFilePlaybackStartTime, activeFileId, isPlaying, setPlaybackTime, togglePlayback]);
 
-  if (!file) return null;
+  if (!file?.spectrogramData) return null;
 
   const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
 

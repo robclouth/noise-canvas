@@ -31,6 +31,7 @@ type NumboxControlProps = {
   marks?: SliderMark[];
   leftValue?: SliderMark;
   rightValue?: SliderMark;
+  rightIcon?: React.ReactNode;
   toNormalized: (value: number) => number;
   fromNormalized: (value: number) => number;
 };
@@ -50,6 +51,7 @@ export const NumboxControl = (props: NumboxControlProps) => {
     marks,
     leftValue,
     rightValue,
+    rightIcon,
     toNormalized,
     fromNormalized,
   } = props;
@@ -395,18 +397,24 @@ export const NumboxControl = (props: NumboxControlProps) => {
         )}
       </Box>
 
-      {/* Dropdown chevron */}
-      {marks && !isEditing && (
+      {/* Right icon: dropdown chevron or custom */}
+      {!isEditing && (marks || rightIcon) && (
         <Box
           style={{
             position: "absolute",
             right: 2,
-            top: "50%",
-            transform: "translateY(-50%)",
+            top: 0,
+            bottom: 0,
+            display: "flex",
+            alignItems: "center",
             pointerEvents: "none",
           }}
         >
-          <ChevronDown size={8} style={{ opacity: 0.7, top: -2, position: "relative" }} />
+          {marks ? (
+            <ChevronDown size={8} style={{ opacity: 0.7, top: -2, position: "relative" }} />
+          ) : (
+            rightIcon
+          )}
         </Box>
       )}
     </Box>

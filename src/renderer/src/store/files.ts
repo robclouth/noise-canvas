@@ -5,6 +5,7 @@ import { produce } from "immer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
 import { getUndoManager } from "../lib/undo-manager";
+import type { BrushStep } from "@renderer/parameters";
 import type { OpenFile, State, ZustandGet, ZustandSet } from "./types";
 import { generateFileId } from "./utils";
 
@@ -46,16 +47,43 @@ export interface FilesState {
   setFileLoading: (fileId: string, message: string | undefined) => void;
   activeFileId: string | null;
   setActiveFileId: (activeFileId: string | null) => Promise<void>;
-  sourceFile: string | null;
-  setSourceFile: (sourceFile: string | null) => void;
   fullscreenFileId: string | null;
   setFullscreenFileId: (fileId: string | null) => void;
+  minimizedFileIds: string[];
+  setFileMinimized: (fileId: string, minimized: boolean) => void;
+  openFileMinimized: (filePath: string) => Promise<void>;
   switchToNextFile: () => void;
   switchToPreviousFile: () => void;
 }
 
 // Open files keyed by file ID
 export const openFiles: Record<string, OpenFile> = {};
+
+/** Get a consistent colour for a file based on a hash of its file path. */
+export function getFileColor(filePath: string): string {
+  let hash = 0;
+  for (let i = 0; i < filePath.length; i++) {
+    hash = filePath.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const hue = ((hash % 360) + 360) % 360;
+  return `hsl(${hue}, 60%, 60%)`;
+}
+
+/** Look up an open file by its file path. Returns the first match or undefined. */
+export function getOpenFileByPath(filePath: string): OpenFile | undefined {
+  return Object.values(openFiles).find((f) => f.filePath === filePath);
+}
+
+/** Check if a file is referenced as a source by any step in any slot. */
+export function isFileReferencedAsSource(filePath: string, slots: Record<number, BrushStep[]>): boolean {
+  for (const slotSteps of Object.values(slots)) {
+    if (!Array.isArray(slotSteps)) continue;
+    for (const step of slotSteps) {
+      if (step.sourceFile?.path === filePath) return true;
+    }
+  }
+  return false;
+}
 
 // Tone.js player for audio playback
 export const player = new Tone.Player().toDestination();
@@ -70,7 +98,7 @@ export function getFileIdByPath(filePath: string): string | undefined {
   return Object.keys(openFiles).find((id) => openFiles[id].filePath === filePath);
 }
 
-export const FILES_PERSISTED_KEYS = ["filepathsBpm"] as const;
+export const FILES_PERSISTED_KEYS = ["filepathsBpm", "minimizedFileIds"] as const;
 
 export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState => ({
   newFile: async () => {
@@ -147,7 +175,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           state.filesPlaybackStartTime[fileId] = 0;
           state.filesDirty[fileId] = true;
 
-          if (!state.sourceFile) state.sourceFile = fileId;
           state.activeFileId = fileId;
         }),
       );
@@ -216,7 +243,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       set(
         produce((state: State) => {
           delete state.filesLoading[fileId];
-          state.sourceFile = fileId;
           state.activeFileId = fileId;
         }),
       );
@@ -243,7 +269,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   },
   duplicateFile: async (fileId: string) => {
     const originalFile = openFiles[fileId];
-    if (!originalFile) return;
+    if (!originalFile?.spectrogramData) return;
 
     const fboData = await originalFile.rendererRef?.current?.getFBOData();
     if (!fboData) {
@@ -788,11 +814,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           const nextFileId = state.openFileIds[state.openFileIds.length - 1] || null;
           state.activeFileId = nextFileId || null;
 
-          // If the file being closed is the source file, set the source file to the next file
-          if (!nextFileId) state.sourceFile = null;
-          else if (state.sourceFile === fileId) {
-            state.sourceFile = nextFileId;
-          }
         }
       }),
     );
@@ -805,12 +826,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const synthesizeFileStart = performance.now();
     console.log("[timing] synthesizeFile started");
 
-    const { normalize, activeFileId, bandsPerOctave, minFreq, isPlaying, getPlayer, setFileSynthesizing } = get();
+    const { activeFileId, bandsPerOctave, minFreq, getPlayer, setFileSynthesizing } = get();
     if (!activeFileId) return;
 
     try {
       const file = openFiles[fileId];
-      if (!file || !file.rendererRef?.current) {
+      if (!file || !file.rendererRef?.current || !file.spectrogramData) {
         return;
       }
 
@@ -1135,10 +1156,107 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
     set({ activeFileId });
   },
-  sourceFile: null,
-  setSourceFile: (sourceFile) => set({ sourceFile }),
   fullscreenFileId: null,
   setFullscreenFileId: (fileId) => set({ fullscreenFileId: fileId }),
+  minimizedFileIds: [],
+  setFileMinimized: (fileId, minimized) => {
+    if (minimized) {
+      const state = get();
+      // Stop playback before minimizing
+      if (state.isPlaying && state.activeFileId === fileId) {
+        state.stopAudio();
+      }
+    }
+    set(
+      produce((state: State) => {
+        if (minimized && !state.minimizedFileIds.includes(fileId)) {
+          state.minimizedFileIds.push(fileId);
+          if (state.activeFileId === fileId) {
+            const lastVisible = [...state.openFileIds]
+              .reverse()
+              .find((id) => !state.minimizedFileIds.includes(id));
+            state.activeFileId = lastVisible ?? null;
+          }
+        } else if (!minimized) {
+          state.minimizedFileIds = state.minimizedFileIds.filter((id) => id !== fileId);
+          state.activeFileId = fileId;
+        }
+      }),
+    );
+  },
+  openFileMinimized: async (filePath) => {
+    // Check if already open
+    const existing = Object.values(openFiles).find((f) => f.filePath === filePath);
+    if (existing) {
+      get().setFileMinimized(existing.id, true);
+      return;
+    }
+
+    const state = get();
+    const fileId = generateFileId();
+
+    // Add placeholder and immediately minimize — never appears as a full canvas
+    openFiles[fileId] = { id: fileId, filePath };
+    set(
+      produce((state: State) => {
+        state.openFileIds.push(fileId);
+        state.minimizedFileIds.push(fileId);
+        state.filepathsBpm[filePath] ??= state.mostRecentBpm ?? 120;
+        state.filesBandsPerOctave[fileId] = state.bandsPerOctave;
+        state.filesZoom[fileId] = 0;
+        state.filesOffset[fileId] = 0;
+        state.filesPlaybackStartTime[fileId] = 0;
+        state.filesLoading[fileId] = "Analysing audio...";
+      }),
+    );
+
+    try {
+      const result = await window.audioAnalysis.analyze(filePath, {
+        bandsPerOctave: state.bandsPerOctave,
+        minFreq: state.minFreq,
+      });
+
+      const spectrogramData = {
+        packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+        inverseMap: new Float32Array(
+          result.inverseMap.buffer,
+          result.inverseMap.byteOffset,
+          result.inverseMap.byteLength / 4,
+        ),
+        metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
+        textureWidth: result.textureWidth,
+        textureHeight: result.textureHeight,
+        numFrames: result.numFrames,
+        numBands: result.numBands,
+        numChannels: result.numChannels,
+        sampleRate: result.sampleRate,
+        packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
+        minFreq: state.minFreq,
+        bandsPerOctave: state.bandsPerOctave,
+        synthesisMetadata: {
+          bandOffsets: result.bandOffsets,
+          bandStepLog2s: result.bandStepLog2s,
+          bandLengths: result.bandLengths,
+        },
+      };
+
+      openFiles[fileId] = { ...openFiles[fileId], spectrogramData };
+      set(
+        produce((state: State) => {
+          delete state.filesLoading[fileId];
+        }),
+      );
+    } catch (error) {
+      delete openFiles[fileId];
+      set(
+        produce((state: State) => {
+          state.openFileIds = state.openFileIds.filter((id) => id !== fileId);
+          state.minimizedFileIds = state.minimizedFileIds.filter((id) => id !== fileId);
+          delete state.filesLoading[fileId];
+        }),
+      );
+    }
+  },
   switchToNextFile: () => {
     const { openFileIds, activeFileId, setActiveFileId } = get();
     if (openFileIds.length <= 1 || !activeFileId) return;

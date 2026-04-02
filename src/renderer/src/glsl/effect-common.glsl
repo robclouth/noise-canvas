@@ -42,6 +42,8 @@ uniform float envelopeSustainEndY;
 uniform float envelopeReleaseEndY;
 uniform float sourceOffsetX;
 uniform float sourceOffsetY;
+uniform float sourceTimeScale; // destDuration / sourceDuration — for correct phase in getTransformedSample
+uniform float sourceBandScale; // destBandCount / sourceBandCount
 uniform Parameter brushPan;
 uniform Parameter brushIntensity;
 uniform int   blendMode;
@@ -129,8 +131,7 @@ vec2 packedToUnpackedUv(sampler2D inverseMapTex, vec2 packedUv, float frameCount
 ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
   ProcessingUvs uvs;
   uvs.dest   = packedToUnpackedUv(destInverseMapTex, destPackedUv, destFrameCount, destBandCount);
-  vec2 offsetUv = vec2(sourceOffsetX, sourceOffsetY);
-  uvs.source = uvs.dest + offsetUv;
+  uvs.source = vec2(uvs.dest.x * sourceTimeScale, uvs.dest.y * sourceBandScale) + vec2(sourceOffsetX, sourceOffsetY);
   return uvs;
 }
 

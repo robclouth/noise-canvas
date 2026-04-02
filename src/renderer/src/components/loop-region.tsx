@@ -16,7 +16,7 @@ export const LoopRegion = ({ fileId }: LoopRegionProps) => {
   const offset = useStore((state) => state.filesOffset[fileId]);
 
   useEffect(() => {
-    if (!overlayRef.current || !file || !loopRegion) {
+    if (!overlayRef.current || !file?.spectrogramData || !loopRegion) {
       if (overlayRef.current) overlayRef.current.style.display = "none";
       return;
     }

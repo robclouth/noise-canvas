@@ -21,7 +21,7 @@ export function computeLinkOffset(
 export function computeSyncError(
   phase1: number,
   phase2: number,
-  quantum: number,
+  _quantum: number,
   elapsedRealSeconds: number,
   linkTempo: number,
   fileBpm: number,

@@ -528,6 +528,9 @@ describe("Effects", () => {
         totalDuration,
         viewZoomPower: 0,
         viewOffset: 0,
+        pressure: 1,
+        tiltX: 0,
+        tiltY: 0,
       };
 
       // First stroke

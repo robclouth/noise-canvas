@@ -46,9 +46,9 @@ export const RESERVED_KEYS = new Set(SHORTCUTS.map((s) => s.key));
 
 export function useShortcuts() {
   const handleKeyDown = (event: KeyboardEvent) => {
-    // Special handling for Shift (hold) - Set Source Mode (Canvas)
+    // Special handling for Shift (hold) - Pick source file position
     if (event.key === "Shift") {
-      useStore.getState().setIsSettingPosition(true);
+      useStore.getState().setPickingFileParam("sourceFile" as import("@renderer/store/types").ParameterKey);
       return;
     }
 
@@ -159,7 +159,7 @@ export function useShortcuts() {
 
   const handleKeyUp = (event: KeyboardEvent) => {
     if (event.key === "Shift") {
-      useStore.getState().setIsSettingPosition(false);
+      useStore.getState().setPickingFileParam(null);
     }
     
     // Platform-specific Zoom Reset

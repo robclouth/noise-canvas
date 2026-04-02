@@ -85,6 +85,11 @@ export function BrushPanel() {
         <PresetSelector />
         <Divider style={{ flex: 1 }} color="dark.4" />
         <Steps />
+        <Section label="Source">
+          <ParameterControl paramKey="sourceFile" />
+          <ParameterControl paramKey="sourcePositionMode" />
+          <ParameterControl paramKey="sourceDataMode" />
+        </Section>
         <Section label="Envelope" parameterKeys={ENVELOPE_PARAMS}>
           <EnvelopeControl />
         </Section>
@@ -95,7 +100,6 @@ export function BrushPanel() {
             <ParameterControl paramKey="brushIterations" />
             <ParameterControl paramKey="brushWrapMode" />
             <ParameterControl paramKey="algorithm" />
-            <ParameterControl paramKey="sourceDataMode" />
             <ParameterControl paramKey="accumulate" />
           </SimpleGrid>
         </Section>

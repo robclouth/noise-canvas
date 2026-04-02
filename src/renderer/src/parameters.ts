@@ -25,8 +25,11 @@ import { ParameterKey } from "./store/types";
 
 // --- Base Interfaces ---
 
+/** File parameter value. timeUv and pitchUv are normalized 0-1 positions within the referenced file. */
+export type FileParameterValue = { path: string; timeUv: number; pitchUv: number } | null;
+
 export interface ParameterBase {
-  kind: "number" | "boolean" | "options" | "string";
+  kind: "number" | "boolean" | "options" | "string" | "file";
   name: string;
   label: string;
   description: string;
@@ -63,9 +66,14 @@ export interface OptionsParameter<T = any> extends ParameterBase {
   options: { value: T; label: string }[];
 }
 
-export type ParameterDef = NumberParameter | BooleanParameter | OptionsParameter | StringParameter;
+export interface FileParameter extends ParameterBase {
+  kind: "file";
+  default: FileParameterValue;
+}
 
-type ParameterDefInput = NumberParameter | BooleanParameter | OptionsParameter | StringParameter;
+export type ParameterDef = NumberParameter | BooleanParameter | OptionsParameter | StringParameter | FileParameter;
+
+type ParameterDefInput = NumberParameter | BooleanParameter | OptionsParameter | StringParameter | FileParameter;
 
 const negBeatMarks = BEAT_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse();
 const zeroBeatMark = { value: 0, label: "0" };
@@ -511,6 +519,14 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     options: ALGORITHMS,
     includeInStep: true,
   },
+  sourceFile: {
+    kind: "file",
+    name: "Source File",
+    label: "Source",
+    description: "File and position to use as the source for this step. When null, paints from self.",
+    default: null,
+    includeInStep: true,
+  },
   sourcePositionMode: {
     kind: "options",
     name: "Source Position Mode",
@@ -520,8 +536,8 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     options: [
       { value: "fixed", label: "Fixed" },
       { value: "anchored", label: "Anchored" },
-      { value: "offset", label: "Offset" },
     ],
+    includeInStep: true,
   },
   sourceDataMode: {
     kind: "options",
@@ -1444,6 +1460,15 @@ export const getStringParameterDef = (key: ParameterKey): StringParameter => {
   return parameterDef as StringParameter;
 };
 
+export const getFileParameterDef = (key: ParameterKey): FileParameter => {
+  const parameterDef = getParameterDef(key);
+
+  if (parameterDef.kind !== "file") {
+    throw new Error(`Parameter ${key} is not a file parameter.`);
+  }
+  return parameterDef as FileParameter;
+};
+
 // --- Step Parameter Helpers ---
 
 /** Returns all parameter keys where includeInStep is true */
@@ -1457,8 +1482,10 @@ export const getStepParameterKeys = (): ParameterKey[] => {
 export type BrushStep = {
   id: string;
   name: string;
+  lockedOffset?: { beats: number; pitch: number } | null;
+  sourceFile?: FileParameterValue;
 } & {
-  [K in ParameterKey]?: (typeof parameterDefs)[K] extends { default: infer D } ? D : never;
+  [K in Exclude<ParameterKey, "sourceFile">]?: (typeof parameterDefs)[K] extends { default: infer D } ? D : never;
 };
 
 /** Creates a default step with all step parameter defaults */

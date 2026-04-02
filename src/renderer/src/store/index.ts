@@ -144,7 +144,7 @@ export const useStore = create<State>()(
                   if (steps) {
                     const currentValue = steps[draft.activeStepIndex]?.[key];
                     steps.forEach((step) => {
-                      step[key] = currentValue;
+                      (step as Record<string, unknown>)[key] = currentValue;
                     });
                   }
                 }

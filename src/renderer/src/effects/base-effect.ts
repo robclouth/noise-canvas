@@ -91,6 +91,9 @@ export type CommonUniforms = {
   strokePitchPosition?: { value: number };
   strokeRandom?: { value: number };
   strokeStepNormalized?: { value: number };
+  strokePressure?: { value: number };
+  strokeTiltX?: { value: number };
+  strokeTiltY?: { value: number };
   // Non-cumulative stroke uniforms for preventing accumulation
   useStrokeMask?: { value: boolean };
   strokeMaskTex?: { value: Texture | null };

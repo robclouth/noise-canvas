@@ -26,6 +26,7 @@ import maskUpdateFrag from "../glsl/mask-update.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { createEffectStateView, createStepStateView } from "../store";
 import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "../store/modulators";
+import type { FileParameterValue } from "../parameters";
 import type { SpectrogramData, State } from "../store/types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { buildModulatorUniforms } from "./modulator-utils";
@@ -363,102 +364,33 @@ export class StrokeRenderer {
    * Calculate source offset based on position mode.
    */
   calculateSourceOffset(
-    state: State,
+    sourceFileValue: FileParameterValue,
+    lockedOffset: { beats: number; pitch: number } | null | undefined,
+    mode: string,
     mousePos: Vector2 | null,
-    sourceBpm: number,
-    sourceTotalDuration: number,
-    sourceSpectrogramData: SpectrogramData,
-    bpm: number,
-    totalDuration: number,
+    timeScale: number,
+    bandScale: number,
   ): Vector2 {
-    const sourceOffsetUv = new Vector2(0, 0);
-
-    if (!state.sourcePosition || !mousePos) {
-      return sourceOffsetUv;
+    if (!sourceFileValue || !mousePos) {
+      return new Vector2(0, 0);
     }
 
-    const mode = state.sourcePositionMode;
-
-    // Calculate brush size from envelope in the CURRENT file's coordinate space
-    const envelopeTimeUvCurrent = unitsToUv(
-      state.brushEnvelopeDelayTime +
-        state.brushEnvelopeAttackTime +
-        state.brushEnvelopeSustainTime +
-        state.brushEnvelopeReleaseTime,
-      0,
-      bpm,
-      totalDuration,
-      this.spectrogramData.bandsPerOctave,
-      this.spectrogramData.numBands,
-    );
-    const envelopePitchUvCurrent = unitsToUv(
-      0,
-      state.brushEnvelopeDelayPitch +
-        state.brushEnvelopeAttackPitch +
-        state.brushEnvelopeSustainPitch +
-        state.brushEnvelopeReleasePitch,
-      bpm,
-      totalDuration,
-      this.spectrogramData.bandsPerOctave,
-      this.spectrogramData.numBands,
-    );
-    const brushSizeUvCurrent = new Vector2(envelopeTimeUvCurrent.x || 1, envelopePitchUvCurrent.y || 1);
-    const halfBrushSizeUvCurrent = new Vector2(brushSizeUvCurrent.x / 2, brushSizeUvCurrent.y / 2);
-
-    // Convert source position (bottom-left) to UV coordinates in the source file
-    const sourcePositionBottomLeftUv = unitsToUv(
-      state.sourcePosition.beats,
-      state.sourcePosition.pitch,
-      sourceBpm,
-      sourceTotalDuration,
-      sourceSpectrogramData.bandsPerOctave,
-      sourceSpectrogramData.numBands,
-    );
-    const sourcePositionUv = sourcePositionBottomLeftUv.clone();
-    const currentBrushUv = mousePos.clone();
+    const sourcePositionUv = new Vector2(sourceFileValue.timeUv, sourceFileValue.pitchUv);
+    // shader does: sourceUv = destUv * scale + offset
+    // so: offset = sourcePositionUv - destCursorUv * scale
+    const scaledMouse = new Vector2(mousePos.x * timeScale, mousePos.y * bandScale);
 
     if (mode === "fixed") {
-      return sourcePositionUv.clone().sub(currentBrushUv);
+      return sourcePositionUv.clone().sub(scaledMouse);
     } else if (mode === "anchored") {
-      if (state.lockedOffset) {
-        return unitsToUv(
-          state.lockedOffset.beats,
-          state.lockedOffset.pitch,
-          sourceBpm,
-          sourceTotalDuration,
-          sourceSpectrogramData.bandsPerOctave,
-          sourceSpectrogramData.numBands,
-        );
+      if (lockedOffset) {
+        return new Vector2(lockedOffset.beats, lockedOffset.pitch);
       } else {
-        return sourcePositionUv.clone().sub(currentBrushUv);
-      }
-    } else if (mode === "offset") {
-      if (state.lockedOffset) {
-        return unitsToUv(
-          state.lockedOffset.beats,
-          state.lockedOffset.pitch,
-          sourceBpm,
-          sourceTotalDuration,
-          sourceSpectrogramData.bandsPerOctave,
-          sourceSpectrogramData.numBands,
-        );
-      } else if (state.cursorPosition) {
-        const brushStartBottomLeftUv = unitsToUv(
-          state.cursorPosition.beats,
-          state.cursorPosition.pitch,
-          bpm,
-          totalDuration,
-          this.spectrogramData.bandsPerOctave,
-          this.spectrogramData.numBands,
-        );
-        const brushStartUv = brushStartBottomLeftUv.clone().add(halfBrushSizeUvCurrent);
-        return sourcePositionUv.clone().sub(brushStartUv);
-      } else {
-        return sourcePositionUv.clone().sub(currentBrushUv);
+        return sourcePositionUv.clone().sub(scaledMouse);
       }
     }
 
-    return sourceOffsetUv;
+    return new Vector2(0, 0);
   }
 
   /**
@@ -473,6 +405,7 @@ export class StrokeRenderer {
     sourceFile: SourceFileInfo,
     bpm: number,
     totalDuration: number,
+    sourceBpm: number,
     viewZoomPower: number,
     viewOffset: number,
     magnitudeLimit: number,
@@ -567,6 +500,16 @@ export class StrokeRenderer {
       bpm: { value: bpm },
       sourceOffsetX: { value: sourceOffsetUv.x },
       sourceOffsetY: { value: sourceOffsetUv.y },
+      // Beat-based scale: 1 beat in dest UV = 1 beat in source UV
+      sourceTimeScale: {
+        value: (() => {
+          const sourceDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
+          return (bpm * totalDuration) / (sourceBpm * sourceDuration);
+        })(),
+      },
+      sourceBandScale: {
+        value: this.spectrogramData.numBands / sourceFile.spectrogramData.numBands,
+      },
       blendMode: { value: stepState.blendMode },
       algorithm: { value: stepState.algorithm },
       magnitudeLimit: { value: magnitudeLimit },
@@ -633,16 +576,23 @@ export class StrokeRenderer {
     if (cursorPos.x < 0) return;
 
     const activeStepState = createStepStateView(state, state.activeStepIndex);
+    const activeStep = (state.slots[state.activeSlotIndex] ?? [])[state.activeStepIndex];
+    const sourceFileValue = activeStepState.sourceFile;
 
     // Calculate source offset
+    // Beat-based scale: converts dest UV to source UV so 1 beat = 1 beat
+    const srcBpm = state.filepathsBpm?.[sourceFile.filePath] || bpm;
+    const srcDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
+    const timeScale = (bpm * totalDuration) / (srcBpm * srcDuration);
+    const bandScale = this.spectrogramData.numBands / sourceFile.spectrogramData.numBands;
+
     const sourceOffsetUv = this.calculateSourceOffset(
-      activeStepState,
+      sourceFileValue,
+      activeStep?.lockedOffset,
+      activeStepState.sourcePositionMode as string,
       cursorPos,
-      bpm,
-      totalDuration,
-      sourceFile.spectrogramData,
-      bpm,
-      totalDuration,
+      timeScale,
+      bandScale,
     );
 
     const currentReadFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
@@ -712,6 +662,7 @@ export class StrokeRenderer {
       const blendDestFbo = stepIndex === 0 ? currentReadFBO : stepInputFbo;
 
       // Build common uniforms for this step
+      const sourceBpm = state.filepathsBpm?.[sourceFile.filePath] || bpm;
       const commonUniforms = this.buildStepUniforms(
         stepState,
         stepBrushSizeUv,
@@ -721,6 +672,7 @@ export class StrokeRenderer {
         sourceFile,
         bpm,
         totalDuration,
+        sourceBpm,
         viewZoomPower,
         viewOffset,
         state.magnitudeLimit,
@@ -757,6 +709,8 @@ export class StrokeRenderer {
         sourceSpectrogramTextureSize: commonUniforms.destSpectrogramTextureSize,
         sourceOffsetX: { value: 0 },
         sourceOffsetY: { value: 0 },
+        sourceTimeScale: { value: 1.0 },
+        sourceBandScale: { value: 1.0 },
       };
 
       // Reset currentReadFbo to the step's input for effect processing

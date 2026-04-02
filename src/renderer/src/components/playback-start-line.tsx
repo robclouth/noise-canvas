@@ -16,7 +16,7 @@ export const PlaybackStartLine = ({ fileId }: PlaybackStartLineProps) => {
   const offset = useStore((state) => state.filesOffset[fileId]);
 
   useEffect(() => {
-    if (!lineRef.current || !file) return;
+    if (!lineRef.current || !file?.spectrogramData) return;
 
     const duration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
     const startTime = playbackStartTime || 0;

@@ -101,6 +101,7 @@ class TransformEffect extends BaseEffect {
 
     const { file, passIndex } = props;
     const { spectrogramData } = file;
+    if (!spectrogramData) return;
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
     const shiftUv = unitsToUv(

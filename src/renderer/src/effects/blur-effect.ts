@@ -102,6 +102,7 @@ class BlurEffect extends BaseEffect {
     const { blurAmountTime, blurAmountPitch, blurNoiseTime, blurNoisePitch, blurEdgeMode, blurSamplesX, blurSamplesY, blurOrigin, filepathsBpm } =
       state;
     const { spectrogramData, filePath } = file;
+    if (!spectrogramData) return;
 
     const bpm = filepathsBpm[filePath] || 120;
 

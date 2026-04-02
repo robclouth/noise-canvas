@@ -1,8 +1,8 @@
 import { useStore } from "@/store";
 import { ActionIcon, Badge, Box, Group, Menu, NumberInput } from "@mantine/core";
-import { openFiles } from "@renderer/store/files";
+import { getFileColor, isFileReferencedAsSource, openFiles } from "@renderer/store/files";
 import truncateMiddle from "@stdlib/string-truncate-middle";
-import { Copy, Maximize2, Minimize2, Pipette, Scissors, X } from "lucide-react";
+import { ChevronDown, Copy, Maximize2, Minimize2, Scissors, X } from "lucide-react";
 import { memo } from "react";
 import { Tooltip } from "./tooltip";
 
@@ -53,16 +53,27 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const file = openFiles[fileId];
   const filePath = file.filePath;
   const bpm = useStore((state) => state.filepathsBpm[filePath]);
-  const sourceFile = useStore((state) => state.sourceFile);
   const fullscreenFileId = useStore((state) => state.fullscreenFileId);
   const bandsPerOctave = useStore((state) => state.filesBandsPerOctave[fileId]);
   const isDirty = useStore((state) => state.filesDirty[fileId] ?? false);
+  const isReferenced = useStore((state) => isFileReferencedAsSource(filePath, state.slots));
+  const isHighlighted = useStore((state) => state.highlightedSourcePath === filePath);
 
-  const isSource = sourceFile === fileId;
   const isFullscreen = fullscreenFileId === fileId;
+  const fileColor = getFileColor(filePath);
 
   return (
-    <Group justify="space-between" align="center" p="xs" wrap="nowrap" bg="dark.7">
+    <Group
+      justify="space-between"
+      align="center"
+      p="xs"
+      wrap="nowrap"
+      bg={isHighlighted ? "dark.6" : "dark.7"}
+      style={{
+        borderLeft: `3px solid ${fileColor}`,
+        ...(isHighlighted ? { outline: "1px solid var(--mantine-color-blue-6)" } : {}),
+      }}
+    >
       <Group gap="xs" style={{ minWidth: 0, flex: 1 }}>
         <Tooltip label={filePath}>
           <Box style={{ minWidth: 0, flex: 1 }}>
@@ -125,15 +136,15 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
             <Copy size={16} />
           </ActionIcon>
         </Tooltip>
-        <Tooltip label="Use this file as the source for painting onto other files. Use the Source Data Mode in the brush panel to choose between current (modified) and original (unmodified) data.">
+        <Tooltip label="Minimize to palette bar">
           <ActionIcon
-            color={isSource ? "orange" : "dark.5"}
+            color="dark.5"
             onClick={(e) => {
               e.stopPropagation();
-              useStore.getState().setSourceFile(fileId);
+              useStore.getState().setFileMinimized(fileId, true);
             }}
           >
-            <Pipette size={16} />
+            <ChevronDown size={16} />
           </ActionIcon>
         </Tooltip>
         <Tooltip label={isFullscreen ? "Exit fullscreen" : "Expand this file to fill the canvas area."}>
@@ -147,17 +158,19 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
             {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </ActionIcon>
         </Tooltip>
-        <Tooltip label="Close this file.">
-          <ActionIcon
-            color="dark.5"
-            onClick={(e) => {
-              e.stopPropagation();
-              useStore.getState().tryCloseFile(fileId);
-            }}
-          >
-            <X size={16} />
-          </ActionIcon>
-        </Tooltip>
+        {!isReferenced && (
+          <Tooltip label="Close this file.">
+            <ActionIcon
+              color="dark.5"
+              onClick={(e) => {
+                e.stopPropagation();
+                useStore.getState().tryCloseFile(fileId);
+              }}
+            >
+              <X size={16} />
+            </ActionIcon>
+          </Tooltip>
+        )}
       </Group>
     </Group>
   );

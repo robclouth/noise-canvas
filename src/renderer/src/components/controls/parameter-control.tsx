@@ -6,6 +6,8 @@ import { getContextualModAmountParamKeys, getModAmountParamKeys } from "@rendere
 import { denormalizeParameterValue, normalizeParameterValue } from "@renderer/store/utils";
 import { memo } from "react";
 import { useShallow } from "zustand/shallow";
+import type { FileParameterValue } from "@renderer/parameters";
+import { FileParameterControl } from "./file-parameter-control";
 import { NumboxControl } from "./numbox-control";
 import { ParamMenu } from "./param-menu";
 import { SelectControl } from "./select-control";
@@ -136,5 +138,17 @@ export const ParameterControl = memo(function ParameterControl({
       />
     );
   }
+
+  if (kind === "file") {
+    return (
+      <FileParameterControl
+        labelComponent={labelComponent}
+        value={parameterValue as FileParameterValue}
+        setValue={handleSetValue}
+        paramKey={paramKey}
+      />
+    );
+  }
+
   return null;
 });

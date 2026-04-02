@@ -7,7 +7,7 @@ import { Canvas, RootState, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
-import { CanvasPanel } from "./components/layout/canvas-panel";
+import { CanvasPanel, PaletteBar } from "./components/layout/canvas-panel";
 import { ControlsPanel } from "./components/layout/controls-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
@@ -74,17 +74,6 @@ function App(): React.JSX.Element {
         // openFilePath(process.cwd() + "/test-audio/tone-440hz-5s.wav");
       }
     }
-
-    // Clear locked offset when switching away from offset mode
-    const unsubModeChange = useStore.subscribe(
-      (state) => state.sourcePositionMode,
-      (mode, prevMode) => {
-        if (prevMode === "offset" && mode !== "offset") {
-          useStore.getState().setLockedOffset(null);
-        }
-      },
-    );
-    unsubscribers.push(unsubModeChange);
 
     const unsubDirtyState = useStore.subscribe(
       (state) => {
@@ -271,6 +260,7 @@ function App(): React.JSX.Element {
             <CanvasPanel />
           </Box>
         )}
+        <PaletteBar />
         <TransportPanel />
       </Stack>
       <ScrollArea

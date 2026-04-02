@@ -1044,7 +1044,7 @@ describe("StrokeRenderer", () => {
       sourceRenderer.initialize();
 
       const state = createMockState({
-        sourcePosition: { beats: 0, pitch: 0, fileId: "source-file" },
+        sourceFile: { path: "/test/source-file.wav", timeUv: 0, pitchUv: 0 },
         sourceDataMode: "current",
       });
 
@@ -1579,6 +1579,9 @@ describe("StrokeRenderer", () => {
           totalDuration,
           viewZoomPower: 0,
           viewOffset: 0,
+          pressure: 1,
+          tiltX: 0,
+          tiltY: 0,
         };
 
         blendRenderer.renderStroke(params, state, sourceFile);

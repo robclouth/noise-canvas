@@ -76,7 +76,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
   const activeFileId = useStore((state) => state.activeFileId);
   const isActive = activeFileId === fileId;
-  const isSettingPosition = useStore((state) => state.isSettingPosition);
+  const pickingFileParam = useStore((state) => state.pickingFileParam);
   const isZooming = useStore((state) => state.isZooming);
   const zoom = useStore((state) => state.filesZoom[fileId]);
   const offset = useStore((state) => state.filesOffset[fileId]);
@@ -88,9 +88,9 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const cursorStyle = useMemo(() => {
     if (isPanning) return { cursor: "grabbing" };
     if (isZooming) return { cursor: "zoom-in" };
-    if (isSettingPosition) return { cursor: "crosshair" };
+    if (pickingFileParam) return { cursor: "crosshair" };
     return { cursor: "crosshair" };
-  }, [isSettingPosition, isPanning, isZooming]);
+  }, [pickingFileParam, isPanning, isZooming]);
 
   const rendererRef = useRef<FileRendererHandle>(null);
   const strokeTimeRangeRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
@@ -313,11 +313,11 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       const coords = getSnappedCoordinates(event, fileId, bpm);
       if (!coords) return;
 
-      if (isSettingPosition) {
-        const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
-        state.setSourcePosition({ beats, pitch, fileId });
-        state.setIsSettingPosition(false);
-        state.setSourceFile(fileId);
+      // Pick mode: clicking on a canvas sets the file param value with UV coordinates
+      if (state.pickingFileParam) {
+        const fileParamValue = { path: openFiles[fileId].filePath, timeUv: coords[0], pitchUv: 1.0 - coords[1] };
+        state.setParameter(state.pickingFileParam, fileParamValue);
+        state.setPickingFileParam(null);
         return;
       }
 
@@ -329,6 +329,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         const { spectrogramData } = file;
         if (!spectrogramData) return;
         isStrokingRef.current = true;
+        state.setIsStroking(true);
         rendererRef.current.beginStroke();
         const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
         state.setCursorPosition({ beats, pitch });
@@ -339,22 +340,33 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         const initialBrushEnd = centerTimeSeconds;
         strokeTimeRangeRef.current = { min: initialBrushStart, max: initialBrushEnd };
 
-        if (state.sourcePosition) {
-          const offsetBeats = state.sourcePosition.beats - beats;
-          const offsetPitch = state.sourcePosition.pitch - pitch;
-          if (state.sourcePositionMode === "anchored") {
-            // Clone stamp: reset source to sourcePosition on every stroke start.
-            state.setLockedOffset({ beats: offsetBeats, pitch: offsetPitch });
-          } else if (state.sourcePositionMode === "offset" && !state.lockedOffset) {
-            // Aligned: lock offset once on the first stroke only.
-            state.setLockedOffset({ beats: offsetBeats, pitch: offsetPitch });
+        // Compute locked offset for anchored mode with beat-based scale
+        const { getActiveStep } = state;
+        const activeStep = getActiveStep();
+        const sourceFileValue = activeStep?.sourceFile ?? null;
+        if (sourceFileValue) {
+          const sourcePositionMode = activeStep?.sourcePositionMode ?? "anchored";
+          if (sourcePositionMode === "anchored") {
+            const sourceOpenFile = Object.values(openFiles).find((f) => f.filePath === sourceFileValue.path);
+            if (sourceOpenFile?.spectrogramData && spectrogramData) {
+              const destBpm = state.filepathsBpm[file.filePath] || 120;
+              const destDur = spectrogramData.numFrames / spectrogramData.sampleRate;
+              const srcBpm = state.filepathsBpm[sourceOpenFile.filePath] || 120;
+              const srcDur = sourceOpenFile.spectrogramData.numFrames / sourceOpenFile.spectrogramData.sampleRate;
+              const tScale = (destBpm * destDur) / (srcBpm * srcDur);
+              const bScale = spectrogramData.numBands / sourceOpenFile.spectrogramData.numBands;
+
+              const offsetX = sourceFileValue.timeUv - coords[0] * tScale;
+              const offsetY = sourceFileValue.pitchUv - coords[1] * bScale;
+              state.updateActiveStepLockedOffset({ beats: offsetX, pitch: offsetY });
+            }
           }
         }
 
         rendererRef.current.renderStroke(coords[0], coords[1], false);
       }
     },
-    [fileId, isActive, isSettingPosition, uvToBeatsAndPitch, file],
+    [fileId, isActive, uvToBeatsAndPitch, file],
   );
 
   const handleCanvasMouseUp: PointerEventHandler<HTMLDivElement> = useCallback(
@@ -373,6 +385,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     isStrokingRef.current = false;
 
     const state = useStore.getState();
+    state.setIsStroking(false);
     const finalRange = strokeTimeRangeRef.current;
 
     // Use unified action with time range

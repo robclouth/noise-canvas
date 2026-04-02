@@ -209,7 +209,7 @@ export function useLinkSync(): void {
     let audioCtx: AudioContext | null = null;
 
     const tick = () => {
-      if (!(window as Record<string, unknown>).__linkMetronome) {
+      if (!(window as unknown as Record<string, unknown>).__linkMetronome) {
         lastBeatInt = -1;
         rafId = requestAnimationFrame(tick);
         return;

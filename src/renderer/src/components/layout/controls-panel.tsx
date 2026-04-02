@@ -1,6 +1,5 @@
 import { Stack, Text } from "@mantine/core";
 import { ParameterControl } from "../controls/parameter-control";
-import { SourcePositionControl } from "../controls/source-position-control";
 import { Section } from "../section";
 
 export function ControlsPanel() {
@@ -19,9 +18,6 @@ export function ControlsPanel() {
       <Section label="Display">
         <ParameterControl paramKey="displayMinDb" />
         <ParameterControl paramKey="displayMaxDb" />
-      </Section>
-      <Section label="Source Position">
-        <SourcePositionControl />
       </Section>
 
       <Section label="Scale">

@@ -152,6 +152,21 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
         draft.slotLinkedParams[draft.activeSlotIndex] = preset.linkedParams ?? [];
       }),
     );
+
+    // Open referenced source files minimized
+    for (const step of mergedSteps) {
+      const sourceFile = step.sourceFile;
+      if (sourceFile?.path) {
+        get().openFileMinimized(sourceFile.path).catch(() => {
+          // File not found — reset to null
+          notifications.show({
+            title: "Source file not found",
+            message: `${sourceFile.path.split("/").pop()} not found on disk`,
+            color: "yellow",
+          });
+        });
+      }
+    }
   },
 
   savePreset: async (name: string, presetId?: string) => {

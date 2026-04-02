@@ -110,20 +110,16 @@ void main() {
 
     // Draw source rectangle first so target renders on top when they overlap
     if (showSourceRectangle) {
-        vec2 sourceCenter = sourceSamplingBottomLeftUv + brushSizeUv * 0.5;
+        vec2 sourceCenter = sourceSamplingBottomLeftUv + sourceBrushSizeUv * 0.5;
 
-        if (sourceCenter.x >= 0.0 && sourceCenter.x <= 1.0 &&
-            sourceCenter.y >= 0.0 && sourceCenter.y <= 1.0) {
+        vec2 dSource = abs(zoomedUv - sourceCenter) - sourceBrushSizeUv * 0.5;
+        float outsideDistSource = length(max(dSource, 0.0));
+        float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
+        float distToBorderSource = outsideDistSource + insideDistSource;
 
-            vec2 dSource = abs(zoomedUv - sourceCenter) - brushSizeUv * 0.5;
-            float outsideDistSource = length(max(dSource, 0.0));
-            float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
-            float distToBorderSource = outsideDistSource + insideDistSource;
-
-            float sourceRectAlpha = 1.0 - smoothstep(0.0, fwidth(distToBorderSource), abs(distToBorderSource));
-            // Mantine blue[6] #228be6
-            color = mix(color, vec3(0.133, 0.545, 0.902), sourceRectAlpha);
-        }
+        float sourceRectAlpha = 1.0 - smoothstep(0.0, fwidth(distToBorderSource), abs(distToBorderSource));
+        // Mantine blue[6] #228be6
+        color = mix(color, vec3(0.133, 0.545, 0.902), sourceRectAlpha);
     }
 
     // Draw target rectangle on top

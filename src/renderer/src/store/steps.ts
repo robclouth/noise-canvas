@@ -17,6 +17,7 @@ export interface StepsState {
   getSteps: () => BrushStep[];
   setStepParameter: (key: ParameterKey, value: unknown) => void;
   setStepName: (index: number, name: string) => void;
+  updateActiveStepLockedOffset: (offset: { beats: number; pitch: number } | null) => void;
 }
 
 export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState => ({
@@ -131,6 +132,17 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
         const draftSteps = draft.slots[draft.activeSlotIndex];
         if (draftSteps && draftSteps[index]) {
           draftSteps[index].name = name;
+        }
+      }),
+    );
+  },
+
+  updateActiveStepLockedOffset: (offset) => {
+    set(
+      produce((draft: State) => {
+        const draftSteps = draft.slots[draft.activeSlotIndex];
+        if (draftSteps && draftSteps[draft.activeStepIndex]) {
+          draftSteps[draft.activeStepIndex].lockedOffset = offset;
         }
       }),
     );

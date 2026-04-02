@@ -13,7 +13,8 @@ export const PlaybackLine = ({ fileId }: PlaybackLineProps) => {
   const animationFrameId = useRef<number | null>(null);
   const isPlaying = useStore((state) => state.isPlaying);
   const loop = useStore((state) => state.loop);
-  const duration = openFiles[fileId].spectrogramData.numFrames / openFiles[fileId].spectrogramData.sampleRate;
+  const fileData = openFiles[fileId];
+  const duration = fileData?.spectrogramData ? fileData.spectrogramData.numFrames / fileData.spectrogramData.sampleRate : 0;
 
   useEffect(() => {
     if (!isPlaying) {

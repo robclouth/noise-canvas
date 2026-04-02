@@ -1,4 +1,5 @@
-import { getParameterDef } from "@renderer/parameters";
+import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
+import type { ParameterKey } from "./types";
 import { openFiles } from "./files";
 import type { ZustandGet, ZustandSet } from "./types";
 
@@ -17,18 +18,19 @@ export interface BrushState {
   brushEnvelopeAttackPitch: number;
   brushEnvelopeSustainPitch: number;
   brushEnvelopeReleasePitch: number;
-  sourcePosition: { beats: number; pitch: number; fileId: string } | null;
-  setSourcePosition: (position: { beats: number; pitch: number; fileId: string } | null) => void;
+  sourceFile: FileParameterValue;
   sourcePositionMode: string;
   sourceDataMode: string;
-  isSettingPosition: boolean;
-  setIsSettingPosition: (value: boolean) => void;
+  pickingFileParam: ParameterKey | null;
+  setPickingFileParam: (paramKey: ParameterKey | null) => void;
+  highlightedSourcePath: string | null;
+  setHighlightedSourcePath: (path: string | null) => void;
+  isStroking: boolean;
+  setIsStroking: (value: boolean) => void;
   cursorVisible: boolean;
   setCursorVisible: (visible: boolean) => void;
   cursorPosition: StrokePosition | null;
   setCursorPosition: (position: StrokePosition | null) => void;
-  lockedOffset: StrokePosition | null;
-  setLockedOffset: (offset: StrokePosition | null) => void;
   // Unified stroke actions
   previewStrokeAtPosition: (position: StrokePosition) => void;
   applyStrokeAtPosition: (position?: StrokePosition, strokeTimeRange?: StrokeTimeRange) => Promise<void>;
@@ -74,18 +76,19 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     blendMode: getParameterDef("blendMode").default,
     algorithm: getParameterDef("algorithm").default,
     accumulate: getParameterDef("accumulate").default,
+    sourceFile: null,
     sourcePositionMode: getParameterDef("sourcePositionMode").default,
     sourceDataMode: getParameterDef("sourceDataMode").default,
-    sourcePosition: null,
-    setSourcePosition: (position) => set({ sourcePosition: position, lockedOffset: null }),
-    isSettingPosition: false,
-    setIsSettingPosition: (value: boolean) => set({ isSettingPosition: value }),
+    pickingFileParam: null,
+    setPickingFileParam: (paramKey) => set({ pickingFileParam: paramKey }),
+    highlightedSourcePath: null,
+    setHighlightedSourcePath: (path) => set({ highlightedSourcePath: path }),
+    isStroking: false,
+    setIsStroking: (value) => set({ isStroking: value }),
     cursorVisible: false,
     setCursorVisible: (visible) => set({ cursorVisible: visible }),
     cursorPosition: null,
     setCursorPosition: (position) => set({ cursorPosition: position }),
-    lockedOffset: null,
-    setLockedOffset: (offset) => set({ lockedOffset: offset }),
 
     // Unified preview action - used by mouse move and arrow keys
     previewStrokeAtPosition: (position) => {
@@ -94,7 +97,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       if (!activeFileId) return;
 
       const file = openFiles[activeFileId];
-      if (!file?.rendererRef?.current) return;
+      if (!file?.rendererRef?.current || !file.spectrogramData) return;
 
       const bpm = state.filepathsBpm[file.filePath] || 120;
       const { spectrogramData } = file;
@@ -122,7 +125,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       if (!activeFileId || !effectivePosition) return;
 
       const file = openFiles[activeFileId];
-      if (!file?.rendererRef?.current) return;
+      if (!file?.rendererRef?.current || !file.spectrogramData) return;
 
       const bpm = state.filepathsBpm[file.filePath] || 120;
       const { spectrogramData } = file;
@@ -180,7 +183,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       if (!activeFileId) return;
 
       const file = openFiles[activeFileId];
-      if (!file) return;
+      if (!file?.spectrogramData) return;
 
       const bpm = state.filepathsBpm[file.filePath] || 120;
       const { spectrogramData } = file;
