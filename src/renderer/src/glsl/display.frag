@@ -8,6 +8,8 @@ uniform float gridSize;
 
 uniform bool showTargetRectangle;
 uniform bool showSourceRectangle;
+uniform float targetRectPulse;
+uniform vec3 targetRectColor;
 
 uniform vec2 sourceBrushSizeUv; // Size of the brush in UV coordinates for the source file
 uniform vec2 sourceSamplingBottomLeftUv; // Pre-computed sampling position on the source file
@@ -145,8 +147,7 @@ void main() {
         float distToBorder = outsideDist + insideDist;
 
         float rectAlpha = 1.0 - smoothstep(0.0, fwidth(distToBorder), abs(distToBorder));
-        // Mantine orange[6] #fd7e14
-        color = mix(color, vec3(0.992, 0.494, 0.078), rectAlpha);
+        color = mix(color, targetRectColor, rectAlpha * targetRectPulse);
     }
 
     outColor = vec4(color, 1.0);

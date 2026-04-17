@@ -8,6 +8,7 @@ import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo,
 import {
   Camera,
   ClampToEdgeWrapping,
+  Color,
   DataTexture,
   FloatType,
   GLSL3,
@@ -124,6 +125,7 @@ export const FileRenderer = memo(
             maxDb: state.displayMaxDb,
             cursorPosition: state.cursorPosition,
             cursorVisible: state.cursorVisible,
+            pickingFileParam: state.pickingFileParam,
           };
         },
         () => {
@@ -191,6 +193,9 @@ export const FileRenderer = memo(
           showVerticalGrid: { value: true },
           showTargetRectangle: { value: false },
           showSourceRectangle: { value: false },
+          targetRectPulse: { value: 1.0 },
+          // Mantine orange[6] #fd7e14 by default; swapped to blue[6] while picking a source.
+          targetRectColor: { value: new Color(0.992, 0.494, 0.078) },
           sourceSamplingBottomLeftUv: { value: new Vector2(-1, -1) },
           viewZoomPower: { value: 0.0 },
           viewOffset: { value: 0.0 },
@@ -337,7 +342,7 @@ export const FileRenderer = memo(
      * The main render loop, called on every frame.
      * This handles initialization, brush stroke application, and updating the display material.
      */
-    useFrame(({ gl, camera, invalidate }) => {
+    useFrame(({ gl, camera, clock, invalidate }) => {
       // Capture refs for use outside of useFrame
       glRef.current = gl;
       cameraRef.current = camera;
@@ -560,6 +565,10 @@ export const FileRenderer = memo(
       }
 
       // Update display material uniforms (once per frame at the end)
+      // While picking a source, never show the stroke preview — just the committed spectrogram + rectangle.
+      if (state.pickingFileParam !== null) {
+        displayMode.current = "committed";
+      }
       const isPreview = displayMode.current === "preview";
       const displayTexture = strokeRenderer.getDisplayTexture(isPreview);
 
@@ -627,6 +636,19 @@ export const FileRenderer = memo(
         state.cursorVisible && state.hoveredFile === fileId,
       );
       displayMaterial.uniforms.showSourceRectangle.value = isSourceFile;
+
+      const isPicking = state.pickingFileParam !== null;
+      displayMaterial.uniforms.targetRectPulse.value = isPicking
+        ? 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(clock.elapsedTime * 2.0 * Math.PI))
+        : 1.0;
+      (displayMaterial.uniforms.targetRectColor.value as Color).setRGB(
+        isPicking ? 0.133 : 0.992,
+        isPicking ? 0.545 : 0.494,
+        isPicking ? 0.902 : 0.078,
+      );
+      if (isPicking && state.hoveredFile === fileId) {
+        invalidate();
+      }
       displayMaterial.uniforms.viewZoomPower.value = viewZoomPower;
       displayMaterial.uniforms.viewOffset.value = viewOffset;
       displayMaterial.uniforms.wrapMode.value = activeStepState.brushWrapMode;
@@ -776,6 +798,12 @@ export const FileRenderer = memo(
      */
     useImperativeHandle(ref, () => ({
       renderStroke: (x: number, y: number, preview: boolean) => {
+        // While picking a source file, don't render the brush preview — just the rectangle.
+        if (preview && useStore.getState().pickingFileParam !== null) {
+          displayMode.current = "committed";
+          invalidateRef.current?.();
+          return;
+        }
         strokeParams.current = { x, y, preview };
         if (preview) {
           displayMode.current = "preview";
