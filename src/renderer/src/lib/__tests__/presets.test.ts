@@ -30,9 +30,10 @@ vi.mock("@renderer/store", () => ({
 }));
 
 // Now import the actual code we want to test
+import { BrushStep, createDefaultStep, parameterDefs } from "../../parameters";
 import { createPresetsSlice } from "../../store/presets";
-import { createDefaultStep, BrushStep } from "../../parameters";
 import type { State } from "../../store/types";
+import { CURRENT_PRESET_VERSION, validatePreset } from "../preset-schema";
 
 /**
  * Helper to create a step with custom values.
@@ -203,6 +204,91 @@ describe("Preset captureState with slots", () => {
       expect(preset.steps).toHaveLength(1);
       expect(preset.steps[0].brushIntensity).toBe(50);
       expect(preset.steps[0].name).toBe("Test");
+    });
+  });
+
+  describe("save -> reload round trip", () => {
+    /**
+     * Build a preset the same way savePreset does. This is the shape that hits disk.
+     */
+    function buildPreset(steps: BrushStep[]) {
+      return {
+        id: "round-trip-preset",
+        name: "Round Trip",
+        isFactory: false,
+        version: CURRENT_PRESET_VERSION,
+        steps,
+        linkedParams: [],
+      };
+    }
+
+    /**
+     * Simulate the full trip: serialize to JSON (as writeFile does), parse back
+     * (as init does on startup), then validate.
+     */
+    function roundTrip(preset: ReturnType<typeof buildPreset>) {
+      const serialized = JSON.stringify(preset);
+      const parsed = JSON.parse(serialized);
+      return validatePreset(parsed);
+    }
+
+    it("validates a preset containing every default step parameter", () => {
+      // createDefaultStep assigns defaults for every includeInStep parameter,
+      // so this catches any parameter kind the schema doesn't handle.
+      const preset = buildPreset([createDefaultStep("Step 1")]);
+
+      const result = roundTrip(preset);
+
+      if (!result.success) {
+        throw new Error(`Round-trip validation failed: ${result.errors.join(", ")}`);
+      }
+      expect(result.success).toBe(true);
+    });
+
+    it("validates a preset with sourceFile set (file kind parameter)", () => {
+      const step = createDefaultStep("Step 1");
+      step.sourceFile = { path: "/tmp/source.wav" };
+      const preset = buildPreset([step]);
+
+      const result = roundTrip(preset);
+
+      if (!result.success) {
+        throw new Error(`sourceFile round-trip failed: ${result.errors.join(", ")}`);
+      }
+      expect(result.success).toBe(true);
+    });
+
+    it("validates a preset with sourceFile explicitly null", () => {
+      const step = createDefaultStep("Step 1");
+      step.sourceFile = null;
+      const preset = buildPreset([step]);
+
+      const result = roundTrip(preset);
+
+      expect(result.success).toBe(true);
+    });
+
+    it("every includeInStep parameter kind has a schema handler", () => {
+      // If a new parameter kind is added without updating createStepParametersSchema,
+      // the default value will either be rejected by the strict object or stripped
+      // silently. This test fails loudly either way by checking the kind against the
+      // set of kinds the schema knows how to handle.
+      const SUPPORTED_KINDS = new Set(["number", "boolean", "options", "string", "file"]);
+
+      const unsupported: Array<{ key: string; kind: string }> = [];
+      for (const [key, def] of Object.entries(parameterDefs)) {
+        if (def?.includeInStep && !SUPPORTED_KINDS.has(def.kind)) {
+          unsupported.push({ key, kind: def.kind });
+        }
+      }
+
+      if (unsupported.length > 0) {
+        throw new Error(
+          `Parameters with unsupported kinds in preset schema: ${unsupported
+            .map(({ key, kind }) => `${key} (${kind})`)
+            .join(", ")}. Add a case in createStepParametersSchema.`,
+        );
+      }
     });
   });
 });

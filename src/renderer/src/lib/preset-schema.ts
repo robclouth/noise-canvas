@@ -42,6 +42,8 @@ function createStepParametersSchema() {
             );
           } else if (parameterDef.kind === "string") {
             acc[key] = z.string().optional();
+          } else if (parameterDef.kind === "file") {
+            acc[key] = z.union([z.null(), z.strictObject({ path: z.string() })]).optional();
           }
         }
         return acc;
@@ -178,7 +180,9 @@ export function migratePreset(data: any): any {
   // Sync effects in all steps to handle added/removed effect types
   migratedData.steps = migratedData.steps.map((step: Record<string, unknown>) => ({
     ...step,
-    effects: syncEffects(step.effects as { id?: string; effect: string; enabled: boolean; params?: Record<string, unknown> }[] | undefined),
+    effects: syncEffects(
+      step.effects as { id?: string; effect: string; enabled: boolean; params?: Record<string, unknown> }[] | undefined,
+    ),
   }));
 
   return migratedData;

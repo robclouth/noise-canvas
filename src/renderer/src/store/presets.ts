@@ -157,14 +157,16 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     for (const step of mergedSteps) {
       const sourceFile = step.sourceFile;
       if (sourceFile?.path) {
-        get().openFileMinimized(sourceFile.path).catch(() => {
-          // File not found — reset to null
-          notifications.show({
-            title: "Source file not found",
-            message: `${sourceFile.path.split("/").pop()} not found on disk`,
-            color: "yellow",
+        get()
+          .openFileMinimized(sourceFile.path)
+          .catch(() => {
+            // File not found — reset to null
+            notifications.show({
+              title: "Source file not found",
+              message: `${sourceFile.path.split("/").pop()} not found on disk`,
+              color: "yellow",
+            });
           });
-        });
       }
     }
   },
@@ -191,6 +193,11 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
 
       if (preset.isFactory) {
         throw new Error("Cannot save over factory presets");
+      }
+
+      const validationResult = validatePreset(JSON.parse(JSON.stringify(preset)));
+      if (!validationResult.success) {
+        throw new Error(`Invalid preset: ${validationResult.errors.join(", ")}`);
       }
 
       try {
