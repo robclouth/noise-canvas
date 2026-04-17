@@ -646,15 +646,25 @@ export class StrokeRenderer {
     const steps = state.slots[state.activeSlotIndex] ?? [];
     const numSteps = steps.length;
 
-    // Calculate scissor rows from maximum brush extent across all steps
+    // Calculate scissor rows from maximum brush extent across all steps.
+    // If any step wraps in Y and its brush crosses the [0,1] boundary, skip scissoring
+    // so wrapped bands are painted too.
     let maxBrushSizeUv = new Vector2(0, 0);
+    let yWrapsOutOfBounds = false;
     for (let i = 0; i < numSteps; i++) {
       const s = createStepStateView(state, i);
       const sz = this.calculateBrushSizeUv(s, bpm, totalDuration);
       maxBrushSizeUv.x = Math.max(maxBrushSizeUv.x, sz.x);
       maxBrushSizeUv.y = Math.max(maxBrushSizeUv.y, sz.y);
+      const wrapMode = s.brushWrapMode as number;
+      const wrapsY = wrapMode === 2 || wrapMode === 3;
+      if (wrapsY && (cursorPos.y < 0 || cursorPos.y + sz.y > 1)) {
+        yWrapsOutOfBounds = true;
+      }
     }
-    const scissorRows = this.calculateScissorRows(cursorPos, maxBrushSizeUv);
+    const scissorRows = yWrapsOutOfBounds
+      ? null
+      : this.calculateScissorRows(cursorPos, maxBrushSizeUv);
 
     // If scissoring, blit full texture to destinationFbo so non-scissored rows are correct,
     // then set scissor on all FBOs that will be rendered to.

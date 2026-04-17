@@ -108,11 +108,19 @@ void main() {
 
     // --- Brush Area Visualization ---
 
+    // Wrap a signed delta along an axis that wraps at 1.0 UV (tiles into [-0.5, 0.5]).
+    bool wrapX = (wrapMode == 1 || wrapMode == 3);
+    bool wrapY = (wrapMode == 2 || wrapMode == 3);
+
     // Draw source rectangle first so target renders on top when they overlap
     if (showSourceRectangle) {
         vec2 sourceCenter = sourceSamplingBottomLeftUv + sourceBrushSizeUv * 0.5;
 
-        vec2 dSource = abs(zoomedUv - sourceCenter) - sourceBrushSizeUv * 0.5;
+        vec2 deltaSource = zoomedUv - sourceCenter;
+        if (wrapX) deltaSource.x -= floor(deltaSource.x + 0.5);
+        if (wrapY) deltaSource.y -= floor(deltaSource.y + 0.5);
+
+        vec2 dSource = abs(deltaSource) - sourceBrushSizeUv * 0.5;
         float outsideDistSource = length(max(dSource, 0.0));
         float insideDistSource = min(max(dSource.x, dSource.y), 0.0);
         float distToBorderSource = outsideDistSource + insideDistSource;
@@ -124,12 +132,14 @@ void main() {
 
     // Draw target rectangle on top
     if (showTargetRectangle) {
-        vec2 rectMin = brushBottomLeftUv;
-        vec2 rectMax = brushBottomLeftUv + brushSizeUv;
-        vec2 rectCenter = (rectMin + rectMax) * 0.5;
+        vec2 rectCenter = brushBottomLeftUv + brushSizeUv * 0.5;
         vec2 halfSize = brushSizeUv * 0.5;
 
-        vec2 d = abs(zoomedUv - rectCenter) - halfSize;
+        vec2 delta = zoomedUv - rectCenter;
+        if (wrapX) delta.x -= floor(delta.x + 0.5);
+        if (wrapY) delta.y -= floor(delta.y + 0.5);
+
+        vec2 d = abs(delta) - halfSize;
         float outsideDist = length(max(d, 0.0));
         float insideDist = min(max(d.x, d.y), 0.0);
         float distToBorder = outsideDist + insideDist;
