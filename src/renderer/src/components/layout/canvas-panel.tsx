@@ -10,7 +10,7 @@ const PaletteChip = memo(({ fileId }: { fileId: string }) => {
   const file = openFiles[fileId];
   const isHighlighted = useStore((state) => state.highlightedSourcePath === file?.filePath);
   const isLoading = useStore((state) => !!state.filesLoading[fileId]);
-  const isReferenced = useStore((state) => (file ? isFileReferencedAsSource(file.filePath, state.slots) : false));
+  const isReferenced = useStore((state) => (file ? isFileReferencedAsSource(file.filePath, state.brushes) : false));
   if (!file) return null;
   const filename = file.filePath.split("/").pop() || file.filePath;
   const fileColor = getFileColor(file.filePath);

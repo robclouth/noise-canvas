@@ -1,10 +1,8 @@
-import { Divider, SimpleGrid, Stack } from "@mantine/core";
+import { SimpleGrid, Stack } from "@mantine/core";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
 import { ParameterKey } from "@renderer/store/types";
 import { EnvelopeControl } from "../controls/envelope-control";
 import { ParameterControl } from "../controls/parameter-control";
-import { PresetSelector } from "../controls/preset-selector";
-import { Slots } from "../controls/slots";
 import { Steps } from "../controls/steps";
 import { EffectsList } from "../effects-list";
 import { ModulatorView } from "../modulator-view";
@@ -81,9 +79,6 @@ export function BrushPanel() {
   return (
     <Stack gap="xs">
       <Stack p="xs" gap="xs">
-        <Slots />
-        <PresetSelector />
-        <Divider style={{ flex: 1 }} color="dark.4" />
         <Steps />
         <Section label="Source">
           <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>

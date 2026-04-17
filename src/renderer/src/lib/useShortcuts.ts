@@ -129,30 +129,31 @@ export function useShortcuts() {
           break;
       }
     } else if (/^[a-z]$/.test(event.key) && !event.ctrlKey && !event.altKey && !event.metaKey) {
-      // Preset selection (exclude control/alt/meta, but allow shift if needed, though usually reserved for other things)
-      // Presets use lowercase match usually
+      // Brush hotkey — jump to the brush whose `hotkey` matches the pressed letter.
       const state = useStore.getState();
-      const presetId = state.presetHotkeys[event.key];
-      if (presetId) {
+      const targetIndex = state.brushes.findIndex((b) => b.hotkey === event.key);
+      if (targetIndex >= 0) {
         event.preventDefault();
-        state.loadPreset(presetId);
+        state.setActiveBrush(targetIndex);
       }
     } else {
-      // Slots (0-9) - number keys switch between slots
+      // Digit keys jump to the first ten brushes (1..9 → 0..8, 0 → 9).
       const code = event.code;
-      let slotIndex = -1;
+      let brushIndex = -1;
 
       if (code.startsWith("Digit")) {
         const digit = parseInt(code.replace("Digit", ""), 10);
-        // Map 1-9 to 0-8, and 0 to 9
         if (!isNaN(digit)) {
-          slotIndex = digit === 0 ? 9 : digit - 1;
+          brushIndex = digit === 0 ? 9 : digit - 1;
         }
       }
 
-      if (slotIndex >= 0 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
-        event.preventDefault();
-        useStore.getState().setActiveSlot(slotIndex);
+      if (brushIndex >= 0 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+        const state = useStore.getState();
+        if (brushIndex < state.brushes.length) {
+          event.preventDefault();
+          state.setActiveBrush(brushIndex);
+        }
       }
     }
   };

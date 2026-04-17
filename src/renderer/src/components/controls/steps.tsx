@@ -10,7 +10,7 @@ export function Steps() {
   const { steps, activeStepIndex, setActiveStepIndex, addStep, removeStep, duplicateStep, reorderSteps, setStepName } =
     useStore(
       useShallow((state) => ({
-        steps: state.slots[state.activeSlotIndex] ?? [],
+        steps: state.brushes[state.activeBrushIndex]?.steps ?? [],
         activeStepIndex: state.activeStepIndex,
         setActiveStepIndex: state.setActiveStepIndex,
         addStep: state.addStep,

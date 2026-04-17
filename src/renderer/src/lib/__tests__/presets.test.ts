@@ -32,7 +32,7 @@ vi.mock("@renderer/store", () => ({
 // Now import the actual code we want to test
 import { BrushStep, createDefaultStep, parameterDefs } from "../../parameters";
 import { createPresetsSlice } from "../../store/presets";
-import type { State } from "../../store/types";
+import type { Brush, State } from "../../store/types";
 import { CURRENT_PRESET_VERSION, validatePreset } from "../preset-schema";
 
 /**
@@ -43,15 +43,27 @@ function createStep(name: string, overrides: Record<string, unknown> = {}): Brus
   return Object.assign(step, overrides);
 }
 
+function makeBrush(steps: BrushStep[], name = "Mock"): Brush {
+  return {
+    id: crypto.randomUUID(),
+    name,
+    color: { hue: "orange", variation: 0 },
+    hotkey: null,
+    steps,
+    linkedParams: [],
+    libraryId: null,
+  };
+}
+
 /**
- * Creates a minimal mock state for testing with slots architecture.
+ * Creates a minimal mock state for testing with brushes architecture.
  */
 function createMockState(overrides: Partial<State> = {}): State {
   const defaultStep = createDefaultStep("Step 1");
 
   const baseState: Partial<State> = {
-    slots: { 0: [defaultStep] },
-    activeSlotIndex: 0,
+    brushes: [makeBrush([defaultStep])],
+    activeBrushIndex: 0,
     activeStepIndex: 0,
     displayMinDb: -60,
     displayMaxDb: 0,
@@ -66,9 +78,8 @@ function createMockState(overrides: Partial<State> = {}): State {
 function createTestStore(initialState: Partial<State> = {}) {
   const mockState = createMockState(initialState);
 
-  // Preserve the initial slots and activeSlotIndex, don't let slice defaults override them
-  const preservedSlots = mockState.slots;
-  const preservedActiveSlotIndex = mockState.activeSlotIndex;
+  const preservedBrushes = mockState.brushes;
+  const preservedActiveBrushIndex = mockState.activeBrushIndex;
 
   let state = mockState;
 
@@ -82,17 +93,15 @@ function createTestStore(initialState: Partial<State> = {}) {
   };
 
   const slice = createPresetsSlice(set, get);
-  // Merge slice but preserve initial slots and activeSlotIndex from test setup
   state = {
     ...state,
     ...slice,
-    slots: preservedSlots,
-    activeSlotIndex: preservedActiveSlotIndex,
+    brushes: preservedBrushes,
+    activeBrushIndex: preservedActiveBrushIndex,
   } as State;
 
   return {
     captureState: slice.captureState,
-    loadPreset: slice.loadPreset,
     getState: () => state,
     setState: (updates: Partial<State>) => {
       state = { ...state, ...updates } as State;
@@ -107,8 +116,8 @@ describe("Preset captureState with slots", () => {
       const step2 = createStep("Test Step 2", { brushIntensity: 75 });
 
       const store = createTestStore({
-        slots: { 0: [step1, step2] },
-        activeSlotIndex: 0,
+        brushes: [makeBrush([step1, step2])],
+        activeBrushIndex: 0,
       });
 
       const captured = store.captureState();
@@ -122,8 +131,8 @@ describe("Preset captureState with slots", () => {
       const step2 = createStep("Step B", { brushIntensity: 100, brushIterations: 5 });
 
       const store = createTestStore({
-        slots: { 0: [step1, step2] },
-        activeSlotIndex: 0,
+        brushes: [makeBrush([step1, step2])],
+        activeBrushIndex: 0,
       });
       const captured = store.captureState();
 
@@ -141,37 +150,34 @@ describe("Preset captureState with slots", () => {
       const originalId = step.id;
 
       const store = createTestStore({
-        slots: { 0: [step] },
-        activeSlotIndex: 0,
+        brushes: [makeBrush([step])],
+        activeBrushIndex: 0,
       });
       const captured = store.captureState();
 
       expect(captured[0].id).toBe(originalId);
     });
 
-    it("should capture from the active slot", () => {
-      const slot0Step = createStep("Slot 0 Step", { brushIntensity: 25 });
-      const slot1Step = createStep("Slot 1 Step", { brushIntensity: 75 });
+    it("should capture from the active brush", () => {
+      const brush0Step = createStep("Brush 0 Step", { brushIntensity: 25 });
+      const brush1Step = createStep("Brush 1 Step", { brushIntensity: 75 });
 
       const store = createTestStore({
-        slots: {
-          0: [slot0Step],
-          1: [slot1Step],
-        },
-        activeSlotIndex: 1,
+        brushes: [makeBrush([brush0Step]), makeBrush([brush1Step])],
+        activeBrushIndex: 1,
       });
 
       const captured = store.captureState();
 
       expect(captured).toHaveLength(1);
-      expect(captured[0].name).toBe("Slot 1 Step");
+      expect(captured[0].name).toBe("Brush 1 Step");
       expect(captured[0].brushIntensity).toBe(75);
     });
 
-    it("should return default step when active slot is empty", () => {
+    it("should return default step when active brush is empty", () => {
       const store = createTestStore({
-        slots: {},
-        activeSlotIndex: 0,
+        brushes: [makeBrush([])],
+        activeBrushIndex: 0,
       });
 
       const captured = store.captureState();
@@ -186,8 +192,8 @@ describe("Preset captureState with slots", () => {
       const step = createStep("Test", { brushIntensity: 50 });
 
       const store = createTestStore({
-        slots: { 0: [step] },
-        activeSlotIndex: 0,
+        brushes: [makeBrush([step])],
+        activeBrushIndex: 0,
       });
 
       const captured = store.captureState();

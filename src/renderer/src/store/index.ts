@@ -1,7 +1,7 @@
 import { deepMerge } from "@mantine/core";
 import { EffectItem, syncEffects } from "@renderer/effects/types";
 import { CONTEXTUAL_MOD_SOURCES, NUM_MODULATORS } from "@renderer/lib/constants";
-import { getParameterDef, isEffectParameter, isStepParameter, parameterDefs } from "@renderer/parameters";
+import { BrushStep, getParameterDef, isEffectParameter, isStepParameter, parameterDefs } from "@renderer/parameters";
 import { produce } from "immer";
 import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
@@ -26,6 +26,7 @@ export const ALL_PERSISTED_KEYS: (keyof State)[] = [
   "excludedFromRandomization",
 ];
 
+
 export const useStore = create<State>()(
   subscribeWithSelector(
     persist(
@@ -41,16 +42,17 @@ export const useStore = create<State>()(
         ...createLinkSlice(set, get),
         setParameter: (key: ParameterKey, value: unknown, effectId?: string) => {
           const state = get();
-          const slotLinkedParams = state.slotLinkedParams[state.activeSlotIndex] ?? [];
-          const isLinked = slotLinkedParams.includes(key as string);
+          const activeBrush = state.brushes[state.activeBrushIndex];
+          const brushLinkedParams = activeBrush?.linkedParams ?? [];
+          const isLinked = brushLinkedParams.includes(key as string);
 
           // If this is an effect parameter and effectId is provided, update the effect's params
           if (effectId && isEffectParameter(key)) {
             set(
               produce((draft: State) => {
-                draft.slotDirty[draft.activeSlotIndex] = true;
-                const steps = draft.slots[draft.activeSlotIndex];
-                if (!steps) return;
+                const brush = draft.brushes[draft.activeBrushIndex];
+                if (!brush) return;
+                const steps = brush.steps;
 
                 const updateEffectParams = (step: (typeof steps)[0]) => {
                   const effects = (step.effects ?? []) as EffectItem[];
@@ -74,9 +76,9 @@ export const useStore = create<State>()(
             // If this is a step parameter, update the active step (or all steps if linked)
             set(
               produce((draft: State) => {
-                draft.slotDirty[draft.activeSlotIndex] = true;
-                const steps = draft.slots[draft.activeSlotIndex];
-                if (!steps) return;
+                const brush = draft.brushes[draft.activeBrushIndex];
+                if (!brush) return;
+                const steps = brush.steps;
                 if (isLinked) {
                   // Propagate to all steps when linked
                   steps.forEach((step) => {
@@ -94,7 +96,6 @@ export const useStore = create<State>()(
             set(
               produce((draft: State) => {
                 (draft as unknown as Record<string, unknown>)[key] = value;
-                draft.slotDirty[draft.activeSlotIndex] = true;
               }),
             );
           }
@@ -129,28 +130,21 @@ export const useStore = create<State>()(
           set(
             produce((draft: State) => {
               const keyStr = key as string;
-              const slotIndex = draft.activeSlotIndex;
-              if (!draft.slotLinkedParams[slotIndex]) {
-                draft.slotLinkedParams[slotIndex] = [];
-              }
-              const linkedParams = draft.slotLinkedParams[slotIndex];
+              const brush = draft.brushes[draft.activeBrushIndex];
+              if (!brush) return;
+              const linkedParams = brush.linkedParams;
               const index = linkedParams.indexOf(keyStr);
               if (linked && index === -1) {
                 linkedParams.push(keyStr);
-                draft.slotDirty[slotIndex] = true;
                 // When enabling linking, sync current value to all steps
                 if (isStepParameter(key)) {
-                  const steps = draft.slots[slotIndex];
-                  if (steps) {
-                    const currentValue = steps[draft.activeStepIndex]?.[key];
-                    steps.forEach((step) => {
-                      (step as Record<string, unknown>)[key] = currentValue;
-                    });
-                  }
+                  const currentValue = brush.steps[draft.activeStepIndex]?.[key];
+                  brush.steps.forEach((step) => {
+                    (step as Record<string, unknown>)[key] = currentValue;
+                  });
                 }
               } else if (!linked && index !== -1) {
                 linkedParams.splice(index, 1);
-                draft.slotDirty[slotIndex] = true;
               }
             }),
           );
@@ -170,25 +164,17 @@ export const useStore = create<State>()(
           );
         },
         merge: (persistedState, currentState) => {
-          const merged = deepMerge(currentState, persistedState) as State;
+          const merged = deepMerge(currentState, persistedState as object) as State;
 
-          // Sync effects in all slots/steps to handle added/removed effects
-          // Also handle migration from effectOrder to effects
-          if (merged.slots && Array.isArray(merged.slots)) {
-            merged.slots = merged.slots.map((slot) => {
-              if (!slot || !Array.isArray(slot)) return slot;
-              return slot.map((step: Record<string, unknown>) => {
-                if (!step) return step;
-                // Handle migration from effectOrder to effects
-                const effectsData = step.effects ?? step.effectOrder;
-                const newStep = { ...step };
-                delete newStep.effectOrder;
-                return {
-                  ...newStep,
-                  effects: syncEffects(effectsData as Parameters<typeof syncEffects>[0]),
-                };
-              });
-            });
+          // Sync effects in all steps to handle added/removed effects
+          if (Array.isArray(merged.brushes)) {
+            merged.brushes = merged.brushes.map((brush) => ({
+              ...brush,
+              steps: ((brush.steps ?? []) as unknown as Record<string, unknown>[]).map((step) => ({
+                ...step,
+                effects: syncEffects(step.effects as Parameters<typeof syncEffects>[0]),
+              })) as unknown as BrushStep[],
+            }));
           }
 
           return merged;
@@ -221,7 +207,7 @@ export function getModulator(index: number) {
  */
 export function getParameterValue(state: State, key: ParameterKey): any {
   if (isStepParameter(key)) {
-    const steps = state.slots[state.activeSlotIndex] ?? [];
+    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
     const activeStep = steps[state.activeStepIndex];
     if (activeStep && key in activeStep) {
       return activeStep[key];
@@ -262,7 +248,7 @@ export function getModulationParamKeys(paramKey: ParameterKey): ParameterKey[] {
  */
 export function getStepParameterValue(state: State, stepIndex: number, key: ParameterKey): any {
   if (isStepParameter(key)) {
-    const steps = state.slots[state.activeSlotIndex] ?? [];
+    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
     const step = steps[stepIndex];
     return step?.[key];
   }
@@ -285,8 +271,8 @@ export function createStepStateView(state: State, stepIndex: number): State {
   // Create a shallow copy to avoid proxy-on-proxy issues
   const view = { ...state } as Record<string, unknown>;
 
-  // Override step parameters with values from the specific step in the active slot
-  const steps = state.slots[state.activeSlotIndex] ?? [];
+  // Override step parameters with values from the specific step in the active brush
+  const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
   const step = steps[stepIndex];
   if (step) {
     Object.keys(parameterDefs).forEach((key) => {
@@ -312,7 +298,7 @@ export function createStepStateView(state: State, stepIndex: number): State {
  * Returns the value from the effect's params, or the parameter default if not set.
  */
 export function getEffectParameterValue(state: State, effectId: string, key: ParameterKey): unknown {
-  const steps = state.slots[state.activeSlotIndex] ?? [];
+  const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
   const activeStep = steps[state.activeStepIndex];
   if (!activeStep) return getParameterDef(key).default;
 

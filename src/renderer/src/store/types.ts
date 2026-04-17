@@ -1,4 +1,5 @@
 import type { FileRendererHandle } from "@renderer/components/file-renderer";
+import type { BrushStep } from "@renderer/parameters";
 import type { Vector2 } from "three";
 import type { AppState } from "./app";
 import type { AudioState } from "./audio";
@@ -9,6 +10,21 @@ import { ModulatorsState } from "./modulators";
 import type { LinkState } from "./link";
 import type { PresetsState } from "./presets";
 import type { StepsState } from "./steps";
+
+export type BrushColor = {
+  hue: string;
+  variation: number;
+};
+
+export type Brush = {
+  id: string;
+  name: string;
+  color: BrushColor;
+  hotkey: string | null;
+  steps: BrushStep[];
+  linkedParams: string[];
+  libraryId: string | null;
+};
 
 export type SliderScale = "linear" | "log" | "logBipolar";
 

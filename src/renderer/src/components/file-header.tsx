@@ -56,7 +56,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const fullscreenFileId = useStore((state) => state.fullscreenFileId);
   const bandsPerOctave = useStore((state) => state.filesBandsPerOctave[fileId]);
   const isDirty = useStore((state) => state.filesDirty[fileId] ?? false);
-  const isReferenced = useStore((state) => isFileReferencedAsSource(filePath, state.slots));
+  const isReferenced = useStore((state) => isFileReferencedAsSource(filePath, state.brushes));
   const isHighlighted = useStore((state) => state.highlightedSourcePath === filePath);
 
   const isFullscreen = fullscreenFileId === fileId;

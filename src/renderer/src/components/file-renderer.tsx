@@ -1,7 +1,6 @@
 import { createStepStateView, useStore } from "@/store";
 import { useFrame } from "@react-three/fiber";
 import { defaultValues } from "@renderer/effects/base-effect";
-import type { FileParameterValue } from "@renderer/parameters";
 import { getOpenFileByPath, openFiles } from "@renderer/store/files";
 import { State } from "@renderer/store/types";
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
@@ -376,10 +375,9 @@ export const FileRenderer = memo(
 
       // Determine file state for rendering logic
       const isActiveFile = state.activeFileId === fileId;
-      const isMouseOverAnyFile = Boolean(state.cursorVisible && state.cursorPosition && state.hoveredFile);
 
       // Check if this file is referenced as source by the active step
-      const activeStepRaw = (state.slots[state.activeSlotIndex] ?? [])[state.activeStepIndex];
+      const activeStepRaw = (state.brushes[state.activeBrushIndex]?.steps ?? [])[state.activeStepIndex];
       const activeStepSourceFile = activeStepRaw?.sourceFile ?? null;
       const sourceFileData = activeStepSourceFile ? getOpenFileByPath(activeStepSourceFile.path) : null;
       const isSourceFile = sourceFileData?.id === fileId;
@@ -459,7 +457,7 @@ export const FileRenderer = memo(
 
       // Calculate maximum brush size across all steps (for display purposes)
       const activeStepState = createStepStateView(state, state.activeStepIndex);
-      const steps = state.slots[state.activeSlotIndex] ?? [];
+      const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
       const brushSizeUv = new Vector2(0, 0);
       for (let i = 0; i < steps.length; i++) {
         const stepState = createStepStateView(state, i);
@@ -598,7 +596,7 @@ export const FileRenderer = memo(
         if (!targetFile.spectrogramData) return new Vector2(0.1, 0.1);
         const targetBpm = state.filepathsBpm[targetFile.filePath] || 120;
         const targetDuration = targetFile.spectrogramData.numFrames / targetFile.spectrogramData.sampleRate;
-        const slotSteps = state.slots[state.activeSlotIndex] ?? [];
+        const slotSteps = state.brushes[state.activeBrushIndex]?.steps ?? [];
 
         let maxTimeUv = 0;
         let maxPitchUv = 0;

@@ -5,8 +5,7 @@ import { produce } from "immer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
 import { getUndoManager } from "../lib/undo-manager";
-import type { BrushStep } from "@renderer/parameters";
-import type { OpenFile, State, ZustandGet, ZustandSet } from "./types";
+import type { Brush, OpenFile, State, ZustandGet, ZustandSet } from "./types";
 import { generateFileId } from "./utils";
 
 export interface FilesState {
@@ -74,11 +73,10 @@ export function getOpenFileByPath(filePath: string): OpenFile | undefined {
   return Object.values(openFiles).find((f) => f.filePath === filePath);
 }
 
-/** Check if a file is referenced as a source by any step in any slot. */
-export function isFileReferencedAsSource(filePath: string, slots: Record<number, BrushStep[]>): boolean {
-  for (const slotSteps of Object.values(slots)) {
-    if (!Array.isArray(slotSteps)) continue;
-    for (const step of slotSteps) {
+/** Check if a file is referenced as a source by any step in any brush. */
+export function isFileReferencedAsSource(filePath: string, brushes: Brush[]): boolean {
+  for (const brush of brushes) {
+    for (const step of brush.steps) {
       if (step.sourceFile?.path === filePath) return true;
     }
   }

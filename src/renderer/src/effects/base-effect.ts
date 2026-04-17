@@ -68,6 +68,11 @@ export type CommonUniforms = {
     value: number;
   };
 
+  sourceTimeScale: { value: number };
+  sourceBandScale: { value: number };
+  sourceTimeOffset: { value: ParameterUniform };
+  sourcePitchOffset: { value: ParameterUniform };
+
   brushPan: {
     value: ParameterUniform;
   };
@@ -148,6 +153,26 @@ export const defaultValues: CommonUniforms = {
   },
   sourceOffsetY: {
     value: 0,
+  },
+  sourceTimeScale: { value: 1 },
+  sourceBandScale: { value: 1 },
+  sourceTimeOffset: {
+    value: {
+      value: 0,
+      minValue: -1,
+      maxValue: 1,
+      modulationAmounts: [],
+      contextualModAmounts: [],
+    },
+  },
+  sourcePitchOffset: {
+    value: {
+      value: 0,
+      minValue: -1,
+      maxValue: 1,
+      modulationAmounts: [],
+      contextualModAmounts: [],
+    },
   },
   brushPan: {
     value: {

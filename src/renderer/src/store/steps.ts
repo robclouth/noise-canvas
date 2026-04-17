@@ -25,7 +25,7 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
 
   setActiveStepIndex: (index: number) => {
     const state = get();
-    const steps = state.slots[state.activeSlotIndex] ?? [];
+    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
     if (index >= 0 && index < steps.length) {
       set({ activeStepIndex: index });
     }
@@ -33,12 +33,12 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
 
   addStep: () => {
     const state = get();
-    const steps = state.slots[state.activeSlotIndex] ?? [];
+    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
     if (steps.length >= MAX_STEPS) return;
 
     set(
       produce((draft: State) => {
-        const draftSteps = draft.slots[draft.activeSlotIndex];
+        const draftSteps = draft.brushes[draft.activeBrushIndex]?.steps;
         if (!draftSteps) return;
         const nextStepNumber = draftSteps.length + 1;
         const newStep = createDefaultStep(`Step ${nextStepNumber}`);
@@ -50,13 +50,13 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
 
   removeStep: (index: number) => {
     const state = get();
-    const steps = state.slots[state.activeSlotIndex] ?? [];
+    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
     if (steps.length <= 1) return;
     if (index < 0 || index >= steps.length) return;
 
     set(
       produce((draft: State) => {
-        const draftSteps = draft.slots[draft.activeSlotIndex];
+        const draftSteps = draft.brushes[draft.activeBrushIndex]?.steps;
         if (!draftSteps) return;
         draftSteps.splice(index, 1);
         // Adjust activeStepIndex if needed
@@ -71,13 +71,13 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
 
   duplicateStep: (index: number) => {
     const state = get();
-    const steps = state.slots[state.activeSlotIndex] ?? [];
+    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
     if (steps.length >= MAX_STEPS) return;
     if (index < 0 || index >= steps.length) return;
 
     set(
       produce((draft: State) => {
-        const draftSteps = draft.slots[draft.activeSlotIndex];
+        const draftSteps = draft.brushes[draft.activeBrushIndex]?.steps;
         if (!draftSteps) return;
         const stepToDuplicate = draftSteps[index];
         const newStep = { ...stepToDuplicate, id: crypto.randomUUID() };
@@ -90,7 +90,7 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
   reorderSteps: (fromIndex: number, toIndex: number) => {
     set(
       produce((draft: State) => {
-        const draftSteps = draft.slots[draft.activeSlotIndex];
+        const draftSteps = draft.brushes[draft.activeBrushIndex]?.steps;
         if (!draftSteps) return;
         const activeStep = draftSteps[draft.activeStepIndex];
         const [movedStep] = draftSteps.splice(fromIndex, 1);
@@ -104,13 +104,13 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
 
   getActiveStep: () => {
     const state = get();
-    const steps = state.slots[state.activeSlotIndex] ?? [];
+    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
     return steps[state.activeStepIndex] || steps[0] || createDefaultStep("Step 1");
   },
 
   getSteps: () => {
     const state = get();
-    return state.slots[state.activeSlotIndex] ?? [createDefaultStep("Step 1")];
+    return state.brushes[state.activeBrushIndex]?.steps ?? [createDefaultStep("Step 1")];
   },
 
   setStepParameter: (key: ParameterKey, value: unknown) => {
@@ -118,7 +118,7 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
 
     set(
       produce((draft: State) => {
-        const draftSteps = draft.slots[draft.activeSlotIndex];
+        const draftSteps = draft.brushes[draft.activeBrushIndex]?.steps;
         if (draftSteps && draftSteps[draft.activeStepIndex]) {
           (draftSteps[draft.activeStepIndex] as Record<string, unknown>)[key] = value;
         }
@@ -129,7 +129,7 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
   setStepName: (index: number, name: string) => {
     set(
       produce((draft: State) => {
-        const draftSteps = draft.slots[draft.activeSlotIndex];
+        const draftSteps = draft.brushes[draft.activeBrushIndex]?.steps;
         if (draftSteps && draftSteps[index]) {
           draftSteps[index].name = name;
         }
@@ -140,7 +140,7 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
   updateActiveStepLockedOffset: (offset) => {
     set(
       produce((draft: State) => {
-        const draftSteps = draft.slots[draft.activeSlotIndex];
+        const draftSteps = draft.brushes[draft.activeBrushIndex]?.steps;
         if (draftSteps && draftSteps[draft.activeStepIndex]) {
           draftSteps[draft.activeStepIndex].lockedOffset = offset;
         }

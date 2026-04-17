@@ -1,4 +1,5 @@
 import { BrushPanel } from "@/components/layout/brush-panel";
+import { PalettePanel } from "@/components/layout/palette-panel";
 import { useStore } from "@/store";
 import { Box, Group, LoadingOverlay, ScrollArea, Stack } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
@@ -214,6 +215,7 @@ function App(): React.JSX.Element {
         />
       )}
       <input {...getInputProps()} />
+      <PalettePanel />
       <Canvas
         dpr={1}
         style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}

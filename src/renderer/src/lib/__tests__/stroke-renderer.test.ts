@@ -698,8 +698,8 @@ describe("StrokeRenderer", () => {
       const state1 = createMockStateForIterations(1);
       const state5 = createMockStateForIterations(5);
 
-      expect(state1.slots[state1.activeSlotIndex][0].brushIterations).toBe(1);
-      expect(state5.slots[state5.activeSlotIndex][0].brushIterations).toBe(5);
+      expect(state1.brushes[state1.activeBrushIndex].steps[0].brushIterations).toBe(1);
+      expect(state5.brushes[state5.activeBrushIndex].steps[0].brushIterations).toBe(5);
     });
 
     it("should apply effect N times when brushIterations = N (additive test)", async () => {
@@ -1044,7 +1044,7 @@ describe("StrokeRenderer", () => {
       sourceRenderer.initialize();
 
       const state = createMockState({
-        sourceFile: { path: "/test/source-file.wav", timeUv: 0, pitchUv: 0 },
+        sourceFile: { path: "/test/source-file.wav" },
         sourceDataMode: "current",
       });
 

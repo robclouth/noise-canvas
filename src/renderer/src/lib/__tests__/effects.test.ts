@@ -104,10 +104,10 @@ function createStateForEffect(effectType: EffectType): State {
     },
   });
 
-  // Update the step's effects in the active slot
-  const activeSlot = state.slots[state.activeSlotIndex];
-  if (activeSlot && activeSlot[0]) {
-    (activeSlot[0] as Record<string, unknown>).effects = effects;
+  // Update the step's effects in the active brush
+  const activeSteps = state.brushes[state.activeBrushIndex]?.steps;
+  if (activeSteps && activeSteps[0]) {
+    (activeSteps[0] as Record<string, unknown>).effects = effects;
   }
 
   return state;
@@ -395,10 +395,10 @@ describe("Effects", () => {
           "/test/effects-test.wav": 120,
         },
       });
-      // Update the step's effects in the active slot
-      const activeSlot = state.slots[state.activeSlotIndex];
-      if (activeSlot && activeSlot[0]) {
-        (activeSlot[0] as Record<string, unknown>).effects = effects;
+      // Update the step's effects in the active brush
+      const activeSteps = state.brushes[state.activeBrushIndex]?.steps;
+      if (activeSteps && activeSteps[0]) {
+        (activeSteps[0] as Record<string, unknown>).effects = effects;
       }
       const sourceFile = createSourceFile(renderer);
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;

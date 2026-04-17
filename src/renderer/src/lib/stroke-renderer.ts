@@ -26,7 +26,6 @@ import maskUpdateFrag from "../glsl/mask-update.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { createEffectStateView, createStepStateView } from "../store";
 import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "../store/modulators";
-import type { FileParameterValue } from "../parameters";
 import type { SpectrogramData, State } from "../store/types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { buildModulatorUniforms } from "./modulator-utils";
@@ -596,7 +595,7 @@ export class StrokeRenderer {
     if (cursorPos.x < 0) return;
 
     const activeStepState = createStepStateView(state, state.activeStepIndex);
-    const activeStep = (state.slots[state.activeSlotIndex] ?? [])[state.activeStepIndex];
+    const activeStep = (state.brushes[state.activeBrushIndex]?.steps ?? [])[state.activeStepIndex];
 
     // Source position from the step's params (0-100% → 0-1 UV)
     const sourcePositionUv = new Vector2(
@@ -643,7 +642,7 @@ export class StrokeRenderer {
       initialSourceFbo = this.strokeStartFbo;
     }
 
-    const steps = state.slots[state.activeSlotIndex] ?? [];
+    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
     const numSteps = steps.length;
 
     // Calculate scissor rows from maximum brush extent across all steps.

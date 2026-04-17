@@ -71,9 +71,19 @@ export function createMockState(overrides: Partial<State> = {}): State {
   // Create a minimal state with defaults for stroke rendering
   // Use type assertion to allow test-specific properties
   const baseState = {
-    // Slots - source of truth for brush parameters
-    slots: { 0: [defaultStep] } as unknown as Record<number, BrushStep[]>,
-    activeSlotIndex: 0,
+    // Brushes - source of truth for brush parameters
+    brushes: [
+      {
+        id: "mock-brush-0",
+        name: "Mock",
+        color: { hue: "orange", variation: 0 },
+        hotkey: null,
+        steps: [defaultStep] as unknown as BrushStep[],
+        linkedParams: [],
+        libraryId: null,
+      },
+    ],
+    activeBrushIndex: 0,
     activeStepIndex: 0,
 
     // Brush parameters (from step or global)
@@ -229,8 +239,18 @@ export function createMockStateWithSteps(
   const steps = stepConfigs.map(({ name, overrides }) => createMockStep(name, overrides));
 
   return createMockState({
-    slots: { 0: steps } as unknown as Record<number, BrushStep[]>,
-    activeSlotIndex: 0,
+    brushes: [
+      {
+        id: "mock-brush-0",
+        name: "Mock",
+        color: { hue: "orange", variation: 0 },
+        hotkey: null,
+        steps: steps as unknown as BrushStep[],
+        linkedParams: [],
+        libraryId: null,
+      },
+    ],
+    activeBrushIndex: 0,
     activeStepIndex: 0,
     ...stateOverrides,
   });
@@ -250,8 +270,18 @@ export function createMockStateForIterations(
   });
 
   return createMockState({
-    slots: { 0: [step] } as unknown as Record<number, BrushStep[]>,
-    activeSlotIndex: 0,
+    brushes: [
+      {
+        id: "mock-brush-0",
+        name: "Mock",
+        color: { hue: "orange", variation: 0 },
+        hotkey: null,
+        steps: [step] as unknown as BrushStep[],
+        linkedParams: [],
+        libraryId: null,
+      },
+    ],
+    activeBrushIndex: 0,
     ...stateOverrides,
   });
 }

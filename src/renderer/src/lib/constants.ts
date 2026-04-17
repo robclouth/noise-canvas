@@ -1,3 +1,5 @@
+import { BASE_HUES } from "./colors";
+
 export const BEAT_UNIT = " b";
 export const SEMITONE_UNIT = " st";
 export const MULTIPLIER_UNIT = "x";
@@ -182,17 +184,30 @@ export const ALGORITHMS = [
   { value: 1, label: "Noisey" },
 ];
 
+const [
+  HUE_GRAPE,
+  HUE_RED,
+  HUE_YELLOW,
+  HUE_GREEN,
+  HUE_VIOLET,
+  HUE_CYAN,
+  HUE_PINK,
+  HUE_ORANGE,
+  HUE_INDIGO,
+  HUE_TEAL,
+] = BASE_HUES;
+
 export const EFFECT_COLORS: Record<string, string> = {
-  dynamics: "grape",
-  transform: "red",
-  overtones: "yellow",
-  blur: "green",
-  synthesize: "violet",
-  evolve: "cyan",
-  binaural: "pink",
-  sort: "orange",
-  transmute: "indigo",
-  waveshape: "teal",
+  dynamics: HUE_GRAPE,
+  transform: HUE_RED,
+  overtones: HUE_YELLOW,
+  blur: HUE_GREEN,
+  synthesize: HUE_VIOLET,
+  evolve: HUE_CYAN,
+  binaural: HUE_PINK,
+  sort: HUE_ORANGE,
+  transmute: HUE_INDIGO,
+  waveshape: HUE_TEAL,
 };
 
 export const EFFECT_LABELS: Record<string, string> = {

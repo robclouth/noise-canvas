@@ -31,7 +31,7 @@ export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false, effe
   const isModulatable = parameter.kind === "number" && "modulatable" in parameter && parameter.modulatable;
 
   const excludedFromRandomization = useStore((state) => state.excludedFromRandomization);
-  const linkedParams = useStore((state) => state.slotLinkedParams[state.activeSlotIndex] ?? []);
+  const linkedParams = useStore((state) => state.brushes[state.activeBrushIndex]?.linkedParams ?? []);
   const setParamExcluded = useStore((state) => state.setParamExcluded);
   const setParamLinked = useStore((state) => state.setParamLinked);
   const setParameter = useStore((state) => state.setParameter);

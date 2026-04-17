@@ -3,6 +3,7 @@ import { ContextModalProps } from "@mantine/modals";
 import { EFFECT_KEYS, EffectType } from "@renderer/effects/types";
 import { EFFECT_COLORS, EFFECT_DESCRIPTIONS, EFFECT_LABELS } from "@renderer/lib/constants";
 import { useRef } from "react";
+import { BrushPickerModal } from "./controls/brush-picker";
 
 export const NewFileModal = ({
   context,
@@ -133,4 +134,5 @@ export const AddEffectModal = ({
 export const modals = {
   newFile: NewFileModal,
   addEffect: AddEffectModal,
+  brushPicker: BrushPickerModal,
 };
