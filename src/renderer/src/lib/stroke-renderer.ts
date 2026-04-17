@@ -363,21 +363,23 @@ export class StrokeRenderer {
   /**
    * Calculate source offset based on position mode.
    */
+  /**
+   * Calculate clone-stamp offset.
+   * The base source position is now in sourceTimeOffset/sourcePitchOffset params (handled in shader).
+   * This just computes the offset from the cursor position, scaled to source UV space.
+   */
   calculateSourceOffset(
-    sourceFileValue: FileParameterValue,
+    sourcePositionUv: Vector2,
     lockedOffset: { beats: number; pitch: number } | null | undefined,
     mode: string,
     mousePos: Vector2 | null,
     timeScale: number,
     bandScale: number,
   ): Vector2 {
-    if (!sourceFileValue || !mousePos) {
+    if (!mousePos) {
       return new Vector2(0, 0);
     }
 
-    const sourcePositionUv = new Vector2(sourceFileValue.timeUv, sourceFileValue.pitchUv);
-    // shader does: sourceUv = destUv * scale + offset
-    // so: offset = sourcePositionUv - destCursorUv * scale
     const scaledMouse = new Vector2(mousePos.x * timeScale, mousePos.y * bandScale);
 
     if (mode === "fixed") {
@@ -510,6 +512,24 @@ export class StrokeRenderer {
       sourceBandScale: {
         value: this.spectrogramData.numBands / sourceFile.spectrogramData.numBands,
       },
+      sourceTimeOffset: {
+        value: {
+          value: (stepState.sourceTimeOffset as number) / 100,
+          minValue: -1,
+          maxValue: 1,
+          modulationAmounts: getModAmountValuesNormalized(stepState, "sourceTimeOffset"),
+          contextualModAmounts: getContextualModAmountsNormalized(stepState, "sourceTimeOffset"),
+        },
+      },
+      sourcePitchOffset: {
+        value: {
+          value: (stepState.sourcePitchOffset as number) / 100,
+          minValue: -1,
+          maxValue: 1,
+          modulationAmounts: getModAmountValuesNormalized(stepState, "sourcePitchOffset"),
+          contextualModAmounts: getContextualModAmountsNormalized(stepState, "sourcePitchOffset"),
+        },
+      },
       blendMode: { value: stepState.blendMode },
       algorithm: { value: stepState.algorithm },
       magnitudeLimit: { value: magnitudeLimit },
@@ -577,9 +597,13 @@ export class StrokeRenderer {
 
     const activeStepState = createStepStateView(state, state.activeStepIndex);
     const activeStep = (state.slots[state.activeSlotIndex] ?? [])[state.activeStepIndex];
-    const sourceFileValue = activeStepState.sourceFile;
 
-    // Calculate source offset
+    // Source position from the step's params (0-100% → 0-1 UV)
+    const sourcePositionUv = new Vector2(
+      (activeStepState.sourceTimeOffset as number) / 100,
+      (activeStepState.sourcePitchOffset as number) / 100,
+    );
+
     // Beat-based scale: converts dest UV to source UV so 1 beat = 1 beat
     const srcBpm = state.filepathsBpm?.[sourceFile.filePath] || bpm;
     const srcDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
@@ -587,7 +611,7 @@ export class StrokeRenderer {
     const bandScale = this.spectrogramData.numBands / sourceFile.spectrogramData.numBands;
 
     const sourceOffsetUv = this.calculateSourceOffset(
-      sourceFileValue,
+      sourcePositionUv,
       activeStep?.lockedOffset,
       activeStepState.sourcePositionMode as string,
       cursorPos,
@@ -711,6 +735,8 @@ export class StrokeRenderer {
         sourceOffsetY: { value: 0 },
         sourceTimeScale: { value: 1.0 },
         sourceBandScale: { value: 1.0 },
+        sourceTimeOffset: { value: { value: 0, minValue: -1, maxValue: 1, modulationAmounts: [0, 0, 0], contextualModAmounts: [0, 0, 0, 0, 0, 0, 0, 0] } },
+        sourcePitchOffset: { value: { value: 0, minValue: -1, maxValue: 1, modulationAmounts: [0, 0, 0], contextualModAmounts: [0, 0, 0, 0, 0, 0, 0, 0] } },
       };
 
       // Reset currentReadFbo to the step's input for effect processing

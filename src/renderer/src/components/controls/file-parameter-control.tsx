@@ -3,9 +3,8 @@ import { Box, Group, Text } from "@mantine/core";
 import type { FileParameterValue } from "@renderer/parameters";
 import { getFileColor } from "@renderer/store/files";
 import type { ParameterKey } from "@renderer/store/types";
-import { MoveHorizontal, MoveVertical, X } from "lucide-react";
+import { X } from "lucide-react";
 import { memo, useCallback } from "react";
-import { NumboxControl } from "./numbox-control";
 
 type FileParameterControlProps = {
   labelComponent: React.ReactNode;
@@ -13,9 +12,6 @@ type FileParameterControlProps = {
   setValue: (value: FileParameterValue) => void;
   paramKey: ParameterKey;
 };
-
-const linearNormalize = (value: number, min: number, max: number) => (value - min) / (max - min);
-const linearDenormalize = (norm: number, min: number, max: number) => norm * (max - min) + min;
 
 export const FileParameterControl = memo(function FileParameterControl({
   labelComponent,
@@ -38,46 +34,9 @@ export const FileParameterControl = memo(function FileParameterControl({
     }
   }, [isPicking, paramKey]);
 
-  // Dummy label for the offset numboxes (they sit inline, no individual labels)
-  const emptyLabel = <></>;
-
   return (
     <Group gap={"xs"} wrap="nowrap" h={24} align="center">
       {labelComponent}
-
-      {/* Time position (displayed as 0-100%, stored as 0-1 UV) */}
-      <NumboxControl
-        labelComponent={emptyLabel}
-        value={(value?.timeUv ?? 0) * 100}
-        setValue={(pct) => {
-          if (value) setValue({ ...value, timeUv: pct / 100 });
-        }}
-        min={0}
-        max={100}
-        step={0.1}
-        unit="%"
-        disabled={!hasValue}
-        rightIcon={<MoveHorizontal size={9} style={{ opacity: 0.5 }} />}
-        toNormalized={(v) => v / 100}
-        fromNormalized={(n) => n * 100}
-      />
-
-      {/* Pitch position (displayed as 0-100%, stored as 0-1 UV) */}
-      <NumboxControl
-        labelComponent={emptyLabel}
-        value={(value?.pitchUv ?? 0) * 100}
-        setValue={(pct) => {
-          if (value) setValue({ ...value, pitchUv: pct / 100 });
-        }}
-        min={0}
-        max={100}
-        step={0.1}
-        unit="%"
-        disabled={!hasValue}
-        rightIcon={<MoveVertical size={9} style={{ opacity: 0.5 }} />}
-        toNormalized={(v) => v / 100}
-        fromNormalized={(n) => n * 100}
-      />
 
       {/* File name button */}
       <Box

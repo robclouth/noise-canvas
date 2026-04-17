@@ -86,9 +86,13 @@ export function BrushPanel() {
         <Divider style={{ flex: 1 }} color="dark.4" />
         <Steps />
         <Section label="Source">
-          <ParameterControl paramKey="sourceFile" />
-          <ParameterControl paramKey="sourcePositionMode" />
-          <ParameterControl paramKey="sourceDataMode" />
+          <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
+            <ParameterControl paramKey="sourceFile" />
+            <ParameterControl paramKey="sourceDataMode" />
+            <ParameterControl paramKey="sourceTimeOffset" />
+            <ParameterControl paramKey="sourcePitchOffset" />
+            <ParameterControl paramKey="sourcePositionMode" />
+          </SimpleGrid>
         </Section>
         <Section label="Envelope" parameterKeys={ENVELOPE_PARAMS}>
           <EnvelopeControl />

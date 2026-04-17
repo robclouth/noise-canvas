@@ -313,10 +313,12 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       const coords = getSnappedCoordinates(event, fileId, bpm);
       if (!coords) return;
 
-      // Pick mode: clicking on a canvas sets the file param value with UV coordinates
+      // Pick mode: clicking on a canvas sets the file path and position params
       if (state.pickingFileParam) {
-        const fileParamValue = { path: openFiles[fileId].filePath, timeUv: coords[0], pitchUv: 1.0 - coords[1] };
-        state.setParameter(state.pickingFileParam, fileParamValue);
+        state.setParameter(state.pickingFileParam, { path: openFiles[fileId].filePath });
+        // Set position params (UV 0-1 → 0-100%). Y is inverted between display and spectrogram space.
+        state.setParameter("sourceTimeOffset" as import("@renderer/store/types").ParameterKey, coords[0] * 100);
+        state.setParameter("sourcePitchOffset" as import("@renderer/store/types").ParameterKey, (1.0 - coords[1]) * 100);
         state.setPickingFileParam(null);
         return;
       }
@@ -356,8 +358,10 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
               const tScale = (destBpm * destDur) / (srcBpm * srcDur);
               const bScale = spectrogramData.numBands / sourceOpenFile.spectrogramData.numBands;
 
-              const offsetX = sourceFileValue.timeUv - coords[0] * tScale;
-              const offsetY = sourceFileValue.pitchUv - coords[1] * bScale;
+              const srcTimeUv = (Number(activeStep?.sourceTimeOffset) || 0) / 100;
+              const srcPitchUv = (Number(activeStep?.sourcePitchOffset) || 0) / 100;
+              const offsetX = srcTimeUv - coords[0] * tScale;
+              const offsetY = srcPitchUv - coords[1] * bScale;
               state.updateActiveStepLockedOffset({ beats: offsetX, pitch: offsetY });
             }
           }

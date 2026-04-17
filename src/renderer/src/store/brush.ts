@@ -19,6 +19,8 @@ export interface BrushState {
   brushEnvelopeSustainPitch: number;
   brushEnvelopeReleasePitch: number;
   sourceFile: FileParameterValue;
+  sourceTimeOffset: number;
+  sourcePitchOffset: number;
   sourcePositionMode: string;
   sourceDataMode: string;
   pickingFileParam: ParameterKey | null;
@@ -77,6 +79,8 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     algorithm: getParameterDef("algorithm").default,
     accumulate: getParameterDef("accumulate").default,
     sourceFile: null,
+    sourceTimeOffset: getParameterDef("sourceTimeOffset").default,
+    sourcePitchOffset: getParameterDef("sourcePitchOffset").default,
     sourcePositionMode: getParameterDef("sourcePositionMode").default,
     sourceDataMode: getParameterDef("sourceDataMode").default,
     pickingFileParam: null,

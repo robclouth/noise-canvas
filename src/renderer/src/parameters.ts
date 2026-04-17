@@ -25,8 +25,8 @@ import { ParameterKey } from "./store/types";
 
 // --- Base Interfaces ---
 
-/** File parameter value. timeUv and pitchUv are normalized 0-1 positions within the referenced file. */
-export type FileParameterValue = { path: string; timeUv: number; pitchUv: number } | null;
+/** File parameter value. Just the path — position is in separate modulatable params. */
+export type FileParameterValue = { path: string } | null;
 
 export interface ParameterBase {
   kind: "number" | "boolean" | "options" | "string" | "file";
@@ -530,7 +530,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   sourcePositionMode: {
     kind: "options",
     name: "Source Position Mode",
-    label: "Mode",
+    label: "Tracking",
     description: "How the source position is used when painting.",
     default: "anchored" as const,
     options: [
@@ -542,7 +542,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   sourceDataMode: {
     kind: "options",
     name: "Source Data Mode",
-    label: "Source",
+    label: "Read From",
     description: "Whether to use the current (modified) or original (unmodified) data from the source file.",
     default: "current" as const,
     options: [
@@ -550,6 +550,32 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       { value: "original", label: "Original" },
     ],
     includeInStep: true,
+  },
+  sourceTimeOffset: {
+    kind: "number",
+    name: "Source Time",
+    label: "Time ↔",
+    description: "Time position in the source file (0-100%).",
+    default: 0,
+    min: 0,
+    max: 100,
+    step: 0.1,
+    unit: "%",
+    includeInStep: true,
+    modulatable: true,
+  },
+  sourcePitchOffset: {
+    kind: "number",
+    name: "Source Pitch",
+    label: "Pitch ↕",
+    description: "Pitch position in the source file (0-100%).",
+    default: 0,
+    min: 0,
+    max: 100,
+    step: 0.1,
+    unit: "%",
+    includeInStep: true,
+    modulatable: true,
   },
 
   // --- Effect Parameters ---

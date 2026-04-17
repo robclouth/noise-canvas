@@ -298,24 +298,22 @@ export const FileRenderer = memo(
     }, [createTextures]);
 
     /**
-     * Calculate source offset accounting for beat-based scale.
-     * shader: sourceUv = destUv * scale + offset
-     * so: offset = sourcePositionUv - destCursorUv * scale
+     * Calculate clone-stamp offset.
+     * Base position is in sourceTimeOffset/sourcePitchOffset params (handled in shader with modulation).
      */
     const calculateSourceOffset = useCallback(
       (
-        sourceFileValue: FileParameterValue,
+        sourcePositionUv: Vector2,
         lockedOffset: { beats: number; pitch: number } | null | undefined,
         mode: string,
         mousePos: Vector2 | null,
         timeScale: number,
         bandScale: number,
       ): Vector2 => {
-        if (!sourceFileValue || !mousePos) {
+        if (!mousePos) {
           return new Vector2(0, 0);
         }
 
-        const sourcePositionUv = new Vector2(sourceFileValue.timeUv, sourceFileValue.pitchUv);
         const scaledMouse = new Vector2(mousePos.x * timeScale, mousePos.y * bandScale);
 
         if (mode === "fixed") {
@@ -469,6 +467,10 @@ export const FileRenderer = memo(
       let sourceDisplayPos = new Vector2(-1, -1);
       if (isSourceFile && activeStepSourceFile) {
         const mode = String(activeStepRaw?.sourcePositionMode ?? "anchored");
+        const sourcePositionUv = new Vector2(
+          (Number(activeStepRaw?.sourceTimeOffset) || 0) / 100,
+          (Number(activeStepRaw?.sourcePitchOffset) || 0) / 100,
+        );
         const shouldTrackCursor =
           (mode === "fixed" || (mode === "anchored" && state.isStroking)) &&
           state.cursorVisible &&
@@ -493,7 +495,7 @@ export const FileRenderer = memo(
             const bScale = spectrogramData.numBands / activeFile.spectrogramData.numBands;
 
             const offset = calculateSourceOffset(
-              activeStepSourceFile,
+              sourcePositionUv,
               activeStepRaw?.lockedOffset,
               mode,
               destCursorUv,
@@ -507,7 +509,7 @@ export const FileRenderer = memo(
           }
         } else {
           // At rest: show at the source position
-          sourceDisplayPos = new Vector2(activeStepSourceFile.timeUv, activeStepSourceFile.pitchUv);
+          sourceDisplayPos = sourcePositionUv;
         }
       }
 
@@ -664,8 +666,12 @@ export const FileRenderer = memo(
         const tScale = (bpm * totalDuration) / (srcBpm * srcDur);
         const bScale = spectrogramData.numBands / sourceFileData.spectrogramData.numBands;
 
+        const srcPositionUv = new Vector2(
+          (Number(activeStepRaw?.sourceTimeOffset) || 0) / 100,
+          (Number(activeStepRaw?.sourcePitchOffset) || 0) / 100,
+        );
         const sourceOffsetUv = calculateSourceOffset(
-          activeStepSourceFile,
+          srcPositionUv,
           activeStepRaw?.lockedOffset,
           String(activeStepRaw?.sourcePositionMode ?? "anchored"),
           cursorPos,

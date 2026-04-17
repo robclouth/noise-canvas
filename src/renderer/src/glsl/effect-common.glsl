@@ -42,8 +42,10 @@ uniform float envelopeSustainEndY;
 uniform float envelopeReleaseEndY;
 uniform float sourceOffsetX;
 uniform float sourceOffsetY;
-uniform float sourceTimeScale; // destDuration / sourceDuration — for correct phase in getTransformedSample
-uniform float sourceBandScale; // destBandCount / sourceBandCount
+uniform float sourceTimeScale;
+uniform float sourceBandScale;
+uniform Parameter sourceTimeOffset;
+uniform Parameter sourcePitchOffset;
 uniform Parameter brushPan;
 uniform Parameter brushIntensity;
 uniform int   blendMode;
@@ -128,12 +130,7 @@ vec2 packedToUnpackedUv(sampler2D inverseMapTex, vec2 packedUv, float frameCount
   return vec2(u, v);
 }
 
-ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
-  ProcessingUvs uvs;
-  uvs.dest   = packedToUnpackedUv(destInverseMapTex, destPackedUv, destFrameCount, destBandCount);
-  uvs.source = vec2(uvs.dest.x * sourceTimeScale, uvs.dest.y * sourceBandScale) + vec2(sourceOffsetX, sourceOffsetY);
-  return uvs;
-}
+// getProcessingUvs is defined after modulation-common.glsl include (needs applyModulation)
 
 // ============================================================================
 // SPECTROGRAM SAMPLING (texelFetch where exact texels are addressed)
@@ -290,6 +287,26 @@ float getAudioLevelDb(vec2 uv) {
 // envelope follower can directly sample phase/panning from the spectrogram.
 #define HAS_SPECTROGRAM_SAMPLING
 #include "modulation-common.glsl"
+
+ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
+  ProcessingUvs uvs;
+  uvs.dest = packedToUnpackedUv(destInverseMapTex, destPackedUv, destFrameCount, destBandCount);
+
+  float modTimeOff = applyModulation(
+    sourceTimeOffset.value, sourceTimeOffset.minValue, sourceTimeOffset.maxValue,
+    sourceTimeOffset.modulationAmounts, sourceTimeOffset.contextualModAmounts,
+    uvs.dest, 0, 0.0
+  );
+  float modPitchOff = applyModulation(
+    sourcePitchOffset.value, sourcePitchOffset.minValue, sourcePitchOffset.maxValue,
+    sourcePitchOffset.modulationAmounts, sourcePitchOffset.contextualModAmounts,
+    uvs.dest, 0, 0.0
+  );
+
+  uvs.source = vec2(uvs.dest.x * sourceTimeScale, uvs.dest.y * sourceBandScale)
+             + vec2(sourceOffsetX + modTimeOff, sourceOffsetY + modPitchOff);
+  return uvs;
+}
 
 /**
  * Samples from the original, unmodified destination spectrogram with interpolation.
