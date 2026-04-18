@@ -37,24 +37,38 @@ export function uvToUnits(
   return [beats, semitones];
 }
 
-export const screenToZoomed = (screenUv: Vector2, viewZoomPower: number, viewOffset: number): Vector2 => {
-  const zoom = Math.pow(2, viewZoomPower);
-  if (zoom <= 1) {
-    return screenUv.clone();
-  }
-  const viewWidth = 1.0 / zoom;
-  const viewStartX = viewOffset * (1.0 - viewWidth);
-  return new Vector2(viewStartX + screenUv.x * viewWidth, screenUv.y);
+type Axis = number | Vector2;
+
+function axisToVec(value: Axis): Vector2 {
+  return typeof value === "number" ? new Vector2(value, 0) : value;
+}
+
+export const screenToZoomed = (screenUv: Vector2, viewZoomPower: Axis, viewOffset: Axis): Vector2 => {
+  const zp = axisToVec(viewZoomPower);
+  const of = axisToVec(viewOffset);
+  const zx = Math.pow(2, zp.x);
+  const zy = Math.pow(2, zp.y);
+  const vwX = 1.0 / zx;
+  const vwY = 1.0 / zy;
+  const vsX = zx > 1 ? of.x * (1.0 - vwX) : 0;
+  const vsY = zy > 1 ? of.y * (1.0 - vwY) : 0;
+  const x = zx > 1 ? vsX + screenUv.x * vwX : screenUv.x;
+  const y = zy > 1 ? vsY + screenUv.y * vwY : screenUv.y;
+  return new Vector2(x, y);
 };
 
-export const zoomedToScreen = (zoomedUv: Vector2, viewZoomPower: number, viewOffset: number): Vector2 => {
-  const zoom = Math.pow(2, viewZoomPower);
-  if (zoom <= 1) {
-    return zoomedUv.clone();
-  }
-  const viewWidth = 1.0 / zoom;
-  const viewStartX = viewOffset * (1.0 - viewWidth);
-  return new Vector2((zoomedUv.x - viewStartX) / viewWidth, zoomedUv.y);
+export const zoomedToScreen = (zoomedUv: Vector2, viewZoomPower: Axis, viewOffset: Axis): Vector2 => {
+  const zp = axisToVec(viewZoomPower);
+  const of = axisToVec(viewOffset);
+  const zx = Math.pow(2, zp.x);
+  const zy = Math.pow(2, zp.y);
+  const vwX = 1.0 / zx;
+  const vwY = 1.0 / zy;
+  const vsX = zx > 1 ? of.x * (1.0 - vwX) : 0;
+  const vsY = zy > 1 ? of.y * (1.0 - vwY) : 0;
+  const x = zx > 1 ? (zoomedUv.x - vsX) / vwX : zoomedUv.x;
+  const y = zy > 1 ? (zoomedUv.y - vsY) / vwY : zoomedUv.y;
+  return new Vector2(x, y);
 };
 
 // Convert beats to bars:beats:ticks format (480 ticks per beat, 4 beats per bar)

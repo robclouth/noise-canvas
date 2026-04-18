@@ -32,6 +32,8 @@ uniform vec2  brushBottomLeftUv;
 uniform vec2  brushSizeUv;
 uniform float viewZoomPower;
 uniform float viewOffset;
+uniform float viewZoomPowerY;
+uniform float viewOffsetY;
 uniform float envelopeDelayEndX;
 uniform float envelopeAttackEndX;
 uniform float envelopeSustainEndX;

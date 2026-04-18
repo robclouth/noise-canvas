@@ -10,6 +10,7 @@ import { screenToZoomed } from "../lib/utils";
 import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { LoopRegion } from "./loop-region";
+import { PITCH_LEGEND_WIDTH, PitchLegend } from "./pitch-legend";
 import { PlaybackLine } from "./playback-line";
 import { TimeLegend } from "./time-legend";
 
@@ -37,8 +38,8 @@ function getSnappedCoordinates(
 
   const screenUv = new Vector2(x, y);
 
-  const zoom = state.filesZoom[fileId];
-  const offset = state.filesOffset[fileId];
+  const zoom = new Vector2(state.filesZoom[fileId], state.filesZoomY[fileId] ?? 0);
+  const offset = new Vector2(state.filesOffset[fileId], state.filesOffsetY[fileId] ?? 0);
   const uv = screenToZoomed(screenUv, zoom, offset);
   const spectrogramData = openFiles[fileId]?.spectrogramData;
   if (!spectrogramData) return null;
@@ -96,12 +97,111 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const strokeTimeRangeRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
   const viewRef = useRef<HTMLDivElement>(null);
   const isStrokingRef = useRef(false);
+  const momentumRef = useRef<{ vx: number; vy: number; raf: number | null }>({ vx: 0, vy: 0, raf: null });
+  const pinchPrevScaleRef = useRef<number>(1);
+
+  const stopMomentum = useCallback(() => {
+    if (momentumRef.current.raf !== null) {
+      cancelAnimationFrame(momentumRef.current.raf);
+      momentumRef.current.raf = null;
+    }
+    momentumRef.current.vx = 0;
+    momentumRef.current.vy = 0;
+  }, []);
+
+  const applyScrollDelta = useCallback(
+    (dxPx: number, dyPx: number) => {
+      const rect = viewRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0 || rect.height === 0) return;
+      const state = useStore.getState();
+      const zx = state.filesZoom[fileId];
+      const ox = state.filesOffset[fileId];
+      const zy = state.filesZoomY[fileId] ?? 0;
+      const oy = state.filesOffsetY[fileId] ?? 0;
+      const zxPow = Math.pow(2, zx);
+      const zyPow = Math.pow(2, zy);
+
+      if (zxPow > 1 + 1e-9) {
+        const viewWidth = 1 / zxPow;
+        const ds = dxPx / rect.width;
+        const denom = 1 - viewWidth;
+        const shifted = ox + (ds * viewWidth) / (denom || 1);
+        state.setFileOffset(fileId, Math.max(0, Math.min(1, shifted)));
+      }
+      if (zyPow > 1 + 1e-9) {
+        const viewHeight = 1 / zyPow;
+        const ds = dyPx / rect.height;
+        const denom = 1 - viewHeight;
+        const shifted = oy + (ds * viewHeight) / (denom || 1);
+        state.setFileOffsetY(fileId, Math.max(0, Math.min(1, shifted)));
+      }
+    },
+    [fileId],
+  );
+
+  const startMomentum = useCallback(
+    (vxPxPerMs: number, vyPxPerMs: number) => {
+      stopMomentum();
+      const DECAY_PER_FRAME = 0.92;
+      const MIN_VEL = 0.005;
+      if (Math.abs(vxPxPerMs) < MIN_VEL && Math.abs(vyPxPerMs) < MIN_VEL) return;
+      momentumRef.current.vx = vxPxPerMs;
+      momentumRef.current.vy = vyPxPerMs;
+
+      let last = performance.now();
+      const step = (now: number) => {
+        const dt = now - last;
+        last = now;
+        applyScrollDelta(momentumRef.current.vx * dt, momentumRef.current.vy * dt);
+        const decay = Math.pow(DECAY_PER_FRAME, dt / 16.67);
+        momentumRef.current.vx *= decay;
+        momentumRef.current.vy *= decay;
+        if (Math.abs(momentumRef.current.vx) < MIN_VEL && Math.abs(momentumRef.current.vy) < MIN_VEL) {
+          momentumRef.current.raf = null;
+          return;
+        }
+        momentumRef.current.raf = requestAnimationFrame(step);
+      };
+      momentumRef.current.raf = requestAnimationFrame(step);
+    },
+    [applyScrollDelta, stopMomentum],
+  );
+
+  const applyCursorCentricXZoom = useCallback(
+    (newPower: number, cursorScreenU: number) => {
+      const state = useStore.getState();
+      const oldPower = state.filesZoom[fileId];
+      const oldOffset = state.filesOffset[fileId];
+      const clamped = Math.max(0, Math.min(newPower, 7));
+      const oldZ = Math.pow(2, oldPower);
+      const newZ = Math.pow(2, clamped);
+      const oldViewWidth = 1 / oldZ;
+      const newViewWidth = 1 / newZ;
+      const oldViewStart = oldZ > 1 ? oldOffset * (1 - oldViewWidth) : 0;
+      const u = oldViewStart + cursorScreenU * oldViewWidth;
+      const newViewStart = u - cursorScreenU * newViewWidth;
+
+      let newOffset: number;
+      if (newZ <= 1 + 1e-9) {
+        newOffset = 0;
+      } else {
+        const denom = 1 - newViewWidth;
+        newOffset = denom > 0 ? newViewStart / denom : 0;
+        newOffset = Math.max(0, Math.min(1, newOffset));
+      }
+      state.setFileZoom(fileId, clamped);
+      state.setFileOffset(fileId, newOffset);
+    },
+    [fileId],
+  );
+
+  useEffect(() => () => stopMomentum(), [stopMomentum]);
 
   useGesture(
     {
       onDrag: ({ event, dragging, delta: [dx] }) => {
-        // Right button only (configured below). Pan in screen space.
         event.preventDefault();
+        stopMomentum();
         setIsPanning(dragging ?? false);
 
         const rect = viewRef.current?.getBoundingClientRect();
@@ -109,83 +209,77 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
         const Z = Math.pow(2, zoom);
         const viewWidth = 1 / Z;
-
-        // No panning when zoomed fully out
         if (Z <= 1 + 1e-9) return;
 
-        // Current viewStart from offset (must match screenToZoomed)
         const viewStart = offset * (1 - viewWidth);
-
-        // Screen-space delta in [0,1]
         const ds = dx / rect.width;
-
-        // Pan: moving the mouse right should decrease viewStart (content moves left)
         let newViewStart = viewStart - ds * viewWidth;
-
-        // Clamp viewStart to [0, 1 - viewWidth]
         newViewStart = Math.max(0, Math.min(1 - viewWidth, newViewStart));
-
-        // Convert back to offset
         const denom = 1 - viewWidth;
         const newOffset = denom > 0 ? newViewStart / denom : 0;
-
         useStore.getState().setFileOffset(fileId, newOffset);
       },
-      onWheel: ({ event, delta: [, dy] }) => {
-        if (!isZooming) return;
+      onWheel: ({ event, delta: [dx, dy], velocity: [vx, vy], direction: [dirX, dirY], last }) => {
         event.preventDefault();
         const rect = viewRef.current?.getBoundingClientRect();
         if (!rect || rect.width === 0) return;
 
-        const { setFileZoom, setFileOffset } = useStore.getState();
+        const wheelEvent = event as WheelEvent;
+        const isZoomGesture = wheelEvent.ctrlKey || wheelEvent.metaKey || isZooming;
 
-        // wheel → zoomPower
-        const sensitivity = 0.01;
-        const oldPower = zoom;
-        const newPower = Math.max(-0, Math.min(oldPower - dy * sensitivity, 7)); // clamp as you like
-
-        const oldZ = Math.pow(2, oldPower);
-        const newZ = Math.pow(2, newPower);
-
-        const s = (event.clientX - rect.left) / rect.width; // cursor in [0,1]
-
-        // From screenToZoomed:
-        // viewWidth = 1/z
-        // viewStart = offset * (1 - viewWidth)
-        const oldViewWidth = 1 / oldZ;
-        const newViewWidth = 1 / newZ;
-
-        // Current world u under the cursor, keep this constant after zoom.
-        const oldViewStart = offset * (1 - oldViewWidth);
-        const u = oldViewStart + s * oldViewWidth;
-
-        // Solve for new viewStart' so that u = viewStart' + s * newViewWidth
-        const newViewStart = u - s * newViewWidth;
-
-        // Convert back to offset' via viewStart' = offset' * (1 - newViewWidth)
-        let newOffset: number;
-
-        if (newZ <= 1 + 1e-9) {
-          // Fully zoomed out — offset is irrelevant; pin to 0 for stability.
-          newOffset = 0;
-        } else {
-          const denom = 1 - newViewWidth;
-          newOffset = denom > 0 ? newViewStart / denom : 0;
-          // Keep viewStart in-bounds => offset in [0,1]
-          newOffset = Math.max(0, Math.min(1, newOffset));
+        if (isZoomGesture) {
+          stopMomentum();
+          const sensitivity = wheelEvent.ctrlKey || wheelEvent.metaKey ? 0.02 : 0.01;
+          const cursorU = (wheelEvent.clientX - rect.left) / rect.width;
+          const oldPower = useStore.getState().filesZoom[fileId];
+          applyCursorCentricXZoom(oldPower - dy * sensitivity, cursorU);
+          return;
         }
 
-        setFileZoom(fileId, newPower);
-        setFileOffset(fileId, newOffset);
+        stopMomentum();
+        applyScrollDelta(dx, dy);
+
+        if (last) {
+          const signedVx = vx * dirX;
+          const signedVy = vy * dirY;
+          if (Math.abs(signedVx) > 0.05 || Math.abs(signedVy) > 0.05) {
+            startMomentum(signedVx, signedVy);
+          }
+        }
+      },
+      onPinch: ({ event, offset: [scale], first }) => {
+        event.preventDefault();
+        const rect = viewRef.current?.getBoundingClientRect();
+        if (!rect || rect.width === 0) return;
+
+        if (first) {
+          pinchPrevScaleRef.current = scale;
+          stopMomentum();
+          return;
+        }
+
+        const deltaLog = Math.log2(scale / pinchPrevScaleRef.current);
+        pinchPrevScaleRef.current = scale;
+        if (deltaLog === 0) return;
+
+        const nativeEvent = event as PointerEvent | WheelEvent;
+        const clientX = "clientX" in nativeEvent ? nativeEvent.clientX : rect.left + rect.width / 2;
+        const cursorU = (clientX - rect.left) / rect.width;
+        const currentPower = useStore.getState().filesZoom[fileId];
+        applyCursorCentricXZoom(currentPower + deltaLog, cursorU);
       },
     },
     {
       target: viewRef,
       eventOptions: { passive: false },
       drag: {
-        pointer: { buttons: [2], mouse: true }, // right click
+        pointer: { buttons: [2], mouse: true },
         from: () => [0, 0],
         filterTaps: true,
+      },
+      pinch: {
+        scaleBounds: { min: 0.0078125, max: 128 },
+        rubberband: true,
       },
     },
   );
@@ -417,8 +511,8 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
       const screenUv = new Vector2(x, y);
       const state = useStore.getState();
-      const currentZoom = state.filesZoom[fileId];
-      const currentOffset = state.filesOffset[fileId];
+      const currentZoom = new Vector2(state.filesZoom[fileId], state.filesZoomY[fileId] ?? 0);
+      const currentOffset = new Vector2(state.filesOffset[fileId], state.filesOffsetY[fileId] ?? 0);
       const uv = screenToZoomed(screenUv, currentZoom, currentOffset);
 
       // Apply snapping
@@ -500,7 +594,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       bd={isActive ? "2px solid orange" : "2px solid dark.7"}
       h={isFullscreen ? "100%" : undefined}
       style={isFullscreen ? { display: "flex", flexDirection: "column" } : undefined}
-      onClick={() => {
+      onPointerDown={() => {
         if (!isActive) {
           useStore.getState().setActiveFileId(fileId);
         }
@@ -530,24 +624,35 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       ) : (
         <>
           <Box
-            ref={viewRef}
             h={isFullscreen ? undefined : 400}
-            style={{ ...(isFullscreen ? { flex: 1 } : {}), ...cursorStyle }}
-            pos="relative"
-            onPointerEnter={handleMouseEnter}
-            onPointerMove={handleMouseMove}
-            onPointerLeave={handleMouseLeave}
-            onPointerDown={handleCanvasMouseDown}
-            onPointerUp={handleCanvasMouseUp}
-            onContextMenu={(e) => e.preventDefault()}
+            style={{
+              ...(isFullscreen ? { flex: 1 } : {}),
+              display: "flex",
+              flexDirection: "row",
+            }}
           >
-            <View style={viewStyle}>
-              <FileRenderer fileId={fileId} ref={refCallback} />
-            </View>
-            {isActive && <LoopRegion fileId={fileId} />}
-            {isActive && <PlaybackLine fileId={fileId} />}
+            <PitchLegend fileId={fileId} />
+            <Box
+              ref={viewRef}
+              style={{ flex: 1, ...cursorStyle }}
+              pos="relative"
+              onPointerEnter={handleMouseEnter}
+              onPointerMove={handleMouseMove}
+              onPointerLeave={handleMouseLeave}
+              onPointerDown={handleCanvasMouseDown}
+              onPointerUp={handleCanvasMouseUp}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              <View style={viewStyle}>
+                <FileRenderer fileId={fileId} ref={refCallback} />
+              </View>
+              {isActive && <LoopRegion fileId={fileId} />}
+              {isActive && <PlaybackLine fileId={fileId} />}
+            </Box>
           </Box>
-          <TimeLegend fileId={fileId} />
+          <Box style={{ paddingLeft: PITCH_LEGEND_WIDTH }}>
+            <TimeLegend fileId={fileId} />
+          </Box>
         </>
       )}
       {isSynthesizing && <Loader size="xs" pos="absolute" bottom={25} right={10} />}

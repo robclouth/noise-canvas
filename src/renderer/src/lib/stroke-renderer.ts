@@ -142,6 +142,8 @@ export interface StrokeParams {
   totalDuration: number;
   viewZoomPower: number;
   viewOffset: number;
+  viewZoomPowerY: number;
+  viewOffsetY: number;
   pressure: number;
   tiltX: number;
   tiltY: number;
@@ -409,6 +411,8 @@ export class StrokeRenderer {
     sourceBpm: number,
     viewZoomPower: number,
     viewOffset: number,
+    viewZoomPowerY: number,
+    viewOffsetY: number,
     magnitudeLimit: number,
   ): CommonUniforms {
     const { placeholderTexture, modulatorScaleLut, modulator1Texture, modulator2Texture, modulator3Texture } =
@@ -470,6 +474,8 @@ export class StrokeRenderer {
       originalSpectrogramTex: { value: this.textures.originalPackedDataTex || placeholderTexture },
       viewZoomPower: { value: viewZoomPower },
       viewOffset: { value: viewOffset },
+      viewZoomPowerY: { value: viewZoomPowerY },
+      viewOffsetY: { value: viewOffsetY },
       brushBottomLeftUv: { value: cursorPos },
       envelopeDelayEndX: { value: envelopeX.delayEnd },
       envelopeAttackEndX: { value: envelopeX.attackEnd },
@@ -590,7 +596,7 @@ export class StrokeRenderer {
       this.initialize();
     }
 
-    const { cursorPos, preview, bpm, totalDuration, viewZoomPower, viewOffset, pressure, tiltX, tiltY } = params;
+    const { cursorPos, preview, bpm, totalDuration, viewZoomPower, viewOffset, viewZoomPowerY, viewOffsetY, pressure, tiltX, tiltY } = params;
 
     if (cursorPos.x < 0) return;
 
@@ -708,6 +714,8 @@ export class StrokeRenderer {
         sourceBpm,
         viewZoomPower,
         viewOffset,
+        viewZoomPowerY,
+        viewOffsetY,
         state.magnitudeLimit,
       );
 

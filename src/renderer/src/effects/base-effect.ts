@@ -48,6 +48,8 @@ export type CommonUniforms = {
   brushSizeUv: { value: Vector2 };
   viewZoomPower: { value: number };
   viewOffset: { value: number };
+  viewZoomPowerY: { value: number };
+  viewOffsetY: { value: number };
   envelopeDelayEndX: { value: number };
   envelopeAttackEndX: { value: number };
   envelopeSustainEndX: { value: number };
@@ -131,6 +133,8 @@ export const defaultValues: CommonUniforms = {
   brushSizeUv: { value: new Vector2(0.1, 0.1) },
   viewZoomPower: { value: 0.0 },
   viewOffset: { value: 0.0 },
+  viewZoomPowerY: { value: 0.0 },
+  viewOffsetY: { value: 0.0 },
   envelopeDelayEndX: { value: 0.0 },
   envelopeAttackEndX: { value: 0.0 },
   envelopeSustainEndX: { value: 1.0 },

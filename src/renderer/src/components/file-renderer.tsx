@@ -118,6 +118,8 @@ export const FileRenderer = memo(
             bpm: file && state.filepathsBpm[file.filePath],
             zoom: state.filesZoom[fileId],
             offset: state.filesOffset[fileId],
+            zoomY: state.filesZoomY[fileId],
+            offsetY: state.filesOffsetY[fileId],
             gridBeats: state.gridSizeBeats,
             gridSemis: state.gridSizeSemis,
             minDb: state.displayMinDb,
@@ -198,6 +200,8 @@ export const FileRenderer = memo(
           sourceSamplingBottomLeftUv: { value: new Vector2(-1, -1) },
           viewZoomPower: { value: 0.0 },
           viewOffset: { value: 0.0 },
+          viewZoomPowerY: { value: 0.0 },
+          viewOffsetY: { value: 0.0 },
           wrapMode: { value: 0 },
         },
         vertexShader: passThroughVert,
@@ -427,6 +431,8 @@ export const FileRenderer = memo(
       // Get per-file zoom and offset from store
       const viewZoomPower = state.filesZoom[fileId];
       const viewOffset = state.filesOffset[fileId];
+      const viewZoomPowerY = state.filesZoomY[fileId] ?? 0;
+      const viewOffsetY = state.filesOffsetY[fileId] ?? 0;
 
       // Helper to calculate brush size from a step state
       const calculateBrushSizeUv = (stepState: State) => {
@@ -547,6 +553,8 @@ export const FileRenderer = memo(
             totalDuration,
             viewZoomPower,
             viewOffset,
+            viewZoomPowerY,
+            viewOffsetY,
             pressure: penState.pressure,
             tiltX: penState.tiltX,
             tiltY: penState.tiltY,
@@ -649,6 +657,8 @@ export const FileRenderer = memo(
       }
       displayMaterial.uniforms.viewZoomPower.value = viewZoomPower;
       displayMaterial.uniforms.viewOffset.value = viewOffset;
+      displayMaterial.uniforms.viewZoomPowerY.value = viewZoomPowerY;
+      displayMaterial.uniforms.viewOffsetY.value = viewOffsetY;
       displayMaterial.uniforms.wrapMode.value = activeStepState.brushWrapMode;
 
       // Calculate and update grid values

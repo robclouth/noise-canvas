@@ -22,25 +22,29 @@ uniform bool showHorizontalGrid;  // Whether to show horizontal grid lines
 uniform bool showVerticalGrid;    // Whether to show vertical grid lines
 
 // Convert screen UV (what we see) to zoomed UV (actual data coordinates)
-vec2 screenToZoomed(vec2 screenUv, float zoomPower, float offset) {
-    float zoom = pow(2.0, zoomPower);
-    if (zoom <= 1.0) {
-        return screenUv;
-    }
-    float viewWidth = 1.0 / zoom;
-    float viewStartX = offset * (1.0 - viewWidth);
-    return vec2(viewStartX + screenUv.x * viewWidth, screenUv.y);
+vec2 screenToZoomed(vec2 screenUv, float zoomPowerX, float offsetX, float zoomPowerY, float offsetY) {
+    float zx = pow(2.0, zoomPowerX);
+    float zy = pow(2.0, zoomPowerY);
+    float vwX = 1.0 / zx;
+    float vwY = 1.0 / zy;
+    float vsX = zx > 1.0 ? offsetX * (1.0 - vwX) : 0.0;
+    float vsY = zy > 1.0 ? (1.0 - offsetY) * (1.0 - vwY) : 0.0;
+    float x = zx > 1.0 ? vsX + screenUv.x * vwX : screenUv.x;
+    float y = zy > 1.0 ? vsY + screenUv.y * vwY : screenUv.y;
+    return vec2(x, y);
 }
 
 // Convert zoomed UV (actual data coordinates) to screen UV (what we see)
-vec2 zoomedToScreen(vec2 zoomedUv, float zoomPower, float offset) {
-    float zoom = pow(2.0, zoomPower);
-    if (zoom <= 1.0) {
-        return zoomedUv;
-    }
-    float viewWidth = 1.0 / zoom;
-    float viewStartX = offset * (1.0 - viewWidth);
-    return vec2((zoomedUv.x - viewStartX) / viewWidth, zoomedUv.y);
+vec2 zoomedToScreen(vec2 zoomedUv, float zoomPowerX, float offsetX, float zoomPowerY, float offsetY) {
+    float zx = pow(2.0, zoomPowerX);
+    float zy = pow(2.0, zoomPowerY);
+    float vwX = 1.0 / zx;
+    float vwY = 1.0 / zy;
+    float vsX = zx > 1.0 ? offsetX * (1.0 - vwX) : 0.0;
+    float vsY = zy > 1.0 ? (1.0 - offsetY) * (1.0 - vwY) : 0.0;
+    float x = zx > 1.0 ? (zoomedUv.x - vsX) / vwX : zoomedUv.x;
+    float y = zy > 1.0 ? (zoomedUv.y - vsY) / vwY : zoomedUv.y;
+    return vec2(x, y);
 }
 
 float magnitudeToDb(float mag) {
@@ -51,7 +55,7 @@ float magnitudeToDb(float mag) {
 
 void main() {
     // Convert screen UV to zoomed UV (actual data coordinates)
-    vec2 zoomedUv = screenToZoomed(vUv, viewZoomPower, viewOffset);
+    vec2 zoomedUv = screenToZoomed(vUv, viewZoomPower, viewOffset, viewZoomPowerY, viewOffsetY);
     
     // Vertical interpolation between adjacent frequency bands, with center-aligned bins
     float bandIndexF = (1.0 - zoomedUv.y) * sourceBandCount;

@@ -36,6 +36,10 @@ export interface FilesState {
   setFileZoom: (fileId: string, zoom: number) => void;
   filesOffset: Record<string, number>;
   setFileOffset: (fileId: string, offset: number) => void;
+  filesZoomY: Record<string, number>;
+  setFileZoomY: (fileId: string, zoom: number) => void;
+  filesOffsetY: Record<string, number>;
+  setFileOffsetY: (fileId: string, offset: number) => void;
   filesPlaybackStartTime: Record<string, number>;
   setFilePlaybackStartTime: (fileId: string, playbackStartTime: number) => void;
   filesDirty: Record<string, boolean>;
@@ -170,6 +174,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           state.filesBandsPerOctave[fileId] = state.bandsPerOctave;
           state.filesZoom[fileId] = 0;
           state.filesOffset[fileId] = 0;
+          state.filesZoomY[fileId] = 0;
+          state.filesOffsetY[fileId] = 0;
           state.filesPlaybackStartTime[fileId] = 0;
           state.filesDirty[fileId] = true;
 
@@ -201,6 +207,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesBandsPerOctave[fileId] = state.bandsPerOctave;
         state.filesZoom[fileId] = 0;
         state.filesOffset[fileId] = 0;
+        state.filesZoomY[fileId] = 0;
+        state.filesOffsetY[fileId] = 0;
         state.filesPlaybackStartTime[fileId] = 0;
         state.filesLoading[fileId] = "Analysing audio...";
       }),
@@ -254,6 +262,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesBandsPerOctave[fileId];
           delete state.filesZoom[fileId];
           delete state.filesOffset[fileId];
+          delete state.filesZoomY[fileId];
+          delete state.filesOffsetY[fileId];
           delete state.filesPlaybackStartTime[fileId];
         }),
       );
@@ -302,6 +312,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesBandsPerOctave[newFileId] = state.filesBandsPerOctave[fileId];
         state.filesZoom[newFileId] = state.filesZoom[fileId];
         state.filesOffset[newFileId] = state.filesOffset[fileId];
+        state.filesZoomY[newFileId] = state.filesZoomY[fileId] ?? 0;
+        state.filesOffsetY[newFileId] = state.filesOffsetY[fileId] ?? 0;
         state.filesPlaybackStartTime[newFileId] = state.filesPlaybackStartTime[fileId];
         state.filesDirty[newFileId] = false;
       }),
@@ -338,6 +350,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           state.filesBandsPerOctave[id] = state.filesBandsPerOctave[fileId];
           state.filesZoom[id] = state.filesZoom[fileId];
           state.filesOffset[id] = state.filesOffset[fileId];
+          state.filesZoomY[id] = state.filesZoomY[fileId] ?? 0;
+          state.filesOffsetY[id] = state.filesOffsetY[fileId] ?? 0;
           state.filesPlaybackStartTime[id] = 0;
           state.filesDirty[id] = true;
           state.filepathsBpm[newPath] = sourceBpm;
@@ -451,6 +465,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           state.filesBandsPerOctave[id] = state.filesBandsPerOctave[fileId];
           state.filesZoom[id] = state.filesZoom[fileId];
           state.filesOffset[id] = state.filesOffset[fileId];
+          state.filesZoomY[id] = state.filesZoomY[fileId] ?? 0;
+          state.filesOffsetY[id] = state.filesOffsetY[fileId] ?? 0;
           state.filesPlaybackStartTime[id] = 0;
           state.filesDirty[id] = true;
           state.filepathsBpm[openFiles[id].filePath] = sourceBpm;
@@ -542,6 +558,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             delete state.filesBandsPerOctave[id];
             delete state.filesZoom[id];
             delete state.filesOffset[id];
+            delete state.filesZoomY[id];
+            delete state.filesOffsetY[id];
             delete state.filesPlaybackStartTime[id];
             delete state.filesDirty[id];
             delete state.filesLoading[id];
@@ -805,6 +823,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesBandsPerOctave[fileId];
           delete state.filesZoom[fileId];
           delete state.filesOffset[fileId];
+          delete state.filesZoomY[fileId];
+          delete state.filesOffsetY[fileId];
           delete state.filesPlaybackStartTime[fileId];
           delete state.filesDirty[fileId];
           delete openFiles[fileId];
@@ -1108,6 +1128,20 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesOffset[fileId] = offset;
       }),
     ),
+  filesZoomY: {},
+  setFileZoomY: (fileId: string, zoom: number) =>
+    set(
+      produce((state: State) => {
+        state.filesZoomY[fileId] = zoom;
+      }),
+    ),
+  filesOffsetY: {},
+  setFileOffsetY: (fileId: string, offset: number) =>
+    set(
+      produce((state: State) => {
+        state.filesOffsetY[fileId] = offset;
+      }),
+    ),
   filesPlaybackStartTime: {},
   setFilePlaybackStartTime: (fileId, time) =>
     set(
@@ -1203,6 +1237,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesBandsPerOctave[fileId] = state.bandsPerOctave;
         state.filesZoom[fileId] = 0;
         state.filesOffset[fileId] = 0;
+        state.filesZoomY[fileId] = 0;
+        state.filesOffsetY[fileId] = 0;
         state.filesPlaybackStartTime[fileId] = 0;
         state.filesLoading[fileId] = "Analysing audio...";
       }),
