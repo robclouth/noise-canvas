@@ -65,8 +65,10 @@ class TransmuteEffect extends BaseEffect {
       contextualModAmounts: getContextualModAmountsNormalized(state, "transmuteCurve"),
     };
 
-    // Swap mode puts phase values (which can be negative) in the magnitude slot.
-    // Force linear blend to avoid log(negative) -> NaN in interpolateComplex.
+    // Swap mode places phase values (can be negative) in the magnitude slot.
+    // Phase-aware interpolation would log(negative) -> NaN, so opt this one
+    // material into linear blend. All other effects keep the proper phase-aware
+    // path.
     this.materials[0].uniforms.useLinearBlend.value = state.transmuteMode === 0;
   }
 }

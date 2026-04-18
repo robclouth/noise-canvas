@@ -111,6 +111,8 @@ export const BLEND_MODES = [
   { value: 6, label: "Minimum" },
   { value: 7, label: "Difference" },
   { value: 8, label: "Dissolve" },
+  { value: 9, label: "Mask" },
+  { value: 10, label: "Screen" },
 ];
 
 export const MODULATOR_MODES = [

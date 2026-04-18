@@ -49,6 +49,9 @@ uniform Parameter brushIntensity;
 uniform int   blendMode;
 uniform int   wrapMode; // 0=Off, 1=Wrap X, 2=Wrap Y, 3=Wrap Both
 uniform int   algorithm;
+// Safety valve for effects (transmute swap, sort) whose output intentionally
+// places non-magnitude values in the magnitude slot. Phase-aware interpolation
+// would log-blend negative "magnitudes" and produce NaN for those cases.
 uniform bool  useLinearBlend;
 
 // New uniform to prevent runaway feedback. Set to > 0 to enable.
@@ -78,6 +81,7 @@ float getMag(vec2 magPhase)   { return magPhase.x; }
 float getPhase(vec2 magPhase) { return magPhase.y; }
 vec2  fromPolar(float mag, float phase) { return vec2(mag, phase); }
 vec2  toComplex(vec2 magPhase) { return magPhase.x * vec2(cos(magPhase.y), sin(magPhase.y)); }
+vec2  polarFromComplex(vec2 z) { return vec2(length(z), atan(z.y, z.x)); }
 
 /**
  * Applies a soft-clipping saturation curve to the magnitude (prevents runaway values).
@@ -206,10 +210,12 @@ vec4 readSourceAtTimeIndex(float timeIndex, float bandStartOffset) {
   return texelFetch(sourceSpectrogramTex, ivec2(px, py), 0);
 }
 
-// Interpolate between two magnitude/phase pairs (log-mag, linear-phase)
+// Interpolate between two magnitude/phase pairs. Magnitudes blend in log space
+// and phases take the shortest arc around the unwrapped representation so
+// values near ±PI don't collapse through zero.
 vec2 interpolateComplex(vec2 magPhase1, vec2 magPhase2, float amount) {
   float magMix   = exp(mix(log(magPhase1.x + 1e-9), log(magPhase2.x + 1e-9), amount));
-  float phaseMix = mix(magPhase1.y, magPhase2.y, amount);
+  float phaseMix = magPhase1.y + amount * unwrapPhase(magPhase2.y - magPhase1.y);
   return vec2(magMix, phaseMix);
 }
 
@@ -740,28 +746,75 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv, vec2 pa
   // Use blendOriginal for blend formula calculations (prevents accumulation in non-cumulative mode)
   float magBlendOriginalL = getMag(blendOriginalL);
   float magBlendOriginalR = getMag(blendOriginalR);
+  float phaseBlendOriginalL = getPhase(blendOriginalL);
+  float phaseBlendOriginalR = getPhase(blendOriginalR);
 
-  float averagePhaseL = 0.5 * (blendOriginalL.y + modifiedL.y);
-  float averagePhaseR = 0.5 * (blendOriginalR.y + modifiedR.y);
+  // Screen mode uses magnitudeLimit as the saturation reference; fall back to 1 when disabled.
+  float screenLimit = magnitudeLimit > 0.0 ? magnitudeLimit : 1.0;
 
   vec2 targetL, targetR;
 
-  if      (blendMode == 0) { targetL = pannedModifiedL; targetR = pannedModifiedR; }
-  else if (blendMode == 1) { targetL = fromPolar(magBlendOriginalL + magModifiedL, averagePhaseL);
-                             targetR = fromPolar(magBlendOriginalR + magModifiedR, averagePhaseR); }
-  else if (blendMode == 2) { targetL = fromPolar(magBlendOriginalL - magModifiedL, averagePhaseL);
-                             targetR = fromPolar(magBlendOriginalR - magModifiedR, averagePhaseR); }
-  else if (blendMode == 3) { targetL = fromPolar(magBlendOriginalL * magModifiedL * 4.0, averagePhaseL);
-                             targetR = fromPolar(magBlendOriginalR * magModifiedR * 4.0, averagePhaseR); }
-  else if (blendMode == 4) { targetL = fromPolar(magBlendOriginalL / (magModifiedL + EPSILON), averagePhaseL);
-                             targetR = fromPolar(magBlendOriginalR / (magModifiedR + EPSILON), averagePhaseR); }
-  else if (blendMode == 5) { targetL = (magModifiedL > magBlendOriginalL) ? modifiedL : blendOriginalL;
-                             targetR = (magModifiedR > magBlendOriginalR) ? modifiedR : blendOriginalR; }
-  else if (blendMode == 6) { targetL = (magModifiedL < magBlendOriginalL) ? modifiedL : blendOriginalL;
-                             targetR = (magModifiedR < magBlendOriginalR) ? modifiedR : blendOriginalR; }
-  else if (blendMode == 7) { targetL = fromPolar(abs(magBlendOriginalL - magModifiedL), averagePhaseL);
-                             targetR = fromPolar(abs(magBlendOriginalR - magModifiedR), averagePhaseR); }
-  else {                     targetL = blendOriginalL; targetR = blendOriginalR; }
+  if      (blendMode == 0) {
+    // Mix — interpolateComplex handles mag/phase blending between original and modified.
+    targetL = pannedModifiedL;
+    targetR = pannedModifiedR;
+  }
+  else if (blendMode == 1) {
+    // Add — complex vector sum, keeping true phase of sum.
+    vec2 sumL = toComplex(blendOriginalL) + toComplex(pannedModifiedL);
+    vec2 sumR = toComplex(blendOriginalR) + toComplex(pannedModifiedR);
+    targetL = polarFromComplex(sumL);
+    targetR = polarFromComplex(sumR);
+  }
+  else if (blendMode == 2) {
+    // Subtract — magnitude-space scoop, keep origin phase.
+    targetL = fromPolar(max(magBlendOriginalL - magModifiedL, 0.0), phaseBlendOriginalL);
+    targetR = fromPolar(max(magBlendOriginalR - magModifiedR, 0.0), phaseBlendOriginalR);
+  }
+  else if (blendMode == 3) {
+    // Multiply — spectral cross-synthesis: modifier is envelope, original is phase.
+    targetL = fromPolar(magBlendOriginalL * magModifiedL, phaseBlendOriginalL);
+    targetR = fromPolar(magBlendOriginalR * magModifiedR, phaseBlendOriginalR);
+  }
+  else if (blendMode == 4) {
+    // Divide — spectral whitening / inverse EQ, keep origin phase.
+    targetL = fromPolar(magBlendOriginalL / (magModifiedL + EPSILON), phaseBlendOriginalL);
+    targetR = fromPolar(magBlendOriginalR / (magModifiedR + EPSILON), phaseBlendOriginalR);
+  }
+  else if (blendMode == 5) {
+    // Maximum — pick the louder sample entirely.
+    targetL = (magModifiedL > magBlendOriginalL) ? pannedModifiedL : blendOriginalL;
+    targetR = (magModifiedR > magBlendOriginalR) ? pannedModifiedR : blendOriginalR;
+  }
+  else if (blendMode == 6) {
+    // Minimum — pick the quieter sample entirely.
+    targetL = (magModifiedL < magBlendOriginalL) ? pannedModifiedL : blendOriginalL;
+    targetR = (magModifiedR < magBlendOriginalR) ? pannedModifiedR : blendOriginalR;
+  }
+  else if (blendMode == 7) {
+    // Difference — symmetric magnitude subtraction, keep origin phase.
+    targetL = fromPolar(abs(magBlendOriginalL - magModifiedL), phaseBlendOriginalL);
+    targetR = fromPolar(abs(magBlendOriginalR - magModifiedR), phaseBlendOriginalR);
+  }
+  // blendMode == 8 (Dissolve) is handled above via early return.
+  else if (blendMode == 9) {
+    // Mask — relative-energy gate, self-normalizing.
+    float denomL = magBlendOriginalL + magModifiedL + EPSILON;
+    float denomR = magBlendOriginalR + magModifiedR + EPSILON;
+    targetL = fromPolar(magBlendOriginalL * (magModifiedL / denomL), phaseBlendOriginalL);
+    targetR = fromPolar(magBlendOriginalR * (magModifiedR / denomR), phaseBlendOriginalR);
+  }
+  else if (blendMode == 10) {
+    // Screen — Photoshop-style brightening with magnitudeLimit as saturation reference.
+    float screenL = screenLimit * (1.0 - (1.0 - magBlendOriginalL / screenLimit) * (1.0 - magModifiedL / screenLimit));
+    float screenR = screenLimit * (1.0 - (1.0 - magBlendOriginalR / screenLimit) * (1.0 - magModifiedR / screenLimit));
+    targetL = fromPolar(screenL, phaseBlendOriginalL);
+    targetR = fromPolar(screenR, phaseBlendOriginalR);
+  }
+  else {
+    targetL = blendOriginalL;
+    targetR = blendOriginalR;
+  }
 
   vec2 finalL, finalR;
   if (useLinearBlend) {
