@@ -25,6 +25,14 @@ export interface EffectsState {
   blurSamplesY: number;
   blurEdgeMode: number;
   blurOrigin: number;
+  cloneSpaceBeats: number;
+  cloneSpaceSemis: number;
+  cloneCountX: number;
+  cloneCountY: number;
+  cloneDecay: number;
+  cloneDirectionX: number;
+  cloneDirectionY: number;
+  cloneEdgeMode: number;
   overtonesCount: number;
   overtonesScale: number;
   overtonesDecay: number;
@@ -82,6 +90,16 @@ export const createEffectsSlice = (): EffectsState => {
     blurSamplesY: getParameterDef("blurSamplesY").default,
     blurEdgeMode: getParameterDef("blurEdgeMode").default,
     blurOrigin: getParameterDef("blurOrigin").default,
+
+    // ---------------- Clone ----------------
+    cloneSpaceBeats: getParameterDef("cloneSpaceBeats").default,
+    cloneSpaceSemis: getParameterDef("cloneSpaceSemis").default,
+    cloneCountX: getParameterDef("cloneCountX").default,
+    cloneCountY: getParameterDef("cloneCountY").default,
+    cloneDecay: getParameterDef("cloneDecay").default,
+    cloneDirectionX: getParameterDef("cloneDirectionX").default,
+    cloneDirectionY: getParameterDef("cloneDirectionY").default,
+    cloneEdgeMode: getParameterDef("cloneEdgeMode").default,
 
     // ---------------- Overtones ----------------
     overtonesCount: getParameterDef("overtonesCount").default,

@@ -9,6 +9,7 @@ export const EFFECT_KEYS = [
   "transform",
   "overtones",
   "blur",
+  "clone",
   "synthesize",
   "evolve",
   "passthrough",

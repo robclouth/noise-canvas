@@ -1,5 +1,6 @@
 import { binauralEffect } from "./binaural-effect";
 import { blurEffect } from "./blur-effect";
+import { cloneEffect } from "./clone-effect";
 import { dynamicsEffect } from "./dynamics-effect";
 import { evolveEffect } from "./evolve-effect";
 import { overtonesEffect } from "./overtones-effect";
@@ -19,6 +20,7 @@ export const effects = {
   transform: transformEffect,
   overtones: overtonesEffect,
   blur: blurEffect,
+  clone: cloneEffect,
   synthesize: synthesizeEffect,
   evolve: evolveEffect,
   passthrough: passThroughEffect,

@@ -11,6 +11,7 @@ import { EffectProvider } from "../contexts/effect-context";
 import { EffectSection } from "./effect-section";
 import { BinauralEffect } from "./effect-views/binaural-effect";
 import { BlurEffect } from "./effect-views/blur-effect";
+import { CloneEffect } from "./effect-views/clone-effect";
 import { DynamicsEffect } from "./effect-views/dynamics-effect";
 import { EvolveEffect } from "./effect-views/evolve-effect";
 import { HarmonicsEffect } from "./effect-views/overtones-effect";
@@ -25,6 +26,7 @@ const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
   transform: <TransformEffect />,
   overtones: <HarmonicsEffect />,
   blur: <BlurEffect />,
+  clone: <CloneEffect />,
   synthesize: <SynthesizeEffect />,
   evolve: <EvolveEffect />,
   binaural: <BinauralEffect />,
@@ -55,6 +57,16 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
     "blurSamplesY",
     "blurEdgeMode",
     "blurOrigin",
+  ],
+  clone: [
+    "cloneSpaceBeats",
+    "cloneSpaceSemis",
+    "cloneCountX",
+    "cloneCountY",
+    "cloneDirectionX",
+    "cloneDirectionY",
+    "cloneDecay",
+    "cloneEdgeMode",
   ],
   synthesize: ["synthesizeBrushType"],
   evolve: [
