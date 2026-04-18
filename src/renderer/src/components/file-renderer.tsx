@@ -81,6 +81,13 @@ export const FileRenderer = memo(
   forwardRef<FileRendererHandle, FileRendererProps>(({ fileId }, ref) => {
     const { spectrogramData } = openFiles[fileId];
     if (!spectrogramData) return null;
+    return <FileRendererInner fileId={fileId} ref={ref} />;
+  }),
+);
+
+const FileRendererInner = memo(
+  forwardRef<FileRendererHandle, FileRendererProps>(({ fileId }, ref) => {
+    const spectrogramData = openFiles[fileId].spectrogramData!;
 
     // Don't subscribe to these during render - access them via refs or useFrame instead
     const glRef = useRef<WebGLRenderer>(null!);
@@ -511,10 +518,7 @@ export const FileRenderer = memo(
               tScale,
               bScale,
             );
-            sourceDisplayPos = new Vector2(
-              destCursorUv.x * tScale + offset.x,
-              destCursorUv.y * bScale + offset.y,
-            );
+            sourceDisplayPos = new Vector2(destCursorUv.x * tScale + offset.x, destCursorUv.y * bScale + offset.y);
           }
         } else {
           // At rest: show at the source position
@@ -600,7 +604,7 @@ export const FileRenderer = memo(
       displayMaterial.uniforms.brushSizeUv.value = brushSizeUv;
       displayMaterial.uniforms.sourceBrushSizeUv.value = (() => {
         // When this file is the source, always compute brush size in this file's coordinate space
-        const targetFile = isSourceFile ? file : (hoveredFile || file);
+        const targetFile = isSourceFile ? file : hoveredFile || file;
         if (!targetFile.spectrogramData) return new Vector2(0.1, 0.1);
         const targetBpm = state.filepathsBpm[targetFile.filePath] || 120;
         const targetDuration = targetFile.spectrogramData.numFrames / targetFile.spectrogramData.sampleRate;
@@ -638,9 +642,7 @@ export const FileRenderer = memo(
         return new Vector2(maxTimeUv || 0.1, maxPitchUv || 0.1);
       })();
 
-      displayMaterial.uniforms.showTargetRectangle.value = Boolean(
-        state.cursorVisible && state.hoveredFile === fileId,
-      );
+      displayMaterial.uniforms.showTargetRectangle.value = Boolean(state.cursorVisible && state.hoveredFile === fileId);
       displayMaterial.uniforms.showSourceRectangle.value = isSourceFile;
 
       const isPicking = state.pickingFileParam !== null;
@@ -836,10 +838,6 @@ export const FileRenderer = memo(
       clearDirtyRegion: () => strokeRendererRef.current?.clearDirtyRegion(),
     }));
 
-    if (!spectrogramData) {
-      return null;
-    }
-
     /**
      * Clears the stroke preview from the display.
      */
@@ -860,3 +858,4 @@ export const FileRenderer = memo(
 );
 
 FileRenderer.displayName = "FileRenderer";
+FileRendererInner.displayName = "FileRendererInner";

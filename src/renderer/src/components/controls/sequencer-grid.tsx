@@ -95,7 +95,7 @@ export function SequencerGrid({ modulatorIndex }: SequencerGridProps) {
     (newValues: number[][]) => {
       setParameter(seqDataKey, serializeSeqData({ values: newValues }));
     },
-    [seqDataKey, setParameter]
+    [seqDataKey, setParameter],
   );
 
   // Set a step value
@@ -103,11 +103,11 @@ export function SequencerGrid({ modulatorIndex }: SequencerGridProps) {
     (row: number, col: number, value: number) => {
       const clampedValue = Math.max(0, Math.min(1, value));
       const newValues = values.map((r, ri) =>
-        ri === row ? r.map((v, ci) => (ci === col ? clampedValue : v)) : [...r]
+        ri === row ? r.map((v, ci) => (ci === col ? clampedValue : v)) : [...r],
       );
       updateValues(newValues);
     },
-    [values, updateValues]
+    [values, updateValues],
   );
 
   // Toggle a step (for simple click)
@@ -119,14 +119,12 @@ export function SequencerGrid({ modulatorIndex }: SequencerGridProps) {
       setStepValue(row, col, newValue);
       return newValue > 0;
     },
-    [values, currentIntensity, setStepValue]
+    [values, currentIntensity, setStepValue],
   );
 
   // Randomize
   const randomize = useCallback(() => {
-    const newValues = Array.from({ length: stepsY }, () =>
-      Array.from({ length: stepsX }, () => Math.random())
-    );
+    const newValues = Array.from({ length: stepsY }, () => Array.from({ length: stepsX }, () => Math.random()));
     updateValues(newValues);
   }, [stepsX, stepsY, updateValues]);
 
@@ -150,7 +148,7 @@ export function SequencerGrid({ modulatorIndex }: SequencerGridProps) {
       }
       return null;
     },
-    [stepsX, stepsY]
+    [stepsX, stepsY],
   );
 
   // Mouse handlers
@@ -173,7 +171,7 @@ export function SequencerGrid({ modulatorIndex }: SequencerGridProps) {
         }
       }
     },
-    [getStepFromPos, values, toggleStep]
+    [getStepFromPos, values, toggleStep],
   );
 
   // Handle mouse move at window level for drag outside canvas
@@ -196,8 +194,10 @@ export function SequencerGrid({ modulatorIndex }: SequencerGridProps) {
           const targetValue = paintModeRef.current === "enable" ? currentIntensity : 0;
           const currentCellValue = values[step.row]?.[step.col] ?? 0;
           // Only update if different
-          if ((paintModeRef.current === "enable" && currentCellValue === 0) ||
-            (paintModeRef.current === "disable" && currentCellValue > 0)) {
+          if (
+            (paintModeRef.current === "enable" && currentCellValue === 0) ||
+            (paintModeRef.current === "disable" && currentCellValue > 0)
+          ) {
             setStepValue(step.row, step.col, targetValue);
           }
         }
@@ -273,9 +273,7 @@ export function SequencerGrid({ modulatorIndex }: SequencerGridProps) {
         <Button size="compact-xs" variant="subtle" onClick={randomize}>
           Rand
         </Button>
-        <Box style={{ fontSize: 10, opacity: 0.6 }}>
-          Intensity: {Math.round(currentIntensity * 100)}%
-        </Box>
+        <Box style={{ fontSize: 10, opacity: 0.6 }}>Intensity: {Math.round(currentIntensity * 100)}%</Box>
       </Group>
       <canvas
         ref={canvasRef}

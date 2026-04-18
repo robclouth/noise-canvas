@@ -371,9 +371,7 @@ function processHrtfData(sofaData: SofaData): HrtfData {
   hrirFFT.sort((a, b) => a.azimuth - b.azimuth);
 
   logInfo(`HRTF processing complete: ${hrirFFT.length} azimuth positions`);
-  logDebug(
-    `Azimuth range: ${hrirFFT[0].azimuth.toFixed(1)}° to ${hrirFFT[hrirFFT.length - 1].azimuth.toFixed(1)}°`,
-  );
+  logDebug(`Azimuth range: ${hrirFFT[0].azimuth.toFixed(1)}° to ${hrirFFT[hrirFFT.length - 1].azimuth.toFixed(1)}°`);
 
   return {
     hrirFFT,
@@ -584,10 +582,7 @@ function computeDiffuseFieldCompensation(hrtfData: HrtfData): number[] {
 /**
  * Resample diffuse field compensation from linear FFT bins to log-frequency bands.
  */
-function resampleCompensationToLogFrequency(
-  linearCompensation: number[],
-  sampleRate: number,
-): number[] {
+function resampleCompensationToLogFrequency(linearCompensation: number[], sampleRate: number): number[] {
   const freqPerBin = sampleRate / CONFIG.fftSize;
   const numLinearBins = linearCompensation.length;
 
@@ -688,11 +683,7 @@ async function main() {
     const interpolated = interpolateHrtf(hrtfData, sofaAzimuth);
 
     // Resample to log frequency scale
-    const leftResampled = resampleToLogFrequency(
-      interpolated.magnitude[0],
-      interpolated.phase[0],
-      hrtfData.sampleRate,
-    );
+    const leftResampled = resampleToLogFrequency(interpolated.magnitude[0], interpolated.phase[0], hrtfData.sampleRate);
     const rightResampled = resampleToLogFrequency(
       interpolated.magnitude[1],
       interpolated.phase[1],

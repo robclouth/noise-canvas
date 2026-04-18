@@ -112,11 +112,7 @@ function openReferencedSourceFiles(steps: BrushStep[], get: ZustandGet) {
   }
 }
 
-export const PRESETS_PERSISTED_KEYS = [
-  "brushes",
-  "activeBrushIndex",
-  "paletteRailCollapsed",
-] as const;
+export const PRESETS_PERSISTED_KEYS = ["brushes", "activeBrushIndex", "paletteRailCollapsed"] as const;
 
 export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsState => ({
   presetsDir: null,
@@ -360,9 +356,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
 
       set(
         produce((draft: State) => {
-          draft.availablePresets = draft.availablePresets.map((p) =>
-            p.id === updated.id ? updated : p,
-          );
+          draft.availablePresets = draft.availablePresets.map((p) => (p.id === updated.id ? updated : p));
         }),
       );
 
@@ -482,9 +476,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
 
       set(
         produce((draft: State) => {
-          draft.availablePresets = draft.availablePresets.map((p) =>
-            p.id === presetId ? updated : p,
-          );
+          draft.availablePresets = draft.availablePresets.map((p) => (p.id === presetId ? updated : p));
         }),
       );
 

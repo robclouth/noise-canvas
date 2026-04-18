@@ -29,7 +29,7 @@ function labelFontSize(text: string): number {
 function openCloseConfirm(brushIndex: number, brushName: string) {
   modals.openConfirmModal({
     title: "Close brush",
-    children: <Text size="sm">Close "{brushName}"? Unsaved changes will be lost.</Text>,
+    children: <Text size="sm">Close &quot;{brushName}&quot;? Unsaved changes will be lost.</Text>,
     labels: { confirm: "Close", cancel: "Cancel" },
     confirmProps: { color: "red", size: "xs" },
     cancelProps: { size: "xs" },

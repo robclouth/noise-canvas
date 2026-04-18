@@ -20,6 +20,7 @@ export interface LinkState {
 
 export const LINK_PERSISTED_KEYS = ["linkEnabled", "linkQuantum", "linkLatencyMs"] as const;
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const createLinkSlice = (set: ZustandSet, _get: ZustandGet): LinkState => ({
   linkEnabled: false,
   linkQuantum: 4,

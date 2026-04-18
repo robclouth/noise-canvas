@@ -148,17 +148,13 @@ export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false, effe
               <Box style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
                 {/* Row 1-3: Modulators | Pen */}
                 {modulatorParamKeys.map((k, i) => {
-                  const penKeys = contextualModParamKeys.filter((ck) =>
-                    ck.endsWith("ModPressure") || ck.endsWith("ModTiltX") || ck.endsWith("ModTiltY"),
+                  const penKeys = contextualModParamKeys.filter(
+                    (ck) => ck.endsWith("ModPressure") || ck.endsWith("ModTiltX") || ck.endsWith("ModTiltY"),
                   );
                   return (
                     <React.Fragment key={k}>
                       <ParameterControl paramKey={k} labelWidth={70} color="blue" />
-                      {penKeys[i] ? (
-                        <ParameterControl paramKey={penKeys[i]} labelWidth={70} color="violet" />
-                      ) : (
-                        <div />
-                      )}
+                      {penKeys[i] ? <ParameterControl paramKey={penKeys[i]} labelWidth={70} color="violet" /> : <div />}
                     </React.Fragment>
                   );
                 })}
@@ -198,5 +194,3 @@ export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false, effe
     </Menu>
   );
 };
-
-

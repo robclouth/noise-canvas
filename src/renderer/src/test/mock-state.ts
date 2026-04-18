@@ -234,7 +234,7 @@ export function createMockStep(name: string, overrides: Partial<TestBrushStep> =
  */
 export function createMockStateWithSteps(
   stepConfigs: Array<{ name: string; overrides?: Partial<TestBrushStep> }>,
-  stateOverrides: Partial<State> = {}
+  stateOverrides: Partial<State> = {},
 ): State {
   const steps = stepConfigs.map(({ name, overrides }) => createMockStep(name, overrides));
 
@@ -262,7 +262,7 @@ export function createMockStateWithSteps(
 export function createMockStateForIterations(
   iterations: number,
   stateOverrides: Partial<State> = {},
-  stepOverrides: Partial<TestBrushStep> = {}
+  stepOverrides: Partial<TestBrushStep> = {},
 ): State {
   const step = createMockStep("Iteration Test Step", {
     brushIterations: iterations,

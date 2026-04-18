@@ -79,7 +79,12 @@ export const RandomizeButton = ({ parameterKeys, storageKey, includeEffects }: R
 
     // Randomize effects if enabled
     if (includeEffects) {
-      const currentEffects = getParameterValue(state, "effects") as { id: string; effect: string; enabled: boolean; params: Record<string, unknown> }[];
+      const currentEffects = getParameterValue(state, "effects") as {
+        id: string;
+        effect: string;
+        enabled: boolean;
+        params: Record<string, unknown>;
+      }[];
       const newEffects = randomizeEffects(currentEffects, amount);
       setParameter("effects" as ParameterKey, newEffects);
     }

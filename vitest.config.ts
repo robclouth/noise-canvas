@@ -25,9 +25,7 @@ export default defineConfig({
           args: ["--use-gl=angle"], // Enable WebGL
         },
       }),
-      instances: [
-        { browser: "chromium" },
-      ],
+      instances: [{ browser: "chromium" }],
       headless: true,
       screenshotFailures: false,
     },

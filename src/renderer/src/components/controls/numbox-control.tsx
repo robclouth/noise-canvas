@@ -410,11 +410,7 @@ export const NumboxControl = (props: NumboxControlProps) => {
             pointerEvents: "none",
           }}
         >
-          {marks ? (
-            <ChevronDown size={8} style={{ opacity: 0.7, top: -2, position: "relative" }} />
-          ) : (
-            rightIcon
-          )}
+          {marks ? <ChevronDown size={8} style={{ opacity: 0.7, top: -2, position: "relative" }} /> : rightIcon}
         </Box>
       )}
     </Box>

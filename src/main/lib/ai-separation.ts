@@ -22,8 +22,7 @@ export function getModelPath(modelFile: string): string {
 // Model I/O: input float32[1,2,N] → output float32[1,4,2,N]
 // Stem order: drums(0), bass(1), other(2), vocals(3)
 const MODEL_URLS: Record<string, string> = {
-  "htdemucs.onnx":
-    "https://huggingface.co/smank/htdemucs-onnx/resolve/main/htdemucs.onnx",
+  "htdemucs.onnx": "https://huggingface.co/smank/htdemucs-onnx/resolve/main/htdemucs.onnx",
 };
 
 export function downloadModel(

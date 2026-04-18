@@ -412,7 +412,10 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         state.setParameter(state.pickingFileParam, { path: openFiles[fileId].filePath });
         // Set position params (UV 0-1 → 0-100%). Y is inverted between display and spectrogram space.
         state.setParameter("sourceTimeOffset" as import("@renderer/store/types").ParameterKey, coords[0] * 100);
-        state.setParameter("sourcePitchOffset" as import("@renderer/store/types").ParameterKey, (1.0 - coords[1]) * 100);
+        state.setParameter(
+          "sourcePitchOffset" as import("@renderer/store/types").ParameterKey,
+          (1.0 - coords[1]) * 100,
+        );
         state.setPickingFileParam(null);
         return;
       }

@@ -205,7 +205,11 @@ export const SectionMenu = ({
             <>
               <Divider label="Randomize" my={4} />
               <NumboxControl
-                labelComponent={<Text size="xs" w={70}>Amount</Text>}
+                labelComponent={
+                  <Text size="xs" w={70}>
+                    Amount
+                  </Text>
+                }
                 value={amount}
                 setValue={(val) => setRandomizationAmount(storageKey, val)}
                 min={0}
@@ -216,7 +220,11 @@ export const SectionMenu = ({
                 fromNormalized={(val) => val * 100}
               />
               <SwitchControl
-                labelComponent={<Text size="xs" w={70}>Include Mod.</Text>}
+                labelComponent={
+                  <Text size="xs" w={70}>
+                    Include Mod.
+                  </Text>
+                }
                 value={modulationEnabled}
                 setValue={setModulationEnabled}
               />
@@ -239,5 +247,3 @@ export const SectionMenu = ({
     </Menu>
   );
 };
-
-

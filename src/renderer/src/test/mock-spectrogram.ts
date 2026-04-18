@@ -193,7 +193,7 @@ export function readSpectrogramPixel(
   numFrames: number,
   numBands: number,
   textureWidth: number,
-  textureHeight: number
+  textureHeight: number,
 ): [number, number, number, number] | null {
   if (frame < 0 || frame >= numFrames || band < 0 || band >= numBands) {
     return null;
@@ -206,7 +206,7 @@ export function readSpectrogramPixel(
 
   const baseIndex = pixelIndex * 4;
   return [
-    data[baseIndex],     // magnitude L
+    data[baseIndex], // magnitude L
     data[baseIndex + 1], // phase L
     data[baseIndex + 2], // magnitude R
     data[baseIndex + 3], // phase R
@@ -217,11 +217,7 @@ export function readSpectrogramPixel(
  * Compares two Float32Arrays for approximate equality.
  * Returns true if all values are within the tolerance.
  */
-export function compareSpectrogramData(
-  a: Float32Array,
-  b: Float32Array,
-  tolerance = 1e-5
-): boolean {
+export function compareSpectrogramData(a: Float32Array, b: Float32Array, tolerance = 1e-5): boolean {
   if (a.length !== b.length) return false;
 
   for (let i = 0; i < a.length; i++) {
@@ -240,7 +236,7 @@ export function compareSpectrogramData(
 export function findDifferingPixels(
   a: Float32Array,
   b: Float32Array,
-  tolerance = 1e-5
+  tolerance = 1e-5,
 ): Array<{ index: number; valueA: number; valueB: number }> {
   const differences: Array<{ index: number; valueA: number; valueB: number }> = [];
 
@@ -257,11 +253,7 @@ export function findDifferingPixels(
 /**
  * Converts UV coordinates (0-1) to frame and band indices.
  */
-export function uvToFrameBand(
-  uv: Vector2,
-  numFrames: number,
-  numBands: number,
-): { frame: number; band: number } {
+export function uvToFrameBand(uv: Vector2, numFrames: number, numBands: number): { frame: number; band: number } {
   const frame = Math.floor(uv.x * numFrames);
   const band = Math.floor(uv.y * numBands);
   return {

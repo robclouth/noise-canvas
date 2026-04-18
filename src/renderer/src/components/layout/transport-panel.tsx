@@ -59,12 +59,12 @@ export const TransportPanel = memo(() => {
   return (
     <Group align="center" justify="center" gap="md" p="md" bg="dark.7" style={{ zIndex: 1000 }}>
       <Group w={300}>
-        <Tooltip label={linkEnabled ? `Ableton Link (${linkNumPeers} peer${linkNumPeers !== 1 ? "s" : ""})` : "Enable Ableton Link"}>
-          <ActionIcon
-            onClick={() => setLinkEnabled(!linkEnabled)}
-            size="lg"
-            color={linkEnabled ? "orange" : "dark.5"}
-          >
+        <Tooltip
+          label={
+            linkEnabled ? `Ableton Link (${linkNumPeers} peer${linkNumPeers !== 1 ? "s" : ""})` : "Enable Ableton Link"
+          }
+        >
+          <ActionIcon onClick={() => setLinkEnabled(!linkEnabled)} size="lg" color={linkEnabled ? "orange" : "dark.5"}>
             <Link2 size={20} />
           </ActionIcon>
         </Tooltip>

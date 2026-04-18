@@ -12,8 +12,8 @@ export const SwitchControl = ({
   setValue: (value: boolean) => void;
   color?: string;
 }) => {
-    const theme = useMantineTheme();
-    const themeColor = theme.colors[color]?.[6] || color;
+  const theme = useMantineTheme();
+  const themeColor = theme.colors[color]?.[6] || color;
 
   return (
     <Group gap={"xs"} wrap="nowrap" h={24} align="center">

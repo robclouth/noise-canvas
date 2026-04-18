@@ -46,7 +46,16 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
     "transformEdgeMode",
   ],
   overtones: ["overtonesCount", "overtonesScale", "overtonesDecay", "overtonesShape"],
-  blur: ["blurAmountTime", "blurAmountPitch", "blurNoiseTime", "blurNoisePitch", "blurSamplesX", "blurSamplesY", "blurEdgeMode", "blurOrigin"],
+  blur: [
+    "blurAmountTime",
+    "blurAmountPitch",
+    "blurNoiseTime",
+    "blurNoisePitch",
+    "blurSamplesX",
+    "blurSamplesY",
+    "blurEdgeMode",
+    "blurOrigin",
+  ],
   synthesize: ["synthesizeBrushType"],
   evolve: [
     "evolveFlow",

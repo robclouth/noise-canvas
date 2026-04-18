@@ -258,7 +258,7 @@ export class StrokeRenderer {
     this.gl.setRenderTarget(src);
     this.gl.setRenderTarget(dst);
     // Access internal framebuffer handles
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     const props = (this.gl as any).properties as { get(obj: unknown): Record<string, unknown> };
     const srcFb = props.get(src).__webglFramebuffer as WebGLFramebuffer;
     const dstFb = props.get(dst).__webglFramebuffer as WebGLFramebuffer;
@@ -596,7 +596,19 @@ export class StrokeRenderer {
       this.initialize();
     }
 
-    const { cursorPos, preview, bpm, totalDuration, viewZoomPower, viewOffset, viewZoomPowerY, viewOffsetY, pressure, tiltX, tiltY } = params;
+    const {
+      cursorPos,
+      preview,
+      bpm,
+      totalDuration,
+      viewZoomPower,
+      viewOffset,
+      viewZoomPowerY,
+      viewOffsetY,
+      pressure,
+      tiltX,
+      tiltY,
+    } = params;
 
     if (cursorPos.x < 0) return;
 
@@ -654,7 +666,7 @@ export class StrokeRenderer {
     // Calculate scissor rows from maximum brush extent across all steps.
     // If any step wraps in Y and its brush crosses the [0,1] boundary, skip scissoring
     // so wrapped bands are painted too.
-    let maxBrushSizeUv = new Vector2(0, 0);
+    const maxBrushSizeUv = new Vector2(0, 0);
     let yWrapsOutOfBounds = false;
     for (let i = 0; i < numSteps; i++) {
       const s = createStepStateView(state, i);
@@ -667,21 +679,14 @@ export class StrokeRenderer {
         yWrapsOutOfBounds = true;
       }
     }
-    const scissorRows = yWrapsOutOfBounds
-      ? null
-      : this.calculateScissorRows(cursorPos, maxBrushSizeUv);
+    const scissorRows = yWrapsOutOfBounds ? null : this.calculateScissorRows(cursorPos, maxBrushSizeUv);
 
     // If scissoring, blit full texture to destinationFbo so non-scissored rows are correct,
     // then set scissor on all FBOs that will be rendered to.
     if (scissorRows) {
       this.blitFBO(currentReadFBO, destinationFbo);
 
-      const scissorVec = new Vector4(
-        0,
-        scissorRows.rowStart,
-        this.spectrogramData.textureWidth,
-        scissorRows.rowCount,
-      );
+      const scissorVec = new Vector4(0, scissorRows.rowStart, this.spectrogramData.textureWidth, scissorRows.rowCount);
       destinationFbo.scissor.copy(scissorVec);
       destinationFbo.scissorTest = true;
       tempFboA.scissor.copy(scissorVec);
@@ -728,7 +733,12 @@ export class StrokeRenderer {
       commonUniforms.sourceSpectrogramTex.value = stepSourceFbo.texture;
 
       // Get enabled effects in order for this step
-      const stepEffects = stepState.effects as { id: string; effect: EffectType; enabled: boolean; params: Record<string, unknown> }[];
+      const stepEffects = stepState.effects as {
+        id: string;
+        effect: EffectType;
+        enabled: boolean;
+        params: Record<string, unknown>;
+      }[];
       const enabledEffectItems = stepEffects.filter(({ enabled }) => enabled);
 
       // If no effects are enabled, add a passthrough effect
@@ -752,8 +762,24 @@ export class StrokeRenderer {
         sourceOffsetY: { value: 0 },
         sourceTimeScale: { value: 1.0 },
         sourceBandScale: { value: 1.0 },
-        sourceTimeOffset: { value: { value: 0, minValue: -1, maxValue: 1, modulationAmounts: [0, 0, 0], contextualModAmounts: [0, 0, 0, 0, 0, 0, 0, 0] } },
-        sourcePitchOffset: { value: { value: 0, minValue: -1, maxValue: 1, modulationAmounts: [0, 0, 0], contextualModAmounts: [0, 0, 0, 0, 0, 0, 0, 0] } },
+        sourceTimeOffset: {
+          value: {
+            value: 0,
+            minValue: -1,
+            maxValue: 1,
+            modulationAmounts: [0, 0, 0],
+            contextualModAmounts: [0, 0, 0, 0, 0, 0, 0, 0],
+          },
+        },
+        sourcePitchOffset: {
+          value: {
+            value: 0,
+            minValue: -1,
+            maxValue: 1,
+            modulationAmounts: [0, 0, 0],
+            contextualModAmounts: [0, 0, 0, 0, 0, 0, 0, 0],
+          },
+        },
       };
 
       // Reset currentReadFbo to the step's input for effect processing

@@ -79,8 +79,7 @@ const defaultMetadata: HrtfMetadata = {
  */
 function getHrtfPath(): string {
   // Check if we're in development by looking for common dev indicators
-  const isDev =
-    process.env.NODE_ENV === "development" || window.location.protocol === "http:";
+  const isDev = process.env.NODE_ENV === "development" || window.location.protocol === "http:";
 
   if (isDev) {
     // In development, use the project's resources directory
@@ -128,13 +127,7 @@ export async function loadHrtfData(): Promise<{ texture: DataTexture; metadata: 
       );
 
       // Create DataTexture
-      const texture = new DataTexture(
-        data,
-        metadata.textureWidth,
-        metadata.textureHeight,
-        RGBAFormat,
-        FloatType,
-      );
+      const texture = new DataTexture(data, metadata.textureWidth, metadata.textureHeight, RGBAFormat, FloatType);
 
       // Configure for bilinear interpolation
       texture.wrapS = ClampToEdgeWrapping; // Azimuth wraps, but we handle that in shader

@@ -1191,7 +1191,8 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "options",
     name: "Waveshape Mode",
     label: "Shape",
-    description: "Nonlinear function applied to rectangular spectral components. Drive controls intensity for all modes.",
+    description:
+      "Nonlinear function applied to rectangular spectral components. Drive controls intensity for all modes.",
     default: 0,
     options: [
       { value: 0, label: "Soft Clip" },
@@ -1208,7 +1209,8 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "number",
     name: "Drive",
     label: "Drive",
-    description: "Gain before shaping. For Fold/Wrap/Sine this controls how many times the signal cycles through the nonlinearity.",
+    description:
+      "Gain before shaping. For Fold/Wrap/Sine this controls how many times the signal cycles through the nonlinearity.",
     default: 1.0,
     min: 0.01,
     max: 16.0,
@@ -1222,7 +1224,8 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "number",
     name: "Tilt",
     label: "Tilt",
-    description: "Skews the real/imaginary axis ratio before shaping. Biases the phase distribution — positive toward 0°/180°, negative toward ±90°.",
+    description:
+      "Skews the real/imaginary axis ratio before shaping. Biases the phase distribution — positive toward 0°/180°, negative toward ±90°.",
     default: 0.0,
     min: -1.0,
     max: 1.0,

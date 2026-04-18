@@ -496,10 +496,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       );
 
       // Step 2: AI-separate the synthesized audio into stems
-      const stems = await window.audioAnalysis.aiSeparate(
-        synthesisResult.channels,
-        spectrogramData.sampleRate,
-      );
+      const stems = await window.audioAnalysis.aiSeparate(synthesisResult.channels, spectrogramData.sampleRate);
 
       // Step 3: Re-analyse each stem with Gaborator → SpectrogramData → new file entry
       const analysisParams = { bandsPerOctave: state.bandsPerOctave, minFreq: state.minFreq };
@@ -521,8 +518,16 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           ...openFiles[stemIds[i]],
           spectrogramData: {
             packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-            inverseMap: new Float32Array(result.inverseMap.buffer, result.inverseMap.byteOffset, result.inverseMap.byteLength / 4),
-            metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
+            inverseMap: new Float32Array(
+              result.inverseMap.buffer,
+              result.inverseMap.byteOffset,
+              result.inverseMap.byteLength / 4,
+            ),
+            metadata: new Float32Array(
+              result.metadata.buffer,
+              result.metadata.byteOffset,
+              result.metadata.byteLength / 4,
+            ),
             textureWidth: result.textureWidth,
             textureHeight: result.textureHeight,
             numFrames: result.numFrames,
@@ -597,7 +602,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             // Extract audio channels from AudioBuffer
             const numChannels = file.audioBuffer!.numberOfChannels;
             const normalize = get().normalize;
-            const gain = (normalize && file.audioPeak && file.audioPeak > 0) ? 1 / file.audioPeak : 1;
+            const gain = normalize && file.audioPeak && file.audioPeak > 0 ? 1 / file.audioPeak : 1;
             const audioChannels: Float32Array[] = [];
             for (let i = 0; i < numChannels; i++) {
               const src = file.audioBuffer!.getChannelData(i);
@@ -831,7 +836,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
           const nextFileId = state.openFileIds[state.openFileIds.length - 1] || null;
           state.activeFileId = nextFileId || null;
-
         }
       }),
     );
@@ -947,7 +951,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         throw synthError;
       }
       const isPartial = startFrame !== undefined;
-      console.log(`[timing] C++ synthesis: ${(performance.now() - cppSynthStart).toFixed(2)}ms` + (isPartial ? " (partial)" : " (full)"));
+      console.log(
+        `[timing] C++ synthesis: ${(performance.now() - cppSynthStart).toFixed(2)}ms` +
+          (isPartial ? " (partial)" : " (full)"),
+      );
 
       if (!synthesisResult || !synthesisResult.channels) {
         console.error("[timing] Invalid synthesis result:", synthesisResult);
@@ -1204,9 +1211,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         if (minimized && !state.minimizedFileIds.includes(fileId)) {
           state.minimizedFileIds.push(fileId);
           if (state.activeFileId === fileId) {
-            const lastVisible = [...state.openFileIds]
-              .reverse()
-              .find((id) => !state.minimizedFileIds.includes(id));
+            const lastVisible = [...state.openFileIds].reverse().find((id) => !state.minimizedFileIds.includes(id));
             state.activeFileId = lastVisible ?? null;
           }
         } else if (!minimized) {
@@ -1280,7 +1285,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesLoading[fileId];
         }),
       );
-    } catch (error) {
+    } catch {
       delete openFiles[fileId];
       set(
         produce((state: State) => {

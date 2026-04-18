@@ -78,9 +78,7 @@ function Row({ onClick, label, trailing }: RowProps) {
         </Text>
       </UnstyledButton>
       {trailing && (
-        <Box style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}>
-          {trailing}
-        </Box>
+        <Box style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}>{trailing}</Box>
       )}
     </Group>
   );
@@ -90,12 +88,7 @@ function PresetRow({ preset, onSelect }: { preset: PresetType; onSelect: () => v
   const trailing = preset.isFactory ? null : (
     <Menu withinPortal position="right-start" shadow="md">
       <Menu.Target>
-        <ActionIcon
-          size="xs"
-          variant="subtle"
-          color="gray"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <ActionIcon size="xs" variant="subtle" color="gray" onClick={(e) => e.stopPropagation()}>
           <MoreVertical size={12} />
         </ActionIcon>
       </Menu.Target>
@@ -195,7 +188,7 @@ export function BrushPickerModal({ context, id }: BrushPickerModalProps): React.
 
           {factoryPresets.length === 0 && userPresets.length === 0 && query.trim().length > 0 && (
             <Text size="xs" c="dimmed" ta="center" py={8}>
-              No brushes match "{query}"
+              No brushes match &quot;{query}&quot;
             </Text>
           )}
         </Stack>

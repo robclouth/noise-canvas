@@ -9,8 +9,8 @@ import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-eff
 // Pass layout: [H-even, H-odd, V-even, V-odd]
 // sortAxis:        0       0     1       1
 // passIndexOffset: 0       1     0       1
-const PASS_AXIS =    [0, 0, 1, 1];
-const PASS_PARITY =  [0, 1, 0, 1];
+const PASS_AXIS = [0, 0, 1, 1];
+const PASS_PARITY = [0, 1, 0, 1];
 
 class SortEffect extends BaseEffect {
   materials: RawShaderMaterial[];
@@ -18,29 +18,25 @@ class SortEffect extends BaseEffect {
 
   constructor() {
     super();
-    this.materials = PASS_AXIS.map((axis, i) =>
-      new RawShaderMaterial({
-        uniforms: {
-          ...defaultValues,
-          sortDirection: { value: 0 },
-          sortOrder: { value: 0 },
-          sortBy: { value: 0 },
-          sortStereoMode: { value: 0 },
-          sortAxis: { value: axis },
-          passIndexOffset: { value: PASS_PARITY[i] },
-        },
-        vertexShader: passThroughVert,
-        fragmentShader: withPlatformDefines(sortEffectFrag),
-        glslVersion: GLSL3,
-      })
+    this.materials = PASS_AXIS.map(
+      (axis, i) =>
+        new RawShaderMaterial({
+          uniforms: {
+            ...defaultValues,
+            sortDirection: { value: 0 },
+            sortOrder: { value: 0 },
+            sortBy: { value: 0 },
+            sortStereoMode: { value: 0 },
+            sortAxis: { value: axis },
+            passIndexOffset: { value: PASS_PARITY[i] },
+          },
+          vertexShader: passThroughVert,
+          fragmentShader: withPlatformDefines(sortEffectFrag),
+          glslVersion: GLSL3,
+        }),
     );
 
-    this.parameters = [
-      "sortDirection",
-      "sortOrder",
-      "sortBy",
-      "sortStereoMode",
-    ];
+    this.parameters = ["sortDirection", "sortOrder", "sortBy", "sortStereoMode"];
   }
 
   updateEffectUniforms(props: UpdateEffectUniformsProps): void {

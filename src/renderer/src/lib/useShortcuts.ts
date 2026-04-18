@@ -57,16 +57,16 @@ export function useShortcuts() {
     const zoomKey = isMac ? "Meta" : "Control";
 
     if (event.key === zoomKey) {
-        useStore.getState().setIsZooming(true);
-        // Note: We don't return here because Meta/Control might be used for other shortcuts 
-        // (though we blocked them for "Set Source", usually they are modifiers for keys like "S", "Z", etc.)
-        // However, standard Zoom logic (wheel) relies on this state.
+      useStore.getState().setIsZooming(true);
+      // Note: We don't return here because Meta/Control might be used for other shortcuts
+      // (though we blocked them for "Set Source", usually they are modifiers for keys like "S", "Z", etc.)
+      // However, standard Zoom logic (wheel) relies on this state.
     }
 
     // Ignore if focused on input/textarea/select/combobox
     const target = event.target as HTMLElement;
     if (
-      target.tagName === "INPUT" || 
+      target.tagName === "INPUT" ||
       target.tagName === "BUTTON" ||
       target.tagName === "TEXTAREA" ||
       target.tagName === "SELECT" ||
@@ -79,17 +79,14 @@ export function useShortcuts() {
 
     // Match shortcuts
     const shortcut = SHORTCUTS.find(
-      (s) =>
-        s.key === event.key &&
-        !!s.shift === event.shiftKey &&
-        s.action !== ShortcutAction.SetSourceMode // Handled separately
+      (s) => s.key === event.key && !!s.shift === event.shiftKey && s.action !== ShortcutAction.SetSourceMode, // Handled separately
     );
 
     if (shortcut) {
       event.preventDefault();
-      
+
       const state = useStore.getState();
-      
+
       switch (shortcut.action) {
         case ShortcutAction.MoveBrushUp:
           state.moveBrushPosition("up");
@@ -162,12 +159,12 @@ export function useShortcuts() {
     if (event.key === "Shift") {
       useStore.getState().setPickingFileParam(null);
     }
-    
+
     // Platform-specific Zoom Reset
     const isMac = window.platform === "darwin";
     const zoomKey = isMac ? "Meta" : "Control";
     if (event.key === zoomKey) {
-        useStore.getState().setIsZooming(false);
+      useStore.getState().setIsZooming(false);
     }
   };
 

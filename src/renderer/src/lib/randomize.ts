@@ -6,12 +6,7 @@ import { ParameterKey } from "@renderer/store/types";
  * Uses smart range calculation to ensure the value never exceeds [min, max].
  * Even at the edges of the range, the full randomization percentage is applied.
  */
-export function randomizeNumberParameter(
-  currentValue: number,
-  min: number,
-  max: number,
-  amount: number,
-): number {
+export function randomizeNumberParameter(currentValue: number, min: number, max: number, amount: number): number {
   const range = max - min;
   const maxDelta = (range * amount) / 100;
 
@@ -59,7 +54,6 @@ export function randomizeBooleanParameter(currentValue: boolean, amount: number)
   // Pick a random boolean (50/50)
   return Math.random() < 0.5;
 }
-
 
 /**
  * Randomize all modulation amounts for a parameter

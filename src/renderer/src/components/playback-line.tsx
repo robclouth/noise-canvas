@@ -14,7 +14,9 @@ export const PlaybackLine = ({ fileId }: PlaybackLineProps) => {
   const isPlaying = useStore((state) => state.isPlaying);
   const loop = useStore((state) => state.loop);
   const fileData = openFiles[fileId];
-  const duration = fileData?.spectrogramData ? fileData.spectrogramData.numFrames / fileData.spectrogramData.sampleRate : 0;
+  const duration = fileData?.spectrogramData
+    ? fileData.spectrogramData.numFrames / fileData.spectrogramData.sampleRate
+    : 0;
 
   useEffect(() => {
     if (!isPlaying) {

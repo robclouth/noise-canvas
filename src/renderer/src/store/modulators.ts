@@ -80,7 +80,6 @@ export interface ModulatorsState
     ModulatorAmountParameters,
     ContextualModAmountParameters {}
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function createModulatorParams(): ModulatorsState {
   const params: ModulatorsState = {
     ...Array.from({ length: NUM_MODULATORS }, (_, i) => i + 1).reduce((acc, idx) => {

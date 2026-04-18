@@ -42,7 +42,10 @@ function loadWav(filePath) {
   while (dataOffset < buf.length - 8) {
     const chunkId = buf.toString("ascii", dataOffset, dataOffset + 4);
     const chunkSize = buf.readUInt32LE(dataOffset + 4);
-    if (chunkId === "data") { dataOffset += 8; break; }
+    if (chunkId === "data") {
+      dataOffset += 8;
+      break;
+    }
     dataOffset += 8 + chunkSize;
   }
 
@@ -57,8 +60,10 @@ function loadWav(filePath) {
       if (bitsPerSample === 16) {
         sum += buf.readInt16LE(offset) / 32768;
       } else if (bitsPerSample === 24) {
-        const lo = buf[offset], mid = buf[offset + 1], hi = buf[offset + 2];
-        const val = (hi << 16 | mid << 8 | lo) << 8 >> 8;
+        const lo = buf[offset],
+          mid = buf[offset + 1],
+          hi = buf[offset + 2];
+        const val = (((hi << 16) | (mid << 8) | lo) << 8) >> 8;
         sum += val / 8388608;
       } else if (bitsPerSample === 32) {
         sum += buf.readInt32LE(offset) / 2147483648;
@@ -70,7 +75,8 @@ function loadWav(filePath) {
   return { samples: mono, sampleRate };
 }
 
-const DRUM_PATH = "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav";
+const DRUM_PATH =
+  "/Users/rob/Splice/sounds/packs/Fresh Mint, a Rohaan moment/Moment_Rohaan_Fresh_Mint/loops/drum_loops/full_drum_loops/MO_RO_140_drum_loop_robust_shed.wav";
 
 // ─── Metrics ──────────────────────────────────────────────────────────────────
 
@@ -91,16 +97,21 @@ function spectralProfile(data, ar) {
 
 function pearsonCorrelation(a, b) {
   const n = Math.min(a.length, b.length);
-  let sumA = 0, sumB = 0, sumAB = 0, sumA2 = 0, sumB2 = 0;
+  let sumA = 0,
+    sumB = 0,
+    sumAB = 0,
+    sumA2 = 0,
+    sumB2 = 0;
   for (let i = 0; i < n; i++) {
-    sumA += a[i]; sumB += b[i];
+    sumA += a[i];
+    sumB += b[i];
     sumAB += a[i] * b[i];
     sumA2 += a[i] * a[i];
     sumB2 += b[i] * b[i];
   }
-  const cov = sumAB - sumA * sumB / n;
-  const da = Math.sqrt(sumA2 - sumA * sumA / n);
-  const db = Math.sqrt(sumB2 - sumB * sumB / n);
+  const cov = sumAB - (sumA * sumB) / n;
+  const da = Math.sqrt(sumA2 - (sumA * sumA) / n);
+  const db = Math.sqrt(sumB2 - (sumB * sumB) / n);
   return cov / (da * db + 1e-12);
 }
 
@@ -211,9 +222,12 @@ function applyTimeShift(data, ar, srcLeft, srcRight, dstLeft, phaseTransform) {
 
 async function synthesize(modData, ar, sampleRate) {
   const result = await addon.synthesize(
-    modData, ar, sampleRate,
+    modData,
+    ar,
+    sampleRate,
     { bandsPerOctave: BANDS_PER_OCTAVE, minFreq: MIN_FREQ },
-    false, []
+    false,
+    [],
   );
   return result.channels[0];
 }
@@ -262,12 +276,10 @@ const phaseNegate = (p) => -p;
 const phaseOldFix = (p, f, T) => -p - TWO_PI * f * T;
 
 // Correct reversal using exact brush boundaries
-const makeReversalPhase = (brushLeft, brushRight) =>
-  (p, f, T) => -p - TWO_PI * f * (brushLeft + brushRight) * T;
+const makeReversalPhase = (brushLeft, brushRight) => (p, f, T) => -p - TWO_PI * f * (brushLeft + brushRight) * T;
 
 // Correct shift using exact source/dest positions
-const makeShiftPhase = (srcLeft, dstLeft) =>
-  (p, f, T) => p + TWO_PI * f * (srcLeft - dstLeft) * T;
+const makeShiftPhase = (srcLeft, dstLeft) => (p, f, T) => p + TWO_PI * f * (srcLeft - dstLeft) * T;
 
 // ─── Phase derivative (centered difference) ─────────────────────────────────
 
@@ -325,9 +337,13 @@ function computeSmoothedDphi(data, offset, len, phaseOff, windowSize) {
   const smoothed = new Float64Array(len);
   const half = Math.floor(windowSize / 2);
   for (let k = 0; k < len; k++) {
-    let sum = 0, count = 0;
+    let sum = 0,
+      count = 0;
     for (let j = k - half; j <= k + half; j++) {
-      if (j >= 0 && j < len) { sum += raw[j]; count++; }
+      if (j >= 0 && j < len) {
+        sum += raw[j];
+        count++;
+      }
     }
     smoothed[k] = sum / count;
   }
@@ -480,7 +496,17 @@ function shiftProfile(profile, shiftBands) {
 // dphi modes: "forward", "centered", "wide4", "backward"
 // confidence modes: "none", "mag", "stability", "both"
 // anchorInterval: reset IF correction every N source frames (0 = no reset)
-function applyUnified2D(data, ar, scaleX, scaleY, shiftXUv, shiftYUv, dphiMode = "centered", confMode = "none", anchorInterval = 0) {
+function applyUnified2D(
+  data,
+  ar,
+  scaleX,
+  scaleY,
+  shiftXUv,
+  shiftYUv,
+  dphiMode = "centered",
+  confMode = "none",
+  anchorInterval = 0,
+) {
   const { bandOffsets, bandLengths, bandStepLog2s, bandFreqsHz, numFrames, sampleRate } = ar;
   const T_total = (numFrames - 1) / sampleRate;
   const dest = new Float32Array(data.length);
@@ -535,17 +561,15 @@ function applyUnified2D(data, ar, scaleX, scaleY, shiftXUv, shiftYUv, dphiMode =
       } else if (dphiMode.startsWith("wt")) {
         // Time-based: "wt50" = 50ms radius, converted to frames per band
         const ms = parseInt(dphiMode.slice(2)) || 50;
-        const radiusFrames = Math.max(1, Math.round((ms / 1000) * sampleRate / srcStep));
+        const radiusFrames = Math.max(1, Math.round(((ms / 1000) * sampleRate) / srcStep));
         dphi = computeWideFiniteDphi(data, srcOffset, srcLen, phaseOff, radiusFrames);
       } else if (dphiMode.startsWith("wfrac")) {
         // Fraction of band length: "wfrac25" = 25% of bandLength as radius
         const pct = parseInt(dphiMode.slice(5)) || 25;
-        const radiusFrames = Math.max(1, Math.round(srcLen * pct / 100));
+        const radiusFrames = Math.max(1, Math.round((srcLen * pct) / 100));
         dphi = computeWideFiniteDphi(data, srcOffset, srcLen, phaseOff, radiusFrames);
       } else dphi = computeCenteredDphi(data, srcOffset, srcLen, phaseOff);
-      const phaseStab = (confMode === "stability" || confMode === "both")
-        ? computePhaseStability(dphi)
-        : null;
+      const phaseStab = confMode === "stability" || confMode === "both" ? computePhaseStability(dphi) : null;
 
       for (let kDst = 0; kDst < dstLen; kDst++) {
         const dstTimeUv = (kDst * dstStep) / (numFrames - 1);
@@ -618,10 +642,10 @@ function applyUnified2D(data, ar, scaleX, scaleY, shiftXUv, shiftYUv, dphiMode =
           if (absScaleX > 1e-5 && Math.abs(absScaleX - 1) > 1e-5) {
             let effectiveDphi = srcDphi;
             if (signX < 0) {
-              const expectedAdvance = TWO_PI * srcFreq * srcStep / sampleRate;
+              const expectedAdvance = (TWO_PI * srcFreq * srcStep) / sampleRate;
               effectiveDphi += expectedAdvance;
             }
-            let stretchFrames = dstTimeUv * (1 - 1 / absScaleX) * (numFrames - 1) / srcStep;
+            let stretchFrames = (dstTimeUv * (1 - 1 / absScaleX) * (numFrames - 1)) / srcStep;
             if (anchorInterval === -1) stretchFrames = 0;
             else if (anchorInterval > 0) stretchFrames = Math.min(stretchFrames, anchorInterval);
             phase += effectiveDphi * stretchFrames;
@@ -759,7 +783,7 @@ function applyUnifiedPhaseCorrection(data, ar, scaleX, srcLeftUv, srcRightUv, ds
         // Bounds check source
         if (srcUv < srcLeftUv - 0.001 || srcUv > srcRightUv + 0.001) continue;
 
-        const srcKFloat = srcUv * (numFrames - 1) / bandStep;
+        const srcKFloat = (srcUv * (numFrames - 1)) / bandStep;
         const srcK0 = Math.floor(srcKFloat);
         const srcK1 = Math.min(srcK0 + 1, len - 1);
         const frac = srcKFloat - srcK0;
@@ -778,7 +802,7 @@ function applyUnifiedPhaseCorrection(data, ar, scaleX, srcLeftUv, srcRightUv, ds
         const srcDphi = dphi[srcK0] * (1 - frac) + dphi[srcK1] * frac;
 
         // Stretch correction: IF-based, brush-relative
-        const stretchFrames = (dstUv - dstLeftUv) * (1 - 1 / scaleX) * (numFrames - 1) / bandStep;
+        const stretchFrames = ((dstUv - dstLeftUv) * (1 - 1 / scaleX) * (numFrames - 1)) / bandStep;
         const ifCorr = srcDphi * stretchFrames;
 
         dest[dstIdx + phaseOff] = srcPhase + bandFreqCorr + ifCorr;
@@ -869,7 +893,7 @@ function applyRevStretchIF(data, ar, absScaleX) {
       for (let k = 0; k < len; k++) {
         // Reverse + stretch: source is mirrored and compressed
         // For whole-file: srcK = (len-1) - k/absScaleX
-        const srcKFloat = (len - 1) - k / absScaleX;
+        const srcKFloat = len - 1 - k / absScaleX;
         const srcK0 = Math.floor(srcKFloat);
         const srcK1 = Math.min(srcK0 + 1, len - 1);
         const frac = srcKFloat - srcK0;
@@ -885,8 +909,7 @@ function applyRevStretchIF(data, ar, absScaleX) {
 
         // Interpolate source phase and phase derivative
         const srcPhase = data[idx0 + phaseOff] * (1 - frac) + data[idx1 + phaseOff] * frac;
-        const srcDphi = dphi[Math.min(srcK0, len - 2)] * (1 - frac)
-                      + dphi[Math.min(srcK1, len - 2)] * frac;
+        const srcDphi = dphi[Math.min(srcK0, len - 2)] * (1 - frac) + dphi[Math.min(srcK1, len - 2)] * frac;
 
         // UV positions for reversal correction
         const dstUv = (k * bandStep) / (numFrames - 1);
@@ -900,7 +923,7 @@ function applyRevStretchIF(data, ar, absScaleX) {
         // an f_b component that doesn't cancel when |S|≠1
         const dt = bandStep / sampleRate;
         const expectedAdvance = TWO_PI * freq * dt;
-        const stretchFrames = dstUv * (1 - 1 / absScaleX) * (numFrames - 1) / bandStep;
+        const stretchFrames = (dstUv * (1 - 1 / absScaleX) * (numFrames - 1)) / bandStep;
         const ifCorr = (srcDphi + expectedAdvance) * stretchFrames;
 
         dest[dstIdx + phaseOff] = -srcPhase + revCorr + ifCorr;
@@ -989,10 +1012,7 @@ async function main() {
   console.log(`  ${signal.length} samples @ ${SR} Hz  (${(signal.length / SR).toFixed(2)} s)\n`);
 
   console.log("Analyzing with Gaborator...");
-  const ar = await addon.analyze(
-    [signal], 1, SR,
-    { bandsPerOctave: BANDS_PER_OCTAVE, minFreq: MIN_FREQ }
-  );
+  const ar = await addon.analyze([signal], 1, SR, { bandsPerOctave: BANDS_PER_OCTAVE, minFreq: MIN_FREQ });
   console.log(`  ${ar.numBands} bands, ${ar.numFrames} frames\n`);
 
   const roundTrip = await synthesize(ar.data.slice(), ar, SR);
@@ -1004,7 +1024,8 @@ async function main() {
   // Brush [0.1, 0.4]: BL + BR = 0.5, so t_start + t_end = 0.5 * T_total.
   // Old fix uses T_total (2× too large) — should be clearly wrong.
   // Correct formula uses 0.5 * T_total.
-  const BL = 0.1, BR = 0.4;
+  const BL = 0.1,
+    BR = 0.4;
   console.log(`=== TEST 1: Partial reversal [${BL}, ${BR}]  (BL+BR = ${BL + BR}, not 1.0) ===`);
   console.log(`  Old fix applies 2π·f·T_total but correct is 2π·f·${BL + BR}·T_total\n`);
 
@@ -1025,7 +1046,8 @@ async function main() {
   }
 
   // ─── TEST 2: Time shift — invariance across positions ────────────────────────
-  const SRC_L = 0.25, SRC_R = 0.45;
+  const SRC_L = 0.25,
+    SRC_R = 0.45;
   const DST_POSITIONS = [0.0, 0.3, 0.6];
   console.log(`\n=== TEST 2: Time shift [${SRC_L}, ${SRC_R}] → three positions ===`);
   console.log("  Correct formula: φ_dest = φ_src + 2π·f·(srcLeft - dstLeft)·T\n");
@@ -1075,13 +1097,15 @@ async function main() {
   const tmpOut = resolve(__dirname, "test-tmp-stretched.wav");
   writeWav(tmpIn, signal, SR);
   const rbStretched = rubberbandStretch(tmpIn, tmpOut, STRETCH);
-  console.log(`  Rubberband: ${rbStretched.samples.length} samples (${(rbStretched.samples.length / SR).toFixed(3)} s)`);
+  console.log(
+    `  Rubberband: ${rbStretched.samples.length} samples (${(rbStretched.samples.length / SR).toFixed(3)} s)`,
+  );
 
   // Also analyze rubberband output with gaborator to get a "ceiling" correlation
-  const rbAnalysis = await addon.analyze(
-    [rbStretched.samples], 1, SR,
-    { bandsPerOctave: BANDS_PER_OCTAVE, minFreq: MIN_FREQ }
-  );
+  const rbAnalysis = await addon.analyze([rbStretched.samples], 1, SR, {
+    bandsPerOctave: BANDS_PER_OCTAVE,
+    minFreq: MIN_FREQ,
+  });
   const rbRoundTrip = await synthesize(rbAnalysis.data.slice(), rbAnalysis, SR);
   const rbCeiling = pearsonCorrelation(rbRoundTrip.slice(0, rbStretched.samples.length), rbStretched.samples);
   console.log(`  Rubberband round-trip ceiling: r=${rbCeiling.toFixed(6)}\n`);
@@ -1104,7 +1128,7 @@ async function main() {
   const sineDur = 1.0;
   const sineLen = Math.round(sineDur * SR);
   const sineSignal = new Float32Array(sineLen);
-  for (let i = 0; i < sineLen; i++) sineSignal[i] = Math.sin(TWO_PI * sineFreq * i / SR);
+  for (let i = 0; i < sineLen; i++) sineSignal[i] = Math.sin((TWO_PI * sineFreq * i) / SR);
   const sineAr = await addon.analyze([sineSignal], 1, SR, { bandsPerOctave: BANDS_PER_OCTAVE, minFreq: MIN_FREQ });
 
   {
@@ -1120,7 +1144,8 @@ async function main() {
     console.log(`    sineSynth length=${sineSynth.length}, sineSignal length=${sineSignal.length}`);
 
     // Check: is the stretched data different from original?
-    let diffCount = 0, maxDiff = 0;
+    let diffCount = 0,
+      maxDiff = 0;
     for (let i = 0; i < sineAr.data.length; i++) {
       const d = Math.abs(sineStretched[i] - sineAr.data[i]);
       if (d > 1e-10) diffCount++;
@@ -1137,19 +1162,25 @@ async function main() {
       const bOff = sineAr.bandOffsets[bandIdx];
       const bLen = sineAr.bandLengths[bandIdx];
       const bStep = 1 << sineAr.bandStepLog2s[bandIdx];
-      console.log(`    440Hz band: idx=${bandIdx}, freq=${sineAr.bandFreqsHz[bandIdx].toFixed(1)}, len=${bLen}, step=${bStep}`);
+      console.log(
+        `    440Hz band: idx=${bandIdx}, freq=${sineAr.bandFreqsHz[bandIdx].toFixed(1)}, len=${bLen}, step=${bStep}`,
+      );
       // Print first few original and stretched values
       for (let k = 0; k < Math.min(5, bLen); k++) {
         const srcK = Math.round(k / STRETCH);
         const oi = (bOff + k) * FPIX;
         const si = (bOff + srcK) * FPIX;
-        console.log(`      k=${k} srcK=${srcK}: orig=[${sineAr.data[oi].toFixed(4)}, ${sineAr.data[oi+1].toFixed(4)}] stretched=[${sineStretched[oi].toFixed(4)}, ${sineStretched[oi+1].toFixed(4)}]`);
+        console.log(
+          `      k=${k} srcK=${srcK}: orig=[${sineAr.data[oi].toFixed(4)}, ${sineAr.data[oi + 1].toFixed(4)}] stretched=[${sineStretched[oi].toFixed(4)}, ${sineStretched[oi + 1].toFixed(4)}]`,
+        );
       }
       // Print last few
       for (let k = bLen - 3; k < bLen; k++) {
         const srcK = Math.round(k / STRETCH);
         const oi = (bOff + k) * FPIX;
-        console.log(`      k=${k} srcK=${srcK}: orig=[${sineAr.data[oi].toFixed(4)}, ${sineAr.data[oi+1].toFixed(4)}] stretched=[${sineStretched[oi].toFixed(4)}, ${sineStretched[oi+1].toFixed(4)}]`);
+        console.log(
+          `      k=${k} srcK=${srcK}: orig=[${sineAr.data[oi].toFixed(4)}, ${sineAr.data[oi + 1].toFixed(4)}] stretched=[${sineStretched[oi].toFixed(4)}, ${sineStretched[oi + 1].toFixed(4)}]`,
+        );
       }
     }
     console.log();
@@ -1184,20 +1215,19 @@ async function main() {
   console.log("  [spec = spectral shape preservation, rb = waveform vs rubberband]\n");
 
   // 1. NN + identity (current broken state)
-  await evalStretch("NN identity phase",
-    applyTimeStretchNN(ar.data, ar, STRETCH, stretchPhaseIdentity));
+  await evalStretch("NN identity phase", applyTimeStretchNN(ar.data, ar, STRETCH, stretchPhaseIdentity));
 
   // 2. NN + Neutral V2 (uses band freq — overcorrects)
-  await evalStretch("NN Neutral V2: φ+2π·f·(src-dst)·T",
-    applyTimeStretchNN(ar.data, ar, STRETCH, stretchPhaseNeutralV2));
+  await evalStretch(
+    "NN Neutral V2: φ+2π·f·(src-dst)·T",
+    applyTimeStretchNN(ar.data, ar, STRETCH, stretchPhaseNeutralV2),
+  );
 
   // 3. Lerp + identity
-  await evalStretch("Lerp identity phase",
-    applyTimeStretchLerp(ar.data, ar, STRETCH, stretchPhaseIdentity));
+  await evalStretch("Lerp identity phase", applyTimeStretchLerp(ar.data, ar, STRETCH, stretchPhaseIdentity));
 
   // 4. Lerp + Neutral V2
-  await evalStretch("Lerp Neutral V2",
-    applyTimeStretchLerp(ar.data, ar, STRETCH, stretchPhaseNeutralV2));
+  await evalStretch("Lerp Neutral V2", applyTimeStretchLerp(ar.data, ar, STRETCH, stretchPhaseNeutralV2));
 
   // 5. IF-corrected (uses phase derivative, not band freq)
   console.log();
@@ -1211,13 +1241,11 @@ async function main() {
   console.log(`  (sine check: r=${rSineIF.toFixed(6)}${rSineIF > 0.99 ? " ✓✓✓" : ""})`);
 
   // 6. Phase propagation
-  await evalStretch("Phase propagation (cumulative)",
-    applyTimeStretchPhaseProp(ar.data, ar, STRETCH));
+  await evalStretch("Phase propagation (cumulative)", applyTimeStretchPhaseProp(ar.data, ar, STRETCH));
 
   // 7. Unified (shift+stretch decomposition) — whole file 2x stretch
   console.log();
-  await evalStretch("Unified (whole file, scaleX=2)",
-    applyUnifiedPhaseCorrection(ar.data, ar, STRETCH, 0, 0.5, 0, 1));
+  await evalStretch("Unified (whole file, scaleX=2)", applyUnifiedPhaseCorrection(ar.data, ar, STRETCH, 0, 0.5, 0, 1));
 
   // 8. Test unified approach on SHIFT
   console.log("\n  --- Unified formula: shift test ---");
@@ -1270,15 +1298,22 @@ async function main() {
 
     writeWav("test-out-rev-stretch-nv2.wav", synthRevNN, SR);
     writeWav("test-out-rev-stretch-if.wav", synthRevIF, SR);
-    try { unlinkSync(tmpRev); } catch {}
-    try { unlinkSync(resolve(__dirname, "test-tmp-rev-stretched.wav")); } catch {}
+    try {
+      unlinkSync(tmpRev);
+    } catch {}
+    try {
+      unlinkSync(resolve(__dirname, "test-tmp-rev-stretched.wav"));
+    } catch {}
   }
 
   // 10. Partial stretch — stretch middle section [0.2, 0.4] by 2x → [0.2, 0.6]
   console.log("\n  --- Unified formula: partial stretch [0.2,0.4] 2x → [0.2,0.6] ---");
   {
-    const pSrcL = 0.2, pSrcR = 0.4, pScale = 2.0;
-    const pDstL = pSrcL, pDstR = pSrcL + (pSrcR - pSrcL) * pScale;
+    const pSrcL = 0.2,
+      pSrcR = 0.4,
+      pScale = 2.0;
+    const pDstL = pSrcL,
+      pDstR = pSrcL + (pSrcR - pSrcL) * pScale;
     const partialData = applyUnifiedPhaseCorrection(ar.data, ar, pScale, pSrcL, pSrcR, pDstL, pDstR);
     const partialSynth = await synthesize(partialData, ar, SR);
 
@@ -1303,13 +1338,21 @@ async function main() {
 
     console.log(`  respec=${rReSpec.toFixed(4)} rb=${rPartial.toFixed(4)}  Partial stretch`);
     writeWav("test-out-partial-stretch.wav", partialSynth, SR);
-    try { unlinkSync("test-tmp-chunk.wav"); } catch {}
-    try { unlinkSync("test-tmp-chunk-stretched.wav"); } catch {}
+    try {
+      unlinkSync("test-tmp-chunk.wav");
+    } catch {}
+    try {
+      unlinkSync("test-tmp-chunk-stretched.wav");
+    } catch {}
   }
 
   writeWav("test-out-stretch-rubberband.wav", rbStretched.samples, SR);
-  try { unlinkSync(tmpIn); } catch {}
-  try { unlinkSync(tmpOut); } catch {}
+  try {
+    unlinkSync(tmpIn);
+  } catch {}
+  try {
+    unlinkSync(tmpOut);
+  } catch {}
 
   // ─── TEST 5: Unified 2D transform — all combinations ─────────────────────
   console.log(`\n=== TEST 5: Unified 2D transform ===\n`);
@@ -1319,7 +1362,7 @@ async function main() {
     const rSin = pearsonCorrelation(a, b);
     // Generate cos version of target
     const cosTarget = new Float32Array(b.length);
-    for (let i = 0; i < b.length; i++) cosTarget[i] = Math.cos(TWO_PI * freqHz * i / SR);
+    for (let i = 0; i < b.length; i++) cosTarget[i] = Math.cos((TWO_PI * freqHz * i) / SR);
     const rCos = pearsonCorrelation(a, cosTarget);
     return Math.sqrt(rSin * rSin + rCos * rCos);
   }
@@ -1357,7 +1400,7 @@ async function main() {
     const sine440data = applyUnified2D(sineAr.data, sineAr, 1, 2, 0, 0);
     const sine880synth = await synthesize(sine440data, sineAr, SR);
     const target880 = new Float32Array(sineLen);
-    for (let i = 0; i < sineLen; i++) target880[i] = Math.sin(TWO_PI * 880 * i / SR);
+    for (let i = 0; i < sineLen; i++) target880[i] = Math.sin((TWO_PI * 880 * i) / SR);
     const r880 = phaseInvariantCorr(sine880synth, target880, 880);
     console.log(`    440→880 (pitch×2):     r_env=${r880.toFixed(4)}${r880 > 0.9 ? " ✓✓✓" : ""}`);
 
@@ -1365,7 +1408,7 @@ async function main() {
     const sine220data = applyUnified2D(sineAr.data, sineAr, 1, 0.5, 0, 0);
     const sine220synth = await synthesize(sine220data, sineAr, SR);
     const target220 = new Float32Array(sineLen);
-    for (let i = 0; i < sineLen; i++) target220[i] = Math.sin(TWO_PI * 220 * i / SR);
+    for (let i = 0; i < sineLen; i++) target220[i] = Math.sin((TWO_PI * 220 * i) / SR);
     const r220 = phaseInvariantCorr(sine220synth, target220, 220);
     console.log(`    440→220 (pitch×0.5):   r_env=${r220.toFixed(4)}${r220 > 0.9 ? " ✓✓✓" : ""}`);
 
@@ -1468,14 +1511,22 @@ async function main() {
   writeWav("test-out-gt-full-rev.wav", gtFullRev, SR);
 
   const bestRevFn = makeReversalPhase(BL, BR);
-  writeWav("test-out-partial-rev-correct.wav",
-    await synthesize(applyPartialReversal(ar.data, ar, BL, BR, bestRevFn), ar, SR), SR);
-  writeWav("test-out-partial-rev-old-fix.wav",
-    await synthesize(applyPartialReversal(ar.data, ar, BL, BR, phaseOldFix), ar, SR), SR);
+  writeWav(
+    "test-out-partial-rev-correct.wav",
+    await synthesize(applyPartialReversal(ar.data, ar, BL, BR, bestRevFn), ar, SR),
+    SR,
+  );
+  writeWav(
+    "test-out-partial-rev-old-fix.wav",
+    await synthesize(applyPartialReversal(ar.data, ar, BL, BR, phaseOldFix), ar, SR),
+    SR,
+  );
 
   for (const dstLeft of DST_POSITIONS) {
     const synth = await synthesize(
-      applyTimeShift(ar.data, ar, SRC_L, SRC_R, dstLeft, makeShiftPhase(SRC_L, dstLeft)), ar, SR
+      applyTimeShift(ar.data, ar, SRC_L, SRC_R, dstLeft, makeShiftPhase(SRC_L, dstLeft)),
+      ar,
+      SR,
     );
     writeWav(`test-out-shift-to-${dstLeft.toFixed(2)}.wav`, synth, SR);
   }
@@ -1484,4 +1535,7 @@ async function main() {
   console.log("Done.");
 }
 
-main().catch((err) => { console.error(err); process.exit(1); });
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

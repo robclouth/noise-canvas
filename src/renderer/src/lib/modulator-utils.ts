@@ -101,7 +101,7 @@ export const buildModulatorUniforms = (
     const envelopeMinDb = state[`modulator${i + 1}EnvelopeMinDb`] as number;
     const envelopeMaxDb = state[`modulator${i + 1}EnvelopeMaxDb`] as number;
     // Convert smoothing beats to UV half-width
-    const envelopeSmoothingUv = ((envelopeSmoothingBeats * 60) / bpm) / totalDuration / 2;
+    const envelopeSmoothingUv = (envelopeSmoothingBeats * 60) / bpm / totalDuration / 2;
 
     const modulatorPatternRate = unitsToUv(rateBeats, rateSemis, bpm, totalDuration, bandsPerOctave, numBands);
 
@@ -168,10 +168,10 @@ export const buildModulatorUniforms = (
       modulatorEnvelopeMinDb: envelopeMinDb,
       modulatorEnvelopeMaxDb: envelopeMaxDb,
       // Sequencer parameters
-      seqStepsX: state[`modulator${i + 1}SeqStepsX`] as number || 8,
-      seqStepsY: state[`modulator${i + 1}SeqStepsY`] as number || 4,
+      seqStepsX: (state[`modulator${i + 1}SeqStepsX`] as number) || 8,
+      seqStepsY: (state[`modulator${i + 1}SeqStepsY`] as number) || 4,
       seqLoopY: (() => {
-        const loopSemis = state[`modulator${i + 1}SeqLoopSemis`] as number || 12;
+        const loopSemis = (state[`modulator${i + 1}SeqLoopSemis`] as number) || 12;
         const loopSemisDef = parameterDefs[`modulator${i + 1}SeqLoopSemis`] as NumberParameter;
         // Convert semitones to UV space
         const loopYUv = loopSemis / (bandsPerOctave * (numBands / bandsPerOctave));
@@ -181,18 +181,21 @@ export const buildModulatorUniforms = (
           minValue: 1 / (bandsPerOctave * (numBands / bandsPerOctave)),
           maxValue: maxLoopYUv,
           modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}SeqLoopSemis` as ParameterKey),
-          contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}SeqLoopSemis` as ParameterKey),
+          contextualModAmounts: getContextualModAmountsNormalized(
+            state,
+            `modulator${i + 1}SeqLoopSemis` as ParameterKey,
+          ),
         };
       })(),
       seqSwing: {
-        value: (state[`modulator${i + 1}SeqSwing`] as number || 0) / 100,
+        value: ((state[`modulator${i + 1}SeqSwing`] as number) || 0) / 100,
         minValue: 0.0,
         maxValue: 1.0,
         modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}SeqSwing` as ParameterKey),
         contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}SeqSwing` as ParameterKey),
       },
       seqLoopX: (() => {
-        const loopBeats = state[`modulator${i + 1}SeqLoopBeats`] as number || 1;
+        const loopBeats = (state[`modulator${i + 1}SeqLoopBeats`] as number) || 1;
         const loopBeatsDef = parameterDefs[`modulator${i + 1}SeqLoopBeats`] as NumberParameter;
         // Convert beats to UV space
         const seconds = (loopBeats * 60) / bpm;
@@ -201,14 +204,17 @@ export const buildModulatorUniforms = (
         const maxLoopXUv = maxSeconds / totalDuration;
         return {
           value: loopXUv,
-          minValue: (((loopBeatsDef?.min || 1/64) * 60) / bpm) / totalDuration,
+          minValue: ((loopBeatsDef?.min || 1 / 64) * 60) / bpm / totalDuration,
           maxValue: maxLoopXUv,
           modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}SeqLoopBeats` as ParameterKey),
-          contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}SeqLoopBeats` as ParameterKey),
+          contextualModAmounts: getContextualModAmountsNormalized(
+            state,
+            `modulator${i + 1}SeqLoopBeats` as ParameterKey,
+          ),
         };
       })(),
       seqDataTex: (() => {
-        const seqDataStr = state[`modulator${i + 1}SeqData`] as string || '{}';
+        const seqDataStr = (state[`modulator${i + 1}SeqData`] as string) || "{}";
         return createSeqDataTexture(seqDataStr);
       })(),
     });

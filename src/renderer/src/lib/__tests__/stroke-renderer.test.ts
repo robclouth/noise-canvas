@@ -171,7 +171,9 @@ function createAdditiveBlendEffect(): BaseEffect {
         mat.uniforms.destSpectrogramTex.value = commonUniforms.destSpectrogramTex.value;
       }
       if ((commonUniforms as Record<string, { value: unknown }>).blendOriginalTex) {
-        mat.uniforms.blendOriginalTex.value = (commonUniforms as Record<string, { value: unknown }>).blendOriginalTex.value;
+        mat.uniforms.blendOriginalTex.value = (
+          commonUniforms as Record<string, { value: unknown }>
+        ).blendOriginalTex.value;
       }
       if ((commonUniforms as Record<string, { value: unknown }>).useStrokeMask) {
         mat.uniforms.useStrokeMask.value = (commonUniforms as Record<string, { value: unknown }>).useStrokeMask.value;
@@ -536,9 +538,7 @@ describe("StrokeRenderer", () => {
     it("should apply a stroke at the center of the canvas", async () => {
       renderer.initialize();
 
-      const state = createMockStateWithSteps([
-        { name: "Test", overrides: { brushIntensity: 100, accumulate: true } },
-      ]);
+      const state = createMockStateWithSteps([{ name: "Test", overrides: { brushIntensity: 100, accumulate: true } }]);
 
       const totalDuration = getSpectrogramDuration(spectrogramData);
       const sourceFile = createSourceFileInfo(spectrogramData, "test-file-1", renderer);
@@ -684,20 +684,16 @@ describe("StrokeRenderer", () => {
      * Uses accumulate: true to allow strokes to accumulate.
      */
     function createIterTestState(iterations: number): State {
-      return createMockStateForIterations(
-        iterations,
-        {} as Partial<State>,
-        {
-          accumulate: true,
-          effects: [
-            { id: "test-transform", effect: "transform", enabled: true, params: {} },
-            { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
-            { id: "test-blur", effect: "blur", enabled: false, params: {} },
-            { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
-            { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
-          ],
-        },
-      );
+      return createMockStateForIterations(iterations, {} as Partial<State>, {
+        accumulate: true,
+        effects: [
+          { id: "test-transform", effect: "transform", enabled: true, params: {} },
+          { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
+          { id: "test-blur", effect: "blur", enabled: false, params: {} },
+          { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
+          { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
+        ],
+      });
     }
 
     it("should read brushIterations from step state correctly", async () => {
@@ -1565,19 +1561,15 @@ describe("StrokeRenderer", () => {
         blendRenderer.initialize();
 
         // Create state with non-cumulative strokes (accumulate: false is the default)
-        const state = createMockStateForIterations(
-          1,
-          {} as Partial<State>,
-          {
-            effects: [
-              { id: "test-transform", effect: "transform", enabled: true, params: {} },
-              { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
-              { id: "test-blur", effect: "blur", enabled: false, params: {} },
-              { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
-              { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
-            ],
-          },
-        );
+        const state = createMockStateForIterations(1, {} as Partial<State>, {
+          effects: [
+            { id: "test-transform", effect: "transform", enabled: true, params: {} },
+            { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
+            { id: "test-blur", effect: "blur", enabled: false, params: {} },
+            { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
+            { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
+          ],
+        });
 
         const totalDuration = blendSpectrogramData.numFrames / blendSpectrogramData.sampleRate;
         const sourceFile: SourceFileInfo = {
@@ -1667,19 +1659,15 @@ describe("StrokeRenderer", () => {
       ncRenderer.initialize();
 
       // Create state with non-cumulative strokes (accumulate: false is the default)
-      const state = createMockStateForIterations(
-        1,
-        {} as Partial<State>,
-        {
-          effects: [
-            { id: "test-transform", effect: "transform", enabled: true, params: {} },
-            { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
-            { id: "test-blur", effect: "blur", enabled: false, params: {} },
-            { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
-            { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
-          ],
-        },
-      );
+      const state = createMockStateForIterations(1, {} as Partial<State>, {
+        effects: [
+          { id: "test-transform", effect: "transform", enabled: true, params: {} },
+          { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
+          { id: "test-blur", effect: "blur", enabled: false, params: {} },
+          { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
+          { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
+        ],
+      });
 
       const totalDuration = ncSpectrogramData.numFrames / ncSpectrogramData.sampleRate;
       const sourceFile: SourceFileInfo = {
@@ -1748,9 +1736,7 @@ describe("StrokeRenderer", () => {
     it("should preserve phase channels when applying strokes", async () => {
       renderer.initialize();
 
-      const state = createMockStateWithSteps([
-        { name: "Test", overrides: { brushIntensity: 100, accumulate: true } },
-      ]);
+      const state = createMockStateWithSteps([{ name: "Test", overrides: { brushIntensity: 100, accumulate: true } }]);
 
       const totalDuration = getSpectrogramDuration(spectrogramData);
       const sourceFile = createSourceFileInfo(spectrogramData, "test-file-1", renderer);
@@ -1913,6 +1899,5 @@ describe("StrokeRenderer", () => {
       const rows = realScissorRows(new Vector2(0.0, 0.05), new Vector2(1.0, 0.9));
       expect(rows).toBeNull();
     });
-
   });
 });

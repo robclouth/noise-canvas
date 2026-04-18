@@ -68,9 +68,7 @@ export const EffectSection = memo(
               effectId={effectId}
             />
           </Group>
-          <Collapse in={enabled}>
-            {children}
-          </Collapse>
+          <Collapse in={enabled}>{children}</Collapse>
         </Stack>
       </Paper>
     );

@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  DEFAULT_EFFECT_ORDER,
-  EFFECT_KEYS,
-  EffectOrderItem,
-  syncEffectOrder,
-} from "../../effects/types";
+import { DEFAULT_EFFECT_ORDER, EFFECT_KEYS, EffectOrderItem, syncEffectOrder } from "../../effects/types";
 
 describe("Effect Order", () => {
   describe("DEFAULT_EFFECT_ORDER", () => {

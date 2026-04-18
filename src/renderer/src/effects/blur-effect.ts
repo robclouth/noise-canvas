@@ -99,8 +99,17 @@ class BlurEffect extends BaseEffect {
     if (!material) return;
 
     const state = props.state ?? useStore.getState();
-    const { blurAmountTime, blurAmountPitch, blurNoiseTime, blurNoisePitch, blurEdgeMode, blurSamplesX, blurSamplesY, blurOrigin, filepathsBpm } =
-      state;
+    const {
+      blurAmountTime,
+      blurAmountPitch,
+      blurNoiseTime,
+      blurNoisePitch,
+      blurEdgeMode,
+      blurSamplesX,
+      blurSamplesY,
+      blurOrigin,
+      filepathsBpm,
+    } = state;
     const { spectrogramData, filePath } = file;
     if (!spectrogramData) return;
 

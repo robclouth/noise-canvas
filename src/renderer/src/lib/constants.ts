@@ -184,18 +184,8 @@ export const ALGORITHMS = [
   { value: 1, label: "Noisey" },
 ];
 
-const [
-  HUE_GRAPE,
-  HUE_RED,
-  HUE_YELLOW,
-  HUE_GREEN,
-  HUE_VIOLET,
-  HUE_CYAN,
-  HUE_PINK,
-  HUE_ORANGE,
-  HUE_INDIGO,
-  HUE_TEAL,
-] = BASE_HUES;
+const [HUE_GRAPE, HUE_RED, HUE_YELLOW, HUE_GREEN, HUE_VIOLET, HUE_CYAN, HUE_PINK, HUE_ORANGE, HUE_INDIGO, HUE_TEAL] =
+  BASE_HUES;
 
 export const EFFECT_COLORS: Record<string, string> = {
   dynamics: HUE_GRAPE,

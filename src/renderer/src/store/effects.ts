@@ -54,7 +54,6 @@ export interface EffectsState {
   waveshapeTilt: number;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const createEffectsSlice = (): EffectsState => {
   return {
     // Note: effects is stored per-step, this is just for type compatibility

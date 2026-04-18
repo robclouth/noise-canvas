@@ -32,7 +32,11 @@ export const Section = ({
           onClick={() => setSectionCollapsed(label, !isCollapsed)}
         >
           <Box style={{ display: "flex", alignItems: "center" }}>
-            {isCollapsed ? <ChevronRight size={14} color={theme.colors.dark[2]} /> : <ChevronDown size={14} color={theme.colors.dark[2]} />}
+            {isCollapsed ? (
+              <ChevronRight size={14} color={theme.colors.dark[2]} />
+            ) : (
+              <ChevronDown size={14} color={theme.colors.dark[2]} />
+            )}
           </Box>
           <Text size="xs" c="dark.2">
             {label}

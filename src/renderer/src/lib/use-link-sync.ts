@@ -25,8 +25,8 @@ function applyPlaybackRate(linkTempo: number): void {
  */
 function syncToLink(): void {
   const state = useStore.getState();
-  const { player, isPlaying, activeFileId, linkEnabled, linkQuantum,
-          linkLatencyMs, filepathsBpm, loop, loopRegion } = state;
+  const { player, isPlaying, activeFileId, linkEnabled, linkQuantum, linkLatencyMs, filepathsBpm, loop, loopRegion } =
+    state;
 
   if (!player || !isPlaying || !activeFileId || !linkEnabled) return;
   if (!window.linkAddon?.isEnabled?.()) return;

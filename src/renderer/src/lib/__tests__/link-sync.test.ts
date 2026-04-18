@@ -95,7 +95,7 @@ describe("Link sync", () => {
 
       // At phase 2 (half bar), should be 2 beats into the loop
       const r2 = computeLinkOffset(2, linkTempo, fileBpm, loopStart, loopEnd);
-      const expectedOffset = 2 * 60 / fileBpm; // 0.857s
+      const expectedOffset = (2 * 60) / fileBpm; // 0.857s
       expect(r2.offset).toBeCloseTo(expectedOffset, 3);
     });
 

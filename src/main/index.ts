@@ -97,8 +97,6 @@ app.whenReady().then(async () => {
 
   createWindow();
 
-
-
   if (mainWindow && is.dev) {
     // Install DevTools extensions in development mode
     // Temporarily suppress deprecation and extension warnings

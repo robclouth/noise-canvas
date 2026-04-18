@@ -43,11 +43,7 @@ describe("screenToZoomed / zoomedToScreen", () => {
     });
 
     it("zooms both axes independently", () => {
-      const z = screenToZoomed(
-        new Vector2(0.5, 0.5),
-        new Vector2(1, 2),
-        new Vector2(0, 0),
-      );
+      const z = screenToZoomed(new Vector2(0.5, 0.5), new Vector2(1, 2), new Vector2(0, 0));
       expect(z.x).toBeCloseTo(0.25); // 2x on x
       expect(z.y).toBeCloseTo(0.125); // 4x on y
     });
