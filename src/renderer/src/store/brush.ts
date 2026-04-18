@@ -10,14 +10,12 @@ export interface BrushState {
   brushIntensity: number;
   brushIterations: number;
   brushPan: number;
-  brushEnvelopeDelayTime: number;
-  brushEnvelopeAttackTime: number;
-  brushEnvelopeSustainTime: number;
-  brushEnvelopeReleaseTime: number;
-  brushEnvelopeDelayPitch: number;
-  brushEnvelopeAttackPitch: number;
-  brushEnvelopeSustainPitch: number;
-  brushEnvelopeReleasePitch: number;
+  brushSizeTime: number;
+  brushCurveTime: number;
+  brushSkewTime: number;
+  brushSizePitch: number;
+  brushCurvePitch: number;
+  brushSkewPitch: number;
   sourceFile: FileParameterValue;
   sourceTimeOffset: number;
   sourcePitchOffset: number;
@@ -67,14 +65,12 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     brushIntensity: getParameterDef("brushIntensity").default,
     brushIterations: getParameterDef("brushIterations").default,
     brushPan: getParameterDef("brushPan").default,
-    brushEnvelopeDelayTime: getParameterDef("brushEnvelopeDelayTime").default,
-    brushEnvelopeAttackTime: getParameterDef("brushEnvelopeAttackTime").default,
-    brushEnvelopeSustainTime: getParameterDef("brushEnvelopeSustainTime").default,
-    brushEnvelopeReleaseTime: getParameterDef("brushEnvelopeReleaseTime").default,
-    brushEnvelopeDelayPitch: getParameterDef("brushEnvelopeDelayPitch").default,
-    brushEnvelopeAttackPitch: getParameterDef("brushEnvelopeAttackPitch").default,
-    brushEnvelopeSustainPitch: getParameterDef("brushEnvelopeSustainPitch").default,
-    brushEnvelopeReleasePitch: getParameterDef("brushEnvelopeReleasePitch").default,
+    brushSizeTime: getParameterDef("brushSizeTime").default,
+    brushCurveTime: getParameterDef("brushCurveTime").default,
+    brushSkewTime: getParameterDef("brushSkewTime").default,
+    brushSizePitch: getParameterDef("brushSizePitch").default,
+    brushCurvePitch: getParameterDef("brushCurvePitch").default,
+    brushSkewPitch: getParameterDef("brushSkewPitch").default,
     blendMode: getParameterDef("blendMode").default,
     algorithm: getParameterDef("algorithm").default,
     accumulate: getParameterDef("accumulate").default,
@@ -149,17 +145,12 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
 
       let autoPlaybackParams: { startTimeSeconds: number; endTimeSeconds: number } | null = null;
       if (autoPlayStroke) {
-        // Get envelope times in beats and convert to seconds
-        const { brushEnvelopeDelayTime, brushEnvelopeAttackTime, brushEnvelopeSustainTime, brushEnvelopeReleaseTime } =
-          state;
         const beatsToSeconds = 60 / bpm;
-        const delaySeconds = brushEnvelopeDelayTime * beatsToSeconds;
-        const envelopeEndSeconds =
-          (brushEnvelopeAttackTime + brushEnvelopeSustainTime + brushEnvelopeReleaseTime) * beatsToSeconds;
+        const brushDurationSeconds = state.brushSizeTime * beatsToSeconds;
 
-        // Extend time range by envelope times for autoplay
-        const autoPlayStart = Math.max(0, clampedStart - delaySeconds);
-        const autoPlayEnd = Math.min(totalDuration, clampedEnd + envelopeEndSeconds);
+        // Extend time range by brush footprint for autoplay
+        const autoPlayStart = clampedStart;
+        const autoPlayEnd = Math.min(totalDuration, clampedEnd + brushDurationSeconds);
 
         setLoopRegion({ start: autoPlayStart, end: autoPlayEnd });
         setFilePlaybackStartTime(activeFileId, autoPlayStart);

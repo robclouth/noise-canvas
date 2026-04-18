@@ -16,13 +16,13 @@ uniform int evolveEdgeMode;
 void main() {
     ProcessingUvs coords = getProcessingUvs(vUv);
     vec4 originalTexel = texture(destSpectrogramTex, vUv);
-    float weight = getBrushWeight(coords.dest);
+    float audioLevelDb = getAudioLevelDb(coords.dest);
+    float weight = getBrushWeight(coords.dest, audioLevelDb);
     if (weight <= 0.0) {
         outColor = originalTexel;
         return;
     }
 
-    float audioLevelDb = getAudioLevelDb(coords.dest);
 
     // Get modulated parameters (normalized to 0-1 range from -100 to 100)
     float flow = applyModulation(evolveFlow.value, evolveFlow.minValue, evolveFlow.maxValue, evolveFlow.modulationAmounts, evolveFlow.contextualModAmounts, coords.dest, 0, audioLevelDb) / 100.0;

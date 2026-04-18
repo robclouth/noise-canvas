@@ -42,67 +42,6 @@ export type EffectsRegistry = Record<string, BaseEffect>;
 const noise2D = createNoise2D();
 
 /**
- * Envelope boundaries calculated from D/A/S/R values
- */
-export interface EnvelopeBoundaries {
-  d: number;
-  a: number;
-  s: number;
-  r: number;
-  delayEnd: number;
-  attackEnd: number;
-  sustainEnd: number;
-  releaseEnd: number;
-}
-
-/**
- * Helper function to calculate normalized envelope stage boundaries.
- * Returns absolute UV values for each stage.
- */
-export function calculateEnvelopeBoundaries(
-  delay: number,
-  attack: number,
-  sustain: number,
-  release: number,
-  bpm: number,
-  totalDuration: number,
-  bandsPerOctave: number,
-  numBands: number,
-  isTime: boolean,
-): EnvelopeBoundaries {
-  let d: number, a: number, s: number, r: number;
-
-  // Convert from beats/semitones to absolute UV using unitsToUv
-  if (isTime) {
-    d = unitsToUv(delay, 0, bpm, totalDuration, bandsPerOctave, numBands).x;
-    a = unitsToUv(attack, 0, bpm, totalDuration, bandsPerOctave, numBands).x;
-    s = unitsToUv(sustain, 0, bpm, totalDuration, bandsPerOctave, numBands).x;
-    r = unitsToUv(release, 0, bpm, totalDuration, bandsPerOctave, numBands).x;
-  } else {
-    d = unitsToUv(0, delay, bpm, totalDuration, bandsPerOctave, numBands).y;
-    a = unitsToUv(0, attack, bpm, totalDuration, bandsPerOctave, numBands).y;
-    s = unitsToUv(0, sustain, bpm, totalDuration, bandsPerOctave, numBands).y;
-    r = unitsToUv(0, release, bpm, totalDuration, bandsPerOctave, numBands).y;
-  }
-
-  // Calculate total brush size from envelope
-  const brushSize = d + a + s + r;
-
-  // Calculate cumulative positions as fractions of brush size (normalized 0-1)
-  const safeSize = Math.max(brushSize, 0.0001);
-  return {
-    d,
-    a,
-    s,
-    r,
-    delayEnd: d / safeSize,
-    attackEnd: (d + a) / safeSize,
-    sustainEnd: (d + a + s) / safeSize,
-    releaseEnd: (d + a + s + r) / safeSize,
-  };
-}
-
-/**
  * Textures required for stroke rendering
  */
 export interface StrokeTextures {
@@ -234,14 +173,6 @@ export class StrokeRenderer {
         destBandCount: { value: 0 },
         brushBottomLeftUv: { value: new Vector2(0, 0) },
         brushSizeUv: { value: new Vector2(0, 0) },
-        envelopeDelayEndX: { value: 0 },
-        envelopeAttackEndX: { value: 0 },
-        envelopeSustainEndX: { value: 0 },
-        envelopeReleaseEndX: { value: 0 },
-        envelopeDelayEndY: { value: 0 },
-        envelopeAttackEndY: { value: 0 },
-        envelopeSustainEndY: { value: 0 },
-        envelopeReleaseEndY: { value: 0 },
       },
       vertexShader: passThroughVert,
       fragmentShader: withPlatformDefines(maskUpdateFrag),
@@ -333,32 +264,26 @@ export class StrokeRenderer {
   }
 
   /**
-   * Calculate brush size in UV coordinates from state envelope parameters.
+   * Calculate brush size in UV coordinates from state size parameters.
    */
   calculateBrushSizeUv(state: State, bpm: number, totalDuration: number): Vector2 {
-    const envelopeTimeUv = unitsToUv(
-      state.brushEnvelopeDelayTime +
-        state.brushEnvelopeAttackTime +
-        state.brushEnvelopeSustainTime +
-        state.brushEnvelopeReleaseTime,
+    const sizeTimeUv = unitsToUv(
+      state.brushSizeTime,
       0,
       bpm,
       totalDuration,
       this.spectrogramData.bandsPerOctave,
       this.spectrogramData.numBands,
     );
-    const envelopePitchUv = unitsToUv(
+    const sizePitchUv = unitsToUv(
       0,
-      state.brushEnvelopeDelayPitch +
-        state.brushEnvelopeAttackPitch +
-        state.brushEnvelopeSustainPitch +
-        state.brushEnvelopeReleasePitch,
+      state.brushSizePitch,
       bpm,
       totalDuration,
       this.spectrogramData.bandsPerOctave,
       this.spectrogramData.numBands,
     );
-    return new Vector2(envelopeTimeUv.x, envelopePitchUv.y);
+    return new Vector2(sizeTimeUv.x, sizePitchUv.y);
   }
 
   /**
@@ -418,30 +343,6 @@ export class StrokeRenderer {
     const { placeholderTexture, modulatorScaleLut, modulator1Texture, modulator2Texture, modulator3Texture } =
       this.textures;
 
-    // Calculate envelope boundaries
-    const envelopeX = calculateEnvelopeBoundaries(
-      stepState.brushEnvelopeDelayTime,
-      stepState.brushEnvelopeAttackTime,
-      stepState.brushEnvelopeSustainTime,
-      stepState.brushEnvelopeReleaseTime,
-      bpm,
-      totalDuration,
-      this.spectrogramData.bandsPerOctave,
-      this.spectrogramData.numBands,
-      true,
-    );
-    const envelopeY = calculateEnvelopeBoundaries(
-      stepState.brushEnvelopeDelayPitch,
-      stepState.brushEnvelopeAttackPitch,
-      stepState.brushEnvelopeSustainPitch,
-      stepState.brushEnvelopeReleasePitch,
-      bpm,
-      totalDuration,
-      this.spectrogramData.bandsPerOctave,
-      this.spectrogramData.numBands,
-      false,
-    );
-
     const modulatorUniforms = buildModulatorUniforms(
       bpm,
       totalDuration,
@@ -477,14 +378,42 @@ export class StrokeRenderer {
       viewZoomPowerY: { value: viewZoomPowerY },
       viewOffsetY: { value: viewOffsetY },
       brushBottomLeftUv: { value: cursorPos },
-      envelopeDelayEndX: { value: envelopeX.delayEnd },
-      envelopeAttackEndX: { value: envelopeX.attackEnd },
-      envelopeSustainEndX: { value: envelopeX.sustainEnd },
-      envelopeReleaseEndX: { value: envelopeX.releaseEnd },
-      envelopeDelayEndY: { value: envelopeY.delayEnd },
-      envelopeAttackEndY: { value: envelopeY.attackEnd },
-      envelopeSustainEndY: { value: envelopeY.sustainEnd },
-      envelopeReleaseEndY: { value: envelopeY.releaseEnd },
+      brushCurveTime: {
+        value: {
+          value: (stepState.brushCurveTime as number) / 100,
+          minValue: -1,
+          maxValue: 1,
+          modulationAmounts: getModAmountValuesNormalized(stepState, "brushCurveTime"),
+          contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushCurveTime"),
+        },
+      },
+      brushSkewTime: {
+        value: {
+          value: ((stepState.brushSkewTime as number) + 100) / 200,
+          minValue: 0,
+          maxValue: 1,
+          modulationAmounts: getModAmountValuesNormalized(stepState, "brushSkewTime"),
+          contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushSkewTime"),
+        },
+      },
+      brushCurvePitch: {
+        value: {
+          value: (stepState.brushCurvePitch as number) / 100,
+          minValue: -1,
+          maxValue: 1,
+          modulationAmounts: getModAmountValuesNormalized(stepState, "brushCurvePitch"),
+          contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushCurvePitch"),
+        },
+      },
+      brushSkewPitch: {
+        value: {
+          value: ((stepState.brushSkewPitch as number) + 100) / 200,
+          minValue: 0,
+          maxValue: 1,
+          modulationAmounts: getModAmountValuesNormalized(stepState, "brushSkewPitch"),
+          contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushSkewPitch"),
+        },
+      },
       brushSizeUv: { value: brushSizeUv },
       brushIntensity: {
         value: {
@@ -900,7 +829,7 @@ export class StrokeRenderer {
 
       // Update stroke mask for non-cumulative mode
       if (!activeStepState.accumulate) {
-        this.updateStrokeMask(state, cursorPos, bpm, totalDuration);
+        this.updateStrokeMask(state, cursorPos, bpm, totalDuration, strokeRandom, pressure, tiltX, tiltY);
       }
 
       // Update dirty region to include this stroke's bounds
@@ -931,12 +860,42 @@ export class StrokeRenderer {
   /**
    * Update the stroke mask for non-cumulative mode.
    */
-  private updateStrokeMask(state: State, cursorPos: Vector2, bpm: number, totalDuration: number): void {
+  private updateStrokeMask(
+    state: State,
+    cursorPos: Vector2,
+    bpm: number,
+    totalDuration: number,
+    strokeRandom: number,
+    pressure: number,
+    tiltX: number,
+    tiltY: number,
+  ): void {
     const currentMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo : this.strokeMaskFbo2;
     const nextMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo2 : this.strokeMaskFbo;
 
     const activeStep = createStepStateView(state, state.activeStepIndex);
     const brushSizeUv = this.calculateBrushSizeUv(activeStep, bpm, totalDuration);
+    const { placeholderTexture, modulator1Texture, modulator2Texture, modulator3Texture, modulatorScaleLut } =
+      this.textures;
+    const modulatorUniforms = buildModulatorUniforms(
+      bpm,
+      totalDuration,
+      this.spectrogramData.bandsPerOctave,
+      this.spectrogramData.numBands,
+      activeStep,
+    );
+
+    const numSteps = (state.brushes[state.activeBrushIndex]?.steps ?? []).length;
+    const brushCenterTime = cursorPos.x + brushSizeUv.x / 2;
+    const brushCenterPitch = cursorPos.y + brushSizeUv.y / 2;
+    this.maskMaterial.uniforms.strokeIterationNormalized.value = 1;
+    this.maskMaterial.uniforms.strokeTimePosition.value = brushCenterTime;
+    this.maskMaterial.uniforms.strokePitchPosition.value = brushCenterPitch;
+    this.maskMaterial.uniforms.strokeRandom.value = strokeRandom;
+    this.maskMaterial.uniforms.strokeStepNormalized.value = numSteps > 1 ? state.activeStepIndex / (numSteps - 1) : 0;
+    this.maskMaterial.uniforms.strokePressure = { value: pressure };
+    this.maskMaterial.uniforms.strokeTiltX = { value: (tiltX + 90) / 180 };
+    this.maskMaterial.uniforms.strokeTiltY = { value: (tiltY + 90) / 180 };
 
     this.maskMaterial.uniforms.currentMaskTex.value = currentMaskFbo.texture;
     this.maskMaterial.uniforms.destMetadataTex.value = this.textures.metadataTex;
@@ -945,46 +904,51 @@ export class StrokeRenderer {
     this.maskMaterial.uniforms.destFrameCount.value = this.spectrogramData.numFrames;
     this.maskMaterial.uniforms.destBandCount.value = this.spectrogramData.numBands;
     this.maskMaterial.uniforms.brushSizeUv.value = brushSizeUv;
+    this.maskMaterial.uniforms.modulators.value = modulatorUniforms;
+    this.maskMaterial.uniforms.gainLut.value = modulatorScaleLut || placeholderTexture;
+    this.maskMaterial.uniforms.modulator1ImageTex.value = modulator1Texture || placeholderTexture;
+    this.maskMaterial.uniforms.modulator2ImageTex.value = modulator2Texture || placeholderTexture;
+    this.maskMaterial.uniforms.modulator3ImageTex.value = modulator3Texture || placeholderTexture;
+    this.maskMaterial.uniforms.modulator1SeqDataTex.value = modulatorUniforms[0]?.seqDataTex || placeholderTexture;
+    this.maskMaterial.uniforms.modulator2SeqDataTex.value = modulatorUniforms[1]?.seqDataTex || placeholderTexture;
+    this.maskMaterial.uniforms.modulator3SeqDataTex.value = modulatorUniforms[2]?.seqDataTex || placeholderTexture;
     this.maskMaterial.uniforms.brushIntensity.value = {
       value: activeStep.brushIntensity / 100,
       minValue: 0,
       maxValue: 1,
-      modulationAmounts: [0, 0, 0],
-      contextualModAmounts: [0, 0, 0, 0, 0],
+      modulationAmounts: getModAmountValuesNormalized(activeStep, "brushIntensity"),
+      contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushIntensity"),
+    };
+    this.maskMaterial.uniforms.brushCurveTime.value = {
+      value: (activeStep.brushCurveTime as number) / 100,
+      minValue: -1,
+      maxValue: 1,
+      modulationAmounts: getModAmountValuesNormalized(activeStep, "brushCurveTime"),
+      contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushCurveTime"),
+    };
+    this.maskMaterial.uniforms.brushSkewTime.value = {
+      value: ((activeStep.brushSkewTime as number) + 100) / 200,
+      minValue: 0,
+      maxValue: 1,
+      modulationAmounts: getModAmountValuesNormalized(activeStep, "brushSkewTime"),
+      contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushSkewTime"),
+    };
+    this.maskMaterial.uniforms.brushCurvePitch.value = {
+      value: (activeStep.brushCurvePitch as number) / 100,
+      minValue: -1,
+      maxValue: 1,
+      modulationAmounts: getModAmountValuesNormalized(activeStep, "brushCurvePitch"),
+      contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushCurvePitch"),
+    };
+    this.maskMaterial.uniforms.brushSkewPitch.value = {
+      value: ((activeStep.brushSkewPitch as number) + 100) / 200,
+      minValue: 0,
+      maxValue: 1,
+      modulationAmounts: getModAmountValuesNormalized(activeStep, "brushSkewPitch"),
+      contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushSkewPitch"),
     };
 
-    const envelopeX = calculateEnvelopeBoundaries(
-      activeStep.brushEnvelopeDelayTime,
-      activeStep.brushEnvelopeAttackTime,
-      activeStep.brushEnvelopeSustainTime,
-      activeStep.brushEnvelopeReleaseTime,
-      bpm,
-      totalDuration,
-      this.spectrogramData.bandsPerOctave,
-      this.spectrogramData.numBands,
-      true,
-    );
-    const envelopeY = calculateEnvelopeBoundaries(
-      activeStep.brushEnvelopeDelayPitch,
-      activeStep.brushEnvelopeAttackPitch,
-      activeStep.brushEnvelopeSustainPitch,
-      activeStep.brushEnvelopeReleasePitch,
-      bpm,
-      totalDuration,
-      this.spectrogramData.bandsPerOctave,
-      this.spectrogramData.numBands,
-      false,
-    );
-
     this.maskMaterial.uniforms.brushBottomLeftUv.value = cursorPos;
-    this.maskMaterial.uniforms.envelopeDelayEndX.value = envelopeX.delayEnd;
-    this.maskMaterial.uniforms.envelopeAttackEndX.value = envelopeX.attackEnd;
-    this.maskMaterial.uniforms.envelopeSustainEndX.value = envelopeX.sustainEnd;
-    this.maskMaterial.uniforms.envelopeReleaseEndX.value = envelopeX.releaseEnd;
-    this.maskMaterial.uniforms.envelopeDelayEndY.value = envelopeY.delayEnd;
-    this.maskMaterial.uniforms.envelopeAttackEndY.value = envelopeY.attackEnd;
-    this.maskMaterial.uniforms.envelopeSustainEndY.value = envelopeY.sustainEnd;
-    this.maskMaterial.uniforms.envelopeReleaseEndY.value = envelopeY.releaseEnd;
 
     this.fboMesh.material = this.maskMaterial;
     this.gl.setRenderTarget(nextMaskFbo);

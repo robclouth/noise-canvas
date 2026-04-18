@@ -50,14 +50,10 @@ export type CommonUniforms = {
   viewOffset: { value: number };
   viewZoomPowerY: { value: number };
   viewOffsetY: { value: number };
-  envelopeDelayEndX: { value: number };
-  envelopeAttackEndX: { value: number };
-  envelopeSustainEndX: { value: number };
-  envelopeReleaseEndX: { value: number };
-  envelopeDelayEndY: { value: number };
-  envelopeAttackEndY: { value: number };
-  envelopeSustainEndY: { value: number };
-  envelopeReleaseEndY: { value: number };
+  brushCurveTime: { value: ParameterUniform };
+  brushSkewTime: { value: ParameterUniform };
+  brushCurvePitch: { value: ParameterUniform };
+  brushSkewPitch: { value: ParameterUniform };
   modulators: { value: Modulator[] };
   brushIntensity: {
     value: ParameterUniform;
@@ -135,14 +131,42 @@ export const defaultValues: CommonUniforms = {
   viewOffset: { value: 0.0 },
   viewZoomPowerY: { value: 0.0 },
   viewOffsetY: { value: 0.0 },
-  envelopeDelayEndX: { value: 0.0 },
-  envelopeAttackEndX: { value: 0.0 },
-  envelopeSustainEndX: { value: 1.0 },
-  envelopeReleaseEndX: { value: 1.0 },
-  envelopeDelayEndY: { value: 0.0 },
-  envelopeAttackEndY: { value: 0.0 },
-  envelopeSustainEndY: { value: 1.0 },
-  envelopeReleaseEndY: { value: 1.0 },
+  brushCurveTime: {
+    value: {
+      value: 0.0,
+      minValue: -1.0,
+      maxValue: 1.0,
+      modulationAmounts: [],
+      contextualModAmounts: [],
+    },
+  },
+  brushSkewTime: {
+    value: {
+      value: 0.5,
+      minValue: 0.0,
+      maxValue: 1.0,
+      modulationAmounts: [],
+      contextualModAmounts: [],
+    },
+  },
+  brushCurvePitch: {
+    value: {
+      value: 0.0,
+      minValue: -1.0,
+      maxValue: 1.0,
+      modulationAmounts: [],
+      contextualModAmounts: [],
+    },
+  },
+  brushSkewPitch: {
+    value: {
+      value: 0.5,
+      minValue: 0.0,
+      maxValue: 1.0,
+      modulationAmounts: [],
+      contextualModAmounts: [],
+    },
+  },
   brushIntensity: {
     value: {
       value: 1.0,

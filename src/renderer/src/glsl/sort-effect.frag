@@ -80,7 +80,8 @@ void main() {
     vec4 currentTexel = texelFetch(destSpectrogramTex, myPixel, 0);
 
     ProcessingUvs coords = getProcessingUvs(vUv);
-    float weight = getBrushWeight(coords.dest);
+    float audioLevelDb = getAudioLevelDb(coords.dest);
+    float weight = getBrushWeight(coords.dest, audioLevelDb);
     if (weight <= 0.0) {
         outColor = currentTexel;
         return;
@@ -141,7 +142,7 @@ void main() {
             // Only swap if neighbor is also inside the brush
             float nU = neighborInvRG.r / max(destFrameCount, 1.0);
             float nV = 1.0 - (neighborInvRG.g + 0.5) / max(destBandCount, 1.0);
-            if (getBrushWeight(vec2(nU, nV)) <= 0.0) {
+            if (getBrushWeight(vec2(nU, nV), audioLevelDb) <= 0.0) {
                 outColor = applyBrush(currentTexel, currentTexel, weight, coords.dest, vUv);
                 return;
             }
@@ -195,7 +196,7 @@ void main() {
             // Only swap if neighbor is also inside the brush
             float nU = neighborInvRG.r / max(destFrameCount, 1.0);
             float nV = 1.0 - (float(neighborBandIdx) + 0.5) / max(destBandCount, 1.0);
-            if (getBrushWeight(vec2(nU, nV)) <= 0.0) {
+            if (getBrushWeight(vec2(nU, nV), audioLevelDb) <= 0.0) {
                 outColor = applyBrush(currentTexel, currentTexel, weight, coords.dest, vUv);
                 return;
             }

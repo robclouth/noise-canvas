@@ -10,7 +10,8 @@ void main() {
   vec2 packedUv = vUv;
   vec2 unpackedUv = packedToUnpackedUv(destInverseMapTex, packedUv, destFrameCount, destBandCount);
 
-  float envelopeWeight = getBrushWeight(unpackedUv);
+  float audioLevelDb = getAudioLevelDb(unpackedUv);
+  float envelopeWeight = getBrushWeight(unpackedUv, audioLevelDb);
   
   // Effective weight is envelope * intensity (same calculation as in applyBrush)
   float newWeight = envelopeWeight * brushIntensity.value;

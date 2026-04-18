@@ -8,14 +8,12 @@ export const EnvelopeControl = () => {
       <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
         <ParameterControl paramKey="brushIntensity" />
         <Box />
-        <ParameterControl paramKey="brushEnvelopeDelayTime" />
-        <ParameterControl paramKey="brushEnvelopeDelayPitch" />
-        <ParameterControl paramKey="brushEnvelopeAttackTime" />
-        <ParameterControl paramKey="brushEnvelopeAttackPitch" />
-        <ParameterControl paramKey="brushEnvelopeSustainTime" />
-        <ParameterControl paramKey="brushEnvelopeSustainPitch" />
-        <ParameterControl paramKey="brushEnvelopeReleaseTime" />
-        <ParameterControl paramKey="brushEnvelopeReleasePitch" />
+        <ParameterControl paramKey="brushSizeTime" />
+        <ParameterControl paramKey="brushSizePitch" />
+        <ParameterControl paramKey="brushCurveTime" />
+        <ParameterControl paramKey="brushCurvePitch" />
+        <ParameterControl paramKey="brushSkewTime" />
+        <ParameterControl paramKey="brushSkewPitch" />
       </SimpleGrid>
       <EnvelopeVisualizer height={60} />
     </Stack>

@@ -10,11 +10,12 @@ uniform int boundaryMode;
 void main() {
     ProcessingUvs coords = getProcessingUvs(vUv);
     vec4 originalTexel = texture(destSpectrogramTex, vUv);
-    float weight = getBrushWeight(coords.dest);
+    float audioLevelDb = getAudioLevelDb(coords.dest);
+    float weight = getBrushWeight(coords.dest, audioLevelDb);
     if( weight <= 0.0 ) {
         outColor = originalTexel;
         return;
-    } 
+    }
 
     // 1. Define the pivot point based on scale direction (bottom-left corner).
     vec2 pivot = brushBottomLeftUv;
@@ -24,7 +25,6 @@ void main() {
     vec2 relativeUv = coords.source - pivot;
 
     // 3. Apply INVERSE Rotation around the new origin (0,0).
-    float audioLevelDb = getAudioLevelDb(coords.dest);
     float rotationValue = applyModulation(rotation.value, rotation.minValue, rotation.maxValue, rotation.modulationAmounts, rotation.contextualModAmounts, coords.dest, 0, audioLevelDb);
     float rad = radians(-rotationValue);
     mat2 rotMat = mat2(cos(rad), -sin(rad), sin(rad), cos(rad));

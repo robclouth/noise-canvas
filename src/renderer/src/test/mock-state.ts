@@ -11,14 +11,12 @@ export interface TestBrushStep {
   brushIntensity?: number;
   brushIterations?: number;
   brushPan?: number;
-  brushEnvelopeDelayTime?: number;
-  brushEnvelopeAttackTime?: number;
-  brushEnvelopeSustainTime?: number;
-  brushEnvelopeReleaseTime?: number;
-  brushEnvelopeDelayPitch?: number;
-  brushEnvelopeAttackPitch?: number;
-  brushEnvelopeSustainPitch?: number;
-  brushEnvelopeReleasePitch?: number;
+  brushSizeTime?: number;
+  brushCurveTime?: number;
+  brushSkewTime?: number;
+  brushSizePitch?: number;
+  brushCurvePitch?: number;
+  brushSkewPitch?: number;
   brushWrapMode?: number;
   blendMode?: number;
   algorithm?: number;
@@ -38,14 +36,12 @@ function createTestStep(name: string): TestBrushStep {
     brushIntensity: 100,
     brushIterations: 1,
     brushPan: 0,
-    brushEnvelopeDelayTime: 0,
-    brushEnvelopeAttackTime: 0.25,
-    brushEnvelopeSustainTime: 0.5,
-    brushEnvelopeReleaseTime: 0.25,
-    brushEnvelopeDelayPitch: 0,
-    brushEnvelopeAttackPitch: 3,
-    brushEnvelopeSustainPitch: 6,
-    brushEnvelopeReleasePitch: 3,
+    brushSizeTime: 1,
+    brushCurveTime: 100,
+    brushSkewTime: -100,
+    brushSizePitch: 12,
+    brushCurvePitch: 100,
+    brushSkewPitch: -100,
     brushWrapMode: 0,
     blendMode: 0,
     algorithm: 0,
@@ -90,14 +86,12 @@ export function createMockState(overrides: Partial<State> = {}): State {
     brushIntensity: 100,
     brushIterations: 1,
     brushPan: 0,
-    brushEnvelopeDelayTime: 0,
-    brushEnvelopeAttackTime: 0.25,
-    brushEnvelopeSustainTime: 0.5,
-    brushEnvelopeReleaseTime: 0.25,
-    brushEnvelopeDelayPitch: 0,
-    brushEnvelopeAttackPitch: 3,
-    brushEnvelopeSustainPitch: 6,
-    brushEnvelopeReleasePitch: 3,
+    brushSizeTime: 1,
+    brushCurveTime: 100,
+    brushSkewTime: -100,
+    brushSizePitch: 12,
+    brushCurvePitch: 100,
+    brushSkewPitch: -100,
     brushWrapMode: 0,
     blendMode: 0,
     algorithm: 0,

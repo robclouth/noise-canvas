@@ -443,29 +443,23 @@ const FileRendererInner = memo(
 
       // Helper to calculate brush size from a step state
       const calculateBrushSizeUv = (stepState: State) => {
-        const envelopeTimeUv = unitsToUv(
-          stepState.brushEnvelopeDelayTime +
-            stepState.brushEnvelopeAttackTime +
-            stepState.brushEnvelopeSustainTime +
-            stepState.brushEnvelopeReleaseTime,
+        const sizeTimeUv = unitsToUv(
+          stepState.brushSizeTime,
           0,
           bpm,
           totalDuration,
           spectrogramData.bandsPerOctave,
           spectrogramData.numBands,
         );
-        const envelopePitchUv = unitsToUv(
+        const sizePitchUv = unitsToUv(
           0,
-          stepState.brushEnvelopeDelayPitch +
-            stepState.brushEnvelopeAttackPitch +
-            stepState.brushEnvelopeSustainPitch +
-            stepState.brushEnvelopeReleasePitch,
+          stepState.brushSizePitch,
           bpm,
           totalDuration,
           spectrogramData.bandsPerOctave,
           spectrogramData.numBands,
         );
-        return new Vector2(envelopeTimeUv.x, envelopePitchUv.y);
+        return new Vector2(sizeTimeUv.x, sizePitchUv.y);
       };
 
       // Calculate maximum brush size across all steps (for display purposes)
@@ -615,10 +609,7 @@ const FileRendererInner = memo(
         for (let i = 0; i < slotSteps.length; i++) {
           const stepState = createStepStateView(state, i);
           const timeUv = unitsToUv(
-            stepState.brushEnvelopeDelayTime +
-              stepState.brushEnvelopeAttackTime +
-              stepState.brushEnvelopeSustainTime +
-              stepState.brushEnvelopeReleaseTime,
+            stepState.brushSizeTime,
             0,
             targetBpm,
             targetDuration,
@@ -627,10 +618,7 @@ const FileRendererInner = memo(
           );
           const pitchUv = unitsToUv(
             0,
-            stepState.brushEnvelopeDelayPitch +
-              stepState.brushEnvelopeAttackPitch +
-              stepState.brushEnvelopeSustainPitch +
-              stepState.brushEnvelopeReleasePitch,
+            stepState.brushSizePitch,
             targetBpm,
             targetDuration,
             targetFile.spectrogramData.bandsPerOctave,

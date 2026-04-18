@@ -27,14 +27,8 @@ import {
 } from "../../test/mock-spectrogram";
 import { createMockState, createMockStateForIterations, createMockStateWithSteps } from "../../test/mock-state";
 import { withPlatformDefines } from "../shader-utils";
-import {
-  calculateEnvelopeBoundaries,
-  EffectsRegistry,
-  SourceFileInfo,
-  StrokeParams,
-  StrokeRenderer,
-  StrokeTextures,
-} from "../stroke-renderer";
+import { brushEnvelopeShape } from "../brush-envelope";
+import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 
 // Mock shaders check brush bounds in packed UV space, which doesn't align with
 // the scissor's unpacked band-index row calculation. Disable scissor for tests.
@@ -496,41 +490,42 @@ describe("StrokeRenderer", () => {
     });
   });
 
-  describe("calculateEnvelopeBoundaries", () => {
-    it("should calculate correct boundaries for time dimension", () => {
-      const result = calculateEnvelopeBoundaries(
-        0, // delay
-        0.25, // attack
-        0.5, // sustain
-        0.25, // release
-        120, // bpm
-        10, // totalDuration
-        24, // bandsPerOctave
-        128, // numBands
-        true, // isTime
-      );
-
-      expect(result.delayEnd).toBe(0);
-      expect(result.releaseEnd).toBe(1);
-      expect(result.attackEnd).toBeGreaterThan(0);
-      expect(result.sustainEnd).toBeGreaterThan(result.attackEnd);
+  describe("brushEnvelopeShape", () => {
+    it("peaks at the skew position", () => {
+      for (const skew of [0, 0.25, 0.5, 0.75, 1]) {
+        expect(brushEnvelopeShape(skew, 0, skew)).toBeCloseTo(1, 10);
+      }
     });
 
-    it("should calculate correct boundaries for pitch dimension", () => {
-      const result = calculateEnvelopeBoundaries(
-        0, // delay
-        3, // attack (semitones)
-        6, // sustain
-        3, // release
-        120,
-        10,
-        24,
-        128,
-        false, // isPitch
-      );
+    it("decays to below 1 at the opposite side when skew is interior", () => {
+      expect(brushEnvelopeShape(0, 0, 0.5)).toBeLessThan(1);
+      expect(brushEnvelopeShape(1, 0, 0.5)).toBeLessThan(1);
+    });
 
-      expect(result.delayEnd).toBe(0);
-      expect(result.releaseEnd).toBe(1);
+    it("produces a crisp rectangle when curve approaches 1", () => {
+      let maxErr = 0;
+      for (let i = 0; i < 50; i++) {
+        const t = 0.1 + (i / 49) * 0.8; // middle 80%
+        const v = brushEnvelopeShape(t, 0.95, 0.5);
+        maxErr = Math.max(maxErr, Math.abs(1 - v));
+      }
+      expect(maxErr).toBeLessThan(0.05);
+    });
+
+    it("produces a narrow spike when curve approaches -1", () => {
+      expect(brushEnvelopeShape(0.5, -0.95, 0.5)).toBeCloseTo(1, 5);
+      expect(brushEnvelopeShape(0.3, -0.95, 0.5)).toBeLessThan(0.05);
+      expect(brushEnvelopeShape(0.7, -0.95, 0.5)).toBeLessThan(0.05);
+    });
+
+    it("is a linear triangle at curve=0, skew=0.5", () => {
+      expect(brushEnvelopeShape(0.25, 0, 0.5)).toBeCloseTo(0.5, 10);
+      expect(brushEnvelopeShape(0.75, 0, 0.5)).toBeCloseTo(0.5, 10);
+    });
+
+    it("returns 0 outside the [0, 1] range", () => {
+      expect(brushEnvelopeShape(-0.1, 0, 0.5)).toBe(0);
+      expect(brushEnvelopeShape(1.1, 0, 0.5)).toBe(0);
     });
   });
 

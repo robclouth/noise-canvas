@@ -34,14 +34,10 @@ uniform float viewZoomPower;
 uniform float viewOffset;
 uniform float viewZoomPowerY;
 uniform float viewOffsetY;
-uniform float envelopeDelayEndX;
-uniform float envelopeAttackEndX;
-uniform float envelopeSustainEndX;
-uniform float envelopeReleaseEndX;
-uniform float envelopeDelayEndY;
-uniform float envelopeAttackEndY;
-uniform float envelopeSustainEndY;
-uniform float envelopeReleaseEndY;
+uniform Parameter brushCurveTime;
+uniform Parameter brushSkewTime;
+uniform Parameter brushCurvePitch;
+uniform Parameter brushSkewPitch;
 uniform float sourceOffsetX;
 uniform float sourceOffsetY;
 uniform float sourceTimeScale;
@@ -602,48 +598,52 @@ vec2 getEffectiveBrushOffset(vec2 unpackedUv) {
   return vec2(wrappedOffset.x, wrappedOffset.y);
 }
 
-// Calculate envelope gain for a single dimension using pre-calculated stage boundaries
-float calculateEnvelopeGain(float localPos, float delayEnd, float attackEnd, float sustainEnd, float releaseEnd) {
-  float gain = 0.0;
-  
-  if (localPos < delayEnd) {
-    // Delay phase: gain = 0
-    gain = 0.0;
-  } else if (localPos < attackEnd) {
-    // Attack phase: ramp from 0 to 1
-    float attackDuration = attackEnd - delayEnd;
-    if (attackDuration > EPSILON) {
-      float attackProgress = (localPos - delayEnd) / attackDuration;
-      gain = smoothstep(0.0, 1.0, attackProgress);
-    } else {
-      gain = 1.0;
-    }
-  } else if (localPos < sustainEnd) {
-    // Sustain phase: gain = 1
-    gain = 1.0;
-  } else if (localPos < releaseEnd) {
-    // Release phase: ramp from 1 to 0
-    float releaseDuration = releaseEnd - sustainEnd;
-    if (releaseDuration > EPSILON) {
-      float releaseProgress = (localPos - sustainEnd) / releaseDuration;
-      gain = 1.0 - smoothstep(0.0, 1.0, releaseProgress);
-    } else {
-      gain = 0.0;
-    }
-  } else {
-    // Beyond envelope
-    gain = 0.0;
+// Continuous envelope shape: spike (curve=-1) to linear triangle (curve=0) to
+// hard rectangle (curve=+1). Skew places the peak along the axis: 0=start, 1=end.
+// Two-branch formulation keeps the peak at 1 across the whole curve range.
+float calculateEnvelopeGain(float localPos, float curve, float skew) {
+  if (localPos < 0.0 || localPos > 1.0) return 0.0;
+  float c = clamp(curve, -1.0, 1.0);
+  float s = clamp(skew, 0.0, 1.0);
+  float leftW  = max(s, EPSILON);
+  float rightW = max(1.0 - s, EPSILON);
+  float x = localPos < s ? (s - localPos) / leftW : (localPos - s) / rightW;
+  if (x <= 0.0) return 1.0;
+  if (x >= 1.0) return 0.0;
+  if (c >= 0.0) {
+    // Rectangle branch: p → ∞ at curve=1 collapses to a hard rectangle (visible).
+    float p = 1.0 / max(1.0 - c, EPSILON);
+    return 1.0 - pow(x, p);
   }
-  
-  return gain;
+  // Spike branch: cap the exponent so the narrowest peak still has visible area.
+  // 0.98 scaling caps p at 50 at curve=-1 (~2% wide spike).
+  float p = 1.0 / max(1.0 + c * 0.98, EPSILON);
+  return pow(1.0 - x, p);
 }
 
-float getBrushWeight(vec2 unpackedUv) {
+float getBrushWeight(vec2 unpackedUv, float audioLevelDb) {
   vec4 meta = getDestMetadata(unpackedUv);
   float binWidth = exp2(meta.b) / destFrameCount;
 
   vec2 off = getEffectiveBrushOffset(unpackedUv);
   vec2 safeBrush = max(vec2(EPSILON), brushSizeUv);
+
+  float curveX = applyModulation(
+    brushCurveTime.value, brushCurveTime.minValue, brushCurveTime.maxValue,
+    brushCurveTime.modulationAmounts, brushCurveTime.contextualModAmounts, unpackedUv, 0, audioLevelDb
+  );
+  float skewX = applyModulation(
+    brushSkewTime.value, brushSkewTime.minValue, brushSkewTime.maxValue,
+    brushSkewTime.modulationAmounts, brushSkewTime.contextualModAmounts, unpackedUv, 0, audioLevelDb
+  );
+  float curveY = applyModulation(
+    brushCurvePitch.value, brushCurvePitch.minValue, brushCurvePitch.maxValue,
+    brushCurvePitch.modulationAmounts, brushCurvePitch.contextualModAmounts, unpackedUv, 0, audioLevelDb
+  );
+  float skewY = applyModulation(
+    brushSkewPitch.value, brushSkewPitch.minValue, brushSkewPitch.maxValue,
+    brushSkewPitch.modulationAmounts, brushSkewPitch.contextualModAmounts, unpackedUv, 0, audioLevelDb
+  );
 
   // X (time): compute overlap between bin [off.x, off.x+binWidth] and brush [0, brushSizeUv.x].
   // Evaluate the envelope at the center of the overlap region rather than the bin center.
@@ -656,16 +656,12 @@ float getBrushWeight(vec2 unpackedUv) {
   float weightX = 0.0;
   if (coverage > 0.0) {
     float localX = (overlapLeft + overlapRight) * 0.5 / safeBrush.x;
-    weightX = calculateEnvelopeGain(localX,
-      envelopeDelayEndX, envelopeAttackEndX, envelopeSustainEndX, envelopeReleaseEndX
-    ) * coverage;
+    weightX = calculateEnvelopeGain(localX, curveX, skewX) * coverage;
   }
 
-  // Y (pitch): use band center position relative to brush (unchanged)
+  // Y (pitch): band center position relative to brush.
   float localY = off.y / safeBrush.y;
-  float weightY = calculateEnvelopeGain(localY,
-    envelopeDelayEndY, envelopeAttackEndY, envelopeSustainEndY, envelopeReleaseEndY
-  );
+  float weightY = calculateEnvelopeGain(localY, curveY, skewY);
 
   return weightX * weightY;
 }

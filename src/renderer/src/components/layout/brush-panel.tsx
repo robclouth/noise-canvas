@@ -8,17 +8,15 @@ import { EffectsList } from "../effects-list";
 import { ModulatorView } from "../modulator-view";
 import { Section } from "../section";
 
-// Pure envelope parameters (delay/attack/sustain/release for time and pitch)
+// Envelope parameters: size/curve/skew per axis plus intensity
 const ENVELOPE_PARAMS: ParameterKey[] = [
   "brushIntensity",
-  "brushEnvelopeDelayTime",
-  "brushEnvelopeAttackTime",
-  "brushEnvelopeSustainTime",
-  "brushEnvelopeReleaseTime",
-  "brushEnvelopeDelayPitch",
-  "brushEnvelopeAttackPitch",
-  "brushEnvelopeSustainPitch",
-  "brushEnvelopeReleasePitch",
+  "brushSizeTime",
+  "brushCurveTime",
+  "brushSkewTime",
+  "brushSizePitch",
+  "brushCurvePitch",
+  "brushSkewPitch",
 ];
 
 // Options parameters (split from envelope)

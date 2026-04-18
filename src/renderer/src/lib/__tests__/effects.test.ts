@@ -477,15 +477,13 @@ describe("Effects", () => {
             overrides: {
               blendMode: 1, // Additive blend mode
               brushIntensity: 100,
-              // Use larger brush to ensure full coverage
-              brushEnvelopeDelayTime: 0,
-              brushEnvelopeAttackTime: 0,
-              brushEnvelopeSustainTime: 10, // Large sustain to cover the whole spectrogram
-              brushEnvelopeReleaseTime: 0,
-              brushEnvelopeDelayPitch: 0,
-              brushEnvelopeAttackPitch: 0,
-              brushEnvelopeSustainPitch: 100, // Large pitch to cover all bands
-              brushEnvelopeReleasePitch: 0,
+              // Large rectangular brush anchored at the cursor
+              brushSizeTime: 10,
+              brushCurveTime: 100,
+              brushSkewTime: -100,
+              brushSizePitch: 100,
+              brushCurvePitch: 100,
+              brushSkewPitch: -100,
               effects: [
                 { id: "test-transform", effect: "transform", enabled: false, params: {} },
                 { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },

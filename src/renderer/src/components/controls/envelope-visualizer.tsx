@@ -1,82 +1,66 @@
 import { Box } from "@mantine/core";
 import { selectParameter, useStore } from "@renderer/store";
-import { useMemo } from "react";
+import { brushEnvelopeShape } from "@renderer/lib/brush-envelope";
+import { useEffect, useRef } from "react";
 
 interface EnvelopeVisualizerProps {
   height?: number;
 }
 
-// Generate gradient stops for an envelope
-function generateEnvelopeGradient(
-  delay: number,
-  attack: number,
-  sustain: number,
-  release: number,
-  intensity: number,
-): string {
-  const total = delay + attack + sustain + release;
-  if (total === 0) return "transparent";
-
-  // Normalize stages to percentages
-  const d = (delay / total) * 100;
-  const a = (attack / total) * 100;
-  const s = (sustain / total) * 100;
-  const r = (release / total) * 100;
-
-  const delayEnd = d;
-  const attackEnd = d + a;
-  const sustainEnd = d + a + s;
-  const releaseEnd = d + a + s + r;
-
-  // Adjust intensity (0-100 to color value)
-  const maxBrightness = Math.floor((intensity / 100) * 255);
-  const peakColor = `rgb(${maxBrightness}, ${maxBrightness}, ${maxBrightness})`;
-
-  const stops: string[] = [];
-
-  // Delay phase (stays at 0)
-  if (delay > 0) {
-    stops.push(`rgb(0, 0, 0) 0%`);
-    stops.push(`rgb(0, 0, 0) ${delayEnd}%`);
-  }
-
-  // Attack phase (ramp up)
-  stops.push(`rgb(0, 0, 0) ${delayEnd}%`);
-  stops.push(`${peakColor} ${attackEnd}%`);
-
-  // Sustain phase (stays at peak)
-  if (sustain > 0) {
-    stops.push(`${peakColor} ${sustainEnd}%`);
-  }
-
-  // Release phase (ramp down)
-  stops.push(`rgb(0, 0, 0) ${releaseEnd}%`);
-
-  return stops.join(", ");
-}
+const WIDTH = 256;
 
 export const EnvelopeVisualizer = ({ height = 80 }: EnvelopeVisualizerProps) => {
-  // Subscribe to envelope parameters from active step
-  const delayTime = useStore(selectParameter("brushEnvelopeDelayTime")) as number;
-  const attackTime = useStore(selectParameter("brushEnvelopeAttackTime")) as number;
-  const sustainTime = useStore(selectParameter("brushEnvelopeSustainTime")) as number;
-  const releaseTime = useStore(selectParameter("brushEnvelopeReleaseTime")) as number;
-  const delayPitch = useStore(selectParameter("brushEnvelopeDelayPitch")) as number;
-  const attackPitch = useStore(selectParameter("brushEnvelopeAttackPitch")) as number;
-  const sustainPitch = useStore(selectParameter("brushEnvelopeSustainPitch")) as number;
-  const releasePitch = useStore(selectParameter("brushEnvelopeReleasePitch")) as number;
+  const curveTime = useStore(selectParameter("brushCurveTime")) as number;
+  const skewTime = useStore(selectParameter("brushSkewTime")) as number;
+  const curvePitch = useStore(selectParameter("brushCurvePitch")) as number;
+  const skewPitch = useStore(selectParameter("brushSkewPitch")) as number;
   const intensity = useStore(selectParameter("brushIntensity")) as number;
 
-  // Generate gradients
-  const horizontalGradient = useMemo(() => {
-    const stops = generateEnvelopeGradient(delayTime, attackTime, sustainTime, releaseTime, intensity);
-    return `linear-gradient(to right, ${stops})`;
-  }, [delayTime, attackTime, sustainTime, releaseTime, intensity]);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const verticalGradient = useMemo(() => {
-    const stops = generateEnvelopeGradient(delayPitch, attackPitch, sustainPitch, releasePitch, intensity);
-    return `linear-gradient(to top, ${stops})`;
-  }, [delayPitch, attackPitch, sustainPitch, releasePitch, intensity]);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const w = canvas.width;
+    const h = canvas.height;
+    const img = ctx.createImageData(w, h);
+    const data = img.data;
+
+    const curveX = curveTime / 100;
+    const skewX = (skewTime + 100) / 200;
+    const curveY = curvePitch / 100;
+    const skewY = (skewPitch + 100) / 200;
+
+    const xProfile = new Float32Array(w);
+    for (let i = 0; i < w; i++) {
+      xProfile[i] = brushEnvelopeShape(i / (w - 1), curveX, skewX);
+    }
+    const yProfile = new Float32Array(h);
+    for (let j = 0; j < h; j++) {
+      const t = 1 - j / (h - 1);
+      yProfile[j] = brushEnvelopeShape(t, curveY, skewY);
+    }
+
+    const scale = Math.max(0, Math.min(1, intensity / 100));
+
+    for (let j = 0; j < h; j++) {
+      const yv = yProfile[j];
+      const rowOffset = j * w * 4;
+      for (let i = 0; i < w; i++) {
+        const v = Math.round(xProfile[i] * yv * scale * 255);
+        const k = rowOffset + i * 4;
+        data[k] = v;
+        data[k + 1] = v;
+        data[k + 2] = v;
+        data[k + 3] = 255;
+      }
+    }
+
+    ctx.putImageData(img, 0, 0);
+  }, [curveTime, skewTime, curvePitch, skewPitch, intensity]);
 
   return (
     <Box
@@ -86,9 +70,15 @@ export const EnvelopeVisualizer = ({ height = 80 }: EnvelopeVisualizerProps) => 
         borderRadius: "4px",
         overflow: "hidden",
         border: "1px solid var(--mantine-color-dark-4)",
-        background: `${horizontalGradient}, ${verticalGradient}`,
-        backgroundBlendMode: "multiply",
+        background: "#000",
       }}
-    />
+    >
+      <canvas
+        ref={canvasRef}
+        width={WIDTH}
+        height={height}
+        style={{ display: "block", width: "100%", height: "100%", imageRendering: "auto" }}
+      />
+    </Box>
   );
 };

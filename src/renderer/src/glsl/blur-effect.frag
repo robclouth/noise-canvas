@@ -13,23 +13,23 @@ uniform int blurOrigin; // 0=left, 1=middle, 2=right
 void main() {
     ProcessingUvs coords = getProcessingUvs(vUv);
     vec4 originalTexel = texture(destSpectrogramTex, vUv);
-    float weight = getBrushWeight(coords.dest);
+    float audioLevelDb = getAudioLevelDb(coords.dest);
+    float weight = getBrushWeight(coords.dest, audioLevelDb);
     if( weight <= 0.0 ) {
         outColor = originalTexel;
         return;
-    } 
+    }
 
     float blurredMagL = 0.0;
     float blurredMagR = 0.0;
     float blurredPhaseL = 0.0;
     float blurredPhaseR = 0.0;
     float totalWeight = 0.0;
-    
+
     vec4 sourceCenterTexel = getTransformedSample(coords.source, coords.dest, sourceTimeScale, sourceBandScale, sourceOffsetX, sourceOffsetY);
     float referencePhaseL = getPhase(sourceCenterTexel.rg);
     float referencePhaseR = getPhase(sourceCenterTexel.ba);
 
-    float audioLevelDb = getAudioLevelDb(coords.dest);
     float blurSizeXValue = applyModulation(blurSizeX.value, blurSizeX.minValue, blurSizeX.maxValue, blurSizeX.modulationAmounts, blurSizeX.contextualModAmounts, coords.dest, 0, audioLevelDb);
     float blurSizeYValue = applyModulation(blurSizeY.value, blurSizeY.minValue, blurSizeY.maxValue, blurSizeY.modulationAmounts, blurSizeY.contextualModAmounts, coords.dest, 0, audioLevelDb);
     float blurNoiseXValue = applyModulation(blurNoiseX.value, blurNoiseX.minValue, blurNoiseX.maxValue, blurNoiseX.modulationAmounts, blurNoiseX.contextualModAmounts, coords.dest, 0, audioLevelDb);
