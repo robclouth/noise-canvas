@@ -455,10 +455,8 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
               const tScale = (destBpm * destDur) / (srcBpm * srcDur);
               const bScale = spectrogramData.numBands / sourceOpenFile.spectrogramData.numBands;
 
-              const srcTimeUv = (Number(activeStep?.sourceTimeOffset) || 0) / 100;
-              const srcPitchUv = (Number(activeStep?.sourcePitchOffset) || 0) / 100;
-              const offsetX = srcTimeUv - coords[0] * tScale;
-              const offsetY = srcPitchUv - coords[1] * bScale;
+              const offsetX = -coords[0] * tScale;
+              const offsetY = -(1 - coords[1]) * bScale;
               state.updateActiveStepLockedOffset({ beats: offsetX, pitch: offsetY });
             }
           }

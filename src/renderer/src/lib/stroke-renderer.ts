@@ -287,15 +287,11 @@ export class StrokeRenderer {
   }
 
   /**
-   * Calculate source offset based on position mode.
-   */
-  /**
-   * Calculate clone-stamp offset.
-   * The base source position is now in sourceTimeOffset/sourcePitchOffset params (handled in shader).
-   * This just computes the offset from the cursor position, scaled to source UV space.
+   * Calculate clone-stamp offset from the cursor position, scaled to source UV space.
+   * The base source position lives in sourceTimeOffset/sourcePitchOffset params and is
+   * added (with modulation) inside the shader, so this helper must not include it.
    */
   calculateSourceOffset(
-    sourcePositionUv: Vector2,
     lockedOffset: { beats: number; pitch: number } | null | undefined,
     mode: string,
     mousePos: Vector2 | null,
@@ -309,12 +305,12 @@ export class StrokeRenderer {
     const scaledMouse = new Vector2(mousePos.x * timeScale, mousePos.y * bandScale);
 
     if (mode === "fixed") {
-      return sourcePositionUv.clone().sub(scaledMouse);
+      return scaledMouse.clone().negate();
     } else if (mode === "anchored") {
       if (lockedOffset) {
         return new Vector2(lockedOffset.beats, lockedOffset.pitch);
       } else {
-        return sourcePositionUv.clone().sub(scaledMouse);
+        return scaledMouse.clone().negate();
       }
     }
 
@@ -544,12 +540,6 @@ export class StrokeRenderer {
     const activeStepState = createStepStateView(state, state.activeStepIndex);
     const activeStep = (state.brushes[state.activeBrushIndex]?.steps ?? [])[state.activeStepIndex];
 
-    // Source position from the step's params (0-100% → 0-1 UV)
-    const sourcePositionUv = new Vector2(
-      (activeStepState.sourceTimeOffset as number) / 100,
-      (activeStepState.sourcePitchOffset as number) / 100,
-    );
-
     // Beat-based scale: converts dest UV to source UV so 1 beat = 1 beat
     const srcBpm = state.filepathsBpm?.[sourceFile.filePath] || bpm;
     const srcDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
@@ -557,8 +547,7 @@ export class StrokeRenderer {
     const bandScale = this.spectrogramData.numBands / sourceFile.spectrogramData.numBands;
 
     const sourceOffsetUv = this.calculateSourceOffset(
-      sourcePositionUv,
-      activeStep?.lockedOffset,
+      state.isStroking ? activeStep?.lockedOffset : null,
       activeStepState.sourcePositionMode as string,
       cursorPos,
       timeScale,
