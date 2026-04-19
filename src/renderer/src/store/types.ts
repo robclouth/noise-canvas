@@ -65,6 +65,9 @@ export type OpenFile = {
   audioBuffer?: AudioBuffer;
   audioPeak?: number;
   rendererRef?: React.RefObject<FileRendererHandle | null>;
+  // True for files with no real on-disk audio (newFile, duplicates, HPSS/AI stems).
+  // These are excluded from session persistence and always appear as unsaved until saved to a real path.
+  isVirtual?: boolean;
 };
 
 export type PlayerClock = {

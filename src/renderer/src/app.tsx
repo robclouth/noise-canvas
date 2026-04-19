@@ -1,7 +1,8 @@
 import { BrushPanel } from "@/components/layout/brush-panel";
 import { PalettePanel } from "@/components/layout/palette-panel";
 import { useStore } from "@/store";
-import { Box, Group, LoadingOverlay, ScrollArea, Stack } from "@mantine/core";
+import { Box, Group, List, LoadingOverlay, ScrollArea, Stack, Text } from "@mantine/core";
+import { modals } from "@mantine/modals";
 import { Notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
 import { Canvas, RootState, useThree } from "@react-three/fiber";
@@ -90,6 +91,21 @@ function App(): React.JSX.Element {
       },
     );
     unsubscribers.push(unsubDirtyState);
+
+    const pushUnsavedFiles = () => {
+      const names = useStore
+        .getState()
+        .getUnsavedFiles()
+        .map((f) => f.fileName);
+      ipcSend("update-unsaved-files", names);
+    };
+    pushUnsavedFiles();
+    const unsubUnsavedFiles = useStore.subscribe(
+      (state) => ({ dirty: state.filesDirty, ids: state.openFileIds }),
+      () => pushUnsavedFiles(),
+      { equalityFn: (a, b) => a.ids === b.ids && a.dirty === b.dirty },
+    );
+    unsubscribers.push(unsubUnsavedFiles);
 
     const unsubNewFile = ipcOn("new-file", async () => {
       const { newFile } = useStore.getState();
@@ -180,6 +196,32 @@ function App(): React.JSX.Element {
       await clearAllUndoManagers();
     });
     unsubscribers.push(unsubAppWillQuit);
+
+    const unsubConfirmQuit = ipcOn("confirm-quit", () => {
+      const unsaved = useStore.getState().getUnsavedFiles();
+      if (unsaved.length === 0) {
+        ipcSend("quit-confirmed");
+        return;
+      }
+      modals.openConfirmModal({
+        title: "Unsaved Changes",
+        children: (
+          <Stack gap="xs">
+            <Text size="sm">The following files have unsaved changes and will be lost if you quit:</Text>
+            <List size="sm" withPadding>
+              {unsaved.map((f) => (
+                <List.Item key={f.fileId}>{f.fileName}</List.Item>
+              ))}
+            </List>
+          </Stack>
+        ),
+        labels: { confirm: "Quit anyway", cancel: "Cancel" },
+        confirmProps: { color: "red", size: "xs" },
+        cancelProps: { size: "xs" },
+        onConfirm: () => ipcSend("quit-confirmed"),
+      });
+    });
+    unsubscribers.push(unsubConfirmQuit);
 
     return () => {
       unsubscribers.forEach((unsub) => unsub());

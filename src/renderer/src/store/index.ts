@@ -9,7 +9,7 @@ import { createAppSlice } from "./app";
 import { AUDIO_PERSISTED_KEYS, createAudioSlice } from "./audio";
 import { createBrushSlice } from "./brush";
 import { createEffectsSlice } from "./effects";
-import { createFilesSlice, FILES_PERSISTED_KEYS } from "./files";
+import { createFilesSlice, FILES_PERSISTED_KEYS, openFiles } from "./files";
 import { createLinkSlice, LINK_PERSISTED_KEYS } from "./link";
 import { createModulatorsSlice } from "./modulators";
 import { createPresetsSlice, PRESETS_PERSISTED_KEYS } from "./presets";
@@ -152,7 +152,7 @@ export const useStore = create<State>()(
       {
         name: "noise-canvas-storage",
         partialize: (state) => {
-          return Object.entries(state).reduce(
+          const picked = Object.entries(state).reduce(
             (acc, [key, value]) => {
               if (key in parameterDefs || ALL_PERSISTED_KEYS.includes(key as keyof State)) {
                 acc[key] = value;
@@ -161,6 +161,37 @@ export const useStore = create<State>()(
             },
             {} as Record<string, any>,
           );
+
+          // Only persist file entries backed by a real on-disk path. Virtual files
+          // (new/duplicate/stems) appear in openFileIds at runtime but must not round-trip
+          // across sessions — they have no reanalysable source.
+          const realIds = new Set(Object.keys(state.persistedFilePaths ?? {}));
+          if (Array.isArray(picked.openFileIds)) {
+            picked.openFileIds = picked.openFileIds.filter((id: string) => realIds.has(id));
+          }
+          if (Array.isArray(picked.minimizedFileIds)) {
+            picked.minimizedFileIds = picked.minimizedFileIds.filter((id: string) => realIds.has(id));
+          }
+          if (typeof picked.activeFileId === "string" && !realIds.has(picked.activeFileId)) {
+            picked.activeFileId = null;
+          }
+          if (typeof picked.fullscreenFileId === "string" && !realIds.has(picked.fullscreenFileId)) {
+            picked.fullscreenFileId = null;
+          }
+          for (const mapKey of [
+            "filesBandsPerOctave",
+            "filesZoom",
+            "filesOffset",
+            "filesZoomY",
+            "filesOffsetY",
+            "filesPlaybackStartTime",
+          ] as const) {
+            const map = picked[mapKey];
+            if (map && typeof map === "object") {
+              picked[mapKey] = Object.fromEntries(Object.entries(map).filter(([id]) => realIds.has(id)));
+            }
+          }
+          return picked;
         },
         merge: (persistedState, currentState) => {
           const merged = deepMerge(currentState, persistedState as object) as State;
@@ -176,7 +207,22 @@ export const useStore = create<State>()(
             }));
           }
 
+          // Seed module-level openFiles with placeholders for persisted entries so
+          // components rendering on first paint don't see undefined, and mark each as loading.
+          const persistedPaths = merged.persistedFilePaths ?? {};
+          for (const [id, filePath] of Object.entries(persistedPaths)) {
+            openFiles[id] ??= { id, filePath, isVirtual: false };
+          }
+          merged.filesLoading = {
+            ...(merged.filesLoading ?? {}),
+            ...Object.fromEntries(Object.keys(persistedPaths).map((id) => [id, "Analysing audio..."])),
+          };
+
           return merged;
+        },
+        onRehydrateStorage: () => (state) => {
+          if (!state) return;
+          void state.reopenPersistedFiles();
         },
       },
     ),

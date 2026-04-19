@@ -44,6 +44,11 @@ export interface FilesState {
   setFileZoomY: (fileId: string, zoom: number) => void;
   filesOffsetY: Record<string, number>;
   setFileOffsetY: (fileId: string, offset: number) => void;
+  // Maps persistable (non-virtual) fileId → filePath. Serialised so the open-file list
+  // survives app restart; virtual files (new/duplicate/stems) are deliberately excluded.
+  persistedFilePaths: Record<string, string>;
+  reopenPersistedFiles: () => Promise<void>;
+  getUnsavedFiles: () => Array<{ fileId: string; filePath: string; fileName: string }>;
   filesPlaybackStartTime: Record<string, number>;
   setFilePlaybackStartTime: (fileId: string, playbackStartTime: number) => void;
   filesDirty: Record<string, boolean>;
@@ -154,7 +159,35 @@ export function getFileIdByPath(filePath: string): string | undefined {
   return Object.keys(openFiles).find((id) => openFiles[id].filePath === filePath);
 }
 
-export const FILES_PERSISTED_KEYS = ["filepathsBpm", "minimizedFileIds"] as const;
+// Derives a Finder-style "copy" filename:
+//   foo.wav         → foo copy.wav
+//   foo copy.wav    → foo copy 2.wav
+//   foo copy 3.wav  → foo copy 4.wav
+function makeCopyPath(filePath: string): string {
+  const ext = window.nodePath.extname(filePath);
+  const base = filePath.slice(0, filePath.length - ext.length);
+  const match = base.match(/^(.*) copy(?: (\d+))?$/);
+  if (match) {
+    const n = match[2] ? parseInt(match[2], 10) + 1 : 2;
+    return `${match[1]} copy ${n}${ext}`;
+  }
+  return `${base} copy${ext}`;
+}
+
+export const FILES_PERSISTED_KEYS = [
+  "filepathsBpm",
+  "minimizedFileIds",
+  "persistedFilePaths",
+  "openFileIds",
+  "activeFileId",
+  "fullscreenFileId",
+  "filesBandsPerOctave",
+  "filesZoom",
+  "filesOffset",
+  "filesZoomY",
+  "filesOffsetY",
+  "filesPlaybackStartTime",
+] as const;
 
 export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState => ({
   newFile: async () => {
@@ -219,6 +252,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
         filePath: filepath,
         spectrogramData,
+        isVirtual: true,
       };
 
       return set(
@@ -253,7 +287,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const fileId = generateFileId();
 
     // Add a placeholder immediately so the file appears in the UI with a loading state
-    openFiles[fileId] = { id: fileId, filePath: filepath };
+    openFiles[fileId] = { id: fileId, filePath: filepath, isVirtual: false };
     set(
       produce((state: State) => {
         state.openFileIds.push(fileId);
@@ -265,6 +299,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesOffsetY[fileId] = 0;
         state.filesPlaybackStartTime[fileId] = 0;
         state.filesLoading[fileId] = "Analysing audio...";
+        state.persistedFilePaths[fileId] = filepath;
       }),
     );
 
@@ -319,6 +354,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesZoomY[fileId];
           delete state.filesOffsetY[fileId];
           delete state.filesPlaybackStartTime[fileId];
+          delete state.persistedFilePaths[fileId];
         }),
       );
       console.error("Error opening file:", error);
@@ -340,10 +376,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     const newFileId = generateFileId();
+    const newFilePath = makeCopyPath(originalFile.filePath);
 
     const newFile: OpenFile = {
       id: newFileId,
-      filePath: originalFile.filePath,
+      filePath: newFilePath,
+      isVirtual: true,
       spectrogramData: {
         ...originalFile.spectrogramData,
         packedData: fboData,
@@ -369,7 +407,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesZoomY[newFileId] = state.filesZoomY[fileId] ?? 0;
         state.filesOffsetY[newFileId] = state.filesOffsetY[fileId] ?? 0;
         state.filesPlaybackStartTime[newFileId] = state.filesPlaybackStartTime[fileId];
-        state.filesDirty[newFileId] = false;
+        state.filesDirty[newFileId] = true;
       }),
     );
   },
@@ -390,8 +428,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const percussiveId = generateFileId();
 
     // Add placeholder files immediately so they appear in the UI with a loading state
-    openFiles[harmonicId] = { id: harmonicId, filePath: `${base}_harmonic${ext}` };
-    openFiles[percussiveId] = { id: percussiveId, filePath: `${base}_percussive${ext}` };
+    openFiles[harmonicId] = { id: harmonicId, filePath: `${base}_harmonic${ext}`, isVirtual: true };
+    openFiles[percussiveId] = { id: percussiveId, filePath: `${base}_percussive${ext}`, isVirtual: true };
 
     const sourceBpm = get().filepathsBpm[originalFile.filePath];
 
@@ -507,7 +545,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const sourceBpm = state.filepathsBpm[originalFile.filePath];
 
     for (let i = 0; i < stemNames.length; i++) {
-      openFiles[stemIds[i]] = { id: stemIds[i], filePath: `${base}_${stemNames[i]}${ext}` };
+      openFiles[stemIds[i]] = { id: stemIds[i], filePath: `${base}_${stemNames[i]}${ext}`, isVirtual: true };
     }
 
     set(
@@ -739,12 +777,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // Update file path in openFiles and copy BPM mapping to new path
       const oldFilePath = file.filePath;
       file.filePath = outputPath;
+      file.isVirtual = false;
       set(
         produce((state: State) => {
           const oldBpm = state.filepathsBpm[oldFilePath];
           if (oldBpm !== undefined) {
             state.filepathsBpm[outputPath] = oldBpm;
           }
+          state.persistedFilePaths[state.activeFileId!] = outputPath;
         }),
       );
 
@@ -814,12 +854,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // Update file path in openFiles and copy BPM mapping to new path
       const oldFilePath = file.filePath;
       file.filePath = outputPath;
+      file.isVirtual = false;
       set(
         produce((state: State) => {
           const oldBpm = state.filepathsBpm[oldFilePath];
           if (oldBpm !== undefined) {
             state.filepathsBpm[outputPath] = oldBpm;
           }
+          state.persistedFilePaths[state.activeFileId!] = outputPath;
         }),
       );
 
@@ -905,6 +947,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesOffsetY[fileId];
           delete state.filesPlaybackStartTime[fileId];
           delete state.filesDirty[fileId];
+          delete state.persistedFilePaths[fileId];
+          state.minimizedFileIds = state.minimizedFileIds.filter((id) => id !== fileId);
+          if (state.fullscreenFileId === fileId) state.fullscreenFileId = null;
           delete openFiles[fileId];
 
           const nextFileId = state.openFileIds[state.openFileIds.length - 1] || null;
@@ -1049,8 +1094,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
       console.log(`[timing] create AudioBuffer: ${(performance.now() - audioBufferStart).toFixed(2)}ms`);
 
-      // Mark file as dirty if it's not the first synthesis
-      get().setFileDirty(fileId, file.audioBuffer !== undefined);
+      // Mark file as dirty if it's not the first synthesis, or if the file has no on-disk
+      // backing (virtual files are always considered unsaved until exported).
+      get().setFileDirty(fileId, file.isVirtual === true || file.audioBuffer !== undefined);
 
       file.audioBuffer = audioBuffer;
       file.audioPeak = synthesisResult.peak > 0 ? synthesisResult.peak : 1;
@@ -1123,7 +1169,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       file.audioBuffer = audioBuffer;
       file.audioPeak = peak > 0 ? peak : 1;
 
-      get().setFileDirty(fileId, hadPreviousBuffer);
+      get().setFileDirty(fileId, file.isVirtual === true || hadPreviousBuffer);
 
       // Hot-swap if currently playing this file
       if (get().isPlaying && get().activeFileId === fileId) {
@@ -1325,6 +1371,113 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesOffsetY[fileId] = offset;
       }),
     ),
+  persistedFilePaths: {},
+  reopenPersistedFiles: async () => {
+    const state = get();
+    const entries = Object.entries(state.persistedFilePaths);
+    if (entries.length === 0) return;
+
+    for (const [fileId, filePath] of entries) {
+      openFiles[fileId] ??= { id: fileId, filePath };
+    }
+    set(
+      produce((draft: State) => {
+        for (const [fileId] of entries) {
+          draft.filesLoading[fileId] = "Analysing audio...";
+        }
+      }),
+    );
+
+    await Promise.all(
+      entries.map(async ([fileId, filePath]) => {
+        try {
+          const pathState = get();
+          const result = await window.audioAnalysis.analyze(filePath, {
+            bandsPerOctave: pathState.filesBandsPerOctave[fileId] ?? pathState.bandsPerOctave,
+            minFreq: pathState.minFreq,
+          });
+          const spectrogramData = {
+            packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+            inverseMap: new Float32Array(
+              result.inverseMap.buffer,
+              result.inverseMap.byteOffset,
+              result.inverseMap.byteLength / 4,
+            ),
+            metadata: new Float32Array(
+              result.metadata.buffer,
+              result.metadata.byteOffset,
+              result.metadata.byteLength / 4,
+            ),
+            textureWidth: result.textureWidth,
+            textureHeight: result.textureHeight,
+            numFrames: result.numFrames,
+            numBands: result.numBands,
+            numChannels: result.numChannels,
+            sampleRate: result.sampleRate,
+            packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
+            minFreq: pathState.minFreq,
+            bandsPerOctave: pathState.filesBandsPerOctave[fileId] ?? pathState.bandsPerOctave,
+            synthesisMetadata: {
+              bandOffsets: result.bandOffsets,
+              bandStepLog2s: result.bandStepLog2s,
+              bandLengths: result.bandLengths,
+            },
+          };
+          openFiles[fileId] = { ...openFiles[fileId], spectrogramData };
+          set(
+            produce((draft: State) => {
+              delete draft.filesLoading[fileId];
+            }),
+          );
+        } catch (error) {
+          delete openFiles[fileId];
+          set(
+            produce((draft: State) => {
+              draft.openFileIds = draft.openFileIds.filter((id) => id !== fileId);
+              draft.minimizedFileIds = draft.minimizedFileIds.filter((id) => id !== fileId);
+              if (draft.activeFileId === fileId) draft.activeFileId = null;
+              if (draft.fullscreenFileId === fileId) draft.fullscreenFileId = null;
+              delete draft.persistedFilePaths[fileId];
+              delete draft.filesLoading[fileId];
+              delete draft.filesBandsPerOctave[fileId];
+              delete draft.filesZoom[fileId];
+              delete draft.filesOffset[fileId];
+              delete draft.filesZoomY[fileId];
+              delete draft.filesOffsetY[fileId];
+              delete draft.filesPlaybackStartTime[fileId];
+            }),
+          );
+          notifications.show({
+            title: "Failed to reopen file",
+            message: `${truncateMiddle(window.nodePath.basename(filePath), 50)}: ${error instanceof Error ? error.message : ""}`,
+            color: "red",
+          });
+        }
+      }),
+    );
+
+    const after = get();
+    if (after.activeFileId && openFiles[after.activeFileId]) {
+      const file = openFiles[after.activeFileId];
+      const transport = Tone.getTransport();
+      const bpm = after.filepathsBpm[file.filePath];
+      if (bpm) transport.bpm.value = bpm;
+    }
+  },
+  getUnsavedFiles: () => {
+    const state = get();
+    return state.openFileIds
+      .filter((id) => state.filesDirty[id])
+      .map((id) => {
+        const file = openFiles[id];
+        const filePath = file?.filePath ?? "";
+        return {
+          fileId: id,
+          filePath,
+          fileName: filePath ? window.nodePath.basename(filePath) : id,
+        };
+      });
+  },
   filesPlaybackStartTime: {},
   setFilePlaybackStartTime: (fileId, time) =>
     set(
@@ -1411,7 +1564,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const fileId = generateFileId();
 
     // Add placeholder and immediately minimize — never appears as a full canvas
-    openFiles[fileId] = { id: fileId, filePath };
+    openFiles[fileId] = { id: fileId, filePath, isVirtual: false };
     set(
       produce((state: State) => {
         state.openFileIds.push(fileId);
@@ -1424,6 +1577,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesOffsetY[fileId] = 0;
         state.filesPlaybackStartTime[fileId] = 0;
         state.filesLoading[fileId] = "Analysing audio...";
+        state.persistedFilePaths[fileId] = filePath;
       }),
     );
 
