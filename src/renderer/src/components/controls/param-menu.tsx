@@ -1,4 +1,4 @@
-import { Box, Button, Divider, Group, Menu, Stack, Text, TextInput, useMantineTheme } from "@mantine/core";
+import { ActionIcon, Box, Divider, Group, Menu, Stack, Text, TextInput, useMantineTheme } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { getParameterDef, isEffectParameter, parameterDefs } from "@renderer/parameters";
 import { getMacroValueIndex, getModulationParamKeys, useStore } from "@renderer/store";
@@ -8,7 +8,7 @@ import {
   getModAmountParamKeys,
 } from "@renderer/store/modulators";
 import { ParameterKey } from "@renderer/store/types";
-import { Link2 } from "lucide-react";
+import { Link2, Pencil, RotateCcw } from "lucide-react";
 import React, { useState } from "react";
 
 const EMPTY_STRING_ARRAY: readonly string[] = [];
@@ -153,17 +153,36 @@ export const ParamMenu = ({
 
       <Menu.Dropdown p={8}>
         <Stack gap={2}>
-          {/* Reset button */}
-          <Button onClick={handleReset} variant="subtle" color="gray" size="xs">
-            Reset
-          </Button>
-
-          {/* Rename button (macros only) */}
-          {isMacro && (
-            <Button onClick={handleRenameMacro} variant="subtle" color="gray" size="xs">
-              Rename
-            </Button>
-          )}
+          <Group gap={4} mb={2}>
+            <Tooltip label="Reset to default">
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleReset();
+                }}
+              >
+                <RotateCcw size={14} />
+              </ActionIcon>
+            </Tooltip>
+            {isMacro && (
+              <Tooltip label="Rename">
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRenameMacro();
+                  }}
+                >
+                  <Pencil size={14} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+          </Group>
 
           {/* Randomise and Step Linked toggles */}
           <Group gap={8} wrap="nowrap">

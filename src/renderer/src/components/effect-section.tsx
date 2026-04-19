@@ -43,6 +43,9 @@ export const EffectSection = memo(
               size="xs"
               color={color}
             />
+            <ActionIcon variant="transparent" color="gray.5" size="xs" {...(dragHandleProps ?? {})}>
+              <GripVertical size={16} />
+            </ActionIcon>
             <Group
               gap={4}
               wrap="nowrap"
@@ -57,9 +60,6 @@ export const EffectSection = memo(
               </Tooltip>
             </Group>
 
-            <ActionIcon variant="transparent" color="gray.5" size="xs" {...(dragHandleProps ?? {})}>
-              <GripVertical size={16} />
-            </ActionIcon>
             <SectionMenu
               storageKey={`effect-${label}`}
               parameterKeys={parameterKeys}
