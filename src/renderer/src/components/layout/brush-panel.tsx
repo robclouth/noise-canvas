@@ -1,5 +1,6 @@
 import { SimpleGrid, Stack } from "@mantine/core";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
+import { selectParameter, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
 import { EnvelopeControl } from "../controls/envelope-control";
 import { ParameterControl } from "../controls/parameter-control";
@@ -74,6 +75,8 @@ const ALL_EFFECT_PARAMS: ParameterKey[] = [
 ];
 
 export function BrushPanel() {
+  const sourcePositionMode = useStore(selectParameter("sourcePositionMode"));
+  const offsetsDisabled = sourcePositionMode === "follow";
   return (
     <Stack gap="xs">
       <Stack p="xs" gap="xs">
@@ -81,10 +84,10 @@ export function BrushPanel() {
         <Section label="Source">
           <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
             <ParameterControl paramKey="sourceFile" />
-            <ParameterControl paramKey="sourceDataMode" />
-            <ParameterControl paramKey="sourceTimeOffset" />
-            <ParameterControl paramKey="sourcePitchOffset" />
             <ParameterControl paramKey="sourcePositionMode" />
+            <ParameterControl paramKey="sourceTimeOffset" disabled={offsetsDisabled} />
+            <ParameterControl paramKey="sourcePitchOffset" disabled={offsetsDisabled} />
+            <ParameterControl paramKey="sourceDataMode" />
           </SimpleGrid>
         </Section>
         <Section label="Envelope" parameterKeys={ENVELOPE_PARAMS}>

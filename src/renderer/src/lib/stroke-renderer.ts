@@ -304,7 +304,9 @@ export class StrokeRenderer {
 
     const scaledMouse = new Vector2(mousePos.x * timeScale, mousePos.y * bandScale);
 
-    if (mode === "fixed") {
+    if (mode === "follow") {
+      return new Vector2(0, 0);
+    } else if (mode === "fixed") {
       return scaledMouse.clone().negate();
     } else if (mode === "anchored") {
       if (lockedOffset) {
@@ -444,20 +446,32 @@ export class StrokeRenderer {
       },
       sourceTimeOffset: {
         value: {
-          value: (stepState.sourceTimeOffset as number) / 100,
+          value: stepState.sourcePositionMode === "follow" ? 0 : (stepState.sourceTimeOffset as number) / 100,
           minValue: -1,
           maxValue: 1,
-          modulationAmounts: getModAmountValuesNormalized(stepState, "sourceTimeOffset"),
-          contextualModAmounts: getContextualModAmountsNormalized(stepState, "sourceTimeOffset"),
+          modulationAmounts:
+            stepState.sourcePositionMode === "follow"
+              ? getModAmountValuesNormalized(stepState, "sourceTimeOffset").map(() => 0)
+              : getModAmountValuesNormalized(stepState, "sourceTimeOffset"),
+          contextualModAmounts:
+            stepState.sourcePositionMode === "follow"
+              ? getContextualModAmountsNormalized(stepState, "sourceTimeOffset").map(() => 0)
+              : getContextualModAmountsNormalized(stepState, "sourceTimeOffset"),
         },
       },
       sourcePitchOffset: {
         value: {
-          value: (stepState.sourcePitchOffset as number) / 100,
+          value: stepState.sourcePositionMode === "follow" ? 0 : (stepState.sourcePitchOffset as number) / 100,
           minValue: -1,
           maxValue: 1,
-          modulationAmounts: getModAmountValuesNormalized(stepState, "sourcePitchOffset"),
-          contextualModAmounts: getContextualModAmountsNormalized(stepState, "sourcePitchOffset"),
+          modulationAmounts:
+            stepState.sourcePositionMode === "follow"
+              ? getModAmountValuesNormalized(stepState, "sourcePitchOffset").map(() => 0)
+              : getModAmountValuesNormalized(stepState, "sourcePitchOffset"),
+          contextualModAmounts:
+            stepState.sourcePositionMode === "follow"
+              ? getContextualModAmountsNormalized(stepState, "sourcePitchOffset").map(() => 0)
+              : getContextualModAmountsNormalized(stepState, "sourcePitchOffset"),
         },
       },
       blendMode: { value: stepState.blendMode },

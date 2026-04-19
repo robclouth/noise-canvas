@@ -330,7 +330,9 @@ const FileRendererInner = memo(
 
         const scaledMouse = new Vector2(mousePos.x * timeScale, mousePos.y * bandScale);
 
-        if (mode === "fixed") {
+        if (mode === "follow") {
+          return new Vector2(0, 0);
+        } else if (mode === "fixed") {
           return scaledMouse.clone().negate();
         } else if (mode === "anchored") {
           if (lockedOffset) {
@@ -386,10 +388,15 @@ const FileRendererInner = memo(
       // Determine file state for rendering logic
       const isActiveFile = state.activeFileId === fileId;
 
-      // Check if this file is referenced as source by the active step
+      // Check if this file is referenced as source by the active step.
+      // When sourceFile is null, the active file is the implicit "self" source.
       const activeStepRaw = (state.brushes[state.activeBrushIndex]?.steps ?? [])[state.activeStepIndex];
       const activeStepSourceFile = activeStepRaw?.sourceFile ?? null;
-      const sourceFileData = activeStepSourceFile ? getOpenFileByPath(activeStepSourceFile.path) : null;
+      const sourceFileData = activeStepSourceFile
+        ? getOpenFileByPath(activeStepSourceFile.path)
+        : state.activeFileId
+          ? openFiles[state.activeFileId]
+          : null;
       const isSourceFile = sourceFileData?.id === fileId;
 
       // Create StrokeRenderer if not exists
@@ -474,14 +481,17 @@ const FileRendererInner = memo(
 
       // For source file: compute the sampling position in this file's UV space.
       let sourceDisplayPos = new Vector2(-1, -1);
-      if (isSourceFile && activeStepSourceFile) {
-        const mode = String(activeStepRaw?.sourcePositionMode ?? "anchored");
-        const sourcePositionUv = new Vector2(
-          (Number(activeStepRaw?.sourceTimeOffset) || 0) / 100,
-          (Number(activeStepRaw?.sourcePitchOffset) || 0) / 100,
-        );
+      if (isSourceFile) {
+        const mode = String(activeStepRaw?.sourcePositionMode ?? "follow");
+        const sourcePositionUv =
+          mode === "follow"
+            ? new Vector2(0, 0)
+            : new Vector2(
+                (Number(activeStepRaw?.sourceTimeOffset) || 0) / 100,
+                (Number(activeStepRaw?.sourcePitchOffset) || 0) / 100,
+              );
         const shouldTrackCursor =
-          (mode === "fixed" || (mode === "anchored" && state.isStroking)) &&
+          (mode === "follow" || mode === "fixed" || (mode === "anchored" && state.isStroking)) &&
           state.cursorVisible &&
           state.cursorPosition &&
           state.activeFileId;
@@ -683,7 +693,7 @@ const FileRendererInner = memo(
 
         const sourceOffsetUv = calculateSourceOffset(
           activeStepRaw?.lockedOffset,
-          String(activeStepRaw?.sourcePositionMode ?? "anchored"),
+          String(activeStepRaw?.sourcePositionMode ?? "follow"),
           cursorPos,
           tScale,
           bScale,

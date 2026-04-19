@@ -55,7 +55,9 @@ export const FileParameterControl = memo(function FileParameterControl({
           overflow: "hidden",
           borderRadius: 2,
           border: `1px solid ${isPicking ? "var(--mantine-color-orange-6)" : "#666"}`,
-          borderLeft: fileColor ? `3px solid ${fileColor}` : undefined,
+          borderLeft: fileColor
+            ? `3px solid ${fileColor}`
+            : `1px solid ${isPicking ? "var(--mantine-color-orange-6)" : "#666"}`,
           backgroundColor: isPicking ? "rgba(255, 140, 0, 0.1)" : "#2c2c2c",
           display: "flex",
           alignItems: "center",

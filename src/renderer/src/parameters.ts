@@ -505,8 +505,9 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     name: "Source Position Mode",
     label: "Tracking",
     description: "How the source position is used when painting.",
-    default: "anchored" as const,
+    default: "follow" as const,
     options: [
+      { value: "follow", label: "Follow" },
       { value: "fixed", label: "Fixed" },
       { value: "anchored", label: "Anchored" },
     ],
