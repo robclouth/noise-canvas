@@ -418,15 +418,21 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       const coords = getSnappedCoordinates(event, fileId, bpm);
       if (!coords) return;
 
-      // Pick mode: clicking on a canvas sets the file path and position params
+      // Pick mode: clicking on a canvas sets the file path and (optionally) its companion offset params.
       if (state.pickingFileParam) {
-        state.setParameter(state.pickingFileParam, { path: openFiles[fileId].filePath });
-        // Set position params (UV 0-1 → 0-100%). Y is inverted between display and spectrogram space.
-        state.setParameter("sourceTimeOffset" as import("@renderer/store/types").ParameterKey, coords[0] * 100);
-        state.setParameter(
-          "sourcePitchOffset" as import("@renderer/store/types").ParameterKey,
-          (1.0 - coords[1]) * 100,
-        );
+        const { getParameterDef } = await import("@renderer/parameters");
+        const def = getParameterDef(state.pickingFileParam);
+        const effectId = state.pickingEffectId ?? undefined;
+        state.setParameter(state.pickingFileParam, { path: openFiles[fileId].filePath }, effectId);
+        if (def.kind === "file") {
+          if (def.timeOffsetParam) {
+            state.setParameter(def.timeOffsetParam, coords[0] * 100, effectId);
+          }
+          if (def.pitchOffsetParam) {
+            // Y is inverted between display and spectrogram space.
+            state.setParameter(def.pitchOffsetParam, (1.0 - coords[1]) * 100, effectId);
+          }
+        }
         state.setPickingFileParam(null);
         return;
       }

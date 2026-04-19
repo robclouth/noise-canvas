@@ -69,6 +69,10 @@ export interface OptionsParameter<T = any> extends ParameterBase {
 export interface FileParameter extends ParameterBase {
   kind: "file";
   default: FileParameterValue;
+  timeOffsetParam?: ParameterKey;
+  pitchOffsetParam?: ParameterKey;
+  previewMode?: "brushRect" | "crosshair";
+  enableShortcut?: boolean;
 }
 
 export type ParameterDef = NumberParameter | BooleanParameter | OptionsParameter | StringParameter | FileParameter;
@@ -499,6 +503,10 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "File and position to use as the source for this step. When null, paints from self.",
     default: null,
     includeInStep: true,
+    timeOffsetParam: "sourceTimeOffset" as ParameterKey,
+    pitchOffsetParam: "sourcePitchOffset" as ParameterKey,
+    previewMode: "brushRect",
+    enableShortcut: true,
   },
   sourcePositionMode: {
     kind: "options",
@@ -1318,6 +1326,91 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     includeInStep: true,
     modulatable: true,
     effectType: "waveshape" as EffectType,
+  },
+
+  convolveIrFile: {
+    kind: "file",
+    name: "Convolve IR",
+    label: "IR",
+    description: "Impulse response spectrogram file used as the convolution kernel.",
+    default: null,
+    includeInStep: true,
+    effectType: "convolve" as EffectType,
+    timeOffsetParam: "convolveIrTimeOffset" as ParameterKey,
+    pitchOffsetParam: "convolveIrPitchOffset" as ParameterKey,
+    previewMode: "crosshair",
+    enableShortcut: false,
+  },
+  convolveIrTimeOffset: {
+    kind: "number",
+    name: "IR Time",
+    label: "Time ↔",
+    description: "Time position in the IR file where tap 0 starts (0-100%).",
+    default: 0,
+    min: 0,
+    max: 100,
+    step: 0.1,
+    unit: "%",
+    includeInStep: true,
+    modulatable: true,
+    effectType: "convolve" as EffectType,
+  },
+  convolveIrPitchOffset: {
+    kind: "number",
+    name: "IR Pitch",
+    label: "Pitch ↕",
+    description: "Pitch shift applied when reading the IR (0-100%).",
+    default: 0,
+    min: 0,
+    max: 100,
+    step: 0.1,
+    unit: "%",
+    includeInStep: true,
+    modulatable: true,
+    effectType: "convolve" as EffectType,
+  },
+  convolveIrSize: {
+    kind: "number",
+    name: "IR Size",
+    label: "Taps",
+    description: "Number of IR frames (taps) to apply. More taps = longer, more expensive tail.",
+    default: 64,
+    min: 1,
+    max: 512,
+    step: 1,
+    unit: "",
+    includeInStep: true,
+    modulatable: true,
+    effectType: "convolve" as EffectType,
+  },
+  convolveGainDb: {
+    kind: "number",
+    name: "Gain",
+    label: "Gain",
+    description: "Output gain applied to the convolution result.",
+    default: 0,
+    min: -36,
+    max: 36,
+    step: 0.1,
+    unit: "dB",
+    includeInStep: true,
+    modulatable: true,
+    effectType: "convolve" as EffectType,
+  },
+  convolveOrigin: {
+    kind: "options",
+    name: "Convolve Origin",
+    label: "Origin",
+    description:
+      "How the IR is aligned to the brush position. Forwards: tail lands after the source event (natural reverb). Backwards: tail lands before. Middle: symmetric.",
+    default: 0,
+    options: [
+      { value: 0, label: "Forwards" },
+      { value: 1, label: "Middle" },
+      { value: 2, label: "Backwards" },
+    ],
+    includeInStep: true,
+    effectType: "convolve" as EffectType,
   },
 
   effects: {

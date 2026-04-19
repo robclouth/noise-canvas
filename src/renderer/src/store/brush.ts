@@ -23,7 +23,8 @@ export interface BrushState {
   sourcePositionMode: string;
   sourceDataMode: string;
   pickingFileParam: ParameterKey | null;
-  setPickingFileParam: (paramKey: ParameterKey | null) => void;
+  pickingEffectId: string | null;
+  setPickingFileParam: (paramKey: ParameterKey | null, effectId?: string | null) => void;
   highlightedSourcePath: string | null;
   setHighlightedSourcePath: (path: string | null) => void;
   isStroking: boolean;
@@ -81,7 +82,9 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     sourcePositionMode: getParameterDef("sourcePositionMode").default,
     sourceDataMode: getParameterDef("sourceDataMode").default,
     pickingFileParam: null,
-    setPickingFileParam: (paramKey) => set({ pickingFileParam: paramKey }),
+    pickingEffectId: null,
+    setPickingFileParam: (paramKey, effectId = null) =>
+      set({ pickingFileParam: paramKey, pickingEffectId: paramKey ? effectId : null }),
     highlightedSourcePath: null,
     setHighlightedSourcePath: (path) => set({ highlightedSourcePath: path }),
     isStroking: false,

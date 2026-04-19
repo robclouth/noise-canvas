@@ -8,6 +8,7 @@ uniform float gridSize;
 
 uniform bool showTargetRectangle;
 uniform bool showSourceRectangle;
+uniform bool showCrosshair;
 uniform float targetRectPulse;
 uniform vec3 targetRectColor;
 
@@ -193,6 +194,19 @@ void main() {
 
         float rectAlpha = 1.0 - smoothstep(0.0, fwidth(distToBorder), abs(distToBorder));
         color = mix(color, targetRectColor, rectAlpha * targetRectPulse);
+    }
+
+    // Crosshair at cursor position — used when picking a file param with point semantics
+    // (e.g. convolve IR) where a brush-sized rectangle doesn't make sense.
+    if (showCrosshair) {
+        vec2 delta = zoomedUv - brushBottomLeftUv;
+        if (wrapX) delta.x -= floor(delta.x + 0.5);
+        if (wrapY) delta.y -= floor(delta.y + 0.5);
+
+        float hLine = 1.0 - smoothstep(0.0, fwidth(delta.y), abs(delta.y));
+        float vLine = 1.0 - smoothstep(0.0, fwidth(delta.x), abs(delta.x));
+        float crossAlpha = max(hLine, vLine);
+        color = mix(color, targetRectColor, crossAlpha * targetRectPulse);
     }
 
     outColor = vec4(color, 1.0);

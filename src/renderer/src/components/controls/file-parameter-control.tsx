@@ -1,5 +1,6 @@
 import { useStore } from "@/store";
 import { Box, Group, Text } from "@mantine/core";
+import { useEffectId } from "@renderer/contexts/effect-context";
 import type { FileParameterValue } from "@renderer/parameters";
 import { getFileColor } from "@renderer/store/files";
 import type { ParameterKey } from "@renderer/store/types";
@@ -19,8 +20,10 @@ export const FileParameterControl = memo(function FileParameterControl({
   setValue,
   paramKey,
 }: FileParameterControlProps) {
+  const effectId = useEffectId();
   const pickingFileParam = useStore((state) => state.pickingFileParam);
-  const isPicking = pickingFileParam === paramKey;
+  const pickingEffectId = useStore((state) => state.pickingEffectId);
+  const isPicking = pickingFileParam === paramKey && pickingEffectId === (effectId ?? null);
 
   const filename = value ? value.path.split("/").pop() || value.path : "Self";
   const hasValue = value !== null;
@@ -30,9 +33,9 @@ export const FileParameterControl = memo(function FileParameterControl({
     if (isPicking) {
       useStore.getState().setPickingFileParam(null);
     } else {
-      useStore.getState().setPickingFileParam(paramKey);
+      useStore.getState().setPickingFileParam(paramKey, effectId);
     }
-  }, [isPicking, paramKey]);
+  }, [isPicking, paramKey, effectId]);
 
   return (
     <Group gap={"xs"} wrap="nowrap" h={24} align="center">

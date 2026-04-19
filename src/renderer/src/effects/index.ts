@@ -1,6 +1,7 @@
 import { binauralEffect } from "./binaural-effect";
 import { blurEffect } from "./blur-effect";
 import { cloneEffect } from "./clone-effect";
+import { convolveEffect } from "./convolve-effect";
 import { dynamicsEffect } from "./dynamics-effect";
 import { evolveEffect } from "./evolve-effect";
 import { overtonesEffect } from "./overtones-effect";
@@ -28,4 +29,5 @@ export const effects = {
   sort: sortEffect,
   transmute: transmuteEffect,
   waveshape: waveshapeEffect,
+  convolve: convolveEffect,
 };

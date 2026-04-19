@@ -12,6 +12,7 @@ import { EffectSection } from "./effect-section";
 import { BinauralEffect } from "./effect-views/binaural-effect";
 import { BlurEffect } from "./effect-views/blur-effect";
 import { CloneEffect } from "./effect-views/clone-effect";
+import { ConvolveEffect } from "./effect-views/convolve-effect";
 import { DynamicsEffect } from "./effect-views/dynamics-effect";
 import { EvolveEffect } from "./effect-views/evolve-effect";
 import { HarmonicsEffect } from "./effect-views/overtones-effect";
@@ -33,6 +34,7 @@ const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
   sort: <SortEffect />,
   transmute: <TransmuteEffect />,
   waveshape: <WaveshapeEffect />,
+  convolve: <ConvolveEffect />,
 };
 
 import { ParameterKey } from "@/store/types";
@@ -85,6 +87,14 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
   sort: ["sortDirection", "sortOrder", "sortBy", "sortStereoMode"],
   transmute: ["transmuteMode", "transmuteAmount", "transmuteCurve"],
   waveshape: ["waveshapeMode", "waveshapeDrive", "waveshapeTilt"],
+  convolve: [
+    "convolveIrFile",
+    "convolveIrTimeOffset",
+    "convolveIrPitchOffset",
+    "convolveIrSize",
+    "convolveOrigin",
+    "convolveGainDb",
+  ],
 };
 
 const MAX_EFFECTS = 10;

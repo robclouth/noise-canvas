@@ -1,5 +1,5 @@
 import { DEFAULT_EFFECTS, EffectItem } from "@renderer/effects/types";
-import { getParameterDef } from "@renderer/parameters";
+import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
 import { shapes } from "../effects/overtones-shapes";
 
 export interface EffectsState {
@@ -60,6 +60,12 @@ export interface EffectsState {
   waveshapeMode: number;
   waveshapeDrive: number;
   waveshapeTilt: number;
+  convolveIrFile: FileParameterValue;
+  convolveIrTimeOffset: number;
+  convolveIrPitchOffset: number;
+  convolveIrSize: number;
+  convolveGainDb: number;
+  convolveOrigin: number;
 }
 
 export const createEffectsSlice = (): EffectsState => {
@@ -142,5 +148,13 @@ export const createEffectsSlice = (): EffectsState => {
     waveshapeMode: getParameterDef("waveshapeMode").default,
     waveshapeDrive: getParameterDef("waveshapeDrive").default,
     waveshapeTilt: getParameterDef("waveshapeTilt").default,
+
+    // ---------------- Convolve ----------------
+    convolveIrFile: null,
+    convolveIrTimeOffset: getParameterDef("convolveIrTimeOffset").default,
+    convolveIrPitchOffset: getParameterDef("convolveIrPitchOffset").default,
+    convolveIrSize: getParameterDef("convolveIrSize").default,
+    convolveGainDb: getParameterDef("convolveGainDb").default,
+    convolveOrigin: getParameterDef("convolveOrigin").default,
   };
 };

@@ -201,6 +201,7 @@ export const EFFECT_COLORS: Record<string, string> = {
   sort: HUE_ORANGE,
   transmute: HUE_INDIGO,
   waveshape: HUE_TEAL,
+  convolve: "blue",
 };
 
 export const EFFECT_LABELS: Record<string, string> = {
@@ -215,6 +216,7 @@ export const EFFECT_LABELS: Record<string, string> = {
   sort: "Sort",
   transmute: "Transmute",
   waveshape: "Waveshape",
+  convolve: "Convolve",
 };
 
 export const EFFECT_DESCRIPTIONS: Record<string, string> = {
@@ -232,4 +234,6 @@ export const EFFECT_DESCRIPTIONS: Record<string, string> = {
     "Low-level polar operations on raw magnitude and phase: swap, complex power, phase rotate, quantize, stereo cross, and phase gate.",
   waveshape:
     "Waveshaper distortion on rectangular spectral bins: soft clip, hard clip, rectify, and boundary modes (fold, wrap, invert, cut).",
+  convolve:
+    "Time-axis convolution with an IR spectrogram. Reverbs, room tones, and other impulse-response-based effects.",
 };
