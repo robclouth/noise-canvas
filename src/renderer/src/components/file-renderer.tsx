@@ -198,6 +198,7 @@ const FileRendererInner = memo(
           gridWidthUv: { value: 0.0 },
           gridHeightUv: { value: 0.0 },
           barWidthUv: { value: 0.0 },
+          octaveHeightUv: { value: 0.0 },
           showHorizontalGrid: { value: true },
           showVerticalGrid: { value: true },
           scaleGridEnabled: { value: false },
@@ -681,6 +682,7 @@ const FileRendererInner = memo(
       const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
       const gridIntervalBands = gridSizeSemis * bandsPerSemitone;
       const gridHeightUv = gridSizeSemis > 0 ? gridIntervalBands / spectrogramData.numBands : 0;
+      const octaveHeightUv = gridSizeSemis > 0 ? (12 * bandsPerSemitone) / spectrogramData.numBands : 0;
 
       // Determine if grid lines should be shown based on spacing (min 10 pixels apart)
       const MIN_GRID_SPACING_PX = 10;
@@ -692,6 +694,7 @@ const FileRendererInner = memo(
       displayMaterial.uniforms.gridWidthUv.value = gridWidthUv;
       displayMaterial.uniforms.gridHeightUv.value = gridHeightUv;
       displayMaterial.uniforms.barWidthUv.value = barWidthUv;
+      displayMaterial.uniforms.octaveHeightUv.value = octaveHeightUv;
       displayMaterial.uniforms.showHorizontalGrid.value = gridWidthPx >= MIN_GRID_SPACING_PX && gridSizeBeats > 0;
       displayMaterial.uniforms.showVerticalGrid.value = gridHeightPx >= MIN_GRID_SPACING_PX && gridSizeSemis > 0;
 
