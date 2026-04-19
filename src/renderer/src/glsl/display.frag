@@ -18,6 +18,7 @@ uniform vec2 sourceSamplingBottomLeftUv; // Pre-computed sampling position on th
 uniform float gridWidthUv;        // Width of each beat in UV coordinates
 uniform float gridHeightUv;       // Height of each semitone in UV coordinates
 uniform float barWidthUv;         // Width of each bar (4 beats) in UV coordinates
+uniform float octaveHeightUv;     // Height of one octave in UV coordinates
 uniform bool showHorizontalGrid;  // Whether to show horizontal grid lines
 uniform bool showVerticalGrid;    // Whether to show vertical grid lines
 
@@ -86,29 +87,18 @@ void main() {
         color = leftColor + rightColor;
     }
 
-    // Grid lines (in zoomed coordinates)
-    float lineThicknessUv = fwidth(zoomedUv.x);
-    
-    // Horizontal grid lines (time)
-    if (showHorizontalGrid) {
-        float line = mod(zoomedUv.x, gridWidthUv);
-        
-        // Check if this is the first beat of a bar (4/4 timing)
-        float barLine = mod(zoomedUv.x, barWidthUv);
-        bool isBarStart = barLine < gridWidthUv;
-        
-        if (line < lineThicknessUv) {
-            color = fract(color + 0.3);
-        }
-    }
-    
-    // Vertical grid lines (frequency)
-    if (showVerticalGrid && gridHeightUv > 0.0) {
-        float verticalLine = mod(zoomedUv.y, gridHeightUv);
-        float verticalLineThicknessUv = fwidth(zoomedUv.y);
-        
-        if (verticalLine < verticalLineThicknessUv) {
-            color = fract(color + 0.3);
+    // Grid dots at beat x semitone intersections
+    if (showHorizontalGrid && showVerticalGrid && gridWidthUv > 0.0 && gridHeightUv > 0.0) {
+        float hThick = fwidth(zoomedUv.x);
+        float vThick = fwidth(zoomedUv.y);
+        float hLine = mod(zoomedUv.x, gridWidthUv);
+        float vLine = mod(zoomedUv.y, gridHeightUv);
+
+        if (hLine < hThick && vLine < vThick) {
+            bool isBar = mod(zoomedUv.x, barWidthUv) < hThick;
+            bool isOctave = octaveHeightUv > 0.0 && mod(zoomedUv.y, octaveHeightUv) < vThick;
+            float delta = (isBar && isOctave) ? 0.5 : 0.3;
+            color = mix(color + delta, color - delta, step(1.0 - delta, color));
         }
     }
 
