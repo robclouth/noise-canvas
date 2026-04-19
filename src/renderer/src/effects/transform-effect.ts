@@ -1,4 +1,5 @@
 import { useStore } from "@/store";
+import { buildScaleOffsets, minFreqSemisAboveC0 } from "@renderer/lib/scale-snap";
 import { unitsToUv } from "@renderer/lib/utils";
 import type { EffectsState } from "@renderer/store/effects";
 import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "@renderer/store/modulators";
@@ -70,6 +71,9 @@ class TransformEffect extends BaseEffect {
           boundaryMode: {
             value: 0,
           },
+          scaleSnapEnabled: { value: false },
+          scaleOffsets: { value: new Float32Array(12) },
+          brushBasePitchAbsSemis: { value: 0.0 },
         },
         vertexShader: passThroughVert,
         fragmentShader: withPlatformDefines(transformEffectFrag),
@@ -152,6 +156,19 @@ class TransformEffect extends BaseEffect {
       contextualModAmounts: getContextualModAmountsNormalized(state, "transformRotation"),
     };
     material.uniforms.boundaryMode.value = transformEdgeMode;
+
+    // Scale snapping: anchor the snap to the brush's pitch-low edge (= the UV position the
+    // pointer snap places on a scale note). brushBottomLeftUv is in pitch-UV convention
+    // (y=0 at band 0 / low pitch, y=1 at the top band), built via unitsToUv(pitch, ...).
+    const { scaleTonic, scaleType, scaleSnap } = state;
+    material.uniforms.scaleSnapEnabled.value = scaleSnap;
+    material.uniforms.scaleOffsets.value = buildScaleOffsets(scaleTonic, scaleType);
+    if (scaleSnap) {
+      const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
+      const bandIndex = props.commonUniforms.brushBottomLeftUv.value.y * spectrogramData.numBands;
+      const semisAboveMinFreq = bandIndex / bandsPerSemitone;
+      material.uniforms.brushBasePitchAbsSemis.value = minFreqSemisAboveC0(spectrogramData.minFreq) + semisAboveMinFreq;
+    }
   }
 }
 

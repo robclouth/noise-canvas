@@ -21,6 +21,11 @@ uniform float barWidthUv;         // Width of each bar (4 beats) in UV coordinat
 uniform bool showHorizontalGrid;  // Whether to show horizontal grid lines
 uniform bool showVerticalGrid;    // Whether to show vertical grid lines
 
+// Scale grid (drawn at in-scale semitones when a scale is active)
+uniform bool scaleGridEnabled;
+uniform float scaleOffsets[12];       // signed; 0 for in-scale pitch classes
+uniform float pitchOffsetSemisFromC0; // semitones above C0 at band index 0
+
 // Convert screen UV (what we see) to zoomed UV (actual data coordinates)
 vec2 screenToZoomed(vec2 screenUv, float zoomPowerX, float offsetX, float zoomPowerY, float offsetY) {
     float zx = pow(2.0, zoomPowerX);
@@ -103,10 +108,24 @@ void main() {
     }
     
     // Vertical grid lines (frequency)
-    if (showVerticalGrid && gridHeightUv > 0.0) {
+    if (scaleGridEnabled) {
+        float bandsPerSemi = sourceBandsPerOctave / 12.0;
+        float semisAboveMin = (1.0 - zoomedUv.y) * sourceBandCount / bandsPerSemi;
+        float absSemis = pitchOffsetSemisFromC0 + semisAboveMin;
+        float nearestSemi = floor(absSemis + 0.5);
+        int pc = int(mod(nearestSemi, 12.0));
+        if (scaleOffsets[pc] == 0.0) {
+            float targetSemisAboveMin = nearestSemi - pitchOffsetSemisFromC0;
+            float targetBandIndex = targetSemisAboveMin * bandsPerSemi;
+            float targetUvY = 1.0 - targetBandIndex / sourceBandCount;
+            if (abs(zoomedUv.y - targetUvY) < 0.5 * fwidth(zoomedUv.y)) {
+                color = fract(color + 0.3);
+            }
+        }
+    } else if (showVerticalGrid && gridHeightUv > 0.0) {
         float verticalLine = mod(zoomedUv.y, gridHeightUv);
         float verticalLineThicknessUv = fwidth(zoomedUv.y);
-        
+
         if (verticalLine < verticalLineThicknessUv) {
             color = fract(color + 0.3);
         }

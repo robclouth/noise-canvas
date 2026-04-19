@@ -1446,6 +1446,13 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       label: startCase(name),
     })),
   },
+  scaleSnap: {
+    kind: "boolean",
+    name: "Snap to Scale",
+    label: "Snap",
+    description: "When enabled, pitch-axis grid and transform pitch shifts snap to the selected scale.",
+    default: false,
+  },
   bandsPerOctave: {
     kind: "options",
     name: "Resolution Mode",

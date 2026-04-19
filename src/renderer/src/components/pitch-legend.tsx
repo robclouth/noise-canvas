@@ -113,8 +113,10 @@ export const PitchLegend = memo(({ fileId }: PitchLegendProps) => {
       if (centerPx < -pxPerSemitone || centerPx > height + pxPerSemitone) continue;
 
       if (showKeys) {
+        // Strip sits above the note's grid line so its bottom edge aligns with the line
+        // (like a piano key: the C key spans from the C line up to the C# line).
         keys.push({
-          top: centerPx - pxPerSemitone / 2,
+          top: centerPx - pxPerSemitone,
           height: pxPerSemitone,
           black: isBlackKey(midi),
         });
@@ -181,7 +183,7 @@ export const PitchLegend = memo(({ fileId }: PitchLegendProps) => {
             left: 4,
             right: 4,
             top: label.top,
-            transform: "translateY(-50%)",
+            transform: "translateY(-100%)",
             fontSize: 10,
             fontWeight: 600,
             color: "rgba(255, 255, 255, 0.85)",

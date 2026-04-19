@@ -12,6 +12,7 @@ export interface AppState {
   normalize: boolean;
   scaleTonic: string;
   scaleType: string;
+  scaleSnap: boolean;
   bandsPerOctave: number;
   minFreq: number;
 
@@ -37,6 +38,7 @@ export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
     normalize: getParameterDef("normalize").default,
     scaleTonic: getParameterDef("scaleTonic").default,
     scaleType: getParameterDef("scaleType").default,
+    scaleSnap: getParameterDef("scaleSnap").default,
     bandsPerOctave: getParameterDef("bandsPerOctave").default,
     minFreq: getParameterDef("minFreq").default,
 

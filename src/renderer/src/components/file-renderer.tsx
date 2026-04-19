@@ -25,6 +25,7 @@ import { effects } from "../effects";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
+import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { SourceFileInfo, StrokeRenderer, StrokeTextures } from "../lib/stroke-renderer";
 import { penState } from "../lib/pen-state";
@@ -199,6 +200,9 @@ const FileRendererInner = memo(
           barWidthUv: { value: 0.0 },
           showHorizontalGrid: { value: true },
           showVerticalGrid: { value: true },
+          scaleGridEnabled: { value: false },
+          scaleOffsets: { value: new Float32Array(12) },
+          pitchOffsetSemisFromC0: { value: 0.0 },
           showTargetRectangle: { value: false },
           showSourceRectangle: { value: false },
           targetRectPulse: { value: 1.0 },
@@ -683,6 +687,12 @@ const FileRendererInner = memo(
       displayMaterial.uniforms.barWidthUv.value = barWidthUv;
       displayMaterial.uniforms.showHorizontalGrid.value = gridWidthPx >= MIN_GRID_SPACING_PX && gridSizeBeats > 0;
       displayMaterial.uniforms.showVerticalGrid.value = gridHeightPx >= MIN_GRID_SPACING_PX && gridSizeSemis > 0;
+
+      // Scale grid: draw a line at every in-scale semitone when scale snap is on. Hide when too dense.
+      const semitoneHeightPx = (spectrogramData.bandsPerOctave / 12 / spectrogramData.numBands) * viewportHeight;
+      displayMaterial.uniforms.scaleGridEnabled.value = state.scaleSnap && semitoneHeightPx >= MIN_GRID_SPACING_PX;
+      displayMaterial.uniforms.scaleOffsets.value = buildScaleOffsets(state.scaleTonic, state.scaleType);
+      displayMaterial.uniforms.pitchOffsetSemisFromC0.value = minFreqSemisAboveC0(spectrogramData.minFreq);
 
       // Update source offset uniforms (for display preview)
       if (activeStepSourceFile && sourceFileData?.spectrogramData) {

@@ -1,4 +1,5 @@
 import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
+import { buildScaleOffsets, minFreqSemisAboveC0, stepScaleSemis } from "@renderer/lib/scale-snap";
 import type { ParameterKey } from "./types";
 import { openFiles } from "./files";
 import type { ZustandGet, ZustandSet } from "./types";
@@ -173,7 +174,16 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     // Helper: move brush and preview
     moveBrushPosition: (direction) => {
       const state = get();
-      const { cursorPosition, gridSizeBeats, gridSizeSemis, activeFileId, previewStrokeAtPosition } = state;
+      const {
+        cursorPosition,
+        gridSizeBeats,
+        gridSizeSemis,
+        activeFileId,
+        previewStrokeAtPosition,
+        scaleTonic,
+        scaleType,
+        scaleSnap,
+      } = state;
 
       if (!activeFileId) return;
 
@@ -200,15 +210,28 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
 
       // Snap current position to grid first
       const snappedBeats = Math.floor(currentPos.beats / gridSizeBeats) * gridSizeBeats;
-      const snappedPitch = Math.floor(currentPos.pitch / gridSizeSemis) * gridSizeSemis;
+      const snappedPitch =
+        gridSizeSemis > 0 ? Math.floor(currentPos.pitch / gridSizeSemis) * gridSizeSemis : currentPos.pitch;
 
       const newPosition = { beats: snappedBeats, pitch: snappedPitch };
+      const minFreqSemis = minFreqSemisAboveC0(spectrogramData.minFreq);
+      const offsets = scaleSnap ? buildScaleOffsets(scaleTonic, scaleType) : null;
       switch (direction) {
         case "up":
-          newPosition.pitch += gridSizeSemis;
+          if (offsets) {
+            const absSemis = minFreqSemis + snappedPitch;
+            newPosition.pitch = stepScaleSemis(absSemis, 1, offsets) - minFreqSemis;
+          } else {
+            newPosition.pitch += gridSizeSemis;
+          }
           break;
         case "down":
-          newPosition.pitch -= gridSizeSemis;
+          if (offsets) {
+            const absSemis = minFreqSemis + snappedPitch;
+            newPosition.pitch = stepScaleSemis(absSemis, -1, offsets) - minFreqSemis;
+          } else {
+            newPosition.pitch -= gridSizeSemis;
+          }
           break;
         case "left":
           newPosition.beats -= gridSizeBeats;
@@ -225,7 +248,8 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         newPosition.beats = 0;
       }
       if (newPosition.pitch < 0) {
-        newPosition.pitch = Math.floor(totalSemitones / gridSizeSemis) * gridSizeSemis;
+        newPosition.pitch =
+          gridSizeSemis > 0 ? Math.floor(totalSemitones / gridSizeSemis) * gridSizeSemis : totalSemitones;
       } else if (newPosition.pitch >= totalSemitones) {
         newPosition.pitch = 0;
       }

@@ -7,6 +7,23 @@ uniform Parameter scaleY;
 uniform Parameter rotation;
 uniform int boundaryMode;
 
+uniform bool scaleSnapEnabled;
+uniform float scaleOffsets[12];
+uniform float brushBasePitchAbsSemis;
+
+// Snap a pitch in semitones to the nearest in-scale semitone. Considers both the
+// floor and ceil chromatic neighbors so values near boundaries pick the truly-closest
+// scale note.
+float snapToScale(float target) {
+    float chromaLow = floor(target);
+    float chromaHigh = chromaLow + 1.0;
+    int pcLow = int(mod(chromaLow, 12.0));
+    int pcHigh = int(mod(chromaHigh, 12.0));
+    float candLow = chromaLow + scaleOffsets[pcLow];
+    float candHigh = chromaHigh + scaleOffsets[pcHigh];
+    return (abs(candLow - target) <= abs(candHigh - target)) ? candLow : candHigh;
+}
+
 void main() {
     ProcessingUvs coords = getProcessingUvs(vUv);
     vec4 originalTexel = texture(destSpectrogramTex, vUv);
@@ -51,7 +68,15 @@ void main() {
     float rawShiftX = applyModulation(shiftX.value, shiftX.minValue, shiftX.maxValue, shiftX.modulationAmounts, shiftX.contextualModAmounts, coords.dest, 0, audioLevelDb);
     float rawShiftY = applyModulation(shiftY.value, shiftY.minValue, shiftY.maxValue, shiftY.modulationAmounts, shiftY.contextualModAmounts, coords.dest, 0, audioLevelDb);
     float appliedShiftX = -rawShiftX;
-    float appliedShiftY = -rawShiftY;
+    // Scale snap: apply to the (already modulated) scalar shift as a whole so the brush
+    // base pitch + shift lands on a scale note. Per-pixel snap would comb-filter the spectrum.
+    float bandsPerSemi = destBandsPerOctave / 12.0;
+    float shiftSemisApplied = -rawShiftY * destBandCount / bandsPerSemi;
+    if (scaleSnapEnabled) {
+        float target = brushBasePitchAbsSemis + shiftSemisApplied;
+        shiftSemisApplied += snapToScale(target) - target;
+    }
+    float appliedShiftY = shiftSemisApplied * bandsPerSemi / destBandCount;
     vec2 finalSourceUv = transformedUv + vec2(appliedShiftX, appliedShiftY);
 
     // Total shift includes both source offset and transform shift
