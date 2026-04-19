@@ -12,9 +12,13 @@ void main() {
 
   float audioLevelDb = getAudioLevelDb(unpackedUv);
   float envelopeWeight = getBrushWeight(unpackedUv, audioLevelDb);
-  
-  // Effective weight is envelope * intensity (same calculation as in applyBrush)
-  float newWeight = envelopeWeight * brushIntensity.value;
+
+  float intensity = applyModulation(
+    brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue,
+    brushIntensity.modulationAmounts, brushIntensity.contextualModAmounts, unpackedUv, 0, audioLevelDb
+  );
+
+  float newWeight = envelopeWeight * intensity;
   
   // Read current mask value and take maximum
   float currentWeight = texture(currentMaskTex, packedUv).r;
