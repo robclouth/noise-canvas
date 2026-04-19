@@ -1476,11 +1476,18 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     label: "Beats",
     description: "The horizontal grid size in beats.",
     default: 1,
-    min: 0,
+    min: BEAT_VALUES[0].value,
     max: 32,
     step: 0.0001,
-    marks: [{ value: 0, label: "Off" }, ...BEAT_VALUES],
+    marks: BEAT_VALUES,
     scale: "log",
+  },
+  snapTime: {
+    kind: "boolean",
+    name: "Snap Time",
+    label: "Snap Time",
+    description: "When enabled, the brush snaps to the horizontal (time) grid.",
+    default: true,
   },
   accumulate: {
     kind: "boolean",
@@ -1495,12 +1502,21 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "number",
     name: "Grid Size Semis",
     label: "Semis",
-    description: "The vertical grid size in semitones.",
+    description:
+      "The vertical grid size in semitones. Set to 'Scale' to use the selected scale instead of a fixed semitone interval.",
     default: 24,
     min: 0,
     max: 96,
     step: 1,
-    marks: [{ value: 0, label: "Off" }, ...PITCH_VALUES],
+    marks: [{ value: 0, label: "Scale" }, ...PITCH_VALUES],
+  },
+  snapPitch: {
+    kind: "boolean",
+    name: "Snap Pitch",
+    label: "Snap Pitch",
+    description:
+      "When enabled, the brush snaps to the vertical (pitch) grid, or to the scale when the pitch grid is set to 'Scale'.",
+    default: true,
   },
   minFreq: {
     kind: "number",
@@ -1551,13 +1567,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       value: name,
       label: startCase(name),
     })),
-  },
-  scaleSnap: {
-    kind: "boolean",
-    name: "Snap to Scale",
-    label: "Snap",
-    description: "When enabled, pitch-axis grid and transform pitch shifts snap to the selected scale.",
-    default: false,
   },
   bandsPerOctave: {
     kind: "options",

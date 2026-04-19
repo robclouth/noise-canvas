@@ -29,7 +29,7 @@ function getSnappedCoordinates(
   bpm: number,
 ): [number, number] | null {
   const state = useStore.getState();
-  const { gridSizeBeats, gridSizeSemis, scaleTonic, scaleType, scaleSnap } = state;
+  const { gridSizeBeats, gridSizeSemis, snapTime, snapPitch, scaleTonic, scaleType } = state;
   const rect = event.currentTarget.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) {
     return null;
@@ -48,32 +48,32 @@ function getSnappedCoordinates(
   let snappedX = uv.x;
   let snappedY = uv.y;
 
-  if (gridSizeBeats > 0) {
+  if (snapTime) {
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
     const gridIntervalSeconds = (60 / bpm) * gridSizeBeats;
     const currentTime = uv.x * totalDuration;
-    // Floor to get the start of the current cell
     const cellIndex = Math.floor(currentTime / gridIntervalSeconds);
     const snappedCenterTime = cellIndex * gridIntervalSeconds;
     snappedX = snappedCenterTime / totalDuration;
   }
 
-  snappedY = snapPitchUv(
-    uv.y,
-    spectrogramData.numBands,
-    spectrogramData.bandsPerOctave,
-    spectrogramData.minFreq,
-    gridSizeSemis,
-    scaleTonic,
-    scaleType,
-    scaleSnap,
-  );
+  if (snapPitch) {
+    snappedY = snapPitchUv(
+      uv.y,
+      spectrogramData.numBands,
+      spectrogramData.bandsPerOctave,
+      spectrogramData.minFreq,
+      gridSizeSemis,
+      scaleTonic,
+      scaleType,
+    );
+  }
 
   return [snappedX, snappedY];
 }
 
-// Snaps a pitch-axis UV to the scale (when scaleSnap is on) or to the chromatic
-// gridSizeSemis cell. Returns uv unchanged if neither is active.
+// Snaps a pitch-axis UV to the scale (when gridSizeSemis is 0 / "Scale" mode)
+// or to the chromatic gridSizeSemis cell.
 function snapPitchUv(
   uvY: number,
   numBands: number,
@@ -82,10 +82,9 @@ function snapPitchUv(
   gridSizeSemis: number,
   scaleTonic: string,
   scaleType: string,
-  scaleSnap: boolean,
 ): number {
-  if (scaleSnap) {
-    const bandsPerSemitone = bandsPerOctave / 12;
+  const bandsPerSemitone = bandsPerOctave / 12;
+  if (gridSizeSemis <= 0) {
     const currentBand = (1.0 - uvY) * numBands;
     const semisAboveMin = currentBand / bandsPerSemitone;
     const pitchOffset = minFreqSemisAboveC0(minFreq);
@@ -95,15 +94,11 @@ function snapPitchUv(
     const snappedBand = (snappedAbs - pitchOffset) * bandsPerSemitone;
     return 1.0 - snappedBand / numBands;
   }
-  if (gridSizeSemis > 0) {
-    const bandsPerSemitone = bandsPerOctave / 12;
-    const gridIntervalBands = gridSizeSemis * bandsPerSemitone;
-    const currentBand = (1.0 - uvY) * numBands;
-    const cellIndex = Math.floor(currentBand / gridIntervalBands);
-    const snappedCenterBand = cellIndex * gridIntervalBands;
-    return 1.0 - snappedCenterBand / numBands;
-  }
-  return uvY;
+  const gridIntervalBands = gridSizeSemis * bandsPerSemitone;
+  const currentBand = (1.0 - uvY) * numBands;
+  const cellIndex = Math.floor(currentBand / gridIntervalBands);
+  const snappedCenterBand = cellIndex * gridIntervalBands;
+  return 1.0 - snappedCenterBand / numBands;
 }
 
 export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) => {
@@ -528,7 +523,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       const uv = screenToZoomed(screenUv, currentZoom, currentOffset);
 
       // Apply snapping
-      const { gridSizeBeats, gridSizeSemis, scaleTonic, scaleType, scaleSnap } = state;
+      const { gridSizeBeats, gridSizeSemis, snapTime, snapPitch, scaleTonic, scaleType } = state;
       const spectrogramData = openFiles[fileId]?.spectrogramData;
       if (!spectrogramData) return;
       const bpm = state.filepathsBpm[openFiles[fileId].filePath];
@@ -536,7 +531,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       let snappedX = uv.x;
       let snappedY = uv.y;
 
-      if (gridSizeBeats > 0) {
+      if (snapTime) {
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
         const gridIntervalSeconds = (60 / bpm) * gridSizeBeats;
         const currentTime = uv.x * totalDuration;
@@ -545,16 +540,17 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         snappedX = snappedCenterTime / totalDuration;
       }
 
-      snappedY = snapPitchUv(
-        uv.y,
-        spectrogramData.numBands,
-        spectrogramData.bandsPerOctave,
-        spectrogramData.minFreq,
-        gridSizeSemis,
-        scaleTonic,
-        scaleType,
-        scaleSnap,
-      );
+      if (snapPitch) {
+        snappedY = snapPitchUv(
+          uv.y,
+          spectrogramData.numBands,
+          spectrogramData.bandsPerOctave,
+          spectrogramData.minFreq,
+          gridSizeSemis,
+          scaleTonic,
+          scaleType,
+        );
+      }
 
       // Track time range
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;

@@ -678,7 +678,8 @@ const FileRendererInner = memo(
       const gridWidthUv = gridSizeBeats > 0 ? gridIntervalSeconds / totalDuration : 0;
       const barWidthUv = gridSizeBeats > 0 ? (beatDurationSeconds * 4.0) / totalDuration : 0;
 
-      // Vertical grid (frequency/semitones)
+      // Vertical grid (frequency/semitones). When gridSizeSemis is 0, the pitch grid is in
+      // "Scale" mode and the chromatic grid is suppressed in favor of the scale grid.
       const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
       const gridIntervalBands = gridSizeSemis * bandsPerSemitone;
       const gridHeightUv = gridSizeSemis > 0 ? gridIntervalBands / spectrogramData.numBands : 0;
@@ -705,7 +706,7 @@ const FileRendererInner = memo(
       // Scale grid: draw a line at every in-scale semitone when scale snap is on. Hide when too dense.
       const semitoneHeightPx =
         (spectrogramData.bandsPerOctave / 12 / spectrogramData.numBands) * viewportHeight * zoomY;
-      displayMaterial.uniforms.scaleGridEnabled.value = state.scaleSnap && semitoneHeightPx >= MIN_GRID_SPACING_PX;
+      displayMaterial.uniforms.scaleGridEnabled.value = gridSizeSemis <= 0 && semitoneHeightPx >= MIN_GRID_SPACING_PX;
       displayMaterial.uniforms.scaleOffsets.value = buildScaleOffsets(state.scaleTonic, state.scaleType);
       displayMaterial.uniforms.pitchOffsetSemisFromC0.value = minFreqSemisAboveC0(spectrogramData.minFreq);
 

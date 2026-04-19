@@ -1,10 +1,8 @@
 import { Stack, Text } from "@mantine/core";
-import { useStore } from "@renderer/store";
 import { ParameterControl } from "../controls/parameter-control";
 import { Section } from "../section";
 
 export function ControlsPanel() {
-  const scaleSnap = useStore((state) => state.scaleSnap);
   return (
     <Stack h="100%" w="100%" p="xs" gap="xs">
       <Section label="Analysis">
@@ -15,7 +13,9 @@ export function ControlsPanel() {
       </Section>
       <Section label="Grid">
         <ParameterControl paramKey="gridSizeBeats" />
-        <ParameterControl paramKey="gridSizeSemis" disabled={scaleSnap} />
+        <ParameterControl paramKey="gridSizeSemis" />
+        <ParameterControl paramKey="snapTime" />
+        <ParameterControl paramKey="snapPitch" />
       </Section>
       <Section label="Display">
         <ParameterControl paramKey="displayMinDb" />
@@ -25,7 +25,6 @@ export function ControlsPanel() {
       <Section label="Scale">
         <ParameterControl paramKey="scaleTonic" />
         <ParameterControl paramKey="scaleType" />
-        <ParameterControl paramKey="scaleSnap" />
       </Section>
       <Section label="Output">
         <ParameterControl paramKey="magnitudeLimit" />

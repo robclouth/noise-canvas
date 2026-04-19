@@ -192,7 +192,6 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         previewStrokeAtPosition,
         scaleTonic,
         scaleType,
-        scaleSnap,
       } = state;
 
       if (!activeFileId) return;
@@ -206,6 +205,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const totalBeats = (totalDuration / 60) * bpm;
       const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
       const totalSemitones = spectrogramData.numBands / bandsPerSemitone;
+      const useScale = gridSizeSemis <= 0;
 
       let currentPos = cursorPosition;
 
@@ -213,19 +213,17 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         // Initialize to playback position, snapped to grid
         const playbackTime = state.getPlaybackTime();
         let beats = (playbackTime / 60) * bpm;
-        // Snap to grid
         beats = Math.floor(beats / gridSizeBeats) * gridSizeBeats;
         currentPos = { beats, pitch: 0 };
       }
 
       // Snap current position to grid first
       const snappedBeats = Math.floor(currentPos.beats / gridSizeBeats) * gridSizeBeats;
-      const snappedPitch =
-        gridSizeSemis > 0 ? Math.floor(currentPos.pitch / gridSizeSemis) * gridSizeSemis : currentPos.pitch;
+      const snappedPitch = useScale ? currentPos.pitch : Math.floor(currentPos.pitch / gridSizeSemis) * gridSizeSemis;
 
       const newPosition = { beats: snappedBeats, pitch: snappedPitch };
       const minFreqSemis = minFreqSemisAboveC0(spectrogramData.minFreq);
-      const offsets = scaleSnap ? buildScaleOffsets(scaleTonic, scaleType) : null;
+      const offsets = useScale ? buildScaleOffsets(scaleTonic, scaleType) : null;
       switch (direction) {
         case "up":
           if (offsets) {
@@ -258,8 +256,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         newPosition.beats = 0;
       }
       if (newPosition.pitch < 0) {
-        newPosition.pitch =
-          gridSizeSemis > 0 ? Math.floor(totalSemitones / gridSizeSemis) * gridSizeSemis : totalSemitones;
+        newPosition.pitch = useScale ? totalSemitones : Math.floor(totalSemitones / gridSizeSemis) * gridSizeSemis;
       } else if (newPosition.pitch >= totalSemitones) {
         newPosition.pitch = 0;
       }

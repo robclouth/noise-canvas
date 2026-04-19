@@ -16,6 +16,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
   const zoom = useStore((state) => state.filesZoom[fileId]);
   const offset = useStore((state) => state.filesOffset[fileId]);
   const gridSizeBeats = useStore((state) => state.gridSizeBeats);
+  const snapTime = useStore((state) => state.snapTime);
   const setFilePlaybackStartTime = useStore((state) => state.setFilePlaybackStartTime);
   const togglePlayback = useStore((state) => state.togglePlayback);
   const isPlaying = useStore((state) => state.isPlaying);
@@ -34,13 +35,13 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
       const uv = screenToZoomed(new Vector2(x, 0.5), zoom, offset);
       const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
       let time = uv.x * totalDuration;
-      if (gridSizeBeats > 0) {
+      if (snapTime) {
         const gridIntervalSeconds = (60 / bpm) * gridSizeBeats;
         time = Math.round(time / gridIntervalSeconds) * gridIntervalSeconds;
       }
       return Math.max(0, Math.min(time, totalDuration));
     },
-    [file, zoom, offset, gridSizeBeats, bpm],
+    [file, zoom, offset, gridSizeBeats, snapTime, bpm],
   );
 
   const handleMouseDown = useCallback(

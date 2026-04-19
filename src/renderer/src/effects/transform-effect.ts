@@ -160,10 +160,12 @@ class TransformEffect extends BaseEffect {
     // Scale snapping: anchor the snap to the brush's pitch-low edge (= the UV position the
     // pointer snap places on a scale note). brushBottomLeftUv is in pitch-UV convention
     // (y=0 at band 0 / low pitch, y=1 at the top band), built via unitsToUv(pitch, ...).
-    const { scaleTonic, scaleType, scaleSnap } = state;
-    material.uniforms.scaleSnapEnabled.value = scaleSnap;
+    // Active when the pitch grid is in "Scale" mode (gridSizeSemis === 0) and pitch snap is on.
+    const { scaleTonic, scaleType, gridSizeSemis, snapPitch } = state;
+    const scaleSnapActive = gridSizeSemis <= 0 && snapPitch;
+    material.uniforms.scaleSnapEnabled.value = scaleSnapActive;
     material.uniforms.scaleOffsets.value = buildScaleOffsets(scaleTonic, scaleType);
-    if (scaleSnap) {
+    if (scaleSnapActive) {
       const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
       const bandIndex = props.commonUniforms.brushBottomLeftUv.value.y * spectrogramData.numBands;
       const semisAboveMinFreq = bandIndex / bandsPerSemitone;

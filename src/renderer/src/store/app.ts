@@ -9,10 +9,11 @@ export interface AppState {
   magnitudeLimit: number;
   gridSizeBeats: number;
   gridSizeSemis: number;
+  snapTime: boolean;
+  snapPitch: boolean;
   normalize: boolean;
   scaleTonic: string;
   scaleType: string;
-  scaleSnap: boolean;
   bandsPerOctave: number;
   minFreq: number;
 
@@ -35,10 +36,11 @@ export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
     magnitudeLimit: getParameterDef("magnitudeLimit").default,
     gridSizeBeats: getParameterDef("gridSizeBeats").default,
     gridSizeSemis: getParameterDef("gridSizeSemis").default,
+    snapTime: getParameterDef("snapTime").default,
+    snapPitch: getParameterDef("snapPitch").default,
     normalize: getParameterDef("normalize").default,
     scaleTonic: getParameterDef("scaleTonic").default,
     scaleType: getParameterDef("scaleType").default,
-    scaleSnap: getParameterDef("scaleSnap").default,
     bandsPerOctave: getParameterDef("bandsPerOctave").default,
     minFreq: getParameterDef("minFreq").default,
 
