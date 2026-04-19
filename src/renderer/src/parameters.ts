@@ -1489,6 +1489,18 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "When enabled, the brush snaps to the horizontal (time) grid.",
     default: true,
   },
+  gridSwing: {
+    kind: "number",
+    name: "Grid Swing",
+    label: "Swing",
+    description:
+      "Swing amount for the time grid. 0% is straight; ~67% is triplet feel; 100% shifts odd-indexed grid lines by half a cell.",
+    default: 0,
+    min: 0,
+    max: 100,
+    step: 1,
+    unit: "%",
+  },
   accumulate: {
     kind: "boolean",
     name: "Accumulate",

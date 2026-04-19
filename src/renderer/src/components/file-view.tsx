@@ -7,7 +7,7 @@ import { memo, PointerEventHandler, useCallback, useEffect, useMemo, useRef, use
 import { Vector2 } from "three";
 import { penState } from "../lib/pen-state";
 import { buildScaleOffsets, minFreqSemisAboveC0, snapSemisToScale } from "../lib/scale-snap";
-import { screenToZoomed } from "../lib/utils";
+import { screenToZoomed, snapToSwungGridFloor } from "../lib/utils";
 import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { LoopRegion } from "./loop-region";
@@ -29,7 +29,7 @@ function getSnappedCoordinates(
   bpm: number,
 ): [number, number] | null {
   const state = useStore.getState();
-  const { gridSizeBeats, gridSizeSemis, snapTime, snapPitch, scaleTonic, scaleType } = state;
+  const { gridSizeBeats, gridSizeSemis, gridSwing, snapTime, snapPitch, scaleTonic, scaleType } = state;
   const rect = event.currentTarget.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) {
     return null;
@@ -52,8 +52,7 @@ function getSnappedCoordinates(
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
     const gridIntervalSeconds = (60 / bpm) * gridSizeBeats;
     const currentTime = uv.x * totalDuration;
-    const cellIndex = Math.floor(currentTime / gridIntervalSeconds);
-    const snappedCenterTime = cellIndex * gridIntervalSeconds;
+    const snappedCenterTime = snapToSwungGridFloor(currentTime, gridIntervalSeconds, gridSwing / 100);
     snappedX = snappedCenterTime / totalDuration;
   }
 
@@ -523,7 +522,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       const uv = screenToZoomed(screenUv, currentZoom, currentOffset);
 
       // Apply snapping
-      const { gridSizeBeats, gridSizeSemis, snapTime, snapPitch, scaleTonic, scaleType } = state;
+      const { gridSizeBeats, gridSizeSemis, gridSwing, snapTime, snapPitch, scaleTonic, scaleType } = state;
       const spectrogramData = openFiles[fileId]?.spectrogramData;
       if (!spectrogramData) return;
       const bpm = state.filepathsBpm[openFiles[fileId].filePath];
@@ -535,8 +534,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
         const gridIntervalSeconds = (60 / bpm) * gridSizeBeats;
         const currentTime = uv.x * totalDuration;
-        const cellIndex = Math.floor(currentTime / gridIntervalSeconds);
-        const snappedCenterTime = cellIndex * gridIntervalSeconds;
+        const snappedCenterTime = snapToSwungGridFloor(currentTime, gridIntervalSeconds, gridSwing / 100);
         snappedX = snappedCenterTime / totalDuration;
       }
 

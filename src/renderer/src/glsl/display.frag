@@ -19,6 +19,7 @@ uniform float gridWidthUv;        // Width of each beat in UV coordinates
 uniform float gridHeightUv;       // Height of each semitone in UV coordinates
 uniform float barWidthUv;         // Width of each bar (4 beats) in UV coordinates
 uniform float octaveHeightUv;     // Height of one octave in UV coordinates
+uniform float swingOffsetUv;      // Offset applied to odd-indexed grid lines (UV)
 uniform bool showHorizontalGrid;  // Whether to show horizontal grid lines
 uniform bool showVerticalGrid;    // Whether to show vertical grid lines
 
@@ -105,8 +106,13 @@ void main() {
     float strongDelta = 0.1 * contrastBoost;
 
     if (showHorizontalGrid && gridWidthUv > 0.0) {
-        if (mod(zoomedUv.x, gridWidthUv) < hThick) {
-            bool isBar = mod(zoomedUv.x, barWidthUv) < hThick;
+        float pairWidth = gridWidthUv * 2.0;
+        float xInPair = mod(zoomedUv.x, pairWidth);
+        float oddLineInPair = gridWidthUv + swingOffsetUv;
+        bool onEven = xInPair < hThick || xInPair > pairWidth - hThick;
+        bool onOdd = abs(xInPair - oddLineInPair) < hThick;
+        if (onEven || onOdd) {
+            bool isBar = onEven && mod(zoomedUv.x, barWidthUv) < hThick;
             float d = isBar ? strongDelta : lineDelta;
             color = mix(color + d, color - d, step(1.0 - d, color));
         }

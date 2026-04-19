@@ -9,6 +9,7 @@ export interface AppState {
   magnitudeLimit: number;
   gridSizeBeats: number;
   gridSizeSemis: number;
+  gridSwing: number;
   snapTime: boolean;
   snapPitch: boolean;
   normalize: boolean;
@@ -36,6 +37,7 @@ export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
     magnitudeLimit: getParameterDef("magnitudeLimit").default,
     gridSizeBeats: getParameterDef("gridSizeBeats").default,
     gridSizeSemis: getParameterDef("gridSizeSemis").default,
+    gridSwing: getParameterDef("gridSwing").default,
     snapTime: getParameterDef("snapTime").default,
     snapPitch: getParameterDef("snapPitch").default,
     normalize: getParameterDef("normalize").default,

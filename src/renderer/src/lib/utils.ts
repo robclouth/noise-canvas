@@ -71,6 +71,63 @@ export const zoomedToScreen = (zoomedUv: Vector2, viewZoomPower: Axis, viewOffse
   return new Vector2(x, y);
 };
 
+// Snap a value to the start of a swung grid cell. Even-indexed cell starts lie at
+// multiples of gridSize; odd-indexed starts are delayed by `swing * gridSize * 0.5`.
+// swing ∈ [0, 1] — 0 is straight, ~0.667 gives a triplet feel, 1 shifts odd lines by half a cell.
+export function snapToSwungGridFloor(value: number, gridSize: number, swing: number): number {
+  if (gridSize <= 0) return value;
+  const swingOffset = swing * gridSize * 0.5;
+  const pairSize = gridSize * 2;
+  const pairIndex = Math.floor(value / pairSize);
+  const pairStart = pairIndex * pairSize;
+  const inPair = value - pairStart;
+  if (inPair < gridSize + swingOffset) {
+    return pairStart;
+  }
+  return pairStart + gridSize + swingOffset;
+}
+
+// Step to the adjacent swung grid line in the given direction. Assumes `value`
+// is already snapped to a swung grid line (or close to one).
+export function stepSwungGrid(value: number, gridSize: number, swing: number, direction: 1 | -1): number {
+  if (gridSize <= 0) return value + direction * gridSize;
+  const swingOffset = swing * gridSize * 0.5;
+  const pairSize = gridSize * 2;
+  const pairIndex = Math.floor(value / pairSize);
+  const pairStart = pairIndex * pairSize;
+  const oddLine = pairStart + gridSize + swingOffset;
+  const onOdd = Math.abs(value - oddLine) < Math.abs(value - pairStart);
+  if (direction === 1) {
+    return onOdd ? pairStart + pairSize : oddLine;
+  }
+  if (onOdd) return pairStart;
+  return pairStart - pairSize + gridSize + swingOffset;
+}
+
+// Round a value to the nearest swung grid line.
+export function snapToSwungGridRound(value: number, gridSize: number, swing: number): number {
+  if (gridSize <= 0) return value;
+  const swingOffset = swing * gridSize * 0.5;
+  const pairSize = gridSize * 2;
+  const pairIndex = Math.floor(value / pairSize);
+  const pairStart = pairIndex * pairSize;
+  const b0 = pairStart;
+  const b1 = pairStart + gridSize + swingOffset;
+  const b2 = pairStart + pairSize;
+  let nearest = b0;
+  let minDist = Math.abs(value - b0);
+  const d1 = Math.abs(value - b1);
+  if (d1 < minDist) {
+    nearest = b1;
+    minDist = d1;
+  }
+  const d2 = Math.abs(value - b2);
+  if (d2 < minDist) {
+    nearest = b2;
+  }
+  return nearest;
+}
+
 // Convert beats to bars:beats:ticks format (480 ticks per beat, 4 beats per bar)
 export function formatBeats(totalBeats: number, showSign: boolean = false): string {
   const sign = showSign ? (totalBeats >= 0 ? "+" : "") : "";

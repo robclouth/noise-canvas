@@ -13,6 +13,7 @@ export function ControlsPanel() {
       </Section>
       <Section label="Grid">
         <ParameterControl paramKey="gridSizeBeats" />
+        <ParameterControl paramKey="gridSwing" />
         <ParameterControl paramKey="gridSizeSemis" />
         <ParameterControl paramKey="snapTime" />
         <ParameterControl paramKey="snapPitch" />

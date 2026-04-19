@@ -130,6 +130,7 @@ const FileRendererInner = memo(
             offsetY: state.filesOffsetY[fileId],
             gridBeats: state.gridSizeBeats,
             gridSemis: state.gridSizeSemis,
+            gridSwing: state.gridSwing,
             minDb: state.displayMinDb,
             maxDb: state.displayMaxDb,
             cursorPosition: state.cursorPosition,
@@ -198,6 +199,7 @@ const FileRendererInner = memo(
           gridWidthUv: { value: 0.0 },
           gridHeightUv: { value: 0.0 },
           barWidthUv: { value: 0.0 },
+          swingOffsetUv: { value: 0.0 },
           octaveHeightUv: { value: 0.0 },
           showHorizontalGrid: { value: true },
           showVerticalGrid: { value: true },
@@ -708,6 +710,7 @@ const FileRendererInner = memo(
       displayMaterial.uniforms.gridWidthUv.value = gridWidthUv;
       displayMaterial.uniforms.gridHeightUv.value = gridHeightUv;
       displayMaterial.uniforms.barWidthUv.value = barWidthUv;
+      displayMaterial.uniforms.swingOffsetUv.value = gridWidthUv * (state.gridSwing / 100) * 0.5;
       displayMaterial.uniforms.octaveHeightUv.value = octaveHeightUv;
       displayMaterial.uniforms.showHorizontalGrid.value = gridWidthPx >= MIN_GRID_SPACING_PX && gridSizeBeats > 0;
       displayMaterial.uniforms.showVerticalGrid.value = gridHeightPx >= MIN_GRID_SPACING_PX && gridSizeSemis > 0;

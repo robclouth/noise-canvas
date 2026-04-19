@@ -1,5 +1,6 @@
 import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
 import { buildScaleOffsets, minFreqSemisAboveC0, stepScaleSemis } from "@renderer/lib/scale-snap";
+import { snapToSwungGridFloor, stepSwungGrid } from "@renderer/lib/utils";
 import type { ParameterKey } from "./types";
 import { openFiles } from "./files";
 import type { ZustandGet, ZustandSet } from "./types";
@@ -188,6 +189,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         cursorPosition,
         gridSizeBeats,
         gridSizeSemis,
+        gridSwing,
         activeFileId,
         previewStrokeAtPosition,
         scaleTonic,
@@ -209,16 +211,17 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
 
       let currentPos = cursorPosition;
 
+      const swingNorm = gridSwing / 100;
       if (!currentPos) {
         // Initialize to playback position, snapped to grid
         const playbackTime = state.getPlaybackTime();
         let beats = (playbackTime / 60) * bpm;
-        beats = Math.floor(beats / gridSizeBeats) * gridSizeBeats;
+        beats = snapToSwungGridFloor(beats, gridSizeBeats, swingNorm);
         currentPos = { beats, pitch: 0 };
       }
 
       // Snap current position to grid first
-      const snappedBeats = Math.floor(currentPos.beats / gridSizeBeats) * gridSizeBeats;
+      const snappedBeats = snapToSwungGridFloor(currentPos.beats, gridSizeBeats, swingNorm);
       const snappedPitch = useScale ? currentPos.pitch : Math.floor(currentPos.pitch / gridSizeSemis) * gridSizeSemis;
 
       const newPosition = { beats: snappedBeats, pitch: snappedPitch };
@@ -242,16 +245,16 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           }
           break;
         case "left":
-          newPosition.beats -= gridSizeBeats;
+          newPosition.beats = stepSwungGrid(snappedBeats, gridSizeBeats, swingNorm, -1);
           break;
         case "right":
-          newPosition.beats += gridSizeBeats;
+          newPosition.beats = stepSwungGrid(snappedBeats, gridSizeBeats, swingNorm, 1);
           break;
       }
 
       // Wrap at edges
       if (newPosition.beats < 0) {
-        newPosition.beats = Math.floor(totalBeats / gridSizeBeats) * gridSizeBeats;
+        newPosition.beats = snapToSwungGridFloor(totalBeats, gridSizeBeats, swingNorm);
       } else if (newPosition.beats >= totalBeats) {
         newPosition.beats = 0;
       }

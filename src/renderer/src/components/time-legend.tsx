@@ -3,7 +3,7 @@ import { Box } from "@mantine/core";
 import { openFiles } from "@renderer/store/files";
 import { memo, useCallback, useEffect, useRef } from "react";
 import { Vector2 } from "three";
-import { screenToZoomed, zoomedToScreen } from "../lib/utils";
+import { screenToZoomed, snapToSwungGridRound, zoomedToScreen } from "../lib/utils";
 
 interface TimeLegendProps {
   fileId: string;
@@ -16,6 +16,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
   const zoom = useStore((state) => state.filesZoom[fileId]);
   const offset = useStore((state) => state.filesOffset[fileId]);
   const gridSizeBeats = useStore((state) => state.gridSizeBeats);
+  const gridSwing = useStore((state) => state.gridSwing);
   const snapTime = useStore((state) => state.snapTime);
   const setFilePlaybackStartTime = useStore((state) => state.setFilePlaybackStartTime);
   const togglePlayback = useStore((state) => state.togglePlayback);
@@ -37,11 +38,11 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
       let time = uv.x * totalDuration;
       if (snapTime) {
         const gridIntervalSeconds = (60 / bpm) * gridSizeBeats;
-        time = Math.round(time / gridIntervalSeconds) * gridIntervalSeconds;
+        time = snapToSwungGridRound(time, gridIntervalSeconds, gridSwing / 100);
       }
       return Math.max(0, Math.min(time, totalDuration));
     },
-    [file, zoom, offset, gridSizeBeats, snapTime, bpm],
+    [file, zoom, offset, gridSizeBeats, gridSwing, snapTime, bpm],
   );
 
   const handleMouseDown = useCallback(
