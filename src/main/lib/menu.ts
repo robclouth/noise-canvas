@@ -68,6 +68,13 @@ export function createMenu(window: BrowserWindow) {
           },
         },
         { type: "separator" },
+        {
+          label: "Export Undo History...",
+          click: () => {
+            webContentsSend(window, "export-undo-history");
+          },
+        },
+        { type: "separator" },
         { role: "quit" },
       ],
     },

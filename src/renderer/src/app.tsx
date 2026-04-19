@@ -117,6 +117,12 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubSaveActiveFileVersion);
 
+    const unsubExportUndoHistory = ipcOn("export-undo-history", () => {
+      const { exportUndoHistory } = useStore.getState();
+      exportUndoHistory();
+    });
+    unsubscribers.push(unsubExportUndoHistory);
+
     const unsubDuplicateActiveFile = ipcOn("duplicate-active-file", () => {
       const { activeFileId, duplicateFile } = useStore.getState();
       if (activeFileId) {

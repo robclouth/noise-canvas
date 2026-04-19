@@ -26,6 +26,8 @@ export interface FilesState {
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
     prefetchedFboData?: Float32Array,
   ) => Promise<void>;
+  loadCachedAudio: (fileId: string, audioPath: string, peak: number) => Promise<boolean>;
+  exportUndoHistory: () => Promise<void>;
   mostRecentBpm: number | null;
   setMostRecentBpm: (bpm: number) => void;
   filepathsBpm: Record<string, number>;
@@ -1024,6 +1026,109 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       console.error("Error running synthesis:", error);
     } finally {
       setFileSynthesizing(fileId, false);
+    }
+  },
+  loadCachedAudio: async (fileId: string, audioPath: string, peak: number): Promise<boolean> => {
+    const file = openFiles[fileId];
+    if (!file?.spectrogramData) return false;
+
+    const { setFileSynthesizing, getPlayer } = get();
+
+    try {
+      setFileSynthesizing(fileId, true);
+
+      const sampleRate = file.spectrogramData.sampleRate;
+      const numChannels = file.spectrogramData.numChannels;
+      const channels = await window.audioAnalysis.decodeAudio(audioPath, sampleRate, numChannels);
+      if (!channels.length || !channels[0].length) return false;
+
+      const audioContext = Tone.getContext().rawContext;
+      const audioBuffer = audioContext.createBuffer(numChannels, channels[0].length, sampleRate);
+      for (let i = 0; i < numChannels; i++) {
+        audioBuffer.copyToChannel(channels[i] as Float32Array<ArrayBuffer>, i);
+      }
+
+      const hadPreviousBuffer = file.audioBuffer !== undefined;
+      file.audioBuffer = audioBuffer;
+      file.audioPeak = peak > 0 ? peak : 1;
+
+      get().setFileDirty(fileId, hadPreviousBuffer);
+
+      // Hot-swap if currently playing this file
+      if (get().isPlaying && get().activeFileId === fileId) {
+        const player = getPlayer();
+        const t = get().getPlaybackTime();
+        player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
+        const normalize = get().normalize;
+        player.volume.value = normalize && file.audioPeak > 0 ? Tone.gainToDb(1 / file.audioPeak) : 0;
+        get().setPlaybackTime(t);
+      }
+
+      return true;
+    } catch (error) {
+      console.error("Failed to load cached undo audio:", error);
+      return false;
+    } finally {
+      setFileSynthesizing(fileId, false);
+    }
+  },
+  exportUndoHistory: async () => {
+    const state = get();
+    if (!state.activeFileId) return;
+    const file = openFiles[state.activeFileId];
+    if (!file) return;
+
+    const { getUndoManager } = await import("../lib/undo-manager");
+    const undoManager = getUndoManager(state.activeFileId);
+    const audioPaths = undoManager.getCachedAudioPaths();
+
+    if (audioPaths.length === 0) {
+      notifications.show({
+        title: "Nothing to export",
+        message: "No cached audio is available in the undo history yet.",
+        color: "yellow",
+      });
+      return;
+    }
+
+    const baseName = window.nodePath.basename(file.filePath, window.nodePath.extname(file.filePath));
+    const defaultDir = window.nodePath.dirname(file.filePath);
+
+    const result = await window.ipcRenderer.invoke("show-directory-dialog", {
+      title: "Export Undo History",
+      defaultPath: defaultDir,
+      buttonLabel: "Export Here",
+    });
+
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) return;
+    const outputDir = result.filePaths[0];
+
+    const pad = Math.max(2, String(audioPaths.length).length);
+    let exportedCount = 0;
+    const errors: string[] = [];
+
+    for (let i = 0; i < audioPaths.length; i++) {
+      const index = String(i + 1).padStart(pad, "0");
+      const destPath = window.nodePath.join(outputDir, `${baseName}_history_${index}.wav`);
+      try {
+        await window.audioAnalysis.copyAudioFile(audioPaths[i], destPath);
+        exportedCount++;
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    if (errors.length > 0) {
+      notifications.show({
+        title: "Export partially failed",
+        message: `Exported ${exportedCount} of ${audioPaths.length} files. First error: ${errors[0]}`,
+        color: "red",
+      });
+    } else {
+      notifications.show({
+        title: "Undo history exported",
+        message: `Exported ${exportedCount} audio file${exportedCount === 1 ? "" : "s"} to ${truncateMiddle(outputDir, 50)}`,
+      });
     }
   },
   reanalyzeActiveFile: async () => {

@@ -162,12 +162,19 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const data = await file.rendererRef.current.getFBOData();
 
       if (data) {
-        // Save state for undo (fire and forget)
-        import("@renderer/lib/undo-manager").then(({ getUndoManager }) =>
-          getUndoManager(activeFileId).addState(data, activeFileId),
-        );
+        const { getUndoManager } = await import("@renderer/lib/undo-manager");
+        const undoManager = getUndoManager(activeFileId);
+        // Run FBO snapshot and synthesis in parallel — same latency as before.
+        const dataPathPromise = undoManager.addState(data, activeFileId);
 
         await synthesizeFile(activeFileId, autoPlaybackParams, data);
+
+        // Cache the synthesised audio for this undo state so redo can skip re-synthesis.
+        const dataPath = await dataPathPromise;
+        const updated = openFiles[activeFileId];
+        if (dataPath && updated?.audioBuffer) {
+          undoManager.setStateAudio(dataPath, updated.audioBuffer, updated.audioPeak ?? 1);
+        }
       }
     },
 
