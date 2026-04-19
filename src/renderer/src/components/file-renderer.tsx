@@ -317,6 +317,15 @@ const FileRendererInner = memo(
       };
     }, [createTextures]);
 
+    // Request a frame once the textures are actually ready. With frameloop="demand"
+    // the initial mount frame runs before setState has populated the textures, so
+    // without this the view stays black until the user interacts.
+    useEffect(() => {
+      if (packedDataTex && originalPackedDataTex && inverseMapTex && metadataTex) {
+        invalidateRef.current?.();
+      }
+    }, [packedDataTex, originalPackedDataTex, inverseMapTex, metadataTex]);
+
     /**
      * Calculate clone-stamp offset from the cursor, scaled to source UV space.
      * Base position is in sourceTimeOffset/sourcePitchOffset params (handled in shader with modulation).

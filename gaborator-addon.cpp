@@ -1002,25 +1002,27 @@ public:
 
         if (numSamples <= SEG)
         {
-            // Short file: pass exact length directly, no overlap-add needed
-            std::vector<float> buf(2 * numSamples);
+            // Model has SEG baked into an internal Reshape op, so pad input to
+            // SEG and trim the output back to numSamples.
+            std::vector<float> buf(2 * SEG, 0.0f);
             for (int i = 0; i < numSamples; i++)
             {
-                buf[i]               = resLeft[i];
-                buf[numSamples + i]  = resRight[i];
+                buf[i]         = resLeft[i];
+                buf[SEG + i]   = resRight[i];
             }
-            const std::array<int64_t, 3> shape = {1, 2, numSamples};
+            const std::array<int64_t, 3> shape = {1, 2, SEG};
             Ort::Value tensor = Ort::Value::CreateTensor<float>(
                 memInfo, buf.data(), buf.size(), shape.data(), shape.size());
             auto outputs = cached.session->Run(
                 Ort::RunOptions{nullptr}, inNames, &tensor, 1, outNames, 1);
             const float *out = outputs[0].GetTensorData<float>();
             auto outShape = outputs[0].GetTensorTypeAndShapeInfo().GetShape();
-            const int outT = (outShape.size() >= 4) ? (int)outShape[3] : numSamples;
+            const int outT = (outShape.size() >= 4) ? (int)outShape[3] : SEG;
+            const int keep = std::min(numSamples, outT);
             for (int s = 0; s < numStems; s++)
             {
-                std::vector<float> rawL(out + s * 2 * outT,         out + s * 2 * outT + outT);
-                std::vector<float> rawR(out + s * 2 * outT + outT,  out + s * 2 * outT + 2 * outT);
+                std::vector<float> rawL(out + s * 2 * outT,         out + s * 2 * outT + keep);
+                std::vector<float> rawR(out + s * 2 * outT + outT,  out + s * 2 * outT + outT + keep);
                 stems[s].first  = aiLinearResample(rawL, MODEL_RATE, sampleRate);
                 stems[s].second = aiLinearResample(rawR, MODEL_RATE, sampleRate);
             }
