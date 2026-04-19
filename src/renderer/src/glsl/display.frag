@@ -87,16 +87,20 @@ void main() {
         color = leftColor + rightColor;
     }
 
-    // Grid dots at beat x semitone intersections
-    if (showHorizontalGrid && showVerticalGrid && gridWidthUv > 0.0 && gridHeightUv > 0.0) {
+    // Grid dots. Dots land at beat x semitone crossings; if only one axis has
+    // a grid, the other is synthesized at a fixed pixel spacing so dots still
+    // appear.
+    if (showHorizontalGrid || showVerticalGrid) {
         float hThick = fwidth(zoomedUv.x);
         float vThick = fwidth(zoomedUv.y);
-        float hLine = mod(zoomedUv.x, gridWidthUv);
-        float vLine = mod(zoomedUv.y, gridHeightUv);
+        float hSpacing = showHorizontalGrid ? gridWidthUv : 24.0 * hThick;
+        float vSpacing = showVerticalGrid ? gridHeightUv : 24.0 * vThick;
+        float hLine = mod(zoomedUv.x, hSpacing);
+        float vLine = mod(zoomedUv.y, vSpacing);
 
         if (hLine < hThick && vLine < vThick) {
-            bool isBar = mod(zoomedUv.x, barWidthUv) < hThick;
-            bool isOctave = octaveHeightUv > 0.0 && mod(zoomedUv.y, octaveHeightUv) < vThick;
+            bool isBar = !showHorizontalGrid || mod(zoomedUv.x, barWidthUv) < hThick;
+            bool isOctave = !showVerticalGrid || (octaveHeightUv > 0.0 && mod(zoomedUv.y, octaveHeightUv) < vThick);
             float delta = (isBar && isOctave) ? 0.5 : 0.3;
             color = mix(color + delta, color - delta, step(1.0 - delta, color));
         }
