@@ -3,7 +3,7 @@ import { Box, Group, Text } from "@mantine/core";
 import { openContextModal } from "@mantine/modals";
 import { useEffectId } from "@renderer/contexts/effect-context";
 import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
-import { getFileColor } from "@renderer/store/files";
+import { getFileColor, openFiles } from "@renderer/store/files";
 import type { ParameterKey } from "@renderer/store/types";
 import { X } from "lucide-react";
 import { memo, useCallback } from "react";
@@ -33,6 +33,10 @@ export const FileParameterControl = memo(function FileParameterControl({
   const hasValue = value !== null;
   const fileColor = hasValue ? getFileColor(value.path) : undefined;
   const isHighlighted = isCanvasPicking;
+  const isMissing = useStore((state) => {
+    if (!value?.path) return false;
+    return !state.openFileIds.some((id) => openFiles[id]?.filePath === value.path);
+  });
 
   const handlePickClick = useCallback(() => {
     if (pickMode === "modal") {
@@ -76,10 +80,14 @@ export const FileParameterControl = memo(function FileParameterControl({
           cursor: "pointer",
           overflow: "hidden",
           borderRadius: 2,
-          border: `1px solid ${isHighlighted ? "var(--mantine-color-orange-6)" : "#666"}`,
+          border: `1px solid ${
+            isHighlighted ? "var(--mantine-color-orange-6)" : isMissing ? "var(--mantine-color-red-6)" : "#666"
+          }`,
           borderLeft: fileColor
-            ? `3px solid ${fileColor}`
-            : `1px solid ${isHighlighted ? "var(--mantine-color-orange-6)" : "#666"}`,
+            ? `3px solid ${isMissing ? "var(--mantine-color-red-6)" : fileColor}`
+            : `1px solid ${
+                isHighlighted ? "var(--mantine-color-orange-6)" : isMissing ? "var(--mantine-color-red-6)" : "#666"
+              }`,
           backgroundColor: isHighlighted ? "rgba(255, 140, 0, 0.1)" : "#2c2c2c",
           display: "flex",
           alignItems: "center",

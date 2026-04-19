@@ -1,11 +1,13 @@
 import { modals, openContextModal } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import truncateMiddle from "@stdlib/string-truncate-middle";
+import { EffectItem } from "@renderer/effects/types";
+import { FileParameterValue, getFileParameterKeys, parameterDefs } from "@renderer/parameters";
 import { produce } from "immer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
 import { getUndoManager } from "../lib/undo-manager";
-import type { Brush, OpenFile, State, ZustandGet, ZustandSet } from "./types";
+import type { Brush, OpenFile, ParameterKey, State, ZustandGet, ZustandSet } from "./types";
 import { generateFileId } from "./utils";
 
 export interface FilesState {
@@ -79,14 +81,64 @@ export function getOpenFileByPath(filePath: string): OpenFile | undefined {
   return Object.values(openFiles).find((f) => f.filePath === filePath);
 }
 
-/** Check if a file is referenced as a source by any step in any brush. */
-export function isFileReferencedAsSource(filePath: string, brushes: Brush[]): boolean {
-  for (const brush of brushes) {
+/** A single reference from a brush step (or effect within a step) to an open file. */
+export type FileReference = {
+  brushIndex: number;
+  brushName: string;
+  paramKey: ParameterKey;
+  paramLabel: string;
+};
+
+function forEachFileValue(
+  brushes: Brush[],
+  visit: (ref: { brushIndex: number; brushName: string; paramKey: ParameterKey; value: FileParameterValue }) => void,
+) {
+  const fileKeys = getFileParameterKeys();
+  brushes.forEach((brush, brushIndex) => {
     for (const step of brush.steps) {
-      if (step.sourceFile?.path === filePath) return true;
+      for (const key of fileKeys) {
+        const def = parameterDefs[key];
+        if (!def || def.kind !== "file") continue;
+        if (def.effectType) {
+          const effects = (step.effects ?? []) as EffectItem[];
+          for (const effect of effects) {
+            if (effect.effect !== def.effectType) continue;
+            const val = effect.params?.[key] as FileParameterValue | undefined;
+            if (val) visit({ brushIndex, brushName: brush.name, paramKey: key, value: val });
+          }
+        } else {
+          const val = (step as Record<string, unknown>)[key] as FileParameterValue | undefined;
+          if (val) visit({ brushIndex, brushName: brush.name, paramKey: key, value: val });
+        }
+      }
     }
-  }
-  return false;
+  });
+}
+
+/** Find every place a file path is referenced across all brushes (step sources + effect file params). */
+export function findFileReferences(filePath: string, brushes: Brush[]): FileReference[] {
+  const results: FileReference[] = [];
+  forEachFileValue(brushes, ({ brushIndex, brushName, paramKey, value }) => {
+    if (value?.path === filePath) {
+      const def = parameterDefs[paramKey];
+      if (def) results.push({ brushIndex, brushName, paramKey, paramLabel: def.label });
+    }
+  });
+  return results;
+}
+
+/** Check if a file is referenced by any brush (as source or as an effect file param). */
+export function isFileReferenced(filePath: string, brushes: Brush[]): boolean {
+  return findFileReferences(filePath, brushes).length > 0;
+}
+
+/** Collect every distinct file path referenced by a single brush (for bulk load). */
+export function collectBrushReferencedPaths(brush: Brush): string[] {
+  const paths = new Set<string>();
+  forEachFileValue([brush], ({ value }) => {
+    if (value?.path) paths.add(value.path);
+  });
+  return [...paths];
 }
 
 // Tone.js player for audio playback
@@ -794,6 +846,25 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const state = get();
     const file = openFiles[fileId];
     if (!file) return;
+
+    const refs = findFileReferences(file.filePath, state.brushes);
+    if (refs.length > 0) {
+      const fileName = file.filePath.split("/").pop() || file.filePath;
+      const refList = refs.map((r) => `${r.brushName} (${r.paramLabel})`).join(", ");
+      const confirmed = await new Promise<boolean>((resolve) => {
+        modals.openConfirmModal({
+          title: "File is referenced",
+          children: `"${fileName}" is referenced by: ${refList}. Closing will remove these connections.`,
+          labels: { confirm: "Close", cancel: "Cancel" },
+          confirmProps: { color: "red", size: "xs" },
+          cancelProps: { size: "xs" },
+          onConfirm: () => resolve(true),
+          onCancel: () => resolve(false),
+          onClose: () => resolve(false),
+        });
+      });
+      if (!confirmed) return;
+    }
 
     if (state.filesDirty[fileId]) {
       await new Promise<void>((resolve) => {

@@ -5,6 +5,7 @@ import { useWindowEvent } from "@mantine/hooks";
 import { modals } from "@mantine/modals";
 import { resolveBrushColor } from "@renderer/lib/colors";
 import { RESERVED_KEYS } from "@renderer/lib/useShortcuts";
+import { collectBrushReferencedPaths } from "@renderer/store/files";
 import type { Brush } from "@renderer/store/types";
 import { ChevronLeft, ChevronRight, MoreVertical, Plus } from "lucide-react";
 import { memo, useCallback, useEffect, useState } from "react";
@@ -93,10 +94,12 @@ const BrushTile = memo(function BrushTile({
   const setActiveBrush = useStore((state) => state.setActiveBrush);
   const renameBrush = useStore((state) => state.renameBrush);
   const duplicateBrush = useStore((state) => state.duplicateBrush);
+  const loadReferencedFiles = useStore((state) => state.loadReferencedFiles);
   const setBrushHotkey = useStore((state) => state.setBrushHotkey);
   const libraryName = useStore((state) =>
     brush.libraryId ? (state.availablePresets.find((p) => p.id === brush.libraryId)?.name ?? null) : null,
   );
+  const hasReferencedFiles = collectBrushReferencedPaths(brush).length > 0;
 
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(brush.name);
@@ -186,6 +189,9 @@ const BrushTile = memo(function BrushTile({
             Save
           </Menu.Item>
           <Menu.Item onClick={() => openSaveAsPrompt(index, brush.name)}>Save as…</Menu.Item>
+          <Menu.Item disabled={!hasReferencedFiles} onClick={() => loadReferencedFiles(index)}>
+            Load referenced files
+          </Menu.Item>
           <Menu.Item onClick={() => onStartHotkeyAssign(index)}>Assign key…</Menu.Item>
           {brush.hotkey && <Menu.Item onClick={() => setBrushHotkey(index, null)}>Remove key</Menu.Item>}
           <Menu.Divider />

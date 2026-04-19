@@ -1734,6 +1734,15 @@ export const isStepParameter = (key: ParameterKey): boolean => {
   return def?.includeInStep === true;
 };
 
+// --- File Parameter Helpers ---
+
+/** Returns all parameter keys with kind: "file". */
+export const getFileParameterKeys = (): ParameterKey[] => {
+  return Object.entries(parameterDefs)
+    .filter(([, def]) => def.kind === "file")
+    .map(([key]) => key as ParameterKey);
+};
+
 // --- Effect Parameter Helpers ---
 
 /** Check if a parameter key belongs to an effect (has effectType set) */

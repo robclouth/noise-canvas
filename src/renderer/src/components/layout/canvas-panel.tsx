@@ -1,6 +1,6 @@
 import { useStore } from "@/store";
 import { ActionIcon, Box, Group, Loader, Stack, Text } from "@mantine/core";
-import { getFileColor, isFileReferencedAsSource, openFiles } from "@renderer/store/files";
+import { getFileColor, openFiles } from "@renderer/store/files";
 import { X } from "lucide-react";
 import { memo } from "react";
 import { FileView } from "../file-view";
@@ -10,7 +10,6 @@ const PaletteChip = memo(({ fileId }: { fileId: string }) => {
   const file = openFiles[fileId];
   const isHighlighted = useStore((state) => state.highlightedSourcePath === file?.filePath);
   const isLoading = useStore((state) => !!state.filesLoading[fileId]);
-  const isReferenced = useStore((state) => (file ? isFileReferencedAsSource(file.filePath, state.brushes) : false));
   if (!file) return null;
   const filename = file.filePath.split("/").pop() || file.filePath;
   const fileColor = getFileColor(file.filePath);
@@ -56,19 +55,17 @@ const PaletteChip = memo(({ fileId }: { fileId: string }) => {
         >
           {filename}
         </Text>
-        {!isReferenced && (
-          <ActionIcon
-            size="xs"
-            variant="subtle"
-            color="gray"
-            onClick={(e) => {
-              e.stopPropagation();
-              useStore.getState().tryCloseFile(fileId);
-            }}
-          >
-            <X size={10} />
-          </ActionIcon>
-        )}
+        <ActionIcon
+          size="xs"
+          variant="subtle"
+          color="gray"
+          onClick={(e) => {
+            e.stopPropagation();
+            useStore.getState().tryCloseFile(fileId);
+          }}
+        >
+          <X size={10} />
+        </ActionIcon>
       </Group>
     </Tooltip>
   );

@@ -5,6 +5,7 @@ import { CURRENT_PRESET_VERSION, PresetType, validatePreset } from "@renderer/li
 import { BrushStep, createDefaultStep } from "@renderer/parameters";
 import { produce } from "immer";
 import { factoryPresets } from "../lib/factory-presets";
+import { collectBrushReferencedPaths } from "./files";
 import type { Brush, State, ZustandGet, ZustandSet } from "./types";
 
 export interface PresetsState {
@@ -28,6 +29,7 @@ export interface PresetsState {
   reorderBrushes: (fromIndex: number, toIndex: number) => void;
   saveBrushToLibrary: (index: number) => Promise<void>;
   saveBrushAsNewPreset: (index: number, name: string) => Promise<void>;
+  loadReferencedFiles: (brushIndex: number) => void;
   deletePreset: (presetId: string) => Promise<void>;
   renamePreset: (presetId: string, newName: string) => Promise<void>;
 }
@@ -95,20 +97,17 @@ function makeBrushFromPreset(preset: PresetType, existingColors: Brush["color"][
   };
 }
 
-function openReferencedSourceFiles(steps: BrushStep[], get: ZustandGet) {
-  for (const step of steps) {
-    const sourceFile = step.sourceFile;
-    if (sourceFile?.path) {
-      get()
-        .openFileMinimized(sourceFile.path)
-        .catch(() => {
-          notifications.show({
-            title: "Source file not found",
-            message: `${sourceFile.path.split("/").pop()} not found on disk`,
-            color: "yellow",
-          });
+function openReferencedFiles(brush: Brush, get: ZustandGet) {
+  for (const path of collectBrushReferencedPaths(brush)) {
+    get()
+      .openFileMinimized(path)
+      .catch(() => {
+        notifications.show({
+          title: "Referenced file not found",
+          message: `${path.split("/").pop()} not found on disk`,
+          color: "yellow",
         });
-    }
+      });
   }
 }
 
@@ -152,6 +151,10 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       }
 
       set({ availablePresets: [...factoryPresets, ...userPresets], presetsDir, isInitialized: true });
+
+      for (const brush of get().brushes) {
+        openReferencedFiles(brush, get);
+      }
     } catch (error: any) {
       console.error("Error loading presets:", error);
       notifications.show({
@@ -217,7 +220,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       }),
     );
 
-    openReferencedSourceFiles(newBrush.steps, get);
+    openReferencedFiles(newBrush, get);
   },
 
   addEmptyBrush: () => {
@@ -424,6 +427,12 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
         color: "red",
       });
     }
+  },
+
+  loadReferencedFiles: (brushIndex: number) => {
+    const brush = get().brushes[brushIndex];
+    if (!brush) return;
+    openReferencedFiles(brush, get);
   },
 
   deletePreset: async (presetId: string) => {

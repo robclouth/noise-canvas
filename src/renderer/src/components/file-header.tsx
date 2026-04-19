@@ -1,6 +1,6 @@
 import { useStore } from "@/store";
 import { ActionIcon, Badge, Box, Group, Menu, NumberInput } from "@mantine/core";
-import { getFileColor, isFileReferencedAsSource, openFiles } from "@renderer/store/files";
+import { getFileColor, openFiles } from "@renderer/store/files";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { ChevronDown, Copy, Maximize2, Minimize2, Scissors, X } from "lucide-react";
 import { memo } from "react";
@@ -56,7 +56,6 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const fullscreenFileId = useStore((state) => state.fullscreenFileId);
   const bandsPerOctave = useStore((state) => state.filesBandsPerOctave[fileId]);
   const isDirty = useStore((state) => state.filesDirty[fileId] ?? false);
-  const isReferenced = useStore((state) => isFileReferencedAsSource(filePath, state.brushes));
   const isHighlighted = useStore((state) => state.highlightedSourcePath === filePath);
 
   const isFullscreen = fullscreenFileId === fileId;
@@ -158,19 +157,17 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
             {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </ActionIcon>
         </Tooltip>
-        {!isReferenced && (
-          <Tooltip label="Close this file.">
-            <ActionIcon
-              color="dark.5"
-              onClick={(e) => {
-                e.stopPropagation();
-                useStore.getState().tryCloseFile(fileId);
-              }}
-            >
-              <X size={16} />
-            </ActionIcon>
-          </Tooltip>
-        )}
+        <Tooltip label="Close this file.">
+          <ActionIcon
+            color="dark.5"
+            onClick={(e) => {
+              e.stopPropagation();
+              useStore.getState().tryCloseFile(fileId);
+            }}
+          >
+            <X size={16} />
+          </ActionIcon>
+        </Tooltip>
       </Group>
     </Group>
   );
