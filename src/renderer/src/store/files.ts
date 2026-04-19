@@ -284,6 +284,18 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   openFileIds: [],
   openFilePath: async (filepath: string) => {
     const state = get();
+
+    // If the file is already open, activate it (un-minimizing if needed) instead of opening again
+    const existing = Object.values(openFiles).find((f) => f.filePath === filepath);
+    if (existing) {
+      if (state.minimizedFileIds.includes(existing.id)) {
+        get().setFileMinimized(existing.id, false);
+      } else {
+        get().setActiveFileId(existing.id);
+      }
+      return;
+    }
+
     const fileId = generateFileId();
 
     // Add a placeholder immediately so the file appears in the UI with a loading state
