@@ -42,15 +42,15 @@ void main() {
     vec2 relativeUv = coords.source - pivot;
 
     // 3. Apply INVERSE Rotation around the new origin (0,0).
-    float rotationValue = applyModulation(rotation.value, rotation.minValue, rotation.maxValue, rotation.modulationAmounts, rotation.contextualModAmounts, coords.dest, 0, audioLevelDb);
+    float rotationValue = applyModulation(rotation.value, rotation.minValue, rotation.maxValue, rotation.modulationAmounts, rotation.contextualModAmounts, rotation.macroAmounts, coords.dest, 0, audioLevelDb);
     float rad = radians(-rotationValue);
     mat2 rotMat = mat2(cos(rad), -sin(rad), sin(rad), cos(rad));
     vec2 rotatedUv = rotMat * relativeUv;
 
     // 4. Apply INVERSE Scale around the new origin (0,0).
     vec2 scaledUv = rotatedUv;
-    float scaleXValue = applyModulation(scaleX.value, scaleX.minValue, scaleX.maxValue, scaleX.modulationAmounts, scaleX.contextualModAmounts, coords.dest, 0, audioLevelDb);
-    float scaleYValue = applyModulation(scaleY.value, scaleY.minValue, scaleY.maxValue, scaleY.modulationAmounts, scaleY.contextualModAmounts, coords.dest, 0, audioLevelDb);
+    float scaleXValue = applyModulation(scaleX.value, scaleX.minValue, scaleX.maxValue, scaleX.modulationAmounts, scaleX.contextualModAmounts, scaleX.macroAmounts, coords.dest, 0, audioLevelDb);
+    float scaleYValue = applyModulation(scaleY.value, scaleY.minValue, scaleY.maxValue, scaleY.modulationAmounts, scaleY.contextualModAmounts, scaleY.macroAmounts, coords.dest, 0, audioLevelDb);
     if (abs(scaleXValue) > 1e-5 && abs(scaleYValue) > 1e-5) {
         scaledUv /= vec2(scaleXValue, scaleYValue);
     }
@@ -65,8 +65,8 @@ void main() {
     }
 
     // 6. Apply the final shift to get the source UV to sample from.
-    float rawShiftX = applyModulation(shiftX.value, shiftX.minValue, shiftX.maxValue, shiftX.modulationAmounts, shiftX.contextualModAmounts, coords.dest, 0, audioLevelDb);
-    float rawShiftY = applyModulation(shiftY.value, shiftY.minValue, shiftY.maxValue, shiftY.modulationAmounts, shiftY.contextualModAmounts, coords.dest, 0, audioLevelDb);
+    float rawShiftX = applyModulation(shiftX.value, shiftX.minValue, shiftX.maxValue, shiftX.modulationAmounts, shiftX.contextualModAmounts, shiftX.macroAmounts, coords.dest, 0, audioLevelDb);
+    float rawShiftY = applyModulation(shiftY.value, shiftY.minValue, shiftY.maxValue, shiftY.modulationAmounts, shiftY.contextualModAmounts, shiftY.macroAmounts, coords.dest, 0, audioLevelDb);
     float appliedShiftX = -rawShiftX;
     // Scale snap: apply to the (already modulated) scalar shift as a whole so the brush
     // base pitch + shift lands on a scale note. Per-pixel snap would comb-filter the spectrum.

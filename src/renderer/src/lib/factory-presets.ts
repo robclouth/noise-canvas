@@ -14,6 +14,8 @@ export const factoryPresets: PresetType[] = [
       },
     ],
     linkedParams: [],
+    macroNames: ["Macro 1", "Macro 2", "Macro 3", "Macro 4"],
+    macroValues: [50, 50, 50, 50],
   },
   {
     id: "eraser",
@@ -28,6 +30,8 @@ export const factoryPresets: PresetType[] = [
       },
     ],
     linkedParams: [],
+    macroNames: ["Macro 1", "Macro 2", "Macro 3", "Macro 4"],
+    macroValues: [50, 50, 50, 50],
   },
   {
     id: "booster",
@@ -42,6 +46,8 @@ export const factoryPresets: PresetType[] = [
       },
     ],
     linkedParams: [],
+    macroNames: ["Macro 1", "Macro 2", "Macro 3", "Macro 4"],
+    macroValues: [50, 50, 50, 50],
   },
   {
     id: "restore",
@@ -58,6 +64,8 @@ export const factoryPresets: PresetType[] = [
       },
     ],
     linkedParams: [],
+    macroNames: ["Macro 1", "Macro 2", "Macro 3", "Macro 4"],
+    macroValues: [50, 50, 50, 50],
   },
   {
     id: "stereo-widening",
@@ -74,5 +82,7 @@ export const factoryPresets: PresetType[] = [
       },
     ],
     linkedParams: [],
+    macroNames: ["Macro 1", "Macro 2", "Macro 3", "Macro 4"],
+    macroValues: [50, 50, 50, 50],
   },
 ];

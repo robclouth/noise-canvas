@@ -1,6 +1,10 @@
 import { NumberParameter, parameterDefs } from "@renderer/parameters";
 import { openFiles } from "@renderer/store/files";
-import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "@renderer/store/modulators";
+import {
+  getContextualModAmountsNormalized,
+  getMacroAmountValuesNormalized,
+  getModAmountValuesNormalized,
+} from "@renderer/store/modulators";
 import { ParameterKey, State } from "@renderer/store/types";
 import { useMemo } from "react";
 import { DataTexture, FloatType, RedFormat } from "three";
@@ -16,6 +20,7 @@ interface ModulatableParam {
   maxValue: number;
   modulationAmounts: number[];
   contextualModAmounts: number[];
+  macroAmounts: number[];
 }
 
 // Type for a single modulator's uniforms
@@ -121,6 +126,7 @@ export const buildModulatorUniforms = (
         maxValue: 1.0,
         modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}PhaseX` as ParameterKey),
         contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}PhaseX` as ParameterKey),
+        macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}PhaseX` as ParameterKey),
       },
       modulatorPhaseY: {
         value: phaseY / 100,
@@ -128,6 +134,7 @@ export const buildModulatorUniforms = (
         maxValue: 1.0,
         modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}PhaseY` as ParameterKey),
         contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}PhaseY` as ParameterKey),
+        macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}PhaseY` as ParameterKey),
       },
       modulatorPatternRateX: {
         value: modulatorPatternRate.x,
@@ -138,6 +145,7 @@ export const buildModulatorUniforms = (
           state,
           `modulator${i + 1}PatternRateBeats` as ParameterKey,
         ),
+        macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}PatternRateBeats` as ParameterKey),
       },
       modulatorPatternRateY: {
         value: modulatorPatternRate.y,
@@ -148,6 +156,7 @@ export const buildModulatorUniforms = (
           state,
           `modulator${i + 1}PatternRateSemis` as ParameterKey,
         ),
+        macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}PatternRateSemis` as ParameterKey),
       },
       modulatorStrength: {
         value: strength / 100,
@@ -155,6 +164,7 @@ export const buildModulatorUniforms = (
         maxValue: 1.0,
         modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}Strength` as ParameterKey),
         contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}Strength` as ParameterKey),
+        macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}Strength` as ParameterKey),
       },
       modulatorRotation: {
         value: rotation,
@@ -162,6 +172,7 @@ export const buildModulatorUniforms = (
         maxValue: rotationDef.max,
         modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}Rotation` as ParameterKey),
         contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}Rotation` as ParameterKey),
+        macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}Rotation` as ParameterKey),
       },
       modulatorEnvelopeSmoothing: envelopeSmoothingUv,
       modulatorEnvelopeSource: envelopeSource,
@@ -185,6 +196,7 @@ export const buildModulatorUniforms = (
             state,
             `modulator${i + 1}SeqLoopSemis` as ParameterKey,
           ),
+          macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}SeqLoopSemis` as ParameterKey),
         };
       })(),
       seqSwing: {
@@ -193,6 +205,7 @@ export const buildModulatorUniforms = (
         maxValue: 1.0,
         modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}SeqSwing` as ParameterKey),
         contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}SeqSwing` as ParameterKey),
+        macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}SeqSwing` as ParameterKey),
       },
       seqLoopX: (() => {
         const loopBeats = (state[`modulator${i + 1}SeqLoopBeats`] as number) || 1;
@@ -211,6 +224,7 @@ export const buildModulatorUniforms = (
             state,
             `modulator${i + 1}SeqLoopBeats` as ParameterKey,
           ),
+          macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}SeqLoopBeats` as ParameterKey),
         };
       })(),
       seqDataTex: (() => {

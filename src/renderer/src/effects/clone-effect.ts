@@ -1,6 +1,10 @@
 import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
-import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "@renderer/store/modulators";
+import {
+  getContextualModAmountsNormalized,
+  getModAmountValuesNormalized,
+  getMacroAmountValuesNormalized,
+} from "@renderer/store/modulators";
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import cloneBrushFrag from "../glsl/clone-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -16,6 +20,7 @@ const uniforms = {
       maxValue: 0.5,
       modulationAmounts: [],
       contextualModAmounts: [],
+      macroAmounts: [],
     },
   },
   cloneSpaceY: {
@@ -25,6 +30,7 @@ const uniforms = {
       maxValue: 0.5,
       modulationAmounts: [],
       contextualModAmounts: [],
+      macroAmounts: [],
     },
   },
   cloneCount: {
@@ -37,6 +43,7 @@ const uniforms = {
       maxValue: 1,
       modulationAmounts: [],
       contextualModAmounts: [],
+      macroAmounts: [],
     },
   },
   cloneDirection: {
@@ -116,6 +123,7 @@ class CloneEffect extends BaseEffect {
       maxValue: 0.5,
       modulationAmounts: getModAmountValuesNormalized(state, "cloneSpaceBeats"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "cloneSpaceBeats"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "cloneSpaceBeats"),
     };
     material.uniforms.cloneSpaceY.value = {
       value: spaceUv.y,
@@ -123,6 +131,7 @@ class CloneEffect extends BaseEffect {
       maxValue: 0.5,
       modulationAmounts: getModAmountValuesNormalized(state, "cloneSpaceSemis"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "cloneSpaceSemis"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "cloneSpaceSemis"),
     };
     material.uniforms.cloneCount.value = passIndex === 0 ? cloneCountX : cloneCountY;
     material.uniforms.cloneDecay.value = {
@@ -131,6 +140,7 @@ class CloneEffect extends BaseEffect {
       maxValue: 1,
       modulationAmounts: getModAmountValuesNormalized(state, "cloneDecay"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "cloneDecay"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "cloneDecay"),
     };
     material.uniforms.cloneDirectionMode.value = passIndex === 0 ? cloneDirectionX : cloneDirectionY;
     material.uniforms.cloneEdgeMode.value = cloneEdgeMode;

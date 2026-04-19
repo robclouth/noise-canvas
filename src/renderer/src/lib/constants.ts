@@ -165,6 +165,8 @@ export const WRAP_MODES = [
 
 export const NUM_MODULATORS = 3;
 
+export const NUM_MACROS = 4;
+
 // Contextual modulation sources - stroke properties that can modulate parameters
 export const CONTEXTUAL_MOD_SOURCES = [
   { key: "Iteration", label: "Iteration", description: "Iteration index (0-1 across brush iterations)" },

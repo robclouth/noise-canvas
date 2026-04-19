@@ -47,11 +47,13 @@ const Scene = ({
     const state = useStore.getState();
     const stepState = createStepStateView(state, state.activeStepIndex);
     const modulators = buildModulatorUniforms(120, 10, 12, 96, stepState);
+    const macroValues = (state.brushes[state.activeBrushIndex]?.macroValues ?? [50, 50, 50, 50]).map((v) => v / 100);
 
     return new RawShaderMaterial({
       uniforms: {
         modulatorIndex: { value: modulatorIndex },
         modulators: { value: modulators },
+        macroValues: { value: macroValues },
         gainLut: { value: modulatorScaleLut },
         modulator1ImageTex: { value: placeholderTexture },
         modulator2ImageTex: { value: placeholderTexture },
@@ -154,6 +156,23 @@ const Scene = ({
       { equalityFn: modulatorsEqual },
     );
 
+    return () => unsubscribe();
+  }, [material, invalidate]);
+
+  useEffect(() => {
+    const macrosEqual = (a: number[], b: number[]): boolean => {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+      return true;
+    };
+    const unsubscribe = useStore.subscribe(
+      (state) => state.brushes[state.activeBrushIndex]?.macroValues ?? [50, 50, 50, 50],
+      (macroValues) => {
+        material.uniforms.macroValues.value = macroValues.map((v) => v / 100);
+        invalidate();
+      },
+      { equalityFn: macrosEqual },
+    );
     return () => unsubscribe();
   }, [material, invalidate]);
 

@@ -1,5 +1,9 @@
 import { getNumberParameterDef } from "@renderer/parameters";
-import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "@renderer/store/modulators";
+import {
+  getContextualModAmountsNormalized,
+  getModAmountValuesNormalized,
+  getMacroAmountValuesNormalized,
+} from "@renderer/store/modulators";
 import { ClampToEdgeWrapping, DataTexture, FloatType, GLSL3, LinearFilter, RawShaderMaterial, RGBAFormat } from "three";
 import binauralEffectFrag from "../glsl/binaural-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -58,6 +62,7 @@ class BinauralEffect extends BaseEffect {
               maxValue: 180.0,
               modulationAmounts: [],
               contextualModAmounts: [],
+              macroAmounts: [],
             },
           },
           distance: {
@@ -67,6 +72,7 @@ class BinauralEffect extends BaseEffect {
               maxValue: 10.0,
               modulationAmounts: [],
               contextualModAmounts: [],
+              macroAmounts: [],
             },
           },
           stereoAngle: {
@@ -76,6 +82,7 @@ class BinauralEffect extends BaseEffect {
               maxValue: 180.0,
               modulationAmounts: [],
               contextualModAmounts: [],
+              macroAmounts: [],
             },
           },
         },
@@ -136,6 +143,7 @@ class BinauralEffect extends BaseEffect {
       maxValue: azimuthDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "binauralAzimuth"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "binauralAzimuth"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "binauralAzimuth"),
     };
 
     // Distance parameter
@@ -147,6 +155,7 @@ class BinauralEffect extends BaseEffect {
       maxValue: distanceDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "binauralDistance"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "binauralDistance"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "binauralDistance"),
     };
 
     // Stereo angle parameter
@@ -158,6 +167,7 @@ class BinauralEffect extends BaseEffect {
       maxValue: stereoAngleDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "binauralStereoAngle"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "binauralStereoAngle"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "binauralStereoAngle"),
     };
   }
 }

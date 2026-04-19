@@ -52,6 +52,8 @@ function makeBrush(steps: BrushStep[], name = "Mock"): Brush {
     steps,
     linkedParams: [],
     libraryId: null,
+    macroNames: ["Macro 1", "Macro 2", "Macro 3", "Macro 4"],
+    macroValues: [50, 50, 50, 50],
   };
 }
 

@@ -8,12 +8,12 @@ uniform Parameter transmuteCurve;
 vec4 applyEffectStroke(vec4 src, ProcessingUvs coords, float audioLevelDb) {
   float amount = applyModulation(
     transmuteAmount.value, transmuteAmount.minValue, transmuteAmount.maxValue,
-    transmuteAmount.modulationAmounts, transmuteAmount.contextualModAmounts,
+    transmuteAmount.modulationAmounts, transmuteAmount.contextualModAmounts, transmuteAmount.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
   float curve = applyModulation(
     transmuteCurve.value, transmuteCurve.minValue, transmuteCurve.maxValue,
-    transmuteCurve.modulationAmounts, transmuteCurve.contextualModAmounts,
+    transmuteCurve.modulationAmounts, transmuteCurve.contextualModAmounts, transmuteCurve.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
 

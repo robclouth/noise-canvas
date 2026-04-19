@@ -51,12 +51,12 @@ vec2 applyWaveshape(vec2 magPhase, float drive, float tilt) {
 vec4 applyEffectStroke(vec4 src, ProcessingUvs coords, float audioLevelDb) {
   float drive = applyModulation(
     waveshapeDrive.value, waveshapeDrive.minValue, waveshapeDrive.maxValue,
-    waveshapeDrive.modulationAmounts, waveshapeDrive.contextualModAmounts,
+    waveshapeDrive.modulationAmounts, waveshapeDrive.contextualModAmounts, waveshapeDrive.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
   float tilt = applyModulation(
     waveshapeTilt.value, waveshapeTilt.minValue, waveshapeTilt.maxValue,
-    waveshapeTilt.modulationAmounts, waveshapeTilt.contextualModAmounts,
+    waveshapeTilt.modulationAmounts, waveshapeTilt.contextualModAmounts, waveshapeTilt.macroAmounts,
     coords.dest, 1, audioLevelDb
   );
 

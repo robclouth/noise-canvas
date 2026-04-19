@@ -1,5 +1,9 @@
 import { getNumberParameterDef } from "@renderer/parameters";
-import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "@renderer/store/modulators";
+import {
+  getContextualModAmountsNormalized,
+  getModAmountValuesNormalized,
+  getMacroAmountValuesNormalized,
+} from "@renderer/store/modulators";
 import { GLSL3, RawShaderMaterial } from "three";
 import transmuteEffectFrag from "../glsl/transmute-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -22,6 +26,7 @@ class TransmuteEffect extends BaseEffect {
               maxValue: 8.0,
               modulationAmounts: [],
               contextualModAmounts: [],
+              macroAmounts: [],
             },
           },
           transmuteCurve: {
@@ -31,6 +36,7 @@ class TransmuteEffect extends BaseEffect {
               maxValue: 4.0,
               modulationAmounts: [],
               contextualModAmounts: [],
+              macroAmounts: [],
             },
           },
         },
@@ -54,6 +60,7 @@ class TransmuteEffect extends BaseEffect {
       maxValue: transmuteAmountDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "transmuteAmount"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "transmuteAmount"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "transmuteAmount"),
     };
 
     const transmuteCurveDef = getNumberParameterDef("transmuteCurve");
@@ -63,6 +70,7 @@ class TransmuteEffect extends BaseEffect {
       maxValue: transmuteCurveDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "transmuteCurve"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "transmuteCurve"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "transmuteCurve"),
     };
 
     // Swap mode places phase values (can be negative) in the magnitude slot.

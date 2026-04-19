@@ -25,22 +25,22 @@ void main() {
 
   float irTimeOff = applyModulation(
     convolveIrTimeOffset.value, convolveIrTimeOffset.minValue, convolveIrTimeOffset.maxValue,
-    convolveIrTimeOffset.modulationAmounts, convolveIrTimeOffset.contextualModAmounts,
+    convolveIrTimeOffset.modulationAmounts, convolveIrTimeOffset.contextualModAmounts, convolveIrTimeOffset.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
   float irPitchShiftBands = applyModulation(
     convolveIrPitchShiftBands.value, convolveIrPitchShiftBands.minValue, convolveIrPitchShiftBands.maxValue,
-    convolveIrPitchShiftBands.modulationAmounts, convolveIrPitchShiftBands.contextualModAmounts,
+    convolveIrPitchShiftBands.modulationAmounts, convolveIrPitchShiftBands.contextualModAmounts, convolveIrPitchShiftBands.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
   float rate = applyModulation(
     convolveIrRate.value, convolveIrRate.minValue, convolveIrRate.maxValue,
-    convolveIrRate.modulationAmounts, convolveIrRate.contextualModAmounts,
+    convolveIrRate.modulationAmounts, convolveIrRate.contextualModAmounts, convolveIrRate.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
   float gain = applyModulation(
     convolveGain.value, convolveGain.minValue, convolveGain.maxValue,
-    convolveGain.modulationAmounts, convolveGain.contextualModAmounts,
+    convolveGain.modulationAmounts, convolveGain.contextualModAmounts, convolveGain.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
 

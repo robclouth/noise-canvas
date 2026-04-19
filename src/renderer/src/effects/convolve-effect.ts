@@ -1,5 +1,9 @@
 import { getNumberParameterDef } from "@renderer/parameters";
-import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "@renderer/store/modulators";
+import {
+  getContextualModAmountsNormalized,
+  getModAmountValuesNormalized,
+  getMacroAmountValuesNormalized,
+} from "@renderer/store/modulators";
 import { getOpenFileByPath, openFiles } from "@renderer/store/files";
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import convolveEffectFrag from "../glsl/convolve-effect.frag";
@@ -93,6 +97,7 @@ class ConvolveEffect extends BaseEffect {
       maxValue: timeOffsetDef.max / 100,
       modulationAmounts: getModAmountValuesNormalized(state, "convolveIrTimeOffset"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "convolveIrTimeOffset"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "convolveIrTimeOffset"),
     };
 
     // Semitones → IR bands (delta). Twelve semitones = one octave = `bandsPerOctave` bands.
@@ -105,6 +110,7 @@ class ConvolveEffect extends BaseEffect {
       maxValue: pitchShiftDef.max * bandsPerSemi,
       modulationAmounts: getModAmountValuesNormalized(state, "convolveIrPitchShift"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "convolveIrPitchShift"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "convolveIrPitchShift"),
     };
 
     const rateDef = getNumberParameterDef("convolveIrRate");
@@ -114,6 +120,7 @@ class ConvolveEffect extends BaseEffect {
       maxValue: rateDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "convolveIrRate"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "convolveIrRate"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "convolveIrRate"),
     };
 
     const gainDef = getNumberParameterDef("convolveGainDb");
@@ -124,6 +131,7 @@ class ConvolveEffect extends BaseEffect {
       maxValue: dbToLinear(gainDef.max),
       modulationAmounts: getModAmountValuesNormalized(state, "convolveGainDb"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "convolveGainDb"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "convolveGainDb"),
     };
   }
 }

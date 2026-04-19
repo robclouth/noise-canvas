@@ -1,5 +1,9 @@
 import { getNumberParameterDef } from "@renderer/parameters";
-import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "@renderer/store/modulators";
+import {
+  getContextualModAmountsNormalized,
+  getModAmountValuesNormalized,
+  getMacroAmountValuesNormalized,
+} from "@renderer/store/modulators";
 import { GLSL3, RawShaderMaterial } from "three";
 import evolveEffectFrag from "../glsl/evolve-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -13,6 +17,7 @@ const defaultUniformValue = {
   maxValue: 100,
   modulationAmounts: [] as number[],
   contextualModAmounts: [] as number[],
+  macroAmounts: [] as number[],
 };
 
 class EvolveEffect extends BaseEffect {
@@ -55,6 +60,7 @@ class EvolveEffect extends BaseEffect {
         maxValue: def.max,
         modulationAmounts: getModAmountValuesNormalized(state, stateKey),
         contextualModAmounts: getContextualModAmountsNormalized(state, stateKey),
+        macroAmounts: getMacroAmountValuesNormalized(state, stateKey),
       };
     };
 

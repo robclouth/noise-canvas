@@ -298,12 +298,12 @@ ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
 
   float modTimeOff = applyModulation(
     sourceTimeOffset.value, sourceTimeOffset.minValue, sourceTimeOffset.maxValue,
-    sourceTimeOffset.modulationAmounts, sourceTimeOffset.contextualModAmounts,
+    sourceTimeOffset.modulationAmounts, sourceTimeOffset.contextualModAmounts, sourceTimeOffset.macroAmounts,
     uvs.dest, 0, 0.0
   );
   float modPitchOff = applyModulation(
     sourcePitchOffset.value, sourcePitchOffset.minValue, sourcePitchOffset.maxValue,
-    sourcePitchOffset.modulationAmounts, sourcePitchOffset.contextualModAmounts,
+    sourcePitchOffset.modulationAmounts, sourcePitchOffset.contextualModAmounts, sourcePitchOffset.macroAmounts,
     uvs.dest, 0, 0.0
   );
 
@@ -636,19 +636,19 @@ float getBrushWeight(vec2 unpackedUv, float audioLevelDb) {
 
   float curveX = applyModulation(
     brushCurveTime.value, brushCurveTime.minValue, brushCurveTime.maxValue,
-    brushCurveTime.modulationAmounts, brushCurveTime.contextualModAmounts, unpackedUv, 0, audioLevelDb
+    brushCurveTime.modulationAmounts, brushCurveTime.contextualModAmounts, brushCurveTime.macroAmounts, unpackedUv, 0, audioLevelDb
   );
   float skewX = applyModulation(
     brushSkewTime.value, brushSkewTime.minValue, brushSkewTime.maxValue,
-    brushSkewTime.modulationAmounts, brushSkewTime.contextualModAmounts, unpackedUv, 0, audioLevelDb
+    brushSkewTime.modulationAmounts, brushSkewTime.contextualModAmounts, brushSkewTime.macroAmounts, unpackedUv, 0, audioLevelDb
   );
   float curveY = applyModulation(
     brushCurvePitch.value, brushCurvePitch.minValue, brushCurvePitch.maxValue,
-    brushCurvePitch.modulationAmounts, brushCurvePitch.contextualModAmounts, unpackedUv, 0, audioLevelDb
+    brushCurvePitch.modulationAmounts, brushCurvePitch.contextualModAmounts, brushCurvePitch.macroAmounts, unpackedUv, 0, audioLevelDb
   );
   float skewY = applyModulation(
     brushSkewPitch.value, brushSkewPitch.minValue, brushSkewPitch.maxValue,
-    brushSkewPitch.modulationAmounts, brushSkewPitch.contextualModAmounts, unpackedUv, 0, audioLevelDb
+    brushSkewPitch.modulationAmounts, brushSkewPitch.contextualModAmounts, brushSkewPitch.macroAmounts, unpackedUv, 0, audioLevelDb
   );
 
   // X (time): compute overlap between bin [off.x, off.x+binWidth] and brush [0, brushSizeUv.x].
@@ -707,12 +707,12 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv, vec2 pa
  
   float intensity = applyModulation(
     brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue,
-    brushIntensity.modulationAmounts, brushIntensity.contextualModAmounts, destUv, 0, audioLevelDb
+    brushIntensity.modulationAmounts, brushIntensity.contextualModAmounts, brushIntensity.macroAmounts, destUv, 0, audioLevelDb
   );
 
   float pan = applyModulation(
     brushPan.value, brushPan.minValue, brushPan.maxValue,
-    brushPan.modulationAmounts, brushPan.contextualModAmounts, destUv, 0, audioLevelDb
+    brushPan.modulationAmounts, brushPan.contextualModAmounts, brushPan.macroAmounts, destUv, 0, audioLevelDb
   );
 
   vec2 pannedModifiedL = fromPolar(getMag(modifiedL) * clamp(1.0 - pan, 0.0, 1.0), getPhase(modifiedL));

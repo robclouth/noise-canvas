@@ -21,14 +21,14 @@ void main() {
 
     bool isXPass = cloneDirection.x > 0.5;
 
-    float spaceX = applyModulation(cloneSpaceX.value, cloneSpaceX.minValue, cloneSpaceX.maxValue, cloneSpaceX.modulationAmounts, cloneSpaceX.contextualModAmounts, coords.dest, 0, audioLevelDb);
-    float spaceY = applyModulation(cloneSpaceY.value, cloneSpaceY.minValue, cloneSpaceY.maxValue, cloneSpaceY.modulationAmounts, cloneSpaceY.contextualModAmounts, coords.dest, 0, audioLevelDb);
+    float spaceX = applyModulation(cloneSpaceX.value, cloneSpaceX.minValue, cloneSpaceX.maxValue, cloneSpaceX.modulationAmounts, cloneSpaceX.contextualModAmounts, cloneSpaceX.macroAmounts, coords.dest, 0, audioLevelDb);
+    float spaceY = applyModulation(cloneSpaceY.value, cloneSpaceY.minValue, cloneSpaceY.maxValue, cloneSpaceY.modulationAmounts, cloneSpaceY.contextualModAmounts, cloneSpaceY.macroAmounts, coords.dest, 0, audioLevelDb);
     float space = isXPass ? spaceX : spaceY;
 
     int count = clamp(cloneCount, 1, 32);
 
     float decayFactor = clamp(
-        applyModulation(cloneDecay.value, cloneDecay.minValue, cloneDecay.maxValue, cloneDecay.modulationAmounts, cloneDecay.contextualModAmounts, coords.dest, 0, audioLevelDb),
+        applyModulation(cloneDecay.value, cloneDecay.minValue, cloneDecay.maxValue, cloneDecay.modulationAmounts, cloneDecay.contextualModAmounts, cloneDecay.macroAmounts, coords.dest, 0, audioLevelDb),
         0.0, 1.0
     );
 

@@ -387,13 +387,82 @@ float getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, flo
         seqSwing = mix(seqSwing, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
       }
     }
+
+    // Apply macro modulation to each modulator parameter.
+    // Macros are global scalars (macroValues[m]), so no getModulationBase call.
+    for (int m = 0; m < NUM_MACROS; m++) {
+      float mod = macroValues[m];
+
+      float macroAmount = modulator.modulatorPatternRateX.macroAmounts[m];
+      if (macroAmount != 0.0) {
+        float minV = macroAmount < 0.0 ? modulator.modulatorPatternRateX.maxValue : modulator.modulatorPatternRateX.minValue;
+        float maxV = macroAmount < 0.0 ? modulator.modulatorPatternRateX.minValue : modulator.modulatorPatternRateX.maxValue;
+        patternRateX = mix(patternRateX, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
+      }
+
+      macroAmount = modulator.modulatorPatternRateY.macroAmounts[m];
+      if (macroAmount != 0.0) {
+        float minV = macroAmount < 0.0 ? modulator.modulatorPatternRateY.maxValue : modulator.modulatorPatternRateY.minValue;
+        float maxV = macroAmount < 0.0 ? modulator.modulatorPatternRateY.minValue : modulator.modulatorPatternRateY.maxValue;
+        patternRateY = mix(patternRateY, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
+      }
+
+      macroAmount = modulator.modulatorStrength.macroAmounts[m];
+      if (macroAmount != 0.0) {
+        float minV = macroAmount < 0.0 ? modulator.modulatorStrength.maxValue : modulator.modulatorStrength.minValue;
+        float maxV = macroAmount < 0.0 ? modulator.modulatorStrength.minValue : modulator.modulatorStrength.maxValue;
+        strength = mix(strength, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
+      }
+
+      macroAmount = modulator.modulatorRotation.macroAmounts[m];
+      if (macroAmount != 0.0) {
+        float minV = macroAmount < 0.0 ? modulator.modulatorRotation.maxValue : modulator.modulatorRotation.minValue;
+        float maxV = macroAmount < 0.0 ? modulator.modulatorRotation.minValue : modulator.modulatorRotation.maxValue;
+        rotation = mix(rotation, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
+      }
+
+      macroAmount = modulator.modulatorPhaseX.macroAmounts[m];
+      if (macroAmount != 0.0) {
+        float minV = macroAmount < 0.0 ? modulator.modulatorPhaseX.maxValue : modulator.modulatorPhaseX.minValue;
+        float maxV = macroAmount < 0.0 ? modulator.modulatorPhaseX.minValue : modulator.modulatorPhaseX.maxValue;
+        phaseX = mix(phaseX, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
+      }
+
+      macroAmount = modulator.modulatorPhaseY.macroAmounts[m];
+      if (macroAmount != 0.0) {
+        float minV = macroAmount < 0.0 ? modulator.modulatorPhaseY.maxValue : modulator.modulatorPhaseY.minValue;
+        float maxV = macroAmount < 0.0 ? modulator.modulatorPhaseY.minValue : modulator.modulatorPhaseY.maxValue;
+        phaseY = mix(phaseY, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
+      }
+
+      macroAmount = modulator.seqLoopX.macroAmounts[m];
+      if (macroAmount != 0.0) {
+        float minV = macroAmount < 0.0 ? modulator.seqLoopX.maxValue : modulator.seqLoopX.minValue;
+        float maxV = macroAmount < 0.0 ? modulator.seqLoopX.minValue : modulator.seqLoopX.maxValue;
+        seqLoopX = mix(seqLoopX, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
+      }
+
+      macroAmount = modulator.seqLoopY.macroAmounts[m];
+      if (macroAmount != 0.0) {
+        float minV = macroAmount < 0.0 ? modulator.seqLoopY.maxValue : modulator.seqLoopY.minValue;
+        float maxV = macroAmount < 0.0 ? modulator.seqLoopY.minValue : modulator.seqLoopY.maxValue;
+        seqLoopY = mix(seqLoopY, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
+      }
+
+      macroAmount = modulator.seqSwing.macroAmounts[m];
+      if (macroAmount != 0.0) {
+        float minV = macroAmount < 0.0 ? modulator.seqSwing.maxValue : modulator.seqSwing.minValue;
+        float maxV = macroAmount < 0.0 ? modulator.seqSwing.minValue : modulator.seqSwing.maxValue;
+        seqSwing = mix(seqSwing, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
+      }
+    }
   }
   #endif
   
   return getModulationBase(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, seqLoopX, seqLoopY, seqSwing, audioLevelDb);
 }
 
-float applyModulation(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float[NUM_CONTEXTUAL_MOD_SOURCES] contextualModAmounts, vec2 uv, int depth, float audioLevelDb) {
+float applyModulation(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float[NUM_CONTEXTUAL_MOD_SOURCES] contextualModAmounts, float[NUM_MACROS] macroAmounts, vec2 uv, int depth, float audioLevelDb) {
   float totalModulation = 0.0;
   float totalModulationAmount = 0.0;
 
@@ -444,6 +513,29 @@ float applyModulation(float value, float minValue, float maxValue, float[NUM_MOD
     }
 
     float modulation = contextualValues[i];  // Already 0-1
+
+    float minV = minValue;
+    float maxV = maxValue;
+
+    if (modulationAmount < 0.0) {
+      minV = maxValue;
+      maxV = minValue;
+    }
+
+    float modulatedValue = mix(minV, maxV, modulation);
+
+    totalModulation += modulatedValue * modulationAmount;
+    totalModulationAmount += abs(modulationAmount);
+  }
+
+  // Apply macro modulation sources
+  for (int i = 0; i < NUM_MACROS; i++) {
+    float modulationAmount = macroAmounts[i];
+    if (modulationAmount == 0.0) {
+      continue;
+    }
+
+    float modulation = macroValues[i];  // Already 0-1
 
     float minV = minValue;
     float maxV = maxValue;

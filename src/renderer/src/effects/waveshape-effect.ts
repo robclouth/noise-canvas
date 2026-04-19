@@ -1,5 +1,9 @@
 import { getNumberParameterDef } from "@renderer/parameters";
-import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "@renderer/store/modulators";
+import {
+  getContextualModAmountsNormalized,
+  getModAmountValuesNormalized,
+  getMacroAmountValuesNormalized,
+} from "@renderer/store/modulators";
 import { GLSL3, RawShaderMaterial } from "three";
 import waveshapeEffectFrag from "../glsl/waveshape-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -22,6 +26,7 @@ class WaveshapeEffect extends BaseEffect {
               maxValue: 16.0,
               modulationAmounts: [],
               contextualModAmounts: [],
+              macroAmounts: [],
             },
           },
           waveshapeTilt: {
@@ -31,6 +36,7 @@ class WaveshapeEffect extends BaseEffect {
               maxValue: 1.0,
               modulationAmounts: [],
               contextualModAmounts: [],
+              macroAmounts: [],
             },
           },
         },
@@ -54,6 +60,7 @@ class WaveshapeEffect extends BaseEffect {
       maxValue: driveDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "waveshapeDrive"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "waveshapeDrive"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "waveshapeDrive"),
     };
 
     const tiltDef = getNumberParameterDef("waveshapeTilt");
@@ -63,6 +70,7 @@ class WaveshapeEffect extends BaseEffect {
       maxValue: tiltDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "waveshapeTilt"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "waveshapeTilt"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "waveshapeTilt"),
     };
   }
 }

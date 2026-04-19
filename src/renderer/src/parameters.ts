@@ -13,6 +13,7 @@ import {
   MODULATOR_MODES,
   MULTIPLIER_UNIT,
   MULTIPLIER_VALUES,
+  NUM_MACROS,
   NUM_MODULATORS,
   PATTERN_SHAPES,
   PITCH_VALUES,
@@ -49,6 +50,7 @@ export interface NumberParameter extends ParameterBase {
   rightValue?: { value: number; label: string };
   marks?: Array<{ value: number; label: string }>;
   modulatable?: boolean;
+  modulationSourcesAllowed?: "all" | "contextualOnly";
 }
 export interface BooleanParameter extends ParameterBase {
   kind: "boolean";
@@ -357,6 +359,28 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
       values: Array.from({ length: 4 }, () => Array.from({ length: 8 }, () => 1)),
     }),
     includeInStep: true,
+  };
+}
+
+// --- Macro Definitions ---
+// Macros are brush-level modulation sources with user-editable names.
+// Their values live on the Brush (macroValues); the parameter def is only
+// used so the existing ParameterControl / ParamMenu UI can render them.
+const macroDefs: Record<string, ParameterDefInput> = {};
+for (let i = 0; i < NUM_MACROS; i++) {
+  const idx = i + 1;
+  macroDefs[`macro${idx}Value`] = {
+    kind: "number",
+    name: `Macro ${idx}`,
+    label: `Macro ${idx}`,
+    description: "User-defined brush macro. Modulates any parameter; renamable via the label menu.",
+    default: 50,
+    min: 0,
+    max: 100,
+    step: 0.1,
+    unit: "%",
+    modulatable: true,
+    modulationSourcesAllowed: "contextualOnly",
   };
 }
 
@@ -1607,6 +1631,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
 const combinedDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   ...baseParameterDefs,
   ...modulatorDefs,
+  ...macroDefs,
 };
 
 const finalParameterDefs: Partial<Record<ParameterKey, ParameterDef>> = { ...combinedDefs };
@@ -1614,27 +1639,30 @@ const finalParameterDefs: Partial<Record<ParameterKey, ParameterDef>> = { ...com
 for (const [key, def] of Object.entries(combinedDefs)) {
   if (def.kind === "number" && def.modulatable) {
     const modKeys: ParameterKey[] = [];
+    const contextualOnly = def.modulationSourcesAllowed === "contextualOnly";
 
     // Generate pattern modulator amounts (Mod1, Mod2, Mod3)
-    for (let i = 0; i < NUM_MODULATORS; i++) {
-      const modIndex = i + 1;
-      const modAmountKey = `${key}Mod${modIndex}Amount` as ParameterKey;
-      modKeys.push(modAmountKey);
+    if (!contextualOnly) {
+      for (let i = 0; i < NUM_MODULATORS; i++) {
+        const modIndex = i + 1;
+        const modAmountKey = `${key}Mod${modIndex}Amount` as ParameterKey;
+        modKeys.push(modAmountKey);
 
-      finalParameterDefs[modAmountKey] = {
-        kind: "number",
-        name: `${def.name} Mod ${modIndex} Amount`,
-        label: `Mod ${modIndex}`,
-        description: `Modulation amount from Modulator ${modIndex} for ${def.name}.`,
-        default: 0,
-        min: -100,
-        max: 100,
-        step: 0.1,
-        unit: "%",
+        finalParameterDefs[modAmountKey] = {
+          kind: "number",
+          name: `${def.name} Mod ${modIndex} Amount`,
+          label: `Mod ${modIndex}`,
+          description: `Modulation amount from Modulator ${modIndex} for ${def.name}.`,
+          default: 0,
+          min: -100,
+          max: 100,
+          step: 0.1,
+          unit: "%",
 
-        includeInStep: true,
-        effectType: def.effectType, // Inherit effectType from parent parameter
-      };
+          includeInStep: true,
+          effectType: def.effectType, // Inherit effectType from parent parameter
+        };
+      }
     }
 
     // Generate contextual modulation amounts (Iteration, Time, Pitch, Random, Step)
@@ -1655,6 +1683,29 @@ for (const [key, def] of Object.entries(combinedDefs)) {
         includeInStep: true,
         effectType: def.effectType, // Inherit effectType from parent parameter
       };
+    }
+
+    // Generate macro modulation amounts (Macro1..Macro4)
+    if (!contextualOnly) {
+      for (let i = 0; i < NUM_MACROS; i++) {
+        const macroIndex = i + 1;
+        const macroAmountKey = `${key}ModMacro${macroIndex}Amount` as ParameterKey;
+
+        finalParameterDefs[macroAmountKey] = {
+          kind: "number",
+          name: `${def.name} Macro ${macroIndex} Amount`,
+          label: `Macro ${macroIndex}`,
+          description: `Modulation amount from Macro ${macroIndex} for ${def.name}.`,
+          default: 0,
+          min: -100,
+          max: 100,
+          step: 0.1,
+          unit: "%",
+
+          includeInStep: true,
+          effectType: def.effectType,
+        };
+      }
     }
   }
 }

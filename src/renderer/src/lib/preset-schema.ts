@@ -6,7 +6,11 @@ import { ParameterKey } from "@renderer/store/types";
 import { z } from "zod";
 
 // Current preset version
-export const CURRENT_PRESET_VERSION = 5;
+export const CURRENT_PRESET_VERSION = 6;
+
+// Default macro values used for new brushes and migrated presets.
+export const DEFAULT_MACRO_NAMES = ["Macro 1", "Macro 2", "Macro 3", "Macro 4"];
+export const DEFAULT_MACRO_VALUES = [50, 50, 50, 50];
 
 /**
  * Create a Zod schema for step parameters (parameters with includeInStep: true)
@@ -76,12 +80,24 @@ export function createSchema() {
     version: z.number().int().min(1).optional().default(CURRENT_PRESET_VERSION),
     steps: z.array(createBrushStepSchema()),
     linkedParams: z.array(z.string()).optional().default([]),
+    macroNames: z
+      .array(z.string())
+      .length(4)
+      .optional()
+      .default([...DEFAULT_MACRO_NAMES]),
+    macroValues: z
+      .array(z.number())
+      .length(4)
+      .optional()
+      .default([...DEFAULT_MACRO_VALUES]),
   });
 }
 
 export type PresetType = Omit<z.infer<ReturnType<typeof createSchema>>, "steps"> & {
   steps: Array<{ id: string; name: string } & Partial<Record<ParameterKey, any>>>;
   linkedParams: string[];
+  macroNames: string[];
+  macroValues: number[];
 };
 
 /**
@@ -170,6 +186,13 @@ export function migratePreset(data: any): any {
     });
 
     migratedData.version = 5;
+  }
+
+  // Migrate from v5 to v6: Initialise macro names/values on the brush.
+  if (migratedData.version < 6) {
+    migratedData.macroNames = [...DEFAULT_MACRO_NAMES];
+    migratedData.macroValues = [...DEFAULT_MACRO_VALUES];
+    migratedData.version = 6;
   }
 
   // Ensure steps array exists

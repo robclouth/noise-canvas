@@ -97,6 +97,8 @@ export type CommonUniforms = {
   strokePressure?: { value: number };
   strokeTiltX?: { value: number };
   strokeTiltY?: { value: number };
+  // Macro values for the active brush, used as modulation sources
+  macroValues: { value: number[] };
   // Non-cumulative stroke uniforms for preventing accumulation
   useStrokeMask?: { value: boolean };
   strokeMaskTex?: { value: Texture | null };
@@ -138,6 +140,7 @@ export const defaultValues: CommonUniforms = {
       maxValue: 1.0,
       modulationAmounts: [],
       contextualModAmounts: [],
+      macroAmounts: [],
     },
   },
   brushSkewTime: {
@@ -147,6 +150,7 @@ export const defaultValues: CommonUniforms = {
       maxValue: 1.0,
       modulationAmounts: [],
       contextualModAmounts: [],
+      macroAmounts: [],
     },
   },
   brushCurvePitch: {
@@ -156,6 +160,7 @@ export const defaultValues: CommonUniforms = {
       maxValue: 1.0,
       modulationAmounts: [],
       contextualModAmounts: [],
+      macroAmounts: [],
     },
   },
   brushSkewPitch: {
@@ -165,6 +170,7 @@ export const defaultValues: CommonUniforms = {
       maxValue: 1.0,
       modulationAmounts: [],
       contextualModAmounts: [],
+      macroAmounts: [],
     },
   },
   brushIntensity: {
@@ -174,6 +180,7 @@ export const defaultValues: CommonUniforms = {
       maxValue: 1.0,
       modulationAmounts: [],
       contextualModAmounts: [],
+      macroAmounts: [],
     },
   },
   sourceOffsetX: {
@@ -191,6 +198,7 @@ export const defaultValues: CommonUniforms = {
       maxValue: 1,
       modulationAmounts: [],
       contextualModAmounts: [],
+      macroAmounts: [],
     },
   },
   sourcePitchOffset: {
@@ -200,6 +208,7 @@ export const defaultValues: CommonUniforms = {
       maxValue: 1,
       modulationAmounts: [],
       contextualModAmounts: [],
+      macroAmounts: [],
     },
   },
   brushPan: {
@@ -209,6 +218,7 @@ export const defaultValues: CommonUniforms = {
       maxValue: 1.0,
       modulationAmounts: [],
       contextualModAmounts: [],
+      macroAmounts: [],
     },
   },
   bpm: { value: 120.0 },
@@ -230,6 +240,7 @@ export const defaultValues: CommonUniforms = {
   strokePitchPosition: { value: 0 },
   strokeRandom: { value: 0 },
   strokeStepNormalized: { value: 0 },
+  macroValues: { value: [0.5, 0.5, 0.5, 0.5] },
   // Non-cumulative stroke uniforms
   useStrokeMask: { value: false },
   strokeMaskTex: { value: null },

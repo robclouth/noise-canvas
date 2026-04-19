@@ -1,6 +1,6 @@
 import { deepMerge } from "@mantine/core";
 import { EffectItem, syncEffects } from "@renderer/effects/types";
-import { CONTEXTUAL_MOD_SOURCES, NUM_MODULATORS } from "@renderer/lib/constants";
+import { CONTEXTUAL_MOD_SOURCES, NUM_MACROS, NUM_MODULATORS } from "@renderer/lib/constants";
 import { BrushStep, getParameterDef, isEffectParameter, isStepParameter, parameterDefs } from "@renderer/parameters";
 import { produce } from "immer";
 import { create } from "zustand";
@@ -15,6 +15,17 @@ import { createModulatorsSlice } from "./modulators";
 import { createPresetsSlice, PRESETS_PERSISTED_KEYS } from "./presets";
 import { createStepsSlice, STEPS_PERSISTED_KEYS } from "./steps";
 import type { ParameterKey, State } from "./types";
+
+/**
+ * Returns the 0-based macro index if `key` is `macro{N}Value`, else null.
+ * Used to route reads/writes of macro value params to the active brush.
+ */
+export function getMacroValueIndex(key: ParameterKey): number | null {
+  const match = /^macro(\d+)Value$/.exec(key as string);
+  if (!match) return null;
+  const idx = parseInt(match[1], 10) - 1;
+  return idx >= 0 && idx < NUM_MACROS ? idx : null;
+}
 
 export const ALL_PERSISTED_KEYS: (keyof State)[] = [
   ...FILES_PERSISTED_KEYS,
@@ -44,6 +55,20 @@ export const useStore = create<State>()(
           const activeBrush = state.brushes[state.activeBrushIndex];
           const brushLinkedParams = activeBrush?.linkedParams ?? [];
           const isLinked = brushLinkedParams.includes(key as string);
+
+          // Macro values live on the brush, not on step state. Route accordingly.
+          const macroIdx = getMacroValueIndex(key);
+          if (macroIdx !== null) {
+            set(
+              produce((draft: State) => {
+                const brush = draft.brushes[draft.activeBrushIndex];
+                if (brush && macroIdx < brush.macroValues.length) {
+                  brush.macroValues[macroIdx] = value as number;
+                }
+              }),
+            );
+            return;
+          }
 
           // If this is an effect parameter and effectId is provided, update the effect's params
           if (effectId && isEffectParameter(key)) {
@@ -251,6 +276,12 @@ export function getModulator(index: number) {
  * Falls back to parameter defaults if the step doesn't have a value.
  */
 export function getParameterValue(state: State, key: ParameterKey): any {
+  const macroIdx = getMacroValueIndex(key);
+  if (macroIdx !== null) {
+    const brush = state.brushes[state.activeBrushIndex];
+    if (brush) return brush.macroValues[macroIdx] ?? parameterDefs[key]?.default;
+    return parameterDefs[key]?.default;
+  }
   if (isStepParameter(key)) {
     const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
     const activeStep = steps[state.activeStepIndex];
@@ -272,15 +303,26 @@ export function getParameterValue(state: State, key: ParameterKey): any {
  */
 export function getModulationParamKeys(paramKey: ParameterKey): ParameterKey[] {
   const keys: ParameterKey[] = [];
+  const def = parameterDefs[paramKey];
+  const contextualOnly = def?.kind === "number" && def.modulationSourcesAllowed === "contextualOnly";
 
-  // Modulator amounts (Mod1Amount, Mod2Amount, Mod3Amount)
-  for (let i = 1; i <= NUM_MODULATORS; i++) {
-    keys.push(`${paramKey}Mod${i}Amount` as ParameterKey);
+  if (!contextualOnly) {
+    // Modulator amounts (Mod1Amount, Mod2Amount, Mod3Amount)
+    for (let i = 1; i <= NUM_MODULATORS; i++) {
+      keys.push(`${paramKey}Mod${i}Amount` as ParameterKey);
+    }
   }
 
   // Contextual mod amounts (ModIteration, ModTime, ModPitch, ModRandom, ModStep)
   for (const source of CONTEXTUAL_MOD_SOURCES) {
     keys.push(`${paramKey}Mod${source.key}` as ParameterKey);
+  }
+
+  if (!contextualOnly) {
+    // Macro amounts (ModMacro1Amount..ModMacro4Amount)
+    for (let i = 1; i <= NUM_MACROS; i++) {
+      keys.push(`${paramKey}ModMacro${i}Amount` as ParameterKey);
+    }
   }
 
   return keys;

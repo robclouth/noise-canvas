@@ -15,7 +15,7 @@ void main() {
 
   float intensity = applyModulation(
     brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue,
-    brushIntensity.modulationAmounts, brushIntensity.contextualModAmounts, unpackedUv, 0, audioLevelDb
+    brushIntensity.modulationAmounts, brushIntensity.contextualModAmounts, brushIntensity.macroAmounts, unpackedUv, 0, audioLevelDb
   );
 
   float newWeight = envelopeWeight * intensity;

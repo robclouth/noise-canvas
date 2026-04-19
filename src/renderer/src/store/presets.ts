@@ -1,7 +1,13 @@
 import { notifications } from "@mantine/notifications";
 import { pickNextBrushColor } from "@renderer/lib/colors";
 import { getFolders } from "@renderer/lib/folders";
-import { CURRENT_PRESET_VERSION, PresetType, validatePreset } from "@renderer/lib/preset-schema";
+import {
+  CURRENT_PRESET_VERSION,
+  DEFAULT_MACRO_NAMES,
+  DEFAULT_MACRO_VALUES,
+  PresetType,
+  validatePreset,
+} from "@renderer/lib/preset-schema";
 import { BrushStep, createDefaultStep } from "@renderer/parameters";
 import { produce } from "immer";
 import { factoryPresets } from "../lib/factory-presets";
@@ -25,6 +31,8 @@ export interface PresetsState {
   duplicateBrush: (index: number) => void;
   closeBrush: (index: number) => void;
   renameBrush: (index: number, name: string) => void;
+  renameMacro: (macroIndex: number, newName: string) => void;
+  setMacroValue: (macroIndex: number, value: number) => void;
   setBrushHotkey: (index: number, hotkey: string | null) => void;
   reorderBrushes: (fromIndex: number, toIndex: number) => void;
   saveBrushToLibrary: (index: number) => Promise<void>;
@@ -82,6 +90,8 @@ export function makeEmptyBrush(name: string, existingColors: Brush["color"][] = 
     steps: [createDefaultStep("Step 1")],
     linkedParams: [],
     libraryId: null,
+    macroNames: [...DEFAULT_MACRO_NAMES],
+    macroValues: [...DEFAULT_MACRO_VALUES],
   };
 }
 
@@ -94,6 +104,8 @@ function makeBrushFromPreset(preset: PresetType, existingColors: Brush["color"][
     steps: cloneStepsFromPreset(preset),
     linkedParams: preset.linkedParams ?? [],
     libraryId: preset.id,
+    macroNames: preset.macroNames ? [...preset.macroNames] : [...DEFAULT_MACRO_NAMES],
+    macroValues: preset.macroValues ? [...preset.macroValues] : [...DEFAULT_MACRO_VALUES],
   };
 }
 
@@ -186,8 +198,18 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     const preset = state.availablePresets.find((p) => p.id === brush.libraryId);
     if (!preset) return true;
 
-    const presetSnapshot = { steps: preset.steps ?? [], linkedParams: preset.linkedParams ?? [] };
-    const brushSnapshot = { steps: brush.steps, linkedParams: brush.linkedParams };
+    const presetSnapshot = {
+      steps: preset.steps ?? [],
+      linkedParams: preset.linkedParams ?? [],
+      macroNames: preset.macroNames ?? [...DEFAULT_MACRO_NAMES],
+      macroValues: preset.macroValues ?? [...DEFAULT_MACRO_VALUES],
+    };
+    const brushSnapshot = {
+      steps: brush.steps,
+      linkedParams: brush.linkedParams,
+      macroNames: brush.macroNames,
+      macroValues: brush.macroValues,
+    };
     return JSON.stringify(presetSnapshot) !== JSON.stringify(brushSnapshot);
   },
 
@@ -251,6 +273,8 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       steps: source.steps.map((step) => ({ ...step, id: crypto.randomUUID() })),
       linkedParams: [...source.linkedParams],
       libraryId: source.libraryId,
+      macroNames: [...source.macroNames],
+      macroValues: [...source.macroValues],
     };
 
     set(
@@ -285,6 +309,28 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       produce((draft: State) => {
         const brush = draft.brushes[index];
         if (brush) brush.name = name;
+      }),
+    );
+  },
+
+  renameMacro: (macroIndex: number, newName: string) => {
+    set(
+      produce((draft: State) => {
+        const brush = draft.brushes[draft.activeBrushIndex];
+        if (brush && macroIndex >= 0 && macroIndex < brush.macroNames.length) {
+          brush.macroNames[macroIndex] = newName;
+        }
+      }),
+    );
+  },
+
+  setMacroValue: (macroIndex: number, value: number) => {
+    set(
+      produce((draft: State) => {
+        const brush = draft.brushes[draft.activeBrushIndex];
+        if (brush && macroIndex >= 0 && macroIndex < brush.macroValues.length) {
+          brush.macroValues[macroIndex] = value;
+        }
       }),
     );
   },
@@ -345,6 +391,8 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       version: CURRENT_PRESET_VERSION,
       steps: brush.steps,
       linkedParams: brush.linkedParams,
+      macroNames: [...brush.macroNames],
+      macroValues: [...brush.macroValues],
     };
 
     try {
@@ -392,6 +440,8 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       version: CURRENT_PRESET_VERSION,
       steps: brush.steps,
       linkedParams: brush.linkedParams,
+      macroNames: [...brush.macroNames],
+      macroValues: [...brush.macroValues],
     };
 
     try {

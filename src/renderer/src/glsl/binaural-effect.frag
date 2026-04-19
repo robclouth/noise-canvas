@@ -51,19 +51,19 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
   // Get modulated parameters
   float azValue = applyModulation(
     azimuth.value, azimuth.minValue, azimuth.maxValue,
-    azimuth.modulationAmounts, azimuth.contextualModAmounts,
+    azimuth.modulationAmounts, azimuth.contextualModAmounts, azimuth.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
 
   float distValue = applyModulation(
     distance.value, distance.minValue, distance.maxValue,
-    distance.modulationAmounts, distance.contextualModAmounts,
+    distance.modulationAmounts, distance.contextualModAmounts, distance.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
 
   float stereoAngleValue = applyModulation(
     stereoAngle.value, stereoAngle.minValue, stereoAngle.maxValue,
-    stereoAngle.modulationAmounts, stereoAngle.contextualModAmounts,
+    stereoAngle.modulationAmounts, stereoAngle.contextualModAmounts, stereoAngle.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
 

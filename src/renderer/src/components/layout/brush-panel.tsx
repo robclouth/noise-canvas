@@ -1,8 +1,9 @@
 import { SimpleGrid, Stack } from "@mantine/core";
-import { NUM_MODULATORS } from "@renderer/lib/constants";
+import { NUM_MACROS, NUM_MODULATORS } from "@renderer/lib/constants";
 import { selectParameter, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
 import { EnvelopeControl } from "../controls/envelope-control";
+import { MacroControls } from "../controls/macro-controls";
 import { ParameterControl } from "../controls/parameter-control";
 import { Steps } from "../controls/steps";
 import { EffectsList } from "../effects-list";
@@ -46,6 +47,8 @@ const MODULATOR_PARAMS = Array.from({ length: NUM_MODULATORS }).flatMap((_, i) =
   ] as ParameterKey[];
 });
 
+const MACRO_PARAMS = Array.from({ length: NUM_MACROS }, (_, i) => `macro${i + 1}Value` as ParameterKey);
+
 // All effect parameters combined for the Effects section randomizer
 const ALL_EFFECT_PARAMS: ParameterKey[] = [
   "dynamicsThresholdDb",
@@ -80,6 +83,9 @@ export function BrushPanel() {
   return (
     <Stack gap="xs">
       <Stack p="xs" gap="xs">
+        <Section label="Macros" parameterKeys={MACRO_PARAMS}>
+          <MacroControls />
+        </Section>
         <Steps />
         <Section label="Source">
           <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>

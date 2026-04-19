@@ -2,7 +2,11 @@ import type { ParameterKey } from "@/store/types";
 import { useEffectId } from "@renderer/contexts/effect-context";
 import { getParameterDef, isEffectParameter } from "@renderer/parameters";
 import { selectEffectParameter, selectParameter, useStore } from "@renderer/store";
-import { getContextualModAmountParamKeys, getModAmountParamKeys } from "@renderer/store/modulators";
+import {
+  getContextualModAmountParamKeys,
+  getMacroAmountParamKeys,
+  getModAmountParamKeys,
+} from "@renderer/store/modulators";
 import { denormalizeParameterValue, normalizeParameterValue } from "@renderer/store/utils";
 import { memo } from "react";
 import { useShallow } from "zustand/shallow";
@@ -19,6 +23,7 @@ export type ParameterControlProps = {
   disabled?: boolean;
   color?: string;
   labelPosition?: "left" | "top";
+  displayLabel?: string;
 };
 
 export const ParameterControl = memo(function ParameterControl({
@@ -27,6 +32,7 @@ export const ParameterControl = memo(function ParameterControl({
   color,
   paramKey,
   labelPosition,
+  displayLabel,
 }: ParameterControlProps) {
   const parameter = getParameterDef(paramKey);
   const { kind } = parameter;
@@ -43,24 +49,17 @@ export const ParameterControl = memo(function ParameterControl({
       // Check if parameter is modulated
       let modulated = false;
       if (isModulatable) {
-        const patternKeys = getModAmountParamKeys(paramKey);
-        const contextualKeys = getContextualModAmountParamKeys(paramKey);
+        const allAmountKeys = [
+          ...getModAmountParamKeys(paramKey),
+          ...getContextualModAmountParamKeys(paramKey),
+          ...getMacroAmountParamKeys(paramKey),
+        ];
 
-        for (const key of patternKeys) {
+        for (const key of allAmountKeys) {
           const amount = useEffectScope ? selectEffectParameter(effectId, key)(state) : selectParameter(key)(state);
           if (amount !== 0) {
             modulated = true;
             break;
-          }
-        }
-
-        if (!modulated) {
-          for (const key of contextualKeys) {
-            const amount = useEffectScope ? selectEffectParameter(effectId, key)(state) : selectParameter(key)(state);
-            if (amount !== 0) {
-              modulated = true;
-              break;
-            }
           }
         }
       }
@@ -89,7 +88,13 @@ export const ParameterControl = memo(function ParameterControl({
 
   // Use ParamMenu as the label component (it handles the label rendering internally)
   const labelComponent = (
-    <ParamMenu paramKey={paramKey} labelWidth={labelWidth} isModulated={isModulated} effectId={effectId ?? undefined}>
+    <ParamMenu
+      paramKey={paramKey}
+      labelWidth={labelWidth}
+      isModulated={isModulated}
+      effectId={effectId ?? undefined}
+      displayLabel={displayLabel}
+    >
       {parameter.label}
     </ParamMenu>
   );

@@ -1,5 +1,9 @@
 import { getNumberParameterDef } from "@renderer/parameters";
-import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "@renderer/store/modulators";
+import {
+  getContextualModAmountsNormalized,
+  getModAmountValuesNormalized,
+  getMacroAmountValuesNormalized,
+} from "@renderer/store/modulators";
 import { GLSL3, RawShaderMaterial } from "three";
 import dynamicsEffectFrag from "../glsl/dynamics-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -21,6 +25,7 @@ class DynamicsEffect extends BaseEffect {
               maxValue: 0,
               modulationAmounts: [],
               contextualModAmounts: [],
+              macroAmounts: [],
             },
           },
           upperRatio: {
@@ -30,6 +35,7 @@ class DynamicsEffect extends BaseEffect {
               maxValue: 2.0,
               modulationAmounts: [],
               contextualModAmounts: [],
+              macroAmounts: [],
             },
           },
           lowerRatio: {
@@ -39,6 +45,7 @@ class DynamicsEffect extends BaseEffect {
               maxValue: 2.0,
               modulationAmounts: [],
               contextualModAmounts: [],
+              macroAmounts: [],
             },
           },
           knee: {
@@ -48,6 +55,7 @@ class DynamicsEffect extends BaseEffect {
               maxValue: 24.0,
               modulationAmounts: [],
               contextualModAmounts: [],
+              macroAmounts: [],
             },
           },
           gainDb: {
@@ -57,6 +65,7 @@ class DynamicsEffect extends BaseEffect {
               maxValue: 24,
               modulationAmounts: [],
               contextualModAmounts: [],
+              macroAmounts: [],
             },
           },
         },
@@ -79,6 +88,7 @@ class DynamicsEffect extends BaseEffect {
       maxValue: thresholdDbDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "dynamicsThresholdDb"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "dynamicsThresholdDb"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "dynamicsThresholdDb"),
     };
 
     const upperRatio = state.dynamicsUpperRatio;
@@ -89,6 +99,7 @@ class DynamicsEffect extends BaseEffect {
       maxValue: upperRatioDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "dynamicsUpperRatio"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "dynamicsUpperRatio"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "dynamicsUpperRatio"),
     };
 
     const lowerRatio = state.dynamicsLowerRatio;
@@ -99,6 +110,7 @@ class DynamicsEffect extends BaseEffect {
       maxValue: lowerRatioDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "dynamicsLowerRatio"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "dynamicsLowerRatio"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "dynamicsLowerRatio"),
     };
 
     const knee = state.dynamicsKnee;
@@ -109,6 +121,7 @@ class DynamicsEffect extends BaseEffect {
       maxValue: kneeDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "dynamicsKnee"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "dynamicsKnee"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "dynamicsKnee"),
     };
 
     const gainDb = state.dynamicsGainDb;
@@ -119,6 +132,7 @@ class DynamicsEffect extends BaseEffect {
       maxValue: gainDbDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "dynamicsGainDb"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "dynamicsGainDb"),
+      macroAmounts: getMacroAmountValuesNormalized(state, "dynamicsGainDb"),
     };
   }
 }

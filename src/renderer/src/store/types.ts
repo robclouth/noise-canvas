@@ -24,6 +24,8 @@ export type Brush = {
   steps: BrushStep[];
   linkedParams: string[];
   libraryId: string | null;
+  macroNames: string[];
+  macroValues: number[];
 };
 
 export type SliderScale = "linear" | "log" | "logBipolar";

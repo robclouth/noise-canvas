@@ -1,10 +1,17 @@
-import { Box, Button, Divider, Group, Menu, Stack, Text, useMantineTheme } from "@mantine/core";
+import { Box, Button, Divider, Group, Menu, Stack, Text, TextInput, useMantineTheme } from "@mantine/core";
+import { modals } from "@mantine/modals";
 import { getParameterDef, isEffectParameter, parameterDefs } from "@renderer/parameters";
-import { getModulationParamKeys, useStore } from "@renderer/store";
-import { getContextualModAmountParamKeys, getModAmountParamKeys } from "@renderer/store/modulators";
+import { getMacroValueIndex, getModulationParamKeys, useStore } from "@renderer/store";
+import {
+  getContextualModAmountParamKeys,
+  getMacroAmountParamKeys,
+  getModAmountParamKeys,
+} from "@renderer/store/modulators";
 import { ParameterKey } from "@renderer/store/types";
 import { Link2 } from "lucide-react";
 import React, { useState } from "react";
+
+const EMPTY_STRING_ARRAY: readonly string[] = [];
 import { Tooltip } from "../tooltip";
 import { ParameterControl } from "./parameter-control";
 import { SectionMenu } from "./section-menu";
@@ -15,6 +22,7 @@ type ParamMenuProps = {
   labelWidth?: number;
   isModulated?: boolean;
   effectId?: string;
+  displayLabel?: string;
   children?: React.ReactNode; // Not used, but accepted for flexibility
 };
 
@@ -22,19 +30,34 @@ type ParamMenuProps = {
  * ParamMenu wraps a parameter label with a click-to-open menu.
  * Shows modulation controls (if modulatable), reset, exclude from randomisation, and step linking.
  */
-export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false, effectId }: ParamMenuProps) => {
+export const ParamMenu = ({
+  paramKey,
+  labelWidth = 70,
+  isModulated = false,
+  effectId,
+  displayLabel,
+}: ParamMenuProps) => {
   const theme = useMantineTheme();
   const [opened, setOpened] = useState(false);
   const [hovered, setHovered] = useState(false);
 
   const parameter = getParameterDef(paramKey);
   const isModulatable = parameter.kind === "number" && "modulatable" in parameter && parameter.modulatable;
+  const contextualOnly = parameter.kind === "number" && parameter.modulationSourcesAllowed === "contextualOnly";
+  const macroIndex = getMacroValueIndex(paramKey);
+  const isMacro = macroIndex !== null;
 
   const excludedFromRandomization = useStore((state) => state.excludedFromRandomization);
-  const linkedParams = useStore((state) => state.brushes[state.activeBrushIndex]?.linkedParams ?? []);
+  const linkedParams = useStore(
+    (state) => state.brushes[state.activeBrushIndex]?.linkedParams ?? (EMPTY_STRING_ARRAY as string[]),
+  );
+  const macroNames = useStore(
+    (state) => state.brushes[state.activeBrushIndex]?.macroNames ?? (EMPTY_STRING_ARRAY as string[]),
+  );
   const setParamExcluded = useStore((state) => state.setParamExcluded);
   const setParamLinked = useStore((state) => state.setParamLinked);
   const setParameter = useStore((state) => state.setParameter);
+  const renameMacro = useStore((state) => state.renameMacro);
 
   const isExcluded = excludedFromRandomization.includes(paramKey as string);
   const isLinked = linkedParams.includes(paramKey as string);
@@ -51,8 +74,33 @@ export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false, effe
     });
   };
 
-  const modulatorParamKeys = isModulatable ? getModAmountParamKeys(paramKey) : undefined;
+  const handleRenameMacro = () => {
+    if (macroIndex === null) return;
+    const currentName = macroNames[macroIndex] ?? `Macro ${macroIndex + 1}`;
+    const inputId = `macro-rename-input-${macroIndex}`;
+    modals.openConfirmModal({
+      title: `Rename "${currentName}"`,
+      children: (
+        <Stack gap="xs">
+          <Text size="sm">Enter a new name:</Text>
+          <TextInput id={inputId} defaultValue={currentName} data-autofocus />
+        </Stack>
+      ),
+      labels: { confirm: "Rename", cancel: "Cancel" },
+      confirmProps: { size: "xs" },
+      cancelProps: { size: "xs" },
+      onConfirm: () => {
+        const input = document.getElementById(inputId) as HTMLInputElement | null;
+        const newName = input?.value?.trim();
+        if (!newName) return;
+        renameMacro(macroIndex, newName);
+      },
+    });
+  };
+
+  const modulatorParamKeys = isModulatable && !contextualOnly ? getModAmountParamKeys(paramKey) : undefined;
   const contextualModParamKeys = isModulatable ? getContextualModAmountParamKeys(paramKey) : undefined;
+  const macroAmountParamKeys = isModulatable && !contextualOnly ? getMacroAmountParamKeys(paramKey) : undefined;
 
   return (
     <Menu opened={opened} onChange={setOpened} position="bottom" withArrow withinPortal={false}>
@@ -97,7 +145,7 @@ export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false, effe
                 whiteSpace: "nowrap",
               }}
             >
-              {parameter.label}
+              {displayLabel ?? parameter.label}
             </Text>
           </Group>
         </Menu.Target>
@@ -109,6 +157,13 @@ export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false, effe
           <Button onClick={handleReset} variant="subtle" color="gray" size="xs">
             Reset
           </Button>
+
+          {/* Rename button (macros only) */}
+          {isMacro && (
+            <Button onClick={handleRenameMacro} variant="subtle" color="gray" size="xs">
+              Rename
+            </Button>
+          )}
 
           {/* Randomise and Step Linked toggles */}
           <Group gap={8} wrap="nowrap">
@@ -133,7 +188,7 @@ export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false, effe
           </Group>
 
           {/* Modulation section (if applicable) */}
-          {isModulatable && modulatorParamKeys && contextualModParamKeys && (
+          {isModulatable && contextualModParamKeys && (
             <>
               <Group gap={4} wrap="nowrap" align="center" h={24} mt={4}>
                 <Text size="xs" c="dark.1">
@@ -142,12 +197,16 @@ export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false, effe
                 <Divider style={{ flex: 1 }} color="dark.4" />
                 <SectionMenu
                   storageKey={`param-${paramKey}-mod`}
-                  parameterKeys={[...modulatorParamKeys, ...contextualModParamKeys]}
+                  parameterKeys={[
+                    ...(modulatorParamKeys ?? []),
+                    ...contextualModParamKeys,
+                    ...(macroAmountParamKeys ?? []),
+                  ]}
                 />
               </Group>
               <Box style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
-                {/* Row 1-3: Modulators | Pen */}
-                {modulatorParamKeys.map((k, i) => {
+                {/* Row 1-3: Modulators | Pen (omitted for contextual-only params like macros) */}
+                {modulatorParamKeys?.map((k, i) => {
                   const penKeys = contextualModParamKeys.filter(
                     (ck) => ck.endsWith("ModPressure") || ck.endsWith("ModTiltX") || ck.endsWith("ModTiltY"),
                   );
@@ -158,6 +217,16 @@ export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false, effe
                     </React.Fragment>
                   );
                 })}
+                {/* If contextual-only (e.g. macros), still show pen keys in their own rows */}
+                {!modulatorParamKeys &&
+                  contextualModParamKeys
+                    .filter((ck) => ck.endsWith("ModPressure") || ck.endsWith("ModTiltX") || ck.endsWith("ModTiltY"))
+                    .map((k) => (
+                      <React.Fragment key={k}>
+                        <ParameterControl paramKey={k} labelWidth={70} color="violet" />
+                        <div />
+                      </React.Fragment>
+                    ))}
                 {/* Row 4: Iteration | Step */}
                 {contextualModParamKeys
                   .filter((k) => k.endsWith("ModIteration"))
@@ -180,12 +249,23 @@ export const ParamMenu = ({ paramKey, labelWidth = 70, isModulated = false, effe
                   .map((k) => (
                     <ParameterControl key={k} paramKey={k} labelWidth={70} color="green" />
                   ))}
-                {/* Row 6: Randomize | (empty) */}
+                {/* Row 6: Randomize | (blank placeholder so macros start on a fresh row) */}
                 {contextualModParamKeys
                   .filter((k) => k.endsWith("ModRandom"))
                   .map((k) => (
                     <ParameterControl key={k} paramKey={k} labelWidth={70} color="green" />
                   ))}
+                {macroAmountParamKeys && <div />}
+                {/* Rows 7-8: Macro 1 | Macro 2, Macro 3 | Macro 4 */}
+                {macroAmountParamKeys?.map((k, i) => (
+                  <ParameterControl
+                    key={k}
+                    paramKey={k}
+                    labelWidth={70}
+                    color="red"
+                    displayLabel={macroNames[i] ?? `Macro ${i + 1}`}
+                  />
+                ))}
               </Box>
             </>
           )}

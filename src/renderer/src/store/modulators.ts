@@ -4,7 +4,7 @@ import {
   getStringParameterDef,
   parameterDefs,
 } from "@renderer/parameters";
-import { CONTEXTUAL_MOD_SOURCES, NUM_MODULATORS } from "../lib/constants";
+import { CONTEXTUAL_MOD_SOURCES, NUM_MACROS, NUM_MODULATORS } from "../lib/constants";
 import type { ParameterKey } from "./types";
 
 // Type for contextual mod source keys
@@ -45,6 +45,11 @@ export type ContextualModAmountParameters = {
   [K in ModulatableParameterKey as `${K}Mod${ContextualModSourceKey}`]: number;
 };
 
+// Macro modulation amount parameters (Macro1..Macro4)
+export type MacroModAmountParameters = {
+  [K in ModulatableParameterKey as `${K}ModMacro${Range<1, 5>}Amount`]: number;
+};
+
 export type ModulatorParameters = {
   [K in Range<1, 4> as `modulator${K}Mode`]: number;
 } & {
@@ -78,7 +83,8 @@ export type ModulatorParameters = {
 export interface ModulatorsState
   extends ModulatorParameters,
     ModulatorAmountParameters,
-    ContextualModAmountParameters {}
+    ContextualModAmountParameters,
+    MacroModAmountParameters {}
 
 function createModulatorParams(): ModulatorsState {
   const params: ModulatorsState = {
@@ -116,14 +122,17 @@ function createModulatorParams(): ModulatorsState {
     }, {} as ModulatorsState),
     ...Object.entries(parameterDefs).reduce((acc, [key, def]) => {
       if (def.kind === "number" && def.modulatable) {
+        const contextualOnly = def.modulationSourcesAllowed === "contextualOnly";
+        const modAmountEntries = contextualOnly
+          ? {}
+          : getModAmountParamKeys(key as ParameterKey).reduce((obj, k) => ({ ...obj, [k]: 0 }), {});
+        const macroAmountEntries = contextualOnly
+          ? {}
+          : getMacroAmountParamKeys(key as ParameterKey).reduce((obj, k) => ({ ...obj, [k]: 0 }), {});
         return {
           ...acc,
-          ...getModAmountParamKeys(key as ParameterKey).reduce((obj, key) => {
-            return {
-              ...obj,
-              [key]: 0,
-            };
-          }, {} as ModulatorAmountParameters),
+          ...modAmountEntries,
+          ...macroAmountEntries,
         };
       } else return acc;
     }, {} as ModulatorsState),
@@ -132,14 +141,22 @@ function createModulatorParams(): ModulatorsState {
   return params;
 }
 
+function isContextualOnly(paramKey: ParameterKey): boolean {
+  const def = parameterDefs[paramKey];
+  return def?.kind === "number" && def.modulationSourcesAllowed === "contextualOnly";
+}
+
 export function getModAmountParamKeys(paramKey: ParameterKey) {
+  if (isContextualOnly(paramKey)) return [] as ParameterKey[];
   return Array.from({ length: NUM_MODULATORS }, (_, i) => i + 1).map(
     (modIdx) => `${paramKey}Mod${modIdx}Amount`,
   ) as ParameterKey[];
 }
 
 export function getModAmountValuesNormalized(state: ModulatorsState, paramKey: ParameterKey) {
-  return getModAmountParamKeys(paramKey).map((key) => (state[key] as number) / 100);
+  const keys = getModAmountParamKeys(paramKey);
+  if (keys.length === 0) return Array.from({ length: NUM_MODULATORS }, () => 0);
+  return keys.map((key) => (state[key] as number) / 100);
 }
 
 // Get contextual mod amount parameter keys for a given parameter
@@ -150,6 +167,21 @@ export function getContextualModAmountParamKeys(paramKey: ParameterKey) {
 // Get normalized contextual mod amounts as an array [iteration, time, pitch, random, step]
 export function getContextualModAmountsNormalized(state: ModulatorsState, paramKey: ParameterKey) {
   return getContextualModAmountParamKeys(paramKey).map((key) => (state[key] as number) / 100);
+}
+
+// Get macro mod amount parameter keys for a given parameter
+export function getMacroAmountParamKeys(paramKey: ParameterKey) {
+  if (isContextualOnly(paramKey)) return [] as ParameterKey[];
+  return Array.from({ length: NUM_MACROS }, (_, i) => i + 1).map(
+    (macroIdx) => `${paramKey}ModMacro${macroIdx}Amount`,
+  ) as ParameterKey[];
+}
+
+// Get normalized macro mod amounts as an array [macro1, macro2, macro3, macro4]
+export function getMacroAmountValuesNormalized(state: ModulatorsState, paramKey: ParameterKey) {
+  const keys = getMacroAmountParamKeys(paramKey);
+  if (keys.length === 0) return Array.from({ length: NUM_MACROS }, () => 0);
+  return keys.map((key) => (state[key] as number) / 100);
 }
 
 export const createModulatorsSlice = (): ModulatorsState => ({

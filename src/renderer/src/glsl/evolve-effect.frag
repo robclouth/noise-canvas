@@ -25,15 +25,15 @@ void main() {
 
 
     // Get modulated parameters (normalized to 0-1 range from -100 to 100)
-    float flow = applyModulation(evolveFlow.value, evolveFlow.minValue, evolveFlow.maxValue, evolveFlow.modulationAmounts, evolveFlow.contextualModAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float spread = applyModulation(evolveSpread.value, evolveSpread.minValue, evolveSpread.maxValue, evolveSpread.modulationAmounts, evolveSpread.contextualModAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float grow = applyModulation(evolveGrow.value, evolveGrow.minValue, evolveGrow.maxValue, evolveGrow.modulationAmounts, evolveGrow.contextualModAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float swirl = applyModulation(evolveSwirl.value, evolveSwirl.minValue, evolveSwirl.maxValue, evolveSwirl.modulationAmounts, evolveSwirl.contextualModAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float driftX = applyModulation(evolveDriftX.value, evolveDriftX.minValue, evolveDriftX.maxValue, evolveDriftX.modulationAmounts, evolveDriftX.contextualModAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float driftY = applyModulation(evolveDriftY.value, evolveDriftY.minValue, evolveDriftY.maxValue, evolveDriftY.modulationAmounts, evolveDriftY.contextualModAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float decay = applyModulation(evolveDecay.value, evolveDecay.minValue, evolveDecay.maxValue, evolveDecay.modulationAmounts, evolveDecay.contextualModAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float scaleX = applyModulation(evolveScaleX.value, evolveScaleX.minValue, evolveScaleX.maxValue, evolveScaleX.modulationAmounts, evolveScaleX.contextualModAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float scaleY = applyModulation(evolveScaleY.value, evolveScaleY.minValue, evolveScaleY.maxValue, evolveScaleY.modulationAmounts, evolveScaleY.contextualModAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    float flow = applyModulation(evolveFlow.value, evolveFlow.minValue, evolveFlow.maxValue, evolveFlow.modulationAmounts, evolveFlow.contextualModAmounts, evolveFlow.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    float spread = applyModulation(evolveSpread.value, evolveSpread.minValue, evolveSpread.maxValue, evolveSpread.modulationAmounts, evolveSpread.contextualModAmounts, evolveSpread.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    float grow = applyModulation(evolveGrow.value, evolveGrow.minValue, evolveGrow.maxValue, evolveGrow.modulationAmounts, evolveGrow.contextualModAmounts, evolveGrow.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    float swirl = applyModulation(evolveSwirl.value, evolveSwirl.minValue, evolveSwirl.maxValue, evolveSwirl.modulationAmounts, evolveSwirl.contextualModAmounts, evolveSwirl.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    float driftX = applyModulation(evolveDriftX.value, evolveDriftX.minValue, evolveDriftX.maxValue, evolveDriftX.modulationAmounts, evolveDriftX.contextualModAmounts, evolveDriftX.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    float driftY = applyModulation(evolveDriftY.value, evolveDriftY.minValue, evolveDriftY.maxValue, evolveDriftY.modulationAmounts, evolveDriftY.contextualModAmounts, evolveDriftY.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    float decay = applyModulation(evolveDecay.value, evolveDecay.minValue, evolveDecay.maxValue, evolveDecay.modulationAmounts, evolveDecay.contextualModAmounts, evolveDecay.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    float scaleX = applyModulation(evolveScaleX.value, evolveScaleX.minValue, evolveScaleX.maxValue, evolveScaleX.modulationAmounts, evolveScaleX.contextualModAmounts, evolveScaleX.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    float scaleY = applyModulation(evolveScaleY.value, evolveScaleY.minValue, evolveScaleY.maxValue, evolveScaleY.modulationAmounts, evolveScaleY.contextualModAmounts, evolveScaleY.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
 
     // Scale factors for neighborhood sampling (convert percentage to UV offset)
     float offsetX = abs(scaleX) * 0.05;

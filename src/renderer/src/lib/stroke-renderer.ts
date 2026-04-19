@@ -25,7 +25,11 @@ import { BaseEffect, CommonUniforms, defaultValues } from "../effects/base-effec
 import maskUpdateFrag from "../glsl/mask-update.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { createEffectStateView, createStepStateView } from "../store";
-import { getContextualModAmountsNormalized, getModAmountValuesNormalized } from "../store/modulators";
+import {
+  getContextualModAmountsNormalized,
+  getMacroAmountValuesNormalized,
+  getModAmountValuesNormalized,
+} from "../store/modulators";
 import type { SpectrogramData, State } from "../store/types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { buildModulatorUniforms } from "./modulator-utils";
@@ -383,6 +387,7 @@ export class StrokeRenderer {
           maxValue: 1,
           modulationAmounts: getModAmountValuesNormalized(stepState, "brushCurveTime"),
           contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushCurveTime"),
+          macroAmounts: getMacroAmountValuesNormalized(stepState, "brushCurveTime"),
         },
       },
       brushSkewTime: {
@@ -392,6 +397,7 @@ export class StrokeRenderer {
           maxValue: 1,
           modulationAmounts: getModAmountValuesNormalized(stepState, "brushSkewTime"),
           contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushSkewTime"),
+          macroAmounts: getMacroAmountValuesNormalized(stepState, "brushSkewTime"),
         },
       },
       brushCurvePitch: {
@@ -401,6 +407,7 @@ export class StrokeRenderer {
           maxValue: 1,
           modulationAmounts: getModAmountValuesNormalized(stepState, "brushCurvePitch"),
           contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushCurvePitch"),
+          macroAmounts: getMacroAmountValuesNormalized(stepState, "brushCurvePitch"),
         },
       },
       brushSkewPitch: {
@@ -410,6 +417,7 @@ export class StrokeRenderer {
           maxValue: 1,
           modulationAmounts: getModAmountValuesNormalized(stepState, "brushSkewPitch"),
           contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushSkewPitch"),
+          macroAmounts: getMacroAmountValuesNormalized(stepState, "brushSkewPitch"),
         },
       },
       brushSizeUv: { value: brushSizeUv },
@@ -420,6 +428,7 @@ export class StrokeRenderer {
           maxValue: 1,
           modulationAmounts: getModAmountValuesNormalized(stepState, "brushIntensity"),
           contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushIntensity"),
+          macroAmounts: getMacroAmountValuesNormalized(stepState, "brushIntensity"),
         },
       },
       brushPan: {
@@ -429,6 +438,7 @@ export class StrokeRenderer {
           maxValue: 1,
           modulationAmounts: getModAmountValuesNormalized(stepState, "brushPan"),
           contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushPan"),
+          macroAmounts: getMacroAmountValuesNormalized(stepState, "brushPan"),
         },
       },
       bpm: { value: bpm },
@@ -457,6 +467,10 @@ export class StrokeRenderer {
             stepState.sourcePositionMode === "follow"
               ? getContextualModAmountsNormalized(stepState, "sourceTimeOffset").map(() => 0)
               : getContextualModAmountsNormalized(stepState, "sourceTimeOffset"),
+          macroAmounts:
+            stepState.sourcePositionMode === "follow"
+              ? getMacroAmountValuesNormalized(stepState, "sourceTimeOffset").map(() => 0)
+              : getMacroAmountValuesNormalized(stepState, "sourceTimeOffset"),
         },
       },
       sourcePitchOffset: {
@@ -472,6 +486,10 @@ export class StrokeRenderer {
             stepState.sourcePositionMode === "follow"
               ? getContextualModAmountsNormalized(stepState, "sourcePitchOffset").map(() => 0)
               : getContextualModAmountsNormalized(stepState, "sourcePitchOffset"),
+          macroAmounts:
+            stepState.sourcePositionMode === "follow"
+              ? getMacroAmountValuesNormalized(stepState, "sourcePitchOffset").map(() => 0)
+              : getMacroAmountValuesNormalized(stepState, "sourcePitchOffset"),
         },
       },
       blendMode: { value: stepState.blendMode },
@@ -486,6 +504,9 @@ export class StrokeRenderer {
       modulator1SeqDataTex: { value: modulatorUniforms[0]?.seqDataTex || placeholderTexture },
       modulator2SeqDataTex: { value: modulatorUniforms[1]?.seqDataTex || placeholderTexture },
       modulator3SeqDataTex: { value: modulatorUniforms[2]?.seqDataTex || placeholderTexture },
+      macroValues: {
+        value: (stepState.brushes[stepState.activeBrushIndex]?.macroValues ?? [50, 50, 50, 50]).map((v) => v / 100),
+      },
     };
   }
 
@@ -701,6 +722,7 @@ export class StrokeRenderer {
             maxValue: 1,
             modulationAmounts: [0, 0, 0],
             contextualModAmounts: [0, 0, 0, 0, 0, 0, 0, 0],
+            macroAmounts: [0, 0, 0, 0],
           },
         },
         sourcePitchOffset: {
@@ -710,6 +732,7 @@ export class StrokeRenderer {
             maxValue: 1,
             modulationAmounts: [0, 0, 0],
             contextualModAmounts: [0, 0, 0, 0, 0, 0, 0, 0],
+            macroAmounts: [0, 0, 0, 0],
           },
         },
       };
@@ -921,6 +944,7 @@ export class StrokeRenderer {
       maxValue: 1,
       modulationAmounts: getModAmountValuesNormalized(activeStep, "brushIntensity"),
       contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushIntensity"),
+      macroAmounts: getMacroAmountValuesNormalized(activeStep, "brushIntensity"),
     };
     this.maskMaterial.uniforms.brushCurveTime.value = {
       value: (activeStep.brushCurveTime as number) / 100,
@@ -928,6 +952,7 @@ export class StrokeRenderer {
       maxValue: 1,
       modulationAmounts: getModAmountValuesNormalized(activeStep, "brushCurveTime"),
       contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushCurveTime"),
+      macroAmounts: getMacroAmountValuesNormalized(activeStep, "brushCurveTime"),
     };
     this.maskMaterial.uniforms.brushSkewTime.value = {
       value: ((activeStep.brushSkewTime as number) + 100) / 200,
@@ -935,6 +960,7 @@ export class StrokeRenderer {
       maxValue: 1,
       modulationAmounts: getModAmountValuesNormalized(activeStep, "brushSkewTime"),
       contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushSkewTime"),
+      macroAmounts: getMacroAmountValuesNormalized(activeStep, "brushSkewTime"),
     };
     this.maskMaterial.uniforms.brushCurvePitch.value = {
       value: (activeStep.brushCurvePitch as number) / 100,
@@ -942,6 +968,7 @@ export class StrokeRenderer {
       maxValue: 1,
       modulationAmounts: getModAmountValuesNormalized(activeStep, "brushCurvePitch"),
       contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushCurvePitch"),
+      macroAmounts: getMacroAmountValuesNormalized(activeStep, "brushCurvePitch"),
     };
     this.maskMaterial.uniforms.brushSkewPitch.value = {
       value: ((activeStep.brushSkewPitch as number) + 100) / 200,
@@ -949,6 +976,11 @@ export class StrokeRenderer {
       maxValue: 1,
       modulationAmounts: getModAmountValuesNormalized(activeStep, "brushSkewPitch"),
       contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushSkewPitch"),
+      macroAmounts: getMacroAmountValuesNormalized(activeStep, "brushSkewPitch"),
+    };
+
+    this.maskMaterial.uniforms.macroValues = {
+      value: (state.brushes[state.activeBrushIndex]?.macroValues ?? [50, 50, 50, 50]).map((v) => v / 100),
     };
 
     this.maskMaterial.uniforms.brushBottomLeftUv.value = cursorPos;
