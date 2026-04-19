@@ -65,6 +65,8 @@ export type ModulatorParameters = {
 } & {
   [K in Range<1, 4> as `modulator${K}Rotation`]: number;
 } & {
+  [K in Range<1, 4> as `modulator${K}StereoSpread`]: number;
+} & {
   [K in Range<1, 4> as `modulator${K}ImagePath`]: string | null;
 } & {
   [K in Range<1, 4> as `setModulator${K}ImagePath`]: (path: string | null) => void;
@@ -103,6 +105,8 @@ function createModulatorParams(): ModulatorsState {
         ).default,
         [`modulator${idx}Strength`]: getNumberParameterDef(`modulator${idx}Strength` as keyof ModulatorsState).default,
         [`modulator${idx}Rotation`]: getNumberParameterDef(`modulator${idx}Rotation` as keyof ModulatorsState).default,
+        [`modulator${idx}StereoSpread`]: getNumberParameterDef(`modulator${idx}StereoSpread` as keyof ModulatorsState)
+          .default,
         [`modulator${idx}TexturePath`]: getStringParameterDef(`modulator${idx}TexturePath` as keyof ModulatorsState)
           .default,
         [`modulator${idx}PhaseMode`]: getOptionsParameterDef<number>(

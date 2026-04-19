@@ -17,79 +17,94 @@ void main() {
     ProcessingUvs coords = getProcessingUvs(vUv);
     vec4 originalTexel = texture(destSpectrogramTex, vUv);
     float audioLevelDb = getAudioLevelDb(coords.dest);
-    float weight = getBrushWeight(coords.dest, audioLevelDb);
-    if (weight <= 0.0) {
+    vec2 weight = getBrushWeight(coords.dest, audioLevelDb);
+    if (weight.x <= 0.0 && weight.y <= 0.0) {
         outColor = originalTexel;
         return;
     }
 
 
-    // Get modulated parameters (normalized to 0-1 range from -100 to 100)
-    float flow = applyModulation(evolveFlow.value, evolveFlow.minValue, evolveFlow.maxValue, evolveFlow.modulationAmounts, evolveFlow.contextualModAmounts, evolveFlow.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float spread = applyModulation(evolveSpread.value, evolveSpread.minValue, evolveSpread.maxValue, evolveSpread.modulationAmounts, evolveSpread.contextualModAmounts, evolveSpread.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float grow = applyModulation(evolveGrow.value, evolveGrow.minValue, evolveGrow.maxValue, evolveGrow.modulationAmounts, evolveGrow.contextualModAmounts, evolveGrow.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float swirl = applyModulation(evolveSwirl.value, evolveSwirl.minValue, evolveSwirl.maxValue, evolveSwirl.modulationAmounts, evolveSwirl.contextualModAmounts, evolveSwirl.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float driftX = applyModulation(evolveDriftX.value, evolveDriftX.minValue, evolveDriftX.maxValue, evolveDriftX.modulationAmounts, evolveDriftX.contextualModAmounts, evolveDriftX.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float driftY = applyModulation(evolveDriftY.value, evolveDriftY.minValue, evolveDriftY.maxValue, evolveDriftY.modulationAmounts, evolveDriftY.contextualModAmounts, evolveDriftY.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float decay = applyModulation(evolveDecay.value, evolveDecay.minValue, evolveDecay.maxValue, evolveDecay.modulationAmounts, evolveDecay.contextualModAmounts, evolveDecay.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float scaleX = applyModulation(evolveScaleX.value, evolveScaleX.minValue, evolveScaleX.maxValue, evolveScaleX.modulationAmounts, evolveScaleX.contextualModAmounts, evolveScaleX.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
-    float scaleY = applyModulation(evolveScaleY.value, evolveScaleY.minValue, evolveScaleY.maxValue, evolveScaleY.modulationAmounts, evolveScaleY.contextualModAmounts, evolveScaleY.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    // Per-channel dynamics scalars (applied to pre-computed L/R samples).
+    vec2 flow = applyModulation(evolveFlow.value, evolveFlow.minValue, evolveFlow.maxValue, evolveFlow.modulationAmounts, evolveFlow.contextualModAmounts, evolveFlow.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    vec2 spread = applyModulation(evolveSpread.value, evolveSpread.minValue, evolveSpread.maxValue, evolveSpread.modulationAmounts, evolveSpread.contextualModAmounts, evolveSpread.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    vec2 grow = applyModulation(evolveGrow.value, evolveGrow.minValue, evolveGrow.maxValue, evolveGrow.modulationAmounts, evolveGrow.contextualModAmounts, evolveGrow.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    vec2 swirl = applyModulation(evolveSwirl.value, evolveSwirl.minValue, evolveSwirl.maxValue, evolveSwirl.modulationAmounts, evolveSwirl.contextualModAmounts, evolveSwirl.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    vec2 driftX = applyModulation(evolveDriftX.value, evolveDriftX.minValue, evolveDriftX.maxValue, evolveDriftX.modulationAmounts, evolveDriftX.contextualModAmounts, evolveDriftX.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    vec2 driftY = applyModulation(evolveDriftY.value, evolveDriftY.minValue, evolveDriftY.maxValue, evolveDriftY.modulationAmounts, evolveDriftY.contextualModAmounts, evolveDriftY.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    vec2 decay = applyModulation(evolveDecay.value, evolveDecay.minValue, evolveDecay.maxValue, evolveDecay.modulationAmounts, evolveDecay.contextualModAmounts, evolveDecay.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    // Neighborhood scale feeds source sampling; stereo-aware with fast-path.
+    vec2 scaleX = applyModulation(evolveScaleX.value, evolveScaleX.minValue, evolveScaleX.maxValue, evolveScaleX.modulationAmounts, evolveScaleX.contextualModAmounts, evolveScaleX.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
+    vec2 scaleY = applyModulation(evolveScaleY.value, evolveScaleY.minValue, evolveScaleY.maxValue, evolveScaleY.modulationAmounts, evolveScaleY.contextualModAmounts, evolveScaleY.macroAmounts, coords.dest, 0, audioLevelDb) / 100.0;
 
-    // Scale factors for neighborhood sampling (convert percentage to UV offset)
-    float offsetX = abs(scaleX) * 0.05;
-    float offsetY = abs(scaleY) * 0.05;
+    bool sameNeighborhood = (scaleX.x == scaleX.y) && (scaleY.x == scaleY.y) && coords.sameSourceUv;
 
-    // Sample neighborhood with edge mode handling
-    vec4 center = sampleWithEdgeMode(coords.source, coords.dest, sourceOffsetX, sourceOffsetY, evolveEdgeMode);
-    vec4 left = sampleWithEdgeMode(coords.source + vec2(-offsetX, 0.0), coords.dest, sourceOffsetX - offsetX, sourceOffsetY, evolveEdgeMode);
-    vec4 right = sampleWithEdgeMode(coords.source + vec2(offsetX, 0.0), coords.dest, sourceOffsetX + offsetX, sourceOffsetY, evolveEdgeMode);
-    vec4 up = sampleWithEdgeMode(coords.source + vec2(0.0, offsetY), coords.dest, sourceOffsetX, sourceOffsetY + offsetY, evolveEdgeMode);
-    vec4 down = sampleWithEdgeMode(coords.source + vec2(0.0, -offsetY), coords.dest, sourceOffsetX, sourceOffsetY - offsetY, evolveEdgeMode);
+    // Sample the L-channel neighborhood (+ reuse for R when sameNeighborhood).
+    float offsetXL = abs(scaleX.x) * 0.05;
+    float offsetYL = abs(scaleY.x) * 0.05;
+    vec4 centerL = sampleWithEdgeMode(coords.sourceL, coords.dest, sourceOffsetX, sourceOffsetY, evolveEdgeMode);
+    vec4 leftL = sampleWithEdgeMode(coords.sourceL + vec2(-offsetXL, 0.0), coords.dest, sourceOffsetX - offsetXL, sourceOffsetY, evolveEdgeMode);
+    vec4 rightL = sampleWithEdgeMode(coords.sourceL + vec2(offsetXL, 0.0), coords.dest, sourceOffsetX + offsetXL, sourceOffsetY, evolveEdgeMode);
+    vec4 upL = sampleWithEdgeMode(coords.sourceL + vec2(0.0, offsetYL), coords.dest, sourceOffsetX, sourceOffsetY + offsetYL, evolveEdgeMode);
+    vec4 downL = sampleWithEdgeMode(coords.sourceL + vec2(0.0, -offsetYL), coords.dest, sourceOffsetX, sourceOffsetY - offsetYL, evolveEdgeMode);
+
+    vec4 centerR, leftR, rightR, upR, downR;
+    if (sameNeighborhood) {
+        centerR = centerL; leftR = leftL; rightR = rightL; upR = upL; downR = downL;
+    } else {
+        float offsetXR = abs(scaleX.y) * 0.05;
+        float offsetYR = abs(scaleY.y) * 0.05;
+        centerR = sampleWithEdgeMode(coords.sourceR, coords.dest, sourceOffsetX, sourceOffsetY, evolveEdgeMode);
+        leftR = sampleWithEdgeMode(coords.sourceR + vec2(-offsetXR, 0.0), coords.dest, sourceOffsetX - offsetXR, sourceOffsetY, evolveEdgeMode);
+        rightR = sampleWithEdgeMode(coords.sourceR + vec2(offsetXR, 0.0), coords.dest, sourceOffsetX + offsetXR, sourceOffsetY, evolveEdgeMode);
+        upR = sampleWithEdgeMode(coords.sourceR + vec2(0.0, offsetYR), coords.dest, sourceOffsetX, sourceOffsetY + offsetYR, evolveEdgeMode);
+        downR = sampleWithEdgeMode(coords.sourceR + vec2(0.0, -offsetYR), coords.dest, sourceOffsetX, sourceOffsetY - offsetYR, evolveEdgeMode);
+    }
 
     // Calculate gradient (for advection) - based on magnitude differences
     vec2 gradientL = vec2(
-        getMag(right.rg) - getMag(left.rg),
-        getMag(up.rg) - getMag(down.rg)
+        getMag(rightL.rg) - getMag(leftL.rg),
+        getMag(upL.rg) - getMag(downL.rg)
     );
     vec2 gradientR = vec2(
-        getMag(right.ba) - getMag(left.ba),
-        getMag(up.ba) - getMag(down.ba)
+        getMag(rightR.ba) - getMag(leftR.ba),
+        getMag(upR.ba) - getMag(downR.ba)
     );
 
     // Add swirl (rotate gradient 90 degrees and blend with original)
     vec2 swirlGradientL = vec2(-gradientL.y, gradientL.x);
     vec2 swirlGradientR = vec2(-gradientR.y, gradientR.x);
-    vec2 flowDirectionL = mix(gradientL, swirlGradientL, swirl);
-    vec2 flowDirectionR = mix(gradientR, swirlGradientR, swirl);
+    vec2 flowDirectionL = mix(gradientL, swirlGradientL, swirl.x);
+    vec2 flowDirectionR = mix(gradientR, swirlGradientR, swirl.y);
 
-    // Add drift bias
-    vec2 driftBias = vec2(driftX, driftY) * 0.1;
-    flowDirectionL += driftBias;
-    flowDirectionR += driftBias;
+    // Per-channel drift bias
+    vec2 driftBiasL = vec2(driftX.x, driftY.x) * 0.1;
+    vec2 driftBiasR = vec2(driftX.y, driftY.y) * 0.1;
+    flowDirectionL += driftBiasL;
+    flowDirectionR += driftBiasR;
 
     // Advect: sample from upstream position with edge mode handling
-    vec2 advectedUvL = coords.source - flowDirectionL * flow * 0.5;
-    vec2 advectedUvR = coords.source - flowDirectionR * flow * 0.5;
-    vec4 advectedL = sampleWithEdgeMode(advectedUvL, coords.dest, sourceOffsetX - flowDirectionL.x * flow * 0.5, sourceOffsetY - flowDirectionL.y * flow * 0.5, evolveEdgeMode);
-    vec4 advectedR = sampleWithEdgeMode(advectedUvR, coords.dest, sourceOffsetX - flowDirectionR.x * flow * 0.5, sourceOffsetY - flowDirectionR.y * flow * 0.5, evolveEdgeMode);
+    vec2 advectedUvL = coords.sourceL - flowDirectionL * flow.x * 0.5;
+    vec2 advectedUvR = coords.sourceR - flowDirectionR * flow.y * 0.5;
+    vec4 advectedL = sampleWithEdgeMode(advectedUvL, coords.dest, sourceOffsetX - flowDirectionL.x * flow.x * 0.5, sourceOffsetY - flowDirectionL.y * flow.x * 0.5, evolveEdgeMode);
+    vec4 advectedR = sampleWithEdgeMode(advectedUvR, coords.dest, sourceOffsetX - flowDirectionR.x * flow.y * 0.5, sourceOffsetY - flowDirectionR.y * flow.y * 0.5, evolveEdgeMode);
 
     // Diffuse: Laplacian (neighbor average - center)
-    float neighborAvgL = (getMag(left.rg) + getMag(right.rg) + getMag(up.rg) + getMag(down.rg)) / 4.0;
-    float neighborAvgR = (getMag(left.ba) + getMag(right.ba) + getMag(up.ba) + getMag(down.ba)) / 4.0;
-    float laplacianL = neighborAvgL - getMag(center.rg);
-    float laplacianR = neighborAvgR - getMag(center.ba);
+    float neighborAvgL = (getMag(leftL.rg) + getMag(rightL.rg) + getMag(upL.rg) + getMag(downL.rg)) / 4.0;
+    float neighborAvgR = (getMag(leftR.ba) + getMag(rightR.ba) + getMag(upR.ba) + getMag(downR.ba)) / 4.0;
+    float laplacianL = neighborAvgL - getMag(centerL.rg);
+    float laplacianR = neighborAvgR - getMag(centerR.ba);
 
     // Get magnitudes from advected samples
     float magL = getMag(advectedL.rg);
     float magR = getMag(advectedR.ba);
 
     // React: non-linear growth/shrinking (quadratic term)
-    float reactionL = magL * magL * grow * 2.0;
-    float reactionR = magR * magR * grow * 2.0;
+    float reactionL = magL * magL * grow.x * 2.0;
+    float reactionR = magR * magR * grow.y * 2.0;
 
     // Combine: advected + diffusion + reaction - decay
-    float newMagL = magL + laplacianL * spread * 0.5 + reactionL - magL * decay * 0.1;
-    float newMagR = magR + laplacianR * spread * 0.5 + reactionR - magR * decay * 0.1;
+    float newMagL = magL + laplacianL * spread.x * 0.5 + reactionL - magL * decay.x * 0.1;
+    float newMagR = magR + laplacianR * spread.y * 0.5 + reactionR - magR * decay.y * 0.1;
 
     // Clamp to valid range
     newMagL = max(0.0, newMagL);

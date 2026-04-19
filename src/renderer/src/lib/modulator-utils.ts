@@ -34,6 +34,7 @@ export interface ModulatorUniform {
   modulatorPatternRateY: ModulatableParam;
   modulatorStrength: ModulatableParam;
   modulatorRotation: ModulatableParam;
+  modulatorStereoSpread: ModulatableParam;
   modulatorEnvelopeSmoothing: number;
   modulatorEnvelopeSource: number;
   modulatorEnvelopeMinDb: number;
@@ -101,6 +102,7 @@ export const buildModulatorUniforms = (
     const rateSemis = state[`modulator${i + 1}PatternRateSemis`] as number;
     const strength = state[`modulator${i + 1}Strength`] as number;
     const rotation = state[`modulator${i + 1}Rotation`] as number;
+    const stereoSpread = state[`modulator${i + 1}StereoSpread`] as number;
     const envelopeSmoothingBeats = state[`modulator${i + 1}EnvelopeSmoothingBeats`] as number;
     const envelopeSource = state[`modulator${i + 1}EnvelopeSource`] as number;
     const envelopeMinDb = state[`modulator${i + 1}EnvelopeMinDb`] as number;
@@ -173,6 +175,14 @@ export const buildModulatorUniforms = (
         modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}Rotation` as ParameterKey),
         contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}Rotation` as ParameterKey),
         macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}Rotation` as ParameterKey),
+      },
+      modulatorStereoSpread: {
+        value: stereoSpread / 100,
+        minValue: -1.0,
+        maxValue: 1.0,
+        modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}StereoSpread` as ParameterKey),
+        contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}StereoSpread` as ParameterKey),
+        macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}StereoSpread` as ParameterKey),
       },
       modulatorEnvelopeSmoothing: envelopeSmoothingUv,
       modulatorEnvelopeSource: envelopeSource,

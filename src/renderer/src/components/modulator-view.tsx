@@ -126,6 +126,7 @@ const Scene = ({
           modA.modulatorPatternRateY.value !== modB.modulatorPatternRateY.value ||
           modA.modulatorStrength.value !== modB.modulatorStrength.value ||
           modA.modulatorRotation.value !== modB.modulatorRotation.value ||
+          modA.modulatorStereoSpread.value !== modB.modulatorStereoSpread.value ||
           modA.seqLoopY.value !== modB.seqLoopY.value
         ) {
           return false;
@@ -197,6 +198,7 @@ const getModulatorParamKeys = (modulatorIndex: number): ParameterKey[] => {
     `modulator${idx}PhaseX`,
     `modulator${idx}PhaseY`,
     `modulator${idx}Strength`,
+    `modulator${idx}StereoSpread`,
     `modulator${idx}EnvelopeSmoothingBeats`,
     `modulator${idx}EnvelopeSource`,
     `modulator${idx}EnvelopeMinDb`,
@@ -339,6 +341,7 @@ export const ModulatorView = () => {
           </>
         )}
         <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Strength` as ParameterKey} />
+        <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}StereoSpread` as ParameterKey} />
       </SimpleGrid>
       {isSequencerMode && <SequencerGrid modulatorIndex={parseInt(viewedModulatorIndex) + 1} />}
       <View ref={viewRef} style={{ height: 100, marginTop: 6 }}>

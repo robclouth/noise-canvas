@@ -186,6 +186,20 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     includeInStep: true,
     modulatable: !isWindows,
   };
+  modulatorDefs[`modulator${idx}StereoSpread`] = {
+    kind: "number",
+    name: `Modulator Stereo Spread ${idx}`,
+    label: "Stereo",
+    description:
+      "Decorrelates the modulator's left and right outputs by offsetting the sample position along the time axis. Negative values swap channels.",
+    default: 0,
+    min: -100,
+    max: 100,
+    step: 1,
+    unit: "%",
+    includeInStep: true,
+    modulatable: !isWindows,
+  };
   modulatorDefs[`modulator${idx}PhaseMode`] = {
     kind: "options",
     name: `Modulator Phase Mode ${idx}`,

@@ -581,4 +581,114 @@ describe("Effects", () => {
       constantTextures.metadataTex.dispose();
     });
   });
+
+  describe("stereo spread", () => {
+    // Source is symmetric (L == R). With modulator1 driving brushIntensity as
+    // a Pattern-mode sine LFO, painted intensity varies spatially. At
+    // stereoSpread=0 both channels sample the modulator at the same UV, so L
+    // and R output magnitudes must match per pixel. At stereoSpread=100 the
+    // channels decorrelate and magnitudes must diverge somewhere in the brush.
+    function createStereoSpreadState(stereoSpread: number): State {
+      const effectsList = [
+        { id: "test-transform", effect: "transform" as const, enabled: true, params: {} },
+        { id: "test-dynamics", effect: "dynamics" as const, enabled: false, params: {} },
+        { id: "test-blur", effect: "blur" as const, enabled: false, params: {} },
+        { id: "test-overtones", effect: "overtones" as const, enabled: false, params: {} },
+        { id: "test-synthesize", effect: "synthesize" as const, enabled: false, params: {} },
+      ];
+
+      return createMockStateWithSteps(
+        [
+          {
+            name: "Stereo",
+            overrides: {
+              brushIntensity: 100,
+              brushSizeTime: 10,
+              brushSizePitch: 100,
+              brushCurveTime: 100,
+              brushSkewTime: -100,
+              brushCurvePitch: 100,
+              brushSkewPitch: -100,
+              accumulate: true,
+              // Add blend mode produces target = source + modified which
+              // differs from source, so intensity changes make the output
+              // magnitude change. This surfaces the L/R divergence that
+              // identity-blend would mask.
+              blendMode: 1,
+              modulator1Mode: 0,
+              modulator1PatternShape: 0, // Sine
+              // Tight rate so the 0.5-UV stereo offset spans several cycles
+              // across the very short test spectrogram.
+              modulator1PatternRateBeats: 0.001,
+              modulator1PatternRateSemis: 1,
+              modulator1Strength: 100,
+              modulator1StereoSpread: stereoSpread,
+              brushIntensityMod1Amount: 100,
+              effects: effectsList,
+            },
+          },
+        ],
+        {
+          filepathsBpm: { "/test/effects-test.wav": 120 },
+        },
+      ) as State;
+    }
+
+    function strokeParams(totalDuration: number): StrokeParams {
+      return {
+        cursorPos: new Vector2(0.0, 0.0),
+        preview: false,
+        bpm: 120,
+        totalDuration,
+        viewZoomPower: 0,
+        viewOffset: 0,
+        viewZoomPowerY: 0,
+        viewOffsetY: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
+      };
+    }
+
+    function maxChannelMagDivergence(data: Float32Array): number {
+      let maxDiff = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        maxDiff = Math.max(maxDiff, Math.abs(data[i] - data[i + 2]));
+      }
+      return maxDiff;
+    }
+
+    it("should produce identical L and R magnitudes when stereoSpread is zero", async () => {
+      const renderer = createRenderer();
+      const sourceFile = createSourceFile(renderer);
+      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+
+      renderer.renderStroke(strokeParams(totalDuration), createStereoSpreadState(0), sourceFile);
+      const data = await renderer.getFBOData();
+
+      // Sanity: the modulated stroke produced non-zero output.
+      expect(hasNonZeroMagnitudes(data)).toBe(true);
+      // Every pixel's L and R magnitudes must match — mono path preserved.
+      expect(maxChannelMagDivergence(data)).toBeLessThan(1e-5);
+
+      renderer.dispose();
+    });
+
+    it("should produce divergent L and R magnitudes when stereoSpread is non-zero", async () => {
+      const renderer = createRenderer();
+      const sourceFile = createSourceFile(renderer);
+      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+
+      renderer.renderStroke(strokeParams(totalDuration), createStereoSpreadState(100), sourceFile);
+      const data = await renderer.getFBOData();
+
+      expect(hasNonZeroMagnitudes(data)).toBe(true);
+      // A full-range spread on a sine LFO must push L and R meaningfully apart
+      // somewhere inside the brush. Threshold is generous because the exact
+      // divergence depends on brush envelope × intensity × effect gain.
+      expect(maxChannelMagDivergence(data)).toBeGreaterThan(0.001);
+
+      renderer.dispose();
+    });
+  });
 });

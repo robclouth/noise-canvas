@@ -119,8 +119,12 @@ vec2 wrapUv(vec2 uv) {
 // ============================================================================
 
 struct ProcessingUvs {
-  vec2 dest;   // Unpacked UV we are writing TO
-  vec2 source; // Unpacked UV we are sampling FROM
+  vec2 dest;     // Unpacked UV we are writing TO
+  vec2 source;   // Unpacked UV we are sampling FROM (= sourceL, kept for code that is OK being mono)
+  vec2 sourceL;  // Per-channel source UV for L (stereo-aware callsites sample .rg here)
+  vec2 sourceR;  // Per-channel source UV for R (stereo-aware callsites sample .ba here)
+  bool sameSourceUv; // True when sourceL == sourceR — effects must branch on this to keep the
+                     // spread=0 fast path (single texture read) instead of double-sampling.
 };
 
 // Converts a packed texture UV to an unpacked spectrogram UV.
@@ -296,19 +300,26 @@ ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
   ProcessingUvs uvs;
   uvs.dest = packedToUnpackedUv(destInverseMapTex, destPackedUv, destFrameCount, destBandCount);
 
-  float modTimeOff = applyModulation(
+  // Stereo-aware source UV offsets. When every modulator driving these params has
+  // stereoSpread == 0, the two components of each vec2 are equal and sameSourceUv
+  // falls out true — effects then take the single-sample fast path.
+  vec2 modTimeOff = applyModulation(
     sourceTimeOffset.value, sourceTimeOffset.minValue, sourceTimeOffset.maxValue,
     sourceTimeOffset.modulationAmounts, sourceTimeOffset.contextualModAmounts, sourceTimeOffset.macroAmounts,
     uvs.dest, 0, 0.0
   );
-  float modPitchOff = applyModulation(
+  vec2 modPitchOff = applyModulation(
     sourcePitchOffset.value, sourcePitchOffset.minValue, sourcePitchOffset.maxValue,
     sourcePitchOffset.modulationAmounts, sourcePitchOffset.contextualModAmounts, sourcePitchOffset.macroAmounts,
     uvs.dest, 0, 0.0
   );
 
-  uvs.source = vec2(uvs.dest.x * sourceTimeScale, uvs.dest.y * sourceBandScale)
-             + vec2(sourceOffsetX + modTimeOff, sourceOffsetY + modPitchOff);
+  vec2 baseUv = vec2(uvs.dest.x * sourceTimeScale, uvs.dest.y * sourceBandScale)
+              + vec2(sourceOffsetX, sourceOffsetY);
+  uvs.sourceL = baseUv + vec2(modTimeOff.x, modPitchOff.x);
+  uvs.sourceR = baseUv + vec2(modTimeOff.y, modPitchOff.y);
+  uvs.source  = uvs.sourceL;
+  uvs.sameSourceUv = (modTimeOff.x == modTimeOff.y) && (modPitchOff.x == modPitchOff.y);
   return uvs;
 }
 
@@ -627,26 +638,28 @@ float calculateEnvelopeGain(float localPos, float curve, float skew) {
   return pow(1.0 - x, p);
 }
 
-float getBrushWeight(vec2 unpackedUv, float audioLevelDb) {
+// Returns vec2(weightL, weightR) — brush weight can decorrelate per channel
+// when the modulators driving envelope curve/skew have non-zero stereo spread.
+vec2 getBrushWeight(vec2 unpackedUv, float audioLevelDb) {
   vec4 meta = getDestMetadata(unpackedUv);
   float binWidth = exp2(meta.b) / destFrameCount;
 
   vec2 off = getEffectiveBrushOffset(unpackedUv);
   vec2 safeBrush = max(vec2(EPSILON), brushSizeUv);
 
-  float curveX = applyModulation(
+  vec2 curveX = applyModulation(
     brushCurveTime.value, brushCurveTime.minValue, brushCurveTime.maxValue,
     brushCurveTime.modulationAmounts, brushCurveTime.contextualModAmounts, brushCurveTime.macroAmounts, unpackedUv, 0, audioLevelDb
   );
-  float skewX = applyModulation(
+  vec2 skewX = applyModulation(
     brushSkewTime.value, brushSkewTime.minValue, brushSkewTime.maxValue,
     brushSkewTime.modulationAmounts, brushSkewTime.contextualModAmounts, brushSkewTime.macroAmounts, unpackedUv, 0, audioLevelDb
   );
-  float curveY = applyModulation(
+  vec2 curveY = applyModulation(
     brushCurvePitch.value, brushCurvePitch.minValue, brushCurvePitch.maxValue,
     brushCurvePitch.modulationAmounts, brushCurvePitch.contextualModAmounts, brushCurvePitch.macroAmounts, unpackedUv, 0, audioLevelDb
   );
-  float skewY = applyModulation(
+  vec2 skewY = applyModulation(
     brushSkewPitch.value, brushSkewPitch.minValue, brushSkewPitch.maxValue,
     brushSkewPitch.modulationAmounts, brushSkewPitch.contextualModAmounts, brushSkewPitch.macroAmounts, unpackedUv, 0, audioLevelDb
   );
@@ -659,15 +672,19 @@ float getBrushWeight(vec2 unpackedUv, float audioLevelDb) {
   float overlap      = max(0.0, overlapRight - overlapLeft);
   float coverage     = overlap / binWidth;
 
-  float weightX = 0.0;
+  vec2 weightX = vec2(0.0);
   if (coverage > 0.0) {
     float localX = (overlapLeft + overlapRight) * 0.5 / safeBrush.x;
-    weightX = calculateEnvelopeGain(localX, curveX, skewX) * coverage;
+    weightX.x = calculateEnvelopeGain(localX, curveX.x, skewX.x) * coverage;
+    weightX.y = calculateEnvelopeGain(localX, curveX.y, skewX.y) * coverage;
   }
 
   // Y (pitch): band center position relative to brush.
   float localY = off.y / safeBrush.y;
-  float weightY = calculateEnvelopeGain(localY, curveY, skewY);
+  vec2 weightY = vec2(
+    calculateEnvelopeGain(localY, curveY.x, skewY.x),
+    calculateEnvelopeGain(localY, curveY.y, skewY.y)
+  );
 
   return weightX * weightY;
 }
@@ -685,7 +702,9 @@ bool isInsideBrush(vec2 unpackedUv) {
 
 // Applies the final brush effect, combining original and modified data.
 // packedUv is the raw texture coordinate (vUv), destUv is the unpacked spectrogram coordinate
-vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv, vec2 packedUv) {
+// weight is vec2(L, R) — each channel carries its own brush envelope weight so
+// modulators driving brush shape parameters can decorrelate the two channels.
+vec4 applyBrush(vec4 original, vec4 modified, vec2 weight, vec2 destUv, vec2 packedUv) {
   vec2 originalL = original.rg;
   vec2 originalR = original.ba;
   vec2 modifiedL = modified.rg;
@@ -704,21 +723,21 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv, vec2 pa
   }
 
   float audioLevelDb = getAudioLevelDb(destUv);
- 
-  float intensity = applyModulation(
+
+  vec2 intensity = applyModulation(
     brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue,
     brushIntensity.modulationAmounts, brushIntensity.contextualModAmounts, brushIntensity.macroAmounts, destUv, 0, audioLevelDb
   );
 
-  float pan = applyModulation(
+  vec2 pan = applyModulation(
     brushPan.value, brushPan.minValue, brushPan.maxValue,
     brushPan.modulationAmounts, brushPan.contextualModAmounts, brushPan.macroAmounts, destUv, 0, audioLevelDb
   );
 
-  vec2 pannedModifiedL = fromPolar(getMag(modifiedL) * clamp(1.0 - pan, 0.0, 1.0), getPhase(modifiedL));
-  vec2 pannedModifiedR = fromPolar(getMag(modifiedR) * clamp(1.0 + pan, 0.0, 1.0), getPhase(modifiedR));
+  vec2 pannedModifiedL = fromPolar(getMag(modifiedL) * clamp(1.0 - pan.x, 0.0, 1.0), getPhase(modifiedL));
+  vec2 pannedModifiedR = fromPolar(getMag(modifiedR) * clamp(1.0 + pan.y, 0.0, 1.0), getPhase(modifiedR));
 
-  float effectiveWeight = weight * intensity;
+  vec2 effectiveWeight = weight * intensity;
 
   // Non-cumulative stroke: use the max weight seen at this pixel
   // Since we always blend from strokeStart, using max(current, stored) ensures:
@@ -728,13 +747,13 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv, vec2 pa
   // Use packedUv to sample the mask since it's stored in packed format
   if (useStrokeMask) {
     float maskValue = texture(strokeMaskTex, packedUv).r;
-    effectiveWeight = max(effectiveWeight, maskValue);
+    effectiveWeight = max(effectiveWeight, vec2(maskValue));
   }
 
   // Dissolve (stochastic)
   if (blendMode == 8) {
-    vec2 finalL = (random(destUv.xy) < effectiveWeight) ? pannedModifiedL : originalL;
-    vec2 finalR = (random(destUv.yx) < effectiveWeight) ? pannedModifiedR : originalR;
+    vec2 finalL = (random(destUv.xy) < effectiveWeight.x) ? pannedModifiedL : originalL;
+    vec2 finalR = (random(destUv.yx) < effectiveWeight.y) ? pannedModifiedR : originalR;
     finalL = limitMagnitude(finalL);
     finalR = limitMagnitude(finalR);
     return vec4(finalL, finalR);
@@ -818,11 +837,11 @@ vec4 applyBrush(vec4 original, vec4 modified, float weight, vec2 destUv, vec2 pa
 
   vec2 finalL, finalR;
   if (useLinearBlend) {
-    finalL = mix(blendOriginalL, targetL, effectiveWeight);
-    finalR = mix(blendOriginalR, targetR, effectiveWeight);
+    finalL = mix(blendOriginalL, targetL, effectiveWeight.x);
+    finalR = mix(blendOriginalR, targetR, effectiveWeight.y);
   } else {
-    finalL = interpolateComplex(blendOriginalL, targetL, effectiveWeight);
-    finalR = interpolateComplex(blendOriginalR, targetR, effectiveWeight);
+    finalL = interpolateComplex(blendOriginalL, targetL, effectiveWeight.x);
+    finalR = interpolateComplex(blendOriginalR, targetR, effectiveWeight.y);
   }
 
   // FINAL LIMITING

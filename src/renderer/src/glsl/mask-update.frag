@@ -11,14 +11,17 @@ void main() {
   vec2 unpackedUv = packedToUnpackedUv(destInverseMapTex, packedUv, destFrameCount, destBandCount);
 
   float audioLevelDb = getAudioLevelDb(unpackedUv);
-  float envelopeWeight = getBrushWeight(unpackedUv, audioLevelDb);
+  vec2 envelopeWeight = getBrushWeight(unpackedUv, audioLevelDb);
 
-  float intensity = applyModulation(
+  vec2 intensity = applyModulation(
     brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue,
     brushIntensity.modulationAmounts, brushIntensity.contextualModAmounts, brushIntensity.macroAmounts, unpackedUv, 0, audioLevelDb
   );
 
-  float newWeight = envelopeWeight * intensity;
+  // Mask is a single scalar per pixel; use the stronger of L/R so the gate
+  // opens wherever either channel has contributed.
+  vec2 combinedWeight = envelopeWeight * intensity;
+  float newWeight = max(combinedWeight.x, combinedWeight.y);
   
   // Read current mask value and take maximum
   float currentWeight = texture(currentMaskTex, packedUv).r;

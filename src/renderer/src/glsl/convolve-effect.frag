@@ -16,29 +16,30 @@ void main() {
   ProcessingUvs coords = getProcessingUvs(vUv);
   vec4 originalTexel = texture(destSpectrogramTex, vUv);
   float audioLevelDb = getAudioLevelDb(coords.dest);
-  float weight = getBrushWeight(coords.dest, audioLevelDb);
+  vec2 weight = getBrushWeight(coords.dest, audioLevelDb);
 
-  if (weight <= 0.0 || !convolveIrEnabled || convolveIrFrameCount <= 0.0) {
+  if ((weight.x <= 0.0 && weight.y <= 0.0) || !convolveIrEnabled || convolveIrFrameCount <= 0.0) {
     outColor = originalTexel;
     return;
   }
 
-  float irTimeOff = applyModulation(
+  // Convolution parameters drive tap geometry shared by both channels; keep mono.
+  float irTimeOff = applyModulationMono(
     convolveIrTimeOffset.value, convolveIrTimeOffset.minValue, convolveIrTimeOffset.maxValue,
     convolveIrTimeOffset.modulationAmounts, convolveIrTimeOffset.contextualModAmounts, convolveIrTimeOffset.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
-  float irPitchShiftBands = applyModulation(
+  float irPitchShiftBands = applyModulationMono(
     convolveIrPitchShiftBands.value, convolveIrPitchShiftBands.minValue, convolveIrPitchShiftBands.maxValue,
     convolveIrPitchShiftBands.modulationAmounts, convolveIrPitchShiftBands.contextualModAmounts, convolveIrPitchShiftBands.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
-  float rate = applyModulation(
+  float rate = applyModulationMono(
     convolveIrRate.value, convolveIrRate.minValue, convolveIrRate.maxValue,
     convolveIrRate.modulationAmounts, convolveIrRate.contextualModAmounts, convolveIrRate.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
-  float gain = applyModulation(
+  float gain = applyModulationMono(
     convolveGain.value, convolveGain.minValue, convolveGain.maxValue,
     convolveGain.modulationAmounts, convolveGain.contextualModAmounts, convolveGain.macroAmounts,
     coords.dest, 0, audioLevelDb

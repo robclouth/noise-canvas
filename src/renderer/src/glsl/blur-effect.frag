@@ -14,8 +14,8 @@ void main() {
     ProcessingUvs coords = getProcessingUvs(vUv);
     vec4 originalTexel = texture(destSpectrogramTex, vUv);
     float audioLevelDb = getAudioLevelDb(coords.dest);
-    float weight = getBrushWeight(coords.dest, audioLevelDb);
-    if( weight <= 0.0 ) {
+    vec2 weight = getBrushWeight(coords.dest, audioLevelDb);
+    if (weight.x <= 0.0 && weight.y <= 0.0) {
         outColor = originalTexel;
         return;
     }
@@ -24,18 +24,35 @@ void main() {
     float blurredMagR = 0.0;
     float blurredPhaseL = 0.0;
     float blurredPhaseR = 0.0;
-    float totalWeight = 0.0;
+    float totalWeightL = 0.0;
+    float totalWeightR = 0.0;
 
-    vec4 sourceCenterTexel = getTransformedSample(coords.source, coords.dest, sourceTimeScale, sourceBandScale, sourceOffsetX, sourceOffsetY);
-    float referencePhaseL = getPhase(sourceCenterTexel.rg);
-    float referencePhaseR = getPhase(sourceCenterTexel.ba);
+    // Stereo-aware kernel params. When all modulators driving these have
+    // stereoSpread == 0 the two components of each vec2 are equal and the
+    // per-sample fast path picks the single-read branch.
+    vec2 blurSizeXValue = applyModulation(blurSizeX.value, blurSizeX.minValue, blurSizeX.maxValue, blurSizeX.modulationAmounts, blurSizeX.contextualModAmounts, blurSizeX.macroAmounts, coords.dest, 0, audioLevelDb);
+    vec2 blurSizeYValue = applyModulation(blurSizeY.value, blurSizeY.minValue, blurSizeY.maxValue, blurSizeY.modulationAmounts, blurSizeY.contextualModAmounts, blurSizeY.macroAmounts, coords.dest, 0, audioLevelDb);
+    vec2 blurNoiseXValue = applyModulation(blurNoiseX.value, blurNoiseX.minValue, blurNoiseX.maxValue, blurNoiseX.modulationAmounts, blurNoiseX.contextualModAmounts, blurNoiseX.macroAmounts, coords.dest, 0, audioLevelDb);
+    vec2 blurNoiseYValue = applyModulation(blurNoiseY.value, blurNoiseY.minValue, blurNoiseY.maxValue, blurNoiseY.modulationAmounts, blurNoiseY.contextualModAmounts, blurNoiseY.macroAmounts, coords.dest, 0, audioLevelDb);
 
-    float blurSizeXValue = applyModulation(blurSizeX.value, blurSizeX.minValue, blurSizeX.maxValue, blurSizeX.modulationAmounts, blurSizeX.contextualModAmounts, blurSizeX.macroAmounts, coords.dest, 0, audioLevelDb);
-    float blurSizeYValue = applyModulation(blurSizeY.value, blurSizeY.minValue, blurSizeY.maxValue, blurSizeY.modulationAmounts, blurSizeY.contextualModAmounts, blurSizeY.macroAmounts, coords.dest, 0, audioLevelDb);
-    float blurNoiseXValue = applyModulation(blurNoiseX.value, blurNoiseX.minValue, blurNoiseX.maxValue, blurNoiseX.modulationAmounts, blurNoiseX.contextualModAmounts, blurNoiseX.macroAmounts, coords.dest, 0, audioLevelDb);
-    float blurNoiseYValue = applyModulation(blurNoiseY.value, blurNoiseY.minValue, blurNoiseY.maxValue, blurNoiseY.modulationAmounts, blurNoiseY.contextualModAmounts, blurNoiseY.macroAmounts, coords.dest, 0, audioLevelDb);
+    bool sameKernel = (blurSizeXValue.x == blurSizeXValue.y)
+                   && (blurSizeYValue.x == blurSizeYValue.y)
+                   && (blurNoiseXValue.x == blurNoiseXValue.y)
+                   && (blurNoiseYValue.x == blurNoiseYValue.y)
+                   && coords.sameSourceUv;
 
-    vec2 blurSizeUv = vec2(blurSizeXValue, blurSizeYValue);
+    vec2 blurSizeUvL = vec2(blurSizeXValue.x, blurSizeYValue.x);
+    vec2 blurSizeUvR = vec2(blurSizeXValue.y, blurSizeYValue.y);
+
+    vec4 sourceCenterTexelL = getTransformedSample(coords.sourceL, coords.dest, sourceTimeScale, sourceBandScale, sourceOffsetX, sourceOffsetY);
+    float referencePhaseL = getPhase(sourceCenterTexelL.rg);
+    float referencePhaseR;
+    if (sameKernel) {
+        referencePhaseR = getPhase(sourceCenterTexelL.ba);
+    } else {
+        vec4 sourceCenterTexelR = getTransformedSample(coords.sourceR, coords.dest, sourceTimeScale, sourceBandScale, sourceOffsetX, sourceOffsetY);
+        referencePhaseR = getPhase(sourceCenterTexelR.ba);
+    }
 
     // radius = half the sample count; sigma scaled so 3-sigma covers the radius
     int radius = blurSampleCount / 2;
@@ -50,55 +67,72 @@ void main() {
         if (blurOrigin == 0 && i > 0) continue; // Left: causal, no future samples
         if (blurOrigin == 2 && i < 0) continue; // Right: anti-causal, no past samples
 
-        vec2 offset = blurDirection * float(i) * blurSizeUv / float(max(radius, 1));
-        
-        // Noise offset direction follows origin mode
-        float noiseRangeX, noiseRangeY;
-        if (blurOrigin == 0) {
-            noiseRangeX = -random(coords.dest) * blurNoiseXValue;
-            noiseRangeY = -random(coords.dest) * blurNoiseYValue;
-        } else if (blurOrigin == 1) {
-            noiseRangeX = (random(coords.dest) * 2.0 - 1.0) * blurNoiseXValue;
-            noiseRangeY = (random(coords.dest) * 2.0 - 1.0) * blurNoiseYValue;
-        } else {
-            noiseRangeX = random(coords.dest) * blurNoiseXValue;
-            noiseRangeY = random(coords.dest) * blurNoiseYValue;
-        }
-        vec2 noiseOffset = vec2(noiseRangeX, noiseRangeY) * blurDirection;
-        vec2 sampleUv = coords.source + offset + noiseOffset;
-
-        // For Cut mode, skip out-of-bounds samples entirely (no weight contribution)
-        if (blurEdgeMode == 0 && !isInsideBrush(sampleUv)) continue;
-
-        vec2 totalShift = vec2(sourceOffsetX, sourceOffsetY) + offset + noiseOffset;
         float fi = float(i);
         float gaussWeight = exp(-0.5 * (fi / sigma) * (fi / sigma));
-        vec4 sampleTexel = sampleWithEdgeMode(sampleUv, coords.dest, totalShift.x, totalShift.y, blurEdgeMode);
 
-        blurredMagL += getMag(sampleTexel.rg) * gaussWeight;
-        blurredMagR += getMag(sampleTexel.ba) * gaussWeight;
-        
-        float samplePhaseL = getPhase(sampleTexel.rg);
-        float deltaPhaseL = samplePhaseL - referencePhaseL;
-        blurredPhaseL += (referencePhaseL + unwrapPhase(deltaPhaseL)) * gaussWeight;
+        // Noise direction follows origin mode. Shared seed for L/R so the random
+        // draw matches across channels; kernel widths scale the magnitude.
+        float rndN = random(coords.dest);
+        float rndS = blurOrigin == 1 ? (rndN * 2.0 - 1.0) : (blurOrigin == 0 ? -rndN : rndN);
 
-        float samplePhaseR = getPhase(sampleTexel.ba);
-        float deltaPhaseR = samplePhaseR - referencePhaseR;
-        blurredPhaseR += (referencePhaseR + unwrapPhase(deltaPhaseR)) * gaussWeight;
+        vec2 offsetL = blurDirection * fi * blurSizeUvL / float(max(radius, 1));
+        vec2 noiseOffsetL = vec2(rndS * blurNoiseXValue.x, rndS * blurNoiseYValue.x) * blurDirection;
+        vec2 sampleUvL = coords.sourceL + offsetL + noiseOffsetL;
 
-        totalWeight += gaussWeight;
+        vec2 offsetR, noiseOffsetR, sampleUvR;
+        if (sameKernel) {
+            offsetR = offsetL;
+            noiseOffsetR = noiseOffsetL;
+            sampleUvR = sampleUvL;
+        } else {
+            offsetR = blurDirection * fi * blurSizeUvR / float(max(radius, 1));
+            noiseOffsetR = vec2(rndS * blurNoiseXValue.y, rndS * blurNoiseYValue.y) * blurDirection;
+            sampleUvR = coords.sourceR + offsetR + noiseOffsetR;
+        }
+
+        // Cut mode: each channel contributes only if its own sample position
+        // (noise-inclusive) falls inside the brush. Skip the iteration only
+        // when both are out.
+        bool inL = blurEdgeMode != 0 || isInsideBrush(sampleUvL);
+        bool inR = sameKernel ? inL : (blurEdgeMode != 0 || isInsideBrush(sampleUvR));
+        if (!inL && !inR) continue;
+
+        vec4 sampleTexelL = inL
+            ? sampleWithEdgeMode(sampleUvL, coords.dest, sourceOffsetX + offsetL.x + noiseOffsetL.x, sourceOffsetY + offsetL.y + noiseOffsetL.y, blurEdgeMode)
+            : vec4(0.0);
+        vec4 sampleTexelR;
+        if (sameKernel) {
+            sampleTexelR = sampleTexelL;
+        } else if (inR) {
+            sampleTexelR = sampleWithEdgeMode(sampleUvR, coords.dest, sourceOffsetX + offsetR.x + noiseOffsetR.x, sourceOffsetY + offsetR.y + noiseOffsetR.y, blurEdgeMode);
+        } else {
+            sampleTexelR = vec4(0.0);
+        }
+
+        if (inL) {
+            blurredMagL += getMag(sampleTexelL.rg) * gaussWeight;
+            float samplePhaseL = getPhase(sampleTexelL.rg);
+            float deltaPhaseL = samplePhaseL - referencePhaseL;
+            blurredPhaseL += (referencePhaseL + unwrapPhase(deltaPhaseL)) * gaussWeight;
+            totalWeightL += gaussWeight;
+        }
+        if (inR) {
+            blurredMagR += getMag(sampleTexelR.ba) * gaussWeight;
+            float samplePhaseR = getPhase(sampleTexelR.ba);
+            float deltaPhaseR = samplePhaseR - referencePhaseR;
+            blurredPhaseR += (referencePhaseR + unwrapPhase(deltaPhaseR)) * gaussWeight;
+            totalWeightR += gaussWeight;
+        }
     }
 
     vec4 resultTexel;
-    if (totalWeight > 0.0) {
-        float avgMagL = blurredMagL / totalWeight;
-        float avgMagR = blurredMagR / totalWeight;
-        float avgPhaseL = blurredPhaseL / totalWeight;
-        float avgPhaseR = blurredPhaseR / totalWeight;
-
-        vec2 finalL = fromPolar(avgMagL, avgPhaseL);
-        vec2 finalR = fromPolar(avgMagR, avgPhaseR);
-
+    if (totalWeightL > 0.0 || totalWeightR > 0.0) {
+        vec2 finalL = totalWeightL > 0.0
+            ? fromPolar(blurredMagL / totalWeightL, blurredPhaseL / totalWeightL)
+            : originalTexel.rg;
+        vec2 finalR = totalWeightR > 0.0
+            ? fromPolar(blurredMagR / totalWeightR, blurredPhaseR / totalWeightR)
+            : originalTexel.ba;
         resultTexel = vec4(finalL, finalR);
     } else {
         resultTexel = originalTexel;
