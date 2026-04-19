@@ -29,7 +29,7 @@ function getSnappedCoordinates(
   bpm: number,
 ): [number, number] | null {
   const state = useStore.getState();
-  const { gridSizeBeats, gridSizeSemis, bandsPerOctave, scaleTonic, scaleType, scaleSnap } = state;
+  const { gridSizeBeats, gridSizeSemis, scaleTonic, scaleType, scaleSnap } = state;
   const rect = event.currentTarget.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) {
     return null;
@@ -61,7 +61,7 @@ function getSnappedCoordinates(
   snappedY = snapPitchUv(
     uv.y,
     spectrogramData.numBands,
-    bandsPerOctave,
+    spectrogramData.bandsPerOctave,
     spectrogramData.minFreq,
     gridSizeSemis,
     scaleTonic,
@@ -134,7 +134,6 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const viewRef = useRef<HTMLDivElement>(null);
   const isStrokingRef = useRef(false);
   const momentumRef = useRef<{ vx: number; vy: number; raf: number | null }>({ vx: 0, vy: 0, raf: null });
-  const pinchPrevScaleRef = useRef<number>(1);
 
   const stopMomentum = useCallback(() => {
     if (momentumRef.current.raf !== null) {
@@ -261,11 +260,12 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         if (!rect || rect.width === 0) return;
 
         const wheelEvent = event as WheelEvent;
-        const isZoomGesture = wheelEvent.ctrlKey || wheelEvent.metaKey || isZooming;
+        const isPinch = wheelEvent.ctrlKey;
+        const isExplicitZoom = wheelEvent.metaKey || isZooming;
 
-        if (isZoomGesture) {
+        if (isPinch || isExplicitZoom) {
           stopMomentum();
-          const sensitivity = wheelEvent.ctrlKey || wheelEvent.metaKey ? 0.02 : 0.01;
+          const sensitivity = isPinch ? 0.02 : 0.01;
           const cursorU = (wheelEvent.clientX - rect.left) / rect.width;
           const oldPower = useStore.getState().filesZoom[fileId];
           applyCursorCentricXZoom(oldPower - dy * sensitivity, cursorU);
@@ -283,27 +283,6 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
           }
         }
       },
-      onPinch: ({ event, offset: [scale], first }) => {
-        event.preventDefault();
-        const rect = viewRef.current?.getBoundingClientRect();
-        if (!rect || rect.width === 0) return;
-
-        if (first) {
-          pinchPrevScaleRef.current = scale;
-          stopMomentum();
-          return;
-        }
-
-        const deltaLog = Math.log2(scale / pinchPrevScaleRef.current);
-        pinchPrevScaleRef.current = scale;
-        if (deltaLog === 0) return;
-
-        const nativeEvent = event as PointerEvent | WheelEvent;
-        const clientX = "clientX" in nativeEvent ? nativeEvent.clientX : rect.left + rect.width / 2;
-        const cursorU = (clientX - rect.left) / rect.width;
-        const currentPower = useStore.getState().filesZoom[fileId];
-        applyCursorCentricXZoom(currentPower + deltaLog, cursorU);
-      },
     },
     {
       target: viewRef,
@@ -312,10 +291,6 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         pointer: { buttons: [2], mouse: true },
         from: () => [0, 0],
         filterTaps: true,
-      },
-      pinch: {
-        scaleBounds: { min: 0.0078125, max: 128 },
-        rubberband: true,
       },
     },
   );
@@ -553,7 +528,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       const uv = screenToZoomed(screenUv, currentZoom, currentOffset);
 
       // Apply snapping
-      const { gridSizeBeats, gridSizeSemis, bandsPerOctave, scaleTonic, scaleType, scaleSnap } = state;
+      const { gridSizeBeats, gridSizeSemis, scaleTonic, scaleType, scaleSnap } = state;
       const spectrogramData = openFiles[fileId]?.spectrogramData;
       if (!spectrogramData) return;
       const bpm = state.filepathsBpm[openFiles[fileId].filePath];
@@ -573,7 +548,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       snappedY = snapPitchUv(
         uv.y,
         spectrogramData.numBands,
-        bandsPerOctave,
+        spectrogramData.bandsPerOctave,
         spectrogramData.minFreq,
         gridSizeSemis,
         scaleTonic,

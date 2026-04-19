@@ -72,7 +72,7 @@ function App(): React.JSX.Element {
         // openFilePath(
         //   "/Users/rob/Splice/sounds/packs/The Jungle Drummer - Breakbeat Culture/Test_Press_-_The_Jungle_Drummer_-_Breakbeat_Culture/Loops/Layered_Breaks/TSP_TJD_172_break_layered_2snare_junglism.wav",
         // );
-        // openFilePath(process.cwd() + "/test-audio/tone-440hz-5s.wav");
+        openFilePath(process.cwd() + "/test-audio/tone-440hz-5s.wav");
       }
     }
 
