@@ -9,3 +9,4 @@ bin
 .env
 test-results
 vendor/
+*.tsbuildinfo
