@@ -1401,6 +1401,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     // Check if already open
     const existing = Object.values(openFiles).find((f) => f.filePath === filePath);
     if (existing) {
+      // Only collapse if it wasn't already open in the normal (non-minimized) file list
+      if (!get().minimizedFileIds.includes(existing.id)) return;
       get().setFileMinimized(existing.id, true);
       return;
     }
