@@ -684,12 +684,16 @@ const FileRendererInner = memo(
       const gridHeightUv = gridSizeSemis > 0 ? gridIntervalBands / spectrogramData.numBands : 0;
       const octaveHeightUv = gridSizeSemis > 0 ? (12 * bandsPerSemitone) / spectrogramData.numBands : 0;
 
-      // Determine if grid lines should be shown based on spacing (min 10 pixels apart)
+      // Determine if grid lines should be shown based on spacing (min 10 pixels apart).
+      // Multiply by the view zoom factor so zooming in can reveal lines that were too
+      // dense at 1x.
       const MIN_GRID_SPACING_PX = 10;
       const viewportWidth = gl.domElement.width;
       const viewportHeight = gl.domElement.height;
-      const gridWidthPx = gridWidthUv * viewportWidth;
-      const gridHeightPx = gridHeightUv * viewportHeight;
+      const zoomX = Math.pow(2, viewZoomPower);
+      const zoomY = Math.pow(2, viewZoomPowerY);
+      const gridWidthPx = gridWidthUv * viewportWidth * zoomX;
+      const gridHeightPx = gridHeightUv * viewportHeight * zoomY;
 
       displayMaterial.uniforms.gridWidthUv.value = gridWidthUv;
       displayMaterial.uniforms.gridHeightUv.value = gridHeightUv;
@@ -699,7 +703,8 @@ const FileRendererInner = memo(
       displayMaterial.uniforms.showVerticalGrid.value = gridHeightPx >= MIN_GRID_SPACING_PX && gridSizeSemis > 0;
 
       // Scale grid: draw a line at every in-scale semitone when scale snap is on. Hide when too dense.
-      const semitoneHeightPx = (spectrogramData.bandsPerOctave / 12 / spectrogramData.numBands) * viewportHeight;
+      const semitoneHeightPx =
+        (spectrogramData.bandsPerOctave / 12 / spectrogramData.numBands) * viewportHeight * zoomY;
       displayMaterial.uniforms.scaleGridEnabled.value = state.scaleSnap && semitoneHeightPx >= MIN_GRID_SPACING_PX;
       displayMaterial.uniforms.scaleOffsets.value = buildScaleOffsets(state.scaleTonic, state.scaleType);
       displayMaterial.uniforms.pitchOffsetSemisFromC0.value = minFreqSemisAboveC0(spectrogramData.minFreq);

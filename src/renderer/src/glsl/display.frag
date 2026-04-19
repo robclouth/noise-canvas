@@ -92,42 +92,64 @@ void main() {
         color = leftColor + rightColor;
     }
 
-    // Grid dots. Dots land at beat x semitone crossings; if only one axis has
-    // a grid, the other is synthesized at a fixed pixel spacing so dots still
-    // appear. When scale grid is active, the vertical axis uses in-scale
-    // semitone positions instead of the regular semitone grid.
-    bool verticalActive = scaleGridEnabled || showVerticalGrid;
-    if (showHorizontalGrid || verticalActive) {
-        float hThick = fwidth(zoomedUv.x);
-        float vThick = fwidth(zoomedUv.y);
-        float hSpacing = showHorizontalGrid ? gridWidthUv : 24.0 * hThick;
-        float hLine = mod(zoomedUv.x, hSpacing);
+    // Faint grid lines. Adaptive contrast (brighten by delta, or darken if that
+    // would clip past 1.0) so lines stay visible on any background. The delta
+    // is scaled up in dark regions to compensate for sRGB gamma — a fixed
+    // additive bump on near-black reads much fainter than the same bump on
+    // mid-gray. Bar/octave boundaries get a slightly stronger delta.
+    float hThick = fwidth(zoomedUv.x);
+    float vThick = fwidth(zoomedUv.y);
+    float brightness = max(color.r, max(color.g, color.b));
+    float contrastBoost = mix(2.0, 1.0, brightness);
+    float lineDelta = 0.045 * contrastBoost;
+    float strongDelta = 0.1 * contrastBoost;
 
-        bool onSemi;
-        if (scaleGridEnabled) {
-            float bandsPerSemi = sourceBandsPerOctave / 12.0;
-            float semisAboveMin = (1.0 - zoomedUv.y) * sourceBandCount / bandsPerSemi;
-            float absSemis = pitchOffsetSemisFromC0 + semisAboveMin;
-            float nearestSemi = floor(absSemis + 0.5);
-            int pc = int(mod(nearestSemi, 12.0));
-            if (scaleOffsets[pc] == 0.0) {
-                float targetSemisAboveMin = nearestSemi - pitchOffsetSemisFromC0;
-                float targetBandIndex = targetSemisAboveMin * bandsPerSemi;
-                float targetUvY = 1.0 - targetBandIndex / sourceBandCount;
-                onSemi = abs(zoomedUv.y - targetUvY) < 0.5 * vThick;
-            } else {
-                onSemi = false;
-            }
-        } else {
-            float vSpacing = showVerticalGrid ? gridHeightUv : 24.0 * vThick;
-            onSemi = mod(zoomedUv.y, vSpacing) < vThick;
+    if (showHorizontalGrid && gridWidthUv > 0.0) {
+        if (mod(zoomedUv.x, gridWidthUv) < hThick) {
+            bool isBar = mod(zoomedUv.x, barWidthUv) < hThick;
+            float d = isBar ? strongDelta : lineDelta;
+            color = mix(color + d, color - d, step(1.0 - d, color));
         }
+    }
 
-        if (hLine < hThick && onSemi) {
-            bool isBar = !showHorizontalGrid || mod(zoomedUv.x, barWidthUv) < hThick;
-            bool isOctave = !verticalActive || (octaveHeightUv > 0.0 && mod(zoomedUv.y, octaveHeightUv) < vThick);
-            float delta = (isBar && isOctave) ? 0.5 : 0.3;
-            color = mix(color + delta, color - delta, step(1.0 - delta, color));
+    if (scaleGridEnabled) {
+        float bandsPerSemi = sourceBandsPerOctave / 12.0;
+        float semisAboveMin = zoomedUv.y * sourceBandCount / bandsPerSemi;
+        float absSemis = pitchOffsetSemisFromC0 + semisAboveMin;
+        float nearestSemi = floor(absSemis + 0.5);
+        int pc = int(mod(nearestSemi, 12.0));
+        if (scaleOffsets[pc] == 0.0) {
+            float targetSemisAboveMin = nearestSemi - pitchOffsetSemisFromC0;
+            float targetBandIndex = targetSemisAboveMin * bandsPerSemi;
+            float targetUvY = targetBandIndex / sourceBandCount;
+            if (abs(zoomedUv.y - targetUvY) < 0.5 * vThick) {
+                bool isOctave = mod(nearestSemi, 12.0) == 0.0;
+                float d = isOctave ? strongDelta : lineDelta;
+                color = mix(color + d, color - d, step(1.0 - d, color));
+            }
+        }
+    } else if (showVerticalGrid && gridHeightUv > 0.0) {
+        // Anchor grid lines to absolute semitones (C0-based) so octave strong
+        // lines actually land on C boundaries regardless of minFreq. Mirrors
+        // the scale-grid approach: round to nearest integer semi, then draw
+        // when that semi is on the grid.
+        float bandsPerSemi = sourceBandsPerOctave / 12.0;
+        float semisAboveMin = zoomedUv.y * sourceBandCount / bandsPerSemi;
+        float absSemis = pitchOffsetSemisFromC0 + semisAboveMin;
+        float gridSizeSemis = 12.0 * gridHeightUv * sourceBandCount / sourceBandsPerOctave;
+
+        float nearestSemi = floor(absSemis + 0.5);
+        float semiMod = mod(nearestSemi, gridSizeSemis);
+        bool onGrid = semiMod < 0.5 || semiMod > gridSizeSemis - 0.5;
+        if (onGrid) {
+            float targetSemisAboveMin = nearestSemi - pitchOffsetSemisFromC0;
+            float targetBandIndex = targetSemisAboveMin * bandsPerSemi;
+            float targetUvY = targetBandIndex / sourceBandCount;
+            if (abs(zoomedUv.y - targetUvY) < 0.5 * vThick) {
+                bool isOctave = mod(nearestSemi, 12.0) == 0.0;
+                float d = isOctave ? strongDelta : lineDelta;
+                color = mix(color + d, color - d, step(1.0 - d, color));
+            }
         }
     }
 
