@@ -69,9 +69,21 @@ export interface OptionsParameter<T = any> extends ParameterBase {
 export interface FileParameter extends ParameterBase {
   kind: "file";
   default: FileParameterValue;
+  /**
+   * How the user picks a file for this param.
+   * - "canvas" — hijack clicks on open file canvases; the click position seeds companion
+   *   offset params (time/pitch). Used by sourceFile for spatial sampling pick.
+   * - "modal"  — open a list of currently-open files and pick by name. Companion offset
+   *   params are controlled only via their sliders.
+   */
+  pickMode: "canvas" | "modal";
+  /** Canvas-mode only: param to receive click x. */
   timeOffsetParam?: ParameterKey;
+  /** Canvas-mode only: param to receive click y. */
   pitchOffsetParam?: ParameterKey;
-  previewMode?: "brushRect" | "crosshair";
+  /** Canvas-mode only: what indicator to draw while picking. */
+  previewMode?: "brushRect";
+  /** Canvas-mode only: whether Shift-held activates the picker. */
   enableShortcut?: boolean;
 }
 
@@ -503,6 +515,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "File and position to use as the source for this step. When null, paints from self.",
     default: null,
     includeInStep: true,
+    pickMode: "canvas",
     timeOffsetParam: "sourceTimeOffset" as ParameterKey,
     pitchOffsetParam: "sourcePitchOffset" as ParameterKey,
     previewMode: "brushRect",
@@ -1336,15 +1349,12 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     default: null,
     includeInStep: true,
     effectType: "convolve" as EffectType,
-    timeOffsetParam: "convolveIrTimeOffset" as ParameterKey,
-    pitchOffsetParam: "convolveIrPitchOffset" as ParameterKey,
-    previewMode: "crosshair",
-    enableShortcut: false,
+    pickMode: "modal",
   },
   convolveIrTimeOffset: {
     kind: "number",
-    name: "IR Time",
-    label: "Time ↔",
+    name: "IR Start",
+    label: "Start",
     description: "Time position in the IR file where tap 0 starts (0-100%).",
     default: 0,
     min: 0,
@@ -1355,16 +1365,17 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     modulatable: true,
     effectType: "convolve" as EffectType,
   },
-  convolveIrPitchOffset: {
+  convolveIrPitchShift: {
     kind: "number",
-    name: "IR Pitch",
-    label: "Pitch ↕",
-    description: "Pitch shift applied when reading the IR (0-100%).",
+    name: "IR Pitch Shift",
+    label: "Pitch Shift",
+    description: "Pitch shift applied to the IR, in semitones.",
     default: 0,
-    min: 0,
-    max: 100,
-    step: 0.1,
-    unit: "%",
+    min: -24,
+    max: 24,
+    step: 0.01,
+    unit: SEMITONE_UNIT,
+    marks: [...negPitchMarks, zeroPitchMark, ...posPitchMarks],
     includeInStep: true,
     modulatable: true,
     effectType: "convolve" as EffectType,
@@ -1397,19 +1408,21 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     modulatable: true,
     effectType: "convolve" as EffectType,
   },
-  convolveOrigin: {
-    kind: "options",
-    name: "Convolve Origin",
-    label: "Origin",
+  convolveIrRate: {
+    kind: "number",
+    name: "IR Rate",
+    label: "Rate",
     description:
-      "How the IR is aligned to the brush position. Forwards: tail lands after the source event (natural reverb). Backwards: tail lands before. Middle: symmetric.",
-    default: 0,
-    options: [
-      { value: 0, label: "Forwards" },
-      { value: 1, label: "Middle" },
-      { value: 2, label: "Backwards" },
-    ],
+      "Source read rate per IR tap. 1 = forward reverb at normal speed. -1 = reverse reverb. |rate|>1 stretches the tail in time, |rate|<1 compresses it.",
+    default: 1.0,
+    min: -256,
+    max: 256,
+    step: 0.001,
+    scale: "logBipolar",
+    unit: MULTIPLIER_UNIT,
+    marks: [...negMultMarks, ...posMultMarks],
     includeInStep: true,
+    modulatable: true,
     effectType: "convolve" as EffectType,
   },
 

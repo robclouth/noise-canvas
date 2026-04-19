@@ -62,10 +62,10 @@ export interface EffectsState {
   waveshapeTilt: number;
   convolveIrFile: FileParameterValue;
   convolveIrTimeOffset: number;
-  convolveIrPitchOffset: number;
+  convolveIrPitchShift: number;
   convolveIrSize: number;
   convolveGainDb: number;
-  convolveOrigin: number;
+  convolveIrRate: number;
 }
 
 export const createEffectsSlice = (): EffectsState => {
@@ -152,9 +152,9 @@ export const createEffectsSlice = (): EffectsState => {
     // ---------------- Convolve ----------------
     convolveIrFile: null,
     convolveIrTimeOffset: getParameterDef("convolveIrTimeOffset").default,
-    convolveIrPitchOffset: getParameterDef("convolveIrPitchOffset").default,
+    convolveIrPitchShift: getParameterDef("convolveIrPitchShift").default,
     convolveIrSize: getParameterDef("convolveIrSize").default,
     convolveGainDb: getParameterDef("convolveGainDb").default,
-    convolveOrigin: getParameterDef("convolveOrigin").default,
+    convolveIrRate: getParameterDef("convolveIrRate").default,
   };
 };

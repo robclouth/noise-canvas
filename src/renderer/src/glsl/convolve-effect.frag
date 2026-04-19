@@ -7,9 +7,9 @@ uniform float     convolveIrBandCount;
 uniform vec2      convolveIrTextureSize;
 uniform bool      convolveIrEnabled;
 uniform int       convolveIrSize;
-uniform int       convolveOrigin; // 0=Forwards (causal), 1=Middle, 2=Backwards (anti-causal)
 uniform Parameter convolveIrTimeOffset;
-uniform Parameter convolveIrPitchOffset;
+uniform Parameter convolveIrPitchShiftBands;
+uniform Parameter convolveIrRate;
 uniform Parameter convolveGain;
 
 void main() {
@@ -28,9 +28,14 @@ void main() {
     convolveIrTimeOffset.modulationAmounts, convolveIrTimeOffset.contextualModAmounts,
     coords.dest, 0, audioLevelDb
   );
-  float irPitchOff = applyModulation(
-    convolveIrPitchOffset.value, convolveIrPitchOffset.minValue, convolveIrPitchOffset.maxValue,
-    convolveIrPitchOffset.modulationAmounts, convolveIrPitchOffset.contextualModAmounts,
+  float irPitchShiftBands = applyModulation(
+    convolveIrPitchShiftBands.value, convolveIrPitchShiftBands.minValue, convolveIrPitchShiftBands.maxValue,
+    convolveIrPitchShiftBands.modulationAmounts, convolveIrPitchShiftBands.contextualModAmounts,
+    coords.dest, 0, audioLevelDb
+  );
+  float rate = applyModulation(
+    convolveIrRate.value, convolveIrRate.minValue, convolveIrRate.maxValue,
+    convolveIrRate.modulationAmounts, convolveIrRate.contextualModAmounts,
     coords.dest, 0, audioLevelDb
   );
   float gain = applyModulation(
@@ -39,15 +44,10 @@ void main() {
     coords.dest, 0, audioLevelDb
   );
 
-  float irBaseV = clamp(coords.dest.y + irPitchOff, 0.0, 1.0);
-
   // ---- Hoisted band metadata ------------------------------------------------
-  // Each gaborator band has its own time resolution (bandTimeScale = 2^exp).
-  // To convolve CORRECTLY we must iterate in band-local frames — one tap per
-  // band frame — otherwise low-frequency bands (which have large time scales
-  // and thus fewer frames) read the same frame multiple times in a row and
-  // get scaled up by the timeScale factor. Advance time in band-local space.
-
+  // gaborator: each band has its own time resolution. We must iterate one tap per
+  // BAND-LOCAL frame, otherwise low-freq bands read the same frame many times in
+  // a row and get scaled up by their time-scale factor.
   float srcBandIndex = floor((1.0 - coords.source.y) * sourceBandCount);
   vec4  srcMeta = fetchBandMetadata(sourceMetadataTex, srcBandIndex);
   float srcBandStart     = srcMeta.r;
@@ -58,7 +58,10 @@ void main() {
   int   srcMaxPx = max(srcTexSize.x - 1, 0);
   int   srcMaxPy = max(srcTexSize.y - 1, 0);
 
-  float irBandIndex = floor((1.0 - irBaseV) * convolveIrBandCount);
+  // Pitch shift applied to IR band index (up-shift = read higher-freq IR content
+  // for this output freq). Clamp to available IR bands.
+  float irBandIndexF = floor((1.0 - coords.dest.y) * convolveIrBandCount) + irPitchShiftBands;
+  float irBandIndex = clamp(irBandIndexF, 0.0, convolveIrBandCount - 1.0);
   vec4  irMeta = fetchBandMetadata(convolveIrMetadataTex, irBandIndex);
   float irBandStart     = irMeta.r;
   float irBandLength    = irMeta.g;
@@ -68,39 +71,30 @@ void main() {
   int   irMaxPx = max(irTexSize.x - 1, 0);
   int   irMaxPy = max(irTexSize.y - 1, 0);
 
-  // Band-local starting index for source (where tap 0 reads from).
-  // coords.source.x is in [0, 1] UV; multiply by frameCount to get master
-  // frames, divide by band's time scale to get this band's local index.
+  // Band-local starting positions (source and IR).
   float srcBaseBandIdx = (coords.source.x * sourceFrameCount) / srcBandTimeScale;
   float irBaseBandIdx  = (irTimeOff * convolveIrFrameCount) / irBandTimeScale;
 
-  // Effective tap count: min of user setting and the IR's band frame count.
-  // At low-freq bands the IR has fewer frames so fewer real taps exist.
   int effectiveTaps = int(min(float(convolveIrSize), irBandLength));
-
-  // Origin: tap 0 sits at (srcBaseBandIdx + originBase). Forwards -> originBase=0
-  // (tap 0 at source pos, later taps read past). Backwards -> originBase=N
-  // (tap 0 in future, taps converge to source pos). Middle -> N/2.
-  float originBase = 0.0;
-  if (convolveOrigin == 1) originBase = float(effectiveTaps) * 0.5;
-  else if (convolveOrigin == 2) originBase = float(effectiveTaps);
 
   vec2 accumL = vec2(0.0);
   vec2 accumR = vec2(0.0);
 
-  // WebGL2 requires a compile-time bound; break once we pass the runtime size.
+  // rate controls how the source advances per tap:
+  //   rate =  1: srcIdx steps -1 per tap (past) → forward reverb at normal speed
+  //   rate = -1: srcIdx steps +1 per tap (future) → reverse reverb at normal speed
+  //   |rate|>1 stretches tail in time; |rate|<1 compresses; 0 is a scalar filter.
+  // IR always reads forward (tap k → IR frame k + 0.5).
   for (int k = 0; k < 512; k++) {
     if (k >= effectiveTaps) break;
 
-    // Source band-local index shifted by origin/tap.
-    float srcBandIdxF = srcBaseBandIdx + (originBase - float(k));
+    float srcBandIdxF = srcBaseBandIdx - rate * float(k);
     float srcIdx = clamp(floor(srcBandIdxF), 0.0, srcBandLength - 1.0);
     float srcPixel = srcBandStart + srcIdx;
     int srcPx = clamp(int(mod(srcPixel, srcTexWidthF)), 0, srcMaxPx);
     int srcPy = clamp(int(floor(srcPixel / srcTexWidthF)), 0, srcMaxPy);
     vec4 srcTexel = texelFetch(sourceSpectrogramTex, ivec2(srcPx, srcPy), 0);
 
-    // IR band-local index (tap k plus offset).
     float irBandIdxF = irBaseBandIdx + float(k) + 0.5;
     float irIdx = clamp(floor(irBandIdxF), 0.0, irBandLength - 1.0);
     float irPixel = irBandStart + irIdx;
@@ -108,8 +102,6 @@ void main() {
     int irPy = clamp(int(floor(irPixel / irTexWidthF)), 0, irMaxPy);
     vec4 irTexel = texelFetch(convolveIrTex, ivec2(irPx, irPy), 0);
 
-    // Complex multiply (mag*mag, phase+phase), accumulate in cartesian for
-    // correct complex sums across taps.
     float magL = srcTexel.x * irTexel.x;
     float phsL = srcTexel.y + irTexel.y;
     float magR = srcTexel.z * irTexel.z;

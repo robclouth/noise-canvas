@@ -1,7 +1,6 @@
 import { createStepStateView, useStore } from "@/store";
 import { useFrame } from "@react-three/fiber";
 import { defaultValues } from "@renderer/effects/base-effect";
-import { getParameterDef } from "@renderer/parameters";
 import { getOpenFileByPath, openFiles } from "@renderer/store/files";
 import { State } from "@renderer/store/types";
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
@@ -207,7 +206,6 @@ const FileRendererInner = memo(
           pitchOffsetSemisFromC0: { value: 0.0 },
           showTargetRectangle: { value: false },
           showSourceRectangle: { value: false },
-          showCrosshair: { value: false },
           targetRectPulse: { value: 1.0 },
           // Mantine orange[6] #fd7e14 by default; swapped to blue[6] while picking a source.
           targetRectColor: { value: new Color(0.992, 0.494, 0.078) },
@@ -649,21 +647,8 @@ const FileRendererInner = memo(
         return new Vector2(maxTimeUv || 0.1, maxPitchUv || 0.1);
       })();
 
-      // When picking a file param whose previewMode is "crosshair" (e.g. convolve IR),
-      // swap the brush-size rectangle for a crosshair at the cursor position.
-      let crosshairPick = false;
-      if (state.pickingFileParam) {
-        const pickingDef = getParameterDef(state.pickingFileParam);
-        if (pickingDef.kind === "file" && pickingDef.previewMode === "crosshair") {
-          crosshairPick = true;
-        }
-      }
-
-      displayMaterial.uniforms.showTargetRectangle.value =
-        !crosshairPick && Boolean(state.cursorVisible && state.hoveredFile === fileId);
-      displayMaterial.uniforms.showSourceRectangle.value = !crosshairPick && isSourceFile;
-      displayMaterial.uniforms.showCrosshair.value =
-        crosshairPick && Boolean(state.cursorVisible && state.hoveredFile === fileId);
+      displayMaterial.uniforms.showTargetRectangle.value = Boolean(state.cursorVisible && state.hoveredFile === fileId);
+      displayMaterial.uniforms.showSourceRectangle.value = isSourceFile;
 
       const isPicking = state.pickingFileParam !== null;
       displayMaterial.uniforms.targetRectPulse.value = isPicking

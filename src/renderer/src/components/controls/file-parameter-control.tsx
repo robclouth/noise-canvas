@@ -1,7 +1,8 @@
 import { useStore } from "@/store";
 import { Box, Group, Text } from "@mantine/core";
+import { openContextModal } from "@mantine/modals";
 import { useEffectId } from "@renderer/contexts/effect-context";
-import type { FileParameterValue } from "@renderer/parameters";
+import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
 import { getFileColor } from "@renderer/store/files";
 import type { ParameterKey } from "@renderer/store/types";
 import { X } from "lucide-react";
@@ -23,19 +24,37 @@ export const FileParameterControl = memo(function FileParameterControl({
   const effectId = useEffectId();
   const pickingFileParam = useStore((state) => state.pickingFileParam);
   const pickingEffectId = useStore((state) => state.pickingEffectId);
-  const isPicking = pickingFileParam === paramKey && pickingEffectId === (effectId ?? null);
+  const def = getParameterDef(paramKey);
+  const pickMode = def.kind === "file" ? def.pickMode : "canvas";
+  const isCanvasPicking =
+    pickMode === "canvas" && pickingFileParam === paramKey && pickingEffectId === (effectId ?? null);
 
   const filename = value ? value.path.split("/").pop() || value.path : "Self";
   const hasValue = value !== null;
   const fileColor = hasValue ? getFileColor(value.path) : undefined;
+  const isHighlighted = isCanvasPicking;
 
   const handlePickClick = useCallback(() => {
-    if (isPicking) {
+    if (pickMode === "modal") {
+      openContextModal({
+        modal: "filePicker",
+        title: "Choose file",
+        innerProps: {
+          currentPath: value?.path ?? null,
+          resolve: (path: string | null) => {
+            setValue(path ? { path } : null);
+          },
+        },
+      });
+      return;
+    }
+    // Canvas pick: toggle the pick mode; user then clicks on a file canvas.
+    if (isCanvasPicking) {
       useStore.getState().setPickingFileParam(null);
     } else {
       useStore.getState().setPickingFileParam(paramKey, effectId);
     }
-  }, [isPicking, paramKey, effectId]);
+  }, [pickMode, isCanvasPicking, paramKey, effectId, value, setValue]);
 
   return (
     <Group gap={"xs"} wrap="nowrap" h={24} align="center">
@@ -57,11 +76,11 @@ export const FileParameterControl = memo(function FileParameterControl({
           cursor: "pointer",
           overflow: "hidden",
           borderRadius: 2,
-          border: `1px solid ${isPicking ? "var(--mantine-color-orange-6)" : "#666"}`,
+          border: `1px solid ${isHighlighted ? "var(--mantine-color-orange-6)" : "#666"}`,
           borderLeft: fileColor
             ? `3px solid ${fileColor}`
-            : `1px solid ${isPicking ? "var(--mantine-color-orange-6)" : "#666"}`,
-          backgroundColor: isPicking ? "rgba(255, 140, 0, 0.1)" : "#2c2c2c",
+            : `1px solid ${isHighlighted ? "var(--mantine-color-orange-6)" : "#666"}`,
+          backgroundColor: isHighlighted ? "rgba(255, 140, 0, 0.1)" : "#2c2c2c",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -74,7 +93,7 @@ export const FileParameterControl = memo(function FileParameterControl({
           style={{
             fontSize: 11,
             lineHeight: 1,
-            color: isPicking ? "var(--mantine-color-orange-6)" : hasValue ? "#fff" : "#888",
+            color: isHighlighted ? "var(--mantine-color-orange-6)" : hasValue ? "#fff" : "#888",
             pointerEvents: "none",
             userSelect: "none",
             textAlign: "center",
@@ -84,10 +103,10 @@ export const FileParameterControl = memo(function FileParameterControl({
             whiteSpace: "nowrap",
           }}
         >
-          {isPicking ? "Click..." : filename}
+          {isCanvasPicking ? "Click..." : filename}
         </Text>
 
-        {hasValue && !isPicking && (
+        {hasValue && !isCanvasPicking && (
           <Box
             onClick={(e) => {
               e.stopPropagation();

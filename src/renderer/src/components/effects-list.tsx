@@ -90,9 +90,9 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
   convolve: [
     "convolveIrFile",
     "convolveIrTimeOffset",
-    "convolveIrPitchOffset",
+    "convolveIrPitchShift",
     "convolveIrSize",
-    "convolveOrigin",
+    "convolveIrRate",
     "convolveGainDb",
   ],
 };

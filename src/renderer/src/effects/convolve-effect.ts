@@ -32,9 +32,11 @@ class ConvolveEffect extends BaseEffect {
           convolveIrTextureSize: { value: new Vector2(0, 0) },
           convolveIrEnabled: { value: false },
           convolveIrSize: { value: 0 },
-          convolveOrigin: { value: 0 },
           convolveIrTimeOffset: paramUniform(),
-          convolveIrPitchOffset: paramUniform(),
+          // Pitch shift in IR-band-local units (bands, can be fractional).
+          // Converted from semitones in TS using the IR's bandsPerOctave.
+          convolveIrPitchShiftBands: paramUniform(0, -256, 256),
+          convolveIrRate: paramUniform(1, -256, 256),
           convolveGain: paramUniform(1, 0, 64),
         },
         vertexShader: passThroughVert,
@@ -52,26 +54,37 @@ class ConvolveEffect extends BaseEffect {
 
     const irFile = state.convolveIrFile;
     let irOpenFile = irFile ? getOpenFileByPath(irFile.path) : undefined;
-    // Fall back to painting from self if the IR file isn't loaded
     if (!irOpenFile && irFile) {
       irOpenFile = Object.values(openFiles).find((f) => f.filePath === irFile.path);
     }
 
     const irTextures = irOpenFile?.rendererRef?.current?.getTextures();
     const irData = irOpenFile?.spectrogramData;
-    const enabled = Boolean(irFile && irTextures && irData);
 
-    material.uniforms.convolveIrEnabled.value = enabled;
-    if (enabled && irTextures && irData) {
+    // Resolve the IR source. If an explicit IR file was picked and is loaded, use it.
+    // Otherwise "Self" — use the current dest (canvas) as the IR. updateCommonUniforms
+    // ran first, so material.uniforms.dest* hold the dest textures/metadata for this pass.
+    let bandsPerOctaveForPitchShift: number;
+    if (irFile && irTextures && irData) {
       material.uniforms.convolveIrTex.value = irTextures.packed.texture;
       material.uniforms.convolveIrMetadataTex.value = irTextures.metadata;
       material.uniforms.convolveIrFrameCount.value = irData.numFrames;
       material.uniforms.convolveIrBandCount.value = irData.numBands;
       material.uniforms.convolveIrTextureSize.value = irData.packedTextureSize;
+      material.uniforms.convolveIrEnabled.value = true;
+      bandsPerOctaveForPitchShift = irData.bandsPerOctave;
+    } else {
+      // Self-convolution: dest texture doubles as the IR.
+      material.uniforms.convolveIrTex.value = material.uniforms.destSpectrogramTex.value;
+      material.uniforms.convolveIrMetadataTex.value = material.uniforms.destMetadataTex.value;
+      material.uniforms.convolveIrFrameCount.value = material.uniforms.destFrameCount.value;
+      material.uniforms.convolveIrBandCount.value = material.uniforms.destBandCount.value;
+      material.uniforms.convolveIrTextureSize.value = material.uniforms.destSpectrogramTextureSize.value;
+      material.uniforms.convolveIrEnabled.value = true;
+      bandsPerOctaveForPitchShift = material.uniforms.destBandsPerOctave.value as number;
     }
 
     material.uniforms.convolveIrSize.value = Math.max(1, Math.floor(state.convolveIrSize));
-    material.uniforms.convolveOrigin.value = state.convolveOrigin;
 
     const timeOffsetDef = getNumberParameterDef("convolveIrTimeOffset");
     material.uniforms.convolveIrTimeOffset.value = {
@@ -82,17 +95,27 @@ class ConvolveEffect extends BaseEffect {
       contextualModAmounts: getContextualModAmountsNormalized(state, "convolveIrTimeOffset"),
     };
 
-    const pitchOffsetDef = getNumberParameterDef("convolveIrPitchOffset");
-    material.uniforms.convolveIrPitchOffset.value = {
-      value: state.convolveIrPitchOffset / 100,
-      minValue: pitchOffsetDef.min / 100,
-      maxValue: pitchOffsetDef.max / 100,
-      modulationAmounts: getModAmountValuesNormalized(state, "convolveIrPitchOffset"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "convolveIrPitchOffset"),
+    // Semitones → IR bands (delta). Twelve semitones = one octave = `bandsPerOctave` bands.
+    // Stored in IR-band units so the shader can just add it to the IR band index.
+    const pitchShiftDef = getNumberParameterDef("convolveIrPitchShift");
+    const bandsPerSemi = bandsPerOctaveForPitchShift / 12;
+    material.uniforms.convolveIrPitchShiftBands.value = {
+      value: state.convolveIrPitchShift * bandsPerSemi,
+      minValue: pitchShiftDef.min * bandsPerSemi,
+      maxValue: pitchShiftDef.max * bandsPerSemi,
+      modulationAmounts: getModAmountValuesNormalized(state, "convolveIrPitchShift"),
+      contextualModAmounts: getContextualModAmountsNormalized(state, "convolveIrPitchShift"),
     };
 
-    // Gain: stored as dB, converted to linear here. Min/max as linear so modulation
-    // maps smoothly across the dB range.
+    const rateDef = getNumberParameterDef("convolveIrRate");
+    material.uniforms.convolveIrRate.value = {
+      value: state.convolveIrRate,
+      minValue: rateDef.min,
+      maxValue: rateDef.max,
+      modulationAmounts: getModAmountValuesNormalized(state, "convolveIrRate"),
+      contextualModAmounts: getContextualModAmountsNormalized(state, "convolveIrRate"),
+    };
+
     const gainDef = getNumberParameterDef("convolveGainDb");
     const dbToLinear = (db: number) => Math.pow(10, db / 20);
     material.uniforms.convolveGain.value = {

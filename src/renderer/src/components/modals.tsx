@@ -2,6 +2,7 @@ import { Box, Button, NumberInput, SimpleGrid, Stack, Text, UnstyledButton } fro
 import { ContextModalProps } from "@mantine/modals";
 import { EFFECT_KEYS, EffectType } from "@renderer/effects/types";
 import { EFFECT_COLORS, EFFECT_DESCRIPTIONS, EFFECT_LABELS } from "@renderer/lib/constants";
+import { getFileColor, openFiles } from "@renderer/store/files";
 import { useRef } from "react";
 import { BrushPickerModal } from "./controls/brush-picker";
 
@@ -130,9 +131,66 @@ export const AddEffectModal = ({
   );
 };
 
+export const FilePickerModal = ({
+  context,
+  id,
+  innerProps: { resolve, currentPath },
+}: ContextModalProps<{
+  resolve: (path: string | null) => void;
+  currentPath: string | null;
+}>) => {
+  const files = Object.values(openFiles);
+  const basename = (p: string) => p.split("/").pop() || p;
+
+  return (
+    <Stack gap="xs">
+      <UnstyledButton
+        onClick={() => {
+          context.closeModal(id);
+          resolve(null);
+        }}
+        p="xs"
+        className="effect-button"
+        style={{
+          borderRadius: "var(--mantine-radius-sm)",
+          backgroundColor: currentPath === null ? "rgba(255, 140, 0, 0.08)" : undefined,
+        }}
+      >
+        <Text size="sm" fw={600}>
+          Self
+        </Text>
+      </UnstyledButton>
+      {files.map((file) => {
+        const selected = file.filePath === currentPath;
+        return (
+          <UnstyledButton
+            key={file.id}
+            onClick={() => {
+              context.closeModal(id);
+              resolve(file.filePath);
+            }}
+            p="xs"
+            className="effect-button"
+            style={{
+              borderRadius: "var(--mantine-radius-sm)",
+              borderLeft: `3px solid ${getFileColor(file.filePath)}`,
+              backgroundColor: selected ? "rgba(255, 140, 0, 0.08)" : undefined,
+            }}
+          >
+            <Text size="sm" fw={600}>
+              {basename(file.filePath)}
+            </Text>
+          </UnstyledButton>
+        );
+      })}
+    </Stack>
+  );
+};
+
 // eslint-disable-next-line react-refresh/only-export-components
 export const modals = {
   newFile: NewFileModal,
   addEffect: AddEffectModal,
   brushPicker: BrushPickerModal,
+  filePicker: FilePickerModal,
 };
