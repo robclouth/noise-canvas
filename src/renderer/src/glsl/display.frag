@@ -92,12 +92,16 @@ void main() {
         color = leftColor + rightColor;
     }
 
-    // Grid dots at beat x semitone intersections
-    bool verticalActive = scaleGridEnabled || (showVerticalGrid && gridHeightUv > 0.0);
-    if (showHorizontalGrid && verticalActive && gridWidthUv > 0.0) {
+    // Grid dots. Dots land at beat x semitone crossings; if only one axis has
+    // a grid, the other is synthesized at a fixed pixel spacing so dots still
+    // appear. When scale grid is active, the vertical axis uses in-scale
+    // semitone positions instead of the regular semitone grid.
+    bool verticalActive = scaleGridEnabled || showVerticalGrid;
+    if (showHorizontalGrid || verticalActive) {
         float hThick = fwidth(zoomedUv.x);
         float vThick = fwidth(zoomedUv.y);
-        float hLine = mod(zoomedUv.x, gridWidthUv);
+        float hSpacing = showHorizontalGrid ? gridWidthUv : 24.0 * hThick;
+        float hLine = mod(zoomedUv.x, hSpacing);
 
         bool onSemi;
         if (scaleGridEnabled) {
@@ -115,12 +119,13 @@ void main() {
                 onSemi = false;
             }
         } else {
-            onSemi = mod(zoomedUv.y, gridHeightUv) < vThick;
+            float vSpacing = showVerticalGrid ? gridHeightUv : 24.0 * vThick;
+            onSemi = mod(zoomedUv.y, vSpacing) < vThick;
         }
 
         if (hLine < hThick && onSemi) {
-            bool isBar = mod(zoomedUv.x, barWidthUv) < hThick;
-            bool isOctave = octaveHeightUv > 0.0 && mod(zoomedUv.y, octaveHeightUv) < vThick;
+            bool isBar = !showHorizontalGrid || mod(zoomedUv.x, barWidthUv) < hThick;
+            bool isOctave = !verticalActive || (octaveHeightUv > 0.0 && mod(zoomedUv.y, octaveHeightUv) < vThick);
             float delta = (isBar && isOctave) ? 0.5 : 0.3;
             color = mix(color + delta, color - delta, step(1.0 - delta, color));
         }
