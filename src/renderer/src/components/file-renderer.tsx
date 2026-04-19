@@ -414,12 +414,19 @@ const FileRendererInner = memo(
       // Initialize StrokeRenderer if not done yet
       if (!strokeRenderer.getIsInitialized()) {
         strokeRenderer.initialize();
-        state.synthesizeFile(fileId);
 
-        // Save initial state for undo
-        import("@renderer/lib/undo-manager").then(({ getUndoManager }) =>
-          getUndoManager(fileId).addState(spectrogramData.packedData, fileId),
-        );
+        // Save initial state for undo and cache its synthesised audio so that
+        // undoing back to the original never has to re-run gaborator.
+        (async () => {
+          const { getUndoManager } = await import("@renderer/lib/undo-manager");
+          const undoManager = getUndoManager(fileId);
+          const dataPath = await undoManager.addState(spectrogramData.packedData, fileId);
+          await state.synthesizeFile(fileId);
+          const updated = openFiles[fileId];
+          if (dataPath && updated?.audioBuffer) {
+            undoManager.setStateAudio(dataPath, updated.audioBuffer, updated.audioPeak ?? 1);
+          }
+        })();
       }
 
       // After initialization, only update if this file is active, source, or cursor is present

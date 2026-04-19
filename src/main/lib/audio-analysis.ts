@@ -1,3 +1,4 @@
+import { copyFile } from "fs/promises";
 import { join } from "path";
 import { decodeAudioFile, encodeBufferToAudioFile, probeAudioFile } from "./ffmpeg";
 import type { AnalysisParams, GaboratorAnalysisResult } from "./types";
@@ -212,4 +213,33 @@ export async function exportAudio(
   format: string = "wav",
 ): Promise<void> {
   await encodeBufferToAudioFile(audioChannels, outputPath, sampleRate, format);
+}
+
+/**
+ * Decode an audio file into planar channel arrays at the target sample rate.
+ */
+export async function decodeAudio(
+  inputPath: string,
+  sampleRate: number,
+  numChannels: number,
+): Promise<Float32Array[]> {
+  const interleaved = await decodeAudioFile(inputPath, sampleRate, numChannels);
+  const numFrames = interleaved.length / numChannels;
+  const channels: Float32Array[] = [];
+  for (let ch = 0; ch < numChannels; ch++) {
+    channels.push(new Float32Array(numFrames));
+  }
+  for (let i = 0; i < numFrames; i++) {
+    for (let ch = 0; ch < numChannels; ch++) {
+      channels[ch][i] = interleaved[i * numChannels + ch];
+    }
+  }
+  return channels;
+}
+
+/**
+ * Copy a file on disk. Used to export cached undo WAVs without re-encoding.
+ */
+export async function copyAudioFile(sourcePath: string, destPath: string): Promise<void> {
+  await copyFile(sourcePath, destPath);
 }

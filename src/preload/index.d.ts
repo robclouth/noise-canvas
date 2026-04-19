@@ -92,6 +92,8 @@ declare global {
         sampleRate: number,
         format?: string,
       ) => Promise<void>;
+      decodeAudio: (inputPath: string, sampleRate: number, numChannels: number) => Promise<Float32Array[]>;
+      copyAudioFile: (sourcePath: string, destPath: string) => Promise<void>;
       init: () => void;
     };
     linkAddon: {
