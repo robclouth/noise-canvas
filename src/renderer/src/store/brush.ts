@@ -184,11 +184,18 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
 
       let autoPlaybackParams: { startTimeSeconds: number; endTimeSeconds: number } | null = null;
       if (autoPlayStroke) {
-        // Use the resolved footprint so Grid/Full brush sizes contribute their real
-        // duration (slider value alone misreads the 0 / ≥32 sentinels).
+        // Active-step brush size overrides the global — match what the stroke
+        // actually paints, so the loop region covers the true brush footprint
+        // (and not just the grid when the global is in Grid mode but the step
+        // overrides to a wider size).
+        const activeStep = state.brushes[state.activeBrushIndex]?.steps?.[state.activeStepIndex] as
+          | Record<string, unknown>
+          | undefined;
+        const stepBrushSizeTime = (activeStep?.brushSizeTime as number | undefined) ?? state.brushSizeTime;
+        const stepBrushSizePitch = (activeStep?.brushSizePitch as number | undefined) ?? state.brushSizePitch;
         const autoplayFootprint = resolveBrushFootprint({
-          brushSizeTime: state.brushSizeTime,
-          brushSizePitch: state.brushSizePitch,
+          brushSizeTime: stepBrushSizeTime,
+          brushSizePitch: stepBrushSizePitch,
           gridSizeBeats: state.gridSizeBeats,
           gridSizeSemis: state.gridSizeSemis,
           bpm,
