@@ -146,8 +146,6 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const isActive = activeFileId === fileId;
   const pickingFileParam = useStore((state) => state.pickingFileParam);
   const isZooming = useStore((state) => state.isZooming);
-  const zoom = useStore((state) => state.filesZoom[fileId]);
-  const offset = useStore((state) => state.filesOffset[fileId]);
   const isSynthesizing = useStore((state) => state.filesSynthesizing[fileId]);
   const loadingMessage = useStore((state) => state.filesLoading[fileId]);
 
@@ -265,25 +263,20 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
   useGesture(
     {
-      onDrag: ({ event, dragging, delta: [dx] }) => {
+      onDrag: ({ event, dragging, delta: [dx, dy], velocity: [vx, vy], direction: [dirX, dirY], last }) => {
         event.preventDefault();
         stopMomentum();
         setIsPanning(dragging ?? false);
 
-        const rect = viewRef.current?.getBoundingClientRect();
-        if (!rect || rect.width === 0) return;
+        applyScrollDelta(-dx, -dy);
 
-        const Z = Math.pow(2, zoom);
-        const viewWidth = 1 / Z;
-        if (Z <= 1 + 1e-9) return;
-
-        const viewStart = offset * (1 - viewWidth);
-        const ds = dx / rect.width;
-        let newViewStart = viewStart - ds * viewWidth;
-        newViewStart = Math.max(0, Math.min(1 - viewWidth, newViewStart));
-        const denom = 1 - viewWidth;
-        const newOffset = denom > 0 ? newViewStart / denom : 0;
-        useStore.getState().setFileOffset(fileId, newOffset);
+        if (last) {
+          const signedVx = vx * dirX;
+          const signedVy = vy * dirY;
+          if (Math.abs(signedVx) > 0.05 || Math.abs(signedVy) > 0.05) {
+            startMomentum(-signedVx, -signedVy);
+          }
+        }
       },
       onWheel: ({ event, delta: [dx, dy], velocity: [vx, vy], direction: [dirX, dirY], last }) => {
         event.preventDefault();
