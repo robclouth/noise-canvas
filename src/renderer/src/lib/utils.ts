@@ -137,20 +137,30 @@ export function snapToSwungGridFloor(value: number, gridSize: number, swing: num
   return pairStart + gridSize + swingOffset;
 }
 
-// Step to the adjacent swung grid line in the given direction. Assumes `value`
-// is already snapped to a swung grid line (or close to one).
+// Return the next swung grid line in `direction` from `value`. Accepts any
+// `value` — if it lies between grid lines, the nearest line in the given
+// direction is returned; if it is on a grid line, the adjacent line is returned.
 export function stepSwungGrid(value: number, gridSize: number, swing: number, direction: 1 | -1): number {
   if (gridSize <= 0) return value + direction * gridSize;
   const swingOffset = swing * gridSize * 0.5;
   const pairSize = gridSize * 2;
-  const pairIndex = Math.floor(value / pairSize);
+  // Tolerance for treating a near-grid value as exactly on the grid.
+  const eps = gridSize * 1e-6;
+
+  if (direction === 1) {
+    const pairIndex = Math.floor((value + eps) / pairSize);
+    const pairStart = pairIndex * pairSize;
+    const oddLine = pairStart + gridSize + swingOffset;
+    if (value < oddLine - eps) return oddLine;
+    if (value < pairStart + pairSize - eps) return pairStart + pairSize;
+    return pairStart + pairSize + gridSize + swingOffset;
+  }
+
+  const pairIndex = Math.floor((value - eps) / pairSize);
   const pairStart = pairIndex * pairSize;
   const oddLine = pairStart + gridSize + swingOffset;
-  const onOdd = Math.abs(value - oddLine) < Math.abs(value - pairStart);
-  if (direction === 1) {
-    return onOdd ? pairStart + pairSize : oddLine;
-  }
-  if (onOdd) return pairStart;
+  if (value > oddLine + eps) return oddLine;
+  if (value > pairStart + eps) return pairStart;
   return pairStart - pairSize + gridSize + swingOffset;
 }
 

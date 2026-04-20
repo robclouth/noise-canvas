@@ -290,13 +290,13 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           break;
         case "left":
           newPosition.beats = isCenter
-            ? stepSwungGridCenter(snappedBeats, gridSizeBeats, swingNorm, -1)
-            : stepSwungGrid(snappedBeats, gridSizeBeats, swingNorm, -1);
+            ? stepSwungGridCenter(currentPos.beats, gridSizeBeats, swingNorm, -1)
+            : stepSwungGrid(currentPos.beats, gridSizeBeats, swingNorm, -1);
           break;
         case "right":
           newPosition.beats = isCenter
-            ? stepSwungGridCenter(snappedBeats, gridSizeBeats, swingNorm, 1)
-            : stepSwungGrid(snappedBeats, gridSizeBeats, swingNorm, 1);
+            ? stepSwungGridCenter(currentPos.beats, gridSizeBeats, swingNorm, 1)
+            : stepSwungGrid(currentPos.beats, gridSizeBeats, swingNorm, 1);
           break;
       }
 
@@ -317,8 +317,40 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
 
     // Helper: apply at current brush position
     applyBrushAtPosition: async () => {
-      const { applyStrokeAtPosition } = get();
+      const state = get();
+      const { activeFileId, cursorPosition, applyStrokeAtPosition } = state;
+      if (!activeFileId || !cursorPosition) return;
+
+      const file = openFiles[activeFileId];
+      if (!file?.rendererRef?.current || !file.spectrogramData) return;
+
+      const bpm = state.filepathsBpm[file.filePath] || 120;
+      const { spectrogramData } = file;
+      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+
+      const { uvX, uvY } = positionToUv(
+        cursorPosition,
+        bpm,
+        totalDuration,
+        spectrogramData.bandsPerOctave,
+        spectrogramData.numBands,
+      );
+      const { blX, blY } = aimUvToBrushBlUv(
+        state,
+        uvX,
+        uvY,
+        bpm,
+        totalDuration,
+        spectrogramData.bandsPerOctave,
+        spectrogramData.numBands,
+      );
+
+      // Arrow keys render the stroke as a preview; committing it requires a
+      // non-preview render before the synthesis/undo step.
+      file.rendererRef.current.beginStroke();
+      file.rendererRef.current.renderStroke(blX, blY, false);
       await applyStrokeAtPosition();
+      file.rendererRef.current.endStroke();
     },
   };
 };
