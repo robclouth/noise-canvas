@@ -2,7 +2,7 @@ import { useStore } from "@/store";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
 import { ActionIcon, Box, Group, Menu, Stack, Text, TextInput, UnstyledButton, useMantineTheme } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
-import { modals } from "@mantine/modals";
+import { openConfirm, openPrompt } from "@renderer/lib/modals";
 import { resolveBrushColor } from "@renderer/lib/colors";
 import { RESERVED_KEYS } from "@renderer/lib/useShortcuts";
 import { collectBrushReferencedPaths } from "@renderer/store/files";
@@ -28,43 +28,31 @@ function labelFontSize(text: string): number {
 }
 
 function openCloseConfirm(brushIndex: number, brushName: string) {
-  modals.openConfirmModal({
+  openConfirm({
     title: "Close brush",
-    children: <Text size="sm">Close &quot;{brushName}&quot;? Unsaved changes will be lost.</Text>,
-    labels: { confirm: "Close", cancel: "Cancel" },
-    confirmProps: { color: "red", size: "xs" },
-    cancelProps: { size: "xs" },
+    message: `Close "${brushName}"? Unsaved changes will be lost.`,
+    confirmLabel: "Close",
+    danger: true,
     onConfirm: () => useStore.getState().closeBrush(brushIndex),
   });
 }
 
 function openSaveConfirm(brushIndex: number, libraryName: string) {
-  modals.openConfirmModal({
+  openConfirm({
     title: `Save over "${libraryName}"?`,
-    children: <Text size="sm">This overwrites the library preset on disk.</Text>,
-    labels: { confirm: "Save", cancel: "Cancel" },
-    confirmProps: { size: "xs" },
-    cancelProps: { size: "xs" },
+    message: "This overwrites the library preset on disk.",
+    confirmLabel: "Save",
     onConfirm: () => useStore.getState().saveBrushToLibrary(brushIndex),
   });
 }
 
 function openSaveAsPrompt(brushIndex: number, defaultName: string) {
-  modals.openConfirmModal({
+  openPrompt({
     title: "Save brush as new preset",
-    children: (
-      <Stack gap="xs">
-        <Text size="sm">Enter a name:</Text>
-        <TextInput id="brush-save-as-input" defaultValue={defaultName} data-autofocus />
-      </Stack>
-    ),
-    labels: { confirm: "Save", cancel: "Cancel" },
-    confirmProps: { size: "xs" },
-    cancelProps: { size: "xs" },
-    onConfirm: async () => {
-      const input = document.getElementById("brush-save-as-input") as HTMLInputElement | null;
-      const name = input?.value?.trim();
-      if (!name) return;
+    label: "Enter a name:",
+    defaultValue: defaultName,
+    confirmLabel: "Save",
+    onConfirm: async (name) => {
       await useStore.getState().saveBrushAsNewPreset(brushIndex, name);
     },
   });

@@ -17,58 +17,63 @@ export const NewFileModal = ({
   const bpmRef = useRef<HTMLInputElement>(null);
   const lengthRef = useRef<HTMLInputElement>(null);
 
+  const submit = () => {
+    context.closeModal(id);
+    resolve({
+      sampleRate: parseInt(sampleRateRef.current!.value),
+      bpm: parseInt(bpmRef.current!.value),
+      lengthBeats: parseInt(lengthRef.current!.value),
+    });
+  };
+
   return (
-    <Stack gap="sm">
-      <SimpleGrid cols={2} spacing="sm">
-        <NumberInput
-          ref={sampleRateRef}
-          size="xs"
-          label="Sample rate"
-          defaultValue={44100}
-          min={8000}
-          max={192000}
-          step={1000}
-          variant="unstyled"
-          hideControls
-        />
-        <NumberInput
-          ref={bpmRef}
-          size="xs"
-          label="BPM"
-          defaultValue={120}
-          min={1}
-          max={999}
-          step={1}
-          variant="unstyled"
-          hideControls
-        />
-        <NumberInput
-          ref={lengthRef}
-          size="xs"
-          label="Length beats"
-          defaultValue={16}
-          min={1}
-          max={64}
-          step={1}
-          variant="unstyled"
-          hideControls
-        />
-      </SimpleGrid>
-      <Button
-        size="xs"
-        fullWidth
-        onClick={() => {
-          context.closeModal(id);
-          resolve({
-            sampleRate: parseInt(sampleRateRef.current!.value),
-            bpm: parseInt(bpmRef.current!.value),
-            lengthBeats: parseInt(lengthRef.current!.value),
-          });
-        }}
-      >
-        Create file
-      </Button>
-    </Stack>
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <Stack gap="sm">
+        <SimpleGrid cols={2} spacing="sm">
+          <NumberInput
+            ref={sampleRateRef}
+            size="xs"
+            label="Sample rate"
+            defaultValue={44100}
+            min={8000}
+            max={192000}
+            step={1000}
+            variant="unstyled"
+            hideControls
+          />
+          <NumberInput
+            ref={bpmRef}
+            size="xs"
+            label="BPM"
+            defaultValue={120}
+            min={1}
+            max={999}
+            step={1}
+            variant="unstyled"
+            hideControls
+          />
+          <NumberInput
+            ref={lengthRef}
+            size="xs"
+            label="Length beats"
+            defaultValue={16}
+            min={1}
+            max={64}
+            step={1}
+            variant="unstyled"
+            hideControls
+          />
+        </SimpleGrid>
+        <Button type="submit" size="xs" fullWidth>
+          Create file
+        </Button>
+      </Stack>
+    </form>
   );
 };
 

@@ -1,6 +1,6 @@
 import { useStore } from "@/store";
 import { Box, Group, Text } from "@mantine/core";
-import { openContextModal } from "@mantine/modals";
+import { openContextModal } from "@renderer/lib/modals";
 import { useEffectId } from "@renderer/contexts/effect-context";
 import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
 import { getFileColor, openFiles } from "@renderer/store/files";

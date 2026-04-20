@@ -12,6 +12,7 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { ContextModalProps, modals } from "@mantine/modals";
+import { openConfirm, openPrompt } from "@renderer/lib/modals";
 import { PresetType } from "@renderer/lib/preset-schema";
 import { MoreVertical, Plus } from "lucide-react";
 import { useState } from "react";
@@ -20,33 +21,23 @@ import { Tooltip } from "../tooltip";
 type BrushPickerModalProps = ContextModalProps<Record<string, never>>;
 
 function promptForRename(preset: PresetType) {
-  modals.openConfirmModal({
+  openPrompt({
     title: `Rename "${preset.name}"`,
-    children: (
-      <Stack gap="xs">
-        <Text size="sm">Enter a new name:</Text>
-        <TextInput id="preset-rename-input" defaultValue={preset.name} data-autofocus />
-      </Stack>
-    ),
-    labels: { confirm: "Rename", cancel: "Cancel" },
-    confirmProps: { size: "xs" },
-    cancelProps: { size: "xs" },
-    onConfirm: async () => {
-      const input = document.getElementById("preset-rename-input") as HTMLInputElement | null;
-      const newName = input?.value?.trim();
-      if (!newName) return;
+    label: "Enter a new name:",
+    defaultValue: preset.name,
+    confirmLabel: "Rename",
+    onConfirm: async (newName) => {
       await useStore.getState().renamePreset(preset.id, newName);
     },
   });
 }
 
 function promptForDelete(preset: PresetType) {
-  modals.openConfirmModal({
+  openConfirm({
     title: `Delete "${preset.name}"?`,
-    children: <Text size="sm">This cannot be undone.</Text>,
-    labels: { confirm: "Delete", cancel: "Cancel" },
-    confirmProps: { color: "red", size: "xs" },
-    cancelProps: { size: "xs" },
+    message: "This cannot be undone.",
+    confirmLabel: "Delete",
+    danger: true,
     onConfirm: async () => {
       await useStore.getState().deletePreset(preset.id);
     },

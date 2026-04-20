@@ -1,5 +1,5 @@
-import { ActionIcon, Box, Divider, Group, Menu, Stack, Text, TextInput, useMantineTheme } from "@mantine/core";
-import { modals } from "@mantine/modals";
+import { ActionIcon, Box, Divider, Group, Menu, Stack, Text, useMantineTheme } from "@mantine/core";
+import { openPrompt } from "@renderer/lib/modals";
 import { getParameterDef, isEffectParameter, parameterDefs } from "@renderer/parameters";
 import { getMacroValueIndex, getModulationParamKeys, useStore } from "@renderer/store";
 import {
@@ -77,24 +77,12 @@ export const ParamMenu = ({
   const handleRenameMacro = () => {
     if (macroIndex === null) return;
     const currentName = macroNames[macroIndex] ?? `Macro ${macroIndex + 1}`;
-    const inputId = `macro-rename-input-${macroIndex}`;
-    modals.openConfirmModal({
+    openPrompt({
       title: `Rename "${currentName}"`,
-      children: (
-        <Stack gap="xs">
-          <Text size="sm">Enter a new name:</Text>
-          <TextInput id={inputId} defaultValue={currentName} data-autofocus />
-        </Stack>
-      ),
-      labels: { confirm: "Rename", cancel: "Cancel" },
-      confirmProps: { size: "xs" },
-      cancelProps: { size: "xs" },
-      onConfirm: () => {
-        const input = document.getElementById(inputId) as HTMLInputElement | null;
-        const newName = input?.value?.trim();
-        if (!newName) return;
-        renameMacro(macroIndex, newName);
-      },
+      label: "Enter a new name:",
+      defaultValue: currentName,
+      confirmLabel: "Rename",
+      onConfirm: (newName) => renameMacro(macroIndex, newName),
     });
   };
 

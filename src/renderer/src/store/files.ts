@@ -1,4 +1,4 @@
-import { modals, openContextModal } from "@mantine/modals";
+import { openConfirm, openContextModal } from "../lib/modals";
 import { notifications } from "@mantine/notifications";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { EffectItem } from "@renderer/effects/types";
@@ -715,12 +715,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     // Show confirmation modal
     return new Promise<void>((resolve) => {
-      modals.openConfirmModal({
+      openConfirm({
         title: "Overwrite File",
-        children: `Do you want to overwrite "${truncateMiddle(fileName, 50)}"?`,
-        labels: { confirm: "Overwrite", cancel: "Cancel" },
-        confirmProps: { color: "red", size: "xs" },
-        cancelProps: { size: "xs" },
+        message: `Do you want to overwrite "${truncateMiddle(fileName, 50)}"?`,
+        confirmLabel: "Overwrite",
+        danger: true,
         onConfirm: async () => {
           try {
             // Extract audio channels from AudioBuffer
@@ -926,12 +925,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const fileName = file.filePath.split("/").pop() || file.filePath;
       const refList = refs.map((r) => `${r.brushName} (${r.paramLabel})`).join(", ");
       const confirmed = await new Promise<boolean>((resolve) => {
-        modals.openConfirmModal({
+        openConfirm({
           title: "File is referenced",
-          children: `"${fileName}" is referenced by: ${refList}. Closing will remove these connections.`,
-          labels: { confirm: "Close", cancel: "Cancel" },
-          confirmProps: { color: "red", size: "xs" },
-          cancelProps: { size: "xs" },
+          message: `"${fileName}" is referenced by: ${refList}. Closing will remove these connections.`,
+          confirmLabel: "Close",
+          danger: true,
           onConfirm: () => resolve(true),
           onCancel: () => resolve(false),
           onClose: () => resolve(false),
@@ -942,12 +940,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     if (state.filesDirty[fileId]) {
       await new Promise<void>((resolve) => {
-        modals.openConfirmModal({
+        openConfirm({
           title: "Unsaved Changes",
-          children: `Are you sure you want to close this file without saving?`,
-          labels: { confirm: "Close", cancel: "Cancel" },
-          confirmProps: { color: "red", size: "xs" },
-          cancelProps: { size: "xs" },
+          message: `Are you sure you want to close this file without saving?`,
+          confirmLabel: "Close",
+          danger: true,
           onConfirm: async () => {
             state.closeFile(fileId);
             resolve();
@@ -1288,12 +1285,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (!state.activeFileId) return;
     const file = openFiles[state.activeFileId];
 
-    modals.openConfirmModal({
+    openConfirm({
       title: "Re-analyze File",
-      children: `This will re-analyze the file with the new settings. You will lose the undo history.`,
-      labels: { confirm: "Re-analyze", cancel: "Cancel" },
-      confirmProps: { color: "red", size: "xs" },
-      cancelProps: { size: "xs" },
+      message: `This will re-analyze the file with the new settings. You will lose the undo history.`,
+      confirmLabel: "Re-analyze",
+      danger: true,
       onConfirm: async () => {
         if (!state.activeFileId) return;
         const audioBuffer = file?.audioBuffer;

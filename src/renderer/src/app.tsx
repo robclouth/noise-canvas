@@ -2,7 +2,7 @@ import { BrushPanel } from "@/components/layout/brush-panel";
 import { PalettePanel } from "@/components/layout/palette-panel";
 import { useStore } from "@/store";
 import { Box, Group, List, LoadingOverlay, ScrollArea, Stack, Text } from "@mantine/core";
-import { modals } from "@mantine/modals";
+import { openConfirm } from "./lib/modals";
 import { Notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
 import { Canvas, RootState, useThree } from "@react-three/fiber";
@@ -213,9 +213,9 @@ function App(): React.JSX.Element {
         ipcSend("quit-confirmed");
         return;
       }
-      modals.openConfirmModal({
+      openConfirm({
         title: "Unsaved Changes",
-        children: (
+        message: (
           <Stack gap="xs">
             <Text size="sm">The following files have unsaved changes and will be lost if you quit:</Text>
             <List size="sm" withPadding>
@@ -225,9 +225,8 @@ function App(): React.JSX.Element {
             </List>
           </Stack>
         ),
-        labels: { confirm: "Quit anyway", cancel: "Cancel" },
-        confirmProps: { color: "red", size: "xs" },
-        cancelProps: { size: "xs" },
+        confirmLabel: "Quit anyway",
+        danger: true,
         onConfirm: () => ipcSend("quit-confirmed"),
       });
     });

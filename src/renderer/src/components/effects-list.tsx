@@ -1,7 +1,7 @@
 import { getParameterValue, selectParameter, useStore } from "@/store";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
 import { Box, Button, Stack } from "@mantine/core";
-import { openContextModal } from "@mantine/modals";
+import { openContextModal } from "@renderer/lib/modals";
 import { EffectItem, EffectType } from "@renderer/effects/types";
 import { EFFECT_COLORS, EFFECT_DESCRIPTIONS, EFFECT_LABELS } from "@renderer/lib/constants";
 import { getEffectParameterDefaults } from "@renderer/parameters";
