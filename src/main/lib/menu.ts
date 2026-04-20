@@ -119,6 +119,19 @@ export function createMenu(window: BrowserWindow) {
             webContentsSend(window, "duplicate-active-file");
           },
         },
+        { type: "separator" },
+        {
+          label: "Double Length",
+          click: () => {
+            webContentsSend(window, "double-active-file-length");
+          },
+        },
+        {
+          label: "Half Length",
+          click: () => {
+            webContentsSend(window, "halve-active-file-length");
+          },
+        },
       ],
     },
   ];

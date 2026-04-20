@@ -192,6 +192,16 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubReanalyzeActiveFile);
 
+    const unsubDoubleActiveFileLength = ipcOn("double-active-file-length", () => {
+      useStore.getState().resizeActiveFileLength(2);
+    });
+    unsubscribers.push(unsubDoubleActiveFileLength);
+
+    const unsubHalveActiveFileLength = ipcOn("halve-active-file-length", () => {
+      useStore.getState().resizeActiveFileLength(0.5);
+    });
+    unsubscribers.push(unsubHalveActiveFileLength);
+
     const unsubAppWillQuit = ipcOn("app-will-quit", async () => {
       await clearAllUndoManagers();
     });

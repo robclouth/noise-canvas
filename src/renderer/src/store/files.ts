@@ -23,6 +23,7 @@ export interface FilesState {
   tryCloseFile: (fileId: string) => Promise<void>;
   closeFile: (fileId: string) => void;
   reanalyzeActiveFile: () => Promise<void>;
+  resizeActiveFileLength: (factor: 2 | 0.5) => Promise<void>;
   synthesizeFile: (
     fileId: string,
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
@@ -412,6 +413,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     openFiles[newFileId] = newFile;
 
+    const sourceBpm = get().filepathsBpm[originalFile.filePath];
+
     set(
       produce((state: State) => {
         state.openFileIds.push(newFileId);
@@ -423,6 +426,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesOffsetY[newFileId] = state.filesOffsetY[fileId] ?? 0;
         state.filesPlaybackStartTime[newFileId] = state.filesPlaybackStartTime[fileId];
         state.filesDirty[newFileId] = true;
+        if (sourceBpm !== undefined) {
+          state.filepathsBpm[newFilePath] = sourceBpm;
+        }
       }),
     );
   },
@@ -1354,6 +1360,98 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         }
       },
     });
+  },
+  resizeActiveFileLength: async (factor: 2 | 0.5) => {
+    const state = get();
+    if (!state.activeFileId) return;
+    const fileId = state.activeFileId;
+    const file = openFiles[fileId];
+    if (!file?.spectrogramData || !file.rendererRef?.current) return;
+
+    const { spectrogramData } = file;
+    const analysisParams = { bandsPerOctave: state.bandsPerOctave, minFreq: state.minFreq };
+
+    try {
+      const fboData = await file.rendererRef.current.getFBOData();
+      if (!fboData) throw new Error("Could not read the current spectrogram state.");
+
+      const synthResult = await window.audioAnalysis.synthesize(
+        fboData,
+        {
+          numFrames: spectrogramData.numFrames,
+          numChannels: spectrogramData.numChannels,
+          numBands: spectrogramData.numBands,
+          bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
+          bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s,
+          bandLengths: spectrogramData.synthesisMetadata.bandLengths,
+        },
+        spectrogramData.sampleRate,
+        analysisParams,
+        false,
+      );
+
+      const oldLength = synthResult.channels[0]?.length ?? 0;
+      const newLength = factor === 2 ? oldLength * 2 : Math.floor(oldLength / 2);
+      if (newLength <= 0) throw new Error("The file is too short to halve.");
+
+      const audioContext = Tone.getContext().rawContext;
+      const audioBuffer = audioContext.createBuffer(synthResult.channels.length, newLength, spectrogramData.sampleRate);
+      for (let ch = 0; ch < synthResult.channels.length; ch++) {
+        const src = synthResult.channels[ch];
+        const dst = new Float32Array(newLength);
+        if (factor === 2) {
+          dst.set(src, 0);
+          dst.set(src, oldLength);
+        } else {
+          dst.set(src.subarray(0, newLength), 0);
+        }
+        audioBuffer.copyToChannel(dst, ch);
+      }
+
+      const result = await window.audioAnalysis.analyseBuffer(audioBuffer, analysisParams);
+
+      file.spectrogramData = {
+        packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+        inverseMap: new Float32Array(
+          result.inverseMap.buffer,
+          result.inverseMap.byteOffset,
+          result.inverseMap.byteLength / 4,
+        ),
+        metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
+        textureWidth: result.textureWidth,
+        textureHeight: result.textureHeight,
+        numFrames: result.numFrames,
+        numBands: result.numBands,
+        numChannels: result.numChannels,
+        sampleRate: result.sampleRate,
+        packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
+        minFreq: state.minFreq,
+        bandsPerOctave: state.bandsPerOctave,
+        synthesisMetadata: {
+          bandOffsets: result.bandOffsets,
+          bandStepLog2s: result.bandStepLog2s,
+          bandLengths: result.bandLengths,
+        },
+      };
+      file.audioBuffer = audioBuffer;
+      file.audioPeak = synthResult.peak > 0 ? synthResult.peak : 1;
+
+      file.rendererRef.current.reloadTextures();
+      getUndoManager(fileId).clear();
+
+      set(
+        produce((s: State) => {
+          s.filesDirty[fileId] = true;
+        }),
+      );
+    } catch (error) {
+      console.error("Resize failed:", error);
+      notifications.show({
+        title: "Resize failed",
+        message: error instanceof Error ? error.message : "Unknown error",
+        color: "red",
+      });
+    }
   },
   filepathsBpm: {},
   setFilepathBpm: (filepath, bpm) =>

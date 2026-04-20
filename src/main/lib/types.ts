@@ -40,6 +40,8 @@ export interface IpcRendererEvents {
   "duplicate-active-file": () => void;
   "close-active-file": () => void;
   "reanalyze-active-file": () => void;
+  "double-active-file-length": () => void;
+  "halve-active-file-length": () => void;
   "update-available": (info: any) => void;
   "update-not-available": () => void;
   "update-downloaded": (info: any) => void;
