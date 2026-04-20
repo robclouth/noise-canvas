@@ -513,11 +513,17 @@ public:
                 // Start with copy of existing audio
                 audioChannels[ch] = existingAudio[ch];
 
-                // Apply crossfade at boundaries
+                // Apply crossfade at boundaries. Skip the fade at absolute file
+                // boundaries — there is no seam with surrounding audio there, so
+                // fading would leak the un-modified original samples through.
                 int64_t fadeInStart = synthStart;
-                int64_t fadeInEnd = std::min(synthStart + crossfadeSamples, synthEnd);
-                int64_t fadeOutStart = std::max(synthEnd - crossfadeSamples, synthStart);
+                int64_t fadeInEnd = (synthStart == 0)
+                                        ? synthStart
+                                        : std::min(synthStart + crossfadeSamples, synthEnd);
                 int64_t fadeOutEnd = synthEnd;
+                int64_t fadeOutStart = (synthEnd == static_cast<int64_t>(numFrames))
+                                           ? synthEnd
+                                           : std::max(synthEnd - crossfadeSamples, synthStart);
 
                 for (int64_t i = synthStart; i < synthEnd; ++i)
                 {
