@@ -1,4 +1,4 @@
-import { Box, SimpleGrid, Stack } from "@mantine/core";
+import { SimpleGrid, Stack } from "@mantine/core";
 import { EnvelopeVisualizer } from "./envelope-visualizer";
 import { ParameterControl } from "./parameter-control";
 
@@ -7,7 +7,7 @@ export const EnvelopeControl = () => {
     <Stack gap={4}>
       <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
         <ParameterControl paramKey="brushIntensity" />
-        <Box />
+        <ParameterControl paramKey="brushAnchorMode" />
         <ParameterControl paramKey="brushSizeTime" />
         <ParameterControl paramKey="brushSizePitch" />
         <ParameterControl paramKey="brushCurveTime" />

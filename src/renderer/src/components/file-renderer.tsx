@@ -30,7 +30,8 @@ import { withPlatformDefines } from "../lib/shader-utils";
 import { SourceFileInfo, StrokeRenderer, StrokeTextures } from "../lib/stroke-renderer";
 import { penState } from "../lib/pen-state";
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
-import { unitsToUv } from "../lib/utils";
+import { aimUvToBrushBlUv } from "../lib/brush-anchor";
+import { resolveBrushAnchor, resolveBrushFootprint, unitsToUv } from "../lib/utils";
 
 /**
  * Props for the FileRenderer component.
@@ -166,9 +167,18 @@ const FileRendererInner = memo(
                 spectrogramData.bandsPerOctave,
                 spectrogramData.numBands,
               );
+              const { blX, blY } = aimUvToBrushBlUv(
+                state,
+                uvPos.x,
+                uvPos.y,
+                bpm,
+                totalDuration,
+                spectrogramData.bandsPerOctave,
+                spectrogramData.numBands,
+              );
 
               // Simulate renderStroke
-              strokeParams.current = { x: uvPos.x, y: uvPos.y, preview: true };
+              strokeParams.current = { x: blX, y: blY, preview: true };
               displayMode.current = "preview";
               applyStroke.current = true;
               invalidateRef.current?.();
@@ -387,11 +397,13 @@ const FileRendererInner = memo(
       const bpm = state.filepathsBpm[file.filePath] || 120;
       const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
 
-      // Determine cursor position in UV
+      // Resolve the brush's bottom-left UV from the stored aim point.
+      // cursorPosition is the user's aim; the renderer's shaders expect the
+      // BL origin, which in center-anchor mode sits half a footprint away.
       let cursorPos = new Vector2(-1, -1);
 
       if ((state.activeFileId === fileId || state.hoveredFile === fileId) && state.cursorPosition) {
-        cursorPos = unitsToUv(
+        const aim = unitsToUv(
           state.cursorPosition.beats,
           state.cursorPosition.pitch,
           bpm,
@@ -399,6 +411,16 @@ const FileRendererInner = memo(
           spectrogramData.bandsPerOctave,
           spectrogramData.numBands,
         );
+        const { blX, blY } = aimUvToBrushBlUv(
+          state,
+          aim.x,
+          aim.y,
+          bpm,
+          totalDuration,
+          spectrogramData.bandsPerOctave,
+          spectrogramData.numBands,
+        );
+        cursorPos = new Vector2(blX, blY);
       }
 
       // Determine file state for rendering logic
@@ -470,36 +492,31 @@ const FileRendererInner = memo(
       const viewZoomPowerY = state.filesZoomY[fileId] ?? 0;
       const viewOffsetY = state.filesOffsetY[fileId] ?? 0;
 
-      // Helper to calculate brush size from a step state
-      const calculateBrushSizeUv = (stepState: State) => {
-        const sizeTimeUv = unitsToUv(
-          stepState.brushSizeTime,
-          0,
+      // Helper to calculate brush footprint from a step state (handles Grid/Full modes)
+      const calculateBrushFootprint = (stepState: State) =>
+        resolveBrushFootprint({
+          brushSizeTime: stepState.brushSizeTime,
+          brushSizePitch: stepState.brushSizePitch,
+          gridSizeBeats: stepState.gridSizeBeats,
+          gridSizeSemis: stepState.gridSizeSemis,
           bpm,
           totalDuration,
-          spectrogramData.bandsPerOctave,
-          spectrogramData.numBands,
-        );
-        const sizePitchUv = unitsToUv(
-          0,
-          stepState.brushSizePitch,
-          bpm,
-          totalDuration,
-          spectrogramData.bandsPerOctave,
-          spectrogramData.numBands,
-        );
-        return new Vector2(sizeTimeUv.x, sizePitchUv.y);
-      };
+          bandsPerOctave: spectrogramData.bandsPerOctave,
+          numBands: spectrogramData.numBands,
+        });
 
       // Calculate maximum brush size across all steps (for display purposes)
       const activeStepState = createStepStateView(state, state.activeStepIndex);
       const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
       const brushSizeUv = new Vector2(0, 0);
+      const displayFullAxes = { fullTime: false, fullPitch: false };
       for (let i = 0; i < steps.length; i++) {
         const stepState = createStepStateView(state, i);
-        const stepBrushSize = calculateBrushSizeUv(stepState);
-        brushSizeUv.x = Math.max(brushSizeUv.x, stepBrushSize.x);
-        brushSizeUv.y = Math.max(brushSizeUv.y, stepBrushSize.y);
+        const stepFp = calculateBrushFootprint(stepState);
+        brushSizeUv.x = Math.max(brushSizeUv.x, stepFp.sizeUv.x);
+        brushSizeUv.y = Math.max(brushSizeUv.y, stepFp.sizeUv.y);
+        if (stepFp.fullTime) displayFullAxes.fullTime = true;
+        if (stepFp.fullPitch) displayFullAxes.fullPitch = true;
       }
 
       // For source file: compute the sampling position in this file's UV space.
@@ -524,7 +541,7 @@ const FileRendererInner = memo(
           if (activeFile?.spectrogramData) {
             const activeBpm = state.filepathsBpm[activeFile.filePath] || 120;
             const activeDuration = activeFile.spectrogramData.numFrames / activeFile.spectrogramData.sampleRate;
-            const destCursorUv = unitsToUv(
+            const aimDestUv = unitsToUv(
               state.cursorPosition!.beats,
               state.cursorPosition!.pitch,
               activeBpm,
@@ -532,14 +549,38 @@ const FileRendererInner = memo(
               activeFile.spectrogramData.bandsPerOctave,
               activeFile.spectrogramData.numBands,
             );
+            const { blX: destCursorX, blY: destCursorY } = aimUvToBrushBlUv(
+              state,
+              aimDestUv.x,
+              aimDestUv.y,
+              activeBpm,
+              activeDuration,
+              activeFile.spectrogramData.bandsPerOctave,
+              activeFile.spectrogramData.numBands,
+            );
+            const destCursorUv = new Vector2(destCursorX, destCursorY);
+
+            // Resolve the active step's footprint in the active file's space so that the
+            // source display rectangle honours Full-axis anchoring (brush anchors to 0).
+            const activeStepFp = resolveBrushFootprint({
+              brushSizeTime: Number(activeStepRaw?.brushSizeTime ?? 0),
+              brushSizePitch: Number(activeStepRaw?.brushSizePitch ?? 0),
+              gridSizeBeats: state.gridSizeBeats,
+              gridSizeSemis: state.gridSizeSemis,
+              bpm: activeBpm,
+              totalDuration: activeDuration,
+              bandsPerOctave: activeFile.spectrogramData.bandsPerOctave,
+              numBands: activeFile.spectrogramData.numBands,
+            });
+            const destAnchorUv = resolveBrushAnchor(destCursorUv, activeStepFp.fullTime, activeStepFp.fullPitch);
 
             const tScale = (activeBpm * activeDuration) / (bpm * totalDuration);
             const bScale = activeFile.spectrogramData.numBands / spectrogramData.numBands;
 
-            const offset = calculateSourceOffset(activeStepRaw?.lockedOffset, mode, destCursorUv, tScale, bScale);
+            const offset = calculateSourceOffset(activeStepRaw?.lockedOffset, mode, destAnchorUv, tScale, bScale);
             sourceDisplayPos = new Vector2(
-              destCursorUv.x * tScale + offset.x + sourcePositionUv.x,
-              destCursorUv.y * bScale + offset.y + sourcePositionUv.y,
+              destAnchorUv.x * tScale + offset.x + sourcePositionUv.x,
+              destAnchorUv.y * bScale + offset.y + sourcePositionUv.y,
             );
           }
         } else {
@@ -621,7 +662,10 @@ const FileRendererInner = memo(
       displayMaterial.uniforms.minDb.value = state.displayMinDb;
       displayMaterial.uniforms.maxDb.value = state.displayMaxDb;
 
-      displayMaterial.uniforms.brushBottomLeftUv.value = cursorPos;
+      // In Full mode, the displayed brush rectangle anchors to 0 on that axis so it
+      // spans the full file extent regardless of cursor position.
+      const displayBrushAnchor = resolveBrushAnchor(cursorPos, displayFullAxes.fullTime, displayFullAxes.fullPitch);
+      displayMaterial.uniforms.brushBottomLeftUv.value = displayBrushAnchor;
       displayMaterial.uniforms.sourceSamplingBottomLeftUv.value = sourceDisplayPos;
       displayMaterial.uniforms.brushSizeUv.value = brushSizeUv;
       displayMaterial.uniforms.sourceBrushSizeUv.value = (() => {
@@ -636,24 +680,18 @@ const FileRendererInner = memo(
         let maxPitchUv = 0;
         for (let i = 0; i < slotSteps.length; i++) {
           const stepState = createStepStateView(state, i);
-          const timeUv = unitsToUv(
-            stepState.brushSizeTime,
-            0,
-            targetBpm,
-            targetDuration,
-            targetFile.spectrogramData.bandsPerOctave,
-            targetFile.spectrogramData.numBands,
-          );
-          const pitchUv = unitsToUv(
-            0,
-            stepState.brushSizePitch,
-            targetBpm,
-            targetDuration,
-            targetFile.spectrogramData.bandsPerOctave,
-            targetFile.spectrogramData.numBands,
-          );
-          maxTimeUv = Math.max(maxTimeUv, timeUv.x);
-          maxPitchUv = Math.max(maxPitchUv, pitchUv.y);
+          const stepFp = resolveBrushFootprint({
+            brushSizeTime: stepState.brushSizeTime,
+            brushSizePitch: stepState.brushSizePitch,
+            gridSizeBeats: stepState.gridSizeBeats,
+            gridSizeSemis: stepState.gridSizeSemis,
+            bpm: targetBpm,
+            totalDuration: targetDuration,
+            bandsPerOctave: targetFile.spectrogramData.bandsPerOctave,
+            numBands: targetFile.spectrogramData.numBands,
+          });
+          maxTimeUv = Math.max(maxTimeUv, stepFp.sizeUv.x);
+          maxPitchUv = Math.max(maxPitchUv, stepFp.sizeUv.y);
         }
         return new Vector2(maxTimeUv || 0.1, maxPitchUv || 0.1);
       })();

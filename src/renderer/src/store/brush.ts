@@ -1,6 +1,8 @@
 import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
+import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
+import { BRUSH_ANCHOR_MODE_CENTER } from "@renderer/lib/constants";
 import { buildScaleOffsets, minFreqSemisAboveC0, stepScaleSemis } from "@renderer/lib/scale-snap";
-import { snapToSwungGridFloor, stepSwungGrid } from "@renderer/lib/utils";
+import { snapToSwungGridCenter, snapToSwungGridFloor, stepSwungGrid, stepSwungGridCenter } from "@renderer/lib/utils";
 import type { ParameterKey } from "./types";
 import { openFiles } from "./files";
 import type { ZustandGet, ZustandSet } from "./types";
@@ -18,6 +20,7 @@ export interface BrushState {
   brushSizePitch: number;
   brushCurvePitch: number;
   brushSkewPitch: number;
+  brushAnchorMode: number;
   sourceFile: FileParameterValue;
   sourceTimeOffset: number;
   sourcePitchOffset: number;
@@ -74,6 +77,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     brushSizePitch: getParameterDef("brushSizePitch").default,
     brushCurvePitch: getParameterDef("brushCurvePitch").default,
     brushSkewPitch: getParameterDef("brushSkewPitch").default,
+    brushAnchorMode: getParameterDef("brushAnchorMode").default,
     blendMode: getParameterDef("blendMode").default,
     algorithm: getParameterDef("algorithm").default,
     accumulate: getParameterDef("accumulate").default,
@@ -118,7 +122,17 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         spectrogramData.numBands,
       );
 
-      file.rendererRef.current.renderStroke(uvX, uvY, true);
+      const { blX, blY } = aimUvToBrushBlUv(
+        state,
+        uvX,
+        uvY,
+        bpm,
+        totalDuration,
+        spectrogramData.bandsPerOctave,
+        spectrogramData.numBands,
+      );
+
+      file.rendererRef.current.renderStroke(blX, blY, true);
     },
 
     // Unified apply action - used by mouse up and Enter key
@@ -136,7 +150,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const { spectrogramData } = file;
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
-      const { timeSeconds } = positionToUv(
+      const { uvX, uvY } = positionToUv(
         effectivePosition,
         bpm,
         totalDuration,
@@ -144,9 +158,23 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         spectrogramData.numBands,
       );
 
+      // Without a provided strokeTimeRange (e.g. keyboard Enter on a single
+      // point), autoplay uses the brush BL time so the loop starts at the
+      // stroke onset in either anchor mode.
+      const { blX } = aimUvToBrushBlUv(
+        state,
+        uvX,
+        uvY,
+        bpm,
+        totalDuration,
+        spectrogramData.bandsPerOctave,
+        spectrogramData.numBands,
+      );
+      const fallbackTimeSeconds = blX * totalDuration;
+
       // Use provided time range or fall back to single point
-      const clampedStart = Math.max(0, strokeTimeRange?.min ?? timeSeconds);
-      const clampedEnd = Math.min(totalDuration, strokeTimeRange?.max ?? timeSeconds);
+      const clampedStart = Math.max(0, strokeTimeRange?.min ?? fallbackTimeSeconds);
+      const clampedEnd = Math.min(totalDuration, strokeTimeRange?.max ?? fallbackTimeSeconds);
 
       let autoPlaybackParams: { startTimeSeconds: number; endTimeSeconds: number } | null = null;
       if (autoPlayStroke) {
@@ -212,17 +240,33 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       let currentPos = cursorPosition;
 
       const swingNorm = gridSwing / 100;
+      const step = state.brushes[state.activeBrushIndex]?.steps?.[state.activeStepIndex] as
+        | Record<string, unknown>
+        | undefined;
+      const anchorMode = (step?.brushAnchorMode as number | undefined) ?? state.brushAnchorMode;
+      const isCenter = anchorMode === BRUSH_ANCHOR_MODE_CENTER;
+
       if (!currentPos) {
-        // Initialize to playback position, snapped to grid
+        // Initializes at the current playback position, snapped to the
+        // anchor-mode grid: cell start for corner, cell midpoint for center.
         const playbackTime = state.getPlaybackTime();
         let beats = (playbackTime / 60) * bpm;
-        beats = snapToSwungGridFloor(beats, gridSizeBeats, swingNorm);
+        beats = isCenter
+          ? snapToSwungGridCenter(beats, gridSizeBeats, swingNorm)
+          : snapToSwungGridFloor(beats, gridSizeBeats, swingNorm);
         currentPos = { beats, pitch: 0 };
       }
 
-      // Snap current position to grid first
-      const snappedBeats = snapToSwungGridFloor(currentPos.beats, gridSizeBeats, swingNorm);
-      const snappedPitch = useScale ? currentPos.pitch : Math.floor(currentPos.pitch / gridSizeSemis) * gridSizeSemis;
+      // Snaps the stored aim to the anchor-mode grid before stepping so each
+      // arrow press lands on the next cell start (corner) or midpoint (center).
+      const snappedBeats = isCenter
+        ? snapToSwungGridCenter(currentPos.beats, gridSizeBeats, swingNorm)
+        : snapToSwungGridFloor(currentPos.beats, gridSizeBeats, swingNorm);
+      const snappedPitch = useScale
+        ? currentPos.pitch
+        : isCenter
+          ? (Math.round(currentPos.pitch / gridSizeSemis - 0.5) + 0.5) * gridSizeSemis
+          : Math.floor(currentPos.pitch / gridSizeSemis) * gridSizeSemis;
 
       const newPosition = { beats: snappedBeats, pitch: snappedPitch };
       const minFreqSemis = minFreqSemisAboveC0(spectrogramData.minFreq);
@@ -245,10 +289,14 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           }
           break;
         case "left":
-          newPosition.beats = stepSwungGrid(snappedBeats, gridSizeBeats, swingNorm, -1);
+          newPosition.beats = isCenter
+            ? stepSwungGridCenter(snappedBeats, gridSizeBeats, swingNorm, -1)
+            : stepSwungGrid(snappedBeats, gridSizeBeats, swingNorm, -1);
           break;
         case "right":
-          newPosition.beats = stepSwungGrid(snappedBeats, gridSizeBeats, swingNorm, 1);
+          newPosition.beats = isCenter
+            ? stepSwungGridCenter(snappedBeats, gridSizeBeats, swingNorm, 1)
+            : stepSwungGrid(snappedBeats, gridSizeBeats, swingNorm, 1);
           break;
       }
 

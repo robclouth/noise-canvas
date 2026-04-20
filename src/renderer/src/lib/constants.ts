@@ -163,6 +163,14 @@ export const WRAP_MODES = [
   { value: 3, label: "Time & Pitch" },
 ];
 
+export const BRUSH_ANCHOR_MODES = [
+  { value: 0, label: "Corner" },
+  { value: 1, label: "Center" },
+];
+
+export const BRUSH_ANCHOR_MODE_CORNER = 0;
+export const BRUSH_ANCHOR_MODE_CENTER = 1;
+
 export const NUM_MODULATORS = 3;
 
 export const NUM_MACROS = 4;

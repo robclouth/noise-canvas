@@ -5,9 +5,11 @@ import { openFiles } from "@renderer/store/files";
 import { useGesture } from "@use-gesture/react";
 import { memo, PointerEventHandler, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Vector2 } from "three";
+import { aimUvToBrushBlUv } from "../lib/brush-anchor";
+import { BRUSH_ANCHOR_MODE_CENTER } from "../lib/constants";
 import { penState } from "../lib/pen-state";
 import { buildScaleOffsets, minFreqSemisAboveC0, snapSemisToScale } from "../lib/scale-snap";
-import { screenToZoomed, snapToSwungGridFloor } from "../lib/utils";
+import { screenToZoomed, snapToSwungGridCenter, snapToSwungGridFloor } from "../lib/utils";
 import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { LoopRegion } from "./loop-region";
@@ -22,7 +24,9 @@ export interface FileViewProps {
 
 const viewStyle = { width: "100%", height: "100%", zIndex: 1 };
 
-// This function remains the same
+// Converts a mouse event into the aim point in the file's UV space, with
+// optional grid/pitch snapping applied. Center-anchor mode snaps the aim to
+// cell midpoints; corner-anchor mode snaps it to cell starts.
 function getSnappedCoordinates(
   event: React.MouseEvent<HTMLDivElement>,
   fileId: string,
@@ -45,6 +49,15 @@ function getSnappedCoordinates(
   const spectrogramData = openFiles[fileId]?.spectrogramData;
   if (!spectrogramData) return null;
 
+  // Center-anchor mode snaps the aim to the nearest cell midpoint so the
+  // brush's visual center lands as close as possible to the cursor. With snap
+  // off, the aim is used directly and the brush sits exactly on the cursor.
+  const activeStep = state.brushes[state.activeBrushIndex]?.steps?.[state.activeStepIndex] as
+    | Record<string, unknown>
+    | undefined;
+  const anchorMode = (activeStep?.brushAnchorMode as number | undefined) ?? state.brushAnchorMode;
+  const isCenter = anchorMode === BRUSH_ANCHOR_MODE_CENTER;
+
   let snappedX = uv.x;
   let snappedY = uv.y;
 
@@ -52,8 +65,9 @@ function getSnappedCoordinates(
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
     const gridIntervalSeconds = (60 / bpm) * gridSizeBeats;
     const currentTime = uv.x * totalDuration;
-    const snappedCenterTime = snapToSwungGridFloor(currentTime, gridIntervalSeconds, gridSwing / 100);
-    snappedX = snappedCenterTime / totalDuration;
+    const snapFn = isCenter ? snapToSwungGridCenter : snapToSwungGridFloor;
+    const snappedTime = snapFn(currentTime, gridIntervalSeconds, gridSwing / 100);
+    snappedX = snappedTime / totalDuration;
   }
 
   if (snapPitch) {
@@ -65,14 +79,35 @@ function getSnappedCoordinates(
       gridSizeSemis,
       scaleTonic,
       scaleType,
+      isCenter,
     );
   }
 
   return [snappedX, snappedY];
 }
 
+// Resolves the aim point to the brush's bottom-left UV for the active file,
+// using the shared brush-anchor helper.
+function aimToBrushBlUv(aimUv: { x: number; y: number }, fileId: string, bpm: number): [number, number] {
+  const spectrogramData = openFiles[fileId]?.spectrogramData;
+  if (!spectrogramData) return [aimUv.x, aimUv.y];
+  const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+  const { blX, blY } = aimUvToBrushBlUv(
+    useStore.getState(),
+    aimUv.x,
+    aimUv.y,
+    bpm,
+    totalDuration,
+    spectrogramData.bandsPerOctave,
+    spectrogramData.numBands,
+  );
+  return [blX, blY];
+}
+
 // Snaps a pitch-axis UV to the scale (when gridSizeSemis is 0 / "Scale" mode)
-// or to the chromatic gridSizeSemis cell.
+// or to the chromatic gridSizeSemis cell. In chromatic mode, centerSnap
+// returns the cell midpoint; otherwise the cell start. Scale mode always
+// returns the nearest scale note (scale notes are points, not cells).
 function snapPitchUv(
   uvY: number,
   numBands: number,
@@ -81,6 +116,7 @@ function snapPitchUv(
   gridSizeSemis: number,
   scaleTonic: string,
   scaleType: string,
+  centerSnap: boolean,
 ): number {
   const bandsPerSemitone = bandsPerOctave / 12;
   if (gridSizeSemis <= 0) {
@@ -95,9 +131,10 @@ function snapPitchUv(
   }
   const gridIntervalBands = gridSizeSemis * bandsPerSemitone;
   const currentBand = (1.0 - uvY) * numBands;
-  const cellIndex = Math.floor(currentBand / gridIntervalBands);
-  const snappedCenterBand = cellIndex * gridIntervalBands;
-  return 1.0 - snappedCenterBand / numBands;
+  const snappedBand = centerSnap
+    ? (Math.round(currentBand / gridIntervalBands - 0.5) + 0.5) * gridIntervalBands
+    : Math.floor(currentBand / gridIntervalBands) * gridIntervalBands;
+  return 1.0 - snappedBand / numBands;
 }
 
 export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) => {
@@ -334,15 +371,16 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       if (!coords) return;
       const [snappedX, snappedY] = coords;
 
-      // Track time range when dragging
+      // Track the stroke's time range in brush-BL time so autoplay loops
+      // cover the painted region for either anchor mode.
       if (isStrokingRef.current && strokeTimeRangeRef.current.min !== null) {
         const { spectrogramData } = file;
         if (!spectrogramData) return;
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const currentBrushStart = snappedX * totalDuration;
-        const currentBrushEnd = snappedX * totalDuration;
-        strokeTimeRangeRef.current.min = Math.min(strokeTimeRangeRef.current.min!, currentBrushStart);
-        strokeTimeRangeRef.current.max = Math.max(strokeTimeRangeRef.current.max!, currentBrushEnd);
+        const [blX] = aimToBrushBlUv({ x: snappedX, y: snappedY }, fileId, bpm);
+        const currentBrushTime = blX * totalDuration;
+        strokeTimeRangeRef.current.min = Math.min(strokeTimeRangeRef.current.min!, currentBrushTime);
+        strokeTimeRangeRef.current.max = Math.max(strokeTimeRangeRef.current.max!, currentBrushTime);
       }
 
       // Only update if position actually changed
@@ -362,7 +400,8 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         // Preview is handled by the renderer watching cursorPosition
         if (rendererRef.current) {
           const isDragging = isStrokingRef.current;
-          rendererRef.current.renderStroke(snappedX, snappedY, !isDragging);
+          const [blX, blY] = aimToBrushBlUv({ x: snappedX, y: snappedY }, fileId, bpm);
+          rendererRef.current.renderStroke(blX, blY, !isDragging);
         }
       }
     },
@@ -385,7 +424,8 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
 
       if (rendererRef.current) {
-        rendererRef.current.renderStroke(snappedX, snappedY, true);
+        const [blX, blY] = aimToBrushBlUv({ x: snappedX, y: snappedY }, fileId, bpm);
+        rendererRef.current.renderStroke(blX, blY, true);
       }
     },
     [fileId, isPanning, uvToBeatsAndPitch],
@@ -438,13 +478,15 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
         state.setCursorPosition({ beats, pitch });
 
-        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const centerTimeSeconds = coords[0] * totalDuration;
-        const initialBrushStart = centerTimeSeconds;
-        const initialBrushEnd = centerTimeSeconds;
-        strokeTimeRangeRef.current = { min: initialBrushStart, max: initialBrushEnd };
+        const [blX, blY] = aimToBrushBlUv({ x: coords[0], y: coords[1] }, fileId, bpm);
 
-        // Compute locked offset for anchored mode with beat-based scale
+        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+        const strokeStartSeconds = blX * totalDuration;
+        strokeTimeRangeRef.current = { min: strokeStartSeconds, max: strokeStartSeconds };
+
+        // Compute the locked offset for anchored source mode using the brush
+        // BL (the shader's stroke origin) so source sampling stays anchored to
+        // the onset corner in both anchor modes.
         const { getActiveStep } = state;
         const activeStep = getActiveStep();
         const sourceFileValue = activeStep?.sourceFile ?? null;
@@ -460,14 +502,14 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
               const tScale = (destBpm * destDur) / (srcBpm * srcDur);
               const bScale = spectrogramData.numBands / sourceOpenFile.spectrogramData.numBands;
 
-              const offsetX = -coords[0] * tScale;
-              const offsetY = -(1 - coords[1]) * bScale;
+              const offsetX = -blX * tScale;
+              const offsetY = -(1 - blY) * bScale;
               state.updateActiveStepLockedOffset({ beats: offsetX, pitch: offsetY });
             }
           }
         }
 
-        rendererRef.current.renderStroke(coords[0], coords[1], false);
+        rendererRef.current.renderStroke(blX, blY, false);
       }
     },
     [fileId, isActive, uvToBeatsAndPitch, file],
@@ -527,6 +569,12 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       if (!spectrogramData) return;
       const bpm = state.filepathsBpm[openFiles[fileId].filePath];
 
+      const activeStep = state.brushes[state.activeBrushIndex]?.steps?.[state.activeStepIndex] as
+        | Record<string, unknown>
+        | undefined;
+      const anchorMode = (activeStep?.brushAnchorMode as number | undefined) ?? state.brushAnchorMode;
+      const isCenter = anchorMode === BRUSH_ANCHOR_MODE_CENTER;
+
       let snappedX = uv.x;
       let snappedY = uv.y;
 
@@ -534,8 +582,9 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
         const gridIntervalSeconds = (60 / bpm) * gridSizeBeats;
         const currentTime = uv.x * totalDuration;
-        const snappedCenterTime = snapToSwungGridFloor(currentTime, gridIntervalSeconds, gridSwing / 100);
-        snappedX = snappedCenterTime / totalDuration;
+        const snapFn = isCenter ? snapToSwungGridCenter : snapToSwungGridFloor;
+        const snappedTime = snapFn(currentTime, gridIntervalSeconds, gridSwing / 100);
+        snappedX = snappedTime / totalDuration;
       }
 
       if (snapPitch) {
@@ -547,12 +596,16 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
           gridSizeSemis,
           scaleTonic,
           scaleType,
+          isCenter,
         );
       }
 
-      // Track time range
+      const [blX, blY] = aimToBrushBlUv({ x: snappedX, y: snappedY }, fileId, bpm);
+
+      // Track time range using brush BL (stroke start), so autoplay duration
+      // lines up with the painted region regardless of anchor mode.
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-      const currentBrushTime = snappedX * totalDuration;
+      const currentBrushTime = blX * totalDuration;
       if (strokeTimeRangeRef.current.min !== null) {
         strokeTimeRangeRef.current.min = Math.min(strokeTimeRangeRef.current.min, currentBrushTime);
         strokeTimeRangeRef.current.max = Math.max(strokeTimeRangeRef.current.max!, currentBrushTime);
@@ -570,7 +623,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
       // Only render if position actually changed (prevents duplicate iterations at same grid cell)
       if (positionChanged && rendererRef.current) {
-        rendererRef.current.renderStroke(snappedX, snappedY, false);
+        rendererRef.current.renderStroke(blX, blY, false);
       }
     };
 

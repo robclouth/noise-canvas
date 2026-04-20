@@ -13,6 +13,7 @@ import { Section } from "../section";
 // Envelope parameters: size/curve/skew per axis plus intensity
 const ENVELOPE_PARAMS: ParameterKey[] = [
   "brushIntensity",
+  "brushAnchorMode",
   "brushSizeTime",
   "brushCurveTime",
   "brushSkewTime",

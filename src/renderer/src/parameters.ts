@@ -8,6 +8,7 @@ import {
   BEAT_UNIT,
   BEAT_VALUES,
   BLEND_MODES,
+  BRUSH_ANCHOR_MODES,
   CONTEXTUAL_MOD_SOURCES,
   EDGE_MODE,
   MODULATOR_MODES,
@@ -104,7 +105,6 @@ const posMultMarks = MULTIPLIER_VALUES;
 const beatMarksWithOff = [{ value: 0, label: "Off" }, ...BEAT_VALUES];
 const beatMarksWithZero = [{ value: 0, label: "0" }, ...BEAT_VALUES];
 const semitoneMarksWithOff = [{ value: 0, label: "Off" }, ...PITCH_VALUES];
-const semitoneMarksWithZero = [{ value: 0, label: "0" }, ...PITCH_VALUES];
 
 // --- Modulator Definitions ---
 // Nested modulation (modulating modulator parameters) is disabled on Windows
@@ -451,14 +451,15 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "number",
     name: "Brush Size Time",
     label: "Size ↔",
-    description: "Horizontal brush size (in beats).",
+    description:
+      'Horizontal brush size. At the minimum ("Grid") it tracks the time grid; at the maximum ("Full") it fills the full file width and anchors to the left edge regardless of cursor position.',
     default: 1,
     min: 0,
     max: 32,
     step: 0.01,
     unit: BEAT_UNIT,
     scale: "log",
-    marks: beatMarksWithZero,
+    marks: [{ value: 0, label: "Grid" }, ...BEAT_VALUES.filter((m) => m.value !== 32), { value: 32, label: "Full" }],
     includeInStep: true,
   },
   brushCurveTime: {
@@ -492,13 +493,14 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "number",
     name: "Brush Size Pitch",
     label: "Size ↕",
-    description: "Vertical brush size (in semitones).",
+    description:
+      'Vertical brush size. At the minimum ("Grid") it tracks the pitch grid; at the maximum ("Full") it fills the full file height and anchors to the bottom regardless of cursor position.',
     default: 48,
     min: 0,
     max: 128,
     step: 0.1,
     unit: SEMITONE_UNIT,
-    marks: semitoneMarksWithZero,
+    marks: [{ value: 0, label: "Grid" }, ...PITCH_VALUES, { value: 128, label: "Full" }],
     includeInStep: true,
   },
   brushCurvePitch: {
@@ -527,6 +529,16 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     unit: "%",
     includeInStep: true,
     modulatable: true,
+  },
+  brushAnchorMode: {
+    kind: "options",
+    name: "Brush Anchor",
+    label: "Anchor",
+    description:
+      "Where the cursor sits on the brush. Corner: cursor is the bottom-left/onset corner — snap locks onsets to the beat grid (best for rhythmic strokes). Center: cursor is the brush center — snap puts the envelope peak on the grid (best for soft/ambient strokes where onset timing doesn't matter).",
+    default: 0,
+    options: BRUSH_ANCHOR_MODES,
+    includeInStep: true,
   },
   blendMode: {
     kind: "options",
