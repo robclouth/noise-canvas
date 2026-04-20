@@ -164,9 +164,11 @@ export const NumboxControl = (props: NumboxControlProps) => {
 
       position = snapPositionToStep(position);
       if (isSnappingRef.current) position = snapPositionToNearestMark(position);
-      else setActiveMark(null);
 
       setValue(fromNormalized(position));
+      // Leave activeMark management to the `[value, marks, ...]` effect below so
+      // that clamped edges (where `value` doesn't change) still resolve to their
+      // mark label — e.g. "Grid" / "Full" on the brush-size sliders.
     },
     [leftValue, rightValue, snapPositionToStep, snapPositionToNearestMark, setValue, fromNormalized],
   );
@@ -284,7 +286,14 @@ export const NumboxControl = (props: NumboxControlProps) => {
   }, [value, toNormalized, updateActiveMark]);
 
   const position = toNormalized(value);
-  const displayValue = activeMark ? `${activeMark.label}${unit || ""}` : `${parseFloat(value.toFixed(2))}${unit || ""}`;
+  // Mark labels that start with a letter (e.g. "Grid", "Full", "Off", "Scale")
+  // aren't values in the parameter's unit — render them bare.
+  const markLabelIsNumeric = activeMark ? /^-?[\d.]/.test(activeMark.label) : false;
+  const displayValue = activeMark
+    ? markLabelIsNumeric
+      ? `${activeMark.label}${unit || ""}`
+      : activeMark.label
+    : `${parseFloat(value.toFixed(2))}${unit || ""}`;
 
   const numboxContent = (
     <Box

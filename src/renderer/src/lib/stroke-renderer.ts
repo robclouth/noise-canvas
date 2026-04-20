@@ -34,7 +34,7 @@ import type { SpectrogramData, State } from "../store/types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { buildModulatorUniforms } from "./modulator-utils";
 import { withPlatformDefines } from "./shader-utils";
-import { unitsToUv } from "./utils";
+import { resolveBrushAnchor, resolveBrushFootprint } from "./utils";
 
 // Import EffectType from the dependency-free types module
 import type { EffectType } from "../effects/types";
@@ -268,26 +268,27 @@ export class StrokeRenderer {
   }
 
   /**
+   * Resolve brush footprint for a given step state, taking Grid/Full sentinel
+   * values on brushSizeTime/brushSizePitch into account.
+   */
+  resolveBrushFootprint(state: State, bpm: number, totalDuration: number) {
+    return resolveBrushFootprint({
+      brushSizeTime: state.brushSizeTime,
+      brushSizePitch: state.brushSizePitch,
+      gridSizeBeats: state.gridSizeBeats,
+      gridSizeSemis: state.gridSizeSemis,
+      bpm,
+      totalDuration,
+      bandsPerOctave: this.spectrogramData.bandsPerOctave,
+      numBands: this.spectrogramData.numBands,
+    });
+  }
+
+  /**
    * Calculate brush size in UV coordinates from state size parameters.
    */
   calculateBrushSizeUv(state: State, bpm: number, totalDuration: number): Vector2 {
-    const sizeTimeUv = unitsToUv(
-      state.brushSizeTime,
-      0,
-      bpm,
-      totalDuration,
-      this.spectrogramData.bandsPerOctave,
-      this.spectrogramData.numBands,
-    );
-    const sizePitchUv = unitsToUv(
-      0,
-      state.brushSizePitch,
-      bpm,
-      totalDuration,
-      this.spectrogramData.bandsPerOctave,
-      this.spectrogramData.numBands,
-    );
-    return new Vector2(sizeTimeUv.x, sizePitchUv.y);
+    return this.resolveBrushFootprint(state, bpm, totalDuration).sizeUv;
   }
 
   /**
@@ -581,10 +582,16 @@ export class StrokeRenderer {
     const timeScale = (bpm * totalDuration) / (srcBpm * srcDuration);
     const bandScale = this.spectrogramData.numBands / sourceFile.spectrogramData.numBands;
 
+    // Active step's footprint determines source offset semantics. In Full mode the
+    // brush anchors to 0 on that axis, so the source offset is computed from that
+    // anchor rather than the raw cursor.
+    const activeFootprint = this.resolveBrushFootprint(activeStepState, bpm, totalDuration);
+    const activeAnchor = resolveBrushAnchor(cursorPos, activeFootprint.fullTime, activeFootprint.fullPitch);
+
     const sourceOffsetUv = this.calculateSourceOffset(
       state.isStroking ? activeStep?.lockedOffset : null,
       activeStepState.sourcePositionMode as string,
-      cursorPos,
+      activeAnchor,
       timeScale,
       bandScale,
     );
@@ -618,21 +625,26 @@ export class StrokeRenderer {
 
     // Calculate scissor rows from maximum brush extent across all steps.
     // If any step wraps in Y and its brush crosses the [0,1] boundary, skip scissoring
-    // so wrapped bands are painted too.
+    // so wrapped bands are painted too. When any step is Full-Y the union anchor
+    // collapses to y=0 and the extent reaches y=1, so scissoring is a no-op but safe.
     const maxBrushSizeUv = new Vector2(0, 0);
+    const unionAnchor = new Vector2(cursorPos.x, cursorPos.y);
     let yWrapsOutOfBounds = false;
     for (let i = 0; i < numSteps; i++) {
       const s = createStepStateView(state, i);
-      const sz = this.calculateBrushSizeUv(s, bpm, totalDuration);
-      maxBrushSizeUv.x = Math.max(maxBrushSizeUv.x, sz.x);
-      maxBrushSizeUv.y = Math.max(maxBrushSizeUv.y, sz.y);
+      const fp = this.resolveBrushFootprint(s, bpm, totalDuration);
+      maxBrushSizeUv.x = Math.max(maxBrushSizeUv.x, fp.sizeUv.x);
+      maxBrushSizeUv.y = Math.max(maxBrushSizeUv.y, fp.sizeUv.y);
+      if (fp.fullTime) unionAnchor.x = 0;
+      if (fp.fullPitch) unionAnchor.y = 0;
       const wrapMode = s.brushWrapMode as number;
       const wrapsY = wrapMode === 2 || wrapMode === 3;
-      if (wrapsY && (cursorPos.y < 0 || cursorPos.y + sz.y > 1)) {
+      const stepAnchorY = fp.fullPitch ? 0 : cursorPos.y;
+      if (wrapsY && (stepAnchorY < 0 || stepAnchorY + fp.sizeUv.y > 1)) {
         yWrapsOutOfBounds = true;
       }
     }
-    const scissorRows = yWrapsOutOfBounds ? null : this.calculateScissorRows(cursorPos, maxBrushSizeUv);
+    const scissorRows = yWrapsOutOfBounds ? null : this.calculateScissorRows(unionAnchor, maxBrushSizeUv);
 
     // If scissoring, blit full texture to destinationFbo so non-scissored rows are correct,
     // then set scissor on all FBOs that will be rendered to.
@@ -653,7 +665,9 @@ export class StrokeRenderer {
 
     for (let stepIndex = 0; stepIndex < numSteps; stepIndex++) {
       const stepState = createStepStateView(state, stepIndex);
-      const stepBrushSizeUv = this.calculateBrushSizeUv(stepState, bpm, totalDuration);
+      const stepFootprint = this.resolveBrushFootprint(stepState, bpm, totalDuration);
+      const stepBrushSizeUv = stepFootprint.sizeUv;
+      const stepAnchor = resolveBrushAnchor(cursorPos, stepFootprint.fullTime, stepFootprint.fullPitch);
 
       // Determine the blend destination for this step
       const blendDestFbo = stepIndex === 0 ? currentReadFBO : stepInputFbo;
@@ -665,7 +679,7 @@ export class StrokeRenderer {
         stepBrushSizeUv,
         sourceOffsetUv,
         blendDestFbo,
-        cursorPos,
+        stepAnchor,
         sourceFile,
         bpm,
         totalDuration,
@@ -760,8 +774,8 @@ export class StrokeRenderer {
 
             // Add contextual modulation uniforms for this iteration/step
             const brushSizeUv = commonUniforms.brushSizeUv.value as Vector2;
-            const brushCenterTime = cursorPos.x + brushSizeUv.x / 2;
-            const brushCenterPitch = cursorPos.y + brushSizeUv.y / 2;
+            const brushCenterTime = stepAnchor.x + brushSizeUv.x / 2;
+            const brushCenterPitch = stepAnchor.y + brushSizeUv.y / 2;
             uniformsForThisIteration.strokeIterationNormalized = {
               value: brushIterations > 1 ? i / (brushIterations - 1) : 0,
             };
@@ -859,11 +873,12 @@ export class StrokeRenderer {
       }
 
       // Update dirty region to include this stroke's bounds
-      const brushSizeUv = this.calculateBrushSizeUv(activeStepState, bpm, totalDuration);
-      const strokeStartX = cursorPos.x;
-      const strokeEndX = cursorPos.x + brushSizeUv.x;
-      const strokeStartY = cursorPos.y;
-      const strokeEndY = cursorPos.y + brushSizeUv.y;
+      const dirtyFp = this.resolveBrushFootprint(activeStepState, bpm, totalDuration);
+      const dirtyAnchor = resolveBrushAnchor(cursorPos, dirtyFp.fullTime, dirtyFp.fullPitch);
+      const strokeStartX = dirtyAnchor.x;
+      const strokeEndX = dirtyAnchor.x + dirtyFp.sizeUv.x;
+      const strokeStartY = dirtyAnchor.y;
+      const strokeEndY = dirtyAnchor.y + dirtyFp.sizeUv.y;
 
       if (this.dirtyRegion) {
         this.dirtyRegion.startX = Math.min(this.dirtyRegion.startX, strokeStartX);
@@ -900,7 +915,9 @@ export class StrokeRenderer {
     const nextMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo2 : this.strokeMaskFbo;
 
     const activeStep = createStepStateView(state, state.activeStepIndex);
-    const brushSizeUv = this.calculateBrushSizeUv(activeStep, bpm, totalDuration);
+    const footprint = this.resolveBrushFootprint(activeStep, bpm, totalDuration);
+    const brushSizeUv = footprint.sizeUv;
+    const brushAnchor = resolveBrushAnchor(cursorPos, footprint.fullTime, footprint.fullPitch);
     const { placeholderTexture, modulator1Texture, modulator2Texture, modulator3Texture, modulatorScaleLut } =
       this.textures;
     const modulatorUniforms = buildModulatorUniforms(
@@ -912,8 +929,8 @@ export class StrokeRenderer {
     );
 
     const numSteps = (state.brushes[state.activeBrushIndex]?.steps ?? []).length;
-    const brushCenterTime = cursorPos.x + brushSizeUv.x / 2;
-    const brushCenterPitch = cursorPos.y + brushSizeUv.y / 2;
+    const brushCenterTime = brushAnchor.x + brushSizeUv.x / 2;
+    const brushCenterPitch = brushAnchor.y + brushSizeUv.y / 2;
     this.maskMaterial.uniforms.strokeIterationNormalized.value = 1;
     this.maskMaterial.uniforms.strokeTimePosition.value = brushCenterTime;
     this.maskMaterial.uniforms.strokePitchPosition.value = brushCenterPitch;
@@ -983,7 +1000,7 @@ export class StrokeRenderer {
       value: (state.brushes[state.activeBrushIndex]?.macroValues ?? [50, 50, 50, 50]).map((v) => v / 100),
     };
 
-    this.maskMaterial.uniforms.brushBottomLeftUv.value = cursorPos;
+    this.maskMaterial.uniforms.brushBottomLeftUv.value = brushAnchor;
 
     this.fboMesh.material = this.maskMaterial;
     this.gl.setRenderTarget(nextMaskFbo);
