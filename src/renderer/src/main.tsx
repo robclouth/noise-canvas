@@ -42,12 +42,18 @@ const theme = createTheme({
   },
 });
 
-const isTextEntry = (t: HTMLElement): boolean =>
-  (t.tagName === "INPUT" &&
-    !["button", "checkbox", "radio", "submit", "reset", "file"].includes((t as HTMLInputElement).type)) ||
-  t.tagName === "TEXTAREA" ||
-  t.isContentEditable ||
-  t.getAttribute("role") === "textbox";
+const isTextEntry = (t: HTMLElement): boolean => {
+  if (t.tagName === "TEXTAREA") return true;
+  if (t.isContentEditable) return true;
+  if (t.getAttribute("role") === "textbox") return true;
+  if (t.tagName === "INPUT") {
+    const input = t as HTMLInputElement;
+    if (["button", "checkbox", "radio", "submit", "reset", "file"].includes(input.type)) return false;
+    if (input.readOnly) return false;
+    return true;
+  }
+  return false;
+};
 
 document.addEventListener(
   "mousedown",
