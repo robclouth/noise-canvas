@@ -42,6 +42,33 @@ const theme = createTheme({
   },
 });
 
+const isTextEntry = (t: HTMLElement): boolean =>
+  (t.tagName === "INPUT" &&
+    !["button", "checkbox", "radio", "submit", "reset", "file"].includes((t as HTMLInputElement).type)) ||
+  t.tagName === "TEXTAREA" ||
+  t.isContentEditable ||
+  t.getAttribute("role") === "textbox";
+
+document.addEventListener(
+  "mousedown",
+  (e) => {
+    if (e.button !== 0) return;
+    const t = e.target as HTMLElement;
+    if (!isTextEntry(t)) e.preventDefault();
+  },
+  { capture: true },
+);
+
+document.addEventListener(
+  "focusin",
+  (e) => {
+    const t = e.target as HTMLElement;
+    if (t === document.body) return;
+    if (!isTextEntry(t)) t.blur();
+  },
+  { capture: true },
+);
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <MantineProvider forceColorScheme="dark" theme={theme}>
     <ModalsProvider
