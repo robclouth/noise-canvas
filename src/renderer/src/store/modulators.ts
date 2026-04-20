@@ -59,17 +59,11 @@ export type ModulatorParameters = {
 } & {
   [K in Range<1, 4> as `modulator${K}PatternRateSemis`]: number;
 } & {
-  [K in Range<1, 4> as `modulator${K}PatternRadial`]: boolean;
-} & {
   [K in Range<1, 4> as `modulator${K}Strength`]: number;
 } & {
   [K in Range<1, 4> as `modulator${K}Rotation`]: number;
 } & {
   [K in Range<1, 4> as `modulator${K}StereoSpread`]: number;
-} & {
-  [K in Range<1, 4> as `modulator${K}ImagePath`]: string | null;
-} & {
-  [K in Range<1, 4> as `setModulator${K}ImagePath`]: (path: string | null) => void;
 } & {
   [K in Range<1, 4> as `modulator${K}PhaseMode`]: number;
 } & {

@@ -143,12 +143,17 @@ export function useModulatorTexture(modulatorIndex: number) {
     }
 
     let isCancelled = false;
+    let currentTexture: Texture | null = null;
 
     textureLoader.load(
       modulatorTexturePath,
       (loadedTexture) => {
-        if (isCancelled) return;
+        if (isCancelled) {
+          loadedTexture.dispose();
+          return;
+        }
         configureTexture(loadedTexture);
+        currentTexture = loadedTexture;
         setTexture(loadedTexture);
       },
       undefined,
@@ -160,6 +165,7 @@ export function useModulatorTexture(modulatorIndex: number) {
 
     return () => {
       isCancelled = true;
+      currentTexture?.dispose();
     };
   }, [modulatorTexturePath]);
   return texture;

@@ -6,7 +6,7 @@ import { FileParameterValue, getFileParameterKeys, parameterDefs } from "@render
 import { produce } from "immer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
-import { getUndoManager } from "../lib/undo-manager";
+import { destroyUndoManager, getUndoManager } from "../lib/undo-manager";
 import type { Brush, OpenFile, ParameterKey, State, ZustandGet, ZustandSet } from "./types";
 import { generateFileId } from "./utils";
 
@@ -70,6 +70,9 @@ export interface FilesState {
 
 // Open files keyed by file ID
 export const openFiles: Record<string, OpenFile> = {};
+
+// In-flight AI separation guard — blocks a second concurrent stem split on the same file.
+const aiSeparatingFileIds = new Set<string>();
 
 /** Get a consistent colour for a file based on a hash of its file path. */
 export function getFileColor(filePath: string): string {
@@ -501,6 +504,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const { spectrogramData } = originalFile;
     if (!spectrogramData) return;
 
+    // Guard against re-entry: a second click during an in-flight separation would
+    // spawn a duplicate set of four stem files, leaving orphaned entries behind.
+    if (aiSeparatingFileIds.has(fileId)) return;
+    aiSeparatingFileIds.add(fileId);
+
     const modelFile = "htdemucs.onnx";
     if (!window.audioAnalysis.isModelDownloaded(modelFile)) {
       notifications.show({
@@ -544,6 +552,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           loading: false,
           autoClose: 5000,
         });
+        aiSeparatingFileIds.delete(fileId);
         return;
       }
     }
@@ -579,6 +588,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }),
     );
 
+    let audioContext: AudioContext | null = null;
     try {
       // Step 1: Synthesize the current painted state via Gaborator → get audio channels
       const fboData = await originalFile.rendererRef?.current?.getFBOData();
@@ -604,7 +614,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
       // Step 3: Re-analyse each stem with Gaborator → SpectrogramData → new file entry
       const analysisParams = { bandsPerOctave: state.bandsPerOctave, minFreq: state.minFreq };
-      const audioContext = new AudioContext({ sampleRate: spectrogramData.sampleRate });
+      audioContext = new AudioContext({ sampleRate: spectrogramData.sampleRate });
 
       for (let i = 0; i < stemNames.length; i++) {
         const stemChannels = stems[stemNames[i]];
@@ -651,7 +661,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
 
       audioContext.close();
+      audioContext = null;
     } catch (error) {
+      audioContext?.close();
       console.error("AI separation failed:", error);
       notifications.show({
         title: "AI separation failed",
@@ -675,6 +687,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           }
         }),
       );
+      aiSeparatingFileIds.delete(fileId);
       return;
     }
 
@@ -683,6 +696,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         for (const id of stemIds) delete state.filesLoading[id];
       }),
     );
+    aiSeparatingFileIds.delete(fileId);
   },
   saveActiveFile: async () => {
     const state = get();
@@ -944,13 +958,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       state.stopAudio();
     }
 
+    // Fire-and-forget: drops FBO snapshots and the per-file temp directory.
+    destroyUndoManager(fileId).catch((err) => console.error("destroyUndoManager failed", err));
+
     return set(
       produce((state: State) => {
         if (openFile) {
-          if (state.isPlaying && state.activeFileId === fileId) {
-            state.stopAudio();
-          }
-
           state.openFileIds = state.openFileIds.filter((id) => id !== fileId);
           delete state.filesBandsPerOctave[fileId];
           delete state.filesZoom[fileId];
@@ -1046,9 +1059,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         startFrame = Math.max(0, Math.floor(dirtyRegion.startX * originalAnalysis.numFrames));
         endFrame = Math.min(originalAnalysis.numFrames, Math.ceil(dirtyRegion.endX * originalAnalysis.numFrames));
 
-        // Convert UV Y coordinates to band numbers (Y=0 is lowest freq, Y=1 is highest)
-        startBand = Math.max(0, Math.floor(dirtyRegion.startY * originalAnalysis.numBands));
-        endBand = Math.min(originalAnalysis.numBands, Math.ceil(dirtyRegion.endY * originalAnalysis.numBands));
+        // UV Y=0 is the visual top (highest band index, highest freq); UV Y=1 is the bottom
+        // (band 0, lowest freq). Invert so startBand..endBand covers the actually modified bands.
+        startBand = Math.max(0, Math.floor((1.0 - dirtyRegion.endY) * originalAnalysis.numBands));
+        endBand = Math.min(
+          originalAnalysis.numBands,
+          Math.ceil((1.0 - dirtyRegion.startY) * originalAnalysis.numBands),
+        );
 
         // Extract existing audio channels for crossfade splicing in C++
         const extractStart = performance.now();
@@ -1526,7 +1543,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (activeFileId && openFiles[activeFileId]) {
       const file = openFiles[activeFileId];
       const transport = Tone.getTransport();
-      transport.bpm.value = get().filepathsBpm[file.filePath];
+      transport.bpm.value = get().filepathsBpm[file.filePath] ?? 120;
 
       if (file.audioBuffer) {
         transport.setLoopPoints(0, file.audioBuffer.duration);

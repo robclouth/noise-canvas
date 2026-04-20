@@ -2,7 +2,13 @@ import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
 import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
 import { BRUSH_ANCHOR_MODE_CENTER } from "@renderer/lib/constants";
 import { buildScaleOffsets, minFreqSemisAboveC0, stepScaleSemis } from "@renderer/lib/scale-snap";
-import { snapToSwungGridCenter, snapToSwungGridFloor, stepSwungGrid, stepSwungGridCenter } from "@renderer/lib/utils";
+import {
+  resolveBrushFootprint,
+  snapToSwungGridCenter,
+  snapToSwungGridFloor,
+  stepSwungGrid,
+  stepSwungGridCenter,
+} from "@renderer/lib/utils";
 import type { ParameterKey } from "./types";
 import { openFiles } from "./files";
 import type { ZustandGet, ZustandSet } from "./types";
@@ -178,8 +184,21 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
 
       let autoPlaybackParams: { startTimeSeconds: number; endTimeSeconds: number } | null = null;
       if (autoPlayStroke) {
-        const beatsToSeconds = 60 / bpm;
-        const brushDurationSeconds = state.brushSizeTime * beatsToSeconds;
+        // Use the resolved footprint so Grid/Full brush sizes contribute their real
+        // duration (slider value alone misreads the 0 / ≥32 sentinels).
+        const autoplayFootprint = resolveBrushFootprint({
+          brushSizeTime: state.brushSizeTime,
+          brushSizePitch: state.brushSizePitch,
+          gridSizeBeats: state.gridSizeBeats,
+          gridSizeSemis: state.gridSizeSemis,
+          bpm,
+          totalDuration,
+          bandsPerOctave: spectrogramData.bandsPerOctave,
+          numBands: spectrogramData.numBands,
+        });
+        const brushDurationSeconds = autoplayFootprint.fullTime
+          ? totalDuration
+          : autoplayFootprint.sizeUv.x * totalDuration;
 
         // Extend time range by brush footprint for autoplay
         const autoPlayStart = clampedStart;

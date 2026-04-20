@@ -365,6 +365,8 @@ export const NumboxControl = (props: NumboxControlProps) => {
                 setValue(rightValue.value);
               } else if (numberValue <= min) {
                 setValue(min);
+              } else if (numberValue >= max) {
+                setValue(max);
               } else {
                 if (step) setValue(Math.round(numberValue / step) * step);
                 else setValue(numberValue);
