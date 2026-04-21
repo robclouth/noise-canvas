@@ -34,11 +34,12 @@ float applyEdgeModeAxis(float localPos, float brushSize, int edgeMode,
         return w;
     } else if (edgeMode == 3) {                            // Clamp
         return clamp(localPos, 0.0, brushSize - 1e-6);
-    } else if (edgeMode == 4) {                            // Reflect
-        float r = localPos;
-        if (r < 0.0) r = -r;
-        else if (r >= brushSize) r = 2.0 * brushSize - r - 1e-6;
-        return clamp(r, 0.0, brushSize - 1e-6);
+    } else if (edgeMode == 4) {                            // Reflect (infinite triangle)
+        float period = 2.0 * brushSize;
+        float p = mod(localPos, period);
+        if (p < 0.0) p += period;
+        if (p >= brushSize) p = 2.0 * brushSize - p;
+        return clamp(p, 0.0, brushSize - 1e-6);
     } else if (edgeMode == 5) {                            // Invert
         invertSample = true;
         return localPos;
