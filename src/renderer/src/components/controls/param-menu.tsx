@@ -135,7 +135,7 @@ export const ParamMenu = ({
   const macroAmountParamKeys = isModulatable && !contextualOnly ? getMacroAmountParamKeys(paramKey) : undefined;
 
   return (
-    <Menu opened={opened} onChange={setOpened} position="bottom" withArrow withinPortal={false}>
+    <Menu opened={opened} onChange={setOpened} position="bottom" withArrow>
       <Tooltip label={parameter.description}>
         <Menu.Target>
           <Group

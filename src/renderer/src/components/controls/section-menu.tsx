@@ -132,7 +132,7 @@ export const SectionMenu = ({
   };
 
   return (
-    <Menu opened={opened} onChange={setOpened} position="right-start" withArrow withinPortal={false}>
+    <Menu opened={opened} onChange={setOpened} position="right-start" withArrow>
       <Menu.Target>
         <ActionIcon
           onClick={(e) => {
