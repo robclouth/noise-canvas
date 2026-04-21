@@ -1,4 +1,4 @@
-import { Box, Stack, Text, UnstyledButton } from "@mantine/core";
+import { Box, SimpleGrid, Stack, Text, UnstyledButton } from "@mantine/core";
 import { ContextModalProps } from "@mantine/modals";
 import { EFFECT_KEYS, EffectType } from "@renderer/effects/types";
 import { EFFECT_COLORS, EFFECT_DESCRIPTIONS, EFFECT_LABELS } from "@renderer/lib/constants";
@@ -19,7 +19,7 @@ export const AddEffectModal = ({
   resolve: (effect: EffectType) => void;
 }>) => {
   return (
-    <Stack gap="xs">
+    <SimpleGrid cols={2} spacing="xs" verticalSpacing="xs">
       {AVAILABLE_EFFECTS.map((effect) => (
         <UnstyledButton
           key={effect}
@@ -49,7 +49,7 @@ export const AddEffectModal = ({
                 flexShrink: 0,
               }}
             />
-            <Box>
+            <Box style={{ minWidth: 0 }}>
               <Text size="sm" fw={600}>
                 {EFFECT_LABELS[effect]}
               </Text>
@@ -60,7 +60,7 @@ export const AddEffectModal = ({
           </Box>
         </UnstyledButton>
       ))}
-    </Stack>
+    </SimpleGrid>
   );
 };
 

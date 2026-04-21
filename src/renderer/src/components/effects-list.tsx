@@ -130,6 +130,7 @@ export function EffectsList() {
     openContextModal({
       modal: "addEffect",
       title: "Add Effect",
+      size: "md",
       innerProps: {
         resolve: (effect: EffectType) => {
           const state = useStore.getState();
