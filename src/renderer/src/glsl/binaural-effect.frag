@@ -29,6 +29,23 @@ uniform Parameter azimuth;
 uniform Parameter distance;
 uniform Parameter stereoAngle;
 
+// Woodworth's ITD model: a pure time delay in seconds for a source at azimuth
+// azDeg (0=front, +=right, -=left). Max ≈0.66 ms at ±90°. Because this is a
+// delay in seconds it maps to the linear phase shift -2π·f·τ — smooth across
+// frequency, which plays well with the multi-resolution spectrogram.
+const float HEAD_RADIUS = 0.0875;
+const float SOUND_SPEED = 343.0;
+const float R_OVER_C = HEAD_RADIUS / SOUND_SPEED;
+
+float computeItd(float azDeg) {
+  float az = mod(radians(azDeg) + PI, TWO_PI) - PI; // wrap to [-π, π]
+  float absAz = abs(az);
+  float tau = absAz <= PI * 0.5
+    ? R_OVER_C * (sin(absAz) + absAz)
+    : R_OVER_C * (PI - absAz + sin(absAz));
+  return sign(az) * tau;
+}
+
 // Sample HRTF at given azimuth and frequency
 vec4 sampleHrtf(float az, float bandFreqHz) {
   // Map azimuth to texture U coordinate [0, 1]
@@ -90,36 +107,38 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
   float airAbsorb = exp(-0.0001 * distValue * bandFreqHz);
   atten *= airAbsorb;
 
-  // Extract source magnitude and phase
+  // Magnitudes from the HRTF (ILD + pinna colouration); phase gets a pure
+  // linear-phase ITD delay per virtual source — no HRTF phase rotation, which
+  // was the source of the bin-to-bin phase scrambling.
   float srcMagL = getMag(sourceTexel.rg);
   float srcPhaseL = getPhase(sourceTexel.rg);
   float srcMagR = getMag(sourceTexel.ba);
   float srcPhaseR = getPhase(sourceTexel.ba);
 
-  // Apply HRTF to each channel separately:
-  // Left source channel goes through HRTF at leftAz position
-  // hrtfL.r = left ear magnitude, hrtfL.b = right ear magnitude
-  float outMagLL = srcMagL * hrtfL.r * atten;  // Left channel -> left ear
-  float outPhaseLL = srcPhaseL + hrtfL.g;
-  float outMagLR = srcMagL * hrtfL.b * atten;  // Left channel -> right ear
-  float outPhaseLR = srcPhaseL + hrtfL.a;
+  // Symmetric half-delay: left ear lags by itd/2 for a right-side source.
+  // Phase shift = -2π·f·delay, so +half-delay → -π·f·itd, -half-delay → +π·f·itd.
+  float itdLeftSrc  = computeItd(leftAz);
+  float itdRightSrc = computeItd(rightAz);
+  float phiLL = -PI * bandFreqHz * itdLeftSrc;   // left ear, from L-channel virtual source
+  float phiLR = +PI * bandFreqHz * itdLeftSrc;   // right ear, from L-channel virtual source
+  float phiRL = -PI * bandFreqHz * itdRightSrc;  // left ear, from R-channel virtual source
+  float phiRR = +PI * bandFreqHz * itdRightSrc;  // right ear, from R-channel virtual source
 
-  // Right source channel goes through HRTF at rightAz position
-  float outMagRL = srcMagR * hrtfR.r * atten;  // Right channel -> left ear
-  float outPhaseRL = srcMagR > 0.0 ? srcPhaseR + hrtfR.g : 0.0;
-  float outMagRR = srcMagR * hrtfR.b * atten;  // Right channel -> right ear
-  float outPhaseRR = srcMagR > 0.0 ? srcPhaseR + hrtfR.a : 0.0;
+  float magLL = srcMagL * hrtfL.r * atten;
+  float magLR = srcMagL * hrtfL.b * atten;
+  float magRL = srcMagR * hrtfR.r * atten;
+  float magRR = srcMagR * hrtfR.b * atten;
 
-  // Sum contributions to each ear
-  // Left ear = (left channel through left HRTF) + (right channel through right HRTF)
-  vec2 leftEarFromL = fromPolar(outMagLL, outPhaseLL);
-  vec2 leftEarFromR = fromPolar(outMagRL, outPhaseRL);
-  vec2 outL = leftEarFromL + leftEarFromR;
-
-  // Right ear = (left channel through left HRTF) + (right channel through right HRTF)
-  vec2 rightEarFromL = fromPolar(outMagLR, outPhaseLR);
-  vec2 rightEarFromR = fromPolar(outMagRR, outPhaseRR);
-  vec2 outR = rightEarFromL + rightEarFromR;
+  // Sum contributions per ear in complex space — the two virtual sources arrive
+  // at each ear with different ITDs, so their superposition must be coherent.
+  vec2 outL = polarFromComplex(
+    toComplex(fromPolar(magLL, srcPhaseL + phiLL)) +
+    toComplex(fromPolar(magRL, srcPhaseR + phiRL))
+  );
+  vec2 outR = polarFromComplex(
+    toComplex(fromPolar(magLR, srcPhaseL + phiLR)) +
+    toComplex(fromPolar(magRR, srcPhaseR + phiRR))
+  );
 
   return vec4(outL, outR);
 }
