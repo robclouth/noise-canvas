@@ -1,7 +1,13 @@
 import { ActionIcon, Box, Divider, Group, Menu, Stack, Text, useMantineTheme } from "@mantine/core";
 import { openPrompt } from "@renderer/lib/modals";
 import { getParameterDef, isEffectParameter, parameterDefs } from "@renderer/parameters";
-import { getMacroValueIndex, getModulationParamKeys, useStore } from "@renderer/store";
+import {
+  getMacroValueIndex,
+  getModulationParamKeys,
+  selectEffectParameter,
+  selectParameter,
+  useStore,
+} from "@renderer/store";
 import {
   getContextualModAmountParamKeys,
   getMacroAmountParamKeys,
@@ -10,12 +16,50 @@ import {
 import { ParameterKey } from "@renderer/store/types";
 import { Link2, Pencil, RotateCcw } from "lucide-react";
 import React, { useState } from "react";
+import { useShallow } from "zustand/shallow";
 
 const EMPTY_STRING_ARRAY: readonly string[] = [];
 import { Tooltip } from "../tooltip";
 import { ParameterControl } from "./parameter-control";
 import { SectionMenu } from "./section-menu";
 import { SwitchControl } from "./switch-control";
+
+const formatRangeValue = (v: number, unit?: string) => `${parseFloat(v.toFixed(2))}${unit ?? ""}`;
+
+const ModulationRange = ({ paramKey, effectId }: { paramKey: ParameterKey; effectId?: string }) => {
+  const parameter = getParameterDef(paramKey);
+
+  const { value, totalAbs } = useStore(
+    useShallow((state) => {
+      const useEffectScope = !!effectId && isEffectParameter(paramKey);
+      const selectVal = (k: ParameterKey) =>
+        useEffectScope ? selectEffectParameter(effectId, k)(state) : selectParameter(k)(state);
+      const val = selectVal(paramKey) as number;
+      const amountKeys: ParameterKey[] = [
+        ...getModAmountParamKeys(paramKey),
+        ...getContextualModAmountParamKeys(paramKey),
+        ...getMacroAmountParamKeys(paramKey),
+      ];
+      let total = 0;
+      for (const k of amountKeys) {
+        const a = selectVal(k) as number;
+        total += Math.abs(a);
+      }
+      return { value: val, totalAbs: Math.min(100, total) / 100 };
+    }),
+  );
+
+  if (parameter.kind !== "number" || totalAbs === 0) return null;
+
+  const lower = value - totalAbs * (value - parameter.min);
+  const upper = value + totalAbs * (parameter.max - value);
+
+  return (
+    <Text size="xs" c="dark.2">
+      {formatRangeValue(lower, parameter.unit)} – {formatRangeValue(upper, parameter.unit)}
+    </Text>
+  );
+};
 
 type ParamMenuProps = {
   paramKey: ParameterKey;
@@ -197,10 +241,11 @@ export const ParamMenu = ({
           {/* Modulation section (if applicable) */}
           {isModulatable && contextualModParamKeys && (
             <>
-              <Group gap={4} wrap="nowrap" align="center" h={24} mt={4}>
+              <Group gap={6} wrap="nowrap" align="center" h={24} mt={4}>
                 <Text size="xs" c="dark.1">
                   Modulation
                 </Text>
+                <ModulationRange paramKey={paramKey} effectId={effectId} />
                 <Divider style={{ flex: 1 }} color="dark.4" />
                 <SectionMenu
                   storageKey={`param-${paramKey}-mod`}
