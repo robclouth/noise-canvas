@@ -617,7 +617,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           bandLengths: spectrogramData.synthesisMetadata.bandLengths,
         },
         spectrogramData.sampleRate,
-        { bandsPerOctave: state.bandsPerOctave, minFreq: state.minFreq },
+        { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq },
         false, // don't normalize — preserve relative levels for separation
       );
 
@@ -625,7 +625,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const stems = await window.audioAnalysis.aiSeparate(synthesisResult.channels, spectrogramData.sampleRate);
 
       // Step 3: Re-analyse each stem with Gaborator → SpectrogramData → new file entry
-      const analysisParams = { bandsPerOctave: state.bandsPerOctave, minFreq: state.minFreq };
+      const analysisParams = { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq };
       audioContext = new AudioContext({ sampleRate: spectrogramData.sampleRate });
 
       for (let i = 0; i < stemNames.length; i++) {
@@ -1000,7 +1000,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const synthesizeFileStart = performance.now();
     console.log("[timing] synthesizeFile started");
 
-    const { activeFileId, bandsPerOctave, minFreq, getPlayer, setFileSynthesizing } = get();
+    const { activeFileId, getPlayer, setFileSynthesizing } = get();
     if (!activeFileId) return;
 
     try {
@@ -1038,8 +1038,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       };
 
       const analysisParams = {
-        bandsPerOctave: bandsPerOctave,
-        minFreq: minFreq,
+        bandsPerOctave: originalAnalysis.bandsPerOctave,
+        minFreq: originalAnalysis.minFreq,
       };
 
       const processedDataArray = new Float32Array(
@@ -1371,7 +1371,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (!file?.spectrogramData || !file.rendererRef?.current) return;
 
     const { spectrogramData } = file;
-    const analysisParams = { bandsPerOctave: state.bandsPerOctave, minFreq: state.minFreq };
+    const analysisParams = { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq };
 
     try {
       const fboData = await file.rendererRef.current.getFBOData();
