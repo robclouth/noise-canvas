@@ -802,11 +802,16 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const truncatedFileName = truncateMiddle(savedFileName, 50);
 
     try {
-      // Extract audio channels from AudioBuffer
+      // Extract audio channels from AudioBuffer, applying normalize gain to match the saveActiveFile path.
       const numChannels = file.audioBuffer.numberOfChannels;
+      const normalize = get().normalize;
+      const gain = normalize && file.audioPeak && file.audioPeak > 0 ? 1 / file.audioPeak : 1;
       const audioChannels: Float32Array[] = [];
       for (let i = 0; i < numChannels; i++) {
-        audioChannels.push(file.audioBuffer.getChannelData(i));
+        const src = file.audioBuffer.getChannelData(i);
+        const dst = new Float32Array(src.length);
+        for (let j = 0; j < src.length; j++) dst[j] = src[j] * gain;
+        audioChannels.push(dst);
       }
 
       // Determine format from file extension
@@ -880,11 +885,16 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const truncatedFileName = truncateMiddle(newFileName, 50);
 
     try {
-      // Extract audio channels from AudioBuffer
+      // Extract audio channels from AudioBuffer, applying normalize gain to match the saveActiveFile path.
       const numChannels = file.audioBuffer.numberOfChannels;
+      const normalize = get().normalize;
+      const gain = normalize && file.audioPeak && file.audioPeak > 0 ? 1 / file.audioPeak : 1;
       const audioChannels: Float32Array[] = [];
       for (let i = 0; i < numChannels; i++) {
-        audioChannels.push(file.audioBuffer.getChannelData(i));
+        const src = file.audioBuffer.getChannelData(i);
+        const dst = new Float32Array(src.length);
+        for (let j = 0; j < src.length; j++) dst[j] = src[j] * gain;
+        audioChannels.push(dst);
       }
 
       // Determine format from file extension
@@ -1432,8 +1442,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         numChannels: result.numChannels,
         sampleRate: result.sampleRate,
         packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-        minFreq: state.minFreq,
-        bandsPerOctave: state.bandsPerOctave,
+        minFreq: analysisParams.minFreq,
+        bandsPerOctave: analysisParams.bandsPerOctave,
         synthesisMetadata: {
           bandOffsets: result.bandOffsets,
           bandStepLog2s: result.bandStepLog2s,
@@ -1441,7 +1451,16 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         },
       };
       file.audioBuffer = audioBuffer;
-      file.audioPeak = synthResult.peak > 0 ? synthResult.peak : 1;
+
+      let newPeak = 0;
+      for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
+        const data = audioBuffer.getChannelData(ch);
+        for (let i = 0; i < data.length; i++) {
+          const v = Math.abs(data[i]);
+          if (v > newPeak) newPeak = v;
+        }
+      }
+      file.audioPeak = newPeak > 0 ? newPeak : 1;
 
       file.rendererRef.current.reloadTextures();
       getUndoManager(fileId).clear();
