@@ -14,6 +14,7 @@ export const ConvolveEffect = memo(function ConvolveEffect() {
       <ParameterControl paramKey="convolveIrPitchShift" color={COLOR} />
       <ParameterControl paramKey="convolveIrRate" color={COLOR} />
       <ParameterControl paramKey="convolveGainDb" color={COLOR} />
+      <ParameterControl paramKey="convolveEdgeMode" color={COLOR} />
     </SimpleGrid>
   );
 });

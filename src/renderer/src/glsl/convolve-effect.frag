@@ -1,14 +1,17 @@
 #include "effect-common.glsl"
+#include "edge-mode.glsl"
 
 uniform sampler2D convolveIrTex;
 uniform sampler2D convolveIrMetadataTex;
 uniform float     convolveIrFrameCount;
 uniform float     convolveIrBandCount;
-uniform vec2      convolveIrTextureSize;
+uniform float     convolveIrMinFreq;
+uniform float     convolveIrBandsPerOctave;
 uniform bool      convolveIrEnabled;
 uniform int       convolveIrSize;
+uniform int       convolveEdgeMode;
 uniform Parameter convolveIrTimeOffset;
-uniform Parameter convolveIrPitchShiftBands;
+uniform Parameter convolveIrPitchShiftSemi;
 uniform Parameter convolveIrRate;
 uniform Parameter convolveGain;
 
@@ -29,9 +32,9 @@ void main() {
     convolveIrTimeOffset.modulationAmounts, convolveIrTimeOffset.contextualModAmounts, convolveIrTimeOffset.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
-  float irPitchShiftBands = applyModulationMono(
-    convolveIrPitchShiftBands.value, convolveIrPitchShiftBands.minValue, convolveIrPitchShiftBands.maxValue,
-    convolveIrPitchShiftBands.modulationAmounts, convolveIrPitchShiftBands.contextualModAmounts, convolveIrPitchShiftBands.macroAmounts,
+  float irPitchShiftSemi = applyModulationMono(
+    convolveIrPitchShiftSemi.value, convolveIrPitchShiftSemi.minValue, convolveIrPitchShiftSemi.maxValue,
+    convolveIrPitchShiftSemi.modulationAmounts, convolveIrPitchShiftSemi.contextualModAmounts, convolveIrPitchShiftSemi.macroAmounts,
     coords.dest, 0, audioLevelDb
   );
   float rate = applyModulationMono(
@@ -59,9 +62,16 @@ void main() {
   int   srcMaxPx = max(srcTexSize.x - 1, 0);
   int   srcMaxPy = max(srcTexSize.y - 1, 0);
 
-  // Pitch shift applied to IR band index (up-shift = read higher-freq IR content
-  // for this output freq). Clamp to available IR bands.
-  float irBandIndexF = floor((1.0 - coords.dest.y) * convolveIrBandCount) + irPitchShiftBands;
+  // Map dest Hz -> IR band so IRs analyzed with a different minFreq / bpo still
+  // filter at matching absolute frequencies (proportional y lookup gives wrong
+  // bands when the IR has a different layout). Positive pitch shift reads LOWER
+  // IR frequencies so that content plays back sounding higher — since gaborator
+  // stores band 0 = highest freq and band N-1 = lowest, that is a POSITIVE
+  // delta on the band index.
+  float fDest = max(getDestMetadata(coords.dest).a, 1e-6);
+  float irBandAtFout = (convolveIrBandCount - 1.0)
+                     - convolveIrBandsPerOctave * log2(fDest / max(convolveIrMinFreq, 1e-6));
+  float irBandIndexF = irBandAtFout + (convolveIrBandsPerOctave / 12.0) * irPitchShiftSemi;
   float irBandIndex = clamp(irBandIndexF, 0.0, convolveIrBandCount - 1.0);
   vec4  irMeta = fetchBandMetadata(convolveIrMetadataTex, irBandIndex);
   float irBandStart     = irMeta.r;
@@ -72,33 +82,83 @@ void main() {
   int   irMaxPx = max(irTexSize.x - 1, 0);
   int   irMaxPy = max(irTexSize.y - 1, 0);
 
-  // Band-local starting positions (source and IR).
-  float srcBaseBandIdx = (coords.source.x * sourceFrameCount) / srcBandTimeScale;
-  float irBaseBandIdx  = (irTimeOff * convolveIrFrameCount) / irBandTimeScale;
+  // IR base position in band-local units. The source per-tap position is
+  // derived inside the loop via the dest-UV formulation so the brush edge mode
+  // can rewrite it; no separate srcBaseBandIdx needed.
+  float irBaseBandIdx = (irTimeOff * convolveIrFrameCount) / irBandTimeScale;
 
   int effectiveTaps = int(min(float(convolveIrSize), irBandLength));
 
   vec2 accumL = vec2(0.0);
   vec2 accumR = vec2(0.0);
 
-  // rate controls how the source advances per tap:
-  //   rate =  1: srcIdx steps -1 per tap (past) → forward reverb at normal speed
-  //   rate = -1: srcIdx steps +1 per tap (future) → reverse reverb at normal speed
+  // rate controls how the source advances per tap, measured in REAL TIME:
+  //   rate =  1: forward reverb at normal speed (one IR-tap of real time into the past per step)
+  //   rate = -1: reverse reverb at normal speed (one IR-tap of real time into the future)
   //   |rate|>1 stretches tail in time; |rate|<1 compresses; 0 is a scalar filter.
+  // One IR tap covers irBandTimeScale real frames. Expressed in dest UV that's:
+  //   destUvStepPerTap = rate * irBandTimeScale / (sourceFrameCount * sourceTimeScale)
+  // From any tap's dest-UV-x we can recover its source-UV-x via the identity
+  //   effSourceUvX = coords.source.x + (effDestUvX - coords.dest.x) * sourceTimeScale
+  // (source/dest offsets + modulation cancel because they don't depend on k).
+  // This matches the naive band-local formulation when no edge remap happens,
+  // but also lets the brush edge mode rewrite effDestUvX inside the brush.
+  float destUvStepPerTap = rate * irBandTimeScale
+                         / max(sourceFrameCount * max(sourceTimeScale, 1e-6), 1e-6);
+
+  // Global wrapMode handles reads that exit file bounds (useful for seamless
+  // loops). convolveEdgeMode handles reads that exit the BRUSH but stay in-file.
+  // Clamping to the file edge would turn every past-start tap into source[0]
+  // and convolve that into the IR, producing a bogus impulse at t=0 that rings
+  // out the tail — zero-pad instead. IR reads always zero-pad: an IR is finite
+  // and wrapping it is meaningless.
+  bool wrapSrcTime = (wrapMode == 1 || wrapMode == 3);
+
   // IR always reads forward (tap k → IR frame k + 0.5).
   for (int k = 0; k < 512; k++) {
     if (k >= effectiveTaps) break;
 
-    float srcBandIdxF = srcBaseBandIdx - rate * float(k);
-    float srcIdx = clamp(floor(srcBandIdxF), 0.0, srcBandLength - 1.0);
+    // --- Brush edge mode (X axis only; convolve doesn't step across bands). --
+    float tapDestUvX = coords.dest.x - destUvStepPerTap * float(k);
+    float localX = tapDestUvX - brushBottomLeftUv.x;
+    bool tapZero, tapInvert;
+    float newLocalX = applyEdgeModeAxis(localX, brushSizeUv.x, convolveEdgeMode, tapZero, tapInvert);
+    if (tapZero) continue;
+
+    // Cut / Bleed / Invert don't relocate the sample (Invert just negates the
+    // contribution below). Wrap / Clamp / Reflect move the read back inside
+    // the brush in dest UV space.
+    float effDestUvX = (convolveEdgeMode == 0 || convolveEdgeMode == 1 || convolveEdgeMode == 5)
+                     ? tapDestUvX
+                     : (brushBottomLeftUv.x + newLocalX);
+    float effSourceUvX = coords.source.x + (effDestUvX - coords.dest.x) * sourceTimeScale;
+    float srcBandIdxF = effSourceUvX * sourceFrameCount / max(srcBandTimeScale, 1e-6);
+
+    // --- File-bounds / global wrap on the source index. ----------------------
+    float srcIdxFloor = floor(srcBandIdxF);
+    float srcIdx;
+    bool srcInBounds;
+    if (wrapSrcTime) {
+      srcIdx = mod(srcIdxFloor, srcBandLength);
+      if (srcIdx < 0.0) srcIdx += srcBandLength;
+      srcInBounds = true;
+    } else {
+      srcIdx = srcIdxFloor;
+      srcInBounds = (srcIdxFloor >= 0.0) && (srcIdxFloor < srcBandLength);
+    }
+
+    float irBandIdxF = irBaseBandIdx + float(k) + 0.5;
+    float irIdxFloor = floor(irBandIdxF);
+    bool irInBounds = (irIdxFloor >= 0.0) && (irIdxFloor < irBandLength);
+
+    if (!srcInBounds || !irInBounds) continue;
+
     float srcPixel = srcBandStart + srcIdx;
     int srcPx = clamp(int(mod(srcPixel, srcTexWidthF)), 0, srcMaxPx);
     int srcPy = clamp(int(floor(srcPixel / srcTexWidthF)), 0, srcMaxPy);
     vec4 srcTexel = texelFetch(sourceSpectrogramTex, ivec2(srcPx, srcPy), 0);
 
-    float irBandIdxF = irBaseBandIdx + float(k) + 0.5;
-    float irIdx = clamp(floor(irBandIdxF), 0.0, irBandLength - 1.0);
-    float irPixel = irBandStart + irIdx;
+    float irPixel = irBandStart + irIdxFloor;
     int irPx = clamp(int(mod(irPixel, irTexWidthF)), 0, irMaxPx);
     int irPy = clamp(int(floor(irPixel / irTexWidthF)), 0, irMaxPy);
     vec4 irTexel = texelFetch(convolveIrTex, ivec2(irPx, irPy), 0);
@@ -108,8 +168,9 @@ void main() {
     float magR = srcTexel.z * irTexel.z;
     float phsR = srcTexel.w + irTexel.w;
 
-    accumL += magL * vec2(cos(phsL), sin(phsL));
-    accumR += magR * vec2(cos(phsR), sin(phsR));
+    float tapSign = tapInvert ? -1.0 : 1.0;
+    accumL += tapSign * magL * vec2(cos(phsL), sin(phsL));
+    accumR += tapSign * magR * vec2(cos(phsR), sin(phsR));
   }
 
   float outMagL = length(accumL) * gain;

@@ -1475,6 +1475,16 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     modulatable: true,
     effectType: "convolve" as EffectType,
   },
+  convolveEdgeMode: {
+    kind: "options",
+    name: "Convolve Edge Mode",
+    label: "Edge",
+    description: "How convolution taps that extend past the brush boundary are handled.",
+    default: 1,
+    options: EDGE_MODE,
+    includeInStep: true,
+    effectType: "convolve" as EffectType,
+  },
 
   effects: {
     kind: "options",

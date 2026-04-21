@@ -5,7 +5,7 @@ import {
   getMacroAmountValuesNormalized,
 } from "@renderer/store/modulators";
 import { getOpenFileByPath, openFiles } from "@renderer/store/files";
-import { GLSL3, RawShaderMaterial, Vector2 } from "three";
+import { GLSL3, RawShaderMaterial } from "three";
 import convolveEffectFrag from "../glsl/convolve-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { withPlatformDefines } from "../lib/shader-utils";
@@ -33,15 +33,15 @@ class ConvolveEffect extends BaseEffect {
           convolveIrMetadataTex: { value: null },
           convolveIrFrameCount: { value: 0 },
           convolveIrBandCount: { value: 0 },
-          convolveIrTextureSize: { value: new Vector2(0, 0) },
+          convolveIrMinFreq: { value: 20 },
+          convolveIrBandsPerOctave: { value: 24 },
           convolveIrEnabled: { value: false },
           convolveIrSize: { value: 0 },
           convolveIrTimeOffset: paramUniform(),
-          // Pitch shift in IR-band-local units (bands, can be fractional).
-          // Converted from semitones in TS using the IR's bandsPerOctave.
-          convolveIrPitchShiftBands: paramUniform(0, -256, 256),
+          convolveIrPitchShiftSemi: paramUniform(0, -24, 24),
           convolveIrRate: paramUniform(1, -256, 256),
           convolveGain: paramUniform(1, 0, 64),
+          convolveEdgeMode: { value: 1 },
         },
         vertexShader: passThroughVert,
         fragmentShader: withPlatformDefines(convolveEffectFrag),
@@ -66,29 +66,31 @@ class ConvolveEffect extends BaseEffect {
     const irData = irOpenFile?.spectrogramData;
 
     // Resolve the IR source. If an explicit IR file was picked and is loaded, use it.
-    // Otherwise "Self" — use the current dest (canvas) as the IR. updateCommonUniforms
-    // ran first, so material.uniforms.dest* hold the dest textures/metadata for this pass.
-    let bandsPerOctaveForPitchShift: number;
+    // Otherwise "Self" — fall back to the source (the file being painted from).
+    // updateCommonUniforms ran first, so material.uniforms.source* are populated.
+    // Painting a file onto itself collapses this to true self-convolution; painting
+    // from B onto A gives B ⊛ B (static IR, predictable). Use a "canvas as filter"
+    // workflow by explicitly picking the canvas file as the IR.
     if (irFile && irTextures && irData) {
       material.uniforms.convolveIrTex.value = irTextures.packed.texture;
       material.uniforms.convolveIrMetadataTex.value = irTextures.metadata;
       material.uniforms.convolveIrFrameCount.value = irData.numFrames;
       material.uniforms.convolveIrBandCount.value = irData.numBands;
-      material.uniforms.convolveIrTextureSize.value = irData.packedTextureSize;
+      material.uniforms.convolveIrMinFreq.value = irData.minFreq;
+      material.uniforms.convolveIrBandsPerOctave.value = irData.bandsPerOctave;
       material.uniforms.convolveIrEnabled.value = true;
-      bandsPerOctaveForPitchShift = irData.bandsPerOctave;
     } else {
-      // Self-convolution: dest texture doubles as the IR.
-      material.uniforms.convolveIrTex.value = material.uniforms.destSpectrogramTex.value;
-      material.uniforms.convolveIrMetadataTex.value = material.uniforms.destMetadataTex.value;
-      material.uniforms.convolveIrFrameCount.value = material.uniforms.destFrameCount.value;
-      material.uniforms.convolveIrBandCount.value = material.uniforms.destBandCount.value;
-      material.uniforms.convolveIrTextureSize.value = material.uniforms.destSpectrogramTextureSize.value;
+      material.uniforms.convolveIrTex.value = material.uniforms.sourceSpectrogramTex.value;
+      material.uniforms.convolveIrMetadataTex.value = material.uniforms.sourceMetadataTex.value;
+      material.uniforms.convolveIrFrameCount.value = material.uniforms.sourceFrameCount.value;
+      material.uniforms.convolveIrBandCount.value = material.uniforms.sourceBandCount.value;
+      material.uniforms.convolveIrMinFreq.value = material.uniforms.sourceMinFreq.value;
+      material.uniforms.convolveIrBandsPerOctave.value = material.uniforms.sourceBandsPerOctave.value;
       material.uniforms.convolveIrEnabled.value = true;
-      bandsPerOctaveForPitchShift = material.uniforms.destBandsPerOctave.value as number;
     }
 
     material.uniforms.convolveIrSize.value = Math.max(1, Math.floor(state.convolveIrSize));
+    material.uniforms.convolveEdgeMode.value = state.convolveEdgeMode;
 
     const timeOffsetDef = getNumberParameterDef("convolveIrTimeOffset");
     material.uniforms.convolveIrTimeOffset.value = {
@@ -100,14 +102,11 @@ class ConvolveEffect extends BaseEffect {
       macroAmounts: getMacroAmountValuesNormalized(state, "convolveIrTimeOffset"),
     };
 
-    // Semitones → IR bands (delta). Twelve semitones = one octave = `bandsPerOctave` bands.
-    // Stored in IR-band units so the shader can just add it to the IR band index.
     const pitchShiftDef = getNumberParameterDef("convolveIrPitchShift");
-    const bandsPerSemi = bandsPerOctaveForPitchShift / 12;
-    material.uniforms.convolveIrPitchShiftBands.value = {
-      value: state.convolveIrPitchShift * bandsPerSemi,
-      minValue: pitchShiftDef.min * bandsPerSemi,
-      maxValue: pitchShiftDef.max * bandsPerSemi,
+    material.uniforms.convolveIrPitchShiftSemi.value = {
+      value: state.convolveIrPitchShift,
+      minValue: pitchShiftDef.min,
+      maxValue: pitchShiftDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "convolveIrPitchShift"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "convolveIrPitchShift"),
       macroAmounts: getMacroAmountValuesNormalized(state, "convolveIrPitchShift"),

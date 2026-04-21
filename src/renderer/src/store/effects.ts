@@ -66,6 +66,7 @@ export interface EffectsState {
   convolveIrSize: number;
   convolveGainDb: number;
   convolveIrRate: number;
+  convolveEdgeMode: number;
 }
 
 export const createEffectsSlice = (): EffectsState => {
@@ -156,5 +157,6 @@ export const createEffectsSlice = (): EffectsState => {
     convolveIrSize: getParameterDef("convolveIrSize").default,
     convolveGainDb: getParameterDef("convolveGainDb").default,
     convolveIrRate: getParameterDef("convolveIrRate").default,
+    convolveEdgeMode: getParameterDef("convolveEdgeMode").default,
   };
 };
