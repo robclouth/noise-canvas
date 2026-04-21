@@ -1,200 +1,186 @@
-import { ActionIcon, Combobox, Group, InputBase, Text, TextInput, useCombobox } from "@mantine/core";
+import { DragDropContext, Draggable, Droppable, DropResult } from "@hello-pangea/dnd";
+import { ActionIcon, Group, useMantineTheme } from "@mantine/core";
+import { resolveBrushColor } from "@renderer/lib/colors";
+import { openConfirm } from "@renderer/lib/modals";
 import { useStore } from "@renderer/store";
 import { MAX_STEPS } from "@renderer/store/steps";
-import { ArrowDown, ArrowUp, Copy, Plus, Trash } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Copy, Plus, Trash } from "lucide-react";
+import { useEffect } from "react";
 import { useShallow } from "zustand/shallow";
+import { Tooltip } from "../tooltip";
+
+const TAB_HEIGHT = 28;
+const SLOT_BASIS = `${100 / MAX_STEPS}%`;
 
 export function Steps() {
-  // Consolidate store subscriptions with shallow comparison
-  const { steps, activeStepIndex, setActiveStepIndex, addStep, removeStep, duplicateStep, reorderSteps, setStepName } =
-    useStore(
-      useShallow((state) => ({
-        steps: state.brushes[state.activeBrushIndex]?.steps ?? [],
-        activeStepIndex: state.activeStepIndex,
-        setActiveStepIndex: state.setActiveStepIndex,
-        addStep: state.addStep,
-        removeStep: state.removeStep,
-        duplicateStep: state.duplicateStep,
-        reorderSteps: state.reorderSteps,
-        setStepName: state.setStepName,
-      })),
-    );
+  const theme = useMantineTheme();
+  const {
+    steps,
+    activeStepIndex,
+    activeBrushIndex,
+    setActiveStepIndex,
+    addStep,
+    removeStep,
+    duplicateStep,
+    reorderSteps,
+    ensureStepColors,
+  } = useStore(
+    useShallow((state) => ({
+      steps: state.brushes[state.activeBrushIndex]?.steps ?? [],
+      activeStepIndex: state.activeStepIndex,
+      activeBrushIndex: state.activeBrushIndex,
+      setActiveStepIndex: state.setActiveStepIndex,
+      addStep: state.addStep,
+      removeStep: state.removeStep,
+      duplicateStep: state.duplicateStep,
+      reorderSteps: state.reorderSteps,
+      ensureStepColors: state.ensureStepColors,
+    })),
+  );
 
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [editValue, setEditValue] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-
-  const combobox = useCombobox({
-    onDropdownClose: () => {
-      combobox.resetSelectedOption();
-      setHoveredIndex(null);
-    },
-  });
+  const missingColor = steps.some((s) => !s.color);
+  useEffect(() => {
+    if (missingColor) ensureStepColors();
+  }, [activeBrushIndex, missingColor, ensureStepColors]);
 
   const canAddStep = steps.length < MAX_STEPS;
   const canRemoveStep = steps.length > 1;
 
-  useEffect(() => {
-    if (editingIndex !== null && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
-    }
-  }, [editingIndex]);
-
-  const startEditing = (index: number) => {
-    setEditingIndex(index);
-    setEditValue(steps[index].name);
+  const handleDragEnd = (result: DropResult) => {
+    if (!result.destination) return;
+    if (result.destination.index === result.source.index) return;
+    reorderSteps(result.source.index, result.destination.index);
   };
 
-  const saveName = () => {
-    if (editingIndex !== null) {
-      const trimmed = editValue.trim();
-      if (trimmed) {
-        setStepName(editingIndex, trimmed);
-      }
-      setEditingIndex(null);
-    }
+  const handleDelete = () => {
+    if (!canRemoveStep) return;
+    const index = activeStepIndex;
+    openConfirm({
+      title: "Delete step",
+      message: `Delete step ${index + 1}? This cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+      onConfirm: () => removeStep(index),
+    });
   };
 
-  const activeStep = steps[activeStepIndex];
+  const slotStyle: React.CSSProperties = {
+    flex: `0 0 ${SLOT_BASIS}`,
+    minWidth: 0,
+    paddingLeft: 1,
+    paddingRight: 1,
+    boxSizing: "border-box",
+  };
 
   return (
-    <Group gap="xs" align="center">
-      <Combobox
-        store={combobox}
-        onOptionSubmit={(val) => {
-          setActiveStepIndex(Number(val));
-          combobox.closeDropdown();
-        }}
-        withinPortal
-      >
-        <Combobox.Target>
-          <InputBase
-            component="button"
-            type="button"
-            pointer
-            rightSection={<Combobox.Chevron />}
-            onDoubleClick={(e) => {
-              e.preventDefault();
-              startEditing(activeStepIndex);
-            }}
-            onClick={() => combobox.toggleDropdown()}
-            rightSectionPointerEvents="none"
-            size="xs"
-            styles={{
-              root: { flex: 1, minWidth: 150 },
-              input: {
-                fontWeight: 600,
-                height: 22,
-              },
-            }}
-          >
-            {editingIndex === activeStepIndex ? (
-              <TextInput
-                ref={inputRef}
-                value={editValue}
-                onChange={(e) => setEditValue(e.currentTarget.value)}
-                onBlur={saveName}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") saveName();
-                  if (e.key === "Escape") setEditingIndex(null);
-                }}
-                onClick={(e) => e.stopPropagation()}
-                onDoubleClick={(e) => e.stopPropagation()}
-                variant="unstyled"
-                size="xs"
-                styles={{
-                  input: {
-                    height: 20,
-                    minHeight: 20,
-                    padding: 0,
-                    fontWeight: "inherit",
-                    fontSize: "inherit",
-                  },
-                }}
-              />
-            ) : (
-              activeStep?.name || "Select step"
-            )}
-          </InputBase>
-        </Combobox.Target>
-
-        <Combobox.Dropdown>
-          <Combobox.Options>
-            {steps.map((step, index) => (
-              <Combobox.Option
-                value={String(index)}
-                key={step.id || index}
-                onMouseEnter={() => setHoveredIndex(index)}
-                onMouseLeave={() => setHoveredIndex(null)}
-                styles={{
-                  option: {
-                    padding: "4px 8px",
-                  },
-                }}
-              >
-                <Group justify="space-between" wrap="nowrap" gap="xs">
-                  <Text size="xs" truncate style={{ flex: 1 }}>
-                    {step.name}
-                  </Text>
-                  <Group
-                    gap={2}
-                    onClick={(e) => e.stopPropagation()}
+    <Group gap={4} align="center" wrap="nowrap">
+      <DragDropContext onDragEnd={handleDragEnd}>
+        <Droppable droppableId="steps" direction="horizontal">
+          {(dropProvided) => (
+            <div
+              ref={dropProvided.innerRef}
+              {...dropProvided.droppableProps}
+              style={{ display: "flex", flex: 1, minWidth: 0 }}
+            >
+              {steps.map((step, index) => {
+                const active = index === activeStepIndex;
+                const stepColor = step.color ? resolveBrushColor(step.color, theme) : theme.colors.dark[3];
+                return (
+                  <Draggable key={step.id} draggableId={step.id} index={index}>
+                    {(dragProvided, snapshot) => (
+                      <div
+                        ref={dragProvided.innerRef}
+                        {...dragProvided.draggableProps}
+                        {...dragProvided.dragHandleProps}
+                        onClick={() => setActiveStepIndex(index)}
+                        style={{ ...dragProvided.draggableProps.style, ...slotStyle }}
+                      >
+                        <div
+                          style={{
+                            width: "100%",
+                            height: TAB_HEIGHT,
+                            position: "relative",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            paddingBottom: 8,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            borderRadius: 4,
+                            cursor: "pointer",
+                            userSelect: "none",
+                            color: active ? theme.white : theme.colors.dark[1],
+                            backgroundColor: active ? theme.colors.dark[5] : "transparent",
+                            border: `1px solid ${active ? theme.colors.dark[4] : "transparent"}`,
+                            boxShadow:
+                              snapshot.isDragging && !snapshot.isDropAnimating
+                                ? "0 0 12px rgba(0, 0, 0, 0.4)"
+                                : undefined,
+                          }}
+                        >
+                          {index + 1}
+                          <div
+                            style={{
+                              position: "absolute",
+                              left: 6,
+                              right: 6,
+                              bottom: 4,
+                              height: 2,
+                              borderRadius: 1,
+                              backgroundColor: stepColor,
+                              opacity: active ? 1 : 0.7,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </Draggable>
+                );
+              })}
+              {dropProvided.placeholder}
+              {canAddStep && (
+                <div onClick={addStep} style={slotStyle}>
+                  <div
                     style={{
-                      visibility: hoveredIndex === index ? "visible" : "hidden",
+                      width: "100%",
+                      height: TAB_HEIGHT,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      userSelect: "none",
+                      color: theme.colors.dark[2],
+                      border: `1px dashed ${theme.colors.dark[4]}`,
                     }}
                   >
-                    <ActionIcon
-                      size="xs"
-                      variant="subtle"
-                      color="gray"
-                      disabled={index === 0}
-                      onClick={() => reorderSteps(index, index - 1)}
-                    >
-                      <ArrowUp size={12} />
-                    </ActionIcon>
-                    <ActionIcon
-                      size="xs"
-                      variant="subtle"
-                      color="gray"
-                      disabled={index === steps.length - 1}
-                      onClick={() => reorderSteps(index, index + 1)}
-                    >
-                      <ArrowDown size={12} />
-                    </ActionIcon>
-                    <ActionIcon
-                      size="xs"
-                      variant="subtle"
-                      color="gray"
-                      disabled={!canAddStep}
-                      onClick={() => duplicateStep(index)}
-                    >
-                      <Copy size={12} />
-                    </ActionIcon>
-                    <ActionIcon
-                      size="xs"
-                      variant="subtle"
-                      color="red"
-                      disabled={!canRemoveStep}
-                      onClick={() => removeStep(index)}
-                    >
-                      <Trash size={12} />
-                    </ActionIcon>
-                  </Group>
-                </Group>
-              </Combobox.Option>
-            ))}
-          </Combobox.Options>
-        </Combobox.Dropdown>
-      </Combobox>
+                    <Plus size={14} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </Droppable>
+      </DragDropContext>
 
-      {canAddStep && (
-        <ActionIcon size="sm" variant="subtle" color="gray" onClick={addStep} title="Add step">
-          <Plus size={14} />
-        </ActionIcon>
-      )}
+      <Group gap={2} wrap="nowrap">
+        <Tooltip label="Duplicate step">
+          <ActionIcon
+            size="sm"
+            variant="subtle"
+            color="gray"
+            disabled={!canAddStep}
+            onClick={() => duplicateStep(activeStepIndex)}
+          >
+            <Copy size={14} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="Delete step">
+          <ActionIcon size="sm" variant="subtle" color="red" disabled={!canRemoveStep} onClick={handleDelete}>
+            <Trash size={14} />
+          </ActionIcon>
+        </Tooltip>
+      </Group>
     </Group>
   );
 }

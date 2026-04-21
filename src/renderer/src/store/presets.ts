@@ -1,5 +1,5 @@
 import { notifications } from "@mantine/notifications";
-import { pickNextBrushColor } from "@renderer/lib/colors";
+import { pickNextBrushColor, pickNextStepColor } from "@renderer/lib/colors";
 import { getFolders } from "@renderer/lib/folders";
 import {
   CURRENT_PRESET_VERSION,
@@ -69,14 +69,18 @@ function generateFilenameId(name: string, existingIds: Set<string> = new Set()):
 function cloneStepsFromPreset(preset: PresetType): BrushStep[] {
   const presetSteps = preset.steps ?? [];
   if (presetSteps.length === 0) {
-    return [createDefaultStep("Step 1")];
+    return [createDefaultStep("Step 1", pickNextStepColor([]))];
   }
+  const assignedColors: (BrushStep["color"] | undefined)[] = [];
   return presetSteps.map((presetStep, index) => {
-    const defaultStep = createDefaultStep(presetStep.name || `Step ${index + 1}`);
+    const color = presetStep.color ?? pickNextStepColor(assignedColors);
+    assignedColors.push(color);
+    const defaultStep = createDefaultStep(presetStep.name || `Step ${index + 1}`, color);
     return {
       ...defaultStep,
       ...presetStep,
       id: presetStep.id || defaultStep.id,
+      color,
     } as BrushStep;
   });
 }
@@ -87,7 +91,7 @@ export function makeEmptyBrush(name: string, existingColors: Brush["color"][] = 
     name,
     color: pickNextBrushColor(existingColors),
     hotkey: null,
-    steps: [createDefaultStep("Step 1")],
+    steps: [createDefaultStep("Step 1", pickNextStepColor([]))],
     linkedParams: [],
     libraryId: null,
     macroNames: [...DEFAULT_MACRO_NAMES],
@@ -187,7 +191,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
   captureState: (): BrushStep[] => {
     const state = get();
     const steps = state.brushes[state.activeBrushIndex]?.steps;
-    return steps && steps.length > 0 ? steps : [createDefaultStep("Step 1")];
+    return steps && steps.length > 0 ? steps : [createDefaultStep("Step 1", pickNextStepColor([]))];
   },
 
   isBrushDirty: (index: number): boolean => {

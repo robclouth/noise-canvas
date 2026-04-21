@@ -41,6 +41,16 @@ export function pickNextBrushColor(existing: BrushColor[]): BrushColor {
   return { hue: BASE_HUES[0], variation: 0 };
 }
 
+export const STEP_HUES: readonly BaseHue[] = ["red", "yellow", "green", "cyan", "violet"] as const;
+
+export function pickNextStepColor(existing: (BrushColor | undefined)[]): BrushColor {
+  const usedHues = new Set(existing.filter((c): c is BrushColor => !!c).map((c) => c.hue));
+  for (const hue of STEP_HUES) {
+    if (!usedHues.has(hue)) return { hue, variation: 0 };
+  }
+  return { hue: STEP_HUES[0], variation: 0 };
+}
+
 function parseHex(hex: string): { r: number; g: number; b: number } {
   const normalized = hex.startsWith("#") ? hex.slice(1) : hex;
   const r = parseInt(normalized.slice(0, 2), 16);

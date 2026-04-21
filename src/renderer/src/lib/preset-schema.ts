@@ -65,6 +65,12 @@ function createBrushStepSchema() {
     .object({
       id: z.string(),
       name: z.string(),
+      color: z
+        .object({
+          hue: z.string(),
+          variation: z.number(),
+        })
+        .optional(),
     })
     .merge(createStepParametersSchema());
 }
@@ -94,7 +100,9 @@ export function createSchema() {
 }
 
 export type PresetType = Omit<z.infer<ReturnType<typeof createSchema>>, "steps"> & {
-  steps: Array<{ id: string; name: string } & Partial<Record<ParameterKey, any>>>;
+  steps: Array<
+    { id: string; name: string; color?: { hue: string; variation: number } } & Partial<Record<ParameterKey, any>>
+  >;
   linkedParams: string[];
   macroNames: string[];
   macroValues: number[];

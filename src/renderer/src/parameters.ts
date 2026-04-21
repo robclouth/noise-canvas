@@ -23,7 +23,7 @@ import {
   SYNTHESIZE_TYPES,
   WRAP_MODES,
 } from "./lib/constants";
-import { ParameterKey } from "./store/types";
+import { BrushColor, ParameterKey } from "./store/types";
 
 // --- Base Interfaces ---
 
@@ -1816,6 +1816,7 @@ export const getStepParameterKeys = (): ParameterKey[] => {
 export type BrushStep = {
   id: string;
   name: string;
+  color?: BrushColor;
   lockedOffset?: { beats: number; pitch: number } | null;
   sourceFile?: FileParameterValue;
 } & {
@@ -1823,11 +1824,12 @@ export type BrushStep = {
 };
 
 /** Creates a default step with all step parameter defaults */
-export const createDefaultStep = (name = "Step 1"): BrushStep => {
+export const createDefaultStep = (name = "Step 1", color?: BrushColor): BrushStep => {
   const step: any = {
     id: crypto.randomUUID(),
     name,
   };
+  if (color) step.color = color;
   for (const [key, def] of Object.entries(parameterDefs)) {
     if (def.includeInStep) {
       step[key as ParameterKey] = def.default;

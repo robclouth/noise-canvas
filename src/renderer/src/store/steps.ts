@@ -1,8 +1,9 @@
+import { pickNextStepColor } from "@renderer/lib/colors";
 import { BrushStep, createDefaultStep, isStepParameter } from "@renderer/parameters";
 import { produce } from "immer";
 import type { ParameterKey, State, ZustandGet, ZustandSet } from "./types";
 
-export const MAX_STEPS = 10;
+export const MAX_STEPS = 5;
 
 export const STEPS_PERSISTED_KEYS = ["activeStepIndex"] as const;
 
@@ -17,6 +18,7 @@ export interface StepsState {
   getSteps: () => BrushStep[];
   setStepParameter: (key: ParameterKey, value: unknown) => void;
   setStepName: (index: number, name: string) => void;
+  ensureStepColors: () => void;
   updateActiveStepLockedOffset: (offset: { beats: number; pitch: number } | null) => void;
 }
 
@@ -41,7 +43,8 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
         const draftSteps = draft.brushes[draft.activeBrushIndex]?.steps;
         if (!draftSteps) return;
         const nextStepNumber = draftSteps.length + 1;
-        const newStep = createDefaultStep(`Step ${nextStepNumber}`);
+        const color = pickNextStepColor(draftSteps.map((s) => s.color));
+        const newStep = createDefaultStep(`Step ${nextStepNumber}`, color);
         draftSteps.push(newStep);
         draft.activeStepIndex = draftSteps.length - 1;
       }),
@@ -80,7 +83,8 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
         const draftSteps = draft.brushes[draft.activeBrushIndex]?.steps;
         if (!draftSteps) return;
         const stepToDuplicate = draftSteps[index];
-        const newStep = { ...stepToDuplicate, id: crypto.randomUUID() };
+        const color = pickNextStepColor(draftSteps.map((s) => s.color));
+        const newStep = { ...stepToDuplicate, id: crypto.randomUUID(), color };
         draftSteps.splice(index + 1, 0, newStep);
         draft.activeStepIndex = index + 1;
       }),
@@ -132,6 +136,20 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
         const draftSteps = draft.brushes[draft.activeBrushIndex]?.steps;
         if (draftSteps && draftSteps[index]) {
           draftSteps[index].name = name;
+        }
+      }),
+    );
+  },
+
+  ensureStepColors: () => {
+    set(
+      produce((draft: State) => {
+        const draftSteps = draft.brushes[draft.activeBrushIndex]?.steps;
+        if (!draftSteps) return;
+        for (const step of draftSteps) {
+          if (!step.color) {
+            step.color = pickNextStepColor(draftSteps.map((s) => s.color));
+          }
         }
       }),
     );
