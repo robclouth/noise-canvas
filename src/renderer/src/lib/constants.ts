@@ -234,8 +234,7 @@ export const EFFECT_DESCRIPTIONS: Record<string, string> = {
   transform: "Shift, scale, and rotate the spectrogram content in time and frequency.",
   overtones: "Add overtones to create richer timbres.",
   blur: "Smooth and blend frequencies over time and pitch for softer transitions.",
-  clone:
-    "Stamp beat- and semitone-spaced copies in 2D for echoes, harmonics, and fractal subdivisions when modulated by iteration.",
+  clone: "Stamp beat- and semitone-spaced copies in 2D for echoes and harmonics.",
   synthesize: "Generate new audio content from scratch (noise, sine waves, etc.).",
   evolve: "Reaction-advection-diffusion simulation for fluid, biological, and chaotic patterns.",
   binaural: "HRTF-based binaural spatialization for 3D audio positioning.",

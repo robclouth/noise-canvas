@@ -65,7 +65,9 @@ void main() {
 
         float normDist = abs(offsetIdx) / maxAbsOffset;
 
-        vec2 offsetL = cloneDirection * offsetIdx * space.x;
+        // Sample opposite to the echo direction: content at S appears as copies
+        // at S + k*space (Forward = +space, Backward = -space).
+        vec2 offsetL = -cloneDirection * offsetIdx * space.x;
         vec2 sampleUvL = coords.sourceL + offsetL;
         bool inL = cloneEdgeMode != 0 || isInsideBrush(sampleUvL);
 
@@ -79,7 +81,7 @@ void main() {
             totalWeightL += w;
             totalWeightR += w;
         } else {
-            vec2 offsetR = cloneDirection * offsetIdx * space.y;
+            vec2 offsetR = -cloneDirection * offsetIdx * space.y;
             vec2 sampleUvR = coords.sourceR + offsetR;
             bool inR = cloneEdgeMode != 0 || isInsideBrush(sampleUvR);
             if (inL) {

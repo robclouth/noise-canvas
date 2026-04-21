@@ -945,7 +945,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "number",
     name: "Clone Space Beats",
     label: "Space ↔",
-    description: "Spacing between copies in beats. Modulate by Iteration for self-similar fractal subdivisions.",
+    description: "Spacing between copies in beats.",
     default: 0.25,
     min: -32,
     max: 32,
