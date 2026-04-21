@@ -24,6 +24,7 @@ export interface IpcMainHandlers {
   "update-save-state": (event: Electron.IpcMainEvent, isDirty: boolean) => void;
   "trigger-open-file": (event: Electron.IpcMainEvent) => void;
   "update-unsaved-files": (event: Electron.IpcMainEvent, fileNames: string[]) => void;
+  "update-recent-files": (event: Electron.IpcMainEvent, paths: string[]) => void;
   "quit-confirmed": (event: Electron.IpcMainEvent) => void;
 }
 
@@ -49,6 +50,7 @@ export interface IpcRendererEvents {
   "update-error": (message: string) => void;
   "app-will-quit": () => void;
   "confirm-quit": () => void;
+  "clear-recent-files": () => void;
 }
 
 export function ipcMainOn<K extends keyof IpcMainHandlers>(channel: K, listener: IpcMainHandlers[K]): void {

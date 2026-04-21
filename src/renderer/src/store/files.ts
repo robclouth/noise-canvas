@@ -49,6 +49,9 @@ export interface FilesState {
   // survives app restart; virtual files (new/duplicate/stems) are deliberately excluded.
   persistedFilePaths: Record<string, string>;
   reopenPersistedFiles: () => Promise<void>;
+  recentFilePaths: string[];
+  addRecentFilePath: (filePath: string) => void;
+  clearRecentFilePaths: () => void;
   getUnsavedFiles: () => Array<{ fileId: string; filePath: string; fileName: string }>;
   filesPlaybackStartTime: Record<string, number>;
   setFilePlaybackStartTime: (fileId: string, playbackStartTime: number) => void;
@@ -182,6 +185,7 @@ export const FILES_PERSISTED_KEYS = [
   "filepathsBpm",
   "minimizedFileIds",
   "persistedFilePaths",
+  "recentFilePaths",
   "openFileIds",
   "activeFileId",
   "fullscreenFileId",
@@ -288,6 +292,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   openFileIds: [],
   openFilePath: async (filepath: string) => {
     const state = get();
+
+    get().addRecentFilePath(filepath);
 
     // If the file is already open, activate it (un-minimizing if needed) instead of opening again
     const existing = Object.values(openFiles).find((f) => f.filePath === filepath);
@@ -1495,6 +1501,23 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }),
     ),
   persistedFilePaths: {},
+  recentFilePaths: [],
+  addRecentFilePath: (filePath: string) => {
+    set(
+      produce((state: State) => {
+        const filtered = state.recentFilePaths.filter((p) => p !== filePath);
+        filtered.unshift(filePath);
+        state.recentFilePaths = filtered.slice(0, 20);
+      }),
+    );
+  },
+  clearRecentFilePaths: () => {
+    set(
+      produce((state: State) => {
+        state.recentFilePaths = [];
+      }),
+    );
+  },
   reopenPersistedFiles: async () => {
     const state = get();
     const entries = Object.entries(state.persistedFilePaths);

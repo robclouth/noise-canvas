@@ -107,6 +107,18 @@ function App(): React.JSX.Element {
     );
     unsubscribers.push(unsubUnsavedFiles);
 
+    const pushRecentFiles = (paths: string[]) => {
+      ipcSend("update-recent-files", paths);
+    };
+    pushRecentFiles(useStore.getState().recentFilePaths);
+    const unsubRecentFiles = useStore.subscribe((state) => state.recentFilePaths, pushRecentFiles);
+    unsubscribers.push(unsubRecentFiles);
+
+    const unsubClearRecent = ipcOn("clear-recent-files", () => {
+      useStore.getState().clearRecentFilePaths();
+    });
+    unsubscribers.push(unsubClearRecent);
+
     const unsubNewFile = ipcOn("new-file", async () => {
       const { newFile } = useStore.getState();
       await newFile();

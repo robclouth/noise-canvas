@@ -1,7 +1,15 @@
 import { app, BrowserWindow, dialog, Menu } from "electron";
 import { autoUpdater } from "electron-updater";
+import path from "path";
 import { allowedExtensions } from "./audio-analysis";
 import { webContentsSend } from "./types";
+
+export interface MenuState {
+  canUndo: boolean;
+  canRedo: boolean;
+  isDirty: boolean;
+  recentFiles: string[];
+}
 
 export async function openFileDialog(window: BrowserWindow) {
   const result = await dialog.showOpenDialog(window, {
@@ -20,7 +28,30 @@ export async function openFileDialog(window: BrowserWindow) {
   }
 }
 
-export function createMenu(window: BrowserWindow) {
+function buildRecentFilesSubmenu(window: BrowserWindow, recentFiles: string[]): Electron.MenuItemConstructorOptions[] {
+  if (recentFiles.length === 0) {
+    return [{ label: "(No recent files)", enabled: false }];
+  }
+  const items: Electron.MenuItemConstructorOptions[] = recentFiles.map((filePath) => ({
+    label: path.basename(filePath),
+    toolTip: filePath,
+    click: () => {
+      webContentsSend(window, "open-file", filePath);
+    },
+  }));
+  items.push({ type: "separator" });
+  items.push({
+    label: "Clear Recent",
+    click: () => {
+      webContentsSend(window, "clear-recent-files");
+    },
+  });
+  return items;
+}
+
+export function createMenu(window: BrowserWindow, state: MenuState) {
+  const { canUndo, canRedo, isDirty, recentFiles } = state;
+
   const template: (Electron.MenuItemConstructorOptions | Electron.MenuItem)[] = [
     {
       label: "File",
@@ -38,9 +69,13 @@ export function createMenu(window: BrowserWindow) {
           click: () => openFileDialog(window),
         },
         {
+          label: "Open Recent",
+          submenu: buildRecentFilesSubmenu(window, recentFiles),
+        },
+        {
           label: "Save",
           accelerator: "CmdOrCtrl+S",
-          enabled: false,
+          enabled: isDirty,
           id: "save",
           click: () => {
             webContentsSend(window, "save-active-file");
@@ -84,7 +119,7 @@ export function createMenu(window: BrowserWindow) {
         {
           label: "Undo",
           accelerator: "CmdOrCtrl+Z",
-          enabled: false,
+          enabled: canUndo,
           click: () => {
             webContentsSend(window, "undo");
           },
@@ -93,7 +128,7 @@ export function createMenu(window: BrowserWindow) {
         {
           label: "Redo",
           accelerator: "Shift+CmdOrCtrl+Z",
-          enabled: false,
+          enabled: canRedo,
           click: () => {
             webContentsSend(window, "redo");
           },

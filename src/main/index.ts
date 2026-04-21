@@ -1,9 +1,9 @@
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell, systemPreferences } from "electron";
 import { installExtension, REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS } from "electron-devtools-installer";
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
-import { createMenu, openFileDialog } from "./lib/menu";
+import { createMenu, MenuState, openFileDialog } from "./lib/menu";
 import { ipcMainOn, webContentsSend } from "./lib/types";
 
 // Remove dictation and character palette menu items on macOS
@@ -15,6 +15,17 @@ if (process.platform === "darwin") {
 let mainWindow: BrowserWindow | null = null;
 let unsavedFileNames: string[] = [];
 let allowQuit = false;
+
+const menuState: MenuState = {
+  canUndo: false,
+  canRedo: false,
+  isDirty: false,
+  recentFiles: [],
+};
+
+function rebuildMenu() {
+  if (mainWindow) createMenu(mainWindow, menuState);
+}
 
 const gotTheLock = app.requestSingleInstanceLock();
 let pendingPath: string | null = getOpenedPathFromArgv(process.argv);
@@ -93,7 +104,7 @@ function createWindow(): void {
     // mainWindow.webContents.openDevTools();
   }
 
-  createMenu(mainWindow!);
+  rebuildMenu();
 }
 
 app.whenReady().then(async () => {
@@ -145,22 +156,22 @@ app.whenReady().then(async () => {
 
 // Update menu items based on undo/redo state from renderer
 ipcMainOn("update-menu-state", (_, canUndo: boolean, canRedo: boolean) => {
-  const menu = Menu.getApplicationMenu();
-  if (menu) {
-    const undoItem = menu.getMenuItemById("undo");
-    if (undoItem) undoItem.enabled = canUndo;
-    const redoItem = menu.getMenuItemById("redo");
-    if (redoItem) redoItem.enabled = canRedo;
-  }
+  if (menuState.canUndo === canUndo && menuState.canRedo === canRedo) return;
+  menuState.canUndo = canUndo;
+  menuState.canRedo = canRedo;
+  rebuildMenu();
 });
 
 // Update save menu item based on dirty state from renderer
 ipcMainOn("update-save-state", (_, isDirty: boolean) => {
-  const menu = Menu.getApplicationMenu();
-  if (menu) {
-    const saveItem = menu.getMenuItemById("save");
-    if (saveItem) saveItem.enabled = isDirty;
-  }
+  if (menuState.isDirty === isDirty) return;
+  menuState.isDirty = isDirty;
+  rebuildMenu();
+});
+
+ipcMainOn("update-recent-files", (_, paths: string[]) => {
+  menuState.recentFiles = paths;
+  rebuildMenu();
 });
 
 ipcMainOn("trigger-open-file", () => {
