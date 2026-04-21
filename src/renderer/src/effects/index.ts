@@ -1,3 +1,4 @@
+import { alignEffect } from "./align-effect";
 import { binauralEffect } from "./binaural-effect";
 import { blurEffect } from "./blur-effect";
 import { cloneEffect } from "./clone-effect";
@@ -30,4 +31,5 @@ export const effects = {
   transmute: transmuteEffect,
   waveshape: waveshapeEffect,
   convolve: convolveEffect,
+  align: alignEffect,
 };

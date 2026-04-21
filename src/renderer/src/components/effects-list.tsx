@@ -95,6 +95,7 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
     "convolveIrRate",
     "convolveGainDb",
   ],
+  align: [],
 };
 
 const MAX_EFFECTS = 10;

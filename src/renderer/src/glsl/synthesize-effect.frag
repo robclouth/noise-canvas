@@ -28,6 +28,21 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
     float phase = 0.0;
     polarValueL = vec2(amplitude, phase);
     polarValueR = vec2(amplitude, phase);
+  } else if (synthesizeType == 2) { // Impulse
+    // Write the exact Gabor-space representation of a Dirac at the brush start:
+    //   magnitude: Gaussian window centered at the anchor, half-width ~Q/f
+    //   phase:     -2π·f·T  (uniform across atoms, for global phase convention)
+    vec4 meta       = getDestMetadata(coords.dest);
+    float fHz       = max(meta.a, 1e-6);
+    float anchorSec = brushBottomLeftUv.x * destFrameCount / destSampleRate;
+    float pixelSec  = coords.dest.x * destFrameCount / destSampleRate;
+    float distSec   = pixelSec - anchorSec;
+    float widthSec  = (destBandsPerOctave * 0.7) / fHz;
+    float arg       = distSec / widthSec;
+    float amplitude = exp(-arg * arg);
+    float phase     = -TWO_PI * fHz * anchorSec;
+    polarValueL = vec2(amplitude, phase);
+    polarValueR = vec2(amplitude, phase);
   }
   else {
     polarValueL = vec2(1.0, 0.0);

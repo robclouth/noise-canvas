@@ -154,6 +154,7 @@ export const EDGE_MODE = [
 export const SYNTHESIZE_TYPES = [
   { value: 0, label: "Noise" },
   { value: 1, label: "Sine" },
+  { value: 2, label: "Impulse" },
 ];
 
 export const WRAP_MODES = [
@@ -212,6 +213,7 @@ export const EFFECT_COLORS: Record<string, string> = {
   transmute: HUE_INDIGO,
   waveshape: HUE_TEAL,
   convolve: "blue",
+  align: "gray",
 };
 
 export const EFFECT_LABELS: Record<string, string> = {
@@ -227,6 +229,7 @@ export const EFFECT_LABELS: Record<string, string> = {
   transmute: "Transmute",
   waveshape: "Waveshape",
   convolve: "Convolve",
+  align: "Align",
 };
 
 export const EFFECT_DESCRIPTIONS: Record<string, string> = {
@@ -245,4 +248,5 @@ export const EFFECT_DESCRIPTIONS: Record<string, string> = {
     "Waveshaper distortion on rectangular spectral bins: soft clip, hard clip, rectify, and boundary modes (fold, wrap, invert, cut).",
   convolve:
     "Time-axis convolution with an IR spectrogram. Reverbs, room tones, and other impulse-response-based effects.",
+  align: "Phase-align bands at brush start to form a sharp impulse, then fade back to the original phase.",
 };
