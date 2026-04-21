@@ -21,7 +21,10 @@ vec2 applyEdgeMode(vec2 sourceUv, int edgeMode, out bool useZero, out bool inver
         useZero = true;
         return sourceUv;
     } else if (edgeMode == 1) {
-        // Bleed: sample freely beyond brush bounds
+        // Bleed: sample freely beyond brush bounds, but zero outside file
+        if (sourceUv.x < 0.0 || sourceUv.x > 1.0 || sourceUv.y < 0.0 || sourceUv.y > 1.0) {
+            useZero = true;
+        }
         return sourceUv;
     } else if (edgeMode == 2) {
         // Wrap: tile within brush bounds
