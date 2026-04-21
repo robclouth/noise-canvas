@@ -11,7 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { SpectrogramData, State } from "../../store/types";
-import { createMockSpectrogramData, getPixelAtUv } from "../../test/mock-spectrogram";
+import { createMockSpectrogramData, getPixelAtUv, readSpectrogramPixel } from "../../test/mock-spectrogram";
 import { createMockState, createMockStateWithSteps } from "../../test/mock-state";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 
@@ -689,6 +689,203 @@ describe("Effects", () => {
       expect(maxChannelMagDivergence(data)).toBeGreaterThan(0.001);
 
       renderer.dispose();
+    });
+  });
+
+  // Cross-file painting with different analysis geometry must map by FREQUENCY,
+  // not by UV ratio. If the two files share minFreq + bandsPerOctave, source
+  // band i and dest band i are the same frequency; the paint should deposit
+  // source[band i] into dest[band i] regardless of how many bands each file
+  // has. A weak "any non-zero output" check hides a wrong mapping (content
+  // still appears, just at the wrong frequencies), so this test measures
+  // per-band similarity.
+  describe("cross-file painting with mismatched analysis parameters", () => {
+    async function paintAndReadDestBands(enableTransform: boolean) {
+      // Dest: 8 bands, silence. Source: 16 bands, per-band magnitude gradient
+      // = (band+1)/16. Same minFreq + bandsPerOctave, so band index == same
+      // frequency in both files.
+      const destSpectrogramData = createMockSpectrogramData({
+        numFrames: 16,
+        numBands: 8,
+        pattern: "silence",
+      });
+      const sourceSpectrogramData = createMockSpectrogramData({
+        numFrames: 16,
+        numBands: 16,
+        pattern: "bandGradient",
+      });
+
+      const destRawTextures = createTexturesFromSpectrogramData(destSpectrogramData);
+      const sourceRawTextures = createTexturesFromSpectrogramData(sourceSpectrogramData);
+
+      const destStrokeTextures: StrokeTextures = {
+        packedDataTex: destRawTextures.packedDataTex,
+        originalPackedDataTex: destRawTextures.originalPackedDataTex,
+        inverseMapTex: destRawTextures.inverseMapTex,
+        metadataTex: destRawTextures.metadataTex,
+        placeholderTexture,
+        modulatorScaleLut,
+        modulator1Texture: placeholderTexture,
+        modulator2Texture: placeholderTexture,
+        modulator3Texture: placeholderTexture,
+      };
+      const sourceStrokeTextures: StrokeTextures = {
+        packedDataTex: sourceRawTextures.packedDataTex,
+        originalPackedDataTex: sourceRawTextures.originalPackedDataTex,
+        inverseMapTex: sourceRawTextures.inverseMapTex,
+        metadataTex: sourceRawTextures.metadataTex,
+        placeholderTexture,
+        modulatorScaleLut,
+        modulator1Texture: placeholderTexture,
+        modulator2Texture: placeholderTexture,
+        modulator3Texture: placeholderTexture,
+      };
+
+      const destRenderer = new StrokeRenderer(gl, destSpectrogramData, destStrokeTextures, "mismatch-dest", effects);
+      destRenderer.initialize();
+      const sourceRenderer = new StrokeRenderer(
+        gl,
+        sourceSpectrogramData,
+        sourceStrokeTextures,
+        "mismatch-source",
+        effects,
+      );
+      sourceRenderer.initialize();
+
+      const sourceTex = sourceRenderer.getTextures();
+      const sourceFile: SourceFileInfo = {
+        id: "mismatch-source",
+        filePath: "/test/mismatch-source.wav",
+        spectrogramData: sourceSpectrogramData,
+        textures: {
+          packed: sourceTex.packed,
+          inverse: sourceTex.inverse,
+          metadata: sourceTex.metadata,
+          original: sourceTex.original,
+        },
+      };
+
+      const effectsList = [
+        { id: "test-transform", effect: "transform" as const, enabled: enableTransform, params: {} },
+        { id: "test-dynamics", effect: "dynamics" as const, enabled: false, params: {} },
+        { id: "test-blur", effect: "blur" as const, enabled: false, params: {} },
+        { id: "test-overtones", effect: "overtones" as const, enabled: false, params: {} },
+        { id: "test-synthesize", effect: "synthesize" as const, enabled: false, params: {} },
+      ];
+      const state = createMockStateWithSteps(
+        [
+          {
+            name: "Mismatch",
+            overrides: {
+              brushIntensity: 100,
+              brushSizeTime: 10,
+              brushSizePitch: 100,
+              brushCurveTime: 100,
+              brushSkewTime: -100,
+              brushCurvePitch: 100,
+              brushSkewPitch: -100,
+              accumulate: false,
+              blendMode: 0,
+              sourcePositionMode: "follow",
+              transformEdgeMode: 1,
+              effects: effectsList,
+            },
+          },
+        ],
+        {
+          filepathsBpm: {
+            "/test/mismatch-source.wav": 120,
+            "/test/effects-test.wav": 120,
+          },
+        },
+      ) as State;
+
+      const totalDuration = destSpectrogramData.numFrames / destSpectrogramData.sampleRate;
+      const params: StrokeParams = {
+        cursorPos: new Vector2(0, 0),
+        preview: false,
+        bpm: 120,
+        totalDuration,
+        viewZoomPower: 0,
+        viewOffset: 0,
+        viewZoomPowerY: 0,
+        viewOffsetY: 0,
+        pressure: 1,
+        tiltX: 0,
+        tiltY: 0,
+      };
+
+      destRenderer.renderStroke(params, state, sourceFile);
+      const outputData = await destRenderer.getFBOData();
+
+      const destBandMeanMag: number[] = [];
+      for (let band = 0; band < destSpectrogramData.numBands; band++) {
+        let sum = 0;
+        let count = 0;
+        for (let frame = 0; frame < destSpectrogramData.numFrames; frame++) {
+          const pixel = readSpectrogramPixel(
+            outputData,
+            frame,
+            band,
+            destSpectrogramData.numFrames,
+            destSpectrogramData.numBands,
+            destSpectrogramData.textureWidth,
+            destSpectrogramData.textureHeight,
+          );
+          if (pixel) {
+            sum += pixel[0];
+            count += 1;
+          }
+        }
+        destBandMeanMag.push(count > 0 ? sum / count : 0);
+      }
+
+      destRenderer.dispose();
+      sourceRenderer.dispose();
+      destRawTextures.packedDataTex.dispose();
+      destRawTextures.originalPackedDataTex.dispose();
+      destRawTextures.inverseMapTex.dispose();
+      destRawTextures.metadataTex.dispose();
+      sourceRawTextures.packedDataTex.dispose();
+      sourceRawTextures.originalPackedDataTex.dispose();
+      sourceRawTextures.inverseMapTex.dispose();
+      sourceRawTextures.metadataTex.dispose();
+
+      return { destBandMeanMag, sourceBandCount: sourceSpectrogramData.numBands };
+    }
+
+    function assertFreqAlignedMatch(result: { destBandMeanMag: number[]; sourceBandCount: number }) {
+      // Gaborator layout: band 0 is highest freq, last band is minFreq. Both
+      // files share minFreq + bandsPerOctave, so dest band i (freq =
+      // minFreq·2^((destN-1-i)/bpo)) maps to source band (sourceN - destN + i)
+      // at the same freq. That source band has magnitude (sourceN-destN+i+1)/sourceN.
+      const destBandCount = result.destBandMeanMag.length;
+      const expectedFor = (band: number) =>
+        (result.sourceBandCount - destBandCount + band + 1) / result.sourceBandCount;
+      let mse = 0;
+      for (let band = 0; band < destBandCount; band++) {
+        const diff = result.destBandMeanMag[band] - expectedFor(band);
+        mse += diff * diff;
+      }
+      mse /= destBandCount;
+      if (mse >= 0.01) {
+        const lines = result.destBandMeanMag.map((actual, band) => {
+          return `  band ${band}: actual=${actual.toFixed(4)}  expected=${expectedFor(band).toFixed(4)}`;
+        });
+        // eslint-disable-next-line no-console
+        console.log(`per-band mag (MSE=${mse.toFixed(4)}):\n${lines.join("\n")}`);
+      }
+      expect(mse).toBeLessThan(0.01);
+    }
+
+    it("transform paints each dest band from the source band at the same frequency", async () => {
+      const result = await paintAndReadDestBands(true);
+      assertFreqAlignedMatch(result);
+    });
+
+    it("passthrough (no effects) paints each dest band from the source band at the same frequency", async () => {
+      const result = await paintAndReadDestBands(false);
+      assertFreqAlignedMatch(result);
     });
   });
 });

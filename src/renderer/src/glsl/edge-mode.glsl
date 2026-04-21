@@ -5,8 +5,11 @@ vec2 applyEdgeMode(vec2 sourceUv, int edgeMode, out bool useZero, out bool inver
     useZero = false;
     invertSample = false;
 
-    vec2 sourceBrushBottomLeft = brushBottomLeftUv + vec2(sourceOffsetX, sourceOffsetY);
-    vec2 localUv = sourceUv - sourceBrushBottomLeft;
+    // Brush containment is defined in DEST UV space. Invert the source→dest
+    // freq-preserving map (nonlinear when analyses differ), do the brush math
+    // there, then forward-map back for wrap / clamp / reflect.
+    vec2 destUv = sourceUvToDestUv(sourceUv);
+    vec2 localUv = destUv - brushBottomLeftUv;
     vec2 safeSize = max(brushSizeUv, vec2(1e-6));
 
     bool insideBrush = (brushSizeUv.x == 0.0 || (localUv.x >= 0.0 && localUv.x < brushSizeUv.x)) &&
@@ -27,13 +30,13 @@ vec2 applyEdgeMode(vec2 sourceUv, int edgeMode, out bool useZero, out bool inver
         }
         return sourceUv;
     } else if (edgeMode == 2) {
-        // Wrap: tile within brush bounds
+        // Wrap: tile within brush bounds (dest space), then forward-map
         vec2 wrappedLocal = fract(localUv / safeSize) * safeSize;
-        return sourceBrushBottomLeft + wrappedLocal;
+        return destUvToSourceUv(brushBottomLeftUv + wrappedLocal);
     } else if (edgeMode == 3) {
         // Clamp: nearest edge (no-flux boundary)
         vec2 clampedLocal = clamp(localUv, vec2(0.0), safeSize - vec2(1e-6));
-        return sourceBrushBottomLeft + clampedLocal;
+        return destUvToSourceUv(brushBottomLeftUv + clampedLocal);
     } else if (edgeMode == 4) {
         // Reflect: single reflection at boundary, then clamp
         vec2 reflected = localUv;
@@ -42,7 +45,7 @@ vec2 applyEdgeMode(vec2 sourceUv, int edgeMode, out bool useZero, out bool inver
         if (localUv.y < 0.0) reflected.y = -localUv.y;
         else if (localUv.y >= safeSize.y) reflected.y = 2.0 * safeSize.y - localUv.y - 1e-6;
         reflected = clamp(reflected, vec2(0.0), safeSize - vec2(1e-6));
-        return sourceBrushBottomLeft + reflected;
+        return destUvToSourceUv(brushBottomLeftUv + reflected);
     } else if (edgeMode == 5) {
         // Invert: sample beyond bounds but negate (creates interference)
         invertSample = true;

@@ -93,8 +93,8 @@ void main() {
         // Cut mode: each channel contributes only if its own sample position
         // (noise-inclusive) falls inside the brush. Skip the iteration only
         // when both are out.
-        bool inL = blurEdgeMode != 0 || isInsideBrush(sampleUvL);
-        bool inR = sameKernel ? inL : (blurEdgeMode != 0 || isInsideBrush(sampleUvR));
+        bool inL = blurEdgeMode != 0 || isInsideSourceBrush(sampleUvL);
+        bool inR = sameKernel ? inL : (blurEdgeMode != 0 || isInsideSourceBrush(sampleUvR));
         if (!inL && !inR) continue;
 
         vec4 sampleTexelL = inL

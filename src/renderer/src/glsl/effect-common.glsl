@@ -296,6 +296,45 @@ float getAudioLevelDb(vec2 uv) {
 #define HAS_SPECTROGRAM_SAMPLING
 #include "modulation-common.glsl"
 
+// Forward freq-preserving map: dest UV.y → source UV.y such that the two UVs
+// refer to the same absolute frequency. Uses dest metadata for the band freq
+// (authoritative) and the source's log-band formula for the inverse — works
+// across different minFreq / bandsPerOctave / bandCount.
+// Gaborator's band layout has UV.y increasing with frequency (band 0 = top of
+// UV = highest freq), so sourceUV.y increases with sourceBandIdx.
+float destToSourceBandUv(vec2 destUnpackedUv) {
+  float destFreqHz = getDestMetadata(destUnpackedUv).a;
+  float sourceBandIdx = sourceBandsPerOctave * log2(max(destFreqHz, 1e-6) / max(sourceMinFreq, 1e-6));
+  return (sourceBandIdx + 0.5) / max(sourceBandCount, 1.0);
+}
+
+// Inverse of destToSourceBandUv: source UV.y → dest UV.y for the same freq.
+// Needed by brush-bounds checks that receive a source UV and want to compare
+// against dest-space brush bounds.
+float sourceToDestBandUv(float sourceBandUvY) {
+  float sourceBandIdx = sourceBandUvY * sourceBandCount - 0.5;
+  float sourceFreqHz = sourceMinFreq * exp2(sourceBandIdx / max(sourceBandsPerOctave, 1e-6));
+  float destBandIdx = destBandsPerOctave * log2(max(sourceFreqHz, 1e-6) / max(destMinFreq, 1e-6));
+  return (destBandIdx + 0.5) / max(destBandCount, 1.0);
+}
+
+// Map a source-space UV back to the dest-space UV that would produce it. Used
+// by brush containment helpers so the geometry of the brush stays defined in
+// dest UV and we don't have to approximate a nonlinear freq map as a scalar.
+vec2 sourceUvToDestUv(vec2 sourceUv) {
+  float destX = (sourceUv.x - sourceOffsetX) / max(sourceTimeScale, 1e-6);
+  float destY = sourceToDestBandUv(sourceUv.y - sourceOffsetY);
+  return vec2(destX, destY);
+}
+
+// Forward freq-preserving map from a dest UV (inside brush) to the source UV
+// that samples the same frequency at the same beat-time.
+vec2 destUvToSourceUv(vec2 destUv) {
+  float sourceX = destUv.x * sourceTimeScale + sourceOffsetX;
+  float sourceY = destToSourceBandUv(destUv) + sourceOffsetY;
+  return vec2(sourceX, sourceY);
+}
+
 ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
   ProcessingUvs uvs;
   uvs.dest = packedToUnpackedUv(destInverseMapTex, destPackedUv, destFrameCount, destBandCount);
@@ -314,8 +353,9 @@ ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
     uvs.dest, 0, 0.0
   );
 
-  vec2 baseUv = vec2(uvs.dest.x * sourceTimeScale, uvs.dest.y * sourceBandScale)
-              + vec2(sourceOffsetX, sourceOffsetY);
+  float baseX = uvs.dest.x * sourceTimeScale + sourceOffsetX;
+  float baseY = destToSourceBandUv(uvs.dest) + sourceOffsetY;
+  vec2 baseUv = vec2(baseX, baseY);
   uvs.sourceL = baseUv + vec2(modTimeOff.x, modPitchOff.x);
   uvs.sourceR = baseUv + vec2(modTimeOff.y, modPitchOff.y);
   uvs.source  = uvs.sourceL;
@@ -691,13 +731,21 @@ vec2 getBrushWeight(vec2 unpackedUv, float audioLevelDb) {
 
 bool isInsideBrush(vec2 unpackedUv) {
   vec2 offset = getEffectiveBrushOffset(unpackedUv);
-  
+
   // With bottom-left reference, offset should be between 0 and brushSizeUv
   if ((brushSizeUv.x > 0.0 && (offset.x < 0.0 || offset.x >= brushSizeUv.x)) ||
       (brushSizeUv.y > 0.0 && (offset.y < 0.0 || offset.y >= brushSizeUv.y))) {
     return false;
   }
   return true;
+}
+
+// Source-space counterpart of isInsideBrush: invert the freq-preserving map
+// back to dest UV and delegate to the dest-space check. Needed whenever
+// source/dest were analyzed with different band layouts — a plain dest-space
+// check on a source UV rejects valid samples when the mapping is nonlinear.
+bool isInsideSourceBrush(vec2 sourceUv) {
+  return isInsideBrush(sourceUvToDestUv(sourceUv));
 }
 
 // Applies the final brush effect, combining original and modified data.

@@ -76,26 +76,28 @@ void main() {
         vec2 finalSourceUv = transformedUv + vec2(appliedShiftX, appliedShiftY); \
         float totalShiftX = sourceOffsetX + appliedShiftX; \
         float totalShiftY = sourceOffsetY + appliedShiftY; \
-        vec2 sourceBrushBottomLeft = brushBottomLeftUv + vec2(sourceOffsetX, sourceOffsetY); \
-        vec2 offsetFromSourceBrush = finalSourceUv - sourceBrushBottomLeft; \
-        bool inSourceBrush = (brushSizeUv.x == 0.0 || (offsetFromSourceBrush.x >= 0.0 && offsetFromSourceBrush.x < brushSizeUv.x)) \
-                          && (brushSizeUv.y == 0.0 || (offsetFromSourceBrush.y >= 0.0 && offsetFromSourceBrush.y < brushSizeUv.y)); \
+        /* Brush containment is defined in dest UV space. Invert the freq-preserving */ \
+        /* map so the check works when source/dest analyses differ. */ \
+        vec2 finalDestUv = sourceUvToDestUv(finalSourceUv); \
+        vec2 offsetFromBrush = finalDestUv - brushBottomLeftUv; \
+        bool inSourceBrush = (brushSizeUv.x == 0.0 || (offsetFromBrush.x >= 0.0 && offsetFromBrush.x < brushSizeUv.x)) \
+                          && (brushSizeUv.y == 0.0 || (offsetFromBrush.y >= 0.0 && offsetFromBrush.y < brushSizeUv.y)); \
         if (boundaryMode == 0) { \
             outTexel = inSourceBrush ? getTransformedSample(finalSourceUv, coords.dest, (sxV), (syV), totalShiftX, totalShiftY) : vec4(0.0); \
         } else if (boundaryMode == 1) { \
             outTexel = getTransformedSample(finalSourceUv, coords.dest, (sxV), (syV), totalShiftX, totalShiftY); \
         } else if (boundaryMode == 2) { \
             vec2 safeSize = max(brushSizeUv, vec2(1e-6)); \
-            vec2 local = finalSourceUv - brushBottomLeftUv; \
+            vec2 local = finalDestUv - brushBottomLeftUv; \
             vec2 wrappedLocal = fract(local / safeSize) * safeSize; \
-            vec2 wrappedUv = brushBottomLeftUv + wrappedLocal; \
+            vec2 wrappedUv = destUvToSourceUv(brushBottomLeftUv + wrappedLocal); \
             outTexel = getTransformedSample(wrappedUv, coords.dest, (sxV), (syV), totalShiftX, totalShiftY); \
         } else { \
             vec2 safeSize = max(brushSizeUv * 2.0, vec2(1e-6)); \
-            vec2 local = finalSourceUv - brushBottomLeftUv; \
+            vec2 local = finalDestUv - brushBottomLeftUv; \
             vec2 t = fract(local / safeSize); \
             vec2 pingPong = 1.0 - abs(2.0 * t - 1.0); \
-            vec2 pingPongUv = brushBottomLeftUv + pingPong * safeSize * 0.5; \
+            vec2 pingPongUv = destUvToSourceUv(brushBottomLeftUv + pingPong * safeSize * 0.5); \
             float pingPongScaleX = pingPong.x < 0.5 ? -abs(sxV) : abs(sxV); \
             outTexel = getTransformedSample(pingPongUv, coords.dest, pingPongScaleX, (syV), totalShiftX, totalShiftY); \
         } \

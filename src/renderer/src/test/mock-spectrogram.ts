@@ -18,7 +18,7 @@ export interface MockSpectrogramOptions {
   /** Bands per octave (default: 24) */
   bandsPerOctave?: number;
   /** Fill pattern for the data */
-  pattern?: "silence" | "sine" | "noise" | "gradient" | "constant";
+  pattern?: "silence" | "sine" | "noise" | "gradient" | "constant" | "bandGradient";
   /** Constant magnitude value (for pattern: "constant") */
   constantMagnitude?: number;
 }
@@ -81,6 +81,13 @@ export function createMockSpectrogramData(options: MockSpectrogramOptions = {}):
           magnitude = constantMagnitude;
           phase = 0;
           break;
+        case "bandGradient":
+          // Distinct magnitude per band, constant across time. Lets a test
+          // detect whether cross-file paints map each dest band to the source
+          // band at the same frequency (not the same fractional UV.y).
+          magnitude = (band + 1) / numBands;
+          phase = 0;
+          break;
       }
 
       // Left channel
@@ -115,9 +122,11 @@ export function createMockSpectrogramData(options: MockSpectrogramOptions = {}):
     metadata[baseIndex] = band * numFrames; // band start offset
     metadata[baseIndex + 1] = numFrames; // band length
     metadata[baseIndex + 2] = 0; // time scale exponent (2^0 = 1, no scaling)
-    // Calculate frequency for this band
-    const semitonesFromMin = band / (bandsPerOctave / 12);
-    const freq = minFreq * Math.pow(2, semitonesFromMin / 12);
+    // Gaborator convention: band 0 is the HIGHEST freq, band (numBands-1)
+    // sits at minFreq. Real analysis stores frequencies in that order, so the
+    // mock mirrors it here — otherwise cross-file freq-preserving maps in the
+    // shader (which assume the Gaborator layout) flip under test.
+    const freq = minFreq * Math.pow(2, (numBands - 1 - band) / bandsPerOctave);
     metadata[baseIndex + 3] = freq;
   }
 

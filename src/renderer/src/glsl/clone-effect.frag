@@ -69,7 +69,7 @@ void main() {
         // at S + k*space (Forward = +space, Backward = -space).
         vec2 offsetL = -cloneDirection * offsetIdx * space.x;
         vec2 sampleUvL = coords.sourceL + offsetL;
-        bool inL = cloneEdgeMode != 0 || isInsideBrush(sampleUvL);
+        bool inL = cloneEdgeMode != 0 || isInsideSourceBrush(sampleUvL);
 
         if (sameTaps) {
             if (!inL) continue;
@@ -83,7 +83,7 @@ void main() {
         } else {
             vec2 offsetR = -cloneDirection * offsetIdx * space.y;
             vec2 sampleUvR = coords.sourceR + offsetR;
-            bool inR = cloneEdgeMode != 0 || isInsideBrush(sampleUvR);
+            bool inR = cloneEdgeMode != 0 || isInsideSourceBrush(sampleUvR);
             if (inL) {
                 float wL = pow(max(1.0 - decayFactor.x, 1e-6), normDist);
                 vec2 totalShiftL = vec2(sourceOffsetX, sourceOffsetY) + offsetL;
