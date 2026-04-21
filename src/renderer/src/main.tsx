@@ -1,5 +1,5 @@
 import "@fontsource-variable/inter";
-import { createTheme, Input, MantineProvider } from "@mantine/core";
+import { createTheme, Input, MantineProvider, Menu, Popover } from "@mantine/core";
 import "@mantine/core/styles.css";
 import { ModalsProvider } from "@mantine/modals";
 import { Notifications } from "@mantine/notifications";
@@ -25,6 +25,13 @@ const theme = createTheme({
     lg: "24px",
     xl: "32px",
   },
+  shadows: {
+    xs: "0 2px 6px rgba(0, 0, 0, 0.35)",
+    sm: "0 4px 12px rgba(0, 0, 0, 0.4)",
+    md: "0 8px 20px rgba(0, 0, 0, 0.5)",
+    lg: "0 14px 32px rgba(0, 0, 0, 0.55)",
+    xl: "0 22px 52px rgba(0, 0, 0, 0.65), 0 6px 16px rgba(0, 0, 0, 0.5)",
+  },
   fontFamily: "Inter Variable, sans-serif",
   focusClassName: "",
   components: {
@@ -39,6 +46,8 @@ const theme = createTheme({
         return { root: {}, wrapper: {} };
       },
     }),
+    Menu: Menu.extend({ defaultProps: { shadow: "xl" } }),
+    Popover: Popover.extend({ defaultProps: { shadow: "xl" } }),
   },
 });
 
@@ -61,6 +70,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       modalProps={{
         zIndex: 1000,
         size: "xs",
+        shadow: "xl",
         styles: {
           title: { fontSize: 14, fontWeight: 600 },
           body: { fontSize: "var(--mantine-font-size-sm)" },

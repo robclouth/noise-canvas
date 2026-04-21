@@ -1,4 +1,4 @@
-import { openConfirm, openContextModal } from "../lib/modals";
+import { openConfirm, openNewFilePrompt } from "../lib/modals";
 import { notifications } from "@mantine/notifications";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { EffectItem } from "@renderer/effects/types";
@@ -199,19 +199,24 @@ export const FILES_PERSISTED_KEYS = [
 
 export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState => ({
   newFile: async () => {
-    const { sampleRate, bpm, lengthBeats } = await new Promise<{
+    const values = await new Promise<{
       sampleRate: number;
       bpm: number;
       lengthBeats: number;
-    }>((resolve) => {
-      openContextModal({
-        modal: "newFile",
-        title: "New File",
-        innerProps: {
-          resolve,
+    } | null>((resolve) => {
+      let confirmed = false;
+      openNewFilePrompt({
+        onConfirm: (v) => {
+          confirmed = true;
+          resolve(v);
+        },
+        onClose: () => {
+          if (!confirmed) resolve(null);
         },
       });
     });
+    if (!values) return;
+    const { sampleRate, bpm, lengthBeats } = values;
 
     const state = get();
 

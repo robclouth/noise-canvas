@@ -18,6 +18,7 @@ vi.mock("@mantine/notifications", () => ({
 vi.mock("../modals", () => ({
   openConfirm: vi.fn(),
   openContextModal: vi.fn(),
+  openNewFilePrompt: vi.fn(),
 }));
 
 vi.mock("../undo-manager", () => ({

@@ -14,5 +14,11 @@
 *:focus,
 *:focus-visible {
   outline: none !important;
+}
+
+*:focus:not(.mantine-Menu-dropdown):not(.mantine-Popover-dropdown):not(.mantine-Modal-content):not(.mantine-Modal-body),
+*:focus-visible:not(.mantine-Menu-dropdown):not(.mantine-Popover-dropdown):not(.mantine-Modal-content):not(
+    .mantine-Modal-body
+  ) {
   box-shadow: none !important;
 }

@@ -1,4 +1,4 @@
-import { Stack, Text, TextInput } from "@mantine/core";
+import { NumberInput, SimpleGrid, Stack, Text, TextInput } from "@mantine/core";
 import { modals, openContextModal } from "@mantine/modals";
 import type { ReactNode, RefObject } from "react";
 
@@ -132,6 +132,86 @@ export function openPrompt({
       const value = inputRef.current?.value?.trim() ?? "";
       if (!value) return;
       await onConfirm(value);
+    },
+    onCancel,
+    onClose,
+  });
+}
+
+type NewFileValues = { sampleRate: number; bpm: number; lengthBeats: number };
+
+type OpenNewFilePromptOptions = {
+  title?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  defaults?: Partial<NewFileValues>;
+  onConfirm: (values: NewFileValues) => void | Promise<void>;
+  onCancel?: () => void;
+  onClose?: () => void;
+};
+
+export function openNewFilePrompt({
+  title = "New File",
+  confirmLabel = "Create",
+  cancelLabel = "Cancel",
+  defaults,
+  onConfirm,
+  onCancel,
+  onClose,
+}: OpenNewFilePromptOptions): string {
+  const sampleRateRef: RefObject<HTMLInputElement | null> = { current: null };
+  const bpmRef: RefObject<HTMLInputElement | null> = { current: null };
+  const lengthRef: RefObject<HTMLInputElement | null> = { current: null };
+
+  return openConfirmModal({
+    title,
+    children: (
+      <SimpleGrid cols={2} spacing="sm">
+        <NumberInput
+          ref={sampleRateRef}
+          size="xs"
+          label="Sample rate"
+          defaultValue={defaults?.sampleRate ?? 44100}
+          min={8000}
+          max={192000}
+          step={1000}
+          variant="unstyled"
+          hideControls
+          data-autofocus
+        />
+        <NumberInput
+          ref={bpmRef}
+          size="xs"
+          label="BPM"
+          defaultValue={defaults?.bpm ?? 120}
+          min={1}
+          max={999}
+          step={1}
+          variant="unstyled"
+          hideControls
+        />
+        <NumberInput
+          ref={lengthRef}
+          size="xs"
+          label="Length beats"
+          defaultValue={defaults?.lengthBeats ?? 16}
+          min={1}
+          max={64}
+          step={1}
+          variant="unstyled"
+          hideControls
+        />
+      </SimpleGrid>
+    ),
+    labels: { confirm: confirmLabel, cancel: cancelLabel },
+    confirmProps: { size: "xs" },
+    cancelProps: { size: "xs" },
+    onConfirm: async () => {
+      const sampleRate = parseInt(sampleRateRef.current?.value ?? "");
+      const bpm = parseInt(bpmRef.current?.value ?? "");
+      const lengthBeats = parseInt(lengthRef.current?.value ?? "");
+      if (!Number.isFinite(sampleRate) || !Number.isFinite(bpm) || !Number.isFinite(lengthBeats)) return;
+      await onConfirm({ sampleRate, bpm, lengthBeats });
     },
     onCancel,
     onClose,
