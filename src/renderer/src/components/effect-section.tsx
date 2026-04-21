@@ -13,7 +13,7 @@ export type EffectSectionProps = {
   onEnabledChange: (enabled: boolean) => void;
   onRemove?: () => void;
   onCopy?: () => void;
-  dragHandleProps?: React.HTMLAttributes<HTMLButtonElement> | null;
+  dragHandleProps?: React.HTMLAttributes<HTMLElement> | null;
   color?: string;
   parameterKeys?: ParameterKey[];
   effectId?: string;
@@ -43,16 +43,16 @@ export const EffectSection = memo(
               size="xs"
               color={color}
             />
-            <ActionIcon variant="transparent" color="gray.5" size="xs" {...(dragHandleProps ?? {})}>
-              <GripVertical size={16} />
-            </ActionIcon>
             <Group
               gap={4}
               wrap="nowrap"
               flex={1}
-              style={{ cursor: "pointer", userSelect: "none" }}
-              onClick={() => onEnabledChange(!enabled)}
+              style={{ cursor: "grab", userSelect: "none" }}
+              {...(dragHandleProps ?? {})}
             >
+              <ActionIcon variant="transparent" color="gray.5" size="xs" component="div">
+                <GripVertical size={16} />
+              </ActionIcon>
               <Tooltip label={description}>
                 <Text size="xs" fw={600}>
                   {label}
