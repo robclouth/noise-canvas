@@ -30,7 +30,8 @@ import {
   getMacroAmountValuesNormalized,
   getModAmountValuesNormalized,
 } from "../store/modulators";
-import type { SpectrogramData, State } from "../store/types";
+import type { ParameterKey, SpectrogramData, State } from "../store/types";
+import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { buildModulatorUniforms } from "./modulator-utils";
 import { withPlatformDefines } from "./shader-utils";
@@ -44,6 +45,35 @@ export type { EffectType };
 export type EffectsRegistry = Record<string, BaseEffect>;
 
 const noise2D = createNoise2D();
+
+function createParameterUniform(value: number, minValue: number, maxValue: number): ParameterUniform {
+  return {
+    value,
+    minValue,
+    maxValue,
+    modulationAmounts: [],
+    contextualModAmounts: [],
+    macroAmounts: [],
+  };
+}
+
+// Mutate a ParameterUniform slot in place from step state, avoiding the wrapper
+// allocation that `slot.value = { ... }` would incur.
+function writeModulatableParam(
+  target: ParameterUniform,
+  value: number,
+  minValue: number,
+  maxValue: number,
+  step: State,
+  key: ParameterKey,
+): void {
+  target.value = value;
+  target.minValue = minValue;
+  target.maxValue = maxValue;
+  target.modulationAmounts = getModAmountValuesNormalized(step, key);
+  target.contextualModAmounts = getContextualModAmountsNormalized(step, key);
+  target.macroAmounts = getMacroAmountValuesNormalized(step, key);
+}
 
 /**
  * Textures required for stroke rendering
@@ -120,6 +150,10 @@ export class StrokeRenderer {
   // Materials
   private maskMaterial: RawShaderMaterial;
 
+  // Preallocated buffer reused across mask-update iterations to avoid allocating
+  // a fresh macro array on every step.
+  private maskMacroValuesBuf: number[] = [0, 0, 0, 0];
+
   // State
   private pingPong = 0;
   private maskPingPong = 0;
@@ -177,11 +211,26 @@ export class StrokeRenderer {
         destBandCount: { value: 0 },
         brushBottomLeftUv: { value: new Vector2(0, 0) },
         brushSizeUv: { value: new Vector2(0, 0) },
+        strokePressure: { value: 0 },
+        strokeTiltX: { value: 0.5 },
+        strokeTiltY: { value: 0.5 },
       },
       vertexShader: passThroughVert,
       fragmentShader: withPlatformDefines(maskUpdateFrag),
       glslVersion: GLSL3,
     });
+
+    // UniformsUtils.clone does a deep clone for Three primitives (Vectors/Textures)
+    // but leaves plain-object .value fields as shared references with defaultValues.
+    // Give this material its own ParameterUniform objects so we can safely mutate
+    // them in place on the hot path without touching shared defaults.
+    const mu = this.maskMaterial.uniforms;
+    mu.brushIntensity = { value: createParameterUniform(1, 0, 1) };
+    mu.brushCurveTime = { value: createParameterUniform(0, -1, 1) };
+    mu.brushSkewTime = { value: createParameterUniform(0.5, 0, 1) };
+    mu.brushCurvePitch = { value: createParameterUniform(0, -1, 1) };
+    mu.brushSkewPitch = { value: createParameterUniform(0.5, 0, 1) };
+    mu.macroValues = { value: this.maskMacroValuesBuf };
   }
 
   /**
@@ -614,8 +663,11 @@ export class StrokeRenderer {
     // For multi-step rendering, we iterate through all steps sequentially
     let stepInputFbo: WebGLRenderTarget | { texture: DataTexture } = initialSourceFbo;
 
-    // Non-cumulative strokes: use snapshot as source to prevent self-feedback
-    if (!activeStepState.accumulate && isSameFile && activeStepState.sourceDataMode !== "original") {
+    // Non-cumulative strokes: use snapshot as source to prevent self-feedback.
+    // Gated by step 0's flags since step 0 is the step that actually consumes
+    // initialSourceFbo; subsequent steps read each other's output.
+    const firstStepState = createStepStateView(state, 0);
+    if (!firstStepState.accumulate && isSameFile && firstStepState.sourceDataMode !== "original") {
       stepInputFbo = this.strokeStartFbo;
       initialSourceFbo = this.strokeStartFbo;
     }
@@ -867,8 +919,18 @@ export class StrokeRenderer {
     if (!preview) {
       this.pingPong = 1 - this.pingPong;
 
-      // Update stroke mask for non-cumulative mode
-      if (!activeStepState.accumulate) {
+      // Update stroke mask for non-cumulative mode. Any step being non-accumulate
+      // means the per-step gate in the render loop will sample the mask for that
+      // step, so we need a fresh composite covering every non-accumulate step.
+      // updateStrokeMask is a no-op when every step is accumulate.
+      let anyNonAccumulate = false;
+      for (let i = 0; i < numSteps; i++) {
+        if (!createStepStateView(state, i).accumulate) {
+          anyNonAccumulate = true;
+          break;
+        }
+      }
+      if (anyNonAccumulate) {
         this.updateStrokeMask(state, cursorPos, bpm, totalDuration, strokeRandom, pressure, tiltX, tiltY);
       }
 
@@ -900,6 +962,9 @@ export class StrokeRenderer {
 
   /**
    * Update the stroke mask for non-cumulative mode.
+   * Iterates every non-accumulate step so each step's envelope/intensity
+   * contribution is composited into the mask (via max in the shader). A pure
+   * no-op when every step is set to accumulate.
    */
   private updateStrokeMask(
     state: State,
@@ -911,103 +976,121 @@ export class StrokeRenderer {
     tiltX: number,
     tiltY: number,
   ): void {
-    const currentMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo : this.strokeMaskFbo2;
-    const nextMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo2 : this.strokeMaskFbo;
+    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+    const numSteps = steps.length;
+    if (numSteps === 0) return;
 
-    const activeStep = createStepStateView(state, state.activeStepIndex);
-    const footprint = this.resolveBrushFootprint(activeStep, bpm, totalDuration);
-    const brushSizeUv = footprint.sizeUv;
-    const brushAnchor = resolveBrushAnchor(cursorPos, footprint.fullTime, footprint.fullPitch);
     const { placeholderTexture, modulator1Texture, modulator2Texture, modulator3Texture, modulatorScaleLut } =
       this.textures;
-    const modulatorUniforms = buildModulatorUniforms(
-      bpm,
-      totalDuration,
-      this.spectrogramData.bandsPerOctave,
-      this.spectrogramData.numBands,
-      activeStep,
-    );
 
-    const numSteps = (state.brushes[state.activeBrushIndex]?.steps ?? []).length;
-    const brushCenterTime = brushAnchor.x + brushSizeUv.x / 2;
-    const brushCenterPitch = brushAnchor.y + brushSizeUv.y / 2;
-    this.maskMaterial.uniforms.strokeIterationNormalized.value = 1;
-    this.maskMaterial.uniforms.strokeTimePosition.value = brushCenterTime;
-    this.maskMaterial.uniforms.strokePitchPosition.value = brushCenterPitch;
-    this.maskMaterial.uniforms.strokeRandom.value = strokeRandom;
-    this.maskMaterial.uniforms.strokeStepNormalized.value = numSteps > 1 ? state.activeStepIndex / (numSteps - 1) : 0;
-    this.maskMaterial.uniforms.strokePressure = { value: pressure };
-    this.maskMaterial.uniforms.strokeTiltX = { value: (tiltX + 90) / 180 };
-    this.maskMaterial.uniforms.strokeTiltY = { value: (tiltY + 90) / 180 };
+    const uniforms = this.maskMaterial.uniforms;
 
-    this.maskMaterial.uniforms.currentMaskTex.value = currentMaskFbo.texture;
-    this.maskMaterial.uniforms.destMetadataTex.value = this.textures.metadataTex;
-    this.maskMaterial.uniforms.destInverseMapTex.value = this.textures.inverseMapTex;
-    this.maskMaterial.uniforms.destSpectrogramTextureSize.value = this.spectrogramData.packedTextureSize;
-    this.maskMaterial.uniforms.destFrameCount.value = this.spectrogramData.numFrames;
-    this.maskMaterial.uniforms.destBandCount.value = this.spectrogramData.numBands;
-    this.maskMaterial.uniforms.brushSizeUv.value = brushSizeUv;
-    this.maskMaterial.uniforms.modulators.value = modulatorUniforms;
-    this.maskMaterial.uniforms.gainLut.value = modulatorScaleLut || placeholderTexture;
-    this.maskMaterial.uniforms.modulator1ImageTex.value = modulator1Texture || placeholderTexture;
-    this.maskMaterial.uniforms.modulator2ImageTex.value = modulator2Texture || placeholderTexture;
-    this.maskMaterial.uniforms.modulator3ImageTex.value = modulator3Texture || placeholderTexture;
-    this.maskMaterial.uniforms.modulator1SeqDataTex.value = modulatorUniforms[0]?.seqDataTex || placeholderTexture;
-    this.maskMaterial.uniforms.modulator2SeqDataTex.value = modulatorUniforms[1]?.seqDataTex || placeholderTexture;
-    this.maskMaterial.uniforms.modulator3SeqDataTex.value = modulatorUniforms[2]?.seqDataTex || placeholderTexture;
-    this.maskMaterial.uniforms.brushIntensity.value = {
-      value: activeStep.brushIntensity / 100,
-      minValue: 0,
-      maxValue: 1,
-      modulationAmounts: getModAmountValuesNormalized(activeStep, "brushIntensity"),
-      contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushIntensity"),
-      macroAmounts: getMacroAmountValuesNormalized(activeStep, "brushIntensity"),
-    };
-    this.maskMaterial.uniforms.brushCurveTime.value = {
-      value: (activeStep.brushCurveTime as number) / 100,
-      minValue: -1,
-      maxValue: 1,
-      modulationAmounts: getModAmountValuesNormalized(activeStep, "brushCurveTime"),
-      contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushCurveTime"),
-      macroAmounts: getMacroAmountValuesNormalized(activeStep, "brushCurveTime"),
-    };
-    this.maskMaterial.uniforms.brushSkewTime.value = {
-      value: ((activeStep.brushSkewTime as number) + 100) / 200,
-      minValue: 0,
-      maxValue: 1,
-      modulationAmounts: getModAmountValuesNormalized(activeStep, "brushSkewTime"),
-      contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushSkewTime"),
-      macroAmounts: getMacroAmountValuesNormalized(activeStep, "brushSkewTime"),
-    };
-    this.maskMaterial.uniforms.brushCurvePitch.value = {
-      value: (activeStep.brushCurvePitch as number) / 100,
-      minValue: -1,
-      maxValue: 1,
-      modulationAmounts: getModAmountValuesNormalized(activeStep, "brushCurvePitch"),
-      contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushCurvePitch"),
-      macroAmounts: getMacroAmountValuesNormalized(activeStep, "brushCurvePitch"),
-    };
-    this.maskMaterial.uniforms.brushSkewPitch.value = {
-      value: ((activeStep.brushSkewPitch as number) + 100) / 200,
-      minValue: 0,
-      maxValue: 1,
-      modulationAmounts: getModAmountValuesNormalized(activeStep, "brushSkewPitch"),
-      contextualModAmounts: getContextualModAmountsNormalized(activeStep, "brushSkewPitch"),
-      macroAmounts: getMacroAmountValuesNormalized(activeStep, "brushSkewPitch"),
-    };
+    // Bind invariants (same for every step) once.
+    uniforms.destMetadataTex.value = this.textures.metadataTex;
+    uniforms.destInverseMapTex.value = this.textures.inverseMapTex;
+    uniforms.destSpectrogramTextureSize.value = this.spectrogramData.packedTextureSize;
+    uniforms.destFrameCount.value = this.spectrogramData.numFrames;
+    uniforms.destBandCount.value = this.spectrogramData.numBands;
+    uniforms.gainLut.value = modulatorScaleLut || placeholderTexture;
+    uniforms.modulator1ImageTex.value = modulator1Texture || placeholderTexture;
+    uniforms.modulator2ImageTex.value = modulator2Texture || placeholderTexture;
+    uniforms.modulator3ImageTex.value = modulator3Texture || placeholderTexture;
+    uniforms.strokeIterationNormalized.value = 1;
+    uniforms.strokeRandom.value = strokeRandom;
+    uniforms.strokePressure.value = pressure;
+    uniforms.strokeTiltX.value = (tiltX + 90) / 180;
+    uniforms.strokeTiltY.value = (tiltY + 90) / 180;
 
-    this.maskMaterial.uniforms.macroValues = {
-      value: (state.brushes[state.activeBrushIndex]?.macroValues ?? [50, 50, 50, 50]).map((v) => v / 100),
-    };
-
-    this.maskMaterial.uniforms.brushBottomLeftUv.value = brushAnchor;
+    // Fill the preallocated macro buffer in place — the uniform slot was wired
+    // to this.maskMacroValuesBuf at construction time.
+    const macros = state.brushes[state.activeBrushIndex]?.macroValues ?? [50, 50, 50, 50];
+    for (let i = 0; i < 4; i++) this.maskMacroValuesBuf[i] = (macros[i] ?? 50) / 100;
 
     this.fboMesh.material = this.maskMaterial;
-    this.gl.setRenderTarget(nextMaskFbo);
-    this.gl.render(this.fboScene, this.camera);
-    this.gl.setRenderTarget(null);
 
-    this.maskPingPong = 1 - this.maskPingPong;
+    let renderedAny = false;
+
+    for (let stepIndex = 0; stepIndex < numSteps; stepIndex++) {
+      const stepState = createStepStateView(state, stepIndex);
+      if (stepState.accumulate) continue;
+
+      const footprint = this.resolveBrushFootprint(stepState, bpm, totalDuration);
+      const brushSizeUv = footprint.sizeUv;
+      const brushAnchor = resolveBrushAnchor(cursorPos, footprint.fullTime, footprint.fullPitch);
+
+      // Modulator params are per-step; rebuild for each step.
+      const modulatorUniforms = buildModulatorUniforms(
+        bpm,
+        totalDuration,
+        this.spectrogramData.bandsPerOctave,
+        this.spectrogramData.numBands,
+        stepState,
+      );
+      uniforms.modulators.value = modulatorUniforms;
+      uniforms.modulator1SeqDataTex.value = modulatorUniforms[0]?.seqDataTex || placeholderTexture;
+      uniforms.modulator2SeqDataTex.value = modulatorUniforms[1]?.seqDataTex || placeholderTexture;
+      uniforms.modulator3SeqDataTex.value = modulatorUniforms[2]?.seqDataTex || placeholderTexture;
+
+      uniforms.strokeTimePosition.value = brushAnchor.x + brushSizeUv.x / 2;
+      uniforms.strokePitchPosition.value = brushAnchor.y + brushSizeUv.y / 2;
+      uniforms.strokeStepNormalized.value = numSteps > 1 ? stepIndex / (numSteps - 1) : 0;
+
+      (uniforms.brushBottomLeftUv.value as Vector2).copy(brushAnchor);
+      (uniforms.brushSizeUv.value as Vector2).copy(brushSizeUv);
+
+      writeModulatableParam(
+        uniforms.brushIntensity.value as ParameterUniform,
+        (stepState.brushIntensity as number) / 100,
+        0,
+        1,
+        stepState,
+        "brushIntensity",
+      );
+      writeModulatableParam(
+        uniforms.brushCurveTime.value as ParameterUniform,
+        (stepState.brushCurveTime as number) / 100,
+        -1,
+        1,
+        stepState,
+        "brushCurveTime",
+      );
+      writeModulatableParam(
+        uniforms.brushSkewTime.value as ParameterUniform,
+        ((stepState.brushSkewTime as number) + 100) / 200,
+        0,
+        1,
+        stepState,
+        "brushSkewTime",
+      );
+      writeModulatableParam(
+        uniforms.brushCurvePitch.value as ParameterUniform,
+        (stepState.brushCurvePitch as number) / 100,
+        -1,
+        1,
+        stepState,
+        "brushCurvePitch",
+      );
+      writeModulatableParam(
+        uniforms.brushSkewPitch.value as ParameterUniform,
+        ((stepState.brushSkewPitch as number) + 100) / 200,
+        0,
+        1,
+        stepState,
+        "brushSkewPitch",
+      );
+
+      const currentMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo : this.strokeMaskFbo2;
+      const nextMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo2 : this.strokeMaskFbo;
+      uniforms.currentMaskTex.value = currentMaskFbo.texture;
+
+      this.gl.setRenderTarget(nextMaskFbo);
+      this.gl.render(this.fboScene, this.camera);
+
+      this.maskPingPong = 1 - this.maskPingPong;
+      renderedAny = true;
+    }
+
+    if (renderedAny) this.gl.setRenderTarget(null);
   }
 
   /**
