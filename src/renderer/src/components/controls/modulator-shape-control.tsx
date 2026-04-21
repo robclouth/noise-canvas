@@ -5,7 +5,7 @@ import { getOptionsParameterDef } from "@renderer/parameters";
 import { selectParameter, useStore } from "@renderer/store";
 import type { ParameterKey } from "@renderer/store/types";
 import { ChevronDown } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Tooltip } from "../tooltip";
 
 interface ModulatorShapeControlProps {
@@ -16,6 +16,7 @@ interface ModulatorShapeControlProps {
 export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorShapeControlProps) => {
   const shape = useStore(selectParameter(paramKey));
   const shapeDef = getOptionsParameterDef(paramKey);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const textureParamKey = `modulator${modulatorIndex}TexturePath` as ParameterKey;
   const texturePath = useStore(selectParameter(textureParamKey));
@@ -56,22 +57,19 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
     return String(shape);
   }, [shape, texturePath]);
 
-  // Handle selection change
   const handleChange = (value: string | null) => {
-    if (!value) return;
-
-    const setParameter = useStore.getState().setParameter;
-
-    if (value.startsWith("texture:")) {
-      // Texture selected
-      const texturePathValue = value.replace("texture:", "");
-      setParameter(paramKey, 12);
-      setParameter(textureParamKey, texturePathValue);
-    } else {
-      // Standard shape selected
-      setParameter(paramKey, parseInt(value));
-      setParameter(textureParamKey, null);
+    if (value) {
+      const setParameter = useStore.getState().setParameter;
+      if (value.startsWith("texture:")) {
+        const texturePathValue = value.replace("texture:", "");
+        setParameter(paramKey, 12);
+        setParameter(textureParamKey, texturePathValue);
+      } else {
+        setParameter(paramKey, parseInt(value));
+        setParameter(textureParamKey, null);
+      }
     }
+    inputRef.current?.blur();
   };
 
   return (
@@ -89,6 +87,7 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
         </Text>
       </Tooltip>
       <Select
+        ref={inputRef}
         size="xs"
         variant="unstyled"
         style={{ width: 70, borderRadius: 2, border: `1px solid #666`, backgroundColor: "#2c2c2c" }}

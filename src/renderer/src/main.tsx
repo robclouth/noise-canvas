@@ -42,35 +42,14 @@ const theme = createTheme({
   },
 });
 
-const isTextEntry = (t: HTMLElement): boolean => {
-  if (t.tagName === "TEXTAREA") return true;
-  if (t.isContentEditable) return true;
-  if (t.getAttribute("role") === "textbox") return true;
-  if (t.tagName === "INPUT") {
-    const input = t as HTMLInputElement;
-    if (["button", "checkbox", "radio", "submit", "reset", "file"].includes(input.type)) return false;
-    if (input.readOnly) return false;
-    return true;
-  }
-  return false;
-};
-
 document.addEventListener(
   "mousedown",
   (e) => {
     if (e.button !== 0) return;
     const t = e.target as HTMLElement;
-    if (!isTextEntry(t)) e.preventDefault();
-  },
-  { capture: true },
-);
-
-document.addEventListener(
-  "focusin",
-  (e) => {
-    const t = e.target as HTMLElement;
-    if (t === document.body) return;
-    if (!isTextEntry(t)) t.blur();
+    if (t.closest('button, [role="button"], [role="tab"], [role="menuitem"], [role="switch"]')) {
+      e.preventDefault();
+    }
   },
   { capture: true },
 );

@@ -1,5 +1,19 @@
-import { useWindowEvent } from "@mantine/hooks";
+import { useEffect } from "react";
 import { useStore } from "../store";
+
+const isTextEntry = (t: HTMLElement | null): boolean => {
+  if (!t) return false;
+  if (t.tagName === "TEXTAREA") return true;
+  if (t.isContentEditable) return true;
+  if (t.getAttribute("role") === "textbox") return true;
+  if (t.tagName === "INPUT") {
+    const input = t as HTMLInputElement;
+    if (["button", "checkbox", "radio", "submit", "reset", "file"].includes(input.type)) return false;
+    if (input.readOnly) return false;
+    return true;
+  }
+  return false;
+};
 
 export enum ShortcutAction {
   MoveBrushUp = "MoveBrushUp",
@@ -63,19 +77,9 @@ export function useShortcuts() {
       // However, standard Zoom logic (wheel) relies on this state.
     }
 
-    // Ignore if focused on input/textarea/select/combobox
-    const target = event.target as HTMLElement;
-    if (
-      target.tagName === "INPUT" ||
-      target.tagName === "BUTTON" ||
-      target.tagName === "TEXTAREA" ||
-      target.tagName === "SELECT" ||
-      target.isContentEditable ||
-      target.getAttribute("role") === "combobox" ||
-      target.getAttribute("role") === "slider"
-    ) {
-      return;
-    }
+    // Only bail when the user is actually typing into a real text-entry element.
+    // Focused buttons/selects/etc. must not swallow global shortcuts like Space.
+    if (isTextEntry(event.target as HTMLElement)) return;
 
     // Match shortcuts
     const shortcut = SHORTCUTS.find(
@@ -84,6 +88,7 @@ export function useShortcuts() {
 
     if (shortcut) {
       event.preventDefault();
+      event.stopPropagation();
 
       const state = useStore.getState();
 
@@ -168,6 +173,13 @@ export function useShortcuts() {
     }
   };
 
-  useWindowEvent("keydown", handleKeyDown);
-  useWindowEvent("keyup", handleKeyUp);
+  useEffect(() => {
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
+    window.addEventListener("keyup", handleKeyUp, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
+      window.removeEventListener("keyup", handleKeyUp, { capture: true });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 }

@@ -10,3 +10,9 @@
 .effect-button:hover {
   background-color: var(--mantine-color-dark-6);
 }
+
+*:focus,
+*:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
