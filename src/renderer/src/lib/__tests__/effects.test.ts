@@ -888,4 +888,153 @@ describe("Effects", () => {
       assertFreqAlignedMatch(result);
     });
   });
+
+  // Passthrough (source = self, no effects, full-coverage rectangular brush at
+  // 100% intensity) must be a true pixel identity: a single non-zero magnitude
+  // in the input must come out at the exact same (band, frame) with the same
+  // magnitude and nothing anywhere else. The mock uses a fractional-band freq
+  // drift so band (N-1) sits below the configured minFreq — the realistic
+  // direction of gaborator's tuning snap, which caused every bin to read from
+  // the next-lower source band (displayed as a one-bin upward shift).
+  describe("identity round-trip", () => {
+    it("passthrough with self-source preserves a single-pixel input at the same (band, frame) with the same magnitude", async () => {
+      const numBands = 8;
+      const numFrames = 16;
+      const spec = createMockSpectrogramData({
+        numFrames,
+        numBands,
+        pattern: "silence",
+        metadataFreqDriftBands: -0.7,
+      });
+
+      // Deposit a single non-zero pixel at a band/frame well inside the grid.
+      const testBand = 3;
+      const testFrame = 8;
+      const testMag = 0.7;
+      const pixelIndex = testBand * numFrames + testFrame;
+      spec.packedData[pixelIndex * 4 + 0] = testMag;
+      spec.packedData[pixelIndex * 4 + 2] = testMag;
+
+      const rawTextures = createTexturesFromSpectrogramData(spec);
+      const strokeTextures: StrokeTextures = {
+        packedDataTex: rawTextures.packedDataTex,
+        originalPackedDataTex: rawTextures.originalPackedDataTex,
+        inverseMapTex: rawTextures.inverseMapTex,
+        metadataTex: rawTextures.metadataTex,
+        placeholderTexture,
+        modulatorScaleLut,
+        modulator1Texture: placeholderTexture,
+        modulator2Texture: placeholderTexture,
+        modulator3Texture: placeholderTexture,
+      };
+      const renderer = new StrokeRenderer(gl, spec, strokeTextures, "identity-test", effects);
+      renderer.initialize();
+
+      const rendererTextures = renderer.getTextures();
+      const sourceFile: SourceFileInfo = {
+        id: "identity-test",
+        filePath: "/test/identity-test.wav",
+        spectrogramData: spec,
+        textures: {
+          packed: rendererTextures.packed,
+          inverse: rendererTextures.inverse,
+          metadata: rendererTextures.metadata,
+          original: rendererTextures.original,
+        },
+      };
+
+      const effectsList = [
+        { id: "test-transform", effect: "transform" as const, enabled: false, params: {} },
+        { id: "test-dynamics", effect: "dynamics" as const, enabled: false, params: {} },
+        { id: "test-blur", effect: "blur" as const, enabled: false, params: {} },
+        { id: "test-overtones", effect: "overtones" as const, enabled: false, params: {} },
+        { id: "test-synthesize", effect: "synthesize" as const, enabled: false, params: {} },
+      ];
+      const state = createMockStateWithSteps(
+        [
+          {
+            name: "Identity",
+            overrides: {
+              brushIntensity: 100,
+              brushSizeTime: 10,
+              brushSizePitch: 100,
+              brushCurveTime: 100,
+              brushSkewTime: -100,
+              brushCurvePitch: 100,
+              brushSkewPitch: -100,
+              accumulate: true,
+              blendMode: 0,
+              sourcePositionMode: "follow",
+              effects: effectsList,
+            },
+          },
+        ],
+        { filepathsBpm: { "/test/identity-test.wav": 120 } },
+      ) as State;
+
+      const totalDuration = spec.numFrames / spec.sampleRate;
+      const params: StrokeParams = {
+        cursorPos: new Vector2(0, 0),
+        preview: false,
+        bpm: 120,
+        totalDuration,
+        viewZoomPower: 0,
+        viewOffset: 0,
+        viewZoomPowerY: 0,
+        viewOffsetY: 0,
+        pressure: 1,
+        tiltX: 0,
+        tiltY: 0,
+      };
+
+      renderer.renderStroke(params, state, sourceFile);
+      const output = await renderer.getFBOData();
+
+      const hitPixel = readSpectrogramPixel(
+        output,
+        testFrame,
+        testBand,
+        spec.numFrames,
+        spec.numBands,
+        spec.textureWidth,
+        spec.textureHeight,
+      );
+      expect(hitPixel).not.toBeNull();
+      expect(hitPixel![0]).toBeCloseTo(testMag, 2);
+      expect(hitPixel![2]).toBeCloseTo(testMag, 2);
+
+      // Every other (band, frame) in the grid must stay ~zero. A one-band
+      // vertical shift would plant testMag at band (testBand±1); a one-frame
+      // horizontal shift would plant it at (testFrame±1).
+      const stray: Array<{ band: number; frame: number; magL: number; magR: number }> = [];
+      for (let band = 0; band < spec.numBands; band++) {
+        for (let frame = 0; frame < spec.numFrames; frame++) {
+          if (band === testBand && frame === testFrame) continue;
+          const pix = readSpectrogramPixel(
+            output,
+            frame,
+            band,
+            spec.numFrames,
+            spec.numBands,
+            spec.textureWidth,
+            spec.textureHeight,
+          );
+          if (pix && (pix[0] > 0.01 || pix[2] > 0.01)) {
+            stray.push({ band, frame, magL: pix[0], magR: pix[2] });
+          }
+        }
+      }
+      if (stray.length > 0) {
+        // eslint-disable-next-line no-console
+        console.log(`unexpected non-zero pixels (one-bin shift would appear here):`, stray);
+      }
+      expect(stray).toEqual([]);
+
+      renderer.dispose();
+      rawTextures.packedDataTex.dispose();
+      rawTextures.originalPackedDataTex.dispose();
+      rawTextures.inverseMapTex.dispose();
+      rawTextures.metadataTex.dispose();
+    });
+  });
 });

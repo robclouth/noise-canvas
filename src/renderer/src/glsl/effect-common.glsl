@@ -297,24 +297,31 @@ float getAudioLevelDb(vec2 uv) {
 #include "modulation-common.glsl"
 
 // Forward freq-preserving map: dest UV.y → source UV.y such that the two UVs
-// refer to the same absolute frequency. Uses dest metadata for the band freq
-// (authoritative) and the source's log-band formula for the inverse — works
-// across different minFreq / bandsPerOctave / bandCount.
+// refer to the same absolute frequency. Works across different minFreq /
+// bandsPerOctave / bandCount.
 // Gaborator's band layout has UV.y increasing with frequency (band 0 = top of
-// UV = highest freq), so sourceUV.y increases with sourceBandIdx.
+// UV = highest freq), so sourceUV.y increases with sourceBandIdx. The freq
+// anchor is the source's actual lowest-band center freq read from metadata,
+// since gaborator snaps the requested minFreq to its internal band tuning and
+// the two can disagree by up to half a band — using the config value would
+// let (sourceBandIdx + 0.5) round to the next integer and shift every bin.
 float destToSourceBandUv(vec2 destUnpackedUv) {
   float destFreqHz = getDestMetadata(destUnpackedUv).a;
-  float sourceBandIdx = sourceBandsPerOctave * log2(max(destFreqHz, 1e-6) / max(sourceMinFreq, 1e-6));
+  float sourceLowestFreq = max(fetchBandMetadata(sourceMetadataTex, sourceBandCount - 1.0).a, 1e-6);
+  float sourceBandIdx = sourceBandsPerOctave * log2(max(destFreqHz, 1e-6) / sourceLowestFreq);
   return (sourceBandIdx + 0.5) / max(sourceBandCount, 1.0);
 }
 
 // Inverse of destToSourceBandUv: source UV.y → dest UV.y for the same freq.
 // Needed by brush-bounds checks that receive a source UV and want to compare
-// against dest-space brush bounds.
+// against dest-space brush bounds. Uses each texture's actual lowest-band freq
+// as the anchor (see destToSourceBandUv).
 float sourceToDestBandUv(float sourceBandUvY) {
+  float sourceLowestFreq = max(fetchBandMetadata(sourceMetadataTex, sourceBandCount - 1.0).a, 1e-6);
+  float destLowestFreq = max(fetchBandMetadata(destMetadataTex, destBandCount - 1.0).a, 1e-6);
   float sourceBandIdx = sourceBandUvY * sourceBandCount - 0.5;
-  float sourceFreqHz = sourceMinFreq * exp2(sourceBandIdx / max(sourceBandsPerOctave, 1e-6));
-  float destBandIdx = destBandsPerOctave * log2(max(sourceFreqHz, 1e-6) / max(destMinFreq, 1e-6));
+  float sourceFreqHz = sourceLowestFreq * exp2(sourceBandIdx / max(sourceBandsPerOctave, 1e-6));
+  float destBandIdx = destBandsPerOctave * log2(max(sourceFreqHz, 1e-6) / destLowestFreq);
   return (destBandIdx + 0.5) / max(destBandCount, 1.0);
 }
 

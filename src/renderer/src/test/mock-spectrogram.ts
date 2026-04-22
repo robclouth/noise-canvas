@@ -21,6 +21,15 @@ export interface MockSpectrogramOptions {
   pattern?: "silence" | "sine" | "noise" | "gradient" | "constant" | "bandGradient";
   /** Constant magnitude value (for pattern: "constant") */
   constantMagnitude?: number;
+  /**
+   * Fractional-band offset applied to every stored metadata frequency. Simulates
+   * gaborator's snap-to-band tuning where the actual lowest-band center freq
+   * differs from the requested minFreq by up to one band. With drift = d, band i
+   * stores freq = minFreq · 2^((numBands-1-i+d)/bandsPerOctave), so d < 0 means
+   * the lowest band sits below the configured minFreq (the realistic direction).
+   * Defaults to 0 (no drift — metadata aligns exactly with the config).
+   */
+  metadataFreqDriftBands?: number;
 }
 
 /**
@@ -37,6 +46,7 @@ export function createMockSpectrogramData(options: MockSpectrogramOptions = {}):
     bandsPerOctave = 24,
     pattern = "silence",
     constantMagnitude = 0.5,
+    metadataFreqDriftBands = 0,
   } = options;
 
   // Calculate texture dimensions
@@ -123,10 +133,12 @@ export function createMockSpectrogramData(options: MockSpectrogramOptions = {}):
     metadata[baseIndex + 1] = numFrames; // band length
     metadata[baseIndex + 2] = 0; // time scale exponent (2^0 = 1, no scaling)
     // Gaborator convention: band 0 is the HIGHEST freq, band (numBands-1)
-    // sits at minFreq. Real analysis stores frequencies in that order, so the
+    // sits near minFreq. Real analysis stores frequencies in that order, so the
     // mock mirrors it here — otherwise cross-file freq-preserving maps in the
     // shader (which assume the Gaborator layout) flip under test.
-    const freq = minFreq * Math.pow(2, (numBands - 1 - band) / bandsPerOctave);
+    // The drift term offsets every stored freq by a fractional band so tests
+    // can simulate gaborator's tuning snap.
+    const freq = minFreq * Math.pow(2, (numBands - 1 - band + metadataFreqDriftBands) / bandsPerOctave);
     metadata[baseIndex + 3] = freq;
   }
 
