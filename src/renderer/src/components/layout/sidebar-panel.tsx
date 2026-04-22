@@ -8,16 +8,13 @@ import { RESERVED_KEYS } from "@renderer/lib/useShortcuts";
 import { collectBrushReferencedPaths } from "@renderer/store/files";
 import type { Brush } from "@renderer/store/types";
 import type { EffectItem } from "@renderer/effects/types";
-import { ChevronLeft, ChevronRight, MoreVertical, Plus } from "lucide-react";
+import { MoreVertical } from "lucide-react";
 import { HistorySection } from "./history-section";
 import { Section } from "../section";
 import { memo, useCallback, useEffect, useState } from "react";
 import { BrushPickerOpenButton } from "../controls/brush-picker";
-import { Tooltip } from "../tooltip";
 
-const EXPANDED_WIDTH = 180;
-const COLLAPSED_WIDTH = 40;
-const COLLAPSED_TILE_SIZE = 28;
+const PANEL_WIDTH = 200;
 
 function getBrushEffectHues(brush: Brush): string[] {
   const seen = new Set<string>();
@@ -34,17 +31,6 @@ function getBrushEffectHues(brush: Brush): string[] {
     }
   }
   return hues;
-}
-
-function shortLabel(brush: Brush, index: number): string {
-  if (brush.hotkey) return brush.hotkey;
-  if (index < 9) return String(index + 1);
-  if (index === 9) return "0";
-  return "";
-}
-
-function labelFontSize(text: string): number {
-  return text.length <= 1 ? 12 : 10;
 }
 
 function openCloseConfirm(brushIndex: number, brushName: string) {
@@ -82,7 +68,6 @@ type BrushTileProps = {
   brush: Brush;
   index: number;
   active: boolean;
-  collapsed: boolean;
   dirty: boolean;
   listeningForHotkey: boolean;
   onStartHotkeyAssign: (index: number) => void;
@@ -92,7 +77,6 @@ const BrushTile = memo(function BrushTile({
   brush,
   index,
   active,
-  collapsed,
   dirty,
   listeningForHotkey,
   onStartHotkeyAssign,
@@ -130,58 +114,6 @@ const BrushTile = memo(function BrushTile({
   };
 
   const effectHues = getBrushEffectHues(brush);
-
-  if (collapsed) {
-    const label = shortLabel(brush, index);
-    return (
-      <Tooltip label={`${brush.name}${dirty ? " (modified)" : ""}`}>
-        <UnstyledButton onClick={onActivate} style={{ display: "flex", justifyContent: "center", width: "100%" }}>
-          <Box
-            style={{
-              width: COLLAPSED_TILE_SIZE,
-              height: COLLAPSED_TILE_SIZE,
-              borderRadius: 4,
-              position: "relative",
-              display: "flex",
-              flexDirection: "column",
-              overflow: "hidden",
-              opacity: active ? 1 : 0.6,
-              outline: active ? "1px solid white" : "none",
-              outlineOffset: 1,
-              background: "var(--mantine-color-dark-5)",
-            }}
-          >
-            {effectHues.map((hue, i) => (
-              <Box key={i} style={{ flex: 1, minHeight: 0, background: `var(--mantine-color-${hue}-6)` }} />
-            ))}
-            {label && (
-              <Text
-                size="xs"
-                fw={700}
-                c="white"
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: labelFontSize(label),
-                  lineHeight: 1,
-                  userSelect: "none",
-                  textShadow: "0 0 3px rgba(0,0,0,0.8)",
-                }}
-              >
-                {label}
-              </Text>
-            )}
-            {dirty && (
-              <Box pos="absolute" top={2} right={2} w={5} h={5} style={{ borderRadius: "50%", background: "white" }} />
-            )}
-          </Box>
-        </UnstyledButton>
-      </Tooltip>
-    );
-  }
 
   const canSave = brush.libraryId !== null && dirty;
 
@@ -313,14 +245,11 @@ const BrushTile = memo(function BrushTile({
   );
 });
 
-export function PalettePanel() {
+export function SidebarPanel() {
   const brushes = useStore((state) => state.brushes);
   const activeBrushIndex = useStore((state) => state.activeBrushIndex);
   const availablePresets = useStore((state) => state.availablePresets);
-  const collapsed = useStore((state) => state.paletteRailCollapsed);
-  const setCollapsed = useStore((state) => state.setPaletteRailCollapsed);
   const reorderBrushes = useStore((state) => state.reorderBrushes);
-  const addEmptyBrush = useStore((state) => state.addEmptyBrush);
 
   const [hotkeyListenIndex, setHotkeyListenIndex] = useState<number | null>(null);
 
@@ -346,8 +275,6 @@ export function PalettePanel() {
     [reorderBrushes],
   );
 
-  const width = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
-
   const dirtyByIndex = brushes.map((brush) => {
     if (brush.libraryId === null) return false;
     const preset = availablePresets.find((p) => p.id === brush.libraryId);
@@ -360,144 +287,83 @@ export function PalettePanel() {
   return (
     <Stack
       h="100%"
-      w={width}
-      miw={width}
+      w={PANEL_WIDTH}
+      miw={PANEL_WIDTH}
       gap={0}
       style={{
         background: "var(--mantine-color-dark-7)",
-        borderRight: "1px solid var(--mantine-color-dark-5)",
+        borderLeft: "1px solid var(--mantine-color-dark-5)",
       }}
     >
-      <Group gap={0} justify="flex-end" wrap="nowrap" px={collapsed ? 4 : 6} py={4}>
-        <Tooltip label={collapsed ? "Expand" : "Collapse"}>
-          <ActionIcon size="xs" variant="subtle" color="gray" onClick={() => setCollapsed(!collapsed)}>
-            {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
-          </ActionIcon>
-        </Tooltip>
-      </Group>
-
       <Box
         style={{
           flex: 1,
           minHeight: 0,
-          paddingTop: 0,
-          paddingLeft: collapsed ? 4 : 8,
-          paddingRight: collapsed ? 4 : 8,
-          paddingBottom: collapsed ? 4 : 8,
+          padding: 8,
           display: "flex",
           flexDirection: "column",
-          gap: collapsed ? 0 : 8,
-          overflowY: collapsed ? "auto" : "hidden",
+          gap: 8,
         }}
       >
-        {collapsed ? (
-          <>
-            <DragDropContext onDragEnd={handleDragEnd}>
-              <Droppable droppableId="brushes">
-                {(provided) => (
-                  <Stack ref={provided.innerRef} {...provided.droppableProps} gap={2}>
-                    {brushes.map((brush, index) => (
-                      <Draggable key={brush.id} draggableId={brush.id} index={index}>
-                        {(draggableProvided, snapshot) => (
-                          <Box
-                            ref={draggableProvided.innerRef}
-                            {...draggableProvided.draggableProps}
-                            {...draggableProvided.dragHandleProps}
-                            style={{
-                              ...draggableProvided.draggableProps.style,
-                              ...(snapshot.isDragging && { boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)" }),
-                            }}
-                          >
-                            <BrushTile
-                              brush={brush}
-                              index={index}
-                              active={activeBrushIndex === index}
-                              collapsed
-                              dirty={dirtyByIndex[index]}
-                              listeningForHotkey={hotkeyListenIndex === index}
-                              onStartHotkeyAssign={setHotkeyListenIndex}
-                            />
-                          </Box>
-                        )}
-                      </Draggable>
-                    ))}
-                    {provided.placeholder}
-                  </Stack>
-                )}
-              </Droppable>
-            </DragDropContext>
-            <Group justify="center" mt={4}>
-              <Tooltip label="Add brush">
-                <ActionIcon size="sm" variant="subtle" color="gray" onClick={() => addEmptyBrush()}>
-                  <Plus size={16} />
-                </ActionIcon>
-              </Tooltip>
-            </Group>
-          </>
-        ) : (
-          <>
-            {/* Brushes fills remaining vertical space minus the History cap.
-                Its body scrolls internally when the list gets long. */}
-            <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-              <Section label="Brushes">
-                <Box style={{ display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
-                  <DragDropContext onDragEnd={handleDragEnd}>
-                    <Droppable droppableId="brushes">
-                      {(provided) => (
-                        <Stack ref={provided.innerRef} {...provided.droppableProps} gap={2}>
-                          {brushes.map((brush, index) => (
-                            <Draggable key={brush.id} draggableId={brush.id} index={index}>
-                              {(draggableProvided, snapshot) => (
-                                <Box
-                                  ref={draggableProvided.innerRef}
-                                  {...draggableProvided.draggableProps}
-                                  {...draggableProvided.dragHandleProps}
-                                  style={{
-                                    ...draggableProvided.draggableProps.style,
-                                    ...(snapshot.isDragging && { boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)" }),
-                                  }}
-                                >
-                                  <BrushTile
-                                    brush={brush}
-                                    index={index}
-                                    active={activeBrushIndex === index}
-                                    collapsed={false}
-                                    dirty={dirtyByIndex[index]}
-                                    listeningForHotkey={hotkeyListenIndex === index}
-                                    onStartHotkeyAssign={setHotkeyListenIndex}
-                                  />
-                                </Box>
-                              )}
-                            </Draggable>
-                          ))}
-                          {provided.placeholder}
-                        </Stack>
-                      )}
-                    </Droppable>
-                  </DragDropContext>
-                  <Box mt={4}>
-                    <BrushPickerOpenButton />
-                  </Box>
-                </Box>
-              </Section>
+        {/* Brushes fills remaining vertical space minus the History cap.
+            Its body scrolls internally when the list gets long. */}
+        <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          <Section label="Brushes">
+            <Box style={{ display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
+              <DragDropContext onDragEnd={handleDragEnd}>
+                <Droppable droppableId="brushes">
+                  {(provided) => (
+                    <Stack ref={provided.innerRef} {...provided.droppableProps} gap={2}>
+                      {brushes.map((brush, index) => (
+                        <Draggable key={brush.id} draggableId={brush.id} index={index}>
+                          {(draggableProvided, snapshot) => (
+                            <Box
+                              ref={draggableProvided.innerRef}
+                              {...draggableProvided.draggableProps}
+                              {...draggableProvided.dragHandleProps}
+                              style={{
+                                ...draggableProvided.draggableProps.style,
+                                ...(snapshot.isDragging && { boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)" }),
+                              }}
+                            >
+                              <BrushTile
+                                brush={brush}
+                                index={index}
+                                active={activeBrushIndex === index}
+                                dirty={dirtyByIndex[index]}
+                                listeningForHotkey={hotkeyListenIndex === index}
+                                onStartHotkeyAssign={setHotkeyListenIndex}
+                              />
+                            </Box>
+                          )}
+                        </Draggable>
+                      ))}
+                      {provided.placeholder}
+                    </Stack>
+                  )}
+                </Droppable>
+              </DragDropContext>
+              <Box mt={4}>
+                <BrushPickerOpenButton />
+              </Box>
             </Box>
+          </Section>
+        </Box>
 
-            {/* History takes whatever's left up to half the container. Inside
-                the Section body we set flex:1 + minHeight:0 so the rows list
-                scrolls internally rather than pushing the container. */}
-            <Box
-              style={{
-                flex: "0 1 auto",
-                maxHeight: "50%",
-                minHeight: 0,
-                display: "flex",
-                flexDirection: "column",
-              }}
-            >
-              <HistorySection />
-            </Box>
-          </>
-        )}
+        {/* History takes whatever's left up to half the container. Inside
+            the Section body we set flex:1 + minHeight:0 so the rows list
+            scrolls internally rather than pushing the container. */}
+        <Box
+          style={{
+            flex: "0 1 auto",
+            maxHeight: "50%",
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          <HistorySection />
+        </Box>
       </Box>
     </Stack>
   );

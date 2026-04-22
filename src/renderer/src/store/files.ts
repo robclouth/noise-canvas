@@ -1,4 +1,4 @@
-import { openConfirm, openNewFilePrompt } from "../lib/modals";
+import { openConfirm, openNewFilePrompt, openReanalyzePrompt } from "../lib/modals";
 import { notifications } from "@mantine/notifications";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { EffectItem } from "@renderer/effects/types";
@@ -1374,27 +1374,25 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     });
   },
   reanalyzeActiveFile: async () => {
-    const state = get();
-    if (!state.activeFileId) return;
-    const file = openFiles[state.activeFileId];
+    const initialState = get();
+    if (!initialState.activeFileId) return;
+    const file = openFiles[initialState.activeFileId];
 
-    openConfirm({
-      title: "Re-analyze File",
-      message: `This will re-analyze the file with the new settings. You will lose the undo history.`,
-      confirmLabel: "Re-analyze",
-      danger: true,
-      onConfirm: async () => {
+    openReanalyzePrompt({
+      initialBandsPerOctave: initialState.bandsPerOctave,
+      onConfirm: async (bandsPerOctave) => {
+        const state = get();
         if (!state.activeFileId) return;
         const audioBuffer = file?.audioBuffer;
 
         try {
           const result = audioBuffer
             ? await window.audioAnalysis.analyseBuffer(audioBuffer, {
-                bandsPerOctave: state.bandsPerOctave,
+                bandsPerOctave,
                 minFreq: state.minFreq,
               })
             : await window.audioAnalysis.analyze(file.filePath, {
-                bandsPerOctave: state.bandsPerOctave,
+                bandsPerOctave,
                 minFreq: state.minFreq,
               });
 
@@ -1418,7 +1416,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             sampleRate: result.sampleRate,
             packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
             minFreq: state.minFreq,
-            bandsPerOctave: state.bandsPerOctave,
+            bandsPerOctave,
             synthesisMetadata: {
               bandOffsets: result.bandOffsets,
               bandStepLog2s: result.bandStepLog2s,
@@ -1439,7 +1437,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
           return set(
             produce((state: State) => {
-              state.filesBandsPerOctave[state.activeFileId!] = state.bandsPerOctave;
+              state.bandsPerOctave = bandsPerOctave;
+              state.filesBandsPerOctave[state.activeFileId!] = bandsPerOctave;
             }),
           );
         } catch (error) {

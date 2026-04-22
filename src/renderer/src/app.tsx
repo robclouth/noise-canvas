@@ -1,5 +1,5 @@
 import { BrushPanel } from "@/components/layout/brush-panel";
-import { PalettePanel } from "@/components/layout/palette-panel";
+import { SidebarPanel } from "@/components/layout/sidebar-panel";
 import { useStore } from "@/store";
 import { Box, Group, List, LoadingOverlay, ScrollArea, Stack, Text } from "@mantine/core";
 import { openConfirm } from "./lib/modals";
@@ -10,7 +10,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
 import { CanvasPanel, PaletteBar } from "./components/layout/canvas-panel";
-import { ControlsPanel } from "./components/layout/controls-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
 import { ipcOn, ipcSend } from "./lib/ipc";
@@ -288,7 +287,6 @@ function App(): React.JSX.Element {
         />
       )}
       <input {...getInputProps()} />
-      <PalettePanel />
       <Canvas
         dpr={1}
         style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}
@@ -338,16 +336,7 @@ function App(): React.JSX.Element {
         <PaletteBar />
         <TransportPanel />
       </Stack>
-      <ScrollArea
-        scrollbarSize={4}
-        type="auto"
-        w={170}
-        miw={170}
-        h="100%"
-        onScrollPositionChange={() => invalidateRef.current?.()}
-      >
-        <ControlsPanel />
-      </ScrollArea>
+      <SidebarPanel />
       <Notifications />
       <UpdateNotification />
     </Group>

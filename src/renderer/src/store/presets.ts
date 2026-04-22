@@ -22,8 +22,6 @@ export interface PresetsState {
   availablePresets: PresetType[];
   brushes: Brush[];
   activeBrushIndex: number;
-  paletteRailCollapsed: boolean;
-  setPaletteRailCollapsed: (collapsed: boolean) => void;
   captureState: () => BrushStep[];
   isBrushDirty: (index: number) => boolean;
   setActiveBrush: (index: number) => void;
@@ -128,7 +126,7 @@ function openReferencedFiles(brush: Brush, get: ZustandGet) {
   }
 }
 
-export const PRESETS_PERSISTED_KEYS = ["brushes", "activeBrushIndex", "paletteRailCollapsed"] as const;
+export const PRESETS_PERSISTED_KEYS = ["brushes", "activeBrushIndex"] as const;
 
 export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsState => ({
   presetsDir: null,
@@ -185,9 +183,6 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
 
   brushes: [makeEmptyBrush(generateRandomBrushName())],
   activeBrushIndex: 0,
-  paletteRailCollapsed: false,
-
-  setPaletteRailCollapsed: (collapsed) => set({ paletteRailCollapsed: collapsed }),
 
   captureState: (): BrushStep[] => {
     const state = get();

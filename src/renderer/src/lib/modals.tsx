@@ -1,5 +1,6 @@
-import { NumberInput, SimpleGrid, Stack, Text, TextInput } from "@mantine/core";
+import { NumberInput, Select, SimpleGrid, Stack, Text, TextInput } from "@mantine/core";
 import { modals, openContextModal } from "@mantine/modals";
+import { BANDS_PER_OCTAVE_VALUES } from "@renderer/lib/constants";
 import type { ReactNode, RefObject } from "react";
 
 export { openContextModal };
@@ -212,6 +213,53 @@ export function openNewFilePrompt({
       const lengthBeats = parseInt(lengthRef.current?.value ?? "");
       if (!Number.isFinite(sampleRate) || !Number.isFinite(bpm) || !Number.isFinite(lengthBeats)) return;
       await onConfirm({ sampleRate, bpm, lengthBeats });
+    },
+    onCancel,
+    onClose,
+  });
+}
+
+type OpenReanalyzePromptOptions = {
+  initialBandsPerOctave: number;
+  onConfirm: (bandsPerOctave: number) => void | Promise<void>;
+  onCancel?: () => void;
+  onClose?: () => void;
+};
+
+export function openReanalyzePrompt({
+  initialBandsPerOctave,
+  onConfirm,
+  onCancel,
+  onClose,
+}: OpenReanalyzePromptOptions): string {
+  let chosen = initialBandsPerOctave;
+
+  return openConfirmModal({
+    title: "Re-analyze File",
+    children: (
+      <Stack gap="sm">
+        <Text size="sm">
+          Re-analyzing replaces the file&apos;s spectrogram data using the selected resolution. You will lose the undo
+          history.
+        </Text>
+        <Select
+          size="xs"
+          label="Resolution"
+          defaultValue={String(initialBandsPerOctave)}
+          data={BANDS_PER_OCTAVE_VALUES.map((o) => ({ value: String(o.value), label: o.label }))}
+          onChange={(val) => {
+            if (val !== null) chosen = parseInt(val);
+          }}
+          allowDeselect={false}
+          data-autofocus
+        />
+      </Stack>
+    ),
+    labels: { confirm: "Re-analyze", cancel: "Cancel" },
+    confirmProps: { size: "xs", color: "red" },
+    cancelProps: { size: "xs" },
+    onConfirm: async () => {
+      await onConfirm(chosen);
     },
     onCancel,
     onClose,
