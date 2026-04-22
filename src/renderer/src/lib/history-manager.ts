@@ -47,10 +47,13 @@ export interface HistoryNode {
   audioPeak?: number;
   audioCached?: boolean;
   customLabel?: string;
+  favorited?: boolean;
 }
 
+const HISTORY_MANIFEST_VERSION = 2;
+
 interface HistoryManifest {
-  version: 1;
+  version: typeof HISTORY_MANIFEST_VERSION;
   rootId: string;
   currentId: string;
   nodes: Record<string, HistoryNode>;
@@ -58,6 +61,15 @@ interface HistoryManifest {
 
 // --- Pure codec ---
 
+/**
+ * Compute a dirty-rectangle delta patch as `after - before` for each pixel in
+ * the bounding box of changed pixels. Unchanged pixels inside the box become
+ * exact zeros, which zstd collapses into near-nothing — dramatically smaller
+ * on disk than storing absolute after-values (which carry the full base value
+ * even in untouched regions of the bbox).
+ *
+ * Reconstruct with applyDelta(base, rect, patch, tW) → element-wise add.
+ */
 export function computeDeltaRect(
   before: Float32Array,
   after: Float32Array,
@@ -98,10 +110,10 @@ export function computeDeltaRect(
     for (let x = 0; x < w; x++) {
       const srcI = srcRow + (minX + x) * 4;
       const dstI = dstRow + x * 4;
-      patch[dstI] = after[srcI];
-      patch[dstI + 1] = after[srcI + 1];
-      patch[dstI + 2] = after[srcI + 2];
-      patch[dstI + 3] = after[srcI + 3];
+      patch[dstI] = after[srcI] - before[srcI];
+      patch[dstI + 1] = after[srcI + 1] - before[srcI + 1];
+      patch[dstI + 2] = after[srcI + 2] - before[srcI + 2];
+      patch[dstI + 3] = after[srcI + 3] - before[srcI + 3];
     }
   }
 
@@ -116,10 +128,10 @@ export function applyDelta(base: Float32Array, rect: Rect, patch: Float32Array, 
     for (let x = 0; x < rect.w; x++) {
       const dstI = dstRow + (rect.x + x) * 4;
       const srcI = srcRow + x * 4;
-      out[dstI] = patch[srcI];
-      out[dstI + 1] = patch[srcI + 1];
-      out[dstI + 2] = patch[srcI + 2];
-      out[dstI + 3] = patch[srcI + 3];
+      out[dstI] += patch[srcI];
+      out[dstI + 1] += patch[srcI + 1];
+      out[dstI + 2] += patch[srcI + 2];
+      out[dstI + 3] += patch[srcI + 3];
     }
   }
   return out;
@@ -249,7 +261,17 @@ export class HistoryManager {
       const dir = await this.dir;
       const path = window.nodePath.join(dir, MANIFEST_FILENAME);
       const buf = await window.nodeFs.readFile(path, "utf8");
-      return JSON.parse(buf as unknown as string) as HistoryManifest;
+      const parsed = JSON.parse(buf as unknown as string) as { version?: number } & HistoryManifest;
+      if (parsed.version !== HISTORY_MANIFEST_VERSION) {
+        // Delta format changed incompatibly in v2 (absolute after-values →
+        // diff values). Old trees would decode wrong, so wipe and start over.
+        console.warn(
+          `history: tree.json version ${parsed.version} is incompatible with ${HISTORY_MANIFEST_VERSION}, wiping`,
+        );
+        await window.nodeFs.rm(dir, { recursive: true, force: true });
+        return null;
+      }
+      return parsed;
     } catch {
       return null;
     }
@@ -362,7 +384,7 @@ export class HistoryManager {
         bandLengths: Array.from(opts.spectrogram.synthesisMetadata.bandLengths),
       },
     };
-    this.manifest = { version: 1, rootId: id, currentId: id, nodes: { [id]: node } };
+    this.manifest = { version: HISTORY_MANIFEST_VERSION, rootId: id, currentId: id, nodes: { [id]: node } };
     await this.writeFullSnapshot(id, opts.data, opts.spectrogram);
     await this.writeManifest();
     this.currentPacked = new Float32Array(opts.data);
@@ -729,6 +751,16 @@ export class HistoryManager {
     const n = this.manifest.nodes[nodeId];
     if (!n) return;
     n.customLabel = label.trim() || undefined;
+    await this.writeManifest();
+    this.emit();
+  }
+
+  async toggleFavorite(nodeId: string): Promise<void> {
+    if (!this.manifest) return;
+    const n = this.manifest.nodes[nodeId];
+    if (!n) return;
+    n.favorited = !n.favorited;
+    if (!n.favorited) delete n.favorited;
     await this.writeManifest();
     this.emit();
   }

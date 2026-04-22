@@ -33,6 +33,7 @@ export interface FilesState {
   loadCachedAudio: (fileId: string, audioPath: string, peak: number) => Promise<boolean>;
   exportHistory: () => Promise<void>;
   exportHistoryBranch: (nodeId: string) => Promise<void>;
+  exportHistoryFavorites: () => Promise<void>;
   mostRecentBpm: number | null;
   setMostRecentBpm: (bpm: number) => void;
   filepathsBpm: Record<string, number>;
@@ -1287,6 +1288,54 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       writeTreeJson: true,
       successNoun: `path${chains.length === 1 ? "" : "s"}`,
       successCount: chains.length,
+    });
+  },
+  exportHistoryFavorites: async () => {
+    const state = get();
+    if (!state.activeFileId) return;
+    const historyManager = getHistoryManager(state.activeFileId);
+    await historyManager.initialize();
+    const manifest = historyManager.getManifest();
+    if (!manifest) {
+      notifications.show({ title: "Nothing to export", message: "No history yet.", color: "yellow" });
+      return;
+    }
+
+    const favorites = Object.values(manifest.nodes)
+      .filter((n) => n.favorited)
+      .sort((a, b) => a.timestamp - b.timestamp);
+    if (favorites.length === 0) {
+      notifications.show({
+        title: "No favorites",
+        message: "Favorite nodes via the right-click menu first.",
+        color: "yellow",
+      });
+      return;
+    }
+
+    const result = await window.ipcRenderer.invoke("show-directory-dialog", {
+      title: "Export Favorites",
+      buttonLabel: "Export Here",
+    });
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) return;
+    const outputRoot = result.filePaths[0];
+
+    const pathOf = buildChildIndexPaths(manifest);
+    // One single-node "chain" per favorite — runHistoryExport already dedups
+    // per node and writes to the root folder when folderFor returns null.
+    const chains = favorites.map((n) => [n.id]);
+
+    await runHistoryExport({
+      historyManager,
+      manifest,
+      chains,
+      outputRoot,
+      pathOf,
+      folderFor: () => null,
+      writeTreeJson: false,
+      successNoun: `favorite${favorites.length === 1 ? "" : "s"}`,
+      successCount: favorites.length,
+      omitOrdinal: true,
     });
   },
   exportHistoryBranch: async (nodeId: string) => {

@@ -69,6 +69,12 @@ export interface RunHistoryExportOpts {
   writeTreeJson: boolean;
   successNoun: string;
   successCount: number;
+  /**
+   * If true, filenames are `<slug>_<path-suffix>.wav` without the per-chain
+   * ordinal prefix. Use for exports where every chain is a single node
+   * (e.g. favorites), where a global `01-` prefix on every file is meaningless.
+   */
+  omitOrdinal?: boolean;
 }
 
 /**
@@ -77,8 +83,18 @@ export interface RunHistoryExportOpts {
  * `<ordinal>-<slug>_<path-suffix>.wav`.
  */
 export async function runHistoryExport(opts: RunHistoryExportOpts): Promise<void> {
-  const { historyManager, manifest, chains, outputRoot, pathOf, folderFor, writeTreeJson, successNoun, successCount } =
-    opts;
+  const {
+    historyManager,
+    manifest,
+    chains,
+    outputRoot,
+    pathOf,
+    folderFor,
+    writeTreeJson,
+    successNoun,
+    successCount,
+    omitOrdinal,
+  } = opts;
 
   const totalWrites = chains.reduce((s, c) => s + c.length, 0);
   const canonicalForNode = new Map<string, string>();
@@ -112,10 +128,15 @@ export async function runHistoryExport(opts: RunHistoryExportOpts): Promise<void
       const nodeId = chain[i];
       const node = manifest.nodes[nodeId];
       if (!node) continue;
-      const ordinal = String(i + 1).padStart(nodePad, "0");
       const slug = slugifyNodeLabel(node.customLabel ?? node.label);
       const suffix = pathOf.get(nodeId) ?? "";
-      const fileName = suffix ? `${ordinal}-${slug}_${suffix}.wav` : `${ordinal}-${slug}.wav`;
+      let fileName: string;
+      if (omitOrdinal) {
+        fileName = suffix ? `${slug}_${suffix}.wav` : `${slug}.wav`;
+      } else {
+        const ordinal = String(i + 1).padStart(nodePad, "0");
+        fileName = suffix ? `${ordinal}-${slug}_${suffix}.wav` : `${ordinal}-${slug}.wav`;
+      }
       const wavPath = window.nodePath.join(dir, fileName);
 
       try {

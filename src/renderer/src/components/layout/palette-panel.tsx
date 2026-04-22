@@ -383,7 +383,17 @@ export function PalettePanel() {
         </Tooltip>
       </Group>
 
-      <Box style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: collapsed ? 4 : 8 }}>
+      <Box
+        style={{
+          flex: 1,
+          minHeight: 0,
+          padding: collapsed ? 4 : 8,
+          display: "flex",
+          flexDirection: "column",
+          gap: collapsed ? 0 : 8,
+          overflowY: collapsed ? "auto" : "hidden",
+        }}
+      >
         {collapsed ? (
           <>
             <DragDropContext onDragEnd={handleDragEnd}>
@@ -429,51 +439,68 @@ export function PalettePanel() {
             </Group>
           </>
         ) : (
-          <Stack gap={8}>
-            <Section label="Brushes">
-              <Stack gap={4}>
-                <DragDropContext onDragEnd={handleDragEnd}>
-                  <Droppable droppableId="brushes">
-                    {(provided) => (
-                      <Stack ref={provided.innerRef} {...provided.droppableProps} gap={2}>
-                        {brushes.map((brush, index) => (
-                          <Draggable key={brush.id} draggableId={brush.id} index={index}>
-                            {(draggableProvided, snapshot) => (
-                              <Box
-                                ref={draggableProvided.innerRef}
-                                {...draggableProvided.draggableProps}
-                                {...draggableProvided.dragHandleProps}
-                                style={{
-                                  ...draggableProvided.draggableProps.style,
-                                  ...(snapshot.isDragging && { boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)" }),
-                                }}
-                              >
-                                <BrushTile
-                                  brush={brush}
-                                  index={index}
-                                  active={activeBrushIndex === index}
-                                  collapsed={false}
-                                  dirty={dirtyByIndex[index]}
-                                  listeningForHotkey={hotkeyListenIndex === index}
-                                  onStartHotkeyAssign={setHotkeyListenIndex}
-                                />
-                              </Box>
-                            )}
-                          </Draggable>
-                        ))}
-                        {provided.placeholder}
-                      </Stack>
-                    )}
-                  </Droppable>
-                </DragDropContext>
-                <Group justify="center">
-                  <BrushPickerOpenButton />
-                </Group>
-              </Stack>
-            </Section>
+          <>
+            {/* Brushes fills remaining vertical space minus the History cap.
+                Its body scrolls internally when the list gets long. */}
+            <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+              <Section label="Brushes">
+                <Box style={{ display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
+                  <DragDropContext onDragEnd={handleDragEnd}>
+                    <Droppable droppableId="brushes">
+                      {(provided) => (
+                        <Stack ref={provided.innerRef} {...provided.droppableProps} gap={2}>
+                          {brushes.map((brush, index) => (
+                            <Draggable key={brush.id} draggableId={brush.id} index={index}>
+                              {(draggableProvided, snapshot) => (
+                                <Box
+                                  ref={draggableProvided.innerRef}
+                                  {...draggableProvided.draggableProps}
+                                  {...draggableProvided.dragHandleProps}
+                                  style={{
+                                    ...draggableProvided.draggableProps.style,
+                                    ...(snapshot.isDragging && { boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)" }),
+                                  }}
+                                >
+                                  <BrushTile
+                                    brush={brush}
+                                    index={index}
+                                    active={activeBrushIndex === index}
+                                    collapsed={false}
+                                    dirty={dirtyByIndex[index]}
+                                    listeningForHotkey={hotkeyListenIndex === index}
+                                    onStartHotkeyAssign={setHotkeyListenIndex}
+                                  />
+                                </Box>
+                              )}
+                            </Draggable>
+                          ))}
+                          {provided.placeholder}
+                        </Stack>
+                      )}
+                    </Droppable>
+                  </DragDropContext>
+                  <Group justify="center" mt={4}>
+                    <BrushPickerOpenButton />
+                  </Group>
+                </Box>
+              </Section>
+            </Box>
 
-            <HistorySection />
-          </Stack>
+            {/* History takes whatever's left up to half the container. Inside
+                the Section body we set flex:1 + minHeight:0 so the rows list
+                scrolls internally rather than pushing the container. */}
+            <Box
+              style={{
+                flex: "0 1 auto",
+                maxHeight: "50%",
+                minHeight: 0,
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <HistorySection />
+            </Box>
+          </>
         )}
       </Box>
     </Stack>

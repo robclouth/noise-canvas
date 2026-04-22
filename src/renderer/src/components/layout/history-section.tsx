@@ -2,7 +2,7 @@ import { useStore } from "@/store";
 import { ActionIcon, Box, Group, Menu, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { openConfirm } from "@renderer/lib/modals";
 import { getHistoryManager, type HistoryManager, type HistoryNode } from "@renderer/lib/history-manager";
-import { MoreVertical } from "lucide-react";
+import { MoreVertical, Star } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Section } from "../section";
 
@@ -156,6 +156,7 @@ interface HistoryRowProps {
   onRename: (nodeId: string, label: string) => void;
   onDeleteSubtree: (nodeId: string) => void;
   onExportBranch: (nodeId: string) => void;
+  onToggleFavorite: (nodeId: string) => void;
 }
 
 const HistoryRow = memo(function HistoryRow({
@@ -170,11 +171,39 @@ const HistoryRow = memo(function HistoryRow({
   onRename,
   onDeleteSubtree,
   onExportBranch,
+  onToggleFavorite,
 }: HistoryRowProps) {
   const { node, lane } = row;
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(node.customLabel ?? node.label);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Mantine's Menu.Target auto-opens on target click regardless of whether
+  // we pass `opened` — so we gate `onChange(true)` by a ref flag that is only
+  // set when the user right-clicks. Closes (onChange(false)) always pass
+  // through so Esc / outside-click / item-click still work.
+  const userInitiatedOpenRef = useRef(false);
+  const handleMenuChange = useCallback((open: boolean) => {
+    if (open && !userInitiatedOpenRef.current) return;
+    userInitiatedOpenRef.current = false;
+    setMenuOpen(open);
+  }, []);
+  const openMenuFromContext = useCallback(() => {
+    userInitiatedOpenRef.current = true;
+    setMenuOpen(true);
+  }, []);
+
+  // Debounce the "busy" indicator for the current node so it only appears if
+  // synthesis actually runs for a noticeable amount of time. Re-synthesis is
+  // often sub-100ms; flashing the spinner on every brief navigate is noisy.
+  const [showSpinner, setShowSpinner] = useState(false);
+  useEffect(() => {
+    if (!synthesizing || !isCurrent) {
+      setShowSpinner(false);
+      return;
+    }
+    const t = setTimeout(() => setShowSpinner(true), 500);
+    return () => clearTimeout(t);
+  }, [synthesizing, isCurrent]);
 
   useEffect(() => {
     setEditValue(node.customLabel ?? node.label);
@@ -257,14 +286,21 @@ const HistoryRow = memo(function HistoryRow({
         />
       </svg>
 
-      <Menu withinPortal position="right-start" shadow="md" opened={menuOpen} onChange={setMenuOpen} closeOnItemClick>
+      <Menu
+        withinPortal
+        position="right-start"
+        shadow="md"
+        opened={menuOpen}
+        onChange={handleMenuChange}
+        closeOnItemClick
+      >
         <Menu.Target>
           <UnstyledButton
             onClick={() => !editing && !menuOpen && onNavigate(node.id)}
             onDoubleClick={() => !editing && setEditing(true)}
             onContextMenu={(e: React.MouseEvent) => {
               e.preventDefault();
-              setMenuOpen(true);
+              openMenuFromContext();
             }}
             px={4}
             py={2}
@@ -279,6 +315,14 @@ const HistoryRow = memo(function HistoryRow({
             }}
           >
             <Group gap={4} wrap="nowrap" align="center">
+              {node.favorited && (
+                <Star
+                  size={10}
+                  color="var(--mantine-color-yellow-5)"
+                  fill="var(--mantine-color-yellow-5)"
+                  style={{ flexShrink: 0 }}
+                />
+              )}
               {editing ? (
                 <TextInput
                   value={editValue}
@@ -310,7 +354,7 @@ const HistoryRow = memo(function HistoryRow({
                   {node.customLabel ?? node.label}
                 </Text>
               )}
-              {synthesizing && isCurrent && (
+              {showSpinner && (
                 <Text size="10px" c="dimmed">
                   …
                 </Text>
@@ -324,6 +368,7 @@ const HistoryRow = memo(function HistoryRow({
           </UnstyledButton>
         </Menu.Target>
         <Menu.Dropdown>
+          <Menu.Item onClick={() => onToggleFavorite(node.id)}>{node.favorited ? "Unfavorite" : "Favorite"}</Menu.Item>
           <Menu.Item onClick={() => setEditing(true)}>Rename</Menu.Item>
           <Menu.Item onClick={() => onExportBranch(node.id)}>Export branch…</Menu.Item>
           <Menu.Divider />
@@ -355,6 +400,7 @@ export function HistorySection() {
   const isSynthesizing = useStore((s) => (activeFileId ? (s.filesSynthesizing[activeFileId] ?? false) : false));
   const exportHistory = useStore((s) => s.exportHistory);
   const exportHistoryBranch = useStore((s) => s.exportHistoryBranch);
+  const exportHistoryFavorites = useStore((s) => s.exportHistoryFavorites);
 
   const manager = useMemo(() => (activeFileId ? getHistoryManager(activeFileId) : null), [activeFileId]);
   const { manifest, version } = useHistoryManifest(manager);
@@ -425,6 +471,13 @@ export function HistorySection() {
     },
     [exportHistoryBranch],
   );
+  const onToggleFavorite = useCallback(
+    (nodeId: string) => {
+      if (!manager) return;
+      void manager.toggleFavorite(nodeId);
+    },
+    [manager],
+  );
   const onPurge = useCallback(() => {
     if (!manager) return;
     openConfirm({
@@ -455,6 +508,15 @@ export function HistorySection() {
         >
           Export History…
         </Menu.Item>
+        <Menu.Item
+          disabled={!manifest}
+          onClick={() => {
+            void exportHistoryFavorites();
+          }}
+        >
+          Export Favorites…
+        </Menu.Item>
+        <Menu.Divider />
         <Menu.Item color="red" disabled={!manifest} onClick={onPurge}>
           Purge History ({formatBytes(diskSize)})
         </Menu.Item>
@@ -464,7 +526,7 @@ export function HistorySection() {
 
   return (
     <Section label="History" rightSlot={menu}>
-      <Box style={{ maxHeight: 320, overflowY: "auto" }}>
+      <Box style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
         {!manifest || !layout ? (
           <Text size="xs" c="dimmed" ta="center" py={8}>
             No history yet.
@@ -485,6 +547,7 @@ export function HistorySection() {
                   onRename={onRename}
                   onDeleteSubtree={onDeleteSubtree}
                   onExportBranch={onExportBranch}
+                  onToggleFavorite={onToggleFavorite}
                 />
               </Box>
             ))}
