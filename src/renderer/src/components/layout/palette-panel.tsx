@@ -368,14 +368,7 @@ export function PalettePanel() {
         borderRight: "1px solid var(--mantine-color-dark-5)",
       }}
     >
-      <Group
-        gap={0}
-        justify="flex-end"
-        wrap="nowrap"
-        px={collapsed ? 4 : 6}
-        py={4}
-        style={{ borderBottom: "1px solid var(--mantine-color-dark-5)" }}
-      >
+      <Group gap={0} justify="flex-end" wrap="nowrap" px={collapsed ? 4 : 6} py={4}>
         <Tooltip label={collapsed ? "Expand" : "Collapse"}>
           <ActionIcon size="xs" variant="subtle" color="gray" onClick={() => setCollapsed(!collapsed)}>
             {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
@@ -387,7 +380,10 @@ export function PalettePanel() {
         style={{
           flex: 1,
           minHeight: 0,
-          padding: collapsed ? 4 : 8,
+          paddingTop: 0,
+          paddingLeft: collapsed ? 4 : 8,
+          paddingRight: collapsed ? 4 : 8,
+          paddingBottom: collapsed ? 4 : 8,
           display: "flex",
           flexDirection: "column",
           gap: collapsed ? 0 : 8,
@@ -479,9 +475,9 @@ export function PalettePanel() {
                       )}
                     </Droppable>
                   </DragDropContext>
-                  <Group justify="center" mt={4}>
+                  <Box mt={4}>
                     <BrushPickerOpenButton />
-                  </Group>
+                  </Box>
                 </Box>
               </Section>
             </Box>

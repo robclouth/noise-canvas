@@ -2,6 +2,7 @@ import { useStore } from "@/store";
 import {
   ActionIcon,
   Box,
+  Button,
   Divider,
   Group,
   Menu,
@@ -16,7 +17,6 @@ import { openConfirm, openPrompt } from "@renderer/lib/modals";
 import { PresetType } from "@renderer/lib/preset-schema";
 import { MoreVertical, Plus } from "lucide-react";
 import { useState } from "react";
-import { Tooltip } from "../tooltip";
 
 type BrushPickerModalProps = ContextModalProps<Record<string, never>>;
 
@@ -190,21 +190,22 @@ export function BrushPickerModal({ context, id }: BrushPickerModalProps): React.
 
 export function BrushPickerOpenButton() {
   return (
-    <Tooltip label="Add brush">
-      <ActionIcon
-        size="sm"
-        variant="subtle"
-        color="gray"
-        onClick={() =>
-          modals.openContextModal({
-            modal: "brushPicker",
-            title: "Add brush",
-            innerProps: {},
-          })
-        }
-      >
-        <Plus size={16} />
-      </ActionIcon>
-    </Tooltip>
+    <Button
+      fullWidth
+      size="compact-xs"
+      variant="subtle"
+      color="gray"
+      justify="flex-start"
+      leftSection={<Plus size={12} />}
+      onClick={() =>
+        modals.openContextModal({
+          modal: "brushPicker",
+          title: "Add brush",
+          innerProps: {},
+        })
+      }
+    >
+      New brush
+    </Button>
   );
 }
