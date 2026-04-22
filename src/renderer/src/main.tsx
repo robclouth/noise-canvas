@@ -56,6 +56,7 @@ document.addEventListener(
   (e) => {
     if (e.button !== 0) return;
     const t = e.target as HTMLElement;
+    if (t.closest('input, textarea, [contenteditable="true"], [contenteditable=""]')) return;
     if (t.closest('button, [role="button"], [role="tab"], [role="menuitem"], [role="switch"]')) {
       e.preventDefault();
     }
