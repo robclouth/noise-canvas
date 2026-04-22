@@ -8,6 +8,7 @@ export const SelectControl = <T,>({
   value,
   setValue,
   color = "orange",
+  dropdownZIndex,
 }: {
   labelComponent: ReactNode;
   value: T;
@@ -15,6 +16,7 @@ export const SelectControl = <T,>({
   setValue: (value: T) => void;
   labelWidth?: number;
   color?: string;
+  dropdownZIndex?: number;
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -46,7 +48,7 @@ export const SelectControl = <T,>({
         value={String(value)}
         onChange={handleChange}
         scrollAreaProps={{ type: "always" }}
-        comboboxProps={{ width: 120 }}
+        comboboxProps={{ width: 120, zIndex: dropdownZIndex }}
         rightSectionWidth={12}
         rightSection={<ChevronDown size={10} color="var(--mantine-color-text)" />}
       />

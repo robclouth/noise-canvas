@@ -66,6 +66,7 @@ export const TransportPanel = memo(() => {
           onChange={setLinkPopoverOpened}
           withArrow
           withinPortal={false}
+          zIndex={10001}
           position="top"
           clickOutsideEvents={["click", "mousedown", "touchstart"]}
         >

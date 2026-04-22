@@ -1,7 +1,8 @@
-import { NumberInput, Select, SimpleGrid, Stack, Text, TextInput } from "@mantine/core";
+import { NumberInput, SimpleGrid, Stack, Text, TextInput } from "@mantine/core";
 import { modals, openContextModal } from "@mantine/modals";
 import { BANDS_PER_OCTAVE_VALUES } from "@renderer/lib/constants";
-import type { ReactNode, RefObject } from "react";
+import { useState, type ReactNode, type RefObject } from "react";
+import { SelectControl } from "@renderer/components/controls/select-control";
 
 export { openContextModal };
 
@@ -226,6 +227,30 @@ type OpenReanalyzePromptOptions = {
   onClose?: () => void;
 };
 
+const RESOLUTION_OPTIONS = BANDS_PER_OCTAVE_VALUES.map((o) => ({ value: String(o.value), label: o.label }));
+
+// eslint-disable-next-line react-refresh/only-export-components
+const ReanalyzeBody = ({ initial, onChange }: { initial: number; onChange: (v: number) => void }) => {
+  const [value, setValue] = useState(initial);
+  return (
+    <SelectControl
+      labelComponent={
+        <Text size="xs" ta="right" c="dark.0" truncate="end" style={{ width: 70 }}>
+          Resolution
+        </Text>
+      }
+      value={String(value)}
+      options={RESOLUTION_OPTIONS}
+      dropdownZIndex={1001}
+      setValue={(v) => {
+        const n = parseInt(v);
+        setValue(n);
+        onChange(n);
+      }}
+    />
+  );
+};
+
 export function openReanalyzePrompt({
   initialBandsPerOctave,
   onConfirm,
@@ -237,26 +262,15 @@ export function openReanalyzePrompt({
   return openConfirmModal({
     title: "Re-analyze File",
     children: (
-      <Stack gap="sm">
-        <Text size="sm">
-          Re-analyzing replaces the file&apos;s spectrogram data using the selected resolution. You will lose the undo
-          history.
-        </Text>
-        <Select
-          size="xs"
-          label="Resolution"
-          defaultValue={String(initialBandsPerOctave)}
-          data={BANDS_PER_OCTAVE_VALUES.map((o) => ({ value: String(o.value), label: o.label }))}
-          onChange={(val) => {
-            if (val !== null) chosen = parseInt(val);
-          }}
-          allowDeselect={false}
-          data-autofocus
-        />
-      </Stack>
+      <ReanalyzeBody
+        initial={initialBandsPerOctave}
+        onChange={(v) => {
+          chosen = v;
+        }}
+      />
     ),
     labels: { confirm: "Re-analyze", cancel: "Cancel" },
-    confirmProps: { size: "xs", color: "red" },
+    confirmProps: { size: "xs" },
     cancelProps: { size: "xs" },
     onConfirm: async () => {
       await onConfirm(chosen);
