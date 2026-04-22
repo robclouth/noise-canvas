@@ -12,6 +12,7 @@ import {
 import type { ParameterKey } from "./types";
 import { openFiles } from "./files";
 import type { ZustandGet, ZustandSet } from "./types";
+import { getHistoryManager } from "@renderer/lib/history-manager";
 
 export type StrokePosition = { beats: number; pitch: number };
 export type StrokeTimeRange = { min: number; max: number };
@@ -216,22 +217,32 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         autoPlaybackParams = { startTimeSeconds: autoPlayStart, endTimeSeconds: autoPlayEnd };
       }
 
-      // Get FBO data for synthesis and undo
+      // Get FBO data for synthesis and history
       const data = await file.rendererRef.current.getFBOData();
 
       if (data) {
-        const { getUndoManager } = await import("@renderer/lib/undo-manager");
-        const undoManager = getUndoManager(activeFileId);
-        // Run FBO snapshot and synthesis in parallel — same latency as before.
-        const dataPathPromise = undoManager.addState(data, activeFileId);
+        const historyManager = getHistoryManager(activeFileId);
+        const spec = file.spectrogramData;
+        const brushName = state.brushes[state.activeBrushIndex]?.name ?? "Stroke";
+        const dimensions = {
+          textureWidth: spec.textureWidth,
+          textureHeight: spec.textureHeight,
+          numFrames: spec.numFrames,
+          numBands: spec.numBands,
+          numChannels: spec.numChannels,
+          sampleRate: spec.sampleRate,
+          minFreq: spec.minFreq,
+          bandsPerOctave: spec.bandsPerOctave,
+        };
+        // Run history node write and synthesis in parallel.
+        const nodeIdPromise = historyManager.addStroke({ data, label: brushName, dimensions });
 
         await synthesizeFile(activeFileId, autoPlaybackParams, data);
 
-        // Cache the synthesised audio for this undo state so redo can skip re-synthesis.
-        const dataPath = await dataPathPromise;
+        const nodeId = await nodeIdPromise;
         const updated = openFiles[activeFileId];
-        if (dataPath && updated?.audioBuffer) {
-          undoManager.setStateAudio(dataPath, updated.audioBuffer, updated.audioPeak ?? 1);
+        if (nodeId && updated?.audioBuffer) {
+          historyManager.setStateAudio(nodeId, updated.audioBuffer, updated.audioPeak ?? 1);
         }
       }
     },

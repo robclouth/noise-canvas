@@ -15,7 +15,7 @@ import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
 import { ipcOn, ipcSend } from "./lib/ipc";
 import { precompileAllShaders } from "./lib/precompile-shaders";
-import { clearAllUndoManagers, getUndoManager } from "./lib/undo-manager";
+import { clearAllHistoryManagers, getHistoryManager } from "./lib/history-manager";
 import { useLinkSync } from "./lib/use-link-sync";
 import { useShortcuts } from "./lib/useShortcuts";
 import { openFiles } from "./store/files";
@@ -149,11 +149,11 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubSaveActiveFileVersion);
 
-    const unsubExportUndoHistory = ipcOn("export-undo-history", () => {
-      const { exportUndoHistory } = useStore.getState();
-      exportUndoHistory();
+    const unsubExportHistory = ipcOn("export-history", () => {
+      const { exportHistory } = useStore.getState();
+      exportHistory();
     });
-    unsubscribers.push(unsubExportUndoHistory);
+    unsubscribers.push(unsubExportHistory);
 
     const unsubDuplicateActiveFile = ipcOn("duplicate-active-file", () => {
       const { activeFileId, duplicateFile } = useStore.getState();
@@ -174,16 +174,16 @@ function App(): React.JSX.Element {
     const unsubUndo = ipcOn("undo", async () => {
       const { activeFileId } = useStore.getState();
       if (!activeFileId) return;
-      const undoManager = getUndoManager(activeFileId);
-      await undoManager.undo();
+      const historyManager = getHistoryManager(activeFileId);
+      await historyManager.navigateToParent();
     });
     unsubscribers.push(unsubUndo);
 
     const unsubRedo = ipcOn("redo", async () => {
       const { activeFileId } = useStore.getState();
       if (!activeFileId) return;
-      const undoManager = getUndoManager(activeFileId);
-      await undoManager.redo();
+      const historyManager = getHistoryManager(activeFileId);
+      await historyManager.navigateToLastChild();
     });
     unsubscribers.push(unsubRedo);
 
@@ -215,7 +215,7 @@ function App(): React.JSX.Element {
     unsubscribers.push(unsubHalveActiveFileLength);
 
     const unsubAppWillQuit = ipcOn("app-will-quit", async () => {
-      await clearAllUndoManagers();
+      await clearAllHistoryManagers();
     });
     unsubscribers.push(unsubAppWillQuit);
 

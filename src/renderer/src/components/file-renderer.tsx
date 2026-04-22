@@ -22,6 +22,7 @@ import {
   WebGLRenderTarget,
 } from "three";
 import { effects } from "../effects";
+import { getHistoryManager } from "@renderer/lib/history-manager";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
@@ -96,6 +97,12 @@ const FileRendererInner = memo(
     const cameraRef = useRef<Camera>(null!);
     const invalidateRef = useRef<() => void>(null!);
     const strokeRendererRef = useRef<StrokeRenderer | null>(null);
+    // Tracks whether we've already seeded / rehydrated the history tree for
+    // this file in the current component lifetime. Separate from the
+    // StrokeRenderer's isInitialized flag because reloadTextures recreates the
+    // StrokeRenderer but must not re-run history rehydration (which would
+    // call reloadTextures again → infinite loop).
+    const historyHookedRef = useRef(false);
 
     const modulatorScaleLut = useModulatorScaleLut(fileId);
 
@@ -458,17 +465,36 @@ const FileRendererInner = memo(
       // Initialize StrokeRenderer if not done yet
       if (!strokeRenderer.getIsInitialized()) {
         strokeRenderer.initialize();
+      }
 
-        // Save initial state for undo and cache its synthesised audio so that
-        // undoing back to the original never has to re-run gaborator.
+      // Hook up the history manager exactly once per component lifetime. This
+      // is intentionally decoupled from StrokeRenderer.isInitialized because
+      // reloadTextures() recreates the StrokeRenderer, which must not cause
+      // this block to run again (doing so would call navigateTo, which calls
+      // reloadTextures, which recreates the StrokeRenderer, ad infinitum).
+      if (!historyHookedRef.current) {
+        historyHookedRef.current = true;
+
         (async () => {
-          const { getUndoManager } = await import("@renderer/lib/undo-manager");
-          const undoManager = getUndoManager(fileId);
-          const dataPath = await undoManager.addState(spectrogramData.packedData, fileId);
+          const historyManager = getHistoryManager(fileId);
+          const hadExisting = await historyManager.initialize();
+          if (hadExisting) {
+            const manifest = historyManager.getManifest();
+            if (manifest && manifest.currentId !== manifest.rootId) {
+              await historyManager.navigateTo(manifest.currentId);
+            }
+            return;
+          }
+          const nodeId = await historyManager.addRootSnapshot({
+            data: spectrogramData.packedData,
+            kind: "root",
+            label: "Opened",
+            spectrogram: spectrogramData,
+          });
           await state.synthesizeFile(fileId);
           const updated = openFiles[fileId];
-          if (dataPath && updated?.audioBuffer) {
-            undoManager.setStateAudio(dataPath, updated.audioBuffer, updated.audioPeak ?? 1);
+          if (nodeId && updated?.audioBuffer) {
+            historyManager.setStateAudio(nodeId, updated.audioBuffer, updated.audioPeak ?? 1);
           }
         })();
       }

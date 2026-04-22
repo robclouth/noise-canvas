@@ -21,9 +21,10 @@ vi.mock("../modals", () => ({
   openNewFilePrompt: vi.fn(),
 }));
 
-vi.mock("../undo-manager", () => ({
-  getUndoManager: vi.fn(),
-  destroyUndoManager: vi.fn(),
+vi.mock("../history-manager", () => ({
+  getHistoryManager: vi.fn(),
+  destroyHistoryManager: vi.fn(),
+  clearAllHistoryManagers: vi.fn(),
 }));
 
 vi.mock("tone", () => ({

@@ -195,7 +195,7 @@ ipcMain.handle("show-save-dialog", async (_event, options) => {
   return await dialog.showSaveDialog(mainWindow, options);
 });
 
-// Handle directory picker dialog from renderer (used for Export Undo History)
+// Handle directory picker dialog from renderer (used for Export History)
 ipcMain.handle("show-directory-dialog", async (_event, options) => {
   if (!mainWindow) return { canceled: true };
   return await dialog.showOpenDialog(mainWindow, {
@@ -203,6 +203,8 @@ ipcMain.handle("show-directory-dialog", async (_event, options) => {
     ...(options ?? {}),
   });
 });
+
+ipcMain.handle("get-user-data-path", () => app.getPath("userData"));
 
 app.on("will-quit", async () => {});
 

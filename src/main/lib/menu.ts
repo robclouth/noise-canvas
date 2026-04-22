@@ -104,9 +104,9 @@ export function createMenu(window: BrowserWindow, state: MenuState) {
         },
         { type: "separator" },
         {
-          label: "Export Undo History...",
+          label: "Export History...",
           click: () => {
-            webContentsSend(window, "export-undo-history");
+            webContentsSend(window, "export-history");
           },
         },
         { type: "separator" },

@@ -9,6 +9,8 @@ import { collectBrushReferencedPaths } from "@renderer/store/files";
 import type { Brush } from "@renderer/store/types";
 import type { EffectItem } from "@renderer/effects/types";
 import { ChevronLeft, ChevronRight, MoreVertical, Plus } from "lucide-react";
+import { HistorySection } from "./history-section";
+import { Section } from "../section";
 import { memo, useCallback, useEffect, useState } from "react";
 import { BrushPickerOpenButton } from "../controls/brush-picker";
 import { Tooltip } from "../tooltip";
@@ -368,17 +370,12 @@ export function PalettePanel() {
     >
       <Group
         gap={0}
-        justify="space-between"
+        justify="flex-end"
         wrap="nowrap"
         px={collapsed ? 4 : 6}
         py={4}
         style={{ borderBottom: "1px solid var(--mantine-color-dark-5)" }}
       >
-        {!collapsed && (
-          <Text size="xs" c="dimmed" fw={600} style={{ textTransform: "uppercase" }}>
-            Brushes
-          </Text>
-        )}
         <Tooltip label={collapsed ? "Expand" : "Collapse"}>
           <ActionIcon size="xs" variant="subtle" color="gray" onClick={() => setCollapsed(!collapsed)}>
             {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
@@ -386,56 +383,99 @@ export function PalettePanel() {
         </Tooltip>
       </Group>
 
-      <Box style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-        <DragDropContext onDragEnd={handleDragEnd}>
-          <Droppable droppableId="brushes">
-            {(provided) => (
-              <Stack ref={provided.innerRef} {...provided.droppableProps} gap={2} p={collapsed ? 4 : 4}>
-                {brushes.map((brush, index) => (
-                  <Draggable key={brush.id} draggableId={brush.id} index={index}>
-                    {(draggableProvided, snapshot) => (
-                      <Box
-                        ref={draggableProvided.innerRef}
-                        {...draggableProvided.draggableProps}
-                        {...draggableProvided.dragHandleProps}
-                        style={{
-                          ...draggableProvided.draggableProps.style,
-                          ...(snapshot.isDragging && {
-                            boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)",
-                          }),
-                        }}
-                      >
-                        <BrushTile
-                          brush={brush}
-                          index={index}
-                          active={activeBrushIndex === index}
-                          collapsed={collapsed}
-                          dirty={dirtyByIndex[index]}
-                          listeningForHotkey={hotkeyListenIndex === index}
-                          onStartHotkeyAssign={setHotkeyListenIndex}
-                        />
-                      </Box>
-                    )}
-                  </Draggable>
-                ))}
-                {provided.placeholder}
-              </Stack>
-            )}
-          </Droppable>
-        </DragDropContext>
-      </Box>
-
-      <Group justify="center" p={4} style={{ borderTop: "1px solid var(--mantine-color-dark-5)" }}>
+      <Box style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: collapsed ? 4 : 8 }}>
         {collapsed ? (
-          <Tooltip label="Add brush">
-            <ActionIcon size="sm" variant="subtle" color="gray" onClick={() => addEmptyBrush()}>
-              <Plus size={16} />
-            </ActionIcon>
-          </Tooltip>
+          <>
+            <DragDropContext onDragEnd={handleDragEnd}>
+              <Droppable droppableId="brushes">
+                {(provided) => (
+                  <Stack ref={provided.innerRef} {...provided.droppableProps} gap={2}>
+                    {brushes.map((brush, index) => (
+                      <Draggable key={brush.id} draggableId={brush.id} index={index}>
+                        {(draggableProvided, snapshot) => (
+                          <Box
+                            ref={draggableProvided.innerRef}
+                            {...draggableProvided.draggableProps}
+                            {...draggableProvided.dragHandleProps}
+                            style={{
+                              ...draggableProvided.draggableProps.style,
+                              ...(snapshot.isDragging && { boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)" }),
+                            }}
+                          >
+                            <BrushTile
+                              brush={brush}
+                              index={index}
+                              active={activeBrushIndex === index}
+                              collapsed
+                              dirty={dirtyByIndex[index]}
+                              listeningForHotkey={hotkeyListenIndex === index}
+                              onStartHotkeyAssign={setHotkeyListenIndex}
+                            />
+                          </Box>
+                        )}
+                      </Draggable>
+                    ))}
+                    {provided.placeholder}
+                  </Stack>
+                )}
+              </Droppable>
+            </DragDropContext>
+            <Group justify="center" mt={4}>
+              <Tooltip label="Add brush">
+                <ActionIcon size="sm" variant="subtle" color="gray" onClick={() => addEmptyBrush()}>
+                  <Plus size={16} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
+          </>
         ) : (
-          <BrushPickerOpenButton />
+          <Stack gap={8}>
+            <Section label="Brushes">
+              <Stack gap={4}>
+                <DragDropContext onDragEnd={handleDragEnd}>
+                  <Droppable droppableId="brushes">
+                    {(provided) => (
+                      <Stack ref={provided.innerRef} {...provided.droppableProps} gap={2}>
+                        {brushes.map((brush, index) => (
+                          <Draggable key={brush.id} draggableId={brush.id} index={index}>
+                            {(draggableProvided, snapshot) => (
+                              <Box
+                                ref={draggableProvided.innerRef}
+                                {...draggableProvided.draggableProps}
+                                {...draggableProvided.dragHandleProps}
+                                style={{
+                                  ...draggableProvided.draggableProps.style,
+                                  ...(snapshot.isDragging && { boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)" }),
+                                }}
+                              >
+                                <BrushTile
+                                  brush={brush}
+                                  index={index}
+                                  active={activeBrushIndex === index}
+                                  collapsed={false}
+                                  dirty={dirtyByIndex[index]}
+                                  listeningForHotkey={hotkeyListenIndex === index}
+                                  onStartHotkeyAssign={setHotkeyListenIndex}
+                                />
+                              </Box>
+                            )}
+                          </Draggable>
+                        ))}
+                        {provided.placeholder}
+                      </Stack>
+                    )}
+                  </Droppable>
+                </DragDropContext>
+                <Group justify="center">
+                  <BrushPickerOpenButton />
+                </Group>
+              </Stack>
+            </Section>
+
+            <HistorySection />
+          </Stack>
         )}
-      </Group>
+      </Box>
     </Stack>
   );
 }

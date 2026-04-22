@@ -6,7 +6,8 @@ import { FileParameterValue, getFileParameterKeys, parameterDefs } from "@render
 import { produce } from "immer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
-import { destroyUndoManager, getUndoManager } from "../lib/undo-manager";
+import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
+import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import type { Brush, OpenFile, ParameterKey, State, ZustandGet, ZustandSet } from "./types";
 import { generateFileId } from "./utils";
 
@@ -30,7 +31,8 @@ export interface FilesState {
     prefetchedFboData?: Float32Array,
   ) => Promise<void>;
   loadCachedAudio: (fileId: string, audioPath: string, peak: number) => Promise<boolean>;
-  exportUndoHistory: () => Promise<void>;
+  exportHistory: () => Promise<void>;
+  exportHistoryBranch: (nodeId: string) => Promise<void>;
   mostRecentBpm: number | null;
   setMostRecentBpm: (bpm: number) => void;
   filepathsBpm: Record<string, number>;
@@ -982,8 +984,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       state.stopAudio();
     }
 
-    // Fire-and-forget: drops FBO snapshots and the per-file temp directory.
-    destroyUndoManager(fileId).catch((err) => console.error("destroyUndoManager failed", err));
+    // Fire-and-forget: drops on-disk history directory and in-memory state.
+    destroyHistoryManager(fileId).catch((err: unknown) => console.error("destroyHistoryManager failed", err));
 
     return set(
       produce((state: State) => {
@@ -1242,64 +1244,85 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       setFileSynthesizing(fileId, false);
     }
   },
-  exportUndoHistory: async () => {
+  exportHistory: async () => {
     const state = get();
     if (!state.activeFileId) return;
     const file = openFiles[state.activeFileId];
     if (!file) return;
 
-    const { getUndoManager } = await import("../lib/undo-manager");
-    const undoManager = getUndoManager(state.activeFileId);
-    const audioPaths = undoManager.getCachedAudioPaths();
-
-    if (audioPaths.length === 0) {
+    const historyManager = getHistoryManager(state.activeFileId);
+    await historyManager.initialize();
+    const manifest = historyManager.getManifest();
+    if (!manifest) {
       notifications.show({
         title: "Nothing to export",
-        message: "No cached audio is available in the undo history yet.",
+        message: "No history for this file yet.",
         color: "yellow",
       });
       return;
     }
 
-    const baseName = window.nodePath.basename(file.filePath, window.nodePath.extname(file.filePath));
-    const defaultDir = window.nodePath.dirname(file.filePath);
-
     const result = await window.ipcRenderer.invoke("show-directory-dialog", {
-      title: "Export Undo History",
-      defaultPath: defaultDir,
+      title: "Export History",
       buttonLabel: "Export Here",
     });
-
     if (result.canceled || !result.filePaths || result.filePaths.length === 0) return;
-    const outputDir = result.filePaths[0];
+    const outputRoot = result.filePaths[0];
 
-    const pad = Math.max(2, String(audioPaths.length).length);
-    let exportedCount = 0;
-    const errors: string[] = [];
+    const pathOf = buildChildIndexPaths(manifest);
 
-    for (let i = 0; i < audioPaths.length; i++) {
-      const index = String(i + 1).padStart(pad, "0");
-      const destPath = window.nodePath.join(outputDir, `${baseName}_history_${index}.wav`);
-      try {
-        await window.audioAnalysis.copyAudioFile(audioPaths[i], destPath);
-        exportedCount++;
-      } catch (error) {
-        errors.push(error instanceof Error ? error.message : String(error));
-      }
+    // Leaves (no children) → one root-to-leaf path per leaf.
+    const leafIds = Object.values(manifest.nodes)
+      .filter((n) => n.childIds.length === 0)
+      .map((n) => n.id);
+    const chains = leafIds.map((id) => chainFromRootTo(manifest, id));
+
+    await runHistoryExport({
+      historyManager,
+      manifest,
+      chains,
+      outputRoot,
+      pathOf,
+      folderFor: (i) => `path-${String(i + 1).padStart(Math.max(2, String(chains.length).length), "0")}`,
+      writeTreeJson: true,
+      successNoun: `path${chains.length === 1 ? "" : "s"}`,
+      successCount: chains.length,
+    });
+  },
+  exportHistoryBranch: async (nodeId: string) => {
+    const state = get();
+    if (!state.activeFileId) return;
+    const historyManager = getHistoryManager(state.activeFileId);
+    await historyManager.initialize();
+    const manifest = historyManager.getManifest();
+    if (!manifest || !manifest.nodes[nodeId]) {
+      notifications.show({ title: "Nothing to export", message: "Node no longer exists.", color: "yellow" });
+      return;
     }
 
-    if (errors.length > 0) {
-      notifications.show({
-        title: "Export partially failed",
-        message: `Exported ${exportedCount} of ${audioPaths.length} files. First error: ${errors[0]}`,
-        color: "red",
-      });
-    } else {
-      notifications.show({
-        title: "Undo history exported",
-        message: `Exported ${exportedCount} audio file${exportedCount === 1 ? "" : "s"} to ${truncateMiddle(outputDir, 50)}`,
-      });
-    }
+    const result = await window.ipcRenderer.invoke("show-directory-dialog", {
+      title: "Export Branch",
+      buttonLabel: "Export Here",
+    });
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) return;
+    const outputRoot = result.filePaths[0];
+
+    const pathOf = buildChildIndexPaths(manifest);
+    const chain = chainFromRootTo(manifest, nodeId);
+
+    // Branch exports dump WAVs directly in the selected folder — no wrapper
+    // subdirectory, since it's a single path.
+    await runHistoryExport({
+      historyManager,
+      manifest,
+      chains: [chain],
+      outputRoot,
+      pathOf,
+      folderFor: () => null,
+      writeTreeJson: false,
+      successNoun: "node",
+      successCount: chain.length,
+    });
   },
   reanalyzeActiveFile: async () => {
     const state = get();
@@ -1358,8 +1381,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
           file.rendererRef?.current?.reloadTextures();
 
-          const undoManager = getUndoManager(state.activeFileId);
-          undoManager.clear();
+          await getHistoryManager(state.activeFileId).addSnapshot({
+            data: spectrogramData.packedData,
+            kind: "reanalyze",
+            label: "Re-analyze",
+            spectrogram: spectrogramData,
+          });
 
           return set(
             produce((state: State) => {
@@ -1463,7 +1490,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       file.audioPeak = newPeak > 0 ? newPeak : 1;
 
       file.rendererRef.current.reloadTextures();
-      getUndoManager(fileId).clear();
+
+      await getHistoryManager(fileId).addSnapshot({
+        data: file.spectrogramData.packedData,
+        kind: "resize",
+        label: "Resize",
+        spectrogram: file.spectrogramData,
+      });
 
       set(
         produce((s: State) => {

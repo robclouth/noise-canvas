@@ -127,6 +127,7 @@ declare global {
     nodeFs: typeof import("fs/promises");
     nodePath: typeof import("path");
     nodeOs: typeof import("os");
+    nodeZlib: typeof import("zlib");
     platform: NodeJS.Platform;
     updater: {
       checkForUpdates: () => Promise<any>;

@@ -9,11 +9,13 @@ export const Section = ({
   label,
   parameterKeys,
   includeEffectOrder,
+  rightSlot,
 }: {
   children: React.ReactNode;
   label: string;
   parameterKeys?: ParameterKey[];
   includeEffectOrder?: boolean;
+  rightSlot?: React.ReactNode;
 }) => {
   const theme = useMantineTheme();
   const sectionCollapsed = useStore((state) => state.sectionCollapsed);
@@ -51,6 +53,7 @@ export const Section = ({
             includeEffects={includeEffectOrder}
           />
         )}
+        {rightSlot}
       </Group>
 
       <Collapse in={!isCollapsed}>

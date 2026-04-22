@@ -3,6 +3,7 @@ import { ipcRenderer } from "electron";
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
+import * as zlib from "zlib";
 import * as audioAnalysis from "../main/lib/audio-analysis";
 import * as linkAddon from "../main/lib/link";
 
@@ -21,6 +22,8 @@ window.nodeFs = fs;
 window.nodePath = path;
 // @ts-ignore (define in dts)
 window.nodeOs = os;
+// @ts-ignore (define in dts)
+window.nodeZlib = zlib;
 // @ts-ignore (define in dts)
 window.platform = process.platform;
 // @ts-ignore (define in dts)
