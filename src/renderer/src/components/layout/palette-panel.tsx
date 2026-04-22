@@ -1,12 +1,13 @@
 import { useStore } from "@/store";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
-import { ActionIcon, Box, Group, Menu, Stack, Text, TextInput, UnstyledButton, useMantineTheme } from "@mantine/core";
+import { ActionIcon, Box, Group, Menu, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { openConfirm, openPrompt } from "@renderer/lib/modals";
-import { resolveBrushColor } from "@renderer/lib/colors";
+import { EFFECT_COLORS } from "@renderer/lib/constants";
 import { RESERVED_KEYS } from "@renderer/lib/useShortcuts";
 import { collectBrushReferencedPaths } from "@renderer/store/files";
 import type { Brush } from "@renderer/store/types";
+import type { EffectItem } from "@renderer/effects/types";
 import { ChevronLeft, ChevronRight, MoreVertical, Plus } from "lucide-react";
 import { memo, useCallback, useEffect, useState } from "react";
 import { BrushPickerOpenButton } from "../controls/brush-picker";
@@ -15,6 +16,23 @@ import { Tooltip } from "../tooltip";
 const EXPANDED_WIDTH = 180;
 const COLLAPSED_WIDTH = 40;
 const COLLAPSED_TILE_SIZE = 28;
+
+function getBrushEffectHues(brush: Brush): string[] {
+  const seen = new Set<string>();
+  const hues: string[] = [];
+  for (const step of brush.steps) {
+    const effects = (step.effects ?? []) as EffectItem[];
+    for (const item of effects) {
+      if (!item.enabled) continue;
+      if (seen.has(item.effect)) continue;
+      const hue = EFFECT_COLORS[item.effect];
+      if (!hue) continue;
+      seen.add(item.effect);
+      hues.push(hue);
+    }
+  }
+  return hues;
+}
 
 function shortLabel(brush: Brush, index: number): string {
   if (brush.hotkey) return brush.hotkey;
@@ -64,7 +82,6 @@ type BrushTileProps = {
   active: boolean;
   collapsed: boolean;
   dirty: boolean;
-  colorCss: string;
   listeningForHotkey: boolean;
   onStartHotkeyAssign: (index: number) => void;
 };
@@ -75,7 +92,6 @@ const BrushTile = memo(function BrushTile({
   active,
   collapsed,
   dirty,
-  colorCss,
   listeningForHotkey,
   onStartHotkeyAssign,
 }: BrushTileProps) {
@@ -111,6 +127,8 @@ const BrushTile = memo(function BrushTile({
     setActiveBrush(index);
   };
 
+  const effectHues = getBrushEffectHues(brush);
+
   if (collapsed) {
     const label = shortLabel(brush, index);
     return (
@@ -120,23 +138,36 @@ const BrushTile = memo(function BrushTile({
             style={{
               width: COLLAPSED_TILE_SIZE,
               height: COLLAPSED_TILE_SIZE,
-              background: colorCss,
               borderRadius: 4,
               position: "relative",
               display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
+              flexDirection: "column",
+              overflow: "hidden",
               opacity: active ? 1 : 0.6,
               outline: active ? "1px solid white" : "none",
               outlineOffset: 1,
+              background: "var(--mantine-color-dark-5)",
             }}
           >
+            {effectHues.map((hue, i) => (
+              <Box key={i} style={{ flex: 1, minHeight: 0, background: `var(--mantine-color-${hue}-6)` }} />
+            ))}
             {label && (
               <Text
                 size="xs"
                 fw={700}
                 c="white"
-                style={{ fontSize: labelFontSize(label), lineHeight: 1, userSelect: "none" }}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: labelFontSize(label),
+                  lineHeight: 1,
+                  userSelect: "none",
+                  textShadow: "0 0 3px rgba(0,0,0,0.8)",
+                }}
               >
                 {label}
               </Text>
@@ -152,10 +183,37 @@ const BrushTile = memo(function BrushTile({
 
   const canSave = brush.libraryId !== null && dirty;
 
-  const colorSwatch = <Box w={10} h={10} style={{ background: colorCss, borderRadius: 2, flexShrink: 0 }} />;
+  const DOT_SIZE = 5;
+  const DOT_GAP = 2;
+  const DOTS_PER_ROW = 4;
+  const effectDots = effectHues.length > 0 && (
+    <Box
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        justifyContent: "flex-end",
+        gap: DOT_GAP,
+        width: DOTS_PER_ROW * DOT_SIZE + (DOTS_PER_ROW - 1) * DOT_GAP,
+        flexShrink: 0,
+      }}
+    >
+      {effectHues.slice(0, DOTS_PER_ROW * 2).map((hue, i) => (
+        <Box
+          key={i}
+          style={{
+            width: DOT_SIZE,
+            height: DOT_SIZE,
+            borderRadius: "50%",
+            background: `var(--mantine-color-${hue}-6)`,
+          }}
+        />
+      ))}
+    </Box>
+  );
 
   const rightSection = editing ? null : (
-    <Group gap={4} wrap="nowrap" align="center">
+    <Group gap={6} wrap="nowrap" align="center">
+      {effectDots}
       {brush.hotkey && (
         <Text size="xs" fw={600} c="dimmed">
           {brush.hotkey}
@@ -219,7 +277,6 @@ const BrushTile = memo(function BrushTile({
         }}
       >
         <Group gap="xs" wrap="nowrap" align="center">
-          {colorSwatch}
           {editing ? (
             <TextInput
               value={editValue}
@@ -262,8 +319,6 @@ export function PalettePanel() {
   const setCollapsed = useStore((state) => state.setPaletteRailCollapsed);
   const reorderBrushes = useStore((state) => state.reorderBrushes);
   const addEmptyBrush = useStore((state) => state.addEmptyBrush);
-
-  const mantineTheme = useMantineTheme();
 
   const [hotkeyListenIndex, setHotkeyListenIndex] = useState<number | null>(null);
 
@@ -356,7 +411,6 @@ export function PalettePanel() {
                           active={activeBrushIndex === index}
                           collapsed={collapsed}
                           dirty={dirtyByIndex[index]}
-                          colorCss={resolveBrushColor(brush.color, mantineTheme)}
                           listeningForHotkey={hotkeyListenIndex === index}
                           onStartHotkeyAssign={setHotkeyListenIndex}
                         />

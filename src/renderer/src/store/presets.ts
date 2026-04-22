@@ -1,6 +1,7 @@
 import { notifications } from "@mantine/notifications";
 import { pickNextBrushColor, pickNextStepColor } from "@renderer/lib/colors";
 import { getFolders } from "@renderer/lib/folders";
+import { generateRandomBrushName } from "@renderer/lib/preset-names";
 import {
   CURRENT_PRESET_VERSION,
   DEFAULT_MACRO_NAMES,
@@ -182,7 +183,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
   },
   availablePresets: [...factoryPresets],
 
-  brushes: [makeEmptyBrush("Untitled")],
+  brushes: [makeEmptyBrush(generateRandomBrushName())],
   activeBrushIndex: 0,
   paletteRailCollapsed: false,
 
@@ -252,7 +253,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
   addEmptyBrush: () => {
     const state = get();
     const existingColors = state.brushes.map((b) => b.color);
-    const newBrush = makeEmptyBrush("Untitled", existingColors);
+    const newBrush = makeEmptyBrush(generateRandomBrushName(), existingColors);
 
     set(
       produce((draft: State) => {
