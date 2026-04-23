@@ -62,14 +62,18 @@ export type SpectrogramData = {
 
 export type OpenFile = {
   id: string;
+  // For real files: an absolute on-disk path. For managed files: a stable
+  // `managed://<fileId>` sentinel so the same path-keyed maps (filepathsBpm,
+  // brush sourceFile refs, getFileColor, etc.) work uniformly. Save As swaps
+  // the sentinel for the chosen real path and migrates those maps.
   filePath: string;
+  // Human-readable label. Derived from basename(filePath) for real files;
+  // assigned (e.g. "Untitled 1") for managed files.
+  displayName: string;
   spectrogramData?: SpectrogramData;
   audioBuffer?: AudioBuffer;
   audioPeak?: number;
   rendererRef?: React.RefObject<FileRendererHandle | null>;
-  // True for files with no real on-disk audio (newFile, duplicates, HPSS/AI stems).
-  // These are excluded from session persistence and always appear as unsaved until saved to a real path.
-  isVirtual?: boolean;
 };
 
 export type PlayerClock = {

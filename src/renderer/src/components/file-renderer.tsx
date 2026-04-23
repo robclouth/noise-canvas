@@ -467,11 +467,19 @@ const FileRendererInner = memo(
         strokeRenderer.initialize();
       }
 
-      // Hook up the history manager exactly once per component lifetime. This
-      // is intentionally decoupled from StrokeRenderer.isInitialized because
-      // reloadTextures() recreates the StrokeRenderer, which must not cause
-      // this block to run again (doing so would call navigateTo, which calls
-      // reloadTextures, which recreates the StrokeRenderer, ad infinitum).
+      // Hook up the history manager exactly once per component lifetime.
+      // Decoupled from StrokeRenderer.isInitialized because reloadTextures()
+      // recreates the StrokeRenderer but must not re-run history rehydration.
+      //
+      // Two flows:
+      // - Existing tree: reopenPersistedFiles already populated
+      //   spectrogramData (and seeded HistoryManager.currentPacked) by reading
+      //   the history root + replaying deltas. The StrokeRenderer's FBO is
+      //   already at the correct currentId state; we only need to restore the
+      //   audio for that node.
+      // - New file: the in-memory spectrogramData is the initial state, so
+      //   seed history with it as the root snapshot, then synthesise + cache
+      //   the initial audio.
       if (!historyHookedRef.current) {
         historyHookedRef.current = true;
 
@@ -479,10 +487,7 @@ const FileRendererInner = memo(
           const historyManager = getHistoryManager(fileId);
           const hadExisting = await historyManager.initialize();
           if (hadExisting) {
-            const manifest = historyManager.getManifest();
-            if (manifest && manifest.currentId !== manifest.rootId) {
-              await historyManager.navigateTo(manifest.currentId);
-            }
+            await historyManager.restoreCurrentAudio();
             return;
           }
           const nodeId = await historyManager.addRootSnapshot({
@@ -633,6 +638,7 @@ const FileRendererInner = memo(
         const sourceFileInfo: SourceFileInfo = {
           id: resolvedSourceFile.id,
           filePath: resolvedSourceFile.filePath,
+          displayName: resolvedSourceFile.displayName,
           spectrogramData: resolvedSourceFile.spectrogramData,
           textures: resolvedSourceTextures,
         };

@@ -230,6 +230,7 @@ describe("Effects", () => {
     return {
       id: "effects-test",
       filePath: "/test/effects-test.wav",
+      displayName: "effects-test.wav",
       spectrogramData,
       textures: {
         packed: rendererTextures.packed,
@@ -507,6 +508,7 @@ describe("Effects", () => {
       const sourceFile: SourceFileInfo = {
         id: "additive-test",
         filePath: "/test/additive-test.wav",
+        displayName: "additive-test.wav",
         spectrogramData: constantSpectrogramData,
         textures: {
           packed: rendererTextures.packed,
@@ -756,6 +758,7 @@ describe("Effects", () => {
       const sourceFile: SourceFileInfo = {
         id: "mismatch-source",
         filePath: "/test/mismatch-source.wav",
+        displayName: "mismatch-source.wav",
         spectrogramData: sourceSpectrogramData,
         textures: {
           packed: sourceTex.packed,
@@ -934,6 +937,7 @@ describe("Effects", () => {
       const sourceFile: SourceFileInfo = {
         id: "identity-test",
         filePath: "/test/identity-test.wav",
+        displayName: "identity-test.wav",
         spectrogramData: spec,
         textures: {
           packed: rendererTextures.packed,

@@ -409,6 +409,7 @@ function createSourceFileInfo(
   return {
     id: fileId,
     filePath: `/test/${fileId}.wav`,
+    displayName: `${fileId}.wav`,
     spectrogramData,
     textures: {
       packed: textures.packed,
@@ -709,6 +710,7 @@ describe("StrokeRenderer", () => {
       const sourceFile: SourceFileInfo = {
         id: "iter-test",
         filePath: "/test/iter-test.wav",
+        displayName: "iter-test.wav",
         spectrogramData: iterSpectrogramData,
         textures: iterRenderer.getTextures(),
       };
@@ -784,6 +786,7 @@ describe("StrokeRenderer", () => {
       const sourceFile: SourceFileInfo = {
         id: "iter-test",
         filePath: "/test/iter-test.wav",
+        displayName: "iter-test.wav",
         spectrogramData: iterSpectrogramData,
         textures: iterRenderer.getTextures(),
       };
@@ -837,6 +840,7 @@ describe("StrokeRenderer", () => {
       const sourceFile: SourceFileInfo = {
         id: "iter-test",
         filePath: "/test/iter-test.wav",
+        displayName: "iter-test.wav",
         spectrogramData: iterSpectrogramData,
         textures: iterRenderer.getTextures(),
       };
@@ -884,6 +888,7 @@ describe("StrokeRenderer", () => {
       const sourceFile: SourceFileInfo = {
         id: "iter-test",
         filePath: "/test/iter-test.wav",
+        displayName: "iter-test.wav",
         spectrogramData: iterSpectrogramData,
         textures: iterRenderer.getTextures(),
       };
@@ -1061,6 +1066,7 @@ describe("StrokeRenderer", () => {
       const sourceFile: SourceFileInfo = {
         id: "source-file",
         filePath: "/test/source-file.wav",
+        displayName: "source-file.wav",
         spectrogramData: sourceSpectrogramData,
         textures: sourceRenderer.getTextures(),
       };
@@ -1339,6 +1345,7 @@ describe("StrokeRenderer", () => {
       const sourceFile: SourceFileInfo = {
         id: "multi-step-test",
         filePath: "/test/multi-step-test.wav",
+        displayName: "multi-step-test.wav",
         spectrogramData: multiStepSpectrogramData,
         textures: multiStepRenderer.getTextures(),
       };
@@ -1429,6 +1436,7 @@ describe("StrokeRenderer", () => {
       const sourceFile: SourceFileInfo = {
         id: "asymmetric-test",
         filePath: "/test/asymmetric-test.wav",
+        displayName: "asymmetric-test.wav",
         spectrogramData: multiStepSpectrogramData,
         textures: multiStepRenderer.getTextures(),
       };
@@ -1570,6 +1578,7 @@ describe("StrokeRenderer", () => {
         const sourceFile: SourceFileInfo = {
           id: "blend-test",
           filePath: "/test/blend-test.wav",
+          displayName: "blend-test.wav",
           spectrogramData: blendSpectrogramData,
           textures: blendRenderer.getTextures(),
         };
@@ -1668,6 +1677,7 @@ describe("StrokeRenderer", () => {
       const sourceFile: SourceFileInfo = {
         id: "nc-test",
         filePath: "/test/nc-test.wav",
+        displayName: "nc-test.wav",
         spectrogramData: ncSpectrogramData,
         textures: ncRenderer.getTextures(),
       };
@@ -1831,6 +1841,7 @@ describe("StrokeRenderer", () => {
       const sourceFile: SourceFileInfo = {
         id: "outside-test",
         filePath: "/test/outside-test.wav",
+        displayName: "outside-test.wav",
         spectrogramData: outsideSpectrogramData,
         textures: outsideRenderer.getTextures(),
       };

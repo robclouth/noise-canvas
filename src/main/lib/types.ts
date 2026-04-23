@@ -23,9 +23,7 @@ export interface IpcMainHandlers {
   "update-menu-state": (event: Electron.IpcMainEvent, canUndo: boolean, canRedo: boolean) => void;
   "update-save-state": (event: Electron.IpcMainEvent, isDirty: boolean) => void;
   "trigger-open-file": (event: Electron.IpcMainEvent) => void;
-  "update-unsaved-files": (event: Electron.IpcMainEvent, fileNames: string[]) => void;
   "update-recent-files": (event: Electron.IpcMainEvent, paths: string[]) => void;
-  "quit-confirmed": (event: Electron.IpcMainEvent) => void;
 }
 
 export interface IpcRendererEvents {
@@ -49,7 +47,6 @@ export interface IpcRendererEvents {
   "download-progress": (progressInfo: any) => void;
   "update-error": (message: string) => void;
   "app-will-quit": () => void;
-  "confirm-quit": () => void;
   "clear-recent-files": () => void;
 }
 

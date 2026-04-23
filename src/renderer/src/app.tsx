@@ -1,8 +1,7 @@
 import { BrushPanel } from "@/components/layout/brush-panel";
 import { SidebarPanel } from "@/components/layout/sidebar-panel";
 import { useStore } from "@/store";
-import { Box, Group, List, LoadingOverlay, ScrollArea, Stack, Text } from "@mantine/core";
-import { openConfirm } from "./lib/modals";
+import { Box, Group, LoadingOverlay, ScrollArea, Stack } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
 import { Canvas, RootState, useThree } from "@react-three/fiber";
@@ -14,7 +13,7 @@ import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
 import { ipcOn, ipcSend } from "./lib/ipc";
 import { precompileAllShaders } from "./lib/precompile-shaders";
-import { clearAllHistoryManagers, getHistoryManager } from "./lib/history-manager";
+import { clearAllHistoryManagers, getHistoryManager, pruneOrphanHistoryDirs } from "./lib/history-manager";
 import { useLinkSync } from "./lib/use-link-sync";
 import { useShortcuts } from "./lib/useShortcuts";
 import { openFiles } from "./store/files";
@@ -57,6 +56,10 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     useStore.getState().init();
+    // Best-effort cleanup of history dirs left behind by crashes or other
+    // close paths that didn't call destroyHistoryManager. Runs after persisted
+    // state is loaded so we know which fileIds are still alive.
+    void pruneOrphanHistoryDirs(new Set(Object.keys(useStore.getState().persistedFilePaths)));
   }, []);
 
   useEffect(() => {
@@ -90,21 +93,6 @@ function App(): React.JSX.Element {
       },
     );
     unsubscribers.push(unsubDirtyState);
-
-    const pushUnsavedFiles = () => {
-      const names = useStore
-        .getState()
-        .getUnsavedFiles()
-        .map((f) => f.fileName);
-      ipcSend("update-unsaved-files", names);
-    };
-    pushUnsavedFiles();
-    const unsubUnsavedFiles = useStore.subscribe(
-      (state) => ({ dirty: state.filesDirty, ids: state.openFileIds }),
-      () => pushUnsavedFiles(),
-      { equalityFn: (a, b) => a.ids === b.ids && a.dirty === b.dirty },
-    );
-    unsubscribers.push(unsubUnsavedFiles);
 
     const pushRecentFiles = (paths: string[]) => {
       ipcSend("update-recent-files", paths);
@@ -214,34 +202,9 @@ function App(): React.JSX.Element {
     unsubscribers.push(unsubHalveActiveFileLength);
 
     const unsubAppWillQuit = ipcOn("app-will-quit", async () => {
-      await clearAllHistoryManagers();
+      clearAllHistoryManagers();
     });
     unsubscribers.push(unsubAppWillQuit);
-
-    const unsubConfirmQuit = ipcOn("confirm-quit", () => {
-      const unsaved = useStore.getState().getUnsavedFiles();
-      if (unsaved.length === 0) {
-        ipcSend("quit-confirmed");
-        return;
-      }
-      openConfirm({
-        title: "Unsaved Changes",
-        message: (
-          <Stack gap="xs">
-            <Text size="sm">The following files have unsaved changes and will be lost if you quit:</Text>
-            <List size="sm" withPadding>
-              {unsaved.map((f) => (
-                <List.Item key={f.fileId}>{f.fileName}</List.Item>
-              ))}
-            </List>
-          </Stack>
-        ),
-        confirmLabel: "Quit anyway",
-        danger: true,
-        onConfirm: () => ipcSend("quit-confirmed"),
-      });
-    });
-    unsubscribers.push(unsubConfirmQuit);
 
     return () => {
       unsubscribers.forEach((unsub) => unsub());

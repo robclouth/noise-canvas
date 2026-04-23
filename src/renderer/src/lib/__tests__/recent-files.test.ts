@@ -19,6 +19,7 @@ vi.mock("../modals", () => ({
   openConfirm: vi.fn(),
   openContextModal: vi.fn(),
   openNewFilePrompt: vi.fn(),
+  openReanalyzePrompt: vi.fn(),
 }));
 
 vi.mock("../history-manager", () => ({

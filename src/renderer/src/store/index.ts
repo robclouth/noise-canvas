@@ -15,6 +15,7 @@ import { createModulatorsSlice } from "./modulators";
 import { createPresetsSlice, PRESETS_PERSISTED_KEYS } from "./presets";
 import { createStepsSlice, STEPS_PERSISTED_KEYS } from "./steps";
 import type { ParameterKey, State } from "./types";
+import { isManagedFilePath } from "./utils";
 
 /**
  * Returns the 0-based macro index if `key` is `macro{N}Value`, else null.
@@ -210,6 +211,8 @@ export const useStore = create<State>()(
             "filesZoomY",
             "filesOffsetY",
             "filesPlaybackStartTime",
+            "filesDirty",
+            "fileDisplayNames",
           ] as const) {
             const map = picked[mapKey];
             if (map && typeof map === "object") {
@@ -234,13 +237,18 @@ export const useStore = create<State>()(
 
           // Seed module-level openFiles with placeholders for persisted entries so
           // components rendering on first paint don't see undefined, and mark each as loading.
+          // displayName is provisional here — reopenPersistedFiles will overwrite it
+          // (with an "Untitled N" for managed files, basename for real files).
           const persistedPaths = merged.persistedFilePaths ?? {};
+          const persistedNames = merged.fileDisplayNames ?? {};
           for (const [id, filePath] of Object.entries(persistedPaths)) {
-            openFiles[id] ??= { id, filePath, isVirtual: false };
+            const provisionalDisplayName =
+              persistedNames[id] ?? (isManagedFilePath(filePath) ? "Untitled" : filePath.split("/").pop() || filePath);
+            openFiles[id] ??= { id, filePath, displayName: provisionalDisplayName };
           }
           merged.filesLoading = {
             ...(merged.filesLoading ?? {}),
-            ...Object.fromEntries(Object.keys(persistedPaths).map((id) => [id, "Analysing audio..."])),
+            ...Object.fromEntries(Object.keys(persistedPaths).map((id) => [id, "Loading..."])),
           };
 
           return merged;

@@ -13,8 +13,6 @@ if (process.platform === "darwin") {
 }
 
 let mainWindow: BrowserWindow | null = null;
-let unsavedFileNames: string[] = [];
-let allowQuit = false;
 
 const menuState: MenuState = {
   canUndo: false,
@@ -83,12 +81,6 @@ function createWindow(): void {
 
   mainWindow.on("ready-to-show", () => {
     mainWindow?.show();
-  });
-
-  mainWindow.on("close", (event) => {
-    if (allowQuit || unsavedFileNames.length === 0 || !mainWindow) return;
-    event.preventDefault();
-    webContentsSend(mainWindow, "confirm-quit");
   });
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -178,15 +170,6 @@ ipcMainOn("trigger-open-file", () => {
   if (mainWindow) {
     openFileDialog(mainWindow);
   }
-});
-
-ipcMainOn("update-unsaved-files", (_, fileNames) => {
-  unsavedFileNames = fileNames;
-});
-
-ipcMainOn("quit-confirmed", () => {
-  allowQuit = true;
-  mainWindow?.close();
 });
 
 // Handle save dialog from renderer

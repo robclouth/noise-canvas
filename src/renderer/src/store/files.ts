@@ -9,7 +9,7 @@ import * as Tone from "tone";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import type { Brush, OpenFile, ParameterKey, State, ZustandGet, ZustandSet } from "./types";
-import { generateFileId } from "./utils";
+import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
 
 export interface FilesState {
   newFile: () => Promise<void>;
@@ -48,14 +48,19 @@ export interface FilesState {
   setFileZoomY: (fileId: string, zoom: number) => void;
   filesOffsetY: Record<string, number>;
   setFileOffsetY: (fileId: string, offset: number) => void;
-  // Maps persistable (non-virtual) fileId → filePath. Serialised so the open-file list
-  // survives app restart; virtual files (new/duplicate/stems) are deliberately excluded.
+  // Maps persistable fileId → filePath (real on-disk path or `managed://<id>`
+  // sentinel for files whose only on-disk backing is their history dir).
+  // Serialised so the open-file list — including managed files — survives
+  // app restart; reopenPersistedFiles rehydrates each entry from history.
   persistedFilePaths: Record<string, string>;
+  // Persisted human-readable label per fileId. Lets a managed file's
+  // "Untitled N" name (and any future user-assigned labels) survive restart
+  // instead of being re-derived from iteration order.
+  fileDisplayNames: Record<string, string>;
   reopenPersistedFiles: () => Promise<void>;
   recentFilePaths: string[];
   addRecentFilePath: (filePath: string) => void;
   clearRecentFilePaths: () => void;
-  getUnsavedFiles: () => Array<{ fileId: string; filePath: string; fileName: string }>;
   filesPlaybackStartTime: Record<string, number>;
   setFilePlaybackStartTime: (fileId: string, playbackStartTime: number) => void;
   filesDirty: Record<string, boolean>;
@@ -77,6 +82,147 @@ export interface FilesState {
 
 // Open files keyed by file ID
 export const openFiles: Record<string, OpenFile> = {};
+
+// Walks a single sequence of brush steps and rewrites file-param entries
+// whose path matches `oldPath` to `newPath`. Returns true if anything
+// changed. The steps-array is the common shape of both an in-session Brush
+// (Brush.steps) and an on-disk preset (PresetType.steps), so this helper
+// drives both `migrateBrushRefs` (in-session) and `migrateRefsInPresetFiles`
+// (preset JSONs on disk).
+export function migrateRefsInSteps(
+  steps: Array<{ effects?: EffectItem[] } & Record<string, unknown>>,
+  oldPath: string,
+  newPath: string,
+): boolean {
+  const fileKeys = getFileParameterKeys();
+  let changed = false;
+  for (const step of steps) {
+    for (const key of fileKeys) {
+      const def = parameterDefs[key];
+      if (!def || def.kind !== "file") continue;
+      if (def.effectType) {
+        const effects = (step.effects ?? []) as EffectItem[];
+        for (const effect of effects) {
+          if (effect.effect !== def.effectType) continue;
+          const val = effect.params?.[key] as FileParameterValue | undefined;
+          if (val?.path === oldPath) {
+            (effect.params as Record<string, FileParameterValue>)[key] = { path: newPath };
+            changed = true;
+          }
+        }
+      } else {
+        const val = (step as Record<string, unknown>)[key] as FileParameterValue | undefined;
+        if (val?.path === oldPath) {
+          (step as Record<string, unknown>)[key] = { path: newPath };
+          changed = true;
+        }
+      }
+    }
+  }
+  return changed;
+}
+
+// In-session migration: walks every brush's steps. Used after Save As so
+// brush references in the open editor follow a renamed file (notably the
+// managed→real promotion path, where refs that pointed at `managed://<fileId>`
+// get rewritten to the user-chosen filesystem path).
+export function migrateBrushRefs(brushes: Brush[], oldPath: string, newPath: string): void {
+  for (const brush of brushes) {
+    migrateRefsInSteps(brush.steps as Array<{ effects?: EffectItem[] } & Record<string, unknown>>, oldPath, newPath);
+  }
+}
+
+// On-disk migration: walks every preset .json under presetsDir. A preset's
+// steps array has the same shape as a brush's, so the same per-step walker
+// applies. Best-effort — a single bad file doesn't block the others, and a
+// total failure (no presetsDir, permission error) just no-ops.
+export async function migrateRefsInPresetFiles(presetsDir: string, oldPath: string, newPath: string): Promise<void> {
+  let entries: string[];
+  try {
+    entries = (await window.nodeFs.readdir(presetsDir)) as unknown as string[];
+  } catch {
+    return;
+  }
+  await Promise.all(
+    entries
+      .filter((f) => f.endsWith(".json"))
+      .map(async (file) => {
+        const filePath = window.nodePath.join(presetsDir, file);
+        try {
+          const raw = (await window.nodeFs.readFile(filePath, "utf-8")) as unknown as string;
+          const preset = JSON.parse(raw) as { steps?: Array<{ effects?: EffectItem[] } & Record<string, unknown>> };
+          if (!Array.isArray(preset.steps)) return;
+          const changed = migrateRefsInSteps(preset.steps, oldPath, newPath);
+          if (changed) {
+            await window.nodeFs.writeFile(filePath, JSON.stringify(preset, null, 2), "utf-8");
+          }
+        } catch (err) {
+          console.error(`migrateRefsInPresetFiles: failed to process ${filePath}`, err);
+        }
+      }),
+  );
+}
+
+// Counter for "Untitled N" labels assigned to managed files (newFile).
+// Persisted indirectly: at module load it starts at 0 and reopenPersistedFiles
+// pulls forward to max(N) + 1 over any rehydrated "Untitled N" names so a
+// freshly-created managed file in the new session never collides with one
+// from the previous session.
+let untitledCounter = 0;
+function nextUntitledName(): string {
+  untitledCounter++;
+  return `Untitled ${untitledCounter}`;
+}
+function bumpUntitledCounterTo(n: number): void {
+  if (n > untitledCounter) untitledCounter = n;
+}
+
+// Strip a file extension from a display label so derivatives compose cleanly
+// ("foo.wav" + " copy" reads as "foo copy" rather than "foo.wav copy"). Names
+// without an extension (managed-file labels like "Untitled 1") pass through
+// unchanged.
+function stripExtensionForLabel(name: string): string {
+  const ext = window.nodePath.extname(name);
+  return ext ? name.slice(0, -ext.length) : name;
+}
+
+// Run gaborator analysis on a real on-disk wav and stash the resulting
+// SpectrogramData on the file. Used by first-time-open and as a recovery
+// fallback in reopenPersistedFiles when a real file's history dir is missing.
+async function loadRealFileViaGaborator(
+  fileId: string,
+  filePath: string,
+  bandsPerOctave: number,
+  minFreq: number,
+): Promise<void> {
+  const file = openFiles[fileId];
+  if (!file) return;
+  const result = await window.audioAnalysis.analyze(filePath, { bandsPerOctave, minFreq });
+  const spectrogramData = {
+    packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+    inverseMap: new Float32Array(
+      result.inverseMap.buffer,
+      result.inverseMap.byteOffset,
+      result.inverseMap.byteLength / 4,
+    ),
+    metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
+    textureWidth: result.textureWidth,
+    textureHeight: result.textureHeight,
+    numFrames: result.numFrames,
+    numBands: result.numBands,
+    numChannels: result.numChannels,
+    sampleRate: result.sampleRate,
+    packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
+    minFreq,
+    bandsPerOctave,
+    synthesisMetadata: {
+      bandOffsets: result.bandOffsets,
+      bandStepLog2s: result.bandStepLog2s,
+      bandLengths: result.bandLengths,
+    },
+  };
+  openFiles[fileId] = { ...openFiles[fileId], spectrogramData };
+}
 
 // In-flight AI separation guard — blocks a second concurrent stem split on the same file.
 const aiSeparatingFileIds = new Set<string>();
@@ -169,21 +315,6 @@ export function getFileIdByPath(filePath: string): string | undefined {
   return Object.keys(openFiles).find((id) => openFiles[id].filePath === filePath);
 }
 
-// Derives a Finder-style "copy" filename:
-//   foo.wav         → foo copy.wav
-//   foo copy.wav    → foo copy 2.wav
-//   foo copy 3.wav  → foo copy 4.wav
-function makeCopyPath(filePath: string): string {
-  const ext = window.nodePath.extname(filePath);
-  const base = filePath.slice(0, filePath.length - ext.length);
-  const match = base.match(/^(.*) copy(?: (\d+))?$/);
-  if (match) {
-    const n = match[2] ? parseInt(match[2], 10) + 1 : 2;
-    return `${match[1]} copy ${n}${ext}`;
-  }
-  return `${base} copy${ext}`;
-}
-
 export const FILES_PERSISTED_KEYS = [
   "filepathsBpm",
   "minimizedFileIds",
@@ -198,6 +329,13 @@ export const FILES_PERSISTED_KEYS = [
   "filesZoomY",
   "filesOffsetY",
   "filesPlaybackStartTime",
+  // Persisted so the italic "unsaved" tab marker survives restart — managed
+  // files in particular are always dirty until promoted via Save As.
+  "filesDirty",
+  // Persisted so a managed file's "Untitled N" label is stable across
+  // sessions (a file the user knew as "Untitled 5" yesterday stays as
+  // "Untitled 5" today instead of being renumbered by iteration order).
+  "fileDisplayNames",
 ] as const;
 
 export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState => ({
@@ -259,16 +397,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         },
       };
 
-      const tempPath = await window.nodeFs.mkdtemp(window.nodePath.join(window.nodeOs.tmpdir(), "noise-canvas-files-"));
-      const filepath = window.nodePath.join(tempPath, `${Date.now()}.wav`);
-
       const fileId = generateFileId();
+      const filepath = makeManagedFilePath(fileId);
+      const displayName = nextUntitledName();
       openFiles[fileId] = {
         id: fileId,
-
         filePath: filepath,
+        displayName,
         spectrogramData,
-        isVirtual: true,
       };
 
       return set(
@@ -282,6 +418,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           state.filesOffsetY[fileId] = 0;
           state.filesPlaybackStartTime[fileId] = 0;
           state.filesDirty[fileId] = true;
+          // Managed files persist across sessions; their history dir is the
+          // sole on-disk backing and is rehydrated by reopenPersistedFiles.
+          state.persistedFilePaths[fileId] = filepath;
+          state.fileDisplayNames[fileId] = displayName;
 
           state.activeFileId = fileId;
         }),
@@ -315,9 +455,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     const fileId = generateFileId();
+    const displayName = window.nodePath.basename(filepath);
 
     // Add a placeholder immediately so the file appears in the UI with a loading state
-    openFiles[fileId] = { id: fileId, filePath: filepath, isVirtual: false };
+    openFiles[fileId] = { id: fileId, filePath: filepath, displayName };
     set(
       produce((state: State) => {
         state.openFileIds.push(fileId);
@@ -330,41 +471,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesPlaybackStartTime[fileId] = 0;
         state.filesLoading[fileId] = "Analysing audio...";
         state.persistedFilePaths[fileId] = filepath;
+        state.fileDisplayNames[fileId] = displayName;
       }),
     );
 
     try {
-      const result = await window.audioAnalysis.analyze(filepath, {
-        bandsPerOctave: state.bandsPerOctave,
-        minFreq: state.minFreq,
-      });
-
-      const spectrogramData = {
-        packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-        inverseMap: new Float32Array(
-          result.inverseMap.buffer,
-          result.inverseMap.byteOffset,
-          result.inverseMap.byteLength / 4,
-        ),
-        metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
-        textureWidth: result.textureWidth,
-        textureHeight: result.textureHeight,
-        numFrames: result.numFrames,
-        numBands: result.numBands,
-        numChannels: result.numChannels,
-        sampleRate: result.sampleRate,
-        packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-        minFreq: state.minFreq,
-        bandsPerOctave: state.bandsPerOctave,
-        synthesisMetadata: {
-          bandOffsets: result.bandOffsets,
-          bandStepLog2s: result.bandStepLog2s,
-          bandLengths: result.bandLengths,
-        },
-      };
-
-      openFiles[fileId] = { ...openFiles[fileId], spectrogramData };
-
+      await loadRealFileViaGaborator(fileId, filepath, state.bandsPerOctave, state.minFreq);
       set(
         produce((state: State) => {
           delete state.filesLoading[fileId];
@@ -385,6 +497,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesOffsetY[fileId];
           delete state.filesPlaybackStartTime[fileId];
           delete state.persistedFilePaths[fileId];
+          delete state.fileDisplayNames[fileId];
         }),
       );
       console.error("Error opening file:", error);
@@ -406,12 +519,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     const newFileId = generateFileId();
-    const newFilePath = makeCopyPath(originalFile.filePath);
+    const newFilePath = makeManagedFilePath(newFileId);
+    const displayName = `${stripExtensionForLabel(originalFile.displayName)} copy`;
 
     const newFile: OpenFile = {
       id: newFileId,
       filePath: newFilePath,
-      isVirtual: true,
+      displayName,
       spectrogramData: {
         ...originalFile.spectrogramData,
         packedData: fboData,
@@ -440,6 +554,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesOffsetY[newFileId] = state.filesOffsetY[fileId] ?? 0;
         state.filesPlaybackStartTime[newFileId] = state.filesPlaybackStartTime[fileId];
         state.filesDirty[newFileId] = true;
+        state.persistedFilePaths[newFileId] = newFilePath;
+        state.fileDisplayNames[newFileId] = displayName;
         if (sourceBpm !== undefined) {
           state.filepathsBpm[newFilePath] = sourceBpm;
         }
@@ -456,15 +572,21 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const { spectrogramData } = originalFile;
     if (!spectrogramData) return;
 
-    const ext = window.nodePath.extname(originalFile.filePath);
-    const base = originalFile.filePath.slice(0, originalFile.filePath.length - ext.length);
-
     const harmonicId = generateFileId();
     const percussiveId = generateFileId();
 
+    const baseLabel = stripExtensionForLabel(originalFile.displayName);
     // Add placeholder files immediately so they appear in the UI with a loading state
-    openFiles[harmonicId] = { id: harmonicId, filePath: `${base}_harmonic${ext}`, isVirtual: true };
-    openFiles[percussiveId] = { id: percussiveId, filePath: `${base}_percussive${ext}`, isVirtual: true };
+    openFiles[harmonicId] = {
+      id: harmonicId,
+      filePath: makeManagedFilePath(harmonicId),
+      displayName: `${baseLabel} harmonic`,
+    };
+    openFiles[percussiveId] = {
+      id: percussiveId,
+      filePath: makeManagedFilePath(percussiveId),
+      displayName: `${baseLabel} percussive`,
+    };
 
     const sourceBpm = get().filepathsBpm[originalFile.filePath];
 
@@ -481,6 +603,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           state.filesOffsetY[id] = state.filesOffsetY[fileId] ?? 0;
           state.filesPlaybackStartTime[id] = 0;
           state.filesDirty[id] = true;
+          state.persistedFilePaths[id] = newPath;
+          state.fileDisplayNames[id] = openFiles[id].displayName;
           state.filepathsBpm[newPath] = sourceBpm;
           state.filesLoading[id] = "Separating harmonic and percussive...";
         }
@@ -581,12 +705,15 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const stemNames = ["drums", "bass", "other", "vocals"];
     const stemIds = stemNames.map(() => generateFileId());
 
-    const ext = window.nodePath.extname(originalFile.filePath);
-    const base = originalFile.filePath.slice(0, originalFile.filePath.length - ext.length);
     const sourceBpm = state.filepathsBpm[originalFile.filePath];
 
+    const baseLabel = stripExtensionForLabel(originalFile.displayName);
     for (let i = 0; i < stemNames.length; i++) {
-      openFiles[stemIds[i]] = { id: stemIds[i], filePath: `${base}_${stemNames[i]}${ext}`, isVirtual: true };
+      openFiles[stemIds[i]] = {
+        id: stemIds[i],
+        filePath: makeManagedFilePath(stemIds[i]),
+        displayName: `${baseLabel} ${stemNames[i]}`,
+      };
     }
 
     set(
@@ -602,6 +729,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           state.filesOffsetY[id] = state.filesOffsetY[fileId] ?? 0;
           state.filesPlaybackStartTime[id] = 0;
           state.filesDirty[id] = true;
+          state.persistedFilePaths[id] = openFiles[id].filePath;
+          state.fileDisplayNames[id] = openFiles[id].displayName;
           state.filepathsBpm[openFiles[id].filePath] = sourceBpm;
           state.filesLoading[id] = "Separating stems (AI)…";
         }
@@ -704,6 +833,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             delete state.filesPlaybackStartTime[id];
             delete state.filesDirty[id];
             delete state.filesLoading[id];
+            delete state.persistedFilePaths[id];
+            delete state.fileDisplayNames[id];
           }
         }),
       );
@@ -723,6 +854,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (!state.activeFileId) return;
     const file = openFiles[state.activeFileId];
     if (!file || !file.audioBuffer) return;
+
+    // Managed files have no real on-disk path to overwrite — Save means
+    // "promote to a real file at a chosen location," which is exactly Save As.
+    if (isManagedFilePath(file.filePath)) {
+      await get().saveActiveFileAs();
+      return;
+    }
 
     const filePath = file.filePath;
     const fileName = window.nodePath.basename(filePath);
@@ -786,12 +924,16 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (!file || !file.audioBuffer) return;
 
     const currentFilePath = file.filePath;
-    const currentFileName = window.nodePath.basename(currentFilePath);
-    const currentDir = window.nodePath.dirname(currentFilePath);
+    const isManaged = isManagedFilePath(currentFilePath);
+    // For managed files there's no real directory to suggest — fall back to
+    // userData equivalents the OS dialog already defaults to. Use just the
+    // displayName as the filename suggestion.
+    const defaultPath = isManaged
+      ? `${file.displayName}.wav`
+      : window.nodePath.join(window.nodePath.dirname(currentFilePath), window.nodePath.basename(currentFilePath));
 
-    // Show save dialog (we'll need to add this to IPC)
     const result = await window.ipcRenderer.invoke("show-save-dialog", {
-      defaultPath: window.nodePath.join(currentDir, currentFileName),
+      defaultPath,
       filters: [
         { name: "Audio Files", extensions: ["wav", "flac", "mp3"] },
         { name: "All Files", extensions: ["*"] },
@@ -827,16 +969,33 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // Update file path in openFiles and copy BPM mapping to new path
       const oldFilePath = file.filePath;
       file.filePath = outputPath;
-      file.isVirtual = false;
+      file.displayName = savedFileName;
       set(
-        produce((state: State) => {
-          const oldBpm = state.filepathsBpm[oldFilePath];
+        produce((draft: State) => {
+          const oldBpm = draft.filepathsBpm[oldFilePath];
           if (oldBpm !== undefined) {
-            state.filepathsBpm[outputPath] = oldBpm;
+            draft.filepathsBpm[outputPath] = oldBpm;
+            // For managed → real promotions the sentinel BPM key is now dead;
+            // for real → real renames the old path's BPM is no longer attached
+            // to any open file either (a fresh open of oldFilePath would seed
+            // its own entry).
+            delete draft.filepathsBpm[oldFilePath];
           }
-          state.persistedFilePaths[state.activeFileId!] = outputPath;
+          draft.persistedFilePaths[state.activeFileId!] = outputPath;
+          draft.fileDisplayNames[state.activeFileId!] = savedFileName;
+          // Walk in-session brushes so any sourceFile / effect file refs that
+          // pointed at the old path follow the rename. On-disk presets are
+          // also rewritten below (best-effort, fire-and-forget) so a preset
+          // that referenced a managed file by its sentinel path follows the
+          // promotion to a real path.
+          migrateBrushRefs(draft.brushes, oldFilePath, outputPath);
         }),
       );
+
+      const presetsDir = get().presetsDir;
+      if (presetsDir) {
+        void migrateRefsInPresetFiles(presetsDir, oldFilePath, outputPath);
+      }
 
       // Mark as not dirty
       get().setFileDirty(state.activeFileId!, false);
@@ -863,6 +1022,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (!state.activeFileId) return;
     const file = openFiles[state.activeFileId];
     if (!file || !file.audioBuffer) return;
+
+    // Versioned saves derive a new name from the source path's directory and
+    // extension. Managed files have no real path to derive from — fall back
+    // to Save As.
+    if (isManagedFilePath(file.filePath)) {
+      await get().saveActiveFileAs();
+      return;
+    }
 
     const currentFilePath = file.filePath;
     const dir = window.nodePath.dirname(currentFilePath);
@@ -909,16 +1076,26 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // Update file path in openFiles and copy BPM mapping to new path
       const oldFilePath = file.filePath;
       file.filePath = outputPath;
-      file.isVirtual = false;
+      file.displayName = newFileName;
       set(
-        produce((state: State) => {
-          const oldBpm = state.filepathsBpm[oldFilePath];
+        produce((draft: State) => {
+          const oldBpm = draft.filepathsBpm[oldFilePath];
           if (oldBpm !== undefined) {
-            state.filepathsBpm[outputPath] = oldBpm;
+            draft.filepathsBpm[outputPath] = oldBpm;
           }
-          state.persistedFilePaths[state.activeFileId!] = outputPath;
+          draft.persistedFilePaths[state.activeFileId!] = outputPath;
+          draft.fileDisplayNames[state.activeFileId!] = newFileName;
+          // saveActiveFileVersion only runs for real files (the managed branch
+          // bails out earlier), so oldFilePath is a normal filesystem path —
+          // any in-session brush refs to it should follow the rename too.
+          migrateBrushRefs(draft.brushes, oldFilePath, outputPath);
         }),
       );
+
+      const presetsDir = get().presetsDir;
+      if (presetsDir) {
+        void migrateRefsInPresetFiles(presetsDir, oldFilePath, outputPath);
+      }
 
       // Mark as not dirty
       get().setFileDirty(state.activeFileId!, false);
@@ -1000,6 +1177,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesPlaybackStartTime[fileId];
           delete state.filesDirty[fileId];
           delete state.persistedFilePaths[fileId];
+          delete state.fileDisplayNames[fileId];
           state.minimizedFileIds = state.minimizedFileIds.filter((id) => id !== fileId);
           if (state.fullscreenFileId === fileId) state.fullscreenFileId = null;
           delete openFiles[fileId];
@@ -1150,9 +1328,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
       console.log(`[timing] create AudioBuffer: ${(performance.now() - audioBufferStart).toFixed(2)}ms`);
 
-      // Mark file as dirty if it's not the first synthesis, or if the file has no on-disk
-      // backing (virtual files are always considered unsaved until exported).
-      get().setFileDirty(fileId, file.isVirtual === true || file.audioBuffer !== undefined);
+      // Mark file as dirty if it's not the first synthesis (the first run on a
+      // freshly-opened real file just builds the initial audio buffer from
+      // the on-disk audio and shouldn't be considered dirty). Managed files
+      // also start as dirty — their first synthesis happens at creation time
+      // before any real audio exists, and re-synthesis of a managed file with
+      // an existing buffer means the user has painted, so dirty stays true.
+      get().setFileDirty(fileId, file.audioBuffer !== undefined || isManagedFilePath(file.filePath));
 
       file.audioBuffer = audioBuffer;
       file.audioPeak = synthesisResult.peak > 0 ? synthesisResult.peak : 1;
@@ -1225,7 +1407,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       file.audioBuffer = audioBuffer;
       file.audioPeak = peak > 0 ? peak : 1;
 
-      get().setFileDirty(fileId, file.isVirtual === true || hadPreviousBuffer);
+      get().setFileDirty(fileId, hadPreviousBuffer || isManagedFilePath(file.filePath));
 
       // Hot-swap if currently playing this file
       if (get().isPlaying && get().activeFileId === fileId) {
@@ -1606,6 +1788,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }),
     ),
   persistedFilePaths: {},
+  fileDisplayNames: {},
   recentFilePaths: [],
   addRecentFilePath: (filePath: string) => {
     set(
@@ -1628,13 +1811,40 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const entries = Object.entries(state.persistedFilePaths);
     if (entries.length === 0) return;
 
+    // Pull the untitled counter forward past any persisted "Untitled N"
+    // labels so a freshly-created managed file later in the session doesn't
+    // collide with one we're rehydrating.
+    for (const persistedName of Object.values(state.fileDisplayNames)) {
+      const m = /^Untitled (\d+)$/.exec(persistedName);
+      if (m) bumpUntitledCounterTo(parseInt(m[1], 10));
+    }
+
+    const newlyAssigned: Record<string, string> = {};
     for (const [fileId, filePath] of entries) {
-      openFiles[fileId] ??= { id: fileId, filePath };
+      // Prefer the persisted label so a managed file's "Untitled N" stays
+      // stable across sessions. Fall back to a freshly-derived label only
+      // when a persisted entry has no name (legacy state, or a prior bug).
+      const persisted = state.fileDisplayNames[fileId];
+      const displayName =
+        persisted ?? (isManagedFilePath(filePath) ? nextUntitledName() : window.nodePath.basename(filePath));
+      if (!persisted) newlyAssigned[fileId] = displayName;
+      openFiles[fileId] ??= { id: fileId, filePath, displayName };
+    }
+    // Persist any names we had to invent for entries missing a label so the
+    // next session is fully stable.
+    if (Object.keys(newlyAssigned).length > 0) {
+      set(
+        produce((draft: State) => {
+          for (const [id, name] of Object.entries(newlyAssigned)) {
+            draft.fileDisplayNames[id] = name;
+          }
+        }),
+      );
     }
     set(
       produce((draft: State) => {
         for (const [fileId] of entries) {
-          draft.filesLoading[fileId] = "Analysing audio...";
+          draft.filesLoading[fileId] = "Loading...";
         }
       }),
     );
@@ -1642,38 +1852,36 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     await Promise.all(
       entries.map(async ([fileId, filePath]) => {
         try {
-          const pathState = get();
-          const result = await window.audioAnalysis.analyze(filePath, {
-            bandsPerOctave: pathState.filesBandsPerOctave[fileId] ?? pathState.bandsPerOctave,
-            minFreq: pathState.minFreq,
-          });
-          const spectrogramData = {
-            packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-            inverseMap: new Float32Array(
-              result.inverseMap.buffer,
-              result.inverseMap.byteOffset,
-              result.inverseMap.byteLength / 4,
-            ),
-            metadata: new Float32Array(
-              result.metadata.buffer,
-              result.metadata.byteOffset,
-              result.metadata.byteLength / 4,
-            ),
-            textureWidth: result.textureWidth,
-            textureHeight: result.textureHeight,
-            numFrames: result.numFrames,
-            numBands: result.numBands,
-            numChannels: result.numChannels,
-            sampleRate: result.sampleRate,
-            packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-            minFreq: pathState.minFreq,
-            bandsPerOctave: pathState.filesBandsPerOctave[fileId] ?? pathState.bandsPerOctave,
-            synthesisMetadata: {
-              bandOffsets: result.bandOffsets,
-              bandStepLog2s: result.bandStepLog2s,
-              bandLengths: result.bandLengths,
-            },
-          };
+          // History is the source of truth on reopen — skip gaborator entirely.
+          // The root snapshot has full SpectrogramData (dimensions + inverseMap
+          // + metadata + synthesisMetadata) and stroke deltas reproduce the
+          // painted state at currentId.
+          const historyManager = getHistoryManager(fileId);
+          const hadExisting = await historyManager.initialize();
+          if (!hadExisting) {
+            // No on-disk history: this can only happen if persistedFilePaths
+            // got out of sync (e.g. a crash between addRootSnapshot and the
+            // store persist write). For real files we can fall back to
+            // gaborator — for managed files there's no fallback.
+            if (isManagedFilePath(filePath)) {
+              throw new Error("No history found for managed file");
+            }
+            const pathState = get();
+            await loadRealFileViaGaborator(
+              fileId,
+              filePath,
+              pathState.filesBandsPerOctave[fileId] ?? pathState.bandsPerOctave,
+              pathState.minFreq,
+            );
+            set(
+              produce((draft: State) => {
+                delete draft.filesLoading[fileId];
+              }),
+            );
+            return;
+          }
+          const spectrogramData = await historyManager.loadSpectrogramAtCurrent();
+          if (!spectrogramData) throw new Error("History tree is empty");
           openFiles[fileId] = { ...openFiles[fileId], spectrogramData };
           set(
             produce((draft: State) => {
@@ -1689,6 +1897,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
               if (draft.activeFileId === fileId) draft.activeFileId = null;
               if (draft.fullscreenFileId === fileId) draft.fullscreenFileId = null;
               delete draft.persistedFilePaths[fileId];
+              delete draft.fileDisplayNames[fileId];
               delete draft.filesLoading[fileId];
               delete draft.filesBandsPerOctave[fileId];
               delete draft.filesZoom[fileId];
@@ -1696,11 +1905,15 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
               delete draft.filesZoomY[fileId];
               delete draft.filesOffsetY[fileId];
               delete draft.filesPlaybackStartTime[fileId];
+              delete draft.filesDirty[fileId];
             }),
           );
+          const label = isManagedFilePath(filePath)
+            ? "managed file"
+            : truncateMiddle(window.nodePath.basename(filePath), 50);
           notifications.show({
             title: "Failed to reopen file",
-            message: `${truncateMiddle(window.nodePath.basename(filePath), 50)}: ${error instanceof Error ? error.message : ""}`,
+            message: `${label}: ${error instanceof Error ? error.message : ""}`,
             color: "red",
           });
         }
@@ -1714,20 +1927,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const bpm = after.filepathsBpm[file.filePath];
       if (bpm) transport.bpm.value = bpm;
     }
-  },
-  getUnsavedFiles: () => {
-    const state = get();
-    return state.openFileIds
-      .filter((id) => state.filesDirty[id])
-      .map((id) => {
-        const file = openFiles[id];
-        const filePath = file?.filePath ?? "";
-        return {
-          fileId: id,
-          filePath,
-          fileName: filePath ? window.nodePath.basename(filePath) : id,
-        };
-      });
   },
   filesPlaybackStartTime: {},
   setFilePlaybackStartTime: (fileId, time) =>
@@ -1813,9 +2012,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     const state = get();
     const fileId = generateFileId();
+    const displayName = window.nodePath.basename(filePath);
 
     // Add placeholder and immediately minimize — never appears as a full canvas
-    openFiles[fileId] = { id: fileId, filePath, isVirtual: false };
+    openFiles[fileId] = { id: fileId, filePath, displayName };
     set(
       produce((state: State) => {
         state.openFileIds.push(fileId);
@@ -1829,40 +2029,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesPlaybackStartTime[fileId] = 0;
         state.filesLoading[fileId] = "Analysing audio...";
         state.persistedFilePaths[fileId] = filePath;
+        state.fileDisplayNames[fileId] = displayName;
       }),
     );
 
     try {
-      const result = await window.audioAnalysis.analyze(filePath, {
-        bandsPerOctave: state.bandsPerOctave,
-        minFreq: state.minFreq,
-      });
-
-      const spectrogramData = {
-        packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-        inverseMap: new Float32Array(
-          result.inverseMap.buffer,
-          result.inverseMap.byteOffset,
-          result.inverseMap.byteLength / 4,
-        ),
-        metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
-        textureWidth: result.textureWidth,
-        textureHeight: result.textureHeight,
-        numFrames: result.numFrames,
-        numBands: result.numBands,
-        numChannels: result.numChannels,
-        sampleRate: result.sampleRate,
-        packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-        minFreq: state.minFreq,
-        bandsPerOctave: state.bandsPerOctave,
-        synthesisMetadata: {
-          bandOffsets: result.bandOffsets,
-          bandStepLog2s: result.bandStepLog2s,
-          bandLengths: result.bandLengths,
-        },
-      };
-
-      openFiles[fileId] = { ...openFiles[fileId], spectrogramData };
+      await loadRealFileViaGaborator(fileId, filePath, state.bandsPerOctave, state.minFreq);
       set(
         produce((state: State) => {
           delete state.filesLoading[fileId];

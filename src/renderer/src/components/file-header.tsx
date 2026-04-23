@@ -1,6 +1,7 @@
 import { useStore } from "@/store";
 import { ActionIcon, Badge, Box, Group, Menu, NumberInput } from "@mantine/core";
 import { getFileColor, openFiles } from "@renderer/store/files";
+import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { ChevronDown, Copy, Maximize2, Minimize2, Scissors, X } from "lucide-react";
 import { memo } from "react";
@@ -26,14 +27,12 @@ function getResolutionLabel(bpo: number): string {
 
 // Component to display filename with middle truncation
 const TruncatedFilename = memo(function TruncatedFilename({
-  filePath,
+  displayName,
   isDirty,
 }: {
-  filePath: string;
+  displayName: string;
   isDirty: boolean;
 }) {
-  const filename = filePath.split("/").pop() || filePath;
-
   return (
     <Box
       style={{
@@ -44,7 +43,7 @@ const TruncatedFilename = memo(function TruncatedFilename({
         whiteSpace: "nowrap",
       }}
     >
-      {truncateMiddle(filename, 50)}
+      {truncateMiddle(displayName, 50)}
     </Box>
   );
 });
@@ -52,6 +51,7 @@ const TruncatedFilename = memo(function TruncatedFilename({
 export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const file = openFiles[fileId];
   const filePath = file.filePath;
+  const displayName = file.displayName;
   const bpm = useStore((state) => state.filepathsBpm[filePath]);
   const fullscreenFileId = useStore((state) => state.fullscreenFileId);
   const bandsPerOctave = useStore((state) => state.filesBandsPerOctave[fileId]);
@@ -60,6 +60,9 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
 
   const isFullscreen = fullscreenFileId === fileId;
   const fileColor = getFileColor(filePath);
+  // Tooltip shows full path for real files (helpful when basenames truncate);
+  // for managed files the path is the opaque sentinel, so just show the label.
+  const tooltipLabel = isManagedFilePath(filePath) ? displayName : filePath;
 
   return (
     <Group
@@ -74,9 +77,9 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
       }}
     >
       <Group gap="xs" style={{ minWidth: 0, flex: 1 }}>
-        <Tooltip label={filePath}>
+        <Tooltip label={tooltipLabel}>
           <Box style={{ minWidth: 0, flex: 1 }}>
-            <TruncatedFilename filePath={filePath} isDirty={isDirty} />
+            <TruncatedFilename displayName={displayName} isDirty={isDirty} />
           </Box>
         </Tooltip>
         {bandsPerOctave && (

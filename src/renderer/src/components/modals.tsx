@@ -73,7 +73,6 @@ export const FilePickerModal = ({
   currentPath: string | null;
 }>) => {
   const files = Object.values(openFiles);
-  const basename = (p: string) => p.split("/").pop() || p;
 
   return (
     <Stack gap="xs">
@@ -111,7 +110,7 @@ export const FilePickerModal = ({
             }}
           >
             <Text size="sm" fw={600}>
-              {basename(file.filePath)}
+              {file.displayName}
             </Text>
           </UnstyledButton>
         );

@@ -11,11 +11,11 @@ const PaletteChip = memo(({ fileId }: { fileId: string }) => {
   const isHighlighted = useStore((state) => state.highlightedSourcePath === file?.filePath);
   const isLoading = useStore((state) => !!state.filesLoading[fileId]);
   if (!file) return null;
-  const filename = file.filePath.split("/").pop() || file.filePath;
+  const displayName = file.displayName;
   const fileColor = getFileColor(file.filePath);
 
   return (
-    <Tooltip label={filename}>
+    <Tooltip label={displayName}>
       <Group
         gap={4}
         px={2}
@@ -53,7 +53,7 @@ const PaletteChip = memo(({ fileId }: { fileId: string }) => {
             paddingLeft: 2,
           }}
         >
-          {filename}
+          {displayName}
         </Text>
         <ActionIcon
           size="xs"

@@ -550,6 +550,21 @@ export class HistoryManager {
     return { packedData, inverseMap, metadata };
   }
 
+  // Read just the side-data of a full snapshot (inverseMap + metadata), without
+  // the packed FBO data. Used by loadSpectrogramAtCurrent so it doesn't redo
+  // work that reconstruct() has already done for the anchor.
+  private async readFullSnapshotSideData(node: HistoryNode): Promise<{
+    inverseMap: Float32Array;
+    metadata: Float32Array;
+  }> {
+    const dir = await this.dir;
+    const [inverseMap, metadata] = await Promise.all([
+      readFloat32Compressed(this.inverseMapPath(dir, node.id)),
+      readFloat32Compressed(this.metadataPath(dir, node.id)),
+    ]);
+    return { inverseMap, metadata };
+  }
+
   // ---------- Reconstruction ----------
 
   /**
@@ -595,6 +610,80 @@ export class HistoryManager {
       node: target,
       fullAnchor: anchor.storage === "full" ? anchor : undefined,
     };
+  }
+
+  /**
+   * Reconstruct the SpectrogramData at the current node from on-disk history,
+   * without needing a renderer to be attached. Used by reopenPersistedFiles to
+   * skip gaborator on launch — the root snapshot already has every shape we need
+   * (dimensions, inverseMap, metadata, synthesisMetadata) and stroke deltas
+   * forward from the nearest full anchor reproduce the painted state.
+   *
+   * Side effect: caches currentPacked so future addStroke deltas compute
+   * against the correct base.
+   */
+  async loadSpectrogramAtCurrent(): Promise<SpectrogramData | null> {
+    await this.initialize();
+    if (!this.manifest) return null;
+    const targetId = this.manifest.currentId;
+    if (!this.manifest.nodes[targetId]) return null;
+
+    // reconstruct() walks back to the nearest full anchor and reads its packed
+    // data once, then applies deltas forward. We piggyback on that walk to
+    // know the anchor identity, and only fetch its side data (inverseMap +
+    // metadata) — which reconstruct doesn't need but spectrogramData does.
+    const { packedData, fullAnchor } = await this.reconstruct(targetId);
+    if (!fullAnchor || !fullAnchor.synthesisMetadata) return null;
+
+    const { inverseMap, metadata } = await this.readFullSnapshotSideData(fullAnchor);
+    this.currentPacked = new Float32Array(packedData);
+
+    const dims = fullAnchor.dimensions;
+    return {
+      packedData,
+      inverseMap,
+      metadata,
+      textureWidth: dims.textureWidth,
+      textureHeight: dims.textureHeight,
+      numFrames: dims.numFrames,
+      numBands: dims.numBands,
+      numChannels: dims.numChannels,
+      sampleRate: dims.sampleRate,
+      minFreq: dims.minFreq,
+      bandsPerOctave: dims.bandsPerOctave,
+      packedTextureSize: new Vector2(dims.textureWidth, dims.textureHeight),
+      synthesisMetadata: {
+        bandOffsets: new Uint32Array(fullAnchor.synthesisMetadata.bandOffsets),
+        bandStepLog2s: new Int32Array(fullAnchor.synthesisMetadata.bandStepLog2s),
+        bandLengths: new Uint32Array(fullAnchor.synthesisMetadata.bandLengths),
+      },
+    };
+  }
+
+  /**
+   * Restore the audio for the current node — cached WAV if present, otherwise
+   * trigger fresh synthesis. Called after FileRenderer mounts on reopen so the
+   * file is immediately playable from where the user left off.
+   */
+  async restoreCurrentAudio(): Promise<void> {
+    await this.initialize();
+    if (!this.manifest) return;
+    const targetId = this.manifest.currentId;
+    const target = this.manifest.nodes[targetId];
+    if (!target) return;
+    const dir = await this.dir;
+    const audioPath = this.audioPath(dir, targetId);
+    if (target.audioCached && target.audioPeak != null) {
+      const { loadCachedAudio } = useStore.getState();
+      const loaded = await loadCachedAudio(this.fileId, audioPath, target.audioPeak);
+      if (loaded) {
+        this.touchAudioLru(targetId);
+        return;
+      }
+      target.audioCached = false;
+    }
+    const { synthesizeFile } = useStore.getState();
+    void synthesizeFile(this.fileId);
   }
 
   // ---------- Navigation ----------
@@ -946,4 +1035,35 @@ export async function destroyHistoryManager(fileId: string): Promise<void> {
 export function clearAllHistoryManagers(): void {
   for (const m of managers.values()) m.dispose();
   managers.clear();
+}
+
+/**
+ * Delete history directories that don't correspond to any of the persisted
+ * fileIds. Catches orphans left by crashes or by close paths that didn't get
+ * to run destroyHistoryManager. Called once at app startup.
+ */
+export async function pruneOrphanHistoryDirs(activeFileIds: Set<string>): Promise<void> {
+  try {
+    const userData = await getUserDataPath();
+    const root = window.nodePath.join(userData, "history");
+    let entries: string[];
+    try {
+      entries = (await window.nodeFs.readdir(root)) as unknown as string[];
+    } catch {
+      return;
+    }
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (activeFileIds.has(entry)) return;
+        const dir = window.nodePath.join(root, entry);
+        try {
+          await window.nodeFs.rm(dir, { recursive: true, force: true });
+        } catch {
+          // best-effort
+        }
+      }),
+    );
+  } catch {
+    // best-effort
+  }
 }

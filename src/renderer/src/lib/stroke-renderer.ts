@@ -96,6 +96,7 @@ export interface StrokeTextures {
 export interface SourceFileInfo {
   id: string;
   filePath: string;
+  displayName: string;
   spectrogramData: SpectrogramData;
   textures: {
     packed: WebGLRenderTarget;
