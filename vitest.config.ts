@@ -30,5 +30,7 @@ export default defineConfig({
       screenshotFailures: false,
     },
     include: ["src/renderer/**/*.test.ts"],
+    // Perf suites are slow and noisy; run them explicitly via `npm run test:perf`.
+    exclude: ["**/node_modules/**", "**/*.perf.test.ts"],
   },
 });
