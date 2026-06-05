@@ -1,5 +1,36 @@
-import { describe, expect, it } from "vitest";
-import { applyDelta, computeDeltaRect } from "../history-manager";
+import { describe, expect, it, vi } from "vitest";
+
+// Mirror the mocks used by managed-files.test.ts so importing history-manager
+// doesn't pull the full zustand store (circular init deps outside Electron).
+vi.mock("@renderer/effects", () => ({
+  effects: { transform: {}, dynamics: {}, blur: {}, overtones: {}, synthesize: {}, passthrough: {} },
+}));
+vi.mock("@mantine/notifications", () => ({ notifications: { show: vi.fn() } }));
+vi.mock("../modals", () => ({
+  openConfirm: vi.fn(),
+  openContextModal: vi.fn(),
+  openNewFilePrompt: vi.fn(),
+  openReanalyzePrompt: vi.fn(),
+}));
+vi.mock("tone", () => ({ Player: class {} }));
+
+// Hoisted so the vi.mock factories (themselves hoisted above the imports) can
+// reference these shared stubs without a TDZ error.
+const { fakeOpenFiles, synthesizeFile, loadCachedAudio } = vi.hoisted(() => ({
+  fakeOpenFiles: {} as Record<string, unknown>,
+  synthesizeFile: vi.fn(),
+  loadCachedAudio: vi.fn(async () => false),
+}));
+vi.mock("@renderer/store", () => ({
+  useStore: { getState: () => ({ synthesizeFile, loadCachedAudio }) },
+}));
+vi.mock("@renderer/store/files", () => ({ openFiles: fakeOpenFiles }));
+
+// Silence the renderer→main menu-state IPC the manager fires on every change.
+vi.mock("../ipc", () => ({ ipcSend: vi.fn() }));
+
+import { applyDelta, computeDeltaRect, getHistoryManager, PackedStateCache } from "../history-manager";
+import type { SpectrogramData } from "../../store/types";
 
 function makeRGBA(width: number, height: number, fill: number): Float32Array {
   const arr = new Float32Array(width * height * 4);
@@ -166,5 +197,184 @@ describe("history-manager codec", () => {
       const reconstructed = applyDelta(before, diff.rect, diff.patch, w);
       expect(Array.from(reconstructed)).toEqual(Array.from(after));
     });
+  });
+});
+
+describe("PackedStateCache", () => {
+  const a = new Float32Array([1, 2, 3, 4]); // 16 bytes each
+  const b = new Float32Array([5, 6, 7, 8]);
+  const c = new Float32Array([9, 10, 11, 12]);
+
+  it("returns the exact stored array (lossless round-trip)", () => {
+    const cache = new PackedStateCache(1024);
+    cache.set("a", a);
+    expect(cache.get("a")).toBe(a);
+  });
+
+  it("evicts least-recently-used entries once over the byte budget", () => {
+    const cache = new PackedStateCache(32); // room for 2 of the 16-byte arrays
+    cache.set("a", a);
+    cache.set("b", b);
+    cache.set("c", c); // pushes total to 48 > 32 → oldest ("a") evicted
+    expect(cache.has("a")).toBe(false);
+    expect(cache.has("b")).toBe(true);
+    expect(cache.has("c")).toBe(true);
+  });
+
+  it("get() refreshes recency so the touched entry survives eviction", () => {
+    const cache = new PackedStateCache(32);
+    cache.set("a", a);
+    cache.set("b", b);
+    cache.get("a"); // "a" is now most-recent, "b" oldest
+    cache.set("c", c); // evicts the oldest, which is now "b"
+    expect(cache.has("a")).toBe(true);
+    expect(cache.has("b")).toBe(false);
+    expect(cache.has("c")).toBe(true);
+  });
+
+  it("keeps the just-inserted entry even when it alone exceeds the budget", () => {
+    const cache = new PackedStateCache(4); // smaller than one 16-byte array
+    cache.set("a", a);
+    expect(cache.get("a")).toBe(a);
+    expect(cache.size).toBe(1);
+  });
+
+  it("delete() drops the entry and frees its budget", () => {
+    const cache = new PackedStateCache(32);
+    cache.set("a", a);
+    cache.set("b", b);
+    cache.delete("a");
+    expect(cache.has("a")).toBe(false);
+    cache.set("c", c); // a+b would have been 32; with "a" gone there's room for "c"
+    expect(cache.has("b")).toBe(true);
+    expect(cache.has("c")).toBe(true);
+  });
+});
+
+// In-memory window.* shims so the real HistoryManager runs in the browser test
+// environment. zstd is faked as identity (byte-preserving) so reconstruction is
+// exercised without a native codec; the fs is a path→value map.
+function installManagerEnv(): { fbo: { last: Float32Array | null } } {
+  // history-manager wraps payloads in Node's Buffer; the browser test runtime
+  // has no Buffer, so stand in a byte-compatible Uint8Array factory.
+  const g = globalThis as unknown as { Buffer?: unknown };
+  if (g.Buffer === undefined) {
+    g.Buffer = {
+      from: (src: ArrayBuffer | ArrayBufferView | number[], off?: number, len?: number): Uint8Array => {
+        if (src instanceof ArrayBuffer) return new Uint8Array(src, off ?? 0, len ?? src.byteLength - (off ?? 0));
+        if (ArrayBuffer.isView(src)) return new Uint8Array(src.buffer, src.byteOffset, src.byteLength);
+        return new Uint8Array(src);
+      },
+    };
+  }
+
+  const store = new Map<string, string | Uint8Array>();
+  const w = window as unknown as Record<string, unknown>;
+  w.ipcRenderer = {
+    invoke: vi.fn(async (channel: string) => (channel === "get-user-data-path" ? "/userdata" : undefined)),
+  };
+  w.nodePath = { join: (...parts: string[]) => parts.join("/") };
+  w.nodeZlib = {
+    zstdCompress: (buf: Uint8Array, cb: (e: Error | null, out: Uint8Array) => void) => cb(null, new Uint8Array(buf)),
+    zstdDecompress: (buf: Uint8Array, cb: (e: Error | null, out: Uint8Array) => void) => cb(null, new Uint8Array(buf)),
+  };
+  w.nodeFs = {
+    mkdir: vi.fn(async () => undefined),
+    writeFile: vi.fn(async (path: string, data: string | Uint8Array) => {
+      store.set(path, typeof data === "string" ? data : new Uint8Array(data));
+    }),
+    readFile: vi.fn(async (path: string, encoding?: string) => {
+      const v = store.get(path);
+      if (v === undefined) throw new Error(`ENOENT: ${path}`);
+      if (encoding === "utf8") return v as string;
+      const bytes = v as Uint8Array;
+      return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    }),
+    rm: vi.fn(async (path: string) => {
+      store.delete(path);
+    }),
+  };
+
+  const fbo = { last: null as Float32Array | null };
+  fakeOpenFiles["f1"] = {
+    spectrogramData: {},
+    rendererRef: { current: { setFBOData: (d: Float32Array) => (fbo.last = d), reloadTextures: vi.fn() } },
+  };
+  return { fbo };
+}
+
+// A spectrogram whose packed data we control; side-data is unused by within-
+// analysis navigation but required by addRootSnapshot.
+function makeSpectrogram(packed: Float32Array, w: number, h: number): SpectrogramData {
+  return {
+    packedData: packed,
+    inverseMap: new Float32Array(4),
+    metadata: new Float32Array(4),
+    textureWidth: w,
+    textureHeight: h,
+    numFrames: w,
+    numBands: h,
+    numChannels: 1,
+    sampleRate: 44100,
+    minFreq: 20,
+    bandsPerOctave: 12,
+    packedTextureSize: { x: w, y: h },
+    synthesisMetadata: {
+      bandOffsets: new Uint32Array([0]),
+      bandStepLog2s: new Int32Array([0]),
+      bandLengths: new Uint32Array([h]),
+    },
+  } as unknown as SpectrogramData;
+}
+
+// Deterministic, deliberately lossy float fill — values like p/97 aren't exactly
+// representable, so a delta-subtraction undo would drift from these. The cache
+// must return the original bytes regardless.
+function lossyFill(w: number, h: number, salt: number): Float32Array {
+  const arr = new Float32Array(w * h * 4);
+  for (let i = 0; i < arr.length; i++) arr[i] = ((i + salt) % 97) / 97 + salt * 0.013;
+  return arr;
+}
+
+describe("HistoryManager undo/redo round-trip", () => {
+  it("restores the exact painted state across repeated undo/redo (lossless)", async () => {
+    const { fbo } = installManagerEnv();
+    const w = 6,
+      h = 4;
+    const root = lossyFill(w, h, 0);
+    const a = lossyFill(w, h, 1);
+    const b = lossyFill(w, h, 2);
+    const dimensions = {
+      textureWidth: w,
+      textureHeight: h,
+      numFrames: w,
+      numBands: h,
+      numChannels: 1,
+      sampleRate: 44100,
+      minFreq: 20,
+      bandsPerOctave: 12,
+    };
+
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    await mgr.addStroke({ data: a, label: "A", dimensions });
+    await mgr.addStroke({ data: b, label: "B", dimensions });
+
+    // Bounce up and down the chain many times. Each visited node must come back
+    // byte-for-byte identical — a subtractive (delta-inverse) undo would
+    // accumulate float error and fail these exact-equality checks.
+    for (let cycle = 0; cycle < 5; cycle++) {
+      await mgr.navigateToParent(); // B → A
+      expect(Array.from(fbo.last!)).toEqual(Array.from(a));
+      await mgr.navigateToParent(); // A → root
+      expect(Array.from(fbo.last!)).toEqual(Array.from(root));
+      await mgr.navigateToLastChild(); // root → A
+      expect(Array.from(fbo.last!)).toEqual(Array.from(a));
+      await mgr.navigateToLastChild(); // A → B
+      expect(Array.from(fbo.last!)).toEqual(Array.from(b));
+    }
+
+    mgr.dispose();
+    delete fakeOpenFiles["f1"];
   });
 });

@@ -6,7 +6,9 @@ import { ipcSend } from "./ipc";
 
 const MANIFEST_FILENAME = "tree.json";
 const CHECKPOINT_INTERVAL = 20;
-const AUDIO_LRU_CAPACITY = 5;
+const AUDIO_LRU_CAPACITY = 50;
+const MANIFEST_WRITE_DEBOUNCE_MS = 400;
+const PACKED_STATE_CACHE_BYTES = 256 * 1024 * 1024;
 
 export type HistoryNodeKind = "root" | "stroke" | "resize" | "reanalyze" | "checkpoint";
 
@@ -137,6 +139,68 @@ export function applyDelta(base: Float32Array, rect: Rect, patch: Float32Array, 
   return out;
 }
 
+/**
+ * Bounded LRU of canonical packed FBO states keyed by history node id. Holds the
+ * exact arrays that were last on screen so revisiting a node during undo/redo is
+ * both instant (no disk read / decompress / delta replay) and lossless — deriving
+ * a neighbour by adding/subtracting a stored delta would accumulate float error
+ * across repeated round-trips. Capacity is a byte budget so it adapts to texture
+ * size; the most-recently used entry is always retained.
+ */
+export class PackedStateCache {
+  private readonly map = new Map<string, Float32Array>();
+  private bytes = 0;
+
+  constructor(private readonly maxBytes: number) {}
+
+  get(id: string): Float32Array | undefined {
+    const v = this.map.get(id);
+    if (v === undefined) return undefined;
+    // Refresh recency: delete + re-insert moves it to the end of the Map.
+    this.map.delete(id);
+    this.map.set(id, v);
+    return v;
+  }
+
+  set(id: string, data: Float32Array): void {
+    const existing = this.map.get(id);
+    if (existing) {
+      this.bytes -= existing.byteLength;
+      this.map.delete(id);
+    }
+    this.map.set(id, data);
+    this.bytes += data.byteLength;
+    // Evict oldest (front of Map) until under budget, but never drop the entry
+    // we just inserted even if it alone exceeds the budget.
+    while (this.bytes > this.maxBytes && this.map.size > 1) {
+      const oldest = this.map.keys().next().value as string;
+      const v = this.map.get(oldest)!;
+      this.bytes -= v.byteLength;
+      this.map.delete(oldest);
+    }
+  }
+
+  delete(id: string): void {
+    const existing = this.map.get(id);
+    if (!existing) return;
+    this.bytes -= existing.byteLength;
+    this.map.delete(id);
+  }
+
+  clear(): void {
+    this.map.clear();
+    this.bytes = 0;
+  }
+
+  has(id: string): boolean {
+    return this.map.has(id);
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
+}
+
 // --- Helpers ---
 
 function shortId(): string {
@@ -213,8 +277,16 @@ export class HistoryManager {
   private initPromise: Promise<void> | null = null;
   private currentPacked: Float32Array | null = null;
   private audioLru: string[] = [];
+  // ID of the full-snapshot node whose spectrogramData (inverseMap, metadata,
+  // dimensions) currently reflects on the file. Used to avoid a redundant
+  // reloadTextures() when navigating among nodes that share an anchor — which
+  // is the common case for undo/redo within a single analysis.
+  private lastLoadedAnchorId: string | null = null;
   private listeners = new Set<() => void>();
   private version = 0;
+  private manifestWriteTimer: ReturnType<typeof setTimeout> | null = null;
+  private manifestWritePending = false;
+  private readonly packedCache = new PackedStateCache(PACKED_STATE_CACHE_BYTES);
 
   constructor(fileId: string) {
     this.fileId = fileId;
@@ -278,10 +350,37 @@ export class HistoryManager {
   }
 
   private async writeManifest(): Promise<void> {
-    if (!this.manifest) return;
+    // Snapshot synchronously so a flush triggered just before dispose() nulls
+    // the manifest still persists the captured tree across the await below.
+    const manifest = this.manifest;
+    if (!manifest) return;
     const dir = await this.ensureDir();
     const path = window.nodePath.join(dir, MANIFEST_FILENAME);
-    await window.nodeFs.writeFile(path, JSON.stringify(this.manifest));
+    await window.nodeFs.writeFile(path, JSON.stringify(manifest));
+  }
+
+  /**
+   * Coalesce manifest writes during rapid navigation (e.g. holding Cmd+Z). The
+   * on-disk currentId only needs to be eventually durable, so debouncing keeps
+   * a fast undo/redo spree from doing a full tree.json write per step.
+   */
+  private scheduleManifestWrite(): void {
+    this.manifestWritePending = true;
+    if (this.manifestWriteTimer != null) return;
+    this.manifestWriteTimer = setTimeout(() => {
+      this.manifestWriteTimer = null;
+      this.flushManifestWrite();
+    }, MANIFEST_WRITE_DEBOUNCE_MS);
+  }
+
+  private flushManifestWrite(): void {
+    if (this.manifestWriteTimer != null) {
+      clearTimeout(this.manifestWriteTimer);
+      this.manifestWriteTimer = null;
+    }
+    if (!this.manifestWritePending) return;
+    this.manifestWritePending = false;
+    void this.writeManifest();
   }
 
   /**
@@ -294,7 +393,20 @@ export class HistoryManager {
     }
     this.initPromise = (async () => {
       const loaded = await this.readManifest();
-      if (loaded) this.manifest = loaded;
+      if (loaded) {
+        this.manifest = loaded;
+        // The freshly-analyzed file on disk almost always matches the root's
+        // dimensions (strokes don't change dims; resize/reanalyze either ran
+        // and re-saved, or we're at root). Set lastLoadedAnchorId to the
+        // nearest full ancestor of currentId so the first navigate doesn't do
+        // a redundant reloadTextures. If it's wrong, the first cross-anchor
+        // navigate will correct it.
+        let cursor: HistoryNode | null = loaded.nodes[loaded.currentId] ?? null;
+        while (cursor && cursor.storage !== "full") {
+          cursor = cursor.parentId ? (loaded.nodes[cursor.parentId] ?? null) : null;
+        }
+        this.lastLoadedAnchorId = cursor?.id ?? null;
+      }
     })();
     await this.initPromise;
     return this.manifest !== null;
@@ -388,6 +500,8 @@ export class HistoryManager {
     await this.writeFullSnapshot(id, opts.data, opts.spectrogram);
     await this.writeManifest();
     this.currentPacked = new Float32Array(opts.data);
+    this.packedCache.set(id, this.currentPacked);
+    this.lastLoadedAnchorId = id;
     this.notifyStateChange();
     return id;
   }
@@ -423,6 +537,8 @@ export class HistoryManager {
     this.manifest.nodes[id] = node;
     this.manifest.currentId = id;
     this.currentPacked = new Float32Array(opts.data);
+    this.packedCache.set(id, this.currentPacked);
+    this.lastLoadedAnchorId = id;
     await this.writeManifest();
     this.notifyStateChange();
     return id;
@@ -500,6 +616,7 @@ export class HistoryManager {
     this.manifest.nodes[id] = node;
     this.manifest.currentId = id;
     this.currentPacked = new Float32Array(opts.data);
+    this.packedCache.set(id, this.currentPacked);
     await this.writeManifest();
     this.notifyStateChange();
     return id;
@@ -613,6 +730,22 @@ export class HistoryManager {
   }
 
   /**
+   * Walk ancestors to the nearest full snapshot (resize/reanalyze or root) — the
+   * node whose inverseMap/metadata/synthesisMetadata describe `nodeId`'s
+   * dimensions. Packed checkpoints are skipped since they share their full
+   * ancestor's side-data. Used to decide whether navigation crossed a dimension
+   * boundary and so needs reloadTextures.
+   */
+  private nearestFullAnchor(nodeId: string): HistoryNode | null {
+    if (!this.manifest) return null;
+    let cursor: HistoryNode | null = this.manifest.nodes[nodeId] ?? null;
+    while (cursor && cursor.storage !== "full") {
+      cursor = cursor.parentId ? (this.manifest.nodes[cursor.parentId] ?? null) : null;
+    }
+    return cursor;
+  }
+
+  /**
    * Reconstruct the SpectrogramData at the current node from on-disk history,
    * without needing a renderer to be attached. Used by reopenPersistedFiles to
    * skip gaborator on launch — the root snapshot already has every shape we need
@@ -715,20 +848,33 @@ export class HistoryManager {
       if (parent) parent.lastChildId = toRoot[i - 1];
     }
 
-    const { packedData, fullAnchor } = await this.reconstruct(targetId);
+    // Reuse the cached canonical packed state when we've recently visited the
+    // target (the common undo/redo case) — it's the exact array that was last on
+    // screen, so round-trips are lossless and need no disk read / decompress /
+    // delta replay. On a miss, rebuild from the nearest checkpoint on disk.
+    let packedData = this.packedCache.get(targetId);
+    if (!packedData) {
+      packedData = (await this.reconstruct(targetId)).packedData;
+    }
 
-    // If the lineage walks back to a full snapshot (root/resize/reanalyze),
-    // restore the file's spectrogramData from that anchor so textures
-    // (inverseMap, metadata, dims) match.
-    if (fullAnchor) {
-      await this.restoreSpectrogramFromFull(fullAnchor, packedData);
+    // Only rebuild textures and swap spectrogramData when the full-snapshot
+    // anchor has actually changed (i.e. we crossed a resize/reanalyze boundary).
+    // For typical undo/redo within a single analysis, the file's existing
+    // inverseMap/metadata/dims are still correct — just push the new FBO bytes.
+    const anchor = this.nearestFullAnchor(targetId);
+    if (anchor && anchor.id !== this.lastLoadedAnchorId) {
+      await this.restoreSpectrogramFromFull(anchor, packedData);
+      this.lastLoadedAnchorId = anchor.id;
     } else {
       file.rendererRef.current.setFBOData(packedData);
     }
 
     this.manifest.currentId = targetId;
-    this.currentPacked = new Float32Array(packedData);
-    await this.writeManifest();
+    // packedData is either a cache entry or a freshly reconstructed array; both
+    // are safe to share (currentPacked is never mutated in place, only replaced).
+    this.currentPacked = packedData;
+    this.packedCache.set(targetId, packedData);
+    this.scheduleManifestWrite();
     this.notifyStateChange();
 
     // Restore audio: cached WAV if present, otherwise re-synthesize.
@@ -882,6 +1028,7 @@ export class HistoryManager {
         this.audioPath(dir, id),
       ];
       for (const f of files) window.nodeFs.rm(f).catch(() => {});
+      this.packedCache.delete(id);
       delete this.manifest.nodes[id];
     }
 
@@ -983,6 +1130,12 @@ export class HistoryManager {
    * Wipe the entire tree and directory. Next call to add* will re-seed from the root.
    */
   async purge(): Promise<void> {
+    // Drop any pending debounced write — the tree is about to be wiped.
+    this.manifestWritePending = false;
+    if (this.manifestWriteTimer != null) {
+      clearTimeout(this.manifestWriteTimer);
+      this.manifestWriteTimer = null;
+    }
     const dir = await this.dir;
     try {
       await window.nodeFs.rm(dir, { recursive: true, force: true });
@@ -991,7 +1144,9 @@ export class HistoryManager {
     }
     this.manifest = null;
     this.currentPacked = null;
+    this.packedCache.clear();
     this.audioLru = [];
+    this.lastLoadedAnchorId = null;
     this.notifyStateChange();
   }
 
@@ -1000,9 +1155,15 @@ export class HistoryManager {
    * on the next launch.
    */
   dispose(): void {
+    // Persist any debounced navigation before dropping in-memory state, so a
+    // quit mid-undo-spree doesn't lose the latest currentId. writeManifest
+    // snapshots the manifest synchronously, so nulling it below is safe.
+    this.flushManifestWrite();
     this.manifest = null;
     this.currentPacked = null;
+    this.packedCache.clear();
     this.audioLru = [];
+    this.lastLoadedAnchorId = null;
     this.listeners.clear();
   }
 }
