@@ -10,12 +10,17 @@ export const Section = ({
   parameterKeys,
   includeEffectOrder,
   rightSlot,
+  fill,
 }: {
   children: React.ReactNode;
   label: string;
   parameterKeys?: ParameterKey[];
   includeEffectOrder?: boolean;
   rightSlot?: React.ReactNode;
+  // When true the section becomes a flex-fill column: it claims the height its
+  // parent gives it and lets a `flex:1, minHeight:0` child body scroll
+  // internally instead of growing the whole container.
+  fill?: boolean;
 }) => {
   const theme = useMantineTheme();
   const sectionCollapsed = useStore((state) => state.sectionCollapsed);
@@ -24,8 +29,8 @@ export const Section = ({
   const isCollapsed = sectionCollapsed[label] ?? false;
 
   return (
-    <Stack gap={2}>
-      <Group gap={4} wrap="nowrap" align="center" h={24}>
+    <Stack gap={2} style={fill ? { flex: 1, minHeight: 0 } : undefined}>
+      <Group gap={4} wrap="nowrap" align="center" h={24} pr={fill ? 8 : undefined}>
         <Group
           gap={4}
           wrap="nowrap"
@@ -56,8 +61,11 @@ export const Section = ({
         {rightSlot}
       </Group>
 
-      <Collapse in={!isCollapsed}>
-        <Stack gap={2} mt={4}>
+      <Collapse
+        in={!isCollapsed}
+        style={fill ? { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" } : undefined}
+      >
+        <Stack gap={2} mt={4} style={fill ? { flex: 1, minHeight: 0 } : undefined}>
           {children}
         </Stack>
       </Collapse>

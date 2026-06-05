@@ -282,19 +282,19 @@ function App(): React.JSX.Element {
         {openFileIds.length === 0 ? (
           <EmptyState />
         ) : (
-          <Box
-            flex={1}
+          <ScrollArea
+            type="auto"
+            scrollbarSize={4}
+            scrollbars="y"
             h="100%"
-            p="xs"
-            style={{
-              minHeight: 0,
-              overflowX: "hidden",
-              overflowY: fullscreenFileId ? "hidden" : "auto",
-            }}
-            onScroll={() => invalidateRef.current?.()}
+            style={{ flex: 1, minHeight: 0 }}
+            viewportProps={{ style: { overflowY: fullscreenFileId ? "hidden" : undefined } }}
+            onScrollPositionChange={() => invalidateRef.current?.()}
           >
-            <CanvasPanel />
-          </Box>
+            <Box p="xs">
+              <CanvasPanel />
+            </Box>
+          </ScrollArea>
         )}
         <PaletteBar />
         <TransportPanel />

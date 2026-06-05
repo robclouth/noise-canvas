@@ -1,6 +1,6 @@
 import { useStore } from "@/store";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
-import { ActionIcon, Box, Group, Menu, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Box, Group, Menu, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { openConfirm, openPrompt } from "@renderer/lib/modals";
 import { EFFECT_COLORS } from "@renderer/lib/constants";
@@ -299,21 +299,25 @@ export function SidebarPanel() {
         style={{
           flex: 1,
           minHeight: 0,
-          padding: 8,
+          paddingTop: 8,
+          paddingBottom: 8,
+          paddingLeft: 8,
+          paddingRight: 0,
           display: "flex",
           flexDirection: "column",
           gap: 8,
         }}
       >
-        {/* Brushes fills remaining vertical space minus the History cap.
-            Its body scrolls internally when the list gets long. */}
+        {/* Brushes fills remaining vertical space minus the History cap. The
+            list body scrolls internally when it gets long; the New brush button
+            stays pinned below it. */}
         <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          <Section label="Brushes">
-            <Box style={{ display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto" }}>
+          <Section label="Brushes" fill>
+            <ScrollArea type="auto" scrollbarSize={4} style={{ flex: 1, minHeight: 0 }}>
               <DragDropContext onDragEnd={handleDragEnd}>
                 <Droppable droppableId="brushes">
                   {(provided) => (
-                    <Stack ref={provided.innerRef} {...provided.droppableProps} gap={2}>
+                    <Stack ref={provided.innerRef} {...provided.droppableProps} gap={2} pr={8}>
                       {brushes.map((brush, index) => (
                         <Draggable key={brush.id} draggableId={brush.id} index={index}>
                           {(draggableProvided, snapshot) => (
@@ -343,16 +347,16 @@ export function SidebarPanel() {
                   )}
                 </Droppable>
               </DragDropContext>
-              <Box mt={4}>
-                <BrushPickerOpenButton />
-              </Box>
+            </ScrollArea>
+            <Box mt={4} pr={8}>
+              <BrushPickerOpenButton />
             </Box>
           </Section>
         </Box>
 
-        {/* History takes whatever's left up to half the container. Inside
-            the Section body we set flex:1 + minHeight:0 so the rows list
-            scrolls internally rather than pushing the container. */}
+        {/* History takes whatever's left up to half the container. Section is in
+            `fill` mode so the rows list scrolls internally rather than pushing
+            the container. */}
         <Box
           style={{
             flex: "0 1 auto",

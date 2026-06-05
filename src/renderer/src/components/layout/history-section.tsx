@@ -1,5 +1,5 @@
 import { useStore } from "@/store";
-import { ActionIcon, Box, Group, Menu, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Box, Group, Menu, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { openConfirm } from "@renderer/lib/modals";
 import { getHistoryManager, type HistoryManager, type HistoryNode } from "@renderer/lib/history-manager";
 import { MoreVertical, Star } from "lucide-react";
@@ -525,14 +525,14 @@ export function HistorySection() {
   );
 
   return (
-    <Section label="History" rightSlot={menu}>
-      <Box style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+    <Section label="History" rightSlot={menu} fill>
+      <ScrollArea type="auto" scrollbarSize={4} style={{ flex: 1, minHeight: 0 }}>
         {!manifest || !layout ? (
-          <Text size="xs" c="dimmed" ta="center" py={8}>
+          <Text size="xs" c="dimmed" ta="center" py={8} pr={8}>
             No history yet.
           </Text>
         ) : (
-          <Stack gap={0}>
+          <Stack gap={0} pr={8}>
             {layout.rows.map((row) => (
               <Box key={row.node.id} ref={row.node.id === manifest.currentId ? currentScrollRef : undefined}>
                 <HistoryRow
@@ -553,7 +553,7 @@ export function HistorySection() {
             ))}
           </Stack>
         )}
-      </Box>
+      </ScrollArea>
     </Section>
   );
 }
