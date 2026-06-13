@@ -11,6 +11,7 @@ import {
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runAnalyzeFramed } from "./analysis-service";
 import { startEditorServer, type EditorServer } from "./server";
 import type { ClipMeta } from "./session";
 
@@ -27,7 +28,9 @@ type Api = ExtensionContext<"1.0.0">;
 // The localhost data plane is shared across every edit; start it once, lazily.
 let serverPromise: Promise<EditorServer> | null = null;
 function getServer(): Promise<EditorServer> {
-  if (!serverPromise) serverPromise = startEditorServer({ webviewDir: WEBVIEW_DIR });
+  if (!serverPromise) {
+    serverPromise = startEditorServer({ webviewDir: WEBVIEW_DIR, analyze: runAnalyzeFramed });
+  }
   return serverPromise;
 }
 

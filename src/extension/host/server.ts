@@ -38,6 +38,10 @@ export interface EditorServerOptions {
   host?: string;
   // Bind port; 0 picks an ephemeral free port (the default).
   port?: number;
+  // Runs native analysis on an on-disk clip path and returns the packed
+  // spectrogram as an encoded binary frame. Injected by the host so the server
+  // stays decoupled from the gaborator/ffmpeg native dependencies.
+  analyze?: (filePath: string, params: { bandsPerOctave: number; minFreq: number }) => Promise<Uint8Array>;
 }
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
@@ -109,6 +113,28 @@ export async function startEditorServer(options: EditorServerOptions): Promise<E
         return sendJson(res, 200, { ok: true });
       }
       return sendJson(res, 405, { error: "method not allowed" });
+    }
+
+    // Native analysis of an on-disk clip path (filePath + ffmpeg + gaborator,
+    // exactly as the Electron app). Stateless, so it is not session-scoped.
+    if (url.pathname === "/analyze" && req.method === "POST") {
+      if (!options.analyze) return sendJson(res, 501, { error: "analysis not available" });
+      const body = await readBody(req);
+      const request = JSON.parse(body.toString("utf8")) as {
+        filePath: string;
+        bandsPerOctave: number;
+        minFreq: number;
+      };
+      const framed = await options.analyze(request.filePath, {
+        bandsPerOctave: request.bandsPerOctave,
+        minFreq: request.minFreq,
+      });
+      res.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-length": framed.byteLength,
+      });
+      res.end(Buffer.from(framed.buffer, framed.byteOffset, framed.byteLength));
+      return;
     }
 
     if (req.method !== "GET") return sendJson(res, 405, { error: "method not allowed" });

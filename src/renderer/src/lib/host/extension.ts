@@ -1,3 +1,4 @@
+import { createExtensionAnalysis } from "./extension-analysis";
 import type { Host, HostPath } from "./types";
 
 // Host implementation for the Ableton extension build. The renderer core runs
@@ -20,6 +21,10 @@ const pending = (capability: string): never => {
       `it will be served by the Node extension host over localhost (Phase 3).`,
   );
 };
+
+// Native analysis (ffmpeg decode + gaborator) runs in the Node host; the webview
+// reaches it over the same-origin localhost server.
+const extensionAnalysis = createExtensionAnalysis();
 
 // Minimal POSIX path implementation. The webview always deals in absolute
 // localhost-served paths, so only join/dirname/basename/extname are needed and
@@ -56,9 +61,7 @@ export const host: Host = {
   get zlib(): Host["zlib"] {
     return pending("zlib");
   },
-  get analysis(): Host["analysis"] {
-    return pending("analysis");
-  },
+  analysis: extensionAnalysis,
   // Ableton Live is the transport clock, so in-app Ableton Link sync is inert:
   // a fully no-op device that always reports disabled. The extension UI hides
   // the Link control, so these are never driven in practice.

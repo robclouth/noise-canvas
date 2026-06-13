@@ -21,6 +21,11 @@ await build({
   target: "node22",
   sourcesContent: false,
   logLevel: "info",
+  // Native/binary deps must resolve at runtime from node_modules: ffmpeg-static
+  // computes its binary path from its own __dirname (broken if inlined), and
+  // onnxruntime-node loads a .node addon. The gaborator addon is a dynamic
+  // require, so esbuild leaves it external automatically.
+  external: ["ffmpeg-static", "onnxruntime-node"],
 });
 
 const manifestPath = join(root, "src/extension/manifest.json");
