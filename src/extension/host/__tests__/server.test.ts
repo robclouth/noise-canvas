@@ -9,6 +9,7 @@ const META: ClipMeta = {
   sourceFilePath: "/Users/test/loop.wav",
   name: "loop",
   startTime: 4,
+  duration: 8,
   isWarped: true,
 };
 

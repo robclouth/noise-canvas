@@ -22,6 +22,8 @@
     "build:ext:webview": "vite build --config vite.extension.config.ts",
     "build:ext:host": "node src/extension/host/build.mjs",
     "build:ext": "npm run build:ext:webview && npm run build:ext:host",
+    "ext:run": "npm run build:ext && cd out-ext && extensions-cli run",
+    "ext:package": "npm run build:ext && cd out-ext && extensions-cli package -i webview -o noise-canvas.ablx",
     "build": "npm run typecheck && electron-vite build",
     "postinstall": "bash scripts/fetch-link.sh && bash scripts/fetch-onnx.sh && electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir --publish=never",
@@ -41,6 +43,7 @@
     "*": "prettier --write --ignore-unknown"
   },
   "dependencies": {
+    "@ableton-extensions/sdk": "file:src/extension/vendor/ableton-extensions-sdk-1.0.0-beta.0.tgz",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "ffmpeg-static": "^5.2.0",
@@ -48,6 +51,7 @@
     "simplex-noise": "^4.0.3"
   },
   "devDependencies": {
+    "@ableton-extensions/cli": "file:src/extension/vendor/ableton-extensions-cli-1.0.0-beta.0.tgz",
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.0.0",
     "@electron-toolkit/tsconfig": "^1.0.1",

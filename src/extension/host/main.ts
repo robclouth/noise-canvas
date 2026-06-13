@@ -1,27 +1,50 @@
-import { initialize, type AudioClip, type AudioTrack, type ExtensionContext } from "@ableton-extensions/sdk";
+import {
+  AudioClip,
+  AudioTrack,
+  DataModelObject,
+  initialize,
+  type ActivationContext,
+  type ClipLoopSettings,
+  type ExtensionContext,
+  type Handle,
+} from "@ableton-extensions/sdk";
 import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startEditorServer, type EditorServer } from "./server";
 import type { ClipMeta } from "./session";
 
-// SDK API version this extension targets; pinned per the distribution plan.
 const API_VERSION = "1.0.0";
+const COMMAND_ID = "noiseCanvas.editAudioClip";
 
-// The webview build is colocated with the host bundle inside the packaged
-// extension: out-ext/host/main.cjs and out-ext/webview/. From the bundle's
-// directory, the webview is one level up and across.
+// The webview build is colocated with this host bundle inside the packaged
+// extension (out-ext/host/main.cjs and out-ext/webview/), so from the bundle's
+// directory the webview is one level up and across.
 const WEBVIEW_DIR = join(__dirname, "..", "webview");
 
-// The localhost data plane is shared across every edit; start it once.
+type Api = ExtensionContext<"1.0.0">;
+
+// The localhost data plane is shared across every edit; start it once, lazily.
 let serverPromise: Promise<EditorServer> | null = null;
 function getServer(): Promise<EditorServer> {
   if (!serverPromise) serverPromise = startEditorServer({ webviewDir: WEBVIEW_DIR });
   return serverPromise;
 }
 
+// Walks up Live's object hierarchy from a clip to its owning audio track, which
+// is where arrangement clips are created and deleted.
+function findAudioTrack(object: DataModelObject<"1.0.0">): AudioTrack<"1.0.0"> | null {
+  let current: DataModelObject<"1.0.0"> | null = object.parent;
+  while (current) {
+    if (current instanceof AudioTrack) return current;
+    current = current.parent;
+  }
+  return null;
+}
+
 // Copies the original clip's <file>.asd warp/analysis sidecar next to the
 // rendered replacement. Because resynthesis preserves sample length, Live keeps
-// the warp markers when createAudioClip reads the co-located sidecar. Missing
+// the warp markers when createAudioClip reads the co-located sidecar. A missing
 // sidecar (un-warped clip) is a no-op.
 async function copyAsdSidecar(originalFilePath: string, replacementFilePath: string): Promise<void> {
   const source = `${originalFilePath}.asd`;
@@ -33,58 +56,98 @@ async function copyAsdSidecar(originalFilePath: string, replacementFilePath: str
   await fs.copyFile(source, `${replacementFilePath}.asd`);
 }
 
-async function editClip(context: ExtensionContext, clip: AudioClip, track: AudioTrack): Promise<void> {
-  const server = await getServer();
+async function editAudioClip(context: Api, clip: AudioClip<"1.0.0">): Promise<void> {
+  const track = findAudioTrack(clip);
+  if (!track) {
+    console.error("Noise Canvas: could not resolve the clip's audio track.");
+    return;
+  }
 
-  const sourceBytes = new Uint8Array(await fs.readFile(clip.filePath));
+  // Capture everything needed to reconstruct the clip before any mutation, since
+  // reading a deleted object throws.
+  const originalName = clip.name;
+  const originalColor = clip.color;
+  const loopSettings: ClipLoopSettings = {
+    looping: clip.looping,
+    startMarker: clip.startMarker,
+    endMarker: clip.endMarker,
+    loopStart: clip.loopStart,
+    loopEnd: clip.loopEnd,
+  };
   const meta: ClipMeta = {
     sourceFilePath: clip.filePath,
-    name: clip.name,
+    name: originalName,
     startTime: clip.startTime,
-    isWarped: clip.isWarped,
+    duration: clip.duration,
+    isWarped: clip.warping,
   };
+
+  const server = await getServer();
+  const sourceBytes = new Uint8Array(await fs.readFile(meta.sourceFilePath));
   const session = server.sessions.create(meta, sourceBytes);
 
-  // The modal loads the webview pointed at this session; the page fetches the
-  // source, lets the user paint, and POSTs the rendered WAV back to the server,
-  // which resolves session.result. showModalDialog's own resolution (the
-  // close_and_send string) just signals the window closed.
+  // showModalDialog supports http://localhost, so the webview loads from the
+  // data plane: it fetches the source over the server, lets the user paint, and
+  // POSTs the rendered WAV back (resolving session.result) before closing.
   const editorUrl = `${server.origin}/?session=${session.id}`;
-  const [, rendered] = await Promise.all([context.ui.showModalDialog(editorUrl, 1280, 800), session.result]).catch(
-    (err: unknown) => {
-      server.sessions.delete(session.id);
-      throw err;
-    },
-  );
+  const dialogClosed = context.ui.showModalDialog(editorUrl, 1280, 800).catch(() => "");
 
-  // Stage the rendered audio to a temp file the SDK can import.
-  const stagedPath = join(context.environment.tempDirectory, `noise-canvas-${session.id}.wav`);
+  let rendered: Uint8Array;
+  try {
+    rendered = await session.result;
+  } catch {
+    // The user dismissed the editor without applying (webview POSTed /cancel, or
+    // the dialog failed to open).
+    server.sessions.delete(session.id);
+    await dialogClosed;
+    return;
+  }
+  await dialogClosed;
+
+  // Stage the rendered audio to a temp file the SDK can import into the project.
+  const tempDir = context.environment.tempDirectory ?? tmpdir();
+  const stagedPath = join(tempDir, `noise-canvas-${session.id}.wav`);
   await fs.writeFile(stagedPath, rendered);
 
-  const managedPath = context.resources.importIntoProject(stagedPath);
-  await copyAsdSidecar(clip.filePath, managedPath);
+  const managedPath = await context.resources.importIntoProject(stagedPath);
+  await copyAsdSidecar(meta.sourceFilePath, managedPath);
 
-  // Replace original with rendered at the same position in one undo step.
-  context.withinTransaction(() => {
-    track.createAudioClip({
-      filePath: managedPath,
-      startTime: clip.startTime,
-      isWarped: clip.isWarped,
-      loopSettings: clip.loopSettings,
-    });
-    track.deleteClip(clip);
-  });
+  // Replace the original with the rendered clip at the same position. The
+  // transaction callback must stay synchronous; returning Promise.all groups the
+  // create and delete into a single undo step. Whether Live tolerates the
+  // concurrent create+delete at the same start time (vs. requiring a sequential
+  // delete-then-create) is the open question the Phase 4 beta spike validates.
+  const [newClip] = await context.withinTransaction(() =>
+    Promise.all([
+      track.createAudioClip({
+        filePath: managedPath,
+        startTime: meta.startTime,
+        duration: meta.duration,
+        isWarped: meta.isWarped,
+        loopSettings,
+      }),
+      track.deleteClip(clip),
+    ]),
+  );
+
+  // Restore identity the imported file doesn't carry.
+  newClip.name = originalName;
+  newClip.color = originalColor;
 
   server.sessions.delete(session.id);
 }
 
-initialize((context) => {
-  context.registerContextMenuAction({
-    scope: "AudioClip",
-    label: "Edit in Noise Canvas",
-    callback: async ({ audioClip, audioTrack }) => {
-      if (!audioClip || !audioTrack) return;
-      await editClip(context, audioClip, audioTrack);
-    },
+export function activate(activation: ActivationContext): void {
+  const context = initialize(activation, API_VERSION);
+
+  // The command callback receives the right-clicked object's Handle as its first
+  // argument; the unknown→Handle cast is the SDK's documented call shape.
+  context.commands.registerCommand(COMMAND_ID, (arg: unknown) => {
+    const clip = context.getObjectFromHandle(arg as Handle, AudioClip);
+    void editAudioClip(context, clip).catch((error: unknown) => {
+      console.error("Noise Canvas: edit failed", error);
+    });
   });
-}, API_VERSION);
+
+  void context.ui.registerContextMenuAction("AudioClip", "Edit in Noise Canvas", COMMAND_ID);
+}

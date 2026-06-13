@@ -1,0 +1,7 @@
+{
+  "name": "Noise Canvas",
+  "author": "Rob Clouth",
+  "entry": "host/main.cjs",
+  "version": "0.1.0",
+  "minimumApiVersion": "1.0.0"
+}

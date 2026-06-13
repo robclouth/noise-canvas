@@ -11,6 +11,9 @@ export interface ClipMeta {
   name: string;
   // Arrangement start time in beats, used to place the replacement clip.
   startTime: number;
+  // Clip length in beats; the replacement is created at the same duration so
+  // warp markers stay valid.
+  duration: number;
   // Whether the original clip is warped; drives the .asd sidecar round-trip.
   isWarped: boolean;
 }

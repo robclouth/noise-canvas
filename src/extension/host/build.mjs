@@ -1,22 +1,26 @@
 import { build } from "esbuild";
+import { copyFile, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
-// Bundles the Node extension host (the SDK-facing glue + localhost data plane)
-// into a single CommonJS file Ableton's embedded Node runtime loads. The webview
-// is built separately by vite.extension.config.ts; both land under out-ext/.
+// Assembles the loadable extension under out-ext/: the manifest, the bundled
+// Node host (this step), and the webview (built separately by
+// vite.extension.config.ts). Live installs the out-ext/ directory; manifest.entry
+// ("host/main.cjs") is resolved relative to it.
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const outDir = join(root, "out-ext");
+
+await mkdir(join(outDir, "host"), { recursive: true });
 
 await build({
-  entryPoints: [resolve(root, "src/extension/host/main.ts")],
-  outfile: resolve(root, "out-ext/host/main.cjs"),
+  entryPoints: [join(root, "src/extension/host/main.ts")],
+  outfile: join(outDir, "host/main.cjs"),
   bundle: true,
   platform: "node",
   format: "cjs",
   target: "node22",
-  // The SDK is supplied by the host runtime, not bundled (and is an off-registry
-  // beta that may be absent at build time). Leaving it external resolves it at
-  // load time inside Live.
-  external: ["@ableton-extensions/sdk"],
+  sourcesContent: false,
   logLevel: "info",
 });
+
+await copyFile(join(root, "src/extension/manifest.json"), join(outDir, "manifest.json"));

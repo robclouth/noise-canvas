@@ -10,4 +10,7 @@ bin
 .env
 test-results
 vendor/
+# The Ableton Extensions SDK/CLI are an off-registry beta installed as file:
+# dependencies, so their tarballs must be tracked despite the broad vendor/ rule.
+!src/extension/vendor/
 *.tsbuildinfo
