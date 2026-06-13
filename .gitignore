@@ -1,6 +1,7 @@
 node_modules
 dist
 out
+out-ext
 build
 bin
 .DS_Store

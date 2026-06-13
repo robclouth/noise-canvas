@@ -17,6 +17,8 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
+    "dev:ext": "vite --config vite.extension.config.ts",
+    "build:ext": "vite build --config vite.extension.config.ts",
     "build": "npm run typecheck && electron-vite build",
     "postinstall": "bash scripts/fetch-link.sh && bash scripts/fetch-onnx.sh && electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir --publish=never",
