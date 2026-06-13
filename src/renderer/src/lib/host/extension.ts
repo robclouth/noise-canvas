@@ -1,4 +1,13 @@
 import { createExtensionAnalysis } from "./extension-analysis";
+import {
+  extensionFs,
+  extensionOs,
+  extensionZlib,
+  getBootstrapOrNull,
+  getUserDataPath,
+  showDirectoryDialog,
+  showSaveDialog,
+} from "./extension-rpc";
 import type { Host, HostPath } from "./types";
 
 // Host implementation for the Ableton extension build. The renderer core runs
@@ -51,16 +60,10 @@ const browserPath: HostPath = {
 };
 
 export const host: Host = {
-  get fs(): Host["fs"] {
-    return pending("fs");
-  },
+  fs: extensionFs,
   path: browserPath,
-  get os(): Host["os"] {
-    return pending("os");
-  },
-  get zlib(): Host["zlib"] {
-    return pending("zlib");
-  },
+  os: extensionOs,
+  zlib: extensionZlib,
   analysis: extensionAnalysis,
   // Ableton Live is the transport clock, so in-app Ableton Link sync is inert:
   // a fully no-op device that always reports disabled. The extension UI hides
@@ -87,26 +90,29 @@ export const host: Host = {
   },
   env: {
     get platform() {
-      // The webview reports the host OS via the userAgent.
+      // Prefer the real host platform from the bootstrap; fall back to userAgent
+      // sniffing if read before the bootstrap loads.
+      const boot = getBootstrapOrNull();
+      if (boot) return boot.platform;
       return navigator.userAgent.includes("Win") ? "win32" : navigator.userAgent.includes("Mac") ? "darwin" : "linux";
     },
     get nodeEnv() {
       return import.meta.env.MODE;
     },
     get resourcesPath() {
-      return "/";
+      return getBootstrapOrNull()?.resourcesPath ?? "/";
     },
     cwd() {
-      return "/";
+      return getBootstrapOrNull()?.cwd ?? "/";
     },
     getEnv() {
       return undefined;
     },
   },
   dialogs: {
-    getUserDataPath: () => pending("dialogs.getUserDataPath"),
-    showSaveDialog: () => pending("dialogs.showSaveDialog"),
-    showDirectoryDialog: () => pending("dialogs.showDirectoryDialog"),
+    getUserDataPath,
+    showSaveDialog,
+    showDirectoryDialog,
   },
   files: {
     getPathForFile: () => pending("files.getPathForFile"),

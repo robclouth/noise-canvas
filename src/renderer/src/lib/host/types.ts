@@ -68,6 +68,50 @@ export interface HostPath {
   extname(p: string): string;
 }
 
+/** A directory entry, the subset of Node's `Dirent` the core reads. */
+export interface HostDirent {
+  readonly name: string;
+  isDirectory(): boolean;
+  isFile(): boolean;
+}
+
+/** File stats, the subset of Node's `Stats` the core reads. */
+export interface HostStats {
+  readonly size: number;
+  isDirectory(): boolean;
+  isFile(): boolean;
+}
+
+/**
+ * The `fs/promises` operations the renderer core uses. Node's `fs/promises` is
+ * structurally assignable to this, so the Electron host supplies it directly; a
+ * non-Node host implements just these members (e.g. over a localhost RPC).
+ */
+export interface HostFs {
+  readFile(path: string): Promise<Uint8Array>;
+  readFile(path: string, encoding: "utf-8" | "utf8"): Promise<string>;
+  readFile(path: string, options: { encoding: "utf-8" | "utf8" }): Promise<string>;
+  writeFile(path: string, data: string | Uint8Array, encoding?: "utf-8" | "utf8"): Promise<void>;
+  readdir(path: string): Promise<string[]>;
+  readdir(path: string, options: { withFileTypes: true }): Promise<HostDirent[]>;
+  mkdir(path: string, options: { recursive: true }): Promise<string | undefined>;
+  rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
+  unlink(path: string): Promise<void>;
+  stat(path: string): Promise<HostStats>;
+  access(path: string): Promise<void>;
+}
+
+/** The single `os` member the core uses. */
+export interface HostOs {
+  homedir(): string;
+}
+
+/** The Zstandard helpers the core uses, keeping Node's callback signatures. */
+export interface HostZlib {
+  zstdCompress(buffer: Uint8Array, callback: (error: Error | null, result: Uint8Array) => void): void;
+  zstdDecompress(buffer: Uint8Array, callback: (error: Error | null, result: Uint8Array) => void): void;
+}
+
 /**
  * The capabilities the renderer core needs from its host environment.
  *
@@ -77,10 +121,10 @@ export interface HostPath {
  * the old `window.*` access is a mechanical rename with no type drift.
  */
 export interface Host {
-  readonly fs: Window["nodeFs"];
+  readonly fs: HostFs;
   readonly path: HostPath;
-  readonly os: Window["nodeOs"];
-  readonly zlib: Window["nodeZlib"];
+  readonly os: HostOs;
+  readonly zlib: HostZlib;
   readonly analysis: Window["audioAnalysis"];
   readonly link: Window["linkAddon"];
   readonly updater: Window["updater"];

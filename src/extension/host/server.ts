@@ -5,6 +5,8 @@ import { extname, join, normalize, sep } from "node:path";
 // Live's embedded Node host does not expose the WHATWG URL global, so import it
 // explicitly rather than relying on globalThis.URL.
 import { URL } from "node:url";
+import type { HostServices } from "./host-services";
+import { decodeRpcRequest, encodeRpcResponse } from "../shared/rpc-protocol";
 import { SessionStore } from "./session";
 
 // data: URLs don't scale to multi-megabyte audio and Live's modal dialog is a
@@ -42,6 +44,16 @@ export interface EditorServerOptions {
   // spectrogram as an encoded binary frame. Injected by the host so the server
   // stays decoupled from the gaborator/ffmpeg native dependencies.
   analyze?: (filePath: string, params: { bandsPerOctave: number; minFreq: number }) => Promise<Uint8Array>;
+  // Node-side fs/os/zlib/dialogs the renderer core reaches over the RPC envelope.
+  hostServices?: HostServices;
+}
+
+// Buffer's backing ArrayBuffer may be a shared pool slice; copy out the exact
+// bytes into a fresh ArrayBuffer for the protocol decoders.
+function toArrayBuffer(buffer: Buffer): ArrayBuffer {
+  const copy = new Uint8Array(buffer.byteLength);
+  copy.set(buffer);
+  return copy.buffer;
 }
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
@@ -135,6 +147,29 @@ export async function startEditorServer(options: EditorServerOptions): Promise<E
       });
       res.end(Buffer.from(framed.buffer, framed.byteOffset, framed.byteLength));
       return;
+    }
+
+    // Host-services RPC (fs / os / zlib / dialogs) for the renderer core.
+    if (url.pathname === "/rpc" && req.method === "POST") {
+      if (!options.hostServices) return sendJson(res, 501, { error: "host services unavailable" });
+      const { request, binary } = decodeRpcRequest(toArrayBuffer(await readBody(req)));
+      let response: Uint8Array;
+      try {
+        const result = await options.hostServices.dispatch(request, binary);
+        response = encodeRpcResponse({ ok: true, json: result.json, hasBinary: !!result.binary }, result.binary);
+      } catch (error) {
+        response = encodeRpcResponse({ ok: false, error: String(error), hasBinary: false });
+      }
+      res.writeHead(200, { "content-type": "application/octet-stream", "content-length": response.byteLength });
+      res.end(Buffer.from(response.buffer, response.byteOffset, response.byteLength));
+      return;
+    }
+
+    // Synchronous host facts (homedir, platform, user-data path) the webview
+    // caches before mounting the app, so sync accessors like os.homedir() work.
+    if (url.pathname === "/host/bootstrap" && req.method === "GET") {
+      if (!options.hostServices) return sendJson(res, 501, { error: "host services unavailable" });
+      return sendJson(res, 200, options.hostServices.bootstrap());
     }
 
     if (req.method !== "GET") return sendJson(res, 405, { error: "method not allowed" });

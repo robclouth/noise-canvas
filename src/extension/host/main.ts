@@ -12,6 +12,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAnalyzeFramed } from "./analysis-service";
+import { createHostServices } from "./host-services";
 import { startEditorServer, type EditorServer } from "./server";
 import type { ClipMeta } from "./session";
 
@@ -27,9 +28,15 @@ type Api = ExtensionContext<"1.0.0">;
 
 // The localhost data plane is shared across every edit; start it once, lazily.
 let serverPromise: Promise<EditorServer> | null = null;
-function getServer(): Promise<EditorServer> {
+function getServer(context: Api): Promise<EditorServer> {
   if (!serverPromise) {
-    serverPromise = startEditorServer({ webviewDir: WEBVIEW_DIR, analyze: runAnalyzeFramed });
+    const userDataPath = context.environment.storageDirectory ?? tmpdir();
+    const hostServices = createHostServices({ userDataPath });
+    serverPromise = startEditorServer({
+      webviewDir: WEBVIEW_DIR,
+      analyze: runAnalyzeFramed,
+      hostServices,
+    });
   }
   return serverPromise;
 }
@@ -85,7 +92,7 @@ async function editAudioClip(context: Api, clip: AudioClip<"1.0.0">): Promise<vo
     isWarped: clip.warping,
   };
 
-  const server = await getServer();
+  const server = await getServer(context);
   const sourceBytes = new Uint8Array(await fs.readFile(meta.sourceFilePath));
   const session = server.sessions.create(meta, sourceBytes);
 
