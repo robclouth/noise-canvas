@@ -2,6 +2,7 @@ import { useStore } from "@/store";
 import { openFiles } from "@/store/files";
 import * as Tone from "tone";
 import { useEffect, useRef } from "react";
+import { host } from "./host";
 
 function getActiveFileBpm(): number {
   const state = useStore.getState();
@@ -29,14 +30,14 @@ function syncToLink(): void {
     state;
 
   if (!player || !isPlaying || !activeFileId || !linkEnabled) return;
-  if (!window.linkAddon?.isEnabled?.()) return;
+  if (!host.link?.isEnabled?.()) return;
 
   const file = activeFileId ? openFiles[activeFileId] : undefined;
   const buffer = file?.audioBuffer;
   if (!buffer || !file) return;
 
   const fileBpm = filepathsBpm[file.filePath] ?? 120;
-  const linkState = window.linkAddon.captureState(linkQuantum);
+  const linkState = host.link.captureState(linkQuantum);
   const rate = linkState.tempo / fileBpm;
   player.playbackRate = rate;
 
@@ -92,15 +93,15 @@ export function useLinkSync(): void {
       return;
     }
 
-    if (!window.linkAddon) {
+    if (!host.link) {
       console.error("Link addon not available");
       useStore.getState().setLinkEnabled(false);
       return;
     }
 
     try {
-      window.linkAddon.create(getActiveFileBpm());
-      window.linkAddon.setCallbacks({
+      host.link.create(getActiveFileBpm());
+      host.link.setCallbacks({
         onTempoChanged: (tempo: number) => {
           const state = useStore.getState();
           state.onLinkTempoChanged(tempo);
@@ -126,11 +127,11 @@ export function useLinkSync(): void {
           useStore.getState().onLinkNumPeersChanged(numPeers);
         },
       });
-      window.linkAddon.enable();
-      window.linkAddon.enableStartStopSync(true);
+      host.link.enable();
+      host.link.enableStartStopSync(true);
 
       const quantum = useStore.getState().linkQuantum;
-      const initialState = window.linkAddon.captureState(quantum);
+      const initialState = host.link.captureState(quantum);
       useStore.getState().onLinkTempoChanged(initialState.tempo);
       useStore.getState().onLinkNumPeersChanged(initialState.numPeers);
       useStore.getState().onLinkStartStopChanged(initialState.isPlaying);
@@ -148,8 +149,8 @@ export function useLinkSync(): void {
 
     return () => {
       try {
-        window.linkAddon.disable();
-        window.linkAddon.destroy();
+        host.link.disable();
+        host.link.destroy();
       } catch (err) {
         console.error("Failed to teardown Ableton Link:", err);
       }
@@ -192,7 +193,7 @@ export function useLinkSync(): void {
         const linkIsPlaying = useStore.getState().linkIsPlaying;
         if (isPlaying !== linkIsPlaying) {
           localTransportChangeRef.current = true;
-          window.linkAddon.setIsPlaying(isPlaying);
+          host.link.setIsPlaying(isPlaying);
         }
       },
     );
@@ -216,7 +217,7 @@ export function useLinkSync(): void {
       }
 
       const quantum = useStore.getState().linkQuantum;
-      const state = window.linkAddon.captureState(quantum);
+      const state = host.link.captureState(quantum);
       const beatInt = Math.floor(state.beat);
 
       if (beatInt !== lastBeatInt && lastBeatInt !== -1) {

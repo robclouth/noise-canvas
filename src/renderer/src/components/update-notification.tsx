@@ -1,6 +1,7 @@
 import { Button, Group, Modal, Progress, Stack, Text, Title } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useState } from "react";
+import { host } from "../lib/host";
 import { ipcOn } from "../lib/ipc";
 
 interface UpdateInfo {
@@ -115,7 +116,7 @@ export function UpdateNotification() {
     });
 
     try {
-      await window.updater.downloadUpdate();
+      await host.updater.downloadUpdate();
     } catch (error) {
       console.error("Failed to download update:", error);
       setIsDownloading(false);
@@ -124,7 +125,7 @@ export function UpdateNotification() {
   };
 
   const handleInstallUpdate = () => {
-    window.updater.quitAndInstall();
+    host.updater.quitAndInstall();
   };
 
   const formatReleaseNotes = (notes: string | string[] | undefined) => {

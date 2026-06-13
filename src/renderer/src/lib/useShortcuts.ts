@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useStore } from "../store";
+import { host } from "./host";
 
 const isTextEntry = (t: HTMLElement | null): boolean => {
   if (!t) return false;
@@ -67,7 +68,7 @@ export function useShortcuts() {
     }
 
     // Platform-specific Zoom Modifier (Meta on Mac, Control on Windows/Linux)
-    const isMac = window.platform === "darwin";
+    const isMac = host.env.platform === "darwin";
     const zoomKey = isMac ? "Meta" : "Control";
 
     if (event.key === zoomKey) {
@@ -166,7 +167,7 @@ export function useShortcuts() {
     }
 
     // Platform-specific Zoom Reset
-    const isMac = window.platform === "darwin";
+    const isMac = host.env.platform === "darwin";
     const zoomKey = isMac ? "Meta" : "Control";
     if (event.key === zoomKey) {
       useStore.getState().setIsZooming(false);

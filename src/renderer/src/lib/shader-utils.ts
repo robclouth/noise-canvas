@@ -2,7 +2,9 @@
 // Nested modulation (modulating modulator parameters) is disabled on Windows
 // due to shader compilation performance issues with unrolled loops
 
-const isWindows = typeof window !== "undefined" && window.platform === "win32";
+import { host } from "./host";
+
+const isWindows = typeof window !== "undefined" && host.env.platform === "win32";
 
 /**
  * Prepends platform-specific defines to a shader source string.

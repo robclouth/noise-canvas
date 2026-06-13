@@ -1,4 +1,5 @@
 import * as Tone from "tone";
+import { host } from "../lib/host";
 import { openFiles } from "./files";
 import type { LoopRegion, PlayerClock, ZustandGet, ZustandSet } from "./types";
 
@@ -235,7 +236,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
     // When Link is enabled and active, phase-align and adjust playback rate
     const { linkEnabled, linkTempo, linkQuantum, filepathsBpm, linkLatencyMs } = get();
-    const linkActive = linkEnabled && typeof window !== "undefined" && window.linkAddon?.isEnabled?.();
+    const linkActive = linkEnabled && typeof window !== "undefined" && host.link?.isEnabled?.();
 
     if (linkActive) {
       const fileBpm = filepathsBpm[file.filePath] ?? 120;
@@ -251,7 +252,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
       try {
         const ctx = Tone.getContext().rawContext;
-        const linkState = window.linkAddon.captureState(linkQuantum);
+        const linkState = host.link.captureState(linkQuantum);
         const actualTempo = linkState.tempo;
         const rate = actualTempo / fileBpm;
         player.playbackRate = rate;

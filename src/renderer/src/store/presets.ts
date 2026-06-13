@@ -9,6 +9,7 @@ import {
   PresetType,
   validatePreset,
 } from "@renderer/lib/preset-schema";
+import { host } from "@renderer/lib/host";
 import { BrushStep, createDefaultStep } from "@renderer/parameters";
 import { produce } from "immer";
 import { factoryPresets } from "../lib/factory-presets";
@@ -138,14 +139,14 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     try {
       const { presetsDir } = await getFolders();
 
-      const files = await window.nodeFs.readdir(presetsDir!);
+      const files = await host.fs.readdir(presetsDir!);
       const userPresets: PresetType[] = [];
 
       for (const file of files) {
         if (file.endsWith(".json")) {
           try {
-            const filePath = window.nodePath.join(presetsDir!, file);
-            const fileContent = await window.nodeFs.readFile(filePath, "utf-8");
+            const filePath = host.path.join(presetsDir!, file);
+            const fileContent = await host.fs.readFile(filePath, "utf-8");
             const rawPreset = JSON.parse(fileContent);
 
             const validationResult = validatePreset(rawPreset);
@@ -402,8 +403,8 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       }
 
       const fileName = `${updated.id}.json`;
-      const filePath = window.nodePath.join(state.presetsDir!, fileName);
-      await window.nodeFs.writeFile(filePath, JSON.stringify(updated, null, 2), "utf-8");
+      const filePath = host.path.join(state.presetsDir!, fileName);
+      await host.fs.writeFile(filePath, JSON.stringify(updated, null, 2), "utf-8");
 
       set(
         produce((draft: State) => {
@@ -451,8 +452,8 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       }
 
       const fileName = `${id}.json`;
-      const filePath = window.nodePath.join(state.presetsDir!, fileName);
-      await window.nodeFs.writeFile(filePath, JSON.stringify(preset, null, 2), "utf-8");
+      const filePath = host.path.join(state.presetsDir!, fileName);
+      await host.fs.writeFile(filePath, JSON.stringify(preset, null, 2), "utf-8");
 
       set(
         produce((draft: State) => {
@@ -495,8 +496,8 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       }
 
       const fileName = `${presetId}.json`;
-      const filePath = window.nodePath.join(presetsDir!, fileName);
-      await window.nodeFs.unlink(filePath);
+      const filePath = host.path.join(presetsDir!, fileName);
+      await host.fs.unlink(filePath);
 
       set(
         produce((draft: State) => {
@@ -530,8 +531,8 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
 
     try {
       const fileName = `${preset.id}.json`;
-      const filePath = window.nodePath.join(state.presetsDir!, fileName);
-      await window.nodeFs.writeFile(filePath, JSON.stringify(updated, null, 2), "utf-8");
+      const filePath = host.path.join(state.presetsDir!, fileName);
+      await host.fs.writeFile(filePath, JSON.stringify(updated, null, 2), "utf-8");
 
       set(
         produce((draft: State) => {

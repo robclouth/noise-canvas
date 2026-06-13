@@ -11,6 +11,7 @@ import { EmptyState } from "./components/empty-state";
 import { CanvasPanel, PaletteBar } from "./components/layout/canvas-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
+import { host } from "./lib/host";
 import { ipcOn, ipcSend } from "./lib/ipc";
 import { precompileAllShaders } from "./lib/precompile-shaders";
 import { clearAllHistoryManagers, getHistoryManager, pruneOrphanHistoryDirs } from "./lib/history-manager";
@@ -66,7 +67,7 @@ function App(): React.JSX.Element {
     const unsubscribers: (() => void)[] = [];
 
     // Development file loading
-    if (process.env.NODE_ENV === "development") {
+    if (host.env.nodeEnv === "development") {
       const { openFilePath, openFileIds } = useStore.getState();
       if (openFileIds.length === 0) {
         openFilePath(
@@ -79,7 +80,7 @@ function App(): React.JSX.Element {
         // openFilePath(
         //   "/Users/rob/Splice/sounds/packs/The Jungle Drummer - Breakbeat Culture/Test_Press_-_The_Jungle_Drummer_-_Breakbeat_Culture/Loops/Layered_Breaks/TSP_TJD_172_break_layered_2snare_junglism.wav",
         // );
-        openFilePath(process.cwd() + "/test-audio/tone-440hz-5s.wav");
+        openFilePath(host.env.cwd() + "/test-audio/tone-440hz-5s.wav");
       }
     }
 
@@ -215,7 +216,7 @@ function App(): React.JSX.Element {
     if (acceptedFiles.length === 0) {
       return;
     }
-    const filePath = window.electron.webUtils.getPathForFile(acceptedFiles[0]);
+    const filePath = host.files.getPathForFile(acceptedFiles[0]);
     useStore.getState().openFilePath(filePath);
   }, []);
 

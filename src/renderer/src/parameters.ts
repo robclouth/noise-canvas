@@ -23,6 +23,7 @@ import {
   SYNTHESIZE_TYPES,
   WRAP_MODES,
 } from "./lib/constants";
+import { host } from "./lib/host";
 import { BrushColor, ParameterKey } from "./store/types";
 
 // --- Base Interfaces ---
@@ -109,7 +110,7 @@ const semitoneMarksWithOff = [{ value: 0, label: "Off" }, ...PITCH_VALUES];
 // --- Modulator Definitions ---
 // Nested modulation (modulating modulator parameters) is disabled on Windows
 // due to shader compilation performance issues with unrolled loops
-const isWindows = typeof window !== "undefined" && window.platform === "win32";
+const isWindows = typeof window !== "undefined" && host.env.platform === "win32";
 const modulatorDefs: Record<string, ParameterDefInput> = {};
 for (let i = 0; i < NUM_MODULATORS; i++) {
   const idx = i + 1;
