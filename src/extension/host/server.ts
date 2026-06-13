@@ -2,6 +2,9 @@ import { createReadStream, promises as fs } from "node:fs";
 import { createServer, IncomingMessage, ServerResponse, Server } from "node:http";
 import { AddressInfo } from "node:net";
 import { extname, join, normalize, sep } from "node:path";
+// Live's embedded Node host does not expose the WHATWG URL global, so import it
+// explicitly rather than relying on globalThis.URL.
+import { URL } from "node:url";
 import { SessionStore } from "./session";
 
 // data: URLs don't scale to multi-megabyte audio and Live's modal dialog is a

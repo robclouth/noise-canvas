@@ -42,8 +42,9 @@ echo "[run-extension] Host module:   $host_module"
 echo "[run-extension] Building extension…"
 npm run build:ext
 
-# The Extension Host connects to a running Live instance. Launch Live if needed
-# and wait for the process to appear.
+# The Extension Host's greeting only lands once Live is fully up; if Live is
+# still booting when the host starts, the connection silently never happens.
+# Launch Live if needed and give it a warm-up window before starting the host.
 if ! pgrep -f "$live_app/Contents/MacOS" >/dev/null 2>&1; then
   echo "[run-extension] Live isn't running — launching it…"
   open -a "$live_app"
@@ -51,6 +52,10 @@ if ! pgrep -f "$live_app/Contents/MacOS" >/dev/null 2>&1; then
     pgrep -f "$live_app/Contents/MacOS" >/dev/null 2>&1 && break
     sleep 1
   done
+  echo "[run-extension] Waiting for Live to finish loading…"
+  sleep 20
+  echo "[run-extension] If \"Edit in Noise Canvas\" doesn't appear, just re-run"
+  echo "[run-extension] 'npm run ext:run' now that Live is warm."
 fi
 
 cat <<EOF

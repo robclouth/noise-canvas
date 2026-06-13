@@ -138,6 +138,7 @@ async function editAudioClip(context: Api, clip: AudioClip<"1.0.0">): Promise<vo
 }
 
 export function activate(activation: ActivationContext): void {
+  console.log("Noise Canvas: activate() called");
   const context = initialize(activation, API_VERSION);
 
   // The command callback receives the right-clicked object's Handle as its first
@@ -148,6 +149,10 @@ export function activate(activation: ActivationContext): void {
       console.error("Noise Canvas: edit failed", error);
     });
   });
+  console.log(`Noise Canvas: registered command ${COMMAND_ID}`);
 
-  void context.ui.registerContextMenuAction("AudioClip", "Edit in Noise Canvas", COMMAND_ID);
+  context.ui.registerContextMenuAction("AudioClip", "Edit in Noise Canvas", COMMAND_ID).then(
+    () => console.log('Noise Canvas: registered "Edit in Noise Canvas" on AudioClip'),
+    (error: unknown) => console.error("Noise Canvas: context-menu registration failed", error),
+  );
 }
