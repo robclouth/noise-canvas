@@ -56,6 +56,19 @@ export interface HostFiles {
 }
 
 /**
+ * The path operations the renderer core uses. A subset of Node's `path` module
+ * (the only members the core touches) so a non-Node host can supply a small
+ * browser implementation without claiming the whole module surface. Node's
+ * `path` is structurally assignable to this.
+ */
+export interface HostPath {
+  join(...parts: string[]): string;
+  dirname(p: string): string;
+  basename(p: string, ext?: string): string;
+  extname(p: string): string;
+}
+
+/**
  * The capabilities the renderer core needs from its host environment.
  *
  * `fs`/`path`/`os`/`zlib`/`analysis`/`link`/`updater` mirror the Node stdlib
@@ -65,7 +78,7 @@ export interface HostFiles {
  */
 export interface Host {
   readonly fs: Window["nodeFs"];
-  readonly path: Window["nodePath"];
+  readonly path: HostPath;
   readonly os: Window["nodeOs"];
   readonly zlib: Window["nodeZlib"];
   readonly analysis: Window["audioAnalysis"];

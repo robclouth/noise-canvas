@@ -4,7 +4,10 @@ import type { Host } from "./types";
 // `window.*` lazily (via getters / per-call closures) rather than capturing a
 // reference at module load — this matches how the renderer accessed the bridges
 // before, and is required for tests that attach `window.*` stubs after import.
-export const electronHost: Host = {
+//
+// Selected by the `@host-impl` build alias for the Electron app build (and for
+// tests / typecheck); the extension build maps `@host-impl` to extension.ts.
+export const host: Host = {
   get fs() {
     return window.nodeFs;
   },

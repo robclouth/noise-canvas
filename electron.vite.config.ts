@@ -26,6 +26,10 @@ export default defineConfig({
       alias: {
         "@renderer": resolve("src/renderer/src"),
         "@": resolve("src/renderer/src"),
+        // The Electron app uses the Electron-backed host implementation. The
+        // Ableton extension build (vite.extension.config.ts) maps this alias
+        // to host/extension.ts instead, so no core file changes between builds.
+        "@host-impl": resolve("src/renderer/src/lib/host/electron.ts"),
       },
     },
     plugins: [

@@ -17,6 +17,9 @@
       ],
       "@/*": [
         "src/renderer/src/*"
+      ],
+      "@host-impl": [
+        "src/renderer/src/lib/host/electron.ts"
       ]
     },
     "types": [

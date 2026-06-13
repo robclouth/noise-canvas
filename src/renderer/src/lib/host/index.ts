@@ -1,10 +1,10 @@
 // The host singleton the renderer core imports to reach its environment.
 //
-// Phase 1 binds the Electron implementation directly. When the Ableton
-// extension build lands, this single line becomes the swap point: select the
-// implementation via a build-time `@host-impl` alias (electron.ts vs a future
-// extension.ts) so no core file needs to change.
-export { electronHost as host } from "./electron";
+// The concrete implementation is selected at build time by the `@host-impl`
+// alias: the Electron app build (and tests / typecheck) resolve it to
+// electron.ts; the Ableton extension build resolves it to extension.ts. No
+// core file imports a specific implementation directly.
+export { host } from "@host-impl";
 export type {
   Host,
   HostEnv,
