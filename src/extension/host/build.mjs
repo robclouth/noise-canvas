@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
@@ -23,4 +23,17 @@ await build({
   logLevel: "info",
 });
 
-await copyFile(join(root, "src/extension/manifest.json"), join(outDir, "manifest.json"));
+const manifestPath = join(root, "src/extension/manifest.json");
+const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+await copyFile(manifestPath, join(outDir, "manifest.json"));
+
+// extensions-cli `run` requires a package.json in the extension directory; the
+// host itself loads via manifest.entry. main mirrors that entry so the dir reads
+// as a normal Node package.
+const pkg = {
+  name: "noise-canvas-extension",
+  version: manifest.version,
+  private: true,
+  main: manifest.entry,
+};
+await writeFile(join(outDir, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
