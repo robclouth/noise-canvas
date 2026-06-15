@@ -11,7 +11,7 @@ import {
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runAnalyzeFramed } from "./analysis-service";
+import { runAnalyzeFramed, runSynthesizeFramed } from "./analysis-service";
 import { createHostServices } from "./host-services";
 import { startEditorServer, type EditorServer } from "./server";
 import type { ClipMeta } from "./session";
@@ -35,6 +35,7 @@ function getServer(context: Api): Promise<EditorServer> {
     serverPromise = startEditorServer({
       webviewDir: WEBVIEW_DIR,
       analyze: runAnalyzeFramed,
+      synthesize: runSynthesizeFramed,
       hostServices,
     });
   }

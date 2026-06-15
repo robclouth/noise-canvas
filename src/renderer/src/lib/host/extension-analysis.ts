@@ -1,4 +1,4 @@
-import { decodeFrame, type NumericArray } from "../../../../extension/shared/analysis-protocol";
+import { decodeFrame, encodeFrame, type NumericArray } from "../../../../extension/shared/analysis-protocol";
 import type { Host } from "./types";
 
 // Webview side of the analysis transport. The page is served by the extension's
@@ -55,11 +55,61 @@ async function analyze(filePath: string, params: { bandsPerOctave: number; minFr
   };
 }
 
+type SynthesizeFn = AnalysisApi["synthesize"];
+type SynthesisResult = Awaited<ReturnType<SynthesizeFn>>;
+type AnalysisMetadata = Parameters<SynthesizeFn>[1];
+
+const synthesize: SynthesizeFn = async (
+  processedData,
+  analysisMetadata: AnalysisMetadata,
+  sampleRate,
+  params,
+  normalize,
+  existingAudio,
+  startFrame,
+  endFrame,
+  startBand,
+  endBand,
+): Promise<SynthesisResult> => {
+  const arrays: Record<string, NumericArray> = {
+    processedData,
+    bandOffsets: analysisMetadata.bandOffsets,
+    bandStepLog2s: analysisMetadata.bandStepLog2s,
+    bandLengths: analysisMetadata.bandLengths,
+  };
+  (existingAudio ?? []).forEach((channel, i) => (arrays[`existing${i}`] = channel));
+
+  const meta: Record<string, number> = {
+    numFrames: analysisMetadata.numFrames,
+    numChannels: analysisMetadata.numChannels,
+    numBands: analysisMetadata.numBands,
+    sampleRate,
+    bandsPerOctave: params.bandsPerOctave,
+    minFreq: params.minFreq,
+    normalize: normalize ? 1 : 0,
+    existingChannelCount: existingAudio?.length ?? 0,
+  };
+  if (startFrame !== undefined) meta.startFrame = startFrame;
+  if (endFrame !== undefined) meta.endFrame = endFrame;
+  if (startBand !== undefined) meta.startBand = startBand;
+  if (endBand !== undefined) meta.endBand = endBand;
+
+  const response = await fetch("/synthesize", { method: "POST", body: encodeFrame({ meta, arrays }) });
+  if (!response.ok) {
+    throw new Error(`synthesis request failed (${response.status}): ${await response.text()}`);
+  }
+  const { meta: outMeta, arrays: outArrays } = decodeFrame(await response.arrayBuffer());
+  const numChannels = Number(outMeta.numChannels);
+  const channels: Float32Array[] = [];
+  for (let i = 0; i < numChannels; i++) channels.push(f32(outArrays[`channel${i}`], `channel${i}`));
+  return { channels, peak: Number(outMeta.peak) };
+};
+
 export function createExtensionAnalysis(): AnalysisApi {
   return {
     analyze,
     analyseBuffer: () => notImplemented("analyseBuffer"),
-    synthesize: () => notImplemented("synthesize"),
+    synthesize,
     isModelDownloaded: () => notImplemented("isModelDownloaded"),
     downloadModel: () => notImplemented("downloadModel"),
     aiSeparate: () => notImplemented("aiSeparate"),

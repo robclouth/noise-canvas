@@ -44,6 +44,8 @@ export interface EditorServerOptions {
   // spectrogram as an encoded binary frame. Injected by the host so the server
   // stays decoupled from the gaborator/ffmpeg native dependencies.
   analyze?: (filePath: string, params: { bandsPerOctave: number; minFreq: number }) => Promise<Uint8Array>;
+  // Synthesises audio from a painted spectrogram frame; returns a PCM frame.
+  synthesize?: (request: ArrayBuffer) => Promise<Uint8Array>;
   // Node-side fs/os/zlib/dialogs the renderer core reaches over the RPC envelope.
   hostServices?: HostServices;
 }
@@ -145,6 +147,15 @@ export async function startEditorServer(options: EditorServerOptions): Promise<E
         "content-type": "application/octet-stream",
         "content-length": framed.byteLength,
       });
+      res.end(Buffer.from(framed.buffer, framed.byteOffset, framed.byteLength));
+      return;
+    }
+
+    // Synthesise audio from a painted spectrogram frame (native gaborator).
+    if (url.pathname === "/synthesize" && req.method === "POST") {
+      if (!options.synthesize) return sendJson(res, 501, { error: "synthesis not available" });
+      const framed = await options.synthesize(toArrayBuffer(await readBody(req)));
+      res.writeHead(200, { "content-type": "application/octet-stream", "content-length": framed.byteLength });
       res.end(Buffer.from(framed.buffer, framed.byteOffset, framed.byteLength));
       return;
     }

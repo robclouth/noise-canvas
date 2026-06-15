@@ -46,7 +46,7 @@ function makeArray(kind: ArrayKind, bytes: Uint8Array): NumericArray {
   return new Int32Array(copy.buffer);
 }
 
-export function encodeFrame(frame: Frame): Uint8Array {
+export function encodeFrame(frame: Frame): Uint8Array<ArrayBuffer> {
   const names = Object.keys(frame.arrays);
   const sections: SectionHeader[] = names.map((name) => ({
     name,
@@ -70,6 +70,19 @@ export function encodeFrame(frame: Frame): Uint8Array {
     offset += section.byteLength;
   }
   return out;
+}
+
+export function asF32(array: NumericArray | undefined, name: string): Float32Array {
+  if (array instanceof Float32Array) return array;
+  throw new Error(`frame: expected Float32Array for ${name}`);
+}
+export function asU32(array: NumericArray | undefined, name: string): Uint32Array {
+  if (array instanceof Uint32Array) return array;
+  throw new Error(`frame: expected Uint32Array for ${name}`);
+}
+export function asI32(array: NumericArray | undefined, name: string): Int32Array {
+  if (array instanceof Int32Array) return array;
+  throw new Error(`frame: expected Int32Array for ${name}`);
 }
 
 export function decodeFrame(buffer: ArrayBuffer): Frame {

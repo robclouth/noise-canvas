@@ -90,4 +90,30 @@ describe("/analyze endpoint", () => {
       await server.close();
     }
   });
+
+  it("passes a synthesis frame through to the injected synthesizer", async () => {
+    const requestSeen: ArrayBuffer[] = [];
+    const resultFrame = encodeFrame({
+      meta: { peak: 0.5, numChannels: 1 },
+      arrays: { channel0: new Float32Array([1, 2, 3]) },
+    });
+    const server = await startEditorServer({
+      webviewDir,
+      synthesize: async (request) => {
+        requestSeen.push(request);
+        return resultFrame;
+      },
+    });
+    try {
+      const reqFrame = encodeFrame({ meta: { numChannels: 1 }, arrays: { processedData: new Float32Array([9, 8]) } });
+      const response = await fetch(`${server.origin}/synthesize`, { method: "POST", body: reqFrame });
+      expect(response.status).toBe(200);
+      expect(requestSeen).toHaveLength(1);
+      const decoded = decodeFrame(await response.arrayBuffer());
+      expect(decoded.meta).toEqual({ peak: 0.5, numChannels: 1 });
+      expect(Array.from(decoded.arrays.channel0)).toEqual([1, 2, 3]);
+    } finally {
+      await server.close();
+    }
+  });
 });

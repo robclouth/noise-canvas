@@ -1,6 +1,14 @@
-import { analyze } from "../../main/lib/audio-analysis";
+import { analyze, synthesize } from "../../main/lib/audio-analysis";
 import type { AnalysisParams } from "../../main/lib/types";
-import { encodeFrame, type Frame, type NumericArray } from "../shared/analysis-protocol";
+import {
+  asF32,
+  asI32,
+  asU32,
+  decodeFrame,
+  encodeFrame,
+  type Frame,
+  type NumericArray,
+} from "../shared/analysis-protocol";
 
 // Reuses the Electron app's native analysis path verbatim: analyze() runs the
 // ffmpeg-static decode + N-API gaborator addon (both verified to run in Live's
@@ -45,4 +53,44 @@ function resultToFrame(result: AnalysisResult): Frame {
 export async function runAnalyzeFramed(filePath: string, params: AnalysisParams): Promise<Uint8Array> {
   const result = await analyze(filePath, params);
   return encodeFrame(resultToFrame(result));
+}
+
+function optionalNumber(value: number | string | undefined): number | undefined {
+  return value === undefined ? undefined : Number(value);
+}
+
+// Synthesises audio from a (painted) packed spectrogram via the native gaborator
+// addon. Request/response travel as frames: the painted data + band tables in,
+// the per-channel PCM out.
+export async function runSynthesizeFramed(request: ArrayBuffer): Promise<Uint8Array> {
+  const { meta, arrays } = decodeFrame(request);
+  const existingChannelCount = Number(meta.existingChannelCount);
+  const existingAudio =
+    existingChannelCount > 0
+      ? Array.from({ length: existingChannelCount }, (_, i) => asF32(arrays[`existing${i}`], `existing${i}`))
+      : undefined;
+
+  const result = await synthesize(
+    asF32(arrays.processedData, "processedData"),
+    {
+      numFrames: Number(meta.numFrames),
+      numChannels: Number(meta.numChannels),
+      numBands: Number(meta.numBands),
+      bandOffsets: asU32(arrays.bandOffsets, "bandOffsets"),
+      bandStepLog2s: asI32(arrays.bandStepLog2s, "bandStepLog2s"),
+      bandLengths: asU32(arrays.bandLengths, "bandLengths"),
+    },
+    Number(meta.sampleRate),
+    { bandsPerOctave: Number(meta.bandsPerOctave), minFreq: Number(meta.minFreq) },
+    meta.normalize === 1,
+    existingAudio,
+    optionalNumber(meta.startFrame),
+    optionalNumber(meta.endFrame),
+    optionalNumber(meta.startBand),
+    optionalNumber(meta.endBand),
+  );
+
+  const channels: Record<string, NumericArray> = {};
+  result.channels.forEach((channel, i) => (channels[`channel${i}`] = channel));
+  return encodeFrame({ meta: { peak: result.peak, numChannels: result.channels.length }, arrays: channels });
 }
