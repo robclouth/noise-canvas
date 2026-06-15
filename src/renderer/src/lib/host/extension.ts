@@ -90,6 +90,7 @@ export const host: Host = {
     quitAndInstall: () => {},
   },
   env: {
+    isExtension: true,
     get platform() {
       // Prefer the real host platform from the bootstrap; fall back to userAgent
       // sniffing if read before the bootstrap loads.

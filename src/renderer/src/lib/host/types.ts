@@ -30,6 +30,9 @@ export interface DirectoryDialogResult {
 
 /** Process/runtime information that varies between host environments. */
 export interface HostEnv {
+  /** True in the Ableton extension build, false in the Electron app. Gates
+   * extension-only UI such as the in-app menu bar (native menus are unavailable). */
+  readonly isExtension: boolean;
   /** The OS platform, e.g. "darwin" | "win32" | "linux". */
   readonly platform: NodeJS.Platform;
   /** The value of NODE_ENV, or undefined when unset. */

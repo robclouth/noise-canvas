@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
 import { CanvasPanel, PaletteBar } from "./components/layout/canvas-panel";
+import { ExtensionMenuBar } from "./components/layout/menu-bar";
 import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
 import { host } from "./lib/host";
@@ -236,74 +237,77 @@ function App(): React.JSX.Element {
   });
 
   return (
-    <Group h="100vh" w="100vw" wrap="nowrap" gap={0} {...getRootProps()}>
-      <LoadingOverlay visible={!isReady} />
-      {isDragActive && (
-        <Box
-          pos="absolute"
-          top={0}
-          left={0}
-          right={0}
-          bottom={0}
-          bg="transparent"
-          bd="2px solid orange"
-          style={{ zIndex: 10000 }}
-        />
-      )}
-      <input {...getInputProps()} />
-      <Canvas
-        dpr={1}
-        style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}
-        eventSource={document.getElementById("root")!}
-        frameloop="demand"
-        gl={{
-          antialias: false,
-          depth: false,
-          premultipliedAlpha: false,
-          preserveDrawingBuffer: false,
-          powerPreference: "high-performance",
-        }}
-      >
-        <View.Port />
-        <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
-
-        <ShaderCompiler onFinish={handleShaderCompileFinish} />
-      </Canvas>
-      <ScrollArea
-        scrollbarSize={4}
-        type="auto"
-        h="100%"
-        w={320}
-        onScrollPositionChange={() => invalidateRef.current?.()}
-      >
-        <BrushPanel />
-      </ScrollArea>
-      <Stack pos="relative" flex={1} h="100%" gap={0}>
-        <Box pos="absolute" top={0} bottom={0} left={0} right={0} bg="dark.9" style={{ zIndex: -1 }} />
-        {openFileIds.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <ScrollArea
-            type="auto"
-            scrollbarSize={4}
-            scrollbars="y"
-            h="100%"
-            style={{ flex: 1, minHeight: 0 }}
-            viewportProps={{ style: { overflowY: fullscreenFileId ? "hidden" : undefined } }}
-            onScrollPositionChange={() => invalidateRef.current?.()}
-          >
-            <Box p="xs">
-              <CanvasPanel />
-            </Box>
-          </ScrollArea>
+    <Stack h="100vh" w="100vw" gap={0}>
+      <ExtensionMenuBar />
+      <Group flex={1} mih={0} w="100vw" wrap="nowrap" gap={0} {...getRootProps()}>
+        <LoadingOverlay visible={!isReady} />
+        {isDragActive && (
+          <Box
+            pos="absolute"
+            top={0}
+            left={0}
+            right={0}
+            bottom={0}
+            bg="transparent"
+            bd="2px solid orange"
+            style={{ zIndex: 10000 }}
+          />
         )}
-        <PaletteBar />
-        <TransportPanel />
-      </Stack>
-      <SidebarPanel />
-      <Notifications />
-      <UpdateNotification />
-    </Group>
+        <input {...getInputProps()} />
+        <Canvas
+          dpr={1}
+          style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}
+          eventSource={document.getElementById("root")!}
+          frameloop="demand"
+          gl={{
+            antialias: false,
+            depth: false,
+            premultipliedAlpha: false,
+            preserveDrawingBuffer: false,
+            powerPreference: "high-performance",
+          }}
+        >
+          <View.Port />
+          <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
+
+          <ShaderCompiler onFinish={handleShaderCompileFinish} />
+        </Canvas>
+        <ScrollArea
+          scrollbarSize={4}
+          type="auto"
+          h="100%"
+          w={320}
+          onScrollPositionChange={() => invalidateRef.current?.()}
+        >
+          <BrushPanel />
+        </ScrollArea>
+        <Stack pos="relative" flex={1} h="100%" gap={0}>
+          <Box pos="absolute" top={0} bottom={0} left={0} right={0} bg="dark.9" style={{ zIndex: -1 }} />
+          {openFileIds.length === 0 ? (
+            <EmptyState />
+          ) : (
+            <ScrollArea
+              type="auto"
+              scrollbarSize={4}
+              scrollbars="y"
+              h="100%"
+              style={{ flex: 1, minHeight: 0 }}
+              viewportProps={{ style: { overflowY: fullscreenFileId ? "hidden" : undefined } }}
+              onScrollPositionChange={() => invalidateRef.current?.()}
+            >
+              <Box p="xs">
+                <CanvasPanel />
+              </Box>
+            </ScrollArea>
+          )}
+          <PaletteBar />
+          <TransportPanel />
+        </Stack>
+        <SidebarPanel />
+        <Notifications />
+        <UpdateNotification />
+      </Group>
+    </Stack>
   );
 }
 

@@ -30,6 +30,7 @@ export const host: Host = {
     return window.updater;
   },
   env: {
+    isExtension: false,
     get platform() {
       return window.platform;
     },
