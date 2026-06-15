@@ -29,7 +29,7 @@ export function UpdateNotification() {
     const unsubscribers: (() => void)[] = [];
 
     // Update available
-    const unsubUpdateAvailable = ipcOn("update-available", (_event, info: UpdateInfo) => {
+    const unsubUpdateAvailable = ipcOn("update-available", (info: UpdateInfo) => {
       console.log("Update available:", info);
       setUpdateInfo(info);
       setShowModal(true);
@@ -58,13 +58,13 @@ export function UpdateNotification() {
     unsubscribers.push(unsubUpdateNotAvailable);
 
     // Download progress
-    const unsubDownloadProgress = ipcOn("download-progress", (_event, progressInfo: ProgressInfo) => {
+    const unsubDownloadProgress = ipcOn("download-progress", (progressInfo: ProgressInfo) => {
       setDownloadProgress(Math.round(progressInfo.percent));
     });
     unsubscribers.push(unsubDownloadProgress);
 
     // Update downloaded
-    const unsubUpdateDownloaded = ipcOn("update-downloaded", (_event, info: UpdateInfo) => {
+    const unsubUpdateDownloaded = ipcOn("update-downloaded", (info: UpdateInfo) => {
       console.log("Update downloaded:", info);
       setIsDownloading(false);
       setUpdateReady(true);
@@ -82,7 +82,7 @@ export function UpdateNotification() {
     unsubscribers.push(unsubUpdateDownloaded);
 
     // Update error
-    const unsubUpdateError = ipcOn("update-error", (_event, error: string) => {
+    const unsubUpdateError = ipcOn("update-error", (error: string) => {
       console.error("Update error:", error);
       setIsDownloading(false);
 

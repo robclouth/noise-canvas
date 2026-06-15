@@ -62,4 +62,21 @@ export const host: Host = {
       return window.electron.webUtils.getPathForFile(file);
     },
   },
+  events: {
+    send(channel, ...args) {
+      window.ipcRenderer.send(channel, ...args);
+    },
+    invoke(channel, ...args) {
+      return window.ipcRenderer.invoke(channel, ...args);
+    },
+    on(channel, listener) {
+      // Strip Electron's leading IpcRendererEvent; callers only want the payload.
+      const wrapped = (_event: unknown, ...args: unknown[]): void => listener(...args);
+      window.ipcRenderer.on(channel, wrapped);
+      return () => window.ipcRenderer.removeListener(channel, wrapped);
+    },
+    once(channel, listener) {
+      window.ipcRenderer.once(channel, (_event: unknown, ...args: unknown[]) => listener(...args));
+    },
+  },
 };

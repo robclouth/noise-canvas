@@ -56,6 +56,20 @@ export interface HostFiles {
 }
 
 /**
+ * The renderer↔host event channel: menu actions (undo/save/open…) and the
+ * updater lifecycle. In Electron it rides `window.ipcRenderer`; in the extension
+ * it is an in-process emitter the in-app menu bar drives. Listeners receive only
+ * the payload args — the Electron event object is stripped by the impl.
+ */
+export interface HostEvents {
+  send(channel: string, ...args: unknown[]): void;
+  invoke(channel: string, ...args: unknown[]): Promise<unknown>;
+  /** Subscribe; returns an unsubscribe function. */
+  on(channel: string, listener: (...args: unknown[]) => void): () => void;
+  once(channel: string, listener: (...args: unknown[]) => void): void;
+}
+
+/**
  * The path operations the renderer core uses. A subset of Node's `path` module
  * (the only members the core touches) so a non-Node host can supply a small
  * browser implementation without claiming the whole module surface. Node's
@@ -131,4 +145,5 @@ export interface Host {
   readonly env: HostEnv;
   readonly dialogs: HostDialogs;
   readonly files: HostFiles;
+  readonly events: HostEvents;
 }

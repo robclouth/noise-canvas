@@ -1,7 +1,9 @@
-// Type-safe IPC helpers for renderer
-// Uses window.ipcRenderer (exposed via preload) to avoid Vite bundling issues
+// Type-safe helpers over the host event channel (host.events). In Electron this
+// rides window.ipcRenderer; in the extension it is an in-process bus. Listeners
+// receive only the payload args — the Electron event object is stripped by the
+// host impl.
 
-import type { IpcRendererEvent } from "electron";
+import { host } from "./host";
 import type { IpcMainHandlers, IpcRendererEvents } from "../../../main/lib/types";
 
 // Extract parameter types from handler functions
@@ -21,7 +23,7 @@ type IpcRendererEventParams<K extends keyof IpcRendererEvents> = Parameters<IpcR
 
 // Type-safe send
 export function ipcSend<K extends keyof IpcMainHandlers>(channel: K, ...args: IpcMainParams<K>): void {
-  window.ipcRenderer.send(channel, ...args);
+  host.events.send(channel, ...args);
 }
 
 // Type-safe invoke
@@ -29,22 +31,22 @@ export function ipcInvoke<K extends keyof IpcMainHandlers>(
   channel: K,
   ...args: IpcMainParams<K>
 ): Promise<IpcMainReturnType<K>> {
-  return window.ipcRenderer.invoke(channel, ...args) as Promise<IpcMainReturnType<K>>;
+  return host.events.invoke(channel, ...args) as Promise<IpcMainReturnType<K>>;
 }
 
-// Type-safe on
+// Type-safe on; returns an unsubscribe function
 export function ipcOn<K extends keyof IpcRendererEvents>(
   channel: K,
-  listener: (event: IpcRendererEvent, ...args: IpcRendererEventParams<K>) => void,
+  listener: (...args: IpcRendererEventParams<K>) => void,
 ): () => void {
-  window.ipcRenderer.on(channel, listener as any);
-  return () => window.ipcRenderer.removeListener(channel, listener as any);
+  // The transport is untyped; the channel map defines each channel's payload.
+  return host.events.on(channel, (...args) => listener(...(args as IpcRendererEventParams<K>)));
 }
 
 // Type-safe once
 export function ipcOnce<K extends keyof IpcRendererEvents>(
   channel: K,
-  listener: (event: IpcRendererEvent, ...args: IpcRendererEventParams<K>) => void,
+  listener: (...args: IpcRendererEventParams<K>) => void,
 ): void {
-  window.ipcRenderer.once(channel, listener as any);
+  host.events.once(channel, (...args) => listener(...(args as IpcRendererEventParams<K>)));
 }

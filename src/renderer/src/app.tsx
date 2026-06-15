@@ -113,7 +113,7 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubNewFile);
 
-    const unsubOpenFile = ipcOn("open-file", async (_event, path) => {
+    const unsubOpenFile = ipcOn("open-file", async (path) => {
       const { openFilePath } = useStore.getState();
       await openFilePath(path);
     });

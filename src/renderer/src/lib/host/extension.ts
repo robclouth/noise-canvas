@@ -1,4 +1,5 @@
 import { createExtensionAnalysis } from "./extension-analysis";
+import { createExtensionEvents } from "./extension-events";
 import {
   extensionFs,
   extensionOs,
@@ -117,4 +118,5 @@ export const host: Host = {
   files: {
     getPathForFile: () => pending("files.getPathForFile"),
   },
+  events: createExtensionEvents(),
 };
