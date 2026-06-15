@@ -277,6 +277,7 @@ function App(): React.JSX.Element {
           type="auto"
           h="100%"
           w={320}
+          style={{ flexShrink: 0 }}
           onScrollPositionChange={() => invalidateRef.current?.()}
         >
           <BrushPanel />

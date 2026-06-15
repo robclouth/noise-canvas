@@ -29,9 +29,17 @@ export interface Frame {
 }
 
 function kindOf(array: NumericArray): ArrayKind {
-  if (array instanceof Float32Array) return "f32";
-  if (array instanceof Uint32Array) return "u32";
-  return "i32";
+  // Brand check rather than `instanceof`: arrays minted by the native gaborator
+  // addon carry the addon environment's constructors, which in Ableton Live's
+  // embedded host are a different realm than the host bundle's globals — so
+  // `array instanceof Float32Array` is false and the old fallthrough mislabelled
+  // f32 (and u32) data as i32. Object.prototype.toString reads the array's
+  // internal brand, which is realm-agnostic.
+  const brand = Object.prototype.toString.call(array);
+  if (brand === "[object Float32Array]") return "f32";
+  if (brand === "[object Uint32Array]") return "u32";
+  if (brand === "[object Int32Array]") return "i32";
+  throw new Error(`frame: unsupported array type ${brand}`);
 }
 
 function bytesOf(array: NumericArray): Uint8Array {

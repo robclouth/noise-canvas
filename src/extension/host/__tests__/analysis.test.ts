@@ -1,8 +1,10 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { decodeFrame, encodeFrame, type Frame } from "../../shared/analysis-protocol";
+import { decodeFrame, encodeFrame, type Frame, type NumericArray } from "../../shared/analysis-protocol";
+import { decodeRenderBatch, encodeRenderBatch, type RenderedAudio } from "../../shared/render-batch";
 import { startEditorServer, type EditorServer } from "../server";
 
 // The native analysis pipeline (ffmpeg + gaborator) is verified to run in Live's
@@ -35,6 +37,48 @@ describe("analysis binary protocol", () => {
     expect(Array.from(decoded.arrays.data)).toEqual(Array.from(original.arrays.data));
     expect(Array.from(decoded.arrays.bandStepLog2s)).toEqual(Array.from(original.arrays.bandStepLog2s));
     expect(Array.from(decoded.arrays.bandLengths)).toEqual(Array.from(original.arrays.bandLengths));
+  });
+
+  it("classifies typed arrays from a foreign realm (native-addon parity)", () => {
+    // The gaborator addon mints its result arrays in its own environment, which
+    // in Live's embedded host is a different realm than the host bundle — so
+    // `instanceof Float32Array` is false. A vm context reproduces that exact
+    // condition: these arrays fail `instanceof` against the outer realm but must
+    // still encode as their real kind, not the old i32 fallthrough.
+    const ctx = runInNewContext(`({
+      data: new Float32Array([0.5, -0.5]),
+      bandOffsets: new Uint32Array([0, 1]),
+      bandStepLog2s: new Int32Array([-1, 2]),
+    })`) as { data: NumericArray; bandOffsets: NumericArray; bandStepLog2s: NumericArray };
+    expect(ctx.data instanceof Float32Array).toBe(false);
+
+    const decoded = decodeFrame(encodeFrame({ meta: {}, arrays: { ...ctx } }).buffer as ArrayBuffer);
+    expect(decoded.arrays.data instanceof Float32Array).toBe(true);
+    expect(decoded.arrays.bandOffsets instanceof Uint32Array).toBe(true);
+    expect(decoded.arrays.bandStepLog2s instanceof Int32Array).toBe(true);
+    expect(Array.from(decoded.arrays.data)).toEqual([0.5, -0.5]);
+  });
+});
+
+describe("render batch", () => {
+  it("round-trips multiple renders with their channels, sample rate and label", () => {
+    const renders: RenderedAudio[] = [
+      { channels: [new Float32Array([0.5, -0.25])], sampleRate: 44100, label: "first" },
+      {
+        channels: [new Float32Array([1, 2, 3]), new Float32Array([-1, -2, -3])],
+        sampleRate: 48000,
+        label: "second",
+      },
+    ];
+    const decoded = decodeRenderBatch(encodeRenderBatch(renders).buffer as ArrayBuffer);
+
+    expect(decoded).toHaveLength(2);
+    expect(decoded[0].label).toBe("first");
+    expect(decoded[0].sampleRate).toBe(44100);
+    expect(Array.from(decoded[0].channels[0])).toEqual([0.5, -0.25]);
+    expect(decoded[1].channels).toHaveLength(2);
+    expect(decoded[1].sampleRate).toBe(48000);
+    expect(Array.from(decoded[1].channels[1])).toEqual([-1, -2, -3]);
   });
 });
 

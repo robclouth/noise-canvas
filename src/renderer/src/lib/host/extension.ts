@@ -1,3 +1,4 @@
+import { encodeRenderBatch } from "../../../../extension/shared/render-batch";
 import { createExtensionAnalysis } from "./extension-analysis";
 import { createExtensionEvents } from "./extension-events";
 import {
@@ -9,7 +10,14 @@ import {
   showDirectoryDialog,
   showSaveDialog,
 } from "./extension-rpc";
-import type { Host, HostPath } from "./types";
+import type { Host, HostPath, HostSession } from "./types";
+
+declare global {
+  interface Window {
+    webkit?: { messageHandlers?: { live?: { postMessage(message: unknown): void } } };
+    chrome?: { webview?: { postMessage(message: unknown): void } };
+  }
+}
 
 // Host implementation for the Ableton extension build. The renderer core runs
 // inside the extension's modal webview; capabilities that the Electron app got
@@ -60,8 +68,31 @@ const browserPath: HostPath = {
   },
 };
 
+// Closes the SDK modal and resolves the host's showModalDialog with `result`.
+function closeEditor(result: string): void {
+  const message = { method: "close_and_send", params: [result] };
+  if (window.webkit?.messageHandlers?.live) {
+    window.webkit.messageHandlers.live.postMessage(message);
+  } else if (window.chrome?.webview) {
+    window.chrome.webview.postMessage(message);
+  }
+}
+
+// Sends the rendered audio to the host over the session's data plane, then
+// closes the editor so the host encodes and imports it into the Live set.
+const extensionSession: HostSession = {
+  async apply(renders): Promise<void> {
+    const sessionId = new URLSearchParams(location.search).get("session");
+    if (!sessionId) return;
+    const batch = encodeRenderBatch(renders);
+    await fetch(`/session/${sessionId}/result`, { method: "POST", body: batch });
+    closeEditor("applied");
+  },
+};
+
 export const host: Host = {
   fs: extensionFs,
+  session: extensionSession,
   path: browserPath,
   os: extensionOs,
   zlib: extensionZlib,

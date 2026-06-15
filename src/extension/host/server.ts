@@ -94,12 +94,12 @@ export async function startEditorServer(options: EditorServerOptions): Promise<E
 
   // GET /session/:id/source.wav        → original clip bytes
   // GET /session/:id/meta              → ClipMeta JSON
-  // POST /session/:id/result.wav       → rendered WAV; resolves session.result
+  // POST /session/:id/result           → rendered audio frame; resolves session.result
   // POST /session/:id/cancel           → user dismissed; rejects session.result
   // GET  /*                            → static webview asset
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", `http://${host}`);
-    const sessionMatch = url.pathname.match(/^\/session\/([^/]+)\/(source\.wav|meta|result\.wav|cancel)$/);
+    const sessionMatch = url.pathname.match(/^\/session\/([^/]+)\/(source\.wav|meta|result|cancel)$/);
 
     if (sessionMatch) {
       const [, id, action] = sessionMatch;
@@ -117,7 +117,7 @@ export async function startEditorServer(options: EditorServerOptions): Promise<E
       if (action === "meta" && req.method === "GET") {
         return sendJson(res, 200, session.meta);
       }
-      if (action === "result.wav" && req.method === "POST") {
+      if (action === "result" && req.method === "POST") {
         const body = await readBody(req);
         session.resolveResult(new Uint8Array(body));
         return sendJson(res, 200, { ok: true });

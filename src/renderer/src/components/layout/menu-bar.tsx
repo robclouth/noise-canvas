@@ -1,18 +1,19 @@
 import { host } from "@/lib/host";
-import { Button, Group, Menu } from "@mantine/core";
+import { saveToLive } from "@/lib/save-to-live";
+import { Button, Group } from "@mantine/core";
 import { useEffect, useState } from "react";
 import type { IpcRendererEvents } from "../../../../main/lib/types";
 
-// In-app menu bar for the Ableton extension build, which has no native menus.
-// Items re-trigger the same channels the native menu used to send; in the
-// extension host.events is an in-process bus, so the app's existing ipcOn
-// handlers (undo, save, etc.) fire. Renders nothing in the Electron app.
+// Inline action bar for the Ableton extension build, which has no native menus.
+// Buttons drive the same channels the native menu used to; in the extension
+// host.events is an in-process bus, so the app's existing ipcOn handlers fire.
+// Renders nothing in the Electron app.
 
 type Channel = keyof IpcRendererEvents;
 
-function MenuTarget({ label }: { label: string }) {
+function BarButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
   return (
-    <Button variant="subtle" color="gray" size="compact-sm" radius="sm" fw={500}>
+    <Button variant="subtle" color="gray" size="compact-sm" radius="sm" fw={500} onClick={onClick} disabled={disabled}>
       {label}
     </Button>
   );
@@ -42,48 +43,22 @@ export function ExtensionMenuBar() {
 
   return (
     <Group
-      gap={2}
+      gap="lg"
       px={6}
       h={34}
       align="center"
       bg="dark.8"
       style={{ borderBottom: "1px solid var(--mantine-color-dark-6)" }}
     >
-      <Menu position="bottom-start" offset={2} withinPortal shadow="md" width={200}>
-        <Menu.Target>
-          <Group gap={0}>
-            <MenuTarget label="File" />
-          </Group>
-        </Menu.Target>
-        <Menu.Dropdown>
-          <Menu.Item onClick={() => send("save-active-file")} disabled={!isDirty}>
-            Save
-          </Menu.Item>
-          <Menu.Item onClick={() => send("save-active-file-as")}>Save As…</Menu.Item>
-          <Menu.Item onClick={() => send("save-active-file-version")}>Save Version</Menu.Item>
-          <Menu.Divider />
-          <Menu.Item onClick={() => send("export-history")}>Export History…</Menu.Item>
-        </Menu.Dropdown>
-      </Menu>
-
-      <Menu position="bottom-start" offset={2} withinPortal shadow="md" width={200}>
-        <Menu.Target>
-          <Group gap={0}>
-            <MenuTarget label="Edit" />
-          </Group>
-        </Menu.Target>
-        <Menu.Dropdown>
-          <Menu.Item onClick={() => send("undo")} disabled={!canUndo}>
-            Undo
-          </Menu.Item>
-          <Menu.Item onClick={() => send("redo")} disabled={!canRedo}>
-            Redo
-          </Menu.Item>
-          <Menu.Divider />
-          <Menu.Item onClick={() => send("restore-original")}>Restore Original</Menu.Item>
-          <Menu.Item onClick={() => send("reanalyze-active-file")}>Re-analyze File</Menu.Item>
-        </Menu.Dropdown>
-      </Menu>
+      <BarButton label="Save to Live" onClick={() => void saveToLive()} disabled={!isDirty} />
+      <Group gap={2}>
+        <BarButton label="Undo" onClick={() => send("undo")} disabled={!canUndo} />
+        <BarButton label="Redo" onClick={() => send("redo")} disabled={!canRedo} />
+      </Group>
+      <Group gap={2}>
+        <BarButton label="Restore Original" onClick={() => send("restore-original")} />
+        <BarButton label="Re-analyze" onClick={() => send("reanalyze-active-file")} />
+      </Group>
     </Group>
   );
 }

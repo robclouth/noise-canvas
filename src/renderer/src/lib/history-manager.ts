@@ -1058,6 +1058,45 @@ export class HistoryManager {
    * mutating the file's displayed state. Uses the cached WAV if present,
    * otherwise reconstructs the packed FBO data and synthesizes fresh audio.
    */
+  // Re-synthesises a node's audio from its packed spectrogram, returning the
+  // planar channels and sample rate. Returns null when the node or its synthesis
+  // metadata can't be resolved.
+  async synthesizeNodeAudio(nodeId: string): Promise<{ channels: Float32Array[]; sampleRate: number } | null> {
+    await this.initialize();
+    if (!this.manifest) return null;
+    const target = this.manifest.nodes[nodeId];
+    if (!target) return null;
+
+    // Walk ancestors to the nearest full snapshot — it carries the
+    // synthesisMetadata (bandOffsets/bandStepLog2s/bandLengths) needed by the
+    // gaborator synthesizer. Stroke chains inherit those from their last
+    // resize/reanalyze ancestor.
+    let anchor: HistoryNode | null = target;
+    while (anchor && anchor.storage !== "full") {
+      anchor = anchor.parentId ? (this.manifest.nodes[anchor.parentId] ?? null) : null;
+    }
+    if (!anchor?.synthesisMetadata) return null;
+
+    const { packedData } = await this.reconstruct(nodeId);
+    const dims = target.dimensions;
+    const synthMeta = {
+      numFrames: dims.numFrames,
+      numChannels: dims.numChannels,
+      numBands: dims.numBands,
+      bandOffsets: new Uint32Array(anchor.synthesisMetadata.bandOffsets),
+      bandStepLog2s: new Int32Array(anchor.synthesisMetadata.bandStepLog2s),
+      bandLengths: new Uint32Array(anchor.synthesisMetadata.bandLengths),
+    };
+    const result = await host.analysis.synthesize(
+      packedData,
+      synthMeta,
+      dims.sampleRate,
+      { bandsPerOctave: dims.bandsPerOctave, minFreq: dims.minFreq },
+      true,
+    );
+    return { channels: result.channels, sampleRate: dims.sampleRate };
+  }
+
   async exportNodeAudio(nodeId: string, outputPath: string): Promise<boolean> {
     await this.initialize();
     if (!this.manifest) return false;
@@ -1077,34 +1116,9 @@ export class HistoryManager {
       }
     }
 
-    // Walk ancestors to the nearest full snapshot — it carries the
-    // synthesisMetadata (bandOffsets/bandStepLog2s/bandLengths) needed by the
-    // gaborator synthesizer. Stroke chains inherit those from their last
-    // resize/reanalyze ancestor.
-    let anchor: HistoryNode | null = target;
-    while (anchor && anchor.storage !== "full") {
-      anchor = anchor.parentId ? (this.manifest.nodes[anchor.parentId] ?? null) : null;
-    }
-    if (!anchor?.synthesisMetadata) return false;
-
-    const { packedData } = await this.reconstruct(nodeId);
-    const dims = target.dimensions;
-    const synthMeta = {
-      numFrames: dims.numFrames,
-      numChannels: dims.numChannels,
-      numBands: dims.numBands,
-      bandOffsets: new Uint32Array(anchor.synthesisMetadata.bandOffsets),
-      bandStepLog2s: new Int32Array(anchor.synthesisMetadata.bandStepLog2s),
-      bandLengths: new Uint32Array(anchor.synthesisMetadata.bandLengths),
-    };
-    const result = await host.analysis.synthesize(
-      packedData,
-      synthMeta,
-      dims.sampleRate,
-      { bandsPerOctave: dims.bandsPerOctave, minFreq: dims.minFreq },
-      true,
-    );
-    await host.analysis.exportAudio(result.channels, outputPath, dims.sampleRate, "wav");
+    const audio = await this.synthesizeNodeAudio(nodeId);
+    if (!audio) return false;
+    await host.analysis.exportAudio(audio.channels, outputPath, audio.sampleRate, "wav");
     return true;
   }
 

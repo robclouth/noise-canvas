@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 // One round-trip of audio through the webview editor. The host creates a session
 // when the user picks "Edit in Noise Canvas" on a clip, hands its id to the modal
 // URL, and awaits `result`. The webview fetches the source bytes + metadata, lets
-// the user paint, then POSTs the rendered WAV back, which resolves `result`.
+// the user paint, then POSTs the rendered audio frame back, which resolves `result`.
 export interface ClipMeta {
   // Absolute path of the clip's source audio, read from AudioClip.filePath.
   sourceFilePath: string;
@@ -23,8 +23,8 @@ export interface EditorSession {
   readonly meta: ClipMeta;
   // The source audio bytes the webview fetches (the original clip's file).
   readonly sourceBytes: Uint8Array;
-  // Resolves with the rendered WAV the webview POSTs back, or rejects if the
-  // user closes the modal without applying.
+  // Resolves with the rendered audio frame the webview POSTs back, or rejects if
+  // the user closes the modal without applying.
   readonly result: Promise<Uint8Array>;
   // Internal: invoked by the server when the result arrives.
   resolveResult(bytes: Uint8Array): void;

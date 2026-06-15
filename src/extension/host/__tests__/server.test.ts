@@ -47,7 +47,7 @@ describe("editor server round-trip", () => {
     expect(meta).toEqual(META);
 
     const rendered = new Uint8Array(2 * 1024 * 1024).fill(7);
-    const post = await fetch(`${server.origin}/session/${session.id}/result.wav`, {
+    const post = await fetch(`${server.origin}/session/${session.id}/result`, {
       method: "POST",
       body: rendered,
     });

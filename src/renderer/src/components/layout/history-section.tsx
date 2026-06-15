@@ -1,8 +1,9 @@
+import { host } from "@/lib/host";
 import { useStore } from "@/store";
 import { ActionIcon, Box, Group, Menu, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { openConfirm } from "@renderer/lib/modals";
 import { getHistoryManager, type HistoryManager, type HistoryNode } from "@renderer/lib/history-manager";
-import { MoreVertical, Star } from "lucide-react";
+import { MoreVertical, Redo2, Star, Undo2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Section } from "../section";
 
@@ -152,10 +153,12 @@ interface HistoryRowProps {
   rowDiagonals: { fromLane: number; toLane: number }[];
   synthesizing: boolean;
   now: number;
+  isExtension: boolean;
   onNavigate: (nodeId: string) => void;
   onRename: (nodeId: string, label: string) => void;
   onDeleteSubtree: (nodeId: string) => void;
   onExportBranch: (nodeId: string) => void;
+  onExportBranchToLive: (nodeId: string) => void;
   onToggleFavorite: (nodeId: string) => void;
 }
 
@@ -167,10 +170,12 @@ const HistoryRow = memo(function HistoryRow({
   rowDiagonals,
   synthesizing,
   now,
+  isExtension,
   onNavigate,
   onRename,
   onDeleteSubtree,
   onExportBranch,
+  onExportBranchToLive,
   onToggleFavorite,
 }: HistoryRowProps) {
   const { node, lane } = row;
@@ -371,6 +376,7 @@ const HistoryRow = memo(function HistoryRow({
           <Menu.Item onClick={() => onToggleFavorite(node.id)}>{node.favorited ? "Unfavorite" : "Favorite"}</Menu.Item>
           <Menu.Item onClick={() => setEditing(true)}>Rename</Menu.Item>
           <Menu.Item onClick={() => onExportBranch(node.id)}>Export branch…</Menu.Item>
+          {isExtension && <Menu.Item onClick={() => onExportBranchToLive(node.id)}>Export branch to Live</Menu.Item>}
           <Menu.Divider />
           <Menu.Item
             color="red"
@@ -400,6 +406,7 @@ export function HistorySection() {
   const isSynthesizing = useStore((s) => (activeFileId ? (s.filesSynthesizing[activeFileId] ?? false) : false));
   const exportHistory = useStore((s) => s.exportHistory);
   const exportHistoryBranch = useStore((s) => s.exportHistoryBranch);
+  const exportHistoryBranchToLive = useStore((s) => s.exportHistoryBranchToLive);
   const exportHistoryFavorites = useStore((s) => s.exportHistoryFavorites);
 
   const manager = useMemo(() => (activeFileId ? getHistoryManager(activeFileId) : null), [activeFileId]);
@@ -471,6 +478,12 @@ export function HistorySection() {
     },
     [exportHistoryBranch],
   );
+  const onExportBranchToLive = useCallback(
+    (nodeId: string) => {
+      void exportHistoryBranchToLive(nodeId);
+    },
+    [exportHistoryBranchToLive],
+  );
   const onToggleFavorite = useCallback(
     (nodeId: string) => {
       if (!manager) return;
@@ -491,6 +504,17 @@ export function HistorySection() {
       },
     });
   }, [manager, diskSize, refreshDiskSize]);
+
+  // Undo steps to the parent node, redo to the most recent child.
+  const current = manifest ? manifest.nodes[manifest.currentId] : null;
+  const canUndo = !!current?.parentId;
+  const canRedo = !!current && current.childIds.length > 0;
+  const onUndo = useCallback(() => {
+    if (manager) void manager.navigateToParent();
+  }, [manager]);
+  const onRedo = useCallback(() => {
+    if (manager) void manager.navigateToLastChild();
+  }, [manager]);
 
   const menu = (
     <Menu withinPortal position="right-start" shadow="md" onOpen={refreshDiskSize}>
@@ -524,8 +548,40 @@ export function HistorySection() {
     </Menu>
   );
 
+  const controls = (
+    <Group gap={2} wrap="nowrap" align="center">
+      <ActionIcon
+        size="xs"
+        variant="subtle"
+        color="gray"
+        disabled={!canUndo}
+        title="Undo"
+        onClick={(e) => {
+          e.stopPropagation();
+          onUndo();
+        }}
+      >
+        <Undo2 size={12} />
+      </ActionIcon>
+      <ActionIcon
+        size="xs"
+        variant="subtle"
+        color="gray"
+        disabled={!canRedo}
+        title="Redo"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRedo();
+        }}
+      >
+        <Redo2 size={12} />
+      </ActionIcon>
+      {menu}
+    </Group>
+  );
+
   return (
-    <Section label="History" rightSlot={menu} fill>
+    <Section label="History" rightSlot={controls} fill>
       <ScrollArea type="auto" scrollbarSize={4} style={{ flex: 1, minHeight: 0 }}>
         {!manifest || !layout ? (
           <Text size="xs" c="dimmed" ta="center" py={8} pr={8}>
@@ -543,10 +599,12 @@ export function HistorySection() {
                   rowDiagonals={rowDiagonals.get(row.rowIndex) ?? []}
                   synthesizing={isSynthesizing}
                   now={now}
+                  isExtension={host.env.isExtension}
                   onNavigate={onNavigate}
                   onRename={onRename}
                   onDeleteSubtree={onDeleteSubtree}
                   onExportBranch={onExportBranch}
+                  onExportBranchToLive={onExportBranchToLive}
                   onToggleFavorite={onToggleFavorite}
                 />
               </Box>

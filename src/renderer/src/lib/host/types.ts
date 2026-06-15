@@ -123,6 +123,27 @@ export interface HostOs {
   homedir(): string;
 }
 
+/**
+ * An active host-driven editing session. Present only in the Ableton extension,
+ * where the editor opens against a specific clip and renders audio back into the
+ * Live set. Absent in the Electron app, which saves to disk instead.
+ */
+/** One rendered audio state bound for a new clip in the Live set. */
+export interface HostRender {
+  channels: Float32Array[];
+  sampleRate: number;
+  /** Clip name, e.g. the file name or a history node's label. */
+  label: string;
+}
+
+export interface HostSession {
+  /**
+   * Send rendered audio back to the host and close the editor. One render
+   * becomes one clip; multiple (a branch export) each become their own clip.
+   */
+  apply(renders: HostRender[]): Promise<void>;
+}
+
 /** The Zstandard helpers the core uses, keeping Node's callback signatures. */
 export interface HostZlib {
   zstdCompress(buffer: Uint8Array, callback: (error: Error | null, result: Uint8Array) => void): void;
@@ -149,4 +170,6 @@ export interface Host {
   readonly dialogs: HostDialogs;
   readonly files: HostFiles;
   readonly events: HostEvents;
+  /** Present only when the editor runs against a host-driven clip session. */
+  readonly session?: HostSession;
 }

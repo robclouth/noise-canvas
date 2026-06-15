@@ -7,6 +7,7 @@ import { produce } from "immer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
 import { host } from "../lib/host";
+import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import type { Brush, OpenFile, ParameterKey, State, ZustandGet, ZustandSet } from "./types";
@@ -34,6 +35,7 @@ export interface FilesState {
   loadCachedAudio: (fileId: string, audioPath: string, peak: number) => Promise<boolean>;
   exportHistory: () => Promise<void>;
   exportHistoryBranch: (nodeId: string) => Promise<void>;
+  exportHistoryBranchToLive: (nodeId: string) => Promise<void>;
   exportHistoryFavorites: () => Promise<void>;
   mostRecentBpm: number | null;
   setMostRecentBpm: (bpm: number) => void;
@@ -1555,6 +1557,52 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       successNoun: "node",
       successCount: chain.length,
     });
+  },
+  exportHistoryBranchToLive: async (nodeId: string) => {
+    const state = get();
+    if (!state.activeFileId || !host.session) return;
+    const historyManager = getHistoryManager(state.activeFileId);
+    await historyManager.initialize();
+    const manifest = historyManager.getManifest();
+    if (!manifest || !manifest.nodes[nodeId]) {
+      notifications.show({ title: "Nothing to export", message: "Node no longer exists.", color: "yellow" });
+      return;
+    }
+
+    const chain = chainFromRootTo(manifest, nodeId);
+    const notificationId = `branch-to-live-${nodeId}`;
+    notifications.show({
+      id: notificationId,
+      title: "Rendering branch",
+      message: `Synthesising ${chain.length} state${chain.length === 1 ? "" : "s"}…`,
+      loading: true,
+      autoClose: false,
+      withCloseButton: false,
+    });
+
+    const renders: HostRender[] = [];
+    for (const id of chain) {
+      const node = manifest.nodes[id];
+      if (!node) continue;
+      const audio = await historyManager.synthesizeNodeAudio(id);
+      if (!audio) continue;
+      renders.push({ channels: audio.channels, sampleRate: audio.sampleRate, label: node.customLabel ?? node.label });
+    }
+
+    if (renders.length === 0) {
+      notifications.update({
+        id: notificationId,
+        title: "Nothing to export",
+        message: "Could not render any states in this branch.",
+        loading: false,
+        autoClose: 4000,
+        color: "yellow",
+      });
+      return;
+    }
+
+    notifications.hide(notificationId);
+    await host.session.apply(renders);
   },
   reanalyzeActiveFile: async () => {
     const initialState = get();

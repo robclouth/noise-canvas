@@ -1,6 +1,9 @@
+// Must run before anything that touches stripped embedded-host globals.
+import "./polyfills";
 import {
   AudioClip,
   AudioTrack,
+  ClipSlot,
   DataModelObject,
   initialize,
   type ActivationContext,
@@ -11,6 +14,8 @@ import {
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { exportAudio } from "../../main/lib/audio-analysis";
+import { decodeRenderBatch } from "../shared/render-batch";
 import { runAnalyzeFramed, runSynthesizeFramed } from "./analysis-service";
 import { createHostServices } from "./host-services";
 import { startEditorServer, type EditorServer } from "./server";
@@ -43,7 +48,7 @@ function getServer(context: Api): Promise<EditorServer> {
 }
 
 // Walks up Live's object hierarchy from a clip to its owning audio track, which
-// is where arrangement clips are created and deleted.
+// is where arrangement clips and take lanes are created.
 function findAudioTrack(object: DataModelObject<"1.0.0">): AudioTrack<"1.0.0"> | null {
   let current: DataModelObject<"1.0.0"> | null = object.parent;
   while (current) {
@@ -51,6 +56,32 @@ function findAudioTrack(object: DataModelObject<"1.0.0">): AudioTrack<"1.0.0"> |
     current = current.parent;
   }
   return null;
+}
+
+// Returns the clip's owning Session-View slot, or null when it lives on the
+// arrangement timeline (a clip in a slot is a Session clip; otherwise the parent
+// chain reaches the track without passing through a slot).
+function findClipSlot(clip: DataModelObject<"1.0.0">): ClipSlot<"1.0.0"> | null {
+  let current: DataModelObject<"1.0.0"> | null = clip.parent;
+  while (current) {
+    if (current instanceof ClipSlot) return current;
+    if (current instanceof AudioTrack) return null;
+    current = current.parent;
+  }
+  return null;
+}
+
+// Picks up to `count` empty slots to hold rendered clips: the free slots below
+// the source first, then wrapping to earlier free slots.
+function pickEmptyClipSlots(
+  track: AudioTrack<"1.0.0">,
+  sourceSlot: ClipSlot<"1.0.0">,
+  count: number,
+): ClipSlot<"1.0.0">[] {
+  const slots = track.clipSlots;
+  const sourceIndex = slots.findIndex((slot) => slot.handle.id === sourceSlot.handle.id);
+  const ordered = [...slots.slice(sourceIndex + 1), ...slots.slice(0, sourceIndex + 1)];
+  return ordered.filter((slot) => slot.clip === null).slice(0, count);
 }
 
 // Copies the original clip's <file>.asd warp/analysis sidecar next to the
@@ -99,7 +130,7 @@ async function editAudioClip(context: Api, clip: AudioClip<"1.0.0">): Promise<vo
 
   // showModalDialog supports http://localhost, so the webview loads from the
   // data plane: it fetches the source over the server, lets the user paint, and
-  // POSTs the rendered WAV back (resolving session.result) before closing.
+  // POSTs the rendered audio back (resolving session.result) before closing.
   const editorUrl = `${server.origin}/?session=${session.id}`;
   const dialogClosed = context.ui.showModalDialog(editorUrl, 1280, 800).catch(() => "");
 
@@ -115,35 +146,72 @@ async function editAudioClip(context: Api, clip: AudioClip<"1.0.0">): Promise<vo
   }
   await dialogClosed;
 
-  // Stage the rendered audio to a temp file the SDK can import into the project.
+  // One render for a single Save, many for a branch export.
+  const renderBytes = new Uint8Array(rendered.byteLength);
+  renderBytes.set(rendered);
+  const renders = decodeRenderBatch(renderBytes.buffer);
+  if (renders.length === 0) {
+    server.sessions.delete(session.id);
+    return;
+  }
+
+  // Encode each render to a staged WAV with ffmpeg (the desktop app's export
+  // path) and import it into the project; the original's .asd sidecar rides along.
   const tempDir = context.environment.tempDirectory ?? tmpdir();
-  const stagedPath = join(tempDir, `noise-canvas-${session.id}.wav`);
-  await fs.writeFile(stagedPath, rendered);
+  const prepared: { managedPath: string; label: string }[] = [];
+  for (let i = 0; i < renders.length; i++) {
+    const render = renders[i];
+    const stagedPath = join(tempDir, `noise-canvas-${session.id}-${i}.wav`);
+    await exportAudio(render.channels, stagedPath, render.sampleRate, "wav");
+    const managedPath = await context.resources.importIntoProject(stagedPath);
+    await copyAsdSidecar(meta.sourceFilePath, managedPath);
+    prepared.push({ managedPath, label: render.label });
+  }
 
-  const managedPath = await context.resources.importIntoProject(stagedPath);
-  await copyAsdSidecar(meta.sourceFilePath, managedPath);
+  // Each render becomes its own new clip, leaving the source clip in place: a
+  // Session clip → a new empty slot, an arrangement clip → a new take lane at the
+  // same position. All in one transaction = a single undo step.
+  const sourceSlot = findClipSlot(clip);
+  const created = await context.withinTransaction(() => {
+    if (sourceSlot) {
+      // Append scenes until the track has an empty slot per render (each new
+      // scene adds one slot to every track), then fill them.
+      const ensureSlots = (): Promise<ClipSlot<"1.0.0">[]> => {
+        const targets = pickEmptyClipSlots(track, sourceSlot, prepared.length);
+        if (targets.length >= prepared.length) return Promise.resolve(targets);
+        return context.application.song.createScene(-1).then(ensureSlots);
+      };
+      return ensureSlots().then((targets) =>
+        Promise.all(
+          prepared.map((entry, i) =>
+            targets[i].createAudioClip({ filePath: entry.managedPath, isWarped: meta.isWarped, loopSettings }),
+          ),
+        ),
+      );
+    }
+    // Take lanes are appended, so create them in order to keep lane order.
+    return prepared.reduce<Promise<AudioClip<"1.0.0">[]>>(
+      (acc, entry) =>
+        acc.then(async (clips) => {
+          const lane = await track.createTakeLane();
+          const newClip = await lane.createAudioClip({
+            filePath: entry.managedPath,
+            startTime: meta.startTime,
+            duration: meta.duration,
+            isWarped: meta.isWarped,
+            loopSettings,
+          });
+          return [...clips, newClip];
+        }),
+      Promise.resolve([]),
+    );
+  });
 
-  // Replace the original with the rendered clip at the same position. The
-  // transaction callback must stay synchronous; returning Promise.all groups the
-  // create and delete into a single undo step. Whether Live tolerates the
-  // concurrent create+delete at the same start time (vs. requiring a sequential
-  // delete-then-create) is the open question the Phase 4 beta spike validates.
-  const [newClip] = await context.withinTransaction(() =>
-    Promise.all([
-      track.createAudioClip({
-        filePath: managedPath,
-        startTime: meta.startTime,
-        duration: meta.duration,
-        isWarped: meta.isWarped,
-        loopSettings,
-      }),
-      track.deleteClip(clip),
-    ]),
-  );
-
-  // Restore identity the imported file doesn't carry.
-  newClip.name = originalName;
-  newClip.color = originalColor;
+  // Restore identity the imported files don't carry.
+  created.forEach((newClip, i) => {
+    newClip.name = prepared[i].label;
+    newClip.color = originalColor;
+  });
 
   server.sessions.delete(session.id);
 }
