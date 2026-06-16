@@ -1,7 +1,7 @@
 import { BrushPanel } from "@/components/layout/brush-panel";
 import { SidebarPanel } from "@/components/layout/sidebar-panel";
 import { useStore } from "@/store";
-import { Box, Group, LoadingOverlay, ScrollArea, Stack } from "@mantine/core";
+import { Box, Group, LoadingOverlay, Progress, ScrollArea, Stack, Text } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
 import { Canvas, RootState, useThree } from "@react-three/fiber";
@@ -12,7 +12,7 @@ import { CanvasPanel, PaletteBar } from "./components/layout/canvas-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
 import { ipcOn, ipcSend } from "./lib/ipc";
-import { precompileAllShaders } from "./lib/precompile-shaders";
+import { precompileAllShaders, warmEffectPipelines } from "./lib/precompile-shaders";
 import { clearAllHistoryManagers, getHistoryManager, pruneOrphanHistoryDirs } from "./lib/history-manager";
 import { useLinkSync } from "./lib/use-link-sync";
 import { useShortcuts } from "./lib/useShortcuts";
@@ -28,16 +28,38 @@ const CanvasInvalidator = ({ onReady }: { onReady: (invalidate: Invalidator) => 
   return null;
 };
 
-const ShaderCompiler = ({ onFinish }: { onFinish: () => void }) => {
+const ShaderCompiler = ({
+  onProgress,
+  onFinish,
+}: {
+  onProgress: (done: number, total: number) => void;
+  onFinish: () => void;
+}) => {
   const gl = useThree((s) => s.gl);
   useEffect(() => {
-    try {
-      precompileAllShaders(gl);
-    } catch (err) {
-      console.error("Shader pre-compilation failed:", err);
-    }
-    onFinish();
-  }, [gl, onFinish]);
+    let cancelled = false;
+    // Link programs (fast), then warm each effect's pipeline state on a worker.
+    // The loading overlay stays up with per-shader progress until warming is
+    // done, since the effects can't be used until their shaders are compiled.
+    precompileAllShaders(gl)
+      .catch((err) => {
+        console.error("Shader linking failed:", err);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        warmEffectPipelines({
+          onProgress: (done, total) => {
+            if (!cancelled) onProgress(done, total);
+          },
+          onDone: () => {
+            if (!cancelled) onFinish();
+          },
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [gl, onProgress, onFinish]);
   return null;
 };
 
@@ -45,6 +67,7 @@ function App(): React.JSX.Element {
   useShortcuts();
   useLinkSync();
   const [isReady, setIsReady] = useState(false);
+  const [shaderProgress, setShaderProgress] = useState<{ done: number; total: number } | null>(null);
   const openFileIds = useStore((state) => state.openFileIds);
   const fullscreenFileId = useStore((state) => state.fullscreenFileId);
 
@@ -223,6 +246,10 @@ function App(): React.JSX.Element {
     setIsReady(true);
   }, []);
 
+  const handleShaderProgress = useCallback((done: number, total: number) => {
+    setShaderProgress({ done, total });
+  }, []);
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     getFilesFromEvent: async (event) => {
@@ -236,7 +263,35 @@ function App(): React.JSX.Element {
 
   return (
     <Group h="100vh" w="100vw" wrap="nowrap" gap={0} {...getRootProps()}>
-      <LoadingOverlay visible={!isReady} />
+      <LoadingOverlay
+        visible={!isReady}
+        zIndex={10001}
+        loaderProps={{
+          children: (
+            <Stack align="center" gap="sm">
+              {shaderProgress ? (
+                <>
+                  <Text size="sm" c="dimmed">
+                    Optimizing shaders… {shaderProgress.done}/{shaderProgress.total}
+                  </Text>
+                  <Progress
+                    w={220}
+                    value={shaderProgress.total ? (shaderProgress.done / shaderProgress.total) * 100 : 0}
+                    transitionDuration={200}
+                  />
+                  <Text size="xs" c="dimmed">
+                    This only takes a while the first time.
+                  </Text>
+                </>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  Loading…
+                </Text>
+              )}
+            </Stack>
+          ),
+        }}
+      />
       {isDragActive && (
         <Box
           pos="absolute"
@@ -266,7 +321,7 @@ function App(): React.JSX.Element {
         <View.Port />
         <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
 
-        <ShaderCompiler onFinish={handleShaderCompileFinish} />
+        <ShaderCompiler onProgress={handleShaderProgress} onFinish={handleShaderCompileFinish} />
       </Canvas>
       <ScrollArea
         scrollbarSize={4}
