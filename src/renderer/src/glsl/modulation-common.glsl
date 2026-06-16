@@ -40,6 +40,23 @@ uniform sampler2D modulator1SeqDataTex;
 uniform sampler2D modulator2SeqDataTex;
 uniform sampler2D modulator3SeqDataTex;
 
+// Per-pixel precomputed modulator outputs, rendered once per step by the
+// modulator pass. tex0 = (mod0.L, mod0.R, mod1.L, mod1.R); tex1 = (mod2.L,
+// mod2.R, _, _). Effect shaders sample these instead of evaluating the
+// modulators inline -- the expensive evaluator then compiles only into the
+// modulator pass, not into every effect.
+uniform sampler2D modulatorTex0;
+uniform sampler2D modulatorTex1;
+
+// Reads the precomputed stereo output of every modulator at this fragment.
+void sampleModulators(out vec2 mods[NUM_MODULATORS]) {
+  vec4 a = texture(modulatorTex0, vUv);
+  vec4 b = texture(modulatorTex1, vUv);
+  mods[0] = a.xy;
+  mods[1] = a.zw;
+  mods[2] = b.xy;
+}
+
 // Helper to get sequencer data value by modulator index (samples from texture)
 float getSeqDataValue(int modulatorIndex, int stepX, int stepY) {
   // Convert step indices to texture UV coordinates (center of texel)
@@ -349,30 +366,6 @@ vec2 getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, floa
   return getModulationBase(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, seqLoopX, seqLoopY, seqSwing, stereoSpread, audioLevelDb);
 }
 
-// Returns vec2(L, R). Modulator contributions can decorrelate between channels
-// when their stereoSpread is non-zero; contextual and macro sources broadcast
-// the same scalar to both lanes.
-// Evaluates the stereo output of every modulator at a uv. This is the expensive
-// part of modulation (pattern/sequencer/envelope evaluation, plus nested
-// modulation at depth 0). Computing it once and sharing the result across the
-// several brush parameters that read the same uv keeps the evaluator from being
-// compiled afresh for every parameter -- the dominant shader compile cost.
-//
-// `used[i]` must be true when any parameter in the sharing group is driven by
-// modulator i; modulators no parameter uses are skipped so runtime cost matches
-// the old per-parameter path (which skipped unused modulators), while still
-// evaluating each used modulator only once for the whole group.
-void evalModulators(vec2 uv, int depth, float audioLevelDb, bool used[NUM_MODULATORS], out vec2 mods[NUM_MODULATORS]) {
-  bool allowNested = (depth == 0);
-  for (int i = 0; i < NUM_MODULATORS; i++) {
-    if (used[i]) {
-      mods[i] = getModulation(uv, i, allowNested, audioLevelDb);
-    } else {
-      mods[i] = vec2(0.0);
-    }
-  }
-}
-
 // Blends precomputed modulator outputs, contextual sources and macros into a
 // parameter. Identical to applyModulation but takes the modulator outputs from
 // evalModulators instead of evaluating them here.
@@ -477,12 +470,8 @@ vec2 applyModulation(float value, float minValue, float maxValue, float[NUM_MODU
 #ifdef ABLATE_MODULATION
   return vec2(value);
 #endif
-  bool used[NUM_MODULATORS];
-  for (int i = 0; i < NUM_MODULATORS; i++) {
-    used[i] = modulationAmounts[i] != 0.0;
-  }
   vec2 mods[NUM_MODULATORS];
-  evalModulators(uv, depth, audioLevelDb, used, mods);
+  sampleModulators(mods);
   return applyModulationCached(value, minValue, maxValue, modulationAmounts, contextualModAmounts, macroAmounts, mods);
 }
 

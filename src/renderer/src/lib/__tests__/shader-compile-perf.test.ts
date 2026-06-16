@@ -27,6 +27,7 @@ import synthesizeFrag from "../../glsl/synthesize-effect.frag";
 import transformFrag from "../../glsl/transform-effect.frag";
 import transmuteFrag from "../../glsl/transmute-effect.frag";
 import waveshapeFrag from "../../glsl/waveshape-effect.frag";
+import modulatorPrecomputeFrag from "../../glsl/modulator-precompute.frag";
 import { withPlatformDefines } from "../shader-utils";
 
 // Measures the wall-clock cost of the first draw of each effect shader -- the
@@ -51,6 +52,8 @@ const EFFECT_FRAGS: { name: string; frag: string }[] = [
   { name: "waveshape", frag: waveshapeFrag },
   { name: "convolve", frag: convolveFrag },
   { name: "align", frag: alignFrag },
+  // The precompute pass now carries the heavy modulator evaluator (compiled once).
+  { name: "mod-precompute", frag: modulatorPrecomputeFrag },
 ];
 
 const TRIVIAL_FRAG = `precision highp float;

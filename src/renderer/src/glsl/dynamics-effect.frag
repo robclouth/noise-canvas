@@ -60,12 +60,8 @@ float applyDynamics(float inputDb, float thresholdDbValue, float upperRatioValue
 
 vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelDb) {
   // Per-pixel dB transforms — each channel receives its own curve.
-  bool used[NUM_MODULATORS];
-  for (int _mi = 0; _mi < NUM_MODULATORS; _mi++) {
-    used[_mi] = (thresholdDb.modulationAmounts[_mi] != 0.0) || (upperRatio.modulationAmounts[_mi] != 0.0) || (lowerRatio.modulationAmounts[_mi] != 0.0) || (knee.modulationAmounts[_mi] != 0.0) || (gainDb.modulationAmounts[_mi] != 0.0);
-  }
   vec2 mods[NUM_MODULATORS];
-  evalModulators(coords.dest, 0, audioLevelDb, used, mods);
+  sampleModulators(mods);
   vec2 thresholdDbValue = applyModulationCached(thresholdDb.value, thresholdDb.minValue, thresholdDb.maxValue, thresholdDb.modulationAmounts, thresholdDb.contextualModAmounts, thresholdDb.macroAmounts, mods);
   vec2 upperRatioValue = applyModulationCached(upperRatio.value, upperRatio.minValue, upperRatio.maxValue, upperRatio.modulationAmounts, upperRatio.contextualModAmounts, upperRatio.macroAmounts, mods);
   vec2 lowerRatioValue = applyModulationCached(lowerRatio.value, lowerRatio.minValue, lowerRatio.maxValue, lowerRatio.modulationAmounts, lowerRatio.contextualModAmounts, lowerRatio.macroAmounts, mods);

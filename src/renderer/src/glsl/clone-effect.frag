@@ -23,12 +23,8 @@ void main() {
 
     // Stereo-aware tap geometry + per-tap decay. When all are equal across
     // channels and source UVs match, the sample-once fast path triggers per tap.
-    bool used[NUM_MODULATORS];
-    for (int _mi = 0; _mi < NUM_MODULATORS; _mi++) {
-      used[_mi] = (cloneSpaceX.modulationAmounts[_mi] != 0.0) || (cloneSpaceY.modulationAmounts[_mi] != 0.0) || (cloneDecay.modulationAmounts[_mi] != 0.0);
-    }
     vec2 mods[NUM_MODULATORS];
-    evalModulators(coords.dest, 0, audioLevelDb, used, mods);
+    sampleModulators(mods);
     vec2 spaceX = applyModulationCached(cloneSpaceX.value, cloneSpaceX.minValue, cloneSpaceX.maxValue, cloneSpaceX.modulationAmounts, cloneSpaceX.contextualModAmounts, cloneSpaceX.macroAmounts, mods);
     vec2 spaceY = applyModulationCached(cloneSpaceY.value, cloneSpaceY.minValue, cloneSpaceY.maxValue, cloneSpaceY.modulationAmounts, cloneSpaceY.contextualModAmounts, cloneSpaceY.macroAmounts, mods);
     vec2 space = isXPass ? spaceX : spaceY;

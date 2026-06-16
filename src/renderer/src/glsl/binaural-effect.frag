@@ -67,12 +67,8 @@ vec4 sampleHrtf(float az, float bandFreqHz) {
 vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelDb) {
   // Binaural positioning is shared across channels (HRTF sampling geometry);
   // collapse modulation to scalar.
-  bool used[NUM_MODULATORS];
-  for (int _mi = 0; _mi < NUM_MODULATORS; _mi++) {
-    used[_mi] = (azimuth.modulationAmounts[_mi] != 0.0) || (distance.modulationAmounts[_mi] != 0.0) || (stereoAngle.modulationAmounts[_mi] != 0.0);
-  }
   vec2 mods[NUM_MODULATORS];
-  evalModulators(coords.dest, 0, audioLevelDb, used, mods);
+  sampleModulators(mods);
   float azValue = applyModulationCachedMono(
     azimuth.value, azimuth.minValue, azimuth.maxValue,
     azimuth.modulationAmounts, azimuth.contextualModAmounts, azimuth.macroAmounts,

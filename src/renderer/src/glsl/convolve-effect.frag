@@ -27,12 +27,8 @@ void main() {
   }
 
   // Convolution parameters drive tap geometry shared by both channels; keep mono.
-  bool used[NUM_MODULATORS];
-  for (int _mi = 0; _mi < NUM_MODULATORS; _mi++) {
-    used[_mi] = (convolveIrTimeOffset.modulationAmounts[_mi] != 0.0) || (convolveIrPitchShiftSemi.modulationAmounts[_mi] != 0.0) || (convolveIrRate.modulationAmounts[_mi] != 0.0) || (convolveGain.modulationAmounts[_mi] != 0.0);
-  }
   vec2 mods[NUM_MODULATORS];
-  evalModulators(coords.dest, 0, audioLevelDb, used, mods);
+  sampleModulators(mods);
   float irTimeOff = applyModulationCachedMono(
     convolveIrTimeOffset.value, convolveIrTimeOffset.minValue, convolveIrTimeOffset.maxValue,
     convolveIrTimeOffset.modulationAmounts, convolveIrTimeOffset.contextualModAmounts, convolveIrTimeOffset.macroAmounts,

@@ -25,12 +25,8 @@ void main() {
 
 
     // Per-channel dynamics scalars (applied to pre-computed L/R samples).
-    bool used[NUM_MODULATORS];
-    for (int _mi = 0; _mi < NUM_MODULATORS; _mi++) {
-      used[_mi] = (evolveFlow.modulationAmounts[_mi] != 0.0) || (evolveSpread.modulationAmounts[_mi] != 0.0) || (evolveGrow.modulationAmounts[_mi] != 0.0) || (evolveSwirl.modulationAmounts[_mi] != 0.0) || (evolveDriftX.modulationAmounts[_mi] != 0.0) || (evolveDriftY.modulationAmounts[_mi] != 0.0) || (evolveDecay.modulationAmounts[_mi] != 0.0) || (evolveScaleX.modulationAmounts[_mi] != 0.0) || (evolveScaleY.modulationAmounts[_mi] != 0.0);
-    }
     vec2 mods[NUM_MODULATORS];
-    evalModulators(coords.dest, 0, audioLevelDb, used, mods);
+    sampleModulators(mods);
     vec2 flow = applyModulationCached(evolveFlow.value, evolveFlow.minValue, evolveFlow.maxValue, evolveFlow.modulationAmounts, evolveFlow.contextualModAmounts, evolveFlow.macroAmounts, mods) / 100.0;
     vec2 spread = applyModulationCached(evolveSpread.value, evolveSpread.minValue, evolveSpread.maxValue, evolveSpread.modulationAmounts, evolveSpread.contextualModAmounts, evolveSpread.macroAmounts, mods) / 100.0;
     vec2 grow = applyModulationCached(evolveGrow.value, evolveGrow.minValue, evolveGrow.maxValue, evolveGrow.modulationAmounts, evolveGrow.contextualModAmounts, evolveGrow.macroAmounts, mods) / 100.0;

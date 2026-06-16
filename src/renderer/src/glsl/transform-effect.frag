@@ -40,12 +40,8 @@ void main() {
 
     // Resolve the geometric params as vec2 (L, R). When all modulators driving
     // them have stereoSpread == 0, .x == .y and the fast path below kicks in.
-    bool used[NUM_MODULATORS];
-    for (int _mi = 0; _mi < NUM_MODULATORS; _mi++) {
-      used[_mi] = (rotation.modulationAmounts[_mi] != 0.0) || (scaleX.modulationAmounts[_mi] != 0.0) || (scaleY.modulationAmounts[_mi] != 0.0) || (shiftX.modulationAmounts[_mi] != 0.0) || (shiftY.modulationAmounts[_mi] != 0.0);
-    }
     vec2 mods[NUM_MODULATORS];
-    evalModulators(coords.dest, 0, audioLevelDb, used, mods);
+    sampleModulators(mods);
     vec2 rotationValue = applyModulationCached(rotation.value, rotation.minValue, rotation.maxValue, rotation.modulationAmounts, rotation.contextualModAmounts, rotation.macroAmounts, mods);
     vec2 scaleXValue = applyModulationCached(scaleX.value, scaleX.minValue, scaleX.maxValue, scaleX.modulationAmounts, scaleX.contextualModAmounts, scaleX.macroAmounts, mods);
     vec2 scaleYValue = applyModulationCached(scaleY.value, scaleY.minValue, scaleY.maxValue, scaleY.modulationAmounts, scaleY.contextualModAmounts, scaleY.macroAmounts, mods);

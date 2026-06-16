@@ -23,6 +23,7 @@ import {
 import { copyMaterial } from "../components/copy-material";
 import { BaseEffect, CommonUniforms, defaultValues } from "../effects/base-effect";
 import maskUpdateFrag from "../glsl/mask-update.frag";
+import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { createEffectStateView, createStepStateView } from "../store";
 import {
@@ -142,6 +143,9 @@ export class StrokeRenderer {
   private strokeMaskFbo: WebGLRenderTarget;
   private strokeMaskFbo2: WebGLRenderTarget;
   private strokeStartFbo: WebGLRenderTarget;
+  // Two RGBA float targets (MRT) holding the precomputed per-pixel modulator
+  // outputs for the current step. tex[0] = (mod0.xy, mod1.xy); tex[1] = mod2.xy.
+  private modulatorFbo: WebGLRenderTarget;
 
   // Scene objects
   private fboScene: Scene;
@@ -150,6 +154,7 @@ export class StrokeRenderer {
 
   // Materials
   private maskMaterial: RawShaderMaterial;
+  private modulatorMaterial: RawShaderMaterial;
 
   // Preallocated buffer reused across mask-update iterations to avoid allocating
   // a fresh macro array on every step.
@@ -199,6 +204,25 @@ export class StrokeRenderer {
     this.strokeMaskFbo = this.createFBO(textureWidth, textureHeight, RedFormat);
     this.strokeMaskFbo2 = this.createFBO(textureWidth, textureHeight, RedFormat);
     this.strokeStartFbo = this.createFBO(textureWidth, textureHeight, RGBAFormat);
+
+    // Multi-render-target buffer for the precomputed modulator outputs.
+    this.modulatorFbo = new WebGLRenderTarget(textureWidth, textureHeight, {
+      count: 2,
+      format: RGBAFormat,
+      type: FloatType,
+      minFilter: NearestFilter,
+      magFilter: NearestFilter,
+    });
+
+    // Modulator precompute material — evaluates all modulators per pixel into
+    // modulatorFbo's two targets. Reuses the common-uniform set so the same
+    // modulator/source/dest uniforms drive it as the effects.
+    this.modulatorMaterial = new RawShaderMaterial({
+      uniforms: { ...UniformsUtils.clone(defaultValues) },
+      vertexShader: passThroughVert,
+      fragmentShader: withPlatformDefines(modulatorPrecomputeFrag),
+      glslVersion: GLSL3,
+    });
 
     // Create mask material
     this.maskMaterial = new RawShaderMaterial({
@@ -262,6 +286,27 @@ export class StrokeRenderer {
       minFilter: NearestFilter,
       magFilter: NearestFilter,
     });
+  }
+
+  /**
+   * Evaluates every modulator's stereo output per pixel into modulatorFbo's two
+   * targets, using the step's common uniforms. Effects then sample these textures
+   * instead of evaluating the modulators inline. Runs once per step.
+   */
+  private renderModulatorTextures(commonUniforms: CommonUniforms): void {
+    const m = this.modulatorMaterial;
+    for (const key in commonUniforms) {
+      const src = (commonUniforms as Record<string, { value: unknown } | undefined>)[key];
+      if (!src) continue;
+      if (key in m.uniforms) {
+        m.uniforms[key].value = src.value;
+      } else {
+        m.uniforms[key] = { value: src.value };
+      }
+    }
+    this.fboMesh.material = m;
+    this.gl.setRenderTarget(this.modulatorFbo);
+    this.gl.render(this.fboScene, this.camera);
   }
 
   /**
@@ -405,6 +450,9 @@ export class StrokeRenderer {
     );
 
     return {
+      // Filled in per step after the modulator precompute pass.
+      modulatorTex0: { value: null },
+      modulatorTex1: { value: null },
       sourceSpectrogramTex: { value: sourceFile.textures.packed.texture || placeholderTexture },
       sourceSpectrogramTextureSize: { value: sourceFile.spectrogramData.packedTextureSize },
       sourceInverseMapTex: { value: sourceFile.textures.inverse || placeholderTexture },
@@ -711,6 +759,9 @@ export class StrokeRenderer {
       tempFboA.scissorTest = true;
       tempFboB.scissor.copy(scissorVec);
       tempFboB.scissorTest = true;
+      // Only precompute modulators for the rows effects will actually read.
+      this.modulatorFbo.scissor.copy(scissorVec);
+      this.modulatorFbo.scissorTest = true;
     }
 
     // Generate random value seeded by position using Perlin noise
@@ -751,6 +802,13 @@ export class StrokeRenderer {
 
       // Override the source texture to use the correct input for this step
       commonUniforms.sourceSpectrogramTex.value = stepSourceFbo.texture;
+
+      // Precompute this step's modulator outputs into modulatorFbo, then point
+      // the effect uniforms at the resulting textures. Done once per step before
+      // any effect pass, so the expensive modulator evaluation happens once.
+      this.renderModulatorTextures(commonUniforms);
+      commonUniforms.modulatorTex0 = { value: this.modulatorFbo.textures[0] };
+      commonUniforms.modulatorTex1 = { value: this.modulatorFbo.textures[1] };
 
       // Get enabled effects in order for this step
       const stepEffects = stepState.effects as {
@@ -914,6 +972,7 @@ export class StrokeRenderer {
       destinationFbo.scissorTest = false;
       this.passFbo1.scissorTest = false;
       this.passFbo2.scissorTest = false;
+      this.modulatorFbo.scissorTest = false;
     }
 
     // If the stroke is not a preview, commit the changes
@@ -1080,6 +1139,14 @@ export class StrokeRenderer {
         "brushSkewPitch",
       );
 
+      // The mask shader samples the precomputed modulator textures (via
+      // getBrushWeight / applyModulation), so render them for this step first,
+      // then restore the mask material as the active program.
+      this.renderModulatorTextures(uniforms as unknown as CommonUniforms);
+      uniforms.modulatorTex0.value = this.modulatorFbo.textures[0];
+      uniforms.modulatorTex1.value = this.modulatorFbo.textures[1];
+      this.fboMesh.material = this.maskMaterial;
+
       const currentMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo : this.strokeMaskFbo2;
       const nextMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo2 : this.strokeMaskFbo;
       uniforms.currentMaskTex.value = currentMaskFbo.texture;
@@ -1238,6 +1305,8 @@ export class StrokeRenderer {
     this.strokeMaskFbo.dispose();
     this.strokeMaskFbo2.dispose();
     this.strokeStartFbo.dispose();
+    this.modulatorFbo.dispose();
     this.maskMaterial.dispose();
+    this.modulatorMaterial.dispose();
   }
 }

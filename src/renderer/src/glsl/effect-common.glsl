@@ -349,12 +349,8 @@ ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
   // Stereo-aware source UV offsets. When every modulator driving these params has
   // stereoSpread == 0, the two components of each vec2 are equal and sameSourceUv
   // falls out true — effects then take the single-sample fast path.
-  bool srcUsed[NUM_MODULATORS];
-  for (int i = 0; i < NUM_MODULATORS; i++) {
-    srcUsed[i] = (sourceTimeOffset.modulationAmounts[i] != 0.0) || (sourcePitchOffset.modulationAmounts[i] != 0.0);
-  }
   vec2 srcMods[NUM_MODULATORS];
-  evalModulators(uvs.dest, 0, 0.0, srcUsed, srcMods);
+  sampleModulators(srcMods);
   vec2 modTimeOff = applyModulationCached(
     sourceTimeOffset.value, sourceTimeOffset.minValue, sourceTimeOffset.maxValue,
     sourceTimeOffset.modulationAmounts, sourceTimeOffset.contextualModAmounts, sourceTimeOffset.macroAmounts,
@@ -700,13 +696,8 @@ vec2 getBrushWeight(vec2 unpackedUv, float audioLevelDb) {
   vec2 off = getEffectiveBrushOffset(unpackedUv);
   vec2 safeBrush = max(vec2(EPSILON), brushSizeUv);
 
-  bool brushUsed[NUM_MODULATORS];
-  for (int i = 0; i < NUM_MODULATORS; i++) {
-    brushUsed[i] = (brushCurveTime.modulationAmounts[i] != 0.0) || (brushSkewTime.modulationAmounts[i] != 0.0)
-                || (brushCurvePitch.modulationAmounts[i] != 0.0) || (brushSkewPitch.modulationAmounts[i] != 0.0);
-  }
   vec2 brushMods[NUM_MODULATORS];
-  evalModulators(unpackedUv, 0, audioLevelDb, brushUsed, brushMods);
+  sampleModulators(brushMods);
   vec2 curveX = applyModulationCached(
     brushCurveTime.value, brushCurveTime.minValue, brushCurveTime.maxValue,
     brushCurveTime.modulationAmounts, brushCurveTime.contextualModAmounts, brushCurveTime.macroAmounts, brushMods
@@ -792,12 +783,8 @@ vec4 applyBrush(vec4 original, vec4 modified, vec2 weight, vec2 destUv, vec2 pac
 
   float audioLevelDb = getAudioLevelDb(destUv);
 
-  bool brushUsed[NUM_MODULATORS];
-  for (int i = 0; i < NUM_MODULATORS; i++) {
-    brushUsed[i] = (brushIntensity.modulationAmounts[i] != 0.0) || (brushPan.modulationAmounts[i] != 0.0);
-  }
   vec2 brushMods[NUM_MODULATORS];
-  evalModulators(destUv, 0, audioLevelDb, brushUsed, brushMods);
+  sampleModulators(brushMods);
   vec2 intensity = applyModulationCached(
     brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue,
     brushIntensity.modulationAmounts, brushIntensity.contextualModAmounts, brushIntensity.macroAmounts, brushMods
