@@ -643,7 +643,12 @@ const FileRendererInner = memo(
           textures: resolvedSourceTextures,
         };
 
-        // Render the stroke using StrokeRenderer
+        // Render the stroke using StrokeRenderer. Opt-in timing (set
+        // window.__paintTiming = true in the console) forces a GPU sync so the
+        // logged duration reflects real stroke cost — useful for comparing
+        // upper- vs lower-band paint latency.
+        const paintTiming = (globalThis as { __paintTiming?: boolean }).__paintTiming === true;
+        const paintT0 = paintTiming ? performance.now() : 0;
         strokeRenderer.renderStroke(
           {
             cursorPos,
@@ -661,6 +666,10 @@ const FileRendererInner = memo(
           state,
           sourceFileInfo,
         );
+        if (paintTiming) {
+          strokeRenderer.finishGpu();
+          console.log(`[paint] stroke ${(performance.now() - paintT0).toFixed(2)}ms`);
+        }
 
         if (!preview) {
           displayMode.current = "committed";

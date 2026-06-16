@@ -10,6 +10,15 @@ layout(location = 1) out vec4 outMod1;
 
 void main() {
   vec2 destUv = packedToUnpackedUv(destInverseMapTex, vUv, destFrameCount, destBandCount);
+
+  // Effects sample these targets only inside the brush footprint, so pixels the
+  // brush cannot reach never have their modulators read — skip evaluating them.
+  if (brushWeightIsZero(destUv)) {
+    outColor = vec4(0.0);
+    outMod1 = vec4(0.0);
+    return;
+  }
+
   float audioLevelDb = getAudioLevelDb(destUv);
 
   vec2 m0 = getModulation(destUv, 0, true, audioLevelDb);

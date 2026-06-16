@@ -759,6 +759,22 @@ bool isInsideSourceBrush(vec2 sourceUv) {
   return isInsideBrush(sourceUvToDestUv(sourceUv));
 }
 
+// Conservative test for fragments whose brush weight is provably zero, derived
+// from getBrushWeight's exact zero conditions: weightY is zero when off.y leaves
+// [0, brushSizeUv.y], weightX is zero when the bin [off.x, off.x+binWidth] does
+// not overlap the brush span [0, brushSizeUv.x]. Runs before the expensive
+// per-fragment work (modulator sampling, source reads), so the large packed
+// regions outside the brush — which dominate high-frequency bands where the
+// scissor over-covers — bail after one unpack and metadata fetch. Never rejects
+// a fragment that getBrushWeight would score above zero.
+bool brushWeightIsZero(vec2 unpackedUv) {
+  vec2 off = getEffectiveBrushOffset(unpackedUv);
+  float binWidth = exp2(getDestMetadata(unpackedUv).b) / destFrameCount;
+  float safeBrushY = max(EPSILON, brushSizeUv.y);
+  return off.y < 0.0 || off.y > safeBrushY
+      || off.x >= brushSizeUv.x || off.x + binWidth <= 0.0;
+}
+
 // Applies the final brush effect, combining original and modified data.
 // packedUv is the raw texture coordinate (vUv), destUv is the unpacked spectrogram coordinate
 // weight is vec2(L, R) — each channel carries its own brush envelope weight so

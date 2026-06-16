@@ -79,6 +79,12 @@ void main() {
     ivec2 myPixel = clamp(ivec2(floor(vUv * vec2(texSize))), ivec2(0), texSize - ivec2(1));
     vec4 currentTexel = texelFetch(destSpectrogramTex, myPixel, 0);
 
+    vec2 destUv = packedToUnpackedUv(destInverseMapTex, vUv, destFrameCount, destBandCount);
+    if (brushWeightIsZero(destUv)) {
+        outColor = currentTexel;
+        return;
+    }
+
     ProcessingUvs coords = getProcessingUvs(vUv);
     float audioLevelDb = getAudioLevelDb(coords.dest);
     vec2 weight = getBrushWeight(coords.dest, audioLevelDb);

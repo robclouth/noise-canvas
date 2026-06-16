@@ -1232,6 +1232,12 @@ export class StrokeRenderer {
     return isPreview ? nextFBO.texture : currentFBO.texture;
   }
 
+  // Blocks until all GPU work submitted so far has finished. Lets opt-in paint
+  // timing attribute true GPU cost to a stroke instead of just the JS dispatch.
+  finishGpu(): void {
+    this.gl.getContext().finish();
+  }
+
   /**
    * Begin a new stroke (snapshot current state).
    */

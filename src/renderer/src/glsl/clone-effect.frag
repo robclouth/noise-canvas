@@ -10,6 +10,11 @@ uniform int cloneDirectionMode; // 0=forward/up, 1=middle, 2=backward/down
 uniform int cloneEdgeMode;
 
 void main() {
+    vec2 destUv = packedToUnpackedUv(destInverseMapTex, vUv, destFrameCount, destBandCount);
+    if (brushWeightIsZero(destUv)) {
+        outColor = texture(destSpectrogramTex, vUv);
+        return;
+    }
     ProcessingUvs coords = getProcessingUvs(vUv);
     vec4 originalTexel = texture(destSpectrogramTex, vUv);
     float audioLevelDb = getAudioLevelDb(coords.dest);
