@@ -5,6 +5,7 @@ import { BrushStep, getParameterDef, isEffectParameter, isStepParameter, paramet
 import { produce } from "immer";
 import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
+import type { PersistStorage, StorageValue } from "zustand/middleware";
 import { createAppSlice } from "./app";
 import { AUDIO_PERSISTED_KEYS, createAudioSlice } from "./audio";
 import { createBrushSlice } from "./brush";
@@ -37,6 +38,55 @@ export const ALL_PERSISTED_KEYS: (keyof State)[] = [
   "randomizationAmounts",
   "excludedFromRandomization",
 ];
+
+// localStorage-backed persistence that coalesces rapid writes. Each store change
+// (e.g. one update per frame while dragging a parameter slider) would otherwise
+// serialize the whole persisted slice and write it synchronously. This defers
+// the serialize-and-write to a single trailing write, and flushes any pending
+// write when the page is hidden or unloaded so the latest state is never lost.
+function createDebouncedStorage<S>(delayMs: number): PersistStorage<S> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let pending: { name: string; value: StorageValue<S> } | null = null;
+
+  const flush = () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (pending) {
+      localStorage.setItem(pending.name, JSON.stringify(pending.value));
+      pending = null;
+    }
+  };
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") flush();
+    });
+  }
+
+  return {
+    getItem: (name) => {
+      const str = localStorage.getItem(name);
+      return str ? (JSON.parse(str) as StorageValue<S>) : null;
+    },
+    setItem: (name, value) => {
+      pending = { name, value };
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(flush, delayMs);
+    },
+    removeItem: (name) => {
+      pending = null;
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      localStorage.removeItem(name);
+    },
+  };
+}
 
 export const useStore = create<State>()(
   subscribeWithSelector(
@@ -177,6 +227,7 @@ export const useStore = create<State>()(
       }),
       {
         name: "noise-canvas-storage",
+        storage: createDebouncedStorage(300),
         partialize: (state) => {
           const picked = Object.entries(state).reduce(
             (acc, [key, value]) => {
