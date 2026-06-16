@@ -83,6 +83,30 @@ function createSeqDataTexture(seqDataStr: string): DataTexture {
   return seqDataTex;
 }
 
+// Sequencer value index in MODULATOR_MODES (Pattern, Envelope, Sequencer).
+const SEQUENCER_MODE = 2;
+
+// Sequencer value textures keyed by their serialized data, so a paint drag
+// reuses one GPU texture instead of allocating (and leaking) a fresh one every
+// step. The data string only changes when the user edits the sequencer, so the
+// map stays tiny. Modulators not in sequencer mode never sample this texture, so
+// they all share a single empty placeholder.
+const seqDataTexCache = new Map<string, DataTexture>();
+let emptySeqDataTex: DataTexture | null = null;
+
+function getSeqDataTexture(mode: number, seqDataStr: string): DataTexture {
+  if (mode !== SEQUENCER_MODE) {
+    if (!emptySeqDataTex) emptySeqDataTex = createSeqDataTexture("{}");
+    return emptySeqDataTex;
+  }
+  let tex = seqDataTexCache.get(seqDataStr);
+  if (!tex) {
+    tex = createSeqDataTexture(seqDataStr);
+    seqDataTexCache.set(seqDataStr, tex);
+  }
+  return tex;
+}
+
 export const buildModulatorUniforms = (
   bpm: number,
   totalDuration: number,
@@ -239,7 +263,7 @@ export const buildModulatorUniforms = (
       })(),
       seqDataTex: (() => {
         const seqDataStr = (state[`modulator${i + 1}SeqData`] as string) || "{}";
-        return createSeqDataTexture(seqDataStr);
+        return getSeqDataTexture(mode, seqDataStr);
       })(),
     });
   }
