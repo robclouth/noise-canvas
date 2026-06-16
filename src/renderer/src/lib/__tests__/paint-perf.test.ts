@@ -336,22 +336,34 @@ describe.skipIf(!RUN_PROFILE)("paint perf profile", () => {
     // Per-render timings (with a GPU sync each) so we can see mean vs max — a
     // mean far above the max-of-most reveals periodic spikes (accumulation),
     // versus a steady high cost.
-    const timeModed = (effect: EffectType, scenario: Scenario, modulated: boolean): { mean: number; max: number } => {
+    // Each render moves the brush (like dragging the mouse) and uses preview
+    // mode — the real per-frame preview path. A fixed position lets the driver
+    // cache results and hides the per-frame cost.
+    const movingParams = (scenario: Scenario, t: number): StrokeParams => ({
+      ...paramsFor(scenario),
+      preview: true,
+      cursorPos: new Vector2(0.1 + 0.8 * t, scenario.cursor.y),
+    });
+    const timeModed = (
+      effect: EffectType,
+      scenario: Scenario,
+      modulated: boolean,
+    ): { med: number; mean: number; max: number } => {
       const state = buildModState(effect, scenario, modulated);
-      const params = paramsFor(scenario);
-      for (let i = 0; i < 5; i++) h.renderer.renderStroke(params, state, h.sourceFile);
+      for (let i = 0; i < 5; i++) h.renderer.renderStroke(movingParams(scenario, i / 40), state, h.sourceFile);
       h.renderer.finishGpu();
       const samples: number[] = [];
       for (let i = 0; i < 40; i++) {
         const t0 = performance.now();
-        h.renderer.renderStroke(params, state, h.sourceFile);
+        h.renderer.renderStroke(movingParams(scenario, i / 40), state, h.sourceFile);
         h.renderer.finishGpu();
         samples.push(performance.now() - t0);
       }
       const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
-      return { mean, max: Math.max(...samples) };
+      return { med: median(samples), mean, max: Math.max(...samples) };
     };
-    const fmtCell = (c: { mean: number; max: number }) => `${c.mean.toFixed(1)}/${c.max.toFixed(0)}`.padStart(16);
+    const fmtCell = (c: { med: number; mean: number; max: number }) =>
+      `${c.med.toFixed(0)}/${c.mean.toFixed(0)}/${c.max.toFixed(0)}`.padStart(16);
 
     // Confirm the modulated state actually engages the precompute pass.
     const engaged = hasActiveModulatorRouting(createStepStateView(buildModState("synthesize", SCENARIOS[0], true), 0));
@@ -366,7 +378,7 @@ describe.skipIf(!RUN_PROFILE)("paint perf profile", () => {
     out += `GPU (unmasked): ${unmasked}\n`;
     out += `texture: ${h.data.textureWidth}x${h.data.textureHeight} (${((h.data.textureWidth * h.data.textureHeight) / 1e6).toFixed(1)}M px), numFrames=${h.data.numFrames}, numBands=${h.data.numBands}\n`;
     out += `modulation actually engaged: ${engaged}\n`;
-    out += `cells are mean/max ms per render\n`;
+    out += `cells are median/mean/max ms per render\n`;
     out += `${"effect".padEnd(12)} ${modScenarios.map((s) => `${s.label} off`.padStart(16)).join(" ")} ${modScenarios.map((s) => `${s.label} SINE`.padStart(16)).join(" ")}\n`;
     for (const effect of modEffects) {
       const off = modScenarios.map((s) => fmtCell(timeModed(effect, s, false)));
