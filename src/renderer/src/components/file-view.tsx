@@ -1,4 +1,5 @@
 import { useStore } from "@/store";
+import { useTransientStore } from "@renderer/store/transient";
 import { Box, Loader, Text } from "@mantine/core";
 import { View } from "@react-three/drei";
 import { openFiles } from "@renderer/store/files";
@@ -384,9 +385,9 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       ) {
         // Convert to beats/pitch and update cursor position
         const { beats, pitch } = uvToBeatsAndPitch(snappedX, snappedY);
-        state.setCursorPosition({ beats, pitch });
-        state.setCursorVisible(true);
-        state.setHoveredFile(fileId);
+        useTransientStore.getState().setCursorPosition({ beats, pitch });
+        useTransientStore.getState().setCursorVisible(true);
+        useTransientStore.getState().setHoveredFile(fileId);
         lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
 
         // Only call renderStroke when actually dragging (applying stroke)
@@ -411,9 +412,9 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       const [snappedX, snappedY] = coords;
 
       const { beats, pitch } = uvToBeatsAndPitch(snappedX, snappedY);
-      state.setCursorPosition({ beats, pitch });
-      state.setCursorVisible(true);
-      state.setHoveredFile(fileId);
+      useTransientStore.getState().setCursorPosition({ beats, pitch });
+      useTransientStore.getState().setCursorVisible(true);
+      useTransientStore.getState().setHoveredFile(fileId);
       lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
 
       if (rendererRef.current) {
@@ -428,10 +429,9 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     // Don't clear state if we're in the middle of a stroke - we'll handle it via window events
     if (isStrokingRef.current) return;
 
-    const state = useStore.getState();
     // Hide cursor when mouse leaves, but keep position so keyboard can resume from here
-    state.setCursorVisible(false);
-    state.setHoveredFile(null);
+    useTransientStore.getState().setCursorVisible(false);
+    useTransientStore.getState().setHoveredFile(null);
     rendererRef.current?.clearPreview();
     lastSnappedPositionRef.current = null;
   }, []);
@@ -469,7 +469,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         state.setIsStroking(true);
         rendererRef.current.beginStroke();
         const { beats, pitch } = uvToBeatsAndPitch(coords[0], coords[1]);
-        state.setCursorPosition({ beats, pitch });
+        useTransientStore.getState().setCursorPosition({ beats, pitch });
 
         const [blX, blY] = aimToBrushBlUv({ x: coords[0], y: coords[1] }, fileId, bpm);
 
@@ -611,7 +611,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
       // Update cursor position
       const { beats, pitch } = uvToBeatsAndPitch(snappedX, snappedY);
-      state.setCursorPosition({ beats, pitch });
+      useTransientStore.getState().setCursorPosition({ beats, pitch });
       lastSnappedPositionRef.current = { x: snappedX, y: snappedY };
 
       // Only render if position actually changed (prevents duplicate iterations at same grid cell)
@@ -624,9 +624,8 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       if (event.button === 0 && isStrokingRef.current) {
         await finishStroke();
         // Clean up cursor state since we're outside the element
-        const state = useStore.getState();
-        state.setCursorVisible(false);
-        state.setHoveredFile(null);
+        useTransientStore.getState().setCursorVisible(false);
+        useTransientStore.getState().setHoveredFile(null);
         rendererRef.current?.clearPreview();
         lastSnappedPositionRef.current = null;
       }

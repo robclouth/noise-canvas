@@ -100,7 +100,6 @@ export function createMockState(overrides: Partial<State> = {}): State {
     sourceFile: null,
     sourcePositionMode: "fixed",
     sourceDataMode: "current",
-    cursorPosition: null,
 
     // Effects
     effects: [
