@@ -27,25 +27,31 @@ void main() {
   }
 
   // Convolution parameters drive tap geometry shared by both channels; keep mono.
-  float irTimeOff = applyModulationMono(
+  bool used[NUM_MODULATORS];
+  for (int _mi = 0; _mi < NUM_MODULATORS; _mi++) {
+    used[_mi] = (convolveIrTimeOffset.modulationAmounts[_mi] != 0.0) || (convolveIrPitchShiftSemi.modulationAmounts[_mi] != 0.0) || (convolveIrRate.modulationAmounts[_mi] != 0.0) || (convolveGain.modulationAmounts[_mi] != 0.0);
+  }
+  vec2 mods[NUM_MODULATORS];
+  evalModulators(coords.dest, 0, audioLevelDb, used, mods);
+  float irTimeOff = applyModulationCachedMono(
     convolveIrTimeOffset.value, convolveIrTimeOffset.minValue, convolveIrTimeOffset.maxValue,
     convolveIrTimeOffset.modulationAmounts, convolveIrTimeOffset.contextualModAmounts, convolveIrTimeOffset.macroAmounts,
-    coords.dest, 0, audioLevelDb
+    mods
   );
-  float irPitchShiftSemi = applyModulationMono(
+  float irPitchShiftSemi = applyModulationCachedMono(
     convolveIrPitchShiftSemi.value, convolveIrPitchShiftSemi.minValue, convolveIrPitchShiftSemi.maxValue,
     convolveIrPitchShiftSemi.modulationAmounts, convolveIrPitchShiftSemi.contextualModAmounts, convolveIrPitchShiftSemi.macroAmounts,
-    coords.dest, 0, audioLevelDb
+    mods
   );
-  float rate = applyModulationMono(
+  float rate = applyModulationCachedMono(
     convolveIrRate.value, convolveIrRate.minValue, convolveIrRate.maxValue,
     convolveIrRate.modulationAmounts, convolveIrRate.contextualModAmounts, convolveIrRate.macroAmounts,
-    coords.dest, 0, audioLevelDb
+    mods
   );
-  float gain = applyModulationMono(
+  float gain = applyModulationCachedMono(
     convolveGain.value, convolveGain.minValue, convolveGain.maxValue,
     convolveGain.modulationAmounts, convolveGain.contextualModAmounts, convolveGain.macroAmounts,
-    coords.dest, 0, audioLevelDb
+    mods
   );
 
   // ---- Hoisted band metadata ------------------------------------------------

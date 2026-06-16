@@ -30,10 +30,16 @@ void main() {
     // Stereo-aware kernel params. When all modulators driving these have
     // stereoSpread == 0 the two components of each vec2 are equal and the
     // per-sample fast path picks the single-read branch.
-    vec2 blurSizeXValue = applyModulation(blurSizeX.value, blurSizeX.minValue, blurSizeX.maxValue, blurSizeX.modulationAmounts, blurSizeX.contextualModAmounts, blurSizeX.macroAmounts, coords.dest, 0, audioLevelDb);
-    vec2 blurSizeYValue = applyModulation(blurSizeY.value, blurSizeY.minValue, blurSizeY.maxValue, blurSizeY.modulationAmounts, blurSizeY.contextualModAmounts, blurSizeY.macroAmounts, coords.dest, 0, audioLevelDb);
-    vec2 blurNoiseXValue = applyModulation(blurNoiseX.value, blurNoiseX.minValue, blurNoiseX.maxValue, blurNoiseX.modulationAmounts, blurNoiseX.contextualModAmounts, blurNoiseX.macroAmounts, coords.dest, 0, audioLevelDb);
-    vec2 blurNoiseYValue = applyModulation(blurNoiseY.value, blurNoiseY.minValue, blurNoiseY.maxValue, blurNoiseY.modulationAmounts, blurNoiseY.contextualModAmounts, blurNoiseY.macroAmounts, coords.dest, 0, audioLevelDb);
+    bool used[NUM_MODULATORS];
+    for (int _mi = 0; _mi < NUM_MODULATORS; _mi++) {
+      used[_mi] = (blurSizeX.modulationAmounts[_mi] != 0.0) || (blurSizeY.modulationAmounts[_mi] != 0.0) || (blurNoiseX.modulationAmounts[_mi] != 0.0) || (blurNoiseY.modulationAmounts[_mi] != 0.0);
+    }
+    vec2 mods[NUM_MODULATORS];
+    evalModulators(coords.dest, 0, audioLevelDb, used, mods);
+    vec2 blurSizeXValue = applyModulationCached(blurSizeX.value, blurSizeX.minValue, blurSizeX.maxValue, blurSizeX.modulationAmounts, blurSizeX.contextualModAmounts, blurSizeX.macroAmounts, mods);
+    vec2 blurSizeYValue = applyModulationCached(blurSizeY.value, blurSizeY.minValue, blurSizeY.maxValue, blurSizeY.modulationAmounts, blurSizeY.contextualModAmounts, blurSizeY.macroAmounts, mods);
+    vec2 blurNoiseXValue = applyModulationCached(blurNoiseX.value, blurNoiseX.minValue, blurNoiseX.maxValue, blurNoiseX.modulationAmounts, blurNoiseX.contextualModAmounts, blurNoiseX.macroAmounts, mods);
+    vec2 blurNoiseYValue = applyModulationCached(blurNoiseY.value, blurNoiseY.minValue, blurNoiseY.maxValue, blurNoiseY.modulationAmounts, blurNoiseY.contextualModAmounts, blurNoiseY.macroAmounts, mods);
 
     bool sameKernel = (blurSizeXValue.x == blurSizeXValue.y)
                    && (blurSizeYValue.x == blurSizeYValue.y)

@@ -6,15 +6,21 @@ uniform Parameter transmuteAmount;
 uniform Parameter transmuteCurve;
 
 vec4 applyEffectStroke(vec4 src, ProcessingUvs coords, float audioLevelDb) {
-  vec2 amount = applyModulation(
+  bool used[NUM_MODULATORS];
+  for (int _mi = 0; _mi < NUM_MODULATORS; _mi++) {
+    used[_mi] = (transmuteAmount.modulationAmounts[_mi] != 0.0) || (transmuteCurve.modulationAmounts[_mi] != 0.0);
+  }
+  vec2 mods[NUM_MODULATORS];
+  evalModulators(coords.dest, 0, audioLevelDb, used, mods);
+  vec2 amount = applyModulationCached(
     transmuteAmount.value, transmuteAmount.minValue, transmuteAmount.maxValue,
     transmuteAmount.modulationAmounts, transmuteAmount.contextualModAmounts, transmuteAmount.macroAmounts,
-    coords.dest, 0, audioLevelDb
+    mods
   );
-  vec2 curve = applyModulation(
+  vec2 curve = applyModulationCached(
     transmuteCurve.value, transmuteCurve.minValue, transmuteCurve.maxValue,
     transmuteCurve.modulationAmounts, transmuteCurve.contextualModAmounts, transmuteCurve.macroAmounts,
-    coords.dest, 0, audioLevelDb
+    mods
   );
 
   float magL   = src.x;
