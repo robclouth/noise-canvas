@@ -175,6 +175,110 @@ export function createMockSpectrogramData(options: MockSpectrogramOptions = {}):
 }
 
 /**
+ * Creates mock SpectrogramData with realistic constant-Q packing, where each
+ * octave toward lower frequency is time-downsampled by another power of two.
+ * High-frequency bands (low band index) therefore hold many more time-frames
+ * than low ones, and the packed layout stacks variable-length bands — exactly
+ * the property that makes the scissor over-cover the upper bands. The simpler
+ * createMockSpectrogramData gives every band the same length and cannot
+ * reproduce that, so it is unsuitable for paint-latency profiling.
+ */
+export function createConstantQMockSpectrogramData(
+  options: {
+    topFrames?: number;
+    numBands?: number;
+    bandsPerOctave?: number;
+    sampleRate?: number;
+    minFreq?: number;
+    constantMagnitude?: number;
+  } = {},
+): SpectrogramData {
+  const {
+    topFrames = 8192,
+    numBands = 216,
+    bandsPerOctave = 24,
+    sampleRate = 44100,
+    minFreq = 20,
+    constantMagnitude = 0.5,
+  } = options;
+
+  const bandLengths = new Uint32Array(numBands);
+  const bandStepLog2s = new Int32Array(numBands);
+  const bandOffsets = new Uint32Array(numBands);
+
+  let offset = 0;
+  for (let band = 0; band < numBands; band++) {
+    // Band 0 is the highest frequency (Gaborator convention) and keeps full
+    // time resolution; each octave down doubles the time stride.
+    const exp = Math.floor(band / bandsPerOctave);
+    const len = Math.max(1, Math.round(topFrames / Math.pow(2, exp)));
+    bandStepLog2s[band] = exp;
+    bandLengths[band] = len;
+    bandOffsets[band] = offset;
+    offset += len;
+  }
+  const totalPacked = offset;
+
+  const textureWidth = Math.ceil(Math.sqrt(totalPacked));
+  const textureHeight = Math.ceil(totalPacked / textureWidth);
+
+  const packedData = new Float32Array(textureWidth * textureHeight * 4);
+  for (let i = 0; i < totalPacked; i++) {
+    const baseIndex = i * 4;
+    packedData[baseIndex] = constantMagnitude;
+    packedData[baseIndex + 2] = constantMagnitude;
+  }
+
+  // Inverse map: packed linear index -> (full-res frame, band). Padding pixels
+  // beyond the packed data map to the lowest band at frame 0, outside any
+  // realistic brush footprint.
+  const inverseMap = new Float32Array(textureWidth * textureHeight * 2);
+  for (let i = 0; i < textureWidth * textureHeight; i++) {
+    inverseMap[i * 2] = 0;
+    inverseMap[i * 2 + 1] = numBands - 1;
+  }
+  for (let band = 0; band < numBands; band++) {
+    const start = bandOffsets[band];
+    const len = bandLengths[band];
+    const step = Math.pow(2, bandStepLog2s[band]);
+    for (let k = 0; k < len; k++) {
+      const idx = start + k;
+      inverseMap[idx * 2] = k * step;
+      inverseMap[idx * 2 + 1] = band;
+    }
+  }
+
+  const metadata = new Float32Array(numBands * 4);
+  for (let band = 0; band < numBands; band++) {
+    const baseIndex = band * 4;
+    metadata[baseIndex] = bandOffsets[band];
+    metadata[baseIndex + 1] = bandLengths[band];
+    metadata[baseIndex + 2] = bandStepLog2s[band];
+    metadata[baseIndex + 3] = minFreq * Math.pow(2, (numBands - 1 - band) / bandsPerOctave);
+  }
+
+  return {
+    packedData,
+    inverseMap,
+    metadata,
+    textureWidth,
+    textureHeight,
+    numFrames: topFrames,
+    numBands,
+    numChannels: 2,
+    sampleRate,
+    packedTextureSize: new Vector2(textureWidth, textureHeight),
+    minFreq,
+    bandsPerOctave,
+    synthesisMetadata: {
+      bandOffsets,
+      bandStepLog2s,
+      bandLengths,
+    },
+  };
+}
+
+/**
  * Creates a mock spectrogram with a specific test pattern.
  * Useful for testing that strokes are applied to the correct region.
  */

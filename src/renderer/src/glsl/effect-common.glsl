@@ -768,11 +768,15 @@ bool isInsideSourceBrush(vec2 sourceUv) {
 // scissor over-covers — bail after one unpack and metadata fetch. Never rejects
 // a fragment that getBrushWeight would score above zero.
 bool brushWeightIsZero(vec2 unpackedUv) {
+#ifdef ABLATE_BRUSH_REJECT
+  return false;
+#else
   vec2 off = getEffectiveBrushOffset(unpackedUv);
   float binWidth = exp2(getDestMetadata(unpackedUv).b) / destFrameCount;
   float safeBrushY = max(EPSILON, brushSizeUv.y);
   return off.y < 0.0 || off.y > safeBrushY
       || off.x >= brushSizeUv.x || off.x + binWidth <= 0.0;
+#endif
 }
 
 // Applies the final brush effect, combining original and modified data.
