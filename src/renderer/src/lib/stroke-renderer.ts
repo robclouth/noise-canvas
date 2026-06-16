@@ -30,6 +30,7 @@ import {
   getContextualModAmountsNormalized,
   getMacroAmountValuesNormalized,
   getModAmountValuesNormalized,
+  hasActiveModulatorRouting,
 } from "../store/modulators";
 import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
@@ -805,10 +806,17 @@ export class StrokeRenderer {
 
       // Precompute this step's modulator outputs into modulatorFbo, then point
       // the effect uniforms at the resulting textures. Done once per step before
-      // any effect pass, so the expensive modulator evaluation happens once.
-      this.renderModulatorTextures(commonUniforms);
-      commonUniforms.modulatorTex0 = { value: this.modulatorFbo.textures[0] };
-      commonUniforms.modulatorTex1 = { value: this.modulatorFbo.textures[1] };
+      // any effect pass, so the expensive modulator evaluation happens once. When
+      // nothing routes to a modulator, every consumer multiplies its output by
+      // zero, so skip the pass and bind the zero placeholder instead.
+      if (hasActiveModulatorRouting(stepState)) {
+        this.renderModulatorTextures(commonUniforms);
+        commonUniforms.modulatorTex0 = { value: this.modulatorFbo.textures[0] };
+        commonUniforms.modulatorTex1 = { value: this.modulatorFbo.textures[1] };
+      } else {
+        commonUniforms.modulatorTex0 = { value: this.textures.placeholderTexture };
+        commonUniforms.modulatorTex1 = { value: this.textures.placeholderTexture };
+      }
 
       // Get enabled effects in order for this step
       const stepEffects = stepState.effects as {
@@ -1141,10 +1149,16 @@ export class StrokeRenderer {
 
       // The mask shader samples the precomputed modulator textures (via
       // getBrushWeight / applyModulation), so render them for this step first,
-      // then restore the mask material as the active program.
-      this.renderModulatorTextures(uniforms as unknown as CommonUniforms);
-      uniforms.modulatorTex0.value = this.modulatorFbo.textures[0];
-      uniforms.modulatorTex1.value = this.modulatorFbo.textures[1];
+      // then restore the mask material as the active program. Skip the pass when
+      // nothing routes to a modulator (zero placeholder yields the same result).
+      if (hasActiveModulatorRouting(stepState)) {
+        this.renderModulatorTextures(uniforms as unknown as CommonUniforms);
+        uniforms.modulatorTex0.value = this.modulatorFbo.textures[0];
+        uniforms.modulatorTex1.value = this.modulatorFbo.textures[1];
+      } else {
+        uniforms.modulatorTex0.value = this.textures.placeholderTexture;
+        uniforms.modulatorTex1.value = this.textures.placeholderTexture;
+      }
       this.fboMesh.material = this.maskMaterial;
 
       const currentMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo : this.strokeMaskFbo2;

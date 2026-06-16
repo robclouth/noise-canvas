@@ -157,6 +157,20 @@ export function getModAmountValuesNormalized(state: ModulatorsState, paramKey: P
   return keys.map((key) => (state[key] as number) / 100);
 }
 
+// True when any modulatable parameter routes to a modulator with a nonzero
+// amount. When false, every modulator output is multiplied by zero at every
+// consumer, so the precomputed modulator textures are never read and the
+// precompute pass can be skipped. Macro and contextual modulation do not use
+// those textures, so they are unaffected by this check.
+export function hasActiveModulatorRouting(state: ModulatorsState): boolean {
+  for (const [key, def] of Object.entries(parameterDefs)) {
+    if (def.kind !== "number" || !def.modulatable) continue;
+    const amounts = getModAmountValuesNormalized(state, key as ParameterKey);
+    if (amounts.some((amount) => amount !== 0)) return true;
+  }
+  return false;
+}
+
 // Get contextual mod amount parameter keys for a given parameter
 export function getContextualModAmountParamKeys(paramKey: ParameterKey) {
   return CONTEXTUAL_MOD_SOURCES.map((source) => `${paramKey}Mod${source.key}`) as ParameterKey[];
