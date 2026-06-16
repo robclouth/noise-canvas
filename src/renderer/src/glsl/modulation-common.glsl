@@ -301,9 +301,35 @@ float applyNestedMacro(float current, Parameter p, float macroVal, int m) {
   return mix(current, mix(minV, maxV, macroVal), clamp(abs(a), 0.0, 1.0));
 }
 
-vec2 getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, float audioLevelDb) {
+// Evaluates each modulator's own scalar output at uv with no nesting. These are
+// the sources consumed by one level of nested modulation. The result depends
+// only on the source modulator and uv, not on which modulator consumes it, so a
+// caller computes this once and shares it across every consuming modulator
+// instead of re-evaluating the same sources per consumer.
+void evalNestedSources(vec2 uv, float audioLevelDb, out float nested[NUM_MODULATORS]) {
+  for (int i = 0; i < NUM_MODULATORS; i++) {
+    nested[i] = evalModulatorAtUv(uv, i,
+      modulators[i].modulatorPatternRateX.value,
+      modulators[i].modulatorPatternRateY.value,
+      modulators[i].modulatorStrength.value,
+      modulators[i].modulatorRotation.value,
+      modulators[i].modulatorPhaseX.value,
+      modulators[i].modulatorPhaseY.value,
+      modulators[i].seqLoopX.value,
+      modulators[i].seqLoopY.value,
+      modulators[i].seqSwing.value,
+      audioLevelDb);
+  }
+}
+
+// Computes a modulator's stereo output, blending in one level of nested pattern
+// and macro modulation when useNested is true. The nested[] sources are passed
+// in precomputed (see evalNestedSources) so they are shared across modulators.
+// When useNested is false the nested[] values are ignored and the modulator's
+// base parameters drive the output directly.
+vec2 getModulationWithNested(vec2 uv, int modulatorIndex, bool useNested, float nested[NUM_MODULATORS], float audioLevelDb) {
   Modulator modulator = modulators[modulatorIndex];
-  
+
   float patternRateX = modulator.modulatorPatternRateX.value;
   float patternRateY = modulator.modulatorPatternRateY.value;
   float strength = modulator.modulatorStrength.value;
@@ -314,26 +340,15 @@ vec2 getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, floa
   float seqLoopY = modulator.seqLoopY.value;
   float seqSwing = modulator.seqSwing.value;
   float stereoSpread = modulator.modulatorStereoSpread.value;
-  
+
   // Only apply modulation to modulator parameters if we're at depth 0 (not nested)
   // This is disabled on Windows due to shader compilation performance issues
   #ifndef DISABLE_NESTED_MODULATION
-  if (allowNestedModulation) {
-    // Apply one level of pattern modulation to each modulator parameter. For a
-    // given source modulator i every parameter shares the same evaluated output,
-    // so it is computed once per i and reused across all parameters.
+  if (useNested) {
+    // Apply one level of pattern modulation to each modulator parameter, reusing
+    // the precomputed source outputs.
     for (int i = 0; i < NUM_MODULATORS; i++) {
-      float modI = evalModulatorAtUv(uv, i,
-        modulators[i].modulatorPatternRateX.value,
-        modulators[i].modulatorPatternRateY.value,
-        modulators[i].modulatorStrength.value,
-        modulators[i].modulatorRotation.value,
-        modulators[i].modulatorPhaseX.value,
-        modulators[i].modulatorPhaseY.value,
-        modulators[i].seqLoopX.value,
-        modulators[i].seqLoopY.value,
-        modulators[i].seqSwing.value,
-        audioLevelDb);
+      float modI = nested[i];
 
       patternRateX = applyNestedParam(patternRateX, modulator.modulatorPatternRateX, modI, i);
       patternRateY = applyNestedParam(patternRateY, modulator.modulatorPatternRateY, modI, i);
@@ -364,6 +379,20 @@ vec2 getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, floa
   #endif
 
   return getModulationBase(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, seqLoopX, seqLoopY, seqSwing, stereoSpread, audioLevelDb);
+}
+
+// Single-modulator entry point. Evaluates the nested sources at uv then computes
+// this modulator's output. Callers that need several modulators at the same uv
+// should evaluate the sources once with evalNestedSources and call
+// getModulationWithNested directly to avoid re-evaluating shared sources.
+vec2 getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, float audioLevelDb) {
+  float nested[NUM_MODULATORS] = float[NUM_MODULATORS](0.0, 0.0, 0.0);
+  #ifndef DISABLE_NESTED_MODULATION
+  if (allowNestedModulation) {
+    evalNestedSources(uv, audioLevelDb, nested);
+  }
+  #endif
+  return getModulationWithNested(uv, modulatorIndex, allowNestedModulation, nested, audioLevelDb);
 }
 
 // Blends precomputed modulator outputs, contextual sources and macros into a

@@ -31,6 +31,7 @@ import {
   getMacroAmountValuesNormalized,
   getModAmountValuesNormalized,
   hasActiveModulatorRouting,
+  hasNestedModulatorRouting,
 } from "../store/modulators";
 import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
@@ -219,7 +220,7 @@ export class StrokeRenderer {
     // modulatorFbo's two targets. Reuses the common-uniform set so the same
     // modulator/source/dest uniforms drive it as the effects.
     this.modulatorMaterial = new RawShaderMaterial({
-      uniforms: { ...UniformsUtils.clone(defaultValues) },
+      uniforms: { ...UniformsUtils.clone(defaultValues), nestedModulationActive: { value: false } },
       vertexShader: passThroughVert,
       fragmentShader: withPlatformDefines(modulatorPrecomputeFrag),
       glslVersion: GLSL3,
@@ -655,6 +656,11 @@ export class StrokeRenderer {
     if (!this.isInitialized) {
       this.initialize();
     }
+
+    // Nesting routing is constant for the whole stroke (and its mask pass), so
+    // resolve it once and let the precompute shader skip the nested-source
+    // evaluation when nothing routes into a modulator parameter.
+    this.modulatorMaterial.uniforms.nestedModulationActive.value = hasNestedModulatorRouting(state);
 
     const {
       cursorPos,
