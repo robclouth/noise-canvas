@@ -14,6 +14,8 @@ import { SpectrogramData, State } from "../../store/types";
 import { EffectType } from "../../effects/types";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState } from "../../test/mock-state";
+import { createStepStateView } from "../../store";
+import { hasActiveModulatorRouting } from "../../store/modulators";
 import { resolveBrushAnchor } from "../utils";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 
@@ -258,33 +260,33 @@ describe.skipIf(!RUN_PROFILE)("paint perf profile", () => {
     gl.setSize(64, 64);
     const renderer = gl.getContext().getParameter(gl.getContext().RENDERER);
 
-    const sizes = [8192, 32768, 131072];
-    let out = `\n=== Passthrough size sweep (median ms) [defines: ${defines}] | GL: ${renderer} ===\n`;
-    out += `${"topFrames".padEnd(10)} ${"texW".padStart(6)} ${SCENARIOS.map((s) => s.label.padStart(12)).join(" ")}\n`;
+    const durations = [2, 5, 10];
+    let out = `\n=== Passthrough duration sweep, bpo 12 (median ms) [defines: ${defines}] | GL: ${renderer} ===\n`;
+    out += `${"seconds".padEnd(8)} ${"texW".padStart(6)} ${"texH".padStart(6)} ${SCENARIOS.map((s) => s.label.padStart(12)).join(" ")}\n`;
 
-    for (const topFrames of sizes) {
-      const data = createConstantQMockSpectrogramData({ topFrames, numBands: 216, bandsPerOctave: 24 });
+    for (const durationSeconds of durations) {
+      const data = createConstantQMockSpectrogramData({ durationSeconds, bandsPerOctave: 12 });
       const h = buildHarness(gl, effects, data);
       const cells = SCENARIOS.map((s) => {
         const ms = timeRender(h, "passthrough", s);
         const frags = fragCount(h, s);
         return `${ms.toFixed(2)}/${(frags / 1000).toFixed(0)}k`.padStart(12);
       });
-      out += `${String(topFrames).padEnd(10)} ${String(data.textureWidth).padStart(6)} ${cells.join(" ")}\n`;
+      out += `${String(durationSeconds).padEnd(8)} ${String(data.textureWidth).padStart(6)} ${String(data.textureHeight).padStart(6)} ${cells.join(" ")}\n`;
       h.dispose();
     }
     out += `(cell = ms / scissor-fragment-count)\n`;
     console.log(out);
 
     gl.dispose();
-    expect(sizes.length).toBe(3);
+    expect(durations.length).toBe(3);
   }, 600000);
 
   it("times every effect at a large texture", async () => {
     const effects = await loadAllEffects();
     const gl = new WebGLRenderer({ antialias: false });
     gl.setSize(64, 64);
-    const data = createConstantQMockSpectrogramData({ topFrames: 131072, numBands: 216, bandsPerOctave: 24 });
+    const data = createConstantQMockSpectrogramData({ durationSeconds: 10, bandsPerOctave: 12 });
     const h = buildHarness(gl, effects, data);
 
     const rows: { effect: string; cells: number[] }[] = [];
@@ -310,56 +312,71 @@ describe.skipIf(!RUN_PROFILE)("paint perf profile", () => {
     const effects = await loadAllEffects();
     const gl = new WebGLRenderer({ antialias: false });
     gl.setSize(64, 64);
-    const data = createConstantQMockSpectrogramData({ topFrames: 131072, numBands: 216, bandsPerOctave: 24 });
+    const data = createConstantQMockSpectrogramData({ durationSeconds: 10, bandsPerOctave: 12 });
     const h = buildHarness(gl, effects, data);
 
-    // mode -1 = no routing (precompute skipped); 0 = Pattern, 1 = Envelope, 2 = Sequencer.
-    const modModes = [
-      { label: "none", mode: -1 },
-      { label: "pattern", mode: 0 },
-      { label: "envelope", mode: 1 },
-      { label: "sequencer", mode: 2 },
-    ];
-    const modScenarios = SCENARIOS.filter((s) => s.label === "upper-small" || s.label === "full");
-
-    const buildModState = (scenario: Scenario, mode: number): State => {
-      const state = buildState("passthrough", scenario) as unknown as Record<string, unknown>;
-      if (mode >= 0) {
-        // Route brush intensity to modulator 1 so the precompute pass runs and
-        // evaluates modulator 1 in the chosen mode.
-        state.modulator1Mode = mode;
+    // Build a state that routes brush intensity to a Sine pattern modulator,
+    // setting the amount on BOTH the state and the active step so the per-step
+    // state view can't reset it to its default of zero. Returns whether the
+    // routing is actually live so the table can't silently report unmodulated
+    // numbers as modulated.
+    const buildModState = (effect: EffectType, scenario: Scenario, modulated: boolean): State => {
+      const state = buildState(effect, scenario) as unknown as Record<string, unknown>;
+      if (modulated) {
+        state.modulator1Mode = 0; // Pattern
+        state.modulator1PatternShape = 0; // Sine
         state.brushIntensityMod1Amount = 100;
+        const brushes = state.brushes as { steps?: Record<string, unknown>[] }[];
+        const step = brushes[state.activeBrushIndex as number]?.steps?.[0];
+        if (step) step.brushIntensityMod1Amount = 100;
       }
       return state as unknown as State;
     };
 
-    const timeModed = (scenario: Scenario, mode: number): number => {
-      const state = buildModState(scenario, mode);
+    // Per-render timings (with a GPU sync each) so we can see mean vs max — a
+    // mean far above the max-of-most reveals periodic spikes (accumulation),
+    // versus a steady high cost.
+    const timeModed = (effect: EffectType, scenario: Scenario, modulated: boolean): { mean: number; max: number } => {
+      const state = buildModState(effect, scenario, modulated);
       const params = paramsFor(scenario);
-      for (let i = 0; i < 3; i++) h.renderer.renderStroke(params, state, h.sourceFile);
+      for (let i = 0; i < 5; i++) h.renderer.renderStroke(params, state, h.sourceFile);
       h.renderer.finishGpu();
       const samples: number[] = [];
-      for (let i = 0; i < 9; i++) {
+      for (let i = 0; i < 40; i++) {
         const t0 = performance.now();
         h.renderer.renderStroke(params, state, h.sourceFile);
         h.renderer.finishGpu();
         samples.push(performance.now() - t0);
       }
-      return median(samples);
+      const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+      return { mean, max: Math.max(...samples) };
     };
+    const fmtCell = (c: { mean: number; max: number }) => `${c.mean.toFixed(1)}/${c.max.toFixed(0)}`.padStart(16);
 
-    const renderer = gl.getContext().getParameter(gl.getContext().RENDERER);
-    let out = `\n=== Modulation cost, passthrough (median ms) [defines: ${defines}] | GL: ${renderer} ===\n`;
-    out += `${"mod mode".padEnd(12)} ${modScenarios.map((s) => s.label.padStart(12)).join(" ")}\n`;
-    for (const mm of modModes) {
-      const cells = modScenarios.map((s) => timeModed(s, mm.mode).toFixed(2).padStart(12));
-      out += `${mm.label.padEnd(12)} ${cells.join(" ")}\n`;
+    // Confirm the modulated state actually engages the precompute pass.
+    const engaged = hasActiveModulatorRouting(createStepStateView(buildModState("synthesize", SCENARIOS[0], true), 0));
+
+    const modEffects: EffectType[] = ["passthrough", "synthesize", "blur"];
+    const modScenarios = SCENARIOS.filter((s) => s.label === "upper-small" || s.label === "full");
+
+    const ctx = gl.getContext();
+    const dbg = ctx.getExtension("WEBGL_debug_renderer_info");
+    const unmasked = dbg ? ctx.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "n/a";
+    let out = `\n=== Sine-modulated brush intensity vs unmodulated (mean ms/render) [defines: ${defines}] ===\n`;
+    out += `GPU (unmasked): ${unmasked}\n`;
+    out += `texture: ${h.data.textureWidth}x${h.data.textureHeight} (${((h.data.textureWidth * h.data.textureHeight) / 1e6).toFixed(1)}M px), numFrames=${h.data.numFrames}, numBands=${h.data.numBands}\n`;
+    out += `modulation actually engaged: ${engaged}\n`;
+    out += `cells are mean/max ms per render\n`;
+    out += `${"effect".padEnd(12)} ${modScenarios.map((s) => `${s.label} off`.padStart(16)).join(" ")} ${modScenarios.map((s) => `${s.label} SINE`.padStart(16)).join(" ")}\n`;
+    for (const effect of modEffects) {
+      const off = modScenarios.map((s) => fmtCell(timeModed(effect, s, false)));
+      const on = modScenarios.map((s) => fmtCell(timeModed(effect, s, true)));
+      out += `${effect.padEnd(12)} ${off.join(" ")} ${on.join(" ")}\n`;
     }
-    out += `(none = precompute skipped; others run the precompute pass + that modulator's evaluation)\n`;
     console.log(out);
 
     h.dispose();
     gl.dispose();
-    expect(modModes.length).toBe(4);
+    expect(engaged).toBe(true);
   }, 600000);
 });
