@@ -1,5 +1,6 @@
 import { createStepStateView, useStore } from "@/store";
 import { useTransientStore } from "@renderer/store/transient";
+import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
 import { useFrame } from "@react-three/fiber";
 import { defaultValues } from "@renderer/effects/base-effect";
 import { getOpenFileByPath, openFiles } from "@renderer/store/files";
@@ -407,6 +408,7 @@ const FileRendererInner = memo(
 
       if (!spectrogramData || !packedDataTex || !inverseMapTex || !metadataTex || !originalPackedDataTex) return;
 
+      const frameT0 = perfEnabled() ? performance.now() : 0;
       const state = useStore.getState();
       const { cursorPosition, cursorVisible, hoveredFile: hoveredFileId } = useTransientStore.getState();
 
@@ -661,22 +663,24 @@ const FileRendererInner = memo(
         // upper- vs lower-band paint latency.
         const paintTiming = (globalThis as { __paintTiming?: boolean }).__paintTiming === true;
         const paintT0 = paintTiming ? performance.now() : 0;
-        strokeRenderer.renderStroke(
-          {
-            cursorPos,
-            preview,
-            bpm,
-            totalDuration,
-            viewZoomPower,
-            viewOffset,
-            viewZoomPowerY,
-            viewOffsetY,
-            pressure: penState.pressure,
-            tiltX: penState.tiltX,
-            tiltY: penState.tiltY,
-          },
-          state,
-          sourceFileInfo,
+        perfMark("renderStroke", () =>
+          strokeRenderer.renderStroke(
+            {
+              cursorPos,
+              preview,
+              bpm,
+              totalDuration,
+              viewZoomPower,
+              viewOffset,
+              viewZoomPowerY,
+              viewOffsetY,
+              pressure: penState.pressure,
+              tiltX: penState.tiltX,
+              tiltY: penState.tiltY,
+            },
+            state,
+            sourceFileInfo,
+          ),
         );
         if (paintTiming) {
           strokeRenderer.finishGpu();
@@ -830,6 +834,15 @@ const FileRendererInner = memo(
 
         displayMaterial.uniforms.sourceOffsetX.value = sourceOffsetUv.x;
         displayMaterial.uniforms.sourceOffsetY.value = sourceOffsetUv.y;
+      }
+
+      // Flag-gated: optionally force a GPU sync so the recorded frame time
+      // reflects real per-frame cost (CPU dispatch + GPU work) for this file's
+      // render. The finish() is behind __perf.sync() so the default cadence
+      // measurement is not perturbed by serializing the GPU.
+      if (perfEnabled()) {
+        if (perfSyncEnabled()) gl.getContext().finish();
+        perfAdd("fileFrame(active)", performance.now() - frameT0);
       }
     });
 

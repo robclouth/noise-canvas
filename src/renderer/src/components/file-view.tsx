@@ -687,6 +687,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
             <PitchLegend fileId={fileId} />
             <Box
               ref={viewRef}
+              data-file-view-id={fileId}
               style={{ flex: 1, ...cursorStyle }}
               pos="relative"
               onPointerEnter={handleMouseEnter}

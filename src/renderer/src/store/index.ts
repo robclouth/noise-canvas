@@ -262,6 +262,12 @@ export const useStore = create<State>()(
   ),
 );
 
+// Dev-only: expose the store on window so a CDP-attached driver can read state
+// and toggle parameters for controlled, reproducible performance measurements.
+if (import.meta.env.DEV) {
+  (globalThis as unknown as { __store?: typeof useStore }).__store = useStore;
+}
+
 export function getModulator(index: number) {
   const state = useStore.getState();
   return {
