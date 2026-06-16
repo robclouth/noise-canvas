@@ -6,6 +6,14 @@ import icon from "../../resources/icon.png?asset";
 import { createMenu, MenuState, openFileDialog } from "./lib/menu";
 import { ipcMainOn, webContentsSend } from "./lib/types";
 
+// On macOS, ANGLE's Metal backend stalls each canvas present on a CoreAnimation
+// backpressure fence once a frame does any extra GPU work (e.g. a modulator
+// precompute pass), which halves the framerate while painting. The OpenGL
+// backend presents without that fence, so use it on macOS.
+if (process.platform === "darwin") {
+  app.commandLine.appendSwitch("use-angle", "gl");
+}
+
 // Remove dictation and character palette menu items on macOS
 if (process.platform === "darwin") {
   systemPreferences.setUserDefault("NSDisabledDictationMenuItem", "boolean", true);
