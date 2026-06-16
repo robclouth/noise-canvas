@@ -305,4 +305,61 @@ describe.skipIf(!RUN_PROFILE)("paint perf profile", () => {
     gl.dispose();
     expect(rows.length).toBe(EFFECT_NAMES.length);
   }, 600000);
+
+  it("measures the cost of active modulation", async () => {
+    const effects = await loadAllEffects();
+    const gl = new WebGLRenderer({ antialias: false });
+    gl.setSize(64, 64);
+    const data = createConstantQMockSpectrogramData({ topFrames: 131072, numBands: 216, bandsPerOctave: 24 });
+    const h = buildHarness(gl, effects, data);
+
+    // mode -1 = no routing (precompute skipped); 0 = Pattern, 1 = Envelope, 2 = Sequencer.
+    const modModes = [
+      { label: "none", mode: -1 },
+      { label: "pattern", mode: 0 },
+      { label: "envelope", mode: 1 },
+      { label: "sequencer", mode: 2 },
+    ];
+    const modScenarios = SCENARIOS.filter((s) => s.label === "upper-small" || s.label === "full");
+
+    const buildModState = (scenario: Scenario, mode: number): State => {
+      const state = buildState("passthrough", scenario) as unknown as Record<string, unknown>;
+      if (mode >= 0) {
+        // Route brush intensity to modulator 1 so the precompute pass runs and
+        // evaluates modulator 1 in the chosen mode.
+        state.modulator1Mode = mode;
+        state.brushIntensityMod1Amount = 100;
+      }
+      return state as unknown as State;
+    };
+
+    const timeModed = (scenario: Scenario, mode: number): number => {
+      const state = buildModState(scenario, mode);
+      const params = paramsFor(scenario);
+      for (let i = 0; i < 3; i++) h.renderer.renderStroke(params, state, h.sourceFile);
+      h.renderer.finishGpu();
+      const samples: number[] = [];
+      for (let i = 0; i < 9; i++) {
+        const t0 = performance.now();
+        h.renderer.renderStroke(params, state, h.sourceFile);
+        h.renderer.finishGpu();
+        samples.push(performance.now() - t0);
+      }
+      return median(samples);
+    };
+
+    const renderer = gl.getContext().getParameter(gl.getContext().RENDERER);
+    let out = `\n=== Modulation cost, passthrough (median ms) [defines: ${defines}] | GL: ${renderer} ===\n`;
+    out += `${"mod mode".padEnd(12)} ${modScenarios.map((s) => s.label.padStart(12)).join(" ")}\n`;
+    for (const mm of modModes) {
+      const cells = modScenarios.map((s) => timeModed(s, mm.mode).toFixed(2).padStart(12));
+      out += `${mm.label.padEnd(12)} ${cells.join(" ")}\n`;
+    }
+    out += `(none = precompute skipped; others run the precompute pass + that modulator's evaluation)\n`;
+    console.log(out);
+
+    h.dispose();
+    gl.dispose();
+    expect(modModes.length).toBe(4);
+  }, 600000);
 });
