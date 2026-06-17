@@ -460,11 +460,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const fileId = generateFileId();
     const displayName = host.path.basename(filepath);
 
-    // Add a placeholder immediately so the file appears in the UI with a loading state
+    // Add a placeholder immediately so the file appears in the UI with a loading
+    // state. Newly opened files go to the top of the list.
     openFiles[fileId] = { id: fileId, filePath: filepath, displayName };
     set(
       produce((state: State) => {
-        state.openFileIds.push(fileId);
+        state.openFileIds.unshift(fileId);
         state.filepathsBpm[filepath] ??= state.mostRecentBpm ?? 120;
         state.filesBandsPerOctave[fileId] = state.bandsPerOctave;
         state.filesZoom[fileId] = 0;
