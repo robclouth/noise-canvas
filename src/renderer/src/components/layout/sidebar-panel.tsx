@@ -4,6 +4,7 @@ import { ActionIcon, Box, Group, Menu, ScrollArea, Stack, Text, TextInput, Unsty
 import { useWindowEvent } from "@mantine/hooks";
 import { openConfirm, openPrompt } from "@renderer/lib/modals";
 import { EFFECT_COLORS } from "@renderer/lib/constants";
+import { INPUT_HEIGHT } from "@renderer/lib/ui-density";
 import { RESERVED_KEYS } from "@renderer/lib/useShortcuts";
 import { collectBrushReferencedPaths } from "@renderer/store/files";
 import type { Brush } from "@renderer/store/types";
@@ -227,7 +228,7 @@ const BrushTile = memo(function BrushTile({
               }}
               size="xs"
               autoFocus
-              styles={{ input: { height: 20, minHeight: 20 } }}
+              styles={{ input: { height: INPUT_HEIGHT, minHeight: INPUT_HEIGHT } }}
               style={{ flex: 1, minWidth: 0 }}
               onClick={(e) => e.stopPropagation()}
             />

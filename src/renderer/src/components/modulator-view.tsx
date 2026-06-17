@@ -3,6 +3,7 @@ import { Box, Group, SegmentedControl, SimpleGrid, Stack } from "@mantine/core";
 import { useTexture, View } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 import { NUM_MODULATORS } from "@renderer/lib/constants";
+import { CONTROL_ROW_HEIGHT, PANEL_COLUMN_SPACING } from "@renderer/lib/ui-density";
 import { createStepStateView, selectParameter, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -271,7 +272,7 @@ export const ModulatorView = () => {
 
   return (
     <Stack gap={2}>
-      <Group gap={4} wrap="nowrap" align="center" h={24}>
+      <Group gap={4} wrap="nowrap" align="center" h={CONTROL_ROW_HEIGHT}>
         <SegmentedControl
           size="xs"
           value={viewedModulatorIndex}
@@ -281,10 +282,14 @@ export const ModulatorView = () => {
             value: index.toString(),
           }))}
           style={{ flex: 1 }}
+          styles={{
+            root: { padding: 2 },
+            label: { paddingTop: 2, paddingBottom: 2, lineHeight: 1.1 },
+          }}
         />
         <SectionMenu storageKey={`modulator-${viewedModulatorIndex}`} parameterKeys={currentModulatorParams} />
       </Group>
-      <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
+      <SimpleGrid cols={2} spacing={PANEL_COLUMN_SPACING} verticalSpacing={0}>
         <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Mode` as ParameterKey} />
         {isPatternMode && (
           <>

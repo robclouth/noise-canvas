@@ -9,6 +9,7 @@ export interface MenuState {
   canRedo: boolean;
   isDirty: boolean;
   recentFiles: string[];
+  isCompact: boolean;
 }
 
 export async function openFileDialog(window: BrowserWindow) {
@@ -50,7 +51,7 @@ function buildRecentFilesSubmenu(window: BrowserWindow, recentFiles: string[]): 
 }
 
 export function createMenu(window: BrowserWindow, state: MenuState) {
-  const { canUndo, canRedo, isDirty, recentFiles } = state;
+  const { canUndo, canRedo, isDirty, recentFiles, isCompact } = state;
 
   const template: (Electron.MenuItemConstructorOptions | Electron.MenuItem)[] = [
     {
@@ -165,6 +166,20 @@ export function createMenu(window: BrowserWindow, state: MenuState) {
           label: "Half Length",
           click: () => {
             webContentsSend(window, "halve-active-file-length");
+          },
+        },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        {
+          label: "Compact UI",
+          type: "checkbox",
+          checked: isCompact,
+          accelerator: "CmdOrCtrl+Shift+C",
+          click: () => {
+            webContentsSend(window, "toggle-ui-size");
           },
         },
       ],

@@ -8,6 +8,7 @@ import {
   getModAmountParamKeys,
 } from "@renderer/store/modulators";
 import { denormalizeParameterValue, normalizeParameterValue } from "@renderer/store/utils";
+import { LABEL_WIDTH } from "@renderer/lib/ui-density";
 import { memo } from "react";
 import { useShallow } from "zustand/shallow";
 import type { FileParameterValue } from "@renderer/parameters";
@@ -19,7 +20,7 @@ import { SwitchControl } from "./switch-control";
 
 export type ParameterControlProps = {
   paramKey: ParameterKey;
-  labelWidth?: number;
+  labelWidth?: number | string;
   disabled?: boolean;
   color?: string;
   labelPosition?: "left" | "top";
@@ -27,7 +28,7 @@ export type ParameterControlProps = {
 };
 
 export const ParameterControl = memo(function ParameterControl({
-  labelWidth = 70,
+  labelWidth = LABEL_WIDTH,
   disabled,
   color,
   paramKey,

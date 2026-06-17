@@ -27,6 +27,7 @@ const menuState: MenuState = {
   canRedo: false,
   isDirty: false,
   recentFiles: [],
+  isCompact: false,
 };
 
 function rebuildMenu() {
@@ -171,6 +172,12 @@ ipcMainOn("update-save-state", (_, isDirty: boolean) => {
 
 ipcMainOn("update-recent-files", (_, paths: string[]) => {
   menuState.recentFiles = paths;
+  rebuildMenu();
+});
+
+ipcMainOn("update-ui-size", (_, isCompact: boolean) => {
+  if (menuState.isCompact === isCompact) return;
+  menuState.isCompact = isCompact;
   rebuildMenu();
 });
 

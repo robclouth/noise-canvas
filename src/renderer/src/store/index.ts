@@ -6,7 +6,7 @@ import { produce } from "immer";
 import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
 import type { PersistStorage, StorageValue } from "zustand/middleware";
-import { createAppSlice } from "./app";
+import { APP_PERSISTED_KEYS, createAppSlice } from "./app";
 import { AUDIO_PERSISTED_KEYS, createAudioSlice } from "./audio";
 import { createBrushSlice } from "./brush";
 import { createEffectsSlice } from "./effects";
@@ -35,6 +35,7 @@ export const ALL_PERSISTED_KEYS: (keyof State)[] = [
   ...PRESETS_PERSISTED_KEYS,
   ...STEPS_PERSISTED_KEYS,
   ...LINK_PERSISTED_KEYS,
+  ...APP_PERSISTED_KEYS,
   "randomizationAmounts",
   "excludedFromRandomization",
 ];

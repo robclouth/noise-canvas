@@ -1,5 +1,6 @@
 import { Group, Select, Text } from "@mantine/core";
 import { PATTERN_SHAPES } from "@renderer/lib/constants";
+import { CONTROL_ROW_GAP, CONTROL_ROW_HEIGHT, LABEL_WIDTH, VALUE_WIDTH } from "@renderer/lib/ui-density";
 import { getTextures } from "@renderer/lib/textures";
 import { getOptionsParameterDef } from "@renderer/parameters";
 import { selectParameter, useStore } from "@renderer/store";
@@ -73,11 +74,11 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
   };
 
   return (
-    <Group gap={"xs"} wrap="nowrap" h={25}>
+    <Group gap={CONTROL_ROW_GAP} wrap="nowrap" h={CONTROL_ROW_HEIGHT}>
       <Tooltip label={shapeDef.description}>
         <Text
           size="xs"
-          w={70}
+          w={LABEL_WIDTH}
           lineClamp={1}
           truncate="end"
           ta="right"
@@ -90,8 +91,7 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
         ref={inputRef}
         size="xs"
         variant="unstyled"
-        style={{ width: 70, borderRadius: 2, border: `1px solid #666`, backgroundColor: "#2c2c2c" }}
-        width={70}
+        style={{ width: VALUE_WIDTH, borderRadius: 2, border: `1px solid #666`, backgroundColor: "#2c2c2c" }}
         data={optionGroups}
         value={currentValue}
         onChange={handleChange}

@@ -1,5 +1,6 @@
 import { SimpleGrid, Stack } from "@mantine/core";
 import { NUM_MACROS, NUM_MODULATORS } from "@renderer/lib/constants";
+import { PANEL_COLUMN_SPACING } from "@renderer/lib/ui-density";
 import { selectParameter, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
 import { EnvelopeControl } from "../controls/envelope-control";
@@ -89,7 +90,7 @@ export function BrushPanel() {
         </Section>
         <Steps />
         <Section label="Source">
-          <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
+          <SimpleGrid cols={2} spacing={PANEL_COLUMN_SPACING} verticalSpacing={0}>
             <ParameterControl paramKey="sourceFile" />
             <ParameterControl paramKey="sourcePositionMode" />
             <ParameterControl paramKey="sourceTimeOffset" disabled={offsetsDisabled} />
@@ -101,7 +102,7 @@ export function BrushPanel() {
           <EnvelopeControl />
         </Section>
         <Section label="Options" parameterKeys={OPTIONS_PARAMS}>
-          <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
+          <SimpleGrid cols={2} spacing={PANEL_COLUMN_SPACING} verticalSpacing={0}>
             <ParameterControl paramKey="blendMode" />
             <ParameterControl paramKey="brushPan" />
             <ParameterControl paramKey="brushIterations" />

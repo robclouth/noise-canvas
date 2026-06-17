@@ -1,4 +1,5 @@
 import { Box, Group, Text, useMantineTheme } from "@mantine/core";
+import { CONTROL_ROW_GAP, CONTROL_ROW_HEIGHT, VALUE_WIDTH, WIDGET_HEIGHT } from "@renderer/lib/ui-density";
 import { ReactNode } from "react";
 
 export const SwitchControl = ({
@@ -16,14 +17,14 @@ export const SwitchControl = ({
   const themeColor = theme.colors[color]?.[6] || color;
 
   return (
-    <Group gap={"xs"} wrap="nowrap" h={24} align="center">
+    <Group gap={CONTROL_ROW_GAP} wrap="nowrap" h={CONTROL_ROW_HEIGHT} align="center">
       {labelComponent}
       <Box
         onClick={() => setValue(!value)}
         style={{
           position: "relative",
-          width: 70,
-          height: 20,
+          width: VALUE_WIDTH,
+          height: WIDGET_HEIGHT,
           cursor: "pointer",
           overflow: "hidden",
           borderRadius: 2,
@@ -38,7 +39,7 @@ export const SwitchControl = ({
         <Text
           size="xs"
           style={{
-            fontSize: 11,
+            fontSize: "var(--ui-font-xs)",
             lineHeight: 1,
             color: "#fff",
             userSelect: "none",

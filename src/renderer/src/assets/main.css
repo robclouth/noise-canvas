@@ -1,3 +1,64 @@
+/* UI density tokens. :root holds the normal ("md") values; the [data-ui-size="sm"]
+   override holds the compact values. The whole UI re-skins by flipping the attribute. */
+:root {
+  --ui-row-h: 24px;
+  --ui-widget-h: 20px;
+  --ui-widget-input-h: 18px;
+  --ui-input-h: 20px;
+  --ui-label-w: 70px;
+  --ui-value-w: 70px;
+  --ui-row-gap: 8px;
+  --ui-panel-w: 320px;
+  --ui-col-spacing: 8px;
+  --ui-input-mantine-h: 19px;
+  --ui-effect-pad-y: 6px;
+  --ui-header-pad: 8px;
+  --ui-header-font: 13px;
+  --ui-font-xs: 11px;
+  --ui-font-sm: 11px;
+  --ui-font-md: 16px;
+  --ui-font-lg: 16px;
+  --ui-font-xl: 18px;
+  --ui-icon-scale: 1;
+  --ui-transport-pad: 10px;
+  --ui-transport-gap: 12px;
+  --ui-transport-label-w: 40px;
+  --ui-transport-time-w: 110px;
+}
+
+[data-ui-size="sm"] {
+  --ui-row-h: 21px;
+  --ui-widget-h: 18px;
+  --ui-widget-input-h: 16px;
+  --ui-input-h: 18px;
+  --ui-label-w: 58px;
+  --ui-value-w: 58px;
+  --ui-row-gap: 4px;
+  --ui-panel-w: 268px;
+  --ui-col-spacing: 6px;
+  --ui-input-mantine-h: 17px;
+  --ui-effect-pad-y: 3px;
+  --ui-header-pad: 4px;
+  --ui-header-font: 11px;
+  --ui-font-xs: 10px;
+  --ui-font-sm: 10px;
+  --ui-font-md: 15px;
+  --ui-font-lg: 15px;
+  --ui-font-xl: 17px;
+  --ui-icon-scale: 0.82;
+  --ui-transport-pad: 5px;
+  --ui-transport-gap: 8px;
+  --ui-transport-label-w: 30px;
+  --ui-transport-time-w: 90px;
+}
+
+/* Shrink all icon-button glyphs proportionally in compact mode. lucide renders
+   fixed width/height attributes, so a CSS transform is the only way to scale them
+   without touching every call site. transform keeps the layout box, so nothing reflows. */
+[data-ui-size="sm"] .lucide {
+  transform: scale(var(--ui-icon-scale));
+}
+
 * {
   -webkit-touch-callout: none; /* iOS Safari */
   -webkit-user-select: none; /* Safari */

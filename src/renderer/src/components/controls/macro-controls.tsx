@@ -1,5 +1,6 @@
 import { SimpleGrid } from "@mantine/core";
 import { NUM_MACROS } from "@renderer/lib/constants";
+import { LABEL_WIDTH, PANEL_COLUMN_SPACING } from "@renderer/lib/ui-density";
 import { useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
 import { ParameterControl } from "./parameter-control";
@@ -12,12 +13,12 @@ export const MacroControls = () => {
     (state) => state.brushes[state.activeBrushIndex]?.macroNames ?? (EMPTY_NAMES as string[]),
   );
   return (
-    <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
+    <SimpleGrid cols={2} spacing={PANEL_COLUMN_SPACING} verticalSpacing={0}>
       {MACRO_KEYS.map((key, i) => (
         <ParameterControl
           key={key}
           paramKey={key}
-          labelWidth={70}
+          labelWidth={LABEL_WIDTH}
           color="red"
           displayLabel={macroNames[i] ?? `Macro ${i + 1}`}
         />

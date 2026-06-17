@@ -2,6 +2,7 @@ import { getParameterValue, selectParameter, useStore } from "@/store";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
 import { Box, Button, Stack } from "@mantine/core";
 import { openContextModal } from "@renderer/lib/modals";
+import { EFFECT_ITEM_PAD_Y } from "@renderer/lib/ui-density";
 import { EffectItem, EffectType } from "@renderer/effects/types";
 import { EFFECT_COLORS, EFFECT_DESCRIPTIONS, EFFECT_LABELS } from "@renderer/lib/constants";
 import { getEffectParameterDefaults } from "@renderer/parameters";
@@ -210,13 +211,14 @@ export function EffectsList() {
             ))}
             {provided.placeholder}
             {effectStructures.length < MAX_EFFECTS && (
-              <Box py={6}>
+              <Box py={EFFECT_ITEM_PAD_Y}>
                 <Button
                   variant="subtle"
                   color="gray"
-                  size="xs"
+                  size="compact-xs"
+                  justify="flex-start"
                   fullWidth
-                  leftSection={<Plus size={14} />}
+                  leftSection={<Plus size={12} />}
                   onClick={handleAddEffect}
                 >
                   Add effect
@@ -262,7 +264,7 @@ const EffectListItem = memo(function EffectListItem({
         <Box
           ref={provided.innerRef}
           {...provided.draggableProps}
-          py={6}
+          py={EFFECT_ITEM_PAD_Y}
           style={{
             ...provided.draggableProps.style,
             ...(snapshot.isDragging && {

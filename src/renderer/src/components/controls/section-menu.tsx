@@ -1,4 +1,5 @@
 import { ActionIcon, Button, Divider, Group, Menu, Stack, Text } from "@mantine/core";
+import { LABEL_WIDTH } from "@renderer/lib/ui-density";
 import { isEffectParameter, parameterDefs } from "@renderer/parameters";
 import { getEffectParameterValue, getModulationParamKeys, getParameterValue, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
@@ -206,7 +207,7 @@ export const SectionMenu = ({
               <Divider label="Randomize" my={4} />
               <NumboxControl
                 labelComponent={
-                  <Text size="xs" w={70}>
+                  <Text size="xs" w={LABEL_WIDTH}>
                     Amount
                   </Text>
                 }
@@ -221,7 +222,7 @@ export const SectionMenu = ({
               />
               <SwitchControl
                 labelComponent={
-                  <Text size="xs" w={70}>
+                  <Text size="xs" w={LABEL_WIDTH}>
                     Include Mod.
                   </Text>
                 }
