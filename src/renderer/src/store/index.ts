@@ -6,6 +6,7 @@ import { produce } from "immer";
 import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
 import type { PersistStorage, StorageValue } from "zustand/middleware";
+import { host } from "@renderer/lib/host";
 import { APP_PERSISTED_KEYS, createAppSlice } from "./app";
 import { AUDIO_PERSISTED_KEYS, createAudioSlice } from "./audio";
 import { createBrushSlice } from "./brush";
@@ -275,6 +276,10 @@ export const useStore = create<State>()(
         },
         merge: (persistedState, currentState) => {
           const merged = deepMerge(currentState, persistedState as object) as State;
+
+          // The Ableton extension always runs at compact density, regardless of
+          // any persisted value.
+          if (host.env.isExtension) merged.uiSize = "sm";
 
           // Sync effects in all steps to handle added/removed effects
           if (Array.isArray(merged.brushes)) {

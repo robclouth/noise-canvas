@@ -9,6 +9,11 @@ import glsl from "vite-plugin-glsl";
 // implementation (browser shims + localhost RPC) instead of the Electron one.
 export default defineConfig({
   root: resolve(__dirname, "src/extension/webview"),
+  // The extension always runs at compact density; this sets the first-run default
+  // (store/app.ts reads it), while the store also forces it on rehydrate.
+  define: {
+    "import.meta.env.VITE_DEFAULT_UI_SIZE": JSON.stringify("sm"),
+  },
   resolve: {
     alias: {
       "@renderer": resolve(__dirname, "src/renderer/src"),
