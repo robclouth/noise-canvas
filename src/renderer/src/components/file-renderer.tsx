@@ -1,4 +1,6 @@
 import { createStepStateView, useStore } from "@/store";
+import { useTransientStore } from "@renderer/store/transient";
+import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
 import { useFrame } from "@react-three/fiber";
 import { defaultValues } from "@renderer/effects/base-effect";
 import { getOpenFileByPath, openFiles } from "@renderer/store/files";
@@ -122,8 +124,6 @@ const FileRendererInner = memo(
     const applyStroke = useRef(false);
     const clearingPreview = useRef(false);
 
-    console.log("FileRenderer rendered");
-
     // Subscriptions to global state - consolidated into fewer subscriptions for efficiency
     useEffect(() => {
       // Consolidate display-related subscriptions that all just trigger invalidate
@@ -141,11 +141,21 @@ const FileRendererInner = memo(
             gridSwing: state.gridSwing,
             minDb: state.displayMinDb,
             maxDb: state.displayMaxDb,
-            cursorPosition: state.cursorPosition,
-            cursorVisible: state.cursorVisible,
             pickingFileParam: state.pickingFileParam,
           };
         },
+        () => {
+          invalidateRef.current?.();
+        },
+      );
+
+      // Transient cursor/hover state lives in its own store; re-render on changes.
+      const unsubTransient = useTransientStore.subscribe(
+        (state) => ({
+          cursorPosition: state.cursorPosition,
+          cursorVisible: state.cursorVisible,
+          hoveredFile: state.hoveredFile,
+        }),
         () => {
           invalidateRef.current?.();
         },
@@ -162,13 +172,14 @@ const FileRendererInner = memo(
             // Became active: if cursor is visible, trigger a preview render
             // We need to wait for the state update to propagate
             const state = useStore.getState();
+            const { cursorVisible, cursorPosition } = useTransientStore.getState();
             const currentFile = openFiles[fileId];
-            if (state.cursorVisible && state.cursorPosition && currentFile?.spectrogramData) {
+            if (cursorVisible && cursorPosition && currentFile?.spectrogramData) {
               const bpm = state.filepathsBpm[currentFile.filePath] || 120;
               const totalDuration = currentFile.spectrogramData.numFrames / currentFile.spectrogramData.sampleRate;
               const uvPos = unitsToUv(
-                state.cursorPosition.beats,
-                state.cursorPosition.pitch,
+                cursorPosition.beats,
+                cursorPosition.pitch,
                 bpm,
                 totalDuration,
                 spectrogramData.bandsPerOctave,
@@ -198,6 +209,7 @@ const FileRendererInner = memo(
 
       return () => {
         unsubDisplay();
+        unsubTransient();
         unsubActiveFileId();
       };
     }, [fileId]);
@@ -396,7 +408,9 @@ const FileRendererInner = memo(
 
       if (!spectrogramData || !packedDataTex || !inverseMapTex || !metadataTex || !originalPackedDataTex) return;
 
+      const frameT0 = perfEnabled() ? performance.now() : 0;
       const state = useStore.getState();
+      const { cursorPosition, cursorVisible, hoveredFile: hoveredFileId } = useTransientStore.getState();
 
       const file = openFiles[fileId];
       if (!file || !file.spectrogramData) return;
@@ -409,10 +423,10 @@ const FileRendererInner = memo(
       // BL origin, which in center-anchor mode sits half a footprint away.
       let cursorPos = new Vector2(-1, -1);
 
-      if ((state.activeFileId === fileId || state.hoveredFile === fileId) && state.cursorPosition) {
+      if ((state.activeFileId === fileId || hoveredFileId === fileId) && cursorPosition) {
         const aim = unitsToUv(
-          state.cursorPosition.beats,
-          state.cursorPosition.pitch,
+          cursorPosition.beats,
+          cursorPosition.pitch,
           bpm,
           totalDuration,
           spectrogramData.bandsPerOctave,
@@ -508,7 +522,7 @@ const FileRendererInner = memo(
       if (
         !isActiveFile &&
         !isSourceFile &&
-        !(state.cursorVisible && state.cursorPosition) &&
+        !(cursorVisible && cursorPosition) &&
         !clearingPreview.current &&
         strokeRenderer.getIsInitialized()
       ) {
@@ -563,8 +577,8 @@ const FileRendererInner = memo(
               );
         const shouldTrackCursor =
           (mode === "follow" || mode === "fixed" || (mode === "anchored" && state.isStroking)) &&
-          state.cursorVisible &&
-          state.cursorPosition &&
+          cursorVisible &&
+          cursorPosition &&
           state.activeFileId;
 
         if (shouldTrackCursor) {
@@ -573,8 +587,8 @@ const FileRendererInner = memo(
             const activeBpm = state.filepathsBpm[activeFile.filePath] || 120;
             const activeDuration = activeFile.spectrogramData.numFrames / activeFile.spectrogramData.sampleRate;
             const aimDestUv = unitsToUv(
-              state.cursorPosition!.beats,
-              state.cursorPosition!.pitch,
+              cursorPosition!.beats,
+              cursorPosition!.pitch,
               activeBpm,
               activeDuration,
               activeFile.spectrogramData.bandsPerOctave,
@@ -643,24 +657,35 @@ const FileRendererInner = memo(
           textures: resolvedSourceTextures,
         };
 
-        // Render the stroke using StrokeRenderer
-        strokeRenderer.renderStroke(
-          {
-            cursorPos,
-            preview,
-            bpm,
-            totalDuration,
-            viewZoomPower,
-            viewOffset,
-            viewZoomPowerY,
-            viewOffsetY,
-            pressure: penState.pressure,
-            tiltX: penState.tiltX,
-            tiltY: penState.tiltY,
-          },
-          state,
-          sourceFileInfo,
+        // Render the stroke using StrokeRenderer. Opt-in timing (set
+        // window.__paintTiming = true in the console) forces a GPU sync so the
+        // logged duration reflects real stroke cost — useful for comparing
+        // upper- vs lower-band paint latency.
+        const paintTiming = (globalThis as { __paintTiming?: boolean }).__paintTiming === true;
+        const paintT0 = paintTiming ? performance.now() : 0;
+        perfMark("renderStroke", () =>
+          strokeRenderer.renderStroke(
+            {
+              cursorPos,
+              preview,
+              bpm,
+              totalDuration,
+              viewZoomPower,
+              viewOffset,
+              viewZoomPowerY,
+              viewOffsetY,
+              pressure: penState.pressure,
+              tiltX: penState.tiltX,
+              tiltY: penState.tiltY,
+            },
+            state,
+            sourceFileInfo,
+          ),
         );
+        if (paintTiming) {
+          strokeRenderer.finishGpu();
+          console.log(`[paint] stroke ${(performance.now() - paintT0).toFixed(2)}ms`);
+        }
 
         if (!preview) {
           displayMode.current = "committed";
@@ -677,7 +702,7 @@ const FileRendererInner = memo(
       const isPreview = displayMode.current === "preview";
       const displayTexture = strokeRenderer.getDisplayTexture(isPreview);
 
-      const hoveredFile = state.hoveredFile ? openFiles[state.hoveredFile] : null;
+      const hoveredFile = hoveredFileId ? openFiles[hoveredFileId] : null;
 
       displayMaterial.uniforms.sourceSpectrogramTex.value = displayTexture || placeholderTexture;
       displayMaterial.uniforms.sourceInverseMapTex.value = inverseMapTex || placeholderTexture;
@@ -728,7 +753,7 @@ const FileRendererInner = memo(
         return new Vector2(maxTimeUv || 0.1, maxPitchUv || 0.1);
       })();
 
-      displayMaterial.uniforms.showTargetRectangle.value = Boolean(state.cursorVisible && state.hoveredFile === fileId);
+      displayMaterial.uniforms.showTargetRectangle.value = Boolean(cursorVisible && hoveredFileId === fileId);
       displayMaterial.uniforms.showSourceRectangle.value = isSourceFile;
 
       const isPicking = state.pickingFileParam !== null;
@@ -740,7 +765,7 @@ const FileRendererInner = memo(
         isPicking ? 0.545 : 0.494,
         isPicking ? 0.902 : 0.078,
       );
-      if (isPicking && state.hoveredFile === fileId) {
+      if (isPicking && hoveredFileId === fileId) {
         invalidate();
       }
       displayMaterial.uniforms.viewZoomPower.value = viewZoomPower;
@@ -809,6 +834,15 @@ const FileRendererInner = memo(
 
         displayMaterial.uniforms.sourceOffsetX.value = sourceOffsetUv.x;
         displayMaterial.uniforms.sourceOffsetY.value = sourceOffsetUv.y;
+      }
+
+      // Flag-gated: optionally force a GPU sync so the recorded frame time
+      // reflects real per-frame cost (CPU dispatch + GPU work) for this file's
+      // render. The finish() is behind __perf.sync() so the default cadence
+      // measurement is not perturbed by serializing the GPU.
+      if (perfEnabled()) {
+        if (perfSyncEnabled()) gl.getContext().finish();
+        perfAdd("fileFrame(active)", performance.now() - frameT0);
       }
     });
 

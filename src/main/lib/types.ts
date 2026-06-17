@@ -24,6 +24,7 @@ export interface IpcMainHandlers {
   "update-save-state": (event: Electron.IpcMainEvent, isDirty: boolean) => void;
   "trigger-open-file": (event: Electron.IpcMainEvent) => void;
   "update-recent-files": (event: Electron.IpcMainEvent, paths: string[]) => void;
+  "update-ui-size": (event: Electron.IpcMainEvent, isCompact: boolean) => void;
 }
 
 export interface IpcRendererEvents {
@@ -48,6 +49,7 @@ export interface IpcRendererEvents {
   "update-error": (message: string) => void;
   "app-will-quit": () => void;
   "clear-recent-files": () => void;
+  "toggle-ui-size": () => void;
 }
 
 export function ipcMainOn<K extends keyof IpcMainHandlers>(channel: K, listener: IpcMainHandlers[K]): void {

@@ -157,6 +157,37 @@ export function getModAmountValuesNormalized(state: ModulatorsState, paramKey: P
   return keys.map((key) => (state[key] as number) / 100);
 }
 
+// True when any modulatable parameter routes to a modulator with a nonzero
+// amount. When false, every modulator output is multiplied by zero at every
+// consumer, so the precomputed modulator textures are never read and the
+// precompute pass can be skipped. Macro and contextual modulation do not use
+// those textures, so they are unaffected by this check.
+export function hasActiveModulatorRouting(state: ModulatorsState): boolean {
+  for (const [key, def] of Object.entries(parameterDefs)) {
+    if (def.kind !== "number" || !def.modulatable) continue;
+    const amounts = getModAmountValuesNormalized(state, key as ParameterKey);
+    if (amounts.some((amount) => amount !== 0)) return true;
+  }
+  return false;
+}
+
+// True when a modulator's own parameter is modulated by a modulator or a macro
+// (one level of nested modulation). When false the nested-source evaluation in
+// the precompute pass is a no-op at every consumer and can be skipped. Macro
+// routing is included because it modulates modulator parameters too, so skipping
+// the nested block requires both to be absent.
+export function hasNestedModulatorRouting(state: ModulatorsState): boolean {
+  for (const [key, def] of Object.entries(parameterDefs)) {
+    if (def.kind !== "number" || !def.modulatable) continue;
+    if (!/^modulator\d/.test(key)) continue;
+    const modAmounts = getModAmountValuesNormalized(state, key as ParameterKey);
+    if (modAmounts.some((amount) => amount !== 0)) return true;
+    const macroAmounts = getMacroAmountValuesNormalized(state, key as ParameterKey);
+    if (macroAmounts.some((amount) => amount !== 0)) return true;
+  }
+  return false;
+}
+
 // Get contextual mod amount parameter keys for a given parameter
 export function getContextualModAmountParamKeys(paramKey: ParameterKey) {
   return CONTEXTUAL_MOD_SOURCES.map((source) => `${paramKey}Mod${source.key}`) as ParameterKey[];

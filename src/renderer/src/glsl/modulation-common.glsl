@@ -40,6 +40,23 @@ uniform sampler2D modulator1SeqDataTex;
 uniform sampler2D modulator2SeqDataTex;
 uniform sampler2D modulator3SeqDataTex;
 
+// Per-pixel precomputed modulator outputs, rendered once per step by the
+// modulator pass. tex0 = (mod0.L, mod0.R, mod1.L, mod1.R); tex1 = (mod2.L,
+// mod2.R, _, _). Effect shaders sample these instead of evaluating the
+// modulators inline -- the expensive evaluator then compiles only into the
+// modulator pass, not into every effect.
+uniform sampler2D modulatorTex0;
+uniform sampler2D modulatorTex1;
+
+// Reads the precomputed stereo output of every modulator at this fragment.
+void sampleModulators(out vec2 mods[NUM_MODULATORS]) {
+  vec4 a = texture(modulatorTex0, vUv);
+  vec4 b = texture(modulatorTex1, vUv);
+  mods[0] = a.xy;
+  mods[1] = a.zw;
+  mods[2] = b.xy;
+}
+
 // Helper to get sequencer data value by modulator index (samples from texture)
 float getSeqDataValue(int modulatorIndex, int stepX, int stepY) {
   // Convert step indices to texture UV coordinates (center of texel)
@@ -90,6 +107,9 @@ float sampleEnvelopeAtUv(int src, vec2 sampleUv, float audioLevelDb, float minDb
 // Nested paths always pass the base uv unmodified — stereo spread is applied
 // only at the outermost evaluation via getModulationBase.
 float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float patternRateY, float strength, float rotation, float phaseX, float phaseY, float seqLoopX, float seqLoopY, float seqSwing, float audioLevelDb) {
+#ifdef ABLATE_PATTERN_EVAL
+  return 0.5;
+#endif
   float v = 0.0;
 
   Modulator modulator = modulators[modulatorIndex];
@@ -260,9 +280,56 @@ vec2 getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float pa
   return vec2(vL, vR);
 }
 
-vec2 getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, float audioLevelDb) {
+// Blends one nested pattern-modulator contribution into a modulator parameter.
+// modScalar is the source modulator's evaluated output, shared across every
+// parameter for a given source index so it is evaluated once and reused.
+float applyNestedParam(float current, Parameter p, float modScalar, int i) {
+  float a = p.modulationAmounts[i];
+  if (a == 0.0) return current;
+  float minV = a < 0.0 ? p.maxValue : p.minValue;
+  float maxV = a < 0.0 ? p.minValue : p.maxValue;
+  return mix(current, mix(minV, maxV, modScalar), clamp(abs(a), 0.0, 1.0));
+}
+
+// Blends one macro contribution into a modulator parameter. Macros are global
+// scalars (macroValues[m]) broadcast identically to both stereo lanes.
+float applyNestedMacro(float current, Parameter p, float macroVal, int m) {
+  float a = p.macroAmounts[m];
+  if (a == 0.0) return current;
+  float minV = a < 0.0 ? p.maxValue : p.minValue;
+  float maxV = a < 0.0 ? p.minValue : p.maxValue;
+  return mix(current, mix(minV, maxV, macroVal), clamp(abs(a), 0.0, 1.0));
+}
+
+// Evaluates each modulator's own scalar output at uv with no nesting. These are
+// the sources consumed by one level of nested modulation. The result depends
+// only on the source modulator and uv, not on which modulator consumes it, so a
+// caller computes this once and shares it across every consuming modulator
+// instead of re-evaluating the same sources per consumer.
+void evalNestedSources(vec2 uv, float audioLevelDb, out float nested[NUM_MODULATORS]) {
+  for (int i = 0; i < NUM_MODULATORS; i++) {
+    nested[i] = evalModulatorAtUv(uv, i,
+      modulators[i].modulatorPatternRateX.value,
+      modulators[i].modulatorPatternRateY.value,
+      modulators[i].modulatorStrength.value,
+      modulators[i].modulatorRotation.value,
+      modulators[i].modulatorPhaseX.value,
+      modulators[i].modulatorPhaseY.value,
+      modulators[i].seqLoopX.value,
+      modulators[i].seqLoopY.value,
+      modulators[i].seqSwing.value,
+      audioLevelDb);
+  }
+}
+
+// Computes a modulator's stereo output, blending in one level of nested pattern
+// and macro modulation when useNested is true. The nested[] sources are passed
+// in precomputed (see evalNestedSources) so they are shared across modulators.
+// When useNested is false the nested[] values are ignored and the modulator's
+// base parameters drive the output directly.
+vec2 getModulationWithNested(vec2 uv, int modulatorIndex, bool useNested, float nested[NUM_MODULATORS], float audioLevelDb) {
   Modulator modulator = modulators[modulatorIndex];
-  
+
   float patternRateX = modulator.modulatorPatternRateX.value;
   float patternRateY = modulator.modulatorPatternRateY.value;
   float strength = modulator.modulatorStrength.value;
@@ -273,231 +340,40 @@ vec2 getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, floa
   float seqLoopY = modulator.seqLoopY.value;
   float seqSwing = modulator.seqSwing.value;
   float stereoSpread = modulator.modulatorStereoSpread.value;
-  
+
   // Only apply modulation to modulator parameters if we're at depth 0 (not nested)
   // This is disabled on Windows due to shader compilation performance issues
   #ifndef DISABLE_NESTED_MODULATION
-  if (allowNestedModulation) {
-    // Apply one level of modulation to each parameter
+  if (useNested) {
+    // Apply one level of pattern modulation to each modulator parameter, reusing
+    // the precomputed source outputs.
     for (int i = 0; i < NUM_MODULATORS; i++) {
-      float modAmount = modulator.modulatorPatternRateX.modulationAmounts[i];
-      if (modAmount != 0.0) {
-        float mod = evalModulatorAtUv(uv, i, 
-          modulators[i].modulatorPatternRateX.value,
-          modulators[i].modulatorPatternRateY.value,
-          modulators[i].modulatorStrength.value,
-          modulators[i].modulatorRotation.value,
-          modulators[i].modulatorPhaseX.value,
-          modulators[i].modulatorPhaseY.value,
-          modulators[i].seqLoopX.value,
-          modulators[i].seqLoopY.value,
-          modulators[i].seqSwing.value,
-          audioLevelDb);
-        float minV = modAmount < 0.0 ? modulator.modulatorPatternRateX.maxValue : modulator.modulatorPatternRateX.minValue;
-        float maxV = modAmount < 0.0 ? modulator.modulatorPatternRateX.minValue : modulator.modulatorPatternRateX.maxValue;
-        patternRateX = mix(patternRateX, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
-      }
-      
-      modAmount = modulator.modulatorPatternRateY.modulationAmounts[i];
-      if (modAmount != 0.0) {
-        float mod = evalModulatorAtUv(uv, i,
-          modulators[i].modulatorPatternRateX.value,
-          modulators[i].modulatorPatternRateY.value,
-          modulators[i].modulatorStrength.value,
-          modulators[i].modulatorRotation.value,
-          modulators[i].modulatorPhaseX.value,
-          modulators[i].modulatorPhaseY.value,
-          modulators[i].seqLoopX.value,
-          modulators[i].seqLoopY.value,
-          modulators[i].seqSwing.value,
-          audioLevelDb);
-        float minV = modAmount < 0.0 ? modulator.modulatorPatternRateY.maxValue : modulator.modulatorPatternRateY.minValue;
-        float maxV = modAmount < 0.0 ? modulator.modulatorPatternRateY.minValue : modulator.modulatorPatternRateY.maxValue;
-        patternRateY = mix(patternRateY, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
-      }
-      
-      modAmount = modulator.modulatorStrength.modulationAmounts[i];
-      if (modAmount != 0.0) {
-        float mod = evalModulatorAtUv(uv, i,
-          modulators[i].modulatorPatternRateX.value,
-          modulators[i].modulatorPatternRateY.value,
-          modulators[i].modulatorStrength.value,
-          modulators[i].modulatorRotation.value,
-          modulators[i].modulatorPhaseX.value,
-          modulators[i].modulatorPhaseY.value,
-          modulators[i].seqLoopX.value,
-          modulators[i].seqLoopY.value,
-          modulators[i].seqSwing.value,
-          audioLevelDb);
-        float minV = modAmount < 0.0 ? modulator.modulatorStrength.maxValue : modulator.modulatorStrength.minValue;
-        float maxV = modAmount < 0.0 ? modulator.modulatorStrength.minValue : modulator.modulatorStrength.maxValue;
-        strength = mix(strength, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
-      }
-      
-      modAmount = modulator.modulatorRotation.modulationAmounts[i];
-      if (modAmount != 0.0) {
-        float mod = evalModulatorAtUv(uv, i,
-          modulators[i].modulatorPatternRateX.value,
-          modulators[i].modulatorPatternRateY.value,
-          modulators[i].modulatorStrength.value,
-          modulators[i].modulatorRotation.value,
-          modulators[i].modulatorPhaseX.value,
-          modulators[i].modulatorPhaseY.value,
-          modulators[i].seqLoopX.value,
-          modulators[i].seqLoopY.value,
-          modulators[i].seqSwing.value,
-          audioLevelDb);
-        float minV = modAmount < 0.0 ? modulator.modulatorRotation.maxValue : modulator.modulatorRotation.minValue;
-        float maxV = modAmount < 0.0 ? modulator.modulatorRotation.minValue : modulator.modulatorRotation.maxValue;
-        rotation = mix(rotation, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
-      }
-      modAmount = modulator.seqLoopX.modulationAmounts[i];
-      if (modAmount != 0.0) {
-        float mod = evalModulatorAtUv(uv, i,
-          modulators[i].modulatorPatternRateX.value,
-          modulators[i].modulatorPatternRateY.value,
-          modulators[i].modulatorStrength.value,
-          modulators[i].modulatorRotation.value,
-          modulators[i].modulatorPhaseX.value,
-          modulators[i].modulatorPhaseY.value,
-          modulators[i].seqLoopX.value,
-          modulators[i].seqLoopY.value,
-          modulators[i].seqSwing.value,
-          audioLevelDb);
-        float minV = modAmount < 0.0 ? modulator.seqLoopX.maxValue : modulator.seqLoopX.minValue;
-        float maxV = modAmount < 0.0 ? modulator.seqLoopX.minValue : modulator.seqLoopX.maxValue;
-        seqLoopX = mix(seqLoopX, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
-      }
-      
-      modAmount = modulator.seqLoopY.modulationAmounts[i];
-      if (modAmount != 0.0) {
-        float mod = evalModulatorAtUv(uv, i,
-          modulators[i].modulatorPatternRateX.value,
-          modulators[i].modulatorPatternRateY.value,
-          modulators[i].modulatorStrength.value,
-          modulators[i].modulatorRotation.value,
-          modulators[i].modulatorPhaseX.value,
-          modulators[i].modulatorPhaseY.value,
-          modulators[i].seqLoopX.value,
-          modulators[i].seqLoopY.value,
-          modulators[i].seqSwing.value,
-          audioLevelDb);
-        float minV = modAmount < 0.0 ? modulator.seqLoopY.maxValue : modulator.seqLoopY.minValue;
-        float maxV = modAmount < 0.0 ? modulator.seqLoopY.minValue : modulator.seqLoopY.maxValue;
-        seqLoopY = mix(seqLoopY, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
-      }
-      
-      modAmount = modulator.seqSwing.modulationAmounts[i];
-      if (modAmount != 0.0) {
-        float mod = evalModulatorAtUv(uv, i,
-          modulators[i].modulatorPatternRateX.value,
-          modulators[i].modulatorPatternRateY.value,
-          modulators[i].modulatorStrength.value,
-          modulators[i].modulatorRotation.value,
-          modulators[i].modulatorPhaseX.value,
-          modulators[i].modulatorPhaseY.value,
-          modulators[i].seqLoopX.value,
-          modulators[i].seqLoopY.value,
-          modulators[i].seqSwing.value,
-          audioLevelDb);
-        float minV = modAmount < 0.0 ? modulator.seqSwing.maxValue : modulator.seqSwing.minValue;
-        float maxV = modAmount < 0.0 ? modulator.seqSwing.minValue : modulator.seqSwing.maxValue;
-        seqSwing = mix(seqSwing, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
-      }
+      float modI = nested[i];
 
-      modAmount = modulator.modulatorStereoSpread.modulationAmounts[i];
-      if (modAmount != 0.0) {
-        float mod = evalModulatorAtUv(uv, i,
-          modulators[i].modulatorPatternRateX.value,
-          modulators[i].modulatorPatternRateY.value,
-          modulators[i].modulatorStrength.value,
-          modulators[i].modulatorRotation.value,
-          modulators[i].modulatorPhaseX.value,
-          modulators[i].modulatorPhaseY.value,
-          modulators[i].seqLoopX.value,
-          modulators[i].seqLoopY.value,
-          modulators[i].seqSwing.value,
-          audioLevelDb);
-        float minV = modAmount < 0.0 ? modulator.modulatorStereoSpread.maxValue : modulator.modulatorStereoSpread.minValue;
-        float maxV = modAmount < 0.0 ? modulator.modulatorStereoSpread.minValue : modulator.modulatorStereoSpread.maxValue;
-        stereoSpread = mix(stereoSpread, mix(minV, maxV, mod), clamp(abs(modAmount), 0.0, 1.0));
-      }
+      patternRateX = applyNestedParam(patternRateX, modulator.modulatorPatternRateX, modI, i);
+      patternRateY = applyNestedParam(patternRateY, modulator.modulatorPatternRateY, modI, i);
+      strength = applyNestedParam(strength, modulator.modulatorStrength, modI, i);
+      rotation = applyNestedParam(rotation, modulator.modulatorRotation, modI, i);
+      seqLoopX = applyNestedParam(seqLoopX, modulator.seqLoopX, modI, i);
+      seqLoopY = applyNestedParam(seqLoopY, modulator.seqLoopY, modI, i);
+      seqSwing = applyNestedParam(seqSwing, modulator.seqSwing, modI, i);
+      stereoSpread = applyNestedParam(stereoSpread, modulator.modulatorStereoSpread, modI, i);
     }
 
-    // Apply macro modulation to each modulator parameter.
-    // Macros are global scalars (macroValues[m]), so no getModulationBase call.
+    // Apply macro modulation to each modulator parameter. Unlike the pattern
+    // loop above, macros also modulate phaseX/phaseY.
     for (int m = 0; m < NUM_MACROS; m++) {
-      float mod = macroValues[m];
-
-      float macroAmount = modulator.modulatorPatternRateX.macroAmounts[m];
-      if (macroAmount != 0.0) {
-        float minV = macroAmount < 0.0 ? modulator.modulatorPatternRateX.maxValue : modulator.modulatorPatternRateX.minValue;
-        float maxV = macroAmount < 0.0 ? modulator.modulatorPatternRateX.minValue : modulator.modulatorPatternRateX.maxValue;
-        patternRateX = mix(patternRateX, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
-      }
-
-      macroAmount = modulator.modulatorPatternRateY.macroAmounts[m];
-      if (macroAmount != 0.0) {
-        float minV = macroAmount < 0.0 ? modulator.modulatorPatternRateY.maxValue : modulator.modulatorPatternRateY.minValue;
-        float maxV = macroAmount < 0.0 ? modulator.modulatorPatternRateY.minValue : modulator.modulatorPatternRateY.maxValue;
-        patternRateY = mix(patternRateY, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
-      }
-
-      macroAmount = modulator.modulatorStrength.macroAmounts[m];
-      if (macroAmount != 0.0) {
-        float minV = macroAmount < 0.0 ? modulator.modulatorStrength.maxValue : modulator.modulatorStrength.minValue;
-        float maxV = macroAmount < 0.0 ? modulator.modulatorStrength.minValue : modulator.modulatorStrength.maxValue;
-        strength = mix(strength, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
-      }
-
-      macroAmount = modulator.modulatorRotation.macroAmounts[m];
-      if (macroAmount != 0.0) {
-        float minV = macroAmount < 0.0 ? modulator.modulatorRotation.maxValue : modulator.modulatorRotation.minValue;
-        float maxV = macroAmount < 0.0 ? modulator.modulatorRotation.minValue : modulator.modulatorRotation.maxValue;
-        rotation = mix(rotation, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
-      }
-
-      macroAmount = modulator.modulatorPhaseX.macroAmounts[m];
-      if (macroAmount != 0.0) {
-        float minV = macroAmount < 0.0 ? modulator.modulatorPhaseX.maxValue : modulator.modulatorPhaseX.minValue;
-        float maxV = macroAmount < 0.0 ? modulator.modulatorPhaseX.minValue : modulator.modulatorPhaseX.maxValue;
-        phaseX = mix(phaseX, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
-      }
-
-      macroAmount = modulator.modulatorPhaseY.macroAmounts[m];
-      if (macroAmount != 0.0) {
-        float minV = macroAmount < 0.0 ? modulator.modulatorPhaseY.maxValue : modulator.modulatorPhaseY.minValue;
-        float maxV = macroAmount < 0.0 ? modulator.modulatorPhaseY.minValue : modulator.modulatorPhaseY.maxValue;
-        phaseY = mix(phaseY, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
-      }
-
-      macroAmount = modulator.seqLoopX.macroAmounts[m];
-      if (macroAmount != 0.0) {
-        float minV = macroAmount < 0.0 ? modulator.seqLoopX.maxValue : modulator.seqLoopX.minValue;
-        float maxV = macroAmount < 0.0 ? modulator.seqLoopX.minValue : modulator.seqLoopX.maxValue;
-        seqLoopX = mix(seqLoopX, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
-      }
-
-      macroAmount = modulator.seqLoopY.macroAmounts[m];
-      if (macroAmount != 0.0) {
-        float minV = macroAmount < 0.0 ? modulator.seqLoopY.maxValue : modulator.seqLoopY.minValue;
-        float maxV = macroAmount < 0.0 ? modulator.seqLoopY.minValue : modulator.seqLoopY.maxValue;
-        seqLoopY = mix(seqLoopY, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
-      }
-
-      macroAmount = modulator.seqSwing.macroAmounts[m];
-      if (macroAmount != 0.0) {
-        float minV = macroAmount < 0.0 ? modulator.seqSwing.maxValue : modulator.seqSwing.minValue;
-        float maxV = macroAmount < 0.0 ? modulator.seqSwing.minValue : modulator.seqSwing.maxValue;
-        seqSwing = mix(seqSwing, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
-      }
-
-      macroAmount = modulator.modulatorStereoSpread.macroAmounts[m];
-      if (macroAmount != 0.0) {
-        float minV = macroAmount < 0.0 ? modulator.modulatorStereoSpread.maxValue : modulator.modulatorStereoSpread.minValue;
-        float maxV = macroAmount < 0.0 ? modulator.modulatorStereoSpread.minValue : modulator.modulatorStereoSpread.maxValue;
-        stereoSpread = mix(stereoSpread, mix(minV, maxV, mod), clamp(abs(macroAmount), 0.0, 1.0));
-      }
+      float macroVal = macroValues[m];
+      patternRateX = applyNestedMacro(patternRateX, modulator.modulatorPatternRateX, macroVal, m);
+      patternRateY = applyNestedMacro(patternRateY, modulator.modulatorPatternRateY, macroVal, m);
+      strength = applyNestedMacro(strength, modulator.modulatorStrength, macroVal, m);
+      rotation = applyNestedMacro(rotation, modulator.modulatorRotation, macroVal, m);
+      phaseX = applyNestedMacro(phaseX, modulator.modulatorPhaseX, macroVal, m);
+      phaseY = applyNestedMacro(phaseY, modulator.modulatorPhaseY, macroVal, m);
+      seqLoopX = applyNestedMacro(seqLoopX, modulator.seqLoopX, macroVal, m);
+      seqLoopY = applyNestedMacro(seqLoopY, modulator.seqLoopY, macroVal, m);
+      seqSwing = applyNestedMacro(seqSwing, modulator.seqSwing, macroVal, m);
+      stereoSpread = applyNestedMacro(stereoSpread, modulator.modulatorStereoSpread, macroVal, m);
     }
   }
   #endif
@@ -505,25 +381,37 @@ vec2 getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, floa
   return getModulationBase(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, seqLoopX, seqLoopY, seqSwing, stereoSpread, audioLevelDb);
 }
 
-// Returns vec2(L, R). Modulator contributions can decorrelate between channels
-// when their stereoSpread is non-zero; contextual and macro sources broadcast
-// the same scalar to both lanes.
-vec2 applyModulation(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float[NUM_CONTEXTUAL_MOD_SOURCES] contextualModAmounts, float[NUM_MACROS] macroAmounts, vec2 uv, int depth, float audioLevelDb) {
+// Single-modulator entry point. Evaluates the nested sources at uv then computes
+// this modulator's output. Callers that need several modulators at the same uv
+// should evaluate the sources once with evalNestedSources and call
+// getModulationWithNested directly to avoid re-evaluating shared sources.
+vec2 getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, float audioLevelDb) {
+  float nested[NUM_MODULATORS] = float[NUM_MODULATORS](0.0, 0.0, 0.0);
+  #ifndef DISABLE_NESTED_MODULATION
+  if (allowNestedModulation) {
+    evalNestedSources(uv, audioLevelDb, nested);
+  }
+  #endif
+  return getModulationWithNested(uv, modulatorIndex, allowNestedModulation, nested, audioLevelDb);
+}
+
+// Blends precomputed modulator outputs, contextual sources and macros into a
+// parameter. Identical to applyModulation but takes the modulator outputs from
+// evalModulators instead of evaluating them here.
+vec2 applyModulationCached(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float[NUM_CONTEXTUAL_MOD_SOURCES] contextualModAmounts, float[NUM_MACROS] macroAmounts, vec2 mods[NUM_MODULATORS]) {
+#ifdef ABLATE_MODULATION
+  return vec2(value);
+#endif
   vec2 totalModulation = vec2(0.0);
   float totalModulationAmount = 0.0;
 
-  // depth 0 = brush parameters (allow nested modulation)
-  // depth 1+ = modulator parameters (no nested modulation)
-  bool allowNested = (depth == 0);
-
-  // Apply pattern modulator sources — stereo-aware via getModulation → vec2
   for (int i = 0; i < NUM_MODULATORS; i++) {
     float modulationAmount = modulationAmounts[i];
     if (modulationAmount == 0.0) {
       continue;
     }
 
-    vec2 modulation = getModulation(uv, i, allowNested, audioLevelDb);
+    vec2 modulation = mods[i];
 
     float minV = minValue;
     float maxV = maxValue;
@@ -606,8 +494,23 @@ vec2 applyModulation(float value, float minValue, float maxValue, float[NUM_MODU
   return mix(vec2(value), modulatedValue, clamp(totalModulationAmount, 0.0, 1.0));
 }
 
+// Stereo modulation entry point. Evaluates the modulators at this uv then blends.
+vec2 applyModulation(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float[NUM_CONTEXTUAL_MOD_SOURCES] contextualModAmounts, float[NUM_MACROS] macroAmounts, vec2 uv, int depth, float audioLevelDb) {
+#ifdef ABLATE_MODULATION
+  return vec2(value);
+#endif
+  vec2 mods[NUM_MODULATORS];
+  sampleModulators(mods);
+  return applyModulationCached(value, minValue, maxValue, modulationAmounts, contextualModAmounts, macroAmounts, mods);
+}
+
 // Mono helper for callsites where only a single scalar is needed (geometric /
 // brush-envelope shape values that have no natural per-channel meaning).
 float applyModulationMono(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float[NUM_CONTEXTUAL_MOD_SOURCES] contextualModAmounts, float[NUM_MACROS] macroAmounts, vec2 uv, int depth, float audioLevelDb) {
   return applyModulation(value, minValue, maxValue, modulationAmounts, contextualModAmounts, macroAmounts, uv, depth, audioLevelDb).x;
+}
+
+// Mono helper using precomputed modulator outputs from evalModulators.
+float applyModulationCachedMono(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float[NUM_CONTEXTUAL_MOD_SOURCES] contextualModAmounts, float[NUM_MACROS] macroAmounts, vec2 mods[NUM_MODULATORS]) {
+  return applyModulationCached(value, minValue, maxValue, modulationAmounts, contextualModAmounts, macroAmounts, mods).x;
 }

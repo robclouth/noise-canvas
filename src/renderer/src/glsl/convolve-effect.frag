@@ -16,6 +16,11 @@ uniform Parameter convolveIrRate;
 uniform Parameter convolveGain;
 
 void main() {
+  vec2 destUv = packedToUnpackedUv(destInverseMapTex, vUv, destFrameCount, destBandCount);
+  if (brushWeightIsZero(destUv)) {
+    outColor = texture(destSpectrogramTex, vUv);
+    return;
+  }
   ProcessingUvs coords = getProcessingUvs(vUv);
   vec4 originalTexel = texture(destSpectrogramTex, vUv);
   float audioLevelDb = getAudioLevelDb(coords.dest);
@@ -27,25 +32,27 @@ void main() {
   }
 
   // Convolution parameters drive tap geometry shared by both channels; keep mono.
-  float irTimeOff = applyModulationMono(
+  vec2 mods[NUM_MODULATORS];
+  sampleModulators(mods);
+  float irTimeOff = applyModulationCachedMono(
     convolveIrTimeOffset.value, convolveIrTimeOffset.minValue, convolveIrTimeOffset.maxValue,
     convolveIrTimeOffset.modulationAmounts, convolveIrTimeOffset.contextualModAmounts, convolveIrTimeOffset.macroAmounts,
-    coords.dest, 0, audioLevelDb
+    mods
   );
-  float irPitchShiftSemi = applyModulationMono(
+  float irPitchShiftSemi = applyModulationCachedMono(
     convolveIrPitchShiftSemi.value, convolveIrPitchShiftSemi.minValue, convolveIrPitchShiftSemi.maxValue,
     convolveIrPitchShiftSemi.modulationAmounts, convolveIrPitchShiftSemi.contextualModAmounts, convolveIrPitchShiftSemi.macroAmounts,
-    coords.dest, 0, audioLevelDb
+    mods
   );
-  float rate = applyModulationMono(
+  float rate = applyModulationCachedMono(
     convolveIrRate.value, convolveIrRate.minValue, convolveIrRate.maxValue,
     convolveIrRate.modulationAmounts, convolveIrRate.contextualModAmounts, convolveIrRate.macroAmounts,
-    coords.dest, 0, audioLevelDb
+    mods
   );
-  float gain = applyModulationMono(
+  float gain = applyModulationCachedMono(
     convolveGain.value, convolveGain.minValue, convolveGain.maxValue,
     convolveGain.modulationAmounts, convolveGain.contextualModAmounts, convolveGain.macroAmounts,
-    coords.dest, 0, audioLevelDb
+    mods
   );
 
   // ---- Hoisted band metadata ------------------------------------------------

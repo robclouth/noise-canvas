@@ -10,6 +10,11 @@ uniform int cloneDirectionMode; // 0=forward/up, 1=middle, 2=backward/down
 uniform int cloneEdgeMode;
 
 void main() {
+    vec2 destUv = packedToUnpackedUv(destInverseMapTex, vUv, destFrameCount, destBandCount);
+    if (brushWeightIsZero(destUv)) {
+        outColor = texture(destSpectrogramTex, vUv);
+        return;
+    }
     ProcessingUvs coords = getProcessingUvs(vUv);
     vec4 originalTexel = texture(destSpectrogramTex, vUv);
     float audioLevelDb = getAudioLevelDb(coords.dest);
@@ -23,14 +28,16 @@ void main() {
 
     // Stereo-aware tap geometry + per-tap decay. When all are equal across
     // channels and source UVs match, the sample-once fast path triggers per tap.
-    vec2 spaceX = applyModulation(cloneSpaceX.value, cloneSpaceX.minValue, cloneSpaceX.maxValue, cloneSpaceX.modulationAmounts, cloneSpaceX.contextualModAmounts, cloneSpaceX.macroAmounts, coords.dest, 0, audioLevelDb);
-    vec2 spaceY = applyModulation(cloneSpaceY.value, cloneSpaceY.minValue, cloneSpaceY.maxValue, cloneSpaceY.modulationAmounts, cloneSpaceY.contextualModAmounts, cloneSpaceY.macroAmounts, coords.dest, 0, audioLevelDb);
+    vec2 mods[NUM_MODULATORS];
+    sampleModulators(mods);
+    vec2 spaceX = applyModulationCached(cloneSpaceX.value, cloneSpaceX.minValue, cloneSpaceX.maxValue, cloneSpaceX.modulationAmounts, cloneSpaceX.contextualModAmounts, cloneSpaceX.macroAmounts, mods);
+    vec2 spaceY = applyModulationCached(cloneSpaceY.value, cloneSpaceY.minValue, cloneSpaceY.maxValue, cloneSpaceY.modulationAmounts, cloneSpaceY.contextualModAmounts, cloneSpaceY.macroAmounts, mods);
     vec2 space = isXPass ? spaceX : spaceY;
 
     int count = clamp(cloneCount, 1, 32);
 
     vec2 decayFactor = clamp(
-        applyModulation(cloneDecay.value, cloneDecay.minValue, cloneDecay.maxValue, cloneDecay.modulationAmounts, cloneDecay.contextualModAmounts, cloneDecay.macroAmounts, coords.dest, 0, audioLevelDb),
+        applyModulationCached(cloneDecay.value, cloneDecay.minValue, cloneDecay.maxValue, cloneDecay.modulationAmounts, cloneDecay.contextualModAmounts, cloneDecay.macroAmounts, mods),
         0.0, 1.0
     );
 

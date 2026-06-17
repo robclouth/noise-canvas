@@ -1,5 +1,6 @@
 import { ActionIcon, Box, Divider, Group, Menu, Stack, Text, useMantineTheme } from "@mantine/core";
 import { openPrompt } from "@renderer/lib/modals";
+import { CONTROL_ROW_HEIGHT, LABEL_WIDTH } from "@renderer/lib/ui-density";
 import { getParameterDef, isEffectParameter, parameterDefs } from "@renderer/parameters";
 import {
   getMacroValueIndex,
@@ -63,7 +64,7 @@ const ModulationRange = ({ paramKey, effectId }: { paramKey: ParameterKey; effec
 
 type ParamMenuProps = {
   paramKey: ParameterKey;
-  labelWidth?: number;
+  labelWidth?: number | string;
   isModulated?: boolean;
   effectId?: string;
   displayLabel?: string;
@@ -76,7 +77,7 @@ type ParamMenuProps = {
  */
 export const ParamMenu = ({
   paramKey,
-  labelWidth = 70,
+  labelWidth = LABEL_WIDTH,
   isModulated = false,
   effectId,
   displayLabel,
@@ -220,7 +221,7 @@ export const ParamMenu = ({
           <Group gap={8} wrap="nowrap">
             <SwitchControl
               labelComponent={
-                <Text size="xs" w={70}>
+                <Text size="xs" w={LABEL_WIDTH}>
                   Randomise
                 </Text>
               }
@@ -229,7 +230,7 @@ export const ParamMenu = ({
             />
             <SwitchControl
               labelComponent={
-                <Text size="xs" w={70}>
+                <Text size="xs" w={LABEL_WIDTH}>
                   Step Linked
                 </Text>
               }
@@ -241,7 +242,7 @@ export const ParamMenu = ({
           {/* Modulation section (if applicable) */}
           {isModulatable && contextualModParamKeys && (
             <>
-              <Group gap={6} wrap="nowrap" align="center" h={24} mt={4}>
+              <Group gap={6} wrap="nowrap" align="center" h={CONTROL_ROW_HEIGHT} mt={4}>
                 <Text size="xs" c="dark.1">
                   Modulation
                 </Text>
@@ -264,8 +265,12 @@ export const ParamMenu = ({
                   );
                   return (
                     <React.Fragment key={k}>
-                      <ParameterControl paramKey={k} labelWidth={70} color="blue" />
-                      {penKeys[i] ? <ParameterControl paramKey={penKeys[i]} labelWidth={70} color="violet" /> : <div />}
+                      <ParameterControl paramKey={k} labelWidth={LABEL_WIDTH} color="blue" />
+                      {penKeys[i] ? (
+                        <ParameterControl paramKey={penKeys[i]} labelWidth={LABEL_WIDTH} color="violet" />
+                      ) : (
+                        <div />
+                      )}
                     </React.Fragment>
                   );
                 })}
@@ -275,7 +280,7 @@ export const ParamMenu = ({
                     .filter((ck) => ck.endsWith("ModPressure") || ck.endsWith("ModTiltX") || ck.endsWith("ModTiltY"))
                     .map((k) => (
                       <React.Fragment key={k}>
-                        <ParameterControl paramKey={k} labelWidth={70} color="violet" />
+                        <ParameterControl paramKey={k} labelWidth={LABEL_WIDTH} color="violet" />
                         <div />
                       </React.Fragment>
                     ))}
@@ -283,29 +288,29 @@ export const ParamMenu = ({
                 {contextualModParamKeys
                   .filter((k) => k.endsWith("ModIteration"))
                   .map((k) => (
-                    <ParameterControl key={k} paramKey={k} labelWidth={70} color="green" />
+                    <ParameterControl key={k} paramKey={k} labelWidth={LABEL_WIDTH} color="green" />
                   ))}
                 {contextualModParamKeys
                   .filter((k) => k.endsWith("ModStep"))
                   .map((k) => (
-                    <ParameterControl key={k} paramKey={k} labelWidth={70} color="green" />
+                    <ParameterControl key={k} paramKey={k} labelWidth={LABEL_WIDTH} color="green" />
                   ))}
                 {/* Row 5: Time Pos. | Pitch Pos. */}
                 {contextualModParamKeys
                   .filter((k) => k.endsWith("ModTime"))
                   .map((k) => (
-                    <ParameterControl key={k} paramKey={k} labelWidth={70} color="green" />
+                    <ParameterControl key={k} paramKey={k} labelWidth={LABEL_WIDTH} color="green" />
                   ))}
                 {contextualModParamKeys
                   .filter((k) => k.endsWith("ModPitch"))
                   .map((k) => (
-                    <ParameterControl key={k} paramKey={k} labelWidth={70} color="green" />
+                    <ParameterControl key={k} paramKey={k} labelWidth={LABEL_WIDTH} color="green" />
                   ))}
                 {/* Row 6: Randomize | (blank placeholder so macros start on a fresh row) */}
                 {contextualModParamKeys
                   .filter((k) => k.endsWith("ModRandom"))
                   .map((k) => (
-                    <ParameterControl key={k} paramKey={k} labelWidth={70} color="green" />
+                    <ParameterControl key={k} paramKey={k} labelWidth={LABEL_WIDTH} color="green" />
                   ))}
                 {macroAmountParamKeys && <div />}
                 {/* Rows 7-8: Macro 1 | Macro 2, Macro 3 | Macro 4 */}
@@ -313,7 +318,7 @@ export const ParamMenu = ({
                   <ParameterControl
                     key={k}
                     paramKey={k}
-                    labelWidth={70}
+                    labelWidth={LABEL_WIDTH}
                     color="red"
                     displayLabel={macroNames[i] ?? `Macro ${i + 1}`}
                   />

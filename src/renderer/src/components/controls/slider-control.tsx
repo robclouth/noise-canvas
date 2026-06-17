@@ -1,5 +1,6 @@
 import { Combobox, Group, NumberInput, Popover, ScrollArea, Slider, Text, useCombobox } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
+import { CONTROL_ROW_GAP, CONTROL_ROW_HEIGHT, LABEL_WIDTH, VALUE_WIDTH } from "@renderer/lib/ui-density";
 import type { ParameterKey, SliderMark } from "@renderer/store/types";
 import { ChevronDown } from "lucide-react";
 import { KeyboardEventHandler, useCallback, useEffect, useRef, useState } from "react";
@@ -133,7 +134,7 @@ export const SliderControl = (props: SliderControlProps) => {
   });
 
   const valuePanel = (
-    <Group gap={0} w={70}>
+    <Group gap={0} w={VALUE_WIDTH}>
       {activeMark ? (
         <Text
           size="xs"
@@ -187,11 +188,11 @@ export const SliderControl = (props: SliderControlProps) => {
   );
 
   return (
-    <Group gap={"xs"} wrap="nowrap" h={25} align="center">
+    <Group gap={CONTROL_ROW_GAP} wrap="nowrap" h={CONTROL_ROW_HEIGHT} align="center">
       {modulatorParamKeys || contextualModParamKeys ? (
         <Popover withArrow shadow="lg">
           <Popover.Target>
-            <Group gap={2} w={70} style={{ cursor: "pointer" }} wrap="nowrap">
+            <Group gap={2} w={LABEL_WIDTH} style={{ cursor: "pointer" }} wrap="nowrap">
               {labelComponent}
               <ChevronDown style={{ flexShrink: 0 }} size={10} />
             </Group>

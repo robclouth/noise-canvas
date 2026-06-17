@@ -3,6 +3,7 @@ import { useStore } from "@/store";
 import { ActionIcon, Box, Group, Menu, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { openConfirm } from "@renderer/lib/modals";
 import { getHistoryManager, type HistoryManager, type HistoryNode } from "@renderer/lib/history-manager";
+import { WIDGET_INPUT_HEIGHT } from "@renderer/lib/ui-density";
 import { MoreVertical, Redo2, Star, Undo2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Section } from "../section";
@@ -344,7 +345,13 @@ const HistoryRow = memo(function HistoryRow({
                   }}
                   size="xs"
                   autoFocus
-                  styles={{ input: { height: 18, minHeight: 18, fontSize: 11 } }}
+                  styles={{
+                    input: {
+                      height: WIDGET_INPUT_HEIGHT,
+                      minHeight: WIDGET_INPUT_HEIGHT,
+                      fontSize: "var(--ui-font-xs)",
+                    },
+                  }}
                   style={{ flex: 1, minWidth: 0 }}
                   onClick={(e) => e.stopPropagation()}
                 />

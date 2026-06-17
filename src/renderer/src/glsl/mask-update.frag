@@ -10,6 +10,13 @@ void main() {
   vec2 packedUv = vUv;
   vec2 unpackedUv = packedToUnpackedUv(destInverseMapTex, packedUv, destFrameCount, destBandCount);
 
+  // Outside the brush footprint the new weight is zero, so max() leaves the
+  // stored mask untouched — bail before the expensive weight evaluation.
+  if (brushWeightIsZero(unpackedUv)) {
+    outColor = vec4(texture(currentMaskTex, packedUv).r, 0.0, 0.0, 1.0);
+    return;
+  }
+
   float audioLevelDb = getAudioLevelDb(unpackedUv);
   vec2 envelopeWeight = getBrushWeight(unpackedUv, audioLevelDb);
 

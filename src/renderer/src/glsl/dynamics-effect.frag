@@ -60,11 +60,13 @@ float applyDynamics(float inputDb, float thresholdDbValue, float upperRatioValue
 
 vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelDb) {
   // Per-pixel dB transforms — each channel receives its own curve.
-  vec2 thresholdDbValue = applyModulation(thresholdDb.value, thresholdDb.minValue, thresholdDb.maxValue, thresholdDb.modulationAmounts, thresholdDb.contextualModAmounts, thresholdDb.macroAmounts, coords.dest, 0, audioLevelDb);
-  vec2 upperRatioValue = applyModulation(upperRatio.value, upperRatio.minValue, upperRatio.maxValue, upperRatio.modulationAmounts, upperRatio.contextualModAmounts, upperRatio.macroAmounts, coords.dest, 0, audioLevelDb);
-  vec2 lowerRatioValue = applyModulation(lowerRatio.value, lowerRatio.minValue, lowerRatio.maxValue, lowerRatio.modulationAmounts, lowerRatio.contextualModAmounts, lowerRatio.macroAmounts, coords.dest, 0, audioLevelDb);
-  vec2 kneeValue = applyModulation(knee.value, knee.minValue, knee.maxValue, knee.modulationAmounts, knee.contextualModAmounts, knee.macroAmounts, coords.dest, 0, audioLevelDb);
-  vec2 gainDbValue = applyModulation(gainDb.value, gainDb.minValue, gainDb.maxValue, gainDb.modulationAmounts, gainDb.contextualModAmounts, gainDb.macroAmounts, coords.dest, 0, audioLevelDb);
+  vec2 mods[NUM_MODULATORS];
+  sampleModulators(mods);
+  vec2 thresholdDbValue = applyModulationCached(thresholdDb.value, thresholdDb.minValue, thresholdDb.maxValue, thresholdDb.modulationAmounts, thresholdDb.contextualModAmounts, thresholdDb.macroAmounts, mods);
+  vec2 upperRatioValue = applyModulationCached(upperRatio.value, upperRatio.minValue, upperRatio.maxValue, upperRatio.modulationAmounts, upperRatio.contextualModAmounts, upperRatio.macroAmounts, mods);
+  vec2 lowerRatioValue = applyModulationCached(lowerRatio.value, lowerRatio.minValue, lowerRatio.maxValue, lowerRatio.modulationAmounts, lowerRatio.contextualModAmounts, lowerRatio.macroAmounts, mods);
+  vec2 kneeValue = applyModulationCached(knee.value, knee.minValue, knee.maxValue, knee.modulationAmounts, knee.contextualModAmounts, knee.macroAmounts, mods);
+  vec2 gainDbValue = applyModulationCached(gainDb.value, gainDb.minValue, gainDb.maxValue, gainDb.modulationAmounts, gainDb.contextualModAmounts, gainDb.macroAmounts, mods);
 
   // Calculate amplitude for each channel
   float amplitudeL = max(sourceTexel.x, EPSILON);

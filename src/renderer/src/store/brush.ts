@@ -13,8 +13,10 @@ import type { ParameterKey } from "./types";
 import { openFiles } from "./files";
 import type { ZustandGet, ZustandSet } from "./types";
 import { getHistoryManager } from "@renderer/lib/history-manager";
+import { useTransientStore } from "./transient";
 
-export type StrokePosition = { beats: number; pitch: number };
+export type { StrokePosition } from "./transient";
+import type { StrokePosition } from "./transient";
 export type StrokeTimeRange = { min: number; max: number };
 
 export interface BrushState {
@@ -40,10 +42,6 @@ export interface BrushState {
   setHighlightedSourcePath: (path: string | null) => void;
   isStroking: boolean;
   setIsStroking: (value: boolean) => void;
-  cursorVisible: boolean;
-  setCursorVisible: (visible: boolean) => void;
-  cursorPosition: StrokePosition | null;
-  setCursorPosition: (position: StrokePosition | null) => void;
   // Unified stroke actions
   previewStrokeAtPosition: (position: StrokePosition) => void;
   applyStrokeAtPosition: (position?: StrokePosition, strokeTimeRange?: StrokeTimeRange) => Promise<void>;
@@ -101,10 +99,6 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     setHighlightedSourcePath: (path) => set({ highlightedSourcePath: path }),
     isStroking: false,
     setIsStroking: (value) => set({ isStroking: value }),
-    cursorVisible: false,
-    setCursorVisible: (visible) => set({ cursorVisible: visible }),
-    cursorPosition: null,
-    setCursorPosition: (position) => set({ cursorPosition: position }),
 
     // Unified preview action - used by mouse move and arrow keys
     previewStrokeAtPosition: (position) => {
@@ -119,7 +113,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const { spectrogramData } = file;
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
-      set({ cursorPosition: position, cursorVisible: true });
+      useTransientStore.setState({ cursorPosition: position, cursorVisible: true });
 
       const { uvX, uvY } = positionToUv(
         position,
@@ -147,7 +141,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const state = get();
       const { activeFileId, synthesizeFile, autoPlayStroke, setFilePlaybackStartTime, setLoopRegion } = state;
 
-      const effectivePosition = position || state.cursorPosition;
+      const effectivePosition = position || useTransientStore.getState().cursorPosition;
       if (!activeFileId || !effectivePosition) return;
 
       const file = openFiles[activeFileId];
@@ -250,16 +244,9 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     // Helper: move brush and preview
     moveBrushPosition: (direction) => {
       const state = get();
-      const {
-        cursorPosition,
-        gridSizeBeats,
-        gridSizeSemis,
-        gridSwing,
-        activeFileId,
-        previewStrokeAtPosition,
-        scaleTonic,
-        scaleType,
-      } = state;
+      const { gridSizeBeats, gridSizeSemis, gridSwing, activeFileId, previewStrokeAtPosition, scaleTonic, scaleType } =
+        state;
+      const { cursorPosition } = useTransientStore.getState();
 
       if (!activeFileId) return;
 
@@ -355,7 +342,8 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     // Helper: apply at current brush position
     applyBrushAtPosition: async () => {
       const state = get();
-      const { activeFileId, cursorPosition, applyStrokeAtPosition } = state;
+      const { activeFileId, applyStrokeAtPosition } = state;
+      const { cursorPosition } = useTransientStore.getState();
       if (!activeFileId || !cursorPosition) return;
 
       const file = openFiles[activeFileId];

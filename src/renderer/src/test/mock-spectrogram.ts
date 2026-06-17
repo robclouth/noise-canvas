@@ -174,6 +174,126 @@ export function createMockSpectrogramData(options: MockSpectrogramOptions = {}):
   };
 }
 
+// Hard cap from the native analyzer (gaborator-addon.cpp MAX_TEXTURE_SIZE). The
+// packed texture is min(4096, totalCoefficients) wide and at most 4096 tall; a
+// file that would exceed that is rejected at analysis time, so a realistic mock
+// must respect the same bound.
+const MAX_TEXTURE_SIZE = 4096;
+
+/**
+ * Creates mock SpectrogramData that matches the real gaborator packing for a
+ * file of a given duration, so paint-latency profiling sees realistic
+ * dimensions. Mirrors gaborator-addon.cpp:
+ *   - numFrames = round(durationSeconds * sampleRate)   (raw sample count)
+ *   - each octave toward lower frequency adds one to the time step exponent, so
+ *     bandLength = ((numFrames - 1) >> stepLog2) + 1   (high bands are longest)
+ *   - textureWidth = min(4096, totalCoefficients), textureHeight = ceil(total / width)
+ * High-frequency bands hold far more time-frames than low ones and the packed
+ * layout stacks variable-length bands — the property that makes the scissor
+ * over-cover the upper bands and the precompute pass span most of the texture.
+ */
+export function createConstantQMockSpectrogramData(
+  options: {
+    durationSeconds?: number;
+    sampleRate?: number;
+    bandsPerOctave?: number;
+    minFreq?: number;
+    constantMagnitude?: number;
+  } = {},
+): SpectrogramData {
+  const {
+    durationSeconds = 10,
+    sampleRate = 44100,
+    bandsPerOctave = 24,
+    minFreq = 20,
+    constantMagnitude = 0.5,
+  } = options;
+
+  const numFrames = Math.round(durationSeconds * sampleRate);
+  const octaves = Math.log2(sampleRate / 2 / minFreq);
+  const numBands = Math.max(1, Math.round(octaves * bandsPerOctave));
+
+  const bandLengths = new Uint32Array(numBands);
+  const bandStepLog2s = new Int32Array(numBands);
+  const bandOffsets = new Uint32Array(numBands);
+
+  let offset = 0;
+  for (let band = 0; band < numBands; band++) {
+    // Band 0 is the highest frequency (finest time resolution, step 0); each
+    // octave down adds one to the step exponent, matching gaborator.
+    const stepLog2 = Math.floor(band / bandsPerOctave);
+    const len = numFrames > 0 ? ((numFrames - 1) >> stepLog2) + 1 : 0;
+    bandStepLog2s[band] = stepLog2;
+    bandLengths[band] = len;
+    bandOffsets[band] = offset;
+    offset += len;
+  }
+  const totalPacked = offset;
+
+  const textureWidth = Math.min(MAX_TEXTURE_SIZE, totalPacked);
+  const textureHeight = totalPacked > 0 ? Math.ceil(totalPacked / textureWidth) : 0;
+  if (textureHeight > MAX_TEXTURE_SIZE) {
+    throw new Error(
+      `Mock exceeds the analyzer's ${MAX_TEXTURE_SIZE}x${MAX_TEXTURE_SIZE} cap (${textureWidth}x${textureHeight}). ` +
+        `Reduce durationSeconds or bandsPerOctave — the real app would reject this file.`,
+    );
+  }
+
+  const packedData = new Float32Array(textureWidth * textureHeight * 4);
+  for (let i = 0; i < totalPacked; i++) {
+    const baseIndex = i * 4;
+    packedData[baseIndex] = constantMagnitude;
+    packedData[baseIndex + 2] = constantMagnitude;
+  }
+
+  // Inverse map: packed linear index -> (full-res frame = i << stepLog2, band).
+  // Padding pixels beyond the packed data map to the lowest band at frame 0.
+  const inverseMap = new Float32Array(textureWidth * textureHeight * 2);
+  for (let i = 0; i < textureWidth * textureHeight; i++) {
+    inverseMap[i * 2] = 0;
+    inverseMap[i * 2 + 1] = numBands - 1;
+  }
+  for (let band = 0; band < numBands; band++) {
+    const start = bandOffsets[band];
+    const len = bandLengths[band];
+    const step = 1 << bandStepLog2s[band];
+    for (let k = 0; k < len; k++) {
+      const idx = start + k;
+      inverseMap[idx * 2] = k * step;
+      inverseMap[idx * 2 + 1] = band;
+    }
+  }
+
+  const metadata = new Float32Array(numBands * 4);
+  for (let band = 0; band < numBands; band++) {
+    const baseIndex = band * 4;
+    metadata[baseIndex] = bandOffsets[band];
+    metadata[baseIndex + 1] = bandLengths[band];
+    metadata[baseIndex + 2] = bandStepLog2s[band];
+    metadata[baseIndex + 3] = minFreq * Math.pow(2, (numBands - 1 - band) / bandsPerOctave);
+  }
+
+  return {
+    packedData,
+    inverseMap,
+    metadata,
+    textureWidth,
+    textureHeight,
+    numFrames,
+    numBands,
+    numChannels: 2,
+    sampleRate,
+    packedTextureSize: new Vector2(textureWidth, textureHeight),
+    minFreq,
+    bandsPerOctave,
+    synthesisMetadata: {
+      bandOffsets,
+      bandStepLog2s,
+      bandLengths,
+    },
+  };
+}
+
 /**
  * Creates a mock spectrogram with a specific test pattern.
  * Useful for testing that strokes are applied to the correct region.

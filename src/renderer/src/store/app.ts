@@ -3,7 +3,23 @@ import { getParameterDef } from "@renderer/parameters";
 import { Vector2 } from "three";
 import type { ZustandGet, ZustandSet } from "./types";
 
+// Global UI density token. Doubles as the Mantine `size` token for components
+// whose size prop should track density (e.g. "md" = normal, "sm" = compact).
+export type UiSize = "md" | "sm";
+
+// Initial density used on first run (before any persisted value). The Ableton
+// extension build sets VITE_DEFAULT_UI_SIZE=sm so compact is the out-of-the-box
+// default there; runtime code can still change it via setUiSize().
+const envUiSize = import.meta.env.VITE_DEFAULT_UI_SIZE;
+export const DEFAULT_UI_SIZE: UiSize = envUiSize === "sm" || envUiSize === "md" ? envUiSize : "md";
+
+export const APP_PERSISTED_KEYS = ["uiSize"] as const;
+
 export interface AppState {
+  uiSize: UiSize;
+  setUiSize: (uiSize: UiSize) => void;
+  toggleUiSize: () => void;
+
   displayMinDb: number;
   displayMaxDb: number;
   magnitudeLimit: number;
@@ -20,8 +36,6 @@ export interface AppState {
 
   mousePos: Vector2 | null;
   setMousePos: (mousePos: Vector2 | null) => void;
-  hoveredFile: string | null;
-  setHoveredFile: (fileId: string | null) => void;
   sectionCollapsed: Record<string, boolean>;
   setSectionCollapsed: (label: string, collapsed: boolean) => void;
   cycleHorizontalGrid: (direction: 1 | -1) => void;
@@ -32,6 +46,9 @@ export interface AppState {
 
 export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
   return {
+    uiSize: DEFAULT_UI_SIZE,
+    setUiSize: (uiSize) => set({ uiSize }),
+    toggleUiSize: () => set((state) => ({ uiSize: state.uiSize === "md" ? "sm" : "md" })),
     displayMinDb: getParameterDef("displayMinDb").default,
     displayMaxDb: getParameterDef("displayMaxDb").default,
     magnitudeLimit: getParameterDef("magnitudeLimit").default,
@@ -48,8 +65,6 @@ export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
 
     mousePos: null,
     setMousePos: (mousePos) => set({ mousePos }),
-    hoveredFile: null,
-    setHoveredFile: (fileId) => set({ hoveredFile: fileId }),
     sectionCollapsed: {},
     setSectionCollapsed: (label, collapsed) =>
       set((state) => ({

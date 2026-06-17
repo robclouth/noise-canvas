@@ -26,6 +26,11 @@ float snapToScale(float target) {
 }
 
 void main() {
+    vec2 destUv = packedToUnpackedUv(destInverseMapTex, vUv, destFrameCount, destBandCount);
+    if (brushWeightIsZero(destUv)) {
+        outColor = texture(destSpectrogramTex, vUv);
+        return;
+    }
     ProcessingUvs coords = getProcessingUvs(vUv);
     vec4 originalTexel = texture(destSpectrogramTex, vUv);
     float audioLevelDb = getAudioLevelDb(coords.dest);
@@ -40,11 +45,13 @@ void main() {
 
     // Resolve the geometric params as vec2 (L, R). When all modulators driving
     // them have stereoSpread == 0, .x == .y and the fast path below kicks in.
-    vec2 rotationValue = applyModulation(rotation.value, rotation.minValue, rotation.maxValue, rotation.modulationAmounts, rotation.contextualModAmounts, rotation.macroAmounts, coords.dest, 0, audioLevelDb);
-    vec2 scaleXValue = applyModulation(scaleX.value, scaleX.minValue, scaleX.maxValue, scaleX.modulationAmounts, scaleX.contextualModAmounts, scaleX.macroAmounts, coords.dest, 0, audioLevelDb);
-    vec2 scaleYValue = applyModulation(scaleY.value, scaleY.minValue, scaleY.maxValue, scaleY.modulationAmounts, scaleY.contextualModAmounts, scaleY.macroAmounts, coords.dest, 0, audioLevelDb);
-    vec2 rawShiftX = applyModulation(shiftX.value, shiftX.minValue, shiftX.maxValue, shiftX.modulationAmounts, shiftX.contextualModAmounts, shiftX.macroAmounts, coords.dest, 0, audioLevelDb);
-    vec2 rawShiftY = applyModulation(shiftY.value, shiftY.minValue, shiftY.maxValue, shiftY.modulationAmounts, shiftY.contextualModAmounts, shiftY.macroAmounts, coords.dest, 0, audioLevelDb);
+    vec2 mods[NUM_MODULATORS];
+    sampleModulators(mods);
+    vec2 rotationValue = applyModulationCached(rotation.value, rotation.minValue, rotation.maxValue, rotation.modulationAmounts, rotation.contextualModAmounts, rotation.macroAmounts, mods);
+    vec2 scaleXValue = applyModulationCached(scaleX.value, scaleX.minValue, scaleX.maxValue, scaleX.modulationAmounts, scaleX.contextualModAmounts, scaleX.macroAmounts, mods);
+    vec2 scaleYValue = applyModulationCached(scaleY.value, scaleY.minValue, scaleY.maxValue, scaleY.modulationAmounts, scaleY.contextualModAmounts, scaleY.macroAmounts, mods);
+    vec2 rawShiftX = applyModulationCached(shiftX.value, shiftX.minValue, shiftX.maxValue, shiftX.modulationAmounts, shiftX.contextualModAmounts, shiftX.macroAmounts, mods);
+    vec2 rawShiftY = applyModulationCached(shiftY.value, shiftY.minValue, shiftY.maxValue, shiftY.modulationAmounts, shiftY.contextualModAmounts, shiftY.macroAmounts, mods);
 
     bool sameParams = (rotationValue.x == rotationValue.y)
                    && (scaleXValue.x == scaleXValue.y)

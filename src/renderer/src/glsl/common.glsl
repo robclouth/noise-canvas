@@ -4,7 +4,7 @@ precision highp int;
 
 in vec2 vUv;
 
-out vec4 outColor;
+layout(location = 0) out vec4 outColor;
 
 #define NUM_CONTEXTUAL_MOD_SOURCES 8
 #define NUM_MACROS 4

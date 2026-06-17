@@ -349,15 +349,17 @@ ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
   // Stereo-aware source UV offsets. When every modulator driving these params has
   // stereoSpread == 0, the two components of each vec2 are equal and sameSourceUv
   // falls out true — effects then take the single-sample fast path.
-  vec2 modTimeOff = applyModulation(
+  vec2 srcMods[NUM_MODULATORS];
+  sampleModulators(srcMods);
+  vec2 modTimeOff = applyModulationCached(
     sourceTimeOffset.value, sourceTimeOffset.minValue, sourceTimeOffset.maxValue,
     sourceTimeOffset.modulationAmounts, sourceTimeOffset.contextualModAmounts, sourceTimeOffset.macroAmounts,
-    uvs.dest, 0, 0.0
+    srcMods
   );
-  vec2 modPitchOff = applyModulation(
+  vec2 modPitchOff = applyModulationCached(
     sourcePitchOffset.value, sourcePitchOffset.minValue, sourcePitchOffset.maxValue,
     sourcePitchOffset.modulationAmounts, sourcePitchOffset.contextualModAmounts, sourcePitchOffset.macroAmounts,
-    uvs.dest, 0, 0.0
+    srcMods
   );
 
   float baseX = uvs.dest.x * sourceTimeScale + sourceOffsetX;
@@ -694,21 +696,23 @@ vec2 getBrushWeight(vec2 unpackedUv, float audioLevelDb) {
   vec2 off = getEffectiveBrushOffset(unpackedUv);
   vec2 safeBrush = max(vec2(EPSILON), brushSizeUv);
 
-  vec2 curveX = applyModulation(
+  vec2 brushMods[NUM_MODULATORS];
+  sampleModulators(brushMods);
+  vec2 curveX = applyModulationCached(
     brushCurveTime.value, brushCurveTime.minValue, brushCurveTime.maxValue,
-    brushCurveTime.modulationAmounts, brushCurveTime.contextualModAmounts, brushCurveTime.macroAmounts, unpackedUv, 0, audioLevelDb
+    brushCurveTime.modulationAmounts, brushCurveTime.contextualModAmounts, brushCurveTime.macroAmounts, brushMods
   );
-  vec2 skewX = applyModulation(
+  vec2 skewX = applyModulationCached(
     brushSkewTime.value, brushSkewTime.minValue, brushSkewTime.maxValue,
-    brushSkewTime.modulationAmounts, brushSkewTime.contextualModAmounts, brushSkewTime.macroAmounts, unpackedUv, 0, audioLevelDb
+    brushSkewTime.modulationAmounts, brushSkewTime.contextualModAmounts, brushSkewTime.macroAmounts, brushMods
   );
-  vec2 curveY = applyModulation(
+  vec2 curveY = applyModulationCached(
     brushCurvePitch.value, brushCurvePitch.minValue, brushCurvePitch.maxValue,
-    brushCurvePitch.modulationAmounts, brushCurvePitch.contextualModAmounts, brushCurvePitch.macroAmounts, unpackedUv, 0, audioLevelDb
+    brushCurvePitch.modulationAmounts, brushCurvePitch.contextualModAmounts, brushCurvePitch.macroAmounts, brushMods
   );
-  vec2 skewY = applyModulation(
+  vec2 skewY = applyModulationCached(
     brushSkewPitch.value, brushSkewPitch.minValue, brushSkewPitch.maxValue,
-    brushSkewPitch.modulationAmounts, brushSkewPitch.contextualModAmounts, brushSkewPitch.macroAmounts, unpackedUv, 0, audioLevelDb
+    brushSkewPitch.modulationAmounts, brushSkewPitch.contextualModAmounts, brushSkewPitch.macroAmounts, brushMods
   );
 
   // X (time): compute overlap between bin [off.x, off.x+binWidth] and brush [0, brushSizeUv.x].
@@ -755,6 +759,26 @@ bool isInsideSourceBrush(vec2 sourceUv) {
   return isInsideBrush(sourceUvToDestUv(sourceUv));
 }
 
+// Conservative test for fragments whose brush weight is provably zero, derived
+// from getBrushWeight's exact zero conditions: weightY is zero when off.y leaves
+// [0, brushSizeUv.y], weightX is zero when the bin [off.x, off.x+binWidth] does
+// not overlap the brush span [0, brushSizeUv.x]. Runs before the expensive
+// per-fragment work (modulator sampling, source reads), so the large packed
+// regions outside the brush — which dominate high-frequency bands where the
+// scissor over-covers — bail after one unpack and metadata fetch. Never rejects
+// a fragment that getBrushWeight would score above zero.
+bool brushWeightIsZero(vec2 unpackedUv) {
+#ifdef ABLATE_BRUSH_REJECT
+  return false;
+#else
+  vec2 off = getEffectiveBrushOffset(unpackedUv);
+  float binWidth = exp2(getDestMetadata(unpackedUv).b) / destFrameCount;
+  float safeBrushY = max(EPSILON, brushSizeUv.y);
+  return off.y < 0.0 || off.y > safeBrushY
+      || off.x >= brushSizeUv.x || off.x + binWidth <= 0.0;
+#endif
+}
+
 // Applies the final brush effect, combining original and modified data.
 // packedUv is the raw texture coordinate (vUv), destUv is the unpacked spectrogram coordinate
 // weight is vec2(L, R) — each channel carries its own brush envelope weight so
@@ -779,14 +803,16 @@ vec4 applyBrush(vec4 original, vec4 modified, vec2 weight, vec2 destUv, vec2 pac
 
   float audioLevelDb = getAudioLevelDb(destUv);
 
-  vec2 intensity = applyModulation(
+  vec2 brushMods[NUM_MODULATORS];
+  sampleModulators(brushMods);
+  vec2 intensity = applyModulationCached(
     brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue,
-    brushIntensity.modulationAmounts, brushIntensity.contextualModAmounts, brushIntensity.macroAmounts, destUv, 0, audioLevelDb
+    brushIntensity.modulationAmounts, brushIntensity.contextualModAmounts, brushIntensity.macroAmounts, brushMods
   );
 
-  vec2 pan = applyModulation(
+  vec2 pan = applyModulationCached(
     brushPan.value, brushPan.minValue, brushPan.maxValue,
-    brushPan.modulationAmounts, brushPan.contextualModAmounts, brushPan.macroAmounts, destUv, 0, audioLevelDb
+    brushPan.modulationAmounts, brushPan.contextualModAmounts, brushPan.macroAmounts, brushMods
   );
 
   vec2 pannedModifiedL = fromPolar(getMag(modifiedL) * clamp(1.0 - pan.x, 0.0, 1.0), getPhase(modifiedL));

@@ -1,6 +1,7 @@
 import { useStore } from "@/store";
 import { ParameterKey } from "@/store/types";
 import { Box, Collapse, Divider, Group, Stack, Text, useMantineTheme } from "@mantine/core";
+import { CONTROL_ROW_HEIGHT } from "@renderer/lib/ui-density";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { SectionMenu } from "./controls/section-menu";
 
@@ -30,7 +31,7 @@ export const Section = ({
 
   return (
     <Stack gap={2} style={fill ? { flex: 1, minHeight: 0 } : undefined}>
-      <Group gap={4} wrap="nowrap" align="center" h={24} pr={fill ? 8 : undefined}>
+      <Group gap={4} wrap="nowrap" align="center" h={CONTROL_ROW_HEIGHT} pr={fill ? 8 : undefined}>
         <Group
           gap={4}
           wrap="nowrap"

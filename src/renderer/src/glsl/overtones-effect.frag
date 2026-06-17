@@ -8,8 +8,10 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
     // Stereo-aware harmonic placement. scale drives the vertical UV offset per
     // harmonic; decay shapes the per-harmonic weight curve. Fast path samples
     // once per harmonic when both params and source UVs match across channels.
-    vec2 scale = applyModulation(overtonesScale.value, overtonesScale.minValue, overtonesScale.maxValue, overtonesScale.modulationAmounts, overtonesScale.contextualModAmounts, overtonesScale.macroAmounts, coords.dest, 0, audioLevelDb);
-    vec2 decay = applyModulation(overtonesDecay.value, overtonesDecay.minValue, overtonesDecay.maxValue, overtonesDecay.modulationAmounts, overtonesDecay.contextualModAmounts, overtonesDecay.macroAmounts, coords.dest, 0, audioLevelDb);
+    vec2 mods[NUM_MODULATORS];
+    sampleModulators(mods);
+    vec2 scale = applyModulationCached(overtonesScale.value, overtonesScale.minValue, overtonesScale.maxValue, overtonesScale.modulationAmounts, overtonesScale.contextualModAmounts, overtonesScale.macroAmounts, mods);
+    vec2 decay = applyModulationCached(overtonesDecay.value, overtonesDecay.minValue, overtonesDecay.maxValue, overtonesDecay.modulationAmounts, overtonesDecay.contextualModAmounts, overtonesDecay.macroAmounts, mods);
 
     bool sameHarmonics = (scale.x == scale.y) && (decay.x == decay.y) && coords.sameSourceUv;
 

@@ -12,11 +12,11 @@ import { modals } from "./components/modals";
 const theme = createTheme({
   primaryColor: "orange",
   fontSizes: {
-    xs: "11px",
-    sm: "11px",
-    md: "16px",
-    lg: "16px",
-    xl: "18px",
+    xs: "var(--ui-font-xs)",
+    sm: "var(--ui-font-sm)",
+    md: "var(--ui-font-md)",
+    lg: "var(--ui-font-lg)",
+    xl: "var(--ui-font-xl)",
   },
   spacing: {
     xs: "8px",
@@ -40,7 +40,11 @@ const theme = createTheme({
         if (props.size === "xs") {
           return {
             root: {},
-            wrapper: { "--input-height": "19px", "--input-color": "#fff", "--input-padding-inline-start": "3px" },
+            wrapper: {
+              "--input-height": "var(--ui-input-mantine-h)",
+              "--input-color": "#fff",
+              "--input-padding-inline-start": "3px",
+            },
           };
         }
         return { root: {}, wrapper: {} };

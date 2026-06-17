@@ -88,6 +88,10 @@ export type CommonUniforms = {
   modulator1SeqDataTex: { value: Texture | null };
   modulator2SeqDataTex: { value: Texture | null };
   modulator3SeqDataTex: { value: Texture | null };
+  // Precomputed per-pixel modulator outputs (filled by the modulator pass each
+  // step). tex0 packs modulators 0 and 1 (xy/zw), tex1 packs modulator 2 (xy).
+  modulatorTex0: { value: Texture | null };
+  modulatorTex1: { value: Texture | null };
   // Contextual stroke uniforms for contextual modulation sources
   strokeIterationNormalized?: { value: number };
   strokeTimePosition?: { value: number };
@@ -235,6 +239,8 @@ export const defaultValues: CommonUniforms = {
   modulator1SeqDataTex: { value: null },
   modulator2SeqDataTex: { value: null },
   modulator3SeqDataTex: { value: null },
+  modulatorTex0: { value: null },
+  modulatorTex1: { value: null },
   strokeIterationNormalized: { value: 0 },
   strokeTimePosition: { value: 0 },
   strokePitchPosition: { value: 0 },

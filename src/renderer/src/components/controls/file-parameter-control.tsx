@@ -1,6 +1,7 @@
 import { useStore } from "@/store";
 import { Box, Group, Text } from "@mantine/core";
 import { openContextModal } from "@renderer/lib/modals";
+import { CONTROL_ROW_GAP, CONTROL_ROW_HEIGHT, VALUE_WIDTH, WIDGET_HEIGHT } from "@renderer/lib/ui-density";
 import { useEffectId } from "@renderer/contexts/effect-context";
 import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
 import { getFileColor, openFiles } from "@renderer/store/files";
@@ -61,7 +62,7 @@ export const FileParameterControl = memo(function FileParameterControl({
   }, [pickMode, isCanvasPicking, paramKey, effectId, value, setValue]);
 
   return (
-    <Group gap={"xs"} wrap="nowrap" h={24} align="center">
+    <Group gap={CONTROL_ROW_GAP} wrap="nowrap" h={CONTROL_ROW_HEIGHT} align="center">
       {labelComponent}
 
       {/* File name button */}
@@ -75,8 +76,8 @@ export const FileParameterControl = memo(function FileParameterControl({
         }}
         style={{
           position: "relative",
-          width: 70,
-          height: 20,
+          width: VALUE_WIDTH,
+          height: WIDGET_HEIGHT,
           cursor: "pointer",
           overflow: "hidden",
           borderRadius: 2,
