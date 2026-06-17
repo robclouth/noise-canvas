@@ -1337,7 +1337,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // also start as dirty — their first synthesis happens at creation time
       // before any real audio exists, and re-synthesis of a managed file with
       // an existing buffer means the user has painted, so dirty stays true.
-      get().setFileDirty(fileId, file.audioBuffer !== undefined || isManagedFilePath(file.filePath));
+      // The extension derives dirty from the history position (off-root), so
+      // leave it to the history manager there.
+      if (!host.env.isExtension) {
+        get().setFileDirty(fileId, file.audioBuffer !== undefined || isManagedFilePath(file.filePath));
+      }
 
       file.audioBuffer = audioBuffer;
       file.audioPeak = synthesisResult.peak > 0 ? synthesisResult.peak : 1;
@@ -1410,7 +1414,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       file.audioBuffer = audioBuffer;
       file.audioPeak = peak > 0 ? peak : 1;
 
-      get().setFileDirty(fileId, hadPreviousBuffer || isManagedFilePath(file.filePath));
+      // The extension derives dirty from the history position (off-root).
+      if (!host.env.isExtension) {
+        get().setFileDirty(fileId, hadPreviousBuffer || isManagedFilePath(file.filePath));
+      }
 
       // Hot-swap if currently playing this file
       if (get().isPlaying && get().activeFileId === fileId) {

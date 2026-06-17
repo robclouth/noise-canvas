@@ -396,6 +396,10 @@ export class HistoryManager {
       const loaded = await this.readManifest();
       if (loaded) {
         this.manifest = loaded;
+        // The Ableton extension opens every clip at its original audio (the root
+        // snapshot), keeping prior edits as branches in the tree rather than
+        // jumping to the last-edited tip.
+        if (host.env.isExtension) loaded.currentId = loaded.rootId;
         // The freshly-analyzed file on disk almost always matches the root's
         // dimensions (strokes don't change dims; resize/reanalyze either ran
         // and re-saved, or we're at root). Set lastLoadedAnchorId to the
@@ -410,6 +414,7 @@ export class HistoryManager {
       }
     })();
     await this.initPromise;
+    this.syncExtensionDirty();
     return this.manifest !== null;
   }
 
@@ -448,7 +453,15 @@ export class HistoryManager {
 
   private notifyStateChange(): void {
     ipcSend("update-menu-state", this.canUndo(), this.canRedo());
+    this.syncExtensionDirty();
     this.emit();
+  }
+
+  // In the Ableton extension a file is "dirty" (has something to Save to Live)
+  // exactly when the current node differs from the original audio at the root.
+  private syncExtensionDirty(): void {
+    if (!host.env.isExtension || !this.manifest) return;
+    useStore.getState().setFileDirty(this.fileId, this.manifest.currentId !== this.manifest.rootId);
   }
 
   // ---------- File paths ----------
