@@ -2,6 +2,7 @@ import { Vector2 } from "three";
 import { useStore } from "@renderer/store";
 import { openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
+import { isManagedFilePath } from "@renderer/store/managed-path";
 import { host } from "./host";
 import { ipcSend } from "./ipc";
 
@@ -59,6 +60,10 @@ interface HistoryManifest {
   version: typeof HISTORY_MANIFEST_VERSION;
   rootId: string;
   currentId: string;
+  // History node whose audio is currently persisted to disk. The file is dirty
+  // exactly when currentId differs from it. Absent on legacy manifests and on
+  // never-saved files; both fall back to the root snapshot.
+  savedNodeId?: string;
   nodes: Record<string, HistoryNode>;
 }
 
@@ -414,7 +419,7 @@ export class HistoryManager {
       }
     })();
     await this.initPromise;
-    this.syncExtensionDirty();
+    this.syncDirty();
     return this.manifest !== null;
   }
 
@@ -453,15 +458,35 @@ export class HistoryManager {
 
   private notifyStateChange(): void {
     ipcSend("update-menu-state", this.canUndo(), this.canRedo());
-    this.syncExtensionDirty();
+    this.syncDirty();
     this.emit();
   }
 
-  // In the Ableton extension a file is "dirty" (has something to Save to Live)
-  // exactly when the current node differs from the original audio at the root.
-  private syncExtensionDirty(): void {
-    if (!host.env.isExtension || !this.manifest) return;
-    useStore.getState().setFileDirty(this.fileId, this.manifest.currentId !== this.manifest.rootId);
+  // A file is dirty when the current node differs from the last-saved one, so
+  // undoing back to the saved (or original) state clears dirty and redoing away
+  // from it sets it again. Managed files have no on-disk audio to match and stay
+  // dirty until promoted to a real file via Save As. In the extension nothing
+  // calls markSaved (Save to Live spawns a new clip), so savedNodeId stays at
+  // the root and dirty means "differs from the clip's original audio."
+  private syncDirty(): void {
+    if (!this.manifest) return;
+    const file = openFiles[this.fileId];
+    if (file?.filePath && isManagedFilePath(file.filePath)) {
+      useStore.getState().setFileDirty(this.fileId, true);
+      return;
+    }
+    const savedId = this.manifest.savedNodeId ?? this.manifest.rootId;
+    useStore.getState().setFileDirty(this.fileId, this.manifest.currentId !== savedId);
+  }
+
+  // Record that the current node's audio has been written to disk, so it becomes
+  // the clean reference for the dirty flag.
+  async markSaved(): Promise<void> {
+    await this.initialize();
+    if (!this.manifest) return;
+    this.manifest.savedNodeId = this.manifest.currentId;
+    this.scheduleManifestWrite();
+    this.syncDirty();
   }
 
   // ---------- File paths ----------

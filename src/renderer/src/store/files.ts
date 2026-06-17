@@ -897,8 +897,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             // Export the audio
             await host.analysis.exportAudio(audioChannels, filePath, file.audioBuffer!.sampleRate, format);
 
-            // Mark as not dirty
-            get().setFileDirty(state.activeFileId!, false);
+            // The current history node now matches what's on disk.
+            await getHistoryManager(state.activeFileId!).markSaved();
             console.log("File saved successfully:", filePath);
 
             // Show success notification
@@ -1001,8 +1001,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         void migrateRefsInPresetFiles(presetsDir, oldFilePath, outputPath);
       }
 
-      // Mark as not dirty
-      get().setFileDirty(state.activeFileId!, false);
+      // The active file is now a real file whose current node matches disk.
+      await getHistoryManager(state.activeFileId!).markSaved();
       console.log("File saved as:", outputPath);
 
       // Show success notification
@@ -1101,8 +1101,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         void migrateRefsInPresetFiles(presetsDir, oldFilePath, outputPath);
       }
 
-      // Mark as not dirty
-      get().setFileDirty(state.activeFileId!, false);
+      // The active file now points at the version on disk at the current node.
+      await getHistoryManager(state.activeFileId!).markSaved();
       console.log("File version saved:", outputPath);
 
       // Show success notification
@@ -1332,18 +1332,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
       console.log(`[timing] create AudioBuffer: ${(performance.now() - audioBufferStart).toFixed(2)}ms`);
 
-      // Mark file as dirty if it's not the first synthesis (the first run on a
-      // freshly-opened real file just builds the initial audio buffer from
-      // the on-disk audio and shouldn't be considered dirty). Managed files
-      // also start as dirty — their first synthesis happens at creation time
-      // before any real audio exists, and re-synthesis of a managed file with
-      // an existing buffer means the user has painted, so dirty stays true.
-      // The extension derives dirty from the history position (off-root), so
-      // leave it to the history manager there.
-      if (!host.env.isExtension) {
-        get().setFileDirty(fileId, file.audioBuffer !== undefined || isManagedFilePath(file.filePath));
-      }
-
       file.audioBuffer = audioBuffer;
       file.audioPeak = synthesisResult.peak > 0 ? synthesisResult.peak : 1;
 
@@ -1411,14 +1399,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         audioBuffer.copyToChannel(channels[i] as Float32Array<ArrayBuffer>, i);
       }
 
-      const hadPreviousBuffer = file.audioBuffer !== undefined;
       file.audioBuffer = audioBuffer;
       file.audioPeak = peak > 0 ? peak : 1;
-
-      // The extension derives dirty from the history position (off-root).
-      if (!host.env.isExtension) {
-        get().setFileDirty(fileId, hadPreviousBuffer || isManagedFilePath(file.filePath));
-      }
 
       // Hot-swap if currently playing this file
       if (get().isPlaying && get().activeFileId === fileId) {

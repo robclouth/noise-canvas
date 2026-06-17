@@ -1,25 +1,14 @@
 import { getNumberParameterDef } from "@renderer/parameters";
 import type { ParameterKey } from "./types";
 
+export { isManagedFilePath, makeManagedFilePath } from "./managed-path";
+
 // utils/normalizers.ts
 const EPS = 1e-9;
 
 // Helper to generate unique file IDs
 export function generateFileId(): string {
   return `file_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-}
-
-// Sentinel scheme for managed (unsaved-to-disk) files. Lets the existing
-// path-keyed maps (filepathsBpm, brush sourceFile refs, getFileColor) treat
-// managed files identically to real files until the user picks a real path.
-const MANAGED_PATH_PREFIX = "managed://";
-
-export function makeManagedFilePath(fileId: string): string {
-  return `${MANAGED_PATH_PREFIX}${fileId}`;
-}
-
-export function isManagedFilePath(filePath: string): boolean {
-  return filePath.startsWith(MANAGED_PATH_PREFIX);
 }
 
 export function normalizeParameterValue(paramKey: ParameterKey, value: number): number {
