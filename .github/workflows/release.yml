@@ -65,8 +65,37 @@ jobs:
           path: dist/latest*.yml
           if-no-files-found: warn
 
+  build-extension:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      # build:ext (webview + esbuilt host) then extensions-cli package → .ablx.
+      # extensions-cli is the vendored @ableton-extensions/cli devDependency, so
+      # it resolves on the npm-script PATH without a global install.
+      - name: Build Ableton extension
+        run: npm run ext:package
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ableton-extension
+          path: out-ext/noise-canvas.ablx
+          if-no-files-found: error
+
   release:
-    needs: build
+    needs: [build, build-extension]
     runs-on: ubuntu-latest
 
     # This lets us create a Release and upload assets.
@@ -100,4 +129,5 @@ jobs:
             artifacts/**/*-setup.exe
             artifacts/**/*.AppImage
             artifacts/**/*.deb
+            artifacts/**/*.ablx
             artifacts/**/*-manifests/latest*.yml
