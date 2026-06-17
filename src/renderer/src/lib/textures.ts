@@ -38,6 +38,7 @@ import {
   TextureLoader,
 } from "three";
 import { getFolders } from "./folders";
+import { host } from "./host";
 
 const TEXTURE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp"];
 
@@ -55,12 +56,12 @@ export async function getTextures() {
     const textures: Array<{ path: string; filename: string }> = [];
 
     try {
-      const entries = await window.nodeFs.readdir(dir, { withFileTypes: true });
+      const entries = await host.fs.readdir(dir, { withFileTypes: true });
 
       for (const entry of entries) {
         if (entry.name.startsWith(".")) continue;
 
-        const fullPath = window.nodePath.join(dir, entry.name);
+        const fullPath = host.path.join(dir, entry.name);
         const relPath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
 
         if (entry.isDirectory()) {

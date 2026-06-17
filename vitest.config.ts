@@ -9,6 +9,8 @@ export default defineConfig({
     alias: {
       "@renderer": resolve(__dirname, "src/renderer/src"),
       "@": resolve(__dirname, "src/renderer/src"),
+      // Tests exercise the Electron host implementation (they stub window.*).
+      "@host-impl": resolve(__dirname, "src/renderer/src/lib/host/electron.ts"),
     },
   },
   plugins: [
@@ -30,5 +32,7 @@ export default defineConfig({
       screenshotFailures: false,
     },
     include: ["src/renderer/**/*.test.ts"],
+    // Perf suites are slow and noisy; run them explicitly via `npm run test:perf`.
+    exclude: ["**/node_modules/**", "**/*.perf.test.ts"],
   },
 });

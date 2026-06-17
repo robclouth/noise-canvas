@@ -167,6 +167,11 @@ export class StrokeRenderer {
   private maskPingPong = 0;
   private isInitialized = false;
 
+  // Test seam: forces committed scissored strokes back onto the legacy
+  // full-texture blit + ping-pong-swap path instead of the brush-sized
+  // copy-back, so equivalence between the two can be asserted.
+  disableScissorCopyBack = false;
+
   // FBO data cache
   private fboDataCache: Float32Array | null = null;
   private fboDataDirty = true;
@@ -278,6 +283,28 @@ export class StrokeRenderer {
     gl2.bindFramebuffer(gl2.READ_FRAMEBUFFER, srcFb);
     gl2.bindFramebuffer(gl2.DRAW_FRAMEBUFFER, dstFb);
     gl2.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl2.COLOR_BUFFER_BIT, gl2.NEAREST);
+    this.gl.setRenderTarget(null);
+  }
+
+  /**
+   * Copy a contiguous band of rows [rowStart, rowStart+rowCount) from src to dst,
+   * leaving all other rows of dst untouched. Used by the committed-stroke
+   * copy-back path so only the brush-sized region is moved each stroke.
+   */
+  private blitFBORows(src: WebGLRenderTarget, dst: WebGLRenderTarget, rowStart: number, rowCount: number): void {
+    const gl2 = this.gl.getContext() as WebGL2RenderingContext;
+    this.gl.setRenderTarget(src);
+    this.gl.setRenderTarget(dst);
+
+    const props = (this.gl as any).properties as { get(obj: unknown): Record<string, unknown> };
+    const srcFb = props.get(src).__webglFramebuffer as WebGLFramebuffer;
+    const dstFb = props.get(dst).__webglFramebuffer as WebGLFramebuffer;
+    const w = src.width;
+    const y0 = Math.max(0, rowStart);
+    const y1 = Math.min(src.height, rowStart + rowCount);
+    gl2.bindFramebuffer(gl2.READ_FRAMEBUFFER, srcFb);
+    gl2.bindFramebuffer(gl2.DRAW_FRAMEBUFFER, dstFb);
+    gl2.blitFramebuffer(0, y0, w, y1, 0, y0, w, y1, gl2.COLOR_BUFFER_BIT, gl2.NEAREST);
     this.gl.setRenderTarget(null);
   }
 
@@ -754,10 +781,17 @@ export class StrokeRenderer {
     }
     const scissorRows = yWrapsOutOfBounds ? null : this.calculateScissorRows(unionAnchor, maxBrushSizeUv);
 
-    // If scissoring, blit full texture to destinationFbo so non-scissored rows are correct,
-    // then set scissor on all FBOs that will be rendered to.
+    // Committed strokes use a copy-back path: render only the brush rows into
+    // destinationFbo, then fold those rows back into the canonical buffer, so
+    // per-stroke cost stays proportional to the brush rather than the whole
+    // texture. Preview strokes still need a fully-valid destination because the
+    // display samples destinationFbo directly (getDisplayTexture), so its
+    // untouched rows must hold the current spectrogram.
+    const committedScissor = scissorRows !== null && !preview && !this.disableScissorCopyBack;
     if (scissorRows) {
-      this.blitFBO(currentReadFBO, destinationFbo);
+      if (!committedScissor) {
+        this.blitFBO(currentReadFBO, destinationFbo);
+      }
 
       const scissorVec = new Vector4(0, scissorRows.rowStart, this.spectrogramData.textureWidth, scissorRows.rowCount);
       destinationFbo.scissor.copy(scissorVec);
@@ -981,6 +1015,13 @@ export class StrokeRenderer {
 
     this.gl.setRenderTarget(null);
 
+    // For committed scissored strokes, fold the freshly painted rows back into
+    // the canonical read buffer. This region blit is brush-sized, not
+    // full-texture, which is what keeps small-brush cost flat as files grow.
+    if (committedScissor && scissorRows) {
+      this.blitFBORows(destinationFbo, currentReadFBO, scissorRows.rowStart, scissorRows.rowCount);
+    }
+
     // Reset scissor on FBOs if it was enabled
     if (scissorRows) {
       destinationFbo.scissorTest = false;
@@ -991,7 +1032,13 @@ export class StrokeRenderer {
 
     // If the stroke is not a preview, commit the changes
     if (!preview) {
-      this.pingPong = 1 - this.pingPong;
+      // A committed scissored stroke already folded its result into the
+      // canonical buffer via copy-back, so the ping-pong must NOT swap;
+      // currentReadFBO stays canonical. Every other committed stroke (including
+      // the legacy full-blit path) wrote the whole destinationFbo and swaps.
+      if (!committedScissor) {
+        this.pingPong = 1 - this.pingPong;
+      }
 
       // Update stroke mask for non-cumulative mode. Any step being non-accumulate
       // means the per-step gate in the render loop will sample the mask for that

@@ -9,6 +9,8 @@
   "scripts": {
     "test": "vitest",
     "test:run": "vitest run",
+    "test:host": "vitest run --config vitest.host.config.ts",
+    "test:perf": "vitest run --config vitest.perf.config.ts",
     "format": "prettier --write .",
     "lint": "eslint --cache .",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
@@ -16,6 +18,12 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
+    "dev:ext": "vite --config vite.extension.config.ts",
+    "build:ext:webview": "vite build --config vite.extension.config.ts",
+    "build:ext:host": "node src/extension/host/build.mjs",
+    "build:ext": "npm run build:ext:webview && npm run build:ext:host",
+    "ext:run": "bash scripts/run-extension.sh",
+    "ext:package": "npm run build:ext && cd out-ext && extensions-cli package -i webview -o noise-canvas.ablx",
     "build": "npm run typecheck && electron-vite build",
     "postinstall": "bash scripts/fetch-link.sh && bash scripts/fetch-onnx.sh && electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir --publish=never",
@@ -35,6 +43,7 @@
     "*": "prettier --write --ignore-unknown"
   },
   "dependencies": {
+    "@ableton-extensions/sdk": "file:src/extension/vendor/ableton-extensions-sdk-1.0.0-beta.0.tgz",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "ffmpeg-static": "^5.2.0",
@@ -42,6 +51,7 @@
     "simplex-noise": "^4.0.3"
   },
   "devDependencies": {
+    "@ableton-extensions/cli": "file:src/extension/vendor/ableton-extensions-cli-1.0.0-beta.0.tgz",
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.0.0",
     "@electron-toolkit/tsconfig": "^1.0.1",
@@ -72,6 +82,7 @@
     "electron-devtools-installer": "^4.0.0",
     "electron-updater": "^6.3.9",
     "electron-vite": "^4.0.0",
+    "esbuild": "^0.25.10",
     "eslint": "^9.31.0",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^5.2.0",

@@ -9,8 +9,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
 import { CanvasPanel, PaletteBar } from "./components/layout/canvas-panel";
+import { ExtensionMenuBar } from "./components/layout/menu-bar";
 import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
+import { host } from "./lib/host";
 import { ipcOn, ipcSend } from "./lib/ipc";
 import { BRUSH_PANEL_WIDTH } from "./lib/ui-density";
 import { precompileAllShaders, warmEffectPipelines } from "./lib/precompile-shaders";
@@ -97,7 +99,7 @@ function App(): React.JSX.Element {
     const unsubscribers: (() => void)[] = [];
 
     // Development file loading
-    if (process.env.NODE_ENV === "development") {
+    if (host.env.nodeEnv === "development") {
       const { openFilePath, openFileIds } = useStore.getState();
       if (openFileIds.length === 0) {
         openFilePath(
@@ -110,7 +112,7 @@ function App(): React.JSX.Element {
         // openFilePath(
         //   "/Users/rob/Splice/sounds/packs/The Jungle Drummer - Breakbeat Culture/Test_Press_-_The_Jungle_Drummer_-_Breakbeat_Culture/Loops/Layered_Breaks/TSP_TJD_172_break_layered_2snare_junglism.wav",
         // );
-        openFilePath(process.cwd() + "/test-audio/tone-440hz-5s.wav");
+        openFilePath(host.env.cwd() + "/test-audio/tone-440hz-5s.wav");
       }
     }
 
@@ -148,7 +150,7 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubNewFile);
 
-    const unsubOpenFile = ipcOn("open-file", async (_event, path) => {
+    const unsubOpenFile = ipcOn("open-file", async (path) => {
       const { openFilePath } = useStore.getState();
       await openFilePath(path);
     });
@@ -251,7 +253,7 @@ function App(): React.JSX.Element {
     if (acceptedFiles.length === 0) {
       return;
     }
-    const filePath = window.electron.webUtils.getPathForFile(acceptedFiles[0]);
+    const filePath = host.files.getPathForFile(acceptedFiles[0]);
     useStore.getState().openFilePath(filePath);
   }, []);
 
@@ -275,102 +277,106 @@ function App(): React.JSX.Element {
   });
 
   return (
-    <Group h="100vh" w="100vw" wrap="nowrap" gap={0} {...getRootProps()}>
-      <LoadingOverlay
-        visible={!isReady}
-        zIndex={10001}
-        loaderProps={{
-          children: (
-            <Stack align="center" gap="sm">
-              {shaderProgress ? (
-                <>
+    <Stack h="100vh" w="100vw" gap={0}>
+      <ExtensionMenuBar />
+      <Group flex={1} mih={0} w="100vw" wrap="nowrap" gap={0} {...getRootProps()}>
+        <LoadingOverlay
+          visible={!isReady}
+          zIndex={10001}
+          loaderProps={{
+            children: (
+              <Stack align="center" gap="sm">
+                {shaderProgress ? (
+                  <>
+                    <Text size="sm" c="dimmed">
+                      Optimizing shaders… {shaderProgress.done}/{shaderProgress.total}
+                    </Text>
+                    <Progress
+                      w={220}
+                      value={shaderProgress.total ? (shaderProgress.done / shaderProgress.total) * 100 : 0}
+                      transitionDuration={200}
+                    />
+                    <Text size="xs" c="dimmed">
+                      This only takes a while the first time.
+                    </Text>
+                  </>
+                ) : (
                   <Text size="sm" c="dimmed">
-                    Optimizing shaders… {shaderProgress.done}/{shaderProgress.total}
+                    Loading…
                   </Text>
-                  <Progress
-                    w={220}
-                    value={shaderProgress.total ? (shaderProgress.done / shaderProgress.total) * 100 : 0}
-                    transitionDuration={200}
-                  />
-                  <Text size="xs" c="dimmed">
-                    This only takes a while the first time.
-                  </Text>
-                </>
-              ) : (
-                <Text size="sm" c="dimmed">
-                  Loading…
-                </Text>
-              )}
-            </Stack>
-          ),
-        }}
-      />
-      {isDragActive && (
-        <Box
-          pos="absolute"
-          top={0}
-          left={0}
-          right={0}
-          bottom={0}
-          bg="transparent"
-          bd="2px solid orange"
-          style={{ zIndex: 10000 }}
+                )}
+              </Stack>
+            ),
+          }}
         />
-      )}
-      <input {...getInputProps()} />
-      <Canvas
-        dpr={1}
-        style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}
-        eventSource={document.getElementById("root")!}
-        frameloop="demand"
-        gl={{
-          antialias: false,
-          depth: false,
-          premultipliedAlpha: false,
-          preserveDrawingBuffer: false,
-          powerPreference: "high-performance",
-        }}
-      >
-        <View.Port />
-        <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
-
-        <ShaderCompiler onProgress={handleShaderProgress} onFinish={handleShaderCompileFinish} />
-      </Canvas>
-      <ScrollArea
-        scrollbarSize={4}
-        type="auto"
-        h="100%"
-        w={BRUSH_PANEL_WIDTH}
-        onScrollPositionChange={() => invalidateRef.current?.()}
-      >
-        <BrushPanel />
-      </ScrollArea>
-      <Stack pos="relative" flex={1} h="100%" gap={0}>
-        <Box pos="absolute" top={0} bottom={0} left={0} right={0} bg="dark.9" style={{ zIndex: -1 }} />
-        {openFileIds.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <ScrollArea
-            type="auto"
-            scrollbarSize={4}
-            scrollbars="y"
-            h="100%"
-            style={{ flex: 1, minHeight: 0 }}
-            viewportProps={{ style: { overflowY: fullscreenFileId ? "hidden" : undefined } }}
-            onScrollPositionChange={() => invalidateRef.current?.()}
-          >
-            <Box p="xs">
-              <CanvasPanel />
-            </Box>
-          </ScrollArea>
+        {isDragActive && (
+          <Box
+            pos="absolute"
+            top={0}
+            left={0}
+            right={0}
+            bottom={0}
+            bg="transparent"
+            bd="2px solid orange"
+            style={{ zIndex: 10000 }}
+          />
         )}
-        <PaletteBar />
-        <TransportPanel />
-      </Stack>
-      <SidebarPanel />
-      <Notifications />
-      <UpdateNotification />
-    </Group>
+        <input {...getInputProps()} />
+        <Canvas
+          dpr={1}
+          style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}
+          eventSource={document.getElementById("root")!}
+          frameloop="demand"
+          gl={{
+            antialias: false,
+            depth: false,
+            premultipliedAlpha: false,
+            preserveDrawingBuffer: false,
+            powerPreference: "high-performance",
+          }}
+        >
+          <View.Port />
+          <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
+
+          <ShaderCompiler onProgress={handleShaderProgress} onFinish={handleShaderCompileFinish} />
+        </Canvas>
+        <ScrollArea
+          scrollbarSize={4}
+          type="auto"
+          h="100%"
+          w={BRUSH_PANEL_WIDTH}
+          style={{ flexShrink: 0 }}
+          onScrollPositionChange={() => invalidateRef.current?.()}
+        >
+          <BrushPanel />
+        </ScrollArea>
+        <Stack pos="relative" flex={1} h="100%" gap={0}>
+          <Box pos="absolute" top={0} bottom={0} left={0} right={0} bg="dark.9" style={{ zIndex: -1 }} />
+          {openFileIds.length === 0 ? (
+            <EmptyState />
+          ) : (
+            <ScrollArea
+              type="auto"
+              scrollbarSize={4}
+              scrollbars="y"
+              h="100%"
+              style={{ flex: 1, minHeight: 0 }}
+              viewportProps={{ style: { overflowY: fullscreenFileId ? "hidden" : undefined } }}
+              onScrollPositionChange={() => invalidateRef.current?.()}
+            >
+              <Box p="xs">
+                <CanvasPanel />
+              </Box>
+            </ScrollArea>
+          )}
+          <PaletteBar />
+          <TransportPanel />
+        </Stack>
+        <SidebarPanel />
+        <Notifications />
+        <UpdateNotification />
+      </Group>
+    </Stack>
   );
 }
 

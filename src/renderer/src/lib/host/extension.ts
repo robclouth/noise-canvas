@@ -1,0 +1,154 @@
+import { encodeRenderBatch } from "../../../../extension/shared/render-batch";
+import { createExtensionAnalysis } from "./extension-analysis";
+import { createExtensionEvents } from "./extension-events";
+import {
+  extensionFs,
+  extensionOs,
+  extensionZlib,
+  getBootstrapOrNull,
+  getUserDataPath,
+  showDirectoryDialog,
+  showSaveDialog,
+} from "./extension-rpc";
+import type { Host, HostPath, HostSession } from "./types";
+
+declare global {
+  interface Window {
+    webkit?: { messageHandlers?: { live?: { postMessage(message: unknown): void } } };
+    chrome?: { webview?: { postMessage(message: unknown): void } };
+  }
+}
+
+// Host implementation for the Ableton extension build. The renderer core runs
+// inside the extension's modal webview; capabilities that the Electron app got
+// from Node/Electron are provided differently here:
+//
+//   - env / platform        → from the browser + values injected by the host
+//   - link / updater         → no-ops (Live owns transport; no self-updater)
+//   - path                   → a small browser implementation (POSIX semantics)
+//   - fs / zlib / analysis    → served by the Node extension host over localhost
+//     (wired in Phase 3). Until then they throw a clear, actionable error so a
+//     premature call is obvious rather than a silent `undefined`.
+//   - dialogs / files         → routed to the SDK host bridge (Phase 2 spike)
+//
+// Selected by the `@host-impl` build alias (see vite.extension.config.ts).
+
+const pending = (capability: string): never => {
+  throw new Error(
+    `host.${capability} is not available in the extension build yet — ` +
+      `it will be served by the Node extension host over localhost (Phase 3).`,
+  );
+};
+
+// Native analysis (ffmpeg decode + gaborator) runs in the Node host; the webview
+// reaches it over the same-origin localhost server.
+const extensionAnalysis = createExtensionAnalysis();
+
+// Minimal POSIX path implementation. The webview always deals in absolute
+// localhost-served paths, so only join/dirname/basename/extname are needed and
+// platform separators are always "/".
+const browserPath: HostPath = {
+  join: (...parts: string[]) =>
+    parts
+      .filter((p) => p.length > 0)
+      .join("/")
+      .replace(/\/+/g, "/"),
+  dirname: (p: string) => {
+    const i = p.replace(/\/+$/, "").lastIndexOf("/");
+    return i <= 0 ? (i === 0 ? "/" : ".") : p.slice(0, i);
+  },
+  basename: (p: string, ext?: string) => {
+    const base = p.replace(/\/+$/, "").split("/").pop() ?? "";
+    return ext && base.endsWith(ext) ? base.slice(0, -ext.length) : base;
+  },
+  extname: (p: string) => {
+    const base = p.split("/").pop() ?? "";
+    const dot = base.lastIndexOf(".");
+    return dot > 0 ? base.slice(dot) : "";
+  },
+};
+
+// Closes the SDK modal and resolves the host's showModalDialog with `result`.
+function closeEditor(result: string): void {
+  const message = { method: "close_and_send", params: [result] };
+  if (window.webkit?.messageHandlers?.live) {
+    window.webkit.messageHandlers.live.postMessage(message);
+  } else if (window.chrome?.webview) {
+    window.chrome.webview.postMessage(message);
+  }
+}
+
+// Sends the rendered audio to the host over the session's data plane, then
+// closes the editor so the host encodes and imports it into the Live set.
+const extensionSession: HostSession = {
+  async apply(renders): Promise<void> {
+    const sessionId = new URLSearchParams(location.search).get("session");
+    if (!sessionId) return;
+    const batch = encodeRenderBatch(renders);
+    await fetch(`/session/${sessionId}/result`, { method: "POST", body: batch });
+    closeEditor("applied");
+  },
+};
+
+export const host: Host = {
+  fs: extensionFs,
+  session: extensionSession,
+  path: browserPath,
+  os: extensionOs,
+  zlib: extensionZlib,
+  analysis: extensionAnalysis,
+  // Ableton Live is the transport clock, so in-app Ableton Link sync is inert:
+  // a fully no-op device that always reports disabled. The extension UI hides
+  // the Link control, so these are never driven in practice.
+  link: {
+    create: () => {},
+    destroy: () => {},
+    setCallbacks: () => {},
+    enable: () => {},
+    disable: () => {},
+    isEnabled: () => false,
+    enableStartStopSync: () => {},
+    setIsPlaying: () => {},
+    setTempo: () => {},
+    requestBeatAtTime: () => {},
+    captureState: () => ({ tempo: 120, beat: 0, phase: 0, isPlaying: false, numPeers: 0 }),
+    init: () => {},
+  },
+  // The extension has no self-updater; the host installs updates.
+  updater: {
+    checkForUpdates: async () => undefined,
+    downloadUpdate: async () => false,
+    quitAndInstall: () => {},
+  },
+  env: {
+    isExtension: true,
+    get platform() {
+      // Prefer the real host platform from the bootstrap; fall back to userAgent
+      // sniffing if read before the bootstrap loads.
+      const boot = getBootstrapOrNull();
+      if (boot) return boot.platform;
+      return navigator.userAgent.includes("Win") ? "win32" : navigator.userAgent.includes("Mac") ? "darwin" : "linux";
+    },
+    get nodeEnv() {
+      return import.meta.env.MODE;
+    },
+    get resourcesPath() {
+      return getBootstrapOrNull()?.resourcesPath ?? "/";
+    },
+    cwd() {
+      return getBootstrapOrNull()?.cwd ?? "/";
+    },
+    getEnv() {
+      return undefined;
+    },
+  },
+  dialogs: {
+    getUserDataPath,
+    showSaveDialog,
+    showDirectoryDialog,
+  },
+  files: {
+    getPathForFile: () => pending("files.getPathForFile"),
+  },
+  events: createExtensionEvents(),
+};

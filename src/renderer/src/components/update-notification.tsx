@@ -1,6 +1,7 @@
 import { Button, Group, Modal, Progress, Stack, Text, Title } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useState } from "react";
+import { host } from "../lib/host";
 import { ipcOn } from "../lib/ipc";
 
 interface UpdateInfo {
@@ -28,7 +29,7 @@ export function UpdateNotification() {
     const unsubscribers: (() => void)[] = [];
 
     // Update available
-    const unsubUpdateAvailable = ipcOn("update-available", (_event, info: UpdateInfo) => {
+    const unsubUpdateAvailable = ipcOn("update-available", (info: UpdateInfo) => {
       console.log("Update available:", info);
       setUpdateInfo(info);
       setShowModal(true);
@@ -57,13 +58,13 @@ export function UpdateNotification() {
     unsubscribers.push(unsubUpdateNotAvailable);
 
     // Download progress
-    const unsubDownloadProgress = ipcOn("download-progress", (_event, progressInfo: ProgressInfo) => {
+    const unsubDownloadProgress = ipcOn("download-progress", (progressInfo: ProgressInfo) => {
       setDownloadProgress(Math.round(progressInfo.percent));
     });
     unsubscribers.push(unsubDownloadProgress);
 
     // Update downloaded
-    const unsubUpdateDownloaded = ipcOn("update-downloaded", (_event, info: UpdateInfo) => {
+    const unsubUpdateDownloaded = ipcOn("update-downloaded", (info: UpdateInfo) => {
       console.log("Update downloaded:", info);
       setIsDownloading(false);
       setUpdateReady(true);
@@ -81,7 +82,7 @@ export function UpdateNotification() {
     unsubscribers.push(unsubUpdateDownloaded);
 
     // Update error
-    const unsubUpdateError = ipcOn("update-error", (_event, error: string) => {
+    const unsubUpdateError = ipcOn("update-error", (error: string) => {
       console.error("Update error:", error);
       setIsDownloading(false);
 
@@ -115,7 +116,7 @@ export function UpdateNotification() {
     });
 
     try {
-      await window.updater.downloadUpdate();
+      await host.updater.downloadUpdate();
     } catch (error) {
       console.error("Failed to download update:", error);
       setIsDownloading(false);
@@ -124,7 +125,7 @@ export function UpdateNotification() {
   };
 
   const handleInstallUpdate = () => {
-    window.updater.quitAndInstall();
+    host.updater.quitAndInstall();
   };
 
   const formatReleaseNotes = (notes: string | string[] | undefined) => {

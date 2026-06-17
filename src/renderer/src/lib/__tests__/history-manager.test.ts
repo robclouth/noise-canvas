@@ -16,13 +16,14 @@ vi.mock("tone", () => ({ Player: class {} }));
 
 // Hoisted so the vi.mock factories (themselves hoisted above the imports) can
 // reference these shared stubs without a TDZ error.
-const { fakeOpenFiles, synthesizeFile, loadCachedAudio } = vi.hoisted(() => ({
+const { fakeOpenFiles, synthesizeFile, loadCachedAudio, setFileDirty } = vi.hoisted(() => ({
   fakeOpenFiles: {} as Record<string, unknown>,
   synthesizeFile: vi.fn(),
   loadCachedAudio: vi.fn(async () => false),
+  setFileDirty: vi.fn(),
 }));
 vi.mock("@renderer/store", () => ({
-  useStore: { getState: () => ({ synthesizeFile, loadCachedAudio }) },
+  useStore: { getState: () => ({ synthesizeFile, loadCachedAudio, setFileDirty }) },
 }));
 vi.mock("@renderer/store/files", () => ({ openFiles: fakeOpenFiles }));
 

@@ -4,6 +4,7 @@
     "src/renderer/src/env.d.ts",
     "src/renderer/src/**/*",
     "src/renderer/src/**/*.tsx",
+    "src/extension/webview/**/*",
     "src/preload/*.d.ts",
     "src/main/lib/types.ts"
   ],
@@ -17,6 +18,9 @@
       ],
       "@/*": [
         "src/renderer/src/*"
+      ],
+      "@host-impl": [
+        "src/renderer/src/lib/host/electron.ts"
       ]
     },
     "types": [

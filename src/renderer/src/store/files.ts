@@ -6,6 +6,8 @@ import { FileParameterValue, getFileParameterKeys, parameterDefs } from "@render
 import { produce } from "immer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
+import { host } from "../lib/host";
+import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import type { Brush, OpenFile, ParameterKey, State, ZustandGet, ZustandSet } from "./types";
@@ -33,6 +35,7 @@ export interface FilesState {
   loadCachedAudio: (fileId: string, audioPath: string, peak: number) => Promise<boolean>;
   exportHistory: () => Promise<void>;
   exportHistoryBranch: (nodeId: string) => Promise<void>;
+  exportHistoryBranchToLive: (nodeId: string) => Promise<void>;
   exportHistoryFavorites: () => Promise<void>;
   mostRecentBpm: number | null;
   setMostRecentBpm: (bpm: number) => void;
@@ -139,7 +142,7 @@ export function migrateBrushRefs(brushes: Brush[], oldPath: string, newPath: str
 export async function migrateRefsInPresetFiles(presetsDir: string, oldPath: string, newPath: string): Promise<void> {
   let entries: string[];
   try {
-    entries = (await window.nodeFs.readdir(presetsDir)) as unknown as string[];
+    entries = (await host.fs.readdir(presetsDir)) as unknown as string[];
   } catch {
     return;
   }
@@ -147,14 +150,14 @@ export async function migrateRefsInPresetFiles(presetsDir: string, oldPath: stri
     entries
       .filter((f) => f.endsWith(".json"))
       .map(async (file) => {
-        const filePath = window.nodePath.join(presetsDir, file);
+        const filePath = host.path.join(presetsDir, file);
         try {
-          const raw = (await window.nodeFs.readFile(filePath, "utf-8")) as unknown as string;
+          const raw = (await host.fs.readFile(filePath, "utf-8")) as unknown as string;
           const preset = JSON.parse(raw) as { steps?: Array<{ effects?: EffectItem[] } & Record<string, unknown>> };
           if (!Array.isArray(preset.steps)) return;
           const changed = migrateRefsInSteps(preset.steps, oldPath, newPath);
           if (changed) {
-            await window.nodeFs.writeFile(filePath, JSON.stringify(preset, null, 2), "utf-8");
+            await host.fs.writeFile(filePath, JSON.stringify(preset, null, 2), "utf-8");
           }
         } catch (err) {
           console.error(`migrateRefsInPresetFiles: failed to process ${filePath}`, err);
@@ -182,7 +185,7 @@ function bumpUntitledCounterTo(n: number): void {
 // without an extension (managed-file labels like "Untitled 1") pass through
 // unchanged.
 function stripExtensionForLabel(name: string): string {
-  const ext = window.nodePath.extname(name);
+  const ext = host.path.extname(name);
   return ext ? name.slice(0, -ext.length) : name;
 }
 
@@ -197,7 +200,7 @@ async function loadRealFileViaGaborator(
 ): Promise<void> {
   const file = openFiles[fileId];
   if (!file) return;
-  const result = await window.audioAnalysis.analyze(filePath, { bandsPerOctave, minFreq });
+  const result = await host.analysis.analyze(filePath, { bandsPerOctave, minFreq });
   const spectrogramData = {
     packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
     inverseMap: new Float32Array(
@@ -368,7 +371,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         sampleRate,
         numberOfChannels: 2,
       });
-      const result = await window.audioAnalysis.analyseBuffer(audioBuffer, {
+      const result = await host.analysis.analyseBuffer(audioBuffer, {
         bandsPerOctave: state.bandsPerOctave,
         minFreq: state.minFreq,
       });
@@ -455,13 +458,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     const fileId = generateFileId();
-    const displayName = window.nodePath.basename(filepath);
+    const displayName = host.path.basename(filepath);
 
-    // Add a placeholder immediately so the file appears in the UI with a loading state
+    // Add a placeholder immediately so the file appears in the UI with a loading
+    // state. Newly opened files go to the top of the list.
     openFiles[fileId] = { id: fileId, filePath: filepath, displayName };
     set(
       produce((state: State) => {
-        state.openFileIds.push(fileId);
+        state.openFileIds.unshift(fileId);
         state.filepathsBpm[filepath] ??= state.mostRecentBpm ?? 120;
         state.filesBandsPerOctave[fileId] = state.bandsPerOctave;
         state.filesZoom[fileId] = 0;
@@ -503,7 +507,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       console.error("Error opening file:", error);
       notifications.show({
         title: `Failed to open file`,
-        message: `Opening '${truncateMiddle(window.nodePath.basename(filepath), 50)}' failed. ${error instanceof Error ? error.message : ""}`,
+        message: `Opening '${truncateMiddle(host.path.basename(filepath), 50)}' failed. ${error instanceof Error ? error.message : ""}`,
         color: "red",
       });
     }
@@ -612,7 +616,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     );
 
     try {
-      const { harmonic, percussive } = await window.audioAnalysis.hpss(fboData, {
+      const { harmonic, percussive } = await host.analysis.hpss(fboData, {
         numBands: spectrogramData.numBands,
         numChannels: spectrogramData.numChannels,
         bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
@@ -654,7 +658,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     aiSeparatingFileIds.add(fileId);
 
     const modelFile = "htdemucs.onnx";
-    if (!window.audioAnalysis.isModelDownloaded(modelFile)) {
+    if (!host.analysis.isModelDownloaded(modelFile)) {
       notifications.show({
         id: "ai-model-download",
         title: "Downloading AI model",
@@ -664,7 +668,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         autoClose: false,
       });
       try {
-        await window.audioAnalysis.downloadModel(modelFile, (downloaded, total) => {
+        await host.analysis.downloadModel(modelFile, (downloaded, total) => {
           const mb = (downloaded / 1024 / 1024).toFixed(1);
           const message =
             total > 0
@@ -743,7 +747,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const fboData = await originalFile.rendererRef?.current?.getFBOData();
       if (!fboData) throw new Error("Could not read current spectrogram state");
 
-      const synthesisResult = await window.audioAnalysis.synthesize(
+      const synthesisResult = await host.analysis.synthesize(
         fboData,
         {
           numFrames: spectrogramData.numFrames,
@@ -759,7 +763,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       );
 
       // Step 2: AI-separate the synthesized audio into stems
-      const stems = await window.audioAnalysis.aiSeparate(synthesisResult.channels, spectrogramData.sampleRate);
+      const stems = await host.analysis.aiSeparate(synthesisResult.channels, spectrogramData.sampleRate);
 
       // Step 3: Re-analyse each stem with Gaborator → SpectrogramData → new file entry
       const analysisParams = { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq };
@@ -775,7 +779,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           audioBuffer.copyToChannel(new Float32Array(stemChannels[ch]), ch);
         }
 
-        const result = await window.audioAnalysis.analyseBuffer(audioBuffer, analysisParams);
+        const result = await host.analysis.analyseBuffer(audioBuffer, analysisParams);
 
         openFiles[stemIds[i]] = {
           ...openFiles[stemIds[i]],
@@ -863,7 +867,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     const filePath = file.filePath;
-    const fileName = window.nodePath.basename(filePath);
+    const fileName = host.path.basename(filePath);
 
     // Show confirmation modal
     return new Promise<void>((resolve) => {
@@ -887,14 +891,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             }
 
             // Determine format from file extension
-            const ext = window.nodePath.extname(filePath).slice(1).toLowerCase();
+            const ext = host.path.extname(filePath).slice(1).toLowerCase();
             const format = ext || "wav";
 
             // Export the audio
-            await window.audioAnalysis.exportAudio(audioChannels, filePath, file.audioBuffer!.sampleRate, format);
+            await host.analysis.exportAudio(audioChannels, filePath, file.audioBuffer!.sampleRate, format);
 
-            // Mark as not dirty
-            get().setFileDirty(state.activeFileId!, false);
+            // The current history node now matches what's on disk.
+            await getHistoryManager(state.activeFileId!).markSaved();
             console.log("File saved successfully:", filePath);
 
             // Show success notification
@@ -930,9 +934,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     // displayName as the filename suggestion.
     const defaultPath = isManaged
       ? `${file.displayName}.wav`
-      : window.nodePath.join(window.nodePath.dirname(currentFilePath), window.nodePath.basename(currentFilePath));
+      : host.path.join(host.path.dirname(currentFilePath), host.path.basename(currentFilePath));
 
-    const result = await window.ipcRenderer.invoke("show-save-dialog", {
+    const result = await host.dialogs.showSaveDialog({
       defaultPath,
       filters: [
         { name: "Audio Files", extensions: ["wav", "flac", "mp3"] },
@@ -943,7 +947,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (result.canceled || !result.filePath) return;
 
     const outputPath = result.filePath;
-    const savedFileName = window.nodePath.basename(outputPath);
+    const savedFileName = host.path.basename(outputPath);
     const truncatedFileName = truncateMiddle(savedFileName, 50);
 
     try {
@@ -960,11 +964,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
 
       // Determine format from file extension
-      const ext = window.nodePath.extname(outputPath).slice(1).toLowerCase();
+      const ext = host.path.extname(outputPath).slice(1).toLowerCase();
       const format = ext || "wav";
 
       // Export the audio
-      await window.audioAnalysis.exportAudio(audioChannels, outputPath, file.audioBuffer.sampleRate, format);
+      await host.analysis.exportAudio(audioChannels, outputPath, file.audioBuffer.sampleRate, format);
 
       // Update file path in openFiles and copy BPM mapping to new path
       const oldFilePath = file.filePath;
@@ -997,8 +1001,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         void migrateRefsInPresetFiles(presetsDir, oldFilePath, outputPath);
       }
 
-      // Mark as not dirty
-      get().setFileDirty(state.activeFileId!, false);
+      // The active file is now a real file whose current node matches disk.
+      await getHistoryManager(state.activeFileId!).markSaved();
       console.log("File saved as:", outputPath);
 
       // Show success notification
@@ -1032,9 +1036,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     const currentFilePath = file.filePath;
-    const dir = window.nodePath.dirname(currentFilePath);
-    const ext = window.nodePath.extname(currentFilePath);
-    const baseName = window.nodePath.basename(currentFilePath, ext);
+    const dir = host.path.dirname(currentFilePath);
+    const ext = host.path.extname(currentFilePath);
+    const baseName = host.path.basename(currentFilePath, ext);
 
     // Check if filename ends with _NUMBER
     const versionMatch = baseName.match(/^(.+)_(\d+)$/);
@@ -1051,7 +1055,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       newFileName = `${baseName}_1${ext}`;
     }
 
-    const outputPath = window.nodePath.join(dir, newFileName);
+    const outputPath = host.path.join(dir, newFileName);
     const truncatedFileName = truncateMiddle(newFileName, 50);
 
     try {
@@ -1071,7 +1075,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const format = ext.slice(1).toLowerCase() || "wav";
 
       // Export the audio
-      await window.audioAnalysis.exportAudio(audioChannels, outputPath, file.audioBuffer.sampleRate, format);
+      await host.analysis.exportAudio(audioChannels, outputPath, file.audioBuffer.sampleRate, format);
 
       // Update file path in openFiles and copy BPM mapping to new path
       const oldFilePath = file.filePath;
@@ -1097,8 +1101,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         void migrateRefsInPresetFiles(presetsDir, oldFilePath, outputPath);
       }
 
-      // Mark as not dirty
-      get().setFileDirty(state.activeFileId!, false);
+      // The active file now points at the version on disk at the current node.
+      await getHistoryManager(state.activeFileId!).markSaved();
       console.log("File version saved:", outputPath);
 
       // Show success notification
@@ -1286,7 +1290,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       let synthesisResult;
       const cppSynthStart = performance.now();
       try {
-        synthesisResult = await window.audioAnalysis.synthesize(
+        synthesisResult = await host.analysis.synthesize(
           processedDataArray,
           payload.analysisMetadata,
           originalAnalysis.sampleRate,
@@ -1327,14 +1331,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         audioBuffer.copyToChannel(channelBuffer as Float32Array<ArrayBuffer>, i);
       }
       console.log(`[timing] create AudioBuffer: ${(performance.now() - audioBufferStart).toFixed(2)}ms`);
-
-      // Mark file as dirty if it's not the first synthesis (the first run on a
-      // freshly-opened real file just builds the initial audio buffer from
-      // the on-disk audio and shouldn't be considered dirty). Managed files
-      // also start as dirty — their first synthesis happens at creation time
-      // before any real audio exists, and re-synthesis of a managed file with
-      // an existing buffer means the user has painted, so dirty stays true.
-      get().setFileDirty(fileId, file.audioBuffer !== undefined || isManagedFilePath(file.filePath));
 
       file.audioBuffer = audioBuffer;
       file.audioPeak = synthesisResult.peak > 0 ? synthesisResult.peak : 1;
@@ -1394,7 +1390,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
       const sampleRate = file.spectrogramData.sampleRate;
       const numChannels = file.spectrogramData.numChannels;
-      const channels = await window.audioAnalysis.decodeAudio(audioPath, sampleRate, numChannels);
+      const channels = await host.analysis.decodeAudio(audioPath, sampleRate, numChannels);
       if (!channels.length || !channels[0].length) return false;
 
       const audioContext = Tone.getContext().rawContext;
@@ -1403,11 +1399,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         audioBuffer.copyToChannel(channels[i] as Float32Array<ArrayBuffer>, i);
       }
 
-      const hadPreviousBuffer = file.audioBuffer !== undefined;
       file.audioBuffer = audioBuffer;
       file.audioPeak = peak > 0 ? peak : 1;
-
-      get().setFileDirty(fileId, hadPreviousBuffer || isManagedFilePath(file.filePath));
 
       // Hot-swap if currently playing this file
       if (get().isPlaying && get().activeFileId === fileId) {
@@ -1445,7 +1438,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       return;
     }
 
-    const result = await window.ipcRenderer.invoke("show-directory-dialog", {
+    const result = await host.dialogs.showDirectoryDialog({
       title: "Export History",
       buttonLabel: "Export Here",
     });
@@ -1495,7 +1488,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       return;
     }
 
-    const result = await window.ipcRenderer.invoke("show-directory-dialog", {
+    const result = await host.dialogs.showDirectoryDialog({
       title: "Export Favorites",
       buttonLabel: "Export Here",
     });
@@ -1531,7 +1524,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       return;
     }
 
-    const result = await window.ipcRenderer.invoke("show-directory-dialog", {
+    const result = await host.dialogs.showDirectoryDialog({
       title: "Export Branch",
       buttonLabel: "Export Here",
     });
@@ -1555,6 +1548,52 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       successCount: chain.length,
     });
   },
+  exportHistoryBranchToLive: async (nodeId: string) => {
+    const state = get();
+    if (!state.activeFileId || !host.session) return;
+    const historyManager = getHistoryManager(state.activeFileId);
+    await historyManager.initialize();
+    const manifest = historyManager.getManifest();
+    if (!manifest || !manifest.nodes[nodeId]) {
+      notifications.show({ title: "Nothing to export", message: "Node no longer exists.", color: "yellow" });
+      return;
+    }
+
+    const chain = chainFromRootTo(manifest, nodeId);
+    const notificationId = `branch-to-live-${nodeId}`;
+    notifications.show({
+      id: notificationId,
+      title: "Rendering branch",
+      message: `Synthesising ${chain.length} state${chain.length === 1 ? "" : "s"}…`,
+      loading: true,
+      autoClose: false,
+      withCloseButton: false,
+    });
+
+    const renders: HostRender[] = [];
+    for (const id of chain) {
+      const node = manifest.nodes[id];
+      if (!node) continue;
+      const audio = await historyManager.synthesizeNodeAudio(id);
+      if (!audio) continue;
+      renders.push({ channels: audio.channels, sampleRate: audio.sampleRate, label: node.customLabel ?? node.label });
+    }
+
+    if (renders.length === 0) {
+      notifications.update({
+        id: notificationId,
+        title: "Nothing to export",
+        message: "Could not render any states in this branch.",
+        loading: false,
+        autoClose: 4000,
+        color: "yellow",
+      });
+      return;
+    }
+
+    notifications.hide(notificationId);
+    await host.session.apply(renders);
+  },
   reanalyzeActiveFile: async () => {
     const initialState = get();
     if (!initialState.activeFileId) return;
@@ -1569,11 +1608,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
         try {
           const result = audioBuffer
-            ? await window.audioAnalysis.analyseBuffer(audioBuffer, {
+            ? await host.analysis.analyseBuffer(audioBuffer, {
                 bandsPerOctave,
                 minFreq: state.minFreq,
               })
-            : await window.audioAnalysis.analyze(file.filePath, {
+            : await host.analysis.analyze(file.filePath, {
                 bandsPerOctave,
                 minFreq: state.minFreq,
               });
@@ -1649,7 +1688,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const fboData = await file.rendererRef.current.getFBOData();
       if (!fboData) throw new Error("Could not read the current spectrogram state.");
 
-      const synthResult = await window.audioAnalysis.synthesize(
+      const synthResult = await host.analysis.synthesize(
         fboData,
         {
           numFrames: spectrogramData.numFrames,
@@ -1682,7 +1721,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         audioBuffer.copyToChannel(dst, ch);
       }
 
-      const result = await window.audioAnalysis.analyseBuffer(audioBuffer, analysisParams);
+      const result = await host.analysis.analyseBuffer(audioBuffer, analysisParams);
 
       file.spectrogramData = {
         packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
@@ -1826,7 +1865,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // when a persisted entry has no name (legacy state, or a prior bug).
       const persisted = state.fileDisplayNames[fileId];
       const displayName =
-        persisted ?? (isManagedFilePath(filePath) ? nextUntitledName() : window.nodePath.basename(filePath));
+        persisted ?? (isManagedFilePath(filePath) ? nextUntitledName() : host.path.basename(filePath));
       if (!persisted) newlyAssigned[fileId] = displayName;
       openFiles[fileId] ??= { id: fileId, filePath, displayName };
     }
@@ -1908,9 +1947,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
               delete draft.filesDirty[fileId];
             }),
           );
-          const label = isManagedFilePath(filePath)
-            ? "managed file"
-            : truncateMiddle(window.nodePath.basename(filePath), 50);
+          const label = isManagedFilePath(filePath) ? "managed file" : truncateMiddle(host.path.basename(filePath), 50);
           notifications.show({
             title: "Failed to reopen file",
             message: `${label}: ${error instanceof Error ? error.message : ""}`,
@@ -2012,7 +2049,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     const state = get();
     const fileId = generateFileId();
-    const displayName = window.nodePath.basename(filePath);
+    const displayName = host.path.basename(filePath);
 
     // Add placeholder and immediately minimize — never appears as a full canvas
     openFiles[fileId] = { id: fileId, filePath, displayName };

@@ -2,7 +2,7 @@ import { useStore } from "@/store";
 import { ActionIcon, Box, Group, Loader, Stack, Text } from "@mantine/core";
 import { getFileColor, openFiles } from "@renderer/store/files";
 import { X } from "lucide-react";
-import { memo } from "react";
+import { memo, useEffect, useRef } from "react";
 import { FileView } from "../file-view";
 import { Tooltip } from "../tooltip";
 
@@ -102,6 +102,14 @@ export const CanvasPanel = memo(() => {
   const openFileIds = useStore((state) => state.openFileIds);
   const fullscreenFileId = useStore((state) => state.fullscreenFileId);
   const minimizedFileIds = useStore((state) => state.minimizedFileIds);
+  const activeFileId = useStore((state) => state.activeFileId);
+
+  // Bring the active file into view when it changes (e.g. opening a file that's
+  // already open further down the list). `nearest` keeps already-visible files put.
+  const activeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [activeFileId]);
 
   return (
     <Stack h={fullscreenFileId ? "100%" : undefined} pos="relative" gap={"xs"}>
@@ -113,6 +121,7 @@ export const CanvasPanel = memo(() => {
         return (
           <Box
             key={fileId}
+            ref={fileId === activeFileId ? activeRef : undefined}
             style={{ display: hidden ? "none" : undefined }}
             h={isFullscreen ? "100%" : undefined}
             flex={isFullscreen ? 1 : undefined}

@@ -2,6 +2,8 @@ import { Vector2 } from "three";
 import { useStore } from "@renderer/store";
 import { openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
+import { isManagedFilePath } from "@renderer/store/managed-path";
+import { host } from "./host";
 import { ipcSend } from "./ipc";
 
 const MANIFEST_FILENAME = "tree.json";
@@ -58,6 +60,10 @@ interface HistoryManifest {
   version: typeof HISTORY_MANIFEST_VERSION;
   rootId: string;
   currentId: string;
+  // History node whose audio is currently persisted to disk. The file is dirty
+  // exactly when currentId differs from it. Absent on legacy manifests and on
+  // never-saved files; both fall back to the root snapshot.
+  savedNodeId?: string;
   nodes: Record<string, HistoryNode>;
 }
 
@@ -208,12 +214,12 @@ function shortId(): string {
 }
 
 async function getUserDataPath(): Promise<string> {
-  return (await window.ipcRenderer.invoke("get-user-data-path")) as string;
+  return await host.dialogs.getUserDataPath();
 }
 
 async function zstdCompress(data: Uint8Array): Promise<Uint8Array> {
   return await new Promise((resolve, reject) => {
-    window.nodeZlib.zstdCompress(Buffer.from(data.buffer, data.byteOffset, data.byteLength), (err, out) => {
+    host.zlib.zstdCompress(Buffer.from(data.buffer, data.byteOffset, data.byteLength), (err, out) => {
       if (err) reject(err);
       else resolve(new Uint8Array(out.buffer, out.byteOffset, out.byteLength));
     });
@@ -222,7 +228,7 @@ async function zstdCompress(data: Uint8Array): Promise<Uint8Array> {
 
 async function zstdDecompress(data: Uint8Array): Promise<Uint8Array> {
   return await new Promise((resolve, reject) => {
-    window.nodeZlib.zstdDecompress(Buffer.from(data.buffer, data.byteOffset, data.byteLength), (err, out) => {
+    host.zlib.zstdDecompress(Buffer.from(data.buffer, data.byteOffset, data.byteLength), (err, out) => {
       if (err) reject(err);
       else resolve(new Uint8Array(out.buffer, out.byteOffset, out.byteLength));
     });
@@ -232,11 +238,11 @@ async function zstdDecompress(data: Uint8Array): Promise<Uint8Array> {
 async function writeFloat32Compressed(filePath: string, arr: Float32Array): Promise<void> {
   const raw = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
   const compressed = await zstdCompress(raw);
-  await window.nodeFs.writeFile(filePath, Buffer.from(compressed));
+  await host.fs.writeFile(filePath, Buffer.from(compressed));
 }
 
 async function readFloat32Compressed(filePath: string): Promise<Float32Array> {
-  const buf = await window.nodeFs.readFile(filePath);
+  const buf = await host.fs.readFile(filePath);
   const bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
   const out = await zstdDecompress(bytes);
   return new Float32Array(out.buffer, out.byteOffset, out.byteLength / 4);
@@ -319,20 +325,20 @@ export class HistoryManager {
 
   private async resolveDir(): Promise<string> {
     const userData = await getUserDataPath();
-    return window.nodePath.join(userData, "history", this.fileId);
+    return host.path.join(userData, "history", this.fileId);
   }
 
   private async ensureDir(): Promise<string> {
     const dir = await this.dir;
-    await window.nodeFs.mkdir(dir, { recursive: true });
+    await host.fs.mkdir(dir, { recursive: true });
     return dir;
   }
 
   private async readManifest(): Promise<HistoryManifest | null> {
     try {
       const dir = await this.dir;
-      const path = window.nodePath.join(dir, MANIFEST_FILENAME);
-      const buf = await window.nodeFs.readFile(path, "utf8");
+      const path = host.path.join(dir, MANIFEST_FILENAME);
+      const buf = await host.fs.readFile(path, "utf8");
       const parsed = JSON.parse(buf as unknown as string) as { version?: number } & HistoryManifest;
       if (parsed.version !== HISTORY_MANIFEST_VERSION) {
         // Delta format changed incompatibly in v2 (absolute after-values →
@@ -340,7 +346,7 @@ export class HistoryManager {
         console.warn(
           `history: tree.json version ${parsed.version} is incompatible with ${HISTORY_MANIFEST_VERSION}, wiping`,
         );
-        await window.nodeFs.rm(dir, { recursive: true, force: true });
+        await host.fs.rm(dir, { recursive: true, force: true });
         return null;
       }
       return parsed;
@@ -355,8 +361,8 @@ export class HistoryManager {
     const manifest = this.manifest;
     if (!manifest) return;
     const dir = await this.ensureDir();
-    const path = window.nodePath.join(dir, MANIFEST_FILENAME);
-    await window.nodeFs.writeFile(path, JSON.stringify(manifest));
+    const path = host.path.join(dir, MANIFEST_FILENAME);
+    await host.fs.writeFile(path, JSON.stringify(manifest));
   }
 
   /**
@@ -395,6 +401,10 @@ export class HistoryManager {
       const loaded = await this.readManifest();
       if (loaded) {
         this.manifest = loaded;
+        // The Ableton extension opens every clip at its original audio (the root
+        // snapshot), keeping prior edits as branches in the tree rather than
+        // jumping to the last-edited tip.
+        if (host.env.isExtension) loaded.currentId = loaded.rootId;
         // The freshly-analyzed file on disk almost always matches the root's
         // dimensions (strokes don't change dims; resize/reanalyze either ran
         // and re-saved, or we're at root). Set lastLoadedAnchorId to the
@@ -409,6 +419,7 @@ export class HistoryManager {
       }
     })();
     await this.initPromise;
+    this.syncDirty();
     return this.manifest !== null;
   }
 
@@ -447,25 +458,53 @@ export class HistoryManager {
 
   private notifyStateChange(): void {
     ipcSend("update-menu-state", this.canUndo(), this.canRedo());
+    this.syncDirty();
     this.emit();
+  }
+
+  // A file is dirty when the current node differs from the last-saved one, so
+  // undoing back to the saved (or original) state clears dirty and redoing away
+  // from it sets it again. Managed files have no on-disk audio to match and stay
+  // dirty until promoted to a real file via Save As. In the extension nothing
+  // calls markSaved (Save to Live spawns a new clip), so savedNodeId stays at
+  // the root and dirty means "differs from the clip's original audio."
+  private syncDirty(): void {
+    if (!this.manifest) return;
+    const file = openFiles[this.fileId];
+    if (file?.filePath && isManagedFilePath(file.filePath)) {
+      useStore.getState().setFileDirty(this.fileId, true);
+      return;
+    }
+    const savedId = this.manifest.savedNodeId ?? this.manifest.rootId;
+    useStore.getState().setFileDirty(this.fileId, this.manifest.currentId !== savedId);
+  }
+
+  // Record that the current node's audio has been written to disk, so it becomes
+  // the clean reference for the dirty flag.
+  async markSaved(): Promise<void> {
+    await this.initialize();
+    if (!this.manifest) return;
+    this.manifest.savedNodeId = this.manifest.currentId;
+    this.scheduleManifestWrite();
+    this.syncDirty();
   }
 
   // ---------- File paths ----------
 
   private packedPath(dir: string, nodeId: string): string {
-    return window.nodePath.join(dir, `${nodeId}.packed.zst`);
+    return host.path.join(dir, `${nodeId}.packed.zst`);
   }
   private deltaPath(dir: string, nodeId: string): string {
-    return window.nodePath.join(dir, `${nodeId}.delta.zst`);
+    return host.path.join(dir, `${nodeId}.delta.zst`);
   }
   private inverseMapPath(dir: string, nodeId: string): string {
-    return window.nodePath.join(dir, `${nodeId}.inverse.zst`);
+    return host.path.join(dir, `${nodeId}.inverse.zst`);
   }
   private metadataPath(dir: string, nodeId: string): string {
-    return window.nodePath.join(dir, `${nodeId}.meta.zst`);
+    return host.path.join(dir, `${nodeId}.meta.zst`);
   }
   private audioPath(dir: string, nodeId: string): string {
-    return window.nodePath.join(dir, `${nodeId}.wav`);
+    return host.path.join(dir, `${nodeId}.wav`);
   }
 
   // ---------- Mutation ----------
@@ -949,7 +988,7 @@ export class HistoryManager {
     }
     const path = this.audioPath(dir, nodeId);
     try {
-      await window.audioAnalysis.exportAudio(channels, path, audioBuffer.sampleRate, "wav");
+      await host.analysis.exportAudio(channels, path, audioBuffer.sampleRate, "wav");
     } catch (err) {
       console.error("history: failed to cache audio", err);
       return;
@@ -974,7 +1013,7 @@ export class HistoryManager {
       const node = this.manifest.nodes[evict];
       if (!node || !node.audioCached) continue;
       const dir = await this.dir;
-      window.nodeFs.rm(this.audioPath(dir, evict)).catch(() => {});
+      host.fs.rm(this.audioPath(dir, evict)).catch(() => {});
       node.audioCached = false;
     }
   }
@@ -1027,7 +1066,7 @@ export class HistoryManager {
         this.metadataPath(dir, id),
         this.audioPath(dir, id),
       ];
-      for (const f of files) window.nodeFs.rm(f).catch(() => {});
+      for (const f of files) host.fs.rm(f).catch(() => {});
       this.packedCache.delete(id);
       delete this.manifest.nodes[id];
     }
@@ -1057,24 +1096,14 @@ export class HistoryManager {
    * mutating the file's displayed state. Uses the cached WAV if present,
    * otherwise reconstructs the packed FBO data and synthesizes fresh audio.
    */
-  async exportNodeAudio(nodeId: string, outputPath: string): Promise<boolean> {
+  // Re-synthesises a node's audio from its packed spectrogram, returning the
+  // planar channels and sample rate. Returns null when the node or its synthesis
+  // metadata can't be resolved.
+  async synthesizeNodeAudio(nodeId: string): Promise<{ channels: Float32Array[]; sampleRate: number } | null> {
     await this.initialize();
-    if (!this.manifest) return false;
+    if (!this.manifest) return null;
     const target = this.manifest.nodes[nodeId];
-    if (!target) return false;
-
-    // Fast path: if the node has a cached WAV on disk, copy it directly.
-    if (target.audioCached) {
-      const dir = await this.dir;
-      const cached = this.audioPath(dir, nodeId);
-      try {
-        await window.audioAnalysis.copyAudioFile(cached, outputPath);
-        return true;
-      } catch {
-        // Cached copy failed (file evicted or permission issue) — fall through
-        // to re-synthesis without mutating the manifest.
-      }
-    }
+    if (!target) return null;
 
     // Walk ancestors to the nearest full snapshot — it carries the
     // synthesisMetadata (bandOffsets/bandStepLog2s/bandLengths) needed by the
@@ -1084,7 +1113,7 @@ export class HistoryManager {
     while (anchor && anchor.storage !== "full") {
       anchor = anchor.parentId ? (this.manifest.nodes[anchor.parentId] ?? null) : null;
     }
-    if (!anchor?.synthesisMetadata) return false;
+    if (!anchor?.synthesisMetadata) return null;
 
     const { packedData } = await this.reconstruct(nodeId);
     const dims = target.dimensions;
@@ -1096,25 +1125,49 @@ export class HistoryManager {
       bandStepLog2s: new Int32Array(anchor.synthesisMetadata.bandStepLog2s),
       bandLengths: new Uint32Array(anchor.synthesisMetadata.bandLengths),
     };
-    const result = await window.audioAnalysis.synthesize(
+    const result = await host.analysis.synthesize(
       packedData,
       synthMeta,
       dims.sampleRate,
       { bandsPerOctave: dims.bandsPerOctave, minFreq: dims.minFreq },
       true,
     );
-    await window.audioAnalysis.exportAudio(result.channels, outputPath, dims.sampleRate, "wav");
+    return { channels: result.channels, sampleRate: dims.sampleRate };
+  }
+
+  async exportNodeAudio(nodeId: string, outputPath: string): Promise<boolean> {
+    await this.initialize();
+    if (!this.manifest) return false;
+    const target = this.manifest.nodes[nodeId];
+    if (!target) return false;
+
+    // Fast path: if the node has a cached WAV on disk, copy it directly.
+    if (target.audioCached) {
+      const dir = await this.dir;
+      const cached = this.audioPath(dir, nodeId);
+      try {
+        await host.analysis.copyAudioFile(cached, outputPath);
+        return true;
+      } catch {
+        // Cached copy failed (file evicted or permission issue) — fall through
+        // to re-synthesis without mutating the manifest.
+      }
+    }
+
+    const audio = await this.synthesizeNodeAudio(nodeId);
+    if (!audio) return false;
+    await host.analysis.exportAudio(audio.channels, outputPath, audio.sampleRate, "wav");
     return true;
   }
 
   async getDiskUsageBytes(): Promise<number> {
     try {
       const dir = await this.dir;
-      const entries = await window.nodeFs.readdir(dir);
+      const entries = await host.fs.readdir(dir);
       let total = 0;
       for (const entry of entries) {
         try {
-          const s = await window.nodeFs.stat(window.nodePath.join(dir, entry));
+          const s = await host.fs.stat(host.path.join(dir, entry));
           total += Number(s.size);
         } catch {
           // ignore
@@ -1138,7 +1191,7 @@ export class HistoryManager {
     }
     const dir = await this.dir;
     try {
-      await window.nodeFs.rm(dir, { recursive: true, force: true });
+      await host.fs.rm(dir, { recursive: true, force: true });
     } catch {
       // ignore
     }
@@ -1206,19 +1259,19 @@ export function clearAllHistoryManagers(): void {
 export async function pruneOrphanHistoryDirs(activeFileIds: Set<string>): Promise<void> {
   try {
     const userData = await getUserDataPath();
-    const root = window.nodePath.join(userData, "history");
+    const root = host.path.join(userData, "history");
     let entries: string[];
     try {
-      entries = (await window.nodeFs.readdir(root)) as unknown as string[];
+      entries = (await host.fs.readdir(root)) as unknown as string[];
     } catch {
       return;
     }
     await Promise.all(
       entries.map(async (entry) => {
         if (activeFileIds.has(entry)) return;
-        const dir = window.nodePath.join(root, entry);
+        const dir = host.path.join(root, entry);
         try {
-          await window.nodeFs.rm(dir, { recursive: true, force: true });
+          await host.fs.rm(dir, { recursive: true, force: true });
         } catch {
           // best-effort
         }

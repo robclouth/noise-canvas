@@ -8,6 +8,7 @@
 
 import { useMemo, useState, useEffect } from "react";
 import { ClampToEdgeWrapping, DataTexture, FloatType, LinearFilter, RGBAFormat } from "three";
+import { host } from "./host";
 
 export interface HrtfMetadata {
   version: number;
@@ -79,16 +80,16 @@ const defaultMetadata: HrtfMetadata = {
  */
 function getHrtfPath(): string {
   // Check if we're in development by looking for common dev indicators
-  const isDev = process.env.NODE_ENV === "development" || window.location.protocol === "http:";
+  const isDev = host.env.nodeEnv === "development" || window.location.protocol === "http:";
 
   if (isDev) {
     // In development, use the project's resources directory
     // This assumes the dev server is running from the project root
-    return window.nodePath.join(process.cwd(), "resources", "hrtf");
+    return host.path.join(host.env.cwd(), "resources", "hrtf");
   } else {
     // In production, use the app's resources path
-    // process.resourcesPath points to the app's Resources folder
-    return window.nodePath.join(process.resourcesPath, "hrtf");
+    // resourcesPath points to the app's Resources folder
+    return host.path.join(host.env.resourcesPath, "hrtf");
   }
 }
 
@@ -113,13 +114,13 @@ export async function loadHrtfData(): Promise<{ texture: DataTexture; metadata: 
       const hrtfDir = getHrtfPath();
 
       // Load metadata
-      const metadataPath = window.nodePath.join(hrtfDir, "hrtf-metadata.json");
-      const metadataContent = await window.nodeFs.readFile(metadataPath, { encoding: "utf-8" });
+      const metadataPath = host.path.join(hrtfDir, "hrtf-metadata.json");
+      const metadataContent = await host.fs.readFile(metadataPath, { encoding: "utf-8" });
       const metadata: HrtfMetadata = JSON.parse(metadataContent);
 
       // Load binary data
-      const dataPath = window.nodePath.join(hrtfDir, "hrtf-data.bin");
-      const dataBuffer = await window.nodeFs.readFile(dataPath);
+      const dataPath = host.path.join(hrtfDir, "hrtf-data.bin");
+      const dataBuffer = await host.fs.readFile(dataPath);
       const data = new Float32Array(
         dataBuffer.buffer,
         dataBuffer.byteOffset,

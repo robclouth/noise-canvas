@@ -2,6 +2,7 @@ import { notifications } from "@mantine/notifications";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import type { HistoryManager } from "./history-manager";
 import { historyExportProgressMessage } from "./history-export-progress";
+import { host } from "./host";
 
 // Exported via HistoryManager.getManifest(); duplicated here to avoid widening
 // the manager's public surface for a local helper.
@@ -119,8 +120,8 @@ export async function runHistoryExport(opts: RunHistoryExportOpts): Promise<void
   outer: for (let p = 0; p < chains.length; p++) {
     const chain = chains[p];
     const folderName = folderFor(p);
-    const dir = folderName ? window.nodePath.join(outputRoot, folderName) : outputRoot;
-    await window.nodeFs.mkdir(dir, { recursive: true });
+    const dir = folderName ? host.path.join(outputRoot, folderName) : outputRoot;
+    await host.fs.mkdir(dir, { recursive: true });
     const nodePad = Math.max(2, String(chain.length).length);
 
     for (let i = 0; i < chain.length; i++) {
@@ -137,12 +138,12 @@ export async function runHistoryExport(opts: RunHistoryExportOpts): Promise<void
         const ordinal = String(i + 1).padStart(nodePad, "0");
         fileName = suffix ? `${ordinal}-${slug}_${suffix}.wav` : `${ordinal}-${slug}.wav`;
       }
-      const wavPath = window.nodePath.join(dir, fileName);
+      const wavPath = host.path.join(dir, fileName);
 
       try {
         const cached = canonicalForNode.get(nodeId);
         if (cached) {
-          await window.audioAnalysis.copyAudioFile(cached, wavPath);
+          await host.analysis.copyAudioFile(cached, wavPath);
           exported++;
         } else {
           const ok = await historyManager.exportNodeAudio(nodeId, wavPath);
@@ -168,7 +169,7 @@ export async function runHistoryExport(opts: RunHistoryExportOpts): Promise<void
 
   if (!cancelled && writeTreeJson) {
     try {
-      await window.nodeFs.writeFile(window.nodePath.join(outputRoot, "tree.json"), JSON.stringify(manifest, null, 2));
+      await host.fs.writeFile(host.path.join(outputRoot, "tree.json"), JSON.stringify(manifest, null, 2));
     } catch (err) {
       errors.push(err instanceof Error ? err.message : String(err));
     }
