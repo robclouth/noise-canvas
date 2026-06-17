@@ -13,7 +13,7 @@ import {
 } from "@ableton-extensions/sdk";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { exportAudio } from "../../main/lib/audio-analysis";
 import { decodeRenderBatch } from "../shared/render-batch";
 import { runAnalyzeFramed, runSynthesizeFramed } from "./analysis-service";
@@ -98,6 +98,18 @@ async function copyAsdSidecar(originalFilePath: string, replacementFilePath: str
   await fs.copyFile(source, `${replacementFilePath}.asd`);
 }
 
+// Builds a filesystem-safe basename for the rendered WAV from the render label,
+// stripping any audio extension and illegal path characters and falling back to
+// the source file's name, so the file imported into Live carries that name.
+function stagedFileBase(label: string, sourceFilePath: string): string {
+  const fallback = basename(sourceFilePath, extname(sourceFilePath));
+  const fromLabel = label
+    .replace(extname(label), "")
+    .replace(/[/\\:*?"<>|]/g, "_")
+    .trim();
+  return fromLabel || fallback || "Edit";
+}
+
 async function editAudioClip(context: Api, clip: AudioClip<"1.0.0">): Promise<void> {
   const track = findAudioTrack(clip);
   if (!track) {
@@ -157,11 +169,15 @@ async function editAudioClip(context: Api, clip: AudioClip<"1.0.0">): Promise<vo
 
   // Encode each render to a staged WAV with ffmpeg (the desktop app's export
   // path) and import it into the project; the original's .asd sidecar rides along.
+  // Each render gets its own staging directory so the WAV basename can be the
+  // source file's name without colliding across renders.
   const tempDir = context.environment.tempDirectory ?? tmpdir();
   const prepared: { managedPath: string; label: string }[] = [];
   for (let i = 0; i < renders.length; i++) {
     const render = renders[i];
-    const stagedPath = join(tempDir, `noise-canvas-${session.id}-${i}.wav`);
+    const stagedDir = join(tempDir, `noise-canvas-${session.id}-${i}`);
+    await fs.mkdir(stagedDir, { recursive: true });
+    const stagedPath = join(stagedDir, `${stagedFileBase(render.label, meta.sourceFilePath)}.wav`);
     await exportAudio(render.channels, stagedPath, render.sampleRate, "wav");
     const managedPath = await context.resources.importIntoProject(stagedPath);
     await copyAsdSidecar(meta.sourceFilePath, managedPath);
