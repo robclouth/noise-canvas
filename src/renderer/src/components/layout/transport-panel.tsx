@@ -1,5 +1,12 @@
 import { useStore } from "@/store";
 import { ActionIcon, Box, Divider, Group, Popover, Stack, Text } from "@mantine/core";
+import {
+  TRANSPORT_GAP,
+  TRANSPORT_LABEL_WIDTH,
+  TRANSPORT_PAD,
+  TRANSPORT_TIME_WIDTH,
+  useUiSize,
+} from "@renderer/lib/ui-density";
 import { Brush, Link2, Play, Repeat, Square } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { ParameterControl } from "../controls/parameter-control";
@@ -32,6 +39,7 @@ export const TransportPanel = memo(() => {
   const playButtonRef = useRef<HTMLButtonElement>(null);
   const animationFrameId = useRef<number | null>(null);
   const [linkPopoverOpened, setLinkPopoverOpened] = useState(false);
+  const uiSize = useUiSize();
 
   useEffect(() => {
     if (!isPlaying) {
@@ -59,7 +67,15 @@ export const TransportPanel = memo(() => {
   }, [isPlaying, loop]);
 
   return (
-    <Group align="center" justify="center" gap="md" p="md" bg="dark.7" wrap="nowrap" style={{ zIndex: 1000 }}>
+    <Group
+      align="center"
+      justify="center"
+      gap={TRANSPORT_GAP}
+      p={TRANSPORT_PAD}
+      bg="dark.7"
+      wrap="nowrap"
+      style={{ zIndex: 1000 }}
+    >
       <Group gap="xs" wrap="nowrap">
         <Popover
           opened={linkPopoverOpened}
@@ -88,10 +104,10 @@ export const TransportPanel = memo(() => {
               >
                 <ActionIcon
                   onClick={() => setLinkEnabled(!linkEnabled)}
-                  size="lg"
+                  size={uiSize}
                   color={linkEnabled ? "orange" : "dark.5"}
                 >
-                  <Link2 size={20} />
+                  <Link2 size={18} />
                 </ActionIcon>
               </Tooltip>
             </Box>
@@ -100,47 +116,47 @@ export const TransportPanel = memo(() => {
             <ParameterControl paramKey="linkLatencyMs" labelWidth={80} />
           </Popover.Dropdown>
         </Popover>
-        <ActionIcon onClick={togglePlayback} size="lg" ref={playButtonRef} color={isPlaying ? "orange" : "dark.5"}>
-          {isPlaying ? <Square size={20} fill="white" /> : <Play size={20} fill="white" />}
+        <ActionIcon onClick={togglePlayback} size={uiSize} ref={playButtonRef} color={isPlaying ? "orange" : "dark.5"}>
+          {isPlaying ? <Square size={18} fill="white" /> : <Play size={18} fill="white" />}
         </ActionIcon>
-        <ActionIcon onClick={() => setLoop(!loop)} size="lg" color={loop ? "orange" : "dark.5"}>
-          <Repeat size={20} />
+        <ActionIcon onClick={() => setLoop(!loop)} size={uiSize} color={loop ? "orange" : "dark.5"}>
+          <Repeat size={18} />
         </ActionIcon>
         <Tooltip label="Automatically play back the region you just painted after finishing a stroke">
           <ActionIcon
             onClick={() => setAutoPlayStroke(!autoPlayStroke)}
-            size="lg"
+            size={uiSize}
             color={autoPlayStroke ? "orange" : "dark.5"}
           >
-            <Brush size={20} />
+            <Brush size={18} />
           </ActionIcon>
         </Tooltip>
-        <Text ff="monospace" size="xl" ref={timeRef} w={120}>
+        <Text ff="monospace" size="lg" ref={timeRef} w={TRANSPORT_TIME_WIDTH}>
           {formatTime(0)}
         </Text>
       </Group>
 
       <Divider orientation="vertical" color="dark.5" />
 
-      <Stack gap={4}>
-        <ParameterControl paramKey="gridSizeBeats" labelWidth={40} />
-        <ParameterControl paramKey="snapTime" labelWidth={40} displayLabel="Snap" />
+      <Stack gap={0}>
+        <ParameterControl paramKey="gridSizeBeats" labelWidth={TRANSPORT_LABEL_WIDTH} />
+        <ParameterControl paramKey="snapTime" labelWidth={TRANSPORT_LABEL_WIDTH} displayLabel="Snap" />
       </Stack>
 
-      <Stack gap={4}>
-        <ParameterControl paramKey="gridSizeSemis" labelWidth={40} />
-        <ParameterControl paramKey="snapPitch" labelWidth={40} displayLabel="Snap" />
+      <Stack gap={0}>
+        <ParameterControl paramKey="gridSizeSemis" labelWidth={TRANSPORT_LABEL_WIDTH} />
+        <ParameterControl paramKey="snapPitch" labelWidth={TRANSPORT_LABEL_WIDTH} displayLabel="Snap" />
       </Stack>
 
-      <Stack gap={4}>
-        <ParameterControl paramKey="gridSwing" labelWidth={40} />
+      <Stack gap={0}>
+        <ParameterControl paramKey="gridSwing" labelWidth={TRANSPORT_LABEL_WIDTH} />
       </Stack>
 
       <Divider orientation="vertical" color="dark.5" />
 
-      <Stack gap={4}>
-        <ParameterControl paramKey="scaleTonic" labelWidth={40} />
-        <ParameterControl paramKey="scaleType" labelWidth={40} />
+      <Stack gap={0}>
+        <ParameterControl paramKey="scaleTonic" labelWidth={TRANSPORT_LABEL_WIDTH} />
+        <ParameterControl paramKey="scaleType" labelWidth={TRANSPORT_LABEL_WIDTH} />
       </Stack>
     </Group>
   );

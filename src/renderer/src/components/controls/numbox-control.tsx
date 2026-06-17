@@ -10,6 +10,13 @@ import {
   useMantineTheme,
 } from "@mantine/core";
 import { useFocusWithin, useMergedRef, useWindowEvent } from "@mantine/hooks";
+import {
+  CONTROL_ROW_GAP,
+  CONTROL_ROW_HEIGHT,
+  VALUE_WIDTH,
+  WIDGET_HEIGHT,
+  WIDGET_INPUT_HEIGHT,
+} from "@renderer/lib/ui-density";
 import type { SliderMark } from "@renderer/store/types";
 import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -306,8 +313,8 @@ export const NumboxControl = (props: NumboxControlProps) => {
       onClick={handleClick}
       style={{
         position: "relative",
-        width: 70,
-        height: 20,
+        width: VALUE_WIDTH,
+        height: WIDGET_HEIGHT,
         cursor: isDragging ? "ns-resize" : disabled ? "default" : "pointer",
         overflow: "hidden",
         borderRadius: 2,
@@ -380,9 +387,9 @@ export const NumboxControl = (props: NumboxControlProps) => {
               input: {
                 textAlign: "center",
                 padding: 0,
-                height: 18,
-                minHeight: 18,
-                fontSize: 11,
+                height: WIDGET_INPUT_HEIGHT,
+                minHeight: WIDGET_INPUT_HEIGHT,
+                fontSize: "var(--ui-font-xs)",
                 color: "#fff",
               },
             }}
@@ -391,7 +398,7 @@ export const NumboxControl = (props: NumboxControlProps) => {
           <Text
             size="xs"
             style={{
-              fontSize: 11,
+              fontSize: "var(--ui-font-xs)",
               lineHeight: 1,
               color: disabled ? "#666" : "#fff",
               pointerEvents: "none",
@@ -467,7 +474,7 @@ export const NumboxControl = (props: NumboxControlProps) => {
   }
 
   return (
-    <Group gap={"xs"} wrap="nowrap" h={24} align="center">
+    <Group gap={CONTROL_ROW_GAP} wrap="nowrap" h={CONTROL_ROW_HEIGHT} align="center">
       {labelWithModulators}
       {numboxWithCombobox}
     </Group>

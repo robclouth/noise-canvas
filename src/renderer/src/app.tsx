@@ -12,6 +12,7 @@ import { CanvasPanel, PaletteBar } from "./components/layout/canvas-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
 import { ipcOn, ipcSend } from "./lib/ipc";
+import { BRUSH_PANEL_WIDTH } from "./lib/ui-density";
 import { precompileAllShaders, warmEffectPipelines } from "./lib/precompile-shaders";
 import { clearAllHistoryManagers, getHistoryManager, pruneOrphanHistoryDirs } from "./lib/history-manager";
 import { useLinkSync } from "./lib/use-link-sync";
@@ -70,12 +71,19 @@ function App(): React.JSX.Element {
   const [shaderProgress, setShaderProgress] = useState<{ done: number; total: number } | null>(null);
   const openFileIds = useStore((state) => state.openFileIds);
   const fullscreenFileId = useStore((state) => state.fullscreenFileId);
+  const uiSize = useStore((state) => state.uiSize);
 
   const invalidateRef = useRef<Invalidator | null>(null);
 
   useEffect(() => {
     invalidateRef.current?.();
   }, [fullscreenFileId]);
+
+  // Drive the density CSS variables and keep the native menu checkmark in sync.
+  useEffect(() => {
+    document.documentElement.dataset.uiSize = uiSize;
+    ipcSend("update-ui-size", uiSize === "sm");
+  }, [uiSize]);
 
   useEffect(() => {
     useStore.getState().init();
@@ -128,6 +136,11 @@ function App(): React.JSX.Element {
       useStore.getState().clearRecentFilePaths();
     });
     unsubscribers.push(unsubClearRecent);
+
+    const unsubToggleUiSize = ipcOn("toggle-ui-size", () => {
+      useStore.getState().toggleUiSize();
+    });
+    unsubscribers.push(unsubToggleUiSize);
 
     const unsubNewFile = ipcOn("new-file", async () => {
       const { newFile } = useStore.getState();
@@ -327,7 +340,7 @@ function App(): React.JSX.Element {
         scrollbarSize={4}
         type="auto"
         h="100%"
-        w={320}
+        w={BRUSH_PANEL_WIDTH}
         onScrollPositionChange={() => invalidateRef.current?.()}
       >
         <BrushPanel />

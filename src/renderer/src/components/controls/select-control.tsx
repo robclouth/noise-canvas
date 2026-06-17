@@ -1,4 +1,5 @@
 import { Group, Select } from "@mantine/core";
+import { CONTROL_ROW_GAP, CONTROL_ROW_HEIGHT, VALUE_WIDTH } from "@renderer/lib/ui-density";
 import { ChevronDown } from "lucide-react";
 import { ReactNode, useRef } from "react";
 
@@ -14,7 +15,7 @@ export const SelectControl = <T,>({
   value: T;
   options: readonly { value: T; label: string }[];
   setValue: (value: T) => void;
-  labelWidth?: number;
+  labelWidth?: number | string;
   color?: string;
   dropdownZIndex?: number;
 }) => {
@@ -31,7 +32,7 @@ export const SelectControl = <T,>({
   };
 
   return (
-    <Group gap={"xs"} wrap="nowrap" h={24}>
+    <Group gap={CONTROL_ROW_GAP} wrap="nowrap" h={CONTROL_ROW_HEIGHT}>
       {labelComponent}
       <Select
         ref={inputRef}
@@ -43,7 +44,7 @@ export const SelectControl = <T,>({
           border: `1px solid #666`,
           backgroundColor: "#2c2c2c",
         }}
-        w={70}
+        w={VALUE_WIDTH}
         data={options.map((o) => ({ value: String(o.value), label: o.label }))}
         value={String(value)}
         onChange={handleChange}

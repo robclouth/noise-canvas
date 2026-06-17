@@ -1,5 +1,6 @@
 import { useStore } from "@/store";
 import { ActionIcon, Badge, Box, Group, Menu, NumberInput } from "@mantine/core";
+import { FILE_HEADER_FONT, FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-density";
 import { getFileColor, openFiles } from "@renderer/store/files";
 import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
@@ -38,7 +39,7 @@ const TruncatedFilename = memo(function TruncatedFilename({
       style={{
         minWidth: 0,
         width: "100%",
-        fontSize: 13,
+        fontSize: FILE_HEADER_FONT,
         fontStyle: isDirty ? "italic" : "normal",
         whiteSpace: "nowrap",
       }}
@@ -49,6 +50,7 @@ const TruncatedFilename = memo(function TruncatedFilename({
 });
 
 export default memo(function FileHeader({ fileId }: { fileId: string }) {
+  const uiSize = useUiSize();
   const file = openFiles[fileId];
   const filePath = file.filePath;
   const displayName = file.displayName;
@@ -68,7 +70,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
     <Group
       justify="space-between"
       align="center"
-      p="xs"
+      p={FILE_HEADER_PAD}
       wrap="nowrap"
       bg={isHighlighted ? "dark.6" : "dark.7"}
       style={{
@@ -102,7 +104,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         <Menu position="bottom-end" withinPortal>
           <Tooltip label="Split this file into separate components.">
             <Menu.Target>
-              <ActionIcon color="dark.5" onClick={(e) => e.stopPropagation()}>
+              <ActionIcon size={uiSize} color="dark.5" onClick={(e) => e.stopPropagation()}>
                 <Scissors size={16} />
               </ActionIcon>
             </Menu.Target>
@@ -129,6 +131,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         </Menu>
         <Tooltip label="Duplicate this file to create an editable copy.">
           <ActionIcon
+            size={uiSize}
             color="dark.5"
             onClick={(e) => {
               e.stopPropagation();
@@ -140,6 +143,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         </Tooltip>
         <Tooltip label="Minimize to palette bar">
           <ActionIcon
+            size={uiSize}
             color="dark.5"
             onClick={(e) => {
               e.stopPropagation();
@@ -151,6 +155,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         </Tooltip>
         <Tooltip label={isFullscreen ? "Exit fullscreen" : "Expand this file to fill the canvas area."}>
           <ActionIcon
+            size={uiSize}
             color={isFullscreen ? "orange" : "dark.5"}
             onClick={(e) => {
               e.stopPropagation();
@@ -162,6 +167,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         </Tooltip>
         <Tooltip label="Close this file.">
           <ActionIcon
+            size={uiSize}
             color="dark.5"
             onClick={(e) => {
               e.stopPropagation();
