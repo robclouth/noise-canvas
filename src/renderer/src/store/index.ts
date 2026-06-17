@@ -277,9 +277,14 @@ export const useStore = create<State>()(
         merge: (persistedState, currentState) => {
           const merged = deepMerge(currentState, persistedState as object) as State;
 
-          // The Ableton extension always runs at compact density, regardless of
-          // any persisted value.
-          if (host.env.isExtension) merged.uiSize = "sm";
+          if (host.env.isExtension) {
+            // The Ableton extension always runs at compact density, regardless
+            // of any persisted value.
+            merged.uiSize = "sm";
+            // The clip opened from Ableton becomes the active file; don't restore
+            // a stale active id from a previous session.
+            merged.activeFileId = null;
+          }
 
           // Sync effects in all steps to handle added/removed effects
           if (Array.isArray(merged.brushes)) {

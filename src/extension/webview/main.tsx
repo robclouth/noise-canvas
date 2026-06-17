@@ -18,7 +18,12 @@ async function seedFromSession(): Promise<void> {
   if (!res.ok) return;
   const meta = (await res.json()) as { sourceFilePath: string };
   const { useStore } = await import("@renderer/store");
+  const { openFiles } = await import("@renderer/store/files");
   await useStore.getState().openFilePath(meta.sourceFilePath);
+  // Make the opened clip the active file even when previously-edited files were
+  // reopened from the persisted session.
+  const seeded = Object.values(openFiles).find((file) => file.filePath === meta.sourceFilePath);
+  if (seeded) await useStore.getState().setActiveFileId(seeded.id);
 }
 
 async function start(): Promise<void> {
