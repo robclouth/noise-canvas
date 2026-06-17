@@ -279,16 +279,16 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
           }
         }
       },
-      onWheel: ({ event, delta: [dx, dy], velocity: [vx, vy], direction: [dirX, dirY], last }) => {
-        event.preventDefault();
-        const rect = viewRef.current?.getBoundingClientRect();
-        if (!rect || rect.width === 0) return;
-
+      onWheel: ({ event, delta: [dx, dy], velocity: [vx], direction: [dirX], last }) => {
         const wheelEvent = event as WheelEvent;
         const isPinch = wheelEvent.ctrlKey;
         const isExplicitZoom = wheelEvent.metaKey || isZooming;
 
+        const rect = viewRef.current?.getBoundingClientRect();
+        if (!rect || rect.width === 0) return;
+
         if (isPinch || isExplicitZoom) {
+          event.preventDefault();
           stopMomentum();
           const sensitivity = isPinch ? 0.02 : 0.01;
           const cursorU = (wheelEvent.clientX - rect.left) / rect.width;
@@ -297,14 +297,18 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
           return;
         }
 
+        // Horizontal two-finger scroll pans the view; a vertical scroll bubbles
+        // up to the parent container so the file views scroll vertically.
+        if (Math.abs(dx) <= Math.abs(dy)) return;
+
+        event.preventDefault();
         stopMomentum();
-        applyScrollDelta(dx, dy);
+        applyScrollDelta(dx, 0);
 
         if (last) {
           const signedVx = vx * dirX;
-          const signedVy = vy * dirY;
-          if (Math.abs(signedVx) > 0.05 || Math.abs(signedVy) > 0.05) {
-            startMomentum(signedVx, signedVy);
+          if (Math.abs(signedVx) > 0.05) {
+            startMomentum(signedVx, 0);
           }
         }
       },
