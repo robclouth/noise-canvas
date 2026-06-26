@@ -931,10 +931,14 @@ export class StrokeRenderer {
             const uniformsForThisIteration =
               isFirstEffect && isFirstIteration && isFirstPass ? { ...commonUniforms } : { ...iterativeUniforms };
 
-            // Add contextual modulation uniforms for this iteration/step
+            // Add contextual modulation uniforms for this iteration/step.
+            // The Time/Pitch position sources track the painted aim. On a
+            // full-size axis the footprint anchors to 0, so the aim is read
+            // straight from the cursor instead of the footprint center, letting
+            // full-axis effects still be modulated by where you paint.
             const brushSizeUv = commonUniforms.brushSizeUv.value as Vector2;
-            const brushCenterTime = stepAnchor.x + brushSizeUv.x / 2;
-            const brushCenterPitch = stepAnchor.y + brushSizeUv.y / 2;
+            const brushCenterTime = stepFootprint.fullTime ? cursorPos.x : stepAnchor.x + brushSizeUv.x / 2;
+            const brushCenterPitch = stepFootprint.fullPitch ? cursorPos.y : stepAnchor.y + brushSizeUv.y / 2;
             uniformsForThisIteration.strokeIterationNormalized = {
               value: brushIterations > 1 ? i / (brushIterations - 1) : 0,
             };
@@ -1152,8 +1156,8 @@ export class StrokeRenderer {
       uniforms.modulator2SeqDataTex.value = modulatorUniforms[1]?.seqDataTex || placeholderTexture;
       uniforms.modulator3SeqDataTex.value = modulatorUniforms[2]?.seqDataTex || placeholderTexture;
 
-      uniforms.strokeTimePosition.value = brushAnchor.x + brushSizeUv.x / 2;
-      uniforms.strokePitchPosition.value = brushAnchor.y + brushSizeUv.y / 2;
+      uniforms.strokeTimePosition.value = footprint.fullTime ? cursorPos.x : brushAnchor.x + brushSizeUv.x / 2;
+      uniforms.strokePitchPosition.value = footprint.fullPitch ? cursorPos.y : brushAnchor.y + brushSizeUv.y / 2;
       uniforms.strokeStepNormalized.value = numSteps > 1 ? stepIndex / (numSteps - 1) : 0;
 
       (uniforms.brushBottomLeftUv.value as Vector2).copy(brushAnchor);
