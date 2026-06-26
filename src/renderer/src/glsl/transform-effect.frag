@@ -40,7 +40,8 @@ void main() {
         return;
     }
 
-    // 1. Define the pivot point based on scale direction (bottom-left corner).
+    // Scale/rotation pivot: the brush's bottom-left corner. Negative scales add
+    // back the brush size below so the flip stays centred on the brush.
     vec2 pivot = brushBottomLeftUv;
 
     // Resolve the geometric params as vec2 (L, R). When all modulators driving
@@ -62,18 +63,29 @@ void main() {
 
     float bandsPerSemi = destBandsPerOctave / 12.0;
 
+    // The geometric transform is defined in DEST UV space (where the brush pivot
+    // and size live), so it must run on the dest coordinate and only then map to
+    // the source. Running it on the already source-mapped UV would fold the
+    // source offset/scale (different source file, Fixed/Anchored tracking) into
+    // the pivot and slide the flipped/scaled result off the brush. The per-channel
+    // source-read offset (sourcePitchOffset/sourceTimeOffset stereo spread) is a
+    // pure source-space translation, so it is re-added after the remap.
+    vec2 baseSourceUv = destUvToSourceUv(coords.dest);
+    vec2 modOffsetL = coords.sourceL - baseSourceUv;
+    vec2 modOffsetR = coords.sourceR - baseSourceUv;
+
     // Computes the transformed source UV and effective scale for one channel
-    // given its source UV (coords.sourceL or coords.sourceR) and its channel's
-    // scalar params. Returns the sample to write into that channel.
-    #define COMPUTE_CHANNEL(outTexel, srcUv, rotV, sxV, syV, shXV, shYV) { \
-        vec2 relativeUv = srcUv - pivot; \
+    // given its per-channel source-read offset and scalar params. Returns the
+    // sample to write into that channel.
+    #define COMPUTE_CHANNEL(outTexel, modOffset, rotV, sxV, syV, shXV, shYV) { \
+        vec2 relativeUv = coords.dest - pivot; \
         float rad = radians(-(rotV)); \
         mat2 rotMat = mat2(cos(rad), -sin(rad), sin(rad), cos(rad)); \
         vec2 scaledUv = rotMat * relativeUv; \
         if (abs(sxV) > 1e-5 && abs(syV) > 1e-5) { scaledUv /= vec2(sxV, syV); } \
-        vec2 transformedUv = scaledUv + pivot; \
-        if ((sxV) < 0.0) transformedUv.x += brushSizeUv.x; \
-        if ((syV) < 0.0) transformedUv.y += brushSizeUv.y; \
+        vec2 transformedDest = scaledUv + pivot; \
+        if ((sxV) < 0.0) transformedDest.x += brushSizeUv.x; \
+        if ((syV) < 0.0) transformedDest.y += brushSizeUv.y; \
         float appliedShiftX = -(shXV); \
         float shiftSemisApplied = -(shYV) * destBandCount / bandsPerSemi; \
         if (scaleSnapEnabled) { \
@@ -81,7 +93,8 @@ void main() {
             shiftSemisApplied += snapToScale(target) - target; \
         } \
         float appliedShiftY = shiftSemisApplied * bandsPerSemi / destBandCount; \
-        vec2 finalSourceUv = transformedUv + vec2(appliedShiftX, appliedShiftY); \
+        transformedDest += vec2(appliedShiftX, appliedShiftY); \
+        vec2 finalSourceUv = destUvToSourceUv(transformedDest) + modOffset; \
         float totalShiftX = sourceOffsetX + appliedShiftX; \
         float totalShiftY = sourceOffsetY + appliedShiftY; \
         bool useZero, invertSample; \
@@ -105,12 +118,12 @@ void main() {
 
     vec4 transformedTexel;
     if (sameParams) {
-        COMPUTE_CHANNEL(transformedTexel, coords.source, rotationValue.x, scaleXValue.x, scaleYValue.x, rawShiftX.x, rawShiftY.x)
+        COMPUTE_CHANNEL(transformedTexel, modOffsetL, rotationValue.x, scaleXValue.x, scaleYValue.x, rawShiftX.x, rawShiftY.x)
     } else {
         vec4 texL;
         vec4 texR;
-        COMPUTE_CHANNEL(texL, coords.sourceL, rotationValue.x, scaleXValue.x, scaleYValue.x, rawShiftX.x, rawShiftY.x)
-        COMPUTE_CHANNEL(texR, coords.sourceR, rotationValue.y, scaleXValue.y, scaleYValue.y, rawShiftX.y, rawShiftY.y)
+        COMPUTE_CHANNEL(texL, modOffsetL, rotationValue.x, scaleXValue.x, scaleYValue.x, rawShiftX.x, rawShiftY.x)
+        COMPUTE_CHANNEL(texR, modOffsetR, rotationValue.y, scaleXValue.y, scaleYValue.y, rawShiftX.y, rawShiftY.y)
         transformedTexel = vec4(texL.rg, texR.ba);
     }
 
