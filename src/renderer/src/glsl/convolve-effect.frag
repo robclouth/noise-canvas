@@ -14,6 +14,7 @@ uniform Parameter convolveIrTimeOffset;
 uniform Parameter convolveIrPitchShiftSemi;
 uniform Parameter convolveIrRate;
 uniform Parameter convolveGain;
+uniform float     convolveIrNormScale;
 
 void main() {
   vec2 destUv = packedToUnpackedUv(destInverseMapTex, vUv, destFrameCount, destBandCount);
@@ -180,9 +181,9 @@ void main() {
     accumR += tapSign * magR * vec2(cos(phsR), sin(phsR));
   }
 
-  float outMagL = length(accumL) * gain;
+  float outMagL = length(accumL) * gain * convolveIrNormScale;
   float outPhsL = accumL == vec2(0.0) ? 0.0 : atan(accumL.y, accumL.x);
-  float outMagR = length(accumR) * gain;
+  float outMagR = length(accumR) * gain * convolveIrNormScale;
   float outPhsR = accumR == vec2(0.0) ? 0.0 : atan(accumR.y, accumR.x);
 
   vec4 wetTexel = vec4(

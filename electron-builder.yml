@@ -23,6 +23,16 @@ files:
   - "build/Release/link_addon.node"
   - "build/Release/libonnxruntime.1.24.3.dylib"
 
+extraResources:
+  - from: resources/hrtf
+    to: hrtf
+    filter:
+      - "**/*"
+      - "!cache${/*}"
+  - from: resources/samples
+    to: samples
+    filter:
+      - "**/*"
 asar: true
 asarUnpack:
   - "**/*.node"

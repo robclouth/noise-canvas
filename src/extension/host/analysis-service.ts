@@ -42,6 +42,7 @@ function resultToFrame(result: AnalysisResult): Frame {
       numChannels: result.numChannels,
       numBands: result.numBands,
       sampleRate: result.sampleRate,
+      magnitudeEnergy: result.magnitudeEnergy,
       format: result.format,
       codec: result.codec,
       channels: result.channels,

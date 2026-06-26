@@ -49,6 +49,7 @@ async function analyze(filePath: string, params: { bandsPerOctave: number; minFr
     numChannels: Number(meta.numChannels),
     numBands: Number(meta.numBands),
     sampleRate: Number(meta.sampleRate),
+    magnitudeEnergy: Number(meta.magnitudeEnergy),
     channels: Number(meta.channels),
     format: String(meta.format),
     codec: String(meta.codec),

@@ -7,6 +7,7 @@ import { produce } from "immer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
 import { host } from "../lib/host";
+import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
@@ -200,7 +201,8 @@ async function loadRealFileViaGaborator(
 ): Promise<void> {
   const file = openFiles[fileId];
   if (!file) return;
-  const result = await host.analysis.analyze(filePath, { bandsPerOctave, minFreq });
+  const diskPath = isBundledPath(filePath) ? resolveBundledPath(filePath) : filePath;
+  const result = await host.analysis.analyze(diskPath, { bandsPerOctave, minFreq });
   const spectrogramData = {
     packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
     inverseMap: new Float32Array(
@@ -218,6 +220,7 @@ async function loadRealFileViaGaborator(
     packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
     minFreq,
     bandsPerOctave,
+    magnitudeEnergy: result.magnitudeEnergy,
     synthesisMetadata: {
       bandOffsets: result.bandOffsets,
       bandStepLog2s: result.bandStepLog2s,
@@ -393,6 +396,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
         minFreq: state.minFreq,
         bandsPerOctave: state.bandsPerOctave,
+        magnitudeEnergy: result.magnitudeEnergy,
         synthesisMetadata: {
           bandOffsets: result.bandOffsets,
           bandStepLog2s: result.bandStepLog2s,
@@ -804,6 +808,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
             minFreq: state.minFreq,
             bandsPerOctave: state.bandsPerOctave,
+            magnitudeEnergy: result.magnitudeEnergy,
             synthesisMetadata: {
               bandOffsets: result.bandOffsets,
               bandStepLog2s: result.bandStepLog2s,
@@ -1638,6 +1643,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
             minFreq: state.minFreq,
             bandsPerOctave,
+            magnitudeEnergy: result.magnitudeEnergy,
             synthesisMetadata: {
               bandOffsets: result.bandOffsets,
               bandStepLog2s: result.bandStepLog2s,
@@ -1740,6 +1746,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
         minFreq: analysisParams.minFreq,
         bandsPerOctave: analysisParams.bandsPerOctave,
+        magnitudeEnergy: result.magnitudeEnergy,
         synthesisMetadata: {
           bandOffsets: result.bandOffsets,
           bandStepLog2s: result.bandStepLog2s,

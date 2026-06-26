@@ -53,6 +53,10 @@ export type SpectrogramData = {
   packedTextureSize: Vector2;
   minFreq: number;
   bandsPerOctave: number;
+  // Sum of squared magnitudes over every stored coefficient, from analysis.
+  // Used to derive the Convolve effect's IR-normalization scalar. Absent on
+  // FBO-derived spectrograms (duplicates, stem splits) that never re-analyze.
+  magnitudeEnergy?: number;
   synthesisMetadata: {
     bandOffsets: Uint32Array;
     bandStepLog2s: Int32Array;

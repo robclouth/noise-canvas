@@ -5,12 +5,26 @@ import {
   getMacroAmountValuesNormalized,
 } from "@renderer/store/modulators";
 import { getOpenFileByPath, openFiles } from "@renderer/store/files";
+import type { SpectrogramData } from "@renderer/store/types";
 import { GLSL3, RawShaderMaterial } from "three";
 import convolveEffectFrag from "../glsl/convolve-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
 import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
+
+// Single scalar that brings the convolution output to roughly unity at 0 dB
+// gain, independent of how loud the IR happens to be. Derived from the IR's
+// total stored magnitude energy (supplied by the analyzer), so it leaves every
+// inter-band and inter-tap ratio (the IR's spectral colour and decay shape)
+// untouched — it is purely automatic makeup gain. sqrt(numBands / energy)
+// centres the average per-band convolution gain near 1; clamped so a near-silent
+// IR can't produce runaway makeup gain.
+function getIrNormScale(data: SpectrogramData | undefined): number {
+  const energy = data?.magnitudeEnergy;
+  if (!data || !energy || energy <= 1e-12 || data.numBands <= 0) return 1;
+  return Math.min(Math.sqrt(data.numBands / energy), 1000);
+}
 
 const paramUniform = (value = 0, minValue = 0, maxValue = 1) => ({
   value: {
@@ -41,6 +55,7 @@ class ConvolveEffect extends BaseEffect {
           convolveIrPitchShiftSemi: paramUniform(0, -24, 24),
           convolveIrRate: paramUniform(1, -256, 256),
           convolveGain: paramUniform(1, 0, 64),
+          convolveIrNormScale: { value: 1 },
           convolveEdgeMode: { value: 1 },
         },
         vertexShader: passThroughVert,
@@ -88,6 +103,10 @@ class ConvolveEffect extends BaseEffect {
       material.uniforms.convolveIrBandsPerOctave.value = material.uniforms.sourceBandsPerOctave.value;
       material.uniforms.convolveIrEnabled.value = true;
     }
+
+    // Normalize against the explicit IR only. The "Self" fallback has no CPU
+    // spectrogram to measure here, so it stays unnormalized (scale 1).
+    material.uniforms.convolveIrNormScale.value = irFile && irTextures && irData ? getIrNormScale(irData) : 1;
 
     material.uniforms.convolveIrSize.value = Math.max(1, Math.floor(state.convolveIrSize));
     material.uniforms.convolveEdgeMode.value = state.convolveEdgeMode;

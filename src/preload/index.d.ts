@@ -26,6 +26,7 @@ declare global {
         bandStepLog2s: Int32Array;
         bandLengths: Uint32Array;
         sampleRate: number;
+        magnitudeEnergy: number;
         format: string;
         codec: string;
         channels: number;
@@ -46,6 +47,7 @@ declare global {
         bandStepLog2s: Int32Array;
         bandLengths: Uint32Array;
         sampleRate: number;
+        magnitudeEnergy: number;
         format: string;
         codec: string;
         channels: number;

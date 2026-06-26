@@ -30,6 +30,9 @@ export interface HistoryDimensions {
   sampleRate: number;
   minFreq: number;
   bandsPerOctave: number;
+  // Optional so manifests written before this field round-trip cleanly; absent
+  // means the Convolve effect falls back to no IR normalization for that file.
+  magnitudeEnergy?: number;
 }
 
 export interface HistoryNode {
@@ -258,6 +261,7 @@ function dimensionsFromSpectrogram(s: SpectrogramData): HistoryDimensions {
     sampleRate: s.sampleRate,
     minFreq: s.minFreq,
     bandsPerOctave: s.bandsPerOctave,
+    magnitudeEnergy: s.magnitudeEnergy,
   };
 }
 
@@ -823,6 +827,7 @@ export class HistoryManager {
       sampleRate: dims.sampleRate,
       minFreq: dims.minFreq,
       bandsPerOctave: dims.bandsPerOctave,
+      magnitudeEnergy: dims.magnitudeEnergy,
       packedTextureSize: new Vector2(dims.textureWidth, dims.textureHeight),
       synthesisMetadata: {
         bandOffsets: new Uint32Array(fullAnchor.synthesisMetadata.bandOffsets),
@@ -962,6 +967,7 @@ export class HistoryManager {
       sampleRate: dims.sampleRate,
       minFreq: dims.minFreq,
       bandsPerOctave: dims.bandsPerOctave,
+      magnitudeEnergy: dims.magnitudeEnergy,
       packedTextureSize: new Vector2(dims.textureWidth, dims.textureHeight),
       synthesisMetadata: {
         bandOffsets: new Uint32Array(synthMeta.bandOffsets),

@@ -19,6 +19,10 @@ type Range<F extends number, T extends number> = Exclude<Enumerate<T>, Enumerate
 export type ModulatableParameterKey =
   | "brushIntensity"
   | "brushPan"
+  | "brushCurveTime"
+  | "brushSkewTime"
+  | "brushCurvePitch"
+  | "brushSkewPitch"
   | "dynamicsThresholdDb"
   | "dynamicsUpperRatio"
   | "dynamicsLowerRatio"
@@ -74,6 +78,24 @@ export type ModulatorParameters = {
   [K in Range<1, 4> as `modulator${K}EnvelopeMinDb`]: number;
 } & {
   [K in Range<1, 4> as `modulator${K}EnvelopeMaxDb`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}PhaseX`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}PhaseY`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}TexturePath`]: string;
+} & {
+  [K in Range<1, 4> as `modulator${K}SeqStepsX`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}SeqStepsY`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}SeqLoopBeats`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}SeqLoopSemis`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}SeqSwing`]: number;
+} & {
+  [K in Range<1, 4> as `modulator${K}SeqData`]: string;
 };
 
 export interface ModulatorsState
@@ -116,6 +138,18 @@ function createModulatorParams(): ModulatorsState {
           .default,
         [`modulator${idx}EnvelopeMaxDb`]: getNumberParameterDef(`modulator${idx}EnvelopeMaxDb` as keyof ModulatorsState)
           .default,
+        [`modulator${idx}PhaseX`]: getNumberParameterDef(`modulator${idx}PhaseX` as keyof ModulatorsState).default,
+        [`modulator${idx}PhaseY`]: getNumberParameterDef(`modulator${idx}PhaseY` as keyof ModulatorsState).default,
+        [`modulator${idx}SeqStepsX`]: getNumberParameterDef(`modulator${idx}SeqStepsX` as keyof ModulatorsState)
+          .default,
+        [`modulator${idx}SeqStepsY`]: getNumberParameterDef(`modulator${idx}SeqStepsY` as keyof ModulatorsState)
+          .default,
+        [`modulator${idx}SeqLoopBeats`]: getNumberParameterDef(`modulator${idx}SeqLoopBeats` as keyof ModulatorsState)
+          .default,
+        [`modulator${idx}SeqLoopSemis`]: getNumberParameterDef(`modulator${idx}SeqLoopSemis` as keyof ModulatorsState)
+          .default,
+        [`modulator${idx}SeqSwing`]: getNumberParameterDef(`modulator${idx}SeqSwing` as keyof ModulatorsState).default,
+        [`modulator${idx}SeqData`]: getStringParameterDef(`modulator${idx}SeqData` as keyof ModulatorsState).default,
       };
     }, {} as ModulatorsState),
     ...Object.entries(parameterDefs).reduce((acc, [key, def]) => {

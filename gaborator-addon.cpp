@@ -180,6 +180,11 @@ public:
                     float magnitude = std::abs(coef);
                     float phase = std::arg(coef);
 
+                    // Accumulate total stored magnitude energy (sum of squares
+                    // over every stored coefficient, all bands and channels) so
+                    // the renderer can derive a single IR-normalization scalar.
+                    magnitudeEnergy += (double)magnitude * (double)magnitude;
+
                     // Unwrap phase: accumulate phase changes
                     float unwrappedPhase = phase;
                     if (tInBand > 0)
@@ -229,6 +234,7 @@ public:
         resultJs.Set("numChannels", Napi::Number::New(env, channels));
         resultJs.Set("numBands", Napi::Number::New(env, numBands));
         resultJs.Set("sampleRate", Napi::Number::New(env, sampleRate));
+        resultJs.Set("magnitudeEnergy", Napi::Number::New(env, magnitudeEnergy));
 
         Napi::Uint32Array bandOffsetsJs = Napi::Uint32Array::New(env, bandOffsets.size());
         memcpy(bandOffsetsJs.Data(), bandOffsets.data(), bandOffsets.size() * sizeof(uint32_t));
@@ -276,6 +282,7 @@ private:
     std::vector<int32_t> bandStepLog2s;
     std::vector<uint32_t> bandLengths;
     std::vector<float> bandFreqsHz;
+    double magnitudeEnergy = 0.0;
 };
 
 Napi::Value AnalyzeAsync(const Napi::CallbackInfo &info)

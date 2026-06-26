@@ -12,6 +12,7 @@ export interface GaboratorAnalysisResult {
   bandOffsets: Uint32Array;
   bandStepLog2s: Int32Array;
   bandLengths: Uint32Array;
+  magnitudeEnergy: number;
 }
 
 export type AnalysisParams = {
