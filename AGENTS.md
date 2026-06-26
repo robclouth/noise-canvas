@@ -3,6 +3,7 @@
 - When creating tests, you can't just duplicate all of the logic of the code that you're testing in the test. You must use the original code as much as possible.
 - Never use "any" type.
 - Use "npx node-gyp rebuild" to rebuild the gaborator addon after changing the C++ code.
+- Commit messages follow gitmoji: `<emoji> (scope): <imperative description>`. Use the unicode emoji (e.g. ✨), not the `:shortcode:`, and put the scope in round brackets. Common emojis: ✨ feature, 🐛 fix, ♻️ refactor, ⚡️ performance, 🎨 code structure/format, ✅ tests, 📝 docs.
 
 ## Project Architecture
 
@@ -11,12 +12,14 @@ This is a spectrogram editor built with Electron, React, and Three.js/WebGL. Use
 ### Core Components
 
 **Renderer Process** (`src/renderer/src/`)
+
 - `app.tsx` - Main app component. Single shared `<Canvas>` with `<View.Port />` for all file views.
 - `components/file-view.tsx` - Wrapper for each open file. Contains gesture handling, mouse events, grid snapping. Creates a `<View>` with `<FileRenderer>` inside.
 - `components/file-renderer.tsx` - React component that manages WebGL rendering for a single file. Exposes `FileRendererHandle` interface with methods like `renderStroke()`, `getFBOData()`, `getTextures()`, `ensureInitialized()`.
 - `lib/stroke-renderer.ts` - Core WebGL stroke rendering logic. Extracted from FileRenderer to enable unit testing. Handles FBO ping-pong, effect chains, and brush application.
 
 **State Management** (`src/renderer/src/store/`)
+
 - Uses Zustand. Main store created with slices for different concerns.
 - `files.ts` - File management (open, close, save), source file selection, synthesis
 - `brush.ts` - Brush-related state and actions
@@ -24,6 +27,7 @@ This is a spectrogram editor built with Electron, React, and Three.js/WebGL. Use
 - `types.ts` - TypeScript types for the store
 
 **Parameters** (`src/renderer/src/parameters.ts`)
+
 - Central definition of ALL parameters (brush, effects, modulators, app settings)
 - Each parameter has: kind, name, label, description, default, min/max, unit, etc.
 - `modulatable` flag indicates if a parameter can be modulated
@@ -31,12 +35,14 @@ This is a spectrogram editor built with Electron, React, and Three.js/WebGL. Use
 - `effectType` associates parameters with specific effects
 
 **Effects** (`src/renderer/src/effects/`)
+
 - Each effect (blur, transform, dynamics, overtones, synthesize, evolve, passthrough) has its own file
 - Effects have one or more shader passes (materials)
 - `base-effect.ts` - Base class and shared uniforms
 - Effects are registered in an `EffectsRegistry` and applied in order
 
 **Shaders** (`src/renderer/src/glsl/`)
+
 - `effect-common.glsl` - Shared uniforms and sampling functions for all effects
 - `modulation-common.glsl` - Modulator logic (patterns, sequencer, envelope follower, IMAGE mode)
 - `common.glsl` - Basic constants and utilities
@@ -56,6 +62,7 @@ This is a spectrogram editor built with Electron, React, and Three.js/WebGL. Use
 ### Uniform System
 
 Uniforms are passed to shaders as objects with `.value` property. Key uniform groups:
+
 - `source*` - Source file data (texture, metadata, dimensions)
 - `dest*` - Destination file data
 - `brush*` - Brush position, size, intensity
@@ -67,6 +74,7 @@ Uniforms are passed to shaders as objects with `.value` property. Key uniform gr
 ### Modulator System
 
 3 modulators, each with:
+
 - Mode: Off, Pattern, Envelope Follower, Sequencer
 - Pattern shapes: Sine, Triangle, Square, Sawtooth, Noise, Perlin, IMAGE (uses texture)
 - Parameters defined in `parameters.ts` as `modulator${idx}*`
