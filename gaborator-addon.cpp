@@ -32,11 +32,15 @@ public:
         : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), channels(channels), sampleRate(sampleRate)
     {
         size_t length = planarInput.Get(0u).As<Napi::Float32Array>().ElementLength();
-        audioChannels.resize(channels);
+        // Reference the channel buffers and read them by pointer on the worker
+        // thread rather than copying them into vectors on the main thread.
+        audioRefs.reserve(channels);
+        audioChannels.reserve(channels);
         for (int ch = 0; ch < channels; ++ch)
         {
             Napi::Float32Array channelData = planarInput.Get(static_cast<uint32_t>(ch)).As<Napi::Float32Array>();
-            audioChannels[ch].assign(channelData.Data(), channelData.Data() + length);
+            audioRefs.push_back(Napi::Reference<Napi::Float32Array>::New(channelData, 1));
+            audioChannels.push_back(channelData.Data());
         }
         numFrames = length;
         bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
@@ -161,7 +165,7 @@ public:
         for (int ch = 0; ch < channels; ++ch)
         {
             allCoefs.emplace_back(analyzer);
-            analyzer.analyze(audioChannels[ch].data(), 0, static_cast<int64_t>(numFrames), allCoefs.back());
+            analyzer.analyze(audioChannels[ch], 0, static_cast<int64_t>(numFrames), allCoefs.back());
             gaborator::process(
                 [&](int b, int64_t t, std::complex<float> &coef)
                 {
@@ -264,7 +268,8 @@ public:
 
 private:
     Napi::Promise::Deferred deferred;
-    std::vector<std::vector<float>> audioChannels;
+    std::vector<Napi::Reference<Napi::Float32Array>> audioRefs;
+    std::vector<const float *> audioChannels;
     int channels;
     double sampleRate;
     int bandsPerOctave;
