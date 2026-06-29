@@ -339,7 +339,13 @@ public:
         : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), sampleRate(sampleRate), normalize(normalize),
           requestedStartFrame(startFrame), requestedEndFrame(endFrame), requestedStartBand(startBand), requestedEndBand(endBand)
     {
-        inputData.assign(inputDataJs.Data(), inputDataJs.Data() + inputDataJs.ElementLength());
+        // Hold the packed FBO buffer by reference and read it straight from its
+        // backing store on the worker thread. The reference keeps the JS array
+        // alive across the async boundary; the caller does not mutate it while
+        // synthesis is in flight, so the worker reads it without a copy.
+        inputDataRef = Napi::Reference<Napi::Float32Array>::New(inputDataJs, 1);
+        inputData = inputDataJs.Data();
+        inputDataLen = inputDataJs.ElementLength();
 
         numFrames = analysisObj.Get("numFrames").As<Napi::Number>().Int64Value();
         channels = analysisObj.Get("numChannels").As<Napi::Number>().Int32Value();
@@ -357,14 +363,21 @@ public:
         bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
         fminHz = paramsJs.Get("minFreq").As<Napi::Number>().DoubleValue();
 
-        // Copy existing audio if provided (for partial synthesis with crossfade)
+        // Reference the existing audio channels (for partial synthesis with
+        // crossfade) and read them by pointer on the worker thread, same as the
+        // packed buffer.
         if (existingAudioJs.Length() > 0)
         {
-            existingAudio.resize(existingAudioJs.Length());
-            for (uint32_t i = 0; i < existingAudioJs.Length(); i++)
+            uint32_t len = existingAudioJs.Length();
+            existingAudio.reserve(len);
+            existingAudioLens.reserve(len);
+            existingAudioRefs.reserve(len);
+            for (uint32_t i = 0; i < len; i++)
             {
                 Napi::Float32Array channelJs = existingAudioJs.Get(i).As<Napi::Float32Array>();
-                existingAudio[i].assign(channelJs.Data(), channelJs.Data() + channelJs.ElementLength());
+                existingAudioRefs.push_back(Napi::Reference<Napi::Float32Array>::New(channelJs, 1));
+                existingAudio.push_back(channelJs.Data());
+                existingAudioLens.push_back(channelJs.ElementLength());
             }
         }
     }
@@ -485,7 +498,7 @@ public:
                     size_t readOffset = base_offset * floatsPerPixel;
 
                     size_t maxReadIndex = readOffset + ch * 2 + 1;
-                    if (maxReadIndex >= inputData.size())
+                    if (maxReadIndex >= inputDataLen)
                     {
                         coef = {0.0f, 0.0f};
                         return;
@@ -518,7 +531,7 @@ public:
             for (int ch = 0; ch < channels; ++ch)
             {
                 // Start with copy of existing audio
-                audioChannels[ch] = existingAudio[ch];
+                audioChannels[ch].assign(existingAudio[ch], existingAudio[ch] + existingAudioLens[ch]);
 
                 // Apply crossfade at boundaries. Skip the fade at absolute file
                 // boundaries — there is no seam with surrounding audio there, so
@@ -612,8 +625,11 @@ public:
 private:
     Napi::Promise::Deferred deferred;
 
-    // Input data
-    std::vector<float> inputData;
+    // Input data, referenced in place rather than copied. The References keep the
+    // JS backing buffers alive while Execute() reads them off the main thread.
+    Napi::Reference<Napi::Float32Array> inputDataRef;
+    const float *inputData = nullptr;
+    size_t inputDataLen = 0;
     double sampleRate;
     bool normalize;
     size_t numFrames;
@@ -628,7 +644,9 @@ private:
     int64_t requestedEndFrame;
     int64_t requestedStartBand;
     int64_t requestedEndBand;
-    std::vector<std::vector<float>> existingAudio;
+    std::vector<Napi::Reference<Napi::Float32Array>> existingAudioRefs;
+    std::vector<const float *> existingAudio;
+    std::vector<size_t> existingAudioLens;
 
     // Results
     std::vector<std::vector<float>> audioChannels;

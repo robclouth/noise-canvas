@@ -1295,7 +1295,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       let synthesisResult;
       const cppSynthStart = performance.now();
       try {
-        synthesisResult = await host.analysis.synthesize(
+        // The native call references the packed buffer and existing audio in
+        // place rather than copying them, so the synchronous part before the
+        // promise is returned is near-zero; the FFT runs off-thread. Timing the
+        // gap before the await isolates any remaining main-thread marshaling.
+        const synthPromise = host.analysis.synthesize(
           processedDataArray,
           payload.analysisMetadata,
           originalAnalysis.sampleRate,
@@ -1307,6 +1311,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           startBand,
           endBand,
         );
+        console.log(
+          `[timing] synthesize marshaling (MAIN THREAD, sync) ${(performance.now() - cppSynthStart).toFixed(1)}ms`,
+        );
+        synthesisResult = await synthPromise;
       } catch (synthError) {
         console.error("[timing] Synthesis failed:", synthError);
         throw synthError;
