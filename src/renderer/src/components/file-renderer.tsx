@@ -1,7 +1,7 @@
 import { createStepStateView, useStore } from "@/store";
 import { useTransientStore } from "@renderer/store/transient";
 import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { defaultValues } from "@renderer/effects/base-effect";
 import { getOpenFileByPath, openFiles } from "@renderer/store/files";
 import { State } from "@renderer/store/types";
@@ -106,6 +106,13 @@ const FileRendererInner = memo(
     // call reloadTextures again → infinite loop).
     const historyHookedRef = useRef(false);
 
+    // Populate invalidateRef from the R3F store, which is available on mount
+    // before the first useFrame runs.
+    const invalidate = useThree((s) => s.invalidate);
+    useEffect(() => {
+      invalidateRef.current = invalidate;
+    }, [invalidate]);
+
     const modulatorScaleLut = useModulatorScaleLut(fileId);
 
     // Load image textures for all modulators
@@ -123,6 +130,9 @@ const FileRendererInner = memo(
     const displayMode = useRef<"preview" | "committed">("committed");
     const applyStroke = useRef(false);
     const clearingPreview = useRef(false);
+    // Whether the display material has been populated at least once for the
+    // current StrokeRenderer. Reset whenever the StrokeRenderer is recreated.
+    const hasDrawnDisplayRef = useRef(false);
 
     // Subscriptions to global state - consolidated into fewer subscriptions for efficiency
     useEffect(() => {
@@ -402,9 +412,6 @@ const FileRendererInner = memo(
       // Capture refs for use outside of useFrame
       glRef.current = gl;
       cameraRef.current = camera;
-      if (!invalidateRef.current) {
-        invalidateRef.current = invalidate;
-      }
 
       if (!spectrogramData || !packedDataTex || !inverseMapTex || !metadataTex || !originalPackedDataTex) return;
 
@@ -472,6 +479,7 @@ const FileRendererInner = memo(
           modulator3Texture,
         };
         strokeRendererRef.current = new StrokeRenderer(gl, spectrogramData, textures, fileId, effects);
+        hasDrawnDisplayRef.current = false;
       }
 
       const strokeRenderer = strokeRendererRef.current;
@@ -518,13 +526,15 @@ const FileRendererInner = memo(
         })();
       }
 
-      // After initialization, only update if this file is active, source, or cursor is present
+      // After the display has been drawn once, only update if this file is
+      // active, source, or has a cursor present.
       if (
         !isActiveFile &&
         !isSourceFile &&
         !(cursorVisible && cursorPosition) &&
         !clearingPreview.current &&
-        strokeRenderer.getIsInitialized()
+        strokeRenderer.getIsInitialized() &&
+        hasDrawnDisplayRef.current
       ) {
         return;
       }
@@ -835,6 +845,8 @@ const FileRendererInner = memo(
         displayMaterial.uniforms.sourceOffsetX.value = sourceOffsetUv.x;
         displayMaterial.uniforms.sourceOffsetY.value = sourceOffsetUv.y;
       }
+
+      hasDrawnDisplayRef.current = true;
 
       // Flag-gated: optionally force a GPU sync so the recorded frame time
       // reflects real per-frame cost (CPU dispatch + GPU work) for this file's
