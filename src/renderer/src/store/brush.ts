@@ -19,6 +19,30 @@ export type { StrokePosition } from "./transient";
 import type { StrokePosition } from "./transient";
 export type StrokeTimeRange = { min: number; max: number };
 
+// Serializes stroke commits per file. A commit (history node write + synthesis
+// + audio cache) must finish before the next begins, or two commits race the
+// HistoryManager's currentPacked/currentId — forking the history tree and
+// mismatching delta bases — and the file's audio buffer. Painting itself is
+// never blocked; only the post-stroke commit tail is queued behind the prior one.
+const strokeCommitChains = new Map<string, Promise<unknown>>();
+
+function serializeStrokeCommit<T>(fileId: string, task: () => Promise<T>): Promise<T> {
+  const prev = strokeCommitChains.get(fileId) ?? Promise.resolve();
+  const result = prev.then(task);
+  // The chain tail must never reject, or one failed commit would wedge the
+  // queue. Drop the entry once it drains so the map doesn't grow unbounded.
+  const tail = result.then(
+    () => {
+      if (strokeCommitChains.get(fileId) === tail) strokeCommitChains.delete(fileId);
+    },
+    () => {
+      if (strokeCommitChains.get(fileId) === tail) strokeCommitChains.delete(fileId);
+    },
+  );
+  strokeCommitChains.set(fileId, tail);
+  return result;
+}
+
 export interface BrushState {
   brushIntensity: number;
   brushIterations: number;
@@ -211,25 +235,33 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         autoPlaybackParams = { startTimeSeconds: autoPlayStart, endTimeSeconds: autoPlayEnd };
       }
 
-      // Get FBO data for synthesis and history
-      const data = await file.rendererRef.current.getFBOData();
+      // Capture the brush footprint and issue the FBO readback before queueing
+      // the commit. getFBOData() issues the GPU read synchronously, so the
+      // snapshot reflects this stroke's end even though the commit body runs
+      // serialized behind any earlier stroke.
+      const renderer = file.rendererRef.current;
+      const dirtyRanges = renderer.getDirtyPixelRanges();
+      const dataPromise = renderer.getFBOData();
+      const spec = file.spectrogramData;
+      const brushName = state.brushes[state.activeBrushIndex]?.name ?? "Stroke";
+      const dimensions = {
+        textureWidth: spec.textureWidth,
+        textureHeight: spec.textureHeight,
+        numFrames: spec.numFrames,
+        numBands: spec.numBands,
+        numChannels: spec.numChannels,
+        sampleRate: spec.sampleRate,
+        minFreq: spec.minFreq,
+        bandsPerOctave: spec.bandsPerOctave,
+      };
 
-      if (data) {
+      await serializeStrokeCommit(activeFileId, async () => {
+        const data = await dataPromise;
+        if (!data) return;
+
         const historyManager = getHistoryManager(activeFileId);
-        const spec = file.spectrogramData;
-        const brushName = state.brushes[state.activeBrushIndex]?.name ?? "Stroke";
-        const dimensions = {
-          textureWidth: spec.textureWidth,
-          textureHeight: spec.textureHeight,
-          numFrames: spec.numFrames,
-          numBands: spec.numBands,
-          numChannels: spec.numChannels,
-          sampleRate: spec.sampleRate,
-          minFreq: spec.minFreq,
-          bandsPerOctave: spec.bandsPerOctave,
-        };
         // Run history node write and synthesis in parallel.
-        const nodeIdPromise = historyManager.addStroke({ data, label: brushName, dimensions });
+        const nodeIdPromise = historyManager.addStroke({ data, label: brushName, dimensions, dirtyRanges });
 
         await synthesizeFile(activeFileId, autoPlaybackParams, data);
 
@@ -238,7 +270,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         if (nodeId && updated?.audioBuffer) {
           historyManager.setStateAudio(nodeId, updated.audioBuffer, updated.audioPeak ?? 1);
         }
-      }
+      });
     },
 
     // Helper: move brush and preview

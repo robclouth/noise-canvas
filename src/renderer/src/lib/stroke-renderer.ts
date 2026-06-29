@@ -179,6 +179,16 @@ export class StrokeRenderer {
   // Dirty region tracking for partial synthesis
   private dirtyRegion: { startX: number; endX: number; startY: number; endY: number } | null = null;
 
+  // UV bounds of the committed dabs of the current stroke, accumulated across
+  // its dabs and reset per stroke in beginStroke(). getDirtyPixelRanges() turns
+  // these into the packed-pixel footprint the history delta stores. Kept
+  // separate from dirtyRegion (which synthesis clears) so a mid-stroke clear
+  // can't drop earlier dabs.
+  private committedTimeMin = Infinity;
+  private committedTimeMax = -Infinity;
+  private committedPitchMin = Infinity;
+  private committedPitchMax = -Infinity;
+
   constructor(
     gl: WebGLRenderer,
     spectrogramData: SpectrogramData,
@@ -1081,6 +1091,14 @@ export class StrokeRenderer {
         };
       }
 
+      // A dab changes pixels only within its brush footprint, so accumulate the
+      // footprint for the history delta regardless of whether the GPU scissored
+      // the render (a full-band dab still has a bounded time window).
+      this.committedTimeMin = Math.min(this.committedTimeMin, strokeStartX);
+      this.committedTimeMax = Math.max(this.committedTimeMax, strokeEndX);
+      this.committedPitchMin = Math.min(this.committedPitchMin, strokeStartY);
+      this.committedPitchMax = Math.max(this.committedPitchMax, strokeEndY);
+
       this.fboDataDirty = true;
     }
   }
@@ -1313,7 +1331,41 @@ export class StrokeRenderer {
    * Begin a new stroke (snapshot current state).
    */
   beginStroke(): void {
-    // Logic moved to initialization and endStroke
+    // Reset the committed footprint for the new stroke. Tied to the stroke
+    // boundary (not dirtyRegion's clear) so every dab of this stroke folds into
+    // one footprint that history reads at commit.
+    this.committedTimeMin = Infinity;
+    this.committedTimeMax = -Infinity;
+    this.committedPitchMin = Infinity;
+    this.committedPitchMax = -Infinity;
+  }
+
+  /**
+   * Packed-pixel ranges the current stroke's committed footprint covers, as a
+   * flat [pixelStart, pixelCount, ...] list — one range per band, mapping the
+   * footprint's time window into each band's packed segment. Returns null when
+   * nothing was committed, so history stores a full snapshot.
+   */
+  getDirtyPixelRanges(): Uint32Array | null {
+    if (this.committedTimeMax <= this.committedTimeMin) return null;
+
+    const { numBands, metadata } = this.spectrogramData;
+    const pitchMargin = 4;
+    const highBand = Math.min(numBands - 1, Math.floor((1 - this.committedPitchMin) * numBands) + pitchMargin);
+    const lowBand = Math.max(0, Math.floor((1 - this.committedPitchMax) * numBands) - pitchMargin);
+    const t0 = Math.max(0, this.committedTimeMin);
+    const t1 = Math.min(1, this.committedTimeMax);
+    const timeMargin = 4;
+
+    const ranges: number[] = [];
+    for (let b = lowBand; b <= highBand; b++) {
+      const offset = Math.round(metadata[b * 4]);
+      const length = Math.round(metadata[b * 4 + 1]);
+      const start = Math.max(offset, offset + Math.floor(t0 * length) - timeMargin);
+      const end = Math.min(offset + length, offset + Math.ceil(t1 * length) + timeMargin);
+      if (end > start) ranges.push(start, end - start);
+    }
+    return ranges.length ? new Uint32Array(ranges) : null;
   }
 
   /**

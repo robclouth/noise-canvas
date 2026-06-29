@@ -30,7 +30,15 @@ vi.mock("@renderer/store/files", () => ({ openFiles: fakeOpenFiles }));
 // Silence the renderer→main menu-state IPC the manager fires on every change.
 vi.mock("../ipc", () => ({ ipcSend: vi.fn() }));
 
-import { applyDelta, computeDeltaRect, getHistoryManager, PackedStateCache } from "../history-manager";
+import {
+  applyFootprintDelta,
+  clearAllHistoryManagers,
+  decodeFootprintDelta,
+  encodeFootprintDelta,
+  footprintChanged,
+  getHistoryManager,
+  PackedStateCache,
+} from "../history-manager";
 import type { SpectrogramData } from "../../store/types";
 
 function makeRGBA(width: number, height: number, fill: number): Float32Array {
@@ -40,163 +48,82 @@ function makeRGBA(width: number, height: number, fill: number): Float32Array {
 }
 
 describe("history-manager codec", () => {
-  describe("computeDeltaRect", () => {
-    it("returns null when nothing changed", () => {
-      const w = 8,
-        h = 4;
-      const before = makeRGBA(w, h, 0.25);
+  // Flat [start, count, ...] range list from [start, count] pairs.
+  const ranges = (...rs: Array<[number, number]>): Uint32Array => new Uint32Array(rs.flat());
+
+  describe("footprintChanged", () => {
+    it("is false when the footprint pixels are identical", () => {
+      const before = makeRGBA(8, 4, 0.25);
       const after = new Float32Array(before);
-      expect(computeDeltaRect(before, after, w, h)).toBeNull();
+      expect(footprintChanged(before, after, ranges([0, 32]))).toBe(false);
     });
 
-    it("picks a 1×1 rect for a single-pixel change", () => {
-      const w = 8,
-        h = 4;
-      const before = makeRGBA(w, h, 0);
+    it("is true when any channel inside the footprint differs", () => {
+      const before = makeRGBA(8, 4, 0);
       const after = new Float32Array(before);
-      const x = 5,
-        y = 2;
-      const i = (y * w + x) * 4;
-      after[i + 0] = 1;
-      after[i + 1] = 2;
-      after[i + 2] = 3;
-      after[i + 3] = 4;
-      const diff = computeDeltaRect(before, after, w, h);
-      expect(diff).not.toBeNull();
-      expect(diff!.rect).toEqual({ x, y, w: 1, h: 1 });
-      expect(Array.from(diff!.patch)).toEqual([1, 2, 3, 4]);
+      after[5 * 4 + 3] = 9; // alpha of pixel 5
+      expect(footprintChanged(before, after, ranges([4, 4]))).toBe(true); // pixels 4..7
     });
 
-    it("bounds multiple changed pixels with a tight rect", () => {
-      const w = 8,
-        h = 6;
-      const before = makeRGBA(w, h, 0);
+    it("ignores changes outside the footprint ranges", () => {
+      const before = makeRGBA(8, 4, 0);
       const after = new Float32Array(before);
-      const write = (x: number, y: number, v: number) => {
-        const i = (y * w + x) * 4;
-        after[i] = v;
-        after[i + 1] = v;
-        after[i + 2] = v;
-        after[i + 3] = v;
-      };
-      write(2, 1, 1);
-      write(4, 3, 2);
-      write(3, 2, 3);
-      const diff = computeDeltaRect(before, after, w, h)!;
-      expect(diff.rect).toEqual({ x: 2, y: 1, w: 3, h: 3 });
-      // Patch value at local (0,0) maps to global (2,1) — value 1.
-      expect(diff.patch[0]).toBe(1);
-      // Patch value at local (2,2) maps to global (4,3) — value 2.
-      const localI = (2 * diff.rect.w + 2) * 4;
-      expect(diff.patch[localI]).toBe(2);
-    });
-
-    it("detects change in any channel", () => {
-      const w = 4,
-        h = 4;
-      const before = makeRGBA(w, h, 1);
-      const after = new Float32Array(before);
-      after[(1 * w + 1) * 4 + 3] = 99; // alpha only
-      const diff = computeDeltaRect(before, after, w, h)!;
-      expect(diff.rect).toEqual({ x: 1, y: 1, w: 1, h: 1 });
-      // Patch stores `after - before`: RGB are unchanged (diff 0), alpha jumped
-      // from 1 → 99, so the recorded diff is 98.
-      expect(diff.patch[0]).toBe(0);
-      expect(diff.patch[1]).toBe(0);
-      expect(diff.patch[2]).toBe(0);
-      expect(diff.patch[3]).toBe(98);
-    });
-
-    it("records zero for untouched pixels inside the bounding box", () => {
-      // Non-zero base so patch values can be distinguished from 'after'.
-      const w = 8,
-        h = 4;
-      const before = makeRGBA(w, h, 0.5);
-      const after = new Float32Array(before);
-      // Only the two corners of the bbox actually change.
-      const writePixel = (x: number, y: number, v: number) => {
-        const i = (y * w + x) * 4;
-        after[i] = v;
-        after[i + 1] = v;
-        after[i + 2] = v;
-        after[i + 3] = v;
-      };
-      writePixel(2, 1, 0.9);
-      writePixel(4, 2, 0.1);
-      const diff = computeDeltaRect(before, after, w, h)!;
-      expect(diff.rect).toEqual({ x: 2, y: 1, w: 3, h: 2 });
-      // Middle pixel of the bbox at local (1, 0) → global (3, 1) is untouched.
-      // Because we store diffs, its patch entry must be exactly zero.
-      const localI = (0 * diff.rect.w + 1) * 4;
-      expect(diff.patch[localI]).toBe(0);
-      expect(diff.patch[localI + 1]).toBe(0);
-      expect(diff.patch[localI + 2]).toBe(0);
-      expect(diff.patch[localI + 3]).toBe(0);
+      after[20 * 4] = 1; // pixel 20, outside the range below
+      expect(footprintChanged(before, after, ranges([0, 8]))).toBe(false);
     });
   });
 
-  describe("applyDelta", () => {
-    it("reproduces the after buffer from before + delta", () => {
-      const w = 16,
-        h = 8;
-      const before = makeRGBA(w, h, 0);
-      const after = new Float32Array(before);
-      // Scatter some changes in a region.
-      for (let y = 2; y < 6; y++) {
-        for (let x = 3; x < 11; x++) {
-          const i = (y * w + x) * 4;
-          after[i] = x + y;
-          after[i + 1] = x * 2;
-          after[i + 2] = y * 3;
-          after[i + 3] = 1;
-        }
-      }
-      const diff = computeDeltaRect(before, after, w, h)!;
-      const reconstructed = applyDelta(before, diff.rect, diff.patch, w);
-      expect(Array.from(reconstructed)).toEqual(Array.from(after));
-    });
-
-    it("does not touch pixels outside the rect", () => {
-      const w = 8,
-        h = 4;
-      const before = makeRGBA(w, h, 0.5);
-      const after = new Float32Array(before);
-      const i = (1 * w + 1) * 4;
-      after[i] = 7;
-      const diff = computeDeltaRect(before, after, w, h)!;
-      const reconstructed = applyDelta(before, diff.rect, diff.patch, w);
-      // Check an arbitrary untouched pixel retained its value.
-      const untouched = (3 * w + 6) * 4;
-      expect(reconstructed[untouched]).toBe(0.5);
-    });
-
-    it("round-trips correctly when base values are non-zero inside the bbox", () => {
-      // This is the scenario diff-based deltas are designed to handle: a base
-      // with non-zero values, only a few pixels inside the bbox actually
-      // change. Reconstruction must equal `after` exactly.
+  describe("encodeFootprintDelta / applyFootprintDelta", () => {
+    it("round-trips after over the footprint", () => {
       const w = 10,
         h = 6;
       const before = new Float32Array(w * h * 4);
-      for (let p = 0; p < w * h; p++) {
-        before[p * 4] = (p % 7) * 0.125; // R
-        before[p * 4 + 1] = (p % 5) * 0.25; // G
-        before[p * 4 + 2] = ((p * 3) % 11) * 0.0625; // B
-        before[p * 4 + 3] = 1;
-      }
+      for (let i = 0; i < before.length; i++) before[i] = (i % 13) * 0.1;
       const after = new Float32Array(before);
-      // Two scattered changes inside a 4×3 bbox.
-      const writePixel = (x: number, y: number, r: number) => {
-        const i = (y * w + x) * 4;
-        after[i] = r;
-        after[i + 1] = r + 0.1;
-        after[i + 2] = r + 0.2;
-        after[i + 3] = r + 0.3;
-      };
-      writePixel(3, 2, 0.9);
-      writePixel(5, 4, 0.4);
-      const diff = computeDeltaRect(before, after, w, h)!;
-      const reconstructed = applyDelta(before, diff.rect, diff.patch, w);
-      expect(Array.from(reconstructed)).toEqual(Array.from(after));
+      for (let p = 12; p < 18; p++) for (let c = 0; c < 4; c++) after[p * 4 + c] = p + c;
+      for (let p = 40; p < 45; p++) for (let c = 0; c < 4; c++) after[p * 4 + c] = p * 2 + c;
+      const rs = ranges([12, 6], [40, 5]);
+      const { ranges: dr, patch } = decodeFootprintDelta(encodeFootprintDelta(after, rs));
+      const out = applyFootprintDelta(before, dr, patch);
+      expect(Array.from(out)).toEqual(Array.from(after));
+    });
+
+    it("leaves pixels outside the ranges untouched", () => {
+      const before = makeRGBA(8, 4, 0.5);
+      const after = new Float32Array(before);
+      after[2 * 4] = 7;
+      const rs = ranges([2, 1]);
+      const { ranges: dr, patch } = decodeFootprintDelta(encodeFootprintDelta(after, rs));
+      const out = applyFootprintDelta(before, dr, patch);
+      expect(out[2 * 4]).toBe(7);
+      expect(out[20 * 4]).toBe(0.5);
+    });
+
+    it("overwrites with exact values, lossless across repeated round-trips", () => {
+      // Values like p/97 aren't exactly representable; an additive delta would
+      // drift, an overwrite delta must not.
+      const before = new Float32Array(64 * 4);
+      for (let i = 0; i < before.length; i++) before[i] = (i % 97) / 97;
+      const after = new Float32Array(before);
+      for (let p = 10; p < 20; p++) for (let c = 0; c < 4; c++) after[p * 4 + c] = ((p * 7 + c) % 91) / 91;
+      const rs = ranges([10, 10]);
+      const { ranges: dr, patch } = decodeFootprintDelta(encodeFootprintDelta(after, rs));
+      let state: Float32Array = before;
+      for (let i = 0; i < 5; i++) state = applyFootprintDelta(state, dr, patch);
+      expect(Array.from(state)).toEqual(Array.from(after));
+    });
+  });
+
+  describe("encodeFootprintDelta / decodeFootprintDelta", () => {
+    it("round-trips ranges and the footprint values through the binary layout", () => {
+      const rs = ranges([3, 2], [40, 5], [100, 1]);
+      const before = new Float32Array(200 * 4);
+      const after = new Float32Array(before);
+      for (let r = 0; r < rs.length; r += 2)
+        for (let p = rs[r]; p < rs[r] + rs[r + 1]; p++) for (let c = 0; c < 4; c++) after[p * 4 + c] = p * 4 + c + 1;
+      const { ranges: outRanges, patch } = decodeFootprintDelta(encodeFootprintDelta(after, rs));
+      expect(Array.from(outRanges)).toEqual(Array.from(rs));
+      expect(Array.from(applyFootprintDelta(before, outRanges, patch))).toEqual(Array.from(after));
     });
   });
 });
@@ -376,6 +303,42 @@ describe("HistoryManager undo/redo round-trip", () => {
     }
 
     mgr.dispose();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it("reconstructs a footprint-delta node from disk losslessly", async () => {
+    installManagerEnv();
+    const w = 8,
+      h = 4;
+    const root = lossyFill(w, h, 0);
+    const a = new Float32Array(root);
+    const rs = new Uint32Array([5, 5]); // pixels 5..9
+    for (let p = 5; p < 10; p++) for (let c = 0; c < 4; c++) a[p * 4 + c] = ((p * 3 + c) % 89) / 89;
+    const dimensions = {
+      textureWidth: w,
+      textureHeight: h,
+      numFrames: w,
+      numBands: h,
+      numChannels: 1,
+      sampleRate: 44100,
+      minFreq: 20,
+      bandsPerOctave: 12,
+    };
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f2");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    const nodeId = await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: rs });
+    expect(mgr.getNode(nodeId)?.storage).toBe("delta");
+
+    // Drop in-memory state so reconstruct reads the delta back from disk.
+    clearAllHistoryManagers();
+    const fresh = getHistoryManager("f2");
+    await fresh.initialize();
+    const { packedData } = await fresh.reconstruct(nodeId);
+    expect(Array.from(packedData)).toEqual(Array.from(a));
+
+    clearAllHistoryManagers();
     delete fakeOpenFiles["f1"];
   });
 });

@@ -14,13 +14,6 @@ const PACKED_STATE_CACHE_BYTES = 256 * 1024 * 1024;
 
 export type HistoryNodeKind = "root" | "stroke" | "resize" | "reanalyze" | "checkpoint";
 
-export interface Rect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
 export interface HistoryDimensions {
   textureWidth: number;
   textureHeight: number;
@@ -44,7 +37,6 @@ export interface HistoryNode {
   label: string;
   kind: HistoryNodeKind;
   storage: "delta" | "packed" | "full";
-  dirtyRect?: Rect;
   dimensions: HistoryDimensions;
   synthesisMetadata?: {
     bandOffsets: number[];
@@ -57,7 +49,7 @@ export interface HistoryNode {
   favorited?: boolean;
 }
 
-const HISTORY_MANIFEST_VERSION = 2;
+const HISTORY_MANIFEST_VERSION = 3;
 
 interface HistoryManifest {
   version: typeof HISTORY_MANIFEST_VERSION;
@@ -73,79 +65,74 @@ interface HistoryManifest {
 // --- Pure codec ---
 
 /**
- * Compute a dirty-rectangle delta patch as `after - before` for each pixel in
- * the bounding box of changed pixels. Unchanged pixels inside the box become
- * exact zeros, which zstd collapses into near-nothing — dramatically smaller
- * on disk than storing absolute after-values (which carry the full base value
- * even in untouched regions of the bbox).
+ * Footprint delta codec. A stroke changes only the pixels under the brush, given
+ * as packed-pixel ranges — one contiguous range per frequency band, because the
+ * packed texture stores each band's time-series at its own offset, so a single
+ * time-window spans many disjoint ranges. The delta holds the after-values for
+ * those pixels; reconstruction overwrites the base with them, which is exact (no
+ * additive drift — see PackedStateCache).
  *
- * Reconstruct with applyDelta(base, rect, patch, tW) → element-wise add.
+ * `ranges` is a flat [pixelStart, pixelCount, ...] list; `patch` holds the RGBA
+ * values for those pixels concatenated in range order.
  */
-export function computeDeltaRect(
-  before: Float32Array,
-  after: Float32Array,
-  textureWidth: number,
-  textureHeight: number,
-): { rect: Rect; patch: Float32Array } | null {
-  let minX = textureWidth;
-  let minY = textureHeight;
-  let maxX = -1;
-  let maxY = -1;
 
-  for (let y = 0; y < textureHeight; y++) {
-    const rowBase = y * textureWidth * 4;
-    for (let x = 0; x < textureWidth; x++) {
-      const i = rowBase + x * 4;
-      if (
-        before[i] !== after[i] ||
-        before[i + 1] !== after[i + 1] ||
-        before[i + 2] !== after[i + 2] ||
-        before[i + 3] !== after[i + 3]
-      ) {
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-      }
+// True if any pixel inside the footprint ranges differs between before/after.
+export function footprintChanged(before: Float32Array, after: Float32Array, ranges: Uint32Array): boolean {
+  for (let r = 0; r < ranges.length; r += 2) {
+    const start = ranges[r] * 4;
+    const end = start + ranges[r + 1] * 4;
+    for (let i = start; i < end; i++) {
+      if (before[i] !== after[i]) return true;
     }
   }
-
-  if (maxX < 0) return null;
-
-  const w = maxX - minX + 1;
-  const h = maxY - minY + 1;
-  const patch = new Float32Array(w * h * 4);
-  for (let y = 0; y < h; y++) {
-    const srcRow = (minY + y) * textureWidth * 4;
-    const dstRow = y * w * 4;
-    for (let x = 0; x < w; x++) {
-      const srcI = srcRow + (minX + x) * 4;
-      const dstI = dstRow + x * 4;
-      patch[dstI] = after[srcI] - before[srcI];
-      patch[dstI + 1] = after[srcI + 1] - before[srcI + 1];
-      patch[dstI + 2] = after[srcI + 2] - before[srcI + 2];
-      patch[dstI + 3] = after[srcI + 3] - before[srcI + 3];
-    }
-  }
-
-  return { rect: { x: minX, y: minY, w, h }, patch };
+  return false;
 }
 
-export function applyDelta(base: Float32Array, rect: Rect, patch: Float32Array, textureWidth: number): Float32Array {
+// Reconstruct `after` from `base` by overwriting the footprint ranges with the
+// stored values. Lossless: stored values are exact, so repeated round-trips
+// never drift.
+export function applyFootprintDelta(base: Float32Array, ranges: Uint32Array, patch: Float32Array): Float32Array {
   const out = new Float32Array(base);
-  for (let y = 0; y < rect.h; y++) {
-    const dstRow = (rect.y + y) * textureWidth * 4;
-    const srcRow = y * rect.w * 4;
-    for (let x = 0; x < rect.w; x++) {
-      const dstI = dstRow + (rect.x + x) * 4;
-      const srcI = srcRow + x * 4;
-      out[dstI] += patch[srcI];
-      out[dstI + 1] += patch[srcI + 1];
-      out[dstI + 2] += patch[srcI + 2];
-      out[dstI + 3] += patch[srcI + 3];
-    }
+  let p = 0;
+  for (let r = 0; r < ranges.length; r += 2) {
+    const start = ranges[r] * 4;
+    const count = ranges[r + 1] * 4;
+    out.set(patch.subarray(p, p + count), start);
+    p += count;
   }
   return out;
+}
+
+// Build the on-disk delta directly from the source FBO buffer. Layout:
+// [u32 numRanges][u32 ranges...][f32 patch], packed into one buffer so a single
+// zstd blob carries both the ranges and their values. The footprint after-values
+// are copied straight from `after` into the patch region in a single pass.
+export function encodeFootprintDelta(after: Float32Array, ranges: Uint32Array): Uint8Array {
+  let total = 0;
+  for (let r = 1; r < ranges.length; r += 2) total += ranges[r] * 4;
+  const headerBytes = 4 + ranges.byteLength;
+  const buf = new ArrayBuffer(headerBytes + total * 4);
+  new DataView(buf).setUint32(0, ranges.length / 2, true);
+  new Uint32Array(buf, 4, ranges.length).set(ranges);
+  const patch = new Float32Array(buf, headerBytes, total);
+  let p = 0;
+  for (let r = 0; r < ranges.length; r += 2) {
+    const start = ranges[r] * 4;
+    const count = ranges[r + 1] * 4;
+    patch.set(after.subarray(start, start + count), p);
+    p += count;
+  }
+  return new Uint8Array(buf);
+}
+
+export function decodeFootprintDelta(bytes: Uint8Array): { ranges: Uint32Array; patch: Float32Array } {
+  // Copy into a fresh 4-byte-aligned buffer so the typed-array views are valid
+  // regardless of the decompressed buffer's byte offset.
+  const buf = bytes.slice().buffer;
+  const numRanges = new DataView(buf).getUint32(0, true);
+  const ranges = new Uint32Array(buf, 4, numRanges * 2);
+  const patch = new Float32Array(buf, 4 + numRanges * 8);
+  return { ranges, patch };
 }
 
 /**
@@ -251,6 +238,17 @@ async function readFloat32Compressed(filePath: string): Promise<Float32Array> {
   return new Float32Array(out.buffer, out.byteOffset, out.byteLength / 4);
 }
 
+async function writeBytesCompressed(filePath: string, bytes: Uint8Array): Promise<void> {
+  const compressed = await zstdCompress(bytes);
+  await host.fs.writeFile(filePath, Buffer.from(compressed));
+}
+
+async function readBytesCompressed(filePath: string): Promise<Uint8Array> {
+  const buf = await host.fs.readFile(filePath);
+  const bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+  return await zstdDecompress(bytes);
+}
+
 function dimensionsFromSpectrogram(s: SpectrogramData): HistoryDimensions {
   return {
     textureWidth: s.textureWidth,
@@ -278,6 +276,10 @@ export interface AddStrokeOpts {
   data: Float32Array;
   label: string;
   dimensions: HistoryDimensions;
+  // Packed-pixel ranges the brush footprint covers, as a flat
+  // [pixelStart, pixelCount, ...] list (one range per band). The delta stores
+  // exactly these pixels. Absent/null stores a full packed snapshot instead.
+  dirtyRanges?: Uint32Array | null;
 }
 
 export class HistoryManager {
@@ -345,8 +347,8 @@ export class HistoryManager {
       const buf = await host.fs.readFile(path, "utf8");
       const parsed = JSON.parse(buf as unknown as string) as { version?: number } & HistoryManifest;
       if (parsed.version !== HISTORY_MANIFEST_VERSION) {
-        // Delta format changed incompatibly in v2 (absolute after-values →
-        // diff values). Old trees would decode wrong, so wipe and start over.
+        // A different manifest version uses an incompatible delta encoding that
+        // would decode wrong, so wipe and start over.
         console.warn(
           `history: tree.json version ${parsed.version} is incompatible with ${HISTORY_MANIFEST_VERSION}, wiping`,
         );
@@ -588,8 +590,9 @@ export class HistoryManager {
   }
 
   /**
-   * Append a stroke as a child of the current node. Stored as a dirty-rect delta if
-   * dimensions still match, otherwise as a raw packed snapshot.
+   * Append a stroke as a child of the current node. Stored as a footprint delta
+   * when dimensions match and the brush footprint is known and covers less than
+   * half the texture, otherwise as a full packed snapshot.
    */
   async addStroke(opts: AddStrokeOpts): Promise<string> {
     await this.initialize();
@@ -602,29 +605,38 @@ export class HistoryManager {
       parent.dimensions.textureWidth === opts.dimensions.textureWidth &&
       parent.dimensions.textureHeight === opts.dimensions.textureHeight;
 
-    let storage: "delta" | "packed";
-    let dirtyRect: Rect | undefined;
+    const base = this.currentPacked;
+    const ranges = opts.dirtyRanges;
+    let footprintPixels = 0;
+    if (ranges) for (let r = 1; r < ranges.length; r += 2) footprintPixels += ranges[r];
+    const texturePixels = opts.dimensions.textureWidth * opts.dimensions.textureHeight;
 
-    if (sameDims && this.currentPacked && this.currentPacked.length === opts.data.length) {
-      const diff = computeDeltaRect(
-        this.currentPacked,
-        opts.data,
-        opts.dimensions.textureWidth,
-        opts.dimensions.textureHeight,
-      );
-      if (!diff) {
-        // No change — skip creating a node.
+    let storage: "delta" | "packed";
+    let deltaBytes: Uint8Array | undefined;
+
+    if (
+      sameDims &&
+      base != null &&
+      base.length === opts.data.length &&
+      ranges != null &&
+      ranges.length > 0 &&
+      footprintPixels < texturePixels * 0.5
+    ) {
+      const deltaStart = performance.now();
+      if (!footprintChanged(base, opts.data, ranges)) {
         return parentId;
       }
-
-      // Insert a checkpoint every CHECKPOINT_INTERVAL strokes on this chain.
       const stepsSinceSnap = this.deltaStepsSinceLastSnap(parentId);
       if (stepsSinceSnap >= CHECKPOINT_INTERVAL) {
         storage = "packed";
       } else {
         storage = "delta";
-        dirtyRect = diff.rect;
+        deltaBytes = encodeFootprintDelta(opts.data, ranges);
       }
+      console.log(
+        `[timing] addStroke: footprint delta ${(performance.now() - deltaStart).toFixed(1)}ms ` +
+          `(${ranges.length / 2} ranges, ${footprintPixels} px)`,
+      );
     } else {
       storage = "packed";
     }
@@ -639,18 +651,11 @@ export class HistoryManager {
       kind: storage === "packed" && !sameDims ? "root" : storage === "packed" ? "checkpoint" : "stroke",
       storage,
       dimensions: opts.dimensions,
-      dirtyRect,
     };
 
     const dir = await this.ensureDir();
-    if (storage === "delta" && dirtyRect) {
-      const diff = computeDeltaRect(
-        this.currentPacked!,
-        opts.data,
-        opts.dimensions.textureWidth,
-        opts.dimensions.textureHeight,
-      )!;
-      await writeFloat32Compressed(this.deltaPath(dir, id), diff.patch);
+    if (storage === "delta" && deltaBytes) {
+      await writeBytesCompressed(this.deltaPath(dir, id), deltaBytes);
     } else {
       await writeFloat32Compressed(this.packedPath(dir, id), opts.data);
     }
@@ -658,7 +663,9 @@ export class HistoryManager {
     this.linkChild(parentId, id);
     this.manifest.nodes[id] = node;
     this.manifest.currentId = id;
-    this.currentPacked = new Float32Array(opts.data);
+    // opts.data is the fresh readback buffer and is never mutated, so it can be
+    // retained directly rather than copied.
+    this.currentPacked = opts.data;
     this.packedCache.set(id, this.currentPacked);
     await this.writeManifest();
     this.notifyStateChange();
@@ -755,9 +762,9 @@ export class HistoryManager {
 
     for (let i = 1; i < chain.length; i++) {
       const n = chain[i];
-      if (n.storage === "delta" && n.dirtyRect) {
-        const patch = await readFloat32Compressed(this.deltaPath(dir, n.id));
-        packed = applyDelta(packed, n.dirtyRect, patch, n.dimensions.textureWidth);
+      if (n.storage === "delta") {
+        const { ranges, patch } = decodeFootprintDelta(await readBytesCompressed(this.deltaPath(dir, n.id)));
+        packed = applyFootprintDelta(packed, ranges, patch);
       } else if (n.storage === "packed") {
         packed = await readFloat32Compressed(this.packedPath(dir, n.id));
       } else {

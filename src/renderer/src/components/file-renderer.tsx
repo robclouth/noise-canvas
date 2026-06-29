@@ -74,6 +74,8 @@ export interface FileRendererHandle {
   getDirtyRegion: () => { startX: number; endX: number; startY: number; endY: number } | null;
   /** Clears the dirty region tracking (call after synthesis). */
   clearDirtyRegion: () => void;
+  /** Packed-pixel ranges the current stroke's committed footprint covers, for the history delta. Null = full snapshot. */
+  getDirtyPixelRanges: () => Uint32Array | null;
 }
 
 /**
@@ -978,6 +980,7 @@ const FileRendererInner = memo(
       },
       getDirtyRegion: () => strokeRendererRef.current?.getDirtyRegion() ?? null,
       clearDirtyRegion: () => strokeRendererRef.current?.clearDirtyRegion(),
+      getDirtyPixelRanges: () => strokeRendererRef.current?.getDirtyPixelRanges() ?? null,
     }));
 
     /**
