@@ -94,68 +94,56 @@ const Scene = ({
   }, [material, modulator1Texture, modulator2Texture, modulator3Texture, invalidate, placeholderTexture]);
 
   useEffect(() => {
-    // Custom equality function that compares modulator arrays efficiently
-    // without JSON.stringify overhead
-    const modulatorsEqual = (
-      a: ReturnType<typeof buildModulatorUniforms>,
-      b: ReturnType<typeof buildModulatorUniforms>,
-    ): boolean => {
+    const signatureEqual = (a: Array<number | string>, b: Array<number | string>): boolean => {
       if (a.length !== b.length) return false;
-      for (let i = 0; i < a.length; i++) {
-        const modA = a[i];
-        const modB = b[i];
-        // Compare scalar values
-        if (
-          modA.modulatorMode !== modB.modulatorMode ||
-          modA.modulatorPatternShape !== modB.modulatorPatternShape ||
-          modA.modulatorPhaseMode !== modB.modulatorPhaseMode ||
-          modA.modulatorEnvelopeSmoothing !== modB.modulatorEnvelopeSmoothing ||
-          modA.modulatorEnvelopeSource !== modB.modulatorEnvelopeSource ||
-          modA.modulatorEnvelopeMinDb !== modB.modulatorEnvelopeMinDb ||
-          modA.modulatorEnvelopeMaxDb !== modB.modulatorEnvelopeMaxDb ||
-          modA.seqStepsX !== modB.seqStepsX ||
-          modA.seqStepsY !== modB.seqStepsY ||
-          modA.seqDataTex !== modB.seqDataTex
-        ) {
-          return false;
-        }
-        // Compare nested value objects
-        if (
-          modA.modulatorPhaseX.value !== modB.modulatorPhaseX.value ||
-          modA.modulatorPhaseY.value !== modB.modulatorPhaseY.value ||
-          modA.modulatorPatternRateX.value !== modB.modulatorPatternRateX.value ||
-          modA.modulatorPatternRateY.value !== modB.modulatorPatternRateY.value ||
-          modA.modulatorStrength.value !== modB.modulatorStrength.value ||
-          modA.modulatorRotation.value !== modB.modulatorRotation.value ||
-          modA.modulatorStereoSpread.value !== modB.modulatorStereoSpread.value ||
-          modA.seqLoopY.value !== modB.seqLoopY.value
-        ) {
-          return false;
-        }
-      }
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
       return true;
     };
 
+    const applyModulators = () => {
+      const state = useStore.getState();
+      const stepState = createStepStateView(state, state.activeStepIndex);
+      const modulators = buildModulatorUniforms(120, 10, 12, 96, stepState);
+      material.uniforms.modulators.value = modulators;
+      if (modulators[0]?.seqDataTex) material.uniforms.modulator1SeqDataTex.value = modulators[0].seqDataTex;
+      if (modulators[1]?.seqDataTex) material.uniforms.modulator2SeqDataTex.value = modulators[1].seqDataTex;
+      if (modulators[2]?.seqDataTex) material.uniforms.modulator3SeqDataTex.value = modulators[2].seqDataTex;
+      invalidate();
+    };
+
+    // Cheap signature of exactly the raw step parameters that determine the
+    // preview, so the expensive buildModulatorUniforms only runs when one of them
+    // changes rather than allocating the full uniform tree on every store update.
     const unsubscribe = useStore.subscribe(
       (state) => {
         const stepState = createStepStateView(state, state.activeStepIndex);
-        return buildModulatorUniforms(120, 10, 12, 96, stepState);
+        const sig: Array<number | string> = [];
+        for (let i = 1; i <= NUM_MODULATORS; i++) {
+          sig.push(
+            stepState[`modulator${i}Mode`] as number,
+            stepState[`modulator${i}PatternShape`] as number,
+            stepState[`modulator${i}PhaseMode`] as number,
+            stepState[`modulator${i}PhaseX`] as number,
+            stepState[`modulator${i}PhaseY`] as number,
+            stepState[`modulator${i}PatternRateBeats`] as number,
+            stepState[`modulator${i}PatternRateSemis`] as number,
+            stepState[`modulator${i}Strength`] as number,
+            stepState[`modulator${i}Rotation`] as number,
+            stepState[`modulator${i}StereoSpread`] as number,
+            stepState[`modulator${i}EnvelopeSmoothingBeats`] as number,
+            stepState[`modulator${i}EnvelopeSource`] as number,
+            stepState[`modulator${i}EnvelopeMinDb`] as number,
+            stepState[`modulator${i}EnvelopeMaxDb`] as number,
+            stepState[`modulator${i}SeqStepsX`] as number,
+            stepState[`modulator${i}SeqStepsY`] as number,
+            stepState[`modulator${i}SeqLoopSemis`] as number,
+            (stepState[`modulator${i}SeqData`] as string) ?? "{}",
+          );
+        }
+        return sig;
       },
-      (modulators) => {
-        material.uniforms.modulators.value = modulators;
-        // Update seqDataTex uniforms from the modulators
-        if (modulators[0]?.seqDataTex) {
-          material.uniforms.modulator1SeqDataTex.value = modulators[0].seqDataTex;
-        }
-        if (modulators[1]?.seqDataTex) {
-          material.uniforms.modulator2SeqDataTex.value = modulators[1].seqDataTex;
-        }
-        if (modulators[2]?.seqDataTex) {
-          material.uniforms.modulator3SeqDataTex.value = modulators[2].seqDataTex;
-        }
-        invalidate();
-      },
-      { equalityFn: modulatorsEqual },
+      applyModulators,
+      { equalityFn: signatureEqual },
     );
 
     return () => unsubscribe();
@@ -233,19 +221,21 @@ export const ModulatorView = () => {
     invalidateRef.current = invalidate;
   };
 
-  // Watch for position changes - necessary for Three.js View to render correctly when scrolling
+  // Watch for position changes so the Three.js View re-renders correctly when
+  // scrolling or when controls above it change height. Polling is the robust way
+  // to catch layout shifts that don't fire scroll/resize, but it only runs while
+  // the preview is actually on screen — a collapsed or scrolled-away modulator
+  // panel costs nothing.
   useEffect(() => {
     const element = viewRef.current;
     if (!element) {
       return;
     }
 
-    let animationFrameId: number;
-    let isRunning = true;
+    let animationFrameId = 0;
+    let polling = false;
 
     const checkPosition = () => {
-      if (!isRunning) return;
-
       const rect = element.getBoundingClientRect();
       const currentPosition = { top: rect.top, left: rect.left };
 
@@ -262,11 +252,25 @@ export const ModulatorView = () => {
       animationFrameId = requestAnimationFrame(checkPosition);
     };
 
-    animationFrameId = requestAnimationFrame(checkPosition);
+    const start = () => {
+      if (polling) return;
+      polling = true;
+      animationFrameId = requestAnimationFrame(checkPosition);
+    };
+    const stop = () => {
+      polling = false;
+      cancelAnimationFrame(animationFrameId);
+    };
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) start();
+      else stop();
+    });
+    observer.observe(element);
 
     return () => {
-      isRunning = false;
-      cancelAnimationFrame(animationFrameId);
+      observer.disconnect();
+      stop();
     };
   }, []);
 
