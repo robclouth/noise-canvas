@@ -1,7 +1,7 @@
 import type { ParameterKey } from "@/store/types";
 import { useEffectId } from "@renderer/contexts/effect-context";
 import { getParameterDef, isEffectParameter } from "@renderer/parameters";
-import { selectEffectParameter, selectParameter, useStore } from "@renderer/store";
+import { getEffectParameterValue, getParameterValue, useStore } from "@renderer/store";
 import {
   getContextualModAmountParamKeys,
   getMacroAmountParamKeys,
@@ -57,7 +57,7 @@ export const ParameterControl = memo(function ParameterControl({
         ];
 
         for (const key of allAmountKeys) {
-          const amount = useEffectScope ? selectEffectParameter(effectId, key)(state) : selectParameter(key)(state);
+          const amount = useEffectScope ? getEffectParameterValue(state, effectId, key) : getParameterValue(state, key);
           if (amount !== 0) {
             modulated = true;
             break;
@@ -67,8 +67,8 @@ export const ParameterControl = memo(function ParameterControl({
 
       // Get parameter value
       const value = useEffectScope
-        ? selectEffectParameter(effectId, paramKey)(state)
-        : selectParameter(paramKey)(state);
+        ? getEffectParameterValue(state, effectId, paramKey)
+        : getParameterValue(state, paramKey);
 
       return {
         isModulated: modulated,

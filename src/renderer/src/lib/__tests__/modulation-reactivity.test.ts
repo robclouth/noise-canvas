@@ -41,4 +41,43 @@ describe("modulator preview reactivity", () => {
 
     expect(after).toBe(before);
   });
+
+  // The modulator-view subscribes to the active step but compares only the
+  // modulator params (modulatorParamsEqual) so the preview rebuild + canvas
+  // invalidate fires only for changes the preview actually depends on. These
+  // assert it rebuilds for every modulator-affecting edit (no stale preview) and
+  // skips unrelated step-param drags (the perf win).
+  it("modulatorParamsEqual rebuilds the preview for modulator and nested-amount edits, but not for unrelated step params", async () => {
+    const { useStore } = await import("../../store");
+    const { modulatorParamsEqual } = await import("../modulator-utils");
+    const activeStep = () => {
+      const s = useStore.getState();
+      return s.brushes[s.activeBrushIndex]?.steps?.[s.activeStepIndex];
+    };
+
+    const set = useStore.getState().setParameter;
+
+    // A modulator's own param.
+    let before = activeStep();
+    set("modulator1Strength" as ParameterKey, 42);
+    expect(modulatorParamsEqual(before, activeStep())).toBe(false);
+
+    // A nested modulation amount routed into a modulator param.
+    before = activeStep();
+    set("modulator2StrengthMod1Amount" as ParameterKey, 33);
+    expect(modulatorParamsEqual(before, activeStep())).toBe(false);
+
+    // A macro amount routed into a modulator param.
+    before = activeStep();
+    set("modulator1PhaseXModMacro2Amount" as ParameterKey, 25);
+    expect(modulatorParamsEqual(before, activeStep())).toBe(false);
+
+    // An unrelated step param the preview does not read: a fresh step object,
+    // but the modulator params are unchanged, so no rebuild.
+    before = activeStep();
+    set("brushIntensity" as ParameterKey, 0.5);
+    const afterUnrelated = activeStep();
+    expect(afterUnrelated).not.toBe(before);
+    expect(modulatorParamsEqual(before, afterUnrelated)).toBe(true);
+  });
 });

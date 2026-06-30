@@ -46,7 +46,14 @@ export const ALL_PERSISTED_KEYS: (keyof State)[] = [
 // serialize the whole persisted slice and write it synchronously. This defers
 // the serialize-and-write to a single trailing write, and flushes any pending
 // write when the page is hidden or unloaded so the latest state is never lost.
-function createDebouncedStorage<S>(delayMs: number): PersistStorage<S> {
+//
+// The persisted-slice projection (`partialize`) is applied here at flush time,
+// not on every store change. zustand runs the persist `partialize` on every set;
+// doing the real work there allocates a large object every dragged frame for a
+// write that is about to be coalesced away. Keeping persist's partialize an
+// identity and projecting only when we actually serialize removes that per-frame
+// allocation (a meaningful source of GC pauses while dragging).
+function createDebouncedStorage<S>(delayMs: number, project: (state: S) => unknown): PersistStorage<S> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let pending: { name: string; value: StorageValue<S> } | null = null;
 
@@ -56,7 +63,8 @@ function createDebouncedStorage<S>(delayMs: number): PersistStorage<S> {
       timer = null;
     }
     if (pending) {
-      localStorage.setItem(pending.name, JSON.stringify(pending.value));
+      const serializable = { ...pending.value, state: project(pending.value.state) };
+      localStorage.setItem(pending.name, JSON.stringify(serializable));
       pending = null;
     }
   };
@@ -88,6 +96,53 @@ function createDebouncedStorage<S>(delayMs: number): PersistStorage<S> {
       localStorage.removeItem(name);
     },
   };
+}
+
+// Projects the full state down to the persisted slice. Runs only when a write is
+// actually serialized (at the debounced flush), not on every store change.
+function persistProjection(state: State): Record<string, unknown> {
+  const picked = Object.entries(state).reduce(
+    (acc, [key, value]) => {
+      if (key in parameterDefs || ALL_PERSISTED_KEYS.includes(key as keyof State)) {
+        acc[key] = value;
+      }
+      return acc;
+    },
+    {} as Record<string, any>,
+  );
+
+  // Only persist file entries backed by a real on-disk path. Virtual files
+  // (new/duplicate/stems) appear in openFileIds at runtime but must not round-trip
+  // across sessions — they have no reanalysable source.
+  const realIds = new Set(Object.keys(state.persistedFilePaths ?? {}));
+  if (Array.isArray(picked.openFileIds)) {
+    picked.openFileIds = picked.openFileIds.filter((id: string) => realIds.has(id));
+  }
+  if (Array.isArray(picked.minimizedFileIds)) {
+    picked.minimizedFileIds = picked.minimizedFileIds.filter((id: string) => realIds.has(id));
+  }
+  if (typeof picked.activeFileId === "string" && !realIds.has(picked.activeFileId)) {
+    picked.activeFileId = null;
+  }
+  if (typeof picked.fullscreenFileId === "string" && !realIds.has(picked.fullscreenFileId)) {
+    picked.fullscreenFileId = null;
+  }
+  for (const mapKey of [
+    "filesBandsPerOctave",
+    "filesZoom",
+    "filesOffset",
+    "filesZoomY",
+    "filesOffsetY",
+    "filesPlaybackStartTime",
+    "filesDirty",
+    "fileDisplayNames",
+  ] as const) {
+    const map = picked[mapKey];
+    if (map && typeof map === "object") {
+      picked[mapKey] = Object.fromEntries(Object.entries(map).filter(([id]) => realIds.has(id)));
+    }
+  }
+  return picked;
 }
 
 export const useStore = create<State>()(
@@ -229,51 +284,11 @@ export const useStore = create<State>()(
       }),
       {
         name: "noise-canvas-storage",
-        storage: createDebouncedStorage(300),
-        partialize: (state) => {
-          const picked = Object.entries(state).reduce(
-            (acc, [key, value]) => {
-              if (key in parameterDefs || ALL_PERSISTED_KEYS.includes(key as keyof State)) {
-                acc[key] = value;
-              }
-              return acc;
-            },
-            {} as Record<string, any>,
-          );
-
-          // Only persist file entries backed by a real on-disk path. Virtual files
-          // (new/duplicate/stems) appear in openFileIds at runtime but must not round-trip
-          // across sessions — they have no reanalysable source.
-          const realIds = new Set(Object.keys(state.persistedFilePaths ?? {}));
-          if (Array.isArray(picked.openFileIds)) {
-            picked.openFileIds = picked.openFileIds.filter((id: string) => realIds.has(id));
-          }
-          if (Array.isArray(picked.minimizedFileIds)) {
-            picked.minimizedFileIds = picked.minimizedFileIds.filter((id: string) => realIds.has(id));
-          }
-          if (typeof picked.activeFileId === "string" && !realIds.has(picked.activeFileId)) {
-            picked.activeFileId = null;
-          }
-          if (typeof picked.fullscreenFileId === "string" && !realIds.has(picked.fullscreenFileId)) {
-            picked.fullscreenFileId = null;
-          }
-          for (const mapKey of [
-            "filesBandsPerOctave",
-            "filesZoom",
-            "filesOffset",
-            "filesZoomY",
-            "filesOffsetY",
-            "filesPlaybackStartTime",
-            "filesDirty",
-            "fileDisplayNames",
-          ] as const) {
-            const map = picked[mapKey];
-            if (map && typeof map === "object") {
-              picked[mapKey] = Object.fromEntries(Object.entries(map).filter(([id]) => realIds.has(id)));
-            }
-          }
-          return picked;
-        },
+        // The real persisted-slice projection runs at flush time inside the
+        // storage (see persistProjection / createDebouncedStorage). Keeping this
+        // an identity avoids allocating the projected object on every store change.
+        storage: createDebouncedStorage(300, persistProjection),
+        partialize: (state) => state,
         merge: (persistedState, currentState) => {
           const merged = deepMerge(currentState, persistedState as object) as State;
 

@@ -102,14 +102,32 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
 const MAX_EFFECTS = 10;
 
 export function EffectsList() {
-  // Subscribe to effects - memoized children prevent cascading re-renders
-  const effects = useStore((state) => selectParameter("effects")(state)) as EffectItem[];
+  // The list only renders each effect's id, type and enabled flag (and order) —
+  // never an effect's parameter values. Subscribing to the whole `effects` array
+  // would re-render this (and its DragDropContext) on every effect-param drag,
+  // since editing a param gives the array a new reference. Subscribe to a
+  // primitive signature of just the structural fields instead, so a value drag
+  // doesn't touch this component. (id/type/flag never contain a newline.)
+  const effectStructureSig = useStore((state) => {
+    const effects = selectParameter("effects")(state) as EffectItem[];
+    return effects.map((e) => `${e.id} ${e.effect} ${e.enabled ? 1 : 0}`).join("\n");
+  });
   const setParameter = useStore((state) => state.setParameter);
 
-  // Derive structural data for rendering
   const effectStructures = useMemo(
-    () => effects.map(({ id, effect, enabled }) => ({ id, effect, enabled })),
-    [effects],
+    () =>
+      effectStructureSig === ""
+        ? []
+        : effectStructureSig.split("\n").map((line) => {
+            const first = line.indexOf(" ");
+            const second = line.indexOf(" ", first + 1);
+            return {
+              id: line.slice(0, first),
+              effect: line.slice(first + 1, second) as EffectType,
+              enabled: line.slice(second + 1) === "1",
+            };
+          }),
+    [effectStructureSig],
   );
 
   const handleDragEnd = useCallback(

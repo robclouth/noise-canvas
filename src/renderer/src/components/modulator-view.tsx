@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import modulatorFrag from "../glsl/modulator.frag";
 import passThroughVert from "../glsl/pass-through.vert";
-import { buildModulatorUniforms, useModulatorScaleLut } from "../lib/modulator-utils";
+import { buildModulatorUniforms, modulatorParamsEqual, useModulatorScaleLut } from "../lib/modulator-utils";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import { ModulatorShapeControl } from "./controls/modulator-shape-control";
@@ -105,15 +105,19 @@ const Scene = ({
       invalidate();
     };
 
-    // The preview output depends on every parameter of the active step: each
+    // The preview output depends on the active step's modulator params: each
     // modulator's own params AND the modulation amounts routed into them (nested
-    // modulation) AND the macro amounts. All of these are step parameters, so the
-    // active step object's reference changes whenever any of them do. Subscribe to
-    // that reference and rebuild only then — cheap, and (unlike a hand-maintained
-    // signature) it cannot silently miss a parameter such as a nested mod amount.
+    // modulation) AND the macro amounts. The macro *values* are watched by the
+    // separate subscription below; everything else lives on the step under a
+    // `modulator<n>` key. Subscribe to the step object but compare only those keys
+    // (`modulatorParamsEqual`) so the rebuild — and the canvas invalidate it
+    // triggers — fires only when a modulator param actually changes, not on every
+    // unrelated step-param drag. Deriving the key set from parameterDefs keeps it
+    // complete: it cannot silently miss a nested mod amount.
     const unsubscribe = useStore.subscribe(
       (state) => state.brushes[state.activeBrushIndex]?.steps?.[state.activeStepIndex],
       applyModulators,
+      { equalityFn: modulatorParamsEqual },
     );
 
     return () => unsubscribe();

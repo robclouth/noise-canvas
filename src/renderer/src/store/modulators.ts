@@ -178,11 +178,24 @@ function isContextualOnly(paramKey: ParameterKey): boolean {
   return def?.kind === "number" && def.modulationSourcesAllowed === "contextualOnly";
 }
 
+// The amount-key lists below are a pure function of paramKey and are read on
+// every store update by every mounted control's selector. Caching the arrays
+// (they are only ever iterated, never mutated) removes a large amount of
+// per-frame allocation — a meaningful source of GC pauses while dragging.
+const modAmountKeysCache = new Map<ParameterKey, ParameterKey[]>();
+const contextualAmountKeysCache = new Map<ParameterKey, ParameterKey[]>();
+const macroAmountKeysCache = new Map<ParameterKey, ParameterKey[]>();
+
 export function getModAmountParamKeys(paramKey: ParameterKey) {
-  if (isContextualOnly(paramKey)) return [] as ParameterKey[];
-  return Array.from({ length: NUM_MODULATORS }, (_, i) => i + 1).map(
-    (modIdx) => `${paramKey}Mod${modIdx}Amount`,
-  ) as ParameterKey[];
+  const cached = modAmountKeysCache.get(paramKey);
+  if (cached) return cached;
+  const keys = isContextualOnly(paramKey)
+    ? ([] as ParameterKey[])
+    : (Array.from({ length: NUM_MODULATORS }, (_, i) => i + 1).map(
+        (modIdx) => `${paramKey}Mod${modIdx}Amount`,
+      ) as ParameterKey[]);
+  modAmountKeysCache.set(paramKey, keys);
+  return keys;
 }
 
 export function getModAmountValuesNormalized(state: ModulatorsState, paramKey: ParameterKey) {
@@ -224,7 +237,11 @@ export function hasNestedModulatorRouting(state: ModulatorsState): boolean {
 
 // Get contextual mod amount parameter keys for a given parameter
 export function getContextualModAmountParamKeys(paramKey: ParameterKey) {
-  return CONTEXTUAL_MOD_SOURCES.map((source) => `${paramKey}Mod${source.key}`) as ParameterKey[];
+  const cached = contextualAmountKeysCache.get(paramKey);
+  if (cached) return cached;
+  const keys = CONTEXTUAL_MOD_SOURCES.map((source) => `${paramKey}Mod${source.key}`) as ParameterKey[];
+  contextualAmountKeysCache.set(paramKey, keys);
+  return keys;
 }
 
 // Get normalized contextual mod amounts as an array [iteration, time, pitch, random, step]
@@ -234,10 +251,15 @@ export function getContextualModAmountsNormalized(state: ModulatorsState, paramK
 
 // Get macro mod amount parameter keys for a given parameter
 export function getMacroAmountParamKeys(paramKey: ParameterKey) {
-  if (isContextualOnly(paramKey)) return [] as ParameterKey[];
-  return Array.from({ length: NUM_MACROS }, (_, i) => i + 1).map(
-    (macroIdx) => `${paramKey}ModMacro${macroIdx}Amount`,
-  ) as ParameterKey[];
+  const cached = macroAmountKeysCache.get(paramKey);
+  if (cached) return cached;
+  const keys = isContextualOnly(paramKey)
+    ? ([] as ParameterKey[])
+    : (Array.from({ length: NUM_MACROS }, (_, i) => i + 1).map(
+        (macroIdx) => `${paramKey}ModMacro${macroIdx}Amount`,
+      ) as ParameterKey[]);
+  macroAmountKeysCache.set(paramKey, keys);
+  return keys;
 }
 
 // Get normalized macro mod amounts as an array [macro1, macro2, macro3, macro4]

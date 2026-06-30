@@ -1,4 +1,4 @@
-import { NumberParameter, parameterDefs } from "@renderer/parameters";
+import { BrushStep, NumberParameter, parameterDefs } from "@renderer/parameters";
 import { openFiles } from "@renderer/store/files";
 import {
   getContextualModAmountsNormalized,
@@ -13,6 +13,31 @@ import { useStore } from "../store";
 import { MAX_SEQ_SIZE, MAX_SEQ_STEPS_X, MAX_SEQ_STEPS_Y, NUM_MODULATORS } from "./constants";
 import { perfMark } from "./perf-probe";
 import { unitsToUv } from "./utils";
+
+// Every step parameter the modulator preview reads is prefixed `modulator<n>` —
+// the modulators' own params plus the nested mod/contextual/macro amounts routed
+// into them (all generated into parameterDefs with that prefix). Deriving the key
+// set from parameterDefs keeps it complete: it cannot silently miss a nested mod
+// amount the way a hand-maintained list could.
+export const MODULATOR_PREVIEW_KEYS = (Object.keys(parameterDefs) as ParameterKey[]).filter((key) =>
+  /^modulator\d/.test(key),
+);
+
+// Equality over only the step parameters the modulator preview depends on. Used
+// as the active-step subscription's equalityFn so the preview rebuild — and the
+// shared-canvas invalidate it triggers — fires only when a modulator param
+// actually changes, not on every unrelated step-param drag (a brush size, an
+// effect amount). The macro *values* are watched by a separate subscription.
+export const modulatorParamsEqual = (a?: BrushStep, b?: BrushStep): boolean => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const sa = a as Record<string, unknown>;
+  const sb = b as Record<string, unknown>;
+  for (const key of MODULATOR_PREVIEW_KEYS) {
+    if (sa[key] !== sb[key]) return false;
+  }
+  return true;
+};
 
 // Type for modulatable parameter with modulation amounts
 interface ModulatableParam {

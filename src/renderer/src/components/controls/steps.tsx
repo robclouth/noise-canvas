@@ -4,8 +4,9 @@ import { resolveBrushColor } from "@renderer/lib/colors";
 import { openConfirm } from "@renderer/lib/modals";
 import { useStore } from "@renderer/store";
 import { MAX_STEPS } from "@renderer/store/steps";
+import type { BrushColor } from "@renderer/store/types";
 import { Copy, Plus, Trash } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useShallow } from "zustand/shallow";
 import { Tooltip } from "../tooltip";
 
@@ -14,8 +15,16 @@ const SLOT_BASIS = `${100 / MAX_STEPS}%`;
 
 export function Steps() {
   const theme = useMantineTheme();
+  // The tab bar only displays each step's id + color, the count, and which step
+  // is active — never any step parameter value. Selecting the whole `steps`
+  // array would re-render this (and the heavy DragDropContext) on every
+  // step-param drag, since immer gives the array a new reference each edit.
+  // Select a primitive signature of just the displayed fields instead, so a
+  // value drag doesn't touch this component. (`id` and `color` never contain a
+  // newline, so it is a safe entry delimiter.)
   const {
-    steps,
+    stepSig,
+    stepCount,
     activeStepIndex,
     activeBrushIndex,
     setActiveStepIndex,
@@ -25,26 +34,42 @@ export function Steps() {
     reorderSteps,
     ensureStepColors,
   } = useStore(
-    useShallow((state) => ({
-      steps: state.brushes[state.activeBrushIndex]?.steps ?? [],
-      activeStepIndex: state.activeStepIndex,
-      activeBrushIndex: state.activeBrushIndex,
-      setActiveStepIndex: state.setActiveStepIndex,
-      addStep: state.addStep,
-      removeStep: state.removeStep,
-      duplicateStep: state.duplicateStep,
-      reorderSteps: state.reorderSteps,
-      ensureStepColors: state.ensureStepColors,
-    })),
+    useShallow((state) => {
+      const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+      return {
+        stepSig: steps.map((s) => `${s.id} ${s.color ?? ""}`).join("\n"),
+        stepCount: steps.length,
+        activeStepIndex: state.activeStepIndex,
+        activeBrushIndex: state.activeBrushIndex,
+        setActiveStepIndex: state.setActiveStepIndex,
+        addStep: state.addStep,
+        removeStep: state.removeStep,
+        duplicateStep: state.duplicateStep,
+        reorderSteps: state.reorderSteps,
+        ensureStepColors: state.ensureStepColors,
+      };
+    }),
   );
 
-  const missingColor = steps.some((s) => !s.color);
+  const stepMeta = useMemo(
+    () =>
+      stepSig === ""
+        ? []
+        : stepSig.split("\n").map((entry) => {
+            const sep = entry.indexOf(" ");
+            const color = entry.slice(sep + 1);
+            return { id: entry.slice(0, sep), color: (color || undefined) as BrushColor | undefined };
+          }),
+    [stepSig],
+  );
+
+  const missingColor = stepMeta.some((s) => !s.color);
   useEffect(() => {
     if (missingColor) ensureStepColors();
   }, [activeBrushIndex, missingColor, ensureStepColors]);
 
-  const canAddStep = steps.length < MAX_STEPS;
-  const canRemoveStep = steps.length > 1;
+  const canAddStep = stepCount < MAX_STEPS;
+  const canRemoveStep = stepCount > 1;
 
   const handleDragEnd = (result: DropResult) => {
     if (!result.destination) return;
@@ -82,7 +107,7 @@ export function Steps() {
               {...dropProvided.droppableProps}
               style={{ display: "flex", flex: 1, minWidth: 0 }}
             >
-              {steps.map((step, index) => {
+              {stepMeta.map((step, index) => {
                 const active = index === activeStepIndex;
                 const stepColor = step.color ? resolveBrushColor(step.color, theme) : theme.colors.dark[3];
                 return (
