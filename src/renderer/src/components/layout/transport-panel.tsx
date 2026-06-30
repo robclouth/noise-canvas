@@ -11,6 +11,7 @@ import { Brush, Link2, Play, Repeat, Square } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { ParameterControl } from "../controls/parameter-control";
 import { Tooltip } from "../tooltip";
+import { OutputMeter } from "./output-meter";
 
 const formatTime = (seconds: number): string => {
   const m = Math.floor((seconds % 3600) / 60)
@@ -158,6 +159,10 @@ export const TransportPanel = memo(() => {
         <ParameterControl paramKey="scaleTonic" labelWidth={TRANSPORT_LABEL_WIDTH} />
         <ParameterControl paramKey="scaleType" labelWidth={TRANSPORT_LABEL_WIDTH} />
       </Stack>
+
+      <Divider orientation="vertical" color="dark.5" />
+
+      <OutputMeter />
     </Group>
   );
 });

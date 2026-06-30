@@ -227,7 +227,7 @@ export const defaultValues: CommonUniforms = {
   },
   bpm: { value: 120.0 },
   blendMode: { value: 0 },
-  magnitudeLimit: { value: 1.0 },
+  magnitudeLimit: { value: 0.0 },
   wrapMode: { value: 0 },
   algorithm: { value: 0 },
   useLinearBlend: { value: false },

@@ -1524,8 +1524,9 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "number",
     name: "Magnitude Limit",
     label: "Mag. Limit",
-    description: "The maximum magnitude limit for the spectrogram.",
-    default: 1.0,
+    description:
+      "Per-bin magnitude soft-clip. 0 disables it; output is kept safe by the audio limiter. Raise it only to bound runaway feedback effects.",
+    default: 0.0,
     min: 0.0,
     max: 2.0,
     step: 0.01,
@@ -1601,13 +1602,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     max: 100,
     step: 0.01,
     unit: "Hz",
-  },
-  normalize: {
-    kind: "boolean",
-    name: "Normalize",
-    label: "Normalize",
-    description: "Normalizes the audio output.",
-    default: true,
   },
   scaleTonic: {
     kind: "options",

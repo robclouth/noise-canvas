@@ -83,13 +83,21 @@ vec2  fromPolar(float mag, float phase) { return vec2(mag, phase); }
 vec2  toComplex(vec2 magPhase) { return magPhase.x * vec2(cos(magPhase.y), sin(magPhase.y)); }
 vec2  polarFromComplex(vec2 z) { return vec2(length(z), atan(z.y, z.x)); }
 
+// Hard ceiling that always applies, even when the soft-clip is disabled, so
+// repeated boosting or feedback can't drive magnitudes to inf/NaN. It sits far
+// above any musical level (the audio limiter governs actual output level), so it
+// never colours normal use.
+const float MAGNITUDE_HARD_CEILING = 1.0e15;
+
 /**
- * Applies a soft-clipping saturation curve to the magnitude (prevents runaway values).
+ * Clamps magnitude to a hard ceiling, and optionally applies a soft-clipping
+ * saturation curve above magnitudeLimit when that is enabled (> 0).
  */
 vec2 limitMagnitude(vec2 magPhase) {
-  if (magnitudeLimit <= 0.0) return magPhase;
-
   float mag = getMag(magPhase);
+  if (mag > MAGNITUDE_HARD_CEILING) return vec2(MAGNITUDE_HARD_CEILING, magPhase.y);
+
+  if (magnitudeLimit <= 0.0) return magPhase;
   if (mag <= magnitudeLimit) return magPhase;
 
   float excessMag       = mag - magnitudeLimit;

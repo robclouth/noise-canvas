@@ -201,7 +201,7 @@ export function createMockState(overrides: Partial<State> = {}): State {
     synthesizeGain: 0,
 
     // Global settings
-    magnitudeLimit: 1.0,
+    magnitudeLimit: 0.0,
 
     // Display (not used in stroke rendering but may be accessed)
     displayMinDb: -60,

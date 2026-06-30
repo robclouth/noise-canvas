@@ -883,16 +883,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         danger: true,
         onConfirm: async () => {
           try {
-            // Extract audio channels from AudioBuffer
+            // Copy the audio channels out of the AudioBuffer at their final level.
             const numChannels = file.audioBuffer!.numberOfChannels;
-            const normalize = get().normalize;
-            const gain = normalize && file.audioPeak && file.audioPeak > 0 ? 1 / file.audioPeak : 1;
             const audioChannels: Float32Array[] = [];
             for (let i = 0; i < numChannels; i++) {
-              const src = file.audioBuffer!.getChannelData(i);
-              const dst = new Float32Array(src.length);
-              for (let j = 0; j < src.length; j++) dst[j] = src[j] * gain;
-              audioChannels.push(dst);
+              audioChannels.push(new Float32Array(file.audioBuffer!.getChannelData(i)));
             }
 
             // Determine format from file extension
@@ -956,16 +951,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const truncatedFileName = truncateMiddle(savedFileName, 50);
 
     try {
-      // Extract audio channels from AudioBuffer, applying normalize gain to match the saveActiveFile path.
+      // Copy the audio channels out of the AudioBuffer at their final level.
       const numChannels = file.audioBuffer.numberOfChannels;
-      const normalize = get().normalize;
-      const gain = normalize && file.audioPeak && file.audioPeak > 0 ? 1 / file.audioPeak : 1;
       const audioChannels: Float32Array[] = [];
       for (let i = 0; i < numChannels; i++) {
-        const src = file.audioBuffer.getChannelData(i);
-        const dst = new Float32Array(src.length);
-        for (let j = 0; j < src.length; j++) dst[j] = src[j] * gain;
-        audioChannels.push(dst);
+        audioChannels.push(new Float32Array(file.audioBuffer.getChannelData(i)));
       }
 
       // Determine format from file extension
@@ -1064,16 +1054,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const truncatedFileName = truncateMiddle(newFileName, 50);
 
     try {
-      // Extract audio channels from AudioBuffer, applying normalize gain to match the saveActiveFile path.
+      // Copy the audio channels out of the AudioBuffer at their final level.
       const numChannels = file.audioBuffer.numberOfChannels;
-      const normalize = get().normalize;
-      const gain = normalize && file.audioPeak && file.audioPeak > 0 ? 1 / file.audioPeak : 1;
       const audioChannels: Float32Array[] = [];
       for (let i = 0; i < numChannels; i++) {
-        const src = file.audioBuffer.getChannelData(i);
-        const dst = new Float32Array(src.length);
-        for (let j = 0; j < src.length; j++) dst[j] = src[j] * gain;
-        audioChannels.push(dst);
+        audioChannels.push(new Float32Array(file.audioBuffer.getChannelData(i)));
       }
 
       // Determine format from file extension
@@ -1373,11 +1358,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
         // Swap the buffer in the player
         player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
-
-        // Update volume for new peak
-        const peak = file.audioPeak ?? 1;
-        const normalize = get().normalize;
-        player.volume.value = normalize && peak > 0 ? Tone.gainToDb(1 / peak) : 0;
+        player.volume.value = 0;
 
         // Use setPlaybackTime to correctly restart the player from the same spot
         // with the new buffer and correct loop settings.
@@ -1420,8 +1401,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         const player = getPlayer();
         const t = get().getPlaybackTime();
         player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
-        const normalize = get().normalize;
-        player.volume.value = normalize && file.audioPeak > 0 ? Tone.gainToDb(1 / file.audioPeak) : 0;
+        player.volume.value = 0;
         get().setPlaybackTime(t);
       }
 

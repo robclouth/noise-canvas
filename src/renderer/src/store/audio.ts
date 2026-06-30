@@ -6,8 +6,10 @@ import type { LoopRegion, PlayerClock, ZustandGet, ZustandSet } from "./types";
 export interface AudioState {
   playerClock: PlayerClock;
   player: Tone.Player | null;
+  meter: Tone.Meter | null;
   getPlaybackTime: () => number;
   getPlayer: () => Tone.Player;
+  getOutputLevels: () => [number, number];
   isPlaying: boolean;
   setIsPlaying: (isPlaying: boolean) => void;
   loop: boolean;
@@ -25,6 +27,7 @@ export const AUDIO_PERSISTED_KEYS = ["autoPlayStroke", "loop"] as const;
 
 export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState => ({
   player: null,
+  meter: null,
   playerClock: {
     startAt: null,
     startOffset: 0,
@@ -63,6 +66,19 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     return pos;
   },
 
+  getOutputLevels: () => {
+    const meter = get().meter;
+    if (!meter) return [-Infinity, -Infinity];
+    const value = meter.getValue();
+    if (Array.isArray(value)) {
+      const left = value[0] ?? -Infinity;
+      const right = value[1] ?? left;
+      // Mono sources only feed channel 0, so mirror it onto the right bar.
+      return [left, right === -Infinity && left !== -Infinity ? left : right];
+    }
+    return [value, value];
+  },
+
   getPlayer: () => {
     const p = get().player;
     if (p) return p;
@@ -73,6 +89,11 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
       fadeIn: 0,
       fadeOut: 0,
     }).toDestination();
+
+    // Fan the player output out to a stereo meter for the transport level display.
+    const meter = new Tone.Meter({ channelCount: 2, normalRange: false, smoothing: 0.8 });
+    newPlayer.connect(meter);
+    set({ meter });
 
     newPlayer.onstop = () => {
       const { loop, getPlaybackTime, isPlaying, playerClock } = get();
@@ -226,10 +247,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
     const player = getPlayer();
     player.buffer = new Tone.ToneAudioBuffer(buffer);
-
-    const peak = file?.audioPeak ?? 1;
-    const normalize = get().normalize;
-    player.volume.value = normalize && peak > 0 ? Tone.gainToDb(1 / peak) : 0;
+    player.volume.value = 0;
 
     const end = loopRegion?.end ?? buffer.duration;
     const loopStart = loopRegion?.start ?? 0;

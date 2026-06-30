@@ -28,7 +28,6 @@ export interface AppState {
   gridSwing: number;
   snapTime: boolean;
   snapPitch: boolean;
-  normalize: boolean;
   scaleTonic: string;
   scaleType: string;
   bandsPerOctave: number;
@@ -57,7 +56,6 @@ export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
     gridSwing: getParameterDef("gridSwing").default,
     snapTime: getParameterDef("snapTime").default,
     snapPitch: getParameterDef("snapPitch").default,
-    normalize: getParameterDef("normalize").default,
     scaleTonic: getParameterDef("scaleTonic").default,
     scaleType: getParameterDef("scaleType").default,
     bandsPerOctave: getParameterDef("bandsPerOctave").default,
