@@ -24,7 +24,8 @@ import tubes from "@/assets/textures/Tubes.jpg";
 import water1 from "@/assets/textures/Water 1.jpg";
 import water2 from "@/assets/textures/Water 2.jpg";
 import water3 from "@/assets/textures/Water 3.jpg";
-import { useStore } from "@renderer/store";
+import { selectParameter, useStore } from "@renderer/store";
+import type { ParameterKey } from "@renderer/store/types";
 import { useEffect, useMemo, useState } from "react";
 import {
   ClampToEdgeWrapping,
@@ -133,7 +134,11 @@ const configureTexture = (texture: Texture): void => {
 };
 
 export function useModulatorTexture(modulatorIndex: number) {
-  const modulatorTexturePath = useStore((state) => state[`modulator${modulatorIndex + 1}TexturePath`] || alienMetal);
+  // The texture path is a per-step parameter, so resolve it through the
+  // step-aware selector (the active step's value) rather than reading the global
+  // slot, which never receives the user's selection.
+  const textureParamKey = `modulator${modulatorIndex + 1}TexturePath` as ParameterKey;
+  const modulatorTexturePath = useStore((state) => (selectParameter(textureParamKey)(state) as string) || alienMetal);
 
   const [texture, setTexture] = useState<Texture | null>(null);
 

@@ -349,6 +349,21 @@ export class StrokeRenderer {
   }
 
   /**
+   * Update the modulator image textures. They load asynchronously (and change
+   * when the user picks a different image), so the values captured at
+   * construction go stale; the owner re-syncs them here whenever they change.
+   */
+  updateModulatorTextures(
+    modulator1Texture: Texture | null,
+    modulator2Texture: Texture | null,
+    modulator3Texture: Texture | null,
+  ): void {
+    this.textures.modulator1Texture = modulator1Texture;
+    this.textures.modulator2Texture = modulator2Texture;
+    this.textures.modulator3Texture = modulator3Texture;
+  }
+
+  /**
    * Initialize the renderer with the spectrogram data.
    * Must be called before rendering strokes.
    */
@@ -694,11 +709,6 @@ export class StrokeRenderer {
       this.initialize();
     }
 
-    // Nesting routing is constant for the whole stroke (and its mask pass), so
-    // resolve it once and let the precompute shader skip the nested-source
-    // evaluation when nothing routes into a modulator parameter.
-    this.modulatorMaterial.uniforms.nestedModulationActive.value = hasNestedModulatorRouting(state);
-
     const {
       cursorPos,
       preview,
@@ -860,6 +870,10 @@ export class StrokeRenderer {
       // nothing routes to a modulator, every consumer multiplies its output by
       // zero, so skip the pass and bind the zero placeholder instead.
       if (hasActiveModulatorRouting(stepState)) {
+        // Nested-modulation routing lives on the step (modulator amounts are
+        // per-step parameters), so resolve the gate from the step state, not the
+        // global state, before rendering this step's modulators.
+        this.modulatorMaterial.uniforms.nestedModulationActive.value = hasNestedModulatorRouting(stepState);
         this.renderModulatorTextures(commonUniforms);
         commonUniforms.modulatorTex0 = { value: this.modulatorFbo.textures[0] };
         commonUniforms.modulatorTex1 = { value: this.modulatorFbo.textures[1] };
@@ -1227,6 +1241,7 @@ export class StrokeRenderer {
       // then restore the mask material as the active program. Skip the pass when
       // nothing routes to a modulator (zero placeholder yields the same result).
       if (hasActiveModulatorRouting(stepState)) {
+        this.modulatorMaterial.uniforms.nestedModulationActive.value = hasNestedModulatorRouting(stepState);
         this.renderModulatorTextures(uniforms as unknown as CommonUniforms);
         uniforms.modulatorTex0.value = this.modulatorFbo.textures[0];
         uniforms.modulatorTex1.value = this.modulatorFbo.textures[1];

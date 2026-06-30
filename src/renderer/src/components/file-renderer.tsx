@@ -122,6 +122,14 @@ const FileRendererInner = memo(
     const modulator2Texture = useModulatorTexture(1);
     const modulator3Texture = useModulatorTexture(2);
 
+    // Modulator textures load asynchronously and change when the user picks a
+    // different image, so the values captured at StrokeRenderer construction go
+    // stale. Re-sync them onto the live renderer whenever they change.
+    useEffect(() => {
+      strokeRendererRef.current?.updateModulatorTextures(modulator1Texture, modulator2Texture, modulator3Texture);
+      invalidateRef.current?.();
+    }, [modulator1Texture, modulator2Texture, modulator3Texture]);
+
     // Textures for spectrogram data
     const [packedDataTex, setPackedDataTex] = useState<DataTexture | null>(null);
     const [originalPackedDataTex, setOriginalPackedDataTex] = useState<DataTexture | null>(null);
