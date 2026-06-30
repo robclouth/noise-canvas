@@ -1,5 +1,4 @@
-#include "../../lygia/generative/snoise.glsl"
-#include "../../lygia/generative/random.glsl"
+#include "./noise.glsl"
 
 #define NUM_MODULATORS 3
 // Using DataTexture for seq data (no uniform limit issues)
@@ -250,6 +249,32 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
     v = random(floor(pos)) ;
   } else if (modulator.modulatorPatternShape == 6) { // SNOISE
     v = snoise(pos) * 0.5 + 0.5;
+  } else if (modulator.modulatorPatternShape == 13) { // QUILT (value noise)
+    v = value12(pos);
+  } else if (modulator.modulatorPatternShape == 14) { // CLOUDS (perlin)
+    v = perlin12(pos);
+  } else if (modulator.modulatorPatternShape == 15) { // CELLS (worley)
+    v = worley12(pos);
+  } else if (modulator.modulatorPatternShape == 16) { // BUBBLES (smooth voronoi)
+    v = voronoi12(pos, 0.5);
+  } else if (modulator.modulatorPatternShape == 17) { // CRATERS
+    v = crater12(pos);
+  } else if (modulator.modulatorPatternShape == 18) { // RIPPLES (gabor)
+    v = gabor12(pos) * 0.5 + 0.5;
+  } else if (modulator.modulatorPatternShape == 19) { // SCRATCHES
+    v = clamp(scratches12(pos), 0.0, 1.0);
+  } else if (modulator.modulatorPatternShape == 20) { // SWIRLS (wavelet)
+    v = wavelet12(pos, 0.0, 1.24) * 0.5 + 0.5;
+  } else if (modulator.modulatorPatternShape == 21) { // PAPER
+    v = paper12(pos);
+  } else if (modulator.modulatorPatternShape == 22) { // MARBLE (stone)
+    v = stone12(pos);
+  } else if (modulator.modulatorPatternShape == 23) { // WEAVE (wool)
+    v = clamp(wool12(pos), 0.0, 1.0);
+  } else if (modulator.modulatorPatternShape == 24) { // TERRAIN (erosion)
+    v = clamp(erosion12(pos).x * 0.5 + 0.5, 0.0, 1.0);
+  } else if (modulator.modulatorPatternShape == 25) { // FLOW (curl)
+    v = clamp(length(curl22(pos)) / 1.414, 0.0, 1.0);
   } else if (modulator.modulatorPatternShape == 12) { // IMAGE
     // Sample from the appropriate image texture based on modulator index
     // Use rate-scaled position for tiling control
