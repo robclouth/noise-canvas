@@ -94,12 +94,6 @@ const Scene = ({
   }, [material, modulator1Texture, modulator2Texture, modulator3Texture, invalidate, placeholderTexture]);
 
   useEffect(() => {
-    const signatureEqual = (a: Array<number | string>, b: Array<number | string>): boolean => {
-      if (a.length !== b.length) return false;
-      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-      return true;
-    };
-
     const applyModulators = () => {
       const state = useStore.getState();
       const stepState = createStepStateView(state, state.activeStepIndex);
@@ -111,39 +105,15 @@ const Scene = ({
       invalidate();
     };
 
-    // Cheap signature of exactly the raw step parameters that determine the
-    // preview, so the expensive buildModulatorUniforms only runs when one of them
-    // changes rather than allocating the full uniform tree on every store update.
+    // The preview output depends on every parameter of the active step: each
+    // modulator's own params AND the modulation amounts routed into them (nested
+    // modulation) AND the macro amounts. All of these are step parameters, so the
+    // active step object's reference changes whenever any of them do. Subscribe to
+    // that reference and rebuild only then — cheap, and (unlike a hand-maintained
+    // signature) it cannot silently miss a parameter such as a nested mod amount.
     const unsubscribe = useStore.subscribe(
-      (state) => {
-        const stepState = createStepStateView(state, state.activeStepIndex);
-        const sig: Array<number | string> = [];
-        for (let i = 1; i <= NUM_MODULATORS; i++) {
-          sig.push(
-            stepState[`modulator${i}Mode`] as number,
-            stepState[`modulator${i}PatternShape`] as number,
-            stepState[`modulator${i}PhaseMode`] as number,
-            stepState[`modulator${i}PhaseX`] as number,
-            stepState[`modulator${i}PhaseY`] as number,
-            stepState[`modulator${i}PatternRateBeats`] as number,
-            stepState[`modulator${i}PatternRateSemis`] as number,
-            stepState[`modulator${i}Strength`] as number,
-            stepState[`modulator${i}Rotation`] as number,
-            stepState[`modulator${i}StereoSpread`] as number,
-            stepState[`modulator${i}EnvelopeSmoothingBeats`] as number,
-            stepState[`modulator${i}EnvelopeSource`] as number,
-            stepState[`modulator${i}EnvelopeMinDb`] as number,
-            stepState[`modulator${i}EnvelopeMaxDb`] as number,
-            stepState[`modulator${i}SeqStepsX`] as number,
-            stepState[`modulator${i}SeqStepsY`] as number,
-            stepState[`modulator${i}SeqLoopSemis`] as number,
-            (stepState[`modulator${i}SeqData`] as string) ?? "{}",
-          );
-        }
-        return sig;
-      },
+      (state) => state.brushes[state.activeBrushIndex]?.steps?.[state.activeStepIndex],
       applyModulators,
-      { equalityFn: signatureEqual },
     );
 
     return () => unsubscribe();
