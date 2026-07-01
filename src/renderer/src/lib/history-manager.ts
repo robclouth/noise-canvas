@@ -697,10 +697,19 @@ export class HistoryManager {
   // ---------- Full-snapshot I/O ----------
 
   private async writeFullSnapshot(nodeId: string, packed: Float32Array, s: SpectrogramData): Promise<void> {
+    await this.writeFullSnapshotParts(nodeId, packed, s.inverseMap, s.metadata);
+  }
+
+  private async writeFullSnapshotParts(
+    nodeId: string,
+    packed: Float32Array,
+    inverseMap: Float32Array,
+    metadata: Float32Array,
+  ): Promise<void> {
     const dir = await this.ensureDir();
     await writeFloat32Compressed(this.packedPath(dir, nodeId), packed);
-    await writeFloat32Compressed(this.inverseMapPath(dir, nodeId), s.inverseMap);
-    await writeFloat32Compressed(this.metadataPath(dir, nodeId), s.metadata);
+    await writeFloat32Compressed(this.inverseMapPath(dir, nodeId), inverseMap);
+    await writeFloat32Compressed(this.metadataPath(dir, nodeId), metadata);
   }
 
   private async readFullSnapshot(node: HistoryNode): Promise<{
@@ -1190,6 +1199,84 @@ export class HistoryManager {
     } catch {
       return 0;
     }
+  }
+
+  /**
+   * Collapse the tree to a single root holding the current state, freeing every
+   * other node's on-disk data. Unlike purge(), the manager keeps a valid root, so
+   * undo/redo and future strokes work from here instead of the next addStroke
+   * throwing on a null manifest. The visible spectrogram, its cached audio, and
+   * the dirty flag are preserved — purging history doesn't change the file.
+   */
+  async resetToCurrent(): Promise<void> {
+    await this.initialize();
+    if (!this.manifest) return;
+    const currentId = this.manifest.currentId;
+    const current = this.manifest.nodes[currentId];
+    if (!current) return;
+
+    // The current state's dimension side-data (inverseMap/metadata/synthesis
+    // metadata) lives on its nearest full-snapshot ancestor; capture it before
+    // the ancestors are deleted below.
+    const anchor = this.nearestFullAnchor(currentId);
+    if (!anchor?.synthesisMetadata) return;
+    const { inverseMap, metadata } = await this.readFullSnapshotSideData(anchor);
+    const packed = this.currentPacked ?? (await this.reconstruct(currentId)).packedData;
+
+    // Drop any pending debounced write — the tree is about to be rewritten.
+    this.manifestWritePending = false;
+    if (this.manifestWriteTimer != null) {
+      clearTimeout(this.manifestWriteTimer);
+      this.manifestWriteTimer = null;
+    }
+
+    const dir = await this.dir;
+    // Delete every other node's on-disk data. The current node's cached audio is
+    // kept because its id is preserved as the new root.
+    for (const id of Object.keys(this.manifest.nodes)) {
+      if (id === currentId) continue;
+      for (const f of [
+        this.packedPath(dir, id),
+        this.deltaPath(dir, id),
+        this.inverseMapPath(dir, id),
+        this.metadataPath(dir, id),
+        this.audioPath(dir, id),
+      ]) {
+        host.fs.rm(f).catch(() => {});
+      }
+      this.packedCache.delete(id);
+    }
+
+    // Rewrite the current node as a standalone full snapshot so it can be the
+    // root with no ancestors left to reconstruct from.
+    host.fs.rm(this.deltaPath(dir, currentId)).catch(() => {});
+    await this.writeFullSnapshotParts(currentId, packed, inverseMap, metadata);
+
+    current.parentId = null;
+    current.childIds = [];
+    current.lastChildId = null;
+    current.storage = "full";
+    current.synthesisMetadata = {
+      bandOffsets: Array.from(anchor.synthesisMetadata.bandOffsets),
+      bandStepLog2s: Array.from(anchor.synthesisMetadata.bandStepLog2s),
+      bandLengths: Array.from(anchor.synthesisMetadata.bandLengths),
+    };
+
+    this.manifest.rootId = currentId;
+    this.manifest.nodes = { [currentId]: current };
+    // savedNodeId is left untouched: purging on-disk history doesn't change
+    // whether the current audio matches the last save, so the dirty flag carries
+    // over (a now-deleted savedNodeId still reads as "differs from saved").
+
+    const canonical = new Float32Array(packed);
+    this.currentPacked = canonical;
+    this.packedCache.clear();
+    this.packedCache.set(currentId, canonical);
+    this.audioLru = current.audioCached ? [currentId] : [];
+    this.lastLoadedAnchorId = currentId;
+
+    await this.writeManifest();
+    this.notifyStateChange();
   }
 
   /**

@@ -342,3 +342,52 @@ describe("HistoryManager undo/redo round-trip", () => {
     delete fakeOpenFiles["f1"];
   });
 });
+
+describe("HistoryManager resetToCurrent (purge history)", () => {
+  it("collapses to a single root at the current state and keeps undo working", async () => {
+    const { fbo } = installManagerEnv();
+    const w = 6,
+      h = 4;
+    const root = lossyFill(w, h, 0);
+    const a = lossyFill(w, h, 1);
+    const b = lossyFill(w, h, 2);
+    const dimensions = {
+      textureWidth: w,
+      textureHeight: h,
+      numFrames: w,
+      numBands: h,
+      numChannels: 1,
+      sampleRate: 44100,
+      minFreq: 20,
+      bandsPerOctave: 12,
+    };
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    await mgr.addStroke({ data: a, label: "A", dimensions });
+    const bId = await mgr.addStroke({ data: b, label: "B", dimensions });
+    expect(mgr.canUndo()).toBe(true);
+
+    await mgr.resetToCurrent();
+
+    // Only the current state survives, as the new root — nothing left to undo to.
+    expect(mgr.listNodes().length).toBe(1);
+    expect(mgr.getCurrentId()).toBe(bId);
+    expect(mgr.canUndo()).toBe(false);
+    expect(mgr.canRedo()).toBe(false);
+    // The kept root reconstructs to the exact pre-purge state.
+    expect(Array.from((await mgr.reconstruct(bId)).packedData)).toEqual(Array.from(b));
+
+    // Painting after a purge records history again, so undo returns to the root
+    // — the regression this guards is addStroke throwing on a null manifest.
+    const c = lossyFill(w, h, 3);
+    await mgr.addStroke({ data: c, label: "C", dimensions });
+    expect(mgr.canUndo()).toBe(true);
+    await mgr.navigateToParent();
+    expect(Array.from(fbo.last!)).toEqual(Array.from(b));
+
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
+});

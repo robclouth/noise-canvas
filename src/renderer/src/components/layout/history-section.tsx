@@ -506,7 +506,7 @@ export function HistorySection() {
       confirmLabel: "Purge",
       danger: true,
       onConfirm: async () => {
-        await manager.purge();
+        await manager.resetToCurrent();
         await refreshDiskSize();
       },
     });
