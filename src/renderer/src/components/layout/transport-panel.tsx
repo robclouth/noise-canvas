@@ -11,6 +11,7 @@ import { Brush, Link2, Play, Repeat, Square } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { ParameterControl } from "../controls/parameter-control";
 import { Tooltip } from "../tooltip";
+import { GainReductionMeter } from "./gain-reduction-meter";
 import { OutputMeter } from "./output-meter";
 
 const formatTime = (seconds: number): string => {
@@ -32,6 +33,7 @@ export const TransportPanel = memo(() => {
   const setLoop = useStore((state) => state.setLoop);
   const autoPlayStroke = useStore((state) => state.autoPlayStroke);
   const setAutoPlayStroke = useStore((state) => state.setAutoPlayStroke);
+  const limiterEnabled = useStore((state) => state.limiterEnabled);
   const togglePlayback = useStore((state) => state.togglePlayback);
   const linkEnabled = useStore((state) => state.linkEnabled);
   const setLinkEnabled = useStore((state) => state.setLinkEnabled);
@@ -162,7 +164,12 @@ export const TransportPanel = memo(() => {
 
       <Divider orientation="vertical" color="dark.5" />
 
-      <OutputMeter />
+      <Box style={{ display: "flex", gap: 2, alignItems: "center" }}>
+        <OutputMeter />
+        {limiterEnabled && <GainReductionMeter />}
+      </Box>
+
+      <ParameterControl paramKey="limiterEnabled" displayLabel="Limiter" />
     </Group>
   );
 });

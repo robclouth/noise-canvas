@@ -64,7 +64,7 @@ declare global {
         },
         sampleRate: number,
         params: AnalysisParams,
-        normalize: boolean,
+        applyLimiter: boolean,
         existingAudio?: Float32Array[],
         startFrame?: number,
         endFrame?: number,
@@ -73,6 +73,8 @@ declare global {
       ) => Promise<{
         channels: Float32Array[];
         peak: number;
+        gainReductionDb: Float32Array;
+        maxGainReductionDb: number;
       }>;
       isModelDownloaded: (modelFile: string) => boolean;
       downloadModel: (modelFile: string, onProgress?: (downloaded: number, total: number) => void) => Promise<void>;

@@ -1551,6 +1551,14 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "When enabled, the brush snaps to the horizontal (time) grid.",
     default: true,
   },
+  limiterEnabled: {
+    kind: "boolean",
+    name: "Limiter",
+    label: "Limiter",
+    description:
+      "Bake a true-peak limiter into the synthesized audio so it can't clip on playback or export. Bypass to hear or print the raw synthesis.",
+    default: true,
+  },
   gridSwing: {
     kind: "number",
     name: "Grid Swing",

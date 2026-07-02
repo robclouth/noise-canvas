@@ -763,7 +763,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         },
         spectrogramData.sampleRate,
         { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq },
-        false, // don't normalize — preserve relative levels for separation
+        false, // don't limit — preserve relative levels for separation
       );
 
       // Step 2: AI-separate the synthesized audio into stems
@@ -1289,7 +1289,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           payload.analysisMetadata,
           originalAnalysis.sampleRate,
           analysisParams,
-          false,
+          get().limiterEnabled,
           existingAudio,
           startFrame,
           endFrame,
@@ -1332,6 +1332,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
       file.audioBuffer = audioBuffer;
       file.audioPeak = synthesisResult.peak > 0 ? synthesisResult.peak : 1;
+      file.gainReductionDb = synthesisResult.gainReductionDb;
+      file.maxGainReductionDb = synthesisResult.maxGainReductionDb;
+      if (get().activeFileId === fileId) {
+        get().setGainReduction(synthesisResult.gainReductionDb ?? null, synthesisResult.maxGainReductionDb ?? 0);
+      }
 
       if (autoPlaybackParams) {
         // --- Handle auto-playback of the painted region ---
@@ -1395,6 +1400,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
       file.audioBuffer = audioBuffer;
       file.audioPeak = peak > 0 ? peak : 1;
+      // Cached audio carries no gain-reduction envelope; the meter clears until
+      // the next synthesis re-derives it.
+      file.gainReductionDb = undefined;
+      file.maxGainReductionDb = undefined;
+      if (get().activeFileId === fileId) get().setGainReduction(null, 0);
 
       // Hot-swap if currently playing this file
       if (get().isPlaying && get().activeFileId === fileId) {
@@ -2003,6 +2013,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
 
       get().stopAudio();
+      get().setGainReduction(file.gainReductionDb ?? null, file.maxGainReductionDb ?? 0);
+    } else {
+      get().setGainReduction(null, 0);
     }
     set({ activeFileId });
   },

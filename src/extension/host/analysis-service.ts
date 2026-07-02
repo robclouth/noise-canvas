@@ -83,7 +83,7 @@ export async function runSynthesizeFramed(request: ArrayBuffer): Promise<Uint8Ar
     },
     Number(meta.sampleRate),
     { bandsPerOctave: Number(meta.bandsPerOctave), minFreq: Number(meta.minFreq) },
-    meta.normalize === 1,
+    meta.applyLimiter === 1,
     existingAudio,
     optionalNumber(meta.startFrame),
     optionalNumber(meta.endFrame),
@@ -93,5 +93,9 @@ export async function runSynthesizeFramed(request: ArrayBuffer): Promise<Uint8Ar
 
   const channels: Record<string, NumericArray> = {};
   result.channels.forEach((channel, i) => (channels[`channel${i}`] = channel));
-  return encodeFrame({ meta: { peak: result.peak, numChannels: result.channels.length }, arrays: channels });
+  channels.gainReductionDb = result.gainReductionDb;
+  return encodeFrame({
+    meta: { peak: result.peak, numChannels: result.channels.length, maxGainReductionDb: result.maxGainReductionDb },
+    arrays: channels,
+  });
 }

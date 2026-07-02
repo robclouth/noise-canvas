@@ -16,6 +16,11 @@ export interface AudioState {
   setLoop: (loop: boolean) => void;
   autoPlayStroke: boolean;
   setAutoPlayStroke: (value: boolean) => void;
+  limiterEnabled: boolean;
+  gainReductionDb: Float32Array | null;
+  maxGainReductionDb: number;
+  setGainReduction: (envDb: Float32Array | null, maxDb: number) => void;
+  getGainReductionAt: (timeSec: number) => number;
   loopRegion: LoopRegion | null;
   setLoopRegion: (region: LoopRegion | null) => void;
   setPlaybackTime: (playbackTime: number) => void;
@@ -23,7 +28,7 @@ export interface AudioState {
   stopAudio: () => void;
 }
 
-export const AUDIO_PERSISTED_KEYS = ["autoPlayStroke", "loop"] as const;
+export const AUDIO_PERSISTED_KEYS = ["autoPlayStroke", "loop", "limiterEnabled"] as const;
 
 export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState => ({
   player: null,
@@ -153,6 +158,23 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
   autoPlayStroke: false,
   setAutoPlayStroke: (value) => set({ autoPlayStroke: value }),
+
+  gainReductionDb: null,
+  maxGainReductionDb: 0,
+  setGainReduction: (envDb, maxDb) => set({ gainReductionDb: envDb, maxGainReductionDb: maxDb }),
+  getGainReductionAt: (timeSec) => {
+    const { gainReductionDb, activeFileId } = get();
+    const file = activeFileId ? openFiles[activeFileId] : undefined;
+    const buffer = file?.audioBuffer;
+    if (!gainReductionDb || gainReductionDb.length === 0 || !buffer || buffer.duration <= 0) return 0;
+    const frac = Math.max(0, Math.min(0.999999, timeSec / buffer.duration));
+    const idx = Math.min(gainReductionDb.length - 1, Math.floor(frac * gainReductionDb.length));
+    return gainReductionDb[idx];
+  },
+
+  // Driven by the `limiterEnabled` parameter; setParameter re-bakes the active
+  // file when it changes.
+  limiterEnabled: true,
 
   loopRegion: null,
   setLoopRegion: (region) => {

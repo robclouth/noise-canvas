@@ -77,6 +77,10 @@ export type OpenFile = {
   spectrogramData?: SpectrogramData;
   audioBuffer?: AudioBuffer;
   audioPeak?: number;
+  // Baked-limiter gain-reduction envelope for this file's latest synthesis
+  // (dB of reduction per ~5 ms hop, spanning the whole buffer) and its peak.
+  gainReductionDb?: Float32Array;
+  maxGainReductionDb?: number;
   rendererRef?: React.RefObject<FileRendererHandle | null>;
 };
 

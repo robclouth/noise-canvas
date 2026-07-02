@@ -35,18 +35,26 @@ static std::ofstream &getDebugLog()
 // gaining harmonic distortion from within-cycle gain modulation. All channels
 // share one gain curve to preserve the stereo image.
 static void applyLookaheadLimiter(std::vector<std::vector<float>> &channels, double sampleRate,
-                                  float attackMs = 2.0f, float holdMs = 40.0f, float releaseMs = 200.0f)
+                                  float holdMs = 40.0f, float releaseMs = 200.0f,
+                                  std::vector<float> *outGain = nullptr)
 {
     if (channels.empty() || channels[0].empty())
         return;
 
-    // True-peak ceiling, a touch below 0 dBFS. The limiter reins in the inter-sample
+    // True-peak ceiling at -2 dBTP. The limiter bounds the inter-sample
     // (reconstructed) peak, not just the sample peak, so playback resampling or the
-    // DAC cannot clip overshoots that the raw samples hide. The headroom covers the
-    // residual error of finite-rate oversampling.
-    constexpr float limiterCeiling = 0.95f;
-    constexpr int OS = 4;   // oversampling factor for true-peak detection
-    constexpr int HT = 5;   // half kernel width; the interpolation FIR has 2*HT taps
+    // DAC cannot clip overshoots hidden between samples. The headroom below 0 dBFS
+    // exceeds the -1 dBTP streaming standard because near-Nyquist content is the
+    // hardest case for finite-rate true-peak detection and the gain-envelope
+    // smoothing below shifts the peak reduction slightly; the margin covers both.
+    constexpr float limiterCeiling = 0.794f;
+    // True-peak detection follows ITU-R BS.1770: oversample with a polyphase
+    // windowed-sinc FIR and take the peak of the reconstructed signal. Both the
+    // oversampling factor and the FIR length must be generous or the detector
+    // under-reads near-Nyquist inter-sample peaks (by ~1 dB at 4x/short-FIR) and the
+    // limiter lets real peaks slip over 0 dBFS, which clips on playback.
+    constexpr int OS = 16;  // oversampling factor for true-peak detection
+    constexpr int HT = 16;  // half kernel width; the interpolation FIR has 2*HT taps per phase
     constexpr float kPi = 3.14159265358979323846f;
     const int channelCount = static_cast<int>(channels.size());
     const size_t blockLen = channels[0].size();
@@ -77,7 +85,7 @@ static void applyLookaheadLimiter(std::vector<std::vector<float>> &channels, dou
             float chPeak = here;
             const float next = (i + 1 < blockLen) ? std::abs(channels[ch][i + 1]) : 0.0f;
             // Only reconstruct between samples that are loud enough to overshoot.
-            if (interior && std::max(here, next) > 0.4f)
+            if (interior && std::max(here, next) > 0.25f)
             {
                 for (int ph = 1; ph < OS; ++ph)
                 {
@@ -93,10 +101,12 @@ static void applyLookaheadLimiter(std::vector<std::vector<float>> &channels, dou
             gainEnv[i] = limiterCeiling / truePeak;
     }
 
-    const float attackStep = 1.0f / std::max(1.0f, static_cast<float>(sampleRate) * attackMs * 0.001f);
     const float releaseStep = 1.0f / std::max(1.0f, static_cast<float>(sampleRate) * releaseMs * 0.001f);
     const int holdSamples = static_cast<int>(std::max(0.0f, static_cast<float>(sampleRate) * holdMs * 0.001f));
 
+    // Ballistics: take the gain instantly down to each new low (instant attack — no
+    // peak escapes), hold it there for holdMs so a whole low-frequency cycle is scaled
+    // by a constant gain (no bass distortion), then recover linearly over releaseMs.
     float env = gainEnv[0];
     int hold = 0;
     for (size_t i = 0; i < blockLen; ++i)
@@ -118,12 +128,42 @@ static void applyLookaheadLimiter(std::vector<std::vector<float>> &channels, dou
         gainEnv[i] = env;
     }
 
-    for (size_t i = blockLen - 1; i-- > 0;)
-        gainEnv[i] = std::min(gainEnv[i], gainEnv[i + 1] + attackStep);
+    // Look-ahead and smoothing in one step: three forward box blurs (running averages,
+    // O(n) each). The forward window biases the smoothing earlier in time, so the gain
+    // is already reduced before each peak (the look-ahead attack). The hold above keeps
+    // the gain floor flat across the blur window at every peak, so averaging can never
+    // raise it back up — peaks stay caught, no overshoot. Three passes make the gain
+    // curve smooth (no slope kinks), so multiplying the audio by it adds no clicks.
+    const int boxW = std::max(1, static_cast<int>(std::lround(static_cast<double>(sampleRate) * 0.0007)));
+    std::vector<float> tmp(blockLen);
+    for (int pass = 0; pass < 3; ++pass)
+    {
+        double sum = 0.0;
+        int count = 0;
+        for (int k = 0; k < boxW && static_cast<size_t>(k) < blockLen; ++k, ++count)
+            sum += gainEnv[k];
+        for (size_t i = 0; i < blockLen; ++i)
+        {
+            tmp[i] = static_cast<float>(sum / count);
+            sum -= gainEnv[i];
+            --count;
+            const size_t add = i + static_cast<size_t>(boxW);
+            if (add < blockLen)
+            {
+                sum += gainEnv[add];
+                ++count;
+            }
+        }
+        gainEnv.swap(tmp);
+    }
 
     for (size_t i = 0; i < blockLen; ++i)
         for (int ch = 0; ch < channelCount; ++ch)
             channels[ch][i] *= gainEnv[i];
+
+    // Hand back the final per-sample gain (1.0 = no reduction) for the meter.
+    if (outGain)
+        *outGain = std::move(gainEnv);
 }
 
 class AnalyzeWorker : public Napi::AsyncWorker
@@ -436,13 +476,13 @@ public:
                      const Napi::Object &analysisObj,
                      double sampleRate,
                      const Napi::Object &paramsJs,
-                     bool normalize,
+                     bool applyLimiter,
                      const Napi::Array &existingAudioJs,
                      int64_t startFrame,
                      int64_t endFrame,
                      int64_t startBand,
                      int64_t endBand)
-        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), sampleRate(sampleRate), normalize(normalize),
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), sampleRate(sampleRate), applyLimiter(applyLimiter),
           requestedStartFrame(startFrame), requestedEndFrame(endFrame), requestedStartBand(startBand), requestedEndBand(endBand)
     {
         // Hold the packed FBO buffer by reference and read it straight from its
@@ -691,7 +731,36 @@ public:
         // continuous across the whole file — limiting the dirty block alone would
         // leave a gain discontinuity where it meets the surrounding audio. Existing
         // audio is already at or below the ceiling, so it passes through unchanged.
-        applyLookaheadLimiter(audioChannels, sampleRate);
+        // The flag lets the caller bypass the limiter.
+        std::vector<float> gainEnv;
+        if (applyLimiter)
+            applyLookaheadLimiter(audioChannels, sampleRate, 40.0f, 200.0f, &gainEnv);
+
+        // Downsample the applied gain into a compact per-file gain-reduction
+        // envelope (dB of reduction, >= 0) for the meter. Each point holds the
+        // worst reduction over a ~5 ms hop so brief dips stay visible, and the
+        // points span the whole buffer evenly so the renderer can index it by
+        // playback fraction.
+        gainReductionDb.clear();
+        maxGainReductionDb = 0.0f;
+        if (!gainEnv.empty())
+        {
+            const int hop = std::max(1, static_cast<int>(std::lround(sampleRate * 0.005)));
+            const size_t points = (gainEnv.size() + hop - 1) / hop;
+            gainReductionDb.resize(points);
+            float minGain = 1.0f;
+            for (size_t p = 0; p < points; ++p)
+            {
+                const size_t start = p * static_cast<size_t>(hop);
+                const size_t end = std::min(gainEnv.size(), start + static_cast<size_t>(hop));
+                float lo = 1.0f;
+                for (size_t i = start; i < end; ++i)
+                    lo = std::min(lo, gainEnv[i]);
+                minGain = std::min(minGain, lo);
+                gainReductionDb[p] = lo < 1.0f ? -20.0f * std::log10(lo) : 0.0f;
+            }
+            maxGainReductionDb = minGain < 1.0f ? -20.0f * std::log10(minGain) : 0.0f;
+        }
 
         // Compute peak of the complete, limited buffer.
         peakValue = 0.0f;
@@ -723,6 +792,13 @@ public:
         }
         result.Set("channels", outputChannels);
         result.Set("peak", Napi::Number::New(env, peakValue));
+
+        Napi::Float32Array grBuffer = Napi::Float32Array::New(env, gainReductionDb.size());
+        if (!gainReductionDb.empty())
+            memcpy(grBuffer.Data(), gainReductionDb.data(), gainReductionDb.size() * sizeof(float));
+        result.Set("gainReductionDb", grBuffer);
+        result.Set("maxGainReductionDb", Napi::Number::New(env, maxGainReductionDb));
+
         deferred.Resolve(result);
     }
 
@@ -742,7 +818,7 @@ private:
     const float *inputData = nullptr;
     size_t inputDataLen = 0;
     double sampleRate;
-    bool normalize;
+    bool applyLimiter;
     size_t numFrames;
     int channels;
     int numBands;
@@ -762,6 +838,8 @@ private:
     // Results
     std::vector<std::vector<float>> audioChannels;
     float peakValue = 0.0f;
+    std::vector<float> gainReductionDb;
+    float maxGainReductionDb = 0.0f;
 };
 
 Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
@@ -770,7 +848,7 @@ Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
 
     if (info.Length() < 6 || !info[0].IsTypedArray() || !info[1].IsObject() || !info[2].IsNumber() || !info[3].IsObject() || !info[4].IsBoolean() || !info[5].IsArray())
     {
-        Napi::TypeError::New(env, "Expected: data (TypedArray), analysisObject (Object), sampleRate (Number), params (Object), normalize (Boolean), existingAudio (Array), [startFrame], [endFrame], [startBand], [endBand]").ThrowAsJavaScriptException();
+        Napi::TypeError::New(env, "Expected: data (TypedArray), analysisObject (Object), sampleRate (Number), params (Object), applyLimiter (Boolean), existingAudio (Array), [startFrame], [endFrame], [startBand], [endBand]").ThrowAsJavaScriptException();
         return env.Null();
     }
 
@@ -778,7 +856,7 @@ Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
     Napi::Object analysisObj = info[1].As<Napi::Object>();
     double sampleRate = info[2].As<Napi::Number>().DoubleValue();
     Napi::Object paramsJs = info[3].As<Napi::Object>();
-    bool normalize = info[4].As<Napi::Boolean>().Value();
+    bool applyLimiter = info[4].As<Napi::Boolean>().Value();
     Napi::Array existingAudioJs = info[5].As<Napi::Array>();
 
     // Optional start/end frame and band for partial synthesis (-1 means full range)
@@ -815,7 +893,7 @@ Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
         return env.Null();
     }
 
-    SynthesizeWorker *worker = new SynthesizeWorker(env, inputDataJs, analysisObj, sampleRate, paramsJs, normalize, existingAudioJs, startFrame, endFrame, startBand, endBand);
+    SynthesizeWorker *worker = new SynthesizeWorker(env, inputDataJs, analysisObj, sampleRate, paramsJs, applyLimiter, existingAudioJs, startFrame, endFrame, startBand, endBand);
     worker->Queue();
     return worker->GetPromise();
 }
@@ -1318,10 +1396,9 @@ Napi::Value ApplyLimiterTest(const Napi::CallbackInfo &info)
         channels[ch].assign(arr.Data(), arr.Data() + arr.ElementLength());
     }
 
-    const float attackMs = info.Length() > 2 && info[2].IsNumber() ? info[2].As<Napi::Number>().FloatValue() : 2.0f;
-    const float holdMs = info.Length() > 3 && info[3].IsNumber() ? info[3].As<Napi::Number>().FloatValue() : 40.0f;
-    const float releaseMs = info.Length() > 4 && info[4].IsNumber() ? info[4].As<Napi::Number>().FloatValue() : 200.0f;
-    applyLookaheadLimiter(channels, sampleRate, attackMs, holdMs, releaseMs);
+    const float holdMs = info.Length() > 2 && info[2].IsNumber() ? info[2].As<Napi::Number>().FloatValue() : 40.0f;
+    const float releaseMs = info.Length() > 3 && info[3].IsNumber() ? info[3].As<Napi::Number>().FloatValue() : 200.0f;
+    applyLookaheadLimiter(channels, sampleRate, holdMs, releaseMs);
 
     Napi::Array out = Napi::Array::New(env, channelCount);
     for (int ch = 0; ch < channelCount; ++ch)

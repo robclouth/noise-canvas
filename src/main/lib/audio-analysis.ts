@@ -124,6 +124,11 @@ export async function analyseBuffer(audioBuffer: AudioBuffer, params: AnalysisPa
 export interface SynthesisResult {
   channels: Float32Array[];
   peak: number;
+  // Per-file gain-reduction envelope from the baked limiter (dB of reduction,
+  // >= 0), one point per ~5 ms hop, spanning the whole buffer. Empty when the
+  // limiter is bypassed.
+  gainReductionDb: Float32Array;
+  maxGainReductionDb: number;
 }
 
 export async function synthesize(
@@ -138,7 +143,7 @@ export async function synthesize(
   },
   sampleRate: number,
   params: AnalysisParams,
-  normalize: boolean,
+  applyLimiter: boolean,
   existingAudio?: Float32Array[],
   startFrame?: number,
   endFrame?: number,
@@ -161,7 +166,7 @@ export async function synthesize(
     analysisMetadata,
     sampleRate,
     params,
-    normalize,
+    applyLimiter,
     existing,
     start,
     end,
@@ -218,11 +223,7 @@ export async function exportAudio(
 /**
  * Decode an audio file into planar channel arrays at the target sample rate.
  */
-export async function decodeAudio(
-  inputPath: string,
-  sampleRate: number,
-  numChannels: number,
-): Promise<Float32Array[]> {
+export async function decodeAudio(inputPath: string, sampleRate: number, numChannels: number): Promise<Float32Array[]> {
   const interleaved = await decodeAudioFile(inputPath, sampleRate, numChannels);
   const numFrames = interleaved.length / numChannels;
   const channels: Float32Array[] = [];

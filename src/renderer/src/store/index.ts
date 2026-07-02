@@ -230,6 +230,12 @@ export const useStore = create<State>()(
                 (draft as unknown as Record<string, unknown>)[key] = value;
               }),
             );
+            // The limiter is baked into the synthesized audio, so toggling it is
+            // only audible after re-synthesizing the active file.
+            if (key === "limiterEnabled") {
+              const { activeFileId, synthesizeFile } = get();
+              if (activeFileId) void synthesizeFile(activeFileId);
+            }
           }
         },
         randomizationAmounts: {},

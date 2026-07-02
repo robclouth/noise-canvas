@@ -65,7 +65,7 @@ const synthesize: SynthesizeFn = async (
   analysisMetadata: AnalysisMetadata,
   sampleRate,
   params,
-  normalize,
+  applyLimiter,
   existingAudio,
   startFrame,
   endFrame,
@@ -87,7 +87,7 @@ const synthesize: SynthesizeFn = async (
     sampleRate,
     bandsPerOctave: params.bandsPerOctave,
     minFreq: params.minFreq,
-    normalize: normalize ? 1 : 0,
+    applyLimiter: applyLimiter ? 1 : 0,
     existingChannelCount: existingAudio?.length ?? 0,
   };
   if (startFrame !== undefined) meta.startFrame = startFrame;
@@ -103,7 +103,12 @@ const synthesize: SynthesizeFn = async (
   const numChannels = Number(outMeta.numChannels);
   const channels: Float32Array[] = [];
   for (let i = 0; i < numChannels; i++) channels.push(f32(outArrays[`channel${i}`], `channel${i}`));
-  return { channels, peak: Number(outMeta.peak) };
+  return {
+    channels,
+    peak: Number(outMeta.peak),
+    gainReductionDb: f32(outArrays.gainReductionDb, "gainReductionDb"),
+    maxGainReductionDb: Number(outMeta.maxGainReductionDb),
+  };
 };
 
 export function createExtensionAnalysis(): AnalysisApi {
