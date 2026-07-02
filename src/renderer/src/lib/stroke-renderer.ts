@@ -38,7 +38,7 @@ import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { buildModulatorUniforms } from "./modulator-utils";
 import { withPlatformDefines } from "./shader-utils";
-import { resolveBrushAnchor, resolveBrushFootprint } from "./utils";
+import { resolveBrushAnchor, resolveBrushFootprint, swungGridCellWidthUv } from "./utils";
 
 // Import EffectType from the dependency-free types module
 import type { EffectType } from "../effects/types";
@@ -418,10 +418,12 @@ export class StrokeRenderer {
 
   /**
    * Resolve brush footprint for a given step state, taking Grid/Full sentinel
-   * values on brushSizeTime/brushSizePitch into account.
+   * values on brushSizeTime/brushSizePitch into account. When `anchorTimeUv` is
+   * given (the brush's BL time), a Grid-mode time brush under time-snap is sized
+   * to the swung grid cell it lands in so snapped strokes tile without gaps.
    */
-  resolveBrushFootprint(state: State, bpm: number, totalDuration: number) {
-    return resolveBrushFootprint({
+  resolveBrushFootprint(state: State, bpm: number, totalDuration: number, anchorTimeUv?: number) {
+    const footprint = resolveBrushFootprint({
       brushSizeTime: state.brushSizeTime,
       brushSizePitch: state.brushSizePitch,
       gridSizeBeats: state.gridSizeBeats,
@@ -431,6 +433,21 @@ export class StrokeRenderer {
       bandsPerOctave: this.spectrogramData.bandsPerOctave,
       numBands: this.spectrogramData.numBands,
     });
+    if (anchorTimeUv !== undefined && !footprint.fullTime) {
+      const swungTimeUv = swungGridCellWidthUv(
+        anchorTimeUv,
+        {
+          brushSizeTime: state.brushSizeTime,
+          gridSizeBeats: state.gridSizeBeats,
+          gridSwing: state.gridSwing,
+          snapTime: state.snapTime,
+        },
+        bpm,
+        totalDuration,
+      );
+      if (swungTimeUv !== null) footprint.sizeUv.x = swungTimeUv;
+    }
+    return footprint;
   }
 
   /**
@@ -737,7 +754,7 @@ export class StrokeRenderer {
     // Active step's footprint determines source offset semantics. In Full mode the
     // brush anchors to 0 on that axis, so the source offset is computed from that
     // anchor rather than the raw cursor.
-    const activeFootprint = this.resolveBrushFootprint(activeStepState, bpm, totalDuration);
+    const activeFootprint = this.resolveBrushFootprint(activeStepState, bpm, totalDuration, cursorPos.x);
     const activeAnchor = resolveBrushAnchor(cursorPos, activeFootprint.fullTime, activeFootprint.fullPitch);
 
     const sourceOffsetUv = this.calculateSourceOffset(
@@ -787,7 +804,7 @@ export class StrokeRenderer {
     let yWrapsOutOfBounds = false;
     for (let i = 0; i < numSteps; i++) {
       const s = createStepStateView(state, i);
-      const fp = this.resolveBrushFootprint(s, bpm, totalDuration);
+      const fp = this.resolveBrushFootprint(s, bpm, totalDuration, cursorPos.x);
       maxBrushSizeUv.x = Math.max(maxBrushSizeUv.x, fp.sizeUv.x);
       maxBrushSizeUv.y = Math.max(maxBrushSizeUv.y, fp.sizeUv.y);
       if (fp.fullTime) unionAnchor.x = 0;
@@ -830,7 +847,7 @@ export class StrokeRenderer {
 
     for (let stepIndex = 0; stepIndex < numSteps; stepIndex++) {
       const stepState = createStepStateView(state, stepIndex);
-      const stepFootprint = this.resolveBrushFootprint(stepState, bpm, totalDuration);
+      const stepFootprint = this.resolveBrushFootprint(stepState, bpm, totalDuration, cursorPos.x);
       const stepBrushSizeUv = stepFootprint.sizeUv;
       const stepAnchor = resolveBrushAnchor(cursorPos, stepFootprint.fullTime, stepFootprint.fullPitch);
 
@@ -1084,7 +1101,7 @@ export class StrokeRenderer {
       }
 
       // Update dirty region to include this stroke's bounds
-      const dirtyFp = this.resolveBrushFootprint(activeStepState, bpm, totalDuration);
+      const dirtyFp = this.resolveBrushFootprint(activeStepState, bpm, totalDuration, cursorPos.x);
       const dirtyAnchor = resolveBrushAnchor(cursorPos, dirtyFp.fullTime, dirtyFp.fullPitch);
       const strokeStartX = dirtyAnchor.x;
       const strokeEndX = dirtyAnchor.x + dirtyFp.sizeUv.x;
@@ -1171,7 +1188,7 @@ export class StrokeRenderer {
       const stepState = createStepStateView(state, stepIndex);
       if (stepState.accumulate) continue;
 
-      const footprint = this.resolveBrushFootprint(stepState, bpm, totalDuration);
+      const footprint = this.resolveBrushFootprint(stepState, bpm, totalDuration, cursorPos.x);
       const brushSizeUv = footprint.sizeUv;
       const brushAnchor = resolveBrushAnchor(cursorPos, footprint.fullTime, footprint.fullPitch);
 

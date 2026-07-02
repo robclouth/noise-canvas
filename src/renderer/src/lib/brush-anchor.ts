@@ -1,5 +1,5 @@
 import { BRUSH_ANCHOR_MODE_CENTER } from "./constants";
-import { resolveBrushFootprint } from "./utils";
+import { resolveBrushFootprint, swungGridCellWidthUv } from "./utils";
 import type { State } from "@renderer/store/types";
 
 // Converts a user-facing aim UV into the brush's bottom-left UV (the stroke
@@ -35,8 +35,17 @@ export function aimUvToBrushBlUv(
     bandsPerOctave,
     numBands,
   });
+  // In Grid mode with time-snap on, the brush fills the swung cell it lands in,
+  // so center it on that cell's width rather than the constant grid width.
+  const swungTimeUv = swungGridCellWidthUv(
+    aimX,
+    { brushSizeTime, gridSizeBeats: state.gridSizeBeats, gridSwing: state.gridSwing, snapTime: state.snapTime },
+    bpm,
+    totalDuration,
+  );
+  const timeSizeUv = swungTimeUv ?? footprint.sizeUv.x;
   return {
-    blX: footprint.fullTime ? aimX : aimX - footprint.sizeUv.x / 2,
+    blX: footprint.fullTime ? aimX : aimX - timeSizeUv / 2,
     blY: footprint.fullPitch ? aimY : aimY - footprint.sizeUv.y / 2,
   };
 }

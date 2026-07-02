@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Vector2 } from "three";
-import { screenToZoomed, zoomedToScreen } from "../utils";
+import { screenToZoomed, stepSwungGrid, swungGridCellWidthUv, zoomedToScreen } from "../utils";
 
 describe("screenToZoomed / zoomedToScreen", () => {
   describe("scalar (x-only) backwards-compat", () => {
@@ -63,5 +63,57 @@ describe("screenToZoomed / zoomedToScreen", () => {
       expect(back.x).toBeCloseTo(original.x);
       expect(back.y).toBeCloseTo(original.y);
     });
+  });
+});
+
+describe("swungGridCellWidthUv", () => {
+  // 120 bpm, 1-beat grid → 0.5s cells; 8s file → 16 straight cells.
+  const bpm = 120;
+  const totalDuration = 8;
+  const gridSizeBeats = 1;
+  const gridInterval = (60 / bpm) * gridSizeBeats; // 0.5s
+  const gridIntervalUv = gridInterval / totalDuration;
+
+  const opts = (over: Partial<Parameters<typeof swungGridCellWidthUv>[1]> = {}) => ({
+    brushSizeTime: 0,
+    gridSizeBeats,
+    gridSwing: 0,
+    snapTime: true,
+    ...over,
+  });
+
+  it("returns null when snap is off or the brush size is not Grid", () => {
+    expect(swungGridCellWidthUv(0.25, opts({ snapTime: false }), bpm, totalDuration)).toBeNull();
+    expect(swungGridCellWidthUv(0.25, opts({ brushSizeTime: 1 }), bpm, totalDuration)).toBeNull();
+  });
+
+  it("equals the constant grid width when swing is zero", () => {
+    const w = swungGridCellWidthUv(0.25, opts({ gridSwing: 0 }), bpm, totalDuration);
+    expect(w).toBeCloseTo(gridIntervalUv, 6);
+  });
+
+  it("alternates wide/narrow cells that sum to two grid intervals under swing", () => {
+    const swing = 60;
+    const even = swungGridCellWidthUv(0, opts({ gridSwing: swing }), bpm, totalDuration)!;
+    // Sample inside the first odd cell to land on it.
+    const oddStartUv = stepSwungGrid(0, gridInterval, swing / 100, 1) / totalDuration;
+    const odd = swungGridCellWidthUv(oddStartUv + 1e-6, opts({ gridSwing: swing }), bpm, totalDuration)!;
+    expect(even).toBeGreaterThan(odd);
+    expect(even + odd).toBeCloseTo(2 * gridIntervalUv, 6);
+  });
+
+  it("makes corner-anchor stamps tile with no gaps or overlaps under swing", () => {
+    const swing = 60;
+    // Walk the swung cells across the file; each stamp's BL is the cell start and
+    // its width is the swung cell width. The right edge must land exactly on the
+    // next cell start — no gap, no overlap — at every cell.
+    let cellStart = 0;
+    while (cellStart < totalDuration - 1e-9) {
+      const blUv = cellStart / totalDuration;
+      const width = swungGridCellWidthUv(blUv, opts({ gridSwing: swing }), bpm, totalDuration)!;
+      const nextCellStart = stepSwungGrid(cellStart, gridInterval, swing / 100, 1);
+      expect(blUv + width).toBeCloseTo(nextCellStart / totalDuration, 6);
+      cellStart = nextCellStart;
+    }
   });
 });

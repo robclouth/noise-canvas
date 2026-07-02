@@ -34,7 +34,7 @@ import { SourceFileInfo, StrokeRenderer, StrokeTextures } from "../lib/stroke-re
 import { penState } from "../lib/pen-state";
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import { aimUvToBrushBlUv } from "../lib/brush-anchor";
-import { resolveBrushAnchor, resolveBrushFootprint, unitsToUv } from "../lib/utils";
+import { resolveBrushAnchor, resolveBrushFootprint, swungGridCellWidthUv, unitsToUv } from "../lib/utils";
 
 /**
  * Props for the FileRenderer component.
@@ -578,7 +578,24 @@ const FileRendererInner = memo(
       for (let i = 0; i < steps.length; i++) {
         const stepState = createStepStateView(state, i);
         const stepFp = calculateBrushFootprint(stepState);
-        brushSizeUv.x = Math.max(brushSizeUv.x, stepFp.sizeUv.x);
+        // Match the painted footprint: a snapped Grid-mode time brush fills the
+        // swung cell under the cursor, so the preview rectangle must too.
+        let stepTimeUv = stepFp.sizeUv.x;
+        if (cursorPos.x >= 0 && !stepFp.fullTime) {
+          const swungTimeUv = swungGridCellWidthUv(
+            cursorPos.x,
+            {
+              brushSizeTime: stepState.brushSizeTime,
+              gridSizeBeats: stepState.gridSizeBeats,
+              gridSwing: stepState.gridSwing,
+              snapTime: stepState.snapTime,
+            },
+            bpm,
+            totalDuration,
+          );
+          if (swungTimeUv !== null) stepTimeUv = swungTimeUv;
+        }
+        brushSizeUv.x = Math.max(brushSizeUv.x, stepTimeUv);
         brushSizeUv.y = Math.max(brushSizeUv.y, stepFp.sizeUv.y);
         if (stepFp.fullTime) displayFullAxes.fullTime = true;
         if (stepFp.fullPitch) displayFullAxes.fullPitch = true;

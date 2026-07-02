@@ -223,6 +223,32 @@ export function snapToSwungGridRound(value: number, gridSize: number, swing: num
   return nearest;
 }
 
+// Width in UV of the swung grid cell containing `anchorTimeUv`, for when the time
+// brush tracks the grid ("Grid" size) and time-snap is on. Swing alternates cell
+// widths, so a constant-width brush leaves gaps on the wider cells; sizing each
+// stamp to its own cell makes snapped strokes tile exactly. Returns null when it
+// does not apply (snap off, or an explicit/Full brush size), leaving callers on
+// the constant footprint.
+export function swungGridCellWidthUv(
+  anchorTimeUv: number,
+  opts: { brushSizeTime: number; gridSizeBeats: number; gridSwing: number; snapTime: boolean },
+  bpm: number,
+  totalDuration: number,
+): number | null {
+  if (!opts.snapTime || opts.brushSizeTime > 0) return null;
+  const gridInterval = (60 / bpm) * opts.gridSizeBeats;
+  if (!(gridInterval > 0) || !(totalDuration > 0)) return null;
+  const swing = opts.gridSwing / 100;
+  // The anchor is the brush's BL, itself produced by snapping and round-tripped
+  // through UV, so it can land a hair below an odd cell start. Nudge forward by
+  // a sub-cell epsilon so a value on a grid line resolves to that cell, not the
+  // previous (wider) one — otherwise odd cells get the wrong width and re-open gaps.
+  const anchorSeconds = anchorTimeUv * totalDuration + gridInterval * 1e-6;
+  const cellStart = snapToSwungGridFloor(anchorSeconds, gridInterval, swing);
+  const cellWidthSeconds = stepSwungGrid(cellStart, gridInterval, swing, 1) - cellStart;
+  return cellWidthSeconds / totalDuration;
+}
+
 // Convert beats to bars:beats:ticks format (480 ticks per beat, 4 beats per bar)
 export function formatBeats(totalBeats: number, showSign: boolean = false): string {
   const sign = showSign ? (totalBeats >= 0 ? "+" : "") : "";
