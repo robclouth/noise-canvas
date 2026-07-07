@@ -6,7 +6,13 @@ import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { ChevronDown, Copy, Maximize2, Minimize2, Scissors, X } from "lucide-react";
 import { memo } from "react";
+import { host } from "../lib/host";
 import { Tooltip } from "./tooltip";
+
+// The ONNX-backed AI separation addon is only compiled on macOS, so the feature
+// is offered there only. On other platforms it would download the model and
+// then fail, so the menu item is hidden entirely.
+const AI_SEPARATION_SUPPORTED = host.env.platform === "darwin";
 
 // Helper to get resolution label from bands per octave value
 function getResolutionLabel(bpo: number): string {
@@ -118,15 +124,19 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
             >
               Split Harmonic and Percussive (HPSS)
             </Menu.Item>
-            <Menu.Divider />
-            <Menu.Item
-              onClick={(e) => {
-                e.stopPropagation();
-                useStore.getState().aiSeparateFile(fileId);
-              }}
-            >
-              Split Drums / Bass / Other / Vocals (AI)
-            </Menu.Item>
+            {AI_SEPARATION_SUPPORTED && (
+              <>
+                <Menu.Divider />
+                <Menu.Item
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    useStore.getState().aiSeparateFile(fileId);
+                  }}
+                >
+                  Split Drums / Bass / Other / Vocals (AI)
+                </Menu.Item>
+              </>
+            )}
           </Menu.Dropdown>
         </Menu>
         <Tooltip label="Duplicate this file to create an editable copy.">

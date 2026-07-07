@@ -1,4 +1,5 @@
 import { createWriteStream, existsSync, mkdirSync } from "fs";
+import { rename, unlink } from "fs/promises";
 import { get as httpsGet } from "https";
 import { homedir } from "os";
 import { join } from "path";
@@ -33,42 +34,56 @@ export function downloadModel(
   const url = MODEL_URLS[modelFile];
   if (!url) throw new Error(`No download URL configured for model: ${modelFile}`);
 
-  return new Promise((resolve, reject) => {
-    const file = createWriteStream(dest);
-    const request = httpsGet(url, (response) => {
-      if (response.statusCode === 301 || response.statusCode === 302) {
-        file.close();
-        const redirectUrl = response.headers.location;
-        if (!redirectUrl) return reject(new Error("Redirect with no Location header"));
-        const redirectRequest = httpsGet(redirectUrl, (redirectResponse) => {
-          const total = parseInt(redirectResponse.headers["content-length"] ?? "0", 10);
-          let downloaded = 0;
-          redirectResponse.on("data", (chunk: Buffer) => {
-            downloaded += chunk.length;
-            onProgress?.(downloaded, total);
-          });
-          redirectResponse.pipe(createWriteStream(dest));
-          redirectResponse.on("end", resolve);
-          redirectResponse.on("error", reject);
+  // Download to a temp file and only rename it into place once the full,
+  // verified payload is flushed to disk, so an interrupted/corrupt transfer is
+  // never mistaken for a valid cached model. Redirects (the live CDN path) are
+  // followed with status checks and error handlers on every hop.
+  const tmp = `${dest}.part`;
+
+  return new Promise<void>((resolve, reject) => {
+    const cleanupReject = (err: Error): void => {
+      unlink(tmp).catch(() => {});
+      reject(err);
+    };
+
+    const fetch = (currentUrl: string, redirectsLeft: number): void => {
+      const request = httpsGet(currentUrl, (response) => {
+        const status = response.statusCode ?? 0;
+
+        if (status >= 300 && status < 400 && response.headers.location) {
+          response.resume(); // drain the redirect body so the socket is freed
+          if (redirectsLeft <= 0) return cleanupReject(new Error(`Too many redirects downloading ${modelFile}`));
+          const nextUrl = new URL(response.headers.location, currentUrl).toString();
+          return fetch(nextUrl, redirectsLeft - 1);
+        }
+
+        if (status !== 200) {
+          response.resume();
+          return cleanupReject(new Error(`HTTP ${status} downloading ${modelFile}`));
+        }
+
+        const total = parseInt(response.headers["content-length"] ?? "0", 10);
+        let downloaded = 0;
+        const file = createWriteStream(tmp);
+
+        response.on("data", (chunk: Buffer) => {
+          downloaded += chunk.length;
+          onProgress?.(downloaded, total);
         });
-        redirectRequest.on("error", reject);
-        return;
-      }
-      if (response.statusCode !== 200) {
-        file.close();
-        return reject(new Error(`HTTP ${response.statusCode} downloading ${modelFile}`));
-      }
-      const total = parseInt(response.headers["content-length"] ?? "0", 10);
-      let downloaded = 0;
-      response.on("data", (chunk: Buffer) => {
-        downloaded += chunk.length;
-        onProgress?.(downloaded, total);
+        response.on("error", cleanupReject);
+        file.on("error", cleanupReject);
+        file.on("finish", () => {
+          if (total > 0 && downloaded !== total) {
+            return cleanupReject(new Error(`Incomplete download for ${modelFile} (${downloaded}/${total} bytes)`));
+          }
+          rename(tmp, dest).then(resolve).catch(cleanupReject);
+        });
+        response.pipe(file);
       });
-      response.pipe(file);
-      file.on("finish", resolve);
-      file.on("error", reject);
-    });
-    request.on("error", reject);
+      request.on("error", cleanupReject);
+    };
+
+    fetch(url, 5);
   });
 }
 
