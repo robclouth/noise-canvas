@@ -13,6 +13,7 @@ import { EffectSection } from "./effect-section";
 import { BinauralEffect } from "./effect-views/binaural-effect";
 import { BlurEffect } from "./effect-views/blur-effect";
 import { CloneEffect } from "./effect-views/clone-effect";
+import { CoherenceEffect } from "./effect-views/coherence-effect";
 import { ConvolveEffect } from "./effect-views/convolve-effect";
 import { DynamicsEffect } from "./effect-views/dynamics-effect";
 import { EvolveEffect } from "./effect-views/evolve-effect";
@@ -36,6 +37,7 @@ const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
   transmute: <TransmuteEffect />,
   waveshape: <WaveshapeEffect />,
   convolve: <ConvolveEffect />,
+  coherence: <CoherenceEffect />,
 };
 
 import { ParameterKey } from "@/store/types";
@@ -97,6 +99,7 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
     "convolveGainDb",
   ],
   align: [],
+  coherence: ["coherenceAmount", "coherenceSharpness", "coherenceStrictness", "coherenceAttack"],
 };
 
 const MAX_EFFECTS = 10;

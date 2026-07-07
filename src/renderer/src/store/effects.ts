@@ -67,6 +67,10 @@ export interface EffectsState {
   convolveGainDb: number;
   convolveIrRate: number;
   convolveEdgeMode: number;
+  coherenceAmount: number;
+  coherenceSharpness: number;
+  coherenceStrictness: number;
+  coherenceAttack: number;
 }
 
 export const createEffectsSlice = (): EffectsState => {
@@ -158,5 +162,11 @@ export const createEffectsSlice = (): EffectsState => {
     convolveGainDb: getParameterDef("convolveGainDb").default,
     convolveIrRate: getParameterDef("convolveIrRate").default,
     convolveEdgeMode: getParameterDef("convolveEdgeMode").default,
+
+    // ---------------- Coherence ----------------
+    coherenceAmount: getParameterDef("coherenceAmount").default,
+    coherenceSharpness: getParameterDef("coherenceSharpness").default,
+    coherenceStrictness: getParameterDef("coherenceStrictness").default,
+    coherenceAttack: getParameterDef("coherenceAttack").default,
   };
 };

@@ -2,6 +2,7 @@ import { alignEffect } from "./align-effect";
 import { binauralEffect } from "./binaural-effect";
 import { blurEffect } from "./blur-effect";
 import { cloneEffect } from "./clone-effect";
+import { coherenceEffect } from "./coherence-effect";
 import { convolveEffect } from "./convolve-effect";
 import { dynamicsEffect } from "./dynamics-effect";
 import { evolveEffect } from "./evolve-effect";
@@ -32,4 +33,5 @@ export const effects = {
   waveshape: waveshapeEffect,
   convolve: convolveEffect,
   align: alignEffect,
+  coherence: coherenceEffect,
 };

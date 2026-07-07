@@ -19,6 +19,7 @@ export const EFFECT_KEYS = [
   "waveshape",
   "convolve",
   "align",
+  "coherence",
 ] as const;
 
 // Effect type derived from the keys

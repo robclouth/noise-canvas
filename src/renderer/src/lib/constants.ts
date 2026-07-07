@@ -223,6 +223,7 @@ export const EFFECT_COLORS: Record<string, string> = {
   waveshape: HUE_TEAL,
   convolve: "blue",
   align: "gray",
+  coherence: "cyan",
 };
 
 export const EFFECT_LABELS: Record<string, string> = {
@@ -239,6 +240,7 @@ export const EFFECT_LABELS: Record<string, string> = {
   waveshape: "Waveshape",
   convolve: "Convolve",
   align: "Align",
+  coherence: "Coherence",
 };
 
 export const EFFECT_DESCRIPTIONS: Record<string, string> = {
@@ -258,4 +260,6 @@ export const EFFECT_DESCRIPTIONS: Record<string, string> = {
   convolve:
     "Time-axis convolution with an IR spectrogram. Reverbs, room tones, and other impulse-response-based effects.",
   align: "Phase-align bands at brush start to form a sharp impulse, then fade back to the original phase.",
+  coherence:
+    "Rebuild phase from the magnitude gradient so painted or synthesised tones and glides sound coherent instead of phasey. Chain into Align for sharp transients.",
 };
