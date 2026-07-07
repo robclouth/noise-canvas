@@ -1,5 +1,5 @@
 import { copyFile } from "fs/promises";
-import { join } from "path";
+import { extname, join } from "path";
 import { decodeAudioFile, encodeBufferToAudioFile, probeAudioFile } from "./ffmpeg";
 import type { AnalysisParams, GaboratorAnalysisResult } from "./types";
 import { getModelPath } from "./ai-separation";
@@ -47,9 +47,15 @@ export async function analyze(filePath: string, params: AnalysisParams) {
 
   const { sampleRate, channels, format, codec } = await probeAudioFile(filePath);
 
-  if (!allowedExtensions.includes(format.toLowerCase())) {
+  // Gate on the file extension, not ffmpeg's container name: containers report
+  // names that differ from the extension (m4a -> "mov,mp4,m4a,...", wma -> "asf",
+  // mka -> "matroska,webm"), so matching the container against an extension
+  // allowlist wrongly rejects supported files. The probe above already rejects
+  // anything without a real audio stream.
+  const ext = extname(filePath).replace(/^\./, "").toLowerCase();
+  if (!allowedExtensions.includes(ext)) {
     throw new Error(
-      `The file format '${format}' is not supported. Please use ${allowedExtensions.slice(0, -1).join(", ")}, or ${allowedExtensions[allowedExtensions.length - 1]}.`,
+      `The file format '${ext || format}' is not supported. Please use ${allowedExtensions.slice(0, -1).join(", ")}, or ${allowedExtensions[allowedExtensions.length - 1]}.`,
     );
   }
 

@@ -1,9 +1,14 @@
 import { spawn } from "child_process";
+import { rename, unlink } from "fs/promises";
+import { dirname, extname, join } from "path";
 
 import ffmpegPathStatic from "ffmpeg-static";
 
 const isPackaged = __dirname.includes("app.asar");
 const ffmpegPath = isPackaged ? ffmpegPathStatic!.replace("app.asar", "app.asar.unpacked") : ffmpegPathStatic!;
+
+// Monotonic suffix so concurrent encodes never collide on a temp filename.
+let encodeTempCounter = 0;
 
 export interface BasicAudioMetadata {
   sampleRate: number;
@@ -28,8 +33,11 @@ export function probeAudioFile(inputPath: string): Promise<BasicAudioMetadata> {
     });
 
     child.on("close", () => {
-      const inputMatch = stderr.match(/Input #0,\s*([^,]+),\s*from/);
-      const format = inputMatch ? inputMatch[1].trim() : "unknown";
+      // The container line lists one or more comma-separated format names
+      // (e.g. "mov,mp4,m4a,3gp,3g2,mj2" for m4a), so capture the whole list up
+      // to ", from" and keep the first token as the canonical container name.
+      const inputMatch = stderr.match(/Input #0,\s*(.+?),\s*from/);
+      const format = inputMatch ? inputMatch[1].split(",")[0].trim() : "unknown";
 
       const streamMatch = stderr.match(/Stream #0:0.*Audio:\s*([^\s,]+),\s*(\d+)\s*Hz,\s*([^,]+)/);
       if (!streamMatch) {
@@ -151,6 +159,13 @@ export async function encodeBufferToAudioFile(
   // Some containers (mp3, flac) infer format from outputPath extension.
   // For WAV we're good too. So we don't need extra format flags here.
 
+  // Encode to a sibling temp file (same directory, same extension so ffmpeg
+  // still infers the container) and only rename it over the destination on
+  // success. This keeps the write atomic: a failed or interrupted encode leaves
+  // the original file untouched instead of truncating it in place.
+  const ext = extname(outputPath);
+  const tmpPath = join(dirname(outputPath), `.ncsave-${process.pid}-${encodeTempCounter++}${ext}`);
+
   // 3. Spawn ffmpeg, feed stdin, capture errors
   await new Promise<void>((resolve, reject) => {
     const args = [
@@ -165,10 +180,14 @@ export async function encodeBufferToAudioFile(
       "-i",
       "pipe:0",
       ...codecArgs,
-      outputPath,
+      tmpPath,
     ];
 
     const child = spawn(ffmpegPath, args, { windowsHide: true });
+
+    // Swallow stdin errors (e.g. EPIPE if ffmpeg exits early); the close handler
+    // reports the real failure. Without this, an EPIPE would crash the process.
+    child.stdin.on("error", () => {});
 
     // write interleaved PCM directly into ffmpeg stdin
     child.stdin.write(interleavedBuffer);
@@ -184,5 +203,17 @@ export async function encodeBufferToAudioFile(
       }
       resolve();
     });
+  }).catch(async (err) => {
+    await unlink(tmpPath).catch(() => {});
+    throw err;
   });
+
+  // Atomically replace the destination (fs.rename overwrites on both POSIX and
+  // Windows). If the rename fails, drop the temp file so nothing is left behind.
+  try {
+    await rename(tmpPath, outputPath);
+  } catch (err) {
+    await unlink(tmpPath).catch(() => {});
+    throw err;
+  }
 }
