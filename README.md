@@ -71,17 +71,18 @@ Eventually I might pay for a certificate and sign the binary properly, but for n
    - [Assigning Keys](#assigning-keys)
    - [Quick Slots](#quick-slots)
 5. [Working with Multiple Files](#working-with-multiple-files)
-6. [Analysis and Display](#analysis-and-display)
+6. [History](#history)
+7. [Analysis and Display](#analysis-and-display)
    - [Source Position (Clone Stamp)](#source-position-clone-stamp)
-7. [Output and Playback](#output-and-playback)
-8. [File Menu](#file-menu)
-9. [Integration with Ableton Live](#integration-with-ableton-live)
-10. [Technical Overview](#technical-overview)
-11. [Status](#status)
-12. [Contributing](#contributing)
-13. [Building](#building)
-14. [Credits](#credits)
-15. [License](#license)
+8. [Output and Playback](#output-and-playback)
+9. [File Menu](#file-menu)
+10. [Integration with Ableton Live](#integration-with-ableton-live)
+11. [Technical Overview](#technical-overview)
+12. [Status](#status)
+13. [Contributing](#contributing)
+14. [Building](#building)
+15. [Credits](#credits)
+16. [License](#license)
 
 ---
 
@@ -127,25 +128,18 @@ Each stroke applies transformations directly to the spectral data of the sound.
 
 All brushes and effects share a set of core controls:
 
-- **Width** – horizontal (time) size of the brush in beats.
-- **Height** – vertical (pitch) size in semitones.
 - **Strength** – how strongly the effect applies.
 - **Iterations** – how many times the effect recursively applies (feedback loops, echoes, spectral delays, etc.).
 - **Pan** – stereo positioning or left/right balance of processing.
-- **Blend Mode** – how the processed and original spectrogram are combined.
-- **Wrapping** – defines behavior when painting off the canvas edges:
-  - None – paint stops at the edge.
-  - Wrap Time – repeats horizontally.
-  - Wrap Time + Pitch – repeats both horizontally and vertically.
+- **Size ↔ (Time) / Size ↕ (Pitch)** – brush size in beats / semitones. At the minimum ("Grid") the brush tracks the grid spacing; at the maximum ("Full") it fills the whole file in that axis.
+- **Curve ↔ / ↕** – shape of the brush envelope in each axis: −100% is a sharp spike, 0% a linear triangle, +100% a hard rectangle. This replaces the old "feathering" control — lower the curve for softer edges.
+- **Skew ↔ / ↕** – where the envelope peak sits: for time, −100% is an early pluck, 0% centred, +100% a delayed hit; for pitch, −100% bottom, +100% top.
+- **Wrap Mode** – behaviour when painting off the canvas edges: Off, Time, Pitch, or Time & Pitch.
+- **Anchor Mode** – where the cursor sits on the brush: Corner (onset corner) or Center.
+- **Blend Mode** – how the processed and original spectrogram are combined (see below).
+- **Warp Algorithm** – resynthesis strategy for reconstructing sound after edits: **Neutral**, **Neutralish**, **Percussive**, **Flangey**, or **Noisey**. Each produces its own artifacts — pick what sounds best.
 
-- **Warp Algorithm** – different resynthesis strategies for reconstructing sound after edits.
-  These aren’t perfect — each produces unique artifacts. Pick what sounds best.
-- **Feathering** – softens brush edges in both time and pitch.
-  - Maximum feather = softest edges.
-  - **Feather slope** adjusts how the transition fades:
-    - -100%: fades from top to bottom.
-    - 0%: symmetrical fade.
-    - +100%: fades from bottom to top.
+You can also assign up to **4 Macros** per brush — renamable controls that can drive any modulatable parameter at once.
 
 ---
 
@@ -174,62 +168,121 @@ This works for almost all numeric parameters and makes experimentation less risk
 
 ### Available Effects
 
-You can enable any combination of effects at once and change their order using the dots icon in the top-right corner of each panel.
+You can enable any combination of effects at once and change their order using the dots icon in the top-right corner of each panel. They're listed here in the order they appear in the UI.
+
+Several effects share an **Edge Mode** that decides what happens to content that spills past the brush border: **Cut** (discard it), **Bleed** (pull in surrounding content), **Wrap** (wrap around the edge), **Clamp** (hold the edge value), **Reflect** (ping-pong flip), or **Invert**.
 
 #### Dynamics
 
-Controls amplitude, compression, and gating directly in the spectrogram domain.
+Controls amplitude, compression, expansion, gating, and inversion directly in the spectrogram domain.
 
-- **Threshold** – amplitude threshold.
-- **Upper Ratio** – compression ratio above the threshold.
-- **Lower Ratio** – expansion ratio below the threshold.
+- **Threshold** – amplitude threshold in dB.
+- **Upper Ratio** – gain applied above the threshold (0.5 = compress, 2 = expand, 0 = gate, −1 = invert).
+- **Lower Ratio** – gain applied below the threshold.
 - **Knee** – smoothness of the transition around the threshold.
-- **Gain** - overall gain to apply.
-
-Together, these allow everything from subtle dynamic shaping to hard gating, expansion and inverting the amplitude.
+- **Gain** – overall output gain in dB.
 
 #### Transform
 
-Shifts, scales, or rotates the spectral image.
+Shifts, scales, and rotates the spectral image.
 
-- **Shift Horizontal / Vertical** – move content in time or pitch.
-- **Scale Horizontal / Vertical** – stretch or compress.
-- **Rotate** – rotate the selection.
-- **Edge Mode** – determines what happens at the brush borders:
-  - **Cut** – anything moved outside is cut off.
-  - **Bleed** – pulls in content from surrounding areas.
-  - **Wrap** – wraps content around edges.
-  - **Mirror** – wraps but alternates flips (ping-pong style).
+- **Shift ↔ / ↕** – move content in time (beats) or pitch (semitones).
+- **Scale ↔ / ↕** – stretch or compress in time or pitch.
+- **Rotation** – rotate the selection, in degrees.
+- **Edge Mode** – behaviour at the brush borders (see above).
 
 #### Overtones
 
-Adds harmonic or inharmonic overtones to the painted region.
+Adds harmonic or inharmonic overtones to the painted region for richer timbres.
 
-- **Count** – number of harmonics.
-- **Scale** – vertical spacing between harmonics.
-- **Decay** – how amplitude decreases per overtone.
-- **Shape** – harmonic relationship type:
-  - Logarithmic – natural harmonic series.
-  - Exponential – octave series.
-  - Selected Scale – uses the chosen musical scale.
+- **Count** – number of overtones (1–64).
+- **Scale** – vertical spacing between overtones.
+- **Decay** – how amplitude falls off per overtone.
+- **Shape** – Logarithmic (natural harmonic series), Exponential, Octaves, or Selected Scale.
 
-#### Smooth
+#### Blur
 
-Spectral blurring for echo, reverb, and diffusion-like effects.
+Smooths and blends frequencies over time and pitch for echo, reverb, and diffusion-like effects. (This was previously called "Smooth".)
 
-- **Blur Horizontal / Vertical** – degree of blur in time/pitch.
-- **Noise Horizontal / Vertical** – random scattering to make the blur more diffuse.
-- **Bleed** – allows smoothing beyond brush borders.
-- **Origin** – defines where blur radiates from:
-  - Left – forward reverb.
-  - Middle – symmetrical reverb.
-  - Right – reversed reverb/echo.
+- **Blur ↔ / ↕** – degree of blur in time / pitch.
+- **Noise ↔ / ↕** – random scattering to make the blur more diffuse.
+- **Samples ↔ / ↕** – blur kernel sample count (quality vs. speed).
+- **Edge Mode** – behaviour at the brush border.
+- **Origin** – where the blur radiates from: Left (forward reverb), Middle (symmetrical), Right (reversed).
+
+#### Clone
+
+Stamps beat- and semitone-spaced copies of the painted region in 2D — echoes, spectral delays, and stacked harmonics.
+
+- **Space ↔ / ↕** – spacing between copies in beats / semitones (can be negative).
+- **Copies ↔ / ↕** – number of copies along each axis (1–32).
+- **Direction ↔ / ↕** – Forward/Middle/Backward and Up/Middle/Down.
+- **Decay** – fade applied to each successive copy.
+- **Edge Mode** – behaviour for copies extending past the border.
 
 #### Synthesize
 
 Fills the brushed area with generated material.
 
-- **Type** – noise or sine (sine currently produces interesting artifacts).
+- **Type** – Noise, Sine, or Impulse.
+
+#### Evolve
+
+A reaction–advection–diffusion simulation for fluid, biological, and chaotic patterns.
+
+- **Flow** – advection strength along the gradient (negative reverses).
+- **Spread** – diffusion (positive spreads, negative sharpens).
+- **Grow** – reaction strength (positive grows, negative shrinks).
+- **Swirl** – adds a rotational component to the flow.
+- **Drift ↔ / ↕** – directional bias in time / pitch.
+- **Decay** – entropy / death rate (negative boosts).
+- **Scale ↔ / ↕** – kernel size in time / pitch.
+- **Edge Mode** – behaviour at the brush border.
+
+#### Binaural
+
+HRTF-based binaural spatialization for 3D placement of the painted region.
+
+- **Azimuth** – horizontal angle (0° front, 90° right, −90° left, ±180° behind).
+- **Distance** – source distance in metres (affects level and high-frequency absorption).
+- **Stereo Angle** – stereo spread around the azimuth (0° = mono, 180° = full L/R offset).
+
+#### Sort
+
+Odd-even transposition sort of the spectrogram bins — pixel-sorting for sound.
+
+- **Direction** – Horizontal, Vertical, or Both.
+- **Order** – Forwards or Backwards.
+- **Sort By** – Magnitude, Phase, dB, Frequency, or Pan.
+- **Stereo Mode** – sort channels Linked or Independent.
+
+#### Transmute
+
+Low-level operations on the raw magnitude and phase of each bin.
+
+- **Mode** – Swap Mag/Phase, Complex Power, Phase Rotate, Phase Quantize, Stereo Cross, or Phase Gate.
+- **Amount** – the primary parameter for the selected mode.
+- **Curve** – secondary shaping for modes that use it.
+
+#### Waveshape
+
+Waveshaper distortion applied to the spectral bins.
+
+- **Shape** – Soft Clip, Hard Clip, Rectify, Fold, Wrap, or Sine.
+- **Drive** – gain before shaping (for Fold/Wrap/Sine, controls how many times the signal cycles through the nonlinearity).
+- **Tilt** – skews the real/imaginary balance before shaping.
+
+#### Convolve
+
+Time-axis convolution with an impulse-response spectrogram — reverbs, room tones, and other IR-based effects.
+
+- **IR** – the impulse-response file, chosen from your open files.
+- **Taps** – number of IR frames applied (longer, more expensive tail).
+- **Start** – where in the IR the first tap begins.
+- **Pitch Shift** – pitch shift applied to the IR, in semitones.
+- **Rate** – source read rate per tap (1 = forward, −1 = reverse, other values stretch/compress the tail).
+- **Gain** – output gain of the convolution, in dB.
+- **Edge Mode** – behaviour for taps extending past the border.
 
 ---
 
@@ -244,6 +297,8 @@ How the processed data merges with the original spectrogram:
 - **Maximum / Minimum** – keep stronger or weaker values.
 - **Difference** – absolute difference between source and result.
 - **Dissolve** – noisy probabilistic mixing similar to Photoshop’s dissolve mode.
+- **Screen** – Photoshop-style brightening (inverse multiply).
+- **Mask** – a self-normalizing relative-energy gate.
 
 ---
 
@@ -265,15 +320,16 @@ In other words, **Amount** controls “how much of the original slider value vs 
 
 ### Modes
 
-- **Pattern** – uses an image or texture as a 2D modulation pattern.
-- **Envelope Follower** – modulates based on the amplitude of the painted region.
-- **Waveforms** – standard shapes: sine, triangle, square, saw, pulse, random, smooth noise, etc.
-- **Selected Scale** – restricts modulation to notes within the selected scale.
+Each modulator runs in one of three modes:
+
+- **Pattern** – a 2D shape scrolled across time and pitch. Choose from waveforms (Sine, Triangle, Square, Sawtooth, Pulse, Random, Smooth Noise), a big set of procedural textures (Quilt, Clouds, Cells, Bubbles, Craters, Ripples, Scratches, Swirls, Paper, Marble, Weave, Terrain, Flow), or **Selected Scale** to snap modulation to the current scale.
+- **Envelope** – follows the amplitude, phase, or panning of the painted region, with adjustable smoothing and dB range.
+- **Sequencer** – a step grid with adjustable steps, rows, loop length, pitch range, and swing.
 
 ### Modulator Inputs
 
-- **Factory Textures** – built-in modulation shapes.
-- **User Textures** – custom images placed in:
+- **Factory shapes** – the built-in waveforms and procedural textures above.
+- **User textures** – drop your own images in:
 
   ```
   Documents/Noise Canvas/Textures/
@@ -281,9 +337,14 @@ In other words, **Amount** controls “how much of the original slider value vs 
 
 ### Modulator Controls
 
-- **Horizontal Rate** – modulation rate in beats.
-- **Vertical Rate** – modulation spacing in semitones.
 - **Depth** – modulation intensity.
+- **Rate ↔** – horizontal rate in beats.
+- **Rate ↕** – vertical spacing in semitones.
+- **Rotation** – rotates the pattern.
+- **Stereo Spread** – decorrelates the left/right channels.
+- **Phase ↔ / ↕** – offsets the pattern’s start position in each axis.
+
+Beyond the three modulators, parameters can also be driven by **contextual sources** — Iteration, Time Position, Pitch Position, Randomize, Step, and pen Pressure / Tilt.
 
 ---
 
@@ -329,30 +390,60 @@ This allows for layered processing, resampling, or selective restoration.
 
 ---
 
+## History
+
+Every edit you make is captured in the **History** panel — but it’s a **branching tree**, not a flat undo list. If you undo a few steps and then paint something new, the steps you undid aren’t thrown away: they stay as a separate branch you can return to at any time. This lets you explore variations freely without ever painting yourself into a corner.
+
+Each entry is a snapshot of the file at that point. The **current** state is highlighted, and every node shows its label and how long ago it was made.
+
+- **Jump to any state** – click a node to instantly return the file to it.
+- **Undo / Redo** – the arrows at the top of the panel step to the parent node (undo) or the most recent child (redo). `Cmd/Ctrl+Z` and `Shift+Cmd/Ctrl+Z` do the same.
+- **Rename** – double-click a node (or right-click → Rename) to give it a memorable name.
+- **Favorite** – right-click → Favorite to star the states you like so they’re easy to find later.
+- **Export a branch** – right-click → Export branch… renders out the audio for that node’s lineage. (In the Ableton extension there’s also **Export branch to Live**.)
+- **Delete a branch** – right-click → Delete branch removes a node and everything downstream of it.
+
+The panel’s **⋮ menu** adds **Export History**, **Export Favorites**, and **Purge History** — which clears the file’s on-disk history to reclaim space while leaving the current state untouched.
+
+History is saved to disk alongside the file, so your whole tree survives closing and reopening.
+
+---
+
 ## Analysis and Display
 
 Right-hand panel settings:
 
-- **Resolution** – adjusts balance between time and frequency detail.
-- **Grid** – set to zero to disable.
-- **Lock Size** – locks brush size to current grid spacing.
-- **Display** – controls spectrogram brightness.
+- **Resolution** – trades off time vs. frequency detail, from **Best Time** through **Balanced** to **Best Pitch**.
+- **Grid Size (Beats / Semitones)** – grid spacing for snapping; set the semitone grid to 0 to snap to the selected scale instead.
+- **Grid Swing** – swing feel for the time grid.
+- **Snap Time / Snap Pitch** – toggle snapping on each axis.
+- **Minimum Frequency** – lowest frequency shown.
+- **Scale** – tonic and scale type used for pitch snapping and scale-based effects/modulation.
+- **Display Min / Max dB** – brightness range of the spectrogram.
+
+### Splitting a File
+
+Each file header has a **scissors** menu:
+
+- **Split Harmonic and Percussive (HPSS)** – separates the file into harmonic and percussive layers.
+- **Split Drums / Bass / Other / Vocals (AI)** – AI stem separation (macOS only; downloads a model on first use).
 
 ### Source Position (Clone Stamp)
 
-Hold **Ctrl** and click to set a source position.
-Modes:
+Hold **Ctrl** and click to set a source position for painting from elsewhere in the file (or from another file).
+Tracking modes:
 
-- **Fixed** – always takes from that position.
-- **Anchored** – maintains offset relative to source.
-- **Offset** – relative to current stroke.
+- **Follow** – the source moves along with your stroke.
+- **Fixed** – always samples from that position.
+- **Anchored** – keeps a fixed offset relative to the source.
 
 ---
 
 ## Output and Playback
 
-- **MagLimit** – limits maximum magnitude (acts like a limiter).
-- **Normalize** – balances loudness across edits.
+- **Mag. Limit** – soft-clips each bin’s magnitude to tame runaway peaks (0 = off).
+- **Limiter** – bakes a true-peak limiter into the synthesized audio so playback and export don’t clip.
+- **Accumulate** – when on, painting over the same area builds up; when off, a stroke won’t overlap itself.
 - **Transport Controls** – play, loop, and auto-playback of strokes.
   When the paint icon is active, each stroke automatically plays back the affected region.
 
@@ -360,15 +451,22 @@ Modes:
 
 ## File Menu
 
-- **New File** – create an empty file (set sample rate, BPM, length in beats).
-- **Open File** – load existing audio.
-- **Save / Save As** – save the current project.
-- **Save New Version** – saves a numbered copy.
+**File:**
+
+- **New** – create an empty file (set sample rate, BPM, length in beats).
+- **Open / Open Recent** – load existing audio.
+- **Save / Save As** – save the current file.
+- **Save Version** – save a numbered copy without overwriting the original.
 - **Close File** – close the current tab.
+- **Export History** – export the file’s edit history.
+
+**Edit:**
+
 - **Undo / Redo** – full edit history.
-- **Restore Original** – reloads the unedited file.
-- **Reanalyze File** – regenerates analysis using current resolution settings.
-- **Duplicate** – duplicates the active file.
+- **Restore Original** – reload the unedited file.
+- **Re-analyze File** – regenerate the analysis at the current resolution settings.
+- **Duplicate File** – duplicate the active file.
+- **Double Length / Half Length** – stretch or shrink the file’s length.
 
 ---
 
