@@ -1099,6 +1099,431 @@ Napi::Value HpssAsync(const Napi::CallbackInfo &info)
     return promise;
 }
 
+// ─── NMF separation ──────────────────────────────────────────────────────────
+//
+// Factorises the magnitude spectrogram as V ≈ W·H, where W holds `numComponents`
+// spectral templates and H their activations over time, then turns each
+// component's reconstruction into a Wiener soft mask. Like HPSS the masks are
+// applied to the magnitude channels only and sum to 1 across components, so the
+// parts add back up to the input — phase channels are copied through untouched.
+//
+// Gaborator's layout is multirate (each band has its own frame count), so the
+// factorisation runs on a rectangular matrix built by resampling every band onto
+// a shared normalised time grid. Masks are then evaluated at each band's native
+// rate by interpolating H, which keeps the fit cheap without losing resolution
+// in the output.
+
+// Longest band length used for the fit grid. Beyond this the extra temporal
+// detail costs iterations without changing the templates meaningfully.
+#define NMF_MAX_FIT_FRAMES 2048
+
+// Deterministic PRNG (LCG) so a given seed always yields the same factorisation.
+static inline float nmfRandom(uint32_t &state)
+{
+    state = state * 1664525u + 1013904223u;
+    return (float)((state >> 8) & 0xFFFFFFu) / (float)0x1000000;
+}
+
+class NmfWorker : public Napi::AsyncWorker
+{
+public:
+    NmfWorker(Napi::Env env,
+              Napi::Float32Array packedDataJs,
+              Napi::Object metaJs,
+              int numComponents, int iterations, uint32_t seed)
+        : Napi::AsyncWorker(env),
+          deferred(Napi::Promise::Deferred::New(env)),
+          numComponents(numComponents), iterations(iterations), seed(seed)
+    {
+        packedData.assign(packedDataJs.Data(),
+                          packedDataJs.Data() + packedDataJs.ElementLength());
+
+        numBands    = metaJs.Get("numBands").As<Napi::Number>().Int32Value();
+        numChannels = metaJs.Get("numChannels").As<Napi::Number>().Int32Value();
+
+        Napi::Uint32Array bo = metaJs.Get("bandOffsets").As<Napi::Uint32Array>();
+        bandOffsets.assign(bo.Data(), bo.Data() + bo.ElementLength());
+
+        Napi::Uint32Array bl = metaJs.Get("bandLengths").As<Napi::Uint32Array>();
+        bandLengths.assign(bl.Data(), bl.Data() + bl.ElementLength());
+    }
+
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+    void Execute() override
+    {
+        const int floatsPerPixel = 4;
+        const float eps = 1e-10f;
+        const int K = numComponents;
+
+        int maxLen = 0;
+        for (int b = 0; b < numBands; ++b)
+            maxLen = std::max(maxLen, (int)bandLengths[b]);
+        const int T = std::max(1, std::min(maxLen, NMF_MAX_FIT_FRAMES));
+
+        // V [numBands × T]: magnitudes summed over channels so one factorisation
+        // describes both, keeping component k the same sound in left and right.
+        std::vector<float> V((size_t)numBands * T, 0.0f);
+        for (int b = 0; b < numBands; ++b)
+        {
+            const int L = (int)bandLengths[b];
+            for (int t = 0; t < T; ++t)
+            {
+                const float normTime = (T > 1) ? (float)t / (float)(T - 1) : 0.0f;
+                const int st = (L > 1)
+                                   ? std::min((int)std::lround(normTime * (float)(L - 1)), L - 1)
+                                   : 0;
+                float sum = 0.0f;
+                for (int ch = 0; ch < numChannels; ++ch)
+                    sum += packedData[((size_t)bandOffsets[b] + st) * floatsPerPixel + ch * 2];
+                V[(size_t)b * T + t] = sum;
+            }
+        }
+
+        uint32_t rng = seed ? seed : 1u;
+        std::vector<float> W((size_t)numBands * K), H((size_t)K * T);
+        for (auto &w : W) w = nmfRandom(rng) * 0.9f + 0.1f;
+        for (auto &h : H) h = nmfRandom(rng) * 0.9f + 0.1f;
+
+        std::vector<float> WH((size_t)numBands * T);
+        std::vector<float> ratio((size_t)numBands * T);
+        std::vector<float> hAcc((size_t)K * T);
+        std::vector<float> hSum(K), wSum(K);
+
+        // Multiplicative updates for the KL divergence, which tracks the wide
+        // dynamic range of a constant-Q magnitude spectrum better than the
+        // Euclidean variant does.
+        for (int it = 0; it < iterations; ++it)
+        {
+            for (int b = 0; b < numBands; ++b)
+            {
+                float *out = &WH[(size_t)b * T];
+                std::fill(out, out + T, 0.0f);
+                for (int k = 0; k < K; ++k)
+                {
+                    const float w = W[(size_t)b * K + k];
+                    if (w <= 0.0f) continue;
+                    const float *hrow = &H[(size_t)k * T];
+                    for (int t = 0; t < T; ++t) out[t] += w * hrow[t];
+                }
+            }
+            for (size_t i = 0; i < WH.size(); ++i)
+                ratio[i] = V[i] / (WH[i] + eps);
+
+            // H ← H ⊙ (Wᵀ·ratio) / (Wᵀ·1)
+            std::fill(hAcc.begin(), hAcc.end(), 0.0f);
+            std::fill(wSum.begin(), wSum.end(), 0.0f);
+            for (int b = 0; b < numBands; ++b)
+            {
+                const float *rrow = &ratio[(size_t)b * T];
+                for (int k = 0; k < K; ++k)
+                {
+                    const float w = W[(size_t)b * K + k];
+                    wSum[k] += w;
+                    if (w <= 0.0f) continue;
+                    float *arow = &hAcc[(size_t)k * T];
+                    for (int t = 0; t < T; ++t) arow[t] += w * rrow[t];
+                }
+            }
+            for (int k = 0; k < K; ++k)
+            {
+                float *hrow = &H[(size_t)k * T];
+                const float *arow = &hAcc[(size_t)k * T];
+                const float denom = wSum[k] + eps;
+                for (int t = 0; t < T; ++t) hrow[t] *= arow[t] / denom;
+            }
+
+            // W ← W ⊙ (ratio·Hᵀ) / (1·Hᵀ), using the ratio from the same sweep;
+            // recomputing WH between the two halves costs a full pass for a
+            // convergence difference that isn't audible.
+            for (int k = 0; k < K; ++k)
+            {
+                const float *hrow = &H[(size_t)k * T];
+                float s = 0.0f;
+                for (int t = 0; t < T; ++t) s += hrow[t];
+                hSum[k] = s;
+            }
+            for (int b = 0; b < numBands; ++b)
+            {
+                const float *rrow = &ratio[(size_t)b * T];
+                for (int k = 0; k < K; ++k)
+                {
+                    const float *hrow = &H[(size_t)k * T];
+                    float s = 0.0f;
+                    for (int t = 0; t < T; ++t) s += rrow[t] * hrow[t];
+                    W[(size_t)b * K + k] *= s / (hSum[k] + eps);
+                }
+            }
+        }
+
+        // Normalise each template to unit sum, pushing the scale into its
+        // activations so W·H is unchanged but the columns are comparable.
+        for (int k = 0; k < K; ++k)
+        {
+            float colSum = 0.0f;
+            for (int b = 0; b < numBands; ++b) colSum += W[(size_t)b * K + k];
+            if (colSum <= eps) continue;
+            for (int b = 0; b < numBands; ++b) W[(size_t)b * K + k] /= colSum;
+            float *hrow = &H[(size_t)k * T];
+            for (int t = 0; t < T; ++t) hrow[t] *= colSum;
+        }
+
+        // Order components by spectral centroid so part 1 is the lowest-pitched.
+        // The factorisation itself has no canonical ordering, and low→high reads
+        // naturally against the vertical spectrogram.
+        std::vector<int> order(K);
+        std::iota(order.begin(), order.end(), 0);
+        std::vector<float> centroid(K, 0.0f);
+        for (int k = 0; k < K; ++k)
+        {
+            float num = 0.0f, den = 0.0f;
+            for (int b = 0; b < numBands; ++b)
+            {
+                const float w = W[(size_t)b * K + k];
+                num += (float)b * w;
+                den += w;
+            }
+            centroid[k] = (den > eps) ? num / den : 0.0f;
+        }
+        std::sort(order.begin(), order.end(),
+                  [&](int a, int b) { return centroid[a] < centroid[b]; });
+
+        // Wiener masks at each band's native frame rate, with H interpolated
+        // back up from the fit grid. Phase channels stay as they are.
+        parts.assign(K, packedData);
+        std::vector<float> comp(K);
+        for (int b = 0; b < numBands; ++b)
+        {
+            const int L = (int)bandLengths[b];
+            for (int t = 0; t < L; ++t)
+            {
+                const float pos = (L > 1)
+                                      ? ((float)t / (float)(L - 1)) * (float)(T - 1)
+                                      : 0.0f;
+                const int t0 = std::min((int)pos, T - 1);
+                const int t1 = std::min(t0 + 1, T - 1);
+                const float frac = pos - (float)t0;
+
+                float total = 0.0f;
+                for (int k = 0; k < K; ++k)
+                {
+                    const int src = order[k];
+                    const float h = H[(size_t)src * T + t0] * (1.0f - frac) +
+                                    H[(size_t)src * T + t1] * frac;
+                    const float v = W[(size_t)b * K + src] * h;
+                    comp[k] = v * v;
+                    total += comp[k];
+                }
+                total += eps;
+
+                for (int ch = 0; ch < numChannels; ++ch)
+                {
+                    const size_t fi = ((size_t)bandOffsets[b] + t) * floatsPerPixel + ch * 2;
+                    const float mag = packedData[fi];
+                    for (int k = 0; k < K; ++k)
+                        parts[k][fi] = mag * (comp[k] / total);
+                }
+            }
+        }
+    }
+
+    void OnOK() override
+    {
+        Napi::Env env = Env();
+        Napi::Array partsJs = Napi::Array::New(env, parts.size());
+        for (size_t k = 0; k < parts.size(); ++k)
+        {
+            Napi::Float32Array arr = Napi::Float32Array::New(env, parts[k].size());
+            memcpy(arr.Data(), parts[k].data(), parts[k].size() * sizeof(float));
+            partsJs[(uint32_t)k] = arr;
+        }
+        Napi::Object result = Napi::Object::New(env);
+        result.Set("parts", partsJs);
+        deferred.Resolve(result);
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    std::vector<float> packedData;
+    std::vector<std::vector<float>> parts;
+    std::vector<uint32_t> bandOffsets, bandLengths;
+    int numComponents, iterations;
+    uint32_t seed;
+    int numBands = 0, numChannels = 0;
+};
+
+Napi::Value NmfAsync(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 3 || !info[0].IsTypedArray() || !info[1].IsObject() || !info[2].IsNumber())
+    {
+        Napi::TypeError::New(env,
+            "Expected (Float32Array packedData, Object meta, number numComponents[, number iterations, number seed])")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    const int numComponents = std::max(2, info[2].As<Napi::Number>().Int32Value());
+    const int iterations = (info.Length() > 3 && info[3].IsNumber())
+                               ? std::max(1, info[3].As<Napi::Number>().Int32Value())
+                               : 120;
+    const uint32_t seed = (info.Length() > 4 && info[4].IsNumber())
+                              ? (uint32_t)info[4].As<Napi::Number>().Int64Value()
+                              : 1u;
+
+    auto *worker = new NmfWorker(env,
+        info[0].As<Napi::Float32Array>(),
+        info[1].As<Napi::Object>(),
+        numComponents, iterations, seed);
+    auto promise = worker->GetPromise();
+    worker->Queue();
+    return promise;
+}
+
+// ─── Spectrogram merge ───────────────────────────────────────────────────────
+//
+// Sums several spectrograms that share a band layout. The sum is taken on the
+// complex coefficients, not the magnitudes: parts fresh out of a split share the
+// input's phase and would add correctly either way, but once a part has been
+// edited (the transform effect rewrites phase) magnitude addition overlaps
+// incoherently and reads as too loud in the shared bins.
+
+class MergeWorker : public Napi::AsyncWorker
+{
+public:
+    MergeWorker(Napi::Env env, Napi::Array inputsJs, Napi::Object metaJs)
+        : Napi::AsyncWorker(env),
+          deferred(Napi::Promise::Deferred::New(env))
+    {
+        const uint32_t count = inputsJs.Length();
+        inputs.resize(count);
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            Napi::Float32Array arr = inputsJs.Get(i).As<Napi::Float32Array>();
+            inputs[i].assign(arr.Data(), arr.Data() + arr.ElementLength());
+        }
+
+        numBands    = metaJs.Get("numBands").As<Napi::Number>().Int32Value();
+        numChannels = metaJs.Get("numChannels").As<Napi::Number>().Int32Value();
+
+        Napi::Uint32Array bo = metaJs.Get("bandOffsets").As<Napi::Uint32Array>();
+        bandOffsets.assign(bo.Data(), bo.Data() + bo.ElementLength());
+
+        Napi::Uint32Array bl = metaJs.Get("bandLengths").As<Napi::Uint32Array>();
+        bandLengths.assign(bl.Data(), bl.Data() + bl.ElementLength());
+    }
+
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+    void Execute() override
+    {
+        if (inputs.empty())
+        {
+            SetError("mergeSpectrograms needs at least one input");
+            return;
+        }
+        const size_t len = inputs[0].size();
+        for (const auto &in : inputs)
+        {
+            if (in.size() != len)
+            {
+                SetError("mergeSpectrograms inputs must all be the same length");
+                return;
+            }
+        }
+
+        const int floatsPerPixel = 4;
+        merged.assign(len, 0.0f);
+
+        for (int b = 0; b < numBands; ++b)
+        {
+            const int L = (int)bandLengths[b];
+            for (int t = 0; t < L; ++t)
+            {
+                for (int ch = 0; ch < numChannels; ++ch)
+                {
+                    const size_t fi = ((size_t)bandOffsets[b] + t) * floatsPerPixel + ch * 2;
+                    if (fi + 1 >= len) continue;
+
+                    double re = 0.0, im = 0.0;
+                    // The part contributing most of the magnitude decides which
+                    // branch the result is expressed on.
+                    float refPhase = inputs[0][fi + 1];
+                    float bestMag = -1.0f;
+                    for (const auto &in : inputs)
+                    {
+                        const float mag = in[fi];
+                        const float phase = in[fi + 1];
+                        re += (double)mag * std::cos((double)phase);
+                        im += (double)mag * std::sin((double)phase);
+                        if (mag > bestMag)
+                        {
+                            bestMag = mag;
+                            refPhase = phase;
+                        }
+                    }
+
+                    const double mag = std::sqrt(re * re + im * im);
+                    merged[fi] = (float)mag;
+                    if (mag > 0.0)
+                    {
+                        // analyze() unwraps phase along time and the transform
+                        // effect's maths depends on that convention, so re-express
+                        // the summed angle on the reference's branch rather than
+                        // leaving it inside atan2's [-π, π]. Parts that still
+                        // share a phase come back with it bit-for-bit.
+                        const double raw = std::atan2(im, re);
+                        const double delta = std::remainder(raw - (double)refPhase, 2.0 * M_PI);
+                        merged[fi + 1] = (float)((double)refPhase + delta);
+                    }
+                    else
+                    {
+                        // A silent bin has no meaningful angle; keep the
+                        // reference phase so the field stays continuous.
+                        merged[fi + 1] = refPhase;
+                    }
+                }
+            }
+        }
+    }
+
+    void OnOK() override
+    {
+        Napi::Env env = Env();
+        Napi::Float32Array arr = Napi::Float32Array::New(env, merged.size());
+        memcpy(arr.Data(), merged.data(), merged.size() * sizeof(float));
+        Napi::Object result = Napi::Object::New(env);
+        result.Set("merged", arr);
+        deferred.Resolve(result);
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    std::vector<std::vector<float>> inputs;
+    std::vector<float> merged;
+    std::vector<uint32_t> bandOffsets, bandLengths;
+    int numBands = 0, numChannels = 0;
+};
+
+Napi::Value MergeSpectrogramsAsync(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 2 || !info[0].IsArray() || !info[1].IsObject())
+    {
+        Napi::TypeError::New(env, "Expected (Float32Array[] parts, Object meta)")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    auto *worker = new MergeWorker(env, info[0].As<Napi::Array>(), info[1].As<Napi::Object>());
+    auto promise = worker->GetPromise();
+    worker->Queue();
+    return promise;
+}
+
 // ─── AI Separation (macOS arm64 only, via ONNX Runtime C++) ─────────────────
 
 #ifdef GABORATOR_ONNX_ENABLED
@@ -1416,6 +1841,8 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
     exports.Set("synthesize", Napi::Function::New(env, SynthesizeAsync));
     exports.Set("applyLimiter", Napi::Function::New(env, ApplyLimiterTest));
     exports.Set("hpss", Napi::Function::New(env, HpssAsync));
+    exports.Set("nmf", Napi::Function::New(env, NmfAsync));
+    exports.Set("mergeSpectrograms", Napi::Function::New(env, MergeSpectrogramsAsync));
 #ifdef GABORATOR_ONNX_ENABLED
     exports.Set("aiSeparate", Napi::Function::New(env, AiSeparateAsync));
 #endif

@@ -120,6 +120,8 @@ export function createExtensionAnalysis(): AnalysisApi {
     downloadModel: () => notImplemented("downloadModel"),
     aiSeparate: () => notImplemented("aiSeparate"),
     hpss: () => notImplemented("hpss"),
+    nmf: () => notImplemented("nmf"),
+    mergeSpectrograms: () => notImplemented("mergeSpectrograms"),
     exportAudio: () => notImplemented("exportAudio"),
     decodeAudio: () => notImplemented("decodeAudio"),
     copyAudioFile: () => notImplemented("copyAudioFile"),

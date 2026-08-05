@@ -90,6 +90,27 @@ declare global {
         kernelH?: number,
         kernelV?: number,
       ) => Promise<{ harmonic: Float32Array; percussive: Float32Array }>;
+      nmf: (
+        packedData: Float32Array,
+        analysisMetadata: {
+          numBands: number;
+          numChannels: number;
+          bandOffsets: Uint32Array;
+          bandLengths: Uint32Array;
+        },
+        numComponents: number,
+        iterations?: number,
+        seed?: number,
+      ) => Promise<{ parts: Float32Array[] }>;
+      mergeSpectrograms: (
+        parts: Float32Array[],
+        analysisMetadata: {
+          numBands: number;
+          numChannels: number;
+          bandOffsets: Uint32Array;
+          bandLengths: Uint32Array;
+        },
+      ) => Promise<{ merged: Float32Array }>;
       exportAudio: (
         audioChannels: Float32Array[],
         outputPath: string,

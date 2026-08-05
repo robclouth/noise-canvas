@@ -191,6 +191,44 @@ export async function hpss(
 }
 
 /**
+ * Split a spectrogram into `numComponents` parts by non-negative matrix
+ * factorisation. Like hpss this masks the magnitude channels and leaves phase
+ * alone, and the masks sum to 1, so the parts add back up to the input.
+ */
+export async function nmf(
+  packedData: Float32Array,
+  analysisMetadata: {
+    numBands: number;
+    numChannels: number;
+    bandOffsets: Uint32Array;
+    bandLengths: Uint32Array;
+  },
+  numComponents: number,
+  iterations = 120,
+  seed = 1,
+): Promise<{ parts: Float32Array[] }> {
+  const gab = init();
+  return await gab.nmf(packedData, analysisMetadata, numComponents, iterations, seed);
+}
+
+/**
+ * Sum spectrograms that share a band layout, adding the complex coefficients
+ * rather than the magnitudes so edited parts recombine coherently.
+ */
+export async function mergeSpectrograms(
+  parts: Float32Array[],
+  analysisMetadata: {
+    numBands: number;
+    numChannels: number;
+    bandOffsets: Uint32Array;
+    bandLengths: Uint32Array;
+  },
+): Promise<{ merged: Float32Array }> {
+  const gab = init();
+  return await gab.mergeSpectrograms(parts, analysisMetadata);
+}
+
+/**
  * Separate audio (already decoded to channels) into 4 stems using htdemucs ONNX.
  * Call with Gaborator-synthesized audio, then re-analyse each stem with Gaborator.
  * Stems: drums, bass, other, vocals
