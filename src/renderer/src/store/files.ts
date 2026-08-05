@@ -11,7 +11,8 @@ import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
-import type { Brush, OpenFile, ParameterKey, State, ZustandGet, ZustandSet } from "./types";
+import type { Brush, OpenFile, ParameterKey, SpectrogramData, State, ZustandGet, ZustandSet } from "./types";
+import type { StemGroupMethod } from "./stem-groups";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
 
 export interface FilesState {
@@ -21,6 +22,10 @@ export interface FilesState {
   duplicateFile: (fileId: string) => Promise<void>;
   hpssFile: (fileId: string) => Promise<void>;
   aiSeparateFile: (fileId: string) => Promise<void>;
+  nmfFile: (fileId: string, numComponents: number) => Promise<void>;
+  /** Sum the given files into a new one, leaving the originals open. */
+  mergeStems: (fileIds: string[]) => Promise<void>;
+  mergeStemGroup: (groupId: string) => Promise<void>;
   saveActiveFile: () => Promise<void>;
   saveActiveFileAs: () => Promise<void>;
   saveActiveFileVersion: () => Promise<void>;
@@ -233,14 +238,18 @@ async function loadRealFileViaGaborator(
 // In-flight AI separation guard — blocks a second concurrent stem split on the same file.
 const aiSeparatingFileIds = new Set<string>();
 
+/** Stable 0-359 hue for a string, so the same path always reads the same colour. */
+export function hashHue(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = value.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return ((hash % 360) + 360) % 360;
+}
+
 /** Get a consistent colour for a file based on a hash of its file path. */
 export function getFileColor(filePath: string): string {
-  let hash = 0;
-  for (let i = 0; i < filePath.length; i++) {
-    hash = filePath.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const hue = ((hash % 360) + 360) % 360;
-  return `hsl(${hue}, 60%, 60%)`;
+  return `hsl(${hashHue(filePath)}, 60%, 60%)`;
 }
 
 /** Look up an open file by its file path. Returns the first match or undefined. */
@@ -319,6 +328,149 @@ export function getFileById(fileId: string): OpenFile | undefined {
 // Helper to find file ID by path
 export function getFileIdByPath(filePath: string): string | undefined {
   return Object.keys(openFiles).find((id) => openFiles[id].filePath === filePath);
+}
+
+// ─── Stem splitting ──────────────────────────────────────────────────────────
+
+// Derive a child spectrogram from the file it was split from: same grid, same
+// metadata, new coefficients. The typed arrays are copied so editing the child
+// never writes through to its source.
+function deriveSpectrogramData(base: SpectrogramData, packedData: Float32Array): SpectrogramData {
+  return {
+    ...base,
+    packedData,
+    inverseMap: base.inverseMap.slice(),
+    metadata: base.metadata.slice(),
+    synthesisMetadata: {
+      bandLengths: base.synthesisMetadata.bandLengths.slice(),
+      bandOffsets: base.synthesisMetadata.bandOffsets.slice(),
+      bandStepLog2s: base.synthesisMetadata.bandStepLog2s.slice(),
+    },
+  };
+}
+
+// The metadata shape the coefficient-domain addon entry points (hpss, nmf,
+// mergeSpectrograms) expect.
+function bandLayout(data: SpectrogramData) {
+  return {
+    numBands: data.numBands,
+    numChannels: data.numChannels,
+    bandOffsets: data.synthesisMetadata.bandOffsets,
+    bandLengths: data.synthesisMetadata.bandLengths,
+  };
+}
+
+// The current painted state of a file, falling back to its analysed
+// coefficients when no renderer is mounted to read an FBO from.
+async function readCurrentPackedData(file: OpenFile): Promise<Float32Array | undefined> {
+  const fboData = await file.rendererRef?.current?.getFBOData();
+  return fboData ?? file.spectrogramData?.packedData;
+}
+
+// Insert placeholder files for a pending split directly after their source so
+// they appear with a spinner while the separator runs. The caller fills in each
+// file's spectrogramData when it returns, or calls discardFiles on failure.
+function createStemPlaceholders(
+  set: ZustandSet,
+  get: ZustandGet,
+  sourceFileId: string,
+  labels: string[],
+  loadingMessage: string,
+): string[] {
+  const sourceFile = openFiles[sourceFileId];
+  const baseLabel = stripExtensionForLabel(sourceFile.displayName);
+  const ids = labels.map(() => generateFileId());
+  const sourceBpm = get().filepathsBpm[sourceFile.filePath];
+
+  for (let i = 0; i < ids.length; i++) {
+    openFiles[ids[i]] = {
+      id: ids[i],
+      filePath: makeManagedFilePath(ids[i]),
+      displayName: `${baseLabel} ${labels[i]}`,
+    };
+  }
+
+  set(
+    produce((state: State) => {
+      const idx = state.openFileIds.indexOf(sourceFileId);
+      state.openFileIds.splice(idx + 1, 0, ...ids);
+      for (const id of ids) {
+        state.filesBandsPerOctave[id] = state.filesBandsPerOctave[sourceFileId];
+        state.filesZoom[id] = state.filesZoom[sourceFileId];
+        state.filesOffset[id] = state.filesOffset[sourceFileId];
+        state.filesZoomY[id] = state.filesZoomY[sourceFileId] ?? 0;
+        state.filesOffsetY[id] = state.filesOffsetY[sourceFileId] ?? 0;
+        state.filesPlaybackStartTime[id] = 0;
+        state.filesDirty[id] = true;
+        state.persistedFilePaths[id] = openFiles[id].filePath;
+        state.fileDisplayNames[id] = openFiles[id].displayName;
+        if (sourceBpm !== undefined) state.filepathsBpm[openFiles[id].filePath] = sourceBpm;
+        state.filesLoading[id] = loadingMessage;
+      }
+    }),
+  );
+
+  return ids;
+}
+
+// Remove files created for an operation that then failed, along with every
+// per-file map entry seeded for them.
+function discardFiles(set: ZustandSet, ids: string[]): void {
+  for (const id of ids) delete openFiles[id];
+  set(
+    produce((state: State) => {
+      state.openFileIds = state.openFileIds.filter((id) => !ids.includes(id));
+      for (const id of ids) {
+        delete state.filesBandsPerOctave[id];
+        delete state.filesZoom[id];
+        delete state.filesOffset[id];
+        delete state.filesZoomY[id];
+        delete state.filesOffsetY[id];
+        delete state.filesPlaybackStartTime[id];
+        delete state.filesDirty[id];
+        delete state.filesLoading[id];
+        delete state.persistedFilePaths[id];
+        delete state.fileDisplayNames[id];
+      }
+    }),
+  );
+}
+
+function clearLoading(set: ZustandSet, ids: string[]): void {
+  set(
+    produce((state: State) => {
+      for (const id of ids) delete state.filesLoading[id];
+    }),
+  );
+}
+
+// Register a completed split so its parts stay visibly connected and can be
+// summed back together. The hue comes from the source path, so a group reads as
+// a shade of the file it came from.
+function registerStemGroup(
+  get: ZustandGet,
+  method: StemGroupMethod,
+  sourceFileId: string,
+  memberIds: string[],
+  label: string,
+): void {
+  const sourceFile = openFiles[sourceFileId];
+  get().createStemGroup({
+    method,
+    label,
+    originId: sourceFileId,
+    memberIds,
+    hue: hashHue(sourceFile?.filePath ?? sourceFileId),
+  });
+}
+
+// Files whose view a change to `fileId` should also move: itself, plus the rest
+// of its stem group while that group has view sync switched on.
+function viewSyncTargets(state: State, fileId: string): string[] {
+  const groupId = state.stemGroupOfFile[fileId];
+  const group = groupId ? state.stemGroups[groupId] : undefined;
+  if (!group?.syncView) return [fileId];
+  return group.memberIds.includes(fileId) ? group.memberIds : [fileId, ...group.memberIds];
 }
 
 export const FILES_PERSISTED_KEYS = [
@@ -580,75 +732,176 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const { spectrogramData } = originalFile;
     if (!spectrogramData) return;
 
-    const harmonicId = generateFileId();
-    const percussiveId = generateFileId();
-
     const baseLabel = stripExtensionForLabel(originalFile.displayName);
-    // Add placeholder files immediately so they appear in the UI with a loading state
-    openFiles[harmonicId] = {
-      id: harmonicId,
-      filePath: makeManagedFilePath(harmonicId),
-      displayName: `${baseLabel} harmonic`,
-    };
-    openFiles[percussiveId] = {
-      id: percussiveId,
-      filePath: makeManagedFilePath(percussiveId),
-      displayName: `${baseLabel} percussive`,
-    };
+    const ids = createStemPlaceholders(
+      set,
+      get,
+      fileId,
+      ["harmonic", "percussive"],
+      "Separating harmonic and percussive...",
+    );
 
-    const sourceBpm = get().filepathsBpm[originalFile.filePath];
+    try {
+      const { harmonic, percussive } = await host.analysis.hpss(fboData, bandLayout(spectrogramData));
+
+      openFiles[ids[0]] = { ...openFiles[ids[0]], spectrogramData: deriveSpectrogramData(spectrogramData, harmonic) };
+      openFiles[ids[1]] = { ...openFiles[ids[1]], spectrogramData: deriveSpectrogramData(spectrogramData, percussive) };
+    } catch (error) {
+      console.error("HPSS separation failed:", error);
+      notifications.show({
+        title: "Separation failed",
+        message: `${error instanceof Error ? error.message : "Unknown error"}`,
+        color: "red",
+      });
+      discardFiles(set, ids);
+      return;
+    }
+
+    clearLoading(set, ids);
+    registerStemGroup(get, "hpss", fileId, ids, `${baseLabel} — harmonic / percussive`);
+  },
+  nmfFile: async (fileId: string, numComponents: number) => {
+    const originalFile = openFiles[fileId];
+    if (!originalFile) return;
+
+    const fboData = await originalFile.rendererRef?.current?.getFBOData();
+    if (!fboData) return;
+
+    const { spectrogramData } = originalFile;
+    if (!spectrogramData) return;
+
+    const parts = Math.max(2, Math.round(numComponents));
+    const baseLabel = stripExtensionForLabel(originalFile.displayName);
+    const labels = Array.from({ length: parts }, (_, i) => `part ${i + 1}`);
+    const ids = createStemPlaceholders(set, get, fileId, labels, `Splitting into ${parts} parts...`);
+
+    try {
+      const result = await host.analysis.nmf(fboData, bandLayout(spectrogramData), parts);
+      if (result.parts.length !== parts) {
+        throw new Error(`Expected ${parts} parts, got ${result.parts.length}`);
+      }
+      for (let i = 0; i < ids.length; i++) {
+        openFiles[ids[i]] = {
+          ...openFiles[ids[i]],
+          spectrogramData: deriveSpectrogramData(spectrogramData, result.parts[i]),
+        };
+      }
+    } catch (error) {
+      console.error("NMF separation failed:", error);
+      notifications.show({
+        title: "Separation failed",
+        message: `${error instanceof Error ? error.message : "Unknown error"}`,
+        color: "red",
+      });
+      discardFiles(set, ids);
+      return;
+    }
+
+    clearLoading(set, ids);
+    registerStemGroup(get, "nmf", fileId, ids, `${baseLabel} — ${parts} parts`);
+  },
+  mergeStems: async (fileIds: string[]) => {
+    if (fileIds.length < 2) return;
+    const files = fileIds.map((id) => openFiles[id]);
+    // Merging a subset of what was asked for would quietly drop energy, so a
+    // part that hasn't finished loading blocks the whole thing.
+    if (files.some((f) => !f?.spectrogramData)) {
+      notifications.show({
+        title: "Can't merge yet",
+        message: "One of these files is still loading.",
+        color: "yellow",
+      });
+      return;
+    }
+
+    const base = files[0].spectrogramData as SpectrogramData;
+    // Summing only means anything while every part still describes the same
+    // grid; a length- or resolution-changing edit on one of them breaks that.
+    const mismatched = files.find((f) => {
+      const data = f.spectrogramData as SpectrogramData;
+      return (
+        data.numBands !== base.numBands ||
+        data.numChannels !== base.numChannels ||
+        data.numFrames !== base.numFrames ||
+        data.sampleRate !== base.sampleRate ||
+        data.bandsPerOctave !== base.bandsPerOctave
+      );
+    });
+    if (mismatched) {
+      notifications.show({
+        title: "Can't merge these files",
+        message: `'${truncateMiddle(mismatched.displayName, 40)}' no longer lines up with the others — its length or resolution has changed.`,
+        color: "red",
+      });
+      return;
+    }
+
+    const groupId = get().stemGroupOfFile[fileIds[0]];
+    const group = groupId ? get().stemGroups[groupId] : undefined;
+    const originFile = group ? openFiles[group.originId] : undefined;
+    const displayName = `${stripExtensionForLabel(originFile?.displayName ?? files[0].displayName)} merged`;
+
+    const newFileId = generateFileId();
+    const newFilePath = makeManagedFilePath(newFileId);
+    openFiles[newFileId] = { id: newFileId, filePath: newFilePath, displayName };
+
+    const sourceId = files[0].id;
+    const sourceBpm = get().filepathsBpm[files[0].filePath];
 
     set(
       produce((state: State) => {
-        const idx = state.openFileIds.indexOf(fileId);
-        state.openFileIds.splice(idx + 1, 0, harmonicId, percussiveId);
-        for (const id of [harmonicId, percussiveId]) {
-          const newPath = openFiles[id].filePath;
-          state.filesBandsPerOctave[id] = state.filesBandsPerOctave[fileId];
-          state.filesZoom[id] = state.filesZoom[fileId];
-          state.filesOffset[id] = state.filesOffset[fileId];
-          state.filesZoomY[id] = state.filesZoomY[fileId] ?? 0;
-          state.filesOffsetY[id] = state.filesOffsetY[fileId] ?? 0;
-          state.filesPlaybackStartTime[id] = 0;
-          state.filesDirty[id] = true;
-          state.persistedFilePaths[id] = newPath;
-          state.fileDisplayNames[id] = openFiles[id].displayName;
-          state.filepathsBpm[newPath] = sourceBpm;
-          state.filesLoading[id] = "Separating harmonic and percussive...";
-        }
+        const lastIdx = fileIds.reduce((max, id) => Math.max(max, state.openFileIds.indexOf(id)), -1);
+        state.openFileIds.splice(lastIdx + 1, 0, newFileId);
+        state.filesBandsPerOctave[newFileId] = state.filesBandsPerOctave[sourceId];
+        state.filesZoom[newFileId] = state.filesZoom[sourceId];
+        state.filesOffset[newFileId] = state.filesOffset[sourceId];
+        state.filesZoomY[newFileId] = state.filesZoomY[sourceId] ?? 0;
+        state.filesOffsetY[newFileId] = state.filesOffsetY[sourceId] ?? 0;
+        state.filesPlaybackStartTime[newFileId] = 0;
+        state.filesDirty[newFileId] = true;
+        state.persistedFilePaths[newFileId] = newFilePath;
+        state.fileDisplayNames[newFileId] = displayName;
+        if (sourceBpm !== undefined) state.filepathsBpm[newFilePath] = sourceBpm;
+        state.filesLoading[newFileId] = "Merging...";
       }),
     );
 
     try {
-      const { harmonic, percussive } = await host.analysis.hpss(fboData, {
-        numBands: spectrogramData.numBands,
-        numChannels: spectrogramData.numChannels,
-        bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
-        bandLengths: spectrogramData.synthesisMetadata.bandLengths,
-      });
+      const packed = await Promise.all(files.map((f) => readCurrentPackedData(f)));
+      const parts = packed.filter((p): p is Float32Array => Boolean(p));
+      if (parts.length !== files.length) throw new Error("Could not read the current state of every file");
 
-      const makeSpectrogramData = (data: Float32Array) => ({
-        ...spectrogramData,
-        packedData: data,
-        inverseMap: spectrogramData.inverseMap.slice(),
-        metadata: spectrogramData.metadata.slice(),
-        synthesisMetadata: {
-          bandLengths: spectrogramData.synthesisMetadata.bandLengths.slice(),
-          bandOffsets: spectrogramData.synthesisMetadata.bandOffsets.slice(),
-          bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s.slice(),
+      const { merged } = await host.analysis.mergeSpectrograms(parts, bandLayout(base));
+
+      openFiles[newFileId] = {
+        ...openFiles[newFileId],
+        spectrogramData: {
+          ...deriveSpectrogramData(base, merged),
+          // The parts each carry a slice of the original's energy, so none of
+          // their totals describes the sum. Take the figure the split came
+          // from when it's still around; the Convolve effect normalises its
+          // impulse response against it.
+          magnitudeEnergy: originFile?.spectrogramData?.magnitudeEnergy ?? base.magnitudeEnergy,
         },
+      };
+    } catch (error) {
+      console.error("Merge failed:", error);
+      notifications.show({
+        title: "Merge failed",
+        message: `${error instanceof Error ? error.message : "Unknown error"}`,
+        color: "red",
       });
-
-      openFiles[harmonicId] = { ...openFiles[harmonicId], spectrogramData: makeSpectrogramData(harmonic) };
-      openFiles[percussiveId] = { ...openFiles[percussiveId], spectrogramData: makeSpectrogramData(percussive) };
-    } finally {
-      set(
-        produce((state: State) => {
-          delete state.filesLoading[harmonicId];
-          delete state.filesLoading[percussiveId];
-        }),
-      );
+      discardFiles(set, [newFileId]);
+      return;
     }
+
+    clearLoading(set, [newFileId]);
+    await get().setActiveFileId(newFileId);
+  },
+  mergeStemGroup: async (groupId: string) => {
+    const group = get().stemGroups[groupId];
+    if (!group) return;
+    await get().mergeStems(group.memberIds);
   },
   aiSeparateFile: async (fileId: string) => {
     const originalFile = openFiles[fileId];
@@ -709,41 +962,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
     }
 
-    const state = get();
     const stemNames = ["drums", "bass", "other", "vocals"];
-    const stemIds = stemNames.map(() => generateFileId());
-
-    const sourceBpm = state.filepathsBpm[originalFile.filePath];
-
     const baseLabel = stripExtensionForLabel(originalFile.displayName);
-    for (let i = 0; i < stemNames.length; i++) {
-      openFiles[stemIds[i]] = {
-        id: stemIds[i],
-        filePath: makeManagedFilePath(stemIds[i]),
-        displayName: `${baseLabel} ${stemNames[i]}`,
-      };
-    }
-
-    set(
-      produce((state: State) => {
-        const idx = state.openFileIds.indexOf(fileId);
-        state.openFileIds.splice(idx + 1, 0, ...stemIds);
-        for (let i = 0; i < stemIds.length; i++) {
-          const id = stemIds[i];
-          state.filesBandsPerOctave[id] = state.filesBandsPerOctave[fileId];
-          state.filesZoom[id] = state.filesZoom[fileId];
-          state.filesOffset[id] = state.filesOffset[fileId];
-          state.filesZoomY[id] = state.filesZoomY[fileId] ?? 0;
-          state.filesOffsetY[id] = state.filesOffsetY[fileId] ?? 0;
-          state.filesPlaybackStartTime[id] = 0;
-          state.filesDirty[id] = true;
-          state.persistedFilePaths[id] = openFiles[id].filePath;
-          state.fileDisplayNames[id] = openFiles[id].displayName;
-          state.filepathsBpm[openFiles[id].filePath] = sourceBpm;
-          state.filesLoading[id] = "Separating stems (AI)…";
-        }
-      }),
-    );
+    const stemIds = createStemPlaceholders(set, get, fileId, stemNames, "Separating stems (AI)…");
 
     let audioContext: AudioContext | null = null;
     try {
@@ -806,8 +1027,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             numChannels: result.numChannels,
             sampleRate: result.sampleRate,
             packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-            minFreq: state.minFreq,
-            bandsPerOctave: state.bandsPerOctave,
+            // From analysisParams, not the current global setting — a stem has
+            // to record the resolution it was actually analysed at, or it stops
+            // lining up with the file it was split from.
+            minFreq: analysisParams.minFreq,
+            bandsPerOctave: analysisParams.bandsPerOctave,
             magnitudeEnergy: result.magnitudeEnergy,
             synthesisMetadata: {
               bandOffsets: result.bandOffsets,
@@ -828,34 +1052,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         message: `${error instanceof Error ? error.message : "Unknown error"}`,
         color: "red",
       });
-      const idsToRemove = [...stemIds];
-      for (const id of idsToRemove) delete openFiles[id];
-      set(
-        produce((state: State) => {
-          state.openFileIds = state.openFileIds.filter((id) => !idsToRemove.includes(id));
-          for (const id of idsToRemove) {
-            delete state.filesBandsPerOctave[id];
-            delete state.filesZoom[id];
-            delete state.filesOffset[id];
-            delete state.filesZoomY[id];
-            delete state.filesOffsetY[id];
-            delete state.filesPlaybackStartTime[id];
-            delete state.filesDirty[id];
-            delete state.filesLoading[id];
-            delete state.persistedFilePaths[id];
-            delete state.fileDisplayNames[id];
-          }
-        }),
-      );
+      discardFiles(set, stemIds);
       aiSeparatingFileIds.delete(fileId);
       return;
     }
 
-    set(
-      produce((state: State) => {
-        for (const id of stemIds) delete state.filesLoading[id];
-      }),
-    );
+    clearLoading(set, stemIds);
+    registerStemGroup(get, "ai", fileId, stemIds, `${baseLabel} — drums / bass / other / vocals`);
     aiSeparatingFileIds.delete(fileId);
   },
   saveActiveFile: async () => {
@@ -1158,6 +1361,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     // Fire-and-forget: drops on-disk history directory and in-memory state.
     destroyHistoryManager(fileId).catch((err: unknown) => console.error("destroyHistoryManager failed", err));
+
+    state.removeFileFromStemGroup(fileId);
 
     return set(
       produce((state: State) => {
@@ -1807,28 +2012,28 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   setFileZoom: (fileId: string, zoom: number) =>
     set(
       produce((state: State) => {
-        state.filesZoom[fileId] = zoom;
+        for (const id of viewSyncTargets(state, fileId)) state.filesZoom[id] = zoom;
       }),
     ),
   filesOffset: {},
   setFileOffset: (fileId: string, offset: number) =>
     set(
       produce((state: State) => {
-        state.filesOffset[fileId] = offset;
+        for (const id of viewSyncTargets(state, fileId)) state.filesOffset[id] = offset;
       }),
     ),
   filesZoomY: {},
   setFileZoomY: (fileId: string, zoom: number) =>
     set(
       produce((state: State) => {
-        state.filesZoomY[fileId] = zoom;
+        for (const id of viewSyncTargets(state, fileId)) state.filesZoomY[id] = zoom;
       }),
     ),
   filesOffsetY: {},
   setFileOffsetY: (fileId: string, offset: number) =>
     set(
       produce((state: State) => {
-        state.filesOffsetY[fileId] = offset;
+        for (const id of viewSyncTargets(state, fileId)) state.filesOffsetY[id] = offset;
       }),
     ),
   persistedFilePaths: {},

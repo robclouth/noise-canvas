@@ -1,10 +1,12 @@
 import { useStore } from "@/store";
 import { ActionIcon, Badge, Box, Group, Menu, NumberInput } from "@mantine/core";
+import { openSplitPartsPrompt } from "@renderer/lib/modals";
 import { FILE_HEADER_FONT, FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-density";
 import { getFileColor, openFiles } from "@renderer/store/files";
+import { selectStemGroupOfFile, stemMemberColor, stemMethodLabel } from "@renderer/store/stem-groups";
 import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
-import { ChevronDown, Copy, Maximize2, Minimize2, Scissors, X } from "lucide-react";
+import { ChevronDown, Combine, Copy, Maximize2, Minimize2, Scissors, X } from "lucide-react";
 import { memo } from "react";
 import { Tooltip } from "./tooltip";
 
@@ -59,9 +61,15 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const bandsPerOctave = useStore((state) => state.filesBandsPerOctave[fileId]);
   const isDirty = useStore((state) => state.filesDirty[fileId] ?? false);
   const isHighlighted = useStore((state) => state.highlightedSourcePath === filePath);
+  const stemGroup = useStore((state) => selectStemGroupOfFile(state, fileId));
 
   const isFullscreen = fullscreenFileId === fileId;
-  const fileColor = getFileColor(filePath);
+  // A stem wears a shade of its group's hue instead of its own path hash, so a
+  // split reads as one unit rather than as unrelated files.
+  const stemIndex = stemGroup ? stemGroup.memberIds.indexOf(fileId) : -1;
+  const fileColor = stemGroup
+    ? stemMemberColor(stemGroup.hue, stemIndex, stemGroup.memberIds.length)
+    : getFileColor(filePath);
   // Tooltip shows full path for real files (helpful when basenames truncate);
   // for managed files the path is the opaque sentinel, so just show the label.
   const tooltipLabel = isManagedFilePath(filePath) ? displayName : filePath;
@@ -84,6 +92,19 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
             <TruncatedFilename displayName={displayName} isDirty={isDirty} />
           </Box>
         </Tooltip>
+        {stemGroup && (
+          <Tooltip
+            label={`Part ${stemIndex + 1} of ${stemGroup.memberIds.length} from a ${stemMethodLabel(stemGroup.method)} split. These parts add back up to the file they came from.`}
+          >
+            <Badge
+              size="sm"
+              variant="light"
+              style={{ flexShrink: 0, color: fileColor, backgroundColor: `${fileColor}22` }}
+            >
+              {stemIndex + 1}/{stemGroup.memberIds.length}
+            </Badge>
+          </Tooltip>
+        )}
         {bandsPerOctave && (
           <Badge size="sm" variant="light" color="orange" style={{ flexShrink: 0 }}>
             {getResolutionLabel(bandsPerOctave)}
@@ -91,6 +112,20 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         )}
       </Group>
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+        {stemGroup && (
+          <Tooltip label="Merge every part of this split into a new file. The parts stay open.">
+            <ActionIcon
+              size={uiSize}
+              color="dark.5"
+              onClick={(e) => {
+                e.stopPropagation();
+                useStore.getState().mergeStemGroup(stemGroup.id);
+              }}
+            >
+              <Combine size={16} />
+            </ActionIcon>
+          </Tooltip>
+        )}
         <Tooltip label="The tempo of this file in beats per minute (BPM). Used for grid snapping and time-based effects.">
           <NumberInput
             w={60}
@@ -117,6 +152,19 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
               }}
             >
               Split Harmonic and Percussive (HPSS)
+            </Menu.Item>
+            <Menu.Divider />
+            <Menu.Item
+              onClick={(e) => {
+                e.stopPropagation();
+                openSplitPartsPrompt({
+                  onConfirm: (parts) => {
+                    useStore.getState().nmfFile(fileId, parts);
+                  },
+                });
+              }}
+            >
+              Split into N Parts (NMF)…
             </Menu.Item>
             <Menu.Divider />
             <Menu.Item

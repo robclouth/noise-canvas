@@ -15,6 +15,7 @@ import { createFilesSlice, FILES_PERSISTED_KEYS, openFiles } from "./files";
 import { createLinkSlice, LINK_PERSISTED_KEYS } from "./link";
 import { createModulatorsSlice } from "./modulators";
 import { createPresetsSlice, PRESETS_PERSISTED_KEYS } from "./presets";
+import { createStemGroupsSlice, STEM_GROUPS_PERSISTED_KEYS } from "./stem-groups";
 import { createStepsSlice, STEPS_PERSISTED_KEYS } from "./steps";
 import type { ParameterKey, State } from "./types";
 import { isManagedFilePath } from "./utils";
@@ -36,6 +37,7 @@ export const ALL_PERSISTED_KEYS: (keyof State)[] = [
   ...PRESETS_PERSISTED_KEYS,
   ...STEPS_PERSISTED_KEYS,
   ...LINK_PERSISTED_KEYS,
+  ...STEM_GROUPS_PERSISTED_KEYS,
   ...APP_PERSISTED_KEYS,
   "randomizationAmounts",
   "excludedFromRandomization",
@@ -111,9 +113,10 @@ function persistProjection(state: State): Record<string, unknown> {
     {} as Record<string, any>,
   );
 
-  // Only persist file entries backed by a real on-disk path. Virtual files
-  // (new/duplicate/stems) appear in openFileIds at runtime but must not round-trip
-  // across sessions — they have no reanalysable source.
+  // Only persist file entries that have somewhere to be rehydrated from. That
+  // covers real on-disk paths and the `managed://` sentinels of virtual files
+  // (new/duplicate/stems), which reopenPersistedFiles restores from their
+  // history dir; anything else is dropped.
   const realIds = new Set(Object.keys(state.persistedFilePaths ?? {}));
   if (Array.isArray(picked.openFileIds)) {
     picked.openFileIds = picked.openFileIds.filter((id: string) => realIds.has(id));
@@ -142,6 +145,23 @@ function persistProjection(state: State): Record<string, unknown> {
       picked[mapKey] = Object.fromEntries(Object.entries(map).filter(([id]) => realIds.has(id)));
     }
   }
+
+  // Stem groups follow their members: drop any member that isn't coming back,
+  // and drop the group itself once fewer than two members remain.
+  const groups = picked.stemGroups as Record<string, { memberIds: string[] }> | undefined;
+  if (groups && typeof groups === "object") {
+    const keptGroups: Record<string, unknown> = {};
+    const keptOfFile: Record<string, string> = {};
+    for (const [groupId, group] of Object.entries(groups)) {
+      const memberIds = (group.memberIds ?? []).filter((id) => realIds.has(id));
+      if (memberIds.length < 2) continue;
+      keptGroups[groupId] = { ...group, memberIds };
+      for (const id of memberIds) keptOfFile[id] = groupId;
+    }
+    picked.stemGroups = keptGroups;
+    picked.stemGroupOfFile = keptOfFile;
+  }
+
   return picked;
 }
 
@@ -158,6 +178,7 @@ export const useStore = create<State>()(
         ...createPresetsSlice(set, get),
         ...createStepsSlice(set, get),
         ...createLinkSlice(set, get),
+        ...createStemGroupsSlice(set, get),
         setParameter: (key: ParameterKey, value: unknown, effectId?: string) => {
           const state = get();
           const activeBrush = state.brushes[state.activeBrushIndex];

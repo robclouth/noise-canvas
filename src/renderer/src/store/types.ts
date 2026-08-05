@@ -9,6 +9,7 @@ import type { FilesState } from "./files";
 import { ModulatorsState } from "./modulators";
 import type { LinkState } from "./link";
 import type { PresetsState } from "./presets";
+import type { StemGroupsState } from "./stem-groups";
 import type { StepsState } from "./steps";
 
 export type BrushColor = {
@@ -104,7 +105,8 @@ export type State = BrushState &
   AppState &
   PresetsState &
   StepsState &
-  LinkState & {
+  LinkState &
+  StemGroupsState & {
     setParameter: (key: ParameterKey, value: unknown, effectId?: string) => void;
     randomizationAmounts: Record<string, number>;
     setRandomizationAmount: (key: string, amount: number) => void;
