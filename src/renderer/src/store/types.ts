@@ -81,6 +81,10 @@ export type OpenFile = {
   // (dB of reduction per ~5 ms hop, spanning the whole buffer) and its peak.
   gainReductionDb?: Float32Array;
   maxGainReductionDb?: number;
+  // Per-coefficient signed contribution to the samples that overloaded, in the
+  // same packed layout as the spectrogram data. Present only when the display's
+  // clipping overlay is enabled and the latest synthesis actually overloaded.
+  clipAttribution?: Float32Array;
   rendererRef?: React.RefObject<FileRendererHandle | null>;
 };
 

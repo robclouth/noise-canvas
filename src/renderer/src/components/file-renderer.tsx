@@ -16,6 +16,7 @@ import {
   Mesh,
   NearestFilter,
   RawShaderMaterial,
+  RedFormat,
   RGBAFormat,
   RGFormat,
   UniformsUtils,
@@ -29,6 +30,7 @@ import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
+import { FULL_SCALE_DB_OFFSET, OVER_FULL_SCALE_RANGE_DB } from "../lib/constants";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { SourceFileInfo, StrokeRenderer, StrokeTextures } from "../lib/stroke-renderer";
 import { penState } from "../lib/pen-state";
@@ -135,6 +137,9 @@ const FileRendererInner = memo(
     const [originalPackedDataTex, setOriginalPackedDataTex] = useState<DataTexture | null>(null);
     const [inverseMapTex, setInverseMapTex] = useState<DataTexture | null>(null);
     const [metadataTex, setMetadataTex] = useState<DataTexture | null>(null);
+    // Clipping attribution, rebuilt only when synthesis produces a new map.
+    const clipAttributionTexRef = useRef<DataTexture | null>(null);
+    const clipAttributionDataRef = useRef<Float32Array | null>(null);
 
     // Interaction state
     const displayMode = useRef<"preview" | "committed">("committed");
@@ -266,6 +271,10 @@ const FileRendererInner = memo(
           viewZoomPowerY: { value: 0.0 },
           viewOffsetY: { value: 0.0 },
           wrapMode: { value: 0 },
+          fullScaleDbOffset: { value: FULL_SCALE_DB_OFFSET },
+          overFullScaleRangeDb: { value: OVER_FULL_SCALE_RANGE_DB },
+          clipAttributionTex: { value: null },
+          showClipping: { value: false },
         },
         vertexShader: passThroughVert,
         fragmentShader: withPlatformDefines(displayFrag),
@@ -755,6 +764,33 @@ const FileRendererInner = memo(
       displayMaterial.uniforms.bpm.value = bpm;
       displayMaterial.uniforms.minDb.value = state.displayMinDb;
       displayMaterial.uniforms.maxDb.value = state.displayMaxDb;
+
+      // Upload the clipping attribution map when synthesis has produced a new one.
+      const clipAttribution = state.showClipping ? (file.clipAttribution ?? null) : null;
+      if (clipAttribution !== clipAttributionDataRef.current) {
+        clipAttributionTexRef.current?.dispose();
+        clipAttributionTexRef.current = null;
+        clipAttributionDataRef.current = clipAttribution;
+        if (clipAttribution) {
+          const tex = new DataTexture(
+            clipAttribution,
+            spectrogramData.textureWidth,
+            spectrogramData.textureHeight,
+            RedFormat,
+            FloatType,
+          );
+          tex.internalFormat = "R32F";
+          tex.minFilter = NearestFilter;
+          tex.magFilter = NearestFilter;
+          tex.wrapS = ClampToEdgeWrapping;
+          tex.wrapT = ClampToEdgeWrapping;
+          tex.generateMipmaps = false;
+          tex.needsUpdate = true;
+          clipAttributionTexRef.current = tex;
+        }
+      }
+      displayMaterial.uniforms.showClipping.value = clipAttributionTexRef.current !== null;
+      displayMaterial.uniforms.clipAttributionTex.value = clipAttributionTexRef.current || placeholderTexture;
 
       // In Full mode, the displayed brush rectangle anchors to 0 on that axis so it
       // spans the full file extent regardless of cursor position.
