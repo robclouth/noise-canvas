@@ -251,6 +251,54 @@ const ReanalyzeBody = ({ initial, onChange }: { initial: number; onChange: (v: n
   );
 };
 
+type OpenSplitPartsPromptOptions = {
+  defaultParts?: number;
+  onConfirm: (parts: number) => void | Promise<void>;
+  onCancel?: () => void;
+  onClose?: () => void;
+};
+
+export function openSplitPartsPrompt({
+  defaultParts = 4,
+  onConfirm,
+  onCancel,
+  onClose,
+}: OpenSplitPartsPromptOptions): string {
+  const partsRef: RefObject<HTMLInputElement | null> = { current: null };
+
+  return openConfirmModal({
+    title: "Split into parts",
+    children: (
+      <Stack gap="xs">
+        <Text size="sm" c="dimmed">
+          Factorises the spectrogram into layers that each capture a recurring sound, ordered from lowest to highest.
+          The parts stay linked and add back up to this file.
+        </Text>
+        <NumberInput
+          ref={partsRef}
+          size="xs"
+          label="Parts"
+          defaultValue={defaultParts}
+          min={2}
+          max={16}
+          step={1}
+          data-autofocus
+        />
+      </Stack>
+    ),
+    labels: { confirm: "Split", cancel: "Cancel" },
+    confirmProps: { size: "xs" },
+    cancelProps: { size: "xs" },
+    onConfirm: async () => {
+      const parts = parseInt(partsRef.current?.value ?? "");
+      if (!Number.isFinite(parts)) return;
+      await onConfirm(Math.min(16, Math.max(2, parts)));
+    },
+    onCancel,
+    onClose,
+  });
+}
+
 export function openReanalyzePrompt({
   initialBandsPerOctave,
   onConfirm,

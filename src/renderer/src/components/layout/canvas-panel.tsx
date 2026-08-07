@@ -1,8 +1,15 @@
 import { useStore } from "@/store";
 import { ActionIcon, Box, Group, Loader, Stack, Text } from "@mantine/core";
 import { getFileColor, openFiles } from "@renderer/store/files";
-import { X } from "lucide-react";
-import { memo, useEffect, useRef } from "react";
+import {
+  getFileSegments,
+  selectStemGroupOfFile,
+  stemGroupColor,
+  stemMemberColor,
+  stemMethodLabel,
+} from "@renderer/store/stem-groups";
+import { Combine, Link2, Link2Off, X } from "lucide-react";
+import { memo, useEffect, useMemo, useRef, type RefObject } from "react";
 import { FileView } from "../file-view";
 import { Tooltip } from "../tooltip";
 
@@ -10,9 +17,12 @@ const PaletteChip = memo(({ fileId }: { fileId: string }) => {
   const file = openFiles[fileId];
   const isHighlighted = useStore((state) => state.highlightedSourcePath === file?.filePath);
   const isLoading = useStore((state) => !!state.filesLoading[fileId]);
+  const stemGroup = useStore((state) => selectStemGroupOfFile(state, fileId));
   if (!file) return null;
   const displayName = file.displayName;
-  const fileColor = getFileColor(file.filePath);
+  const fileColor = stemGroup
+    ? stemMemberColor(stemGroup.hue, stemGroup.memberIds.indexOf(fileId), stemGroup.memberIds.length)
+    : getFileColor(file.filePath);
 
   return (
     <Tooltip label={displayName}>
@@ -98,11 +108,120 @@ export const PaletteBar = memo(() => {
 });
 PaletteBar.displayName = "PaletteBar";
 
+type FileLaneProps = {
+  fileId: string;
+  activeFileId: string | null;
+  activeRef: RefObject<HTMLDivElement | null>;
+  fullscreenFileId: string | null;
+  minimizedFileIds: string[];
+};
+
+const FileLane = memo(({ fileId, activeFileId, activeRef, fullscreenFileId, minimizedFileIds }: FileLaneProps) => {
+  const isFullscreen = fullscreenFileId === fileId;
+  const hidden = (fullscreenFileId !== null && !isFullscreen) || minimizedFileIds.includes(fileId);
+  return (
+    <Box
+      ref={fileId === activeFileId ? activeRef : undefined}
+      style={{ display: hidden ? "none" : undefined }}
+      h={isFullscreen ? "100%" : undefined}
+      flex={isFullscreen ? 1 : undefined}
+    >
+      <FileView fileId={fileId} isFullscreen={isFullscreen} />
+    </Box>
+  );
+});
+FileLane.displayName = "FileLane";
+
+/**
+ * Wraps the lanes of one split in a rail carrying the group's colour, with a
+ * header for the operations that act on the whole group. The rail is what makes
+ * the parts read as connected rather than as files that happen to be adjacent.
+ */
+const StemGroupSection = memo(
+  ({ groupId, fileIds, ...laneProps }: { groupId: string; fileIds: string[] } & Omit<FileLaneProps, "fileId">) => {
+    const group = useStore((state) => state.stemGroups[groupId]);
+    const anyLoading = useStore((state) => fileIds.some((id) => !!state.filesLoading[id]));
+
+    // Fullscreen takes over the canvas, so the group chrome would just be a
+    // stray bar above it.
+    const chromeHidden = laneProps.fullscreenFileId !== null;
+    if (!group) {
+      return (
+        <>
+          {fileIds.map((fileId) => (
+            <FileLane key={fileId} fileId={fileId} {...laneProps} />
+          ))}
+        </>
+      );
+    }
+
+    const color = stemGroupColor(group.hue);
+
+    return (
+      <Box
+        style={{
+          borderLeft: chromeHidden ? undefined : `2px solid ${color}`,
+          paddingLeft: chromeHidden ? undefined : 6,
+          borderRadius: 2,
+        }}
+        h={laneProps.fullscreenFileId !== null ? "100%" : undefined}
+        flex={laneProps.fullscreenFileId !== null ? 1 : undefined}
+      >
+        {!chromeHidden && (
+          <Group gap="xs" wrap="nowrap" py={2} px={4} style={{ minHeight: 24 }}>
+            <Combine size={12} color={color} style={{ flexShrink: 0 }} />
+            <Text size="xs" c="dimmed" truncate="end" style={{ minWidth: 0, flex: 1 }}>
+              {group.label}
+            </Text>
+            {anyLoading && <Loader size={10} color="gray" />}
+            <Tooltip
+              label={
+                group.syncView
+                  ? "Zoom and scroll are shared across these parts. Click to unlink."
+                  : "Zoom and scroll move independently. Click to link them."
+              }
+            >
+              <ActionIcon
+                size="xs"
+                variant="subtle"
+                color={group.syncView ? "gray" : "dark.3"}
+                onClick={() => useStore.getState().setStemGroupSyncView(groupId, !group.syncView)}
+              >
+                {group.syncView ? <Link2 size={12} /> : <Link2Off size={12} />}
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip
+              label={`Merge all ${group.memberIds.length} parts of this ${stemMethodLabel(group.method)} split into a new file. The parts stay open.`}
+            >
+              <ActionIcon
+                size="xs"
+                variant="subtle"
+                color="gray"
+                loading={anyLoading}
+                onClick={() => useStore.getState().mergeStemGroup(groupId)}
+              >
+                <Combine size={12} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+        )}
+        <Stack gap="xs">
+          {fileIds.map((fileId) => (
+            <FileLane key={fileId} fileId={fileId} {...laneProps} />
+          ))}
+        </Stack>
+      </Box>
+    );
+  },
+);
+StemGroupSection.displayName = "StemGroupSection";
+
 export const CanvasPanel = memo(() => {
   const openFileIds = useStore((state) => state.openFileIds);
   const fullscreenFileId = useStore((state) => state.fullscreenFileId);
   const minimizedFileIds = useStore((state) => state.minimizedFileIds);
   const activeFileId = useStore((state) => state.activeFileId);
+  const stemGroupOfFile = useStore((state) => state.stemGroupOfFile);
 
   // Bring the active file into view when it changes (e.g. opening a file that's
   // already open further down the list). `nearest` keeps already-visible files put.
@@ -111,25 +230,26 @@ export const CanvasPanel = memo(() => {
     activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [activeFileId]);
 
+  const segments = useMemo(() => getFileSegments(openFileIds, stemGroupOfFile), [openFileIds, stemGroupOfFile]);
+  const laneProps = useMemo(
+    () => ({ activeFileId, activeRef, fullscreenFileId, minimizedFileIds }),
+    [activeFileId, fullscreenFileId, minimizedFileIds],
+  );
+
   return (
     <Stack h={fullscreenFileId ? "100%" : undefined} pos="relative" gap={"xs"}>
-      {openFileIds.map((fileId) => {
-        const isFullscreen = fullscreenFileId === fileId;
-        const isMinimized = minimizedFileIds.includes(fileId);
-        const hiddenByFullscreen = fullscreenFileId !== null && !isFullscreen;
-        const hidden = hiddenByFullscreen || isMinimized;
-        return (
-          <Box
-            key={fileId}
-            ref={fileId === activeFileId ? activeRef : undefined}
-            style={{ display: hidden ? "none" : undefined }}
-            h={isFullscreen ? "100%" : undefined}
-            flex={isFullscreen ? 1 : undefined}
-          >
-            <FileView fileId={fileId} isFullscreen={isFullscreen} />
-          </Box>
-        );
-      })}
+      {segments.map((segment, index) =>
+        segment.groupId !== null ? (
+          <StemGroupSection
+            key={`${segment.groupId}-${index}`}
+            groupId={segment.groupId}
+            fileIds={segment.fileIds}
+            {...laneProps}
+          />
+        ) : (
+          segment.fileIds.map((fileId) => <FileLane key={fileId} fileId={fileId} {...laneProps} />)
+        ),
+      )}
     </Stack>
   );
 });
