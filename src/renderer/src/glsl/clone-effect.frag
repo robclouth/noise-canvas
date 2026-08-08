@@ -53,6 +53,11 @@ void main() {
     }
     maxAbsOffset = max(maxAbsOffset, 1.0);
 
+    // Seconds a copy is displaced by, for the carrier correction that keeps a
+    // cloned attack coherent at the time it lands on.
+    float destFreqHz = getDestMetadata(coords.dest).a;
+    float uvToSec = destFrameCount / max(destSampleRate, 1e-6);
+
     vec2 sumL = vec2(0.0);
     vec2 sumR = vec2(0.0);
     float totalWeightL = 0.0;
@@ -83,6 +88,9 @@ void main() {
             float w = pow(max(1.0 - decayFactor.x, 1e-6), normDist);
             vec2 totalShift = vec2(sourceOffsetX, sourceOffsetY) + offsetL;
             vec4 sampleTexel = sampleWithEdgeMode(sampleUvL, coords.dest, totalShift.x, totalShift.y, cloneEdgeMode);
+            float dtSec = (coords.dest.x - sampleUvL.x) * uvToSec;
+            sampleTexel.g = reanchorTimeShift(sampleUvL, sampleTexel.g, destFreqHz, dtSec);
+            sampleTexel.a = reanchorTimeShift(sampleUvL, sampleTexel.a, destFreqHz, dtSec);
             sumL += toComplex(sampleTexel.rg) * w;
             sumR += toComplex(sampleTexel.ba) * w;
             totalWeightL += w;
@@ -95,6 +103,8 @@ void main() {
                 float wL = pow(max(1.0 - decayFactor.x, 1e-6), normDist);
                 vec2 totalShiftL = vec2(sourceOffsetX, sourceOffsetY) + offsetL;
                 vec4 sampleTexelL = sampleWithEdgeMode(sampleUvL, coords.dest, totalShiftL.x, totalShiftL.y, cloneEdgeMode);
+                float dtSecL = (coords.dest.x - sampleUvL.x) * uvToSec;
+                sampleTexelL.g = reanchorTimeShift(sampleUvL, sampleTexelL.g, destFreqHz, dtSecL);
                 sumL += toComplex(sampleTexelL.rg) * wL;
                 totalWeightL += wL;
             }
@@ -102,6 +112,8 @@ void main() {
                 float wR = pow(max(1.0 - decayFactor.y, 1e-6), normDist);
                 vec2 totalShiftR = vec2(sourceOffsetX, sourceOffsetY) + offsetR;
                 vec4 sampleTexelR = sampleWithEdgeMode(sampleUvR, coords.dest, totalShiftR.x, totalShiftR.y, cloneEdgeMode);
+                float dtSecR = (coords.dest.x - sampleUvR.x) * uvToSec;
+                sampleTexelR.a = reanchorTimeShift(sampleUvR, sampleTexelR.a, destFreqHz, dtSecR);
                 sumR += toComplex(sampleTexelR.ba) * wR;
                 totalWeightR += wR;
             }

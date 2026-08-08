@@ -668,6 +668,37 @@ const float PUNCHY_SIGMA_FLOOR  = 0.002;
 // How strongly this sample is inside an onset, and the phase offset that
 // transports the source's deviation from the impulse relation to the
 // destination. Shared by Punchy and the hybrid.
+// The stored coefficient nearest in time, rounded rather than floored. Reading
+// the phase at an attack must not fall back to the silent coefficient before
+// it, and each band's grid has its own stride.
+vec4 sampleSourceNearest(vec2 sourceUv) {
+  float strideFrames = exp2(getSourceMetadata(sourceUv).b);
+  return sampleSourceNoInterp(sourceUv + vec2(0.5 * strideFrames / max(sourceFrameCount, 1.0), 0.0));
+}
+
+// How strongly a source position sits inside an onset, in the SOURCE band's
+// Gabor support — the width of the attack ridge. Effects that only move
+// content in time use this to decide where a re-anchor is worth applying.
+float onsetWeight(vec2 sourceUv) {
+  float fSrc = max(getSourceMetadata(sourceUv).a, 1e-6);
+  float tSrcSec = sourceUv.x * sourceFrameCount / max(sourceSampleRate, 1e-6);
+  vec2 onset = texture(sourceOnsetTex, vec2(sourceUv.x, 0.5)).rg;
+  float sigma = max(PUNCHY_SUPPORT_GAIN * sourceBandsPerOctave / fSrc, PUNCHY_SIGMA_FLOOR);
+  float dt = (tSrcSec - onset.x) / sigma;
+  return onset.y * exp(-dt * dt);
+}
+
+/**
+ * Re-anchors a phase for content moved by dtSec seconds along the time axis,
+ * within the destination's own band (so the frequency does not change). The
+ * carrier correction is exact, but only worth applying at an attack: away from
+ * one it is the identity anyway, and applying it costs the fetch.
+ */
+float reanchorTimeShift(vec2 sourceUv, float phase, float freqHz, float dtSec) {
+  float w = onsetWeight(sourceUv);
+  return phase - w * TWO_PI * freqHz * dtSec;
+}
+
 void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, out float w, out float anchor) {
   float fSrc  = max(getSourceMetadata(sourceUv).a, 1e-6);
   float fDest = max(getDestMetadata(destUv).a, 1e-6);
@@ -697,8 +728,13 @@ vec4 getTransformedSamplePunchy(vec2 sourceUv, vec2 destUv, float scaleX) {
 
   float w, anchor;
   onsetTransport(sourceUv, destUv, scaleX, w, anchor);
-  float lockL = anchor + magPhase.y;
-  float lockR = anchor + magPhase.w;
+  // The deviation being transported comes from the nearest stored coefficient,
+  // not the interpolated phase: interpolating phase across an attack averages
+  // two atoms that disagree, which is the whole reason a moved transient
+  // smears even when the carrier correction is exact.
+  vec4 nearest = sampleSourceNearest(sourceUv);
+  float lockL = anchor + nearest.y;
+  float lockR = anchor + nearest.w;
 
   vec2 seed = destUv * vec2(destFrameCount, destBandCount);
   float randL = random(seed + random(seed + vec2(12.34, 56.78))) * TWO_PI;
@@ -732,9 +768,10 @@ vec4 getTransformedSampleHybrid(vec2 sourceUv, vec2 destUv, float scaleX, float 
 
   float w, anchor;
   onsetTransport(wrappedSourceUv, destUv, scaleX, w, anchor);
+  vec4 nearest = sampleSourceNearest(wrappedSourceUv);
 
-  magPhase.y = neutral.x + w * unwrapPhase(anchor + magPhase.y - neutral.x);
-  magPhase.w = neutral.y + w * unwrapPhase(anchor + magPhase.w - neutral.y);
+  magPhase.y = neutral.x + w * unwrapPhase(anchor + nearest.y - neutral.x);
+  magPhase.w = neutral.y + w * unwrapPhase(anchor + nearest.w - neutral.y);
   return magPhase;
 }
 

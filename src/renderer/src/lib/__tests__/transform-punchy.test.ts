@@ -40,6 +40,7 @@ async function loadEffects(): Promise<EffectsRegistry> {
 describe("transient-preserving transform algorithms", () => {
   let gl: WebGLRenderer;
   let effects: EffectsRegistry;
+  let ridgeFrameFound = 0;
 
   const numFrames = 64;
   const numBands = 32;
@@ -82,15 +83,15 @@ describe("transient-preserving transform algorithms", () => {
     return spec;
   }
 
-  function shiftState(algorithm: number): State {
+  function shiftState(algorithm: number, shift: { beats?: number; semis?: number } = {}): State {
     const overrides = {
       algorithm,
       sourcePositionMode: "follow",
       sourceDataMode: "current",
       transformScaleTime: 1,
       transformScalePitch: 1,
-      transformShiftBeats: 0,
-      transformShiftSemis: -12,
+      transformShiftBeats: shift.beats ?? 0,
+      transformShiftSemis: shift.semis ?? -12,
       transformRotation: 0,
       transformEdgeMode: 0,
       filepathsBpm: { [srcPath]: bpm, [destPath]: bpm },
@@ -131,6 +132,8 @@ describe("transient-preserving transform algorithms", () => {
   async function runShift(
     algorithm: number,
     onsets: { timeSec: number; strength: number }[] = [{ timeSec: t0, strength: 1 }],
+    shift: { beats?: number; semis?: number } = {},
+    readFrame: number | "ridge" = ridgeFrame,
   ): Promise<{ phase: number; freq: number; mag: number }[]> {
     const srcSpec = impulseSpec();
     const destSpec = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "silence" });
@@ -156,14 +159,37 @@ describe("transient-preserving transform algorithms", () => {
       onsetTexture: bakeOnsetTexture(onsets, numFrames / sampleRate),
     };
 
-    destRenderer.renderStroke(strokeParams(), shiftState(algorithm), sourceFile);
+    destRenderer.renderStroke(strokeParams(), shiftState(algorithm, shift), sourceFile);
     const data = await destRenderer.getFBOData();
+
+    // "ridge" locates the frame the content actually landed on, so a fractional
+    // shift can be read where it ends up rather than where it was aimed.
+    let frame = readFrame === "ridge" ? 0 : readFrame;
+    if (readFrame === "ridge") {
+      let best = -1;
+      for (let f = 0; f < numFrames; f++) {
+        let total = 0;
+        for (let band = 0; band < numBands; band++) total += data[(band * numFrames + f) * 4];
+        if (total > best) {
+          best = total;
+          frame = f;
+        }
+      }
+      ridgeFrameFound = frame;
+    }
+
+    // Relative to the ridge's own peak: a fractional time shift lands the
+    // impulse between two frames, and the magnitude interpolation is
+    // geometric, so against exact silence the ridge survives at a small
+    // fraction of its original level even though its phase is intact.
+    let peak = 0;
+    for (let band = 0; band < numBands; band++) peak = Math.max(peak, data[(band * numFrames + frame) * 4]);
 
     const lit: { phase: number; freq: number; mag: number }[] = [];
     for (let band = 0; band < numBands; band++) {
-      const idx = (band * numFrames + ridgeFrame) * 4;
+      const idx = (band * numFrames + frame) * 4;
       const mag = data[idx];
-      if (mag > 0.2) {
+      if (mag > peak * 0.2) {
         lit.push({ phase: data[idx + 1], freq: destSpec.metadata[band * 4 + 3], mag });
       }
     }
@@ -201,6 +227,23 @@ describe("transient-preserving transform algorithms", () => {
     const lit = await runShift(HYBRID_ALGORITHM);
     expect(lit.length).toBeGreaterThanOrEqual(4);
     expect(impulseAlignment(lit, t0)).toBeGreaterThan(0.85);
+  });
+
+  it("the hybrid keeps the ridge aligned through a non-integer time shift", async () => {
+    // 0.1 beat at bpm 60 over a 1 s file is 6.4 frames — the shifted ridge
+    // lands between frames, so the transported anchor has to follow the
+    // transform's own time mapping rather than a whole number of frames.
+    const shiftBeats = 0.1;
+    const lit = await runShift(
+      HYBRID_ALGORITHM,
+      [{ timeSec: t0, strength: 1 }],
+      { beats: shiftBeats, semis: 0 },
+      "ridge",
+    );
+
+    expect(lit.length).toBeGreaterThanOrEqual(4);
+    expect(Math.abs(ridgeFrameFound - ridgeFrame)).toBe(Math.round(shiftBeats * sampleRate));
+    expect(impulseAlignment(lit, ridgeFrameFound / sampleRate)).toBeGreaterThan(0.85);
   });
 
   it("the hybrid leaves content with no onset exactly as neutral would", async () => {
