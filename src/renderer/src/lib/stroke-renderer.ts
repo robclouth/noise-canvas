@@ -36,9 +36,7 @@ import {
 import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
-import { PUNCHY_ALGORITHM } from "./constants";
 import { buildModulatorUniforms } from "./modulator-utils";
-import { getOnsetMapTexture } from "./onset-map";
 import { withPlatformDefines } from "./shader-utils";
 import { resolveBrushAnchor, resolveBrushFootprint, swungGridCellWidthUv } from "./utils";
 
@@ -109,6 +107,9 @@ export interface SourceFileInfo {
     metadata: DataTexture;
     original: DataTexture;
   };
+  // Nearest-onset lookup row for this file at the current sensitivity, baked by
+  // lib/onset-map.ts. Null when the file has no onsets yet.
+  onsetTexture?: Texture | null;
 }
 
 /**
@@ -126,6 +127,9 @@ export interface StrokeParams {
   pressure: number;
   tiltX: number;
   tiltY: number;
+  // The painted file's own onset map, read by passes after the first, which
+  // sample the destination rather than the source file.
+  destOnsetTexture?: Texture | null;
 }
 
 /**
@@ -536,12 +540,7 @@ export class StrokeRenderer {
       sourceBandCount: { value: sourceFile.spectrogramData.numBands },
       sourceChannelCount: { value: sourceFile.spectrogramData.numChannels },
       sourceSampleRate: { value: sourceFile.spectrogramData.sampleRate },
-      sourceOnsetTex: {
-        value:
-          stepState.algorithm === PUNCHY_ALGORITHM
-            ? getOnsetMapTexture(sourceFile.spectrogramData)
-            : placeholderTexture,
-      },
+      sourceOnsetTex: { value: sourceFile.onsetTexture ?? placeholderTexture },
       destSpectrogramTex: { value: destTexture.texture || placeholderTexture },
       destSpectrogramTextureSize: { value: this.spectrogramData.packedTextureSize },
       destInverseMapTex: { value: this.textures.inverseMapTex || placeholderTexture },
@@ -933,12 +932,7 @@ export class StrokeRenderer {
         sourceChannelCount: commonUniforms.destChannelCount,
         sourceSampleRate: commonUniforms.destSampleRate,
         sourceSpectrogramTextureSize: commonUniforms.destSpectrogramTextureSize,
-        sourceOnsetTex: {
-          value:
-            stepState.algorithm === PUNCHY_ALGORITHM
-              ? getOnsetMapTexture(this.spectrogramData)
-              : this.textures.placeholderTexture,
-        },
+        sourceOnsetTex: { value: params.destOnsetTexture ?? this.textures.placeholderTexture },
         sourceOffsetX: { value: 0 },
         sourceOffsetY: { value: 0 },
         sourceTimeScale: { value: 1.0 },

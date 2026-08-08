@@ -38,6 +38,7 @@ import { getHistoryManager } from "@renderer/lib/history-manager";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
+import { getOnsetTexture } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { captureMaterialToCanvas } from "../lib/snapshot-capture";
@@ -860,14 +861,24 @@ const FileRendererInner = memo(
 
         const preview = strokeParams.current?.preview ?? false;
 
-        // Build source file info for StrokeRenderer
+        // Build source file info for StrokeRenderer. Both onset maps are baked
+        // here rather than inside the renderer so the sensitivity control and
+        // the file's latest detections reach the shader through one path.
+        const onsetSensitivity = state.onsetSensitivity;
         const sourceFileInfo: SourceFileInfo = {
           id: resolvedSourceFile.id,
           filePath: resolvedSourceFile.filePath,
           displayName: resolvedSourceFile.displayName,
           spectrogramData: resolvedSourceFile.spectrogramData,
           textures: resolvedSourceTextures,
+          onsetTexture: getOnsetTexture(
+            resolvedSourceFile.id,
+            resolvedSourceFile.onsets,
+            resolvedSourceFile.spectrogramData.numFrames / resolvedSourceFile.spectrogramData.sampleRate,
+            onsetSensitivity,
+          ),
         };
+        const destOnsetTexture = getOnsetTexture(fileId, openFiles[fileId]?.onsets, totalDuration, onsetSensitivity);
 
         // Render the stroke using StrokeRenderer. Opt-in timing (set
         // window.__paintTiming = true in the console) forces a GPU sync so the
@@ -889,6 +900,7 @@ const FileRendererInner = memo(
               pressure: penState.pressure,
               tiltX: penState.tiltX,
               tiltY: penState.tiltY,
+              destOnsetTexture,
             },
             state,
             sourceFileInfo,

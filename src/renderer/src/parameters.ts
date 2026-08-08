@@ -1551,6 +1551,25 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "When enabled, the brush snaps to the horizontal (time) grid.",
     default: true,
   },
+  onsetSensitivity: {
+    kind: "number",
+    name: "Onset Sensitivity",
+    label: "Onsets",
+    description:
+      "How much of the detected transient content counts as an onset. Low keeps only the clearest hits; high includes softer and more ambiguous ones. Onsets drive transient-preserving transforms, the onset markers, and onset snapping.",
+    default: 50,
+    min: 0,
+    max: 100,
+    step: 1,
+    unit: "%",
+  },
+  showOnsets: {
+    kind: "boolean",
+    name: "Show Onsets",
+    label: "Show Onsets",
+    description: "Draw a marker over the spectrogram at every detected onset.",
+    default: false,
+  },
   limiterEnabled: {
     kind: "boolean",
     name: "Limiter",

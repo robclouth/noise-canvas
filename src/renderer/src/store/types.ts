@@ -82,6 +82,10 @@ export type OpenFile = {
   // (dB of reduction per ~5 ms hop, spanning the whole buffer) and its peak.
   gainReductionDb?: Float32Array;
   maxGainReductionDb?: number;
+  // Detected onsets as flat [timeSec, salience] pairs, from analysis and
+  // refreshed by synthesis so they follow what has been painted. Raw and
+  // unthresholded — lib/onset-map.ts applies the sensitivity control.
+  onsets?: Float32Array;
   rendererRef?: React.RefObject<FileRendererHandle | null>;
 };
 

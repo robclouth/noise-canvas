@@ -6,7 +6,7 @@ import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState } from "../../test/mock-state";
 import { createHarnessTextures, disposeHarnessTextures, toStrokeTextures } from "../../test/render-harness";
 import { PUNCHY_ALGORITHM } from "../constants";
-import { detectOnsets } from "../onset-map";
+import { bakeOnsetTexture } from "../onset-map";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer } from "../stroke-renderer";
 
 const TWO_PI = Math.PI * 2;
@@ -150,6 +150,7 @@ describe("transform punchy algorithm", () => {
         metadata: srcTex.metadata,
         original: srcTex.original,
       },
+      onsetTexture: bakeOnsetTexture([{ timeSec: t0, strength: 1 }], numFrames / sampleRate),
     };
 
     destRenderer.renderStroke(strokeParams(), shiftState(algorithm), sourceFile);
@@ -181,24 +182,15 @@ describe("transform punchy algorithm", () => {
     return Math.hypot(re, im) / Math.max(lit.length, 1);
   }
 
-  it("detects the impulse ridge as a single onset", () => {
-    const onsets = detectOnsets(impulseSpec());
-    expect(onsets.length).toBe(1);
-    expect(onsets[0].timeSec).toBeCloseTo(t0, 2);
-    expect(onsets[0].strength).toBeCloseTo(1, 5);
-  });
-
   it("punchy re-aligns shifted bands to the impulse relation despite unwrap offsets", async () => {
-    const onsets = detectOnsets(impulseSpec());
     const lit = await runShift(PUNCHY_ALGORITHM);
     expect(lit.length).toBeGreaterThanOrEqual(4);
-    expect(impulseAlignment(lit, onsets[0].timeSec)).toBeGreaterThan(0.85);
+    expect(impulseAlignment(lit, t0)).toBeGreaterThan(0.85);
   });
 
   it("neutral scrambles the same content by scaling the unwrap offsets", async () => {
-    const onsets = detectOnsets(impulseSpec());
     const lit = await runShift(4);
     expect(lit.length).toBeGreaterThanOrEqual(4);
-    expect(impulseAlignment(lit, onsets[0].timeSec)).toBeLessThan(0.5);
+    expect(impulseAlignment(lit, t0)).toBeLessThan(0.5);
   });
 });
