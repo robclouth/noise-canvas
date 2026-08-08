@@ -5,7 +5,17 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { defaultValues } from "@renderer/effects/base-effect";
 import { getOpenFileByPath, openFiles } from "@renderer/store/files";
 import { State } from "@renderer/store/types";
-import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  memo,
+  RefObject,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Camera,
   ClampToEdgeWrapping,
@@ -30,6 +40,7 @@ import passThroughVert from "../glsl/pass-through.vert";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
 import { withPlatformDefines } from "../lib/shader-utils";
+import { captureMaterialToCanvas } from "../lib/snapshot-capture";
 import { SourceFileInfo, StrokeRenderer, StrokeTextures } from "../lib/stroke-renderer";
 import { penState } from "../lib/pen-state";
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
@@ -38,10 +49,18 @@ import { resolveBrushAnchor, resolveBrushFootprint, swungGridCellWidthUv, unitsT
 
 /**
  * Props for the FileRenderer component.
- * @param file - The open file to render.
+ * @param fileId - The open file to render.
+ * @param isLive - Whether this file's view is live-rendered. When false the
+ *   frame loop skips the file entirely (its DOM snapshot covers the view) and
+ *   display-state changes refresh the snapshot instead.
+ * @param snapshotCanvasRef - The 2D canvas that snapshot captures paint into.
+ * @param onLiveFrame - Called after each fully drawn live frame.
  */
 interface FileRendererProps {
   fileId: string;
+  isLive: boolean;
+  snapshotCanvasRef: RefObject<HTMLCanvasElement | null>;
+  onLiveFrame?: () => void;
 }
 
 /**
@@ -76,6 +95,14 @@ export interface FileRendererHandle {
   clearDirtyRegion: () => void;
   /** Packed-pixel ranges the current stroke's committed footprint covers, for the history delta. Null = full snapshot. */
   getDirtyPixelRanges: () => Uint32Array | null;
+  /**
+   * Renders the committed spectrogram (no cursor/preview overlays) into the
+   * snapshot canvas at its current on-screen size. Resolves false when the
+   * renderer isn't ready yet or the view has no usable size.
+   */
+  captureSnapshot: () => Promise<boolean>;
+  /** Schedules a throttled snapshot re-capture (no-op while the view is live). */
+  refreshSnapshot: () => void;
 }
 
 /**
@@ -85,15 +112,15 @@ export interface FileRendererHandle {
  * for processing and displaying the spectrogram.
  */
 export const FileRenderer = memo(
-  forwardRef<FileRendererHandle, FileRendererProps>(({ fileId }, ref) => {
-    const { spectrogramData } = openFiles[fileId];
+  forwardRef<FileRendererHandle, FileRendererProps>((props, ref) => {
+    const { spectrogramData } = openFiles[props.fileId];
     if (!spectrogramData) return null;
-    return <FileRendererInner fileId={fileId} ref={ref} />;
+    return <FileRendererInner {...props} ref={ref} />;
   }),
 );
 
 const FileRendererInner = memo(
-  forwardRef<FileRendererHandle, FileRendererProps>(({ fileId }, ref) => {
+  forwardRef<FileRendererHandle, FileRendererProps>(({ fileId, isLive, snapshotCanvasRef, onLiveFrame }, ref) => {
     const spectrogramData = openFiles[fileId].spectrogramData!;
 
     // Don't subscribe to these during render - access them via refs or useFrame instead
@@ -114,6 +141,40 @@ const FileRendererInner = memo(
     useEffect(() => {
       invalidateRef.current = invalidate;
     }, [invalidate]);
+
+    // Mirror the live flag into a ref for the frame loop and subscriptions.
+    // Going live needs a frame so the view repaints under the snapshot overlay.
+    const isLiveRef = useRef(isLive);
+    useEffect(() => {
+      isLiveRef.current = isLive;
+      if (isLive) invalidateRef.current?.();
+    }, [isLive]);
+
+    // Set when display-affecting state changes after a snapshot capture has
+    // read the state, so an in-flight capture re-schedules itself on finish.
+    const snapshotStaleRef = useRef(false);
+    const snapshotTimerRef = useRef<number | null>(null);
+    // Latest-closure indirection: subscriptions and timers are created once
+    // but must call the capture with current textures and spectrogram data.
+    const captureSnapshotRef = useRef<() => Promise<boolean>>(async () => false);
+
+    const scheduleSnapshotRefresh = useCallback(() => {
+      if (isLiveRef.current) return;
+      if (snapshotTimerRef.current !== null) return;
+      snapshotTimerRef.current = window.setTimeout(() => {
+        snapshotTimerRef.current = null;
+        if (!isLiveRef.current) void captureSnapshotRef.current();
+      }, 150);
+    }, []);
+
+    useEffect(() => {
+      return () => {
+        if (snapshotTimerRef.current !== null) {
+          window.clearTimeout(snapshotTimerRef.current);
+          snapshotTimerRef.current = null;
+        }
+      };
+    }, []);
 
     const modulatorScaleLut = useModulatorScaleLut(fileId);
 
@@ -161,11 +222,17 @@ const FileRendererInner = memo(
             gridSwing: state.gridSwing,
             minDb: state.displayMinDb,
             maxDb: state.displayMaxDb,
+            scaleTonic: state.scaleTonic,
+            scaleType: state.scaleType,
             pickingFileParam: state.pickingFileParam,
           };
         },
         () => {
           invalidateRef.current?.();
+          // A static view won't repaint from the frame loop, so its snapshot
+          // must be refreshed to reflect the new display state.
+          snapshotStaleRef.current = true;
+          scheduleSnapshotRefresh();
         },
       );
 
@@ -232,7 +299,7 @@ const FileRendererInner = memo(
         unsubTransient();
         unsubActiveFileId();
       };
-    }, [fileId]);
+    }, [fileId, scheduleSnapshotRefresh]);
 
     // Materials and scene objects for rendering
     const displayMaterial = useMemo(() => {
@@ -415,6 +482,118 @@ const FileRendererInner = memo(
     const placeholderTexture = usePlaceholderTexture();
 
     /**
+     * Updates every display uniform that doesn't depend on the cursor,
+     * preview, or picking state: texture metadata, dB range, view zoom/offset,
+     * and the grid overlay. Shared by the live frame loop and snapshot capture
+     * so a captured snapshot matches what the live view would draw.
+     */
+    const applyStaticDisplayUniforms = (state: State, viewportWidth: number, viewportHeight: number): void => {
+      const file = openFiles[fileId];
+      if (!file?.spectrogramData || !inverseMapTex || !metadataTex) return;
+
+      const bpm = state.filepathsBpm[file.filePath] || 120;
+      const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
+      const viewZoomPower = state.filesZoom[fileId];
+      const viewOffset = state.filesOffset[fileId];
+      const viewZoomPowerY = state.filesZoomY[fileId] ?? 0;
+      const viewOffsetY = state.filesOffsetY[fileId] ?? 0;
+
+      const uniforms = displayMaterial.uniforms;
+      uniforms.sourceInverseMapTex.value = inverseMapTex;
+      uniforms.sourceMetadataTex.value = metadataTex;
+      uniforms.sourceMinFreq.value = spectrogramData.minFreq;
+      uniforms.sourceBandsPerOctave.value = spectrogramData.bandsPerOctave;
+      uniforms.sourceFrameCount.value = spectrogramData.numFrames;
+      uniforms.sourceBandCount.value = spectrogramData.numBands;
+      uniforms.sourceChannelCount.value = spectrogramData.numChannels;
+      uniforms.sourceSampleRate.value = spectrogramData.sampleRate;
+      uniforms.sourceSpectrogramTextureSize.value = spectrogramData.packedTextureSize;
+      uniforms.gridSize.value = state.gridSizeBeats;
+      uniforms.bpm.value = bpm;
+      uniforms.minDb.value = state.displayMinDb;
+      uniforms.maxDb.value = state.displayMaxDb;
+      uniforms.viewZoomPower.value = viewZoomPower;
+      uniforms.viewOffset.value = viewOffset;
+      uniforms.viewZoomPowerY.value = viewZoomPowerY;
+      uniforms.viewOffsetY.value = viewOffsetY;
+
+      // Calculate and update grid values
+      const gridSizeBeats = state.gridSizeBeats;
+      const gridSizeSemis = state.gridSizeSemis;
+
+      // Horizontal grid (time/beats)
+      const beatDurationSeconds = 60.0 / bpm;
+      const gridIntervalSeconds = beatDurationSeconds * gridSizeBeats;
+      const gridWidthUv = gridSizeBeats > 0 ? gridIntervalSeconds / totalDuration : 0;
+      const barWidthUv = gridSizeBeats > 0 ? (beatDurationSeconds * 4.0) / totalDuration : 0;
+
+      // Vertical grid (frequency/semitones). When gridSizeSemis is 0, the pitch grid is in
+      // "Scale" mode and the chromatic grid is suppressed in favor of the scale grid.
+      const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
+      const gridIntervalBands = gridSizeSemis * bandsPerSemitone;
+      const gridHeightUv = gridSizeSemis > 0 ? gridIntervalBands / spectrogramData.numBands : 0;
+      const octaveHeightUv = gridSizeSemis > 0 ? (12 * bandsPerSemitone) / spectrogramData.numBands : 0;
+
+      // Determine if grid lines should be shown based on spacing (min 10 pixels apart).
+      // Multiply by the view zoom factor so zooming in can reveal lines that were too
+      // dense at 1x.
+      const MIN_GRID_SPACING_PX = 10;
+      const zoomX = Math.pow(2, viewZoomPower);
+      const zoomY = Math.pow(2, viewZoomPowerY);
+      const gridWidthPx = gridWidthUv * viewportWidth * zoomX;
+      const gridHeightPx = gridHeightUv * viewportHeight * zoomY;
+
+      uniforms.gridWidthUv.value = gridWidthUv;
+      uniforms.gridHeightUv.value = gridHeightUv;
+      uniforms.barWidthUv.value = barWidthUv;
+      uniforms.swingOffsetUv.value = gridWidthUv * (state.gridSwing / 100) * 0.5;
+      uniforms.octaveHeightUv.value = octaveHeightUv;
+      uniforms.showHorizontalGrid.value = gridWidthPx >= MIN_GRID_SPACING_PX && gridSizeBeats > 0;
+      uniforms.showVerticalGrid.value = gridHeightPx >= MIN_GRID_SPACING_PX && gridSizeSemis > 0;
+
+      // Scale grid: draw a line at every in-scale semitone when scale snap is on. Hide when too dense.
+      const semitoneHeightPx =
+        (spectrogramData.bandsPerOctave / 12 / spectrogramData.numBands) * viewportHeight * zoomY;
+      uniforms.scaleGridEnabled.value = gridSizeSemis <= 0 && semitoneHeightPx >= MIN_GRID_SPACING_PX;
+      uniforms.scaleOffsets.value = buildScaleOffsets(state.scaleTonic, state.scaleType);
+      uniforms.pitchOffsetSemisFromC0.value = minFreqSemisAboveC0(spectrogramData.minFreq);
+    };
+
+    /**
+     * Renders the committed spectrogram into the snapshot canvas at the
+     * view's current on-screen size, with all cursor/preview overlays off.
+     * Used when the view goes static so the DOM canvas can replace the live
+     * WebGL view, and re-run (throttled) when display state changes while
+     * static.
+     */
+    const captureSnapshot = async (): Promise<boolean> => {
+      const gl = glRef.current;
+      const strokeRenderer = strokeRendererRef.current;
+      const canvas = snapshotCanvasRef.current;
+      if (!gl || !canvas || !strokeRenderer || !strokeRenderer.getIsInitialized()) return false;
+
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      if (width < 2 || height < 2) return false;
+
+      snapshotStaleRef.current = false;
+      const state = useStore.getState();
+      applyStaticDisplayUniforms(state, gl.domElement.width, gl.domElement.height);
+      displayMaterial.uniforms.sourceSpectrogramTex.value =
+        strokeRenderer.getDisplayTexture(false) || placeholderTexture;
+      displayMaterial.uniforms.showTargetRectangle.value = false;
+      displayMaterial.uniforms.showSourceRectangle.value = false;
+
+      const ok = await captureMaterialToCanvas(gl, displayMaterial, canvas, width, height);
+      // Display state that changed while the capture was in flight isn't in
+      // the pixels we just painted; go around again.
+      if (snapshotStaleRef.current) scheduleSnapshotRefresh();
+      return ok;
+    };
+    captureSnapshotRef.current = captureSnapshot;
+
+    /**
      * The main render loop, called on every frame.
      * This handles initialization, brush stroke application, and updating the display material.
      */
@@ -460,9 +639,6 @@ const FileRendererInner = memo(
         );
         cursorPos = new Vector2(blX, blY);
       }
-
-      // Determine file state for rendering logic
-      const isActiveFile = state.activeFileId === fileId;
 
       // Check if this file is referenced as source by the active step.
       // When sourceFile is null, the active file is the implicit "self" source.
@@ -536,12 +712,11 @@ const FileRendererInner = memo(
         })();
       }
 
-      // After the display has been drawn once, only update if this file is
-      // active, source, or has a cursor present.
+      // After the display has been drawn once, a static view skips the frame
+      // loop entirely — its DOM snapshot canvas is covering the region, and
+      // display-state changes refresh that snapshot instead.
       if (
-        !isActiveFile &&
-        !isSourceFile &&
-        !(cursorVisible && cursorPosition) &&
+        !isLiveRef.current &&
         !clearingPreview.current &&
         strokeRenderer.getIsInitialized() &&
         hasDrawnDisplayRef.current
@@ -741,20 +916,8 @@ const FileRendererInner = memo(
 
       const hoveredFile = hoveredFileId ? openFiles[hoveredFileId] : null;
 
+      applyStaticDisplayUniforms(state, gl.domElement.width, gl.domElement.height);
       displayMaterial.uniforms.sourceSpectrogramTex.value = displayTexture || placeholderTexture;
-      displayMaterial.uniforms.sourceInverseMapTex.value = inverseMapTex || placeholderTexture;
-      displayMaterial.uniforms.sourceMetadataTex.value = metadataTex || placeholderTexture;
-      displayMaterial.uniforms.sourceMinFreq.value = spectrogramData.minFreq;
-      displayMaterial.uniforms.sourceBandsPerOctave.value = spectrogramData.bandsPerOctave;
-      displayMaterial.uniforms.sourceFrameCount.value = spectrogramData.numFrames;
-      displayMaterial.uniforms.sourceBandCount.value = spectrogramData.numBands;
-      displayMaterial.uniforms.sourceChannelCount.value = spectrogramData.numChannels;
-      displayMaterial.uniforms.sourceSampleRate.value = spectrogramData.sampleRate;
-      displayMaterial.uniforms.sourceSpectrogramTextureSize.value = spectrogramData.packedTextureSize;
-      displayMaterial.uniforms.gridSize.value = state.gridSizeBeats;
-      displayMaterial.uniforms.bpm.value = bpm;
-      displayMaterial.uniforms.minDb.value = state.displayMinDb;
-      displayMaterial.uniforms.maxDb.value = state.displayMaxDb;
 
       // In Full mode, the displayed brush rectangle anchors to 0 on that axis so it
       // spans the full file extent regardless of cursor position.
@@ -805,54 +968,7 @@ const FileRendererInner = memo(
       if (isPicking && hoveredFileId === fileId) {
         invalidate();
       }
-      displayMaterial.uniforms.viewZoomPower.value = viewZoomPower;
-      displayMaterial.uniforms.viewOffset.value = viewOffset;
-      displayMaterial.uniforms.viewZoomPowerY.value = viewZoomPowerY;
-      displayMaterial.uniforms.viewOffsetY.value = viewOffsetY;
       displayMaterial.uniforms.wrapMode.value = activeStepState.brushWrapMode;
-
-      // Calculate and update grid values
-      const gridSizeBeats = state.gridSizeBeats;
-      const gridSizeSemis = state.gridSizeSemis;
-
-      // Horizontal grid (time/beats)
-      const beatDurationSeconds = 60.0 / bpm;
-      const gridIntervalSeconds = beatDurationSeconds * gridSizeBeats;
-      const gridWidthUv = gridSizeBeats > 0 ? gridIntervalSeconds / totalDuration : 0;
-      const barWidthUv = gridSizeBeats > 0 ? (beatDurationSeconds * 4.0) / totalDuration : 0;
-
-      // Vertical grid (frequency/semitones). When gridSizeSemis is 0, the pitch grid is in
-      // "Scale" mode and the chromatic grid is suppressed in favor of the scale grid.
-      const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
-      const gridIntervalBands = gridSizeSemis * bandsPerSemitone;
-      const gridHeightUv = gridSizeSemis > 0 ? gridIntervalBands / spectrogramData.numBands : 0;
-      const octaveHeightUv = gridSizeSemis > 0 ? (12 * bandsPerSemitone) / spectrogramData.numBands : 0;
-
-      // Determine if grid lines should be shown based on spacing (min 10 pixels apart).
-      // Multiply by the view zoom factor so zooming in can reveal lines that were too
-      // dense at 1x.
-      const MIN_GRID_SPACING_PX = 10;
-      const viewportWidth = gl.domElement.width;
-      const viewportHeight = gl.domElement.height;
-      const zoomX = Math.pow(2, viewZoomPower);
-      const zoomY = Math.pow(2, viewZoomPowerY);
-      const gridWidthPx = gridWidthUv * viewportWidth * zoomX;
-      const gridHeightPx = gridHeightUv * viewportHeight * zoomY;
-
-      displayMaterial.uniforms.gridWidthUv.value = gridWidthUv;
-      displayMaterial.uniforms.gridHeightUv.value = gridHeightUv;
-      displayMaterial.uniforms.barWidthUv.value = barWidthUv;
-      displayMaterial.uniforms.swingOffsetUv.value = gridWidthUv * (state.gridSwing / 100) * 0.5;
-      displayMaterial.uniforms.octaveHeightUv.value = octaveHeightUv;
-      displayMaterial.uniforms.showHorizontalGrid.value = gridWidthPx >= MIN_GRID_SPACING_PX && gridSizeBeats > 0;
-      displayMaterial.uniforms.showVerticalGrid.value = gridHeightPx >= MIN_GRID_SPACING_PX && gridSizeSemis > 0;
-
-      // Scale grid: draw a line at every in-scale semitone when scale snap is on. Hide when too dense.
-      const semitoneHeightPx =
-        (spectrogramData.bandsPerOctave / 12 / spectrogramData.numBands) * viewportHeight * zoomY;
-      displayMaterial.uniforms.scaleGridEnabled.value = gridSizeSemis <= 0 && semitoneHeightPx >= MIN_GRID_SPACING_PX;
-      displayMaterial.uniforms.scaleOffsets.value = buildScaleOffsets(state.scaleTonic, state.scaleType);
-      displayMaterial.uniforms.pitchOffsetSemisFromC0.value = minFreqSemisAboveC0(spectrogramData.minFreq);
 
       // Update source offset uniforms (for display preview)
       if (activeStepSourceFile && sourceFileData?.spectrogramData) {
@@ -874,6 +990,7 @@ const FileRendererInner = memo(
       }
 
       hasDrawnDisplayRef.current = true;
+      onLiveFrame?.();
 
       // Flag-gated: optionally force a GPU sync so the recorded frame time
       // reflects real per-frame cost (CPU dispatch + GPU work) for this file's
@@ -905,6 +1022,8 @@ const FileRendererInner = memo(
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();
+      snapshotStaleRef.current = true;
+      scheduleSnapshotRefresh();
     };
 
     /**
@@ -928,6 +1047,8 @@ const FileRendererInner = memo(
         strokeRendererRef.current.restoreOriginal();
       }
       invalidateRef.current();
+      snapshotStaleRef.current = true;
+      scheduleSnapshotRefresh();
       useStore.getState().synthesizeFile(fileId);
     };
 
@@ -957,6 +1078,8 @@ const FileRendererInner = memo(
       setMetadataTex(meta);
 
       invalidateRef.current();
+      snapshotStaleRef.current = true;
+      scheduleSnapshotRefresh();
     };
 
     const beginStroke = () => {
@@ -1006,6 +1129,8 @@ const FileRendererInner = memo(
       getDirtyRegion: () => strokeRendererRef.current?.getDirtyRegion() ?? null,
       clearDirtyRegion: () => strokeRendererRef.current?.clearDirtyRegion(),
       getDirtyPixelRanges: () => strokeRendererRef.current?.getDirtyPixelRanges() ?? null,
+      captureSnapshot,
+      refreshSnapshot: scheduleSnapshotRefresh,
     }));
 
     /**

@@ -25,6 +25,17 @@ export interface FileViewProps {
 
 const viewStyle = { width: "100%", height: "100%", zIndex: 1 };
 
+/**
+ * How the spectrogram region is presented.
+ * - "live": the WebGL view renders; no snapshot overlay.
+ * - "static": a DOM canvas snapshot covers the region and the WebGL view is
+ *   skipped, so the content scrolls natively with the page instead of being
+ *   re-rendered on the shared canvas every frame.
+ * - "unveiling": going static→live; the snapshot stays up until the WebGL
+ *   view has drawn a frame underneath, so there's no background flash.
+ */
+type ViewPhase = "live" | "unveiling" | "static";
+
 // Converts a mouse event into the aim point in the file's UV space, with
 // optional grid/pitch snapping applied. Center-anchor mode snaps the aim to
 // cell midpoints; corner-anchor mode snaps it to cell starts.
@@ -141,7 +152,6 @@ function snapPitchUv(
 export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) => {
   const file = openFiles[fileId];
   const filePath = file?.filePath || "";
-  console.log("FileView render", fileId, filePath);
 
   const activeFileId = useStore((state) => state.activeFileId);
   const isActive = activeFileId === fileId;
@@ -149,6 +159,14 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const isZooming = useStore((state) => state.isZooming);
   const isSynthesizing = useStore((state) => state.filesSynthesizing[fileId]);
   const loadingMessage = useStore((state) => state.filesLoading[fileId]);
+
+  const isHovered = useTransientStore((state) => state.hoveredFile === fileId);
+  const cursorVisible = useTransientStore((state) => state.cursorVisible);
+  const isStroking = useStore((state) => state.isStroking);
+  const explicitSourcePath = useStore((state) => {
+    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+    return steps[state.activeStepIndex]?.sourceFile?.path ?? null;
+  });
 
   const [isPanning, setIsPanning] = useState(false);
 
@@ -164,6 +182,69 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const viewRef = useRef<HTMLDivElement>(null);
   const isStrokingRef = useRef(false);
   const momentumRef = useRef<{ vx: number; vy: number; raf: number | null }>({ vx: 0, vy: 0, raf: null });
+  const snapshotCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  // A view is live only while it can show cursor-dependent UI: hovered (brush
+  // preview), active with a cursor anywhere (stroking + implicit-source
+  // rectangle), the active step's explicit source file (sampling rectangle),
+  // or fullscreen. Everything else is presented as a static snapshot.
+  const wantsLive =
+    isHovered ||
+    isFullscreen ||
+    (isActive && (cursorVisible || isStroking)) ||
+    (explicitSourcePath !== null && explicitSourcePath === filePath);
+
+  const [phase, setPhase] = useState<ViewPhase>("live");
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  const wantsLiveRef = useRef(wantsLive);
+  wantsLiveRef.current = wantsLive;
+  const captureInFlightRef = useRef(false);
+
+  const trySnapshot = useCallback(() => {
+    if (captureInFlightRef.current) return;
+    const capture = rendererRef.current?.captureSnapshot();
+    if (!capture) return;
+    captureInFlightRef.current = true;
+    capture
+      .then((ok) => {
+        if (ok && !wantsLiveRef.current) setPhase("static");
+      })
+      .finally(() => {
+        captureInFlightRef.current = false;
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!wantsLive && phase === "live") {
+      trySnapshot();
+    } else if (wantsLive && phase === "static") {
+      setPhase("unveiling");
+    }
+  }, [wantsLive, phase, trySnapshot]);
+
+  // Runs after each fully drawn live frame: completes the static→live unveil
+  // (the WebGL view now has correct pixels under the snapshot) and retries
+  // captures that raced renderer initialization.
+  const handleLiveFrame = useCallback(() => {
+    if (phaseRef.current === "unveiling") {
+      setPhase("live");
+    } else if (phaseRef.current === "live" && !wantsLiveRef.current) {
+      trySnapshot();
+    }
+  }, [trySnapshot]);
+
+  // A static snapshot is a fixed-size bitmap; when the view box resizes it
+  // stretches, so re-capture at the new size.
+  useEffect(() => {
+    const el = viewRef.current;
+    if (!el) return undefined;
+    const observer = new ResizeObserver(() => {
+      rendererRef.current?.refreshSnapshot();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loadingMessage]);
 
   const stopMomentum = useCallback(() => {
     if (momentumRef.current.raf !== null) {
@@ -701,9 +782,28 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
               onPointerUp={handleCanvasMouseUp}
               onContextMenu={(e) => e.preventDefault()}
             >
-              <View style={viewStyle}>
-                <FileRenderer fileId={fileId} ref={refCallback} />
+              <View style={viewStyle} visible={phase !== "static"}>
+                <FileRenderer
+                  fileId={fileId}
+                  ref={refCallback}
+                  isLive={phase !== "static"}
+                  snapshotCanvasRef={snapshotCanvasRef}
+                  onLiveFrame={handleLiveFrame}
+                />
               </View>
+              <canvas
+                ref={snapshotCanvasRef}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: "100%",
+                  zIndex: 2,
+                  pointerEvents: "none",
+                  visibility: phase === "live" ? "hidden" : "visible",
+                }}
+              />
               {isActive && <LoopRegion fileId={fileId} />}
               {isActive && <PlaybackLine fileId={fileId} />}
             </Box>

@@ -1,35 +1,32 @@
 import * as THREE from "three";
 
+type PixelBuffer = Float32Array | Uint8Array;
+
 /**
- * Reads pixels from a WebGL render target asynchronously using WebGL2 Pixel Pack Buffers (PBO).
- * This prevents blocking the main thread during pixel readback operations.
- *
- * @param gl - The WebGL renderer
- * @param renderTarget - The render target to read from
- * @param x - X coordinate to start reading from
- * @param y - Y coordinate to start reading from
- * @param width - Width of the region to read
- * @param height - Height of the region to read
- * @returns Promise that resolves to a Float32Array containing the pixel data
+ * Core PBO readback: reads RGBA pixels from a render target into `buffer`
+ * without blocking the main thread. The GL type (FLOAT / UNSIGNED_BYTE) is
+ * derived from the buffer's kind. Falls back to a synchronous readback when
+ * PBOs are unavailable (WebGL1).
  */
-export async function readRenderTargetPixelsAsync(
+async function readPixelsViaPbo(
   gl: THREE.WebGLRenderer,
   renderTarget: THREE.WebGLRenderTarget,
   x: number,
   y: number,
   width: number,
   height: number,
-): Promise<Float32Array> {
-  const buffer = new Float32Array(width * height * 4);
+  buffer: PixelBuffer,
+): Promise<PixelBuffer> {
   const glContext = gl.getContext() as WebGL2RenderingContext;
 
   // Check if WebGL2 is available
   if (!glContext.createBuffer || !glContext.fenceSync) {
     // Fallback to synchronous readback for WebGL1
     gl.readRenderTargetPixels(renderTarget, x, y, width, height, buffer);
-    console.log("readRenderTargetPixelsAsync: WebGL1 fallback (sync)");
     return buffer;
   }
+
+  const glType = buffer instanceof Float32Array ? glContext.FLOAT : glContext.UNSIGNED_BYTE;
 
   // Create a Pixel Pack Buffer Object (PBO)
   const pbo = glContext.createBuffer();
@@ -40,7 +37,7 @@ export async function readRenderTargetPixelsAsync(
   const byteSize = buffer.byteLength;
 
   // Bind the FBO for reading
-  const framebuffer = (gl.properties.get(renderTarget) as any).__webglFramebuffer;
+  const framebuffer = (gl.properties.get(renderTarget) as { __webglFramebuffer: WebGLFramebuffer }).__webglFramebuffer;
   glContext.bindFramebuffer(glContext.FRAMEBUFFER, framebuffer);
 
   // Bind PBO and allocate storage
@@ -54,7 +51,7 @@ export async function readRenderTargetPixelsAsync(
     width,
     height,
     glContext.RGBA,
-    glContext.FLOAT,
+    glType,
     0, // offset into PBO
   );
 
@@ -95,6 +92,48 @@ export async function readRenderTargetPixelsAsync(
   glContext.deleteSync(sync);
   glContext.deleteBuffer(pbo);
 
-  console.log("readRenderTargetPixelsAsync: completed (async)");
+  return buffer;
+}
+
+/**
+ * Reads float pixels from a WebGL render target asynchronously using WebGL2
+ * Pixel Pack Buffers (PBO). This prevents blocking the main thread during
+ * pixel readback operations.
+ *
+ * @param gl - The WebGL renderer
+ * @param renderTarget - The render target to read from
+ * @param x - X coordinate to start reading from
+ * @param y - Y coordinate to start reading from
+ * @param width - Width of the region to read
+ * @param height - Height of the region to read
+ * @returns Promise that resolves to a Float32Array containing the pixel data
+ */
+export async function readRenderTargetPixelsAsync(
+  gl: THREE.WebGLRenderer,
+  renderTarget: THREE.WebGLRenderTarget,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): Promise<Float32Array> {
+  const buffer = new Float32Array(width * height * 4);
+  await readPixelsViaPbo(gl, renderTarget, x, y, width, height, buffer);
+  return buffer;
+}
+
+/**
+ * Byte (RGBA8) variant of {@link readRenderTargetPixelsAsync}, for readbacks
+ * destined for 2D canvas ImageData.
+ */
+export async function readRenderTargetBytesAsync(
+  gl: THREE.WebGLRenderer,
+  renderTarget: THREE.WebGLRenderTarget,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): Promise<Uint8Array> {
+  const buffer = new Uint8Array(width * height * 4);
+  await readPixelsViaPbo(gl, renderTarget, x, y, width, height, buffer);
   return buffer;
 }
