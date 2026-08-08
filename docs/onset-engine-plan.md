@@ -1,5 +1,29 @@
 # Onset Engine & Transient-Preserving Defaults — Implementation Plan
 
+> **Status: implemented** on `feature/onset-engine`. Kept as the record of what
+> was intended; three things were built differently from what is written below,
+> for reasons found while building:
+>
+> - **Phase 1** budgets detection against the audio (~1.5 ms per second) rather
+>   than against synthesis, which is FFT-based and far faster than a
+>   per-coefficient walk, so "under 10% of synthesis" was never reachable.
+>   Detection is therefore requested per call rather than always on. Peak
+>   picking also spreads each coefficient's contribution across the time it
+>   covers: dropping it into the bin it starts in makes the slow bands, one
+>   coefficient per 43 ms, spike periodically and swamp the function.
+> - **Phase 2** scales salience against the file's 90th percentile rather than
+>   by rank. Rank scoring gives the weakest hit of a loop of equal hits a score
+>   of zero, which is exactly wrong.
+> - **Phase 7** derives tonality per pixel from the source's own phase (five
+>   texture reads) instead of a per-band map computed in C++ and carried
+>   through as a texture the size of the spectrogram. Same behaviour, finer
+>   resolution, and nothing new to plumb.
+>
+> Phase 6 also found a real defect the plan assumed away: the transported
+> deviation was being read from interpolated phase, which averages two atoms
+> that disagree across an attack. It now comes from the nearest stored
+> coefficient, rounded on that band's own stride.
+
 Self-contained plan for implementing the onset engine, UI, and transient-preserving
 transform defaults. Background, formulas, and conventions are included so no prior
 conversation context is needed.
