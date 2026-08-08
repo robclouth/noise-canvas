@@ -83,6 +83,40 @@ describe("transient-preserving transform algorithms", () => {
     return spec;
   }
 
+  // A sustained partial in every band: magnitude everywhere, phase advancing at
+  // the band's own rate, so its second difference is zero and it reads as tonal.
+  function tonalSpec(): SpectrogramData {
+    const spec = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "silence" });
+    for (let band = 0; band < numBands; band++) {
+      const freq = spec.metadata[band * 4 + 3];
+      for (let frame = 0; frame < numFrames; frame++) {
+        const idx = (band * numFrames + frame) * 4;
+        const phase = TWO_PI * freq * (frame / sampleRate);
+        spec.packedData[idx] = 1;
+        spec.packedData[idx + 1] = phase;
+        spec.packedData[idx + 2] = 1;
+        spec.packedData[idx + 3] = phase;
+      }
+    }
+    return spec;
+  }
+
+  // The same but with phase scattered frame to frame — band-limited noise.
+  function noiseSpec(): SpectrogramData {
+    const spec = tonalSpec();
+    let state = 1;
+    for (let band = 0; band < numBands; band++) {
+      for (let frame = 0; frame < numFrames; frame++) {
+        state = (state * 1664525 + 1013904223) >>> 0;
+        const idx = (band * numFrames + frame) * 4;
+        const phase = (state / 0xffffffff) * TWO_PI * 8;
+        spec.packedData[idx + 1] = phase;
+        spec.packedData[idx + 3] = phase;
+      }
+    }
+    return spec;
+  }
+
   function shiftState(algorithm: number, shift: { beats?: number; semis?: number } = {}): State {
     const overrides = {
       algorithm,
@@ -134,8 +168,9 @@ describe("transient-preserving transform algorithms", () => {
     onsets: { timeSec: number; strength: number }[] = [{ timeSec: t0, strength: 1 }],
     shift: { beats?: number; semis?: number } = {},
     readFrame: number | "ridge" = ridgeFrame,
+    makeSpec: () => SpectrogramData = impulseSpec,
   ): Promise<{ phase: number; freq: number; mag: number }[]> {
-    const srcSpec = impulseSpec();
+    const srcSpec = makeSpec();
     const destSpec = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "silence" });
     const srcTextures = createHarnessTextures(srcSpec);
     const destTextures = createHarnessTextures(destSpec);
@@ -246,17 +281,30 @@ describe("transient-preserving transform algorithms", () => {
     expect(impulseAlignment(lit, ridgeFrameFound / sampleRate)).toBeGreaterThan(0.85);
   });
 
-  it("the hybrid leaves content with no onset exactly as neutral would", async () => {
+  it("the hybrid leaves tonal content with no onset exactly as neutral would", async () => {
     // Also the check that the blend keeps phase unwrapped away from onsets:
     // wrapping into [-π, π] would change these values even though it makes no
     // audible difference, and onset detection reads phase differences.
-    const neutral = await runShift(4, []);
-    const hybrid = await runShift(HYBRID_ALGORITHM, []);
+    const neutral = await runShift(4, [], {}, ridgeFrame, tonalSpec);
+    const hybrid = await runShift(HYBRID_ALGORITHM, [], {}, ridgeFrame, tonalSpec);
 
+    expect(hybrid.length).toBeGreaterThanOrEqual(4);
     expect(hybrid.length).toBe(neutral.length);
     hybrid.forEach((sample, i) => {
       expect(sample.phase).toBe(neutral[i].phase);
       expect(sample.mag).toBe(neutral[i].mag);
     });
+  });
+
+  it("the hybrid re-randomizes noise with no onset instead of scaling its phase", async () => {
+    const neutral = await runShift(4, [], {}, ridgeFrame, noiseSpec);
+    const hybrid = await runShift(HYBRID_ALGORITHM, [], {}, ridgeFrame, noiseSpec);
+
+    expect(hybrid.length).toBeGreaterThanOrEqual(4);
+    expect(hybrid.length).toBe(neutral.length);
+    const moved = hybrid.filter((sample, i) => Math.abs(sample.phase - neutral[i].phase) > 0.1);
+    expect(moved.length).toBeGreaterThan(hybrid.length * 0.7);
+    // Only the phase changes — the noise keeps its shape.
+    hybrid.forEach((sample, i) => expect(sample.mag).toBeCloseTo(neutral[i].mag, 5));
   });
 });

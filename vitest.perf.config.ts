@@ -14,6 +14,9 @@ export default defineConfig({
     alias: {
       "@renderer": resolve(__dirname, "src/renderer/src"),
       "@": resolve(__dirname, "src/renderer/src"),
+      // Same as vitest.config.ts: the suites exercise the Electron host
+      // implementation and stub window.* around it.
+      "@host-impl": resolve(__dirname, "src/renderer/src/lib/host/electron.ts"),
     },
   },
   plugins: [

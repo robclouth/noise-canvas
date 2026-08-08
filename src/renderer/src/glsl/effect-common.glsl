@@ -676,6 +676,31 @@ vec4 sampleSourceNearest(vec2 sourceUv) {
   return sampleSourceNoInterp(sourceUv + vec2(0.5 * strideFrames / max(sourceFrameCount, 1.0), 0.0));
 }
 
+// Spread of the phase second difference, in radians, at which content stops
+// counting as tonal.
+const float TONALITY_SPREAD = 0.6;
+
+/**
+ * How tonal the source is here, 0..1. Phase is stored unwrapped along time, so
+ * a steady partial advances linearly and its second difference sits near zero,
+ * while noise scatters it across the whole circle. One sample of that is too
+ * noisy to classify on, so it is averaged over a few coefficients of the band's
+ * own grid.
+ */
+float sourceTonality(vec2 sourceUv) {
+  float strideUv = exp2(getSourceMetadata(sourceUv).b) / max(sourceFrameCount, 1.0);
+  float phases[5];
+  for (int i = 0; i < 5; i++) {
+    phases[i] = sampleSourceNoInterp(vec2(sourceUv.x - float(i) * strideUv, sourceUv.y)).y;
+  }
+  float total = 0.0;
+  for (int i = 0; i < 3; i++) {
+    total += abs(unwrapPhase(phases[i] - 2.0 * phases[i + 1] + phases[i + 2]));
+  }
+  float mean = total / 3.0;
+  return exp(-(mean * mean) / (TONALITY_SPREAD * TONALITY_SPREAD));
+}
+
 // How strongly a source position sits inside an onset, in the SOURCE band's
 // Gabor support — the width of the attack ridge. Effects that only move
 // content in time use this to decide where a re-anchor is worth applying.
@@ -755,10 +780,16 @@ vec4 getTransformedSamplePunchy(vec2 sourceUv, vec2 destUv, float scaleX) {
  * sustained material is untouched, so this is safe as the default in a way
  * Punchy — which re-randomizes everything away from an onset — is not.
  *
- * The two rules are blended along the shortest arc between them rather than on
- * the unit circle, so a sample with no onset comes out bit-identical to
- * NeutralV2 instead of wrapped into [-π, π]: phase is stored unwrapped along
- * time, and onset detection and several effects read differences of it.
+ * Between onsets, noise is re-randomized at the destination band's own rate,
+ * which sounds like band-limited noise rather than the slowed, watery texture
+ * scaled phase gives it; tonal content keeps NeutralV2 untouched. Which it is
+ * comes from the source's own phase behaviour.
+ *
+ * Every blend runs along the shortest arc between the two phases rather than on
+ * the unit circle, so tonal content with no onset comes out bit-identical to
+ * NeutralV2 instead of wrapped into [-π, π], and even a fully randomized sample
+ * stays near the unwrapped baseline. Phase is stored unwrapped along time, and
+ * onset detection and the tonality estimate above both read differences of it.
  */
 vec4 getTransformedSampleHybrid(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
   vec2 wrappedSourceUv = wrapUv(sourceUv);
@@ -766,12 +797,19 @@ vec4 getTransformedSampleHybrid(vec2 sourceUv, vec2 destUv, float scaleX, float 
 
   vec2 neutral = neutralV2Phase(sourceUv, destUv, scaleX, scaleY, magPhase);
 
+  float tonal = sourceTonality(wrappedSourceUv);
+  vec2 seed = destUv * vec2(destFrameCount, destBandCount);
+  float randL = random(seed + random(seed + vec2(12.34, 56.78))) * TWO_PI;
+  float randR = random(seed + random(seed + vec2(90.12, 34.56))) * TWO_PI;
+  float baseL = neutral.x + (1.0 - tonal) * unwrapPhase(randL - neutral.x);
+  float baseR = neutral.y + (1.0 - tonal) * unwrapPhase(randR - neutral.y);
+
   float w, anchor;
   onsetTransport(wrappedSourceUv, destUv, scaleX, w, anchor);
   vec4 nearest = sampleSourceNearest(wrappedSourceUv);
 
-  magPhase.y = neutral.x + w * unwrapPhase(anchor + nearest.y - neutral.x);
-  magPhase.w = neutral.y + w * unwrapPhase(anchor + nearest.w - neutral.y);
+  magPhase.y = baseL + w * unwrapPhase(anchor + nearest.y - baseL);
+  magPhase.w = baseR + w * unwrapPhase(anchor + nearest.w - baseR);
   return magPhase;
 }
 

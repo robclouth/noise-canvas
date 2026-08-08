@@ -12,6 +12,7 @@ import {
   type HarnessTextures,
 } from "../../test/render-harness";
 import type { EffectType } from "../../effects/types";
+import { HYBRID_ALGORITHM, PUNCHY_ALGORITHM } from "../constants";
 import type { SpectrogramData, State } from "../../store/types";
 import { StrokeRenderer, type EffectsRegistry, type SourceFileInfo, type StrokeParams } from "../stroke-renderer";
 
@@ -220,6 +221,35 @@ describe("painting performance", () => {
           }
         });
       }
+    }
+  });
+
+  // 1b) Warp algorithm cost. The default does more per pixel than the others —
+  // an onset lookup, a nearest-coefficient read, and a tonality estimate that
+  // reads five phases — so its cost against the plainer rules is worth
+  // watching, and this is the case where every pixel pays it.
+  describe("warp algorithm cost @ 1024²", () => {
+    for (const [label, algorithm] of [
+      ["neutral", 4],
+      ["punchy", PUNCHY_ALGORITHM],
+      ["neutral+", HYBRID_ALGORITHM],
+    ] as const) {
+      it(`transform:${label} [full]`, () => {
+        const h = makeHarness(EFFECT_SIZE);
+        try {
+          const cov = coverageBrush("full");
+          const state = createStateForEffects(["transform"], {
+            brushSizeTime: cov.brushSizeTime,
+            brushSizePitch: cov.brushSizePitch,
+            stepOverrides: { algorithm, transformShiftSemis: -12 },
+          });
+          const ms = measure(h, state, { totalDuration: COVERAGE_DURATION });
+          collected.push({ scenario: `transform:${label} [full]`, size: EFFECT_SIZE.label, msPerStroke: ms });
+          expect(ms).toBeGreaterThan(0);
+        } finally {
+          disposeHarness(h);
+        }
+      });
     }
   });
 

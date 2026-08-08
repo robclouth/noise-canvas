@@ -195,6 +195,22 @@ function detectOnsets(data, ar, { refine = true } = {}) {
 // = src freq / 8). Coefficient k of band b sits at frame time k * 2^stepLog2.
 // phaseRule(ctx) → phase for the dest coefficient. ctx has everything.
 
+// How tonal the source is at a coefficient, mirroring sourceTonality in
+// effect-common.glsl: the second difference of unwrapped phase is near zero for
+// a steady partial and scattered across the circle for noise.
+const TONALITY_SPREAD = 0.6;
+
+function tonality(data, bandOffset, k) {
+  const phaseAt = (j) => data[(bandOffset + Math.max(0, k - j)) * FPIX + 1];
+  let total = 0;
+  for (let i = 0; i < 3; i++) {
+    const d = phaseAt(i) - 2 * phaseAt(i + 1) + phaseAt(i + 2);
+    total += Math.abs(((((d + Math.PI) % TWO_PI) + TWO_PI) % TWO_PI) - Math.PI);
+  }
+  const mean = total / 3;
+  return Math.exp(-(mean * mean) / (TONALITY_SPREAD * TONALITY_SPREAD));
+}
+
 function shiftDown(data, ar, peaks, phaseRule, opts = {}) {
   const out = new Float32Array(data.length); // silence outside written bands
   const rand = mulberry32(98765);
@@ -223,7 +239,16 @@ function shiftDown(data, ar, peaks, phaseRule, opts = {}) {
       const mag = (data[i0] * (1 - frac) + data[i1] * frac) * gain;
       if (mag <= 0) continue;
       const srcPhase = data[i0 + 1];
-      const phase = phaseRule({ mag, srcPhase, fDest, fSrc, tSec, bDest, rand });
+      const phase = phaseRule({
+        mag,
+        srcPhase,
+        fDest,
+        fSrc,
+        tSec,
+        bDest,
+        rand,
+        tonality: tonality(data, offS, Math.min(k0, lenS - 1)),
+      });
       const iD = (offD + k) * FPIX;
       out[iD + 0] = mag;
       out[iD + 1] = phase;
@@ -328,10 +353,13 @@ function makeHybrid(onsets, { supportGain = 0.7, sigmaFloor = 0.002 } = {}) {
     }
     w = Math.min(w, 1);
     const neutral = ruleScale(ctx);
-    if (w <= 0) return neutral;
+    // Away from an onset, noise is re-randomized and tonal content is left on
+    // the neutral rule; both blends run along the shortest arc.
+    const shortest = (a, b) => ((((a - b + Math.PI) % TWO_PI) + TWO_PI) % TWO_PI) - Math.PI;
+    const base = neutral + (1 - ctx.tonality) * shortest(ctx.rand() * TWO_PI, neutral);
+    if (w <= 0) return base;
     const lock = -TWO_PI * ctx.fDest * bestT + ctx.srcPhase + TWO_PI * ctx.fSrc * bestT;
-    const delta = ((((lock - neutral + Math.PI) % TWO_PI) + TWO_PI) % TWO_PI) - Math.PI;
-    return neutral + w * delta;
+    return base + w * shortest(lock, base);
   };
 }
 

@@ -133,10 +133,16 @@ export interface EffectStateOptions {
   /** Brush pitch footprint in semitones, stamped onto the active step. */
   brushSizePitch?: number;
   overrides?: Partial<State>;
+  /**
+   * Written onto the active step as well as onto state. Parameters marked
+   * includeInStep are read from the step first, so setting them only at state
+   * level has no effect.
+   */
+  stepOverrides?: Record<string, unknown>;
 }
 
 export function createStateForEffects(enabled: EffectType[], options: EffectStateOptions = {}): State {
-  const { brushSizeTime, brushSizePitch, overrides = {} } = options;
+  const { brushSizeTime, brushSizePitch, overrides = {}, stepOverrides = {} } = options;
   const effectItems = enabled.map((effect) => ({
     id: `perf-${effect}`,
     effect,
@@ -147,6 +153,7 @@ export function createStateForEffects(enabled: EffectType[], options: EffectStat
   const state = createMockState({
     effects: effectItems,
     filepathsBpm: { [HARNESS_FILE_PATH]: 120 },
+    ...stepOverrides,
     ...(brushSizeTime !== undefined ? { brushSizeTime } : {}),
     ...(brushSizePitch !== undefined ? { brushSizePitch } : {}),
     ...overrides,
@@ -160,6 +167,7 @@ export function createStateForEffects(enabled: EffectType[], options: EffectStat
     step.effects = effectItems;
     if (brushSizeTime !== undefined) step.brushSizeTime = brushSizeTime;
     if (brushSizePitch !== undefined) step.brushSizePitch = brushSizePitch;
+    Object.assign(step, stepOverrides);
   }
 
   return state;
