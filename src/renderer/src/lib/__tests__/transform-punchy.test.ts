@@ -5,7 +5,7 @@ import { SpectrogramData, State } from "../../store/types";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState } from "../../test/mock-state";
 import { createHarnessTextures, disposeHarnessTextures, toStrokeTextures } from "../../test/render-harness";
-import { PUNCHY_ALGORITHM } from "../constants";
+import { HYBRID_ALGORITHM, PUNCHY_ALGORITHM } from "../constants";
 import { bakeOnsetTexture } from "../onset-map";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer } from "../stroke-renderer";
 
@@ -37,7 +37,7 @@ async function loadEffects(): Promise<EffectsRegistry> {
   };
 }
 
-describe("transform punchy algorithm", () => {
+describe("transient-preserving transform algorithms", () => {
   let gl: WebGLRenderer;
   let effects: EffectsRegistry;
 
@@ -128,7 +128,10 @@ describe("transform punchy algorithm", () => {
   // Paints the shifted impulse onto a silent dest and returns, for every dest
   // band that received magnitude at the ridge frame, the band's stored phase
   // and metadata frequency.
-  async function runShift(algorithm: number): Promise<{ phase: number; freq: number; mag: number }[]> {
+  async function runShift(
+    algorithm: number,
+    onsets: { timeSec: number; strength: number }[] = [{ timeSec: t0, strength: 1 }],
+  ): Promise<{ phase: number; freq: number; mag: number }[]> {
     const srcSpec = impulseSpec();
     const destSpec = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "silence" });
     const srcTextures = createHarnessTextures(srcSpec);
@@ -150,7 +153,7 @@ describe("transform punchy algorithm", () => {
         metadata: srcTex.metadata,
         original: srcTex.original,
       },
-      onsetTexture: bakeOnsetTexture([{ timeSec: t0, strength: 1 }], numFrames / sampleRate),
+      onsetTexture: bakeOnsetTexture(onsets, numFrames / sampleRate),
     };
 
     destRenderer.renderStroke(strokeParams(), shiftState(algorithm), sourceFile);
@@ -192,5 +195,25 @@ describe("transform punchy algorithm", () => {
     const lit = await runShift(4);
     expect(lit.length).toBeGreaterThanOrEqual(4);
     expect(impulseAlignment(lit, t0)).toBeLessThan(0.5);
+  });
+
+  it("the hybrid re-aligns the ridge like punchy does", async () => {
+    const lit = await runShift(HYBRID_ALGORITHM);
+    expect(lit.length).toBeGreaterThanOrEqual(4);
+    expect(impulseAlignment(lit, t0)).toBeGreaterThan(0.85);
+  });
+
+  it("the hybrid leaves content with no onset exactly as neutral would", async () => {
+    // Also the check that the blend keeps phase unwrapped away from onsets:
+    // wrapping into [-π, π] would change these values even though it makes no
+    // audible difference, and onset detection reads phase differences.
+    const neutral = await runShift(4, []);
+    const hybrid = await runShift(HYBRID_ALGORITHM, []);
+
+    expect(hybrid.length).toBe(neutral.length);
+    hybrid.forEach((sample, i) => {
+      expect(sample.phase).toBe(neutral[i].phase);
+      expect(sample.mag).toBe(neutral[i].mag);
+    });
   });
 });

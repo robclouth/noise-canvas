@@ -19,7 +19,7 @@ import { writeFileSync, mkdirSync } from "fs";
 import { resolve, join } from "path";
 
 const PROJECT = "/Users/rob/Documents/Projects/Music/Tools/noise-canvas";
-const OUT_DIR = new URL("./listen/", import.meta.url).pathname;
+const OUT_DIR = new URL("./test-audio/pitchdown-proof/", import.meta.url).pathname;
 mkdirSync(OUT_DIR, { recursive: true });
 
 const require = createRequire(import.meta.url);
@@ -310,6 +310,31 @@ function makeOnsetTransport(onsets, { supportGain = 0.7, sigmaFloor = 0.002 } = 
   };
 }
 
+// Hybrid (shader algorithm 6, the default): onset transport where there is an
+// onset, the neutral scaled phase everywhere else, blended along the shortest
+// arc between them so a sample with no onset comes out exactly as neutral.
+function makeHybrid(onsets, { supportGain = 0.7, sigmaFloor = 0.002 } = {}) {
+  return (ctx) => {
+    let w = 0;
+    let bestT = 0;
+    for (const o of onsets) {
+      const sigma = Math.max((BPO * supportGain) / ctx.fSrc, sigmaFloor);
+      const d = (ctx.tSec - o.t) / sigma;
+      const weight = o.strength * Math.exp(-d * d);
+      if (weight > w) {
+        w = weight;
+        bestT = o.t;
+      }
+    }
+    w = Math.min(w, 1);
+    const neutral = ruleScale(ctx);
+    if (w <= 0) return neutral;
+    const lock = -TWO_PI * ctx.fDest * bestT + ctx.srcPhase + TWO_PI * ctx.fSrc * bestT;
+    const delta = ((((lock - neutral + Math.PI) % TWO_PI) + TWO_PI) % TWO_PI) - Math.PI;
+    return neutral + w * delta;
+  };
+}
+
 // ─── Metrics ─────────────────────────────────────────────────────────────────
 
 function envelope(x, winMs = 1) {
@@ -522,6 +547,7 @@ async function runCase(label, signal, fileTag, { refine = true, eventT = IMPULSE
     ["random", ruleRandom],
     ["onsetlock", makeOnsetLock(onsets)],
     ["onset-transport", makeOnsetTransport(onsets)],
+    ["hybrid", makeHybrid(onsets)],
   ];
 
   const gtPeakMs = peakTimeMs(gtAudio);

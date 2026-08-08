@@ -584,9 +584,9 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
  * For time shift, a band-frequency carrier correction is added to
  * compensate for the synthesis happening at a different absolute time.
  */
-vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
-  vec4 magPhase = sampleSourceInterp(wrapUv(sourceUv));
-
+// NeutralV2's phase rule on its own, so the hybrid can blend against it
+// without a second copy of the maths. Returns (left, right).
+vec2 neutralV2Phase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 magPhase) {
   float signX = scaleX < 0.0 ? -1.0 : 1.0;
   float signY = scaleY < 0.0 ? -1.0 : 1.0;
   float absScaleX = abs(scaleX);
@@ -630,11 +630,14 @@ vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX, flo
   float phaseR = mix(addR, sclR, stretchAmount);
 
   // Pitch ratio scaling
-  phaseL *= freqRatio;
-  phaseR *= freqRatio;
+  return vec2(phaseL, phaseR) * freqRatio;
+}
 
-  magPhase.y = phaseL;
-  magPhase.w = phaseR;
+vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
+  vec4 magPhase = sampleSourceInterp(wrapUv(sourceUv));
+  vec2 phase = neutralV2Phase(sourceUv, destUv, scaleX, scaleY, magPhase);
+  magPhase.y = phase.x;
+  magPhase.w = phase.y;
   return magPhase;
 }
 
@@ -662,9 +665,10 @@ vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX, flo
 const float PUNCHY_SUPPORT_GAIN = 0.7;
 const float PUNCHY_SIGMA_FLOOR  = 0.002;
 
-vec4 getTransformedSamplePunchy(vec2 sourceUv, vec2 destUv, float scaleX) {
-  vec4 magPhase = sampleSourceInterp(sourceUv);
-
+// How strongly this sample is inside an onset, and the phase offset that
+// transports the source's deviation from the impulse relation to the
+// destination. Shared by Punchy and the hybrid.
+void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, out float w, out float anchor) {
   float fSrc  = max(getSourceMetadata(sourceUv).a, 1e-6);
   float fDest = max(getDestMetadata(destUv).a, 1e-6);
 
@@ -676,7 +680,7 @@ vec4 getTransformedSamplePunchy(vec2 sourceUv, vec2 destUv, float scaleX) {
   // tail energy into a false click.
   float sigma = max(PUNCHY_SUPPORT_GAIN * sourceBandsPerOctave / fSrc, PUNCHY_SIGMA_FLOOR);
   float dt = (tSrcSec - onset.x) / sigma;
-  float w = onset.y * exp(-dt * dt);
+  w = onset.y * exp(-dt * dt);
 
   // Onset time mapped into dest seconds through the transform's x-affine
   // (destUvToSourceUv slope is sourceTimeScale, the geometric transform's is
@@ -685,7 +689,14 @@ vec4 getTransformedSamplePunchy(vec2 sourceUv, vec2 destUv, float scaleX) {
   float deltaDestUv = deltaSrcUv * scaleX / max(sourceTimeScale, 1e-6);
   float tOnsetDestSec = (destUv.x + deltaDestUv) * destFrameCount / max(destSampleRate, 1e-6);
 
-  float anchor = -TWO_PI * fDest * tOnsetDestSec + TWO_PI * fSrc * onset.x;
+  anchor = -TWO_PI * fDest * tOnsetDestSec + TWO_PI * fSrc * onset.x;
+}
+
+vec4 getTransformedSamplePunchy(vec2 sourceUv, vec2 destUv, float scaleX) {
+  vec4 magPhase = sampleSourceInterp(sourceUv);
+
+  float w, anchor;
+  onsetTransport(sourceUv, destUv, scaleX, w, anchor);
   float lockL = anchor + magPhase.y;
   float lockR = anchor + magPhase.w;
 
@@ -697,6 +708,33 @@ vec4 getTransformedSamplePunchy(vec2 sourceUv, vec2 destUv, float scaleX) {
   vec2 vR = w * vec2(cos(lockR), sin(lockR)) + (1.0 - w) * vec2(cos(randR), sin(randR));
   magPhase.y = atan(vL.y, vL.x);
   magPhase.w = atan(vR.y, vR.x);
+  return magPhase;
+}
+
+/**
+ * Algorithm 6 — Neutral+ (default)
+ *
+ * Punchy's onset transport where there is an onset, NeutralV2 everywhere else.
+ * Percussive material keeps its attacks through any pitch or time move;
+ * sustained material is untouched, so this is safe as the default in a way
+ * Punchy — which re-randomizes everything away from an onset — is not.
+ *
+ * The two rules are blended along the shortest arc between them rather than on
+ * the unit circle, so a sample with no onset comes out bit-identical to
+ * NeutralV2 instead of wrapped into [-π, π]: phase is stored unwrapped along
+ * time, and onset detection and several effects read differences of it.
+ */
+vec4 getTransformedSampleHybrid(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
+  vec2 wrappedSourceUv = wrapUv(sourceUv);
+  vec4 magPhase = sampleSourceInterp(wrappedSourceUv);
+
+  vec2 neutral = neutralV2Phase(sourceUv, destUv, scaleX, scaleY, magPhase);
+
+  float w, anchor;
+  onsetTransport(wrappedSourceUv, destUv, scaleX, w, anchor);
+
+  magPhase.y = neutral.x + w * unwrapPhase(anchor + magPhase.y - neutral.x);
+  magPhase.w = neutral.y + w * unwrapPhase(anchor + magPhase.w - neutral.y);
   return magPhase;
 }
 
@@ -715,6 +753,8 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY
     return getTransformedSampleNeutralV2(sourceUv, destUv, scaleX, scaleY);
   } else if (algorithm == 5) {
     return getTransformedSamplePunchy(wrappedSourceUv, destUv, scaleX);
+  } else if (algorithm == 6) {
+    return getTransformedSampleHybrid(sourceUv, destUv, scaleX, scaleY);
   }
   return vec4(0.0);
 }
