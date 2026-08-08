@@ -102,6 +102,12 @@ float sampleEnvelopeAtUv(int src, vec2 sampleUv, float audioLevelDb, float minDb
   }
 }
 
+// Brush-space UV for phaseMode == 1: 0..1 across the brush footprint, following
+// the brush around the canvas edge when that axis wraps.
+vec2 brushSpaceUv(vec2 uv) {
+  return getEffectiveBrushOffset(uv) / max(brushSizeUv, vec2(0.0001));
+}
+
 // Scalar evaluator used by both the stereo wrapper and by nested modulation.
 // Nested paths always pass the base uv unmodified — stereo spread is applied
 // only at the outermost evaluation via getModulationBase.
@@ -138,9 +144,9 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
     // Apply phase mode: adjust UV based on canvas or brush space
     vec2 adjustedUv = uv;
     if (modulator.modulatorPhaseMode == 1) { // Brush mode
-      adjustedUv = (uv - brushBottomLeftUv) / max(brushSizeUv, vec2(0.0001));
+      adjustedUv = brushSpaceUv(uv);
     }
-    
+
     int stepsX = modulator.seqStepsX;
     int stepsY = modulator.seqStepsY;
     float loopX = seqLoopX;
@@ -173,7 +179,7 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
   vec2 adjustedUv = uv;
   if (modulator.modulatorPhaseMode == 1) { // Brush mode
     // Convert to brush-relative coordinates (bottom-left is origin)
-    adjustedUv = (uv - brushBottomLeftUv) / max(brushSizeUv, vec2(0.0001));
+    adjustedUv = brushSpaceUv(uv);
   }
 
   vec2 rates = vec2(

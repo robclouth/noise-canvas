@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "common.glsl"
+#include "brush-space.glsl"
 
 uniform sampler2D sourceSpectrogramTex;
 uniform sampler2D sourceMetadataTex;
@@ -28,8 +29,6 @@ uniform float     destBandsPerOctave;
 
 uniform sampler2D originalSpectrogramTex;
 
-uniform vec2  brushBottomLeftUv;
-uniform vec2  brushSizeUv;
 uniform float viewZoomPower;
 uniform float viewOffset;
 uniform float viewZoomPowerY;
@@ -47,7 +46,6 @@ uniform Parameter sourcePitchOffset;
 uniform Parameter brushPan;
 uniform Parameter brushIntensity;
 uniform int   blendMode;
-uniform int   wrapMode; // 0=Off, 1=Wrap X, 2=Wrap Y, 3=Wrap Both
 uniform int   algorithm;
 // Safety valve for effects (transmute swap, sort) whose output intentionally
 // places non-magnitude values in the magnitude slot. Phase-aware interpolation
@@ -104,22 +102,6 @@ vec2 limitMagnitude(vec2 magPhase) {
   float saturatedExcess = magnitudeLimit * tanh(excessMag / magnitudeLimit);
   float newMag          = magnitudeLimit + saturatedExcess;
   return vec2(newMag, magPhase.y);
-}
-
-// Calculate wrapped distance between two points on an axis
-float wrappedDistance(float a, float b, bool shouldWrap) {
-  if (!shouldWrap) return abs(a - b);
-  float dist       = abs(a - b);
-  float wrappedDist= 1.0 - dist;
-  return min(dist, wrappedDist);
-}
-
-// Wraps UV coordinates based on the wrap mode
-vec2 wrapUv(vec2 uv) {
-  vec2 wrapped = uv;
-  if (wrapMode == 1 || wrapMode == 3) wrapped.x = fract(uv.x);
-  if (wrapMode == 2 || wrapMode == 3) wrapped.y = fract(uv.y);
-  return wrapped;
 }
 
 // ============================================================================
@@ -231,6 +213,19 @@ vec2 interpolateComplex(vec2 magPhase1, vec2 magPhase2, float amount) {
   return vec2(magMix, phaseMix);
 }
 
+// The two time indices a linear read straddles inside one band, plus the
+// fraction between them. On a wrapping time axis the last frame's partner is
+// the band's first frame, so a loop has no seam; otherwise both indices stay
+// clamped inside the band, since index bandLength is the START of the next
+// (lower-frequency) band in the packed layout, not a later time.
+void bandTimeIndices(float scaledTime, float bandLength, out float index0, out float index1, out float fraction) {
+  float length = max(bandLength, 1.0);
+  float t = wrapsTimeAxis() ? mod(scaledTime, length) : clamp(scaledTime, 0.0, length - 1.0);
+  index0 = floor(t);
+  fraction = t - index0;
+  index1 = wrapsTimeAxis() ? mod(index0 + 1.0, length) : min(index0 + 1.0, length - 1.0);
+}
+
 /**
  * Interpolated read between two time samples (uses texelFetch for the exact texels).
  */
@@ -253,22 +248,21 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv,
     timeInFrames -= bandTimeScale / 2.0;
   }
   float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
-  scaledTime = clamp(scaledTime, 0.0, bandLength - 1.0);
 
-  float timeIndexFloor = floor(scaledTime);
-  float timeFraction   = fract(scaledTime);
+  float timeIndex0, timeIndex1, timeFraction;
+  bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, timeFraction);
 
   ivec2 texSize    = textureSize(dataTex, 0);
   float widthFloat = float(max(texSize.x, 1));
 
-  float linearIndex1 = bandStartOffset + timeIndexFloor;
+  float linearIndex1 = bandStartOffset + timeIndex0;
   int px1 = int(mod(linearIndex1, widthFloat));
   int py1 = int(floor(linearIndex1 / widthFloat));
   px1 = clamp(px1, 0, max(texSize.x - 1, 0));
   py1 = clamp(py1, 0, max(texSize.y - 1, 0));
   vec4 sample1 = texelFetch(dataTex, ivec2(px1, py1), 0);
 
-  float linearIndex2 = bandStartOffset + timeIndexFloor + 1.0;
+  float linearIndex2 = bandStartOffset + timeIndex1;
   int px2 = int(mod(linearIndex2, widthFloat));
   int py2 = int(floor(linearIndex2 / widthFloat));
   px2 = clamp(px2, 0, max(texSize.x - 1, 0));
@@ -409,20 +403,21 @@ vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float s
 
   float timeInFrames   = sourceUv.x * sourceFrameCount;
   float scaledTime     = timeInFrames / exp2(bandTimeScaleExp);
-  float timeIndexFloor = floor(scaledTime);
-  float timeFraction   = fract(scaledTime);
+
+  float timeIndex0, timeIndex1, timeFraction;
+  bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, timeFraction);
 
   ivec2 sSize    = textureSize(sourceSpectrogramTex, 0);
   float widthF   = float(max(sSize.x, 1));
 
-  float linearIndex1 = bandStartOffset + timeIndexFloor;
+  float linearIndex1 = bandStartOffset + timeIndex0;
   int px1 = int(mod(linearIndex1, widthF));
   int py1 = int(floor(linearIndex1 / widthF));
   px1 = clamp(px1, 0, max(sSize.x - 1, 0));
   py1 = clamp(py1, 0, max(sSize.y - 1, 0));
   vec4 sample0 = texelFetch(sourceSpectrogramTex, ivec2(px1, py1), 0);
 
-  float linearIndex2 = bandStartOffset + timeIndexFloor + 1.0;
+  float linearIndex2 = bandStartOffset + timeIndex1;
   int px2 = int(mod(linearIndex2, widthF));
   int py2 = int(floor(linearIndex2 / widthF));
   px2 = clamp(px2, 0, max(sSize.x - 1, 0));
@@ -660,17 +655,6 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY
 // ============================================================================
 // BRUSH & BLENDING
 // ============================================================================
-
-vec2 getEffectiveBrushOffset(vec2 unpackedUv) {
-  vec2 offset = unpackedUv - brushBottomLeftUv;
-  vec2 wrappedOffset = fract(offset);
-
-  if(wrapMode == 0) return offset;
-  else if(wrapMode == 1) return vec2(wrappedOffset.x, offset.y);
-  else if(wrapMode == 2) return vec2(offset.x, wrappedOffset.y);
-  
-  return vec2(wrappedOffset.x, wrappedOffset.y);
-}
 
 // Continuous envelope shape: spike (curve=-1) to linear triangle (curve=0) to
 // hard rectangle (curve=+1). Skew places the peak along the axis: 0=start, 1=end.

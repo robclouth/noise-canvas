@@ -53,9 +53,11 @@ vec2 applyEdgeMode(vec2 sourceUv, int edgeMode, out bool useZero, out bool inver
 
     // Brush containment is defined in DEST UV space. Invert the source→dest
     // freq-preserving map (nonlinear when analyses differ), do the brush math
-    // there, then forward-map back for wrap / clamp / reflect.
+    // there, then forward-map back for wrap / clamp / reflect. The local
+    // position is wrap-aware, so the half of a brush that continues past the
+    // canvas edge counts as inside rather than a canvas-width outside.
     vec2 destUv = sourceUvToDestUv(sourceUv);
-    vec2 localUv = destUv - brushBottomLeftUv;
+    vec2 localUv = getEffectiveBrushOffset(destUv);
 
     bool zeroX = false, zeroY = false;
     bool invertX = false, invertY = false;
@@ -69,8 +71,12 @@ vec2 applyEdgeMode(vec2 sourceUv, int edgeMode, out bool useZero, out bool inver
     if (edgeMode == 0 || edgeMode == 5) return sourceUv;
 
     // Bleed: preserve the file-bounds zero so callers don't sample outside [0,1].
+    // An axis the canvas wraps on has no file bound — the read continues from
+    // the opposite edge — so only the non-wrapping axes zero-pad.
     if (edgeMode == 1) {
-        if (sourceUv.x < 0.0 || sourceUv.x > 1.0 || sourceUv.y < 0.0 || sourceUv.y > 1.0) {
+        bool outX = !wrapsTimeAxis()  && (sourceUv.x < 0.0 || sourceUv.x > 1.0);
+        bool outY = !wrapsPitchAxis() && (sourceUv.y < 0.0 || sourceUv.y > 1.0);
+        if (outX || outY) {
             useZero = true;
         }
         return sourceUv;

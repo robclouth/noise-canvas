@@ -1,8 +1,5 @@
 #include "common.glsl"
-
-uniform vec2 brushBottomLeftUv;
-uniform vec2 brushSizeUv;
-
+#include "brush-space.glsl"
 #include "modulation-common.glsl"
 
 uniform int modulatorIndex;
