@@ -28,6 +28,7 @@ function resultToFrame(result: AnalysisResult): Frame {
     bandOffsets: result.bandOffsets,
     bandStepLog2s: result.bandStepLog2s,
     bandLengths: result.bandLengths,
+    onsets: result.onsets,
   };
   // bandFreqsHz is returned by the addon but absent from the published type;
   // forward it when present so the renderer sees the same shape as in Electron.
@@ -82,7 +83,11 @@ export async function runSynthesizeFramed(request: ArrayBuffer): Promise<Uint8Ar
       bandLengths: asU32(arrays.bandLengths, "bandLengths"),
     },
     Number(meta.sampleRate),
-    { bandsPerOctave: Number(meta.bandsPerOctave), minFreq: Number(meta.minFreq) },
+    {
+      bandsPerOctave: Number(meta.bandsPerOctave),
+      minFreq: Number(meta.minFreq),
+      detectOnsets: meta.detectOnsets === 1,
+    },
     meta.applyLimiter === 1,
     existingAudio,
     optionalNumber(meta.startFrame),
@@ -94,6 +99,7 @@ export async function runSynthesizeFramed(request: ArrayBuffer): Promise<Uint8Ar
   const channels: Record<string, NumericArray> = {};
   result.channels.forEach((channel, i) => (channels[`channel${i}`] = channel));
   channels.gainReductionDb = result.gainReductionDb;
+  if (result.onsets) channels.onsets = result.onsets;
   return encodeFrame({
     meta: { peak: result.peak, numChannels: result.channels.length, maxGainReductionDb: result.maxGainReductionDb },
     arrays: channels,
