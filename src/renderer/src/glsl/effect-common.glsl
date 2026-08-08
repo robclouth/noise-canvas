@@ -15,6 +15,9 @@ uniform int       sourceChannelCount;
 uniform float     sourceMinFreq;
 uniform float     sourceBandsPerOctave;
 uniform float     sourceSampleRate;
+// Nearest-onset lookup for the source file: R = onset time (sec), G = strength
+// 0..1, sampled by unpacked source UV.x. See lib/onset-map.ts.
+uniform sampler2D sourceOnsetTex;
 
 uniform sampler2D destSpectrogramTex;
 uniform sampler2D destMetadataTex;
@@ -635,6 +638,68 @@ vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX, flo
   return magPhase;
 }
 
+/**
+ * Algorithm 5 — Punchy (onset transport)
+ *
+ * Transient-preserving phase rule for percussive material, for any combination
+ * of pitch/time shift:
+ *
+ *   near an onset:  φ = −2π·f_dest·T_dest + (φ_src + 2π·f_src·T_src)
+ *   elsewhere:      deterministic hash-random phase
+ *
+ * In the Gaborator global convention an impulse at time T has φ = −2π·f·T at
+ * every atom, so the bracketed term is the source's phase DEVIATION from a
+ * perfect impulse at the onset. Re-anchoring that deviation at the dest
+ * frequency transports the source's transient character: coherent clicks stay
+ * coherent (cross-band aligned → sharp attack, no pre-echo), noisy attacks
+ * stay noisy. Purely additive — stored phase is never scaled, so the 2πn
+ * unwrap ambiguity that algorithm 3/4 scaling turns into per-band phase junk
+ * cancels mod 2π here. Away from onsets, noise re-randomized at the dest
+ * band's own rate sounds like genuine band-limited noise instead of the slowed
+ * watery texture that scaled phase produces. Sustained tonal material has no
+ * valid rule in this mode — use Neutral for that.
+ */
+const float PUNCHY_SUPPORT_GAIN = 0.7;
+const float PUNCHY_SIGMA_FLOOR  = 0.002;
+
+vec4 getTransformedSamplePunchy(vec2 sourceUv, vec2 destUv, float scaleX) {
+  vec4 magPhase = sampleSourceInterp(sourceUv);
+
+  float fSrc  = max(getSourceMetadata(sourceUv).a, 1e-6);
+  float fDest = max(getDestMetadata(destUv).a, 1e-6);
+
+  float tSrcSec = sourceUv.x * sourceFrameCount / max(sourceSampleRate, 1e-6);
+  vec2 onset = texture(sourceOnsetTex, vec2(sourceUv.x, 0.5)).rg;
+
+  // Lock window matched to the SOURCE band's Gabor support — the width of the
+  // attack ridge in the transported data. A dest-support window would cohere
+  // tail energy into a false click.
+  float sigma = max(PUNCHY_SUPPORT_GAIN * sourceBandsPerOctave / fSrc, PUNCHY_SIGMA_FLOOR);
+  float dt = (tSrcSec - onset.x) / sigma;
+  float w = onset.y * exp(-dt * dt);
+
+  // Onset time mapped into dest seconds through the transform's x-affine
+  // (destUvToSourceUv slope is sourceTimeScale, the geometric transform's is
+  // 1/scaleX), so the lock lands where the transient lands after the move.
+  float deltaSrcUv  = (onset.x - tSrcSec) * sourceSampleRate / max(sourceFrameCount, 1.0);
+  float deltaDestUv = deltaSrcUv * scaleX / max(sourceTimeScale, 1e-6);
+  float tOnsetDestSec = (destUv.x + deltaDestUv) * destFrameCount / max(destSampleRate, 1e-6);
+
+  float anchor = -TWO_PI * fDest * tOnsetDestSec + TWO_PI * fSrc * onset.x;
+  float lockL = anchor + magPhase.y;
+  float lockR = anchor + magPhase.w;
+
+  vec2 seed = destUv * vec2(destFrameCount, destBandCount);
+  float randL = random(seed + random(seed + vec2(12.34, 56.78))) * TWO_PI;
+  float randR = random(seed + random(seed + vec2(90.12, 34.56))) * TWO_PI;
+
+  vec2 vL = w * vec2(cos(lockL), sin(lockL)) + (1.0 - w) * vec2(cos(randL), sin(randL));
+  vec2 vR = w * vec2(cos(lockR), sin(lockR)) + (1.0 - w) * vec2(cos(randR), sin(randR));
+  magPhase.y = atan(vL.y, vL.x);
+  magPhase.w = atan(vR.y, vR.x);
+  return magPhase;
+}
+
 vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, float shiftX, float shiftY) {
   vec2 wrappedSourceUv = wrapUv(sourceUv);
 
@@ -648,6 +713,8 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY
     return getTransformedSampleNeutral(sourceUv, destUv, scaleX, scaleY, shiftX, shiftY);
   } else if (algorithm == 4) {
     return getTransformedSampleNeutralV2(sourceUv, destUv, scaleX, scaleY);
+  } else if (algorithm == 5) {
+    return getTransformedSamplePunchy(wrappedSourceUv, destUv, scaleX);
   }
   return vec4(0.0);
 }

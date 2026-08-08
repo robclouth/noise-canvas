@@ -198,9 +198,14 @@ export const CONTEXTUAL_MOD_SOURCES = [
 ] as const;
 export const NUM_CONTEXTUAL_MOD_SOURCES = CONTEXTUAL_MOD_SOURCES.length;
 
+// Transient-preserving transform algorithm: re-anchors phase at detected
+// onsets, randomizes elsewhere. Needs the source onset map (see onset-map.ts).
+export const PUNCHY_ALGORITHM = 5;
+
 export const ALGORITHMS = [
   { value: 4, label: "Neutral" },
   { value: 3, label: "Neutralish" },
+  { value: PUNCHY_ALGORITHM, label: "Punchy" },
   { value: 2, label: "Percussive" },
   { value: 0, label: "Flangey" },
   { value: 1, label: "Noisey" },

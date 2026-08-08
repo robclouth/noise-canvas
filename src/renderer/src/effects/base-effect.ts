@@ -33,6 +33,7 @@ export type CommonUniforms = {
   sourceSampleRate: { value: number };
   sourceMinFreq: { value: number };
   sourceBandsPerOctave: { value: number };
+  sourceOnsetTex: { value: Texture | null };
   destSpectrogramTex: { value: Texture | null };
   destInverseMapTex: { value: Texture | null };
   destMetadataTex: { value: Texture | null };
@@ -119,6 +120,7 @@ export const defaultValues: CommonUniforms = {
   sourceChannelCount: { value: 1 },
   sourceSampleRate: { value: 44100.0 },
   sourceMinFreq: { value: 20.0 },
+  sourceOnsetTex: { value: null },
   sourceBandsPerOctave: { value: 24.0 },
   destSpectrogramTex: { value: null },
   destInverseMapTex: { value: null },

@@ -36,7 +36,9 @@ import {
 import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
+import { PUNCHY_ALGORITHM } from "./constants";
 import { buildModulatorUniforms } from "./modulator-utils";
+import { getOnsetMapTexture } from "./onset-map";
 import { withPlatformDefines } from "./shader-utils";
 import { resolveBrushAnchor, resolveBrushFootprint, swungGridCellWidthUv } from "./utils";
 
@@ -534,6 +536,12 @@ export class StrokeRenderer {
       sourceBandCount: { value: sourceFile.spectrogramData.numBands },
       sourceChannelCount: { value: sourceFile.spectrogramData.numChannels },
       sourceSampleRate: { value: sourceFile.spectrogramData.sampleRate },
+      sourceOnsetTex: {
+        value:
+          stepState.algorithm === PUNCHY_ALGORITHM
+            ? getOnsetMapTexture(sourceFile.spectrogramData)
+            : placeholderTexture,
+      },
       destSpectrogramTex: { value: destTexture.texture || placeholderTexture },
       destSpectrogramTextureSize: { value: this.spectrogramData.packedTextureSize },
       destInverseMapTex: { value: this.textures.inverseMapTex || placeholderTexture },
@@ -925,6 +933,12 @@ export class StrokeRenderer {
         sourceChannelCount: commonUniforms.destChannelCount,
         sourceSampleRate: commonUniforms.destSampleRate,
         sourceSpectrogramTextureSize: commonUniforms.destSpectrogramTextureSize,
+        sourceOnsetTex: {
+          value:
+            stepState.algorithm === PUNCHY_ALGORITHM
+              ? getOnsetMapTexture(this.spectrogramData)
+              : this.textures.placeholderTexture,
+        },
         sourceOffsetX: { value: 0 },
         sourceOffsetY: { value: 0 },
         sourceTimeScale: { value: 1.0 },
