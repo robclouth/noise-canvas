@@ -1551,6 +1551,18 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "When enabled, the brush snaps to the horizontal (time) grid.",
     default: true,
   },
+  snapTimeSource: {
+    kind: "options",
+    name: "Snap Time To",
+    label: "To",
+    description:
+      "What time snapping lands on: the beat grid, or the file's detected onsets. Onset snapping puts a stamp exactly on a hit, which is what a transient-preserving transform wants.",
+    default: "grid",
+    options: [
+      { value: "grid", label: "Grid" },
+      { value: "onsets", label: "Onsets" },
+    ],
+  },
   onsetSensitivity: {
     kind: "number",
     name: "Onset Sensitivity",

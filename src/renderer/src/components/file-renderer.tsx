@@ -321,6 +321,7 @@ const FileRendererInner = memo(
           showHorizontalGrid: { value: true },
           showVerticalGrid: { value: true },
           scaleGridEnabled: { value: false },
+          showOnsets: { value: false },
           scaleOffsets: { value: new Float32Array(12) },
           pitchOffsetSemisFromC0: { value: 0.0 },
           showTargetRectangle: { value: false },
@@ -558,6 +559,11 @@ const FileRendererInner = memo(
       uniforms.scaleGridEnabled.value = gridSizeSemis <= 0 && semitoneHeightPx >= MIN_GRID_SPACING_PX;
       uniforms.scaleOffsets.value = buildScaleOffsets(state.scaleTonic, state.scaleType);
       uniforms.pitchOffsetSemisFromC0.value = minFreqSemisAboveC0(spectrogramData.minFreq);
+
+      uniforms.showOnsets.value = state.showOnsets;
+      uniforms.sourceOnsetTex.value = state.showOnsets
+        ? getOnsetTexture(fileId, openFiles[fileId]?.onsets, totalDuration, state.onsetSensitivity)
+        : placeholderTexture;
     };
 
     /**
