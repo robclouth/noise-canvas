@@ -8,7 +8,8 @@ import {
   stemMemberColor,
   stemMethodLabel,
 } from "@renderer/store/stem-groups";
-import { Combine, Link2, Link2Off, X } from "lucide-react";
+import { useUiSize } from "@renderer/lib/ui-density";
+import { Layers, Link2, Link2Off, Merge, X } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, type RefObject } from "react";
 import { FileView } from "../file-view";
 import { Tooltip } from "../tooltip";
@@ -141,6 +142,7 @@ const StemGroupSection = memo(
   ({ groupId, fileIds, ...laneProps }: { groupId: string; fileIds: string[] } & Omit<FileLaneProps, "fileId">) => {
     const group = useStore((state) => state.stemGroups[groupId]);
     const anyLoading = useStore((state) => fileIds.some((id) => !!state.filesLoading[id]));
+    const uiSize = useUiSize();
 
     // Fullscreen takes over the canvas, so the group chrome would just be a
     // stray bar above it.
@@ -167,9 +169,12 @@ const StemGroupSection = memo(
         h={laneProps.fullscreenFileId !== null ? "100%" : undefined}
         flex={laneProps.fullscreenFileId !== null ? 1 : undefined}
       >
+        {/* The space above the header row is already the canvas gap — the panel's
+            own padding for the first segment, the inter-segment gap otherwise —
+            so the row pads only below, by the same amount, to sit evenly. */}
         {!chromeHidden && (
-          <Group gap="xs" wrap="nowrap" py={2} px={4} style={{ minHeight: 24 }}>
-            <Combine size={12} color={color} style={{ flexShrink: 0 }} />
+          <Group gap="xs" wrap="nowrap" pb="xs" px={4} style={{ minHeight: 24 }}>
+            <Layers size={16} color={color} style={{ flexShrink: 0 }} />
             <Text size="xs" c="dimmed" truncate="end" style={{ minWidth: 0, flex: 1 }}>
               {group.label}
             </Text>
@@ -182,25 +187,35 @@ const StemGroupSection = memo(
               }
             >
               <ActionIcon
-                size="xs"
+                size={uiSize}
                 variant="subtle"
                 color={group.syncView ? "gray" : "dark.3"}
                 onClick={() => useStore.getState().setStemGroupSyncView(groupId, !group.syncView)}
               >
-                {group.syncView ? <Link2 size={12} /> : <Link2Off size={12} />}
+                {group.syncView ? <Link2 size={16} /> : <Link2Off size={16} />}
               </ActionIcon>
             </Tooltip>
             <Tooltip
               label={`Merge all ${group.memberIds.length} parts of this ${stemMethodLabel(group.method)} split into a new file. The parts stay open.`}
             >
               <ActionIcon
-                size="xs"
+                size={uiSize}
                 variant="subtle"
                 color="gray"
                 loading={anyLoading}
                 onClick={() => useStore.getState().mergeStemGroup(groupId)}
               >
-                <Combine size={12} />
+                <Merge size={16} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label={`Close all ${group.memberIds.length} parts of this split.`}>
+              <ActionIcon
+                size={uiSize}
+                variant="subtle"
+                color="gray"
+                onClick={() => useStore.getState().closeStemGroup(groupId)}
+              >
+                <X size={16} />
               </ActionIcon>
             </Tooltip>
           </Group>

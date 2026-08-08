@@ -6,7 +6,7 @@ import { getFileColor, openFiles } from "@renderer/store/files";
 import { selectStemGroupOfFile, stemMemberColor, stemMethodLabel } from "@renderer/store/stem-groups";
 import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
-import { ChevronDown, Combine, Copy, Maximize2, Minimize2, Scissors, X } from "lucide-react";
+import { ChevronDown, Copy, Maximize2, Minimize2, Split, X } from "lucide-react";
 import { memo } from "react";
 import { host } from "../lib/host";
 import { Tooltip } from "./tooltip";
@@ -118,20 +118,6 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         )}
       </Group>
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-        {stemGroup && (
-          <Tooltip label="Merge every part of this split into a new file. The parts stay open.">
-            <ActionIcon
-              size={uiSize}
-              color="dark.5"
-              onClick={(e) => {
-                e.stopPropagation();
-                useStore.getState().mergeStemGroup(stemGroup.id);
-              }}
-            >
-              <Combine size={16} />
-            </ActionIcon>
-          </Tooltip>
-        )}
         <Tooltip label="The tempo of this file in beats per minute (BPM). Used for grid snapping and time-based effects.">
           <NumberInput
             w={60}
@@ -146,7 +132,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
           <Tooltip label="Split this file into separate components.">
             <Menu.Target>
               <ActionIcon size={uiSize} color="dark.5" onClick={(e) => e.stopPropagation()}>
-                <Scissors size={16} />
+                <Split size={16} />
               </ActionIcon>
             </Menu.Target>
           </Tooltip>

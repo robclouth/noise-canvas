@@ -26,6 +26,8 @@ export interface FilesState {
   /** Sum the given files into a new one, leaving the originals open. */
   mergeStems: (fileIds: string[]) => Promise<void>;
   mergeStemGroup: (groupId: string) => Promise<void>;
+  /** Close every member of a group, after one confirmation covering all of them. */
+  closeStemGroup: (groupId: string) => Promise<void>;
   saveActiveFile: () => Promise<void>;
   saveActiveFileAs: () => Promise<void>;
   saveActiveFileVersion: () => Promise<void>;
@@ -902,6 +904,30 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const group = get().stemGroups[groupId];
     if (!group) return;
     await get().mergeStems(group.memberIds);
+  },
+  closeStemGroup: async (groupId: string) => {
+    const group = get().stemGroups[groupId];
+    if (!group) return;
+    // Closing a member dissolves the group once it drops below two, so the list
+    // is snapshotted before anything is removed.
+    const memberIds = [...group.memberIds];
+    const unsaved = memberIds.filter((id) => get().filesDirty[id]).length;
+    const confirmed = await new Promise<boolean>((resolve) => {
+      openConfirm({
+        title: "Close all parts",
+        message:
+          unsaved > 0
+            ? `Close all ${memberIds.length} parts of this split? ${unsaved === 1 ? "One has" : `${unsaved} have`} unsaved changes.`
+            : `Close all ${memberIds.length} parts of this split?`,
+        confirmLabel: "Close All",
+        danger: true,
+        onConfirm: () => resolve(true),
+        onCancel: () => resolve(false),
+        onClose: () => resolve(false),
+      });
+    });
+    if (!confirmed) return;
+    for (const id of memberIds) get().closeFile(id);
   },
   aiSeparateFile: async (fileId: string) => {
     const originalFile = openFiles[fileId];
