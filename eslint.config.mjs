@@ -5,7 +5,9 @@ import eslintPluginReactHooks from "eslint-plugin-react-hooks";
 import eslintPluginReactRefresh from "eslint-plugin-react-refresh";
 
 export default tseslint.config(
-  { ignores: ["**/node_modules", "**/dist", "**/out", "**/out-ext", "test-phase.mjs"] },
+  // .claude/worktrees holds git worktrees checked out inside the repo, so every
+  // file in them is a second copy of the source and would be linted twice.
+  { ignores: ["**/node_modules", "**/dist", "**/out", "**/out-ext", "**/.claude/worktrees", "test-phase.mjs"] },
   tseslint.configs.recommended,
   eslintPluginReact.configs.flat.recommended,
   eslintPluginReact.configs.flat["jsx-runtime"],
