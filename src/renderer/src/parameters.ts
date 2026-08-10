@@ -1558,13 +1558,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description: "When enabled, the brush snaps to the horizontal (time) grid.",
     default: true,
   },
-  showOnsets: {
-    kind: "boolean",
-    name: "Show Onsets",
-    label: "Show Onsets",
-    description: "Show a row above each spectrogram with a line at every detected onset.",
-    default: false,
-  },
   limiterEnabled: {
     kind: "boolean",
     name: "Limiter",

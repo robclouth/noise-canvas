@@ -21,18 +21,14 @@ interface OnsetLegendProps {
 }
 
 /**
- * A strip above the spectrogram carrying one line per detected onset. The hits
- * stay visible without drawing over the picture, which is what full-height
- * markers did.
+ * A strip above the spectrogram carrying one line per detected onset, so the
+ * hits are readable without anything being drawn over the picture itself.
  */
 export const OnsetLegend = memo(({ fileId }: OnsetLegendProps) => {
-  const showOnsets = useStore((state) => state.showOnsets);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (!showOnsets) return undefined;
-
     const draw = () => {
       const canvas = canvasRef.current;
       const container = containerRef.current;
@@ -92,9 +88,7 @@ export const OnsetLegend = memo(({ fileId }: OnsetLegendProps) => {
       unsubscribe();
       observer.disconnect();
     };
-  }, [fileId, showOnsets]);
-
-  if (!showOnsets) return null;
+  }, [fileId]);
 
   return (
     <Box

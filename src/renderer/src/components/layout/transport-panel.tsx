@@ -153,7 +153,6 @@ export const TransportPanel = memo(() => {
 
       <Stack gap={0}>
         <ParameterControl paramKey="gridSwing" labelWidth={TRANSPORT_LABEL_WIDTH} />
-        <ParameterControl paramKey="showOnsets" labelWidth={TRANSPORT_LABEL_WIDTH} displayLabel="Onsets" />
       </Stack>
 
       <Divider orientation="vertical" color="dark.5" />
