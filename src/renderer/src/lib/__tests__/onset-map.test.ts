@@ -84,6 +84,27 @@ describe("filterOnsets", () => {
     for (const onset of strictest) expect(onset.strength).toBeCloseTo(1, 5);
   });
 
+  it("keeps the file's first event however quiet it is", () => {
+    // A loop opening on a quiet hit: the same level later in the file is cut at
+    // this sensitivity, but the one the file opens on is the anchor for the
+    // head of the file and stays.
+    const raw = packed([
+      [0.0, 1],
+      [0.1, 10],
+      [0.2, 10],
+      [0.3, 10],
+      [0.4, 10],
+      [0.5, 1],
+    ]);
+    const found = filterOnsets(raw, 50);
+    const times = found.map((o) => o.timeSec);
+
+    expect(times).toContain(0);
+    expect(times).not.toContain(0.5);
+    // Kept, but still drawn at its own level rather than promoted.
+    expect(found[0].strength).toBeCloseTo(0, 5);
+  });
+
   it("returns nothing without onsets", () => {
     expect(filterOnsets(undefined, 100)).toEqual([]);
     expect(filterOnsets(new Float32Array(0), 100)).toEqual([]);

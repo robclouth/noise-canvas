@@ -63,7 +63,10 @@ export function filterOnsets(packed: Float32Array | undefined, sensitivity: numb
     if (!(saliences[i] > 0)) continue;
     const db = 20 * Math.log10(saliences[i] / reference);
     const strength = Math.min(1, Math.max(0, 1 + db / rangeDb));
-    if (strength < threshold) continue;
+    // The first event in a file is where its material begins, so it is kept at
+    // any sensitivity: it competes with nothing, and everything painted at the
+    // head of the file anchors to it.
+    if (strength < threshold && onsets.length > 0) continue;
     onsets.push({ timeSec: packed[i * 2], strength });
   }
   return onsets;
