@@ -4,16 +4,27 @@
 > was intended; three things were built differently from what is written below,
 > for reasons found while building:
 >
-> - **Phase 1** budgets detection against the audio (~1.5 ms per second) rather
+> - **Phase 1** budgets detection against the audio (~6 ms per second) rather
 >   than against synthesis, which is FFT-based and far faster than a
 >   per-coefficient walk, so "under 10% of synthesis" was never reachable.
 >   Detection is therefore requested per call rather than always on. Peak
 >   picking also spreads each coefficient's contribution across the time it
->   covers: dropping it into the bin it starts in makes the slow bands, one
->   coefficient per 43 ms, spike periodically and swamp the function.
-> - **Phase 2** scales salience against the file's 90th percentile rather than
->   by rank. Rank scoring gives the weakest hit of a loop of equal hits a score
->   of zero, which is exactly wrong.
+>   covers, as a triangle peaking at its own position: dropping it into the bin
+>   it starts in makes the slow bands, one coefficient per 43 ms, spike
+>   periodically and swamp the function, while spreading it as a flat block
+>   leaves no single highest point and reports the block's leading edge as a
+>   second event ahead of the real one.
+> - **Phase 2** measures salience as the level the event reaches over the floor
+>   before it, on a curve summing power across the bands at each instant. The
+>   plan's peak-over-local-mean measures how isolated a hit is rather than how
+>   big, so a tick alone in a gap outranks a kick in a busy bar; and anything
+>   measured per unit time ranks a hi-hat above a kick 24 dB louder, because a
+>   kick's bands are sampled a couple of hundred times more slowly. Scaled
+>   against the file's 90th percentile rather than by rank — rank scoring gives
+>   the weakest hit of a loop of equal hits a score of zero, which is exactly
+>   wrong — and read in decibels, over whatever range the file contains.
+>   The map carries the control's verdict and the event's level separately: an
+>   onset that counts is re-anchored in full whether or not it is loud.
 > - **Phase 7** derives tonality per pixel from the source's own phase (five
 >   texture reads) instead of a per-band map computed in C++ and carried
 >   through as a texture the size of the spectrogram. Same behaviour, finer
