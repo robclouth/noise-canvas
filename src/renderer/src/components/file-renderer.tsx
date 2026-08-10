@@ -38,6 +38,7 @@ import { getHistoryManager } from "@renderer/lib/history-manager";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { DEFAULT_ONSET_SENSITIVITY } from "../lib/constants";
+import { getFileOnsets } from "../lib/file-onsets";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { getOnsetTexture } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
@@ -227,6 +228,9 @@ const FileRendererInner = memo(
             scaleTonic: state.scaleTonic,
             scaleType: state.scaleType,
             pickingFileParam: state.pickingFileParam,
+            // The brush preview rectangle can be an onset span wide, so it
+            // moves with the file's sensitivity.
+            onsetSensitivity: file && state.filepathsOnsetSensitivity[file.filePath],
           };
         },
         () => {
@@ -322,7 +326,6 @@ const FileRendererInner = memo(
           showHorizontalGrid: { value: true },
           showVerticalGrid: { value: true },
           scaleGridEnabled: { value: false },
-          showOnsets: { value: false },
           scaleOffsets: { value: new Float32Array(12) },
           pitchOffsetSemisFromC0: { value: 0.0 },
           showTargetRectangle: { value: false },
@@ -560,16 +563,6 @@ const FileRendererInner = memo(
       uniforms.scaleGridEnabled.value = gridSizeSemis <= 0 && semitoneHeightPx >= MIN_GRID_SPACING_PX;
       uniforms.scaleOffsets.value = buildScaleOffsets(state.scaleTonic, state.scaleType);
       uniforms.pitchOffsetSemisFromC0.value = minFreqSemisAboveC0(spectrogramData.minFreq);
-
-      uniforms.showOnsets.value = state.showOnsets;
-      uniforms.sourceOnsetTex.value = state.showOnsets
-        ? getOnsetTexture(
-            fileId,
-            openFiles[fileId]?.onsets,
-            totalDuration,
-            state.filepathsOnsetSensitivity[openFiles[fileId]?.filePath] ?? DEFAULT_ONSET_SENSITIVITY,
-          )
-        : placeholderTexture;
     };
 
     /**
@@ -777,6 +770,7 @@ const FileRendererInner = memo(
               gridSizeBeats: stepState.gridSizeBeats,
               gridSwing: stepState.gridSwing,
               snapTime: stepState.snapTime,
+              onsets: getFileOnsets(fileId),
             },
             bpm,
             totalDuration,

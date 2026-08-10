@@ -7,14 +7,15 @@ import { useGesture } from "@use-gesture/react";
 import { memo, PointerEventHandler, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Vector2 } from "three";
 import { aimUvToBrushBlUv } from "../lib/brush-anchor";
-import { BEAT_VALUES, BRUSH_ANCHOR_MODE_CENTER, DEFAULT_ONSET_SENSITIVITY } from "../lib/constants";
+import { BRUSH_ANCHOR_MODE_CENTER, isOnsetGrid } from "../lib/constants";
+import { getFileOnsets } from "../lib/file-onsets";
 import { penState } from "../lib/pen-state";
 import { buildScaleOffsets, minFreqSemisAboveC0, snapSemisToScale } from "../lib/scale-snap";
-import { filterOnsets } from "../lib/onset-map";
 import { screenToZoomed, snapToSwungGridCenter, snapToSwungGridFloor } from "../lib/utils";
 import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { LoopRegion } from "./loop-region";
+import { OnsetLegend } from "./onset-legend";
 import { PITCH_LEGEND_WIDTH, PitchLegend } from "./pitch-legend";
 import { PlaybackLine } from "./playback-line";
 import { TimeLegend } from "./time-legend";
@@ -45,10 +46,8 @@ type ViewPhase = "live" | "unveiling" | "static";
 function snapTimeUv(uvX: number, fileId: string, bpm: number, totalDuration: number, isCenter: boolean): number {
   const state = useStore.getState();
 
-  if (state.gridSizeBeats < BEAT_VALUES[0].value) {
-    const file = openFiles[fileId];
-    const sensitivity = state.filepathsOnsetSensitivity[file?.filePath] ?? DEFAULT_ONSET_SENSITIVITY;
-    const onsets = filterOnsets(file?.onsets, sensitivity);
+  if (isOnsetGrid(state.gridSizeBeats)) {
+    const onsets = getFileOnsets(fileId);
     if (onsets.length === 0) return uvX;
     const currentTime = uvX * totalDuration;
     let nearest = onsets[0].timeSec;
@@ -780,6 +779,9 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         </Box>
       ) : (
         <>
+          <Box style={{ paddingLeft: PITCH_LEGEND_WIDTH }}>
+            <OnsetLegend fileId={fileId} />
+          </Box>
           <Box
             h={isFullscreen ? undefined : 400}
             style={{

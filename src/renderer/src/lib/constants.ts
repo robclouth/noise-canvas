@@ -9,6 +9,12 @@ export const MULTIPLIER_UNIT = "x";
 export const ONSETS_GRID_VALUE = 1 / 128;
 export const DEFAULT_ONSET_SENSITIVITY = 50;
 
+// The time grid means onsets rather than beats whenever it sits below the
+// smallest beat value.
+export function isOnsetGrid(gridSizeBeats: number): boolean {
+  return gridSizeBeats < BEAT_VALUES[0].value;
+}
+
 export const BEAT_VALUES = [
   { value: 1 / 64, label: "1/64" },
   { value: (1 / 32) * (2 / 3), label: "1/32t" },

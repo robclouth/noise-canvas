@@ -36,6 +36,7 @@ import {
 import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
+import { getFileOnsets } from "./file-onsets";
 import { buildModulatorUniforms } from "./modulator-utils";
 import { withPlatformDefines } from "./shader-utils";
 import { resolveBrushAnchor, resolveBrushFootprint, swungGridCellWidthUv } from "./utils";
@@ -447,6 +448,7 @@ export class StrokeRenderer {
           gridSizeBeats: state.gridSizeBeats,
           gridSwing: state.gridSwing,
           snapTime: state.snapTime,
+          onsets: getFileOnsets(this.fileId),
         },
         bpm,
         totalDuration,

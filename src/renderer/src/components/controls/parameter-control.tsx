@@ -127,6 +127,7 @@ export const ParameterControl = memo(function ParameterControl({
         marks={parameter.marks}
         disabled={disabled}
         color={color}
+        leftValue={parameter.leftValue}
         rightValue={parameter.rightValue}
         fromNormalized={(value) => denormalizeParameterValue(paramKey, value)}
         toNormalized={(value) => normalizeParameterValue(paramKey, value)}

@@ -107,6 +107,24 @@ type CacheEntry = { packed: Float32Array | undefined; sensitivity: number; durat
 
 const textureCache = new Map<string, CacheEntry>();
 
+type ListCacheEntry = { packed: Float32Array | undefined; sensitivity: number; onsets: Onset[] };
+
+const listCache = new Map<string, ListCacheEntry>();
+
+/**
+ * The surviving onsets for a file, cached against its raw onsets and its
+ * sensitivity. Cursor snapping and brush sizing ask for this on every mouse
+ * move and every frame, which is too often to re-filter.
+ */
+export function getFilteredOnsets(fileId: string, packed: Float32Array | undefined, sensitivity: number): Onset[] {
+  const cached = listCache.get(fileId);
+  if (cached && cached.packed === packed && cached.sensitivity === sensitivity) return cached.onsets;
+
+  const onsets = filterOnsets(packed, sensitivity);
+  listCache.set(fileId, { packed, sensitivity, onsets });
+  return onsets;
+}
+
 /**
  * The baked map for a file, rebuilt when its onsets, its length, or the
  * sensitivity change. Released by disposeOnsetTexture when the file closes.
@@ -123,12 +141,13 @@ export function getOnsetTexture(
   }
   cached?.texture.dispose();
 
-  const texture = bakeOnsetTexture(filterOnsets(packed, sensitivity), durationSec);
+  const texture = bakeOnsetTexture(getFilteredOnsets(fileId, packed, sensitivity), durationSec);
   textureCache.set(fileId, { packed, sensitivity, durationSec, texture });
   return texture;
 }
 
 export function disposeOnsetTexture(fileId: string): void {
+  listCache.delete(fileId);
   const cached = textureCache.get(fileId);
   if (!cached) return;
   cached.texture.dispose();

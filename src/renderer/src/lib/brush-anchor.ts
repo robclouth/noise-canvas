@@ -1,4 +1,4 @@
-import { BRUSH_ANCHOR_MODE_CENTER } from "./constants";
+import { BRUSH_ANCHOR_MODE_CENTER, isOnsetGrid } from "./constants";
 import { resolveBrushFootprint, swungGridCellWidthUv } from "./utils";
 import type { State } from "@renderer/store/types";
 
@@ -44,8 +44,12 @@ export function aimUvToBrushBlUv(
     totalDuration,
   );
   const timeSizeUv = swungTimeUv ?? footprint.sizeUv.x;
+  // A Grid-size brush on the onset grid runs from the hit to the next one, and
+  // the aim is already snapped onto the hit — an onset is a position rather
+  // than a cell to sit inside — so the time axis stays corner-anchored.
+  const onsetAnchored = isOnsetGrid(state.gridSizeBeats) && brushSizeTime <= 0 && state.snapTime;
   return {
-    blX: footprint.fullTime ? aimX : aimX - timeSizeUv / 2,
+    blX: footprint.fullTime || onsetAnchored ? aimX : aimX - timeSizeUv / 2,
     blY: footprint.fullPitch ? aimY : aimY - footprint.sizeUv.y / 2,
   };
 }

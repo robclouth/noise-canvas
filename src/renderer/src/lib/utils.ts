@@ -1,4 +1,6 @@
 import { Vector2 } from "three";
+import { isOnsetGrid } from "./constants";
+import type { Onset } from "./onset-map";
 
 // Special sentinel values on the brush size sliders:
 //   value === 0          → "Grid" mode (track the current time/pitch grid)
@@ -9,6 +11,18 @@ export const BRUSH_SIZE_PITCH_FULL = 128;
 // Fallback grid interval in semis when the pitch grid is set to "Scale" mode
 // (gridSizeSemis <= 0) but the brush size is linked to Grid.
 const PITCH_GRID_SCALE_FALLBACK_SEMIS = 12;
+
+// Fallback grid interval in beats when the time grid is set to "Onsets" but the
+// brush size is linked to Grid. Onset spans are measured per hit, so this only
+// applies where there is no hit to measure — time snap off, or a file with no
+// detected onsets — and the sentinel's own value (a 128th of a beat) would
+// otherwise leave a brush too small to paint with.
+const TIME_GRID_ONSET_FALLBACK_BEATS = 1;
+
+// The anchor round-trips through UV, so a value on an onset can come back a
+// hair below it. Nudge forward by a microsecond so it resolves to that onset's
+// span rather than the one before.
+const GRID_CELL_EPSILON_SEC = 1e-6;
 
 export interface ResolvedBrushFootprint {
   sizeUv: Vector2;
@@ -34,7 +48,11 @@ export function resolveBrushFootprint(params: {
   const gridTime = brushSizeTime <= 0;
   const gridPitch = brushSizePitch <= 0;
 
-  const timeBeats = gridTime ? gridSizeBeats : brushSizeTime;
+  const timeBeats = gridTime
+    ? isOnsetGrid(gridSizeBeats)
+      ? TIME_GRID_ONSET_FALLBACK_BEATS
+      : gridSizeBeats
+    : brushSizeTime;
   const pitchSemis = gridPitch ? (gridSizeSemis > 0 ? gridSizeSemis : PITCH_GRID_SCALE_FALLBACK_SEMIS) : brushSizePitch;
 
   const timeUv = fullTime ? 1 : unitsToUv(timeBeats, 0, bpm, totalDuration, bandsPerOctave, numBands).x;
@@ -223,21 +241,56 @@ export function snapToSwungGridRound(value: number, gridSize: number, swing: num
   return nearest;
 }
 
-// Width in UV of the swung grid cell containing `anchorTimeUv`, for when the time
+// Width in UV of the span the onset at or before `anchorTimeUv` owns: from that
+// onset to the next one, or to the end of the file for the last. The aim snaps
+// onto the onset, so a Grid-size brush covers exactly one hit however unevenly
+// the hits are spaced. Returns null when the file has no onsets to measure.
+export function onsetCellWidthUv(
+  anchorTimeUv: number,
+  onsets: Onset[] | undefined,
+  totalDuration: number,
+): number | null {
+  if (!onsets?.length) return null;
+  const anchorSeconds = anchorTimeUv * totalDuration + GRID_CELL_EPSILON_SEC;
+
+  // Last onset at or before the anchor; -1 when the anchor precedes them all,
+  // whose span then runs from the start of the file.
+  let lo = 0;
+  let hi = onsets.length - 1;
+  let index = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (onsets[mid].timeSec <= anchorSeconds) {
+      index = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+
+  const start = index < 0 ? 0 : onsets[index].timeSec;
+  const end = index + 1 < onsets.length ? onsets[index + 1].timeSec : totalDuration;
+  return end > start ? (end - start) / totalDuration : null;
+}
+
+// Width in UV of the grid cell containing `anchorTimeUv`, for when the time
 // brush tracks the grid ("Grid" size) and time-snap is on. Swing alternates cell
 // widths, so a constant-width brush leaves gaps on the wider cells; sizing each
-// stamp to its own cell makes snapped strokes tile exactly. Returns null when it
-// does not apply (snap off, or an explicit/Full brush size), leaving callers on
-// the constant footprint.
+// stamp to its own cell makes snapped strokes tile exactly. On the onset grid
+// the cell is the span between hits instead. Returns null when it does not apply
+// (snap off, or an explicit/Full brush size), leaving callers on the constant
+// footprint.
 export function swungGridCellWidthUv(
   anchorTimeUv: number,
-  opts: { brushSizeTime: number; gridSizeBeats: number; gridSwing: number; snapTime: boolean },
+  opts: { brushSizeTime: number; gridSizeBeats: number; gridSwing: number; snapTime: boolean; onsets?: Onset[] },
   bpm: number,
   totalDuration: number,
 ): number | null {
   if (!opts.snapTime || opts.brushSizeTime > 0) return null;
+  if (!(totalDuration > 0)) return null;
+  if (isOnsetGrid(opts.gridSizeBeats)) return onsetCellWidthUv(anchorTimeUv, opts.onsets, totalDuration);
   const gridInterval = (60 / bpm) * opts.gridSizeBeats;
-  if (!(gridInterval > 0) || !(totalDuration > 0)) return null;
+  if (!(gridInterval > 0)) return null;
   const swing = opts.gridSwing / 100;
   // The anchor is the brush's BL, itself produced by snapping and round-tripped
   // through UV, so it can land a hair below an odd cell start. Nudge forward by

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Vector2 } from "three";
-import { screenToZoomed, stepSwungGrid, swungGridCellWidthUv, zoomedToScreen } from "../utils";
+import { ONSETS_GRID_VALUE } from "../constants";
+import { filterOnsets } from "../onset-map";
+import { resolveBrushFootprint, screenToZoomed, stepSwungGrid, swungGridCellWidthUv, zoomedToScreen } from "../utils";
 
 describe("screenToZoomed / zoomedToScreen", () => {
   describe("scalar (x-only) backwards-compat", () => {
@@ -115,5 +117,45 @@ describe("swungGridCellWidthUv", () => {
       expect(blUv + width).toBeCloseTo(nextCellStart / totalDuration, 6);
       cellStart = nextCellStart;
     }
+  });
+
+  describe("on the onset grid", () => {
+    // Unevenly spaced hits, as the detector reports them: flat [time, salience]
+    // pairs at full salience so every one survives the sensitivity cutoff.
+    const times = [0, 0.4, 1.9, 4.5];
+    const onsets = filterOnsets(Float32Array.from(times.flatMap((t) => [t, 1])), 50);
+    const onsetOpts = (over: Partial<Parameters<typeof swungGridCellWidthUv>[1]> = {}) =>
+      opts({ gridSizeBeats: ONSETS_GRID_VALUE, onsets, ...over });
+
+    it("spans from each hit to the next rather than the sentinel's own beat value", () => {
+      for (let i = 0; i < times.length; i++) {
+        const expectedEnd = i + 1 < times.length ? times[i + 1] : totalDuration;
+        const width = swungGridCellWidthUv(times[i] / totalDuration, onsetOpts(), bpm, totalDuration)!;
+        expect(width * totalDuration).toBeCloseTo(expectedEnd - times[i], 6);
+      }
+    });
+
+    it("covers the run-up to the first hit from the start of the file", () => {
+      const width = swungGridCellWidthUv(0.5 * (times[1] / totalDuration), onsetOpts(), bpm, totalDuration)!;
+      expect(width * totalDuration).toBeCloseTo(times[1], 6);
+    });
+
+    it("falls back to the constant footprint when the file has no onsets", () => {
+      expect(swungGridCellWidthUv(0.25, onsetOpts({ onsets: [] }), bpm, totalDuration)).toBeNull();
+    });
+
+    it("sizes a Grid brush by the beat rather than the sentinel when there is no cell to measure", () => {
+      const footprint = resolveBrushFootprint({
+        brushSizeTime: 0,
+        brushSizePitch: 12,
+        gridSizeBeats: ONSETS_GRID_VALUE,
+        gridSizeSemis: 12,
+        bpm,
+        totalDuration,
+        bandsPerOctave: 48,
+        numBands: 480,
+      });
+      expect(footprint.sizeUv.x * totalDuration).toBeCloseTo(60 / bpm, 6);
+    });
   });
 });

@@ -1541,9 +1541,13 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     description:
       "The horizontal grid size in beats. Set to 'Onsets' to snap to the file's detected onsets instead — an onset lands a stamp exactly on a hit, which is what a transient-preserving transform wants.",
     default: 1,
-    min: ONSETS_GRID_VALUE,
+    // Onsets sit past the bottom of the beat range rather than inside it, so
+    // the travel between the smallest and largest beat stays even and the
+    // sentinel is reached by taking the control all the way down.
+    min: BEAT_VALUES[0].value,
     max: 32,
     step: 0.0001,
+    leftValue: { value: ONSETS_GRID_VALUE, label: "Onsets" },
     marks: [{ value: ONSETS_GRID_VALUE, label: "Onsets" }, ...BEAT_VALUES],
     scale: "log",
   },
@@ -1558,7 +1562,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "boolean",
     name: "Show Onsets",
     label: "Show Onsets",
-    description: "Draw a marker over the spectrogram at every detected onset.",
+    description: "Show a row above each spectrogram with a line at every detected onset.",
     default: false,
   },
   limiterEnabled: {
