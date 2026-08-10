@@ -7,7 +7,19 @@ import eslintPluginReactRefresh from "eslint-plugin-react-refresh";
 export default tseslint.config(
   // .claude/worktrees holds git worktrees checked out inside the repo, so every
   // file in them is a second copy of the source and would be linted twice.
-  { ignores: ["**/node_modules", "**/dist", "**/out", "**/out-ext", "**/.claude/worktrees", "test-phase.mjs"] },
+  // .cache holds generated browser profiles whose bundled extension scripts are
+  // megabyte-long single lines — minutes each to parse, for no findings.
+  {
+    ignores: [
+      "**/node_modules",
+      "**/dist",
+      "**/out",
+      "**/out-ext",
+      "**/.claude/worktrees",
+      "**/.cache",
+      "test-phase.mjs",
+    ],
+  },
   tseslint.configs.recommended,
   eslintPluginReact.configs.flat.recommended,
   eslintPluginReact.configs.flat["jsx-runtime"],
