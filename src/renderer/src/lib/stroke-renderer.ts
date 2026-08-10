@@ -170,6 +170,10 @@ export class StrokeRenderer {
   private maskMacroValuesBuf: number[] = [0, 0, 0, 0];
 
   // State
+  // Holds the spectrogram as it was before a preview run of committed strokes,
+  // so the preview can be taken back without a history round trip. Allocated
+  // only while a preview is up.
+  private rollbackFbo: WebGLRenderTarget | null = null;
   private pingPong = 0;
   private maskPingPong = 0;
   private isInitialized = false;
@@ -1316,6 +1320,9 @@ export class StrokeRenderer {
   setFBOData(data: Float32Array): void {
     const { packedTextureSize } = this.spectrogramData;
 
+    // History moved the spectrogram somewhere else; pixels saved for a preview
+    // rollback no longer belong to it.
+    this.releaseRollback();
     this.pingPong = 0;
 
     const dataTex = new DataTexture(data, packedTextureSize.x, packedTextureSize.y, RGBAFormat, FloatType);
@@ -1367,6 +1374,50 @@ export class StrokeRenderer {
   // timing attribute true GPU cost to a stroke instead of just the JS dispatch.
   finishGpu(): void {
     this.gl.getContext().finish();
+  }
+
+  /**
+   * Saves the current spectrogram so a run of committed strokes can be taken
+   * back without touching history — what the Generate preview paints onto.
+   * Calling it again while a snapshot is held restores that snapshot instead of
+   * replacing it, so repeated previews always start from the same pixels.
+   */
+  captureRollback(): void {
+    if (this.rollbackFbo) {
+      this.blitFBO(this.rollbackFbo, this.pingPong === 0 ? this.fbo1 : this.fbo2);
+    } else {
+      this.rollbackFbo = this.createFBO(
+        this.spectrogramData.textureWidth,
+        this.spectrogramData.textureHeight,
+        RGBAFormat,
+      );
+      this.blitFBO(this.pingPong === 0 ? this.fbo1 : this.fbo2, this.rollbackFbo);
+    }
+    this.fboDataDirty = true;
+  }
+
+  /** Whether a rollback snapshot is currently held. */
+  hasRollback(): boolean {
+    return this.rollbackFbo !== null;
+  }
+
+  /**
+   * Puts the saved spectrogram back and drops the snapshot. Returns false when
+   * there was nothing to restore.
+   */
+  restoreRollback(): boolean {
+    if (!this.rollbackFbo) return false;
+    this.blitFBO(this.rollbackFbo, this.pingPong === 0 ? this.fbo1 : this.fbo2);
+    this.releaseRollback();
+    this.dirtyRegion = null;
+    this.fboDataDirty = true;
+    return true;
+  }
+
+  /** Drops the snapshot, keeping whatever is currently painted. */
+  releaseRollback(): void {
+    this.rollbackFbo?.dispose();
+    this.rollbackFbo = null;
   }
 
   /**
@@ -1469,6 +1520,7 @@ export class StrokeRenderer {
    * Dispose of all WebGL resources.
    */
   dispose(): void {
+    this.releaseRollback();
     this.fbo1.dispose();
     this.fbo2.dispose();
     this.passFbo1.dispose();

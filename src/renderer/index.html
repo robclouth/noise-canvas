@@ -4,9 +4,11 @@
     <meta charset="UTF-8" />
     <title>Noise Canvas</title>
     <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
+    <!-- 'unsafe-eval': Generate patterns are expressions the user writes, compiled
+         with new Function() against a fixed strudel scope. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; img-src 'self' blob: file: data:;"
+      content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; img-src 'self' blob: file: data:;"
     />
   </head>
 

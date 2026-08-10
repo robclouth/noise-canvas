@@ -85,6 +85,15 @@ export interface FileRendererHandle {
    * how many were painted.
    */
   renderStampBatch: (stamps: StampDispatch[]) => number;
+  /**
+   * Saves the spectrogram (or restores an already-saved one) so the stamps
+   * painted next can be taken back without touching history.
+   */
+  beginStampPreview: () => void;
+  /** Puts back the pixels from before the preview. Returns false if none were saved. */
+  discardStampPreview: () => boolean;
+  /** Keeps the previewed pixels and forgets the saved ones, so they can be committed. */
+  keepStampPreview: () => void;
   /** Gets the raw data from the current frame buffer object asynchronously. */
   getFBOData: () => Promise<Float32Array>;
   /** Sets the data of the frame buffer object. */
@@ -1160,7 +1169,19 @@ const FileRendererInner = memo(
       scheduleSnapshotRefresh();
     };
 
+    const discardStampPreview = (): boolean => {
+      const restored = strokeRendererRef.current?.restoreRollback() ?? false;
+      if (restored) {
+        displayMode.current = "committed";
+        invalidateRef.current?.();
+        scheduleSnapshotRefresh();
+      }
+      return restored;
+    };
+
     const beginStroke = () => {
+      // Painting by hand supersedes a pattern preview rather than stacking on it.
+      discardStampPreview();
       if (strokeRendererRef.current) {
         strokeRendererRef.current.beginStroke();
       }
@@ -1200,8 +1221,17 @@ const FileRendererInner = memo(
         }
         if (painted > 0) displayMode.current = "committed";
         invalidateRef.current?.();
+        scheduleSnapshotRefresh();
         return painted;
       },
+      beginStampPreview: () => {
+        const strokeRenderer = strokeRendererRef.current;
+        if (!strokeRenderer?.getIsInitialized()) return;
+        strokeRenderer.captureRollback();
+        strokeRenderer.beginStroke();
+      },
+      discardStampPreview,
+      keepStampPreview: () => strokeRendererRef.current?.releaseRollback(),
       getFBOData,
       setFBOData,
       getTextures,
