@@ -140,7 +140,7 @@ const BrushTile = memo(function BrushTile({
   // order, with the effect's hue dot next to its name.
   const stepRows = brush.steps
     .map((step, stepIndex) => ({
-      name: step.name || `Step ${stepIndex + 1}`,
+      name: step.name && !/^Step \d+$/.test(step.name) ? step.name : `${stepIndex + 1}`,
       color: step.color ? resolveBrushColor(step.color, theme) : theme.colors.dark[3],
       effects: ((step.effects ?? []) as EffectItem[]).filter((item) => item.enabled && EFFECT_COLORS[item.effect]),
     }))
