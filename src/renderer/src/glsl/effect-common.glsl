@@ -236,8 +236,7 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv,
                                 sampler2D dataTex,
                                 sampler2D metaTex,
                                 float frameCount,
-                                float bandCount,
-                                bool centerBins) {
+                                float bandCount) {
   float bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
 
   vec4 meta = fetchBandMetadata(metaTex, bandIndex);
@@ -246,10 +245,6 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv,
   float bandTimeScaleExp = meta.b;
 
   float timeInFrames = unpackedUv.x * frameCount;
-  if (centerBins) {
-    float bandTimeScale = exp2(bandTimeScaleExp);
-    timeInFrames -= bandTimeScale / 2.0;
-  }
   float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
 
   float timeIndex0, timeIndex1, timeFraction;
@@ -278,11 +273,7 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv,
 }
 
 vec4 sampleSourceInterp(vec2 sourceUv) {
-  return readPackedDataInterpolated(sourceUv, sourceSpectrogramTex, sourceMetadataTex, sourceFrameCount, sourceBandCount, false);
-}
-
-vec4 sampleSourceInterpCentered(vec2 sourceUv) {
-  return readPackedDataInterpolated(sourceUv, sourceSpectrogramTex, sourceMetadataTex, sourceFrameCount, sourceBandCount, true);
+  return readPackedDataInterpolated(sourceUv, sourceSpectrogramTex, sourceMetadataTex, sourceFrameCount, sourceBandCount);
 }
 
 /**
@@ -391,7 +382,7 @@ ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
  */
 vec4 getOriginalDestSample(vec2 destUv) {
   vec2 wrappedUv = wrapUv(destUv);
-  return readPackedDataInterpolated(wrappedUv, originalSpectrogramTex, destMetadataTex, destFrameCount, destBandCount, false);
+  return readPackedDataInterpolated(wrappedUv, originalSpectrogramTex, destMetadataTex, destFrameCount, destBandCount);
 }
 
 vec2 modifyPhase(vec2 magPhase, vec2 uv, bool shouldRandomise) {
@@ -867,37 +858,50 @@ float calculateEnvelopeGain(float localPos, float curve, float skew) {
   return pow(1.0 - x, p);
 }
 
-// Time-axis brush coverage by center-of-bin membership: a bin is inside the
-// brush iff its center falls within the span [0, brushSizeUv.x]. Every band's
-// bins share the frame-0 origin and step by a power of two, so equal adjacent
-// stamps partition each band's bin centers exactly — dragging one grid cell
-// after another tiles every resolution level with no seam and no overlap.
-// Returns coverage as 0.0 or 1.0 and outputs localX, the bin center's position
-// within the span, for the envelope.
+// Time-axis brush coverage by edge-of-bin membership: a bin is inside the
+// brush iff its left edge k·2^step falls within the span [0, brushSizeUv.x).
+// The left edge is where the bin's coefficient actually sits — the analysis
+// atom is centered there, the inverse map addresses it there, and the display
+// draws it there — so painted energy stays centered under the brush at every
+// band instead of ringing half a bin early at coarse bands. Every band's bins
+// share the frame-0 origin and step by a power of two, so equal adjacent
+// stamps still partition each band's bins exactly (half-open span, one owner
+// per bin). Returns coverage as 0.0 or 1.0 and outputs localX, the bin edge's
+// position within the span, for the envelope.
 float getBrushTimeCoverage(vec2 unpackedUv, vec4 meta, out float localX) {
   float cellFrames = exp2(meta.b);
   float bandLength = meta.g;
 
-  // Quantize the fragment to its bin and take the bin center in frames. The
-  // final bin is partial (its nominal span runs past the file end), so clamp
-  // its right edge to the file: that keeps the last bin's center inside the
-  // file so a stroke reaching the end still claims it — including the wide,
-  // sparse low-frequency bins that would otherwise be centered past the end.
   float binIndex = clamp(floor(unpackedUv.x * destFrameCount / cellFrames), 0.0, bandLength - 1.0);
-  float binStart = binIndex * cellFrames;
-  float binEnd   = min(binStart + cellFrames, destFrameCount);
-  float binCenterUv = 0.5 * (binStart + binEnd) / destFrameCount;
-  float binWidthUv  = cellFrames / destFrameCount;
+  float binEdgeUv  = binIndex * cellFrames / destFrameCount;
+  float binWidthUv = cellFrames / destFrameCount;
 
-  float centerOff = getEffectiveBrushOffset(vec2(binCenterUv, unpackedUv.y)).x;
-  localX = clamp(centerOff / max(EPSILON, brushSizeUv.x), 0.0, 1.0);
+  // The edge itself can coincide exactly with a brush boundary (both live on
+  // the frame grid), where float noise — and fract() on a wrapping axis, which
+  // folds "one ulp below the start" to "just under one" — would make ownership
+  // arbitrary. Probing slightly inside the bin tests the same membership from a
+  // point clear of every aligned boundary, so the half-open span stays
+  // deterministic: an edge on the brush start belongs to this stamp, an edge on
+  // its end belongs to the next. The probe is a quarter bin capped at two
+  // frames: enough to clear UV float noise on long files, small enough that the
+  // membership bias for unaligned brush edges stays inaudible at coarse bands.
+  float probeUv = binEdgeUv + 0.25 * min(cellFrames, 8.0) / destFrameCount;
+  float probeOff = getEffectiveBrushOffset(vec2(probeUv, unpackedUv.y)).x;
+  float edgeOff = probeOff - (probeUv - binEdgeUv);
+  // The envelope samples at the bin center, not the edge: an edge landing
+  // exactly on the span start (localX 0) would read the envelope's hard-zero
+  // endpoint and silence the stamp's first bin at every band. Centers sit
+  // strictly inside the span, which is also where the envelope was sampled
+  // before edge membership, so stroke fade shapes are unchanged.
+  localX = clamp((edgeOff + 0.5 * binWidthUv) / max(EPSILON, brushSizeUv.x), 0.0, 1.0);
 
-  bool inside = centerOff >= 0.0 && centerOff < brushSizeUv.x;
+  bool inside = probeOff >= 0.0 && probeOff < brushSizeUv.x;
   // Sub-bin fallback: a brush narrower than this band's cell can contain no bin
-  // center, which would stripe the wide low-frequency bands during a drag. When
-  // that happens, paint the single bin that holds the brush's own center.
+  // edge, which would stripe the wide low-frequency bands during a drag. When
+  // that happens, paint the single bin whose coefficient is nearest the brush's
+  // own center.
   bool fallback = brushSizeUv.x < binWidthUv
-               && abs(centerOff - brushSizeUv.x * 0.5) < 0.5 * binWidthUv;
+               && abs(edgeOff - brushSizeUv.x * 0.5) < 0.5 * binWidthUv;
 
   return (inside || fallback) ? 1.0 : 0.0;
 }
@@ -929,7 +933,7 @@ vec2 getBrushWeight(vec2 unpackedUv, float audioLevelDb) {
     brushSkewPitch.modulationAmounts, brushSkewPitch.contextualModAmounts, brushSkewPitch.macroAmounts, brushMods
   );
 
-  // X (time): center-of-bin membership so adjacent grid stamps tile each band
+  // X (time): edge-of-bin membership so adjacent grid stamps tile each band
   // exactly. coverage is 0 or 1; the envelope shapes the weight across the span.
   float localX;
   float coverage = getBrushTimeCoverage(unpackedUv, meta, localX);
@@ -957,7 +961,7 @@ bool isInsideBrush(vec2 unpackedUv) {
   if (brushSizeUv.y > 0.0 && (offset.y < 0.0 || offset.y >= brushSizeUv.y)) {
     return false;
   }
-  // Time axis: same center-of-bin membership the brush weight uses, so the
+  // Time axis: same edge-of-bin membership the brush weight uses, so the
   // footprint test and the painted region agree bin-for-bin at every band.
   if (brushSizeUv.x > 0.0) {
     float localX;

@@ -64,16 +64,22 @@ void main() {
     // Convert screen UV to zoomed UV (actual data coordinates)
     vec2 zoomedUv = screenToZoomed(vUv, viewZoomPower, viewOffset, viewZoomPowerY, viewOffsetY);
     
-    // Vertical interpolation between adjacent frequency bands, with center-aligned bins
-    float bandIndexF = (1.0 - zoomedUv.y) * sourceBandCount;
-    float b0 = floor(bandIndexF);
+    // Vertical interpolation between adjacent frequency bands. A band's row is
+    // the strip [b/N, (b+1)/N], so its pure value renders at the strip center
+    // (bandIndexF lands on an integer there) and blends toward its neighbours
+    // at the strip edges.
+    float bandIndexF = (1.0 - zoomedUv.y) * sourceBandCount - 0.5;
+    float b0 = clamp(floor(bandIndexF), 0.0, sourceBandCount - 1.0);
     float b1 = min(b0 + 1.0, sourceBandCount - 1.0);
-    float bandFrac = fract(bandIndexF);
+    float bandFrac = clamp(bandIndexF - b0, 0.0, 1.0);
 
     vec2 uv0 = vec2(zoomedUv.x, 1.0 - (b0 + 0.5) / sourceBandCount);
     vec2 uv1 = vec2(zoomedUv.x, 1.0 - (b1 + 0.5) / sourceBandCount);
 
-    vec4 packedValue = mix(sampleSourceInterpCentered(uv0), sampleSourceInterpCentered(uv1), bandFrac);
+    // Time axis samples edge-aligned: the stored coefficient for bin k is the
+    // analysis atom centered at frame k * 2^step, so an impulse reads as a
+    // vertical ridge at the same time in every band regardless of bin stride.
+    vec4 packedValue = mix(sampleSourceInterp(uv0), sampleSourceInterp(uv1), bandFrac);
 
     // packedValue stores [leftMagnitude, leftPhase, rightMagnitude, rightPhase]
     vec2 leftMagPhase = packedValue.rg;
