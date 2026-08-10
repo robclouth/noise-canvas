@@ -537,6 +537,18 @@ static constexpr int ONSET_RIDGE_SMOOTH_BINS = 2;
 // Rise per bin, relative to the ridge window's peak, that still counts as the
 // attack climbing rather than plateau noise.
 static constexpr double ONSET_RIDGE_CLIMB = 0.01;
+// How far back from the top of an attack its foot is looked for.
+static constexpr double ONSET_ATTACK_SEARCH_SEC = 0.020;
+// Height up the attack, as a share of the rise from its foot to its top, that
+// counts as the hit having started. Above the very bottom, which on real
+// material is the noise the attack grew out of rather than the attack itself.
+static constexpr double ONSET_ATTACK_FOOT = 0.60;
+// The analysis is non-causal: atoms positioned before an event see it, so a
+// measured rise begins about this far ahead of the event itself. Added back to
+// the anchor, so an impulse lands on its own time instead of a fraction of a
+// millisecond early — which a transform amplifies into pre-echo by its
+// stretch factor.
+static constexpr double ONSET_SMEAR_COMP_SEC = 0.00035;
 // Detection-function level, relative to the file maximum, below which a peak is
 // silence rather than an event.
 static constexpr double ONSET_FLOOR_RATIO = 0.02;
@@ -669,7 +681,12 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
             const size_t px = (offset + k) * 4;
             if (px + 3 >= packedFloats)
                 break;
-            const int64_t centre = std::min(numBins - 1, (int64_t)((double)k * binsPerCoef));
+            // The bin whose centre is nearest the coefficient's own time. A
+            // floor here would place every coefficient up to a whole bin late
+            // and by a different amount per band, since a bin carries what sits
+            // at its centre rather than at its start.
+            const int64_t centre =
+                std::max<int64_t>(0, std::min(numBins - 1, (int64_t)std::llround((double)k * binsPerCoef - 0.5)));
 
             float mag = 0.0f;
             for (int ch = 0; ch < channels; ++ch)
@@ -677,18 +694,24 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
             mag *= channelScale;
             addTriangle(energyD2, centre, span, mag * spread);
 
-            if (k == 0)
-                continue;
-
-            const int64_t prevSample = (int64_t)(k - 1) * stride;
+            // Before the file there is nothing, so the first coefficient of a
+            // band is compared against silence and everything in it counts as
+            // having arrived. Without that the flux term is blind for a stride
+            // at every band, and a file that opens on a hit reports it late,
+            // weakly, or not at all — while a file that opens on silence has
+            // nothing in that first coefficient to report either way.
             float maxNeighbor = 0.0f;
-            for (int nb = nbLo; nb <= nbHi; ++nb)
+            if (k > 0)
             {
-                const uint32_t nlen = layout.bandLengths[nb];
-                if (nlen == 0)
-                    continue;
-                const int64_t idx = std::min<int64_t>(prevSample >> layout.bandStepLog2s[nb], (int64_t)nlen - 1);
-                maxNeighbor = std::max(maxNeighbor, whitened[nb][(size_t)idx]);
+                const int64_t prevSample = (int64_t)(k - 1) * stride;
+                for (int nb = nbLo; nb <= nbHi; ++nb)
+                {
+                    const uint32_t nlen = layout.bandLengths[nb];
+                    if (nlen == 0)
+                        continue;
+                    const int64_t idx = std::min<int64_t>(prevSample >> layout.bandStepLog2s[nb], (int64_t)nlen - 1);
+                    maxNeighbor = std::max(maxNeighbor, whitened[nb][(size_t)idx]);
+                }
             }
             const float d = whitened[b][k] - maxNeighbor;
             if (d > 0.0f)
@@ -751,6 +774,12 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     if (maxOdf <= 0.0)
         return onsets;
 
+    // Smoothed for choosing which bin the top of an attack is, kept raw for
+    // measuring where that attack began: smoothing spreads a rise across its
+    // own width, so walking down a smoothed one lands a smoothing-width early —
+    // on a click, whose energy rises inside a single bin, that is the whole
+    // error.
+    std::vector<double> rawEnergy(energy);
     {
         std::vector<double> energyPrefix((size_t)numBins + 1, 0.0);
         for (int64_t i = 0; i < numBins; ++i)
@@ -768,6 +797,7 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     const int64_t meanPost = std::max<int64_t>(1, (int64_t)std::llround(ONSET_MEAN_POST_SEC / ONSET_BIN_SEC));
     const int64_t minGap = std::max<int64_t>(1, (int64_t)std::llround(ONSET_MIN_GAP_SEC / ONSET_BIN_SEC));
     const int64_t ridgeSearch = std::max<int64_t>(1, (int64_t)std::llround(ONSET_RIDGE_SEARCH_SEC / ONSET_BIN_SEC));
+    const int64_t attackSearch = std::max<int64_t>(1, (int64_t)std::llround(ONSET_ATTACK_SEARCH_SEC / ONSET_BIN_SEC));
     const double floorLevel = maxOdf * ONSET_FLOOR_RATIO;
     int64_t lastBin = -minGap;
 
@@ -797,37 +827,57 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         if (v < localMean * ONSET_THRESHOLD_RATIO)
             continue;
 
-        // The anchor is where the energy has arrived, not where it happens to
-        // be largest: an impulse gives a genuine peak, but a sustained hit
-        // gives a plateau on which the argmax is decided by noise. Take the
-        // first bin that reaches the window's level and climb any rise it sits
-        // on, so both shapes land on the same edge of the attack.
+        // Find the top of the attack: the first bin reaching the window's level
+        // and any further rise it sits on. An impulse gives a genuine peak, but
+        // a sustained hit gives a plateau on which the argmax is decided by
+        // noise, so both shapes land on the same edge this way.
         const int64_t rHi = std::min<int64_t>(numBins - 1, n + ridgeSearch);
         double windowPeak = 0.0;
         for (int64_t j = n; j <= rHi; ++j)
             windowPeak = std::max(windowPeak, energy[j]);
 
-        int64_t bestBin = rHi;
+        int64_t ridgeBin = rHi;
         for (int64_t j = n; j <= rHi; ++j)
         {
             if (energy[j] >= windowPeak * ONSET_RIDGE_ARRIVAL)
             {
-                bestBin = j;
+                ridgeBin = j;
                 break;
             }
         }
-        while (bestBin < rHi && energy[bestBin + 1] - energy[bestBin] > windowPeak * ONSET_RIDGE_CLIMB)
-            ++bestBin;
-        const double bestEnergy = energy[bestBin];
+        while (ridgeBin < rHi && energy[ridgeBin + 1] - energy[ridgeBin] > windowPeak * ONSET_RIDGE_CLIMB)
+            ++ridgeBin;
 
-        // Parabolic vertex through the ridge bin and its neighbours; the base is
-        // the bin centre and the offset is clamped to the bin it belongs to.
-        const double eL = bestBin > 0 ? energy[bestBin - 1] : 0.0;
-        const double eR = bestBin + 1 < numBins ? energy[bestBin + 1] : 0.0;
-        const double denom = eL - 2.0 * bestEnergy + eR;
-        const double delta = denom < 0.0 ? std::max(-0.5, std::min(0.5, 0.5 * (eL - eR) / denom)) : 0.0;
+        // Then walk back down it to where the attack began. The top of an
+        // attack is not when it happened — a hit is heard, and a transported
+        // transient is placed, at the moment its energy starts rising, and on a
+        // quantized loop anchoring at the top sits a consistent few
+        // milliseconds behind the grid the material was cut on. How far back
+        // that is depends on the hit: a click rises within a bin, a noise burst
+        // over several.
+        const int64_t footLimit = std::max<int64_t>(0, ridgeBin - attackSearch);
+        double preFloor = rawEnergy[ridgeBin];
+        for (int64_t j = ridgeBin; j >= footLimit; --j)
+            preFloor = std::min(preFloor, rawEnergy[j]);
+        const double footLevel = preFloor + (rawEnergy[ridgeBin] - preFloor) * ONSET_ATTACK_FOOT;
 
-        const double timeSec = std::min(durationSec, ((double)bestBin + 0.5 + delta) * ONSET_BIN_SEC);
+        int64_t bestBin = ridgeBin;
+        while (bestBin > footLimit && rawEnergy[bestBin - 1] > footLevel)
+            --bestBin;
+
+        // Sub-bin position of the crossing itself, so the anchor is not
+        // quantized to the detection function's grid.
+        double delta = 0.0;
+        if (bestBin > 0)
+        {
+            const double below = rawEnergy[bestBin - 1];
+            const double above = rawEnergy[bestBin];
+            if (above > below)
+                delta = -std::max(0.0, std::min(1.0, (above - footLevel) / (above - below)));
+        }
+
+        const double timeSec = std::min(
+            durationSec, std::max(0.0, ((double)bestBin + 0.5 + delta) * ONSET_BIN_SEC + ONSET_SMEAR_COMP_SEC));
         candidates.push_back(timeSec);
         lastBin = n;
     }
