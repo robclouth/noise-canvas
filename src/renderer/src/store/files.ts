@@ -2179,7 +2179,28 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           }
           const spectrogramData = await historyManager.loadSpectrogramAtCurrent();
           if (!spectrogramData) throw new Error("History tree is empty");
-          openFiles[fileId] = { ...openFiles[fileId], spectrogramData };
+          // Onsets are not persisted — they are re-derived from the
+          // coefficients history reproduced, before the loading flag clears so
+          // the first paint of the file already has them. A detection failure
+          // only costs the onsets, not the file.
+          let onsets: Float32Array | undefined;
+          try {
+            onsets = await host.analysis.detectOnsets(
+              spectrogramData.packedData,
+              {
+                numBands: spectrogramData.numBands,
+                numChannels: spectrogramData.numChannels,
+                numFrames: spectrogramData.numFrames,
+                bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
+                bandLengths: spectrogramData.synthesisMetadata.bandLengths,
+                bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s,
+              },
+              spectrogramData.sampleRate,
+            );
+          } catch (error) {
+            console.error("Onset detection on reopen failed:", error);
+          }
+          openFiles[fileId] = { ...openFiles[fileId], spectrogramData, onsets };
           set(
             produce((draft: State) => {
               delete draft.filesLoading[fileId];

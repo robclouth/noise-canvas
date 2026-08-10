@@ -82,6 +82,18 @@ declare global {
       isModelDownloaded: (modelFile: string) => boolean;
       downloadModel: (modelFile: string, onProgress?: (downloaded: number, total: number) => void) => Promise<void>;
       aiSeparate: (audioChannels: Float32Array[], sampleRate: number) => Promise<Record<string, Float32Array[]>>;
+      detectOnsets: (
+        packedData: Float32Array,
+        analysisMetadata: {
+          numBands: number;
+          numChannels: number;
+          numFrames: number;
+          bandOffsets: Uint32Array;
+          bandLengths: Uint32Array;
+          bandStepLog2s: Int32Array;
+        },
+        sampleRate: number,
+      ) => Promise<Float32Array>;
       hpss: (
         packedData: Float32Array,
         analysisMetadata: {

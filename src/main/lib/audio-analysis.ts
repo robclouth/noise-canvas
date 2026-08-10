@@ -42,12 +42,32 @@ export function init() {
   return gaborator;
 }
 
-// Onsets for a freshly analysed file. The addon reads the packed buffer by
-// reference, so this is a second walk of the coefficients rather than a copy of
-// them; synthesis re-derives its own from whatever has since been painted.
-async function detectOnsets(analysisResult: GaboratorAnalysisResult, sampleRate: number): Promise<PackedOnsets> {
+/**
+ * Onsets for a packed spectrogram. The addon reads the buffer by reference, so
+ * this is a walk of the coefficients rather than a copy of them. Called with a
+ * fresh analysis, and by the renderer for a file reloaded from history, whose
+ * onsets are not persisted anywhere — they are re-derived from the coefficients
+ * they describe.
+ */
+export async function detectOnsets(
+  packedData: Float32Array,
+  analysisMetadata: {
+    numBands: number;
+    numChannels: number;
+    numFrames: number;
+    bandOffsets: Uint32Array;
+    bandLengths: Uint32Array;
+    bandStepLog2s: Int32Array;
+  },
+  sampleRate: number,
+): Promise<PackedOnsets> {
   const gab = init();
-  const { onsets } = await gab.detectOnsets(
+  const { onsets } = await gab.detectOnsets(packedData, analysisMetadata, sampleRate);
+  return onsets;
+}
+
+function analysisOnsets(analysisResult: GaboratorAnalysisResult, sampleRate: number): Promise<PackedOnsets> {
+  return detectOnsets(
     analysisResult.data,
     {
       numBands: analysisResult.numBands,
@@ -59,7 +79,6 @@ async function detectOnsets(analysisResult: GaboratorAnalysisResult, sampleRate:
     },
     sampleRate,
   );
-  return onsets;
 }
 
 export async function analyze(filePath: string, params: AnalysisParams) {
@@ -108,7 +127,7 @@ export async function analyze(filePath: string, params: AnalysisParams) {
 
   return {
     ...analysisResult,
-    onsets: await detectOnsets(analysisResult, sampleRate),
+    onsets: await analysisOnsets(analysisResult, sampleRate),
     sampleRate,
     format,
     codec,
@@ -141,7 +160,7 @@ export async function analyseBuffer(audioBuffer: AudioBuffer, params: AnalysisPa
 
   return {
     ...analysisResult,
-    onsets: await detectOnsets(analysisResult, sampleRate),
+    onsets: await analysisOnsets(analysisResult, sampleRate),
     sampleRate,
     format: "wav", // AudioBuffer is always PCM data
     codec: "pcm_f32le", // AudioBuffer uses 32-bit float PCM

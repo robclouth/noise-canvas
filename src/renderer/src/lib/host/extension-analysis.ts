@@ -122,6 +122,7 @@ export function createExtensionAnalysis(): AnalysisApi {
     isModelDownloaded: () => notImplemented("isModelDownloaded"),
     downloadModel: () => notImplemented("downloadModel"),
     aiSeparate: () => notImplemented("aiSeparate"),
+    detectOnsets: () => notImplemented("detectOnsets"),
     hpss: () => notImplemented("hpss"),
     nmf: () => notImplemented("nmf"),
     mergeSpectrograms: () => notImplemented("mergeSpectrograms"),
