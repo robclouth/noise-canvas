@@ -151,8 +151,8 @@ const BrushTile = memo(function BrushTile({
       {stepRows.map((row, rowIndex) => (
         <Box key={rowIndex}>
           {multiStep && (
-            <Box mb={3} style={{ display: "inline-block" }}>
-              <Text size="xs" fw={600}>
+            <Box mb={3} style={{ display: "inline-block", minWidth: 24 }}>
+              <Text size="xs" fw={600} ta="center">
                 {row.name}
               </Text>
               <Box style={{ height: 2, borderRadius: 1, marginTop: 1, background: row.color }} />
