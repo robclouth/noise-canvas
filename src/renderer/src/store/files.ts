@@ -8,10 +8,12 @@ import { Vector2 } from "three";
 import * as Tone from "tone";
 import { host } from "../lib/host";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
+import type { AnalysisParams } from "../../../main/lib/types";
+import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
-import { disposeOnsetTexture } from "../lib/onset-map";
+import { disposeOnsetTexture, packOnsetState, spliceOnsets, unpackOnsetState } from "../lib/onset-map";
 import type { Brush, OpenFile, ParameterKey, SpectrogramData, State, ZustandGet, ZustandSet } from "./types";
 import type { StemGroupMethod } from "./stem-groups";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
@@ -42,6 +44,7 @@ export interface FilesState {
     prefetchedFboData?: Float32Array,
   ) => Promise<void>;
   loadCachedAudio: (fileId: string, audioPath: string, peak: number) => Promise<boolean>;
+  restoreOnsetsForNode: (fileId: string, nodeId: string, packedData: Float32Array) => Promise<void>;
   exportHistory: () => Promise<void>;
   exportHistoryBranch: (nodeId: string) => Promise<void>;
   exportHistoryBranchToLive: (nodeId: string) => Promise<void>;
@@ -239,7 +242,15 @@ async function loadRealFileViaGaborator(
       bandLengths: result.bandLengths,
     },
   };
-  openFiles[fileId] = { ...openFiles[fileId], spectrogramData, onsets: result.onsets };
+  openFiles[fileId] = {
+    ...openFiles[fileId],
+    spectrogramData,
+    onsets: result.onsets,
+    onsetReference:
+      result.onsetOdfMax !== undefined && result.onsetBandMax
+        ? { odfMax: result.onsetOdfMax, bandMax: result.onsetBandMax }
+        : undefined,
+  };
 }
 
 // In-flight AI separation guard — blocks a second concurrent stem split on the same file.
@@ -1469,12 +1480,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         },
       };
 
-      const analysisParams = {
+      const analysisParams: AnalysisParams = {
         bandsPerOctave: originalAnalysis.bandsPerOctave,
         minFreq: originalAnalysis.minFreq,
-        // Onsets follow what has been painted, so they are re-derived from the
-        // packed data this synthesis runs on.
-        detectOnsets: true,
       };
 
       const processedDataArray = new Float32Array(
@@ -1520,6 +1528,32 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         console.log(`[timing] extract existing audio channels: ${(performance.now() - extractStart).toFixed(2)}ms`);
 
         console.log("[timing] Partial synthesis range:", { startFrame, endFrame, startBand, endBand });
+      }
+
+      // Only the span the stroke touched needs its onsets found again, which on
+      // a long file is the difference between a few milliseconds and walking
+      // every coefficient in it. Padded either side, because an event is
+      // anchored at the foot of its attack and measured for a moment after it,
+      // so the ones at the edges are read from a little more material than the
+      // span itself. Needs the reference from a pass that read the whole file;
+      // without one this stays a whole-file pass, which then produces it.
+      const onsetReference = file.onsetReference;
+      if (onsetReference && startFrame !== undefined && endFrame !== undefined) {
+        const sampleRate = originalAnalysis.sampleRate;
+        analysisParams.detectOnsets = true;
+        analysisParams.onsetStartSec = Math.max(0, startFrame / sampleRate - ONSET_REGION_PAD_SEC);
+        analysisParams.onsetEndSec = Math.min(
+          originalAnalysis.numFrames / sampleRate,
+          endFrame / sampleRate + ONSET_REGION_PAD_SEC,
+        );
+        analysisParams.onsetOdfReference = onsetReference.odfMax;
+        analysisParams.onsetBandMax = onsetReference.bandMax;
+      } else if (!file.onsets || !onsetReference) {
+        // Nothing to work from yet, so this pass reads the whole file and
+        // produces the reference the ones after it go on. A synthesis that
+        // changed nothing — arriving at a history state, say — leaves the
+        // onsets it already has alone.
+        analysisParams.detectOnsets = true;
       }
 
       let synthesisResult;
@@ -1579,7 +1613,17 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       file.audioPeak = synthesisResult.peak > 0 ? synthesisResult.peak : 1;
       file.gainReductionDb = synthesisResult.gainReductionDb;
       file.maxGainReductionDb = synthesisResult.maxGainReductionDb;
-      if (synthesisResult.onsets) file.onsets = synthesisResult.onsets;
+      if (synthesisResult.onsets) {
+        const { onsetStartSec, onsetEndSec } = analysisParams;
+        const onsets =
+          onsetStartSec !== undefined && onsetEndSec !== undefined
+            ? spliceOnsets(file.onsets, synthesisResult.onsets, onsetStartSec, onsetEndSec)
+            : synthesisResult.onsets;
+        file.onsets = onsets;
+        if (synthesisResult.onsetOdfMax !== undefined && synthesisResult.onsetBandMax) {
+          file.onsetReference = { odfMax: synthesisResult.onsetOdfMax, bandMax: synthesisResult.onsetBandMax };
+        }
+      }
       if (get().activeFileId === fileId) {
         get().setGainReduction(synthesisResult.gainReductionDb ?? null, synthesisResult.maxGainReductionDb ?? 0);
       }
@@ -1624,6 +1668,51 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       setFileSynthesizing(fileId, false);
     }
   },
+  /**
+   * Put a file's onsets back to the ones belonging to a history node — after an
+   * undo, or on reopening. Stored with the node where possible; a node from
+   * before they were stored, or one whose file has gone, is detected once and
+   * then stored, so a history heals as it is used.
+   */
+  restoreOnsetsForNode: async (fileId: string, nodeId: string, packedData: Float32Array): Promise<void> => {
+    const file = openFiles[fileId];
+    if (!file?.spectrogramData) return;
+    const historyManager = getHistoryManager(fileId);
+
+    try {
+      const stored = await historyManager.getNodeOnsets(nodeId);
+      const state = stored ? unpackOnsetState(stored) : null;
+      if (state) {
+        file.onsets = state.onsets;
+        file.onsetReference = state.reference;
+        return;
+      }
+
+      const spectrogramData = file.spectrogramData;
+      const result = await host.analysis.detectOnsets(
+        packedData,
+        {
+          numBands: spectrogramData.numBands,
+          numChannels: spectrogramData.numChannels,
+          numFrames: spectrogramData.numFrames,
+          bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
+          bandLengths: spectrogramData.synthesisMetadata.bandLengths,
+          bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s,
+        },
+        spectrogramData.sampleRate,
+      );
+      file.onsets = result.onsets;
+      file.onsetReference = { odfMax: result.odfMax, bandMax: result.bandMax };
+      await historyManager.setNodeOnsets(
+        nodeId,
+        packOnsetState({ onsets: result.onsets, reference: file.onsetReference }),
+      );
+    } catch (error) {
+      // Losing the onsets costs the markers and the onset grid, not the file.
+      console.error("Onsets for history node failed:", error);
+    }
+  },
+
   loadCachedAudio: async (fileId: string, audioPath: string, peak: number): Promise<boolean> => {
     const file = openFiles[fileId];
     if (!file?.spectrogramData) return false;
@@ -2179,28 +2268,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           }
           const spectrogramData = await historyManager.loadSpectrogramAtCurrent();
           if (!spectrogramData) throw new Error("History tree is empty");
-          // Onsets are not persisted — they are re-derived from the
-          // coefficients history reproduced, before the loading flag clears so
-          // the first paint of the file already has them. A detection failure
-          // only costs the onsets, not the file.
-          let onsets: Float32Array | undefined;
-          try {
-            onsets = await host.analysis.detectOnsets(
-              spectrogramData.packedData,
-              {
-                numBands: spectrogramData.numBands,
-                numChannels: spectrogramData.numChannels,
-                numFrames: spectrogramData.numFrames,
-                bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
-                bandLengths: spectrogramData.synthesisMetadata.bandLengths,
-                bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s,
-              },
-              spectrogramData.sampleRate,
-            );
-          } catch (error) {
-            console.error("Onset detection on reopen failed:", error);
+          openFiles[fileId] = { ...openFiles[fileId], spectrogramData };
+          // Restored from the node the file reopens on, before the loading flag
+          // clears, so its first paint already has them.
+          const currentId = historyManager.getManifest()?.currentId;
+          if (currentId) {
+            await get().restoreOnsetsForNode(fileId, currentId, spectrogramData.packedData);
           }
-          openFiles[fileId] = { ...openFiles[fileId], spectrogramData, onsets };
           set(
             produce((draft: State) => {
               delete draft.filesLoading[fileId];

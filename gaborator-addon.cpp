@@ -555,12 +555,40 @@ static constexpr double ONSET_FLOOR_RATIO = 0.02;
 // Longest an event's level is looked for past its anchor, when no other event
 // follows sooner. Covers the time the coarsest bands take to register a hit.
 static constexpr double ONSET_LEVEL_POST_SEC = 0.150;
+// How far before its first reported event a regional pass still reads
+// coefficients, so the whitening's running peak reaches the value a whole-file
+// pass would have had there. The peak jumps to any loud moment at once and only
+// decays with the time constant, so a few of those bound the difference.
+static constexpr double ONSET_WHITEN_WARMUP_SEC = 3.0 * ONSET_WHITEN_TAU_SEC;
+
+/**
+ * A detection restricted to part of a file: only events inside [startSec,
+ * endSec) are reported, and only the coefficients bearing on those events are
+ * read. Everything an event's own report depends on is local — its flux, its
+ * anchor, its level — except the silence gate, which is a share of the loudest
+ * moment anywhere in the file, so a regional pass is handed the previous pass's
+ * gate and hands back whichever of the two is larger.
+ */
+struct OnsetRegion
+{
+    double startSec;
+    double endSec;
+    double odfReference;
+    // Each band's loudest moment anywhere in the file, from that same pass.
+    // Without it a regional pass has to scan every band in full to find them,
+    // which costs more than everything else it does put together.
+    const float *bandMaxReference;
+    int bandMaxCount;
+};
 
 static std::vector<DetectedOnset> computeOnsets(const float *packed,
                                                 size_t packedFloats,
                                                 const OnsetBandLayout &layout,
                                                 int64_t numFrames,
-                                                double sampleRate)
+                                                double sampleRate,
+                                                const OnsetRegion *region = nullptr,
+                                                double *odfMaxOut = nullptr,
+                                                std::vector<float> *bandMaxOut = nullptr)
 {
     std::vector<DetectedOnset> onsets;
     if (!packed || layout.numBands <= 0 || numFrames <= 0 || sampleRate <= 0.0)
@@ -571,10 +599,50 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     const double durationSec = (double)numFrames / sampleRate;
     const int64_t numBins = std::max<int64_t>(1, (int64_t)std::ceil(durationSec / ONSET_BIN_SEC));
 
+    double maxStrideSec = 0.0;
+    for (int b = 0; b < layout.numBands; ++b)
+        maxStrideSec = std::max(maxStrideSec, (double)(1LL << layout.bandStepLog2s[b]) / sampleRate);
+
+    // The span of the file this pass reports on, and the wider span it has to
+    // read for those reports to come out as they would from a whole-file pass:
+    // the whitening needs its warm-up, a peak is judged against a mean taken
+    // either side of it, and an event's level is measured for a moment after it.
+    const double emitStartSec = region ? std::max(0.0, region->startSec) : 0.0;
+    const double emitEndSec = region ? std::min(durationSec, region->endSec) : durationSec;
+    if (emitEndSec <= emitStartSec)
+        return onsets;
+    const double leadSec = ONSET_WHITEN_WARMUP_SEC + ONSET_MEAN_PRE_SEC + 2.0 * maxStrideSec;
+    const double trailSec =
+        ONSET_LEVEL_POST_SEC + ONSET_MEAN_POST_SEC + ONSET_RIDGE_SEARCH_SEC + 2.0 * maxStrideSec;
+    const double readStartSec = region ? std::max(0.0, emitStartSec - leadSec) : 0.0;
+    const double readEndSec = region ? std::min(durationSec, emitEndSec + trailSec) : durationSec;
+
+    // That span as a coefficient range on a band of the given stride.
+    const auto coefLo = [readStartSec](uint32_t len, double strideSec) -> uint32_t {
+        return (uint32_t)std::min<int64_t>((int64_t)len,
+                                           std::max<int64_t>(0, (int64_t)std::floor(readStartSec / strideSec)));
+    };
+    const auto coefHi = [readEndSec](uint32_t len, double strideSec) -> uint32_t {
+        return (uint32_t)std::min<int64_t>((int64_t)len, (int64_t)std::ceil(readEndSec / strideSec) + 2);
+    };
+
     // Per-band whitened magnitudes. The max filter reads neighbouring bands at
     // this band's previous time position, so whole tracks are kept rather than
     // one previous frame.
+    if (bandMaxOut)
+        bandMaxOut->assign((size_t)std::max(0, layout.numBands), 0.0f);
+
+    // Whitened magnitudes are held only over the span being read, so a regional
+    // pass neither allocates nor clears the rest of the file. The range each
+    // band holds is kept alongside it, since reads reach across bands.
     std::vector<std::vector<float>> whitened(layout.numBands);
+    std::vector<uint32_t> bandKLo((size_t)std::max(0, layout.numBands), 0);
+    std::vector<uint32_t> bandKHi((size_t)std::max(0, layout.numBands), 0);
+    const auto whitenedAt = [&](int b, int64_t k) -> float {
+        if (k < (int64_t)bandKLo[(size_t)b] || k >= (int64_t)bandKHi[(size_t)b])
+            return 0.0f;
+        return whitened[(size_t)b][(size_t)(k - bandKLo[(size_t)b])];
+    };
     uint32_t longestBand = 0;
     for (int b = 0; b < layout.numBands; ++b)
         longestBand = std::max(longestBand, layout.bandLengths[b]);
@@ -584,14 +652,17 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     {
         const size_t offset = layout.bandOffsets[b];
         const uint32_t len = layout.bandLengths[b];
-        whitened[b].assign(len, 0.0f);
         if (len == 0)
             continue;
         const double strideSec = (double)(1LL << layout.bandStepLog2s[b]) / sampleRate;
         const float decay = (float)std::exp(-strideSec / ONSET_WHITEN_TAU_SEC);
+        const uint32_t kLo = coefLo(len, strideSec);
+        const uint32_t kHi = coefHi(len, strideSec);
+        bandKLo[(size_t)b] = kLo;
+        bandKHi[(size_t)b] = kHi;
+        whitened[b].assign(kHi > kLo ? (size_t)(kHi - kLo) : 0, 0.0f);
 
-        float bandMax = 0.0f;
-        for (uint32_t k = 0; k < len; ++k)
+        for (uint32_t k = kLo; k < kHi; ++k)
         {
             const size_t px = (offset + k) * 4;
             compressed[k] = 0.0f;
@@ -601,8 +672,41 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
             for (int ch = 0; ch < channels; ++ch)
                 mag += packed[px + ch * 2];
             compressed[k] = std::log1p(ONSET_LOG_GAMMA * std::max(0.0f, mag * channelScale));
-            bandMax = std::max(bandMax, compressed[k]);
         }
+
+        // The band's loudest moment anywhere in the file, so the floor below is
+        // the one a whole-file pass would use however little of the band this
+        // pass reads. What has been painted into the span being read can be
+        // louder than the file used to be, which is why the reference is a
+        // starting point rather than the answer.
+        float bandMax = 0.0f;
+        for (uint32_t k = kLo; k < kHi; ++k)
+            bandMax = std::max(bandMax, compressed[k]);
+        if (region && b < region->bandMaxCount && region->bandMaxReference)
+        {
+            bandMax = std::max(bandMax, region->bandMaxReference[b]);
+        }
+        else if (region)
+        {
+            // Nothing to go on, so find it directly. Read off the magnitudes
+            // rather than the compressed values: the compression is monotonic,
+            // so the largest magnitude is the largest compressed value, and the
+            // scan then costs no transcendentals.
+            float maxMag = 0.0f;
+            for (uint32_t k = 0; k < len; ++k)
+            {
+                const size_t px = (offset + k) * 4;
+                if (px + 3 >= packedFloats)
+                    continue;
+                float mag = 0.0f;
+                for (int ch = 0; ch < channels; ++ch)
+                    mag += packed[px + ch * 2];
+                maxMag = std::max(maxMag, mag * channelScale);
+            }
+            bandMax = std::max(bandMax, std::log1p(ONSET_LOG_GAMMA * std::max(0.0f, maxMag)));
+        }
+        if (bandMaxOut)
+            (*bandMaxOut)[b] = bandMax;
 
         // Whitening is meant to put the bands on equal terms, not to promote
         // what is effectively silence in one of them. Held off the band's own
@@ -613,10 +717,10 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         // full and read as an event of its own.
         const float floorLevel = std::max(ONSET_WHITEN_FLOOR, ONSET_WHITEN_FLOOR_RATIO * bandMax);
         float peak = floorLevel;
-        for (uint32_t k = 0; k < len; ++k)
+        for (uint32_t k = kLo; k < kHi; ++k)
         {
             peak = std::max(std::max(compressed[k], decay * peak), floorLevel);
-            whitened[b][k] = compressed[k] / peak;
+            whitened[b][k - kLo] = compressed[k] / peak;
         }
     }
 
@@ -675,8 +779,10 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         const double spread = 1.0 / (double)span;
         const int nbLo = std::max(0, b - ONSET_MAX_FILTER_BANDS);
         const int nbHi = std::min(layout.numBands - 1, b + ONSET_MAX_FILTER_BANDS);
+        const uint32_t kLo = coefLo(len, strideSec);
+        const uint32_t kHi = coefHi(len, strideSec);
 
-        for (uint32_t k = 0; k < len; ++k)
+        for (uint32_t k = kLo; k < kHi; ++k)
         {
             const size_t px = (offset + k) * 4;
             if (px + 3 >= packedFloats)
@@ -710,10 +816,10 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
                     if (nlen == 0)
                         continue;
                     const int64_t idx = std::min<int64_t>(prevSample >> layout.bandStepLog2s[nb], (int64_t)nlen - 1);
-                    maxNeighbor = std::max(maxNeighbor, whitened[nb][(size_t)idx]);
+                    maxNeighbor = std::max(maxNeighbor, whitenedAt(nb, idx));
                 }
             }
-            const float d = whitened[b][k] - maxNeighbor;
+            const float d = whitenedAt(b, (int64_t)k) - maxNeighbor;
             if (d > 0.0f)
                 addTriangle(fluxD2, centre, span, (double)d * spread);
 
@@ -742,7 +848,7 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
             }
             // Gated by the whitened magnitude, so it only counts where there is
             // content and lands on the same scale as the flux term.
-            const double cdev = (double)(whitened[b][k] * relDev * channelScale);
+            const double cdev = (double)(whitenedAt(b, (int64_t)k) * relDev * channelScale);
             addTriangle(complexD2, centre, span, cdev * spread);
         }
     }
@@ -771,7 +877,13 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         prefix[bin + 1] = prefix[bin] + odf[bin];
         maxOdf = std::max(maxOdf, odf[bin]);
     }
-    if (maxOdf <= 0.0)
+    // A regional pass only sees its own part of the curve, so the gate comes
+    // from the whole-file value it was handed, raised if what was painted into
+    // the region turns out to be louder than anything the file had before.
+    const double odfGate = region ? std::max(maxOdf, region->odfReference) : maxOdf;
+    if (odfMaxOut)
+        *odfMaxOut = odfGate;
+    if (odfGate <= 0.0)
         return onsets;
 
     // Smoothed for choosing which bin the top of an attack is, kept raw for
@@ -798,14 +910,30 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     const int64_t minGap = std::max<int64_t>(1, (int64_t)std::llround(ONSET_MIN_GAP_SEC / ONSET_BIN_SEC));
     const int64_t ridgeSearch = std::max<int64_t>(1, (int64_t)std::llround(ONSET_RIDGE_SEARCH_SEC / ONSET_BIN_SEC));
     const int64_t attackSearch = std::max<int64_t>(1, (int64_t)std::llround(ONSET_ATTACK_SEARCH_SEC / ONSET_BIN_SEC));
-    const double floorLevel = maxOdf * ONSET_FLOOR_RATIO;
-    int64_t lastBin = -minGap;
+    const double floorLevel = odfGate * ONSET_FLOOR_RATIO;
+    const int64_t emitLo = std::max<int64_t>(0, (int64_t)std::floor(emitStartSec / ONSET_BIN_SEC));
+    const int64_t emitHi = std::min<int64_t>(numBins, (int64_t)std::ceil(emitEndSec / ONSET_BIN_SEC));
+    // A regional pass looks for candidates either side of the span it reports
+    // on. Before it, because the detection function peaks on the rising edge
+    // while the event is anchored at the foot of the attack, so a peak just
+    // outside can still belong to an event just inside. After it, because how
+    // big an event is depends on where the next one starts, and the last event
+    // in the span would otherwise be measured as if nothing followed.
+    const int64_t pickLo =
+        region ? std::max<int64_t>(0, emitLo - (int64_t)std::llround((ONSET_RIDGE_SEARCH_SEC +
+                                                                     ONSET_ATTACK_SEARCH_SEC) /
+                                                                    ONSET_BIN_SEC))
+               : 0;
+    const int64_t pickHi =
+        region ? std::min<int64_t>(numBins, emitHi + (int64_t)std::llround(ONSET_LEVEL_POST_SEC / ONSET_BIN_SEC))
+               : numBins;
+    int64_t lastBin = pickLo - minGap;
 
     // Where each event is, found first; how big it is needs the next one's
     // position, so that is measured in a second pass.
     std::vector<double> candidates;
 
-    for (int64_t n = 0; n < numBins; ++n)
+    for (int64_t n = pickLo; n < pickHi; ++n)
     {
         const double v = odf[n];
         if (v <= floorLevel || n - lastBin < minGap)
@@ -897,6 +1025,12 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     for (size_t i = 0; i < candidates.size(); ++i)
     {
         const double tSec = candidates[i];
+        // Candidates found past the reported span, and events whose walk back
+        // down the attack landed before it, are here only to bound the ones
+        // inside it: the caller replaces exactly that span and keeps its own
+        // onsets either side.
+        if (region && (tSec < emitStartSec || tSec >= emitEndSec))
+            continue;
         double tEndSec = std::min(durationSec, tSec + ONSET_LEVEL_POST_SEC);
         if (i + 1 < candidates.size())
             tEndSec = std::min(tEndSec, candidates[i + 1]);
@@ -958,9 +1092,32 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
 class OnsetWorker : public Napi::AsyncWorker
 {
 public:
-    OnsetWorker(Napi::Env env, const Napi::Float32Array &packedJs, const Napi::Object &metaJs, double sampleRate)
+    OnsetWorker(Napi::Env env, const Napi::Float32Array &packedJs, const Napi::Object &metaJs, double sampleRate,
+                const Napi::Value &optionsJs)
         : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), sampleRate(sampleRate)
     {
+        // A region asks for the onsets of one span of the file only, given the
+        // gate a previous pass over the whole of it arrived at.
+        if (optionsJs.IsObject())
+        {
+            Napi::Object options = optionsJs.As<Napi::Object>();
+            if (options.Has("startSec") && options.Has("endSec"))
+            {
+                region.startSec = options.Get("startSec").ToNumber().DoubleValue();
+                region.endSec = options.Get("endSec").ToNumber().DoubleValue();
+                region.odfReference =
+                    options.Has("odfReference") ? options.Get("odfReference").ToNumber().DoubleValue() : 0.0;
+                if (options.Has("bandMax") && options.Get("bandMax").IsTypedArray())
+                {
+                    Napi::Float32Array bm = options.Get("bandMax").As<Napi::Float32Array>();
+                    bandMaxIn.assign(bm.Data(), bm.Data() + bm.ElementLength());
+                    region.bandMaxReference = bandMaxIn.data();
+                    region.bandMaxCount = (int)bandMaxIn.size();
+                }
+                hasRegion = true;
+            }
+        }
+
         // Held by reference and read from its backing store on the worker
         // thread, like synthesis — the caller must not mutate it in flight.
         packedRef = Napi::Reference<Napi::Float32Array>::New(packedJs, 1);
@@ -992,7 +1149,8 @@ public:
         layout.bandOffsets = bandOffsets.data();
         layout.bandLengths = bandLengths.data();
         layout.bandStepLog2s = bandStepLog2s.data();
-        onsets = computeOnsets(packed, packedFloats, layout, numFrames, sampleRate);
+        onsets = computeOnsets(packed, packedFloats, layout, numFrames, sampleRate, hasRegion ? &region : nullptr,
+                               &odfMax, &bandMaxOut);
     }
 
     void OnOK() override
@@ -1001,10 +1159,22 @@ public:
         Napi::HandleScope scope(env);
         Napi::Object result = Napi::Object::New(env);
         result.Set("onsets", packOnsets(env, onsets));
+        // What this pass learned about the file as a whole, to be handed back on
+        // the next regional one so it judges its own span on the same terms.
+        result.Set("odfMax", Napi::Number::New(env, odfMax));
+        result.Set("bandMax", packBandMax(env, bandMaxOut));
         deferred.Resolve(result);
     }
 
     void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+
+    static Napi::Float32Array packBandMax(Napi::Env env, const std::vector<float> &bandMax)
+    {
+        Napi::Float32Array out = Napi::Float32Array::New(env, bandMax.size());
+        if (!bandMax.empty())
+            memcpy(out.Data(), bandMax.data(), bandMax.size() * sizeof(float));
+        return out;
+    }
 
     // Flat [time0, salience0, time1, salience1, …] in seconds.
     static Napi::Float32Array packOnsets(Napi::Env env, const std::vector<DetectedOnset> &onsets)
@@ -1020,6 +1190,11 @@ public:
 
 private:
     Napi::Promise::Deferred deferred;
+    OnsetRegion region{0.0, 0.0, 0.0, nullptr, 0};
+    bool hasRegion = false;
+    std::vector<float> bandMaxIn;
+    std::vector<float> bandMaxOut;
+    double odfMax = 0.0;
     Napi::Reference<Napi::Float32Array> packedRef;
     const float *packed = nullptr;
     size_t packedFloats = 0;
@@ -1039,14 +1214,15 @@ Napi::Value DetectOnsetsAsync(const Napi::CallbackInfo &info)
 
     if (info.Length() < 3 || !info[0].IsTypedArray() || !info[1].IsObject() || !info[2].IsNumber())
     {
-        Napi::TypeError::New(env, "Expected: packedData (Float32Array), meta (Object), sampleRate (Number)").ThrowAsJavaScriptException();
+        Napi::TypeError::New(env, "Expected: packedData (Float32Array), meta (Object), sampleRate (Number), [options (Object)]").ThrowAsJavaScriptException();
         return env.Null();
     }
 
     OnsetWorker *worker = new OnsetWorker(env,
                                           info[0].As<Napi::Float32Array>(),
                                           info[1].As<Napi::Object>(),
-                                          info[2].As<Napi::Number>().DoubleValue());
+                                          info[2].As<Napi::Number>().DoubleValue(),
+                                          info.Length() > 3 ? info[3] : env.Undefined());
     worker->Queue();
     return worker->GetPromise();
 }
@@ -1095,6 +1271,21 @@ public:
         // they track what has been painted. Full-file work regardless of the
         // synthesized range, hence opt-in per call.
         detectOnsets = paramsJs.Has("detectOnsets") && paramsJs.Get("detectOnsets").ToBoolean().Value();
+        if (detectOnsets && paramsJs.Has("onsetStartSec") && paramsJs.Has("onsetEndSec"))
+        {
+            onsetRegion.startSec = paramsJs.Get("onsetStartSec").ToNumber().DoubleValue();
+            onsetRegion.endSec = paramsJs.Get("onsetEndSec").ToNumber().DoubleValue();
+            onsetRegion.odfReference =
+                paramsJs.Has("onsetOdfReference") ? paramsJs.Get("onsetOdfReference").ToNumber().DoubleValue() : 0.0;
+            if (paramsJs.Has("onsetBandMax") && paramsJs.Get("onsetBandMax").IsTypedArray())
+            {
+                Napi::Float32Array bm = paramsJs.Get("onsetBandMax").As<Napi::Float32Array>();
+                onsetBandMaxIn.assign(bm.Data(), bm.Data() + bm.ElementLength());
+                onsetRegion.bandMaxReference = onsetBandMaxIn.data();
+                onsetRegion.bandMaxCount = (int)onsetBandMaxIn.size();
+            }
+            hasOnsetRegion = true;
+        }
 
         // Reference the existing audio channels (for partial synthesis with
         // crossfade) and read them by pointer on the worker thread, same as the
@@ -1369,7 +1560,12 @@ public:
             layout.bandOffsets = bandOffsets.data();
             layout.bandLengths = bandLengths.data();
             layout.bandStepLog2s = bandStepLog2s.data();
-            onsets = computeOnsets(inputData, inputDataLen, layout, (int64_t)numFrames, sampleRate);
+            // A stroke changes one span of the file, so only that span's onsets
+            // are worth finding again; the caller splices them into the ones it
+            // already has. Without a region — the first pass over a file — the
+            // whole of it is read.
+            onsets = computeOnsets(inputData, inputDataLen, layout, (int64_t)numFrames, sampleRate,
+                                   hasOnsetRegion ? &onsetRegion : nullptr, &onsetOdfMax, &onsetBandMaxOut);
             DEBUG_LOG << "[C++] Detected " << onsets.size() << " onsets" << std::endl << std::flush;
         }
 
@@ -1399,7 +1595,11 @@ public:
         result.Set("gainReductionDb", grBuffer);
         result.Set("maxGainReductionDb", Napi::Number::New(env, maxGainReductionDb));
         if (detectOnsets)
+        {
             result.Set("onsets", OnsetWorker::packOnsets(env, onsets));
+            result.Set("onsetOdfMax", Napi::Number::New(env, onsetOdfMax));
+            result.Set("onsetBandMax", OnsetWorker::packBandMax(env, onsetBandMaxOut));
+        }
 
         deferred.Resolve(result);
     }
@@ -1430,6 +1630,11 @@ private:
     int bandsPerOctave;
     double fminHz;
     bool detectOnsets = false;
+    OnsetRegion onsetRegion{0.0, 0.0, 0.0, nullptr, 0};
+    bool hasOnsetRegion = false;
+    std::vector<float> onsetBandMaxIn;
+    std::vector<float> onsetBandMaxOut;
+    double onsetOdfMax = 0.0;
     int64_t requestedStartFrame;
     int64_t requestedEndFrame;
     int64_t requestedStartBand;

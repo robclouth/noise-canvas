@@ -9,6 +9,12 @@ export const MULTIPLIER_UNIT = "x";
 export const ONSETS_GRID_VALUE = 1 / 128;
 export const DEFAULT_ONSET_SENSITIVITY = 50;
 
+// Padding either side of a repainted span when its onsets are found again. An
+// event is anchored at the foot of its attack and its level measured for a
+// moment after it, so the ones at the edges of the span have to be read from a
+// little more material than the span itself.
+export const ONSET_REGION_PAD_SEC = 0.25;
+
 // The time grid means onsets rather than beats whenever it sits below the
 // smallest beat value.
 export function isOnsetGrid(gridSizeBeats: number): boolean {

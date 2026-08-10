@@ -45,6 +45,8 @@ export interface HistoryNode {
   };
   audioPeak?: number;
   audioCached?: boolean;
+  // Whether this node's onsets are stored next to it (see setNodeOnsets).
+  onsetsCached?: boolean;
   customLabel?: string;
   favorited?: boolean;
 }
@@ -512,6 +514,42 @@ export class HistoryManager {
   private audioPath(dir: string, nodeId: string): string {
     return host.path.join(dir, `${nodeId}.wav`);
   }
+  private onsetsPath(dir: string, nodeId: string): string {
+    return host.path.join(dir, `${nodeId}.onsets.zst`);
+  }
+
+  /**
+   * Onsets belong to the coefficients they were found in, so each state keeps
+   * its own: moving through the tree restores the onsets of the state arrived
+   * at, and reopening a file reads them back rather than walking every
+   * coefficient again, which on a long file takes seconds. A few hundred bytes
+   * to a few kilobytes each, so unlike the audio cache they are never evicted.
+   */
+  async setNodeOnsets(nodeId: string, packedState: Float32Array): Promise<void> {
+    await this.initialize();
+    const node = this.manifest?.nodes[nodeId];
+    if (!node) return;
+    const dir = await this.ensureDir();
+    await writeFloat32Compressed(this.onsetsPath(dir, nodeId), packedState);
+    if (!node.onsetsCached) {
+      node.onsetsCached = true;
+      this.scheduleManifestWrite();
+    }
+  }
+
+  /** Null when the node predates onset storage, or its file has gone. */
+  async getNodeOnsets(nodeId: string): Promise<Float32Array | null> {
+    await this.initialize();
+    const node = this.manifest?.nodes[nodeId];
+    if (!node?.onsetsCached) return null;
+    try {
+      const dir = await this.dir;
+      return await readFloat32Compressed(this.onsetsPath(dir, nodeId));
+    } catch {
+      node.onsetsCached = false;
+      return null;
+    }
+  }
 
   // ---------- Mutation ----------
 
@@ -937,6 +975,11 @@ export class HistoryManager {
     this.scheduleManifestWrite();
     this.notifyStateChange();
 
+    // Onsets describe the coefficients they were found in, so they move with
+    // the state. Not awaited: the picture is already back, and the markers and
+    // the onset grid can follow a moment later.
+    void useStore.getState().restoreOnsetsForNode(this.fileId, targetId, packedData);
+
     // Restore audio: cached WAV if present, otherwise re-synthesize.
     const dir = await this.dir;
     const audioPath = this.audioPath(dir, targetId);
@@ -1087,6 +1130,7 @@ export class HistoryManager {
         this.inverseMapPath(dir, id),
         this.metadataPath(dir, id),
         this.audioPath(dir, id),
+        this.onsetsPath(dir, id),
       ];
       for (const f of files) host.fs.rm(f).catch(() => {});
       this.packedCache.delete(id);
@@ -1241,6 +1285,7 @@ export class HistoryManager {
         this.inverseMapPath(dir, id),
         this.metadataPath(dir, id),
         this.audioPath(dir, id),
+        this.onsetsPath(dir, id),
       ]) {
         host.fs.rm(f).catch(() => {});
       }

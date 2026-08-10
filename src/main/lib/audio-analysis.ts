@@ -1,7 +1,7 @@
 import { copyFile } from "fs/promises";
 import { extname, join } from "path";
 import { decodeAudioFile, encodeBufferToAudioFile, probeAudioFile } from "./ffmpeg";
-import type { AnalysisParams, GaboratorAnalysisResult, PackedOnsets } from "./types";
+import type { AnalysisParams, GaboratorAnalysisResult, OnsetReference, OnsetResult, PackedOnsets } from "./types";
 import { getModelPath } from "./ai-separation";
 export { isModelDownloaded, downloadModel } from "./ai-separation";
 export type { FourStemName, TwoStemName } from "./ai-separation";
@@ -45,9 +45,13 @@ export function init() {
 /**
  * Onsets for a packed spectrogram. The addon reads the buffer by reference, so
  * this is a walk of the coefficients rather than a copy of them. Called with a
- * fresh analysis, and by the renderer for a file reloaded from history, whose
- * onsets are not persisted anywhere — they are re-derived from the coefficients
- * they describe.
+ * fresh analysis, and by the renderer for a file reloaded from history whose
+ * stored onsets are missing.
+ *
+ * With a region, only that span of the file is walked and only its onsets are
+ * reported — the caller splices them into the ones it has. The reference from a
+ * pass that read the whole file goes with it, so the span is judged on the same
+ * terms as the rest.
  */
 export async function detectOnsets(
   packedData: Float32Array,
@@ -60,13 +64,21 @@ export async function detectOnsets(
     bandStepLog2s: Int32Array;
   },
   sampleRate: number,
-): Promise<PackedOnsets> {
+  region?: { startSec: number; endSec: number } & Partial<OnsetReference>,
+): Promise<OnsetResult> {
   const gab = init();
-  const { onsets } = await gab.detectOnsets(packedData, analysisMetadata, sampleRate);
-  return onsets;
+  const options = region
+    ? {
+        startSec: region.startSec,
+        endSec: region.endSec,
+        odfReference: region.odfMax ?? 0,
+        bandMax: region.bandMax,
+      }
+    : undefined;
+  return await gab.detectOnsets(packedData, analysisMetadata, sampleRate, options);
 }
 
-function analysisOnsets(analysisResult: GaboratorAnalysisResult, sampleRate: number): Promise<PackedOnsets> {
+function analysisOnsets(analysisResult: GaboratorAnalysisResult, sampleRate: number): Promise<OnsetResult> {
   return detectOnsets(
     analysisResult.data,
     {
@@ -125,9 +137,12 @@ export async function analyze(filePath: string, params: AnalysisParams) {
   const analyzeTime = performance.now() - analyzeStart;
   console.log(`[analyze] Gaborator analyze time (planar): ${analyzeTime.toFixed(2)}ms`);
 
+  const onsetResult = await analysisOnsets(analysisResult, sampleRate);
   return {
     ...analysisResult,
-    onsets: await analysisOnsets(analysisResult, sampleRate),
+    onsets: onsetResult.onsets,
+    onsetOdfMax: onsetResult.odfMax,
+    onsetBandMax: onsetResult.bandMax,
     sampleRate,
     format,
     codec,
@@ -158,9 +173,12 @@ export async function analyseBuffer(audioBuffer: AudioBuffer, params: AnalysisPa
   const analyzeTime = performance.now() - analyzeStart;
   console.log(`[analyseBuffer] Gaborator analyze time: ${analyzeTime.toFixed(2)}ms`);
 
+  const onsetResult = await analysisOnsets(analysisResult, sampleRate);
   return {
     ...analysisResult,
-    onsets: await analysisOnsets(analysisResult, sampleRate),
+    onsets: onsetResult.onsets,
+    onsetOdfMax: onsetResult.odfMax,
+    onsetBandMax: onsetResult.bandMax,
     sampleRate,
     format: "wav", // AudioBuffer is always PCM data
     codec: "pcm_f32le", // AudioBuffer uses 32-bit float PCM
@@ -177,8 +195,11 @@ export interface SynthesisResult {
   gainReductionDb: Float32Array;
   maxGainReductionDb: number;
   // Present only when params.detectOnsets was set: the onset map re-derived
-  // from the packed data this synthesis ran on.
+  // from the packed data this synthesis ran on, covering the requested span,
+  // with the reference the pass arrived at.
   onsets?: PackedOnsets;
+  onsetOdfMax?: number;
+  onsetBandMax?: Float32Array;
 }
 
 export async function synthesize(

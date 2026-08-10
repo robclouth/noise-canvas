@@ -20,16 +20,39 @@ export type AnalysisParams = {
   minFreq: number;
   /**
    * Re-derive the onset map during synthesis, from the packed data that pass
-   * already walks. Costs a full walk of every coefficient regardless of the
-   * range being synthesized, so callers ask for it when the result is going to
-   * be kept rather than on every stroke. Ignored by analysis, which always
-   * returns onsets.
+   * already walks. Ignored by analysis, which always returns onsets.
    */
   detectOnsets?: boolean;
+  /**
+   * Span of the file to re-derive onsets for, with the reference from the pass
+   * that last read the whole file (see OnsetReference). A stroke only changes
+   * its own span, so only that span's onsets need finding again; the caller
+   * splices them into the ones it already has. Without a span, and without a
+   * reference to go on, the whole file is walked.
+   */
+  onsetStartSec?: number;
+  onsetEndSec?: number;
+  onsetOdfReference?: number;
+  onsetBandMax?: Float32Array;
 };
 
 /** Flat [time0, salience0, time1, salience1, …]; times in seconds. */
 export type PackedOnsets = Float32Array;
+
+/**
+ * What a detection pass learned about the file as a whole: the level that
+ * counts as silence, and each band's loudest moment. Everything else about an
+ * onset is local to it, so handing these back is what lets a later pass read
+ * one span of the file and still judge it on the file's own terms.
+ */
+export interface OnsetReference {
+  odfMax: number;
+  bandMax: Float32Array;
+}
+
+export interface OnsetResult extends OnsetReference {
+  onsets: PackedOnsets;
+}
 
 export interface IpcMainHandlers {
   "update-menu-state": (event: Electron.IpcMainEvent, canUndo: boolean, canRedo: boolean) => void;

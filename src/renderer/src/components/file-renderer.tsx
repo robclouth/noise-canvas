@@ -40,7 +40,7 @@ import passThroughVert from "../glsl/pass-through.vert";
 import { DEFAULT_ONSET_SENSITIVITY } from "../lib/constants";
 import { getFileOnsets } from "../lib/file-onsets";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
-import { getOnsetTexture } from "../lib/onset-map";
+import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { captureMaterialToCanvas } from "../lib/snapshot-capture";
@@ -710,6 +710,14 @@ const FileRendererInner = memo(
             label: "Opened",
             spectrogram: spectrogramData,
           });
+          // Analysis has already found this state's onsets, so they are stored
+          // with it rather than found again the next time the file is opened.
+          const opened = openFiles[fileId];
+          if (nodeId && opened?.onsets) {
+            void historyManager
+              .setNodeOnsets(nodeId, packOnsetState({ onsets: opened.onsets, reference: opened.onsetReference }))
+              .catch((error) => console.error("Storing onsets for history node failed:", error));
+          }
           await state.synthesizeFile(fileId);
           const updated = openFiles[fileId];
           if (nodeId && updated?.audioBuffer) {

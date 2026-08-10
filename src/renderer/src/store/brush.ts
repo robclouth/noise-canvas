@@ -13,6 +13,7 @@ import type { ParameterKey } from "./types";
 import { openFiles } from "./files";
 import type { ZustandGet, ZustandSet } from "./types";
 import { getHistoryManager } from "@renderer/lib/history-manager";
+import { packOnsetState } from "@renderer/lib/onset-map";
 import { useTransientStore } from "./transient";
 
 export type { StrokePosition } from "./transient";
@@ -269,6 +270,13 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         const updated = openFiles[activeFileId];
         if (nodeId && updated?.audioBuffer) {
           historyManager.setStateAudio(nodeId, updated.audioBuffer, updated.audioPeak ?? 1);
+        }
+        // Stored against the state the stroke made, so coming back to it later
+        // restores the onsets of what it painted rather than finding them again.
+        if (nodeId && updated?.onsets) {
+          void historyManager
+            .setNodeOnsets(nodeId, packOnsetState({ onsets: updated.onsets, reference: updated.onsetReference }))
+            .catch((error) => console.error("Storing onsets for history node failed:", error));
         }
       });
     },

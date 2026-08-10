@@ -28,6 +28,10 @@ declare global {
         sampleRate: number;
         magnitudeEnergy: number;
         onsets: Float32Array;
+        // What the whole-file onset pass learned, so later passes can re-derive
+        // one span of the file and still judge it on the file's own terms.
+        onsetOdfMax?: number;
+        onsetBandMax?: Float32Array;
         format: string;
         codec: string;
         channels: number;
@@ -50,6 +54,10 @@ declare global {
         sampleRate: number;
         magnitudeEnergy: number;
         onsets: Float32Array;
+        // What the whole-file onset pass learned, so later passes can re-derive
+        // one span of the file and still judge it on the file's own terms.
+        onsetOdfMax?: number;
+        onsetBandMax?: Float32Array;
         format: string;
         codec: string;
         channels: number;
@@ -78,6 +86,8 @@ declare global {
         gainReductionDb: Float32Array;
         maxGainReductionDb: number;
         onsets?: Float32Array;
+        onsetOdfMax?: number;
+        onsetBandMax?: Float32Array;
       }>;
       isModelDownloaded: (modelFile: string) => boolean;
       downloadModel: (modelFile: string, onProgress?: (downloaded: number, total: number) => void) => Promise<void>;
@@ -93,7 +103,8 @@ declare global {
           bandStepLog2s: Int32Array;
         },
         sampleRate: number,
-      ) => Promise<Float32Array>;
+        region?: { startSec: number; endSec: number; odfMax?: number; bandMax?: Float32Array },
+      ) => Promise<{ onsets: Float32Array; odfMax: number; bandMax: Float32Array }>;
       hpss: (
         packedData: Float32Array,
         analysisMetadata: {

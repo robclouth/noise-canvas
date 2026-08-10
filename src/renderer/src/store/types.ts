@@ -86,6 +86,11 @@ export type OpenFile = {
   // refreshed by synthesis so they follow what has been painted. Raw and
   // unthresholded — lib/onset-map.ts applies the sensitivity control.
   onsets?: Float32Array;
+  // What the last pass over the whole file found: the level that counts as
+  // silence, and each band's loudest moment. Carried so a stroke can re-detect
+  // its own span alone and still judge it on the file's terms. Absent until a
+  // whole-file pass has run, which makes the next detection a whole-file one.
+  onsetReference?: { odfMax: number; bandMax: Float32Array };
   rendererRef?: React.RefObject<FileRendererHandle | null>;
 };
 

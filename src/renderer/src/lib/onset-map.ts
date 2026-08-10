@@ -72,6 +72,64 @@ export function filterOnsets(packed: Float32Array | undefined, sensitivity: numb
   return onsets;
 }
 
+export type OnsetReference = { odfMax: number; bandMax: Float32Array };
+export type OnsetState = { onsets: Float32Array; reference?: OnsetReference };
+
+/**
+ * A file's onsets and the reference they were found against, as one array for
+ * storage: [odfMax, band count, each band's maximum…, then the onset pairs].
+ * Detection is a function of the coefficients, so what is stored belongs to the
+ * history node whose coefficients it describes.
+ */
+export function packOnsetState(state: OnsetState): Float32Array {
+  const bandMax = state.reference?.bandMax ?? new Float32Array(0);
+  const out = new Float32Array(2 + bandMax.length + state.onsets.length);
+  out[0] = state.reference?.odfMax ?? 0;
+  out[1] = bandMax.length;
+  out.set(bandMax, 2);
+  out.set(state.onsets, 2 + bandMax.length);
+  return out;
+}
+
+export function unpackOnsetState(raw: Float32Array): OnsetState | null {
+  if (raw.length < 2) return null;
+  const bandCount = raw[1];
+  if (!Number.isFinite(bandCount) || bandCount < 0 || 2 + bandCount > raw.length) return null;
+  const bandMax = raw.slice(2, 2 + bandCount);
+  const onsets = raw.slice(2 + bandCount);
+  const odfMax = raw[0];
+  return { onsets, reference: odfMax > 0 && bandMax.length > 0 ? { odfMax, bandMax } : undefined };
+}
+
+/**
+ * Replaces the onsets between `startSec` and `endSec` with a freshly detected
+ * set for that span, keeping the rest of the file's as they were. A stroke only
+ * changes its own span, so that is the only part worth detecting again.
+ * Both lists are the detector's flat [time, salience] pairs, in time order.
+ */
+export function spliceOnsets(
+  existing: Float32Array | undefined,
+  replacement: Float32Array,
+  startSec: number,
+  endSec: number,
+): Float32Array {
+  if (!existing || existing.length < 2) return replacement.slice();
+
+  const before: number[] = [];
+  const after: number[] = [];
+  for (let i = 0; i + 1 < existing.length; i += 2) {
+    const timeSec = existing[i];
+    if (timeSec < startSec) before.push(timeSec, existing[i + 1]);
+    else if (timeSec >= endSec) after.push(timeSec, existing[i + 1]);
+  }
+
+  const out = new Float32Array(before.length + replacement.length + after.length);
+  out.set(before, 0);
+  out.set(replacement, before.length);
+  out.set(after, before.length + replacement.length);
+  return out;
+}
+
 /**
  * Bakes a nearest-onset lookup row. Onsets must be sorted by time, which is how
  * the detector reports them.

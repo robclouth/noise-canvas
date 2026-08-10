@@ -36,7 +36,12 @@ const addon = require(join(__dirname, "../../../../build/Release/gaborator_addon
     sampleRate: number,
     params: { bandsPerOctave: number; minFreq: number },
   ) => Promise<GaboratorAnalysisResult>;
-  detectOnsets: (packedData: Float32Array, meta: OnsetMeta, sampleRate: number) => Promise<{ onsets: Float32Array }>;
+  detectOnsets: (
+    packedData: Float32Array,
+    meta: OnsetMeta,
+    sampleRate: number,
+    region?: { startSec: number; endSec: number; odfReference?: number; bandMax?: Float32Array },
+  ) => Promise<{ onsets: Float32Array; odfMax: number; bandMax: Float32Array }>;
   synthesize: (
     data: Float32Array,
     analysis: GaboratorAnalysisResult,
@@ -323,6 +328,46 @@ describe("addon onset detection", () => {
       // around 6 ms per second of audio, so a couple of hundred milliseconds on
       // a long file. That is why it is requested per call rather than always on.
       expect(withMs - plainMs).toBeLessThan(durationSec * 10);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "reports a span exactly as the whole-file pass does, without reading the whole file",
+    async () => {
+      // Long enough that a span in the middle is a small fraction of it.
+      const durationSec = 40;
+      const hits: number[] = [];
+      for (let t = 0.25; t < durationSec - 0.5; t += 0.5) hits.push(t);
+      const analysis = await addon.analyze([makeHatPattern(durationSec, hits, 0.1)], 1, SR, PARAMS);
+
+      const fullStart = performance.now();
+      const full = await addon.detectOnsets(analysis.data, metaOf(analysis), SR);
+      const fullMs = performance.now() - fullStart;
+
+      const startSec = 20;
+      const endSec = 22;
+      const regionStart = performance.now();
+      const region = await addon.detectOnsets(analysis.data, metaOf(analysis), SR, {
+        startSec,
+        endSec,
+        odfReference: full.odfMax,
+        bandMax: full.bandMax,
+      });
+      const regionMs = performance.now() - regionStart;
+
+      const inSpan = unpack(full.onsets).filter((o) => o.timeSec >= startSec && o.timeSec < endSec);
+      const reported = unpack(region.onsets);
+      expect(reported.length).toBe(inSpan.length);
+      reported.forEach((onset, i) => {
+        expect(onset.timeSec).toBeCloseTo(inSpan[i].timeSec, 6);
+        expect(onset.salience).toBeCloseTo(inSpan[i].salience, 6);
+      });
+
+      // The cost of a span is its own length plus a fixed warm-up, not the
+      // file's length, which is what makes re-deriving onsets after a stroke
+      // affordable on long material.
+      expect(regionMs).toBeLessThan(fullMs / 2);
     },
     TIMEOUT,
   );
