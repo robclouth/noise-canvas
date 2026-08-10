@@ -1,5 +1,6 @@
 import { useStore } from "@/store";
-import { ActionIcon, Badge, Box, Group, Menu, NumberInput } from "@mantine/core";
+import { ActionIcon, Badge, Box, Group, Menu, Text } from "@mantine/core";
+import { NumboxControl } from "@renderer/components/controls/numbox-control";
 import { DEFAULT_ONSET_SENSITIVITY } from "@renderer/lib/constants";
 import { openSplitPartsPrompt } from "@renderer/lib/modals";
 import { FILE_HEADER_FONT, FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-density";
@@ -33,6 +34,51 @@ function getResolutionLabel(bpo: number): string {
     default:
       return `${bpo} BPO`;
   }
+}
+
+// A per-file value in the header, presented as the same label + draggable
+// numbox as every other parameter. These values live per file path rather than
+// on the store's parameter map, so they carry their own label instead of going
+// through ParameterControl.
+function FileHeaderNumbox({
+  label,
+  tooltip,
+  value,
+  setValue,
+  min,
+  max,
+  step,
+  unit,
+}: {
+  label: string;
+  tooltip: string;
+  value: number;
+  setValue: (value: number) => void;
+  min: number;
+  max: number;
+  step: number;
+  unit?: string;
+}) {
+  const labelComponent = (
+    <Tooltip label={tooltip}>
+      <Text size="xs" ta="right" c="dark.0" style={{ whiteSpace: "nowrap" }}>
+        {label}
+      </Text>
+    </Tooltip>
+  );
+  return (
+    <NumboxControl
+      labelComponent={labelComponent}
+      value={value}
+      setValue={setValue}
+      min={min}
+      max={max}
+      step={step}
+      unit={unit}
+      toNormalized={(v) => (v - min) / (max - min)}
+      fromNormalized={(v) => min + v * (max - min)}
+    />
+  );
 }
 
 // Component to display filename with middle truncation
@@ -107,27 +153,25 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         )}
       </Group>
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-        <Tooltip label="Onset sensitivity: how far down this file's own level range a hit still counts as an onset. 0% keeps only the loudest, 100% keeps everything the detector found. Onsets drive transient-preserving transforms, the onset markers, and onset snapping.">
-          <NumberInput
-            w={62}
-            value={onsetSensitivity}
-            onChange={(val) => useStore.getState().setFilepathOnsetSensitivity(filePath, Number(val))}
-            size="xs"
-            max={100}
-            min={0}
-            suffix="%"
-          />
-        </Tooltip>
-        <Tooltip label="The tempo of this file in beats per minute (BPM). Used for grid snapping and time-based effects.">
-          <NumberInput
-            w={60}
-            value={bpm}
-            onChange={(val) => useStore.getState().setFilepathBpm(filePath, Number(val))}
-            size="xs"
-            max={999}
-            min={10}
-          />
-        </Tooltip>
+        <FileHeaderNumbox
+          label="Onsets"
+          tooltip="Onset sensitivity: how far down this file's own level range a hit still counts as an onset. 0% keeps only the loudest, 100% keeps everything the detector found. Onsets drive transient-preserving transforms, the onset markers, and onset snapping."
+          value={onsetSensitivity}
+          setValue={(v) => useStore.getState().setFilepathOnsetSensitivity(filePath, v)}
+          min={0}
+          max={100}
+          step={1}
+          unit="%"
+        />
+        <FileHeaderNumbox
+          label="BPM"
+          tooltip="The tempo of this file in beats per minute (BPM). Used for grid snapping and time-based effects."
+          value={bpm ?? 120}
+          setValue={(v) => useStore.getState().setFilepathBpm(filePath, v)}
+          min={10}
+          max={999}
+          step={1}
+        />
         <Menu position="bottom-end" withinPortal>
           <Tooltip label="Split this file into separate components.">
             <Menu.Target>
