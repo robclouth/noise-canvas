@@ -239,8 +239,9 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubHalveActiveFileLength);
 
-    const unsubAppWillQuit = ipcOn("app-will-quit", async () => {
-      clearAllHistoryManagers();
+    const unsubAppWillQuit = ipcOn("app-will-quit", () => {
+      // Main holds the quit until this reports back (or times out).
+      void clearAllHistoryManagers().finally(() => ipcSend("quit-cleanup-done"));
     });
     unsubscribers.push(unsubAppWillQuit);
 

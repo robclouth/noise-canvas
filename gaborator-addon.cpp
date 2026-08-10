@@ -2644,8 +2644,483 @@ Napi::Value ApplyLimiterTest(const Napi::CallbackInfo &info)
     return out;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Undo-history codec
+//
+// The history cache stores packed FBO states, which run to hundreds of megabytes
+// on a multi-minute file. Everything here walks those buffers a value at a time,
+// so it lives in the addon and runs on a worker thread: the same passes in the
+// renderer's JS would stall painting for hundreds of milliseconds per stroke.
+//
+// zstd finds almost nothing in interleaved RGBA float32 — adjacent bytes belong
+// to different channels (magnitude, phase) and to different positions within a
+// mantissa. Reordering into per-channel planes and then per-byte-position planes
+// groups the bytes that correlate, which is worth ~30% of the compressed size.
+// The reordering is a permutation, so it is exactly lossless; the compression
+// itself is left to the caller.
+
+// Channels per pixel in the packed texture: [magL, phaseL, magR, phaseR].
+static const size_t HISTORY_CHANNELS = 4;
+static const size_t HISTORY_VALUE_BYTES = 4;
+
+// Interleaved 32-bit values -> byte-position-major, then channel-major planes.
+static void historyEncodePlanes(const uint8_t *src, size_t valueCount, uint8_t *out)
+{
+    const size_t pixels = valueCount / HISTORY_CHANNELS;
+    const size_t planeStride = valueCount;
+    for (size_t c = 0; c < HISTORY_CHANNELS; ++c)
+    {
+        const size_t planeBase = c * pixels;
+        for (size_t i = 0; i < pixels; ++i)
+        {
+            const uint8_t *s = src + (i * HISTORY_CHANNELS + c) * HISTORY_VALUE_BYTES;
+            const size_t d = planeBase + i;
+            out[d] = s[0];
+            out[planeStride + d] = s[1];
+            out[2 * planeStride + d] = s[2];
+            out[3 * planeStride + d] = s[3];
+        }
+    }
+}
+
+static void historyDecodePlanes(const uint8_t *src, size_t valueCount, uint8_t *out)
+{
+    const size_t pixels = valueCount / HISTORY_CHANNELS;
+    const size_t planeStride = valueCount;
+    for (size_t c = 0; c < HISTORY_CHANNELS; ++c)
+    {
+        const size_t planeBase = c * pixels;
+        for (size_t i = 0; i < pixels; ++i)
+        {
+            uint8_t *d = out + (i * HISTORY_CHANNELS + c) * HISTORY_VALUE_BYTES;
+            const size_t s = planeBase + i;
+            d[0] = src[s];
+            d[1] = src[planeStride + s];
+            d[2] = src[2 * planeStride + s];
+            d[3] = src[3 * planeStride + s];
+        }
+    }
+}
+
+// Holds a typed array alive across the async boundary and exposes its bytes.
+// The caller must not mutate the array while the worker is in flight.
+struct HistoryBufferRef
+{
+    Napi::Reference<Napi::Value> ref;
+    const uint8_t *data = nullptr;
+    size_t byteLength = 0;
+
+    void hold(const Napi::Value &value)
+    {
+        ref = Napi::Reference<Napi::Value>::New(value, 1);
+        Napi::ArrayBuffer buffer;
+        size_t offset = 0;
+        if (value.IsTypedArray())
+        {
+            Napi::TypedArray array = value.As<Napi::TypedArray>();
+            buffer = array.ArrayBuffer();
+            offset = array.ByteOffset();
+            byteLength = array.ByteLength();
+        }
+        else
+        {
+            buffer = value.As<Napi::ArrayBuffer>();
+            byteLength = buffer.ByteLength();
+        }
+        data = static_cast<const uint8_t *>(buffer.Data()) + offset;
+    }
+};
+
+// Reorders a packed state into plane order, ready to be compressed.
+class HistoryEncodePlanesWorker : public Napi::AsyncWorker
+{
+public:
+    HistoryEncodePlanesWorker(Napi::Env env, const Napi::Value &input)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env))
+    {
+        source.hold(input);
+    }
+
+    void Execute() override
+    {
+        const size_t valueCount = source.byteLength / HISTORY_VALUE_BYTES;
+        // Packed states are whole RGBA pixels; anything else would be silently
+        // truncated by the plane split rather than round-tripping.
+        if (source.byteLength % (HISTORY_CHANNELS * HISTORY_VALUE_BYTES) != 0)
+        {
+            SetError("history state is not a whole number of RGBA pixels");
+            return;
+        }
+        out.resize(source.byteLength);
+        if (!out.empty())
+            historyEncodePlanes(source.data, valueCount, out.data());
+    }
+
+    void OnOK() override
+    {
+        Napi::HandleScope scope(Env());
+        deferred.Resolve(Napi::Buffer<uint8_t>::Copy(Env(), out.data(), out.size()));
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    HistoryBufferRef source;
+    std::vector<uint8_t> out;
+};
+
+// Restores a packed state from plane order.
+class HistoryDecodePlanesWorker : public Napi::AsyncWorker
+{
+public:
+    HistoryDecodePlanesWorker(Napi::Env env, const Napi::Value &input)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env))
+    {
+        source.hold(input);
+    }
+
+    void Execute() override
+    {
+        if (source.byteLength % (HISTORY_CHANNELS * HISTORY_VALUE_BYTES) != 0)
+        {
+            SetError("history state is not a whole number of RGBA pixels");
+            return;
+        }
+        out.resize(source.byteLength);
+        if (!out.empty())
+            historyDecodePlanes(source.data, source.byteLength / HISTORY_VALUE_BYTES, out.data());
+    }
+
+    void OnOK() override
+    {
+        Napi::HandleScope scope(Env());
+        Napi::Float32Array result = Napi::Float32Array::New(Env(), out.size() / HISTORY_VALUE_BYTES);
+        memcpy(result.Data(), out.data(), out.size());
+        deferred.Resolve(result);
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    HistoryBufferRef source;
+    std::vector<uint8_t> out;
+};
+
+// True if any value inside the footprint ranges differs between base and after.
+class HistoryFootprintChangedWorker : public Napi::AsyncWorker
+{
+public:
+    HistoryFootprintChangedWorker(Napi::Env env, const Napi::Value &baseJs, const Napi::Value &afterJs,
+                                  const Napi::Uint32Array &rangesJs)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env))
+    {
+        base.hold(baseJs);
+        after.hold(afterJs);
+        ranges.assign(rangesJs.Data(), rangesJs.Data() + rangesJs.ElementLength());
+    }
+
+    void Execute() override
+    {
+        const uint32_t *baseBits = reinterpret_cast<const uint32_t *>(base.data);
+        const uint32_t *afterBits = reinterpret_cast<const uint32_t *>(after.data);
+        for (size_t r = 0; r + 1 < ranges.size(); r += 2)
+        {
+            const size_t start = static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
+            const size_t count = static_cast<size_t>(ranges[r + 1]) * HISTORY_CHANNELS;
+            for (size_t i = 0; i < count; ++i)
+            {
+                if (baseBits[start + i] != afterBits[start + i])
+                {
+                    changed = true;
+                    return;
+                }
+            }
+        }
+    }
+
+    void OnOK() override
+    {
+        Napi::HandleScope scope(Env());
+        deferred.Resolve(Napi::Boolean::New(Env(), changed));
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    HistoryBufferRef base, after;
+    std::vector<uint32_t> ranges;
+    bool changed = false;
+};
+
+// Builds a stroke's on-disk delta. Layout:
+//   [u32 numRanges][u32 ranges...][plane-ordered u32 differences]
+//
+// Each footprint value is stored as the integer difference of its bit pattern
+// from the base's, which reconstruction adds back. Integer arithmetic on the bit
+// patterns is exactly invertible — unlike a float subtraction it cannot round —
+// so repeated undo/redo never drifts. Storing the difference rather than the
+// value leaves untouched pixels as runs of zeros and barely-touched ones as
+// small integers, which halves the compressed size of a stroke.
+class HistoryEncodeDeltaWorker : public Napi::AsyncWorker
+{
+public:
+    HistoryEncodeDeltaWorker(Napi::Env env, const Napi::Value &baseJs, const Napi::Value &afterJs,
+                             const Napi::Uint32Array &rangesJs)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env))
+    {
+        base.hold(baseJs);
+        after.hold(afterJs);
+        ranges.assign(rangesJs.Data(), rangesJs.Data() + rangesJs.ElementLength());
+    }
+
+    void Execute() override
+    {
+        size_t total = 0;
+        for (size_t r = 1; r < ranges.size(); r += 2)
+            total += static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
+
+        const size_t valueCount = base.byteLength / HISTORY_VALUE_BYTES;
+        if (after.byteLength != base.byteLength)
+        {
+            SetError("history delta: the painted state is a different size to the base");
+            return;
+        }
+        for (size_t r = 0; r + 1 < ranges.size(); r += 2)
+        {
+            const size_t end = (static_cast<size_t>(ranges[r]) + ranges[r + 1]) * HISTORY_CHANNELS;
+            if (end > valueCount)
+            {
+                SetError("history delta: footprint range runs past the end of the state");
+                return;
+            }
+        }
+
+        const uint32_t *baseBits = reinterpret_cast<const uint32_t *>(base.data);
+        const uint32_t *afterBits = reinterpret_cast<const uint32_t *>(after.data);
+
+        std::vector<uint32_t> diff(total);
+        size_t p = 0;
+        for (size_t r = 0; r + 1 < ranges.size(); r += 2)
+        {
+            const size_t start = static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
+            const size_t count = static_cast<size_t>(ranges[r + 1]) * HISTORY_CHANNELS;
+            for (size_t i = 0; i < count; ++i)
+                diff[p + i] = afterBits[start + i] - baseBits[start + i];
+            p += count;
+        }
+
+        const size_t headerBytes = 4 + ranges.size() * sizeof(uint32_t);
+        out.resize(headerBytes + total * sizeof(uint32_t));
+        const uint32_t numRanges = static_cast<uint32_t>(ranges.size() / 2);
+        memcpy(out.data(), &numRanges, 4);
+        if (!ranges.empty())
+            memcpy(out.data() + 4, ranges.data(), ranges.size() * sizeof(uint32_t));
+        if (total > 0)
+            historyEncodePlanes(reinterpret_cast<const uint8_t *>(diff.data()), total, out.data() + headerBytes);
+    }
+
+    void OnOK() override
+    {
+        Napi::HandleScope scope(Env());
+        deferred.Resolve(Napi::Buffer<uint8_t>::Copy(Env(), out.data(), out.size()));
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    HistoryBufferRef base, after;
+    std::vector<uint32_t> ranges;
+    std::vector<uint8_t> out;
+};
+
+// Reconstructs the state a delta describes: a copy of the base with the stored
+// bit-pattern differences added back over the footprint ranges.
+class HistoryApplyDeltaWorker : public Napi::AsyncWorker
+{
+public:
+    HistoryApplyDeltaWorker(Napi::Env env, const Napi::Value &baseJs, const Napi::Value &deltaJs)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env))
+    {
+        base.hold(baseJs);
+        delta.hold(deltaJs);
+    }
+
+    void Execute() override
+    {
+        if (delta.byteLength < 4)
+        {
+            SetError("history delta is truncated");
+            return;
+        }
+        uint32_t numRanges = 0;
+        memcpy(&numRanges, delta.data, 4);
+        const size_t rangeValues = static_cast<size_t>(numRanges) * 2;
+        const size_t headerBytes = 4 + rangeValues * sizeof(uint32_t);
+        if (delta.byteLength < headerBytes)
+        {
+            SetError("history delta header is truncated");
+            return;
+        }
+        std::vector<uint32_t> ranges(rangeValues);
+        if (rangeValues > 0)
+            memcpy(ranges.data(), delta.data + 4, rangeValues * sizeof(uint32_t));
+
+        const size_t diffBytes = delta.byteLength - headerBytes;
+        std::vector<uint32_t> diff(diffBytes / sizeof(uint32_t));
+        if (!diff.empty())
+            historyDecodePlanes(delta.data + headerBytes, diff.size(), reinterpret_cast<uint8_t *>(diff.data()));
+
+        out.assign(base.data, base.data + base.byteLength);
+        uint32_t *outBits = reinterpret_cast<uint32_t *>(out.data());
+        const uint32_t *baseBits = reinterpret_cast<const uint32_t *>(base.data);
+        const size_t valueCount = base.byteLength / HISTORY_VALUE_BYTES;
+
+        size_t p = 0;
+        for (size_t r = 0; r + 1 < ranges.size(); r += 2)
+        {
+            const size_t start = static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
+            const size_t count = static_cast<size_t>(ranges[r + 1]) * HISTORY_CHANNELS;
+            if (start + count > valueCount || p + count > diff.size())
+            {
+                SetError("history delta range is out of bounds");
+                return;
+            }
+            for (size_t i = 0; i < count; ++i)
+                outBits[start + i] = baseBits[start + i] + diff[p + i];
+            p += count;
+        }
+    }
+
+    void OnOK() override
+    {
+        Napi::HandleScope scope(Env());
+        Napi::Float32Array result = Napi::Float32Array::New(Env(), out.size() / HISTORY_VALUE_BYTES);
+        memcpy(result.Data(), out.data(), out.size());
+        deferred.Resolve(result);
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    HistoryBufferRef base, delta;
+    std::vector<uint8_t> out;
+};
+
+// Rebuilds the inverse map (each packed pixel's time offset and band index) from
+// a band layout. The analysis writes the same values every time, so the history
+// derives it on load rather than storing a copy beside every full snapshot.
+class HistoryInverseMapWorker : public Napi::AsyncWorker
+{
+public:
+    HistoryInverseMapWorker(Napi::Env env, const Napi::Uint32Array &offsetsJs, const Napi::Uint32Array &lengthsJs,
+                            const Napi::Int32Array &stepLog2sJs, size_t pixelCount)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), pixelCount(pixelCount)
+    {
+        bandOffsets.assign(offsetsJs.Data(), offsetsJs.Data() + offsetsJs.ElementLength());
+        bandLengths.assign(lengthsJs.Data(), lengthsJs.Data() + lengthsJs.ElementLength());
+        bandStepLog2s.assign(stepLog2sJs.Data(), stepLog2sJs.Data() + stepLog2sJs.ElementLength());
+    }
+
+    void Execute() override
+    {
+        out.assign(pixelCount * 2, 0.0f);
+        const size_t numBands = bandOffsets.size();
+        for (size_t band = 0; band < numBands; ++band)
+        {
+            const uint64_t timeStep = 1ULL << bandStepLog2s[band];
+            const size_t offset = bandOffsets[band];
+            for (uint32_t i = 0; i < bandLengths[band]; ++i)
+            {
+                const size_t pixel = offset + i;
+                if (pixel >= pixelCount)
+                    break;
+                out[pixel * 2 + 0] = static_cast<float>(i * timeStep);
+                out[pixel * 2 + 1] = static_cast<float>(band);
+            }
+        }
+    }
+
+    void OnOK() override
+    {
+        Napi::HandleScope scope(Env());
+        Napi::Float32Array result = Napi::Float32Array::New(Env(), out.size());
+        memcpy(result.Data(), out.data(), out.size() * sizeof(float));
+        deferred.Resolve(result);
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    size_t pixelCount;
+    std::vector<uint32_t> bandOffsets, bandLengths;
+    std::vector<int32_t> bandStepLog2s;
+    std::vector<float> out;
+};
+
+Napi::Value HistoryEncodePlanesAsync(const Napi::CallbackInfo &info)
+{
+    auto *worker = new HistoryEncodePlanesWorker(info.Env(), info[0]);
+    worker->Queue();
+    return worker->GetPromise();
+}
+
+Napi::Value HistoryDecodePlanesAsync(const Napi::CallbackInfo &info)
+{
+    auto *worker = new HistoryDecodePlanesWorker(info.Env(), info[0]);
+    worker->Queue();
+    return worker->GetPromise();
+}
+
+Napi::Value HistoryFootprintChangedAsync(const Napi::CallbackInfo &info)
+{
+    auto *worker = new HistoryFootprintChangedWorker(info.Env(), info[0], info[1], info[2].As<Napi::Uint32Array>());
+    worker->Queue();
+    return worker->GetPromise();
+}
+
+Napi::Value HistoryEncodeDeltaAsync(const Napi::CallbackInfo &info)
+{
+    auto *worker = new HistoryEncodeDeltaWorker(info.Env(), info[0], info[1], info[2].As<Napi::Uint32Array>());
+    worker->Queue();
+    return worker->GetPromise();
+}
+
+Napi::Value HistoryApplyDeltaAsync(const Napi::CallbackInfo &info)
+{
+    auto *worker = new HistoryApplyDeltaWorker(info.Env(), info[0], info[1]);
+    worker->Queue();
+    return worker->GetPromise();
+}
+
+Napi::Value HistoryInverseMapAsync(const Napi::CallbackInfo &info)
+{
+    auto *worker = new HistoryInverseMapWorker(info.Env(), info[0].As<Napi::Uint32Array>(),
+                                               info[1].As<Napi::Uint32Array>(), info[2].As<Napi::Int32Array>(),
+                                               info[3].As<Napi::Number>().Int64Value());
+    worker->Queue();
+    return worker->GetPromise();
+}
+
 Napi::Object init(Napi::Env env, Napi::Object exports)
 {
+    exports.Set("historyEncodePlanes", Napi::Function::New(env, HistoryEncodePlanesAsync));
+    exports.Set("historyDecodePlanes", Napi::Function::New(env, HistoryDecodePlanesAsync));
+    exports.Set("historyFootprintChanged", Napi::Function::New(env, HistoryFootprintChangedAsync));
+    exports.Set("historyEncodeDelta", Napi::Function::New(env, HistoryEncodeDeltaAsync));
+    exports.Set("historyApplyDelta", Napi::Function::New(env, HistoryApplyDeltaAsync));
+    exports.Set("historyInverseMap", Napi::Function::New(env, HistoryInverseMapAsync));
     exports.Set("analyze", Napi::Function::New(env, AnalyzeAsync));
     exports.Set("synthesize", Napi::Function::New(env, SynthesizeAsync));
     exports.Set("detectOnsets", Napi::Function::New(env, DetectOnsetsAsync));

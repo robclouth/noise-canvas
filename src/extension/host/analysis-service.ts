@@ -1,8 +1,18 @@
-import { analyze, synthesize } from "../../main/lib/audio-analysis";
+import {
+  analyze,
+  applyHistoryDelta,
+  buildHistoryInverseMap,
+  decodeHistorySnapshot,
+  encodeHistoryDelta,
+  encodeHistorySnapshot,
+  historyFootprintChanged,
+  synthesize,
+} from "../../main/lib/audio-analysis";
 import type { AnalysisParams } from "../../main/lib/types";
 import {
   asF32,
   asI32,
+  asU8,
   asU32,
   decodeFrame,
   encodeFrame,
@@ -104,4 +114,63 @@ export async function runSynthesizeFramed(request: ArrayBuffer): Promise<Uint8Ar
     meta: { peak: result.peak, numChannels: result.channels.length, maxGainReductionDb: result.maxGainReductionDb },
     arrays: channels,
   });
+}
+
+/**
+ * Runs one undo-history codec operation in the host. The webview holds the
+ * packed states but not the addon, so the buffers travel over the same framed
+ * transport the analysis uses; `meta.op` selects the operation.
+ */
+export async function runHistoryCodecFramed(request: ArrayBuffer): Promise<Uint8Array> {
+  const { meta, arrays } = decodeFrame(request);
+  switch (String(meta.op)) {
+    case "encodeSnapshot":
+      return encodeFrame({
+        meta: {},
+        arrays: { bytes: await encodeHistorySnapshot(asF32(arrays.packed, "packed")) },
+      });
+    case "decodeSnapshot":
+      return encodeFrame({
+        meta: {},
+        arrays: { packed: await decodeHistorySnapshot(asU8(arrays.bytes, "bytes")) },
+      });
+    case "footprintChanged": {
+      const changed = await historyFootprintChanged(
+        asF32(arrays.base, "base"),
+        asF32(arrays.after, "after"),
+        asU32(arrays.ranges, "ranges"),
+      );
+      return encodeFrame({ meta: { changed: changed ? 1 : 0 }, arrays: {} });
+    }
+    case "encodeDelta":
+      return encodeFrame({
+        meta: {},
+        arrays: {
+          bytes: await encodeHistoryDelta(
+            asF32(arrays.base, "base"),
+            asF32(arrays.after, "after"),
+            asU32(arrays.ranges, "ranges"),
+          ),
+        },
+      });
+    case "applyDelta":
+      return encodeFrame({
+        meta: {},
+        arrays: { packed: await applyHistoryDelta(asF32(arrays.base, "base"), asU8(arrays.bytes, "bytes")) },
+      });
+    case "inverseMap":
+      return encodeFrame({
+        meta: {},
+        arrays: {
+          inverseMap: await buildHistoryInverseMap(
+            asU32(arrays.bandOffsets, "bandOffsets"),
+            asU32(arrays.bandLengths, "bandLengths"),
+            asI32(arrays.bandStepLog2s, "bandStepLog2s"),
+            Number(meta.pixelCount),
+          ),
+        },
+      });
+    default:
+      throw new Error(`history codec: unknown op ${String(meta.op)}`);
+  }
 }

@@ -46,6 +46,9 @@ export interface EditorServerOptions {
   analyze?: (filePath: string, params: { bandsPerOctave: number; minFreq: number }) => Promise<Uint8Array>;
   // Synthesises audio from a painted spectrogram frame; returns a PCM frame.
   synthesize?: (request: ArrayBuffer) => Promise<Uint8Array>;
+  // Runs one undo-history codec operation on the host's addon; the operation and
+  // its buffers travel in the request frame.
+  historyCodec?: (request: ArrayBuffer) => Promise<Uint8Array>;
   // Node-side fs/os/zlib/dialogs the renderer core reaches over the RPC envelope.
   hostServices?: HostServices;
 }
@@ -155,6 +158,15 @@ export async function startEditorServer(options: EditorServerOptions): Promise<E
     if (url.pathname === "/synthesize" && req.method === "POST") {
       if (!options.synthesize) return sendJson(res, 501, { error: "synthesis not available" });
       const framed = await options.synthesize(toArrayBuffer(await readBody(req)));
+      res.writeHead(200, { "content-type": "application/octet-stream", "content-length": framed.byteLength });
+      res.end(Buffer.from(framed.buffer, framed.byteOffset, framed.byteLength));
+      return;
+    }
+
+    // One undo-history codec operation (native addon).
+    if (url.pathname === "/history-codec" && req.method === "POST") {
+      if (!options.historyCodec) return sendJson(res, 501, { error: "history codec not available" });
+      const framed = await options.historyCodec(toArrayBuffer(await readBody(req)));
       res.writeHead(200, { "content-type": "application/octet-stream", "content-length": framed.byteLength });
       res.end(Buffer.from(framed.buffer, framed.byteOffset, framed.byteLength));
       return;

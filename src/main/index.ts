@@ -204,6 +204,28 @@ ipcMain.handle("show-directory-dialog", async (_event, options) => {
 
 ipcMain.handle("get-user-data-path", () => app.getPath("userData"));
 
+// Give the renderer a moment to finish its shutdown work (flushing the debounced
+// history manifest, thinning cached audio) before the process goes away. Quit is
+// held once and only briefly: if the renderer doesn't answer, quitting proceeds
+// anyway rather than leaving the app unclosable.
+const QUIT_CLEANUP_TIMEOUT_MS = 3000;
+let quitCleanupRun = false;
+
+app.on("before-quit", (event) => {
+  if (quitCleanupRun || !mainWindow || mainWindow.webContents.isDestroyed()) return;
+  quitCleanupRun = true;
+  event.preventDefault();
+
+  const finish = (): void => {
+    clearTimeout(timer);
+    ipcMain.removeListener("quit-cleanup-done", finish);
+    app.quit();
+  };
+  const timer = setTimeout(finish, QUIT_CLEANUP_TIMEOUT_MS);
+  ipcMain.once("quit-cleanup-done", finish);
+  webContentsSend(mainWindow, "app-will-quit");
+});
+
 app.on("will-quit", async () => {});
 
 app.on("window-all-closed", () => {

@@ -114,11 +114,50 @@ const synthesize: SynthesizeFn = async (
   };
 };
 
+// The undo-history codec runs in the addon, which lives in the Node host — so
+// each operation is a framed round-trip over the same transport the analysis
+// uses, with `op` selecting which one.
+async function historyCodec(
+  op: string,
+  arrays: Record<string, NumericArray>,
+  meta: Record<string, number | string> = {},
+): Promise<{ meta: Record<string, number | string>; arrays: Record<string, NumericArray> }> {
+  const response = await fetch("/history-codec", {
+    method: "POST",
+    body: encodeFrame({ meta: { op, ...meta }, arrays }),
+  });
+  if (!response.ok) {
+    throw new Error(`history codec ${op} failed (${response.status}): ${await response.text()}`);
+  }
+  return decodeFrame(await response.arrayBuffer());
+}
+
+function u8(array: NumericArray | undefined, name: string): Uint8Array {
+  if (array instanceof Uint8Array) return array;
+  throw new Error(`analysis frame: expected Uint8Array for ${name}`);
+}
+
 export function createExtensionAnalysis(): AnalysisApi {
   return {
     analyze,
     analyseBuffer: () => notImplemented("analyseBuffer"),
     synthesize,
+    encodeHistorySnapshot: async (packed) =>
+      u8((await historyCodec("encodeSnapshot", { packed })).arrays.bytes, "bytes"),
+    decodeHistorySnapshot: async (bytes) =>
+      f32((await historyCodec("decodeSnapshot", { bytes })).arrays.packed, "packed"),
+    historyFootprintChanged: async (base, after, ranges) =>
+      Number((await historyCodec("footprintChanged", { base, after, ranges })).meta.changed) === 1,
+    encodeHistoryDelta: async (base, after, ranges) =>
+      u8((await historyCodec("encodeDelta", { base, after, ranges })).arrays.bytes, "bytes"),
+    applyHistoryDelta: async (base, bytes) =>
+      f32((await historyCodec("applyDelta", { base, bytes })).arrays.packed, "packed"),
+    buildHistoryInverseMap: async (bandOffsets, bandLengths, bandStepLog2s, pixelCount) =>
+      f32(
+        (await historyCodec("inverseMap", { bandOffsets, bandLengths, bandStepLog2s }, { pixelCount })).arrays
+          .inverseMap,
+        "inverseMap",
+      ),
     isModelDownloaded: () => notImplemented("isModelDownloaded"),
     downloadModel: () => notImplemented("downloadModel"),
     aiSeparate: () => notImplemented("aiSeparate"),

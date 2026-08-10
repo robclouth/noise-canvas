@@ -152,9 +152,17 @@ export async function encodeBufferToAudioFile(
   //   -ac <ch>   : number of channels
   //   -i pipe:0  : read that raw PCM from stdin
   //
-  // then we pick encoding based on desired format
+  // then we pick encoding based on desired format. WavPack ("wv") is the only
+  // one of these that stores float samples losslessly at less than raw size,
+  // which is what the undo history caches its renders as.
   const codecArgs =
-    format === "wav" ? ["-acodec", "pcm_f32le"] : format === "flac" ? ["-acodec", "flac"] : ["-acodec", "libmp3lame"];
+    format === "wav"
+      ? ["-acodec", "pcm_f32le"]
+      : format === "wv"
+        ? ["-acodec", "wavpack"]
+        : format === "flac"
+          ? ["-acodec", "flac"]
+          : ["-acodec", "libmp3lame"];
 
   // Some containers (mp3, flac) infer format from outputPath extension.
   // For WAV we're good too. So we don't need extra format flags here.

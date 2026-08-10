@@ -145,6 +145,19 @@ declare global {
       ) => Promise<void>;
       decodeAudio: (inputPath: string, sampleRate: number, numChannels: number) => Promise<Float32Array[]>;
       copyAudioFile: (sourcePath: string, destPath: string) => Promise<void>;
+      // Undo-history codec. Each of these walks a packed state, so they run in
+      // the addon off the renderer thread.
+      encodeHistorySnapshot: (packed: Float32Array) => Promise<Uint8Array>;
+      decodeHistorySnapshot: (bytes: Uint8Array) => Promise<Float32Array>;
+      historyFootprintChanged: (base: Float32Array, after: Float32Array, ranges: Uint32Array) => Promise<boolean>;
+      encodeHistoryDelta: (base: Float32Array, after: Float32Array, ranges: Uint32Array) => Promise<Uint8Array>;
+      applyHistoryDelta: (base: Float32Array, bytes: Uint8Array) => Promise<Float32Array>;
+      buildHistoryInverseMap: (
+        bandOffsets: Uint32Array,
+        bandLengths: Uint32Array,
+        bandStepLog2s: Int32Array,
+        pixelCount: number,
+      ) => Promise<Float32Array>;
       init: () => void;
     };
     linkAddon: {

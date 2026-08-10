@@ -9,8 +9,8 @@
 // Sections appear in the byte stream in header order. Bytes are copied out into
 // fresh typed arrays on decode, so no buffer alignment is assumed.
 
-export type NumericArray = Float32Array | Uint32Array | Int32Array;
-type ArrayKind = "f32" | "u32" | "i32";
+export type NumericArray = Float32Array | Uint32Array | Int32Array | Uint8Array;
+type ArrayKind = "f32" | "u32" | "i32" | "u8";
 
 interface SectionHeader {
   name: string;
@@ -39,7 +39,13 @@ function kindOf(array: NumericArray): ArrayKind {
   if (brand === "[object Float32Array]") return "f32";
   if (brand === "[object Uint32Array]") return "u32";
   if (brand === "[object Int32Array]") return "i32";
+  if (brand === "[object Uint8Array]") return "u8";
   throw new Error(`frame: unsupported array type ${brand}`);
+}
+
+// Bytes per element, so a section's byte length follows from its kind.
+function widthOf(kind: ArrayKind): number {
+  return kind === "u8" ? 1 : 4;
 }
 
 function bytesOf(array: NumericArray): Uint8Array {
@@ -51,6 +57,7 @@ function makeArray(kind: ArrayKind, bytes: Uint8Array): NumericArray {
   const copy = bytes.slice();
   if (kind === "f32") return new Float32Array(copy.buffer);
   if (kind === "u32") return new Uint32Array(copy.buffer);
+  if (kind === "u8") return copy;
   return new Int32Array(copy.buffer);
 }
 
@@ -92,6 +99,10 @@ export function asI32(array: NumericArray | undefined, name: string): Int32Array
   if (array instanceof Int32Array) return array;
   throw new Error(`frame: expected Int32Array for ${name}`);
 }
+export function asU8(array: NumericArray | undefined, name: string): Uint8Array {
+  if (array instanceof Uint8Array) return array;
+  throw new Error(`frame: expected Uint8Array for ${name}`);
+}
 
 export function decodeFrame(buffer: ArrayBuffer): Frame {
   const view = new DataView(buffer);
@@ -102,8 +113,7 @@ export function decodeFrame(buffer: ArrayBuffer): Frame {
   const arrays: Record<string, NumericArray> = {};
   let offset = 4 + headerLength;
   for (const section of header.sections) {
-    // f32 / u32 / i32 are all 4 bytes per element.
-    const byteLength = section.length * 4;
+    const byteLength = section.length * widthOf(section.kind);
     const slice = new Uint8Array(buffer, offset, byteLength);
     arrays[section.name] = makeArray(section.kind, slice);
     offset += byteLength;

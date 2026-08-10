@@ -9,6 +9,10 @@ import { ipcSend } from "./ipc";
 const MANIFEST_FILENAME = "tree.json";
 const CHECKPOINT_INTERVAL = 20;
 const AUDIO_LRU_CAPACITY = 50;
+const AUDIO_LRU_BYTES = 512 * 1024 * 1024;
+// WavPack: lossless for the float samples synthesis produces, and about a
+// quarter smaller than the float32 WAV it replaces.
+const AUDIO_CACHE_FORMAT = "wv";
 const MANIFEST_WRITE_DEBOUNCE_MS = 400;
 const PACKED_STATE_CACHE_BYTES = 256 * 1024 * 1024;
 
@@ -38,10 +42,13 @@ export interface HistoryNode {
   kind: HistoryNodeKind;
   storage: "delta" | "packed" | "full";
   dimensions: HistoryDimensions;
+  // Band layout of the analysis this node belongs to. Enough to rebuild the
+  // spectrogram's inverseMap and metadata, which are therefore not stored.
   synthesisMetadata?: {
     bandOffsets: number[];
     bandStepLog2s: number[];
     bandLengths: number[];
+    bandFreqs: number[];
   };
   audioPeak?: number;
   audioCached?: boolean;
@@ -51,7 +58,7 @@ export interface HistoryNode {
   favorited?: boolean;
 }
 
-const HISTORY_MANIFEST_VERSION = 3;
+const HISTORY_MANIFEST_VERSION = 4;
 
 interface HistoryManifest {
   version: typeof HISTORY_MANIFEST_VERSION;
@@ -64,78 +71,18 @@ interface HistoryManifest {
   nodes: Record<string, HistoryNode>;
 }
 
-// --- Pure codec ---
-
 /**
- * Footprint delta codec. A stroke changes only the pixels under the brush, given
+ * Storage of a stroke. A stroke changes only the pixels under the brush, given
  * as packed-pixel ranges — one contiguous range per frequency band, because the
  * packed texture stores each band's time-series at its own offset, so a single
- * time-window spans many disjoint ranges. The delta holds the after-values for
- * those pixels; reconstruction overwrites the base with them, which is exact (no
- * additive drift — see PackedStateCache).
+ * time-window spans many disjoint ranges.
  *
- * `ranges` is a flat [pixelStart, pixelCount, ...] list; `patch` holds the RGBA
- * values for those pixels concatenated in range order.
+ * A stroke is stored as the difference from the state it was painted onto, and
+ * the packed states themselves are reordered before compression. Both passes
+ * walk buffers that reach hundreds of megabytes on a multi-minute file, so both
+ * live in the addon (see host.analysis) and run off the renderer thread; the
+ * codec is exactly lossless, so repeated undo/redo never drifts.
  */
-
-// True if any pixel inside the footprint ranges differs between before/after.
-export function footprintChanged(before: Float32Array, after: Float32Array, ranges: Uint32Array): boolean {
-  for (let r = 0; r < ranges.length; r += 2) {
-    const start = ranges[r] * 4;
-    const end = start + ranges[r + 1] * 4;
-    for (let i = start; i < end; i++) {
-      if (before[i] !== after[i]) return true;
-    }
-  }
-  return false;
-}
-
-// Reconstruct `after` from `base` by overwriting the footprint ranges with the
-// stored values. Lossless: stored values are exact, so repeated round-trips
-// never drift.
-export function applyFootprintDelta(base: Float32Array, ranges: Uint32Array, patch: Float32Array): Float32Array {
-  const out = new Float32Array(base);
-  let p = 0;
-  for (let r = 0; r < ranges.length; r += 2) {
-    const start = ranges[r] * 4;
-    const count = ranges[r + 1] * 4;
-    out.set(patch.subarray(p, p + count), start);
-    p += count;
-  }
-  return out;
-}
-
-// Build the on-disk delta directly from the source FBO buffer. Layout:
-// [u32 numRanges][u32 ranges...][f32 patch], packed into one buffer so a single
-// zstd blob carries both the ranges and their values. The footprint after-values
-// are copied straight from `after` into the patch region in a single pass.
-export function encodeFootprintDelta(after: Float32Array, ranges: Uint32Array): Uint8Array {
-  let total = 0;
-  for (let r = 1; r < ranges.length; r += 2) total += ranges[r] * 4;
-  const headerBytes = 4 + ranges.byteLength;
-  const buf = new ArrayBuffer(headerBytes + total * 4);
-  new DataView(buf).setUint32(0, ranges.length / 2, true);
-  new Uint32Array(buf, 4, ranges.length).set(ranges);
-  const patch = new Float32Array(buf, headerBytes, total);
-  let p = 0;
-  for (let r = 0; r < ranges.length; r += 2) {
-    const start = ranges[r] * 4;
-    const count = ranges[r + 1] * 4;
-    patch.set(after.subarray(start, start + count), p);
-    p += count;
-  }
-  return new Uint8Array(buf);
-}
-
-export function decodeFootprintDelta(bytes: Uint8Array): { ranges: Uint32Array; patch: Float32Array } {
-  // Copy into a fresh 4-byte-aligned buffer so the typed-array views are valid
-  // regardless of the decompressed buffer's byte offset.
-  const buf = bytes.slice().buffer;
-  const numRanges = new DataView(buf).getUint32(0, true);
-  const ranges = new Uint32Array(buf, 4, numRanges * 2);
-  const patch = new Float32Array(buf, 4 + numRanges * 8);
-  return { ranges, patch };
-}
 
 /**
  * Bounded LRU of canonical packed FBO states keyed by history node id. Holds the
@@ -240,15 +187,61 @@ async function readFloat32Compressed(filePath: string): Promise<Float32Array> {
   return new Float32Array(out.buffer, out.byteOffset, out.byteLength / 4);
 }
 
-async function writeBytesCompressed(filePath: string, bytes: Uint8Array): Promise<void> {
-  const compressed = await zstdCompress(bytes);
-  await host.fs.writeFile(filePath, Buffer.from(compressed));
+// Packed FBO data is reordered and compressed by the addon, off this thread.
+async function writePackedCompressed(filePath: string, arr: Float32Array): Promise<void> {
+  const blob = await host.analysis.encodeHistorySnapshot(arr);
+  await host.fs.writeFile(filePath, Buffer.from(blob));
 }
 
-async function readBytesCompressed(filePath: string): Promise<Uint8Array> {
+async function readPackedCompressed(filePath: string): Promise<Float32Array> {
   const buf = await host.fs.readFile(filePath);
-  const bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-  return await zstdDecompress(bytes);
+  return await host.analysis.decodeHistorySnapshot(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength));
+}
+
+// The band layout the analysis produced. bandFreqs is only carried in the
+// metadata texture (one float per band), so it is read back out of there.
+function synthesisMetadataFromSpectrogram(s: SpectrogramData): NonNullable<HistoryNode["synthesisMetadata"]> {
+  const bandFreqs: number[] = [];
+  for (let b = 0; b < s.numBands; b++) bandFreqs.push(s.metadata[b * 4 + 3]);
+  return {
+    bandOffsets: Array.from(s.synthesisMetadata.bandOffsets),
+    bandStepLog2s: Array.from(s.synthesisMetadata.bandStepLog2s),
+    bandLengths: Array.from(s.synthesisMetadata.bandLengths),
+    bandFreqs,
+  };
+}
+
+/**
+ * Rebuild a full snapshot's inverseMap and metadata textures from its band
+ * layout. Both are pure functions of that layout — the analysis writes the same
+ * values every time — so storing them alongside every full snapshot would cost
+ * half a megabyte to save a loop that runs in a few milliseconds.
+ */
+export async function deriveSideData(node: HistoryNode): Promise<{
+  inverseMap: Float32Array;
+  metadata: Float32Array;
+}> {
+  const { textureWidth, textureHeight, numBands } = node.dimensions;
+  const layout = node.synthesisMetadata;
+  if (!layout) throw new Error(`HistoryManager: node ${node.id} has no band layout`);
+
+  // The inverse map has an entry per packed pixel, so the addon fills it; the
+  // metadata texture is four floats per band and stays here.
+  const inverseMap = await host.analysis.buildHistoryInverseMap(
+    new Uint32Array(layout.bandOffsets),
+    new Uint32Array(layout.bandLengths),
+    new Int32Array(layout.bandStepLog2s),
+    textureWidth * textureHeight,
+  );
+
+  const metadata = new Float32Array(numBands * 4);
+  for (let band = 0; band < numBands; band++) {
+    metadata[band * 4] = layout.bandOffsets[band];
+    metadata[band * 4 + 1] = layout.bandLengths[band];
+    metadata[band * 4 + 2] = layout.bandStepLog2s[band];
+    metadata[band * 4 + 3] = layout.bandFreqs[band];
+  }
+  return { inverseMap, metadata };
 }
 
 function dimensionsFromSpectrogram(s: SpectrogramData): HistoryDimensions {
@@ -291,6 +284,8 @@ export class HistoryManager {
   private initPromise: Promise<void> | null = null;
   private currentPacked: Float32Array | null = null;
   private audioLru: string[] = [];
+  // On-disk size of each cached render, for the audio LRU's byte budget.
+  private audioBytes = new Map<string, number>();
   // ID of the full-snapshot node whose spectrogramData (inverseMap, metadata,
   // dimensions) currently reflects on the file. Used to avoid a redundant
   // reloadTextures() when navigating among nodes that share an anchor — which
@@ -505,17 +500,23 @@ export class HistoryManager {
   private deltaPath(dir: string, nodeId: string): string {
     return host.path.join(dir, `${nodeId}.delta.zst`);
   }
-  private inverseMapPath(dir: string, nodeId: string): string {
-    return host.path.join(dir, `${nodeId}.inverse.zst`);
-  }
-  private metadataPath(dir: string, nodeId: string): string {
-    return host.path.join(dir, `${nodeId}.meta.zst`);
-  }
+  // WavPack rather than WAV: lossless for float samples, roughly a quarter
+  // smaller, and ffmpeg both ends of the trip.
   private audioPath(dir: string, nodeId: string): string {
-    return host.path.join(dir, `${nodeId}.wav`);
+    return host.path.join(dir, `${nodeId}.wv`);
   }
   private onsetsPath(dir: string, nodeId: string): string {
     return host.path.join(dir, `${nodeId}.onsets.zst`);
+  }
+
+  // Every file a node can own on disk, for the paths that delete one.
+  private nodeFilePaths(dir: string, nodeId: string): string[] {
+    return [
+      this.packedPath(dir, nodeId),
+      this.deltaPath(dir, nodeId),
+      this.audioPath(dir, nodeId),
+      this.onsetsPath(dir, nodeId),
+    ];
   }
 
   /**
@@ -573,14 +574,10 @@ export class HistoryManager {
       kind: opts.kind,
       storage: "full",
       dimensions: dimensionsFromSpectrogram(opts.spectrogram),
-      synthesisMetadata: {
-        bandOffsets: Array.from(opts.spectrogram.synthesisMetadata.bandOffsets),
-        bandStepLog2s: Array.from(opts.spectrogram.synthesisMetadata.bandStepLog2s),
-        bandLengths: Array.from(opts.spectrogram.synthesisMetadata.bandLengths),
-      },
+      synthesisMetadata: synthesisMetadataFromSpectrogram(opts.spectrogram),
     };
     this.manifest = { version: HISTORY_MANIFEST_VERSION, rootId: id, currentId: id, nodes: { [id]: node } };
-    await this.writeFullSnapshot(id, opts.data, opts.spectrogram);
+    await this.writeFullSnapshot(id, opts.data);
     await this.writeManifest();
     this.currentPacked = new Float32Array(opts.data);
     this.packedCache.set(id, this.currentPacked);
@@ -608,14 +605,10 @@ export class HistoryManager {
       kind: opts.kind,
       storage: "full",
       dimensions: dimensionsFromSpectrogram(opts.spectrogram),
-      synthesisMetadata: {
-        bandOffsets: Array.from(opts.spectrogram.synthesisMetadata.bandOffsets),
-        bandStepLog2s: Array.from(opts.spectrogram.synthesisMetadata.bandStepLog2s),
-        bandLengths: Array.from(opts.spectrogram.synthesisMetadata.bandLengths),
-      },
+      synthesisMetadata: synthesisMetadataFromSpectrogram(opts.spectrogram),
     };
 
-    await this.writeFullSnapshot(id, opts.data, opts.spectrogram);
+    await this.writeFullSnapshot(id, opts.data);
     this.linkChild(parentId, id);
     this.manifest.nodes[id] = node;
     this.manifest.currentId = id;
@@ -661,7 +654,7 @@ export class HistoryManager {
       footprintPixels < texturePixels * 0.5
     ) {
       const deltaStart = performance.now();
-      if (!footprintChanged(base, opts.data, ranges)) {
+      if (!(await host.analysis.historyFootprintChanged(base, opts.data, ranges))) {
         return parentId;
       }
       const stepsSinceSnap = this.deltaStepsSinceLastSnap(parentId);
@@ -669,7 +662,7 @@ export class HistoryManager {
         storage = "packed";
       } else {
         storage = "delta";
-        deltaBytes = encodeFootprintDelta(opts.data, ranges);
+        deltaBytes = await host.analysis.encodeHistoryDelta(base, opts.data, ranges);
       }
       console.log(
         `[timing] addStroke: footprint delta ${(performance.now() - deltaStart).toFixed(1)}ms ` +
@@ -693,9 +686,9 @@ export class HistoryManager {
 
     const dir = await this.ensureDir();
     if (storage === "delta" && deltaBytes) {
-      await writeBytesCompressed(this.deltaPath(dir, id), deltaBytes);
+      await host.fs.writeFile(this.deltaPath(dir, id), Buffer.from(deltaBytes));
     } else {
-      await writeFloat32Compressed(this.packedPath(dir, id), opts.data);
+      await writePackedCompressed(this.packedPath(dir, id), opts.data);
     }
 
     this.linkChild(parentId, id);
@@ -734,49 +727,9 @@ export class HistoryManager {
 
   // ---------- Full-snapshot I/O ----------
 
-  private async writeFullSnapshot(nodeId: string, packed: Float32Array, s: SpectrogramData): Promise<void> {
-    await this.writeFullSnapshotParts(nodeId, packed, s.inverseMap, s.metadata);
-  }
-
-  private async writeFullSnapshotParts(
-    nodeId: string,
-    packed: Float32Array,
-    inverseMap: Float32Array,
-    metadata: Float32Array,
-  ): Promise<void> {
+  private async writeFullSnapshot(nodeId: string, packed: Float32Array): Promise<void> {
     const dir = await this.ensureDir();
-    await writeFloat32Compressed(this.packedPath(dir, nodeId), packed);
-    await writeFloat32Compressed(this.inverseMapPath(dir, nodeId), inverseMap);
-    await writeFloat32Compressed(this.metadataPath(dir, nodeId), metadata);
-  }
-
-  private async readFullSnapshot(node: HistoryNode): Promise<{
-    packedData: Float32Array;
-    inverseMap: Float32Array;
-    metadata: Float32Array;
-  }> {
-    const dir = await this.dir;
-    const [packedData, inverseMap, metadata] = await Promise.all([
-      readFloat32Compressed(this.packedPath(dir, node.id)),
-      readFloat32Compressed(this.inverseMapPath(dir, node.id)),
-      readFloat32Compressed(this.metadataPath(dir, node.id)),
-    ]);
-    return { packedData, inverseMap, metadata };
-  }
-
-  // Read just the side-data of a full snapshot (inverseMap + metadata), without
-  // the packed FBO data. Used by loadSpectrogramAtCurrent so it doesn't redo
-  // work that reconstruct() has already done for the anchor.
-  private async readFullSnapshotSideData(node: HistoryNode): Promise<{
-    inverseMap: Float32Array;
-    metadata: Float32Array;
-  }> {
-    const dir = await this.dir;
-    const [inverseMap, metadata] = await Promise.all([
-      readFloat32Compressed(this.inverseMapPath(dir, node.id)),
-      readFloat32Compressed(this.metadataPath(dir, node.id)),
-    ]);
-    return { inverseMap, metadata };
+    await writePackedCompressed(this.packedPath(dir, nodeId), packed);
   }
 
   // ---------- Reconstruction ----------
@@ -805,15 +758,18 @@ export class HistoryManager {
 
     const anchor = chain[0];
     const dir = await this.dir;
-    let packed = await readFloat32Compressed(this.packedPath(dir, anchor.id));
+    let packed = await readPackedCompressed(this.packedPath(dir, anchor.id));
 
     for (let i = 1; i < chain.length; i++) {
       const n = chain[i];
       if (n.storage === "delta") {
-        const { ranges, patch } = decodeFootprintDelta(await readBytesCompressed(this.deltaPath(dir, n.id)));
-        packed = applyFootprintDelta(packed, ranges, patch);
+        const buf = await host.fs.readFile(this.deltaPath(dir, n.id));
+        packed = await host.analysis.applyHistoryDelta(
+          packed,
+          new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength),
+        );
       } else if (n.storage === "packed") {
-        packed = await readFloat32Compressed(this.packedPath(dir, n.id));
+        packed = await readPackedCompressed(this.packedPath(dir, n.id));
       } else {
         throw new Error(`HistoryManager: unexpected storage in reconstruct: ${n.storage}`);
       }
@@ -859,13 +815,13 @@ export class HistoryManager {
     if (!this.manifest.nodes[targetId]) return null;
 
     // reconstruct() walks back to the nearest full anchor and reads its packed
-    // data once, then applies deltas forward. We piggyback on that walk to
-    // know the anchor identity, and only fetch its side data (inverseMap +
-    // metadata) — which reconstruct doesn't need but spectrogramData does.
+    // data once, then applies deltas forward. We piggyback on that walk to know
+    // the anchor identity, and rebuild its side data (inverseMap + metadata) —
+    // which reconstruct doesn't need but spectrogramData does.
     const { packedData, fullAnchor } = await this.reconstruct(targetId);
     if (!fullAnchor || !fullAnchor.synthesisMetadata) return null;
 
-    const { inverseMap, metadata } = await this.readFullSnapshotSideData(fullAnchor);
+    const { inverseMap, metadata } = await deriveSideData(fullAnchor);
     this.currentPacked = new Float32Array(packedData);
 
     const dims = fullAnchor.dimensions;
@@ -1011,7 +967,7 @@ export class HistoryManager {
   private async restoreSpectrogramFromFull(anchor: HistoryNode, packedData: Float32Array): Promise<void> {
     const file = openFiles[this.fileId];
     if (!file?.rendererRef?.current) return;
-    const { inverseMap, metadata } = await this.readFullSnapshot(anchor);
+    const { inverseMap, metadata } = await deriveSideData(anchor);
     const dims = anchor.dimensions;
     const synthMeta = anchor.synthesisMetadata!;
     const spectrogramData: SpectrogramData = {
@@ -1053,13 +1009,19 @@ export class HistoryManager {
     }
     const path = this.audioPath(dir, nodeId);
     try {
-      await host.analysis.exportAudio(channels, path, audioBuffer.sampleRate, "wav");
+      await host.analysis.exportAudio(channels, path, audioBuffer.sampleRate, AUDIO_CACHE_FORMAT);
     } catch (err) {
       console.error("history: failed to cache audio", err);
       return;
     }
     node.audioCached = true;
     node.audioPeak = peak;
+    try {
+      const stat = await host.fs.stat(path);
+      this.audioBytes.set(nodeId, Number(stat.size));
+    } catch {
+      // Size unknown — the count cap still bounds this entry.
+    }
     this.touchAudioLru(nodeId);
     await this.enforceAudioLru();
     await this.writeManifest();
@@ -1070,17 +1032,52 @@ export class HistoryManager {
     this.audioLru = [nodeId, ...this.audioLru.filter((id) => id !== nodeId)];
   }
 
+  private cachedAudioBytes(): number {
+    let total = 0;
+    for (const id of this.audioLru) total += this.audioBytes.get(id) ?? 0;
+    return total;
+  }
+
+  // Bounded by both a count and a byte budget: one cached render of a short file
+  // is a couple of megabytes, but of a ten-minute stereo file it is over a
+  // hundred, so a count alone lets the cache run to gigabytes.
   private async enforceAudioLru(): Promise<void> {
     if (!this.manifest) return;
-    while (this.audioLru.length > AUDIO_LRU_CAPACITY) {
+    while (
+      this.audioLru.length > AUDIO_LRU_CAPACITY ||
+      (this.audioLru.length > 1 && this.cachedAudioBytes() > AUDIO_LRU_BYTES)
+    ) {
       const evict = this.audioLru.pop();
       if (!evict) break;
+      this.audioBytes.delete(evict);
       const node = this.manifest.nodes[evict];
       if (!node || !node.audioCached) continue;
       const dir = await this.dir;
       host.fs.rm(this.audioPath(dir, evict)).catch(() => {});
       node.audioCached = false;
     }
+  }
+
+  /**
+   * Drop cached audio for every node except the current one, the last-saved one,
+   * and any the user favorited. Called when the app is closing: the renders are
+   * only a shortcut past re-synthesis, and keeping fifty of them on disk between
+   * sessions costs far more than regenerating the one or two that get revisited.
+   */
+  async pruneAudioCache(): Promise<void> {
+    if (!this.manifest) return;
+    const keep = new Set<string>([this.manifest.currentId, this.manifest.savedNodeId ?? this.manifest.rootId]);
+    const dir = await this.dir;
+    let changed = false;
+    for (const node of Object.values(this.manifest.nodes)) {
+      if (!node.audioCached || keep.has(node.id) || node.favorited) continue;
+      await host.fs.rm(this.audioPath(dir, node.id)).catch(() => {});
+      node.audioCached = false;
+      this.audioBytes.delete(node.id);
+      changed = true;
+    }
+    this.audioLru = this.audioLru.filter((id) => this.manifest?.nodes[id]?.audioCached);
+    if (changed) await this.writeManifest();
   }
 
   // ---------- Metadata ----------
@@ -1124,16 +1121,9 @@ export class HistoryManager {
     }
 
     for (const id of toDelete) {
-      const files = [
-        this.packedPath(dir, id),
-        this.deltaPath(dir, id),
-        this.inverseMapPath(dir, id),
-        this.metadataPath(dir, id),
-        this.audioPath(dir, id),
-        this.onsetsPath(dir, id),
-      ];
-      for (const f of files) host.fs.rm(f).catch(() => {});
+      for (const f of this.nodeFilePaths(dir, id)) host.fs.rm(f).catch(() => {});
       this.packedCache.delete(id);
+      this.audioBytes.delete(id);
       delete this.manifest.nodes[id];
     }
 
@@ -1207,16 +1197,22 @@ export class HistoryManager {
     const target = this.manifest.nodes[nodeId];
     if (!target) return false;
 
-    // Fast path: if the node has a cached WAV on disk, copy it directly.
+    // Fast path: transcode the node's cached render rather than synthesizing it
+    // again. Still far cheaper than a full re-synthesis, but unlike the WAV
+    // cache this replaced, the cached file isn't the export format.
     if (target.audioCached) {
       const dir = await this.dir;
       const cached = this.audioPath(dir, nodeId);
       try {
-        await host.analysis.copyAudioFile(cached, outputPath);
-        return true;
+        const dims = target.dimensions;
+        const channels = await host.analysis.decodeAudio(cached, dims.sampleRate, dims.numChannels);
+        if (channels.length && channels[0].length) {
+          await host.analysis.exportAudio(channels, outputPath, dims.sampleRate, "wav");
+          return true;
+        }
       } catch {
-        // Cached copy failed (file evicted or permission issue) — fall through
-        // to re-synthesis without mutating the manifest.
+        // Cached render unusable (evicted or permission issue) — fall through to
+        // re-synthesis without mutating the manifest.
       }
     }
 
@@ -1259,12 +1255,11 @@ export class HistoryManager {
     const current = this.manifest.nodes[currentId];
     if (!current) return;
 
-    // The current state's dimension side-data (inverseMap/metadata/synthesis
-    // metadata) lives on its nearest full-snapshot ancestor; capture it before
-    // the ancestors are deleted below.
+    // The current state's band layout lives on its nearest full-snapshot
+    // ancestor; capture it before the ancestors are deleted below.
     const anchor = this.nearestFullAnchor(currentId);
     if (!anchor?.synthesisMetadata) return;
-    const { inverseMap, metadata } = await this.readFullSnapshotSideData(anchor);
+    const layout = anchor.synthesisMetadata;
     const packed = this.currentPacked ?? (await this.reconstruct(currentId)).packedData;
 
     // Drop any pending debounced write — the tree is about to be rewritten.
@@ -1279,32 +1274,25 @@ export class HistoryManager {
     // kept because its id is preserved as the new root.
     for (const id of Object.keys(this.manifest.nodes)) {
       if (id === currentId) continue;
-      for (const f of [
-        this.packedPath(dir, id),
-        this.deltaPath(dir, id),
-        this.inverseMapPath(dir, id),
-        this.metadataPath(dir, id),
-        this.audioPath(dir, id),
-        this.onsetsPath(dir, id),
-      ]) {
-        host.fs.rm(f).catch(() => {});
-      }
+      for (const f of this.nodeFilePaths(dir, id)) host.fs.rm(f).catch(() => {});
       this.packedCache.delete(id);
+      this.audioBytes.delete(id);
     }
 
     // Rewrite the current node as a standalone full snapshot so it can be the
     // root with no ancestors left to reconstruct from.
     host.fs.rm(this.deltaPath(dir, currentId)).catch(() => {});
-    await this.writeFullSnapshotParts(currentId, packed, inverseMap, metadata);
+    await this.writeFullSnapshot(currentId, packed);
 
     current.parentId = null;
     current.childIds = [];
     current.lastChildId = null;
     current.storage = "full";
     current.synthesisMetadata = {
-      bandOffsets: Array.from(anchor.synthesisMetadata.bandOffsets),
-      bandStepLog2s: Array.from(anchor.synthesisMetadata.bandStepLog2s),
-      bandLengths: Array.from(anchor.synthesisMetadata.bandLengths),
+      bandOffsets: [...layout.bandOffsets],
+      bandStepLog2s: [...layout.bandStepLog2s],
+      bandLengths: [...layout.bandLengths],
+      bandFreqs: [...layout.bandFreqs],
     };
 
     this.manifest.rootId = currentId;
@@ -1344,6 +1332,7 @@ export class HistoryManager {
     this.currentPacked = null;
     this.packedCache.clear();
     this.audioLru = [];
+    this.audioBytes.clear();
     this.lastLoadedAnchorId = null;
     this.notifyStateChange();
   }
@@ -1361,6 +1350,7 @@ export class HistoryManager {
     this.currentPacked = null;
     this.packedCache.clear();
     this.audioLru = [];
+    this.audioBytes.clear();
     this.lastLoadedAnchorId = null;
     this.listeners.clear();
   }
@@ -1389,11 +1379,22 @@ export async function destroyHistoryManager(fileId: string): Promise<void> {
 }
 
 /**
- * Called on app quit — drops in-memory state only. On-disk history is preserved.
+ * Called on app quit — thins each tree's cached audio down to the states worth
+ * keeping, then drops in-memory state. On-disk history is preserved.
  */
-export function clearAllHistoryManagers(): void {
-  for (const m of managers.values()) m.dispose();
+export async function clearAllHistoryManagers(): Promise<void> {
+  const open = [...managers.values()];
   managers.clear();
+  await Promise.all(
+    open.map(async (m) => {
+      try {
+        await m.pruneAudioCache();
+      } catch (err) {
+        console.error("history: pruning cached audio failed", err);
+      }
+      m.dispose();
+    }),
+  );
 }
 
 /**

@@ -31,103 +31,8 @@ vi.mock("@renderer/store/files", () => ({ openFiles: fakeOpenFiles }));
 // Silence the renderer→main menu-state IPC the manager fires on every change.
 vi.mock("../ipc", () => ({ ipcSend: vi.fn() }));
 
-import {
-  applyFootprintDelta,
-  clearAllHistoryManagers,
-  decodeFootprintDelta,
-  encodeFootprintDelta,
-  footprintChanged,
-  getHistoryManager,
-  PackedStateCache,
-} from "../history-manager";
+import { clearAllHistoryManagers, getHistoryManager, PackedStateCache } from "../history-manager";
 import type { SpectrogramData } from "../../store/types";
-
-function makeRGBA(width: number, height: number, fill: number): Float32Array {
-  const arr = new Float32Array(width * height * 4);
-  for (let i = 0; i < arr.length; i++) arr[i] = fill;
-  return arr;
-}
-
-describe("history-manager codec", () => {
-  // Flat [start, count, ...] range list from [start, count] pairs.
-  const ranges = (...rs: Array<[number, number]>): Uint32Array => new Uint32Array(rs.flat());
-
-  describe("footprintChanged", () => {
-    it("is false when the footprint pixels are identical", () => {
-      const before = makeRGBA(8, 4, 0.25);
-      const after = new Float32Array(before);
-      expect(footprintChanged(before, after, ranges([0, 32]))).toBe(false);
-    });
-
-    it("is true when any channel inside the footprint differs", () => {
-      const before = makeRGBA(8, 4, 0);
-      const after = new Float32Array(before);
-      after[5 * 4 + 3] = 9; // alpha of pixel 5
-      expect(footprintChanged(before, after, ranges([4, 4]))).toBe(true); // pixels 4..7
-    });
-
-    it("ignores changes outside the footprint ranges", () => {
-      const before = makeRGBA(8, 4, 0);
-      const after = new Float32Array(before);
-      after[20 * 4] = 1; // pixel 20, outside the range below
-      expect(footprintChanged(before, after, ranges([0, 8]))).toBe(false);
-    });
-  });
-
-  describe("encodeFootprintDelta / applyFootprintDelta", () => {
-    it("round-trips after over the footprint", () => {
-      const w = 10,
-        h = 6;
-      const before = new Float32Array(w * h * 4);
-      for (let i = 0; i < before.length; i++) before[i] = (i % 13) * 0.1;
-      const after = new Float32Array(before);
-      for (let p = 12; p < 18; p++) for (let c = 0; c < 4; c++) after[p * 4 + c] = p + c;
-      for (let p = 40; p < 45; p++) for (let c = 0; c < 4; c++) after[p * 4 + c] = p * 2 + c;
-      const rs = ranges([12, 6], [40, 5]);
-      const { ranges: dr, patch } = decodeFootprintDelta(encodeFootprintDelta(after, rs));
-      const out = applyFootprintDelta(before, dr, patch);
-      expect(Array.from(out)).toEqual(Array.from(after));
-    });
-
-    it("leaves pixels outside the ranges untouched", () => {
-      const before = makeRGBA(8, 4, 0.5);
-      const after = new Float32Array(before);
-      after[2 * 4] = 7;
-      const rs = ranges([2, 1]);
-      const { ranges: dr, patch } = decodeFootprintDelta(encodeFootprintDelta(after, rs));
-      const out = applyFootprintDelta(before, dr, patch);
-      expect(out[2 * 4]).toBe(7);
-      expect(out[20 * 4]).toBe(0.5);
-    });
-
-    it("overwrites with exact values, lossless across repeated round-trips", () => {
-      // Values like p/97 aren't exactly representable; an additive delta would
-      // drift, an overwrite delta must not.
-      const before = new Float32Array(64 * 4);
-      for (let i = 0; i < before.length; i++) before[i] = (i % 97) / 97;
-      const after = new Float32Array(before);
-      for (let p = 10; p < 20; p++) for (let c = 0; c < 4; c++) after[p * 4 + c] = ((p * 7 + c) % 91) / 91;
-      const rs = ranges([10, 10]);
-      const { ranges: dr, patch } = decodeFootprintDelta(encodeFootprintDelta(after, rs));
-      let state: Float32Array = before;
-      for (let i = 0; i < 5; i++) state = applyFootprintDelta(state, dr, patch);
-      expect(Array.from(state)).toEqual(Array.from(after));
-    });
-  });
-
-  describe("encodeFootprintDelta / decodeFootprintDelta", () => {
-    it("round-trips ranges and the footprint values through the binary layout", () => {
-      const rs = ranges([3, 2], [40, 5], [100, 1]);
-      const before = new Float32Array(200 * 4);
-      const after = new Float32Array(before);
-      for (let r = 0; r < rs.length; r += 2)
-        for (let p = rs[r]; p < rs[r] + rs[r + 1]; p++) for (let c = 0; c < 4; c++) after[p * 4 + c] = p * 4 + c + 1;
-      const { ranges: outRanges, patch } = decodeFootprintDelta(encodeFootprintDelta(after, rs));
-      expect(Array.from(outRanges)).toEqual(Array.from(rs));
-      expect(Array.from(applyFootprintDelta(before, outRanges, patch))).toEqual(Array.from(after));
-    });
-  });
-});
 
 describe("PackedStateCache", () => {
   const a = new Float32Array([1, 2, 3, 4]); // 16 bytes each
@@ -180,10 +85,61 @@ describe("PackedStateCache", () => {
   });
 });
 
+/**
+ * Stand-in for the addon's history codec, which is native and so unavailable in
+ * the browser test environment. It is deliberately the simplest thing that round-
+ * trips — no reordering, deltas as plain footprint copies — because what these
+ * tests check is the manager's plumbing: that each node is rebuilt from the right
+ * base, off the right file. The real codec's losslessness is covered against the
+ * addon itself in src/main/lib/__tests__/history-codec.test.ts.
+ */
+function fakeHistoryCodec(): Record<string, unknown> {
+  const bytesOf = (a: Float32Array): Uint8Array => new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
+  const footprint = (ranges: Uint32Array): number[] => {
+    const indices: number[] = [];
+    for (let r = 0; r < ranges.length; r += 2) {
+      for (let p = ranges[r]; p < ranges[r] + ranges[r + 1]; p++) {
+        for (let c = 0; c < 4; c++) indices.push(p * 4 + c);
+      }
+    }
+    return indices;
+  };
+
+  return {
+    encodeHistorySnapshot: async (packed: Float32Array) => new Uint8Array(bytesOf(packed)),
+    decodeHistorySnapshot: async (bytes: Uint8Array) => new Float32Array(bytes.slice().buffer),
+    historyFootprintChanged: async (base: Float32Array, after: Float32Array, ranges: Uint32Array) =>
+      footprint(ranges).some((i) => base[i] !== after[i]),
+    encodeHistoryDelta: async (_base: Float32Array, after: Float32Array, ranges: Uint32Array) => {
+      const indices = footprint(ranges);
+      const out = new Float32Array(1 + ranges.length + indices.length);
+      out[0] = ranges.length;
+      out.set(ranges, 1);
+      indices.forEach((src, i) => (out[1 + ranges.length + i] = after[src]));
+      return new Uint8Array(bytesOf(out));
+    },
+    applyHistoryDelta: async (base: Float32Array, bytes: Uint8Array) => {
+      const blob = new Float32Array(bytes.slice().buffer);
+      const rangeCount = blob[0];
+      const ranges = new Uint32Array(Array.from(blob.subarray(1, 1 + rangeCount)));
+      const values = blob.subarray(1 + rangeCount);
+      const out = new Float32Array(base);
+      footprint(ranges).forEach((dst, i) => (out[dst] = values[i]));
+      return out;
+    },
+    buildHistoryInverseMap: async (
+      _bandOffsets: Uint32Array,
+      _bandLengths: Uint32Array,
+      _bandStepLog2s: Int32Array,
+      pixelCount: number,
+    ) => new Float32Array(pixelCount * 2),
+  };
+}
+
 // In-memory window.* shims so the real HistoryManager runs in the browser test
 // environment. zstd is faked as identity (byte-preserving) so reconstruction is
 // exercised without a native codec; the fs is a path→value map.
-function installManagerEnv(): { fbo: { last: Float32Array | null } } {
+function installManagerEnv(): { fbo: { last: Float32Array | null }; files: Map<string, string | Uint8Array> } {
   // history-manager wraps payloads in Node's Buffer; the browser test runtime
   // has no Buffer, so stand in a byte-compatible Uint8Array factory.
   const g = globalThis as unknown as { Buffer?: unknown };
@@ -207,6 +163,7 @@ function installManagerEnv(): { fbo: { last: Float32Array | null } } {
     zstdCompress: (buf: Uint8Array, cb: (e: Error | null, out: Uint8Array) => void) => cb(null, new Uint8Array(buf)),
     zstdDecompress: (buf: Uint8Array, cb: (e: Error | null, out: Uint8Array) => void) => cb(null, new Uint8Array(buf)),
   };
+  w.audioAnalysis = fakeHistoryCodec();
   w.nodeFs = {
     mkdir: vi.fn(async () => undefined),
     writeFile: vi.fn(async (path: string, data: string | Uint8Array) => {
@@ -229,16 +186,35 @@ function installManagerEnv(): { fbo: { last: Float32Array | null } } {
     spectrogramData: {},
     rendererRef: { current: { setFBOData: (d: Float32Array) => (fbo.last = d), reloadTextures: vi.fn() } },
   };
-  return { fbo };
+  return { fbo, files: store };
 }
 
-// A spectrogram whose packed data we control; side-data is unused by within-
-// analysis navigation but required by addRootSnapshot.
+// A spectrogram whose packed data we control, laid out one band per texture row
+// so its band layout and metadata are self-consistent — the manager rebuilds
+// both from the manifest, so a nonsense layout wouldn't exercise that.
 function makeSpectrogram(packed: Float32Array, w: number, h: number): SpectrogramData {
+  const bandOffsets = new Uint32Array(h);
+  const bandLengths = new Uint32Array(h);
+  const bandStepLog2s = new Int32Array(h);
+  const metadata = new Float32Array(h * 4);
+  const inverseMap = new Float32Array(w * h * 2);
+  for (let band = 0; band < h; band++) {
+    bandOffsets[band] = band * w;
+    bandLengths[band] = w;
+    bandStepLog2s[band] = 0;
+    metadata[band * 4] = band * w;
+    metadata[band * 4 + 1] = w;
+    metadata[band * 4 + 2] = 0;
+    metadata[band * 4 + 3] = 100 * (band + 1);
+    for (let i = 0; i < w; i++) {
+      inverseMap[(band * w + i) * 2] = i;
+      inverseMap[(band * w + i) * 2 + 1] = band;
+    }
+  }
   return {
     packedData: packed,
-    inverseMap: new Float32Array(4),
-    metadata: new Float32Array(4),
+    inverseMap,
+    metadata,
     textureWidth: w,
     textureHeight: h,
     numFrames: w,
@@ -248,11 +224,7 @@ function makeSpectrogram(packed: Float32Array, w: number, h: number): Spectrogra
     minFreq: 20,
     bandsPerOctave: 12,
     packedTextureSize: { x: w, y: h },
-    synthesisMetadata: {
-      bandOffsets: new Uint32Array([0]),
-      bandStepLog2s: new Int32Array([0]),
-      bandLengths: new Uint32Array([h]),
-    },
+    synthesisMetadata: { bandOffsets, bandStepLog2s, bandLengths },
   } as unknown as SpectrogramData;
 }
 
@@ -338,6 +310,91 @@ describe("HistoryManager undo/redo round-trip", () => {
     await fresh.initialize();
     const { packedData } = await fresh.reconstruct(nodeId);
     expect(Array.from(packedData)).toEqual(Array.from(a));
+
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
+});
+
+describe("HistoryManager side data", () => {
+  it("rebuilds the spectrogram on reopen without storing inverseMap or metadata", async () => {
+    const { files } = installManagerEnv();
+    const w = 6,
+      h = 4;
+    const root = lossyFill(w, h, 0);
+    const spectrogram = makeSpectrogram(root, w, h);
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram });
+
+    // Nothing on disk holds the side data; only the packed state and the tree.
+    const written = [...files.keys()];
+    expect(written.some((p) => p.endsWith(".inverse.zst"))).toBe(false);
+    expect(written.some((p) => p.endsWith(".meta.zst"))).toBe(false);
+
+    // Reopening rebuilds the side data from the band layout in the manifest. The
+    // metadata texture is built here, so it must match what the analysis
+    // produced; the inverse map comes from the addon (covered in the codec
+    // tests), so only its shape is checked against this fake.
+    clearAllHistoryManagers();
+    const fresh = getHistoryManager("f1");
+    const restored = await fresh.loadSpectrogramAtCurrent();
+    expect(restored).not.toBeNull();
+    expect(Array.from(restored!.metadata)).toEqual(Array.from(spectrogram.metadata));
+    expect(restored!.inverseMap.length).toBe(spectrogram.inverseMap.length);
+    expect(Array.from(restored!.packedData)).toEqual(Array.from(root));
+
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
+});
+
+describe("HistoryManager pruneAudioCache", () => {
+  it("keeps the current, saved and favorited renders and drops the rest", async () => {
+    installManagerEnv();
+    const w = 6,
+      h = 4;
+    const dimensions = {
+      textureWidth: w,
+      textureHeight: h,
+      numFrames: w,
+      numBands: h,
+      numChannels: 1,
+      sampleRate: 44100,
+      minFreq: 20,
+      bandsPerOctave: 12,
+    };
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f1");
+    const rootId = await mgr.addRootSnapshot({
+      data: lossyFill(w, h, 0),
+      kind: "root",
+      label: "root",
+      spectrogram: makeSpectrogram(lossyFill(w, h, 0), w, h),
+    });
+    const aId = await mgr.addStroke({ data: lossyFill(w, h, 1), label: "A", dimensions });
+    await mgr.markSaved(); // A is the saved state
+    const bId = await mgr.addStroke({ data: lossyFill(w, h, 2), label: "B", dimensions });
+    await mgr.toggleFavorite(bId);
+    const cId = await mgr.addStroke({ data: lossyFill(w, h, 3), label: "C", dimensions });
+    const dId = await mgr.addStroke({ data: lossyFill(w, h, 4), label: "D", dimensions });
+
+    // Every state has a cached render; D is current.
+    const manifest = mgr.getManifest()!;
+    for (const id of [rootId, aId, bId, cId, dId]) {
+      manifest.nodes[id].audioCached = true;
+      manifest.nodes[id].audioPeak = 1;
+    }
+
+    await mgr.pruneAudioCache();
+
+    expect(manifest.nodes[dId].audioCached).toBe(true); // current
+    expect(manifest.nodes[aId].audioCached).toBe(true); // saved
+    expect(manifest.nodes[bId].audioCached).toBe(true); // favorited
+    expect(manifest.nodes[rootId].audioCached).toBe(false);
+    expect(manifest.nodes[cId].audioCached).toBe(false);
 
     clearAllHistoryManagers();
     delete fakeOpenFiles["f1"];

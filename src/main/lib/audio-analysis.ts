@@ -1,5 +1,8 @@
+import { existsSync } from "fs";
 import { copyFile } from "fs/promises";
 import { extname, join } from "path";
+import { promisify } from "util";
+import { zstdCompress, zstdDecompress } from "zlib";
 import { decodeAudioFile, encodeBufferToAudioFile, probeAudioFile } from "./ffmpeg";
 import type { AnalysisParams, GaboratorAnalysisResult, OnsetReference, OnsetResult, PackedOnsets } from "./types";
 import { getModelPath } from "./ai-separation";
@@ -23,11 +26,13 @@ export function getGaboratorPath(): string {
 
   if (isPackaged) {
     return join(process.resourcesPath, "app.asar.unpacked/build/Release/gaborator_addon.node");
-  } else {
-    // In development, __dirname will be something like .../out/preload or .../out/main
-    // We need to go up to the project root and then to build/Release
-    return join(__dirname, "../../build/Release/gaborator_addon.node");
   }
+  // In development, __dirname will be something like .../out/preload or .../out/main
+  // We need to go up to the project root and then to build/Release. Tests run
+  // this file from its source directory instead, which is one level deeper.
+  const bundled = join(__dirname, "../../build/Release/gaborator_addon.node");
+  if (existsSync(bundled)) return bundled;
+  return join(__dirname, "../../../build/Release/gaborator_addon.node");
 }
 
 export function init() {
@@ -40,6 +45,79 @@ export function init() {
     console.log("Gaborator loaded successfully");
   }
   return gaborator;
+}
+
+/**
+ * Undo-history codec.
+ *
+ * The history cache stores packed FBO states, hundreds of megabytes each on a
+ * multi-minute file. Every pass over them runs in the addon on a worker thread —
+ * the same loops in the renderer would stall painting for hundreds of
+ * milliseconds per stroke — and the compression around them is Node's zstd,
+ * which is likewise off-thread. Nothing here touches the JS thread with more
+ * than a buffer handoff.
+ */
+interface HistoryCodecAddon {
+  historyEncodePlanes(src: Float32Array | Uint32Array): Promise<Buffer>;
+  historyDecodePlanes(bytes: Uint8Array): Promise<Float32Array>;
+  historyFootprintChanged(base: Float32Array, after: Float32Array, ranges: Uint32Array): Promise<boolean>;
+  historyEncodeDelta(base: Float32Array, after: Float32Array, ranges: Uint32Array): Promise<Buffer>;
+  historyApplyDelta(base: Float32Array, delta: Uint8Array): Promise<Float32Array>;
+  historyInverseMap(
+    bandOffsets: Uint32Array,
+    bandLengths: Uint32Array,
+    bandStepLog2s: Int32Array,
+    pixelCount: number,
+  ): Promise<Float32Array>;
+}
+
+function historyCodec(): HistoryCodecAddon {
+  return init() as HistoryCodecAddon;
+}
+
+const zstdCompressAsync = promisify(zstdCompress);
+const zstdDecompressAsync = promisify(zstdDecompress);
+
+/** Reorder a packed state for compression, then compress it. */
+export async function encodeHistorySnapshot(packed: Float32Array): Promise<Buffer> {
+  return await zstdCompressAsync(await historyCodec().historyEncodePlanes(packed));
+}
+
+export async function decodeHistorySnapshot(bytes: Uint8Array): Promise<Float32Array> {
+  return await historyCodec().historyDecodePlanes(await zstdDecompressAsync(bytes));
+}
+
+/** True if a stroke changed anything inside the footprint it claims to cover. */
+export async function historyFootprintChanged(
+  base: Float32Array,
+  after: Float32Array,
+  ranges: Uint32Array,
+): Promise<boolean> {
+  return await historyCodec().historyFootprintChanged(base, after, ranges);
+}
+
+/** Encode a stroke as the difference from the state it was painted onto. */
+export async function encodeHistoryDelta(
+  base: Float32Array,
+  after: Float32Array,
+  ranges: Uint32Array,
+): Promise<Buffer> {
+  return await zstdCompressAsync(await historyCodec().historyEncodeDelta(base, after, ranges));
+}
+
+/** Rebuild the state a stroke produced, given the state it was painted onto. */
+export async function applyHistoryDelta(base: Float32Array, bytes: Uint8Array): Promise<Float32Array> {
+  return await historyCodec().historyApplyDelta(base, await zstdDecompressAsync(bytes));
+}
+
+/** Each packed pixel's time offset and band index, from the band layout. */
+export async function buildHistoryInverseMap(
+  bandOffsets: Uint32Array,
+  bandLengths: Uint32Array,
+  bandStepLog2s: Int32Array,
+  pixelCount: number,
+): Promise<Float32Array> {
+  return await historyCodec().historyInverseMap(bandOffsets, bandLengths, bandStepLog2s, pixelCount);
 }
 
 /**
