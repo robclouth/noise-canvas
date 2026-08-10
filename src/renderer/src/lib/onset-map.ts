@@ -5,12 +5,18 @@ import { ClampToEdgeWrapping, DataTexture, FloatType, NearestFilter, RGBAFormat 
  * and reports every plausible peak with a raw salience and no threshold; this
  * is where the sensitivity control decides which of them count, and where the
  * survivors are baked into a 1-row float texture mapping any time position to
- * its nearest onset: R = onset time in seconds, G = strength 0..1 (BA unused).
+ * its nearest onset: R = onset time in seconds, G = how much phase work the
+ * onset earns 0..1, B = how loud the event is 0..1 (A unused).
  * Transient-aware effects re-anchor phase at the mapped onset with a single
  * texture fetch.
+ *
+ * The two channels are separate on purpose. An onset that survives the control
+ * wants re-anchoring in full whether it is a kick or a ghost note — the point
+ * of the treatment is that the moment is an attack, not that it is loud — while
+ * what gets drawn should show which hits are the big ones.
  */
 
-export type Onset = { timeSec: number; strength: number };
+export type Onset = { timeSec: number; weight: number; strength: number };
 
 const BIN_SEC = 0.001;
 const MAX_TEX_WIDTH = 4096;
@@ -23,6 +29,16 @@ const KNEE = 0.1;
 // down, and as a level rather than a rank so a loop of equal hits keeps them
 // all at full strength.
 const REFERENCE_PERCENTILE = 0.9;
+// The quiet end of the same scale. Together with the reference these span the
+// range of level the file actually contains, so the control divides up what is
+// there rather than a fixed span most material does not fill.
+const FLOOR_PERCENTILE = 0.1;
+// Bounds on that span. Below the minimum, a loop whose hits are all within a
+// couple of decibels would have those differences stretched across the whole
+// control and read as meaningful; above the maximum, one distant hit would push
+// everything else into the top of the range together.
+const MIN_RANGE_DB = 12;
+const MAX_RANGE_DB = 48;
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - edge0) / Math.max(edge1 - edge0, 1e-9)));
@@ -31,8 +47,10 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
 
 /**
  * Applies the sensitivity control to the addon's raw onsets (flat
- * [time, salience] pairs). Sensitivity runs 0..100; the survivors carry a
- * strength that also expresses how confident the detection was.
+ * [time, salience] pairs). Salience is an amplitude, so the control works in
+ * decibels below the file's reference level: an even slider travel then covers
+ * an even span of level, where dividing the amplitudes directly would spend
+ * most of the travel on the loudest few decibels.
  */
 export function filterOnsets(packed: Float32Array | undefined, sensitivity: number): Onset[] {
   if (!packed || packed.length < 2) return [];
@@ -42,16 +60,21 @@ export function filterOnsets(packed: Float32Array | undefined, sensitivity: numb
   for (let i = 0; i < count; i++) saliences[i] = packed[i * 2 + 1];
 
   const sorted = Float64Array.from(saliences).sort();
-  const reference = sorted[Math.min(count - 1, Math.floor((count - 1) * REFERENCE_PERCENTILE))];
+  const at = (p: number): number => sorted[Math.min(count - 1, Math.floor((count - 1) * p))];
+  const reference = at(REFERENCE_PERCENTILE);
   if (!(reference > 0)) return [];
+  const floor = Math.max(at(FLOOR_PERCENTILE), reference * 1e-4);
+  const rangeDb = Math.min(MAX_RANGE_DB, Math.max(MIN_RANGE_DB, 20 * Math.log10(reference / floor)));
 
   const threshold = 1 - sensitivity / 100;
   const onsets: Onset[] = [];
   for (let i = 0; i < count; i++) {
-    const normalized = Math.min(1, saliences[i] / reference);
-    const gain = smoothstep(threshold - KNEE, threshold + KNEE, normalized);
-    if (gain <= 0) continue;
-    onsets.push({ timeSec: packed[i * 2], strength: gain * normalized });
+    if (!(saliences[i] > 0)) continue;
+    const db = 20 * Math.log10(saliences[i] / reference);
+    const strength = Math.min(1, Math.max(0, 1 + db / rangeDb));
+    const weight = smoothstep(threshold - KNEE, threshold + KNEE, strength);
+    if (weight <= 0) continue;
+    onsets.push({ timeSec: packed[i * 2], weight, strength });
   }
   return onsets;
 }
@@ -75,7 +98,8 @@ export function bakeOnsetTexture(onsets: Onset[], durationSec: number): DataText
         cursor++;
       }
       data[x * 4] = onsets[cursor].timeSec;
-      data[x * 4 + 1] = onsets[cursor].strength;
+      data[x * 4 + 1] = onsets[cursor].weight;
+      data[x * 4 + 2] = onsets[cursor].strength;
     }
   }
 

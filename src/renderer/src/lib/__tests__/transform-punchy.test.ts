@@ -165,7 +165,7 @@ describe("transient-preserving transform algorithms", () => {
   // and metadata frequency.
   async function runShift(
     algorithm: number,
-    onsets: { timeSec: number; strength: number }[] = [{ timeSec: t0, strength: 1 }],
+    onsets: { timeSec: number; weight: number; strength: number }[] = [{ timeSec: t0, weight: 1, strength: 1 }],
     shift: { beats?: number; semis?: number } = {},
     readFrame: number | "ridge" = ridgeFrame,
     makeSpec: () => SpectrogramData = impulseSpec,
@@ -271,7 +271,7 @@ describe("transient-preserving transform algorithms", () => {
     const shiftBeats = 0.1;
     const lit = await runShift(
       HYBRID_ALGORITHM,
-      [{ timeSec: t0, strength: 1 }],
+      [{ timeSec: t0, weight: 1, strength: 1 }],
       { beats: shiftBeats, semis: 0 },
       "ridge",
     );

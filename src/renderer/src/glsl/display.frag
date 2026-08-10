@@ -165,11 +165,12 @@ void main() {
     }
 
     if (showOnsets) {
-        vec2 onset = texture(sourceOnsetTex, vec2(clamp(zoomedUv.x, 0.0, 1.0), 0.5)).rg;
+        vec4 onset = texture(sourceOnsetTex, vec2(clamp(zoomedUv.x, 0.0, 1.0), 0.5));
         float onsetUvX = onset.r * sourceSampleRate / max(sourceFrameCount, 1.0);
-        // Roughly a pixel and a half wide however far the view is zoomed.
+        // Roughly a pixel and a half wide however far the view is zoomed. Drawn
+        // at the event's own level, not at how much phase work it earns.
         if (onset.g > 0.0 && abs(zoomedUv.x - onsetUvX) < hThick * 0.75) {
-            color = mix(color, ONSET_MARKER_COLOR, 0.25 + 0.5 * onset.g);
+            color = mix(color, ONSET_MARKER_COLOR, 0.25 + 0.5 * onset.b);
         }
     }
 

@@ -26,12 +26,33 @@ describe("filterOnsets", () => {
     for (const onset of [...quiet, ...loud]) expect(onset.strength).toBeCloseTo(1, 5);
   });
 
+  it("ranks hits by level rather than by how isolated they are", () => {
+    // Salience is an amplitude and the control spans the file's own range,
+    // which here runs the 24 dB from the loudest hits down to the quietest. The
+    // hit 12 dB down therefore sits at half strength, wherever it falls in the
+    // bar and however many neighbours it has.
+    const raw = packed([
+      [0.1, 1],
+      [0.2, 1],
+      [0.3, 1],
+      [0.4, 1],
+      [0.5, 0.25],
+      [0.6, 0.0625],
+    ]);
+    const found = filterOnsets(raw, 100);
+    const strength = (t: number): number => found.find((o) => Math.abs(o.timeSec - t) < 1e-6)?.strength ?? -1;
+
+    expect(strength(0.1)).toBeCloseTo(1, 5);
+    expect(strength(0.5)).toBeCloseTo(0.5, 2);
+    expect(strength(0.6)).toBeCloseTo(0, 5);
+  });
+
   it("drops weak detections before strong ones as sensitivity falls", () => {
     const raw = packed([
       [0.1, 10],
-      [0.2, 2],
+      [0.2, 0.6],
       [0.3, 10],
-      [0.4, 1],
+      [0.4, 0.3],
       [0.5, 10],
     ]);
 
@@ -42,24 +63,46 @@ describe("filterOnsets", () => {
     for (const onset of middling) expect(onset.strength).toBeCloseTo(1, 5);
   });
 
+  it("re-anchors a surviving onset in full however quiet it is", () => {
+    // What the shaders read is the weight, and it says whether the moment
+    // counts as an attack — a ghost note that clears the control earns the same
+    // treatment as the loudest hit in the bar, while what is drawn still shows
+    // which of them is which.
+    const raw = packed([
+      [0.1, 10],
+      [0.2, 10],
+      [0.3, 10],
+      [0.4, 3],
+      [0.5, 1],
+    ]);
+    const found = filterOnsets(raw, 100);
+    const quiet = found.find((o) => Math.abs(o.timeSec - 0.4) < 1e-6);
+
+    expect(quiet).toBeDefined();
+    expect(quiet?.weight).toBeCloseTo(1, 5);
+    expect(quiet?.strength).toBeLessThan(0.6);
+  });
+
   it("fades an onset out rather than dropping it in one step", () => {
     const raw = packed([
       [0.1, 10],
       [0.2, 10],
       [0.3, 10],
-      [0.4, 5],
+      [0.4, 10],
+      [0.5, 3],
+      [0.6, 1],
     ]);
 
-    // The 0.4 s hit sits at half the reference level, so it fades across the
+    // The 0.5 s hit sits halfway down the file's range, so it fades across the
     // knee the threshold passes through as sensitivity drops.
-    const strengths = [58, 50, 40].map((sensitivity) => {
-      const found = filterOnsets(raw, sensitivity).find((o) => Math.abs(o.timeSec - 0.4) < 1e-6);
-      return found?.strength ?? 0;
+    const weights = [58, 50, 40].map((sensitivity) => {
+      const found = filterOnsets(raw, sensitivity).find((o) => Math.abs(o.timeSec - 0.5) < 1e-6);
+      return found?.weight ?? 0;
     });
 
-    expect(strengths[0]).toBeGreaterThan(strengths[1]);
-    expect(strengths[1]).toBeGreaterThan(strengths[2]);
-    expect(strengths[2]).toBe(0);
+    expect(weights[0]).toBeGreaterThan(weights[1]);
+    expect(weights[1]).toBeGreaterThan(weights[2]);
+    expect(weights[2]).toBe(0);
   });
 
   it("returns nothing without onsets", () => {
@@ -72,16 +115,16 @@ describe("bakeOnsetTexture", () => {
   it("maps every position to the nearest onset", () => {
     const texture = bakeOnsetTexture(
       [
-        { timeSec: 0.2, strength: 1 },
-        { timeSec: 0.8, strength: 0.5 },
+        { timeSec: 0.2, weight: 1, strength: 1 },
+        { timeSec: 0.8, weight: 1, strength: 0.5 },
       ],
       1,
     );
     const data = texture.image.data as Float32Array;
     const width = texture.image.width;
-    const at = (t: number): { timeSec: number; strength: number } => {
+    const at = (t: number): { timeSec: number; weight: number; strength: number } => {
       const x = Math.min(width - 1, Math.floor(t * width));
-      return { timeSec: data[x * 4], strength: data[x * 4 + 1] };
+      return { timeSec: data[x * 4], weight: data[x * 4 + 1], strength: data[x * 4 + 2] };
     };
 
     expect(at(0.05).timeSec).toBeCloseTo(0.2, 5);
@@ -89,11 +132,12 @@ describe("bakeOnsetTexture", () => {
     // Halfway between the two, the later one takes over.
     expect(at(0.55).timeSec).toBeCloseTo(0.8, 5);
     expect(at(0.95).timeSec).toBeCloseTo(0.8, 5);
+    expect(at(0.95).weight).toBeCloseTo(1, 5);
     expect(at(0.95).strength).toBeCloseTo(0.5, 5);
     texture.dispose();
   });
 
-  it("bakes a strength of zero everywhere when there are no onsets", () => {
+  it("bakes a weight of zero everywhere when there are no onsets", () => {
     const texture = bakeOnsetTexture([], 1);
     const data = texture.image.data as Float32Array;
     for (let x = 0; x < texture.image.width; x++) expect(data[x * 4 + 1]).toBe(0);

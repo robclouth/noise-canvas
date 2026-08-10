@@ -126,7 +126,10 @@ describe("clone onset re-anchoring", () => {
 
   async function runClone(withOnset: boolean): Promise<{ phase: number; freq: number; mag: number }[]> {
     const spec = impulseSpec();
-    const onsetTexture = bakeOnsetTexture(withOnset ? [{ timeSec: t0, strength: 1 }] : [], numFrames / sampleRate);
+    const onsetTexture = bakeOnsetTexture(
+      withOnset ? [{ timeSec: t0, weight: 1, strength: 1 }] : [],
+      numFrames / sampleRate,
+    );
     const textures = createHarnessTextures(spec);
     const renderer = new StrokeRenderer(gl, spec, toStrokeTextures(textures), "self", effects);
     renderer.initialize();
