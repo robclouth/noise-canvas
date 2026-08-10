@@ -8,7 +8,7 @@ import type { BrushColor } from "@renderer/store/types";
 import { Copy, Plus, Trash } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { useShallow } from "zustand/shallow";
-import { Tooltip } from "../tooltip";
+import { Tooltip, TooltipContent } from "../tooltip";
 
 const TAB_HEIGHT = 28;
 const SLOT_BASIS = `${100 / MAX_STEPS}%`;
@@ -113,75 +113,87 @@ export function Steps() {
                 return (
                   <Draggable key={step.id} draggableId={step.id} index={index}>
                     {(dragProvided, snapshot) => (
-                      <div
-                        ref={dragProvided.innerRef}
-                        {...dragProvided.draggableProps}
-                        {...dragProvided.dragHandleProps}
-                        onClick={() => setActiveStepIndex(index)}
-                        style={{ ...dragProvided.draggableProps.style, ...slotStyle }}
+                      <Tooltip
+                        label={
+                          <TooltipContent
+                            title={`Step ${index + 1}`}
+                            body="Steps are applied one after another on every stroke, each with its own effects and settings. Use them to build a multi-stage brush."
+                            hints={["Click to edit this step", "Drag to reorder"]}
+                          />
+                        }
                       >
                         <div
-                          style={{
-                            width: "100%",
-                            height: TAB_HEIGHT,
-                            position: "relative",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            paddingBottom: 8,
-                            fontSize: 11,
-                            fontWeight: 600,
-                            borderRadius: 4,
-                            cursor: "pointer",
-                            userSelect: "none",
-                            color: active ? theme.white : theme.colors.dark[1],
-                            backgroundColor: active ? theme.colors.dark[5] : "transparent",
-                            border: `1px solid ${active ? theme.colors.dark[4] : "transparent"}`,
-                            boxShadow:
-                              snapshot.isDragging && !snapshot.isDropAnimating
-                                ? "0 0 12px rgba(0, 0, 0, 0.4)"
-                                : undefined,
-                          }}
+                          ref={dragProvided.innerRef}
+                          {...dragProvided.draggableProps}
+                          {...dragProvided.dragHandleProps}
+                          onClick={() => setActiveStepIndex(index)}
+                          style={{ ...dragProvided.draggableProps.style, ...slotStyle }}
                         >
-                          {index + 1}
                           <div
                             style={{
-                              position: "absolute",
-                              left: 6,
-                              right: 6,
-                              bottom: 4,
-                              height: 2,
-                              borderRadius: 1,
-                              backgroundColor: stepColor,
-                              opacity: active ? 1 : 0.7,
+                              width: "100%",
+                              height: TAB_HEIGHT,
+                              position: "relative",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              paddingBottom: 8,
+                              fontSize: 11,
+                              fontWeight: 600,
+                              borderRadius: 4,
+                              cursor: "pointer",
+                              userSelect: "none",
+                              color: active ? theme.white : theme.colors.dark[1],
+                              backgroundColor: active ? theme.colors.dark[5] : "transparent",
+                              border: `1px solid ${active ? theme.colors.dark[4] : "transparent"}`,
+                              boxShadow:
+                                snapshot.isDragging && !snapshot.isDropAnimating
+                                  ? "0 0 12px rgba(0, 0, 0, 0.4)"
+                                  : undefined,
                             }}
-                          />
+                          >
+                            {index + 1}
+                            <div
+                              style={{
+                                position: "absolute",
+                                left: 6,
+                                right: 6,
+                                bottom: 4,
+                                height: 2,
+                                borderRadius: 1,
+                                backgroundColor: stepColor,
+                                opacity: active ? 1 : 0.7,
+                              }}
+                            />
+                          </div>
                         </div>
-                      </div>
+                      </Tooltip>
                     )}
                   </Draggable>
                 );
               })}
               {dropProvided.placeholder}
               {canAddStep && (
-                <div onClick={addStep} style={slotStyle}>
-                  <div
-                    style={{
-                      width: "100%",
-                      height: TAB_HEIGHT,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: 4,
-                      cursor: "pointer",
-                      userSelect: "none",
-                      color: theme.colors.dark[2],
-                      border: `1px dashed ${theme.colors.dark[4]}`,
-                    }}
-                  >
-                    <Plus size={14} />
+                <Tooltip label="Add another step to this brush. Steps run in order on every stroke.">
+                  <div onClick={addStep} style={slotStyle}>
+                    <div
+                      style={{
+                        width: "100%",
+                        height: TAB_HEIGHT,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: 4,
+                        cursor: "pointer",
+                        userSelect: "none",
+                        color: theme.colors.dark[2],
+                        border: `1px dashed ${theme.colors.dark[4]}`,
+                      }}
+                    >
+                      <Plus size={14} />
+                    </div>
                   </div>
-                </div>
+                </Tooltip>
               )}
             </div>
           )}

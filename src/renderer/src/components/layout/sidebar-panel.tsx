@@ -12,6 +12,7 @@ import type { EffectItem } from "@renderer/effects/types";
 import { MoreVertical } from "lucide-react";
 import { HistorySection } from "./history-section";
 import { Section } from "../section";
+import { Tooltip } from "../tooltip";
 import { memo, useCallback, useEffect, useState } from "react";
 import { BrushPickerOpenButton } from "../controls/brush-picker";
 
@@ -156,9 +157,11 @@ const BrushTile = memo(function BrushTile({
       )}
       <Menu withinPortal position="right-start" shadow="md">
         <Menu.Target>
-          <ActionIcon size="xs" variant="subtle" color="gray" onClick={(e) => e.stopPropagation()}>
-            <MoreVertical size={12} />
-          </ActionIcon>
+          <Tooltip label="Rename, duplicate, save, assign a key, or close this brush">
+            <ActionIcon size="xs" variant="subtle" color="gray" onClick={(e) => e.stopPropagation()}>
+              <MoreVertical size={12} />
+            </ActionIcon>
+          </Tooltip>
         </Menu.Target>
         <Menu.Dropdown>
           <Menu.Item onClick={() => setEditing(true)}>Rename</Menu.Item>
@@ -313,7 +316,11 @@ export function SidebarPanel() {
             list body scrolls internally when it gets long; the New brush button
             stays pinned below it. */}
         <Box style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          <Section label="Brushes" fill>
+          <Section
+            label="Brushes"
+            description="Your loaded brushes. Each one holds its own effects, envelope and modulation. Click to select, double-click to rename, drag to reorder, and assign a letter key from its ⋮ menu for instant recall."
+            fill
+          >
             <ScrollArea type="auto" scrollbarSize={4} style={{ flex: 1, minHeight: 0 }}>
               <DragDropContext onDragEnd={handleDragEnd}>
                 <Droppable droppableId="brushes">

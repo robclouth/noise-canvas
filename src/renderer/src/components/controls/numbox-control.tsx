@@ -20,6 +20,7 @@ import {
 import type { SliderMark } from "@renderer/store/types";
 import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Tooltip } from "../tooltip";
 
 const BASE_SENSITIVITY = 1 / 200;
 const SHIFT_SENSITIVITY = 1 / 600;
@@ -39,6 +40,8 @@ type NumboxControlProps = {
   leftValue?: SliderMark;
   rightValue?: SliderMark;
   rightIcon?: React.ReactNode;
+  /** Hover help shown on the value widget itself, matching the label's tooltip. */
+  tooltip?: React.ReactNode;
   toNormalized: (value: number) => number;
   fromNormalized: (value: number) => number;
 };
@@ -59,6 +62,7 @@ export const NumboxControl = (props: NumboxControlProps) => {
     leftValue,
     rightValue,
     rightIcon,
+    tooltip,
     toNormalized,
     fromNormalized,
   } = props;
@@ -464,19 +468,26 @@ export const NumboxControl = (props: NumboxControlProps) => {
     numboxContent
   );
 
-  if (labelPosition === "top") {
-    return (
+  const row =
+    labelPosition === "top" ? (
       <Stack gap={2} align="stretch">
         {labelWithModulators}
         {numboxWithCombobox}
       </Stack>
+    ) : (
+      <Group gap={CONTROL_ROW_GAP} wrap="nowrap" h={CONTROL_ROW_HEIGHT} align="center">
+        {labelWithModulators}
+        {numboxWithCombobox}
+      </Group>
     );
-  }
 
+  if (!tooltip) return row;
+
+  // Suppressed mid-interaction: a tooltip popping up over the value you are
+  // dragging or typing into is pure obstruction.
   return (
-    <Group gap={CONTROL_ROW_GAP} wrap="nowrap" h={CONTROL_ROW_HEIGHT} align="center">
-      {labelWithModulators}
-      {numboxWithCombobox}
-    </Group>
+    <Tooltip label={tooltip} disabled={isDragging || isEditing}>
+      {row}
+    </Tooltip>
   );
 };

@@ -17,6 +17,7 @@ import { ModulatorShapeControl } from "./controls/modulator-shape-control";
 import { ParameterControl } from "./controls/parameter-control";
 import { SectionMenu } from "./controls/section-menu";
 import { SequencerGrid } from "./controls/sequencer-grid";
+import { Tooltip, TooltipContent } from "./tooltip";
 
 const Scene = ({
   modulatorIndex,
@@ -251,20 +252,30 @@ export const ModulatorView = () => {
   return (
     <Stack gap={2}>
       <Group gap={4} wrap="nowrap" align="center" h={CONTROL_ROW_HEIGHT}>
-        <SegmentedControl
-          size="xs"
-          value={viewedModulatorIndex}
-          onChange={setViewedModulatorIndex}
-          data={Array.from({ length: NUM_MODULATORS }).map((_, index) => ({
-            label: `${index + 1}`,
-            value: index.toString(),
-          }))}
-          style={{ flex: 1 }}
-          styles={{
-            root: { padding: 2 },
-            label: { paddingTop: 2, paddingBottom: 2, lineHeight: 1.1 },
-          }}
-        />
+        <Tooltip
+          label={
+            <TooltipContent
+              title="Modulator"
+              body={`Which of the ${NUM_MODULATORS} modulators you are editing. All of them run at once — this only changes whose controls are shown below.`}
+              hints={["Route one into a parameter from that parameter's label menu"]}
+            />
+          }
+        >
+          <SegmentedControl
+            size="xs"
+            value={viewedModulatorIndex}
+            onChange={setViewedModulatorIndex}
+            data={Array.from({ length: NUM_MODULATORS }).map((_, index) => ({
+              label: `${index + 1}`,
+              value: index.toString(),
+            }))}
+            style={{ flex: 1 }}
+            styles={{
+              root: { padding: 2 },
+              label: { paddingTop: 2, paddingBottom: 2, lineHeight: 1.1 },
+            }}
+          />
+        </Tooltip>
         <SectionMenu storageKey={`modulator-${viewedModulatorIndex}`} parameterKeys={currentModulatorParams} />
       </Group>
       <SimpleGrid cols={2} spacing={PANEL_COLUMN_SPACING} verticalSpacing={0}>
@@ -327,9 +338,13 @@ export const ModulatorView = () => {
         <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}StereoSpread` as ParameterKey} />
       </SimpleGrid>
       {isSequencerMode && <SequencerGrid modulatorIndex={parseInt(viewedModulatorIndex) + 1} />}
-      <View ref={viewRef} style={{ height: 100, marginTop: 6 }}>
-        <Scene modulatorIndex={parseInt(viewedModulatorIndex)} onInvalidateReady={handleInvalidateReady} />
-      </View>
+      <Tooltip label="Live preview of this modulator's output — time runs across, pitch runs up. Bright is a high value, dark is a low one.">
+        <Box>
+          <View ref={viewRef} style={{ height: 100, marginTop: 6 }}>
+            <Scene modulatorIndex={parseInt(viewedModulatorIndex)} onInvalidateReady={handleInvalidateReady} />
+          </View>
+        </Box>
+      </Tooltip>
     </Stack>
   );
 };

@@ -5,7 +5,7 @@ import { getEffectParameterValue, getModulationParamKeys, getParameterValue, use
 import { ParameterKey } from "@renderer/store/types";
 import { Copy, MoreVertical, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { Tooltip } from "../tooltip";
+import { Tooltip, TooltipContent } from "../tooltip";
 import {
   randomizeBooleanParameter,
   randomizeEffects,
@@ -135,17 +135,30 @@ export const SectionMenu = ({
   return (
     <Menu opened={opened} onChange={setOpened} position="right-start" withArrow>
       <Menu.Target>
-        <ActionIcon
-          onClick={(e) => {
-            e.stopPropagation();
-            setOpened(true);
-          }}
-          variant="transparent"
-          color="gray.5"
-          size="xs"
+        <Tooltip
+          label={
+            <TooltipContent
+              title="Section menu"
+              body={
+                parameterKeys
+                  ? "Reset this section to its defaults, or randomize it by an adjustable amount."
+                  : "Actions for this section."
+              }
+            />
+          }
         >
-          <MoreVertical size={14} />
-        </ActionIcon>
+          <ActionIcon
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpened(true);
+            }}
+            variant="transparent"
+            color="gray.5"
+            size="xs"
+          >
+            <MoreVertical size={14} />
+          </ActionIcon>
+        </Tooltip>
       </Menu.Target>
 
       <Menu.Dropdown p={8}>

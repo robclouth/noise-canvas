@@ -85,11 +85,18 @@ export function BrushPanel() {
   return (
     <Stack gap="xs">
       <Stack p="xs" gap="xs">
-        <Section label="Macros" parameterKeys={MACRO_PARAMS}>
+        <Section
+          label="Macros"
+          description="Four renamable knobs per brush. Assign one to any set of modulatable parameters from their label menus and move them all together."
+          parameterKeys={MACRO_PARAMS}
+        >
           <MacroControls />
         </Section>
         <Steps />
-        <Section label="Source">
+        <Section
+          label="Source"
+          description="Where the brush reads audio from. By default it reads the file you are painting on; point it at another open file to paint one sound onto another."
+        >
           <SimpleGrid cols={2} spacing={PANEL_COLUMN_SPACING} verticalSpacing={0}>
             <ParameterControl paramKey="sourceFile" />
             <ParameterControl paramKey="sourcePositionMode" />
@@ -98,10 +105,18 @@ export function BrushPanel() {
             <ParameterControl paramKey="sourceDataMode" />
           </SimpleGrid>
         </Section>
-        <Section label="Envelope" parameterKeys={ENVELOPE_PARAMS}>
+        <Section
+          label="Envelope"
+          description="The size and shape of the brush footprint — how far a stroke reaches in time and pitch, and how the effect fades towards its edges."
+          parameterKeys={ENVELOPE_PARAMS}
+        >
           <EnvelopeControl />
         </Section>
-        <Section label="Options" parameterKeys={OPTIONS_PARAMS}>
+        <Section
+          label="Options"
+          description="How the processed result is merged back in: blend mode, stereo placement, feedback iterations, edge wrapping, and the resynthesis algorithm."
+          parameterKeys={OPTIONS_PARAMS}
+        >
           <SimpleGrid cols={2} spacing={PANEL_COLUMN_SPACING} verticalSpacing={0}>
             <ParameterControl paramKey="blendMode" />
             <ParameterControl paramKey="brushPan" />
@@ -111,10 +126,19 @@ export function BrushPanel() {
             <ParameterControl paramKey="accumulate" />
           </SimpleGrid>
         </Section>
-        <Section label="Effects" parameterKeys={ALL_EFFECT_PARAMS} includeEffectOrder>
+        <Section
+          label="Effects"
+          description="What each stroke actually does to the sound. Effects run top to bottom and can be reordered, disabled, or stacked several deep."
+          parameterKeys={ALL_EFFECT_PARAMS}
+          includeEffectOrder
+        >
           <EffectsList />
         </Section>
-        <Section label="Modulators" parameterKeys={MODULATOR_PARAMS}>
+        <Section
+          label="Modulators"
+          description="Three sources that vary parameters across time and pitch as you paint. Set one up here, then dial in how much it affects a parameter from that parameter's label menu."
+          parameterKeys={MODULATOR_PARAMS}
+        >
           <ModulatorView />
         </Section>
       </Stack>

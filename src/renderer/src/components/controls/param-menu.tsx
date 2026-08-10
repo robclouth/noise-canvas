@@ -21,6 +21,7 @@ import { useShallow } from "zustand/shallow";
 
 const EMPTY_STRING_ARRAY: readonly string[] = [];
 import { Tooltip } from "../tooltip";
+import { ParamTooltipContent } from "./param-tooltip";
 import { ParameterControl } from "./parameter-control";
 import { SectionMenu } from "./section-menu";
 import { SwitchControl } from "./switch-control";
@@ -68,6 +69,13 @@ type ParamMenuProps = {
   isModulated?: boolean;
   effectId?: string;
   displayLabel?: string;
+  /** Hover help for the label. Falls back to the parameter's own description. */
+  tooltip?: React.ReactNode;
+  /**
+   * Set when the surrounding control row already shows the same tooltip, so the
+   * label doesn't open a second, identical one on top of it.
+   */
+  tooltipHandledByRow?: boolean;
   children?: React.ReactNode; // Not used, but accepted for flexibility
 };
 
@@ -81,6 +89,8 @@ export const ParamMenu = ({
   isModulated = false,
   effectId,
   displayLabel,
+  tooltip,
+  tooltipHandledByRow,
 }: ParamMenuProps) => {
   const theme = useMantineTheme();
   const [opened, setOpened] = useState(false);
@@ -137,7 +147,7 @@ export const ParamMenu = ({
 
   return (
     <Menu opened={opened} onChange={setOpened} position="bottom" withArrow>
-      <Tooltip label={parameter.description}>
+      <Tooltip label={tooltip ?? <ParamTooltipContent paramKey={paramKey} />} disabled={tooltipHandledByRow}>
         <Menu.Target>
           <Group
             gap={4}

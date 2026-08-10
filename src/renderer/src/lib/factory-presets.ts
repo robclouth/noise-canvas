@@ -7,6 +7,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "init",
     name: "Init",
+    description: "An empty brush with no effects. The blank slate to build your own from.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -23,6 +24,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "eraser",
     name: "Eraser",
+    description: "Silences whatever you paint over by dropping its gain to nothing.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -39,6 +41,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "booster",
     name: "Booster",
+    description: "Lifts the level of the region you paint over.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -55,6 +58,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "restore",
     name: "Restore",
+    description: "Paints the file's original, unedited audio back over your edits.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -73,6 +77,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "stereo-widening",
     name: "Stereo Widening",
+    description: "Spreads the painted region wider across the stereo field.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -94,6 +99,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "compressor",
     name: "Compressor",
+    description: "Tames loud regions with gentle compression and makeup gain, across the full pitch range.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -123,6 +129,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "noise-gate",
     name: "Noise Gate",
+    description: "Silences anything below the threshold to clean up hiss and bleed between sounds.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -152,6 +159,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "smudge",
     name: "Smudge",
+    description: "Drag to smear content around — each dab re-blurs what the last one left behind.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -184,6 +192,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "octave-up",
     name: "Octave Up",
+    description: "Shifts whatever you paint over up by one octave.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -208,6 +217,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "octave-down",
     name: "Octave Down",
+    description: "Shifts whatever you paint over down by one octave.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -232,6 +242,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "reverse",
     name: "Reverse",
+    description: "Plays the painted window backwards, leaving the audio around it untouched.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -263,6 +274,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "low-pass-sweep",
     name: "Low-Pass Sweep",
+    description: "A low-pass tilt whose corner is swept up and down by an LFO.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -292,6 +304,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "high-pass",
     name: "High-Pass",
+    description: "A static low-cut that thins out the bottom of the painted region.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -317,6 +330,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "harmonics",
     name: "Harmonics",
+    description: "Stacks decaying octave overtones on the painted material to thicken a tone.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -348,6 +362,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "reverb",
     name: "Reverb (Blur)",
+    description: "Smears energy forward in time into a reverb-like tail, layered over the dry sound.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -383,6 +398,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "echo",
     name: "Echo",
+    description: "Beat-spaced decaying copies extending forward in time — a rhythmic delay.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -414,6 +430,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "paint-noise",
     name: "Paint Noise",
+    description: "Draws broadband noise with a soft, rounded edge. Good for air and texture.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -439,6 +456,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "paint-tone",
     name: "Paint Tone",
+    description: "Draws a single sine note with a sharp attack and a long release.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -466,6 +484,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "flow",
     name: "Flow",
+    description: "Smears the painted region into flowing, smoke-like shapes over several iterations.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -498,6 +517,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "pixel-sort",
     name: "Pixel Sort",
+    description: "Sorts spectral bins into vertical streaks for a glitchy, smeared look and sound.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -531,6 +551,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "tremolo",
     name: "Tremolo",
+    description: "An LFO dips the gain rhythmically across the painted region.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -563,6 +584,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "step-gate",
     name: "Step Gate",
+    description: "A step sequencer chops the painted region into a rhythmic gate pattern.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -597,6 +619,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "dynamic-bloom",
     name: "Dynamic Bloom",
+    description: "Follows the amplitude of what you paint over and blurs the loudest material most.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -630,6 +653,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "3d-orbit",
     name: "3D Orbit",
+    description: "Sweeps the painted region around the listener in 3D using binaural panning.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -664,6 +688,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "shimmer",
     name: "Shimmer",
+    description: "Octave-up copies feeding a forward blur, repeated into a rising shimmer tail.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -703,6 +728,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "morph",
     name: "Morph (Macros)",
+    description: "Two macro knobs — Blur and Echo Tail — reshape the whole brush as you turn them.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -738,6 +764,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "sampler",
     name: "Sampler",
+    description: "Paints the spectrum of a bundled pad sample wherever you brush.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -764,6 +791,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "convolution",
     name: "Convolution",
+    description: "Convolves what you paint with a bundled reverb impulse response for a smeared tail.",
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [

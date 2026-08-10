@@ -9,6 +9,7 @@ import { getEffectParameterDefaults } from "@renderer/parameters";
 import { Plus } from "lucide-react";
 import { memo, useCallback, useMemo } from "react";
 import { EffectProvider } from "../contexts/effect-context";
+import { Tooltip } from "./tooltip";
 import { EffectSection } from "./effect-section";
 import { BinauralEffect } from "./effect-views/binaural-effect";
 import { BlurEffect } from "./effect-views/blur-effect";
@@ -230,17 +231,19 @@ export function EffectsList() {
             {provided.placeholder}
             {effectStructures.length < MAX_EFFECTS && (
               <Box py={EFFECT_ITEM_PAD_Y}>
-                <Button
-                  variant="subtle"
-                  color="gray"
-                  size="compact-xs"
-                  justify="flex-start"
-                  fullWidth
-                  leftSection={<Plus size={12} />}
-                  onClick={handleAddEffect}
-                >
-                  Add effect
-                </Button>
+                <Tooltip label="Pick an effect to add to this step's chain. Effects run top to bottom and you can stack several, including more than one of the same kind.">
+                  <Button
+                    variant="subtle"
+                    color="gray"
+                    size="compact-xs"
+                    justify="flex-start"
+                    fullWidth
+                    leftSection={<Plus size={12} />}
+                    onClick={handleAddEffect}
+                  >
+                    Add effect
+                  </Button>
+                </Tooltip>
               </Box>
             )}
           </Stack>

@@ -139,6 +139,8 @@ All brushes and effects share a set of core controls:
 - **Blend Mode** – how the processed and original spectrogram are combined (see below).
 - **Warp Algorithm** – resynthesis strategy for reconstructing sound after edits: **Neutral**, **Neutralish**, **Percussive**, **Flangey**, or **Noisey**. Each produces its own artifacts — pick what sounds best.
 
+Under the envelope controls there's a row of **shape presets** — Block, Soft, Bell, Spike, Pluck, Swell, Fade In/Out, Low, High, Band and Stab. Each tile draws the shape it applies; clicking one sets the curve and skew of both axes and leaves size, strength and anchor alone. They're the quickest way to see what curve and skew actually do.
+
 You can also assign up to **4 Macros** per brush — renamable controls that can drive any modulatable parameter at once.
 
 ---
@@ -152,9 +154,11 @@ Noise Canvas has a few useful shortcuts for working with sliders and parameters 
 Many sliders have **preset values** — musically meaningful or commonly used settings (like specific beat divisions or semitone steps).  
 When a slider supports presets, you’ll see a **small dropdown icon** next to its numeric value.
 
-- **Click the dropdown icon** to open the full list of available preset values.
-- **Hold Shift and drag** on the slider to **snap** between those preset values instead of moving smoothly.  
+- **Right-click the value** (or click the dropdown icon) to open the full list of available preset values.
+- **Hold Ctrl while dragging** to **snap** between those preset values instead of moving smoothly.  
   This makes it easy to land precisely on useful values without fine-tuning manually.
+- **Hold Shift while dragging** for **fine steps** when you need small, precise adjustments.
+- **Click the value** to type a number in directly.
 
 #### Resetting Parameters
 

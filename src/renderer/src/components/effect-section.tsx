@@ -3,7 +3,7 @@ import { ActionIcon, Checkbox, Collapse, Group, Paper, Stack, Text } from "@mant
 import { GripVertical } from "lucide-react";
 import { memo } from "react";
 import { SectionMenu } from "./controls/section-menu";
-import { Tooltip } from "./tooltip";
+import { Tooltip, TooltipContent } from "./tooltip";
 
 export type EffectSectionProps = {
   label: string;
@@ -37,28 +37,38 @@ export const EffectSection = memo(
       <Paper>
         <Stack gap="xs">
           <Group gap="xs" wrap="nowrap">
-            <Checkbox
-              checked={enabled}
-              onChange={(event) => onEnabledChange(event.currentTarget.checked)}
-              size="xs"
-              color={color}
-            />
-            <Group
-              gap={4}
-              wrap="nowrap"
-              flex={1}
-              style={{ cursor: "grab", userSelect: "none" }}
-              {...(dragHandleProps ?? {})}
+            <Tooltip label={enabled ? `Bypass ${label} without removing it` : `Enable ${label}`}>
+              <Checkbox
+                checked={enabled}
+                onChange={(event) => onEnabledChange(event.currentTarget.checked)}
+                size="xs"
+                color={color}
+              />
+            </Tooltip>
+            <Tooltip
+              label={
+                <TooltipContent
+                  title={label}
+                  body={description}
+                  hints={["Drag to reorder — effects run top to bottom"]}
+                />
+              }
             >
-              <ActionIcon variant="transparent" color="gray.5" size="xs" component="div">
-                <GripVertical size={16} />
-              </ActionIcon>
-              <Tooltip label={description}>
+              <Group
+                gap={4}
+                wrap="nowrap"
+                flex={1}
+                style={{ cursor: "grab", userSelect: "none" }}
+                {...(dragHandleProps ?? {})}
+              >
+                <ActionIcon variant="transparent" color="gray.5" size="xs" component="div">
+                  <GripVertical size={16} />
+                </ActionIcon>
                 <Text size="xs" fw={600}>
                   {label}
                 </Text>
-              </Tooltip>
-            </Group>
+              </Group>
+            </Tooltip>
 
             <SectionMenu
               storageKey={`effect-${label}`}

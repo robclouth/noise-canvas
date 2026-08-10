@@ -2,6 +2,7 @@ import { Box, Button, Group, useMantineTheme } from "@mantine/core";
 import { selectParameter, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Tooltip, TooltipContent } from "../tooltip";
 
 interface SequencerData {
   values: number[][];
@@ -270,23 +271,37 @@ export function SequencerGrid({ modulatorIndex }: SequencerGridProps) {
   return (
     <Box ref={containerRef} style={{ userSelect: "none", width: "100%" }}>
       <Group gap={4} mb={4}>
-        <Button size="compact-xs" variant="subtle" onClick={randomize}>
-          Rand
-        </Button>
-        <Box style={{ fontSize: 10, opacity: 0.6 }}>Intensity: {Math.round(currentIntensity * 100)}%</Box>
+        <Tooltip label="Fill the grid with a random pattern.">
+          <Button size="compact-xs" variant="subtle" onClick={randomize}>
+            Rand
+          </Button>
+        </Tooltip>
+        <Tooltip label="Value written into cells you paint. Drag on the grid to draw at this level.">
+          <Box style={{ fontSize: 10, opacity: 0.6 }}>Intensity: {Math.round(currentIntensity * 100)}%</Box>
+        </Tooltip>
       </Group>
-      <canvas
-        ref={canvasRef}
-        width={canvasSize.width}
-        height={canvasSize.height}
-        style={{
-          width: "100%",
-          height: "auto",
-          cursor: "pointer",
-          borderRadius: 4,
-        }}
-        onMouseDown={handleMouseDown}
-      />
+      <Tooltip
+        label={
+          <TooltipContent
+            title="Sequencer grid"
+            body="The pattern this modulator outputs. Columns are steps in time, rows are pitch bands, and a filled cell means a high value there."
+            hints={["Drag across cells to draw", "Set the grid's size and loop length with the controls above"]}
+          />
+        }
+      >
+        <canvas
+          ref={canvasRef}
+          width={canvasSize.width}
+          height={canvasSize.height}
+          style={{
+            width: "100%",
+            height: "auto",
+            cursor: "pointer",
+            borderRadius: 4,
+          }}
+          onMouseDown={handleMouseDown}
+        />
+      </Tooltip>
     </Box>
   );
 }

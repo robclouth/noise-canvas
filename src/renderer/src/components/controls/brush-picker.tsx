@@ -17,6 +17,7 @@ import { openConfirm, openPrompt } from "@renderer/lib/modals";
 import { PresetType } from "@renderer/lib/preset-schema";
 import { MoreVertical, Plus } from "lucide-react";
 import { useState } from "react";
+import { Tooltip } from "../tooltip";
 
 type BrushPickerModalProps = ContextModalProps<Record<string, never>>;
 
@@ -47,10 +48,11 @@ function promptForDelete(preset: PresetType) {
 type RowProps = {
   onClick: () => void;
   label: string;
+  description?: string;
   trailing?: React.ReactNode;
 };
 
-function Row({ onClick, label, trailing }: RowProps) {
+function Row({ onClick, label, description, trailing }: RowProps) {
   return (
     <Group gap={0} wrap="nowrap" align="center" style={{ position: "relative" }}>
       <UnstyledButton
@@ -62,11 +64,18 @@ function Row({ onClick, label, trailing }: RowProps) {
           borderRadius: "var(--mantine-radius-sm)",
           flex: 1,
           minWidth: 0,
+          // Leave room for the trailing menu so long names don't run under it.
+          paddingRight: trailing ? 24 : undefined,
         }}
       >
         <Text size="sm" truncate>
           {label}
         </Text>
+        {description && (
+          <Text size="xs" c="dimmed" lh={1.3}>
+            {description}
+          </Text>
+        )}
       </UnstyledButton>
       {trailing && (
         <Box style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}>{trailing}</Box>
@@ -79,9 +88,11 @@ function PresetRow({ preset, onSelect }: { preset: PresetType; onSelect: () => v
   const trailing = preset.isFactory ? null : (
     <Menu withinPortal position="right-start" shadow="md">
       <Menu.Target>
-        <ActionIcon size="xs" variant="subtle" color="gray" onClick={(e) => e.stopPropagation()}>
-          <MoreVertical size={12} />
-        </ActionIcon>
+        <Tooltip label="Rename or delete this saved brush">
+          <ActionIcon size="xs" variant="subtle" color="gray" onClick={(e) => e.stopPropagation()}>
+            <MoreVertical size={12} />
+          </ActionIcon>
+        </Tooltip>
       </Menu.Target>
       <Menu.Dropdown>
         <Menu.Item onClick={() => promptForRename(preset)}>Rename…</Menu.Item>
@@ -92,7 +103,7 @@ function PresetRow({ preset, onSelect }: { preset: PresetType; onSelect: () => v
     </Menu>
   );
 
-  return <Row onClick={onSelect} label={preset.name} trailing={trailing} />;
+  return <Row onClick={onSelect} label={preset.name} description={preset.description} trailing={trailing} />;
 }
 
 export function BrushPickerModal({ context, id }: BrushPickerModalProps): React.JSX.Element {
@@ -127,6 +138,7 @@ export function BrushPickerModal({ context, id }: BrushPickerModalProps): React.
               close();
             }}
             label="New"
+            description="Start from an empty brush with no effects."
           />
 
           {factoryPresets.length > 0 && (
@@ -190,22 +202,24 @@ export function BrushPickerModal({ context, id }: BrushPickerModalProps): React.
 
 export function BrushPickerOpenButton() {
   return (
-    <Button
-      fullWidth
-      size="compact-xs"
-      variant="subtle"
-      color="gray"
-      justify="flex-start"
-      leftSection={<Plus size={12} />}
-      onClick={() =>
-        modals.openContextModal({
-          modal: "brushPicker",
-          title: "Add brush",
-          innerProps: {},
-        })
-      }
-    >
-      New brush
-    </Button>
+    <Tooltip label="Add a brush from the factory library or your own saved brushes — a good way to see what the effects can do.">
+      <Button
+        fullWidth
+        size="compact-xs"
+        variant="subtle"
+        color="gray"
+        justify="flex-start"
+        leftSection={<Plus size={12} />}
+        onClick={() =>
+          modals.openContextModal({
+            modal: "brushPicker",
+            title: "Add brush",
+            innerProps: {},
+          })
+        }
+      >
+        New brush
+      </Button>
+    </Tooltip>
   );
 }

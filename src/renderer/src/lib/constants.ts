@@ -1,4 +1,8 @@
 import { BASE_HUES } from "./colors";
+import { host } from "./host";
+
+/** Name of the platform's primary modifier, for spelling shortcuts in the UI. */
+export const MOD_KEY = host.env.platform === "darwin" ? "Cmd" : "Ctrl";
 
 export const BEAT_UNIT = " b";
 export const SEMITONE_UNIT = " st";

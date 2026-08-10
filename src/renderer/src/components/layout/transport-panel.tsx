@@ -10,7 +10,7 @@ import {
 import { Brush, Link2, Play, Repeat, Square } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { ParameterControl } from "../controls/parameter-control";
-import { Tooltip } from "../tooltip";
+import { Tooltip, TooltipContent } from "../tooltip";
 import { GainReductionMeter } from "./gain-reduction-meter";
 import { OutputMeter } from "./output-meter";
 
@@ -119,12 +119,33 @@ export const TransportPanel = memo(() => {
             <ParameterControl paramKey="linkLatencyMs" labelWidth={80} />
           </Popover.Dropdown>
         </Popover>
-        <ActionIcon onClick={togglePlayback} size={uiSize} ref={playButtonRef} color={isPlaying ? "orange" : "dark.5"}>
-          {isPlaying ? <Square size={18} fill="white" /> : <Play size={18} fill="white" />}
-        </ActionIcon>
-        <ActionIcon onClick={() => setLoop(!loop)} size={uiSize} color={loop ? "orange" : "dark.5"}>
-          <Repeat size={18} />
-        </ActionIcon>
+        <Tooltip
+          label={
+            <TooltipContent
+              title={isPlaying ? "Stop" : "Play"}
+              body="Plays the active file from the start line. Drag the start line on the canvas to move it."
+              hints={["Spacebar"]}
+            />
+          }
+        >
+          <ActionIcon
+            onClick={togglePlayback}
+            size={uiSize}
+            ref={playButtonRef}
+            color={isPlaying ? "orange" : "dark.5"}
+          >
+            {isPlaying ? <Square size={18} fill="white" /> : <Play size={18} fill="white" />}
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip
+          label={
+            <TooltipContent title="Loop" body="Repeats playback over the loop region instead of stopping at the end." />
+          }
+        >
+          <ActionIcon onClick={() => setLoop(!loop)} size={uiSize} color={loop ? "orange" : "dark.5"}>
+            <Repeat size={18} />
+          </ActionIcon>
+        </Tooltip>
         <Tooltip label="Automatically play back the region you just painted after finishing a stroke">
           <ActionIcon
             onClick={() => setAutoPlayStroke(!autoPlayStroke)}

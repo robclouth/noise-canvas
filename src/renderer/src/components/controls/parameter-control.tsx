@@ -15,6 +15,7 @@ import type { FileParameterValue } from "@renderer/parameters";
 import { FileParameterControl } from "./file-parameter-control";
 import { NumboxControl } from "./numbox-control";
 import { ParamMenu } from "./param-menu";
+import { ParamTooltipContent } from "./param-tooltip";
 import { SelectControl } from "./select-control";
 import { SwitchControl } from "./switch-control";
 
@@ -87,6 +88,10 @@ export const ParameterControl = memo(function ParameterControl({
     }
   };
 
+  // One tooltip per control, shown from anywhere on the row rather than only
+  // from the label.
+  const tooltip = <ParamTooltipContent paramKey={paramKey} displayLabel={displayLabel} />;
+
   // Use ParamMenu as the label component (it handles the label rendering internally)
   const labelComponent = (
     <ParamMenu
@@ -95,6 +100,7 @@ export const ParameterControl = memo(function ParameterControl({
       isModulated={isModulated}
       effectId={effectId ?? undefined}
       displayLabel={displayLabel}
+      tooltipHandledByRow
     >
       {parameter.label}
     </ParamMenu>
@@ -109,6 +115,7 @@ export const ParameterControl = memo(function ParameterControl({
         setValue={handleSetValue}
         labelWidth={labelWidth}
         color={color}
+        tooltip={tooltip}
       />
     );
   }
@@ -128,6 +135,7 @@ export const ParameterControl = memo(function ParameterControl({
         disabled={disabled}
         color={color}
         rightValue={parameter.rightValue}
+        tooltip={tooltip}
         fromNormalized={(value) => denormalizeParameterValue(paramKey, value)}
         toNormalized={(value) => normalizeParameterValue(paramKey, value)}
       />
@@ -141,6 +149,7 @@ export const ParameterControl = memo(function ParameterControl({
         value={parameterValue as boolean}
         setValue={handleSetValue}
         color={color}
+        tooltip={tooltip}
       />
     );
   }
@@ -152,6 +161,7 @@ export const ParameterControl = memo(function ParameterControl({
         value={parameterValue as FileParameterValue}
         setValue={handleSetValue}
         paramKey={paramKey}
+        tooltip={tooltip}
       />
     );
   }

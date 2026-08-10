@@ -2,6 +2,7 @@ import { Group, Select } from "@mantine/core";
 import { CONTROL_ROW_GAP, CONTROL_ROW_HEIGHT, VALUE_WIDTH } from "@renderer/lib/ui-density";
 import { ChevronDown } from "lucide-react";
 import { ReactNode, useRef } from "react";
+import { Tooltip } from "../tooltip";
 
 export const SelectControl = <T,>({
   labelComponent,
@@ -10,6 +11,7 @@ export const SelectControl = <T,>({
   setValue,
   color = "orange",
   dropdownZIndex,
+  tooltip,
 }: {
   labelComponent: ReactNode;
   value: T;
@@ -18,6 +20,8 @@ export const SelectControl = <T,>({
   labelWidth?: number | string;
   color?: string;
   dropdownZIndex?: number;
+  /** Hover help for the whole row. */
+  tooltip?: ReactNode;
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -31,7 +35,7 @@ export const SelectControl = <T,>({
     inputRef.current?.blur();
   };
 
-  return (
+  const row = (
     <Group gap={CONTROL_ROW_GAP} wrap="nowrap" h={CONTROL_ROW_HEIGHT}>
       {labelComponent}
       <Select
@@ -55,4 +59,7 @@ export const SelectControl = <T,>({
       />
     </Group>
   );
+
+  if (!tooltip) return row;
+  return <Tooltip label={tooltip}>{row}</Tooltip>;
 };

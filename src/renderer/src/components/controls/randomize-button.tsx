@@ -10,6 +10,7 @@ import {
   randomizeNumberParameter,
   randomizeOptionsParameter,
 } from "../../lib/randomize";
+import { Tooltip, TooltipContent } from "../tooltip";
 import { NumboxControl } from "./numbox-control";
 
 type RandomizeButtonProps = {
@@ -110,18 +111,32 @@ export const RandomizeButton = ({ parameterKeys, storageKey, includeEffects }: R
           }}
           style={{ display: "inline-flex", alignItems: "center", gap: 2 }}
         >
-          <ActionIcon
-            variant="subtle"
-            size="xs"
-            color="gray"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleRandomize();
-            }}
-            title={`Randomize (Right-click to set amount: ${amount}%)`}
+          <Tooltip
+            label={
+              <TooltipContent
+                title="Randomize"
+                body="Nudges every parameter in this section by a random amount. Small amounts explore around the current sound; 100% goes anywhere in range."
+                meta={`Amount: ${amount}%`}
+                hints={[
+                  "Right-click to set the amount",
+                  "Exclude individual parameters from their label menus",
+                  "Undo restores the previous values",
+                ]}
+              />
+            }
           >
-            <Dice5 size={14} />
-          </ActionIcon>
+            <ActionIcon
+              variant="subtle"
+              size="xs"
+              color="gray"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRandomize();
+              }}
+            >
+              <Dice5 size={14} />
+            </ActionIcon>
+          </Tooltip>
           {/* Vertical bar indicator */}
           <Box
             style={{

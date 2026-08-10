@@ -8,12 +8,15 @@ import { getFileColor, openFiles } from "@renderer/store/files";
 import type { ParameterKey } from "@renderer/store/types";
 import { X } from "lucide-react";
 import { memo, useCallback } from "react";
+import { Tooltip } from "../tooltip";
 
 type FileParameterControlProps = {
   labelComponent: React.ReactNode;
   value: FileParameterValue;
   setValue: (value: FileParameterValue) => void;
   paramKey: ParameterKey;
+  /** Hover help for the whole row. */
+  tooltip?: React.ReactNode;
 };
 
 export const FileParameterControl = memo(function FileParameterControl({
@@ -21,6 +24,7 @@ export const FileParameterControl = memo(function FileParameterControl({
   value,
   setValue,
   paramKey,
+  tooltip,
 }: FileParameterControlProps) {
   const effectId = useEffectId();
   const pickingFileParam = useStore((state) => state.pickingFileParam);
@@ -61,7 +65,7 @@ export const FileParameterControl = memo(function FileParameterControl({
     }
   }, [pickMode, isCanvasPicking, paramKey, effectId, value, setValue]);
 
-  return (
+  const row = (
     <Group gap={CONTROL_ROW_GAP} wrap="nowrap" h={CONTROL_ROW_HEIGHT} align="center">
       {labelComponent}
 
@@ -144,4 +148,7 @@ export const FileParameterControl = memo(function FileParameterControl({
       </Box>
     </Group>
   );
+
+  if (!tooltip) return row;
+  return <Tooltip label={tooltip}>{row}</Tooltip>;
 });

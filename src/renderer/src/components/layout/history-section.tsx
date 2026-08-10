@@ -3,10 +3,12 @@ import { useStore } from "@/store";
 import { ActionIcon, Box, Group, Menu, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { openConfirm } from "@renderer/lib/modals";
 import { getHistoryManager, type HistoryManager, type HistoryNode } from "@renderer/lib/history-manager";
+import { MOD_KEY } from "@renderer/lib/constants";
 import { WIDGET_INPUT_HEIGHT } from "@renderer/lib/ui-density";
 import { MoreVertical, Redo2, Star, Undo2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Section } from "../section";
+import { Tooltip, TooltipContent } from "../tooltip";
 
 const LANE_WIDTH = 9;
 const ROW_HEIGHT = 22;
@@ -526,9 +528,11 @@ export function HistorySection() {
   const menu = (
     <Menu withinPortal position="right-start" shadow="md" onOpen={refreshDiskSize}>
       <Menu.Target>
-        <ActionIcon size="xs" variant="subtle" color="gray" onClick={(e) => e.stopPropagation()}>
-          <MoreVertical size={12} />
-        </ActionIcon>
+        <Tooltip label="Export or purge this file's history">
+          <ActionIcon size="xs" variant="subtle" color="gray" onClick={(e) => e.stopPropagation()}>
+            <MoreVertical size={12} />
+          </ActionIcon>
+        </Tooltip>
       </Menu.Target>
       <Menu.Dropdown>
         <Menu.Item
@@ -557,38 +561,61 @@ export function HistorySection() {
 
   const controls = (
     <Group gap={2} wrap="nowrap" align="center">
-      <ActionIcon
-        size="xs"
-        variant="subtle"
-        color="gray"
-        disabled={!canUndo}
-        title="Undo"
-        onClick={(e) => {
-          e.stopPropagation();
-          onUndo();
-        }}
+      <Tooltip
+        label={
+          <TooltipContent
+            title="Undo"
+            body="Step back to the previous state of this file."
+            hints={[`${MOD_KEY}+Z`, "History is a tree — undoing keeps the branch you left, it doesn't discard it"]}
+          />
+        }
       >
-        <Undo2 size={12} />
-      </ActionIcon>
-      <ActionIcon
-        size="xs"
-        variant="subtle"
-        color="gray"
-        disabled={!canRedo}
-        title="Redo"
-        onClick={(e) => {
-          e.stopPropagation();
-          onRedo();
-        }}
+        <ActionIcon
+          size="xs"
+          variant="subtle"
+          color="gray"
+          disabled={!canUndo}
+          onClick={(e) => {
+            e.stopPropagation();
+            onUndo();
+          }}
+        >
+          <Undo2 size={12} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip
+        label={
+          <TooltipContent
+            title="Redo"
+            body="Step forward to the most recent state made from here."
+            hints={[`Shift+${MOD_KEY}+Z`]}
+          />
+        }
       >
-        <Redo2 size={12} />
-      </ActionIcon>
+        <ActionIcon
+          size="xs"
+          variant="subtle"
+          color="gray"
+          disabled={!canRedo}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRedo();
+          }}
+        >
+          <Redo2 size={12} />
+        </ActionIcon>
+      </Tooltip>
       {menu}
     </Group>
   );
 
   return (
-    <Section label="History" rightSlot={controls} fill>
+    <Section
+      label="History"
+      description="Every edit to this file as a branching tree, saved to disk alongside it. Click any state to jump back to it; painting from there starts a new branch rather than discarding the old one."
+      rightSlot={controls}
+      fill
+    >
       <ScrollArea type="auto" scrollbarSize={4} style={{ flex: 1, minHeight: 0 }}>
         {!manifest || !layout ? (
           <Text size="xs" c="dimmed" ta="center" py={8} pr={8}>

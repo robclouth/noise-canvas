@@ -1,22 +1,26 @@
 import { Box, Group, Text, useMantineTheme } from "@mantine/core";
 import { CONTROL_ROW_GAP, CONTROL_ROW_HEIGHT, VALUE_WIDTH, WIDGET_HEIGHT } from "@renderer/lib/ui-density";
 import { ReactNode } from "react";
+import { Tooltip } from "../tooltip";
 
 export const SwitchControl = ({
   labelComponent,
   value,
   setValue,
   color = "orange",
+  tooltip,
 }: {
   labelComponent: ReactNode;
   value: boolean;
   setValue: (value: boolean) => void;
   color?: string;
+  /** Hover help for the whole row. */
+  tooltip?: ReactNode;
 }) => {
   const theme = useMantineTheme();
   const themeColor = theme.colors[color]?.[6] || color;
 
-  return (
+  const row = (
     <Group gap={CONTROL_ROW_GAP} wrap="nowrap" h={CONTROL_ROW_HEIGHT} align="center">
       {labelComponent}
       <Box
@@ -51,4 +55,7 @@ export const SwitchControl = ({
       </Box>
     </Group>
   );
+
+  if (!tooltip) return row;
+  return <Tooltip label={tooltip}>{row}</Tooltip>;
 };

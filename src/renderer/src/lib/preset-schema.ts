@@ -82,6 +82,8 @@ export function createSchema() {
   return z.strictObject({
     id: z.string(),
     name: z.string(),
+    /** One line on what the brush does, shown in the brush picker. */
+    description: z.string().optional(),
     isFactory: z.boolean(),
     version: z.number().int().min(1).optional().default(CURRENT_PRESET_VERSION),
     steps: z.array(createBrushStepSchema()),
