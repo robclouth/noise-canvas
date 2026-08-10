@@ -18,7 +18,6 @@ export interface StepsState {
   getSteps: () => BrushStep[];
   setStepParameter: (key: ParameterKey, value: unknown) => void;
   setStepName: (index: number, name: string) => void;
-  ensureStepColors: () => void;
   updateActiveStepLockedOffset: (offset: { beats: number; pitch: number } | null) => void;
 }
 
@@ -136,20 +135,6 @@ export const createStepsSlice = (set: ZustandSet, get: ZustandGet): StepsState =
         const draftSteps = draft.brushes[draft.activeBrushIndex]?.steps;
         if (draftSteps && draftSteps[index]) {
           draftSteps[index].name = name;
-        }
-      }),
-    );
-  },
-
-  ensureStepColors: () => {
-    set(
-      produce((draft: State) => {
-        const draftSteps = draft.brushes[draft.activeBrushIndex]?.steps;
-        if (!draftSteps) return;
-        for (const step of draftSteps) {
-          if (!step.color) {
-            step.color = pickNextStepColor(draftSteps.map((s) => s.color));
-          }
         }
       }),
     );

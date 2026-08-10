@@ -6,7 +6,7 @@ import { useStore } from "@renderer/store";
 import { MAX_STEPS } from "@renderer/store/steps";
 import type { BrushColor } from "@renderer/store/types";
 import { Copy, Plus, Trash } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { useShallow } from "zustand/shallow";
 import { Tooltip } from "../tooltip";
 
@@ -26,27 +26,23 @@ export function Steps() {
     stepSig,
     stepCount,
     activeStepIndex,
-    activeBrushIndex,
     setActiveStepIndex,
     addStep,
     removeStep,
     duplicateStep,
     reorderSteps,
-    ensureStepColors,
   } = useStore(
     useShallow((state) => {
       const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
       return {
-        stepSig: steps.map((s) => `${s.id} ${s.color ?? ""}`).join("\n"),
+        stepSig: steps.map((s) => `${s.id} ${s.color ? `${s.color.hue}:${s.color.variation}` : ""}`).join("\n"),
         stepCount: steps.length,
         activeStepIndex: state.activeStepIndex,
-        activeBrushIndex: state.activeBrushIndex,
         setActiveStepIndex: state.setActiveStepIndex,
         addStep: state.addStep,
         removeStep: state.removeStep,
         duplicateStep: state.duplicateStep,
         reorderSteps: state.reorderSteps,
-        ensureStepColors: state.ensureStepColors,
       };
     }),
   );
@@ -57,16 +53,16 @@ export function Steps() {
         ? []
         : stepSig.split("\n").map((entry) => {
             const sep = entry.indexOf(" ");
-            const color = entry.slice(sep + 1);
-            return { id: entry.slice(0, sep), color: (color || undefined) as BrushColor | undefined };
+            const colorStr = entry.slice(sep + 1);
+            const colorSep = colorStr.indexOf(":");
+            const color: BrushColor | undefined =
+              colorSep > 0
+                ? { hue: colorStr.slice(0, colorSep), variation: Number(colorStr.slice(colorSep + 1)) }
+                : undefined;
+            return { id: entry.slice(0, sep), color };
           }),
     [stepSig],
   );
-
-  const missingColor = stepMeta.some((s) => !s.color);
-  useEffect(() => {
-    if (missingColor) ensureStepColors();
-  }, [activeBrushIndex, missingColor, ensureStepColors]);
 
   const canAddStep = stepCount < MAX_STEPS;
   const canRemoveStep = stepCount > 1;

@@ -1,6 +1,7 @@
 import { deepMerge } from "@mantine/core";
 import { EffectItem, syncEffects } from "@renderer/effects/types";
 import { CONTEXTUAL_MOD_SOURCES, NUM_MACROS, NUM_MODULATORS } from "@renderer/lib/constants";
+import { pickNextStepColor } from "@renderer/lib/colors";
 import { BrushStep, getParameterDef, isEffectParameter, isStepParameter, parameterDefs } from "@renderer/parameters";
 import { produce } from "immer";
 import { create } from "zustand";
@@ -328,15 +329,21 @@ export const useStore = create<State>()(
             merged.activeFileId = null;
           }
 
-          // Sync effects in all steps to handle added/removed effects
+          // Sync effects in all steps to handle added/removed effects, and
+          // assign palette colors to steps saved before step colors existed.
           if (Array.isArray(merged.brushes)) {
-            merged.brushes = merged.brushes.map((brush) => ({
-              ...brush,
-              steps: ((brush.steps ?? []) as unknown as Record<string, unknown>[]).map((step) => ({
+            merged.brushes = merged.brushes.map((brush) => {
+              const steps = ((brush.steps ?? []) as unknown as Record<string, unknown>[]).map((step) => ({
                 ...step,
                 effects: syncEffects(step.effects as Parameters<typeof syncEffects>[0]),
-              })) as unknown as BrushStep[],
-            }));
+              })) as unknown as BrushStep[];
+              steps.forEach((step, index) => {
+                if (!step.color) {
+                  steps[index] = { ...step, color: pickNextStepColor(steps.map((s) => s.color)) };
+                }
+              });
+              return { ...brush, steps };
+            });
           }
 
           // Seed module-level openFiles with placeholders for persisted entries so
