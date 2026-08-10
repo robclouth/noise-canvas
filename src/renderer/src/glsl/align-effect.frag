@@ -13,7 +13,10 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
   vec4 meta = getDestMetadata(coords.dest);
   float fHz = max(meta.a, 1e-6);
 
-  float anchorUvX  = brushBottomLeftUv.x + ALIGN_ANCHOR_01 * brushSizeUv.x;
+  // Anchor located in brush space, so a brush that wraps the canvas aligns its
+  // wrapped half to the same anchor — one loop earlier in absolute time.
+  float anchorDistUv = getEffectiveBrushOffset(coords.dest).x - ALIGN_ANCHOR_01 * brushSizeUv.x;
+  float anchorUvX  = coords.dest.x - anchorDistUv;
   float anchorSec  = anchorUvX * destFrameCount / destSampleRate;
   float octaves    = log2(fHz / max(destMinFreq, 1e-6));
   float bandAnchor = anchorSec + ALIGN_TILT_SPO * octaves;

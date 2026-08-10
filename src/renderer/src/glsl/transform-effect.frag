@@ -74,14 +74,14 @@ void main() {
     vec2 modOffsetL = coords.sourceL - baseSourceUv;
     vec2 modOffsetR = coords.sourceR - baseSourceUv;
 
-    // Computes the transformed source UV and effective scale for one channel
-    // given its per-channel source-read offset and scalar params. Returns the
-    // sample to write into that channel.
     // Position within the brush, taken modulo the canvas on any wrapping axis so
     // the half of the brush that continues past the edge rotates and scales
     // about the same pivot as the rest of it.
     vec2 brushLocalUv = getEffectiveBrushOffset(coords.dest);
 
+    // Computes the transformed source UV and effective scale for one channel
+    // given its per-channel source-read offset and scalar params. Returns the
+    // sample to write into that channel.
     #define COMPUTE_CHANNEL(outTexel, modOffset, rotV, sxV, syV, shXV, shYV) { \
         vec2 relativeUv = brushLocalUv; \
         float rad = radians(-(rotV)); \

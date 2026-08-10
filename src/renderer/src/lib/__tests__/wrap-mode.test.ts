@@ -2,9 +2,10 @@ import { DataTexture, FloatType, RGBAFormat, Vector2, WebGLRenderer } from "thre
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { SpectrogramData, State } from "../../store/types";
-import { createMockSpectrogramData } from "../../test/mock-spectrogram";
+import { createConstantQMockSpectrogramData, createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState } from "../../test/mock-state";
 import { createGL, createSpectrogramTextures } from "../../test/render-harness";
+import { BRUSH_SIZE_PITCH_FULL, BRUSH_SIZE_TIME_FULL } from "../utils";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 
 function createPlaceholderTexture(): DataTexture {
@@ -31,6 +32,20 @@ function magByFrame(data: Float32Array, numFrames: number, numBands: number): nu
       sum += data[(band * numFrames + frame) * 4];
     }
     out.push(sum / numBands);
+  }
+  return out;
+}
+
+// Magnitude (L channel) per band, averaged over time — the pitch-axis mirror of
+// magByFrame, for fixtures that are constant along time.
+function magByBand(data: Float32Array, numFrames: number, numBands: number): number[] {
+  const out: number[] = [];
+  for (let band = 0; band < numBands; band++) {
+    let sum = 0;
+    for (let frame = 0; frame < numFrames; frame++) {
+      sum += data[(band * numFrames + frame) * 4];
+    }
+    out.push(sum / numFrames);
   }
   return out;
 }
@@ -62,13 +77,13 @@ describe("brush wrap mode", () => {
     modulatorScaleLut.dispose();
   });
 
-  function fill(magForFrame: (frame: number) => number): SpectrogramData {
+  function fill(mag: (frame: number, band: number) => number): SpectrogramData {
     const spec = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "silence" });
     for (let band = 0; band < numBands; band++) {
       for (let frame = 0; frame < numFrames; frame++) {
         const idx = (band * numFrames + frame) * 4;
-        spec.packedData[idx] = magForFrame(frame);
-        spec.packedData[idx + 2] = magForFrame(frame);
+        spec.packedData[idx] = mag(frame, band);
+        spec.packedData[idx + 2] = mag(frame, band);
       }
     }
     return spec;
@@ -82,6 +97,11 @@ describe("brush wrap mode", () => {
   // space, so an exponential ramp reads back as exactly 2^uv at any UV — which
   // makes the read POSITION recoverable from the output magnitude.
   const logRamp = () => fill((frame) => Math.pow(2, frame / numFrames));
+
+  // One distinct magnitude per band, constant along time. The pitch axis is
+  // point-sampled by band index, so the output band's value names the source
+  // band it read from.
+  const bandLadder = () => fill((_frame, band) => (band + 1) / numBands);
 
   function makeRenderer(spec: SpectrogramData, id: string): StrokeRenderer {
     const raw = createSpectrogramTextures(spec);
@@ -131,7 +151,7 @@ describe("brush wrap mode", () => {
       brushSizePitch: 128, // full pitch, so only the time axis is under test
       accumulate: true,
       blendMode: 0,
-      algorithm: 0,
+      algorithm: 4,
       effects: [{ id: "transform", effect: "transform", enabled: true, params: {} }],
       ...overrides,
     };
@@ -156,10 +176,14 @@ describe("brush wrap mode", () => {
     };
   }
 
-  async function paint(spec: SpectrogramData, state: State, cursorX: number, id: string): Promise<number[]> {
+  async function paintRaw(spec: SpectrogramData, state: State, cursorX: number, id: string): Promise<Float32Array> {
     const renderer = makeRenderer(spec, id);
     renderer.renderStroke(params(cursorX), state, sourceFileFor(renderer, spec, id));
-    return magByFrame(await renderer.getFBOData(), numFrames, numBands);
+    return renderer.getFBOData();
+  }
+
+  async function paint(spec: SpectrogramData, state: State, cursorX: number, id: string): Promise<number[]> {
+    return magByFrame(await paintRaw(spec, state, cursorX, id), numFrames, numBands);
   }
 
   // Brush at x=0.75 spanning 0.5 UV runs off the right edge; with time wrap its
@@ -203,6 +227,202 @@ describe("brush wrap mode", () => {
       const local = (((destUv - 0.6) % 1) + 1) % 1;
       const expected = Math.pow(2, 0.6 + local / 2);
       expect(out[frame], `frame ${frame}`).toBeCloseTo(expected, 2);
+    }
+  });
+
+  // The mock analyses at 24 bands/octave, so one semitone is two bands. Shifting
+  // the ladder must rotate it — bands pushed past one end reappear at the other
+  // — rather than smearing the edge band across everything beyond it.
+  it.each([1, -1])("pitch shift of %i semitones wraps past the end band", async (semis) => {
+    const state = stateFor({
+      brushSizeTime: 1, // one beat == the whole file
+      brushWrapMode: 2, // Pitch
+      transformEdgeMode: 1,
+      transformShiftSemis: semis,
+    });
+    const out = magByBand(await paintRaw(bandLadder(), state, 0, `pitch-wrap-${semis}`), numFrames, numBands);
+
+    const bandsPerSemitone = 24 / 12;
+    for (let band = 0; band < numBands; band++) {
+      const sourceBand = (((band + semis * bandsPerSemitone) % numBands) + numBands) % numBands;
+      expect(out[band], `band ${band}`).toBeCloseTo((sourceBand + 1) / numBands, 3);
+    }
+  });
+
+  // Full mode anchors the brush to 0 and sizes it to the whole canvas on that
+  // axis, so the brush covers exactly one loop. A shift must still wrap.
+  it("time shift wraps under a Full-width brush", async () => {
+    const state = stateFor({
+      brushSizeTime: BRUSH_SIZE_TIME_FULL,
+      brushSizePitch: 12,
+      brushWrapMode: 1, // Time
+      transformEdgeMode: 1,
+      transformShiftBeats: 0.5,
+    });
+    const out = await paint(logRamp(), state, 0.5, "full-time");
+
+    for (let frame = 0; frame < numFrames; frame++) {
+      const read = (((frame / numFrames - 0.5) % 1) + 1) % 1;
+      expect(out[frame], `frame ${frame}`).toBeCloseTo(Math.pow(2, read), 2);
+    }
+  });
+
+  it("pitch shift wraps under a Full-height brush", async () => {
+    const state = stateFor({
+      brushSizeTime: 1,
+      brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+      brushWrapMode: 2, // Pitch
+      transformEdgeMode: 1,
+      transformShiftSemis: 1,
+    });
+    const out = magByBand(await paintRaw(bandLadder(), state, 0, "full-pitch"), numFrames, numBands);
+
+    for (let band = 0; band < numBands; band++) {
+      const sourceBand = (band + 2) % numBands;
+      expect(out[band], `band ${band}`).toBeCloseTo((sourceBand + 1) / numBands, 3);
+    }
+  });
+
+  // Edge mode governs reads that leave the BRUSH. A Full-height brush spans the
+  // whole canvas, so nothing a pitch shift reads is ever outside it — every edge
+  // mode must leave the canvas wrap alone and produce the same rotation.
+  it.each([0, 1, 2, 3, 4, 5])("pitch shift wraps under a Full-height brush with edge mode %i", async (edgeMode) => {
+    const state = stateFor({
+      brushSizeTime: 1,
+      brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+      brushWrapMode: 2,
+      transformEdgeMode: edgeMode,
+      transformShiftSemis: 1,
+    });
+    const out = magByBand(await paintRaw(bandLadder(), state, 0, `edge-${edgeMode}`), numFrames, numBands);
+
+    for (let band = 0; band < numBands; band++) {
+      const sourceBand = (band + 2) % numBands;
+      expect(out[band], `band ${band}`).toBeCloseTo((sourceBand + 1) / numBands, 3);
+    }
+  });
+
+  // Edge mode Wrap folds a read back inside the BRUSH, so under a Full-height
+  // brush it folds at the canvas edge — the same rotation the canvas wrap gives,
+  // with or without Wrap mode on. Under a smaller brush it would cycle over that
+  // brush's much shorter pitch span instead.
+  it("Wrap edge mode cycles over the whole canvas when the brush is Full-height", async () => {
+    const state = stateFor({
+      brushSizeTime: 1,
+      brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+      brushWrapMode: 0, // Off — the brush edge is the canvas edge, so Wrap still cycles
+      transformEdgeMode: 2,
+      transformShiftSemis: 1,
+    });
+    const out = magByBand(await paintRaw(bandLadder(), state, 0, "edge-wrap-nocanvas"), numFrames, numBands);
+
+    for (let band = 0; band < numBands; band++) {
+      const sourceBand = (band + 2) % numBands;
+      expect(out[band], `band ${band}`).toBeCloseTo((sourceBand + 1) / numBands, 3);
+    }
+  });
+
+  // Every warp algorithm reads the source through the same dest→source map, so
+  // the wrap must hold for all of them — the app defaults to Neutral (4), not 0.
+  it.each([0, 1, 2, 3, 4, 5])("pitch shift wraps under a Full-height brush with algorithm %i", async (algorithm) => {
+    const state = stateFor({
+      brushSizeTime: 1,
+      brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+      brushWrapMode: 2,
+      transformEdgeMode: 1,
+      transformShiftSemis: 1,
+      algorithm,
+    });
+    const out = magByBand(await paintRaw(bandLadder(), state, 0, `algo-${algorithm}`), numFrames, numBands);
+
+    for (let band = 0; band < numBands; band++) {
+      const sourceBand = (band + 2) % numBands;
+      expect(out[band], `band ${band}`).toBeCloseTo((sourceBand + 1) / numBands, 3);
+    }
+  });
+
+  // Gaborator packs each octave at half the time resolution of the one above, so
+  // bands differ in length and stride. Rebuild the Full-height pitch-wrap case on
+  // that layout, where a wrapped read lands in a band whose time grid is a
+  // different power of two from the one it was read for.
+  describe("dyadic band layout", () => {
+    // 12 bands/octave over 4 octaves => one semitone is exactly one band.
+    const cqSampleRate = 64;
+    const cqBands = 48;
+    const cqShiftSemis = cqBands / 2;
+
+    function cqLadder(): SpectrogramData {
+      const spec = createConstantQMockSpectrogramData({
+        durationSeconds: 1,
+        sampleRate: cqSampleRate,
+        bandsPerOctave: 12,
+        minFreq: 2,
+      });
+      const { bandOffsets, bandLengths } = spec.synthesisMetadata;
+      spec.packedData.fill(0);
+      for (let band = 0; band < spec.numBands; band++) {
+        for (let k = 0; k < bandLengths[band]; k++) {
+          const idx = (bandOffsets[band] + k) * 4;
+          spec.packedData[idx] = (band + 1) / spec.numBands;
+          spec.packedData[idx + 2] = (band + 1) / spec.numBands;
+        }
+      }
+      return spec;
+    }
+
+    // Average each band's own packed run, which is shorter for lower octaves.
+    function cqMagByBand(data: Float32Array, spec: SpectrogramData): number[] {
+      const { bandOffsets, bandLengths } = spec.synthesisMetadata;
+      const out: number[] = [];
+      for (let band = 0; band < spec.numBands; band++) {
+        let sum = 0;
+        for (let k = 0; k < bandLengths[band]; k++) sum += data[(bandOffsets[band] + k) * 4];
+        out.push(sum / bandLengths[band]);
+      }
+      return out;
+    }
+
+    it.each([2, 4])("pitch shift wraps under a Full-height brush with edge mode %i", async (edgeMode) => {
+      const spec = cqLadder();
+      const state = stateFor({
+        brushSizeTime: 1,
+        brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+        brushWrapMode: 2,
+        transformEdgeMode: edgeMode,
+        transformShiftSemis: cqShiftSemis,
+      });
+      const renderer = makeRenderer(spec, `cq-edge-${edgeMode}`);
+      renderer.renderStroke(
+        { ...params(0), totalDuration: spec.numFrames / spec.sampleRate },
+        state,
+        sourceFileFor(renderer, spec, `cq-edge-${edgeMode}`),
+      );
+      const out = cqMagByBand(await renderer.getFBOData(), spec);
+
+      for (let band = 0; band < spec.numBands; band++) {
+        const sourceBand = (band + cqShiftSemis) % spec.numBands;
+        expect(out[band], `band ${band}`).toBeCloseTo((sourceBand + 1) / spec.numBands, 3);
+      }
+    });
+  });
+
+  it("Time & Pitch wrap shifts both axes under a Full brush", async () => {
+    const state = stateFor({
+      brushSizeTime: BRUSH_SIZE_TIME_FULL,
+      brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+      brushWrapMode: 3, // Time & Pitch
+      transformEdgeMode: 1,
+      transformShiftBeats: 0.5,
+      transformShiftSemis: 1,
+    });
+    const raw = await paintRaw(bandLadder(), state, 0.5, "full-both");
+
+    // Content is constant along time, so the time shift must leave the ladder
+    // intact while the pitch shift rotates it by two bands.
+    const out = magByBand(raw, numFrames, numBands);
+    for (let band = 0; band < numBands; band++) {
+      const sourceBand = (band + 2) % numBands;
+      expect(out[band], `band ${band}`).toBeCloseTo((sourceBand + 1) / numBands, 3);
     }
   });
 });

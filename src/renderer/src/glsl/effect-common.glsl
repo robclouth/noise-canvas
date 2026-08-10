@@ -222,11 +222,11 @@ vec2 interpolateComplex(vec2 magPhase1, vec2 magPhase2, float amount) {
 // clamped inside the band, since index bandLength is the START of the next
 // (lower-frequency) band in the packed layout, not a later time.
 void bandTimeIndices(float scaledTime, float bandLength, out float index0, out float index1, out float fraction) {
-  float length = max(bandLength, 1.0);
-  float t = wrapsTimeAxis() ? mod(scaledTime, length) : clamp(scaledTime, 0.0, length - 1.0);
+  float frames = max(bandLength, 1.0);
+  float t = wrapsTimeAxis() ? mod(scaledTime, frames) : clamp(scaledTime, 0.0, frames - 1.0);
   index0 = floor(t);
   fraction = t - index0;
-  index1 = wrapsTimeAxis() ? mod(index0 + 1.0, length) : min(index0 + 1.0, length - 1.0);
+  index1 = wrapsTimeAxis() ? mod(index0 + 1.0, frames) : min(index0 + 1.0, frames - 1.0);
 }
 
 /**
@@ -303,16 +303,25 @@ float getAudioLevelDb(vec2 uv) {
 
 // Forward freq-preserving map: dest UV.y → source UV.y such that the two UVs
 // refer to the same absolute frequency. Works across different minFreq /
-// bandsPerOctave / bandCount.
+// bandsPerOctave / bandCount, and is the exact inverse of sourceToDestBandUv.
 // Gaborator's band layout has UV.y increasing with frequency (band 0 = top of
-// UV = highest freq), so sourceUV.y increases with sourceBandIdx. The freq
-// anchor is the source's actual lowest-band center freq read from metadata,
-// since gaborator snaps the requested minFreq to its internal band tuning and
-// the two can disagree by up to half a band — using the config value would
-// let (sourceBandIdx + 0.5) round to the next integer and shift every bin.
+// UV = highest freq), so both bandIdx values below count up from the lowest
+// band as UV.y rises. Each freq anchor is that texture's actual lowest-band
+// center freq read from metadata, since gaborator snaps the requested minFreq
+// to its internal band tuning and the two can disagree by up to half a band —
+// using the config value would let (sourceBandIdx + 0.5) round to the next
+// integer and shift every bin.
+// The layout is geometric, so the dest frequency is computed in closed form
+// rather than fetched by band index: that fetch saturates at the outermost
+// band, which would pin a UV that a pitch shift pushed past the top or bottom
+// to the edge band. Everything downstream — the canvas wrap below, and the
+// brush edge modes, which invert this map — would then never see that the read
+// had left the canvas at all.
 float destToSourceBandUv(vec2 destUnpackedUv) {
-  float destFreqHz = getDestMetadata(destUnpackedUv).a;
+  float destLowestFreq = max(fetchBandMetadata(destMetadataTex, destBandCount - 1.0).a, 1e-6);
   float sourceLowestFreq = max(fetchBandMetadata(sourceMetadataTex, sourceBandCount - 1.0).a, 1e-6);
+  float destBandIdx = wrapUv(destUnpackedUv).y * destBandCount - 0.5;
+  float destFreqHz = destLowestFreq * exp2(destBandIdx / max(destBandsPerOctave, 1e-6));
   float sourceBandIdx = sourceBandsPerOctave * log2(max(destFreqHz, 1e-6) / sourceLowestFreq);
   return (sourceBandIdx + 0.5) / max(sourceBandCount, 1.0);
 }
@@ -458,20 +467,20 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 d
 
   float timeInFrames   = sourceUv.x * sourceFrameCount;
   float scaledTime     = timeInFrames / exp2(bandTimeScaleExp);
-  float timeIndexFloor = floor(scaledTime);
-  float timeFraction   = fract(scaledTime);
+  float timeIndex0, timeIndex1, timeFraction;
+  bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, timeFraction);
 
   ivec2 sSize    = textureSize(sourceSpectrogramTex, 0);
   float widthF   = float(max(sSize.x, 1));
 
-  float linearIndex1 = bandStartOffset + timeIndexFloor;
+  float linearIndex1 = bandStartOffset + timeIndex0;
   int px1 = int(mod(linearIndex1, widthF));
   int py1 = int(floor(linearIndex1 / widthF));
   px1 = clamp(px1, 0, max(sSize.x - 1, 0));
   py1 = clamp(py1, 0, max(sSize.y - 1, 0));
   vec4 smp0 = texelFetch(sourceSpectrogramTex, ivec2(px1, py1), 0);
 
-  float linearIndex2 = bandStartOffset + timeIndexFloor + 1.0;
+  float linearIndex2 = bandStartOffset + timeIndex1;
   int px2 = int(mod(linearIndex2, widthF));
   int py2 = int(floor(linearIndex2 / widthF));
   px2 = clamp(px2, 0, max(sSize.x - 1, 0));
@@ -591,8 +600,9 @@ vec2 neutralV2Phase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4
   float signY = scaleY < 0.0 ? -1.0 : 1.0;
   float absScaleX = abs(scaleX);
 
-  // Frequency ratio for pitch scaling
-  vec4 srcMeta  = getSourceMetadata(sourceUv);
+  // Frequency ratio for pitch scaling. Read from the band actually sampled, so a
+  // read that wrapped the pitch axis reports the frequency it landed on.
+  vec4 srcMeta  = getSourceMetadata(wrapUv(sourceUv));
   float srcFreqHz = srcMeta.a;
   float destFreqHz = getDestMetadata(destUv).a;
   float freqRatio = (srcFreqHz > 1e-3) ? destFreqHz / srcFreqHz : 1.0;

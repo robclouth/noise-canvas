@@ -128,7 +128,7 @@ void main() {
 
     // --- Brush edge mode (X axis only; convolve doesn't step across bands). --
     float tapDestUvX = coords.dest.x - destUvStepPerTap * float(k);
-    float localX = tapDestUvX - brushBottomLeftUv.x;
+    float localX = getEffectiveBrushOffset(vec2(tapDestUvX, coords.dest.y)).x;
     bool tapZero, tapInvert;
     float newLocalX = applyEdgeModeAxis(localX, brushSizeUv.x, convolveEdgeMode, tapZero, tapInvert);
     if (tapZero) continue;

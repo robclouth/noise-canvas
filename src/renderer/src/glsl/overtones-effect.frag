@@ -50,7 +50,9 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
         float pixelOffsetL = destBandsPerOctave * semitone / 12.0 * scale.x;
         float offsetVL = -pixelOffsetL / destBandCount;
         vec2 overtoneUvL = coords.sourceL + vec2(0.0, offsetVL);
-        bool inL = overtoneUvL.y >= 0.0 && overtoneUvL.y <= 1.0;
+        // A harmonic past the top or bottom band is dropped, unless the pitch
+        // axis wraps — then it comes back in from the other end.
+        bool inL = wrapsPitchAxis() || (overtoneUvL.y >= 0.0 && overtoneUvL.y <= 1.0);
 
         if (sameHarmonics) {
             if (!inL) continue;
@@ -74,7 +76,7 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
             float pixelOffsetR = destBandsPerOctave * semitone / 12.0 * scale.y;
             float offsetVR = -pixelOffsetR / destBandCount;
             vec2 overtoneUvR = coords.sourceR + vec2(0.0, offsetVR);
-            bool inR = overtoneUvR.y >= 0.0 && overtoneUvR.y <= 1.0;
+            bool inR = wrapsPitchAxis() || (overtoneUvR.y >= 0.0 && overtoneUvR.y <= 1.0);
             if (inR) {
                 vec4 harmonicColorR = getTransformedSample(overtoneUvR, coords.dest, 1.0, 1.0, 0.0, offsetVR);
                 sumMagR += getMag(harmonicColorR.ba) * amplitudeR;
