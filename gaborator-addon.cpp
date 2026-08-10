@@ -508,6 +508,10 @@ static constexpr float ONSET_LOG_GAMMA = 20.0f;
 // Decay time constant of the per-band running peak used for whitening.
 static constexpr double ONSET_WHITEN_TAU_SEC = 2.0;
 static constexpr float ONSET_WHITEN_FLOOR = 1e-4f;
+// Floor of the same running peak as a share of the band's own loudest moment,
+// so that quiet enough content in a band is left quiet instead of being lifted
+// to the same footing as that band's real material.
+static constexpr float ONSET_WHITEN_FLOOR_RATIO = 0.05f;
 // Bands either side of the current one included in the SuperFlux max filter —
 // a semitone of vibrato at the app's default 36 bands per octave.
 static constexpr int ONSET_MAX_FILTER_BANDS = 3;
@@ -536,6 +540,9 @@ static constexpr double ONSET_RIDGE_CLIMB = 0.01;
 // Detection-function level, relative to the file maximum, below which a peak is
 // silence rather than an event.
 static constexpr double ONSET_FLOOR_RATIO = 0.02;
+// Longest an event's level is looked for past its anchor, when no other event
+// follows sooner. Covers the time the coarsest bands take to register a hit.
+static constexpr double ONSET_LEVEL_POST_SEC = 0.150;
 
 static std::vector<DetectedOnset> computeOnsets(const float *packed,
                                                 size_t packedFloats,
@@ -556,6 +563,11 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     // this band's previous time position, so whole tracks are kept rather than
     // one previous frame.
     std::vector<std::vector<float>> whitened(layout.numBands);
+    uint32_t longestBand = 0;
+    for (int b = 0; b < layout.numBands; ++b)
+        longestBand = std::max(longestBand, layout.bandLengths[b]);
+    std::vector<float> compressed(longestBand, 0.0f);
+
     for (int b = 0; b < layout.numBands; ++b)
     {
         const size_t offset = layout.bandOffsets[b];
@@ -565,31 +577,76 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
             continue;
         const double strideSec = (double)(1LL << layout.bandStepLog2s[b]) / sampleRate;
         const float decay = (float)std::exp(-strideSec / ONSET_WHITEN_TAU_SEC);
-        float peak = ONSET_WHITEN_FLOOR;
+
+        float bandMax = 0.0f;
         for (uint32_t k = 0; k < len; ++k)
         {
             const size_t px = (offset + k) * 4;
+            compressed[k] = 0.0f;
             if (px + 3 >= packedFloats)
-                break;
+                continue;
             float mag = 0.0f;
             for (int ch = 0; ch < channels; ++ch)
                 mag += packed[px + ch * 2];
-            const float c = std::log1p(ONSET_LOG_GAMMA * std::max(0.0f, mag * channelScale));
-            peak = std::max(std::max(c, decay * peak), ONSET_WHITEN_FLOOR);
-            whitened[b][k] = c / peak;
+            compressed[k] = std::log1p(ONSET_LOG_GAMMA * std::max(0.0f, mag * channelScale));
+            bandMax = std::max(bandMax, compressed[k]);
+        }
+
+        // Whitening is meant to put the bands on equal terms, not to promote
+        // what is effectively silence in one of them. Held off the band's own
+        // maximum rather than off an absolute floor: with only an absolute
+        // floor, a band opens the file whitening against nothing, so the first
+        // thing to reach it — the analysis ringing ahead of the first hit, which
+        // in the slowest bands begins a twelfth of a second early — is scaled to
+        // full and read as an event of its own.
+        const float floorLevel = std::max(ONSET_WHITEN_FLOOR, ONSET_WHITEN_FLOOR_RATIO * bandMax);
+        float peak = floorLevel;
+        for (uint32_t k = 0; k < len; ++k)
+        {
+            peak = std::max(std::max(compressed[k], decay * peak), floorLevel);
+            whitened[b][k] = compressed[k] / peak;
         }
     }
 
     // A band deposits one coefficient every stride samples, so dropping each
     // whole contribution into the single bin it starts in makes the low bands —
     // whose stride is tens of milliseconds — spike periodically and swamp
-    // everything else. Each contribution is instead spread across the span of
-    // time the coefficient covers, centred on it, which turns every band into a
-    // rate that can be summed. The spreads are accumulated as differences and
-    // integrated once, so the cost does not grow with the span.
-    std::vector<double> fluxDiff((size_t)numBins + 1, 0.0);
-    std::vector<double> complexDiff((size_t)numBins + 1, 0.0);
-    std::vector<double> energyDiff((size_t)numBins + 1, 0.0);
+    // everything else. Each contribution is instead spread across the time the
+    // coefficient covers, which turns every band into something that can be
+    // summed with the others.
+    //
+    // Spread as a triangle peaking at the coefficient's own position rather
+    // than as a flat block over it. A block has no single highest point, so
+    // peak picking takes its leading edge, which for the slowest bands is a
+    // twelfth of a second before the hit that made it — every first hit in a
+    // file was being reported twice, once at the real attack and once at the
+    // front edge of the block carrying it. Triangles a stride wide, a stride
+    // apart, also sum to exactly the value they carry, so a steady band reads
+    // as a steady level rather than rippling at its own sampling rate.
+    //
+    // Accumulated as second differences and integrated twice, so the cost does
+    // not grow with how far each one is spread. The padding holds the part of a
+    // triangle that falls outside the file, which still has to be integrated
+    // through for the part inside it to come out right.
+    int64_t maxSpan = 1;
+    for (int b = 0; b < layout.numBands; ++b)
+    {
+        const double strideSec = (double)(1LL << layout.bandStepLog2s[b]) / sampleRate;
+        maxSpan = std::max(maxSpan, (int64_t)std::ceil(strideSec / ONSET_BIN_SEC));
+    }
+    const int64_t pad = maxSpan + 2;
+    const size_t curveLen = (size_t)(numBins + 2 * pad + 2);
+    std::vector<double> fluxD2(curveLen, 0.0);
+    std::vector<double> complexD2(curveLen, 0.0);
+    std::vector<double> energyD2(curveLen, 0.0);
+    std::vector<double> levelD2(curveLen, 0.0);
+
+    const auto addTriangle = [pad](std::vector<double> &d2, int64_t centre, int64_t half, double peak) {
+        const double slope = peak / (double)half;
+        d2[(size_t)(pad + centre - half + 1)] += slope;
+        d2[(size_t)(pad + centre + 1)] -= 2.0 * slope;
+        d2[(size_t)(pad + centre + half + 1)] += slope;
+    };
 
     for (int b = 0; b < layout.numBands; ++b)
     {
@@ -600,8 +657,18 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         const int64_t stride = 1LL << layout.bandStepLog2s[b];
         const double strideSec = (double)stride / sampleRate;
         const double binsPerCoef = strideSec / ONSET_BIN_SEC;
-        const int64_t span = std::max<int64_t>(1, (int64_t)std::llround(binsPerCoef));
+        // Half-width of each triangle: a stride, rounded up so that consecutive
+        // ones overlap rather than leaving gaps between them.
+        const int64_t span = std::max<int64_t>(1, (int64_t)std::ceil(binsPerCoef));
+        // The rate curves carry the same total per coefficient however wide it
+        // is spread, so their peak is divided by the width.
         const double spread = 1.0 / (double)span;
+        // The finest bands deposit more than one coefficient per bin. Summing
+        // them would report a band as louder than it is purely for being
+        // sampled densely, so a coefficient covering less than a bin counts for
+        // the fraction it covers, which averages them instead. The rate curves
+        // want that sum, being per unit time rather than per instant.
+        const double levelWeight = std::min(1.0, binsPerCoef);
         const int nbLo = std::max(0, b - ONSET_MAX_FILTER_BANDS);
         const int nbHi = std::min(layout.numBands - 1, b + ONSET_MAX_FILTER_BANDS);
 
@@ -611,16 +678,22 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
             if (px + 3 >= packedFloats)
                 break;
             const int64_t centre = std::min(numBins - 1, (int64_t)((double)k * binsPerCoef));
-            const int64_t binLo = std::max<int64_t>(0, centre - (span - 1) / 2);
-            const int64_t binHi = std::min(numBins - 1, binLo + span - 1);
-            const double weight = spread;
 
             float mag = 0.0f;
             for (int ch = 0; ch < channels; ++ch)
                 mag += packed[px + ch * 2];
             mag *= channelScale;
-            energyDiff[binLo] += mag * weight;
-            energyDiff[binHi + 1] -= mag * weight;
+            addTriangle(energyD2, centre, span, mag * spread);
+            // Power present at an instant, which is what an onset's strength is
+            // measured on. Squared because that is what tracks the signal's own
+            // level: on a kick and a hi-hat 24 dB apart it reproduces the ratio
+            // to within 4%, where a sum of bare magnitudes reads only 5:1. Not
+            // divided by the width, so a band counts the same whether it is
+            // sampled every third of a millisecond or every sixth of a second —
+            // the rate curves, which decide timing rather than size, divide a
+            // band by how coarsely it is sampled and on that pair rank the
+            // hi-hat 16× above the kick.
+            addTriangle(levelD2, centre, span, mag * mag * levelWeight);
 
             if (k == 0)
                 continue;
@@ -637,10 +710,7 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
             }
             const float d = whitened[b][k] - maxNeighbor;
             if (d > 0.0f)
-            {
-                fluxDiff[binLo] += d * weight;
-                fluxDiff[binHi + 1] -= d * weight;
-            }
+                addTriangle(fluxD2, centre, span, (double)d * spread);
 
             if (k < 2)
                 continue;
@@ -668,27 +738,38 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
             // Gated by the whitened magnitude, so it only counts where there is
             // content and lands on the same scale as the flux term.
             const double cdev = (double)(whitened[b][k] * relDev * channelScale);
-            complexDiff[binLo] += cdev * weight;
-            complexDiff[binHi + 1] -= cdev * weight;
+            addTriangle(complexD2, centre, span, cdev * spread);
         }
     }
 
     std::vector<double> odf((size_t)numBins, 0.0);
     std::vector<double> energy((size_t)numBins, 0.0);
+    std::vector<double> level((size_t)numBins, 0.0);
     std::vector<double> prefix((size_t)numBins + 1, 0.0);
-    double fluxRun = 0.0;
-    double complexRun = 0.0;
-    double energyRun = 0.0;
+    double fluxSlope = 0.0, fluxRun = 0.0;
+    double complexSlope = 0.0, complexRun = 0.0;
+    double energySlope = 0.0, energyRun = 0.0;
+    double levelSlope = 0.0, levelRun = 0.0;
     double maxOdf = 0.0;
-    for (int64_t i = 0; i < numBins; ++i)
+    for (size_t i = 0; i < curveLen; ++i)
     {
-        fluxRun += fluxDiff[i];
-        complexRun += complexDiff[i];
-        energyRun += energyDiff[i];
-        odf[i] = fluxRun + ONSET_COMPLEX_WEIGHT * complexRun;
-        energy[i] = energyRun;
-        prefix[i + 1] = prefix[i] + odf[i];
-        maxOdf = std::max(maxOdf, odf[i]);
+        fluxSlope += fluxD2[i];
+        fluxRun += fluxSlope;
+        complexSlope += complexD2[i];
+        complexRun += complexSlope;
+        energySlope += energyD2[i];
+        energyRun += energySlope;
+        levelSlope += levelD2[i];
+        levelRun += levelSlope;
+
+        const int64_t bin = (int64_t)i - pad;
+        if (bin < 0 || bin >= numBins)
+            continue;
+        odf[bin] = std::max(0.0, fluxRun + ONSET_COMPLEX_WEIGHT * complexRun);
+        energy[bin] = std::max(0.0, energyRun);
+        level[bin] = std::max(0.0, levelRun);
+        prefix[bin + 1] = prefix[bin] + odf[bin];
+        maxOdf = std::max(maxOdf, odf[bin]);
     }
     if (maxOdf <= 0.0)
         return onsets;
@@ -710,8 +791,19 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     const int64_t meanPost = std::max<int64_t>(1, (int64_t)std::llround(ONSET_MEAN_POST_SEC / ONSET_BIN_SEC));
     const int64_t minGap = std::max<int64_t>(1, (int64_t)std::llround(ONSET_MIN_GAP_SEC / ONSET_BIN_SEC));
     const int64_t ridgeSearch = std::max<int64_t>(1, (int64_t)std::llround(ONSET_RIDGE_SEARCH_SEC / ONSET_BIN_SEC));
+    const int64_t levelPost = std::max<int64_t>(1, (int64_t)std::llround(ONSET_LEVEL_POST_SEC / ONSET_BIN_SEC));
     const double floorLevel = maxOdf * ONSET_FLOOR_RATIO;
     int64_t lastBin = -minGap;
+
+    // Where each event is, found first; how big it is needs the next one's
+    // position, so that is measured in a second pass.
+    struct Candidate
+    {
+        double timeSec;
+        int64_t peakBin;
+        int64_t anchorBin;
+    };
+    std::vector<Candidate> candidates;
 
     for (int64_t n = 0; n < numBins; ++n)
     {
@@ -766,8 +858,41 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         const double delta = denom < 0.0 ? std::max(-0.5, std::min(0.5, 0.5 * (eL - eR) / denom)) : 0.0;
 
         const double timeSec = std::min(durationSec, ((double)bestBin + 0.5 + delta) * ONSET_BIN_SEC);
-        onsets.push_back({timeSec, (float)(v / (localMean + 1e-12))});
+        candidates.push_back({timeSec, n, bestBin});
         lastBin = n;
+    }
+
+    // How big each event is: the level it reaches, against the quietest the
+    // signal got in the window before it. A difference of levels rather than a
+    // ratio, because a ratio measures how isolated a hit is rather than how
+    // large — a tick alone in a gap beats a kick inside a busy bar, which is
+    // the opposite of what a strength is read as. The floor is a minimum rather
+    // than a mean so that a rise which began before the detection function
+    // peaked still counts as part of the event rather than as the level it grew
+    // from, and the level is looked for up to the next event, because the low
+    // bands take most of a tenth of a second to register a hit and a kick's
+    // body peaks long after its attack.
+    onsets.reserve(candidates.size());
+    for (size_t i = 0; i < candidates.size(); ++i)
+    {
+        const int64_t n = candidates[i].peakBin;
+        const int64_t anchor = candidates[i].anchorBin;
+
+        const int64_t sLo = std::max<int64_t>(0, n - meanPre);
+        double preFloor = level[sLo];
+        for (int64_t j = sLo; j <= n; ++j)
+            preFloor = std::min(preFloor, level[j]);
+
+        int64_t sHi = std::min<int64_t>(numBins - 1, anchor + levelPost);
+        if (i + 1 < candidates.size())
+            sHi = std::min(sHi, std::max(anchor, candidates[i + 1].anchorBin - 1));
+        double postPeak = 0.0;
+        for (int64_t j = n; j <= sHi; ++j)
+            postPeak = std::max(postPeak, level[j]);
+
+        // Reported as an amplitude, so saliences stand in the same ratios to
+        // each other as the levels of the hits do.
+        onsets.push_back({candidates[i].timeSec, (float)std::sqrt(std::max(0.0, postPeak - preFloor))});
     }
 
     return onsets;
