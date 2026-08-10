@@ -104,9 +104,7 @@ export function evaluatePattern(code: string): Pattern {
 
   let result: unknown;
   try {
-    const evaluate = new Function(...names, `"use strict"; return (${source});`) as (
-      ...args: unknown[]
-    ) => unknown;
+    const evaluate = new Function(...names, `"use strict"; return (${source});`) as (...args: unknown[]) => unknown;
     result = evaluate(...values);
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : String(error));

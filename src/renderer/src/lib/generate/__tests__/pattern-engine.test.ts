@@ -119,7 +119,12 @@ describe("resolveBrushToken", () => {
     expect(resolveBrushToken("3", brushes)).toBe(2);
     expect(resolveBrushToken("4", brushes)).toBe(null);
     expect(resolveBrushToken("0", brushes)).toBe(null);
-    expect(resolveBrushToken("0", Array.from({ length: 10 }, (_, i) => makeBrush(`B${i}`)))).toBe(9);
+    expect(
+      resolveBrushToken(
+        "0",
+        Array.from({ length: 10 }, (_, i) => makeBrush(`B${i}`)),
+      ),
+    ).toBe(9);
   });
 
   it("maps a letter to its hotkey", () => {

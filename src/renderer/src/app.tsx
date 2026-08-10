@@ -10,6 +10,7 @@ import { useDropzone } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
 import { CanvasPanel, PaletteBar } from "./components/layout/canvas-panel";
 import { ExtensionMenuBar } from "./components/layout/menu-bar";
+import { GeneratePanel } from "./components/layout/generate-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
 import { host } from "./lib/host";
@@ -363,6 +364,7 @@ function App(): React.JSX.Element {
             </ScrollArea>
           )}
           <PaletteBar />
+          <GeneratePanel />
           <TransportPanel />
         </Stack>
         <SidebarPanel />
