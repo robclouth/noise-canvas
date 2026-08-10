@@ -639,7 +639,6 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     std::vector<double> fluxD2(curveLen, 0.0);
     std::vector<double> complexD2(curveLen, 0.0);
     std::vector<double> energyD2(curveLen, 0.0);
-    std::vector<double> levelD2(curveLen, 0.0);
 
     const auto addTriangle = [pad](std::vector<double> &d2, int64_t centre, int64_t half, double peak) {
         const double slope = peak / (double)half;
@@ -663,12 +662,6 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         // The rate curves carry the same total per coefficient however wide it
         // is spread, so their peak is divided by the width.
         const double spread = 1.0 / (double)span;
-        // The finest bands deposit more than one coefficient per bin. Summing
-        // them would report a band as louder than it is purely for being
-        // sampled densely, so a coefficient covering less than a bin counts for
-        // the fraction it covers, which averages them instead. The rate curves
-        // want that sum, being per unit time rather than per instant.
-        const double levelWeight = std::min(1.0, binsPerCoef);
         const int nbLo = std::max(0, b - ONSET_MAX_FILTER_BANDS);
         const int nbHi = std::min(layout.numBands - 1, b + ONSET_MAX_FILTER_BANDS);
 
@@ -684,16 +677,6 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
                 mag += packed[px + ch * 2];
             mag *= channelScale;
             addTriangle(energyD2, centre, span, mag * spread);
-            // Power present at an instant, which is what an onset's strength is
-            // measured on. Squared because that is what tracks the signal's own
-            // level: on a kick and a hi-hat 24 dB apart it reproduces the ratio
-            // to within 4%, where a sum of bare magnitudes reads only 5:1. Not
-            // divided by the width, so a band counts the same whether it is
-            // sampled every third of a millisecond or every sixth of a second —
-            // the rate curves, which decide timing rather than size, divide a
-            // band by how coarsely it is sampled and on that pair rank the
-            // hi-hat 16× above the kick.
-            addTriangle(levelD2, centre, span, mag * mag * levelWeight);
 
             if (k == 0)
                 continue;
@@ -744,12 +727,10 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
 
     std::vector<double> odf((size_t)numBins, 0.0);
     std::vector<double> energy((size_t)numBins, 0.0);
-    std::vector<double> level((size_t)numBins, 0.0);
     std::vector<double> prefix((size_t)numBins + 1, 0.0);
     double fluxSlope = 0.0, fluxRun = 0.0;
     double complexSlope = 0.0, complexRun = 0.0;
     double energySlope = 0.0, energyRun = 0.0;
-    double levelSlope = 0.0, levelRun = 0.0;
     double maxOdf = 0.0;
     for (size_t i = 0; i < curveLen; ++i)
     {
@@ -759,15 +740,12 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         complexRun += complexSlope;
         energySlope += energyD2[i];
         energyRun += energySlope;
-        levelSlope += levelD2[i];
-        levelRun += levelSlope;
 
         const int64_t bin = (int64_t)i - pad;
         if (bin < 0 || bin >= numBins)
             continue;
         odf[bin] = std::max(0.0, fluxRun + ONSET_COMPLEX_WEIGHT * complexRun);
         energy[bin] = std::max(0.0, energyRun);
-        level[bin] = std::max(0.0, levelRun);
         prefix[bin + 1] = prefix[bin] + odf[bin];
         maxOdf = std::max(maxOdf, odf[bin]);
     }
@@ -791,19 +769,12 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     const int64_t meanPost = std::max<int64_t>(1, (int64_t)std::llround(ONSET_MEAN_POST_SEC / ONSET_BIN_SEC));
     const int64_t minGap = std::max<int64_t>(1, (int64_t)std::llround(ONSET_MIN_GAP_SEC / ONSET_BIN_SEC));
     const int64_t ridgeSearch = std::max<int64_t>(1, (int64_t)std::llround(ONSET_RIDGE_SEARCH_SEC / ONSET_BIN_SEC));
-    const int64_t levelPost = std::max<int64_t>(1, (int64_t)std::llround(ONSET_LEVEL_POST_SEC / ONSET_BIN_SEC));
     const double floorLevel = maxOdf * ONSET_FLOOR_RATIO;
     int64_t lastBin = -minGap;
 
     // Where each event is, found first; how big it is needs the next one's
     // position, so that is measured in a second pass.
-    struct Candidate
-    {
-        double timeSec;
-        int64_t peakBin;
-        int64_t anchorBin;
-    };
-    std::vector<Candidate> candidates;
+    std::vector<double> candidates;
 
     for (int64_t n = 0; n < numBins; ++n)
     {
@@ -858,41 +829,78 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         const double delta = denom < 0.0 ? std::max(-0.5, std::min(0.5, 0.5 * (eL - eR) / denom)) : 0.0;
 
         const double timeSec = std::min(durationSec, ((double)bestBin + 0.5 + delta) * ONSET_BIN_SEC);
-        candidates.push_back({timeSec, n, bestBin});
+        candidates.push_back(timeSec);
         lastBin = n;
     }
 
-    // How big each event is: the level it reaches, against the quietest the
-    // signal got in the window before it. A difference of levels rather than a
-    // ratio, because a ratio measures how isolated a hit is rather than how
-    // large — a tick alone in a gap beats a kick inside a busy bar, which is
-    // the opposite of what a strength is read as. The floor is a minimum rather
-    // than a mean so that a rise which began before the detection function
-    // peaked still counts as part of the event rather than as the level it grew
-    // from, and the level is looked for up to the next event, because the low
-    // bands take most of a tenth of a second to register a hit and a kick's
-    // body peaks long after its attack.
+    // How big each event is: the power that arrives with it. Per band, the peak
+    // power reached between this onset and the next, less the power just before
+    // it, counted only where it rises — so a sound stopping scores nothing
+    // however loud what ended was, and a hit in one band is not credited to a
+    // neighbouring event. Read off each band's own stored coefficients rather
+    // than any curve summed across bands: the slowest bands cover so much time
+    // each that a summed curve smears adjacent events into each other in busy
+    // material. Power because that is what tracks the signal's own level — a
+    // kick and a hi-hat 24 dB apart come out in the ratio of their true levels
+    // to within a few percent, where bare magnitudes read 5:1 — and reported as
+    // an amplitude, so saliences stand in the same ratios as the hits do.
     onsets.reserve(candidates.size());
     for (size_t i = 0; i < candidates.size(); ++i)
     {
-        const int64_t n = candidates[i].peakBin;
-        const int64_t anchor = candidates[i].anchorBin;
-
-        const int64_t sLo = std::max<int64_t>(0, n - meanPre);
-        double preFloor = level[sLo];
-        for (int64_t j = sLo; j <= n; ++j)
-            preFloor = std::min(preFloor, level[j]);
-
-        int64_t sHi = std::min<int64_t>(numBins - 1, anchor + levelPost);
+        const double tSec = candidates[i];
+        double tEndSec = std::min(durationSec, tSec + ONSET_LEVEL_POST_SEC);
         if (i + 1 < candidates.size())
-            sHi = std::min(sHi, std::max(anchor, candidates[i + 1].anchorBin - 1));
-        double postPeak = 0.0;
-        for (int64_t j = n; j <= sHi; ++j)
-            postPeak = std::max(postPeak, level[j]);
+            tEndSec = std::min(tEndSec, candidates[i + 1]);
+        const int64_t sample = (int64_t)(tSec * sampleRate);
+        const int64_t sampleEnd = (int64_t)(tEndSec * sampleRate);
 
-        // Reported as an amplitude, so saliences stand in the same ratios to
-        // each other as the levels of the hits do.
-        onsets.push_back({candidates[i].timeSec, (float)std::sqrt(std::max(0.0, postPeak - preFloor))});
+        double arrived = 0.0;
+        for (int b = 0; b < layout.numBands; ++b)
+        {
+            const size_t offset = layout.bandOffsets[b];
+            const uint32_t len = layout.bandLengths[b];
+            if (len == 0)
+                continue;
+            const int32_t stepLog2 = layout.bandStepLog2s[b];
+            const double strideSec = (double)(1LL << stepLog2) / sampleRate;
+            const int64_t j0 = std::min<int64_t>((int64_t)len - 1, std::max<int64_t>(0, sample >> stepLog2));
+            const int64_t jEnd = std::min<int64_t>((int64_t)len - 1, std::max<int64_t>(j0, sampleEnd >> stepLog2));
+            // A band whose stride is longer than this event's window cannot
+            // tell this event from its neighbours — the coefficient holding the
+            // onset holds them too, so its power would be credited to every
+            // event within a stride of a loud hit. Such a band only counts for
+            // the share of its span this event owns.
+            const double owned = std::min(1.0, (tEndSec - tSec) / strideSec);
+
+            const auto powerAt = [&](int64_t j) -> double {
+                if (j < 0 || j >= (int64_t)len)
+                    return 0.0;
+                const size_t px = (offset + (size_t)j) * 4;
+                if (px + 3 >= packedFloats)
+                    return 0.0;
+                float m = 0.0f;
+                for (int ch = 0; ch < channels; ++ch)
+                    m += packed[px + ch * 2];
+                m *= channelScale;
+                return (double)m * (double)m;
+            };
+            // Averaged over three coefficients so that noise is compared as an
+            // envelope: a noisy band's coefficients scatter, and the maximum of
+            // many raw draws beats any single one — which read a hat's own
+            // decay as new energy arriving at seventy percent of the hit.
+            const auto envAt = [&](int64_t j, int64_t cap) -> double {
+                return (powerAt(j - 1) + powerAt(j) + powerAt(std::min(j + 1, cap))) / 3.0;
+            };
+
+            // The last envelope wholly before the coefficient containing the
+            // onset.
+            const double pre = envAt(j0 - 2, jEnd);
+            double post = 0.0;
+            for (int64_t j = j0; j <= jEnd; ++j)
+                post = std::max(post, envAt(j, jEnd));
+            arrived += std::max(0.0, post - pre) * owned;
+        }
+        onsets.push_back({tSec, (float)std::sqrt(arrived)});
     }
 
     return onsets;
