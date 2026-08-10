@@ -1,0 +1,113 @@
+import type { StampDispatch } from "@renderer/components/file-renderer";
+import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
+import { BEATS_PER_CYCLE, evaluatePattern, queryStamps } from "@renderer/lib/generate/pattern-engine";
+import { GENERATE_PRESETS } from "@renderer/lib/generate/presets";
+import { resolveBrushToken } from "@renderer/lib/generate/resolve-brush";
+import { buildStampState, type ResolvedStamp } from "@renderer/lib/generate/stamp-state";
+import { positionToUv } from "./brush";
+import { openFiles } from "./files";
+import { useTransientStore } from "./transient";
+import type { ZustandGet, ZustandSet } from "./types";
+
+export const GENERATE_PERSISTED_KEYS = ["generateCode"] as const;
+
+export interface GenerateState {
+  /** Pattern source shown in the Generate panel. */
+  generateCode: string;
+  /** Selects which window of the pattern's randomness is used. */
+  generateSeed: number;
+  isGenerating: boolean;
+  setGenerateCode: (code: string) => void;
+  setGenerateSeed: (seed: number) => void;
+  /** Stamps the current pattern across the active file as a single stroke. */
+  runGenerate: () => Promise<void>;
+  /** Picks a new seed and generates again. */
+  rerollGenerate: () => Promise<void>;
+}
+
+export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateState => ({
+  generateCode: GENERATE_PRESETS[0].code,
+  generateSeed: 0,
+  isGenerating: false,
+
+  setGenerateCode: (code) => set({ generateCode: code }),
+  setGenerateSeed: (seed) => set({ generateSeed: seed }),
+
+  runGenerate: async () => {
+    const state = get();
+    const { activeFileId, isGenerating } = state;
+    if (!activeFileId || isGenerating) return;
+
+    const file = openFiles[activeFileId];
+    const renderer = file?.rendererRef?.current;
+    const spectrogramData = file?.spectrogramData;
+    if (!renderer || !spectrogramData) return;
+
+    const bpm = state.filepathsBpm[file.filePath] || 120;
+    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+    const fileBeats = (totalDuration / 60) * bpm;
+    const cycles = Math.max(1, Math.ceil(fileBeats / BEATS_PER_CYCLE));
+    const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
+    // Without a cursor to aim from, stamps land halfway up the file.
+    const basePitch =
+      useTransientStore.getState().cursorPosition?.pitch ?? spectrogramData.numBands / bandsPerSemitone / 2;
+
+    set({ isGenerating: true });
+    try {
+      const events = queryStamps(evaluatePattern(state.generateCode), cycles, state.generateSeed);
+
+      const dispatches: StampDispatch[] = [];
+      for (const event of events) {
+        if (event.beats >= fileBeats) continue;
+
+        const resolved: ResolvedStamp = {
+          ...event,
+          brushIndex: resolveBrushToken(event.brushToken, state.brushes) ?? state.activeBrushIndex,
+          pitchSemis: basePitch + event.semis,
+        };
+        const stampState = buildStampState(state, resolved);
+
+        const { uvX, uvY } = positionToUv(
+          { beats: resolved.beats, pitch: resolved.pitchSemis },
+          bpm,
+          totalDuration,
+          spectrogramData.bandsPerOctave,
+          spectrogramData.numBands,
+        );
+        // Anchor conversion reads the stamp's own brush size and anchor mode,
+        // so it must see the per-stamp state rather than the live one.
+        const { blX, blY } = aimUvToBrushBlUv(
+          stampState,
+          uvX,
+          uvY,
+          bpm,
+          totalDuration,
+          spectrogramData.bandsPerOctave,
+          spectrogramData.numBands,
+        );
+        dispatches.push({ blX, blY, state: stampState });
+      }
+
+      if (dispatches.length === 0) return;
+
+      // The whole pass is one stroke, so it commits as a single history node
+      // and resynthesizes once.
+      renderer.beginStroke();
+      const painted = renderer.renderStampBatch(dispatches);
+      if (painted === 0) {
+        renderer.endStroke();
+        return;
+      }
+      await state.applyStrokeAtPosition({ beats: 0, pitch: basePitch }, { min: 0, max: totalDuration }, "Generate");
+      renderer.endStroke();
+    } finally {
+      set({ isGenerating: false });
+    }
+  },
+
+  rerollGenerate: async () => {
+    if (get().isGenerating) return;
+    set({ generateSeed: Math.floor(Math.random() * 1_000_000) });
+    await get().runGenerate();
+  },
+});

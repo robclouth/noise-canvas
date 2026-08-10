@@ -69,7 +69,11 @@ export interface BrushState {
   setIsStroking: (value: boolean) => void;
   // Unified stroke actions
   previewStrokeAtPosition: (position: StrokePosition) => void;
-  applyStrokeAtPosition: (position?: StrokePosition, strokeTimeRange?: StrokeTimeRange) => Promise<void>;
+  applyStrokeAtPosition: (
+    position?: StrokePosition,
+    strokeTimeRange?: StrokeTimeRange,
+    label?: string,
+  ) => Promise<void>;
   // Helper actions that use the unified ones
   moveBrushPosition: (direction: "up" | "down" | "left" | "right") => void;
   applyBrushAtPosition: () => Promise<void>;
@@ -80,7 +84,7 @@ export interface BrushState {
 }
 
 // Helper to convert position to UV coordinates
-function positionToUv(
+export function positionToUv(
   position: StrokePosition,
   bpm: number,
   totalDuration: number,
@@ -162,7 +166,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     },
 
     // Unified apply action - used by mouse up and Enter key
-    applyStrokeAtPosition: async (position?, strokeTimeRange?) => {
+    applyStrokeAtPosition: async (position?, strokeTimeRange?, label?) => {
       const state = get();
       const { activeFileId, synthesizeFile, autoPlayStroke, setFilePlaybackStartTime, setLoopRegion } = state;
 
@@ -244,7 +248,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const dirtyRanges = renderer.getDirtyPixelRanges();
       const dataPromise = renderer.getFBOData();
       const spec = file.spectrogramData;
-      const brushName = state.brushes[state.activeBrushIndex]?.name ?? "Stroke";
+      const brushName = label ?? state.brushes[state.activeBrushIndex]?.name ?? "Stroke";
       const dimensions = {
         textureWidth: spec.textureWidth,
         textureHeight: spec.textureHeight,

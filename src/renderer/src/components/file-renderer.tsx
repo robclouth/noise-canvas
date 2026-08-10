@@ -66,12 +66,25 @@ interface FileRendererProps {
   onLiveFrame?: () => void;
 }
 
+/** One stamp of a batch: where its brush origin sits, and the state to paint it with. */
+export interface StampDispatch {
+  blX: number;
+  blY: number;
+  state: State;
+}
+
 /**
  * Handle for the FileRenderer component, exposing methods to parent components.
  */
 export interface FileRendererHandle {
   /** Renders a brush stroke at the given coordinates. */
   renderStroke: (x: number, y: number, preview: boolean) => void;
+  /**
+   * Paints a batch of stamps into the FBO immediately, each from its own state
+   * snapshot, as part of the stroke already opened with beginStroke(). Returns
+   * how many were painted.
+   */
+  renderStampBatch: (stamps: StampDispatch[]) => number;
   /** Gets the raw data from the current frame buffer object asynchronously. */
   getFBOData: () => Promise<Float32Array>;
   /** Sets the data of the frame buffer object. */
@@ -600,6 +613,89 @@ const FileRendererInner = memo(
     captureSnapshotRef.current = captureSnapshot;
 
     /**
+     * Paints one stroke into the FBO from an explicit state snapshot. The frame
+     * loop calls it with the live store and the cursor's brush origin; batch
+     * generation calls it once per stamp with a per-stamp state. Returns false
+     * when the source file's textures aren't ready.
+     */
+    const dispatchStroke = (state: State, cursorPos: Vector2, preview: boolean): boolean => {
+      const strokeRenderer = strokeRendererRef.current;
+      const file = openFiles[fileId];
+      if (!strokeRenderer || !file?.spectrogramData) return false;
+
+      const bpm = state.filepathsBpm[file.filePath] || 120;
+      const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
+
+      // The active step names the file the brush samples from; null means this
+      // file paints from itself.
+      const activeStepRaw = (state.brushes[state.activeBrushIndex]?.steps ?? [])[state.activeStepIndex];
+      const activeStepSourceFile = activeStepRaw?.sourceFile ?? null;
+      const sourceFileData = activeStepSourceFile
+        ? getOpenFileByPath(activeStepSourceFile.path)
+        : state.activeFileId
+          ? openFiles[state.activeFileId]
+          : null;
+      const resolvedSourceFile = sourceFileData ?? openFiles[fileId];
+      const resolvedSourceTextures = resolvedSourceFile?.rendererRef?.current?.getTextures();
+      if (!resolvedSourceTextures || !resolvedSourceFile?.spectrogramData) return false;
+
+      // Both onset maps are baked here rather than inside the renderer so the
+      // sensitivity control and the file's latest detections reach the shader
+      // through one path. Sensitivity is per file — each side of a cross-file
+      // paint uses its own.
+      const sourceFileInfo: SourceFileInfo = {
+        id: resolvedSourceFile.id,
+        filePath: resolvedSourceFile.filePath,
+        displayName: resolvedSourceFile.displayName,
+        spectrogramData: resolvedSourceFile.spectrogramData,
+        textures: resolvedSourceTextures,
+        onsetTexture: getOnsetTexture(
+          resolvedSourceFile.id,
+          resolvedSourceFile.onsets,
+          resolvedSourceFile.spectrogramData.numFrames / resolvedSourceFile.spectrogramData.sampleRate,
+          state.filepathsOnsetSensitivity[resolvedSourceFile.filePath] ?? DEFAULT_ONSET_SENSITIVITY,
+        ),
+      };
+      const destOnsetTexture = getOnsetTexture(
+        fileId,
+        file.onsets,
+        totalDuration,
+        state.filepathsOnsetSensitivity[file.filePath] ?? DEFAULT_ONSET_SENSITIVITY,
+      );
+
+      // Opt-in timing (set window.__paintTiming = true in the console) forces a
+      // GPU sync so the logged duration reflects real stroke cost — useful for
+      // comparing upper- vs lower-band paint latency.
+      const paintTiming = (globalThis as { __paintTiming?: boolean }).__paintTiming === true;
+      const paintT0 = paintTiming ? performance.now() : 0;
+      perfMark("renderStroke", () =>
+        strokeRenderer.renderStroke(
+          {
+            cursorPos,
+            preview,
+            bpm,
+            totalDuration,
+            viewZoomPower: state.filesZoom[fileId],
+            viewOffset: state.filesOffset[fileId],
+            viewZoomPowerY: state.filesZoomY[fileId] ?? 0,
+            viewOffsetY: state.filesOffsetY[fileId] ?? 0,
+            pressure: penState.pressure,
+            tiltX: penState.tiltX,
+            tiltY: penState.tiltY,
+            destOnsetTexture,
+          },
+          state,
+          sourceFileInfo,
+        ),
+      );
+      if (paintTiming) {
+        strokeRenderer.finishGpu();
+        console.log(`[paint] stroke ${(performance.now() - paintT0).toFixed(2)}ms`);
+      }
+      return true;
+    };
+
+    /**
      * The main render loop, called on every frame.
      * This handles initialization, brush stroke application, and updating the display material.
      */
@@ -740,12 +836,6 @@ const FileRendererInner = memo(
 
       clearingPreview.current = false;
 
-      // Get per-file zoom and offset from store
-      const viewZoomPower = state.filesZoom[fileId];
-      const viewOffset = state.filesOffset[fileId];
-      const viewZoomPowerY = state.filesZoomY[fileId] ?? 0;
-      const viewOffsetY = state.filesOffsetY[fileId] ?? 0;
-
       // Helper to calculate brush footprint from a step state (handles Grid/Full modes)
       const calculateBrushFootprint = (stepState: State) =>
         resolveBrushFootprint({
@@ -863,73 +953,8 @@ const FileRendererInner = memo(
 
       // Render brush stroke if requested
       if (applyStroke.current && cursorPos.x >= 0) {
-        // Resolve source file from active step's sourceFile param
-        // If null (self), use this file's own data
-        const resolvedSourceFile = sourceFileData ?? openFiles[fileId];
-        const resolvedSourceRendererRef = resolvedSourceFile.rendererRef;
-        const resolvedSourceTextures = resolvedSourceRendererRef?.current?.getTextures();
-
-        if (!resolvedSourceTextures || !resolvedSourceFile.spectrogramData) {
-          return;
-        }
-
         const preview = strokeParams.current?.preview ?? false;
-
-        // Build source file info for StrokeRenderer. Both onset maps are baked
-        // here rather than inside the renderer so the sensitivity control and
-        // the file's latest detections reach the shader through one path.
-        // Sensitivity is per file — each side of a cross-file paint uses its
-        // own.
-        const sourceFileInfo: SourceFileInfo = {
-          id: resolvedSourceFile.id,
-          filePath: resolvedSourceFile.filePath,
-          displayName: resolvedSourceFile.displayName,
-          spectrogramData: resolvedSourceFile.spectrogramData,
-          textures: resolvedSourceTextures,
-          onsetTexture: getOnsetTexture(
-            resolvedSourceFile.id,
-            resolvedSourceFile.onsets,
-            resolvedSourceFile.spectrogramData.numFrames / resolvedSourceFile.spectrogramData.sampleRate,
-            state.filepathsOnsetSensitivity[resolvedSourceFile.filePath] ?? DEFAULT_ONSET_SENSITIVITY,
-          ),
-        };
-        const destOnsetTexture = getOnsetTexture(
-          fileId,
-          openFiles[fileId]?.onsets,
-          totalDuration,
-          state.filepathsOnsetSensitivity[openFiles[fileId]?.filePath] ?? DEFAULT_ONSET_SENSITIVITY,
-        );
-
-        // Render the stroke using StrokeRenderer. Opt-in timing (set
-        // window.__paintTiming = true in the console) forces a GPU sync so the
-        // logged duration reflects real stroke cost — useful for comparing
-        // upper- vs lower-band paint latency.
-        const paintTiming = (globalThis as { __paintTiming?: boolean }).__paintTiming === true;
-        const paintT0 = paintTiming ? performance.now() : 0;
-        perfMark("renderStroke", () =>
-          strokeRenderer.renderStroke(
-            {
-              cursorPos,
-              preview,
-              bpm,
-              totalDuration,
-              viewZoomPower,
-              viewOffset,
-              viewZoomPowerY,
-              viewOffsetY,
-              pressure: penState.pressure,
-              tiltX: penState.tiltX,
-              tiltY: penState.tiltY,
-              destOnsetTexture,
-            },
-            state,
-            sourceFileInfo,
-          ),
-        );
-        if (paintTiming) {
-          strokeRenderer.finishGpu();
-          console.log(`[paint] stroke ${(performance.now() - paintT0).toFixed(2)}ms`);
-        }
+        if (!dispatchStroke(state, cursorPos, preview)) return;
 
         if (!preview) {
           displayMode.current = "committed";
@@ -1165,6 +1190,17 @@ const FileRendererInner = memo(
         }
         applyStroke.current = true;
         invalidateRef.current?.();
+      },
+      renderStampBatch: (stamps: StampDispatch[]) => {
+        const strokeRenderer = strokeRendererRef.current;
+        if (!strokeRenderer?.getIsInitialized()) return 0;
+        let painted = 0;
+        for (const stamp of stamps) {
+          if (dispatchStroke(stamp.state, new Vector2(stamp.blX, stamp.blY), false)) painted++;
+        }
+        if (painted > 0) displayMode.current = "committed";
+        invalidateRef.current?.();
+        return painted;
       },
       getFBOData,
       setFBOData,
