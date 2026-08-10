@@ -508,7 +508,7 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 d
   return vec4(correctedL, correctedR);
 }
 
-vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, float shiftX, float shiftY) {
+vec4 getTransformedSampleNeutralish(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, float shiftX, float shiftY) {
   vec2 sampleUv = sourceUv;
   bool needsWrap = (wrapMode != 0) && (sampleUv.x < 0.0 || sampleUv.x > 1.0 || sampleUv.y < 0.0 || sampleUv.y > 1.0);
   if (needsWrap) sampleUv = wrapUv(sampleUv);
@@ -569,7 +569,7 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
 }
 
 /**
- * Algorithm 4 — Neutral
+ * Algorithm 4 — the plain neutral rule
  *
  * Unified phase formula for arbitrary 2D spectrogram transforms.
  * Handles any combination of: time stretch, time reversal, pitch shift,
@@ -593,9 +593,11 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
  * For time shift, a band-frequency carrier correction is added to
  * compensate for the synthesis happening at a different absolute time.
  */
-// NeutralV2's phase rule on its own, so the hybrid can blend against it
-// without a second copy of the maths. Returns (left, right).
-vec2 neutralV2Phase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 magPhase) {
+// The plain phase rule on its own, so algorithm 6 can blend against it without
+// a second copy of the maths. Returns (left, right), and reports the multiplier
+// it applied to the stored phase — 1 means the stored phase came through
+// untouched, anything else means it was rescaled.
+vec2 neutralPhase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 magPhase, out float phaseGain) {
   float signX = scaleX < 0.0 ? -1.0 : 1.0;
   float signY = scaleY < 0.0 ? -1.0 : 1.0;
   float absScaleX = abs(scaleX);
@@ -639,26 +641,29 @@ vec2 neutralV2Phase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4
   float phaseL = mix(addL, sclL, stretchAmount);
   float phaseR = mix(addR, sclR, stretchAmount);
 
+  // Both branches carry the same signX·signY factor, so what is left of the
+  // stored phase is its magnitude times the pitch ratio.
+  phaseGain = mix(1.0, absScaleX, stretchAmount) * freqRatio;
+
   // Pitch ratio scaling
   return vec2(phaseL, phaseR) * freqRatio;
 }
 
-vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
+vec4 getTransformedSampleNeutralPlain(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
   vec4 magPhase = sampleSourceInterp(wrapUv(sourceUv));
-  vec2 phase = neutralV2Phase(sourceUv, destUv, scaleX, scaleY, magPhase);
+  float phaseGain;
+  vec2 phase = neutralPhase(sourceUv, destUv, scaleX, scaleY, magPhase, phaseGain);
   magPhase.y = phase.x;
   magPhase.w = phase.y;
   return magPhase;
 }
 
 /**
- * Algorithm 5 — Punchy (onset transport)
+ * Onset transport
  *
- * Transient-preserving phase rule for percussive material, for any combination
- * of pitch/time shift:
+ * Transient-preserving phase rule, for any combination of pitch/time shift:
  *
- *   near an onset:  φ = −2π·f_dest·T_dest + (φ_src + 2π·f_src·T_src)
- *   elsewhere:      deterministic hash-random phase
+ *   φ = −2π·f_dest·T_dest + (φ_src + 2π·f_src·T_src)
  *
  * In the Gaborator global convention an impulse at time T has φ = −2π·f·T at
  * every atom, so the bracketed term is the source's phase DEVIATION from a
@@ -666,18 +671,12 @@ vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX, flo
  * frequency transports the source's transient character: coherent clicks stay
  * coherent (cross-band aligned → sharp attack, no pre-echo), noisy attacks
  * stay noisy. Purely additive — stored phase is never scaled, so the 2πn
- * unwrap ambiguity that algorithm 3/4 scaling turns into per-band phase junk
- * cancels mod 2π here. Away from onsets, noise re-randomized at the dest
- * band's own rate sounds like genuine band-limited noise instead of the slowed
- * watery texture that scaled phase produces. Sustained tonal material has no
- * valid rule in this mode — use Neutral for that.
+ * unwrap ambiguity that a scaling rule turns into per-band phase junk cancels
+ * mod 2π here.
  */
-const float PUNCHY_SUPPORT_GAIN = 0.7;
-const float PUNCHY_SIGMA_FLOOR  = 0.002;
+const float ONSET_SUPPORT_GAIN = 0.7;
+const float ONSET_SIGMA_FLOOR  = 0.002;
 
-// How strongly this sample is inside an onset, and the phase offset that
-// transports the source's deviation from the impulse relation to the
-// destination. Shared by Punchy and the hybrid.
 // The stored coefficient nearest in time, rounded rather than floored. Reading
 // the phase at an attack must not fall back to the silent coefficient before
 // it, and each band's grid has its own stride.
@@ -718,7 +717,7 @@ float onsetWeight(vec2 sourceUv) {
   float fSrc = max(getSourceMetadata(sourceUv).a, 1e-6);
   float tSrcSec = sourceUv.x * sourceFrameCount / max(sourceSampleRate, 1e-6);
   vec2 onset = texture(sourceOnsetTex, vec2(sourceUv.x, 0.5)).rg;
-  float sigma = max(PUNCHY_SUPPORT_GAIN * sourceBandsPerOctave / fSrc, PUNCHY_SIGMA_FLOOR);
+  float sigma = max(ONSET_SUPPORT_GAIN * sourceBandsPerOctave / fSrc, ONSET_SIGMA_FLOOR);
   float dt = (tSrcSec - onset.x) / sigma;
   return onset.y * exp(-dt * dt);
 }
@@ -744,7 +743,7 @@ void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, out float w, out f
   // Lock window matched to the SOURCE band's Gabor support — the width of the
   // attack ridge in the transported data. A dest-support window would cohere
   // tail energy into a false click.
-  float sigma = max(PUNCHY_SUPPORT_GAIN * sourceBandsPerOctave / fSrc, PUNCHY_SIGMA_FLOOR);
+  float sigma = max(ONSET_SUPPORT_GAIN * sourceBandsPerOctave / fSrc, ONSET_SIGMA_FLOOR);
   float dt = (tSrcSec - onset.x) / sigma;
   w = onset.y * exp(-dt * dt);
 
@@ -758,64 +757,60 @@ void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, out float w, out f
   anchor = -TWO_PI * fDest * tOnsetDestSec + TWO_PI * fSrc * onset.x;
 }
 
-vec4 getTransformedSamplePunchy(vec2 sourceUv, vec2 destUv, float scaleX) {
-  vec4 magPhase = sampleSourceInterp(sourceUv);
-
-  float w, anchor;
-  onsetTransport(sourceUv, destUv, scaleX, w, anchor);
-  // The deviation being transported comes from the nearest stored coefficient,
-  // not the interpolated phase: interpolating phase across an attack averages
-  // two atoms that disagree, which is the whole reason a moved transient
-  // smears even when the carrier correction is exact.
-  vec4 nearest = sampleSourceNearest(sourceUv);
-  float lockL = anchor + nearest.y;
-  float lockR = anchor + nearest.w;
-
-  vec2 seed = destUv * vec2(destFrameCount, destBandCount);
-  float randL = random(seed + random(seed + vec2(12.34, 56.78))) * TWO_PI;
-  float randR = random(seed + random(seed + vec2(90.12, 34.56))) * TWO_PI;
-
-  vec2 vL = w * vec2(cos(lockL), sin(lockL)) + (1.0 - w) * vec2(cos(randL), sin(randL));
-  vec2 vR = w * vec2(cos(lockR), sin(lockR)) + (1.0 - w) * vec2(cos(randR), sin(randR));
-  magPhase.y = atan(vL.y, vL.x);
-  magPhase.w = atan(vR.y, vR.x);
-  return magPhase;
-}
+// How far the multiplier applied to the stored phase has to sit from 1 before
+// the noise it scrambles is replaced outright. Unwrapped phase reaches hundreds
+// of radians, so any multiplier but 1 leaves noise scrambled — the ramp is only
+// there to keep the switch from being a step, and 1 itself is the case that
+// matters: a move that preserves phase leaves the source alone. The dead zone
+// is a fifty-thousandth of a cent wide, and absorbs the rounding in the
+// multiplier so that "leaves alone" is exact.
+const float NOISE_REPLACE_RAMP     = 100.0;
+const float NOISE_REPLACE_DEADZONE = 1.0e-5;
 
 /**
- * Algorithm 6 — Neutral+ (default)
+ * Algorithm 6 — Neutral (default)
  *
- * Punchy's onset transport where there is an onset, NeutralV2 everywhere else.
- * Percussive material keeps its attacks through any pitch or time move;
- * sustained material is untouched, so this is safe as the default in a way
- * Punchy — which re-randomizes everything away from an onset — is not.
+ * The plain neutral rule, with onset transport where the source has an onset,
+ * so percussive material keeps its attacks through any pitch or time move while
+ * sustained material is left as the plain rule leaves it.
  *
- * Between onsets, noise is re-randomized at the destination band's own rate,
- * which sounds like band-limited noise rather than the slowed, watery texture
- * scaled phase gives it; tonal content keeps NeutralV2 untouched. Which it is
- * comes from the source's own phase behaviour.
+ * Where the transform rescales stored phase, the unwrap history it scrambles is
+ * replaced with hash-random phase at the destination band's own rate for the
+ * part of the content that is noise — that sounds like band-limited noise
+ * rather than the slowed, watery texture scaled phase gives it. Tonal content
+ * is untouched, and so is everything when the move preserves phase exactly.
  *
  * Every blend runs along the shortest arc between the two phases rather than on
- * the unit circle, so tonal content with no onset comes out bit-identical to
- * NeutralV2 instead of wrapped into [-π, π], and even a fully randomized sample
- * stays near the unwrapped baseline. Phase is stored unwrapped along time, and
- * onset detection and the tonality estimate above both read differences of it.
+ * the unit circle, so content with no onset comes out bit-identical to the plain
+ * rule instead of wrapped into [-π, π], and even a fully randomized sample stays
+ * near the unwrapped baseline. Phase is stored unwrapped along time, and onset
+ * detection and the tonality estimate above both read differences of it.
  */
-vec4 getTransformedSampleHybrid(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
+vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
   vec2 wrappedSourceUv = wrapUv(sourceUv);
   vec4 magPhase = sampleSourceInterp(wrappedSourceUv);
 
-  vec2 neutral = neutralV2Phase(sourceUv, destUv, scaleX, scaleY, magPhase);
+  float phaseGain;
+  vec2 neutral = neutralPhase(sourceUv, destUv, scaleX, scaleY, magPhase, phaseGain);
 
-  float tonal = sourceTonality(wrappedSourceUv);
-  vec2 seed = destUv * vec2(destFrameCount, destBandCount);
-  float randL = random(seed + random(seed + vec2(12.34, 56.78))) * TWO_PI;
-  float randR = random(seed + random(seed + vec2(90.12, 34.56))) * TWO_PI;
-  float baseL = neutral.x + (1.0 - tonal) * unwrapPhase(randL - neutral.x);
-  float baseR = neutral.y + (1.0 - tonal) * unwrapPhase(randR - neutral.y);
+  float baseL = neutral.x;
+  float baseR = neutral.y;
+  float replace = clamp((abs(phaseGain - 1.0) - NOISE_REPLACE_DEADZONE) * NOISE_REPLACE_RAMP, 0.0, 1.0);
+  if (replace > 0.0) {
+    float noise = replace * (1.0 - sourceTonality(wrappedSourceUv));
+    vec2 seed = destUv * vec2(destFrameCount, destBandCount);
+    float randL = random(seed + random(seed + vec2(12.34, 56.78))) * TWO_PI;
+    float randR = random(seed + random(seed + vec2(90.12, 34.56))) * TWO_PI;
+    baseL += noise * unwrapPhase(randL - baseL);
+    baseR += noise * unwrapPhase(randR - baseR);
+  }
 
   float w, anchor;
   onsetTransport(wrappedSourceUv, destUv, scaleX, w, anchor);
+  // The deviation being transported comes from the nearest stored coefficient,
+  // not the interpolated phase: interpolating phase across an attack averages
+  // two atoms that disagree, which is the whole reason a moved transient smears
+  // even when the carrier correction is exact.
   vec4 nearest = sampleSourceNearest(wrappedSourceUv);
 
   magPhase.y = baseL + w * unwrapPhase(anchor + nearest.y - baseL);
@@ -833,15 +828,16 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY
   } else if (algorithm == 2) {
     return getTransformedSampleSnappy(wrappedSourceUv, true, destUv, scaleX);
   } else if (algorithm == 3) {
-    return getTransformedSampleNeutral(sourceUv, destUv, scaleX, scaleY, shiftX, shiftY);
+    return getTransformedSampleNeutralish(sourceUv, destUv, scaleX, scaleY, shiftX, shiftY);
   } else if (algorithm == 4) {
-    return getTransformedSampleNeutralV2(sourceUv, destUv, scaleX, scaleY);
-  } else if (algorithm == 5) {
-    return getTransformedSamplePunchy(wrappedSourceUv, destUv, scaleX);
-  } else if (algorithm == 6) {
-    return getTransformedSampleHybrid(sourceUv, destUv, scaleX, scaleY);
+    // The plain rule with no onset transport and no noise replacement: the
+    // baseline algorithm 6 is defined against, reachable for tests but not
+    // offered in the menu.
+    return getTransformedSampleNeutralPlain(sourceUv, destUv, scaleX, scaleY);
   }
-  return vec4(0.0);
+  // Anything else, including values stored before an algorithm was retired,
+  // paints with the default rather than writing silence.
+  return getTransformedSampleNeutral(sourceUv, destUv, scaleX, scaleY);
 }
 
 // ============================================================================

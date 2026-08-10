@@ -215,18 +215,13 @@ export const CONTEXTUAL_MOD_SOURCES = [
 ] as const;
 export const NUM_CONTEXTUAL_MOD_SOURCES = CONTEXTUAL_MOD_SOURCES.length;
 
-// Transient-preserving transform algorithm: re-anchors phase at detected
-// onsets, randomizes elsewhere. Needs the source onset map (see onset-map.ts).
-export const PUNCHY_ALGORITHM = 5;
-// Onset transport where there is an onset, Neutral everywhere else — the
-// default, since it keeps attacks without touching sustained material.
-export const HYBRID_ALGORITHM = 6;
+// The faithful rule, re-anchoring phase at detected onsets so transients
+// survive being moved. Needs the source onset map (see onset-map.ts).
+export const NEUTRAL_ALGORITHM = 6;
 
 export const ALGORITHMS = [
-  { value: HYBRID_ALGORITHM, label: "Neutral+" },
-  { value: 4, label: "Neutral" },
+  { value: NEUTRAL_ALGORITHM, label: "Neutral" },
   { value: 3, label: "Neutralish" },
-  { value: PUNCHY_ALGORITHM, label: "Punchy" },
   { value: 2, label: "Percussive" },
   { value: 0, label: "Flangey" },
   { value: 1, label: "Noisey" },

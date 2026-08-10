@@ -12,7 +12,7 @@ import {
   type HarnessTextures,
 } from "../../test/render-harness";
 import type { EffectType } from "../../effects/types";
-import { HYBRID_ALGORITHM, PUNCHY_ALGORITHM } from "../constants";
+import { NEUTRAL_ALGORITHM } from "../constants";
 import type { SpectrogramData, State } from "../../store/types";
 import { StrokeRenderer, type EffectsRegistry, type SourceFileInfo, type StrokeParams } from "../stroke-renderer";
 
@@ -230,9 +230,8 @@ describe("painting performance", () => {
   // watching, and this is the case where every pixel pays it.
   describe("warp algorithm cost @ 1024²", () => {
     for (const [label, algorithm] of [
-      ["neutral", 4],
-      ["punchy", PUNCHY_ALGORITHM],
-      ["neutral+", HYBRID_ALGORITHM],
+      ["plain", 4],
+      ["neutral", NEUTRAL_ALGORITHM],
     ] as const) {
       it(`transform:${label} [full]`, () => {
         const h = makeHarness(EFFECT_SIZE);

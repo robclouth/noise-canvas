@@ -5,7 +5,7 @@ import { SpectrogramData, State } from "../../store/types";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState } from "../../test/mock-state";
 import { createHarnessTextures, disposeHarnessTextures, toStrokeTextures } from "../../test/render-harness";
-import { HYBRID_ALGORITHM, PUNCHY_ALGORITHM } from "../constants";
+import { NEUTRAL_ALGORITHM } from "../constants";
 import { bakeOnsetTexture } from "../onset-map";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer } from "../stroke-renderer";
 
@@ -37,7 +37,7 @@ async function loadEffects(): Promise<EffectsRegistry> {
   };
 }
 
-describe("transient-preserving transform algorithms", () => {
+describe("onset transport in the neutral transform", () => {
   let gl: WebGLRenderer;
   let effects: EffectsRegistry;
   let ridgeFrameFound = 0;
@@ -46,8 +46,8 @@ describe("transient-preserving transform algorithms", () => {
   const numBands = 32;
   const sampleRate = 64; // 1-second file so beats map directly at bpm 60
   const bpm = 60;
-  const destPath = "/test/punchy-dest.wav";
-  const srcPath = "/test/punchy-src.wav";
+  const destPath = "/test/onset-dest.wav";
+  const srcPath = "/test/onset-src.wav";
   // Frame 33 = 515.625 ms — deliberately not millisecond-aligned, so the
   // detector's sub-bin refinement (not grid luck) must supply the anchor time.
   const ridgeFrame = 33;
@@ -183,7 +183,7 @@ describe("transient-preserving transform algorithms", () => {
     const sourceFile: SourceFileInfo = {
       id: "src",
       filePath: srcPath,
-      displayName: "punchy-src.wav",
+      displayName: "onset-src.wav",
       spectrogramData: srcSpec,
       textures: {
         packed: srcTex.packed,
@@ -246,31 +246,25 @@ describe("transient-preserving transform algorithms", () => {
     return Math.hypot(re, im) / Math.max(lit.length, 1);
   }
 
-  it("punchy re-aligns shifted bands to the impulse relation despite unwrap offsets", async () => {
-    const lit = await runShift(PUNCHY_ALGORITHM);
-    expect(lit.length).toBeGreaterThanOrEqual(4);
-    expect(impulseAlignment(lit, t0)).toBeGreaterThan(0.85);
-  });
-
-  it("neutral scrambles the same content by scaling the unwrap offsets", async () => {
+  it("the plain rule scrambles a shifted transient by scaling the unwrap offsets", async () => {
     const lit = await runShift(4);
     expect(lit.length).toBeGreaterThanOrEqual(4);
     expect(impulseAlignment(lit, t0)).toBeLessThan(0.5);
   });
 
-  it("the hybrid re-aligns the ridge like punchy does", async () => {
-    const lit = await runShift(HYBRID_ALGORITHM);
+  it("re-aligns shifted bands to the impulse relation despite unwrap offsets", async () => {
+    const lit = await runShift(NEUTRAL_ALGORITHM);
     expect(lit.length).toBeGreaterThanOrEqual(4);
     expect(impulseAlignment(lit, t0)).toBeGreaterThan(0.85);
   });
 
-  it("the hybrid keeps the ridge aligned through a non-integer time shift", async () => {
+  it("keeps the ridge aligned through a non-integer time shift", async () => {
     // 0.1 beat at bpm 60 over a 1 s file is 6.4 frames — the shifted ridge
     // lands between frames, so the transported anchor has to follow the
     // transform's own time mapping rather than a whole number of frames.
     const shiftBeats = 0.1;
     const lit = await runShift(
-      HYBRID_ALGORITHM,
+      NEUTRAL_ALGORITHM,
       [{ timeSec: t0, strength: 1 }],
       { beats: shiftBeats, semis: 0 },
       "ridge",
@@ -281,30 +275,46 @@ describe("transient-preserving transform algorithms", () => {
     expect(impulseAlignment(lit, ridgeFrameFound / sampleRate)).toBeGreaterThan(0.85);
   });
 
-  it("the hybrid leaves tonal content with no onset exactly as neutral would", async () => {
+  it("leaves tonal content with no onset exactly as the plain rule does", async () => {
     // Also the check that the blend keeps phase unwrapped away from onsets:
     // wrapping into [-π, π] would change these values even though it makes no
     // audible difference, and onset detection reads phase differences.
-    const neutral = await runShift(4, [], {}, ridgeFrame, tonalSpec);
-    const hybrid = await runShift(HYBRID_ALGORITHM, [], {}, ridgeFrame, tonalSpec);
+    const plain = await runShift(4, [], {}, ridgeFrame, tonalSpec);
+    const neutral = await runShift(NEUTRAL_ALGORITHM, [], {}, ridgeFrame, tonalSpec);
 
-    expect(hybrid.length).toBeGreaterThanOrEqual(4);
-    expect(hybrid.length).toBe(neutral.length);
-    hybrid.forEach((sample, i) => {
-      expect(sample.phase).toBe(neutral[i].phase);
-      expect(sample.mag).toBe(neutral[i].mag);
+    expect(neutral.length).toBeGreaterThanOrEqual(4);
+    expect(neutral.length).toBe(plain.length);
+    neutral.forEach((sample, i) => {
+      expect(sample.phase).toBe(plain[i].phase);
+      expect(sample.mag).toBe(plain[i].mag);
     });
   });
 
-  it("the hybrid re-randomizes noise with no onset instead of scaling its phase", async () => {
-    const neutral = await runShift(4, [], {}, ridgeFrame, noiseSpec);
-    const hybrid = await runShift(HYBRID_ALGORITHM, [], {}, ridgeFrame, noiseSpec);
+  it("replaces noise phase with no onset instead of scaling it", async () => {
+    const plain = await runShift(4, [], {}, ridgeFrame, noiseSpec);
+    const neutral = await runShift(NEUTRAL_ALGORITHM, [], {}, ridgeFrame, noiseSpec);
 
-    expect(hybrid.length).toBeGreaterThanOrEqual(4);
-    expect(hybrid.length).toBe(neutral.length);
-    const moved = hybrid.filter((sample, i) => Math.abs(sample.phase - neutral[i].phase) > 0.1);
-    expect(moved.length).toBeGreaterThan(hybrid.length * 0.7);
+    expect(neutral.length).toBeGreaterThanOrEqual(4);
+    expect(neutral.length).toBe(plain.length);
+    const moved = neutral.filter((sample, i) => Math.abs(sample.phase - plain[i].phase) > 0.1);
+    expect(moved.length).toBeGreaterThan(neutral.length * 0.7);
     // Only the phase changes — the noise keeps its shape.
-    hybrid.forEach((sample, i) => expect(sample.mag).toBeCloseTo(neutral[i].mag, 5));
+    neutral.forEach((sample, i) => expect(sample.mag).toBeCloseTo(plain[i].mag, 5));
+  });
+
+  it("leaves noise alone when the move preserves its phase", async () => {
+    // A whole-frame time shift with no pitch change multiplies stored phase by
+    // 1, so there is no scrambled unwrap history to replace and the source's
+    // own noise has to come through untouched.
+    const shift = { beats: 4 / sampleRate, semis: 0 };
+    const plain = await runShift(4, [], shift, ridgeFrame, noiseSpec);
+    const neutral = await runShift(NEUTRAL_ALGORITHM, [], shift, ridgeFrame, noiseSpec);
+
+    expect(neutral.length).toBeGreaterThanOrEqual(4);
+    expect(neutral.length).toBe(plain.length);
+    neutral.forEach((sample, i) => {
+      expect(sample.phase).toBe(plain[i].phase);
+      expect(sample.mag).toBe(plain[i].mag);
+    });
   });
 });

@@ -167,14 +167,13 @@ The brush envelope decides where the stroke deposits energy and how much.
 
 When content is moved in time or pitch, its phase has to be reconstructed. Each strategy has its own character and its own artifacts — pick what sounds best:
 
-| Algorithm      | Character                                                                                                                                                                                                            |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Neutral**    | Default. The most faithful general-purpose rule — best for sustained, tonal material.                                                                                                                                |
-| **Neutralish** | An earlier neutral rule that also compensates for shifts. Slightly different smear character.                                                                                                                        |
-| **Punchy**     | Transient-preserving. Re-anchors phase at detected onsets and re-randomizes elsewhere, so clicks stay sharp instead of smearing into pre-echo. Best for drums and percussive material; sustained tones want Neutral. |
-| **Percussive** | Snappy, aggressive re-anchoring. Emphasises attacks.                                                                                                                                                                 |
-| **Flangey**    | Keeps stored phase as-is. Comb-filtered, metallic.                                                                                                                                                                   |
-| **Noisey**     | Randomizes phase. Diffuse and airy.                                                                                                                                                                                  |
+| Algorithm      | Character                                                                                                                                                                                         |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Neutral**    | Default. The faithful general-purpose rule. Transients are re-anchored at detected onsets so clicks stay sharp instead of smearing into pre-echo, and sustained tonal material is left as it was. |
+| **Neutralish** | An earlier neutral rule that also compensates for shifts. Slightly different smear character.                                                                                                     |
+| **Percussive** | Snappy, aggressive re-anchoring. Emphasises attacks.                                                                                                                                              |
+| **Flangey**    | Keeps stored phase as-is. Comb-filtered, metallic.                                                                                                                                                |
+| **Noisey**     | Randomizes phase. Diffuse and airy.                                                                                                                                                               |
 
 ### Blend Modes
 

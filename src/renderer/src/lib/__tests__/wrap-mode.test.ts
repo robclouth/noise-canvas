@@ -323,8 +323,8 @@ describe("brush wrap mode", () => {
   });
 
   // Every warp algorithm reads the source through the same dest→source map, so
-  // the wrap must hold for all of them — the app defaults to Neutral (4), not 0.
-  it.each([0, 1, 2, 3, 4, 5])("pitch shift wraps under a Full-height brush with algorithm %i", async (algorithm) => {
+  // the wrap must hold for all of them — the app defaults to Neutral (6), not 0.
+  it.each([0, 1, 2, 3, 4, 6])("pitch shift wraps under a Full-height brush with algorithm %i", async (algorithm) => {
     const state = stateFor({
       brushSizeTime: 1,
       brushSizePitch: BRUSH_SIZE_PITCH_FULL,
