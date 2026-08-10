@@ -23,6 +23,11 @@ uniform float swingOffsetUv;      // Offset applied to odd-indexed grid lines (U
 uniform bool showHorizontalGrid;  // Whether to show horizontal grid lines
 uniform bool showVerticalGrid;    // Whether to show vertical grid lines
 
+// Onset markers, read from the same nearest-onset row the transient-aware
+// transforms use, so what is drawn is exactly what they act on.
+uniform bool showOnsets;
+const vec3 ONSET_MARKER_COLOR = vec3(1.0, 0.55, 0.2);
+
 // Scale grid (drawn at in-scale semitones when a scale is active)
 uniform bool scaleGridEnabled;
 uniform float scaleOffsets[12];       // signed; 0 for in-scale pitch classes
@@ -156,6 +161,15 @@ void main() {
                 float d = isOctave ? strongDelta : lineDelta;
                 color = mix(color + d, color - d, step(1.0 - d, color));
             }
+        }
+    }
+
+    if (showOnsets) {
+        vec2 onset = texture(sourceOnsetTex, vec2(clamp(zoomedUv.x, 0.0, 1.0), 0.5)).rg;
+        float onsetUvX = onset.r * sourceSampleRate / max(sourceFrameCount, 1.0);
+        // Roughly a pixel and a half wide however far the view is zoomed.
+        if (onset.g > 0.0 && abs(zoomedUv.x - onsetUvX) < hThick * 0.75) {
+            color = mix(color, ONSET_MARKER_COLOR, 0.25 + 0.5 * onset.g);
         }
     }
 

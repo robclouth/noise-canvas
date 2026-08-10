@@ -144,6 +144,7 @@ export const TransportPanel = memo(() => {
       <Stack gap={0}>
         <ParameterControl paramKey="gridSizeBeats" labelWidth={TRANSPORT_LABEL_WIDTH} />
         <ParameterControl paramKey="snapTime" labelWidth={TRANSPORT_LABEL_WIDTH} displayLabel="Snap" />
+        <ParameterControl paramKey="snapTimeSource" labelWidth={TRANSPORT_LABEL_WIDTH} />
       </Stack>
 
       <Stack gap={0}>
@@ -153,6 +154,11 @@ export const TransportPanel = memo(() => {
 
       <Stack gap={0}>
         <ParameterControl paramKey="gridSwing" labelWidth={TRANSPORT_LABEL_WIDTH} />
+      </Stack>
+
+      <Stack gap={0}>
+        <ParameterControl paramKey="onsetSensitivity" labelWidth={TRANSPORT_LABEL_WIDTH} />
+        <ParameterControl paramKey="showOnsets" labelWidth={TRANSPORT_LABEL_WIDTH} displayLabel="Show" />
       </Stack>
 
       <Divider orientation="vertical" color="dark.5" />

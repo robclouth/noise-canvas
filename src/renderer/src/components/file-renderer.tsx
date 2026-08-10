@@ -38,6 +38,7 @@ import { getHistoryManager } from "@renderer/lib/history-manager";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
+import { getOnsetTexture } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { captureMaterialToCanvas } from "../lib/snapshot-capture";
@@ -320,6 +321,7 @@ const FileRendererInner = memo(
           showHorizontalGrid: { value: true },
           showVerticalGrid: { value: true },
           scaleGridEnabled: { value: false },
+          showOnsets: { value: false },
           scaleOffsets: { value: new Float32Array(12) },
           pitchOffsetSemisFromC0: { value: 0.0 },
           showTargetRectangle: { value: false },
@@ -557,6 +559,11 @@ const FileRendererInner = memo(
       uniforms.scaleGridEnabled.value = gridSizeSemis <= 0 && semitoneHeightPx >= MIN_GRID_SPACING_PX;
       uniforms.scaleOffsets.value = buildScaleOffsets(state.scaleTonic, state.scaleType);
       uniforms.pitchOffsetSemisFromC0.value = minFreqSemisAboveC0(spectrogramData.minFreq);
+
+      uniforms.showOnsets.value = state.showOnsets;
+      uniforms.sourceOnsetTex.value = state.showOnsets
+        ? getOnsetTexture(fileId, openFiles[fileId]?.onsets, totalDuration, state.onsetSensitivity)
+        : placeholderTexture;
     };
 
     /**
@@ -860,14 +867,24 @@ const FileRendererInner = memo(
 
         const preview = strokeParams.current?.preview ?? false;
 
-        // Build source file info for StrokeRenderer
+        // Build source file info for StrokeRenderer. Both onset maps are baked
+        // here rather than inside the renderer so the sensitivity control and
+        // the file's latest detections reach the shader through one path.
+        const onsetSensitivity = state.onsetSensitivity;
         const sourceFileInfo: SourceFileInfo = {
           id: resolvedSourceFile.id,
           filePath: resolvedSourceFile.filePath,
           displayName: resolvedSourceFile.displayName,
           spectrogramData: resolvedSourceFile.spectrogramData,
           textures: resolvedSourceTextures,
+          onsetTexture: getOnsetTexture(
+            resolvedSourceFile.id,
+            resolvedSourceFile.onsets,
+            resolvedSourceFile.spectrogramData.numFrames / resolvedSourceFile.spectrogramData.sampleRate,
+            onsetSensitivity,
+          ),
         };
+        const destOnsetTexture = getOnsetTexture(fileId, openFiles[fileId]?.onsets, totalDuration, onsetSensitivity);
 
         // Render the stroke using StrokeRenderer. Opt-in timing (set
         // window.__paintTiming = true in the console) forces a GPU sync so the
@@ -889,6 +906,7 @@ const FileRendererInner = memo(
               pressure: penState.pressure,
               tiltX: penState.tiltX,
               tiltY: penState.tiltY,
+              destOnsetTexture,
             },
             state,
             sourceFileInfo,

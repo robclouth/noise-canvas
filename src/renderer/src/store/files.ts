@@ -11,6 +11,7 @@ import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
+import { disposeOnsetTexture } from "../lib/onset-map";
 import type { Brush, OpenFile, ParameterKey, SpectrogramData, State, ZustandGet, ZustandSet } from "./types";
 import type { StemGroupMethod } from "./stem-groups";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
@@ -234,7 +235,7 @@ async function loadRealFileViaGaborator(
       bandLengths: result.bandLengths,
     },
   };
-  openFiles[fileId] = { ...openFiles[fileId], spectrogramData };
+  openFiles[fileId] = { ...openFiles[fileId], spectrogramData, onsets: result.onsets };
 }
 
 // In-flight AI separation guard — blocks a second concurrent stem split on the same file.
@@ -418,7 +419,10 @@ function createStemPlaceholders(
 // Remove files created for an operation that then failed, along with every
 // per-file map entry seeded for them.
 function discardFiles(set: ZustandSet, ids: string[]): void {
-  for (const id of ids) delete openFiles[id];
+  for (const id of ids) {
+    delete openFiles[id];
+    disposeOnsetTexture(id);
+  }
   set(
     produce((state: State) => {
       state.openFileIds = state.openFileIds.filter((id) => !ids.includes(id));
@@ -648,6 +652,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     } catch (error) {
       // Remove the placeholder on failure
       delete openFiles[fileId];
+      disposeOnsetTexture(fileId);
       set(
         produce((state: State) => {
           state.openFileIds = state.openFileIds.filter((id) => id !== fileId);
@@ -1406,6 +1411,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           state.minimizedFileIds = state.minimizedFileIds.filter((id) => id !== fileId);
           if (state.fullscreenFileId === fileId) state.fullscreenFileId = null;
           delete openFiles[fileId];
+          disposeOnsetTexture(fileId);
 
           const nextFileId = state.openFileIds[state.openFileIds.length - 1] || null;
           state.activeFileId = nextFileId || null;
@@ -1461,6 +1467,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const analysisParams = {
         bandsPerOctave: originalAnalysis.bandsPerOctave,
         minFreq: originalAnalysis.minFreq,
+        // Onsets follow what has been painted, so they are re-derived from the
+        // packed data this synthesis runs on.
+        detectOnsets: true,
       };
 
       const processedDataArray = new Float32Array(
@@ -1565,6 +1574,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       file.audioPeak = synthesisResult.peak > 0 ? synthesisResult.peak : 1;
       file.gainReductionDb = synthesisResult.gainReductionDb;
       file.maxGainReductionDb = synthesisResult.maxGainReductionDb;
+      if (synthesisResult.onsets) file.onsets = synthesisResult.onsets;
       if (get().activeFileId === fileId) {
         get().setGainReduction(synthesisResult.gainReductionDb ?? null, synthesisResult.maxGainReductionDb ?? 0);
       }
@@ -2165,6 +2175,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           );
         } catch (error) {
           delete openFiles[fileId];
+          disposeOnsetTexture(fileId);
           set(
             produce((draft: State) => {
               draft.openFileIds = draft.openFileIds.filter((id) => id !== fileId);
@@ -2318,6 +2329,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       );
     } catch {
       delete openFiles[fileId];
+      disposeOnsetTexture(fileId);
       set(
         produce((state: State) => {
           state.openFileIds = state.openFileIds.filter((id) => id !== fileId);

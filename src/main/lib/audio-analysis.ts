@@ -1,7 +1,7 @@
 import { copyFile } from "fs/promises";
 import { extname, join } from "path";
 import { decodeAudioFile, encodeBufferToAudioFile, probeAudioFile } from "./ffmpeg";
-import type { AnalysisParams, GaboratorAnalysisResult } from "./types";
+import type { AnalysisParams, GaboratorAnalysisResult, PackedOnsets } from "./types";
 import { getModelPath } from "./ai-separation";
 export { isModelDownloaded, downloadModel } from "./ai-separation";
 export type { FourStemName, TwoStemName } from "./ai-separation";
@@ -40,6 +40,26 @@ export function init() {
     console.log("Gaborator loaded successfully");
   }
   return gaborator;
+}
+
+// Onsets for a freshly analysed file. The addon reads the packed buffer by
+// reference, so this is a second walk of the coefficients rather than a copy of
+// them; synthesis re-derives its own from whatever has since been painted.
+async function detectOnsets(analysisResult: GaboratorAnalysisResult, sampleRate: number): Promise<PackedOnsets> {
+  const gab = init();
+  const { onsets } = await gab.detectOnsets(
+    analysisResult.data,
+    {
+      numBands: analysisResult.numBands,
+      numChannels: analysisResult.numChannels,
+      numFrames: analysisResult.numFrames,
+      bandOffsets: analysisResult.bandOffsets,
+      bandLengths: analysisResult.bandLengths,
+      bandStepLog2s: analysisResult.bandStepLog2s,
+    },
+    sampleRate,
+  );
+  return onsets;
 }
 
 export async function analyze(filePath: string, params: AnalysisParams) {
@@ -88,6 +108,7 @@ export async function analyze(filePath: string, params: AnalysisParams) {
 
   return {
     ...analysisResult,
+    onsets: await detectOnsets(analysisResult, sampleRate),
     sampleRate,
     format,
     codec,
@@ -120,6 +141,7 @@ export async function analyseBuffer(audioBuffer: AudioBuffer, params: AnalysisPa
 
   return {
     ...analysisResult,
+    onsets: await detectOnsets(analysisResult, sampleRate),
     sampleRate,
     format: "wav", // AudioBuffer is always PCM data
     codec: "pcm_f32le", // AudioBuffer uses 32-bit float PCM
@@ -135,6 +157,9 @@ export interface SynthesisResult {
   // limiter is bypassed.
   gainReductionDb: Float32Array;
   maxGainReductionDb: number;
+  // Present only when params.detectOnsets was set: the onset map re-derived
+  // from the packed data this synthesis ran on.
+  onsets?: PackedOnsets;
 }
 
 export async function synthesize(

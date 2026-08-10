@@ -28,6 +28,9 @@ export interface AppState {
   gridSwing: number;
   snapTime: boolean;
   snapPitch: boolean;
+  snapTimeSource: string;
+  onsetSensitivity: number;
+  showOnsets: boolean;
   scaleTonic: string;
   scaleType: string;
   bandsPerOctave: number;
@@ -56,6 +59,9 @@ export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
     gridSwing: getParameterDef("gridSwing").default,
     snapTime: getParameterDef("snapTime").default,
     snapPitch: getParameterDef("snapPitch").default,
+    snapTimeSource: getParameterDef("snapTimeSource").default,
+    onsetSensitivity: getParameterDef("onsetSensitivity").default,
+    showOnsets: getParameterDef("showOnsets").default,
     scaleTonic: getParameterDef("scaleTonic").default,
     scaleType: getParameterDef("scaleType").default,
     bandsPerOctave: getParameterDef("bandsPerOctave").default,

@@ -468,6 +468,407 @@ Napi::Value AnalyzeAsync(const Napi::CallbackInfo &info)
     return worker->GetPromise();
 }
 
+// ─── Onset detection ─────────────────────────────────────────────────────────
+
+// Onsets are detected straight from packed constant-Q coefficients. The
+// detection function is a SuperFlux-style spectral flux (Böck & Widmer 2013)
+// over log-compressed, per-band adaptively whitened magnitudes (Stowell &
+// Plumbley), plus a complex-domain phase-prediction term (Bello/Duxbury) that
+// catches soft tonal attacks a magnitude flux misses. Whitening equalizes quiet
+// and loud passages; the max filter over neighbouring bands stops vibrato and
+// pitch glides — which painting modulation produces constantly — from reading
+// as new events.
+//
+// Peak picking is deliberately permissive and no threshold is applied here:
+// every peak is returned with a continuous salience, and the UI's sensitivity
+// control decides which ones count. Each accepted peak is then moved onto the
+// energy ridge and refined to sub-bin precision, because a transform that
+// re-anchors phase at an onset displaces the transient by
+// (pitchRatio − 1) × the timing error.
+
+struct OnsetBandLayout
+{
+    int numBands = 0;
+    int numChannels = 1;
+    const uint32_t *bandOffsets = nullptr;
+    const uint32_t *bandLengths = nullptr;
+    const int32_t *bandStepLog2s = nullptr;
+};
+
+struct DetectedOnset
+{
+    double timeSec;
+    float salience;
+};
+
+// Time resolution of the detection function.
+static constexpr double ONSET_BIN_SEC = 0.0005;
+// Magnitude compression applied before whitening: log1p(gamma * mag).
+static constexpr float ONSET_LOG_GAMMA = 20.0f;
+// Decay time constant of the per-band running peak used for whitening.
+static constexpr double ONSET_WHITEN_TAU_SEC = 2.0;
+static constexpr float ONSET_WHITEN_FLOOR = 1e-4f;
+// Bands either side of the current one included in the SuperFlux max filter —
+// a semitone of vibrato at the app's default 36 bands per octave.
+static constexpr int ONSET_MAX_FILTER_BANDS = 3;
+// Weight of the complex-domain term relative to the flux term.
+static constexpr float ONSET_COMPLEX_WEIGHT = 0.5f;
+// Half-width of the window a peak must dominate.
+static constexpr double ONSET_PEAK_WINDOW_SEC = 0.015;
+// Window the local mean is taken over, asymmetric so a peak is judged mostly
+// against what preceded it.
+static constexpr double ONSET_MEAN_PRE_SEC = 0.080;
+static constexpr double ONSET_MEAN_POST_SEC = 0.030;
+static constexpr float ONSET_THRESHOLD_RATIO = 1.5f;
+static constexpr double ONSET_MIN_GAP_SEC = 0.030;
+// How far past a detection-function peak the energy ridge is searched for; flux
+// peaks on the rising edge, ahead of the ridge centre.
+static constexpr double ONSET_RIDGE_SEARCH_SEC = 0.010;
+// Fraction of the ridge window's peak energy that counts as having arrived.
+static constexpr double ONSET_RIDGE_ARRIVAL = 0.95;
+// Half-width of the box the ridge energy is smoothed with, so the ridge of a
+// sustained hit is not chosen by which bin of its plateau happened to be
+// loudest. Well under the shortest attack the analysis can resolve.
+static constexpr int ONSET_RIDGE_SMOOTH_BINS = 2;
+// Rise per bin, relative to the ridge window's peak, that still counts as the
+// attack climbing rather than plateau noise.
+static constexpr double ONSET_RIDGE_CLIMB = 0.01;
+// Detection-function level, relative to the file maximum, below which a peak is
+// silence rather than an event.
+static constexpr double ONSET_FLOOR_RATIO = 0.02;
+
+static std::vector<DetectedOnset> computeOnsets(const float *packed,
+                                                size_t packedFloats,
+                                                const OnsetBandLayout &layout,
+                                                int64_t numFrames,
+                                                double sampleRate)
+{
+    std::vector<DetectedOnset> onsets;
+    if (!packed || layout.numBands <= 0 || numFrames <= 0 || sampleRate <= 0.0)
+        return onsets;
+
+    const int channels = std::max(1, layout.numChannels);
+    const float channelScale = 1.0f / (float)channels;
+    const double durationSec = (double)numFrames / sampleRate;
+    const int64_t numBins = std::max<int64_t>(1, (int64_t)std::ceil(durationSec / ONSET_BIN_SEC));
+
+    // Per-band whitened magnitudes. The max filter reads neighbouring bands at
+    // this band's previous time position, so whole tracks are kept rather than
+    // one previous frame.
+    std::vector<std::vector<float>> whitened(layout.numBands);
+    for (int b = 0; b < layout.numBands; ++b)
+    {
+        const size_t offset = layout.bandOffsets[b];
+        const uint32_t len = layout.bandLengths[b];
+        whitened[b].assign(len, 0.0f);
+        if (len == 0)
+            continue;
+        const double strideSec = (double)(1LL << layout.bandStepLog2s[b]) / sampleRate;
+        const float decay = (float)std::exp(-strideSec / ONSET_WHITEN_TAU_SEC);
+        float peak = ONSET_WHITEN_FLOOR;
+        for (uint32_t k = 0; k < len; ++k)
+        {
+            const size_t px = (offset + k) * 4;
+            if (px + 3 >= packedFloats)
+                break;
+            float mag = 0.0f;
+            for (int ch = 0; ch < channels; ++ch)
+                mag += packed[px + ch * 2];
+            const float c = std::log1p(ONSET_LOG_GAMMA * std::max(0.0f, mag * channelScale));
+            peak = std::max(std::max(c, decay * peak), ONSET_WHITEN_FLOOR);
+            whitened[b][k] = c / peak;
+        }
+    }
+
+    // A band deposits one coefficient every stride samples, so dropping each
+    // whole contribution into the single bin it starts in makes the low bands —
+    // whose stride is tens of milliseconds — spike periodically and swamp
+    // everything else. Each contribution is instead spread across the span of
+    // time the coefficient covers, centred on it, which turns every band into a
+    // rate that can be summed. The spreads are accumulated as differences and
+    // integrated once, so the cost does not grow with the span.
+    std::vector<double> fluxDiff((size_t)numBins + 1, 0.0);
+    std::vector<double> complexDiff((size_t)numBins + 1, 0.0);
+    std::vector<double> energyDiff((size_t)numBins + 1, 0.0);
+
+    for (int b = 0; b < layout.numBands; ++b)
+    {
+        const size_t offset = layout.bandOffsets[b];
+        const uint32_t len = layout.bandLengths[b];
+        if (len == 0)
+            continue;
+        const int64_t stride = 1LL << layout.bandStepLog2s[b];
+        const double strideSec = (double)stride / sampleRate;
+        const double binsPerCoef = strideSec / ONSET_BIN_SEC;
+        const int64_t span = std::max<int64_t>(1, (int64_t)std::llround(binsPerCoef));
+        const double spread = 1.0 / (double)span;
+        const int nbLo = std::max(0, b - ONSET_MAX_FILTER_BANDS);
+        const int nbHi = std::min(layout.numBands - 1, b + ONSET_MAX_FILTER_BANDS);
+
+        for (uint32_t k = 0; k < len; ++k)
+        {
+            const size_t px = (offset + k) * 4;
+            if (px + 3 >= packedFloats)
+                break;
+            const int64_t centre = std::min(numBins - 1, (int64_t)((double)k * binsPerCoef));
+            const int64_t binLo = std::max<int64_t>(0, centre - (span - 1) / 2);
+            const int64_t binHi = std::min(numBins - 1, binLo + span - 1);
+            const double weight = spread;
+
+            float mag = 0.0f;
+            for (int ch = 0; ch < channels; ++ch)
+                mag += packed[px + ch * 2];
+            mag *= channelScale;
+            energyDiff[binLo] += mag * weight;
+            energyDiff[binHi + 1] -= mag * weight;
+
+            if (k == 0)
+                continue;
+
+            const int64_t prevSample = (int64_t)(k - 1) * stride;
+            float maxNeighbor = 0.0f;
+            for (int nb = nbLo; nb <= nbHi; ++nb)
+            {
+                const uint32_t nlen = layout.bandLengths[nb];
+                if (nlen == 0)
+                    continue;
+                const int64_t idx = std::min<int64_t>(prevSample >> layout.bandStepLog2s[nb], (int64_t)nlen - 1);
+                maxNeighbor = std::max(maxNeighbor, whitened[nb][(size_t)idx]);
+            }
+            const float d = whitened[b][k] - maxNeighbor;
+            if (d > 0.0f)
+            {
+                fluxDiff[binLo] += d * weight;
+                fluxDiff[binHi + 1] -= d * weight;
+            }
+
+            if (k < 2)
+                continue;
+
+            // Stored phase is unwrapped per band, so the steady-state
+            // prediction is a straight linear extrapolation and the deviation
+            // is the distance between the predicted and the actual atom. Only
+            // the phase difference between the two survives the law of cosines,
+            // so this costs one cosine rather than four.
+            const size_t pxPrev = (offset + k - 1) * 4;
+            const size_t pxPrev2 = (offset + k - 2) * 4;
+            float relDev = 0.0f;
+            for (int ch = 0; ch < channels; ++ch)
+            {
+                const float magK = packed[px + ch * 2];
+                const float magP = packed[pxPrev + ch * 2];
+                const float dPhi = packed[px + ch * 2 + 1] - 2.0f * packed[pxPrev + ch * 2 + 1] +
+                                   packed[pxPrev2 + ch * 2 + 1];
+                const float dev = std::sqrt(std::max(0.0f, magK * magK + magP * magP -
+                                                               2.0f * magK * magP * std::cos(dPhi)));
+                // Taken relative to the magnitudes involved, so the term is a
+                // dimensionless prediction error rather than a level.
+                relDev += dev / (magK + magP + 1e-9f);
+            }
+            // Gated by the whitened magnitude, so it only counts where there is
+            // content and lands on the same scale as the flux term.
+            const double cdev = (double)(whitened[b][k] * relDev * channelScale);
+            complexDiff[binLo] += cdev * weight;
+            complexDiff[binHi + 1] -= cdev * weight;
+        }
+    }
+
+    std::vector<double> odf((size_t)numBins, 0.0);
+    std::vector<double> energy((size_t)numBins, 0.0);
+    std::vector<double> prefix((size_t)numBins + 1, 0.0);
+    double fluxRun = 0.0;
+    double complexRun = 0.0;
+    double energyRun = 0.0;
+    double maxOdf = 0.0;
+    for (int64_t i = 0; i < numBins; ++i)
+    {
+        fluxRun += fluxDiff[i];
+        complexRun += complexDiff[i];
+        energyRun += energyDiff[i];
+        odf[i] = fluxRun + ONSET_COMPLEX_WEIGHT * complexRun;
+        energy[i] = energyRun;
+        prefix[i + 1] = prefix[i] + odf[i];
+        maxOdf = std::max(maxOdf, odf[i]);
+    }
+    if (maxOdf <= 0.0)
+        return onsets;
+
+    {
+        std::vector<double> energyPrefix((size_t)numBins + 1, 0.0);
+        for (int64_t i = 0; i < numBins; ++i)
+            energyPrefix[i + 1] = energyPrefix[i] + energy[i];
+        for (int64_t i = 0; i < numBins; ++i)
+        {
+            const int64_t lo = std::max<int64_t>(0, i - ONSET_RIDGE_SMOOTH_BINS);
+            const int64_t hi = std::min<int64_t>(numBins, i + ONSET_RIDGE_SMOOTH_BINS + 1);
+            energy[i] = (energyPrefix[hi] - energyPrefix[lo]) / (double)(hi - lo);
+        }
+    }
+
+    const int64_t peakWin = std::max<int64_t>(1, (int64_t)std::llround(ONSET_PEAK_WINDOW_SEC / ONSET_BIN_SEC));
+    const int64_t meanPre = std::max<int64_t>(1, (int64_t)std::llround(ONSET_MEAN_PRE_SEC / ONSET_BIN_SEC));
+    const int64_t meanPost = std::max<int64_t>(1, (int64_t)std::llround(ONSET_MEAN_POST_SEC / ONSET_BIN_SEC));
+    const int64_t minGap = std::max<int64_t>(1, (int64_t)std::llround(ONSET_MIN_GAP_SEC / ONSET_BIN_SEC));
+    const int64_t ridgeSearch = std::max<int64_t>(1, (int64_t)std::llround(ONSET_RIDGE_SEARCH_SEC / ONSET_BIN_SEC));
+    const double floorLevel = maxOdf * ONSET_FLOOR_RATIO;
+    int64_t lastBin = -minGap;
+
+    for (int64_t n = 0; n < numBins; ++n)
+    {
+        const double v = odf[n];
+        if (v <= floorLevel || n - lastBin < minGap)
+            continue;
+
+        const int64_t lo = std::max<int64_t>(0, n - peakWin);
+        const int64_t hi = std::min<int64_t>(numBins - 1, n + peakWin);
+        bool isPeak = true;
+        for (int64_t j = lo; j < n && isPeak; ++j)
+            isPeak = odf[j] < v;
+        for (int64_t j = n + 1; j <= hi && isPeak; ++j)
+            isPeak = odf[j] <= v;
+        if (!isPeak)
+            continue;
+
+        const int64_t mLo = std::max<int64_t>(0, n - meanPre);
+        const int64_t mHi = std::min<int64_t>(numBins, n + meanPost + 1);
+        const double localMean = (prefix[mHi] - prefix[mLo]) / (double)(mHi - mLo);
+        if (v < localMean * ONSET_THRESHOLD_RATIO)
+            continue;
+
+        // The anchor is where the energy has arrived, not where it happens to
+        // be largest: an impulse gives a genuine peak, but a sustained hit
+        // gives a plateau on which the argmax is decided by noise. Take the
+        // first bin that reaches the window's level and climb any rise it sits
+        // on, so both shapes land on the same edge of the attack.
+        const int64_t rHi = std::min<int64_t>(numBins - 1, n + ridgeSearch);
+        double windowPeak = 0.0;
+        for (int64_t j = n; j <= rHi; ++j)
+            windowPeak = std::max(windowPeak, energy[j]);
+
+        int64_t bestBin = rHi;
+        for (int64_t j = n; j <= rHi; ++j)
+        {
+            if (energy[j] >= windowPeak * ONSET_RIDGE_ARRIVAL)
+            {
+                bestBin = j;
+                break;
+            }
+        }
+        while (bestBin < rHi && energy[bestBin + 1] - energy[bestBin] > windowPeak * ONSET_RIDGE_CLIMB)
+            ++bestBin;
+        const double bestEnergy = energy[bestBin];
+
+        // Parabolic vertex through the ridge bin and its neighbours; the base is
+        // the bin centre and the offset is clamped to the bin it belongs to.
+        const double eL = bestBin > 0 ? energy[bestBin - 1] : 0.0;
+        const double eR = bestBin + 1 < numBins ? energy[bestBin + 1] : 0.0;
+        const double denom = eL - 2.0 * bestEnergy + eR;
+        const double delta = denom < 0.0 ? std::max(-0.5, std::min(0.5, 0.5 * (eL - eR) / denom)) : 0.0;
+
+        const double timeSec = std::min(durationSec, ((double)bestBin + 0.5 + delta) * ONSET_BIN_SEC);
+        onsets.push_back({timeSec, (float)(v / (localMean + 1e-12))});
+        lastBin = n;
+    }
+
+    return onsets;
+}
+
+class OnsetWorker : public Napi::AsyncWorker
+{
+public:
+    OnsetWorker(Napi::Env env, const Napi::Float32Array &packedJs, const Napi::Object &metaJs, double sampleRate)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), sampleRate(sampleRate)
+    {
+        // Held by reference and read from its backing store on the worker
+        // thread, like synthesis — the caller must not mutate it in flight.
+        packedRef = Napi::Reference<Napi::Float32Array>::New(packedJs, 1);
+        packed = packedJs.Data();
+        packedFloats = packedJs.ElementLength();
+
+        numBands = metaJs.Get("numBands").As<Napi::Number>().Int32Value();
+        numChannels = metaJs.Get("numChannels").As<Napi::Number>().Int32Value();
+        numFrames = metaJs.Get("numFrames").As<Napi::Number>().Int64Value();
+
+        Napi::Uint32Array bo = metaJs.Get("bandOffsets").As<Napi::Uint32Array>();
+        bandOffsets.assign(bo.Data(), bo.Data() + bo.ElementLength());
+
+        Napi::Uint32Array bl = metaJs.Get("bandLengths").As<Napi::Uint32Array>();
+        bandLengths.assign(bl.Data(), bl.Data() + bl.ElementLength());
+
+        Napi::Int32Array bs = metaJs.Get("bandStepLog2s").As<Napi::Int32Array>();
+        bandStepLog2s.assign(bs.Data(), bs.Data() + bs.ElementLength());
+    }
+
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+    void Execute() override
+    {
+        OnsetBandLayout layout;
+        layout.numBands = std::min<int>(numBands, (int)std::min(bandOffsets.size(),
+                                                                std::min(bandLengths.size(), bandStepLog2s.size())));
+        layout.numChannels = numChannels;
+        layout.bandOffsets = bandOffsets.data();
+        layout.bandLengths = bandLengths.data();
+        layout.bandStepLog2s = bandStepLog2s.data();
+        onsets = computeOnsets(packed, packedFloats, layout, numFrames, sampleRate);
+    }
+
+    void OnOK() override
+    {
+        Napi::Env env = Env();
+        Napi::HandleScope scope(env);
+        Napi::Object result = Napi::Object::New(env);
+        result.Set("onsets", packOnsets(env, onsets));
+        deferred.Resolve(result);
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+
+    // Flat [time0, salience0, time1, salience1, …] in seconds.
+    static Napi::Float32Array packOnsets(Napi::Env env, const std::vector<DetectedOnset> &onsets)
+    {
+        Napi::Float32Array out = Napi::Float32Array::New(env, onsets.size() * 2);
+        for (size_t i = 0; i < onsets.size(); ++i)
+        {
+            out[i * 2] = (float)onsets[i].timeSec;
+            out[i * 2 + 1] = onsets[i].salience;
+        }
+        return out;
+    }
+
+private:
+    Napi::Promise::Deferred deferred;
+    Napi::Reference<Napi::Float32Array> packedRef;
+    const float *packed = nullptr;
+    size_t packedFloats = 0;
+    double sampleRate;
+    int numBands = 0;
+    int numChannels = 1;
+    int64_t numFrames = 0;
+    std::vector<uint32_t> bandOffsets;
+    std::vector<uint32_t> bandLengths;
+    std::vector<int32_t> bandStepLog2s;
+    std::vector<DetectedOnset> onsets;
+};
+
+Napi::Value DetectOnsetsAsync(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+
+    if (info.Length() < 3 || !info[0].IsTypedArray() || !info[1].IsObject() || !info[2].IsNumber())
+    {
+        Napi::TypeError::New(env, "Expected: packedData (Float32Array), meta (Object), sampleRate (Number)").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    OnsetWorker *worker = new OnsetWorker(env,
+                                          info[0].As<Napi::Float32Array>(),
+                                          info[1].As<Napi::Object>(),
+                                          info[2].As<Napi::Number>().DoubleValue());
+    worker->Queue();
+    return worker->GetPromise();
+}
+
 class SynthesizeWorker : public Napi::AsyncWorker
 {
 public:
@@ -508,6 +909,10 @@ public:
 
         bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
         fminHz = paramsJs.Get("minFreq").As<Napi::Number>().DoubleValue();
+        // Onsets are re-derived from the packed data this pass already walks, so
+        // they track what has been painted. Full-file work regardless of the
+        // synthesized range, hence opt-in per call.
+        detectOnsets = paramsJs.Has("detectOnsets") && paramsJs.Get("detectOnsets").ToBoolean().Value();
 
         // Reference the existing audio channels (for partial synthesis with
         // crossfade) and read them by pointer on the worker thread, same as the
@@ -773,6 +1178,19 @@ public:
         }
         DEBUG_LOG << "[C++] Peak value: " << peakValue << std::endl << std::flush;
 
+        if (detectOnsets)
+        {
+            OnsetBandLayout layout;
+            layout.numBands = std::min<int>(numBands, (int)std::min(bandOffsets.size(),
+                                                                    std::min(bandLengths.size(), bandStepLog2s.size())));
+            layout.numChannels = channels;
+            layout.bandOffsets = bandOffsets.data();
+            layout.bandLengths = bandLengths.data();
+            layout.bandStepLog2s = bandStepLog2s.data();
+            onsets = computeOnsets(inputData, inputDataLen, layout, (int64_t)numFrames, sampleRate);
+            DEBUG_LOG << "[C++] Detected " << onsets.size() << " onsets" << std::endl << std::flush;
+        }
+
         DEBUG_LOG << "[C++] Execute() complete" << std::endl << std::flush;
     }
 
@@ -798,6 +1216,8 @@ public:
             memcpy(grBuffer.Data(), gainReductionDb.data(), gainReductionDb.size() * sizeof(float));
         result.Set("gainReductionDb", grBuffer);
         result.Set("maxGainReductionDb", Napi::Number::New(env, maxGainReductionDb));
+        if (detectOnsets)
+            result.Set("onsets", OnsetWorker::packOnsets(env, onsets));
 
         deferred.Resolve(result);
     }
@@ -827,6 +1247,7 @@ private:
     std::vector<int32_t> bandStepLog2s;
     int bandsPerOctave;
     double fminHz;
+    bool detectOnsets = false;
     int64_t requestedStartFrame;
     int64_t requestedEndFrame;
     int64_t requestedStartBand;
@@ -840,6 +1261,7 @@ private:
     float peakValue = 0.0f;
     std::vector<float> gainReductionDb;
     float maxGainReductionDb = 0.0f;
+    std::vector<DetectedOnset> onsets;
 };
 
 Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
@@ -1839,6 +2261,7 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
 {
     exports.Set("analyze", Napi::Function::New(env, AnalyzeAsync));
     exports.Set("synthesize", Napi::Function::New(env, SynthesizeAsync));
+    exports.Set("detectOnsets", Napi::Function::New(env, DetectOnsetsAsync));
     exports.Set("applyLimiter", Napi::Function::New(env, ApplyLimiterTest));
     exports.Set("hpss", Napi::Function::New(env, HpssAsync));
     exports.Set("nmf", Napi::Function::New(env, NmfAsync));

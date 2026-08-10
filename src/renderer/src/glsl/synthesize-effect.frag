@@ -34,9 +34,12 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
     //   phase:     -2π·f·T  (uniform across atoms, for global phase convention)
     vec4 meta       = getDestMetadata(coords.dest);
     float fHz       = max(meta.a, 1e-6);
-    float anchorSec = brushBottomLeftUv.x * destFrameCount / destSampleRate;
-    float pixelSec  = coords.dest.x * destFrameCount / destSampleRate;
-    float distSec   = pixelSec - anchorSec;
+    // Distance from the brush start measured in brush space, so a brush that
+    // wraps the canvas anchors its wrapped half to the same impulse — one loop
+    // earlier in absolute time, which the anchor UV below reflects.
+    float distUv    = getEffectiveBrushOffset(coords.dest).x;
+    float anchorSec = (coords.dest.x - distUv) * destFrameCount / destSampleRate;
+    float distSec   = distUv * destFrameCount / destSampleRate;
     float widthSec  = (destBandsPerOctave * 0.7) / fHz;
     float arg       = distSec / widthSec;
     float amplitude = exp(-arg * arg);

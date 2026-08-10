@@ -27,6 +27,7 @@ declare global {
         bandLengths: Uint32Array;
         sampleRate: number;
         magnitudeEnergy: number;
+        onsets: Float32Array;
         format: string;
         codec: string;
         channels: number;
@@ -48,6 +49,7 @@ declare global {
         bandLengths: Uint32Array;
         sampleRate: number;
         magnitudeEnergy: number;
+        onsets: Float32Array;
         format: string;
         codec: string;
         channels: number;
@@ -75,6 +77,7 @@ declare global {
         peak: number;
         gainReductionDb: Float32Array;
         maxGainReductionDb: number;
+        onsets?: Float32Array;
       }>;
       isModelDownloaded: (modelFile: string) => boolean;
       downloadModel: (modelFile: string, onProgress?: (downloaded: number, total: number) => void) => Promise<void>;

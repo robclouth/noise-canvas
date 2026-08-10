@@ -43,6 +43,7 @@ async function analyze(filePath: string, params: { bandsPerOctave: number; minFr
     bandOffsets: u32(arrays.bandOffsets, "bandOffsets"),
     bandStepLog2s: i32(arrays.bandStepLog2s, "bandStepLog2s"),
     bandLengths: u32(arrays.bandLengths, "bandLengths"),
+    onsets: f32(arrays.onsets, "onsets"),
     textureWidth: Number(meta.textureWidth),
     textureHeight: Number(meta.textureHeight),
     numFrames: Number(meta.numFrames),
@@ -88,6 +89,7 @@ const synthesize: SynthesizeFn = async (
     bandsPerOctave: params.bandsPerOctave,
     minFreq: params.minFreq,
     applyLimiter: applyLimiter ? 1 : 0,
+    detectOnsets: params.detectOnsets ? 1 : 0,
     existingChannelCount: existingAudio?.length ?? 0,
   };
   if (startFrame !== undefined) meta.startFrame = startFrame;
@@ -108,6 +110,7 @@ const synthesize: SynthesizeFn = async (
     peak: Number(outMeta.peak),
     gainReductionDb: f32(outArrays.gainReductionDb, "gainReductionDb"),
     maxGainReductionDb: Number(outMeta.maxGainReductionDb),
+    onsets: outArrays.onsets ? f32(outArrays.onsets, "onsets") : undefined,
   };
 };
 

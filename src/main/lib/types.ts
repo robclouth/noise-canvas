@@ -18,7 +18,18 @@ export interface GaboratorAnalysisResult {
 export type AnalysisParams = {
   bandsPerOctave: number;
   minFreq: number;
+  /**
+   * Re-derive the onset map during synthesis, from the packed data that pass
+   * already walks. Costs a full walk of every coefficient regardless of the
+   * range being synthesized, so callers ask for it when the result is going to
+   * be kept rather than on every stroke. Ignored by analysis, which always
+   * returns onsets.
+   */
+  detectOnsets?: boolean;
 };
+
+/** Flat [time0, salience0, time1, salience1, …]; times in seconds. */
+export type PackedOnsets = Float32Array;
 
 export interface IpcMainHandlers {
   "update-menu-state": (event: Electron.IpcMainEvent, canUndo: boolean, canRedo: boolean) => void;

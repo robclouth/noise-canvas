@@ -10,6 +10,7 @@ import { aimUvToBrushBlUv } from "../lib/brush-anchor";
 import { BRUSH_ANCHOR_MODE_CENTER } from "../lib/constants";
 import { penState } from "../lib/pen-state";
 import { buildScaleOffsets, minFreqSemisAboveC0, snapSemisToScale } from "../lib/scale-snap";
+import { filterOnsets } from "../lib/onset-map";
 import { screenToZoomed, snapToSwungGridCenter, snapToSwungGridFloor } from "../lib/utils";
 import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
@@ -36,6 +37,29 @@ const viewStyle = { width: "100%", height: "100%", zIndex: 1 };
  */
 type ViewPhase = "live" | "unveiling" | "static";
 
+// Snaps a time-axis UV to whichever source time snapping is set to. The beat
+// grid snaps to cell midpoints in center-anchor mode and cell starts otherwise;
+// onset snapping lands the aim on the onset in either mode, since an onset is a
+// position rather than a cell to sit inside.
+function snapTimeUv(uvX: number, fileId: string, bpm: number, totalDuration: number, isCenter: boolean): number {
+  const state = useStore.getState();
+
+  if (state.snapTimeSource === "onsets") {
+    const onsets = filterOnsets(openFiles[fileId]?.onsets, state.onsetSensitivity);
+    if (onsets.length === 0) return uvX;
+    const currentTime = uvX * totalDuration;
+    let nearest = onsets[0].timeSec;
+    for (const onset of onsets) {
+      if (Math.abs(onset.timeSec - currentTime) < Math.abs(nearest - currentTime)) nearest = onset.timeSec;
+    }
+    return nearest / totalDuration;
+  }
+
+  const gridIntervalSeconds = (60 / bpm) * state.gridSizeBeats;
+  const snapFn = isCenter ? snapToSwungGridCenter : snapToSwungGridFloor;
+  return snapFn(uvX * totalDuration, gridIntervalSeconds, state.gridSwing / 100) / totalDuration;
+}
+
 // Converts a mouse event into the aim point in the file's UV space, with
 // optional grid/pitch snapping applied. Center-anchor mode snaps the aim to
 // cell midpoints; corner-anchor mode snaps it to cell starts.
@@ -45,7 +69,7 @@ function getSnappedCoordinates(
   bpm: number,
 ): [number, number] | null {
   const state = useStore.getState();
-  const { gridSizeBeats, gridSizeSemis, gridSwing, snapTime, snapPitch, scaleTonic, scaleType } = state;
+  const { gridSizeSemis, snapTime, snapPitch, scaleTonic, scaleType } = state;
   const rect = event.currentTarget.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) {
     return null;
@@ -75,11 +99,7 @@ function getSnappedCoordinates(
 
   if (snapTime) {
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-    const gridIntervalSeconds = (60 / bpm) * gridSizeBeats;
-    const currentTime = uv.x * totalDuration;
-    const snapFn = isCenter ? snapToSwungGridCenter : snapToSwungGridFloor;
-    const snappedTime = snapFn(currentTime, gridIntervalSeconds, gridSwing / 100);
-    snappedX = snappedTime / totalDuration;
+    snappedX = snapTimeUv(uv.x, fileId, bpm, totalDuration, isCenter);
   }
 
   if (snapPitch) {
@@ -642,7 +662,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       const uv = screenToZoomed(screenUv, currentZoom, currentOffset);
 
       // Apply snapping
-      const { gridSizeBeats, gridSizeSemis, gridSwing, snapTime, snapPitch, scaleTonic, scaleType } = state;
+      const { gridSizeSemis, snapTime, snapPitch, scaleTonic, scaleType } = state;
       const spectrogramData = openFiles[fileId]?.spectrogramData;
       if (!spectrogramData) return;
       const bpm = state.filepathsBpm[openFiles[fileId].filePath];
@@ -658,11 +678,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
       if (snapTime) {
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const gridIntervalSeconds = (60 / bpm) * gridSizeBeats;
-        const currentTime = uv.x * totalDuration;
-        const snapFn = isCenter ? snapToSwungGridCenter : snapToSwungGridFloor;
-        const snappedTime = snapFn(currentTime, gridIntervalSeconds, gridSwing / 100);
-        snappedX = snappedTime / totalDuration;
+        snappedX = snapTimeUv(uv.x, fileId, bpm, totalDuration, isCenter);
       }
 
       if (snapPitch) {

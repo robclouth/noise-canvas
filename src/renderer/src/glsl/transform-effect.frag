@@ -74,11 +74,16 @@ void main() {
     vec2 modOffsetL = coords.sourceL - baseSourceUv;
     vec2 modOffsetR = coords.sourceR - baseSourceUv;
 
+    // Position within the brush, taken modulo the canvas on any wrapping axis so
+    // the half of the brush that continues past the edge rotates and scales
+    // about the same pivot as the rest of it.
+    vec2 brushLocalUv = getEffectiveBrushOffset(coords.dest);
+
     // Computes the transformed source UV and effective scale for one channel
     // given its per-channel source-read offset and scalar params. Returns the
     // sample to write into that channel.
     #define COMPUTE_CHANNEL(outTexel, modOffset, rotV, sxV, syV, shXV, shYV) { \
-        vec2 relativeUv = coords.dest - pivot; \
+        vec2 relativeUv = brushLocalUv; \
         float rad = radians(-(rotV)); \
         mat2 rotMat = mat2(cos(rad), -sin(rad), sin(rad), cos(rad)); \
         vec2 scaledUv = rotMat * relativeUv; \
@@ -108,7 +113,7 @@ void main() {
             float effScaleX = (sxV); \
             if (boundaryMode == 4 && brushSizeUv.x > 0.0) { \
                 vec2 finalDestUv = sourceUvToDestUv(finalSourceUv); \
-                float parityX = mod(floor((finalDestUv.x - brushBottomLeftUv.x) / brushSizeUv.x), 2.0); \
+                float parityX = mod(floor(getEffectiveBrushOffset(finalDestUv).x / brushSizeUv.x), 2.0); \
                 if (parityX > 0.5) effScaleX = -effScaleX; \
             } \
             vec4 result = getTransformedSample(edgeUv, coords.dest, effScaleX, (syV), totalShiftX, totalShiftY); \

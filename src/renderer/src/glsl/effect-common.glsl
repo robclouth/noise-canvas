@@ -3,6 +3,7 @@
 // ============================================================================
 
 #include "common.glsl"
+#include "brush-space.glsl"
 
 uniform sampler2D sourceSpectrogramTex;
 uniform sampler2D sourceMetadataTex;
@@ -14,6 +15,9 @@ uniform int       sourceChannelCount;
 uniform float     sourceMinFreq;
 uniform float     sourceBandsPerOctave;
 uniform float     sourceSampleRate;
+// Nearest-onset lookup for the source file: R = onset time (sec), G = strength
+// 0..1, sampled by unpacked source UV.x. See lib/onset-map.ts.
+uniform sampler2D sourceOnsetTex;
 
 uniform sampler2D destSpectrogramTex;
 uniform sampler2D destMetadataTex;
@@ -28,8 +32,6 @@ uniform float     destBandsPerOctave;
 
 uniform sampler2D originalSpectrogramTex;
 
-uniform vec2  brushBottomLeftUv;
-uniform vec2  brushSizeUv;
 uniform float viewZoomPower;
 uniform float viewOffset;
 uniform float viewZoomPowerY;
@@ -47,7 +49,6 @@ uniform Parameter sourcePitchOffset;
 uniform Parameter brushPan;
 uniform Parameter brushIntensity;
 uniform int   blendMode;
-uniform int   wrapMode; // 0=Off, 1=Wrap X, 2=Wrap Y, 3=Wrap Both
 uniform int   algorithm;
 // Safety valve for effects (transmute swap, sort) whose output intentionally
 // places non-magnitude values in the magnitude slot. Phase-aware interpolation
@@ -104,22 +105,6 @@ vec2 limitMagnitude(vec2 magPhase) {
   float saturatedExcess = magnitudeLimit * tanh(excessMag / magnitudeLimit);
   float newMag          = magnitudeLimit + saturatedExcess;
   return vec2(newMag, magPhase.y);
-}
-
-// Calculate wrapped distance between two points on an axis
-float wrappedDistance(float a, float b, bool shouldWrap) {
-  if (!shouldWrap) return abs(a - b);
-  float dist       = abs(a - b);
-  float wrappedDist= 1.0 - dist;
-  return min(dist, wrappedDist);
-}
-
-// Wraps UV coordinates based on the wrap mode
-vec2 wrapUv(vec2 uv) {
-  vec2 wrapped = uv;
-  if (wrapMode == 1 || wrapMode == 3) wrapped.x = fract(uv.x);
-  if (wrapMode == 2 || wrapMode == 3) wrapped.y = fract(uv.y);
-  return wrapped;
 }
 
 // ============================================================================
@@ -231,6 +216,19 @@ vec2 interpolateComplex(vec2 magPhase1, vec2 magPhase2, float amount) {
   return vec2(magMix, phaseMix);
 }
 
+// The two time indices a linear read straddles inside one band, plus the
+// fraction between them. On a wrapping time axis the last frame's partner is
+// the band's first frame, so a loop has no seam; otherwise both indices stay
+// clamped inside the band, since index bandLength is the START of the next
+// (lower-frequency) band in the packed layout, not a later time.
+void bandTimeIndices(float scaledTime, float bandLength, out float index0, out float index1, out float fraction) {
+  float frames = max(bandLength, 1.0);
+  float t = wrapsTimeAxis() ? mod(scaledTime, frames) : clamp(scaledTime, 0.0, frames - 1.0);
+  index0 = floor(t);
+  fraction = t - index0;
+  index1 = wrapsTimeAxis() ? mod(index0 + 1.0, frames) : min(index0 + 1.0, frames - 1.0);
+}
+
 /**
  * Interpolated read between two time samples (uses texelFetch for the exact texels).
  */
@@ -253,22 +251,21 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv,
     timeInFrames -= bandTimeScale / 2.0;
   }
   float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
-  scaledTime = clamp(scaledTime, 0.0, bandLength - 1.0);
 
-  float timeIndexFloor = floor(scaledTime);
-  float timeFraction   = fract(scaledTime);
+  float timeIndex0, timeIndex1, timeFraction;
+  bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, timeFraction);
 
   ivec2 texSize    = textureSize(dataTex, 0);
   float widthFloat = float(max(texSize.x, 1));
 
-  float linearIndex1 = bandStartOffset + timeIndexFloor;
+  float linearIndex1 = bandStartOffset + timeIndex0;
   int px1 = int(mod(linearIndex1, widthFloat));
   int py1 = int(floor(linearIndex1 / widthFloat));
   px1 = clamp(px1, 0, max(texSize.x - 1, 0));
   py1 = clamp(py1, 0, max(texSize.y - 1, 0));
   vec4 sample1 = texelFetch(dataTex, ivec2(px1, py1), 0);
 
-  float linearIndex2 = bandStartOffset + timeIndexFloor + 1.0;
+  float linearIndex2 = bandStartOffset + timeIndex1;
   int px2 = int(mod(linearIndex2, widthFloat));
   int py2 = int(floor(linearIndex2 / widthFloat));
   px2 = clamp(px2, 0, max(texSize.x - 1, 0));
@@ -306,16 +303,25 @@ float getAudioLevelDb(vec2 uv) {
 
 // Forward freq-preserving map: dest UV.y → source UV.y such that the two UVs
 // refer to the same absolute frequency. Works across different minFreq /
-// bandsPerOctave / bandCount.
+// bandsPerOctave / bandCount, and is the exact inverse of sourceToDestBandUv.
 // Gaborator's band layout has UV.y increasing with frequency (band 0 = top of
-// UV = highest freq), so sourceUV.y increases with sourceBandIdx. The freq
-// anchor is the source's actual lowest-band center freq read from metadata,
-// since gaborator snaps the requested minFreq to its internal band tuning and
-// the two can disagree by up to half a band — using the config value would
-// let (sourceBandIdx + 0.5) round to the next integer and shift every bin.
+// UV = highest freq), so both bandIdx values below count up from the lowest
+// band as UV.y rises. Each freq anchor is that texture's actual lowest-band
+// center freq read from metadata, since gaborator snaps the requested minFreq
+// to its internal band tuning and the two can disagree by up to half a band —
+// using the config value would let (sourceBandIdx + 0.5) round to the next
+// integer and shift every bin.
+// The layout is geometric, so the dest frequency is computed in closed form
+// rather than fetched by band index: that fetch saturates at the outermost
+// band, which would pin a UV that a pitch shift pushed past the top or bottom
+// to the edge band. Everything downstream — the canvas wrap below, and the
+// brush edge modes, which invert this map — would then never see that the read
+// had left the canvas at all.
 float destToSourceBandUv(vec2 destUnpackedUv) {
-  float destFreqHz = getDestMetadata(destUnpackedUv).a;
+  float destLowestFreq = max(fetchBandMetadata(destMetadataTex, destBandCount - 1.0).a, 1e-6);
   float sourceLowestFreq = max(fetchBandMetadata(sourceMetadataTex, sourceBandCount - 1.0).a, 1e-6);
+  float destBandIdx = wrapUv(destUnpackedUv).y * destBandCount - 0.5;
+  float destFreqHz = destLowestFreq * exp2(destBandIdx / max(destBandsPerOctave, 1e-6));
   float sourceBandIdx = sourceBandsPerOctave * log2(max(destFreqHz, 1e-6) / sourceLowestFreq);
   return (sourceBandIdx + 0.5) / max(sourceBandCount, 1.0);
 }
@@ -409,20 +415,21 @@ vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float s
 
   float timeInFrames   = sourceUv.x * sourceFrameCount;
   float scaledTime     = timeInFrames / exp2(bandTimeScaleExp);
-  float timeIndexFloor = floor(scaledTime);
-  float timeFraction   = fract(scaledTime);
+
+  float timeIndex0, timeIndex1, timeFraction;
+  bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, timeFraction);
 
   ivec2 sSize    = textureSize(sourceSpectrogramTex, 0);
   float widthF   = float(max(sSize.x, 1));
 
-  float linearIndex1 = bandStartOffset + timeIndexFloor;
+  float linearIndex1 = bandStartOffset + timeIndex0;
   int px1 = int(mod(linearIndex1, widthF));
   int py1 = int(floor(linearIndex1 / widthF));
   px1 = clamp(px1, 0, max(sSize.x - 1, 0));
   py1 = clamp(py1, 0, max(sSize.y - 1, 0));
   vec4 sample0 = texelFetch(sourceSpectrogramTex, ivec2(px1, py1), 0);
 
-  float linearIndex2 = bandStartOffset + timeIndexFloor + 1.0;
+  float linearIndex2 = bandStartOffset + timeIndex1;
   int px2 = int(mod(linearIndex2, widthF));
   int py2 = int(floor(linearIndex2 / widthF));
   px2 = clamp(px2, 0, max(sSize.x - 1, 0));
@@ -460,20 +467,20 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 d
 
   float timeInFrames   = sourceUv.x * sourceFrameCount;
   float scaledTime     = timeInFrames / exp2(bandTimeScaleExp);
-  float timeIndexFloor = floor(scaledTime);
-  float timeFraction   = fract(scaledTime);
+  float timeIndex0, timeIndex1, timeFraction;
+  bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, timeFraction);
 
   ivec2 sSize    = textureSize(sourceSpectrogramTex, 0);
   float widthF   = float(max(sSize.x, 1));
 
-  float linearIndex1 = bandStartOffset + timeIndexFloor;
+  float linearIndex1 = bandStartOffset + timeIndex0;
   int px1 = int(mod(linearIndex1, widthF));
   int py1 = int(floor(linearIndex1 / widthF));
   px1 = clamp(px1, 0, max(sSize.x - 1, 0));
   py1 = clamp(py1, 0, max(sSize.y - 1, 0));
   vec4 smp0 = texelFetch(sourceSpectrogramTex, ivec2(px1, py1), 0);
 
-  float linearIndex2 = bandStartOffset + timeIndexFloor + 1.0;
+  float linearIndex2 = bandStartOffset + timeIndex1;
   int px2 = int(mod(linearIndex2, widthF));
   int py2 = int(floor(linearIndex2 / widthF));
   px2 = clamp(px2, 0, max(sSize.x - 1, 0));
@@ -586,15 +593,16 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
  * For time shift, a band-frequency carrier correction is added to
  * compensate for the synthesis happening at a different absolute time.
  */
-vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
-  vec4 magPhase = sampleSourceInterp(wrapUv(sourceUv));
-
+// NeutralV2's phase rule on its own, so the hybrid can blend against it
+// without a second copy of the maths. Returns (left, right).
+vec2 neutralV2Phase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 magPhase) {
   float signX = scaleX < 0.0 ? -1.0 : 1.0;
   float signY = scaleY < 0.0 ? -1.0 : 1.0;
   float absScaleX = abs(scaleX);
 
-  // Frequency ratio for pitch scaling
-  vec4 srcMeta  = getSourceMetadata(sourceUv);
+  // Frequency ratio for pitch scaling. Read from the band actually sampled, so a
+  // read that wrapped the pitch axis reports the frequency it landed on.
+  vec4 srcMeta  = getSourceMetadata(wrapUv(sourceUv));
   float srcFreqHz = srcMeta.a;
   float destFreqHz = getDestMetadata(destUv).a;
   float freqRatio = (srcFreqHz > 1e-3) ? destFreqHz / srcFreqHz : 1.0;
@@ -632,11 +640,186 @@ vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX, flo
   float phaseR = mix(addR, sclR, stretchAmount);
 
   // Pitch ratio scaling
-  phaseL *= freqRatio;
-  phaseR *= freqRatio;
+  return vec2(phaseL, phaseR) * freqRatio;
+}
 
-  magPhase.y = phaseL;
-  magPhase.w = phaseR;
+vec4 getTransformedSampleNeutralV2(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
+  vec4 magPhase = sampleSourceInterp(wrapUv(sourceUv));
+  vec2 phase = neutralV2Phase(sourceUv, destUv, scaleX, scaleY, magPhase);
+  magPhase.y = phase.x;
+  magPhase.w = phase.y;
+  return magPhase;
+}
+
+/**
+ * Algorithm 5 — Punchy (onset transport)
+ *
+ * Transient-preserving phase rule for percussive material, for any combination
+ * of pitch/time shift:
+ *
+ *   near an onset:  φ = −2π·f_dest·T_dest + (φ_src + 2π·f_src·T_src)
+ *   elsewhere:      deterministic hash-random phase
+ *
+ * In the Gaborator global convention an impulse at time T has φ = −2π·f·T at
+ * every atom, so the bracketed term is the source's phase DEVIATION from a
+ * perfect impulse at the onset. Re-anchoring that deviation at the dest
+ * frequency transports the source's transient character: coherent clicks stay
+ * coherent (cross-band aligned → sharp attack, no pre-echo), noisy attacks
+ * stay noisy. Purely additive — stored phase is never scaled, so the 2πn
+ * unwrap ambiguity that algorithm 3/4 scaling turns into per-band phase junk
+ * cancels mod 2π here. Away from onsets, noise re-randomized at the dest
+ * band's own rate sounds like genuine band-limited noise instead of the slowed
+ * watery texture that scaled phase produces. Sustained tonal material has no
+ * valid rule in this mode — use Neutral for that.
+ */
+const float PUNCHY_SUPPORT_GAIN = 0.7;
+const float PUNCHY_SIGMA_FLOOR  = 0.002;
+
+// How strongly this sample is inside an onset, and the phase offset that
+// transports the source's deviation from the impulse relation to the
+// destination. Shared by Punchy and the hybrid.
+// The stored coefficient nearest in time, rounded rather than floored. Reading
+// the phase at an attack must not fall back to the silent coefficient before
+// it, and each band's grid has its own stride.
+vec4 sampleSourceNearest(vec2 sourceUv) {
+  float strideFrames = exp2(getSourceMetadata(sourceUv).b);
+  return sampleSourceNoInterp(sourceUv + vec2(0.5 * strideFrames / max(sourceFrameCount, 1.0), 0.0));
+}
+
+// Spread of the phase second difference, in radians, at which content stops
+// counting as tonal.
+const float TONALITY_SPREAD = 0.6;
+
+/**
+ * How tonal the source is here, 0..1. Phase is stored unwrapped along time, so
+ * a steady partial advances linearly and its second difference sits near zero,
+ * while noise scatters it across the whole circle. One sample of that is too
+ * noisy to classify on, so it is averaged over a few coefficients of the band's
+ * own grid.
+ */
+float sourceTonality(vec2 sourceUv) {
+  float strideUv = exp2(getSourceMetadata(sourceUv).b) / max(sourceFrameCount, 1.0);
+  float phases[5];
+  for (int i = 0; i < 5; i++) {
+    phases[i] = sampleSourceNoInterp(vec2(sourceUv.x - float(i) * strideUv, sourceUv.y)).y;
+  }
+  float total = 0.0;
+  for (int i = 0; i < 3; i++) {
+    total += abs(unwrapPhase(phases[i] - 2.0 * phases[i + 1] + phases[i + 2]));
+  }
+  float mean = total / 3.0;
+  return exp(-(mean * mean) / (TONALITY_SPREAD * TONALITY_SPREAD));
+}
+
+// How strongly a source position sits inside an onset, in the SOURCE band's
+// Gabor support — the width of the attack ridge. Effects that only move
+// content in time use this to decide where a re-anchor is worth applying.
+float onsetWeight(vec2 sourceUv) {
+  float fSrc = max(getSourceMetadata(sourceUv).a, 1e-6);
+  float tSrcSec = sourceUv.x * sourceFrameCount / max(sourceSampleRate, 1e-6);
+  vec2 onset = texture(sourceOnsetTex, vec2(sourceUv.x, 0.5)).rg;
+  float sigma = max(PUNCHY_SUPPORT_GAIN * sourceBandsPerOctave / fSrc, PUNCHY_SIGMA_FLOOR);
+  float dt = (tSrcSec - onset.x) / sigma;
+  return onset.y * exp(-dt * dt);
+}
+
+/**
+ * Re-anchors a phase for content moved by dtSec seconds along the time axis,
+ * within the destination's own band (so the frequency does not change). The
+ * carrier correction is exact, but only worth applying at an attack: away from
+ * one it is the identity anyway, and applying it costs the fetch.
+ */
+float reanchorTimeShift(vec2 sourceUv, float phase, float freqHz, float dtSec) {
+  float w = onsetWeight(sourceUv);
+  return phase - w * TWO_PI * freqHz * dtSec;
+}
+
+void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, out float w, out float anchor) {
+  float fSrc  = max(getSourceMetadata(sourceUv).a, 1e-6);
+  float fDest = max(getDestMetadata(destUv).a, 1e-6);
+
+  float tSrcSec = sourceUv.x * sourceFrameCount / max(sourceSampleRate, 1e-6);
+  vec2 onset = texture(sourceOnsetTex, vec2(sourceUv.x, 0.5)).rg;
+
+  // Lock window matched to the SOURCE band's Gabor support — the width of the
+  // attack ridge in the transported data. A dest-support window would cohere
+  // tail energy into a false click.
+  float sigma = max(PUNCHY_SUPPORT_GAIN * sourceBandsPerOctave / fSrc, PUNCHY_SIGMA_FLOOR);
+  float dt = (tSrcSec - onset.x) / sigma;
+  w = onset.y * exp(-dt * dt);
+
+  // Onset time mapped into dest seconds through the transform's x-affine
+  // (destUvToSourceUv slope is sourceTimeScale, the geometric transform's is
+  // 1/scaleX), so the lock lands where the transient lands after the move.
+  float deltaSrcUv  = (onset.x - tSrcSec) * sourceSampleRate / max(sourceFrameCount, 1.0);
+  float deltaDestUv = deltaSrcUv * scaleX / max(sourceTimeScale, 1e-6);
+  float tOnsetDestSec = (destUv.x + deltaDestUv) * destFrameCount / max(destSampleRate, 1e-6);
+
+  anchor = -TWO_PI * fDest * tOnsetDestSec + TWO_PI * fSrc * onset.x;
+}
+
+vec4 getTransformedSamplePunchy(vec2 sourceUv, vec2 destUv, float scaleX) {
+  vec4 magPhase = sampleSourceInterp(sourceUv);
+
+  float w, anchor;
+  onsetTransport(sourceUv, destUv, scaleX, w, anchor);
+  // The deviation being transported comes from the nearest stored coefficient,
+  // not the interpolated phase: interpolating phase across an attack averages
+  // two atoms that disagree, which is the whole reason a moved transient
+  // smears even when the carrier correction is exact.
+  vec4 nearest = sampleSourceNearest(sourceUv);
+  float lockL = anchor + nearest.y;
+  float lockR = anchor + nearest.w;
+
+  vec2 seed = destUv * vec2(destFrameCount, destBandCount);
+  float randL = random(seed + random(seed + vec2(12.34, 56.78))) * TWO_PI;
+  float randR = random(seed + random(seed + vec2(90.12, 34.56))) * TWO_PI;
+
+  vec2 vL = w * vec2(cos(lockL), sin(lockL)) + (1.0 - w) * vec2(cos(randL), sin(randL));
+  vec2 vR = w * vec2(cos(lockR), sin(lockR)) + (1.0 - w) * vec2(cos(randR), sin(randR));
+  magPhase.y = atan(vL.y, vL.x);
+  magPhase.w = atan(vR.y, vR.x);
+  return magPhase;
+}
+
+/**
+ * Algorithm 6 — Neutral+ (default)
+ *
+ * Punchy's onset transport where there is an onset, NeutralV2 everywhere else.
+ * Percussive material keeps its attacks through any pitch or time move;
+ * sustained material is untouched, so this is safe as the default in a way
+ * Punchy — which re-randomizes everything away from an onset — is not.
+ *
+ * Between onsets, noise is re-randomized at the destination band's own rate,
+ * which sounds like band-limited noise rather than the slowed, watery texture
+ * scaled phase gives it; tonal content keeps NeutralV2 untouched. Which it is
+ * comes from the source's own phase behaviour.
+ *
+ * Every blend runs along the shortest arc between the two phases rather than on
+ * the unit circle, so tonal content with no onset comes out bit-identical to
+ * NeutralV2 instead of wrapped into [-π, π], and even a fully randomized sample
+ * stays near the unwrapped baseline. Phase is stored unwrapped along time, and
+ * onset detection and the tonality estimate above both read differences of it.
+ */
+vec4 getTransformedSampleHybrid(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
+  vec2 wrappedSourceUv = wrapUv(sourceUv);
+  vec4 magPhase = sampleSourceInterp(wrappedSourceUv);
+
+  vec2 neutral = neutralV2Phase(sourceUv, destUv, scaleX, scaleY, magPhase);
+
+  float tonal = sourceTonality(wrappedSourceUv);
+  vec2 seed = destUv * vec2(destFrameCount, destBandCount);
+  float randL = random(seed + random(seed + vec2(12.34, 56.78))) * TWO_PI;
+  float randR = random(seed + random(seed + vec2(90.12, 34.56))) * TWO_PI;
+  float baseL = neutral.x + (1.0 - tonal) * unwrapPhase(randL - neutral.x);
+  float baseR = neutral.y + (1.0 - tonal) * unwrapPhase(randR - neutral.y);
+
+  float w, anchor;
+  onsetTransport(wrappedSourceUv, destUv, scaleX, w, anchor);
+  vec4 nearest = sampleSourceNearest(wrappedSourceUv);
+
+  magPhase.y = baseL + w * unwrapPhase(anchor + nearest.y - baseL);
+  magPhase.w = baseR + w * unwrapPhase(anchor + nearest.w - baseR);
   return magPhase;
 }
 
@@ -653,6 +836,10 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY
     return getTransformedSampleNeutral(sourceUv, destUv, scaleX, scaleY, shiftX, shiftY);
   } else if (algorithm == 4) {
     return getTransformedSampleNeutralV2(sourceUv, destUv, scaleX, scaleY);
+  } else if (algorithm == 5) {
+    return getTransformedSamplePunchy(wrappedSourceUv, destUv, scaleX);
+  } else if (algorithm == 6) {
+    return getTransformedSampleHybrid(sourceUv, destUv, scaleX, scaleY);
   }
   return vec4(0.0);
 }
@@ -660,17 +847,6 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY
 // ============================================================================
 // BRUSH & BLENDING
 // ============================================================================
-
-vec2 getEffectiveBrushOffset(vec2 unpackedUv) {
-  vec2 offset = unpackedUv - brushBottomLeftUv;
-  vec2 wrappedOffset = fract(offset);
-
-  if(wrapMode == 0) return offset;
-  else if(wrapMode == 1) return vec2(wrappedOffset.x, offset.y);
-  else if(wrapMode == 2) return vec2(offset.x, wrappedOffset.y);
-  
-  return vec2(wrappedOffset.x, wrappedOffset.y);
-}
 
 // Continuous envelope shape: spike (curve=-1) to linear triangle (curve=0) to
 // hard rectangle (curve=+1). Skew places the peak along the axis: 0=start, 1=end.
