@@ -12,6 +12,7 @@ export const Section = ({
   includeEffectOrder,
   rightSlot,
   fill,
+  anchor,
 }: {
   children: React.ReactNode;
   label: string;
@@ -22,6 +23,9 @@ export const Section = ({
   // parent gives it and lets a `flex:1, minHeight:0` child body scroll
   // internally instead of growing the whole container.
   fill?: boolean;
+  // Marks the section in the DOM so screenshot and walkthrough tooling can
+  // find it.
+  anchor?: string;
 }) => {
   const theme = useMantineTheme();
   const sectionCollapsed = useStore((state) => state.sectionCollapsed);
@@ -30,7 +34,7 @@ export const Section = ({
   const isCollapsed = sectionCollapsed[label] ?? false;
 
   return (
-    <Stack gap={2} style={fill ? { flex: 1, minHeight: 0 } : undefined}>
+    <Stack gap={2} style={fill ? { flex: 1, minHeight: 0 } : undefined} data-anchor={anchor}>
       <Group gap={4} wrap="nowrap" align="center" h={CONTROL_ROW_HEIGHT} pr={fill ? 8 : undefined}>
         <Group
           gap={4}
