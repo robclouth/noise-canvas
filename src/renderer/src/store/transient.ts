@@ -15,6 +15,11 @@ export interface TransientState {
   setCursorVisible: (visible: boolean) => void;
   hoveredFile: string | null;
   setHoveredFile: (fileId: string | null) => void;
+  // A control is being dragged. The drag is tracked on the window, so the
+  // pointer passes over the canvas on its way; hovering there would move the
+  // brush cursor and repaint a preview under a gesture aimed at a control.
+  controlDragging: boolean;
+  setControlDragging: (dragging: boolean) => void;
 }
 
 export const useTransientStore = create<TransientState>()(
@@ -25,5 +30,7 @@ export const useTransientStore = create<TransientState>()(
     setCursorVisible: (visible) => set({ cursorVisible: visible }),
     hoveredFile: null,
     setHoveredFile: (fileId) => set({ hoveredFile: fileId }),
+    controlDragging: false,
+    setControlDragging: (dragging) => set({ controlDragging: dragging }),
   })),
 );

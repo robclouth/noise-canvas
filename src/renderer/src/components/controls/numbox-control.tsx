@@ -18,6 +18,7 @@ import {
   WIDGET_INPUT_HEIGHT,
 } from "@renderer/lib/ui-density";
 import type { SliderMark } from "@renderer/store/types";
+import { useTransientStore } from "@renderer/store/transient";
 import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -70,6 +71,7 @@ export const NumboxControl = (props: NumboxControlProps) => {
   const [activeMark, setActiveMark] = useState<SliderMark | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false);
   const isSnappingRef = useRef(false);
   const sensitivityRef = useRef(1 / 200);
   const dragStartY = useRef<number>(0);
@@ -195,6 +197,8 @@ export const NumboxControl = (props: NumboxControlProps) => {
       if (e.button === 0) {
         e.preventDefault();
         setIsDragging(true);
+        isDraggingRef.current = true;
+        useTransientStore.getState().setControlDragging(true);
         dragStartY.current = e.clientY;
         const currentPosition = toNormalized(value);
         dragStartValue.current = currentPosition;
@@ -228,9 +232,20 @@ export const NumboxControl = (props: NumboxControlProps) => {
   const handleMouseUp = useCallback(() => {
     if (isDragging) {
       setIsDragging(false);
+      isDraggingRef.current = false;
+      useTransientStore.getState().setControlDragging(false);
       document.body.style.userSelect = "";
     }
   }, [isDragging]);
+
+  // A drag cut short by the control going away would otherwise leave the canvas
+  // thinking one is still under way, and never hover again.
+  useEffect(
+    () => () => {
+      if (isDraggingRef.current) useTransientStore.getState().setControlDragging(false);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (isDragging) {

@@ -462,7 +462,8 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
   const handleMouseMove: PointerEventHandler<HTMLDivElement> = useCallback(
     (event) => {
-      if (isPanning) return;
+      // A control drag is aimed at the control, wherever the pointer travels.
+      if (isPanning || useTransientStore.getState().controlDragging) return;
       penState.pressure = event.pointerType === "pen" ? event.pressure : 1;
       penState.tiltX = event.tiltX;
       penState.tiltY = event.tiltY;
@@ -511,7 +512,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
   const handleMouseEnter: PointerEventHandler<HTMLDivElement> = useCallback(
     (event) => {
-      if (isPanning) return;
+      if (isPanning || useTransientStore.getState().controlDragging) return;
       const state = useStore.getState();
       const bpm = state.filepathsBpm[openFiles[fileId].filePath];
       const coords = getSnappedCoordinates(event, fileId, bpm);
