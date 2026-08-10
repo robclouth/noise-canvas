@@ -45,5 +45,13 @@ export default tseslint.config(
       "@typescript-eslint/no-explicit-any": "off",
     },
   },
+  {
+    // Plain-JS tooling scripts can't carry the type annotations the TS rules
+    // ask for.
+    files: ["**/*.{js,mjs,cjs}"],
+    rules: {
+      "@typescript-eslint/explicit-function-return-type": "off",
+    },
+  },
   eslintConfigPrettier,
 );

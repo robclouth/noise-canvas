@@ -11,6 +11,8 @@ bin
 test-results
 # Listening exports from test-pitchdown-proof.mjs — regenerable by rerunning it.
 test-audio/pitchdown-proof/
+# Browser profile the UI capture script runs the app under.
+.cache/
 vendor/
 # The Ableton Extensions SDK/CLI are an off-registry beta installed as file:
 # dependencies, so their tarballs must be tracked despite the broad vendor/ rule.
