@@ -286,25 +286,17 @@ function App(): React.JSX.Element {
           loaderProps={{
             children: (
               <Stack align="center" gap="sm">
-                {shaderProgress ? (
-                  <>
-                    <Text size="sm" c="dimmed">
-                      Optimizing shaders… {shaderProgress.done}/{shaderProgress.total}
-                    </Text>
-                    <Progress
-                      w={220}
-                      value={shaderProgress.total ? (shaderProgress.done / shaderProgress.total) * 100 : 0}
-                      transitionDuration={200}
-                    />
-                    <Text size="xs" c="dimmed">
-                      This only takes a while the first time.
-                    </Text>
-                  </>
-                ) : (
-                  <Text size="sm" c="dimmed">
-                    Loading…
-                  </Text>
-                )}
+                <Text size="sm" c="dimmed">
+                  Loading
+                </Text>
+                <Progress
+                  w={220}
+                  color="orange"
+                  value={
+                    shaderProgress && shaderProgress.total ? (shaderProgress.done / shaderProgress.total) * 100 : 0
+                  }
+                  transitionDuration={200}
+                />
               </Stack>
             ),
           }}
