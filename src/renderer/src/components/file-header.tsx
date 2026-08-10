@@ -4,7 +4,7 @@ import { DEFAULT_ONSET_SENSITIVITY } from "@renderer/lib/constants";
 import { openSplitPartsPrompt } from "@renderer/lib/modals";
 import { FILE_HEADER_FONT, FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-density";
 import { getFileColor, openFiles } from "@renderer/store/files";
-import { selectStemGroupOfFile, stemMemberColor, stemMethodLabel } from "@renderer/store/stem-groups";
+import { selectStemGroupOfFile, stemMemberColor } from "@renderer/store/stem-groups";
 import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { ChevronDown, Copy, Maximize2, Minimize2, Split, X } from "lucide-react";
@@ -100,19 +100,6 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
             <TruncatedFilename displayName={displayName} isDirty={isDirty} />
           </Box>
         </Tooltip>
-        {stemGroup && (
-          <Tooltip
-            label={`Part ${stemIndex + 1} of ${stemGroup.memberIds.length} from a ${stemMethodLabel(stemGroup.method)} split. These parts add back up to the file they came from.`}
-          >
-            <Badge
-              size="sm"
-              variant="light"
-              style={{ flexShrink: 0, color: fileColor, backgroundColor: `${fileColor}22` }}
-            >
-              {stemIndex + 1}/{stemGroup.memberIds.length}
-            </Badge>
-          </Tooltip>
-        )}
         {bandsPerOctave && (
           <Badge size="sm" variant="light" color="orange" style={{ flexShrink: 0 }}>
             {getResolutionLabel(bandsPerOctave)}
