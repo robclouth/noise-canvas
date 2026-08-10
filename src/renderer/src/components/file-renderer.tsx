@@ -979,7 +979,28 @@ const FileRendererInner = memo(
             bandsPerOctave: targetFile.spectrogramData.bandsPerOctave,
             numBands: targetFile.spectrogramData.numBands,
           });
-          maxTimeUv = Math.max(maxTimeUv, stepFp.sizeUv.x);
+          // Match the painted footprint, as the target rectangle does: a snapped
+          // Grid-mode time brush fills the cell it lands in, which on the onset
+          // grid is the span between two hits and so differs from cell to cell.
+          // Measured where this rectangle sits, in this file's own timeline and
+          // against its own onsets.
+          let stepTimeUv = stepFp.sizeUv.x;
+          if (sourceDisplayPos.x >= 0 && !stepFp.fullTime) {
+            const cellTimeUv = swungGridCellWidthUv(
+              sourceDisplayPos.x,
+              {
+                brushSizeTime: stepState.brushSizeTime,
+                gridSizeBeats: stepState.gridSizeBeats,
+                gridSwing: stepState.gridSwing,
+                snapTime: stepState.snapTime,
+                onsets: getFileOnsets(targetFile.id),
+              },
+              targetBpm,
+              targetDuration,
+            );
+            if (cellTimeUv !== null) stepTimeUv = cellTimeUv;
+          }
+          maxTimeUv = Math.max(maxTimeUv, stepTimeUv);
           maxPitchUv = Math.max(maxPitchUv, stepFp.sizeUv.y);
         }
         return new Vector2(maxTimeUv || 0.1, maxPitchUv || 0.1);
