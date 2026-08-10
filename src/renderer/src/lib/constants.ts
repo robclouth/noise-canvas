@@ -4,6 +4,11 @@ export const BEAT_UNIT = " b";
 export const SEMITONE_UNIT = " st";
 export const MULTIPLIER_UNIT = "x";
 
+// Sentinel bottom position of the time-grid slider: below the smallest real
+// beat value, the grid is the file's detected onsets instead of beats.
+export const ONSETS_GRID_VALUE = 1 / 128;
+export const DEFAULT_ONSET_SENSITIVITY = 50;
+
 export const BEAT_VALUES = [
   { value: 1 / 64, label: "1/64" },
   { value: (1 / 32) * (2 / 3), label: "1/32t" },

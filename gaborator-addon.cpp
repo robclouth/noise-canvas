@@ -617,12 +617,11 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     //
     // Spread as a triangle peaking at the coefficient's own position rather
     // than as a flat block over it. A block has no single highest point, so
-    // peak picking takes its leading edge, which for the slowest bands is a
-    // twelfth of a second before the hit that made it — every first hit in a
-    // file was being reported twice, once at the real attack and once at the
-    // front edge of the block carrying it. Triangles a stride wide, a stride
-    // apart, also sum to exactly the value they carry, so a steady band reads
-    // as a steady level rather than rippling at its own sampling rate.
+    // peak picking would take its leading edge — for the slowest bands a
+    // twelfth of a second before the hit that made it, reporting every first
+    // hit in a file twice. Triangles a stride wide, a stride apart, also sum
+    // to exactly the value they carry, so a steady band reads as a steady
+    // level rather than rippling at its own sampling rate.
     //
     // Accumulated as second differences and integrated twice, so the cost does
     // not grow with how far each one is spread. The padding holds the part of a
@@ -886,8 +885,8 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
             };
             // Averaged over three coefficients so that noise is compared as an
             // envelope: a noisy band's coefficients scatter, and the maximum of
-            // many raw draws beats any single one — which read a hat's own
-            // decay as new energy arriving at seventy percent of the hit.
+            // many raw draws beats any single one, which would read a noise
+            // tail's own fluctuation as new energy arriving.
             const auto envAt = [&](int64_t j, int64_t cap) -> double {
                 return (powerAt(j - 1) + powerAt(j) + powerAt(std::min(j + 1, cap))) / 3.0;
             };

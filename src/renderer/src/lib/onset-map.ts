@@ -3,27 +3,22 @@ import { ClampToEdgeWrapping, DataTexture, FloatType, NearestFilter, RGBAFormat 
 /**
  * Onset map for a file. The addon detects onsets from the packed coefficients
  * and reports every plausible peak with a raw salience and no threshold; this
- * is where the sensitivity control decides which of them count, and where the
+ * is where the file's sensitivity decides which of them count, and where the
  * survivors are baked into a 1-row float texture mapping any time position to
- * its nearest onset: R = onset time in seconds, G = how much phase work the
- * onset earns 0..1, B = how loud the event is 0..1 (A unused).
- * Transient-aware effects re-anchor phase at the mapped onset with a single
- * texture fetch.
+ * its nearest onset: R = onset time in seconds, G = 1 where an onset exists,
+ * B = how loud the event is 0..1 (A unused). Transient-aware effects re-anchor
+ * phase at the mapped onset with a single texture fetch.
  *
- * The two channels are separate on purpose. An onset that survives the control
- * wants re-anchoring in full whether it is a kick or a ghost note — the point
- * of the treatment is that the moment is an attack, not that it is loud — while
- * what gets drawn should show which hits are the big ones.
+ * The cutoff is hard: an onset either counts or it does not, and one that
+ * counts is re-anchored in full whether it is a kick or a ghost note — the
+ * point of the treatment is that the moment is an attack, not that it is loud.
+ * The level only sets how brightly the marker is drawn.
  */
 
-export type Onset = { timeSec: number; weight: number; strength: number };
+export type Onset = { timeSec: number; strength: number };
 
 const BIN_SEC = 0.001;
 const MAX_TEX_WIDTH = 4096;
-// Half-width of the threshold's soft knee. Onsets fade in and out as the
-// sensitivity slider passes them instead of popping, which matters because a
-// dropped onset changes how the shader treats a whole attack.
-const KNEE = 0.1;
 // Percentile of the file's saliences that maps to full strength. Taken high
 // rather than at the maximum so one outlier hit does not scale everything else
 // down, and as a level rather than a rank so a loop of equal hits keeps them
@@ -40,17 +35,13 @@ const FLOOR_PERCENTILE = 0.1;
 const MIN_RANGE_DB = 12;
 const MAX_RANGE_DB = 48;
 
-function smoothstep(edge0: number, edge1: number, x: number): number {
-  const t = Math.min(1, Math.max(0, (x - edge0) / Math.max(edge1 - edge0, 1e-9)));
-  return t * t * (3 - 2 * t);
-}
-
 /**
- * Applies the sensitivity control to the addon's raw onsets (flat
- * [time, salience] pairs). Salience is an amplitude, so the control works in
- * decibels below the file's reference level: an even slider travel then covers
- * an even span of level, where dividing the amplitudes directly would spend
- * most of the travel on the loudest few decibels.
+ * Applies a sensitivity (0..100) to the addon's raw onsets (flat
+ * [time, salience] pairs): every onset whose strength reaches 1 − s/100
+ * survives. Salience is an amplitude, so the control works in decibels below
+ * the file's reference level: an even slider travel then covers an even span
+ * of level, where dividing the amplitudes directly would spend most of the
+ * travel on the loudest few decibels.
  */
 export function filterOnsets(packed: Float32Array | undefined, sensitivity: number): Onset[] {
   if (!packed || packed.length < 2) return [];
@@ -72,9 +63,8 @@ export function filterOnsets(packed: Float32Array | undefined, sensitivity: numb
     if (!(saliences[i] > 0)) continue;
     const db = 20 * Math.log10(saliences[i] / reference);
     const strength = Math.min(1, Math.max(0, 1 + db / rangeDb));
-    const weight = smoothstep(threshold - KNEE, threshold + KNEE, strength);
-    if (weight <= 0) continue;
-    onsets.push({ timeSec: packed[i * 2], weight, strength });
+    if (strength < threshold) continue;
+    onsets.push({ timeSec: packed[i * 2], strength });
   }
   return onsets;
 }
@@ -98,7 +88,7 @@ export function bakeOnsetTexture(onsets: Onset[], durationSec: number): DataText
         cursor++;
       }
       data[x * 4] = onsets[cursor].timeSec;
-      data[x * 4 + 1] = onsets[cursor].weight;
+      data[x * 4 + 1] = 1;
       data[x * 4 + 2] = onsets[cursor].strength;
     }
   }

@@ -17,6 +17,7 @@ import {
   MULTIPLIER_VALUES,
   NUM_MACROS,
   NUM_MODULATORS,
+  ONSETS_GRID_VALUE,
   PATTERN_SHAPES,
   PITCH_VALUES,
   PITCH_VALUES_NO_FRACTIONS,
@@ -1537,12 +1538,13 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "number",
     name: "Grid Size Beats",
     label: "Beats",
-    description: "The horizontal grid size in beats.",
+    description:
+      "The horizontal grid size in beats. Set to 'Onsets' to snap to the file's detected onsets instead — an onset lands a stamp exactly on a hit, which is what a transient-preserving transform wants.",
     default: 1,
-    min: BEAT_VALUES[0].value,
+    min: ONSETS_GRID_VALUE,
     max: 32,
     step: 0.0001,
-    marks: BEAT_VALUES,
+    marks: [{ value: ONSETS_GRID_VALUE, label: "Onsets" }, ...BEAT_VALUES],
     scale: "log",
   },
   snapTime: {
@@ -1551,30 +1553,6 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     label: "Snap Time",
     description: "When enabled, the brush snaps to the horizontal (time) grid.",
     default: true,
-  },
-  snapTimeSource: {
-    kind: "options",
-    name: "Snap Time To",
-    label: "To",
-    description:
-      "What time snapping lands on: the beat grid, or the file's detected onsets. Onset snapping puts a stamp exactly on a hit, which is what a transient-preserving transform wants.",
-    default: "grid",
-    options: [
-      { value: "grid", label: "Grid" },
-      { value: "onsets", label: "Onsets" },
-    ],
-  },
-  onsetSensitivity: {
-    kind: "number",
-    name: "Onset Sensitivity",
-    label: "Onsets",
-    description:
-      "How much of the detected transient content counts as an onset. Low keeps only the clearest hits; high includes softer and more ambiguous ones. Onsets drive transient-preserving transforms, the onset markers, and onset snapping.",
-    default: 50,
-    min: 0,
-    max: 100,
-    step: 1,
-    unit: "%",
   },
   showOnsets: {
     kind: "boolean",

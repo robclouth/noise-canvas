@@ -1,5 +1,6 @@
 import { useStore } from "@/store";
 import { ActionIcon, Badge, Box, Group, Menu, NumberInput } from "@mantine/core";
+import { DEFAULT_ONSET_SENSITIVITY } from "@renderer/lib/constants";
 import { openSplitPartsPrompt } from "@renderer/lib/modals";
 import { FILE_HEADER_FONT, FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-density";
 import { getFileColor, openFiles } from "@renderer/store/files";
@@ -63,6 +64,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const filePath = file.filePath;
   const displayName = file.displayName;
   const bpm = useStore((state) => state.filepathsBpm[filePath]);
+  const onsetSensitivity = useStore((state) => state.filepathsOnsetSensitivity[filePath] ?? DEFAULT_ONSET_SENSITIVITY);
   const fullscreenFileId = useStore((state) => state.fullscreenFileId);
   const bandsPerOctave = useStore((state) => state.filesBandsPerOctave[fileId]);
   const isDirty = useStore((state) => state.filesDirty[fileId] ?? false);
@@ -118,6 +120,17 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         )}
       </Group>
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+        <Tooltip label="Onset sensitivity: how far down this file's own level range a hit still counts as an onset. 0% keeps only the loudest, 100% keeps everything the detector found. Onsets drive transient-preserving transforms, the onset markers, and onset snapping.">
+          <NumberInput
+            w={62}
+            value={onsetSensitivity}
+            onChange={(val) => useStore.getState().setFilepathOnsetSensitivity(filePath, Number(val))}
+            size="xs"
+            max={100}
+            min={0}
+            suffix="%"
+          />
+        </Tooltip>
         <Tooltip label="The tempo of this file in beats per minute (BPM). Used for grid snapping and time-based effects.">
           <NumberInput
             w={60}

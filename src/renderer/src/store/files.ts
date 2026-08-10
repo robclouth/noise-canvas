@@ -50,6 +50,10 @@ export interface FilesState {
   setMostRecentBpm: (bpm: number) => void;
   filepathsBpm: Record<string, number>;
   setFilepathBpm: (fileId: string, bpm: number) => void;
+  // Onset sensitivity is a property of the material, like its tempo: how far
+  // down its own level range the hits worth keeping sit.
+  filepathsOnsetSensitivity: Record<string, number>;
+  setFilepathOnsetSensitivity: (filepath: string, sensitivity: number) => void;
   filesBandsPerOctave: Record<string, number>;
   setFileBandsPerOctave: (fileId: string, bandsPerOctave: number) => void;
   filesZoom: Record<string, number>;
@@ -481,6 +485,7 @@ function viewSyncTargets(state: State, fileId: string): string[] {
 
 export const FILES_PERSISTED_KEYS = [
   "filepathsBpm",
+  "filepathsOnsetSensitivity",
   "minimizedFileIds",
   "persistedFilePaths",
   "recentFilePaths",
@@ -2033,6 +2038,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       produce((state: State) => {
         state.filepathsBpm[filepath] = bpm;
         state.mostRecentBpm = bpm;
+      }),
+    ),
+  filepathsOnsetSensitivity: {},
+  setFilepathOnsetSensitivity: (filepath, sensitivity) =>
+    set(
+      produce((state: State) => {
+        state.filepathsOnsetSensitivity[filepath] = sensitivity;
       }),
     ),
   mostRecentBpm: null,

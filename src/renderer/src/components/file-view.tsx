@@ -7,7 +7,7 @@ import { useGesture } from "@use-gesture/react";
 import { memo, PointerEventHandler, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Vector2 } from "three";
 import { aimUvToBrushBlUv } from "../lib/brush-anchor";
-import { BRUSH_ANCHOR_MODE_CENTER } from "../lib/constants";
+import { BEAT_VALUES, BRUSH_ANCHOR_MODE_CENTER, DEFAULT_ONSET_SENSITIVITY } from "../lib/constants";
 import { penState } from "../lib/pen-state";
 import { buildScaleOffsets, minFreqSemisAboveC0, snapSemisToScale } from "../lib/scale-snap";
 import { filterOnsets } from "../lib/onset-map";
@@ -37,15 +37,18 @@ const viewStyle = { width: "100%", height: "100%", zIndex: 1 };
  */
 type ViewPhase = "live" | "unveiling" | "static";
 
-// Snaps a time-axis UV to whichever source time snapping is set to. The beat
-// grid snaps to cell midpoints in center-anchor mode and cell starts otherwise;
-// onset snapping lands the aim on the onset in either mode, since an onset is a
-// position rather than a cell to sit inside.
+// Snaps a time-axis UV to the time grid. Below the smallest beat value the
+// grid control means the file's detected onsets. The beat grid snaps to cell
+// midpoints in center-anchor mode and cell starts otherwise; onset snapping
+// lands the aim on the onset in either mode, since an onset is a position
+// rather than a cell to sit inside.
 function snapTimeUv(uvX: number, fileId: string, bpm: number, totalDuration: number, isCenter: boolean): number {
   const state = useStore.getState();
 
-  if (state.snapTimeSource === "onsets") {
-    const onsets = filterOnsets(openFiles[fileId]?.onsets, state.onsetSensitivity);
+  if (state.gridSizeBeats < BEAT_VALUES[0].value) {
+    const file = openFiles[fileId];
+    const sensitivity = state.filepathsOnsetSensitivity[file?.filePath] ?? DEFAULT_ONSET_SENSITIVITY;
+    const onsets = filterOnsets(file?.onsets, sensitivity);
     if (onsets.length === 0) return uvX;
     const currentTime = uvX * totalDuration;
     let nearest = onsets[0].timeSec;

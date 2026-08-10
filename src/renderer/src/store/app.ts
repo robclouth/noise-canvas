@@ -1,4 +1,4 @@
-import { BEAT_VALUES, PITCH_VALUES } from "@renderer/lib/constants";
+import { BEAT_VALUES, ONSETS_GRID_VALUE, PITCH_VALUES } from "@renderer/lib/constants";
 import { getParameterDef } from "@renderer/parameters";
 import { Vector2 } from "three";
 import type { ZustandGet, ZustandSet } from "./types";
@@ -28,8 +28,6 @@ export interface AppState {
   gridSwing: number;
   snapTime: boolean;
   snapPitch: boolean;
-  snapTimeSource: string;
-  onsetSensitivity: number;
   showOnsets: boolean;
   scaleTonic: string;
   scaleType: string;
@@ -59,8 +57,6 @@ export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
     gridSwing: getParameterDef("gridSwing").default,
     snapTime: getParameterDef("snapTime").default,
     snapPitch: getParameterDef("snapPitch").default,
-    snapTimeSource: getParameterDef("snapTimeSource").default,
-    onsetSensitivity: getParameterDef("onsetSensitivity").default,
     showOnsets: getParameterDef("showOnsets").default,
     scaleTonic: getParameterDef("scaleTonic").default,
     scaleType: getParameterDef("scaleType").default,
@@ -75,12 +71,14 @@ export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
         sectionCollapsed: { ...state.sectionCollapsed, [label]: collapsed },
       })),
     cycleHorizontalGrid: (direction) => {
+      // Onsets sits below the smallest beat value as the grid's bottom stop.
+      const values = [ONSETS_GRID_VALUE, ...BEAT_VALUES.map((v) => v.value)];
       const { gridSizeBeats } = get();
-      const currentIndex = BEAT_VALUES.findIndex((v) => Math.abs(v.value - gridSizeBeats) < 0.0001);
+      const currentIndex = values.findIndex((v) => Math.abs(v - gridSizeBeats) < 0.0001);
       let nextIndex = currentIndex + direction;
-      if (nextIndex < 0) nextIndex = BEAT_VALUES.length - 1;
-      if (nextIndex >= BEAT_VALUES.length) nextIndex = 0;
-      set({ gridSizeBeats: BEAT_VALUES[nextIndex].value });
+      if (nextIndex < 0) nextIndex = values.length - 1;
+      if (nextIndex >= values.length) nextIndex = 0;
+      set({ gridSizeBeats: values[nextIndex] });
     },
     cycleVerticalGrid: (direction) => {
       const { gridSizeSemis } = get();

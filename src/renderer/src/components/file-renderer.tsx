@@ -37,6 +37,7 @@ import { effects } from "../effects";
 import { getHistoryManager } from "@renderer/lib/history-manager";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
+import { DEFAULT_ONSET_SENSITIVITY } from "../lib/constants";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { getOnsetTexture } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
@@ -562,7 +563,12 @@ const FileRendererInner = memo(
 
       uniforms.showOnsets.value = state.showOnsets;
       uniforms.sourceOnsetTex.value = state.showOnsets
-        ? getOnsetTexture(fileId, openFiles[fileId]?.onsets, totalDuration, state.onsetSensitivity)
+        ? getOnsetTexture(
+            fileId,
+            openFiles[fileId]?.onsets,
+            totalDuration,
+            state.filepathsOnsetSensitivity[openFiles[fileId]?.filePath] ?? DEFAULT_ONSET_SENSITIVITY,
+          )
         : placeholderTexture;
     };
 
@@ -870,7 +876,8 @@ const FileRendererInner = memo(
         // Build source file info for StrokeRenderer. Both onset maps are baked
         // here rather than inside the renderer so the sensitivity control and
         // the file's latest detections reach the shader through one path.
-        const onsetSensitivity = state.onsetSensitivity;
+        // Sensitivity is per file — each side of a cross-file paint uses its
+        // own.
         const sourceFileInfo: SourceFileInfo = {
           id: resolvedSourceFile.id,
           filePath: resolvedSourceFile.filePath,
@@ -881,10 +888,15 @@ const FileRendererInner = memo(
             resolvedSourceFile.id,
             resolvedSourceFile.onsets,
             resolvedSourceFile.spectrogramData.numFrames / resolvedSourceFile.spectrogramData.sampleRate,
-            onsetSensitivity,
+            state.filepathsOnsetSensitivity[resolvedSourceFile.filePath] ?? DEFAULT_ONSET_SENSITIVITY,
           ),
         };
-        const destOnsetTexture = getOnsetTexture(fileId, openFiles[fileId]?.onsets, totalDuration, onsetSensitivity);
+        const destOnsetTexture = getOnsetTexture(
+          fileId,
+          openFiles[fileId]?.onsets,
+          totalDuration,
+          state.filepathsOnsetSensitivity[openFiles[fileId]?.filePath] ?? DEFAULT_ONSET_SENSITIVITY,
+        );
 
         // Render the stroke using StrokeRenderer. Opt-in timing (set
         // window.__paintTiming = true in the console) forces a GPU sync so the
