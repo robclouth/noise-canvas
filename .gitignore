@@ -18,3 +18,5 @@ vendor/
 # dependencies, so their tarballs must be tracked despite the broad vendor/ rule.
 !src/extension/vendor/
 *.tsbuildinfo
+# Listening comparisons rendered while working on a change — regenerable.
+listening/
