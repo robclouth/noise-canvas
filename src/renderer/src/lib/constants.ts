@@ -21,6 +21,30 @@ export function isOnsetGrid(gridSizeBeats: number): boolean {
   return gridSizeBeats < BEAT_VALUES[0].value;
 }
 
+// Coefficient magnitude produced by a steady sine at full scale (amplitude 1.0).
+// The analysis applies no amplitude normalization, so this factor is what relates
+// a stored magnitude to an absolute level: amplitude = magnitude / this. It is
+// independent of frequency — measured identical from 55 Hz to 7 kHz against the
+// analysis parameters (overlap 0.7, global phase).
+export const FULL_SCALE_MAGNITUDE = 0.45727;
+
+// Decibel offset that converts a raw magnitude in dB to dBFS:
+// dBFS = 20*log10(magnitude) + FULL_SCALE_DB_OFFSET.
+export const FULL_SCALE_DB_OFFSET = -20 * Math.log10(FULL_SCALE_MAGNITUDE);
+
+// Level above 0 dBFS at which the display's over-full-scale tint saturates.
+export const OVER_FULL_SCALE_RANGE_DB = 6;
+
+// Ratio of each analysis filter's standard deviation to the spacing between
+// adjacent bands. Must match OVERLAP in the native analyzer.
+export const ANALYSIS_OVERLAP = 0.7;
+
+// Overshoot (or limiter gain reduction) at which the clipping overlay reaches
+// full intensity. Tint strength tracks this absolutely rather than being scaled
+// to whatever the worst offender happens to be, so the overlay fades away as
+// the overshoot is painted down instead of staying saturated until it vanishes.
+export const CLIP_FULL_TINT_DB = 6;
+
 export const BEAT_VALUES = [
   { value: 1 / 64, label: "1/64" },
   { value: (1 / 32) * (2 / 3), label: "1/32t" },

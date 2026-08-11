@@ -1580,6 +1580,13 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       "Bakes a true-peak limiter into the synthesized audio so it can't clip on playback or export. Bypass it to hear or print the raw synthesis.",
     default: true,
   },
+  showClipping: {
+    kind: "boolean",
+    name: "Show Clipping",
+    label: "Show Clipping",
+    description: "Tints the partials driving the output past full scale red, and the ones holding the peak back cyan.",
+    default: false,
+  },
   gridSwing: {
     kind: "number",
     name: "Grid Swing",

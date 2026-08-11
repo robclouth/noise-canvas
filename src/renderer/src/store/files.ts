@@ -9,7 +9,8 @@ import * as Tone from "tone";
 import { host } from "../lib/host";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type { AnalysisParams } from "../../../main/lib/types";
-import { ONSET_REGION_PAD_SEC } from "../lib/constants";
+import { computeClipAttribution, findOverloads } from "../lib/clip-analysis";
+import { ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB, ONSET_REGION_PAD_SEC } from "../lib/constants";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
@@ -1628,6 +1629,28 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         get().setGainReduction(synthesisResult.gainReductionDb ?? null, synthesisResult.maxGainReductionDb ?? 0);
       }
 
+      // Attribute the overloaded samples back onto the coefficients that drove
+      // them. Only meaningful once the audio exists, so it runs after synthesis.
+      if (get().showClipping && file.spectrogramData) {
+        const overloads = findOverloads(
+          synthesisResult.channels,
+          originalAnalysis.sampleRate,
+          synthesisResult.gainReductionDb ?? null,
+        );
+        file.clipAttribution =
+          overloads.length > 0
+            ? computeClipAttribution(
+                file.spectrogramData,
+                processedDataArray,
+                overloads,
+                ANALYSIS_OVERLAP,
+                CLIP_FULL_TINT_DB,
+              )
+            : undefined;
+      } else {
+        file.clipAttribution = undefined;
+      }
+
       if (autoPlaybackParams) {
         // --- Handle auto-playback of the painted region ---
         const autoPlayStart = performance.now();
@@ -1739,6 +1762,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // the next synthesis re-derives it.
       file.gainReductionDb = undefined;
       file.maxGainReductionDb = undefined;
+      file.clipAttribution = undefined;
       if (get().activeFileId === fileId) get().setGainReduction(null, 0);
 
       // Hot-swap if currently playing this file

@@ -28,6 +28,17 @@ uniform bool scaleGridEnabled;
 uniform float scaleOffsets[12];       // signed; 0 for in-scale pitch classes
 uniform float pitchOffsetSemisFromC0; // semitones above C0 at band index 0
 
+// Absolute level calibration. The analysis applies no amplitude normalization,
+// so this offset is what turns a raw coefficient magnitude into dBFS.
+uniform float fullScaleDbOffset;
+uniform float overFullScaleRangeDb; // level above 0 dBFS at which the tint saturates
+
+// Per-coefficient signed contribution to samples that overloaded, in the same
+// packed layout as the spectrogram data. Positive pushes the peak further past
+// full scale, negative pulls it back.
+uniform sampler2D clipAttributionTex;
+uniform bool showClipping;
+
 // Convert screen UV (what we see) to zoomed UV (actual data coordinates).
 // screenUv.y and the result are pitch UV — 0 at the file's lowest band — but
 // offsetY arrives in the view space the DOM pans in, y measured down from the
@@ -57,10 +68,21 @@ vec2 zoomedToScreen(vec2 zoomedUv, float zoomPowerX, float offsetX, float zoomPo
     return vec2(x, y);
 }
 
+// Absolute level of a coefficient, in dB relative to full scale.
+float magnitudeToDbfs(float mag) {
+    return 20.0 * log(mag + 1.0e-7) / log(10.0) + fullScaleDbOffset;
+}
+
+// Normalized display intensity in [0, 1] across the visible dB window.
 float magnitudeToDb(float mag) {
-    float logMag = 20.0 * log(mag + 1.0e-7) / log(10.0);
-    float db = (logMag - minDb) / (maxDb - minDb);
+    float db = (magnitudeToDbfs(mag) - minDb) / (maxDb - minDb);
     return clamp(db, 0.0, 1.0);
+}
+
+// How far a coefficient exceeds full scale, normalized to [0, 1]. Tied to
+// 0 dBFS rather than to maxDb so it stays absolute as the display window moves.
+float overFullScaleAmount(float mag) {
+    return clamp(magnitudeToDbfs(mag) / max(overFullScaleRangeDb, 1.0e-3), 0.0, 1.0);
 }
 
 void main() {
@@ -90,16 +112,43 @@ void main() {
     float leftDb = magnitudeToDb(leftMag);
     
     vec3 color;
+    float overFullScale;
     if (sourceChannelCount == 1) {
         color = vec3(leftDb);
+        overFullScale = overFullScaleAmount(leftMag);
     } else {
         vec2 rightMagPhase = packedValue.ba;
         float rightMag = rightMagPhase.x;
         float rightDb = magnitudeToDb(rightMag);
-        
+
         vec3 leftColor = vec3(leftDb, leftDb * 0.5, 0.0);
         vec3 rightColor = vec3(0.0, rightDb * 0.5, rightDb);
         color = leftColor + rightColor;
+        overFullScale = max(overFullScaleAmount(leftMag), overFullScaleAmount(rightMag));
+    }
+
+    // A single partial past full scale is always a problem on its own, so it is
+    // flagged from magnitude alone. Partials below full scale can still clip
+    // collectively — that case needs the attribution overlay below, because the
+    // sum is not visible in any individual coefficient.
+    if (overFullScale > 0.0) {
+        color = mix(color, vec3(1.0, 0.15, 0.1), overFullScale * 0.85);
+    }
+
+    // Contribution to samples that actually overloaded. Red marks coefficients
+    // driving the peak outwards, cyan marks ones holding it back — attenuating
+    // the latter would make the clipping worse.
+    if (showClipping) {
+        // The band whose strip this pixel falls in, not the lower half of the
+        // interpolation pair, so the tint sits on the coefficient it blames.
+        float blameBand = clamp(floor((1.0 - zoomedUv.y) * sourceBandCount), 0.0, sourceBandCount - 1.0);
+        float blame = readPackedData(
+            vec2(zoomedUv.x, 1.0 - (blameBand + 0.5) / sourceBandCount),
+            clipAttributionTex, sourceMetadataTex, sourceFrameCount, sourceBandCount).r;
+        float pushes = clamp(blame, 0.0, 1.0);
+        float pulls = clamp(-blame, 0.0, 1.0);
+        color = mix(color, vec3(1.0, 0.1, 0.05), pushes * 0.8);
+        color = mix(color, vec3(0.1, 0.8, 0.9), pulls * 0.35);
     }
 
     // Faint grid lines. Adaptive contrast (brighten by delta, or darken if that

@@ -642,6 +642,7 @@ The transport bar, left to right:
 - **Tonic / Type** – the scale used for pitch snapping and for scale-based effects and modulation.
 - **Output meter** and **gain-reduction meter**.
 - **Limiter** – bakes a true-peak limiter into the synthesized audio so playback and export can't clip. Bypass it to hear or print the raw synthesis.
+- **Clipping** – tints the spectrogram where the output overloads. Red marks the partials pushing the peak past full scale; cyan marks the ones pulling it back, so attenuating cyan makes the clipping worse. Paint the red down to clear it. A partial that is over full scale on its own always reads red, whether or not the mix overloads.
 - **?** – outlines every area of the window at once. See [Getting Help](#getting-help).
 
 Audio is resynthesized incrementally after every stroke, so what you hear is always the real thing, not a preview.

@@ -395,6 +395,7 @@ const PARAMETER_SECTIONS: Record<string, string> = {
   scaleTonic: "transport-and-output",
   scaleType: "transport-and-output",
   limiterEnabled: "transport-and-output",
+  showClipping: "transport-and-output",
   linkLatencyMs: "working-with-ableton-live",
 
   bandsPerOctave: "working-with-files",

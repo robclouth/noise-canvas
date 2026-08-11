@@ -17,6 +17,7 @@ export interface AudioState {
   autoPlayStroke: boolean;
   setAutoPlayStroke: (value: boolean) => void;
   limiterEnabled: boolean;
+  showClipping: boolean;
   gainReductionDb: Float32Array | null;
   maxGainReductionDb: number;
   setGainReduction: (envDb: Float32Array | null, maxDb: number) => void;
@@ -175,6 +176,10 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
   // Driven by the `limiterEnabled` parameter; setParameter re-bakes the active
   // file when it changes.
   limiterEnabled: true,
+
+  // Driven by the `showClipping` parameter; synthesis computes the attribution
+  // map only while it is on.
+  showClipping: false,
 
   loopRegion: null,
   setLoopRegion: (region) => {

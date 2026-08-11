@@ -179,7 +179,10 @@ export const TransportPanel = memo(() => {
         {limiterEnabled && <GainReductionMeter />}
       </Box>
 
-      <ParameterControl paramKey="limiterEnabled" displayLabel="Limiter" />
+      <Stack gap={0}>
+        <ParameterControl paramKey="limiterEnabled" displayLabel="Limiter" />
+        <ParameterControl paramKey="showClipping" displayLabel="Clipping" />
+      </Stack>
 
       <Divider orientation="vertical" color="dark.5" />
 

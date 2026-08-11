@@ -256,8 +256,10 @@ export const useStore = create<State>()(
               }),
             );
             // The limiter is baked into the synthesized audio, so toggling it is
-            // only audible after re-synthesizing the active file.
-            if (key === "limiterEnabled") {
+            // only audible after re-synthesizing the active file. The clipping
+            // attribution is derived from that same synthesis pass, so enabling
+            // the overlay needs one too.
+            if (key === "limiterEnabled" || key === "showClipping") {
               const { activeFileId, synthesizeFile } = get();
               if (activeFileId) void synthesizeFile(activeFileId);
             }
