@@ -1,23 +1,35 @@
 import { Anchor, Box, Button, Group, Paper, Portal, Stack, Text } from "@mantine/core";
 import { host } from "@renderer/lib/host";
-import { UI_AREA_NAMES, deepTourFor, getArea, type UiAreaName } from "@renderer/lib/ui-areas";
 import { anchorSelector } from "@renderer/lib/ui-anchors";
+import { UI_AREA_NAMES, deepTourFor, getArea, type UiAreaName } from "@renderer/lib/ui-areas";
 import { startDeepTour } from "@renderer/lib/walkthrough";
 import { useStore } from "@renderer/store";
 import { BookOpen, Route } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
- * Outlines every interactive area at once, which is the answer to "what is all
- * this?" that a one-at-a-time tour can't give. Clicking an outline opens that
- * area's deeper material — its tour if it has one, its manual section either
- * way. Opened from the ? button in the transport, or the ? key.
+ * Dims the window and brightens whatever the pointer is over, with that area's
+ * description beside it. Moving around the window is the gesture — there are no
+ * standing labels, because fifteen of them at once is what the overlay is
+ * supposed to save you from.
  */
 
 type Outline = { name: UiAreaName; rect: DOMRect };
 
-/** driver.js sits at 500; this has to cover the app but never a running tour. */
-const OVERLAY_Z = 400;
+/**
+ * Above every layer the app itself uses — the transport and the Generate bar
+ * sit at 1000, Mantine's portals at 10001 — so nothing pokes through the dim.
+ * It never coexists with a tour: opening one closes this first.
+ */
+const OVERLAY_Z = 10003;
+/** The UI is already dark, so it takes a heavy scrim to read as switched off. */
+const DIM = "rgba(0, 0, 0, 0.78)";
+const EASE = "top 120ms ease, left 120ms ease, width 120ms ease, height 120ms ease";
+
+const POPOVER_WIDTH = 280;
+const POPOVER_GAP = 12;
+/** Enough room for a title, a blurb, the buttons and two recipes. */
+const POPOVER_HEIGHT = 190;
 
 /**
  * Recipes live on GitHub rather than in the build: unlike the manual they grow
@@ -34,7 +46,6 @@ function recipeTitle(id: string): string {
 function measure(): Outline[] {
   const outlines: Outline[] = [];
   for (const name of UI_AREA_NAMES) {
-    // `file-lane` exists once per open file; the first is the one on screen.
     const element = document.querySelector(anchorSelector(name));
     if (!element) continue;
     const rect = element.getBoundingClientRect();
@@ -44,20 +55,61 @@ function measure(): Outline[] {
   return outlines;
 }
 
+/**
+ * The smallest area under the pointer. Areas nest — sections sit inside the
+ * brush panel, the header inside its lane — and the innermost one is always
+ * the more specific answer to "what is this?".
+ */
+function hitTest(outlines: Outline[], x: number, y: number): Outline | null {
+  let best: Outline | null = null;
+  for (const outline of outlines) {
+    const { rect } = outline;
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue;
+    const area = rect.width * rect.height;
+    if (!best || area < best.rect.width * best.rect.height) best = outline;
+  }
+  return best;
+}
+
+/** Beside the highlight where there is room, otherwise below or above it. */
+function placePopover(rect: DOMRect): { top: number; left: number } {
+  const { innerWidth: vw, innerHeight: vh } = window;
+
+  let left: number;
+  if (rect.right + POPOVER_GAP + POPOVER_WIDTH <= vw) left = rect.right + POPOVER_GAP;
+  else if (rect.left - POPOVER_GAP - POPOVER_WIDTH >= 0) left = rect.left - POPOVER_GAP - POPOVER_WIDTH;
+  else left = Math.min(Math.max(rect.left, POPOVER_GAP), vw - POPOVER_WIDTH - POPOVER_GAP);
+
+  const beside = left >= rect.right || left + POPOVER_WIDTH <= rect.left;
+  let top: number;
+  if (beside) top = rect.top;
+  else if (rect.bottom + POPOVER_GAP + POPOVER_HEIGHT <= vh) top = rect.bottom + POPOVER_GAP;
+  else top = rect.top - POPOVER_GAP - POPOVER_HEIGHT;
+
+  return {
+    top: Math.min(Math.max(top, POPOVER_GAP), vh - POPOVER_HEIGHT - POPOVER_GAP),
+    left,
+  };
+}
+
 export function HelpOverlay(): React.JSX.Element | null {
   const open = useStore((state) => state.helpOverlayOpen);
   const setOpen = useStore((state) => state.setHelpOverlayOpen);
   const openManual = useStore((state) => state.openManual);
   const [outlines, setOutlines] = useState<Outline[]>([]);
-  const [selected, setSelected] = useState<UiAreaName | null>(null);
+  const [hovered, setHovered] = useState<UiAreaName | null>(null);
+  const frame = useRef(0);
 
   const close = useCallback(() => {
     setOpen(false);
-    setSelected(null);
+    setHovered(null);
   }, [setOpen]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setHovered(null);
+      return;
+    }
     setOutlines(measure());
     const remeasure = () => setOutlines(measure());
     window.addEventListener("resize", remeasure);
@@ -84,83 +136,93 @@ export function HelpOverlay(): React.JSX.Element | null {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [close]);
 
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+
+  const onMouseMove = useCallback(
+    (event: React.MouseEvent) => {
+      const { clientX, clientY } = event;
+      cancelAnimationFrame(frame.current);
+      frame.current = requestAnimationFrame(() => {
+        const hit = hitTest(outlines, clientX, clientY);
+        // Empty space keeps the last highlight, so crossing a gap on the way to
+        // the popover doesn't blink it away.
+        if (hit) setHovered(hit.name);
+      });
+    },
+    [outlines],
+  );
+
+  const active = useMemo(() => outlines.find((o) => o.name === hovered) ?? null, [outlines, hovered]);
+
   if (!open) return null;
 
-  const chosen = selected ? getArea(selected) : null;
-  const chosenRect = selected ? outlines.find((o) => o.name === selected)?.rect : undefined;
-  const hasTour = selected ? deepTourFor(selected).length > 0 : false;
+  const rect = active?.rect;
+  const area = hovered ? getArea(hovered) : null;
+  const hasTour = hovered ? deepTourFor(hovered).length > 0 : false;
+  const dim: React.CSSProperties = { position: "fixed", background: DIM, transition: EASE, pointerEvents: "none" };
 
   return (
     <Portal>
+      {/* One transparent catcher over everything, so tracking stays continuous
+          across the bright cut-out and no click reaches the app underneath. */}
       <Box
         pos="fixed"
         top={0}
         left={0}
         right={0}
         bottom={0}
-        bg="rgba(0, 0, 0, 0.55)"
-        style={{ zIndex: OVERLAY_Z }}
+        style={{ zIndex: OVERLAY_Z, cursor: "crosshair" }}
+        onMouseMove={onMouseMove}
         onClick={close}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          close();
+        }}
       >
-        {outlines.map(({ name, rect }) => {
-          const area = getArea(name);
-          const active = selected === name;
-          return (
+        {rect ? (
+          <>
+            <Box style={{ ...dim, top: 0, left: 0, right: 0, height: Math.max(0, rect.top) }} />
+            <Box style={{ ...dim, top: rect.bottom, left: 0, right: 0, bottom: 0 }} />
+            <Box style={{ ...dim, top: rect.top, left: 0, width: Math.max(0, rect.left), height: rect.height }} />
+            <Box style={{ ...dim, top: rect.top, left: rect.right, right: 0, height: rect.height }} />
             <Box
-              key={name}
-              pos="absolute"
-              top={rect.top}
-              left={rect.left}
-              w={rect.width}
-              h={rect.height}
-              onClick={(event) => {
-                event.stopPropagation();
-                setSelected(name);
-              }}
               style={{
-                border: `1px solid var(--mantine-color-orange-${active ? 5 : 8})`,
+                position: "fixed",
+                top: rect.top,
+                left: rect.left,
+                width: rect.width,
+                height: rect.height,
+                border: "1px solid var(--mantine-color-orange-5)",
                 borderRadius: 4,
-                background: active ? "rgba(255, 146, 43, 0.12)" : "transparent",
-                cursor: "pointer",
+                boxShadow: "0 0 0 3px rgba(255, 146, 43, 0.18)",
+                transition: EASE,
+                pointerEvents: "none",
               }}
-            >
-              <Text
-                size="xs"
-                c={active ? "orange.4" : "orange.6"}
-                fw={600}
-                pos="absolute"
-                top={2}
-                left={4}
-                style={{ pointerEvents: "none", textShadow: "0 1px 3px rgba(0,0,0,0.9)" }}
-              >
-                {area.title}
-              </Text>
-            </Box>
-          );
-        })}
+            />
+          </>
+        ) : (
+          <Box style={{ ...dim, top: 0, left: 0, right: 0, bottom: 0 }} />
+        )}
 
-        {chosen && chosenRect && (
+        {area && rect && (
           <Paper
-            pos="absolute"
             withBorder
             shadow="md"
             p="sm"
-            w={280}
+            w={POPOVER_WIDTH}
+            pos="fixed"
+            style={{ ...placePopover(rect), transition: EASE }}
+            // Freezes the highlight once the pointer is on the card, so its
+            // buttons stay reachable without the selection sliding away.
+            onMouseMove={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
-            style={{
-              // Below the outline where there is room, above it otherwise.
-              top: chosenRect.bottom + 180 < window.innerHeight ? chosenRect.bottom + 8 : undefined,
-              bottom:
-                chosenRect.bottom + 180 < window.innerHeight ? undefined : window.innerHeight - chosenRect.top + 8,
-              left: Math.min(chosenRect.left, window.innerWidth - 296),
-            }}
           >
             <Stack gap="xs">
               <Text size="sm" fw={600}>
-                {chosen.title}
+                {area.title}
               </Text>
               <Text size="xs" c="dimmed">
-                {chosen.blurb}
+                {area.blurb}
               </Text>
               <Group gap="xs">
                 {hasTour && (
@@ -170,8 +232,9 @@ export function HelpOverlay(): React.JSX.Element | null {
                     color="orange"
                     leftSection={<Route size={12} />}
                     onClick={() => {
+                      const target = hovered;
                       close();
-                      void startDeepTour(selected!);
+                      if (target) void startDeepTour(target);
                     }}
                   >
                     Show me around
@@ -184,18 +247,18 @@ export function HelpOverlay(): React.JSX.Element | null {
                   leftSection={<BookOpen size={12} />}
                   onClick={() => {
                     close();
-                    openManual(chosen.manualSection);
+                    openManual(area.manualSection);
                   }}
                 >
                   Manual
                 </Button>
               </Group>
-              {chosen.recipes && chosen.recipes.length > 0 && (
+              {area.recipes && area.recipes.length > 0 && (
                 <Stack gap={2}>
                   <Text size="xs" c="dimmed">
                     Things to do with it
                   </Text>
-                  {chosen.recipes.map((recipe) => (
+                  {area.recipes.map((recipe) => (
                     <Anchor
                       key={recipe}
                       size="xs"
@@ -213,16 +276,29 @@ export function HelpOverlay(): React.JSX.Element | null {
           </Paper>
         )}
 
-        <Text
-          pos="absolute"
-          bottom={12}
-          left="50%"
-          size="xs"
-          c="dimmed"
-          style={{ transform: "translateX(-50%)", pointerEvents: "none" }}
-        >
-          Click an area to go deeper · Esc or ? to close
-        </Text>
+        {/* Only until the first hover: every fixed corner sits over some area
+            you'd want to point at, and by then the gesture is self-evident. */}
+        {!hovered && (
+          <Text
+            pos="fixed"
+            bottom={16}
+            left="50%"
+            size="xs"
+            c="dimmed"
+            px="sm"
+            py={4}
+            bg="dark.9"
+            style={{
+              transform: "translateX(-50%)",
+              pointerEvents: "none",
+              borderRadius: 999,
+              border: "1px solid var(--mantine-color-dark-6)",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Move over anything to find out what it is · click or Esc to close
+          </Text>
+        )}
       </Box>
     </Portal>
   );
