@@ -85,11 +85,11 @@ export function BrushPanel() {
   return (
     <Stack gap="xs">
       <Stack p="xs" gap="xs">
-        <Section label="Macros" parameterKeys={MACRO_PARAMS}>
+        <Section label="Macros" parameterKeys={MACRO_PARAMS} anchor="section-macros">
           <MacroControls />
         </Section>
         <Steps />
-        <Section label="Source">
+        <Section label="Source" anchor="section-source">
           <SimpleGrid cols={2} spacing={PANEL_COLUMN_SPACING} verticalSpacing={0}>
             <ParameterControl paramKey="sourceFile" />
             <ParameterControl paramKey="sourcePositionMode" />
@@ -98,10 +98,10 @@ export function BrushPanel() {
             <ParameterControl paramKey="sourceDataMode" />
           </SimpleGrid>
         </Section>
-        <Section label="Envelope" parameterKeys={ENVELOPE_PARAMS}>
+        <Section label="Envelope" parameterKeys={ENVELOPE_PARAMS} anchor="section-envelope">
           <EnvelopeControl />
         </Section>
-        <Section label="Options" parameterKeys={OPTIONS_PARAMS}>
+        <Section label="Options" parameterKeys={OPTIONS_PARAMS} anchor="section-options">
           <SimpleGrid cols={2} spacing={PANEL_COLUMN_SPACING} verticalSpacing={0}>
             <ParameterControl paramKey="blendMode" />
             <ParameterControl paramKey="brushPan" />
@@ -111,10 +111,10 @@ export function BrushPanel() {
             <ParameterControl paramKey="accumulate" />
           </SimpleGrid>
         </Section>
-        <Section label="Effects" parameterKeys={ALL_EFFECT_PARAMS} includeEffectOrder>
+        <Section label="Effects" parameterKeys={ALL_EFFECT_PARAMS} includeEffectOrder anchor="section-effects">
           <EffectsList />
         </Section>
-        <Section label="Modulators" parameterKeys={MODULATOR_PARAMS}>
+        <Section label="Modulators" parameterKeys={MODULATOR_PARAMS} anchor="section-modulators">
           <ModulatorView />
         </Section>
       </Stack>

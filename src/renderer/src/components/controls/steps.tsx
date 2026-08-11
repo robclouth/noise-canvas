@@ -3,6 +3,7 @@ import { ActionIcon, Group, useMantineTheme } from "@mantine/core";
 import { resolveBrushColor } from "@renderer/lib/colors";
 import { openConfirm } from "@renderer/lib/modals";
 import { useStore } from "@renderer/store";
+import { anchorProps } from "@renderer/lib/ui-anchors";
 import { MAX_STEPS } from "@renderer/store/steps";
 import type { BrushColor } from "@renderer/store/types";
 import { Copy, Plus, Trash } from "lucide-react";
@@ -22,30 +23,22 @@ export function Steps() {
   // Select a primitive signature of just the displayed fields instead, so a
   // value drag doesn't touch this component. (`id` and `color` never contain a
   // newline, so it is a safe entry delimiter.)
-  const {
-    stepSig,
-    stepCount,
-    activeStepIndex,
-    setActiveStepIndex,
-    addStep,
-    removeStep,
-    duplicateStep,
-    reorderSteps,
-  } = useStore(
-    useShallow((state) => {
-      const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
-      return {
-        stepSig: steps.map((s) => `${s.id} ${s.color ? `${s.color.hue}:${s.color.variation}` : ""}`).join("\n"),
-        stepCount: steps.length,
-        activeStepIndex: state.activeStepIndex,
-        setActiveStepIndex: state.setActiveStepIndex,
-        addStep: state.addStep,
-        removeStep: state.removeStep,
-        duplicateStep: state.duplicateStep,
-        reorderSteps: state.reorderSteps,
-      };
-    }),
-  );
+  const { stepSig, stepCount, activeStepIndex, setActiveStepIndex, addStep, removeStep, duplicateStep, reorderSteps } =
+    useStore(
+      useShallow((state) => {
+        const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+        return {
+          stepSig: steps.map((s) => `${s.id} ${s.color ? `${s.color.hue}:${s.color.variation}` : ""}`).join("\n"),
+          stepCount: steps.length,
+          activeStepIndex: state.activeStepIndex,
+          setActiveStepIndex: state.setActiveStepIndex,
+          addStep: state.addStep,
+          removeStep: state.removeStep,
+          duplicateStep: state.duplicateStep,
+          reorderSteps: state.reorderSteps,
+        };
+      }),
+    );
 
   const stepMeta = useMemo(
     () =>
@@ -94,7 +87,7 @@ export function Steps() {
   };
 
   return (
-    <Group gap={4} align="center" wrap="nowrap">
+    <Group gap={4} align="center" wrap="nowrap" {...anchorProps("section-steps")}>
       <DragDropContext onDragEnd={handleDragEnd}>
         <Droppable droppableId="steps" direction="horizontal">
           {(dropProvided) => (

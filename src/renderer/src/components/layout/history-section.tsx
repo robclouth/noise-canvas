@@ -588,7 +588,7 @@ export function HistorySection() {
   );
 
   return (
-    <Section label="History" rightSlot={controls} fill>
+    <Section label="History" rightSlot={controls} fill anchor="section-history">
       <ScrollArea type="auto" scrollbarSize={4} style={{ flex: 1, minHeight: 0 }}>
         {!manifest || !layout ? (
           <Text size="xs" c="dimmed" ta="center" py={8} pr={8}>

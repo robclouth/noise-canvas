@@ -4,6 +4,7 @@ import { NumboxControl } from "@renderer/components/controls/numbox-control";
 import { DEFAULT_ONSET_SENSITIVITY } from "@renderer/lib/constants";
 import { openSplitPartsPrompt } from "@renderer/lib/modals";
 import { FILE_HEADER_FONT, FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-density";
+import { anchorProps } from "@renderer/lib/ui-anchors";
 import { getFileColor, openFiles } from "@renderer/store/files";
 import { selectStemGroupOfFile, stemMemberColor } from "@renderer/store/stem-groups";
 import { isManagedFilePath } from "@renderer/store/utils";
@@ -139,6 +140,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         borderLeft: `3px solid ${fileColor}`,
         ...(isHighlighted ? { outline: "1px solid var(--mantine-color-blue-6)" } : {}),
       }}
+      {...anchorProps("file-header")}
     >
       <Group gap="xs" style={{ minWidth: 0, flex: 1 }}>
         <Tooltip label={tooltipLabel}>

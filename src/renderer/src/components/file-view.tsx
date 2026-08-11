@@ -16,6 +16,7 @@ import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { LoopRegion } from "./loop-region";
 import { OnsetLegend } from "./onset-legend";
+import { laneAnchorProps } from "../lib/ui-anchors";
 import { PITCH_LEGEND_WIDTH, PitchLegend } from "./pitch-legend";
 import { PlaybackLine } from "./playback-line";
 import { TimeLegend } from "./time-legend";
@@ -756,6 +757,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
           useStore.getState().setActiveFileId(fileId);
         }
       }}
+      {...laneAnchorProps(fileId)}
     >
       <FileHeader fileId={fileId} />
       {loadingMessage || !file.spectrogramData ? (

@@ -301,6 +301,7 @@ const EffectListItem = memo(function EffectListItem({
             color={EFFECT_COLORS[effect] || "gray"}
             parameterKeys={EFFECT_PARAMS[effect]}
             effectId={id}
+            effectType={effect}
           >
             <EffectProvider effectId={id}>{EFFECT_COMPONENTS[effect] || null}</EffectProvider>
           </EffectSection>

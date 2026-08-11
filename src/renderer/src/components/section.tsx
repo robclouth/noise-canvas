@@ -2,6 +2,7 @@ import { useStore } from "@/store";
 import { ParameterKey } from "@/store/types";
 import { Box, Collapse, Divider, Group, Stack, Text, useMantineTheme } from "@mantine/core";
 import { CONTROL_ROW_HEIGHT } from "@renderer/lib/ui-density";
+import { anchorProps, type UiAnchor } from "@renderer/lib/ui-anchors";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { SectionMenu } from "./controls/section-menu";
 
@@ -12,6 +13,7 @@ export const Section = ({
   includeEffectOrder,
   rightSlot,
   fill,
+  anchor,
 }: {
   children: React.ReactNode;
   label: string;
@@ -22,6 +24,8 @@ export const Section = ({
   // parent gives it and lets a `flex:1, minHeight:0` child body scroll
   // internally instead of growing the whole container.
   fill?: boolean;
+  // Names this section for the walkthrough and the docs screenshot script.
+  anchor?: UiAnchor;
 }) => {
   const theme = useMantineTheme();
   const sectionCollapsed = useStore((state) => state.sectionCollapsed);
@@ -30,7 +34,7 @@ export const Section = ({
   const isCollapsed = sectionCollapsed[label] ?? false;
 
   return (
-    <Stack gap={2} style={fill ? { flex: 1, minHeight: 0 } : undefined}>
+    <Stack gap={2} style={fill ? { flex: 1, minHeight: 0 } : undefined} {...(anchor ? anchorProps(anchor) : {})}>
       <Group gap={4} wrap="nowrap" align="center" h={CONTROL_ROW_HEIGHT} pr={fill ? 8 : undefined}>
         <Group
           gap={4}

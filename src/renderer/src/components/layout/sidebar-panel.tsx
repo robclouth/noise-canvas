@@ -18,6 +18,7 @@ import { useWindowEvent } from "@mantine/hooks";
 import { openConfirm, openPrompt } from "@renderer/lib/modals";
 import { resolveBrushColor } from "@renderer/lib/colors";
 import { EFFECT_COLORS, EFFECT_LABELS } from "@renderer/lib/constants";
+import { anchorProps } from "@renderer/lib/ui-anchors";
 import { INPUT_HEIGHT } from "@renderer/lib/ui-density";
 import { RESERVED_KEYS } from "@renderer/lib/useShortcuts";
 import { collectBrushReferencedPaths } from "@renderer/store/files";
@@ -401,6 +402,7 @@ export function SidebarPanel() {
         background: "var(--mantine-color-dark-7)",
         borderLeft: "1px solid var(--mantine-color-dark-5)",
       }}
+      {...anchorProps("sidebar")}
     >
       <Box
         style={{

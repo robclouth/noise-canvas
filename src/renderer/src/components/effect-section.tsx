@@ -1,4 +1,6 @@
 import { ParameterKey } from "@/store/types";
+import type { EffectType } from "@renderer/effects/types";
+import { anchorProps } from "@renderer/lib/ui-anchors";
 import { ActionIcon, Checkbox, Collapse, Group, Paper, Stack, Text } from "@mantine/core";
 import { GripVertical } from "lucide-react";
 import { memo } from "react";
@@ -17,6 +19,7 @@ export type EffectSectionProps = {
   color?: string;
   parameterKeys?: ParameterKey[];
   effectId?: string;
+  effectType?: EffectType;
 };
 
 export const EffectSection = memo(
@@ -32,9 +35,10 @@ export const EffectSection = memo(
     color,
     parameterKeys,
     effectId,
+    effectType,
   }: EffectSectionProps) => {
     return (
-      <Paper>
+      <Paper {...(effectType ? anchorProps(`effect-${effectType}`) : {})}>
         <Stack gap="xs">
           <Group gap="xs" wrap="nowrap">
             <Checkbox
