@@ -1,6 +1,7 @@
 import { Box, Group, Stack, Text, UnstyledButton, useMantineTheme, type MantineTheme } from "@mantine/core";
 import { resolveBrushColor } from "@renderer/lib/colors";
 import { EFFECT_COLORS, EFFECT_LABELS } from "@renderer/lib/constants";
+import { helpProps } from "@renderer/lib/ui-controls";
 import type { BrushColor } from "@renderer/store/types";
 import { Tooltip } from "../tooltip";
 
@@ -140,7 +141,8 @@ export function BrushRow({
 
   return (
     <Tooltip
-      label={summary}
+      help="brush-row"
+      detail={summary}
       disabled={!summary || summaryDisabled}
       position="left"
       openDelay={500}
@@ -161,6 +163,7 @@ export function BrushRow({
         px="xs"
         py={4}
         className={editing ? undefined : "effect-button"}
+        {...helpProps("brush-row")}
         style={{
           position: "relative",
           overflow: "hidden",

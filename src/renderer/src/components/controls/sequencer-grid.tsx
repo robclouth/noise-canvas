@@ -1,7 +1,9 @@
-import { Box, Button, Group, useMantineTheme } from "@mantine/core";
+import { Box, Group, useMantineTheme } from "@mantine/core";
+import { helpProps } from "@renderer/lib/ui-controls";
 import { selectParameter, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { HelpButton } from "./help-control";
 
 interface SequencerData {
   values: number[][];
@@ -270,9 +272,9 @@ export function SequencerGrid({ modulatorIndex }: SequencerGridProps) {
   return (
     <Box ref={containerRef} style={{ userSelect: "none", width: "100%" }}>
       <Group gap={4} mb={4}>
-        <Button size="compact-xs" variant="subtle" onClick={randomize}>
+        <HelpButton help="sequencer-randomize" size="compact-xs" variant="subtle" onClick={randomize}>
           Rand
-        </Button>
+        </HelpButton>
         <Box style={{ fontSize: 10, opacity: 0.6 }}>Intensity: {Math.round(currentIntensity * 100)}%</Box>
       </Group>
       <canvas
@@ -286,6 +288,7 @@ export function SequencerGrid({ modulatorIndex }: SequencerGridProps) {
           borderRadius: 4,
         }}
         onMouseDown={handleMouseDown}
+        {...helpProps("sequencer-grid")}
       />
     </Box>
   );

@@ -1,6 +1,6 @@
 import { getParameterValue, selectParameter, useStore } from "@/store";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
-import { Box, Button, Stack } from "@mantine/core";
+import { Box, Stack } from "@mantine/core";
 import { openContextModal } from "@renderer/lib/modals";
 import { EFFECT_ITEM_PAD_Y } from "@renderer/lib/ui-density";
 import { EffectItem, EffectType } from "@renderer/effects/types";
@@ -10,6 +10,7 @@ import { Plus } from "lucide-react";
 import { memo, useCallback, useMemo } from "react";
 import { EffectProvider } from "../contexts/effect-context";
 import { EffectSection } from "./effect-section";
+import { HelpButton } from "./controls/help-control";
 import { BinauralEffect } from "./effect-views/binaural-effect";
 import { BlurEffect } from "./effect-views/blur-effect";
 import { CloneEffect } from "./effect-views/clone-effect";
@@ -230,7 +231,8 @@ export function EffectsList() {
             {provided.placeholder}
             {effectStructures.length < MAX_EFFECTS && (
               <Box py={EFFECT_ITEM_PAD_Y}>
-                <Button
+                <HelpButton
+                  help="effect-add"
                   variant="subtle"
                   color="gray"
                   size="compact-xs"
@@ -240,7 +242,7 @@ export function EffectsList() {
                   onClick={handleAddEffect}
                 >
                   Add effect
-                </Button>
+                </HelpButton>
               </Box>
             )}
           </Stack>

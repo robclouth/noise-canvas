@@ -1,5 +1,6 @@
-import { ActionIcon, Box, Divider, Group, Menu, Stack, Text, useMantineTheme } from "@mantine/core";
+import { Box, Divider, Group, Menu, Stack, Text, useMantineTheme } from "@mantine/core";
 import { openPrompt } from "@renderer/lib/modals";
+import { helpProps } from "@renderer/lib/ui-controls";
 import { CONTROL_ROW_HEIGHT, LABEL_WIDTH } from "@renderer/lib/ui-density";
 import { getParameterDef, isEffectParameter, parameterDefs } from "@renderer/parameters";
 import {
@@ -22,6 +23,7 @@ import { useShallow } from "zustand/shallow";
 
 const EMPTY_STRING_ARRAY: readonly string[] = [];
 import { Tooltip } from "../tooltip";
+import { HelpActionIcon } from "./help-control";
 import { ParameterControl } from "./parameter-control";
 import { SectionMenu } from "./section-menu";
 import { SwitchControl } from "./switch-control";
@@ -195,49 +197,46 @@ export const ParamMenu = ({
       <Menu.Dropdown p={8}>
         <Stack gap={2}>
           <Group gap={4} mb={2}>
-            <Tooltip label="Reset to default">
-              <ActionIcon
+            <HelpActionIcon
+              help="param-reset"
+              variant="subtle"
+              color="gray"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleReset();
+              }}
+            >
+              <RotateCcw size={14} />
+            </HelpActionIcon>
+            {isMacro && (
+              <HelpActionIcon
+                help="param-rename-macro"
                 variant="subtle"
                 color="gray"
                 size="sm"
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleReset();
+                  handleRenameMacro();
                 }}
               >
-                <RotateCcw size={14} />
-              </ActionIcon>
-            </Tooltip>
-            {isMacro && (
-              <Tooltip label="Rename">
-                <ActionIcon
-                  variant="subtle"
-                  color="gray"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleRenameMacro();
-                  }}
-                >
-                  <Pencil size={14} />
-                </ActionIcon>
-              </Tooltip>
+                <Pencil size={14} />
+              </HelpActionIcon>
             )}
             {manualSection && (
-              <Tooltip label="Read about this in the manual">
-                <ActionIcon
-                  variant="subtle"
-                  color="gray"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setOpened(false);
-                    openManual(manualSection);
-                  }}
-                >
-                  <BookOpen size={14} />
-                </ActionIcon>
-              </Tooltip>
+              <HelpActionIcon
+                help="param-manual"
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpened(false);
+                  openManual(manualSection);
+                }}
+              >
+                <BookOpen size={14} />
+              </HelpActionIcon>
             )}
           </Group>
 
@@ -245,7 +244,7 @@ export const ParamMenu = ({
           <Group gap={8} wrap="nowrap">
             <SwitchControl
               labelComponent={
-                <Text size="xs" w={LABEL_WIDTH}>
+                <Text size="xs" w={LABEL_WIDTH} {...helpProps("param-randomise")}>
                   Randomise
                 </Text>
               }
@@ -254,7 +253,7 @@ export const ParamMenu = ({
             />
             <SwitchControl
               labelComponent={
-                <Text size="xs" w={LABEL_WIDTH}>
+                <Text size="xs" w={LABEL_WIDTH} {...helpProps("param-step-linked")}>
                   Step Linked
                 </Text>
               }

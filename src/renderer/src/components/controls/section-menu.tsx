@@ -1,17 +1,18 @@
-import { ActionIcon, Button, Divider, Group, Menu, Stack, Text } from "@mantine/core";
+import { ActionIcon, Divider, Group, Menu, Stack, Text } from "@mantine/core";
 import { LABEL_WIDTH } from "@renderer/lib/ui-density";
+import { helpProps } from "@renderer/lib/ui-controls";
 import { isEffectParameter, parameterDefs } from "@renderer/parameters";
 import { getEffectParameterValue, getModulationParamKeys, getParameterValue, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
 import { Copy, MoreVertical, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { Tooltip } from "../tooltip";
 import {
   randomizeBooleanParameter,
   randomizeEffects,
   randomizeNumberParameter,
   randomizeOptionsParameter,
 } from "../../lib/randomize";
+import { HelpActionIcon, HelpButton } from "./help-control";
 import { NumboxControl } from "./numbox-control";
 import { SwitchControl } from "./switch-control";
 
@@ -143,6 +144,7 @@ export const SectionMenu = ({
           variant="transparent"
           color="gray.5"
           size="xs"
+          {...helpProps("section-menu")}
         >
           <MoreVertical size={14} />
         </ActionIcon>
@@ -154,50 +156,47 @@ export const SectionMenu = ({
           <Group gap={4} justify="space-between" mb={2}>
             <Group gap={4}>
               {onCopy && (
-                <Tooltip label="Duplicate">
-                  <ActionIcon
-                    variant="subtle"
-                    color="gray"
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOpened(false);
-                      onCopy();
-                    }}
-                  >
-                    <Copy size={14} />
-                  </ActionIcon>
-                </Tooltip>
-              )}
-              <Tooltip label="Reset to defaults">
-                <ActionIcon
+                <HelpActionIcon
+                  help="effect-duplicate"
                   variant="subtle"
                   color="gray"
                   size="sm"
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleReset();
+                    setOpened(false);
+                    onCopy();
                   }}
                 >
-                  <RotateCcw size={14} />
-                </ActionIcon>
-              </Tooltip>
+                  <Copy size={14} />
+                </HelpActionIcon>
+              )}
+              <HelpActionIcon
+                help="effect-reset"
+                variant="subtle"
+                color="gray"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleReset();
+                }}
+              >
+                <RotateCcw size={14} />
+              </HelpActionIcon>
             </Group>
             {onRemove && (
-              <Tooltip label="Remove">
-                <ActionIcon
-                  variant="subtle"
-                  color="red"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setOpened(false);
-                    onRemove();
-                  }}
-                >
-                  <Trash2 size={14} />
-                </ActionIcon>
-              </Tooltip>
+              <HelpActionIcon
+                help="effect-remove"
+                variant="subtle"
+                color="red"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpened(false);
+                  onRemove();
+                }}
+              >
+                <Trash2 size={14} />
+              </HelpActionIcon>
             )}
           </Group>
 
@@ -229,7 +228,8 @@ export const SectionMenu = ({
                 value={modulationEnabled}
                 setValue={setModulationEnabled}
               />
-              <Button
+              <HelpButton
+                help="section-randomize"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleRandomize();
@@ -240,7 +240,7 @@ export const SectionMenu = ({
                 mt={4}
               >
                 Randomize
-              </Button>
+              </HelpButton>
             </>
           )}
         </Stack>

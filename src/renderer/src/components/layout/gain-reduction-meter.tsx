@@ -1,5 +1,6 @@
 import { useStore } from "@/store";
 import { Box } from "@mantine/core";
+import { helpProps } from "@renderer/lib/ui-controls";
 import { useUiSize } from "@renderer/lib/ui-density";
 import { memo, useEffect, useRef } from "react";
 import { Tooltip } from "../tooltip";
@@ -67,8 +68,8 @@ export const GainReductionMeter = memo(() => {
   };
 
   return (
-    <Tooltip label={`Limiter gain reduction — peak ${formatGr(maxGr)} dB this render`}>
-      <Box style={trackStyle}>
+    <Tooltip help="gain-reduction-meter" detail={`Peak ${formatGr(maxGr)} dB this render`}>
+      <Box style={trackStyle} {...helpProps("gain-reduction-meter")}>
         {/* Reduction fills downward from the top: the more the limiter pulls the
             level down, the more of the bar lights up. */}
         <Box ref={barRef} style={{ position: "absolute", top: 0, left: 0, right: 0, height: "0%" }} />

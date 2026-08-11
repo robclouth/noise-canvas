@@ -1,5 +1,5 @@
 import { useStore } from "@/store";
-import { ActionIcon, Box, Divider, Group, Popover, Stack, Text } from "@mantine/core";
+import { Box, Divider, Group, Popover, Stack, Text } from "@mantine/core";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import {
   TRANSPORT_GAP,
@@ -10,8 +10,8 @@ import {
 } from "@renderer/lib/ui-density";
 import { Brush, CircleHelp, Link2, Play, Repeat, Square } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
+import { HelpActionIcon } from "../controls/help-control";
 import { ParameterControl } from "../controls/parameter-control";
-import { Tooltip } from "../tooltip";
 import { GainReductionMeter } from "./gain-reduction-meter";
 import { OutputMeter } from "./output-meter";
 
@@ -100,42 +100,50 @@ export const TransportPanel = memo(() => {
               }}
               style={{ display: "inline-flex" }}
             >
-              <Tooltip
-                label={
+              <HelpActionIcon
+                help="transport-link"
+                detail={
                   linkEnabled
-                    ? `Ableton Link (${linkNumPeers} peer${linkNumPeers !== 1 ? "s" : ""}) — right-click for latency`
-                    : "Enable Ableton Link — right-click for latency"
+                    ? `${linkNumPeers} peer${linkNumPeers !== 1 ? "s" : ""} — right-click for latency`
+                    : "Right-click for latency"
                 }
+                onClick={() => setLinkEnabled(!linkEnabled)}
+                size={uiSize}
+                color={linkEnabled ? "orange" : "dark.5"}
               >
-                <ActionIcon
-                  onClick={() => setLinkEnabled(!linkEnabled)}
-                  size={uiSize}
-                  color={linkEnabled ? "orange" : "dark.5"}
-                >
-                  <Link2 size={18} />
-                </ActionIcon>
-              </Tooltip>
+                <Link2 size={18} />
+              </HelpActionIcon>
             </Box>
           </Popover.Target>
           <Popover.Dropdown p="xs" onClick={(e) => e.stopPropagation()}>
             <ParameterControl paramKey="linkLatencyMs" labelWidth={80} />
           </Popover.Dropdown>
         </Popover>
-        <ActionIcon onClick={togglePlayback} size={uiSize} ref={playButtonRef} color={isPlaying ? "orange" : "dark.5"}>
+        <HelpActionIcon
+          help="transport-play"
+          onClick={togglePlayback}
+          size={uiSize}
+          ref={playButtonRef}
+          color={isPlaying ? "orange" : "dark.5"}
+        >
           {isPlaying ? <Square size={18} fill="white" /> : <Play size={18} fill="white" />}
-        </ActionIcon>
-        <ActionIcon onClick={() => setLoop(!loop)} size={uiSize} color={loop ? "orange" : "dark.5"}>
+        </HelpActionIcon>
+        <HelpActionIcon
+          help="transport-loop"
+          onClick={() => setLoop(!loop)}
+          size={uiSize}
+          color={loop ? "orange" : "dark.5"}
+        >
           <Repeat size={18} />
-        </ActionIcon>
-        <Tooltip label="Automatically play back the region you just painted after finishing a stroke">
-          <ActionIcon
-            onClick={() => setAutoPlayStroke(!autoPlayStroke)}
-            size={uiSize}
-            color={autoPlayStroke ? "orange" : "dark.5"}
-          >
-            <Brush size={18} />
-          </ActionIcon>
-        </Tooltip>
+        </HelpActionIcon>
+        <HelpActionIcon
+          help="transport-audition"
+          onClick={() => setAutoPlayStroke(!autoPlayStroke)}
+          size={uiSize}
+          color={autoPlayStroke ? "orange" : "dark.5"}
+        >
+          <Brush size={18} />
+        </HelpActionIcon>
         <Text ff="monospace" size="lg" ref={timeRef} w={TRANSPORT_TIME_WIDTH}>
           {formatTime(0)}
         </Text>
@@ -176,16 +184,15 @@ export const TransportPanel = memo(() => {
       <Divider orientation="vertical" color="dark.5" />
 
       {/* The transport is the one bar that is always visible, whatever is open. */}
-      <Tooltip label="What is all this? — outlines every area (?)">
-        <ActionIcon
-          onClick={() => useStore.getState().setHelpOverlayOpen(true)}
-          size={uiSize}
-          variant="subtle"
-          color="dark.2"
-        >
-          <CircleHelp size={18} />
-        </ActionIcon>
-      </Tooltip>
+      <HelpActionIcon
+        help="transport-help"
+        onClick={() => useStore.getState().setHelpOverlayOpen(true)}
+        size={uiSize}
+        variant="subtle"
+        color="dark.2"
+      >
+        <CircleHelp size={18} />
+      </HelpActionIcon>
     </Group>
   );
 });

@@ -1,13 +1,8 @@
 import { useStore } from "@/store";
-import { ActionIcon, Box, Group, Loader, Stack, Text } from "@mantine/core";
+import { Box, Group, Loader, Stack, Text } from "@mantine/core";
 import { getFileColor, openFiles } from "@renderer/store/files";
-import {
-  getFileSegments,
-  selectStemGroupOfFile,
-  stemGroupColor,
-  stemMemberColor,
-  stemMethodLabel,
-} from "@renderer/store/stem-groups";
+import { getFileSegments, selectStemGroupOfFile, stemGroupColor, stemMemberColor } from "@renderer/store/stem-groups";
+import { HelpActionIcon } from "@renderer/components/controls/help-control";
 import { useUiSize } from "@renderer/lib/ui-density";
 import { Layers, Link2, Link2Off, Merge, X } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, type RefObject } from "react";
@@ -66,7 +61,8 @@ const PaletteChip = memo(({ fileId }: { fileId: string }) => {
         >
           {displayName}
         </Text>
-        <ActionIcon
+        <HelpActionIcon
+          help="palette-close"
           size="xs"
           variant="subtle"
           color="gray"
@@ -76,7 +72,7 @@ const PaletteChip = memo(({ fileId }: { fileId: string }) => {
           }}
         >
           <X size={10} />
-        </ActionIcon>
+        </HelpActionIcon>
       </Group>
     </Tooltip>
   );
@@ -179,45 +175,37 @@ const StemGroupSection = memo(
               {group.label}
             </Text>
             {anyLoading && <Loader size={10} color="gray" />}
-            <Tooltip
-              label={
-                group.syncView
-                  ? "Zoom and scroll are shared across these parts. Click to unlink."
-                  : "Zoom and scroll move independently. Click to link them."
-              }
+            <HelpActionIcon
+              help="stem-sync-view"
+              detail={group.syncView ? "Linked" : "Unlinked"}
+              size={uiSize}
+              variant="subtle"
+              color={group.syncView ? "gray" : "dark.3"}
+              onClick={() => useStore.getState().setStemGroupSyncView(groupId, !group.syncView)}
             >
-              <ActionIcon
-                size={uiSize}
-                variant="subtle"
-                color={group.syncView ? "gray" : "dark.3"}
-                onClick={() => useStore.getState().setStemGroupSyncView(groupId, !group.syncView)}
-              >
-                {group.syncView ? <Link2 size={16} /> : <Link2Off size={16} />}
-              </ActionIcon>
-            </Tooltip>
-            <Tooltip
-              label={`Merge all ${group.memberIds.length} parts of this ${stemMethodLabel(group.method)} split into a new file. The parts stay open.`}
+              {group.syncView ? <Link2 size={16} /> : <Link2Off size={16} />}
+            </HelpActionIcon>
+            <HelpActionIcon
+              help="stem-merge"
+              detail={`${group.memberIds.length} parts`}
+              size={uiSize}
+              variant="subtle"
+              color="gray"
+              loading={anyLoading}
+              onClick={() => useStore.getState().mergeStemGroup(groupId)}
             >
-              <ActionIcon
-                size={uiSize}
-                variant="subtle"
-                color="gray"
-                loading={anyLoading}
-                onClick={() => useStore.getState().mergeStemGroup(groupId)}
-              >
-                <Merge size={16} />
-              </ActionIcon>
-            </Tooltip>
-            <Tooltip label={`Close all ${group.memberIds.length} parts of this split.`}>
-              <ActionIcon
-                size={uiSize}
-                variant="subtle"
-                color="gray"
-                onClick={() => useStore.getState().closeStemGroup(groupId)}
-              >
-                <X size={16} />
-              </ActionIcon>
-            </Tooltip>
+              <Merge size={16} />
+            </HelpActionIcon>
+            <HelpActionIcon
+              help="stem-close"
+              detail={`${group.memberIds.length} parts`}
+              size={uiSize}
+              variant="subtle"
+              color="gray"
+              onClick={() => useStore.getState().closeStemGroup(groupId)}
+            >
+              <X size={16} />
+            </HelpActionIcon>
           </Group>
         )}
         <Stack gap="xs">

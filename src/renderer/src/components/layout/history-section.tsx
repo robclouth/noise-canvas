@@ -1,9 +1,11 @@
 import { host } from "@/lib/host";
 import { useStore } from "@/store";
 import { ActionIcon, Box, Group, Menu, ScrollArea, Stack, Text, TextInput, UnstyledButton } from "@mantine/core";
+import { HelpActionIcon } from "@renderer/components/controls/help-control";
 import { openConfirm } from "@renderer/lib/modals";
 import { getHistoryManager, type HistoryManager, type HistoryNode } from "@renderer/lib/history-manager";
 import { WIDGET_INPUT_HEIGHT } from "@renderer/lib/ui-density";
+import { helpProps } from "@renderer/lib/ui-controls";
 import { MoreVertical, Redo2, Star, Undo2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Section } from "../section";
@@ -302,6 +304,7 @@ const HistoryRow = memo(function HistoryRow({
       >
         <Menu.Target>
           <UnstyledButton
+            {...helpProps("history-entry")}
             onClick={() => !editing && !menuOpen && onNavigate(node.id)}
             onDoubleClick={() => !editing && setEditing(true)}
             onContextMenu={(e: React.MouseEvent) => {
@@ -526,7 +529,13 @@ export function HistorySection() {
   const menu = (
     <Menu withinPortal position="right-start" shadow="md" onOpen={refreshDiskSize}>
       <Menu.Target>
-        <ActionIcon size="xs" variant="subtle" color="gray" onClick={(e) => e.stopPropagation()}>
+        <ActionIcon
+          {...helpProps("history-menu")}
+          size="xs"
+          variant="subtle"
+          color="gray"
+          onClick={(e) => e.stopPropagation()}
+        >
           <MoreVertical size={12} />
         </ActionIcon>
       </Menu.Target>
@@ -557,32 +566,32 @@ export function HistorySection() {
 
   const controls = (
     <Group gap={2} wrap="nowrap" align="center">
-      <ActionIcon
+      <HelpActionIcon
+        help="history-undo"
         size="xs"
         variant="subtle"
         color="gray"
         disabled={!canUndo}
-        title="Undo"
         onClick={(e) => {
           e.stopPropagation();
           onUndo();
         }}
       >
         <Undo2 size={12} />
-      </ActionIcon>
-      <ActionIcon
+      </HelpActionIcon>
+      <HelpActionIcon
+        help="history-redo"
         size="xs"
         variant="subtle"
         color="gray"
         disabled={!canRedo}
-        title="Redo"
         onClick={(e) => {
           e.stopPropagation();
           onRedo();
         }}
       >
         <Redo2 size={12} />
-      </ActionIcon>
+      </HelpActionIcon>
       {menu}
     </Group>
   );

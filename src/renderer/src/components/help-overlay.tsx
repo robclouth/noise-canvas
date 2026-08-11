@@ -8,6 +8,7 @@ import {
   manualSectionForParameter,
   type UiAreaName,
 } from "@renderer/lib/ui-areas";
+import { HELP_ATTR, UI_CONTROLS, getControl, readHelpInstance, type UiControlName } from "@renderer/lib/ui-controls";
 import { parameterDefs } from "@renderer/parameters";
 import type { ParameterKey } from "@renderer/store/types";
 import { startDeepTour } from "@renderer/lib/walkthrough";
@@ -23,11 +24,14 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
  */
 
 /**
- * What the pointer can land on: a region of the UI, or one control inside it.
- * Controls are the smaller of the two, so hit-testing prefers them without
- * needing to know which is which.
+ * What the pointer can land on: a region of the UI, a parameter, or one of the
+ * buttons and widgets in the control registry. The inner ones are smaller, so
+ * hit-testing prefers them without needing to know which is which.
  */
-type Target = { kind: "area"; name: UiAreaName; rect: DOMRect } | { kind: "param"; key: ParameterKey; rect: DOMRect };
+type Target =
+  | { kind: "area"; name: UiAreaName; rect: DOMRect }
+  | { kind: "param"; key: ParameterKey; rect: DOMRect }
+  | { kind: "control"; name: UiControlName; rect: DOMRect; instance: { title: string; text: string } | null };
 
 /**
  * Above every layer the app itself uses — the transport and the Generate bar
@@ -101,6 +105,14 @@ function measure(): Target[] {
     targets.push({ kind: "param", key, rect });
   }
 
+  for (const element of document.querySelectorAll(`[${HELP_ATTR}]`)) {
+    const name = element.getAttribute(HELP_ATTR) as UiControlName;
+    if (!UI_CONTROLS[name]) continue;
+    const rect = element.getBoundingClientRect();
+    if (rect.width < 4 || rect.height < 4) continue;
+    targets.push({ kind: "control", name, rect, instance: readHelpInstance(element) });
+  }
+
   return targets;
 }
 
@@ -166,7 +178,17 @@ function aimingAtCard(from: Point, to: Point, card: DOMRect): boolean {
 }
 
 function targetId(target: Target): string {
-  return target.kind === "area" ? `area:${target.name}` : `param:${target.key}`;
+  return target.kind === "param" ? `param:${target.key}` : `${target.kind}:${target.name}`;
+}
+
+/** Whether a re-measure moved the target, so the highlight follows a scroll. */
+function sameRect(a: Target, b: Target): boolean {
+  return (
+    Math.abs(a.rect.top - b.rect.top) < 0.5 &&
+    Math.abs(a.rect.left - b.rect.left) < 0.5 &&
+    Math.abs(a.rect.width - b.rect.width) < 0.5 &&
+    Math.abs(a.rect.height - b.rect.height) < 0.5
+  );
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -220,7 +242,6 @@ export function HelpOverlay(): React.JSX.Element | null {
   const open = useStore((state) => state.helpOverlayOpen);
   const setOpen = useStore((state) => state.setHelpOverlayOpen);
   const openManual = useStore((state) => state.openManual);
-  const [targets, setTargets] = useState<Target[]>([]);
   const [hovered, setHovered] = useState<Target | null>(null);
   const [cardHeight, setCardHeight] = useState(POPOVER_HEIGHT);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -234,17 +255,13 @@ export function HelpOverlay(): React.JSX.Element | null {
 
   useEffect(() => {
     pointer.current = null;
-    if (!open) {
-      setHovered(null);
-      return;
-    }
-    setTargets(measure());
-    const remeasure = () => setTargets(measure());
-    window.addEventListener("resize", remeasure);
-    return () => window.removeEventListener("resize", remeasure);
+    if (!open) setHovered(null);
   }, [open]);
 
-  // `?` toggles the overlay, Escape closes it. Ignored while typing.
+  // `?` toggles the overlay, Escape closes it. Ignored while typing. Captured
+  // on the way down rather than caught on the way up, so an open menu or
+  // popover can't swallow the key before it arrives — asking what something is
+  // has to work while the thing you're asking about is on screen.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
@@ -260,8 +277,8 @@ export function HelpOverlay(): React.JSX.Element | null {
         close();
       }
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [close]);
 
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
@@ -274,33 +291,37 @@ export function HelpOverlay(): React.JSX.Element | null {
     if (height && Math.abs(height - cardHeight) > 1) setCardHeight(height);
   }, [hovered, cardHeight]);
 
-  const onMouseMove = useCallback(
-    (event: React.MouseEvent) => {
-      const { clientX, clientY } = event;
-      cancelAnimationFrame(frame.current);
-      frame.current = requestAnimationFrame(() => {
-        const from = pointer.current;
-        const to = { x: clientX, y: clientY };
-        pointer.current = to;
+  const onMouseMove = useCallback((event: React.MouseEvent) => {
+    const { clientX, clientY } = event;
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(() => {
+      const from = pointer.current;
+      const to = { x: clientX, y: clientY };
+      pointer.current = to;
 
-        const card = cardRef.current?.getBoundingClientRect();
-        if (card) {
-          const near =
-            clientX >= card.left - CARD_BRIDGE &&
-            clientX <= card.right + CARD_BRIDGE &&
-            clientY >= card.top - CARD_BRIDGE &&
-            clientY <= card.bottom + CARD_BRIDGE;
-          if (near || (from && aimingAtCard(from, to, card))) return;
-        }
+      const card = cardRef.current?.getBoundingClientRect();
+      if (card) {
+        const near =
+          clientX >= card.left - CARD_BRIDGE &&
+          clientX <= card.right + CARD_BRIDGE &&
+          clientY >= card.top - CARD_BRIDGE &&
+          clientY <= card.bottom + CARD_BRIDGE;
+        if (near || (from && aimingAtCard(from, to, card))) return;
+      }
 
-        const hit = hitTest(targets, clientX, clientY);
-        // Empty space keeps the last highlight, so crossing a gap on the way to
-        // the card doesn't blink it away.
-        if (hit) setHovered((current) => (current && targetId(current) === targetId(hit) ? current : hit));
-      });
-    },
-    [targets],
-  );
+      // Measured fresh each move rather than once when the overlay opens, so
+      // menus and popovers opened since are covered, and a panel scrolled
+      // under the pointer still highlights where it now is.
+      const hit = hitTest(measure(), clientX, clientY);
+      // Empty space keeps the last highlight, so crossing a gap on the way to
+      // the card doesn't blink it away.
+      if (hit) {
+        setHovered((current) =>
+          current && targetId(current) === targetId(hit) && sameRect(current, hit) ? current : hit,
+        );
+      }
+    });
+  }, []);
 
   if (!open) return null;
 
@@ -308,12 +329,22 @@ export function HelpOverlay(): React.JSX.Element | null {
   const rect = target?.rect;
   const area = target?.kind === "area" ? getArea(target.name) : null;
   const parameter = target?.kind === "param" ? parameterDefs[target.key] : null;
+  const control = target?.kind === "control" ? getControl(target.name) : null;
   const hasTour = target?.kind === "area" && deepTourFor(target.name).length > 0;
   const manualSection =
     target?.kind === "param"
       ? manualSectionForParameter(target.key, parameter?.effectType)
-      : (area?.manualSection ?? null);
-  const card = area ?? (parameter ? { title: parameter.label, blurb: parameter.description } : null);
+      : (control?.manualSection ?? area?.manualSection ?? null);
+  const card =
+    area ??
+    (parameter
+      ? { title: parameter.label, blurb: parameter.description }
+      : control
+        ? {
+            title: target?.kind === "control" ? (target.instance?.title ?? control.label) : control.label,
+            blurb: target?.kind === "control" ? (target.instance?.text ?? control.description) : control.description,
+          }
+        : null);
   const dim: React.CSSProperties = { position: "fixed", background: DIM, transition: EASE, pointerEvents: "none" };
 
   return (

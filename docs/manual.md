@@ -2,7 +2,7 @@
 
 The complete guide to Noise Canvas. For downloads, installation, and build instructions, see the [README](../README.md).
 
-All the parameters in the app have tooltips, and how to use a tool should be mostly obvious just by using it — this manual is for when it isn't.
+Every control in the app has a tooltip and an entry in the `?` overlay, and how to use a tool should be mostly obvious just by using it — this manual is for when it isn't.
 
 ## Contents
 
@@ -698,16 +698,18 @@ File and Edit shortcuts (`Cmd/Ctrl+N`, `+O`, `+S`, `+W`, `+D`, …) are listed u
 
 Six places, each answering a different question.
 
-| Surface               | How you get there                                         | What it answers                     |
-| --------------------- | --------------------------------------------------------- | ----------------------------------- |
-| **Parameter tooltip** | Hover any control for a second                            | What does this one control do?      |
-| **Parameter menu**    | Click a parameter's label, then the book icon             | …and where is it explained in full? |
-| **`?` overlay**       | The **?** button in the transport, or the `?` key         | What is all this?                   |
-| **Deep tour**         | Click an area in the `?` overlay → **Show me around**     | How does this part work?            |
-| **Walkthrough**       | Offered on first launch; **Help → Run Walkthrough** after | Where is everything?                |
-| **This manual**       | **Help → Manual** (`Cmd/Ctrl+/`), or any book icon        | What does this do, exactly?         |
+| Surface            | How you get there                                         | What it answers                     |
+| ------------------ | --------------------------------------------------------- | ----------------------------------- |
+| **Tooltip**        | Hover any control for a second                            | What does this one control do?      |
+| **Parameter menu** | Click a parameter's label, then the book icon             | …and where is it explained in full? |
+| **`?` overlay**    | The **?** button in the transport, or the `?` key         | What is all this?                   |
+| **Deep tour**      | Click an area in the `?` overlay → **Show me around**     | How does this part work?            |
+| **Walkthrough**    | Offered on first launch; **Help → Run Walkthrough** after | Where is everything?                |
+| **This manual**    | **Help → Manual** (`Cmd/Ctrl+/`), or any book icon        | What does this do, exactly?         |
 
-The `?` overlay is the hub: it outlines every region of the window at once and labels each one. Clicking a region offers that region's tour, if it has one, and jumps into the right part of this manual either way. Press `?` or `Esc` to close it.
+The `?` overlay dims the window and brightens whatever you point at, with a description beside it. It covers regions, parameters and every button and widget, down to individual controls, so pointing at something is the way to ask what it is. Each card offers that area's tour, if it has one, and the part of this manual that explains it. Menus and popovers are covered too — open one first, then press `?`, and the controls inside it answer like any other. Press `?` or `Esc` to close it.
+
+Every tooltip and every overlay description comes from the same sentence, so the two can never tell you different things.
 
 Deep tours don't ask you to do anything — they run straight through their area. The first-run walkthrough does, twice: it makes you add an effect and paint a stroke, so you finish it having built a working brush by hand.
 

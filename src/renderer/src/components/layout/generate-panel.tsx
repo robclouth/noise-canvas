@@ -1,12 +1,13 @@
 import { useStore } from "@/store";
-import { ActionIcon, Box, Button, Group, Select, Text } from "@mantine/core";
+import { Box, Group, Select, Text } from "@mantine/core";
+import { HelpActionIcon, HelpButton } from "@renderer/components/controls/help-control";
 import { GENERATE_PRESETS } from "@renderer/lib/generate/presets";
+import { helpProps } from "@renderer/lib/ui-controls";
 import { TRANSPORT_GAP, TRANSPORT_PAD } from "@renderer/lib/ui-density";
 import { Dices } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PatternEditor } from "../controls/pattern-editor";
 import { Section } from "../section";
-import { Tooltip } from "../tooltip";
 
 const PRESET_OPTIONS = GENERATE_PRESETS.map((preset) => ({ value: preset.name, label: preset.name }));
 
@@ -72,6 +73,7 @@ export function GeneratePanel() {
       <Section label="Generate" anchor="section-generate">
         <Group gap={TRANSPORT_GAP} wrap="nowrap" align="center">
           <Select
+            {...helpProps("generate-preset")}
             size="xs"
             w={130}
             placeholder="Preset"
@@ -83,21 +85,29 @@ export function GeneratePanel() {
               if (preset) setGenerateCode(preset.code);
             }}
           />
-          <PatternEditor onRun={apply} />
-          <Tooltip label="New random variation">
-            <ActionIcon
-              size="md"
-              variant="subtle"
-              color="gray"
-              disabled={disabled}
-              onClick={() => report(rerollGenerate)}
-            >
-              <Dices size={16} />
-            </ActionIcon>
-          </Tooltip>
-          <Button size="xs" variant="light" loading={isGenerating} disabled={disabled} onClick={apply}>
+          <Box {...helpProps("generate-code")} style={{ flex: 1, minWidth: 0 }}>
+            <PatternEditor onRun={apply} />
+          </Box>
+          <HelpActionIcon
+            help="generate-reroll"
+            size="md"
+            variant="subtle"
+            color="gray"
+            disabled={disabled}
+            onClick={() => report(rerollGenerate)}
+          >
+            <Dices size={16} />
+          </HelpActionIcon>
+          <HelpButton
+            help="generate-apply"
+            size="xs"
+            variant="light"
+            loading={isGenerating}
+            disabled={disabled}
+            onClick={apply}
+          >
             Apply
-          </Button>
+          </HelpButton>
         </Group>
         {error && (
           <Text size="xs" c="red.5" lineClamp={2}>

@@ -1,5 +1,6 @@
 import { useStore } from "@/store";
 import { Box } from "@mantine/core";
+import { helpProps } from "@renderer/lib/ui-controls";
 import { useUiSize } from "@renderer/lib/ui-density";
 import { memo, useEffect, useRef } from "react";
 import { Tooltip } from "../tooltip";
@@ -66,8 +67,8 @@ export const OutputMeter = memo(() => {
   const fillStyle = { position: "absolute" as const, bottom: 0, left: 0, right: 0, height: "0%" };
 
   return (
-    <Tooltip label="Output level (L / R)">
-      <Box style={{ display: "flex", gap: 2, alignItems: "center" }}>
+    <Tooltip help="output-meter">
+      <Box style={{ display: "flex", gap: 2, alignItems: "center" }} {...helpProps("output-meter")}>
         <Box style={trackStyle}>
           <Box ref={leftRef} style={fillStyle} />
         </Box>

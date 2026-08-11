@@ -1,4 +1,5 @@
-import { ActionIcon, Box, Checkbox, Popover, Stack, Text } from "@mantine/core";
+import { Box, Checkbox, Popover, Stack, Text } from "@mantine/core";
+import { helpProps } from "@renderer/lib/ui-controls";
 import { parameterDefs } from "@renderer/parameters";
 import { getModulationParamKeys, getParameterValue, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
@@ -10,6 +11,7 @@ import {
   randomizeNumberParameter,
   randomizeOptionsParameter,
 } from "../../lib/randomize";
+import { HelpActionIcon } from "./help-control";
 import { NumboxControl } from "./numbox-control";
 
 type RandomizeButtonProps = {
@@ -110,7 +112,9 @@ export const RandomizeButton = ({ parameterKeys, storageKey, includeEffects }: R
           }}
           style={{ display: "inline-flex", alignItems: "center", gap: 2 }}
         >
-          <ActionIcon
+          <HelpActionIcon
+            help="randomize-dice"
+            detail={`Right-click to set amount: ${amount}%`}
             variant="subtle"
             size="xs"
             color="gray"
@@ -118,10 +122,9 @@ export const RandomizeButton = ({ parameterKeys, storageKey, includeEffects }: R
               e.stopPropagation();
               handleRandomize();
             }}
-            title={`Randomize (Right-click to set amount: ${amount}%)`}
           >
             <Dice5 size={14} />
-          </ActionIcon>
+          </HelpActionIcon>
           {/* Vertical bar indicator */}
           <Box
             style={{
@@ -149,7 +152,11 @@ export const RandomizeButton = ({ parameterKeys, storageKey, includeEffects }: R
       <Popover.Dropdown p={4} onClick={(e) => e.stopPropagation()}>
         <Stack gap={4}>
           <NumboxControl
-            labelComponent={<Text size="xs">Rnd</Text>}
+            labelComponent={
+              <Text size="xs" {...helpProps("randomize-amount")}>
+                Rnd
+              </Text>
+            }
             value={amount}
             setValue={(val) => setRandomizationAmount(storageKey, val)}
             min={0}

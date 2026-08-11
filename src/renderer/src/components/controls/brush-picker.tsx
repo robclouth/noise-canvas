@@ -14,6 +14,7 @@ import {
 } from "@mantine/core";
 import { ContextModalProps, modals } from "@mantine/modals";
 import { resolveBrushColor } from "@renderer/lib/colors";
+import { helpProps } from "@renderer/lib/ui-controls";
 import type { BrushColor } from "@renderer/store/types";
 import { BrushRow } from "./brush-row";
 import { openConfirm, openPrompt } from "@renderer/lib/modals";
@@ -193,6 +194,7 @@ export function BrushPickerModal({ context, id }: BrushPickerModalProps): React.
 export function BrushPickerOpenButton() {
   return (
     <Button
+      {...helpProps("brush-add")}
       fullWidth
       size="compact-xs"
       variant="subtle"

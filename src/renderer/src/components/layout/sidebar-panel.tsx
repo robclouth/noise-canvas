@@ -8,6 +8,7 @@ import { resolveBrushColor } from "@renderer/lib/colors";
 import { EFFECT_COLORS } from "@renderer/lib/constants";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import { INPUT_HEIGHT } from "@renderer/lib/ui-density";
+import { helpProps } from "@renderer/lib/ui-controls";
 import { RESERVED_KEYS } from "@renderer/lib/useShortcuts";
 import { collectBrushReferencedPaths } from "@renderer/store/files";
 import type { Brush } from "@renderer/store/types";
@@ -161,7 +162,13 @@ const BrushTile = memo(function BrushTile({
       {effectDots}
       <Menu withinPortal position="right-start" shadow="md">
         <Menu.Target>
-          <ActionIcon size="xs" variant="subtle" color="gray" onClick={(e) => e.stopPropagation()}>
+          <ActionIcon
+            {...helpProps("brush-menu")}
+            size="xs"
+            variant="subtle"
+            color="gray"
+            onClick={(e) => e.stopPropagation()}
+          >
             <MoreVertical size={12} />
           </ActionIcon>
         </Menu.Target>

@@ -1,10 +1,12 @@
 import { useStore } from "@/store";
 import { ActionIcon, Badge, Box, Group, Menu, Text } from "@mantine/core";
+import { HelpActionIcon } from "@renderer/components/controls/help-control";
 import { NumboxControl } from "@renderer/components/controls/numbox-control";
 import { DEFAULT_ONSET_SENSITIVITY } from "@renderer/lib/constants";
 import { openSplitPartsPrompt } from "@renderer/lib/modals";
-import { FILE_HEADER_FONT, FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-density";
 import { anchorProps } from "@renderer/lib/ui-anchors";
+import { helpProps, type UiControlName } from "@renderer/lib/ui-controls";
+import { FILE_HEADER_FONT, FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-density";
 import { getFileColor, openFiles } from "@renderer/store/files";
 import { selectStemGroupOfFile, stemMemberColor } from "@renderer/store/stem-groups";
 import { isManagedFilePath } from "@renderer/store/utils";
@@ -43,7 +45,7 @@ function getResolutionLabel(bpo: number): string {
 // through ParameterControl.
 function FileHeaderNumbox({
   label,
-  tooltip,
+  help,
   value,
   setValue,
   min,
@@ -52,7 +54,7 @@ function FileHeaderNumbox({
   unit,
 }: {
   label: string;
-  tooltip: string;
+  help: UiControlName;
   value: number;
   setValue: (value: number) => void;
   min: number;
@@ -61,8 +63,8 @@ function FileHeaderNumbox({
   unit?: string;
 }) {
   const labelComponent = (
-    <Tooltip label={tooltip}>
-      <Text size="xs" ta="right" c="dark.0" style={{ whiteSpace: "nowrap" }}>
+    <Tooltip help={help}>
+      <Text size="xs" ta="right" c="dark.0" style={{ whiteSpace: "nowrap" }} {...helpProps(help)}>
         {label}
       </Text>
     </Tooltip>
@@ -143,8 +145,8 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
       {...anchorProps("file-header")}
     >
       <Group gap="xs" style={{ minWidth: 0, flex: 1 }}>
-        <Tooltip label={tooltipLabel}>
-          <Box style={{ minWidth: 0, flex: 1 }}>
+        <Tooltip help="file-name" detail={tooltipLabel}>
+          <Box style={{ minWidth: 0, flex: 1 }} {...helpProps("file-name")}>
             <TruncatedFilename displayName={displayName} isDirty={isDirty} />
           </Box>
         </Tooltip>
@@ -157,7 +159,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
         <FileHeaderNumbox
           label="Onsets"
-          tooltip="Onset sensitivity: how far down this file's own level range a hit still counts as an onset. 0% keeps only the loudest, 100% keeps everything the detector found. Onsets drive transient-preserving transforms, the onset markers, and onset snapping."
+          help="file-onsets"
           value={onsetSensitivity}
           setValue={(v) => useStore.getState().setFilepathOnsetSensitivity(filePath, v)}
           min={0}
@@ -167,7 +169,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         />
         <FileHeaderNumbox
           label="BPM"
-          tooltip="The tempo of this file in beats per minute (BPM). Used for grid snapping and time-based effects."
+          help="file-bpm"
           value={bpm ?? 120}
           setValue={(v) => useStore.getState().setFilepathBpm(filePath, v)}
           min={10}
@@ -175,9 +177,14 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
           step={1}
         />
         <Menu position="bottom-end" withinPortal>
-          <Tooltip label="Split this file into separate components.">
+          <Tooltip help="file-split">
             <Menu.Target>
-              <ActionIcon size={uiSize} color="dark.5" onClick={(e) => e.stopPropagation()}>
+              <ActionIcon
+                size={uiSize}
+                color="dark.5"
+                onClick={(e) => e.stopPropagation()}
+                {...helpProps("file-split")}
+              >
                 <Split size={16} />
               </ActionIcon>
             </Menu.Target>
@@ -219,54 +226,51 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
             )}
           </Menu.Dropdown>
         </Menu>
-        <Tooltip label="Duplicate this file to create an editable copy.">
-          <ActionIcon
-            size={uiSize}
-            color="dark.5"
-            onClick={(e) => {
-              e.stopPropagation();
-              useStore.getState().duplicateFile(fileId);
-            }}
-          >
-            <Copy size={16} />
-          </ActionIcon>
-        </Tooltip>
-        <Tooltip label="Minimize to palette bar">
-          <ActionIcon
-            size={uiSize}
-            color="dark.5"
-            onClick={(e) => {
-              e.stopPropagation();
-              useStore.getState().setFileMinimized(fileId, true);
-            }}
-          >
-            <ChevronDown size={16} />
-          </ActionIcon>
-        </Tooltip>
-        <Tooltip label={isFullscreen ? "Exit fullscreen" : "Expand this file to fill the canvas area."}>
-          <ActionIcon
-            size={uiSize}
-            color={isFullscreen ? "orange" : "dark.5"}
-            onClick={(e) => {
-              e.stopPropagation();
-              useStore.getState().setFullscreenFileId(isFullscreen ? null : fileId);
-            }}
-          >
-            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-          </ActionIcon>
-        </Tooltip>
-        <Tooltip label="Close this file.">
-          <ActionIcon
-            size={uiSize}
-            color="dark.5"
-            onClick={(e) => {
-              e.stopPropagation();
-              useStore.getState().tryCloseFile(fileId);
-            }}
-          >
-            <X size={16} />
-          </ActionIcon>
-        </Tooltip>
+        <HelpActionIcon
+          help="file-duplicate"
+          size={uiSize}
+          color="dark.5"
+          onClick={(e) => {
+            e.stopPropagation();
+            useStore.getState().duplicateFile(fileId);
+          }}
+        >
+          <Copy size={16} />
+        </HelpActionIcon>
+        <HelpActionIcon
+          help="file-minimize"
+          size={uiSize}
+          color="dark.5"
+          onClick={(e) => {
+            e.stopPropagation();
+            useStore.getState().setFileMinimized(fileId, true);
+          }}
+        >
+          <ChevronDown size={16} />
+        </HelpActionIcon>
+        <HelpActionIcon
+          help="file-fullscreen"
+          detail={isFullscreen ? "Exit fullscreen" : "Expand"}
+          size={uiSize}
+          color={isFullscreen ? "orange" : "dark.5"}
+          onClick={(e) => {
+            e.stopPropagation();
+            useStore.getState().setFullscreenFileId(isFullscreen ? null : fileId);
+          }}
+        >
+          {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+        </HelpActionIcon>
+        <HelpActionIcon
+          help="file-close"
+          size={uiSize}
+          color="dark.5"
+          onClick={(e) => {
+            e.stopPropagation();
+            useStore.getState().tryCloseFile(fileId);
+          }}
+        >
+          <X size={16} />
+        </HelpActionIcon>
       </Group>
     </Group>
   );

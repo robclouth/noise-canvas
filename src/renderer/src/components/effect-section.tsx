@@ -1,6 +1,7 @@
 import { ParameterKey } from "@/store/types";
 import type { EffectType } from "@renderer/effects/types";
 import { anchorProps } from "@renderer/lib/ui-anchors";
+import { helpInstance, helpProps } from "@renderer/lib/ui-controls";
 import { ActionIcon, Checkbox, Collapse, Group, Paper, Stack, Text } from "@mantine/core";
 import { GripVertical } from "lucide-react";
 import { memo } from "react";
@@ -42,6 +43,7 @@ export const EffectSection = memo(
         <Stack gap="xs">
           <Group gap="xs" wrap="nowrap">
             <Checkbox
+              {...helpProps("effect-enable")}
               checked={enabled}
               onChange={(event) => onEnabledChange(event.currentTarget.checked)}
               size="xs"
@@ -52,12 +54,14 @@ export const EffectSection = memo(
               wrap="nowrap"
               flex={1}
               style={{ cursor: "grab", userSelect: "none" }}
+              {...helpProps("effect-header")}
+              {...helpInstance(label, description)}
               {...(dragHandleProps ?? {})}
             >
               <ActionIcon variant="transparent" color="gray.5" size="xs" component="div">
                 <GripVertical size={16} />
               </ActionIcon>
-              <Tooltip label={description}>
+              <Tooltip help="effect-header" detail={description}>
                 <Text size="xs" fw={600}>
                   {label}
                 </Text>

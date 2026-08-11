@@ -1,15 +1,16 @@
 import { DragDropContext, Draggable, Droppable, DropResult } from "@hello-pangea/dnd";
-import { ActionIcon, Group, useMantineTheme } from "@mantine/core";
+import { Group, useMantineTheme } from "@mantine/core";
 import { resolveBrushColor } from "@renderer/lib/colors";
 import { openConfirm } from "@renderer/lib/modals";
 import { useStore } from "@renderer/store";
 import { anchorProps } from "@renderer/lib/ui-anchors";
+import { helpProps } from "@renderer/lib/ui-controls";
 import { MAX_STEPS } from "@renderer/store/steps";
 import type { BrushColor } from "@renderer/store/types";
 import { Copy, Plus, Trash } from "lucide-react";
 import { useMemo } from "react";
 import { useShallow } from "zustand/shallow";
-import { Tooltip } from "../tooltip";
+import { HelpActionIcon } from "./help-control";
 
 const TAB_HEIGHT = 28;
 const SLOT_BASIS = `${100 / MAX_STEPS}%`;
@@ -108,6 +109,7 @@ export function Steps() {
                         {...dragProvided.dragHandleProps}
                         onClick={() => setActiveStepIndex(index)}
                         style={{ ...dragProvided.draggableProps.style, ...slotStyle }}
+                        {...helpProps("step-select")}
                       >
                         <div
                           style={{
@@ -153,7 +155,7 @@ export function Steps() {
               })}
               {dropProvided.placeholder}
               {canAddStep && (
-                <div onClick={addStep} style={slotStyle}>
+                <div onClick={addStep} style={slotStyle} {...helpProps("step-add")}>
                   <div
                     style={{
                       width: "100%",
@@ -178,22 +180,26 @@ export function Steps() {
       </DragDropContext>
 
       <Group gap={2} wrap="nowrap">
-        <Tooltip label="Duplicate step">
-          <ActionIcon
-            size="sm"
-            variant="subtle"
-            color="gray"
-            disabled={!canAddStep}
-            onClick={() => duplicateStep(activeStepIndex)}
-          >
-            <Copy size={14} />
-          </ActionIcon>
-        </Tooltip>
-        <Tooltip label="Delete step">
-          <ActionIcon size="sm" variant="subtle" color="red" disabled={!canRemoveStep} onClick={handleDelete}>
-            <Trash size={14} />
-          </ActionIcon>
-        </Tooltip>
+        <HelpActionIcon
+          help="step-duplicate"
+          size="sm"
+          variant="subtle"
+          color="gray"
+          disabled={!canAddStep}
+          onClick={() => duplicateStep(activeStepIndex)}
+        >
+          <Copy size={14} />
+        </HelpActionIcon>
+        <HelpActionIcon
+          help="step-delete"
+          size="sm"
+          variant="subtle"
+          color="red"
+          disabled={!canRemoveStep}
+          onClick={handleDelete}
+        >
+          <Trash size={14} />
+        </HelpActionIcon>
       </Group>
     </Group>
   );

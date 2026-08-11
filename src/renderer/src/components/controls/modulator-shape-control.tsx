@@ -2,6 +2,7 @@ import { Group, Select, Text } from "@mantine/core";
 import { PATTERN_SHAPES } from "@renderer/lib/constants";
 import { CONTROL_ROW_GAP, CONTROL_ROW_HEIGHT, LABEL_WIDTH, VALUE_WIDTH } from "@renderer/lib/ui-density";
 import { getTextures } from "@renderer/lib/textures";
+import { helpProps } from "@renderer/lib/ui-controls";
 import { getOptionsParameterDef } from "@renderer/parameters";
 import { selectParameter, useStore } from "@renderer/store";
 import type { ParameterKey } from "@renderer/store/types";
@@ -74,8 +75,8 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
   };
 
   return (
-    <Group gap={CONTROL_ROW_GAP} wrap="nowrap" h={CONTROL_ROW_HEIGHT}>
-      <Tooltip label={shapeDef.description}>
+    <Group gap={CONTROL_ROW_GAP} wrap="nowrap" h={CONTROL_ROW_HEIGHT} {...helpProps("modulator-shape")}>
+      <Tooltip help="modulator-shape" detail={shapeDef.description}>
         <Text
           size="xs"
           w={LABEL_WIDTH}
