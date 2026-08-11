@@ -39,7 +39,7 @@ import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { getFileOnsets } from "./file-onsets";
 import { buildModulatorUniforms } from "./modulator-utils";
 import { withPlatformDefines } from "./shader-utils";
-import { resolveBrushAnchor, resolveBrushFootprint, swungGridCellWidthUv } from "./utils";
+import { pitchUvToBandIndex, resolveBrushAnchor, resolveBrushFootprint, swungGridCellWidthUv } from "./utils";
 
 // Import EffectType from the dependency-free types module
 import type { EffectType } from "../effects/types";
@@ -702,15 +702,15 @@ export class StrokeRenderer {
   ): { rowStart: number; rowCount: number } | null {
     const { numBands, textureWidth, textureHeight, metadata } = this.spectrogramData;
 
-    // Convert brush UV Y range to band range
-    // bandIndex = floor((1 - uv.y) * bandCount), so lower uv.y = higher band index
-    const brushTopY = brushBottomLeftUv.y;
-    const brushBottomY = brushBottomLeftUv.y + brushSizeUv.y;
+    // Band indices count down in frequency, so the brush's low pitch edge is
+    // the highest index.
+    const brushLowPitchY = brushBottomLeftUv.y;
+    const brushHighPitchY = brushBottomLeftUv.y + brushSizeUv.y;
 
     // Add margin for effects that sample neighboring bands
     const margin = 4;
-    const highBand = Math.min(numBands - 1, Math.floor((1 - brushTopY) * numBands) + margin);
-    const lowBand = Math.max(0, Math.floor((1 - brushBottomY) * numBands) - margin);
+    const highBand = Math.min(numBands - 1, Math.floor(pitchUvToBandIndex(brushLowPitchY, numBands)) + margin);
+    const lowBand = Math.max(0, Math.floor(pitchUvToBandIndex(brushHighPitchY, numBands)) - margin);
 
     // If brush covers most of the bands, don't bother with scissor
     const bandSpan = highBand - lowBand + 1;
@@ -1441,8 +1441,11 @@ export class StrokeRenderer {
 
     const { numBands, metadata } = this.spectrogramData;
     const pitchMargin = 4;
-    const highBand = Math.min(numBands - 1, Math.floor((1 - this.committedPitchMin) * numBands) + pitchMargin);
-    const lowBand = Math.max(0, Math.floor((1 - this.committedPitchMax) * numBands) - pitchMargin);
+    const highBand = Math.min(
+      numBands - 1,
+      Math.floor(pitchUvToBandIndex(this.committedPitchMin, numBands)) + pitchMargin,
+    );
+    const lowBand = Math.max(0, Math.floor(pitchUvToBandIndex(this.committedPitchMax, numBands)) - pitchMargin);
     const t0 = Math.max(0, this.committedTimeMin);
     const t1 = Math.min(1, this.committedTimeMax);
     const timeMargin = 4;

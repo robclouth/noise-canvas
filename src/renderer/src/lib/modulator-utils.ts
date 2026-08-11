@@ -12,7 +12,7 @@ import { Note, Scale } from "tonal";
 import { useStore } from "../store";
 import { MAX_SEQ_SIZE, MAX_SEQ_STEPS_X, MAX_SEQ_STEPS_Y, NUM_MODULATORS } from "./constants";
 import { perfMark } from "./perf-probe";
-import { unitsToUv } from "./utils";
+import { bandIndexToPitchUv, unitsToUv } from "./utils";
 
 // Every step parameter the modulator preview reads is prefixed `modulator<n>` —
 // the modulators' own params plus the nested mod/contextual/macro amounts routed
@@ -328,7 +328,7 @@ export const useModulatorScaleLut = (fileId: string) => {
     const gainLutData = new Float32Array(numBands);
 
     for (let i = 0; i < numBands; i++) {
-      const v = 1.0 - (i + 0.5) / numBands;
+      const v = bandIndexToPitchUv(i + 0.5, numBands);
       const currentFreq = minFreq * Math.pow(2.0, v * totalOctaves);
 
       if (currentFreq <= 0) {

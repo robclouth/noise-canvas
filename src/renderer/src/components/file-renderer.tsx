@@ -68,6 +68,7 @@ interface FileRendererProps {
 
 /** One stamp of a batch: where its brush origin sits, and the state to paint it with. */
 export interface StampDispatch {
+  /** Brush bottom-left in pitch UV — y up from the file's lowest band, as unitsToUv gives it. */
   blX: number;
   blY: number;
   state: State;
@@ -77,8 +78,8 @@ export interface StampDispatch {
  * Handle for the FileRenderer component, exposing methods to parent components.
  */
 export interface FileRendererHandle {
-  /** Renders a brush stroke at the given coordinates. */
-  renderStroke: (x: number, y: number, preview: boolean) => void;
+  /** Renders a brush stroke at the current cursor position. */
+  renderStroke: (preview: boolean) => void;
   /**
    * Paints a batch of stamps into the FBO immediately, each from its own state
    * snapshot, as part of the stroke already opened with beginStroke(). Returns
@@ -286,32 +287,12 @@ const FileRendererInner = memo(
           } else {
             // Became active: if cursor is visible, trigger a preview render
             // We need to wait for the state update to propagate
-            const state = useStore.getState();
             const { cursorVisible, cursorPosition } = useTransientStore.getState();
             const currentFile = openFiles[fileId];
             if (cursorVisible && cursorPosition && currentFile?.spectrogramData) {
-              const bpm = state.filepathsBpm[currentFile.filePath] || 120;
-              const totalDuration = currentFile.spectrogramData.numFrames / currentFile.spectrogramData.sampleRate;
-              const uvPos = unitsToUv(
-                cursorPosition.beats,
-                cursorPosition.pitch,
-                bpm,
-                totalDuration,
-                spectrogramData.bandsPerOctave,
-                spectrogramData.numBands,
-              );
-              const { blX, blY } = aimUvToBrushBlUv(
-                state,
-                uvPos.x,
-                uvPos.y,
-                bpm,
-                totalDuration,
-                spectrogramData.bandsPerOctave,
-                spectrogramData.numBands,
-              );
-
-              // Simulate renderStroke
-              strokeParams.current = { x: blX, y: blY, preview: true };
+              // Simulate renderStroke; the frame loop resolves the position
+              // from the cursor.
+              strokePreview.current = true;
               displayMode.current = "preview";
               applyStroke.current = true;
               invalidateRef.current?.();
@@ -371,7 +352,7 @@ const FileRendererInner = memo(
     const mesh = useRef<Mesh>(null!);
 
     // Stroke params for render loop
-    const strokeParams = useRef<{ x: number; y: number; preview: boolean } | null>(null);
+    const strokePreview = useRef(false);
 
     // Cleanup StrokeRenderer on unmount or when textures change
     useEffect(() => {
@@ -962,7 +943,7 @@ const FileRendererInner = memo(
 
       // Render brush stroke if requested
       if (applyStroke.current && cursorPos.x >= 0) {
-        const preview = strokeParams.current?.preview ?? false;
+        const preview = strokePreview.current;
         if (!dispatchStroke(state, cursorPos, preview)) return;
 
         if (!preview) {
@@ -1198,14 +1179,14 @@ const FileRendererInner = memo(
      * Exposes component methods to the parent through a ref.
      */
     useImperativeHandle(ref, () => ({
-      renderStroke: (x: number, y: number, preview: boolean) => {
+      renderStroke: (preview: boolean) => {
         // While picking a source file, don't render the brush preview — just the rectangle.
         if (preview && useStore.getState().pickingFileParam !== null) {
           displayMode.current = "committed";
           invalidateRef.current?.();
           return;
         }
-        strokeParams.current = { x, y, preview };
+        strokePreview.current = preview;
         if (preview) {
           displayMode.current = "preview";
         }
@@ -1241,7 +1222,7 @@ const FileRendererInner = memo(
       beginStroke,
       endStroke,
       applyStroke: () => {
-        // strokeParams are optional, cursorPos is used for position
+        // The frame loop resolves the position from the cursor.
         applyStroke.current = true;
         invalidateRef.current?.();
       },

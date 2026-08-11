@@ -102,8 +102,6 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
       };
       const stampState = buildStampState(state, resolved);
 
-      // The renderer places a brush from unitsToUv, the same conversion the
-      // frame loop uses for the cursor.
       const aim = unitsToUv(
         resolved.beats,
         resolved.pitchSemis,

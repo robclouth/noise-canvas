@@ -28,7 +28,10 @@ uniform bool scaleGridEnabled;
 uniform float scaleOffsets[12];       // signed; 0 for in-scale pitch classes
 uniform float pitchOffsetSemisFromC0; // semitones above C0 at band index 0
 
-// Convert screen UV (what we see) to zoomed UV (actual data coordinates)
+// Convert screen UV (what we see) to zoomed UV (actual data coordinates).
+// screenUv.y and the result are pitch UV — 0 at the file's lowest band — but
+// offsetY arrives in the view space the DOM pans in, y measured down from the
+// top of the lane, so it is flipped here.
 vec2 screenToZoomed(vec2 screenUv, float zoomPowerX, float offsetX, float zoomPowerY, float offsetY) {
     float zx = pow(2.0, zoomPowerX);
     float zy = pow(2.0, zoomPowerY);
