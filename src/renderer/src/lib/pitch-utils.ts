@@ -1,10 +1,12 @@
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
-export function bandToFreq(band: number, minFreq: number, bandsPerOctave: number): number {
-  return minFreq * Math.pow(2, band / bandsPerOctave);
+// These count bands upward from the file's lowest, which is the opposite
+// direction to a packed-data band index (see lib/utils for the spaces).
+export function bandsAboveMinToFreq(bandsAboveMin: number, minFreq: number, bandsPerOctave: number): number {
+  return minFreq * Math.pow(2, bandsAboveMin / bandsPerOctave);
 }
 
-export function freqToBand(freq: number, minFreq: number, bandsPerOctave: number): number {
+export function freqToBandsAboveMin(freq: number, minFreq: number, bandsPerOctave: number): number {
   return Math.log2(freq / minFreq) * bandsPerOctave;
 }
 
@@ -23,12 +25,12 @@ export function midiToNoteName(midi: number): string {
   return `${NOTE_NAMES[pitchClass]}${octave}`;
 }
 
-export function midiToBand(midi: number, minFreq: number, bandsPerOctave: number): number {
-  return freqToBand(midiToFreq(midi), minFreq, bandsPerOctave);
+export function midiToBandsAboveMin(midi: number, minFreq: number, bandsPerOctave: number): number {
+  return freqToBandsAboveMin(midiToFreq(midi), minFreq, bandsPerOctave);
 }
 
-export function bandToMidi(band: number, minFreq: number, bandsPerOctave: number): number {
-  return freqToMidi(bandToFreq(band, minFreq, bandsPerOctave));
+export function bandsAboveMinToMidi(bandsAboveMin: number, minFreq: number, bandsPerOctave: number): number {
+  return freqToMidi(bandsAboveMinToFreq(bandsAboveMin, minFreq, bandsPerOctave));
 }
 
 export function isBlackKey(midi: number): boolean {

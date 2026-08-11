@@ -4,8 +4,8 @@ import { openFiles } from "@renderer/store/files";
 import { useGesture } from "@use-gesture/react";
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Vector2 } from "three";
-import { bandToFreq, freqToMidi, isBlackKey, midiToBand, midiToNoteName } from "../lib/pitch-utils";
-import { screenToZoomed, zoomedToScreen } from "../lib/utils";
+import { bandsAboveMinToFreq, freqToMidi, isBlackKey, midiToBandsAboveMin, midiToNoteName } from "../lib/pitch-utils";
+import { pitchUvToViewUvY, screenToZoomed, viewUvYToPitchUv, zoomedToScreen } from "../lib/utils";
 
 interface PitchLegendProps {
   fileId: string;
@@ -93,11 +93,11 @@ export const PitchLegend = memo(({ fileId }: PitchLegendProps) => {
     const offset = new Vector2(0, offsetY);
     const topZoomed = screenToZoomed(new Vector2(0, 0), zoomPower, offset);
     const bottomZoomed = screenToZoomed(new Vector2(0, 1), zoomPower, offset);
-    const topBand = (1 - topZoomed.y) * numBands;
-    const bottomBand = (1 - bottomZoomed.y) * numBands;
+    const topBands = viewUvYToPitchUv(topZoomed.y) * numBands;
+    const bottomBands = viewUvYToPitchUv(bottomZoomed.y) * numBands;
 
-    const topFreq = bandToFreq(topBand, minFreq, bandsPerOctave);
-    const bottomFreq = bandToFreq(Math.max(bottomBand, 0.0001), minFreq, bandsPerOctave);
+    const topFreq = bandsAboveMinToFreq(topBands, minFreq, bandsPerOctave);
+    const bottomFreq = bandsAboveMinToFreq(Math.max(bottomBands, 0.0001), minFreq, bandsPerOctave);
     const highMidi = Math.ceil(freqToMidi(topFreq)) + 1;
     const lowMidi = Math.floor(freqToMidi(bottomFreq)) - 1;
 
@@ -105,9 +105,9 @@ export const PitchLegend = memo(({ fileId }: PitchLegendProps) => {
     const labels: { top: number; text: string }[] = [];
 
     for (let midi = lowMidi; midi <= highMidi; midi++) {
-      const band = midiToBand(midi, minFreq, bandsPerOctave);
-      if (band < 0 || band > numBands) continue;
-      const zoomedY = 1 - band / numBands;
+      const bandsAboveMin = midiToBandsAboveMin(midi, minFreq, bandsPerOctave);
+      if (bandsAboveMin < 0 || bandsAboveMin > numBands) continue;
+      const zoomedY = pitchUvToViewUvY(bandsAboveMin / numBands);
       const screenY = zoomedToScreen(new Vector2(0, zoomedY), zoomPower, offset).y;
       const centerPx = screenY * height;
       if (centerPx < -pxPerSemitone || centerPx > height + pxPerSemitone) continue;

@@ -43,7 +43,7 @@ import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { getFileOnsets } from "./file-onsets";
 import { buildModulatorUniforms } from "./modulator-utils";
 import { withPlatformDefines } from "./shader-utils";
-import { resolveBrushAnchor, resolveBrushFootprint, swungGridCellWidthUv } from "./utils";
+import { pitchUvToBandIndex, resolveBrushAnchor, resolveBrushFootprint, swungGridCellWidthUv } from "./utils";
 
 // Import EffectType from the dependency-free types module
 import type { EffectType } from "../effects/types";
@@ -179,6 +179,9 @@ export class StrokeRenderer {
   private maskMacroValuesBuf: number[] = [0, 0, 0, 0];
 
   // State
+  // The spectrogram as it was before a preview run of committed strokes.
+  // Allocated only while a preview is up.
+  private rollbackFbo: WebGLRenderTarget | null = null;
   private pingPong = 0;
   private maskPingPong = 0;
   private isInitialized = false;
@@ -712,15 +715,15 @@ export class StrokeRenderer {
   ): { rowStart: number; rowCount: number } | null {
     const { numBands, textureWidth, textureHeight, metadata } = this.spectrogramData;
 
-    // Convert brush UV Y range to band range
-    // bandIndex = floor((1 - uv.y) * bandCount), so lower uv.y = higher band index
-    const brushTopY = brushBottomLeftUv.y;
-    const brushBottomY = brushBottomLeftUv.y + brushSizeUv.y;
+    // Band indices count down in frequency, so the brush's low pitch edge is
+    // the highest index.
+    const brushLowPitchY = brushBottomLeftUv.y;
+    const brushHighPitchY = brushBottomLeftUv.y + brushSizeUv.y;
 
     // Add margin for effects that sample neighboring bands
     const margin = 4;
-    const highBand = Math.min(numBands - 1, Math.floor((1 - brushTopY) * numBands) + margin);
-    const lowBand = Math.max(0, Math.floor((1 - brushBottomY) * numBands) - margin);
+    const highBand = Math.min(numBands - 1, Math.floor(pitchUvToBandIndex(brushLowPitchY, numBands)) + margin);
+    const lowBand = Math.max(0, Math.floor(pitchUvToBandIndex(brushHighPitchY, numBands)) - margin);
 
     // If brush covers most of the bands, don't bother with scissor
     const bandSpan = highBand - lowBand + 1;
@@ -1329,6 +1332,7 @@ export class StrokeRenderer {
   setFBOData(data: Float32Array): void {
     const { packedTextureSize } = this.spectrogramData;
 
+    this.releaseRollback();
     this.pingPong = 0;
 
     const dataTex = new DataTexture(data, packedTextureSize.x, packedTextureSize.y, RGBAFormat, FloatType);
@@ -1477,6 +1481,50 @@ export class StrokeRenderer {
   }
 
   /**
+   * Saves the current spectrogram so a run of committed strokes can be taken
+   * back without touching history — what the Generate preview paints onto.
+   * Calling it again while a snapshot is held restores that snapshot instead of
+   * replacing it, so repeated previews always start from the same pixels.
+   */
+  captureRollback(): void {
+    if (this.rollbackFbo) {
+      this.blitFBO(this.rollbackFbo, this.pingPong === 0 ? this.fbo1 : this.fbo2);
+    } else {
+      this.rollbackFbo = this.createFBO(
+        this.spectrogramData.textureWidth,
+        this.spectrogramData.textureHeight,
+        RGBAFormat,
+      );
+      this.blitFBO(this.pingPong === 0 ? this.fbo1 : this.fbo2, this.rollbackFbo);
+    }
+    this.fboDataDirty = true;
+  }
+
+  /** Whether a rollback snapshot is currently held. */
+  hasRollback(): boolean {
+    return this.rollbackFbo !== null;
+  }
+
+  /**
+   * Puts the saved spectrogram back and drops the snapshot. Returns false when
+   * there was nothing to restore.
+   */
+  restoreRollback(): boolean {
+    if (!this.rollbackFbo) return false;
+    this.blitFBO(this.rollbackFbo, this.pingPong === 0 ? this.fbo1 : this.fbo2);
+    this.releaseRollback();
+    this.dirtyRegion = null;
+    this.fboDataDirty = true;
+    return true;
+  }
+
+  /** Drops the snapshot, keeping whatever is currently painted. */
+  releaseRollback(): void {
+    this.rollbackFbo?.dispose();
+    this.rollbackFbo = null;
+  }
+
+  /**
    * Begin a new stroke (snapshot current state).
    */
   beginStroke(): void {
@@ -1536,8 +1584,11 @@ export class StrokeRenderer {
 
     const { numBands, metadata } = this.spectrogramData;
     const pitchMargin = 4;
-    const highBand = Math.min(numBands - 1, Math.floor((1 - this.committedPitchMin) * numBands) + pitchMargin);
-    const lowBand = Math.max(0, Math.floor((1 - this.committedPitchMax) * numBands) - pitchMargin);
+    const highBand = Math.min(
+      numBands - 1,
+      Math.floor(pitchUvToBandIndex(this.committedPitchMin, numBands)) + pitchMargin,
+    );
+    const lowBand = Math.max(0, Math.floor(pitchUvToBandIndex(this.committedPitchMax, numBands)) - pitchMargin);
     const t0 = Math.max(0, this.committedTimeMin);
     const t1 = Math.min(1, this.committedTimeMax);
     const timeMargin = 4;
@@ -1612,6 +1663,7 @@ export class StrokeRenderer {
    * Dispose of all WebGL resources.
    */
   dispose(): void {
+    this.releaseRollback();
     this.fbo1.dispose();
     this.fbo2.dispose();
     this.passFbo1.dispose();

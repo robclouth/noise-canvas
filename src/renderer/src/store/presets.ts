@@ -103,7 +103,7 @@ function makeBrushFromPreset(preset: PresetType, existingColors: Brush["color"][
   return {
     id: crypto.randomUUID(),
     name: preset.name,
-    color: pickNextBrushColor(existingColors),
+    color: preset.color ?? pickNextBrushColor(existingColors),
     hotkey: null,
     steps: cloneStepsFromPreset(preset),
     linkedParams: preset.linkedParams ?? [],
@@ -390,6 +390,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     const updated: PresetType = {
       ...existing,
       version: CURRENT_PRESET_VERSION,
+      color: brush.color,
       steps: brush.steps,
       linkedParams: brush.linkedParams,
       macroNames: [...brush.macroNames],
@@ -439,6 +440,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       name,
       isFactory: false,
       version: CURRENT_PRESET_VERSION,
+      color: brush.color,
       steps: brush.steps,
       linkedParams: brush.linkedParams,
       macroNames: [...brush.macroNames],

@@ -1,23 +1,11 @@
 import { useStore } from "@/store";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
-import {
-  ActionIcon,
-  Box,
-  Group,
-  Kbd,
-  Menu,
-  ScrollArea,
-  Stack,
-  Text,
-  TextInput,
-  Tooltip,
-  UnstyledButton,
-} from "@mantine/core";
+import { ActionIcon, Box, Group, Kbd, Menu, ScrollArea, Stack, Text, TextInput } from "@mantine/core";
 import { useMantineTheme } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { openConfirm, openPrompt } from "@renderer/lib/modals";
 import { resolveBrushColor } from "@renderer/lib/colors";
-import { EFFECT_COLORS, EFFECT_LABELS } from "@renderer/lib/constants";
+import { EFFECT_COLORS } from "@renderer/lib/constants";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import { INPUT_HEIGHT } from "@renderer/lib/ui-density";
 import { RESERVED_KEYS } from "@renderer/lib/useShortcuts";
@@ -29,6 +17,7 @@ import { HistorySection } from "./history-section";
 import { Section } from "../section";
 import { memo, useCallback, useEffect, useState } from "react";
 import { BrushPickerOpenButton } from "../controls/brush-picker";
+import { BrushRow } from "../controls/brush-row";
 
 const PANEL_WIDTH = 200;
 
@@ -137,49 +126,6 @@ const BrushTile = memo(function BrushTile({
   const brushColor = resolveBrushColor(brush.color, theme);
   const effectHues = getBrushEffectHues(brush);
 
-  // Hover summary of the brush contents: each step's enabled effect chain, in
-  // order, with the effect's hue dot next to its name.
-  const stepRows = brush.steps
-    .map((step, stepIndex) => ({
-      name: step.name && !/^Step \d+$/.test(step.name) ? step.name : `${stepIndex + 1}`,
-      color: step.color ? resolveBrushColor(step.color, theme) : theme.colors.dark[3],
-      effects: ((step.effects ?? []) as EffectItem[]).filter((item) => item.enabled && EFFECT_COLORS[item.effect]),
-    }))
-    .filter((row) => row.effects.length > 0);
-  const multiStep = brush.steps.length > 1;
-  const effectsTooltip = stepRows.length > 0 && (
-    <Stack gap={6} py={2}>
-      {stepRows.map((row, rowIndex) => (
-        <Box key={rowIndex}>
-          {multiStep && (
-            <Box mb={3} style={{ display: "inline-block", minWidth: 24 }}>
-              <Text size="xs" fw={600} ta="center">
-                {row.name}
-              </Text>
-              <Box style={{ height: 2, borderRadius: 1, marginTop: 1, background: row.color }} />
-            </Box>
-          )}
-          <Stack gap={2}>
-            {row.effects.map((item, itemIndex) => (
-              <Group key={itemIndex} gap={6} wrap="nowrap">
-                <Box
-                  style={{
-                    width: 5,
-                    height: 5,
-                    borderRadius: "50%",
-                    flexShrink: 0,
-                    background: `var(--mantine-color-${EFFECT_COLORS[item.effect]}-6)`,
-                  }}
-                />
-                <Text size="xs">{EFFECT_LABELS[item.effect] ?? item.effect}</Text>
-              </Group>
-            ))}
-          </Stack>
-        </Box>
-      ))}
-    </Stack>
-  );
-
   const canSave = brush.libraryId !== null && dirty;
 
   const DOT_SIZE = 5;
@@ -254,98 +200,62 @@ const BrushTile = memo(function BrushTile({
 
   return (
     <Group gap={0} wrap="nowrap" align="center" style={{ position: "relative" }}>
-      {/* Rendered as a div: dnd blocks drag-starts on real <button> elements,
-          which would leave only the row's edges draggable. */}
-      <Tooltip
-        label={effectsTooltip}
-        disabled={!effectsTooltip || editing}
-        position="left"
-        openDelay={500}
-        withinPortal
-        styles={{
-          tooltip: {
-            background: "var(--mantine-color-dark-7)",
-            border: "1px solid var(--mantine-color-dark-4)",
-            color: "var(--mantine-color-gray-2)",
-          },
-        }}
+      {/* asDiv: dnd blocks drag-starts on real <button> elements, which would
+          leave only the row's edges draggable. */}
+      <BrushRow
+        steps={brush.steps}
+        color={brushColor}
+        active={active}
+        outlined={listeningForHotkey}
+        summaryDisabled={editing}
+        onClick={onActivate}
+        onDoubleClick={() => !editing && setEditing(true)}
+        asDiv
+        editing={editing}
       >
-        <UnstyledButton
-          component="div"
-          role="button"
-          onClick={onActivate}
-          onDoubleClick={() => !editing && setEditing(true)}
-          px="xs"
-          py={4}
-          className={editing ? undefined : "effect-button"}
-          style={{
-            position: "relative",
-            overflow: "hidden",
-            borderRadius: "var(--mantine-radius-sm)",
-            background: active ? "var(--mantine-color-dark-6)" : undefined,
-            outline: listeningForHotkey ? "1px dashed var(--mantine-color-orange-5)" : undefined,
-            outlineOffset: -1,
-            flex: 1,
-            minWidth: 0,
-            cursor: editing ? "text" : "pointer",
-          }}
-        >
-          <Box
-            style={{
-              position: "absolute",
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: 3,
-              background: brushColor,
+        {index < 10 && (
+          <Kbd size="xs" style={{ flexShrink: 0 }}>
+            {(index + 1) % 10}
+          </Kbd>
+        )}
+        {brush.hotkey && (
+          <Kbd size="xs" style={{ flexShrink: 0 }}>
+            {brush.hotkey}
+          </Kbd>
+        )}
+        {editing ? (
+          <TextInput
+            value={editValue}
+            onChange={(e) => setEditValue(e.currentTarget.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitRename();
+              } else if (e.key === "Escape") {
+                setEditValue(brush.name);
+                setEditing(false);
+              }
             }}
+            size="xs"
+            autoFocus
+            styles={{ input: { height: INPUT_HEIGHT, minHeight: INPUT_HEIGHT } }}
+            style={{ flex: 1, minWidth: 0 }}
+            onClick={(e) => e.stopPropagation()}
           />
-          <Group gap={6} wrap="nowrap" align="center" mih={22}>
-            {index < 10 && (
-              <Kbd size="xs" style={{ flexShrink: 0 }}>
-                {(index + 1) % 10}
-              </Kbd>
-            )}
-            {brush.hotkey && (
-              <Kbd size="xs" style={{ flexShrink: 0 }}>
-                {brush.hotkey}
-              </Kbd>
-            )}
-            {editing ? (
-              <TextInput
-                value={editValue}
-                onChange={(e) => setEditValue(e.currentTarget.value)}
-                onBlur={commitRename}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    commitRename();
-                  } else if (e.key === "Escape") {
-                    setEditValue(brush.name);
-                    setEditing(false);
-                  }
-                }}
-                size="xs"
-                autoFocus
-                styles={{ input: { height: INPUT_HEIGHT, minHeight: INPUT_HEIGHT } }}
-                style={{ flex: 1, minWidth: 0 }}
-                onClick={(e) => e.stopPropagation()}
-              />
-            ) : (
-              <Text
-                size="sm"
-                truncate
-                fs={dirty ? "italic" : "normal"}
-                fw={active ? 700 : undefined}
-                c={active ? "white" : undefined}
-                style={{ flex: 1, minWidth: 0 }}
-              >
-                {brush.name}
-              </Text>
-            )}
-          </Group>
-        </UnstyledButton>
-      </Tooltip>
+        ) : (
+          <Text
+            size="sm"
+            truncate
+            fs={dirty ? "italic" : "normal"}
+            fw={active ? 700 : undefined}
+            c={active ? "white" : undefined}
+            style={{ flex: 1, minWidth: 0 }}
+          >
+            {brush.name}
+          </Text>
+        )}
+      </BrushRow>
       {!editing && (
         <Box style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}>{rightSection}</Box>
       )}

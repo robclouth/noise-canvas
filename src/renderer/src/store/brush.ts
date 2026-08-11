@@ -10,6 +10,7 @@ import {
   snapToSwungGridFloor,
   stepSwungGrid,
   stepSwungGridCenter,
+  unitsToUv,
 } from "@renderer/lib/utils";
 import type { ParameterKey } from "./types";
 import { openFiles } from "./files";
@@ -71,7 +72,11 @@ export interface BrushState {
   setIsStroking: (value: boolean) => void;
   // Unified stroke actions
   previewStrokeAtPosition: (position: StrokePosition) => void;
-  applyStrokeAtPosition: (position?: StrokePosition, strokeTimeRange?: StrokeTimeRange) => Promise<void>;
+  applyStrokeAtPosition: (
+    position?: StrokePosition,
+    strokeTimeRange?: StrokeTimeRange,
+    label?: string,
+  ) => Promise<void>;
   // Helper actions that use the unified ones
   moveBrushPosition: (direction: "up" | "down" | "left" | "right") => void;
   applyBrushAtPosition: () => Promise<void>;
@@ -79,22 +84,6 @@ export interface BrushState {
   blendMode: number;
   algorithm: number;
   accumulate: boolean;
-}
-
-// Helper to convert position to UV coordinates
-function positionToUv(
-  position: StrokePosition,
-  bpm: number,
-  totalDuration: number,
-  bandsPerOctave: number,
-  numBands: number,
-): { uvX: number; uvY: number; timeSeconds: number } {
-  const timeSeconds = (position.beats / bpm) * 60;
-  const uvX = timeSeconds / totalDuration;
-  const bandsPerSemitone = bandsPerOctave / 12;
-  const bandIndex = position.pitch * bandsPerSemitone;
-  const uvY = 1 - bandIndex / numBands;
-  return { uvX, uvY, timeSeconds };
 }
 
 export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState => {
@@ -136,35 +125,12 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const file = openFiles[activeFileId];
       if (!file?.rendererRef?.current || !file.spectrogramData) return;
 
-      const bpm = state.filepathsBpm[file.filePath] || 120;
-      const { spectrogramData } = file;
-      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-
       useTransientStore.setState({ cursorPosition: position, cursorVisible: true });
-
-      const { uvX, uvY } = positionToUv(
-        position,
-        bpm,
-        totalDuration,
-        spectrogramData.bandsPerOctave,
-        spectrogramData.numBands,
-      );
-
-      const { blX, blY } = aimUvToBrushBlUv(
-        state,
-        uvX,
-        uvY,
-        bpm,
-        totalDuration,
-        spectrogramData.bandsPerOctave,
-        spectrogramData.numBands,
-      );
-
-      file.rendererRef.current.renderStroke(blX, blY, true);
+      file.rendererRef.current.renderStroke(true);
     },
 
     // Unified apply action - used by mouse up and Enter key
-    applyStrokeAtPosition: async (position?, strokeTimeRange?) => {
+    applyStrokeAtPosition: async (position?, strokeTimeRange?, label?) => {
       const state = get();
       const { activeFileId, synthesizeFile, autoPlayStroke, setFilePlaybackStartTime, setLoopRegion } = state;
 
@@ -178,8 +144,9 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const { spectrogramData } = file;
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
-      const { uvX, uvY } = positionToUv(
-        effectivePosition,
+      const aim = unitsToUv(
+        effectivePosition.beats,
+        effectivePosition.pitch,
         bpm,
         totalDuration,
         spectrogramData.bandsPerOctave,
@@ -191,8 +158,8 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       // stroke onset in either anchor mode.
       const { blX } = aimUvToBrushBlUv(
         state,
-        uvX,
-        uvY,
+        aim.x,
+        aim.y,
         bpm,
         totalDuration,
         spectrogramData.bandsPerOctave,
@@ -246,7 +213,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const dirtyRanges = renderer.getDirtyPixelRanges();
       const dataPromise = renderer.getFBOData();
       const spec = file.spectrogramData;
-      const brushName = state.brushes[state.activeBrushIndex]?.name ?? "Stroke";
+      const brushName = label ?? state.brushes[state.activeBrushIndex]?.name ?? "Stroke";
       const dimensions = {
         textureWidth: spec.textureWidth,
         textureHeight: spec.textureHeight,
@@ -410,31 +377,10 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const file = openFiles[activeFileId];
       if (!file?.rendererRef?.current || !file.spectrogramData) return;
 
-      const bpm = state.filepathsBpm[file.filePath] || 120;
-      const { spectrogramData } = file;
-      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-
-      const { uvX, uvY } = positionToUv(
-        cursorPosition,
-        bpm,
-        totalDuration,
-        spectrogramData.bandsPerOctave,
-        spectrogramData.numBands,
-      );
-      const { blX, blY } = aimUvToBrushBlUv(
-        state,
-        uvX,
-        uvY,
-        bpm,
-        totalDuration,
-        spectrogramData.bandsPerOctave,
-        spectrogramData.numBands,
-      );
-
       // Arrow keys render the stroke as a preview; committing it requires a
       // non-preview render before the synthesis/undo step.
       file.rendererRef.current.beginStroke();
-      file.rendererRef.current.renderStroke(blX, blY, false);
+      file.rendererRef.current.renderStroke(false);
       await applyStrokeAtPosition();
       file.rendererRef.current.endStroke();
     },

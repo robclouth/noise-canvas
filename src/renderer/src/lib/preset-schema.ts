@@ -84,6 +84,13 @@ export function createSchema() {
     name: z.string(),
     isFactory: z.boolean(),
     version: z.number().int().min(1).optional().default(CURRENT_PRESET_VERSION),
+    // Palette colour the brush takes when added from this preset.
+    color: z
+      .object({
+        hue: z.string(),
+        variation: z.number(),
+      })
+      .optional(),
     steps: z.array(createBrushStepSchema()),
     linkedParams: z.array(z.string()).optional().default([]),
     macroNames: z

@@ -10,9 +10,12 @@ import {
   Stack,
   Text,
   TextInput,
-  UnstyledButton,
+  useMantineTheme,
 } from "@mantine/core";
 import { ContextModalProps, modals } from "@mantine/modals";
+import { resolveBrushColor } from "@renderer/lib/colors";
+import type { BrushColor } from "@renderer/store/types";
+import { BrushRow } from "./brush-row";
 import { openConfirm, openPrompt } from "@renderer/lib/modals";
 import { PresetType } from "@renderer/lib/preset-schema";
 import { MoreVertical, Plus } from "lucide-react";
@@ -47,27 +50,21 @@ function promptForDelete(preset: PresetType) {
 type RowProps = {
   onClick: () => void;
   label: string;
+  color?: BrushColor;
+  steps?: readonly Record<string, unknown>[];
   trailing?: React.ReactNode;
 };
 
-function Row({ onClick, label, trailing }: RowProps) {
+/** A picker entry, built from the same row the sidebar palette uses. */
+function Row({ onClick, label, color, steps = [], trailing }: RowProps) {
+  const theme = useMantineTheme();
   return (
     <Group gap={0} wrap="nowrap" align="center" style={{ position: "relative" }}>
-      <UnstyledButton
-        onClick={onClick}
-        px="xs"
-        py={4}
-        className="effect-button"
-        style={{
-          borderRadius: "var(--mantine-radius-sm)",
-          flex: 1,
-          minWidth: 0,
-        }}
-      >
-        <Text size="sm" truncate>
+      <BrushRow steps={steps} color={color ? resolveBrushColor(color, theme) : theme.colors.dark[4]} onClick={onClick}>
+        <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
           {label}
         </Text>
-      </UnstyledButton>
+      </BrushRow>
       {trailing && (
         <Box style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}>{trailing}</Box>
       )}
@@ -92,7 +89,7 @@ function PresetRow({ preset, onSelect }: { preset: PresetType; onSelect: () => v
     </Menu>
   );
 
-  return <Row onClick={onSelect} label={preset.name} trailing={trailing} />;
+  return <Row onClick={onSelect} label={preset.name} color={preset.color} steps={preset.steps} trailing={trailing} />;
 }
 
 export function BrushPickerModal({ context, id }: BrushPickerModalProps): React.JSX.Element {

@@ -68,6 +68,35 @@ export function resolveBrushAnchor(cursorPos: Vector2, fullTime: boolean, fullPi
   return new Vector2(fullTime ? 0 : cursorPos.x, fullPitch ? 0 : cursorPos.y);
 }
 
+// Three vertical coordinate spaces meet in this app:
+//
+//   view UV     the DOM's y-down fraction of a file lane: 0 at the top of the
+//               view (highest frequency), 1 at the bottom (lowest). Pointer
+//               events, pan/zoom offsets and the legends work in it.
+//   pitch UV    the y-up space every shader works in: 0 at the file's lowest
+//               band, 1 above its highest. unitsToUv/uvToUnits convert to and
+//               from it, and brushBottomLeftUv is expressed in it.
+//   band index  a row of the packed spectrogram: 0 is the highest band and the
+//               index counts downward in frequency.
+//
+// Pointer input crosses from view UV into pitch UV exactly once, in
+// lib/aim.ts; nothing downstream of that flips again.
+export function viewUvYToPitchUv(viewY: number): number {
+  return 1 - viewY;
+}
+
+export function pitchUvToViewUvY(pitchY: number): number {
+  return 1 - pitchY;
+}
+
+export function pitchUvToBandIndex(pitchY: number, numBands: number): number {
+  return (1 - pitchY) * numBands;
+}
+
+export function bandIndexToPitchUv(bandIndex: number, numBands: number): number {
+  return 1 - bandIndex / numBands;
+}
+
 export function unitsToUv(
   beats: number,
   semitones: number,

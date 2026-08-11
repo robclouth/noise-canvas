@@ -37,8 +37,9 @@ describe("parsing the manual", () => {
   });
 
   it("reads the tables the manual has", () => {
-    // Warp algorithms, keyboard shortcuts, and the help surfaces.
-    expect(ofKind("table").length).toBe(3);
+    // Warp algorithms, the two pattern references, keyboard shortcuts, and the
+    // help surfaces.
+    expect(ofKind("table").length).toBe(5);
   });
 
   it("never emits an empty list or a list item with no text", () => {
