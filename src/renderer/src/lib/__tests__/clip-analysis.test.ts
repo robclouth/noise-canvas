@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeClipAttribution, findOverloads, type Overload } from "../clip-analysis";
-import { ANALYSIS_OVERLAP, FULL_SCALE_DB_OFFSET, FULL_SCALE_MAGNITUDE } from "../constants";
+import { ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB, FULL_SCALE_DB_OFFSET, FULL_SCALE_MAGNITUDE } from "../constants";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 
 /** Silent buffer with a single peak of the given amplitude. */
@@ -90,13 +90,13 @@ describe("computeClipAttribution", () => {
 
   it("returns an all-zero map when nothing overloaded", () => {
     const data = spectrogramWithBand(10, 0.5, 0);
-    const result = computeClipAttribution(data, data.packedData, [], ANALYSIS_OVERLAP);
+    const result = computeClipAttribution(data, data.packedData, [], ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
     expect(result.some((v) => v !== 0)).toBe(false);
   });
 
   it("leaves silent coefficients unblamed", () => {
     const data = spectrogramWithBand(10, 0.5, 0);
-    const result = computeClipAttribution(data, data.packedData, overloads, ANALYSIS_OVERLAP);
+    const result = computeClipAttribution(data, data.packedData, overloads, ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
 
     // Band 40 was never filled, so none of its coefficients may be blamed.
     const start = 40 * data.numFrames;
@@ -105,7 +105,7 @@ describe("computeClipAttribution", () => {
 
   it("blames the band that carries the energy", () => {
     const data = spectrogramWithBand(10, 0.5, 0);
-    const result = computeClipAttribution(data, data.packedData, overloads, ANALYSIS_OVERLAP);
+    const result = computeClipAttribution(data, data.packedData, overloads, ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
 
     const start = 10 * data.numFrames;
     let peak = 0;
@@ -119,8 +119,8 @@ describe("computeClipAttribution", () => {
     const inPhase = spectrogramWithBand(10, 0.5, 0);
     const inverted = spectrogramWithBand(10, 0.5, Math.PI);
 
-    const a = computeClipAttribution(inPhase, inPhase.packedData, overloads, ANALYSIS_OVERLAP);
-    const b = computeClipAttribution(inverted, inverted.packedData, overloads, ANALYSIS_OVERLAP);
+    const a = computeClipAttribution(inPhase, inPhase.packedData, overloads, ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
+    const b = computeClipAttribution(inverted, inverted.packedData, overloads, ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
 
     const start = 10 * inPhase.numFrames;
     for (let i = start; i < start + inPhase.numFrames; i++) {
@@ -130,12 +130,13 @@ describe("computeClipAttribution", () => {
 
   it("flips the blame when the overload is a negative peak", () => {
     const data = spectrogramWithBand(10, 0.5, 0);
-    const positive = computeClipAttribution(data, data.packedData, overloads, ANALYSIS_OVERLAP);
+    const positive = computeClipAttribution(data, data.packedData, overloads, ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
     const negative = computeClipAttribution(
       data,
       data.packedData,
       [{ sample: 128, sign: -1, excessDb: 3 }],
       ANALYSIS_OVERLAP,
+      CLIP_FULL_TINT_DB,
     );
 
     const start = 10 * data.numFrames;
@@ -144,16 +145,57 @@ describe("computeClipAttribution", () => {
     }
   });
 
-  it("normalizes the map into [-1, 1] with the peak at full scale", () => {
+  it("keeps values inside [-1, 1] and peaks at the overload's severity", () => {
     const data = spectrogramWithBand(10, 0.5, 0);
-    const result = computeClipAttribution(data, data.packedData, overloads, ANALYSIS_OVERLAP);
+    const result = computeClipAttribution(data, data.packedData, overloads, ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
 
     let peak = 0;
     for (const v of result) {
       expect(Math.abs(v)).toBeLessThanOrEqual(1 + 1e-6);
       peak = Math.max(peak, Math.abs(v));
     }
+    // 3 dB of overshoot against a 6 dB full-tint reference.
+    expect(peak).toBeCloseTo(3 / CLIP_FULL_TINT_DB, 6);
+  });
+
+  it("saturates once the overshoot reaches the full-tint reference", () => {
+    const data = spectrogramWithBand(10, 0.5, 0);
+    const result = computeClipAttribution(
+      data,
+      data.packedData,
+      [{ sample: 128, sign: 1, excessDb: CLIP_FULL_TINT_DB * 2 }],
+      ANALYSIS_OVERLAP,
+      CLIP_FULL_TINT_DB,
+    );
+
+    let peak = 0;
+    for (const v of result) peak = Math.max(peak, Math.abs(v));
     expect(peak).toBeCloseTo(1, 6);
+  });
+
+  it("fades the whole map as the overshoot shrinks", () => {
+    // The property that makes "reduce until the red is gone" converge: halving
+    // the overshoot must halve the tint everywhere, not merely re-rank it.
+    const data = spectrogramWithBand(10, 0.5, 0);
+    const loud = computeClipAttribution(
+      data,
+      data.packedData,
+      [{ sample: 128, sign: 1, excessDb: 4 }],
+      ANALYSIS_OVERLAP,
+      CLIP_FULL_TINT_DB,
+    );
+    const quiet = computeClipAttribution(
+      data,
+      data.packedData,
+      [{ sample: 128, sign: 1, excessDb: 2 }],
+      ANALYSIS_OVERLAP,
+      CLIP_FULL_TINT_DB,
+    );
+
+    const start = 10 * data.numFrames;
+    for (let i = start; i < start + data.numFrames; i++) {
+      expect(quiet[i]).toBeCloseTo(loud[i] / 2, 6);
+    }
   });
 
   it("scales blame with how badly the sample overloaded", () => {
@@ -168,6 +210,7 @@ describe("computeClipAttribution", () => {
         { sample: 200, sign: 1, excessDb: 8 },
       ],
       ANALYSIS_OVERLAP,
+      CLIP_FULL_TINT_DB,
     );
 
     const start = 10 * data.numFrames;

@@ -147,14 +147,27 @@ function atomSigmaSamples(centerFreqHz: number, sampleRate: number, bandsPerOcta
  * in the same packed layout as the spectrogram data so it can be uploaded as a
  * texture and read with the existing packed-coordinate helpers.
  *
- * Values are normalized to [-1, 1]: positive means the coefficient pushes the
- * waveform further past full scale, negative means it pulls it back.
+ * Values land in [-1, 1]: positive means the coefficient pushes the waveform
+ * further past full scale, negative means it pulls it back.
+ *
+ * Magnitude combines two things. Within a single overload, contributions are
+ * scaled against the strongest one, which is what ranks the coefficients at that
+ * instant. That share is then multiplied by an absolute severity taken from how
+ * far the sample actually overloaded, so the whole map fades as the overshoot is
+ * reduced. Scaling the map to its own maximum instead would keep it saturated at
+ * every stage — the worst remaining offender always reading full red — which
+ * hides any progress until the overload disappears entirely.
+ *
+ * Where overloads overlap, the strongest single verdict wins rather than the sum:
+ * a coefficient's tint should say how badly it drives the worst peak it takes
+ * part in, not how many peaks it happens to touch.
  */
 export function computeClipAttribution(
   spectrogramData: SpectrogramData,
   packedData: Float32Array,
   overloads: Overload[],
   overlap: number,
+  fullTintDb: number,
 ): Float32Array {
   const { textureWidth, textureHeight, numBands, numChannels, sampleRate, bandsPerOctave, metadata } = spectrogramData;
   const { bandOffsets, bandStepLog2s, bandLengths } = spectrogramData.synthesisMetadata;
@@ -162,26 +175,38 @@ export function computeClipAttribution(
   const attribution = new Float32Array(textureWidth * textureHeight);
   if (overloads.length === 0) return attribution;
 
+  // Per-band atom geometry, independent of which overload is being attributed.
+  const sigmas = new Float64Array(numBands);
+  const fractionalFreqs = new Float64Array(numBands);
   for (let band = 0; band < numBands; band++) {
     const centerFreqHz = metadata[band * 4 + 3];
-    const sigma = atomSigmaSamples(centerFreqHz, sampleRate, bandsPerOctave, overlap);
-    if (sigma <= 0) continue;
+    sigmas[band] = atomSigmaSamples(centerFreqHz, sampleRate, bandsPerOctave, overlap);
+    fractionalFreqs[band] = centerFreqHz / sampleRate;
+  }
 
-    const fractionalFreq = centerFreqHz / sampleRate;
-    const stepLog2 = bandStepLog2s[band];
-    const step = 1 << stepLog2;
-    const bandLength = bandLengths[band];
-    const bandOffset = bandOffsets[band];
-    const reach = ATOM_SIGMA_CUTOFF * sigma;
-    const twoSigmaSquared = 2 * sigma * sigma;
+  // Scratch buffers for one overload's contributions, reused across overloads.
+  const touched: number[] = [];
+  const contributions: number[] = [];
 
-    for (const overload of overloads) {
-      const t0 = overload.sample;
-      // The carrier is evaluated at absolute time, so it is shared by every
-      // coefficient in the band for this overload.
-      const carrierAngle = 2 * Math.PI * fractionalFreq * t0;
+  for (const overload of overloads) {
+    touched.length = 0;
+    contributions.length = 0;
+    let strongest = 0;
+
+    const t0 = overload.sample;
+    for (let band = 0; band < numBands; band++) {
+      const sigma = sigmas[band];
+      if (sigma <= 0) continue;
+
+      const step = 1 << bandStepLog2s[band];
+      const bandOffset = bandOffsets[band];
+      const reach = ATOM_SIGMA_CUTOFF * sigma;
+      const twoSigmaSquared = 2 * sigma * sigma;
+      // The carrier is evaluated at absolute time, so every coefficient in the
+      // band shares it for this overload.
+      const carrierAngle = 2 * Math.PI * fractionalFreqs[band] * t0;
       const first = Math.max(0, Math.ceil((t0 - reach) / step));
-      const last = Math.min(bandLength - 1, Math.floor((t0 + reach) / step));
+      const last = Math.min(bandLengths[band] - 1, Math.floor((t0 + reach) / step));
 
       for (let j = first; j <= last; j++) {
         const index = bandOffset + j;
@@ -199,18 +224,25 @@ export function computeClipAttribution(
           const value = magnitude * envelope * Math.cos(carrierAngle + phase);
           if (Math.abs(value) > Math.abs(contribution)) contribution = value;
         }
+        if (contribution === 0) continue;
 
         // Positive when the coefficient pushes the waveform in the direction it
-        // already overshot, weighted by how badly that sample overloaded.
-        attribution[index] += contribution * overload.sign * overload.excessDb;
+        // already overshot.
+        const signed = contribution * overload.sign;
+        touched.push(index);
+        contributions.push(signed);
+        strongest = Math.max(strongest, Math.abs(signed));
       }
+    }
+
+    if (strongest <= 0) continue;
+    const severity = Math.min(1, overload.excessDb / Math.max(fullTintDb, 1e-3));
+    for (let k = 0; k < touched.length; k++) {
+      const index = touched[k];
+      const value = (contributions[k] / strongest) * severity;
+      if (Math.abs(value) > Math.abs(attribution[index])) attribution[index] = value;
     }
   }
 
-  let peak = 0;
-  for (let i = 0; i < attribution.length; i++) peak = Math.max(peak, Math.abs(attribution[i]));
-  if (peak > 0) {
-    for (let i = 0; i < attribution.length; i++) attribution[i] /= peak;
-  }
   return attribution;
 }

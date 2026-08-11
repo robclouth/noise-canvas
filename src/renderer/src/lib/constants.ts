@@ -22,6 +22,12 @@ export const OVER_FULL_SCALE_RANGE_DB = 6;
 // adjacent bands. Must match OVERLAP in the native analyzer.
 export const ANALYSIS_OVERLAP = 0.7;
 
+// Overshoot (or limiter gain reduction) at which the clipping overlay reaches
+// full intensity. Tint strength tracks this absolutely rather than being scaled
+// to whatever the worst offender happens to be, so the overlay fades away as
+// the overshoot is painted down instead of staying saturated until it vanishes.
+export const CLIP_FULL_TINT_DB = 6;
+
 export const BEAT_VALUES = [
   { value: 1 / 64, label: "1/64" },
   { value: (1 / 32) * (2 / 3), label: "1/32t" },

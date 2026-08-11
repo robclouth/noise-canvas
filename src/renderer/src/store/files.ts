@@ -9,7 +9,7 @@ import * as Tone from "tone";
 import { host } from "../lib/host";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import { computeClipAttribution, findOverloads } from "../lib/clip-analysis";
-import { ANALYSIS_OVERLAP } from "../lib/constants";
+import { ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB } from "../lib/constants";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
@@ -1350,7 +1350,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         );
         file.clipAttribution =
           overloads.length > 0
-            ? computeClipAttribution(file.spectrogramData, processedDataArray, overloads, ANALYSIS_OVERLAP)
+            ? computeClipAttribution(
+                file.spectrogramData,
+                processedDataArray,
+                overloads,
+                ANALYSIS_OVERLAP,
+                CLIP_FULL_TINT_DB,
+              )
             : undefined;
       } else {
         file.clipAttribution = undefined;
