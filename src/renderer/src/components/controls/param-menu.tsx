@@ -57,7 +57,7 @@ const ModulationRange = ({ paramKey, effectId }: { paramKey: ParameterKey; effec
   const upper = value + totalAbs * (parameter.max - value);
 
   return (
-    <Text size="xs" c="dark.2">
+    <Text size="xs" c="dimmed">
       {formatRangeValue(lower, parameter.unit)} – {formatRangeValue(upper, parameter.unit)}
     </Text>
   );
@@ -267,7 +267,7 @@ export const ParamMenu = ({
           {isModulatable && contextualModParamKeys && (
             <>
               <Group gap={6} wrap="nowrap" align="center" h={CONTROL_ROW_HEIGHT} mt={4}>
-                <Text size="xs" c="dark.1">
+                <Text size="xs" c="dimmed">
                   Modulation
                 </Text>
                 <ModulationRange paramKey={paramKey} effectId={effectId} />

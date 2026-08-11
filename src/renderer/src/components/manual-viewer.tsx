@@ -16,6 +16,9 @@ import manualSource from "../../../../docs/manual.md?raw";
 /** Above the transport and the app's own modals, which both sit at 1000. */
 const MANUAL_Z = 10004;
 const NAV_WIDTH = 210;
+const NAV_TEXT_SIZE = 12;
+/** Around 75 characters a line at the prose size, which is where reading is easiest. */
+const BODY_WIDTH = 680;
 const HEIGHT = "86vh";
 /** Breathing room above a heading the viewer has jumped to. */
 const HEADING_INSET = 8;
@@ -135,7 +138,9 @@ export function ManualViewer(): React.JSX.Element {
       opened={opened}
       onClose={closeManual}
       title="Manual"
-      size="90%"
+      // Wide enough for the nav beside a full-width column of prose, and no
+      // wider, so the text isn't stranded against an empty half of the modal.
+      size={`min(${NAV_WIDTH + BODY_WIDTH + 80}px, 92vw)`}
       zIndex={MANUAL_Z}
       // The body fills whatever the header leaves rather than a guessed offset,
       // so the two panes own the only scrollbars and nothing overflows the frame.
@@ -163,7 +168,7 @@ export function ManualViewer(): React.JSX.Element {
               onClick={() => openManual(entry.id)}
             >
               <Text
-                size="xs"
+                fz={NAV_TEXT_SIZE}
                 fw={entry.level === 2 ? 600 : 400}
                 c={activeId === entry.id ? "orange.4" : entry.level === 2 ? "gray.3" : "dimmed"}
                 truncate
@@ -173,7 +178,7 @@ export function ManualViewer(): React.JSX.Element {
             </UnstyledButton>
           ))}
           {contents.length === 0 && (
-            <Text size="xs" c="dimmed" px="xs">
+            <Text fz={NAV_TEXT_SIZE} c="dimmed" px="xs">
               Nothing matches “{query}”.
             </Text>
           )}
@@ -191,7 +196,7 @@ export function ManualViewer(): React.JSX.Element {
         px="lg"
         pb="md"
       >
-        <Box ref={bodyRef} maw={780}>
+        <Box ref={bodyRef} maw={BODY_WIDTH}>
           {content}
         </Box>
       </ScrollArea>

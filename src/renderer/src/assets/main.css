@@ -72,6 +72,14 @@
   background-color: var(--mantine-color-dark-6);
 }
 
+/* Dropdowns carry explanatory prose rather than glanceable panel labels, so
+   secondary text in one sits several steps lighter than it does in a panel. */
+.mantine-Popover-dropdown,
+.mantine-Menu-dropdown,
+.mantine-HoverCard-dropdown {
+  --mantine-color-dimmed: var(--mantine-color-gray-4);
+}
+
 *:focus,
 *:focus-visible {
   outline: none !important;

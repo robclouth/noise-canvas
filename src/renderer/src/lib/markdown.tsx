@@ -9,6 +9,14 @@ import { Fragment, type ReactNode } from "react";
  * route — in-document anchors scroll, external ones open in a browser.
  */
 
+/**
+ * Prose is read, not glanced at, so it sets its own sizes in pixels rather than
+ * taking the theme's scale, which is tuned for dense control panels.
+ */
+const PROSE = 14;
+const PROSE_SMALL = 13;
+const PROSE_LH = 1.6;
+
 export type MarkdownBlock =
   | { kind: "heading"; level: number; id: string; text: string }
   | { kind: "paragraph"; text: string }
@@ -140,7 +148,8 @@ export function renderInline(text: string, onLink: LinkHandler): ReactNode {
 
     if (token.startsWith("`")) {
       parts.push(
-        <Code key={key++} fz="xs">
+        // Relative, so inline code stays in proportion inside table cells too.
+        <Code key={key++} fz="0.92em">
           {token.slice(1, -1)}
         </Code>,
       );
@@ -149,7 +158,7 @@ export function renderInline(text: string, onLink: LinkHandler): ReactNode {
       parts.push(
         <Anchor
           key={key++}
-          size="sm"
+          fz="inherit"
           onClick={(event) => {
             event.preventDefault();
             onLink(href);
@@ -193,19 +202,27 @@ export function renderBlocks(blocks: MarkdownBlock[], onLink: LinkHandler): Reac
 
       case "paragraph":
         return (
-          <Text key={index} size="sm" mb="sm">
+          <Text key={index} fz={PROSE} lh={PROSE_LH} mb="sm">
             {renderInline(block.text, onLink)}
           </Text>
         );
 
       case "list":
         return (
-          <List key={index} type={block.ordered ? "ordered" : "unordered"} size="sm" spacing={4} mb="sm" withPadding>
+          <List
+            key={index}
+            type={block.ordered ? "ordered" : "unordered"}
+            fz={PROSE}
+            lh={PROSE_LH}
+            spacing={4}
+            mb="sm"
+            withPadding
+          >
             {block.items.map((item, itemIndex) => (
               <List.Item key={itemIndex}>
                 {renderInline(item.text, onLink)}
                 {item.children.length > 0 && (
-                  <List type={block.ordered ? "ordered" : "unordered"} size="sm" spacing={2} mt={4} withPadding>
+                  <List type={block.ordered ? "ordered" : "unordered"} fz={PROSE} spacing={2} mt={4} withPadding>
                     {item.children.map((child, childIndex) => (
                       <List.Item key={childIndex}>{renderInline(child, onLink)}</List.Item>
                     ))}
@@ -218,7 +235,7 @@ export function renderBlocks(blocks: MarkdownBlock[], onLink: LinkHandler): Reac
 
       case "table":
         return (
-          <Table key={index} striped highlightOnHover withTableBorder fz="xs" mb="sm" layout="auto">
+          <Table key={index} striped highlightOnHover withTableBorder fz={PROSE_SMALL} mb="sm" layout="auto">
             <Table.Thead>
               <Table.Tr>
                 {block.header.map((cell, cellIndex) => (
@@ -240,14 +257,14 @@ export function renderBlocks(blocks: MarkdownBlock[], onLink: LinkHandler): Reac
 
       case "quote":
         return (
-          <Blockquote key={index} color="orange" p="xs" mb="sm" fz="sm">
+          <Blockquote key={index} color="orange" p="xs" mb="sm" fz={PROSE} lh={PROSE_LH}>
             {renderInline(block.text, onLink)}
           </Blockquote>
         );
 
       case "code":
         return (
-          <Code key={index} block fz="xs" mb="sm">
+          <Code key={index} block fz={PROSE_SMALL} mb="sm">
             {block.text}
           </Code>
         );

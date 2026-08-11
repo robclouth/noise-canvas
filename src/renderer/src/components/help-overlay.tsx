@@ -13,7 +13,7 @@ import type { ParameterKey } from "@renderer/store/types";
 import { startDeepTour } from "@renderer/lib/walkthrough";
 import { useStore } from "@renderer/store";
 import { BookOpen, Route } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /**
  * Dims the window and brightens whatever the pointer is over, with that area's
@@ -40,8 +40,16 @@ const EASE = "top 120ms ease, left 120ms ease, width 120ms ease, height 120ms ea
 
 const POPOVER_WIDTH = 280;
 const POPOVER_GAP = 12;
-/** Enough room for a title, a blurb, the buttons and two recipes. */
-const POPOVER_HEIGHT = 190;
+/** A first guess only, for the frame before the card has been measured. */
+const POPOVER_HEIGHT = 150;
+/**
+ * Slack around the card in which the highlight stops following the pointer, so
+ * the card stays put and reachable while you move onto its buttons.
+ */
+const CARD_BRIDGE = 28;
+/** The card is prose, so it reads at prose sizes rather than the panels' dense scale. */
+const CARD_TITLE_SIZE = 13;
+const CARD_TEXT_SIZE = 12;
 
 /**
  * Recipes live on GitHub rather than in the build: unlike the manual they grow
@@ -111,29 +119,89 @@ function hitTest(targets: Target[], x: number, y: number): Target | null {
   return best;
 }
 
+type Point = { x: number; y: number };
+
+function cross(a: Point, b: Point, c: Point): number {
+  return (a.x - c.x) * (b.y - c.y) - (b.x - c.x) * (a.y - c.y);
+}
+
+function inTriangle(p: Point, a: Point, b: Point, c: Point): boolean {
+  const d1 = cross(p, a, b);
+  const d2 = cross(p, b, c);
+  const d3 = cross(p, c, a);
+  return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+}
+
+/** The card edge that faces a point, as its two corners. */
+function facingEdge(from: Point, card: DOMRect): [Point, Point] {
+  if (from.x < card.left)
+    return [
+      { x: card.left, y: card.top },
+      { x: card.left, y: card.bottom },
+    ];
+  if (from.x > card.right)
+    return [
+      { x: card.right, y: card.top },
+      { x: card.right, y: card.bottom },
+    ];
+  if (from.y < card.top)
+    return [
+      { x: card.left, y: card.top },
+      { x: card.right, y: card.top },
+    ];
+  return [
+    { x: card.left, y: card.bottom },
+    { x: card.right, y: card.bottom },
+  ];
+}
+
+/**
+ * True while the pointer is heading into the card — inside the cone from where
+ * it was to the card's near edge. Reaching a button on the card means crossing
+ * whatever sits between, and without this the card moves out from under the aim.
+ */
+function aimingAtCard(from: Point, to: Point, card: DOMRect): boolean {
+  const [a, b] = facingEdge(from, card);
+  return inTriangle(to, from, a, b);
+}
+
+/**
+ * What the pointer is on, and where it was when that was picked. The card is
+ * placed from `at` once and then holds still, rather than sliding along as the
+ * pointer wanders around the same target.
+ */
+type Hover = { target: Target; at: Point };
+
 function targetId(target: Target): string {
   return target.kind === "area" ? `area:${target.name}` : `param:${target.key}`;
 }
 
-/** Beside the highlight where there is room, otherwise below or above it. */
-function placePopover(rect: DOMRect): { top: number; left: number } {
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+/**
+ * Beside the highlight, level with the pointer — so the card is always straight
+ * out from where you are and reaching it is one movement along one axis. Above
+ * or below only when neither side has room, and then centred on the pointer for
+ * the same reason. Takes the card's measured height: clamping against a guessed
+ * one leaves the pointer off the end of the card near the window's edges, which
+ * is the diagonal reach this placement exists to avoid.
+ */
+function placePopover(rect: DOMRect, at: Point, height: number): { top: number; left: number } {
   const { innerWidth: vw, innerHeight: vh } = window;
+  const level = clamp(at.y - height / 2, POPOVER_GAP, vh - height - POPOVER_GAP);
 
-  let left: number;
-  if (rect.right + POPOVER_GAP + POPOVER_WIDTH <= vw) left = rect.right + POPOVER_GAP;
-  else if (rect.left - POPOVER_GAP - POPOVER_WIDTH >= 0) left = rect.left - POPOVER_GAP - POPOVER_WIDTH;
-  else left = Math.min(Math.max(rect.left, POPOVER_GAP), vw - POPOVER_WIDTH - POPOVER_GAP);
+  const right = rect.right + POPOVER_GAP;
+  if (right + POPOVER_WIDTH + POPOVER_GAP <= vw) return { top: level, left: right };
 
-  const beside = left >= rect.right || left + POPOVER_WIDTH <= rect.left;
-  let top: number;
-  if (beside) top = rect.top;
-  else if (rect.bottom + POPOVER_GAP + POPOVER_HEIGHT <= vh) top = rect.bottom + POPOVER_GAP;
-  else top = rect.top - POPOVER_GAP - POPOVER_HEIGHT;
+  const left = rect.left - POPOVER_GAP - POPOVER_WIDTH;
+  if (left >= POPOVER_GAP) return { top: level, left };
 
-  return {
-    top: Math.min(Math.max(top, POPOVER_GAP), vh - POPOVER_HEIGHT - POPOVER_GAP),
-    left,
-  };
+  const centred = clamp(at.x - POPOVER_WIDTH / 2, POPOVER_GAP, vw - POPOVER_WIDTH - POPOVER_GAP);
+  const below = rect.bottom + POPOVER_GAP;
+  if (below + height + POPOVER_GAP <= vh) return { top: below, left: centred };
+  return { top: Math.max(POPOVER_GAP, rect.top - POPOVER_GAP - height), left: centred };
 }
 
 export function HelpOverlay(): React.JSX.Element | null {
@@ -141,7 +209,10 @@ export function HelpOverlay(): React.JSX.Element | null {
   const setOpen = useStore((state) => state.setHelpOverlayOpen);
   const openManual = useStore((state) => state.openManual);
   const [targets, setTargets] = useState<Target[]>([]);
-  const [hovered, setHovered] = useState<Target | null>(null);
+  const [hovered, setHovered] = useState<Hover | null>(null);
+  const [cardHeight, setCardHeight] = useState(POPOVER_HEIGHT);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const pointer = useRef<Point | null>(null);
   const frame = useRef(0);
 
   const close = useCallback(() => {
@@ -150,6 +221,7 @@ export function HelpOverlay(): React.JSX.Element | null {
   }, [setOpen]);
 
   useEffect(() => {
+    pointer.current = null;
     if (!open) {
       setHovered(null);
       return;
@@ -182,15 +254,41 @@ export function HelpOverlay(): React.JSX.Element | null {
 
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
+  // The card is as tall as its text, so it is placed from a measurement rather
+  // than a constant. Before paint, so the corrected position is the first one
+  // shown. Height doesn't depend on placement, so this settles in one pass.
+  useLayoutEffect(() => {
+    const height = cardRef.current?.getBoundingClientRect().height;
+    if (height && Math.abs(height - cardHeight) > 1) setCardHeight(height);
+  }, [hovered, cardHeight]);
+
   const onMouseMove = useCallback(
     (event: React.MouseEvent) => {
       const { clientX, clientY } = event;
       cancelAnimationFrame(frame.current);
       frame.current = requestAnimationFrame(() => {
+        const from = pointer.current;
+        const to = { x: clientX, y: clientY };
+        pointer.current = to;
+
+        const card = cardRef.current?.getBoundingClientRect();
+        if (card) {
+          const near =
+            clientX >= card.left - CARD_BRIDGE &&
+            clientX <= card.right + CARD_BRIDGE &&
+            clientY >= card.top - CARD_BRIDGE &&
+            clientY <= card.bottom + CARD_BRIDGE;
+          if (near || (from && aimingAtCard(from, to, card))) return;
+        }
+
         const hit = hitTest(targets, clientX, clientY);
         // Empty space keeps the last highlight, so crossing a gap on the way to
         // the card doesn't blink it away.
-        if (hit) setHovered((current) => (current && targetId(current) === targetId(hit) ? current : hit));
+        if (hit) {
+          setHovered((current) =>
+            current && targetId(current.target) === targetId(hit) ? current : { target: hit, at: to },
+          );
+        }
       });
     },
     [targets],
@@ -198,13 +296,14 @@ export function HelpOverlay(): React.JSX.Element | null {
 
   if (!open) return null;
 
-  const rect = hovered?.rect;
-  const area = hovered?.kind === "area" ? getArea(hovered.name) : null;
-  const parameter = hovered?.kind === "param" ? parameterDefs[hovered.key] : null;
-  const hasTour = hovered?.kind === "area" && deepTourFor(hovered.name).length > 0;
+  const target = hovered?.target;
+  const rect = target?.rect;
+  const area = target?.kind === "area" ? getArea(target.name) : null;
+  const parameter = target?.kind === "param" ? parameterDefs[target.key] : null;
+  const hasTour = target?.kind === "area" && deepTourFor(target.name).length > 0;
   const manualSection =
-    hovered?.kind === "param"
-      ? manualSectionForParameter(hovered.key, parameter?.effectType)
+    target?.kind === "param"
+      ? manualSectionForParameter(target.key, parameter?.effectType)
       : (area?.manualSection ?? null);
   const card = area ?? (parameter ? { title: parameter.label, blurb: parameter.description } : null);
   const dim: React.CSSProperties = { position: "fixed", background: DIM, transition: EASE, pointerEvents: "none" };
@@ -252,35 +351,36 @@ export function HelpOverlay(): React.JSX.Element | null {
           <Box style={{ ...dim, top: 0, left: 0, right: 0, bottom: 0 }} />
         )}
 
-        {card && rect && (
+        {card && rect && hovered && (
           <Paper
+            ref={cardRef}
             withBorder
             shadow="md"
             p="sm"
             w={POPOVER_WIDTH}
             pos="fixed"
-            style={{ ...placePopover(rect), transition: EASE }}
+            style={{ ...placePopover(rect, hovered.at, cardHeight), transition: EASE, cursor: "default" }}
             // Freezes the highlight once the pointer is on the card, so its
             // buttons stay reachable without the selection sliding away.
             onMouseMove={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
           >
             <Stack gap="xs">
-              <Text size="sm" fw={600}>
+              <Text fz={CARD_TITLE_SIZE} fw={600}>
                 {card.title}
               </Text>
-              <Text size="xs" c="dimmed">
+              <Text fz={CARD_TEXT_SIZE} c="gray.4" lh={1.45}>
                 {card.blurb}
               </Text>
               <Group gap="xs">
-                {hasTour && hovered?.kind === "area" && (
+                {hasTour && target?.kind === "area" && (
                   <Button
                     size="compact-xs"
                     variant="light"
                     color="orange"
                     leftSection={<Route size={12} />}
                     onClick={() => {
-                      const name = hovered.name;
+                      const name = target.name;
                       close();
                       void startDeepTour(name);
                     }}
@@ -305,13 +405,13 @@ export function HelpOverlay(): React.JSX.Element | null {
               </Group>
               {area?.recipes && area.recipes.length > 0 && (
                 <Stack gap={2}>
-                  <Text size="xs" c="dimmed">
+                  <Text fz={CARD_TEXT_SIZE} c="gray.5">
                     Things to do with it
                   </Text>
                   {area.recipes.map((recipe) => (
                     <Anchor
                       key={recipe}
-                      size="xs"
+                      fz={CARD_TEXT_SIZE}
                       onClick={() => {
                         close();
                         host.shell.openExternal(`${RECIPES_URL}#${recipe}`);
@@ -333,8 +433,8 @@ export function HelpOverlay(): React.JSX.Element | null {
             pos="fixed"
             bottom={16}
             left="50%"
-            size="xs"
-            c="dimmed"
+            fz={CARD_TEXT_SIZE}
+            c="gray.5"
             px="sm"
             py={4}
             bg="dark.9"
