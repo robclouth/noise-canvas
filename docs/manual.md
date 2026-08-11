@@ -26,19 +26,23 @@ All the parameters in the app have tooltips, and how to use a tool should be mos
    - [Modulator Controls](#modulator-controls)
    - [Contextual Sources](#contextual-sources)
    - [Nested Modulation](#nested-modulation)
-6. [Parameter Controls](#parameter-controls)
+6. [Generate](#generate)
+   - [Writing Patterns](#writing-patterns)
+   - [Choosing Brushes from a Pattern](#choosing-brushes-from-a-pattern)
+   - [Presets and the Dice](#presets-and-the-dice)
+7. [Parameter Controls](#parameter-controls)
    - [Randomization](#randomization)
    - [Linking Parameters Across Steps](#linking-parameters-across-steps)
-7. [Working with Files](#working-with-files)
+8. [Working with Files](#working-with-files)
    - [Splitting a File](#splitting-a-file)
    - [Stem Groups](#stem-groups)
    - [Navigating the Canvas](#navigating-the-canvas)
-8. [History](#history)
-9. [Transport and Output](#transport-and-output)
-10. [Menus](#menus)
-11. [Keyboard Shortcuts](#keyboard-shortcuts)
-12. [Where Things Are Saved](#where-things-are-saved)
-13. [Working with Ableton Live](#working-with-ableton-live)
+9. [History](#history)
+10. [Transport and Output](#transport-and-output)
+11. [Menus](#menus)
+12. [Keyboard Shortcuts](#keyboard-shortcuts)
+13. [Where Things Are Saved](#where-things-are-saved)
+14. [Working with Ableton Live](#working-with-ableton-live)
 
 ---
 
@@ -86,7 +90,7 @@ The window is split into three columns plus a transport bar:
 - **Left — Brush panel.** Everything that defines the current brush: Macros, Steps, Source, Envelope, Options, Effects, Modulators.
 - **Middle — Canvas.** Every open file stacked vertically, each with its own header, time legend, and pitch legend. Minimized files collapse into a palette bar at the bottom.
 - **Right — Sidebar.** The brush list on top, the history tree below.
-- **Bottom — Transport.** Playback, grid, scale, meters, limiter, Ableton Link.
+- **Bottom — Generate and Transport.** A pattern that paints the whole file at once, then playback, grid, scale, meters, limiter, Ableton Link.
 
 **Compact UI** (`Cmd/Ctrl+Shift+C`, or **View → Compact UI**) shrinks every control so more fits on smaller screens.
 
@@ -102,7 +106,8 @@ When you paint, the brush defines **where** and **how strongly** an effect is ap
 
 Brushes live in the right-hand sidebar. You can have as many open as you like; each is an independent set of steps, effects, modulators, and macros.
 
-- **Coloured dots** on each row show which effects that brush uses, so you can tell what a brush does at a glance.
+- A **colour bar** down the left edge identifies each brush; the same colour marks it wherever it is referenced.
+- **Hover** a row to see what is in it: each step's effects, in order.
 - **Click** a row to make it active. **Double-click** the name to rename.
 - The **⋮ menu** offers Rename, Duplicate, Save, Save as…, Load referenced files, Assign key…, Remove key, and Close.
 - **Drag** rows to reorder them.
@@ -379,6 +384,60 @@ Beyond the three modulators and four macros, every modulatable parameter can als
 Modulator parameters are themselves modulatable — you can modulate modulator 2's rate with modulator 1, or drive a modulator's depth from a macro. One level of nesting is supported.
 
 > Nested modulation is disabled on Windows, where the unrolled shader loops it produces make compile times unusable.
+
+---
+
+## Generate
+
+**Generate** sits above the transport. It paints the whole file in one pass: a pattern says when each stamp lands, how long it is, and which brush makes it.
+
+Editing the pattern repaints a **preview** on the canvas — nothing is committed, nothing is resynthesized, and painting by hand clears it. **Apply** (or `Cmd/Ctrl+Enter` in the editor) commits exactly what you are looking at: one stroke, one history step, one resynthesis.
+
+### Writing Patterns
+
+Patterns are written in [Strudel](https://strudel.cc)'s mini-notation. A quoted string is a bar, split evenly between whatever is inside it:
+
+| Pattern     | What it does                                |
+| ----------- | ------------------------------------------- |
+| `"x"`       | one stamp filling the bar                   |
+| `"x x x x"` | four stamps, a beat each                    |
+| `"x*8"`     | eight stamps, half a beat each              |
+| `"x ~ x ~"` | two stamps with rests between them          |
+| `"x [x x]"` | one long stamp, then two short ones         |
+| `"x@3 x"`   | a stamp three times the length of the next  |
+| `"x(3,8)"`  | three stamps spread evenly over eight slots |
+| `"<x ~>"`   | a stamp on every other bar                  |
+| `"x*8?"`    | eighths with half of them dropped at random |
+
+One bar is four beats of the file, so the pattern repeats until the file runs out. **Each event's length becomes the brush's time size**, which is what makes `"x@3 x"` paint a wide stamp followed by a narrow one.
+
+The box also accepts JavaScript over those patterns, so the strudel transforms are available:
+
+```js
+mini("x [x x] x x").rev();
+mini("x*8").every(4, (p) => p.rev());
+stack("x*4", "[~ x]*2");
+s("x*4").n("0 12 7 -5");
+```
+
+`n(...)` shifts a stamp's pitch in semitones from where the cursor last was, so `s("x*4").n("0 12")` alternates between the cursor's pitch and an octave up.
+
+### Choosing Brushes from a Pattern
+
+Each event names the brush that paints it:
+
+- **A digit** — the brush in that slot, counting `1`–`9` then `0`, matching the number shown on each brush in the list.
+- **A letter** — the brush with that hotkey.
+- **A word** — the brush with that name.
+- **Anything else** — the active brush.
+
+So `"1 2 1 3"` alternates between the first three brushes, and `"x*8"` uses whatever brush is selected. Tokens that name a brush are underlined in that brush's colour as you type; a dashed underline means the token matched nothing and the active brush will be used.
+
+### Presets and the Dice
+
+The dropdown holds a set of starting points — Fill, Offbeat, Euclid, Build, Stutter, Sparse, Reverse, Every 4th, Echo, Widening. They all use the token `x`, so they run with whichever brush you have selected.
+
+The **dice** re-rolls the random parts of a pattern (`?`, `degradeBy`) and previews the new variation. Since previews replace each other, you can keep rolling until you find one worth applying.
 
 ---
 
