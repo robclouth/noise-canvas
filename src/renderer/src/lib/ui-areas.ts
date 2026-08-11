@@ -26,6 +26,13 @@ export type UiArea = {
   blurb: string;
   /** Heading id in docs/manual.md — verified by the drift check. */
   manualSection: string;
+  /**
+   * A layout column that only wraps other areas. The `?` overlay skips these:
+   * pointing at one always means one of its children, so offering the column
+   * as well is a second answer to a question that only has one. The
+   * walkthrough and the screenshot script still address them by name.
+   */
+  container?: boolean;
   /** Present only where an area teaches something a tooltip can't. */
   deepTour?: AreaTourStep[];
   /** Recipe ids in docs/recipes.md, surfaced from the overlay. */
@@ -37,11 +44,13 @@ export const UI_AREAS = {
     title: "Brush panel",
     blurb: "Everything that defines the current brush, top to bottom.",
     manualSection: "brushes",
+    container: true,
   },
   sidebar: {
     title: "Sidebar",
     blurb: "Your brush list on top, the history tree below.",
     manualSection: "the-interface",
+    container: true,
   },
   transport: {
     title: "Transport",

@@ -22,8 +22,7 @@ type Outline = { name: UiAreaName; rect: DOMRect };
  * It never coexists with a tour: opening one closes this first.
  */
 const OVERLAY_Z = 10003;
-/** The UI is already dark, so it takes a heavy scrim to read as switched off. */
-const DIM = "rgba(0, 0, 0, 0.78)";
+const DIM = "rgba(0, 0, 0, 0.6)";
 const EASE = "top 120ms ease, left 120ms ease, width 120ms ease, height 120ms ease";
 
 const POPOVER_WIDTH = 280;
@@ -46,6 +45,9 @@ function recipeTitle(id: string): string {
 function measure(): Outline[] {
   const outlines: Outline[] = [];
   for (const name of UI_AREA_NAMES) {
+    // Layout columns are skipped: pointing at one always means one of the
+    // sections inside it, so offering the column too is noise.
+    if (getArea(name).container) continue;
     const element = document.querySelector(anchorSelector(name));
     if (!element) continue;
     const rect = element.getBoundingClientRect();

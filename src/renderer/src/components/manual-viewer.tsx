@@ -1,9 +1,8 @@
-import { Box, Modal, ScrollArea, TextInput } from "@mantine/core";
+import { Box, Divider, Modal, ScrollArea, Text, TextInput, UnstyledButton } from "@mantine/core";
 import { host } from "@renderer/lib/host";
 import { ipcOn } from "@renderer/lib/ipc";
 import { parseMarkdown, renderBlocks } from "@renderer/lib/markdown";
 import { useStore } from "@renderer/store";
-import { Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import manualSource from "../../../../docs/manual.md?raw";
@@ -13,6 +12,11 @@ import manualSource from "../../../../docs/manual.md?raw";
  * inside the JS bundle rather than as a loose resource, so help is offline,
  * always describes this binary, and can't go missing from the package.
  */
+
+/** Above the transport and the app's own modals, which both sit at 1000. */
+const MANUAL_Z = 10004;
+const NAV_WIDTH = 210;
+const HEIGHT = "86vh";
 
 /** Filters to the sections whose heading or body mentions the query. */
 function filterSource(source: string, query: string): string {
@@ -39,11 +43,25 @@ export function ManualViewer(): React.JSX.Element {
   const closeManual = useStore((state) => state.closeManual);
   const openManual = useStore((state) => state.openManual);
   const [query, setQuery] = useState("");
+  const [activeId, setActiveId] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
 
   const opened = section !== null;
 
   const blocks = useMemo(() => parseMarkdown(filterSource(manualSource, query)), [query]);
+
+  /** The contents tree: top-level sections with their subsections nested. */
+  const contents = useMemo(
+    () =>
+      blocks
+        .filter((block) => block.kind === "heading" && block.level >= 2 && block.level <= 3)
+        .map((block) => (block.kind === "heading" ? { id: block.id, text: block.text, level: block.level } : null))
+        .filter((entry): entry is { id: string; text: string; level: number } => entry !== null)
+        // The manual's own Contents section duplicates this nav.
+        .filter((entry) => entry.id !== "contents"),
+    [blocks],
+  );
 
   const handleLink = useCallback(
     (href: string) => {
@@ -71,7 +89,10 @@ export function ManualViewer(): React.JSX.Element {
     const scroll = () => {
       if (cancelled) return;
       const target = bodyRef.current?.querySelector(`#${CSS.escape(section)}`);
-      if (target) target.scrollIntoView({ block: "start" });
+      if (target) {
+        target.scrollIntoView({ block: "start" });
+        setActiveId(section);
+      }
     };
     const frame = requestAnimationFrame(() => requestAnimationFrame(scroll));
     return () => {
@@ -86,28 +107,86 @@ export function ManualViewer(): React.JSX.Element {
 
   // Help → Manual, and the same accelerator from the menu.
   useEffect(() => {
-    return ipcOn("open-manual", (section) => openManual(typeof section === "string" ? section : undefined));
+    return ipcOn("open-manual", (target) => openManual(typeof target === "string" ? target : undefined));
   }, [openManual]);
+
+  /** Marks the last heading scrolled past, so the nav tracks where you are. */
+  const trackPosition = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const headings = bodyRef.current?.querySelectorAll<HTMLElement>("h1, h2, h3, h4");
+    if (!headings) return;
+    const top = viewport.getBoundingClientRect().top;
+    let current: string | null = null;
+    for (const heading of headings) {
+      if (heading.getBoundingClientRect().top - top > 24) break;
+      if (heading.id) current = heading.id;
+    }
+    setActiveId(current);
+  }, []);
 
   return (
     <Modal
       opened={opened}
       onClose={closeManual}
       title="Manual"
-      size="xl"
-      scrollAreaComponent={ScrollArea.Autosize}
-      styles={{ body: { paddingTop: 0 } }}
+      size="90%"
+      zIndex={MANUAL_Z}
+      styles={{
+        content: { height: HEIGHT },
+        body: { height: `calc(${HEIGHT} - 54px)`, padding: 0, display: "flex" },
+      }}
     >
-      <Box pos="sticky" top={0} bg="var(--mantine-color-body)" pt={4} pb="sm" style={{ zIndex: 1 }}>
+      <Box w={NAV_WIDTH} style={{ flexShrink: 0, display: "flex", flexDirection: "column" }} pl="md" pb="md">
         <TextInput
           placeholder="Search the manual…"
-          leftSection={<Search size={14} />}
           value={query}
           onChange={(event) => setQuery(event.currentTarget.value)}
           size="xs"
+          mb="xs"
         />
+        <ScrollArea scrollbarSize={4} type="auto" style={{ flex: 1, minHeight: 0 }}>
+          {contents.map((entry) => (
+            <UnstyledButton
+              key={entry.id}
+              w="100%"
+              px={entry.level === 3 ? "md" : "xs"}
+              py={2}
+              onClick={() => openManual(entry.id)}
+            >
+              <Text
+                size="xs"
+                fw={entry.level === 2 ? 600 : 400}
+                c={activeId === entry.id ? "orange.4" : entry.level === 2 ? "gray.3" : "dimmed"}
+                truncate
+              >
+                {entry.text}
+              </Text>
+            </UnstyledButton>
+          ))}
+          {contents.length === 0 && (
+            <Text size="xs" c="dimmed" px="xs">
+              Nothing matches “{query}”.
+            </Text>
+          )}
+        </ScrollArea>
       </Box>
-      <Box ref={bodyRef}>{content}</Box>
+
+      <Divider orientation="vertical" />
+
+      <ScrollArea
+        viewportRef={viewportRef}
+        onScrollPositionChange={trackPosition}
+        scrollbarSize={6}
+        type="auto"
+        style={{ flex: 1, minWidth: 0 }}
+        px="lg"
+        pb="md"
+      >
+        <Box ref={bodyRef} maw={780}>
+          {content}
+        </Box>
+      </ScrollArea>
     </Modal>
   );
 }
