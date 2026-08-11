@@ -1,4 +1,4 @@
-import { BEATS_PER_CYCLE, evaluatePattern, queryStamps } from "@renderer/lib/generate/pattern-engine";
+import { BEATS_PER_CYCLE, CUSTOM_CONTROLS, evaluatePattern, queryStamps } from "@renderer/lib/generate/pattern-engine";
 import { GENERATE_PRESETS } from "@renderer/lib/generate/presets";
 import { resolveBrushToken } from "@renderer/lib/generate/resolve-brush";
 import type { Brush } from "@renderer/store/types";
@@ -40,6 +40,40 @@ describe("evaluatePattern", () => {
     const stamps = stampsFor('s("a b").n("0 7")');
     expect(stamps.map((stamp) => stamp.brushToken)).toEqual(["a", "b"]);
     expect(stamps.map((stamp) => stamp.semis)).toEqual([0, 7]);
+  });
+
+  it("reads strength, pan, size and macros from controls", () => {
+    const [first, second] = stampsFor('s("x*2").gain("1 0.25").pan("0 1").height("12 36").width("2 0.5")');
+    expect(first.gain).toBe(1);
+    expect(second.gain).toBe(0.25);
+    // Strudel pans 0–1; the app's pan is centred on zero.
+    expect(first.pan).toBe(-1);
+    expect(second.pan).toBe(1);
+    expect(first.heightSemis).toBe(12);
+    expect(second.heightSemis).toBe(36);
+    expect(first.widthBeats).toBe(2);
+    expect(second.widthBeats).toBe(0.5);
+  });
+
+  it("reads macros only when the pattern sets them", () => {
+    const [withMacros] = stampsFor('s("x").m1("0.2").m3("0.9")');
+    expect(withMacros.macros).toEqual([0.2, undefined, 0.9, undefined]);
+    expect(stampsFor('"x"')[0].macros).toBeUndefined();
+  });
+
+  it("reads absolute pitch from note names and numbers", () => {
+    const named = stampsFor('s("x*2").note("c4 a4")');
+    expect(named[0].noteMidi).toBe(60);
+    expect(named[1].noteMidi).toBe(69);
+    expect(stampsFor('s("x").note("60")')[0].noteMidi).toBe(60);
+    expect(stampsFor('"x"')[0].noteMidi).toBeUndefined();
+  });
+
+  it("registers every custom control as a pattern method", () => {
+    for (const control of CUSTOM_CONTROLS) {
+      expect(() => evaluatePattern(`s("x").${control}("1")`), `${control} is not callable`).not.toThrow();
+      expect(() => evaluatePattern(`${control}("1")`), `${control} is missing from the scope`).not.toThrow();
+    }
   });
 
   it("rejects empty and non-pattern code", () => {

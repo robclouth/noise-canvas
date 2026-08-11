@@ -89,6 +89,47 @@ describe("buildStampState", () => {
     );
   });
 
+  it("scales the brush's own strength by gain", () => {
+    useStore.getState().setStepParameter("brushIntensity", 80);
+    const withIntensity = useStore.getState();
+    const brushIndex = withIntensity.activeBrushIndex;
+
+    const half = buildStampState(withIntensity, stamp({ brushIndex, gain: 0.5 }));
+    expect(stepValue(half, brushIndex, withIntensity.activeStepIndex, "brushIntensity")).toBe(40);
+
+    const loud = buildStampState(withIntensity, stamp({ brushIndex, gain: 4 }));
+    expect(stepValue(loud, brushIndex, withIntensity.activeStepIndex, "brushIntensity")).toBe(100);
+
+    const untouched = buildStampState(withIntensity, stamp({ brushIndex }));
+    expect(stepValue(untouched, brushIndex, withIntensity.activeStepIndex, "brushIntensity")).toBe(80);
+  });
+
+  it("writes pan and pitch size onto every step", () => {
+    const next = buildStampState(base, stamp({ pan: -0.5, heightSemis: 24 }));
+    for (let i = 0; i < next.brushes[0].steps.length; i++) {
+      expect(stepValue(next, 0, i, "brushPan")).toBe(-50);
+      expect(stepValue(next, 0, i, "brushSizePitch")).toBe(24);
+    }
+    // Nothing set means the brush keeps its own.
+    const plain = buildStampState(base, stamp());
+    expect(stepValue(plain, 0, 0, "brushSizePitch")).toBe(base.brushes[0].steps[0].brushSizePitch);
+  });
+
+  it("lets an explicit width override the event length", () => {
+    const next = buildStampState(base, stamp({ durationBeats: 0.5, widthBeats: 8 }));
+    expect(stepValue(next, 0, 0, "brushSizeTime")).toBe(8);
+  });
+
+  it("sets only the macros the pattern named", () => {
+    const originals = base.brushes[0].macroValues;
+    const next = buildStampState(base, stamp({ macros: [0.25, undefined, 1, undefined] }));
+    expect(next.brushes[0].macroValues[0]).toBe(25);
+    expect(next.brushes[0].macroValues[1]).toBe(originals[1]);
+    expect(next.brushes[0].macroValues[2]).toBe(100);
+    expect(next.brushes[0].macroValues[3]).toBe(originals[3]);
+    expect(base.brushes[0].macroValues).toEqual(originals);
+  });
+
   it("returns the base state when the brush index is out of range", () => {
     expect(buildStampState(base, stamp({ brushIndex: 99 }))).toBe(base);
   });

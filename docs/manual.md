@@ -28,6 +28,8 @@ All the parameters in the app have tooltips, and how to use a tool should be mos
    - [Nested Modulation](#nested-modulation)
 6. [Generate](#generate)
    - [Writing Patterns](#writing-patterns)
+   - [Where in the Spectrum](#where-in-the-spectrum)
+   - [Strength, Pan and Macros](#strength-pan-and-macros)
    - [Choosing Brushes from a Pattern](#choosing-brushes-from-a-pattern)
    - [Presets and the Dice](#presets-and-the-dice)
 7. [Parameter Controls](#parameter-controls)
@@ -417,10 +419,59 @@ The box also accepts JavaScript over those patterns, so the strudel transforms a
 mini("x [x x] x x").rev();
 mini("x*8").every(4, (p) => p.rev());
 stack("x*4", "[~ x]*2");
-s("x*4").n("0 12 7 -5");
 ```
 
-`n(...)` shifts a stamp's pitch in semitones from where the cursor last was, so `s("x*4").n("0 12")` alternates between the cursor's pitch and an octave up.
+Wrapping a pattern in `s(...)` turns each event into a value the controls below can attach to — that is why the examples that set strength or pitch start with `s("x*4")` rather than a bare string.
+
+### Where in the Spectrum
+
+By default a stamp lands at the last cursor position, or halfway up if there hasn't been one. Three controls place it deliberately.
+
+**`zone` — the spectrum in slices.** This is the quick one: it cuts the whole frequency range into equal slices and stamps one of them, sizing the brush to fit. Slice 0 is the lowest.
+
+```js
+s("x*4").zone("0 1 2 3"); // in quarters, climbing
+s("x*3").zone("0 1 2"); // in thirds
+s("x*8").zone("0 2 1 3"); // in quarters, out of order
+```
+
+You don't have to say how many slices there are — the pattern's highest slice number sets it, so `zone("0 1 2")` means thirds. Say it outright with `zones` when the pattern doesn't reach the top slice, or when it should change:
+
+```js
+s("x*2").zone("0 7").zones(8); // just the extremes of eight
+s("x*8").zone(irand(16)).zones(16); // a random sixteenth each time
+s("x*4").zone("0").zones(1); // the whole range
+```
+
+Slice numbers past the top wrap around to the bottom, so a climbing pattern keeps climbing.
+
+**`note` — an absolute pitch.** Takes note names or MIDI numbers, and puts the brush's lower edge there.
+
+```js
+stack(s("x*2").note("c3"), s("x*2").note("g3"), s("x*2").note("c4"));
+```
+
+**`n` — a pitch offset**, in semitones from wherever the stamp would otherwise land. It stacks on top of `zone` and `note`, so `s("x*4").zone("0 1").n("0 3")` nudges within each slice.
+
+**`height`** sets the brush's pitch size in semitones outright, overriding whatever `zone` worked out.
+
+### Strength, Pan and Macros
+
+| Control   | What it does                                                                             |
+| --------- | ---------------------------------------------------------------------------------------- |
+| `gain`    | Scales the brush's strength. `1` leaves it alone, `0.5` halves it, and it stops at full. |
+| `pan`     | Stereo position, `0` left to `1` right, as in Strudel.                                   |
+| `width`   | Brush time size in beats, overriding the event's own length.                             |
+| `height`  | Brush pitch size in semitones.                                                           |
+| `m1`–`m4` | The brush's four macros, `0` to `1`. Macros you don't name keep their own value.         |
+
+```js
+s("x*8").gain(saw.segment(8)); // a swell across each bar
+s("x*16").m1(sine.segment(16)); // macro 1 swept across the file
+s("x*4").gain("1 0.3").pan("0 1"); // loud left, quiet right
+```
+
+Any signal works as a control value — `saw`, `sine`, `tri`, `perlin`, `rand`, `irand(n)` — segmented to the number of steps you want.
 
 ### Choosing Brushes from a Pattern
 
@@ -435,7 +486,11 @@ So `"1 2 1 3"` alternates between the first three brushes, and `"x*8"` uses what
 
 ### Presets and the Dice
 
-The dropdown holds a set of starting points — Fill, Offbeat, Euclid, Build, Stutter, Sparse, Reverse, Every 4th, Echo, Widening. They all use the token `x`, so they run with whichever brush you have selected.
+The dropdown holds a set of starting points, from plain rhythms through to spectrum splits and swept macros:
+
+> Fill · Offbeat · Euclid · Build · Stutter · Sparse · Reverse · Every 4th · Echo · Widening · Swell · Climb · Chord · Bands · Quarters · Thirds up · Split ends · Scatter · Macro sweep
+
+They all use the token `x`, so they run with whichever brush you have selected.
 
 The **dice** re-rolls the random parts of a pattern (`?`, `degradeBy`) and previews the new variation. Since previews replace each other, you can keep rolling until you find one worth applying.
 

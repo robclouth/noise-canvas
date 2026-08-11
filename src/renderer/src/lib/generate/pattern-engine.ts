@@ -1,9 +1,14 @@
 import {
   cat,
+  createParams,
   fastcat,
+  gain,
   irand,
   isaw,
   n,
+  note,
+  noteToMidi,
+  pan,
   perlin,
   polymeter,
   polyrhythm,
@@ -35,6 +40,12 @@ export const MAX_STAMPS = 1024;
 /** Cycles between the query windows of consecutive seeds. */
 const SEED_WINDOW_CYCLES = 1024;
 
+/** Number of macros a brush carries. */
+export const MACRO_COUNT = 4;
+
+/** Controls the app registers with strudel on top of the built-in ones. */
+export const CUSTOM_CONTROLS = ["width", "height", "zone", "zones", "m1", "m2", "m3", "m4"] as const;
+
 export interface StampEvent {
   /** Onset in beats from the start of the file. */
   beats: number;
@@ -42,15 +53,33 @@ export interface StampEvent {
   durationBeats: number;
   /** Raw token naming the brush ("1", "b", "kick"); "" when the event carries none. */
   brushToken: string;
-  /** Semitone offset from the base pitch, from the event's `n` value. */
+  /** Semitone offset from the base pitch, from `n`. */
   semis: number;
+  /** Absolute pitch as a MIDI note number, from `note`. */
+  noteMidi?: number;
+  /** Multiplier on the brush's strength, from `gain`. */
+  gain?: number;
+  /** Stereo position from -1 (left) to 1 (right), from `pan`. */
+  pan?: number;
+  /** Brush time size in beats, from `width`; overrides the event's length. */
+  widthBeats?: number;
+  /** Brush pitch size in semitones, from `height`. */
+  heightSemis?: number;
+  /** Which slice of the spectrum to stamp, counting up from the lowest, from `zone`. */
+  zoneIndex?: number;
+  /** How many slices the spectrum is cut into, from `zones`. */
+  zoneCount?: number;
+  /** Macro values 0–1 from `m1`–`m4`; undefined entries keep the brush's own. */
+  macros?: (number | undefined)[];
 }
 
 let stringParserInstalled = false;
+let customControls: Record<string, (value: unknown) => Pattern> = {};
 
 function ensureInit(): void {
   if (stringParserInstalled) return;
   miniAllStrings();
+  customControls = createParams(...CUSTOM_CONTROLS);
   stringParserInstalled = true;
 }
 
@@ -72,6 +101,9 @@ function buildScope(): Record<string, unknown> {
     irand,
     n,
     s,
+    note,
+    gain,
+    pan,
     silence,
     rand,
     perlin,
@@ -80,6 +112,7 @@ function buildScope(): Record<string, unknown> {
     sine,
     square,
     tri,
+    ...customControls,
   };
 }
 
@@ -115,20 +148,56 @@ export function evaluatePattern(code: string): Pattern {
   throw new Error("Pattern expected");
 }
 
-function readValue(value: unknown): { brushToken: string; semis: number } {
+function readNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** Note names and MIDI numbers both name an absolute pitch. */
+function readNote(value: unknown): number | undefined {
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== "string") return undefined;
+  try {
+    const midi = noteToMidi(value);
+    return Number.isFinite(midi) ? midi : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readMacros(record: Record<string, unknown>): (number | undefined)[] | undefined {
+  let found = false;
+  const macros: (number | undefined)[] = [];
+  for (let i = 0; i < MACRO_COUNT; i++) {
+    const value = readNumber(record[`m${i + 1}`]);
+    macros.push(value);
+    if (value !== undefined) found = true;
+  }
+  return found ? macros : undefined;
+}
+
+function readValue(value: unknown): Omit<StampEvent, "beats" | "durationBeats"> {
   if (typeof value === "string" || typeof value === "number") {
     return { brushToken: String(value), semis: 0 };
   }
-  if (typeof value === "object" && value !== null) {
-    const record = value as Record<string, unknown>;
-    const token = record.s;
-    const offset = record.n;
-    return {
-      brushToken: typeof token === "string" || typeof token === "number" ? String(token) : "",
-      semis: typeof offset === "number" ? offset : 0,
-    };
+  if (typeof value !== "object" || value === null) {
+    return { brushToken: "", semis: 0 };
   }
-  return { brushToken: "", semis: 0 };
+
+  const record = value as Record<string, unknown>;
+  const token = record.s;
+  return {
+    brushToken: typeof token === "string" || typeof token === "number" ? String(token) : "",
+    semis: readNumber(record.n) ?? 0,
+    noteMidi: readNote(record.note),
+    gain: readNumber(record.gain),
+    // Strudel pans 0 (left) to 1 (right); the app's pan is centred on zero.
+    pan: record.pan === undefined ? undefined : (readNumber(record.pan) ?? 0.5) * 2 - 1,
+    widthBeats: readNumber(record.width),
+    heightSemis: readNumber(record.height),
+    zoneIndex: readNumber(record.zone),
+    zoneCount: readNumber(record.zones),
+    macros: readMacros(record),
+  };
 }
 
 function toStamp(hap: Hap, offsetCycles: number): StampEvent | null {
@@ -136,12 +205,10 @@ function toStamp(hap: Hap, offsetCycles: number): StampEvent | null {
   if (!whole) return null;
   const begin = whole.begin.valueOf() - offsetCycles;
   const end = whole.end.valueOf() - offsetCycles;
-  const { brushToken, semis } = readValue(hap.value);
   return {
+    ...readValue(hap.value),
     beats: begin * BEATS_PER_CYCLE,
     durationBeats: (end - begin) * BEATS_PER_CYCLE,
-    brushToken,
-    semis,
   };
 }
 

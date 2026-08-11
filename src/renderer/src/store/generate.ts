@@ -1,10 +1,12 @@
 import type { StampDispatch } from "@renderer/components/file-renderer";
 import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
+import { zoneSlice, inferZoneCount } from "@renderer/lib/generate/zones";
 import { BEATS_PER_CYCLE, evaluatePattern, queryStamps } from "@renderer/lib/generate/pattern-engine";
 import { GENERATE_PRESETS } from "@renderer/lib/generate/presets";
 import { resolveBrushToken } from "@renderer/lib/generate/resolve-brush";
 import { buildStampState, type ResolvedStamp } from "@renderer/lib/generate/stamp-state";
-import { positionToUv } from "./brush";
+import { freqToMidi } from "@renderer/lib/pitch-utils";
+import { unitsToUv } from "@renderer/lib/utils";
 import { openFiles } from "./files";
 import { useTransientStore } from "./transient";
 import type { State, ZustandGet, ZustandSet } from "./types";
@@ -72,19 +74,39 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
 
     const events = queryStamps(evaluatePattern(state.generateCode), cycles, state.generateSeed);
 
+    // `note` names an absolute pitch; the app measures pitch in semitones above
+    // the file's lowest band.
+    const lowestMidi = freqToMidi(spectrogramData.minFreq);
+    const spectrumSemis = spectrogramData.numBands / bandsPerSemitone;
+    const defaultZoneCount = inferZoneCount(events);
+
     const dispatches: StampDispatch[] = [];
     for (const event of events) {
       if (event.beats >= fileBeats) continue;
 
+      const slice =
+        event.zoneIndex !== undefined
+          ? zoneSlice(event.zoneIndex, event.zoneCount ?? defaultZoneCount, spectrumSemis)
+          : null;
+      const anchorPitch = slice
+        ? slice.anchorSemis
+        : event.noteMidi !== undefined
+          ? event.noteMidi - lowestMidi
+          : basePitch;
+
       const resolved: ResolvedStamp = {
         ...event,
         brushIndex: resolveBrushToken(event.brushToken, state.brushes) ?? state.activeBrushIndex,
-        pitchSemis: basePitch + event.semis,
+        pitchSemis: anchorPitch + event.semis,
+        sliceSemis: slice?.heightSemis,
       };
       const stampState = buildStampState(state, resolved);
 
-      const { uvX, uvY } = positionToUv(
-        { beats: resolved.beats, pitch: resolved.pitchSemis },
+      // The renderer places a brush from unitsToUv, the same conversion the
+      // frame loop uses for the cursor.
+      const aim = unitsToUv(
+        resolved.beats,
+        resolved.pitchSemis,
         bpm,
         totalDuration,
         spectrogramData.bandsPerOctave,
@@ -93,8 +115,8 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
       // Anchor conversion reads the stamp's own brush size and anchor mode.
       const { blX, blY } = aimUvToBrushBlUv(
         stampState,
-        uvX,
-        uvY,
+        aim.x,
+        aim.y,
         bpm,
         totalDuration,
         spectrogramData.bandsPerOctave,

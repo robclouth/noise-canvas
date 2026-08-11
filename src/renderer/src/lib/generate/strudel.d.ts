@@ -49,6 +49,21 @@ declare module "@strudel/core" {
     n(value: unknown): Pattern;
     /** Sets the `s` field of each event's value (used here as the brush token). */
     s(value: unknown): Pattern;
+    note(value: unknown): Pattern;
+    gain(value: unknown): Pattern;
+    pan(value: unknown): Pattern;
+    /** Registered by createParams(); brush pitch size in semitones. */
+    height(value: unknown): Pattern;
+    /** Registered by createParams(); brush time size in beats. */
+    width(value: unknown): Pattern;
+    /** Registered by createParams(); which slice of the spectrum to stamp. */
+    zone(value: unknown): Pattern;
+    /** Registered by createParams(); how many slices the spectrum is cut into. */
+    zones(value: unknown): Pattern;
+    m1(value: unknown): Pattern;
+    m2(value: unknown): Pattern;
+    m3(value: unknown): Pattern;
+    m4(value: unknown): Pattern;
   }
 
   export function isPattern(value: unknown): boolean | undefined;
@@ -66,6 +81,13 @@ declare module "@strudel/core" {
   export function irand(n: unknown): Pattern;
   export function n(value: unknown): Pattern;
   export function s(value: unknown): Pattern;
+  export function note(value: unknown): Pattern;
+  export function gain(value: unknown): Pattern;
+  export function pan(value: unknown): Pattern;
+  /** Registers controls by name, returning them and adding them as Pattern methods. */
+  export function createParams(...names: string[]): Record<string, (value: unknown) => Pattern>;
+  /** Parses a note name ("c4", "a#3") into a MIDI note number. */
+  export function noteToMidi(note: string): number;
   export const silence: Pattern;
   export const rand: Pattern;
   export const perlin: Pattern;

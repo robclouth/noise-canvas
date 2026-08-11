@@ -84,7 +84,7 @@ export interface BrushState {
 }
 
 // Helper to convert position to UV coordinates
-export function positionToUv(
+function positionToUv(
   position: StrokePosition,
   bpm: number,
   totalDuration: number,
