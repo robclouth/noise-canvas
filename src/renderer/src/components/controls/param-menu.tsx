@@ -14,8 +14,9 @@ import {
   getMacroAmountParamKeys,
   getModAmountParamKeys,
 } from "@renderer/store/modulators";
+import { manualSectionForParameter } from "@renderer/lib/ui-areas";
 import { ParameterKey } from "@renderer/store/types";
-import { Link2, Pencil, RotateCcw } from "lucide-react";
+import { BookOpen, Link2, Pencil, RotateCcw } from "lucide-react";
 import React, { useState } from "react";
 import { useShallow } from "zustand/shallow";
 
@@ -91,6 +92,9 @@ export const ParamMenu = ({
   const contextualOnly = parameter.kind === "number" && parameter.modulationSourcesAllowed === "contextualOnly";
   const macroIndex = getMacroValueIndex(paramKey);
   const isMacro = macroIndex !== null;
+
+  const manualSection = manualSectionForParameter(paramKey, parameter.effectType);
+  const openManual = useStore((state) => state.openManual);
 
   const excludedFromRandomization = useStore((state) => state.excludedFromRandomization);
   const linkedParams = useStore(
@@ -212,6 +216,22 @@ export const ParamMenu = ({
                   }}
                 >
                   <Pencil size={14} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            {manualSection && (
+              <Tooltip label="Read about this in the manual">
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpened(false);
+                    openManual(manualSection);
+                  }}
+                >
+                  <BookOpen size={14} />
                 </ActionIcon>
               </Tooltip>
             )}

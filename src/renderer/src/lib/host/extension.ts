@@ -150,5 +150,12 @@ export const host: Host = {
   files: {
     getPathForFile: () => pending("files.getPathForFile"),
   },
+  // The extension runs in a browser context inside Live, where a new window is
+  // the only way out to the system browser.
+  shell: {
+    openExternal: (url) => {
+      window.open(url, "_blank", "noopener,noreferrer");
+    },
+  },
   events: createExtensionEvents(),
 };

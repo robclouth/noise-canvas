@@ -215,24 +215,41 @@ export function createMenu(window: BrowserWindow, state: MenuState) {
     });
   }
 
-  // Add Help menu for non-macOS platforms
+  // Help carries the walkthrough on every platform. Check for Updates lives in
+  // the app menu on macOS, so it is only added here off macOS.
+  const helpSubmenu: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: "Manual",
+      accelerator: "CmdOrCtrl+/",
+      click: () => {
+        webContentsSend(window, "open-manual");
+      },
+    },
+    {
+      label: "Run Walkthrough",
+      click: () => {
+        webContentsSend(window, "run-walkthrough");
+      },
+    },
+  ];
+
   if (process.platform !== "darwin") {
-    template.push({
-      label: "Help",
-      submenu: [
-        {
-          label: "Check for Updates...",
-          click: async () => {
-            try {
-              await autoUpdater.checkForUpdates();
-            } catch (error) {
-              console.error("Failed to check for updates:", error);
-            }
-          },
+    helpSubmenu.push(
+      { type: "separator" },
+      {
+        label: "Check for Updates...",
+        click: async () => {
+          try {
+            await autoUpdater.checkForUpdates();
+          } catch (error) {
+            console.error("Failed to check for updates:", error);
+          }
         },
-      ],
-    });
+      },
+    );
   }
+
+  template.push({ label: "Help", submenu: helpSubmenu });
 
   const mainMenu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(mainMenu);

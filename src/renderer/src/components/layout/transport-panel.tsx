@@ -1,5 +1,6 @@
 import { useStore } from "@/store";
 import { ActionIcon, Box, Divider, Group, Popover, Stack, Text } from "@mantine/core";
+import { anchorProps } from "@renderer/lib/ui-anchors";
 import {
   TRANSPORT_GAP,
   TRANSPORT_LABEL_WIDTH,
@@ -7,7 +8,7 @@ import {
   TRANSPORT_TIME_WIDTH,
   useUiSize,
 } from "@renderer/lib/ui-density";
-import { Brush, Link2, Play, Repeat, Square } from "lucide-react";
+import { Brush, CircleHelp, Link2, Play, Repeat, Square } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { ParameterControl } from "../controls/parameter-control";
 import { Tooltip } from "../tooltip";
@@ -78,6 +79,7 @@ export const TransportPanel = memo(() => {
       bg="dark.7"
       wrap="nowrap"
       style={{ zIndex: 1000 }}
+      {...anchorProps("transport")}
     >
       <Group gap="xs" wrap="nowrap">
         <Popover
@@ -170,6 +172,20 @@ export const TransportPanel = memo(() => {
       </Box>
 
       <ParameterControl paramKey="limiterEnabled" displayLabel="Limiter" />
+
+      <Divider orientation="vertical" color="dark.5" />
+
+      {/* The transport is the one bar that is always visible, whatever is open. */}
+      <Tooltip label="What is all this? — outlines every area (?)">
+        <ActionIcon
+          onClick={() => useStore.getState().setHelpOverlayOpen(true)}
+          size={uiSize}
+          variant="subtle"
+          color="dark.2"
+        >
+          <CircleHelp size={18} />
+        </ActionIcon>
+      </Tooltip>
     </Group>
   );
 });

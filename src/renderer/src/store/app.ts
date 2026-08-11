@@ -13,12 +13,27 @@ export type UiSize = "md" | "sm";
 const envUiSize = import.meta.env.VITE_DEFAULT_UI_SIZE;
 export const DEFAULT_UI_SIZE: UiSize = envUiSize === "sm" || envUiSize === "md" ? envUiSize : "md";
 
-export const APP_PERSISTED_KEYS = ["uiSize"] as const;
+export const APP_PERSISTED_KEYS = ["uiSize", "walkthroughSeen"] as const;
 
 export interface AppState {
   uiSize: UiSize;
   setUiSize: (uiSize: UiSize) => void;
   toggleUiSize: () => void;
+
+  // Set once the first-run walkthrough has been offered, so it is only ever
+  // proposed unprompted on a genuinely fresh install.
+  walkthroughSeen: boolean;
+  setWalkthroughSeen: (seen: boolean) => void;
+
+  // The manual heading the viewer is open at, or null when it is closed.
+  // Opening at a section is how every deep link into the manual works.
+  manualSection: string | null;
+  openManual: (section?: string) => void;
+  closeManual: () => void;
+
+  // True while the discoverability overlay is outlining every area at once.
+  helpOverlayOpen: boolean;
+  setHelpOverlayOpen: (open: boolean) => void;
 
   displayMinDb: number;
   displayMaxDb: number;
@@ -48,6 +63,14 @@ export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
     uiSize: DEFAULT_UI_SIZE,
     setUiSize: (uiSize) => set({ uiSize }),
     toggleUiSize: () => set((state) => ({ uiSize: state.uiSize === "md" ? "sm" : "md" })),
+    walkthroughSeen: false,
+    setWalkthroughSeen: (walkthroughSeen) => set({ walkthroughSeen }),
+    manualSection: null,
+    // An empty section still opens the viewer; it just lands at the top.
+    openManual: (section) => set({ manualSection: section ?? "", helpOverlayOpen: false }),
+    closeManual: () => set({ manualSection: null }),
+    helpOverlayOpen: false,
+    setHelpOverlayOpen: (helpOverlayOpen) => set({ helpOverlayOpen }),
     displayMinDb: getParameterDef("displayMinDb").default,
     displayMaxDb: getParameterDef("displayMaxDb").default,
     magnitudeLimit: getParameterDef("magnitudeLimit").default,

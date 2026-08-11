@@ -86,6 +86,8 @@ export interface IpcRendererEvents {
   "download-progress": (progressInfo: any) => void;
   "update-error": (message: string) => void;
   "app-will-quit": () => void;
+  "run-walkthrough": () => void;
+  "open-manual": (section?: string) => void;
   "clear-recent-files": () => void;
   "toggle-ui-size": () => void;
 }

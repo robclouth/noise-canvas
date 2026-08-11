@@ -63,6 +63,11 @@ export const host: Host = {
       return window.electron.webUtils.getPathForFile(file);
     },
   },
+  shell: {
+    openExternal(url) {
+      window.ipcRenderer.send("open-external", url);
+    },
+  },
   events: {
     send(channel, ...args) {
       window.ipcRenderer.send(channel, ...args);

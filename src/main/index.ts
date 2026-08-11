@@ -204,6 +204,12 @@ ipcMain.handle("show-directory-dialog", async (_event, options) => {
 
 ipcMain.handle("get-user-data-path", () => app.getPath("userData"));
 
+// Links in the manual go to the system browser rather than navigating the
+// editor window, which has no way back.
+ipcMain.on("open-external", (_event, url: string) => {
+  if (/^https?:\/\//.test(url)) shell.openExternal(url);
+});
+
 // Give the renderer a moment to finish its shutdown work (flushing the debounced
 // history manifest, thinning cached audio) before the process goes away. Quit is
 // held once and only briefly: if the renderer doesn't answer, quitting proceeds

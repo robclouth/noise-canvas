@@ -1,0 +1,113 @@
+/* driver.js walkthrough popovers, restyled to match the Mantine dark theme. */
+
+/*
+ * The overlay never takes pointer events. driver.js normally makes the dimmed
+ * area clickable so a stray click closes the tour, but its cut-out only exposes
+ * the spotlit element — anything the app opens elsewhere, notably the Add
+ * Effect modal a gated step asks for, would sit under the overlay and refuse
+ * clicks. Letting every event through keeps the app fully usable mid-tour; the
+ * close button and Escape still end it.
+ */
+.driver-overlay,
+.driver-overlay * {
+  pointer-events: none !important;
+}
+
+/*
+ * driver.js kills pointer events on the whole page and restores them only
+ * inside the spotlit element. Mantine renders modals, menus and popovers into
+ * a portal on <body>, which is never inside that subtree, so a step that asks
+ * the user to open one would leave them unable to click anything in it.
+ */
+.driver-active [data-portal="true"],
+.driver-active [data-portal="true"] * {
+  pointer-events: auto !important;
+}
+
+/*
+ * The dimming sits below Mantine's modal and popover layers (z-index 1000+) so
+ * anything the app opens over it renders at full contrast rather than greyed,
+ * while the tour popover stays on top of both so its instructions remain
+ * readable over an open modal.
+ */
+.driver-overlay {
+  z-index: 500 !important;
+}
+
+.driver-popover.walkthrough-popover {
+  z-index: 10002;
+}
+
+.driver-popover.walkthrough-popover {
+  background-color: var(--mantine-color-dark-7);
+  color: var(--mantine-color-gray-3);
+  border: 1px solid var(--mantine-color-dark-4);
+  border-radius: var(--mantine-radius-sm);
+  box-shadow: var(--mantine-shadow-lg);
+  font-family: "Inter Variable", sans-serif;
+  max-width: 320px;
+}
+
+.driver-popover.walkthrough-popover .driver-popover-title {
+  font-size: var(--ui-font-md);
+  font-weight: 600;
+  color: var(--mantine-color-white);
+}
+
+.driver-popover.walkthrough-popover .driver-popover-description {
+  font-size: var(--ui-font-sm);
+  line-height: 1.5;
+  color: var(--mantine-color-gray-4);
+}
+
+.driver-popover.walkthrough-popover .driver-popover-progress-text {
+  font-size: var(--ui-font-xs);
+  color: var(--mantine-color-dark-2);
+}
+
+.driver-popover.walkthrough-popover .driver-popover-close-btn {
+  color: var(--mantine-color-dark-2);
+}
+
+.driver-popover.walkthrough-popover .driver-popover-close-btn:hover {
+  color: var(--mantine-color-white);
+}
+
+.driver-popover.walkthrough-popover button.driver-popover-next-btn,
+.driver-popover.walkthrough-popover button.driver-popover-prev-btn {
+  background-color: var(--mantine-color-dark-5);
+  color: var(--mantine-color-gray-3);
+  border: none;
+  border-radius: var(--mantine-radius-sm);
+  font-family: inherit;
+  font-size: var(--ui-font-xs);
+  padding: 4px 10px;
+  text-shadow: none;
+}
+
+.driver-popover.walkthrough-popover button.driver-popover-next-btn {
+  background-color: var(--mantine-color-orange-filled);
+  color: var(--mantine-color-black);
+}
+
+.driver-popover.walkthrough-popover button.driver-popover-next-btn:hover {
+  background-color: var(--mantine-color-orange-filled-hover);
+}
+
+.driver-popover.walkthrough-popover button.driver-popover-prev-btn:hover {
+  background-color: var(--mantine-color-dark-4);
+}
+
+/* Arrows inherit the popover background so they don't read as a pale notch. */
+.driver-popover.walkthrough-popover .driver-popover-arrow-side-top {
+  border-top-color: var(--mantine-color-dark-7);
+}
+.driver-popover.walkthrough-popover .driver-popover-arrow-side-bottom {
+  border-bottom-color: var(--mantine-color-dark-7);
+}
+.driver-popover.walkthrough-popover .driver-popover-arrow-side-left {
+  border-left-color: var(--mantine-color-dark-7);
+}
+.driver-popover.walkthrough-popover .driver-popover-arrow-side-right {
+  border-right-color: var(--mantine-color-dark-7);
+}

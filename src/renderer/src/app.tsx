@@ -13,8 +13,12 @@ import { CanvasPanel, PaletteBar } from "./components/layout/canvas-panel";
 import { ExtensionMenuBar } from "./components/layout/menu-bar";
 import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
+import { HelpOverlay } from "./components/help-overlay";
+import { ManualViewer } from "./components/manual-viewer";
+import { Walkthrough } from "./components/walkthrough";
 import { host } from "./lib/host";
 import { ipcOn, ipcSend } from "./lib/ipc";
+import { anchorProps } from "./lib/ui-anchors";
 import { BRUSH_PANEL_WIDTH } from "./lib/ui-density";
 import { precompileAllShaders, warmEffectPipelines } from "./lib/precompile-shaders";
 import { clearAllHistoryManagers, getHistoryManager, pruneOrphanHistoryDirs } from "./lib/history-manager";
@@ -350,6 +354,7 @@ function App(): React.JSX.Element {
           w={BRUSH_PANEL_WIDTH}
           style={{ flexShrink: 0 }}
           onScrollPositionChange={() => invalidateRef.current?.()}
+          {...anchorProps("brush-panel")}
         >
           <BrushPanel />
         </ScrollArea>
@@ -378,6 +383,9 @@ function App(): React.JSX.Element {
         <SidebarPanel />
         <Notifications />
         <UpdateNotification />
+        <Walkthrough ready={isReady} />
+        <ManualViewer />
+        <HelpOverlay />
       </Group>
     </Stack>
   );

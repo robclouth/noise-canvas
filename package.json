@@ -78,6 +78,7 @@
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
     "dotenv-cli": "^10.0.0",
+    "driver.js": "^1.8.0",
     "electron": "^37.2.3",
     "electron-builder": "26.0.19",
     "electron-devtools-installer": "^4.0.0",

@@ -158,6 +158,11 @@ export interface HostZlib {
  * `Window` augmentation (see src/preload/index.d.ts) so the migration away from
  * the old `window.*` access is a mechanical rename with no type drift.
  */
+/** Opening a URL outside the app, so a link never navigates the editor away. */
+export interface HostShell {
+  openExternal(url: string): void;
+}
+
 export interface Host {
   readonly fs: HostFs;
   readonly path: HostPath;
@@ -169,6 +174,7 @@ export interface Host {
   readonly env: HostEnv;
   readonly dialogs: HostDialogs;
   readonly files: HostFiles;
+  readonly shell: HostShell;
   readonly events: HostEvents;
   /** Present only when the editor runs against a host-driven clip session. */
   readonly session?: HostSession;
