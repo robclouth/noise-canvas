@@ -47,11 +47,6 @@ const POPOVER_WIDTH = 280;
 const POPOVER_GAP = 12;
 /** A first guess only, for the frame before the card has been measured. */
 const POPOVER_HEIGHT = 150;
-/**
- * Slack around the card in which the highlight stops following the pointer, so
- * the card stays put and reachable while you move onto its buttons.
- */
-const CARD_BRIDGE = 28;
 /** The card is prose, so it reads at prose sizes rather than the panels' dense scale. */
 const CARD_TITLE_SIZE = 13;
 const CARD_TEXT_SIZE = 12;
@@ -113,17 +108,32 @@ function inWideBar(element: Element): boolean {
 
 const AREA_NAMES = new Set<string>(UI_AREA_NAMES);
 
+/** Things that float above the rest of the window and confine what is under the pointer. */
+const SURFACE_SELECTOR =
+  "[class*='Menu-dropdown'], [class*='Popover-dropdown'], [class*='HoverCard-dropdown'], [class*='Modal-content']";
+
 /**
  * What the pointer is over: the topmost element at that point, then outwards
  * through its ancestors until one is marked. Reading the stacking order rather
- * than a list of rectangles is what makes an open menu answer for itself
- * instead of for the controls it covers, and it picks the innermost marker
- * without having to compare areas.
+ * than a list of rectangles is what makes an open menu answer for itself, and
+ * it picks the innermost marker without having to compare areas.
+ *
+ * Returns null while the pointer is on the card, so the card holds still under
+ * an aim instead of answering for whatever it happens to cover.
  */
 function targetAt(x: number, y: number): Target | null {
-  for (const element of document.elementsFromPoint(x, y)) {
-    // The overlay's own layers sit above everything and are not the subject.
-    if (element.closest(`[${LAYER_ATTR}]`)) continue;
+  const stack = document.elementsFromPoint(x, y);
+  if (stack.some((element) => element.getAttribute(LAYER_ATTR) === "card")) return null;
+
+  // The overlay's own layers sit above everything and are never the subject.
+  const beneath = stack.filter((element) => !element.closest(`[${LAYER_ATTR}]`));
+
+  // A menu or popover ends the search at its own edge. The controls it covers
+  // are behind it, so they are not what the pointer is on, marked or not.
+  const surface = beneath[0]?.closest(SURFACE_SELECTOR) ?? null;
+
+  for (const element of beneath) {
+    if (surface && !surface.contains(element)) return null;
 
     const key = element.getAttribute("data-param");
     if (key && parameterDefs[key as ParameterKey]) {
@@ -154,52 +164,6 @@ function targetAt(x: number, y: number): Target | null {
     }
   }
   return null;
-}
-
-type Point = { x: number; y: number };
-
-function cross(a: Point, b: Point, c: Point): number {
-  return (a.x - c.x) * (b.y - c.y) - (b.x - c.x) * (a.y - c.y);
-}
-
-function inTriangle(p: Point, a: Point, b: Point, c: Point): boolean {
-  const d1 = cross(p, a, b);
-  const d2 = cross(p, b, c);
-  const d3 = cross(p, c, a);
-  return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
-}
-
-/** The card edge that faces a point, as its two corners. */
-function facingEdge(from: Point, card: DOMRect): [Point, Point] {
-  if (from.x < card.left)
-    return [
-      { x: card.left, y: card.top },
-      { x: card.left, y: card.bottom },
-    ];
-  if (from.x > card.right)
-    return [
-      { x: card.right, y: card.top },
-      { x: card.right, y: card.bottom },
-    ];
-  if (from.y < card.top)
-    return [
-      { x: card.left, y: card.top },
-      { x: card.right, y: card.top },
-    ];
-  return [
-    { x: card.left, y: card.bottom },
-    { x: card.right, y: card.bottom },
-  ];
-}
-
-/**
- * True while the pointer is heading into the card — inside the cone from where
- * it was to the card's near edge. Reaching a button on the card means crossing
- * whatever sits between, and without this the card moves out from under the aim.
- */
-function aimingAtCard(from: Point, to: Point, card: DOMRect): boolean {
-  const [a, b] = facingEdge(from, card);
-  return inTriangle(to, from, a, b);
 }
 
 function targetId(target: Target): string {
@@ -270,7 +234,6 @@ export function HelpOverlay(): React.JSX.Element | null {
   const [hovered, setHovered] = useState<Target | null>(null);
   const [cardHeight, setCardHeight] = useState(POPOVER_HEIGHT);
   const cardRef = useRef<HTMLDivElement>(null);
-  const pointer = useRef<Point | null>(null);
   const frame = useRef(0);
 
   const close = useCallback(() => {
@@ -279,7 +242,6 @@ export function HelpOverlay(): React.JSX.Element | null {
   }, [setOpen]);
 
   useEffect(() => {
-    pointer.current = null;
     if (!open) setHovered(null);
   }, [open]);
 
@@ -320,18 +282,18 @@ export function HelpOverlay(): React.JSX.Element | null {
     const { clientX, clientY } = event;
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => {
-      const from = pointer.current;
-      const to = { x: clientX, y: clientY };
-      pointer.current = to;
-
+      // The gap between a target and its card, and nothing wider: enough to
+      // reach the card without the highlight letting go, while sweeping along
+      // a row of controls still moves to each one as the pointer arrives.
       const card = cardRef.current?.getBoundingClientRect();
-      if (card) {
-        const near =
-          clientX >= card.left - CARD_BRIDGE &&
-          clientX <= card.right + CARD_BRIDGE &&
-          clientY >= card.top - CARD_BRIDGE &&
-          clientY <= card.bottom + CARD_BRIDGE;
-        if (near || (from && aimingAtCard(from, to, card))) return;
+      if (
+        card &&
+        clientX >= card.left - POPOVER_GAP &&
+        clientX <= card.right + POPOVER_GAP &&
+        clientY >= card.top - POPOVER_GAP &&
+        clientY <= card.bottom + POPOVER_GAP
+      ) {
+        return;
       }
 
       // Resolved fresh each move rather than measured once when the overlay
@@ -377,7 +339,7 @@ export function HelpOverlay(): React.JSX.Element | null {
       {/* One transparent catcher over everything, so tracking stays continuous
           across the bright cut-out and no click reaches the app underneath. */}
       <Box
-        {...{ [LAYER_ATTR]: "" }}
+        {...{ [LAYER_ATTR]: "catcher" }}
         pos="fixed"
         top={0}
         left={0}
@@ -419,7 +381,7 @@ export function HelpOverlay(): React.JSX.Element | null {
         {card && rect && (
           <Paper
             ref={cardRef}
-            {...{ [LAYER_ATTR]: "" }}
+            {...{ [LAYER_ATTR]: "card" }}
             withBorder
             shadow="md"
             p="sm"
