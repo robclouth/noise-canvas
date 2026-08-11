@@ -262,21 +262,21 @@ export const EFFECT_LABELS: Record<string, string> = {
   align: "Align",
 };
 
+// Read at the moment of choosing, by someone who does not yet know what the
+// effect is: one line, verb first, naming the sound rather than the maths.
+// Modes belong on the effect card and mechanism belongs in the manual.
 export const EFFECT_DESCRIPTIONS: Record<string, string> = {
-  dynamics: "Control dynamic range with compression, expansion, gating, and inversion.",
-  transform: "Shift, scale, and rotate the spectrogram content in time and frequency.",
-  overtones: "Add overtones to create richer timbres.",
-  blur: "Smooth and blend frequencies over time and pitch for softer transitions.",
-  clone: "Stamp beat- and semitone-spaced copies in 2D for echoes and harmonics.",
-  synthesize: "Generate new audio content from scratch (noise, sine waves, etc.).",
-  evolve: "Reaction-advection-diffusion simulation for fluid, biological, and chaotic patterns.",
-  binaural: "HRTF-based binaural spatialization for 3D audio positioning.",
-  sort: "Odd-even transposition sort on spectrogram bins by magnitude or phase.",
-  transmute:
-    "Low-level polar operations on raw magnitude and phase: swap, complex power, phase rotate, quantize, stereo cross, and phase gate.",
-  waveshape:
-    "Waveshaper distortion on rectangular spectral bins: soft clip, hard clip, rectify, and boundary modes (fold, wrap, invert, cut).",
-  convolve:
-    "Time-axis convolution with an IR spectrogram. Reverbs, room tones, and other impulse-response-based effects.",
-  align: "Phase-align bands at brush start to form a sharp impulse, then fade back to the original phase.",
+  dynamics: "Squash, gate, expand or invert whatever the brush covers.",
+  transform: "Move sound through time and pitch — shift, stretch, rotate, reverse.",
+  overtones: "Stack harmonics on top of what's there for a richer, brighter timbre.",
+  blur: "Smear energy across time and pitch. Reverb, freeze, and soft edges.",
+  clone: "Repeat what's there at beat and semitone offsets. Echoes and harmonies.",
+  synthesize: "Paint new sound from nothing — noise, tones, impulses.",
+  evolve: "Let the sound grow and flow on its own, into fluid or chaotic textures.",
+  binaural: "Place sound anywhere around the listener's head, in 3D.",
+  sort: "Reorder the bins by loudness or phase. Glitched, banded, pixel-sorted.",
+  transmute: "Bend magnitude and phase against each other for metallic, alien tones.",
+  waveshape: "Distort the spectrum itself — clipped, folded, wrapped, inverted.",
+  convolve: "Print the character of another sound onto this one. Reverbs and room tone.",
+  align: "Snap everything into one sharp impulse, then let it drift apart again.",
 };
