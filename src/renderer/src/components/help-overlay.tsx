@@ -35,7 +35,7 @@ type Target = { kind: "area"; name: UiAreaName; rect: DOMRect } | { kind: "param
  * It never coexists with a tour: opening one closes this first.
  */
 const OVERLAY_Z = 10003;
-const DIM = "rgba(0, 0, 0, 0.6)";
+const DIM = "rgba(0, 0, 0, 0.3)";
 const EASE = "top 120ms ease, left 120ms ease, width 120ms ease, height 120ms ease";
 
 const POPOVER_WIDTH = 280;
@@ -165,13 +165,6 @@ function aimingAtCard(from: Point, to: Point, card: DOMRect): boolean {
   return inTriangle(to, from, a, b);
 }
 
-/**
- * What the pointer is on, and where it was when that was picked. The card is
- * placed from `at` once and then holds still, rather than sliding along as the
- * pointer wanders around the same target.
- */
-type Hover = { target: Target; at: Point };
-
 function targetId(target: Target): string {
   return target.kind === "area" ? `area:${target.name}` : `param:${target.key}`;
 }
@@ -180,28 +173,47 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
+type Placement = { top: number; left: number };
+
+/** Past this share of the window, a target's sides are too far from the pointer. */
+const WIDE_FRACTION = 0.4;
+
 /**
- * Beside the highlight, level with the pointer — so the card is always straight
- * out from where you are and reaching it is one movement along one axis. Above
- * or below only when neither side has room, and then centred on the pointer for
- * the same reason. Takes the card's measured height: clamping against a guessed
- * one leaves the pointer off the end of the card near the window's edges, which
- * is the diagonal reach this placement exists to avoid.
+ * Placed from the target alone, centred on it, on the side that faces the
+ * middle of the window: a target on the left gets the card to its right, one
+ * low in the window gets it above. Wide targets are stacked rather than put
+ * beside, because the side of a bar that spans the window is nowhere near it.
+ *
+ * Takes the card's measured height rather than a guess, so the clamps against
+ * the window edges land where the card actually ends.
  */
-function placePopover(rect: DOMRect, at: Point, height: number): { top: number; left: number } {
+function placePopover(rect: DOMRect, height: number): Placement {
   const { innerWidth: vw, innerHeight: vh } = window;
-  const level = clamp(at.y - height / 2, POPOVER_GAP, vh - height - POPOVER_GAP);
+  const midX = rect.left + rect.width / 2;
+  const midY = rect.top + rect.height / 2;
+  const centredX = clamp(midX - POPOVER_WIDTH / 2, POPOVER_GAP, vw - POPOVER_WIDTH - POPOVER_GAP);
+  const centredY = clamp(midY - height / 2, POPOVER_GAP, vh - height - POPOVER_GAP);
 
-  const right = rect.right + POPOVER_GAP;
-  if (right + POPOVER_WIDTH + POPOVER_GAP <= vw) return { top: level, left: right };
+  const beside = (): Placement | null => {
+    const right = rect.right + POPOVER_GAP;
+    const left = rect.left - POPOVER_GAP - POPOVER_WIDTH;
+    for (const x of midX < vw / 2 ? [right, left] : [left, right]) {
+      if (x >= POPOVER_GAP && x + POPOVER_WIDTH + POPOVER_GAP <= vw) return { top: centredY, left: x };
+    }
+    return null;
+  };
 
-  const left = rect.left - POPOVER_GAP - POPOVER_WIDTH;
-  if (left >= POPOVER_GAP) return { top: level, left };
+  const stacked = (): Placement | null => {
+    const above = rect.top - POPOVER_GAP - height;
+    const below = rect.bottom + POPOVER_GAP;
+    for (const y of midY > vh / 2 ? [above, below] : [below, above]) {
+      if (y >= POPOVER_GAP && y + height + POPOVER_GAP <= vh) return { top: y, left: centredX };
+    }
+    return null;
+  };
 
-  const centred = clamp(at.x - POPOVER_WIDTH / 2, POPOVER_GAP, vw - POPOVER_WIDTH - POPOVER_GAP);
-  const below = rect.bottom + POPOVER_GAP;
-  if (below + height + POPOVER_GAP <= vh) return { top: below, left: centred };
-  return { top: Math.max(POPOVER_GAP, rect.top - POPOVER_GAP - height), left: centred };
+  const wide = rect.width > vw * WIDE_FRACTION;
+  return (wide ? (stacked() ?? beside()) : (beside() ?? stacked())) ?? { top: centredY, left: centredX };
 }
 
 export function HelpOverlay(): React.JSX.Element | null {
@@ -209,7 +221,7 @@ export function HelpOverlay(): React.JSX.Element | null {
   const setOpen = useStore((state) => state.setHelpOverlayOpen);
   const openManual = useStore((state) => state.openManual);
   const [targets, setTargets] = useState<Target[]>([]);
-  const [hovered, setHovered] = useState<Hover | null>(null);
+  const [hovered, setHovered] = useState<Target | null>(null);
   const [cardHeight, setCardHeight] = useState(POPOVER_HEIGHT);
   const cardRef = useRef<HTMLDivElement>(null);
   const pointer = useRef<Point | null>(null);
@@ -284,11 +296,7 @@ export function HelpOverlay(): React.JSX.Element | null {
         const hit = hitTest(targets, clientX, clientY);
         // Empty space keeps the last highlight, so crossing a gap on the way to
         // the card doesn't blink it away.
-        if (hit) {
-          setHovered((current) =>
-            current && targetId(current.target) === targetId(hit) ? current : { target: hit, at: to },
-          );
-        }
+        if (hit) setHovered((current) => (current && targetId(current) === targetId(hit) ? current : hit));
       });
     },
     [targets],
@@ -296,7 +304,7 @@ export function HelpOverlay(): React.JSX.Element | null {
 
   if (!open) return null;
 
-  const target = hovered?.target;
+  const target = hovered;
   const rect = target?.rect;
   const area = target?.kind === "area" ? getArea(target.name) : null;
   const parameter = target?.kind === "param" ? parameterDefs[target.key] : null;
@@ -351,7 +359,7 @@ export function HelpOverlay(): React.JSX.Element | null {
           <Box style={{ ...dim, top: 0, left: 0, right: 0, bottom: 0 }} />
         )}
 
-        {card && rect && hovered && (
+        {card && rect && (
           <Paper
             ref={cardRef}
             withBorder
@@ -359,7 +367,7 @@ export function HelpOverlay(): React.JSX.Element | null {
             p="sm"
             w={POPOVER_WIDTH}
             pos="fixed"
-            style={{ ...placePopover(rect, hovered.at, cardHeight), transition: EASE, cursor: "default" }}
+            style={{ ...placePopover(rect, cardHeight), transition: EASE, cursor: "default" }}
             // Freezes the highlight once the pointer is on the card, so its
             // buttons stay reachable without the selection sliding away.
             onMouseMove={(event) => event.stopPropagation()}
