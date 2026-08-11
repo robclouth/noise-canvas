@@ -78,6 +78,12 @@ export interface FileRendererHandle {
   getFBOData: () => Promise<Float32Array>;
   /** Sets the data of the frame buffer object. */
   setFBOData: (data: Float32Array) => void;
+  /**
+   * Uploads only the texture rows covered by the flat [pixelStart, pixelCount, ...]
+   * ranges from `data` (the full packed state). Equivalent to setFBOData when
+   * everything outside the ranges already matches the FBO, but far cheaper.
+   */
+  patchFBOData: (data: Float32Array, pixelRanges: Uint32Array) => void;
   /** Returns the textures used for rendering. */
   getTextures: () => {
     packed: WebGLRenderTarget;
@@ -100,6 +106,12 @@ export interface FileRendererHandle {
   clearDirtyRegion: () => void;
   /** Packed-pixel ranges the current stroke's committed footprint covers, for the history delta. Null = full snapshot. */
   getDirtyPixelRanges: () => Uint32Array | null;
+  /** The stroke's committed footprint in unpacked UV, or null when nothing was committed. */
+  getCommittedFootprintUv: () => { timeMin: number; timeMax: number; pitchMin: number; pitchMax: number } | null;
+  /** Monotonic count of stroke starts, for dropping stale async commit work. */
+  getStrokeGeneration: () => number;
+  /** Widens the dirty region to cover pixels changed outside the painted rect. */
+  expandDirtyRegion: (startX: number, endX: number, startY: number, endY: number) => void;
   /**
    * Renders the committed spectrogram (no cursor/preview overlays) into the
    * snapshot canvas at its current on-screen size. Resolves false when the
@@ -1115,6 +1127,17 @@ const FileRendererInner = memo(
       scheduleSnapshotRefresh();
     };
 
+    const patchFBOData = (data: Float32Array, pixelRanges: Uint32Array) => {
+      if (!strokeRendererRef.current) return;
+
+      strokeRendererRef.current.patchFBOData(data, pixelRanges);
+      applyStroke.current = false;
+      displayMode.current = "committed";
+      invalidateRef.current();
+      snapshotStaleRef.current = true;
+      scheduleSnapshotRefresh();
+    };
+
     /**
      * Returns the current set of textures.
      */
@@ -1204,6 +1227,7 @@ const FileRendererInner = memo(
       },
       getFBOData,
       setFBOData,
+      patchFBOData,
       getTextures,
       restoreOriginal,
       clearPreview,
@@ -1218,6 +1242,10 @@ const FileRendererInner = memo(
       getDirtyRegion: () => strokeRendererRef.current?.getDirtyRegion() ?? null,
       clearDirtyRegion: () => strokeRendererRef.current?.clearDirtyRegion(),
       getDirtyPixelRanges: () => strokeRendererRef.current?.getDirtyPixelRanges() ?? null,
+      getCommittedFootprintUv: () => strokeRendererRef.current?.getCommittedFootprintUv() ?? null,
+      getStrokeGeneration: () => strokeRendererRef.current?.getStrokeGeneration() ?? 0,
+      expandDirtyRegion: (startX: number, endX: number, startY: number, endY: number) =>
+        strokeRendererRef.current?.expandDirtyRegion(startX, endX, startY, endY),
       captureSnapshot,
       refreshSnapshot: scheduleSnapshotRefresh,
       renderExportImage,

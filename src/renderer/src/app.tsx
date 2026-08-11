@@ -227,6 +227,9 @@ function App(): React.JSX.Element {
       if (!file?.rendererRef?.current) return;
 
       file.rendererRef.current.restoreOriginal();
+      // restore-original bypasses history, so the FBO no longer matches the
+      // history's current node; navigation must not patch on top of it.
+      getHistoryManager(activeFileId).markFboOutOfSync();
     });
     unsubscribers.push(unsubRestoreOriginal);
 

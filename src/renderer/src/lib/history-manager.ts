@@ -5,6 +5,7 @@ import type { SpectrogramData } from "@renderer/store/types";
 import { isManagedFilePath } from "@renderer/store/managed-path";
 import { host } from "./host";
 import { ipcSend } from "./ipc";
+import { mergePixelRanges } from "./pixel-ranges";
 
 const MANIFEST_FILENAME = "tree.json";
 const CHECKPOINT_INTERVAL = 20;
@@ -296,6 +297,15 @@ export class HistoryManager {
   private manifestWriteTimer: ReturnType<typeof setTimeout> | null = null;
   private manifestWritePending = false;
   private readonly packedCache = new PackedStateCache(PACKED_STATE_CACHE_BYTES);
+  // Dirty ranges of strokes added this session, keyed by node id. Lets
+  // navigation between such nodes upload only the changed texture rows
+  // instead of the whole packed state. Purely an optimization: a miss falls
+  // back to the full upload.
+  private readonly nodeDirtyRanges = new Map<string, Uint32Array>();
+  // True when the renderer's FBO no longer matches currentId's packed state
+  // (e.g. restore-original bypasses history); forces the next navigation to
+  // upload the full state rather than a patch.
+  private fboOutOfSync = false;
 
   constructor(fileId: string) {
     this.fileId = fileId;
@@ -615,6 +625,7 @@ export class HistoryManager {
     this.currentPacked = new Float32Array(opts.data);
     this.packedCache.set(id, this.currentPacked);
     this.lastLoadedAnchorId = id;
+    this.fboOutOfSync = false;
     await this.writeManifest();
     this.notifyStateChange();
     return id;
@@ -644,6 +655,7 @@ export class HistoryManager {
 
     let storage: "delta" | "packed";
     let deltaBytes: Uint8Array | undefined;
+    let rangesForPatch: Uint32Array | null = null;
 
     if (
       sameDims &&
@@ -657,6 +669,7 @@ export class HistoryManager {
       if (!(await host.analysis.historyFootprintChanged(base, opts.data, ranges))) {
         return parentId;
       }
+      rangesForPatch = ranges;
       const stepsSinceSnap = this.deltaStepsSinceLastSnap(parentId);
       if (stepsSinceSnap >= CHECKPOINT_INTERVAL) {
         storage = "packed";
@@ -698,6 +711,9 @@ export class HistoryManager {
     // retained directly rather than copied.
     this.currentPacked = opts.data;
     this.packedCache.set(id, this.currentPacked);
+    if (rangesForPatch) this.nodeDirtyRanges.set(id, rangesForPatch);
+    // The stroke was read back from the FBO, so the two are in step again.
+    this.fboOutOfSync = false;
     await this.writeManifest();
     this.notifyStateChange();
     return id;
@@ -920,8 +936,18 @@ export class HistoryManager {
       await this.restoreSpectrogramFromFull(anchor, packedData);
       this.lastLoadedAnchorId = anchor.id;
     } else {
-      file.rendererRef.current.setFBOData(packedData);
+      // When every hop between here and the target is a stroke whose dirty
+      // ranges are known, only those texture rows differ from what the FBO
+      // already holds — upload just them.
+      const ranges = this.fboOutOfSync ? null : this.pathDirtyRanges(this.manifest.currentId, targetId);
+      const restoreStart = performance.now();
+      if (ranges) file.rendererRef.current.patchFBOData(packedData, ranges);
+      else file.rendererRef.current.setFBOData(packedData);
+      console.log(
+        `[timing] navigateTo FBO ${ranges ? "patch" : "full"} upload: ${(performance.now() - restoreStart).toFixed(2)}ms`,
+      );
     }
+    this.fboOutOfSync = false;
 
     this.manifest.currentId = targetId;
     // packedData is either a cache entry or a freshly reconstructed array; both
@@ -950,6 +976,58 @@ export class HistoryManager {
     }
     const { synthesizeFile } = useStore.getState();
     void synthesizeFile(this.fileId);
+  }
+
+  /**
+   * Marks the renderer's FBO as diverged from the history's current node
+   * (e.g. after restore-original, which bypasses history). The next
+   * navigation then uploads the full packed state instead of a patch.
+   */
+  markFboOutOfSync(): void {
+    this.fboOutOfSync = true;
+  }
+
+  /**
+   * Union of the per-node dirty ranges along the tree path between two nodes,
+   * or null when any hop's ranges are unknown (nodes from a previous session,
+   * checkpoints of oversized footprints) — callers then fall back to a full
+   * upload. Every node on the path except the common ancestor stands for the
+   * delta its hop crosses, in either direction.
+   */
+  private pathDirtyRanges(fromId: string, toId: string): Uint32Array | null {
+    if (!this.manifest) return null;
+    // Same-node navigation can't be trusted as a no-op: deleteNode reassigns
+    // currentId before navigating, so the FBO may hold a deleted state.
+    if (fromId === toId) return null;
+
+    const fromAncestors = new Set<string>();
+    let cursor: string | null = fromId;
+    while (cursor) {
+      fromAncestors.add(cursor);
+      cursor = this.manifest.nodes[cursor]?.parentId ?? null;
+    }
+
+    const path: string[] = [];
+    cursor = toId;
+    while (cursor && !fromAncestors.has(cursor)) {
+      path.push(cursor);
+      cursor = this.manifest.nodes[cursor]?.parentId ?? null;
+    }
+    if (!cursor) return null;
+    const lca = cursor;
+    cursor = fromId;
+    while (cursor && cursor !== lca) {
+      path.push(cursor);
+      cursor = this.manifest.nodes[cursor]?.parentId ?? null;
+    }
+
+    let ranges: Uint32Array = new Uint32Array(0);
+    for (const id of path) {
+      const r = this.nodeDirtyRanges.get(id);
+      if (!r) return null;
+      ranges = mergePixelRanges(ranges, r);
+    }
+    return ranges;
   }
 
   async navigateToParent(): Promise<void> {
@@ -1124,6 +1202,7 @@ export class HistoryManager {
       for (const f of this.nodeFilePaths(dir, id)) host.fs.rm(f).catch(() => {});
       this.packedCache.delete(id);
       this.audioBytes.delete(id);
+      this.nodeDirtyRanges.delete(id);
       delete this.manifest.nodes[id];
     }
 
@@ -1277,6 +1356,7 @@ export class HistoryManager {
       for (const f of this.nodeFilePaths(dir, id)) host.fs.rm(f).catch(() => {});
       this.packedCache.delete(id);
       this.audioBytes.delete(id);
+      this.nodeDirtyRanges.delete(id);
     }
 
     // Rewrite the current node as a standalone full snapshot so it can be the
@@ -1305,6 +1385,7 @@ export class HistoryManager {
     this.currentPacked = canonical;
     this.packedCache.clear();
     this.packedCache.set(currentId, canonical);
+    this.nodeDirtyRanges.clear();
     this.audioLru = current.audioCached ? [currentId] : [];
     this.lastLoadedAnchorId = currentId;
 
@@ -1331,6 +1412,7 @@ export class HistoryManager {
     this.manifest = null;
     this.currentPacked = null;
     this.packedCache.clear();
+    this.nodeDirtyRanges.clear();
     this.audioLru = [];
     this.audioBytes.clear();
     this.lastLoadedAnchorId = null;
@@ -1349,6 +1431,7 @@ export class HistoryManager {
     this.manifest = null;
     this.currentPacked = null;
     this.packedCache.clear();
+    this.nodeDirtyRanges.clear();
     this.audioLru = [];
     this.audioBytes.clear();
     this.lastLoadedAnchorId = null;

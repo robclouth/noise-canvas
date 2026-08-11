@@ -1,10 +1,13 @@
 import { createNoise2D } from "simplex-noise";
 import {
+  BufferAttribute,
   Camera,
   Color,
   DataTexture,
   FloatType,
   GLSL3,
+  InstancedBufferAttribute,
+  InstancedBufferGeometry,
   Mesh,
   NearestFilter,
   OrthographicCamera,
@@ -21,6 +24,7 @@ import {
   WebGLRenderTarget,
 } from "three";
 import { copyMaterial } from "../components/copy-material";
+import { patchMaterial } from "../components/patch-material";
 import { BaseEffect, CommonUniforms, defaultValues } from "../effects/base-effect";
 import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
@@ -49,6 +53,11 @@ export type { EffectType };
 export type EffectsRegistry = Record<string, BaseEffect>;
 
 const noise2D = createNoise2D();
+
+// Unit quad in [0,1]², stretched per instance to a pixel range's bounding box
+// by patchMaterial's vertex shader.
+const PATCH_QUAD_POSITIONS = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
+const PATCH_QUAD_INDICES = new Uint16Array([0, 1, 2, 0, 2, 3]);
 
 function createParameterUniform(value: number, minValue: number, maxValue: number): ParameterUniform {
   return {
@@ -195,6 +204,10 @@ export class StrokeRenderer {
   private committedTimeMax = -Infinity;
   private committedPitchMin = Infinity;
   private committedPitchMax = -Infinity;
+  // Monotonic count of stroke starts. Commit-time work that runs async after a
+  // stroke (boundary conditioning) captures this before awaiting and drops its
+  // result if a new stroke began meanwhile, so it never writes over new dabs.
+  private strokeGeneration = 0;
 
   constructor(
     gl: WebGLRenderer,
@@ -1338,6 +1351,100 @@ export class StrokeRenderer {
   }
 
   /**
+   * Update only the texture rows covered by `pixelRanges` (a flat
+   * [pixelStart, pixelCount, ...] list in packed-pixel indices) from `data`,
+   * which must hold the full packed state. Both the committed FBO and the
+   * stroke-start snapshot receive the rows, so when every pixel outside the
+   * ranges already matches the FBO this is equivalent to setFBOData at a
+   * fraction of the upload cost. Falls back to setFBOData when the ranges
+   * span most of the texture.
+   */
+  patchFBOData(data: Float32Array, pixelRanges: Uint32Array): void {
+    const { packedTextureSize } = this.spectrogramData;
+    const width = packedTextureSize.x;
+    const height = packedTextureSize.y;
+
+    let patchPixels = 0;
+    let numRanges = 0;
+    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
+      if (pixelRanges[i + 1] === 0) continue;
+      patchPixels += pixelRanges[i + 1];
+      numRanges++;
+    }
+    if (patchPixels === 0) return;
+    // Past roughly half the texture the gather plus scatter costs more than
+    // just re-uploading everything.
+    if (patchPixels >= width * height * 0.5) {
+      this.setFBOData(data);
+      return;
+    }
+
+    // Gather the ranges into one compact block, and record where each range
+    // landed so the shader can scatter it back.
+    const patch = new Float32Array(patchPixels * 4);
+    const instances = new Uint32Array(numRanges * 3);
+    let srcPixel = 0;
+    let inst = 0;
+    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
+      const start = pixelRanges[i];
+      const count = pixelRanges[i + 1];
+      if (count === 0) continue;
+      patch.set(data.subarray(start * 4, (start + count) * 4), srcPixel * 4);
+      instances[inst * 3] = start;
+      instances[inst * 3 + 1] = count;
+      instances[inst * 3 + 2] = srcPixel;
+      srcPixel += count;
+      inst++;
+    }
+
+    const patchWidth = Math.min(width, patchPixels);
+    const patchHeight = Math.ceil(patchPixels / patchWidth);
+    const padded =
+      patch.length === patchWidth * patchHeight * 4
+        ? patch
+        : (() => {
+            const p = new Float32Array(patchWidth * patchHeight * 4);
+            p.set(patch);
+            return p;
+          })();
+    const patchTex = new DataTexture(padded, patchWidth, patchHeight, RGBAFormat, FloatType);
+    patchTex.needsUpdate = true;
+    this.gl.initTexture(patchTex);
+
+    const geometry = new InstancedBufferGeometry();
+    geometry.setAttribute("position", new BufferAttribute(PATCH_QUAD_POSITIONS, 3));
+    geometry.setIndex(new BufferAttribute(PATCH_QUAD_INDICES, 1));
+    geometry.setAttribute("aRange", new InstancedBufferAttribute(instances, 3));
+    geometry.instanceCount = numRanges;
+
+    patchMaterial.uniforms.patchTex.value = patchTex;
+    patchMaterial.uniforms.destWidth.value = width;
+    patchMaterial.uniforms.destHeight.value = height;
+    patchMaterial.uniforms.patchWidth.value = patchWidth;
+
+    const mesh = new Mesh(geometry, patchMaterial);
+    mesh.frustumCulled = false;
+    const scene = new Scene();
+    scene.add(mesh);
+
+    // Only the patched pixels are drawn, so the rest of the target must survive
+    // the render — no clear.
+    const prevAutoClear = this.gl.autoClear;
+    this.gl.autoClear = false;
+    const committed = this.pingPong === 0 ? this.fbo1 : this.fbo2;
+    for (const target of [committed, this.strokeStartFbo]) {
+      this.gl.setRenderTarget(target);
+      this.gl.render(scene, this.camera);
+    }
+    this.gl.setRenderTarget(null);
+    this.gl.autoClear = prevAutoClear;
+
+    geometry.dispose();
+    patchTex.dispose();
+    this.fboDataDirty = true;
+  }
+
+  /**
    * Get the current textures for reading.
    */
   getTextures(): {
@@ -1380,6 +1487,42 @@ export class StrokeRenderer {
     this.committedTimeMax = -Infinity;
     this.committedPitchMin = Infinity;
     this.committedPitchMax = -Infinity;
+    this.strokeGeneration++;
+  }
+
+  getStrokeGeneration(): number {
+    return this.strokeGeneration;
+  }
+
+  /**
+   * The stroke's committed footprint in unpacked UV, or null when nothing was
+   * committed. Time is [timeMin, timeMax]; pitch follows the same UV axis the
+   * dirty region uses (0 = top of the texture).
+   */
+  getCommittedFootprintUv(): { timeMin: number; timeMax: number; pitchMin: number; pitchMax: number } | null {
+    if (this.committedTimeMax <= this.committedTimeMin) return null;
+    return {
+      timeMin: Math.max(0, this.committedTimeMin),
+      timeMax: Math.min(1, this.committedTimeMax),
+      pitchMin: Math.max(0, this.committedPitchMin),
+      pitchMax: Math.min(1, this.committedPitchMax),
+    };
+  }
+
+  /**
+   * Widens the dirty region so the next synthesis covers pixels changed
+   * outside the painted rect — boundary conditioning writes into a margin
+   * around the stroke's time edges.
+   */
+  expandDirtyRegion(startX: number, endX: number, startY: number, endY: number): void {
+    if (this.dirtyRegion) {
+      this.dirtyRegion.startX = Math.min(this.dirtyRegion.startX, startX);
+      this.dirtyRegion.endX = Math.max(this.dirtyRegion.endX, endX);
+      this.dirtyRegion.startY = Math.min(this.dirtyRegion.startY, startY);
+      this.dirtyRegion.endY = Math.max(this.dirtyRegion.endY, endY);
+    } else {
+      this.dirtyRegion = { startX, endX, startY, endY };
+    }
   }
 
   /**

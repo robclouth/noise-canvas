@@ -633,6 +633,99 @@ describe("StrokeRenderer", () => {
     });
   });
 
+  describe("patchFBOData", () => {
+    function modifyRanges(base: Float32Array, ranges: Uint32Array): Float32Array {
+      const modified = new Float32Array(base);
+      for (let i = 0; i + 1 < ranges.length; i += 2) {
+        for (let p = ranges[i]; p < ranges[i] + ranges[i + 1]; p++) {
+          modified[p * 4] = 0.123 + (p % 7) * 0.01;
+          modified[p * 4 + 1] = -2.5;
+          modified[p * 4 + 2] = 0.456;
+          modified[p * 4 + 3] = 3.5;
+        }
+      }
+      return modified;
+    }
+
+    function countDiffs(a: Float32Array, b: Float32Array): number {
+      let diffs = 0;
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diffs++;
+      return diffs;
+    }
+
+    it("uploads the given ranges and leaves everything else untouched", async () => {
+      renderer.initialize();
+      const before = new Float32Array(await renderer.getFBOData());
+      const width = spectrogramData.packedTextureSize.x;
+      // Disjoint ranges: mid-row, crossing a row boundary, and a long run.
+      const ranges = new Uint32Array([5, 10, width * 3 - 4, 8, width * 7 + 20, width]);
+      const modified = modifyRanges(before, ranges);
+
+      renderer.patchFBOData(modified, ranges);
+
+      const after = await renderer.getFBOData();
+      expect(after.length).toBe(modified.length);
+      expect(countDiffs(after, modified)).toBe(0);
+    });
+
+    it("matches setFBOData when the ranges cover most of the texture (fallback)", async () => {
+      renderer.initialize();
+      const before = new Float32Array(await renderer.getFBOData());
+      const { x: width, y: height } = spectrogramData.packedTextureSize;
+      // Over half the texture, so the gather-and-scatter gives way to a plain
+      // full upload; the result must be identical either way.
+      const ranges = new Uint32Array([0, Math.floor(width * height * 0.75)]);
+      const modified = modifyRanges(before, ranges);
+
+      renderer.patchFBOData(modified, ranges);
+
+      const after = await renderer.getFBOData();
+      expect(countDiffs(after, modified)).toBe(0);
+    });
+
+    it("is a no-op for empty ranges", async () => {
+      renderer.initialize();
+      const before = new Float32Array(await renderer.getFBOData());
+
+      renderer.patchFBOData(new Float32Array(before.length), new Uint32Array(0));
+
+      const after = await renderer.getFBOData();
+      expect(countDiffs(after, before)).toBe(0);
+    });
+
+    it("patches the stroke-start snapshot the next stroke reads from", async () => {
+      renderer.initialize();
+      const before = new Float32Array(await renderer.getFBOData());
+      const width = spectrogramData.packedTextureSize.x;
+      const ranges = new Uint32Array([width * 2 + 3, 16]);
+      const modified = modifyRanges(before, ranges);
+      renderer.patchFBOData(modified, ranges);
+
+      // A committed stroke's first iteration reads the stroke-start snapshot;
+      // pixels outside the brush pass through it, so a stale snapshot would
+      // revert the patched pixels to their pre-patch values.
+      const state = createMockStateWithSteps([{ name: "Test", overrides: { brushIntensity: 100, accumulate: true } }]);
+      const params: StrokeParams = {
+        cursorPos: new Vector2(0.5, 0.5),
+        preview: false,
+        bpm: 120,
+        totalDuration: getSpectrogramDuration(spectrogramData),
+        viewZoomPower: 0,
+        viewOffset: 0,
+        viewZoomPowerY: 0,
+        viewOffsetY: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
+      };
+      renderer.renderStroke(params, state, createSourceFileInfo(spectrogramData, "test-file-1", renderer));
+
+      const after = await renderer.getFBOData();
+      const patched = modified.subarray(ranges[0] * 4, (ranges[0] + ranges[1]) * 4);
+      expect(countDiffs(after.subarray(ranges[0] * 4, (ranges[0] + ranges[1]) * 4), patched)).toBe(0);
+    });
+  });
+
   describe("iterations", () => {
     // For iteration tests, we need a renderer with an additive effect
     // so that multiple iterations produce measurable cumulative changes
