@@ -75,20 +75,29 @@ function recipeTitle(id: string): string {
  * to the first ancestor meaningfully wider than the label, which is the row in
  * every control layout.
  */
-function rowRect(label: Element): DOMRect {
+function rowOf(label: Element): Element {
   const labelWidth = label.getBoundingClientRect().width;
   let node: Element | null = label.parentElement;
   for (let depth = 0; depth < 3 && node; depth++) {
-    const rect = node.getBoundingClientRect();
-    if (rect.width > labelWidth + 8) return rect;
+    if (node.getBoundingClientRect().width > labelWidth + 8) return node;
     node = node.parentElement;
   }
-  return label.getBoundingClientRect();
+  return label;
 }
 
-/** A marker on a text label stands for its whole row; anything else is its own box. */
-function markerRect(element: Element): DOMRect {
-  return element.tagName === "P" ? rowRect(element) : element.getBoundingClientRect();
+/**
+ * Whether a marker names its whole row rather than itself: parameter markers
+ * always sit on the label, and a control marker on a text label does too. The
+ * highlight and the region that answers to the pointer are then the same
+ * element, so what lights up is what you can point at.
+ */
+function standsForRow(marker: Element): boolean {
+  return marker.hasAttribute("data-param") || marker.tagName === "P";
+}
+
+/** The element a marker speaks for: its row, or itself. */
+function regionOf(marker: Element): Element {
+  return standsForRow(marker) ? rowOf(marker) : marker;
 }
 
 /**
@@ -135,35 +144,55 @@ function targetAt(x: number, y: number): Target | null {
   for (const element of beneath) {
     if (surface && !surface.contains(element)) return null;
 
-    const key = element.getAttribute("data-param");
-    if (key && parameterDefs[key as ParameterKey]) {
-      return { kind: "param", key: key as ParameterKey, rect: rowRect(element), inBar: inWideBar(element) };
+    // The marker on this element, or the one it is the row for. Pointing at a
+    // control whose label carries the marker has to answer the same as
+    // pointing at the label itself.
+    const own = element.hasAttribute("data-param") || element.hasAttribute(HELP_ATTR) ? element : null;
+    const inRow = own ? null : rowMarkerIn(element);
+    const marker = own ?? inRow;
+    if (!marker) {
+      // Layout columns are skipped: pointing at one always means one of the
+      // sections inside it, so offering the column too is noise.
+      const anchor = element.getAttribute(ANCHOR_ATTR);
+      if (anchor && AREA_NAMES.has(anchor) && !getArea(anchor as UiAreaName).container) {
+        return {
+          kind: "area",
+          name: anchor as UiAreaName,
+          rect: element.getBoundingClientRect(),
+          inBar: inWideBar(element),
+        };
+      }
+      continue;
     }
 
-    const name = element.getAttribute(HELP_ATTR);
+    const region = regionOf(marker);
+    const rect = region.getBoundingClientRect();
+    const inBar = inWideBar(region);
+
+    const key = marker.getAttribute("data-param");
+    if (key && parameterDefs[key as ParameterKey]) {
+      return { kind: "param", key: key as ParameterKey, rect, inBar };
+    }
+
+    const name = marker.getAttribute(HELP_ATTR);
     if (name && UI_CONTROLS[name as UiControlName]) {
       return {
         kind: "control",
         name: name as UiControlName,
-        rect: markerRect(element),
-        instance: readHelpInstance(element),
-        inBar: inWideBar(element),
-      };
-    }
-
-    // Layout columns are skipped: pointing at one always means one of the
-    // sections inside it, so offering the column too is noise.
-    const anchor = element.getAttribute(ANCHOR_ATTR);
-    if (anchor && AREA_NAMES.has(anchor) && !getArea(anchor as UiAreaName).container) {
-      return {
-        kind: "area",
-        name: anchor as UiAreaName,
-        rect: element.getBoundingClientRect(),
-        inBar: inWideBar(element),
+        rect,
+        instance: readHelpInstance(marker),
+        inBar,
       };
     }
   }
   return null;
+}
+
+/** The marker this element is the row for, if it is a row at all. */
+function rowMarkerIn(element: Element): Element | null {
+  const marker = element.querySelector(`[data-param], [${HELP_ATTR}]`);
+  if (!marker || !standsForRow(marker)) return null;
+  return rowOf(marker) === element ? marker : null;
 }
 
 function targetId(target: Target): string {
