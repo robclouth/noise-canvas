@@ -5,22 +5,6 @@ const DEFAULT_MACRO_VALUES = [50, 50, 50, 50];
 
 export const factoryPresets: PresetType[] = [
   {
-    id: "init",
-    name: "Init",
-    isFactory: true,
-    version: CURRENT_PRESET_VERSION,
-    steps: [
-      {
-        id: "init-step-1",
-        name: "Step 1",
-        effects: [],
-      },
-    ],
-    linkedParams: [],
-    macroNames: DEFAULT_MACRO_NAMES,
-    macroValues: DEFAULT_MACRO_VALUES,
-  },
-  {
     id: "eraser",
     name: "Eraser",
     isFactory: true,

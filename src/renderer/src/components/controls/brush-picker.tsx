@@ -119,16 +119,21 @@ export function BrushPickerModal({ context, id }: BrushPickerModalProps): React.
         autoFocus
       />
 
+      <Row
+        onClick={() => {
+          addEmptyBrush();
+          close();
+        }}
+        label="New"
+        trailing={
+          <Text size="xs" c="dimmed" pr={4}>
+            empty brush
+          </Text>
+        }
+      />
+
       <ScrollArea.Autosize mah={420} scrollbarSize={4} type="auto">
         <Stack gap={2}>
-          <Row
-            onClick={() => {
-              addEmptyBrush();
-              close();
-            }}
-            label="New"
-          />
-
           {factoryPresets.length > 0 && (
             <>
               <Divider
@@ -205,7 +210,7 @@ export function BrushPickerOpenButton() {
         })
       }
     >
-      New brush
+      Add brush
     </Button>
   );
 }
