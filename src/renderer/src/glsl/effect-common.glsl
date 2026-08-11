@@ -872,30 +872,49 @@ float getBrushTimeCoverage(vec2 unpackedUv, vec4 meta, out float localX) {
   float cellFrames = exp2(meta.b);
   float bandLength = meta.g;
 
-  float binIndex = clamp(floor(unpackedUv.x * destFrameCount / cellFrames), 0.0, bandLength - 1.0);
+  // Recover the fragment's frame as a whole number before choosing its bin.
+  // The inverse map stores an exact integer frame, but it reaches the shader
+  // divided by frameCount and is multiplied back here, and that float32 round
+  // trip can land a hair low — frame 256 comes back as 255.99998. A plain
+  // floor() then attributes the fragment to the previous bin, which at a stamp
+  // edge means neither stamp claims it and one coefficient per band survives
+  // the stroke untouched. Snapping to the frame first, then biasing the
+  // division by half a frame, keeps containment semantics for any UV while
+  // making bin-aligned ones exact.
+  float pixelFrame = floor(unpackedUv.x * destFrameCount + 0.5);
+  float binIndex = clamp(floor((pixelFrame + 0.5) / cellFrames), 0.0, bandLength - 1.0);
   float binEdgeUv  = binIndex * cellFrames / destFrameCount;
   float binWidthUv = cellFrames / destFrameCount;
 
-  // The edge itself can coincide exactly with a brush boundary (both live on
-  // the frame grid), where float noise — and fract() on a wrapping axis, which
-  // folds "one ulp below the start" to "just under one" — would make ownership
-  // arbitrary. Probing slightly inside the bin tests the same membership from a
-  // point clear of every aligned boundary, so the half-open span stays
-  // deterministic: an edge on the brush start belongs to this stamp, an edge on
-  // its end belongs to the next. The probe is a quarter bin capped at two
-  // frames: enough to clear UV float noise on long files, small enough that the
-  // membership bias for unaligned brush edges stays inaudible at coarse bands.
-  float probeUv = binEdgeUv + 0.25 * min(cellFrames, 8.0) / destFrameCount;
-  float probeOff = getEffectiveBrushOffset(vec2(probeUv, unpackedUv.y)).x;
-  float edgeOff = probeOff - (probeUv - binEdgeUv);
-  // The envelope samples at the bin center, not the edge: an edge landing
-  // exactly on the span start (localX 0) would read the envelope's hard-zero
-  // endpoint and silence the stamp's first bin at every band. Centers sit
-  // strictly inside the span, which is also where the envelope was sampled
-  // before edge membership, so stroke fade shapes are unchanged.
-  localX = clamp((edgeOff + 0.5 * binWidthUv) / max(EPSILON, brushSizeUv.x), 0.0, 1.0);
+  // Membership is decided in whole frames, not in UV. A bin edge is an exact
+  // integer frame, and rounding the brush's own edges to frames makes one
+  // stamp's end and the next one's start round to the SAME integer — so every
+  // bin has exactly one owner. Comparing the UV floats instead leaves cracks: a
+  // stamp's end and its neighbour's start are computed by different expressions
+  // whose last bits differ, and a bin edge landing on that boundary can be
+  // disowned by both, which drops one coefficient per band at the seam.
+  float blFrame = floor(brushBottomLeftUv.x * destFrameCount + 0.5);
+  float endFrame = floor((brushBottomLeftUv.x + brushSizeUv.x) * destFrameCount + 0.5);
+  float spanFrames = endFrame - blFrame;
+  float edgeFrame = binIndex * cellFrames;
+  float offFrames = edgeFrame - blFrame;
+  // On a wrapping axis the span continues from the far edge of the canvas, so
+  // fold the offset there — in frames, where it stays exact.
+  if (wrapsTimeAxis()) offFrames = mod(offFrames + destFrameCount, destFrameCount);
+  float edgeOff = offFrames / destFrameCount;
+  // The envelope samples at the center of the bin's overlap with the span, not
+  // at the bin's own center: either endpoint of the envelope is a hard zero, so
+  // a bin clipped by the span — its edge inside but its center past the end, or
+  // the reverse at the start — would clamp onto that zero and drop out,
+  // leaving an unpainted sliver at every seam between adjacent grid stamps. The
+  // overlap center is strictly inside the span for every bin the membership test
+  // admits, and equals the bin center for bins the span wholly contains, so
+  // stroke fade shapes are unchanged.
+  float overlapStart = max(offFrames, 0.0);
+  float overlapEnd = min(offFrames + cellFrames, spanFrames);
+  localX = clamp(0.5 * (overlapStart + overlapEnd) / max(EPSILON, spanFrames), 0.0, 1.0);
 
-  bool inside = probeOff >= 0.0 && probeOff < brushSizeUv.x;
+  bool inside = offFrames >= 0.0 && offFrames < spanFrames;
   // Sub-bin fallback: a brush narrower than this band's cell can contain no bin
   // edge, which would stripe the wide low-frequency bands during a drag. When
   // that happens, paint the single bin whose coefficient is nearest the brush's
