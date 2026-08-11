@@ -1,6 +1,6 @@
 import { Anchor, Box, Button, Group, Paper, Portal, Stack, Text } from "@mantine/core";
 import { host } from "@renderer/lib/host";
-import { anchorSelector } from "@renderer/lib/ui-anchors";
+import { ANCHOR_ATTR } from "@renderer/lib/ui-anchors";
 import {
   UI_AREA_NAMES,
   deepTourFor,
@@ -28,10 +28,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
  * buttons and widgets in the control registry. The inner ones are smaller, so
  * hit-testing prefers them without needing to know which is which.
  */
-type Target =
-  | { kind: "area"; name: UiAreaName; rect: DOMRect }
-  | { kind: "param"; key: ParameterKey; rect: DOMRect }
-  | { kind: "control"; name: UiControlName; rect: DOMRect; instance: { title: string; text: string } | null };
+type Target = { rect: DOMRect; inBar: boolean } & (
+  | { kind: "area"; name: UiAreaName }
+  | { kind: "param"; key: ParameterKey }
+  | { kind: "control"; name: UiControlName; instance: { title: string; text: string } | null }
+);
 
 /**
  * Above every layer the app itself uses — the transport and the Generate bar
@@ -54,6 +55,13 @@ const CARD_BRIDGE = 28;
 /** The card is prose, so it reads at prose sizes rather than the panels' dense scale. */
 const CARD_TITLE_SIZE = 13;
 const CARD_TEXT_SIZE = 12;
+
+/** Past this share of the window, a target's sides are too far from the pointer. */
+const WIDE_FRACTION = 0.4;
+/** A container this wide and no taller is a bar, whose controls sit side by side. */
+const BAR_HEIGHT = 0.25;
+/** Marks the overlay's own layers, which are above everything and never the subject. */
+const LAYER_ATTR = "data-help-layer";
 
 /**
  * Recipes live on GitHub rather than in the build: unlike the manual they grow
@@ -83,52 +91,69 @@ function rowRect(label: Element): DOMRect {
   return label.getBoundingClientRect();
 }
 
-function measure(): Target[] {
-  const targets: Target[] = [];
-
-  for (const name of UI_AREA_NAMES) {
-    // Layout columns are skipped: pointing at one always means one of the
-    // sections inside it, so offering the column too is noise.
-    if (getArea(name).container) continue;
-    const element = document.querySelector(anchorSelector(name));
-    if (!element) continue;
-    const rect = element.getBoundingClientRect();
-    if (rect.width < 8 || rect.height < 8) continue;
-    targets.push({ kind: "area", name, rect });
-  }
-
-  for (const label of document.querySelectorAll("[data-param]")) {
-    const key = label.getAttribute("data-param") as ParameterKey;
-    if (!parameterDefs[key]) continue;
-    const rect = rowRect(label);
-    if (rect.width < 8 || rect.height < 8) continue;
-    targets.push({ kind: "param", key, rect });
-  }
-
-  for (const element of document.querySelectorAll(`[${HELP_ATTR}]`)) {
-    const name = element.getAttribute(HELP_ATTR) as UiControlName;
-    if (!UI_CONTROLS[name]) continue;
-    const rect = element.getBoundingClientRect();
-    if (rect.width < 4 || rect.height < 4) continue;
-    targets.push({ kind: "control", name, rect, instance: readHelpInstance(element) });
-  }
-
-  return targets;
+/** A marker on a text label stands for its whole row; anything else is its own box. */
+function markerRect(element: Element): DOMRect {
+  return element.tagName === "P" ? rowRect(element) : element.getBoundingClientRect();
 }
 
 /**
- * The smallest thing under the pointer. Targets nest — a control inside a
- * section inside a lane — and the innermost is always the more specific
- * answer to "what is this?".
+ * Whether the control sits in a bar that spans the window. Its neighbours are
+ * then to the left and right of it, which is where the card must not go.
  */
-function hitTest(targets: Target[], x: number, y: number): Target | null {
-  let best: Target | null = null;
-  for (const target of targets) {
-    const { rect } = target;
-    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue;
-    if (!best || rect.width * rect.height < best.rect.width * best.rect.height) best = target;
+function inWideBar(element: Element): boolean {
+  const { innerWidth: vw, innerHeight: vh } = window;
+  let node: Element | null = element.parentElement;
+  for (let depth = 0; depth < 6 && node; depth++) {
+    const rect = node.getBoundingClientRect();
+    if (rect.width > vw * WIDE_FRACTION && rect.height < vh * BAR_HEIGHT) return true;
+    node = node.parentElement;
   }
-  return best;
+  return false;
+}
+
+const AREA_NAMES = new Set<string>(UI_AREA_NAMES);
+
+/**
+ * What the pointer is over: the topmost element at that point, then outwards
+ * through its ancestors until one is marked. Reading the stacking order rather
+ * than a list of rectangles is what makes an open menu answer for itself
+ * instead of for the controls it covers, and it picks the innermost marker
+ * without having to compare areas.
+ */
+function targetAt(x: number, y: number): Target | null {
+  for (const element of document.elementsFromPoint(x, y)) {
+    // The overlay's own layers sit above everything and are not the subject.
+    if (element.closest(`[${LAYER_ATTR}]`)) continue;
+
+    const key = element.getAttribute("data-param");
+    if (key && parameterDefs[key as ParameterKey]) {
+      return { kind: "param", key: key as ParameterKey, rect: rowRect(element), inBar: inWideBar(element) };
+    }
+
+    const name = element.getAttribute(HELP_ATTR);
+    if (name && UI_CONTROLS[name as UiControlName]) {
+      return {
+        kind: "control",
+        name: name as UiControlName,
+        rect: markerRect(element),
+        instance: readHelpInstance(element),
+        inBar: inWideBar(element),
+      };
+    }
+
+    // Layout columns are skipped: pointing at one always means one of the
+    // sections inside it, so offering the column too is noise.
+    const anchor = element.getAttribute(ANCHOR_ATTR);
+    if (anchor && AREA_NAMES.has(anchor) && !getArea(anchor as UiAreaName).container) {
+      return {
+        kind: "area",
+        name: anchor as UiAreaName,
+        rect: element.getBoundingClientRect(),
+        inBar: inWideBar(element),
+      };
+    }
+  }
+  return null;
 }
 
 type Point = { x: number; y: number };
@@ -197,19 +222,19 @@ function clamp(value: number, min: number, max: number): number {
 
 type Placement = { top: number; left: number };
 
-/** Past this share of the window, a target's sides are too far from the pointer. */
-const WIDE_FRACTION = 0.4;
-
 /**
  * Placed from the target alone, centred on it, on the side that faces the
  * middle of the window: a target on the left gets the card to its right, one
- * low in the window gets it above. Wide targets are stacked rather than put
- * beside, because the side of a bar that spans the window is nowhere near it.
+ * low in the window gets it above.
+ *
+ * Anything in a bar is stacked above or below instead of put beside. A bar's
+ * controls sit shoulder to shoulder, so a card beside one covers its
+ * neighbours — which are exactly what you are about to point at next.
  *
  * Takes the card's measured height rather than a guess, so the clamps against
  * the window edges land where the card actually ends.
  */
-function placePopover(rect: DOMRect, height: number): Placement {
+function placePopover(rect: DOMRect, height: number, stack: boolean): Placement {
   const { innerWidth: vw, innerHeight: vh } = window;
   const midX = rect.left + rect.width / 2;
   const midY = rect.top + rect.height / 2;
@@ -234,8 +259,8 @@ function placePopover(rect: DOMRect, height: number): Placement {
     return null;
   };
 
-  const wide = rect.width > vw * WIDE_FRACTION;
-  return (wide ? (stacked() ?? beside()) : (beside() ?? stacked())) ?? { top: centredY, left: centredX };
+  const vertical = stack || rect.width > vw * WIDE_FRACTION;
+  return (vertical ? (stacked() ?? beside()) : (beside() ?? stacked())) ?? { top: centredY, left: centredX };
 }
 
 export function HelpOverlay(): React.JSX.Element | null {
@@ -309,10 +334,10 @@ export function HelpOverlay(): React.JSX.Element | null {
         if (near || (from && aimingAtCard(from, to, card))) return;
       }
 
-      // Measured fresh each move rather than once when the overlay opens, so
-      // menus and popovers opened since are covered, and a panel scrolled
-      // under the pointer still highlights where it now is.
-      const hit = hitTest(measure(), clientX, clientY);
+      // Resolved fresh each move rather than measured once when the overlay
+      // opens, so menus and popovers opened since are covered, and a panel
+      // scrolled under the pointer still highlights where it now is.
+      const hit = targetAt(clientX, clientY);
       // Empty space keeps the last highlight, so crossing a gap on the way to
       // the card doesn't blink it away.
       if (hit) {
@@ -352,6 +377,7 @@ export function HelpOverlay(): React.JSX.Element | null {
       {/* One transparent catcher over everything, so tracking stays continuous
           across the bright cut-out and no click reaches the app underneath. */}
       <Box
+        {...{ [LAYER_ATTR]: "" }}
         pos="fixed"
         top={0}
         left={0}
@@ -393,12 +419,13 @@ export function HelpOverlay(): React.JSX.Element | null {
         {card && rect && (
           <Paper
             ref={cardRef}
+            {...{ [LAYER_ATTR]: "" }}
             withBorder
             shadow="md"
             p="sm"
             w={POPOVER_WIDTH}
             pos="fixed"
-            style={{ ...placePopover(rect, cardHeight), transition: EASE, cursor: "default" }}
+            style={{ ...placePopover(rect, cardHeight, target.inBar), transition: EASE, cursor: "default" }}
             // Freezes the highlight once the pointer is on the card, so its
             // buttons stay reachable without the selection sliding away.
             onMouseMove={(event) => event.stopPropagation()}

@@ -145,8 +145,8 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
       {...anchorProps("file-header")}
     >
       <Group gap="xs" style={{ minWidth: 0, flex: 1 }}>
-        <Tooltip help="file-name" detail={tooltipLabel}>
-          <Box style={{ minWidth: 0, flex: 1 }} {...helpProps("file-name")}>
+        <Tooltip label={tooltipLabel}>
+          <Box style={{ minWidth: 0, flex: 1 }}>
             <TruncatedFilename displayName={displayName} isDirty={isDirty} />
           </Box>
         </Tooltip>

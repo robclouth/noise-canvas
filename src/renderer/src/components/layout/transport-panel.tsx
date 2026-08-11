@@ -186,7 +186,14 @@ export const TransportPanel = memo(() => {
       {/* The transport is the one bar that is always visible, whatever is open. */}
       <HelpActionIcon
         help="transport-help"
-        onClick={() => useStore.getState().setHelpOverlayOpen(true)}
+        // Kept from the document, so an open menu or popover never sees an
+        // outside click and closes: asking what something is has to work while
+        // the thing you are asking about is still on screen.
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          useStore.getState().setHelpOverlayOpen(true);
+        }}
         size={uiSize}
         variant="subtle"
         color="dark.2"

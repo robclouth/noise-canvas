@@ -55,11 +55,6 @@ export const UI_CONTROLS = {
   },
 
   // File header
-  "file-name": {
-    label: "File name",
-    description: "Names the open file, and marks it with a dot while it has unsaved edits.",
-    manualSection: "working-with-files",
-  },
   "file-onsets": {
     label: "Onsets",
     description: "Sets how far down this file's level range a hit still counts as an onset.",
