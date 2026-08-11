@@ -94,6 +94,7 @@ The shader blends two approaches based on `|scaleX|`:
 ```
 
 Where carrier correction is:
+
 - Positive scaleX: `2π·f_src·(srcUv - dstUv/scaleX)·T`
 - Negative scaleX: `-2π·f_src·(srcUv + dstUv)·T`
 
@@ -142,6 +143,7 @@ Without IF correction, time stretching by factor S shifts every component's freq
 ### 2. Additive IF correction accumulates error
 
 The additive correction `dphi × stretchFrames` uses a per-frame IF estimate (from phase derivative) and multiplies by the total offset from the brush start. Any error in dphi gets amplified by stretchFrames, which grows linearly. This causes:
+
 - **Position-dependent quality**: kicks near brush start sound different from kicks near the end
 - **Swooping artifacts**: noisy dphi from transients creates pitch sweeps when multiplied by large stretchFrames
 
@@ -169,18 +171,18 @@ When using the additive approach, a wider finite difference for dphi estimation 
 
 Test script: `test-phase.mjs` at project root. Uses a real drum loop sample and rubberband as reference.
 
-| Operation | Metric | Score | Method |
-|---|---|---|---|
-| Identity (scaleX=1) | respec | 1.000 | all |
-| Pure reversal (scaleX=-1) | respec | 0.9999 | additive (via blend) |
-| Pure stretch (scaleX=2) | respec | 0.9985 | scale-by-S (via blend) |
-| Rev+stretch (scaleX=-2) | respec | 0.9938 | scale-by-S (via blend) |
-| Pitch up octave (scaleY=2) | respec | 0.999 | freqRatio |
-| Pitch down octave (scaleY=0.5) | respec | 0.995 | freqRatio |
-| Stretch+pitch (2, 2) | respec | 0.999 | scale-by-S + freqRatio |
-| Shift invariance | variance | 0.018 | additive |
-| Sine 440→880Hz | r_env | 0.993 | freqRatio |
-| Sine 2× stretch | r_env | 0.999 | scale-by-S |
+| Operation                      | Metric   | Score  | Method                 |
+| ------------------------------ | -------- | ------ | ---------------------- |
+| Identity (scaleX=1)            | respec   | 1.000  | all                    |
+| Pure reversal (scaleX=-1)      | respec   | 0.9999 | additive (via blend)   |
+| Pure stretch (scaleX=2)        | respec   | 0.9985 | scale-by-S (via blend) |
+| Rev+stretch (scaleX=-2)        | respec   | 0.9938 | scale-by-S (via blend) |
+| Pitch up octave (scaleY=2)     | respec   | 0.999  | freqRatio              |
+| Pitch down octave (scaleY=0.5) | respec   | 0.995  | freqRatio              |
+| Stretch+pitch (2, 2)           | respec   | 0.999  | scale-by-S + freqRatio |
+| Shift invariance               | variance | 0.018  | additive               |
+| Sine 440→880Hz                 | r_env    | 0.993  | freqRatio              |
+| Sine 2× stretch                | r_env    | 0.999  | scale-by-S             |
 
 ## Ideas for Further Improvement
 
@@ -211,6 +213,7 @@ The shader's `interpolateComplex` function uses log-magnitude interpolation for 
 ### 6. Phase vocoder pre-pass for high-quality stretch (high impact, high complexity)
 
 Instead of manipulating gaborator coefficients directly, implement a proper phase vocoder as a separate processing step:
+
 1. Synthesize the source region to audio (via gaborator)
 2. Run a phase vocoder (overlap-add with phase propagation and transient detection)
 3. Re-analyze the result with gaborator

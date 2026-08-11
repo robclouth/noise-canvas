@@ -32,13 +32,15 @@ All the parameters in the app have tooltips, and how to use a tool should be mos
 7. [Working with Files](#working-with-files)
    - [Splitting a File](#splitting-a-file)
    - [Stem Groups](#stem-groups)
+   - [Onsets](#onsets)
    - [Navigating the Canvas](#navigating-the-canvas)
 8. [History](#history)
 9. [Transport and Output](#transport-and-output)
 10. [Menus](#menus)
 11. [Keyboard Shortcuts](#keyboard-shortcuts)
-12. [Where Things Are Saved](#where-things-are-saved)
-13. [Working with Ableton Live](#working-with-ableton-live)
+12. [Getting Help](#getting-help)
+13. [Where Things Are Saved](#where-things-are-saved)
+14. [Working with Ableton Live](#working-with-ableton-live)
 
 ---
 
@@ -106,13 +108,13 @@ Brushes live in the right-hand sidebar. You can have as many open as you like; e
 - **Click** a row to make it active. **Double-click** the name to rename.
 - The **⋮ menu** offers Rename, Duplicate, Save, Save as…, Load referenced files, Assign key…, Remove key, and Close.
 - **Drag** rows to reorder them.
-- **New brush** at the bottom of the list opens the preset picker.
+- **Add brush** at the bottom of the list opens the picker: **New** for an empty brush, or any preset below it.
 
 **Hotkeys.** Any brush can be bound to a letter key (⋮ → _Assign key…_, then press a letter). Pressing that letter anywhere in the app jumps straight to that brush. The number keys **1–9 and 0** always select the first ten brushes in the list, no assignment needed.
 
 **The library.** Brushes are saved as JSON presets in `Documents/Noise Canvas/Presets/`. A brush loaded from the library remembers where it came from — _Save_ overwrites it, _Save as…_ creates a new one. A dirty marker appears when the brush has drifted from its saved version. A set of factory presets ships with the app:
 
-> Init · Eraser · Booster · Restore · Stereo Widening · Compressor · Noise Gate · Smudge · Octave Up · Octave Down · Reverse · Low-Pass Sweep · High-Pass · Harmonics · Reverb (Blur) · Echo · Paint Noise · Paint Tone · Flow · Pixel Sort · Tremolo · Step Gate · Dynamic Bloom · 3D Orbit · Shimmer · Morph (Macros) · Sampler · Convolution
+> Eraser · Booster · Restore · Stereo Widening · Compressor · Noise Gate · Smudge · Octave Up · Octave Down · Reverse · Low-Pass Sweep · High-Pass · Harmonics · Reverb (Blur) · Echo · Paint Noise · Paint Tone · Flow · Pixel Sort · Tremolo · Step Gate · Dynamic Bloom · 3D Orbit · Shimmer · Morph (Macros) · Sampler · Convolution
 
 Some factory brushes reference bundled audio (an IR, a pad loop). Those load automatically; _Load referenced files_ re-opens them if you closed them.
 
@@ -387,7 +389,7 @@ Modulator parameters are themselves modulatable — you can modulate modulator 2
 - **Drag** a slider to change it; **hold Shift while dragging** to snap between that parameter's preset values (musical beat divisions, semitone intervals, and so on).
 - **Click the dropdown icon** next to a numeric value to pick a preset value from a list.
 - **Double-click the label** to reset a parameter to its default — this also clears every modulation amount on it.
-- **Click the label** to open the parameter menu: modulation amounts, reset, exclude-from-randomization, and step linking.
+- **Click the label** to open the parameter menu: modulation amounts, reset, exclude-from-randomization, step linking, and a **book icon** that opens this manual at the section explaining that parameter.
 
 ### Randomization
 
@@ -413,6 +415,7 @@ Open files stack vertically in the canvas column. Each header gives you:
 
 - The **filename** (italic when it has unsaved changes) and a **resolution badge**.
 - **BPM** – this file's tempo, which drives grid snapping and every beat-based parameter.
+- **Onsets** – how sensitive the hit detector is for this file. See [Onsets](#onsets).
 - **Split** (scissors) – see below.
 - **Duplicate** – an editable copy, with its own history.
 - **Minimize** – collapse it into the palette bar at the bottom of the canvas area.
@@ -440,6 +443,20 @@ Every split produces a **stem group**: the parts stay ordinary files — every b
 - **Close group** – closes every member with one confirmation.
 
 This is the resample loop: split, paint on one part, merge back.
+
+### Onsets
+
+Every file is scanned for **onsets** — the moments where a new sound starts. They're detected from the analysis itself, not from the tempo, so they follow what's actually in the audio however loosely it was played.
+
+Onsets show up in three places:
+
+- **The onset strip** – a thin row of markers directly above the spectrogram, one line per detected hit. Brighter lines are stronger onsets.
+- **Onsets sensitivity** – the **Onsets** control in the file header. It sets how far down this file's own level range a hit still counts: **0%** keeps only the loudest, **100%** keeps everything the detector found. Because the range is per-file, the same percentage means something comparable on a quiet pad and a hot drum loop. It applies to that file's path, so it survives closing and reopening.
+- **Onset snapping** – set the time grid (**Beats**) to **Onsets** in the transport bar. Strokes then snap to detected hits instead of beat divisions, so a stamp lands exactly on a transient rather than near it. Pair it with **Anchor = Corner** in [Options](#options) so the cursor is the stroke's own onset.
+
+Onsets also drive the [warp algorithms](#warp-algorithms): **Neutral** re-anchors phase at each detected onset when it moves audio, which is what keeps a moved drum hit cracking instead of smearing into pre-echo. Lower the sensitivity if a busy file is being over-anchored; raise it if quiet hits are smearing.
+
+Onsets are recomputed for the region around a stroke after you paint, so they track your edits rather than describing the file you loaded.
 
 ### Navigating the Canvas
 
@@ -492,11 +509,12 @@ The transport bar, left to right:
 - **Link** – toggle **Ableton Link** to sync tempo and start/stop with other Link-enabled apps on the network. The tooltip shows the peer count; **right-click** the button for latency compensation.
 - **Play / Stop** (`Space`), **Loop**, and **Auto-play stroke** (the brush icon) — when active, each stroke automatically plays back the region you just painted.
 - **Playback time**.
-- **Beats / Snap** and **Semis / Snap** – grid spacing and snapping per axis. Set the semitone grid to **Scale** to snap to the selected scale instead of a fixed interval.
+- **Beats / Snap** and **Semis / Snap** – grid spacing and snapping per axis. Set the semitone grid to **Scale** to snap to the selected scale instead of a fixed interval, and the beat grid to **Onsets** to snap to the file's detected hits instead of a division (see [Onsets](#onsets)).
 - **Swing** – swing feel for the time grid. 0% is straight, ~67% is a triplet feel, 100% shifts odd grid lines by half a cell.
 - **Tonic / Type** – the scale used for pitch snapping and for scale-based effects and modulation.
 - **Output meter** and **gain-reduction meter**.
 - **Limiter** – bakes a true-peak limiter into the synthesized audio so playback and export can't clip. Bypass it to hear or print the raw synthesis.
+- **?** – outlines every area of the window at once. See [Getting Help](#getting-help).
 
 Audio is resynthesized incrementally after every stroke, so what you hear is always the real thing, not a preview.
 
@@ -526,6 +544,11 @@ Audio is resynthesized incrementally after every stroke, so what you hear is alw
 
 - **Compact UI** (`Cmd/Ctrl+Shift+C`).
 
+**Help**
+
+- **Manual** (`Cmd/Ctrl+/`) – open this document in a window inside the app.
+- **Run Walkthrough** – replay the first-run tour at any time. See [Getting Help](#getting-help).
+
 **Updates**
 
 **Check for Updates…** lives in the **Noise Canvas** app menu on macOS and under **Help** everywhere else, and will tell you whether a newer version exists. Installing it is a manual job: grab the new build from the [Releases page](https://github.com/robclouth/noise-canvas/releases) and replace your copy. Because the app isn't code-signed, it can't update itself in place.
@@ -536,22 +559,47 @@ Audio is resynthesized incrementally after every stroke, so what you hear is alw
 
 File and Edit shortcuts (`Cmd/Ctrl+N`, `+O`, `+S`, `+W`, `+D`, …) are listed under [Menus](#menus).
 
-| Key                   | Action                                  |
-| --------------------- | --------------------------------------- |
-| `Space`               | Play / stop                             |
-| `Arrow keys`          | Move the brush by one grid cell         |
-| `Enter`               | Stamp the brush at the current position |
-| `-` / `=`             | Decrease / increase the time grid       |
-| `Shift` + `-` / `=`   | Decrease / increase the pitch grid      |
-| `Tab` / `Shift+Tab`   | Next / previous file                    |
-| `1`–`9`, `0`          | Select the first ten brushes            |
-| `a`–`z`               | Select the brush bound to that key      |
-| Hold `Shift` + click  | Pick a source file and position         |
-| `Cmd`/`Ctrl` + scroll | Zoom                                    |
-| Right-click drag      | Pan                                     |
-| `Cmd/Ctrl+Z`          | Undo                                    |
-| `Shift+Cmd/Ctrl+Z`    | Redo                                    |
-| `Cmd/Ctrl+Shift+C`    | Toggle compact UI                       |
+| Key                   | Action                                                 |
+| --------------------- | ------------------------------------------------------ |
+| `Space`               | Play / stop                                            |
+| `Arrow keys`          | Move the brush by one grid cell                        |
+| `Enter`               | Stamp the brush at the current position                |
+| `-` / `=`             | Decrease / increase the time grid                      |
+| `Shift` + `-` / `=`   | Decrease / increase the pitch grid                     |
+| `Tab` / `Shift+Tab`   | Next / previous file                                   |
+| `1`–`9`, `0`          | Select the first ten brushes                           |
+| `a`–`z`               | Select the brush bound to that key                     |
+| Hold `Shift` + click  | Pick a source file and position                        |
+| `Cmd`/`Ctrl` + scroll | Zoom                                                   |
+| Right-click drag      | Pan                                                    |
+| `Cmd/Ctrl+Z`          | Undo                                                   |
+| `Shift+Cmd/Ctrl+Z`    | Redo                                                   |
+| `Cmd/Ctrl+Shift+C`    | Toggle compact UI                                      |
+| `?`                   | Outline every area (see [Getting Help](#getting-help)) |
+| `Cmd/Ctrl+/`          | Open this manual                                       |
+
+---
+
+## Getting Help
+
+Five places, each answering a different question.
+
+| Surface               | How you get there                                         | What it answers                     |
+| --------------------- | --------------------------------------------------------- | ----------------------------------- |
+| **Parameter tooltip** | Hover any control for a second                            | What does this one control do?      |
+| **Parameter menu**    | Click a parameter's label, then the book icon             | …and where is it explained in full? |
+| **`?` overlay**       | The **?** button in the transport, or the `?` key         | What is all this?                   |
+| **Deep tour**         | Click an area in the `?` overlay → **Show me around**     | How does this part work?            |
+| **Walkthrough**       | Offered on first launch; **Help → Run Walkthrough** after | Where is everything?                |
+| **This manual**       | **Help → Manual** (`Cmd/Ctrl+/`), or any book icon        | What does this do, exactly?         |
+
+The `?` overlay is the hub: it outlines every region of the window at once and labels each one. Clicking a region offers that region's tour, if it has one, and jumps into the right part of this manual either way. Press `?` or `Esc` to close it.
+
+Deep tours don't ask you to do anything — they run straight through their area. The first-run walkthrough does, twice: it makes you add an effect and paint a stroke, so you finish it having built a working brush by hand.
+
+The manual is bundled with the app, so it works offline and always describes the build you're running rather than whatever is on the default branch. It has a search box at the top that filters to matching sections.
+
+Separately, [**Recipes**](./recipes.md) covers what to actually _do_ with all this — start-to-finish walkthroughs of specific moves. Those live online rather than in the build, because they grow between releases. The `?` overlay links to the ones relevant to whatever area you clicked.
 
 ---
 

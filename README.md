@@ -4,18 +4,18 @@
 
 Noise Canvas is a standalone tool for doing sound design. It loads audio files, shows them as **spectrograms**, and lets you paint transformations and effects directly onto the sound — in beats and semitones, not samples and Hz.
 
-![Noise Canvas Screenshot](./images/screenshot.jpeg)
+![Noise Canvas Screenshot](./docs/images/screenshot.webp)
 
-## 📖 [Read the manual →](./docs/manual.md)
+## 📖 [Read the manual →](./docs/manual.md) · 🍳 [Recipes →](./docs/recipes.md)
 
-Or just open it up and play around. All the parameters have got tooltips. I'm of the belief that how to use a tool should be mostly obvious just by using it. If it's not then I need to fix something.
+Or just open it up and play around. All the parameters have got tooltips, there's a walkthrough on first launch, and `?` outlines every part of the window at once. I'm of the belief that how to use a tool should be mostly obvious just by using it. If it's not then I need to fix something.
 
 ---
 
 ## What it does
 
 - **Paint on spectrograms.** Brushes stamp effects across time and pitch, snapped to a musical grid and scale.
-- **13 spectral effects** — dynamics, transform, overtones, blur, clone, synthesize, evolve, binaural, sort, transmute, waveshape, convolve, align — stackable and reorderable, several instances at a time.
+- **11 spectral effects** — dynamics, transform, overtones, blur, clone, synthesize, evolve, binaural, sort, convolve, align — stackable and reorderable, several instances at a time.
 - **Multi-step brushes** with four macros, a preset library, and hotkeys.
 - **Deep modulation** — three per-pixel 2D modulators (patterns, procedural textures, your own images, envelope follower, sequencer), plus macros, pen pressure/tilt, and contextual sources.
 - **Branching history** that survives restarts, with favorites and per-branch audio export.
@@ -23,6 +23,26 @@ Or just open it up and play around. All the parameters have got tooltips. I'm of
 - **Runs inside Ableton Live** as a Live 12 extension — right-click a clip, edit, render back into the set. Also works as an external sample editor, and syncs over Ableton Link.
 
 Everything runs on the GPU and resynthesizes after every stroke, so you hear the real audio immediately.
+
+---
+
+## How it works
+
+Two decisions shape how everything in here sounds.
+
+### Phase is not thrown away
+
+A spectrogram you can look at is only magnitude — a picture of where the energy is. That's not enough to rebuild a sound from, which is why tools that work from the picture alone tend to come back sounding smeared and metallic.
+
+Every cell here carries **magnitude _and_ phase, for left and right**, and every effect operates on all of it. Nothing is ever reconstructed from an image. That's the difference between editing a recording and re-synthesising an impression of one: transients stay sharp when you move them, stereo and 3D placement mean something, and what comes out is the audio you edited.
+
+It's also why every brush has a **Warp Algorithm** setting. Shifting sound in time or pitch means deciding what its phase should now be, and there's no single right answer — the rule that keeps a drum hit cracking is the wrong rule for a sustained pad. So you get a handful of them and pick by ear.
+
+### Time is beats, pitch is semitones
+
+The analysis is a **Constant-Q Transform** rather than an FFT, which means the vertical axis is genuinely pitch: a semitone is the same distance anywhere on the canvas, low or high. Constant-Q also trades resolution the way hearing does — accurate pitch down low, accurate timing up top — so transients and harmonics come out sounding natural instead of carrying the usual FFT smear.
+
+Horizontally you're in beats, not seconds. Every file has a tempo, the grid snaps to beat divisions with swing, and pitch snaps to a scale. So a brush that's "one beat wide and an octave tall" stays that regardless of what you load it onto.
 
 ---
 
@@ -112,9 +132,7 @@ Full details in the [manual](./docs/manual.md#working-with-ableton-live); build 
 - All DSP runs on the GPU as **GLSL shaders**, ping-ponging between float FBOs. The brush, effect chain, blending, and modulation are all one render graph. Shaders are precompiled and warmed on a worker at startup so the first stroke isn't a freeze.
 - Analysis and resynthesis are handled by a native addon around **[Gaborator](https://gaborator.com/)**, which implements the Constant-Q Transform. The same addon does HPSS, NMF, spectrogram merging, ONNX-based AI separation, and the true-peak limiter.
 - Audio decoding via **ffmpeg**; playback via **Tone.js**; tempo sync via **Ableton Link**.
-- Complex coefficients are stored as magnitude/phase pairs at full 32-bit float precision, with phase unwrapped along time per band.
-
-Why Constant-Q rather than FFT: it adjusts time resolution based on frequency — low frequencies get accurate pitch, high frequencies get accurate timing. That matches human hearing and avoids the artificial "FFT sound," producing more natural transients and harmonics.
+- Complex coefficients are stored as magnitude/phase pairs in RGBA32F textures, phase unwrapped along time per band. The float precision isn't optional — the accumulated phase values don't survive half-float.
 
 ---
 
@@ -183,6 +201,29 @@ npm run ext:package    # produces out-ext/noise-canvas.ablx
 ```
 
 See [`src/extension/README.md`](./src/extension/README.md).
+
+---
+
+## Related Projects
+
+Other tools that treat sound as something you can look at and draw on. Worth
+your time if this one is.
+
+- **[MetaSynth](https://uisoftware.com/metasynth/)** — its Image Synth paints
+  sound directly, mapping luminance to loudness and colour to stereo position.
+  The best-known take on the idea.
+- **[Virtual ANS](https://warmplace.ru/soft/ans/)** — Alexander Zolotov's
+  emulation of the ANS, Evgeny Murzin's photoelectronic synth from 1938, where
+  you scratch away emulsion to draw on a spectral surface. Still the purest
+  version of the concept.
+- **[Photosounder](https://www.photosounder.com/)** — sound and image as the
+  same editable object, in both directions.
+- **[HighC](https://highc.org/)** — and UPIC behind it: composing by drawing a
+  shape rather than notating a note.
+- **[iZotope RX](https://www.izotope.com/products/rx.html)** — spectral editing
+  as retouching: the idea that you can go in and fix one sound in a mix.
+- **[SpectraLayers](https://www.steinberg.net/spectralayers/)** — brush-based
+  spectral editing alongside unmixing a file into its parts.
 
 ---
 
