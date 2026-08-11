@@ -71,6 +71,7 @@ export interface IpcRendererEvents {
   "save-active-file-as": () => void;
   "save-active-file-version": () => void;
   "export-history": () => void;
+  "export-image": () => void;
   undo: () => void;
   redo: () => void;
   "restore-original": () => void;

@@ -4,6 +4,7 @@ import { EFFECT_KEYS, EffectType } from "@renderer/effects/types";
 import { EFFECT_COLORS, EFFECT_DESCRIPTIONS, EFFECT_LABELS } from "@renderer/lib/constants";
 import { getFileColor, openFiles } from "@renderer/store/files";
 import { BrushPickerModal } from "./controls/brush-picker";
+import { ImageExportModal } from "./image-export-modal";
 
 const HIDDEN_EFFECTS = new Set(["transmute", "waveshape"]);
 const AVAILABLE_EFFECTS = EFFECT_KEYS.filter((key) => key !== "passthrough" && !HIDDEN_EFFECTS.has(key)) as Exclude<
@@ -124,4 +125,5 @@ export const modals = {
   addEffect: AddEffectModal,
   brushPicker: BrushPickerModal,
   filePicker: FilePickerModal,
+  imageExport: ImageExportModal,
 };

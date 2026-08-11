@@ -105,6 +105,12 @@ export function createMenu(window: BrowserWindow, state: MenuState) {
         },
         { type: "separator" },
         {
+          label: "Export Image...",
+          click: () => {
+            webContentsSend(window, "export-image");
+          },
+        },
+        {
           label: "Export History...",
           click: () => {
             webContentsSend(window, "export-history");

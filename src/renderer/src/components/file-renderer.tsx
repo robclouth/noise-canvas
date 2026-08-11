@@ -43,6 +43,8 @@ import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
 import { withPlatformDefines } from "../lib/shader-utils";
+import { renderExportImage as renderExportImageToCanvas, type ImageExportOptions } from "../lib/image-export";
+import type { PosterInfo } from "../lib/image-export-poster";
 import { captureMaterialToCanvas } from "../lib/snapshot-capture";
 import { SourceFileInfo, StrokeRenderer, StrokeTextures } from "../lib/stroke-renderer";
 import { penState } from "../lib/pen-state";
@@ -106,6 +108,15 @@ export interface FileRendererHandle {
   captureSnapshot: () => Promise<boolean>;
   /** Schedules a throttled snapshot re-capture (no-op while the view is live). */
   refreshSnapshot: () => void;
+  /**
+   * Renders a standalone still image of the committed spectrogram at export
+   * resolution. Resolves null when the renderer isn't ready yet.
+   */
+  renderExportImage: (
+    options: ImageExportOptions,
+    posterInfo: PosterInfo,
+    onProgress?: (fraction: number) => void,
+  ) => Promise<HTMLCanvasElement | null>;
 }
 
 /**
@@ -598,6 +609,31 @@ const FileRendererInner = memo(
       return ok;
     };
     captureSnapshotRef.current = captureSnapshot;
+
+    /**
+     * Renders the committed spectrogram as a still image for export. Reads the
+     * same FBO the view samples, so what is painted is what gets exported.
+     */
+    const renderExportImage = async (
+      options: ImageExportOptions,
+      posterInfo: PosterInfo,
+      onProgress?: (fraction: number) => void,
+    ): Promise<HTMLCanvasElement | null> => {
+      const gl = glRef.current;
+      const strokeRenderer = strokeRendererRef.current;
+      if (!gl || !strokeRenderer || !strokeRenderer.getIsInitialized()) return null;
+      return renderExportImageToCanvas(
+        gl,
+        {
+          texture: strokeRenderer.getDisplayTexture(false),
+          metadataTexture: strokeRenderer.getTextures().metadata,
+          spectrogramData,
+        },
+        options,
+        posterInfo,
+        onProgress,
+      );
+    };
 
     /**
      * The main render loop, called on every frame.
@@ -1184,6 +1220,7 @@ const FileRendererInner = memo(
       getDirtyPixelRanges: () => strokeRendererRef.current?.getDirtyPixelRanges() ?? null,
       captureSnapshot,
       refreshSnapshot: scheduleSnapshotRefresh,
+      renderExportImage,
     }));
 
     /**

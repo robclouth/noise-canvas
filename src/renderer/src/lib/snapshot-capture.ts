@@ -22,15 +22,7 @@ let quadMesh: Mesh | null = null;
 let quadCamera: OrthographicCamera | null = null;
 let captureTarget: WebGLRenderTarget | null = null;
 
-function ensureCaptureResources(
-  width: number,
-  height: number,
-): {
-  scene: Scene;
-  mesh: Mesh;
-  camera: OrthographicCamera;
-  target: WebGLRenderTarget;
-} {
+function ensureQuad(): { scene: Scene; mesh: Mesh; camera: OrthographicCamera } {
   if (!quadScene || !quadMesh || !quadCamera) {
     quadCamera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
     quadCamera.position.z = 1;
@@ -38,17 +30,50 @@ function ensureCaptureResources(
     quadMesh = new Mesh(new PlaneGeometry(2, 2));
     quadScene.add(quadMesh);
   }
+  return { scene: quadScene, mesh: quadMesh, camera: quadCamera };
+}
+
+function ensureCaptureResources(width: number, height: number): WebGLRenderTarget {
   if (!captureTarget) {
-    captureTarget = new WebGLRenderTarget(width, height, {
-      type: UnsignedByteType,
-      depthBuffer: false,
-      stencilBuffer: false,
-      colorSpace: NoColorSpace,
-    });
+    captureTarget = createByteTarget(width, height);
   } else if (captureTarget.width !== width || captureTarget.height !== height) {
     captureTarget.setSize(width, height);
   }
-  return { scene: quadScene, mesh: quadMesh, camera: quadCamera, target: captureTarget };
+  return captureTarget;
+}
+
+/**
+ * An 8-bit RGBA render target with no color-space conversion, so a raw shader's
+ * output bytes reach the readback untouched.
+ */
+export function createByteTarget(width: number, height: number): WebGLRenderTarget {
+  return new WebGLRenderTarget(width, height, {
+    type: UnsignedByteType,
+    depthBuffer: false,
+    stencilBuffer: false,
+    colorSpace: NoColorSpace,
+  });
+}
+
+/**
+ * Renders `material` as a fullscreen quad into `target` and reads the result
+ * back asynchronously (PBO + fence). Rows run bottom-to-top, the order
+ * readPixels returns them in.
+ */
+export async function renderMaterialToBytes(
+  gl: WebGLRenderer,
+  material: RawShaderMaterial,
+  target: WebGLRenderTarget,
+): Promise<Uint8Array> {
+  const { scene, mesh, camera } = ensureQuad();
+  mesh.material = material;
+
+  const prevTarget = gl.getRenderTarget();
+  gl.setRenderTarget(target);
+  gl.render(scene, camera);
+  gl.setRenderTarget(prevTarget);
+
+  return readRenderTargetBytesAsync(gl, target, 0, 0, target.width, target.height);
 }
 
 /**
@@ -67,15 +92,8 @@ export async function captureMaterialToCanvas(
   const ctx = canvas.getContext("2d");
   if (!ctx) return false;
 
-  const { scene, mesh, camera, target } = ensureCaptureResources(width, height);
-  mesh.material = material;
-
-  const prevTarget = gl.getRenderTarget();
-  gl.setRenderTarget(target);
-  gl.render(scene, camera);
-  gl.setRenderTarget(prevTarget);
-
-  const pixels = await readRenderTargetBytesAsync(gl, target, 0, 0, width, height);
+  const target = ensureCaptureResources(width, height);
+  const pixels = await renderMaterialToBytes(gl, material, target);
 
   canvas.width = width;
   canvas.height = height;

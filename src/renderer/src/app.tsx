@@ -8,6 +8,7 @@ import { Canvas, RootState, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
+import { openImageExportModal } from "./components/image-export-modal";
 import { CanvasPanel, PaletteBar } from "./components/layout/canvas-panel";
 import { ExtensionMenuBar } from "./components/layout/menu-bar";
 import { TransportPanel } from "./components/layout/transport-panel";
@@ -173,6 +174,12 @@ function App(): React.JSX.Element {
       saveActiveFileVersion();
     });
     unsubscribers.push(unsubSaveActiveFileVersion);
+
+    const unsubExportImage = ipcOn("export-image", () => {
+      const { activeFileId } = useStore.getState();
+      if (activeFileId) openImageExportModal(activeFileId);
+    });
+    unsubscribers.push(unsubExportImage);
 
     const unsubExportHistory = ipcOn("export-history", () => {
       const { exportHistory } = useStore.getState();
