@@ -147,12 +147,9 @@ function toStamp(hap: Hap, offsetCycles: number): StampEvent | null {
 
 /**
  * Queries a pattern over `cycles` cycles and returns one stamp per event onset.
- *
- * Strudel's randomness is a deterministic hash of time, so re-querying the same
- * window always gives the same events. A seed therefore selects a different
- * window far enough along the timeline to be independent, keeping cycle parity
- * even so that non-random alternations (`<a b>`) still start on their first
- * value.
+ * The seed picks the window queried: strudel's randomness is a hash of time, so
+ * a far-off window gives independent results, and an even cycle offset leaves
+ * alternations (`<a b>`) starting on their first value.
  */
 export function queryStamps(pattern: Pattern, cycles: number, seed: number): StampEvent[] {
   const spanCycles = Math.max(1, Math.ceil(cycles));

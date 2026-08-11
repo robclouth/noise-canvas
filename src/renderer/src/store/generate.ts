@@ -90,8 +90,7 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
         spectrogramData.bandsPerOctave,
         spectrogramData.numBands,
       );
-      // Anchor conversion reads the stamp's own brush size and anchor mode, so
-      // it must see the per-stamp state rather than the live one.
+      // Anchor conversion reads the stamp's own brush size and anchor mode.
       const { blX, blY } = aimUvToBrushBlUv(
         stampState,
         uvX,
@@ -109,8 +108,8 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
       return null;
     }
 
-    // Saves the pre-preview pixels on the first call and restores them on every
-    // later one, so each preview replaces the last instead of layering onto it.
+    // Saves the pre-preview pixels on the first call, restores them on later
+    // ones, so each preview replaces the last instead of layering onto it.
     renderer.beginStampPreview();
     set({ generatePreviewFileId: fileId });
 
@@ -153,8 +152,6 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
 
       set({ isGenerating: true });
       try {
-        // Repainting from the saved pixels makes Apply independent of whatever
-        // preview happens to be on screen.
         const pass = paintPreview();
         if (!pass) return;
 
@@ -162,8 +159,7 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
         const renderer = file?.rendererRef?.current;
         if (!renderer) return;
 
-        // The preview's pixels become the commit, so the whole pass lands as one
-        // history node and one resynthesis.
+        // The previewed pixels become the commit: one history node, one resynthesis.
         renderer.keepStampPreview();
         set({ generatePreviewFileId: null });
         await get().applyStrokeAtPosition(

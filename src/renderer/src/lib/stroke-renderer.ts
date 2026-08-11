@@ -170,9 +170,8 @@ export class StrokeRenderer {
   private maskMacroValuesBuf: number[] = [0, 0, 0, 0];
 
   // State
-  // Holds the spectrogram as it was before a preview run of committed strokes,
-  // so the preview can be taken back without a history round trip. Allocated
-  // only while a preview is up.
+  // The spectrogram as it was before a preview run of committed strokes.
+  // Allocated only while a preview is up.
   private rollbackFbo: WebGLRenderTarget | null = null;
   private pingPong = 0;
   private maskPingPong = 0;
@@ -1320,8 +1319,6 @@ export class StrokeRenderer {
   setFBOData(data: Float32Array): void {
     const { packedTextureSize } = this.spectrogramData;
 
-    // History moved the spectrogram somewhere else; pixels saved for a preview
-    // rollback no longer belong to it.
     this.releaseRollback();
     this.pingPong = 0;
 

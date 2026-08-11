@@ -20,8 +20,7 @@ export interface ResolvedStamp extends StampEvent {
 /**
  * A state snapshot for one stamp: the pattern's brush selected, and every step
  * of it stretched to the event's length and anchored at its onset. Both are
- * per-step parameters, so they are written onto cloned steps rather than the
- * top-level state the renderer would otherwise ignore.
+ * per-step parameters, so they are written onto cloned steps.
  */
 export function buildStampState(base: State, stamp: ResolvedStamp): State {
   const brush = base.brushes[stamp.brushIndex];
@@ -30,8 +29,6 @@ export function buildStampState(base: State, stamp: ResolvedStamp): State {
   const sizeTime = Math.min(MAX_STAMP_BEATS, Math.max(MIN_STAMP_BEATS, stamp.durationBeats));
   const steps: BrushStep[] = brush.steps.map((step) => {
     const next: BrushStep = { ...step };
-    // BrushStep's mapped parameter fields are read-only in the type; the store
-    // writes them through the same widened view.
     const writable: Record<string, unknown> = next;
     writable.brushSizeTime = sizeTime;
     writable.brushAnchorMode = BRUSH_ANCHOR_MODE_CORNER;

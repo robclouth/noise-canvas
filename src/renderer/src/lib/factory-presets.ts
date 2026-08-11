@@ -7,6 +7,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "init",
     name: "Init",
+    color: { hue: "grape", variation: 1 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -23,6 +24,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "eraser",
     name: "Eraser",
+    color: { hue: "red", variation: 0 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -39,6 +41,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "booster",
     name: "Booster",
+    color: { hue: "red", variation: 1 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -55,6 +58,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "restore",
     name: "Restore",
+    color: { hue: "teal", variation: 1 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -73,6 +77,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "stereo-widening",
     name: "Stereo Widening",
+    color: { hue: "cyan", variation: 0 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -94,6 +99,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "compressor",
     name: "Compressor",
+    color: { hue: "red", variation: 0 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -123,6 +129,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "noise-gate",
     name: "Noise Gate",
+    color: { hue: "red", variation: 1 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -152,6 +159,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "smudge",
     name: "Smudge",
+    color: { hue: "green", variation: 1 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -184,6 +192,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "octave-up",
     name: "Octave Up",
+    color: { hue: "violet", variation: 0 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -208,6 +217,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "octave-down",
     name: "Octave Down",
+    color: { hue: "violet", variation: 1 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -232,6 +242,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "reverse",
     name: "Reverse",
+    color: { hue: "orange", variation: 0 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -263,6 +274,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "low-pass-sweep",
     name: "Low-Pass Sweep",
+    color: { hue: "yellow", variation: 0 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -292,6 +304,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "high-pass",
     name: "High-Pass",
+    color: { hue: "yellow", variation: 1 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -317,6 +330,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "harmonics",
     name: "Harmonics",
+    color: { hue: "indigo", variation: 0 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -348,6 +362,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "reverb",
     name: "Reverb (Blur)",
+    color: { hue: "cyan", variation: 1 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -383,6 +398,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "echo",
     name: "Echo",
+    color: { hue: "teal", variation: 0 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -414,6 +430,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "paint-noise",
     name: "Paint Noise",
+    color: { hue: "green", variation: 0 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -439,6 +456,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "paint-tone",
     name: "Paint Tone",
+    color: { hue: "pink", variation: 0 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -466,6 +484,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "flow",
     name: "Flow",
+    color: { hue: "orange", variation: 1 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -498,6 +517,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "pixel-sort",
     name: "Pixel Sort",
+    color: { hue: "pink", variation: 1 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -531,6 +551,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "tremolo",
     name: "Tremolo",
+    color: { hue: "grape", variation: 0 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -563,6 +584,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "step-gate",
     name: "Step Gate",
+    color: { hue: "grape", variation: 1 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -597,6 +619,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "dynamic-bloom",
     name: "Dynamic Bloom",
+    color: { hue: "red", variation: 1 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -630,6 +653,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "3d-orbit",
     name: "3D Orbit",
+    color: { hue: "cyan", variation: 0 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -664,6 +688,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "shimmer",
     name: "Shimmer",
+    color: { hue: "indigo", variation: 1 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -703,6 +728,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "morph",
     name: "Morph (Macros)",
+    color: { hue: "orange", variation: 0 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -738,6 +764,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "sampler",
     name: "Sampler",
+    color: { hue: "pink", variation: 0 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
@@ -764,6 +791,7 @@ export const factoryPresets: PresetType[] = [
   {
     id: "convolution",
     name: "Convolution",
+    color: { hue: "teal", variation: 1 },
     isFactory: true,
     version: CURRENT_PRESET_VERSION,
     steps: [
