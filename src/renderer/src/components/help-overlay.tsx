@@ -1,11 +1,19 @@
 import { Anchor, Box, Button, Group, Paper, Portal, Stack, Text } from "@mantine/core";
 import { host } from "@renderer/lib/host";
 import { anchorSelector } from "@renderer/lib/ui-anchors";
-import { UI_AREA_NAMES, deepTourFor, getArea, type UiAreaName } from "@renderer/lib/ui-areas";
+import {
+  UI_AREA_NAMES,
+  deepTourFor,
+  getArea,
+  manualSectionForParameter,
+  type UiAreaName,
+} from "@renderer/lib/ui-areas";
+import { parameterDefs } from "@renderer/parameters";
+import type { ParameterKey } from "@renderer/store/types";
 import { startDeepTour } from "@renderer/lib/walkthrough";
 import { useStore } from "@renderer/store";
 import { BookOpen, Route } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * Dims the window and brightens whatever the pointer is over, with that area's
@@ -14,7 +22,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
  * supposed to save you from.
  */
 
-type Outline = { name: UiAreaName; rect: DOMRect };
+/**
+ * What the pointer can land on: a region of the UI, or one control inside it.
+ * Controls are the smaller of the two, so hit-testing prefers them without
+ * needing to know which is which.
+ */
+type Target = { kind: "area"; name: UiAreaName; rect: DOMRect } | { kind: "param"; key: ParameterKey; rect: DOMRect };
 
 /**
  * Above every layer the app itself uses — the transport and the Generate bar
@@ -42,8 +55,25 @@ function recipeTitle(id: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-function measure(): Outline[] {
-  const outlines: Outline[] = [];
+/**
+ * The label carries the marker, but the row is what someone points at. Climbs
+ * to the first ancestor meaningfully wider than the label, which is the row in
+ * every control layout.
+ */
+function rowRect(label: Element): DOMRect {
+  const labelWidth = label.getBoundingClientRect().width;
+  let node: Element | null = label.parentElement;
+  for (let depth = 0; depth < 3 && node; depth++) {
+    const rect = node.getBoundingClientRect();
+    if (rect.width > labelWidth + 8) return rect;
+    node = node.parentElement;
+  }
+  return label.getBoundingClientRect();
+}
+
+function measure(): Target[] {
+  const targets: Target[] = [];
+
   for (const name of UI_AREA_NAMES) {
     // Layout columns are skipped: pointing at one always means one of the
     // sections inside it, so offering the column too is noise.
@@ -52,25 +82,37 @@ function measure(): Outline[] {
     if (!element) continue;
     const rect = element.getBoundingClientRect();
     if (rect.width < 8 || rect.height < 8) continue;
-    outlines.push({ name, rect });
+    targets.push({ kind: "area", name, rect });
   }
-  return outlines;
+
+  for (const label of document.querySelectorAll("[data-param]")) {
+    const key = label.getAttribute("data-param") as ParameterKey;
+    if (!parameterDefs[key]) continue;
+    const rect = rowRect(label);
+    if (rect.width < 8 || rect.height < 8) continue;
+    targets.push({ kind: "param", key, rect });
+  }
+
+  return targets;
 }
 
 /**
- * The smallest area under the pointer. Areas nest — sections sit inside the
- * brush panel, the header inside its lane — and the innermost one is always
- * the more specific answer to "what is this?".
+ * The smallest thing under the pointer. Targets nest — a control inside a
+ * section inside a lane — and the innermost is always the more specific
+ * answer to "what is this?".
  */
-function hitTest(outlines: Outline[], x: number, y: number): Outline | null {
-  let best: Outline | null = null;
-  for (const outline of outlines) {
-    const { rect } = outline;
+function hitTest(targets: Target[], x: number, y: number): Target | null {
+  let best: Target | null = null;
+  for (const target of targets) {
+    const { rect } = target;
     if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) continue;
-    const area = rect.width * rect.height;
-    if (!best || area < best.rect.width * best.rect.height) best = outline;
+    if (!best || rect.width * rect.height < best.rect.width * best.rect.height) best = target;
   }
   return best;
+}
+
+function targetId(target: Target): string {
+  return target.kind === "area" ? `area:${target.name}` : `param:${target.key}`;
 }
 
 /** Beside the highlight where there is room, otherwise below or above it. */
@@ -98,8 +140,8 @@ export function HelpOverlay(): React.JSX.Element | null {
   const open = useStore((state) => state.helpOverlayOpen);
   const setOpen = useStore((state) => state.setHelpOverlayOpen);
   const openManual = useStore((state) => state.openManual);
-  const [outlines, setOutlines] = useState<Outline[]>([]);
-  const [hovered, setHovered] = useState<UiAreaName | null>(null);
+  const [targets, setTargets] = useState<Target[]>([]);
+  const [hovered, setHovered] = useState<Target | null>(null);
   const frame = useRef(0);
 
   const close = useCallback(() => {
@@ -112,8 +154,8 @@ export function HelpOverlay(): React.JSX.Element | null {
       setHovered(null);
       return;
     }
-    setOutlines(measure());
-    const remeasure = () => setOutlines(measure());
+    setTargets(measure());
+    const remeasure = () => setTargets(measure());
     window.addEventListener("resize", remeasure);
     return () => window.removeEventListener("resize", remeasure);
   }, [open]);
@@ -145,22 +187,26 @@ export function HelpOverlay(): React.JSX.Element | null {
       const { clientX, clientY } = event;
       cancelAnimationFrame(frame.current);
       frame.current = requestAnimationFrame(() => {
-        const hit = hitTest(outlines, clientX, clientY);
+        const hit = hitTest(targets, clientX, clientY);
         // Empty space keeps the last highlight, so crossing a gap on the way to
-        // the popover doesn't blink it away.
-        if (hit) setHovered(hit.name);
+        // the card doesn't blink it away.
+        if (hit) setHovered((current) => (current && targetId(current) === targetId(hit) ? current : hit));
       });
     },
-    [outlines],
+    [targets],
   );
-
-  const active = useMemo(() => outlines.find((o) => o.name === hovered) ?? null, [outlines, hovered]);
 
   if (!open) return null;
 
-  const rect = active?.rect;
-  const area = hovered ? getArea(hovered) : null;
-  const hasTour = hovered ? deepTourFor(hovered).length > 0 : false;
+  const rect = hovered?.rect;
+  const area = hovered?.kind === "area" ? getArea(hovered.name) : null;
+  const parameter = hovered?.kind === "param" ? parameterDefs[hovered.key] : null;
+  const hasTour = hovered?.kind === "area" && deepTourFor(hovered.name).length > 0;
+  const manualSection =
+    hovered?.kind === "param"
+      ? manualSectionForParameter(hovered.key, parameter?.effectType)
+      : (area?.manualSection ?? null);
+  const card = area ?? (parameter ? { title: parameter.label, blurb: parameter.description } : null);
   const dim: React.CSSProperties = { position: "fixed", background: DIM, transition: EASE, pointerEvents: "none" };
 
   return (
@@ -206,7 +252,7 @@ export function HelpOverlay(): React.JSX.Element | null {
           <Box style={{ ...dim, top: 0, left: 0, right: 0, bottom: 0 }} />
         )}
 
-        {area && rect && (
+        {card && rect && (
           <Paper
             withBorder
             shadow="md"
@@ -221,41 +267,43 @@ export function HelpOverlay(): React.JSX.Element | null {
           >
             <Stack gap="xs">
               <Text size="sm" fw={600}>
-                {area.title}
+                {card.title}
               </Text>
               <Text size="xs" c="dimmed">
-                {area.blurb}
+                {card.blurb}
               </Text>
               <Group gap="xs">
-                {hasTour && (
+                {hasTour && hovered?.kind === "area" && (
                   <Button
                     size="compact-xs"
                     variant="light"
                     color="orange"
                     leftSection={<Route size={12} />}
                     onClick={() => {
-                      const target = hovered;
+                      const name = hovered.name;
                       close();
-                      if (target) void startDeepTour(target);
+                      void startDeepTour(name);
                     }}
                   >
                     Show me around
                   </Button>
                 )}
-                <Button
-                  size="compact-xs"
-                  variant="subtle"
-                  color="gray"
-                  leftSection={<BookOpen size={12} />}
-                  onClick={() => {
-                    close();
-                    openManual(area.manualSection);
-                  }}
-                >
-                  Manual
-                </Button>
+                {manualSection && (
+                  <Button
+                    size="compact-xs"
+                    variant="subtle"
+                    color="gray"
+                    leftSection={<BookOpen size={12} />}
+                    onClick={() => {
+                      close();
+                      openManual(manualSection);
+                    }}
+                  >
+                    Manual
+                  </Button>
+                )}
               </Group>
-              {area.recipes && area.recipes.length > 0 && (
+              {area?.recipes && area.recipes.length > 0 && (
                 <Stack gap={2}>
                   <Text size="xs" c="dimmed">
                     Things to do with it
@@ -298,7 +346,7 @@ export function HelpOverlay(): React.JSX.Element | null {
               whiteSpace: "nowrap",
             }}
           >
-            Move over anything to find out what it is · click or Esc to close
+            Move over anything — a panel or a single control · click or Esc to close
           </Text>
         )}
       </Box>

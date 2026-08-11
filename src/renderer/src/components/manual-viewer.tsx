@@ -17,6 +17,8 @@ import manualSource from "../../../../docs/manual.md?raw";
 const MANUAL_Z = 10004;
 const NAV_WIDTH = 210;
 const HEIGHT = "86vh";
+/** Breathing room above a heading the viewer has jumped to. */
+const HEADING_INSET = 8;
 
 /** Filters to the sections whose heading or body mentions the query. */
 function filterSource(source: string, query: string): string {
@@ -81,23 +83,26 @@ export function ManualViewer(): React.JSX.Element {
 
   const content = useMemo(() => renderBlocks(blocks, handleLink), [blocks, handleLink]);
 
-  // Scrolling has to wait for the filtered body to render, and again for
-  // Mantine's modal transition to have laid the viewport out.
+  // Corrects by the measured gap rather than calling scrollIntoView, which
+  // would also scroll every ancestor, and repeats a few times so a heading that
+  // shifts as the modal settles is followed rather than missed. Each pass
+  // measures afresh, so it converges and then does nothing.
   useEffect(() => {
     if (!opened || !section) return;
-    let cancelled = false;
-    const scroll = () => {
-      if (cancelled) return;
+    const timers: number[] = [];
+    const align = () => {
+      const viewport = viewportRef.current;
       const target = bodyRef.current?.querySelector(`#${CSS.escape(section)}`);
-      if (target) {
-        target.scrollIntoView({ block: "start" });
-        setActiveId(section);
-      }
+      if (!viewport || !target) return;
+      const delta = target.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
+      if (Math.abs(delta) > 1) viewport.scrollTop += delta - HEADING_INSET;
+      setActiveId(section);
     };
-    const frame = requestAnimationFrame(() => requestAnimationFrame(scroll));
+    const frame = requestAnimationFrame(align);
+    for (const delay of [80, 200, 400]) timers.push(window.setTimeout(align, delay));
     return () => {
-      cancelled = true;
       cancelAnimationFrame(frame);
+      for (const timer of timers) window.clearTimeout(timer);
     };
   }, [opened, section, content]);
 
@@ -132,9 +137,12 @@ export function ManualViewer(): React.JSX.Element {
       title="Manual"
       size="90%"
       zIndex={MANUAL_Z}
+      // The body fills whatever the header leaves rather than a guessed offset,
+      // so the two panes own the only scrollbars and nothing overflows the frame.
       styles={{
-        content: { height: HEIGHT },
-        body: { height: `calc(${HEIGHT} - 54px)`, padding: 0, display: "flex" },
+        content: { height: HEIGHT, display: "flex", flexDirection: "column", overflow: "hidden" },
+        header: { flexShrink: 0 },
+        body: { flex: 1, minHeight: 0, padding: 0, display: "flex", overflow: "hidden" },
       }}
     >
       <Box w={NAV_WIDTH} style={{ flexShrink: 0, display: "flex", flexDirection: "column" }} pl="md" pb="md">

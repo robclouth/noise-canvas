@@ -153,6 +153,10 @@ export const ParamMenu = ({
             onDoubleClick={handleReset}
             style={{ cursor: "pointer" }}
             justify="end"
+            // The handle the ? overlay hovers to name this control. It sits on
+            // the label because every control shape puts one here; the overlay
+            // widens the hit area back out to the whole row.
+            data-param={paramKey}
           >
             {/* Chain link icon for linked params */}
             {isLinked && <Link2 size={10} style={{ flexShrink: 0, color: theme.colors.orange[5] }} />}
