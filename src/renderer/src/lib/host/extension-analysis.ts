@@ -142,6 +142,9 @@ export function createExtensionAnalysis(): AnalysisApi {
     analyze,
     analyseBuffer: () => notImplemented("analyseBuffer"),
     synthesize,
+    // No endpoint yet: an empty patch means "no boundary changes", so strokes
+    // keep their plain coefficient edges in the embedded host.
+    conditionBoundary: async () => ({ ranges: new Uint32Array(0), pixels: new Float32Array(0) }),
     encodeHistorySnapshot: async (packed) =>
       u8((await historyCodec("encodeSnapshot", { packed })).arrays.bytes, "bytes"),
     decodeHistorySnapshot: async (bytes) =>

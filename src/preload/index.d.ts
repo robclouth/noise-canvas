@@ -89,6 +89,20 @@ declare global {
         onsetOdfMax?: number;
         onsetBandMax?: Float32Array;
       }>;
+      conditionBoundary: (
+        packedData: Float32Array,
+        analysisMetadata: {
+          numFrames: number;
+          numChannels: number;
+          numBands: number;
+          bandOffsets: Uint32Array;
+          bandStepLog2s: Int32Array;
+          bandLengths: Uint32Array;
+        },
+        sampleRate: number,
+        params: AnalysisParams,
+        footprint: { startFrame: number; endFrame: number; bandLo: number; bandHi: number },
+      ) => Promise<{ ranges: Uint32Array; pixels: Float32Array }>;
       isModelDownloaded: (modelFile: string) => boolean;
       downloadModel: (modelFile: string, onProgress?: (downloaded: number, total: number) => void) => Promise<void>;
       aiSeparate: (audioChannels: Float32Array[], sampleRate: number) => Promise<Record<string, Float32Array[]>>;

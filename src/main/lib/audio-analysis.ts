@@ -324,6 +324,31 @@ export async function synthesize(
   );
 }
 
+/**
+ * Computes the boundary-conditioning patch for a stroke footprint: the
+ * coefficients around the footprint's time edges rewritten to carry the
+ * time-domain-exact edit (interior content confined to the footprint,
+ * exterior content excluded from it). Returns per-band ranges plus the
+ * patched pixel values; the input buffer is not modified.
+ */
+export async function conditionBoundary(
+  packedData: Float32Array,
+  analysisMetadata: {
+    numFrames: number;
+    numChannels: number;
+    numBands: number;
+    bandOffsets: Uint32Array;
+    bandStepLog2s: Int32Array;
+    bandLengths: Uint32Array;
+  },
+  sampleRate: number,
+  params: AnalysisParams,
+  footprint: { startFrame: number; endFrame: number; bandLo: number; bandHi: number },
+): Promise<{ ranges: Uint32Array; pixels: Float32Array }> {
+  const gab = init();
+  return await gab.conditionBoundary(packedData, analysisMetadata, sampleRate, params, footprint);
+}
+
 export async function hpss(
   packedData: Float32Array,
   analysisMetadata: {

@@ -1,4 +1,6 @@
 import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
+import { conditionStrokeBoundary } from "@renderer/lib/boundary-conditioning";
+import { mergePixelRanges } from "@renderer/lib/pixel-ranges";
 import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
 import { BRUSH_ANCHOR_MODE_CENTER } from "@renderer/lib/constants";
 import { buildScaleOffsets, minFreqSemisAboveC0, stepScaleSemis } from "@renderer/lib/scale-snap";
@@ -260,9 +262,28 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         const data = await dataPromise;
         if (!data) return;
 
+        // Hard-edged strokes get their time boundaries rewritten to the
+        // time-domain-exact edit before history and synthesis consume the
+        // data, so what is stored, shown, and heard all carry the conditioned
+        // boundary. Failure or a stale stroke just keeps the plain edges.
+        let historyDirtyRanges = dirtyRanges;
+        try {
+          const patched = await conditionStrokeBoundary(renderer, spec, state, data);
+          if (patched && historyDirtyRanges) {
+            historyDirtyRanges = mergePixelRanges(historyDirtyRanges, patched);
+          }
+        } catch (error) {
+          console.error("Boundary conditioning failed; committing plain stroke:", error);
+        }
+
         const historyManager = getHistoryManager(activeFileId);
         // Run history node write and synthesis in parallel.
-        const nodeIdPromise = historyManager.addStroke({ data, label: brushName, dimensions, dirtyRanges });
+        const nodeIdPromise = historyManager.addStroke({
+          data,
+          label: brushName,
+          dimensions,
+          dirtyRanges: historyDirtyRanges,
+        });
 
         await synthesizeFile(activeFileId, autoPlaybackParams, data);
 
