@@ -36,10 +36,11 @@ describe("parsing the manual", () => {
     }
   });
 
-  it("reads the tables the manual has", () => {
-    // Warp algorithms, the two pattern references, keyboard shortcuts, and the
-    // help surfaces.
-    expect(ofKind("table").length).toBe(5);
+  it("reads every table the manual has", () => {
+    // Counted from the source rather than fixed, so adding a table to the
+    // manual is not a test failure, but one the parser drops still is.
+    const inSource = [...manual.matchAll(/^\|?[\s:-]+\|[\s|:-]*$/gm)].length;
+    expect(ofKind("table").length).toBe(inSource);
   });
 
   it("never emits an empty list or a list item with no text", () => {

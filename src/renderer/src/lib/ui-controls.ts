@@ -55,6 +55,11 @@ export const UI_CONTROLS = {
   },
 
   // File header
+  "file-resolution": {
+    label: "Analysis resolution",
+    description: "Sets how this file's analysis trades time detail against pitch detail.",
+    manualSection: "analysis-resolution",
+  },
   "file-onsets": {
     label: "Onsets",
     description: "Sets how far down this file's level range a hit still counts as an onset.",
@@ -77,7 +82,7 @@ export const UI_CONTROLS = {
   },
   "file-minimize": {
     label: "Minimize",
-    description: "Moves the file to the palette bar, leaving it open but off the canvas.",
+    description: "Moves the file off the canvas to the dock, leaving it open.",
     manualSection: "navigating-the-canvas",
   },
   "file-fullscreen": {
@@ -90,9 +95,19 @@ export const UI_CONTROLS = {
     description: "Closes the file, asking first if it has unsaved edits.",
     manualSection: "working-with-files",
   },
-  "palette-close": {
+  dock: {
+    label: "Dock",
+    description: "Holds minimized files, which stay open and usable as sources while off the canvas.",
+    manualSection: "navigating-the-canvas",
+  },
+  "dock-file": {
+    label: "Minimized file",
+    description: "Restores this file to the canvas.",
+    manualSection: "navigating-the-canvas",
+  },
+  "dock-close": {
     label: "Close",
-    description: "Closes a minimized file from the palette bar.",
+    description: "Closes this file without restoring it to the canvas.",
     manualSection: "navigating-the-canvas",
   },
 

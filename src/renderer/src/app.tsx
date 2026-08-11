@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
 import { openImageExportModal } from "./components/image-export-modal";
-import { CanvasPanel, PaletteBar } from "./components/layout/canvas-panel";
+import { CanvasPanel, Dock } from "./components/layout/canvas-panel";
 import { ExtensionMenuBar } from "./components/layout/menu-bar";
 import { GeneratePanel } from "./components/layout/generate-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
@@ -378,7 +378,7 @@ function App(): React.JSX.Element {
               </Box>
             </ScrollArea>
           )}
-          <PaletteBar />
+          <Dock />
           <GeneratePanel />
           <TransportPanel />
         </Stack>

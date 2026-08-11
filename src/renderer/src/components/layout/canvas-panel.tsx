@@ -4,12 +4,13 @@ import { getFileColor, openFiles } from "@renderer/store/files";
 import { getFileSegments, selectStemGroupOfFile, stemGroupColor, stemMemberColor } from "@renderer/store/stem-groups";
 import { HelpActionIcon } from "@renderer/components/controls/help-control";
 import { useUiSize } from "@renderer/lib/ui-density";
+import { helpProps } from "@renderer/lib/ui-controls";
 import { Layers, Link2, Link2Off, Merge, X } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, type RefObject } from "react";
 import { FileView } from "../file-view";
 import { Tooltip } from "../tooltip";
 
-const PaletteChip = memo(({ fileId }: { fileId: string }) => {
+const DockedFile = memo(({ fileId }: { fileId: string }) => {
   const file = openFiles[fileId];
   const isHighlighted = useStore((state) => state.highlightedSourcePath === file?.filePath);
   const isLoading = useStore((state) => !!state.filesLoading[fileId]);
@@ -21,8 +22,9 @@ const PaletteChip = memo(({ fileId }: { fileId: string }) => {
     : getFileColor(file.filePath);
 
   return (
-    <Tooltip label={displayName}>
+    <Tooltip help="dock-file" detail={displayName}>
       <Group
+        {...helpProps("dock-file")}
         gap={4}
         px={2}
         py={0}
@@ -62,7 +64,7 @@ const PaletteChip = memo(({ fileId }: { fileId: string }) => {
           {displayName}
         </Text>
         <HelpActionIcon
-          help="palette-close"
+          help="dock-close"
           size="xs"
           variant="subtle"
           color="gray"
@@ -77,9 +79,9 @@ const PaletteChip = memo(({ fileId }: { fileId: string }) => {
     </Tooltip>
   );
 });
-PaletteChip.displayName = "PaletteChip";
+DockedFile.displayName = "DockedFile";
 
-export const PaletteBar = memo(() => {
+export const Dock = memo(() => {
   const minimizedFileIds = useStore((state) => state.minimizedFileIds);
   const openFileIds = useStore((state) => state.openFileIds);
 
@@ -88,6 +90,7 @@ export const PaletteBar = memo(() => {
 
   return (
     <Group
+      {...helpProps("dock")}
       gap={6}
       px={8}
       py={6}
@@ -98,12 +101,12 @@ export const PaletteBar = memo(() => {
       }}
     >
       {minimized.map((fileId) => (
-        <PaletteChip key={fileId} fileId={fileId} />
+        <DockedFile key={fileId} fileId={fileId} />
       ))}
     </Group>
   );
 });
-PaletteBar.displayName = "PaletteBar";
+Dock.displayName = "Dock";
 
 type FileLaneProps = {
   fileId: string;

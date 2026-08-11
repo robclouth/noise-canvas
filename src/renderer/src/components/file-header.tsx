@@ -39,6 +39,24 @@ function getResolutionLabel(bpo: number): string {
   }
 }
 
+/** What this file's own setting does, under the shared sentence about the badge. */
+function getResolutionDetail(bpo: number): string {
+  switch (bpo) {
+    case 12:
+      return "12 bands/octave — sharpest transients, coarsest pitch.";
+    case 24:
+      return "24 bands/octave — leans toward time, still separates notes.";
+    case 36:
+      return "36 bands/octave — the default, favouring neither.";
+    case 48:
+      return "48 bands/octave — leans toward pitch, at some cost to attacks.";
+    case 60:
+      return "60 bands/octave — finest pitch, softest transients.";
+    default:
+      return `${bpo} bands/octave.`;
+  }
+}
+
 // A per-file value in the header, presented as the same label + draggable
 // numbox as every other parameter. These values live per file path rather than
 // on the store's parameter map, so they carry their own label instead of going
@@ -151,9 +169,11 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
           </Box>
         </Tooltip>
         {bandsPerOctave && (
-          <Badge size="sm" variant="light" color="orange" style={{ flexShrink: 0 }}>
-            {getResolutionLabel(bandsPerOctave)}
-          </Badge>
+          <Tooltip help="file-resolution" detail={getResolutionDetail(bandsPerOctave)}>
+            <Badge {...helpProps("file-resolution")} size="sm" variant="light" color="orange" style={{ flexShrink: 0 }}>
+              {getResolutionLabel(bandsPerOctave)}
+            </Badge>
+          </Tooltip>
         )}
       </Group>
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>

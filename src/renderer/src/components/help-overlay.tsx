@@ -28,7 +28,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
  * buttons and widgets in the control registry. The inner ones are smaller, so
  * hit-testing prefers them without needing to know which is which.
  */
-type Target = { rect: DOMRect; inBar: boolean } & (
+type Target = { rect: DOMRect; placeAgainst: DOMRect; inBar: boolean } & (
   | { kind: "area"; name: UiAreaName }
   | { kind: "param"; key: ParameterKey }
   | { kind: "control"; name: UiControlName; instance: { title: string; text: string } | null }
@@ -103,13 +103,19 @@ function regionOf(marker: Element): Element {
 /**
  * Whether the control sits in a bar that spans the window. Its neighbours are
  * then to the left and right of it, which is where the card must not go.
+ *
+ * Only ancestors that actually enclose the control count. A portal wrapper is
+ * as wide as the window and barely tall, which otherwise reads as a bar and
+ * pushes the card above a control that is nowhere near one.
  */
 function inWideBar(element: Element): boolean {
   const { innerWidth: vw, innerHeight: vh } = window;
+  const box = element.getBoundingClientRect();
   let node: Element | null = element.parentElement;
   for (let depth = 0; depth < 6 && node; depth++) {
     const rect = node.getBoundingClientRect();
-    if (rect.width > vw * WIDE_FRACTION && rect.height < vh * BAR_HEIGHT) return true;
+    const encloses = rect.top <= box.top + 1 && rect.bottom >= box.bottom - 1;
+    if (encloses && rect.width > vw * WIDE_FRACTION && rect.height < vh * BAR_HEIGHT) return true;
     node = node.parentElement;
   }
   return false;
@@ -155,10 +161,12 @@ function targetAt(x: number, y: number): Target | null {
       // sections inside it, so offering the column too is noise.
       const anchor = element.getAttribute(ANCHOR_ATTR);
       if (anchor && AREA_NAMES.has(anchor) && !getArea(anchor as UiAreaName).container) {
+        const areaRect = element.getBoundingClientRect();
         return {
           kind: "area",
           name: anchor as UiAreaName,
-          rect: element.getBoundingClientRect(),
+          rect: areaRect,
+          placeAgainst: areaRect,
           inBar: inWideBar(element),
         };
       }
@@ -167,11 +175,19 @@ function targetAt(x: number, y: number): Target | null {
 
     const region = regionOf(marker);
     const rect = region.getBoundingClientRect();
-    const inBar = inWideBar(region);
+    // Nothing inside a menu or popover is bar-mounted: it has a whole surface
+    // of its own, so its card goes beside it like any other control.
+    const inBar = surface ? false : inWideBar(region);
+    // Inside a popover the card clears the whole popover rather than the one
+    // control, which would put it over the controls alongside — level with
+    // what is highlighted, but out past the edge of the surface.
+    const placeAgainst = surface
+      ? new DOMRect(surface.getBoundingClientRect().x, rect.y, surface.getBoundingClientRect().width, rect.height)
+      : rect;
 
     const key = marker.getAttribute("data-param");
     if (key && parameterDefs[key as ParameterKey]) {
-      return { kind: "param", key: key as ParameterKey, rect, inBar };
+      return { kind: "param", key: key as ParameterKey, rect, placeAgainst, inBar };
     }
 
     const name = marker.getAttribute(HELP_ATTR);
@@ -180,6 +196,7 @@ function targetAt(x: number, y: number): Target | null {
         kind: "control",
         name: name as UiControlName,
         rect,
+        placeAgainst,
         instance: readHelpInstance(marker),
         inBar,
       };
@@ -416,7 +433,11 @@ export function HelpOverlay(): React.JSX.Element | null {
             p="sm"
             w={POPOVER_WIDTH}
             pos="fixed"
-            style={{ ...placePopover(rect, cardHeight, target.inBar), transition: EASE, cursor: "default" }}
+            style={{
+              ...placePopover(target.placeAgainst, cardHeight, target.inBar),
+              transition: EASE,
+              cursor: "default",
+            }}
             // Freezes the highlight once the pointer is on the card, so its
             // buttons stay reachable without the selection sliding away.
             onMouseMove={(event) => event.stopPropagation()}

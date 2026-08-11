@@ -83,7 +83,21 @@ The Constant-Q Transform adjusts time resolution based on frequency:
 - Low frequencies → lower time resolution (smeared in time, accurate in pitch)
 - High frequencies → higher time resolution (precise in time, less in pitch)
 
-This matches human hearing and avoids the artificial "FFT sound," producing more natural transients and harmonics. The trade-off point is adjustable per file via **Resolution** in the Re-analyze dialog, from **Best Time** through **Balanced** to **Best Pitch**.
+This matches human hearing and avoids the artificial "FFT sound," producing more natural transients and harmonics.
+
+### Analysis Resolution
+
+Where a file sits on that trade-off is fixed when it is analyzed, and shown as a badge in its header. Change it with **Resolution** in the Re-analyze dialog. The setting is bands per octave: more bands separate pitches more finely, and each band then needs a longer window to do it, which smears events in time.
+
+| Badge            | Bands/octave | What it does                                                                                 |
+| ---------------- | ------------ | -------------------------------------------------------------------------------------------- |
+| **Best Time**    | 12           | Sharpest transients, coarsest pitch. Drums, percussive edits, anything where attacks matter. |
+| **Better Time**  | 24           | Leans toward time, still separates notes usefully.                                           |
+| **Balanced**     | 36           | The default. Handles pitched material and transients without favouring either.               |
+| **Better Pitch** | 48           | Leans toward pitch, at some cost to attacks.                                                 |
+| **Best Pitch**   | 60           | Finest pitch separation, softest transients. Pads, drones, harmonic work.                    |
+
+The choice affects what edits sound like, not just how the spectrogram looks: a shift or stretch is reconstructed from these bands, so a file analyzed at 12 bands per octave keeps its clicks crisp while one at 60 keeps its harmonics clean.
 
 ---
 
@@ -92,7 +106,7 @@ This matches human hearing and avoids the artificial "FFT sound," producing more
 The window is split into three columns plus a transport bar:
 
 - **Left — Brush panel.** Everything that defines the current brush: Macros, Steps, Source, Envelope, Options, Effects, Modulators.
-- **Middle — Canvas.** Every open file stacked vertically, each with its own header, time legend, and pitch legend. Minimized files collapse into a palette bar at the bottom.
+- **Middle — Canvas.** Every open file stacked vertically, each with its own header, time legend, and pitch legend. Minimized files collapse into the dock at the bottom.
 - **Right — Sidebar.** The brush list on top, the history tree below.
 - **Bottom — Generate and Transport.** A pattern that paints the whole file at once, then playback, grid, scale, meters, limiter, Ableton Link.
 
@@ -532,7 +546,7 @@ Open files stack vertically in the canvas column. Each header gives you:
 - **Onsets** – how sensitive the hit detector is for this file. See [Onsets](#onsets).
 - **Split** (scissors) – see below.
 - **Duplicate** – an editable copy, with its own history.
-- **Minimize** – collapse it into the palette bar at the bottom of the canvas area.
+- **Minimize** – collapse it into the dock at the bottom of the canvas area. A docked file stays open and can still be used as a source; click it to bring it back.
 - **Fullscreen** – expand it to fill the canvas area.
 - **Close**.
 
