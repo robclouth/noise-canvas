@@ -8,7 +8,7 @@ Each recipe is **Goal → Set up → Do → Variations**. Settings not mentioned
 
 ## Contents
 
-- [Rhythm](#rhythm) — [Chop to the hits](#chop-to-the-hits) · [Rearrange beats](#rearrange-beats) · [Erase a hit](#erase-a-hit) · [Turn a pad into a rhythm](#turn-a-pad-into-a-rhythm)
+- [Rhythm](#rhythm) — [Chop to the hits](#chop-to-the-hits) · [Rearrange beats](#rearrange-beats) · [Erase a hit](#erase-a-hit) · [Turn a pad into a rhythm](#turn-a-pad-into-a-rhythm) · [Stamp a rhythm across the file](#stamp-a-rhythm-across-the-file) · [Sweep a brush up the spectrum](#sweep-a-brush-up-the-spectrum)
 - [Pitch and time](#pitch-and-time) — [Pitch up or down](#pitch-up-or-down) · [Reverse a phrase](#reverse-a-phrase) · [Half speed](#half-speed) · [Harmonise](#harmonise)
 - [Space and texture](#space-and-texture) — [Reverb from nothing](#reverb-from-nothing) · [Reverse reverb](#reverse-reverb) · [Freeze and smear](#freeze-and-smear) · [Build a hat from noise](#build-a-hat-from-noise)
 - [Repair](#repair) — [Undo one region](#undo-one-region) · [Mute a vocal](#mute-a-vocal)
@@ -80,6 +80,36 @@ _See also:_ [Dynamics](./manual.md#dynamics).
 **Variations.** Swap the sequencer for **Mode = Pattern**, **Shape = Square**, **Rate ↔ = 1/4** for a straight gate, or **Shape = Sine** for a tremolo. Set the sequencer to several rows and it gates pitch bands independently — the pad becomes a chord that flickers.
 
 _See also:_ [Modulator Modes](./manual.md#modulator-modes), [How Modulation Amount Works](./manual.md#how-modulation-amount-works).
+
+### Stamp a rhythm across the file
+
+**Goal.** Apply a brush on every offbeat of a whole loop without placing a single stamp by hand.
+
+**Set up.**
+
+- Pick the brush you want stamped — it's whatever is selected.
+- **Generate**, above the transport: `s("~ x")*4`, or take **Offbeat** from the preset dropdown.
+
+**Do.** The canvas previews as you type. **Apply** (or `Cmd/Ctrl+Enter` in the editor) commits the whole pass as one stroke and one undo step.
+
+**Variations.** `"1 2 1 3"` alternates between the first three brushes in your list, so one pass can lay down a kick, a hat and a fill. `"x*8?"` drops half the eighths at random, and the **dice** re-rolls that until you get a variation worth keeping. `.gain(saw.segment(8))` swells across each bar.
+
+_See also:_ [Generate](./manual.md#generate), [Writing Patterns](./manual.md#writing-patterns).
+
+### Sweep a brush up the spectrum
+
+**Goal.** March one effect from the bass to the top over a bar, in even steps.
+
+**Set up.**
+
+- **Generate**: `s("x*4").zone("0 1 2 3")`.
+- `zone` cuts the frequency range into slices and sizes the brush to fit one. The highest number in the pattern sets how many slices there are, so this is quarters.
+
+**Do.** Apply.
+
+**Variations.** `.zones(16)` with `.zone(irand(16))` scatters a random sixteenth per stamp. `.zone("0 7").zones(8)` hits only the extremes. Add `.m1(sine.segment(16))` to sweep a macro across the file at the same time, so the brush changes character as it climbs.
+
+_See also:_ [Where in the Spectrum](./manual.md#where-in-the-spectrum), [Strength, Pan and Macros](./manual.md#strength-pan-and-macros).
 
 ---
 

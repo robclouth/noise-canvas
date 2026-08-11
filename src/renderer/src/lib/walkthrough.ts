@@ -15,7 +15,7 @@ const DEMO_FILE = "bundled://pad-loop.mp3";
  * A user who collapsed one of these before re-running the tour would otherwise
  * get a spotlight on a bare header.
  */
-const SECTIONS_TO_EXPAND = ["Effects", "Envelope", "Modulators", "Brushes", "History"];
+const SECTIONS_TO_EXPAND = ["Effects", "Envelope", "Modulators", "Brushes", "History", "Generate"];
 
 /**
  * Arms a one-shot gate: the step advances when the user does the thing rather
@@ -132,11 +132,18 @@ const STEPS: Step[] = [
       "That Blur was fixed across the whole stroke. Three modulators paint 2D fields over time and pitch — patterns, textures, envelope followers, sequencers — and any parameter with a menu can be driven by them.",
   },
   {
+    anchor: "section-generate",
+    side: "top",
+    title: "Or don't paint at all",
+    description:
+      'Write a rhythm here and it stamps the brush across the whole file — <b>"x*8"</b> for eight per bar, <b>"1 2 1 3"</b> to alternate between brushes. It previews as you type and commits nothing until you hit Apply.',
+  },
+  {
     anchor: "brush-panel",
     side: "right",
     title: "That's the tour",
     description:
-      "There is a lot more underneath: multi-step brushes, painting from other files, stem splitting, Ableton Live. The manual covers all of it, and you can re-run this from <b>Help → Run Walkthrough</b>.",
+      "There is a lot more underneath: multi-step brushes, painting from other files, stem splitting, Ableton Live. Press <b>?</b> any time to see every part of the window at once, and the manual is on <b>Help → Manual</b>.",
   },
 ];
 

@@ -69,7 +69,7 @@ export function GeneratePanel() {
 
   return (
     <Box px={TRANSPORT_PAD} pt={4} pb={2} bg="dark.7" style={{ zIndex: 1000 }}>
-      <Section label="Generate">
+      <Section label="Generate" anchor="section-generate">
         <Group gap={TRANSPORT_GAP} wrap="nowrap" align="center">
           <Select
             size="xs"

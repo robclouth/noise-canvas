@@ -696,7 +696,7 @@ File and Edit shortcuts (`Cmd/Ctrl+N`, `+O`, `+S`, `+W`, `+D`, …) are listed u
 
 ## Getting Help
 
-Five places, each answering a different question.
+Six places, each answering a different question.
 
 | Surface               | How you get there                                         | What it answers                     |
 | --------------------- | --------------------------------------------------------- | ----------------------------------- |

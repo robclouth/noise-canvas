@@ -216,6 +216,47 @@ export const UI_AREAS = {
       },
     ],
   },
+
+  "section-generate": {
+    title: "Generate",
+    blurb: "Paint the whole file from a pattern, previewed live before you commit it.",
+    manualSection: "generate",
+    deepTour: [
+      {
+        title: "The whole file in one pass",
+        description:
+          "A pattern says when each stamp lands, how long it is, and which brush makes it — then it runs the length of the file. This is the same brush you'd paint by hand, placed by a rhythm instead of by your mouse.",
+      },
+      {
+        anchor: "file-lane",
+        side: "top",
+        title: "Everything here is a preview",
+        description:
+          "Editing repaints the canvas but commits nothing — no history step, no resynthesis, and painting by hand clears it. <b>Apply</b>, or <b>Cmd/Ctrl+Enter</b> in the editor, commits exactly what you're looking at as one stroke and one undo.",
+      },
+      {
+        title: "Patterns are Strudel",
+        description:
+          '<b>"x x x x"</b> is four stamps, <b>"x*8"</b> is eight, <b>"x ~ x ~"</b> leaves rests, <b>"x(3,8)"</b> spreads three over eight slots. One bar is four beats. Each event\'s length becomes the brush\'s time size, so <b>"x@3 x"</b> paints wide then narrow.',
+      },
+      {
+        title: "Every token can name a brush",
+        description:
+          'A digit picks the brush in that slot, a letter picks the one with that hotkey, a word picks it by name — so <b>"1 2 1 3"</b> alternates between three brushes in one pass. Tokens are underlined in the brush\'s own colour as you type; a dashed underline matched nothing.',
+      },
+      {
+        title: "Placing it in the spectrum",
+        description:
+          '<b>zone</b> cuts the frequency range into slices and stamps one, sizing the brush to fit — <b>s("x*4").zone("0 1 2 3")</b> climbs in quarters. <b>note</b> takes an absolute pitch, <b>n</b> an offset in semitones. <b>gain</b>, <b>pan</b> and <b>m1</b>–<b>m4</b> drive strength, position and the macros.',
+      },
+      {
+        title: "Rolling for one you like",
+        description:
+          "The dropdown holds starting points, all written with the token <b>x</b> so they run with whatever brush you have selected. The <b>dice</b> re-rolls a pattern's random parts and previews the variation — previews replace each other, so keep rolling until one is worth applying.",
+      },
+    ],
+    recipes: ["stamp-a-rhythm-across-the-file", "sweep-a-brush-up-the-spectrum"],
+  },
 } as const satisfies Record<UiAnchor, UiArea>;
 
 export type UiAreaName = keyof typeof UI_AREAS;
