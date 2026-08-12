@@ -1,3 +1,4 @@
+import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
 import { BRUSH_ANCHOR_MODE_CENTER, BRUSH_ANCHOR_MODE_CORNER } from "@renderer/lib/constants";
 import {
   buildStampState,
@@ -87,6 +88,20 @@ describe("buildStampState", () => {
     expect(stepValue(next, centered.activeBrushIndex, centered.activeStepIndex, "brushAnchorMode")).toBe(
       BRUSH_ANCHOR_MODE_CORNER,
     );
+  });
+
+  it("leaves the aim as the brush origin, which is what places the overlay", () => {
+    // The overlay skips the anchor conversion because a stamp is always
+    // corner-anchored. If that ever stops being true, this fails rather than
+    // the blocks quietly drifting half a footprint off the stamps.
+    useStore.getState().setStepParameter("brushAnchorMode", BRUSH_ANCHOR_MODE_CENTER);
+    const centered = useStore.getState();
+    const next = buildStampState(centered, stamp({ brushIndex: centered.activeBrushIndex }));
+
+    const aim = { x: 0.4, y: 0.6 };
+    const { blX, blY } = aimUvToBrushBlUv(next, aim.x, aim.y, 120, 10, 24, 240);
+    expect(blX).toBe(aim.x);
+    expect(blY).toBe(aim.y);
   });
 
   it("scales the brush's own strength by gain", () => {

@@ -1,10 +1,9 @@
-import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
 import { freqToMidi } from "@renderer/lib/pitch-utils";
 import { resolveBrushFootprint, unitsToUv } from "@renderer/lib/utils";
 import type { BrushColor, SpectrogramData, State } from "@renderer/store/types";
 import { BEATS_PER_CYCLE, evaluatePattern, queryStamps, type StampEvent } from "./pattern-engine";
 import { resolveBrushToken } from "./resolve-brush";
-import { buildStampState, type ResolvedStamp } from "./stamp-state";
+import { buildStampState, stampSizes, type ResolvedStamp } from "./stamp-state";
 import { inferZoneCount, zoneSlice } from "./zones";
 
 /** One control the pattern set on a stamp, named as it was written. */
@@ -14,9 +13,8 @@ export interface StampLabel {
 }
 
 /**
- * Where one stamp lands and what the pattern asked of it. The painter turns
- * these into strokes and the canvas overlay draws them, so what is shown and
- * what is painted are resolved once rather than derived twice.
+ * Where one stamp lands and what the pattern asked of it — everything the
+ * canvas overlay draws, and nothing that costs a state snapshot to work out.
  */
 export interface StampMarker {
   /** Brush origin and footprint in pitch UV: y runs up from the lowest band. */
@@ -33,12 +31,6 @@ export interface StampMarker {
 export interface StampLayout extends StampMarker {
   /** The per-stamp state snapshot the stroke is painted from. */
   state: State;
-}
-
-/** Drops the state snapshot, leaving what the canvas overlay draws. */
-export function toMarker(layout: StampLayout): StampMarker {
-  const { blX, blY, sizeX, sizeY, brushIndex, brushName, color, labels } = layout;
-  return { blX, blY, sizeX, sizeY, brushIndex, brushName, color, labels };
 }
 
 /** Trims a pattern value to the shortest form that still reads exactly. */
@@ -71,77 +63,102 @@ export interface StampTarget {
   basePitch: number;
 }
 
-/**
- * Runs the pattern over the file and places every stamp it produces. Throws the
- * pattern's own error when the code doesn't parse.
- */
-export function resolveStampLayout(state: State, target: StampTarget): StampLayout[] {
+/** A placed stamp, and the resolution the painter needs to build its state from. */
+interface Placement {
+  marker: StampMarker;
+  resolved: ResolvedStamp;
+}
+
+function placeEvent(state: State, target: StampTarget, event: StampEvent, zoneCount: number): Placement | null {
   const { spectrogramData, bpm, totalDuration, basePitch } = target;
   const { bandsPerOctave, numBands } = spectrogramData;
 
-  const fileBeats = (totalDuration / 60) * bpm;
-  const cycles = Math.max(1, Math.ceil(fileBeats / BEATS_PER_CYCLE));
-  const events = queryStamps(evaluatePattern(state.generateCode), cycles, state.generateSeed);
-
+  const spectrumSemis = (numBands / bandsPerOctave) * 12;
+  const slice =
+    event.zoneIndex !== undefined ? zoneSlice(event.zoneIndex, event.zoneCount ?? zoneCount, spectrumSemis) : null;
   // `note` names an absolute pitch; the app measures pitch in semitones above
   // the file's lowest band.
-  const lowestMidi = freqToMidi(spectrogramData.minFreq);
-  const spectrumSemis = (numBands / bandsPerOctave) * 12;
-  const defaultZoneCount = inferZoneCount(events);
+  const anchorPitch = slice
+    ? slice.anchorSemis
+    : event.noteMidi !== undefined
+      ? event.noteMidi - freqToMidi(spectrogramData.minFreq)
+      : basePitch;
 
-  const layouts: StampLayout[] = [];
-  for (const event of events) {
-    if (event.beats >= fileBeats) continue;
+  const brushIndex = resolveBrushToken(event.brushToken, state.brushes) ?? state.activeBrushIndex;
+  const brush = state.brushes[brushIndex];
+  if (!brush) return null;
 
-    const slice =
-      event.zoneIndex !== undefined
-        ? zoneSlice(event.zoneIndex, event.zoneCount ?? defaultZoneCount, spectrumSemis)
-        : null;
-    const anchorPitch = slice
-      ? slice.anchorSemis
-      : event.noteMidi !== undefined
-        ? event.noteMidi - lowestMidi
-        : basePitch;
+  const resolved: ResolvedStamp = {
+    ...event,
+    brushIndex,
+    pitchSemis: anchorPitch + event.semis,
+    sliceSemis: slice?.heightSemis,
+  };
 
-    const brushIndex = resolveBrushToken(event.brushToken, state.brushes) ?? state.activeBrushIndex;
-    const resolved: ResolvedStamp = {
-      ...event,
-      brushIndex,
-      pitchSemis: anchorPitch + event.semis,
-      sliceSemis: slice?.heightSemis,
-    };
-    const stampState = buildStampState(state, resolved);
-    const brush = stampState.brushes[brushIndex];
-    if (!brush) continue;
+  const step = brush.steps[state.activeStepIndex] as Record<string, unknown> | undefined;
+  const sizes = stampSizes(resolved);
+  const footprint = resolveBrushFootprint({
+    brushSizeTime: sizes.sizeTime,
+    brushSizePitch: sizes.sizePitch ?? (step?.brushSizePitch as number | undefined) ?? state.brushSizePitch,
+    gridSizeBeats: state.gridSizeBeats,
+    gridSizeSemis: state.gridSizeSemis,
+    bpm,
+    totalDuration,
+    bandsPerOctave,
+    numBands,
+  });
 
-    const aim = unitsToUv(resolved.beats, resolved.pitchSemis, bpm, totalDuration, bandsPerOctave, numBands);
-    // Anchor conversion reads the stamp's own brush size and anchor mode.
-    const { blX, blY } = aimUvToBrushBlUv(stampState, aim.x, aim.y, bpm, totalDuration, bandsPerOctave, numBands);
+  // Stamps are corner-anchored — buildStampState says so for every one — which
+  // makes the aim point the brush origin, with no footprint to subtract.
+  const aim = unitsToUv(resolved.beats, resolved.pitchSemis, bpm, totalDuration, bandsPerOctave, numBands);
 
-    const step = brush.steps[stampState.activeStepIndex] as Record<string, unknown> | undefined;
-    const footprint = resolveBrushFootprint({
-      brushSizeTime: (step?.brushSizeTime as number | undefined) ?? stampState.brushSizeTime,
-      brushSizePitch: (step?.brushSizePitch as number | undefined) ?? stampState.brushSizePitch,
-      gridSizeBeats: stampState.gridSizeBeats,
-      gridSizeSemis: stampState.gridSizeSemis,
-      bpm,
-      totalDuration,
-      bandsPerOctave,
-      numBands,
-    });
-
-    layouts.push({
-      blX,
-      blY,
+  return {
+    resolved,
+    marker: {
+      blX: aim.x,
+      blY: aim.y,
       sizeX: footprint.sizeUv.x,
       sizeY: footprint.sizeUv.y,
       brushIndex,
       brushName: brush.name,
       color: brush.color,
-      labels: labelsFor(event, defaultZoneCount),
-      state: stampState,
-    });
-  }
+      labels: labelsFor(event, zoneCount),
+    },
+  };
+}
 
-  return layouts;
+/** Runs the pattern over the file and places every stamp it produces. */
+function placeAll(state: State, target: StampTarget): Placement[] {
+  const fileBeats = (target.totalDuration / 60) * target.bpm;
+  const cycles = Math.max(1, Math.ceil(fileBeats / BEATS_PER_CYCLE));
+  const events = queryStamps(evaluatePattern(state.generateCode), cycles, state.generateSeed);
+  const zoneCount = inferZoneCount(events);
+
+  const placements: Placement[] = [];
+  for (const event of events) {
+    if (event.beats >= fileBeats) continue;
+    const placement = placeEvent(state, target, event, zoneCount);
+    if (placement) placements.push(placement);
+  }
+  return placements;
+}
+
+/**
+ * Where the pass lands, without the state snapshots painting it needs. This is
+ * the cheap path: the overlay runs it on every keystroke.
+ */
+export function resolveStampMarkers(state: State, target: StampTarget): StampMarker[] {
+  return placeAll(state, target).map((placement) => placement.marker);
+}
+
+/**
+ * The same pass, each stamp carrying the state its stroke is painted from.
+ * Building those snapshots clones the store per stamp, so only the painter asks
+ * for them.
+ */
+export function resolveStampLayout(state: State, target: StampTarget): StampLayout[] {
+  return placeAll(state, target).map(({ marker, resolved }) => ({
+    ...marker,
+    state: buildStampState(state, resolved),
+  }));
 }

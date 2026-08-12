@@ -24,6 +24,27 @@ export interface ResolvedStamp extends StampEvent {
   sliceSemis?: number;
 }
 
+export interface StampSizes {
+  /** Brush time size the event's length asks for, in beats. */
+  sizeTime: number;
+  /** Set only where the pattern asked for a pitch size; otherwise the step keeps its own. */
+  sizePitch: number | undefined;
+}
+
+/**
+ * The brush footprint one stamp asks for. Shared by the state snapshot a stamp
+ * is painted from and the block the overlay draws, so the two are the same size.
+ */
+export function stampSizes(stamp: ResolvedStamp): StampSizes {
+  const sizeTime =
+    stamp.widthBeats !== undefined
+      ? clamp(stamp.widthBeats, 0, BRUSH_SIZE_TIME_FULL)
+      : clamp(stamp.durationBeats, MIN_STAMP_BEATS, MAX_STAMP_BEATS);
+  const requestedPitch = stamp.heightSemis ?? stamp.sliceSemis;
+  const sizePitch = requestedPitch !== undefined ? clamp(requestedPitch, 0, BRUSH_SIZE_PITCH_FULL) : undefined;
+  return { sizeTime, sizePitch };
+}
+
 /**
  * A state snapshot for one stamp: the pattern's brush selected, its steps
  * stretched to the event's length and anchored at its onset, and any strength,
@@ -34,12 +55,7 @@ export function buildStampState(base: State, stamp: ResolvedStamp): State {
   const brush = base.brushes[stamp.brushIndex];
   if (!brush) return base;
 
-  const sizeTime =
-    stamp.widthBeats !== undefined
-      ? clamp(stamp.widthBeats, 0, BRUSH_SIZE_TIME_FULL)
-      : clamp(stamp.durationBeats, MIN_STAMP_BEATS, MAX_STAMP_BEATS);
-  const requestedPitch = stamp.heightSemis ?? stamp.sliceSemis;
-  const sizePitch = requestedPitch !== undefined ? clamp(requestedPitch, 0, BRUSH_SIZE_PITCH_FULL) : undefined;
+  const { sizeTime, sizePitch } = stampSizes(stamp);
   const panPercent = stamp.pan !== undefined ? clamp(stamp.pan, -1, 1) * MAX_PERCENT : undefined;
 
   const steps: BrushStep[] = brush.steps.map((step) => {

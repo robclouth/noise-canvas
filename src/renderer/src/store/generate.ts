@@ -1,6 +1,11 @@
 import type { StampDispatch } from "@renderer/components/file-renderer";
 import { GENERATE_PRESETS } from "@renderer/lib/generate/presets";
-import { resolveStampLayout, toMarker, type StampMarker, type StampTarget } from "@renderer/lib/generate/stamp-layout";
+import {
+  resolveStampLayout,
+  resolveStampMarkers,
+  type StampMarker,
+  type StampTarget,
+} from "@renderer/lib/generate/stamp-layout";
 import { openFiles } from "./files";
 import { useTransientStore } from "./transient";
 import type { State, ZustandGet, ZustandSet } from "./types";
@@ -15,11 +20,6 @@ export interface GenerateState {
   isGenerating: boolean;
   /** File currently showing an uncommitted preview, if any. */
   generatePreviewFileId: string | null;
-  /**
-   * The pass the preview last painted, for the canvas overlay to draw. Written
-   * by the painter rather than derived again, so what is drawn is what landed.
-   */
-  generateLayout: StampMarker[];
   setGenerateCode: (code: string) => void;
   setGenerateSeed: (seed: number) => void;
   /** Paints the pattern across the active file without committing it. */
@@ -52,12 +52,24 @@ function resolveTarget(state: State) {
   return { fileId: activeFileId, renderer, target };
 }
 
+/**
+ * Where the active file's pass would land, without painting it. The canvas
+ * overlay calls this on every keystroke; `paintPreview` places the same stamps
+ * through the same code when typing pauses, so a drawn block and a painted
+ * stamp cannot disagree. Throws the pattern's own error.
+ */
+export function activeStampMarkers(state: State): StampMarker[] {
+  const resolved = resolveTarget(state);
+  if (!resolved) return [];
+  return resolveStampMarkers(state, resolved.target);
+}
+
 export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateState => {
   const discardPreview = () => {
     const { generatePreviewFileId } = get();
     if (!generatePreviewFileId) return;
     openFiles[generatePreviewFileId]?.rendererRef?.current?.discardStampPreview();
-    set({ generatePreviewFileId: null, generateLayout: [] });
+    set({ generatePreviewFileId: null });
   };
 
   /**
@@ -70,8 +82,7 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
     if (!resolved) return null;
     const { fileId, renderer, target } = resolved;
 
-    const layout = resolveStampLayout(state, target);
-    const dispatches: StampDispatch[] = layout.map((stamp) => ({
+    const dispatches: StampDispatch[] = resolveStampLayout(state, target).map((stamp) => ({
       blX: stamp.blX,
       blY: stamp.blY,
       state: stamp.state,
@@ -85,7 +96,7 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
     // Saves the pre-preview pixels on the first call, restores them on later
     // ones, so each preview replaces the last instead of layering onto it.
     renderer.beginStampPreview();
-    set({ generatePreviewFileId: fileId, generateLayout: layout.map(toMarker) });
+    set({ generatePreviewFileId: fileId });
 
     const painted = renderer.renderStampBatch(dispatches);
     if (painted === 0) {
@@ -100,7 +111,6 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
     generateSeed: 0,
     isGenerating: false,
     generatePreviewFileId: null,
-    generateLayout: [],
 
     setGenerateCode: (code) => set({ generateCode: code }),
     setGenerateSeed: (seed) => set({ generateSeed: seed }),
