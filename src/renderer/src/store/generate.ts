@@ -1,12 +1,6 @@
 import type { StampDispatch } from "@renderer/components/file-renderer";
-import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
-import { zoneSlice, inferZoneCount } from "@renderer/lib/generate/zones";
-import { BEATS_PER_CYCLE, evaluatePattern, queryStamps } from "@renderer/lib/generate/pattern-engine";
 import { GENERATE_PRESETS } from "@renderer/lib/generate/presets";
-import { resolveBrushToken } from "@renderer/lib/generate/resolve-brush";
-import { buildStampState, type ResolvedStamp } from "@renderer/lib/generate/stamp-state";
-import { freqToMidi } from "@renderer/lib/pitch-utils";
-import { unitsToUv } from "@renderer/lib/utils";
+import { resolveStampLayout, toMarker, type StampMarker, type StampTarget } from "@renderer/lib/generate/stamp-layout";
 import { openFiles } from "./files";
 import { useTransientStore } from "./transient";
 import type { State, ZustandGet, ZustandSet } from "./types";
@@ -21,6 +15,11 @@ export interface GenerateState {
   isGenerating: boolean;
   /** File currently showing an uncommitted preview, if any. */
   generatePreviewFileId: string | null;
+  /**
+   * The pass the preview last painted, for the canvas overlay to draw. Written
+   * by the painter rather than derived again, so what is drawn is what landed.
+   */
+  generateLayout: StampMarker[];
   setGenerateCode: (code: string) => void;
   setGenerateSeed: (seed: number) => void;
   /** Paints the pattern across the active file without committing it. */
@@ -42,9 +41,15 @@ function resolveTarget(state: State) {
   const spectrogramData = file?.spectrogramData;
   if (!renderer || !spectrogramData) return null;
 
-  const bpm = state.filepathsBpm[file.filePath] || 120;
-  const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-  return { fileId: activeFileId, renderer, spectrogramData, bpm, totalDuration };
+  const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
+  const target: StampTarget = {
+    spectrogramData,
+    bpm: state.filepathsBpm[file.filePath] || 120,
+    totalDuration: spectrogramData.numFrames / spectrogramData.sampleRate,
+    // Without a cursor to aim from, stamps land halfway up the file.
+    basePitch: useTransientStore.getState().cursorPosition?.pitch ?? spectrogramData.numBands / bandsPerSemitone / 2,
+  };
+  return { fileId: activeFileId, renderer, target };
 }
 
 export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateState => {
@@ -52,7 +57,7 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
     const { generatePreviewFileId } = get();
     if (!generatePreviewFileId) return;
     openFiles[generatePreviewFileId]?.rendererRef?.current?.discardStampPreview();
-    set({ generatePreviewFileId: null });
+    set({ generatePreviewFileId: null, generateLayout: [] });
   };
 
   /**
@@ -61,67 +66,16 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
    */
   const paintPreview = (): { basePitch: number; totalDuration: number; fileId: string } | null => {
     const state = get();
-    const target = resolveTarget(state);
-    if (!target) return null;
-    const { fileId, renderer, spectrogramData, bpm, totalDuration } = target;
+    const resolved = resolveTarget(state);
+    if (!resolved) return null;
+    const { fileId, renderer, target } = resolved;
 
-    const fileBeats = (totalDuration / 60) * bpm;
-    const cycles = Math.max(1, Math.ceil(fileBeats / BEATS_PER_CYCLE));
-    const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
-    // Without a cursor to aim from, stamps land halfway up the file.
-    const basePitch =
-      useTransientStore.getState().cursorPosition?.pitch ?? spectrogramData.numBands / bandsPerSemitone / 2;
-
-    const events = queryStamps(evaluatePattern(state.generateCode), cycles, state.generateSeed);
-
-    // `note` names an absolute pitch; the app measures pitch in semitones above
-    // the file's lowest band.
-    const lowestMidi = freqToMidi(spectrogramData.minFreq);
-    const spectrumSemis = spectrogramData.numBands / bandsPerSemitone;
-    const defaultZoneCount = inferZoneCount(events);
-
-    const dispatches: StampDispatch[] = [];
-    for (const event of events) {
-      if (event.beats >= fileBeats) continue;
-
-      const slice =
-        event.zoneIndex !== undefined
-          ? zoneSlice(event.zoneIndex, event.zoneCount ?? defaultZoneCount, spectrumSemis)
-          : null;
-      const anchorPitch = slice
-        ? slice.anchorSemis
-        : event.noteMidi !== undefined
-          ? event.noteMidi - lowestMidi
-          : basePitch;
-
-      const resolved: ResolvedStamp = {
-        ...event,
-        brushIndex: resolveBrushToken(event.brushToken, state.brushes) ?? state.activeBrushIndex,
-        pitchSemis: anchorPitch + event.semis,
-        sliceSemis: slice?.heightSemis,
-      };
-      const stampState = buildStampState(state, resolved);
-
-      const aim = unitsToUv(
-        resolved.beats,
-        resolved.pitchSemis,
-        bpm,
-        totalDuration,
-        spectrogramData.bandsPerOctave,
-        spectrogramData.numBands,
-      );
-      // Anchor conversion reads the stamp's own brush size and anchor mode.
-      const { blX, blY } = aimUvToBrushBlUv(
-        stampState,
-        aim.x,
-        aim.y,
-        bpm,
-        totalDuration,
-        spectrogramData.bandsPerOctave,
-        spectrogramData.numBands,
-      );
-      dispatches.push({ blX, blY, state: stampState });
-    }
+    const layout = resolveStampLayout(state, target);
+    const dispatches: StampDispatch[] = layout.map((stamp) => ({
+      blX: stamp.blX,
+      blY: stamp.blY,
+      state: stamp.state,
+    }));
 
     if (dispatches.length === 0) {
       discardPreview();
@@ -131,14 +85,14 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
     // Saves the pre-preview pixels on the first call, restores them on later
     // ones, so each preview replaces the last instead of layering onto it.
     renderer.beginStampPreview();
-    set({ generatePreviewFileId: fileId });
+    set({ generatePreviewFileId: fileId, generateLayout: layout.map(toMarker) });
 
     const painted = renderer.renderStampBatch(dispatches);
     if (painted === 0) {
       discardPreview();
       return null;
     }
-    return { basePitch, totalDuration, fileId };
+    return { basePitch: target.basePitch, totalDuration: target.totalDuration, fileId };
   };
 
   return {
@@ -146,6 +100,7 @@ export const createGenerateSlice = (set: ZustandSet, get: ZustandGet): GenerateS
     generateSeed: 0,
     isGenerating: false,
     generatePreviewFileId: null,
+    generateLayout: [],
 
     setGenerateCode: (code) => set({ generateCode: code }),
     setGenerateSeed: (seed) => set({ generateSeed: seed }),

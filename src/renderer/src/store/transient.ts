@@ -20,6 +20,11 @@ export interface TransientState {
   // brush cursor and repaint a preview under a gesture aimed at a control.
   controlDragging: boolean;
   setControlDragging: (dragging: boolean) => void;
+  // The Generate pattern editor holds the caret. The canvas draws the pattern's
+  // stamps only while it does, so the overlay is present exactly while the code
+  // that produces it is being written.
+  patternEditorFocused: boolean;
+  setPatternEditorFocused: (focused: boolean) => void;
 }
 
 export const useTransientStore = create<TransientState>()(
@@ -32,5 +37,7 @@ export const useTransientStore = create<TransientState>()(
     setHoveredFile: (fileId) => set({ hoveredFile: fileId }),
     controlDragging: false,
     setControlDragging: (dragging) => set({ controlDragging: dragging }),
+    patternEditorFocused: false,
+    setPatternEditorFocused: (focused) => set({ patternEditorFocused: focused }),
   })),
 );

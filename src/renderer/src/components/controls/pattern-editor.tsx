@@ -6,6 +6,7 @@ import { resolveBrushColor } from "@renderer/lib/colors";
 import { findBrushTokens } from "@renderer/lib/generate/pattern-tokens";
 import { resolveBrushToken } from "@renderer/lib/generate/resolve-brush";
 import { useStore } from "@renderer/store";
+import { useTransientStore } from "@renderer/store/transient";
 import type { Brush } from "@renderer/store/types";
 import { useEffect, useRef } from "react";
 
@@ -128,6 +129,9 @@ export function PatternEditor({ onRun }: { onRun: () => void }) {
           editorTheme,
           EditorView.updateListener.of((update) => {
             if (update.docChanged) setGenerateCode(update.state.doc.toString());
+            if (update.focusChanged) {
+              useTransientStore.getState().setPatternEditorFocused(update.view.hasFocus);
+            }
           }),
         ],
       }),
@@ -138,6 +142,7 @@ export function PatternEditor({ onRun }: { onRun: () => void }) {
     return () => {
       view.destroy();
       viewRef.current = null;
+      useTransientStore.getState().setPatternEditorFocused(false);
     };
   }, [setGenerateCode]);
 

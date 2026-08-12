@@ -411,6 +411,8 @@ Modulator parameters are themselves modulatable — you can modulate modulator 2
 
 Editing the pattern repaints a **preview** on the canvas — nothing is committed, nothing is resynthesized, and painting by hand clears it. **Apply** (or `Cmd/Ctrl+Enter` in the editor) commits exactly what you are looking at: one stroke, one history step, one resynthesis.
 
+While the caret is in the pattern editor the canvas also shows the pass as **blocks**, one per stamp, in the colour of the brush that paints it and labelled with that brush and whatever the pattern set on it. A quiet stamp, or one that lands where the file is already loud, can be impossible to pick out of the spectrogram; its block is not. Click away from the editor and the blocks go, leaving the preview.
+
 ### Writing Patterns
 
 Patterns are written in [Strudel](https://strudel.cc)'s mini-notation. A quoted string is a bar, split evenly between whatever is inside it:
