@@ -374,6 +374,7 @@ const FileRendererInner = memo(
           overFullScaleRangeDb: { value: OVER_FULL_SCALE_RANGE_DB },
           clipAttributionTex: { value: null },
           showClipping: { value: false },
+          hasClipAttribution: { value: false },
         },
         vertexShader: passThroughVert,
         fragmentShader: withPlatformDefines(displayFrag),
@@ -1047,7 +1048,8 @@ const FileRendererInner = memo(
           clipAttributionTexRef.current = tex;
         }
       }
-      displayMaterial.uniforms.showClipping.value = clipAttributionTexRef.current !== null;
+      displayMaterial.uniforms.showClipping.value = state.showClipping;
+      displayMaterial.uniforms.hasClipAttribution.value = clipAttributionTexRef.current !== null;
       displayMaterial.uniforms.clipAttributionTex.value = clipAttributionTexRef.current || placeholderTexture;
 
       // In Full mode, the displayed brush rectangle anchors to 0 on that axis so it

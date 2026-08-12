@@ -1,4 +1,22 @@
-import type { SpectrogramData } from "../store/types";
+/**
+ * The parts of a file's analysis that attribution reads. `SpectrogramData`
+ * satisfies it structurally; naming it here keeps this module free of the
+ * renderer's store and so loadable outside the browser.
+ */
+export interface ClipAnalysisLayout {
+  textureWidth: number;
+  textureHeight: number;
+  numBands: number;
+  numChannels: number;
+  sampleRate: number;
+  bandsPerOctave: number;
+  metadata: Float32Array;
+  synthesisMetadata: {
+    bandOffsets: Uint32Array;
+    bandStepLog2s: Int32Array;
+    bandLengths: Uint32Array;
+  };
+}
 
 /**
  * Attributes clipping (or limiter gain reduction) back onto individual
@@ -39,6 +57,14 @@ const GAIN_REDUCTION_HOP_SECONDS = 0.005;
 /** Cap on how many overloads are attributed, strongest first. */
 const MAX_OVERLOADS = 512;
 
+/**
+ * How far below the buffer's ceiling a peak may sit and still count as one the
+ * limiter is holding down. The limiter drives every peak it acts on up against
+ * the ceiling, so a quieter peak under the same gain reduction is only there
+ * because the envelope is still releasing from an earlier one.
+ */
+const CEILING_TOLERANCE_DB = 1;
+
 /** Gaussian atom is truncated beyond this many standard deviations. */
 const ATOM_SIGMA_CUTOFF = 3;
 
@@ -46,10 +72,12 @@ const ATOM_SIGMA_CUTOFF = 3;
  * Locates the samples where the output overloaded.
  *
  * With the limiter engaged the buffer never exceeds the ceiling, so the
- * gain-reduction envelope is what marks the overloaded regions; the peak within
- * each region is still at the same sample because the limiter's gain curve is
- * smooth and holds across it. With the limiter bypassed the overshoot is
- * visible in the samples directly.
+ * gain-reduction envelope is what marks them. The envelope's release spans far
+ * more than the peak that triggered it — on dense material it never returns to
+ * zero — so each hop is examined on its own rather than reduced to one peak per
+ * contiguous reduced stretch, and a hop counts only when its loudest sample
+ * reaches the ceiling the limiter is holding it to. With the limiter bypassed
+ * the overshoot is visible in the samples directly.
  */
 export function findOverloads(
   channels: Float32Array[],
@@ -71,31 +99,32 @@ export function findOverloads(
 
   if (useGainReduction) {
     const hop = Math.max(1, Math.round(sampleRate * GAIN_REDUCTION_HOP_SECONDS));
-    let regionStart = -1;
-    for (let p = 0; p <= gainReductionDb.length; p++) {
-      const active = p < gainReductionDb.length && gainReductionDb[p] > GAIN_REDUCTION_THRESHOLD_DB;
-      if (active && regionStart < 0) regionStart = p;
-      if (!active && regionStart >= 0) {
-        const start = Math.min(length - 1, regionStart * hop);
-        const end = Math.min(length, p * hop);
-        let bestValue = -1;
-        let bestIndex = start;
-        let worstDb = 0;
-        for (let q = regionStart; q < p; q++) worstDb = Math.max(worstDb, gainReductionDb[q]);
-        for (let i = start; i < end; i++) {
-          const v = peakAt(i);
-          if (v > bestValue) {
-            bestValue = v;
-            bestIndex = i;
-          }
+
+    // The ceiling the limiter is holding to, read off the buffer itself so it
+    // needs no knowledge of the limiter's constant.
+    let ceiling = 0;
+    for (let i = 0; i < length; i++) ceiling = Math.max(ceiling, peakAt(i));
+    const floor = ceiling * Math.pow(10, -CEILING_TOLERANCE_DB / 20);
+
+    for (let p = 0; p < gainReductionDb.length; p++) {
+      if (gainReductionDb[p] <= GAIN_REDUCTION_THRESHOLD_DB) continue;
+      const start = Math.min(length - 1, p * hop);
+      const end = Math.min(length, start + hop);
+      let bestValue = -1;
+      let bestIndex = start;
+      for (let i = start; i < end; i++) {
+        const v = peakAt(i);
+        if (v > bestValue) {
+          bestValue = v;
+          bestIndex = i;
         }
-        overloads.push({
-          sample: bestIndex,
-          sign: channels[0][bestIndex] >= 0 ? 1 : -1,
-          excessDb: worstDb,
-        });
-        regionStart = -1;
       }
+      if (bestValue < floor) continue;
+      overloads.push({
+        sample: bestIndex,
+        sign: channels[0][bestIndex] >= 0 ? 1 : -1,
+        excessDb: gainReductionDb[p],
+      });
     }
   } else {
     let regionStart = -1;
@@ -163,7 +192,7 @@ function atomSigmaSamples(centerFreqHz: number, sampleRate: number, bandsPerOcta
  * part in, not how many peaks it happens to touch.
  */
 export function computeClipAttribution(
-  spectrogramData: SpectrogramData,
+  spectrogramData: ClipAnalysisLayout,
   packedData: Float32Array,
   overloads: Overload[],
   overlap: number,

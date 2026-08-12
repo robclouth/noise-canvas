@@ -1582,8 +1582,8 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   },
   showClipping: {
     kind: "boolean",
-    name: "Show Clipping",
-    label: "Show Clipping",
+    name: "Overloads",
+    label: "Overloads",
     description: "Tints the partials driving the output past full scale red, and the ones holding the peak back cyan.",
     default: false,
   },

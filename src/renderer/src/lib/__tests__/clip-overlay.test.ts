@@ -62,6 +62,7 @@ function makeTexture(
 function renderDisplay(
   spectrogramData: SpectrogramData,
   attribution: Float32Array | null,
+  showClipping = true,
 ): (band: number, frame: number) => Rgb {
   const { textureWidth, textureHeight, numBands, numFrames } = spectrogramData;
   const renderer = new WebGLRenderer({ antialias: false });
@@ -106,7 +107,8 @@ function renderDisplay(
           "R32F",
         ),
       },
-      showClipping: { value: attribution !== null },
+      showClipping: { value: showClipping },
+      hasClipAttribution: { value: attribution !== null },
     },
     vertexShader: passThroughVert,
     fragmentShader: withPlatformDefines(displayFrag),
@@ -228,9 +230,20 @@ describe("display shader: clipping overlay", () => {
 
   it("draws nothing when the overlay is off", () => {
     const data = flatSpectrogram(FULL_SCALE_MAGNITUDE * 0.4);
-    const sample = renderDisplay(data, null);
+    const sample = renderDisplay(data, attributionMap(data), false);
     const { r, g, b } = sample(10, 10);
 
+    expect(Math.abs(r - g)).toBeLessThan(12);
+    expect(Math.abs(g - b)).toBeLessThan(12);
+  });
+
+  it("leaves an over-full-scale coefficient untinted while the overlay is off", () => {
+    const data = flatSpectrogram(FULL_SCALE_MAGNITUDE * 4);
+    const sample = renderDisplay(data, null, false);
+    const { r, g, b } = sample(16, 32);
+
+    // The magnitude tint answers to the toggle too, so a hot file is not
+    // permanently washed red when the overlay is switched off.
     expect(Math.abs(r - g)).toBeLessThan(12);
     expect(Math.abs(g - b)).toBeLessThan(12);
   });

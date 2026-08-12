@@ -181,7 +181,7 @@ export const TransportPanel = memo(() => {
 
       <Stack gap={0}>
         <ParameterControl paramKey="limiterEnabled" displayLabel="Limiter" />
-        <ParameterControl paramKey="showClipping" displayLabel="Clipping" />
+        <ParameterControl paramKey="showClipping" displayLabel="Overloads" />
       </Stack>
 
       <Divider orientation="vertical" color="dark.5" />
