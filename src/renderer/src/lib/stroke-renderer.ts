@@ -982,101 +982,113 @@ export class StrokeRenderer {
 
       const isLastStep = stepIndex === numSteps - 1;
 
-      // Apply each enabled effect in order, with iterations
-      for (let effectIndex = 0; effectIndex < enabledEffectItems.length; effectIndex++) {
-        const effectItem = enabledEffectItems[effectIndex];
+      const brushIterations = stepState.brushIterations as number;
+
+      // Flatten every (effect, iteration, pass) the step will render. Effects
+      // drop passes that would be a no-op at the current settings, so first/last
+      // pass bookkeeping has to count what actually renders, not what exists.
+      const plannedPasses: { effect: BaseEffect; effectState: State; passIndex: number; iteration: number }[] = [];
+      for (const effectItem of enabledEffectItems) {
         const effect = this.effects[effectItem.effect];
         if (!effect) continue;
-        const numPasses = effect.materials.length;
-        const brushIterations = stepState.brushIterations as number;
-
+        const effectState = createEffectStateView(state, stepIndex, effectItem);
+        const activePasses = effect.getActivePasses?.(effectState) ?? effect.materials.map((_, index) => index);
+        if (activePasses.length === 0) continue;
         for (let i = 0; i < brushIterations; i++) {
-          for (let p = 0; p < numPasses; p++) {
-            const isFirstEffect = effectIndex === 0;
-            const isFirstIteration = i === 0;
-            const isFirstPass = p === 0;
-            const uniformsForThisIteration =
-              isFirstEffect && isFirstIteration && isFirstPass ? { ...commonUniforms } : { ...iterativeUniforms };
-
-            // Add contextual modulation uniforms for this iteration/step.
-            // The Time/Pitch position sources track the painted aim. On a
-            // full-size axis the footprint anchors to 0, so the aim is read
-            // straight from the cursor instead of the footprint center, letting
-            // full-axis effects still be modulated by where you paint.
-            const brushSizeUv = commonUniforms.brushSizeUv.value as Vector2;
-            const brushCenterTime = stepFootprint.fullTime ? cursorPos.x : stepAnchor.x + brushSizeUv.x / 2;
-            const brushCenterPitch = stepFootprint.fullPitch ? cursorPos.y : stepAnchor.y + brushSizeUv.y / 2;
-            uniformsForThisIteration.strokeIterationNormalized = {
-              value: brushIterations > 1 ? i / (brushIterations - 1) : 0,
-            };
-            uniformsForThisIteration.strokeTimePosition = { value: brushCenterTime };
-            uniformsForThisIteration.strokePitchPosition = { value: brushCenterPitch };
-            uniformsForThisIteration.strokeRandom = { value: strokeRandom };
-            uniformsForThisIteration.strokeStepNormalized = {
-              value: numSteps > 1 ? stepIndex / (numSteps - 1) : 0,
-            };
-            uniformsForThisIteration.strokePressure = { value: pressure };
-            // Normalize tilt from [-90,90] degrees to [0,1] range (center=0.5)
-            uniformsForThisIteration.strokeTiltX = { value: (tiltX + 90) / 180 };
-            uniformsForThisIteration.strokeTiltY = { value: (tiltY + 90) / 180 };
-
-            const material = effect.materials[p];
-            this.fboMesh.material = material;
-
-            const isLastEffect = effectIndex === enabledEffectItems.length - 1;
-            const isLastIteration = i === brushIterations - 1;
-            const isLastPass = p === numPasses - 1;
-            const isFinalPassOfStep = isLastEffect && isLastIteration && isLastPass;
-            const isFinalPass = isFinalPassOfStep && isLastStep;
-            const currentWriteFbo = isFinalPass ? destinationFbo : tempFboA;
-
-            const inputTexture = currentReadFbo.texture;
-
-            // The "source" on the first effect/iteration/pass is already set correctly in commonUniforms
-            if (!(isFirstEffect && isFirstIteration && isFirstPass)) {
-              uniformsForThisIteration.sourceSpectrogramTex = { value: inputTexture };
-            }
-
-            // The "destination" (for blending) is the original target only on the very first pass
-            uniformsForThisIteration.destSpectrogramTex = {
-              value:
-                isFirstEffect && isFirstIteration && isFirstPass
-                  ? commonUniforms.destSpectrogramTex.value
-                  : inputTexture,
-            };
-
-            // Pass the mask if enabled (non-cumulative mode)
-            if (!stepState.accumulate) {
-              const currentMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo : this.strokeMaskFbo2;
-              (uniformsForThisIteration as any).useStrokeMask = { value: true };
-              (uniformsForThisIteration as any).strokeMaskTex = { value: currentMaskFbo.texture };
-              // Pass stroke start texture for blend calculations to prevent accumulation with additive blend modes
-              (uniformsForThisIteration as any).blendOriginalTex = { value: this.strokeStartFbo.texture };
-            } else {
-              (uniformsForThisIteration as any).useStrokeMask = { value: false };
-              (uniformsForThisIteration as any).strokeMaskTex = { value: this.textures.placeholderTexture };
-              (uniformsForThisIteration as any).blendOriginalTex = { value: this.textures.placeholderTexture };
-            }
-
-            // Create effect-specific state view with per-instance params merged in
-            const effectState = createEffectStateView(state, stepIndex, effectItem);
-
-            effect.updateEffectUniforms({
-              commonUniforms: uniformsForThisIteration,
-              passIndex: p,
-              file: sourceFile,
-              state: effectState,
-            });
-
-            this.gl.setRenderTarget(currentWriteFbo);
-            this.gl.render(this.fboScene, this.camera);
-
-            currentReadFbo = currentWriteFbo;
-
-            if (!isFinalPass) {
-              [tempFboA, tempFboB] = [tempFboB, tempFboA];
-            }
+          for (const passIndex of activePasses) {
+            plannedPasses.push({ effect, effectState, passIndex, iteration: i });
           }
+        }
+      }
+
+      // Every pass dropped out. One passthrough still has to run: it carries the
+      // source offset, the brush blend, and the write into destinationFbo.
+      if (plannedPasses.length === 0) {
+        const passthrough = this.effects.passthrough;
+        if (passthrough) {
+          plannedPasses.push({
+            effect: passthrough,
+            effectState: createStepStateView(state, stepIndex),
+            passIndex: 0,
+            iteration: 0,
+          });
+        }
+      }
+
+      // Apply each planned pass in order
+      for (let passOrdinal = 0; passOrdinal < plannedPasses.length; passOrdinal++) {
+        const { effect, effectState, passIndex: p, iteration: i } = plannedPasses[passOrdinal];
+        const isFirstOfStep = passOrdinal === 0;
+        const uniformsForThisIteration = isFirstOfStep ? { ...commonUniforms } : { ...iterativeUniforms };
+
+        // Add contextual modulation uniforms for this iteration/step.
+        // The Time/Pitch position sources track the painted aim. On a
+        // full-size axis the footprint anchors to 0, so the aim is read
+        // straight from the cursor instead of the footprint center, letting
+        // full-axis effects still be modulated by where you paint.
+        const brushSizeUv = commonUniforms.brushSizeUv.value as Vector2;
+        const brushCenterTime = stepFootprint.fullTime ? cursorPos.x : stepAnchor.x + brushSizeUv.x / 2;
+        const brushCenterPitch = stepFootprint.fullPitch ? cursorPos.y : stepAnchor.y + brushSizeUv.y / 2;
+        uniformsForThisIteration.strokeIterationNormalized = {
+          value: brushIterations > 1 ? i / (brushIterations - 1) : 0,
+        };
+        uniformsForThisIteration.strokeTimePosition = { value: brushCenterTime };
+        uniformsForThisIteration.strokePitchPosition = { value: brushCenterPitch };
+        uniformsForThisIteration.strokeRandom = { value: strokeRandom };
+        uniformsForThisIteration.strokeStepNormalized = {
+          value: numSteps > 1 ? stepIndex / (numSteps - 1) : 0,
+        };
+        uniformsForThisIteration.strokePressure = { value: pressure };
+        // Normalize tilt from [-90,90] degrees to [0,1] range (center=0.5)
+        uniformsForThisIteration.strokeTiltX = { value: (tiltX + 90) / 180 };
+        uniformsForThisIteration.strokeTiltY = { value: (tiltY + 90) / 180 };
+
+        const material = effect.materials[p];
+        this.fboMesh.material = material;
+
+        const isFinalPassOfStep = passOrdinal === plannedPasses.length - 1;
+        const isFinalPass = isFinalPassOfStep && isLastStep;
+        const currentWriteFbo = isFinalPass ? destinationFbo : tempFboA;
+
+        const inputTexture = currentReadFbo.texture;
+
+        // The "source" on the first pass of the step is already set correctly in commonUniforms
+        if (!isFirstOfStep) {
+          uniformsForThisIteration.sourceSpectrogramTex = { value: inputTexture };
+        }
+
+        // The "destination" (for blending) is the original target only on the very first pass
+        uniformsForThisIteration.destSpectrogramTex = {
+          value: isFirstOfStep ? commonUniforms.destSpectrogramTex.value : inputTexture,
+        };
+
+        // Pass the mask if enabled (non-cumulative mode)
+        if (!stepState.accumulate) {
+          const currentMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo : this.strokeMaskFbo2;
+          (uniformsForThisIteration as any).useStrokeMask = { value: true };
+          (uniformsForThisIteration as any).strokeMaskTex = { value: currentMaskFbo.texture };
+          // Pass stroke start texture for blend calculations to prevent accumulation with additive blend modes
+          (uniformsForThisIteration as any).blendOriginalTex = { value: this.strokeStartFbo.texture };
+        } else {
+          (uniformsForThisIteration as any).useStrokeMask = { value: false };
+          (uniformsForThisIteration as any).strokeMaskTex = { value: this.textures.placeholderTexture };
+          (uniformsForThisIteration as any).blendOriginalTex = { value: this.textures.placeholderTexture };
+        }
+
+        effect.updateEffectUniforms({
+          commonUniforms: uniformsForThisIteration,
+          passIndex: p,
+          file: sourceFile,
+          state: effectState,
+        });
+
+        this.gl.setRenderTarget(currentWriteFbo);
+        this.gl.render(this.fboScene, this.camera);
+
+        currentReadFbo = currentWriteFbo;
+
+        if (!isFinalPass) {
+          [tempFboA, tempFboB] = [tempFboB, tempFboA];
         }
       }
 

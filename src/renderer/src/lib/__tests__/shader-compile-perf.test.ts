@@ -20,7 +20,6 @@ import cloneFrag from "../../glsl/clone-effect.frag";
 import convolveFrag from "../../glsl/convolve-effect.frag";
 import dynamicsFrag from "../../glsl/dynamics-effect.frag";
 import evolveFrag from "../../glsl/evolve-effect.frag";
-import overtonesFrag from "../../glsl/overtones-effect.frag";
 import passthroughFrag from "../../glsl/passthrough-effect.frag";
 import sortFrag from "../../glsl/sort-effect.frag";
 import synthesizeFrag from "../../glsl/synthesize-effect.frag";
@@ -40,7 +39,6 @@ import { withPlatformDefines } from "../shader-utils";
 const EFFECT_FRAGS: { name: string; frag: string }[] = [
   { name: "dynamics", frag: dynamicsFrag },
   { name: "transform", frag: transformFrag },
-  { name: "overtones", frag: overtonesFrag },
   { name: "blur", frag: blurFrag },
   { name: "clone", frag: cloneFrag },
   { name: "synthesize", frag: synthesizeFrag },

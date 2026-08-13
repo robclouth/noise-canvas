@@ -192,7 +192,6 @@ function createMockEffectsWithAdditiveBlend(): EffectsRegistry {
   return {
     dynamics: passthroughEffect,
     transform: additiveBlendEffect, // Additive blend for testing
-    overtones: passthroughEffect,
     blur: passthroughEffect,
     synthesize: passthroughEffect,
     passthrough: passthroughEffect,
@@ -322,7 +321,6 @@ function createMockEffects(): EffectsRegistry {
   return {
     dynamics: passthroughEffect,
     transform: passthroughEffect,
-    overtones: passthroughEffect,
     blur: passthroughEffect,
     synthesize: passthroughEffect,
     passthrough: passthroughEffect,
@@ -339,7 +337,6 @@ function createMockEffectsWithAdditive(): EffectsRegistry {
   return {
     dynamics: passthroughEffect,
     transform: additiveEffect, // Additive effect for testing iterations
-    overtones: passthroughEffect,
     blur: passthroughEffect,
     synthesize: passthroughEffect,
     passthrough: passthroughEffect,
@@ -779,7 +776,6 @@ describe("StrokeRenderer", () => {
           { id: "test-transform", effect: "transform", enabled: true, params: {} },
           { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
           { id: "test-blur", effect: "blur", enabled: false, params: {} },
-          { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
           { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
         ],
       });
@@ -1386,7 +1382,6 @@ describe("StrokeRenderer", () => {
       const effects: EffectsRegistry = {
         dynamics: passthroughEffect,
         transform: additiveEffect,
-        overtones: passthroughEffect,
         blur: subtractiveEffect, // Use blur slot for subtractive
         synthesize: passthroughEffect,
         passthrough: passthroughEffect,
@@ -1414,7 +1409,6 @@ describe("StrokeRenderer", () => {
               { id: "test-transform", effect: "transform", enabled: true, params: {} },
               { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
               { id: "test-blur", effect: "blur", enabled: false, params: {} },
-              { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
               { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
             ],
           },
@@ -1427,7 +1421,6 @@ describe("StrokeRenderer", () => {
               { id: "test-transform", effect: "transform", enabled: false, params: {} },
               { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
               { id: "test-blur", effect: "blur", enabled: true, params: {} },
-              { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
               { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
             ],
           },
@@ -1487,7 +1480,6 @@ describe("StrokeRenderer", () => {
       const effects: EffectsRegistry = {
         dynamics: passthroughEffect,
         transform: additiveEffect,
-        overtones: passthroughEffect,
         blur: subtractiveEffect,
         synthesize: passthroughEffect,
         passthrough: passthroughEffect,
@@ -1662,7 +1654,6 @@ describe("StrokeRenderer", () => {
             { id: "test-transform", effect: "transform", enabled: true, params: {} },
             { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
             { id: "test-blur", effect: "blur", enabled: false, params: {} },
-            { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
             { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
           ],
         });
@@ -1761,7 +1752,6 @@ describe("StrokeRenderer", () => {
           { id: "test-transform", effect: "transform", enabled: true, params: {} },
           { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
           { id: "test-blur", effect: "blur", enabled: false, params: {} },
-          { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
           { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
         ],
       });
@@ -1925,7 +1915,6 @@ describe("StrokeRenderer", () => {
           { id: "test-transform", effect: "transform", enabled: true, params: {} },
           { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
           { id: "test-blur", effect: "blur", enabled: false, params: {} },
-          { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
           { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
         ],
       } as Partial<State>) as State;

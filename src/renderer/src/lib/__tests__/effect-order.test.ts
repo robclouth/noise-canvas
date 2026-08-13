@@ -12,7 +12,6 @@ describe("Effect Order", () => {
     it("should include all expected effects", () => {
       expect(EFFECT_KEYS).toContain("dynamics");
       expect(EFFECT_KEYS).toContain("transform");
-      expect(EFFECT_KEYS).toContain("overtones");
       expect(EFFECT_KEYS).toContain("blur");
       expect(EFFECT_KEYS).toContain("synthesize");
       expect(EFFECT_KEYS).toContain("evolve");

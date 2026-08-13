@@ -308,8 +308,8 @@ export const factoryPresets: PresetType[] = [
     macroValues: DEFAULT_MACRO_VALUES,
   },
 
-  // --- Overtones ---
-  // Stacks decaying octave overtones on top of the painted material to thicken a tone.
+  // --- Harmonics ---
+  // Stacks a decaying harmonic series on top of the painted material to thicken a tone.
   {
     id: "harmonics",
     name: "Harmonics",
@@ -322,10 +322,19 @@ export const factoryPresets: PresetType[] = [
         name: "Step 1",
         effects: [
           {
-            id: "harmonics-overtones",
-            effect: "overtones",
+            id: "harmonics-clone",
+            effect: "clone",
             enabled: true,
-            params: { overtonesCount: 16, overtonesShape: "octaves", overtonesDecay: 60, overtonesScale: 1 },
+            params: {
+              cloneCountX: 1,
+              cloneCountY: 16,
+              cloneSpaceBeats: 0,
+              cloneSpaceSemis: 12,
+              cloneShapeY: "harmonic",
+              cloneDirectionY: 0,
+              cloneDecay: 60,
+              cloneSumMode: 1,
+            },
           },
         ],
         brushSizeTime: 2,

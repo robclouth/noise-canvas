@@ -15,7 +15,7 @@ Or just open it up and play around. All the parameters have got tooltips, there'
 ## What it does
 
 - **Paint on spectrograms.** Brushes stamp effects across time and pitch, snapped to a musical grid and scale.
-- **11 spectral effects** — dynamics, transform, overtones, blur, clone, synthesize, evolve, binaural, sort, convolve, align — stackable and reorderable, several instances at a time.
+- **10 spectral effects** — dynamics, transform, blur, clone, synthesize, evolve, binaural, sort, convolve, align — stackable and reorderable, several instances at a time.
 - **Multi-step brushes** with four macros, a preset library, and hotkeys.
 - **Generate** — paint the whole file from a [Strudel](https://strudel.cc) pattern that picks the brush, the timing, and the width of every stamp, previewed live.
 - **Deep modulation** — three per-pixel 2D modulators (patterns, procedural textures, your own images, envelope follower, sequencer), plus macros, pen pressure/tilt, and contextual sources.

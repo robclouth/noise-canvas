@@ -5,9 +5,9 @@ import { cloneEffect } from "./clone-effect";
 import { convolveEffect } from "./convolve-effect";
 import { dynamicsEffect } from "./dynamics-effect";
 import { evolveEffect } from "./evolve-effect";
-import { overtonesEffect } from "./overtones-effect";
 import { passThroughEffect } from "./passthrough-effect";
 import { sortEffect } from "./sort-effect";
+import { reflowEffect } from "./reflow-effect";
 import { synthesizeEffect } from "./synthesize-effect";
 import { transformEffect } from "./transform-effect";
 import { transmuteEffect } from "./transmute-effect";
@@ -20,7 +20,6 @@ export type { EffectType } from "./types";
 export const effects = {
   dynamics: dynamicsEffect,
   transform: transformEffect,
-  overtones: overtonesEffect,
   blur: blurEffect,
   clone: cloneEffect,
   synthesize: synthesizeEffect,
@@ -32,4 +31,5 @@ export const effects = {
   waveshape: waveshapeEffect,
   convolve: convolveEffect,
   align: alignEffect,
+  reflow: reflowEffect,
 };

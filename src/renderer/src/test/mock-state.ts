@@ -51,7 +51,6 @@ function createTestStep(name: string): TestBrushStep {
       { id: "mock-transform", effect: "transform", enabled: true, params: {} },
       { id: "mock-dynamics", effect: "dynamics", enabled: false, params: {} },
       { id: "mock-blur", effect: "blur", enabled: false, params: {} },
-      { id: "mock-overtones", effect: "overtones", enabled: false, params: {} },
       { id: "mock-synthesize", effect: "synthesize", enabled: false, params: {} },
     ],
   };
@@ -106,7 +105,6 @@ export function createMockState(overrides: Partial<State> = {}): State {
       { id: "mock-transform", effect: "transform", enabled: true, params: {} },
       { id: "mock-dynamics", effect: "dynamics", enabled: false, params: {} },
       { id: "mock-blur", effect: "blur", enabled: false, params: {} },
-      { id: "mock-overtones", effect: "overtones", enabled: false, params: {} },
       { id: "mock-synthesize", effect: "synthesize", enabled: false, params: {} },
     ],
 
@@ -191,11 +189,6 @@ export function createMockState(overrides: Partial<State> = {}): State {
     blurAmountBeats: 0.25,
     blurAmountSemis: 3,
     blurIterations: 1,
-
-    overtonesCount: 8,
-    overtonesShape: "octaves",
-    overtonesGain: -6,
-    overtonesDecay: -3,
 
     synthesizeType: "noise",
     synthesizeGain: 0,

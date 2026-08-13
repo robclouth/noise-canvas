@@ -8,6 +8,43 @@ uniform Parameter cloneDecay;
 uniform vec2 cloneDirection; // (1,0) for time pass, (0,1) for pitch pass
 uniform int cloneDirectionMode; // 0=forward/up, 1=middle, 2=backward/down
 uniform int cloneEdgeMode;
+uniform int cloneSumMode; // 0=coherent complex sum, 1=constructive magnitude sum
+uniform sampler2D cloneShapeTex;
+
+// Tap position in Space units. The table holds one entry per copy; Middle mode
+// asks for half indices, so entries are interpolated and mirrored about zero.
+float shapeStep(float offsetIdx, int tableSize) {
+    float a = abs(offsetIdx);
+    float last = float(max(tableSize - 1, 0));
+    float i0 = clamp(floor(a), 0.0, last);
+    float i1 = min(i0 + 1.0, last);
+    float frac = clamp(a - i0, 0.0, 1.0);
+    float v0 = texelFetch(cloneShapeTex, ivec2(int(i0), 0), 0).r;
+    float v1 = texelFetch(cloneShapeTex, ivec2(int(i1), 0), 0).r;
+    return mix(v0, v1, frac) * sign(offsetIdx);
+}
+
+void accumulateTap(vec2 magPhase, float w, bool constructive,
+                   inout vec2 sumZ, inout float sumMag, inout float sumPhase,
+                   inout float refPhase, inout bool haveRef, inout float totalWeight) {
+    if (constructive) {
+        float phase = getPhase(magPhase);
+        if (!haveRef) {
+            refPhase = phase;
+            haveRef = true;
+        }
+        sumMag += getMag(magPhase) * w;
+        sumPhase += (refPhase + unwrapPhase(phase - refPhase)) * w;
+    } else {
+        sumZ += toComplex(magPhase) * w;
+    }
+    totalWeight += w;
+}
+
+vec2 resolveTaps(bool constructive, vec2 sumZ, float sumMag, float sumPhase, float totalWeight, vec2 fallback) {
+    if (totalWeight <= 0.0) return fallback;
+    return constructive ? fromPolar(sumMag, sumPhase / totalWeight) : polarFromComplex(sumZ);
+}
 
 void main() {
     vec2 destUv = packedToUnpackedUv(destInverseMapTex, vUv, destFrameCount, destBandCount);
@@ -34,7 +71,9 @@ void main() {
     vec2 spaceY = applyModulationCached(cloneSpaceY.value, cloneSpaceY.minValue, cloneSpaceY.maxValue, cloneSpaceY.modulationAmounts, cloneSpaceY.contextualModAmounts, cloneSpaceY.macroAmounts, mods);
     vec2 space = isXPass ? spaceX : spaceY;
 
-    int count = clamp(cloneCount, 1, 32);
+    int count = clamp(cloneCount, 1, 64);
+    int tableSize = textureSize(cloneShapeTex, 0).x;
+    bool constructive = cloneSumMode == 1;
 
     vec2 decayFactor = clamp(
         applyModulationCached(cloneDecay.value, cloneDecay.minValue, cloneDecay.maxValue, cloneDecay.modulationAmounts, cloneDecay.contextualModAmounts, cloneDecay.macroAmounts, mods),
@@ -60,10 +99,18 @@ void main() {
 
     vec2 sumL = vec2(0.0);
     vec2 sumR = vec2(0.0);
+    float sumMagL = 0.0;
+    float sumMagR = 0.0;
+    float sumPhaseL = 0.0;
+    float sumPhaseR = 0.0;
+    float refPhaseL = 0.0;
+    float refPhaseR = 0.0;
+    bool haveRefL = false;
+    bool haveRefR = false;
     float totalWeightL = 0.0;
     float totalWeightR = 0.0;
 
-    for (int s = 0; s < 32; s++) {
+    for (int s = 0; s < 64; s++) {
         if (s >= count) break;
 
         float offsetIdx;
@@ -76,12 +123,16 @@ void main() {
         }
 
         float normDist = abs(offsetIdx) / maxAbsOffset;
+        float tapStep = shapeStep(offsetIdx, tableSize);
 
         // Sample opposite to the echo direction: content at S appears as copies
         // at S + k*space (Forward = +space, Backward = -space).
-        vec2 offsetL = -cloneDirection * offsetIdx * space.x;
+        vec2 offsetL = -cloneDirection * tapStep * space.x;
         vec2 sampleUvL = coords.sourceL + offsetL;
-        bool inL = cloneEdgeMode != 0 || isInsideSourceBrush(sampleUvL);
+        // A pitch copy past the top or bottom band is dropped, unless the pitch
+        // axis wraps — then it comes back in from the other end.
+        bool withinPitchL = isXPass || wrapsPitchAxis() || (sampleUvL.y >= 0.0 && sampleUvL.y <= 1.0);
+        bool inL = withinPitchL && (cloneEdgeMode != 0 || isInsideSourceBrush(sampleUvL));
 
         if (sameTaps) {
             if (!inL) continue;
@@ -91,22 +142,20 @@ void main() {
             float dtSec = (coords.dest.x - sampleUvL.x) * uvToSec;
             sampleTexel.g = reanchorTimeShift(sampleUvL, sampleTexel.g, destFreqHz, dtSec);
             sampleTexel.a = reanchorTimeShift(sampleUvL, sampleTexel.a, destFreqHz, dtSec);
-            sumL += toComplex(sampleTexel.rg) * w;
-            sumR += toComplex(sampleTexel.ba) * w;
-            totalWeightL += w;
-            totalWeightR += w;
+            accumulateTap(sampleTexel.rg, w, constructive, sumL, sumMagL, sumPhaseL, refPhaseL, haveRefL, totalWeightL);
+            accumulateTap(sampleTexel.ba, w, constructive, sumR, sumMagR, sumPhaseR, refPhaseR, haveRefR, totalWeightR);
         } else {
-            vec2 offsetR = -cloneDirection * offsetIdx * space.y;
+            vec2 offsetR = -cloneDirection * tapStep * space.y;
             vec2 sampleUvR = coords.sourceR + offsetR;
-            bool inR = cloneEdgeMode != 0 || isInsideSourceBrush(sampleUvR);
+            bool withinPitchR = isXPass || wrapsPitchAxis() || (sampleUvR.y >= 0.0 && sampleUvR.y <= 1.0);
+            bool inR = withinPitchR && (cloneEdgeMode != 0 || isInsideSourceBrush(sampleUvR));
             if (inL) {
                 float wL = pow(max(1.0 - decayFactor.x, 1e-6), normDist);
                 vec2 totalShiftL = vec2(sourceOffsetX, sourceOffsetY) + offsetL;
                 vec4 sampleTexelL = sampleWithEdgeMode(sampleUvL, coords.dest, totalShiftL.x, totalShiftL.y, cloneEdgeMode);
                 float dtSecL = (coords.dest.x - sampleUvL.x) * uvToSec;
                 sampleTexelL.g = reanchorTimeShift(sampleUvL, sampleTexelL.g, destFreqHz, dtSecL);
-                sumL += toComplex(sampleTexelL.rg) * wL;
-                totalWeightL += wL;
+                accumulateTap(sampleTexelL.rg, wL, constructive, sumL, sumMagL, sumPhaseL, refPhaseL, haveRefL, totalWeightL);
             }
             if (inR) {
                 float wR = pow(max(1.0 - decayFactor.y, 1e-6), normDist);
@@ -114,17 +163,17 @@ void main() {
                 vec4 sampleTexelR = sampleWithEdgeMode(sampleUvR, coords.dest, totalShiftR.x, totalShiftR.y, cloneEdgeMode);
                 float dtSecR = (coords.dest.x - sampleUvR.x) * uvToSec;
                 sampleTexelR.a = reanchorTimeShift(sampleUvR, sampleTexelR.a, destFreqHz, dtSecR);
-                sumR += toComplex(sampleTexelR.ba) * wR;
-                totalWeightR += wR;
+                accumulateTap(sampleTexelR.ba, wR, constructive, sumR, sumMagR, sumPhaseR, refPhaseR, haveRefR, totalWeightR);
             }
         }
     }
 
     vec4 resultTexel;
     if (totalWeightL > 0.0 || totalWeightR > 0.0) {
-        vec2 polL = totalWeightL > 0.0 ? polarFromComplex(sumL) : originalTexel.rg;
-        vec2 polR = totalWeightR > 0.0 ? polarFromComplex(sumR) : originalTexel.ba;
-        resultTexel = vec4(polL, polR);
+        resultTexel = vec4(
+            resolveTaps(constructive, sumL, sumMagL, sumPhaseL, totalWeightL, originalTexel.rg),
+            resolveTaps(constructive, sumR, sumMagR, sumPhaseR, totalWeightR, originalTexel.ba)
+        );
     } else {
         resultTexel = originalTexel;
     }

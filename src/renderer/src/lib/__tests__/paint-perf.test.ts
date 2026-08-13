@@ -84,7 +84,6 @@ async function loadAllEffects(): Promise<EffectsRegistry> {
     import("../../effects/transform-effect"),
     import("../../effects/dynamics-effect"),
     import("../../effects/blur-effect"),
-    import("../../effects/overtones-effect"),
     import("../../effects/clone-effect"),
     import("../../effects/convolve-effect"),
     import("../../effects/evolve-effect"),
@@ -95,13 +94,12 @@ async function loadAllEffects(): Promise<EffectsRegistry> {
     import("../../effects/align-effect"),
     import("../../effects/synthesize-effect"),
   ]);
-  const [pt, tr, dy, bl, ov, cl, co, ev, bi, tm, ws, so, al, sy] = mods;
+  const [pt, tr, dy, bl, cl, co, ev, bi, tm, ws, so, al, sy] = mods;
   return {
     passthrough: pt.passThroughEffect,
     transform: tr.transformEffect,
     dynamics: dy.dynamicsEffect,
     blur: bl.blurEffect,
-    overtones: ov.overtonesEffect,
     clone: cl.cloneEffect,
     convolve: co.convolveEffect,
     evolve: ev.evolveEffect,
@@ -119,7 +117,6 @@ const EFFECT_NAMES = [
   "transform",
   "dynamics",
   "blur",
-  "overtones",
   "clone",
   "convolve",
   "evolve",

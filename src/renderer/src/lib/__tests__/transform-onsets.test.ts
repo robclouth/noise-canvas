@@ -12,26 +12,18 @@ import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer } from ".
 const TWO_PI = Math.PI * 2;
 
 async function loadEffects(): Promise<EffectsRegistry> {
-  const [
-    { transformEffect },
-    { dynamicsEffect },
-    { blurEffect },
-    { overtonesEffect },
-    { synthesizeEffect },
-    { passThroughEffect },
-  ] = await Promise.all([
-    import("../../effects/transform-effect"),
-    import("../../effects/dynamics-effect"),
-    import("../../effects/blur-effect"),
-    import("../../effects/overtones-effect"),
-    import("../../effects/synthesize-effect"),
-    import("../../effects/passthrough-effect"),
-  ]);
+  const [{ transformEffect }, { dynamicsEffect }, { blurEffect }, { synthesizeEffect }, { passThroughEffect }] =
+    await Promise.all([
+      import("../../effects/transform-effect"),
+      import("../../effects/dynamics-effect"),
+      import("../../effects/blur-effect"),
+      import("../../effects/synthesize-effect"),
+      import("../../effects/passthrough-effect"),
+    ]);
   return {
     transform: transformEffect,
     dynamics: dynamicsEffect,
     blur: blurEffect,
-    overtones: overtonesEffect,
     synthesize: synthesizeEffect,
     passthrough: passThroughEffect,
   };

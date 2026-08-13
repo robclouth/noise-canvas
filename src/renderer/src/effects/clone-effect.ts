@@ -5,11 +5,22 @@ import {
   getModAmountValuesNormalized,
   getMacroAmountValuesNormalized,
 } from "@renderer/store/modulators";
-import { GLSL3, RawShaderMaterial, Vector2 } from "three";
+import type { State } from "@renderer/store/types";
+import {
+  ClampToEdgeWrapping,
+  DataTexture,
+  FloatType,
+  GLSL3,
+  NearestFilter,
+  RawShaderMaterial,
+  RedFormat,
+  Vector2,
+} from "three";
 import cloneBrushFrag from "../glsl/clone-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
+import { activeClonePasses, buildShapeTable, CloneShapeKey } from "./clone-shapes";
 
 const uniforms = {
   ...defaultValues,
@@ -55,10 +66,29 @@ const uniforms = {
   cloneEdgeMode: {
     value: 1,
   },
+  cloneSumMode: {
+    value: 0,
+  },
 };
+
+type ShapeCacheEntry = { key: string; texture: DataTexture };
+
+function createShapeTexture(table: number[]): DataTexture {
+  const data = new Float32Array(table);
+  const texture = new DataTexture(data, data.length, 1, RedFormat, FloatType);
+  texture.internalFormat = "R32F";
+  texture.minFilter = NearestFilter;
+  texture.magFilter = NearestFilter;
+  texture.wrapS = ClampToEdgeWrapping;
+  texture.wrapT = ClampToEdgeWrapping;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
+}
 
 class CloneEffect extends BaseEffect {
   materials: RawShaderMaterial[];
+  private shapeCache: (ShapeCacheEntry | null)[] = [null, null];
 
   constructor() {
     super();
@@ -67,6 +97,7 @@ class CloneEffect extends BaseEffect {
         uniforms: {
           ...uniforms,
           cloneDirection: { value: new Vector2(1, 0) },
+          cloneShapeTex: { value: null },
         },
         vertexShader: passThroughVert,
         fragmentShader: withPlatformDefines(cloneBrushFrag),
@@ -76,12 +107,34 @@ class CloneEffect extends BaseEffect {
         uniforms: {
           ...uniforms,
           cloneDirection: { value: new Vector2(0, 1) },
+          cloneShapeTex: { value: null },
         },
         vertexShader: passThroughVert,
         fragmentShader: withPlatformDefines(cloneBrushFrag),
         glslVersion: GLSL3,
       }),
     ];
+  }
+
+  getActivePasses(state: State): number[] {
+    return activeClonePasses(state.cloneCountX, state.cloneCountY);
+  }
+
+  private getShapeTexture(
+    passIndex: number,
+    shapeKey: CloneShapeKey,
+    count: number,
+    scaleTonic: string,
+    scaleType: string,
+  ): DataTexture {
+    const key = `${shapeKey}|${count}|${scaleTonic}|${scaleType}`;
+    const cached = this.shapeCache[passIndex];
+    if (cached && cached.key === key) return cached.texture;
+
+    const texture = createShapeTexture(buildShapeTable(shapeKey, count, scaleTonic, scaleType));
+    cached?.texture.dispose();
+    this.shapeCache[passIndex] = { key, texture };
+    return texture;
   }
 
   updateEffectUniforms(props: UpdateEffectUniformsProps): void {
@@ -101,6 +154,11 @@ class CloneEffect extends BaseEffect {
       cloneDirectionX,
       cloneDirectionY,
       cloneEdgeMode,
+      cloneShapeX,
+      cloneShapeY,
+      cloneSumMode,
+      scaleTonic,
+      scaleType,
       filepathsBpm,
     } = state;
     const { spectrogramData, filePath } = file;
@@ -133,7 +191,8 @@ class CloneEffect extends BaseEffect {
       contextualModAmounts: getContextualModAmountsNormalized(state, "cloneSpaceSemis"),
       macroAmounts: getMacroAmountValuesNormalized(state, "cloneSpaceSemis"),
     };
-    material.uniforms.cloneCount.value = passIndex === 0 ? cloneCountX : cloneCountY;
+    const count = passIndex === 0 ? cloneCountX : cloneCountY;
+    material.uniforms.cloneCount.value = count;
     material.uniforms.cloneDecay.value = {
       value: cloneDecay / 100,
       minValue: 0,
@@ -144,6 +203,14 @@ class CloneEffect extends BaseEffect {
     };
     material.uniforms.cloneDirectionMode.value = passIndex === 0 ? cloneDirectionX : cloneDirectionY;
     material.uniforms.cloneEdgeMode.value = cloneEdgeMode;
+    material.uniforms.cloneSumMode.value = cloneSumMode;
+    material.uniforms.cloneShapeTex.value = this.getShapeTexture(
+      passIndex,
+      passIndex === 0 ? cloneShapeX : cloneShapeY,
+      count,
+      scaleTonic,
+      scaleType,
+    );
   }
 }
 

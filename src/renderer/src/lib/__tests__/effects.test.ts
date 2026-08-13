@@ -82,18 +82,34 @@ function createModulatorScaleLut(): DataTexture {
   return tex;
 }
 
-type EffectType = "transform" | "dynamics" | "blur" | "overtones" | "synthesize" | "passthrough";
+type EffectType = "transform" | "dynamics" | "blur" | "clone" | "synthesize" | "passthrough";
 
 /**
  * Creates a state configured for a specific effect.
  */
-function createStateForEffect(effectType: EffectType): State {
+function createStateForEffect(effectType: EffectType, effectParams: Record<string, unknown> = {}): State {
+  const params = (key: EffectType) => (key === effectType ? effectParams : {});
   const effects = [
-    { id: "test-transform", effect: "transform" as const, enabled: effectType === "transform", params: {} },
-    { id: "test-dynamics", effect: "dynamics" as const, enabled: effectType === "dynamics", params: {} },
-    { id: "test-blur", effect: "blur" as const, enabled: effectType === "blur", params: {} },
-    { id: "test-overtones", effect: "overtones" as const, enabled: effectType === "overtones", params: {} },
-    { id: "test-synthesize", effect: "synthesize" as const, enabled: effectType === "synthesize", params: {} },
+    {
+      id: "test-transform",
+      effect: "transform" as const,
+      enabled: effectType === "transform",
+      params: params("transform"),
+    },
+    {
+      id: "test-dynamics",
+      effect: "dynamics" as const,
+      enabled: effectType === "dynamics",
+      params: params("dynamics"),
+    },
+    { id: "test-blur", effect: "blur" as const, enabled: effectType === "blur", params: params("blur") },
+    { id: "test-clone", effect: "clone" as const, enabled: effectType === "clone", params: params("clone") },
+    {
+      id: "test-synthesize",
+      effect: "synthesize" as const,
+      enabled: effectType === "synthesize",
+      params: params("synthesize"),
+    },
   ];
 
   // Use createMockState with minimal overrides - let it use the default step
@@ -135,14 +151,14 @@ async function loadEffects(): Promise<EffectsRegistry> {
     { transformEffect },
     { dynamicsEffect },
     { blurEffect },
-    { overtonesEffect },
+    { cloneEffect },
     { synthesizeEffect },
     { passThroughEffect },
   ] = await Promise.all([
     import("../../effects/transform-effect"),
     import("../../effects/dynamics-effect"),
     import("../../effects/blur-effect"),
-    import("../../effects/overtones-effect"),
+    import("../../effects/clone-effect"),
     import("../../effects/synthesize-effect"),
     import("../../effects/passthrough-effect"),
   ]);
@@ -151,7 +167,7 @@ async function loadEffects(): Promise<EffectsRegistry> {
     transform: transformEffect,
     dynamics: dynamicsEffect,
     blur: blurEffect,
-    overtones: overtonesEffect,
+    clone: cloneEffect,
     synthesize: synthesizeEffect,
     passthrough: passThroughEffect,
   };
@@ -334,9 +350,16 @@ describe("Effects", () => {
       renderer.dispose();
     });
 
-    it("overtones effect should not produce black output", async () => {
+    it("clone effect stacking a harmonic series should not produce black output", async () => {
       const renderer = createRenderer();
-      const state = createStateForEffect("overtones");
+      const state = createStateForEffect("clone", {
+        cloneCountX: 1,
+        cloneCountY: 8,
+        cloneSpaceSemis: 12,
+        cloneShapeY: "harmonic",
+        cloneSumMode: 1,
+        cloneDecay: 40,
+      });
       const sourceFile = createSourceFile(renderer);
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
@@ -397,7 +420,6 @@ describe("Effects", () => {
         { id: "test-transform", effect: "transform" as const, enabled: false, params: {} },
         { id: "test-dynamics", effect: "dynamics" as const, enabled: false, params: {} },
         { id: "test-blur", effect: "blur" as const, enabled: false, params: {} },
-        { id: "test-overtones", effect: "overtones" as const, enabled: false, params: {} },
         { id: "test-synthesize", effect: "synthesize" as const, enabled: false, params: {} },
       ];
       const state = createMockState({
@@ -489,7 +511,6 @@ describe("Effects", () => {
                 { id: "test-transform", effect: "transform", enabled: false, params: {} },
                 { id: "test-dynamics", effect: "dynamics", enabled: false, params: {} },
                 { id: "test-blur", effect: "blur", enabled: false, params: {} },
-                { id: "test-overtones", effect: "overtones", enabled: false, params: {} },
                 { id: "test-synthesize", effect: "synthesize", enabled: false, params: {} },
               ],
               accumulate: false, // non-cumulative mode
@@ -595,7 +616,6 @@ describe("Effects", () => {
         { id: "test-transform", effect: "transform" as const, enabled: true, params: {} },
         { id: "test-dynamics", effect: "dynamics" as const, enabled: false, params: {} },
         { id: "test-blur", effect: "blur" as const, enabled: false, params: {} },
-        { id: "test-overtones", effect: "overtones" as const, enabled: false, params: {} },
         { id: "test-synthesize", effect: "synthesize" as const, enabled: false, params: {} },
       ];
 
@@ -772,7 +792,6 @@ describe("Effects", () => {
         { id: "test-transform", effect: "transform" as const, enabled: enableTransform, params: {} },
         { id: "test-dynamics", effect: "dynamics" as const, enabled: false, params: {} },
         { id: "test-blur", effect: "blur" as const, enabled: false, params: {} },
-        { id: "test-overtones", effect: "overtones" as const, enabled: false, params: {} },
         { id: "test-synthesize", effect: "synthesize" as const, enabled: false, params: {} },
       ];
       const state = createMockStateWithSteps(
@@ -951,7 +970,6 @@ describe("Effects", () => {
         { id: "test-transform", effect: "transform" as const, enabled: false, params: {} },
         { id: "test-dynamics", effect: "dynamics" as const, enabled: false, params: {} },
         { id: "test-blur", effect: "blur" as const, enabled: false, params: {} },
-        { id: "test-overtones", effect: "overtones" as const, enabled: false, params: {} },
         { id: "test-synthesize", effect: "synthesize" as const, enabled: false, params: {} },
       ];
       const state = createMockStateWithSteps(
