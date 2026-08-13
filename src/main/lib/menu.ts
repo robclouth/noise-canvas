@@ -143,6 +143,14 @@ export function createMenu(window: BrowserWindow, state: MenuState) {
         },
         { type: "separator" },
         {
+          label: "Fill Grid with Brush",
+          accelerator: "CmdOrCtrl+G",
+          click: () => {
+            webContentsSend(window, "fill-grid");
+          },
+        },
+        { type: "separator" },
+        {
           label: "Restore Original",
           click: () => {
             webContentsSend(window, "restore-original");

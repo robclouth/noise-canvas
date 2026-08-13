@@ -375,7 +375,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     kind: "string",
     name: `Sequencer Data ${idx}`,
     label: "Seq Data",
-    description: "Holds the on/off state of every cell in the grid.",
+    description: "Holds the value and the on/off state of every cell in the grid.",
     default: JSON.stringify({
       values: Array.from({ length: 4 }, () => Array.from({ length: 8 }, () => 1)),
     }),

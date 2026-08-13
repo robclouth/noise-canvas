@@ -166,6 +166,12 @@ const getModulatorParamKeys = (modulatorIndex: number): ParameterKey[] => {
     `modulator${idx}EnvelopeSource`,
     `modulator${idx}EnvelopeMinDb`,
     `modulator${idx}EnvelopeMaxDb`,
+    `modulator${idx}SeqStepsX`,
+    `modulator${idx}SeqStepsY`,
+    `modulator${idx}SeqLoopBeats`,
+    `modulator${idx}SeqLoopSemis`,
+    `modulator${idx}SeqSwing`,
+    `modulator${idx}SeqData`,
   ] as ParameterKey[];
 };
 

@@ -13,7 +13,7 @@ import { AUDIO_PERSISTED_KEYS, createAudioSlice } from "./audio";
 import { createBrushSlice } from "./brush";
 import { createEffectsSlice } from "./effects";
 import { createFilesSlice, FILES_PERSISTED_KEYS, openFiles } from "./files";
-import { createGenerateSlice, GENERATE_PERSISTED_KEYS } from "./generate";
+import { createFillSlice } from "./fill";
 import { createLinkSlice, LINK_PERSISTED_KEYS } from "./link";
 import { createModulatorsSlice } from "./modulators";
 import { createPresetsSlice, PRESETS_PERSISTED_KEYS } from "./presets";
@@ -42,7 +42,6 @@ export const ALL_PERSISTED_KEYS: (keyof State)[] = [
   ...LINK_PERSISTED_KEYS,
   ...STEM_GROUPS_PERSISTED_KEYS,
   ...APP_PERSISTED_KEYS,
-  ...GENERATE_PERSISTED_KEYS,
   "randomizationAmounts",
   "excludedFromRandomization",
 ];
@@ -184,7 +183,7 @@ export const useStore = create<State>()(
         ...createStepsSlice(set, get),
         ...createLinkSlice(set, get),
         ...createStemGroupsSlice(set, get),
-        ...createGenerateSlice(set, get),
+        ...createFillSlice(set, get),
         setParameter: (key: ParameterKey, value: unknown, effectId?: string) => {
           const state = get();
           const activeBrush = state.brushes[state.activeBrushIndex];

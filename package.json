@@ -50,8 +50,6 @@
     "@codemirror/view": "^6.43.8",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
-    "@strudel/core": "^1.2.6",
-    "@strudel/mini": "^1.2.6",
     "ffmpeg-static": "^5.2.0",
     "onnxruntime-node": "^1.24.3",
     "simplex-noise": "^4.0.3"

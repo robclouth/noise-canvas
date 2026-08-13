@@ -88,13 +88,14 @@ _See also:_ [Modulator Modes](./manual.md#modulator-modes), [How Modulation Amou
 **Set up.**
 
 - Pick the brush you want painted — it's whatever is selected.
-- **Generate**, above the transport: `s("~ x")*4`, or take **Offbeat** from the preset dropdown.
+- Set the time grid to the spacing you want, an eighth for offbeats, and leave **Size ↔** on **Grid** so each stroke fills its cell.
+- Drag on the time legend if you only want part of the file covered.
 
-**Do.** The canvas previews as you type. **Apply** (or `Cmd/Ctrl+Enter` in the editor) commits the whole pass as one stroke and one undo step.
+**Do.** Click the grid icon on the file header, or press `Cmd/Ctrl+G`. The whole pass is one stroke and one undo step.
 
-**Variations.** `"1 2 1 3"` alternates between the first three brushes in your list, so one pass can lay down a kick, a hat and a fill. `"x*8?"` drops half the eighths at random, and the **dice** re-rolls that until you get a variation worth keeping. `.gain(saw.segment(8))` swells across each bar.
+**Variations.** Put a **sequencer** modulator on **Strength** and draw the rhythm you want — `1 0 0 1 0 0 1 0` gives a three-against-eight. A Random pattern modulator on Strength varies each stroke instead, and taking its depth down far enough drops some of them. Set the time grid to **Onsets** and the fill follows the file's own hits.
 
-_See also:_ [Generate](./manual.md#generate), [Writing Patterns](./manual.md#writing-patterns).
+_See also:_ [Fill Grid](./manual.md#fill-grid), [What Sets the Spacing](./manual.md#what-sets-the-spacing).
 
 ### Sweep a brush up the spectrum
 
@@ -102,12 +103,12 @@ _See also:_ [Generate](./manual.md#generate), [Writing Patterns](./manual.md#wri
 
 **Set up.**
 
-- **Generate**: `s("x*4").zone("0 1 2 3")`.
-- `zone` cuts the frequency range into slices and sizes the brush to fit one. The highest number in the pattern sets how many slices there are, so this is quarters.
+- Set the pitch grid **Semis** to a quarter of your file's range, and leave **Size ↕** on **Grid** so each stroke fills its row.
+- Set the time grid to a beat, so the fill steps across time as it climbs.
 
-**Do.** Apply.
+**Do.** **Fill Grid** from the file header, or `Cmd/Ctrl+G`.
 
-**Variations.** `.zones(16)` with `.zone(irand(16))` scatters a random sixteenth per stroke. `.zone("0 7").zones(8)` hits only the extremes. Add `.m1(sine.segment(16))` to sweep a macro across the file at the same time, so the brush changes character as it climbs.
+**Variations.** Set the pitch grid to **Scale** and every stroke lands on a note of the selected scale instead of a fixed interval. A pattern modulator on **Strength**, set slower than the grid, fades the fill in as it climbs, because a modulator is a field across the canvas and each stroke samples where it lands.
 
 _See also:_ [Where in the Spectrum](./manual.md#where-in-the-spectrum), [Strength, Pan and Macros](./manual.md#strength-pan-and-macros).
 

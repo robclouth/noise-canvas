@@ -1,33 +1,101 @@
 import { Box, Group, useMantineTheme } from "@mantine/core";
 import { helpProps } from "@renderer/lib/ui-controls";
-import { selectParameter, useStore } from "@renderer/store";
+import { getParameterValue, selectParameter, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
+import { Dice5, Eraser, SquareCheck } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { HelpButton } from "./help-control";
-
-interface SequencerData {
-  values: number[][];
-}
+import { HelpActionIcon } from "./help-control";
 
 interface SequencerGridProps {
   modulatorIndex: number;
 }
 
-function parseSeqData(dataStr: string): SequencerData {
+/** A step holds a value whether it is on or off, so switching it off keeps it. */
+interface StoredSeqData {
+  values?: number[][];
+  off?: boolean[][];
+}
+
+interface Cell {
+  row: number;
+  col: number;
+}
+
+/** The stored grid cropped and padded to the step and row counts on screen. */
+interface Grid {
+  values: number[][];
+  off: boolean[][];
+}
+
+interface Drag {
+  pointerId: number;
+  mode: "pending" | "value" | "paint" | "erase";
+  startX: number;
+  startY: number;
+  cell: Cell;
+  startValue: number;
+  paintOn: boolean;
+}
+
+const ROW_HEIGHT = 26;
+const MIN_HEIGHT = 78;
+const MAX_HEIGHT = 182;
+/** Pointer travel before a press becomes a drag rather than a click. */
+const DRAG_THRESHOLD = 3;
+/** Pixels of vertical travel that span the whole 0–1 range. */
+const VALUE_DRAG_RANGE = 120;
+const FINE_DRAG_SCALE = 0.25;
+const HINT = "Click to switch · drag up or down to set";
+
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+
+function parseSeqData(dataStr: string): StoredSeqData {
   try {
-    const parsed = JSON.parse(dataStr);
-    return { values: parsed.values || [[1]] };
+    const parsed: unknown = JSON.parse(dataStr);
+    if (!parsed || typeof parsed !== "object") return {};
+    const { values, off } = parsed as StoredSeqData;
+    return {
+      values: Array.isArray(values) ? values : undefined,
+      off: Array.isArray(off) ? off : undefined,
+    };
   } catch {
-    return { values: [[1]] };
+    return {};
   }
 }
 
-function serializeSeqData(data: SequencerData): string {
-  return JSON.stringify(data);
+function buildGrid(stored: StoredSeqData, stepsX: number, stepsY: number): Grid {
+  const values: number[][] = [];
+  const off: boolean[][] = [];
+  for (let row = 0; row < stepsY; row++) {
+    values[row] = [];
+    off[row] = [];
+    for (let col = 0; col < stepsX; col++) {
+      values[row][col] = clamp01(stored.values?.[row]?.[col] ?? 1);
+      off[row][col] = stored.off?.[row]?.[col] === true;
+    }
+  }
+  return { values, off };
 }
 
-// Fixed aspect ratio (width:height)
-const ASPECT_RATIO = 256 / 96;
+/** Writes `block` over the top-left of `stored`, so rows and steps outside the
+ * visible grid survive a change to the step or row count. */
+function overlay<T>(stored: T[][] | undefined, block: T[][]): T[][] {
+  const rowCount = Math.max(stored?.length ?? 0, block.length);
+  const result: T[][] = [];
+  for (let row = 0; row < rowCount; row++) {
+    const storedRow = stored?.[row] ?? [];
+    const blockRow = block[row];
+    if (!blockRow) {
+      result[row] = [...storedRow];
+      continue;
+    }
+    const colCount = Math.max(storedRow.length, blockRow.length);
+    result[row] = Array.from({ length: colCount }, (_, col) =>
+      col < blockRow.length ? blockRow[col] : storedRow[col],
+    );
+  }
+  return result;
+}
 
 export function SequencerGrid({ modulatorIndex }: SequencerGridProps) {
   const stepsXKey = `modulator${modulatorIndex}SeqStepsX` as ParameterKey;
@@ -39,243 +107,264 @@ export function SequencerGrid({ modulatorIndex }: SequencerGridProps) {
   const seqDataStr = (useStore(selectParameter(seqDataKey)) as string) || "{}";
   const setParameter = useStore((state) => state.setParameter);
 
+  const theme = useMantineTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<Drag | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 256, height: 96 });
-  const [isPainting, setIsPainting] = useState(false);
-  const paintModeRef = useRef<"enable" | "disable" | "intensity">("enable");
-  const [currentIntensity, setCurrentIntensity] = useState(1.0);
-  const startYRef = useRef(0);
-  const startValueRef = useRef(0);
-  const activeStepRef = useRef<{ row: number; col: number } | null>(null);
+  const [hover, setHover] = useState<Cell | null>(null);
 
-  const theme = useMantineTheme();
+  const displayHeight = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, stepsY * ROW_HEIGHT));
 
-  // Measure container width and update canvas size
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const updateSize = () => {
       const dpr = window.devicePixelRatio || 1;
-      const displayWidth = container.clientWidth;
-      const displayHeight = Math.round(displayWidth / ASPECT_RATIO);
-      // Canvas size is display size * pixel ratio for crisp rendering
       setCanvasSize({
-        width: Math.round(displayWidth * dpr),
+        width: Math.round(container.clientWidth * dpr),
         height: Math.round(displayHeight * dpr),
       });
     };
 
-    // Initial size
     updateSize();
-
-    // Watch for resize
     const observer = new ResizeObserver(updateSize);
     observer.observe(container);
-
     return () => observer.disconnect();
-  }, []);
+  }, [displayHeight]);
 
-  // Parse data
-  const seqData = useMemo(() => parseSeqData(seqDataStr), [seqDataStr]);
+  const grid = useMemo(() => buildGrid(parseSeqData(seqDataStr), stepsX, stepsY), [seqDataStr, stepsX, stepsY]);
 
-  // Ensure data arrays are sized correctly
-  const values = useMemo(() => {
-    const result: number[][] = [];
-    for (let row = 0; row < stepsY; row++) {
-      result[row] = [];
-      for (let col = 0; col < stepsX; col++) {
-        result[row][col] = seqData.values[row]?.[col] ?? 1;
-      }
-    }
-    return result;
-  }, [seqData.values, stepsX, stepsY]);
-
-  // Update parameter
-  const updateValues = useCallback(
-    (newValues: number[][]) => {
-      setParameter(seqDataKey, serializeSeqData({ values: newValues }));
-    },
-    [seqDataKey, setParameter],
-  );
-
-  // Set a step value
-  const setStepValue = useCallback(
-    (row: number, col: number, value: number) => {
-      const clampedValue = Math.max(0, Math.min(1, value));
-      const newValues = values.map((r, ri) =>
-        ri === row ? r.map((v, ci) => (ci === col ? clampedValue : v)) : [...r],
+  /** Reads the stored grid back out of the store, so several edits in one
+   * pointer event build on each other rather than on the rendered copy. */
+  const mutate = useCallback(
+    (edit: (grid: Grid) => Grid | null) => {
+      const stored = parseSeqData((getParameterValue(useStore.getState(), seqDataKey) as string) || "{}");
+      const next = edit(buildGrid(stored, stepsX, stepsY));
+      if (!next) return;
+      setParameter(
+        seqDataKey,
+        JSON.stringify({ values: overlay(stored.values, next.values), off: overlay(stored.off, next.off) }),
       );
-      updateValues(newValues);
     },
-    [values, updateValues],
+    [seqDataKey, setParameter, stepsX, stepsY],
   );
 
-  // Toggle a step (for simple click)
-  const toggleStep = useCallback(
-    (row: number, col: number) => {
-      const currentValue = values[row]?.[col] ?? 0;
-      // Toggle between 0 and current intensity
-      const newValue = currentValue > 0 ? 0 : currentIntensity;
-      setStepValue(row, col, newValue);
-      return newValue > 0;
-    },
-    [values, currentIntensity, setStepValue],
+  const setCell = useCallback(
+    (cell: Cell, edit: (value: number, off: boolean) => { value: number; off: boolean }) =>
+      mutate((current) => {
+        const { row, col } = cell;
+        const next = edit(current.values[row][col], current.off[row][col]);
+        if (next.value === current.values[row][col] && next.off === current.off[row][col]) return null;
+        return {
+          values: current.values.map((r, ri) => (ri === row ? r.map((v, ci) => (ci === col ? next.value : v)) : r)),
+          off: current.off.map((r, ri) => (ri === row ? r.map((o, ci) => (ci === col ? next.off : o)) : r)),
+        };
+      }),
+    [mutate],
   );
 
-  // Randomize
-  const randomize = useCallback(() => {
-    const newValues = Array.from({ length: stepsY }, () => Array.from({ length: stepsX }, () => Math.random()));
-    updateValues(newValues);
-  }, [stepsX, stepsY, updateValues]);
+  /** Switching a step on gives a step left at zero something to play. */
+  const setOn = useCallback(
+    (cell: Cell, on: boolean) => setCell(cell, (value) => ({ value: on && value === 0 ? 1 : value, off: !on })),
+    [setCell],
+  );
 
-  // Get step from canvas coordinates
-  const getStepFromPos = useCallback(
-    (clientX: number, clientY: number): { row: number; col: number } | null => {
+  const toggle = useCallback(
+    (cell: Cell) =>
+      setCell(cell, (value, off) => {
+        const on = !off && value > 0;
+        return { value: on || value > 0 ? value : 1, off: on };
+      }),
+    [setCell],
+  );
+
+  const setValue = useCallback(
+    (cell: Cell, value: number) => setCell(cell, () => ({ value: clamp01(value), off: false })),
+    [setCell],
+  );
+
+  const fillGrid = useCallback(
+    (value: number, off: boolean) =>
+      mutate(() => ({
+        values: Array.from({ length: stepsY }, () => Array.from({ length: stepsX }, () => value)),
+        off: Array.from({ length: stepsY }, () => Array.from({ length: stepsX }, () => off)),
+      })),
+    [mutate, stepsX, stepsY],
+  );
+
+  const randomize = useCallback(
+    () =>
+      mutate(() => ({
+        values: Array.from({ length: stepsY }, () => Array.from({ length: stepsX }, () => Math.random())),
+        off: Array.from({ length: stepsY }, () => Array.from({ length: stepsX }, () => false)),
+      })),
+    [mutate, stepsX, stepsY],
+  );
+
+  const cellFromPos = useCallback(
+    (clientX: number, clientY: number): Cell | null => {
       const canvas = canvasRef.current;
       if (!canvas) return null;
       const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
-      const canvasX = (clientX - rect.left) * scaleX;
-      const canvasY = (clientY - rect.top) * scaleY;
-      const stepWidth = canvas.width / stepsX;
-      const stepHeight = canvas.height / stepsY;
-      const col = Math.floor(canvasX / stepWidth);
-      // Flip Y: bottom row is row 0, top row is stepsY-1
-      const row = stepsY - 1 - Math.floor(canvasY / stepHeight);
-      if (row >= 0 && row < stepsY && col >= 0 && col < stepsX) {
-        return { row, col };
-      }
-      return null;
+      const col = Math.floor(((clientX - rect.left) / rect.width) * stepsX);
+      // Row 0 is the bottom row, matching the data texture's orientation.
+      const row = stepsY - 1 - Math.floor(((clientY - rect.top) / rect.height) * stepsY);
+      if (row < 0 || row >= stepsY || col < 0 || col >= stepsX) return null;
+      return { row, col };
     },
     [stepsX, stepsY],
   );
 
-  // Mouse handlers
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      const step = getStepFromPos(e.clientX, e.clientY);
-      if (step) {
-        setIsPainting(true);
-        activeStepRef.current = step;
-
-        if (e.metaKey || e.ctrlKey) {
-          // Cmd/Ctrl+click: adjust intensity mode
-          paintModeRef.current = "intensity";
-          startYRef.current = e.clientY;
-          startValueRef.current = values[step.row][step.col];
-        } else {
-          // Normal click: toggle and set paint mode based on result
-          const isNowEnabled = toggleStep(step.row, step.col);
-          paintModeRef.current = isNowEnabled ? "enable" : "disable";
-        }
-      }
-    },
-    [getStepFromPos, values, toggleStep],
-  );
-
-  // Handle mouse move at window level for drag outside canvas
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isPainting) return;
-
-      if (paintModeRef.current === "intensity" && activeStepRef.current) {
-        // Adjusting intensity: vertical drag changes value
-        const deltaY = startYRef.current - e.clientY;
-        const sensitivity = 0.01;
-        const newValue = Math.max(0, Math.min(1, startValueRef.current + deltaY * sensitivity));
-        const { row, col } = activeStepRef.current;
-        setStepValue(row, col, newValue);
-        setCurrentIntensity(newValue);
-      } else {
-        // Normal drag: paint cells we pass over
-        const step = getStepFromPos(e.clientX, e.clientY);
-        if (step) {
-          const targetValue = paintModeRef.current === "enable" ? currentIntensity : 0;
-          const currentCellValue = values[step.row]?.[step.col] ?? 0;
-          // Only update if different
-          if (
-            (paintModeRef.current === "enable" && currentCellValue === 0) ||
-            (paintModeRef.current === "disable" && currentCellValue > 0)
-          ) {
-            setStepValue(step.row, step.col, targetValue);
-          }
-        }
-      }
+  const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (event.button !== 0 && event.button !== 2) return;
+    const cell = cellFromPos(event.clientX, event.clientY);
+    if (!cell) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const erasing = event.button === 2;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      mode: erasing ? "erase" : "pending",
+      startX: event.clientX,
+      startY: event.clientY,
+      cell,
+      startValue: grid.values[cell.row][cell.col],
+      paintOn: false,
     };
+    setHover(cell);
+    if (erasing) setOn(cell, false);
+  };
 
-    const handleMouseUp = () => {
-      setIsPainting(false);
-      activeStepRef.current = null;
-    };
-
-    if (isPainting) {
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
+  const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const drag = dragRef.current;
+    const cell = cellFromPos(event.clientX, event.clientY);
+    if (!drag) {
+      setHover(cell);
+      return;
     }
 
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [isPainting, getStepFromPos, setStepValue, currentIntensity, values]);
+    if (drag.mode === "pending") {
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+      if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+      if (Math.abs(dy) > Math.abs(dx)) {
+        drag.mode = "value";
+      } else {
+        drag.mode = "paint";
+        drag.paintOn = grid.off[drag.cell.row][drag.cell.col] || grid.values[drag.cell.row][drag.cell.col] === 0;
+        setOn(drag.cell, drag.paintOn);
+      }
+    }
 
-  // Draw canvas
+    if (drag.mode === "value") {
+      const scale = event.shiftKey ? FINE_DRAG_SCALE : 1;
+      const delta = ((drag.startY - event.clientY) / VALUE_DRAG_RANGE) * scale;
+      setValue(drag.cell, drag.startValue + delta);
+      setHover(drag.cell);
+      return;
+    }
+
+    if (!cell) return;
+    setOn(cell, drag.mode === "paint" && drag.paintOn);
+    setHover(cell);
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (drag?.mode === "pending") toggle(drag.cell);
+  };
+
   const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const width = canvas.width;
-    const height = canvas.height;
-    const stepWidth = width / stepsX;
-    const stepHeight = height / stepsY;
-    const gap = 1;
+    const { width, height } = canvas;
+    const cellWidth = width / stepsX;
+    const cellHeight = height / stepsY;
+    const gap = Math.max(1, Math.round(window.devicePixelRatio || 1));
 
-    // Clear
-    ctx.fillStyle = "#1a1a1a";
+    ctx.fillStyle = theme.colors.dark[8];
     ctx.fillRect(0, 0, width, height);
 
-    // Draw steps with intensity fill from bottom
-    // Row 0 is at bottom, row stepsY-1 is at top (matching texture coordinates)
     for (let row = 0; row < stepsY; row++) {
       for (let col = 0; col < stepsX; col++) {
-        const x = col * stepWidth + gap / 2;
-        // Flip Y: row 0 at bottom, row stepsY-1 at top
-        const y = (stepsY - 1 - row) * stepHeight + gap / 2;
-        const w = stepWidth - gap;
-        const h = stepHeight - gap;
-        const intensity = values[row]?.[col] ?? 0;
+        const x = col * cellWidth + gap / 2;
+        const y = (stepsY - 1 - row) * cellHeight + gap / 2;
+        const w = cellWidth - gap;
+        const h = cellHeight - gap;
+        const value = grid.values[row][col];
+        const off = grid.off[row][col];
 
-        // Draw background
-        ctx.fillStyle = "#2c2c2c";
+        ctx.fillStyle = hover?.row === row && hover?.col === col ? theme.colors.dark[5] : theme.colors.dark[6];
         ctx.fillRect(x, y, w, h);
 
-        // Draw intensity fill from bottom
-        if (intensity > 0) {
-          const fillHeight = h * intensity;
+        if (off) {
+          // A step that is off still shows the level it comes back on at.
+          const level = Math.max(h * value, gap * 2);
+          ctx.globalAlpha = 0.25;
           ctx.fillStyle = theme.colors.blue[6];
-          ctx.fillRect(x, y + h - fillHeight, w, fillHeight);
+          ctx.fillRect(x, y + h - level, w, level);
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = theme.colors.dark[2];
+          ctx.fillRect(x, y + h - level, w, gap * 2);
+        } else if (value > 0) {
+          ctx.fillStyle = theme.colors.blue[6];
+          ctx.fillRect(x, y + h - h * value, w, h * value);
         }
       }
     }
-  }, [values, stepsX, stepsY]);
 
-  // Redraw when values, steps, or canvas size change
+    ctx.fillStyle = theme.colors.dark[2];
+    for (let col = 4; col < stepsX; col += 4) {
+      ctx.fillRect(col * cellWidth - gap, 0, gap * 2, height);
+    }
+  }, [grid, stepsX, stepsY, hover, theme]);
+
   useEffect(() => {
     drawCanvas();
   }, [drawCanvas, canvasSize]);
 
+  const readout = hover
+    ? `Step ${hover.col + 1} · Band ${hover.row + 1} — ${Math.round(grid.values[hover.row][hover.col] * 100)}%${
+        grid.off[hover.row][hover.col] ? " off" : ""
+      }`
+    : HINT;
+
   return (
     <Box ref={containerRef} style={{ userSelect: "none", width: "100%" }}>
-      <Group gap={4} mb={4}>
-        <HelpButton help="sequencer-randomize" size="compact-xs" variant="subtle" onClick={randomize}>
-          Rand
-        </HelpButton>
-        <Box style={{ fontSize: 10, opacity: 0.6 }}>Intensity: {Math.round(currentIntensity * 100)}%</Box>
+      <Group gap={2} mb={4} wrap="nowrap">
+        <HelpActionIcon help="sequencer-randomize" size="sm" variant="subtle" color="gray" onClick={randomize}>
+          <Dice5 size={14} />
+        </HelpActionIcon>
+        <HelpActionIcon
+          help="sequencer-fill"
+          size="sm"
+          variant="subtle"
+          color="gray"
+          onClick={() => fillGrid(1, false)}
+        >
+          <SquareCheck size={14} />
+        </HelpActionIcon>
+        <HelpActionIcon
+          help="sequencer-clear"
+          size="sm"
+          variant="subtle"
+          color="gray"
+          onClick={() => fillGrid(0, true)}
+        >
+          <Eraser size={14} />
+        </HelpActionIcon>
+        <Box style={{ fontSize: 10, opacity: 0.6, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden" }}>
+          {readout}
+        </Box>
       </Group>
       <canvas
         ref={canvasRef}
@@ -283,11 +372,21 @@ export function SequencerGrid({ modulatorIndex }: SequencerGridProps) {
         height={canvasSize.height}
         style={{
           width: "100%",
-          height: "auto",
+          height: displayHeight,
           cursor: "pointer",
           borderRadius: 4,
+          touchAction: "none",
         }}
-        onMouseDown={handleMouseDown}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onPointerLeave={(event) => {
+          // Releasing pointer capture fires a leave with the pointer still over
+          // the canvas, so clear the readout only when it has really left.
+          if (!dragRef.current && !cellFromPos(event.clientX, event.clientY)) setHover(null);
+        }}
+        onContextMenu={(event) => event.preventDefault()}
         {...helpProps("sequencer-grid")}
       />
     </Box>

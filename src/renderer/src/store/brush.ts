@@ -78,6 +78,8 @@ export interface BrushState {
     position?: StrokePosition,
     strokeTimeRange?: StrokeTimeRange,
     label?: string,
+    /** False leaves the transport alone; the new buffer still swaps in. */
+    autoPlay?: boolean,
   ) => Promise<void>;
   // Helper actions that use the unified ones
   moveBrushPosition: (direction: "up" | "down" | "left" | "right") => void;
@@ -132,7 +134,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     },
 
     // Unified apply action - used by mouse up and Enter key
-    applyStrokeAtPosition: async (position?, strokeTimeRange?, label?) => {
+    applyStrokeAtPosition: async (position?, strokeTimeRange?, label?, autoPlay = true) => {
       const state = get();
       const { activeFileId, commitStroke, autoPlayStroke, setFilePlaybackStartTime, setLoopRegion } = state;
 
@@ -174,7 +176,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       const clampedEnd = Math.min(totalDuration, strokeTimeRange?.max ?? fallbackTimeSeconds);
 
       let autoPlaybackParams: { startTimeSeconds: number; endTimeSeconds: number } | null = null;
-      if (autoPlayStroke) {
+      if (autoPlayStroke && autoPlay) {
         // Active-step brush size overrides the global — match what the stroke
         // actually paints, so the loop region covers the true brush footprint
         // (and not just the grid when the global is in Grid mode but the step

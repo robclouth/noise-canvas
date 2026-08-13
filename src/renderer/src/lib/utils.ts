@@ -305,7 +305,7 @@ export function onsetCellWidthUv(
 // Width in UV of the grid cell containing `anchorTimeUv`, for when the time
 // brush tracks the grid ("Grid" size) and time-snap is on. Swing alternates cell
 // widths, so a constant-width brush leaves gaps on the wider cells; sizing each
-// stamp to its own cell makes snapped strokes tile exactly. On the onset grid
+// stroke to its own cell makes snapped strokes tile exactly. On the onset grid
 // the cell is the span between hits instead. Returns null when it does not apply
 // (snap off, or an explicit/Full brush size), leaving callers on the constant
 // footprint.

@@ -95,18 +95,27 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
       const rect = legendRef.current?.getBoundingClientRect();
       if (!rect || !file) return;
 
+      // The legend belongs to its own file, which need not be the active one.
+      // Only the active file's region drives the player, so an inactive file's
+      // region is stored without touching playback.
+      const writeLoopRegion = (region: { start: number; end: number } | null) => {
+        const store = useStore.getState();
+        if (store.activeFileId === fileId) store.setLoopRegion(region);
+        else store.setFileLoopRegion(fileId, region);
+      };
+
       if (isDraggingRef.current) {
         isDraggingRef.current = false;
         const endTime = getTimeFromX(event.clientX, rect);
         const loopStart = Math.min(startTime, endTime);
         const loopEnd = Math.max(startTime, endTime);
         if (loopEnd > loopStart) {
-          useStore.getState().setLoopRegion({ start: loopStart, end: loopEnd });
+          writeLoopRegion({ start: loopStart, end: loopEnd });
           setFilePlaybackStartTime(fileId, loopStart);
         }
       } else {
         // It was a plain click — set playback position
-        useStore.getState().setLoopRegion(null);
+        writeLoopRegion(null);
         setFilePlaybackStartTime(fileId, startTime);
         if (activeFileId === fileId && isPlaying) {
           setPlaybackTime(startTime);

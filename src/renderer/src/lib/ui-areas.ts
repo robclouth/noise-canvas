@@ -65,9 +65,31 @@ export const UI_AREAS = {
   },
   "file-header": {
     title: "File header",
-    blurb: "Tempo, onset sensitivity, splitting, and the per-file view controls.",
+    blurb: "Tempo, onset sensitivity, splitting, filling the grid, and the per-file view controls.",
     manualSection: "working-with-files",
-    recipes: ["mute-a-vocal"],
+    deepTour: [
+      {
+        title: "Painting without a mouse",
+        description:
+          "The grid icon paints the current brush on every cell of the grid, across the whole file or across a loop region you drag on the time legend. It commits as one stroke and one undo, and a large fill runs behind a progress dialog you can cancel.",
+      },
+      {
+        title: "The grid decides the rhythm",
+        description:
+          "There are no separate settings — a fill reads the <b>Beats</b>, <b>Swing</b> and <b>Semis</b> grids you already set. Set the time grid to <b>Onsets</b> and it follows the file's own hits; set the pitch grid to <b>Scale</b> and it lands on the notes of the selected scale.",
+      },
+      {
+        title: "The brush decides the size",
+        description:
+          "<b>Size ↔</b> and <b>Size ↕</b> behave exactly as they do by hand: at <b>Grid</b> each stroke fills its cell so the fill tiles edge to edge, at a fixed value every stroke takes that size, and at <b>Full</b> it spans the axis.",
+      },
+      {
+        title: "Making the strokes differ",
+        description:
+          "Every stroke uses the same brush, so variation comes from modulation — a modulator is a field across the canvas, so strokes in different places sample different values. A Random pattern on <b>Strength</b> varies each one; a sequencer on it draws the rhythm outright.",
+      },
+    ],
+    recipes: ["mute-a-vocal", "paint-a-rhythm-across-the-file", "sweep-a-brush-up-the-spectrum"],
   },
 
   "section-macros": {
@@ -224,47 +246,6 @@ export const UI_AREAS = {
           "<b>Export branch…</b> renders one numbered WAV per node down a lineage, which is how you audition variations in a DAW. The <b>⋮</b> menu adds Export Favorites and <b>Purge History</b>, which reclaims disk without touching the current state.",
       },
     ],
-  },
-
-  "section-generate": {
-    title: "Generate",
-    blurb: "Paint the whole file from a pattern, previewed live before you commit it.",
-    manualSection: "generate",
-    deepTour: [
-      {
-        title: "The whole file in one pass",
-        description:
-          "A pattern says when each stroke lands, how long it is, and which brush makes it — then it runs the length of the file. This is the same brush you'd paint by hand, placed by a rhythm instead of by your mouse.",
-      },
-      {
-        anchor: "file-lane",
-        side: "top",
-        title: "Everything here is a preview",
-        description:
-          "Editing repaints the canvas but commits nothing — no history step, no resynthesis, and painting by hand clears it. <b>Apply</b>, or <b>Cmd/Ctrl+Enter</b> in the editor, commits exactly what you're looking at as one stroke and one undo.",
-      },
-      {
-        title: "Patterns are Strudel",
-        description:
-          '<b>"x x x x"</b> is four strokes, <b>"x*8"</b> is eight, <b>"x ~ x ~"</b> leaves rests, <b>"x(3,8)"</b> spreads three over eight slots. One bar is four beats. Each event\'s length becomes the brush\'s time size, so <b>"x@3 x"</b> paints wide then narrow.',
-      },
-      {
-        title: "Every token can name a brush",
-        description:
-          'A digit picks the brush in that slot, a letter picks the one with that hotkey, a word picks it by name — so <b>"1 2 1 3"</b> alternates between three brushes in one pass. Tokens are underlined in the brush\'s own colour as you type; a dashed underline matched nothing.',
-      },
-      {
-        title: "Placing it in the spectrum",
-        description:
-          '<b>zone</b> cuts the frequency range into slices and paints one, sizing the brush to fit — <b>s("x*4").zone("0 1 2 3")</b> climbs in quarters. <b>note</b> takes an absolute pitch, <b>n</b> an offset in semitones. <b>gain</b>, <b>pan</b> and <b>m1</b>–<b>m4</b> drive strength, position and the macros.',
-      },
-      {
-        title: "Rolling for one you like",
-        description:
-          "The dropdown holds starting points, all written with the token <b>x</b> so they run with whatever brush you have selected. The <b>dice</b> re-rolls a pattern's random parts and previews the variation — previews replace each other, so keep rolling until one is worth applying.",
-      },
-    ],
-    recipes: ["paint-a-rhythm-across-the-file", "sweep-a-brush-up-the-spectrum"],
   },
 } as const satisfies Record<UiAnchor, UiArea>;
 

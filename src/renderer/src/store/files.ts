@@ -16,6 +16,16 @@ import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import { disposeOnsetTexture, packOnsetState, spliceOnsets, unpackOnsetState } from "../lib/onset-map";
 import { commitStrokeOf, commitWindowOf, type StrokeCommitSnapshot } from "../lib/stroke-commit";
+import type {
+  Brush,
+  LoopRegion,
+  OpenFile,
+  ParameterKey,
+  SpectrogramData,
+  State,
+  ZustandGet,
+  ZustandSet,
+} from "./types";
 
 /** The audio side of any synthesis, whichever pass produced it. */
 interface SynthesisAudioResult {
@@ -29,7 +39,6 @@ interface SynthesisAudioResult {
   onsetOdfMax?: number;
   onsetBandMax?: Float32Array;
 }
-import type { Brush, OpenFile, ParameterKey, SpectrogramData, State, ZustandGet, ZustandSet } from "./types";
 import type { StemGroupMethod } from "./stem-groups";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
 
@@ -126,6 +135,11 @@ export interface FilesState {
   clearRecentFilePaths: () => void;
   filesPlaybackStartTime: Record<string, number>;
   setFilePlaybackStartTime: (fileId: string, playbackStartTime: number) => void;
+  // Loop region per file, in seconds. Held here rather than on the audio slice
+  // so switching files carries each file's own region instead of reinterpreting
+  // one file's seconds against another's buffer.
+  filesLoopRegion: Record<string, LoopRegion | null>;
+  setFileLoopRegion: (fileId: string, region: LoopRegion | null) => void;
   filesDirty: Record<string, boolean>;
   setFileDirty: (fileId: string, dirty: boolean) => void;
   filesSynthesizing: Record<string, boolean>;
@@ -370,6 +384,21 @@ export function isFileReferenced(filePath: string, brushes: Brush[]): boolean {
   return findFileReferences(filePath, brushes).length > 0;
 }
 
+/** Open each path minimized, warning about the ones no longer on disk. */
+export function openReferencedPaths(paths: string[], get: ZustandGet) {
+  for (const path of paths) {
+    get()
+      .openFileMinimized(path)
+      .catch(() => {
+        notifications.show({
+          title: "Referenced file not found",
+          message: `${path.split("/").pop()} not found on disk`,
+          color: "yellow",
+        });
+      });
+  }
+}
+
 /** Collect every distinct file path referenced by a single brush (for bulk load). */
 export function collectBrushReferencedPaths(brush: Brush): string[] {
   const paths = new Set<string>();
@@ -492,6 +521,7 @@ function discardFiles(set: ZustandSet, ids: string[]): void {
         delete state.filesZoomY[id];
         delete state.filesOffsetY[id];
         delete state.filesPlaybackStartTime[id];
+        delete state.filesLoopRegion[id];
         delete state.filesDirty[id];
         delete state.filesLoading[id];
         delete state.persistedFilePaths[id];
@@ -531,6 +561,11 @@ function registerStemGroup(
 
 // Files whose view a change to `fileId` should also move: itself, plus the rest
 // of its stem group while that group has view sync switched on.
+/** The active file's loop region, or null when there is no file or no region. */
+export function activeLoopRegion(state: Pick<State, "activeFileId" | "filesLoopRegion">): LoopRegion | null {
+  return state.activeFileId ? (state.filesLoopRegion[state.activeFileId] ?? null) : null;
+}
+
 function viewSyncTargets(state: State, fileId: string): string[] {
   const groupId = state.stemGroupOfFile[fileId];
   const group = groupId ? state.stemGroups[groupId] : undefined;
@@ -553,6 +588,7 @@ export const FILES_PERSISTED_KEYS = [
   "filesZoomY",
   "filesOffsetY",
   "filesPlaybackStartTime",
+  "filesLoopRegion",
   // Persisted so the italic "unsaved" tab marker survives restart — managed
   // files in particular are always dirty until promoted via Save As.
   "filesDirty",
@@ -723,6 +759,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesZoomY[fileId];
           delete state.filesOffsetY[fileId];
           delete state.filesPlaybackStartTime[fileId];
+          delete state.filesLoopRegion[fileId];
           delete state.persistedFilePaths[fileId];
           delete state.fileDisplayNames[fileId];
         }),
@@ -1465,6 +1502,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesZoomY[fileId];
           delete state.filesOffsetY[fileId];
           delete state.filesPlaybackStartTime[fileId];
+          delete state.filesLoopRegion[fileId];
           delete state.filesDirty[fileId];
           delete state.persistedFilePaths[fileId];
           delete state.fileDisplayNames[fileId];
@@ -2428,6 +2466,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     set(
       produce((state: State) => {
         state.filesPlaybackStartTime[fileId] = time;
+      }),
+    ),
+  filesLoopRegion: {},
+  setFileLoopRegion: (fileId, region) =>
+    set(
+      produce((state: State) => {
+        state.filesLoopRegion[fileId] = region;
       }),
     ),
   filesDirty: {},

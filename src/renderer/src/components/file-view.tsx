@@ -13,7 +13,6 @@ import { penState } from "../lib/pen-state";
 import { uvToUnits } from "../lib/utils";
 import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
-import { GenerateOverlay } from "./generate-overlay";
 import { LoopRegion } from "./loop-region";
 import { LevelStrip } from "./level-strip";
 import { OnsetLegend } from "./onset-legend";
@@ -729,7 +728,6 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
                 }}
               />
               {isActive && <LoopRegion fileId={fileId} />}
-              {isActive && <GenerateOverlay fileId={fileId} />}
               {isActive && <PlaybackLine fileId={fileId} />}
             </Box>
           </Box>

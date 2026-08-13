@@ -70,6 +70,11 @@ export const UI_CONTROLS = {
     description: "Separates the file into parts, each in its own lane.",
     manualSection: "splitting-a-file",
   },
+  "file-fill-grid": {
+    label: "Fill grid",
+    description: "Paints the current brush on every grid cell, across the loop region or the whole file.",
+    manualSection: "fill-grid",
+  },
   "file-duplicate": {
     label: "Duplicate",
     description: "Copies the file into a new lane you can edit on its own.",
@@ -143,28 +148,6 @@ export const UI_CONTROLS = {
     label: "History menu",
     description: "Exports or purges the stored history of this file.",
     manualSection: "history",
-  },
-
-  // Generate
-  "generate-preset": {
-    label: "Preset",
-    description: "Loads a written pattern into the editor.",
-    manualSection: "presets-and-the-dice",
-  },
-  "generate-code": {
-    label: "Pattern",
-    description: "Holds the pattern that says where to paint and how hard.",
-    manualSection: "writing-patterns",
-  },
-  "generate-reroll": {
-    label: "New variation",
-    description: "Re-rolls the random choices the pattern makes.",
-    manualSection: "presets-and-the-dice",
-  },
-  "generate-apply": {
-    label: "Apply",
-    description: "Paints the pattern onto the active file.",
-    manualSection: "generate",
   },
 
   // Brushes
@@ -311,12 +294,22 @@ export const UI_CONTROLS = {
   "sequencer-grid": {
     label: "Sequencer grid",
     description: "Sets the modulator's value for each step of its sequence.",
-    manualSection: "modulator-controls",
+    manualSection: "the-sequencer-grid",
   },
   "sequencer-randomize": {
-    label: "Randomize steps",
-    description: "Fills the sequencer grid with random values.",
-    manualSection: "modulator-controls",
+    label: "Randomise",
+    description: "Fills the grid with random values.",
+    manualSection: "the-sequencer-grid",
+  },
+  "sequencer-fill": {
+    label: "Fill",
+    description: "Switches every step on, at full value.",
+    manualSection: "the-sequencer-grid",
+  },
+  "sequencer-clear": {
+    label: "Clear",
+    description: "Switches every step off, keeping the values it holds.",
+    manualSection: "the-sequencer-grid",
   },
 } as const satisfies Record<string, UiControl>;
 

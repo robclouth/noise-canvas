@@ -7,6 +7,7 @@ import {
   captureSectionValues,
   folderFor,
   pickSectionPresetColor,
+  referencedFilePaths,
   resolveSectionPreset,
   SectionPreset,
   serializeSectionPreset,
@@ -41,6 +42,20 @@ describe("section presets", () => {
       { key: "blurAmountPitch", value: defaultOf("blurAmountPitch") },
       { key: "blurNoiseTime", value: defaultOf("blurNoiseTime") },
     ]);
+  });
+
+  it("leaves a file parameter alone unless the preset names one", () => {
+    const keys: ParameterKey[] = ["convolveIrFile", "convolveIrSize"];
+    const target = { scope: "effect:convolve", effectId: "e1" } as const;
+    const preset: SectionPreset = { ...blurPreset, scope: "effect:convolve", values: { convolveIrSize: 128 } };
+
+    expect(resolveSectionPreset(preset, target, keys)).toEqual([{ key: "convolveIrSize", value: 128 }]);
+
+    const named = { ...preset, values: { ...preset.values, convolveIrFile: { path: "/ir/hall.wav" } } };
+    const resolved = resolveSectionPreset(named, target, keys);
+
+    expect(resolved).toContainEqual({ key: "convolveIrFile", value: { path: "/ir/hall.wav" } });
+    expect(referencedFilePaths(resolved)).toEqual(["/ir/hall.wav"]);
   });
 
   it("loads a modulator preset onto a different modulator", () => {
@@ -119,6 +134,26 @@ describe("section presets", () => {
         if (preset.scope.startsWith("effect:") && getEffectType(key) !== preset.scope.slice("effect:".length)) {
           wrong.push(`${preset.id}: ${id} belongs to another effect`);
         }
+      }
+    }
+
+    expect(wrong).toEqual([]);
+  });
+
+  it("ships sequencer grids that match the step counts beside them", () => {
+    const wrong: string[] = [];
+
+    for (const preset of factorySectionPresets) {
+      const data = preset.values.SeqData;
+      if (typeof data !== "string") continue;
+
+      const rows = (JSON.parse(data) as { values: number[][] }).values;
+      const { SeqStepsX: stepsX, SeqStepsY: stepsY } = preset.values;
+
+      if (rows.length !== stepsY) wrong.push(`${preset.id}: ${rows.length} rows, SeqStepsY ${stepsY}`);
+      for (const row of rows) {
+        if (row.length !== stepsX) wrong.push(`${preset.id}: ${row.length} cells, SeqStepsX ${stepsX}`);
+        if (row.some((cell) => cell < 0 || cell > 1)) wrong.push(`${preset.id}: a cell is outside 0–1`);
       }
     }
 
