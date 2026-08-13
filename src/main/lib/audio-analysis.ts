@@ -4,7 +4,17 @@ import { extname, join } from "path";
 import { promisify } from "util";
 import { zstdCompress, zstdDecompress } from "zlib";
 import { decodeAudioFile, encodeBufferToAudioFile, probeAudioFile } from "./ffmpeg";
-import type { AnalysisParams, GaboratorAnalysisResult, OnsetReference, OnsetResult, PackedOnsets } from "./types";
+import type {
+  AnalysisParams,
+  CommitStroke,
+  CommitStrokeResult,
+  CommitWindow,
+  GaboratorAnalysisResult,
+  OnsetReference,
+  OnsetResult,
+  PackedLayout,
+  PackedOnsets,
+} from "./types";
 import { getModelPath } from "./ai-separation";
 export { isModelDownloaded, downloadModel } from "./ai-separation";
 export type { FourStemName, TwoStemName } from "./ai-separation";
@@ -322,6 +332,29 @@ export async function synthesize(
     bandStart,
     bandEnd,
   );
+}
+
+/**
+ * Everything a finished stroke derives, in one pass: the audio for the span it
+ * touched spliced into the audio there was, its hard time edges made exact,
+ * the limiter applied inside the stroke, the coefficients that audio analyses
+ * to, the onsets over the span and its output levels.
+ *
+ * Any failure rejects the whole call — a commit that half happened would leave
+ * the canvas, the audio and the history disagreeing. The input buffer is never
+ * written; the returned patch alone carries this pass's coefficient changes.
+ */
+export async function commitStroke(
+  packedData: Float32Array,
+  analysisMetadata: PackedLayout,
+  sampleRate: number,
+  params: AnalysisParams,
+  existingAudio: Float32Array[],
+  window: CommitWindow,
+  stroke: CommitStroke,
+): Promise<CommitStrokeResult> {
+  const gab = init();
+  return await gab.commitStroke(packedData, analysisMetadata, sampleRate, params, existingAudio, window, stroke);
 }
 
 /**

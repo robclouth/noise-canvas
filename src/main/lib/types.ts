@@ -39,6 +39,66 @@ export type AnalysisParams = {
 /** Flat [time0, salience0, time1, salience1, …]; times in seconds. */
 export type PackedOnsets = Float32Array;
 
+/** Band layout of a packed spectrogram, as every coefficient pass wants it. */
+export interface PackedLayout {
+  numFrames: number;
+  numChannels: number;
+  numBands: number;
+  bandOffsets: Uint32Array;
+  bandStepLog2s: Int32Array;
+  bandLengths: Uint32Array;
+}
+
+/** Coefficients a pass rewrote: per-band [band, k0, count] plus their pixels. */
+export interface CoefficientPatch {
+  ranges: Uint32Array;
+  pixels: Float32Array;
+}
+
+/** The span of the canvas a commit rebuilds: the dirty region, in frames and bands. */
+export interface CommitWindow {
+  startFrame: number;
+  endFrame: number;
+  startBand: number;
+  endBand: number;
+}
+
+/** What the stroke itself asks of the commit, beyond the span it touched. */
+export interface CommitStroke {
+  footStartFrame: number;
+  footEndFrame: number;
+  /** Whether each time edge is a hard cut that must be exact in the time domain. */
+  hardEdgeStart: boolean;
+  hardEdgeEnd: boolean;
+  applyLimiter: boolean;
+  /**
+   * The brush's time envelope across the whole file, one point per 5 ms hop,
+   * each holding the envelope's largest value over its hop. Weights the
+   * limiter, so the reduction belongs to the stroke and reaches unity where the
+   * brush does not reach.
+   */
+  envelope: Float32Array;
+}
+
+/** Peak level per 5 ms hop over the window a commit rebuilt, from `startHop`. */
+export interface CommitLevels {
+  startHop: number;
+  peaks: Float32Array;
+  clipped: Uint8Array;
+}
+
+export interface CommitStrokeResult {
+  channels: Float32Array[];
+  peak: number;
+  patch: CoefficientPatch;
+  gainReductionDb: Float32Array;
+  maxGainReductionDb: number;
+  levels: CommitLevels;
+  onsets?: PackedOnsets;
+  onsetOdfMax?: number;
+  onsetBandMax?: Float32Array;
+}
+
 /**
  * What a detection pass learned about the file as a whole: the level that
  * counts as silence, and each band's loudest moment. Everything else about an

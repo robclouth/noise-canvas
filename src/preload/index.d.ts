@@ -1,6 +1,12 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 import type { IpcRenderer } from "electron";
-import { AnalysisParams } from "../main/lib/types";
+import {
+  AnalysisParams,
+  CommitStroke,
+  CommitStrokeResult,
+  CommitWindow,
+  PackedLayout,
+} from "../main/lib/types";
 
 // Type definitions for window globals
 
@@ -103,6 +109,19 @@ declare global {
         params: AnalysisParams,
         footprint: { startFrame: number; endFrame: number; bandLo: number; bandHi: number },
       ) => Promise<{ ranges: Uint32Array; pixels: Float32Array }>;
+      /**
+       * Everything a finished stroke derives, in one call. Rejects whole on any
+       * failure; never writes to `packedData`.
+       */
+      commitStroke: (
+        packedData: Float32Array,
+        analysisMetadata: PackedLayout,
+        sampleRate: number,
+        params: AnalysisParams,
+        existingAudio: Float32Array[],
+        window: CommitWindow,
+        stroke: CommitStroke,
+      ) => Promise<CommitStrokeResult>;
       isModelDownloaded: (modelFile: string) => boolean;
       downloadModel: (modelFile: string, onProgress?: (downloaded: number, total: number) => void) => Promise<void>;
       aiSeparate: (audioChannels: Float32Array[], sampleRate: number) => Promise<Record<string, Float32Array[]>>;

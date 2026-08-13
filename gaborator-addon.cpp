@@ -166,6 +166,104 @@ static void applyLookaheadLimiter(std::vector<std::vector<float>> &channels, dou
         *outGain = std::move(gainEnv);
 }
 
+/**
+ * Phase on the branch the packed format stores: congruent to `phase` mod 2pi and
+ * within pi of the previous coefficient's stored phase. Every writer of a packed
+ * phase must go through this, or the stored sequence stops being unwrapped and
+ * the transform reads the wrong instantaneous frequency.
+ */
+static inline float unwrapForward(float phase, float prevUnwrapped)
+{
+    float diff = phase - std::fmod(prevUnwrapped, 2.0f * (float)M_PI);
+    while (diff > (float)M_PI)
+        diff -= 2.0f * (float)M_PI;
+    while (diff < -(float)M_PI)
+        diff += 2.0f * (float)M_PI;
+    return prevUnwrapped + diff;
+}
+
+/**
+ * A view of a packed FBO buffer: 4 floats per coefficient
+ * ([magL, phaseL, magR, phaseR]), bands laid back to back at bandOffsets with
+ * bandLengths entries each, band b holding the sample time t at t >> stepLog2.
+ */
+struct PackedCoefs
+{
+    const float *data = nullptr;
+    size_t len = 0;
+    const uint32_t *bandOffsets = nullptr;
+    const uint32_t *bandLengths = nullptr;
+    const int32_t *bandStepLog2s = nullptr;
+    int numBands = 0;
+};
+
+/**
+ * Reads one channel out of the packed buffer into `out` over [fillStart,
+ * fillEnd). Bands outside the packed layout, and times outside a band's stored
+ * range, read as silence.
+ */
+static void fillCoefsFromPacked(const PackedCoefs &src, int channel, int bandBegin, int bandEnd,
+                                int64_t fillStart, int64_t fillEnd, gaborator::coefs<float> &out)
+{
+    gaborator::fill(
+        [&](int b, int64_t t, std::complex<float> &coef)
+        {
+            const int bi = b - bandBegin;
+            if (bi < 0 || bi >= src.numBands)
+            {
+                coef = {0.0f, 0.0f};
+                return;
+            }
+            const int64_t k = t >> src.bandStepLog2s[bi];
+            if (k < 0 || (size_t)k >= (size_t)src.bandLengths[bi])
+            {
+                coef = {0.0f, 0.0f};
+                return;
+            }
+            const size_t off = ((size_t)src.bandOffsets[bi] + (size_t)k) * 4 + (size_t)channel * 2;
+            if (off + 1 >= src.len)
+            {
+                coef = {0.0f, 0.0f};
+                return;
+            }
+            const float mag = src.data[off];
+            const float ph = src.data[off + 1];
+            coef.real(mag * std::cos(ph));
+            coef.imag(mag * std::sin(ph));
+        },
+        bandBegin, bandEnd, fillStart, fillEnd, out);
+}
+
+/**
+ * Crossfades a block synthesized over [synthStart, synthEnd) into `dest`, which
+ * already holds `existing`. 10 ms ramps at each seam, skipped where the seam is
+ * a file boundary — there is no surrounding audio to fade against there, and
+ * fading would leak the unmodified original through.
+ */
+static void crossfadeSpliceInto(std::vector<float> &dest, const float *existing,
+                                const std::vector<float> &synth, int64_t synthStart, int64_t synthEnd,
+                                int64_t numFrames, int64_t crossfadeSamples)
+{
+    const int64_t fadeInStart = synthStart;
+    const int64_t fadeInEnd = (synthStart == 0) ? synthStart : std::min(synthStart + crossfadeSamples, synthEnd);
+    const int64_t fadeOutEnd = synthEnd;
+    const int64_t fadeOutStart = (synthEnd == numFrames) ? synthEnd : std::max(synthEnd - crossfadeSamples, synthStart);
+
+    for (int64_t i = synthStart; i < synthEnd; ++i)
+    {
+        const float newSample = synth[(size_t)(i - synthStart)];
+        const float oldSample = existing[i];
+
+        float blend = 1.0f;
+        if (i >= fadeInStart && i < fadeInEnd && fadeInEnd > fadeInStart)
+            blend = (float)(i - fadeInStart) / (float)(fadeInEnd - fadeInStart);
+        else if (i >= fadeOutStart && i < fadeOutEnd && fadeOutEnd > fadeOutStart)
+            blend = 1.0f - (float)(i - fadeOutStart) / (float)(fadeOutEnd - fadeOutStart);
+
+        dest[(size_t)i] = oldSample * (1.0f - blend) + newSample * blend;
+    }
+}
+
 class AnalyzeWorker : public Napi::AsyncWorker
 {
 public:
@@ -333,18 +431,7 @@ public:
                     // Unwrap phase: accumulate phase changes
                     float unwrappedPhase = phase;
                     if (tInBand > 0)
-                    {
-                        float prevPhase = previousPhases[ch][bandIdx][tInBand - 1];
-                        float phaseDiff = phase - std::fmod(prevPhase, 2.0f * M_PI);
-
-                        // Normalize phase difference to [-pi, pi]
-                        while (phaseDiff > M_PI)
-                            phaseDiff -= 2.0f * M_PI;
-                        while (phaseDiff < -M_PI)
-                            phaseDiff += 2.0f * M_PI;
-
-                        unwrappedPhase = prevPhase + phaseDiff;
-                    }
+                        unwrappedPhase = unwrapForward(phase, previousPhases[ch][bandIdx][tInBand - 1]);
                     previousPhases[ch][bandIdx][tInBand] = unwrappedPhase;
 
                     size_t writeOffset = baseOffset * floatsPerPixel;
@@ -501,6 +588,21 @@ struct DetectedOnset
     float salience;
 };
 
+/**
+ * A patch laid over the packed buffer, so a detection can read coefficients a
+ * commit has recomputed but not yet written back. Band b's coefficients
+ * [k0[b], k0[b] + count[b]) come from `pixels` at pixelBase[b] instead of from
+ * the packed data; everything else reads through.
+ */
+struct OnsetPatchOverlay
+{
+    const int64_t *k0 = nullptr;
+    const int64_t *count = nullptr;
+    const size_t *pixelBase = nullptr;
+    const float *pixels = nullptr;
+    size_t pixelFloats = 0;
+};
+
 // Time resolution of the detection function.
 static constexpr double ONSET_BIN_SEC = 0.0005;
 // Magnitude compression applied before whitening: log1p(gamma * mag).
@@ -588,11 +690,30 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
                                                 double sampleRate,
                                                 const OnsetRegion *region = nullptr,
                                                 double *odfMaxOut = nullptr,
-                                                std::vector<float> *bandMaxOut = nullptr)
+                                                std::vector<float> *bandMaxOut = nullptr,
+                                                const OnsetPatchOverlay *overlay = nullptr)
 {
     std::vector<DetectedOnset> onsets;
     if (!packed || layout.numBands <= 0 || numFrames <= 0 || sampleRate <= 0.0)
         return onsets;
+
+    // The four floats of one coefficient, or null when it is out of bounds.
+    const auto pixelAt = [&](int b, int64_t k) -> const float * {
+        if (overlay)
+        {
+            const int64_t rel = k - overlay->k0[b];
+            if (rel >= 0 && rel < overlay->count[b])
+            {
+                const size_t px = overlay->pixelBase[b] + (size_t)rel * 4;
+                if (px + 3 < overlay->pixelFloats)
+                    return overlay->pixels + px;
+            }
+        }
+        const size_t px = ((size_t)layout.bandOffsets[b] + (size_t)k) * 4;
+        if (px + 3 >= packedFloats)
+            return nullptr;
+        return packed + px;
+    };
 
     const int channels = std::max(1, layout.numChannels);
     const float channelScale = 1.0f / (float)channels;
@@ -650,7 +771,6 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
 
     for (int b = 0; b < layout.numBands; ++b)
     {
-        const size_t offset = layout.bandOffsets[b];
         const uint32_t len = layout.bandLengths[b];
         if (len == 0)
             continue;
@@ -664,13 +784,13 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
 
         for (uint32_t k = kLo; k < kHi; ++k)
         {
-            const size_t px = (offset + k) * 4;
             compressed[k] = 0.0f;
-            if (px + 3 >= packedFloats)
+            const float *p = pixelAt(b, (int64_t)k);
+            if (!p)
                 continue;
             float mag = 0.0f;
             for (int ch = 0; ch < channels; ++ch)
-                mag += packed[px + ch * 2];
+                mag += p[ch * 2];
             compressed[k] = std::log1p(ONSET_LOG_GAMMA * std::max(0.0f, mag * channelScale));
         }
 
@@ -695,12 +815,12 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
             float maxMag = 0.0f;
             for (uint32_t k = 0; k < len; ++k)
             {
-                const size_t px = (offset + k) * 4;
-                if (px + 3 >= packedFloats)
+                const float *p = pixelAt(b, (int64_t)k);
+                if (!p)
                     continue;
                 float mag = 0.0f;
                 for (int ch = 0; ch < channels; ++ch)
-                    mag += packed[px + ch * 2];
+                    mag += p[ch * 2];
                 maxMag = std::max(maxMag, mag * channelScale);
             }
             bandMax = std::max(bandMax, std::log1p(ONSET_LOG_GAMMA * std::max(0.0f, maxMag)));
@@ -764,7 +884,6 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
 
     for (int b = 0; b < layout.numBands; ++b)
     {
-        const size_t offset = layout.bandOffsets[b];
         const uint32_t len = layout.bandLengths[b];
         if (len == 0)
             continue;
@@ -784,8 +903,8 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
 
         for (uint32_t k = kLo; k < kHi; ++k)
         {
-            const size_t px = (offset + k) * 4;
-            if (px + 3 >= packedFloats)
+            const float *p = pixelAt(b, (int64_t)k);
+            if (!p)
                 break;
             // The bin whose centre is nearest the coefficient's own time. A
             // floor here would place every coefficient up to a whole bin late
@@ -796,7 +915,7 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
 
             float mag = 0.0f;
             for (int ch = 0; ch < channels; ++ch)
-                mag += packed[px + ch * 2];
+                mag += p[ch * 2];
             mag *= channelScale;
             addTriangle(energyD2, centre, span, mag * spread);
 
@@ -831,15 +950,16 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
             // is the distance between the predicted and the actual atom. Only
             // the phase difference between the two survives the law of cosines,
             // so this costs one cosine rather than four.
-            const size_t pxPrev = (offset + k - 1) * 4;
-            const size_t pxPrev2 = (offset + k - 2) * 4;
+            const float *pPrev = pixelAt(b, (int64_t)k - 1);
+            const float *pPrev2 = pixelAt(b, (int64_t)k - 2);
+            if (!pPrev || !pPrev2)
+                continue;
             float relDev = 0.0f;
             for (int ch = 0; ch < channels; ++ch)
             {
-                const float magK = packed[px + ch * 2];
-                const float magP = packed[pxPrev + ch * 2];
-                const float dPhi = packed[px + ch * 2 + 1] - 2.0f * packed[pxPrev + ch * 2 + 1] +
-                                   packed[pxPrev2 + ch * 2 + 1];
+                const float magK = p[ch * 2];
+                const float magP = pPrev[ch * 2];
+                const float dPhi = p[ch * 2 + 1] - 2.0f * pPrev[ch * 2 + 1] + pPrev2[ch * 2 + 1];
                 const float dev = std::sqrt(std::max(0.0f, magK * magK + magP * magP -
                                                                2.0f * magK * magP * std::cos(dPhi)));
                 // Taken relative to the magnitudes involved, so the term is a
@@ -1040,7 +1160,6 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         double arrived = 0.0;
         for (int b = 0; b < layout.numBands; ++b)
         {
-            const size_t offset = layout.bandOffsets[b];
             const uint32_t len = layout.bandLengths[b];
             if (len == 0)
                 continue;
@@ -1058,12 +1177,12 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
             const auto powerAt = [&](int64_t j) -> double {
                 if (j < 0 || j >= (int64_t)len)
                     return 0.0;
-                const size_t px = (offset + (size_t)j) * 4;
-                if (px + 3 >= packedFloats)
+                const float *p = pixelAt(b, j);
+                if (!p)
                     return 0.0;
                 float m = 0.0f;
                 for (int ch = 0; ch < channels; ++ch)
-                    m += packed[px + ch * 2];
+                    m += p[ch * 2];
                 m *= channelScale;
                 return (double)m * (double)m;
             };
@@ -1364,7 +1483,6 @@ public:
         DEBUG_LOG << "[C++] crossfadeSamples: " << crossfadeSamples << std::endl << std::flush;
 
         int64_t synthStart, synthEnd;
-        size_t floatsPerPixel = 4;
 
         if (isPartialSynthesis)
         {
@@ -1396,46 +1514,14 @@ public:
 
         // Fill and synthesize
         std::vector<std::vector<float>> synthesizedBuffers(channels);
+        const PackedCoefs packedView{inputData, inputDataLen, bandOffsets.data(), bandLengths.data(),
+                                     bandStepLog2s.data(), numBands};
 
         for (int ch = 0; ch < channels; ++ch)
         {
             DEBUG_LOG << "[C++] Processing channel " << ch << std::endl << std::flush;
             gaborator::coefs<float> channelCoefs(analyzer);
-
-            // Fill coefficients for the required range
-            gaborator::fill(
-                [&](int b, int64_t t, std::complex<float> &coef)
-                {
-                    int band_idx = b - band_begin;
-                    if (band_idx < 0 || band_idx >= numBands)
-                    {
-                        coef = {0.0f, 0.0f};
-                        return;
-                    }
-                    int64_t t_in_band = t >> bandStepLog2s[band_idx];
-                    if (t_in_band < 0 || (size_t)t_in_band >= (size_t)bandLengths[band_idx])
-                    {
-                        coef = {0.0f, 0.0f};
-                        return;
-                    }
-                    size_t base_offset = bandOffsets[band_idx] + t_in_band;
-                    size_t readOffset = base_offset * floatsPerPixel;
-
-                    size_t maxReadIndex = readOffset + ch * 2 + 1;
-                    if (maxReadIndex >= inputDataLen)
-                    {
-                        coef = {0.0f, 0.0f};
-                        return;
-                    }
-
-                    float magnitude = inputData[readOffset + ch * 2 + 0];
-                    float unwrappedPhase = inputData[readOffset + ch * 2 + 1];
-                    float real = magnitude * std::cos(unwrappedPhase);
-                    float imag = magnitude * std::sin(unwrappedPhase);
-                    coef.real(real);
-                    coef.imag(imag);
-                },
-                band_begin, band_end, fillStart, fillEnd, channelCoefs);
+            fillCoefsFromPacked(packedView, ch, band_begin, band_end, fillStart, fillEnd, channelCoefs);
 
             // Synthesize the required range
             size_t synthLength = static_cast<size_t>(synthEnd - synthStart);
@@ -1456,43 +1542,8 @@ public:
             {
                 // Start with copy of existing audio
                 audioChannels[ch].assign(existingAudio[ch], existingAudio[ch] + existingAudioLens[ch]);
-
-                // Apply crossfade at boundaries. Skip the fade at absolute file
-                // boundaries — there is no seam with surrounding audio there, so
-                // fading would leak the un-modified original samples through.
-                int64_t fadeInStart = synthStart;
-                int64_t fadeInEnd = (synthStart == 0)
-                                        ? synthStart
-                                        : std::min(synthStart + crossfadeSamples, synthEnd);
-                int64_t fadeOutEnd = synthEnd;
-                int64_t fadeOutStart = (synthEnd == static_cast<int64_t>(numFrames))
-                                           ? synthEnd
-                                           : std::max(synthEnd - crossfadeSamples, synthStart);
-
-                for (int64_t i = synthStart; i < synthEnd; ++i)
-                {
-                    size_t synthIdx = static_cast<size_t>(i - synthStart);
-                    float newSample = synthesizedBuffers[ch][synthIdx];
-                    float oldSample = existingAudio[ch][i];
-
-                    float blend = 1.0f; // Default: use new sample fully
-
-                    // Fade-in at start
-                    if (i >= fadeInStart && i < fadeInEnd && fadeInEnd > fadeInStart)
-                    {
-                        float fadeProgress = static_cast<float>(i - fadeInStart) / static_cast<float>(fadeInEnd - fadeInStart);
-                        blend = fadeProgress;
-                    }
-                    // Fade-out at end
-                    else if (i >= fadeOutStart && i < fadeOutEnd && fadeOutEnd > fadeOutStart)
-                    {
-                        float fadeProgress = static_cast<float>(i - fadeOutStart) / static_cast<float>(fadeOutEnd - fadeOutStart);
-                        blend = 1.0f - fadeProgress;
-                    }
-
-                    // Crossfade blend
-                    audioChannels[ch][i] = oldSample * (1.0f - blend) + newSample * blend;
-                }
+                crossfadeSpliceInto(audioChannels[ch], existingAudio[ch], synthesizedBuffers[ch], synthStart,
+                                    synthEnd, static_cast<int64_t>(numFrames), crossfadeSamples);
                 DEBUG_LOG << "[C++] Channel " << ch << " - crossfade splice complete" << std::endl << std::flush;
             }
         }
@@ -1703,6 +1754,779 @@ Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
     }
 
     SynthesizeWorker *worker = new SynthesizeWorker(env, inputDataJs, analysisObj, sampleRate, paramsJs, applyLimiter, existingAudioJs, startFrame, endFrame, startBand, endBand);
+    worker->Queue();
+    return worker->GetPromise();
+}
+
+// ─── Stroke commit ───────────────────────────────────────────────────────────
+//
+// Everything a finished stroke derives, in one pass over one snapshot: the
+// audio, the hard-edge gate, the limiter, the coefficients the audio actually
+// analyzes to, the onsets and the output levels.
+//
+// The canvas is projected through the audio — synthesize the stroke's window,
+// re-analyze it, hand the coefficients back as a patch. Analysis and synthesis
+// reconstruct perfectly, so the projection is idempotent: committing twice
+// changes nothing the second time. What it buys is that the picture is the
+// analysis of what will be heard, so a phase-only edit shows, and no coefficient
+// survives that synthesis would discard.
+
+/** How much of the file one point of the levels and the envelope covers. */
+static constexpr double COMMIT_LEVEL_HOP_SEC = 0.005;
+/** Gain reduction above which a level slice counts as held down. */
+static constexpr float COMMIT_CLIP_GAIN_DB = 0.1f;
+/** Longest analysis margin a band is given, however wide its filter. */
+static constexpr double COMMIT_MAX_ANALYSIS_MARGIN_SEC = 2.0;
+
+class CommitStrokeWorker : public Napi::AsyncWorker
+{
+public:
+    CommitStrokeWorker(Napi::Env env,
+                       const Napi::Float32Array &packedJs,
+                       const Napi::Object &metaObj,
+                       double sampleRate,
+                       const Napi::Object &paramsJs,
+                       const Napi::Array &existingAudioJs,
+                       const Napi::Object &windowObj,
+                       const Napi::Object &strokeObj)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), sampleRate(sampleRate)
+    {
+        // Held by reference and read from its backing store on the worker
+        // thread. Never written: the patch alone carries this pass's changes.
+        packedRef = Napi::Reference<Napi::Float32Array>::New(packedJs, 1);
+        packed = packedJs.Data();
+        packedLen = packedJs.ElementLength();
+
+        numFrames = metaObj.Get("numFrames").As<Napi::Number>().Int64Value();
+        channels = metaObj.Get("numChannels").As<Napi::Number>().Int32Value();
+        numBands = metaObj.Get("numBands").As<Napi::Number>().Int32Value();
+
+        Napi::Uint32Array bandOffsetsJs = metaObj.Get("bandOffsets").As<Napi::Uint32Array>();
+        bandOffsets.assign(bandOffsetsJs.Data(), bandOffsetsJs.Data() + bandOffsetsJs.ElementLength());
+        Napi::Uint32Array bandLengthsJs = metaObj.Get("bandLengths").As<Napi::Uint32Array>();
+        bandLengths.assign(bandLengthsJs.Data(), bandLengthsJs.Data() + bandLengthsJs.ElementLength());
+        Napi::Int32Array bandStepLog2sJs = metaObj.Get("bandStepLog2s").As<Napi::Int32Array>();
+        bandStepLog2s.assign(bandStepLog2sJs.Data(), bandStepLog2sJs.Data() + bandStepLog2sJs.ElementLength());
+
+        bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
+        fminHz = paramsJs.Get("minFreq").As<Napi::Number>().DoubleValue();
+
+        detectOnsets = paramsJs.Has("detectOnsets") && paramsJs.Get("detectOnsets").ToBoolean().Value();
+        if (detectOnsets && paramsJs.Has("onsetStartSec") && paramsJs.Has("onsetEndSec"))
+        {
+            onsetRegion.startSec = paramsJs.Get("onsetStartSec").ToNumber().DoubleValue();
+            onsetRegion.endSec = paramsJs.Get("onsetEndSec").ToNumber().DoubleValue();
+            onsetRegion.odfReference =
+                paramsJs.Has("onsetOdfReference") ? paramsJs.Get("onsetOdfReference").ToNumber().DoubleValue() : 0.0;
+            if (paramsJs.Has("onsetBandMax") && paramsJs.Get("onsetBandMax").IsTypedArray())
+            {
+                Napi::Float32Array bm = paramsJs.Get("onsetBandMax").As<Napi::Float32Array>();
+                onsetBandMaxIn.assign(bm.Data(), bm.Data() + bm.ElementLength());
+                onsetRegion.bandMaxReference = onsetBandMaxIn.data();
+                onsetRegion.bandMaxCount = (int)onsetBandMaxIn.size();
+            }
+            hasOnsetRegion = true;
+        }
+
+        if (existingAudioJs.Length() > 0)
+        {
+            const uint32_t len = existingAudioJs.Length();
+            existingAudio.reserve(len);
+            existingAudioLens.reserve(len);
+            existingAudioRefs.reserve(len);
+            for (uint32_t i = 0; i < len; i++)
+            {
+                Napi::Float32Array channelJs = existingAudioJs.Get(i).As<Napi::Float32Array>();
+                existingAudioRefs.push_back(Napi::Reference<Napi::Float32Array>::New(channelJs, 1));
+                existingAudio.push_back(channelJs.Data());
+                existingAudioLens.push_back(channelJs.ElementLength());
+            }
+        }
+
+        winStartFrame = windowObj.Get("startFrame").As<Napi::Number>().Int64Value();
+        winEndFrame = windowObj.Get("endFrame").As<Napi::Number>().Int64Value();
+        winStartBand = windowObj.Get("startBand").As<Napi::Number>().Int32Value();
+        winEndBand = windowObj.Get("endBand").As<Napi::Number>().Int32Value();
+
+        footStart = strokeObj.Get("footStartFrame").As<Napi::Number>().Int64Value();
+        footEnd = strokeObj.Get("footEndFrame").As<Napi::Number>().Int64Value();
+        hardEdgeStart = strokeObj.Get("hardEdgeStart").ToBoolean().Value();
+        hardEdgeEnd = strokeObj.Get("hardEdgeEnd").ToBoolean().Value();
+        applyLimiter = strokeObj.Get("applyLimiter").ToBoolean().Value();
+        if (strokeObj.Has("envelope") && strokeObj.Get("envelope").IsTypedArray())
+        {
+            Napi::Float32Array envJs = strokeObj.Get("envelope").As<Napi::Float32Array>();
+            envelope.assign(envJs.Data(), envJs.Data() + envJs.ElementLength());
+        }
+    }
+
+    void Execute()
+    {
+        if (!validate())
+            return;
+
+        const double fminFrac = fminHz / sampleRate;
+        gaborator::log_fq_scale scale(bandsPerOctave, fminFrac);
+        gaborator::parameters params(scale, OVERLAP);
+        params.phase = gaborator::coef_phase::global;
+        gaborator::analyzer<float> analyzer(params);
+        const int bandBegin = analyzer.bandpass_bands_begin();
+        const int bandEnd = analyzer.bandpass_bands_end();
+
+        const PackedCoefs src{packed, packedLen, bandOffsets.data(), bandLengths.data(), bandStepLog2s.data(),
+                              numBands};
+
+        const bool partial = !existingAudio.empty() && winStartFrame >= 0 && winEndFrame > winStartFrame;
+
+        // The window the audio is rebuilt over: the painted span plus the reach
+        // of the widest synthesis filter it touched.
+        int64_t support;
+        if (partial && winStartBand >= 0 && winEndBand > winStartBand)
+        {
+            double maxSupport = 0.0;
+            const int b0 = std::max(0, (int)winStartBand);
+            const int b1 = std::min(numBands, (int)winEndBand);
+            for (int b = b0; b < b1; ++b)
+                maxSupport = std::max(maxSupport, analyzer.band_synthesis_support(b + bandBegin));
+            support = (int64_t)std::ceil(maxSupport);
+        }
+        else
+        {
+            support = (int64_t)std::ceil(analyzer.synthesis_support());
+        }
+        support = std::min(support, (int64_t)(sampleRate * 0.1));
+
+        const int64_t crossfadeSamples = (int64_t)(sampleRate * 0.01);
+        // The gate rewrites from the window edge inward, so the window must
+        // start clear of the splice's own ramp or the two would fight.
+        support = std::max(support, crossfadeSamples);
+
+        int64_t w0, w1;
+        if (partial)
+        {
+            w0 = std::max<int64_t>(0, winStartFrame - support);
+            w1 = std::min<int64_t>(numFrames, winEndFrame + support);
+        }
+        else
+        {
+            w0 = 0;
+            w1 = numFrames;
+        }
+        if (w1 <= w0)
+        {
+            SetError("commitStroke: empty synthesis window");
+            return;
+        }
+
+        int64_t fillStart = 0;
+        int64_t fillEnd = numFrames;
+        if (partial)
+        {
+            fillStart = std::max<int64_t>(0, w0 - support * 2);
+            fillEnd = std::min<int64_t>(numFrames, w1 + support * 2);
+        }
+
+        // 1. Synthesize the window and splice it into the audio there was.
+        audioChannels.resize(channels);
+        {
+            std::vector<float> synth((size_t)(w1 - w0));
+            for (int ch = 0; ch < channels; ++ch)
+            {
+                gaborator::coefs<float> coefs(analyzer);
+                fillCoefsFromPacked(src, ch, bandBegin, bandEnd, fillStart, fillEnd, coefs);
+                analyzer.synthesize(coefs, w0, w1, synth.data());
+
+                if (partial)
+                {
+                    audioChannels[ch].assign(existingAudio[ch], existingAudio[ch] + existingAudioLens[ch]);
+                    crossfadeSpliceInto(audioChannels[ch], existingAudio[ch], synth, w0, w1, numFrames,
+                                        crossfadeSamples);
+                }
+                else
+                {
+                    audioChannels[ch] = synth;
+                }
+            }
+        }
+
+        // 2. Hard time edges, made exact in the time domain.
+        if (partial && (hardEdgeStart || hardEdgeEnd))
+            applyHardEdges(analyzer, src, bandBegin, bandEnd, w0, w1, fillStart, fillEnd);
+
+        // 3. Limiting, weighted by the brush envelope so it belongs to the
+        //    stroke rather than to the file.
+        std::vector<float> weightedGain;
+        if (applyLimiter)
+            limitWindow(w0, w1, weightedGain);
+
+        // 4. Project the canvas through the audio.
+        project(analyzer, bandBegin, bandEnd, w0, w1);
+
+        peakValue = 0.0f;
+        for (const auto &channel : audioChannels)
+            for (float sample : channel)
+                peakValue = std::max(peakValue, std::abs(sample));
+
+        // 5. Onsets, read through the patch so they answer to the projection
+        //    rather than to the coefficients it replaced.
+        if (detectOnsets)
+        {
+            OnsetBandLayout layout;
+            layout.numBands = std::min<int>(numBands, (int)std::min(bandOffsets.size(),
+                                                                    std::min(bandLengths.size(), bandStepLog2s.size())));
+            layout.numChannels = channels;
+            layout.bandOffsets = bandOffsets.data();
+            layout.bandLengths = bandLengths.data();
+            layout.bandStepLog2s = bandStepLog2s.data();
+
+            OnsetPatchOverlay overlay;
+            overlay.k0 = patchK0.data();
+            overlay.count = patchCount.data();
+            overlay.pixelBase = patchPixelBase.data();
+            overlay.pixels = patchPixels.data();
+            overlay.pixelFloats = patchPixels.size();
+
+            onsets = computeOnsets(packed, packedLen, layout, numFrames, sampleRate,
+                                   hasOnsetRegion ? &onsetRegion : nullptr, &onsetOdfMax, &onsetBandMaxOut,
+                                   &overlay);
+        }
+
+        // 6. Output levels over the window.
+        computeLevels(w0, w1, weightedGain);
+    }
+
+    void OnOK()
+    {
+        Napi::Env env = Env();
+        Napi::HandleScope scope(env);
+        Napi::Object result = Napi::Object::New(env);
+
+        Napi::Array outputChannels = Napi::Array::New(env, channels);
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            const size_t len = audioChannels[ch].size();
+            Napi::Float32Array buffer = Napi::Float32Array::New(env, len);
+            if (len)
+                memcpy(buffer.Data(), audioChannels[ch].data(), len * sizeof(float));
+            outputChannels[ch] = buffer;
+        }
+        result.Set("channels", outputChannels);
+        result.Set("peak", Napi::Number::New(env, peakValue));
+
+        Napi::Object patch = Napi::Object::New(env);
+        const size_t n = rangeBands.size();
+        Napi::Uint32Array ranges = Napi::Uint32Array::New(env, n * 3);
+        for (size_t i = 0; i < n; ++i)
+        {
+            ranges[i * 3 + 0] = rangeBands[i];
+            ranges[i * 3 + 1] = rangeStarts[i];
+            ranges[i * 3 + 2] = rangeCounts[i];
+        }
+        Napi::Float32Array pixels = Napi::Float32Array::New(env, patchPixels.size());
+        if (!patchPixels.empty())
+            memcpy(pixels.Data(), patchPixels.data(), patchPixels.size() * sizeof(float));
+        patch.Set("ranges", ranges);
+        patch.Set("pixels", pixels);
+        result.Set("patch", patch);
+
+        Napi::Float32Array grBuffer = Napi::Float32Array::New(env, gainReductionDb.size());
+        if (!gainReductionDb.empty())
+            memcpy(grBuffer.Data(), gainReductionDb.data(), gainReductionDb.size() * sizeof(float));
+        result.Set("gainReductionDb", grBuffer);
+        result.Set("maxGainReductionDb", Napi::Number::New(env, maxGainReductionDb));
+
+        Napi::Object levels = Napi::Object::New(env);
+        levels.Set("startHop", Napi::Number::New(env, (double)levelStartHop));
+        Napi::Float32Array peaksJs = Napi::Float32Array::New(env, levelPeaks.size());
+        if (!levelPeaks.empty())
+            memcpy(peaksJs.Data(), levelPeaks.data(), levelPeaks.size() * sizeof(float));
+        levels.Set("peaks", peaksJs);
+        Napi::Uint8Array clippedJs = Napi::Uint8Array::New(env, levelClipped.size());
+        if (!levelClipped.empty())
+            memcpy(clippedJs.Data(), levelClipped.data(), levelClipped.size());
+        levels.Set("clipped", clippedJs);
+        result.Set("levels", levels);
+
+        if (detectOnsets)
+        {
+            result.Set("onsets", OnsetWorker::packOnsets(env, onsets));
+            result.Set("onsetOdfMax", Napi::Number::New(env, onsetOdfMax));
+            result.Set("onsetBandMax", OnsetWorker::packBandMax(env, onsetBandMaxOut));
+        }
+
+        deferred.Resolve(result);
+    }
+
+    void OnError(const Napi::Error &e) { deferred.Reject(e.Value()); }
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+private:
+    /** Any violation fails the whole commit: a partial result has no meaning. */
+    bool validate()
+    {
+        if (channels <= 0 || numBands <= 0 || numFrames <= 0 || sampleRate <= 0.0)
+        {
+            SetError("commitStroke: numChannels, numBands, numFrames and sampleRate must all be positive");
+            return false;
+        }
+        if ((int)bandOffsets.size() < numBands || (int)bandLengths.size() < numBands ||
+            (int)bandStepLog2s.size() < numBands)
+        {
+            SetError("commitStroke: band tables are shorter than numBands");
+            return false;
+        }
+        for (int b = 0; b < numBands; ++b)
+        {
+            const size_t end = (size_t)bandOffsets[b] + (size_t)bandLengths[b];
+            if (end * 4 > packedLen)
+            {
+                SetError("commitStroke: band layout runs past the end of the packed buffer");
+                return false;
+            }
+        }
+        if (!existingAudio.empty())
+        {
+            if ((int)existingAudio.size() != channels)
+            {
+                SetError("commitStroke: existingAudio has a different channel count from the analysis");
+                return false;
+            }
+            for (size_t i = 0; i < existingAudioLens.size(); ++i)
+            {
+                if ((int64_t)existingAudioLens[i] != numFrames)
+                {
+                    SetError("commitStroke: existingAudio channel length does not match numFrames");
+                    return false;
+                }
+            }
+        }
+        if (footEnd > footStart && (footStart < 0 || footEnd > numFrames))
+        {
+            SetError("commitStroke: stroke footprint falls outside the file");
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * A hard-edged stroke changes the audio inside its own time span and
+     * nowhere else. Outside the span the audio that was there goes back — that
+     * is the definition, and it is exact. Inside it, the atoms that live
+     * outside still ring in across the edge, so their stem is synthesized and
+     * subtracted; without that, an erase keeps an audible pre-tail before the
+     * audio comes back and a tail after it cuts.
+     */
+    void applyHardEdges(gaborator::analyzer<float> &analyzer, const PackedCoefs &src, int bandBegin, int bandEnd,
+                        int64_t w0, int64_t w1, int64_t fillStart, int64_t fillEnd)
+    {
+        const int64_t f0 = std::max(w0, footStart);
+        const int64_t f1 = std::min(w1, footEnd);
+        if (f1 <= f0)
+            return;
+
+        const int bandLo = std::max(0, (int)winStartBand);
+        const int bandHi = std::min(numBands - 1, (int)winEndBand - 1);
+        if (bandLo > bandHi)
+            return;
+
+        const bool gateStart = hardEdgeStart && footStart > 0;
+        const bool gateEnd = hardEdgeEnd && footEnd < numFrames;
+        if (!gateStart && !gateEnd)
+            return;
+
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            // The stem reads the same coefficient range the synthesis read, so
+            // what it subtracts is exactly what the synthesis put in.
+            gaborator::coefs<float> exterior(analyzer);
+            gaborator::fill(
+                [&](int b, int64_t t, std::complex<float> &coef)
+                {
+                    coef = {0.0f, 0.0f};
+                    const int bi = b - bandBegin;
+                    if (bi < bandLo || bi > bandHi)
+                        return;
+                    if (t >= footStart && t < footEnd)
+                        return;
+                    const int64_t k = t >> src.bandStepLog2s[bi];
+                    if (k < 0 || (size_t)k >= (size_t)src.bandLengths[bi])
+                        return;
+                    const size_t off = ((size_t)src.bandOffsets[bi] + (size_t)k) * 4 + (size_t)ch * 2;
+                    if (off + 1 >= src.len)
+                        return;
+                    const float mag = src.data[off];
+                    const float ph = src.data[off + 1];
+                    coef = {mag * std::cos(ph), mag * std::sin(ph)};
+                },
+                bandBegin, bandEnd, fillStart, fillEnd, exterior);
+
+            std::vector<float> ringIn((size_t)(f1 - f0));
+            analyzer.synthesize(exterior, f0, f1, ringIn.data());
+            for (int64_t t = f0; t < f1; ++t)
+                audioChannels[ch][(size_t)t] -= ringIn[(size_t)(t - f0)];
+
+            if (gateStart)
+                for (int64_t t = w0; t < f0; ++t)
+                    audioChannels[ch][(size_t)t] = existingAudio[ch][t];
+            if (gateEnd)
+                for (int64_t t = f1; t < w1; ++t)
+                    audioChannels[ch][(size_t)t] = existingAudio[ch][t];
+        }
+    }
+
+    /**
+     * The brush's time envelope at a sample. Each point covers a whole 5 ms
+     * hop and holds the envelope's largest value over it, so a rectangular
+     * brush stays rectangular; interpolating between points would ramp its
+     * edge down over the last hop and let the loudest samples through
+     * unlimited.
+     */
+    float envelopeAt(int64_t sample) const
+    {
+        if (envelope.empty())
+            return 0.0f;
+        const int64_t i = sample / levelHopSamples();
+        if (i < 0)
+            return envelope.front();
+        if (i >= (int64_t)envelope.size())
+            return envelope.back();
+        return envelope[(size_t)i];
+    }
+
+    /**
+     * Limits inside the stroke and nowhere else. The limiter runs over the
+     * window to find the reduction it would apply, and the brush envelope then
+     * scales that reduction in the exponent — full where the envelope is full,
+     * none where it is zero. The envelope reaches zero at the footprint edge,
+     * so the gain reaches unity there and the surrounding audio is untouched
+     * with no step to hear.
+     */
+    void limitWindow(int64_t w0, int64_t w1, std::vector<float> &weightedGain)
+    {
+        const size_t n = (size_t)(w1 - w0);
+        std::vector<std::vector<float>> scratch(channels);
+        for (int ch = 0; ch < channels; ++ch)
+            scratch[ch].assign(audioChannels[ch].begin() + w0, audioChannels[ch].begin() + w1);
+
+        std::vector<float> rawGain;
+        applyLookaheadLimiter(scratch, sampleRate, 40.0f, 200.0f, &rawGain);
+        if (rawGain.size() < n)
+            return;
+
+        weightedGain.assign(n, 1.0f);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const float raw = rawGain[i];
+            if (raw >= 1.0f)
+                continue;
+            const float env = std::max(0.0f, std::min(1.0f, envelopeAt(w0 + (int64_t)i)));
+            if (env <= 0.0f)
+                continue;
+            const float g = std::exp(std::log(std::max(raw, 1e-6f)) * env);
+            weightedGain[i] = g;
+            for (int ch = 0; ch < channels; ++ch)
+                audioChannels[ch][(size_t)(w0 + (int64_t)i)] *= g;
+        }
+    }
+
+    /**
+     * Re-analyzes the finished audio and hands back the coefficients it reads
+     * as, over every band. A band is rewritten only where its own filter can
+     * see the changed audio; the analysis runs over twice that margin so those
+     * coefficients are complete.
+     *
+     * Phase is written on the branch the packed format keeps — unwrapped
+     * forward in time from the coefficient before the patch. A nearest-turn
+     * write per coefficient would let neighbours land on different turns
+     * wherever the stroke moved a phase by more than pi, and the transform
+     * reads the difference between neighbours as pitch.
+     */
+    void project(gaborator::analyzer<float> &analyzer, int bandBegin, int bandEnd, int64_t w0, int64_t w1)
+    {
+        const int64_t marginCap = (int64_t)(sampleRate * COMMIT_MAX_ANALYSIS_MARGIN_SEC);
+        std::vector<int64_t> bandMargin((size_t)numBands, 0);
+        int64_t marginMax = 0;
+        for (int b = 0; b < numBands; ++b)
+        {
+            int64_t m = (int64_t)std::ceil(analyzer.band_analysis_support(b + bandBegin));
+            m = std::min(m, marginCap);
+            bandMargin[(size_t)b] = m;
+            marginMax = std::max(marginMax, m);
+        }
+
+        const int64_t a0 = std::max<int64_t>(0, w0 - 2 * marginMax);
+        const int64_t a1 = std::min<int64_t>(numFrames, w1 + 2 * marginMax);
+
+        patchK0.assign((size_t)numBands, 0);
+        patchCount.assign((size_t)numBands, 0);
+        patchPixelBase.assign((size_t)numBands, 0);
+        for (int b = 0; b < numBands; ++b)
+        {
+            const int32_t step = bandStepLog2s[(size_t)b];
+            const int64_t len = (int64_t)bandLengths[(size_t)b];
+            if (len <= 0)
+                continue;
+            const int64_t k0 = std::max<int64_t>(0, (w0 - bandMargin[(size_t)b]) >> step);
+            const int64_t k1 = std::min<int64_t>(len - 1, (w1 + bandMargin[(size_t)b] - 1) >> step);
+            if (k1 < k0)
+                continue;
+            patchK0[(size_t)b] = k0;
+            patchCount[(size_t)b] = k1 - k0 + 1;
+        }
+
+        // Harvest per band, then unwrap in time order — process() gives no
+        // ordering, and the branch of one coefficient depends on the one before.
+        std::vector<std::vector<float>> bandMag((size_t)numBands), bandPhase((size_t)numBands);
+        for (int b = 0; b < numBands; ++b)
+        {
+            const size_t count = (size_t)patchCount[(size_t)b];
+            if (!count)
+                continue;
+            bandMag[(size_t)b].assign(count * (size_t)channels, 0.0f);
+            bandPhase[(size_t)b].assign(count * (size_t)channels, 0.0f);
+        }
+
+        std::vector<std::complex<float>> harvest;
+        std::vector<uint8_t> needsTail((size_t)numBands, 0);
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            gaborator::coefs<float> coefs(analyzer);
+            analyzer.analyze(audioChannels[ch].data() + a0, a0, a1, coefs);
+
+            for (int b = 0; b < numBands; ++b)
+            {
+                const size_t count = (size_t)patchCount[(size_t)b];
+                if (!count)
+                    continue;
+                harvest.assign(count, {0.0f, 0.0f});
+                const int32_t step = bandStepLog2s[(size_t)b];
+                const int64_t k0 = patchK0[(size_t)b];
+                gaborator::process(
+                    [&](int gb, int64_t t, std::complex<float> &coef)
+                    {
+                        if (gb - bandBegin != b)
+                            return;
+                        const int64_t rel = (t >> step) - k0;
+                        if (rel < 0 || rel >= (int64_t)count)
+                            return;
+                        harvest[(size_t)rel] = coef;
+                    },
+                    bandBegin + b, bandBegin + b + 1, a0, a1, coefs);
+
+                // Anchored on the coefficient before the patch, so the branch
+                // continues the one already stored.
+                float prev = 0.0f;
+                bool havePrev = false;
+                if (k0 > 0)
+                {
+                    const size_t off = ((size_t)bandOffsets[(size_t)b] + (size_t)(k0 - 1)) * 4 + (size_t)ch * 2;
+                    if (off + 1 < packedLen)
+                    {
+                        prev = packed[off + 1];
+                        havePrev = true;
+                    }
+                }
+                for (size_t rel = 0; rel < count; ++rel)
+                {
+                    const std::complex<float> v = harvest[rel];
+                    const float mag = std::abs(v);
+                    const float raw = std::arg(v);
+                    const float unwrapped = havePrev ? unwrapForward(raw, prev) : raw;
+                    prev = unwrapped;
+                    havePrev = true;
+                    bandMag[(size_t)b][rel * (size_t)channels + (size_t)ch] = mag;
+                    bandPhase[(size_t)b][rel * (size_t)channels + (size_t)ch] = unwrapped;
+                }
+
+                // The coefficient after the patch was unwrapped against the one
+                // the patch replaced. If it no longer follows on from the new
+                // value, the rest of the band has to be re-unwrapped, or the
+                // transform reads the jump at the seam as pitch.
+                const int64_t k1 = k0 + (int64_t)count - 1;
+                if (k1 + 1 < (int64_t)bandLengths[(size_t)b])
+                {
+                    const size_t nextOff = ((size_t)bandOffsets[(size_t)b] + (size_t)(k1 + 1)) * 4 + (size_t)ch * 2;
+                    if (nextOff + 1 < packedLen)
+                    {
+                        const float stored = packed[nextOff + 1];
+                        const float rebranched = unwrapForward(stored, prev);
+                        if (std::abs(rebranched - stored) > 1.0f)
+                            needsTail[(size_t)b] = 1;
+                    }
+                }
+            }
+        }
+
+        // Assemble the patch, extending any band whose branch moved.
+        rangeBands.clear();
+        rangeStarts.clear();
+        rangeCounts.clear();
+        patchPixels.clear();
+        for (int b = 0; b < numBands; ++b)
+        {
+            const size_t count = (size_t)patchCount[(size_t)b];
+            if (!count)
+                continue;
+            const int64_t k0 = patchK0[(size_t)b];
+            const int64_t len = (int64_t)bandLengths[(size_t)b];
+
+            const size_t total = needsTail[(size_t)b] ? (size_t)(len - k0) : count;
+
+            patchPixelBase[(size_t)b] = patchPixels.size();
+            patchCount[(size_t)b] = (int64_t)total;
+            rangeBands.push_back((uint32_t)b);
+            rangeStarts.push_back((uint32_t)k0);
+            rangeCounts.push_back((uint32_t)total);
+
+            std::vector<float> tailPrev((size_t)channels, 0.0f);
+            for (int ch = 0; ch < channels; ++ch)
+                tailPrev[(size_t)ch] = bandPhase[(size_t)b][(count - 1) * (size_t)channels + (size_t)ch];
+
+            const size_t base = patchPixels.size();
+            patchPixels.resize(base + total * 4, 0.0f);
+            for (size_t rel = 0; rel < total; ++rel)
+            {
+                float *out = patchPixels.data() + base + rel * 4;
+                if (rel < count)
+                {
+                    for (int ch = 0; ch < channels; ++ch)
+                    {
+                        out[ch * 2] = bandMag[(size_t)b][rel * (size_t)channels + (size_t)ch];
+                        out[ch * 2 + 1] = bandPhase[(size_t)b][rel * (size_t)channels + (size_t)ch];
+                    }
+                    continue;
+                }
+                // Past the re-analyzed span the magnitudes stand, but the phases
+                // are put back on the branch the new values ended on.
+                const size_t srcOff = ((size_t)bandOffsets[(size_t)b] + (size_t)k0 + rel) * 4;
+                if (srcOff + 3 >= packedLen)
+                    continue;
+                for (int ch = 0; ch < channels; ++ch)
+                {
+                    const float rebranched =
+                        unwrapForward(packed[srcOff + (size_t)ch * 2 + 1], tailPrev[(size_t)ch]);
+                    tailPrev[(size_t)ch] = rebranched;
+                    out[ch * 2] = packed[srcOff + (size_t)ch * 2];
+                    out[ch * 2 + 1] = rebranched;
+                }
+            }
+        }
+    }
+
+    int64_t levelHopSamples() const
+    {
+        return std::max<int64_t>(1, std::lround(sampleRate * COMMIT_LEVEL_HOP_SEC));
+    }
+
+    /**
+     * Peak level per 5 ms slice over the window, and where the output ran out
+     * of headroom. With the limiter engaged the samples cannot reach full
+     * scale, so the reduction it applied is what marks a slice; bypassed, the
+     * samples pass full scale directly.
+     */
+    void computeLevels(int64_t w0, int64_t w1, const std::vector<float> &weightedGain)
+    {
+        const int64_t hop = levelHopSamples();
+        levelStartHop = w0 / hop;
+        const int64_t lastHop = (w1 - 1) / hop;
+        const size_t points = (size_t)std::max<int64_t>(0, lastHop - levelStartHop + 1);
+        levelPeaks.assign(points, 0.0f);
+        levelClipped.assign(points, 0);
+        gainReductionDb.assign(points, 0.0f);
+        maxGainReductionDb = 0.0f;
+
+        for (size_t p = 0; p < points; ++p)
+        {
+            const int64_t s0 = (levelStartHop + (int64_t)p) * hop;
+            const int64_t s1 = std::min<int64_t>(numFrames, s0 + hop);
+            float peak = 0.0f;
+            for (int ch = 0; ch < channels; ++ch)
+                for (int64_t i = s0; i < s1; ++i)
+                    peak = std::max(peak, std::abs(audioChannels[ch][(size_t)i]));
+            levelPeaks[p] = peak;
+
+            if (!weightedGain.empty())
+            {
+                float lowest = 1.0f;
+                for (int64_t i = std::max(s0, w0); i < std::min(s1, w1); ++i)
+                    lowest = std::min(lowest, weightedGain[(size_t)(i - w0)]);
+                const float db = lowest < 1.0f ? -20.0f * std::log10(lowest) : 0.0f;
+                gainReductionDb[p] = db;
+                maxGainReductionDb = std::max(maxGainReductionDb, db);
+                levelClipped[p] = db > COMMIT_CLIP_GAIN_DB ? 1 : 0;
+            }
+            else
+            {
+                levelClipped[p] = peak >= 1.0f ? 1 : 0;
+            }
+        }
+    }
+
+    Napi::Promise::Deferred deferred;
+
+    Napi::Reference<Napi::Float32Array> packedRef;
+    const float *packed = nullptr;
+    size_t packedLen = 0;
+
+    double sampleRate;
+    int64_t numFrames = 0;
+    int channels = 1;
+    int numBands = 0;
+    std::vector<uint32_t> bandOffsets;
+    std::vector<uint32_t> bandLengths;
+    std::vector<int32_t> bandStepLog2s;
+    int bandsPerOctave = 0;
+    double fminHz = 0.0;
+
+    bool detectOnsets = false;
+    OnsetRegion onsetRegion{0.0, 0.0, 0.0, nullptr, 0};
+    bool hasOnsetRegion = false;
+    std::vector<float> onsetBandMaxIn;
+
+    std::vector<Napi::Reference<Napi::Float32Array>> existingAudioRefs;
+    std::vector<const float *> existingAudio;
+    std::vector<size_t> existingAudioLens;
+
+    int64_t winStartFrame = -1, winEndFrame = -1;
+    int32_t winStartBand = -1, winEndBand = -1;
+    int64_t footStart = 0, footEnd = 0;
+    bool hardEdgeStart = false, hardEdgeEnd = false;
+    bool applyLimiter = false;
+    std::vector<float> envelope;
+
+    // Results
+    std::vector<std::vector<float>> audioChannels;
+    float peakValue = 0.0f;
+    std::vector<uint32_t> rangeBands, rangeStarts, rangeCounts;
+    std::vector<float> patchPixels;
+    std::vector<int64_t> patchK0, patchCount;
+    std::vector<size_t> patchPixelBase;
+    std::vector<float> gainReductionDb;
+    float maxGainReductionDb = 0.0f;
+    int64_t levelStartHop = 0;
+    std::vector<float> levelPeaks;
+    std::vector<uint8_t> levelClipped;
+    std::vector<DetectedOnset> onsets;
+    std::vector<float> onsetBandMaxOut;
+    double onsetOdfMax = 0.0;
+};
+
+Napi::Value CommitStrokeAsync(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 7 || !info[0].IsTypedArray() || !info[1].IsObject() || !info[2].IsNumber() ||
+        !info[3].IsObject() || !info[4].IsArray() || !info[5].IsObject() || !info[6].IsObject())
+    {
+        Napi::TypeError::New(env, "Expected: packedData (Float32Array), analysisMetadata (Object), sampleRate "
+                                  "(Number), params (Object), existingAudio (Array), window (Object), stroke (Object)")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    auto *worker = new CommitStrokeWorker(env, info[0].As<Napi::Float32Array>(), info[1].As<Napi::Object>(),
+                                          info[2].As<Napi::Number>().DoubleValue(), info[3].As<Napi::Object>(),
+                                          info[4].As<Napi::Array>(), info[5].As<Napi::Object>(),
+                                          info[6].As<Napi::Object>());
     worker->Queue();
     return worker->GetPromise();
 }
@@ -3419,6 +4243,7 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
     exports.Set("analyze", Napi::Function::New(env, AnalyzeAsync));
     exports.Set("synthesize", Napi::Function::New(env, SynthesizeAsync));
     exports.Set("conditionBoundary", Napi::Function::New(env, ConditionBoundaryAsync));
+    exports.Set("commitStroke", Napi::Function::New(env, CommitStrokeAsync));
     exports.Set("detectOnsets", Napi::Function::New(env, DetectOnsetsAsync));
     exports.Set("applyLimiter", Napi::Function::New(env, ApplyLimiterTest));
     exports.Set("hpss", Napi::Function::New(env, HpssAsync));
