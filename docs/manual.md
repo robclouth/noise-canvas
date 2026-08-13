@@ -352,15 +352,15 @@ Time-axis convolution with an impulse-response spectrogram — reverbs, room ton
 
 No parameters. Phase-aligns every band at the start of the brush to form a sharp impulse, then fades back to the original phase. Use it to manufacture transients out of noise, or to tighten up an attack that's gone smeary.
 
-### Reflow
+### Attract
 
-Retunes whatever the brush covers by rewriting phase trajectories. Each band's true pitch is measured from its phase motion, averaged across the brush span, and pulled toward a target — magnitudes are never touched, so the retune stays clean within about a semitone of movement. The rewrite is anchored at the brush start.
+Pulls energy across time and pitch toward a map — a landscape of valleys that content falls into. Energy genuinely relocates: each bin's magnitude moves by its own kernel-weighted pull and lands with its phase re-based, so a strong pull is a real migration, not a filter sweep. Repeated strokes behave like mean-shift: content climbs to the floor of its valley and settles there.
 
-- **Mode** – Scale snaps each pitch to the nearest note of the global scale; Pitch pulls everything toward one pitch; Stretch bends the spectrum around a fixed point.
-- **Amount** – how far pitches move toward their target. Negative pushes away from it; past 100 overshoots.
-- **Pitch** – the target for Pitch mode and the fixed point for Stretch, in semitones from A4.
-- **Stretch** – the exponent for Stretch mode: 1 leaves spacing alone, above 1 spreads the spectrum apart, 0 collapses it onto the fixed point, negative mirrors it.
-- **Reach** – pitches farther than this from their target stay put, in semitones.
+- **Map** – Source uses the sound's own loud content as the landscape, so strong partials capture their neighbours; Scale puts a valley at every note of the global scale (autotune when the pull is full); Grid puts valleys on the snap grid's pitch and beat lines.
+- **Source** – picks the file whose loud regions form the Source map's landscape, matched by absolute frequency. Leave it empty and the sound attracts toward itself.
+- **Valley** – the cross-section of each valley: Gaussian, Triangle, Box, or Steps. It shapes both how far a valley reaches and how the pull ramps toward the floor.
+- **Pull Time / Pull Pitch** – how far energy moves along each axis. Negative pushes away; past 100 overshoots the target.
+- **Smooth Time / Smooth Pitch** – valley width per axis, in beats and semitones. Narrow valleys snap precisely and ignore distant content; wide valleys reach out and drag everything, and at the extreme the landscape flattens and the pull fades away.
 
 ---
 
@@ -385,7 +385,7 @@ The parameter menu shows the resulting **live range in real units** next to the 
 
 - **Pattern** – a 2D shape scrolled across time and pitch.
 - **Envelope** – follows the painted region's own **Amplitude**, **Phase**, or **Panning**, with adjustable smoothing window (in beats) and dB range.
-- **Sequencer** – a step grid you draw on: adjustable steps (1–16), rows (1–8), loop length in beats, pitch range in semitones, and swing.
+- **Sequence** – a step grid you draw on: adjustable steps (1–16), rows (1–8), loop length in beats, pitch range in semitones, and swing.
 
 ### Pattern Shapes and Images
 
@@ -415,7 +415,7 @@ They appear in the shape picker under a "User" group.
 
 ### The Sequencer Grid
 
-In Sequencer mode the modulator reads a grid instead of a shape. Steps run left to right in time and bands run bottom to top in pitch, and every cell holds one value between 0 and 1 — the modulator's output wherever that cell lands on the canvas. A full cell drives the parameter to the top of its modulated range, an empty one to the bottom.
+In Sequence mode the modulator reads a grid instead of a shape. Steps run left to right in time and bands run bottom to top in pitch, and every cell holds one value between 0 and 1 — the modulator's output wherever that cell lands on the canvas. A full cell drives the parameter to the top of its modulated range, an empty one to the bottom.
 
 | Gesture                 | What it does                      |
 | ----------------------- | --------------------------------- |

@@ -72,7 +72,7 @@ _See also:_ [Dynamics](./manual.md#dynamics).
 
 - Effects: **Dynamics**, Gain at 0 dB.
 - On Dynamics **Gain**, click the label and set **Modulator 1** to **−100%**, so the modulator drives gain across its full range downwards.
-- Modulator 1: **Mode = Sequencer**, 8 steps, 1 row, **Loop = 2 beats**, and draw the pattern you want.
+- Modulator 1: **Mode = Sequence**, 8 steps, 1 row, **Loop = 2 beats**, and draw the pattern you want.
 - Envelope: **Size ↔ = 4 beats**, **Size ↕ = Full**, both **Curves = +100%** so the stroke is a hard rectangle rather than a fade.
 
 **Do.** Paint across a bar of the pad.
