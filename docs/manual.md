@@ -676,7 +676,7 @@ The transport bar, left to right:
 - **Limit** – holds each stroke's own level down as you paint it, following the brush envelope so the edges stay untouched. It is baked into the stroke, so undo removes it along with the paint, and turning it off only affects what you paint next. Turn it off to paint as loud as the effect makes it.
 - **?** – outlines every area of the window at once. See [Getting Help](#getting-help).
 
-Audio is resynthesized incrementally after every stroke, and the spectrogram is then redrawn from the analysis of that audio — so the picture is what you will hear, down to the edits that only move phase. Nothing protects the output as a whole: the strip above the spectrogram marks any slice that runs out of headroom.
+Audio is resynthesised incrementally after every stroke, and the spectrogram is then redrawn from the analysis of that audio — so the picture is what you will hear, down to the edits that only move phase. Nothing protects the output as a whole: the strip above the spectrogram marks any slice that runs out of headroom.
 
 ---
 
