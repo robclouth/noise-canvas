@@ -559,14 +559,16 @@ function registerStemGroup(
   });
 }
 
-// Files whose view a change to `fileId` should also move: itself, plus the rest
-// of its stem group while that group has view sync switched on.
 /** The active file's loop region, or null when there is no file or no region. */
 export function activeLoopRegion(state: Pick<State, "activeFileId" | "filesLoopRegion">): LoopRegion | null {
   return state.activeFileId ? (state.filesLoopRegion[state.activeFileId] ?? null) : null;
 }
 
-function viewSyncTargets(state: State, fileId: string): string[] {
+/**
+ * Files whose view a change to `fileId` should also move: itself, plus the rest
+ * of its stem group while that group has view sync switched on.
+ */
+export function viewSyncTargets(state: Pick<State, "stemGroupOfFile" | "stemGroups">, fileId: string): string[] {
   const groupId = state.stemGroupOfFile[fileId];
   const group = groupId ? state.stemGroups[groupId] : undefined;
   if (!group?.syncView) return [fileId];

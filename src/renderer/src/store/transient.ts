@@ -20,6 +20,12 @@ export interface TransientState {
   // brush cursor and repaint a preview under a gesture aimed at a control.
   controlDragging: boolean;
   setControlDragging: (dragging: boolean) => void;
+  // The file whose axis legend is being dragged, or null. The legend sits
+  // outside the canvas box, so the drag unhovers the view; without this the
+  // view and its view-synced siblings would go static and update from
+  // throttled snapshots mid-gesture.
+  axisDragFile: string | null;
+  setAxisDragFile: (fileId: string | null) => void;
 }
 
 export const useTransientStore = create<TransientState>()(
@@ -32,5 +38,7 @@ export const useTransientStore = create<TransientState>()(
     setHoveredFile: (fileId) => set({ hoveredFile: fileId }),
     controlDragging: false,
     setControlDragging: (dragging) => set({ controlDragging: dragging }),
+    axisDragFile: null,
+    setAxisDragFile: (fileId) => set({ axisDragFile: fileId }),
   })),
 );

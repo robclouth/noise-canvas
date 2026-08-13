@@ -1,8 +1,9 @@
 import { useStore } from "@/store";
 import { Box } from "@mantine/core";
 import { openFiles } from "@renderer/store/files";
+import { useTransientStore } from "@renderer/store/transient";
 import { useGesture } from "@use-gesture/react";
-import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Vector2 } from "three";
 import { bandsAboveMinToFreq, freqToMidi, isBlackKey, midiToBandsAboveMin, midiToNoteName } from "../lib/pitch-utils";
 import { pitchUvToViewUvY, screenToZoomed, viewUvYToPitchUv, zoomedToScreen } from "../lib/utils";
@@ -34,8 +35,10 @@ export const PitchLegend = memo(({ fileId }: PitchLegendProps) => {
 
   useGesture(
     {
-      onDrag: ({ event, delta: [dx, dy], xy: [, cy] }) => {
+      onDrag: ({ event, delta: [dx, dy], xy: [, cy], first, last }) => {
         event.preventDefault();
+        if (first) useTransientStore.getState().setAxisDragFile(fileId);
+        if (last) useTransientStore.getState().setAxisDragFile(null);
         const rect = ref.current?.getBoundingClientRect();
         if (!rect || rect.height === 0) return;
 
@@ -77,6 +80,13 @@ export const PitchLegend = memo(({ fileId }: PitchLegendProps) => {
     },
     { target: ref, eventOptions: { passive: false } },
   );
+
+  useEffect(() => {
+    return () => {
+      const transient = useTransientStore.getState();
+      if (transient.axisDragFile === fileId) transient.setAxisDragFile(null);
+    };
+  }, [fileId]);
 
   const spectrogramData = file?.spectrogramData;
 

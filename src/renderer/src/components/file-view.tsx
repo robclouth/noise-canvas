@@ -2,7 +2,7 @@ import { useStore } from "@/store";
 import { useTransientStore } from "@renderer/store/transient";
 import { Box, Loader, Text } from "@mantine/core";
 import { View } from "@react-three/drei";
-import { openFiles } from "@renderer/store/files";
+import { openFiles, viewSyncTargets } from "@renderer/store/files";
 import { useGesture } from "@use-gesture/react";
 import { memo, PointerEventHandler, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Vector2 } from "three";
@@ -106,6 +106,11 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const loadingMessage = useStore((state) => state.filesLoading[fileId]);
 
   const isHovered = useTransientStore((state) => state.hoveredFile === fileId);
+  // An axis drag moves every view-synced file, so all of them stay live.
+  const axisDragFile = useTransientStore((state) => state.axisDragFile);
+  const isAxisDragging = useStore((state) =>
+    axisDragFile === null ? false : viewSyncTargets(state, axisDragFile).includes(fileId),
+  );
   const cursorVisible = useTransientStore((state) => state.cursorVisible);
   const isStroking = useStore((state) => state.isStroking);
   const explicitSourcePath = useStore((state) => {
@@ -132,10 +137,12 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   // A view is live only while it can show cursor-dependent UI: hovered (brush
   // preview), active with a cursor anywhere (stroking + implicit-source
   // rectangle), the active step's explicit source file (sampling rectangle),
-  // or fullscreen. Everything else is presented as a static snapshot.
+  // fullscreen, or an axis-legend drag zooming/panning the view. Everything
+  // else is presented as a static snapshot.
   const wantsLive =
     isHovered ||
     isFullscreen ||
+    isAxisDragging ||
     (isActive && (cursorVisible || isStroking)) ||
     (explicitSourcePath !== null && explicitSourcePath === filePath);
 
