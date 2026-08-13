@@ -7,7 +7,7 @@ import { dynamicsEffect } from "./dynamics-effect";
 import { evolveEffect } from "./evolve-effect";
 import { passThroughEffect } from "./passthrough-effect";
 import { sortEffect } from "./sort-effect";
-import { reflowEffect } from "./reflow-effect";
+import { attractEffect } from "./attract-effect";
 import { synthesizeEffect } from "./synthesize-effect";
 import { transformEffect } from "./transform-effect";
 import { transmuteEffect } from "./transmute-effect";
@@ -31,5 +31,5 @@ export const effects = {
   waveshape: waveshapeEffect,
   convolve: convolveEffect,
   align: alignEffect,
-  reflow: reflowEffect,
+  attract: attractEffect,
 };

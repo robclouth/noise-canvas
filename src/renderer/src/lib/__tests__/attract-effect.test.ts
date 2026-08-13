@@ -73,31 +73,31 @@ function createModulatorScaleLut(): DataTexture {
   return tex;
 }
 
-const REFLOW_STEP_PARAMS = {
-  reflowMode: 1,
-  reflowAmount: 100,
-  reflowPitch: -12,
-  reflowStretch: 1,
-  reflowReach: 48,
-};
-
-function createReflowState(): State {
-  const effects = [{ id: "test-reflow", effect: "reflow" as const, enabled: true, params: {} }];
+function createAttractState(params: Record<string, number>): State {
+  const effects = [{ id: "test-attract", effect: "attract" as const, enabled: true, params: {} }];
   const state = createMockState({
     effects,
-    filepathsBpm: { "/test/reflow-test.wav": 120 },
-    ...REFLOW_STEP_PARAMS,
+    filepathsBpm: { "/test/attract-test.wav": 120 },
+    ...params,
   });
   const activeSteps = state.brushes[state.activeBrushIndex]?.steps;
   if (activeSteps && activeSteps[0]) {
     const step = activeSteps[0] as unknown as Record<string, unknown>;
     step.effects = effects;
-    Object.assign(step, REFLOW_STEP_PARAMS);
+    Object.assign(step, params);
   }
   return state;
 }
 
-describe("Reflow effect", () => {
+function totalEnergy(data: Float32Array): number {
+  let e = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    e += data[i] * data[i] + data[i + 2] * data[i + 2];
+  }
+  return e;
+}
+
+describe("Attract effect", () => {
   let gl: WebGLRenderer;
   let spectrogramData: SpectrogramData;
   let textures: ReturnType<typeof createTexturesFromSpectrogramData>;
@@ -106,17 +106,17 @@ describe("Reflow effect", () => {
   let effects: EffectsRegistry;
 
   beforeEach(async () => {
-    const [{ reflowEffect }, { passThroughEffect }] = await Promise.all([
-      import("../../effects/reflow-effect"),
+    const [{ attractEffect }, { passThroughEffect }] = await Promise.all([
+      import("../../effects/attract-effect"),
       import("../../effects/passthrough-effect"),
     ]);
-    effects = { reflow: reflowEffect, passthrough: passThroughEffect };
+    effects = { attract: attractEffect, passthrough: passThroughEffect };
 
     gl = new WebGLRenderer({ antialias: false });
     gl.setSize(64, 64);
 
     // A low sample rate stretches the mock's duration to a fraction of a
-    // second, so the retune's phase ramp accumulates measurably across frames.
+    // second so brush-anchored phase ramps accumulate measurably.
     spectrogramData = createMockSpectrogramData({
       numFrames: 256,
       numBands: 32,
@@ -152,7 +152,7 @@ describe("Reflow effect", () => {
       modulator2Texture: placeholderTexture,
       modulator3Texture: placeholderTexture,
     };
-    const renderer = new StrokeRenderer(gl, spectrogramData, strokeTextures, "reflow-test", effects);
+    const renderer = new StrokeRenderer(gl, spectrogramData, strokeTextures, "attract-test", effects);
     renderer.initialize();
     return renderer;
   }
@@ -160,9 +160,9 @@ describe("Reflow effect", () => {
   function createSourceFile(renderer: StrokeRenderer): SourceFileInfo {
     const rendererTextures = renderer.getTextures();
     return {
-      id: "reflow-test",
-      filePath: "/test/reflow-test.wav",
-      displayName: "reflow-test.wav",
+      id: "attract-test",
+      filePath: "/test/attract-test.wav",
+      displayName: "attract-test.wav",
       spectrogramData,
       textures: {
         packed: rendererTextures.packed,
@@ -173,19 +173,12 @@ describe("Reflow effect", () => {
     };
   }
 
-  it("shifts phases toward the target pitch while leaving magnitudes untouched", async () => {
-    const renderer = createRenderer();
-    const state = createReflowState();
-    const sourceFile = createSourceFile(renderer);
-    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-
-    const initialData = await renderer.getFBOData();
-
-    const params: StrokeParams = {
+  function strokeParams(): StrokeParams {
+    return {
       cursorPos: new Vector2(0.0, 0.0),
       preview: false,
       bpm: 120,
-      totalDuration,
+      totalDuration: spectrogramData.numFrames / spectrogramData.sampleRate,
       viewZoomPower: 0,
       viewOffset: 0,
       viewZoomPowerY: 0,
@@ -194,29 +187,53 @@ describe("Reflow effect", () => {
       tiltX: 0,
       tiltY: 0,
     };
-    renderer.renderStroke(params, state, sourceFile);
+  }
 
+  it("is an identity when both pulls are zero", async () => {
+    const renderer = createRenderer();
+    const state = createAttractState({ attractMap: 1, attractAmountX: 0, attractAmountY: 0 });
+    const sourceFile = createSourceFile(renderer);
+
+    const initialData = await renderer.getFBOData();
+    renderer.renderStroke(strokeParams(), state, sourceFile);
     const outputData = await renderer.getFBOData();
 
-    let changedPhases = 0;
-    let maxMagDelta = 0;
-    let sawContent = false;
+    let maxDelta = 0;
+    for (let i = 0; i < outputData.length; i++) {
+      maxDelta = Math.max(maxDelta, Math.abs(outputData[i] - initialData[i]));
+    }
+    expect(maxDelta).toBeLessThan(1e-6);
+
+    renderer.dispose();
+  });
+
+  it("moves energy toward scale valleys without creating or destroying it wholesale", async () => {
+    const renderer = createRenderer();
+    const state = createAttractState({
+      attractMap: 1,
+      attractAmountX: 0,
+      attractAmountY: 100,
+      attractSmoothY: 2,
+    });
+    const sourceFile = createSourceFile(renderer);
+
+    const initialData = await renderer.getFBOData();
+    renderer.renderStroke(strokeParams(), state, sourceFile);
+    const outputData = await renderer.getFBOData();
+
+    let changed = 0;
+    let sawNaN = false;
     for (let i = 0; i < outputData.length; i += 4) {
-      const magL0 = initialData[i];
-      if (magL0 > 1e-6) sawContent = true;
-      maxMagDelta = Math.max(
-        maxMagDelta,
-        Math.abs(outputData[i] - magL0),
-        Math.abs(outputData[i + 2] - initialData[i + 2]),
-      );
-      if (magL0 > 1e-6 && Math.abs(outputData[i + 1] - initialData[i + 1]) > 0.05) {
-        changedPhases++;
-      }
+      if (Number.isNaN(outputData[i]) || Number.isNaN(outputData[i + 1])) sawNaN = true;
+      if (Math.abs(outputData[i] - initialData[i]) > 1e-4) changed++;
     }
 
-    expect(sawContent).toBe(true);
-    expect(maxMagDelta).toBeLessThan(1e-3);
-    expect(changedPhases).toBeGreaterThan(100);
+    expect(sawNaN).toBe(false);
+    expect(changed).toBeGreaterThan(100);
+
+    const ratio = totalEnergy(outputData) / totalEnergy(initialData);
+    expect(ratio).toBeGreaterThan(0.25);
+    expect(ratio).toBeLessThan(4);
 
     renderer.dispose();
   });

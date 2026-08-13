@@ -56,11 +56,13 @@ export interface EffectsState {
   transmuteMode: number;
   transmuteAmount: number;
   transmuteCurve: number;
-  reflowMode: number;
-  reflowAmount: number;
-  reflowPitch: number;
-  reflowStretch: number;
-  reflowReach: number;
+  attractMap: number;
+  attractSourceFile: FileParameterValue;
+  attractKernel: number;
+  attractAmountX: number;
+  attractAmountY: number;
+  attractSmoothX: number;
+  attractSmoothY: number;
   waveshapeMode: number;
   waveshapeDrive: number;
   waveshapeTilt: number;
@@ -146,12 +148,14 @@ export const createEffectsSlice = (): EffectsState => {
     transmuteAmount: getParameterDef("transmuteAmount").default,
     transmuteCurve: getParameterDef("transmuteCurve").default,
 
-    // ---------------- Reflow ----------------
-    reflowMode: getParameterDef("reflowMode").default,
-    reflowAmount: getParameterDef("reflowAmount").default,
-    reflowPitch: getParameterDef("reflowPitch").default,
-    reflowStretch: getParameterDef("reflowStretch").default,
-    reflowReach: getParameterDef("reflowReach").default,
+    // ---------------- Attract ----------------
+    attractMap: getParameterDef("attractMap").default,
+    attractSourceFile: null,
+    attractKernel: getParameterDef("attractKernel").default,
+    attractAmountX: getParameterDef("attractAmountX").default,
+    attractAmountY: getParameterDef("attractAmountY").default,
+    attractSmoothX: getParameterDef("attractSmoothX").default,
+    attractSmoothY: getParameterDef("attractSmoothY").default,
 
     // ---------------- Waveshape ----------------
     waveshapeMode: getParameterDef("waveshapeMode").default,

@@ -253,7 +253,7 @@ export const EFFECT_COLORS: Record<string, string> = {
   waveshape: HUE_TEAL,
   convolve: "blue",
   align: "gray",
-  reflow: "lime",
+  attract: "lime",
 };
 
 export const EFFECT_LABELS: Record<string, string> = {
@@ -269,7 +269,7 @@ export const EFFECT_LABELS: Record<string, string> = {
   waveshape: "Waveshape",
   convolve: "Convolve",
   align: "Align",
-  reflow: "Reflow",
+  attract: "Attract",
 };
 
 // Read at the moment of choosing, by someone who does not yet know what the
@@ -288,5 +288,5 @@ export const EFFECT_DESCRIPTIONS: Record<string, string> = {
   waveshape: "Distort the spectrum itself — clipped, folded, wrapped, inverted.",
   convolve: "Print the character of another sound onto this one. Reverbs and room tone.",
   align: "Snap everything into one sharp impulse, then let it drift apart again.",
-  reflow: "Retune what's there — to the scale, to one pitch, or stretched into bells.",
+  attract: "Pull energy toward a map — the scale, the grid, or the sound's own peaks.",
 };

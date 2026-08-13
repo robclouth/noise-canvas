@@ -17,7 +17,7 @@ import { CloneEffect } from "./effect-views/clone-effect";
 import { ConvolveEffect } from "./effect-views/convolve-effect";
 import { DynamicsEffect } from "./effect-views/dynamics-effect";
 import { EvolveEffect } from "./effect-views/evolve-effect";
-import { ReflowEffect } from "./effect-views/reflow-effect";
+import { AttractEffect } from "./effect-views/attract-effect";
 import { SynthesizeEffect } from "./effect-views/synthesize-effect";
 import { SortEffect } from "./effect-views/sort-effect";
 import { TransformEffect } from "./effect-views/transform-effect";
@@ -36,7 +36,7 @@ const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
   transmute: <TransmuteEffect />,
   waveshape: <WaveshapeEffect />,
   convolve: <ConvolveEffect />,
-  reflow: <ReflowEffect />,
+  attract: <AttractEffect />,
 };
 
 import { ParameterKey } from "@/store/types";
@@ -100,7 +100,15 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
     "convolveGainDb",
   ],
   align: [],
-  reflow: ["reflowMode", "reflowAmount", "reflowPitch", "reflowStretch", "reflowReach"],
+  attract: [
+    "attractMap",
+    "attractSourceFile",
+    "attractKernel",
+    "attractAmountX",
+    "attractAmountY",
+    "attractSmoothX",
+    "attractSmoothY",
+  ],
 };
 
 const MAX_EFFECTS = 10;
