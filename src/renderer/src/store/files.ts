@@ -1840,11 +1840,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
       file.audioBuffer = audioBuffer;
       file.audioPeak = peak > 0 ? peak : 1;
-      // Cached audio carries no gain-reduction envelope; the meter clears until
-      // the next synthesis re-derives it.
+      // Cached audio carries no gain-reduction envelope.
       file.gainReductionDb = undefined;
       file.maxGainReductionDb = undefined;
-      file.outputLevels = undefined;
+      file.outputLevels = computeOutputLevels(audioBuffer) ?? undefined;
 
       // Hot-swap if currently playing this file
       if (get().isPlaying && get().activeFileId === fileId) {
