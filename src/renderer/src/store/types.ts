@@ -92,10 +92,6 @@ export type OpenFile = {
   // its own span alone and still judge it on the file's terms. Absent until a
   // whole-file pass has run, which makes the next detection a whole-file one.
   onsetReference?: { odfMax: number; bandMax: Float32Array };
-  // Per-coefficient signed contribution to the samples that overloaded, in the
-  // same packed layout as the spectrogram data. Present only when the display's
-  // clipping overlay is enabled and the latest synthesis actually overloaded.
-  clipAttribution?: Float32Array;
   rendererRef?: React.RefObject<FileRendererHandle | null>;
 };
 

@@ -18,7 +18,7 @@ Every control in the app has a tooltip and an entry in the `?` overlay, and how 
    - [Warp Algorithms](#warp-algorithms)
    - [Blend Modes](#blend-modes)
 4. [Effects](#effects)
-   - [Dynamics](#dynamics) · [Transform](#transform) · [Overtones](#overtones) · [Blur](#blur) · [Clone](#clone) · [Synthesize](#synthesize) · [Evolve](#evolve) · [Binaural](#binaural) · [Sort](#sort) · [Transmute](#transmute) · [Waveshape](#waveshape) · [Convolve](#convolve) · [Align](#align)
+   - [Dynamics](#dynamics) · [Transform](#transform) · [Blur](#blur) · [Clone](#clone) · [Synthesize](#synthesize) · [Evolve](#evolve) · [Binaural](#binaural) · [Sort](#sort) · [Transmute](#transmute) · [Waveshape](#waveshape) · [Convolve](#convolve) · [Align](#align)
 5. [Modulation](#modulation)
    - [How Modulation Amount Works](#how-modulation-amount-works)
    - [Modulator Modes](#modulator-modes)
@@ -243,15 +243,6 @@ Shifts, scales, and rotates the spectral image.
 - **Rotation** – rotate the painted region, in degrees.
 - **Edge** – behaviour at the brush borders.
 
-### Overtones
-
-Adds harmonic or inharmonic overtones to the painted region.
-
-- **Count** – number of overtones (1–64).
-- **Scale** – vertical spacing multiplier between overtones (negative goes downwards).
-- **Decay** – how amplitude falls off per overtone.
-- **Shape** – Logarithmic (natural harmonic series), Exponential, Octaves, or Selected Scale.
-
 ### Blur
 
 Smooths and blends over time and pitch — echo, reverb, and diffusion-like effects.
@@ -266,11 +257,31 @@ Smooths and blends over time and pitch — echo, reverb, and diffusion-like effe
 
 Stamps beat- and semitone-spaced copies of the painted region in 2D — echoes, spectral delays, stacked harmonics.
 
-- **Space ↔ / ↕** – spacing between copies in beats / semitones (can be negative).
-- **Copies ↔ / ↕** – number of copies along each axis (1–32).
+- **Space ↔ / ↕** – spacing between copies in beats / semitones (can be negative). With any shape other than Even this is the gap to the _first_ copy, and the shape sets the rest.
+- **Copies ↔ / ↕** – number of copies along each axis (1–64).
+- **Shape ↔ / ↕** – how the gaps grow from copy to copy. See the table below.
 - **Dir. ↔ / ↕** – Forward/Middle/Backward and Up/Middle/Down.
 - **Decay** – fade applied to each successive copy; the two axes multiply.
 - **Edge** – behaviour for copies extending past the border.
+- **Sum** – Coherent adds the copies as waves, so overlapping copies can cancel and comb. Constructive adds their levels and averages their phase against the first copy, so a stack never cancels.
+
+An axis set to 1 copy costs nothing: that pass is skipped entirely.
+
+#### Shapes
+
+Every shape places the first copy one **Space** value out, so switching shape never moves it. Only the copies past it move.
+
+| Shape ↕   | Shape ↔     | Gaps                                                                             |
+| ---------- | ------------ | -------------------------------------------------------------------------------- |
+| Even       | Even         | All the same. Space ↕ = 12 gives octaves, 7 gives fifths.                       |
+| Harmonic   | Decelerating | The natural harmonic series — gaps shrink as they climb.                         |
+| Geometric  | Accelerating | Every gap is twice the one before.                                               |
+| Inharmonic | Uneven       | The harmonic series stretched sharp, like a struck bar or a piano's top octaves. |
+| Scale      | —            | The degrees of the scale set in the transport bar.                               |
+
+Even is the only shape with even gaps, and it is the only one a modulator can reach — modulation stretches the whole comb at once, so it cannot make gaps unequal. That is what shapes are for.
+
+Set **Copies ↔** to 1, **Shape ↕** to Harmonic, **Space ↕** to 12 and **Sum** to Constructive and Clone stacks a harmonic series on whatever it covers. **Space ↕** then doubles as the stretch: above 12 the partials spread sharp, below 12 they compress.
 
 ### Synthesize
 
@@ -339,6 +350,16 @@ Time-axis convolution with an impulse-response spectrogram — reverbs, room ton
 ### Align
 
 No parameters. Phase-aligns every band at the start of the brush to form a sharp impulse, then fades back to the original phase. Use it to manufacture transients out of noise, or to tighten up an attack that's gone smeary.
+
+### Reflow
+
+Retunes whatever the brush covers by rewriting phase trajectories. Each band's true pitch is measured from its phase motion, averaged across the brush span, and pulled toward a target — magnitudes are never touched, so the retune stays clean within about a semitone of movement. The rewrite is anchored at the brush start.
+
+- **Mode** – Scale snaps each pitch to the nearest note of the global scale; Pitch pulls everything toward one pitch; Stretch bends the spectrum around a fixed point.
+- **Amount** – how far pitches move toward their target. Negative pushes away from it; past 100 overshoots.
+- **Pitch** – the target for Pitch mode and the fixed point for Stretch, in semitones from A4.
+- **Stretch** – the exponent for Stretch mode: 1 leaves spacing alone, above 1 spreads the spectrum apart, 0 collapses it onto the fixed point, negative mirrors it.
+- **Reach** – pitches farther than this from their target stay put, in semitones.
 
 ---
 
@@ -644,7 +665,6 @@ The transport bar, left to right:
 - **Tonic / Type** – the scale used for pitch snapping and for scale-based effects and modulation.
 - **Output meter** and **gain-reduction meter**.
 - **Limiter** – bakes a true-peak limiter into the synthesized audio so playback and export can't clip. Bypass it to hear or print the raw synthesis.
-- **Overloads** – tints the spectrogram where the output overloads. Red marks the partials pushing the peak past full scale; cyan marks the ones pulling it back, so attenuating cyan makes the clipping worse. Paint the red down to clear it. A partial that is over full scale on its own always reads red, whether or not the mix overloads.
 - **?** – outlines every area of the window at once. See [Getting Help](#getting-help).
 
 Audio is resynthesized incrementally after every stroke, so what you hear is always the real thing, not a preview.

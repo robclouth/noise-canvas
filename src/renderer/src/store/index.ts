@@ -260,9 +260,6 @@ export const useStore = create<State>()(
             if (key === "limiterEnabled") {
               const { activeFileId, synthesizeFile } = get();
               if (activeFileId) void synthesizeFile(activeFileId);
-            } else if (key === "showClipping") {
-              const { activeFileId, refreshClipAttribution } = get();
-              if (activeFileId) void refreshClipAttribution(activeFileId);
             }
           }
         },

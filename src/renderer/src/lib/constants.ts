@@ -32,19 +32,6 @@ export const FULL_SCALE_MAGNITUDE = 0.45727;
 // dBFS = 20*log10(magnitude) + FULL_SCALE_DB_OFFSET.
 export const FULL_SCALE_DB_OFFSET = -20 * Math.log10(FULL_SCALE_MAGNITUDE);
 
-// Level above 0 dBFS at which the display's over-full-scale tint saturates.
-export const OVER_FULL_SCALE_RANGE_DB = 6;
-
-// Ratio of each analysis filter's standard deviation to the spacing between
-// adjacent bands. Must match OVERLAP in the native analyzer.
-export const ANALYSIS_OVERLAP = 0.7;
-
-// Overshoot (or limiter gain reduction) at which the clipping overlay reaches
-// full intensity. Tint strength tracks this absolutely rather than being scaled
-// to whatever the worst offender happens to be, so the overlay fades away as
-// the overshoot is painted down instead of staying saturated until it vanishes.
-export const CLIP_FULL_TINT_DB = 6;
-
 export const BEAT_VALUES = [
   { value: 1 / 64, label: "1/64" },
   { value: (1 / 32) * (2 / 3), label: "1/32t" },
@@ -251,13 +238,11 @@ export const ALGORITHMS = [
   { value: 1, label: "Noisey" },
 ];
 
-const [HUE_GRAPE, HUE_RED, HUE_YELLOW, HUE_GREEN, HUE_VIOLET, HUE_CYAN, HUE_PINK, HUE_ORANGE, HUE_INDIGO, HUE_TEAL] =
-  BASE_HUES;
+const [HUE_GRAPE, HUE_RED, , HUE_GREEN, HUE_VIOLET, HUE_CYAN, HUE_PINK, HUE_ORANGE, HUE_INDIGO, HUE_TEAL] = BASE_HUES;
 
 export const EFFECT_COLORS: Record<string, string> = {
   dynamics: HUE_GRAPE,
   transform: HUE_RED,
-  overtones: HUE_YELLOW,
   blur: HUE_GREEN,
   clone: "lime",
   synthesize: HUE_VIOLET,
@@ -268,12 +253,12 @@ export const EFFECT_COLORS: Record<string, string> = {
   waveshape: HUE_TEAL,
   convolve: "blue",
   align: "gray",
+  reflow: "lime",
 };
 
 export const EFFECT_LABELS: Record<string, string> = {
   dynamics: "Dynamics",
   transform: "Transform",
-  overtones: "Overtones",
   blur: "Blur",
   clone: "Clone",
   synthesize: "Synthesize",
@@ -284,6 +269,7 @@ export const EFFECT_LABELS: Record<string, string> = {
   waveshape: "Waveshape",
   convolve: "Convolve",
   align: "Align",
+  reflow: "Reflow",
 };
 
 // Read at the moment of choosing, by someone who does not yet know what the
@@ -292,7 +278,6 @@ export const EFFECT_LABELS: Record<string, string> = {
 export const EFFECT_DESCRIPTIONS: Record<string, string> = {
   dynamics: "Squash, gate, expand or invert whatever the brush covers.",
   transform: "Move sound through time and pitch — shift, stretch, rotate, reverse.",
-  overtones: "Stack harmonics on top of what's there for a richer, brighter timbre.",
   blur: "Smear energy across time and pitch. Reverb, freeze, and soft edges.",
   clone: "Repeat what's there at beat and semitone offsets. Echoes and harmonies.",
   synthesize: "Paint new sound from nothing — noise, tones, impulses.",
@@ -303,4 +288,5 @@ export const EFFECT_DESCRIPTIONS: Record<string, string> = {
   waveshape: "Distort the spectrum itself — clipped, folded, wrapped, inverted.",
   convolve: "Print the character of another sound onto this one. Reverbs and room tone.",
   align: "Snap everything into one sharp impulse, then let it drift apart again.",
+  reflow: "Retune what's there — to the scale, to one pitch, or stretched into bells.",
 };

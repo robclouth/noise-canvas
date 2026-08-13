@@ -26,7 +26,6 @@ import {
   Mesh,
   NearestFilter,
   RawShaderMaterial,
-  RedFormat,
   RGBAFormat,
   RGFormat,
   UniformsUtils,
@@ -43,7 +42,7 @@ import { getFileOnsets } from "../lib/file-onsets";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
-import { FULL_SCALE_DB_OFFSET, OVER_FULL_SCALE_RANGE_DB } from "../lib/constants";
+import { FULL_SCALE_DB_OFFSET } from "../lib/constants";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { renderExportImage as renderExportImageToCanvas, type ImageExportOptions } from "../lib/image-export";
 import type { PosterInfo } from "../lib/image-export-poster";
@@ -247,9 +246,6 @@ const FileRendererInner = memo(
     const [originalPackedDataTex, setOriginalPackedDataTex] = useState<DataTexture | null>(null);
     const [inverseMapTex, setInverseMapTex] = useState<DataTexture | null>(null);
     const [metadataTex, setMetadataTex] = useState<DataTexture | null>(null);
-    // Clipping attribution, rebuilt only when synthesis produces a new map.
-    const clipAttributionTexRef = useRef<DataTexture | null>(null);
-    const clipAttributionDataRef = useRef<Float32Array | null>(null);
 
     // Interaction state
     const displayMode = useRef<"preview" | "committed">("committed");
@@ -276,8 +272,6 @@ const FileRendererInner = memo(
             gridSwing: state.gridSwing,
             minDb: state.displayMinDb,
             maxDb: state.displayMaxDb,
-            showClipping: state.showClipping,
-            clipAttributionRevision: state.clipAttributionRevision,
             scaleTonic: state.scaleTonic,
             scaleType: state.scaleType,
             pickingFileParam: state.pickingFileParam,
@@ -373,10 +367,6 @@ const FileRendererInner = memo(
           viewOffsetY: { value: 0.0 },
           wrapMode: { value: 0 },
           fullScaleDbOffset: { value: FULL_SCALE_DB_OFFSET },
-          overFullScaleRangeDb: { value: OVER_FULL_SCALE_RANGE_DB },
-          clipAttributionTex: { value: null },
-          showClipping: { value: false },
-          hasClipAttribution: { value: false },
         },
         vertexShader: passThroughVert,
         fragmentShader: withPlatformDefines(displayFrag),
@@ -601,34 +591,6 @@ const FileRendererInner = memo(
       uniforms.scaleGridEnabled.value = gridSizeSemis <= 0 && semitoneHeightPx >= MIN_GRID_SPACING_PX;
       uniforms.scaleOffsets.value = buildScaleOffsets(state.scaleTonic, state.scaleType);
       uniforms.pitchOffsetSemisFromC0.value = minFreqSemisAboveC0(spectrogramData.minFreq);
-
-      // Upload the overload map when synthesis has produced a new one.
-      const clipAttribution = state.showClipping ? (openFiles[fileId]?.clipAttribution ?? null) : null;
-      if (clipAttribution !== clipAttributionDataRef.current) {
-        clipAttributionTexRef.current?.dispose();
-        clipAttributionTexRef.current = null;
-        clipAttributionDataRef.current = clipAttribution;
-        if (clipAttribution) {
-          const tex = new DataTexture(
-            clipAttribution,
-            spectrogramData.textureWidth,
-            spectrogramData.textureHeight,
-            RedFormat,
-            FloatType,
-          );
-          tex.internalFormat = "R32F";
-          tex.minFilter = NearestFilter;
-          tex.magFilter = NearestFilter;
-          tex.wrapS = ClampToEdgeWrapping;
-          tex.wrapT = ClampToEdgeWrapping;
-          tex.generateMipmaps = false;
-          tex.needsUpdate = true;
-          clipAttributionTexRef.current = tex;
-        }
-      }
-      uniforms.showClipping.value = state.showClipping;
-      uniforms.hasClipAttribution.value = clipAttributionTexRef.current !== null;
-      uniforms.clipAttributionTex.value = clipAttributionTexRef.current || placeholderTexture;
     };
 
     /**

@@ -15,6 +15,7 @@ import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { GenerateOverlay } from "./generate-overlay";
 import { LoopRegion } from "./loop-region";
+import { LevelStrip } from "./level-strip";
 import { OnsetLegend } from "./onset-legend";
 import { laneAnchorProps } from "../lib/ui-anchors";
 import { PITCH_LEGEND_WIDTH, PitchLegend } from "./pitch-legend";
@@ -678,6 +679,9 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         </Box>
       ) : (
         <>
+          <Box style={{ paddingLeft: PITCH_LEGEND_WIDTH }}>
+            <LevelStrip fileId={fileId} />
+          </Box>
           <Box style={{ paddingLeft: PITCH_LEGEND_WIDTH }}>
             <OnsetLegend fileId={fileId} />
           </Box>

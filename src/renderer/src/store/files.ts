@@ -9,8 +9,7 @@ import * as Tone from "tone";
 import { host } from "../lib/host";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type { AnalysisParams } from "../../../main/lib/types";
-import { computeClipAttribution, findOverloads } from "../lib/clip-analysis";
-import { ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB, ONSET_REGION_PAD_SEC } from "../lib/constants";
+import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
@@ -44,7 +43,6 @@ export interface FilesState {
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
     prefetchedFboData?: Float32Array,
   ) => Promise<void>;
-  refreshClipAttribution: (fileId: string) => Promise<void>;
   loadCachedAudio: (fileId: string, audioPath: string, peak: number) => Promise<boolean>;
   restoreOnsetsForNode: (fileId: string, nodeId: string, packedData: Float32Array) => Promise<void>;
   exportHistory: () => Promise<void>;
@@ -378,20 +376,6 @@ function bandLayout(data: SpectrogramData) {
     bandOffsets: data.synthesisMetadata.bandOffsets,
     bandLengths: data.synthesisMetadata.bandLengths,
   };
-}
-
-// Signed per-coefficient blame for the samples that overloaded, or undefined
-// when none did.
-function attributeClipping(
-  spectrogramData: SpectrogramData,
-  packedData: Float32Array,
-  channels: Float32Array[],
-  sampleRate: number,
-  gainReductionDb: Float32Array | null,
-): Float32Array | undefined {
-  const overloads = findOverloads(channels, sampleRate, gainReductionDb);
-  if (overloads.length === 0) return undefined;
-  return computeClipAttribution(spectrogramData, packedData, overloads, ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
 }
 
 // The current painted state of a file, falling back to its analysed
@@ -1644,19 +1628,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         get().setGainReduction(synthesisResult.gainReductionDb ?? null, synthesisResult.maxGainReductionDb ?? 0);
       }
 
-      // Attribute the overloaded samples back onto the coefficients that drove
-      // them. Only meaningful once the audio exists, so it runs after synthesis.
-      file.clipAttribution =
-        get().showClipping && file.spectrogramData
-          ? attributeClipping(
-              file.spectrogramData,
-              processedDataArray,
-              synthesisResult.channels,
-              originalAnalysis.sampleRate,
-              synthesisResult.gainReductionDb ?? null,
-            )
-          : undefined;
-
       if (autoPlaybackParams) {
         // --- Handle auto-playback of the painted region ---
         const autoPlayStart = performance.now();
@@ -1742,34 +1713,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
   },
 
-  // Rebuilds the overload map from the audio and gain-reduction envelope the
-  // last synthesis left on the file.
-  refreshClipAttribution: async (fileId: string) => {
-    const file = openFiles[fileId];
-    if (!file) return;
-
-    if (!get().showClipping) {
-      file.clipAttribution = undefined;
-    } else if (file.spectrogramData && file.audioBuffer) {
-      const packedData = await readCurrentPackedData(file);
-      if (packedData) {
-        const audioBuffer = file.audioBuffer;
-        const channels = Array.from({ length: audioBuffer.numberOfChannels }, (_, channel) =>
-          audioBuffer.getChannelData(channel),
-        );
-        file.clipAttribution = attributeClipping(
-          file.spectrogramData,
-          packedData,
-          channels,
-          audioBuffer.sampleRate,
-          file.gainReductionDb ?? null,
-        );
-      }
-    }
-
-    set({ clipAttributionRevision: get().clipAttributionRevision + 1 });
-  },
-
   loadCachedAudio: async (fileId: string, audioPath: string, peak: number): Promise<boolean> => {
     const file = openFiles[fileId];
     if (!file?.spectrogramData) return false;
@@ -1796,7 +1739,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // the next synthesis re-derives it.
       file.gainReductionDb = undefined;
       file.maxGainReductionDb = undefined;
-      file.clipAttribution = undefined;
       if (get().activeFileId === fileId) get().setGainReduction(null, 0);
 
       // Hot-swap if currently playing this file
