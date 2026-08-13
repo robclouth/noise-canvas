@@ -11,7 +11,7 @@ import { getFileColor, openFiles } from "@renderer/store/files";
 import { selectStemGroupOfFile, stemMemberColor } from "@renderer/store/stem-groups";
 import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
-import { ChevronDown, Copy, Maximize2, Minimize2, Split, X } from "lucide-react";
+import { ChevronDown, Copy, Grid3x3, Maximize2, Minimize2, Split, X } from "lucide-react";
 import { memo } from "react";
 import { host } from "../lib/host";
 import { Tooltip } from "./tooltip";
@@ -246,6 +246,20 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
             )}
           </Menu.Dropdown>
         </Menu>
+        <HelpActionIcon
+          help="file-fill-grid"
+          size={uiSize}
+          color="dark.5"
+          onClick={(e) => {
+            e.stopPropagation();
+            void useStore
+              .getState()
+              .setActiveFileId(fileId)
+              .then(() => useStore.getState().fillGrid());
+          }}
+        >
+          <Grid3x3 size={16} />
+        </HelpActionIcon>
         <HelpActionIcon
           help="file-duplicate"
           size={uiSize}

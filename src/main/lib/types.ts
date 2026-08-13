@@ -76,6 +76,7 @@ export interface IpcRendererEvents {
   redo: () => void;
   "restore-original": () => void;
   "duplicate-active-file": () => void;
+  "fill-grid": () => void;
   "close-active-file": () => void;
   "reanalyze-active-file": () => void;
   "double-active-file-length": () => void;

@@ -26,12 +26,11 @@ Every control in the app has a tooltip and an entry in the `?` overlay, and how 
    - [Modulator Controls](#modulator-controls)
    - [Contextual Sources](#contextual-sources)
    - [Nested Modulation](#nested-modulation)
-6. [Generate](#generate)
-   - [Writing Patterns](#writing-patterns)
-   - [Where in the Spectrum](#where-in-the-spectrum)
-   - [Strength, Pan and Macros](#strength-pan-and-macros)
-   - [Choosing Brushes from a Pattern](#choosing-brushes-from-a-pattern)
-   - [Presets and the Dice](#presets-and-the-dice)
+6. [Fill Grid](#fill-grid)
+   - [What Sets the Spacing](#what-sets-the-spacing)
+   - [What Sets the Size](#what-sets-the-size)
+   - [Filling Part of a File](#filling-part-of-a-file)
+   - [Variation Between Strokes](#variation-between-strokes)
 7. [Parameter Controls](#parameter-controls)
    - [Section Presets](#section-presets)
    - [Randomization](#randomization)
@@ -109,7 +108,7 @@ The window is split into three columns plus a transport bar:
 - **Left — Brush panel.** Everything that defines the current brush: Macros, Steps, Source, Envelope, Options, Effects, Modulators.
 - **Middle — Canvas.** Every open file stacked vertically, each with its own header, time legend, and pitch legend. Minimized files collapse into the dock at the bottom.
 - **Right — Sidebar.** The brush list on top, the history tree below.
-- **Bottom — Generate and Transport.** A pattern that paints the whole file at once, then playback, grid, scale, meters, limiter, Ableton Link.
+- **Bottom — Transport.** Playback, grid, scale, meters, limiter, Ableton Link.
 
 **Compact UI** (`Cmd/Ctrl+Shift+C`, or **View → Compact UI**) shrinks every control so more fits on smaller screens.
 
@@ -427,114 +426,47 @@ Modulator parameters are themselves modulatable — you can modulate modulator 2
 
 ---
 
-## Generate
+## Fill Grid
 
-**Generate** sits above the transport. It paints the whole file in one pass: a pattern says when each stroke lands, how long it is, and which brush makes it.
+**Fill Grid** paints the current brush on every cell of the grid, in one pass. The grid icon on a file's header runs it, as does **Edit → Fill Grid with Brush** (`Cmd/Ctrl+G`). The whole pass commits as one stroke, one history step, and one resynthesis, so a single undo takes it back.
 
-Editing the pattern repaints a **preview** on the canvas — nothing is committed, nothing is resynthesized, and painting by hand clears it. **Apply** (or `Cmd/Ctrl+Enter` in the editor) commits exactly what you are looking at: one stroke, one history step, one resynthesis.
+A fine grid over a long file can run to thousands of strokes. Nothing is refused: a large fill paints in the background behind a progress dialog, and **Cancel** stops it and puts back the pixels from before it started.
 
-While the caret is in the pattern editor the canvas also shows the pass as **blocks**, one per stroke, in the colour of the brush that paints it and labelled with that brush and whatever the pattern set on it. A quiet stroke, or one that lands where the file is already loud, can be impossible to pick out of the spectrogram; its block is not. Click away from the editor and the blocks go, leaving the preview.
+Nothing here has its own rhythm settings. The fill reads the grid you already set, so everything the grid can express, the fill can paint.
 
-### Writing Patterns
+### What Sets the Spacing
 
-Patterns are written in [Strudel](https://strudel.cc)'s mini-notation. A quoted string is a bar, split evenly between whatever is inside it:
+**Time** comes from **Beats** and **Swing** in the transport. A one-beat grid paints on every beat; a sixteenth grid paints sixteen to the bar. Swing carries straight through, so an off-eighth lands late and its cell is wider — a swung fill tiles without gaps.
 
-| Pattern     | What it does                                 |
-| ----------- | -------------------------------------------- |
-| `"x"`       | one stroke filling the bar                   |
-| `"x x x x"` | four strokes, a beat each                    |
-| `"x*8"`     | eight strokes, half a beat each              |
-| `"x ~ x ~"` | two strokes with rests between them          |
-| `"x [x x]"` | one long stroke, then two short ones         |
-| `"x@3 x"`   | a stroke three times the length of the next  |
-| `"x(3,8)"`  | three strokes spread evenly over eight slots |
-| `"<x ~>"`   | a stroke on every other bar                  |
-| `"x*8?"`    | eighths with half of them dropped at random  |
+Set the time grid to **Onsets** and the fill lands on the file's own detected hits instead of a fixed division. Each stroke then runs from its hit to the next, so an uneven performance is followed rather than flattened.
 
-One bar is four beats of the file, so the pattern repeats until the file runs out. **Each event's length becomes the brush's time size**, which is what makes `"x@3 x"` paint a wide stroke followed by a narrow one.
+**Pitch** comes from **Semis**. A 12-semitone grid paints one row per octave. Set it to **Scale** and the fill puts a stroke on every note of the selected scale instead.
 
-The box also accepts JavaScript over those patterns, so the strudel transforms are available:
+Turn **Snap Time** or **Snap Pitch** off and that axis stops being divided: the fill treats it as one cell, and a brush whose size tracks the grid stretches to span it. With both off you get a single stroke covering everything, which is how you apply a brush to a whole file at once.
 
-```js
-mini("x [x x] x x").rev();
-mini("x*8").every(4, (p) => p.rev());
-stack("x*4", "[~ x]*2");
-```
+### What Sets the Size
 
-Wrapping a pattern in `s(...)` turns each event into a value the controls below can attach to — that is why the examples that set strength or pitch start with `s("x*4")` rather than a bare string.
+The brush does. **Size ↔** and **Size ↕** work exactly as they do when you paint by hand:
 
-### Where in the Spectrum
+- At **Grid** the stroke fills the cell it lands in, so the fill tiles edge to edge.
+- At a **fixed** beat or semitone value every stroke takes that size, whatever the spacing — smaller than the cell leaves gaps, larger overlaps.
+- At **Full** the stroke spans the axis.
 
-By default a stroke lands at the last cursor position, or halfway up if there hasn't been one. Three controls place it deliberately.
+**Anchor** is honoured too: Corner puts each stroke's onset on the grid line, Center puts its envelope peak on the cell.
 
-**`zone` — the spectrum in slices.** This is the quick one: it cuts the whole frequency range into equal slices and paints one of them, sizing the brush to fit. Slice 0 is the lowest.
+### Filling Part of a File
 
-```js
-s("x*4").zone("0 1 2 3"); // in quarters, climbing
-s("x*3").zone("0 1 2"); // in thirds
-s("x*8").zone("0 2 1 3"); // in quarters, out of order
-```
+Drag on the time legend to set a loop region and the fill covers only that span. The region belongs to the file and survives a restart, so each open file keeps its own. Click the legend to clear it, and the fill covers the whole file again.
 
-You don't have to say how many slices there are — the pattern's highest slice number sets it, so `zone("0 1 2")` means thirds. Say it outright with `zones` when the pattern doesn't reach the top slice, or when it should change:
+### Variation Between Strokes
 
-```js
-s("x*2").zone("0 7").zones(8); // just the extremes of eight
-s("x*8").zone(irand(16)).zones(16); // a random sixteenth each time
-s("x*4").zone("0").zones(1); // the whole range
-```
+Every stroke uses the same brush, so a bare fill repeats one sound. Variation comes from modulation, which is a field across the canvas rather than a value per stroke — strokes at different places sample different values.
 
-Slice numbers past the top wrap around to the bottom, so a climbing pattern keeps climbing.
+- A **pattern** modulator on **Strength** with a Random or Smooth Noise shape gives each stroke its own level. Take the depth far enough down and some strokes fall silent, which thins the rhythm.
+- A **sequencer** modulator on Strength is a grid you draw. Draw `1 0 0 1 0 0 1 0` and the fill plays that rhythm; draw a checkerboard against a two-row pitch grid and you get one.
+- Anything modulatable works the same way — pitch shift, blur amount, an effect's own controls.
 
-**`note` — an absolute pitch.** Takes note names or MIDI numbers, and puts the brush's lower edge there.
-
-```js
-stack(s("x*2").note("c3"), s("x*2").note("g3"), s("x*2").note("c4"));
-```
-
-**`n` — a pitch offset**, in semitones from wherever the stroke would otherwise land. It stacks on top of `zone` and `note`, so `s("x*4").zone("0 1").n("0 3")` nudges within each slice.
-
-**`height`** sets the brush's pitch size in semitones outright, overriding whatever `zone` worked out.
-
-### Strength, Pan and Macros
-
-| Control   | What it does                                                                             |
-| --------- | ---------------------------------------------------------------------------------------- |
-| `gain`    | Scales the brush's strength. `1` leaves it alone, `0.5` halves it, and it stops at full. |
-| `pan`     | Stereo position, `0` left to `1` right, as in Strudel.                                   |
-| `width`   | Brush time size in beats, overriding the event's own length.                             |
-| `height`  | Brush pitch size in semitones.                                                           |
-| `m1`–`m4` | The brush's four macros, `0` to `1`. Macros you don't name keep their own value.         |
-
-```js
-s("x*8").gain(saw.segment(8)); // a swell across each bar
-s("x*16").m1(sine.segment(16)); // macro 1 swept across the file
-s("x*4").gain("1 0.3").pan("0 1"); // loud left, quiet right
-```
-
-Any signal works as a control value — `saw`, `sine`, `tri`, `perlin`, `rand`, `irand(n)` — segmented to the number of steps you want.
-
-### Choosing Brushes from a Pattern
-
-Each event names the brush that paints it:
-
-- **A digit** — the brush in that slot, counting `1`–`9` then `0`, matching the number shown on each brush in the list.
-- **A letter** — the brush with that hotkey.
-- **A word** — the brush with that name.
-- **Anything else** — the active brush.
-
-So `"1 2 1 3"` alternates between the first three brushes, and `"x*8"` uses whatever brush is selected. Tokens that name a brush are underlined in that brush's colour as you type; a dashed underline means the token matched nothing and the active brush will be used.
-
-### Presets and the Dice
-
-The dropdown holds a set of starting points, from plain rhythms through to spectrum splits and swept macros:
-
-> Fill · Offbeat · Euclid · Build · Stutter · Sparse · Reverse · Every 4th · Echo · Widening · Swell · Climb · Chord · Bands · Quarters · Thirds up · Split ends · Scatter · Macro sweep
-
-They all use the token `x`, so they run with whichever brush you have selected.
-
-The **dice** re-rolls the random parts of a pattern (`?`, `degradeBy`) and previews the new variation. Since previews replace each other, you can keep rolling until you find one worth applying.
-
----
+To layer, fill twice. Change the grid or the brush between passes and each is its own undo step.
 
 ## Parameter Controls
 

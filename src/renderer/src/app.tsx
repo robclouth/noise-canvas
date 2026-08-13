@@ -11,9 +11,9 @@ import { EmptyState } from "./components/empty-state";
 import { openImageExportModal } from "./components/image-export-modal";
 import { CanvasPanel, Dock } from "./components/layout/canvas-panel";
 import { ExtensionMenuBar } from "./components/layout/menu-bar";
-import { GeneratePanel } from "./components/layout/generate-panel";
 import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
+import { FillProgressModal } from "./components/fill-progress-modal";
 import { HelpOverlay } from "./components/help-overlay";
 import { ManualViewer } from "./components/manual-viewer";
 import { Walkthrough } from "./components/walkthrough";
@@ -209,6 +209,11 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubCloseActiveFile);
 
+    const unsubFillGrid = ipcOn("fill-grid", () => {
+      void useStore.getState().fillGrid();
+    });
+    unsubscribers.push(unsubFillGrid);
+
     const unsubUndo = ipcOn("undo", async () => {
       const { activeFileId } = useStore.getState();
       if (!activeFileId) return;
@@ -380,7 +385,6 @@ function App(): React.JSX.Element {
             </ScrollArea>
           )}
           <Dock />
-          <GeneratePanel />
           <TransportPanel />
         </Stack>
         <SidebarPanel />
@@ -389,6 +393,7 @@ function App(): React.JSX.Element {
         <Walkthrough ready={isReady} />
         <ManualViewer />
         <HelpOverlay />
+        <FillProgressModal />
       </Group>
     </Stack>
   );

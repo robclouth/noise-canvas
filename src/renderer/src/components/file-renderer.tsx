@@ -69,8 +69,8 @@ interface FileRendererProps {
   onLiveFrame?: () => void;
 }
 
-/** One stamp of a batch: where its brush origin sits, and the state to paint it with. */
-export interface StampDispatch {
+/** One stroke of a batch: where its brush origin sits, and the state to paint it with. */
+export interface StrokeDispatch {
   /** Brush bottom-left in pitch UV — y up from the file's lowest band, as unitsToUv gives it. */
   blX: number;
   blY: number;
@@ -84,20 +84,20 @@ export interface FileRendererHandle {
   /** Renders a brush stroke at the current cursor position. */
   renderStroke: (preview: boolean) => void;
   /**
-   * Paints a batch of stamps into the FBO immediately, each from its own state
+   * Paints a batch of strokes into the FBO immediately, each from its own state
    * snapshot, as part of the stroke already opened with beginStroke(). Returns
    * how many were painted.
    */
-  renderStampBatch: (stamps: StampDispatch[]) => number;
+  renderStrokeBatch: (strokes: StrokeDispatch[]) => number;
   /**
-   * Saves the spectrogram (or restores an already-saved one) so the stamps
+   * Saves the spectrogram (or restores an already-saved one) so the strokes
    * painted next can be taken back without touching history.
    */
-  beginStampPreview: () => void;
+  beginStrokePreview: () => void;
   /** Puts back the pixels from before the preview. Returns false if none were saved. */
-  discardStampPreview: () => boolean;
+  discardStrokePreview: () => boolean;
   /** Keeps the previewed pixels and forgets the saved ones, so they can be committed. */
-  keepStampPreview: () => void;
+  keepStrokePreview: () => void;
   /** Gets the raw data from the current frame buffer object asynchronously. */
   getFBOData: () => Promise<Float32Array>;
   /** Sets the data of the frame buffer object. */
@@ -655,7 +655,7 @@ const FileRendererInner = memo(
     /**
      * Paints one stroke into the FBO from an explicit state snapshot. The frame
      * loop calls it with the live store and the cursor's brush origin; batch
-     * generation calls it once per stamp with a per-stamp state. Returns false
+     * a grid fill calls it once per stroke with a shared state. Returns false
      * when the source file's textures aren't ready.
      */
     const dispatchStroke = (state: State, cursorPos: Vector2, preview: boolean): boolean => {
@@ -1211,7 +1211,7 @@ const FileRendererInner = memo(
       scheduleSnapshotRefresh();
     };
 
-    const discardStampPreview = (): boolean => {
+    const discardStrokePreview = (): boolean => {
       const restored = strokeRendererRef.current?.restoreRollback() ?? false;
       if (restored) {
         displayMode.current = "committed";
@@ -1223,7 +1223,7 @@ const FileRendererInner = memo(
 
     const beginStroke = () => {
       // Painting by hand supersedes a pattern preview rather than stacking on it.
-      discardStampPreview();
+      discardStrokePreview();
       if (strokeRendererRef.current) {
         strokeRendererRef.current.beginStroke();
       }
@@ -1254,26 +1254,26 @@ const FileRendererInner = memo(
         applyStroke.current = true;
         invalidateRef.current?.();
       },
-      renderStampBatch: (stamps: StampDispatch[]) => {
+      renderStrokeBatch: (strokes: StrokeDispatch[]) => {
         const strokeRenderer = strokeRendererRef.current;
         if (!strokeRenderer?.getIsInitialized()) return 0;
         let painted = 0;
-        for (const stamp of stamps) {
-          if (dispatchStroke(stamp.state, new Vector2(stamp.blX, stamp.blY), false)) painted++;
+        for (const stroke of strokes) {
+          if (dispatchStroke(stroke.state, new Vector2(stroke.blX, stroke.blY), false)) painted++;
         }
         if (painted > 0) displayMode.current = "committed";
         invalidateRef.current?.();
         scheduleSnapshotRefresh();
         return painted;
       },
-      beginStampPreview: () => {
+      beginStrokePreview: () => {
         const strokeRenderer = strokeRendererRef.current;
         if (!strokeRenderer?.getIsInitialized()) return;
         strokeRenderer.captureRollback();
         strokeRenderer.beginStroke();
       },
-      discardStampPreview,
-      keepStampPreview: () => strokeRendererRef.current?.releaseRollback(),
+      discardStrokePreview,
+      keepStrokePreview: () => strokeRendererRef.current?.releaseRollback(),
       getFBOData,
       setFBOData,
       patchFBOData,

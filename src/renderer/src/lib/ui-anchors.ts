@@ -30,7 +30,6 @@ export const UI_ANCHORS = [
   "section-brushes",
   "section-history",
   // The pattern bar above the transport
-  "section-generate",
 ] as const;
 
 export type UiAnchor = (typeof UI_ANCHORS)[number];
