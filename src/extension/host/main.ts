@@ -16,7 +16,12 @@ import { tmpdir } from "node:os";
 import { basename, extname, join } from "node:path";
 import { exportAudio } from "../../main/lib/audio-analysis";
 import { decodeRenderBatch } from "../shared/render-batch";
-import { runAnalyzeFramed, runSynthesizeFramed, runHistoryCodecFramed } from "./analysis-service";
+import {
+  runAnalyzeFramed,
+  runCommitStrokeFramed,
+  runHistoryCodecFramed,
+  runSynthesizeFramed,
+} from "./analysis-service";
 import { createHostServices } from "./host-services";
 import { startEditorServer, type EditorServer } from "./server";
 import type { ClipMeta } from "./session";
@@ -41,6 +46,7 @@ function getServer(context: Api): Promise<EditorServer> {
       webviewDir: WEBVIEW_DIR,
       analyze: runAnalyzeFramed,
       synthesize: runSynthesizeFramed,
+      commitStroke: runCommitStrokeFramed,
       historyCodec: runHistoryCodecFramed,
       hostServices,
     });

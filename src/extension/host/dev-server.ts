@@ -3,7 +3,12 @@ import { promises as fs } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import ffmpegPath from "ffmpeg-static";
-import { runAnalyzeFramed, runSynthesizeFramed, runHistoryCodecFramed } from "./analysis-service";
+import {
+  runAnalyzeFramed,
+  runCommitStrokeFramed,
+  runHistoryCodecFramed,
+  runSynthesizeFramed,
+} from "./analysis-service";
 import { createHostServices } from "./host-services";
 import { startEditorServer } from "./server";
 
@@ -39,6 +44,7 @@ async function main(): Promise<void> {
     port: 5174,
     analyze: runAnalyzeFramed,
     synthesize: runSynthesizeFramed,
+    commitStroke: runCommitStrokeFramed,
     historyCodec: runHistoryCodecFramed,
     hostServices: createHostServices({ userDataPath }),
   });

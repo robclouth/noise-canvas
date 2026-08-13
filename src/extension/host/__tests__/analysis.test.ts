@@ -160,4 +160,58 @@ describe("/analyze endpoint", () => {
       await server.close();
     }
   });
+
+  it("passes a stroke commit frame through, arrays and all", async () => {
+    const requestSeen: ArrayBuffer[] = [];
+    const resultFrame = encodeFrame({
+      meta: { numChannels: 1, peak: 0.5, maxGainReductionDb: 2, levelStartHop: 7 },
+      arrays: {
+        channel0: new Float32Array([1, 2, 3]),
+        patchRanges: new Uint32Array([3, 0, 2]),
+        patchPixels: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+        gainReductionDb: new Float32Array([0, 2]),
+        levelPeaks: new Float32Array([0.4, 0.5]),
+        levelClipped: new Uint8Array([0, 1]),
+      },
+    });
+    const server = await startEditorServer({
+      webviewDir,
+      commitStroke: async (request) => {
+        requestSeen.push(request);
+        return resultFrame;
+      },
+    });
+    try {
+      const reqFrame = encodeFrame({
+        meta: { numChannels: 1, startFrame: 10, endFrame: 20, hardEdgeStart: 1 },
+        arrays: { packedData: new Float32Array([9, 8]), envelope: new Float32Array([0, 1, 0]) },
+      });
+      const response = await fetch(`${server.origin}/commit-stroke`, { method: "POST", body: reqFrame });
+      expect(response.status).toBe(200);
+      expect(requestSeen).toHaveLength(1);
+      // The host must see the request unchanged, arrays included.
+      const sent = decodeFrame(requestSeen[0]);
+      expect(sent.meta.startFrame).toBe(10);
+      expect(Array.from(sent.arrays.envelope)).toEqual([0, 1, 0]);
+
+      const decoded = decodeFrame(await response.arrayBuffer());
+      expect(decoded.meta.levelStartHop).toBe(7);
+      expect(Array.from(decoded.arrays.patchRanges)).toEqual([3, 0, 2]);
+      expect(decoded.arrays.levelClipped).toBeInstanceOf(Uint8Array);
+      expect(Array.from(decoded.arrays.levelClipped)).toEqual([0, 1]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("answers 501 for a stroke commit when the host has no addon", async () => {
+    const server = await startEditorServer({ webviewDir });
+    try {
+      const frame = encodeFrame({ meta: {}, arrays: { packedData: new Float32Array([1]) } });
+      const response = await fetch(`${server.origin}/commit-stroke`, { method: "POST", body: frame });
+      expect(response.status).toBe(501);
+    } finally {
+      await server.close();
+    }
+  });
 });

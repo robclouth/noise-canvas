@@ -268,6 +268,15 @@ export interface AddSnapshotOpts {
   spectrogram: SpectrogramData;
 }
 
+/**
+ * Where a stroke landed. `isNew` is false when the stroke changed nothing and
+ * the tree stayed where it was, so its caches belong to the parent already.
+ */
+export interface AddStrokeOutcome {
+  id: string;
+  isNew: boolean;
+}
+
 export interface AddStrokeOpts {
   data: Float32Array;
   label: string;
@@ -636,7 +645,7 @@ export class HistoryManager {
    * when dimensions match and the brush footprint is known and covers less than
    * half the texture, otherwise as a full packed snapshot.
    */
-  async addStroke(opts: AddStrokeOpts): Promise<string> {
+  async addStroke(opts: AddStrokeOpts): Promise<AddStrokeOutcome> {
     await this.initialize();
     if (!this.manifest) throw new Error("HistoryManager: cannot addStroke before root");
 
@@ -667,7 +676,9 @@ export class HistoryManager {
     ) {
       const deltaStart = performance.now();
       if (!(await host.analysis.historyFootprintChanged(base, opts.data, ranges))) {
-        return parentId;
+        // The stroke changed nothing, so it gets no node of its own. The
+        // caller must not then write its audio against the parent's id.
+        return { id: parentId, isNew: false };
       }
       rangesForPatch = ranges;
       const stepsSinceSnap = this.deltaStepsSinceLastSnap(parentId);
@@ -716,7 +727,7 @@ export class HistoryManager {
     this.fboOutOfSync = false;
     await this.writeManifest();
     this.notifyStateChange();
-    return id;
+    return { id, isNew: true };
   }
 
   private deltaStepsSinceLastSnap(fromId: string): number {

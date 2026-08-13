@@ -25,6 +25,10 @@ function i32(array: NumericArray | undefined, name: string): Int32Array {
   if (array instanceof Int32Array) return array;
   throw new Error(`analysis frame: expected Int32Array for ${name}`);
 }
+function u8(array: NumericArray | undefined, name: string): Uint8Array {
+  if (array instanceof Uint8Array) return array;
+  throw new Error(`analysis frame: expected Uint8Array for ${name}`);
+}
 
 async function analyze(filePath: string, params: { bandsPerOctave: number; minFreq: number }): Promise<AnalyzeResult> {
   const response = await fetch("/analyze", {
@@ -114,6 +118,79 @@ const synthesize: SynthesizeFn = async (
   };
 };
 
+type CommitStrokeFn = AnalysisApi["commitStroke"];
+type CommitResult = Awaited<ReturnType<CommitStrokeFn>>;
+
+const commitStroke: CommitStrokeFn = async (
+  packedData,
+  analysisMetadata,
+  sampleRate,
+  params,
+  existingAudio,
+  window,
+  stroke,
+): Promise<CommitResult> => {
+  const arrays: Record<string, NumericArray> = {
+    packedData,
+    bandOffsets: analysisMetadata.bandOffsets,
+    bandStepLog2s: analysisMetadata.bandStepLog2s,
+    bandLengths: analysisMetadata.bandLengths,
+    envelope: stroke.envelope,
+  };
+  existingAudio.forEach((channel, i) => (arrays[`existing${i}`] = channel));
+  if (params.onsetBandMax) arrays.onsetBandMax = params.onsetBandMax;
+
+  const meta: Record<string, number> = {
+    numFrames: analysisMetadata.numFrames,
+    numChannels: analysisMetadata.numChannels,
+    numBands: analysisMetadata.numBands,
+    sampleRate,
+    bandsPerOctave: params.bandsPerOctave,
+    minFreq: params.minFreq,
+    detectOnsets: params.detectOnsets ? 1 : 0,
+    existingChannelCount: existingAudio.length,
+    startFrame: window.startFrame,
+    endFrame: window.endFrame,
+    startBand: window.startBand,
+    endBand: window.endBand,
+    footStartFrame: stroke.footStartFrame,
+    footEndFrame: stroke.footEndFrame,
+    hardEdgeStart: stroke.hardEdgeStart ? 1 : 0,
+    hardEdgeEnd: stroke.hardEdgeEnd ? 1 : 0,
+    applyLimiter: stroke.applyLimiter ? 1 : 0,
+  };
+  if (params.onsetStartSec !== undefined) meta.onsetStartSec = params.onsetStartSec;
+  if (params.onsetEndSec !== undefined) meta.onsetEndSec = params.onsetEndSec;
+  if (params.onsetOdfReference !== undefined) meta.onsetOdfReference = params.onsetOdfReference;
+
+  const response = await fetch("/commit-stroke", { method: "POST", body: encodeFrame({ meta, arrays }) });
+  if (!response.ok) {
+    throw new Error(`stroke commit failed (${response.status}): ${await response.text()}`);
+  }
+  const { meta: outMeta, arrays: outArrays } = decodeFrame(await response.arrayBuffer());
+  const numChannels = Number(outMeta.numChannels);
+  const channels: Float32Array[] = [];
+  for (let i = 0; i < numChannels; i++) channels.push(f32(outArrays[`channel${i}`], `channel${i}`));
+  return {
+    channels,
+    peak: Number(outMeta.peak),
+    patch: {
+      ranges: u32(outArrays.patchRanges, "patchRanges"),
+      pixels: f32(outArrays.patchPixels, "patchPixels"),
+    },
+    gainReductionDb: f32(outArrays.gainReductionDb, "gainReductionDb"),
+    maxGainReductionDb: Number(outMeta.maxGainReductionDb),
+    levels: {
+      startHop: Number(outMeta.levelStartHop),
+      peaks: f32(outArrays.levelPeaks, "levelPeaks"),
+      clipped: u8(outArrays.levelClipped, "levelClipped"),
+    },
+    onsets: outArrays.onsets ? f32(outArrays.onsets, "onsets") : undefined,
+    onsetOdfMax: outMeta.onsetOdfMax === undefined ? undefined : Number(outMeta.onsetOdfMax),
+    onsetBandMax: outArrays.onsetBandMax ? f32(outArrays.onsetBandMax, "onsetBandMax") : undefined,
+  };
+};
+
 // The undo-history codec runs in the addon, which lives in the Node host — so
 // each operation is a framed round-trip over the same transport the analysis
 // uses, with `op` selecting which one.
@@ -132,20 +209,12 @@ async function historyCodec(
   return decodeFrame(await response.arrayBuffer());
 }
 
-function u8(array: NumericArray | undefined, name: string): Uint8Array {
-  if (array instanceof Uint8Array) return array;
-  throw new Error(`analysis frame: expected Uint8Array for ${name}`);
-}
-
 export function createExtensionAnalysis(): AnalysisApi {
   return {
     analyze,
     analyseBuffer: () => notImplemented("analyseBuffer"),
     synthesize,
-    // No endpoint yet: an empty patch means "no boundary changes", so strokes
-    // keep their plain coefficient edges in the embedded host.
-    conditionBoundary: async () => ({ ranges: new Uint32Array(0), pixels: new Float32Array(0) }),
-    commitStroke: () => notImplemented("commitStroke"),
+    commitStroke,
     encodeHistorySnapshot: async (packed) =>
       u8((await historyCodec("encodeSnapshot", { packed })).arrays.bytes, "bytes"),
     decodeHistorySnapshot: async (bytes) =>

@@ -8,13 +8,24 @@ import { Vector2 } from "three";
 import * as Tone from "tone";
 import { host } from "../lib/host";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
-import type { AnalysisParams } from "../../../main/lib/types";
+import type { AnalysisParams, CommitStrokeResult, PackedOnsets } from "../../../main/lib/types";
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import { disposeOnsetTexture, packOnsetState, spliceOnsets, unpackOnsetState } from "../lib/onset-map";
-import type { DirtyRegionUv } from "../lib/stroke-commit";
+import { commitStrokeOf, commitWindowOf, type StrokeCommitSnapshot } from "../lib/stroke-commit";
+
+/** The audio side of any synthesis, whichever pass produced it. */
+interface SynthesisAudioResult {
+  channels: Float32Array[];
+  peak: number;
+  gainReductionDb?: Float32Array;
+  maxGainReductionDb?: number;
+  onsets?: PackedOnsets;
+  onsetOdfMax?: number;
+  onsetBandMax?: Float32Array;
+}
 import type { Brush, OpenFile, ParameterKey, SpectrogramData, State, ZustandGet, ZustandSet } from "./types";
 import type { StemGroupMethod } from "./stem-groups";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
@@ -43,8 +54,34 @@ export interface FilesState {
     fileId: string,
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
     prefetchedFboData?: Float32Array,
-    capturedDirtyRegion?: DirtyRegionUv | null,
   ) => Promise<void>;
+  /**
+   * Puts a synthesis result into a file: its audio buffer, peak, onsets and
+   * limiting, and either starts the stroke's playback or swaps the buffer under
+   * a running one.
+   */
+  applySynthesizedAudio: (
+    fileId: string,
+    result: SynthesisAudioResult,
+    options?: {
+      autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null;
+      onsetStartSec?: number;
+      onsetEndSec?: number;
+    },
+  ) => Promise<void>;
+  /**
+   * Derives everything a finished stroke means from one snapshot: the audio,
+   * its hard edges, its limiting, its onsets and levels, and the coefficients
+   * the audio analyses to. Applies the audio to the file and hands the caller
+   * the result so it can write the coefficients to the canvas and to history.
+   * Rejects whole — a commit that half happened would leave the three
+   * disagreeing.
+   */
+  commitStroke: (
+    fileId: string,
+    snapshot: StrokeCommitSnapshot,
+    data: Float32Array,
+  ) => Promise<CommitStrokeResult | null>;
   loadCachedAudio: (fileId: string, audioPath: string, peak: number) => Promise<boolean>;
   restoreOnsetsForNode: (fileId: string, nodeId: string, packedData: Float32Array) => Promise<void>;
   exportHistory: () => Promise<void>;
@@ -1441,15 +1478,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     fileId: string,
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
     prefetchedFboData?: Float32Array,
-    // A region taken at mouse-up. Undefined reads the renderer's live region
-    // and clears it after; passing one leaves the live region alone, so dabs
-    // painted while this synthesis runs stay dirty for the next commit.
-    capturedDirtyRegion?: DirtyRegionUv | null,
   ) => {
     const synthesizeFileStart = performance.now();
     console.log("[timing] synthesizeFile started");
 
-    const { activeFileId, getPlayer, setFileSynthesizing } = get();
+    const { activeFileId, setFileSynthesizing } = get();
     if (!activeFileId) return;
 
     try {
@@ -1498,8 +1531,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       );
 
       // Check for dirty region to enable partial synthesis optimization
-      const usingCapturedRegion = capturedDirtyRegion !== undefined;
-      const dirtyRegion = usingCapturedRegion ? capturedDirtyRegion : renderer.getDirtyRegion();
+      const dirtyRegion = renderer.getDirtyRegion();
 
       const existingBuffer = file.audioBuffer;
       const canDoPartialSynthesis = dirtyRegion && existingBuffer;
@@ -1600,77 +1632,140 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
 
       // Clear dirty region after synthesis
-      if (!usingCapturedRegion) renderer.clearDirtyRegion();
+      renderer.clearDirtyRegion();
 
-      // C++ now returns the full buffer (with crossfade splice done internally)
-      const audioBufferStart = performance.now();
-      const numChannels = synthesisResult.channels.length;
-      const numFrames = synthesisResult.channels[0].length;
-      const audioContext = Tone.getContext().rawContext;
-      const audioBuffer = audioContext.createBuffer(numChannels, numFrames, originalAnalysis.sampleRate);
-      for (let i = 0; i < numChannels; i++) {
-        const channelBuffer = synthesisResult.channels[i];
-        audioBuffer.copyToChannel(channelBuffer as Float32Array<ArrayBuffer>, i);
-      }
-      console.log(`[timing] create AudioBuffer: ${(performance.now() - audioBufferStart).toFixed(2)}ms`);
-
-      file.audioBuffer = audioBuffer;
-      file.audioPeak = synthesisResult.peak > 0 ? synthesisResult.peak : 1;
-      file.gainReductionDb = synthesisResult.gainReductionDb;
-      file.maxGainReductionDb = synthesisResult.maxGainReductionDb;
-      if (synthesisResult.onsets) {
-        const { onsetStartSec, onsetEndSec } = analysisParams;
-        const onsets =
-          onsetStartSec !== undefined && onsetEndSec !== undefined
-            ? spliceOnsets(file.onsets, synthesisResult.onsets, onsetStartSec, onsetEndSec)
-            : synthesisResult.onsets;
-        file.onsets = onsets;
-        if (synthesisResult.onsetOdfMax !== undefined && synthesisResult.onsetBandMax) {
-          file.onsetReference = { odfMax: synthesisResult.onsetOdfMax, bandMax: synthesisResult.onsetBandMax };
-        }
-      }
-      if (get().activeFileId === fileId) {
-        get().setGainReduction(synthesisResult.gainReductionDb ?? null, synthesisResult.maxGainReductionDb ?? 0);
-      }
-
-      if (autoPlaybackParams) {
-        // --- Handle auto-playback of the painted region ---
-        const autoPlayStart = performance.now();
-        const { startTimeSeconds, endTimeSeconds } = autoPlaybackParams;
-
-        // If already playing, stop it first. togglePlayback is async.
-        if (get().isPlaying) {
-          await get().togglePlayback();
-        }
-
-        // Set the loop region for this stroke's playback
-        get().setLoopRegion({ start: startTimeSeconds, end: endTimeSeconds });
-        get().setFilePlaybackStartTime(fileId, startTimeSeconds);
-
-        // Now, toggle playback ON. It will use the start/end times we just set.
-        await get().togglePlayback();
-        console.log(`[timing] auto-playback setup: ${(performance.now() - autoPlayStart).toFixed(2)}ms`);
-      } else if (get().isPlaying && get().activeFileId === fileId) {
-        // --- Handle standard buffer hot-swap while playing ---
-        const bufferSwapStart = performance.now();
-        const player = getPlayer();
-        const t = get().getPlaybackTime(); // Get time BEFORE swapping
-
-        // Swap the buffer in the player
-        player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
-        player.volume.value = 0;
-
-        // Use setPlaybackTime to correctly restart the player from the same spot
-        // with the new buffer and correct loop settings.
-        get().setPlaybackTime(t);
-        console.log(`[timing] buffer hot-swap: ${(performance.now() - bufferSwapStart).toFixed(2)}ms`);
-      }
-      // If not playing and not auto-playing, do nothing. The new buffer is ready for the next time the user hits play.
+      await get().applySynthesizedAudio(fileId, synthesisResult, {
+        autoPlaybackParams,
+        onsetStartSec: analysisParams.onsetStartSec,
+        onsetEndSec: analysisParams.onsetEndSec,
+      });
       console.log(`[timing] synthesizeFile total: ${(performance.now() - synthesizeFileStart).toFixed(2)}ms`);
     } catch (error) {
       console.error("Error running synthesis:", error);
     } finally {
       setFileSynthesizing(fileId, false);
+    }
+  },
+  applySynthesizedAudio: async (fileId, result, options = {}) => {
+    const file = openFiles[fileId];
+    if (!file?.spectrogramData || !result.channels.length) return;
+
+    const audioBufferStart = performance.now();
+    const numChannels = result.channels.length;
+    const numFrames = result.channels[0].length;
+    const audioContext = Tone.getContext().rawContext;
+    const audioBuffer = audioContext.createBuffer(numChannels, numFrames, file.spectrogramData.sampleRate);
+    for (let i = 0; i < numChannels; i++) {
+      audioBuffer.copyToChannel(result.channels[i] as Float32Array<ArrayBuffer>, i);
+    }
+    console.log(`[timing] create AudioBuffer: ${(performance.now() - audioBufferStart).toFixed(2)}ms`);
+
+    file.audioBuffer = audioBuffer;
+    file.audioPeak = result.peak > 0 ? result.peak : 1;
+    file.gainReductionDb = result.gainReductionDb;
+    file.maxGainReductionDb = result.maxGainReductionDb;
+    if (result.onsets) {
+      const { onsetStartSec, onsetEndSec } = options;
+      file.onsets =
+        onsetStartSec !== undefined && onsetEndSec !== undefined
+          ? spliceOnsets(file.onsets, result.onsets, onsetStartSec, onsetEndSec)
+          : result.onsets;
+      if (result.onsetOdfMax !== undefined && result.onsetBandMax) {
+        file.onsetReference = { odfMax: result.onsetOdfMax, bandMax: result.onsetBandMax };
+      }
+    }
+    if (get().activeFileId === fileId) {
+      get().setGainReduction(result.gainReductionDb ?? null, result.maxGainReductionDb ?? 0);
+    }
+
+    const { autoPlaybackParams } = options;
+    if (autoPlaybackParams) {
+      const autoPlayStart = performance.now();
+      const { startTimeSeconds, endTimeSeconds } = autoPlaybackParams;
+      if (get().isPlaying) await get().togglePlayback();
+      get().setLoopRegion({ start: startTimeSeconds, end: endTimeSeconds });
+      get().setFilePlaybackStartTime(fileId, startTimeSeconds);
+      await get().togglePlayback();
+      console.log(`[timing] auto-playback setup: ${(performance.now() - autoPlayStart).toFixed(2)}ms`);
+    } else if (get().isPlaying && get().activeFileId === fileId) {
+      // Swap the buffer under the player and restart it from where it was, so
+      // the edit is heard without the transport moving.
+      const bufferSwapStart = performance.now();
+      const player = get().getPlayer();
+      const t = get().getPlaybackTime();
+      player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
+      player.volume.value = 0;
+      get().setPlaybackTime(t);
+      console.log(`[timing] buffer hot-swap: ${(performance.now() - bufferSwapStart).toFixed(2)}ms`);
+    }
+  },
+  commitStroke: async (fileId, snapshot, data) => {
+    const file = openFiles[fileId];
+    if (!file?.spectrogramData) return null;
+
+    const spec = file.spectrogramData;
+    const window = commitWindowOf(snapshot);
+    const stroke = commitStrokeOf(snapshot, snapshot.limiterEnabled);
+
+    const params: AnalysisParams = { bandsPerOctave: spec.bandsPerOctave, minFreq: spec.minFreq };
+    // Only the span the stroke touched needs its onsets found again, padded
+    // either side because an event is anchored at the foot of its attack and
+    // measured for a moment after it. Without a reference from a whole-file
+    // pass this reads everything, and produces one.
+    const onsetReference = file.onsetReference;
+    if (onsetReference && window) {
+      params.detectOnsets = true;
+      params.onsetStartSec = Math.max(0, window.startFrame / spec.sampleRate - ONSET_REGION_PAD_SEC);
+      params.onsetEndSec = Math.min(
+        spec.numFrames / spec.sampleRate,
+        window.endFrame / spec.sampleRate + ONSET_REGION_PAD_SEC,
+      );
+      params.onsetOdfReference = onsetReference.odfMax;
+      params.onsetBandMax = onsetReference.bandMax;
+    } else if (!file.onsets || !onsetReference) {
+      params.detectOnsets = true;
+    }
+
+    // Without a window, or without audio to splice into, the commit rebuilds
+    // the whole file — which is what the addon does when either is missing.
+    const existingBuffer = file.audioBuffer;
+    const existingAudio: Float32Array[] = [];
+    if (window && existingBuffer) {
+      for (let i = 0; i < existingBuffer.numberOfChannels; i++) existingAudio.push(existingBuffer.getChannelData(i));
+    }
+
+    get().setFileSynthesizing(fileId, true);
+    try {
+      const commitStart = performance.now();
+      const result = await host.analysis.commitStroke(
+        data,
+        {
+          numFrames: spec.numFrames,
+          numChannels: spec.numChannels,
+          numBands: spec.numBands,
+          bandOffsets: spec.synthesisMetadata.bandOffsets,
+          bandStepLog2s: spec.synthesisMetadata.bandStepLog2s,
+          bandLengths: spec.synthesisMetadata.bandLengths,
+        },
+        spec.sampleRate,
+        params,
+        existingAudio,
+        window ?? { startFrame: -1, endFrame: -1, startBand: -1, endBand: -1 },
+        stroke,
+      );
+      console.log(
+        `[timing] commitStroke: ${(performance.now() - commitStart).toFixed(2)}ms ` +
+          `(${result.patch.ranges.length / 3} band ranges)`,
+      );
+
+      await get().applySynthesizedAudio(fileId, result, {
+        autoPlaybackParams: snapshot.autoPlaybackParams,
+        onsetStartSec: params.onsetStartSec,
+        onsetEndSec: params.onsetEndSec,
+      });
+      return result;
+    } finally {
+      get().setFileSynthesizing(fileId, false);
     }
   },
   /**

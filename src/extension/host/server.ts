@@ -46,6 +46,9 @@ export interface EditorServerOptions {
   analyze?: (filePath: string, params: { bandsPerOctave: number; minFreq: number }) => Promise<Uint8Array>;
   // Synthesises audio from a painted spectrogram frame; returns a PCM frame.
   synthesize?: (request: ArrayBuffer) => Promise<Uint8Array>;
+  // Derives everything a finished stroke means: audio, coefficient patch,
+  // onsets and levels in one frame, or a rejection carrying none of them.
+  commitStroke?: (request: ArrayBuffer) => Promise<Uint8Array>;
   // Runs one undo-history codec operation on the host's addon; the operation and
   // its buffers travel in the request frame.
   historyCodec?: (request: ArrayBuffer) => Promise<Uint8Array>;
@@ -158,6 +161,15 @@ export async function startEditorServer(options: EditorServerOptions): Promise<E
     if (url.pathname === "/synthesize" && req.method === "POST") {
       if (!options.synthesize) return sendJson(res, 501, { error: "synthesis not available" });
       const framed = await options.synthesize(toArrayBuffer(await readBody(req)));
+      res.writeHead(200, { "content-type": "application/octet-stream", "content-length": framed.byteLength });
+      res.end(Buffer.from(framed.buffer, framed.byteOffset, framed.byteLength));
+      return;
+    }
+
+    // Everything a finished stroke means, in one pass (native gaborator).
+    if (url.pathname === "/commit-stroke" && req.method === "POST") {
+      if (!options.commitStroke) return sendJson(res, 501, { error: "stroke commit not available" });
+      const framed = await options.commitStroke(toArrayBuffer(await readBody(req)));
       res.writeHead(200, { "content-type": "application/octet-stream", "content-length": framed.byteLength });
       res.end(Buffer.from(framed.buffer, framed.byteOffset, framed.byteLength));
       return;

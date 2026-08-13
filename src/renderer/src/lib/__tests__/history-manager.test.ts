@@ -301,7 +301,7 @@ describe("HistoryManager undo/redo round-trip", () => {
     clearAllHistoryManagers();
     const mgr = getHistoryManager("f2");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
-    const nodeId = await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: rs });
+    const { id: nodeId } = await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: rs });
     expect(mgr.getNode(nodeId)?.storage).toBe("delta");
 
     // Drop in-memory state so reconstruct reads the delta back from disk.
@@ -374,12 +374,12 @@ describe("HistoryManager pruneAudioCache", () => {
       label: "root",
       spectrogram: makeSpectrogram(lossyFill(w, h, 0), w, h),
     });
-    const aId = await mgr.addStroke({ data: lossyFill(w, h, 1), label: "A", dimensions });
+    const { id: aId } = await mgr.addStroke({ data: lossyFill(w, h, 1), label: "A", dimensions });
     await mgr.markSaved(); // A is the saved state
-    const bId = await mgr.addStroke({ data: lossyFill(w, h, 2), label: "B", dimensions });
+    const { id: bId } = await mgr.addStroke({ data: lossyFill(w, h, 2), label: "B", dimensions });
     await mgr.toggleFavorite(bId);
-    const cId = await mgr.addStroke({ data: lossyFill(w, h, 3), label: "C", dimensions });
-    const dId = await mgr.addStroke({ data: lossyFill(w, h, 4), label: "D", dimensions });
+    const { id: cId } = await mgr.addStroke({ data: lossyFill(w, h, 3), label: "C", dimensions });
+    const { id: dId } = await mgr.addStroke({ data: lossyFill(w, h, 4), label: "D", dimensions });
 
     // Every state has a cached render; D is current.
     const manifest = mgr.getManifest()!;
@@ -424,7 +424,7 @@ describe("HistoryManager resetToCurrent (purge history)", () => {
     const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
     await mgr.addStroke({ data: a, label: "A", dimensions });
-    const bId = await mgr.addStroke({ data: b, label: "B", dimensions });
+    const { id: bId } = await mgr.addStroke({ data: b, label: "B", dimensions });
     expect(mgr.canUndo()).toBe(true);
 
     await mgr.resetToCurrent();

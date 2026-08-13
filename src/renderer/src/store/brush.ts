@@ -1,5 +1,6 @@
 import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
-import { conditionStrokeBoundary } from "@renderer/lib/boundary-conditioning";
+import { notifications } from "@mantine/notifications";
+import { applyCoefficientPatch } from "@renderer/lib/coef-patch";
 import { buildStrokeCommitSnapshot } from "@renderer/lib/stroke-commit";
 import { mergePixelRanges } from "@renderer/lib/pixel-ranges";
 import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
@@ -133,7 +134,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
     // Unified apply action - used by mouse up and Enter key
     applyStrokeAtPosition: async (position?, strokeTimeRange?, label?) => {
       const state = get();
-      const { activeFileId, synthesizeFile, autoPlayStroke, setFilePlaybackStartTime, setLoopRegion } = state;
+      const { activeFileId, commitStroke, autoPlayStroke, setFilePlaybackStartTime, setLoopRegion } = state;
 
       const effectivePosition = position || useTransientStore.getState().cursorPosition;
       if (!activeFileId || !effectivePosition) return;
@@ -224,42 +225,68 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         const data = await dataPromise;
         if (!data) return;
 
-        // Hard-edged strokes get their time boundaries rewritten to the
-        // time-domain-exact edit before history and synthesis consume the
-        // data, so what is stored, shown, and heard all carry the conditioned
-        // boundary. Failure or a stale stroke just keeps the plain edges.
-        let historyDirtyRanges = snapshot.dirtyRanges;
         try {
-          const patched = await conditionStrokeBoundary(renderer, snapshot, data);
-          if (patched && historyDirtyRanges) {
-            historyDirtyRanges = mergePixelRanges(historyDirtyRanges, patched);
+          // One pass derives the audio and the coefficients that audio
+          // analyses to, so what is stored, shown and heard are the same
+          // thing. Anything less than all of it is a bug, not a fallback.
+          const result = await commitStroke(activeFileId, snapshot, data);
+          if (!result) return;
+
+          let historyDirtyRanges = snapshot.dirtyRanges;
+          const extent = applyCoefficientPatch(
+            data,
+            result.patch,
+            snapshot.spec.synthesisMetadata.bandOffsets,
+            snapshot.spec.synthesisMetadata.bandStepLog2s,
+          );
+          if (extent) {
+            // The projection reaches past the painted rect, so the delta must
+            // cover it too or undo would store stale margins.
+            historyDirtyRanges = historyDirtyRanges
+              ? mergePixelRanges(historyDirtyRanges, extent.pixelRanges)
+              : extent.pixelRanges;
+            // A new stroke started while this one was in flight; its dabs are
+            // not in `data`, so uploading would paint over them. The audio and
+            // history are still right for this stroke, and the next commit
+            // re-projects the union.
+            if (renderer.getStrokeGeneration() === snapshot.strokeGeneration) {
+              const uploadStart = performance.now();
+              renderer.patchFBOData(data, extent.pixelRanges);
+              console.log(`[timing] commit FBO upload: ${(performance.now() - uploadStart).toFixed(2)}ms`);
+            }
+          }
+
+          const historyManager = getHistoryManager(activeFileId);
+          const node = await historyManager.addStroke({
+            data,
+            label: snapshot.brushName,
+            dimensions: snapshot.dimensions,
+            dirtyRanges: historyDirtyRanges,
+          });
+
+          const updated = openFiles[activeFileId];
+          // A stroke that changed nothing gets no node, and the id that comes
+          // back is its parent's — whose caches already belong to it.
+          if (node.isNew && updated?.audioBuffer) {
+            historyManager.setStateAudio(node.id, updated.audioBuffer, updated.audioPeak ?? 1);
+          }
+          // Stored against the state the stroke made, so coming back to it later
+          // restores the onsets of what it painted rather than finding them again.
+          if (node.isNew && updated?.onsets) {
+            void historyManager
+              .setNodeOnsets(node.id, packOnsetState({ onsets: updated.onsets, reference: updated.onsetReference }))
+              .catch((error) => console.error("Storing onsets for history node failed:", error));
           }
         } catch (error) {
-          console.error("Boundary conditioning failed; committing plain stroke:", error);
-        }
-
-        const historyManager = getHistoryManager(activeFileId);
-        // Run history node write and synthesis in parallel.
-        const nodeIdPromise = historyManager.addStroke({
-          data,
-          label: snapshot.brushName,
-          dimensions: snapshot.dimensions,
-          dirtyRanges: historyDirtyRanges,
-        });
-
-        await synthesizeFile(activeFileId, snapshot.autoPlaybackParams, data, snapshot.dirtyRegion);
-
-        const nodeId = await nodeIdPromise;
-        const updated = openFiles[activeFileId];
-        if (nodeId && updated?.audioBuffer) {
-          historyManager.setStateAudio(nodeId, updated.audioBuffer, updated.audioPeak ?? 1);
-        }
-        // Stored against the state the stroke made, so coming back to it later
-        // restores the onsets of what it painted rather than finding them again.
-        if (nodeId && updated?.onsets) {
-          void historyManager
-            .setNodeOnsets(nodeId, packOnsetState({ onsets: updated.onsets, reference: updated.onsetReference }))
-            .catch((error) => console.error("Storing onsets for history node failed:", error));
+          console.error("Committing the stroke failed:", error);
+          notifications.show({
+            color: "red",
+            title: "Stroke not committed",
+            message: "The canvas, the audio and the history may disagree. Undo to get back to a state that holds.",
+          });
+          // The canvas on the GPU is no longer known to match the history, so
+          // the next navigation restores in full rather than by delta.
+          getHistoryManager(activeFileId).markFboOutOfSync();
         }
       });
     },

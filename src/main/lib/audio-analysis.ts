@@ -37,6 +37,10 @@ export function getGaboratorPath(): string {
   if (isPackaged) {
     return join(process.resourcesPath, "app.asar.unpacked/build/Release/gaborator_addon.node");
   }
+  // The Ableton extension ships the addon beside its bundled host entry, which
+  // is the only copy a packaged .ablx has.
+  const beside = join(__dirname, "gaborator_addon.node");
+  if (existsSync(beside)) return beside;
   // In development, __dirname will be something like .../out/preload or .../out/main
   // We need to go up to the project root and then to build/Release. Tests run
   // this file from its source directory instead, which is one level deeper.
@@ -355,31 +359,6 @@ export async function commitStroke(
 ): Promise<CommitStrokeResult> {
   const gab = init();
   return await gab.commitStroke(packedData, analysisMetadata, sampleRate, params, existingAudio, window, stroke);
-}
-
-/**
- * Computes the boundary-conditioning patch for a stroke footprint: the
- * coefficients around the footprint's time edges rewritten to carry the
- * time-domain-exact edit (interior content confined to the footprint,
- * exterior content excluded from it). Returns per-band ranges plus the
- * patched pixel values; the input buffer is not modified.
- */
-export async function conditionBoundary(
-  packedData: Float32Array,
-  analysisMetadata: {
-    numFrames: number;
-    numChannels: number;
-    numBands: number;
-    bandOffsets: Uint32Array;
-    bandStepLog2s: Int32Array;
-    bandLengths: Uint32Array;
-  },
-  sampleRate: number,
-  params: AnalysisParams,
-  footprint: { startFrame: number; endFrame: number; bandLo: number; bandHi: number },
-): Promise<{ ranges: Uint32Array; pixels: Float32Array }> {
-  const gab = init();
-  return await gab.conditionBoundary(packedData, analysisMetadata, sampleRate, params, footprint);
 }
 
 export async function hpss(

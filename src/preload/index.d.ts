@@ -95,20 +95,6 @@ declare global {
         onsetOdfMax?: number;
         onsetBandMax?: Float32Array;
       }>;
-      conditionBoundary: (
-        packedData: Float32Array,
-        analysisMetadata: {
-          numFrames: number;
-          numChannels: number;
-          numBands: number;
-          bandOffsets: Uint32Array;
-          bandStepLog2s: Int32Array;
-          bandLengths: Uint32Array;
-        },
-        sampleRate: number,
-        params: AnalysisParams,
-        footprint: { startFrame: number; endFrame: number; bandLo: number; bandHi: number },
-      ) => Promise<{ ranges: Uint32Array; pixels: Float32Array }>;
       /**
        * Everything a finished stroke derives, in one call. Rejects whole on any
        * failure; never writes to `packedData`.

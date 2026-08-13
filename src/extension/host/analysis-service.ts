@@ -2,6 +2,7 @@ import {
   analyze,
   applyHistoryDelta,
   buildHistoryInverseMap,
+  commitStroke,
   decodeHistorySnapshot,
   encodeHistoryDelta,
   encodeHistorySnapshot,
@@ -113,6 +114,78 @@ export async function runSynthesizeFramed(request: ArrayBuffer): Promise<Uint8Ar
   return encodeFrame({
     meta: { peak: result.peak, numChannels: result.channels.length, maxGainReductionDb: result.maxGainReductionDb },
     arrays: channels,
+  });
+}
+
+/**
+ * Derives everything a finished stroke means, in the host where the addon
+ * lives. One request in, one frame out — the audio, the coefficient patch, the
+ * onsets and the levels, or a rejection carrying none of them.
+ */
+export async function runCommitStrokeFramed(request: ArrayBuffer): Promise<Uint8Array> {
+  const { meta, arrays } = decodeFrame(request);
+  const existingChannelCount = Number(meta.existingChannelCount);
+  const existingAudio = Array.from({ length: existingChannelCount }, (_, i) =>
+    asF32(arrays[`existing${i}`], `existing${i}`),
+  );
+
+  const result = await commitStroke(
+    asF32(arrays.packedData, "packedData"),
+    {
+      numFrames: Number(meta.numFrames),
+      numChannels: Number(meta.numChannels),
+      numBands: Number(meta.numBands),
+      bandOffsets: asU32(arrays.bandOffsets, "bandOffsets"),
+      bandStepLog2s: asI32(arrays.bandStepLog2s, "bandStepLog2s"),
+      bandLengths: asU32(arrays.bandLengths, "bandLengths"),
+    },
+    Number(meta.sampleRate),
+    {
+      bandsPerOctave: Number(meta.bandsPerOctave),
+      minFreq: Number(meta.minFreq),
+      detectOnsets: meta.detectOnsets === 1,
+      onsetStartSec: optionalNumber(meta.onsetStartSec),
+      onsetEndSec: optionalNumber(meta.onsetEndSec),
+      onsetOdfReference: optionalNumber(meta.onsetOdfReference),
+      onsetBandMax: arrays.onsetBandMax ? asF32(arrays.onsetBandMax, "onsetBandMax") : undefined,
+    },
+    existingAudio,
+    {
+      startFrame: Number(meta.startFrame),
+      endFrame: Number(meta.endFrame),
+      startBand: Number(meta.startBand),
+      endBand: Number(meta.endBand),
+    },
+    {
+      footStartFrame: Number(meta.footStartFrame),
+      footEndFrame: Number(meta.footEndFrame),
+      hardEdgeStart: meta.hardEdgeStart === 1,
+      hardEdgeEnd: meta.hardEdgeEnd === 1,
+      applyLimiter: meta.applyLimiter === 1,
+      envelope: asF32(arrays.envelope, "envelope"),
+    },
+  );
+
+  const out: Record<string, NumericArray> = {
+    patchRanges: result.patch.ranges,
+    patchPixels: result.patch.pixels,
+    gainReductionDb: result.gainReductionDb,
+    levelPeaks: result.levels.peaks,
+    levelClipped: result.levels.clipped,
+  };
+  result.channels.forEach((channel, i) => (out[`channel${i}`] = channel));
+  if (result.onsets) out.onsets = result.onsets;
+  if (result.onsetBandMax) out.onsetBandMax = result.onsetBandMax;
+
+  return encodeFrame({
+    meta: {
+      numChannels: result.channels.length,
+      peak: result.peak,
+      maxGainReductionDb: result.maxGainReductionDb,
+      levelStartHop: result.levels.startHop,
+      ...(result.onsetOdfMax !== undefined ? { onsetOdfMax: result.onsetOdfMax } : {}),
+    },
+    arrays: out,
   });
 }
 
