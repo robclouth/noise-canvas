@@ -1,14 +1,9 @@
-import { Box, Group, Stack, Text, UnstyledButton, useMantineTheme, type MantineTheme } from "@mantine/core";
+import { Box, Group, Stack, Text, useMantineTheme, type MantineTheme } from "@mantine/core";
 import { resolveBrushColor } from "@renderer/lib/colors";
 import { EFFECT_COLORS, EFFECT_LABELS } from "@renderer/lib/constants";
-import { helpProps } from "@renderer/lib/ui-controls";
 import type { BrushColor } from "@renderer/store/types";
 import { Tooltip } from "../tooltip";
-
-/** Width of the colour bar down the left edge of every brush row. */
-const COLOR_BAR_WIDTH = 3;
-/** Row height, held even for rows with no keycap so a list stays even. */
-const ROW_MIN_HEIGHT = 22;
+import { ListRow } from "./list-row";
 
 /** A step's loose parameter bag, as stored on brushes and on presets. */
 type StepLike = Record<string, unknown>;
@@ -155,33 +150,18 @@ export function BrushRow({
         },
       }}
     >
-      <UnstyledButton
-        component={asDiv ? "div" : "button"}
-        role={asDiv ? "button" : undefined}
+      <ListRow
+        help="brush-row"
+        accent={color}
+        active={active}
+        outlined={outlined}
         onClick={onClick}
         onDoubleClick={onDoubleClick}
-        px="xs"
-        py={4}
-        className={editing ? undefined : "effect-button"}
-        {...helpProps("brush-row")}
-        style={{
-          position: "relative",
-          overflow: "hidden",
-          borderRadius: "var(--mantine-radius-sm)",
-          background: active ? "var(--mantine-color-dark-6)" : undefined,
-          outline: outlined ? "1px dashed var(--mantine-color-orange-5)" : undefined,
-          outlineOffset: -1,
-          flex: 1,
-          minWidth: 0,
-          textAlign: "left",
-          cursor: editing ? "text" : "pointer",
-        }}
+        asDiv={asDiv}
+        editing={editing}
       >
-        <Box style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: COLOR_BAR_WIDTH, background: color }} />
-        <Group gap={6} wrap="nowrap" align="center" mih={ROW_MIN_HEIGHT}>
-          {children}
-        </Group>
-      </UnstyledButton>
+        {children}
+      </ListRow>
     </Tooltip>
   );
 }

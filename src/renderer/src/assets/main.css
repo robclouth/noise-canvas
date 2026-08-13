@@ -2,6 +2,9 @@
    override holds the compact values. The whole UI re-skins by flipping the attribute. */
 :root {
   --ui-row-h: 24px;
+  --ui-section-h: 18px;
+  --ui-section-gap: 6px;
+  --ui-section-font: 10px;
   --ui-widget-h: 20px;
   --ui-widget-input-h: 18px;
   --ui-input-h: 20px;
@@ -28,6 +31,9 @@
 
 [data-ui-size="sm"] {
   --ui-row-h: 21px;
+  --ui-section-h: 16px;
+  --ui-section-gap: 5px;
+  --ui-section-font: 9px;
   --ui-widget-h: 18px;
   --ui-widget-input-h: 16px;
   --ui-input-h: 18px;
@@ -68,8 +74,21 @@
   user-select: none; /* Non-prefixed version, currently supported by Chrome and Opera */
 }
 
+/* Translucent rather than a fixed shade: these rows sit on the panel and inside
+   dropdowns, whose own background is dark-6. */
 .effect-button:hover {
-  background-color: var(--mantine-color-dark-6);
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.list-row-host .list-row-menu {
+  opacity: 0;
+  transition: opacity 80ms ease-out;
+}
+
+.list-row-host:hover .list-row-menu,
+.list-row-host:focus-within .list-row-menu,
+.list-row-menu[data-open="true"] {
+  opacity: 1;
 }
 
 /* Dropdowns carry explanatory prose rather than glanceable panel labels, so

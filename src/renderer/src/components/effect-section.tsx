@@ -1,5 +1,6 @@
 import { ParameterKey } from "@/store/types";
 import type { EffectType } from "@renderer/effects/types";
+import { effectScope } from "@renderer/lib/section-presets";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import { helpInstance, helpProps } from "@renderer/lib/ui-controls";
 import { ActionIcon, Checkbox, Collapse, Group, Paper, Stack, Text } from "@mantine/core";
@@ -74,6 +75,7 @@ export const EffectSection = memo(
               onRemove={onRemove}
               onCopy={onCopy}
               effectId={effectId}
+              presetScope={effectType ? effectScope(effectType) : undefined}
             />
           </Group>
           <Collapse in={enabled}>{children}</Collapse>

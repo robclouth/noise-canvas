@@ -17,6 +17,7 @@ import { createGenerateSlice, GENERATE_PERSISTED_KEYS } from "./generate";
 import { createLinkSlice, LINK_PERSISTED_KEYS } from "./link";
 import { createModulatorsSlice } from "./modulators";
 import { createPresetsSlice, PRESETS_PERSISTED_KEYS } from "./presets";
+import { createSectionPresetsSlice } from "./section-presets";
 import { createStemGroupsSlice, STEM_GROUPS_PERSISTED_KEYS } from "./stem-groups";
 import { createStepsSlice, STEPS_PERSISTED_KEYS } from "./steps";
 import type { ParameterKey, State } from "./types";
@@ -179,6 +180,7 @@ export const useStore = create<State>()(
         ...createAudioSlice(set, get),
         ...createAppSlice(set, get),
         ...createPresetsSlice(set, get),
+        ...createSectionPresetsSlice(set, get),
         ...createStepsSlice(set, get),
         ...createLinkSlice(set, get),
         ...createStemGroupsSlice(set, get),

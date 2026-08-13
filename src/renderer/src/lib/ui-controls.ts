@@ -230,6 +230,21 @@ export const UI_CONTROLS = {
     description: "Randomizes the parameters in this section that are set to take part.",
     manualSection: "randomization",
   },
+  "section-preset": {
+    label: "Preset",
+    description: "Sets every parameter in this section at once.",
+    manualSection: "section-presets",
+  },
+  "section-save-preset": {
+    label: "Add preset",
+    description: "Keeps this section's current settings as a preset of your own.",
+    manualSection: "section-presets",
+  },
+  "preset-menu": {
+    label: "Preset menu",
+    description: "Duplicates this preset, and renames or deletes it when it is one of your own.",
+    manualSection: "section-presets",
+  },
 
   // Steps
   "step-select": {

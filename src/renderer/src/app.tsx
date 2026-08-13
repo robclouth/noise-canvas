@@ -95,6 +95,7 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     useStore.getState().init();
+    void useStore.getState().initSectionPresets();
     // Best-effort cleanup of history dirs left behind by crashes or other
     // close paths that didn't call destroyHistoryManager. Runs after persisted
     // state is loaded so we know which fileIds are still alive.

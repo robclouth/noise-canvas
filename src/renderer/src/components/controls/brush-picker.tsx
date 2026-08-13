@@ -1,25 +1,14 @@
 import { useStore } from "@/store";
-import {
-  ActionIcon,
-  Box,
-  Button,
-  Divider,
-  Group,
-  Menu,
-  ScrollArea,
-  Stack,
-  Text,
-  TextInput,
-  useMantineTheme,
-} from "@mantine/core";
+import { Box, Button, Divider, Group, Menu, ScrollArea, Stack, Text, TextInput, useMantineTheme } from "@mantine/core";
 import { ContextModalProps, modals } from "@mantine/modals";
 import { resolveBrushColor } from "@renderer/lib/colors";
 import { helpProps } from "@renderer/lib/ui-controls";
 import type { BrushColor } from "@renderer/store/types";
 import { BrushRow } from "./brush-row";
+import { LIST_ROW_HOST, ListRowMenu } from "./list-row";
 import { openConfirm, openPrompt } from "@renderer/lib/modals";
 import { PresetType } from "@renderer/lib/preset-schema";
-import { MoreVertical, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useState } from "react";
 
 type BrushPickerModalProps = ContextModalProps<Record<string, never>>;
@@ -60,7 +49,7 @@ type RowProps = {
 function Row({ onClick, label, color, steps = [], trailing }: RowProps) {
   const theme = useMantineTheme();
   return (
-    <Group gap={0} wrap="nowrap" align="center" style={{ position: "relative" }}>
+    <Group className={LIST_ROW_HOST} gap={0} wrap="nowrap" align="center" style={{ position: "relative" }}>
       <BrushRow steps={steps} color={color ? resolveBrushColor(color, theme) : theme.colors.dark[4]} onClick={onClick}>
         <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
           {label}
@@ -75,19 +64,12 @@ function Row({ onClick, label, color, steps = [], trailing }: RowProps) {
 
 function PresetRow({ preset, onSelect }: { preset: PresetType; onSelect: () => void }) {
   const trailing = preset.isFactory ? null : (
-    <Menu withinPortal position="right-start" shadow="md">
-      <Menu.Target>
-        <ActionIcon size="xs" variant="subtle" color="gray" onClick={(e) => e.stopPropagation()}>
-          <MoreVertical size={12} />
-        </ActionIcon>
-      </Menu.Target>
-      <Menu.Dropdown>
-        <Menu.Item onClick={() => promptForRename(preset)}>Rename…</Menu.Item>
-        <Menu.Item color="red" onClick={() => promptForDelete(preset)}>
-          Delete…
-        </Menu.Item>
-      </Menu.Dropdown>
-    </Menu>
+    <ListRowMenu help="brush-menu">
+      <Menu.Item onClick={() => promptForRename(preset)}>Rename…</Menu.Item>
+      <Menu.Item color="red" onClick={() => promptForDelete(preset)}>
+        Delete…
+      </Menu.Item>
+    </ListRowMenu>
   );
 
   return <Row onClick={onSelect} label={preset.name} color={preset.color} steps={preset.steps} trailing={trailing} />;

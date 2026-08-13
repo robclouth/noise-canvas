@@ -33,6 +33,7 @@ Every control in the app has a tooltip and an entry in the `?` overlay, and how 
    - [Choosing Brushes from a Pattern](#choosing-brushes-from-a-pattern)
    - [Presets and the Dice](#presets-and-the-dice)
 7. [Parameter Controls](#parameter-controls)
+   - [Section Presets](#section-presets)
    - [Randomization](#randomization)
    - [Linking Parameters Across Steps](#linking-parameters-across-steps)
 8. [Working with Files](#working-with-files)
@@ -542,6 +543,14 @@ The **dice** re-rolls the random parts of a pattern (`?`, `degradeBy`) and previ
 - **Double-click the label** to reset a parameter to its default — this also clears every modulation amount on it.
 - **Click the label** to open the parameter menu: modulation amounts, reset, exclude-from-randomization, step linking, and a **book icon** that opens this manual at the section explaining that parameter.
 
+### Section Presets
+
+The **⋮ menu** on an effect card or the modulator holds a list of presets for that section — starting points for the things it is usually asked to do. Pick one and the whole section changes to it. Hover a name to read what it does.
+
+The **+** on the Presets heading keeps the section's current settings under a name of your own, and yours then appear in the same list. Every row has a **⋮** on hover: **Duplicate…** on any of them, plus **Rename…** and **Delete…** on your own. The ones that ship with the app cannot be renamed or deleted, so duplicating is how you start from one and make it yours. Modulator presets are not tied to the modulator you saved them from, so one saved on modulator 1 loads into any of the three.
+
+Presets carry values only, so any modulation you have wired up survives loading one.
+
 ### Randomization
 
 Every section header has a **⋮ menu** with a Randomize block:
@@ -759,8 +768,10 @@ Separately, [**Recipes**](./recipes.md) covers what to actually _do_ with all th
 ## Where Things Are Saved
 
 ```
-Documents/Noise Canvas/Presets/     brush presets (.json)
-Documents/Noise Canvas/Textures/    your own modulator images
+Documents/Noise Canvas/Presets/               brush presets (.json)
+Documents/Noise Canvas/Presets/Effects/       your effect presets
+Documents/Noise Canvas/Presets/Modulators/    your modulator presets
+Documents/Noise Canvas/Textures/              your own modulator images
 ~/.noise-canvas/models/             downloaded AI separation models
 <user data>/history/<fileId>/       per-file history trees
 ```

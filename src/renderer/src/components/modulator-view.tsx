@@ -265,7 +265,12 @@ export const ModulatorView = () => {
             label: { paddingTop: 2, paddingBottom: 2, lineHeight: 1.1 },
           }}
         />
-        <SectionMenu storageKey={`modulator-${viewedModulatorIndex}`} parameterKeys={currentModulatorParams} />
+        <SectionMenu
+          storageKey={`modulator-${viewedModulatorIndex}`}
+          parameterKeys={currentModulatorParams}
+          presetScope="modulator"
+          modulatorIndex={parseInt(viewedModulatorIndex) + 1}
+        />
       </Group>
       <SimpleGrid cols={2} spacing={PANEL_COLUMN_SPACING} verticalSpacing={0}>
         <ParameterControl paramKey={`modulator${parseInt(viewedModulatorIndex) + 1}Mode` as ParameterKey} />

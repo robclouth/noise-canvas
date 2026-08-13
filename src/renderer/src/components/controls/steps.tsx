@@ -1,9 +1,10 @@
 import { DragDropContext, Draggable, Droppable, DropResult } from "@hello-pangea/dnd";
-import { Group, useMantineTheme } from "@mantine/core";
+import { Group, Stack, useMantineTheme } from "@mantine/core";
 import { resolveBrushColor } from "@renderer/lib/colors";
 import { openConfirm } from "@renderer/lib/modals";
 import { useStore } from "@renderer/store";
 import { anchorProps } from "@renderer/lib/ui-anchors";
+import { SECTION_GAP } from "@renderer/lib/ui-density";
 import { helpProps } from "@renderer/lib/ui-controls";
 import { MAX_STEPS } from "@renderer/store/steps";
 import type { BrushColor } from "@renderer/store/types";
@@ -14,6 +15,30 @@ import { HelpActionIcon } from "./help-control";
 
 const TAB_HEIGHT = 28;
 const SLOT_BASIS = `${100 / MAX_STEPS}%`;
+
+/**
+ * Wraps the sections whose parameters belong to the active step, marking them
+ * with a rule in that step's own colour.
+ */
+export function StepScope({ children }: { children: React.ReactNode }) {
+  const theme = useMantineTheme();
+  const colorSig = useStore((state) => {
+    const color = state.brushes[state.activeBrushIndex]?.steps[state.activeStepIndex]?.color;
+    return color ? `${color.hue}:${color.variation}` : "";
+  });
+
+  const sep = colorSig.indexOf(":");
+  const accent =
+    sep > 0
+      ? resolveBrushColor({ hue: colorSig.slice(0, sep), variation: Number(colorSig.slice(sep + 1)) }, theme)
+      : theme.colors.dark[3];
+
+  return (
+    <Stack gap={SECTION_GAP} style={{ borderLeft: `2px solid ${accent}`, paddingLeft: 8 }}>
+      {children}
+    </Stack>
+  );
+}
 
 export function Steps() {
   const theme = useMantineTheme();

@@ -12,6 +12,14 @@ export const useUiSize = () => useStore((state) => state.uiSize);
 // Height of a standard control row (label + control + value).
 export const CONTROL_ROW_HEIGHT = "var(--ui-row-h)";
 
+// Height of a section header row, and the font its label is set in. Shorter than
+// a control row so a panel of many sections spends less height on chrome.
+export const SECTION_HEADER_HEIGHT = "var(--ui-section-h)";
+export const SECTION_HEADER_FONT = "var(--ui-section-font)";
+
+// Vertical gap between sibling sections in a panel.
+export const SECTION_GAP = "var(--ui-section-gap)";
+
 // Height of the value/toggle boxes (numbox, switch) that align in the right column.
 export const WIDGET_HEIGHT = "var(--ui-widget-h)";
 
