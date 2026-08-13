@@ -210,13 +210,13 @@ describe("display shader: clipping overlay", () => {
     expect(r).toBeGreaterThan(b + 60);
   });
 
-  it("marks coefficients that hold the peak back in cyan", () => {
+  it("leaves coefficients that hold the peak back untinted", () => {
     const data = flatSpectrogram(FULL_SCALE_MAGNITUDE * 0.4);
     const sample = renderDisplay(data, attributionMap(data));
     const { r, g, b } = sample(20, 50);
 
-    expect(g).toBeGreaterThan(r + 10);
-    expect(b).toBeGreaterThan(r + 10);
+    expect(Math.abs(r - g)).toBeLessThan(12);
+    expect(Math.abs(g - b)).toBeLessThan(12);
   });
 
   it("leaves unattributed coefficients neutral", () => {

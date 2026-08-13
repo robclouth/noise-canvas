@@ -103,32 +103,37 @@ describe("computeClipAttribution", () => {
     for (let i = start; i < start + data.numFrames; i++) expect(result[i]).toBe(0);
   });
 
-  it("blames the band that carries the energy", () => {
-    const data = spectrogramWithBand(10, 0.5, 0);
-    const result = computeClipAttribution(data, data.packedData, overloads, ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
-
-    const start = 10 * data.numFrames;
+  function peakOf(map: Float32Array): number {
     let peak = 0;
-    for (let i = start; i < start + data.numFrames; i++) peak = Math.max(peak, Math.abs(result[i]));
-    expect(peak).toBeGreaterThan(0);
-  });
+    for (const value of map) peak = Math.max(peak, value);
+    return peak;
+  }
 
-  it("flips the blame when the partial is inverted", () => {
-    // Same magnitude, opposite phase: the partial now pulls the waveform back
-    // from the peak instead of driving it, so every contribution negates.
+  // Every coefficient in a band shares the carrier evaluated at the overload,
+  // so one phase drives the peak outwards and the opposite one holds it back.
+  // Only the first is blamed; the caller gets whichever that is.
+  function blamedBand(list: Overload[], band = 10): Float32Array {
+    const inPhase = spectrogramWithBand(band, 0.5, 0);
+    const inverted = spectrogramWithBand(band, 0.5, Math.PI);
+    const a = computeClipAttribution(inPhase, inPhase.packedData, list, ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
+    const b = computeClipAttribution(inverted, inverted.packedData, list, ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
+    return peakOf(a) > 0 ? a : b;
+  }
+
+  it("blames the phase that drives the peak outwards, and only that one", () => {
     const inPhase = spectrogramWithBand(10, 0.5, 0);
     const inverted = spectrogramWithBand(10, 0.5, Math.PI);
 
     const a = computeClipAttribution(inPhase, inPhase.packedData, overloads, ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
     const b = computeClipAttribution(inverted, inverted.packedData, overloads, ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
 
-    const start = 10 * inPhase.numFrames;
-    for (let i = start; i < start + inPhase.numFrames; i++) {
-      expect(b[i]).toBeCloseTo(-a[i], 5);
-    }
+    // Attenuating the other phase would make the clipping worse, so it stays
+    // unmarked rather than being blamed alongside.
+    expect(Math.min(peakOf(a), peakOf(b))).toBe(0);
+    expect(Math.max(peakOf(a), peakOf(b))).toBeGreaterThan(0);
   });
 
-  it("flips the blame when the overload is a negative peak", () => {
+  it("swaps which phase it blames when the overload is a negative peak", () => {
     const data = spectrogramWithBand(10, 0.5, 0);
     const positive = computeClipAttribution(data, data.packedData, overloads, ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
     const negative = computeClipAttribution(
@@ -139,81 +144,50 @@ describe("computeClipAttribution", () => {
       CLIP_FULL_TINT_DB,
     );
 
-    const start = 10 * data.numFrames;
-    for (let i = start; i < start + data.numFrames; i++) {
-      expect(negative[i]).toBeCloseTo(-positive[i], 5);
-    }
+    expect(Math.min(peakOf(positive), peakOf(negative))).toBe(0);
+    expect(Math.max(peakOf(positive), peakOf(negative))).toBeGreaterThan(0);
   });
 
-  it("keeps values inside [-1, 1] and peaks at the overload's severity", () => {
-    const data = spectrogramWithBand(10, 0.5, 0);
-    const result = computeClipAttribution(data, data.packedData, overloads, ANALYSIS_OVERLAP, CLIP_FULL_TINT_DB);
+  it("keeps values inside [0, 1] and peaks at the overload's severity", () => {
+    const result = blamedBand(overloads);
 
-    let peak = 0;
     for (const v of result) {
-      expect(Math.abs(v)).toBeLessThanOrEqual(1 + 1e-6);
-      peak = Math.max(peak, Math.abs(v));
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1 + 1e-6);
     }
     // 3 dB of overshoot against a 6 dB full-tint reference.
-    expect(peak).toBeCloseTo(3 / CLIP_FULL_TINT_DB, 6);
+    expect(peakOf(result)).toBeCloseTo(3 / CLIP_FULL_TINT_DB, 6);
   });
 
   it("saturates once the overshoot reaches the full-tint reference", () => {
-    const data = spectrogramWithBand(10, 0.5, 0);
-    const result = computeClipAttribution(
-      data,
-      data.packedData,
-      [{ sample: 128, sign: 1, excessDb: CLIP_FULL_TINT_DB * 2 }],
-      ANALYSIS_OVERLAP,
-      CLIP_FULL_TINT_DB,
-    );
-
-    let peak = 0;
-    for (const v of result) peak = Math.max(peak, Math.abs(v));
-    expect(peak).toBeCloseTo(1, 6);
+    const result = blamedBand([{ sample: 128, sign: 1, excessDb: CLIP_FULL_TINT_DB * 2 }]);
+    expect(peakOf(result)).toBeCloseTo(1, 6);
   });
 
   it("fades the whole map as the overshoot shrinks", () => {
     // The property that makes "reduce until the red is gone" converge: halving
     // the overshoot must halve the tint everywhere, not merely re-rank it.
-    const data = spectrogramWithBand(10, 0.5, 0);
-    const loud = computeClipAttribution(
-      data,
-      data.packedData,
-      [{ sample: 128, sign: 1, excessDb: 4 }],
-      ANALYSIS_OVERLAP,
-      CLIP_FULL_TINT_DB,
-    );
-    const quiet = computeClipAttribution(
-      data,
-      data.packedData,
-      [{ sample: 128, sign: 1, excessDb: 2 }],
-      ANALYSIS_OVERLAP,
-      CLIP_FULL_TINT_DB,
-    );
+    const loud = blamedBand([{ sample: 128, sign: 1, excessDb: 4 }]);
+    const quiet = blamedBand([{ sample: 128, sign: 1, excessDb: 2 }]);
 
-    const start = 10 * data.numFrames;
-    for (let i = start; i < start + data.numFrames; i++) {
-      expect(quiet[i]).toBeCloseTo(loud[i] / 2, 6);
-    }
+    expect(peakOf(loud)).toBeGreaterThan(0);
+    for (let i = 0; i < loud.length; i++) expect(quiet[i]).toBeCloseTo(loud[i] / 2, 6);
   });
 
   it("scales blame with how badly the sample overloaded", () => {
-    const data = spectrogramWithBand(10, 0.5, 0);
-    // Two overloads of differing severity at well-separated times: the harder
-    // one must dominate the normalized map.
-    const result = computeClipAttribution(
-      data,
-      data.packedData,
+    // Two overloads of differing severity, on a band whose atom is narrow
+    // enough that neither reaches the other's sample.
+    const band = 110;
+    const result = blamedBand(
       [
         { sample: 40, sign: 1, excessDb: 1 },
-        { sample: 200, sign: 1, excessDb: 8 },
+        { sample: 200, sign: 1, excessDb: 4 },
       ],
-      ANALYSIS_OVERLAP,
-      CLIP_FULL_TINT_DB,
+      band,
     );
 
-    const start = 10 * data.numFrames;
-    expect(Math.abs(result[start + 200])).toBeGreaterThan(Math.abs(result[start + 40]));
+    const start = band * 256;
+    expect(result[start + 40]).toBeGreaterThan(0);
+    expect(result[start + 200]).toBeGreaterThan(result[start + 40]);
   });
 });

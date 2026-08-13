@@ -169,24 +169,23 @@ function atomSigmaSamples(centerFreqHz: number, sampleRate: number, bandsPerOcta
 }
 
 /**
- * Builds a per-coefficient map of signed contribution to the overloaded samples,
- * in the same packed layout as the spectrogram data so it can be uploaded as a
- * texture and read with the existing packed-coordinate helpers.
+ * Builds a per-coefficient map of how much attenuating that coefficient would
+ * relieve the overloaded samples, in the same packed layout as the spectrogram
+ * data so it can be uploaded as a texture and read with the existing
+ * packed-coordinate helpers.
  *
- * Values land in [-1, 1]: positive means the coefficient pushes the waveform
- * further past full scale, negative means it pulls it back.
+ * Values land in [0, 1]. A coefficient scores above zero only when reducing it
+ * reduces the overshoot: its contribution is signed against the direction the
+ * waveform broke through, and the signed contributions are summed across every
+ * overload it takes part in. A partial that drives one peak outwards but holds
+ * another one back cancels towards zero, and only consistent offenders survive.
+ * Negatives are dropped, since attenuating those would make clipping worse.
  *
- * Magnitude combines two things. Within a single overload, contributions are
- * scaled against the strongest one, which is what ranks the coefficients at that
- * instant. That share is then multiplied by an absolute severity taken from how
- * far the sample actually overloaded, so the whole map fades as the overshoot is
- * reduced. Scaling the map to its own maximum instead would keep it saturated at
- * every stage — the worst remaining offender always reading full red — which
- * hides any progress until the overload disappears entirely.
- *
- * Where overloads overlap, the strongest single verdict wins rather than the sum:
- * a coefficient's tint should say how badly it drives the worst peak it takes
- * part in, not how many peaks it happens to touch.
+ * Within a single overload, contributions are scaled against the strongest one,
+ * which ranks the coefficients at that instant. That share is weighted by an
+ * absolute severity taken from how far the sample actually overloaded, so the
+ * map fades as the overshoot is painted down rather than restaying saturated
+ * against its own worst remaining offender.
  */
 export function computeClipAttribution(
   spectrogramData: ClipAnalysisLayout,
@@ -264,10 +263,14 @@ export function computeClipAttribution(
     if (strongest <= 0) continue;
     const severity = Math.min(1, overload.excessDb / Math.max(fullTintDb, 1e-3));
     for (let k = 0; k < touched.length; k++) {
-      const index = touched[k];
-      const value = (contributions[k] / strongest) * severity;
-      if (Math.abs(value) > Math.abs(attribution[index])) attribution[index] = value;
+      attribution[touched[k]] += (contributions[k] / strongest) * severity;
     }
+  }
+
+  // Only the coefficients worth attenuating are drawn, and the running sum can
+  // outrun a single overload's share once several agree.
+  for (let i = 0; i < attribution.length; i++) {
+    attribution[i] = Math.min(1, Math.max(0, attribution[i]));
   }
 
   return attribution;

@@ -116,7 +116,7 @@ describe("clip detection against real synthesis", () => {
   );
 
   it(
-    "blames coefficients on both sides of the peak it attributes",
+    "marks only coefficients worth attenuating, and marks them visibly",
     async () => {
       const analysis = await addon.analyze([makeLoudSignal()], 1, SR, PARAMS);
       const limited = await addon.synthesize(analysis.data, analysis, SR, PARAMS, true, []);
@@ -125,21 +125,56 @@ describe("clip detection against real synthesis", () => {
 
       const attribution = computeClipAttribution(toLayout(analysis), analysis.data, overloads, OVERLAP, FULL_TINT_DB);
 
-      let pushes = 0;
-      let pulls = 0;
+      let marked = 0;
       let peak = 0;
       for (const value of attribution) {
-        if (value > 0) pushes++;
-        else if (value < 0) pulls++;
-        peak = Math.max(peak, Math.abs(value));
+        expect(value).toBeGreaterThanOrEqual(0);
+        expect(value).toBeLessThanOrEqual(1);
+        if (value > 0) marked++;
+        peak = Math.max(peak, value);
       }
 
-      // Both signs must appear: the overlay's whole claim is that some partials
-      // drive the peak out and others hold it back.
-      expect(pushes).toBeGreaterThan(0);
-      expect(pulls).toBeGreaterThan(0);
-      // And it has to be visible — values live in [-1, 1].
+      expect(marked).toBeGreaterThan(0);
       expect(peak).toBeGreaterThan(0.5);
+      // Blaming everything would be no answer at all.
+      expect(marked).toBeLessThan(attribution.length * 0.5);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "fades as the coefficients it blames are attenuated",
+    async () => {
+      const analysis = await addon.analyze([makeLoudSignal()], 1, SR, PARAMS);
+      const layout = toLayout(analysis);
+
+      const before = await addon.synthesize(analysis.data, analysis, SR, PARAMS, true, []);
+      const overloads = findOverloads(before.channels, SR, before.gainReductionDb ?? null);
+      const blame = computeClipAttribution(layout, analysis.data, overloads, OVERLAP, FULL_TINT_DB);
+
+      let blameTotal = 0;
+      for (const value of blame) blameTotal += value;
+      expect(blameTotal).toBeGreaterThan(0);
+
+      // Turn the blamed coefficients down in proportion to how hard they are
+      // blamed, leave everything else alone, and re-run the whole chain.
+      const quieter = Float32Array.from(analysis.data);
+      for (let pixel = 0; pixel < blame.length; pixel++) {
+        const gain = 1 - 0.9 * blame[pixel];
+        quieter[pixel * 4] *= gain;
+        quieter[pixel * 4 + 2] *= gain;
+      }
+
+      const after = await addon.synthesize(quieter, analysis, SR, PARAMS, true, []);
+      const overloadsAfter = findOverloads(after.channels, SR, after.gainReductionDb ?? null);
+      const blameAfter = computeClipAttribution(layout, quieter, overloadsAfter, OVERLAP, FULL_TINT_DB);
+
+      let blameTotalAfter = 0;
+      for (const value of blameAfter) blameTotalAfter += value;
+
+      // The point of the overlay: painting the red down clears the red.
+      expect(after.maxGainReductionDb ?? 0).toBeLessThan(before.maxGainReductionDb ?? 0);
+      expect(blameTotalAfter).toBeLessThan(blameTotal);
     },
     TIMEOUT,
   );
@@ -171,16 +206,13 @@ describe("clip detection against real synthesis", () => {
 
       const attribution = computeClipAttribution(toLayout(analysis), analysis.data, overloads, OVERLAP, FULL_TINT_DB);
 
-      let pushes = 0;
-      let pulls = 0;
+      let marked = 0;
       let peak = 0;
       for (const value of attribution) {
-        if (value > 0) pushes++;
-        else if (value < 0) pulls++;
-        peak = Math.max(peak, Math.abs(value));
+        if (value > 0) marked++;
+        peak = Math.max(peak, value);
       }
-      expect(pushes).toBeGreaterThan(0);
-      expect(pulls).toBeGreaterThan(0);
+      expect(marked).toBeGreaterThan(0);
       expect(peak).toBeGreaterThan(0.5);
     },
     TIMEOUT,

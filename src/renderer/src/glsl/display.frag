@@ -137,9 +137,7 @@ void main() {
             color = mix(color, vec3(1.0, 0.15, 0.1), overFullScale * 0.85);
         }
 
-        // Contribution to samples that actually overloaded. Red marks
-        // coefficients driving the peak outwards, cyan marks ones holding it
-        // back — attenuating the latter would make the clipping worse.
+        // Coefficients whose attenuation would relieve the overloaded samples.
         if (hasClipAttribution) {
             // The band whose strip this pixel falls in. b0 is the lower half of
             // the vertical interpolation pair and sits half a band below it.
@@ -147,10 +145,7 @@ void main() {
             float blame = readPackedData(
                 vec2(zoomedUv.x, 1.0 - (blameBand + 0.5) / sourceBandCount),
                 clipAttributionTex, sourceMetadataTex, sourceFrameCount, sourceBandCount).r;
-            float pushes = clamp(blame, 0.0, 1.0);
-            float pulls = clamp(-blame, 0.0, 1.0);
-            color = mix(color, vec3(1.0, 0.1, 0.05), pushes * 0.8);
-            color = mix(color, vec3(0.1, 0.8, 0.9), pulls * 0.35);
+            color = mix(color, vec3(1.0, 0.1, 0.05), clamp(blame, 0.0, 1.0) * 0.8);
         }
     }
 
