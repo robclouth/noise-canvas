@@ -39,7 +39,7 @@ interface SynthesisAudioResult {
   onsetOdfMax?: number;
   onsetBandMax?: Float32Array;
 }
-import type { StemGroupMethod } from "./stem-groups";
+import { selectStemGroupOfFile, stemMemberColor, type StemGroupMethod } from "./stem-groups";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
 
 export interface FilesState {
@@ -314,7 +314,7 @@ async function loadRealFileViaGaborator(
 // In-flight AI separation guard — blocks a second concurrent stem split on the same file.
 const aiSeparatingFileIds = new Set<string>();
 
-/** Stable 0-359 hue for a string, so the same path always reads the same colour. */
+/** Stable 0-359 hue for a string, for anything without a hue of its own. */
 export function hashHue(value: string): number {
   let hash = 0;
   for (let i = 0; i < value.length; i++) {
@@ -323,9 +323,58 @@ export function hashHue(value: string): number {
   return ((hash % 360) + 360) % 360;
 }
 
-/** Get a consistent colour for a file based on a hash of its file path. */
+// Hue per open file path. Entries for closed files are released so their hue
+// can go to a later file.
+const fileHues = new Map<string, number>();
+
+const FIRST_FILE_HUE = 210;
+
+/** The hue furthest from every hue in `taken`: the midpoint of the widest gap on the wheel. */
+function farthestHue(taken: number[]): number {
+  if (taken.length === 0) return FIRST_FILE_HUE;
+  const sorted = [...taken].sort((a, b) => a - b);
+  let widestStart = sorted[0];
+  let widest = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const start = sorted[i];
+    const end = i + 1 < sorted.length ? sorted[i + 1] : sorted[0] + 360;
+    if (end - start > widest) {
+      widest = end - start;
+      widestStart = start;
+    }
+  }
+  return (widestStart + widest / 2) % 360;
+}
+
+// Release the hues of files that have closed, then give every open file without
+// one the hue furthest from the hues in use.
+function syncFileHues(): void {
+  const openPaths = new Set(Object.values(openFiles).map((f) => f.filePath));
+  for (const path of fileHues.keys()) {
+    if (!openPaths.has(path)) fileHues.delete(path);
+  }
+  for (const file of Object.values(openFiles)) {
+    if (!fileHues.has(file.filePath)) fileHues.set(file.filePath, farthestHue([...fileHues.values()]));
+  }
+}
+
+/** Hue of an open file, or a hash of the path for a file that is not open. */
+export function getFileHue(filePath: string): number {
+  syncFileHues();
+  return fileHues.get(filePath) ?? hashHue(filePath);
+}
+
+/** Get the colour of a file. Every open file gets its own. */
 export function getFileColor(filePath: string): string {
-  return `hsl(${hashHue(filePath)}, 60%, 60%)`;
+  return `hsl(${getFileHue(filePath)}, 60%, 60%)`;
+}
+
+/** The colour a file wears everywhere: a shade of its group's hue if it is a stem, else its own. */
+export function selectFileColor(state: Pick<State, "stemGroups" | "stemGroupOfFile">, fileId: string): string {
+  const group = selectStemGroupOfFile(state, fileId);
+  if (group) return stemMemberColor(group.hue, group.memberIds.indexOf(fileId), group.memberIds.length);
+  const file = openFiles[fileId];
+  return getFileColor(file?.filePath ?? fileId);
 }
 
 /** Look up an open file by its file path. Returns the first match or undefined. */
@@ -540,8 +589,9 @@ function clearLoading(set: ZustandSet, ids: string[]): void {
 }
 
 // Register a completed split so its parts stay visibly connected and can be
-// summed back together. The hue comes from the source path, so a group reads as
-// a shade of the file it came from.
+// summed back together. The hue comes from the source file, so a group reads as
+// a shade of the file it came from. The members take that hue too, which keeps
+// the whole split to one hue of the wheel however many parts it has.
 function registerStemGroup(
   get: ZustandGet,
   method: StemGroupMethod,
@@ -550,13 +600,12 @@ function registerStemGroup(
   label: string,
 ): void {
   const sourceFile = openFiles[sourceFileId];
-  get().createStemGroup({
-    method,
-    label,
-    originId: sourceFileId,
-    memberIds,
-    hue: hashHue(sourceFile?.filePath ?? sourceFileId),
-  });
+  const hue = sourceFile ? getFileHue(sourceFile.filePath) : hashHue(sourceFileId);
+  for (const memberId of memberIds) {
+    const member = openFiles[memberId];
+    if (member) fileHues.set(member.filePath, hue);
+  }
+  get().createStemGroup({ method, label, originId: sourceFileId, memberIds, hue });
 }
 
 /** The active file's loop region, or null when there is no file or no region. */

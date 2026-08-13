@@ -66,7 +66,10 @@ export function stemGroupColor(hue: number): string {
  * The group a file belongs to, or undefined. Returns the stored group object so
  * it stays reference-stable across unrelated store updates.
  */
-export function selectStemGroupOfFile(state: State, fileId: string): StemGroup | undefined {
+export function selectStemGroupOfFile(
+  state: Pick<State, "stemGroups" | "stemGroupOfFile">,
+  fileId: string,
+): StemGroup | undefined {
   const groupId = state.stemGroupOfFile[fileId];
   return groupId ? state.stemGroups[groupId] : undefined;
 }

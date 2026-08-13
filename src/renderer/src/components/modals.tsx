@@ -2,7 +2,8 @@ import { Box, SimpleGrid, Stack, Text, UnstyledButton } from "@mantine/core";
 import { ContextModalProps } from "@mantine/modals";
 import { EFFECT_KEYS, EffectType } from "@renderer/effects/types";
 import { EFFECT_COLORS, EFFECT_DESCRIPTIONS, EFFECT_LABELS } from "@renderer/lib/constants";
-import { getFileColor, openFiles } from "@renderer/store/files";
+import { useStore } from "@/store";
+import { openFiles, selectFileColor } from "@renderer/store/files";
 import { BrushPickerModal } from "./controls/brush-picker";
 import { ImageExportModal } from "./image-export-modal";
 
@@ -73,6 +74,8 @@ export const FilePickerModal = ({
   resolve: (path: string | null) => void;
   currentPath: string | null;
 }>) => {
+  const stemGroups = useStore((state) => state.stemGroups);
+  const stemGroupOfFile = useStore((state) => state.stemGroupOfFile);
   const files = Object.values(openFiles);
 
   return (
@@ -106,7 +109,7 @@ export const FilePickerModal = ({
             className="effect-button"
             style={{
               borderRadius: "var(--mantine-radius-sm)",
-              borderLeft: `3px solid ${getFileColor(file.filePath)}`,
+              borderLeft: `3px solid ${selectFileColor({ stemGroups, stemGroupOfFile }, file.id)}`,
               backgroundColor: selected ? "rgba(255, 140, 0, 0.08)" : undefined,
             }}
           >

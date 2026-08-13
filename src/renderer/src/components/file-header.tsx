@@ -7,8 +7,7 @@ import { openSplitPartsPrompt } from "@renderer/lib/modals";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import { helpProps, type UiControlName } from "@renderer/lib/ui-controls";
 import { FILE_HEADER_FONT, FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-density";
-import { getFileColor, openFiles } from "@renderer/store/files";
-import { selectStemGroupOfFile, stemMemberColor } from "@renderer/store/stem-groups";
+import { openFiles, selectFileColor } from "@renderer/store/files";
 import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { ChevronDown, Copy, Grid3x3, Maximize2, Minimize2, Split, X } from "lucide-react";
@@ -136,15 +135,9 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const bandsPerOctave = useStore((state) => state.filesBandsPerOctave[fileId]);
   const isDirty = useStore((state) => state.filesDirty[fileId] ?? false);
   const isHighlighted = useStore((state) => state.highlightedSourcePath === filePath);
-  const stemGroup = useStore((state) => selectStemGroupOfFile(state, fileId));
+  const fileColor = useStore((state) => selectFileColor(state, fileId));
 
   const isFullscreen = fullscreenFileId === fileId;
-  // A stem wears a shade of its group's hue instead of its own path hash, so a
-  // split reads as one unit rather than as unrelated files.
-  const stemIndex = stemGroup ? stemGroup.memberIds.indexOf(fileId) : -1;
-  const fileColor = stemGroup
-    ? stemMemberColor(stemGroup.hue, stemIndex, stemGroup.memberIds.length)
-    : getFileColor(filePath);
   // Tooltip shows full path for real files (helpful when basenames truncate);
   // for managed files the path is the opaque sentinel, so just show the label.
   const tooltipLabel = isManagedFilePath(filePath) ? displayName : filePath;

@@ -1,7 +1,7 @@
 import { useStore } from "@/store";
 import { Box, Group, Loader, Stack, Text } from "@mantine/core";
-import { getFileColor, openFiles } from "@renderer/store/files";
-import { getFileSegments, selectStemGroupOfFile, stemGroupColor, stemMemberColor } from "@renderer/store/stem-groups";
+import { openFiles, selectFileColor } from "@renderer/store/files";
+import { getFileSegments, stemGroupColor } from "@renderer/store/stem-groups";
 import { HelpActionIcon } from "@renderer/components/controls/help-control";
 import { useUiSize } from "@renderer/lib/ui-density";
 import { helpProps } from "@renderer/lib/ui-controls";
@@ -14,12 +14,9 @@ const DockedFile = memo(({ fileId }: { fileId: string }) => {
   const file = openFiles[fileId];
   const isHighlighted = useStore((state) => state.highlightedSourcePath === file?.filePath);
   const isLoading = useStore((state) => !!state.filesLoading[fileId]);
-  const stemGroup = useStore((state) => selectStemGroupOfFile(state, fileId));
+  const fileColor = useStore((state) => selectFileColor(state, fileId));
   if (!file) return null;
   const displayName = file.displayName;
-  const fileColor = stemGroup
-    ? stemMemberColor(stemGroup.hue, stemGroup.memberIds.indexOf(fileId), stemGroup.memberIds.length)
-    : getFileColor(file.filePath);
 
   return (
     <Tooltip help="dock-file" detail={displayName}>
