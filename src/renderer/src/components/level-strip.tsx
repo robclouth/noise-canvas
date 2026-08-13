@@ -4,7 +4,6 @@ import { openFiles } from "@renderer/store/files";
 import { memo, useEffect, useRef } from "react";
 import { Vector2 } from "three";
 import { shallow } from "zustand/shallow";
-import { getOutputLevels } from "../lib/output-levels";
 import { screenToZoomed } from "../lib/utils";
 import { ONSET_LEGEND_HEIGHT } from "./onset-legend";
 
@@ -71,8 +70,7 @@ export const LevelStrip = memo(({ fileId }: LevelStripProps) => {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
 
-      const file = openFiles[fileId];
-      const levels = getOutputLevels(file?.audioBuffer, file?.gainReductionDb);
+      const levels = openFiles[fileId]?.outputLevels;
       if (!levels || levels.peaks.length === 0) return;
 
       const state = useStore.getState();
@@ -106,10 +104,10 @@ export const LevelStrip = memo(({ fileId }: LevelStripProps) => {
       (state) => ({
         zoom: state.filesZoom[fileId],
         offset: state.filesOffset[fileId],
-        limiter: state.limiterEnabled,
-        // Not store state, but read here so the synthesis that replaces the
-        // buffer repaints on the store update that comes with it.
-        audio: openFiles[fileId]?.audioBuffer,
+        // Not store state, but read here so the pass that replaces the levels
+        // repaints on the store update that comes with it. Keyed on identity,
+        // so every writer must hand over a new object rather than edit this one.
+        levels: openFiles[fileId]?.outputLevels,
         loading: state.filesLoading[fileId],
       }),
       draw,

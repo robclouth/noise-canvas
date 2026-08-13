@@ -109,7 +109,7 @@ The window is split into three columns plus a transport bar:
 - **Left — Brush panel.** Everything that defines the current brush: Macros, Steps, Source, Envelope, Options, Effects, Modulators.
 - **Middle — Canvas.** Every open file stacked vertically, each with its own header, time legend, and pitch legend. Minimized files collapse into the dock at the bottom.
 - **Right — Sidebar.** The brush list on top, the history tree below.
-- **Bottom — Generate and Transport.** A pattern that paints the whole file at once, then playback, grid, scale, meters, limiter, Ableton Link.
+- **Bottom — Generate and Transport.** A pattern that paints the whole file at once, then playback, grid, scale, meters, stroke limiting, Ableton Link.
 
 **Compact UI** (`Cmd/Ctrl+Shift+C`, or **View → Compact UI**) shrinks every control so more fits on smaller screens.
 
@@ -672,11 +672,11 @@ The transport bar, left to right:
 - **Beats / Snap** and **Semis / Snap** – grid spacing and snapping per axis. Set the semitone grid to **Scale** to snap to the selected scale instead of a fixed interval, and the beat grid to **Onsets** to snap to the file's detected hits instead of a division (see [Onsets](#onsets)).
 - **Swing** – swing feel for the time grid. 0% is straight, ~67% is a triplet feel, 100% shifts odd grid lines by half a cell.
 - **Tonic / Type** – the scale used for pitch snapping and for scale-based effects and modulation.
-- **Output meter** and **gain-reduction meter**.
-- **Limiter** – bakes a true-peak limiter into the synthesized audio so playback and export can't clip. Bypass it to hear or print the raw synthesis.
+- **Output meter**.
+- **Limit** – holds each stroke's own level down as you paint it, following the brush envelope so the edges stay untouched. It is baked into the stroke, so undo removes it along with the paint, and turning it off only affects what you paint next. Turn it off to paint as loud as the effect makes it.
 - **?** – outlines every area of the window at once. See [Getting Help](#getting-help).
 
-Audio is resynthesized incrementally after every stroke, so what you hear is always the real thing, not a preview.
+Audio is resynthesized incrementally after every stroke, and the spectrogram is then redrawn from the analysis of that audio — so the picture is what you will hear, down to the edits that only move phase. Nothing protects the output as a whole: the strip above the spectrogram marks any slice that runs out of headroom.
 
 ---
 

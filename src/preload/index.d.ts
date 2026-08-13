@@ -1,12 +1,6 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 import type { IpcRenderer } from "electron";
-import {
-  AnalysisParams,
-  CommitStroke,
-  CommitStrokeResult,
-  CommitWindow,
-  PackedLayout,
-} from "../main/lib/types";
+import { AnalysisParams, CommitStroke, CommitStrokeResult, CommitWindow, PackedLayout } from "../main/lib/types";
 
 // Type definitions for window globals
 

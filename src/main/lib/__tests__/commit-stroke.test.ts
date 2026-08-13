@@ -468,15 +468,7 @@ describe("commit stroke", () => {
       const before = new Float32Array(erased);
       const original = await roundTrip(analysis, analysis.data);
 
-      await addon.commitStroke(
-        erased,
-        metaOf(analysis),
-        SR,
-        PARAMS,
-        [original],
-        fullWindow(analysis),
-        gateStroke(),
-      );
+      await addon.commitStroke(erased, metaOf(analysis), SR, PARAMS, [original], fullWindow(analysis), gateStroke());
       expect(erased).toEqual(before);
 
       // Existing audio that does not match the analysis is a caller bug, and a

@@ -48,11 +48,6 @@ export const UI_CONTROLS = {
     description: "Shows the output level of the left and right channels.",
     manualSection: "transport-and-output",
   },
-  "gain-reduction-meter": {
-    label: "Gain reduction",
-    description: "Shows how far the limiter is pulling the output down.",
-    manualSection: "transport-and-output",
-  },
 
   // File header
   "file-resolution": {

@@ -236,8 +236,22 @@ describe("coefficient patch", () => {
     // Two bands, two coefficients each.
     const ranges = new Uint32Array([2, 5, 2, 4, 1, 2]);
     const pixels = new Float32Array([
-      1, 2, 3, 4, 5, 6, 7, 8, // band 2, k=5 and k=6
-      9, 10, 11, 12, 13, 14, 15, 16, // band 4, k=1 and k=2
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8, // band 2, k=5 and k=6
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16, // band 4, k=1 and k=2
     ]);
 
     const extent = applyCoefficientPatch(data, { ranges, pixels }, bandOffsets, bandStepLog2s);

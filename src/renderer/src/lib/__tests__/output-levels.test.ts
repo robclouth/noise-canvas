@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getOutputLevels, LEVEL_HOP_SECONDS } from "../output-levels";
+import { computeOutputLevels, LEVEL_HOP_SECONDS, outputLevelPoints, spliceOutputLevels } from "../output-levels";
 
 const SR = 48000;
 const HOP = Math.round(SR * LEVEL_HOP_SECONDS);
@@ -11,13 +11,13 @@ function makeBuffer(channels: Float32Array[]): AudioBuffer {
   return buffer;
 }
 
-function levelsOf(channels: Float32Array[], gainReductionDb?: Float32Array) {
-  return getOutputLevels(makeBuffer(channels), gainReductionDb);
+function levelsOf(channels: Float32Array[]) {
+  return computeOutputLevels(makeBuffer(channels));
 }
 
-describe("getOutputLevels", () => {
+describe("computeOutputLevels", () => {
   it("returns nothing for a file with no audio yet", () => {
-    expect(getOutputLevels(undefined, undefined)).toBeNull();
+    expect(computeOutputLevels(undefined)).toBeNull();
   });
 
   it("takes the peak of each hop, not its average", () => {
@@ -38,31 +38,79 @@ describe("getOutputLevels", () => {
     expect(levelsOf([quiet, loud])!.peaks[0]).toBeCloseTo(0.6, 5);
   });
 
-  it("marks samples past full scale when the limiter is bypassed", () => {
+  it("marks the slices that reach full scale", () => {
     const channel = new Float32Array(HOP * 3).fill(0.2);
     channel[HOP + 3] = 1.4;
     const levels = levelsOf([channel])!;
     expect(Array.from(levels.clipped)).toEqual([0, 1, 0]);
   });
 
-  it("marks where the limiter is holding the output down", () => {
-    // Nothing reaches full scale — the limiter already pulled it back — so the
-    // envelope is the only thing that says the headroom ran out.
-    const channel = new Float32Array(HOP * 4).fill(0.7);
-    const gainReductionDb = Float32Array.from([0, 0, 3.5, 0]);
-    const levels = levelsOf([channel], gainReductionDb)!;
-    expect(Math.max(...levels.peaks)).toBeLessThan(1);
-    expect(Array.from(levels.clipped)).toEqual([0, 0, 1, 0]);
+  it("counts one point per hop of the buffer", () => {
+    expect(outputLevelPoints(makeBuffer([new Float32Array(HOP * 3)]))).toBe(3);
+    expect(outputLevelPoints(makeBuffer([new Float32Array(HOP * 3 + 1)]))).toBe(4);
+  });
+});
+
+/** Float32 rounds, so peaks compare within a tolerance rather than exactly. */
+function expectPeaks(actual: Float32Array, expected: number[]): void {
+  expect(actual).toHaveLength(expected.length);
+  expected.forEach((value, i) => expect(actual[i]).toBeCloseTo(value, 6));
+}
+
+describe("spliceOutputLevels", () => {
+  const whole = {
+    peaks: Float32Array.from([0.1, 0.2, 0.3, 0.4, 0.5]),
+    clipped: Uint8Array.from([0, 0, 0, 0, 1]),
+  };
+
+  it("writes a commit's window over the levels it replaced, and leaves the rest", () => {
+    const spliced = spliceOutputLevels(
+      whole,
+      { startHop: 1, peaks: Float32Array.from([0.9, 0.8]), clipped: Uint8Array.from([1, 0]) },
+      5,
+    );
+    expectPeaks(spliced.peaks, [0.1, 0.9, 0.8, 0.4, 0.5]);
+    expect(Array.from(spliced.clipped)).toEqual([0, 1, 0, 0, 1]);
   });
 
-  it("reuses the result until the audio is replaced", () => {
-    const buffer = makeBuffer([new Float32Array(HOP).fill(0.3)]);
+  it("hands back a new object, so a repaint keyed on identity sees the change", () => {
+    const spliced = spliceOutputLevels(whole, { startHop: 0, peaks: whole.peaks, clipped: whole.clipped }, 5);
+    expect(spliced).not.toBe(whole);
+    expect(spliced.peaks).not.toBe(whole.peaks);
+  });
 
-    const first = getOutputLevels(buffer, undefined)!;
-    expect(getOutputLevels(buffer, undefined)).toBe(first);
+  it("grows and shrinks with the buffer", () => {
+    const longer = spliceOutputLevels(
+      whole,
+      { startHop: 5, peaks: Float32Array.from([0.7]), clipped: Uint8Array.from([0]) },
+      6,
+    );
+    expectPeaks(longer.peaks, [0.1, 0.2, 0.3, 0.4, 0.5, 0.7]);
 
-    const second = levelsOf([new Float32Array(HOP).fill(0.9)])!;
-    expect(second).not.toBe(first);
-    expect(second.peaks[0]).toBeCloseTo(0.9, 5);
+    const shorter = spliceOutputLevels(
+      whole,
+      { startHop: 0, peaks: Float32Array.from([0.6]), clipped: Uint8Array.from([0]) },
+      3,
+    );
+    expectPeaks(shorter.peaks, [0.6, 0.2, 0.3]);
+  });
+
+  it("drops a window that runs past the end rather than overflowing", () => {
+    const spliced = spliceOutputLevels(
+      whole,
+      { startHop: 4, peaks: Float32Array.from([0.9, 0.9, 0.9]), clipped: Uint8Array.from([1, 1, 1]) },
+      5,
+    );
+    expectPeaks(spliced.peaks, [0.1, 0.2, 0.3, 0.4, 0.9]);
+  });
+
+  it("starts from nothing when the file has no levels yet", () => {
+    const spliced = spliceOutputLevels(
+      undefined,
+      { startHop: 1, peaks: Float32Array.from([0.5]), clipped: Uint8Array.from([1]) },
+      3,
+    );
+    expectPeaks(spliced.peaks, [0, 0.5, 0]);
+    expect(Array.from(spliced.clipped)).toEqual([0, 1, 0]);
   });
 });

@@ -1,9 +1,6 @@
 /** Slice of output the strip resolves, matching the limiter's envelope hop. */
 export const LEVEL_HOP_SECONDS = 0.005;
 
-/** Gain reduction above which the limiter counts as holding a slice down. */
-const GAIN_REDUCTION_THRESHOLD_DB = 0.1;
-
 export interface OutputLevels {
   /** Peak sample magnitude per hop, linear, where 1 is full scale. */
   peaks: Float32Array;
@@ -11,24 +8,16 @@ export interface OutputLevels {
   clipped: Uint8Array;
 }
 
-const cache = new WeakMap<AudioBuffer, OutputLevels>();
-
 /**
- * Per-hop peak level of a synthesized output, and where it ran out of headroom.
+ * Per-hop peak level of a whole buffer, and where it ran out of headroom.
  *
- * With the limiter engaged the buffer cannot exceed the ceiling, so the
- * limiter's own gain-reduction envelope is what marks those slices; bypassed,
- * the samples pass full scale directly. Cached against the audio buffer, so a
- * new synthesis recomputes and repeated draws do not.
+ * Nothing limits the output as a whole any more, so a slice at or past full
+ * scale is the only thing that counts as overloaded here. A commit measures
+ * its own window and splices the result in; this is for the passes that
+ * replace the whole buffer.
  */
-export function getOutputLevels(
-  audioBuffer: AudioBuffer | undefined,
-  gainReductionDb: Float32Array | undefined,
-): OutputLevels | null {
+export function computeOutputLevels(audioBuffer: AudioBuffer | undefined): OutputLevels | null {
   if (!audioBuffer) return null;
-
-  const cached = cache.get(audioBuffer);
-  if (cached) return cached;
 
   const { sampleRate, length, numberOfChannels } = audioBuffer;
   const hop = Math.max(1, Math.round(sampleRate * LEVEL_HOP_SECONDS));
@@ -45,17 +34,38 @@ export function getOutputLevels(
   }
 
   const clipped = new Uint8Array(points);
-  if (gainReductionDb && gainReductionDb.length > 0) {
-    // The envelope spans the buffer evenly rather than sharing this hop count.
-    for (let point = 0; point < points; point++) {
-      const index = Math.min(gainReductionDb.length - 1, Math.floor((point / points) * gainReductionDb.length));
-      clipped[point] = gainReductionDb[index] > GAIN_REDUCTION_THRESHOLD_DB ? 1 : 0;
-    }
-  } else {
-    for (let point = 0; point < points; point++) clipped[point] = peaks[point] >= 1 ? 1 : 0;
+  for (let point = 0; point < points; point++) clipped[point] = peaks[point] >= 1 ? 1 : 0;
+
+  return { peaks, clipped };
+}
+
+/**
+ * Writes a commit's own measurements of its window into the levels of the
+ * whole file, growing the arrays if the buffer got longer. Returns a new
+ * object, so a repaint keyed on identity sees the change.
+ */
+export function spliceOutputLevels(
+  existing: OutputLevels | undefined,
+  window: { startHop: number; peaks: Float32Array; clipped: Uint8Array },
+  totalPoints: number,
+): OutputLevels {
+  const peaks = new Float32Array(totalPoints);
+  const clipped = new Uint8Array(totalPoints);
+  if (existing) {
+    peaks.set(existing.peaks.subarray(0, Math.min(existing.peaks.length, totalPoints)));
+    clipped.set(existing.clipped.subarray(0, Math.min(existing.clipped.length, totalPoints)));
   }
 
-  const levels: OutputLevels = { peaks, clipped };
-  cache.set(audioBuffer, levels);
-  return levels;
+  const count = Math.min(window.peaks.length, Math.max(0, totalPoints - window.startHop));
+  for (let i = 0; i < count; i++) {
+    peaks[window.startHop + i] = window.peaks[i];
+    clipped[window.startHop + i] = window.clipped[i];
+  }
+  return { peaks, clipped };
+}
+
+/** How many hops a buffer of this length covers. */
+export function outputLevelPoints(audioBuffer: AudioBuffer): number {
+  const hop = Math.max(1, Math.round(audioBuffer.sampleRate * LEVEL_HOP_SECONDS));
+  return Math.max(1, Math.ceil(audioBuffer.length / hop));
 }

@@ -8,7 +8,8 @@ import { Vector2 } from "three";
 import * as Tone from "tone";
 import { host } from "../lib/host";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
-import type { AnalysisParams, CommitStrokeResult, PackedOnsets } from "../../../main/lib/types";
+import type { AnalysisParams, CommitLevels, CommitStrokeResult, PackedOnsets } from "../../../main/lib/types";
+import { computeOutputLevels, outputLevelPoints, spliceOutputLevels, type OutputLevels } from "../lib/output-levels";
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
@@ -22,6 +23,8 @@ interface SynthesisAudioResult {
   peak: number;
   gainReductionDb?: Float32Array;
   maxGainReductionDb?: number;
+  /** Peak level per 5 ms hop over the whole buffer, and where it overloads. */
+  outputLevels?: OutputLevels;
   onsets?: PackedOnsets;
   onsetOdfMax?: number;
   onsetBandMax?: Float32Array;
@@ -67,6 +70,8 @@ export interface FilesState {
       autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null;
       onsetStartSec?: number;
       onsetEndSec?: number;
+      /** A commit's own measurements of the window it rebuilt. */
+      levelWindow?: CommitLevels;
     },
   ) => Promise<void>;
   /**
@@ -1605,7 +1610,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           payload.analysisMetadata,
           originalAnalysis.sampleRate,
           analysisParams,
-          get().limiterEnabled,
+          false,
           existingAudio,
           startFrame,
           endFrame,
@@ -1664,6 +1669,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     file.audioPeak = result.peak > 0 ? result.peak : 1;
     file.gainReductionDb = result.gainReductionDb;
     file.maxGainReductionDb = result.maxGainReductionDb;
+    file.outputLevels = options.levelWindow
+      ? spliceOutputLevels(file.outputLevels, options.levelWindow, outputLevelPoints(audioBuffer))
+      : (computeOutputLevels(audioBuffer) ?? undefined);
     if (result.onsets) {
       const { onsetStartSec, onsetEndSec } = options;
       file.onsets =
@@ -1674,10 +1682,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         file.onsetReference = { odfMax: result.onsetOdfMax, bandMax: result.onsetBandMax };
       }
     }
-    if (get().activeFileId === fileId) {
-      get().setGainReduction(result.gainReductionDb ?? null, result.maxGainReductionDb ?? 0);
-    }
-
     const { autoPlaybackParams } = options;
     if (autoPlaybackParams) {
       const autoPlayStart = performance.now();
@@ -1762,6 +1766,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         autoPlaybackParams: snapshot.autoPlaybackParams,
         onsetStartSec: params.onsetStartSec,
         onsetEndSec: params.onsetEndSec,
+        levelWindow: window ? result.levels : undefined,
       });
       return result;
     } finally {
@@ -1839,7 +1844,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // the next synthesis re-derives it.
       file.gainReductionDb = undefined;
       file.maxGainReductionDb = undefined;
-      if (get().activeFileId === fileId) get().setGainReduction(null, 0);
+      file.outputLevels = undefined;
 
       // Hot-swap if currently playing this file
       if (get().isPlaying && get().activeFileId === fileId) {
@@ -2462,9 +2467,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
 
       get().stopAudio();
-      get().setGainReduction(file.gainReductionDb ?? null, file.maxGainReductionDb ?? 0);
-    } else {
-      get().setGainReduction(null, 0);
     }
     set({ activeFileId });
   },

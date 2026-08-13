@@ -1,5 +1,6 @@
 import type { FileRendererHandle } from "@renderer/components/file-renderer";
 import type { BrushStep } from "@renderer/parameters";
+import type { OutputLevels } from "@renderer/lib/output-levels";
 import type { Vector2 } from "three";
 import type { AppState } from "./app";
 import type { AudioState } from "./audio";
@@ -80,10 +81,13 @@ export type OpenFile = {
   spectrogramData?: SpectrogramData;
   audioBuffer?: AudioBuffer;
   audioPeak?: number;
-  // Baked-limiter gain-reduction envelope for this file's latest synthesis
-  // (dB of reduction per ~5 ms hop, spanning the whole buffer) and its peak.
+  // Gain reduction the last stroke's limiting applied (dB per 5 ms hop over
+  // the window it rebuilt) and its peak.
   gainReductionDb?: Float32Array;
   maxGainReductionDb?: number;
+  // Peak level per 5 ms hop over the whole buffer, and where it overloads.
+  // A commit measures the window it rebuilt and splices it in.
+  outputLevels?: OutputLevels;
   // Detected onsets as flat [timeSec, salience] pairs, from analysis and
   // refreshed by synthesis so they follow what has been painted. Raw and
   // unthresholded — lib/onset-map.ts applies the sensitivity control.

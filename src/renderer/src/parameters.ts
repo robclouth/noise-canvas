@@ -1635,10 +1635,10 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   },
   limiterEnabled: {
     kind: "boolean",
-    name: "Limiter",
-    label: "Limiter",
+    name: "Limit Strokes",
+    label: "Limit",
     description:
-      "Bakes a true-peak limiter into the synthesized audio so it can't clip on playback or export. Bypass it to hear or print the raw synthesis.",
+      "Holds each stroke's own level down as you paint it, following the brush envelope so the edges stay untouched. Turn it off to paint as loud as the effect makes it.",
     default: true,
   },
   gridSwing: {

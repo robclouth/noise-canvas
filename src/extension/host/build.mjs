@@ -31,10 +31,7 @@ await build({
 // The gaborator addon is a dynamic require, so esbuild leaves it out of the
 // bundle. Copy it next to the host entry — getGaboratorPath() looks there
 // first, and without it every stroke in a packaged extension fails.
-await copyFile(
-  join(root, "build/Release/gaborator_addon.node"),
-  join(outDir, "host/gaborator_addon.node"),
-);
+await copyFile(join(root, "build/Release/gaborator_addon.node"), join(outDir, "host/gaborator_addon.node"));
 
 const manifestPath = join(root, "src/extension/manifest.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
