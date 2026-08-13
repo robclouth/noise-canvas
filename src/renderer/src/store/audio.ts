@@ -18,6 +18,7 @@ export interface AudioState {
   setAutoPlayStroke: (value: boolean) => void;
   limiterEnabled: boolean;
   showClipping: boolean;
+  clipAttributionRevision: number;
   gainReductionDb: Float32Array | null;
   maxGainReductionDb: number;
   setGainReduction: (envDb: Float32Array | null, maxDb: number) => void;
@@ -177,9 +178,13 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
   // file when it changes.
   limiterEnabled: true,
 
-  // Driven by the `showClipping` parameter; synthesis computes the attribution
-  // map only while it is on.
+  // Driven by the `showClipping` parameter; the attribution map is built only
+  // while it is on.
   showClipping: false,
+
+  // Bumped whenever a file's attribution map is rebuilt, so the display, which
+  // only draws on demand, knows to repaint.
+  clipAttributionRevision: 0,
 
   loopRegion: null,
   setLoopRegion: (region) => {

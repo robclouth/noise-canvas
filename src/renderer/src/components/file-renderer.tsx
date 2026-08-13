@@ -276,6 +276,8 @@ const FileRendererInner = memo(
             gridSwing: state.gridSwing,
             minDb: state.displayMinDb,
             maxDb: state.displayMaxDb,
+            showClipping: state.showClipping,
+            clipAttributionRevision: state.clipAttributionRevision,
             scaleTonic: state.scaleTonic,
             scaleType: state.scaleType,
             pickingFileParam: state.pickingFileParam,
