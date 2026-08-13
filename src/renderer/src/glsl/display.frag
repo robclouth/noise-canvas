@@ -141,9 +141,8 @@ void main() {
         // coefficients driving the peak outwards, cyan marks ones holding it
         // back — attenuating the latter would make the clipping worse.
         if (hasClipAttribution) {
-            // The band whose strip this pixel falls in, not the lower half of
-            // the interpolation pair, so the tint sits on the coefficient it
-            // blames.
+            // The band whose strip this pixel falls in. b0 is the lower half of
+            // the vertical interpolation pair and sits half a band below it.
             float blameBand = clamp(floor((1.0 - zoomedUv.y) * sourceBandCount), 0.0, sourceBandCount - 1.0);
             float blame = readPackedData(
                 vec2(zoomedUv.x, 1.0 - (blameBand + 0.5) / sourceBandCount),

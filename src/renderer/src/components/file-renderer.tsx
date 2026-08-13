@@ -601,6 +601,34 @@ const FileRendererInner = memo(
       uniforms.scaleGridEnabled.value = gridSizeSemis <= 0 && semitoneHeightPx >= MIN_GRID_SPACING_PX;
       uniforms.scaleOffsets.value = buildScaleOffsets(state.scaleTonic, state.scaleType);
       uniforms.pitchOffsetSemisFromC0.value = minFreqSemisAboveC0(spectrogramData.minFreq);
+
+      // Upload the overload map when synthesis has produced a new one.
+      const clipAttribution = state.showClipping ? (openFiles[fileId]?.clipAttribution ?? null) : null;
+      if (clipAttribution !== clipAttributionDataRef.current) {
+        clipAttributionTexRef.current?.dispose();
+        clipAttributionTexRef.current = null;
+        clipAttributionDataRef.current = clipAttribution;
+        if (clipAttribution) {
+          const tex = new DataTexture(
+            clipAttribution,
+            spectrogramData.textureWidth,
+            spectrogramData.textureHeight,
+            RedFormat,
+            FloatType,
+          );
+          tex.internalFormat = "R32F";
+          tex.minFilter = NearestFilter;
+          tex.magFilter = NearestFilter;
+          tex.wrapS = ClampToEdgeWrapping;
+          tex.wrapT = ClampToEdgeWrapping;
+          tex.generateMipmaps = false;
+          tex.needsUpdate = true;
+          clipAttributionTexRef.current = tex;
+        }
+      }
+      uniforms.showClipping.value = state.showClipping;
+      uniforms.hasClipAttribution.value = clipAttributionTexRef.current !== null;
+      uniforms.clipAttributionTex.value = clipAttributionTexRef.current || placeholderTexture;
     };
 
     /**
@@ -1025,34 +1053,6 @@ const FileRendererInner = memo(
 
       applyStaticDisplayUniforms(state, gl.domElement.width, gl.domElement.height);
       displayMaterial.uniforms.sourceSpectrogramTex.value = displayTexture || placeholderTexture;
-
-      // Upload the clipping attribution map when synthesis has produced a new one.
-      const clipAttribution = state.showClipping ? (file.clipAttribution ?? null) : null;
-      if (clipAttribution !== clipAttributionDataRef.current) {
-        clipAttributionTexRef.current?.dispose();
-        clipAttributionTexRef.current = null;
-        clipAttributionDataRef.current = clipAttribution;
-        if (clipAttribution) {
-          const tex = new DataTexture(
-            clipAttribution,
-            spectrogramData.textureWidth,
-            spectrogramData.textureHeight,
-            RedFormat,
-            FloatType,
-          );
-          tex.internalFormat = "R32F";
-          tex.minFilter = NearestFilter;
-          tex.magFilter = NearestFilter;
-          tex.wrapS = ClampToEdgeWrapping;
-          tex.wrapT = ClampToEdgeWrapping;
-          tex.generateMipmaps = false;
-          tex.needsUpdate = true;
-          clipAttributionTexRef.current = tex;
-        }
-      }
-      displayMaterial.uniforms.showClipping.value = state.showClipping;
-      displayMaterial.uniforms.hasClipAttribution.value = clipAttributionTexRef.current !== null;
-      displayMaterial.uniforms.clipAttributionTex.value = clipAttributionTexRef.current || placeholderTexture;
 
       // In Full mode, the displayed brush rectangle anchors to 0 on that axis so it
       // spans the full file extent regardless of cursor position.

@@ -7,10 +7,9 @@ import { computeClipAttribution, findOverloads } from "../../../renderer/src/lib
 import type { GaboratorAnalysisResult } from "../types";
 
 // Exercises clipping detection against the real analysis and synthesis rather
-// than a hand-built spectrogram: the baked limiter's release runs far longer
-// than the peak that triggers it, so on dense material its gain-reduction
-// envelope never returns to zero, and any detector that reduces a contiguous
-// reduced stretch to a single peak reports one overload for the whole file.
+// than a hand-built spectrogram. The baked limiter's release outlasts the peak
+// that triggers it, so on dense material its gain-reduction envelope never
+// returns to zero — which a mock envelope does not reproduce.
 
 const require = createRequire(import.meta.url);
 const addon = require(join(__dirname, "../../../../build/Release/gaborator_addon.node")) as {

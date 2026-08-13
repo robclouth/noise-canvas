@@ -182,8 +182,8 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
   // while it is on.
   showClipping: false,
 
-  // Bumped whenever a file's attribution map is rebuilt, so the display, which
-  // only draws on demand, knows to repaint.
+  // Bumped whenever a file's overload map is rebuilt. The display only draws on
+  // demand, so it needs a state change to repaint from.
   clipAttributionRevision: 0,
 
   loopRegion: null,

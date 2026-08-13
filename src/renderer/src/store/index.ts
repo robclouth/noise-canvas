@@ -256,9 +256,7 @@ export const useStore = create<State>()(
               }),
             );
             // The limiter is baked into the synthesized audio, so toggling it is
-            // only audible after re-synthesizing the active file. The overload
-            // map is derived from audio that already exists, so it is rebuilt in
-            // place instead.
+            // only audible after re-synthesizing the active file.
             if (key === "limiterEnabled") {
               const { activeFileId, synthesizeFile } = get();
               if (activeFileId) void synthesizeFile(activeFileId);

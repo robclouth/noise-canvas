@@ -1743,8 +1743,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   },
 
   // Rebuilds the overload map from the audio and gain-reduction envelope the
-  // last synthesis already left on the file, so switching the overlay on does
-  // not cost a synthesis pass.
+  // last synthesis left on the file.
   refreshClipAttribution: async (fileId: string) => {
     const file = openFiles[fileId];
     if (!file) return;

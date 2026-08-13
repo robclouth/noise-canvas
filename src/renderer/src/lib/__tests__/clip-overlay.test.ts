@@ -242,8 +242,7 @@ describe("display shader: clipping overlay", () => {
     const sample = renderDisplay(data, null, false);
     const { r, g, b } = sample(16, 32);
 
-    // The magnitude tint answers to the toggle too, so a hot file is not
-    // permanently washed red when the overlay is switched off.
+    // The magnitude tint answers to the toggle, not just to the attribution map.
     expect(Math.abs(r - g)).toBeLessThan(12);
     expect(Math.abs(g - b)).toBeLessThan(12);
   });

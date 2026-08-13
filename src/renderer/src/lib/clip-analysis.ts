@@ -59,9 +59,8 @@ const MAX_OVERLOADS = 512;
 
 /**
  * How far below the buffer's ceiling a peak may sit and still count as one the
- * limiter is holding down. The limiter drives every peak it acts on up against
- * the ceiling, so a quieter peak under the same gain reduction is only there
- * because the envelope is still releasing from an earlier one.
+ * limiter is holding down. A quieter peak under the same gain reduction is the
+ * envelope still releasing from an earlier one.
  */
 const CEILING_TOLERANCE_DB = 1;
 
@@ -72,12 +71,10 @@ const ATOM_SIGMA_CUTOFF = 3;
  * Locates the samples where the output overloaded.
  *
  * With the limiter engaged the buffer never exceeds the ceiling, so the
- * gain-reduction envelope is what marks them. The envelope's release spans far
- * more than the peak that triggered it — on dense material it never returns to
- * zero — so each hop is examined on its own rather than reduced to one peak per
- * contiguous reduced stretch, and a hop counts only when its loudest sample
- * reaches the ceiling the limiter is holding it to. With the limiter bypassed
- * the overshoot is visible in the samples directly.
+ * gain-reduction envelope is what marks them. Its release outlasts the peak that
+ * triggered it and on dense material never returns to zero, so each hop is
+ * judged on its own and counts only when its loudest sample reaches the ceiling.
+ * With the limiter bypassed the overshoot is visible in the samples directly.
  */
 export function findOverloads(
   channels: Float32Array[],
