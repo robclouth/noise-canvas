@@ -140,6 +140,26 @@ describe("section presets", () => {
     expect(wrong).toEqual([]);
   });
 
+  it("ships sequencer grids that match the step counts beside them", () => {
+    const wrong: string[] = [];
+
+    for (const preset of factorySectionPresets) {
+      const data = preset.values.SeqData;
+      if (typeof data !== "string") continue;
+
+      const rows = (JSON.parse(data) as { values: number[][] }).values;
+      const { SeqStepsX: stepsX, SeqStepsY: stepsY } = preset.values;
+
+      if (rows.length !== stepsY) wrong.push(`${preset.id}: ${rows.length} rows, SeqStepsY ${stepsY}`);
+      for (const row of rows) {
+        if (row.length !== stepsX) wrong.push(`${preset.id}: ${row.length} cells, SeqStepsX ${stepsX}`);
+        if (row.some((cell) => cell < 0 || cell > 1)) wrong.push(`${preset.id}: a cell is outside 0–1`);
+      }
+    }
+
+    expect(wrong).toEqual([]);
+  });
+
   it("ships factory presets whose values are in range", () => {
     const wrong: string[] = [];
 
