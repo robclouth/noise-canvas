@@ -1,6 +1,6 @@
 import { DEFAULT_EFFECTS, EffectItem } from "@renderer/effects/types";
 import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
-import { shapes } from "../effects/overtones-shapes";
+import { CloneShapeKey } from "../effects/clone-shapes";
 
 export interface EffectsState {
   // Note: effects is stored per-step, but defined here for ParameterKey type compatibility
@@ -33,10 +33,9 @@ export interface EffectsState {
   cloneDirectionX: number;
   cloneDirectionY: number;
   cloneEdgeMode: number;
-  overtonesCount: number;
-  overtonesScale: number;
-  overtonesDecay: number;
-  overtonesShape: keyof typeof shapes;
+  cloneShapeX: CloneShapeKey;
+  cloneShapeY: CloneShapeKey;
+  cloneSumMode: number;
   evolveFlow: number;
   evolveSpread: number;
   evolveGrow: number;
@@ -57,6 +56,11 @@ export interface EffectsState {
   transmuteMode: number;
   transmuteAmount: number;
   transmuteCurve: number;
+  reflowMode: number;
+  reflowAmount: number;
+  reflowPitch: number;
+  reflowStretch: number;
+  reflowReach: number;
   waveshapeMode: number;
   waveshapeDrive: number;
   waveshapeTilt: number;
@@ -107,12 +111,9 @@ export const createEffectsSlice = (): EffectsState => {
     cloneDirectionX: getParameterDef("cloneDirectionX").default,
     cloneDirectionY: getParameterDef("cloneDirectionY").default,
     cloneEdgeMode: getParameterDef("cloneEdgeMode").default,
-
-    // ---------------- Overtones ----------------
-    overtonesCount: getParameterDef("overtonesCount").default,
-    overtonesScale: getParameterDef("overtonesScale").default,
-    overtonesDecay: getParameterDef("overtonesDecay").default,
-    overtonesShape: getParameterDef("overtonesShape").default,
+    cloneShapeX: getParameterDef("cloneShapeX").default,
+    cloneShapeY: getParameterDef("cloneShapeY").default,
+    cloneSumMode: getParameterDef("cloneSumMode").default,
 
     // ---------------- Synthesize ----------------
     synthesizeBrushType: getParameterDef("synthesizeBrushType").default,
@@ -144,6 +145,13 @@ export const createEffectsSlice = (): EffectsState => {
     transmuteMode: getParameterDef("transmuteMode").default,
     transmuteAmount: getParameterDef("transmuteAmount").default,
     transmuteCurve: getParameterDef("transmuteCurve").default,
+
+    // ---------------- Reflow ----------------
+    reflowMode: getParameterDef("reflowMode").default,
+    reflowAmount: getParameterDef("reflowAmount").default,
+    reflowPitch: getParameterDef("reflowPitch").default,
+    reflowStretch: getParameterDef("reflowStretch").default,
+    reflowReach: getParameterDef("reflowReach").default,
 
     // ---------------- Waveshape ----------------
     waveshapeMode: getParameterDef("waveshapeMode").default,

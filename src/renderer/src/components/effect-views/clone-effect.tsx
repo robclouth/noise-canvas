@@ -12,10 +12,13 @@ export const CloneEffect = memo(function CloneEffect() {
       <ParameterControl paramKey="cloneSpaceSemis" color={COLOR} />
       <ParameterControl paramKey="cloneCountX" color={COLOR} />
       <ParameterControl paramKey="cloneCountY" color={COLOR} />
+      <ParameterControl paramKey="cloneShapeX" color={COLOR} />
+      <ParameterControl paramKey="cloneShapeY" color={COLOR} />
       <ParameterControl paramKey="cloneDirectionX" color={COLOR} />
       <ParameterControl paramKey="cloneDirectionY" color={COLOR} />
       <ParameterControl paramKey="cloneDecay" color={COLOR} />
       <ParameterControl paramKey="cloneEdgeMode" color={COLOR} />
+      <ParameterControl paramKey="cloneSumMode" color={COLOR} />
     </SimpleGrid>
   );
 });

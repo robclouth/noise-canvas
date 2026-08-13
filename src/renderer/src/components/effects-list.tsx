@@ -17,7 +17,7 @@ import { CloneEffect } from "./effect-views/clone-effect";
 import { ConvolveEffect } from "./effect-views/convolve-effect";
 import { DynamicsEffect } from "./effect-views/dynamics-effect";
 import { EvolveEffect } from "./effect-views/evolve-effect";
-import { HarmonicsEffect } from "./effect-views/overtones-effect";
+import { ReflowEffect } from "./effect-views/reflow-effect";
 import { SynthesizeEffect } from "./effect-views/synthesize-effect";
 import { SortEffect } from "./effect-views/sort-effect";
 import { TransformEffect } from "./effect-views/transform-effect";
@@ -27,7 +27,6 @@ import { WaveshapeEffect } from "./effect-views/waveshape-effect";
 const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
   dynamics: <DynamicsEffect />,
   transform: <TransformEffect />,
-  overtones: <HarmonicsEffect />,
   blur: <BlurEffect />,
   clone: <CloneEffect />,
   synthesize: <SynthesizeEffect />,
@@ -37,6 +36,7 @@ const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
   transmute: <TransmuteEffect />,
   waveshape: <WaveshapeEffect />,
   convolve: <ConvolveEffect />,
+  reflow: <ReflowEffect />,
 };
 
 import { ParameterKey } from "@/store/types";
@@ -51,7 +51,6 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
     "transformRotation",
     "transformEdgeMode",
   ],
-  overtones: ["overtonesCount", "overtonesScale", "overtonesDecay", "overtonesShape"],
   blur: [
     "blurAmountTime",
     "blurAmountPitch",
@@ -67,10 +66,13 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
     "cloneSpaceSemis",
     "cloneCountX",
     "cloneCountY",
+    "cloneShapeX",
+    "cloneShapeY",
     "cloneDirectionX",
     "cloneDirectionY",
     "cloneDecay",
     "cloneEdgeMode",
+    "cloneSumMode",
   ],
   synthesize: ["synthesizeBrushType"],
   evolve: [
@@ -98,6 +100,7 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
     "convolveGainDb",
   ],
   align: [],
+  reflow: ["reflowMode", "reflowAmount", "reflowPitch", "reflowStretch", "reflowReach"],
 };
 
 const MAX_EFFECTS = 10;

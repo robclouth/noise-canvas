@@ -267,6 +267,13 @@ export abstract class BaseEffect {
 
   abstract updateEffectUniforms(props: UpdateEffectUniformsProps): void;
 
+  /**
+   * Pass indices that do real work at the given settings. Returning fewer
+   * indices skips those passes for the stroke, and an empty array skips the
+   * effect. Left undefined, every pass runs.
+   */
+  getActivePasses?(state: State): number[];
+
   updateCommonUniforms({ commonUniforms, passIndex }: { commonUniforms: CommonUniforms; passIndex: number }): void {
     const material = this.materials[passIndex];
     if (!material) return;

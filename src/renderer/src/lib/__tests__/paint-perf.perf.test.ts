@@ -187,7 +187,6 @@ describe("painting performance", () => {
     { label: "dynamics", keys: ["dynamics"] },
     { label: "transform", keys: ["transform"] },
     { label: "blur", keys: ["blur"] },
-    { label: "overtones", keys: ["overtones"] },
     { label: "waveshape", keys: ["waveshape"] },
     { label: "transmute", keys: ["transmute"] },
     { label: "evolve", keys: ["evolve"] },

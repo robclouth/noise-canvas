@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 // Mirror the mocks used by managed-files.test.ts so importing history-manager
 // doesn't pull the full zustand store (circular init deps outside Electron).
 vi.mock("@renderer/effects", () => ({
-  effects: { transform: {}, dynamics: {}, blur: {}, overtones: {}, synthesize: {}, passthrough: {} },
+  effects: { transform: {}, dynamics: {}, blur: {}, synthesize: {}, passthrough: {} },
 }));
 vi.mock("@mantine/notifications", () => ({ notifications: { show: vi.fn() } }));
 vi.mock("../modals", () => ({

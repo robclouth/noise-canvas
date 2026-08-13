@@ -2,6 +2,7 @@
 - After big changes, run "npm run test:run" to run tests.
 - When creating tests, you can't just duplicate all of the logic of the code that you're testing in the test. You must use the original code as much as possible.
 - Never use "any" type.
+- Any string a user reads — a parameter label or description, an effect blurb, a control tooltip, a tour step, the manual — follows `docs/copy-style.md`. Read it before writing copy. British English, `-ise` not `-ize`, in visible strings only; code identifiers keep their spelling.
 - Use "npx node-gyp rebuild" to rebuild the gaborator addon after changing the C++ code. Run the native addon tests (e.g. the baked limiter) with "npm run test:addon" — they load the built `.node` in a node environment, separate from the browser/WebGL renderer suite.
 - Commit messages follow gitmoji: `<emoji> (scope): <imperative description>`. Use the unicode emoji (e.g. ✨), not the `:shortcode:`, and put the scope in round brackets. Common emojis: ✨ feature, 🐛 fix, ♻️ refactor, ⚡️ performance, 🎨 code structure/format, ✅ tests, 📝 docs.
 
@@ -36,7 +37,7 @@ This is a spectrogram editor built with Electron, React, and Three.js/WebGL. Use
 
 **Effects** (`src/renderer/src/effects/`)
 
-- Each effect (blur, transform, dynamics, overtones, synthesize, evolve, passthrough) has its own file
+- Each effect (blur, transform, dynamics, clone, synthesize, evolve, passthrough) has its own file
 - Effects have one or more shader passes (materials)
 - `base-effect.ts` - Base class and shared uniforms
 - Effects are registered in an `EffectsRegistry` and applied in order

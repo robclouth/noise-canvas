@@ -90,26 +90,18 @@ function createFlatImageTexture(): DataTexture {
 }
 
 async function loadEffects(): Promise<EffectsRegistry> {
-  const [
-    { transformEffect },
-    { dynamicsEffect },
-    { blurEffect },
-    { overtonesEffect },
-    { synthesizeEffect },
-    { passThroughEffect },
-  ] = await Promise.all([
-    import("../../effects/transform-effect"),
-    import("../../effects/dynamics-effect"),
-    import("../../effects/blur-effect"),
-    import("../../effects/overtones-effect"),
-    import("../../effects/synthesize-effect"),
-    import("../../effects/passthrough-effect"),
-  ]);
+  const [{ transformEffect }, { dynamicsEffect }, { blurEffect }, { synthesizeEffect }, { passThroughEffect }] =
+    await Promise.all([
+      import("../../effects/transform-effect"),
+      import("../../effects/dynamics-effect"),
+      import("../../effects/blur-effect"),
+      import("../../effects/synthesize-effect"),
+      import("../../effects/passthrough-effect"),
+    ]);
   return {
     transform: transformEffect,
     dynamics: dynamicsEffect,
     blur: blurEffect,
-    overtones: overtonesEffect,
     synthesize: synthesizeEffect,
     passthrough: passThroughEffect,
   };
@@ -119,7 +111,6 @@ const effectsList = [
   { id: "t", effect: "transform" as const, enabled: true, params: {} },
   { id: "d", effect: "dynamics" as const, enabled: false, params: {} },
   { id: "b", effect: "blur" as const, enabled: false, params: {} },
-  { id: "o", effect: "overtones" as const, enabled: false, params: {} },
   { id: "s", effect: "synthesize" as const, enabled: false, params: {} },
 ];
 

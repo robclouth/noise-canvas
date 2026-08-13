@@ -8,7 +8,6 @@ vi.mock("@renderer/effects", () => ({
     transform: {},
     dynamics: {},
     blur: {},
-    overtones: {},
     synthesize: {},
     passthrough: {},
   },

@@ -7,7 +7,6 @@
 export const EFFECT_KEYS = [
   "dynamics",
   "transform",
-  "overtones",
   "blur",
   "clone",
   "synthesize",
@@ -19,6 +18,7 @@ export const EFFECT_KEYS = [
   "waveshape",
   "convolve",
   "align",
+  "reflow",
 ] as const;
 
 // Effect type derived from the keys
@@ -44,8 +44,32 @@ export const DEFAULT_EFFECTS: EffectItem[] = [];
 // Backward compatibility alias
 export const DEFAULT_EFFECT_ORDER = DEFAULT_EFFECTS;
 
+const OVERTONES_SHAPE_TO_CLONE_SHAPE: Record<string, string> = {
+  logarithmic: "harmonic",
+  exponential: "geometric",
+  octaves: "even",
+  selectedScale: "scale",
+};
+
+function migrateOvertonesParams(params: EffectParams): EffectParams {
+  const scale = typeof params.overtonesScale === "number" ? params.overtonesScale : 1;
+  const migrated: EffectParams = {
+    cloneCountX: 1,
+    cloneCountY: typeof params.overtonesCount === "number" ? params.overtonesCount : 32,
+    cloneSpaceSemis: 12 * scale,
+    cloneSpaceBeats: 0,
+    cloneDirectionY: 0,
+    cloneShapeY: OVERTONES_SHAPE_TO_CLONE_SHAPE[String(params.overtonesShape ?? "logarithmic")] ?? "harmonic",
+    cloneSumMode: 1,
+    cloneEdgeMode: 1,
+  };
+  if (typeof params.overtonesDecay === "number") migrated.cloneDecay = params.overtonesDecay;
+  return migrated;
+}
+
 /**
  * Synchronizes an effects array with the current EFFECT_KEYS.
+ * - Rewrites retired effects onto their replacement
  * - Removes effects that no longer exist in EFFECT_KEYS
  * - Adds unique IDs to entries that don't have them (migration from old format)
  * - Adds empty params object if missing
@@ -64,6 +88,11 @@ export function syncEffects(
 
   // Filter out effects that no longer exist and ensure all fields are present
   return effects
+    .map((item) =>
+      item.effect === "overtones"
+        ? { ...item, effect: "clone", params: migrateOvertonesParams(item.params ?? {}) }
+        : item,
+    )
     .filter((item) => validEffectKeys.includes(item.effect as EffectType))
     .map((item) => ({
       id: item.id ?? crypto.randomUUID(),
