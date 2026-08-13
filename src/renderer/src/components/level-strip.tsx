@@ -8,7 +8,7 @@ import { getOutputLevels } from "../lib/output-levels";
 import { screenToZoomed } from "../lib/utils";
 import { ONSET_LEGEND_HEIGHT } from "./onset-legend";
 
-const LEVEL_STRIP_HEIGHT = ONSET_LEGEND_HEIGHT;
+const LEVEL_STRIP_HEIGHT = Math.round(ONSET_LEGEND_HEIGHT / 2);
 
 /** Level the ramp starts to lift off the floor. */
 const FLOOR_DB = -60;
