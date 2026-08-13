@@ -199,7 +199,7 @@ like.
   negatives (`−100%`).
 - **A band is a band.** In user copy, the pitch rows are **bands**, never
   "bins". "Bin" is a code word.
-- **Names, fixed**: brush, step, stamp (one application), stroke (a drag),
+- **Names, fixed**: brush, step, stroke (one brush application, click or drag),
   canvas, dock, source file, spectrogram, transport, grid, scale.
 
 ---
@@ -233,7 +233,7 @@ displaced material is shown where it goes.
 
 **Anchor** — 195 characters, carrying two mode meanings and a suggestion.
 
-> **Before** Puts the cursor on the stamp's bottom-left onset corner, so snapping locks hits to the grid, or on its centre, so snapping lands the envelope peak on the grid. Corner for rhythm, Center for pads.
+> **Before** Puts the cursor on the stroke's bottom-left onset corner, so snapping locks hits to the grid, or on its centre, so snapping lands the envelope peak on the grid. Corner for rhythm, Center for pads.
 >
 > **After** Sets where the cursor sits on the brush, which decides what snapping locks to the grid.
 >
@@ -249,7 +249,7 @@ displaced material is shown where it goes.
 >
 > **Manual** −100% is an early pluck, 0% is centred, +100% is a delayed hit. Contextual Time modulation flattens the envelope rather than moving its peak.
 >
-> **Hint** Modulate Skew ↔ with a pattern slower than the brush for a peak that slides from stamp to stamp.
+> **Hint** Modulate Skew ↔ with a pattern slower than the brush for a peak that slides from stroke to stroke.
 
 **Magnitude Limit** — mechanism, a code word, and an aside.
 
@@ -261,19 +261,19 @@ displaced material is shown where it goes.
 
 **Grid ↔** — a second sentence explaining another setting.
 
-> **Before** Spaces the time grid, in beats. Set it to 'Onsets' to snap to the file's detected hits instead, which lands a stamp exactly on a transient rather than near it.
+> **Before** Spaces the time grid, in beats. Set it to 'Onsets' to snap to the file's detected hits instead, which lands a stroke exactly on a transient rather than near it.
 >
 > **After** Spaces the time grid, in beats.
 >
 > **Manual** Set it to Onsets and the grid follows the file's detected hits instead of a fixed division.
 >
-> **Hint** Snap to onsets to land a stamp exactly on a transient rather than near it.
+> **Hint** Snap to onsets to land a stroke exactly on a transient rather than near it.
 
 **Iterations** — a trailing fragment.
 
-> **Before** Re-runs the whole effect chain this many times inside one stamp, feeding its own output back in. Echoes, feedback, spectral delay.
+> **Before** Re-runs the whole effect chain this many times inside one stroke, feeding its own output back in. Echoes, feedback, spectral delay.
 >
-> **After** Repeats the whole effect chain inside one stamp, feeding each pass back in.
+> **After** Repeats the whole effect chain inside one stroke, feeding each pass back in.
 >
 > **Hint** Two or three iterations build echoes and spectral delays out of a single effect.
 

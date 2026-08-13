@@ -28,20 +28,22 @@ export function openConfirmModal(params: ConfirmModalParams): string {
     const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"]');
     if (dialogs.length === 0) return;
     const topDialog = dialogs[dialogs.length - 1];
-    const buttons = topDialog.querySelectorAll<HTMLButtonElement>("button:not([disabled])");
+    // Every button, so a disabled confirm blocks Enter rather than handing it
+    // to whichever button happens to sit before it.
+    const buttons = topDialog.querySelectorAll<HTMLButtonElement>("button");
     if (buttons.length === 0) return;
     const confirmButton = buttons[buttons.length - 1];
     e.preventDefault();
     e.stopPropagation();
+    if (confirmButton.disabled) return;
     confirmButton.click();
   };
 
   const id = modals.openConfirmModal({
     ...params,
-    onConfirm: () => {
-      cleanup();
-      params.onConfirm?.();
-    },
+    // Not cleaned up here: a confirm that rejects its input leaves the dialog
+    // open, and Enter has to keep working for the next attempt.
+    onConfirm: () => params.onConfirm?.(),
     onCancel: () => {
       cleanup();
       params.onCancel?.();
@@ -119,16 +121,36 @@ export function openPrompt({
   onClose,
 }: OpenPromptOptions): string {
   const inputRef: RefObject<HTMLInputElement | null> = { current: null };
-  return openConfirmModal({
+  const modalId: RefObject<string> = { current: "" };
+
+  const confirmProps = { size: "xs", color: danger ? "red" : undefined } as const;
+  const isBlank = (value: string | undefined) => (value ?? "").trim().length === 0;
+  const blank: RefObject<boolean> = { current: isBlank(defaultValue) };
+
+  modalId.current = openConfirmModal({
     title,
     children: (
       <Stack gap="xs">
         {label != null && (typeof label === "string" ? <Text size="sm">{label}</Text> : label)}
-        <TextInput ref={inputRef} defaultValue={defaultValue} placeholder={placeholder} data-autofocus />
+        <TextInput
+          ref={inputRef}
+          defaultValue={defaultValue}
+          placeholder={placeholder}
+          onChange={(event) => {
+            const nowBlank = isBlank(event.currentTarget.value);
+            if (nowBlank === blank.current) return;
+            blank.current = nowBlank;
+            modals.updateModal({
+              modalId: modalId.current,
+              confirmProps: { ...confirmProps, disabled: nowBlank },
+            });
+          }}
+          data-autofocus
+        />
       </Stack>
     ),
     labels: { confirm: confirmLabel, cancel: cancelLabel },
-    confirmProps: { size: "xs", color: danger ? "red" : undefined },
+    confirmProps: { ...confirmProps, disabled: blank.current },
     cancelProps: { size: "xs" },
     onConfirm: async () => {
       const value = inputRef.current?.value?.trim() ?? "";
@@ -138,6 +160,8 @@ export function openPrompt({
     onCancel,
     onClose,
   });
+
+  return modalId.current;
 }
 
 type NewFileValues = { sampleRate: number; bpm: number; lengthBeats: number };

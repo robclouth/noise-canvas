@@ -2,15 +2,19 @@ import { host } from "./host";
 
 const PRESETS_FOLDER_NAME = "Noise Canvas";
 const PRESETS_SUBFOLDER_NAME = "Presets";
+const EFFECTS_SUBFOLDER_NAME = "Effects";
+const MODULATORS_SUBFOLDER_NAME = "Modulators";
 const TEXTURES_SUBFOLDER_NAME = "Textures";
 
 let appDir: string;
 let presetsDir: string;
+let effectPresetsDir: string;
+let modulatorPresetsDir: string;
 let texturesDir: string;
 
 export async function getFolders() {
-  if (appDir && presetsDir && texturesDir) {
-    return { appDir, presetsDir, texturesDir };
+  if (appDir && presetsDir && effectPresetsDir && modulatorPresetsDir && texturesDir) {
+    return { appDir, presetsDir, effectPresetsDir, modulatorPresetsDir, texturesDir };
   }
 
   const homeDir = host.os.homedir();
@@ -44,11 +48,18 @@ export async function getFolders() {
 
   appDir = host.path.join(documentsDir, PRESETS_FOLDER_NAME);
   presetsDir = host.path.join(appDir, PRESETS_SUBFOLDER_NAME);
+  effectPresetsDir = host.path.join(presetsDir, EFFECTS_SUBFOLDER_NAME);
+  modulatorPresetsDir = host.path.join(presetsDir, MODULATORS_SUBFOLDER_NAME);
   texturesDir = host.path.join(appDir, TEXTURES_SUBFOLDER_NAME);
 
-  console.log("App directories:", { appDir, presetsDir, texturesDir });
+  console.log("App directories:", { appDir, presetsDir, effectPresetsDir, modulatorPresetsDir, texturesDir });
 
-  await Promise.all([host.fs.mkdir(presetsDir, { recursive: true }), host.fs.mkdir(texturesDir, { recursive: true })]);
+  await Promise.all([
+    host.fs.mkdir(presetsDir, { recursive: true }),
+    host.fs.mkdir(effectPresetsDir, { recursive: true }),
+    host.fs.mkdir(modulatorPresetsDir, { recursive: true }),
+    host.fs.mkdir(texturesDir, { recursive: true }),
+  ]);
 
-  return { appDir, presetsDir, texturesDir };
+  return { appDir, presetsDir, effectPresetsDir, modulatorPresetsDir, texturesDir };
 }

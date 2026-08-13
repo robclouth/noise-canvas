@@ -1,10 +1,10 @@
 import { useStore } from "@/store";
 import { ParameterKey } from "@/store/types";
-import { Box, Collapse, Divider, Group, Stack, Text, useMantineTheme } from "@mantine/core";
-import { CONTROL_ROW_HEIGHT } from "@renderer/lib/ui-density";
+import { Box, Collapse, Stack, useMantineTheme } from "@mantine/core";
 import { anchorProps, type UiAnchor } from "@renderer/lib/ui-anchors";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { SectionMenu } from "./controls/section-menu";
+import { SectionHeading } from "./section-heading";
 
 export const Section = ({
   children,
@@ -34,15 +34,12 @@ export const Section = ({
   const isCollapsed = sectionCollapsed[label] ?? false;
 
   return (
-    <Stack gap={2} style={fill ? { flex: 1, minHeight: 0 } : undefined} {...(anchor ? anchorProps(anchor) : {})}>
-      <Group gap={4} wrap="nowrap" align="center" h={CONTROL_ROW_HEIGHT} pr={fill ? 8 : undefined}>
-        <Group
-          gap={4}
-          wrap="nowrap"
-          flex={1}
-          style={{ cursor: "pointer", userSelect: "none" }}
-          onClick={() => setSectionCollapsed(label, !isCollapsed)}
-        >
+    <Stack gap={0} style={fill ? { flex: 1, minHeight: 0 } : undefined} {...(anchor ? anchorProps(anchor) : {})}>
+      <SectionHeading
+        label={label}
+        pr={fill ? 8 : undefined}
+        onClick={() => setSectionCollapsed(label, !isCollapsed)}
+        leading={
           <Box style={{ display: "flex", alignItems: "center" }}>
             {isCollapsed ? (
               <ChevronRight size={14} color={theme.colors.dark[2]} />
@@ -50,21 +47,20 @@ export const Section = ({
               <ChevronDown size={14} color={theme.colors.dark[2]} />
             )}
           </Box>
-          <Text size="xs" c="dark.2">
-            {label}
-          </Text>
-          <Divider style={{ flex: 1 }} color="dark.4" />
-        </Group>
-
-        {parameterKeys && (
-          <SectionMenu
-            storageKey={`section-${label}`}
-            parameterKeys={parameterKeys}
-            includeEffects={includeEffectOrder}
-          />
-        )}
-        {rightSlot}
-      </Group>
+        }
+        trailing={
+          <>
+            {parameterKeys && (
+              <SectionMenu
+                storageKey={`section-${label}`}
+                parameterKeys={parameterKeys}
+                includeEffects={includeEffectOrder}
+              />
+            )}
+            {rightSlot}
+          </>
+        }
+      />
 
       <Collapse
         in={!isCollapsed}

@@ -8,7 +8,7 @@ Each recipe is **Goal → Set up → Do → Variations**. Settings not mentioned
 
 ## Contents
 
-- [Rhythm](#rhythm) — [Chop to the hits](#chop-to-the-hits) · [Rearrange beats](#rearrange-beats) · [Erase a hit](#erase-a-hit) · [Turn a pad into a rhythm](#turn-a-pad-into-a-rhythm) · [Stamp a rhythm across the file](#stamp-a-rhythm-across-the-file) · [Sweep a brush up the spectrum](#sweep-a-brush-up-the-spectrum)
+- [Rhythm](#rhythm) — [Chop to the hits](#chop-to-the-hits) · [Rearrange beats](#rearrange-beats) · [Erase a hit](#erase-a-hit) · [Turn a pad into a rhythm](#turn-a-pad-into-a-rhythm) · [Paint a rhythm across the file](#paint-a-rhythm-across-the-file) · [Sweep a brush up the spectrum](#sweep-a-brush-up-the-spectrum)
 - [Pitch and time](#pitch-and-time) — [Pitch up or down](#pitch-up-or-down) · [Reverse a phrase](#reverse-a-phrase) · [Half speed](#half-speed) · [Harmonise](#harmonise)
 - [Space and texture](#space-and-texture) — [Reverb from nothing](#reverb-from-nothing) · [Reverse reverb](#reverse-reverb) · [Freeze and smear](#freeze-and-smear) · [Build a hat from noise](#build-a-hat-from-noise)
 - [Repair](#repair) — [Undo one region](#undo-one-region) · [Mute a vocal](#mute-a-vocal)
@@ -25,9 +25,9 @@ Each recipe is **Goal → Set up → Do → Variations**. Settings not mentioned
 
 - Transport: **Beats = Onsets**, **Snap** on.
 - Options: **Anchor = Corner**.
-- Envelope: **Size ↔ = Grid** — with an onset grid this makes one stamp exactly one hit, edge to edge.
+- Envelope: **Size ↔ = Grid** — with an onset grid this makes one stroke exactly one hit, edge to edge.
 
-**Do.** Click on a hit. The stamp lands on the transient rather than near it, and stops where the next one starts.
+**Do.** Click on a hit. The stroke lands on the transient rather than near it, and stops where the next one starts.
 
 **Variations.** Lower the file header's **Onsets** sensitivity if a busy loop is finding hits you don't hear; raise it if quiet ghost notes are being missed. Everything below in this section works better with this set up first.
 
@@ -41,9 +41,9 @@ _See also:_ [Onsets](./manual.md#onsets), [Options](./manual.md#options).
 
 - Chop to the hits, above.
 - Source: **Shift+click** the hit you want on beat 3 — a brush-sized rectangle previews what you'll be sampling.
-- Source: **Tracking = Fixed**, so every stamp reads that same spot.
+- Source: **Tracking = Fixed**, so every stroke reads that same spot.
 
-**Do.** Stamp on beat 1. Repeat anywhere else you want it.
+**Do.** Paint on beat 1. Repeat anywhere else you want it.
 
 **Variations.** **Tracking = Anchored** keeps the offset instead, so dragging moves source and destination together — good for sliding a whole bar. **Blend mode = Add** layers the hit over what's there instead of replacing it.
 
@@ -58,9 +58,9 @@ _See also:_ [Source](./manual.md#source), [Blend Modes](./manual.md#blend-modes)
 - The **Eraser** factory brush (Dynamics with Gain at the bottom).
 - Chop to the hits, above.
 
-**Do.** Stamp on the hit.
+**Do.** Paint on the hit.
 
-**Variations.** For a partial removal, raise Dynamics **Gain** off the floor, or drop brush **Strength** — both leave some of it behind. To erase only the low end of a hit, set **Size ↕** small and place the stamp on the fundamental.
+**Variations.** For a partial removal, raise Dynamics **Gain** off the floor, or drop brush **Strength** — both leave some of it behind. To erase only the low end of a hit, set **Size ↕** small and place the stroke on the fundamental.
 
 _See also:_ [Dynamics](./manual.md#dynamics).
 
@@ -73,21 +73,21 @@ _See also:_ [Dynamics](./manual.md#dynamics).
 - Effects: **Dynamics**, Gain at 0 dB.
 - On Dynamics **Gain**, click the label and set **Modulator 1** to **−100%**, so the modulator drives gain across its full range downwards.
 - Modulator 1: **Mode = Sequencer**, 8 steps, 1 row, **Loop = 2 beats**, and draw the pattern you want.
-- Envelope: **Size ↔ = 4 beats**, **Size ↕ = Full**, both **Curves = +100%** so the stamp is a hard rectangle rather than a fade.
+- Envelope: **Size ↔ = 4 beats**, **Size ↕ = Full**, both **Curves = +100%** so the stroke is a hard rectangle rather than a fade.
 
-**Do.** Stamp across a bar of the pad.
+**Do.** Paint across a bar of the pad.
 
 **Variations.** Swap the sequencer for **Mode = Pattern**, **Shape = Square**, **Rate ↔ = 1/4** for a straight gate, or **Shape = Sine** for a tremolo. Set the sequencer to several rows and it gates pitch bands independently — the pad becomes a chord that flickers.
 
 _See also:_ [Modulator Modes](./manual.md#modulator-modes), [How Modulation Amount Works](./manual.md#how-modulation-amount-works).
 
-### Stamp a rhythm across the file
+### Paint a rhythm across the file
 
-**Goal.** Apply a brush on every offbeat of a whole loop without placing a single stamp by hand.
+**Goal.** Apply a brush on every offbeat of a whole loop without placing a single stroke by hand.
 
 **Set up.**
 
-- Pick the brush you want stamped — it's whatever is selected.
+- Pick the brush you want painted — it's whatever is selected.
 - **Generate**, above the transport: `s("~ x")*4`, or take **Offbeat** from the preset dropdown.
 
 **Do.** The canvas previews as you type. **Apply** (or `Cmd/Ctrl+Enter` in the editor) commits the whole pass as one stroke and one undo step.
@@ -107,7 +107,7 @@ _See also:_ [Generate](./manual.md#generate), [Writing Patterns](./manual.md#wri
 
 **Do.** Apply.
 
-**Variations.** `.zones(16)` with `.zone(irand(16))` scatters a random sixteenth per stamp. `.zone("0 7").zones(8)` hits only the extremes. Add `.m1(sine.segment(16))` to sweep a macro across the file at the same time, so the brush changes character as it climbs.
+**Variations.** `.zones(16)` with `.zone(irand(16))` scatters a random sixteenth per stroke. `.zone("0 7").zones(8)` hits only the extremes. Add `.m1(sine.segment(16))` to sweep a macro across the file at the same time, so the brush changes character as it climbs.
 
 _See also:_ [Where in the Spectrum](./manual.md#where-in-the-spectrum), [Strength, Pan and Macros](./manual.md#strength-pan-and-macros).
 
@@ -136,7 +136,7 @@ _See also:_ [Warp Algorithms](./manual.md#warp-algorithms), [Transform](./manual
 
 **Set up.** The **Reverse** factory brush: Transform with **Scale ↔ = −1**, **Edge = Cut**, hard rectangular envelope.
 
-**Do.** Stamp over the phrase. The window you paint is what gets mirrored — Edge = Cut is what stops neighbouring audio being dragged into it.
+**Do.** Paint over the phrase. The window you paint is what gets mirrored — Edge = Cut is what stops neighbouring audio being dragged into it.
 
 **Variations.** **Scale ↕ = −1** flips pitch instead, turning a rising line into a falling one about the middle of the brush.
 
@@ -153,7 +153,7 @@ _See also:_ [Transform](./manual.md#transform).
 - Envelope: **Size ↔ = Full**, **Size ↕ = Full**.
 - Options: **Warp algo = Neutral**.
 
-**Do.** One stamp.
+**Do.** One stroke.
 
 **Variations.** **Scale ↔ = 0.5** after **Half Length** does the opposite. Because time and pitch are independent here, the pitch does not move — add **Shift ↕ = −12** if you want the tape-speed version.
 
@@ -166,13 +166,13 @@ _See also:_ [Transform](./manual.md#transform), [Menus](./manual.md#menus).
 **Set up.** Either:
 
 - Effects: **Clone**, **Space ↕ = 7** semitones, **Count ↕ = 2**, **Direction ↕ = Up** — one copy a fifth above. Or:
-- Effects: **Overtones**, **Shape = Selected Scale**, and set the scale in the transport bar — harmonies that stay in key.
+- Effects: **Clone**, **Shape ↕ = Scale**, **Copies ↕ = 4**, and set the scale in the transport bar — harmonies that stay in key.
 
 **Do.** Paint over the melody.
 
-**Variations.** **Clone Decay** fades the outer copies, so a stack of four reads as one voice with overtones rather than four voices. **Space ↕ = 12** gives octaves instead.
+**Variations.** **Clone Decay** fades the outer copies, so a stack of four reads as one voice with overtones rather than four voices. **Space ↕ = 12** gives octaves instead, and **Shape ↕ = Harmonic** with **Sum = Constructive** gives the natural harmonic series.
 
-_See also:_ [Clone](./manual.md#clone), [Overtones](./manual.md#overtones).
+_See also:_ [Clone](./manual.md#clone).
 
 ---
 
@@ -219,7 +219,7 @@ _See also:_ [Convolve](./manual.md#convolve).
 
 **Do.** Paint from the moment you want frozen across the bar.
 
-**Variations.** **Iterations** above 1 re-runs the blur inside one stamp and the freeze goes further with less brush size. Add **Evolve** after the Blur, with a little **Flow** and **Spread**, and the frozen texture drifts instead of sitting still.
+**Variations.** **Iterations** above 1 re-runs the blur inside one stroke and the freeze goes further with less brush size. Add **Evolve** after the Blur, with a little **Flow** and **Spread**, and the frozen texture drifts instead of sitting still.
 
 _See also:_ [Blur](./manual.md#blur), [Evolve](./manual.md#evolve), [Options](./manual.md#options).
 
@@ -233,9 +233,9 @@ _See also:_ [Blur](./manual.md#blur), [Evolve](./manual.md#evolve), [Options](./
 - Envelope: **Size ↔ = Grid** on a small time grid, **Curve ↔ = −100%** for a sharp spike, **Skew ↔ = −100%** so the peak is at the start.
 - Envelope: **Size ↕** covering the top few octaves only.
 
-**Do.** Stamp on the offbeats.
+**Do.** Paint on the offbeats.
 
-**Variations.** **Type = Noise** with the same envelope gives you a snare rather than a hat. Widen **Size ↕** downwards and it becomes a crash. Modulating **Strength** from **Randomize** gives every stamp a different velocity.
+**Variations.** **Type = Noise** with the same envelope gives you a snare rather than a hat. Widen **Size ↕** downwards and it becomes a crash. Modulating **Strength** from **Randomize** gives every stroke a different velocity.
 
 _See also:_ [Synthesize](./manual.md#synthesize), [Align](./manual.md#align), [Envelope](./manual.md#envelope), [Contextual Sources](./manual.md#contextual-sources).
 

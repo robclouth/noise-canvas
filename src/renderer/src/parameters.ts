@@ -211,7 +211,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     name: `Modulator Phase Mode ${idx}`,
     label: "Phase Mode",
     description:
-      "Pins the pattern to the canvas, so separate strokes uncover one stationary field, or to the brush, so it travels with each stamp.",
+      "Pins the pattern to the canvas, so separate strokes uncover one stationary field, or to the brush, so it travels with each stroke.",
     default: 0,
     options: [
       { value: 0, label: "Canvas" },
@@ -435,7 +435,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     name: "Brush Iterations",
     label: "Iterations",
     description:
-      "Re-runs the whole effect chain this many times inside one stamp, feeding its own output back in. Echoes, feedback, spectral delay.",
+      "Re-runs the whole effect chain this many times inside one stroke, feeding its own output back in. Echoes, feedback, spectral delay.",
     default: 1,
     min: 1,
     max: 20,
@@ -545,7 +545,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     name: "Brush Anchor",
     label: "Anchor",
     description:
-      "Puts the cursor on the stamp's bottom-left onset corner, so snapping locks hits to the grid, or on its centre, so snapping lands the envelope peak on the grid. Corner for rhythm, Center for pads.",
+      "Puts the cursor on the stroke's bottom-left onset corner, so snapping locks hits to the grid, or on its centre, so snapping lands the envelope peak on the grid. Corner for rhythm, Center for pads.",
     default: 0,
     options: BRUSH_ANCHOR_MODES,
     includeInStep: true,
@@ -1614,7 +1614,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     name: "Grid Size Beats",
     label: "Beats",
     description:
-      "Spaces the time grid, in beats. Set it to 'Onsets' to snap to the file's detected hits instead, which lands a stamp exactly on a transient rather than near it.",
+      "Spaces the time grid, in beats. Set it to 'Onsets' to snap to the file's detected hits instead, which lands a stroke exactly on a transient rather than near it.",
     default: 1,
     // Onsets sit past the bottom of the beat range rather than inside it, so
     // the travel between the smallest and largest beat stays even and the

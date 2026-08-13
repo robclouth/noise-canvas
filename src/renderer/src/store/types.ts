@@ -10,6 +10,7 @@ import type { GenerateState } from "./generate";
 import { ModulatorsState } from "./modulators";
 import type { LinkState } from "./link";
 import type { PresetsState } from "./presets";
+import type { SectionPresetsState } from "./section-presets";
 import type { StemGroupsState } from "./stem-groups";
 import type { StepsState } from "./steps";
 
@@ -114,6 +115,7 @@ export type State = BrushState &
   AudioState &
   AppState &
   PresetsState &
+  SectionPresetsState &
   StepsState &
   LinkState &
   GenerateState &

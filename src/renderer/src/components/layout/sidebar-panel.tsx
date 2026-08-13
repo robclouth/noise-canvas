@@ -1,6 +1,6 @@
 import { useStore } from "@/store";
 import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
-import { ActionIcon, Box, Group, Kbd, Menu, ScrollArea, Stack, Text, TextInput } from "@mantine/core";
+import { Box, Group, Kbd, Menu, ScrollArea, Stack, Text, TextInput } from "@mantine/core";
 import { useMantineTheme } from "@mantine/core";
 import { useWindowEvent } from "@mantine/hooks";
 import { openConfirm, openPrompt } from "@renderer/lib/modals";
@@ -8,16 +8,15 @@ import { resolveBrushColor } from "@renderer/lib/colors";
 import { EFFECT_COLORS } from "@renderer/lib/constants";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import { INPUT_HEIGHT } from "@renderer/lib/ui-density";
-import { helpProps } from "@renderer/lib/ui-controls";
 import { RESERVED_KEYS } from "@renderer/lib/useShortcuts";
 import { collectBrushReferencedPaths } from "@renderer/store/files";
 import type { Brush } from "@renderer/store/types";
 import type { EffectItem } from "@renderer/effects/types";
-import { MoreVertical } from "lucide-react";
 import { HistorySection } from "./history-section";
 import { Section } from "../section";
 import { memo, useCallback, useEffect, useState } from "react";
 import { BrushPickerOpenButton } from "../controls/brush-picker";
+import { LIST_ROW_HOST, ListRowMenu } from "../controls/list-row";
 import { BrushRow } from "../controls/brush-row";
 
 const PANEL_WIDTH = 200;
@@ -160,53 +159,40 @@ const BrushTile = memo(function BrushTile({
   const rightSection = editing ? null : (
     <Group gap={6} wrap="nowrap" align="center">
       {effectDots}
-      <Menu withinPortal position="right-start" shadow="md">
-        <Menu.Target>
-          <ActionIcon
-            {...helpProps("brush-menu")}
-            size="xs"
-            variant="subtle"
-            color="gray"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <MoreVertical size={12} />
-          </ActionIcon>
-        </Menu.Target>
-        <Menu.Dropdown>
-          <Menu.Item onClick={() => setEditing(true)}>Rename</Menu.Item>
-          <Menu.Item onClick={() => duplicateBrush(index)}>Duplicate</Menu.Item>
-          <Menu.Item
-            disabled={!canSave || !libraryName}
-            onClick={() => libraryName && openSaveConfirm(index, libraryName)}
-          >
-            Save
-          </Menu.Item>
-          <Menu.Item onClick={() => openSaveAsPrompt(index, brush.name)}>Save as…</Menu.Item>
-          <Menu.Item disabled={!hasReferencedFiles} onClick={() => loadReferencedFiles(index)}>
-            Load referenced files
-          </Menu.Item>
-          <Menu.Item onClick={() => onStartHotkeyAssign(index)}>Assign key…</Menu.Item>
-          {brush.hotkey && <Menu.Item onClick={() => setBrushHotkey(index, null)}>Remove key</Menu.Item>}
-          <Menu.Divider />
-          <Menu.Item
-            color="red"
-            onClick={() => {
-              if (dirty || brush.libraryId === null) {
-                openCloseConfirm(index, brush.name);
-              } else {
-                useStore.getState().closeBrush(index);
-              }
-            }}
-          >
-            Close
-          </Menu.Item>
-        </Menu.Dropdown>
-      </Menu>
+      <ListRowMenu help="brush-menu">
+        <Menu.Item onClick={() => setEditing(true)}>Rename</Menu.Item>
+        <Menu.Item onClick={() => duplicateBrush(index)}>Duplicate</Menu.Item>
+        <Menu.Item
+          disabled={!canSave || !libraryName}
+          onClick={() => libraryName && openSaveConfirm(index, libraryName)}
+        >
+          Save
+        </Menu.Item>
+        <Menu.Item onClick={() => openSaveAsPrompt(index, brush.name)}>Save as…</Menu.Item>
+        <Menu.Item disabled={!hasReferencedFiles} onClick={() => loadReferencedFiles(index)}>
+          Load referenced files
+        </Menu.Item>
+        <Menu.Item onClick={() => onStartHotkeyAssign(index)}>Assign key…</Menu.Item>
+        {brush.hotkey && <Menu.Item onClick={() => setBrushHotkey(index, null)}>Remove key</Menu.Item>}
+        <Menu.Divider />
+        <Menu.Item
+          color="red"
+          onClick={() => {
+            if (dirty || brush.libraryId === null) {
+              openCloseConfirm(index, brush.name);
+            } else {
+              useStore.getState().closeBrush(index);
+            }
+          }}
+        >
+          Close
+        </Menu.Item>
+      </ListRowMenu>
     </Group>
   );
 
   return (
-    <Group gap={0} wrap="nowrap" align="center" style={{ position: "relative" }}>
+    <Group className={LIST_ROW_HOST} gap={0} wrap="nowrap" align="center" style={{ position: "relative" }}>
       {/* asDiv: dnd blocks drag-starts on real <button> elements, which would
           leave only the row's edges draggable. */}
       <BrushRow
