@@ -112,7 +112,7 @@ export const UI_AREAS = {
       {
         title: "How the source follows you",
         description:
-          "<b>Follow</b> drags the source along with your stroke. <b>Fixed</b> reads the same spot every time, which is how you stamp one hit repeatedly. <b>Anchored</b> keeps the offset you started with, so the source moves in parallel.",
+          "<b>Follow</b> drags the source along with your stroke. <b>Fixed</b> reads the same spot every time, which is how you paint one hit repeatedly. <b>Anchored</b> keeps the offset you started with, so the source moves in parallel.",
       },
       {
         title: "Reading the original",
@@ -131,7 +131,7 @@ export const UI_AREAS = {
   },
   "section-envelope": {
     title: "Envelope",
-    blurb: "Where a stamp lands and how much energy it deposits.",
+    blurb: "Where a stroke lands and how much energy it deposits.",
     manualSection: "envelope",
   },
   "section-options": {
@@ -163,7 +163,7 @@ export const UI_AREAS = {
       {
         title: "Anchored to the canvas or the brush",
         description:
-          "<b>Phase Mode → Canvas</b> pins the pattern to the file, so separate strokes uncover one continuous field. <b>Brush</b> carries it along with each stamp, so every stamp gets the same shape wherever you put it.",
+          "<b>Phase Mode → Canvas</b> pins the pattern to the file, so separate strokes uncover one continuous field. <b>Brush</b> carries it along with each stroke, so every stroke gets the same shape wherever you put it.",
       },
       {
         anchor: "brush-panel",
@@ -234,7 +234,7 @@ export const UI_AREAS = {
       {
         title: "The whole file in one pass",
         description:
-          "A pattern says when each stamp lands, how long it is, and which brush makes it — then it runs the length of the file. This is the same brush you'd paint by hand, placed by a rhythm instead of by your mouse.",
+          "A pattern says when each stroke lands, how long it is, and which brush makes it — then it runs the length of the file. This is the same brush you'd paint by hand, placed by a rhythm instead of by your mouse.",
       },
       {
         anchor: "file-lane",
@@ -246,7 +246,7 @@ export const UI_AREAS = {
       {
         title: "Patterns are Strudel",
         description:
-          '<b>"x x x x"</b> is four stamps, <b>"x*8"</b> is eight, <b>"x ~ x ~"</b> leaves rests, <b>"x(3,8)"</b> spreads three over eight slots. One bar is four beats. Each event\'s length becomes the brush\'s time size, so <b>"x@3 x"</b> paints wide then narrow.',
+          '<b>"x x x x"</b> is four strokes, <b>"x*8"</b> is eight, <b>"x ~ x ~"</b> leaves rests, <b>"x(3,8)"</b> spreads three over eight slots. One bar is four beats. Each event\'s length becomes the brush\'s time size, so <b>"x@3 x"</b> paints wide then narrow.',
       },
       {
         title: "Every token can name a brush",
@@ -256,7 +256,7 @@ export const UI_AREAS = {
       {
         title: "Placing it in the spectrum",
         description:
-          '<b>zone</b> cuts the frequency range into slices and stamps one, sizing the brush to fit — <b>s("x*4").zone("0 1 2 3")</b> climbs in quarters. <b>note</b> takes an absolute pitch, <b>n</b> an offset in semitones. <b>gain</b>, <b>pan</b> and <b>m1</b>–<b>m4</b> drive strength, position and the macros.',
+          '<b>zone</b> cuts the frequency range into slices and paints one, sizing the brush to fit — <b>s("x*4").zone("0 1 2 3")</b> climbs in quarters. <b>note</b> takes an absolute pitch, <b>n</b> an offset in semitones. <b>gain</b>, <b>pan</b> and <b>m1</b>–<b>m4</b> drive strength, position and the macros.',
       },
       {
         title: "Rolling for one you like",
@@ -264,7 +264,7 @@ export const UI_AREAS = {
           "The dropdown holds starting points, all written with the token <b>x</b> so they run with whatever brush you have selected. The <b>dice</b> re-rolls a pattern's random parts and previews the variation — previews replace each other, so keep rolling until one is worth applying.",
       },
     ],
-    recipes: ["stamp-a-rhythm-across-the-file", "sweep-a-brush-up-the-spectrum"],
+    recipes: ["paint-a-rhythm-across-the-file", "sweep-a-brush-up-the-spectrum"],
   },
 } as const satisfies Record<UiAnchor, UiArea>;
 

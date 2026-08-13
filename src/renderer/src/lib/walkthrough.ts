@@ -94,7 +94,7 @@ const STEPS: Step[] = [
     side: "right",
     title: "Decide where it lands",
     description:
-      "Size sets how much time and pitch one stamp covers, in beats and semitones. Curve shapes its edges, from a sharp spike to a hard rectangle, and Skew moves the peak.",
+      "Size sets how much time and pitch one stroke covers, in beats and semitones. Curve shapes its edges, from a sharp spike to a hard rectangle, and Skew moves the peak.",
   },
   {
     anchor: "file-lane",
@@ -136,7 +136,7 @@ const STEPS: Step[] = [
     side: "top",
     title: "Or don't paint at all",
     description:
-      'Write a rhythm here and it stamps the brush across the whole file — <b>"x*8"</b> for eight per bar, <b>"1 2 1 3"</b> to alternate between brushes. It previews as you type and commits nothing until you hit Apply.',
+      'Write a rhythm here and it paints the brush across the whole file — <b>"x*8"</b> for eight per bar, <b>"1 2 1 3"</b> to alternate between brushes. It previews as you type and commits nothing until you hit Apply.',
   },
   {
     anchor: "brush-panel",

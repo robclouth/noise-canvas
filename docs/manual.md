@@ -182,7 +182,7 @@ The brush envelope decides where the stroke deposits energy and how much.
 
 - **Blend mode** – how the processed and original spectrogram are combined (see below).
 - **Pan** – stereo positioning of the processing.
-- **Iterations** – how many times the effect chain recursively re-applies within one stamp (feedback, echoes, spectral delays).
+- **Iterations** – how many times the effect chain recursively re-applies within one stroke (feedback, echoes, spectral delays).
 - **Wrap** – behaviour when painting off the canvas edges: Off, Time, Pitch, or Time & Pitch.
 - **Warp algo** – resynthesis strategy (see below).
 - **Accumulate** – when on, painting over the same area builds up; when off, a single stroke won't overlap itself, so dragging back and forth doesn't double-apply.
@@ -410,7 +410,7 @@ They appear in the shape picker under a "User" group.
 - **Rate ↕** – how many semitones one cycle spans. At 0 ("Off") it stops varying along pitch.
 - **Rotation** – rotates the pattern.
 - **Stereo** – decorrelates the left/right channels by offsetting the sample position in time. Negative values swap channels.
-- **Phase Mode** – whether the pattern is anchored to the **Canvas** (fixed in the file, so strokes reveal a stationary pattern) or to the **Brush** (travels with each stamp).
+- **Phase Mode** – whether the pattern is anchored to the **Canvas** (fixed in the file, so strokes reveal a stationary pattern) or to the **Brush** (travels with each stroke).
 - **Phase ↔ / ↕** – offsets the pattern's start position in each axis.
 
 ### Contextual Sources
@@ -429,29 +429,29 @@ Modulator parameters are themselves modulatable — you can modulate modulator 2
 
 ## Generate
 
-**Generate** sits above the transport. It paints the whole file in one pass: a pattern says when each stamp lands, how long it is, and which brush makes it.
+**Generate** sits above the transport. It paints the whole file in one pass: a pattern says when each stroke lands, how long it is, and which brush makes it.
 
 Editing the pattern repaints a **preview** on the canvas — nothing is committed, nothing is resynthesized, and painting by hand clears it. **Apply** (or `Cmd/Ctrl+Enter` in the editor) commits exactly what you are looking at: one stroke, one history step, one resynthesis.
 
-While the caret is in the pattern editor the canvas also shows the pass as **blocks**, one per stamp, in the colour of the brush that paints it and labelled with that brush and whatever the pattern set on it. A quiet stamp, or one that lands where the file is already loud, can be impossible to pick out of the spectrogram; its block is not. Click away from the editor and the blocks go, leaving the preview.
+While the caret is in the pattern editor the canvas also shows the pass as **blocks**, one per stroke, in the colour of the brush that paints it and labelled with that brush and whatever the pattern set on it. A quiet stroke, or one that lands where the file is already loud, can be impossible to pick out of the spectrogram; its block is not. Click away from the editor and the blocks go, leaving the preview.
 
 ### Writing Patterns
 
 Patterns are written in [Strudel](https://strudel.cc)'s mini-notation. A quoted string is a bar, split evenly between whatever is inside it:
 
-| Pattern     | What it does                                |
-| ----------- | ------------------------------------------- |
-| `"x"`       | one stamp filling the bar                   |
-| `"x x x x"` | four stamps, a beat each                    |
-| `"x*8"`     | eight stamps, half a beat each              |
-| `"x ~ x ~"` | two stamps with rests between them          |
-| `"x [x x]"` | one long stamp, then two short ones         |
-| `"x@3 x"`   | a stamp three times the length of the next  |
-| `"x(3,8)"`  | three stamps spread evenly over eight slots |
-| `"<x ~>"`   | a stamp on every other bar                  |
-| `"x*8?"`    | eighths with half of them dropped at random |
+| Pattern     | What it does                                 |
+| ----------- | -------------------------------------------- |
+| `"x"`       | one stroke filling the bar                   |
+| `"x x x x"` | four strokes, a beat each                    |
+| `"x*8"`     | eight strokes, half a beat each              |
+| `"x ~ x ~"` | two strokes with rests between them          |
+| `"x [x x]"` | one long stroke, then two short ones         |
+| `"x@3 x"`   | a stroke three times the length of the next  |
+| `"x(3,8)"`  | three strokes spread evenly over eight slots |
+| `"<x ~>"`   | a stroke on every other bar                  |
+| `"x*8?"`    | eighths with half of them dropped at random  |
 
-One bar is four beats of the file, so the pattern repeats until the file runs out. **Each event's length becomes the brush's time size**, which is what makes `"x@3 x"` paint a wide stamp followed by a narrow one.
+One bar is four beats of the file, so the pattern repeats until the file runs out. **Each event's length becomes the brush's time size**, which is what makes `"x@3 x"` paint a wide stroke followed by a narrow one.
 
 The box also accepts JavaScript over those patterns, so the strudel transforms are available:
 
@@ -465,9 +465,9 @@ Wrapping a pattern in `s(...)` turns each event into a value the controls below 
 
 ### Where in the Spectrum
 
-By default a stamp lands at the last cursor position, or halfway up if there hasn't been one. Three controls place it deliberately.
+By default a stroke lands at the last cursor position, or halfway up if there hasn't been one. Three controls place it deliberately.
 
-**`zone` — the spectrum in slices.** This is the quick one: it cuts the whole frequency range into equal slices and stamps one of them, sizing the brush to fit. Slice 0 is the lowest.
+**`zone` — the spectrum in slices.** This is the quick one: it cuts the whole frequency range into equal slices and paints one of them, sizing the brush to fit. Slice 0 is the lowest.
 
 ```js
 s("x*4").zone("0 1 2 3"); // in quarters, climbing
@@ -491,7 +491,7 @@ Slice numbers past the top wrap around to the bottom, so a climbing pattern keep
 stack(s("x*2").note("c3"), s("x*2").note("g3"), s("x*2").note("c4"));
 ```
 
-**`n` — a pitch offset**, in semitones from wherever the stamp would otherwise land. It stacks on top of `zone` and `note`, so `s("x*4").zone("0 1").n("0 3")` nudges within each slice.
+**`n` — a pitch offset**, in semitones from wherever the stroke would otherwise land. It stacks on top of `zone` and `note`, so `s("x*4").zone("0 1").n("0 3")` nudges within each slice.
 
 **`height`** sets the brush's pitch size in semitones outright, overriding whatever `zone` worked out.
 
@@ -612,7 +612,7 @@ Onsets show up in three places:
 
 - **The onset strip** – a thin row of markers directly above the spectrogram, one line per detected hit. Brighter lines are stronger onsets.
 - **Onsets sensitivity** – the **Onsets** control in the file header. It sets how far down this file's own level range a hit still counts: **0%** keeps only the loudest, **100%** keeps everything the detector found. Because the range is per-file, the same percentage means something comparable on a quiet pad and a hot drum loop. It applies to that file's path, so it survives closing and reopening.
-- **Onset snapping** – set the time grid (**Beats**) to **Onsets** in the transport bar. Strokes then snap to detected hits instead of beat divisions, so a stamp lands exactly on a transient rather than near it. Pair it with **Anchor = Corner** in [Options](#options) so the cursor is the stroke's own onset.
+- **Onset snapping** – set the time grid (**Beats**) to **Onsets** in the transport bar. Strokes then snap to detected hits instead of beat divisions, so a stroke lands exactly on a transient rather than near it. Pair it with **Anchor = Corner** in [Options](#options) so the cursor is the stroke's own onset.
 
 Onsets also drive the [warp algorithms](#warp-algorithms): **Neutral** re-anchors phase at each detected onset when it moves audio, which is what keeps a moved drum hit cracking instead of smearing into pre-echo. Lower the sensitivity if a busy file is being over-anchored; raise it if quiet hits are smearing.
 
@@ -723,7 +723,7 @@ File and Edit shortcuts (`Cmd/Ctrl+N`, `+O`, `+S`, `+W`, `+D`, …) are listed u
 | --------------------- | ------------------------------------------------------ |
 | `Space`               | Play / stop                                            |
 | `Arrow keys`          | Move the brush by one grid cell                        |
-| `Enter`               | Stamp the brush at the current position                |
+| `Enter`               | Apply the brush at the current position                |
 | `-` / `=`             | Decrease / increase the time grid                      |
 | `Shift` + `-` / `=`   | Decrease / increase the pitch grid                     |
 | `Tab` / `Shift+Tab`   | Next / previous file                                   |
