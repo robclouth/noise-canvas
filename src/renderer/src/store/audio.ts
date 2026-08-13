@@ -1,6 +1,6 @@
 import * as Tone from "tone";
 import { host } from "../lib/host";
-import { openFiles } from "./files";
+import { activeLoopRegion, openFiles } from "./files";
 import type { LoopRegion, PlayerClock, ZustandGet, ZustandSet } from "./types";
 
 export interface AudioState {
@@ -21,7 +21,7 @@ export interface AudioState {
   maxGainReductionDb: number;
   setGainReduction: (envDb: Float32Array | null, maxDb: number) => void;
   getGainReductionAt: (timeSec: number) => number;
-  loopRegion: LoopRegion | null;
+  /** Sets the active file's loop region. */
   setLoopRegion: (region: LoopRegion | null) => void;
   setPlaybackTime: (playbackTime: number) => void;
   togglePlayback: () => Promise<void>;
@@ -41,7 +41,8 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
   },
 
   getPlaybackTime: () => {
-    const { player, isPlaying, loop, loopRegion, activeFileId, playerClock } = get();
+    const { player, isPlaying, loop, activeFileId, playerClock, filesLoopRegion } = get();
+    const loopRegion = activeLoopRegion({ activeFileId, filesLoopRegion });
     const file = activeFileId ? openFiles[activeFileId] : undefined;
     const buffer = file?.audioBuffer;
     if (!player || !buffer) return 0;
@@ -120,7 +121,8 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
   loop: false,
   setLoop: (loop) => {
-    const { player, isPlaying, loopRegion, activeFileId, getPlaybackTime } = get();
+    const { player, isPlaying, activeFileId, getPlaybackTime, filesLoopRegion } = get();
+    const loopRegion = activeLoopRegion({ activeFileId, filesLoopRegion });
     const file = activeFileId ? openFiles[activeFileId] : undefined;
     const buffer = file?.audioBuffer;
 
@@ -176,13 +178,14 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
   // file when it changes.
   limiterEnabled: true,
 
-  loopRegion: null,
   setLoopRegion: (region) => {
-    set({ loopRegion: region });
+    const { activeFileId, setFileLoopRegion } = get();
+    if (!activeFileId) return;
+    setFileLoopRegion(activeFileId, region);
 
     if (!region) return;
 
-    const { player, isPlaying, activeFileId } = get();
+    const { player, isPlaying } = get();
     if (!isPlaying || !player) return;
 
     const file = activeFileId ? openFiles[activeFileId] : undefined;
@@ -210,7 +213,8 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
   },
 
   setPlaybackTime: (playbackTime) => {
-    const { activeFileId, loopRegion, loop, getPlayer } = get();
+    const { activeFileId, loop, getPlayer, filesLoopRegion } = get();
+    const loopRegion = activeLoopRegion({ activeFileId, filesLoopRegion });
     if (activeFileId === null) return;
     const file = openFiles[activeFileId];
     const buf = file?.audioBuffer;
@@ -246,7 +250,8 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
   togglePlayback: async () => {
     const state = get();
-    const { isPlaying, activeFileId, loop, filesPlaybackStartTime, loopRegion, getPlayer } = state;
+    const { isPlaying, activeFileId, loop, filesPlaybackStartTime, getPlayer } = state;
+    const loopRegion = activeLoopRegion(state);
 
     if (!activeFileId) {
       return;

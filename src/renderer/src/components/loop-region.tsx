@@ -11,7 +11,7 @@ interface LoopRegionProps {
 export const LoopRegion = ({ fileId }: LoopRegionProps) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const file = openFiles[fileId];
-  const loopRegion = useStore((state) => state.loopRegion);
+  const loopRegion = useStore((state) => state.filesLoopRegion[fileId] ?? null);
   const zoom = useStore((state) => state.filesZoom[fileId]);
   const offset = useStore((state) => state.filesOffset[fileId]);
 

@@ -1,5 +1,5 @@
 import { useStore } from "@/store";
-import { openFiles } from "@/store/files";
+import { activeLoopRegion, openFiles } from "@/store/files";
 import * as Tone from "tone";
 import { useEffect, useRef } from "react";
 import { host } from "./host";
@@ -26,8 +26,8 @@ function applyPlaybackRate(linkTempo: number): void {
  */
 function syncToLink(): void {
   const state = useStore.getState();
-  const { player, isPlaying, activeFileId, linkEnabled, linkQuantum, linkLatencyMs, filepathsBpm, loop, loopRegion } =
-    state;
+  const { player, isPlaying, activeFileId, linkEnabled, linkQuantum, linkLatencyMs, filepathsBpm, loop } = state;
+  const loopRegion = activeLoopRegion(state);
 
   if (!player || !isPlaying || !activeFileId || !linkEnabled) return;
   if (!host.link?.isEnabled?.()) return;
