@@ -246,13 +246,15 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
               ? mergePixelRanges(historyDirtyRanges, extent.pixelRanges)
               : extent.pixelRanges;
             // A new stroke started while this one was in flight; its dabs are
-            // not in `data`, so uploading would paint over them. The audio and
-            // history are still right for this stroke, and the next commit
-            // re-projects the union.
+            // not in `data`, so uploading would paint over them. The patch
+            // still reaches the history, leaving the canvas without it, so the
+            // next navigation must restore in full rather than by delta.
             if (renderer.getStrokeGeneration() === snapshot.strokeGeneration) {
               const uploadStart = performance.now();
               renderer.patchFBOData(data, extent.pixelRanges);
               console.log(`[timing] commit FBO upload: ${(performance.now() - uploadStart).toFixed(2)}ms`);
+            } else {
+              getHistoryManager(activeFileId).markFboOutOfSync();
             }
           }
 
