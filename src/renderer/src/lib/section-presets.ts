@@ -1,6 +1,6 @@
 import type { EffectType } from "@renderer/effects/types";
 import { pickNextBrushColor } from "@renderer/lib/colors";
-import { parameterDefs } from "@renderer/parameters";
+import { parameterDefs, type FileParameterValue } from "@renderer/parameters";
 import type { BrushColor, ParameterKey } from "@renderer/store/types";
 import { z } from "zod";
 
@@ -61,18 +61,39 @@ export function toParameterKey(target: SectionTarget, id: string): ParameterKey 
 /**
  * Every value applying `preset` writes: the ones it names, and each key it
  * omits at that parameter's default, so the section always ends in the state
- * the preset describes.
+ * the preset describes. A file parameter the preset does not name is left out
+ * altogether, so whatever is loaded stays loaded.
  */
 export function resolveSectionPreset(
   preset: SectionPreset,
   target: SectionTarget,
   keys: ParameterKey[],
 ): { key: ParameterKey; value: unknown }[] {
-  return keys.map((key) => {
+  const resolved: { key: ParameterKey; value: unknown }[] = [];
+
+  for (const key of keys) {
     const id = toStorageId(target.scope, key);
-    const named = Object.prototype.hasOwnProperty.call(preset.values, id);
-    return { key, value: named ? preset.values[id] : parameterDefs[key]?.default };
-  });
+    if (Object.prototype.hasOwnProperty.call(preset.values, id)) {
+      resolved.push({ key, value: preset.values[id] });
+    } else if (parameterDefs[key]?.kind !== "file") {
+      resolved.push({ key, value: parameterDefs[key]?.default });
+    }
+  }
+
+  return resolved;
+}
+
+/** The paths among resolved values, which applying a preset opens alongside it. */
+export function referencedFilePaths(resolved: { key: ParameterKey; value: unknown }[]): string[] {
+  const paths = new Set<string>();
+
+  for (const { key, value } of resolved) {
+    if (parameterDefs[key]?.kind !== "file") continue;
+    const path = (value as FileParameterValue)?.path;
+    if (path) paths.add(path);
+  }
+
+  return [...paths];
 }
 
 /** The current value of every key in the section, keyed for storage. */

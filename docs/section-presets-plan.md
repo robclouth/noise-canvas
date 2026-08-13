@@ -1,12 +1,27 @@
 # Section Presets — Implementation Plan
 
-> **Status: engine shipped, content outstanding.** The mechanism, the UI and 15
-> presets landed in `a2b6922` on `section-presets`. This plan covers the two
-> engine defects found while proposing content, and the 53 presets still to
-> write.
+> **Status: done.** The mechanism, the UI and the first 15 presets landed in
+> `a2b6922`. Phases 1 to 4 below — the file-parameter rule, the sequencer keys
+> and the remaining 53 presets — landed on `section-preset-content`. Kept as the
+> record of what each preset is for and why the two defects existed.
 
 Self-contained: parameter keys, ranges and option values are quoted here so no
 prior conversation is needed.
+
+**Changed on the way in.** Three things the plan got wrong, settled against the
+code:
+
+- **Bouncing Ball uses `harmonic`, not `geometric`.** The tables in
+  `effects/clone-shapes.ts` are offsets, so `harmonic` (`log2(i+1)`) is the one
+  whose gaps shrink. Note the axis labels read the other way round —
+  `harmonic` shows as "Decelerating" and `geometric` as "Accelerating".
+- **Swung Eighths needs hits on the offbeats.** Swing shifts odd steps, so a row
+  of `1 0 1 0` is unaffected by it. The preset accents alternate steps instead:
+  `1 .55 1 .55`.
+- **Per Stroke is now Random Steps.** Brush phase mode reads the same patch of
+  the field for every stroke, so it repeats rather than re-rolling. Canvas mode
+  with the Random shape is the thing that actually gives a fresh value, one per
+  beat and octave.
 
 ## Background
 
@@ -84,13 +99,14 @@ Add to that list, per modulator index:
 | `SeqData`      | string | JSON    | 4×8 of `1` |
 
 `SeqData` is `{"values": number[rows][cols]}` with cells **continuous 0–1**, not
-on/off — the grid paints intensities. `values[row][col]`; confirm which end of
-the pitch axis row 0 draws at before writing Staircase and Pitch Comb, since
-both encode direction.
+on/off — the grid paints intensities. `values[row][col]`, and **row 0 is the
+bottom of the grid**, the lowest band: both `getStepFromPos` and `drawCanvas` in
+`controls/sequencer-grid.tsx` flip Y to match the texture.
 
-**Check before shipping:** widening the list also widens Randomise. Rolling a
-random `SeqData` string is meaningless — confirm `randomizeOptionsParameter`
-and friends leave a `kind: "string"` parameter alone, or exclude it.
+**Checked:** widening the list also widens Randomise, but `handleRandomize`
+switches on `def.kind` and returns on anything that is not a number, option or
+boolean, so the `SeqData` string is left alone. Reset writes its default grid,
+which is what Reset should do.
 
 ---
 
@@ -114,9 +130,9 @@ plus `"scale"` on the pitch axis), `cloneSumMode` (0 Coherent, 1 Constructive),
 | Delay           | Eight echoes a sixteenth apart, each quieter than the last. | SpaceBeats .25, CountX 8, CountY 1, Decay 60, DirX 0, Sum 0         |
 | Octaves         | Stacks octaves above without letting them cancel.           | SpaceSemis 12, CountY 3, CountX 1, DirY 0, Sum 1, Decay 40          |
 | Harmonic Series | Builds a harmonic stack on whatever it covers.              | CountX 1, CountY 8, ShapeY harmonic, SpaceSemis 12, Sum 1, Decay 30 |
-| Bouncing Ball   | Echoes whose gaps double each time.                         | SpaceBeats .125, CountX 6, ShapeX geometric, Decay 70, Sum 0        |
+| Bouncing Ball   | Echoes that crowd together as they fade.                    | SpaceBeats .5, CountX 8, ShapeX harmonic, Decay 70, Sum 0           |
 | Comb            | Copies close enough together to cancel each other.          | SpaceBeats .01, CountX 16, Decay 0, Sum 0                           |
-| Struck Bar      | An inharmonic stack, like a piano's top octave.             | CountY 7, ShapeY inharmonic, SpaceSemis 14, Sum 1, Decay 35         |
+| Struck Bar      | An inharmonic stack, like a piano's top octave.             | CountY 7, ShapeY inharmonic, SpaceSemis 12, Sum 1, Decay 35         |
 
 ### Evolve — 6
 
@@ -203,18 +219,18 @@ Noise, 11 Selected Scale, 13 Quilt, 14 Clouds, 15 Cells, 16 Bubbles,
 17 Craters, 18 Ripples, 19 Scratches, 20 Swirls, 21 Paper, 22 Marble, 23 Weave,
 24 Terrain, 25 Flow.
 
-| Name            | Blurb                                               | Values                                                   |
-| --------------- | --------------------------------------------------- | -------------------------------------------------------- |
-| Slow Sweep      | One cycle every eight beats, unchanging in pitch.   | Mode 0, Shape 0, RateBeats 8, RateSemis 0                |
-| Bar Ramp        | Rises across each bar and drops back.               | Mode 0, Shape 3, RateBeats 4, RateSemis 0                |
-| Pitch Stripes   | Varies with pitch alone, an octave per cycle.       | Mode 0, Shape 0, RateBeats 0, RateSemis 12               |
-| Scale Bands     | Follows the notes of the transport's scale.         | Mode 0, Shape 11, RateSemis 12, RateBeats 0              |
-| Per Stamp       | A fresh value for every stamp the stroke lays down. | Mode 0, Shape 5, RateBeats 0.5, PhaseMode 1              |
-| Clouds          | A soft field over both time and pitch.              | Mode 0, Shape 14, RateBeats 4, RateSemis 24, PhaseMode 0 |
-| Ripples         | Diagonal interference.                              | Mode 0, Shape 18, RateBeats 2, RateSemis 24, Rotation 45 |
-| Marble          | Veined texture, slow across the file.               | Mode 0, Shape 22, RateBeats 8, RateSemis 36              |
-| Follow Loudness | Tracks the material's own level.                    | Mode 1, EnvelopeSource 0, Smoothing 0.25, Min −60, Max 0 |
-| Follow Panning  | Tracks where the material sits in the image.        | Mode 1, EnvelopeSource 2, Smoothing 0.5                  |
+| Name            | Blurb                                             | Values                                                   |
+| --------------- | ------------------------------------------------- | -------------------------------------------------------- |
+| Slow Sweep      | One cycle every eight beats, unchanging in pitch. | Mode 0, Shape 0, RateBeats 8, RateSemis 0                |
+| Bar Ramp        | Rises across each bar and drops back.             | Mode 0, Shape 3, RateBeats 4, RateSemis 0                |
+| Pitch Stripes   | Varies with pitch alone, an octave per cycle.     | Mode 0, Shape 0, RateBeats 0, RateSemis 12               |
+| Scale Bands     | Follows the notes of the transport's scale.       | Mode 0, Shape 11, RateSemis 12, RateBeats 0              |
+| Random Steps    | A new random value for each beat and each octave. | Mode 0, Shape 5, RateBeats 1, RateSemis 12               |
+| Clouds          | A soft field over both time and pitch.            | Mode 0, Shape 14, RateBeats 4, RateSemis 24, PhaseMode 0 |
+| Ripples         | Diagonal interference.                            | Mode 0, Shape 18, RateBeats 2, RateSemis 24, Rotation 45 |
+| Marble          | Veined texture, slow across the file.             | Mode 0, Shape 22, RateBeats 8, RateSemis 36              |
+| Follow Loudness | Tracks the material's own level.                  | Mode 1, EnvelopeSource 0, Smoothing 0.25, Min −60, Max 0 |
+| Follow Panning  | Tracks where the material sits in the image.      | Mode 1, EnvelopeSource 2, Smoothing 0.5                  |
 
 ### Modulator — sequencer, 10
 
@@ -226,7 +242,7 @@ All set `Mode` 2. `SeqData` grids are written below as pictures; `·` is 0 and
 | Four on the Floor | On every other step of the bar.                       | `█·█·█·█·` 8×1              | LoopBeats 4               |
 | Offbeat           | The steps the last one leaves out.                    | `·█·█·█·█` 8×1              | LoopBeats 4               |
 | Euclid 3/8        | Three hits spread over eight steps.                   | `█··█··█·` 8×1              | LoopBeats 4               |
-| Swung Eighths     | Alternating steps, pushed late.                       | `█·█·█·█·` 8×1              | LoopBeats 4, Swing 60     |
+| Swung Eighths     | Eighths with the offbeats softened and pushed late.   | `█▄█▄█▄█▄` 8×1              | LoopBeats 4, Swing 60     |
 | Breathe           | Swells in and back out across the bar.                | 16×1 ramp up and down       | LoopBeats 4               |
 | Decay Hits        | Each hit falls away instead of holding.               | `1 .5 .2 0` ×2, 8×1         | LoopBeats 4               |
 | Checkerboard      | Neighbouring bands get opposite halves of the rhythm. | 8×4 alternating both axes   | LoopBeats 4, LoopSemis 24 |
@@ -240,7 +256,7 @@ Grids in full:
 Four on the Floor  [[1,0,1,0,1,0,1,0]]
 Offbeat            [[0,1,0,1,0,1,0,1]]
 Euclid 3/8         [[1,0,0,1,0,0,1,0]]
-Swung Eighths      [[1,0,1,0,1,0,1,0]]
+Swung Eighths      [[1,0.55,1,0.55,1,0.55,1,0.55]]
 Breathe            [[0.13,0.25,0.38,0.5,0.63,0.75,0.88,1,
                      1,0.88,0.75,0.63,0.5,0.38,0.25,0.13]]
 Decay Hits         [[1,0.5,0.2,0,1,0.5,0.2,0]]
@@ -274,8 +290,9 @@ preset. Roll one once and paste it in.
 
 ## Phase 4 — Docs
 
-- `docs/manual.md` → **Section Presets** already describes the mechanism.
-  Add nothing per effect; the lists explain themselves in the UI.
+- `docs/manual.md` → **Section Presets** describes the mechanism, plus one line
+  on presets that name a file. Nothing per effect; the lists explain themselves
+  in the UI.
 - Blurbs follow `docs/copy-style.md`: British spelling, sentence case, one
   sentence, warm rather than clinical — these are effect-card copy, not
   tooltips.
@@ -283,21 +300,21 @@ preset. Roll one once and paste it in.
 
 ## Verification
 
-- `npm run test:run` — the two guard tests already fail the build on a preset
-  that names a parameter outside its own section, or a value outside range.
-- Add the Phase 1 file-parameter test.
-- By hand, in a build: apply a Convolve preset with an IR loaded and confirm the
-  IR survives; save one and confirm it reloads its IR; apply a sequencer preset
-  and confirm the grid redraws.
+- `npm run test:run` — the guard tests fail the build on a preset that names a
+  parameter outside its own section, holds a value outside range, or ships a
+  sequencer grid whose shape disagrees with its step counts.
+- `section-presets-store.test.ts` covers the Phase 1 rule at the store: an
+  unnamed file parameter is never written, a named one is written and opened.
+- By hand, in a build: applying **Hall** with an IR loaded left the IR in place
+  and moved Taps to 256 and Gain to −3 dB; applying **Checkerboard** switched
+  the modulator to Sequencer and redrew the grid.
 
-## Open choices
+## Still open
 
-1. **"Stamp" versus "stroke".** `docs/copy-style.md` fixes both — stamp is one
-   application, stroke is a drag. The Per Stamp preset and the modulator deep
-   tour both depend on the distinction. Renaming the concept is a change to the
-   guide and to existing copy, not to this plan.
-2. **Row order in `SeqData`.** Confirm whether row 0 is the top or the bottom of
-   the pitch axis before committing Staircase and Pitch Comb.
-3. **Descriptions on factory presets** are currently shown only as a hover
-   tooltip. If the column grows past ten entries per section, a second line per
-   row may read better than a tooltip.
+1. **Descriptions on factory presets** are shown only as a hover tooltip. The
+   modulator list is now 20 rows, ten of them visible — a second line per row
+   may read better than a tooltip at that length.
+2. **The modulator list holds every colour there is.** The palette is 20, so a
+   preset saved on top of the 20 factory ones repeats one.
+3. **`convolveEdgeMode` is not in `EFFECT_PARAMS.convolve`,** so Reset,
+   Randomise and presets all skip it. Adding it widens all three.
