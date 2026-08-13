@@ -24,6 +24,7 @@ Every control in the app has a tooltip and an entry in the `?` overlay, and how 
    - [Modulator Modes](#modulator-modes)
    - [Pattern Shapes and Images](#pattern-shapes-and-images)
    - [Modulator Controls](#modulator-controls)
+   - [The Sequencer Grid](#the-sequencer-grid)
    - [Contextual Sources](#contextual-sources)
    - [Nested Modulation](#nested-modulation)
 6. [Fill Grid](#fill-grid)
@@ -411,6 +412,26 @@ They appear in the shape picker under a "User" group.
 - **Stereo** – decorrelates the left/right channels by offsetting the sample position in time. Negative values swap channels.
 - **Phase Mode** – whether the pattern is anchored to the **Canvas** (fixed in the file, so strokes reveal a stationary pattern) or to the **Brush** (travels with each stroke).
 - **Phase ↔ / ↕** – offsets the pattern's start position in each axis.
+
+### The Sequencer Grid
+
+In Sequencer mode the modulator reads a grid instead of a shape. Steps run left to right in time and bands run bottom to top in pitch, and every cell holds one value between 0 and 1 — the modulator's output wherever that cell lands on the canvas. A full cell drives the parameter to the top of its modulated range, an empty one to the bottom.
+
+| Gesture                 | What it does                      |
+| ----------------------- | --------------------------------- |
+| Click a step            | Switches it on or off             |
+| Drag up or down on it   | Sets its value                    |
+| Drag sideways           | Switches a run of steps on or off |
+| Right-drag              | Switches steps off                |
+| Hold Shift while moving | Fine-tunes the value              |
+
+A step switched off keeps its value and shows it as a faint line, so switching it back on returns the level you left. **Randomise** fills every cell with a random value, **Fill** switches the whole grid on, and **Clear** switches it off without losing the values.
+
+**Steps ↔** and **Rows ↕** set the size of the grid, **Loop ↔** and **Loop ↕** set how far it stretches before repeating, and **Swing** pushes odd-numbered steps later.
+
+**Hints**
+
+- Off is the bottom of the parameter's modulated range, not "no modulation" — on Strength that is silence, but on a pitch parameter it is the lowest pitch.
 
 ### Contextual Sources
 

@@ -299,12 +299,22 @@ export const UI_CONTROLS = {
   "sequencer-grid": {
     label: "Sequencer grid",
     description: "Sets the modulator's value for each step of its sequence.",
-    manualSection: "modulator-controls",
+    manualSection: "the-sequencer-grid",
   },
   "sequencer-randomize": {
-    label: "Randomize steps",
-    description: "Fills the sequencer grid with random values.",
-    manualSection: "modulator-controls",
+    label: "Randomise",
+    description: "Fills the grid with random values.",
+    manualSection: "the-sequencer-grid",
+  },
+  "sequencer-fill": {
+    label: "Fill",
+    description: "Switches every step on, at full value.",
+    manualSection: "the-sequencer-grid",
+  },
+  "sequencer-clear": {
+    label: "Clear",
+    description: "Switches every step off, keeping the values it holds.",
+    manualSection: "the-sequencer-grid",
   },
 } as const satisfies Record<string, UiControl>;
 

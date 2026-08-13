@@ -74,7 +74,7 @@ export interface ModulatorUniform {
 }
 
 // Cache for parsed sequencer JSON to avoid repeated parsing
-const seqDataParseCache = new Map<string, { values?: number[][] }>();
+const seqDataParseCache = new Map<string, { values?: number[][]; off?: boolean[][] }>();
 
 // Helper to parse sequencer data and create DataTexture
 function createSeqDataTexture(seqDataStr: string): DataTexture {
@@ -89,14 +89,16 @@ function createSeqDataTexture(seqDataStr: string): DataTexture {
   }
   parsed = parsed!;
 
-  // Create 16x16 Float32Array for seq values
+  // Create 16x16 Float32Array for seq values. A step switched off reads as 0
+  // while keeping its own value in the JSON.
   const valuesData = new Float32Array(MAX_SEQ_SIZE);
+  const off = Array.isArray(parsed.off) ? parsed.off : undefined;
   if (parsed.values && Array.isArray(parsed.values)) {
     for (let row = 0; row < Math.min(parsed.values.length, MAX_SEQ_STEPS_Y); row++) {
       const rowData = parsed.values[row];
       if (Array.isArray(rowData)) {
         for (let col = 0; col < Math.min(rowData.length, MAX_SEQ_STEPS_X); col++) {
-          valuesData[row * MAX_SEQ_STEPS_X + col] = rowData[col] || 0;
+          valuesData[row * MAX_SEQ_STEPS_X + col] = off?.[row]?.[col] ? 0 : rowData[col] || 0;
         }
       }
     }
