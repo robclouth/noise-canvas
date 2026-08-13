@@ -48,6 +48,8 @@ async function analyze(filePath: string, params: { bandsPerOctave: number; minFr
     bandStepLog2s: i32(arrays.bandStepLog2s, "bandStepLog2s"),
     bandLengths: u32(arrays.bandLengths, "bandLengths"),
     onsets: f32(arrays.onsets, "onsets"),
+    onsetOdfMax: meta.onsetOdfMax === undefined ? undefined : Number(meta.onsetOdfMax),
+    onsetBandMax: arrays.onsetBandMax ? f32(arrays.onsetBandMax, "onsetBandMax") : undefined,
     textureWidth: Number(meta.textureWidth),
     textureHeight: Number(meta.textureHeight),
     numFrames: Number(meta.numFrames),

@@ -45,6 +45,9 @@ function resultToFrame(result: AnalysisResult): Frame {
   // forward it when present so the renderer sees the same shape as in Electron.
   const maybeFreqs = (result as { bandFreqsHz?: NumericArray }).bandFreqsHz;
   if (maybeFreqs) arrays.bandFreqsHz = maybeFreqs;
+  // The onset reference seeds region-limited re-detection on the first stroke;
+  // without it the renderer falls back to a whole-file pass.
+  if (result.onsetBandMax) arrays.onsetBandMax = result.onsetBandMax;
 
   return {
     meta: {
@@ -58,6 +61,7 @@ function resultToFrame(result: AnalysisResult): Frame {
       format: result.format,
       codec: result.codec,
       channels: result.channels,
+      ...(result.onsetOdfMax !== undefined ? { onsetOdfMax: result.onsetOdfMax } : {}),
     },
     arrays,
   };
