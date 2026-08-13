@@ -385,7 +385,7 @@ The parameter menu shows the resulting **live range in real units** next to the 
 
 - **Pattern** – a 2D shape scrolled across time and pitch.
 - **Envelope** – follows the painted region's own **Amplitude**, **Phase**, or **Panning**, with adjustable smoothing window (in beats) and dB range.
-- **Sequencer** – a step grid you draw on: adjustable steps (1–16), rows (1–8), loop length in beats, pitch range in semitones, and swing.
+- **Sequence** – a step grid you draw on: adjustable steps (1–16), rows (1–8), loop length in beats, pitch range in semitones, and swing.
 
 ### Pattern Shapes and Images
 
@@ -415,7 +415,7 @@ They appear in the shape picker under a "User" group.
 
 ### The Sequencer Grid
 
-In Sequencer mode the modulator reads a grid instead of a shape. Steps run left to right in time and bands run bottom to top in pitch, and every cell holds one value between 0 and 1 — the modulator's output wherever that cell lands on the canvas. A full cell drives the parameter to the top of its modulated range, an empty one to the bottom.
+In Sequence mode the modulator reads a grid instead of a shape. Steps run left to right in time and bands run bottom to top in pitch, and every cell holds one value between 0 and 1 — the modulator's output wherever that cell lands on the canvas. A full cell drives the parameter to the top of its modulated range, an empty one to the bottom.
 
 | Gesture                 | What it does                      |
 | ----------------------- | --------------------------------- |

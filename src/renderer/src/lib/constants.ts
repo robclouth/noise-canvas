@@ -146,7 +146,7 @@ export const BLEND_MODES = [
 export const MODULATOR_MODES = [
   { value: 0, label: "Pattern" },
   { value: 1, label: "Envelope" },
-  { value: 2, label: "Sequencer" },
+  { value: 2, label: "Sequence" },
 ];
 
 // Sequencer constants (using DataTexture so no uniform limit issues)
