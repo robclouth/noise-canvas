@@ -128,6 +128,8 @@ export interface FileRendererHandle {
   getDirtyRegion: () => { startX: number; endX: number; startY: number; endY: number } | null;
   /** Clears the dirty region tracking (call after synthesis). */
   clearDirtyRegion: () => void;
+  /** Takes the dirty region and clears it, so only this commit synthesizes it. */
+  consumeDirtyRegion: () => { startX: number; endX: number; startY: number; endY: number } | null;
   /** Packed-pixel ranges the current stroke's committed footprint covers, for the history delta. Null = full snapshot. */
   getDirtyPixelRanges: () => Uint32Array | null;
   /** The stroke's committed footprint in unpacked UV, or null when nothing was committed. */
@@ -1290,6 +1292,7 @@ const FileRendererInner = memo(
       },
       getDirtyRegion: () => strokeRendererRef.current?.getDirtyRegion() ?? null,
       clearDirtyRegion: () => strokeRendererRef.current?.clearDirtyRegion(),
+      consumeDirtyRegion: () => strokeRendererRef.current?.consumeDirtyRegion() ?? null,
       getDirtyPixelRanges: () => strokeRendererRef.current?.getDirtyPixelRanges() ?? null,
       getCommittedFootprintUv: () => strokeRendererRef.current?.getCommittedFootprintUv() ?? null,
       getStrokeGeneration: () => strokeRendererRef.current?.getStrokeGeneration() ?? 0,

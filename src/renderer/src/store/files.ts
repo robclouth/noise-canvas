@@ -14,6 +14,7 @@ import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import { disposeOnsetTexture, packOnsetState, spliceOnsets, unpackOnsetState } from "../lib/onset-map";
+import type { DirtyRegionUv } from "../lib/stroke-commit";
 import type { Brush, OpenFile, ParameterKey, SpectrogramData, State, ZustandGet, ZustandSet } from "./types";
 import type { StemGroupMethod } from "./stem-groups";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
@@ -42,6 +43,7 @@ export interface FilesState {
     fileId: string,
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
     prefetchedFboData?: Float32Array,
+    capturedDirtyRegion?: DirtyRegionUv | null,
   ) => Promise<void>;
   loadCachedAudio: (fileId: string, audioPath: string, peak: number) => Promise<boolean>;
   restoreOnsetsForNode: (fileId: string, nodeId: string, packedData: Float32Array) => Promise<void>;
@@ -1439,6 +1441,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     fileId: string,
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
     prefetchedFboData?: Float32Array,
+    // A region taken at mouse-up. Undefined reads the renderer's live region
+    // and clears it after; passing one leaves the live region alone, so dabs
+    // painted while this synthesis runs stay dirty for the next commit.
+    capturedDirtyRegion?: DirtyRegionUv | null,
   ) => {
     const synthesizeFileStart = performance.now();
     console.log("[timing] synthesizeFile started");
@@ -1492,9 +1498,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       );
 
       // Check for dirty region to enable partial synthesis optimization
-      const dirtyRegionStart = performance.now();
-      const dirtyRegion = renderer.getDirtyRegion();
-      console.log(`[timing] getDirtyRegion: ${(performance.now() - dirtyRegionStart).toFixed(2)}ms`);
+      const usingCapturedRegion = capturedDirtyRegion !== undefined;
+      const dirtyRegion = usingCapturedRegion ? capturedDirtyRegion : renderer.getDirtyRegion();
 
       const existingBuffer = file.audioBuffer;
       const canDoPartialSynthesis = dirtyRegion && existingBuffer;
@@ -1595,7 +1600,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
 
       // Clear dirty region after synthesis
-      renderer.clearDirtyRegion();
+      if (!usingCapturedRegion) renderer.clearDirtyRegion();
 
       // C++ now returns the full buffer (with crossfade splice done internally)
       const audioBufferStart = performance.now();

@@ -1,5 +1,5 @@
 import type { FileRendererHandle } from "@renderer/components/file-renderer";
-import type { SpectrogramData, State } from "@renderer/store/types";
+import type { StrokeCommitSnapshot } from "./stroke-commit";
 import { host } from "./host";
 
 // A hard-edged stroke leaves the coefficients around its time boundaries
@@ -16,30 +16,23 @@ import { host } from "./host";
 const HARD_EDGE_CURVE_MIN = 80;
 
 /**
- * Runs boundary conditioning for the stroke whose committed footprint the
- * renderer currently holds, patching `data` in place and pushing the patched
- * coefficients to the GPU. Returns the patched pixel ranges as a flat
- * [pixelStart, pixelCount, ...] list for widening the history delta, or null
- * when conditioning did not apply (soft envelope, wrap, stale stroke, or an
- * empty patch).
+ * Runs boundary conditioning for the snapshot's stroke, patching `data` in
+ * place and pushing the patched coefficients to the GPU. Returns the patched
+ * pixel ranges as a flat [pixelStart, pixelCount, ...] list for widening the
+ * history delta, or null when conditioning did not apply (soft envelope, wrap,
+ * stale stroke, or an empty patch). Widens `snapshot.dirtyRegion` to cover the
+ * margins the patch reaches into.
  */
 export async function conditionStrokeBoundary(
   renderer: FileRendererHandle,
-  spec: SpectrogramData,
-  state: State,
+  snapshot: StrokeCommitSnapshot,
   data: Float32Array,
 ): Promise<Uint32Array | null> {
-  const step = state.brushes[state.activeBrushIndex]?.steps?.[state.activeStepIndex] as
-    | Record<string, unknown>
-    | undefined;
-  const curveTime = (step?.brushCurveTime as number | undefined) ?? state.brushCurveTime;
-  const wrapMode = (step?.brushWrapMode as number | undefined) ?? state.brushWrapMode;
+  const { spec, curveTime, wrapMode, footprintUv } = snapshot;
 
   if (curveTime < HARD_EDGE_CURVE_MIN) return null;
   // A footprint that wraps the time axis has no in-file edges to condition.
   if (wrapMode === 1 || wrapMode === 3) return null;
-
-  const footprintUv = renderer.getCommittedFootprintUv();
   if (!footprintUv) return null;
 
   const { numFrames, numBands } = spec;
@@ -61,7 +54,6 @@ export async function conditionStrokeBoundary(
     bandLengths: spec.synthesisMetadata.bandLengths,
   };
 
-  const generation = renderer.getStrokeGeneration();
   const condStart = performance.now();
   const patch = await host.analysis.conditionBoundary(
     data,
@@ -76,7 +68,7 @@ export async function conditionStrokeBoundary(
   if (!patch.ranges.length) return null;
   // A new stroke began while the patch was computed; applying it would write
   // over dabs the readback never saw. Leave everything as painted.
-  if (renderer.getStrokeGeneration() !== generation) return null;
+  if (renderer.getStrokeGeneration() !== snapshot.strokeGeneration) return null;
 
   const { ranges, pixels } = patch;
   const { bandOffsets, bandStepLog2s } = spec.synthesisMetadata;
@@ -108,11 +100,30 @@ export async function conditionStrokeBoundary(
   console.log(`[timing] conditioning FBO upload: ${(performance.now() - uploadStart).toFixed(2)}ms`);
   // The patch reaches beyond the painted rect (time margins plus a spectral
   // skirt); synthesis must cover it or the audio misses the conditioning.
-  renderer.expandDirtyRegion(
+  expandSnapshotRegion(
+    snapshot,
     Math.max(0, minFrameTouched / numFrames),
     Math.min(1, maxFrameTouched / numFrames),
     1 - (maxBandTouched + 1) / numBands,
     1 - minBandTouched / numBands,
   );
   return pixelRanges;
+}
+
+function expandSnapshotRegion(
+  snapshot: StrokeCommitSnapshot,
+  startX: number,
+  endX: number,
+  startY: number,
+  endY: number,
+): void {
+  const region = snapshot.dirtyRegion;
+  if (!region) {
+    snapshot.dirtyRegion = { startX, endX, startY, endY };
+    return;
+  }
+  region.startX = Math.min(region.startX, startX);
+  region.endX = Math.max(region.endX, endX);
+  region.startY = Math.min(region.startY, startY);
+  region.endY = Math.max(region.endY, endY);
 }

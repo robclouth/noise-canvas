@@ -1,5 +1,6 @@
 import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
 import { conditionStrokeBoundary } from "@renderer/lib/boundary-conditioning";
+import { buildStrokeCommitSnapshot } from "@renderer/lib/stroke-commit";
 import { mergePixelRanges } from "@renderer/lib/pixel-ranges";
 import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
 import { BRUSH_ANCHOR_MODE_CENTER } from "@renderer/lib/constants";
@@ -205,25 +206,19 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         autoPlaybackParams = { startTimeSeconds: autoPlayStart, endTimeSeconds: autoPlayEnd };
       }
 
-      // Capture the brush footprint and issue the FBO readback before queueing
-      // the commit. getFBOData() issues the GPU read synchronously, so the
-      // snapshot reflects this stroke's end even though the commit body runs
-      // serialized behind any earlier stroke.
+      // Take everything the commit reads from the renderer, and issue the FBO
+      // readback, before queueing. getFBOData() issues the GPU read
+      // synchronously, so the snapshot reflects this stroke's end even though
+      // the commit body runs serialized behind any earlier stroke.
       const renderer = file.rendererRef.current;
-      const dirtyRanges = renderer.getDirtyPixelRanges();
+      const snapshot = buildStrokeCommitSnapshot({
+        renderer,
+        state,
+        spec: file.spectrogramData,
+        brushName: label ?? state.brushes[state.activeBrushIndex]?.name ?? "Stroke",
+        autoPlaybackParams,
+      });
       const dataPromise = renderer.getFBOData();
-      const spec = file.spectrogramData;
-      const brushName = label ?? state.brushes[state.activeBrushIndex]?.name ?? "Stroke";
-      const dimensions = {
-        textureWidth: spec.textureWidth,
-        textureHeight: spec.textureHeight,
-        numFrames: spec.numFrames,
-        numBands: spec.numBands,
-        numChannels: spec.numChannels,
-        sampleRate: spec.sampleRate,
-        minFreq: spec.minFreq,
-        bandsPerOctave: spec.bandsPerOctave,
-      };
 
       await serializeStrokeCommit(activeFileId, async () => {
         const data = await dataPromise;
@@ -233,9 +228,9 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         // time-domain-exact edit before history and synthesis consume the
         // data, so what is stored, shown, and heard all carry the conditioned
         // boundary. Failure or a stale stroke just keeps the plain edges.
-        let historyDirtyRanges = dirtyRanges;
+        let historyDirtyRanges = snapshot.dirtyRanges;
         try {
-          const patched = await conditionStrokeBoundary(renderer, spec, state, data);
+          const patched = await conditionStrokeBoundary(renderer, snapshot, data);
           if (patched && historyDirtyRanges) {
             historyDirtyRanges = mergePixelRanges(historyDirtyRanges, patched);
           }
@@ -247,12 +242,12 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         // Run history node write and synthesis in parallel.
         const nodeIdPromise = historyManager.addStroke({
           data,
-          label: brushName,
-          dimensions,
+          label: snapshot.brushName,
+          dimensions: snapshot.dimensions,
           dirtyRanges: historyDirtyRanges,
         });
 
-        await synthesizeFile(activeFileId, autoPlaybackParams, data);
+        await synthesizeFile(activeFileId, snapshot.autoPlaybackParams, data, snapshot.dirtyRegion);
 
         const nodeId = await nodeIdPromise;
         const updated = openFiles[activeFileId];

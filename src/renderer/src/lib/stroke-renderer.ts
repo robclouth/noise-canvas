@@ -1672,6 +1672,17 @@ export class StrokeRenderer {
   }
 
   /**
+   * Take the dirty region and clear it in one step. The commit that owns the
+   * returned region is the only one that synthesizes it; dabs painted after
+   * this call accumulate into a fresh region for the next commit.
+   */
+  consumeDirtyRegion(): { startX: number; endX: number; startY: number; endY: number } | null {
+    const region = this.dirtyRegion;
+    this.dirtyRegion = null;
+    return region;
+  }
+
+  /**
    * Dispose of all WebGL resources.
    */
   dispose(): void {
