@@ -13,7 +13,7 @@ import { host } from "@renderer/lib/host";
 import { BrushStep, createDefaultStep } from "@renderer/parameters";
 import { produce } from "immer";
 import { factoryPresets } from "../lib/factory-presets";
-import { collectBrushReferencedPaths } from "./files";
+import { collectBrushReferencedPaths, openReferencedPaths } from "./files";
 import type { Brush, State, ZustandGet, ZustandSet } from "./types";
 
 export interface PresetsState {
@@ -114,17 +114,7 @@ function makeBrushFromPreset(preset: PresetType, existingColors: Brush["color"][
 }
 
 function openReferencedFiles(brush: Brush, get: ZustandGet) {
-  for (const path of collectBrushReferencedPaths(brush)) {
-    get()
-      .openFileMinimized(path)
-      .catch(() => {
-        notifications.show({
-          title: "Referenced file not found",
-          message: `${path.split("/").pop()} not found on disk`,
-          color: "yellow",
-        });
-      });
-  }
+  openReferencedPaths(collectBrushReferencedPaths(brush), get);
 }
 
 export const PRESETS_PERSISTED_KEYS = ["brushes", "activeBrushIndex"] as const;

@@ -7,6 +7,7 @@ import {
   folderFor,
   makeSectionPresetId,
   pickSectionPresetColor,
+  referencedFilePaths,
   resolveSectionPreset,
   SectionFolder,
   SectionPreset,
@@ -17,6 +18,7 @@ import {
 } from "@renderer/lib/section-presets";
 import { produce } from "immer";
 import { getEffectParameterValue, getParameterValue } from ".";
+import { openReferencedPaths } from "./files";
 import type { ParameterKey, State, ZustandGet, ZustandSet } from "./types";
 
 export interface SectionPresetsState {
@@ -118,10 +120,13 @@ export const createSectionPresetsSlice = (set: ZustandSet, get: ZustandGet): Sec
     const preset = get().sectionPresets.find((candidate) => candidate.id === presetId);
     if (!preset) return;
 
+    const resolved = resolveSectionPreset(preset, target, keys);
     const setParameter = get().setParameter;
-    for (const { key, value } of resolveSectionPreset(preset, target, keys)) {
+    for (const { key, value } of resolved) {
       setParameter(key, value, target.effectId);
     }
+
+    openReferencedPaths(referencedFilePaths(resolved), get);
   },
 
   saveSectionPreset: async (name: string, target: SectionTarget, keys: ParameterKey[]) => {

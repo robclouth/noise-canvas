@@ -326,6 +326,21 @@ export function isFileReferenced(filePath: string, brushes: Brush[]): boolean {
   return findFileReferences(filePath, brushes).length > 0;
 }
 
+/** Open each path minimized, warning about the ones no longer on disk. */
+export function openReferencedPaths(paths: string[], get: ZustandGet) {
+  for (const path of paths) {
+    get()
+      .openFileMinimized(path)
+      .catch(() => {
+        notifications.show({
+          title: "Referenced file not found",
+          message: `${path.split("/").pop()} not found on disk`,
+          color: "yellow",
+        });
+      });
+  }
+}
+
 /** Collect every distinct file path referenced by a single brush (for bulk load). */
 export function collectBrushReferencedPaths(brush: Brush): string[] {
   const paths = new Set<string>();

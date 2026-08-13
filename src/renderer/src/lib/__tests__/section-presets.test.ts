@@ -7,6 +7,7 @@ import {
   captureSectionValues,
   folderFor,
   pickSectionPresetColor,
+  referencedFilePaths,
   resolveSectionPreset,
   SectionPreset,
   serializeSectionPreset,
@@ -41,6 +42,20 @@ describe("section presets", () => {
       { key: "blurAmountPitch", value: defaultOf("blurAmountPitch") },
       { key: "blurNoiseTime", value: defaultOf("blurNoiseTime") },
     ]);
+  });
+
+  it("leaves a file parameter alone unless the preset names one", () => {
+    const keys: ParameterKey[] = ["convolveIrFile", "convolveIrSize"];
+    const target = { scope: "effect:convolve", effectId: "e1" } as const;
+    const preset: SectionPreset = { ...blurPreset, scope: "effect:convolve", values: { convolveIrSize: 128 } };
+
+    expect(resolveSectionPreset(preset, target, keys)).toEqual([{ key: "convolveIrSize", value: 128 }]);
+
+    const named = { ...preset, values: { ...preset.values, convolveIrFile: { path: "/ir/hall.wav" } } };
+    const resolved = resolveSectionPreset(named, target, keys);
+
+    expect(resolved).toContainEqual({ key: "convolveIrFile", value: { path: "/ir/hall.wav" } });
+    expect(referencedFilePaths(resolved)).toEqual(["/ir/hall.wav"]);
   });
 
   it("loads a modulator preset onto a different modulator", () => {
