@@ -3,6 +3,7 @@ import { useStore } from "@renderer/store";
 import { openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
 import { isManagedFilePath } from "@renderer/store/managed-path";
+import { clearCanvasPatchStash } from "./canvas-patch-stash";
 import { host } from "./host";
 import { ipcSend } from "./ipc";
 import { mergePixelRanges } from "./pixel-ranges";
@@ -959,6 +960,9 @@ export class HistoryManager {
       );
     }
     this.fboOutOfSync = false;
+    // The FBO now holds the target state; a patch stashed against the old
+    // state would write stale pixels onto it.
+    clearCanvasPatchStash(this.fileId);
 
     this.manifest.currentId = targetId;
     // packedData is either a cache entry or a freshly reconstructed array; both
@@ -992,10 +996,12 @@ export class HistoryManager {
   /**
    * Marks the renderer's FBO as diverged from the history's current node
    * (e.g. after restore-original, which bypasses history). The next
-   * navigation then uploads the full packed state instead of a patch.
+   * navigation then uploads the full packed state instead of a patch. Any
+   * stashed canvas patch described the diverged state, so it goes too.
    */
   markFboOutOfSync(): void {
     this.fboOutOfSync = true;
+    clearCanvasPatchStash(this.fileId);
   }
 
   /**
@@ -1470,6 +1476,7 @@ export async function destroyHistoryManager(fileId: string): Promise<void> {
   if (!m) return;
   await m.purge();
   managers.delete(fileId);
+  clearCanvasPatchStash(fileId);
 }
 
 /**

@@ -1,8 +1,9 @@
 import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
 import { notifications } from "@mantine/notifications";
 import { applyCoefficientPatch } from "@renderer/lib/coef-patch";
+import { setCanvasPatchStash, takeCanvasPatchStash } from "@renderer/lib/canvas-patch-stash";
 import { buildStrokeCommitSnapshot } from "@renderer/lib/stroke-commit";
-import { mergePixelRanges } from "@renderer/lib/pixel-ranges";
+import { mergePixelRanges, scatterPixelRanges } from "@renderer/lib/pixel-ranges";
 import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
 import { BRUSH_ANCHOR_MODE_CENTER } from "@renderer/lib/constants";
 import { buildScaleOffsets, minFreqSemisAboveC0, stepScaleSemis } from "@renderer/lib/scale-snap";
@@ -227,6 +228,12 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         const data = await dataPromise;
         if (!data) return;
 
+        // A patch an earlier commit could not upload, because this stroke was
+        // already on the canvas when it landed. Fold it in before anything
+        // reads `data`, so synthesis, history and the canvas all agree on it.
+        const stash = takeCanvasPatchStash(activeFileId);
+        if (stash) scatterPixelRanges(data, stash.data, stash.ranges);
+
         try {
           // One pass derives the audio and the coefficients that audio
           // analyses to, so what is stored, shown and heard are the same
@@ -247,16 +254,23 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
             historyDirtyRanges = historyDirtyRanges
               ? mergePixelRanges(historyDirtyRanges, extent.pixelRanges)
               : extent.pixelRanges;
-            // A new stroke started while this one was in flight; its dabs are
-            // not in `data`, so uploading would paint over them. The patch
-            // still reaches the history, leaving the canvas without it, so the
-            // next navigation must restore in full rather than by delta.
+          }
+
+          let uploadRanges = extent ? extent.pixelRanges : null;
+          if (stash) uploadRanges = uploadRanges ? mergePixelRanges(stash.ranges, uploadRanges) : stash.ranges;
+          if (uploadRanges) {
             if (renderer.getStrokeGeneration() === snapshot.strokeGeneration) {
               const uploadStart = performance.now();
-              renderer.patchFBOData(data, extent.pixelRanges);
+              renderer.patchFBOData(data, uploadRanges);
               console.log(`[timing] commit FBO upload: ${(performance.now() - uploadStart).toFixed(2)}ms`);
             } else {
+              // A new stroke started while this one was in flight; its dabs
+              // are not in `data`, so uploading would paint over them. Stash
+              // the patch for the next commit to upload, and make any
+              // navigation before then restore in full — the restore also
+              // drops the stash, which it makes stale.
               getHistoryManager(activeFileId).markFboOutOfSync();
+              setCanvasPatchStash(activeFileId, { data, ranges: uploadRanges });
             }
           }
 
