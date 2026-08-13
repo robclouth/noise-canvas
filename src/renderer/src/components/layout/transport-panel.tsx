@@ -174,9 +174,10 @@ export const TransportPanel = memo(() => {
 
       <OutputMeter />
 
-      <ParameterControl paramKey="limiterEnabled" displayLabel="Limit" />
-
-      <ParameterControl paramKey="reanalyzeStrokes" displayLabel="Re-analyse" />
+      <Stack gap={0}>
+        <ParameterControl paramKey="limiterEnabled" displayLabel="Limit" />
+        <ParameterControl paramKey="reanalyzeStrokes" displayLabel="Re-analyse" />
+      </Stack>
 
       <Divider orientation="vertical" color="dark.5" />
 
