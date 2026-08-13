@@ -1853,6 +1853,8 @@ public:
         hardEdgeStart = strokeObj.Get("hardEdgeStart").ToBoolean().Value();
         hardEdgeEnd = strokeObj.Get("hardEdgeEnd").ToBoolean().Value();
         applyLimiter = strokeObj.Get("applyLimiter").ToBoolean().Value();
+        if (strokeObj.Has("project"))
+            projectEnabled = strokeObj.Get("project").ToBoolean().Value();
         if (strokeObj.Has("envelope") && strokeObj.Get("envelope").IsTypedArray())
         {
             Napi::Float32Array envJs = strokeObj.Get("envelope").As<Napi::Float32Array>();
@@ -1959,8 +1961,10 @@ public:
         if (applyLimiter)
             limitWindow(w0, w1, weightedGain);
 
-        // 4. Project the canvas through the audio.
-        project(analyzer, bandBegin, bandEnd, w0, w1);
+        // 4. Project the canvas through the audio. Skipped when the stroke
+        //    keeps its painted coefficients; the patch then comes back empty.
+        if (projectEnabled)
+            project(analyzer, bandBegin, bandEnd, w0, w1);
 
         peakValue = 0.0f;
         for (const auto &channel : audioChannels)
@@ -1988,7 +1992,7 @@ public:
 
             onsets = computeOnsets(packed, packedLen, layout, numFrames, sampleRate,
                                    hasOnsetRegion ? &onsetRegion : nullptr, &onsetOdfMax, &onsetBandMaxOut,
-                                   &overlay);
+                                   projectEnabled ? &overlay : nullptr);
         }
 
         // 6. Output levels over the window.
@@ -2492,6 +2496,7 @@ private:
     int64_t footStart = 0, footEnd = 0;
     bool hardEdgeStart = false, hardEdgeEnd = false;
     bool applyLimiter = false;
+    bool projectEnabled = true;
     std::vector<float> envelope;
 
     // Results

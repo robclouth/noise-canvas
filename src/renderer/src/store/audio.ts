@@ -17,6 +17,7 @@ export interface AudioState {
   autoPlayStroke: boolean;
   setAutoPlayStroke: (value: boolean) => void;
   limiterEnabled: boolean;
+  reanalyzeStrokes: boolean;
   /** Sets the active file's loop region. */
   setLoopRegion: (region: LoopRegion | null) => void;
   setPlaybackTime: (playbackTime: number) => void;
@@ -24,7 +25,7 @@ export interface AudioState {
   stopAudio: () => void;
 }
 
-export const AUDIO_PERSISTED_KEYS = ["autoPlayStroke", "loop", "limiterEnabled"] as const;
+export const AUDIO_PERSISTED_KEYS = ["autoPlayStroke", "loop", "limiterEnabled", "reanalyzeStrokes"] as const;
 
 export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState => ({
   player: null,
@@ -160,6 +161,10 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
   // Whether painting holds each stroke's own level down. Read at mouse-up and
   // baked into the stroke, so changing it only affects what is painted next.
   limiterEnabled: true,
+
+  // Whether a committed stroke is redrawn from the analysis of its own audio.
+  // Read at mouse-up, like the limiter; the audio is the same either way.
+  reanalyzeStrokes: false,
 
   setLoopRegion: (region) => {
     const { activeFileId, setFileLoopRegion } = get();

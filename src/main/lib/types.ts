@@ -71,6 +71,8 @@ export interface CommitStroke {
   hardEdgeStart: boolean;
   hardEdgeEnd: boolean;
   applyLimiter: boolean;
+  /** False skips the projection: the patch comes back empty and the canvas keeps its painted coefficients. */
+  project: boolean;
   /**
    * The brush's time envelope across the whole file, one point per 5 ms hop,
    * each holding the envelope's largest value over its hop. Weights the

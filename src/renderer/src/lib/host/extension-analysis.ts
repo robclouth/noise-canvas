@@ -160,6 +160,7 @@ const commitStroke: CommitStrokeFn = async (
     hardEdgeStart: stroke.hardEdgeStart ? 1 : 0,
     hardEdgeEnd: stroke.hardEdgeEnd ? 1 : 0,
     applyLimiter: stroke.applyLimiter ? 1 : 0,
+    project: stroke.project ? 1 : 0,
   };
   if (params.onsetStartSec !== undefined) meta.onsetStartSec = params.onsetStartSec;
   if (params.onsetEndSec !== undefined) meta.onsetEndSec = params.onsetEndSec;

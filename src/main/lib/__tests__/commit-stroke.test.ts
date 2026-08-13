@@ -24,6 +24,7 @@ interface CommitStroke {
   hardEdgeStart: boolean;
   hardEdgeEnd: boolean;
   applyLimiter: boolean;
+  project: boolean;
   envelope: Float32Array;
 }
 
@@ -178,6 +179,7 @@ function gateStroke(overrides: Partial<CommitStroke> = {}): CommitStroke {
     hardEdgeStart: true,
     hardEdgeEnd: true,
     applyLimiter: false,
+    project: true,
     envelope: boxEnvelope(),
     ...overrides,
   };
@@ -570,6 +572,45 @@ describe("commit stroke", () => {
       // The click outside the erased span survives; the one inside it does not.
       expect(times.some((t) => Math.abs(t - 0.5) < 0.03)).toBe(true);
       expect(times.some((t) => Math.abs(t - 1.7) < 0.03)).toBe(false);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "keeps the painted canvas when projection is off, with the same audio",
+    async () => {
+      const analysis = await addon.analyze([makeNoise()], 1, SR, PARAMS);
+      const original = await roundTrip(analysis, analysis.data);
+      const erased = erase(analysis);
+
+      const run = (project: boolean) =>
+        addon.commitStroke(
+          erased,
+          metaOf(analysis),
+          SR,
+          { ...PARAMS, detectOnsets: true },
+          [original],
+          fullWindow(analysis),
+          gateStroke({ project }),
+        );
+      const projected = await run(true);
+      const painted = await run(false);
+
+      // No patch: the canvas keeps exactly what was painted.
+      expect(painted.patch.ranges.length).toBe(0);
+      expect(painted.patch.pixels.length).toBe(0);
+      expect(projected.patch.ranges.length).toBeGreaterThan(0);
+
+      // The projection only reads the audio, so skipping it changes nothing
+      // the ear gets: same samples, same peak, same levels.
+      let maxDiff = 0;
+      for (let i = 0; i < N; i++)
+        maxDiff = Math.max(maxDiff, Math.abs(painted.channels[0][i] - projected.channels[0][i]));
+      expect(maxDiff).toBe(0);
+      expect(painted.peak).toBe(projected.peak);
+
+      // Onsets still run, reading the painted coefficients directly.
+      expect(painted.onsets).toBeDefined();
     },
     TIMEOUT,
   );

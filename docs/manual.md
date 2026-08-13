@@ -627,9 +627,10 @@ The transport bar, left to right:
 - **Tonic / Type** – the scale used for pitch snapping and for scale-based effects and modulation.
 - **Output meter**.
 - **Limit** – holds each stroke's own level down as you paint it, following the brush envelope so the edges stay untouched. It is baked into the stroke, so undo removes it along with the paint, and turning it off only affects what you paint next. Turn it off to paint as loud as the effect makes it.
+- **Re-analyse** – redraws each stroke as the analysis of the audio it made, so the picture settles into what you will hear — even edits that only move phase. Off, the canvas keeps exactly what you painted; the sound is the same either way, and commits are faster. Like Limit, it is read at the end of each stroke.
 - **?** – outlines every area of the window at once. See [Getting Help](#getting-help).
 
-Audio is resynthesised incrementally after every stroke, and the spectrogram is then redrawn from the analysis of that audio — so the picture is what you will hear, down to the edits that only move phase. Nothing protects the output as a whole: the strip above the spectrogram marks any slice that runs out of headroom.
+Audio is resynthesised incrementally after every stroke, so what you hear is always the real thing, not a preview. Nothing protects the output as a whole: the strip above the spectrogram marks any slice that runs out of headroom.
 
 ---
 

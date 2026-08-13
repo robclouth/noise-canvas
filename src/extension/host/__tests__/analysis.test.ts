@@ -183,7 +183,7 @@ describe("/analyze endpoint", () => {
     });
     try {
       const reqFrame = encodeFrame({
-        meta: { numChannels: 1, startFrame: 10, endFrame: 20, hardEdgeStart: 1 },
+        meta: { numChannels: 1, startFrame: 10, endFrame: 20, hardEdgeStart: 1, project: 0 },
         arrays: { packedData: new Float32Array([9, 8]), envelope: new Float32Array([0, 1, 0]) },
       });
       const response = await fetch(`${server.origin}/commit-stroke`, { method: "POST", body: reqFrame });
@@ -192,6 +192,7 @@ describe("/analyze endpoint", () => {
       // The host must see the request unchanged, arrays included.
       const sent = decodeFrame(requestSeen[0]);
       expect(sent.meta.startFrame).toBe(10);
+      expect(sent.meta.project).toBe(0);
       expect(Array.from(sent.arrays.envelope)).toEqual([0, 1, 0]);
 
       const decoded = decodeFrame(await response.arrayBuffer());

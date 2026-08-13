@@ -54,6 +54,7 @@ function makeState(overrides: Partial<State> = {}): State {
     brushSkewTime: -100,
     brushWrapMode: 0,
     limiterEnabled: false,
+    reanalyzeStrokes: false,
     ...overrides,
   } as unknown as State;
 }
@@ -120,6 +121,17 @@ describe("stroke commit snapshot", () => {
     expect(second.dirtyRegion).toBeNull();
   });
 
+  it("captures the re-analyse toggle at mouse-up", () => {
+    const snapshot = buildStrokeCommitSnapshot({
+      renderer: makeRenderer(),
+      state: makeState({ reanalyzeStrokes: true } as unknown as Partial<State>),
+      spec: makeSpec(),
+      brushName: "Test",
+      autoPlaybackParams: null,
+    });
+    expect(snapshot.reanalyzeEnabled).toBe(true);
+  });
+
   it("prefers the active step's envelope parameters over the globals", () => {
     const state = makeState({
       brushes: [{ name: "Test", steps: [{ brushCurveTime: 10, brushSkewTime: 40, brushWrapMode: 1 }] }],
@@ -180,6 +192,11 @@ describe("commit stroke request", () => {
   it("passes the limiter toggle straight through", () => {
     expect(commitStrokeOf(makeSnapshot(), true).applyLimiter).toBe(true);
     expect(commitStrokeOf(makeSnapshot(), false).applyLimiter).toBe(false);
+  });
+
+  it("asks for the projection only when re-analyse is on", () => {
+    expect(commitStrokeOf(makeSnapshot({ reanalyzeEnabled: true }), false).project).toBe(true);
+    expect(commitStrokeOf(makeSnapshot({ reanalyzeEnabled: false }), false).project).toBe(false);
   });
 });
 

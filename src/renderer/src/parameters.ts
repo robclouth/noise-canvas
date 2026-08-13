@@ -1641,6 +1641,14 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       "Holds each stroke's own level down as you paint it, following the brush envelope so the edges stay untouched. Turn it off to paint as loud as the effect makes it.",
     default: true,
   },
+  reanalyzeStrokes: {
+    kind: "boolean",
+    name: "Re-analyse Strokes",
+    label: "Re-analyse",
+    description:
+      "Redraws each stroke as the analysis of the audio it made, so the picture settles into what you will hear — even edits that only move phase. Turn it off to keep exactly what you painted.",
+    default: false,
+  },
   gridSwing: {
     kind: "number",
     name: "Grid Swing",

@@ -166,6 +166,7 @@ export async function runCommitStrokeFramed(request: ArrayBuffer): Promise<Uint8
       hardEdgeStart: meta.hardEdgeStart === 1,
       hardEdgeEnd: meta.hardEdgeEnd === 1,
       applyLimiter: meta.applyLimiter === 1,
+      project: meta.project === 1,
       envelope: asF32(arrays.envelope, "envelope"),
     },
   );

@@ -42,6 +42,7 @@ export interface StrokeCommitSnapshot {
   skewTime: number;
   wrapMode: number;
   limiterEnabled: boolean;
+  reanalyzeEnabled: boolean;
   spec: SpectrogramData;
   dimensions: HistoryDimensions;
   brushName: string;
@@ -73,6 +74,7 @@ export function buildStrokeCommitSnapshot(opts: {
     skewTime: (step?.brushSkewTime as number | undefined) ?? state.brushSkewTime,
     wrapMode: (step?.brushWrapMode as number | undefined) ?? state.brushWrapMode,
     limiterEnabled: state.limiterEnabled,
+    reanalyzeEnabled: state.reanalyzeStrokes,
     spec,
     dimensions: {
       textureWidth: spec.textureWidth,
@@ -129,6 +131,7 @@ export function commitStrokeOf(snapshot: StrokeCommitSnapshot, limitStrokes: boo
     hardEdgeStart: hard && footStartFrame > 0,
     hardEdgeEnd: hard && footEndFrame < spec.numFrames,
     applyLimiter: limitStrokes,
+    project: snapshot.reanalyzeEnabled,
     envelope: buildTimeEnvelope(snapshot),
   };
 }

@@ -176,6 +176,8 @@ export const TransportPanel = memo(() => {
 
       <ParameterControl paramKey="limiterEnabled" displayLabel="Limit" />
 
+      <ParameterControl paramKey="reanalyzeStrokes" displayLabel="Re-analyse" />
+
       <Divider orientation="vertical" color="dark.5" />
 
       {/* The transport is the one bar that is always visible, whatever is open. */}
