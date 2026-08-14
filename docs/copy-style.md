@@ -188,15 +188,16 @@ like.
 - **British English throughout**: colour, centre, centred, favour, behaviour,
   metre, grey.
 - **`-ise`, not `-ize`**: randomise, normalise, minimise, synthesise, and
-  analyse. This reaches labels — the dice is **Randomise**, the effect is
+  analyse. This reaches labels: the dice is **Randomise**, the effect is
   **Synthesise**, the menu item is **Re-analyse File**.
 - **Code is not copy.** Identifiers, object keys, CSS and file names keep their
   current spelling (`randomize-dice`, `synthesize`, `normalizeIr`). Only the
   strings a user reads change.
 - **Sentence case in descriptions and manual prose**, Title Case in labels and
   headings.
-- **En dash for ranges** (`1–64`), em dash for asides (`—`), minus sign for
-  negatives (`−100%`).
+- **En dash for ranges** (`1–64`), minus sign for negatives (`−100%`). No em
+  dashes: use a comma, colon, or full stop instead. An em-dash aside reads as
+  machine-written.
 - **A band is a band.** In user copy, the pitch rows are **bands**, never
   "bins". "Bin" is a code word.
 - **Names, fixed**: brush, step, stroke (one brush application, click or drag),

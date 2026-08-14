@@ -1,8 +1,8 @@
-# Noise Canvas — Manual
+# Noise Canvas Manual
 
 The complete guide to Noise Canvas. For downloads, installation, and build instructions, see the [README](../README.md).
 
-Every control in the app has a tooltip and an entry in the `?` overlay, and how to use a tool should be mostly obvious just by using it — this manual is for when it isn't.
+Every control in the app has a tooltip and an entry in the `?` overlay, and how to use a tool should be mostly obvious just by using it. This manual is for when it isn't.
 
 ## Contents
 
@@ -62,10 +62,10 @@ A spectrogram is a visual representation of sound where:
 - The **vertical axis** is **pitch** (measured in semitones)
 - The **brightness or color** represents **amplitude**
 
-When you load an audio file, Noise Canvas analyzes it into this form using the **Constant-Q Transform (CQT)** — which gives a musically intuitive frequency layout.
+When you load an audio file, Noise Canvas analyses it into this form using the **Constant-Q Transform (CQT)**, which gives a musically intuitive frequency layout.
 Instead of abstract FFT bins, you're working in **beats and notes**. That means everything you draw, erase, blur, shift, or distort corresponds directly to musical structure.
 
-Crucially, the app stores **complex** coefficients — magnitude _and_ phase — not just a picture. Effects operate on both, which is why transients survive being moved around, why stereo and binaural work at all, and why the results resynthesize back to real audio rather than to a vocoder-y approximation.
+The app stores **complex** coefficients (magnitude _and_ phase), not just a picture. Effects operate on both, which is why transients survive being moved around, why stereo and binaural work at all, and why the results resynthesise back to real audio rather than a vocoder-y approximation.
 
 The workflow is simple:
 
@@ -74,7 +74,7 @@ The workflow is simple:
 3. Paint across time and pitch.
 4. Hear the results instantly.
 
-This approach makes sound design tangible — almost physical. You're literally **painting timbre**.
+This approach makes sound design tangible, almost physical. You're literally **painting timbre**.
 
 You can load **multiple audio files** at once and choose which one acts as the source (where data is pulled from) and which as the target (where data is painted to). A branching history and versioned saving let you experiment freely without fear of breaking anything.
 
@@ -107,10 +107,10 @@ The choice affects what edits sound like, not just how the spectrogram looks: a 
 
 The window is split into three columns plus a transport bar:
 
-- **Left — Brush panel.** Everything that defines the current brush: Macros, Steps, Source, Envelope, Options, Effects, Modulators.
-- **Middle — Canvas.** Every open file stacked vertically, each with its own header, time legend, and pitch legend. Minimized files collapse into the dock at the bottom.
-- **Right — Sidebar.** The open palettes and their brushes on top, the history tree below.
-- **Bottom — Transport.** Playback, grid, scale, meters, stroke limiting, Ableton Link.
+- **Left: Brush panel.** Everything that defines the current brush: Macros, Steps, Source, Envelope, Options, Effects, Modulators.
+- **Middle: Canvas.** Every open file stacked vertically, each with its own header, time legend, and pitch legend. Minimized files collapse into the dock at the bottom.
+- **Right: Sidebar.** The open palettes and their brushes on top, the history tree below.
+- **Bottom: Transport.** Playback, grid, scale, meters, stroke limiting, Ableton Link.
 
 **Compact UI** (`Cmd/Ctrl+Shift+C`, or **View → Compact UI**) shrinks every control so more fits on smaller screens.
 
@@ -118,7 +118,7 @@ The window is split into three columns plus a transport bar:
 
 ## Brushes
 
-Everything in Noise Canvas revolves around the brush — it's the link between what you see and what you hear.
+Everything in Noise Canvas revolves around the brush. It's the link between what you see and what you hear.
 
 When you paint, the brush defines **where** and **how strongly** an effect is applied to the spectrogram. Effects are modular: you can enable several at once, tweak them independently, and reorder them to change their processing order.
 
@@ -161,13 +161,13 @@ Brushes live inside a palette. You can have as many open as you like; each is an
 
 **Hotkeys.** Any brush can be bound to a letter key (⋮ → _Assign key…_, then press a letter). Pressing that letter anywhere in the app jumps straight to that brush. The number keys **1–9 and 0** always select the first ten brushes in the sidebar, counting across every open palette in order. Folding a palette hides its rows but does not renumber anything.
 
-**The library.** Brushes are saved as JSON presets in `Documents/Noise Canvas/Presets/`. A brush loaded from the library remembers where it came from — _Save_ overwrites it, _Save as…_ creates a new one. A dirty marker appears when the brush has drifted from its saved version. This is the level below the palette: one brush to a file, where a palette is a whole set. A set of factory presets ships with the app:
+**The library.** Brushes are saved as JSON presets in `Documents/Noise Canvas/Presets/`. A brush loaded from the library remembers where it came from: _Save_ overwrites it, _Save as…_ creates a new one. A dirty marker appears when the brush has drifted from its saved version. This is the level below the palette, one brush to a file, where a palette is a whole set. A set of factory presets ships with the app:
 
 > Eraser · Booster · Restore · Stereo Widening · Compressor · Noise Gate · Smudge · Octave Up · Octave Down · Reverse · Low-Pass Sweep · High-Pass · Harmonics · Reverb (Blur) · Echo · Paint Noise · Paint Tone · Flow · Pixel Sort · Tremolo · Step Gate · Dynamic Bloom · 3D Orbit · Shimmer · Morph (Macros) · Stamp · Sampler · Convolution · Jungle Stretch · Stutter · Rewind · Crush · Magnet · Freeze · Updraft · Crackle · Stack
 
-Every factory brush ships with at least one named [macro](#macros) wired to its key parameter, parked at the value the brush opens with — Eraser's **Level**, Reverse's **Speed**, Echo's **Fade** — so the first knob to reach for is always the same one.
+Every factory brush ships with at least one named [macro](#macros) wired to its key parameter, parked at the value the brush opens with (Eraser's **Level**, Reverse's **Speed**, Echo's **Fade**), so the first knob to reach for is always the same one.
 
-**Stamp** reads the file itself at a fixed offset from the stroke, so a slice picked once paints anywhere else in the same file. It is the chop-and-rearrange brush, and it has no effects at all — not to be confused with the [Clone](#clone) effect, which stamps spaced copies of what you paint over.
+**Stamp** reads the file itself at a fixed offset from the stroke, so a slice picked once paints anywhere else in the same file. It is the chop-and-rearrange brush, and it has no effects at all. Do not confuse it with the [Clone](#clone) effect, which stamps spaced copies of what you paint over.
 
 **Jungle Stretch** is the old-sampler timestretch: it stretches the painted region to double length with the Flangey warp while a sixteenth-of-a-beat sequencer ripples the level for the classic cyclic flutter. Its **Stretch** macro is a varispeed knob that runs from reverse through freeze up to 4×.
 
@@ -175,7 +175,7 @@ Some factory brushes reference bundled audio (an IR, a pad loop). Those load aut
 
 ### Steps
 
-A brush can have up to **5 steps**, shown as a tab strip. Each step is a complete, independent set of brush parameters and effects, and a single stroke runs through **all** of them in order. This is how you build multi-stage moves — e.g. step 1 synthesizes a tone, step 2 blurs it, step 3 spatializes it.
+A brush can have up to **5 steps**, shown as a tab strip. Each step is a complete, independent set of brush parameters and effects, and a single stroke runs through **all** of them in order. This is how you build multi-stage moves: step 1 synthesizes a tone, step 2 blurs it, step 3 spatializes it.
 
 - Steps carry a persistent colour, so reordering reads as moving an identity rather than relabelling a slot.
 - **Drag** to reorder, **Duplicate** and **Delete** from the buttons on the right.
@@ -185,28 +185,28 @@ Almost every brush and effect parameter is **per-step**. The exceptions are the 
 
 ### Macros
 
-Four renamable **Macros** per brush. A macro is just a knob that can modulate any modulatable parameter, at any depth, positive or negative — good for collapsing a complicated brush down to one or two performance controls. Rename them from the parameter label menu (pencil icon).
+Four renamable **Macros** per brush. A macro is just a knob that can modulate any modulatable parameter, at any depth, positive or negative. Good for collapsing a complicated brush down to one or two performance controls. Rename them from the parameter label menu (pencil icon).
 
 ### Source
 
 By default a brush reads from the file it's painting on. The **Source** section changes that:
 
-- **Source** — hold **Shift** (or click the Source control to arm it) and click on any open file's canvas to pick a source file and position. A brush-sized rectangle previews where you're sampling from. This is the clone-stamp.
-- **Tracking** — how the source position is used:
-  - **Follow** — the source moves along with your stroke.
-  - **Fixed** — always samples from that exact position.
-  - **Anchored** — keeps a fixed offset relative to where the stroke started.
-- **Time ↔ / Pitch ↕** — explicit source position, as a percentage of the source file (disabled in Follow mode, and both are modulatable).
-- **Read From** — **Current** paints using the source file's edited state, **Original** paints from its unedited analysis. This is how the "Restore" brush works.
+- **Source** – hold **Shift** (or click the Source control to arm it) and click on any open file's canvas to pick a source file and position. A brush-sized rectangle previews where you're sampling from. This is the clone-stamp.
+- **Tracking** – how the source position is used:
+  - **Follow** – the source moves along with your stroke.
+  - **Fixed** – always samples from that exact position.
+  - **Anchored** – keeps a fixed offset relative to where the stroke started.
+- **Time ↔ / Pitch ↕** – explicit source position, as a percentage of the source file (disabled in Follow mode, and both are modulatable).
+- **Read From** – **Current** paints using the source file's edited state, **Original** paints from its unedited analysis. This is how the "Restore" brush works.
 
-Painting between files with different tempos, lengths, or analysis resolutions is supported — positions are mapped through a frequency-preserving map so the geometries don't have to agree.
+Painting between files with different tempos, lengths, or analysis resolutions is supported. Positions are mapped through a frequency-preserving map, so the geometries don't have to agree.
 
 ### Envelope
 
 The brush envelope decides where the stroke deposits energy and how much.
 
 - **Strength** – how strongly the effect applies.
-- **Anchor** – where the cursor sits on the brush. **Corner** puts the cursor at the onset (bottom-left) corner, so snapping locks onsets to the beat grid — best for rhythmic strokes. **Center** puts the cursor at the brush centre, so snapping puts the envelope peak on the grid — best for soft/ambient strokes.
+- **Anchor** – where the cursor sits on the brush. **Corner** puts the cursor at the onset (bottom-left) corner, so snapping locks onsets to the beat grid. Best for rhythmic strokes. **Center** puts the cursor at the brush centre, so snapping puts the envelope peak on the grid. Best for soft or ambient strokes.
 - **Size ↔ (beats) / Size ↕ (semitones)** – brush size. At the minimum ("Grid") the brush tracks the current grid spacing; at the maximum ("Full") it fills the whole file in that axis and anchors to the edge.
 - **Curve ↔ / ↕** – shape of the envelope in each axis: −100% is a sharp spike, 0% a linear triangle, +100% a hard rectangle. Lower the curve for softer edges.
 - **Skew ↔ / ↕** – where the envelope peak sits. For time, −100% is an early pluck, 0% centred, +100% a delayed hit; for pitch, −100% bottom, +100% top.
@@ -222,7 +222,7 @@ The brush envelope decides where the stroke deposits energy and how much.
 
 ### Warp Algorithms
 
-When content is moved in time or pitch, its phase has to be reconstructed. Each strategy has its own character and its own artifacts — pick what sounds best:
+When content is moved in time or pitch, its phase has to be reconstructed. Each strategy has its own character and its own artifacts. Pick what sounds best:
 
 | Algorithm      | Character                                                                                                                                                                                         |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -250,11 +250,11 @@ How the processed data merges with the original spectrogram:
 
 ## Effects
 
-Add effects with **Add effect** at the bottom of the Effects section — the picker lays them out in two columns with a description for each. A step holds **up to 10 effects**, and you can add several instances of the same effect, each with its own independent settings.
+Add effects with **Add effect** at the bottom of the Effects section. The picker lays them out in two columns with a description for each. A step holds **up to 10 effects**, and you can add several instances of the same effect, each with its own independent settings.
 
 Each effect header has a **checkbox** that bypasses it, a **title that doubles as the drag handle** for reordering, and a **⋮ menu** with Duplicate, Reset to defaults, and Remove.
 
-> **Transmute** and **Waveshape** are currently hidden from the Add Effect picker. They still work, and still run in any brush that already uses them, but you can't add a new instance from the UI. They're documented below anyway.
+> **Transmute** and **Waveshape** aren't available from the Add Effect picker. They still work, and still run in any brush that already uses them, but you can't add a new instance from the UI. They're documented below anyway.
 
 Several effects share an **Edge Mode** that decides what happens to content that spills past the brush border: **Cut** (discard it), **Bleed** (pull in surrounding content), **Wrap** (wrap around the edge), **Clamp** (hold the edge value), **Reflect** (ping-pong flip), or **Invert**.
 
@@ -279,7 +279,7 @@ Shifts, scales, and rotates the spectral image.
 
 ### Blur
 
-Smooths and blends over time and pitch — echo, reverb, and diffusion-like effects.
+Smooths and blends over time and pitch: echo, reverb, and diffusion-like effects.
 
 - **Blur ↔ / ↕** – degree of blur in time / pitch.
 - **Noise ↔ / ↕** – random scattering to make the blur more diffuse.
@@ -289,7 +289,7 @@ Smooths and blends over time and pitch — echo, reverb, and diffusion-like effe
 
 ### Clone
 
-Stamps beat- and semitone-spaced copies of the painted region in 2D — echoes, spectral delays, stacked harmonics.
+Stamps beat- and semitone-spaced copies of the painted region in 2D: echoes, spectral delays, stacked harmonics.
 
 - **Space ↔ / ↕** – spacing between copies in beats / semitones (can be negative). With any shape other than Even this is the gap to the _first_ copy, and the shape sets the rest.
 - **Copies ↔ / ↕** – number of copies along each axis (1–64).
@@ -308,12 +308,12 @@ Every shape places the first copy one **Space** value out, so switching shape ne
 | Shape ↕   | Shape ↔     | Gaps                                                                             |
 | ---------- | ------------ | -------------------------------------------------------------------------------- |
 | Even       | Even         | All the same. Space ↕ = 12 gives octaves, 7 gives fifths.                       |
-| Harmonic   | Decelerating | The natural harmonic series — gaps shrink as they climb.                         |
+| Harmonic   | Decelerating | The natural harmonic series. Gaps shrink as they climb.                          |
 | Geometric  | Accelerating | Every gap is twice the one before.                                               |
 | Inharmonic | Uneven       | The harmonic series stretched sharp, like a struck bar or a piano's top octaves. |
-| Scale      | —            | The degrees of the scale set in the transport bar.                               |
+| Scale      | n/a          | The degrees of the scale set in the transport bar.                               |
 
-Even is the only shape with even gaps, and it is the only one a modulator can reach — modulation stretches the whole comb at once, so it cannot make gaps unequal. That is what shapes are for.
+Even is the only shape with even gaps, and it is the only one a modulator can reach. Modulation stretches the whole comb at once, so it cannot make gaps unequal. That is what shapes are for.
 
 Set **Copies ↔** to 1, **Shape ↕** to Harmonic, **Space ↕** to 12 and **Sum** to Constructive and Clone stacks a harmonic series on whatever it covers. **Space ↕** then doubles as the stretch: above 12 the partials spread sharp, below 12 they compress.
 
@@ -346,7 +346,7 @@ HRTF-based binaural spatialization for 3D placement of the painted region.
 
 ### Sort
 
-Odd-even transposition sort of the spectrogram bins — pixel-sorting, for sound.
+Odd-even transposition sort of the spectrogram bins: pixel-sorting, for sound.
 
 - **Direction** – Horizontal, Vertical, or Both.
 - **Order** – Forwards or Backwards.
@@ -371,7 +371,7 @@ Waveshaper distortion applied to the rectangular (real/imaginary) spectral compo
 
 ### Convolve
 
-Time-axis convolution with an impulse-response spectrogram — reverbs, room tones, and other IR-based effects. IR loudness is auto-normalized so swapping IRs doesn't blow up the level.
+Time-axis convolution with an impulse-response spectrogram: reverbs, room tones, and other IR-based effects. IR loudness is auto-normalized, so swapping IRs doesn't blow up the level.
 
 - **IR** – the impulse-response file, chosen from your open files.
 - **Taps** – number of IR frames applied (longer, more expensive tail).
@@ -387,9 +387,9 @@ No parameters. Phase-aligns every band at the start of the brush to form a sharp
 
 ### Attract
 
-Pulls energy across time and pitch toward a map — a landscape of valleys that content falls into. Energy genuinely relocates: each bin's magnitude moves by its own kernel-weighted pull and lands with its phase re-based, so a strong pull is a real migration, not a filter sweep. Repeated strokes behave like mean-shift: content climbs to the floor of its valley and settles there.
+Pulls energy across time and pitch toward a map: a landscape of valleys that content falls into. Energy genuinely relocates. Each bin's magnitude moves by its own kernel-weighted pull and lands with its phase re-based, so a strong pull is a real migration, not a filter sweep. Repeated strokes behave like mean-shift: content climbs to the floor of its valley and settles there.
 
-- **Map** – Source uses the sound's own loud content as the landscape, so strong partials capture their neighbours; Scale puts a valley at every note of the global scale (autotune when the pull is full); Grid puts valleys on the snap grid's pitch and beat lines; Modulator 1–3 use a modulator's field as the landscape, so energy gathers where the pattern is bright — an image modulator turns the picture into terrain the sound falls into.
+- **Map** – Source uses the sound's own loud content as the landscape, so strong partials capture their neighbours; Scale puts a valley at every note of the global scale (autotune when the pull is full); Grid puts valleys on the snap grid's pitch and beat lines; Modulator 1–3 use a modulator's field as the landscape, so energy gathers where the pattern is bright. An image modulator turns the picture into terrain the sound falls into.
 - **Source** – picks the file whose loud regions form the Source map's landscape, matched by absolute frequency. Leave it empty and the sound attracts toward itself.
 - **Pull ↔ / ↕** – how far energy moves along each axis. Negative pushes away; past 100 overshoots the target.
 - **Smooth ↔ / ↕** – valley width per axis, in beats and semitones. Narrow valleys snap precisely and ignore distant content; wide valleys reach out and drag everything, and at the extreme the landscape flattens and the pull fades away.
@@ -400,7 +400,7 @@ Pulls energy across time and pitch toward a map — a landscape of valleys that 
 
 Noise Canvas has a deep modulation system for automating parameters across time and pitch. Anywhere a parameter label opens a menu with a **Modulation** section, that parameter is modulatable. You get **three modulators** per step, plus four macros and eight contextual sources.
 
-Modulation is evaluated **per pixel**, not per stroke — a modulator is a 2D field over the spectrogram, not an LFO on a timeline.
+Modulation is evaluated **per pixel**, not per stroke. A modulator is a 2D field over the spectrogram, not an LFO on a timeline.
 
 ### How Modulation Amount Works
 
@@ -425,9 +425,9 @@ The parameter menu shows the resulting **live range in real units** next to the 
 
 **Procedural textures:** Quilt, Clouds, Cells, Bubbles, Craters, Ripples, Scratches, Swirls, Paper, Marble, Weave, Terrain, Flow.
 
-**Selected Scale** — snaps modulation to the scale set in the transport bar.
+**Selected Scale** – snaps modulation to the scale set in the transport bar.
 
-**Images** — a set of factory textures ships with the app, and you can drop your own images in:
+**Images** – a set of factory textures ships with the app, and you can drop your own images in:
 
 ```
 Documents/Noise Canvas/Textures/
@@ -447,7 +447,7 @@ They appear in the shape picker under a "User" group.
 
 ### The Sequencer Grid
 
-In Sequence mode the modulator reads a grid instead of a shape. Steps run left to right in time and bands run bottom to top in pitch, and every cell holds one value between 0 and 1 — the modulator's output wherever that cell lands on the canvas. A full cell drives the parameter to the top of its modulated range, an empty one to the bottom.
+In Sequence mode the modulator reads a grid instead of a shape. Steps run left to right in time and bands run bottom to top in pitch, and every cell holds one value between 0 and 1: the modulator's output wherever that cell lands on the canvas. A full cell drives the parameter to the top of its modulated range, an empty one to the bottom.
 
 | Gesture                 | What it does                      |
 | ----------------------- | --------------------------------- |
@@ -463,7 +463,7 @@ A step switched off keeps its value and shows it as a faint line, so switching i
 
 **Hints**
 
-- Off is the bottom of the parameter's modulated range, not "no modulation" — on Strength that is silence, but on a pitch parameter it is the lowest pitch.
+- Off is the bottom of the parameter's modulated range, not "no modulation." On Strength that is silence, but on a pitch parameter it is the lowest pitch.
 
 ### Contextual Sources
 
@@ -473,9 +473,9 @@ Beyond the three modulators and four macros, every modulatable parameter can als
 
 ### Nested Modulation
 
-Modulator parameters are themselves modulatable — you can modulate modulator 2's rate with modulator 1, or drive a modulator's depth from a macro. One level of nesting is supported.
+Modulator parameters are themselves modulatable. You can modulate modulator 2's rate with modulator 1, or drive a modulator's depth from a macro. One level of nesting is supported.
 
-> Nested modulation is disabled on Windows, where the unrolled shader loops it produces make compile times unusable.
+> Nested modulation is not available on Windows.
 
 ---
 
@@ -489,7 +489,7 @@ Nothing here has its own rhythm settings. The fill reads the grid you already se
 
 ### What Sets the Spacing
 
-**Time** comes from **Beats** and **Swing** in the transport. A one-beat grid paints on every beat; a sixteenth grid paints sixteen to the bar. Swing carries straight through, so an off-eighth lands late and its cell is wider — a swung fill tiles without gaps.
+**Time** comes from **Beats** and **Swing** in the transport. A one-beat grid paints on every beat; a sixteenth grid paints sixteen to the bar. Swing carries straight through, so an off-eighth lands late and its cell is wider. A swung fill tiles without gaps.
 
 Set the time grid to **Onsets** and the fill lands on the file's own detected hits instead of a fixed division. Each stroke then runs from its hit to the next, so an uneven performance is followed rather than flattened.
 
@@ -502,7 +502,7 @@ Turn **Snap Time** or **Snap Pitch** off and that axis stops being divided: the 
 The brush does. **Size ↔** and **Size ↕** work exactly as they do when you paint by hand:
 
 - At **Grid** the stroke fills the cell it lands in, so the fill tiles edge to edge.
-- At a **fixed** beat or semitone value every stroke takes that size, whatever the spacing — smaller than the cell leaves gaps, larger overlaps.
+- At a **fixed** beat or semitone value every stroke takes that size, whatever the spacing. Smaller than the cell leaves gaps, larger overlaps.
 - At **Full** the stroke spans the axis.
 
 **Anchor** is honoured too: Corner puts each stroke's onset on the grid line, Center puts its envelope peak on the cell.
@@ -513,24 +513,25 @@ Drag on the time legend to set a loop region and the fill covers only that span.
 
 ### Variation Between Strokes
 
-Every stroke uses the same brush, so a bare fill repeats one sound. Variation comes from modulation, which is a field across the canvas rather than a value per stroke — strokes at different places sample different values.
+Every stroke uses the same brush, so a bare fill repeats one sound. Variation comes from modulation, which is a field across the canvas rather than a value per stroke: strokes at different places sample different values.
 
 - A **pattern** modulator on **Strength** with a Random or Smooth Noise shape gives each stroke its own level. Take the depth far enough down and some strokes fall silent, which thins the rhythm.
 - A **sequencer** modulator on Strength is a grid you draw. Draw `1 0 0 1 0 0 1 0` and the fill plays that rhythm; draw a checkerboard against a two-row pitch grid and you get one.
-- Anything modulatable works the same way — pitch shift, blur amount, an effect's own controls.
+- Anything modulatable works the same way: pitch shift, blur amount, an effect's own controls.
 
 To layer, fill twice. Change the grid or the brush between passes and each is its own undo step.
 
 ## Parameter Controls
 
-- **Drag** a slider to change it; **hold Shift while dragging** to snap between that parameter's preset values (musical beat divisions, semitone intervals, and so on).
-- **Click the dropdown icon** next to a numeric value to pick a preset value from a list.
-- **Double-click the label** to reset a parameter to its default — this also clears every modulation amount on it.
+- **Drag** a value to change it. **Hold Ctrl while dragging** to snap to that parameter's preset values (musical beat divisions, semitone intervals, and so on). **Hold Shift while dragging** for fine control, three times slower than a plain drag.
+- **Right-click** a value to pick from its list of preset values. A small chevron marks the values that have one.
+- **Click** a value to type a number in.
+- **Double-click the label** to reset a parameter to its default. This also clears every modulation amount on it.
 - **Click the label** to open the parameter menu: modulation amounts, reset, exclude-from-randomization, step linking, and a **book icon** that opens this manual at the section explaining that parameter.
 
 ### Section Presets
 
-The **⋮ menu** on an effect card or the modulator holds a list of presets for that section — starting points for the things it is usually asked to do. Pick one and the whole section changes to it. Hover a name to read what it does.
+The **⋮ menu** on an effect card or the modulator holds a list of presets for that section: starting points for the things it is usually asked to do. Pick one and the whole section changes to it. Hover a name to read what it does.
 
 The **+** on the Presets heading keeps the section's current settings under a name of your own, and yours then appear in the same list. Every row has a **⋮** on hover: **Duplicate…** on any of them, plus **Rename…** and **Delete…** on your own. The ones that ship with the app cannot be renamed or deleted, so duplicating is how you start from one and make it yours. Modulator presets are not tied to the modulator you saved them from, so one saved on modulator 1 loads into any of the three.
 
@@ -548,7 +549,7 @@ The Effects section also shuffles effect order and enabled states. Individual pa
 
 ### Linking Parameters Across Steps
 
-From a parameter's label menu, toggle the **link** icon to link it across all of the brush's steps — changing it in one step changes it everywhere. Useful for keeping brush size or blend mode consistent across a multi-step brush.
+From a parameter's label menu, toggle the **link** icon to link it across all of the brush's steps. Changing it in one step then changes it everywhere. Useful for keeping brush size or blend mode consistent across a multi-step brush.
 
 ---
 
@@ -569,7 +570,7 @@ Open files stack vertically in the canvas column. Each header gives you:
 
 The active file has an orange border; click any file to make it active. `Tab` / `Shift+Tab` cycle through them.
 
-Files you create in-app (New File, duplicates, stems) are **fully persisted** — they're backed by their own on-disk history, so quitting never loses them, and they get a real path when you Save As.
+Files you create in-app (New File, duplicates, stems) are **fully persisted**. They're backed by their own on-disk history, so quitting never loses them, and they get a real path when you Save As.
 
 ### Splitting a File
 
@@ -581,7 +582,7 @@ The scissors menu on each file header:
 
 ### Stem Groups
 
-Every split produces a **stem group**: the parts stay ordinary files — every brush and effect works on them unchanged — but they're bracketed together in the UI, share a colour, and remember that their coefficients still sum back to the original.
+Every split produces a **stem group**: the parts stay ordinary files (every brush and effect works on them unchanged), but they're bracketed together in the UI, share a colour, and remember that their coefficients still sum back to the original.
 
 - **Sync view** – zoom and scroll follow each other across all members.
 - **Merge** – sums the group back into a new file, in the coefficient domain, so a split-then-merge round trip is lossless. The parts stay open.
@@ -591,7 +592,7 @@ This is the resample loop: split, paint on one part, merge back.
 
 ### Onsets
 
-Every file is scanned for **onsets** — the moments where a new sound starts. They're detected from the analysis itself, not from the tempo, so they follow what's actually in the audio however loosely it was played.
+Every file is scanned for **onsets**: the moments where a new sound starts. They're detected from the analysis itself, not from the tempo, so they follow what's actually in the audio however loosely it was played.
 
 Onsets show up in three places:
 
@@ -630,7 +631,7 @@ Zoom and scroll are remembered per file across restarts, and files in a [stem gr
 
 ## History
 
-Every edit you make is captured in the **History** panel — but it's a **branching tree**, not a flat undo list. If you undo a few steps and then paint something new, the steps you undid aren't thrown away: they stay as a separate branch you can return to at any time. This lets you explore variations freely without ever painting yourself into a corner.
+Every edit you make is captured in the **History** panel, but it's a **branching tree**, not a flat undo list. If you undo a few steps and then paint something new, the steps you undid aren't thrown away. They stay as a separate branch you can return to at any time. This lets you explore variations freely without ever painting yourself into a corner.
 
 Each node is a snapshot of the file at that point. The **current** state is highlighted, and every node shows its label and how long ago it was made.
 
@@ -641,9 +642,9 @@ Each node is a snapshot of the file at that point. The **current** state is high
 - **Export branch…** – renders out the audio for that node's lineage, one numbered WAV per node from the root down. (In the Ableton extension there's also **Export branch to Live**.)
 - **Delete branch** – removes a node and everything downstream of it.
 
-The panel's **⋮ menu** adds **Export History…**, **Export Favorites…**, and **Purge History** — which shows how much disk the tree is using and clears it to reclaim space while leaving the current state untouched.
+The panel's **⋮ menu** adds **Export History…**, **Export Favorites…**, and **Purge History**, which shows how much disk the tree is using and clears it to reclaim space while leaving the current state untouched.
 
-Under the hood each stroke is stored as a compressed delta against its parent, with full snapshots at intervals, so a long session's tree stays small. History lives on disk per file, so the whole tree survives quitting and reopening — it's only deleted when you explicitly close the file.
+History lives on disk per file, so the whole tree survives quitting and reopening. It's only deleted when you explicitly close the file.
 
 ---
 
@@ -652,14 +653,14 @@ Under the hood each stroke is stored as a compressed delta against its parent, w
 The transport bar, left to right:
 
 - **Link** – toggle **Ableton Link** to sync tempo and start/stop with other Link-enabled apps on the network. The tooltip shows the peer count; **right-click** the button for latency compensation.
-- **Play / Stop** (`Space`), **Loop**, and **Auto-play stroke** (the brush icon) — when active, each stroke automatically plays back the region you just painted.
+- **Play / Stop** (`Space`), **Loop**, and **Auto-play stroke** (the brush icon). When active, each stroke automatically plays back the region you just painted.
 - **Playback time**.
 - **Beats / Snap** and **Semis / Snap** – grid spacing and snapping per axis. Set the semitone grid to **Scale** to snap to the selected scale instead of a fixed interval, and the beat grid to **Onsets** to snap to the file's detected hits instead of a division (see [Onsets](#onsets)).
 - **Swing** – swing feel for the time grid. 0% is straight, ~67% is a triplet feel, 100% shifts odd grid lines by half a cell.
 - **Tonic / Type** – the scale used for pitch snapping and for scale-based effects and modulation.
 - **Output meter**.
-- **Limit** – holds each stroke's own level down as you paint it, leaving the audio around it untouched. On audio that is already loud, the stroke is held to the level that was there. It is baked into the stroke, so undo removes it along with the paint, and turning it off only affects what you paint next. Turn it off to paint as loud as the effect makes it.
-- **Re-analyse** – redraws each stroke as the analysis of the audio it made, so the picture settles into what you will hear — even edits that only move phase. Off, the canvas keeps exactly what you painted; the sound is the same either way, and commits are faster. Like Limit, it is read at the end of each stroke.
+- **Auto-limit** – holds each stroke's own level down as you paint it, leaving the audio around it untouched. On audio that is already loud, the stroke is held to the level that was there. It is baked into the stroke, so undo removes it along with the paint, and turning it off only affects what you paint next. Turn it off to paint as loud as the effect makes it.
+- **Re-analyse** – redraws each stroke as the analysis of the audio it made, so the picture settles into what you will hear, even edits that only move phase. Off, the canvas keeps exactly what you painted; the sound is the same either way, and commits are faster. Like Auto-limit, it is read at the end of each stroke.
 - **?** – outlines every area of the window at once. See [Getting Help](#getting-help).
 
 Audio is resynthesised incrementally after every stroke, so what you hear is always the real thing, not a preview. Nothing protects the output as a whole: the strip above the spectrogram marks any slice that runs out of headroom.
@@ -697,7 +698,7 @@ Audio is resynthesised incrementally after every stroke, so what you hear is alw
 
 **Updates**
 
-**Check for Updates…** lives in the **Noise Canvas** app menu on macOS and under **Help** everywhere else, and will tell you whether a newer version exists. Installing it is a manual job: grab the new build from the [Releases page](https://github.com/robclouth/noise-canvas/releases) and replace your copy. Because the app isn't code-signed, it can't update itself in place.
+**Check for Updates…** lives in the **Noise Canvas** app menu on macOS and under **Help** everywhere else, and tells you whether a newer version exists. Installing it is a manual job: download the new build from the [Releases page](https://github.com/robclouth/noise-canvas/releases) and replace your copy.
 
 ---
 
@@ -739,15 +740,17 @@ Six places, each answering a different question.
 | **Walkthrough**    | Offered on first launch; **Help → Run Walkthrough** after | Where is everything?                |
 | **This manual**    | **Help → Manual** (`Cmd/Ctrl+/`), or any book icon        | What does this do, exactly?         |
 
-The `?` overlay dims the window and brightens whatever you point at, with a description beside it. It covers regions, parameters and every button and widget, down to individual controls, so pointing at something is the way to ask what it is. Each card offers that area's tour, if it has one, and the part of this manual that explains it. Menus and popovers are covered too — open one first, then press `?`, and the controls inside it answer like any other. Press `?` or `Esc` to close it.
+The `?` overlay dims the window and brightens whatever you point at, with a description beside it. It covers regions, parameters and every button and widget, down to individual controls, so pointing at something is the way to ask what it is. Each card offers that area's tour, if it has one, and the part of this manual that explains it. Menus and popovers are covered too: open one first, then press `?`, and the controls inside it answer like any other. Press `?` or `Esc` to close it.
 
 Every tooltip and every overlay description comes from the same sentence, so the two can never tell you different things.
 
-Deep tours don't ask you to do anything — they run straight through their area. The first-run walkthrough does, twice: it makes you add an effect and paint a stroke, so you finish it having built a working brush by hand.
+Deep tours don't ask you to do anything. They run straight through their area. The first-run walkthrough does, twice: it makes you add an effect and paint a stroke, so you finish it having built a working brush by hand.
 
 The manual is bundled with the app, so it works offline and always describes the build you're running rather than whatever is on the default branch. It has a search box at the top that filters to matching sections.
 
-Separately, [**Recipes**](./recipes.md) covers what to actually _do_ with all this — start-to-finish walkthroughs of specific moves. Those live online rather than in the build, because they grow between releases. The `?` overlay links to the ones relevant to whatever area you clicked.
+Separately, [**Recipes**](./recipes.md) covers what to actually _do_ with all this: start-to-finish walkthroughs of specific moves. Those live online rather than in the build, because they grow between releases. The `?` overlay links to the ones relevant to whatever area you clicked.
+
+Found a bug? Report it on the [issues page](https://github.com/robclouth/noise-canvas/issues).
 
 ---
 
@@ -762,7 +765,7 @@ Documents/Noise Canvas/Textures/              your own modulator images
 <user data>/history/<fileId>/       per-file history trees
 ```
 
-`<user data>` is Electron's per-app data directory — `~/Library/Application Support/…` on macOS, `%APPDATA%\…` on Windows, `~/.config/…` on Linux. History is the one that grows: each file's tree is stored there until you close the file or use **Purge History**, and the History panel's ⋮ menu shows the current size.
+`<user data>` is Electron's per-app data directory: `~/Library/Application Support/…` on macOS, `%APPDATA%\…` on Windows, `~/.config/…` on Linux. History is the one that grows: each file's tree is stored there until you close the file or use **Purge History**, and the History panel's ⋮ menu shows the current size.
 
 Your open files, their zoom and scroll positions, BPMs, brushes, and window settings are all persisted too, so the app reopens where you left it.
 
@@ -780,6 +783,6 @@ Your open files, their zoom and scroll positions, BPMs, brushes, and window sett
 
 No exporting, importing, or manual refreshing required.
 
-**As a Live extension (beta):** Noise Canvas also builds as an Ableton Live 12 extension (`.ablx`), which embeds the whole editor inside Live. Right-click an audio clip → **Edit in Noise Canvas**, edit, and render straight back into the set as a new clip — including **Export branch to Live** from the history panel. This requires a Live build with Extensions support and is distributed alongside each release. See [`src/extension/README.md`](../src/extension/README.md).
+**As a Live extension (beta):** Noise Canvas also builds as an Ableton Live 12 extension (`.ablx`), which embeds the whole editor inside Live. Right-click an audio clip → **Edit in Noise Canvas**, edit, and render straight back into the set as a new clip, including **Export branch to Live** from the history panel. This requires a Live build with Extensions support and is distributed alongside each release. See [`src/extension/README.md`](../src/extension/README.md).
 
-**Ableton Link** works regardless of which route you take — enable it in the transport bar to lock tempo and transport to Live or anything else on the network.
+**Ableton Link** works regardless of which route you take. Enable it in the transport bar to lock tempo and transport to Live or anything else on the network.
