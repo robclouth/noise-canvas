@@ -385,6 +385,41 @@ vec4 getOriginalDestSample(vec2 destUv) {
   return readPackedDataInterpolated(wrappedUv, originalSpectrogramTex, destMetadataTex, destFrameCount, destBandCount);
 }
 
+// ============================================================================
+// PHASE MOVE PRIMITIVES
+//
+// Stored phase is unwrapped and measured against the band's centre-frequency
+// carrier, so any rule that moves content across the time-frequency grid is a
+// sum of products 2π·(fA − fB)·(tA − tB) built from the two primitives below.
+// Time reversal and pitch flip conjugate stored phase (φ → parity·φ with
+// parity = signX·signY); the conjugation belongs to every stored-phase term a
+// rule transports — deviations included — and never to carrier terms.
+// ============================================================================
+
+// Re-expresses a phase stored against one band carrier as stored against
+// another, at the coefficient time the phase describes.
+float carrierRebase(float fcFromHz, float fcToHz, float tSec) {
+  return TWO_PI * (fcFromHz - fcToHz) * tSec;
+}
+
+// Phase advance of content oscillating at fHz against a carrier at fcHz over
+// dtSec. fHz picks the content model: a measured frequency for a sustained
+// partial, a target frequency for a retune, 0 for a waveform moved with its
+// absolute phase frozen (the transient rule).
+float contentAdvance(float fHz, float fcHz, float dtSec) {
+  return TWO_PI * (fHz - fcHz) * dtSec;
+}
+
+// How far a measured instantaneous frequency may sit from its band centre, as
+// a fraction of the centre, before the estimate reads as numerical junk.
+const float FREQ_DEV_CLAMP = 0.06;
+
+// Instantaneous-frequency deviation from the band carrier, in Hz, from three
+// consecutive stored phases on the band's own time grid.
+float instFreqDevHz(float pPrev, float pCenter, float pNext, float dtSec) {
+  return (unwrapPhase(pCenter - pPrev) + unwrapPhase(pNext - pCenter)) * 0.5 / (TWO_PI * dtSec);
+}
+
 vec2 modifyPhase(vec2 magPhase, vec2 uv, bool shouldRandomise) {
   float mag = getMag(magPhase);
   float phase = getPhase(magPhase);
@@ -437,9 +472,9 @@ vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float s
   // Derived from: C_rev(tc, f) = exp(-i·2π·f·T) · conj( C_src(T−tc, f) )
   if (scaleX < 0.0) {
     float destFreqHz = getDestMetadata(destUv).a;
-    float phaseShift = TWO_PI * destFreqHz * (destFrameCount - 1.0) / destSampleRate;
-    correctedL.y = -correctedL.y - phaseShift;
-    correctedR.y = -correctedR.y - phaseShift;
+    float phaseShift = contentAdvance(0.0, destFreqHz, (destFrameCount - 1.0) / destSampleRate);
+    correctedL.y = -correctedL.y + phaseShift;
+    correctedR.y = -correctedR.y + phaseShift;
   }
 
   return vec4(correctedL, correctedR);
@@ -491,9 +526,9 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 d
   // Derived from: C_rev(tc, f) = exp(-i·2π·f·T) · conj( C_src(T−tc, f) )
   if (scaleX < 0.0) {
     float destFreqHz = getDestMetadata(destUv).a;
-    float phaseShift = TWO_PI * destFreqHz * (destFrameCount - 1.0) / destSampleRate;
-    correctedL.y = -correctedL.y - phaseShift;
-    correctedR.y = -correctedR.y - phaseShift;
+    float phaseShift = contentAdvance(0.0, destFreqHz, (destFrameCount - 1.0) / destSampleRate);
+    correctedL.y = -correctedL.y + phaseShift;
+    correctedR.y = -correctedR.y + phaseShift;
   }
 
   return vec4(correctedL, correctedR);
@@ -655,11 +690,11 @@ vec2 neutralPhase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 m
   float addL = signX * signY * magPhase.y;
   float addR = signX * signY * magPhase.w;
   if (scaleXPhys < 0.0) {
-    float corr = -TWO_PI * srcFreqHz * (tSrcSec + tDestSec);
+    float corr = contentAdvance(0.0, srcFreqHz, tSrcSec + tDestSec);
     addL += corr;
     addR += corr;
   } else {
-    float corr = TWO_PI * srcFreqHz * (tSrcSec - tDestSec / max(scaleXPhys, 1e-5));
+    float corr = contentAdvance(0.0, srcFreqHz, tDestSec / max(scaleXPhys, 1e-5) - tSrcSec);
     addL += corr;
     addR += corr;
   }
@@ -697,7 +732,7 @@ vec4 getTransformedSampleNeutralPlain(vec2 sourceUv, vec2 destUv, float scaleX, 
  *
  * Transient-preserving phase rule, for any combination of pitch/time shift:
  *
- *   φ = −2π·f_dest·T_dest + (φ_src + 2π·f_src·T_src)
+ *   φ = −2π·f_dest·T_dest + parity·(φ_src + 2π·f_src·T_src)
  *
  * In the Gaborator global convention an impulse at time T has φ = −2π·f·T at
  * every atom, so the bracketed term is the source's phase DEVIATION from a
@@ -706,7 +741,9 @@ vec4 getTransformedSampleNeutralPlain(vec2 sourceUv, vec2 destUv, float scaleX, 
  * coherent (cross-band aligned → sharp attack, no pre-echo), noisy attacks
  * stay noisy. Purely additive — stored phase is never scaled, so the 2πn
  * unwrap ambiguity that a scaling rule turns into per-band phase junk cancels
- * mod 2π here.
+ * mod 2π here. parity is the move's stored-phase conjugation (signX·signY):
+ * a reversed or pitch-flipped move transports the conjugated deviation, so a
+ * reversed attack lands as its own mirror image instead of a forward click.
  */
 const float ONSET_SUPPORT_GAIN = 0.7;
 const float ONSET_SIGMA_FLOOR  = 0.002;
@@ -765,8 +802,6 @@ const float XRES_D2_SPREAD = 0.012;
 // Float32 phase quantisation grows with the unwrapped magnitude; widening the
 // spread with it fails toward "tonal", the milder treatment.
 const float XRES_D2_ULP = 4e-6;
-// Measured-frequency deviation clamp, as a fraction of the band centre.
-const float XRES_DEV_CLAMP = 0.06;
 // Largest source-side attenuation the tonal path may undo, in (src bands)².
 const float XRES_DEV_UNDO_CAP = 1.5;
 // Level makeup for the synthetic noise phase walk's residual self-cancellation.
@@ -776,8 +811,8 @@ const float XRES_NOISE_MAKEUP = 1.65;
 const float XRES_BLOCK_SUPPORT = 0.7;
 
 // Tonality and measured frequency deviation of the source at a position, from
-// six stored phases on the band's own grid. Deviation is clamped to
-// ±XRES_DEV_CLAMP of the centre (see attractDevHz — same estimator).
+// six stored phases on the band's own grid. Deviation comes from
+// instFreqDevHz, clamped to ±FREQ_DEV_CLAMP of the centre.
 void xresAnalyzeSource(vec2 sourceUv, float srcFreqHz, out float tonality, out float devHz) {
   vec4 meta = getSourceMetadata(sourceUv);
   float strideFrames = exp2(meta.b);
@@ -795,8 +830,8 @@ void xresAnalyzeSource(vec2 sourceUv, float srcFreqHz, out float tonality, out f
   float spread = max(XRES_D2_SPREAD, abs(phases[1]) * XRES_D2_ULP);
   tonality = exp(-(mean * mean) / (spread * spread));
 
-  float dev = (unwrapPhase(phases[1] - phases[2]) + unwrapPhase(phases[0] - phases[1])) * 0.5 / (TWO_PI * dtSec);
-  devHz = clamp(dev, -XRES_DEV_CLAMP * srcFreqHz, XRES_DEV_CLAMP * srcFreqHz);
+  float dev = instFreqDevHz(phases[2], phases[1], phases[0], dtSec);
+  devHz = clamp(dev, -FREQ_DEV_CLAMP * srcFreqHz, FREQ_DEV_CLAMP * srcFreqHz);
 }
 
 // How strongly a source position sits inside an onset, in the SOURCE band's
@@ -819,10 +854,10 @@ float onsetWeight(vec2 sourceUv) {
  */
 float reanchorTimeShift(vec2 sourceUv, float phase, float freqHz, float dtSec) {
   float w = onsetWeight(sourceUv);
-  return phase - w * TWO_PI * freqHz * dtSec;
+  return phase + w * contentAdvance(0.0, freqHz, dtSec);
 }
 
-void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, out float w, out float anchor) {
+void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, float parity, out float w, out float anchor) {
   float fSrc  = max(getSourceMetadata(sourceUv).a, 1e-6);
   float fDest = max(getDestMetadata(destUv).a, 1e-6);
 
@@ -843,7 +878,7 @@ void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, out float w, out f
   float deltaDestUv = deltaSrcUv * scaleX / max(sourceTimeScale, 1e-6);
   float tOnsetDestSec = (destUv.x + deltaDestUv) * destFrameCount / max(destSampleRate, 1e-6);
 
-  anchor = -TWO_PI * fDest * tOnsetDestSec + TWO_PI * fSrc * onset.x;
+  anchor = -TWO_PI * fDest * tOnsetDestSec + parity * TWO_PI * fSrc * onset.x;
 }
 
 // How far the multiplier applied to the stored phase has to sit from 1 before
@@ -884,6 +919,10 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
 
   float baseL = neutral.x;
   float baseR = neutral.y;
+
+  // Stored-phase conjugation of this move (see the phase primitives block):
+  // multiplies every transported stored-phase term below, never carrier terms.
+  float parity = (scaleX < 0.0 ? -1.0 : 1.0) * (scaleY < 0.0 ? -1.0 : 1.0);
 
   // Cross-resolution resample (see the XRES block above). Reshapes magnitude
   // and, where the content is noise, the phase; every phase edit is applied as
@@ -973,9 +1012,9 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
       magPhase.z = newMag.y;
       // Swap the centre tap's stored phase for the loudest tap's, carried
       // through the same intended-ratio and carrier-rebase terms.
-      baseL += freqRatio * (maxPhase.x - magPhase.y)
+      baseL += parity * freqRatio * (maxPhase.x - magPhase.y)
              + TWO_PI * destFreqHz * (maxFreq.x - srcFreqHz) / idealFreqHz * tDestSec;
-      baseR += freqRatio * (maxPhase.y - magPhase.w)
+      baseR += parity * freqRatio * (maxPhase.y - magPhase.w)
              + TWO_PI * destFreqHz * (maxFreq.y - srcFreqHz) / idealFreqHz * tDestSec;
     }
   }
@@ -991,15 +1030,15 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
   }
 
   float w, anchor;
-  onsetTransport(wrappedSourceUv, destUv, scaleX, w, anchor);
+  onsetTransport(wrappedSourceUv, destUv, scaleX, parity, w, anchor);
   // The deviation being transported comes from the nearest stored coefficient,
   // not the interpolated phase: interpolating phase across an attack averages
   // two atoms that disagree, which is the whole reason a moved transient smears
   // even when the carrier correction is exact.
   vec4 nearest = sampleSourceNearest(wrappedSourceUv);
 
-  magPhase.y = baseL + w * unwrapPhase(anchor + nearest.y - baseL);
-  magPhase.w = baseR + w * unwrapPhase(anchor + nearest.w - baseR);
+  magPhase.y = baseL + w * unwrapPhase(anchor + parity * nearest.y - baseL);
+  magPhase.w = baseR + w * unwrapPhase(anchor + parity * nearest.w - baseR);
   return magPhase;
 }
 

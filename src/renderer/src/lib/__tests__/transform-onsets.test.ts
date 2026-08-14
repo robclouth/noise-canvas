@@ -75,6 +75,25 @@ describe("onset transport in the neutral transform", () => {
     return spec;
   }
 
+  // Per-band deviation from the impulse relation, spread over the whole circle
+  // so cross-band alignment can only come from handling it correctly.
+  function deviationFor(band: number): number {
+    return 1.2 * Math.sin(2.7 * band);
+  }
+
+  // An impulse at t0 whose bands each carry a fixed extra deviation — an
+  // asymmetric transient. A reversal must conjugate the deviation; an aligned
+  // impulse cannot tell, because its deviation is zero.
+  function dispersedSpec(): SpectrogramData {
+    const spec = impulseSpec();
+    for (let band = 0; band < numBands; band++) {
+      const idx = (band * numFrames + ridgeFrame) * 4;
+      spec.packedData[idx + 1] += deviationFor(band);
+      spec.packedData[idx + 3] += deviationFor(band);
+    }
+    return spec;
+  }
+
   // A sustained partial in every band: magnitude everywhere, phase advancing at
   // the band's own rate, so its second difference is zero and it reads as tonal.
   function tonalSpec(): SpectrogramData {
@@ -109,12 +128,12 @@ describe("onset transport in the neutral transform", () => {
     return spec;
   }
 
-  function shiftState(algorithm: number, shift: { beats?: number; semis?: number } = {}): State {
+  function shiftState(algorithm: number, shift: { beats?: number; semis?: number } = {}, scaleTime = 1): State {
     const overrides = {
       algorithm,
       sourcePositionMode: "follow",
       sourceDataMode: "current",
-      transformScaleTime: 1,
+      transformScaleTime: scaleTime,
       transformScalePitch: 1,
       transformShiftBeats: shift.beats ?? 0,
       transformShiftSemis: shift.semis ?? -12,
@@ -161,7 +180,8 @@ describe("onset transport in the neutral transform", () => {
     shift: { beats?: number; semis?: number } = {},
     readFrame: number | "ridge" = ridgeFrame,
     makeSpec: () => SpectrogramData = impulseSpec,
-  ): Promise<{ phase: number; freq: number; mag: number }[]> {
+    scaleTime = 1,
+  ): Promise<{ band: number; phase: number; freq: number; mag: number }[]> {
     const srcSpec = makeSpec();
     const destSpec = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "silence" });
     const srcTextures = createHarnessTextures(srcSpec);
@@ -186,7 +206,7 @@ describe("onset transport in the neutral transform", () => {
       onsetTexture: bakeOnsetTexture(onsets, numFrames / sampleRate),
     };
 
-    destRenderer.renderStroke(strokeParams(), shiftState(algorithm, shift), sourceFile);
+    destRenderer.renderStroke(strokeParams(), shiftState(algorithm, shift, scaleTime), sourceFile);
     const data = await destRenderer.getFBOData();
 
     // "ridge" locates the frame the content actually landed on, so a fractional
@@ -212,12 +232,12 @@ describe("onset transport in the neutral transform", () => {
     let peak = 0;
     for (let band = 0; band < numBands; band++) peak = Math.max(peak, data[(band * numFrames + frame) * 4]);
 
-    const lit: { phase: number; freq: number; mag: number }[] = [];
+    const lit: { band: number; phase: number; freq: number; mag: number }[] = [];
     for (let band = 0; band < numBands; band++) {
       const idx = (band * numFrames + frame) * 4;
       const mag = data[idx];
       if (mag > peak * 0.2) {
-        lit.push({ phase: data[idx + 1], freq: destSpec.metadata[band * 4 + 3], mag });
+        lit.push({ band, phase: data[idx + 1], freq: destSpec.metadata[band * 4 + 3], mag });
       }
     }
     disposeHarnessTextures(srcTextures);
@@ -265,6 +285,34 @@ describe("onset transport in the neutral transform", () => {
     expect(lit.length).toBeGreaterThanOrEqual(4);
     expect(Math.abs(ridgeFrameFound - ridgeFrame)).toBe(Math.round(shiftBeats * sampleRate));
     expect(impulseAlignment(lit, ridgeFrameFound / sampleRate)).toBeGreaterThan(0.85);
+  });
+
+  it("reverse transports the conjugated onset deviation", async () => {
+    // An exact reversal is C_rev(t) = conj(C(T−t))·e^(−i·2π·f·T), so the
+    // deviation carried to the mirrored onset must come out negated. A rule
+    // that transports the forward deviation instead restates the attack.
+    const lit = await runShift(
+      NEUTRAL_ALGORITHM,
+      [{ timeSec: t0, strength: 1 }],
+      { semis: 0 },
+      "ridge",
+      dispersedSpec,
+      -1,
+    );
+
+    expect(lit.length).toBeGreaterThanOrEqual(4);
+    expect(Math.abs(ridgeFrameFound - (numFrames - 1 - ridgeFrame))).toBeLessThanOrEqual(1);
+
+    const t1 = ridgeFrameFound / sampleRate;
+    let re = 0;
+    let im = 0;
+    for (const { band, phase, freq } of lit) {
+      const err = phase - (-TWO_PI * freq * t1 - deviationFor(band));
+      re += Math.cos(err);
+      im += Math.sin(err);
+    }
+    const alignment = Math.hypot(re, im) / lit.length;
+    expect(alignment).toBeGreaterThan(0.85);
   });
 
   it("leaves tonal content with no onset exactly as the plain rule does", async () => {

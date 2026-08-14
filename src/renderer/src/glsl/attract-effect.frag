@@ -115,7 +115,7 @@ float attractModFieldMag(vec4 meta, float xUv) {
 float attractDevHz(vec4 meta, float xUv, float pCenter, float strideUv, float dtSec) {
   float p0 = attractPackedRead(destSpectrogramTex, meta, xUv - strideUv, destFrameCount).y;
   float p2 = attractPackedRead(destSpectrogramTex, meta, xUv + strideUv, destFrameCount).y;
-  return (unwrapPhase(pCenter - p0) + unwrapPhase(p2 - pCenter)) * 0.5 / (TWO_PI * dtSec);
+  return instFreqDevHz(p0, pCenter, p2, dtSec);
 }
 
 void main() {
@@ -244,7 +244,7 @@ void main() {
         float dtJ = exp2(jMeta.b) / max(destSampleRate, 1e-6);
         float strideJUv = exp2(jMeta.b) / max(destFrameCount, 1.0);
         float devJ = attractDevHz(jMeta, destUv.x, jTexel.y, strideJUv, dtJ);
-        float fTrueJ = fcJ + clamp(devJ, -0.06 * fcJ, 0.06 * fcJ);
+        float fTrueJ = fcJ + clamp(devJ, -FREQ_DEV_CLAMP * fcJ, FREQ_DEV_CLAMP * fcJ);
 
         // Carrier re-base for the band move, evaluated at each band's own
         // dyadic coefficient time: detrend swap at tJ, retune ramp from the
@@ -252,9 +252,9 @@ void main() {
         // time at the landed frequency.
         float tJ = attractCoeffTimeSec(destUv.x, jMeta.b);
         float fTargetHz = fTrueJ * exp2(dispSemis / 12.0);
-        float phaseAdd = TWO_PI * ((fcJ - fcDest) * tJ
-                                 + (fTargetHz - fTrueJ) * (tJ - tAnchorSec)
-                                 + (fTargetHz - fcDest) * (tD - tJ));
+        float phaseAdd = carrierRebase(fcJ, fcDest, tJ)
+                       + contentAdvance(fTargetHz, fTrueJ, tJ - tAnchorSec)
+                       + contentAdvance(fTargetHz, fcDest, tD - tJ);
 
         accL += toComplex(vec2(getMag(jTexel.rg) * hat, jTexel.g + phaseAdd));
         accR += toComplex(vec2(getMag(jTexel.ba) * hat, jTexel.a + phaseAdd));
@@ -273,7 +273,7 @@ void main() {
         float dtJ = exp2(jMeta.b) / max(destSampleRate, 1e-6);
         float strideJUv = exp2(jMeta.b) / max(destFrameCount, 1.0);
         float devJ = attractDevHz(jMeta, destUv.x, jTexel.y, strideJUv, dtJ);
-        float fTrueJ = fcJ + clamp(devJ, -0.06 * fcJ, 0.06 * fcJ);
+        float fTrueJ = fcJ + clamp(devJ, -FREQ_DEV_CLAMP * fcJ, FREQ_DEV_CLAMP * fcJ);
 
         float absSemis = 12.0 * log2(fTrueJ / ATTRACT_C0_HZ);
         float pullSemis = attractCombPullSemis(absSemis, smoothYSemis);
@@ -285,9 +285,9 @@ void main() {
 
         float tJ = attractCoeffTimeSec(destUv.x, jMeta.b);
         float fTargetHz = fTrueJ * exp2(dispSemis / 12.0);
-        float phaseAdd = TWO_PI * ((fcJ - fcDest) * tJ
-                                 + (fTargetHz - fTrueJ) * (tJ - tAnchorSec)
-                                 + (fTargetHz - fcDest) * (tD - tJ));
+        float phaseAdd = carrierRebase(fcJ, fcDest, tJ)
+                       + contentAdvance(fTargetHz, fTrueJ, tJ - tAnchorSec)
+                       + contentAdvance(fTargetHz, fcDest, tD - tJ);
 
         accL += toComplex(vec2(getMag(jTexel.rg) * hat, jTexel.g + phaseAdd));
         accR += toComplex(vec2(getMag(jTexel.ba) * hat, jTexel.a + phaseAdd));
@@ -382,7 +382,7 @@ void main() {
       // waveform keeps its absolute phase, and the new slot detrends by
       // fc * tD instead of fc * tJ.
       float tJ = attractCoeffTimeSec(jUv.x, destMeta.b);
-      float phaseAdd = -TWO_PI * fcDest * (tDCoeff - tJ);
+      float phaseAdd = contentAdvance(0.0, fcDest, tDCoeff - tJ);
 
       accL += toComplex(vec2(getMag(jTexel.rg) * hat, jTexel.g + phaseAdd));
       accR += toComplex(vec2(getMag(jTexel.ba) * hat, jTexel.a + phaseAdd));
