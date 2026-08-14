@@ -752,6 +752,32 @@ export const factoryPresets: PresetType[] = [
   },
 
   // --- Source / sample painting ---
+  // Reads the file itself at a fixed offset from the stroke, so a slice picked once
+  // paints anywhere else in the same file. Hard time edges keep the slice from bleeding.
+  {
+    id: "stamp",
+    name: "Stamp",
+    color: { hue: "pink", variation: 1 },
+    isFactory: true,
+    version: CURRENT_PRESET_VERSION,
+    steps: [
+      {
+        id: "stamp-step-1",
+        name: "Step 1",
+        effects: [],
+        sourceFile: null,
+        sourcePositionMode: "anchored",
+        brushSizeTime: 2,
+        brushSizePitch: 128,
+        brushCurveTime: 100,
+        brushCurvePitch: 100,
+        brushAnchorMode: 0,
+      },
+    ],
+    linkedParams: [],
+    macroNames: DEFAULT_MACRO_NAMES,
+    macroValues: DEFAULT_MACRO_VALUES,
+  },
   // Paints the spectrum of a bundled pad sample wherever you brush.
   {
     id: "sampler",

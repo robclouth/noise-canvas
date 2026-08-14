@@ -203,10 +203,10 @@ export const UI_AREAS = {
     recipes: ["turn-a-pad-into-a-rhythm"],
   },
 
-  "section-brushes": {
-    title: "Brushes",
-    blurb: "The brush list. 27 factory presets, plus anything you save.",
-    manualSection: "the-brush-list",
+  "section-palette": {
+    title: "Palettes",
+    blurb: "Your brushes, grouped into named sets you open side by side.",
+    manualSection: "the-palette",
     deepTour: [
       {
         title: "Brushes stay open",
@@ -219,9 +219,14 @@ export const UI_AREAS = {
           "<b>1–9</b> and <b>0</b> always select the first ten in the list. Any brush can also be bound to a letter: <b>⋮ → Assign key…</b>, then press a letter. That letter then jumps to it from anywhere in the app.",
       },
       {
-        title: "Saving and the library",
+        title: "Palettes are folders",
         description:
-          "Brushes live as JSON in <i>Documents/Noise Canvas/Presets</i>. A brush loaded from there remembers where it came from — <b>Save</b> overwrites it, <b>Save as…</b> makes a new one, and a dirty marker appears once it drifts.",
+          "Each grey band titles one open palette and folds its brushes away. Open as many as you like — seven ship with the app, one per job — and drag a brush from one to another. The ⋮ on the section heading opens more.",
+      },
+      {
+        title: "Two libraries, two levels",
+        description:
+          "One brush saves to <i>Documents/Noise Canvas/Presets</i>; a whole palette saves to <i>Palettes</i> beside it. Both show a dirty marker once they drift, and both have <b>Save</b> and <b>Save as…</b> on the ⋮.",
       },
     ],
   },
@@ -304,7 +309,7 @@ export const UI_TECHNIQUES: readonly UiTechnique[] = [
     id: "brush-hotkeys",
     title: "Bind a brush to a letter",
     blurb: "⋮ → Assign key…, then press a letter. 1–0 always select the first ten.",
-    demonstrateOn: "section-brushes",
+    demonstrateOn: "section-palette",
     manualSection: "the-brush-list",
   },
   {

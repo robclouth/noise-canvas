@@ -10,6 +10,7 @@ import type { FilesState } from "./files";
 import type { FillState } from "./fill";
 import { ModulatorsState } from "./modulators";
 import type { LinkState } from "./link";
+import type { PalettesState } from "./palettes";
 import type { PresetsState } from "./presets";
 import type { SectionPresetsState } from "./section-presets";
 import type { StemGroupsState } from "./stem-groups";
@@ -23,6 +24,8 @@ export type BrushColor = {
 export type Brush = {
   id: string;
   name: string;
+  /** The open palette holding this brush, keyed by `OpenPalette.id`. */
+  paletteId: string;
   color: BrushColor;
   hotkey: string | null;
   steps: BrushStep[];
@@ -119,6 +122,7 @@ export type State = BrushState &
   AudioState &
   AppState &
   PresetsState &
+  PalettesState &
   SectionPresetsState &
   StepsState &
   LinkState &

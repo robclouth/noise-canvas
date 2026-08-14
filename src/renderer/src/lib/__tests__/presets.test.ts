@@ -32,6 +32,7 @@ vi.mock("@renderer/store", () => ({
 import { BrushStep, createDefaultStep, parameterDefs } from "../../parameters";
 import { createPresetsSlice } from "../../store/presets";
 import type { Brush, State } from "../../store/types";
+import { DEFAULT_PALETTE_ID } from "../../store/palette-id";
 import { CURRENT_PRESET_VERSION, validatePreset } from "../preset-schema";
 
 /**
@@ -46,6 +47,7 @@ function makeBrush(steps: BrushStep[], name = "Mock"): Brush {
   return {
     id: crypto.randomUUID(),
     name,
+    paletteId: DEFAULT_PALETTE_ID,
     color: { hue: "orange", variation: 0 },
     hotkey: null,
     steps,

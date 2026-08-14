@@ -1,7 +1,6 @@
 import { notifications } from "@mantine/notifications";
 import { pickNextBrushColor, pickNextStepColor } from "@renderer/lib/colors";
 import { getFolders } from "@renderer/lib/folders";
-import { generateRandomBrushName } from "@renderer/lib/preset-names";
 import {
   CURRENT_PRESET_VERSION,
   DEFAULT_MACRO_NAMES,
@@ -13,6 +12,9 @@ import { host } from "@renderer/lib/host";
 import { BrushStep, createDefaultStep } from "@renderer/parameters";
 import { produce } from "immer";
 import { factoryPresets } from "../lib/factory-presets";
+import { makeBrushFromPreset, makeEmptyBrush } from "./brush-factory";
+import { DEFAULT_PALETTE_ID } from "./palette-id";
+import { flatInsertIndex, selectTargetPaletteId } from "./palettes";
 import { collectBrushReferencedPaths, openReferencedPaths } from "./files";
 import type { Brush, State, ZustandGet, ZustandSet } from "./types";
 
@@ -26,8 +28,8 @@ export interface PresetsState {
   captureState: () => BrushStep[];
   isBrushDirty: (index: number) => boolean;
   setActiveBrush: (index: number) => void;
-  addBrushFromPreset: (presetId: string) => void;
-  addEmptyBrush: () => void;
+  addBrushFromPreset: (presetId: string, paletteId?: string) => void;
+  addEmptyBrush: (paletteId?: string) => void;
   duplicateBrush: (index: number) => void;
   closeBrush: (index: number) => void;
   renameBrush: (index: number, name: string) => void;
@@ -64,53 +66,6 @@ function generateFilenameId(name: string, existingIds: Set<string> = new Set()):
   }
 
   return id;
-}
-
-function cloneStepsFromPreset(preset: PresetType): BrushStep[] {
-  const presetSteps = preset.steps ?? [];
-  if (presetSteps.length === 0) {
-    return [createDefaultStep("Step 1", pickNextStepColor([]))];
-  }
-  const assignedColors: (BrushStep["color"] | undefined)[] = [];
-  return presetSteps.map((presetStep, index) => {
-    const color = presetStep.color ?? pickNextStepColor(assignedColors);
-    assignedColors.push(color);
-    const defaultStep = createDefaultStep(presetStep.name || `Step ${index + 1}`, color);
-    return {
-      ...defaultStep,
-      ...presetStep,
-      id: presetStep.id || defaultStep.id,
-      color,
-    } as BrushStep;
-  });
-}
-
-export function makeEmptyBrush(name: string, existingColors: Brush["color"][] = []): Brush {
-  return {
-    id: crypto.randomUUID(),
-    name,
-    color: pickNextBrushColor(existingColors),
-    hotkey: null,
-    steps: [createDefaultStep("Step 1", pickNextStepColor([]))],
-    linkedParams: [],
-    libraryId: null,
-    macroNames: [...DEFAULT_MACRO_NAMES],
-    macroValues: [...DEFAULT_MACRO_VALUES],
-  };
-}
-
-function makeBrushFromPreset(preset: PresetType, existingColors: Brush["color"][]): Brush {
-  return {
-    id: crypto.randomUUID(),
-    name: preset.name,
-    color: preset.color ?? pickNextBrushColor(existingColors),
-    hotkey: null,
-    steps: cloneStepsFromPreset(preset),
-    linkedParams: preset.linkedParams ?? [],
-    libraryId: preset.id,
-    macroNames: preset.macroNames ? [...preset.macroNames] : [...DEFAULT_MACRO_NAMES],
-    macroValues: preset.macroValues ? [...preset.macroValues] : [...DEFAULT_MACRO_VALUES],
-  };
 }
 
 function openReferencedFiles(brush: Brush, get: ZustandGet) {
@@ -172,7 +127,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
   },
   availablePresets: [...factoryPresets],
 
-  brushes: [makeEmptyBrush(generateRandomBrushName())],
+  brushes: [makeEmptyBrush(DEFAULT_PALETTE_ID)],
   activeBrushIndex: 0,
 
   captureState: (): BrushStep[] => {
@@ -210,7 +165,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     set({ activeBrushIndex: index, activeStepIndex: 0 });
   },
 
-  addBrushFromPreset: (presetId: string) => {
+  addBrushFromPreset: (presetId: string, targetPaletteId?: string) => {
     const state = get();
     const preset = state.availablePresets.find((p) => p.id === presetId);
     if (!preset) {
@@ -222,13 +177,20 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       return;
     }
 
-    const existingColors = state.brushes.map((b) => b.color);
-    const newBrush = makeBrushFromPreset(preset, existingColors);
+    const paletteId = targetPaletteId ?? selectTargetPaletteId(state);
+    if (paletteId === null) return;
+    const newBrush = makeBrushFromPreset(
+      preset,
+      state.brushes.map((b) => b.color),
+      undefined,
+      paletteId,
+    );
 
     set(
       produce((draft: State) => {
-        draft.brushes.push(newBrush);
-        draft.activeBrushIndex = draft.brushes.length - 1;
+        const at = flatInsertIndex(draft.brushes, draft.openPalettes, paletteId, Infinity);
+        draft.brushes.splice(at, 0, newBrush);
+        draft.activeBrushIndex = at;
         draft.activeStepIndex = 0;
       }),
     );
@@ -236,15 +198,20 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     openReferencedFiles(newBrush, get);
   },
 
-  addEmptyBrush: () => {
+  addEmptyBrush: (targetPaletteId?: string) => {
     const state = get();
-    const existingColors = state.brushes.map((b) => b.color);
-    const newBrush = makeEmptyBrush(generateRandomBrushName(), existingColors);
+    const paletteId = targetPaletteId ?? selectTargetPaletteId(state);
+    if (paletteId === null) return;
+    const newBrush = makeEmptyBrush(
+      paletteId,
+      state.brushes.map((b) => b.color),
+    );
 
     set(
       produce((draft: State) => {
-        draft.brushes.push(newBrush);
-        draft.activeBrushIndex = draft.brushes.length - 1;
+        const at = flatInsertIndex(draft.brushes, draft.openPalettes, paletteId, Infinity);
+        draft.brushes.splice(at, 0, newBrush);
+        draft.activeBrushIndex = at;
         draft.activeStepIndex = 0;
       }),
     );
@@ -259,6 +226,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     const copy: Brush = {
       id: crypto.randomUUID(),
       name: `${source.name} copy`,
+      paletteId: source.paletteId,
       color: pickNextBrushColor(existingColors),
       hotkey: null,
       steps: source.steps.map((step) => ({ ...step, id: crypto.randomUUID() })),

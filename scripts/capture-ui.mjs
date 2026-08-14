@@ -64,6 +64,12 @@ const EXTRA_TARGETS = [
     teardown: dismiss,
   },
   {
+    name: "modal-palette-picker",
+    spec: { kind: "popover" },
+    setup: async ({ page }) => clickAndSettle(page, page.getByRole("button", { name: "Add palette" }).first()),
+    teardown: dismiss,
+  },
+  {
     name: "menu-parameter",
     spec: { kind: "popover" },
     setup: async ({ page }) => clickAndSettle(page, page.getByText("Strength", { exact: true }).first()),

@@ -16,6 +16,8 @@ import { createFilesSlice, FILES_PERSISTED_KEYS, openFiles } from "./files";
 import { createFillSlice } from "./fill";
 import { createLinkSlice, LINK_PERSISTED_KEYS } from "./link";
 import { createModulatorsSlice } from "./modulators";
+import { createPalettesSlice, makeDefaultPalette, PALETTES_PERSISTED_KEYS } from "./palettes";
+import { DEFAULT_PALETTE_ID } from "./palette-id";
 import { createPresetsSlice, PRESETS_PERSISTED_KEYS } from "./presets";
 import { createSectionPresetsSlice } from "./section-presets";
 import { createStemGroupsSlice, STEM_GROUPS_PERSISTED_KEYS } from "./stem-groups";
@@ -38,6 +40,7 @@ export const ALL_PERSISTED_KEYS: (keyof State)[] = [
   ...FILES_PERSISTED_KEYS,
   ...AUDIO_PERSISTED_KEYS,
   ...PRESETS_PERSISTED_KEYS,
+  ...PALETTES_PERSISTED_KEYS,
   ...STEPS_PERSISTED_KEYS,
   ...LINK_PERSISTED_KEYS,
   ...STEM_GROUPS_PERSISTED_KEYS,
@@ -179,6 +182,7 @@ export const useStore = create<State>()(
         ...createAudioSlice(set, get),
         ...createAppSlice(set, get),
         ...createPresetsSlice(set, get),
+        ...createPalettesSlice(set, get),
         ...createSectionPresetsSlice(set, get),
         ...createStepsSlice(set, get),
         ...createLinkSlice(set, get),
@@ -325,6 +329,19 @@ export const useStore = create<State>()(
             // The clip opened from Ableton becomes the active file; don't restore
             // a stale active id from a previous session.
             merged.activeFileId = null;
+          }
+
+          // Brushes saved before palettes existed have no group. Put the whole
+          // flat list into one untitled palette, and drop any group whose
+          // brushes are all gone so the sidebar never shows an orphan header.
+          if (Array.isArray(merged.brushes)) {
+            const groupIds = new Set((merged.openPalettes ?? []).map((palette) => palette.id));
+            merged.brushes = merged.brushes.map((brush) =>
+              brush.paletteId && groupIds.has(brush.paletteId) ? brush : { ...brush, paletteId: DEFAULT_PALETTE_ID },
+            );
+            const used = new Set(merged.brushes.map((brush) => brush.paletteId));
+            const kept = (merged.openPalettes ?? []).filter((palette) => used.has(palette.id));
+            merged.openPalettes = kept.length > 0 ? kept : [makeDefaultPalette()];
           }
 
           // Sync effects in all steps to handle added/removed effects, and

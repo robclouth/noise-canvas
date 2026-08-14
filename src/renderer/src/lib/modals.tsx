@@ -8,14 +8,12 @@ export { openContextModal };
 
 type ConfirmModalParams = Parameters<typeof modals.openConfirmModal>[0];
 
-export function openConfirmModal(params: ConfirmModalParams): string {
+/**
+ * Makes Enter press the last button in the topmost dialog. Returns the cleanup
+ * that detaches it.
+ */
+function attachEnterToLastButton(): () => void {
   let active = true;
-
-  const cleanup = () => {
-    if (!active) return;
-    active = false;
-    document.removeEventListener("keydown", handleKeyDown, true);
-  };
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (!active) return;
@@ -39,6 +37,20 @@ export function openConfirmModal(params: ConfirmModalParams): string {
     confirmButton.click();
   };
 
+  setTimeout(() => {
+    if (active) document.addEventListener("keydown", handleKeyDown, true);
+  }, 50);
+
+  return () => {
+    if (!active) return;
+    active = false;
+    document.removeEventListener("keydown", handleKeyDown, true);
+  };
+}
+
+export function openConfirmModal(params: ConfirmModalParams): string {
+  const cleanup = attachEnterToLastButton();
+
   const id = modals.openConfirmModal({
     ...params,
     // Not cleaned up here: a confirm that rejects its input leaves the dialog
@@ -53,10 +65,6 @@ export function openConfirmModal(params: ConfirmModalParams): string {
       params.onClose?.();
     },
   });
-
-  setTimeout(() => {
-    if (active) document.addEventListener("keydown", handleKeyDown, true);
-  }, 50);
 
   return id;
 }

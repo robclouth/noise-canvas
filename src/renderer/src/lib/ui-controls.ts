@@ -150,10 +150,32 @@ export const UI_CONTROLS = {
     manualSection: "history",
   },
 
+  // Palettes
+  "palette-header": {
+    label: "Palette",
+    description: "Names one open palette, and folds its brushes away.",
+    manualSection: "the-palette",
+  },
+  "palette-add": {
+    label: "Add palette",
+    description: "Opens the palette browser, which starts an empty one or opens a saved set.",
+    manualSection: "the-palette",
+  },
+  "palette-row": {
+    label: "Palette",
+    description: "Opens this palette and its brushes in the sidebar.",
+    manualSection: "the-palette",
+  },
+  "palette-menu": {
+    label: "Palette menu",
+    description: "Saves, renames, closes or removes this palette.",
+    manualSection: "the-palette",
+  },
+
   // Brushes
   "brush-add": {
     label: "Add brush",
-    description: "Opens the brush picker to add a brush to the list.",
+    description: "Opens the brush picker to add a brush to this palette.",
     manualSection: "the-brush-list",
   },
   "brush-row": {

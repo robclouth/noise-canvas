@@ -15,7 +15,7 @@ const DEMO_FILE = "bundled://pad-loop.mp3";
  * A user who collapsed one of these before re-running the tour would otherwise
  * get a spotlight on a bare header.
  */
-const SECTIONS_TO_EXPAND = ["Effects", "Envelope", "Modulators", "Brushes", "History", "Generate"];
+const SECTIONS_TO_EXPAND = ["Effects", "Envelope", "Modulators", "Palette", "History", "Generate"];
 
 /**
  * Arms a one-shot gate: the step advances when the user does the thing rather
@@ -118,11 +118,11 @@ const STEPS: Step[] = [
       "Every stroke becomes a node. Undo walks back up the tree and leaves the branch you came from intact, so you can wander off and come back. It survives quitting, too.",
   },
   {
-    anchor: "section-brushes",
+    anchor: "section-palette",
     side: "left",
-    title: "Start from a preset",
+    title: "Start from a palette",
     description:
-      "27 factory brushes to pull apart and build on. The number keys jump between the first ten, and you can bind your own letters.",
+      "A palette is a folder of brushes for one job. Seven ship with the app, and you can have several open at once. The number keys jump between the first ten brushes.",
   },
   {
     anchor: "section-modulators",

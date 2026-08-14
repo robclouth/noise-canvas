@@ -9,6 +9,7 @@ Every control in the app has a tooltip and an entry in the `?` overlay, and how 
 1. [Core Concepts](#core-concepts)
 2. [The Interface](#the-interface)
 3. [Brushes](#brushes)
+   - [The Palette](#the-palette)
    - [The Brush List](#the-brush-list)
    - [Steps](#steps)
    - [Macros](#macros)
@@ -108,7 +109,7 @@ The window is split into three columns plus a transport bar:
 
 - **Left — Brush panel.** Everything that defines the current brush: Macros, Steps, Source, Envelope, Options, Effects, Modulators.
 - **Middle — Canvas.** Every open file stacked vertically, each with its own header, time legend, and pitch legend. Minimized files collapse into the dock at the bottom.
-- **Right — Sidebar.** The brush list on top, the history tree below.
+- **Right — Sidebar.** The open palettes and their brushes on top, the history tree below.
 - **Bottom — Transport.** Playback, grid, scale, meters, stroke limiting, Ableton Link.
 
 **Compact UI** (`Cmd/Ctrl+Shift+C`, or **View → Compact UI**) shrinks every control so more fits on smaller screens.
@@ -121,22 +122,54 @@ Everything in Noise Canvas revolves around the brush — it's the link between w
 
 When you paint, the brush defines **where** and **how strongly** an effect is applied to the spectrogram. Effects are modular: you can enable several at once, tweak them independently, and reorder them to change their processing order.
 
+### The Palette
+
+A palette is a folder of brushes for one job. The sidebar shows each open palette as a grey band with its brushes indented under it, and you can have as many open at once as you like.
+
+- **Click a band** to fold its brushes away. **Double-click** the name to rename.
+- **Drag** a brush from one palette to another to move it between them.
+- The band's **⋮** offers Save, Save as…, Rename, Close and Delete file….
+- **Add palette** at the bottom of the sidebar opens the browser: **New** for an empty palette, or any saved one below it.
+- **Add brush** sits at the end of each palette's own list, so a new brush always lands where you asked for it.
+- A band shows its name in _italics_ once its brushes drift from the saved file. Closing a dirty palette asks first; its brushes close with it.
+- The last open palette cannot be closed, so there is always somewhere for a new brush to go.
+
+Palettes are JSON in `Documents/Noise Canvas/Palettes/`, beside the `Presets/` folder single brushes save to. Opening one always makes a fresh copy, so the same palette can be open twice and edits never reach back into the file until you Save. Seven ship with the app, one per job:
+
+| Palette      | Brushes                                                                                           |
+| ------------ | ------------------------------------------------------------------------------------------------- |
+| Restoration  | Eraser · Noise Gate · Restore · High-Pass · Compressor · Smudge                                   |
+| Breaks       | Stamp · Jungle Stretch · Stutter · Rewind · Eraser · Reverse · Echo · Step Gate · Octave Down     |
+| Vocals       | Eraser · Noise Gate · Magnet · Compressor · Harmonics · Shimmer · Reverb (Blur) · Stereo Widening |
+| From Scratch | Paint Tone · Paint Noise · Stack · Crackle · Harmonics · Octave Up · Sampler · Convolution        |
+| Mixing       | Booster · Compressor · Dynamic Bloom · Low-Pass Sweep · High-Pass · Stereo Widening               |
+| Space        | Reverb (Blur) · Echo · Shimmer · Freeze · 3D Orbit · Stereo Widening                              |
+| Mangle       | Pixel Sort · Crush · Updraft · Flow · Smudge · Reverse · Octave Down · Morph (Macros)             |
+
+A brush can sit in several palettes. The picker shows which ones under each brush's name.
+
 ### The Brush List
 
-Brushes live in the right-hand sidebar. You can have as many open as you like; each is an independent set of steps, effects, modulators, and macros.
+Brushes live inside a palette. You can have as many open as you like; each is an independent set of steps, effects, modulators, and macros. **Add brush** puts a new one in the palette holding the brush you have selected.
 
 - A **colour bar** down the left edge identifies each brush; the same colour marks it wherever it is referenced.
 - **Hover** a row to see what is in it: each step's effects, in order.
 - **Click** a row to make it active. **Double-click** the name to rename.
 - The **⋮ menu** offers Rename, Duplicate, Save, Save as…, Load referenced files, Assign key…, Remove key, and Close.
-- **Drag** rows to reorder them.
-- **Add brush** at the bottom of the list opens the picker: **New** for an empty brush, or any preset below it.
+- **Drag** rows to reorder them, or to move a brush into another palette.
+- **Add brush** at the end of each palette opens the picker: **New** for an empty brush, or any preset below it.
 
-**Hotkeys.** Any brush can be bound to a letter key (⋮ → _Assign key…_, then press a letter). Pressing that letter anywhere in the app jumps straight to that brush. The number keys **1–9 and 0** always select the first ten brushes in the list, no assignment needed.
+**Hotkeys.** Any brush can be bound to a letter key (⋮ → _Assign key…_, then press a letter). Pressing that letter anywhere in the app jumps straight to that brush. The number keys **1–9 and 0** always select the first ten brushes in the sidebar, counting across every open palette in order. Folding a palette hides its rows but does not renumber anything.
 
-**The library.** Brushes are saved as JSON presets in `Documents/Noise Canvas/Presets/`. A brush loaded from the library remembers where it came from — _Save_ overwrites it, _Save as…_ creates a new one. A dirty marker appears when the brush has drifted from its saved version. A set of factory presets ships with the app:
+**The library.** Brushes are saved as JSON presets in `Documents/Noise Canvas/Presets/`. A brush loaded from the library remembers where it came from — _Save_ overwrites it, _Save as…_ creates a new one. A dirty marker appears when the brush has drifted from its saved version. This is the level below the palette: one brush to a file, where a palette is a whole set. A set of factory presets ships with the app:
 
-> Eraser · Booster · Restore · Stereo Widening · Compressor · Noise Gate · Smudge · Octave Up · Octave Down · Reverse · Low-Pass Sweep · High-Pass · Harmonics · Reverb (Blur) · Echo · Paint Noise · Paint Tone · Flow · Pixel Sort · Tremolo · Step Gate · Dynamic Bloom · 3D Orbit · Shimmer · Morph (Macros) · Sampler · Convolution
+> Eraser · Booster · Restore · Stereo Widening · Compressor · Noise Gate · Smudge · Octave Up · Octave Down · Reverse · Low-Pass Sweep · High-Pass · Harmonics · Reverb (Blur) · Echo · Paint Noise · Paint Tone · Flow · Pixel Sort · Tremolo · Step Gate · Dynamic Bloom · 3D Orbit · Shimmer · Morph (Macros) · Stamp · Sampler · Convolution · Jungle Stretch · Stutter · Rewind · Crush · Magnet · Freeze · Updraft · Crackle · Stack
+
+Every factory brush ships with at least one named [macro](#macros) wired to its key parameter, parked at the value the brush opens with — Eraser's **Level**, Reverse's **Speed**, Echo's **Fade** — so the first knob to reach for is always the same one.
+
+**Stamp** reads the file itself at a fixed offset from the stroke, so a slice picked once paints anywhere else in the same file. It is the chop-and-rearrange brush, and it has no effects at all — not to be confused with the [Clone](#clone) effect, which stamps spaced copies of what you paint over.
+
+**Jungle Stretch** is the old-sampler timestretch: it stretches the painted region to double length with the Flangey warp while a sixteenth-of-a-beat sequencer ripples the level for the classic cyclic flutter. Its **Stretch** macro is a varispeed knob that runs from reverse through freeze up to 4×.
 
 Some factory brushes reference bundled audio (an IR, a pad loop). Those load automatically; _Load referenced files_ re-opens them if you closed them.
 

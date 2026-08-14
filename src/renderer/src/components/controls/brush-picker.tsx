@@ -1,5 +1,6 @@
 import { useStore } from "@/store";
 import { Box, Button, Divider, Group, Menu, ScrollArea, Stack, Text, TextInput, useMantineTheme } from "@mantine/core";
+import { buildPresetPaletteIndex, type PaletteTag } from "@renderer/store/palettes";
 import { ContextModalProps, modals } from "@mantine/modals";
 import { resolveBrushColor } from "@renderer/lib/colors";
 import { helpProps } from "@renderer/lib/ui-controls";
@@ -7,11 +8,12 @@ import type { BrushColor } from "@renderer/store/types";
 import { BrushRow } from "./brush-row";
 import { LIST_ROW_HOST, ListRowMenu } from "./list-row";
 import { openConfirm, openPrompt } from "@renderer/lib/modals";
+import { openPalettePicker } from "@renderer/lib/palette-actions";
 import { PresetType } from "@renderer/lib/preset-schema";
 import { Plus } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
-type BrushPickerModalProps = ContextModalProps<Record<string, never>>;
+type BrushPickerModalProps = ContextModalProps<{ paletteId?: string }>;
 
 function promptForRename(preset: PresetType) {
   openPrompt({
@@ -37,23 +39,42 @@ function promptForDelete(preset: PresetType) {
   });
 }
 
+/** The palettes a brush appears in, as small chips below its name. */
+function PaletteTags({ tags }: { tags: readonly PaletteTag[] }) {
+  return (
+    <Group gap={4} wrap="wrap" mt={1}>
+      {tags.map((tag) => (
+        <Box key={tag.id} px={4} style={{ background: "var(--mantine-color-dark-6)", borderRadius: 3 }}>
+          <Text size="9px" c="dimmed" lh={1.6}>
+            {tag.name}
+          </Text>
+        </Box>
+      ))}
+    </Group>
+  );
+}
+
 type RowProps = {
   onClick: () => void;
   label: string;
   color?: BrushColor;
   steps?: readonly Record<string, unknown>[];
+  tags?: readonly PaletteTag[];
   trailing?: React.ReactNode;
 };
 
 /** A picker entry, built from the same row the sidebar palette uses. */
-function Row({ onClick, label, color, steps = [], trailing }: RowProps) {
+function Row({ onClick, label, color, steps = [], tags, trailing }: RowProps) {
   const theme = useMantineTheme();
   return (
     <Group className={LIST_ROW_HOST} gap={0} wrap="nowrap" align="center" style={{ position: "relative" }}>
       <BrushRow steps={steps} color={color ? resolveBrushColor(color, theme) : theme.colors.dark[4]} onClick={onClick}>
-        <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
-          {label}
-        </Text>
+        <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
+          <Text size="sm" truncate>
+            {label}
+          </Text>
+          {tags && tags.length > 0 && <PaletteTags tags={tags} />}
+        </Stack>
       </BrushRow>
       {trailing && (
         <Box style={{ position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)" }}>{trailing}</Box>
@@ -62,7 +83,15 @@ function Row({ onClick, label, color, steps = [], trailing }: RowProps) {
   );
 }
 
-function PresetRow({ preset, onSelect }: { preset: PresetType; onSelect: () => void }) {
+function PresetRow({
+  preset,
+  tags,
+  onSelect,
+}: {
+  preset: PresetType;
+  tags?: readonly PaletteTag[];
+  onSelect: () => void;
+}) {
   const trailing = preset.isFactory ? null : (
     <ListRowMenu help="brush-menu">
       <Menu.Item onClick={() => promptForRename(preset)}>Rename…</Menu.Item>
@@ -72,14 +101,26 @@ function PresetRow({ preset, onSelect }: { preset: PresetType; onSelect: () => v
     </ListRowMenu>
   );
 
-  return <Row onClick={onSelect} label={preset.name} color={preset.color} steps={preset.steps} trailing={trailing} />;
+  return (
+    <Row
+      onClick={onSelect}
+      label={preset.name}
+      color={preset.color}
+      steps={preset.steps}
+      tags={tags}
+      trailing={trailing}
+    />
+  );
 }
 
-export function BrushPickerModal({ context, id }: BrushPickerModalProps): React.JSX.Element {
+export function BrushPickerModal({ context, id, innerProps }: BrushPickerModalProps): React.JSX.Element {
   const [query, setQuery] = useState("");
   const availablePresets = useStore((state) => state.availablePresets);
+  const availablePalettes = useStore((state) => state.availablePalettes);
   const addEmptyBrush = useStore((state) => state.addEmptyBrush);
   const addBrushFromPreset = useStore((state) => state.addBrushFromPreset);
+
+  const paletteIndex = useMemo(() => buildPresetPaletteIndex(availablePalettes), [availablePalettes]);
 
   const matchesQuery = (name: string) =>
     query.trim().length === 0 || name.toLowerCase().includes(query.trim().toLowerCase());
@@ -101,7 +142,7 @@ export function BrushPickerModal({ context, id }: BrushPickerModalProps): React.
 
       <Row
         onClick={() => {
-          addEmptyBrush();
+          addEmptyBrush(innerProps.paletteId);
           close();
         }}
         label="New"
@@ -129,8 +170,9 @@ export function BrushPickerModal({ context, id }: BrushPickerModalProps): React.
                 <PresetRow
                   key={preset.id}
                   preset={preset}
+                  tags={paletteIndex.get(preset.id)}
                   onSelect={() => {
-                    addBrushFromPreset(preset.id);
+                    addBrushFromPreset(preset.id, innerProps.paletteId);
                     close();
                   }}
                 />
@@ -153,8 +195,9 @@ export function BrushPickerModal({ context, id }: BrushPickerModalProps): React.
                 <PresetRow
                   key={preset.id}
                   preset={preset}
+                  tags={paletteIndex.get(preset.id)}
                   onSelect={() => {
-                    addBrushFromPreset(preset.id);
+                    addBrushFromPreset(preset.id, innerProps.paletteId);
                     close();
                   }}
                 />
@@ -173,7 +216,8 @@ export function BrushPickerModal({ context, id }: BrushPickerModalProps): React.
   );
 }
 
-export function BrushPickerOpenButton() {
+/** Adds a brush to `paletteId`, the palette this button sits under. */
+export function BrushPickerOpenButton({ paletteId }: { paletteId: string }) {
   return (
     <Button
       {...helpProps("brush-add")}
@@ -187,11 +231,29 @@ export function BrushPickerOpenButton() {
         modals.openContextModal({
           modal: "brushPicker",
           title: "Add brush",
-          innerProps: {},
+          innerProps: { paletteId },
         })
       }
     >
       Add brush
+    </Button>
+  );
+}
+
+/** Opens the palette browser, whose first row starts an empty one. */
+export function PalettePickerOpenButton() {
+  return (
+    <Button
+      {...helpProps("palette-add")}
+      fullWidth
+      size="compact-xs"
+      variant="subtle"
+      color="gray"
+      justify="flex-start"
+      leftSection={<Plus size={12} />}
+      onClick={openPalettePicker}
+    >
+      Add palette
     </Button>
   );
 }

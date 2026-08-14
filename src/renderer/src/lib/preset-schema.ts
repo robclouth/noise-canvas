@@ -60,7 +60,7 @@ function createStepParametersSchema() {
 /**
  * Create a Zod schema for a single BrushStep
  */
-function createBrushStepSchema() {
+export function createBrushStepSchema() {
   return z
     .object({
       id: z.string(),

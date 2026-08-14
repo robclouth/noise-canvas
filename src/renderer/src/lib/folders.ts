@@ -4,17 +4,19 @@ const PRESETS_FOLDER_NAME = "Noise Canvas";
 const PRESETS_SUBFOLDER_NAME = "Presets";
 const EFFECTS_SUBFOLDER_NAME = "Effects";
 const MODULATORS_SUBFOLDER_NAME = "Modulators";
+const PALETTES_SUBFOLDER_NAME = "Palettes";
 const TEXTURES_SUBFOLDER_NAME = "Textures";
 
 let appDir: string;
 let presetsDir: string;
 let effectPresetsDir: string;
 let modulatorPresetsDir: string;
+let palettesDir: string;
 let texturesDir: string;
 
 export async function getFolders() {
-  if (appDir && presetsDir && effectPresetsDir && modulatorPresetsDir && texturesDir) {
-    return { appDir, presetsDir, effectPresetsDir, modulatorPresetsDir, texturesDir };
+  if (appDir && presetsDir && effectPresetsDir && modulatorPresetsDir && palettesDir && texturesDir) {
+    return { appDir, presetsDir, effectPresetsDir, modulatorPresetsDir, palettesDir, texturesDir };
   }
 
   const homeDir = host.os.homedir();
@@ -50,16 +52,25 @@ export async function getFolders() {
   presetsDir = host.path.join(appDir, PRESETS_SUBFOLDER_NAME);
   effectPresetsDir = host.path.join(presetsDir, EFFECTS_SUBFOLDER_NAME);
   modulatorPresetsDir = host.path.join(presetsDir, MODULATORS_SUBFOLDER_NAME);
+  palettesDir = host.path.join(appDir, PALETTES_SUBFOLDER_NAME);
   texturesDir = host.path.join(appDir, TEXTURES_SUBFOLDER_NAME);
 
-  console.log("App directories:", { appDir, presetsDir, effectPresetsDir, modulatorPresetsDir, texturesDir });
+  console.log("App directories:", {
+    appDir,
+    presetsDir,
+    effectPresetsDir,
+    modulatorPresetsDir,
+    palettesDir,
+    texturesDir,
+  });
 
   await Promise.all([
     host.fs.mkdir(presetsDir, { recursive: true }),
     host.fs.mkdir(effectPresetsDir, { recursive: true }),
     host.fs.mkdir(modulatorPresetsDir, { recursive: true }),
+    host.fs.mkdir(palettesDir, { recursive: true }),
     host.fs.mkdir(texturesDir, { recursive: true }),
   ]);
 
-  return { appDir, presetsDir, effectPresetsDir, modulatorPresetsDir, texturesDir };
+  return { appDir, presetsDir, effectPresetsDir, modulatorPresetsDir, palettesDir, texturesDir };
 }

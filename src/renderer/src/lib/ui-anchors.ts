@@ -27,7 +27,7 @@ export const UI_ANCHORS = [
   "section-effects",
   "section-modulators",
   // Sidebar sections
-  "section-brushes",
+  "section-palette",
   "section-history",
   // The pattern bar above the transport
 ] as const;

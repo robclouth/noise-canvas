@@ -1,6 +1,7 @@
 // Use type-only import to avoid triggering module execution and circular dependencies
 import type { State } from "../store/types";
 import type { BrushStep } from "../parameters";
+import { DEFAULT_PALETTE_ID } from "../store/palette-id";
 
 /**
  * Type for a brush step in tests.
@@ -71,6 +72,7 @@ export function createMockState(overrides: Partial<State> = {}): State {
       {
         id: "mock-brush-0",
         name: "Mock",
+        paletteId: DEFAULT_PALETTE_ID,
         color: { hue: "orange", variation: 0 },
         hotkey: null,
         steps: [defaultStep] as unknown as BrushStep[],
@@ -229,6 +231,7 @@ export function createMockStateWithSteps(
       {
         id: "mock-brush-0",
         name: "Mock",
+        paletteId: DEFAULT_PALETTE_ID,
         color: { hue: "orange", variation: 0 },
         hotkey: null,
         steps: steps as unknown as BrushStep[],
@@ -262,6 +265,7 @@ export function createMockStateForIterations(
       {
         id: "mock-brush-0",
         name: "Mock",
+        paletteId: DEFAULT_PALETTE_ID,
         color: { hue: "orange", variation: 0 },
         hotkey: null,
         steps: [step] as unknown as BrushStep[],

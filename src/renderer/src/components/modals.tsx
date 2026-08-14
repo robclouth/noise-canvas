@@ -5,6 +5,7 @@ import { EFFECT_COLORS, EFFECT_DESCRIPTIONS, EFFECT_LABELS } from "@renderer/lib
 import { useStore } from "@/store";
 import { openFiles, selectFileColor } from "@renderer/store/files";
 import { BrushPickerModal } from "./controls/brush-picker";
+import { PalettePickerModal } from "./controls/palette-picker";
 import { ImageExportModal } from "./image-export-modal";
 
 const HIDDEN_EFFECTS = new Set(["transmute", "waveshape"]);
@@ -127,6 +128,7 @@ export const FilePickerModal = ({
 export const modals = {
   addEffect: AddEffectModal,
   brushPicker: BrushPickerModal,
+  palettePicker: PalettePickerModal,
   filePicker: FilePickerModal,
   imageExport: ImageExportModal,
 };
