@@ -94,6 +94,72 @@ describe("onset transport in the neutral transform", () => {
     return spec;
   }
 
+  // An impulse at t0 with a per-band magnitude skirt around the ridge —
+  // constant phase across the skirt, per the impulse convention. A stretch
+  // that smears the skirt is measurable here, where a one-frame ridge is not:
+  // the geometric magnitude interpolation kills a lone ridge at every
+  // fractional read position.
+  function skirtSpec(): SpectrogramData {
+    const spec = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "silence" });
+    for (let band = 0; band < numBands; band++) {
+      const freq = spec.metadata[band * 4 + 3];
+      const phase = -TWO_PI * freq * t0 + TWO_PI * (band + 1);
+      for (let k = -5; k <= 5; k++) {
+        const idx = (band * numFrames + ridgeFrame + k) * 4;
+        const mag = Math.exp(-(k * k) / 4);
+        spec.packedData[idx] = mag;
+        spec.packedData[idx + 1] = phase;
+        spec.packedData[idx + 2] = mag;
+        spec.packedData[idx + 3] = phase;
+      }
+    }
+    return spec;
+  }
+
+  // Energy-weighted RMS width, in frames, of each band's magnitude around its
+  // own centroid.
+  function bandWidths(data: Float32Array): number[] {
+    const widths: number[] = [];
+    for (let band = 0; band < numBands; band++) {
+      let energy = 0;
+      let centroid = 0;
+      for (let frame = 0; frame < numFrames; frame++) {
+        const mag = data[(band * numFrames + frame) * 4];
+        energy += mag * mag;
+        centroid += mag * mag * frame;
+      }
+      if (energy < 1e-6) continue;
+      centroid /= energy;
+      let variance = 0;
+      for (let frame = 0; frame < numFrames; frame++) {
+        const mag = data[(band * numFrames + frame) * 4];
+        variance += mag * mag * (frame - centroid) * (frame - centroid);
+      }
+      widths.push(Math.sqrt(variance / energy));
+    }
+    return widths;
+  }
+
+  // A magnitude ramp across time in every band, with tonal phase: the dest
+  // magnitude reports which source frame each dest frame read, so the read
+  // map itself is measurable.
+  function rampSpec(): SpectrogramData {
+    const spec = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "silence" });
+    for (let band = 0; band < numBands; band++) {
+      const freq = spec.metadata[band * 4 + 3];
+      for (let frame = 0; frame < numFrames; frame++) {
+        const idx = (band * numFrames + frame) * 4;
+        const mag = 0.1 + (0.8 * frame) / (numFrames - 1);
+        const phase = TWO_PI * freq * (frame / sampleRate);
+        spec.packedData[idx] = mag;
+        spec.packedData[idx + 1] = phase;
+        spec.packedData[idx + 2] = mag;
+        spec.packedData[idx + 3] = phase;
+      }
+    }
+    return spec;
+  }
+
   // A sustained partial in every band: magnitude everywhere, phase advancing at
   // the band's own rate, so its second difference is zero and it reads as tonal.
   function tonalSpec(): SpectrogramData {
@@ -171,17 +237,15 @@ describe("onset transport in the neutral transform", () => {
     };
   }
 
-  // Paints the shifted impulse onto a silent dest and returns, for every dest
-  // band that received magnitude at the ridge frame, the band's stored phase
-  // and metadata frequency.
-  async function runShift(
+  // Paints the shifted source onto a silent dest and returns the dest FBO
+  // contents together with the dest metadata.
+  async function paintShift(
     algorithm: number,
-    onsets: { timeSec: number; strength: number }[] = [{ timeSec: t0, strength: 1 }],
-    shift: { beats?: number; semis?: number } = {},
-    readFrame: number | "ridge" = ridgeFrame,
-    makeSpec: () => SpectrogramData = impulseSpec,
-    scaleTime = 1,
-  ): Promise<{ band: number; phase: number; freq: number; mag: number }[]> {
+    onsets: { timeSec: number; strength: number }[],
+    shift: { beats?: number; semis?: number },
+    makeSpec: () => SpectrogramData,
+    scaleTime: number,
+  ): Promise<{ data: Float32Array; destMeta: Float32Array }> {
     const srcSpec = makeSpec();
     const destSpec = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "silence" });
     const srcTextures = createHarnessTextures(srcSpec);
@@ -208,6 +272,23 @@ describe("onset transport in the neutral transform", () => {
 
     destRenderer.renderStroke(strokeParams(), shiftState(algorithm, shift, scaleTime), sourceFile);
     const data = await destRenderer.getFBOData();
+    disposeHarnessTextures(srcTextures);
+    disposeHarnessTextures(destTextures);
+    return { data, destMeta: destSpec.metadata };
+  }
+
+  // Paints the shifted impulse onto a silent dest and returns, for every dest
+  // band that received magnitude at the ridge frame, the band's stored phase
+  // and metadata frequency.
+  async function runShift(
+    algorithm: number,
+    onsets: { timeSec: number; strength: number }[] = [{ timeSec: t0, strength: 1 }],
+    shift: { beats?: number; semis?: number } = {},
+    readFrame: number | "ridge" = ridgeFrame,
+    makeSpec: () => SpectrogramData = impulseSpec,
+    scaleTime = 1,
+  ): Promise<{ band: number; phase: number; freq: number; mag: number }[]> {
+    const { data, destMeta } = await paintShift(algorithm, onsets, shift, makeSpec, scaleTime);
 
     // "ridge" locates the frame the content actually landed on, so a fractional
     // shift can be read where it ends up rather than where it was aimed.
@@ -237,11 +318,9 @@ describe("onset transport in the neutral transform", () => {
       const idx = (band * numFrames + frame) * 4;
       const mag = data[idx];
       if (mag > peak * 0.2) {
-        lit.push({ band, phase: data[idx + 1], freq: destSpec.metadata[band * 4 + 3], mag });
+        lit.push({ band, phase: data[idx + 1], freq: destMeta[band * 4 + 3], mag });
       }
     }
-    disposeHarnessTextures(srcTextures);
-    disposeHarnessTextures(destTextures);
     return lit;
   }
 
@@ -313,6 +392,82 @@ describe("onset transport in the neutral transform", () => {
     }
     const alignment = Math.hypot(re, im) / lit.length;
     expect(alignment).toBeGreaterThan(0.85);
+  });
+
+  it("keeps a transient's own duration through a time stretch", async () => {
+    // A stretched read smears each band's attack skirt to S times its width,
+    // so bands sweep in low-to-high before a hit and die high-to-low after it.
+    // The rigid re-read around the onset must keep every band's skirt at its
+    // source width, land the ridge at the mapped onset time, and keep the
+    // impulse relation there. Shift −0.25 beats keeps the doubled position on
+    // the canvas: source = dest/2 + 0.25, so the ridge maps to frame 34.
+    const onsets = [{ timeSec: t0, strength: 1 }];
+    const unstretched = await paintShift(NEUTRAL_ALGORITHM, onsets, { semis: 0 }, skirtSpec, 1);
+    const stretched = await paintShift(NEUTRAL_ALGORITHM, onsets, { beats: -0.25, semis: 0 }, skirtSpec, 2);
+
+    const baseWidths = bandWidths(unstretched.data);
+    const stretchedWidths = bandWidths(stretched.data);
+    expect(baseWidths.length).toBe(numBands);
+    expect(stretchedWidths.length).toBe(numBands);
+    for (let band = 0; band < numBands; band++) {
+      expect(stretchedWidths[band]).toBeLessThan(baseWidths[band] * 1.35);
+    }
+
+    let ridge = 0;
+    let best = -1;
+    for (let f = 0; f < numFrames; f++) {
+      let total = 0;
+      for (let band = 0; band < numBands; band++) total += stretched.data[(band * numFrames + f) * 4];
+      if (total > best) {
+        best = total;
+        ridge = f;
+      }
+    }
+    expect(Math.abs(ridge - 34)).toBeLessThanOrEqual(1);
+
+    const t1 = ridge / sampleRate;
+    let re = 0;
+    let im = 0;
+    let count = 0;
+    for (let band = 0; band < numBands; band++) {
+      const idx = (band * numFrames + ridge) * 4;
+      if (stretched.data[idx] < 0.2) continue;
+      const err = stretched.data[idx + 1] - -TWO_PI * stretched.destMeta[band * 4 + 3] * t1;
+      re += Math.cos(err);
+      im += Math.sin(err);
+      count++;
+    }
+    expect(count).toBeGreaterThanOrEqual(4);
+    expect(Math.hypot(re, im) / count).toBeGreaterThan(0.85);
+  });
+
+  it("spreads the stretch evenly between onsets and joins segments with no tear", async () => {
+    // The dest magnitude of a source ramp reports the read position per dest
+    // frame. The piecewise map must read monotonically — in particular the
+    // nearest-onset switch midway between two hits must not jump between
+    // rigid targets — must never read faster than the rigid slope, and must
+    // hold one uniform slope across the middle of a segment.
+    const onsets = [
+      { timeSec: 24 / sampleRate, strength: 1 },
+      { timeSec: 40 / sampleRate, strength: 1 },
+    ];
+    const { data } = await paintShift(NEUTRAL_ALGORITHM, onsets, { beats: -0.25, semis: 0 }, rampSpec, 2);
+
+    // Band 0 has the tightest lock window, so it shows the sharpest artefacts.
+    const read = (f: number): number => ((data[f * 4] - 0.1) / 0.8) * (numFrames - 1);
+    const slope = (f: number): number => read(f + 1) - read(f);
+
+    for (let f = 1; f <= 61; f++) {
+      expect(slope(f)).toBeGreaterThan(-0.05);
+      expect(slope(f)).toBeLessThan(1.3);
+    }
+
+    // Source onsets at frames 24 and 40 map to dest 16 and 48; the rigid
+    // zones around them are capped at 4 frames each, so the middle of the
+    // segment must run at one constant slope.
+    const middle: number[] = [];
+    for (let f = 22; f <= 41; f++) middle.push(slope(f));
+    expect(Math.max(...middle) - Math.min(...middle)).toBeLessThan(0.12);
   });
 
   it("leaves tonal content with no onset exactly as the plain rule does", async () => {

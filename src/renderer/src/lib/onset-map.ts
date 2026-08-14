@@ -5,14 +5,15 @@ import { ClampToEdgeWrapping, DataTexture, FloatType, NearestFilter, RGBAFormat 
  * and reports every plausible peak with a raw salience and no threshold; this
  * is where the file's sensitivity decides which of them count, and where the
  * survivors are baked into a 1-row float texture mapping any time position to
- * its nearest onset: R = onset time in seconds, G = 1 where an onset exists,
- * B = how loud the event is 0..1 (A unused). Transient-aware effects re-anchor
- * phase at the mapped onset with a single texture fetch.
+ * its onset neighbourhood: R = nearest onset time in seconds, G = 1 where an
+ * onset exists, B = the previous onset time (at or before the position, −1
+ * when none), A = the next onset time (−1 when none). Transient-aware effects
+ * re-anchor phase at the nearest onset, and the transform's rigid transient
+ * re-read spans the stretch between the two neighbours, all from one fetch.
  *
  * The cutoff is hard: an onset either counts or it does not, and one that
  * counts is re-anchored in full whether it is a kick or a ghost note — the
  * point of the treatment is that the moment is an attack, not that it is loud.
- * The level only sets how brightly the marker is drawn.
  */
 
 export type Onset = { timeSec: number; strength: number };
@@ -131,26 +132,29 @@ export function spliceOnsets(
 }
 
 /**
- * Bakes a nearest-onset lookup row. Onsets must be sorted by time, which is how
- * the detector reports them.
+ * Bakes the onset-neighbourhood lookup row. Onsets must be sorted by time,
+ * which is how the detector reports them.
  */
 export function bakeOnsetTexture(onsets: Onset[], durationSec: number): DataTexture {
   const width = Math.max(1, Math.min(MAX_TEX_WIDTH, Math.ceil(durationSec / BIN_SEC)));
   const data = new Float32Array(width * 4);
 
   if (onsets.length > 0) {
-    let cursor = 0;
+    let prev = -1;
     for (let x = 0; x < width; x++) {
       const t = ((x + 0.5) / width) * durationSec;
-      while (
-        cursor < onsets.length - 1 &&
-        Math.abs(onsets[cursor + 1].timeSec - t) <= Math.abs(onsets[cursor].timeSec - t)
-      ) {
-        cursor++;
-      }
-      data[x * 4] = onsets[cursor].timeSec;
+      while (prev < onsets.length - 1 && onsets[prev + 1].timeSec <= t) prev++;
+      const prevTime = prev >= 0 ? onsets[prev].timeSec : -1;
+      const nextTime = prev + 1 < onsets.length ? onsets[prev + 1].timeSec : -1;
+      // Nearest of the two neighbours; a tie goes to the later one.
+      let nearest: number;
+      if (prevTime < 0) nearest = nextTime;
+      else if (nextTime < 0) nearest = prevTime;
+      else nearest = nextTime - t <= t - prevTime ? nextTime : prevTime;
+      data[x * 4] = nearest;
       data[x * 4 + 1] = 1;
-      data[x * 4 + 2] = onsets[cursor].strength;
+      data[x * 4 + 2] = prevTime;
+      data[x * 4 + 3] = nextTime;
     }
   }
 

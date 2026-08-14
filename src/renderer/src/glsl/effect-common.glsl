@@ -630,21 +630,27 @@ vec4 getTransformedSampleNeutralish(vec2 sourceUv, vec2 destUv, float scaleX, fl
 // zero so an aligned read keeps phaseGain = 1 and a zero re-anchor exactly.
 const float BAND_FRAC_DEADZONE = 1e-3;
 
+// Physical time stretch of a move. Callers pass scaleX in the shared map
+// convention (dest→source UV slope = sourceTimeScale / scaleX), and the two
+// files' UV axes can cover different durations, so the read slope in seconds
+// is (sourceTimeScale / scaleX) · T_src / T_dest; this returns its inverse.
+// For a same-file transform it reduces to scaleX exactly; for a paste between
+// files of different lengths at equal tempo it reduces to 1, because such a
+// paste moves content without stretching it.
+float physicalTimeScale(float scaleX) {
+  float T_src  = max(sourceFrameCount - 1.0, 1.0) / max(sourceSampleRate, 1e-6);
+  float T_dest = max(destFrameCount - 1.0, 1.0) / max(destSampleRate, 1e-6);
+  return scaleX * T_dest / (max(sourceTimeScale, 1e-6) * T_src);
+}
+
 // The plain phase rule on its own, so algorithm 6 can blend against it without
 // a second copy of the maths. Returns (left, right), and reports the multiplier
 // it applied to the stored phase — 1 means the stored phase came through
 // untouched, anything else means it was rescaled.
 vec2 neutralPhase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 magPhase, out float phaseGain) {
-  // Physical time stretch. Callers pass scaleX in the shared map convention
-  // (dest→source UV slope = sourceTimeScale / scaleX), and the two files' UV
-  // axes can cover different durations, so the read slope in seconds is
-  // (sourceTimeScale / scaleX) · T_src / T_dest. The phase rule needs its
-  // inverse. For a same-file transform this reduces to scaleX exactly; for a
-  // paste between files of different lengths at equal tempo it reduces to 1,
-  // because such a paste moves content without stretching it.
   float T_src  = max(sourceFrameCount - 1.0, 1.0) / max(sourceSampleRate, 1e-6);
   float T_dest = max(destFrameCount - 1.0, 1.0) / max(destSampleRate, 1e-6);
-  float scaleXPhys = scaleX * T_dest / (max(sourceTimeScale, 1e-6) * T_src);
+  float scaleXPhys = physicalTimeScale(scaleX);
 
   float signX = scaleXPhys < 0.0 ? -1.0 : 1.0;
   float signY = scaleY < 0.0 ? -1.0 : 1.0;
@@ -744,9 +750,24 @@ vec4 getTransformedSampleNeutralPlain(vec2 sourceUv, vec2 destUv, float scaleX, 
  * mod 2π here. parity is the move's stored-phase conjugation (signX·signY):
  * a reversed or pitch-flipped move transports the conjugated deviation, so a
  * reversed attack lands as its own mirror image instead of a forward click.
+ *
+ * A physical stretch also smears each band's attack skirt to |S| times its
+ * width — low bands sweep in early and die late, a chirp around every hit. So
+ * the transport also returns a read-position warp: a piecewise map that runs
+ * at slope ±1 in physical seconds inside a support-sized window around each
+ * onset and at one uniform slope across the rest of the segment between
+ * onsets. The transient keeps its own duration, the segment absorbs the
+ * stretch evenly, and every band's read meets the segment boundaries exactly,
+ * so nothing tears where the nearest onset changes.
  */
 const float ONSET_SUPPORT_GAIN = 0.7;
 const float ONSET_SIGMA_FLOOR  = 0.002;
+// Physical stretch below which the rigid re-read stays off, so a move that
+// does not stretch (shift, reversal, cross-file paste at equal tempo) keeps
+// its read position bit-exactly.
+const float ONSET_RIGID_DEADZONE = 1e-4;
+// Rigid half-width around an onset, in units of the band's lock window sigma.
+const float ONSET_RIGID_SUPPORT = 1.5;
 
 // The stored coefficient nearest in time, rounded rather than floored. Reading
 // the phase at an attack must not fall back to the silent coefficient before
@@ -857,12 +878,13 @@ float reanchorTimeShift(vec2 sourceUv, float phase, float freqHz, float dtSec) {
   return phase + w * contentAdvance(0.0, freqHz, dtSec);
 }
 
-void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, float parity, out float w, out float anchor) {
+void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, float parity,
+                    out float w, out float anchor, out float warpDeltaUvX) {
   float fSrc  = max(getSourceMetadata(sourceUv).a, 1e-6);
   float fDest = max(getDestMetadata(destUv).a, 1e-6);
 
   float tSrcSec = sourceUv.x * sourceFrameCount / max(sourceSampleRate, 1e-6);
-  vec2 onset = texture(sourceOnsetTex, vec2(sourceUv.x, 0.5)).rg;
+  vec4 onset = texture(sourceOnsetTex, vec2(sourceUv.x, 0.5));
 
   // Lock window matched to the SOURCE band's Gabor support — the width of the
   // attack ridge in the transported data. A dest-support window would cohere
@@ -879,6 +901,44 @@ void onsetTransport(vec2 sourceUv, vec2 destUv, float scaleX, float parity, out 
   float tOnsetDestSec = (destUv.x + deltaDestUv) * destFrameCount / max(destSampleRate, 1e-6);
 
   anchor = -TWO_PI * fDest * tOnsetDestSec + parity * TWO_PI * fSrc * onset.x;
+
+  // Rigid transient re-read: between two onsets the read map is piecewise —
+  // slope ±1 in physical seconds inside a support-sized window around each
+  // onset, one uniform slope across the rest of the segment. Every band's
+  // read agrees at both segment boundaries, so neighbouring segments join
+  // with no tear. A boundary with no onset (file edge) gets a zero-width
+  // rigid zone.
+  warpDeltaUvX = 0.0;
+  float scaleXPhys = physicalTimeScale(scaleX);
+  if (onset.y > 0.0 && abs(abs(scaleXPhys) - 1.0) > ONSET_RIGID_DEADZONE) {
+    float durSec = sourceFrameCount / max(sourceSampleRate, 1e-6);
+    float prevT = onset.z < 0.0 ? 0.0 : onset.z;
+    float nextT = onset.w < 0.0 ? durSec : onset.w;
+    // Dest times of the segment boundaries, through the same x-affine as the
+    // anchor above.
+    float destPerSrc = (sourceSampleRate / max(sourceFrameCount, 1.0)) * (scaleX / max(sourceTimeScale, 1e-6))
+                     * (destFrameCount / max(destSampleRate, 1e-6));
+    float tDestSec = destUv.x * destFrameCount / max(destSampleRate, 1e-6);
+    float destPrev = tDestSec + (prevT - tSrcSec) * destPerSrc;
+    float destNext = tDestSec + (nextT - tSrcSec) * destPerSrc;
+    float segLen = max(nextT - prevT, 1e-6);
+    float destSpan = max(abs(destNext - destPrev), 1e-6);
+    float rigidCap = 0.25 * min(segLen, destSpan);
+    float rPrev = onset.z < 0.0 ? 0.0 : min(ONSET_RIGID_SUPPORT * sigma, rigidCap);
+    float rNext = onset.w < 0.0 ? 0.0 : min(ONSET_RIGID_SUPPORT * sigma, rigidCap);
+    float dir = destNext >= destPrev ? 1.0 : -1.0;
+    float xi = clamp((tDestSec - destPrev) * dir, 0.0, destSpan);
+    float readSec;
+    if (xi <= rPrev) {
+      readSec = prevT + xi;
+    } else if (xi >= destSpan - rNext) {
+      readSec = nextT - (destSpan - xi);
+    } else {
+      float mid = (segLen - rPrev - rNext) / max(destSpan - rPrev - rNext, 1e-6);
+      readSec = prevT + rPrev + mid * (xi - rPrev);
+    }
+    warpDeltaUvX = (readSec - tSrcSec) * sourceSampleRate / max(sourceFrameCount, 1.0);
+  }
 }
 
 // How far the multiplier applied to the stored phase has to sit from 1 before
@@ -911,6 +971,18 @@ const float NOISE_REPLACE_DEADZONE = 1.0e-5;
  * detection and the tonality estimate above both read differences of it.
  */
 vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
+  // Stored-phase conjugation of this move (see the phase primitives block):
+  // multiplies every transported stored-phase term below, never carrier terms.
+  float parity = (scaleX < 0.0 ? -1.0 : 1.0) * (scaleY < 0.0 ? -1.0 : 1.0);
+
+  // Lock weight, phase anchor, and rigid re-read for the nearest onset, all
+  // decided at the stretch-mapped read position. The warp applies before any
+  // sampling, so magnitude and the transported deviation both come from the
+  // rigid position.
+  float w, anchor, warpDeltaUvX;
+  onsetTransport(wrapUv(sourceUv), destUv, scaleX, parity, w, anchor, warpDeltaUvX);
+  sourceUv.x += warpDeltaUvX;
+
   vec2 wrappedSourceUv = wrapUv(sourceUv);
   vec4 magPhase = sampleSourceInterp(wrappedSourceUv);
 
@@ -919,10 +991,6 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
 
   float baseL = neutral.x;
   float baseR = neutral.y;
-
-  // Stored-phase conjugation of this move (see the phase primitives block):
-  // multiplies every transported stored-phase term below, never carrier terms.
-  float parity = (scaleX < 0.0 ? -1.0 : 1.0) * (scaleY < 0.0 ? -1.0 : 1.0);
 
   // Cross-resolution resample (see the XRES block above). Reshapes magnitude
   // and, where the content is noise, the phase; every phase edit is applied as
@@ -1029,8 +1097,6 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
     baseR += noise * unwrapPhase(randR - baseR);
   }
 
-  float w, anchor;
-  onsetTransport(wrappedSourceUv, destUv, scaleX, parity, w, anchor);
   // The deviation being transported comes from the nearest stored coefficient,
   // not the interpolated phase: interpolating phase across an attack averages
   // two atoms that disagree, which is the whole reason a moved transient smears

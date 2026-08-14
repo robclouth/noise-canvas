@@ -196,7 +196,7 @@ describe("packOnsetState", () => {
 });
 
 describe("bakeOnsetTexture", () => {
-  it("maps every position to the nearest onset", () => {
+  it("maps every position to its nearest, previous, and next onsets", () => {
     const texture = bakeOnsetTexture(
       [
         { timeSec: 0.2, strength: 1 },
@@ -206,18 +206,24 @@ describe("bakeOnsetTexture", () => {
     );
     const data = texture.image.data as Float32Array;
     const width = texture.image.width;
-    const at = (t: number): { timeSec: number; present: number; strength: number } => {
+    const at = (t: number): { nearest: number; present: number; prev: number; next: number } => {
       const x = Math.min(width - 1, Math.floor(t * width));
-      return { timeSec: data[x * 4], present: data[x * 4 + 1], strength: data[x * 4 + 2] };
+      return { nearest: data[x * 4], present: data[x * 4 + 1], prev: data[x * 4 + 2], next: data[x * 4 + 3] };
     };
 
-    expect(at(0.05).timeSec).toBeCloseTo(0.2, 5);
-    expect(at(0.45).timeSec).toBeCloseTo(0.2, 5);
-    // Halfway between the two, the later one takes over.
-    expect(at(0.55).timeSec).toBeCloseTo(0.8, 5);
-    expect(at(0.95).timeSec).toBeCloseTo(0.8, 5);
+    expect(at(0.05).nearest).toBeCloseTo(0.2, 5);
+    expect(at(0.05).prev).toBe(-1);
+    expect(at(0.05).next).toBeCloseTo(0.2, 5);
+    expect(at(0.45).nearest).toBeCloseTo(0.2, 5);
+    expect(at(0.45).prev).toBeCloseTo(0.2, 5);
+    expect(at(0.45).next).toBeCloseTo(0.8, 5);
+    // Halfway between the two, the later one takes over as nearest.
+    expect(at(0.55).nearest).toBeCloseTo(0.8, 5);
+    expect(at(0.55).prev).toBeCloseTo(0.2, 5);
+    expect(at(0.95).nearest).toBeCloseTo(0.8, 5);
+    expect(at(0.95).prev).toBeCloseTo(0.8, 5);
+    expect(at(0.95).next).toBe(-1);
     expect(at(0.95).present).toBe(1);
-    expect(at(0.95).strength).toBeCloseTo(0.5, 5);
     texture.dispose();
   });
 
