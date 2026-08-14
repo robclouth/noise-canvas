@@ -23,6 +23,8 @@ export type ModulatableParameterKey =
   | "brushSkewTime"
   | "brushCurvePitch"
   | "brushSkewPitch"
+  | "sourceTimeOffset"
+  | "sourcePitchOffset"
   | "dynamicsThresholdDb"
   | "dynamicsUpperRatio"
   | "dynamicsLowerRatio"
