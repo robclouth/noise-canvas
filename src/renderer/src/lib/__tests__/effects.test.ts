@@ -894,7 +894,7 @@ describe("Effects", () => {
         const lines = result.destBandMeanMag.map((actual, band) => {
           return `  band ${band}: actual=${actual.toFixed(4)}  expected=${expectedFor(band).toFixed(4)}`;
         });
-        // eslint-disable-next-line no-console
+
         console.log(`per-band mag (MSE=${mse.toFixed(4)}):\n${lines.join("\n")}`);
       }
       expect(mse).toBeLessThan(0.01);
@@ -1047,7 +1047,6 @@ describe("Effects", () => {
         }
       }
       if (stray.length > 0) {
-        // eslint-disable-next-line no-console
         console.log(`unexpected non-zero pixels (one-bin shift would appear here):`, stray);
       }
       expect(stray).toEqual([]);

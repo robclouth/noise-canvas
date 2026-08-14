@@ -181,6 +181,5 @@ export function useShortcuts() {
       window.removeEventListener("keydown", handleKeyDown, { capture: true });
       window.removeEventListener("keyup", handleKeyUp, { capture: true });
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }
