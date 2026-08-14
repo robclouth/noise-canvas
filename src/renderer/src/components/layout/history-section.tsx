@@ -6,7 +6,7 @@ import { openConfirm } from "@renderer/lib/modals";
 import { getHistoryManager, type HistoryManager, type HistoryNode } from "@renderer/lib/history-manager";
 import { WIDGET_INPUT_HEIGHT } from "@renderer/lib/ui-density";
 import { helpProps } from "@renderer/lib/ui-controls";
-import { MoreVertical, Redo2, Star, Undo2 } from "lucide-react";
+import { ChevronDown, ChevronRight, GitBranch, MoreVertical, Redo2, Star, Undo2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Section } from "../section";
 
@@ -106,6 +106,179 @@ function layoutTree(nodes: Record<string, HistoryNode>): LayoutResult {
   return { rows, laneCount, passThroughLanes, diagonals };
 }
 
+// ---- Branch collapsing & run merging ----
+
+const MERGE_RUN_MIN_LENGTH = 3;
+
+interface NodeMeta {
+  kind: "branch" | "branchHead" | "run" | "runHead";
+  count?: number;
+  branchRootId?: string;
+  latestLabel?: string;
+  hasFavorite?: boolean;
+  runNodeIds?: string[];
+}
+
+// The path the user is actually on: ancestors of the current node, plus
+// whichever child was most recently active at each fork going forward. Any
+// other child at a fork is a branch the user tried and left.
+function computeSpine(nodes: Record<string, HistoryNode>, currentId: string): Set<string> {
+  const spine = new Set<string>();
+  let id: string | null = currentId;
+  while (id && nodes[id]) {
+    spine.add(id);
+    id = nodes[id].parentId;
+  }
+  id = nodes[currentId]?.lastChildId ?? null;
+  while (id && nodes[id]) {
+    spine.add(id);
+    id = nodes[id].lastChildId;
+  }
+  return spine;
+}
+
+function branchRootIdOf(
+  nodeId: string,
+  nodes: Record<string, HistoryNode>,
+  spineIds: Set<string>,
+  cache: Map<string, string>,
+): string {
+  const cached = cache.get(nodeId);
+  if (cached) return cached;
+  const parentId = nodes[nodeId].parentId;
+  const result = !parentId || spineIds.has(parentId) ? nodeId : branchRootIdOf(parentId, nodes, spineIds, cache);
+  cache.set(nodeId, result);
+  return result;
+}
+
+function collectSubtree(rootId: string, nodes: Record<string, HistoryNode>): HistoryNode[] {
+  const out: HistoryNode[] = [];
+  const stack = [rootId];
+  while (stack.length) {
+    const id = stack.pop()!;
+    const n = nodes[id];
+    if (!n) continue;
+    out.push(n);
+    stack.push(...n.childIds);
+  }
+  return out;
+}
+
+// Builds a reduced tree for display: branches the user isn't on collapse into
+// a single placeholder row (until expanded), and runs of consecutive nodes
+// with the same label collapse into one row showing a count (until
+// expanded). Both collapse in the display only — the real manifest, and undo
+// granularity, are untouched.
+function buildVisibleTree(
+  nodes: Record<string, HistoryNode>,
+  currentId: string,
+  expandedBranches: Set<string>,
+  expandedRuns: Set<string>,
+): { tree: Record<string, HistoryNode>; meta: Map<string, NodeMeta> } {
+  const spineIds = computeSpine(nodes, currentId);
+  const branchRootCache = new Map<string, string>();
+  const meta = new Map<string, NodeMeta>();
+  const tree: Record<string, HistoryNode> = {};
+
+  const isVisible = (id: string): boolean =>
+    spineIds.has(id) || expandedBranches.has(branchRootIdOf(id, nodes, spineIds, branchRootCache));
+
+  for (const node of Object.values(nodes)) {
+    if (!isVisible(node.id)) continue;
+    const childIds: string[] = [];
+    for (const childId of node.childIds) {
+      if (isVisible(childId)) {
+        childIds.push(childId);
+        if (!spineIds.has(childId) && branchRootIdOf(childId, nodes, spineIds, branchRootCache) === childId) {
+          meta.set(childId, { kind: "branchHead", branchRootId: childId });
+        }
+        continue;
+      }
+      // childId heads a branch the user left. Represent the whole subtree as
+      // one placeholder row attached where it diverged.
+      const placeholderId = `branch:${childId}`;
+      childIds.push(placeholderId);
+      const subtree = collectSubtree(childId, nodes);
+      const latest = subtree.reduce((a, b) => (b.timestamp > a.timestamp ? b : a));
+      tree[placeholderId] = {
+        ...nodes[childId],
+        id: placeholderId,
+        parentId: node.id,
+        childIds: [],
+        favorited: false,
+      };
+      meta.set(placeholderId, {
+        kind: "branch",
+        count: subtree.length,
+        branchRootId: childId,
+        latestLabel: latest.customLabel ?? latest.label,
+        hasFavorite: subtree.some((n) => n.favorited),
+      });
+    }
+    tree[node.id] = { ...node, childIds };
+  }
+
+  const labelOf = (n: HistoryNode) => n.customLabel ?? n.label;
+  const isPlaceholder = (id: string) => id.startsWith("branch:");
+  const mergeable = (n: HistoryNode) => !isPlaceholder(n.id) && n.id !== currentId && !n.favorited;
+  const isTopOfChain = (node: HistoryNode): boolean => {
+    if (node.childIds.length !== 1) return true;
+    const child = tree[node.childIds[0]];
+    return !child || !mergeable(child) || labelOf(child) !== labelOf(node);
+  };
+
+  for (const node of Object.values(tree)) {
+    if (!tree[node.id] || !mergeable(node) || !isTopOfChain(node)) continue;
+    const chain: HistoryNode[] = [node];
+    let cur = node;
+    while (true) {
+      const parent: HistoryNode | undefined = cur.parentId ? tree[cur.parentId] : undefined;
+      if (!parent || !mergeable(parent) || parent.childIds.length !== 1 || labelOf(parent) !== labelOf(cur)) break;
+      chain.push(parent);
+      cur = parent;
+    }
+    if (chain.length < MERGE_RUN_MIN_LENGTH) continue;
+
+    if (expandedRuns.has(node.id)) {
+      meta.set(node.id, { kind: "runHead", count: chain.length, runNodeIds: chain.map((n) => n.id) });
+      continue;
+    }
+
+    const oldest = chain[chain.length - 1];
+    const newest = tree[node.id];
+    newest.parentId = oldest.parentId;
+    if (oldest.parentId && tree[oldest.parentId]) {
+      const parent = tree[oldest.parentId];
+      parent.childIds = parent.childIds.map((id) => (id === oldest.id ? newest.id : id));
+    }
+    for (let i = 1; i < chain.length; i++) delete tree[chain[i].id];
+    meta.set(newest.id, { kind: "run", count: chain.length, runNodeIds: chain.map((n) => n.id) });
+  }
+
+  return { tree, meta };
+}
+
+function isDescendantOrSelf(rootId: string, targetId: string, nodes: Record<string, HistoryNode>): boolean {
+  let id: string | null = targetId;
+  while (id) {
+    if (id === rootId) return true;
+    id = nodes[id]?.parentId ?? null;
+  }
+  return false;
+}
+
+function isRunMember(repId: string, targetId: string, nodes: Record<string, HistoryNode>): boolean {
+  const labelOf = (n: HistoryNode) => n.customLabel ?? n.label;
+  let cur: HistoryNode | undefined = nodes[repId];
+  while (cur) {
+    if (cur.id === targetId) return true;
+    const parent: HistoryNode | undefined = cur.parentId ? nodes[cur.parentId] : undefined;
+    if (!parent || parent.childIds.length !== 1 || labelOf(parent) !== labelOf(cur)) break;
+    cur = parent;
+  }
+  return false;
+}
+
 // ---- Time formatter ----
 
 function formatRelative(ts: number, now: number): string {
@@ -157,12 +330,20 @@ interface HistoryRowProps {
   synthesizing: boolean;
   now: number;
   isExtension: boolean;
+  meta: NodeMeta | undefined;
   onNavigate: (nodeId: string) => void;
   onRename: (nodeId: string, label: string) => void;
   onDeleteSubtree: (nodeId: string) => void;
   onExportBranch: (nodeId: string) => void;
   onExportBranchToLive: (nodeId: string) => void;
   onToggleFavorite: (nodeId: string) => void;
+  onToggleBranch: (branchRootId: string) => void;
+  onToggleRun: (nodeId: string) => void;
+  // Expanding a collapsed row reflows the list under the pointer, so the second
+  // click of a real double-click can land on a different row entirely. Set true
+  // right after a click-driven expand; every row's double-click checks it first
+  // and swallows itself rather than acting on whatever it landed on.
+  suppressDblClickRef: React.RefObject<boolean>;
 }
 
 const HistoryRow = memo(function HistoryRow({
@@ -174,14 +355,24 @@ const HistoryRow = memo(function HistoryRow({
   synthesizing,
   now,
   isExtension,
+  meta,
   onNavigate,
   onRename,
   onDeleteSubtree,
   onExportBranch,
   onExportBranchToLive,
   onToggleFavorite,
+  onToggleBranch,
+  onToggleRun,
+  suppressDblClickRef,
 }: HistoryRowProps) {
   const { node, lane } = row;
+  const isBranchPlaceholder = meta?.kind === "branch";
+  const isBranchHead = meta?.kind === "branchHead";
+  const isRun = meta?.kind === "run";
+  const isRunHead = meta?.kind === "runHead";
+  const isCollapsedGroup = isBranchPlaceholder || isRun;
+  const runCount = isRun ? meta.count : undefined;
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(node.customLabel ?? node.label);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -290,7 +481,9 @@ const HistoryRow = memo(function HistoryRow({
           cx={dotX}
           cy={rowCenterY}
           r={DOT_RADIUS}
-          fill={isCurrent ? "var(--mantine-color-orange-5)" : "var(--mantine-color-dark-2)"}
+          fill={isCollapsedGroup ? "none" : isCurrent ? "var(--mantine-color-orange-5)" : "var(--mantine-color-dark-2)"}
+          stroke={isCollapsedGroup ? "var(--mantine-color-dark-2)" : undefined}
+          strokeWidth={isCollapsedGroup ? 1.2 : undefined}
         />
       </svg>
 
@@ -305,8 +498,26 @@ const HistoryRow = memo(function HistoryRow({
         <Menu.Target>
           <UnstyledButton
             {...helpProps("history-entry")}
-            onClick={() => !editing && !menuOpen && onNavigate(node.id)}
-            onDoubleClick={() => !editing && setEditing(true)}
+            onClick={(e) => {
+              if (editing || menuOpen || e.detail > 1) return;
+              if (isBranchPlaceholder || isRun) {
+                suppressDblClickRef.current = true;
+                setTimeout(() => {
+                  suppressDblClickRef.current = false;
+                }, 500);
+                if (isBranchPlaceholder) onToggleBranch(meta!.branchRootId!);
+                else onToggleRun(node.id);
+                return;
+              }
+              onNavigate(node.id);
+            }}
+            onDoubleClick={() => {
+              if (suppressDblClickRef.current) {
+                suppressDblClickRef.current = false;
+                return;
+              }
+              if (!editing && !meta) setEditing(true);
+            }}
             onContextMenu={(e: React.MouseEvent) => {
               e.preventDefault();
               openMenuFromContext();
@@ -324,9 +535,36 @@ const HistoryRow = memo(function HistoryRow({
             }}
           >
             <Group gap={4} wrap="nowrap" align="center">
+              {isCollapsedGroup && (
+                <ChevronRight size={10} color="var(--mantine-color-dark-2)" style={{ flexShrink: 0 }} />
+              )}
+              {(isBranchHead || isRunHead) && (
+                <UnstyledButton
+                  {...helpProps("history-collapse")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isBranchHead) onToggleBranch(meta!.branchRootId!);
+                    else onToggleRun(node.id);
+                  }}
+                  style={{ display: "flex", flexShrink: 0 }}
+                >
+                  <ChevronDown size={10} color="var(--mantine-color-dark-2)" />
+                </UnstyledButton>
+              )}
+              {(isBranchPlaceholder || isBranchHead) && (
+                <GitBranch size={10} color="var(--mantine-color-dark-2)" style={{ flexShrink: 0 }} />
+              )}
               {node.favorited && (
                 <Star
                   size={10}
+                  color="var(--mantine-color-yellow-5)"
+                  fill="var(--mantine-color-yellow-5)"
+                  style={{ flexShrink: 0 }}
+                />
+              )}
+              {isBranchPlaceholder && meta?.hasFavorite && (
+                <Star
+                  size={9}
                   color="var(--mantine-color-yellow-5)"
                   fill="var(--mantine-color-yellow-5)"
                   style={{ flexShrink: 0 }}
@@ -363,10 +601,15 @@ const HistoryRow = memo(function HistoryRow({
                   size="xs"
                   truncate
                   fw={isCurrent ? 600 : 400}
-                  c={isCurrent ? undefined : "dark.1"}
+                  c={isBranchPlaceholder ? "dark.2" : isCurrent ? undefined : "dark.1"}
                   style={{ flex: 1, minWidth: 0 }}
                 >
-                  {node.customLabel ?? node.label}
+                  {isBranchPlaceholder ? meta!.latestLabel : (node.customLabel ?? node.label)}
+                </Text>
+              )}
+              {(isBranchPlaceholder || runCount) && (
+                <Text size="10px" c="dimmed" style={{ flexShrink: 0 }}>
+                  ×{isBranchPlaceholder ? meta!.count : runCount}
                 </Text>
               )}
               {showSpinner && (
@@ -383,26 +626,58 @@ const HistoryRow = memo(function HistoryRow({
           </UnstyledButton>
         </Menu.Target>
         <Menu.Dropdown>
-          <Menu.Item onClick={() => onToggleFavorite(node.id)}>{node.favorited ? "Unfavorite" : "Favorite"}</Menu.Item>
-          <Menu.Item onClick={() => setEditing(true)}>Rename</Menu.Item>
-          <Menu.Item onClick={() => onExportBranch(node.id)}>Export branch…</Menu.Item>
-          {isExtension && <Menu.Item onClick={() => onExportBranchToLive(node.id)}>Export branch to Live</Menu.Item>}
-          <Menu.Divider />
-          <Menu.Item
-            color="red"
-            disabled={node.parentId === null}
-            onClick={() => {
-              openConfirm({
-                title: "Delete branch",
-                message: "Delete this node and all of its descendants? This cannot be undone.",
-                confirmLabel: "Delete",
-                danger: true,
-                onConfirm: () => onDeleteSubtree(node.id),
-              });
-            }}
-          >
-            Delete branch
-          </Menu.Item>
+          {isBranchPlaceholder ? (
+            <>
+              <Menu.Item onClick={() => onToggleBranch(meta!.branchRootId!)}>Expand</Menu.Item>
+              <Menu.Item onClick={() => onExportBranch(meta!.branchRootId!)}>Export branch…</Menu.Item>
+              {isExtension && (
+                <Menu.Item onClick={() => onExportBranchToLive(meta!.branchRootId!)}>Export branch to Live</Menu.Item>
+              )}
+              <Menu.Divider />
+              <Menu.Item
+                color="red"
+                onClick={() => {
+                  const targetId = meta!.branchRootId!;
+                  openConfirm({
+                    title: "Delete branch",
+                    message: "Delete this branch and all of its descendants? This cannot be undone.",
+                    confirmLabel: "Delete",
+                    danger: true,
+                    onConfirm: () => onDeleteSubtree(targetId),
+                  });
+                }}
+              >
+                Delete branch
+              </Menu.Item>
+            </>
+          ) : (
+            <>
+              <Menu.Item onClick={() => onToggleFavorite(node.id)}>
+                {node.favorited ? "Unfavorite" : "Favorite"}
+              </Menu.Item>
+              <Menu.Item onClick={() => setEditing(true)}>Rename</Menu.Item>
+              <Menu.Item onClick={() => onExportBranch(node.id)}>Export branch…</Menu.Item>
+              {isExtension && (
+                <Menu.Item onClick={() => onExportBranchToLive(node.id)}>Export branch to Live</Menu.Item>
+              )}
+              <Menu.Divider />
+              <Menu.Item
+                color="red"
+                disabled={node.parentId === null}
+                onClick={() => {
+                  openConfirm({
+                    title: "Delete branch",
+                    message: "Delete this node and all of its descendants? This cannot be undone.",
+                    confirmLabel: "Delete",
+                    danger: true,
+                    onConfirm: () => onDeleteSubtree(node.id),
+                  });
+                }}
+              >
+                Delete branch
+              </Menu.Item>
+            </>
+          )}
         </Menu.Dropdown>
       </Menu>
     </Group>
@@ -438,13 +713,54 @@ export function HistorySection() {
     setDiskSize(n);
   }, [manager]);
 
-  const layout = useMemo(
-    () => (manifest ? layoutTree(manifest.nodes) : null),
+  const [expandedBranches, setExpandedBranches] = useState<Set<string>>(() => new Set());
+  const [expandedRuns, setExpandedRuns] = useState<Set<string>>(() => new Set());
+  const suppressDblClickRef = useRef(false);
+  useEffect(() => {
+    setExpandedBranches(new Set());
+    setExpandedRuns(new Set());
+  }, [manager]);
+  useEffect(() => {
+    if (!manifest) return;
+    const currentId = manifest.currentId;
+    const nodes = manifest.nodes;
+    setExpandedBranches((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set([...prev].filter((id) => isDescendantOrSelf(id, currentId, nodes)));
+      return next.size === prev.size ? prev : next;
+    });
+    setExpandedRuns((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set([...prev].filter((id) => isRunMember(id, currentId, nodes)));
+      return next.size === prev.size ? prev : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manifest?.currentId]);
+  const onToggleBranch = useCallback((branchRootId: string) => {
+    setExpandedBranches((prev) => {
+      const next = new Set(prev);
+      if (next.has(branchRootId)) next.delete(branchRootId);
+      else next.add(branchRootId);
+      return next;
+    });
+  }, []);
+  const onToggleRun = useCallback((nodeId: string) => {
+    setExpandedRuns((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  }, []);
+
+  const visibleTree = useMemo(
+    () => (manifest ? buildVisibleTree(manifest.nodes, manifest.currentId, expandedBranches, expandedRuns) : null),
     // `manifest` is mutated in place; `version` is what actually changes on
     // tree mutation, so include it as an explicit invalidation dep.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [manifest, version],
+    [manifest, version, expandedBranches, expandedRuns],
   );
+  const layout = useMemo(() => (visibleTree ? layoutTree(visibleTree.tree) : null), [visibleTree]);
   const currentScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     currentScrollRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -616,12 +932,16 @@ export function HistorySection() {
                   synthesizing={isSynthesizing}
                   now={now}
                   isExtension={host.env.isExtension}
+                  meta={visibleTree?.meta.get(row.node.id)}
                   onNavigate={onNavigate}
                   onRename={onRename}
                   onDeleteSubtree={onDeleteSubtree}
                   onExportBranch={onExportBranch}
                   onExportBranchToLive={onExportBranchToLive}
                   onToggleFavorite={onToggleFavorite}
+                  onToggleBranch={onToggleBranch}
+                  onToggleRun={onToggleRun}
+                  suppressDblClickRef={suppressDblClickRef}
                 />
               </Box>
             ))}

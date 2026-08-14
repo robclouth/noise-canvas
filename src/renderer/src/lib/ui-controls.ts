@@ -149,6 +149,11 @@ export const UI_CONTROLS = {
     description: "Exports or purges the stored history of this file.",
     manualSection: "history",
   },
+  "history-collapse": {
+    label: "Collapse",
+    description: "Folds this branch's steps back into a single row.",
+    manualSection: "history",
+  },
 
   // Palettes
   "palette-header": {
