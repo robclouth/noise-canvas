@@ -4,6 +4,8 @@ import { openConfirm, openPrompt } from "@renderer/lib/modals";
 import { SECTION_HEADER_FONT } from "@renderer/lib/ui-density";
 import { helpProps } from "@renderer/lib/ui-controls";
 import type { OpenPalette } from "@renderer/store/palettes";
+import type { Brush } from "@renderer/store/types";
+import { SwatchStrip } from "./swatch-strip";
 import { ChevronDown, ChevronRight, MoreVertical } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -51,7 +53,8 @@ function confirmDelete(group: OpenPalette) {
 
 type PaletteHeaderProps = {
   group: OpenPalette;
-  brushCount: number;
+  /** The palette's brushes, shown as a swatch strip while it is folded. */
+  brushes: readonly Brush[];
   dirty: boolean;
   /** False when this is the only palette open, which cannot be closed. */
   closable: boolean;
@@ -62,7 +65,7 @@ type PaletteHeaderProps = {
  * band, an uppercase label and a disclosure arrow rather than a pressable tile
  * with a colour bar.
  */
-export function PaletteHeader({ group, brushCount, dirty, closable }: PaletteHeaderProps) {
+export function PaletteHeader({ group, brushes, dirty, closable }: PaletteHeaderProps) {
   const theme = useMantineTheme();
   const toggle = useStore((state) => state.togglePaletteCollapsed);
   const rename = useStore((state) => state.renameOpenPalette);
@@ -141,9 +144,7 @@ export function PaletteHeader({ group, brushCount, dirty, closable }: PaletteHea
 
       {!editing && (
         <>
-          <Text fz={SECTION_HEADER_FONT} c="dark.2" style={{ flexShrink: 0 }}>
-            {brushCount}
-          </Text>
+          {group.collapsed && <SwatchStrip brushes={brushes} />}
           <Menu withinPortal position="bottom-end" shadow="md">
             <Menu.Target>
               <ActionIcon {...helpProps("palette-menu")} size="xs" variant="subtle" color="gray">

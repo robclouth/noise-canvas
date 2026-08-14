@@ -358,7 +358,7 @@ export function SidebarPanel() {
                     <Stack key={group.id} gap={2}>
                       <PaletteHeader
                         group={group}
-                        brushCount={entries.length}
+                        brushes={entries.map((entry) => entry.brush)}
                         dirty={paletteDirty.get(group.id) ?? false}
                         closable={openPalettes.length > 1}
                       />

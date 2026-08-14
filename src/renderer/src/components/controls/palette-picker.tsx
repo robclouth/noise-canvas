@@ -7,31 +7,7 @@ import type { PaletteBrush, PaletteType } from "@renderer/lib/palette-schema";
 import { useState } from "react";
 import { Tooltip } from "../tooltip";
 import { LIST_ROW_HOST, ListRow, ListRowMenu } from "./list-row";
-
-/** Swatches a strip shows before it runs out of room. */
-const MAX_SWATCHES = 8;
-const SWATCH_WIDTH = 3;
-const SWATCH_HEIGHT = 12;
-
-/** One bar per brush, in the brush's own colour, so a palette reads as a set. */
-function SwatchStrip({ brushes }: { brushes: readonly PaletteBrush[] }) {
-  const theme = useMantineTheme();
-  return (
-    <Group gap={2} wrap="nowrap" style={{ flexShrink: 0 }}>
-      {brushes.slice(0, MAX_SWATCHES).map((brush) => (
-        <Box
-          key={brush.id}
-          style={{
-            width: SWATCH_WIDTH,
-            height: SWATCH_HEIGHT,
-            borderRadius: 1,
-            background: resolveBrushColor(brush.color, theme),
-          }}
-        />
-      ))}
-    </Group>
-  );
-}
+import { SWATCH_WIDTH, SwatchStrip } from "./swatch-strip";
 
 /** Hover contents of a palette row: the brushes it holds, in order. */
 function BrushList({ brushes }: { brushes: readonly PaletteBrush[] }) {
