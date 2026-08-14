@@ -4,6 +4,11 @@ import { openFiles } from "@renderer/store/files";
 import { useEffect, useRef } from "react";
 import { Vector2 } from "three";
 
+export const LOOP_COLOUR = "rgba(255, 255, 255, 0.5)";
+
+/** The loop drag, over the time legend rather than the canvas. */
+export const LOOP_DRAG_COLOUR = "rgba(255, 255, 255, 0.3)";
+
 interface LoopRegionProps {
   fileId: string;
 }
@@ -45,6 +50,10 @@ export const LoopRegion = ({ fileId }: LoopRegionProps) => {
     overlayRef.current.style.display = "block";
     overlayRef.current.style.left = `${clampedLeft * 100}%`;
     overlayRef.current.style.width = `${widthFraction * 100}%`;
+    // An edge scrolled off screen draws no line, so the clamp never reads as a
+    // loop boundary that isn't there.
+    overlayRef.current.style.borderLeftWidth = screenStart.x >= 0 ? "1px" : "0";
+    overlayRef.current.style.borderRightWidth = screenEnd.x <= 1 ? "1px" : "0";
   }, [loopRegion, zoom, offset, fileId, file]);
 
   return (
@@ -54,7 +63,13 @@ export const LoopRegion = ({ fileId }: LoopRegionProps) => {
         position: "absolute",
         top: 0,
         height: "100%",
-        background: "rgba(255, 150, 0, 0.15)",
+        boxSizing: "border-box",
+        borderStyle: "solid",
+        borderColor: LOOP_COLOUR,
+        borderTopWidth: 0,
+        borderBottomWidth: "3px",
+        borderLeftWidth: "1px",
+        borderRightWidth: "1px",
         pointerEvents: "none",
         display: "none",
         zIndex: 10,

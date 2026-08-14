@@ -4,6 +4,7 @@ import { openFiles } from "@renderer/store/files";
 import { memo, useCallback, useEffect, useRef } from "react";
 import { Vector2 } from "three";
 import { screenToZoomed, snapToSwungGridRound, zoomedToScreen } from "../lib/utils";
+import { LOOP_DRAG_COLOUR } from "./loop-region";
 
 interface TimeLegendProps {
   fileId: string;
@@ -219,7 +220,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
           position: "absolute",
           top: 0,
           height: "100%",
-          background: "rgba(255, 150, 0, 0.4)",
+          background: LOOP_DRAG_COLOUR,
           pointerEvents: "none",
           display: "none",
           zIndex: 10,
