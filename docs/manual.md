@@ -89,7 +89,7 @@ This matches human hearing and avoids the artificial "FFT sound," producing more
 
 ### Analysis Resolution
 
-Where a file sits on that trade-off is fixed when it is analyzed, and shown as a badge in its header. Change it with **Resolution** in the Re-analyze dialog. The setting is bands per octave: more bands separate pitches more finely, and each band then needs a longer window to do it, which smears events in time.
+Where a file sits on that trade-off is set when it is analysed, and shown as a badge in its header. The badge is a menu: pick a resolution from it and the file is analysed again at once, which adds a node to its history rather than replacing anything. The setting is bands per octave: more bands separate pitches more finely, and each band then needs a longer window to do it, which smears events in time.
 
 | Badge            | Bands/octave | What it does                                                                                 |
 | ---------------- | ------------ | -------------------------------------------------------------------------------------------- |
@@ -99,7 +99,7 @@ Where a file sits on that trade-off is fixed when it is analyzed, and shown as a
 | **Better Pitch** | 48           | Leans toward pitch, at some cost to attacks.                                                 |
 | **Best Pitch**   | 60           | Finest pitch separation, softest transients. Pads, drones, harmonic work.                    |
 
-The choice affects what edits sound like, not just how the spectrogram looks: a shift or stretch is reconstructed from these bands, so a file analyzed at 12 bands per octave keeps its clicks crisp while one at 60 keeps its harmonics clean.
+The choice affects what edits sound like, not just how the spectrogram looks: a shift or stretch is reconstructed from these bands, so a file analysed at 12 bands per octave keeps its clicks crisp while one at 60 keeps its harmonics clean.
 
 ---
 
@@ -682,7 +682,7 @@ Audio is resynthesised incrementally after every stroke, so what you hear is alw
 
 - **Undo / Redo** (`Cmd/Ctrl+Z`, `Shift+Cmd/Ctrl+Z`).
 - **Restore Original** – reload the unedited file.
-- **Re-analyze File** – regenerate the analysis, optionally at a different resolution (Best Time → Balanced → Best Pitch). This is non-destructive: it adds a node to the history tree rather than replacing it.
+- **Re-analyse File** – regenerate the analysis, optionally at a different resolution (Best Time → Balanced → Best Pitch). This is non-destructive: it adds a node to the history tree rather than replacing it.
 - **Duplicate File** (`Cmd/Ctrl+D`).
 - **Double Length / Half Length** – stretch or shrink the file's length.
 

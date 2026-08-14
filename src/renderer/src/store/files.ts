@@ -61,6 +61,8 @@ export interface FilesState {
   tryCloseFile: (fileId: string) => Promise<void>;
   closeFile: (fileId: string) => void;
   reanalyzeActiveFile: () => Promise<void>;
+  /** Analyse a file again at a new resolution, keeping its audio and history. */
+  reanalyzeFile: (fileId: string, bandsPerOctave: number) => Promise<void>;
   resizeActiveFileLength: (factor: 2 | 0.5) => Promise<void>;
   synthesizeFile: (
     fileId: string,
@@ -2126,85 +2128,87 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     await host.session.apply(renders);
   },
   reanalyzeActiveFile: async () => {
-    const initialState = get();
-    if (!initialState.activeFileId) return;
-    const file = openFiles[initialState.activeFileId];
+    const { activeFileId, bandsPerOctave, reanalyzeFile } = get();
+    if (!activeFileId) return;
 
     openReanalyzePrompt({
-      initialBandsPerOctave: initialState.bandsPerOctave,
-      onConfirm: async (bandsPerOctave) => {
-        const state = get();
-        if (!state.activeFileId) return;
-        const audioBuffer = file?.audioBuffer;
-
-        try {
-          const result = audioBuffer
-            ? await host.analysis.analyseBuffer(audioBuffer, {
-                bandsPerOctave,
-                minFreq: state.minFreq,
-              })
-            : await host.analysis.analyze(file.filePath, {
-                bandsPerOctave,
-                minFreq: state.minFreq,
-              });
-
-          const spectrogramData = {
-            packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-            inverseMap: new Float32Array(
-              result.inverseMap.buffer,
-              result.inverseMap.byteOffset,
-              result.inverseMap.byteLength / 4,
-            ),
-            metadata: new Float32Array(
-              result.metadata.buffer,
-              result.metadata.byteOffset,
-              result.metadata.byteLength / 4,
-            ),
-            textureWidth: result.textureWidth,
-            textureHeight: result.textureHeight,
-            numFrames: result.numFrames,
-            numBands: result.numBands,
-            numChannels: result.numChannels,
-            sampleRate: result.sampleRate,
-            packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-            minFreq: state.minFreq,
-            bandsPerOctave,
-            magnitudeEnergy: result.magnitudeEnergy,
-            synthesisMetadata: {
-              bandOffsets: result.bandOffsets,
-              bandStepLog2s: result.bandStepLog2s,
-              bandLengths: result.bandLengths,
-            },
-          };
-
-          file.spectrogramData = spectrogramData;
-
-          file.rendererRef?.current?.reloadTextures();
-
-          await getHistoryManager(state.activeFileId).addSnapshot({
-            data: spectrogramData.packedData,
-            kind: "reanalyze",
-            label: "Re-analyze",
-            spectrogram: spectrogramData,
-          });
-
-          return set(
-            produce((state: State) => {
-              state.bandsPerOctave = bandsPerOctave;
-              state.filesBandsPerOctave[state.activeFileId!] = bandsPerOctave;
-            }),
-          );
-        } catch (error) {
-          console.error("Error during re-analysis:", error);
-          notifications.show({
-            title: "Re-analysis failed",
-            message: `${error instanceof Error ? error.message : "Unknown error"}`,
-            color: "red",
-          });
-          return;
-        }
-      },
+      initialBandsPerOctave: bandsPerOctave,
+      onConfirm: (chosen) => reanalyzeFile(activeFileId, chosen),
     });
+  },
+  reanalyzeFile: async (fileId, bandsPerOctave) => {
+    const file = openFiles[fileId];
+    if (!file) return;
+    const { minFreq } = get();
+    const audioBuffer = file.audioBuffer;
+
+    set(
+      produce((state: State) => {
+        state.filesLoading[fileId] = "Analysing audio...";
+      }),
+    );
+
+    try {
+      const result = audioBuffer
+        ? await host.analysis.analyseBuffer(audioBuffer, { bandsPerOctave, minFreq })
+        : await host.analysis.analyze(file.filePath, { bandsPerOctave, minFreq });
+
+      const spectrogramData = {
+        packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+        inverseMap: new Float32Array(
+          result.inverseMap.buffer,
+          result.inverseMap.byteOffset,
+          result.inverseMap.byteLength / 4,
+        ),
+        metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
+        textureWidth: result.textureWidth,
+        textureHeight: result.textureHeight,
+        numFrames: result.numFrames,
+        numBands: result.numBands,
+        numChannels: result.numChannels,
+        sampleRate: result.sampleRate,
+        packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
+        minFreq,
+        bandsPerOctave,
+        magnitudeEnergy: result.magnitudeEnergy,
+        synthesisMetadata: {
+          bandOffsets: result.bandOffsets,
+          bandStepLog2s: result.bandStepLog2s,
+          bandLengths: result.bandLengths,
+        },
+      };
+
+      file.spectrogramData = spectrogramData;
+
+      file.rendererRef?.current?.reloadTextures();
+
+      await getHistoryManager(fileId).addSnapshot({
+        data: spectrogramData.packedData,
+        kind: "reanalyze",
+        label: "Re-analyse",
+        spectrogram: spectrogramData,
+      });
+
+      set(
+        produce((state: State) => {
+          state.bandsPerOctave = bandsPerOctave;
+          state.filesBandsPerOctave[fileId] = bandsPerOctave;
+        }),
+      );
+    } catch (error) {
+      console.error("Error during re-analysis:", error);
+      notifications.show({
+        title: "Re-analysis failed",
+        message: `${error instanceof Error ? error.message : "Unknown error"}`,
+        color: "red",
+      });
+    } finally {
+      set(
+        produce((state: State) => {
+          delete state.filesLoading[fileId];
+        }),
+      );
+    }
   },
   resizeActiveFileLength: async (factor: 2 | 0.5) => {
     const state = get();

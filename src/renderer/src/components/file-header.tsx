@@ -2,7 +2,7 @@ import { useStore } from "@/store";
 import { ActionIcon, Badge, Box, Group, Menu, Text } from "@mantine/core";
 import { HelpActionIcon } from "@renderer/components/controls/help-control";
 import { NumboxControl } from "@renderer/components/controls/numbox-control";
-import { DEFAULT_ONSET_SENSITIVITY } from "@renderer/lib/constants";
+import { BANDS_PER_OCTAVE_VALUES, DEFAULT_ONSET_SENSITIVITY } from "@renderer/lib/constants";
 import { openSplitPartsPrompt } from "@renderer/lib/modals";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import { helpProps, type UiControlName } from "@renderer/lib/ui-controls";
@@ -162,11 +162,38 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
           </Box>
         </Tooltip>
         {bandsPerOctave && (
-          <Tooltip help="file-resolution" detail={getResolutionDetail(bandsPerOctave)}>
-            <Badge {...helpProps("file-resolution")} size="sm" variant="light" color="orange" style={{ flexShrink: 0 }}>
-              {getResolutionLabel(bandsPerOctave)}
-            </Badge>
-          </Tooltip>
+          <Menu position="bottom-start" withinPortal>
+            <Tooltip help="file-resolution" detail={getResolutionDetail(bandsPerOctave)}>
+              <Menu.Target>
+                <Badge
+                  {...helpProps("file-resolution")}
+                  size="sm"
+                  variant="light"
+                  color="orange"
+                  rightSection={<ChevronDown size={10} />}
+                  style={{ flexShrink: 0, cursor: "pointer" }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {getResolutionLabel(bandsPerOctave)}
+                </Badge>
+              </Menu.Target>
+            </Tooltip>
+            <Menu.Dropdown>
+              {BANDS_PER_OCTAVE_VALUES.map((option) => (
+                <Menu.Item
+                  key={option.value}
+                  fw={option.value === bandsPerOctave ? 700 : undefined}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (option.value === bandsPerOctave) return;
+                    void useStore.getState().reanalyzeFile(fileId, option.value);
+                  }}
+                >
+                  {option.label}
+                </Menu.Item>
+              ))}
+            </Menu.Dropdown>
+          </Menu>
         )}
       </Group>
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>

@@ -340,7 +340,7 @@ export function openReanalyzePrompt({
   let chosen = initialBandsPerOctave;
 
   return openConfirmModal({
-    title: "Re-analyze File",
+    title: "Re-analyse File",
     children: (
       <ReanalyzeBody
         initial={initialBandsPerOctave}
@@ -349,7 +349,7 @@ export function openReanalyzePrompt({
         }}
       />
     ),
-    labels: { confirm: "Re-analyze", cancel: "Cancel" },
+    labels: { confirm: "Re-analyse", cancel: "Cancel" },
     confirmProps: { size: "xs" },
     cancelProps: { size: "xs" },
     onConfirm: async () => {

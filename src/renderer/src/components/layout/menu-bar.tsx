@@ -57,7 +57,7 @@ export function ExtensionMenuBar() {
       </Group>
       <Group gap={2}>
         <BarButton label="Restore Original" onClick={() => send("restore-original")} />
-        <BarButton label="Re-analyze" onClick={() => send("reanalyze-active-file")} />
+        <BarButton label="Re-analyse" onClick={() => send("reanalyze-active-file")} />
       </Group>
     </Group>
   );

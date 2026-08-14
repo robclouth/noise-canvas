@@ -157,7 +157,7 @@ export function createMenu(window: BrowserWindow, state: MenuState) {
           },
         },
         {
-          label: "Re-analyze File",
+          label: "Re-analyse File",
           click: () => {
             webContentsSend(window, "reanalyze-active-file");
           },
