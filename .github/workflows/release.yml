@@ -37,7 +37,21 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # macOS signs with the Developer ID certificate in MAC_CSC_LINK, then
+      # notarises with the Apple ID credentials. CSC_LINK is read on every
+      # platform, so it must stay off the Windows and Linux runners.
+      - name: Build application (signed and notarised)
+        if: runner.os == 'macOS'
+        run: npm run ${{ matrix.script }}
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
       - name: Build application
+        if: runner.os != 'macOS'
         run: npm run ${{ matrix.script }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
@@ -54,11 +68,12 @@ jobs:
             dist/*-setup.exe
             dist/*.AppImage
             dist/*.deb
+            dist/*.blockmap
           if-no-files-found: warn
 
-      # Only upload update manifests from arm64 Mac build to avoid duplicates
+      # Every job uploads its own manifest. The two macOS manifests each list
+      # one arch, so the release job merges them before publishing.
       - name: Upload update manifests
-        if: matrix.arch == 'arm64' || runner.os == 'Windows' || runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-${{ matrix.arch || 'default' }}-manifests
@@ -103,10 +118,32 @@ jobs:
       contents: write
 
     steps:
+      - name: Check out git repository
+        uses: actions/checkout@v4
+        with:
+          # release-notes.sh walks back to the previous tag.
+          fetch-depth: 0
+
+      - name: Build release notes from commit titles
+        run: bash scripts/release-notes.sh "${{ github.ref_name }}" | tee release-notes.md
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      # electron-builder writes one latest-mac.yml per arch, each listing only
+      # its own build. electron-updater filters that list by arch, so an
+      # arm64-only manifest leaves Intel Macs with nothing to download.
+      - name: Merge macOS update manifests
+        run: |
+          mkdir -p /tmp/merge && cd /tmp/merge
+          npm init -y > /dev/null
+          npm install js-yaml@4 > /dev/null
+          cp "$GITHUB_WORKSPACE/scripts/merge-mac-manifests.mjs" .
+          node merge-mac-manifests.mjs \
+            "$GITHUB_WORKSPACE/artifacts" \
+            "$GITHUB_WORKSPACE/artifacts/merged/latest-mac.yml"
 
       # Create/publish the GitHub Release from the tag, attach installers.
       - name: Create GitHub Release
@@ -116,7 +153,10 @@ jobs:
           name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
-          generate_release_notes: true
+          # electron-updater reads this body back out of the releases Atom feed
+          # and shows it as "What's New" in the update prompt.
+          body_path: release-notes.md
+          generate_release_notes: false
           # discussion_category_name: Announcements
 
           # Avoid failing if e.g. Linux didn't build .deb, etc.
@@ -130,4 +170,7 @@ jobs:
             artifacts/**/*.AppImage
             artifacts/**/*.deb
             artifacts/**/*.ablx
-            artifacts/**/*-manifests/latest*.yml
+            artifacts/**/*.blockmap
+            artifacts/merged/latest-mac.yml
+            artifacts/**/*-manifests/latest.yml
+            artifacts/**/*-manifests/latest-linux.yml

@@ -5,6 +5,7 @@ import { join } from "path";
 import icon from "../../resources/icon.png?asset";
 import { createMenu, MenuState, openFileDialog } from "./lib/menu";
 import { ipcMainOn, webContentsSend } from "./lib/types";
+import { checkForUpdates, initUpdater } from "./lib/updater";
 
 // On macOS, ANGLE's Metal backend stalls each canvas present on a CoreAnimation
 // backpressure fence once a frame does any extra GPU work (e.g. a modulator
@@ -115,6 +116,8 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window);
   });
 
+  initUpdater(() => mainWindow);
+
   createWindow();
 
   if (mainWindow && is.dev) {
@@ -147,6 +150,7 @@ app.whenReady().then(async () => {
         webContentsSend(mainWindow!, "open-file", pendingPath);
         pendingPath = null;
       }
+      checkForUpdates();
     });
   }
 

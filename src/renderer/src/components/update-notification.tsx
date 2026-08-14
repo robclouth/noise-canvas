@@ -1,22 +1,9 @@
 import { Button, Group, Modal, Progress, Stack, Text, Title } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useState } from "react";
+import type { ProgressInfo, UpdateInfo } from "electron-updater";
 import { host } from "../lib/host";
 import { ipcOn } from "../lib/ipc";
-
-interface UpdateInfo {
-  version: string;
-  releaseDate?: string;
-  releaseName?: string;
-  releaseNotes?: string | string[];
-}
-
-interface ProgressInfo {
-  bytesPerSecond: number;
-  percent: number;
-  transferred: number;
-  total: number;
-}
 
 export function UpdateNotification() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -128,15 +115,20 @@ export function UpdateNotification() {
     host.updater.quitAndInstall();
   };
 
-  const formatReleaseNotes = (notes: string | string[] | undefined) => {
+  // The feed gives one HTML blob for a single release, or one entry per version
+  // when the updater runs with fullChangelog on.
+  const formatReleaseNotes = (notes: UpdateInfo["releaseNotes"]) => {
     if (!notes) return null;
     if (typeof notes === "string") {
       return <div dangerouslySetInnerHTML={{ __html: notes }} />;
     }
-    return notes.map((note, index) => (
-      <Text key={index} size="sm">
-        {note}
-      </Text>
+    return notes.map(({ version, note }) => (
+      <Stack key={version} gap={2}>
+        <Text size="sm" fw={500}>
+          {version}
+        </Text>
+        {note && <div dangerouslySetInnerHTML={{ __html: note }} />}
+      </Stack>
     ));
   };
 

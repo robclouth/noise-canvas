@@ -1,8 +1,8 @@
 import { app, BrowserWindow, dialog, Menu } from "electron";
-import { autoUpdater } from "electron-updater";
 import path from "path";
 import { allowedExtensions } from "./audio-analysis";
 import { webContentsSend } from "./types";
+import { checkForUpdates } from "./updater";
 
 export interface MenuState {
   canUndo: boolean;
@@ -206,18 +206,7 @@ export function createMenu(window: BrowserWindow, state: MenuState) {
       submenu: [
         {
           label: "Check for Updates...",
-          click: async () => {
-            try {
-              const update = await autoUpdater.checkForUpdates();
-              if (update) {
-                webContentsSend(window, "update-available", update);
-              } else {
-                webContentsSend(window, "update-not-available");
-              }
-            } catch (error) {
-              console.error("Failed to check for updates:", error);
-            }
-          },
+          click: () => checkForUpdates(),
         },
       ],
     });
@@ -246,13 +235,7 @@ export function createMenu(window: BrowserWindow, state: MenuState) {
       { type: "separator" },
       {
         label: "Check for Updates...",
-        click: async () => {
-          try {
-            await autoUpdater.checkForUpdates();
-          } catch (error) {
-            console.error("Failed to check for updates:", error);
-          }
-        },
+        click: () => checkForUpdates(),
       },
     );
   }

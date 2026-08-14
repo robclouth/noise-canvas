@@ -1,4 +1,4 @@
-appId: com.electron.app
+appId: com.robclouth.noise-canvas
 productName: "Noise Canvas"
 directories:
   buildResources: build
@@ -49,13 +49,15 @@ nsis:
 mac:
   icon: resources/icon.png
   artifactName: ${name}-${version}-${arch}.${ext}
+  entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
   extendInfo:
     - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
     - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
     - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
-  notarize: false
-  identity: "-"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  notarize: true
 dmg:
   artifactName: ${name}-${version}-${arch}.${ext}
   icon: resources/icon.png
@@ -69,4 +71,8 @@ linux:
   category: Utility
 appImage:
   artifactName: ${name}-${version}.${ext}
+publish:
+  provider: github
+  owner: robclouth
+  repo: noise-canvas
 npmRebuild: false

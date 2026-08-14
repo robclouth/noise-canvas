@@ -1,4 +1,5 @@
 import { BrowserWindow, ipcMain } from "electron";
+import type { ProgressInfo, UpdateInfo } from "electron-updater";
 // Describes the flat object returned directly from the C++ addon
 export interface GaboratorAnalysisResult {
   data: Float32Array;
@@ -136,10 +137,10 @@ export interface IpcRendererEvents {
   "reanalyze-active-file": () => void;
   "double-active-file-length": () => void;
   "halve-active-file-length": () => void;
-  "update-available": (info: any) => void;
+  "update-available": (info: UpdateInfo) => void;
   "update-not-available": () => void;
-  "update-downloaded": (info: any) => void;
-  "download-progress": (progressInfo: any) => void;
+  "update-downloaded": (info: UpdateInfo) => void;
+  "download-progress": (progressInfo: ProgressInfo) => void;
   "update-error": (message: string) => void;
   "app-will-quit": () => void;
   "run-walkthrough": () => void;
