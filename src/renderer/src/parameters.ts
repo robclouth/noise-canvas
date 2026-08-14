@@ -1651,8 +1651,8 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
   },
   limiterEnabled: {
     kind: "boolean",
-    name: "Limit Strokes",
-    label: "Limit",
+    name: "Auto-limit Strokes",
+    label: "Auto-limit",
     description:
       "Holds each stroke's own level down as you paint it, leaving the audio around it untouched. Turn it off to paint as loud as the effect makes it.",
     default: true,

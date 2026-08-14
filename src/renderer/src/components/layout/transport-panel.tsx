@@ -145,6 +145,7 @@ export const TransportPanel = memo(() => {
         <Text ff="monospace" size="lg" ref={timeRef} w={TRANSPORT_TIME_WIDTH}>
           {formatTime(0)}
         </Text>
+        <OutputMeter />
       </Group>
 
       <Divider orientation="vertical" color="dark.5" />
@@ -172,10 +173,8 @@ export const TransportPanel = memo(() => {
 
       <Divider orientation="vertical" color="dark.5" />
 
-      <OutputMeter />
-
       <Stack gap={0}>
-        <ParameterControl paramKey="limiterEnabled" displayLabel="Limit" />
+        <ParameterControl paramKey="limiterEnabled" displayLabel="Auto-limit" />
         <ParameterControl paramKey="reanalyzeStrokes" displayLabel="Re-analyse" />
       </Stack>
 
@@ -184,6 +183,7 @@ export const TransportPanel = memo(() => {
       {/* The transport is the one bar that is always visible, whatever is open. */}
       <HelpActionIcon
         help="transport-help"
+        {...anchorProps("transport-help")}
         // Kept from the document, so an open menu or popover never sees an
         // outside click and closes: asking what something is has to work while
         // the thing you are asking about is still on screen.
