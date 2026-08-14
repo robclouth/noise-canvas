@@ -268,6 +268,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
         </Menu>
         <HelpActionIcon
           help="file-fill-grid"
+          {...anchorProps("file-fill-grid")}
           size={uiSize}
           color="dark.5"
           onClick={(e) => {

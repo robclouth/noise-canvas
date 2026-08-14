@@ -37,7 +37,16 @@ export type UiAnchor = (typeof UI_ANCHORS)[number];
 /** One effect card inside the Effects list, keyed by which effect it hosts. */
 export type EffectAnchor = `effect-${EffectType}`;
 
-export type AnchorName = UiAnchor | EffectAnchor;
+/**
+ * One-off controls the walkthrough spotlights directly, rather than the
+ * coarser section/panel they sit in. Not part of `UI_ANCHORS`: they have no
+ * "?" overlay area of their own (their `data-help` entry already covers
+ * that), so they're exempt from the area-registry exhaustiveness check.
+ */
+export const CONTROL_ANCHORS = ["file-fill-grid", "transport-help"] as const;
+export type ControlAnchor = (typeof CONTROL_ANCHORS)[number];
+
+export type AnchorName = UiAnchor | EffectAnchor | ControlAnchor;
 
 export const ANCHOR_ATTR = "data-anchor";
 

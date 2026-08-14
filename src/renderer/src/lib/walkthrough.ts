@@ -4,11 +4,13 @@ import { getFileIdByPath } from "@renderer/store/files";
 import { driver, type DriveStep, type Driver } from "driver.js";
 import "driver.js/dist/driver.css";
 import "../assets/walkthrough.css";
-import { anchorSelector, laneSelector, type UiAnchor } from "./ui-anchors";
+import { anchorSelector, laneSelector, type AnchorName } from "./ui-anchors";
 import { deepTourFor, type UiAreaName } from "./ui-areas";
 
 /** Opened at the start of every run so the tour has something to paint on. */
-const DEMO_FILE = "bundled://pad-loop.mp3";
+const DEMO_FILE = "bundled://break-loop.mp3";
+/** The demo file's real tempo, forced on every run regardless of what a previous run left behind. */
+const DEMO_BPM = 160;
 
 /**
  * Sections the tour points at, by the label the Section component collapses on.
@@ -23,17 +25,27 @@ const SECTIONS_TO_EXPAND = ["Effects", "Envelope", "Modulators", "Palette", "His
  */
 type Gate = (advance: () => void) => () => void;
 
-/** Advances once the active step gains an effect. */
-const effectAddedGate: Gate = (advance) => {
-  const countEffects = (): number => {
-    const step = useStore.getState().getActiveStep();
-    return ((step?.effects ?? []) as EffectItem[]).length;
-  };
-  const before = countEffects();
+/** Advances once a new, empty brush becomes active. */
+const emptyBrushAddedGate: Gate = (advance) => {
+  const before = useStore.getState().brushes.length;
+  return useStore.subscribe(
+    (state) => state.brushes.length,
+    (count) => {
+      if (count <= before) return;
+      const step = useStore.getState().getActiveStep();
+      if (((step?.effects ?? []) as EffectItem[]).length === 0) advance();
+    },
+  );
+};
+
+/** Advances once the active step gains a Transform effect. */
+const transformAddedGate: Gate = (advance) => {
   return useStore.subscribe(
     (state) => state.brushes[state.activeBrushIndex],
     () => {
-      if (countEffects() > before) advance();
+      const step = useStore.getState().getActiveStep();
+      const hasTransform = ((step?.effects ?? []) as EffectItem[]).some((item) => item.effect === "transform");
+      if (hasTransform) advance();
     },
   );
 };
@@ -49,7 +61,7 @@ const strokePaintedGate: Gate = (advance) => {
 };
 
 type Step = {
-  anchor?: UiAnchor;
+  anchor?: AnchorName;
   title: string;
   description: string;
   side?: "top" | "right" | "bottom" | "left";
@@ -58,23 +70,23 @@ type Step = {
 
 const STEPS: Step[] = [
   {
-    title: "Welcome to Noise Canvas",
+    title: "Let's take a look",
     description:
-      "Hey, it's Rob. Welcome to Noise Canvas — a tool for spectrally destroying samples. I've tried to make it as intuitive as I can, but a few things are easier shown than found, so this should make it a bit less mysterious. Takes about a minute.",
+      "A few things are easier to show than to explain, so this walks through where everything lives. Takes about a minute.",
   },
   {
     anchor: "file-lane",
     side: "top",
     title: "This is your sound",
     description:
-      "Time runs left to right in <b>beats</b>, pitch runs bottom to top in <b>semitones</b>, and brightness is loudness. Colour shows the stereo image — orange leans left, blue leans right, grey is equal in both.",
+      "Time runs left to right in <b>beats</b>, pitch runs bottom to top in <b>semitones</b>, and brightness is loudness. Colour shows the stereo image: orange leans left, blue leans right, grey is equal in both.",
   },
   {
     anchor: "file-lane",
     side: "top",
     title: "Getting around it",
     description:
-      "<b>Right-click drag</b> to pan through time, and <b>Cmd/Ctrl + scroll</b> (or pinch) to zoom around the cursor. Pitch is separate: <b>drag the legend</b> down the left edge — sideways to zoom, up and down to scroll. Plain vertical scroll moves the file list, not the file.",
+      "<b>Right-click drag</b> to pan through time, and <b>Cmd/Ctrl + scroll</b> (or pinch) to zoom around the cursor. Pitch is separate: <b>drag the legend</b> down the left edge, sideways to zoom, up and down to scroll. Plain vertical scroll moves the file list, not the file.",
   },
   {
     anchor: "brush-panel",
@@ -83,18 +95,33 @@ const STEPS: Step[] = [
     description: "Everything down this side defines the brush: what it does to the sound, and where the stroke lands.",
   },
   {
+    anchor: "section-palette",
+    side: "left",
+    title: "Start with a fresh one",
+    description:
+      "Click <b>Add brush</b> at the bottom of the palette and pick <b>New</b> for an empty brush to build from scratch. It comes with a random name; double-click the label any time to rename it.",
+    gate: emptyBrushAddedGate,
+  },
+  {
     anchor: "section-effects",
     side: "right",
     title: "Give it something to do",
-    description: "Click <b>Add effect</b> and pick <b>Blur</b>. A brush with no effects does nothing.",
-    gate: effectAddedGate,
+    description: "Click <b>Add effect</b> and pick <b>Transform</b>. A brush with no effects does nothing.",
+    gate: transformAddedGate,
+  },
+  {
+    anchor: "effect-transform",
+    side: "right",
+    title: "Make it stretch",
+    description:
+      "Turn <b>Scale ↔</b> above 1 to stretch the sound out in time, or below 1 to squash it. Negative values play it backwards.<br><br>Every value works the same way. Drag it, hold <b>Ctrl</b> to snap to musical units, or hold <b>Shift</b> for fine control. <b>Right-click</b> a value for a list of preset ones, and <b>click its label</b> for the menu: modulation, randomisation and the rest.",
   },
   {
     anchor: "section-envelope",
     side: "right",
     title: "Decide where it lands",
     description:
-      "Size sets how much time and pitch one stroke covers, in beats and semitones. Curve shapes its edges, from a sharp spike to a hard rectangle, and Skew moves the peak.",
+      "Try <b>Size ↔</b> at <b>Full</b> to see it span the whole file, then bring it down to around <b>4 beats</b> so the stroke covers a bar or so. Curve shapes its edges, from a sharp spike to a hard rectangle, and Skew moves the peak.",
   },
   {
     anchor: "file-lane",
@@ -129,21 +156,21 @@ const STEPS: Step[] = [
     side: "right",
     title: "Make it move",
     description:
-      "That Blur was fixed across the whole stroke. Three modulators paint 2D fields over time and pitch — patterns, textures, envelope followers, sequencers — and any parameter with a menu can be driven by them.",
+      "That Transform was fixed across the whole stroke. Three modulators paint 2D fields over time and pitch: patterns, textures, envelope followers, sequencers. Any parameter with a menu can be driven by them.",
   },
   {
-    anchor: "file-header",
+    anchor: "file-fill-grid",
     side: "bottom",
     title: "Or don't paint at all",
     description:
-      "The grid icon paints the brush on every cell of the grid — every beat, every onset, every note of a scale, whatever you have the grid set to. One click lays them all down as a single stroke.",
+      "The grid icon paints the brush on every cell of the grid: every beat, every onset, every note of a scale, whatever you have the grid set to. One click lays them all down as a single stroke.",
   },
   {
-    anchor: "brush-panel",
-    side: "right",
+    anchor: "transport-help",
+    side: "top",
     title: "That's the tour",
     description:
-      "There is a lot more underneath: multi-step brushes, painting from other files, stem splitting, Ableton Live. Press <b>?</b> any time to see every part of the window at once, and the manual is on <b>Help → Manual</b>.",
+      "There is a lot more underneath: multi-step brushes, painting from other files, stem splitting, Ableton Live integration. Press <b>?</b> any time to see every part of the window at once, or <b>Cmd/Ctrl+/</b> to open the manual.",
   },
 ];
 
@@ -160,7 +187,7 @@ function clearGate(): void {
  * selector would spotlight whichever lane happens to be first. Every lane step
  * means the demo file the tour just opened.
  */
-function selectorFor(anchor: UiAnchor, fileId: string | null): string {
+function selectorFor(anchor: AnchorName, fileId: string | null): string {
   if (anchor === "file-lane" && fileId) return laneSelector(fileId);
   return anchorSelector(anchor);
 }
@@ -179,7 +206,12 @@ function toDriveStep(step: Step, fileId: string | null, instance: () => Driver |
         if (!step.gate) return;
         releaseGate = step.gate(() => {
           clearGate();
-          instance()?.moveNext();
+          // The gate fires synchronously off a store subscription, ahead of React's
+          // render for whatever the user's action just added. If the next step
+          // anchors on that new element (e.g. a just-added effect card), advancing
+          // in the same tick makes driver.js query for it too early and fall back
+          // to a dummy centered element. Two rAFs guarantee a paint has happened.
+          requestAnimationFrame(() => requestAnimationFrame(() => instance()?.moveNext()));
         });
       },
     },
@@ -219,6 +251,9 @@ async function revealLane(fileId: string): Promise<void> {
 export async function startWalkthrough(): Promise<void> {
   if (active) return;
 
+  // Forced ahead of open/activate so the transport reads it back correctly,
+  // regardless of what a previous run may have left in this path's stored BPM.
+  useStore.getState().setFilepathBpm(DEMO_FILE, DEMO_BPM);
   await useStore.getState().openFilePath(DEMO_FILE);
   // Resolved by path rather than from activeFileId: reopening a minimized file
   // restores it without activating it.
