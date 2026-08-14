@@ -51,13 +51,15 @@ void main() {
     vec2 blurSizeUvL = vec2(blurSizeXValue.x, blurSizeYValue.x);
     vec2 blurSizeUvR = vec2(blurSizeXValue.y, blurSizeYValue.y);
 
-    vec4 sourceCenterTexelL = getTransformedSample(coords.sourceL, coords.dest, sourceTimeScale, sourceBandScale, sourceOffsetX, sourceOffsetY);
+    // scaleX/scaleY = 1: blur applies no geometric stretch; the dest→source
+    // map already carries the unit conversion between the two files.
+    vec4 sourceCenterTexelL = getTransformedSample(coords.sourceL, coords.dest, 1.0, 1.0, sourceOffsetX, sourceOffsetY);
     float referencePhaseL = getPhase(sourceCenterTexelL.rg);
     float referencePhaseR;
     if (sameKernel) {
         referencePhaseR = getPhase(sourceCenterTexelL.ba);
     } else {
-        vec4 sourceCenterTexelR = getTransformedSample(coords.sourceR, coords.dest, sourceTimeScale, sourceBandScale, sourceOffsetX, sourceOffsetY);
+        vec4 sourceCenterTexelR = getTransformedSample(coords.sourceR, coords.dest, 1.0, 1.0, sourceOffsetX, sourceOffsetY);
         referencePhaseR = getPhase(sourceCenterTexelR.ba);
     }
 

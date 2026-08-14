@@ -18,12 +18,17 @@ void main() {
 
     // Fast path: one read when source UVs match across channels. When they
     // differ, sample twice and take each channel's half of the result.
+    // scaleX/scaleY are the user's geometric stretch, which the wrapper does
+    // not apply — always 1. The dest→source map already carries
+    // sourceTimeScale/sourceBandScale, and those convert units between two
+    // files' UV spaces rather than stretch content, so passing them here would
+    // make the phase rules stretch a paste that is 1:1 in seconds.
     vec4 sourceTexel;
     if (coords.sameSourceUv) {
-        sourceTexel = getTransformedSample(coords.source, coords.dest, sourceTimeScale, sourceBandScale, sourceOffsetX, sourceOffsetY);
+        sourceTexel = getTransformedSample(coords.source, coords.dest, 1.0, 1.0, sourceOffsetX, sourceOffsetY);
     } else {
-        vec4 sL = getTransformedSample(coords.sourceL, coords.dest, sourceTimeScale, sourceBandScale, sourceOffsetX, sourceOffsetY);
-        vec4 sR = getTransformedSample(coords.sourceR, coords.dest, sourceTimeScale, sourceBandScale, sourceOffsetX, sourceOffsetY);
+        vec4 sL = getTransformedSample(coords.sourceL, coords.dest, 1.0, 1.0, sourceOffsetX, sourceOffsetY);
+        vec4 sR = getTransformedSample(coords.sourceR, coords.dest, 1.0, 1.0, sourceOffsetX, sourceOffsetY);
         sourceTexel = vec4(sL.rg, sR.ba);
     }
     vec4 modifiedTexel = applyEffectStroke(sourceTexel, coords, audioLevelDb);

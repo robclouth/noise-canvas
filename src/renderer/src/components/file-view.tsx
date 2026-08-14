@@ -10,7 +10,7 @@ import { resolveAimUv, type AimUv } from "../lib/aim";
 import { aimUvToBrushBlUv } from "../lib/brush-anchor";
 import { getFileOnsets } from "../lib/file-onsets";
 import { penState } from "../lib/pen-state";
-import { uvToUnits } from "../lib/utils";
+import { sourceBandUvSlope, uvToUnits } from "../lib/utils";
 import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { LoopRegion } from "./loop-region";
@@ -540,7 +540,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
               const srcBpm = state.filepathsBpm[sourceOpenFile.filePath] || 120;
               const srcDur = sourceOpenFile.spectrogramData.numFrames / sourceOpenFile.spectrogramData.sampleRate;
               const tScale = (destBpm * destDur) / (srcBpm * srcDur);
-              const bScale = spectrogramData.numBands / sourceOpenFile.spectrogramData.numBands;
+              const bScale = sourceBandUvSlope(spectrogramData, sourceOpenFile.spectrogramData);
 
               const offsetX = -blX * tScale;
               const offsetY = -blY * bScale;

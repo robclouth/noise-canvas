@@ -51,7 +51,14 @@ import { SourceFileInfo, StrokeRenderer, StrokeTextures } from "../lib/stroke-re
 import { penState } from "../lib/pen-state";
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import { aimUvToBrushBlUv } from "../lib/brush-anchor";
-import { resolveBrushAnchor, resolveBrushFootprint, swungGridCellWidthUv, unitsToUv } from "../lib/utils";
+import {
+  destToSourceBandUv,
+  resolveBrushAnchor,
+  resolveBrushFootprint,
+  sourceBandUvSlope,
+  swungGridCellWidthUv,
+  unitsToUv,
+} from "../lib/utils";
 
 /**
  * Props for the FileRenderer component.
@@ -979,12 +986,14 @@ const FileRendererInner = memo(
             const destAnchorUv = resolveBrushAnchor(destCursorUv, activeStepFp.fullTime, activeStepFp.fullPitch);
 
             const tScale = (activeBpm * activeDuration) / (bpm * totalDuration);
-            const bScale = activeFile.spectrogramData.numBands / spectrogramData.numBands;
+            const bScale = sourceBandUvSlope(activeFile.spectrogramData, spectrogramData);
 
             const offset = calculateSourceOffset(activeStepRaw?.lockedOffset, mode, destAnchorUv, tScale, bScale);
             sourceDisplayPos = new Vector2(
               destAnchorUv.x * tScale + offset.x + sourcePositionUv.x,
-              destAnchorUv.y * bScale + offset.y + sourcePositionUv.y,
+              destToSourceBandUv(destAnchorUv.y, activeFile.spectrogramData, spectrogramData) +
+                offset.y +
+                sourcePositionUv.y,
             );
           }
         } else {
@@ -1095,7 +1104,7 @@ const FileRendererInner = memo(
         const srcBpm = state.filepathsBpm[sourceFileData.filePath] || 120;
         const srcDur = sourceFileData.spectrogramData.numFrames / sourceFileData.spectrogramData.sampleRate;
         const tScale = (bpm * totalDuration) / (srcBpm * srcDur);
-        const bScale = spectrogramData.numBands / sourceFileData.spectrogramData.numBands;
+        const bScale = sourceBandUvSlope(spectrogramData, sourceFileData.spectrogramData);
 
         const sourceOffsetUv = calculateSourceOffset(
           activeStepRaw?.lockedOffset,

@@ -578,66 +578,109 @@ vec4 getTransformedSampleNeutralish(vec2 sourceUv, vec2 destUv, float scaleX, fl
  * operation — no per-frame IF estimation, no error accumulation, every
  * pixel computed independently.
  *
- * For pitch change, multiplying by freqRatio = f_dst/f_src scales all
- * phase advance rates to match the target frequency.
+ * For pitch change, multiplying by freqRatio = f_dst/f_ideal scales all
+ * phase advance rates to match the target frequency. f_ideal is the exact
+ * frequency the transform asks to read; the residual between it and the
+ * centre of the band actually sampled is a carrier change, not a shift, and
+ * is re-anchored additively (see neutralPhase).
  *
  * For time shift, a band-frequency carrier correction is added to
  * compensate for the synthesis happening at a different absolute time.
  */
+// How far the continuous read position may sit from the sampled band's centre,
+// in band units, and still count as ON the centre. Float noise in the
+// freq-preserving UV map reaches ~1e-4 bands; a real grid offset — two layouts
+// whose centres interleave, or a fractional pitch shift a user would notice —
+// is orders of magnitude larger. Inside the dead zone the residual snaps to
+// zero so an aligned read keeps phaseGain = 1 and a zero re-anchor exactly.
+const float BAND_FRAC_DEADZONE = 1e-3;
+
 // The plain phase rule on its own, so algorithm 6 can blend against it without
 // a second copy of the maths. Returns (left, right), and reports the multiplier
 // it applied to the stored phase — 1 means the stored phase came through
 // untouched, anything else means it was rescaled.
 vec2 neutralPhase(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY, vec4 magPhase, out float phaseGain) {
-  float signX = scaleX < 0.0 ? -1.0 : 1.0;
-  float signY = scaleY < 0.0 ? -1.0 : 1.0;
-  float absScaleX = abs(scaleX);
+  // Physical time stretch. Callers pass scaleX in the shared map convention
+  // (dest→source UV slope = sourceTimeScale / scaleX), and the two files' UV
+  // axes can cover different durations, so the read slope in seconds is
+  // (sourceTimeScale / scaleX) · T_src / T_dest. The phase rule needs its
+  // inverse. For a same-file transform this reduces to scaleX exactly; for a
+  // paste between files of different lengths at equal tempo it reduces to 1,
+  // because such a paste moves content without stretching it.
+  float T_src  = max(sourceFrameCount - 1.0, 1.0) / max(sourceSampleRate, 1e-6);
+  float T_dest = max(destFrameCount - 1.0, 1.0) / max(destSampleRate, 1e-6);
+  float scaleXPhys = scaleX * T_dest / (max(sourceTimeScale, 1e-6) * T_src);
 
-  // Frequency ratio for pitch scaling. Read from the band actually sampled, so a
-  // read that wrapped the pitch axis reports the frequency it landed on.
-  vec4 srcMeta  = getSourceMetadata(wrapUv(sourceUv));
+  float signX = scaleXPhys < 0.0 ? -1.0 : 1.0;
+  float signY = scaleY < 0.0 ? -1.0 : 1.0;
+  float absScaleX = abs(scaleXPhys);
+
+  // Pitch ratio, read from the band actually sampled, so a read that wrapped
+  // the pitch axis reports the frequency it landed on. The ratio splits in
+  // two. The part the transform INTENDS — the continuous read position against
+  // the source's geometric grid — scales the stored phase: a true pitch shift.
+  // The residual between that ideal frequency and the sampled band's centre is
+  // not a shift at all, only a change of carrier, and gets the additive
+  // re-anchor below instead. Without the split, a paste across two different
+  // band layouts detunes every dest band toward its nearest source band centre
+  // and trips the noise replacement, because the grid residual masquerades as
+  // a pitch shift applied to hundreds of radians of unwrapped phase.
+  vec2 wrappedSourceUv = wrapUv(sourceUv);
+  vec4 srcMeta  = getSourceMetadata(wrappedSourceUv);
   float srcFreqHz = srcMeta.a;
   float destFreqHz = getDestMetadata(destUv).a;
-  float freqRatio = (srcFreqHz > 1e-3) ? destFreqHz / srcFreqHz : 1.0;
-  float T_total = (destFrameCount - 1.0) / destSampleRate;
+  float srcBandIdx = wrappedSourceUv.y * sourceBandCount - 0.5;
+  float sampledBandIdx = sourceBandCount - 1.0 - floor((1.0 - wrappedSourceUv.y) * sourceBandCount);
+  float bandFrac = srcBandIdx - sampledBandIdx;
+  if (abs(bandFrac) < BAND_FRAC_DEADZONE) bandFrac = 0.0;
+  float idealFreqHz = srcFreqHz * exp2(bandFrac / max(sourceBandsPerOctave, 1e-6));
+  float freqRatio = (idealFreqHz > 1e-3) ? destFreqHz / idealFreqHz : 1.0;
+  // Carrier re-anchor rate for the grid residual: content stored against the
+  // sampled band's centre must advance against the dest band's centre instead.
+  // Zero exactly when bandFrac snapped to zero.
+  float mismatchHz = (idealFreqHz > 1e-3) ? destFreqHz * (srcFreqHz - idealFreqHz) / idealFreqHz : 0.0;
 
-  // Two approaches, blended by how far |scaleX| is from 1:
+  float tSrcSec  = sourceUv.x * T_src;
+  float tDestSec = destUv.x * T_dest;
+
+  // Two approaches, blended by how far |scaleXPhys| is from 1:
   //
-  // Additive (proven for |scaleX|=1): precise carrier correction for
+  // Additive (proven for |scaleXPhys|=1): precise carrier correction for
   // shift/reversal, but IF correction accumulates error during stretch.
   //
-  // Scale-by-S (proven for |scaleX|≠1): no error accumulation, every
-  // pixel independent, but loses inter-band phase alignment at |scaleX|=1.
+  // Scale-by-S (proven for |scaleXPhys|≠1): no error accumulation, every
+  // pixel independent, but loses inter-band phase alignment at |scaleXPhys|=1.
 
   // Additive phase: signX × signY × φ + carrier correction
   float addL = signX * signY * magPhase.y;
   float addR = signX * signY * magPhase.w;
-  if (scaleX < 0.0) {
-    float corr = -TWO_PI * srcFreqHz * (sourceUv.x + destUv.x) * T_total;
+  if (scaleXPhys < 0.0) {
+    float corr = -TWO_PI * srcFreqHz * (tSrcSec + tDestSec);
     addL += corr;
     addR += corr;
   } else {
-    float shiftOffset = sourceUv.x - destUv.x / max(scaleX, 1e-5);
-    float corr = TWO_PI * srcFreqHz * shiftOffset * T_total;
+    float corr = TWO_PI * srcFreqHz * (tSrcSec - tDestSec / max(scaleXPhys, 1e-5));
     addL += corr;
     addR += corr;
   }
 
-  // Scale-by-S phase: scaleX × signY × φ (handles stretch + reversal)
-  float sclL = scaleX * signY * magPhase.y;
-  float sclR = scaleX * signY * magPhase.w;
+  // Scale-by-S phase: scaleXPhys × signY × φ (handles stretch + reversal)
+  float sclL = scaleXPhys * signY * magPhase.y;
+  float sclR = scaleXPhys * signY * magPhase.w;
 
-  // Blend: use additive near |scaleX|=1, scale-by-S when stretching
+  // Blend: use additive near |scaleXPhys|=1, scale-by-S when stretching
   float stretchAmount = clamp(abs(absScaleX - 1.0) * 4.0, 0.0, 1.0);
   float phaseL = mix(addL, sclL, stretchAmount);
   float phaseR = mix(addR, sclR, stretchAmount);
 
   // Both branches carry the same signX·signY factor, so what is left of the
-  // stored phase is its magnitude times the pitch ratio.
+  // stored phase is its magnitude times the intended pitch ratio. The grid
+  // residual stays out of phaseGain — a re-anchor leaves the stored phase
+  // untouched, so it must not trigger the noise replacement.
   phaseGain = mix(1.0, absScaleX, stretchAmount) * freqRatio;
 
-  // Pitch ratio scaling
-  return vec2(phaseL, phaseR) * freqRatio;
+  // Pitch ratio scaling, then the residual carrier re-anchor.
+  return vec2(phaseL, phaseR) * freqRatio + vec2(TWO_PI * mismatchHz * tDestSec);
 }
 
 vec4 getTransformedSampleNeutralPlain(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY) {
@@ -699,6 +742,61 @@ float sourceTonality(vec2 sourceUv) {
   }
   float mean = total / 3.0;
   return exp(-(mean * mean) / (TONALITY_SPREAD * TONALITY_SPREAD));
+}
+
+// ---------------------------------------------------------------------------
+// Cross-resolution resampling (source and dest analysed at different
+// bands-per-octave). A nearest-band read alone duplicates each wide source
+// band into several narrow dest bands (or drops fine bands into a coarse
+// one): tones grow ghost partials and a level boost, noise turns into a
+// correlated chorus. The rules below reshape magnitude — and, for noise, the
+// phase — so the pasted canvas matches what a direct analysis of the source
+// audio at the dest resolution would hold. Constants are calibrated against
+// native-addon round trips (12↔60 and 24↔48 bpo, tones and noise, synthesised
+// and re-analysed): each lands within ~1 dB of the direct analysis.
+// ---------------------------------------------------------------------------
+
+// Dest atom frequency response exp(-c·d²), d in the atom's own band units.
+const float XRES_ATTEN_COEFF = 1.0;
+// A tone's phase second difference is numerically ~0 at any resolution;
+// band-limited noise wanders by >= ~0.03 rad. A fixed-radian tonality cannot
+// separate the two on a coarse grid, where the bin rate oversamples the band.
+const float XRES_D2_SPREAD = 0.012;
+// Float32 phase quantisation grows with the unwrapped magnitude; widening the
+// spread with it fails toward "tonal", the milder treatment.
+const float XRES_D2_ULP = 4e-6;
+// Measured-frequency deviation clamp, as a fraction of the band centre.
+const float XRES_DEV_CLAMP = 0.06;
+// Largest source-side attenuation the tonal path may undo, in (src bands)².
+const float XRES_DEV_UNDO_CAP = 1.5;
+// Level makeup for the synthetic noise phase walk's residual self-cancellation.
+const float XRES_NOISE_MAKEUP = 1.65;
+// Noise phase block length in seconds, × destBandsPerOctave / f — the dest
+// atom's own support, so the walk is band-limited at the dest band's rate.
+const float XRES_BLOCK_SUPPORT = 0.7;
+
+// Tonality and measured frequency deviation of the source at a position, from
+// six stored phases on the band's own grid. Deviation is clamped to
+// ±XRES_DEV_CLAMP of the centre (see attractDevHz — same estimator).
+void xresAnalyzeSource(vec2 sourceUv, float srcFreqHz, out float tonality, out float devHz) {
+  vec4 meta = getSourceMetadata(sourceUv);
+  float strideFrames = exp2(meta.b);
+  float strideUv = strideFrames / max(sourceFrameCount, 1.0);
+  float dtSec = strideFrames / max(sourceSampleRate, 1e-6);
+  float phases[6];
+  for (int i = 0; i < 6; i++) {
+    phases[i] = sampleSourceNoInterp(vec2(sourceUv.x + (1.0 - float(i)) * strideUv, sourceUv.y)).y;
+  }
+  float total = 0.0;
+  for (int i = 1; i < 4; i++) {
+    total += abs(unwrapPhase(phases[i - 1] - 2.0 * phases[i] + phases[i + 1]));
+  }
+  float mean = total / 3.0;
+  float spread = max(XRES_D2_SPREAD, abs(phases[1]) * XRES_D2_ULP);
+  tonality = exp(-(mean * mean) / (spread * spread));
+
+  float dev = (unwrapPhase(phases[1] - phases[2]) + unwrapPhase(phases[0] - phases[1])) * 0.5 / (TWO_PI * dtSec);
+  devHz = clamp(dev, -XRES_DEV_CLAMP * srcFreqHz, XRES_DEV_CLAMP * srcFreqHz);
 }
 
 // How strongly a source position sits inside an onset, in the SOURCE band's
@@ -786,6 +884,102 @@ vec4 getTransformedSampleNeutral(vec2 sourceUv, vec2 destUv, float scaleX, float
 
   float baseL = neutral.x;
   float baseR = neutral.y;
+
+  // Cross-resolution resample (see the XRES block above). Reshapes magnitude
+  // and, where the content is noise, the phase; every phase edit is applied as
+  // a delta on the neutral base so the rule composes with time shifts,
+  // reversal, and the stretch blend.
+  float bpoRatio = destBandsPerOctave / max(sourceBandsPerOctave, 1e-6);
+  if (abs(bpoRatio - 1.0) > 1e-4) {
+    vec4 srcMeta = getSourceMetadata(wrappedSourceUv);
+    float srcFreqHz = max(srcMeta.a, 1e-6);
+    float destFreqHz = max(getDestMetadata(destUv).a, 1e-6);
+    float srcBandIdx = wrappedSourceUv.y * sourceBandCount - 0.5;
+    float sampledBandIdx = sourceBandCount - 1.0 - floor((1.0 - wrappedSourceUv.y) * sourceBandCount);
+    float bandFrac = srcBandIdx - sampledBandIdx;
+    if (abs(bandFrac) < BAND_FRAC_DEADZONE) bandFrac = 0.0;
+    float idealFreqHz = max(srcFreqHz * exp2(bandFrac / max(sourceBandsPerOctave, 1e-6)), 1e-6);
+    float freqRatio = destFreqHz / idealFreqHz;
+    float tDestSec = destUv.x * (destFrameCount - 1.0) / max(destSampleRate, 1e-6);
+
+    if (bpoRatio > 1.0) {
+      // Upsampling: ~bpoRatio dest bands read each source band. The tonal part
+      // attenuates each duplicate by the dest atom's response around the
+      // MEASURED frequency, undoing the source-side attenuation the read
+      // arrived with; the noise part splits the band's energy across the
+      // duplicates and walks its own band-limited random phase, because the
+      // copied wide-band phase fluctuates too fast for the narrow dest atom
+      // and cancels in the synthesis.
+      float tonality, devHz;
+      xresAnalyzeSource(wrappedSourceUv, srcFreqHz, tonality, devHz);
+      float s = smoothstep(0.2, 0.7, tonality);
+
+      // Offset of the content's TARGET frequency from this dest band, in dest
+      // bands. Measured against the ideal read frequency rather than the dest
+      // band absolute, so a transposing paste (pitch offsets, Fixed tracking)
+      // carries the content to fTrue × the intended ratio instead of pinning
+      // it at its source-absolute frequency.
+      float fTrue = max(srcFreqHz + devHz, 1e-6);
+      float offDest = destBandsPerOctave * log2(fTrue / idealFreqHz);
+      float devSrc = sourceBandsPerOctave * log2(fTrue / srcFreqHz);
+      float undo = min(devSrc * devSrc, XRES_DEV_UNDO_CAP);
+      float tonalMag2 = exp(-2.0 * XRES_ATTEN_COEFF * (offDest * offDest - undo));
+      float noiseMag2 = XRES_NOISE_MAKEUP * XRES_NOISE_MAKEUP / bpoRatio;
+      float magScale = sqrt(mix(noiseMag2, tonalMag2, s));
+      magPhase.x *= magScale;
+      magPhase.z *= magScale;
+
+      float blockDur = XRES_BLOCK_SUPPORT * destBandsPerOctave / destFreqHz;
+      float tBlocks = tDestSec / blockDur;
+      float b0 = floor(tBlocks);
+      float fb = tBlocks - b0;
+      float bandSeed = floor((1.0 - destUv.y) * destBandCount);
+      float noiseL = TWO_PI * mix(random(vec2(bandSeed, b0)), random(vec2(bandSeed, b0 + 1.0)), fb);
+      float noiseR = TWO_PI * mix(random(vec2(bandSeed + 917.0, b0)), random(vec2(bandSeed + 917.0, b0 + 1.0)), fb);
+      float noiseW = 1.0 - s;
+      baseL += noiseW * unwrapPhase(noiseL - baseL);
+      baseR += noiseW * unwrapPhase(noiseR - baseR);
+    } else {
+      // Downsampling: project every fine band the coarse dest atom covers.
+      // Tonal content sums amplitudes (coherent taps, normalised so a tone
+      // maps to its true coarse coefficient); noise sums power. The phase
+      // comes from the LOUDEST tap — the nearest one can be silent, and
+      // magnitude written with junk phase cancels in the synthesis.
+      float halfSpan = 0.5 / bpoRatio + 3.0;
+      vec2 power = vec2(0.0);
+      vec2 ampSum = vec2(0.0);
+      vec2 maxMag = vec2(0.0);
+      vec2 maxPhase = vec2(magPhase.y, magPhase.w);
+      vec2 maxFreq = vec2(srcFreqHz);
+      for (int h = -8; h <= 8; h++) {
+        if (abs(float(h) - bandFrac) > halfSpan) continue;
+        vec2 tapUv = vec2(wrappedSourceUv.x,
+                          clamp(wrappedSourceUv.y + float(h) / max(sourceBandCount, 1.0), 0.0, 1.0));
+        vec4 tap = sampleSourceInterp(tapUv);
+        float dCoarse = (float(h) - bandFrac) * bpoRatio;
+        float w = exp(-XRES_ATTEN_COEFF * dCoarse * dCoarse);
+        vec2 m = vec2(tap.x, tap.z) * w;
+        power += m * m;
+        ampSum += m;
+        float tapFreq = srcFreqHz * exp2(float(h) / max(sourceBandsPerOctave, 1e-6));
+        if (m.x > maxMag.x) { maxMag.x = m.x; maxPhase.x = tap.y; maxFreq.x = tapFreq; }
+        if (m.y > maxMag.y) { maxMag.y = m.y; maxPhase.y = tap.w; maxFreq.y = tapFreq; }
+      }
+      vec2 peakiness = maxMag * maxMag / max(power, vec2(1e-20));
+      vec2 s2 = smoothstep(vec2(0.3), vec2(0.7), peakiness);
+      vec2 tonalMag = sqrt(XRES_ATTEN_COEFF / PI) * ampSum;
+      vec2 newMag = sqrt(mix(power, tonalMag * tonalMag, s2));
+      magPhase.x = newMag.x;
+      magPhase.z = newMag.y;
+      // Swap the centre tap's stored phase for the loudest tap's, carried
+      // through the same intended-ratio and carrier-rebase terms.
+      baseL += freqRatio * (maxPhase.x - magPhase.y)
+             + TWO_PI * destFreqHz * (maxFreq.x - srcFreqHz) / idealFreqHz * tDestSec;
+      baseR += freqRatio * (maxPhase.y - magPhase.w)
+             + TWO_PI * destFreqHz * (maxFreq.y - srcFreqHz) / idealFreqHz * tDestSec;
+    }
+  }
+
   float replace = clamp((abs(phaseGain - 1.0) - NOISE_REPLACE_DEADZONE) * NOISE_REPLACE_RAMP, 0.0, 1.0);
   if (replace > 0.0) {
     float noise = replace * (1.0 - sourceTonality(wrappedSourceUv));

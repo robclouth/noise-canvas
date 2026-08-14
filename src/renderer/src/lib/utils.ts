@@ -117,6 +117,41 @@ export function unitsToUv(
   return new Vector2(u, v);
 }
 
+/**
+ * Slope of the frequency-preserving dest→source band-UV map (the shader's
+ * destToSourceBandUv): how far the source read moves, in source UV, per unit
+ * of dest UV. Equals the plain band-count ratio only when both files share a
+ * bands-per-octave setting — offsets that compensate cursor movement (Fixed
+ * and Anchored source tracking) must use this slope, not the count ratio.
+ */
+export function sourceBandUvSlope(
+  dest: { numBands: number; bandsPerOctave: number },
+  source: { numBands: number; bandsPerOctave: number },
+): number {
+  const safeDestBpo = dest.bandsPerOctave > 0 ? dest.bandsPerOctave : 1;
+  const safeSourceBands = source.numBands > 0 ? source.numBands : 1;
+  return (dest.numBands * source.bandsPerOctave) / (safeDestBpo * safeSourceBands);
+}
+
+/**
+ * CPU mirror of the shader's destToSourceBandUv: the source band-UV that holds
+ * the same frequency as a dest band-UV. Anchored on each file's configured
+ * minFreq, which can sit up to half a band from gaborator's snapped tuning, so
+ * it serves display geometry, not sample-exact reads.
+ */
+export function destToSourceBandUv(
+  destUvY: number,
+  dest: { numBands: number; bandsPerOctave: number; minFreq: number },
+  source: { numBands: number; bandsPerOctave: number; minFreq: number },
+): number {
+  const safeDestBpo = dest.bandsPerOctave > 0 ? dest.bandsPerOctave : 1;
+  const destIdx = destUvY * dest.numBands - 0.5;
+  const destFreq = dest.minFreq * Math.pow(2, destIdx / safeDestBpo);
+  const safeSourceMin = source.minFreq > 0 ? source.minFreq : 1e-6;
+  const srcIdx = source.bandsPerOctave * Math.log2(Math.max(destFreq, 1e-6) / safeSourceMin);
+  return (srcIdx + 0.5) / (source.numBands > 0 ? source.numBands : 1);
+}
+
 export function uvToUnits(
   u: number,
   v: number,

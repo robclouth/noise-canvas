@@ -44,7 +44,13 @@ import { ATTRACT_MODULATOR_MAP_START } from "./constants";
 import { getFileOnsets } from "./file-onsets";
 import { buildModulatorUniforms } from "./modulator-utils";
 import { withPlatformDefines } from "./shader-utils";
-import { pitchUvToBandIndex, resolveBrushAnchor, resolveBrushFootprint, swungGridCellWidthUv } from "./utils";
+import {
+  pitchUvToBandIndex,
+  resolveBrushAnchor,
+  resolveBrushFootprint,
+  sourceBandUvSlope,
+  swungGridCellWidthUv,
+} from "./utils";
 
 // Import EffectType from the dependency-free types module
 import type { EffectType } from "../effects/types";
@@ -775,7 +781,7 @@ export class StrokeRenderer {
     const srcBpm = state.filepathsBpm?.[sourceFile.filePath] || bpm;
     const srcDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
     const timeScale = (bpm * totalDuration) / (srcBpm * srcDuration);
-    const bandScale = this.spectrogramData.numBands / sourceFile.spectrogramData.numBands;
+    const bandScale = sourceBandUvSlope(this.spectrogramData, sourceFile.spectrogramData);
 
     // Active step's footprint determines source offset semantics. In Full mode the
     // brush anchors to 0 on that axis, so the source offset is computed from that
