@@ -73,18 +73,26 @@ function createModulatorScaleLut(): DataTexture {
   return tex;
 }
 
+// Attract params go on the effect item and the rest on the step, matching
+// where the app's parameter store writes each kind.
 function createAttractState(params: Record<string, number>): State {
-  const effects = [{ id: "test-attract", effect: "attract" as const, enabled: true, params: {} }];
+  const effectParams: Record<string, number> = {};
+  const stepParams: Record<string, number> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (key.startsWith("attract")) effectParams[key] = value;
+    else stepParams[key] = value;
+  }
+  const effects = [{ id: "test-attract", effect: "attract" as const, enabled: true, params: effectParams }];
   const state = createMockState({
     effects,
     filepathsBpm: { "/test/attract-test.wav": 120 },
-    ...params,
+    ...stepParams,
   });
   const activeSteps = state.brushes[state.activeBrushIndex]?.steps;
   if (activeSteps && activeSteps[0]) {
     const step = activeSteps[0] as unknown as Record<string, unknown>;
     step.effects = effects;
-    Object.assign(step, params);
+    Object.assign(step, stepParams);
   }
   return state;
 }
@@ -203,6 +211,41 @@ describe("Attract effect", () => {
       maxDelta = Math.max(maxDelta, Math.abs(outputData[i] - initialData[i]));
     }
     expect(maxDelta).toBeLessThan(1e-6);
+
+    renderer.dispose();
+  });
+
+  it("pulls energy toward a modulator pattern's bright regions", async () => {
+    const renderer = createRenderer();
+    const state = createAttractState({
+      attractMap: 3,
+      attractAmountX: 0,
+      attractAmountY: 100,
+      attractSmoothY: 2,
+      modulator1Mode: 0,
+      modulator1PatternShape: 0,
+      modulator1PatternRateSemis: 12,
+      modulator1PatternRateBeats: 0,
+    });
+    const sourceFile = createSourceFile(renderer);
+
+    const initialData = await renderer.getFBOData();
+    renderer.renderStroke(strokeParams(), state, sourceFile);
+    const outputData = await renderer.getFBOData();
+
+    let changed = 0;
+    let sawNaN = false;
+    for (let i = 0; i < outputData.length; i += 4) {
+      if (Number.isNaN(outputData[i]) || Number.isNaN(outputData[i + 1])) sawNaN = true;
+      if (Math.abs(outputData[i] - initialData[i]) > 1e-4) changed++;
+    }
+
+    expect(sawNaN).toBe(false);
+    expect(changed).toBeGreaterThan(100);
+
+    const ratio = totalEnergy(outputData) / totalEnergy(initialData);
+    expect(ratio).toBeGreaterThan(0.25);
+    expect(ratio).toBeLessThan(4);
 
     renderer.dispose();
   });

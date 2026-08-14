@@ -40,6 +40,7 @@ import {
 import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
+import { ATTRACT_MODULATOR_MAP_START } from "./constants";
 import { getFileOnsets } from "./file-onsets";
 import { buildModulatorUniforms } from "./modulator-utils";
 import { withPlatformDefines } from "./shader-utils";
@@ -906,12 +907,29 @@ export class StrokeRenderer {
       // Override the source texture to use the correct input for this step
       commonUniforms.sourceSpectrogramTex.value = stepSourceFbo.texture;
 
+      // Get enabled effects in order for this step
+      const stepEffects = stepState.effects as {
+        id: string;
+        effect: EffectType;
+        enabled: boolean;
+        params: Record<string, unknown>;
+      }[];
+      const enabledEffectItems = stepEffects.filter(({ enabled }) => enabled);
+
       // Precompute this step's modulator outputs into modulatorFbo, then point
       // the effect uniforms at the resulting textures. Done once per step before
       // any effect pass, so the expensive modulator evaluation happens once. When
       // nothing routes to a modulator, every consumer multiplies its output by
-      // zero, so skip the pass and bind the zero placeholder instead.
-      if (hasActiveModulatorRouting(stepState)) {
+      // zero, so skip the pass and bind the zero placeholder instead. Attract's
+      // modulator maps read the textures directly, so they keep the pass alive
+      // with no amounts routed; effect params live on the effect item, so the
+      // check reads each attract item's merged view, not the step state.
+      const attractReadsModulators = enabledEffectItems.some(
+        (item) =>
+          item.effect === "attract" &&
+          createEffectStateView(state, stepIndex, item).attractMap >= ATTRACT_MODULATOR_MAP_START,
+      );
+      if (hasActiveModulatorRouting(stepState) || attractReadsModulators) {
         // Nested-modulation routing lives on the step (modulator amounts are
         // per-step parameters), so resolve the gate from the step state, not the
         // global state, before rendering this step's modulators.
@@ -923,15 +941,6 @@ export class StrokeRenderer {
         commonUniforms.modulatorTex0 = { value: this.textures.placeholderTexture };
         commonUniforms.modulatorTex1 = { value: this.textures.placeholderTexture };
       }
-
-      // Get enabled effects in order for this step
-      const stepEffects = stepState.effects as {
-        id: string;
-        effect: EffectType;
-        enabled: boolean;
-        params: Record<string, unknown>;
-      }[];
-      const enabledEffectItems = stepEffects.filter(({ enabled }) => enabled);
 
       // If no effects are enabled, add a passthrough effect
       if (enabledEffectItems.length === 0) {

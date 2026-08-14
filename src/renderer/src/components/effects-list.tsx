@@ -100,15 +100,7 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
     "convolveGainDb",
   ],
   align: [],
-  attract: [
-    "attractMap",
-    "attractSourceFile",
-    "attractKernel",
-    "attractAmountX",
-    "attractAmountY",
-    "attractSmoothX",
-    "attractSmoothY",
-  ],
+  attract: ["attractMap", "attractSourceFile", "attractAmountX", "attractAmountY", "attractSmoothX", "attractSmoothY"],
 };
 
 const MAX_EFFECTS = 10;

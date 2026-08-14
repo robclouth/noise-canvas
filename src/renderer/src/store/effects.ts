@@ -58,7 +58,6 @@ export interface EffectsState {
   transmuteCurve: number;
   attractMap: number;
   attractSourceFile: FileParameterValue;
-  attractKernel: number;
   attractAmountX: number;
   attractAmountY: number;
   attractSmoothX: number;
@@ -151,7 +150,6 @@ export const createEffectsSlice = (): EffectsState => {
     // ---------------- Attract ----------------
     attractMap: getParameterDef("attractMap").default,
     attractSourceFile: null,
-    attractKernel: getParameterDef("attractKernel").default,
     attractAmountX: getParameterDef("attractAmountX").default,
     attractAmountY: getParameterDef("attractAmountY").default,
     attractSmoothX: getParameterDef("attractSmoothX").default,

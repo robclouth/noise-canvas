@@ -21,6 +21,10 @@ export function isOnsetGrid(gridSizeBeats: number): boolean {
   return gridSizeBeats < BEAT_VALUES[0].value;
 }
 
+// attractMap values at and above this read a modulator's precomputed field
+// (3/4/5 = Modulator 1/2/3).
+export const ATTRACT_MODULATOR_MAP_START = 3;
+
 // Coefficient magnitude produced by a steady sine at full scale (amplitude 1.0).
 // The analysis applies no amplitude normalization, so this factor is what relates
 // a stored magnitude to an absolute level: amplitude = magnitude / this. It is

@@ -10,7 +10,6 @@ export const AttractEffect = memo(function AttractEffect() {
     <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
       <ParameterControl paramKey="attractMap" color={COLOR} />
       <ParameterControl paramKey="attractSourceFile" color={COLOR} />
-      <ParameterControl paramKey="attractKernel" color={COLOR} />
       <ParameterControl paramKey="attractAmountX" color={COLOR} />
       <ParameterControl paramKey="attractAmountY" color={COLOR} />
       <ParameterControl paramKey="attractSmoothX" color={COLOR} />

@@ -356,11 +356,10 @@ No parameters. Phase-aligns every band at the start of the brush to form a sharp
 
 Pulls energy across time and pitch toward a map — a landscape of valleys that content falls into. Energy genuinely relocates: each bin's magnitude moves by its own kernel-weighted pull and lands with its phase re-based, so a strong pull is a real migration, not a filter sweep. Repeated strokes behave like mean-shift: content climbs to the floor of its valley and settles there.
 
-- **Map** – Source uses the sound's own loud content as the landscape, so strong partials capture their neighbours; Scale puts a valley at every note of the global scale (autotune when the pull is full); Grid puts valleys on the snap grid's pitch and beat lines.
+- **Map** – Source uses the sound's own loud content as the landscape, so strong partials capture their neighbours; Scale puts a valley at every note of the global scale (autotune when the pull is full); Grid puts valleys on the snap grid's pitch and beat lines; Modulator 1–3 use a modulator's field as the landscape, so energy gathers where the pattern is bright — an image modulator turns the picture into terrain the sound falls into.
 - **Source** – picks the file whose loud regions form the Source map's landscape, matched by absolute frequency. Leave it empty and the sound attracts toward itself.
-- **Valley** – the cross-section of each valley: Gaussian, Triangle, Box, or Steps. It shapes both how far a valley reaches and how the pull ramps toward the floor.
-- **Pull Time / Pull Pitch** – how far energy moves along each axis. Negative pushes away; past 100 overshoots the target.
-- **Smooth Time / Smooth Pitch** – valley width per axis, in beats and semitones. Narrow valleys snap precisely and ignore distant content; wide valleys reach out and drag everything, and at the extreme the landscape flattens and the pull fades away.
+- **Pull ↔ / ↕** – how far energy moves along each axis. Negative pushes away; past 100 overshoots the target.
+- **Smooth ↔ / ↕** – valley width per axis, in beats and semitones. Narrow valleys snap precisely and ignore distant content; wide valleys reach out and drag everything, and at the extreme the landscape flattens and the pull fades away.
 
 ---
 

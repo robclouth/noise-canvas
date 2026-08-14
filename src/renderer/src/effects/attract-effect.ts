@@ -9,6 +9,7 @@ import {
   getMacroAmountValuesNormalized,
 } from "@renderer/store/modulators";
 import type { EffectsState } from "@renderer/store/effects";
+import type { State } from "@renderer/store/types";
 import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import attractEffectFrag from "../glsl/attract-effect.frag";
@@ -28,6 +29,17 @@ const defaultUniformValue = {
 // Pass layout: [pitch axis, time axis]
 const PASS_AXES = [0, 1];
 
+// Whether a pull parameter can end up non-zero once modulation is applied.
+function pullCanBeNonZero(state: State, key: "attractAmountX" | "attractAmountY"): boolean {
+  if (state[key] !== 0) return true;
+  const anyNonZero = (values: number[]): boolean => values.some((v) => v !== 0);
+  return (
+    anyNonZero(getModAmountValuesNormalized(state, key)) ||
+    anyNonZero(getContextualModAmountsNormalized(state, key)) ||
+    anyNonZero(getMacroAmountValuesNormalized(state, key))
+  );
+}
+
 class AttractEffect extends BaseEffect {
   materials: RawShaderMaterial[];
   parameters: (keyof EffectsState)[];
@@ -40,7 +52,6 @@ class AttractEffect extends BaseEffect {
           uniforms: {
             ...defaultValues,
             attractMap: { value: 0 },
-            attractKernel: { value: 0 },
             attractAxis: { value: axis },
             attractAmountX: { value: { ...defaultUniformValue } },
             attractAmountY: { value: { ...defaultUniformValue, value: 100 } },
@@ -63,14 +74,16 @@ class AttractEffect extends BaseEffect {
           glslVersion: GLSL3,
         }),
     );
-    this.parameters = [
-      "attractMap",
-      "attractAmountX",
-      "attractAmountY",
-      "attractSmoothX",
-      "attractSmoothY",
-      "attractKernel",
-    ];
+    this.parameters = ["attractMap", "attractAmountX", "attractAmountY", "attractSmoothX", "attractSmoothY"];
+  }
+
+  // The pitch pass is an identity at zero pitch pull, and the time pass at
+  // zero time pull or on the Scale map, which has no time lattice.
+  getActivePasses(state: State): number[] {
+    const passes: number[] = [];
+    if (pullCanBeNonZero(state, "attractAmountY")) passes.push(0);
+    if (state.attractMap !== 1 && pullCanBeNonZero(state, "attractAmountX")) passes.push(1);
+    return passes;
   }
 
   updateEffectUniforms(props: UpdateEffectUniformsProps): void {
@@ -97,7 +110,6 @@ class AttractEffect extends BaseEffect {
     updateParam("attractSmoothX", "attractSmoothX");
     updateParam("attractSmoothY", "attractSmoothY");
     material.uniforms.attractMap.value = state.attractMap;
-    material.uniforms.attractKernel.value = state.attractKernel;
     material.uniforms.attractScaleOffsets.value = buildScaleOffsets(state.scaleTonic, state.scaleType);
     material.uniforms.attractGridSemis.value = state.gridSizeSemis;
     material.uniforms.attractGridBeats.value = state.gridSizeBeats > ONSETS_GRID_VALUE ? state.gridSizeBeats : 1;

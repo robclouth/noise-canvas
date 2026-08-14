@@ -182,7 +182,7 @@ describe("painting performance", () => {
 
   // The effects most likely to dominate per the GPU-fill analysis, plus a
   // passthrough baseline (one full ping-pong pass with no kernel work).
-  const EFFECTS: { label: string; keys: EffectType[] }[] = [
+  const EFFECTS: { label: string; keys: EffectType[]; stepOverrides?: Record<string, unknown> }[] = [
     { label: "passthrough", keys: ["passthrough"] },
     { label: "dynamics", keys: ["dynamics"] },
     { label: "transform", keys: ["transform"] },
@@ -192,6 +192,10 @@ describe("painting performance", () => {
     { label: "evolve", keys: ["evolve"] },
     { label: "sort", keys: ["sort"] },
     { label: "convolve", keys: ["convolve"] },
+    // Both pulls on so the pitch and time passes both run their gathers; the
+    // pitch-only row is the default setting, where the time pass is skipped.
+    { label: "attract", keys: ["attract"], stepOverrides: { attractAmountX: 100 } },
+    { label: "attract:pitch-only", keys: ["attract"] },
     { label: "chain:transform+dynamics+blur", keys: ["transform", "dynamics", "blur"] },
   ];
 
@@ -201,7 +205,7 @@ describe("painting performance", () => {
   // effects collapse toward the passthrough baseline.
   describe("per-effect cost @ 1024²", () => {
     const size = EFFECT_SIZE;
-    for (const { label, keys } of EFFECTS) {
+    for (const { label, keys, stepOverrides } of EFFECTS) {
       for (const coverage of ["small", "full"] as Coverage[]) {
         it(`${label} [${coverage}]`, () => {
           const h = makeHarness(size);
@@ -210,6 +214,7 @@ describe("painting performance", () => {
             const state = createStateForEffects(keys, {
               brushSizeTime: cov.brushSizeTime,
               brushSizePitch: cov.brushSizePitch,
+              stepOverrides,
             });
             const ms = measure(h, state, { totalDuration: COVERAGE_DURATION });
             collected.push({ scenario: `${label} [${coverage}]`, size: size.label, msPerStroke: ms });
