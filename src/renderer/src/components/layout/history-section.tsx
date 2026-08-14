@@ -6,13 +6,14 @@ import { openConfirm } from "@renderer/lib/modals";
 import { getHistoryManager, type HistoryManager, type HistoryNode } from "@renderer/lib/history-manager";
 import { WIDGET_INPUT_HEIGHT } from "@renderer/lib/ui-density";
 import { helpProps } from "@renderer/lib/ui-controls";
-import { ChevronDown, ChevronRight, GitBranch, MoreVertical, Redo2, Star, Undo2 } from "lucide-react";
+import { MoreVertical, Redo2, Star, Undo2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Section } from "../section";
 
 const LANE_WIDTH = 9;
 const ROW_HEIGHT = 22;
 const DOT_RADIUS = 3;
+const GROUP_DOT_RADIUS = 7;
 const GRAPH_PAD_LEFT = 4;
 const MAX_LANES = 3;
 
@@ -111,7 +112,7 @@ function layoutTree(nodes: Record<string, HistoryNode>): LayoutResult {
 const MERGE_RUN_MIN_LENGTH = 3;
 
 interface NodeMeta {
-  kind: "branch" | "branchHead" | "run" | "runHead";
+  kind: "branch" | "run";
   count?: number;
   branchRootId?: string;
   latestLabel?: string;
@@ -177,11 +178,23 @@ function buildVisibleTree(
 ): { tree: Record<string, HistoryNode>; meta: Map<string, NodeMeta> } {
   const spineIds = computeSpine(nodes, currentId);
   const branchRootCache = new Map<string, string>();
+  const branchSizeCache = new Map<string, number>();
   const meta = new Map<string, NodeMeta>();
   const tree: Record<string, HistoryNode> = {};
 
-  const isVisible = (id: string): boolean =>
-    spineIds.has(id) || expandedBranches.has(branchRootIdOf(id, nodes, spineIds, branchRootCache));
+  const branchSize = (branchRootId: string): number => {
+    const cached = branchSizeCache.get(branchRootId);
+    if (cached !== undefined) return cached;
+    const size = collectSubtree(branchRootId, nodes).length;
+    branchSizeCache.set(branchRootId, size);
+    return size;
+  };
+
+  const isVisible = (id: string): boolean => {
+    if (spineIds.has(id)) return true;
+    const root = branchRootIdOf(id, nodes, spineIds, branchRootCache);
+    return branchSize(root) < MERGE_RUN_MIN_LENGTH || expandedBranches.has(root);
+  };
 
   for (const node of Object.values(nodes)) {
     if (!isVisible(node.id)) continue;
@@ -189,13 +202,11 @@ function buildVisibleTree(
     for (const childId of node.childIds) {
       if (isVisible(childId)) {
         childIds.push(childId);
-        if (!spineIds.has(childId) && branchRootIdOf(childId, nodes, spineIds, branchRootCache) === childId) {
-          meta.set(childId, { kind: "branchHead", branchRootId: childId });
-        }
         continue;
       }
-      // childId heads a branch the user left. Represent the whole subtree as
-      // one placeholder row attached where it diverged.
+      // childId heads a branch the user left, at least MERGE_RUN_MIN_LENGTH
+      // nodes deep. Represent the whole subtree as one placeholder row
+      // attached where it diverged; smaller branches just stay inline above.
       const placeholderId = `branch:${childId}`;
       childIds.push(placeholderId);
       const subtree = collectSubtree(childId, nodes);
@@ -220,7 +231,12 @@ function buildVisibleTree(
 
   const labelOf = (n: HistoryNode) => n.customLabel ?? n.label;
   const isPlaceholder = (id: string) => id.startsWith("branch:");
-  const mergeable = (n: HistoryNode) => !isPlaceholder(n.id) && n.id !== currentId && !n.favorited;
+  // Only the path the user is on merges into runs. A node made visible because
+  // it's inside a branch (small enough to show inline, or explicitly expanded)
+  // stays a real row — otherwise expanding a branch of same-label steps would
+  // immediately re-collapse itself into a run and the expand would do nothing.
+  const mergeable = (n: HistoryNode) =>
+    !isPlaceholder(n.id) && n.id !== currentId && !n.favorited && spineIds.has(n.id);
   const isTopOfChain = (node: HistoryNode): boolean => {
     if (node.childIds.length !== 1) return true;
     const child = tree[node.childIds[0]];
@@ -239,10 +255,7 @@ function buildVisibleTree(
     }
     if (chain.length < MERGE_RUN_MIN_LENGTH) continue;
 
-    if (expandedRuns.has(node.id)) {
-      meta.set(node.id, { kind: "runHead", count: chain.length, runNodeIds: chain.map((n) => n.id) });
-      continue;
-    }
+    if (expandedRuns.has(node.id)) continue;
 
     const oldest = chain[chain.length - 1];
     const newest = tree[node.id];
@@ -256,27 +269,6 @@ function buildVisibleTree(
   }
 
   return { tree, meta };
-}
-
-function isDescendantOrSelf(rootId: string, targetId: string, nodes: Record<string, HistoryNode>): boolean {
-  let id: string | null = targetId;
-  while (id) {
-    if (id === rootId) return true;
-    id = nodes[id]?.parentId ?? null;
-  }
-  return false;
-}
-
-function isRunMember(repId: string, targetId: string, nodes: Record<string, HistoryNode>): boolean {
-  const labelOf = (n: HistoryNode) => n.customLabel ?? n.label;
-  let cur: HistoryNode | undefined = nodes[repId];
-  while (cur) {
-    if (cur.id === targetId) return true;
-    const parent: HistoryNode | undefined = cur.parentId ? nodes[cur.parentId] : undefined;
-    if (!parent || parent.childIds.length !== 1 || labelOf(parent) !== labelOf(cur)) break;
-    cur = parent;
-  }
-  return false;
 }
 
 // ---- Time formatter ----
@@ -368,14 +360,12 @@ const HistoryRow = memo(function HistoryRow({
 }: HistoryRowProps) {
   const { node, lane } = row;
   const isBranchPlaceholder = meta?.kind === "branch";
-  const isBranchHead = meta?.kind === "branchHead";
   const isRun = meta?.kind === "run";
-  const isRunHead = meta?.kind === "runHead";
   const isCollapsedGroup = isBranchPlaceholder || isRun;
-  const runCount = isRun ? meta.count : undefined;
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(node.customLabel ?? node.label);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [badgeHovered, setBadgeHovered] = useState(false);
   // Mantine's Menu.Target auto-opens on target click regardless of whether
   // we pass `opened` — so we gate `onChange(true)` by a ref flag that is only
   // set when the user right-clicks. Closes (onChange(false)) always pass
@@ -418,7 +408,14 @@ const HistoryRow = memo(function HistoryRow({
     setEditing(false);
   }, [editValue, node.id, node.customLabel, node.label, onRename]);
 
-  const graphWidth = Math.min(laneCount, MAX_LANES) * LANE_WIDTH + GRAPH_PAD_LEFT;
+  const groupCount = isBranchPlaceholder || isRun ? meta!.count : undefined;
+  const badgeText = groupCount == null ? "" : groupCount > 99 ? "99+" : String(groupCount);
+  // A 1-digit badge fits the base radius; wider text needs a wider circle to
+  // stay centered instead of overflowing it.
+  const groupDotRadius =
+    badgeText.length >= 3 ? GROUP_DOT_RADIUS + 3 : badgeText.length === 2 ? GROUP_DOT_RADIUS + 1.5 : GROUP_DOT_RADIUS;
+  const graphWidth =
+    Math.min(laneCount, MAX_LANES) * LANE_WIDTH + GRAPH_PAD_LEFT + (isCollapsedGroup ? groupDotRadius : 0);
   const centerX = (l: number) => GRAPH_PAD_LEFT + l * LANE_WIDTH + LANE_WIDTH / 2;
   const rowCenterY = ROW_HEIGHT / 2;
 
@@ -476,15 +473,50 @@ const HistoryRow = memo(function HistoryRow({
             strokeWidth={1}
           />
         )}
-        {/* Node dot */}
-        <circle
-          cx={dotX}
-          cy={rowCenterY}
-          r={DOT_RADIUS}
-          fill={isCollapsedGroup ? "none" : isCurrent ? "var(--mantine-color-orange-5)" : "var(--mantine-color-dark-2)"}
-          stroke={isCollapsedGroup ? "var(--mantine-color-dark-2)" : undefined}
-          strokeWidth={isCollapsedGroup ? 1.2 : undefined}
-        />
+        {/* Node dot, or a count badge standing in for the group folded behind
+            it. The badge itself is the click target for expanding the group. */}
+        {isCollapsedGroup ? (
+          <>
+            <circle
+              cx={dotX}
+              cy={rowCenterY}
+              r={groupDotRadius}
+              fill={badgeHovered ? "var(--mantine-color-dark-3)" : "var(--mantine-color-dark-4)"}
+              style={{ cursor: "pointer" }}
+              onMouseEnter={() => setBadgeHovered(true)}
+              onMouseLeave={() => setBadgeHovered(false)}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (menuOpen || e.detail > 1) return;
+                suppressDblClickRef.current = true;
+                setTimeout(() => {
+                  suppressDblClickRef.current = false;
+                }, 500);
+                if (isBranchPlaceholder) onToggleBranch(meta!.branchRootId!);
+                else onToggleRun(node.id);
+              }}
+            />
+            <text
+              x={dotX}
+              y={rowCenterY}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontSize={badgeText.length >= 3 ? 7 : 8}
+              fontWeight={600}
+              fill="var(--mantine-color-dark-0)"
+              style={{ pointerEvents: "none", userSelect: "none" }}
+            >
+              {badgeText}
+            </text>
+          </>
+        ) : (
+          <circle
+            cx={dotX}
+            cy={rowCenterY}
+            r={DOT_RADIUS}
+            fill={isCurrent ? "var(--mantine-color-orange-5)" : "var(--mantine-color-dark-2)"}
+          />
+        )}
       </svg>
 
       <Menu
@@ -535,25 +567,6 @@ const HistoryRow = memo(function HistoryRow({
             }}
           >
             <Group gap={4} wrap="nowrap" align="center">
-              {isCollapsedGroup && (
-                <ChevronRight size={10} color="var(--mantine-color-dark-2)" style={{ flexShrink: 0 }} />
-              )}
-              {(isBranchHead || isRunHead) && (
-                <UnstyledButton
-                  {...helpProps("history-collapse")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (isBranchHead) onToggleBranch(meta!.branchRootId!);
-                    else onToggleRun(node.id);
-                  }}
-                  style={{ display: "flex", flexShrink: 0 }}
-                >
-                  <ChevronDown size={10} color="var(--mantine-color-dark-2)" />
-                </UnstyledButton>
-              )}
-              {(isBranchPlaceholder || isBranchHead) && (
-                <GitBranch size={10} color="var(--mantine-color-dark-2)" style={{ flexShrink: 0 }} />
-              )}
               {node.favorited && (
                 <Star
                   size={10}
@@ -601,15 +614,10 @@ const HistoryRow = memo(function HistoryRow({
                   size="xs"
                   truncate
                   fw={isCurrent ? 600 : 400}
-                  c={isBranchPlaceholder ? "dark.2" : isCurrent ? undefined : "dark.1"}
+                  c={isCollapsedGroup ? "dark.2" : isCurrent ? undefined : "dark.1"}
                   style={{ flex: 1, minWidth: 0 }}
                 >
                   {isBranchPlaceholder ? meta!.latestLabel : (node.customLabel ?? node.label)}
-                </Text>
-              )}
-              {(isBranchPlaceholder || runCount) && (
-                <Text size="10px" c="dimmed" style={{ flexShrink: 0 }}>
-                  ×{isBranchPlaceholder ? meta!.count : runCount}
                 </Text>
               )}
               {showSpinner && (
@@ -716,26 +724,12 @@ export function HistorySection() {
   const [expandedBranches, setExpandedBranches] = useState<Set<string>>(() => new Set());
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(() => new Set());
   const suppressDblClickRef = useRef(false);
+  // Any history change (a new stroke, an undo, a redo) collapses everything
+  // back down — there's no manual collapse control, only expand-to-peek.
   useEffect(() => {
     setExpandedBranches(new Set());
     setExpandedRuns(new Set());
-  }, [manager]);
-  useEffect(() => {
-    if (!manifest) return;
-    const currentId = manifest.currentId;
-    const nodes = manifest.nodes;
-    setExpandedBranches((prev) => {
-      if (prev.size === 0) return prev;
-      const next = new Set([...prev].filter((id) => isDescendantOrSelf(id, currentId, nodes)));
-      return next.size === prev.size ? prev : next;
-    });
-    setExpandedRuns((prev) => {
-      if (prev.size === 0) return prev;
-      const next = new Set([...prev].filter((id) => isRunMember(id, currentId, nodes)));
-      return next.size === prev.size ? prev : next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manifest?.currentId]);
+  }, [manager, manifest?.currentId]);
   const onToggleBranch = useCallback((branchRootId: string) => {
     setExpandedBranches((prev) => {
       const next = new Set(prev);
