@@ -1,5 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { mergePixelRanges, scatterPixelRanges } from "../pixel-ranges";
+import { mergePixelRanges, scatterPixelRanges, subtractPixelRanges } from "../pixel-ranges";
+
+describe("subtractPixelRanges", () => {
+  it("cuts a hole out of a range", () => {
+    expect(Array.from(subtractPixelRanges(new Uint32Array([0, 100]), new Uint32Array([10, 10])))).toEqual([
+      0, 10, 20, 80,
+    ]);
+  });
+
+  it("drops a range the cut covers entirely", () => {
+    expect(Array.from(subtractPixelRanges(new Uint32Array([10, 5]), new Uint32Array([0, 100])))).toEqual([]);
+  });
+
+  it("keeps a range the cut only touches at its edges", () => {
+    expect(Array.from(subtractPixelRanges(new Uint32Array([10, 10]), new Uint32Array([0, 10, 20, 10])))).toEqual([
+      10, 10,
+    ]);
+  });
+
+  it("applies every cut to every range that follows", () => {
+    const kept = subtractPixelRanges(new Uint32Array([0, 10, 20, 10]), new Uint32Array([5, 20]));
+    expect(Array.from(kept)).toEqual([0, 5, 25, 5]);
+  });
+
+  it("leaves the newer stroke's pixels behind when an older patch folds in", () => {
+    const canvas = Float32Array.from({ length: 8 * 4 }, () => 2);
+    const older = Float32Array.from({ length: 8 * 4 }, () => 1);
+    // The older patch covers pixels 0-5; the newer stroke painted pixels 3-5.
+    const kept = subtractPixelRanges(new Uint32Array([0, 6]), new Uint32Array([3, 3]));
+    scatterPixelRanges(canvas, older, kept);
+
+    expect(Array.from({ length: 8 }, (_, p) => canvas[p * 4])).toEqual([1, 1, 1, 2, 2, 2, 2, 2]);
+  });
+});
 
 describe("scatterPixelRanges", () => {
   it("copies only the ranges' pixels, four floats each", () => {

@@ -636,6 +636,9 @@ export class HistoryManager {
     this.packedCache.set(id, this.currentPacked);
     this.lastLoadedAnchorId = id;
     this.fboOutOfSync = false;
+    // The packed layout changes with the new dimensions, so a patch stashed
+    // against the old one no longer addresses the pixels it was cut from.
+    clearCanvasPatchStash(this.fileId);
     await this.writeManifest();
     this.notifyStateChange();
     return id;
