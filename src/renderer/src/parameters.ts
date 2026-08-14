@@ -1654,7 +1654,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     name: "Limit Strokes",
     label: "Limit",
     description:
-      "Holds each stroke's own level down as you paint it, following the brush envelope so the edges stay untouched. Turn it off to paint as loud as the effect makes it.",
+      "Holds each stroke's own level down as you paint it, leaving the audio around it untouched. Turn it off to paint as loud as the effect makes it.",
     default: true,
   },
   reanalyzeStrokes: {

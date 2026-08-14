@@ -1,6 +1,4 @@
 import type { CommitStroke, CommitWindow } from "../../../main/lib/types";
-import { brushEnvelopeShape } from "./brush-envelope";
-import { LEVEL_HOP_SECONDS } from "./output-levels";
 import type { HistoryDimensions } from "./history-manager";
 import type { SpectrogramData, State } from "@renderer/store/types";
 
@@ -39,7 +37,6 @@ export interface StrokeCommitSnapshot {
   footprintUv: FootprintUv | null;
   strokeGeneration: number;
   curveTime: number;
-  skewTime: number;
   wrapMode: number;
   limiterEnabled: boolean;
   reanalyzeEnabled: boolean;
@@ -71,7 +68,6 @@ export function buildStrokeCommitSnapshot(opts: {
     footprintUv: renderer.getCommittedFootprintUv(),
     strokeGeneration: renderer.getStrokeGeneration(),
     curveTime: (step?.brushCurveTime as number | undefined) ?? state.brushCurveTime,
-    skewTime: (step?.brushSkewTime as number | undefined) ?? state.brushSkewTime,
     wrapMode: (step?.brushWrapMode as number | undefined) ?? state.brushWrapMode,
     limiterEnabled: state.limiterEnabled,
     reanalyzeEnabled: state.reanalyzeStrokes,
@@ -132,39 +128,5 @@ export function commitStrokeOf(snapshot: StrokeCommitSnapshot, limitStrokes: boo
     hardEdgeEnd: hard && footEndFrame < spec.numFrames,
     applyLimiter: limitStrokes,
     project: snapshot.reanalyzeEnabled,
-    envelope: buildTimeEnvelope(snapshot),
   };
-}
-
-/**
- * The brush's time envelope across the whole file, one point per level hop.
- * Each point holds the envelope's largest value over its own hop, so a
- * rectangular brush stays rectangular at this resolution rather than losing
- * its last hop to a ramp.
- */
-export function buildTimeEnvelope(snapshot: StrokeCommitSnapshot): Float32Array {
-  const { footprintUv, spec, curveTime, skewTime } = snapshot;
-  const hop = Math.max(1, Math.round(spec.sampleRate * LEVEL_HOP_SECONDS));
-  const points = Math.ceil(spec.numFrames / hop) + 1;
-  const envelope = new Float32Array(points);
-  if (!footprintUv) return envelope;
-
-  const startFrame = footprintUv.timeMin * spec.numFrames;
-  const span = (footprintUv.timeMax - footprintUv.timeMin) * spec.numFrames;
-  if (span <= 0) return envelope;
-
-  const curve = curveTime / 100;
-  const skew = (skewTime + 100) / 200;
-  // Sub-samples each hop so the point holds the envelope's peak over it, not
-  // whatever the envelope happens to be at its left edge.
-  const SUBSTEPS = 4;
-  for (let p = 0; p < points; p++) {
-    let peak = 0;
-    for (let s = 0; s <= SUBSTEPS; s++) {
-      const sample = p * hop + (s / SUBSTEPS) * hop;
-      peak = Math.max(peak, brushEnvelopeShape((sample - startFrame) / span, curve, skew));
-    }
-    envelope[p] = peak;
-  }
-  return envelope;
 }

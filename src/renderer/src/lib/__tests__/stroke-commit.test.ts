@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { brushEnvelopeShape } from "../brush-envelope";
 import { applyCoefficientPatch } from "../coef-patch";
-import { LEVEL_HOP_SECONDS } from "../output-levels";
 import {
   buildStrokeCommitSnapshot,
-  buildTimeEnvelope,
   commitStrokeOf,
   commitWindowOf,
   type DirtyRegionUv,
@@ -144,7 +141,6 @@ describe("stroke commit snapshot", () => {
       autoPlaybackParams: null,
     });
     expect(snapshot.curveTime).toBe(10);
-    expect(snapshot.skewTime).toBe(40);
     expect(snapshot.wrapMode).toBe(1);
   });
 });
@@ -197,49 +193,6 @@ describe("commit stroke request", () => {
   it("asks for the projection only when re-analyse is on", () => {
     expect(commitStrokeOf(makeSnapshot({ reanalyzeEnabled: true }), false).project).toBe(true);
     expect(commitStrokeOf(makeSnapshot({ reanalyzeEnabled: false }), false).project).toBe(false);
-  });
-});
-
-describe("time envelope", () => {
-  it("holds a rectangle to its very last hop", () => {
-    const spec = makeSpec();
-    const snapshot = makeSnapshot({ spec, curveTime: 100 });
-    const envelope = buildTimeEnvelope(snapshot);
-    const hop = Math.round(SR * LEVEL_HOP_SECONDS);
-    const startFrame = 0.25 * NUM_FRAMES;
-    const endFrame = 0.5 * NUM_FRAMES;
-
-    // Interpolating a rectangle sampled at hop points would ramp its last hop
-    // down to zero, which is where the loudest samples of a hard stroke sit.
-    const lastInside = Math.floor((endFrame - 1) / hop);
-    expect(envelope[lastInside]).toBe(1);
-    expect(envelope[Math.floor(startFrame / hop)]).toBe(1);
-    // And nothing outside the footprint, so the margins stay untouched.
-    expect(envelope[Math.floor(startFrame / hop) - 2]).toBe(0);
-    expect(envelope[Math.ceil(endFrame / hop) + 2]).toBe(0);
-  });
-
-  it("follows the brush's own shape, and never exceeds it", () => {
-    const spec = makeSpec();
-    const snapshot = makeSnapshot({ spec, curveTime: 0, skewTime: 0 });
-    const envelope = buildTimeEnvelope(snapshot);
-    const hop = Math.round(SR * LEVEL_HOP_SECONDS);
-    const startFrame = 0.25 * NUM_FRAMES;
-    const span = 0.25 * NUM_FRAMES;
-
-    for (let p = 0; p < envelope.length; p++) {
-      expect(envelope[p]).toBeGreaterThanOrEqual(0);
-      expect(envelope[p]).toBeLessThanOrEqual(1);
-      // Each point is the shape's largest value over its own hop, so it is at
-      // least the value at the hop's start.
-      const atStart = brushEnvelopeShape((p * hop - startFrame) / span, 0, 0.5);
-      expect(envelope[p]).toBeGreaterThanOrEqual(atStart - 1e-6);
-    }
-  });
-
-  it("is silent when the stroke committed no footprint", () => {
-    const envelope = buildTimeEnvelope(makeSnapshot({ footprintUv: null }));
-    expect(envelope.every((v) => v === 0)).toBe(true);
   });
 });
 

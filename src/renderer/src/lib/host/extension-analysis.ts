@@ -137,7 +137,6 @@ const commitStroke: CommitStrokeFn = async (
     bandOffsets: analysisMetadata.bandOffsets,
     bandStepLog2s: analysisMetadata.bandStepLog2s,
     bandLengths: analysisMetadata.bandLengths,
-    envelope: stroke.envelope,
   };
   existingAudio.forEach((channel, i) => (arrays[`existing${i}`] = channel));
   if (params.onsetBandMax) arrays.onsetBandMax = params.onsetBandMax;

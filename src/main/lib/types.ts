@@ -73,13 +73,6 @@ export interface CommitStroke {
   applyLimiter: boolean;
   /** False skips the projection: the patch comes back empty and the canvas keeps its painted coefficients. */
   project: boolean;
-  /**
-   * The brush's time envelope across the whole file, one point per 5 ms hop,
-   * each holding the envelope's largest value over its hop. Weights the
-   * limiter, so the reduction belongs to the stroke and reaches unity where the
-   * brush does not reach.
-   */
-  envelope: Float32Array;
 }
 
 /** Peak level per 5 ms hop over the window a commit rebuilt, from `startHop`. */

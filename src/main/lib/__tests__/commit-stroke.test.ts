@@ -25,7 +25,6 @@ interface CommitStroke {
   hardEdgeEnd: boolean;
   applyLimiter: boolean;
   project: boolean;
-  envelope: Float32Array;
 }
 
 interface CommitResult {
@@ -156,18 +155,6 @@ function applyPatch(
   return out;
 }
 
-// A rectangular brush envelope over [from, to). Each point holds the envelope's
-// largest value over its own 5 ms hop, which is what the worker reads.
-function boxEnvelope(from = F0, to = F1): Float32Array {
-  const points = Math.ceil(N / HOP) + 1;
-  const env = new Float32Array(points);
-  for (let p = 0; p < points; p++) {
-    const hopStart = p * HOP;
-    env[p] = hopStart < to && hopStart + HOP > from ? 1 : 0;
-  }
-  return env;
-}
-
 function fullWindow(analysis: GaboratorAnalysisResult): CommitWindow {
   return { startFrame: F0, endFrame: F1, startBand: 0, endBand: analysis.numBands };
 }
@@ -180,7 +167,6 @@ function gateStroke(overrides: Partial<CommitStroke> = {}): CommitStroke {
     hardEdgeEnd: true,
     applyLimiter: false,
     project: true,
-    envelope: boxEnvelope(),
     ...overrides,
   };
 }
@@ -367,7 +353,7 @@ describe("commit stroke", () => {
   );
 
   it(
-    "limits inside the stroke only, and leaves the margins byte-equal",
+    "limits inside the stroke only, and never moves the margins away from the existing audio",
     async () => {
       const analysis = await addon.analyze([makeNoise(0.3)], 1, SR, PARAMS);
       const original = await roundTrip(analysis, analysis.data);
@@ -395,19 +381,109 @@ describe("commit stroke", () => {
       expect(limited.maxGainReductionDb).toBeGreaterThan(1);
       expect(limited.peak).toBeLessThan(bypassed.peak);
 
-      // The envelope is zero outside the footprint, so the gain is unity there
-      // and those samples come through exactly as the bypassed commit's.
-      for (let i = 0; i < F0 - SR * 0.05; i += 97) {
-        expect(limited.channels[0][i]).toBe(bypassed.channels[0][i]);
-      }
-      for (let i = F1 + Math.round(SR * 0.05); i < N; i += 97) {
-        expect(limited.channels[0][i]).toBe(bypassed.channels[0][i]);
-      }
+      // Outside the footprint the gain acts on the stroke's contribution
+      // alone, so limiting can only move a margin sample toward the existing
+      // audio, never past it — and where the commit already left the existing
+      // audio bit-exact, it stays bit-exact.
+      const checkMargin = (i: number): void => {
+        const ex = original[i];
+        const off = bypassed.channels[0][i];
+        const on = limited.channels[0][i];
+        if (off === ex) {
+          expect(on).toBe(ex);
+          return;
+        }
+        expect(Math.abs(on - off)).toBeLessThanOrEqual(Math.abs(off - ex) + 1e-6);
+        expect(Math.abs(on - ex)).toBeLessThanOrEqual(Math.abs(off - ex) + 1e-6);
+      };
+      for (let i = 0; i < F0 - SR * 0.05; i += 97) checkMargin(i);
+      for (let i = F1 + Math.round(SR * 0.05); i < N; i += 97) checkMargin(i);
 
       // Inside, the peak is held under the limiter's ceiling.
       let inside = 0;
       for (let i = F0; i < F1; i++) inside = Math.max(inside, Math.abs(limited.channels[0][i]));
       expect(inside).toBeLessThan(1);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "keeps a stroke audible on already-hot audio, held to the loudness that was there",
+    async () => {
+      // A hot bed whose inter-sample true peak sits at its sample peak: a
+      // loud low tone plus a little noise. Broadband noise at full scale
+      // would carry true peaks far over its sample peak, and the limiter's
+      // ceiling honours true peaks.
+      const noise = makeNoise(0.12, 555555);
+      const hot = new Float32Array(N);
+      for (let i = 0; i < N; i++) hot[i] = 0.85 * Math.sin((2 * Math.PI * 220 * i) / SR) + noise[i];
+      const analysis = await addon.analyze([hot], 1, SR, PARAMS);
+      const original = await roundTrip(analysis, analysis.data);
+
+      // Boost only the shortest-stride (highest-frequency) bands, so the
+      // stroke is a timbre change that survives being held to the existing
+      // loudness.
+      const minStep = Math.min(...Array.from(analysis.bandStepLog2s));
+      const loud = new Float32Array(analysis.data);
+      for (let b = 0; b < analysis.numBands; b++) {
+        if (analysis.bandStepLog2s[b] > minStep + 1) continue;
+        const s = 1 << analysis.bandStepLog2s[b];
+        const off = analysis.bandOffsets[b];
+        for (let k = 0; k < analysis.bandLengths[b]; k++) {
+          const t = k * s;
+          if (t >= F0 && t < F1) loud[(off + k) * 4] *= 16;
+        }
+      }
+      const window = fullWindow(analysis);
+      const stroke = gateStroke({ hardEdgeStart: false, hardEdgeEnd: false });
+
+      const bypassed = await addon.commitStroke(loud, metaOf(analysis), SR, PARAMS, [original], window, stroke);
+      const limited = await addon.commitStroke(loud, metaOf(analysis), SR, PARAMS, [original], window, {
+        ...stroke,
+        applyLimiter: true,
+      });
+
+      expect(limited.maxGainReductionDb).toBeGreaterThan(1);
+      expect(limited.peak).toBeLessThan(bypassed.peak);
+
+      // Held to the loudness that was there: the existing audio already sits
+      // over the global ceiling, and the stroke must not push past it. A soft
+      // edge's mask ramp may pass a sliver of the existing level, so the soft
+      // bound is read clear of the ramps.
+      const ramp = Math.round(SR * 0.015);
+      let originalPeak = 0;
+      let insidePeak = 0;
+      for (let i = F0 + ramp; i < F1 - ramp; i++) {
+        originalPeak = Math.max(originalPeak, Math.abs(original[i]));
+        insidePeak = Math.max(insidePeak, Math.abs(limited.channels[0][i]));
+      }
+      expect(insidePeak).toBeLessThan(originalPeak * 1.2);
+
+      // A gated hard edge takes no ramp, so the bound holds over the whole
+      // footprint, first sample to last.
+      const hardLimited = await addon.commitStroke(loud, metaOf(analysis), SR, PARAMS, [original], window, {
+        ...stroke,
+        hardEdgeStart: true,
+        hardEdgeEnd: true,
+        applyLimiter: true,
+      });
+      let originalPeakFull = 0;
+      let hardInsidePeak = 0;
+      for (let i = F0; i < F1; i++) {
+        originalPeakFull = Math.max(originalPeakFull, Math.abs(original[i]));
+        hardInsidePeak = Math.max(hardInsidePeak, Math.abs(hardLimited.channels[0][i]));
+      }
+      expect(hardInsidePeak).toBeLessThan(originalPeakFull * 1.2);
+
+      // Not cancelled: the stroke still reads as a clear change to the audio.
+      const changeDb = (audio: Float32Array): number => {
+        const a = Math.round((T0 + 0.05) * SR);
+        const b = Math.round((T1 - 0.05) * SR);
+        let sum = 0;
+        for (let i = a; i < b; i++) sum += (audio[i] - original[i]) ** 2;
+        return 10 * Math.log10(sum / (b - a) + 1e-20);
+      };
+      expect(changeDb(limited.channels[0])).toBeGreaterThan(rmsDb(original, T0 + 0.05, T1 - 0.05) - 12);
     },
     TIMEOUT,
   );

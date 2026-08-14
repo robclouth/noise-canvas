@@ -6,6 +6,7 @@
 #include <numeric>
 #include <cmath>
 #include <algorithm>
+#include <deque>
 #include <string>   // For std::string
 #include <sstream>  // For std::stringstream
 #include <iomanip>  // For std::fixed, std::setprecision
@@ -25,40 +26,29 @@ static std::ofstream &getDebugLog()
 
 #define DEBUG_LOG getDebugLog()
 
-// Look-ahead true-peak brickwall limiter. For each sample the gain needed to bring
-// the channel-linked inter-sample peak down to the ceiling is computed, then the
-// gain curve is shaped so it never exceeds the ceiling while staying smooth: it drops to each
-// new low, holds there for the hold time, then recovers (release); a final
-// backward pass ramps the gain down ahead of each peak (look-ahead attack) so
-// transients are contained without an abrupt gain step. The hold keeps the gain
-// constant across a full low-frequency cycle so bass is scaled cleanly instead of
-// gaining harmonic distortion from within-cycle gain modulation. All channels
-// share one gain curve to preserve the stereo image.
-static void applyLookaheadLimiter(std::vector<std::vector<float>> &channels, double sampleRate,
-                                  float holdMs = 40.0f, float releaseMs = 200.0f,
-                                  std::vector<float> *outGain = nullptr)
-{
-    if (channels.empty() || channels[0].empty())
-        return;
+// True-peak ceiling at -2 dBTP. The limiters bound the inter-sample
+// (reconstructed) peak, not just the sample peak, so playback resampling or the
+// DAC cannot clip overshoots hidden between samples. The headroom below 0 dBFS
+// exceeds the -1 dBTP streaming standard because near-Nyquist content is the
+// hardest case for finite-rate true-peak detection and the gain-envelope
+// smoothing shifts the peak reduction slightly; the margin covers both.
+static constexpr float LIMITER_CEILING = 0.794f;
 
-    // True-peak ceiling at -2 dBTP. The limiter bounds the inter-sample
-    // (reconstructed) peak, not just the sample peak, so playback resampling or the
-    // DAC cannot clip overshoots hidden between samples. The headroom below 0 dBFS
-    // exceeds the -1 dBTP streaming standard because near-Nyquist content is the
-    // hardest case for finite-rate true-peak detection and the gain-envelope
-    // smoothing below shifts the peak reduction slightly; the margin covers both.
-    constexpr float limiterCeiling = 0.794f;
-    // True-peak detection follows ITU-R BS.1770: oversample with a polyphase
-    // windowed-sinc FIR and take the peak of the reconstructed signal. Both the
-    // oversampling factor and the FIR length must be generous or the detector
-    // under-reads near-Nyquist inter-sample peaks (by ~1 dB at 4x/short-FIR) and the
-    // limiter lets real peaks slip over 0 dBFS, which clips on playback.
+// Channel-linked per-sample true peak. Detection follows ITU-R BS.1770:
+// oversample with a polyphase windowed-sinc FIR and take the peak of the
+// reconstructed signal. Both the oversampling factor and the FIR length must be
+// generous or the detector under-reads near-Nyquist inter-sample peaks (by
+// ~1 dB at 4x/short-FIR) and a limiter fed by it lets real peaks slip over
+// 0 dBFS, which clips on playback. Below 0.25 the sample peak stands in for the
+// reconstruction; nothing that quiet can overshoot the ceiling.
+static std::vector<float> truePeakPerSample(const std::vector<std::vector<float>> &channels)
+{
     constexpr int OS = 16;  // oversampling factor for true-peak detection
     constexpr int HT = 16;  // half kernel width; the interpolation FIR has 2*HT taps per phase
     constexpr float kPi = 3.14159265358979323846f;
     const int channelCount = static_cast<int>(channels.size());
-    const size_t blockLen = channels[0].size();
-    std::vector<float> gainEnv(blockLen, 1.0f);
+    const size_t blockLen = channels.empty() ? 0 : channels[0].size();
+    std::vector<float> truePeak(blockLen, 0.0f);
 
     // Polyphase windowed-sinc kernels that reconstruct the signal at the fractional
     // sample positions between each pair of samples.
@@ -77,7 +67,7 @@ static void applyLookaheadLimiter(std::vector<std::vector<float>> &channels, dou
 
     for (size_t i = 0; i < blockLen; ++i)
     {
-        float truePeak = 0.0f;
+        float peak = 0.0f;
         const bool interior = i >= static_cast<size_t>(HT) && i + HT < blockLen;
         for (int ch = 0; ch < channelCount; ++ch)
         {
@@ -95,18 +85,32 @@ static void applyLookaheadLimiter(std::vector<std::vector<float>> &channels, dou
                     chPeak = std::max(chPeak, std::abs(acc));
                 }
             }
-            truePeak = std::max(truePeak, chPeak);
+            peak = std::max(peak, chPeak);
         }
-        if (truePeak > limiterCeiling)
-            gainEnv[i] = limiterCeiling / truePeak;
+        truePeak[i] = peak;
     }
+    return truePeak;
+}
+
+// Shapes a per-sample required-gain curve so it stays smooth without ever
+// rising above the requirement at a peak: instant attack (drop to each new
+// low), hold for holdMs so a whole low-frequency cycle is scaled by a constant
+// gain (no bass distortion), linear recovery over releaseMs, then three forward
+// box blurs (running averages, O(n) each). The forward window biases the
+// smoothing earlier in time, so the gain is already reduced before each peak
+// (the look-ahead attack). The hold keeps the gain floor flat across the blur
+// window at every peak, so averaging can never raise it back up — peaks stay
+// caught, no overshoot. Three passes make the curve smooth (no slope kinks), so
+// multiplying audio by it adds no clicks.
+static void smoothLimiterGain(std::vector<float> &gainEnv, double sampleRate, float holdMs, float releaseMs)
+{
+    const size_t blockLen = gainEnv.size();
+    if (!blockLen)
+        return;
 
     const float releaseStep = 1.0f / std::max(1.0f, static_cast<float>(sampleRate) * releaseMs * 0.001f);
     const int holdSamples = static_cast<int>(std::max(0.0f, static_cast<float>(sampleRate) * holdMs * 0.001f));
 
-    // Ballistics: take the gain instantly down to each new low (instant attack — no
-    // peak escapes), hold it there for holdMs so a whole low-frequency cycle is scaled
-    // by a constant gain (no bass distortion), then recover linearly over releaseMs.
     float env = gainEnv[0];
     int hold = 0;
     for (size_t i = 0; i < blockLen; ++i)
@@ -128,12 +132,6 @@ static void applyLookaheadLimiter(std::vector<std::vector<float>> &channels, dou
         gainEnv[i] = env;
     }
 
-    // Look-ahead and smoothing in one step: three forward box blurs (running averages,
-    // O(n) each). The forward window biases the smoothing earlier in time, so the gain
-    // is already reduced before each peak (the look-ahead attack). The hold above keeps
-    // the gain floor flat across the blur window at every peak, so averaging can never
-    // raise it back up — peaks stay caught, no overshoot. Three passes make the gain
-    // curve smooth (no slope kinks), so multiplying the audio by it adds no clicks.
     const int boxW = std::max(1, static_cast<int>(std::lround(static_cast<double>(sampleRate) * 0.0007)));
     std::vector<float> tmp(blockLen);
     for (int pass = 0; pass < 3; ++pass)
@@ -156,9 +154,55 @@ static void applyLookaheadLimiter(std::vector<std::vector<float>> &channels, dou
         }
         gainEnv.swap(tmp);
     }
+}
+
+// Sliding maximum over a centred window of +/- halfWidth samples, O(n) via a
+// monotonic deque of indices.
+static std::vector<float> slidingMax(const std::vector<float> &v, int halfWidth)
+{
+    const int64_t n = static_cast<int64_t>(v.size());
+    std::vector<float> out(v.size(), 0.0f);
+    std::deque<int64_t> idx;
+    for (int64_t r = 0; r < n + halfWidth; ++r)
+    {
+        if (r < n)
+        {
+            while (!idx.empty() && v[static_cast<size_t>(idx.back())] <= v[static_cast<size_t>(r)])
+                idx.pop_back();
+            idx.push_back(r);
+        }
+        const int64_t c = r - halfWidth;
+        if (c < 0 || c >= n)
+            continue;
+        while (idx.front() < c - halfWidth)
+            idx.pop_front();
+        out[static_cast<size_t>(c)] = v[static_cast<size_t>(idx.front())];
+    }
+    return out;
+}
+
+// Look-ahead true-peak brickwall limiter: the gain needed to bring the
+// channel-linked inter-sample peak down to the ceiling, shaped by
+// smoothLimiterGain, applied to every channel. All channels share one gain
+// curve to preserve the stereo image.
+static void applyLookaheadLimiter(std::vector<std::vector<float>> &channels, double sampleRate,
+                                  float holdMs = 40.0f, float releaseMs = 200.0f,
+                                  std::vector<float> *outGain = nullptr)
+{
+    if (channels.empty() || channels[0].empty())
+        return;
+
+    const std::vector<float> truePeak = truePeakPerSample(channels);
+    const size_t blockLen = channels[0].size();
+    std::vector<float> gainEnv(blockLen, 1.0f);
+    for (size_t i = 0; i < blockLen; ++i)
+        if (truePeak[i] > LIMITER_CEILING)
+            gainEnv[i] = LIMITER_CEILING / truePeak[i];
+
+    smoothLimiterGain(gainEnv, sampleRate, holdMs, releaseMs);
 
     for (size_t i = 0; i < blockLen; ++i)
-        for (int ch = 0; ch < channelCount; ++ch)
+        for (int ch = 0; ch < static_cast<int>(channels.size()); ++ch)
             channels[ch][i] *= gainEnv[i];
 
     // Hand back the final per-sample gain (1.0 = no reduction) for the meter.
@@ -1855,11 +1899,6 @@ public:
         applyLimiter = strokeObj.Get("applyLimiter").ToBoolean().Value();
         if (strokeObj.Has("project"))
             projectEnabled = strokeObj.Get("project").ToBoolean().Value();
-        if (strokeObj.Has("envelope") && strokeObj.Get("envelope").IsTypedArray())
-        {
-            Napi::Float32Array envJs = strokeObj.Get("envelope").As<Napi::Float32Array>();
-            envelope.assign(envJs.Data(), envJs.Data() + envJs.ElementLength());
-        }
     }
 
     void Execute()
@@ -1955,11 +1994,12 @@ public:
         if (partial && (hardEdgeStart || hardEdgeEnd))
             applyHardEdges(analyzer, src, bandBegin, bandEnd, w0, w1, fillStart, fillEnd);
 
-        // 3. Limiting, weighted by the brush envelope so it belongs to the
-        //    stroke rather than to the file.
+        // 3. Limiting, applied to the stroke's contribution so it belongs to
+        //    the stroke rather than to the file.
         std::vector<float> weightedGain;
         if (applyLimiter)
-            limitWindow(w0, w1, weightedGain);
+            limitWindow(w0, w1, partial && hardEdgeStart && footStart > 0,
+                        partial && hardEdgeEnd && footEnd < numFrames, weightedGain);
 
         // 4. Project the canvas through the audio. Skipped when the stroke
         //    keeps its painted coefficients; the patch then comes back empty.
@@ -2179,57 +2219,100 @@ private:
     }
 
     /**
-     * The brush's time envelope at a sample. Each point covers a whole 5 ms
-     * hop and holds the envelope's largest value over it, so a rectangular
-     * brush stays rectangular; interpolating between points would ramp its
-     * edge down over the last hop and let the loudest samples through
-     * unlimited.
+     * Limits inside the stroke and nowhere else. The gain is applied to the
+     * stroke's contribution, not to the mix: out = g*mix + (1-g)*(1-w)*ex,
+     * where w is a footprint mask that is 1 inside the stroke and 0 at and
+     * beyond its in-file time edges. Outside the footprint (w = 0) that is
+     * ex + g*(mix - ex): where the mix equals the existing audio the gain has
+     * nothing to act on, so the limiter's attack and release skirts leave the
+     * surroundings bit-exact — no ducking, no step. The per-sample ceiling is
+     * the global ceiling or the existing audio's own held true peak, whichever
+     * is higher, so a stroke into already-hot audio is held to the loudness
+     * that was there instead of being cancelled. weightedGain gets the gain
+     * the footprint hears (unity outside it), which is what the meter shows.
+     *
+     * gatedStart/gatedEnd say the hard-edge gate rewrote the audio outside
+     * that edge to the existing samples exactly.
      */
-    float envelopeAt(int64_t sample) const
-    {
-        if (envelope.empty())
-            return 0.0f;
-        const int64_t i = sample / levelHopSamples();
-        if (i < 0)
-            return envelope.front();
-        if (i >= (int64_t)envelope.size())
-            return envelope.back();
-        return envelope[(size_t)i];
-    }
-
-    /**
-     * Limits inside the stroke and nowhere else. The limiter runs over the
-     * window to find the reduction it would apply, and the brush envelope then
-     * scales that reduction in the exponent — full where the envelope is full,
-     * none where it is zero. The envelope reaches zero at the footprint edge,
-     * so the gain reaches unity there and the surrounding audio is untouched
-     * with no step to hear.
-     */
-    void limitWindow(int64_t w0, int64_t w1, std::vector<float> &weightedGain)
+    void limitWindow(int64_t w0, int64_t w1, bool gatedStart, bool gatedEnd, std::vector<float> &weightedGain)
     {
         const size_t n = (size_t)(w1 - w0);
-        std::vector<std::vector<float>> scratch(channels);
-        for (int ch = 0; ch < channels; ++ch)
-            scratch[ch].assign(audioChannels[ch].begin() + w0, audioChannels[ch].begin() + w1);
-
-        std::vector<float> rawGain;
-        applyLookaheadLimiter(scratch, sampleRate, 40.0f, 200.0f, &rawGain);
-        if (rawGain.size() < n)
+        if (!n)
             return;
+
+        std::vector<std::vector<float>> mixWin((size_t)channels), exWin((size_t)channels);
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            mixWin[(size_t)ch].assign(audioChannels[ch].begin() + w0, audioChannels[ch].begin() + w1);
+            if (!existingAudio.empty())
+                exWin[(size_t)ch].assign(existingAudio[ch] + w0, existingAudio[ch] + w1);
+            else
+                exWin[(size_t)ch].assign(n, 0.0f);
+        }
+
+        const std::vector<float> mixPeak = truePeakPerSample(mixWin);
+        // The existing audio's loudness, held over the limiter's hold window
+        // so its zero crossings do not read as headroom.
+        const int holdSamples = (int)std::max(0.0, sampleRate * 0.040);
+        const std::vector<float> exLoud = slidingMax(truePeakPerSample(exWin), holdSamples);
+
+        // Footprint mask: 0 at and past each in-file time edge. A soft edge
+        // raised-cosines up to 1 over the first rampSamples inside, keeping
+        // the taper's hand-back continuous. A gated hard edge takes no ramp:
+        // the audio outside it is the existing samples exactly, so the mask
+        // may step where the content itself steps. An edge at the file
+        // boundary has no outside to protect and stays at 1, and no footprint
+        // at all means the whole window is the stroke.
+        const float rampSamples = std::max(1.0f, (float)std::lround(sampleRate * 0.010));
+        std::vector<float> mask(n, 1.0f);
+        if (footEnd > footStart)
+        {
+            for (size_t i = 0; i < n; ++i)
+            {
+                const int64_t t = w0 + (int64_t)i;
+                if (t < footStart || t >= footEnd)
+                {
+                    mask[i] = 0.0f;
+                    continue;
+                }
+                const float dS = (footStart > 0 && !gatedStart) ? (float)(t - footStart) : rampSamples;
+                const float dE = (footEnd < numFrames && !gatedEnd) ? (float)(footEnd - 1 - t) : rampSamples;
+                const float u = std::min(1.0f, std::min(dS, dE) / rampSamples);
+                mask[i] = u * u * (3.0f - 2.0f * u);
+            }
+        }
+
+        // Required gain per sample: bring the mix down to the ceiling. Where
+        // the mask is 1 that bounds the output exactly. Over a soft edge's
+        // ramp the unscaled share of the existing audio can carry the output
+        // at most (1-w)*(1-g)*exLoud past it — but a soft stroke tapers to
+        // nothing at its edge, so where that share is large the stroke is
+        // quiet and the bound is slack anyway.
+        std::vector<float> gain(n, 1.0f);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const float ceiling = std::max(LIMITER_CEILING, exLoud[i]);
+            if (mixPeak[i] > ceiling)
+                gain[i] = ceiling / mixPeak[i];
+        }
+        smoothLimiterGain(gain, sampleRate, 40.0f, 200.0f);
 
         weightedGain.assign(n, 1.0f);
         for (size_t i = 0; i < n; ++i)
         {
-            const float raw = rawGain[i];
-            if (raw >= 1.0f)
+            const float g = gain[i];
+            if (g >= 1.0f)
                 continue;
-            const float env = std::max(0.0f, std::min(1.0f, envelopeAt(w0 + (int64_t)i)));
-            if (env <= 0.0f)
-                continue;
-            const float g = std::exp(std::log(std::max(raw, 1e-6f)) * env);
-            weightedGain[i] = g;
+            const float w = mask[i];
             for (int ch = 0; ch < channels; ++ch)
-                audioChannels[ch][(size_t)(w0 + (int64_t)i)] *= g;
+            {
+                const float ex = exWin[(size_t)ch][i];
+                const float mix = mixWin[(size_t)ch][i];
+                // = g*mix + (1-g)*(1-w)*ex, written so mix == ex passes ex
+                // through bit-exact when w is 0.
+                audioChannels[ch][(size_t)(w0 + (int64_t)i)] = ex + g * (mix - ex) - w * (1.0f - g) * ex;
+            }
+            weightedGain[i] = 1.0f + (g - 1.0f) * w;
         }
     }
 
@@ -2497,7 +2580,6 @@ private:
     bool hardEdgeStart = false, hardEdgeEnd = false;
     bool applyLimiter = false;
     bool projectEnabled = true;
-    std::vector<float> envelope;
 
     // Results
     std::vector<std::vector<float>> audioChannels;

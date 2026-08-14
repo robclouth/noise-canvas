@@ -658,7 +658,7 @@ The transport bar, left to right:
 - **Swing** – swing feel for the time grid. 0% is straight, ~67% is a triplet feel, 100% shifts odd grid lines by half a cell.
 - **Tonic / Type** – the scale used for pitch snapping and for scale-based effects and modulation.
 - **Output meter**.
-- **Limit** – holds each stroke's own level down as you paint it, following the brush envelope so the edges stay untouched. It is baked into the stroke, so undo removes it along with the paint, and turning it off only affects what you paint next. Turn it off to paint as loud as the effect makes it.
+- **Limit** – holds each stroke's own level down as you paint it, leaving the audio around it untouched. On audio that is already loud, the stroke is held to the level that was there. It is baked into the stroke, so undo removes it along with the paint, and turning it off only affects what you paint next. Turn it off to paint as loud as the effect makes it.
 - **Re-analyse** – redraws each stroke as the analysis of the audio it made, so the picture settles into what you will hear — even edits that only move phase. Off, the canvas keeps exactly what you painted; the sound is the same either way, and commits are faster. Like Limit, it is read at the end of each stroke.
 - **?** – outlines every area of the window at once. See [Getting Help](#getting-help).
 
