@@ -15,12 +15,14 @@ export const Tooltip = ({ label, help, detail, children, ...props }: TooltipProp
   return (
     <MantineTooltip
       label={
+        // Divs, not the default paragraph: a label or detail can be a whole
+        // block of markup, which the browser would otherwise hoist out of a <p>.
         <Stack gap={2}>
-          <Text size="xs" style={{ wordBreak: "break-word" }}>
+          <Text component="div" size="xs" style={{ wordBreak: "break-word" }}>
             {text}
           </Text>
           {detail && (
-            <Text size="xs" c="gray.5" style={{ wordBreak: "break-word" }}>
+            <Text component="div" size="xs" c="gray.5" style={{ wordBreak: "break-word" }}>
               {detail}
             </Text>
           )}

@@ -136,8 +136,7 @@ export function BrushRow({
 
   return (
     <Tooltip
-      help="brush-row"
-      detail={summary}
+      label={summary}
       disabled={!summary || summaryDisabled}
       position="left"
       openDelay={500}
@@ -150,18 +149,22 @@ export function BrushRow({
         },
       }}
     >
-      <ListRow
-        help="brush-row"
-        accent={color}
-        active={active}
-        outlined={outlined}
-        onClick={onClick}
-        onDoubleClick={onDoubleClick}
-        asDiv={asDiv}
-        editing={editing}
-      >
-        {children}
-      </ListRow>
+      {/* The tooltip's own target: Mantine clones its child to inject a ref and
+          the pointer handlers, which a plain component would drop. */}
+      <Box style={{ display: "flex", flex: 1, minWidth: 0 }}>
+        <ListRow
+          help="brush-row"
+          accent={color}
+          active={active}
+          outlined={outlined}
+          onClick={onClick}
+          onDoubleClick={onDoubleClick}
+          asDiv={asDiv}
+          editing={editing}
+        >
+          {children}
+        </ListRow>
+      </Box>
     </Tooltip>
   );
 }
