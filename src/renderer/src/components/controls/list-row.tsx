@@ -25,7 +25,6 @@ export interface ListRowProps {
   active?: boolean;
   outlined?: boolean;
   onClick?: () => void;
-  onDoubleClick?: () => void;
   /** Drag-and-drop blocks drag-starts on real buttons, so rows in a draggable list render as divs. */
   asDiv?: boolean;
   editing?: boolean;
@@ -38,25 +37,13 @@ export interface ListRowProps {
  * background, and an optional colour bar. Trailing controls belong outside it,
  * positioned over the row, since a button cannot nest inside a button.
  */
-export function ListRow({
-  children,
-  help,
-  accent,
-  active,
-  outlined,
-  onClick,
-  onDoubleClick,
-  asDiv,
-  editing,
-  dense,
-}: ListRowProps) {
+export function ListRow({ children, help, accent, active, outlined, onClick, asDiv, editing, dense }: ListRowProps) {
   const size = dense ? "dense" : "normal";
   return (
     <UnstyledButton
       component={asDiv ? "div" : "button"}
       role={asDiv ? "button" : undefined}
       onClick={onClick}
-      onDoubleClick={onDoubleClick}
       px={dense ? 8 : "xs"}
       py={PAD_Y[size]}
       className={editing ? undefined : "effect-button"}

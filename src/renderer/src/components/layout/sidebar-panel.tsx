@@ -204,7 +204,6 @@ const BrushTile = memo(function BrushTile({
         outlined={listeningForHotkey}
         summaryDisabled={editing}
         onClick={onActivate}
-        onDoubleClick={() => !editing && setEditing(true)}
         asDiv
         editing={editing}
       >

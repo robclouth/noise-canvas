@@ -131,7 +131,7 @@ When you paint, the brush defines **where** and **how strongly** an effect is ap
 
 A palette is a folder of brushes for one job. The sidebar shows each open palette as a grey band with its brushes indented under it, and you can have as many open at once as you like.
 
-- **Click a band** to fold its brushes away. **Double-click** the name to rename.
+- **Click a band** to fold its brushes away.
 - **Drag** a brush from one palette to another to move it between them.
 - The band's **⋮** offers Save, Save as…, Rename, Close and Delete file….
 - **Add palette** at the bottom of the sidebar opens the browser: **New** for an empty palette, or any saved one below it.
@@ -162,7 +162,7 @@ Brushes live inside a palette. You can have as many open as you like; each is an
 
 - A **colour bar** down the left edge identifies each brush; the same colour marks it wherever it is referenced.
 - **Hover** a row to see what is in it: each step's effects, in order.
-- **Click** a row to make it active. **Double-click** the name to rename.
+- **Click** a row to make it active.
 - The **⋮ menu** offers Rename, Duplicate, Save, Save as…, Load referenced files, Assign key…, Remove key, and Close.
 - **Drag** rows to reorder them, or to move a brush into another palette.
 - **Add brush** at the end of each palette opens the picker: **New** for an empty brush, or any preset below it.

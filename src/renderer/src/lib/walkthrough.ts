@@ -99,7 +99,7 @@ const STEPS: Step[] = [
     side: "left",
     title: "Start with a fresh one",
     description:
-      "Click <b>Add brush</b> at the bottom of the palette and pick <b>New</b> for an empty brush to build from scratch. It comes with a random name; double-click the label any time to rename it.",
+      "Click <b>Add brush</b> at the bottom of the palette and pick <b>New</b> for an empty brush to build from scratch. It comes with a random name; rename it any time from the row's <b>⋮</b> menu.",
     gate: emptyBrushAddedGate,
   },
   {

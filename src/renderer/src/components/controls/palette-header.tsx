@@ -134,7 +134,6 @@ export function PaletteHeader({ group, brushes, dirty, closable }: PaletteHeader
           c="dark.0"
           truncate
           fs={dirty ? "italic" : undefined}
-          onDoubleClick={() => setEditing(true)}
           style={{ letterSpacing: "0.07em", flex: 1, minWidth: 0, cursor: "pointer", userSelect: "none" }}
           onClick={() => toggle(group.id)}
         >

@@ -108,7 +108,6 @@ export interface BrushRowProps {
   /** Suppresses the hover summary, e.g. while the name is being edited. */
   summaryDisabled?: boolean;
   onClick?: () => void;
-  onDoubleClick?: () => void;
   /** Drag-and-drop blocks drag-starts on real buttons, so rows in a draggable list render as divs. */
   asDiv?: boolean;
   editing?: boolean;
@@ -127,7 +126,6 @@ export function BrushRow({
   outlined,
   summaryDisabled,
   onClick,
-  onDoubleClick,
   asDiv,
   editing,
 }: BrushRowProps) {
@@ -158,7 +156,6 @@ export function BrushRow({
           active={active}
           outlined={outlined}
           onClick={onClick}
-          onDoubleClick={onDoubleClick}
           asDiv={asDiv}
           editing={editing}
         >
