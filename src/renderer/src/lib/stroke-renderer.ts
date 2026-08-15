@@ -36,6 +36,7 @@ import {
   getModAmountValuesNormalized,
   hasActiveModulatorRouting,
   hasNestedModulatorRouting,
+  paramsRouteModulators,
 } from "../store/modulators";
 import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
@@ -931,16 +932,16 @@ export class StrokeRenderer {
       // the effect uniforms at the resulting textures. Done once per step before
       // any effect pass, so the expensive modulator evaluation happens once. When
       // nothing routes to a modulator, every consumer multiplies its output by
-      // zero, so skip the pass and bind the zero placeholder instead. Attract's
-      // modulator maps read the textures directly, so they keep the pass alive
-      // with no amounts routed; effect params live on the effect item, so the
-      // check reads each attract item's merged view, not the step state.
+      // zero, so skip the pass and bind the zero placeholder instead. Effect
+      // parameter amounts live on the effect item, not on the step, and
+      // Attract's modulator maps read the textures with no amounts routed.
       const attractReadsModulators = enabledEffectItems.some(
         (item) =>
           item.effect === "attract" &&
           createEffectStateView(state, stepIndex, item).attractMap >= ATTRACT_MODULATOR_MAP_START,
       );
-      if (hasActiveModulatorRouting(stepState) || attractReadsModulators) {
+      const effectItemsRouteModulators = enabledEffectItems.some((item) => paramsRouteModulators(item.params));
+      if (hasActiveModulatorRouting(stepState) || effectItemsRouteModulators || attractReadsModulators) {
         // Nested-modulation routing lives on the step (modulator amounts are
         // per-step parameters), so resolve the gate from the step state, not the
         // global state, before rendering this step's modulators.

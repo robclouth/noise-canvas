@@ -220,6 +220,29 @@ export function hasActiveModulatorRouting(state: ModulatorsState): boolean {
   return false;
 }
 
+let modAmountKeySet: Set<string> | null = null;
+
+function getModAmountKeySet(): Set<string> {
+  if (modAmountKeySet) return modAmountKeySet;
+  const keys = new Set<string>();
+  for (const [key, def] of Object.entries(parameterDefs)) {
+    if (def.kind !== "number" || !def.modulatable) continue;
+    for (const amountKey of getModAmountParamKeys(key as ParameterKey)) keys.add(amountKey);
+  }
+  modAmountKeySet = keys;
+  return keys;
+}
+
+/** True when a loose parameter bag, such as an effect item's params, holds a nonzero modulator amount. */
+export function paramsRouteModulators(params: Record<string, unknown> | undefined): boolean {
+  if (!params) return false;
+  const amountKeys = getModAmountKeySet();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== 0 && typeof value === "number" && amountKeys.has(key)) return true;
+  }
+  return false;
+}
+
 // True when a modulator's own parameter is modulated by a modulator or a macro
 // (one level of nested modulation). When false the nested-source evaluation in
 // the precompute pass is a no-op at every consumer and can be skipped. Macro
