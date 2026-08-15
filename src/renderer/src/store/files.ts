@@ -8,6 +8,7 @@ import { Vector2 } from "three";
 import * as Tone from "tone";
 import { host } from "../lib/host";
 import { remainingCoefficientBudget } from "../lib/gpu-budget";
+import { toChannelCount } from "../lib/channel-mix";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type { AnalysisParams, CommitLevels, CommitStrokeResult, PackedOnsets } from "../../../main/lib/types";
 import { computeOutputLevels, outputLevelPoints, spliceOutputLevels, type OutputLevels } from "../lib/output-levels";
@@ -64,6 +65,8 @@ export interface FilesState {
   /** Analyse a file again at a new resolution, keeping its audio and history. */
   reanalyzeFile: (fileId: string, bandsPerOctave: number) => Promise<void>;
   resizeActiveFileLength: (factor: 2 | 0.5) => Promise<void>;
+  /** Analyse a file again as mono or stereo, keeping its paint and history. */
+  setFileChannelCount: (fileId: string, channelCount: number) => Promise<void>;
   synthesizeFile: (
     fileId: string,
     autoPlaybackParams?: { startTimeSeconds: number; endTimeSeconds: number } | null,
@@ -524,6 +527,110 @@ function bandLayout(data: SpectrogramData) {
     bandOffsets: data.synthesisMetadata.bandOffsets,
     bandLengths: data.synthesisMetadata.bandLengths,
   };
+}
+
+/**
+ * Rebuild a file from the audio `packedData` synthesises to, with `transform`
+ * rewriting the channels in between. Replaces the file's spectrogram, audio
+ * and peak, and adds the result to its history. The renderer is optional
+ * throughout: a file showing a loading message has none mounted, and picks the
+ * new analysis up from its spectrogram when it comes back.
+ */
+async function rebuildFileFromAudio(
+  set: ZustandSet,
+  fileId: string,
+  packedData: Float32Array,
+  transform: (channels: Float32Array[]) => Float32Array[],
+  snapshot: { kind: "resize" | "reanalyze"; label: string },
+): Promise<void> {
+  const file = openFiles[fileId];
+  if (!file?.spectrogramData) return;
+
+  const { spectrogramData } = file;
+  const analysisParams: AnalysisParams = {
+    bandsPerOctave: spectrogramData.bandsPerOctave,
+    minFreq: spectrogramData.minFreq,
+    maxCoefficients: remainingCoefficientBudget(openFileTexelCounts(fileId)),
+  };
+
+  const synthResult = await host.analysis.synthesize(
+    packedData,
+    {
+      numFrames: spectrogramData.numFrames,
+      numChannels: spectrogramData.numChannels,
+      numBands: spectrogramData.numBands,
+      bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
+      bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s,
+      bandLengths: spectrogramData.synthesisMetadata.bandLengths,
+    },
+    spectrogramData.sampleRate,
+    analysisParams,
+    false,
+  );
+
+  const channels = transform(synthResult.channels);
+  const length = channels[0]?.length ?? 0;
+  if (length <= 0) throw new Error("There is no audio left to analyse.");
+
+  const audioContext = Tone.getContext().rawContext;
+  const audioBuffer = audioContext.createBuffer(channels.length, length, spectrogramData.sampleRate);
+  for (let ch = 0; ch < channels.length; ch++) {
+    audioBuffer.getChannelData(ch).set(channels[ch]);
+  }
+
+  const result = await host.analysis.analyseBuffer(audioBuffer, analysisParams);
+
+  file.spectrogramData = {
+    packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+    inverseMap: new Float32Array(
+      result.inverseMap.buffer,
+      result.inverseMap.byteOffset,
+      result.inverseMap.byteLength / 4,
+    ),
+    metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
+    textureWidth: result.textureWidth,
+    textureHeight: result.textureHeight,
+    numFrames: result.numFrames,
+    numBands: result.numBands,
+    numChannels: result.numChannels,
+    sampleRate: result.sampleRate,
+    packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
+    minFreq: analysisParams.minFreq,
+    bandsPerOctave: analysisParams.bandsPerOctave,
+    magnitudeEnergy: result.magnitudeEnergy,
+    synthesisMetadata: {
+      bandOffsets: result.bandOffsets,
+      bandStepLog2s: result.bandStepLog2s,
+      bandLengths: result.bandLengths,
+    },
+  };
+  file.audioBuffer = audioBuffer;
+  file.unprojectedPaint = false;
+
+  let newPeak = 0;
+  for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
+    const data = audioBuffer.getChannelData(ch);
+    for (let i = 0; i < data.length; i++) {
+      const v = Math.abs(data[i]);
+      if (v > newPeak) newPeak = v;
+    }
+  }
+  file.audioPeak = newPeak > 0 ? newPeak : 1;
+
+  file.rendererRef?.current?.reloadTextures();
+
+  await getHistoryManager(fileId).addSnapshot({
+    data: file.spectrogramData.packedData,
+    kind: snapshot.kind,
+    label: snapshot.label,
+    spectrogram: file.spectrogramData,
+  });
+
+  set(
+    produce((state: State) => {
+      state.filesDirty[fileId] = true;
+    }),
+  );
 }
 
 // The current painted state of a file, falling back to its analysed
@@ -2243,108 +2350,32 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
   },
   resizeActiveFileLength: async (factor: 2 | 0.5) => {
-    const state = get();
-    if (!state.activeFileId) return;
-    const fileId = state.activeFileId;
-    const file = openFiles[fileId];
-    if (!file?.spectrogramData || !file.rendererRef?.current) return;
-
-    const { spectrogramData } = file;
-    const analysisParams: AnalysisParams = {
-      bandsPerOctave: spectrogramData.bandsPerOctave,
-      minFreq: spectrogramData.minFreq,
-      maxCoefficients: remainingCoefficientBudget(openFileTexelCounts(fileId)),
-    };
+    const fileId = get().activeFileId;
+    const file = fileId ? openFiles[fileId] : undefined;
+    if (!fileId || !file) return;
 
     try {
-      const fboData = await file.rendererRef.current.getFBOData();
-      if (!fboData) throw new Error("Could not read the current spectrogram state.");
+      const packedData = await readCurrentPackedData(file);
+      if (!packedData) throw new Error("Could not read the current spectrogram state.");
 
-      const synthResult = await host.analysis.synthesize(
-        fboData,
-        {
-          numFrames: spectrogramData.numFrames,
-          numChannels: spectrogramData.numChannels,
-          numBands: spectrogramData.numBands,
-          bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
-          bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s,
-          bandLengths: spectrogramData.synthesisMetadata.bandLengths,
-        },
-        spectrogramData.sampleRate,
-        analysisParams,
-        false,
-      );
-
-      const oldLength = synthResult.channels[0]?.length ?? 0;
-      const newLength = factor === 2 ? oldLength * 2 : Math.floor(oldLength / 2);
-      if (newLength <= 0) throw new Error("The file is too short to halve.");
-
-      const audioContext = Tone.getContext().rawContext;
-      const audioBuffer = audioContext.createBuffer(synthResult.channels.length, newLength, spectrogramData.sampleRate);
-      for (let ch = 0; ch < synthResult.channels.length; ch++) {
-        const src = synthResult.channels[ch];
-        const dst = new Float32Array(newLength);
-        if (factor === 2) {
-          dst.set(src, 0);
-          dst.set(src, oldLength);
-        } else {
-          dst.set(src.subarray(0, newLength), 0);
-        }
-        audioBuffer.copyToChannel(dst, ch);
-      }
-
-      const result = await host.analysis.analyseBuffer(audioBuffer, analysisParams);
-
-      file.spectrogramData = {
-        packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-        inverseMap: new Float32Array(
-          result.inverseMap.buffer,
-          result.inverseMap.byteOffset,
-          result.inverseMap.byteLength / 4,
-        ),
-        metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
-        textureWidth: result.textureWidth,
-        textureHeight: result.textureHeight,
-        numFrames: result.numFrames,
-        numBands: result.numBands,
-        numChannels: result.numChannels,
-        sampleRate: result.sampleRate,
-        packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-        minFreq: analysisParams.minFreq,
-        bandsPerOctave: analysisParams.bandsPerOctave,
-        magnitudeEnergy: result.magnitudeEnergy,
-        synthesisMetadata: {
-          bandOffsets: result.bandOffsets,
-          bandStepLog2s: result.bandStepLog2s,
-          bandLengths: result.bandLengths,
-        },
-      };
-      file.audioBuffer = audioBuffer;
-      file.unprojectedPaint = false;
-
-      let newPeak = 0;
-      for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
-        const data = audioBuffer.getChannelData(ch);
-        for (let i = 0; i < data.length; i++) {
-          const v = Math.abs(data[i]);
-          if (v > newPeak) newPeak = v;
-        }
-      }
-      file.audioPeak = newPeak > 0 ? newPeak : 1;
-
-      file.rendererRef.current.reloadTextures();
-
-      await getHistoryManager(fileId).addSnapshot({
-        data: file.spectrogramData.packedData,
-        kind: "resize",
-        label: "Resize",
-        spectrogram: file.spectrogramData,
-      });
-
-      set(
-        produce((s: State) => {
-          s.filesDirty[fileId] = true;
-        }),
+      await rebuildFileFromAudio(
+        set,
+        fileId,
+        packedData,
+        (channels) =>
+          channels.map((src) => {
+            const newLength = factor === 2 ? src.length * 2 : Math.floor(src.length / 2);
+            if (newLength <= 0) throw new Error("The file is too short to halve.");
+            const dst = new Float32Array(newLength);
+            if (factor === 2) {
+              dst.set(src, 0);
+              dst.set(src, src.length);
+            } else {
+              dst.set(src.subarray(0, newLength), 0);
+            }
+            return dst;
+          }),
+        { kind: "resize", label: "Resize" },
       );
     } catch (error) {
       console.error("Resize failed:", error);
@@ -2353,6 +2384,43 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         message: error instanceof Error ? error.message : "Unknown error",
         color: "red",
       });
+    }
+  },
+  setFileChannelCount: async (fileId, channelCount) => {
+    const file = openFiles[fileId];
+    if (!file?.spectrogramData || file.spectrogramData.numChannels === channelCount) return;
+    if (get().filesLoading[fileId]) return;
+
+    // Read the painted state first: the loading message below takes the
+    // renderer, and with it the FBO, off the screen.
+    const packedData = await readCurrentPackedData(file);
+
+    set(
+      produce((state: State) => {
+        state.filesLoading[fileId] = channelCount === 1 ? "Mixing down to mono..." : "Spreading to stereo...";
+      }),
+    );
+
+    try {
+      if (!packedData) throw new Error("Could not read the current spectrogram state.");
+
+      await rebuildFileFromAudio(set, fileId, packedData, (channels) => toChannelCount(channels, channelCount), {
+        kind: "reanalyze",
+        label: channelCount === 1 ? "To mono" : "To stereo",
+      });
+    } catch (error) {
+      console.error("Channel change failed:", error);
+      notifications.show({
+        title: "Channel change failed",
+        message: error instanceof Error ? error.message : "Unknown error",
+        color: "red",
+      });
+    } finally {
+      set(
+        produce((state: State) => {
+          delete state.filesLoading[fileId];
+        }),
+      );
     }
   },
   filepathsBpm: {},

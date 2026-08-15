@@ -34,6 +34,7 @@ Every control in the app has a tooltip and an entry in the `?` overlay, and how 
    - [Randomization](#randomization)
    - [Linking Parameters Across Steps](#linking-parameters-across-steps)
 8. [Working with Files](#working-with-files)
+   - [Mono and Stereo](#mono-and-stereo)
    - [Splitting a File](#splitting-a-file)
    - [Stem Groups](#stem-groups)
    - [Onsets](#onsets)
@@ -649,7 +650,7 @@ Open a file from **File → Open**, from **Open Recent**, or by **dragging an au
 
 Open files stack vertically in the canvas column. Each header gives you:
 
-- The **filename** (italic when it has unsaved changes) and a **resolution badge**.
+- The **filename** (italic when it has unsaved changes), a **resolution badge**, and a **channel badge**.
 - **BPM** – this file's tempo, which drives grid snapping and every beat-based parameter.
 - **Onsets** – how sensitive the hit detector is for this file. See [Onsets](#onsets).
 - **Split** – see below.
@@ -661,6 +662,17 @@ Open files stack vertically in the canvas column. Each header gives you:
 The active file has an orange border; click any file to make it active. `Tab` / `Shift+Tab` cycle through them.
 
 Files you create in-app (New File, duplicates, stems) are **fully persisted**. They're backed by their own on-disk history, so quitting never loses them, and they get a real path when you Save As.
+
+### Mono and Stereo
+
+A file is analysed with as many channels as the audio it came from, and the badge next to the resolution badge says which: **Mono** or **Stereo**. It matters because a mono file has no stereo field to work in, so **Binaural**, **Sort**'s Stereo mode, **Transmute**'s Stereo Cross, and a modulator's **Stereo** spread all have nothing to move — they run, and the result is centred.
+
+The badge is a menu, so a file can go either way. The current painted state is rendered to audio, converted, and analysed again, which adds a node to the file's history rather than replacing anything.
+
+- **Mono → Stereo** copies the single channel into both, so the file sounds the same until you paint on it. This is the step that gives the stereo effects something to place.
+- **Stereo → Mono** mixes the two channels together at equal weight.
+
+Both cost the same graphics memory: one packed coefficient holds both channels either way, so a stereo file is no shorter than a mono one.
 
 ### Splitting a File
 

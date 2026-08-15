@@ -7,11 +7,12 @@ import { openSplitPartsPrompt } from "@renderer/lib/modals";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import { helpProps, type UiControlName } from "@renderer/lib/ui-controls";
 import { FILE_HEADER_FONT, FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-density";
+import { getHistoryManager } from "@renderer/lib/history-manager";
 import { openFiles, selectFileColor } from "@renderer/store/files";
 import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { ChevronDown, Copy, Grid3x3, Maximize2, Minimize2, Split, X } from "lucide-react";
-import { memo } from "react";
+import { memo, useCallback, useMemo, useSyncExternalStore } from "react";
 import { host } from "../lib/host";
 import { Tooltip } from "./tooltip";
 
@@ -20,6 +21,10 @@ import { Tooltip } from "./tooltip";
 // Either way it would download the model and then fail, so the menu item is
 // hidden entirely.
 const AI_SEPARATION_SUPPORTED = !host.env.isExtension && !(host.env.platform === "darwin" && host.env.arch === "x64");
+
+// Changing the channel count analyses a rendered audio buffer, which the
+// extension host has no entry point for, so there the badge only reports.
+const CHANNEL_CHANGE_SUPPORTED = !host.env.isExtension;
 
 // Helper to get resolution label from bands per octave value
 function getResolutionLabel(bpo: number): string {
@@ -55,6 +60,34 @@ function getResolutionDetail(bpo: number): string {
     default:
       return `${bpo} bands/octave.`;
   }
+}
+
+const CHANNEL_OPTIONS = [
+  { value: 1, label: "Mono" },
+  { value: 2, label: "Stereo" },
+];
+
+/** What this file's own channel count means, under the shared sentence about the badge. */
+function getChannelDetail(channelCount: number): string {
+  return channelCount === 1
+    ? "One channel — stereo effects have nothing to work across."
+    : "Two channels, left and right.";
+}
+
+/**
+ * This file's channel count, read from the analysis itself so it follows every
+ * re-analysis and every move through history.
+ */
+function useFileChannelCount(fileId: string): number | undefined {
+  const manager = useMemo(() => getHistoryManager(fileId), [fileId]);
+  useSyncExternalStore(
+    useCallback((onChange: () => void) => manager.subscribe(onChange), [manager]),
+    useCallback(() => manager.getVersion(), [manager]),
+  );
+  // A file being analysed has no spectrogram to read yet; clearing its loading
+  // message is the render that first has one.
+  useStore((state) => state.filesLoading[fileId]);
+  return openFiles[fileId]?.spectrogramData?.numChannels;
 }
 
 // A per-file value in the header, presented as the same label + draggable
@@ -137,6 +170,7 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const isDirty = useStore((state) => state.filesDirty[fileId] ?? false);
   const isHighlighted = useStore((state) => state.highlightedSourcePath === filePath);
   const fileColor = useStore((state) => selectFileColor(state, fileId));
+  const channelCount = useFileChannelCount(fileId);
 
   const isFullscreen = fullscreenFileId === fileId;
   // Tooltip shows full path for real files (helpful when basenames truncate);
@@ -196,6 +230,47 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
             </Menu.Dropdown>
           </Menu>
         )}
+        {channelCount !== undefined &&
+          (CHANNEL_CHANGE_SUPPORTED ? (
+            <Menu position="bottom-start" withinPortal>
+              <Tooltip help="file-channels" detail={getChannelDetail(channelCount)}>
+                <Menu.Target>
+                  <Badge
+                    {...helpProps("file-channels")}
+                    size="sm"
+                    variant="light"
+                    color="teal"
+                    rightSection={<ChevronDown size={10} />}
+                    style={{ flexShrink: 0, cursor: "pointer" }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {channelCount === 1 ? "Mono" : "Stereo"}
+                  </Badge>
+                </Menu.Target>
+              </Tooltip>
+              <Menu.Dropdown>
+                {CHANNEL_OPTIONS.map((option) => (
+                  <Menu.Item
+                    key={option.value}
+                    fw={option.value === channelCount ? 700 : undefined}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (option.value === channelCount) return;
+                      void useStore.getState().setFileChannelCount(fileId, option.value);
+                    }}
+                  >
+                    {option.label}
+                  </Menu.Item>
+                ))}
+              </Menu.Dropdown>
+            </Menu>
+          ) : (
+            <Tooltip help="file-channels" detail={getChannelDetail(channelCount)}>
+              <Badge {...helpProps("file-channels")} size="sm" variant="light" color="teal" style={{ flexShrink: 0 }}>
+                {channelCount === 1 ? "Mono" : "Stereo"}
+              </Badge>
+            </Tooltip>
+          ))}
       </Group>
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
         <FileHeaderNumbox

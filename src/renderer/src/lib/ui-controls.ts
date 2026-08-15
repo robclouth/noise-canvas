@@ -62,6 +62,11 @@ export const UI_CONTROLS = {
     description: "Sets how this file's analysis trades time detail against pitch detail.",
     manualSection: "analysis-resolution",
   },
+  "file-channels": {
+    label: "Channels",
+    description: "Switches this file between mono and stereo, analysing it again.",
+    manualSection: "mono-and-stereo",
+  },
   "file-onsets": {
     label: "Onsets",
     description: "Sets how far down this file's level range a hit still counts as an onset.",
