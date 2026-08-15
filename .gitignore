@@ -20,3 +20,5 @@ vendor/
 *.tsbuildinfo
 # Listening comparisons rendered while working on a change — regenerable.
 listening/
+# Agent worktrees: full repo copies, never part of a commit.
+.claude/worktrees/
