@@ -149,7 +149,6 @@ describe("transform reverse scale", () => {
   function makeRenderer(spec: SpectrogramData, id: string) {
     const raw = createTexturesFromSpectrogramData(spec);
     const strokeTextures: StrokeTextures = {
-      packedDataTex: raw.packedDataTex,
       originalPackedDataTex: raw.originalPackedDataTex,
       inverseMapTex: raw.inverseMapTex,
       metadataTex: raw.metadataTex,

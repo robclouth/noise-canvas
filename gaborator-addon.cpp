@@ -12,7 +12,12 @@
 #include <iomanip>  // For std::fixed, std::setprecision
 #include <iostream> // For std::cerr
 #include <fstream>  // For file logging
+#include <cstdint>
 #include "gaborator/gaborator.h"
+
+#ifdef _WIN32
+#include <dxgi.h>
+#endif
 
 #define OVERLAP 0.7
 #define MAX_TEXTURE_SIZE 8192
@@ -328,6 +333,12 @@ public:
         numFrames = length;
         bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
         fminHz = paramsJs.Get("minFreq").As<Napi::Number>().DoubleValue();
+        if (paramsJs.Has("maxCoefficients") && paramsJs.Get("maxCoefficients").IsNumber())
+        {
+            double v = paramsJs.Get("maxCoefficients").As<Napi::Number>().DoubleValue();
+            if (v > 0)
+                maxCoefficientBudget = (size_t)v;
+        }
     }
 
     ~AnalyzeWorker() {}
@@ -375,16 +386,17 @@ public:
             totalComplexCoefficients += len;
         }
 
-        const int maxWidth = MAX_TEXTURE_SIZE;
-        const int maxHeight = MAX_TEXTURE_SIZE;
-        textureWidth = std::min((size_t)maxWidth, totalComplexCoefficients);
-        textureHeight = (totalComplexCoefficients > 0) ? (totalComplexCoefficients + textureWidth - 1) / textureWidth : 0;
+        // The coefficient cap is the texture dimension limit or the caller's
+        // GPU-memory budget, whichever is smaller. Checked before any
+        // allocation so an oversized file fails with a clear message instead
+        // of exhausting memory.
+        size_t maxCoefficients = (size_t)MAX_TEXTURE_SIZE * MAX_TEXTURE_SIZE;
+        maxCoefficients = std::min(maxCoefficients, maxCoefficientBudget);
 
-        if (textureHeight > maxHeight)
+        if (totalComplexCoefficients > maxCoefficients)
         {
             if (coefficientDensity > 1e-9)
             {
-                size_t maxCoefficients = (size_t)maxWidth * maxHeight;
                 double maxFrames = (double)maxCoefficients / coefficientDensity;
                 double maxSeconds = maxFrames / sampleRate;
 
@@ -398,6 +410,9 @@ public:
             }
             return;
         }
+
+        textureWidth = std::min((size_t)MAX_TEXTURE_SIZE, totalComplexCoefficients);
+        textureHeight = (totalComplexCoefficients > 0) ? (totalComplexCoefficients + textureWidth - 1) / textureWidth : 0;
 
         size_t floatsPerPixel = 4;
         size_t dataFloatCount = (size_t)textureWidth * textureHeight * floatsPerPixel;
@@ -546,6 +561,9 @@ private:
     double sampleRate;
     int bandsPerOctave;
     double fminHz;
+    // Caller-supplied coefficient budget from the shared GPU-memory pool;
+    // SIZE_MAX means no budget was passed and only the texture cap applies.
+    size_t maxCoefficientBudget = SIZE_MAX;
 
     // Results
     std::vector<float> data;
@@ -4027,6 +4045,40 @@ Napi::Value HistoryInverseMapAsync(const Napi::CallbackInfo &info)
     return worker->GetPromise();
 }
 
+/**
+ * Reports the GPU memory available to textures, in bytes. On Windows this
+ * queries DXGI across all adapters; integrated GPUs report almost no dedicated
+ * memory but render from the shared system pool, so the larger of dedicated
+ * and half the shared pool is used. Returns 0 where no query exists (macOS
+ * has unified memory, so the caller uses total system RAM instead).
+ */
+Napi::Value GetGpuMemoryBytes(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+#ifdef _WIN32
+    IDXGIFactory *factory = nullptr;
+    if (SUCCEEDED(CreateDXGIFactory(__uuidof(IDXGIFactory), (void **)&factory)))
+    {
+        SIZE_T best = 0;
+        IDXGIAdapter *adapter = nullptr;
+        for (UINT i = 0; factory->EnumAdapters(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i)
+        {
+            DXGI_ADAPTER_DESC desc;
+            if (SUCCEEDED(adapter->GetDesc(&desc)))
+            {
+                SIZE_T usable = std::max(desc.DedicatedVideoMemory, desc.SharedSystemMemory / 2);
+                best = std::max(best, usable);
+            }
+            adapter->Release();
+        }
+        factory->Release();
+        if (best > 0)
+            return Napi::Number::New(env, (double)best);
+    }
+#endif
+    return Napi::Number::New(env, 0.0);
+}
+
 Napi::Object init(Napi::Env env, Napi::Object exports)
 {
     exports.Set("historyEncodePlanes", Napi::Function::New(env, HistoryEncodePlanesAsync));
@@ -4036,6 +4088,7 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
     exports.Set("historyApplyDelta", Napi::Function::New(env, HistoryApplyDeltaAsync));
     exports.Set("historyInverseMap", Napi::Function::New(env, HistoryInverseMapAsync));
     exports.Set("analyze", Napi::Function::New(env, AnalyzeAsync));
+    exports.Set("getGpuMemoryBytes", Napi::Function::New(env, GetGpuMemoryBytes));
     exports.Set("synthesize", Napi::Function::New(env, SynthesizeAsync));
     exports.Set("commitStroke", Napi::Function::New(env, CommitStrokeAsync));
     exports.Set("detectOnsets", Napi::Function::New(env, DetectOnsetsAsync));

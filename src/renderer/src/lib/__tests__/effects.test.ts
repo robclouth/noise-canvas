@@ -222,7 +222,6 @@ describe("Effects", () => {
    */
   function createRenderer(): StrokeRenderer {
     const strokeTextures: StrokeTextures = {
-      packedDataTex: textures.packedDataTex,
       originalPackedDataTex: textures.originalPackedDataTex,
       inverseMapTex: textures.inverseMapTex,
       metadataTex: textures.metadataTex,
@@ -472,7 +471,6 @@ describe("Effects", () => {
       const constantTextures = createTexturesFromSpectrogramData(constantSpectrogramData);
 
       const constantStrokeTextures: StrokeTextures = {
-        packedDataTex: constantTextures.packedDataTex,
         originalPackedDataTex: constantTextures.originalPackedDataTex,
         inverseMapTex: constantTextures.inverseMapTex,
         metadataTex: constantTextures.metadataTex,
@@ -741,7 +739,6 @@ describe("Effects", () => {
       const sourceRawTextures = createTexturesFromSpectrogramData(sourceSpectrogramData);
 
       const destStrokeTextures: StrokeTextures = {
-        packedDataTex: destRawTextures.packedDataTex,
         originalPackedDataTex: destRawTextures.originalPackedDataTex,
         inverseMapTex: destRawTextures.inverseMapTex,
         metadataTex: destRawTextures.metadataTex,
@@ -752,7 +749,6 @@ describe("Effects", () => {
         modulator3Texture: placeholderTexture,
       };
       const sourceStrokeTextures: StrokeTextures = {
-        packedDataTex: sourceRawTextures.packedDataTex,
         originalPackedDataTex: sourceRawTextures.originalPackedDataTex,
         inverseMapTex: sourceRawTextures.inverseMapTex,
         metadataTex: sourceRawTextures.metadataTex,
@@ -939,7 +935,6 @@ describe("Effects", () => {
 
       const rawTextures = createTexturesFromSpectrogramData(spec);
       const strokeTextures: StrokeTextures = {
-        packedDataTex: rawTextures.packedDataTex,
         originalPackedDataTex: rawTextures.originalPackedDataTex,
         inverseMapTex: rawTextures.inverseMapTex,
         metadataTex: rawTextures.metadataTex,

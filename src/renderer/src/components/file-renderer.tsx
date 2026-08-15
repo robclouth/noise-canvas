@@ -1,4 +1,5 @@
 import { createStepStateView, useStore } from "@/store";
+import { notifications } from "@mantine/notifications";
 import { useTransientStore } from "@renderer/store/transient";
 import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
 import { useFrame, useThree } from "@react-three/fiber";
@@ -250,8 +251,9 @@ const FileRendererInner = memo(
       invalidateRef.current?.();
     }, [modulator1Texture, modulator2Texture, modulator3Texture]);
 
-    // Textures for spectrogram data
-    const [packedDataTex, setPackedDataTex] = useState<DataTexture | null>(null);
+    // Textures for spectrogram data. The pristine packed texture serves both
+    // as the FBO seed and as the shaders' originalSpectrogramTex; the current
+    // state lives in the StrokeRenderer's FBOs, so no second copy is needed.
     const [originalPackedDataTex, setOriginalPackedDataTex] = useState<DataTexture | null>(null);
     const [inverseMapTex, setInverseMapTex] = useState<DataTexture | null>(null);
     const [metadataTex, setMetadataTex] = useState<DataTexture | null>(null);
@@ -447,17 +449,7 @@ const FileRendererInner = memo(
     useEffect(() => {
       const { packed, inverse, meta } = createTextures();
 
-      const original = packed.clone();
-
-      original.wrapS = ClampToEdgeWrapping;
-      original.wrapT = ClampToEdgeWrapping;
-      original.minFilter = NearestFilter;
-      original.magFilter = NearestFilter;
-      original.generateMipmaps = false;
-      original.needsUpdate = true;
-
-      setPackedDataTex(packed);
-      setOriginalPackedDataTex(original);
+      setOriginalPackedDataTex(packed);
       setInverseMapTex(inverse);
       setMetadataTex(meta);
 
@@ -471,7 +463,6 @@ const FileRendererInner = memo(
         packed.dispose();
         inverse.dispose();
         meta.dispose();
-        setPackedDataTex(null);
         setOriginalPackedDataTex(null);
         setInverseMapTex(null);
         setMetadataTex(null);
@@ -482,10 +473,10 @@ const FileRendererInner = memo(
     // the initial mount frame runs before setState has populated the textures, so
     // without this the view stays black until the user interacts.
     useEffect(() => {
-      if (packedDataTex && originalPackedDataTex && inverseMapTex && metadataTex) {
+      if (originalPackedDataTex && inverseMapTex && metadataTex) {
         invalidateRef.current?.();
       }
-    }, [packedDataTex, originalPackedDataTex, inverseMapTex, metadataTex]);
+    }, [originalPackedDataTex, inverseMapTex, metadataTex]);
 
     /**
      * Calculate clone-stamp offset from the cursor, scaled to source UV space.
@@ -753,7 +744,7 @@ const FileRendererInner = memo(
       glRef.current = gl;
       cameraRef.current = camera;
 
-      if (!spectrogramData || !packedDataTex || !inverseMapTex || !metadataTex || !originalPackedDataTex) return;
+      if (!spectrogramData || !inverseMapTex || !metadataTex || !originalPackedDataTex) return;
 
       const frameT0 = perfEnabled() ? performance.now() : 0;
       const state = useStore.getState();
@@ -805,7 +796,6 @@ const FileRendererInner = memo(
       // Create StrokeRenderer if not exists
       if (!strokeRendererRef.current) {
         const textures: StrokeTextures = {
-          packedDataTex,
           originalPackedDataTex,
           inverseMapTex,
           metadataTex,
@@ -815,7 +805,21 @@ const FileRendererInner = memo(
           modulator2Texture,
           modulator3Texture,
         };
-        strokeRendererRef.current = new StrokeRenderer(gl, spectrogramData, textures, fileId, effects);
+        // A file this size passed the analysis budget, but the GPU can still
+        // refuse the allocations; close the file instead of leaving a dead
+        // context behind.
+        try {
+          strokeRendererRef.current = new StrokeRenderer(gl, spectrogramData, textures, fileId, effects);
+        } catch (error) {
+          console.error("Creating the stroke renderer failed:", error);
+          notifications.show({
+            title: "Not enough graphics memory",
+            message: "The file was closed because the graphics device could not allocate its buffers.",
+            color: "red",
+          });
+          useStore.getState().closeFile(fileId);
+          return;
+        }
         hasDrawnDisplayRef.current = false;
       }
 
@@ -1198,7 +1202,6 @@ const FileRendererInner = memo(
      */
     const reloadTextures = () => {
       // Dispose old textures
-      if (packedDataTex) packedDataTex.dispose();
       if (originalPackedDataTex) originalPackedDataTex.dispose();
       if (inverseMapTex) inverseMapTex.dispose();
       if (metadataTex) metadataTex.dispose();
@@ -1212,8 +1215,7 @@ const FileRendererInner = memo(
       // Create new textures using shared helper
       const { packed, inverse, meta } = createTextures();
 
-      setPackedDataTex(packed);
-      setOriginalPackedDataTex(packed.clone());
+      setOriginalPackedDataTex(packed);
       setInverseMapTex(inverse);
       setMetadataTex(meta);
 

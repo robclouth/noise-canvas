@@ -68,6 +68,7 @@
                         "defines": ["_USE_MATH_DEFINES", "GABORATOR_USE_PFFFT=1"],
                         "include_dirs": ["pffft"],
                         "sources": ["pffft/pffft.c"],
+                        "libraries": ["-ldxgi"],
                     },
                 ],
                 [

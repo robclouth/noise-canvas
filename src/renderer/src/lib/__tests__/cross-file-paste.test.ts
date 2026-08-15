@@ -161,7 +161,6 @@ describe("cross-file paste phase handling", () => {
     const raw = createTexturesFromSpectrogramData(spec);
     disposables.push(raw.packedDataTex, raw.originalPackedDataTex, raw.inverseMapTex, raw.metadataTex);
     const strokeTextures: StrokeTextures = {
-      packedDataTex: raw.packedDataTex,
       originalPackedDataTex: raw.originalPackedDataTex,
       inverseMapTex: raw.inverseMapTex,
       metadataTex: raw.metadataTex,

@@ -17,6 +17,7 @@ import { basename, extname, join } from "node:path";
 import { exportAudio } from "../../main/lib/audio-analysis";
 import { decodeRenderBatch } from "../shared/render-batch";
 import {
+  getGpuMemoryInfo,
   runAnalyzeFramed,
   runCommitStrokeFramed,
   runHistoryCodecFramed,
@@ -41,7 +42,7 @@ let serverPromise: Promise<EditorServer> | null = null;
 function getServer(context: Api): Promise<EditorServer> {
   if (!serverPromise) {
     const userDataPath = context.environment.storageDirectory ?? tmpdir();
-    const hostServices = createHostServices({ userDataPath });
+    const hostServices = createHostServices({ userDataPath, gpuMemory: getGpuMemoryInfo() });
     serverPromise = startEditorServer({
       webviewDir: WEBVIEW_DIR,
       analyze: runAnalyzeFramed,

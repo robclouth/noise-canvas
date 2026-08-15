@@ -1,4 +1,5 @@
 import { decodeFrame, encodeFrame, type NumericArray } from "../../../../extension/shared/analysis-protocol";
+import { getBootstrapOrNull } from "./extension-rpc";
 import type { Host } from "./types";
 
 // Webview side of the analysis transport. The page is served by the extension's
@@ -30,11 +31,19 @@ function u8(array: NumericArray | undefined, name: string): Uint8Array {
   throw new Error(`analysis frame: expected Uint8Array for ${name}`);
 }
 
-async function analyze(filePath: string, params: { bandsPerOctave: number; minFreq: number }): Promise<AnalyzeResult> {
+async function analyze(
+  filePath: string,
+  params: { bandsPerOctave: number; minFreq: number; maxCoefficients?: number },
+): Promise<AnalyzeResult> {
   const response = await fetch("/analyze", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ filePath, bandsPerOctave: params.bandsPerOctave, minFreq: params.minFreq }),
+    body: JSON.stringify({
+      filePath,
+      bandsPerOctave: params.bandsPerOctave,
+      minFreq: params.minFreq,
+      maxCoefficients: params.maxCoefficients,
+    }),
   });
   if (!response.ok) {
     throw new Error(`analysis request failed (${response.status}): ${await response.text()}`);
@@ -213,6 +222,10 @@ async function historyCodec(
 
 export function createExtensionAnalysis(): AnalysisApi {
   return {
+    getGpuMemoryInfo: () => {
+      const boot = getBootstrapOrNull();
+      return { bytes: boot?.gpuMemoryBytes ?? 0, unified: boot?.gpuMemoryUnified ?? true };
+    },
     analyze,
     analyseBuffer: () => notImplemented("analyseBuffer"),
     synthesize,

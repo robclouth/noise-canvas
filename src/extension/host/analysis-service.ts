@@ -10,6 +10,7 @@ import {
   synthesize,
 } from "../../main/lib/audio-analysis";
 import type { AnalysisParams } from "../../main/lib/types";
+export { getGpuMemoryInfo } from "../../main/lib/audio-analysis";
 import {
   asF32,
   asI32,

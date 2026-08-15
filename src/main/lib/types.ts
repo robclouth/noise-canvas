@@ -20,6 +20,12 @@ export type AnalysisParams = {
   bandsPerOctave: number;
   minFreq: number;
   /**
+   * Largest packed coefficient count the analysis may produce, from the GPU
+   * memory the open files leave free. Analysis fails with the maximum-duration
+   * message when the file needs more; ignored by synthesis.
+   */
+  maxCoefficients?: number;
+  /**
    * Re-derive the onset map during synthesis, from the packed data that pass
    * already walks. Ignored by analysis, which always returns onsets.
    */

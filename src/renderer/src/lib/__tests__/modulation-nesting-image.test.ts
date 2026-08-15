@@ -152,7 +152,6 @@ describe("modulation: nested + image", () => {
 
   function makeRenderer(modulator1Texture: DataTexture): StrokeRenderer {
     const strokeTextures: StrokeTextures = {
-      packedDataTex: textures.packedDataTex,
       originalPackedDataTex: textures.originalPackedDataTex,
       inverseMapTex: textures.inverseMapTex,
       metadataTex: textures.metadataTex,
