@@ -1,5 +1,6 @@
 import { existsSync } from "fs";
 import { copyFile } from "fs/promises";
+import { totalmem } from "os";
 import { extname, join } from "path";
 import { promisify } from "util";
 import { zstdCompress, zstdDecompress } from "zlib";
@@ -59,6 +60,17 @@ export function init() {
     console.log("Gaborator loaded successfully");
   }
   return gaborator;
+}
+
+/**
+ * GPU memory available to textures, in bytes. `unified` is true when the GPU
+ * shares system RAM (no separate VRAM query exists), so CPU-side copies of the
+ * spectrogram compete with the textures for the same pool.
+ */
+export function getGpuMemoryInfo(): { bytes: number; unified: boolean } {
+  const queried: number = init().getGpuMemoryBytes();
+  if (queried > 0) return { bytes: queried, unified: false };
+  return { bytes: totalmem(), unified: true };
 }
 
 /**

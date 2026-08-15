@@ -213,6 +213,9 @@ async function historyCodec(
 
 export function createExtensionAnalysis(): AnalysisApi {
   return {
+    // The extension host has no GPU-memory query yet; zero bytes disables the
+    // analysis budget and leaves only the texture-dimension cap.
+    getGpuMemoryInfo: () => ({ bytes: 0, unified: true }),
     analyze,
     analyseBuffer: () => notImplemented("analyseBuffer"),
     synthesize,

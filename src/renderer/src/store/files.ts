@@ -7,6 +7,7 @@ import { produce } from "immer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
 import { host } from "../lib/host";
+import { remainingCoefficientBudget } from "../lib/gpu-budget";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type { AnalysisParams, CommitLevels, CommitStrokeResult, PackedOnsets } from "../../../main/lib/types";
 import { computeOutputLevels, outputLevelPoints, spliceOutputLevels, type OutputLevels } from "../lib/output-levels";
@@ -265,6 +266,17 @@ function stripExtensionForLabel(name: string): string {
   return ext ? name.slice(0, -ext.length) : name;
 }
 
+/** Texel counts of the open files' packed textures, skipping `excludeFileId`. */
+function openFileTexelCounts(excludeFileId?: string): number[] {
+  const counts: number[] = [];
+  for (const [id, file] of Object.entries(openFiles)) {
+    if (id === excludeFileId) continue;
+    const data = file.spectrogramData;
+    if (data) counts.push(data.textureWidth * data.textureHeight);
+  }
+  return counts;
+}
+
 // Run gaborator analysis on a real on-disk wav and stash the resulting
 // SpectrogramData on the file. Used by first-time-open and as a recovery
 // fallback in reopenPersistedFiles when a real file's history dir is missing.
@@ -277,7 +289,20 @@ async function loadRealFileViaGaborator(
   const file = openFiles[fileId];
   if (!file) return;
   const diskPath = isBundledPath(filePath) ? resolveBundledPath(filePath) : filePath;
-  const result = await host.analysis.analyze(diskPath, { bandsPerOctave, minFreq });
+  const otherTexelCounts = openFileTexelCounts(fileId);
+  let result: Awaited<ReturnType<typeof host.analysis.analyze>>;
+  try {
+    result = await host.analysis.analyze(diskPath, {
+      bandsPerOctave,
+      minFreq,
+      maxCoefficients: remainingCoefficientBudget(otherTexelCounts),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("maximum audio duration") && otherTexelCounts.length > 0) {
+      throw new Error(`${error.message} Close another file to free graphics memory.`);
+    }
+    throw error;
+  }
   const spectrogramData = {
     packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
     inverseMap: new Float32Array(
@@ -684,6 +709,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const result = await host.analysis.analyseBuffer(audioBuffer, {
         bandsPerOctave: state.bandsPerOctave,
         minFreq: state.minFreq,
+        maxCoefficients: remainingCoefficientBudget(openFileTexelCounts()),
       });
 
       const spectrogramData = {
@@ -1185,7 +1211,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           audioBuffer.copyToChannel(new Float32Array(stemChannels[ch]), ch);
         }
 
-        const result = await host.analysis.analyseBuffer(audioBuffer, analysisParams);
+        const result = await host.analysis.analyseBuffer(audioBuffer, {
+          ...analysisParams,
+          maxCoefficients: remainingCoefficientBudget(openFileTexelCounts()),
+        });
 
         openFiles[stemIds[i]] = {
           ...openFiles[stemIds[i]],
@@ -2149,9 +2178,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     );
 
     try {
+      const reanalysisParams: AnalysisParams = {
+        bandsPerOctave,
+        minFreq,
+        maxCoefficients: remainingCoefficientBudget(openFileTexelCounts(fileId)),
+      };
       const result = audioBuffer
-        ? await host.analysis.analyseBuffer(audioBuffer, { bandsPerOctave, minFreq })
-        : await host.analysis.analyze(file.filePath, { bandsPerOctave, minFreq });
+        ? await host.analysis.analyseBuffer(audioBuffer, reanalysisParams)
+        : await host.analysis.analyze(file.filePath, reanalysisParams);
 
       const spectrogramData = {
         packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
@@ -2218,7 +2252,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (!file?.spectrogramData || !file.rendererRef?.current) return;
 
     const { spectrogramData } = file;
-    const analysisParams = { bandsPerOctave: spectrogramData.bandsPerOctave, minFreq: spectrogramData.minFreq };
+    const analysisParams: AnalysisParams = {
+      bandsPerOctave: spectrogramData.bandsPerOctave,
+      minFreq: spectrogramData.minFreq,
+      maxCoefficients: remainingCoefficientBudget(openFileTexelCounts(fileId)),
+    };
 
     try {
       const fboData = await file.rendererRef.current.getFBOData();

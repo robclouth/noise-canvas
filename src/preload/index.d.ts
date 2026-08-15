@@ -10,6 +10,11 @@ declare global {
     // Direct IPC access (exposed to avoid Vite bundling issues)
     ipcRenderer: IpcRenderer;
     audioAnalysis: {
+      /**
+       * GPU memory available to textures in bytes; `unified` marks a GPU that
+       * shares system RAM. Zero bytes means no budget is known.
+       */
+      getGpuMemoryInfo: () => { bytes: number; unified: boolean };
       analyze: (
         filePath: string,
         params: AnalysisParams,
