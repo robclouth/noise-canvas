@@ -60,7 +60,15 @@ if (!gotTheLock) {
   });
 }
 
+// The renderer gets a moment to finish its shutdown work (flushing the debounced
+// history manifest, thinning cached audio) before the window goes away. The
+// close is held once and only briefly: if the renderer doesn't answer, the
+// window closes anyway rather than leaving the app unclosable.
+const QUIT_CLEANUP_TIMEOUT_MS = 3000;
+
 function createWindow(): void {
+  let quitCleanupRun = false;
+
   mainWindow = new BrowserWindow({
     width: 1600,
     height: 1200,
@@ -79,6 +87,31 @@ function createWindow(): void {
 
   mainWindow.on("ready-to-show", () => {
     mainWindow?.show();
+  });
+
+  // Close is the one point both the window button and Quit pass through while
+  // the renderer is still alive, so the cleanup handshake runs here. The second
+  // close, from finish(), falls through the guard and closes for real.
+  mainWindow.on("close", (event) => {
+    const window = mainWindow;
+    if (quitCleanupRun || !window || window.webContents.isDestroyed()) return;
+    quitCleanupRun = true;
+    event.preventDefault();
+
+    const finish = (): void => {
+      clearTimeout(timer);
+      ipcMain.removeListener("quit-cleanup-done", finish);
+      window.close();
+    };
+    const timer = setTimeout(finish, QUIT_CLEANUP_TIMEOUT_MS);
+    ipcMain.once("quit-cleanup-done", finish);
+    webContentsSend(window, "app-will-quit");
+  });
+
+  // Every later property read on a destroyed BrowserWindow throws, so drop the
+  // reference as soon as the window goes.
+  mainWindow.on("closed", () => {
+    mainWindow = null;
   });
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -189,30 +222,6 @@ ipcMain.handle("get-user-data-path", () => app.getPath("userData"));
 ipcMain.on("open-external", (_event, url: string) => {
   if (/^https?:\/\//.test(url)) shell.openExternal(url);
 });
-
-// Give the renderer a moment to finish its shutdown work (flushing the debounced
-// history manifest, thinning cached audio) before the process goes away. Quit is
-// held once and only briefly: if the renderer doesn't answer, quitting proceeds
-// anyway rather than leaving the app unclosable.
-const QUIT_CLEANUP_TIMEOUT_MS = 3000;
-let quitCleanupRun = false;
-
-app.on("before-quit", (event) => {
-  if (quitCleanupRun || !mainWindow || mainWindow.webContents.isDestroyed()) return;
-  quitCleanupRun = true;
-  event.preventDefault();
-
-  const finish = (): void => {
-    clearTimeout(timer);
-    ipcMain.removeListener("quit-cleanup-done", finish);
-    app.quit();
-  };
-  const timer = setTimeout(finish, QUIT_CLEANUP_TIMEOUT_MS);
-  ipcMain.once("quit-cleanup-done", finish);
-  webContentsSend(mainWindow, "app-will-quit");
-});
-
-app.on("will-quit", async () => {});
 
 app.on("window-all-closed", () => {
   app.quit();
