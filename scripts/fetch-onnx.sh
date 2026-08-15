@@ -12,10 +12,11 @@ ONNX_VERSION="1.24.3"
 ONNX_DIR="vendor/onnxruntime"
 DYLIB="$ONNX_DIR/lib/libonnxruntime.${ONNX_VERSION}.dylib"
 
+# ONNX Runtime published its last macOS x86_64 build for 1.23, so Intel Macs
+# build without the separation path rather than pinning an older runtime.
 case "$(uname -m)" in
-  arm64)  ONNX_ARCH="arm64" ;;
-  x86_64) ONNX_ARCH="x86_64" ;;
-  *) echo "[fetch-onnx] Unsupported arch: $(uname -m)"; exit 1 ;;
+  arm64) ONNX_ARCH="arm64" ;;
+  *) echo "[fetch-onnx] No macOS ONNX Runtime build for $(uname -m), skipping."; exit 0 ;;
 esac
 
 if [ -f "$DYLIB" ]; then

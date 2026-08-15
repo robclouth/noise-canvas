@@ -14,8 +14,7 @@
                 "GCC_ENABLE_CPP_RTTI": "YES",
                 "CLANG_CXX_LIBRARY": "libc++",
                 "MACOSX_DEPLOYMENT_TARGET": "10.7",
-                "OTHER_CPLUSPLUSFLAGS": ["-std=c++17", "-arch arm64"],
-                "OTHER_LDFLAGS": ["-arch arm64"],
+                "OTHER_CPLUSPLUSFLAGS": ["-std=c++17"],
             },
             "msvs_settings": {
                 "VCCLCompilerTool": {
@@ -28,27 +27,38 @@
                 [
                     'OS=="mac"',
                     {
-                        "defines": ["GABORATOR_USE_VDSP=1", "GABORATOR_ONNX_ENABLED=1"],
-                        "include_dirs": ["vendor/onnxruntime/include"],
+                        "defines": ["GABORATOR_USE_VDSP=1"],
                         "link_settings": {
-                            "libraries": [
-                                "-framework Accelerate",
-                                "<(module_root_dir)/vendor/onnxruntime/lib/libonnxruntime.dylib",
-                            ],
+                            "libraries": ["-framework Accelerate"],
                         },
                         "xcode_settings": {
-                            "OTHER_LDFLAGS": [
-                                "-arch arm64",
-                                "-Wl,-rpath,@loader_path",
-                            ],
+                            "OTHER_LDFLAGS": ["-Wl,-rpath,@loader_path"],
                         },
-                        "copies": [
-                            {
-                                "destination": "<(PRODUCT_DIR)",
-                                "files": [
-                                    "<(module_root_dir)/vendor/onnxruntime/lib/libonnxruntime.1.24.3.dylib",
-                                ],
-                            },
+                        "conditions": [
+                            [
+                                # ONNX Runtime ships no macOS x86_64 build after
+                                # 1.23, so stem separation compiles on Apple
+                                # Silicon only. Callers must treat aiSeparate as
+                                # absent elsewhere.
+                                'target_arch=="arm64"',
+                                {
+                                    "defines": ["GABORATOR_ONNX_ENABLED=1"],
+                                    "include_dirs": ["vendor/onnxruntime/include"],
+                                    "link_settings": {
+                                        "libraries": [
+                                            "<(module_root_dir)/vendor/onnxruntime/lib/libonnxruntime.dylib",
+                                        ],
+                                    },
+                                    "copies": [
+                                        {
+                                            "destination": "<(PRODUCT_DIR)",
+                                            "files": [
+                                                "<(module_root_dir)/vendor/onnxruntime/lib/libonnxruntime.1.24.3.dylib",
+                                            ],
+                                        },
+                                    ],
+                                },
+                            ],
                         ],
                     },
                 ],
@@ -88,8 +98,7 @@
                 "GCC_ENABLE_CPP_RTTI": "YES",
                 "CLANG_CXX_LIBRARY": "libc++",
                 "MACOSX_DEPLOYMENT_TARGET": "10.7",
-                "OTHER_CPLUSPLUSFLAGS": ["-std=c++17", "-arch arm64"],
-                "OTHER_LDFLAGS": ["-arch arm64"],
+                "OTHER_CPLUSPLUSFLAGS": ["-std=c++17"],
             },
             "msvs_settings": {
                 "VCCLCompilerTool": {

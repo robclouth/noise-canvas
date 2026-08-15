@@ -11,6 +11,7 @@ export interface BootstrapInfo {
   homedir: string;
   userDataPath: string;
   platform: NodeJS.Platform;
+  arch: NodeJS.Architecture;
   resourcesPath: string;
   cwd: string;
 }

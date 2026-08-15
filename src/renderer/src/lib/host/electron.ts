@@ -34,6 +34,9 @@ export const host: Host = {
     get platform() {
       return window.platform;
     },
+    get arch() {
+      return process.arch;
+    },
     get nodeEnv() {
       return process.env.NODE_ENV;
     },

@@ -35,6 +35,8 @@ export interface HostEnv {
   readonly isExtension: boolean;
   /** The OS platform, e.g. "darwin" | "win32" | "linux". */
   readonly platform: NodeJS.Platform;
+  /** The CPU architecture, e.g. "arm64" | "x64". */
+  readonly arch: NodeJS.Architecture;
   /** The value of NODE_ENV, or undefined when unset. */
   readonly nodeEnv: string | undefined;
   /** Absolute path to the app's bundled resources directory. */

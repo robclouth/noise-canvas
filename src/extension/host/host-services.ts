@@ -115,6 +115,7 @@ export function createHostServices(config: HostServicesConfig): HostServices {
         homedir: homedir(),
         userDataPath: config.userDataPath,
         platform: process.platform,
+        arch: process.arch,
         resourcesPath: config.userDataPath,
         cwd: process.cwd(),
       };

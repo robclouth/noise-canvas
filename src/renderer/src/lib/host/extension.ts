@@ -129,6 +129,9 @@ export const host: Host = {
       if (boot) return boot.platform;
       return navigator.userAgent.includes("Win") ? "win32" : navigator.userAgent.includes("Mac") ? "darwin" : "linux";
     },
+    get arch() {
+      return getBootstrapOrNull()?.arch ?? "x64";
+    },
     get nodeEnv() {
       return import.meta.env.MODE;
     },

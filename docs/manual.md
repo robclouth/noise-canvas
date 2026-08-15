@@ -667,7 +667,7 @@ The split menu on each file header:
 
 - **Split Harmonic and Percussive (HPSS)** – separates the file into harmonic and percussive layers.
 - **Split into N Parts (NMF)…** – non-negative matrix factorization into any number of components.
-- **Split Drums / Bass / Other / Vocals (AI)** – neural stem separation. macOS only.
+- **Split Drums / Bass / Other / Vocals (AI)** – neural stem separation. Apple Silicon Macs only, so the item is hidden on Intel Macs, Windows and Linux.
 
 ### Stem Groups
 

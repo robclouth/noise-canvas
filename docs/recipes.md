@@ -262,7 +262,7 @@ _See also:_ [Source](./manual.md#source), [History](./manual.md#history).
 
 **Set up.**
 
-- File header → **scissors** → **Split Drums / Bass / Other / Vocals (AI)**. macOS only; the model downloads once.
+- File header → **scissors** → **Split Drums / Bass / Other / Vocals (AI)**. Apple Silicon Macs only; the model downloads once.
 - The vocal stem opens as an ordinary file alongside the others, bracketed as a [stem group](./manual.md#stem-groups).
 
 **Do.** Erase on the vocal stem — the **Eraser** brush, **Size ↕ = Full**, painted across the parts you want gone. Then **Merge** the group back.
