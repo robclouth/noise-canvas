@@ -100,7 +100,6 @@ export function createHarnessTextures(spectrogramData: SpectrogramData): Harness
 /** Assembles the StrokeTextures the renderer constructor expects. */
 export function toStrokeTextures(t: HarnessTextures): StrokeTextures {
   return {
-    packedDataTex: t.packedDataTex,
     originalPackedDataTex: t.originalPackedDataTex,
     inverseMapTex: t.inverseMapTex,
     metadataTex: t.metadataTex,

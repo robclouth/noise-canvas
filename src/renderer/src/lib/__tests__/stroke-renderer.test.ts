@@ -347,22 +347,18 @@ function createMockEffectsWithAdditive(): EffectsRegistry {
  * Creates WebGL textures from SpectrogramData for testing.
  */
 function createTexturesFromSpectrogramData(spectrogramData: SpectrogramData): {
-  packedDataTex: DataTexture;
   originalPackedDataTex: DataTexture;
   inverseMapTex: DataTexture;
   metadataTex: DataTexture;
 } {
   const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
 
-  const packedDataTex = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
-  packedDataTex.internalFormat = "RGBA32F";
-  packedDataTex.minFilter = NearestFilter;
-  packedDataTex.magFilter = NearestFilter;
-  packedDataTex.wrapS = ClampToEdgeWrapping;
-  packedDataTex.wrapT = ClampToEdgeWrapping;
-  packedDataTex.needsUpdate = true;
-
-  const originalPackedDataTex = packedDataTex.clone();
+  const originalPackedDataTex = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
+  originalPackedDataTex.internalFormat = "RGBA32F";
+  originalPackedDataTex.minFilter = NearestFilter;
+  originalPackedDataTex.magFilter = NearestFilter;
+  originalPackedDataTex.wrapS = ClampToEdgeWrapping;
+  originalPackedDataTex.wrapT = ClampToEdgeWrapping;
   originalPackedDataTex.needsUpdate = true;
 
   const inverseMapTex = new DataTexture(inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
@@ -381,7 +377,7 @@ function createTexturesFromSpectrogramData(spectrogramData: SpectrogramData): {
   metadataTex.wrapT = ClampToEdgeWrapping;
   metadataTex.needsUpdate = true;
 
-  return { packedDataTex, originalPackedDataTex, inverseMapTex, metadataTex };
+  return { originalPackedDataTex, inverseMapTex, metadataTex };
 }
 
 /**
@@ -462,7 +458,6 @@ describe("StrokeRenderer", () => {
     gl.dispose();
 
     // Dispose textures
-    textures.packedDataTex.dispose();
     textures.originalPackedDataTex.dispose();
     textures.inverseMapTex.dispose();
     textures.metadataTex.dispose();
@@ -758,7 +753,6 @@ describe("StrokeRenderer", () => {
 
     afterEach(() => {
       iterRenderer.dispose();
-      iterTextures.packedDataTex.dispose();
       iterTextures.originalPackedDataTex.dispose();
       iterTextures.inverseMapTex.dispose();
       iterTextures.metadataTex.dispose();
@@ -1199,7 +1193,6 @@ describe("StrokeRenderer", () => {
       // Cleanup
       sourceRenderer.dispose();
       sourceGl.dispose();
-      sourceTextures.packedDataTex.dispose();
       sourceTextures.originalPackedDataTex.dispose();
       sourceTextures.inverseMapTex.dispose();
       sourceTextures.metadataTex.dispose();
@@ -1364,7 +1357,6 @@ describe("StrokeRenderer", () => {
     afterEach(() => {
       multiStepRenderer?.dispose();
       multiStepGl?.dispose();
-      multiStepTextures?.packedDataTex.dispose();
       multiStepTextures?.originalPackedDataTex.dispose();
       multiStepTextures?.inverseMapTex.dispose();
       multiStepTextures?.metadataTex.dispose();
@@ -1596,7 +1588,6 @@ describe("StrokeRenderer", () => {
     afterEach(() => {
       ncRenderer?.dispose();
       ncGl?.dispose();
-      ncTextures?.packedDataTex.dispose();
       ncTextures?.originalPackedDataTex.dispose();
       ncTextures?.inverseMapTex.dispose();
       ncTextures?.metadataTex.dispose();
@@ -1735,7 +1726,6 @@ describe("StrokeRenderer", () => {
       } finally {
         blendRenderer.dispose();
         blendGl.dispose();
-        blendTextures.packedDataTex.dispose();
         blendTextures.originalPackedDataTex.dispose();
         blendTextures.inverseMapTex.dispose();
         blendTextures.metadataTex.dispose();
@@ -1900,7 +1890,6 @@ describe("StrokeRenderer", () => {
     afterEach(() => {
       outsideRenderer?.dispose();
       outsideGl?.dispose();
-      outsideTextures?.packedDataTex.dispose();
       outsideTextures?.originalPackedDataTex.dispose();
       outsideTextures?.inverseMapTex.dispose();
       outsideTextures?.metadataTex.dispose();

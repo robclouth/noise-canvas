@@ -84,7 +84,6 @@ describe("grid stamp tiling", () => {
   function makeRenderer(spec: SpectrogramData, id: string): StrokeRenderer {
     const raw = createSpectrogramTextures(spec);
     const strokeTextures: StrokeTextures = {
-      packedDataTex: raw.packedDataTex,
       originalPackedDataTex: raw.originalPackedDataTex,
       inverseMapTex: raw.inverseMapTex,
       metadataTex: raw.metadataTex,

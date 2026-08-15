@@ -174,7 +174,6 @@ function buildHarness(gl: WebGLRenderer, effects: EffectsRegistry, data: Spectro
   const ph = placeholder();
   const lut = scaleLut();
   const strokeTextures: StrokeTextures = {
-    packedDataTex: tex.packedDataTex,
     originalPackedDataTex: tex.originalPackedDataTex,
     inverseMapTex: tex.inverseMapTex,
     metadataTex: tex.metadataTex,

@@ -150,7 +150,6 @@ describe("Attract effect", () => {
 
   function createRenderer(): StrokeRenderer {
     const strokeTextures: StrokeTextures = {
-      packedDataTex: textures.packedDataTex,
       originalPackedDataTex: textures.originalPackedDataTex,
       inverseMapTex: textures.inverseMapTex,
       metadataTex: textures.metadataTex,

@@ -175,10 +175,10 @@ export function createMockSpectrogramData(options: MockSpectrogramOptions = {}):
 }
 
 // Hard cap from the native analyzer (gaborator-addon.cpp MAX_TEXTURE_SIZE). The
-// packed texture is min(4096, totalCoefficients) wide and at most 4096 tall; a
+// packed texture is min(8192, totalCoefficients) wide and at most 8192 tall; a
 // file that would exceed that is rejected at analysis time, so a realistic mock
 // must respect the same bound.
-const MAX_TEXTURE_SIZE = 4096;
+const MAX_TEXTURE_SIZE = 8192;
 
 /**
  * Creates mock SpectrogramData that matches the real gaborator packing for a
@@ -187,7 +187,7 @@ const MAX_TEXTURE_SIZE = 4096;
  *   - numFrames = round(durationSeconds * sampleRate)   (raw sample count)
  *   - each octave toward lower frequency adds one to the time step exponent, so
  *     bandLength = ((numFrames - 1) >> stepLog2) + 1   (high bands are longest)
- *   - textureWidth = min(4096, totalCoefficients), textureHeight = ceil(total / width)
+ *   - textureWidth = min(8192, totalCoefficients), textureHeight = ceil(total / width)
  * High-frequency bands hold far more time-frames than low ones and the packed
  * layout stacks variable-length bands — the property that makes the scissor
  * over-cover the upper bands and the precompute pass span most of the texture.

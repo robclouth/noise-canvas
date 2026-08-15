@@ -44,6 +44,7 @@ import { ATTRACT_MODULATOR_MAP_START } from "./constants";
 import { getFileOnsets } from "./file-onsets";
 import { buildModulatorUniforms } from "./modulator-utils";
 import { withPlatformDefines } from "./shader-utils";
+import { getStrokeScratchPool, StrokeScratch, StrokeScratchPool } from "./stroke-scratch-pool";
 import {
   pitchUvToBandIndex,
   resolveBrushAnchor,
@@ -99,7 +100,6 @@ function writeModulatableParam(
  * Textures required for stroke rendering
  */
 export interface StrokeTextures {
-  packedDataTex: DataTexture;
   originalPackedDataTex: DataTexture;
   inverseMapTex: DataTexture;
   metadataTex: DataTexture;
@@ -163,14 +163,10 @@ export class StrokeRenderer {
   // FBOs for ping-pong rendering
   private fbo1: WebGLRenderTarget;
   private fbo2: WebGLRenderTarget;
-  private passFbo1: WebGLRenderTarget;
-  private passFbo2: WebGLRenderTarget;
-  private strokeMaskFbo: WebGLRenderTarget;
-  private strokeMaskFbo2: WebGLRenderTarget;
-  private strokeStartFbo: WebGLRenderTarget;
-  // Two RGBA float targets (MRT) holding the precomputed per-pixel modulator
-  // outputs for the current step. tex[0] = (mod0.xy, mod1.xy); tex[1] = mod2.xy.
-  private modulatorFbo: WebGLRenderTarget;
+  // Per-stroke scratch targets, shared across all files through the pool.
+  // Bound (and refreshed if another file painted since) by acquireScratch().
+  private pool: StrokeScratchPool;
+  private scratch: StrokeScratch | null = null;
 
   // Scene objects
   private fboScene: Scene;
@@ -246,24 +242,11 @@ export class StrokeRenderer {
 
     this.fbo1 = this.createFBO(textureWidth, textureHeight, RGBAFormat);
     this.fbo2 = this.createFBO(textureWidth, textureHeight, RGBAFormat);
-    this.passFbo1 = this.createFBO(textureWidth, textureHeight, RGBAFormat);
-    this.passFbo2 = this.createFBO(textureWidth, textureHeight, RGBAFormat);
-    this.strokeMaskFbo = this.createFBO(textureWidth, textureHeight, RedFormat);
-    this.strokeMaskFbo2 = this.createFBO(textureWidth, textureHeight, RedFormat);
-    this.strokeStartFbo = this.createFBO(textureWidth, textureHeight, RGBAFormat);
-
-    // Multi-render-target buffer for the precomputed modulator outputs.
-    this.modulatorFbo = new WebGLRenderTarget(textureWidth, textureHeight, {
-      count: 2,
-      format: RGBAFormat,
-      type: FloatType,
-      minFilter: NearestFilter,
-      magFilter: NearestFilter,
-    });
+    this.pool = getStrokeScratchPool(gl);
 
     // Modulator precompute material — evaluates all modulators per pixel into
-    // modulatorFbo's two targets. Reuses the common-uniform set so the same
-    // modulator/source/dest uniforms drive it as the effects.
+    // the scratch modulatorFbo's two targets. Reuses the common-uniform set so
+    // the same modulator/source/dest uniforms drive it as the effects.
     this.modulatorMaterial = new RawShaderMaterial({
       uniforms: { ...UniformsUtils.clone(defaultValues), nestedModulationActive: { value: false } },
       vertexShader: passThroughVert,
@@ -358,11 +341,12 @@ export class StrokeRenderer {
   }
 
   /**
-   * Evaluates every modulator's stereo output per pixel into modulatorFbo's two
-   * targets, using the step's common uniforms. Effects then sample these textures
-   * instead of evaluating the modulators inline. Runs once per step.
+   * Evaluates every modulator's stereo output per pixel into the scratch
+   * modulatorFbo's two targets, using the step's common uniforms. Effects then
+   * sample these textures instead of evaluating the modulators inline. Runs
+   * once per step.
    */
-  private renderModulatorTextures(commonUniforms: CommonUniforms): void {
+  private renderModulatorTextures(scratch: StrokeScratch, commonUniforms: CommonUniforms): void {
     const m = this.modulatorMaterial;
     for (const key in commonUniforms) {
       const src = (commonUniforms as Record<string, { value: unknown } | undefined>)[key];
@@ -374,7 +358,7 @@ export class StrokeRenderer {
       }
     }
     this.fboMesh.material = m;
-    this.gl.setRenderTarget(this.modulatorFbo);
+    this.gl.setRenderTarget(scratch.modulatorFbo);
     this.gl.render(this.fboScene, this.camera);
   }
 
@@ -401,7 +385,7 @@ export class StrokeRenderer {
     if (this.isInitialized) return;
 
     this.fboMesh.material = copyMaterial;
-    copyMaterial.uniforms.inputTex.value = this.textures.packedDataTex;
+    copyMaterial.uniforms.inputTex.value = this.textures.originalPackedDataTex;
 
     this.gl.setRenderTarget(this.fbo1);
     this.gl.render(this.fboScene, this.camera);
@@ -409,37 +393,57 @@ export class StrokeRenderer {
 
     this.pingPong = 0;
 
-    // Clear both mask FBOs on init
-    const oldClearColor = new Color();
-    this.gl.getClearColor(oldClearColor);
-    const oldClearAlpha = this.gl.getClearAlpha();
-    this.gl.setClearColor(0x000000, 0);
-    this.gl.setRenderTarget(this.strokeMaskFbo);
-    this.gl.clear(true, false, false);
-    this.gl.setRenderTarget(this.strokeMaskFbo2);
-    this.gl.clear(true, false, false);
-    this.gl.setRenderTarget(null);
-    this.gl.setClearColor(oldClearColor, oldClearAlpha);
-    this.maskPingPong = 0;
-
-    // Snapshot initial state to strokeStartFbo
-    this.snapshotToStrokeStart(this.fbo1.texture);
+    // The stroke-start snapshot no longer matches the reset canvas; force the
+    // next acquireScratch to rebuild it.
+    this.pool.disown(this);
 
     this.fboDataDirty = true;
     this.isInitialized = true;
   }
 
   /**
+   * Binds the shared scratch targets to this renderer. When another file
+   * painted since the last call (or the texture size changed), the masks are
+   * cleared and the stroke-start snapshot is rebuilt from the committed state,
+   * restoring the between-strokes invariants the paint path relies on.
+   */
+  private acquireScratch(): StrokeScratch {
+    const { textureWidth, textureHeight } = this.spectrogramData;
+    const { scratch, refreshed } = this.pool.acquire(this, textureWidth, textureHeight);
+    this.scratch = scratch;
+    if (refreshed) {
+      this.clearMasks(scratch);
+      this.maskPingPong = 0;
+      const currentReadFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
+      this.snapshotToStrokeStart(scratch, currentReadFBO.texture);
+    }
+    return scratch;
+  }
+
+  private clearMasks(scratch: StrokeScratch): void {
+    const oldClearColor = new Color();
+    this.gl.getClearColor(oldClearColor);
+    const oldClearAlpha = this.gl.getClearAlpha();
+    this.gl.setClearColor(0x000000, 0);
+    this.gl.setRenderTarget(scratch.strokeMaskFbo);
+    this.gl.clear(true, false, false);
+    this.gl.setRenderTarget(scratch.strokeMaskFbo2);
+    this.gl.clear(true, false, false);
+    this.gl.setRenderTarget(null);
+    this.gl.setClearColor(oldClearColor, oldClearAlpha);
+  }
+
+  /**
    * Snapshot the current FBO state to the strokeStartFbo.
    */
-  private snapshotToStrokeStart(sourceTexture: Texture): void {
+  private snapshotToStrokeStart(scratch: StrokeScratch, sourceTexture: Texture): void {
     const prevMaterial = this.fboMesh.material;
 
     this.fboMesh.material = copyMaterial;
     copyMaterial.uniforms.inputTex.value = sourceTexture;
 
     const oldTarget = this.gl.getRenderTarget();
-    this.gl.setRenderTarget(this.strokeStartFbo);
+    this.gl.setRenderTarget(scratch.strokeStartFbo);
     this.gl.render(this.fboScene, this.camera);
     this.gl.setRenderTarget(oldTarget);
 
@@ -757,6 +761,7 @@ export class StrokeRenderer {
     if (!this.isInitialized) {
       this.initialize();
     }
+    const scratch = this.acquireScratch();
 
     const {
       cursorPos,
@@ -809,8 +814,8 @@ export class StrokeRenderer {
           ? currentReadFBO
           : sourceFile.textures.packed;
 
-    let tempFboA = this.passFbo1;
-    let tempFboB = this.passFbo2;
+    let tempFboA = scratch.passFbo1;
+    let tempFboB = scratch.passFbo2;
 
     // For multi-step rendering, we iterate through all steps sequentially
     let stepInputFbo: WebGLRenderTarget | { texture: DataTexture } = initialSourceFbo;
@@ -820,8 +825,8 @@ export class StrokeRenderer {
     // initialSourceFbo; subsequent steps read each other's output.
     const firstStepState = createStepStateView(state, 0);
     if (!firstStepState.accumulate && isSameFile && firstStepState.sourceDataMode !== "original") {
-      stepInputFbo = this.strokeStartFbo;
-      initialSourceFbo = this.strokeStartFbo;
+      stepInputFbo = scratch.strokeStartFbo;
+      initialSourceFbo = scratch.strokeStartFbo;
     }
 
     const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
@@ -870,8 +875,8 @@ export class StrokeRenderer {
       tempFboB.scissor.copy(scissorVec);
       tempFboB.scissorTest = true;
       // Only precompute modulators for the rows effects will actually read.
-      this.modulatorFbo.scissor.copy(scissorVec);
-      this.modulatorFbo.scissorTest = true;
+      scratch.modulatorFbo.scissor.copy(scissorVec);
+      scratch.modulatorFbo.scissorTest = true;
     }
 
     // Generate random value seeded by position using Perlin noise
@@ -940,9 +945,9 @@ export class StrokeRenderer {
         // per-step parameters), so resolve the gate from the step state, not the
         // global state, before rendering this step's modulators.
         this.modulatorMaterial.uniforms.nestedModulationActive.value = hasNestedModulatorRouting(stepState);
-        this.renderModulatorTextures(commonUniforms);
-        commonUniforms.modulatorTex0 = { value: this.modulatorFbo.textures[0] };
-        commonUniforms.modulatorTex1 = { value: this.modulatorFbo.textures[1] };
+        this.renderModulatorTextures(scratch, commonUniforms);
+        commonUniforms.modulatorTex0 = { value: scratch.modulatorFbo.textures[0] };
+        commonUniforms.modulatorTex1 = { value: scratch.modulatorFbo.textures[1] };
       } else {
         commonUniforms.modulatorTex0 = { value: this.textures.placeholderTexture };
         commonUniforms.modulatorTex1 = { value: this.textures.placeholderTexture };
@@ -1079,11 +1084,11 @@ export class StrokeRenderer {
 
         // Pass the mask if enabled (non-cumulative mode)
         if (!stepState.accumulate) {
-          const currentMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo : this.strokeMaskFbo2;
+          const currentMaskFbo = this.maskPingPong === 0 ? scratch.strokeMaskFbo : scratch.strokeMaskFbo2;
           (uniformsForThisIteration as any).useStrokeMask = { value: true };
           (uniformsForThisIteration as any).strokeMaskTex = { value: currentMaskFbo.texture };
           // Pass stroke start texture for blend calculations to prevent accumulation with additive blend modes
-          (uniformsForThisIteration as any).blendOriginalTex = { value: this.strokeStartFbo.texture };
+          (uniformsForThisIteration as any).blendOriginalTex = { value: scratch.strokeStartFbo.texture };
         } else {
           (uniformsForThisIteration as any).useStrokeMask = { value: false };
           (uniformsForThisIteration as any).strokeMaskTex = { value: this.textures.placeholderTexture };
@@ -1123,9 +1128,9 @@ export class StrokeRenderer {
     // Reset scissor on FBOs if it was enabled
     if (scissorRows) {
       destinationFbo.scissorTest = false;
-      this.passFbo1.scissorTest = false;
-      this.passFbo2.scissorTest = false;
-      this.modulatorFbo.scissorTest = false;
+      scratch.passFbo1.scissorTest = false;
+      scratch.passFbo2.scissorTest = false;
+      scratch.modulatorFbo.scissorTest = false;
     }
 
     // If the stroke is not a preview, commit the changes
@@ -1150,7 +1155,7 @@ export class StrokeRenderer {
         }
       }
       if (anyNonAccumulate) {
-        this.updateStrokeMask(state, cursorPos, bpm, totalDuration, strokeRandom, pressure, tiltX, tiltY);
+        this.updateStrokeMask(scratch, state, cursorPos, bpm, totalDuration, strokeRandom, pressure, tiltX, tiltY);
       }
 
       // Update dirty region to include this stroke's bounds
@@ -1194,6 +1199,7 @@ export class StrokeRenderer {
    * no-op when every step is set to accumulate.
    */
   private updateStrokeMask(
+    scratch: StrokeScratch,
     state: State,
     cursorPos: Vector2,
     bpm: number,
@@ -1312,17 +1318,17 @@ export class StrokeRenderer {
       // nothing routes to a modulator (zero placeholder yields the same result).
       if (hasActiveModulatorRouting(stepState)) {
         this.modulatorMaterial.uniforms.nestedModulationActive.value = hasNestedModulatorRouting(stepState);
-        this.renderModulatorTextures(uniforms as unknown as CommonUniforms);
-        uniforms.modulatorTex0.value = this.modulatorFbo.textures[0];
-        uniforms.modulatorTex1.value = this.modulatorFbo.textures[1];
+        this.renderModulatorTextures(scratch, uniforms as unknown as CommonUniforms);
+        uniforms.modulatorTex0.value = scratch.modulatorFbo.textures[0];
+        uniforms.modulatorTex1.value = scratch.modulatorFbo.textures[1];
       } else {
         uniforms.modulatorTex0.value = this.textures.placeholderTexture;
         uniforms.modulatorTex1.value = this.textures.placeholderTexture;
       }
       this.fboMesh.material = this.maskMaterial;
 
-      const currentMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo : this.strokeMaskFbo2;
-      const nextMaskFbo = this.maskPingPong === 0 ? this.strokeMaskFbo2 : this.strokeMaskFbo;
+      const currentMaskFbo = this.maskPingPong === 0 ? scratch.strokeMaskFbo : scratch.strokeMaskFbo2;
+      const nextMaskFbo = this.maskPingPong === 0 ? scratch.strokeMaskFbo2 : scratch.strokeMaskFbo;
       uniforms.currentMaskTex.value = currentMaskFbo.texture;
 
       this.gl.setRenderTarget(nextMaskFbo);
@@ -1374,7 +1380,12 @@ export class StrokeRenderer {
     this.gl.render(this.fboScene, this.camera);
     this.gl.setRenderTarget(null);
 
-    this.snapshotToStrokeStart(this.fbo1.texture);
+    // The stroke-start snapshot only exists while this renderer holds the
+    // scratch pool; when it does not, the next acquireScratch rebuilds it
+    // from fbo1 anyway.
+    if (this.pool.ownedBy(this) && this.scratch) {
+      this.snapshotToStrokeStart(this.scratch, this.fbo1.texture);
+    }
 
     dataTex.dispose();
 
@@ -1463,7 +1474,14 @@ export class StrokeRenderer {
     const prevAutoClear = this.gl.autoClear;
     this.gl.autoClear = false;
     const committed = this.pingPong === 0 ? this.fbo1 : this.fbo2;
-    for (const target of [committed, this.strokeStartFbo]) {
+    const targets = [committed];
+    // The stroke-start snapshot must receive the same rows, but only while
+    // this renderer holds it; otherwise the next acquireScratch rebuilds it
+    // from the patched committed buffer.
+    if (this.pool.ownedBy(this) && this.scratch) {
+      targets.push(this.scratch.strokeStartFbo);
+    }
+    for (const target of targets) {
       this.gl.setRenderTarget(target);
       this.gl.render(scene, this.camera);
     }
@@ -1635,23 +1653,16 @@ export class StrokeRenderer {
    * End the current stroke (prepare for next stroke).
    */
   endStroke(): void {
+    // Without the scratch pool there is nothing to reset; the next
+    // acquireScratch establishes the same state.
+    if (!this.pool.ownedBy(this) || !this.scratch) return;
+
     // Snapshot the result of the stroke to strokeStartFbo
     const currentReadFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
-    this.snapshotToStrokeStart(currentReadFBO.texture);
+    this.snapshotToStrokeStart(this.scratch, currentReadFBO.texture);
 
     // Clear both Mask FBOs and reset ping-pong
-    const oldClearColor = new Color();
-    this.gl.getClearColor(oldClearColor);
-    const oldClearAlpha = this.gl.getClearAlpha();
-    this.gl.setClearColor(0x000000, 0);
-
-    this.gl.setRenderTarget(this.strokeMaskFbo);
-    this.gl.clear(true, false, false);
-    this.gl.setRenderTarget(this.strokeMaskFbo2);
-    this.gl.clear(true, false, false);
-    this.gl.setRenderTarget(null);
-
-    this.gl.setClearColor(oldClearColor, oldClearAlpha);
+    this.clearMasks(this.scratch);
     this.maskPingPong = 0;
   }
 
@@ -1702,14 +1713,10 @@ export class StrokeRenderer {
    */
   dispose(): void {
     this.releaseRollback();
+    this.pool.release(this);
+    this.scratch = null;
     this.fbo1.dispose();
     this.fbo2.dispose();
-    this.passFbo1.dispose();
-    this.passFbo2.dispose();
-    this.strokeMaskFbo.dispose();
-    this.strokeMaskFbo2.dispose();
-    this.strokeStartFbo.dispose();
-    this.modulatorFbo.dispose();
     this.maskMaterial.dispose();
     this.modulatorMaterial.dispose();
   }
