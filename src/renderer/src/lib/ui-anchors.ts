@@ -43,7 +43,7 @@ export type EffectAnchor = `effect-${EffectType}`;
  * "?" overlay area of their own (their `data-help` entry already covers
  * that), so they're exempt from the area-registry exhaustiveness check.
  */
-export const CONTROL_ANCHORS = ["file-fill-grid", "transport-help"] as const;
+export const CONTROL_ANCHORS = ["file-fill-grid", "menu-help"] as const;
 export type ControlAnchor = (typeof CONTROL_ANCHORS)[number];
 
 export type AnchorName = UiAnchor | EffectAnchor | ControlAnchor;

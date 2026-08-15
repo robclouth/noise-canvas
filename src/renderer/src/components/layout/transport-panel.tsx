@@ -8,7 +8,7 @@ import {
   TRANSPORT_TIME_WIDTH,
   useUiSize,
 } from "@renderer/lib/ui-density";
-import { Brush, CircleHelp, Link2, Play, Repeat, Square } from "lucide-react";
+import { Brush, Link2, Play, Repeat, Square } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { HelpActionIcon } from "../controls/help-control";
 import { ParameterControl } from "../controls/parameter-control";
@@ -177,27 +177,6 @@ export const TransportPanel = memo(() => {
         <ParameterControl paramKey="limiterEnabled" displayLabel="Auto-limit" />
         <ParameterControl paramKey="reanalyzeStrokes" displayLabel="Re-analyse" />
       </Stack>
-
-      <Divider orientation="vertical" color="dark.5" />
-
-      {/* The transport is the one bar that is always visible, whatever is open. */}
-      <HelpActionIcon
-        help="transport-help"
-        {...anchorProps("transport-help")}
-        // Kept from the document, so an open menu or popover never sees an
-        // outside click and closes: asking what something is has to work while
-        // the thing you are asking about is still on screen.
-        onMouseDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          useStore.getState().setHelpOverlayOpen(true);
-        }}
-        size={uiSize}
-        variant="subtle"
-        color="dark.2"
-      >
-        <CircleHelp size={18} />
-      </HelpActionIcon>
     </Group>
   );
 });

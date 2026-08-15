@@ -118,13 +118,10 @@ export interface OnsetResult extends OnsetReference {
 }
 
 export interface IpcMainHandlers {
-  "update-menu-state": (event: Electron.IpcMainEvent, canUndo: boolean, canRedo: boolean) => void;
   // Renderer's answer to "app-will-quit": its shutdown work is finished.
   "quit-cleanup-done": (event: Electron.IpcMainEvent) => void;
-  "update-save-state": (event: Electron.IpcMainEvent, isDirty: boolean) => void;
   "trigger-open-file": (event: Electron.IpcMainEvent) => void;
-  "update-recent-files": (event: Electron.IpcMainEvent, paths: string[]) => void;
-  "update-ui-size": (event: Electron.IpcMainEvent, isCompact: boolean) => void;
+  "check-for-updates": (event: Electron.IpcMainEvent) => void;
 }
 
 export interface IpcRendererEvents {
@@ -141,7 +138,6 @@ export interface IpcRendererEvents {
   "duplicate-active-file": () => void;
   "fill-grid": () => void;
   "close-active-file": () => void;
-  "reanalyze-active-file": () => void;
   "double-active-file-length": () => void;
   "halve-active-file-length": () => void;
   "update-available": (info: UpdateInfo) => void;

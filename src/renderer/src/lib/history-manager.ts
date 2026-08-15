@@ -5,7 +5,6 @@ import type { SpectrogramData } from "@renderer/store/types";
 import { isManagedFilePath } from "@renderer/store/managed-path";
 import { clearCanvasPatchStash } from "./canvas-patch-stash";
 import { host } from "./host";
-import { ipcSend } from "./ipc";
 import { mergePixelRanges } from "./pixel-ranges";
 
 const MANIFEST_FILENAME = "tree.json";
@@ -485,7 +484,6 @@ export class HistoryManager {
   }
 
   private notifyStateChange(): void {
-    ipcSend("update-menu-state", this.canUndo(), this.canRedo());
     this.syncDirty();
     this.emit();
   }

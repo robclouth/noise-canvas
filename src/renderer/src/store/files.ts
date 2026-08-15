@@ -1,4 +1,4 @@
-import { openConfirm, openNewFilePrompt, openReanalyzePrompt } from "../lib/modals";
+import { openConfirm, openNewFilePrompt } from "../lib/modals";
 import { notifications } from "@mantine/notifications";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { EffectItem } from "@renderer/effects/types";
@@ -61,7 +61,6 @@ export interface FilesState {
   saveActiveFileVersion: () => Promise<void>;
   tryCloseFile: (fileId: string) => Promise<void>;
   closeFile: (fileId: string) => void;
-  reanalyzeActiveFile: () => Promise<void>;
   /** Analyse a file again at a new resolution, keeping its audio and history. */
   reanalyzeFile: (fileId: string, bandsPerOctave: number) => Promise<void>;
   resizeActiveFileLength: (factor: 2 | 0.5) => Promise<void>;
@@ -2162,15 +2161,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     notifications.hide(notificationId);
     await host.session.apply(renders);
-  },
-  reanalyzeActiveFile: async () => {
-    const { activeFileId, bandsPerOctave, reanalyzeFile } = get();
-    if (!activeFileId) return;
-
-    openReanalyzePrompt({
-      initialBandsPerOctave: bandsPerOctave,
-      onConfirm: (chosen) => reanalyzeFile(activeFileId, chosen),
-    });
   },
   reanalyzeFile: async (fileId, bandsPerOctave) => {
     const file = openFiles[fileId];

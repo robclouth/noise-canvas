@@ -3,7 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell, systemPreferences } from "e
 import { installExtension, REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS } from "electron-devtools-installer";
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
-import { createMenu, MenuState, openFileDialog } from "./lib/menu";
+import { createMenu, openFileDialog } from "./lib/menu";
 import { ipcMainOn, webContentsSend } from "./lib/types";
 import { checkForUpdates, initUpdater } from "./lib/updater";
 
@@ -22,18 +22,6 @@ if (process.platform === "darwin") {
 }
 
 let mainWindow: BrowserWindow | null = null;
-
-const menuState: MenuState = {
-  canUndo: false,
-  canRedo: false,
-  isDirty: false,
-  recentFiles: [],
-  isCompact: false,
-};
-
-function rebuildMenu() {
-  if (mainWindow) createMenu(mainWindow, menuState);
-}
 
 const gotTheLock = app.requestSingleInstanceLock();
 let pendingPath: string | null = getOpenedPathFromArgv(process.argv);
@@ -116,7 +104,7 @@ function createWindow(): void {
     // mainWindow.webContents.openDevTools();
   }
 
-  rebuildMenu();
+  createMenu();
 }
 
 app.whenReady().then(async () => {
@@ -169,30 +157,8 @@ app.whenReady().then(async () => {
   });
 });
 
-// Update menu items based on undo/redo state from renderer
-ipcMainOn("update-menu-state", (_, canUndo: boolean, canRedo: boolean) => {
-  if (menuState.canUndo === canUndo && menuState.canRedo === canRedo) return;
-  menuState.canUndo = canUndo;
-  menuState.canRedo = canRedo;
-  rebuildMenu();
-});
-
-// Update save menu item based on dirty state from renderer
-ipcMainOn("update-save-state", (_, isDirty: boolean) => {
-  if (menuState.isDirty === isDirty) return;
-  menuState.isDirty = isDirty;
-  rebuildMenu();
-});
-
-ipcMainOn("update-recent-files", (_, paths: string[]) => {
-  menuState.recentFiles = paths;
-  rebuildMenu();
-});
-
-ipcMainOn("update-ui-size", (_, isCompact: boolean) => {
-  if (menuState.isCompact === isCompact) return;
-  menuState.isCompact = isCompact;
-  rebuildMenu();
+ipcMainOn("check-for-updates", () => {
+  checkForUpdates();
 });
 
 ipcMainOn("trigger-open-file", () => {

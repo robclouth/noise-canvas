@@ -231,12 +231,10 @@ function buildVisibleTree(
 
   const labelOf = (n: HistoryNode) => n.customLabel ?? n.label;
   const isPlaceholder = (id: string) => id.startsWith("branch:");
-  // Only the path the user is on merges into runs. A node made visible because
-  // it's inside a branch (small enough to show inline, or explicitly expanded)
-  // stays a real row — otherwise expanding a branch of same-label steps would
-  // immediately re-collapse itself into a run and the expand would do nothing.
-  const mergeable = (n: HistoryNode) =>
-    !isPlaceholder(n.id) && n.id !== currentId && !n.favorited && spineIds.has(n.id);
+  // Runs merge on every branch, not only the path the user is on. Expanding a
+  // branch of same-label steps therefore shows its runs as badges, which the
+  // badge expands in turn.
+  const mergeable = (n: HistoryNode) => !isPlaceholder(n.id) && n.id !== currentId && !n.favorited;
   const isTopOfChain = (node: HistoryNode): boolean => {
     if (node.childIds.length !== 1) return true;
     const child = tree[node.childIds[0]];

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useStore } from "../store";
+import { acceleratorCommands, matchesAccelerator, runCommand } from "./app-menu";
 import { host } from "./host";
 
 const isTextEntry = (t: HTMLElement | null): boolean => {
@@ -61,6 +62,16 @@ export const RESERVED_KEYS = new Set(SHORTCUTS.map((s) => s.key));
 
 export function useShortcuts() {
   const handleKeyDown = (event: KeyboardEvent) => {
+    // Menu accelerators run wherever the focus is, as a native menu's would,
+    // and are matched before anything that a text field would swallow.
+    for (const { accelerator, command } of acceleratorCommands()) {
+      if (!matchesAccelerator(event, accelerator)) continue;
+      event.preventDefault();
+      event.stopPropagation();
+      runCommand(command);
+      return;
+    }
+
     // Special handling for Shift (hold) - Pick source file position
     if (event.key === "Shift") {
       useStore.getState().setPickingFileParam("sourceFile" as import("@renderer/store/types").ParameterKey);

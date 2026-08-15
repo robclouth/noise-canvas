@@ -106,8 +106,9 @@ Files run to a little over five minutes at 44.1 kHz, and less at higher sample r
 
 ![The Noise Canvas window](images/ui/window.webp)
 
-The window is split into three columns plus a transport bar:
+The window is split into three columns, with a menu bar above and a transport bar below:
 
+- **Top: Menu bar.** File, Edit, View and Help, with the memory reading and the **?** button at the right-hand end.
 - **Left: Brush panel.** Everything that defines the current brush: Macros, Steps, Source, Envelope, Options, Effects, Modulators.
 - **Middle: Canvas.** Every open file stacked vertically, each with its own header, time legend, and pitch legend. Minimized files collapse into the dock at the bottom.
 - **Right: Sidebar.** The open palettes and their brushes on top, the history tree below.
@@ -777,6 +778,10 @@ Audio is resynthesised incrementally after every stroke, so what you hear is alw
 
 ## Menus
 
+The menus live in the window rather than in the system menu bar, so they read the same on every platform and inside Ableton Live. The right-hand end of the bar holds two things: how much of the graphics memory budget the open files hold, and the **?** button that opens the overlay.
+
+Memory climbs with the length and resolution of everything you have open, not with how much you paint. Past about 90% a new file may be refused, or analysed at a lower resolution — close a file to make room.
+
 **File**
 
 - **New** (`Cmd/Ctrl+N`) – create an empty file (sample rate, BPM, length in beats).
@@ -791,12 +796,13 @@ Audio is resynthesised incrementally after every stroke, so what you hear is alw
   - **Size** – 2K, 4K or 8K along the long edge.
   - **Poster** – adds the file's name as a caption underneath.
 - **Export History…**.
+- **Quit** – on macOS this lives in the **Noise Canvas** menu instead.
 
 **Edit**
 
 - **Undo / Redo** (`Cmd/Ctrl+Z`, `Shift+Cmd/Ctrl+Z`).
+- **Fill Grid with Brush** (`Cmd/Ctrl+G`) – see [Fill Grid](#fill-grid).
 - **Restore Original** – reload the unedited file.
-- **Re-analyse File** – regenerate the analysis, optionally at a different resolution (Best Time → Balanced → Best Pitch). This is non-destructive: it adds a node to the history tree rather than replacing it.
 - **Duplicate File** (`Cmd/Ctrl+D`).
 - **Double Length / Half Length** – stretch or shrink the file's length.
 
@@ -808,10 +814,13 @@ Audio is resynthesised incrementally after every stroke, so what you hear is alw
 
 - **Manual** (`Cmd/Ctrl+/`) – open this document in a window inside the app.
 - **Run Walkthrough** – replay the first-run tour at any time. See [Getting Help](#getting-help).
+- **Check for Updates…** – see below.
+
+Re-analysing a file is not in these menus. The resolution badge in each file's header does it, so it acts on the file you point at rather than on whichever one is active. See [Analysis Resolution](#analysis-resolution).
 
 **Updates**
 
-**Check for Updates…** lives in the **Noise Canvas** app menu on macOS and under **Help** everywhere else, and tells you whether a newer version exists. Installing it is a manual job: download the new build from the [Releases page](https://github.com/robclouth/noise-canvas/releases) and replace your copy.
+**Check for Updates…** sits under **Help**, and on macOS in the **Noise Canvas** menu as well. It tells you whether a newer version exists. Installing it is a manual job: download the new build from the [Releases page](https://github.com/robclouth/noise-canvas/releases) and replace your copy.
 
 ---
 
@@ -848,7 +857,7 @@ Six places, each answering a different question.
 | ------------------ | --------------------------------------------------------- | ----------------------------------- |
 | **Tooltip**        | Hover any control for a second                            | What does this one control do?      |
 | **Parameter menu** | Click a parameter's label, then the book icon             | …and where is it explained in full? |
-| **`?` overlay**    | The **?** button in the transport, or the `?` key         | What is all this?                   |
+| **`?` overlay**    | The **?** button in the menu bar, or the `?` key          | What is all this?                   |
 | **Deep tour**      | Click an area in the `?` overlay → **Show me around**     | How does this part work?            |
 | **Walkthrough**    | Offered on first launch; **Help → Run Walkthrough** after | Where is everything?                |
 | **This manual**    | **Help → Manual** (`Cmd/Ctrl+/`), or any book icon        | What does this do, exactly?         |

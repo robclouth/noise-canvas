@@ -38,15 +38,22 @@ export const UI_CONTROLS = {
     description: "Syncs tempo and playback with other Ableton Link apps on the network.",
     manualSection: "working-with-ableton-live",
   },
-  "transport-help": {
-    label: "Help overlay",
-    description: "Dims the interface and describes whatever the pointer is over.",
-    manualSection: "getting-help",
-  },
   "output-meter": {
     label: "Output level",
     description: "Shows the output level of the left and right channels.",
     manualSection: "transport-and-output",
+  },
+
+  // Menu bar
+  "menu-help": {
+    label: "Help overlay",
+    description: "Dims the interface and describes whatever the pointer is over.",
+    manualSection: "getting-help",
+  },
+  "menu-memory": {
+    label: "Memory use",
+    description: "Shows how much of the graphics memory budget the open files hold.",
+    manualSection: "menus",
   },
 
   // File header

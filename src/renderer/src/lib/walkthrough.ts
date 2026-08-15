@@ -166,8 +166,8 @@ const STEPS: Step[] = [
       "The grid icon paints the brush on every cell of the grid: every beat, every onset, every note of a scale, whatever you have the grid set to. One click lays them all down as a single stroke.",
   },
   {
-    anchor: "transport-help",
-    side: "top",
+    anchor: "menu-help",
+    side: "bottom",
     title: "That's the tour",
     description:
       "There is a lot more underneath: multi-step brushes, painting from other files, stem splitting, Ableton Live integration. Press <b>?</b> any time to see every part of the window at once, or <b>Cmd/Ctrl+/</b> to open the manual.",

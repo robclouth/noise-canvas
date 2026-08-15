@@ -17,6 +17,30 @@ const GPU_BUDGET_SHARE = 0.5;
 
 let cachedInfo: { bytes: number; unified: boolean } | null = null;
 
+/** Bytes the open files hold, by the same rates the budget is spent at. */
+export function spectrogramBytes(openTexelCounts: number[], unified: boolean): number {
+  let sum = 0;
+  let largest = 0;
+  for (const texels of openTexelCounts) {
+    sum += texels;
+    largest = Math.max(largest, texels);
+  }
+  const perTexel = GPU_BYTES_PER_TEXEL_FILE + (unified ? CPU_BYTES_PER_TEXEL_FILE : 0);
+  return perTexel * sum + GPU_BYTES_PER_TEXEL_SCRATCH * largest;
+}
+
+/**
+ * Share of the spectrogram memory budget the open files hold, as 0..1 — what
+ * the menu bar reports. Undefined when the host names no GPU memory figure,
+ * which leaves no budget to measure against.
+ */
+export function usedBudgetFraction(openTexelCounts: number[]): number | undefined {
+  if (!cachedInfo) cachedInfo = host.analysis.getGpuMemoryInfo();
+  if (cachedInfo.bytes <= 0) return undefined;
+  const budget = cachedInfo.bytes * GPU_BUDGET_SHARE;
+  return spectrogramBytes(openTexelCounts, cachedInfo.unified) / budget;
+}
+
 /**
  * Largest packed coefficient count one more analysis may produce, given the
  * texel counts of the files already open. Undefined when the host reports no

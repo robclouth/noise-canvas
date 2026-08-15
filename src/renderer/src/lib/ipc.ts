@@ -34,13 +34,35 @@ export function ipcInvoke<K extends keyof IpcMainHandlers>(
   return host.events.invoke(channel, ...args) as Promise<IpcMainReturnType<K>>;
 }
 
+type LocalListener = (...args: unknown[]) => void;
+const localListeners = new Map<string, Set<LocalListener>>();
+
+/**
+ * Fire a renderer event from inside the renderer, for the in-window menu and
+ * its keyboard shortcuts. In Electron `host.events.send` reaches the main
+ * process, which has no listener for these channels; only the local bus does.
+ */
+export function ipcEmitLocal<K extends keyof IpcRendererEvents>(channel: K, ...args: IpcRendererEventParams<K>): void {
+  localListeners.get(channel)?.forEach((listener) => listener(...args));
+}
+
 // Type-safe on; returns an unsubscribe function
 export function ipcOn<K extends keyof IpcRendererEvents>(
   channel: K,
   listener: (...args: IpcRendererEventParams<K>) => void,
 ): () => void {
   // The transport is untyped; the channel map defines each channel's payload.
-  return host.events.on(channel, (...args) => listener(...(args as IpcRendererEventParams<K>)));
+  const offHost = host.events.on(channel, (...args) => listener(...(args as IpcRendererEventParams<K>)));
+
+  const local: LocalListener = (...args) => listener(...(args as IpcRendererEventParams<K>));
+  const set = localListeners.get(channel) ?? new Set<LocalListener>();
+  localListeners.set(channel, set);
+  set.add(local);
+
+  return () => {
+    offHost();
+    set.delete(local);
+  };
 }
 
 // Type-safe once

@@ -1,16 +1,7 @@
 import { app, BrowserWindow, dialog, Menu } from "electron";
-import path from "path";
 import { allowedExtensions } from "./audio-analysis";
 import { webContentsSend } from "./types";
 import { checkForUpdates } from "./updater";
-
-export interface MenuState {
-  canUndo: boolean;
-  canRedo: boolean;
-  isDirty: boolean;
-  recentFiles: string[];
-  isCompact: boolean;
-}
 
 export async function openFileDialog(window: BrowserWindow) {
   const result = await dialog.showOpenDialog(window, {
@@ -29,219 +20,40 @@ export async function openFileDialog(window: BrowserWindow) {
   }
 }
 
-function buildRecentFilesSubmenu(window: BrowserWindow, recentFiles: string[]): Electron.MenuItemConstructorOptions[] {
-  if (recentFiles.length === 0) {
-    return [{ label: "(No recent files)", enabled: false }];
+/**
+ * The app's own menus live in the window (see `components/layout/menu-bar.tsx`),
+ * so the native menu carries only what the OS owns. On macOS that is the
+ * application menu, which cannot be removed, plus the text-editing roles that
+ * Chromium needs a menu item for before Cmd+X/C/V/A reach an input. Every other
+ * platform gets no menu at all.
+ */
+export function createMenu() {
+  if (process.platform !== "darwin") {
+    Menu.setApplicationMenu(null);
+    return;
   }
-  const items: Electron.MenuItemConstructorOptions[] = recentFiles.map((filePath) => ({
-    label: path.basename(filePath),
-    toolTip: filePath,
-    click: () => {
-      webContentsSend(window, "open-file", filePath);
-    },
-  }));
-  items.push({ type: "separator" });
-  items.push({
-    label: "Clear Recent",
-    click: () => {
-      webContentsSend(window, "clear-recent-files");
-    },
-  });
-  return items;
-}
 
-export function createMenu(window: BrowserWindow, state: MenuState) {
-  const { canUndo, canRedo, isDirty, recentFiles, isCompact } = state;
-
-  const template: (Electron.MenuItemConstructorOptions | Electron.MenuItem)[] = [
+  const template: Electron.MenuItemConstructorOptions[] = [
     {
-      label: "File",
-      submenu: [
-        {
-          label: "New",
-          accelerator: "CmdOrCtrl+N",
-          click: () => {
-            webContentsSend(window, "new-file");
-          },
-        },
-        {
-          label: "Open...",
-          accelerator: "CmdOrCtrl+O",
-          click: () => openFileDialog(window),
-        },
-        {
-          label: "Open Recent",
-          submenu: buildRecentFilesSubmenu(window, recentFiles),
-        },
-        {
-          label: "Save",
-          accelerator: "CmdOrCtrl+S",
-          enabled: isDirty,
-          id: "save",
-          click: () => {
-            webContentsSend(window, "save-active-file");
-          },
-        },
-        {
-          label: "Save As...",
-          accelerator: "CmdOrCtrl+Shift+S",
-          click: () => {
-            webContentsSend(window, "save-active-file-as");
-          },
-        },
-        {
-          label: "Save Version",
-          accelerator: "CmdOrCtrl+Alt+S",
-          click: () => {
-            webContentsSend(window, "save-active-file-version");
-          },
-        },
-        {
-          label: "Close File",
-          accelerator: "CmdOrCtrl+W",
-          click: () => {
-            webContentsSend(window, "close-active-file");
-          },
-        },
-        { type: "separator" },
-        {
-          label: "Export Image...",
-          click: () => {
-            webContentsSend(window, "export-image");
-          },
-        },
-        {
-          label: "Export History...",
-          click: () => {
-            webContentsSend(window, "export-history");
-          },
-        },
-        { type: "separator" },
-        { role: "quit" },
-      ],
-    },
-    {
-      label: "Edit",
-      submenu: [
-        {
-          label: "Undo",
-          accelerator: "CmdOrCtrl+Z",
-          enabled: canUndo,
-          click: () => {
-            webContentsSend(window, "undo");
-          },
-          id: "undo",
-        },
-        {
-          label: "Redo",
-          accelerator: "Shift+CmdOrCtrl+Z",
-          enabled: canRedo,
-          click: () => {
-            webContentsSend(window, "redo");
-          },
-          id: "redo",
-        },
-        { type: "separator" },
-        {
-          label: "Fill Grid with Brush",
-          accelerator: "CmdOrCtrl+G",
-          click: () => {
-            webContentsSend(window, "fill-grid");
-          },
-        },
-        { type: "separator" },
-        {
-          label: "Restore Original",
-          click: () => {
-            webContentsSend(window, "restore-original");
-          },
-        },
-        {
-          label: "Re-analyse File",
-          click: () => {
-            webContentsSend(window, "reanalyze-active-file");
-          },
-        },
-        {
-          label: "Duplicate File",
-          accelerator: "CmdOrCtrl+D",
-          click: () => {
-            webContentsSend(window, "duplicate-active-file");
-          },
-        },
-        { type: "separator" },
-        {
-          label: "Double Length",
-          click: () => {
-            webContentsSend(window, "double-active-file-length");
-          },
-        },
-        {
-          label: "Half Length",
-          click: () => {
-            webContentsSend(window, "halve-active-file-length");
-          },
-        },
-      ],
-    },
-    {
-      label: "View",
-      submenu: [
-        {
-          label: "Compact UI",
-          type: "checkbox",
-          checked: isCompact,
-          accelerator: "CmdOrCtrl+Shift+C",
-          click: () => {
-            webContentsSend(window, "toggle-ui-size");
-          },
-        },
-      ],
-    },
-  ];
-
-  if (process.platform === "darwin") {
-    template.unshift({
       label: app.getName(),
       submenu: [
-        {
-          label: "Check for Updates...",
-          click: () => checkForUpdates(),
-        },
+        { label: `About ${app.getName()}`, role: "about" },
+        { label: "Check for Updates...", click: () => checkForUpdates() },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+        { role: "cut", visible: false },
+        { role: "copy", visible: false },
+        { role: "paste", visible: false },
+        { role: "selectAll", visible: false },
       ],
-    });
-  }
-
-  // Help carries the walkthrough on every platform. Check for Updates lives in
-  // the app menu on macOS, so it is only added here off macOS.
-  const helpSubmenu: Electron.MenuItemConstructorOptions[] = [
-    {
-      label: "Manual",
-      accelerator: "CmdOrCtrl+/",
-      click: () => {
-        webContentsSend(window, "open-manual");
-      },
-    },
-    {
-      label: "Run Walkthrough",
-      click: () => {
-        webContentsSend(window, "run-walkthrough");
-      },
     },
   ];
 
-  if (process.platform !== "darwin") {
-    helpSubmenu.push(
-      { type: "separator" },
-      {
-        label: "Check for Updates...",
-        click: () => checkForUpdates(),
-      },
-    );
-  }
-
-  template.push({ label: "Help", submenu: helpSubmenu });
-
-  const mainMenu = Menu.buildFromTemplate(template);
-  Menu.setApplicationMenu(mainMenu);
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }

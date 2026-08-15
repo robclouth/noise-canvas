@@ -1,8 +1,6 @@
 import { NumberInput, SimpleGrid, Stack, Text, TextInput } from "@mantine/core";
 import { modals, openContextModal } from "@mantine/modals";
-import { BANDS_PER_OCTAVE_VALUES } from "@renderer/lib/constants";
-import { useState, type ReactNode, type RefObject } from "react";
-import { SelectControl } from "@renderer/components/controls/select-control";
+import { type ReactNode, type RefObject } from "react";
 
 export { openContextModal };
 
@@ -252,37 +250,6 @@ export function openNewFilePrompt({
   });
 }
 
-type OpenReanalyzePromptOptions = {
-  initialBandsPerOctave: number;
-  onConfirm: (bandsPerOctave: number) => void | Promise<void>;
-  onCancel?: () => void;
-  onClose?: () => void;
-};
-
-const RESOLUTION_OPTIONS = BANDS_PER_OCTAVE_VALUES.map((o) => ({ value: String(o.value), label: o.label }));
-
-// eslint-disable-next-line react-refresh/only-export-components
-const ReanalyzeBody = ({ initial, onChange }: { initial: number; onChange: (v: number) => void }) => {
-  const [value, setValue] = useState(initial);
-  return (
-    <SelectControl
-      labelComponent={
-        <Text size="xs" ta="right" c="dark.0" truncate="end" style={{ width: 70 }}>
-          Resolution
-        </Text>
-      }
-      value={String(value)}
-      options={RESOLUTION_OPTIONS}
-      dropdownZIndex={1001}
-      setValue={(v) => {
-        const n = parseInt(v);
-        setValue(n);
-        onChange(n);
-      }}
-    />
-  );
-};
-
 type OpenSplitPartsPromptOptions = {
   defaultParts?: number;
   onConfirm: (parts: number) => void | Promise<void>;
@@ -325,35 +292,6 @@ export function openSplitPartsPrompt({
       const parts = parseInt(partsRef.current?.value ?? "");
       if (!Number.isFinite(parts)) return;
       await onConfirm(Math.min(16, Math.max(2, parts)));
-    },
-    onCancel,
-    onClose,
-  });
-}
-
-export function openReanalyzePrompt({
-  initialBandsPerOctave,
-  onConfirm,
-  onCancel,
-  onClose,
-}: OpenReanalyzePromptOptions): string {
-  let chosen = initialBandsPerOctave;
-
-  return openConfirmModal({
-    title: "Re-analyse File",
-    children: (
-      <ReanalyzeBody
-        initial={initialBandsPerOctave}
-        onChange={(v) => {
-          chosen = v;
-        }}
-      />
-    ),
-    labels: { confirm: "Re-analyse", cancel: "Cancel" },
-    confirmProps: { size: "xs" },
-    cancelProps: { size: "xs" },
-    onConfirm: async () => {
-      await onConfirm(chosen);
     },
     onCancel,
     onClose,

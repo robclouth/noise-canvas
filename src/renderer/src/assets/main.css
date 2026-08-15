@@ -80,6 +80,20 @@
   background-color: rgba(255, 255, 255, 0.1);
 }
 
+.menu-bar-title {
+  color: var(--mantine-color-dark-1);
+  border-radius: 3px;
+  transition:
+    background-color 60ms ease-out,
+    color 60ms ease-out;
+}
+
+.menu-bar-title:hover,
+.menu-bar-title[data-open="true"] {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: var(--mantine-color-white);
+}
+
 .list-row-host .list-row-menu {
   opacity: 0;
   transition: opacity 80ms ease-out;

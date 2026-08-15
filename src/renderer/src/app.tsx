@@ -10,7 +10,7 @@ import { useDropzone } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
 import { openImageExportModal } from "./components/image-export-modal";
 import { CanvasPanel, Dock } from "./components/layout/canvas-panel";
-import { ExtensionMenuBar } from "./components/layout/menu-bar";
+import { AppMenuBar } from "./components/layout/menu-bar";
 import { TransportPanel } from "./components/layout/transport-panel";
 import { UpdateNotification } from "./components/update-notification";
 import { FillProgressModal } from "./components/fill-progress-modal";
@@ -87,10 +87,9 @@ function App(): React.JSX.Element {
     invalidateRef.current?.();
   }, [fullscreenFileId]);
 
-  // Drive the density CSS variables and keep the native menu checkmark in sync.
+  // Drive the density CSS variables.
   useEffect(() => {
     document.documentElement.dataset.uiSize = uiSize;
-    ipcSend("update-ui-size", uiSize === "sm");
   }, [uiSize]);
 
   useEffect(() => {
@@ -123,24 +122,6 @@ function App(): React.JSX.Element {
         openFilePath(host.env.cwd() + "/test-audio/tone-440hz-5s.wav");
       }
     }
-
-    const unsubDirtyState = useStore.subscribe(
-      (state) => {
-        const activeFileId = state.activeFileId;
-        return activeFileId ? state.filesDirty[activeFileId] || false : false;
-      },
-      (isDirty) => {
-        ipcSend("update-save-state", isDirty);
-      },
-    );
-    unsubscribers.push(unsubDirtyState);
-
-    const pushRecentFiles = (paths: string[]) => {
-      ipcSend("update-recent-files", paths);
-    };
-    pushRecentFiles(useStore.getState().recentFilePaths);
-    const unsubRecentFiles = useStore.subscribe((state) => state.recentFilePaths, pushRecentFiles);
-    unsubscribers.push(unsubRecentFiles);
 
     const unsubClearRecent = ipcOn("clear-recent-files", () => {
       useStore.getState().clearRecentFilePaths();
@@ -247,12 +228,6 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubRestoreOriginal);
 
-    const unsubReanalyzeActiveFile = ipcOn("reanalyze-active-file", () => {
-      const { reanalyzeActiveFile } = useStore.getState();
-      reanalyzeActiveFile();
-    });
-    unsubscribers.push(unsubReanalyzeActiveFile);
-
     const unsubDoubleActiveFileLength = ipcOn("double-active-file-length", () => {
       useStore.getState().resizeActiveFileLength(2);
     });
@@ -303,7 +278,7 @@ function App(): React.JSX.Element {
 
   return (
     <Stack h="100vh" w="100vw" gap={0}>
-      <ExtensionMenuBar />
+      <AppMenuBar />
       <Group flex={1} mih={0} w="100vw" wrap="nowrap" gap={0} {...getRootProps()}>
         <LoadingOverlay
           visible={!isReady}
