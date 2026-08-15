@@ -555,7 +555,7 @@ They appear in the shape picker under a "User" group.
 - **Rate ↔** – how many beats one cycle of the pattern spans. Bigger is slower. At 0 ("Off") the pattern stops varying along time.
 - **Rate ↕** – how many semitones one cycle spans. At 0 ("Off") it stops varying along pitch.
 - **Rotation** – rotates the pattern.
-- **Stereo** – decorrelates the left/right channels by offsetting the sample position in time. Negative values swap channels.
+- **Stereo** – reads the modulator at two places at once, one per channel. The gap is measured in the modulator's own cycle, so it works at any rate: at 100% the channels sit half a cycle apart, as far as they can get. In Envelope Follower mode the gap is time instead, up to half the file. Negative values swap channels.
 - **Phase Mode** – whether the pattern is anchored to the **Canvas** (fixed in the file, so strokes reveal a stationary pattern) or to the **Brush** (travels with each stroke).
 - **Phase ↔ / ↕** – offsets the pattern's start position in each axis.
 

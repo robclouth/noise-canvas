@@ -196,8 +196,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     kind: "number",
     name: `Modulator Stereo Spread ${idx}`,
     label: "Stereo",
-    description:
-      "Decorrelates the modulator's left and right outputs by offsetting the sample position along the time axis. Negative values swap channels.",
+    description: "Slides the left and right outputs apart, up to half a cycle. Negative values swap the channels.",
     default: 0,
     min: -100,
     max: 100,

@@ -15,7 +15,7 @@ struct Modulator {
   Parameter modulatorPatternRateY;
   Parameter modulatorStrength;
   Parameter modulatorRotation;
-  Parameter modulatorStereoSpread; // UV-space offset applied as ±spread/2 along time (x) axis
+  Parameter modulatorStereoSpread; // read-position offset applied as ∓spread/2 per channel
   float modulatorEnvelopeSmoothing; // UV half-width of the averaging window
   int modulatorEnvelopeSource; // 0=Amplitude, 1=Phase, 2=Panning
   float modulatorEnvelopeMinDb;
@@ -109,9 +109,11 @@ vec2 brushSpaceUv(vec2 uv) {
 }
 
 // Scalar evaluator used by both the stereo wrapper and by nested modulation.
-// Nested paths always pass the base uv unmodified — stereo spread is applied
-// only at the outermost evaluation via getModulationBase.
-float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float patternRateY, float strength, float rotation, float phaseX, float phaseY, float seqLoopX, float seqLoopY, float seqSwing, float audioLevelDb) {
+// stereoPhase shifts this channel's read position: a fraction of a cycle in
+// pattern mode, a fraction of the loop in sequencer mode, and a UV offset along
+// time in envelope-follower mode, which has no cycle. Nested paths pass 0 —
+// stereo spread applies only at the outermost evaluation via getModulationBase.
+float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float patternRateY, float strength, float rotation, float phaseX, float phaseY, float seqLoopX, float seqLoopY, float seqSwing, float stereoPhase, float audioLevelDb) {
 #ifdef ABLATE_PATTERN_EVAL
   return 0.5;
 #endif
@@ -125,16 +127,17 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
     float minDb = modulator.modulatorEnvelopeMinDb;
     float maxDb = modulator.modulatorEnvelopeMaxDb;
     float smoothing = modulator.modulatorEnvelopeSmoothing;
+    vec2 envUv = vec2(uv.x + stereoPhase, uv.y);
     if (smoothing > EPSILON) {
       float total = 0.0;
       for (int i = 0; i < NUM_ENVELOPE_SMOOTH_SAMPLES; i++) {
         float t = (float(i) + 0.5) / float(NUM_ENVELOPE_SMOOTH_SAMPLES);
-        vec2 sampleUv = vec2(clamp(uv.x + (t - 0.5) * 2.0 * smoothing, 0.0, 1.0), uv.y);
+        vec2 sampleUv = vec2(clamp(envUv.x + (t - 0.5) * 2.0 * smoothing, 0.0, 1.0), envUv.y);
         total += sampleEnvelopeAtUv(src, sampleUv, audioLevelDb, minDb, maxDb);
       }
       v = total / float(NUM_ENVELOPE_SMOOTH_SAMPLES);
     } else {
-      v = sampleEnvelopeAtUv(src, uv, audioLevelDb, minDb, maxDb);
+      v = sampleEnvelopeAtUv(src, envUv, audioLevelDb, minDb, maxDb);
     }
     return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
   }
@@ -154,7 +157,7 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
     float swing = seqSwing;
     
     // Calculate horizontal position
-    float posX = loopX > 0.0 ? mod(adjustedUv.x, loopX) / loopX : 0.0;
+    float posX = loopX > 0.0 ? fract(mod(adjustedUv.x, loopX) / loopX + stereoPhase) : 0.0;
     int stepX = int(floor(posX * float(stepsX)));
     
     // Apply swing to odd steps
@@ -194,9 +197,10 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
   vec2 rotatedUv = m * (adjustedUv - 0.5) + 0.5;
 
   vec2 pos = rotatedUv * rates;
-  
-  // Apply phase offset
-  pos += vec2(phaseX, phaseY);
+
+  // Apply phase offset. stereoPhase lands on both axes so a pattern that varies
+  // along pitch alone still splits across channels.
+  pos += vec2(phaseX + stereoPhase, phaseY + stereoPhase);
   
   bool x_zero = patternRateX == 0.0;
   bool y_zero = patternRateY == 0.0;
@@ -296,18 +300,18 @@ float evalModulatorAtUv(vec2 uv, int modulatorIndex, float patternRateX, float p
   return mix(0.5 - strength / 2.0, 0.5 + strength / 2.0, v);
 }
 
-// Stereo-aware wrapper. Offsets the sample UV by ±stereoSpread/2 along the
-// time (x) axis and returns vec2(L, R). When spread is zero the single-sample
-// fast path runs at mono cost.
+// Stereo-aware wrapper. Reads the modulator at ∓stereoSpread/4 and returns
+// vec2(L, R), so a full spread lands the channels half a cycle apart — the
+// furthest they can get — whatever the rate. When spread is zero the
+// single-sample fast path runs at mono cost.
 vec2 getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float patternRateY, float strength, float rotation, float phaseX, float phaseY, float seqLoopX, float seqLoopY, float seqSwing, float stereoSpread, float audioLevelDb) {
   if (abs(stereoSpread) < EPSILON) {
-    float v = evalModulatorAtUv(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, seqLoopX, seqLoopY, seqSwing, audioLevelDb);
+    float v = evalModulatorAtUv(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, seqLoopX, seqLoopY, seqSwing, 0.0, audioLevelDb);
     return vec2(v);
   }
-  vec2 uvL = uv + vec2(-stereoSpread * 0.5, 0.0);
-  vec2 uvR = uv + vec2(+stereoSpread * 0.5, 0.0);
-  float vL = evalModulatorAtUv(uvL, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, seqLoopX, seqLoopY, seqSwing, audioLevelDb);
-  float vR = evalModulatorAtUv(uvR, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, seqLoopX, seqLoopY, seqSwing, audioLevelDb);
+  float offset = stereoSpread * 0.25;
+  float vL = evalModulatorAtUv(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, seqLoopX, seqLoopY, seqSwing, -offset, audioLevelDb);
+  float vR = evalModulatorAtUv(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, seqLoopX, seqLoopY, seqSwing, +offset, audioLevelDb);
   return vec2(vL, vR);
 }
 
@@ -349,6 +353,7 @@ void evalNestedSources(vec2 uv, float audioLevelDb, out float nested[NUM_MODULAT
       modulators[i].seqLoopX.value,
       modulators[i].seqLoopY.value,
       modulators[i].seqSwing.value,
+      0.0,
       audioLevelDb);
   }
 }
