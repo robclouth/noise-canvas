@@ -87,7 +87,7 @@
 
 .driver-popover.walkthrough-popover button.driver-popover-next-btn {
   background-color: var(--mantine-color-orange-filled);
-  color: var(--mantine-color-black);
+  color: var(--mantine-color-white);
 }
 
 .driver-popover.walkthrough-popover button.driver-popover-next-btn:hover {

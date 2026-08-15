@@ -156,7 +156,7 @@ const STEPS: Step[] = [
     side: "right",
     title: "Make it move",
     description:
-      "That Transform was fixed across the whole stroke. Three modulators paint 2D fields over time and pitch: patterns, textures, envelope followers, sequencers. Any parameter with a menu can be driven by them.",
+      "That Transform was fixed across the whole stroke. Three modulators paint 2D fields over time and pitch: patterns, textures, envelope followers, sequencers. Any parameter with a <b>blue dot</b> next to its label can be modulated.",
   },
   {
     anchor: "file-fill-grid",

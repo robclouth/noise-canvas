@@ -25,7 +25,7 @@ export function Walkthrough({ ready }: { ready: boolean }): null {
     openConfirm({
       title: "Welcome to Noise Canvas",
       message:
-        "Hey, it's Rob. This is a tool for spectrally destroying samples: you paint effects straight onto a picture of a sound. Want a quick tour of where everything is?",
+        "This is a tool for spectrally destroying samples: you paint effects straight onto a picture of a sound. Want a quick tour of where everything is?",
       confirmLabel: "Show me",
       cancelLabel: "No thanks",
       onConfirm: () => {
