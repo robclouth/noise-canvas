@@ -9,6 +9,9 @@ on:
 jobs:
   build:
     strategy:
+      # One platform's failure must not cancel the others, so a run reports
+      # every platform's state rather than only the first to break.
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
