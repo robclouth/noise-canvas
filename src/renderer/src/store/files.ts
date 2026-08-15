@@ -15,7 +15,7 @@ import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import { disposeOnsetTexture, packOnsetState, spliceOnsets, unpackOnsetState } from "../lib/onset-map";
-import { commitStrokeOf, commitWindowOf, type StrokeCommitSnapshot } from "../lib/stroke-commit";
+import { commitStrokeOf, commitWindowOf, projectsWholeFile, type StrokeCommitSnapshot } from "../lib/stroke-commit";
 import type {
   Brush,
   LoopRegion,
@@ -843,6 +843,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       id: newFileId,
       filePath: newFilePath,
       displayName,
+      unprojectedPaint: originalFile.unprojectedPaint,
       spectrogramData: {
         ...originalFile.spectrogramData,
         packedData: fboData,
@@ -1799,6 +1800,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (!file?.spectrogramData) return null;
 
     const spec = file.spectrogramData;
+    const wholeFile = projectsWholeFile(snapshot);
     const window = commitWindowOf(snapshot);
     const stroke = commitStrokeOf(snapshot, snapshot.limiterEnabled);
 
@@ -1817,15 +1819,17 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       );
       params.onsetOdfReference = onsetReference.odfMax;
       params.onsetBandMax = onsetReference.bandMax;
-    } else if (!file.onsets || !onsetReference) {
+    } else if (!file.onsets || !onsetReference || wholeFile) {
       params.detectOnsets = true;
     }
 
     // Without a window, or without audio to splice into, the commit rebuilds
     // the whole file — which is what the addon does when either is missing.
+    // The audio goes with it either way: the limiter measures the stroke
+    // against it, so a rebuild without it would hold the whole file down.
     const existingBuffer = file.audioBuffer;
     const existingAudio: Float32Array[] = [];
-    if (window && existingBuffer) {
+    if (existingBuffer) {
       for (let i = 0; i < existingBuffer.numberOfChannels; i++) existingAudio.push(existingBuffer.getChannelData(i));
     }
 
@@ -1852,6 +1856,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         `[timing] commitStroke: ${(performance.now() - commitStart).toFixed(2)}ms ` +
           `(${result.patch.ranges.length / 3} band ranges)`,
       );
+
+      if (snapshot.reanalyzeEnabled) file.unprojectedPaint = false;
+      else if (snapshot.dirtyRegion) file.unprojectedPaint = true;
 
       await get().applySynthesizedAudio(fileId, result, {
         autoPlaybackParams: snapshot.autoPlaybackParams,
@@ -2179,6 +2186,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       };
 
       file.spectrogramData = spectrogramData;
+      file.unprojectedPaint = false;
 
       file.rendererRef?.current?.reloadTextures();
 
@@ -2284,6 +2292,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         },
       };
       file.audioBuffer = audioBuffer;
+      file.unprojectedPaint = false;
 
       let newPeak = 0;
       for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {

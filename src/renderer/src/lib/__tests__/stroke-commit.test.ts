@@ -5,6 +5,7 @@ import {
   buildStrokeCommitSnapshot,
   commitStrokeOf,
   commitWindowOf,
+  projectsWholeFile,
   type DirtyRegionUv,
   type FootprintUv,
   type StrokeCommitRenderer,
@@ -129,6 +130,20 @@ describe("stroke commit snapshot", () => {
     expect(snapshot.reanalyzeEnabled).toBe(true);
   });
 
+  it("carries the file's unprojected paint, and reads false without one", () => {
+    const built = (hasUnprojectedPaint?: boolean): boolean =>
+      buildStrokeCommitSnapshot({
+        renderer: makeRenderer(),
+        state: makeState(),
+        spec: makeSpec(),
+        brushName: "Test",
+        autoPlaybackParams: null,
+        hasUnprojectedPaint,
+      }).hasUnprojectedPaint;
+    expect(built(true)).toBe(true);
+    expect(built()).toBe(false);
+  });
+
   it("prefers the active step's envelope parameters over the globals", () => {
     const state = makeState({
       brushes: [{ name: "Test", steps: [{ brushCurveTime: 10, brushSkewTime: 40, brushWrapMode: 1 }] }],
@@ -159,6 +174,24 @@ describe("commit window", () => {
 
   it("is null when the stroke changed nothing", () => {
     expect(commitWindowOf(makeSnapshot({ dirtyRegion: null }))).toBeNull();
+  });
+
+  it("is null for the first re-analysing stroke after paint that was never projected", () => {
+    const snapshot = makeSnapshot({ reanalyzeEnabled: true, hasUnprojectedPaint: true });
+    expect(projectsWholeFile(snapshot)).toBe(true);
+    expect(commitWindowOf(snapshot)).toBeNull();
+  });
+
+  it("keeps the stroke's window once the file holds nothing unprojected", () => {
+    const snapshot = makeSnapshot({ reanalyzeEnabled: true, hasUnprojectedPaint: false });
+    expect(projectsWholeFile(snapshot)).toBe(false);
+    expect(commitWindowOf(snapshot)).not.toBeNull();
+  });
+
+  it("keeps the stroke's window while re-analyse is off, however much paint is unprojected", () => {
+    const snapshot = makeSnapshot({ reanalyzeEnabled: false, hasUnprojectedPaint: true });
+    expect(projectsWholeFile(snapshot)).toBe(false);
+    expect(commitWindowOf(snapshot)).not.toBeNull();
   });
 });
 

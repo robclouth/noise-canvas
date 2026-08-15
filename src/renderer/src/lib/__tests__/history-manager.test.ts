@@ -314,6 +314,87 @@ describe("HistoryManager undo/redo round-trip", () => {
     clearAllHistoryManagers();
     delete fakeOpenFiles["f1"];
   });
+
+  it("puts the file's unprojected paint back with the state it belongs to", async () => {
+    installManagerEnv();
+    const w = 6,
+      h = 4;
+    const root = lossyFill(w, h, 0);
+    const a = lossyFill(w, h, 1);
+    const b = lossyFill(w, h, 2);
+    const dimensions = {
+      textureWidth: w,
+      textureHeight: h,
+      numFrames: w,
+      numBands: h,
+      numChannels: 1,
+      sampleRate: 44100,
+      minFreq: 20,
+      bandsPerOctave: 12,
+    };
+    const file = fakeOpenFiles["f1"] as { unprojectedPaint?: boolean };
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    // A painted with re-analysis off, then B the stroke that settled the file.
+    await mgr.addStroke({ data: a, label: "A", dimensions, unprojectedPaint: true });
+    await mgr.addStroke({ data: b, label: "B", dimensions, unprojectedPaint: false });
+
+    await mgr.navigateToParent(); // B → A
+    expect(file.unprojectedPaint).toBe(true);
+    await mgr.navigateToParent(); // A → root
+    expect(file.unprojectedPaint).toBe(false);
+    await mgr.navigateToLastChild(); // root → A
+    expect(file.unprojectedPaint).toBe(true);
+    await mgr.navigateToLastChild(); // A → B
+    expect(file.unprojectedPaint).toBe(false);
+
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it("leaves the state's own answer when a stroke changes nothing", async () => {
+    installManagerEnv();
+    const w = 8,
+      h = 4;
+    const root = lossyFill(w, h, 0);
+    const a = new Float32Array(root);
+    const rs = new Uint32Array([5, 5]);
+    for (let p = 5; p < 10; p++) for (let c = 0; c < 4; c++) a[p * 4 + c] = ((p * 3 + c) % 89) / 89;
+    const dimensions = {
+      textureWidth: w,
+      textureHeight: h,
+      numFrames: w,
+      numBands: h,
+      numChannels: 1,
+      sampleRate: 44100,
+      minFreq: 20,
+      bandsPerOctave: 12,
+    };
+    const file = fakeOpenFiles["f1"] as { unprojectedPaint?: boolean };
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: rs, unprojectedPaint: false });
+
+    // The canvas is still A's, so a stroke that painted nothing cannot make it
+    // hold unprojected paint.
+    file.unprojectedPaint = true;
+    const outcome = await mgr.addStroke({
+      data: new Float32Array(a),
+      label: "B",
+      dimensions,
+      dirtyRanges: rs,
+      unprojectedPaint: true,
+    });
+    expect(outcome.isNew).toBe(false);
+    expect(file.unprojectedPaint).toBe(false);
+
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
 });
 
 describe("HistoryManager side data", () => {

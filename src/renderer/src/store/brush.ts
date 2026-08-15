@@ -221,6 +221,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         spec: file.spectrogramData,
         brushName: label ?? state.brushes[state.activeBrushIndex]?.name ?? "Stroke",
         autoPlaybackParams,
+        hasUnprojectedPaint: file.unprojectedPaint === true,
       });
       const dataPromise = renderer.getFBOData();
 
@@ -286,6 +287,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
             label: snapshot.brushName,
             dimensions: snapshot.dimensions,
             dirtyRanges: historyDirtyRanges,
+            unprojectedPaint: openFiles[activeFileId]?.unprojectedPaint === true,
           });
 
           const updated = openFiles[activeFileId];

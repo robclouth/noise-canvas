@@ -100,6 +100,10 @@ export type OpenFile = {
   // its own span alone and still judge it on the file's terms. Absent until a
   // whole-file pass has run, which makes the next detection a whole-file one.
   onsetReference?: { odfMax: number; bandMax: Float32Array };
+  // Set by a stroke committed with re-analysis off, whose coefficients stay as
+  // painted rather than as the audio analyses. The next projecting stroke
+  // rebuilds the whole file to clear it, so the picture holds together.
+  unprojectedPaint?: boolean;
   rendererRef?: React.RefObject<FileRendererHandle | null>;
 };
 

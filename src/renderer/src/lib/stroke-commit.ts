@@ -40,6 +40,8 @@ export interface StrokeCommitSnapshot {
   wrapMode: number;
   limiterEnabled: boolean;
   reanalyzeEnabled: boolean;
+  /** Whether the canvas still holds paint that no projection has passed over. */
+  hasUnprojectedPaint: boolean;
   spec: SpectrogramData;
   dimensions: HistoryDimensions;
   brushName: string;
@@ -56,6 +58,7 @@ export function buildStrokeCommitSnapshot(opts: {
   spec: SpectrogramData;
   brushName: string;
   autoPlaybackParams: { startTimeSeconds: number; endTimeSeconds: number } | null;
+  hasUnprojectedPaint?: boolean;
 }): StrokeCommitSnapshot {
   const { renderer, state, spec, brushName, autoPlaybackParams } = opts;
   const step = state.brushes[state.activeBrushIndex]?.steps?.[state.activeStepIndex] as
@@ -71,6 +74,7 @@ export function buildStrokeCommitSnapshot(opts: {
     wrapMode: (step?.brushWrapMode as number | undefined) ?? state.brushWrapMode,
     limiterEnabled: state.limiterEnabled,
     reanalyzeEnabled: state.reanalyzeStrokes,
+    hasUnprojectedPaint: opts.hasUnprojectedPaint ?? false,
     spec,
     dimensions: {
       textureWidth: spec.textureWidth,
@@ -97,10 +101,19 @@ function wrapsTime(wrapMode: number): boolean {
   return wrapMode === 1 || wrapMode === 3;
 }
 
-/** The span of the canvas the commit rebuilds, or null when nothing changed. */
+/**
+ * Whether the commit rebuilds and projects the whole file rather than the span
+ * the stroke touched. Paint made with re-analysis off is not what the audio
+ * analyses to, so projecting only the new span would leave a seam against it.
+ */
+export function projectsWholeFile(snapshot: StrokeCommitSnapshot): boolean {
+  return snapshot.reanalyzeEnabled && snapshot.hasUnprojectedPaint;
+}
+
+/** The span of the canvas the commit rebuilds, or null for the whole file. */
 export function commitWindowOf(snapshot: StrokeCommitSnapshot): CommitWindow | null {
   const { dirtyRegion, spec } = snapshot;
-  if (!dirtyRegion) return null;
+  if (!dirtyRegion || projectsWholeFile(snapshot)) return null;
   const startFrame = Math.max(0, Math.floor(dirtyRegion.startX * spec.numFrames));
   const endFrame = Math.min(spec.numFrames, Math.ceil(dirtyRegion.endX * spec.numFrames));
   if (endFrame <= startFrame) return null;

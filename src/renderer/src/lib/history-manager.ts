@@ -56,6 +56,9 @@ export interface HistoryNode {
   audioCached?: boolean;
   // Whether this node's onsets are stored next to it (see setNodeOnsets).
   onsetsCached?: boolean;
+  // Whether this node's coefficients hold paint no projection passed over.
+  // Absent on nodes written before it was recorded, which read as false.
+  unprojectedPaint?: boolean;
   customLabel?: string;
   favorited?: boolean;
 }
@@ -286,6 +289,8 @@ export interface AddStrokeOpts {
   // [pixelStart, pixelCount, ...] list (one range per band). The delta stores
   // exactly these pixels. Absent/null stores a full packed snapshot instead.
   dirtyRanges?: Uint32Array | null;
+  // Whether the state this stroke leaves holds paint no projection passed over.
+  unprojectedPaint?: boolean;
 }
 
 export class HistoryManager {
@@ -681,7 +686,10 @@ export class HistoryManager {
       const deltaStart = performance.now();
       if (!(await host.analysis.historyFootprintChanged(base, opts.data, ranges))) {
         // The stroke changed nothing, so it gets no node of its own. The
-        // caller must not then write its audio against the parent's id.
+        // caller must not then write its audio against the parent's id. The
+        // canvas is still the parent's, so its projection state is too.
+        const file = openFiles[this.fileId];
+        if (file) file.unprojectedPaint = parent.unprojectedPaint === true;
         return { id: parentId, isNew: false };
       }
       rangesForPatch = ranges;
@@ -711,6 +719,7 @@ export class HistoryManager {
       storage,
       dimensions: opts.dimensions,
     };
+    if (opts.unprojectedPaint) node.unprojectedPaint = true;
 
     const dir = await this.ensureDir();
     if (storage === "delta" && deltaBytes) {
@@ -889,6 +898,8 @@ export class HistoryManager {
     const targetId = this.manifest.currentId;
     const target = this.manifest.nodes[targetId];
     if (!target) return;
+    const reopened = openFiles[this.fileId];
+    if (reopened) reopened.unprojectedPaint = target.unprojectedPaint === true;
     const dir = await this.dir;
     const audioPath = this.audioPath(dir, targetId);
     if (target.audioCached && target.audioPeak != null) {
@@ -968,6 +979,10 @@ export class HistoryManager {
     clearCanvasPatchStash(this.fileId);
 
     this.manifest.currentId = targetId;
+    // The coefficients on the canvas are this node's, so whether they hold
+    // unprojected paint is its answer too — the next re-analysing stroke reads
+    // it to decide whether it settles the whole file.
+    file.unprojectedPaint = target.unprojectedPaint === true;
     // packedData is either a cache entry or a freshly reconstructed array; both
     // are safe to share (currentPacked is never mutated in place, only replaced).
     this.currentPacked = packedData;
