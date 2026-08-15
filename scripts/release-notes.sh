@@ -11,8 +11,6 @@ tag="${1:?usage: release-notes.sh <tag>}"
 previous="$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)"
 range="${previous:+${previous}..}${tag}"
 
-echo "## What's changed"
-echo
 # The tag sits on the "Release vX" commit npm version makes, which says nothing
 # a user cares about.
 git log --no-merges --invert-grep --grep='^Release v' --pretty=format:'- %s' "$range"
