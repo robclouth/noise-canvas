@@ -64,6 +64,11 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
+      # The addon resolves ONNX Runtime from its own directory, so packaging has
+      # to place both in the same unpacked one.
+      - name: Check the packaged app carries the addon and its runtime
+        run: node scripts/check-package.mjs
+
       # Upload ONLY the distributable installer-ish artifacts for each OS.
       # (We do not upload the entire app bundle contents.)
       - name: Upload release artifacts
