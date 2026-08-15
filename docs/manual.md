@@ -493,7 +493,7 @@ Pulls energy across time and pitch toward a map: a landscape of valleys that sou
 
 - **Map** – what the landscape is made of:
   - **Source** – the sound's own loud content, so strong partials capture their neighbours.
-  - **Scale** – a valley at every note of the global scale. Not retuning: everything under the brush gathers onto those notes and crystallises into the scale, so noise and smear take on a harmonic shape.
+  - **Scale** – a valley at every note of the global scale, so noise and smear take on a harmonic shape.
   - **Grid** – valleys on the snap grid's pitch and beat lines.
   - **Modulator 1–3** – a modulator's field, so energy gathers where the pattern is bright. An image modulator turns the picture into terrain the sound falls into.
 - **Source** – picks the file whose loud regions form the Source map's landscape, matched by absolute frequency. Leave it empty and the sound attracts toward itself.
