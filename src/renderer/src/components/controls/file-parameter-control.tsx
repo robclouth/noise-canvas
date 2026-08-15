@@ -94,7 +94,6 @@ export const FileParameterControl = memo(function FileParameterControl({
           alignItems: "center",
           justifyContent: "center",
           padding: "0 4px",
-          flexShrink: 0,
         }}
       >
         <Text
