@@ -111,6 +111,9 @@ jobs:
 
   release:
     needs: [build, build-extension]
+    # workflow_dispatch is the dry run: it builds, signs and notarises, and the
+    # artifacts land on the run page, but only a tag publishes a release.
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
 
     # This lets us create a Release and upload assets.
