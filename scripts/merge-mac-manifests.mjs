@@ -53,6 +53,22 @@ for (const manifest of manifests) {
   }
 }
 
+// electron-updater resolves these names against the release assets, so a name
+// with no matching artifact publishes a feed that updates cannot download.
+const names = new Set();
+(function collect(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) collect(join(dir, entry.name));
+    else names.add(entry.name);
+  }
+})(searchDir);
+
+const missing = files.map((file) => file.url).filter((url) => !names.has(url));
+if (missing.length > 0) {
+  console.error(`manifest references artifacts that were never uploaded:\n  ${missing.join("\n  ")}`);
+  process.exit(1);
+}
+
 const merged = { ...manifests[0], files };
 
 mkdirSync(dirname(outputFile), { recursive: true });

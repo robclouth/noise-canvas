@@ -72,7 +72,7 @@ jobs:
             dist/*.AppImage
             dist/*.deb
             dist/*.blockmap
-          if-no-files-found: warn
+          if-no-files-found: error
 
       # Every job uploads its own manifest. The two macOS manifests each list
       # one arch, so the release job merges them before publishing.
@@ -81,7 +81,7 @@ jobs:
         with:
           name: ${{ matrix.os }}-${{ matrix.arch || 'default' }}-manifests
           path: dist/latest*.yml
-          if-no-files-found: warn
+          if-no-files-found: error
 
   build-extension:
     runs-on: macos-latest

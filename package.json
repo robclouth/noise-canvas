@@ -26,7 +26,6 @@
     "ext:run": "bash scripts/run-extension.sh",
     "ext:package": "npm run build:ext && cd out-ext && extensions-cli package -i webview -o noise-canvas.ablx",
     "build": "npm run typecheck && electron-vite build",
-    "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir --publish=never",
     "build:win": "npm run build && electron-builder --win --publish=never",
     "build:mac": "electron-vite build && dotenv -e .env -- electron-builder --mac --publish=never",
