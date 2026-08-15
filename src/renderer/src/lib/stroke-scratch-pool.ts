@@ -3,8 +3,8 @@ import { FloatType, NearestFilter, RedFormat, RGBAFormat, WebGLRenderer, WebGLRe
 /**
  * Scratch render targets used only while painting: effect pass ping-pong,
  * stroke masks, the stroke-start snapshot, and the modulator precompute MRT.
- * Only one file is painted at a time, so one set is shared by every open
- * file's StrokeRenderer instead of each file holding its own.
+ * One set is shared by every open file's StrokeRenderer, which holds because
+ * only one file is painted at a time.
  */
 export interface StrokeScratch {
   passFbo1: WebGLRenderTarget;

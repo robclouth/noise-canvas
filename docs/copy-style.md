@@ -149,6 +149,21 @@ Anything longer than a line is a recipe, not a hint.
 
 ### Not in the manual
 
+**Anything the reader cannot act on.** A true sentence that changes nothing is
+still padding. Guarantees that hold silently, behaviour that never varies, and
+reassurance that a feature works are answers to questions nobody asked: the
+reader learns only that there was once a doubt. This is the general rule, and
+most of what follows is a special case of it.
+
+Ask what the reader would do differently for knowing. If the answer is nothing,
+cut it.
+
+- Cut: "It is the same at every resolution, so a file that opens can always be
+  re-analysed at another one." Nothing to do, and no way to see it.
+- Cut: any sentence whose point is that something behaves correctly.
+- Keep: "Files run to a little over five minutes at 44.1 kHz." That is a wall
+  the reader hits.
+
 **Implementation.** Name a mechanism only when knowing it changes what the
 reader would do. "Adjusts time resolution with frequency, so low notes are
 accurate in pitch and high ones sharp in time" earns its place — it tells you

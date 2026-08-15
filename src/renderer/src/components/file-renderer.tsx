@@ -251,9 +251,9 @@ const FileRendererInner = memo(
       invalidateRef.current?.();
     }, [modulator1Texture, modulator2Texture, modulator3Texture]);
 
-    // Textures for spectrogram data. The pristine packed texture serves both
-    // as the FBO seed and as the shaders' originalSpectrogramTex; the current
-    // state lives in the StrokeRenderer's FBOs, so no second copy is needed.
+    // Textures for spectrogram data. The pristine packed texture is both the
+    // FBO seed and the shaders' originalSpectrogramTex; the current state lives
+    // in the StrokeRenderer's FBOs.
     const [originalPackedDataTex, setOriginalPackedDataTex] = useState<DataTexture | null>(null);
     const [inverseMapTex, setInverseMapTex] = useState<DataTexture | null>(null);
     const [metadataTex, setMetadataTex] = useState<DataTexture | null>(null);
@@ -805,9 +805,8 @@ const FileRendererInner = memo(
           modulator2Texture,
           modulator3Texture,
         };
-        // A file this size passed the analysis budget, but the GPU can still
-        // refuse the allocations; close the file instead of leaving a dead
-        // context behind.
+        // The GPU can refuse the allocations even after analysis fit the
+        // budget; closing the file keeps the context alive.
         try {
           strokeRendererRef.current = new StrokeRenderer(gl, spectrogramData, textures, fileId, effects);
         } catch (error) {

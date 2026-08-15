@@ -27,6 +27,10 @@
 
 #define OVERLAP 0.7
 #define MAX_TEXTURE_SIZE 8192
+// Packed coefficients per input frame at the densest resolution the app offers
+// (12 bands/octave). Must stay at or above every resolution's own density, or a
+// file that opens at one resolution fails to re-analyse at another.
+#define MAX_COEFFICIENT_DENSITY 4.79
 
 // Debug logging to file
 static std::ofstream &getDebugLog()
@@ -376,13 +380,11 @@ public:
         bandLengths.resize(numBands);
         bandFreqsHz.resize(numBands);
         size_t totalComplexCoefficients = 0;
-        double coefficientDensity = 0.0;
 
         for (int i = 0; i < numBands; ++i)
         {
             int gbno = bandBegin + i;
             int stepLog2 = analyzer.band_step_log2(gbno);
-            coefficientDensity += 1.0 / (double)(1ULL << stepLog2);
             double centerFreq = analyzer.bandpass_band_ff(gbno) * sampleRate;
             size_t len = (numFrames > 0) ? ((numFrames - 1) >> stepLog2) + 1 : 0;
             bandOffsets[i] = static_cast<uint32_t>(totalComplexCoefficients);
@@ -399,21 +401,14 @@ public:
         size_t maxCoefficients = (size_t)MAX_TEXTURE_SIZE * MAX_TEXTURE_SIZE;
         maxCoefficients = std::min(maxCoefficients, maxCoefficientBudget);
 
-        if (totalComplexCoefficients > maxCoefficients)
+        double worstCaseCoefficients = (double)numFrames * MAX_COEFFICIENT_DENSITY;
+        if (worstCaseCoefficients > (double)maxCoefficients || totalComplexCoefficients > maxCoefficients)
         {
-            if (coefficientDensity > 1e-9)
-            {
-                double maxFrames = (double)maxCoefficients / coefficientDensity;
-                double maxSeconds = maxFrames / sampleRate;
+            double maxSeconds = (double)maxCoefficients / MAX_COEFFICIENT_DENSITY / sampleRate;
 
-                std::stringstream ss;
-                ss << "The maximum audio duration with these settings is " << std::fixed << std::setprecision(0) << maxSeconds << " seconds.";
-                SetError(ss.str().c_str());
-            }
-            else
-            {
-                SetError("The audio file is too long.");
-            }
+            std::stringstream ss;
+            ss << "The maximum audio duration is " << std::fixed << std::setprecision(0) << maxSeconds << " seconds.";
+            SetError(ss.str().c_str());
             return;
         }
 

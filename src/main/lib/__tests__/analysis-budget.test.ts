@@ -57,6 +57,34 @@ describe("analysis coefficient budget", () => {
     ).rejects.toThrow(/maximum audio duration/);
   });
 
+  it("accepts and refuses the same file at every resolution", async () => {
+    const resolutions = [12, 24, 36, 48, 60];
+    // Just above what the file needs at its densest resolution, so a limit that
+    // tracked the resolution in use would split the verdicts across the set.
+    const channel = noiseChannel(1);
+    const budget = Math.ceil(channel.length * 4.79) + 1;
+
+    const accepted = await Promise.all(
+      resolutions.map((bandsPerOctave) =>
+        addon
+          .analyze([channel], 1, SAMPLE_RATE, { bandsPerOctave, minFreq: 40, maxCoefficients: budget })
+          .then(() => true)
+          .catch(() => false),
+      ),
+    );
+    expect(accepted).toEqual(resolutions.map(() => true));
+
+    const refused = await Promise.all(
+      resolutions.map((bandsPerOctave) =>
+        addon
+          .analyze([channel], 1, SAMPLE_RATE, { bandsPerOctave, minFreq: 40, maxCoefficients: budget - budget / 2 })
+          .then(() => true)
+          .catch(() => false),
+      ),
+    );
+    expect(refused).toEqual(resolutions.map(() => false));
+  });
+
   it("ignores a zero or missing budget", async () => {
     const channel = noiseChannel(0.5);
     const withZero = await addon.analyze([channel], 1, SAMPLE_RATE, {

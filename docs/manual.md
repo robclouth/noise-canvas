@@ -98,6 +98,8 @@ Where a file sits on that trade-off is set when it is analysed, and shown as a b
 
 The choice affects what edits sound like, not just how the spectrogram looks: a shift or stretch is reconstructed from these bands, so a file analysed at 12 bands per octave keeps its clicks crisp while one at 60 keeps its harmonics clean.
 
+Files run to a little over five minutes at 44.1 kHz, and less at higher sample rates or with several files already open.
+
 ---
 
 ## The Interface
