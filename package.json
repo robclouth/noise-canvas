@@ -26,7 +26,7 @@
     "ext:run": "bash scripts/run-extension.sh",
     "ext:package": "npm run build:ext && cd out-ext && extensions-cli package -i webview -o noise-canvas.ablx",
     "build": "npm run typecheck && electron-vite build",
-    "postinstall": "bash scripts/fetch-link.sh && bash scripts/fetch-onnx.sh && electron-builder install-app-deps",
+    "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir --publish=never",
     "build:win": "npm run build && electron-builder --win --publish=never",
     "build:mac": "electron-vite build && dotenv -e .env -- electron-builder --mac --publish=never",
@@ -38,7 +38,8 @@
     "release:patch": "npm version patch -m 'Release v%s'",
     "release:minor": "npm version minor -m 'Release v%s'",
     "release:major": "npm version major -m 'Release v%s'",
-    "prepare": "husky"
+    "prepare": "husky",
+    "install": "bash scripts/fetch-link.sh && bash scripts/fetch-onnx.sh && node-gyp rebuild"
   },
   "lint-staged": {
     "*": "prettier --write --ignore-unknown"
