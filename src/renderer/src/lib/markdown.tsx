@@ -1,6 +1,8 @@
 import { Anchor, Blockquote, Code, Divider, List, Table, Text, Title } from "@mantine/core";
 import { Fragment, type ReactNode } from "react";
 
+import screenshotSizes from "../../../../docs/images/ui/sizes.json";
+
 /**
  * Renders the subset of Markdown docs/manual.md actually uses: headings,
  * paragraphs, bullet and numbered lists with one level of nesting, GFM tables,
@@ -24,7 +26,39 @@ export type MarkdownBlock =
   | { kind: "table"; header: string[]; rows: string[][] }
   | { kind: "quote"; text: string }
   | { kind: "code"; text: string }
+  | { kind: "image"; alt: string; src: string }
   | { kind: "rule" };
+
+/**
+ * Screenshots referenced from the manual by a path relative to docs/ (e.g.
+ * `images/ui/transport.webp`), resolved to the bundled asset by file name so
+ * the manual's own relative links keep working unmodified on GitHub.
+ */
+const SCREENSHOT_MODULES = import.meta.glob("../../../../docs/images/ui/*.webp", {
+  eager: true,
+  query: "?url",
+  import: "default",
+}) as Record<string, string>;
+
+const SCREENSHOT_URLS = new Map(Object.entries(SCREENSHOT_MODULES).map(([path, url]) => [path.split("/").pop()!, url]));
+
+function resolveScreenshot(src: string): string | undefined {
+  return SCREENSHOT_URLS.get(src.split("/").pop()!);
+}
+
+/**
+ * capture-ui.mjs shoots at device scale for a sharp image on a Retina host,
+ * so a screenshot's own pixel size is larger than it ever appeared on screen.
+ * sizes.json carries the logical size it was captured at, so the manual shows
+ * it at that size rather than at its raw, doubled pixel dimensions.
+ */
+function resolveScreenshotSize(src: string): { width: number; height: number } | undefined {
+  const name = src
+    .split("/")
+    .pop()!
+    .replace(/\.webp$/, "");
+  return (screenshotSizes as Record<string, { width: number; height: number } | undefined>)[name];
+}
 
 /** GitHub's heading-anchor rule, which the area registry's ids are written to. */
 export function slugify(heading: string): string {
@@ -93,6 +127,13 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
       const body: string[] = [];
       while (i < lines.length && lines[i].startsWith(">")) body.push(lines[i++].replace(/^>\s?/, ""));
       blocks.push({ kind: "quote", text: body.join(" ").trim() });
+      continue;
+    }
+
+    const image = line.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (image) {
+      blocks.push({ kind: "image", alt: image[1], src: image[2] });
+      i++;
       continue;
     }
 
@@ -268,6 +309,29 @@ export function renderBlocks(blocks: MarkdownBlock[], onLink: LinkHandler): Reac
             {block.text}
           </Code>
         );
+
+      case "image": {
+        const url = resolveScreenshot(block.src);
+        if (!url) return null;
+        const size = resolveScreenshotSize(block.src);
+        return (
+          <img
+            key={index}
+            src={url}
+            alt={block.alt}
+            width={size?.width}
+            height={size?.height}
+            style={{
+              display: "block",
+              maxWidth: "100%",
+              height: "auto",
+              borderRadius: 6,
+              border: "1px solid var(--mantine-color-dark-4)",
+              marginBottom: "var(--mantine-spacing-md)",
+            }}
+          />
+        );
+      }
 
       case "rule":
         return <Divider key={index} my="lg" />;

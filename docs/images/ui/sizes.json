@@ -1,0 +1,122 @@
+{
+  "brush-panel": {
+    "width": 320,
+    "height": 1178
+  },
+  "sidebar": {
+    "width": 192,
+    "height": 144
+  },
+  "transport": {
+    "width": 1045,
+    "height": 60
+  },
+  "file-lane": {
+    "width": 1088,
+    "height": 484
+  },
+  "file-header": {
+    "width": 1043,
+    "height": 32
+  },
+  "section-macros": {
+    "width": 308,
+    "height": 78
+  },
+  "section-steps": {
+    "width": 301,
+    "height": 27
+  },
+  "section-source": {
+    "width": 303,
+    "height": 102
+  },
+  "section-envelope": {
+    "width": 304,
+    "height": 192
+  },
+  "section-options": {
+    "width": 302,
+    "height": 102
+  },
+  "section-effects": {
+    "width": 305,
+    "height": 376
+  },
+  "section-modulators": {
+    "width": 306,
+    "height": 287
+  },
+  "section-palette": {
+    "width": 192,
+    "height": 144
+  },
+  "section-history": {
+    "width": 188,
+    "height": 51
+  },
+  "effect-dynamics": {
+    "width": 301,
+    "height": 106
+  },
+  "effect-transform": {
+    "width": 305,
+    "height": 107
+  },
+  "effect-blur": {
+    "width": 305,
+    "height": 131
+  },
+  "effect-clone": {
+    "width": 305,
+    "height": 179
+  },
+  "effect-synthesize": {
+    "width": 298,
+    "height": 59
+  },
+  "effect-evolve": {
+    "width": 305,
+    "height": 155
+  },
+  "effect-binaural": {
+    "width": 301,
+    "height": 82
+  },
+  "effect-sort": {
+    "width": 305,
+    "height": 83
+  },
+  "effect-convolve": {
+    "width": 301,
+    "height": 131
+  },
+  "effect-align": {
+    "width": 298,
+    "height": 28
+  },
+  "effect-attract": {
+    "width": 301,
+    "height": 106
+  },
+  "window": {
+    "width": 1600,
+    "height": 1172
+  },
+  "modal-add-effect": {
+    "width": 452,
+    "height": 597
+  },
+  "modal-brush-picker": {
+    "width": 332,
+    "height": 573
+  },
+  "modal-palette-picker": {
+    "width": 332,
+    "height": 400
+  },
+  "menu-parameter": {
+    "width": 334,
+    "height": 318
+  }
+}

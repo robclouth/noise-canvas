@@ -70,6 +70,8 @@ describe("parsing the manual", () => {
             return block.items.map((item) => `${item.text} ${item.children.join(" ")}`).join(" ");
           case "table":
             return [...block.header, ...block.rows.flat()].join(" ");
+          case "image":
+            return `${block.alt} ${block.src}`;
           case "rule":
             return "";
         }

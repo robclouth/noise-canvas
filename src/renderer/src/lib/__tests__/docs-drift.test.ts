@@ -123,3 +123,22 @@ describe.skipIf(screenshotNames.size === 0)("screenshots", () => {
     expect(screenshotNames).toContain(name);
   });
 });
+
+const embeddedScreenshots = [...manual.matchAll(/!\[[^\]]*\]\(images\/ui\/([\w.-]+)\.webp\)/g)].map((m) => m[1]);
+
+describe.skipIf(screenshotNames.size === 0)("manual screenshots", () => {
+  it("only embeds screenshots that were actually captured", () => {
+    const missing = embeddedScreenshots.filter((name) => !screenshotNames.has(name));
+    expect(missing).toEqual([]);
+  });
+
+  // A container's own capture is the whole column — several times taller than
+  // wide — and is redundant with its children's screenshots anyway, so it's
+  // exempt the same way the `?` overlay exempts containers from having an
+  // entry of their own.
+  const embeddableAreas = areaNames.filter((name) => !getArea(name).container);
+
+  it.each(embeddableAreas)("%s's screenshot is embedded somewhere in the manual", (name) => {
+    expect(embeddedScreenshots).toContain(name);
+  });
+});

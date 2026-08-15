@@ -3,9 +3,14 @@
  * Captures element-level screenshots of the UI for docs/manual.md.
  *
  * Launches the packaged build in Electron, drives it into a known state, and
- * writes one WebP per target into docs/images/ui/. Targets address the app by
- * the `data-anchor` names declared in src/renderer/src/lib/ui-anchors.ts, so a
- * renamed region fails loudly here rather than producing a stale screenshot.
+ * writes one WebP per target into docs/images/ui/, plus a sizes.json giving
+ * each one's logical (CSS-pixel) size. Captures run at device scale for a
+ * sharp image on a Retina host, so the WebP's own pixel dimensions are larger
+ * than it ever appeared on screen — sizes.json is how the manual displays it
+ * at the size it actually was in the app rather than at its raw pixel size.
+ * Targets address the app by the `data-anchor` names declared in
+ * src/renderer/src/lib/ui-anchors.ts, so a renamed region fails loudly here
+ * rather than producing a stale screenshot.
  *
  * Usage:
  *   node scripts/capture-ui.mjs                     capture every target
@@ -42,13 +47,28 @@ const anchor = (name, extra) => ({ name, spec: { kind: "anchor", anchor: name },
  */
 const QUALITY = 0.92;
 
+/** Effect cards the demo brush already carries, so they need no setup. */
+const DEMO_BRUSH_EFFECTS = ["blur", "clone"];
+
+/**
+ * One card per effect. The demo brush supplies two of them; the rest are
+ * added and removed one at a time, so each is captured in the state a user
+ * meets it in — freshly added, at its defaults.
+ */
+function effectTargets(addable) {
+  return addable.map(({ key, label }) =>
+    DEMO_BRUSH_EFFECTS.includes(key)
+      ? anchor(`effect-${key}`)
+      : anchor(`effect-${key}`, {
+          setup: ({ page }) => addEffect(page, label),
+          teardown: ({ page }) => removeEffect(page, key),
+        }),
+  );
+}
+
 /** The rest of the app, which the area registry does not describe as a region. */
 const EXTRA_TARGETS = [
   { name: "window", spec: { kind: "css", selector: "#root" }, pad: 0 },
-
-  // Effect cards, present because the demo brush uses them
-  anchor("effect-blur"),
-  anchor("effect-clone"),
 
   // Transient UI, which only exists while it is open
   {
@@ -84,7 +104,8 @@ const EXTRA_TARGETS = [
  */
 async function buildTargets() {
   const areas = await registryAreas();
-  return [...areas.map((name) => anchor(name)), ...EXTRA_TARGETS];
+  const effects = await addableEffects();
+  return [...areas.map((name) => anchor(name)), ...effectTargets(effects), ...EXTRA_TARGETS];
 }
 
 async function clickAndSettle(page, locator) {
@@ -96,6 +117,69 @@ async function dismiss({ page }) {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);
 }
+
+async function addEffect(page, label) {
+  await clickAndSettle(page, page.getByRole("button", { name: "Add effect" }).first());
+  // Scoped to the modal: the effect's own card carries the same name once added.
+  const picker = page.locator("[class*='Modal-content']");
+  await clickAndSettle(page, picker.getByText(label, { exact: true }).first());
+}
+
+async function removeEffect(page, key) {
+  const card = page.locator(`[data-anchor="effect-${key}"]`).first();
+  await card.locator("[data-help='section-menu']").first().click();
+  await page.waitForTimeout(250);
+  // The dropdown is portaled out of the card, so it is addressed from the page.
+  await page.locator("[data-help='effect-remove']").first().click();
+  await page.waitForTimeout(300);
+}
+
+/**
+ * Runs in the page. A section that flex-grows to fill its column's leftover
+ * space (a Mantine ScrollArea's viewport sizes to the available column height,
+ * not its content) screenshots as mostly background if cropped to its own box.
+ * Unioning every true leaf element's rect skips wrapper emptiness regardless
+ * of nesting, but doesn't help when a real control (the Palette section's
+ * "Add palette" button) is itself pinned to the bottom of that same flex-grown
+ * column — a plain union still spans the gap in front of it. So leaves are
+ * sorted top to bottom and the union stops at the first gap far bigger than
+ * any real spacing between rows, keeping just that first cluster of content.
+ */
+const CONTENT_BOX = `(captureId) => {
+  const el = document.querySelector('[data-capture-id="' + captureId + '"]');
+  if (!el) return null;
+  const leaves = [];
+  const walk = (node) => {
+    if (node.children.length === 0) {
+      const r = node.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) leaves.push(r);
+      return;
+    }
+    for (const child of node.children) walk(child);
+  };
+  walk(el);
+  if (leaves.length === 0) {
+    const full = el.getBoundingClientRect();
+    return { x: full.x, y: full.y, width: full.width, height: full.height };
+  }
+
+  const GAP = 120;
+  const sorted = leaves.slice().sort((a, b) => a.top - b.top);
+  const cluster = [sorted[0]];
+  let clusterBottom = sorted[0].bottom;
+  for (let i = 1; i < sorted.length; i++) {
+    const r = sorted[i];
+    if (r.top - clusterBottom > GAP) break;
+    cluster.push(r);
+    clusterBottom = Math.max(clusterBottom, r.bottom);
+  }
+
+  const left = Math.min(...cluster.map((r) => r.left));
+  const top = Math.min(...cluster.map((r) => r.top));
+  const right = Math.max(...cluster.map((r) => r.right));
+  const bottom = Math.max(...cluster.map((r) => r.bottom));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}`;
 
 // ---------------------------------------------------------------------------
 // Element resolution
@@ -150,6 +234,33 @@ async function declaredAnchors() {
     ...namesIn(anchorsSrc, "export const UI_ANCHORS"),
     ...namesIn(effectsSrc, "export const EFFECT_KEYS").map((key) => `effect-${key}`),
   ]);
+}
+
+/**
+ * The effects the Add Effect picker offers, with the label it lists them
+ * under. Read from source so hiding an effect, or renaming one, changes what
+ * gets captured without this script having to be edited alongside.
+ */
+async function addableEffects() {
+  const effectsSrc = await readFile(join(repoRoot, "src/renderer/src/effects/types.ts"), "utf-8");
+  const modalsSrc = await readFile(join(repoRoot, "src/renderer/src/components/modals.tsx"), "utf-8");
+  const constantsSrc = await readFile(join(repoRoot, "src/renderer/src/lib/constants.ts"), "utf-8");
+
+  const keysStart = effectsSrc.indexOf("export const EFFECT_KEYS");
+  const keysBlock = effectsSrc.slice(keysStart, effectsSrc.indexOf("] as const", keysStart));
+  const keys = [...keysBlock.matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
+
+  const hiddenStart = modalsSrc.indexOf("const HIDDEN_EFFECTS");
+  const hiddenBlock = modalsSrc.slice(hiddenStart, modalsSrc.indexOf("\n", hiddenStart));
+  const hidden = new Set([...hiddenBlock.matchAll(/"([a-z-]+)"/g)].map((m) => m[1]));
+
+  const labelsStart = constantsSrc.indexOf("export const EFFECT_LABELS");
+  const labelsBlock = constantsSrc.slice(labelsStart, constantsSrc.indexOf("};", labelsStart));
+  const labels = Object.fromEntries([...labelsBlock.matchAll(/(\w+):\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]));
+
+  return keys
+    .filter((key) => key !== "passthrough" && !hidden.has(key))
+    .map((key) => ({ key, label: labels[key] ?? key }));
 }
 
 /**
@@ -345,6 +456,7 @@ async function main() {
 
   const wanted = opts.only ? TARGETS.filter((t) => opts.only.includes(t.name)) : TARGETS;
   const failures = [];
+  const sizes = opts.only ? JSON.parse(await readFile(join(outDir, "sizes.json"), "utf-8").catch(() => "{}")) : {};
 
   for (const target of wanted) {
     try {
@@ -362,7 +474,10 @@ async function main() {
       await locator.scrollIntoViewIfNeeded();
       await page.waitForTimeout(250);
 
-      const box = await locator.boundingBox();
+      const box =
+        target.spec.kind === "anchor"
+          ? await page.evaluate(([src, id]) => eval(`(${src})`)(id), [CONTENT_BOX, target.name])
+          : await locator.boundingBox();
       if (!box || box.width < 2 || box.height < 2) throw new Error("element has no size");
 
       // A little breathing room reads better in docs than an exact crop.
@@ -380,6 +495,7 @@ async function main() {
       const png = await page.screenshot({ clip, scale: "device" });
       const webp = await toWebp(page, png, target.quality ?? QUALITY);
       await writeFile(join(outDir, `${target.name}.webp`), webp);
+      sizes[target.name] = { width: Math.round(clip.width), height: Math.round(clip.height) };
 
       const size = `${Math.round(webp.length / 1024)} KB ${webpMode(webp)}`;
       console.log(`  ✓ ${target.name}  ${Math.round(box.width)}×${Math.round(box.height)}  ${size}`);
@@ -389,6 +505,8 @@ async function main() {
       if (target.teardown) await target.teardown({ page, app }).catch(() => {});
     }
   }
+
+  await writeFile(join(outDir, "sizes.json"), `${JSON.stringify(sizes, null, 2)}\n`);
 
   console.log(`\nWrote ${wanted.length - failures.length}/${wanted.length} to ${opts.out}`);
   for (const f of failures) console.log(`  ✗ ${f}`);
