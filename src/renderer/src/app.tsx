@@ -283,6 +283,7 @@ function App(): React.JSX.Element {
         <LoadingOverlay
           visible={!isReady}
           zIndex={10001}
+          overlayProps={{ blur: 8, backgroundOpacity: 0.6 }}
           loaderProps={{
             children: (
               <Stack align="center" gap="sm">

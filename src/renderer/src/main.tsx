@@ -1,5 +1,5 @@
 import "@fontsource-variable/inter";
-import { createTheme, Input, MantineProvider, Menu, Popover } from "@mantine/core";
+import { createTheme, Input, MantineProvider, Menu, Modal, Popover } from "@mantine/core";
 import "@mantine/core/styles.css";
 import { ModalsProvider } from "@mantine/modals";
 import { Notifications } from "@mantine/notifications";
@@ -51,6 +51,7 @@ const theme = createTheme({
       },
     }),
     Menu: Menu.extend({ defaultProps: { shadow: "xl" } }),
+    Modal: Modal.extend({ defaultProps: { overlayProps: { blur: 8, backgroundOpacity: 0.5 } } }),
     Popover: Popover.extend({ defaultProps: { shadow: "xl" } }),
   },
 });
