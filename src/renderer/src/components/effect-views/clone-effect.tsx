@@ -18,7 +18,6 @@ export const CloneEffect = memo(function CloneEffect() {
       <ParameterControl paramKey="cloneDirectionY" color={COLOR} />
       <ParameterControl paramKey="cloneDecay" color={COLOR} />
       <ParameterControl paramKey="cloneEdgeMode" color={COLOR} />
-      <ParameterControl paramKey="cloneSumMode" color={COLOR} />
     </SimpleGrid>
   );
 });

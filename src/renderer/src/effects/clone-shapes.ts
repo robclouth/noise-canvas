@@ -1,6 +1,4 @@
-import { Scale } from "tonal";
-
-/** Tap spacing tables for the clone effect, in unit steps of the axis Space value. */
+/** Tap spacing tables for the repeat effect, in unit steps of the axis Gap value. */
 export type CloneShapeKey = "even" | "harmonic" | "geometric" | "inharmonic" | "scale";
 
 export interface CloneShape {
@@ -8,7 +6,7 @@ export interface CloneShape {
   label: string;
   /** Label on the time axis. Null keeps the shape off the time axis. */
   timeLabel: string | null;
-  create: (count: number, scaleTonic: string, scaleType: string) => number[];
+  create: (count: number) => number[];
 }
 
 // Highest exponent the geometric table reaches before it flattens, so a large
@@ -54,51 +52,31 @@ export const cloneShapes: Record<CloneShapeKey, CloneShape> = {
         }),
       ),
   },
+  // Even steps; the shader snaps each copy's landing pitch to the selected scale.
   scale: {
     label: "Scale",
     timeLabel: null,
-    create: (count, scaleTonic, scaleType) => {
-      const scale = Scale.get(`${scaleTonic} ${scaleType}`);
-      const chroma = scale.chroma.split("").map(Number);
-      if (!chroma.some((step) => step)) return Array.from({ length: count }, (_, i) => i);
-
-      const degrees: number[] = [];
-      let octave = 0;
-      while (degrees.length < count) {
-        for (let i = 0; i < 12; i++) {
-          if (chroma[i]) {
-            degrees.push((i + octave * 12) / 12);
-            if (degrees.length >= count) break;
-          }
-        }
-        octave++;
-      }
-      return degrees;
-    },
+    create: (count) => Array.from({ length: count }, (_, i) => i),
   },
 };
 
 export const CLONE_SHAPE_KEYS = Object.keys(cloneShapes) as CloneShapeKey[];
 
 /**
- * Pass indices the clone effect renders: 0 is the time axis, 1 is the pitch axis.
- * An axis with a single copy has nothing to add, but one pass always runs
- * because it stamps the source and applies the edge mode.
+ * Pass indices the repeat effect renders: 0 is the time axis, 1 is the pitch axis.
+ * Counts are copies added on top of the original. An axis adding none has
+ * nothing to do, but one pass always runs because it stamps the source and
+ * applies the edge mode.
  */
 export function activeClonePasses(countX: number, countY: number): number[] {
   const passes: number[] = [];
-  if (countX > 1) passes.push(0);
-  if (countY > 1) passes.push(1);
+  if (countX > 0) passes.push(0);
+  if (countY > 0) passes.push(1);
   return passes.length > 0 ? passes : [0];
 }
 
-/** Tap offsets in unit steps, where 1 step is one axis Space value. */
-export function buildShapeTable(
-  shapeKey: CloneShapeKey,
-  count: number,
-  scaleTonic: string,
-  scaleType: string,
-): number[] {
+/** Tap offsets in unit steps, where 1 step is one axis Gap value. */
+export function buildShapeTable(shapeKey: CloneShapeKey, count: number): number[] {
   const shape = cloneShapes[shapeKey] ?? cloneShapes.even;
-  return shape.create(Math.max(1, count), scaleTonic, scaleType);
+  return shape.create(Math.max(1, count));
 }

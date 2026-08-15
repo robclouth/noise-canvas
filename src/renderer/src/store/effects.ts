@@ -35,7 +35,6 @@ export interface EffectsState {
   cloneEdgeMode: number;
   cloneShapeX: CloneShapeKey;
   cloneShapeY: CloneShapeKey;
-  cloneSumMode: number;
   evolveFlow: number;
   evolveSpread: number;
   evolveGrow: number;
@@ -114,7 +113,6 @@ export const createEffectsSlice = (): EffectsState => {
     cloneEdgeMode: getParameterDef("cloneEdgeMode").default,
     cloneShapeX: getParameterDef("cloneShapeX").default,
     cloneShapeY: getParameterDef("cloneShapeY").default,
-    cloneSumMode: getParameterDef("cloneSumMode").default,
 
     // ---------------- Synthesize ----------------
     synthesizeBrushType: getParameterDef("synthesizeBrushType").default,

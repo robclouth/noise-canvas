@@ -336,13 +336,13 @@ Smooths and blends over time and pitch: echo, reverb, and diffusion-like effects
 Stamps beat- and semitone-spaced copies of the painted region in 2D: echoes, spectral delays, stacked harmonics.
 
 - **Gap ↔ / ↕** – spacing between copies in beats / semitones (can be negative). With any shape other than Even this is the gap to the _first_ copy, and the shape sets the rest.
-- **Copies ↔ / ↕** – number of copies along each axis (1–64).
+- **Copies ↔ / ↕** – how many copies each axis adds on top of the original (0–63). 0 leaves that axis alone.
 - **Shape ↔ / ↕** – how the gaps grow from copy to copy. See the table below.
 - **Dir. ↔ / ↕** – Forward/Middle/Backward and Up/Middle/Down.
 - **Decay** – fade applied to each successive copy; the two axes multiply. 50% puts the outermost copy 30 dB down, 100% mutes every copy past the first.
 - **Edge** – behaviour for copies extending past the border.
 
-Overlapping copies add as waves, so a tight stack can interfere and comb. An axis set to 1 copy costs nothing: that pass is skipped entirely.
+Overlapping copies add as waves, so a tight stack can interfere and comb. An axis set to 0 copies costs nothing: that pass is skipped entirely.
 
 #### Shapes
 
@@ -358,11 +358,11 @@ Every shape places the first copy one **Gap** value out, so switching shape neve
 
 Even is the only shape with even gaps, and it is the only one a modulator can reach. Modulation stretches the whole comb at once, so it cannot make gaps unequal. That is what shapes are for.
 
-Set **Copies ↔** to 1, **Shape ↕** to Harmonic and **Gap ↕** to 12 and Repeat stacks a harmonic series on whatever it covers. **Gap ↕** then doubles as the stretch: above 12 the partials spread sharp, below 12 they compress.
+Set **Copies ↔** to 0, **Shape ↕** to Harmonic and **Gap ↕** to 12 and Repeat stacks a harmonic series on whatever it covers. **Gap ↕** then doubles as the stretch: above 12 the partials spread sharp, below 12 they compress.
 
 **Try it for**
 
-- Echoes locked to the grid. **Gap ↔** to 1/2 b, **Copies ↔** to 4, and **Decay** to taste.
+- Echoes locked to the grid. **Gap ↔** to 1/2 b, **Copies ↔** to 4, and **Decay** to taste. 50% puts the last echo 30 dB down.
 - Harmonies from a single note. **Gap ↕** to 7 st for fifths, 12 for octaves.
 - Chords that stay in key. **Shape ↕** to Scale and **Gap ↕** to 3 or 4 for stacked thirds.
 - Thickening a thin sound. A harmonic stack, as above, adds body without changing the pitch.

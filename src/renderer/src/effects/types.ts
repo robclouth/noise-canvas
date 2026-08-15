@@ -53,14 +53,15 @@ const OVERTONES_SHAPE_TO_CLONE_SHAPE: Record<string, string> = {
 
 function migrateOvertonesParams(params: EffectParams): EffectParams {
   const scale = typeof params.overtonesScale === "number" ? params.overtonesScale : 1;
+  const partials = typeof params.overtonesCount === "number" ? params.overtonesCount : 32;
   const migrated: EffectParams = {
-    cloneCountX: 1,
-    cloneCountY: typeof params.overtonesCount === "number" ? params.overtonesCount : 32,
+    cloneCountX: 0,
+    // The overtones count included the fundamental; clone counts copies added.
+    cloneCountY: Math.max(0, partials - 1),
     cloneSpaceSemis: 12 * scale,
     cloneSpaceBeats: 0,
     cloneDirectionY: 0,
     cloneShapeY: OVERTONES_SHAPE_TO_CLONE_SHAPE[String(params.overtonesShape ?? "logarithmic")] ?? "harmonic",
-    cloneSumMode: 1,
     cloneEdgeMode: 1,
   };
   if (typeof params.overtonesDecay === "number") migrated.cloneDecay = params.overtonesDecay;

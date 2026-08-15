@@ -1,11 +1,13 @@
 import { useStore } from "@/store";
-import { unitsToUv } from "@renderer/lib/utils";
+import { getNumberParameterDef } from "@renderer/parameters";
+import { buildScaleOffsets, minFreqSemisAboveC0 } from "@renderer/lib/scale-snap";
 import {
   getContextualModAmountsNormalized,
   getModAmountValuesNormalized,
   getMacroAmountValuesNormalized,
 } from "@renderer/store/modulators";
 import type { State } from "@renderer/store/types";
+import { normalizeParameterValue } from "@renderer/store/utils";
 import {
   ClampToEdgeWrapping,
   DataTexture,
@@ -26,9 +28,9 @@ const uniforms = {
   ...defaultValues,
   cloneSpaceX: {
     value: {
-      value: 0,
-      minValue: -0.5,
-      maxValue: 0.5,
+      value: 0.5,
+      minValue: 0,
+      maxValue: 1,
       modulationAmounts: [],
       contextualModAmounts: [],
       macroAmounts: [],
@@ -37,12 +39,18 @@ const uniforms = {
   cloneSpaceY: {
     value: {
       value: 0,
-      minValue: -0.5,
-      maxValue: 0.5,
+      minValue: -96,
+      maxValue: 96,
       modulationAmounts: [],
       contextualModAmounts: [],
       macroAmounts: [],
     },
+  },
+  cloneBeatsLog: {
+    value: 0,
+  },
+  cloneBeatsToUv: {
+    value: 0,
   },
   cloneCount: {
     value: 4,
@@ -66,7 +74,10 @@ const uniforms = {
   cloneEdgeMode: {
     value: 1,
   },
-  cloneSumMode: {
+  cloneScaleSnap: {
+    value: false,
+  },
+  brushBasePitchAbsSemis: {
     value: 0,
   },
 };
@@ -98,6 +109,7 @@ class CloneEffect extends BaseEffect {
           ...uniforms,
           cloneDirection: { value: new Vector2(1, 0) },
           cloneShapeTex: { value: null },
+          scaleOffsets: { value: new Float32Array(12) },
         },
         vertexShader: passThroughVert,
         fragmentShader: withPlatformDefines(cloneBrushFrag),
@@ -108,6 +120,7 @@ class CloneEffect extends BaseEffect {
           ...uniforms,
           cloneDirection: { value: new Vector2(0, 1) },
           cloneShapeTex: { value: null },
+          scaleOffsets: { value: new Float32Array(12) },
         },
         vertexShader: passThroughVert,
         fragmentShader: withPlatformDefines(cloneBrushFrag),
@@ -120,18 +133,12 @@ class CloneEffect extends BaseEffect {
     return activeClonePasses(state.cloneCountX, state.cloneCountY);
   }
 
-  private getShapeTexture(
-    passIndex: number,
-    shapeKey: CloneShapeKey,
-    count: number,
-    scaleTonic: string,
-    scaleType: string,
-  ): DataTexture {
-    const key = `${shapeKey}|${count}|${scaleTonic}|${scaleType}`;
+  private getShapeTexture(passIndex: number, shapeKey: CloneShapeKey, count: number): DataTexture {
+    const key = `${shapeKey}|${count}`;
     const cached = this.shapeCache[passIndex];
     if (cached && cached.key === key) return cached.texture;
 
-    const texture = createShapeTexture(buildShapeTable(shapeKey, count, scaleTonic, scaleType));
+    const texture = createShapeTexture(buildShapeTable(shapeKey, count));
     cached?.texture.dispose();
     this.shapeCache[passIndex] = { key, texture };
     return texture;
@@ -156,7 +163,6 @@ class CloneEffect extends BaseEffect {
       cloneEdgeMode,
       cloneShapeX,
       cloneShapeY,
-      cloneSumMode,
       scaleTonic,
       scaleType,
       filepathsBpm,
@@ -165,33 +171,33 @@ class CloneEffect extends BaseEffect {
     if (!spectrogramData) return;
 
     const bpm = filepathsBpm[filePath] || 120;
+    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
-    const spaceUv = unitsToUv(
-      cloneSpaceBeats,
-      cloneSpaceSemis,
-      bpm,
-      spectrogramData.numFrames / spectrogramData.sampleRate,
-      spectrogramData.bandsPerOctave,
-      spectrogramData.numBands,
-    );
-
+    // The beats gap crosses to the shader as its knob position, so modulation
+    // sweeps the log-bipolar arc the knob has, not the file's raw UV span.
+    const beatsDef = getNumberParameterDef("cloneSpaceBeats");
     material.uniforms.cloneSpaceX.value = {
-      value: spaceUv.x,
-      minValue: -0.5,
-      maxValue: 0.5,
+      value: normalizeParameterValue("cloneSpaceBeats", cloneSpaceBeats),
+      minValue: 0,
+      maxValue: 1,
       modulationAmounts: getModAmountValuesNormalized(state, "cloneSpaceBeats"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "cloneSpaceBeats"),
       macroAmounts: getMacroAmountValuesNormalized(state, "cloneSpaceBeats"),
     };
+    material.uniforms.cloneBeatsLog.value = Math.log1p(Math.max(Math.abs(beatsDef.min), Math.abs(beatsDef.max)));
+    material.uniforms.cloneBeatsToUv.value = 60 / bpm / (totalDuration > 0 ? totalDuration : 1);
+
+    const semisDef = getNumberParameterDef("cloneSpaceSemis");
     material.uniforms.cloneSpaceY.value = {
-      value: spaceUv.y,
-      minValue: -0.5,
-      maxValue: 0.5,
+      value: cloneSpaceSemis,
+      minValue: semisDef.min,
+      maxValue: semisDef.max,
       modulationAmounts: getModAmountValuesNormalized(state, "cloneSpaceSemis"),
       contextualModAmounts: getContextualModAmountsNormalized(state, "cloneSpaceSemis"),
       macroAmounts: getMacroAmountValuesNormalized(state, "cloneSpaceSemis"),
     };
-    const count = passIndex === 0 ? cloneCountX : cloneCountY;
+    // Counts are copies added; the shader's tap count includes the original.
+    const count = (passIndex === 0 ? cloneCountX : cloneCountY) + 1;
     material.uniforms.cloneCount.value = count;
     material.uniforms.cloneDecay.value = {
       value: cloneDecay / 100,
@@ -203,14 +209,18 @@ class CloneEffect extends BaseEffect {
     };
     material.uniforms.cloneDirectionMode.value = passIndex === 0 ? cloneDirectionX : cloneDirectionY;
     material.uniforms.cloneEdgeMode.value = cloneEdgeMode;
-    material.uniforms.cloneSumMode.value = cloneSumMode;
-    material.uniforms.cloneShapeTex.value = this.getShapeTexture(
-      passIndex,
-      passIndex === 0 ? cloneShapeX : cloneShapeY,
-      count,
-      scaleTonic,
-      scaleType,
-    );
+
+    const shapeKey = passIndex === 0 ? cloneShapeX : cloneShapeY;
+    material.uniforms.cloneShapeTex.value = this.getShapeTexture(passIndex, shapeKey, count);
+
+    // Scale-shape snapping anchors to the brush's pitch-low edge, the position
+    // the pointer snap places on a scale note (same anchor as transform).
+    material.uniforms.cloneScaleSnap.value = passIndex === 1 && shapeKey === "scale";
+    material.uniforms.scaleOffsets.value = buildScaleOffsets(scaleTonic, scaleType);
+    const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
+    const bandIndex = props.commonUniforms.brushBottomLeftUv.value.y * spectrogramData.numBands;
+    material.uniforms.brushBasePitchAbsSemis.value =
+      minFreqSemisAboveC0(spectrogramData.minFreq) + bandIndex / bandsPerSemitone;
   }
 }
 

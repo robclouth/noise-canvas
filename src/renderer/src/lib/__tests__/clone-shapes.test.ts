@@ -2,12 +2,12 @@ import { activeClonePasses, buildShapeTable } from "@renderer/effects/clone-shap
 import { syncEffects } from "@renderer/effects/types";
 import { describe, expect, it } from "vitest";
 
-// Tables are in Space units. On the pitch axis one unit is the Space ↕ value,
-// so a table entry of 1 with Space ↕ = 12 lands an octave up.
+// Tables are in Gap units. On the pitch axis one unit is the Gap ↕ value,
+// so a table entry of 1 with Gap ↕ = 12 lands an octave up.
 const SEMIS_PER_UNIT = 12;
 
-function semitones(shape: Parameters<typeof buildShapeTable>[0], count: number, tonic = "C", type = "major"): number[] {
-  return buildShapeTable(shape, count, tonic, type).map((step) => step * SEMIS_PER_UNIT);
+function semitones(shape: Parameters<typeof buildShapeTable>[0], count: number): number[] {
+  return buildShapeTable(shape, count).map((step) => step * SEMIS_PER_UNIT);
 }
 
 describe("clone shape tables", () => {
@@ -17,8 +17,8 @@ describe("clone shape tables", () => {
     }
   });
 
-  it("puts the first copy one Space value out, except on the scale", () => {
-    for (const shape of ["even", "harmonic", "geometric", "inharmonic"] as const) {
+  it("puts the first copy one Gap value out", () => {
+    for (const shape of ["even", "harmonic", "geometric", "inharmonic", "scale"] as const) {
       expect(semitones(shape, 8)[1]).toBeCloseTo(SEMIS_PER_UNIT, 6);
     }
   });
@@ -55,30 +55,30 @@ describe("clone shape tables", () => {
     expect(inharmonic[31] - harmonic[31]).toBeGreaterThan(1);
   });
 
-  it("follows the selected scale's degrees", () => {
-    expect(semitones("scale", 8)).toEqual([0, 2, 4, 5, 7, 9, 11, 12]);
+  it("keeps the scale shape on even steps for the shader's snap", () => {
+    expect(buildShapeTable("scale", 5)).toEqual([0, 1, 2, 3, 4]);
   });
 
-  it("spaces the even shape by one Space value per copy", () => {
+  it("spaces the even shape by one Gap value per copy", () => {
     expect(semitones("even", 5)).toEqual([0, 12, 24, 36, 48]);
   });
 });
 
 describe("clone pass skipping", () => {
-  it("runs both passes when both axes have copies", () => {
+  it("runs both passes when both axes add copies", () => {
     expect(activeClonePasses(4, 4)).toEqual([0, 1]);
   });
 
   it("drops the time pass for a pitch-only stack", () => {
-    expect(activeClonePasses(1, 16)).toEqual([1]);
+    expect(activeClonePasses(0, 16)).toEqual([1]);
   });
 
   it("drops the pitch pass for a time-only echo", () => {
-    expect(activeClonePasses(6, 1)).toEqual([0]);
+    expect(activeClonePasses(6, 0)).toEqual([0]);
   });
 
-  it("keeps one pass when a single copy stamps the source", () => {
-    expect(activeClonePasses(1, 1)).toEqual([0]);
+  it("keeps one pass when neither axis adds a copy", () => {
+    expect(activeClonePasses(0, 0)).toEqual([0]);
   });
 });
 
@@ -96,13 +96,12 @@ describe("overtones migration", () => {
     expect(migrated.effect).toBe("clone");
     expect(migrated.enabled).toBe(true);
     expect(migrated.params).toMatchObject({
-      cloneCountX: 1,
-      cloneCountY: 16,
+      cloneCountX: 0,
+      cloneCountY: 15,
       cloneSpaceSemis: 12,
       cloneShapeY: "harmonic",
       cloneDirectionY: 0,
       cloneDecay: 60,
-      cloneSumMode: 1,
     });
   });
 

@@ -404,6 +404,8 @@ const PARAMETER_PREFIXES: [string, string][] = [
  * amounts, which are explained by the Modulation section as a whole.
  */
 export function manualSectionForParameter(key: string, effectType?: string): string | null {
+  // Effects whose manual heading differs from their state key.
+  if (effectType === "clone") return "repeat";
   if (effectType) return effectType;
   const named = PARAMETER_SECTIONS[key];
   if (named) return named;

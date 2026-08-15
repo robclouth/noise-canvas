@@ -352,11 +352,10 @@ describe("Effects", () => {
     it("clone effect stacking a harmonic series should not produce black output", async () => {
       const renderer = createRenderer();
       const state = createStateForEffect("clone", {
-        cloneCountX: 1,
-        cloneCountY: 8,
+        cloneCountX: 0,
+        cloneCountY: 7,
         cloneSpaceSemis: 12,
         cloneShapeY: "harmonic",
-        cloneSumMode: 1,
         cloneDecay: 40,
       });
       const sourceFile = createSourceFile(renderer);

@@ -72,7 +72,6 @@ const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
     "cloneDirectionY",
     "cloneDecay",
     "cloneEdgeMode",
-    "cloneSumMode",
   ],
   synthesize: ["synthesizeBrushType"],
   evolve: [

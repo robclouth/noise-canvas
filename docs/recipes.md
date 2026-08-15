@@ -166,8 +166,8 @@ _See also:_ [Transform](./manual.md#transform), [Menus](./manual.md#menus).
 
 **Set up.** Either:
 
-- Effects: **Repeat**, **Gap ↕ = 7** semitones, **Copies ↕ = 2**, **Direction ↕ = Up** — one copy a fifth above. Or:
-- Effects: **Repeat**, **Shape ↕ = Scale**, **Gap ↕ = 3**, **Copies ↕ = 4**, and set the scale in the transport bar — chords that stay in key.
+- Effects: **Repeat**, **Gap ↕ = 7** semitones, **Copies ↕ = 1**, **Direction ↕ = Up** — one copy a fifth above. Or:
+- Effects: **Repeat**, **Shape ↕ = Scale**, **Gap ↕ = 3**, **Copies ↕ = 3**, and set the scale in the transport bar — chords that stay in key.
 
 **Do.** Paint over the melody.
 

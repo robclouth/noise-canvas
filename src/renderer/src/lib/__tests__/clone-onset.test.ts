@@ -70,8 +70,8 @@ describe("clone onset re-anchoring", () => {
       // A beat spans the file at bpm 60, so beats and file fractions coincide.
       cloneSpaceBeats: spaceFrames / numFrames,
       cloneSpaceSemis: 0,
-      cloneCountX: 2,
-      cloneCountY: 1,
+      cloneCountX: 1,
+      cloneCountY: 0,
       cloneDecay: 0,
       cloneDirectionX: 0,
       cloneDirectionY: 0,
