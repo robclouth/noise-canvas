@@ -19,7 +19,7 @@ Every control in the app has a tooltip and an entry in the `?` overlay, and how 
    - [Warp Algorithms](#warp-algorithms)
    - [Blend Modes](#blend-modes)
 4. [Effects](#effects)
-   - [Dynamics](#dynamics) · [Transform](#transform) · [Blur](#blur) · [Clone](#clone) · [Synthesize](#synthesize) · [Evolve](#evolve) · [Binaural](#binaural) · [Sort](#sort) · [Transmute](#transmute) · [Waveshape](#waveshape) · [Convolve](#convolve) · [Align](#align) · [Attract](#attract)
+   - [Dynamics](#dynamics) · [Transform](#transform) · [Blur](#blur) · [Repeat](#repeat) · [Synthesize](#synthesize) · [Evolve](#evolve) · [Binaural](#binaural) · [Sort](#sort) · [Transmute](#transmute) · [Waveshape](#waveshape) · [Convolve](#convolve) · [Align](#align) · [Attract](#attract)
 5. [Modulation](#modulation)
    - [How Modulation Amount Works](#how-modulation-amount-works)
    - [Modulator Modes](#modulator-modes)
@@ -329,44 +329,42 @@ Smooths and blends over time and pitch: echo, reverb, and diffusion-like effects
 - Reverse reverb before a hit. The same, with **Origin** on Right.
 - Freezing a sound into a pad. A wide brush with **Blur ↔** high smears everything under it into one sustained wash.
 
-### Clone
+### Repeat
 
-![The Clone effect card](images/ui/effect-clone.webp)
+![The Repeat effect card](images/ui/effect-clone.webp)
 
 Stamps beat- and semitone-spaced copies of the painted region in 2D: echoes, spectral delays, stacked harmonics.
 
-- **Space ↔ / ↕** – spacing between copies in beats / semitones (can be negative). With any shape other than Even this is the gap to the _first_ copy, and the shape sets the rest.
+- **Gap ↔ / ↕** – spacing between copies in beats / semitones (can be negative). With any shape other than Even this is the gap to the _first_ copy, and the shape sets the rest.
 - **Copies ↔ / ↕** – number of copies along each axis (1–64).
 - **Shape ↔ / ↕** – how the gaps grow from copy to copy. See the table below.
 - **Dir. ↔ / ↕** – Forward/Middle/Backward and Up/Middle/Down.
-- **Decay** – fade applied to each successive copy; the two axes multiply.
+- **Decay** – fade applied to each successive copy; the two axes multiply. 50% puts the outermost copy 30 dB down, 100% mutes every copy past the first.
 - **Edge** – behaviour for copies extending past the border.
-- **Sum** – how overlapping copies combine:
-  - **Coherent** – adds them as waves, so copies can cancel each other and comb.
-  - **Constructive** – adds their levels instead, so a stack never cancels.
 
-An axis set to 1 copy costs nothing: that pass is skipped entirely.
+Overlapping copies add as waves, so a tight stack can interfere and comb. An axis set to 1 copy costs nothing: that pass is skipped entirely.
 
 #### Shapes
 
-Every shape places the first copy one **Space** value out, so switching shape never moves it. Only the copies past it move.
+Every shape places the first copy one **Gap** value out, so switching shape never moves it. Only the copies past it move.
 
-| Shape ↕   | Shape ↔     | Gaps                                                                             |
-| ---------- | ------------ | -------------------------------------------------------------------------------- |
-| Even       | Even         | All the same. Space ↕ = 12 gives octaves, 7 gives fifths.                       |
-| Harmonic   | Decelerating | The natural harmonic series. Gaps shrink as they climb.                          |
-| Geometric  | Accelerating | Every gap is twice the one before.                                               |
-| Inharmonic | Uneven       | The harmonic series stretched sharp, like a struck bar or a piano's top octaves. |
-| Scale      | n/a          | The degrees of the scale set in the transport bar.                               |
+| Shape ↕   | Shape ↔     | Gaps                                                                                           |
+| ---------- | ------------ | ---------------------------------------------------------------------------------------------- |
+| Even       | Even         | All the same. Gap ↕ = 12 gives octaves, 7 gives fifths.                                       |
+| Harmonic   | Decelerating | The natural harmonic series. Gaps shrink as they climb.                                        |
+| Geometric  | Accelerating | Every gap is twice the one before.                                                             |
+| Inharmonic | Uneven       | The harmonic series stretched sharp, like a struck bar or a piano's top octaves.               |
+| Scale      | n/a          | Even steps, with every copy snapped to the nearest note of the scale set in the transport bar. |
 
 Even is the only shape with even gaps, and it is the only one a modulator can reach. Modulation stretches the whole comb at once, so it cannot make gaps unequal. That is what shapes are for.
 
-Set **Copies ↔** to 1, **Shape ↕** to Harmonic, **Space ↕** to 12 and **Sum** to Constructive and Clone stacks a harmonic series on whatever it covers. **Space ↕** then doubles as the stretch: above 12 the partials spread sharp, below 12 they compress.
+Set **Copies ↔** to 1, **Shape ↕** to Harmonic and **Gap ↕** to 12 and Repeat stacks a harmonic series on whatever it covers. **Gap ↕** then doubles as the stretch: above 12 the partials spread sharp, below 12 they compress.
 
 **Try it for**
 
-- Echoes locked to the grid. **Space ↔** to 1/2 b, **Copies ↔** to 4, and **Decay** to taste.
-- Harmonies from a single note. **Space ↕** to 7 st for fifths, 12 for octaves.
+- Echoes locked to the grid. **Gap ↔** to 1/2 b, **Copies ↔** to 4, and **Decay** to taste.
+- Harmonies from a single note. **Gap ↕** to 7 st for fifths, 12 for octaves.
+- Chords that stay in key. **Shape ↕** to Scale and **Gap ↕** to 3 or 4 for stacked thirds.
 - Thickening a thin sound. A harmonic stack, as above, adds body without changing the pitch.
 
 ### Synthesize
@@ -667,7 +665,7 @@ The split menu on each file header:
 
 - **Split Harmonic and Percussive (HPSS)** – separates the file into harmonic and percussive layers.
 - **Split into N Parts (NMF)…** – non-negative matrix factorization into any number of components.
-- **Split Drums / Bass / Other / Vocals (AI)** – neural stem separation. Apple Silicon Macs only, so the item is hidden on Intel Macs, Windows and Linux.
+- **Split Drums / Bass / Other / Vocals (AI)** – neural stem separation. Not available on Intel Macs, so the item is hidden there.
 
 ### Stem Groups
 

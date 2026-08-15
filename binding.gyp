@@ -37,9 +37,9 @@
                         "conditions": [
                             [
                                 # ONNX Runtime ships no macOS x86_64 build after
-                                # 1.23, so stem separation compiles on Apple
-                                # Silicon only. Callers must treat aiSeparate as
-                                # absent elsewhere.
+                                # 1.23, so Intel Macs are the one target without
+                                # stem separation. Callers must treat aiSeparate
+                                # as absent there.
                                 'target_arch=="arm64"',
                                 {
                                     "defines": ["GABORATOR_ONNX_ENABLED=1"],
@@ -65,18 +65,49 @@
                 [
                     'OS=="win"',
                     {
-                        "defines": ["_USE_MATH_DEFINES", "GABORATOR_USE_PFFFT=1"],
-                        "include_dirs": ["pffft"],
+                        "defines": [
+                            "_USE_MATH_DEFINES",
+                            "GABORATOR_USE_PFFFT=1",
+                            "GABORATOR_ONNX_ENABLED=1",
+                        ],
+                        "include_dirs": ["pffft", "vendor/onnxruntime/include"],
                         "sources": ["pffft/pffft.c"],
-                        "libraries": ["-ldxgi"],
+                        "libraries": [
+                            "-ldxgi",
+                            "<(module_root_dir)/vendor/onnxruntime/lib/onnxruntime.lib",
+                        ],
+                        # uv_dlopen loads the addon with LOAD_WITH_ALTERED_SEARCH_PATH,
+                        # so a DLL beside the .node resolves without touching PATH.
+                        "copies": [
+                            {
+                                "destination": "<(PRODUCT_DIR)",
+                                "files": [
+                                    "<(module_root_dir)/vendor/onnxruntime/lib/onnxruntime.dll",
+                                ],
+                            },
+                        ],
                     },
                 ],
                 [
                     'OS=="linux"',
                     {
-                        "defines": ["GABORATOR_USE_PFFFT=1"],
-                        "include_dirs": ["pffft"],
+                        "defines": ["GABORATOR_USE_PFFFT=1", "GABORATOR_ONNX_ENABLED=1"],
+                        "include_dirs": ["pffft", "vendor/onnxruntime/include"],
                         "sources": ["pffft/pffft.c"],
+                        "libraries": [
+                            "<(module_root_dir)/vendor/onnxruntime/lib/libonnxruntime.so",
+                        ],
+                        # $ORIGIN resolves the SONAME against the addon's own
+                        # directory, where the copy below lands.
+                        "ldflags": ["-Wl,-rpath,'$$ORIGIN'"],
+                        "copies": [
+                            {
+                                "destination": "<(PRODUCT_DIR)",
+                                "files": [
+                                    "<(module_root_dir)/vendor/onnxruntime/lib/libonnxruntime.so.1",
+                                ],
+                            },
+                        ],
                     },
                 ],
             ],

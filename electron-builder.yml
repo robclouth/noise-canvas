@@ -21,7 +21,11 @@ files:
   - "!node_modules/**/{benchmark,benchmarks}"
   - "build/Release/gaborator_addon.node"
   - "build/Release/link_addon.node"
+  # ONNX Runtime, beside the addon that loads it. Only one of these exists per
+  # platform, and Intel macOS has none.
   - "build/Release/libonnxruntime.1.24.3.dylib"
+  - "build/Release/libonnxruntime.so.1"
+  - "build/Release/onnxruntime.dll"
 
 extraResources:
   - from: resources/hrtf
@@ -37,6 +41,8 @@ asar: true
 asarUnpack:
   - "**/*.node"
   - "**/*.dylib"
+  - "**/*.dll"
+  - "**/*.so.*"
   - "**/node_modules/ffmpeg-static/ffmpeg*"
 win:
   icon: resources/icon.png

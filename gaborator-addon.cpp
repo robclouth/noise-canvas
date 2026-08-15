@@ -16,6 +16,12 @@
 #include "gaborator/gaborator.h"
 
 #ifdef _WIN32
+// NOMINMAX keeps windows.h from macro-defining min/max over the std:: calls
+// throughout this file.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #include <dxgi.h>
 #endif
 
@@ -3265,7 +3271,7 @@ Napi::Value MergeSpectrogramsAsync(const Napi::CallbackInfo &info)
     return promise;
 }
 
-// ─── AI Separation (macOS arm64 only, via ONNX Runtime C++) ─────────────────
+// ─── AI Separation (via ONNX Runtime C++; not built for Intel macOS) ────────
 
 #ifdef GABORATOR_ONNX_ENABLED
 #include "vendor/onnxruntime/include/onnxruntime_cxx_api.h"
@@ -3306,6 +3312,21 @@ static Ort::Env &getOrtEnv()
     return env;
 }
 
+// ORTCHAR_T is wchar_t on Windows and char elsewhere, so paths cross the API in
+// the platform's own encoding.
+#ifdef _WIN32
+static std::wstring toOrtPath(const std::string &path)
+{
+    if (path.empty()) return std::wstring();
+    int length = MultiByteToWideChar(CP_UTF8, 0, path.data(), (int)path.size(), nullptr, 0);
+    std::wstring wide((size_t)length, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, path.data(), (int)path.size(), wide.data(), length);
+    return wide;
+}
+#else
+static const std::string &toOrtPath(const std::string &path) { return path; }
+#endif
+
 struct CachedSession
 {
     std::shared_ptr<Ort::Session> session;
@@ -3329,7 +3350,7 @@ static CachedSession getOrCreateSession(const std::string &modelPath)
     opts.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
 
     CachedSession cached;
-    cached.session = std::make_shared<Ort::Session>(getOrtEnv(), modelPath.c_str(), opts);
+    cached.session = std::make_shared<Ort::Session>(getOrtEnv(), toOrtPath(modelPath).c_str(), opts);
 
     Ort::AllocatorWithDefaultOptions allocator;
     cached.inputName  = cached.session->GetInputNameAllocated(0, allocator).get();

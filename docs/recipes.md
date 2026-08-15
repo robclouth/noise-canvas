@@ -166,14 +166,14 @@ _See also:_ [Transform](./manual.md#transform), [Menus](./manual.md#menus).
 
 **Set up.** Either:
 
-- Effects: **Clone**, **Space ↕ = 7** semitones, **Count ↕ = 2**, **Direction ↕ = Up** — one copy a fifth above. Or:
-- Effects: **Clone**, **Shape ↕ = Scale**, **Copies ↕ = 4**, and set the scale in the transport bar — harmonies that stay in key.
+- Effects: **Repeat**, **Gap ↕ = 7** semitones, **Copies ↕ = 2**, **Direction ↕ = Up** — one copy a fifth above. Or:
+- Effects: **Repeat**, **Shape ↕ = Scale**, **Gap ↕ = 3**, **Copies ↕ = 4**, and set the scale in the transport bar — chords that stay in key.
 
 **Do.** Paint over the melody.
 
-**Variations.** **Clone Decay** fades the outer copies, so a stack of four reads as one voice with overtones rather than four voices. **Space ↕ = 12** gives octaves instead, and **Shape ↕ = Harmonic** with **Sum = Constructive** gives the natural harmonic series.
+**Variations.** **Repeat Decay** fades the outer copies, so a stack of four reads as one voice with overtones rather than four voices. **Gap ↕ = 12** gives octaves instead, and **Shape ↕ = Harmonic** gives the natural harmonic series.
 
-_See also:_ [Clone](./manual.md#clone).
+_See also:_ [Repeat](./manual.md#repeat).
 
 ---
 
@@ -262,7 +262,7 @@ _See also:_ [Source](./manual.md#source), [History](./manual.md#history).
 
 **Set up.**
 
-- File header → **scissors** → **Split Drums / Bass / Other / Vocals (AI)**. Apple Silicon Macs only; the model downloads once.
+- File header → **scissors** → **Split Drums / Bass / Other / Vocals (AI)**. Not on Intel Macs; the model downloads once.
 - The vocal stem opens as an ordinary file alongside the others, bracketed as a [stem group](./manual.md#stem-groups).
 
 **Do.** Erase on the vocal stem — the **Eraser** brush, **Size ↕ = Full**, painted across the parts you want gone. Then **Merge** the group back.

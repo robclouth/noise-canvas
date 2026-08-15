@@ -15,10 +15,11 @@ import { memo } from "react";
 import { host } from "../lib/host";
 import { Tooltip } from "./tooltip";
 
-// The ONNX-backed AI separation addon is only compiled for Apple Silicon, since
-// ONNX Runtime has no macOS x86_64 build past 1.23. Anywhere else it would
-// download the model and then fail, so the menu item is hidden entirely.
-const AI_SEPARATION_SUPPORTED = host.env.platform === "darwin" && host.env.arch === "arm64";
+// ONNX Runtime has no macOS x86_64 build past 1.23, so the separation addon is
+// not compiled for Intel Macs, and the extension host does not implement it.
+// Either way it would download the model and then fail, so the menu item is
+// hidden entirely.
+const AI_SEPARATION_SUPPORTED = !host.env.isExtension && !(host.env.platform === "darwin" && host.env.arch === "x64");
 
 // Helper to get resolution label from bands per octave value
 function getResolutionLabel(bpo: number): string {
