@@ -98,6 +98,16 @@ function createWindow(): void {
     return { action: "deny" };
   });
 
+  // setWindowOpenHandler only catches target="_blank". Plain hrefs, such as the
+  // links inside release notes, navigate this window instead, which would hand a
+  // remote page the window's Node access.
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    const current = mainWindow?.webContents.getURL();
+    if (current && url.startsWith(current)) return;
+    event.preventDefault();
+    if (/^https?:\/\//.test(url)) shell.openExternal(url);
+  });
+
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
     mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
     mainWindow.webContents.openDevTools();
