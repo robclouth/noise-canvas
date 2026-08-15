@@ -19,6 +19,9 @@ export interface BootstrapInfo {
   // analysis bounded only by the texture-dimension cap.
   gpuMemoryBytes: number;
   gpuMemoryUnified: boolean;
+  // AI-model files already cached on the host's disk, so the webview's
+  // synchronous isModelDownloaded can answer without a round-trip.
+  downloadedModels: string[];
 }
 
 export interface RpcRequest {

@@ -58,6 +58,21 @@ describe("analysis binary protocol", () => {
     expect(decoded.arrays.bandStepLog2s instanceof Int32Array).toBe(true);
     expect(Array.from(decoded.arrays.data)).toEqual([0.5, -0.5]);
   });
+
+  it("keeps sections 4-byte aligned so decode returns views, not copies", () => {
+    // The odd-length u8 section forces padding before the f32 that follows it.
+    const encoded = encodeFrame({
+      meta: {},
+      arrays: { bytes: new Uint8Array([1, 2, 3]), data: new Float32Array([1.5, -2.5]) },
+    });
+    const decoded = decodeFrame(encoded.buffer);
+
+    expect(Array.from(decoded.arrays.bytes)).toEqual([1, 2, 3]);
+    expect(Array.from(decoded.arrays.data)).toEqual([1.5, -2.5]);
+    expect(decoded.arrays.data.byteOffset % 4).toBe(0);
+    expect(decoded.arrays.bytes.buffer).toBe(encoded.buffer);
+    expect(decoded.arrays.data.buffer).toBe(encoded.buffer);
+  });
 });
 
 describe("render batch", () => {
@@ -210,6 +225,48 @@ describe("/analyze endpoint", () => {
     try {
       const frame = encodeFrame({ meta: {}, arrays: { packedData: new Float32Array([1]) } });
       const response = await fetch(`${server.origin}/commit-stroke`, { method: "POST", body: frame });
+      expect(response.status).toBe(501);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("passes an analysis-op frame through to the injected handler", async () => {
+    const requestSeen: ArrayBuffer[] = [];
+    const resultFrame = encodeFrame({ meta: { odfMax: 3 }, arrays: { onsets: new Float32Array([0.5, 1]) } });
+    const server = await startEditorServer({
+      webviewDir,
+      analysisOp: async (request) => {
+        requestSeen.push(request);
+        return resultFrame;
+      },
+    });
+    try {
+      const reqFrame = encodeFrame({
+        meta: { op: "detectOnsets", sampleRate: 44100 },
+        arrays: { packed: new Float32Array([9, 8]) },
+      });
+      const response = await fetch(`${server.origin}/analysis-op`, { method: "POST", body: reqFrame });
+      expect(response.status).toBe(200);
+      expect(requestSeen).toHaveLength(1);
+
+      const sent = decodeFrame(requestSeen[0]);
+      expect(sent.meta.op).toBe("detectOnsets");
+      expect(Array.from(sent.arrays.packed)).toEqual([9, 8]);
+
+      const decoded = decodeFrame(await response.arrayBuffer());
+      expect(decoded.meta.odfMax).toBe(3);
+      expect(Array.from(decoded.arrays.onsets)).toEqual([0.5, 1]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("answers 501 for an analysis op when none is injected", async () => {
+    const server = await startEditorServer({ webviewDir });
+    try {
+      const frame = encodeFrame({ meta: { op: "hpss" }, arrays: {} });
+      const response = await fetch(`${server.origin}/analysis-op`, { method: "POST", body: frame });
       expect(response.status).toBe(501);
     } finally {
       await server.close();

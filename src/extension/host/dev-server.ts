@@ -3,8 +3,10 @@ import { promises as fs } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import ffmpegPath from "ffmpeg-static";
+import { isModelDownloaded } from "../../main/lib/audio-analysis";
 import {
   getGpuMemoryInfo,
+  runAnalysisOpFramed,
   runAnalyzeFramed,
   runCommitStrokeFramed,
   runHistoryCodecFramed,
@@ -47,7 +49,12 @@ async function main(): Promise<void> {
     synthesize: runSynthesizeFramed,
     commitStroke: runCommitStrokeFramed,
     historyCodec: runHistoryCodecFramed,
-    hostServices: createHostServices({ userDataPath, gpuMemory: getGpuMemoryInfo() }),
+    analysisOp: runAnalysisOpFramed,
+    hostServices: createHostServices({
+      userDataPath,
+      gpuMemory: getGpuMemoryInfo(),
+      downloadedModels: () => ["htdemucs.onnx"].filter((file) => isModelDownloaded(file)),
+    }),
   });
 
   const clipPath = join(tmpdir(), "noise-canvas-dev-clip.wav");

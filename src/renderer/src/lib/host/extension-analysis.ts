@@ -10,10 +10,6 @@ import type { Host } from "./types";
 type AnalysisApi = Host["analysis"];
 type AnalyzeResult = Awaited<ReturnType<AnalysisApi["analyze"]>>;
 
-function notImplemented(capability: string): never {
-  throw new Error(`host.analysis.${capability} is not yet wired in the Ableton extension (later transport slice).`);
-}
-
 function f32(array: NumericArray | undefined, name: string): Float32Array {
   if (array instanceof Float32Array) return array;
   throw new Error(`analysis frame: expected Float32Array for ${name}`);
@@ -31,24 +27,11 @@ function u8(array: NumericArray | undefined, name: string): Uint8Array {
   throw new Error(`analysis frame: expected Uint8Array for ${name}`);
 }
 
-async function analyze(
-  filePath: string,
-  params: { bandsPerOctave: number; minFreq: number; maxCoefficients?: number },
-): Promise<AnalyzeResult> {
-  const response = await fetch("/analyze", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      filePath,
-      bandsPerOctave: params.bandsPerOctave,
-      minFreq: params.minFreq,
-      maxCoefficients: params.maxCoefficients,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`analysis request failed (${response.status}): ${await response.text()}`);
-  }
-  const { meta, arrays } = decodeFrame(await response.arrayBuffer());
+function frameToAnalysis(frame: {
+  meta: Record<string, number | string>;
+  arrays: Record<string, NumericArray>;
+}): AnalyzeResult {
+  const { meta, arrays } = frame;
   return {
     data: f32(arrays.data, "data"),
     inverseMap: f32(arrays.inverseMap, "inverseMap"),
@@ -70,6 +53,62 @@ async function analyze(
     format: String(meta.format),
     codec: String(meta.codec),
   };
+}
+
+async function analyze(
+  filePath: string,
+  params: { bandsPerOctave: number; minFreq: number; maxCoefficients?: number },
+): Promise<AnalyzeResult> {
+  const response = await fetch("/analyze", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      filePath,
+      bandsPerOctave: params.bandsPerOctave,
+      minFreq: params.minFreq,
+      maxCoefficients: params.maxCoefficients,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`analysis request failed (${response.status}): ${await response.text()}`);
+  }
+  return frameToAnalysis(decodeFrame(await response.arrayBuffer()));
+}
+
+// One analysis operation on in-memory buffers, running in the Node host where
+// the addon and ffmpeg live; `op` selects which. Same framed round-trip as the
+// history codec.
+async function analysisOp(
+  op: string,
+  arrays: Record<string, NumericArray>,
+  meta: Record<string, number | string> = {},
+): Promise<{ meta: Record<string, number | string>; arrays: Record<string, NumericArray> }> {
+  const response = await fetch("/analysis-op", {
+    method: "POST",
+    body: encodeFrame({ meta: { op, ...meta }, arrays }),
+  });
+  if (!response.ok) {
+    throw new Error(`analysis op ${op} failed (${response.status}): ${await response.text()}`);
+  }
+  return decodeFrame(await response.arrayBuffer());
+}
+
+async function analyseBuffer(
+  audioBuffer: AudioBuffer,
+  params: { bandsPerOctave: number; minFreq: number; maxCoefficients?: number },
+): Promise<AnalyzeResult> {
+  const arrays: Record<string, NumericArray> = {};
+  for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
+    arrays[`channel${ch}`] = audioBuffer.getChannelData(ch);
+  }
+  const meta: Record<string, number> = {
+    numChannels: audioBuffer.numberOfChannels,
+    sampleRate: audioBuffer.sampleRate,
+    bandsPerOctave: params.bandsPerOctave,
+    minFreq: params.minFreq,
+  };
+  if (params.maxCoefficients !== undefined) meta.maxCoefficients = params.maxCoefficients;
+  return frameToAnalysis(await analysisOp("analyseChannels", arrays, meta));
 }
 
 type SynthesizeFn = AnalysisApi["synthesize"];
@@ -220,6 +259,131 @@ async function historyCodec(
   return decodeFrame(await response.arrayBuffer());
 }
 
+type DetectOnsetsFn = AnalysisApi["detectOnsets"];
+const detectOnsets: DetectOnsetsFn = async (packedData, analysisMetadata, sampleRate, region) => {
+  const arrays: Record<string, NumericArray> = {
+    packed: packedData,
+    bandOffsets: analysisMetadata.bandOffsets,
+    bandLengths: analysisMetadata.bandLengths,
+    bandStepLog2s: analysisMetadata.bandStepLog2s,
+  };
+  const meta: Record<string, number> = {
+    numBands: analysisMetadata.numBands,
+    numChannels: analysisMetadata.numChannels,
+    numFrames: analysisMetadata.numFrames,
+    sampleRate,
+  };
+  if (region) {
+    meta.regionStartSec = region.startSec;
+    meta.regionEndSec = region.endSec;
+    if (region.odfMax !== undefined) meta.regionOdfMax = region.odfMax;
+    if (region.bandMax) arrays.regionBandMax = region.bandMax;
+  }
+  const result = await analysisOp("detectOnsets", arrays, meta);
+  return {
+    onsets: f32(result.arrays.onsets, "onsets"),
+    odfMax: Number(result.meta.odfMax),
+    bandMax: f32(result.arrays.bandMax, "bandMax"),
+  };
+};
+
+// The coefficient-layout metadata hpss/nmf/mergeSpectrograms share.
+type SplitLayout = Parameters<AnalysisApi["hpss"]>[1];
+
+function layoutFrame(
+  packedOrParts: Record<string, NumericArray>,
+  layout: SplitLayout,
+): { arrays: Record<string, NumericArray>; meta: Record<string, number> } {
+  return {
+    arrays: { ...packedOrParts, bandOffsets: layout.bandOffsets, bandLengths: layout.bandLengths },
+    meta: { numBands: layout.numBands, numChannels: layout.numChannels },
+  };
+}
+
+type HpssFn = AnalysisApi["hpss"];
+const hpss: HpssFn = async (packedData, analysisMetadata, kernelH, kernelV) => {
+  const { arrays, meta } = layoutFrame({ packed: packedData }, analysisMetadata);
+  const withKernels: Record<string, number> = { ...meta };
+  if (kernelH !== undefined) withKernels.kernelH = kernelH;
+  if (kernelV !== undefined) withKernels.kernelV = kernelV;
+  const result = await analysisOp("hpss", arrays, withKernels);
+  return {
+    harmonic: f32(result.arrays.harmonic, "harmonic"),
+    percussive: f32(result.arrays.percussive, "percussive"),
+  };
+};
+
+type NmfFn = AnalysisApi["nmf"];
+const nmf: NmfFn = async (packedData, analysisMetadata, numComponents, iterations, seed) => {
+  const { arrays, meta } = layoutFrame({ packed: packedData }, analysisMetadata);
+  const withOptions: Record<string, number> = { ...meta, numComponents };
+  if (iterations !== undefined) withOptions.iterations = iterations;
+  if (seed !== undefined) withOptions.seed = seed;
+  const result = await analysisOp("nmf", arrays, withOptions);
+  const numParts = Number(result.meta.numParts);
+  return { parts: Array.from({ length: numParts }, (_, i) => f32(result.arrays[`part${i}`], `part${i}`)) };
+};
+
+type MergeFn = AnalysisApi["mergeSpectrograms"];
+const mergeSpectrograms: MergeFn = async (parts, analysisMetadata) => {
+  const partArrays: Record<string, NumericArray> = {};
+  parts.forEach((part, i) => (partArrays[`part${i}`] = part));
+  const { arrays, meta } = layoutFrame(partArrays, analysisMetadata);
+  const result = await analysisOp("mergeSpectrograms", arrays, { ...meta, numParts: parts.length });
+  return { merged: f32(result.arrays.merged, "merged") };
+};
+
+type AiSeparateFn = AnalysisApi["aiSeparate"];
+const aiSeparate: AiSeparateFn = async (audioChannels, sampleRate) => {
+  const arrays: Record<string, NumericArray> = {};
+  audioChannels.forEach((channel, i) => (arrays[`channel${i}`] = channel));
+  const result = await analysisOp("aiSeparate", arrays, { numChannels: audioChannels.length, sampleRate });
+  const stems: Record<string, Float32Array[]> = {};
+  for (const stem of String(result.meta.stemNames).split(",").filter(Boolean)) {
+    const count = Number(result.meta[`${stem}Channels`]);
+    stems[stem] = Array.from({ length: count }, (_, i) => f32(result.arrays[`${stem}${i}`], `${stem}${i}`));
+  }
+  return stems;
+};
+
+// Models downloaded during this webview's lifetime; the bootstrap carries the
+// ones already cached on disk, so the synchronous check never needs a round-trip.
+const downloadedThisSession = new Set<string>();
+
+type DownloadModelFn = AnalysisApi["downloadModel"];
+const downloadModel: DownloadModelFn = async (modelFile, onProgress) => {
+  // The download rides a single long request, so progress is polled beside it.
+  const poll = onProgress
+    ? window.setInterval(() => {
+        void analysisOp("modelDownloadProgress", {}, { modelFile }).then(
+          (frame) => {
+            const downloaded = Number(frame.meta.downloaded);
+            if (downloaded > 0) onProgress(downloaded, Number(frame.meta.total));
+          },
+          () => {},
+        );
+      }, 500)
+    : null;
+  try {
+    await analysisOp("downloadModel", {}, { modelFile });
+    downloadedThisSession.add(modelFile);
+  } finally {
+    if (poll !== null) window.clearInterval(poll);
+  }
+};
+
+type ExportAudioFn = AnalysisApi["exportAudio"];
+const exportAudio: ExportAudioFn = async (audioChannels, outputPath, sampleRate, format) => {
+  const arrays: Record<string, NumericArray> = {};
+  audioChannels.forEach((channel, i) => (arrays[`channel${i}`] = channel));
+  await analysisOp("exportAudio", arrays, {
+    numChannels: audioChannels.length,
+    outputPath,
+    sampleRate,
+    format: format ?? "wav",
+  });
+};
+
 export function createExtensionAnalysis(): AnalysisApi {
   return {
     getGpuMemoryInfo: () => {
@@ -227,7 +391,7 @@ export function createExtensionAnalysis(): AnalysisApi {
       return { bytes: boot?.gpuMemoryBytes ?? 0, unified: boot?.gpuMemoryUnified ?? true };
     },
     analyze,
-    analyseBuffer: () => notImplemented("analyseBuffer"),
+    analyseBuffer,
     synthesize,
     commitStroke,
     encodeHistorySnapshot: async (packed) =>
@@ -246,16 +410,22 @@ export function createExtensionAnalysis(): AnalysisApi {
           .inverseMap,
         "inverseMap",
       ),
-    isModelDownloaded: () => notImplemented("isModelDownloaded"),
-    downloadModel: () => notImplemented("downloadModel"),
-    aiSeparate: () => notImplemented("aiSeparate"),
-    detectOnsets: () => notImplemented("detectOnsets"),
-    hpss: () => notImplemented("hpss"),
-    nmf: () => notImplemented("nmf"),
-    mergeSpectrograms: () => notImplemented("mergeSpectrograms"),
-    exportAudio: () => notImplemented("exportAudio"),
-    decodeAudio: () => notImplemented("decodeAudio"),
-    copyAudioFile: () => notImplemented("copyAudioFile"),
+    isModelDownloaded: (modelFile) =>
+      downloadedThisSession.has(modelFile) || (getBootstrapOrNull()?.downloadedModels ?? []).includes(modelFile),
+    downloadModel,
+    aiSeparate,
+    detectOnsets,
+    hpss,
+    nmf,
+    mergeSpectrograms,
+    exportAudio,
+    decodeAudio: async (inputPath, sampleRate, numChannels) => {
+      const result = await analysisOp("decodeAudio", {}, { inputPath, sampleRate, numChannels });
+      return Array.from({ length: numChannels }, (_, i) => f32(result.arrays[`channel${i}`], `channel${i}`));
+    },
+    copyAudioFile: async (sourcePath, destPath) => {
+      await analysisOp("copyAudioFile", {}, { sourcePath, destPath });
+    },
     init: () => {},
   };
 }

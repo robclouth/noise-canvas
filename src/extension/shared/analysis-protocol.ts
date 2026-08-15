@@ -6,8 +6,9 @@
 // Wire format:
 //   [u32 LE headerByteLength][header JSON utf8][section bytes, concatenated]
 // header = { meta: <scalars>, sections: [{ name, kind, length }, ...] }
-// Sections appear in the byte stream in header order. Bytes are copied out into
-// fresh typed arrays on decode, so no buffer alignment is assumed.
+// Sections appear in the byte stream in header order, each starting on a 4-byte
+// boundary (zero padding between), so decode returns views into the incoming
+// buffer rather than copies.
 
 export type NumericArray = Float32Array | Uint32Array | Int32Array | Uint8Array;
 type ArrayKind = "f32" | "u32" | "i32" | "u8";
@@ -52,13 +53,15 @@ function bytesOf(array: NumericArray): Uint8Array {
   return new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
 }
 
-function makeArray(kind: ArrayKind, bytes: Uint8Array): NumericArray {
-  // Copy into a fresh, aligned buffer — the source offset may be unaligned.
-  const copy = bytes.slice();
-  if (kind === "f32") return new Float32Array(copy.buffer);
-  if (kind === "u32") return new Uint32Array(copy.buffer);
-  if (kind === "u8") return copy;
-  return new Int32Array(copy.buffer);
+function align4(offset: number): number {
+  return (offset + 3) & ~3;
+}
+
+function makeArray(kind: ArrayKind, buffer: ArrayBuffer, byteOffset: number, length: number): NumericArray {
+  if (kind === "f32") return new Float32Array(buffer, byteOffset, length);
+  if (kind === "u32") return new Uint32Array(buffer, byteOffset, length);
+  if (kind === "u8") return new Uint8Array(buffer, byteOffset, length);
+  return new Int32Array(buffer, byteOffset, length);
 }
 
 export function encodeFrame(frame: Frame): Uint8Array<ArrayBuffer> {
@@ -71,15 +74,16 @@ export function encodeFrame(frame: Frame): Uint8Array<ArrayBuffer> {
   const headerJson = JSON.stringify({ meta: frame.meta, sections } satisfies FrameHeader);
   const headerBytes = new TextEncoder().encode(headerJson);
 
-  let bodyBytes = 0;
-  for (const name of names) bodyBytes += frame.arrays[name].byteLength;
+  let total = 4 + headerBytes.byteLength;
+  for (const name of names) total = align4(total) + frame.arrays[name].byteLength;
 
-  const out = new Uint8Array(4 + headerBytes.byteLength + bodyBytes);
+  const out = new Uint8Array(total);
   new DataView(out.buffer).setUint32(0, headerBytes.byteLength, true);
   out.set(headerBytes, 4);
 
   let offset = 4 + headerBytes.byteLength;
   for (const name of names) {
+    offset = align4(offset);
     const section = bytesOf(frame.arrays[name]);
     out.set(section, offset);
     offset += section.byteLength;
@@ -113,10 +117,9 @@ export function decodeFrame(buffer: ArrayBuffer): Frame {
   const arrays: Record<string, NumericArray> = {};
   let offset = 4 + headerLength;
   for (const section of header.sections) {
-    const byteLength = section.length * widthOf(section.kind);
-    const slice = new Uint8Array(buffer, offset, byteLength);
-    arrays[section.name] = makeArray(section.kind, slice);
-    offset += byteLength;
+    offset = align4(offset);
+    arrays[section.name] = makeArray(section.kind, buffer, offset, section.length);
+    offset += section.length * widthOf(section.kind);
   }
   return { meta: header.meta, arrays };
 }

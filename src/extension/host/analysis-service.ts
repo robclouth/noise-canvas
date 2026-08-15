@@ -1,12 +1,23 @@
 import {
+  aiSeparate,
+  analyseChannels,
   analyze,
   applyHistoryDelta,
   buildHistoryInverseMap,
   commitStroke,
+  copyAudioFile,
+  decodeAudio,
   decodeHistorySnapshot,
+  detectOnsets,
+  downloadModel,
   encodeHistoryDelta,
   encodeHistorySnapshot,
+  exportAudio,
   historyFootprintChanged,
+  hpss,
+  isModelDownloaded,
+  mergeSpectrograms,
+  nmf,
   synthesize,
 } from "../../main/lib/audio-analysis";
 import type { AnalysisParams } from "../../main/lib/types";
@@ -192,6 +203,165 @@ export async function runCommitStrokeFramed(request: ArrayBuffer): Promise<Uint8
     },
     arrays: out,
   });
+}
+
+function planarChannels(arrays: Record<string, NumericArray>, count: number, prefix = "channel"): Float32Array[] {
+  return Array.from({ length: count }, (_, i) => asF32(arrays[`${prefix}${i}`], `${prefix}${i}`));
+}
+
+function framedChannels(channels: Float32Array[]): Frame {
+  const arrays: Record<string, NumericArray> = {};
+  channels.forEach((channel, i) => (arrays[`channel${i}`] = channel));
+  return { meta: { numChannels: channels.length }, arrays };
+}
+
+// In-flight model downloads, so the webview can poll progress while its
+// download request is still pending.
+const modelDownloads = new Map<string, { downloaded: number; total: number; done: boolean }>();
+
+/**
+ * Runs one analysis operation on in-memory buffers in the host: buffer
+ * analysis, onset detection, splits and merges, AI separation, and audio
+ * encode/decode/copy. The buffers travel over the same framed transport the
+ * analysis uses; `meta.op` selects the operation.
+ */
+export async function runAnalysisOpFramed(request: ArrayBuffer): Promise<Uint8Array> {
+  const { meta, arrays } = decodeFrame(request);
+  switch (String(meta.op)) {
+    case "analyseChannels": {
+      const channels = planarChannels(arrays, Number(meta.numChannels));
+      const params: AnalysisParams = {
+        bandsPerOctave: Number(meta.bandsPerOctave),
+        minFreq: Number(meta.minFreq),
+      };
+      if (meta.maxCoefficients !== undefined) params.maxCoefficients = Number(meta.maxCoefficients);
+      const result = await analyseChannels(channels, Number(meta.sampleRate), params);
+      return encodeFrame(resultToFrame(result));
+    }
+    case "detectOnsets": {
+      const region =
+        meta.regionStartSec !== undefined
+          ? {
+              startSec: Number(meta.regionStartSec),
+              endSec: Number(meta.regionEndSec),
+              odfMax: optionalNumber(meta.regionOdfMax),
+              bandMax: arrays.regionBandMax ? asF32(arrays.regionBandMax, "regionBandMax") : undefined,
+            }
+          : undefined;
+      const result = await detectOnsets(
+        asF32(arrays.packed, "packed"),
+        {
+          numBands: Number(meta.numBands),
+          numChannels: Number(meta.numChannels),
+          numFrames: Number(meta.numFrames),
+          bandOffsets: asU32(arrays.bandOffsets, "bandOffsets"),
+          bandLengths: asU32(arrays.bandLengths, "bandLengths"),
+          bandStepLog2s: asI32(arrays.bandStepLog2s, "bandStepLog2s"),
+        },
+        Number(meta.sampleRate),
+        region,
+      );
+      return encodeFrame({
+        meta: { odfMax: result.odfMax },
+        arrays: { onsets: result.onsets, bandMax: result.bandMax },
+      });
+    }
+    case "hpss": {
+      const result = await hpss(
+        asF32(arrays.packed, "packed"),
+        {
+          numBands: Number(meta.numBands),
+          numChannels: Number(meta.numChannels),
+          bandOffsets: asU32(arrays.bandOffsets, "bandOffsets"),
+          bandLengths: asU32(arrays.bandLengths, "bandLengths"),
+        },
+        optionalNumber(meta.kernelH),
+        optionalNumber(meta.kernelV),
+      );
+      return encodeFrame({ meta: {}, arrays: { harmonic: result.harmonic, percussive: result.percussive } });
+    }
+    case "nmf": {
+      const result = await nmf(
+        asF32(arrays.packed, "packed"),
+        {
+          numBands: Number(meta.numBands),
+          numChannels: Number(meta.numChannels),
+          bandOffsets: asU32(arrays.bandOffsets, "bandOffsets"),
+          bandLengths: asU32(arrays.bandLengths, "bandLengths"),
+        },
+        Number(meta.numComponents),
+        optionalNumber(meta.iterations),
+        optionalNumber(meta.seed),
+      );
+      const parts: Record<string, NumericArray> = {};
+      result.parts.forEach((part, i) => (parts[`part${i}`] = part));
+      return encodeFrame({ meta: { numParts: result.parts.length }, arrays: parts });
+    }
+    case "mergeSpectrograms": {
+      const parts = planarChannels(arrays, Number(meta.numParts), "part");
+      const result = await mergeSpectrograms(parts, {
+        numBands: Number(meta.numBands),
+        numChannels: Number(meta.numChannels),
+        bandOffsets: asU32(arrays.bandOffsets, "bandOffsets"),
+        bandLengths: asU32(arrays.bandLengths, "bandLengths"),
+      });
+      return encodeFrame({ meta: {}, arrays: { merged: result.merged } });
+    }
+    case "aiSeparate": {
+      const channels = planarChannels(arrays, Number(meta.numChannels));
+      const stems = await aiSeparate(channels, Number(meta.sampleRate));
+      const out: Record<string, NumericArray> = {};
+      const outMeta: Record<string, number | string> = { stemNames: Object.keys(stems).join(",") };
+      for (const [stem, stemChannels] of Object.entries(stems)) {
+        outMeta[`${stem}Channels`] = stemChannels.length;
+        stemChannels.forEach((channel, i) => (out[`${stem}${i}`] = channel));
+      }
+      return encodeFrame({ meta: outMeta, arrays: out });
+    }
+    case "isModelDownloaded":
+      return encodeFrame({ meta: { downloaded: isModelDownloaded(String(meta.modelFile)) ? 1 : 0 }, arrays: {} });
+    case "downloadModel": {
+      const modelFile = String(meta.modelFile);
+      if (!isModelDownloaded(modelFile)) {
+        const progress = { downloaded: 0, total: 0, done: false };
+        modelDownloads.set(modelFile, progress);
+        try {
+          await downloadModel(modelFile, (downloaded, total) => {
+            progress.downloaded = downloaded;
+            progress.total = total;
+          });
+        } finally {
+          progress.done = true;
+        }
+      }
+      return encodeFrame({ meta: {}, arrays: {} });
+    }
+    case "modelDownloadProgress": {
+      const progress = modelDownloads.get(String(meta.modelFile));
+      return encodeFrame({
+        meta: {
+          downloaded: progress?.downloaded ?? 0,
+          total: progress?.total ?? 0,
+          done: progress && !progress.done ? 0 : 1,
+        },
+        arrays: {},
+      });
+    }
+    case "exportAudio": {
+      const channels = planarChannels(arrays, Number(meta.numChannels));
+      await exportAudio(channels, String(meta.outputPath), Number(meta.sampleRate), String(meta.format));
+      return encodeFrame({ meta: {}, arrays: {} });
+    }
+    case "decodeAudio": {
+      const channels = await decodeAudio(String(meta.inputPath), Number(meta.sampleRate), Number(meta.numChannels));
+      return encodeFrame(framedChannels(channels));
+    }
+    case "copyAudioFile":
+      await copyAudioFile(String(meta.sourcePath), String(meta.destPath));
+      return encodeFrame({ meta: {}, arrays: {} });
+    default:
+      throw new Error(`analysis op: unknown op ${String(meta.op)}`);
+  }
 }
 
 /**

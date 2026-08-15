@@ -14,10 +14,11 @@ import {
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, extname, join } from "node:path";
-import { exportAudio } from "../../main/lib/audio-analysis";
+import { exportAudio, isModelDownloaded } from "../../main/lib/audio-analysis";
 import { decodeRenderBatch } from "../shared/render-batch";
 import {
   getGpuMemoryInfo,
+  runAnalysisOpFramed,
   runAnalyzeFramed,
   runCommitStrokeFramed,
   runHistoryCodecFramed,
@@ -29,6 +30,10 @@ import type { ClipMeta } from "./session";
 
 const API_VERSION = "1.0.0";
 const COMMAND_ID = "noiseCanvas.editAudioClip";
+
+// The AI-model files the webview may ask about; bootstrap reports which are
+// already cached on disk.
+const AI_MODEL_FILES = ["htdemucs.onnx"];
 
 // The webview build is colocated with this host bundle inside the packaged
 // extension (out-ext/host/main.cjs and out-ext/webview/), so from the bundle's
@@ -42,13 +47,18 @@ let serverPromise: Promise<EditorServer> | null = null;
 function getServer(context: Api): Promise<EditorServer> {
   if (!serverPromise) {
     const userDataPath = context.environment.storageDirectory ?? tmpdir();
-    const hostServices = createHostServices({ userDataPath, gpuMemory: getGpuMemoryInfo() });
+    const hostServices = createHostServices({
+      userDataPath,
+      gpuMemory: getGpuMemoryInfo(),
+      downloadedModels: () => AI_MODEL_FILES.filter((file) => isModelDownloaded(file)),
+    });
     serverPromise = startEditorServer({
       webviewDir: WEBVIEW_DIR,
       analyze: runAnalyzeFramed,
       synthesize: runSynthesizeFramed,
       commitStroke: runCommitStrokeFramed,
       historyCodec: runHistoryCodecFramed,
+      analysisOp: runAnalysisOpFramed,
       hostServices,
     });
   }

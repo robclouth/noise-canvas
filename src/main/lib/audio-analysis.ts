@@ -254,28 +254,15 @@ export async function analyze(filePath: string, params: AnalysisParams) {
   };
 }
 
-export async function analyseBuffer(audioBuffer: AudioBuffer, params: AnalysisParams) {
+/** Analyse planar PCM channels that are already in memory, no file needed. */
+export async function analyseChannels(channelArrays: Float32Array[], sampleRate: number, params: AnalysisParams) {
   const gab = init();
-
-  const sampleRate = audioBuffer.sampleRate;
-  const channels = audioBuffer.numberOfChannels;
-  const length = audioBuffer.length;
-
-  // Pass planar data directly - no interleaving needed
-  const startTime = performance.now();
-  const channelArrays: Float32Array[] = [];
-  for (let ch = 0; ch < channels; ch++) {
-    channelArrays.push(audioBuffer.getChannelData(ch));
-  }
-  const prepTime = performance.now() - startTime;
-  console.log(
-    `[analyseBuffer] Prep time (planar): ${prepTime.toFixed(2)}ms for ${length} samples × ${channels} channels`,
-  );
+  const channels = channelArrays.length;
 
   const analyzeStart = performance.now();
   const analysisResult: GaboratorAnalysisResult = await gab.analyze(channelArrays, channels, sampleRate, params);
   const analyzeTime = performance.now() - analyzeStart;
-  console.log(`[analyseBuffer] Gaborator analyze time: ${analyzeTime.toFixed(2)}ms`);
+  console.log(`[analyseChannels] Gaborator analyze time: ${analyzeTime.toFixed(2)}ms`);
 
   const onsetResult = await analysisOnsets(analysisResult, sampleRate);
   return {
@@ -284,10 +271,19 @@ export async function analyseBuffer(audioBuffer: AudioBuffer, params: AnalysisPa
     onsetOdfMax: onsetResult.odfMax,
     onsetBandMax: onsetResult.bandMax,
     sampleRate,
-    format: "wav", // AudioBuffer is always PCM data
-    codec: "pcm_f32le", // AudioBuffer uses 32-bit float PCM
+    format: "wav", // in-memory audio is always PCM data
+    codec: "pcm_f32le",
     channels,
   };
+}
+
+export async function analyseBuffer(audioBuffer: AudioBuffer, params: AnalysisParams) {
+  // Pass planar data directly - no interleaving needed
+  const channelArrays: Float32Array[] = [];
+  for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
+    channelArrays.push(audioBuffer.getChannelData(ch));
+  }
+  return analyseChannels(channelArrays, audioBuffer.sampleRate, params);
 }
 
 export interface SynthesisResult {

@@ -18,6 +18,9 @@ export interface HostServicesConfig {
   // measured here so this module stays free of the native addon; omitted, the
   // webview falls back to the texture-dimension cap alone.
   gpuMemory?: { bytes: number; unified: boolean };
+  // AI-model files cached on disk, checked at each bootstrap so a model
+  // downloaded in an earlier session reads as present.
+  downloadedModels?: () => string[];
 }
 
 export interface RpcResult {
@@ -124,6 +127,7 @@ export function createHostServices(config: HostServicesConfig): HostServices {
         cwd: process.cwd(),
         gpuMemoryBytes: config.gpuMemory?.bytes ?? 0,
         gpuMemoryUnified: config.gpuMemory?.unified ?? true,
+        downloadedModels: config.downloadedModels?.() ?? [],
       };
     },
   };

@@ -55,13 +55,21 @@ export interface EditorServerOptions {
   // Runs one undo-history codec operation on the host's addon; the operation and
   // its buffers travel in the request frame.
   historyCodec?: (request: ArrayBuffer) => Promise<Uint8Array>;
+  // Runs one analysis operation on in-memory buffers (buffer analysis, onsets,
+  // splits, AI separation, audio encode/decode); the operation and its buffers
+  // travel in the request frame.
+  analysisOp?: (request: ArrayBuffer) => Promise<Uint8Array>;
   // Node-side fs/os/zlib/dialogs the renderer core reaches over the RPC envelope.
   hostServices?: HostServices;
 }
 
-// Buffer's backing ArrayBuffer may be a shared pool slice; copy out the exact
-// bytes into a fresh ArrayBuffer for the protocol decoders.
+// Buffer's backing ArrayBuffer may be a shared pool slice; hand it over as-is
+// when the Buffer owns it exactly, otherwise copy out the exact bytes.
 function toArrayBuffer(buffer: Buffer): ArrayBuffer {
+  const backing = buffer.buffer;
+  if (backing instanceof ArrayBuffer && buffer.byteOffset === 0 && buffer.byteLength === backing.byteLength) {
+    return backing;
+  }
   const copy = new Uint8Array(buffer.byteLength);
   copy.set(buffer);
   return copy.buffer;
@@ -175,6 +183,15 @@ export async function startEditorServer(options: EditorServerOptions): Promise<E
     if (url.pathname === "/commit-stroke" && req.method === "POST") {
       if (!options.commitStroke) return sendJson(res, 501, { error: "stroke commit not available" });
       const framed = await options.commitStroke(toArrayBuffer(await readBody(req)));
+      res.writeHead(200, { "content-type": "application/octet-stream", "content-length": framed.byteLength });
+      res.end(Buffer.from(framed.buffer, framed.byteOffset, framed.byteLength));
+      return;
+    }
+
+    // One analysis operation on in-memory buffers (native addon + ffmpeg).
+    if (url.pathname === "/analysis-op" && req.method === "POST") {
+      if (!options.analysisOp) return sendJson(res, 501, { error: "analysis ops not available" });
+      const framed = await options.analysisOp(toArrayBuffer(await readBody(req)));
       res.writeHead(200, { "content-type": "application/octet-stream", "content-length": framed.byteLength });
       res.end(Buffer.from(framed.buffer, framed.byteOffset, framed.byteLength));
       return;

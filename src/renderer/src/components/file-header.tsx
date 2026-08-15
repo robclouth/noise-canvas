@@ -17,14 +17,9 @@ import { host } from "../lib/host";
 import { Tooltip } from "./tooltip";
 
 // ONNX Runtime has no macOS x86_64 build past 1.23, so the separation addon is
-// not compiled for Intel Macs, and the extension host does not implement it.
-// Either way it would download the model and then fail, so the menu item is
-// hidden entirely.
-const AI_SEPARATION_SUPPORTED = !host.env.isExtension && !(host.env.platform === "darwin" && host.env.arch === "x64");
-
-// Changing the channel count analyses a rendered audio buffer, which the
-// extension host has no entry point for, so there the badge only reports.
-const CHANNEL_CHANGE_SUPPORTED = !host.env.isExtension;
+// not compiled for Intel Macs. It would download the model and then fail, so
+// the menu item is hidden entirely.
+const AI_SEPARATION_SUPPORTED = !(host.env.platform === "darwin" && host.env.arch === "x64");
 
 // Helper to get resolution label from bands per octave value
 function getResolutionLabel(bpo: number): string {
@@ -230,47 +225,40 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
             </Menu.Dropdown>
           </Menu>
         )}
-        {channelCount !== undefined &&
-          (CHANNEL_CHANGE_SUPPORTED ? (
-            <Menu position="bottom-start" withinPortal>
-              <Tooltip help="file-channels" detail={getChannelDetail(channelCount)}>
-                <Menu.Target>
-                  <Badge
-                    {...helpProps("file-channels")}
-                    size="sm"
-                    variant="light"
-                    color="teal"
-                    rightSection={<ChevronDown size={10} />}
-                    style={{ flexShrink: 0, cursor: "pointer" }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {channelCount === 1 ? "Mono" : "Stereo"}
-                  </Badge>
-                </Menu.Target>
-              </Tooltip>
-              <Menu.Dropdown>
-                {CHANNEL_OPTIONS.map((option) => (
-                  <Menu.Item
-                    key={option.value}
-                    fw={option.value === channelCount ? 700 : undefined}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (option.value === channelCount) return;
-                      void useStore.getState().setFileChannelCount(fileId, option.value);
-                    }}
-                  >
-                    {option.label}
-                  </Menu.Item>
-                ))}
-              </Menu.Dropdown>
-            </Menu>
-          ) : (
+        {channelCount !== undefined && (
+          <Menu position="bottom-start" withinPortal>
             <Tooltip help="file-channels" detail={getChannelDetail(channelCount)}>
-              <Badge {...helpProps("file-channels")} size="sm" variant="light" color="teal" style={{ flexShrink: 0 }}>
-                {channelCount === 1 ? "Mono" : "Stereo"}
-              </Badge>
+              <Menu.Target>
+                <Badge
+                  {...helpProps("file-channels")}
+                  size="sm"
+                  variant="light"
+                  color="teal"
+                  rightSection={<ChevronDown size={10} />}
+                  style={{ flexShrink: 0, cursor: "pointer" }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {channelCount === 1 ? "Mono" : "Stereo"}
+                </Badge>
+              </Menu.Target>
             </Tooltip>
-          ))}
+            <Menu.Dropdown>
+              {CHANNEL_OPTIONS.map((option) => (
+                <Menu.Item
+                  key={option.value}
+                  fw={option.value === channelCount ? 700 : undefined}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (option.value === channelCount) return;
+                    void useStore.getState().setFileChannelCount(fileId, option.value);
+                  }}
+                >
+                  {option.label}
+                </Menu.Item>
+              ))}
+            </Menu.Dropdown>
+          </Menu>
+        )}
       </Group>
       <Group align="center" gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
         <FileHeaderNumbox
