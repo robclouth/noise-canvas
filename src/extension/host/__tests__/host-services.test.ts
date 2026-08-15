@@ -34,7 +34,10 @@ describe("host-services RPC", () => {
     const webviewDir = join(workDir, "webview");
     await fs.mkdir(webviewDir);
     await fs.writeFile(join(webviewDir, "index.html"), "<!doctype html>");
-    server = await startEditorServer({ webviewDir, hostServices: createHostServices({ userDataPath }) });
+    server = await startEditorServer({
+      webviewDir,
+      hostServices: createHostServices({ userDataPath, gpuMemory: { bytes: 8_000_000_000, unified: false } }),
+    });
   });
 
   afterAll(async () => {
@@ -104,6 +107,10 @@ describe("host-services RPC", () => {
     expect(boot.userDataPath).toBe(userDataPath);
     expect(typeof boot.homedir).toBe("string");
     expect(boot.platform).toBe(process.platform);
+    // The webview budgets analyses against these, so they must survive the
+    // JSON round trip rather than arriving as undefined.
+    expect(boot.gpuMemoryBytes).toBe(8_000_000_000);
+    expect(boot.gpuMemoryUnified).toBe(false);
 
     const userData = await callRpc(server.origin, "dialogs", "getUserDataPath", {});
     expect(userData.json).toBe(userDataPath);

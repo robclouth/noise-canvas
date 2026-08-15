@@ -14,6 +14,10 @@ const zstdDecompressAsync = promisify(zstdDecompress);
 export interface HostServicesConfig {
   // Directory where the extension persists per-user data (history, presets).
   userDataPath: string;
+  // GPU memory the webview budgets analyses against. Injected rather than
+  // measured here so this module stays free of the native addon; omitted, the
+  // webview falls back to the texture-dimension cap alone.
+  gpuMemory?: { bytes: number; unified: boolean };
 }
 
 export interface RpcResult {
@@ -117,6 +121,8 @@ export function createHostServices(config: HostServicesConfig): HostServices {
         platform: process.platform,
         resourcesPath: config.userDataPath,
         cwd: process.cwd(),
+        gpuMemoryBytes: config.gpuMemory?.bytes ?? 0,
+        gpuMemoryUnified: config.gpuMemory?.unified ?? true,
       };
     },
   };

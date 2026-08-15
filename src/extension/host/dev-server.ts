@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import ffmpegPath from "ffmpeg-static";
 import {
+  getGpuMemoryInfo,
   runAnalyzeFramed,
   runCommitStrokeFramed,
   runHistoryCodecFramed,
@@ -46,7 +47,7 @@ async function main(): Promise<void> {
     synthesize: runSynthesizeFramed,
     commitStroke: runCommitStrokeFramed,
     historyCodec: runHistoryCodecFramed,
-    hostServices: createHostServices({ userDataPath }),
+    hostServices: createHostServices({ userDataPath, gpuMemory: getGpuMemoryInfo() }),
   });
 
   const clipPath = join(tmpdir(), "noise-canvas-dev-clip.wav");

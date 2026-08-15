@@ -43,7 +43,10 @@ export interface EditorServerOptions {
   // Runs native analysis on an on-disk clip path and returns the packed
   // spectrogram as an encoded binary frame. Injected by the host so the server
   // stays decoupled from the gaborator/ffmpeg native dependencies.
-  analyze?: (filePath: string, params: { bandsPerOctave: number; minFreq: number }) => Promise<Uint8Array>;
+  analyze?: (
+    filePath: string,
+    params: { bandsPerOctave: number; minFreq: number; maxCoefficients?: number },
+  ) => Promise<Uint8Array>;
   // Synthesises audio from a painted spectrogram frame; returns a PCM frame.
   synthesize?: (request: ArrayBuffer) => Promise<Uint8Array>;
   // Derives everything a finished stroke means: audio, coefficient patch,
@@ -144,10 +147,12 @@ export async function startEditorServer(options: EditorServerOptions): Promise<E
         filePath: string;
         bandsPerOctave: number;
         minFreq: number;
+        maxCoefficients?: number;
       };
       const framed = await options.analyze(request.filePath, {
         bandsPerOctave: request.bandsPerOctave,
         minFreq: request.minFreq,
+        maxCoefficients: request.maxCoefficients,
       });
       res.writeHead(200, {
         "content-type": "application/octet-stream",

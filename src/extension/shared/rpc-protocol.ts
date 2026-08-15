@@ -13,6 +13,11 @@ export interface BootstrapInfo {
   platform: NodeJS.Platform;
   resourcesPath: string;
   cwd: string;
+  // GPU memory available to textures, in bytes; `unified` marks a GPU that
+  // shares system RAM. Zero means the host could not measure it, which leaves
+  // analysis bounded only by the texture-dimension cap.
+  gpuMemoryBytes: number;
+  gpuMemoryUnified: boolean;
 }
 
 export interface RpcRequest {
