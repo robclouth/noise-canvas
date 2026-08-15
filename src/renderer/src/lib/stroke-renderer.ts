@@ -1527,7 +1527,7 @@ export class StrokeRenderer {
 
   /**
    * Saves the current spectrogram so a run of committed strokes can be taken
-   * back without touching history — what the Generate preview paints onto.
+   * back without touching history — what a grid fill paints onto.
    * Calling it again while a snapshot is held restores that snapshot instead of
    * replacing it, so repeated previews always start from the same pixels.
    */

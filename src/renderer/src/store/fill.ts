@@ -1,5 +1,5 @@
 import type { StrokeDispatch } from "@renderer/components/file-renderer";
-import { resolveGridFill, type GridFillTarget } from "@renderer/lib/generate/grid-fill";
+import { resolveGridFill, type GridFillTarget } from "@renderer/lib/grid/grid-fill";
 import { activeLoopRegion, openFiles } from "./files";
 import type { State, ZustandGet, ZustandSet } from "./types";
 

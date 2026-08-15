@@ -1,12 +1,4 @@
-import {
-  FloatType,
-  HalfFloatType,
-  NearestFilter,
-  RedFormat,
-  RGBAFormat,
-  WebGLRenderer,
-  WebGLRenderTarget,
-} from "three";
+import { FloatType, NearestFilter, RedFormat, RGBAFormat, WebGLRenderer, WebGLRenderTarget } from "three";
 
 /**
  * Scratch render targets used only while painting: effect pass ping-pong,
@@ -22,8 +14,6 @@ export interface StrokeScratch {
   strokeStartFbo: WebGLRenderTarget;
   // Two float targets (MRT) holding the precomputed per-pixel modulator
   // outputs for the current step. tex[0] = (mod0.xy, mod1.xy); tex[1] = mod2.xy.
-  // Half float: modulator outputs are bounded control signals, unlike the
-  // unwrapped phase in the spectrogram targets which needs full float.
   modulatorFbo: WebGLRenderTarget;
 }
 
@@ -44,7 +34,7 @@ function createTargets(width: number, height: number): StrokeScratch {
     modulatorFbo: new WebGLRenderTarget(width, height, {
       count: 2,
       format: RGBAFormat,
-      type: HalfFloatType,
+      type: FloatType,
       minFilter: NearestFilter,
       magFilter: NearestFilter,
     }),
