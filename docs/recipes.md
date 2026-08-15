@@ -95,7 +95,7 @@ _See also:_ [Modulator Modes](./manual.md#modulator-modes), [How Modulation Amou
 
 **Variations.** Put a **sequencer** modulator on **Strength** and draw the rhythm you want — `1 0 0 1 0 0 1 0` gives a three-against-eight. A Random pattern modulator on Strength varies each stroke instead, and taking its depth down far enough drops some of them. Set the time grid to **Onsets** and the fill follows the file's own hits.
 
-_See also:_ [Fill Grid](./manual.md#fill-grid), [What Sets the Spacing](./manual.md#what-sets-the-spacing).
+_See also:_ [Fill Grid](./manual.md#fill-grid), [Transport and Output](./manual.md#transport-and-output).
 
 ### Sweep a brush up the spectrum
 

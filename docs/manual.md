@@ -19,7 +19,7 @@ Every control in the app has a tooltip and an entry in the `?` overlay, and how 
    - [Warp Algorithms](#warp-algorithms)
    - [Blend Modes](#blend-modes)
 4. [Effects](#effects)
-   - [Dynamics](#dynamics) · [Transform](#transform) · [Blur](#blur) · [Clone](#clone) · [Synthesize](#synthesize) · [Evolve](#evolve) · [Binaural](#binaural) · [Sort](#sort) · [Transmute](#transmute) · [Waveshape](#waveshape) · [Convolve](#convolve) · [Align](#align)
+   - [Dynamics](#dynamics) · [Transform](#transform) · [Blur](#blur) · [Clone](#clone) · [Synthesize](#synthesize) · [Evolve](#evolve) · [Binaural](#binaural) · [Sort](#sort) · [Transmute](#transmute) · [Waveshape](#waveshape) · [Convolve](#convolve) · [Align](#align) · [Attract](#attract)
 5. [Modulation](#modulation)
    - [How Modulation Amount Works](#how-modulation-amount-works)
    - [Modulator Modes](#modulator-modes)
@@ -29,10 +29,6 @@ Every control in the app has a tooltip and an entry in the `?` overlay, and how 
    - [Contextual Sources](#contextual-sources)
    - [Nested Modulation](#nested-modulation)
 6. [Fill Grid](#fill-grid)
-   - [What Sets the Spacing](#what-sets-the-spacing)
-   - [What Sets the Size](#what-sets-the-size)
-   - [Filling Part of a File](#filling-part-of-a-file)
-   - [Variation Between Strokes](#variation-between-strokes)
 7. [Parameter Controls](#parameter-controls)
    - [Section Presets](#section-presets)
    - [Randomization](#randomization)
@@ -41,6 +37,7 @@ Every control in the app has a tooltip and an entry in the `?` overlay, and how 
    - [Splitting a File](#splitting-a-file)
    - [Stem Groups](#stem-groups)
    - [Onsets](#onsets)
+   - [The Level Strip](#the-level-strip)
    - [Navigating the Canvas](#navigating-the-canvas)
 9. [History](#history)
 10. [Transport and Output](#transport-and-output)
@@ -105,6 +102,8 @@ The choice affects what edits sound like, not just how the spectrogram looks: a 
 
 ## The Interface
 
+![The Noise Canvas window](images/ui/window.webp)
+
 The window is split into three columns plus a transport bar:
 
 - **Left: Brush panel.** Everything that defines the current brush: Macros, Steps, Source, Envelope, Options, Effects, Modulators.
@@ -124,12 +123,17 @@ When you paint, the brush defines **where** and **how strongly** an effect is ap
 
 ### The Palette
 
+![The palette section of the sidebar](images/ui/section-palette.webp)
+
 A palette is a folder of brushes for one job. The sidebar shows each open palette as a grey band with its brushes indented under it, and you can have as many open at once as you like.
 
 - **Click a band** to fold its brushes away. **Double-click** the name to rename.
 - **Drag** a brush from one palette to another to move it between them.
 - The band's **⋮** offers Save, Save as…, Rename, Close and Delete file….
 - **Add palette** at the bottom of the sidebar opens the browser: **New** for an empty palette, or any saved one below it.
+
+![The Add palette browser](images/ui/modal-palette-picker.webp)
+
 - **Add brush** sits at the end of each palette's own list, so a new brush always lands where you asked for it.
 - A band shows its name in _italics_ once its brushes drift from the saved file. Closing a dirty palette asks first; its brushes close with it.
 - The last open palette cannot be closed, so there is always somewhere for a new brush to go.
@@ -159,49 +163,44 @@ Brushes live inside a palette. You can have as many open as you like; each is an
 - **Drag** rows to reorder them, or to move a brush into another palette.
 - **Add brush** at the end of each palette opens the picker: **New** for an empty brush, or any preset below it.
 
-**Hotkeys.** Any brush can be bound to a letter key (⋮ → _Assign key…_, then press a letter). Pressing that letter anywhere in the app jumps straight to that brush. The number keys **1–9 and 0** always select the first ten brushes in the sidebar, counting across every open palette in order. Folding a palette hides its rows but does not renumber anything.
+![The Add brush picker](images/ui/modal-brush-picker.webp)
 
-**The library.** Brushes are saved as JSON presets in `Documents/Noise Canvas/Presets/`. A brush loaded from the library remembers where it came from: _Save_ overwrites it, _Save as…_ creates a new one. A dirty marker appears when the brush has drifted from its saved version. This is the level below the palette, one brush to a file, where a palette is a whole set. A set of factory presets ships with the app:
+**Hotkeys.** Any brush can be bound to a letter key (⋮ → _Assign key…_, then press a letter). Pressing that letter anywhere in the app jumps straight to that brush. The number keys **1–9 and 0** always select the first ten brushes in the sidebar, counting across every open palette in order.
 
-> Eraser · Booster · Restore · Stereo Widening · Compressor · Noise Gate · Smudge · Octave Up · Octave Down · Reverse · Low-Pass Sweep · High-Pass · Harmonics · Reverb (Blur) · Echo · Paint Noise · Paint Tone · Flow · Pixel Sort · Tremolo · Step Gate · Dynamic Bloom · 3D Orbit · Shimmer · Morph (Macros) · Stamp · Sampler · Convolution · Jungle Stretch · Stutter · Rewind · Crush · Magnet · Freeze · Updraft · Crackle · Stack
-
-Every factory brush ships with at least one named [macro](#macros) wired to its key parameter, parked at the value the brush opens with (Eraser's **Level**, Reverse's **Speed**, Echo's **Fade**), so the first knob to reach for is always the same one.
-
-**Stamp** reads the file itself at a fixed offset from the stroke, so a slice picked once paints anywhere else in the same file. It is the chop-and-rearrange brush, and it has no effects at all. Do not confuse it with the [Clone](#clone) effect, which stamps spaced copies of what you paint over.
-
-**Jungle Stretch** is the old-sampler timestretch: it stretches the painted region to double length with the Flangey warp while a sixteenth-of-a-beat sequencer ripples the level for the classic cyclic flutter. Its **Stretch** macro is a varispeed knob that runs from reverse through freeze up to 4×.
-
-Some factory brushes reference bundled audio (an IR, a pad loop). Those load automatically; _Load referenced files_ re-opens them if you closed them.
+**The library.** Brushes are saved as JSON presets in `Documents/Noise Canvas/Presets/`. A brush loaded from the library remembers where it came from: _Save_ overwrites it, _Save as…_ creates a new one. A dirty marker appears when the brush has drifted from its saved version. This is the level below the palette, one brush to a file, where a palette is a whole set.
 
 ### Steps
 
+![The Steps strip](images/ui/section-steps.webp)
+
 A brush can have up to **5 steps**, shown as a tab strip. Each step is a complete, independent set of brush parameters and effects, and a single stroke runs through **all** of them in order. This is how you build multi-stage moves: step 1 synthesizes a tone, step 2 blurs it, step 3 spatializes it.
 
-- Steps carry a persistent colour, so reordering reads as moving an identity rather than relabelling a slot.
 - **Drag** to reorder, **Duplicate** and **Delete** from the buttons on the right.
 - The strip is fixed-width, so adding or removing a step never rescales the others.
 
-Almost every brush and effect parameter is **per-step**. The exceptions are the genuinely global ones: the grid, the scale, and the transport settings.
-
 ### Macros
+
+![The Macros section](images/ui/section-macros.webp)
 
 Four renamable **Macros** per brush. A macro is just a knob that can modulate any modulatable parameter, at any depth, positive or negative. Good for collapsing a complicated brush down to one or two performance controls. Rename them from the parameter label menu (pencil icon).
 
 ### Source
 
+![The Source section](images/ui/section-source.webp)
+
 By default a brush reads from the file it's painting on. The **Source** section changes that:
 
-- **Source** – hold **Shift** (or click the Source control to arm it) and click on any open file's canvas to pick a source file and position. A brush-sized rectangle previews where you're sampling from. This is the clone-stamp.
+- **Source** – hold **Shift** (or click the Source control to arm it) and click on any open file's canvas to pick a source file and position. A brush-sized rectangle previews where you're sampling from.
 - **Tracking** – how the source position is used:
   - **Follow** – the source moves along with your stroke.
   - **Fixed** – always samples from that exact position.
-  - **Anchored** – keeps a fixed offset relative to where the stroke started.
+  - **Anchored** – keeps a fixed offset relative to where the stroke started, like the clone stamp tool in Photoshop.
 - **Time ↔ / Pitch ↕** – explicit source position, as a percentage of the source file (disabled in Follow mode, and both are modulatable).
 - **Read From** – **Current** paints using the source file's edited state, **Original** paints from its unedited analysis. This is how the "Restore" brush works.
 
-Painting between files with different tempos, lengths, or analysis resolutions is supported. Positions are mapped through a frequency-preserving map, so the geometries don't have to agree.
-
 ### Envelope
+
+![The Envelope section](images/ui/section-envelope.webp)
 
 The brush envelope decides where the stroke deposits energy and how much.
 
@@ -213,6 +212,8 @@ The brush envelope decides where the stroke deposits energy and how much.
 
 ### Options
 
+![The Options section](images/ui/section-options.webp)
+
 - **Blend mode** – how the processed and original spectrogram are combined (see below).
 - **Pan** – stereo positioning of the processing.
 - **Iterations** – how many times the effect chain recursively re-applies within one stroke (feedback, echoes, spectral delays).
@@ -222,15 +223,15 @@ The brush envelope decides where the stroke deposits energy and how much.
 
 ### Warp Algorithms
 
-When content is moved in time or pitch, its phase has to be reconstructed. Each strategy has its own character and its own artifacts. Pick what sounds best:
+Moving sound in time or pitch means rebuilding it, and each option colours the result differently. Pick by ear:
 
-| Algorithm      | Character                                                                                                                                                                                         |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Neutral**    | Default. The faithful general-purpose rule. Transients are re-anchored at detected onsets so clicks stay sharp instead of smearing into pre-echo, and sustained tonal material is left as it was. |
-| **Neutralish** | An earlier neutral rule that also compensates for shifts. Slightly different smear character.                                                                                                     |
-| **Percussive** | Snappy, aggressive re-anchoring. Emphasises attacks.                                                                                                                                              |
-| **Flangey**    | Keeps stored phase as-is. Comb-filtered, metallic.                                                                                                                                                |
-| **Noisey**     | Randomizes phase. Diffuse and airy.                                                                                                                                                               |
+| Algorithm      | Sounds like                                                | Reach for it on                                          |
+| -------------- | ---------------------------------------------------------- | -------------------------------------------------------- |
+| **Neutral**    | Clean and faithful. Attacks stay sharp, notes stay steady. | Anything. Start here and only change if you want colour. |
+| **Neutralish** | Neutral with a slightly softer edge.                       | Sustained material that Neutral makes sound too tight.   |
+| **Percussive** | Hard and snappy, attacks pushed forward.                   | Drums, and anything that needs to snap.                  |
+| **Flangey**    | Hollow and metallic, like a comb filter.                   | Adding a phasey, robotic character on purpose.           |
+| **Noisey**     | Diffuse and breathy, edges blurred away.                   | Pads, textures, and turning a sound into a wash.         |
 
 ### Blend Modes
 
@@ -250,34 +251,66 @@ How the processed data merges with the original spectrogram:
 
 ## Effects
 
+![The Effects section](images/ui/section-effects.webp)
+
 Add effects with **Add effect** at the bottom of the Effects section. The picker lays them out in two columns with a description for each. A step holds **up to 10 effects**, and you can add several instances of the same effect, each with its own independent settings.
+
+![The Add effect picker](images/ui/modal-add-effect.webp)
 
 Each effect header has a **checkbox** that bypasses it, a **title that doubles as the drag handle** for reordering, and a **⋮ menu** with Duplicate, Reset to defaults, and Remove.
 
-> **Transmute** and **Waveshape** aren't available from the Add Effect picker. They still work, and still run in any brush that already uses them, but you can't add a new instance from the UI. They're documented below anyway.
+Several effects share an **Edge Mode**, which decides what happens to content that spills past the brush border:
 
-Several effects share an **Edge Mode** that decides what happens to content that spills past the brush border: **Cut** (discard it), **Bleed** (pull in surrounding content), **Wrap** (wrap around the edge), **Clamp** (hold the edge value), **Reflect** (ping-pong flip), or **Invert**.
+- **Cut** – discard it.
+- **Bleed** – pull in the surrounding content.
+- **Wrap** – bring it back round the other side.
+- **Clamp** – hold the value at the edge.
+- **Reflect** – flip it back in, like a ping-pong.
+- **Invert** – flip it back in upside down.
 
 ### Dynamics
 
-Compression, expansion, gating, and inversion, per spectrogram bin.
+![The Dynamics effect card](images/ui/effect-dynamics.webp)
+
+Squashes, gates, expands or inverts whatever the brush covers. It works on each band separately rather than on the sound as a whole, so it can pull the hiss out from between notes and leave the notes alone.
 
 - **Threshold** – amplitude threshold in dB.
-- **Upper** – gain applied above the threshold (1 = unity, 0.5 = compress, 2 = expand, 0 = gate, −1 = invert).
-- **Lower** – gain applied below the threshold.
+- **Upper** – what happens above the threshold:
+  - **1×** – leave it alone.
+  - **0.5×** – compress it.
+  - **2×** – expand it.
+  - **0×** – gate it out.
+  - **−1×** – invert it.
+- **Lower** – the same, applied below the threshold.
 - **Knee** – width of the transition zone around the threshold, in dB.
 - **Gain** – overall output gain in dB.
 
+**Try it for**
+
+- Cleaning up a noisy recording. **Upper** at 1 and **Lower** at 0 silences everything under the threshold and leaves the rest untouched.
+- Evening out a performance. **Upper** around 0.5 holds the loud moments down.
+- Turning a sound inside out. **Upper** at −1 keeps what was quiet and drops what was loud.
+
 ### Transform
 
-Shifts, scales, and rotates the spectral image.
+![The Transform effect card](images/ui/effect-transform.webp)
+
+Moves sound through time and pitch: shift it, stretch it, mirror it, spin it. How it sounds afterwards depends a lot on the [warp algorithm](#warp-algorithms) in Options.
 
 - **Shift ↔ / ↕** – move content in time (beats) or pitch (semitones).
 - **Scale ↔ / ↕** – stretch or compress in time or pitch. Negative values reverse/mirror.
 - **Rotation** – rotate the painted region, in degrees.
 - **Edge** – behaviour at the brush borders.
 
+**Try it for**
+
+- Dropping a part an octave. **Shift ↕** to −12, with Percussive warp on drums and Neutral on anything sustained.
+- Reversing a hit where it sits. **Scale ↔** to −1.
+- Half-speed tape. Double the file's length first, then **Scale ↔** to 2.
+
 ### Blur
+
+![The Blur effect card](images/ui/effect-blur.webp)
 
 Smooths and blends over time and pitch: echo, reverb, and diffusion-like effects.
 
@@ -285,9 +318,20 @@ Smooths and blends over time and pitch: echo, reverb, and diffusion-like effects
 - **Noise ↔ / ↕** – random scattering to make the blur more diffuse.
 - **Samples ↔ / ↕** – blur kernel sample count (quality vs. speed).
 - **Edge** – behaviour at the brush border.
-- **Origin** – where the blur radiates from: Left (forward reverb), Middle (symmetrical), Right (reversed).
+- **Origin** – where the blur radiates from:
+  - **Left** – forwards, like reverb.
+  - **Middle** – evenly, in both directions.
+  - **Right** – backwards, like reverse reverb.
+
+**Try it for**
+
+- Reverb on something that never had any. Raise **Blur ↔** and set **Origin** to Left.
+- Reverse reverb before a hit. The same, with **Origin** on Right.
+- Freezing a sound into a pad. A wide brush with **Blur ↔** high smears everything under it into one sustained wash.
 
 ### Clone
+
+![The Clone effect card](images/ui/effect-clone.webp)
 
 Stamps beat- and semitone-spaced copies of the painted region in 2D: echoes, spectral delays, stacked harmonics.
 
@@ -297,7 +341,9 @@ Stamps beat- and semitone-spaced copies of the painted region in 2D: echoes, spe
 - **Dir. ↔ / ↕** – Forward/Middle/Backward and Up/Middle/Down.
 - **Decay** – fade applied to each successive copy; the two axes multiply.
 - **Edge** – behaviour for copies extending past the border.
-- **Sum** – Coherent adds the copies as waves, so overlapping copies can cancel and comb. Constructive adds their levels and averages their phase against the first copy, so a stack never cancels.
+- **Sum** – how overlapping copies combine:
+  - **Coherent** – adds them as waves, so copies can cancel each other and comb.
+  - **Constructive** – adds their levels instead, so a stack never cancels.
 
 An axis set to 1 copy costs nothing: that pass is skipped entirely.
 
@@ -317,45 +363,83 @@ Even is the only shape with even gaps, and it is the only one a modulator can re
 
 Set **Copies ↔** to 1, **Shape ↕** to Harmonic, **Space ↕** to 12 and **Sum** to Constructive and Clone stacks a harmonic series on whatever it covers. **Space ↕** then doubles as the stretch: above 12 the partials spread sharp, below 12 they compress.
 
+**Try it for**
+
+- Echoes locked to the grid. **Space ↔** to 1/2 b, **Copies ↔** to 4, and **Decay** to taste.
+- Harmonies from a single note. **Space ↕** to 7 st for fifths, 12 for octaves.
+- Thickening a thin sound. A harmonic stack, as above, adds body without changing the pitch.
+
 ### Synthesize
 
-Fills the brushed area with generated material.
+![The Synthesize effect card](images/ui/effect-synthesize.webp)
 
-- **Type** – Noise, Sine, or Impulse. (Impulse plus a tight envelope is how you draw hats, snares, and kicks from nothing.)
+Paints new sound from nothing, so you can draw parts that were never recorded.
+
+- **Type** – Noise, Sine, or Impulse.
+
+**Try it for**
+
+- Drawing a hi-hat. **Impulse**, a short **Size ↔**, and a sharp **Curve ↔**.
+- Adding air to a dull recording. **Noise**, painted gently over the top of the spectrum.
+- Sketching a bassline. **Sine**, with pitch snapping on.
 
 ### Evolve
 
-A reaction–advection–diffusion simulation, for fluid, biological, and chaotic patterns.
+![The Evolve effect card](images/ui/effect-evolve.webp)
 
-- **Flow** – advection strength along the gradient (negative reverses).
-- **Spread** – diffusion (positive spreads, negative sharpens).
-- **Grow** – reaction strength (positive grows, negative shrinks).
-- **Swirl** – adds a rotational component to the flow.
-- **Drift ↔ / ↕** – directional bias in time / pitch.
-- **Decay** – entropy / death rate (negative boosts).
-- **Scale ↔ / ↕** – kernel size in time / pitch.
+Lets the sound grow, flow and mutate on its own, into fluid, biological or chaotic textures. It is the least predictable effect here, and rewards small values.
+
+- **Flow** – how strongly energy travels (negative reverses).
+- **Spread** – positive spreads energy out, negative sharpens it.
+- **Grow** – positive grows the sound, negative eats it away.
+- **Swirl** – adds a rotation to the flow.
+- **Drift ↔ / ↕** – pushes the movement in a direction in time / pitch.
+- **Decay** – how fast it dies away (negative boosts instead).
+- **Scale ↔ / ↕** – how far each step reaches, in time / pitch.
 - **Edge** – behaviour at the brush border.
+
+**Try it for**
+
+- Turning a static pad into something that crawls. A little **Flow** and **Grow**, high **Iterations** in Options.
+- Sharpening rather than smearing. **Spread** negative.
+- Slow spectral decay. **Decay** up, everything else low.
 
 ### Binaural
 
-HRTF-based binaural spatialization for 3D placement of the painted region.
+![The Binaural effect card](images/ui/effect-binaural.webp)
+
+Places the painted sound anywhere around the listener's head, in 3D. Made for headphones; on speakers you mostly hear it as width.
 
 - **Azimuth** – horizontal angle (0° front, 90° right, −90° left, ±180° behind).
 - **Distance** – source distance in metres (affects level and high-frequency absorption).
 - **Stereo** – stereo spread around the azimuth (0° = mono, 180° = full L/R offset).
 
+**Try it for**
+
+- Putting a sound behind the listener. **Azimuth** to 180°.
+- Pushing a part back without turning it down. Raise **Distance**.
+- Orbiting a sound around the head. Modulate **Azimuth** with a slow pattern.
+
 ### Sort
 
-Odd-even transposition sort of the spectrogram bins: pixel-sorting, for sound.
+![The Sort effect card](images/ui/effect-sort.webp)
+
+Reorders the spectrogram's bins by how loud, high or wide they are. Pixel-sorting, for sound: glitched, banded and smeared.
 
 - **Direction** – Horizontal, Vertical, or Both.
 - **Order** – Forwards or Backwards.
 - **Sort By** – Magnitude, Phase, dB, Frequency, or Pan.
 - **Stereo** – sort channels Linked or Independent.
 
+**Try it for**
+
+- Glitchy vertical banding. **Direction** Vertical, **Sort By** Magnitude.
+- Digital smear. **Direction** Both, over a busy passage.
+- Stereo mess. **Stereo** to Independent so the channels drift apart.
+
 ### Transmute
 
-Low-level polar operations on the raw magnitude and phase of each bin.
+Rewires magnitude against phase. Results run from metallic to completely unrecognisable, and it is worth auditioning rather than reasoning about.
 
 - **Mode** – Swap Mag/Phase, Complex Power, Phase Rotate, Phase Quantize, Stereo Cross, or Phase Gate.
 - **Amount** – the primary parameter for the selected mode.
@@ -363,15 +447,17 @@ Low-level polar operations on the raw magnitude and phase of each bin.
 
 ### Waveshape
 
-Waveshaper distortion applied to the rectangular (real/imaginary) spectral components.
+Distortion applied to the spectrum rather than to the waveform, so it adds grit and harmonics without the usual mush.
 
 - **Shape** – Soft Clip, Hard Clip, Rectify, Fold, Wrap, or Sine.
-- **Drive** – gain before shaping. For Fold/Wrap/Sine this controls how many times the signal cycles through the nonlinearity.
-- **Tilt** – skews the real/imaginary balance before shaping, biasing the phase distribution.
+- **Drive** – how hard it is pushed. For Fold, Wrap and Sine this sets how many times the sound folds back on itself.
+- **Tilt** – biases the character of the distortion.
 
 ### Convolve
 
-Time-axis convolution with an impulse-response spectrogram: reverbs, room tones, and other IR-based effects. IR loudness is auto-normalized, so swapping IRs doesn't blow up the level.
+![The Convolve effect card](images/ui/effect-convolve.webp)
+
+Prints the character of one sound onto another: reverbs, room tones, and stranger things when the impulse is not a room. Loudness is levelled automatically, so swapping impulses doesn't blow up the level.
 
 - **IR** – the impulse-response file, chosen from your open files.
 - **Taps** – number of IR frames applied (longer, more expensive tail).
@@ -381,22 +467,49 @@ Time-axis convolution with an impulse-response spectrogram: reverbs, room tones,
 - **Gain** – output gain of the convolution, in dB.
 - **Edge** – behaviour for taps extending past the border.
 
+**Try it for**
+
+- A real room. Pick an impulse response and leave the rest alone.
+- Reverse reverb. **Rate** to −1.
+- Making one sound wear another. Load any recording as the IR — the odder the source, the odder the result.
+
 ### Align
 
-No parameters. Phase-aligns every band at the start of the brush to form a sharp impulse, then fades back to the original phase. Use it to manufacture transients out of noise, or to tighten up an attack that's gone smeary.
+![The Align effect card](images/ui/effect-align.webp)
+
+No parameters. It lines up the start of the brush into a single sharp click, then lets the sound go back to normal.
+
+**Try it for**
+
+- Manufacturing a transient out of noise, so a formless sound gets an attack.
+- Tightening an attack that has gone soft.
 
 ### Attract
 
-Pulls energy across time and pitch toward a map: a landscape of valleys that content falls into. Energy genuinely relocates. Each bin's magnitude moves by its own kernel-weighted pull and lands with its phase re-based, so a strong pull is a real migration, not a filter sweep. Repeated strokes behave like mean-shift: content climbs to the floor of its valley and settles there.
+![The Attract effect card](images/ui/effect-attract.webp)
 
-- **Map** – Source uses the sound's own loud content as the landscape, so strong partials capture their neighbours; Scale puts a valley at every note of the global scale (autotune when the pull is full); Grid puts valleys on the snap grid's pitch and beat lines; Modulator 1–3 use a modulator's field as the landscape, so energy gathers where the pattern is bright. An image modulator turns the picture into terrain the sound falls into.
+Pulls energy across time and pitch toward a map: a landscape of valleys that sound falls into. The energy genuinely moves rather than being filtered away, so painting the same spot repeatedly gathers content into the valleys and settles it there.
+
+- **Map** – what the landscape is made of:
+  - **Source** – the sound's own loud content, so strong partials capture their neighbours.
+  - **Scale** – a valley at every note of the global scale. Not retuning: everything under the brush gathers onto those notes and crystallises into the scale, so noise and smear take on a harmonic shape.
+  - **Grid** – valleys on the snap grid's pitch and beat lines.
+  - **Modulator 1–3** – a modulator's field, so energy gathers where the pattern is bright. An image modulator turns the picture into terrain the sound falls into.
 - **Source** – picks the file whose loud regions form the Source map's landscape, matched by absolute frequency. Leave it empty and the sound attracts toward itself.
 - **Pull ↔ / ↕** – how far energy moves along each axis. Negative pushes away; past 100 overshoots the target.
 - **Smooth ↔ / ↕** – valley width per axis, in beats and semitones. Narrow valleys snap precisely and ignore distant content; wide valleys reach out and drag everything, and at the extreme the landscape flattens and the pull fades away.
 
+**Try it for**
+
+- Crystallising a noisy or smeared sound into the scale, so it turns harmonic. **Map** to Scale and **Pull ↕** up.
+- Tightening loose timing. **Map** to Grid, with **Pull ↔** up and **Pull ↕** at 0.
+- Making a sound collapse into its own strongest partials. **Map** to Source, painted repeatedly.
+
 ---
 
 ## Modulation
+
+![The Modulators section](images/ui/section-modulators.webp)
 
 Noise Canvas has a deep modulation system for automating parameters across time and pitch. Anywhere a parameter label opens a menu with a **Modulation** section, that parameter is modulatable. You get **three modulators** per step, plus four macros and eight contextual sources.
 
@@ -481,47 +594,21 @@ Modulator parameters are themselves modulatable. You can modulate modulator 2's 
 
 ## Fill Grid
 
-**Fill Grid** paints the current brush on every cell of the grid, in one pass. The grid icon on a file's header runs it, as does **Edit → Fill Grid with Brush** (`Cmd/Ctrl+G`). The whole pass commits as one stroke, one history step, and one resynthesis, so a single undo takes it back.
+**Fill Grid** paints the current brush on every cell of the grid at once, instead of you dragging out each stroke by hand. The grid icon on a file's header runs it, as does **Edit → Fill Grid with Brush** (`Cmd/Ctrl+G`). The whole pass commits as one stroke, so one undo takes it back.
 
-A fine grid over a long file can run to thousands of strokes. Nothing is refused: a large fill paints in the background behind a progress dialog, and **Cancel** stops it and puts back the pixels from before it started.
+It has no settings of its own. The rhythm comes from the grid you already set in the transport, and the size and shape of each stroke comes from the brush. Change the grid and you change the pattern; change the brush and you change the sound.
 
-Nothing here has its own rhythm settings. The fill reads the grid you already set, so everything the grid can express, the fill can paint.
+**Hints**
 
-### What Sets the Spacing
-
-**Time** comes from **Beats** and **Swing** in the transport. A one-beat grid paints on every beat; a sixteenth grid paints sixteen to the bar. Swing carries straight through, so an off-eighth lands late and its cell is wider. A swung fill tiles without gaps.
-
-Set the time grid to **Onsets** and the fill lands on the file's own detected hits instead of a fixed division. Each stroke then runs from its hit to the next, so an uneven performance is followed rather than flattened.
-
-**Pitch** comes from **Semis**. A 12-semitone grid paints one row per octave. Set it to **Scale** and the fill puts a stroke on every note of the selected scale instead.
-
-Turn **Snap Time** or **Snap Pitch** off and that axis stops being divided: the fill treats it as one cell, and a brush whose size tracks the grid stretches to span it. With both off you get a single stroke covering everything, which is how you apply a brush to a whole file at once.
-
-### What Sets the Size
-
-The brush does. **Size ↔** and **Size ↕** work exactly as they do when you paint by hand:
-
-- At **Grid** the stroke fills the cell it lands in, so the fill tiles edge to edge.
-- At a **fixed** beat or semitone value every stroke takes that size, whatever the spacing. Smaller than the cell leaves gaps, larger overlaps.
-- At **Full** the stroke spans the axis.
-
-**Anchor** is honoured too: Corner puts each stroke's onset on the grid line, Center puts its envelope peak on the cell.
-
-### Filling Part of a File
-
-Drag on the time legend to set a loop region and the fill covers only that span. The region belongs to the file and survives a restart, so each open file keeps its own. Click the legend to clear it, and the fill covers the whole file again.
-
-### Variation Between Strokes
-
-Every stroke uses the same brush, so a bare fill repeats one sound. Variation comes from modulation, which is a field across the canvas rather than a value per stroke: strokes at different places sample different values.
-
-- A **pattern** modulator on **Strength** with a Random or Smooth Noise shape gives each stroke its own level. Take the depth far enough down and some strokes fall silent, which thins the rhythm.
-- A **sequencer** modulator on Strength is a grid you draw. Draw `1 0 0 1 0 0 1 0` and the fill plays that rhythm; draw a checkerboard against a two-row pitch grid and you get one.
-- Anything modulatable works the same way: pitch shift, blur amount, an effect's own controls.
-
-To layer, fill twice. Change the grid or the brush between passes and each is its own undo step.
+- Set the time grid to **Onsets** and the fill lands on the file's own hits instead of a fixed division, so a loosely played part is followed rather than flattened. Set the pitch grid to **Scale** to put a stroke on every note of the scale.
+- Turn **Snap Time** or **Snap Pitch** off and that axis stops being divided, so one stroke spans it. With both off, a single stroke covers the whole file, which is how you apply a brush to everything at once.
+- Drag on the time legend to set a loop region and the fill covers only that span.
+- Every stroke uses the same brush, so a bare fill repeats one sound. Modulation is what varies it: a Random pattern on **Strength** gives each stroke its own level, and a sequencer on it draws a rhythm outright.
+- To layer, fill twice, changing the grid or the brush between passes.
 
 ## Parameter Controls
+
+![A parameter's label menu](images/ui/menu-parameter.webp)
 
 - **Drag** a value to change it. **Hold Ctrl while dragging** to snap to that parameter's preset values (musical beat divisions, semitone intervals, and so on). **Hold Shift while dragging** for fine control, three times slower than a plain drag.
 - **Right-click** a value to pick from its list of preset values. A small chevron marks the values that have one.
@@ -555,6 +642,8 @@ From a parameter's label menu, toggle the **link** icon to link it across all of
 
 ## Working with Files
 
+![A file's header](images/ui/file-header.webp)
+
 Open a file from **File → Open**, from **Open Recent**, or by **dragging an audio file onto the window** (one at a time).
 
 Open files stack vertically in the canvas column. Each header gives you:
@@ -562,7 +651,7 @@ Open files stack vertically in the canvas column. Each header gives you:
 - The **filename** (italic when it has unsaved changes) and a **resolution badge**.
 - **BPM** – this file's tempo, which drives grid snapping and every beat-based parameter.
 - **Onsets** – how sensitive the hit detector is for this file. See [Onsets](#onsets).
-- **Split** (scissors) – see below.
+- **Split** – see below.
 - **Duplicate** – an editable copy, with its own history.
 - **Minimize** – collapse it into the dock at the bottom of the canvas area. A docked file stays open and can still be used as a source; click it to bring it back.
 - **Fullscreen** – expand it to fill the canvas area.
@@ -574,11 +663,11 @@ Files you create in-app (New File, duplicates, stems) are **fully persisted**. T
 
 ### Splitting a File
 
-The scissors menu on each file header:
+The split menu on each file header:
 
 - **Split Harmonic and Percussive (HPSS)** – separates the file into harmonic and percussive layers.
-- **Split into N Parts (NMF)…** – non-negative matrix factorization into any number of components, ordered low-to-high by spectral centroid.
-- **Split Drums / Bass / Other / Vocals (AI)** – neural stem separation using htdemucs. macOS only; downloads the model on first use and caches it in `~/.noise-canvas/models/` so it survives app updates.
+- **Split into N Parts (NMF)…** – non-negative matrix factorization into any number of components.
+- **Split Drums / Bass / Other / Vocals (AI)** – neural stem separation. macOS only.
 
 ### Stem Groups
 
@@ -604,7 +693,22 @@ Onsets also drive the [warp algorithms](#warp-algorithms): **Neutral** re-anchor
 
 Onsets are recomputed for the region around a stroke after you paint, so they track your edits rather than describing the file you loaded.
 
+### The Level Strip
+
+A thin strip sits directly above each file's spectrogram, showing how loud the finished audio is at every moment. It is always there and has nothing to set. Read it left to right like the file itself, and it tells you where you are running out of room.
+
+- **Dark** – quiet, or nothing at all.
+- **Light, up to white** – healthy level.
+- **Yellow** – close to full scale. Still fine, but there is no headroom left to give.
+- **Red** – out of headroom. The deeper the red, the further past it went.
+
+Red means one of two things, depending on [Auto-limit](#transport-and-output). With it on, red marks the moments the limiter is holding down for you, so it is a report rather than a problem. With it off, red is real clipping in the output, and it is worth undoing the stroke or painting it more gently.
+
+The strip describes the whole file's output, not just your last stroke, so a red patch somewhere you are not working is still worth looking at.
+
 ### Navigating the Canvas
+
+![A file's canvas](images/ui/file-lane.webp)
 
 Time axis, on the spectrogram itself:
 
@@ -631,6 +735,8 @@ Zoom and scroll are remembered per file across restarts, and files in a [stem gr
 
 ## History
 
+![The History panel](images/ui/section-history.webp)
+
 Every edit you make is captured in the **History** panel, but it's a **branching tree**, not a flat undo list. If you undo a few steps and then paint something new, the steps you undid aren't thrown away. They stay as a separate branch you can return to at any time. This lets you explore variations freely without ever painting yourself into a corner.
 
 Each node is a snapshot of the file at that point. The **current** state is highlighted, and every node shows its label and how long ago it was made.
@@ -650,6 +756,8 @@ History lives on disk per file, so the whole tree survives quitting and reopenin
 
 ## Transport and Output
 
+![The transport bar](images/ui/transport.webp)
+
 The transport bar, left to right:
 
 - **Link** – toggle **Ableton Link** to sync tempo and start/stop with other Link-enabled apps on the network. The tooltip shows the peer count; **right-click** the button for latency compensation.
@@ -659,11 +767,11 @@ The transport bar, left to right:
 - **Swing** – swing feel for the time grid. 0% is straight, ~67% is a triplet feel, 100% shifts odd grid lines by half a cell.
 - **Tonic / Type** – the scale used for pitch snapping and for scale-based effects and modulation.
 - **Output meter**.
-- **Auto-limit** – holds each stroke's own level down as you paint it, leaving the audio around it untouched. On audio that is already loud, the stroke is held to the level that was there. It is baked into the stroke, so undo removes it along with the paint, and turning it off only affects what you paint next. Turn it off to paint as loud as the effect makes it.
+- **Auto-limit** – on by default. Holds each stroke's own level down as you paint it, leaving the audio around it untouched. On audio that is already loud, the stroke is held to the level that was there. It is baked into the stroke, so undo removes it along with the paint, and turning it off only affects what you paint next. Turn it off to paint as loud as the effect makes it, at the risk of clipping the output. Either way, [the level strip](#the-level-strip) above each spectrogram shows where the headroom went: with Auto-limit on, red marks what it is holding down for you, and with it off, red is clipping.
 - **Re-analyse** – redraws each stroke as the analysis of the audio it made, so the picture settles into what you will hear, even edits that only move phase. Off, the canvas keeps exactly what you painted; the sound is the same either way, and commits are faster. Like Auto-limit, it is read at the end of each stroke.
 - **?** – outlines every area of the window at once. See [Getting Help](#getting-help).
 
-Audio is resynthesised incrementally after every stroke, so what you hear is always the real thing, not a preview. Nothing protects the output as a whole: the strip above the spectrogram marks any slice that runs out of headroom.
+Audio is resynthesised incrementally after every stroke, so what you hear is always the real thing, not a preview. Nothing protects the output as a whole, which is what [the level strip](#the-level-strip) is for.
 
 ---
 
@@ -677,6 +785,11 @@ Audio is resynthesised incrementally after every stroke, so what you hear is alw
 - **Save As…** (`Cmd/Ctrl+Shift+S`).
 - **Save Version** (`Cmd/Ctrl+Alt+S`) – save a numbered copy alongside the original without overwriting it.
 - **Close File** (`Cmd/Ctrl+W`).
+- **Export Image…** – save the active file's spectrogram as a PNG, for artwork rather than for audio. A live preview shows what you will get.
+  - **Colour** – Editor keeps the app's own look. Mono, Magma, Viridis and Ice restyle it, and Random rolls a new palette each time you pick it.
+  - **Shape** – 1:1, 4:5, 3:2, 16:9, or 9:16 for a phone screen.
+  - **Size** – 2K, 4K or 8K along the long edge.
+  - **Poster** – adds the file's name as a caption underneath.
 - **Export History…**.
 
 **Edit**
