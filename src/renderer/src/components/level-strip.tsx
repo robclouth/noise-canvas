@@ -13,28 +13,36 @@ const LEVEL_STRIP_HEIGHT = Math.round(ONSET_LEGEND_HEIGHT / 2);
 const FLOOR_DB = -60;
 /** Level the ramp reaches white, above which it warms towards yellow. */
 const HOT_DB = -6;
+/** dB past headroom at which a slice reads fully red. */
+const OVER_FULL_RED_DB = 2;
 
 const FLOOR_COLOR = [22, 22, 26];
 const FULL_COLOR = [236, 236, 242];
 const HOT_COLOR = [250, 205, 60];
 const CLIP_COLOR = [255, 58, 44];
 
-function mixChannel(from: number[], to: number[], t: number, channel: number): number {
-  return Math.round(from[channel] + (to[channel] - from[channel]) * t);
+function mixColor(from: number[], to: number[], t: number): number[] {
+  return from.map((value, channel) => Math.round(value + (to[channel] - value) * t));
 }
 
-/** Colour for one slice: dark to white with level, warming to yellow near full scale. */
-function levelColor(peak: number): string {
+/**
+ * Colour for one slice: dark to white with level, warming to yellow near full
+ * scale, then reddening with how far the slice ran out of headroom.
+ */
+function levelColor(peak: number, overDb: number): string {
   const db = 20 * Math.log10(Math.max(peak, 1e-7));
-  if (db <= FLOOR_DB) return `rgb(${FLOOR_COLOR.join(",")})`;
 
-  if (db < HOT_DB) {
-    const t = (db - FLOOR_DB) / (HOT_DB - FLOOR_DB);
-    return `rgb(${mixChannel(FLOOR_COLOR, FULL_COLOR, t, 0)},${mixChannel(FLOOR_COLOR, FULL_COLOR, t, 1)},${mixChannel(FLOOR_COLOR, FULL_COLOR, t, 2)})`;
+  let rgb: number[];
+  if (db <= FLOOR_DB) {
+    rgb = FLOOR_COLOR;
+  } else if (db < HOT_DB) {
+    rgb = mixColor(FLOOR_COLOR, FULL_COLOR, (db - FLOOR_DB) / (HOT_DB - FLOOR_DB));
+  } else {
+    rgb = mixColor(FULL_COLOR, HOT_COLOR, Math.min(1, (db - HOT_DB) / -HOT_DB));
   }
 
-  const t = Math.min(1, (db - HOT_DB) / -HOT_DB);
-  return `rgb(${mixChannel(FULL_COLOR, HOT_COLOR, t, 0)},${mixChannel(FULL_COLOR, HOT_COLOR, t, 1)},${mixChannel(FULL_COLOR, HOT_COLOR, t, 2)})`;
+  if (overDb > 0) rgb = mixColor(rgb, CLIP_COLOR, Math.min(1, overDb / OVER_FULL_RED_DB));
+  return `rgb(${rgb.join(",")})`;
 }
 
 interface LevelStripProps {
@@ -43,7 +51,7 @@ interface LevelStripProps {
 
 /**
  * A strip above the spectrogram carrying the synthesized output's peak level
- * against time, red wherever it ran out of headroom.
+ * against time, reddening with how far it ran out of headroom.
  */
 export const LevelStrip = memo(({ fileId }: LevelStripProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -89,13 +97,13 @@ export const LevelStrip = memo(({ fileId }: LevelStripProps) => {
         const last = Math.min(points - 1, Math.max(first, Math.ceil(uvEnd * points) - 1));
 
         let peak = 0;
-        let clipped = false;
+        let overDb = 0;
         for (let point = first; point <= last; point++) {
           if (levels.peaks[point] > peak) peak = levels.peaks[point];
-          if (levels.clipped[point]) clipped = true;
+          if (levels.overDb[point] > overDb) overDb = levels.overDb[point];
         }
 
-        ctx.fillStyle = clipped ? `rgb(${CLIP_COLOR.join(",")})` : levelColor(peak);
+        ctx.fillStyle = levelColor(peak, overDb);
         ctx.fillRect(x, 0, 1, height);
       }
     };

@@ -80,7 +80,8 @@ export interface CommitStroke {
 export interface CommitLevels {
   startHop: number;
   peaks: Float32Array;
-  clipped: Uint8Array;
+  /** dB the samples pass full scale beyond the tolerance, per hop; 0 inside headroom. */
+  overDb: Float32Array;
 }
 
 export interface CommitStrokeResult {

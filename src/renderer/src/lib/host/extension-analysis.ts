@@ -185,7 +185,7 @@ const commitStroke: CommitStrokeFn = async (
     levels: {
       startHop: Number(outMeta.levelStartHop),
       peaks: f32(outArrays.levelPeaks, "levelPeaks"),
-      clipped: u8(outArrays.levelClipped, "levelClipped"),
+      overDb: f32(outArrays.levelOverDb, "levelOverDb"),
     },
     onsets: outArrays.onsets ? f32(outArrays.onsets, "onsets") : undefined,
     onsetOdfMax: outMeta.onsetOdfMax === undefined ? undefined : Number(outMeta.onsetOdfMax),

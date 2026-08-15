@@ -15,7 +15,7 @@
 #include "gaborator/gaborator.h"
 
 #define OVERLAP 0.7
-#define MAX_TEXTURE_SIZE 4096
+#define MAX_TEXTURE_SIZE 8192
 
 // Debug logging to file
 static std::ofstream &getDebugLog()
@@ -1817,8 +1817,9 @@ Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
 
 /** How much of the file one point of the levels and the envelope covers. */
 static constexpr double COMMIT_LEVEL_HOP_SEC = 0.005;
-/** Gain reduction above which a level slice counts as held down. */
-static constexpr float COMMIT_CLIP_GAIN_DB = 0.1f;
+/** Reconstruction ripple synthesis can add to full-scale material on its own
+    (measured up to ~0.7 dB); sample peaks within it do not count as over. */
+static constexpr float COMMIT_OVER_TOLERANCE_DB = 1.0f;
 /** Longest analysis margin a band is given, however wide its filter. */
 static constexpr double COMMIT_MAX_ANALYSIS_MARGIN_SEC = 2.0;
 
@@ -2085,10 +2086,10 @@ public:
         if (!levelPeaks.empty())
             memcpy(peaksJs.Data(), levelPeaks.data(), levelPeaks.size() * sizeof(float));
         levels.Set("peaks", peaksJs);
-        Napi::Uint8Array clippedJs = Napi::Uint8Array::New(env, levelClipped.size());
-        if (!levelClipped.empty())
-            memcpy(clippedJs.Data(), levelClipped.data(), levelClipped.size());
-        levels.Set("clipped", clippedJs);
+        Napi::Float32Array overDbJs = Napi::Float32Array::New(env, levelOverDb.size());
+        if (!levelOverDb.empty())
+            memcpy(overDbJs.Data(), levelOverDb.data(), levelOverDb.size() * sizeof(float));
+        levels.Set("overDb", overDbJs);
         result.Set("levels", levels);
 
         if (detectOnsets)
@@ -2506,10 +2507,10 @@ private:
     }
 
     /**
-     * Peak level per 5 ms slice over the window, and where the output ran out
-     * of headroom. With the limiter engaged the samples cannot reach full
-     * scale, so the reduction it applied is what marks a slice; bypassed, the
-     * samples pass full scale directly.
+     * Peak level per 5 ms slice over the window, and how far the samples pass
+     * full scale beyond the round trip's own ripple — measured the same with
+     * the limiter engaged or bypassed. The limiter's reduction goes to
+     * gainReductionDb alongside, not into the levels.
      */
     void computeLevels(int64_t w0, int64_t w1, const std::vector<float> &weightedGain)
     {
@@ -2518,7 +2519,7 @@ private:
         const int64_t lastHop = (w1 - 1) / hop;
         const size_t points = (size_t)std::max<int64_t>(0, lastHop - levelStartHop + 1);
         levelPeaks.assign(points, 0.0f);
-        levelClipped.assign(points, 0);
+        levelOverDb.assign(points, 0.0f);
         gainReductionDb.assign(points, 0.0f);
         maxGainReductionDb = 0.0f;
 
@@ -2540,11 +2541,13 @@ private:
                 const float db = lowest < 1.0f ? -20.0f * std::log10(lowest) : 0.0f;
                 gainReductionDb[p] = db;
                 maxGainReductionDb = std::max(maxGainReductionDb, db);
-                levelClipped[p] = db > COMMIT_CLIP_GAIN_DB ? 1 : 0;
             }
-            else
+
+            if (peak > 1.0f)
             {
-                levelClipped[p] = peak >= 1.0f ? 1 : 0;
+                const float db = 20.0f * std::log10(peak);
+                if (db > COMMIT_OVER_TOLERANCE_DB)
+                    levelOverDb[p] = db - COMMIT_OVER_TOLERANCE_DB;
             }
         }
     }
@@ -2592,7 +2595,7 @@ private:
     float maxGainReductionDb = 0.0f;
     int64_t levelStartHop = 0;
     std::vector<float> levelPeaks;
-    std::vector<uint8_t> levelClipped;
+    std::vector<float> levelOverDb;
     std::vector<DetectedOnset> onsets;
     std::vector<float> onsetBandMaxOut;
     double onsetOdfMax = 0.0;

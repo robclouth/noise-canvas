@@ -1,20 +1,30 @@
 /** Slice of output the strip resolves, matching the limiter's envelope hop. */
 export const LEVEL_HOP_SECONDS = 0.005;
 
+/**
+ * Reconstruction ripple the synthesis round trip can add to full-scale
+ * material on its own (measured up to ~0.7 dB on peak-normalised noise).
+ * Sample peaks within it do not count as over.
+ */
+export const OVER_TOLERANCE_DB = 1;
+
 export interface OutputLevels {
   /** Peak sample magnitude per hop, linear, where 1 is full scale. */
   peaks: Float32Array;
-  /** True where the output ran out of headroom, one entry per hop. */
-  clipped: Uint8Array;
+  /**
+   * dB the samples pass full scale beyond the tolerance, per hop; 0 where
+   * the output stayed inside headroom.
+   */
+  overDb: Float32Array;
 }
 
 /**
- * Per-hop peak level of a whole buffer, and where it ran out of headroom.
+ * Per-hop peak level of a whole buffer, and how far it ran out of headroom.
  *
- * Nothing limits the output as a whole any more, so a slice at or past full
- * scale is the only thing that counts as overloaded here. A commit measures
- * its own window and splices the result in; this is for the passes that
- * replace the whole buffer.
+ * Nothing limits the output as a whole any more, so a slice past full scale
+ * (beyond the round trip's own ripple) is the only thing that counts as
+ * overloaded here. A commit measures its own window and splices the result
+ * in; this is for the passes that replace the whole buffer.
  */
 export function computeOutputLevels(audioBuffer: AudioBuffer | undefined): OutputLevels | null {
   if (!audioBuffer) return null;
@@ -33,10 +43,14 @@ export function computeOutputLevels(audioBuffer: AudioBuffer | undefined): Outpu
     }
   }
 
-  const clipped = new Uint8Array(points);
-  for (let point = 0; point < points; point++) clipped[point] = peaks[point] >= 1 ? 1 : 0;
+  const overDb = new Float32Array(points);
+  for (let point = 0; point < points; point++) {
+    if (peaks[point] <= 1) continue;
+    const db = 20 * Math.log10(peaks[point]);
+    if (db > OVER_TOLERANCE_DB) overDb[point] = db - OVER_TOLERANCE_DB;
+  }
 
-  return { peaks, clipped };
+  return { peaks, overDb };
 }
 
 /**
@@ -46,22 +60,22 @@ export function computeOutputLevels(audioBuffer: AudioBuffer | undefined): Outpu
  */
 export function spliceOutputLevels(
   existing: OutputLevels | undefined,
-  window: { startHop: number; peaks: Float32Array; clipped: Uint8Array },
+  window: { startHop: number; peaks: Float32Array; overDb: Float32Array },
   totalPoints: number,
 ): OutputLevels {
   const peaks = new Float32Array(totalPoints);
-  const clipped = new Uint8Array(totalPoints);
+  const overDb = new Float32Array(totalPoints);
   if (existing) {
     peaks.set(existing.peaks.subarray(0, Math.min(existing.peaks.length, totalPoints)));
-    clipped.set(existing.clipped.subarray(0, Math.min(existing.clipped.length, totalPoints)));
+    overDb.set(existing.overDb.subarray(0, Math.min(existing.overDb.length, totalPoints)));
   }
 
   const count = Math.min(window.peaks.length, Math.max(0, totalPoints - window.startHop));
   for (let i = 0; i < count; i++) {
     peaks[window.startHop + i] = window.peaks[i];
-    clipped[window.startHop + i] = window.clipped[i];
+    overDb[window.startHop + i] = window.overDb[i];
   }
-  return { peaks, clipped };
+  return { peaks, overDb };
 }
 
 /** How many hops a buffer of this length covers. */

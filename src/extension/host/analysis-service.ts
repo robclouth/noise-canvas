@@ -175,7 +175,7 @@ export async function runCommitStrokeFramed(request: ArrayBuffer): Promise<Uint8
     patchPixels: result.patch.pixels,
     gainReductionDb: result.gainReductionDb,
     levelPeaks: result.levels.peaks,
-    levelClipped: result.levels.clipped,
+    levelOverDb: result.levels.overDb,
   };
   result.channels.forEach((channel, i) => (out[`channel${i}`] = channel));
   if (result.onsets) out.onsets = result.onsets;

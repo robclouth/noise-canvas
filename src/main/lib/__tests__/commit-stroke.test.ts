@@ -33,7 +33,7 @@ interface CommitResult {
   patch: { ranges: Uint32Array; pixels: Float32Array };
   gainReductionDb: Float32Array;
   maxGainReductionDb: number;
-  levels: { startHop: number; peaks: Float32Array; clipped: Uint8Array };
+  levels: { startHop: number; peaks: Float32Array; overDb: Float32Array };
   onsets?: Float32Array;
   onsetOdfMax?: number;
   onsetBandMax?: Float32Array;
@@ -489,7 +489,7 @@ describe("commit stroke", () => {
   );
 
   it(
-    "reports levels over the window and marks the slices it held down",
+    "reports levels over the window and marks only the slices that clipped",
     async () => {
       const analysis = await addon.analyze([makeNoise(0.3)], 1, SR, PARAMS);
       const original = await roundTrip(analysis, analysis.data);
@@ -510,10 +510,10 @@ describe("commit stroke", () => {
         PARAMS,
         [original],
         fullWindow(analysis),
-        gateStroke({ hardEdgeStart: false, hardEdgeEnd: false, applyLimiter: true }),
+        gateStroke({ hardEdgeStart: false, hardEdgeEnd: false }),
       );
 
-      expect(commit.levels.peaks.length).toBe(commit.levels.clipped.length);
+      expect(commit.levels.peaks.length).toBe(commit.levels.overDb.length);
       expect(commit.levels.peaks.length).toBeGreaterThan(0);
       // The window starts before the footprint, so its first hop precedes it.
       expect(commit.levels.startHop).toBeLessThanOrEqual(Math.floor(F0 / HOP));
@@ -527,13 +527,27 @@ describe("commit stroke", () => {
         expect(commit.levels.peaks[p]).toBeCloseTo(peak, 5);
       }
 
-      let clippedInside = 0;
-      for (let p = 0; p < commit.levels.clipped.length; p++) {
+      let overInside = 0;
+      for (let p = 0; p < commit.levels.overDb.length; p++) {
         const sample = (commit.levels.startHop + p) * HOP;
-        if (commit.levels.clipped[p] && sample >= F0 && sample < F1) clippedInside++;
-        if (commit.levels.clipped[p]) expect(sample).toBeGreaterThanOrEqual(F0 - HOP);
+        if (commit.levels.overDb[p] > 0 && sample >= F0 && sample < F1) overInside++;
+        if (commit.levels.overDb[p] > 0) expect(sample).toBeGreaterThanOrEqual(F0 - HOP);
       }
-      expect(clippedInside).toBeGreaterThan(0);
+      expect(overInside).toBeGreaterThan(0);
+
+      // The limiter keeps the same stroke inside headroom, so nothing marks:
+      // the levels read the samples the same way whether it ran or not.
+      const limited = await addon.commitStroke(
+        loud,
+        metaOf(analysis),
+        SR,
+        PARAMS,
+        [original],
+        fullWindow(analysis),
+        gateStroke({ hardEdgeStart: false, hardEdgeEnd: false, applyLimiter: true }),
+      );
+      expect(limited.maxGainReductionDb).toBeGreaterThan(0);
+      for (let p = 0; p < limited.levels.overDb.length; p++) expect(limited.levels.overDb[p]).toBe(0);
     },
     TIMEOUT,
   );
