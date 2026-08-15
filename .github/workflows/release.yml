@@ -40,6 +40,11 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # npm install compiles the addons. Loading them here proves ONNX Runtime
+      # resolves from beside the addon before the installer is built around it.
+      - name: Check the native addons load
+        run: node scripts/check-addon.mjs
+
       # macOS signs with the Developer ID certificate in MAC_CSC_LINK, then
       # notarises with the Apple ID credentials. CSC_LINK is read on every
       # platform, so it must stay off the Windows and Linux runners.
