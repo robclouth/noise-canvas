@@ -198,6 +198,10 @@ export class StrokeRenderer {
   // FBO data cache
   private fboDataCache: Float32Array | null = null;
   private fboDataDirty = true;
+  // Bumped on every change to the FBO contents. getFBOData() captures it before
+  // its readback and keeps the result only if it still matches, so paint that
+  // lands mid-read cannot leave a snapshot taken before it marked clean.
+  private fboDataEpoch = 0;
 
   // Dirty region tracking for partial synthesis
   private dirtyRegion: { startX: number; endX: number; startY: number; endY: number } | null = null;
@@ -398,7 +402,7 @@ export class StrokeRenderer {
     // next acquireScratch to rebuild it.
     this.pool.disown(this);
 
-    this.fboDataDirty = true;
+    this.invalidateFboData();
     this.isInitialized = true;
   }
 
@@ -1189,7 +1193,7 @@ export class StrokeRenderer {
       this.committedPitchMin = Math.min(this.committedPitchMin, strokeStartY);
       this.committedPitchMax = Math.max(this.committedPitchMax, strokeEndY);
 
-      this.fboDataDirty = true;
+      this.invalidateFboData();
     }
   }
 
@@ -1342,8 +1346,16 @@ export class StrokeRenderer {
     if (renderedAny) this.gl.setRenderTarget(null);
   }
 
+  /** Marks the cached packed state stale, so the next read goes to the GPU. */
+  private invalidateFboData(): void {
+    this.fboDataDirty = true;
+    this.fboDataEpoch++;
+  }
+
   /**
-   * Get the current FBO data asynchronously.
+   * Get the current FBO data asynchronously. The readback is issued against the
+   * FBO as it stands at the call, so the resolved array is that caller's
+   * snapshot even when later paint lands before it resolves.
    */
   async getFBOData(): Promise<Float32Array> {
     if (this.fboDataCache && !this.fboDataDirty) {
@@ -1352,10 +1364,15 @@ export class StrokeRenderer {
 
     const { packedTextureSize } = this.spectrogramData;
     const fboToRead = this.pingPong === 0 ? this.fbo1 : this.fbo2;
+    const epoch = this.fboDataEpoch;
     const data = await readRenderTargetPixelsAsync(this.gl, fboToRead, 0, 0, packedTextureSize.x, packedTextureSize.y);
 
-    this.fboDataCache = data;
-    this.fboDataDirty = false;
+    // Paint that landed while the read was in flight is absent from `data`, so
+    // it stands in for nothing later: leave the cache stale for the next read.
+    if (epoch === this.fboDataEpoch) {
+      this.fboDataCache = data;
+      this.fboDataDirty = false;
+    }
 
     return data;
   }
@@ -1390,7 +1407,7 @@ export class StrokeRenderer {
 
     dataTex.dispose();
 
-    this.fboDataDirty = true;
+    this.invalidateFboData();
   }
 
   /**
@@ -1491,7 +1508,7 @@ export class StrokeRenderer {
 
     geometry.dispose();
     patchTex.dispose();
-    this.fboDataDirty = true;
+    this.invalidateFboData();
   }
 
   /**
@@ -1543,7 +1560,7 @@ export class StrokeRenderer {
       );
       this.blitFBO(this.pingPong === 0 ? this.fbo1 : this.fbo2, this.rollbackFbo);
     }
-    this.fboDataDirty = true;
+    this.invalidateFboData();
   }
 
   /** Whether a rollback snapshot is currently held. */
@@ -1560,7 +1577,7 @@ export class StrokeRenderer {
     this.blitFBO(this.rollbackFbo, this.pingPong === 0 ? this.fbo1 : this.fbo2);
     this.releaseRollback();
     this.dirtyRegion = null;
-    this.fboDataDirty = true;
+    this.invalidateFboData();
     return true;
   }
 
@@ -1672,7 +1689,7 @@ export class StrokeRenderer {
    */
   restoreOriginal(): void {
     this.isInitialized = false;
-    this.fboDataDirty = true;
+    this.invalidateFboData();
     this.dirtyRegion = null;
   }
 
