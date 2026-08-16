@@ -48,14 +48,18 @@ function syncToLink(): void {
   const end = loopRegion?.end ?? buffer.duration;
   const loopStart = loopRegion?.start ?? 0;
 
+  // A zero-length span makes the modulo below NaN, and a NaN offset reaches
+  // player.restart. Leave the player where it is until there is a span to sync.
+  const spanSeconds = loop && loopRegion ? loopRegion.end - loopRegion.start : buffer.duration;
+  if (!(spanSeconds > 0) || !Number.isFinite(secondsPerBeat) || secondsPerBeat <= 0) return;
+
   let offset: number;
   if (loop && loopRegion) {
-    const loopLen = loopRegion.end - loopRegion.start;
-    const loopLenBeats = loopLen / secondsPerBeat;
+    const loopLenBeats = spanSeconds / secondsPerBeat;
     const posInLoopBeats = ((adjustedBeat % loopLenBeats) + loopLenBeats) % loopLenBeats;
     offset = loopRegion.start + posInLoopBeats * secondsPerBeat;
   } else {
-    const durationBeats = buffer.duration / secondsPerBeat;
+    const durationBeats = spanSeconds / secondsPerBeat;
     const posBeats = ((adjustedBeat % durationBeats) + durationBeats) % durationBeats;
     offset = posBeats * secondsPerBeat;
   }

@@ -321,14 +321,20 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
 
         const secondsPerBeat = 60 / fileBpm;
 
+        // A zero-length span makes the modulo below NaN, and a NaN offset
+        // reaches player.start. Fall through to the normal, unsynced start.
+        const spanSeconds = loop && loopRegion ? loopRegion.end - loopRegion.start : buffer.duration;
+        if (!(spanSeconds > 0) || !Number.isFinite(secondsPerBeat) || secondsPerBeat <= 0) {
+          throw new Error("Link sync needs a non-empty span and a positive tempo");
+        }
+
         let offset: number;
         if (loop && loopRegion) {
-          const loopLen = loopRegion.end - loopRegion.start;
-          const loopLenBeats = loopLen / secondsPerBeat;
+          const loopLenBeats = spanSeconds / secondsPerBeat;
           const posInLoopBeats = ((adjustedBeat % loopLenBeats) + loopLenBeats) % loopLenBeats;
           offset = loopRegion.start + posInLoopBeats * secondsPerBeat;
         } else {
-          const durationBeats = buffer.duration / secondsPerBeat;
+          const durationBeats = spanSeconds / secondsPerBeat;
           const posBeats = ((adjustedBeat % durationBeats) + durationBeats) % durationBeats;
           offset = posBeats * secondsPerBeat;
         }
