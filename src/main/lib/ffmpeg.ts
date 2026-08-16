@@ -44,6 +44,51 @@ export interface BasicAudioMetadata {
   format: string;
 }
 
+// The named layouts ffmpeg prints, and how many channels each carries.
+const NAMED_CHANNEL_LAYOUTS: Record<string, number> = {
+  mono: 1,
+  stereo: 2,
+  downmix: 2,
+  "2.1": 3,
+  "3.0": 3,
+  "3.0(back)": 3,
+  "4.0": 4,
+  quad: 4,
+  "quad(side)": 4,
+  "5.0": 5,
+  "5.0(side)": 5,
+  "5.1": 6,
+  "5.1(side)": 6,
+  "6.0": 6,
+  "6.1": 7,
+  "7.0": 7,
+  "7.1": 8,
+  hexagonal: 6,
+  octagonal: 8,
+};
+
+/**
+ * Channel count for an ffmpeg channel-layout string, e.g. "stereo", "5.1(side)"
+ * or "8 channels". Returns 0 when the layout is not recognised at all.
+ */
+export function channelsFromLayout(layout: string): number {
+  const trimmed = layout.trim();
+  const named = NAMED_CHANNEL_LAYOUTS[trimmed.toLowerCase()];
+  if (named) return named;
+
+  // ffmpeg falls back to "N channels" for layouts it has no name for.
+  const counted = trimmed.match(/^(\d+)\s*channels?$/i);
+  if (counted) return parseInt(counted[1], 10);
+
+  // "N.M" surround, including names this table does not list yet.
+  const surround = trimmed.match(/(\d+)\.(\d+)/);
+  if (surround) return parseInt(surround[1], 10) + parseInt(surround[2], 10);
+
+  if (/stereo/i.test(trimmed)) return 2;
+  if (/mono/i.test(trimmed)) return 1;
+  return 0;
+}
+
 export function probeAudioFile(inputPath: string): Promise<BasicAudioMetadata> {
   return new Promise((resolve, reject) => {
     // This does a "dry run": ffmpeg inspects the file, prints stream info, then errors out
@@ -75,16 +120,9 @@ export function probeAudioFile(inputPath: string): Promise<BasicAudioMetadata> {
       const sampleRate = parseInt(streamMatch[2], 10);
 
       const layout = streamMatch[3].trim();
-      let channels = 1;
-      if (/stereo/i.test(layout)) channels = 2;
-      else if (/mono/i.test(layout)) channels = 1;
-      else {
-        const surround = layout.match(/(\d+)\.(\d+)/); // e.g. "5.1"
-        if (surround) {
-          const base = parseInt(surround[1], 10);
-          const lfe = parseInt(surround[2], 10);
-          channels = base + lfe;
-        }
+      const channels = channelsFromLayout(layout);
+      if (channels === 0) {
+        return reject(new Error(`The file's channel layout ("${layout}") is not one Noise Canvas can read.`));
       }
 
       resolve({
