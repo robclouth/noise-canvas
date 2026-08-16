@@ -1942,11 +1942,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       // Swap the buffer under the player and restart it from where it was, so
       // the edit is heard without the transport moving.
       const bufferSwapStart = performance.now();
-      const player = get().getPlayer();
-      const t = get().getPlaybackTime();
-      player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
-      player.volume.value = 0;
-      get().setPlaybackTime(t);
+      get().swapPlayingBuffer(audioBuffer);
       console.log(`[timing] buffer hot-swap: ${(performance.now() - bufferSwapStart).toFixed(2)}ms`);
     }
   },
@@ -2075,7 +2071,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const file = openFiles[fileId];
     if (!file?.spectrogramData) return false;
 
-    const { setFileSynthesizing, getPlayer } = get();
+    const { setFileSynthesizing } = get();
 
     try {
       setFileSynthesizing(fileId, true);
@@ -2100,11 +2096,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
       // Hot-swap if currently playing this file
       if (get().isPlaying && get().activeFileId === fileId) {
-        const player = getPlayer();
-        const t = get().getPlaybackTime();
-        player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
-        player.volume.value = 0;
-        get().setPlaybackTime(t);
+        get().swapPlayingBuffer(audioBuffer);
       }
 
       return true;

@@ -7,7 +7,8 @@ export interface AudioState {
   playerClock: PlayerClock;
   player: Tone.Player | null;
   meter: Tone.Meter | null;
-  getPlaybackTime: () => number;
+  /** Position the player is at, at `atTime` on the audio clock (default now). */
+  getPlaybackTime: (atTime?: number) => number;
   getPlayer: () => Tone.Player;
   getOutputLevels: () => [number, number];
   isPlaying: boolean;
@@ -20,12 +21,23 @@ export interface AudioState {
   reanalyzeStrokes: boolean;
   /** Sets the active file's loop region. */
   setLoopRegion: (region: LoopRegion | null) => void;
-  setPlaybackTime: (playbackTime: number) => void;
+  setPlaybackTime: (playbackTime: number, atTime?: number) => void;
+  /**
+   * Put `audioBuffer` under the running player at the position it already
+   * plays, crossfading out of the buffer it replaces.
+   */
+  swapPlayingBuffer: (audioBuffer: AudioBuffer) => void;
   togglePlayback: () => Promise<void>;
   stopAudio: () => void;
 }
 
 export const AUDIO_PERSISTED_KEYS = ["autoPlayStroke", "loop", "limiterEnabled", "reanalyzeStrokes"] as const;
+
+// Fade on every source the player makes, so a restart overlaps the outgoing and
+// incoming sources into a crossfade rather than a hard splice. Tone copies it
+// onto a source when it is made, so it must be set before playback starts —
+// setting it later leaves the outgoing source stopping dead.
+const PLAYER_FADE_SEC = 0.01;
 
 export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState => ({
   player: null,
@@ -37,7 +49,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     loopEnd: 0,
   },
 
-  getPlaybackTime: () => {
+  getPlaybackTime: (atTime) => {
     const { player, isPlaying, loop, activeFileId, playerClock, filesLoopRegion } = get();
     const loopRegion = activeLoopRegion({ activeFileId, filesLoopRegion });
     const file = activeFileId ? openFiles[activeFileId] : undefined;
@@ -50,7 +62,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
       return Math.min(Math.max(playerClock.startOffset, playerClock.loopStart), end);
     }
 
-    const now = Tone.now();
+    const now = atTime ?? Tone.now();
     const elapsed = Math.max(0, now - playerClock.startAt);
     const rate = player.playbackRate ?? 1;
     let pos = playerClock.startOffset + elapsed * rate;
@@ -89,8 +101,8 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     const newPlayer = new Tone.Player({
       loop: false,
       autostart: false,
-      fadeIn: 0,
-      fadeOut: 0,
+      fadeIn: PLAYER_FADE_SEC,
+      fadeOut: PLAYER_FADE_SEC,
     }).toDestination();
 
     // Fan the player output out to a stereo meter for the transport level display.
@@ -200,7 +212,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     }));
   },
 
-  setPlaybackTime: (playbackTime) => {
+  setPlaybackTime: (playbackTime, atTime) => {
     const { activeFileId, loop, getPlayer, filesLoopRegion } = get();
     const loopRegion = activeLoopRegion({ activeFileId, filesLoopRegion });
     if (activeFileId === null) return;
@@ -209,6 +221,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     if (!buf) return;
 
     const player = getPlayer();
+    const startAt = atTime ?? Tone.now();
     const end = loopRegion?.end ?? buf.duration;
     const loopStart = loopRegion?.start ?? 0;
     const offset = Math.min(Math.max(playbackTime, 0), end);
@@ -216,7 +229,7 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     set((s) => ({
       playerClock: {
         ...s.playerClock,
-        startAt: Tone.now(),
+        startAt,
         startOffset: offset,
         loopStart,
         loopEnd: end,
@@ -228,12 +241,24 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
         player.loop = true;
         player.loopStart = loopStart;
         player.loopEnd = end;
-        player.restart(Tone.now(), offset);
+        player.restart(startAt, offset);
       } else {
         player.loop = false;
-        player.restart(Tone.now(), offset, Math.max(0, end - offset));
+        player.restart(startAt, offset, Math.max(0, end - offset));
       }
     }
+  },
+
+  swapPlayingBuffer: (audioBuffer) => {
+    const { getPlayer, getPlaybackTime, setPlaybackTime } = get();
+    // One clock reading for both the position and the restart, so the incoming
+    // source lines up with the outgoing one it fades across.
+    const now = Tone.now();
+    const player = getPlayer();
+    const playbackTime = getPlaybackTime(now);
+    player.buffer = new Tone.ToneAudioBuffer(audioBuffer);
+    player.volume.value = 0;
+    setPlaybackTime(playbackTime, now);
   },
 
   togglePlayback: async () => {
