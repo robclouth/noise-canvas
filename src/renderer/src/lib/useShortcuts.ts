@@ -72,6 +72,12 @@ export function useShortcuts() {
       return;
     }
 
+    // Only bail when the user is actually typing into a real text-entry element.
+    // Focused buttons/selects/etc. must not swallow global shortcuts like Space.
+    // Ahead of the modifier branches: Shift for a capital letter must not put
+    // the canvas into source-pick mode.
+    if (isTextEntry(event.target as HTMLElement)) return;
+
     // Special handling for Shift (hold) - Pick source file position
     if (event.key === "Shift") {
       useStore.getState().setPickingFileParam("sourceFile" as import("@renderer/store/types").ParameterKey);
@@ -88,10 +94,6 @@ export function useShortcuts() {
       // (though we blocked them for "Set Source", usually they are modifiers for keys like "S", "Z", etc.)
       // However, standard Zoom logic (wheel) relies on this state.
     }
-
-    // Only bail when the user is actually typing into a real text-entry element.
-    // Focused buttons/selects/etc. must not swallow global shortcuts like Space.
-    if (isTextEntry(event.target as HTMLElement)) return;
 
     // Match shortcuts
     const shortcut = SHORTCUTS.find(
@@ -185,12 +187,27 @@ export function useShortcuts() {
     }
   };
 
+  // Held modifiers drive these modes, and their keyup goes to whichever app the
+  // user switched to. Without this the canvas comes back in pick or zoom mode.
+  const clearHeldModifierModes = () => {
+    const state = useStore.getState();
+    state.setPickingFileParam(null);
+    state.setIsZooming(false);
+  };
+
   useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) clearHeldModifierModes();
+    };
     window.addEventListener("keydown", handleKeyDown, { capture: true });
     window.addEventListener("keyup", handleKeyUp, { capture: true });
+    window.addEventListener("blur", clearHeldModifierModes);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.removeEventListener("keydown", handleKeyDown, { capture: true });
       window.removeEventListener("keyup", handleKeyUp, { capture: true });
+      window.removeEventListener("blur", clearHeldModifierModes);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 }

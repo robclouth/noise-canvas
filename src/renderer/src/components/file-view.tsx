@@ -586,8 +586,23 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
   // Window-level event listeners to handle mouse movements and releases outside the file view
   useEffect(() => {
+    const endStrokeOutsideWindow = async () => {
+      if (!isStrokingRef.current) return;
+      await finishStroke();
+      useTransientStore.getState().setCursorVisible(false);
+      useTransientStore.getState().setHoveredFile(null);
+      rendererRef.current?.clearPreview();
+      lastSnappedPositionRef.current = null;
+    };
+
     const handleWindowMouseMove = (event: MouseEvent) => {
       if (!isStrokingRef.current) return;
+      // A release outside the window sends no mouseup here, so the first move
+      // back inside is where the stroke learns the button is no longer held.
+      if (event.buttons === 0) {
+        void endStrokeOutsideWindow();
+        return;
+      }
 
       const rect = viewRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -638,11 +653,17 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       }
     };
 
+    const handleWindowBlur = () => {
+      void endStrokeOutsideWindow();
+    };
+
     window.addEventListener("mousemove", handleWindowMouseMove);
     window.addEventListener("mouseup", handleWindowMouseUp);
+    window.addEventListener("blur", handleWindowBlur);
     return () => {
       window.removeEventListener("mousemove", handleWindowMouseMove);
       window.removeEventListener("mouseup", handleWindowMouseUp);
+      window.removeEventListener("blur", handleWindowBlur);
     };
   }, [fileId, finishStroke, aimToBeatsAndPitch]);
 
