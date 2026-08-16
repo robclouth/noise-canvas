@@ -15,6 +15,7 @@ import { computeOutputLevels, outputLevelPoints, spliceOutputLevels, type Output
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
+import { whenFileTasksSettle } from "../lib/file-task-queue";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import { disposeOnsetTexture, packOnsetState, spliceOnsets, unpackOnsetState } from "../lib/onset-map";
 import { commitStrokeOf, commitWindowOf, projectsWholeFile, type StrokeCommitSnapshot } from "../lib/stroke-commit";
@@ -168,6 +169,10 @@ export interface FilesState {
 
 // Open files keyed by file ID
 export const openFiles: Record<string, OpenFile> = {};
+
+// Counts synthesis requests per file, so a result that resolves after a later
+// request started can tell that it has been superseded.
+const fileSynthesisGeneration = new Map<string, number>();
 
 /**
  * Merges `patch` into an open file. Returns false when the file is no longer
@@ -439,7 +444,13 @@ export type FileReference = {
 
 function forEachFileValue(
   brushes: Brush[],
-  visit: (ref: { brushIndex: number; brushName: string; paramKey: ParameterKey; value: FileParameterValue }) => void,
+  visit: (ref: {
+    brushIndex: number;
+    brushName: string;
+    paramKey: ParameterKey;
+    value: FileParameterValue;
+    clear: () => void;
+  }) => void,
 ) {
   const fileKeys = getFileParameterKeys();
   brushes.forEach((brush, brushIndex) => {
@@ -452,11 +463,17 @@ function forEachFileValue(
           for (const effect of effects) {
             if (effect.effect !== def.effectType) continue;
             const val = effect.params?.[key] as FileParameterValue | undefined;
-            if (val) visit({ brushIndex, brushName: brush.name, paramKey: key, value: val });
+            const clear = () => {
+              if (effect.params) delete effect.params[key];
+            };
+            if (val) visit({ brushIndex, brushName: brush.name, paramKey: key, value: val, clear });
           }
         } else {
           const val = (step as Record<string, unknown>)[key] as FileParameterValue | undefined;
-          if (val) visit({ brushIndex, brushName: brush.name, paramKey: key, value: val });
+          const clear = () => {
+            (step as Record<string, unknown>)[key] = null;
+          };
+          if (val) visit({ brushIndex, brushName: brush.name, paramKey: key, value: val, clear });
         }
       }
     }
@@ -478,6 +495,16 @@ export function findFileReferences(filePath: string, brushes: Brush[]): FileRefe
 /** Check if a file is referenced by any brush (as source or as an effect file param). */
 export function isFileReferenced(filePath: string, brushes: Brush[]): boolean {
   return findFileReferences(filePath, brushes).length > 0;
+}
+
+/**
+ * Unset every brush reference to `filePath`, in both step sources and effect
+ * file params. `brushes` is mutated, so pass an immer draft.
+ */
+export function clearFileReferences(filePath: string, brushes: Brush[]): void {
+  forEachFileValue(brushes, ({ value, clear }) => {
+    if (value?.path === filePath) clear();
+  });
 }
 
 /** Open each path minimized, warning about the ones no longer on disk. */
@@ -1399,7 +1426,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   saveActiveFile: async () => {
     const state = get();
     if (!state.activeFileId) return;
-    const file = openFiles[state.activeFileId];
+    const fileId = state.activeFileId;
+    const file = openFiles[fileId];
     if (!file || !file.audioBuffer) return;
 
     // Managed files have no real on-disk path to overwrite — Save means
@@ -1421,11 +1449,21 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         danger: true,
         onConfirm: async () => {
           try {
+            // A stroke released just before Save is still deriving its audio and
+            // its history node; without the wait the file on disk is the one
+            // from before it, and markSaved marks the node it superseded.
+            await whenFileTasksSettle(fileId);
+            const current = openFiles[fileId];
+            if (!current?.audioBuffer) {
+              resolve();
+              return;
+            }
+
             // Copy the audio channels out of the AudioBuffer at their final level.
-            const numChannels = file.audioBuffer!.numberOfChannels;
+            const numChannels = current.audioBuffer.numberOfChannels;
             const audioChannels: Float32Array[] = [];
             for (let i = 0; i < numChannels; i++) {
-              audioChannels.push(new Float32Array(file.audioBuffer!.getChannelData(i)));
+              audioChannels.push(new Float32Array(current.audioBuffer.getChannelData(i)));
             }
 
             // Determine format from file extension
@@ -1433,10 +1471,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             const format = ext || "wav";
 
             // Export the audio
-            await host.analysis.exportAudio(audioChannels, filePath, file.audioBuffer!.sampleRate, format);
+            await host.analysis.exportAudio(audioChannels, filePath, current.audioBuffer.sampleRate, format);
 
             // The current history node now matches what's on disk.
-            await getHistoryManager(state.activeFileId!).markSaved();
+            await getHistoryManager(fileId).markSaved();
             console.log("File saved successfully:", filePath);
 
             // Show success notification
@@ -1489,11 +1527,17 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const truncatedFileName = truncateMiddle(savedFileName, 50);
 
     try {
+      // A stroke released just before Save As is still deriving its audio;
+      // without the wait the exported file is the one from before it.
+      await whenFileTasksSettle(state.activeFileId);
+      const current = openFiles[state.activeFileId];
+      if (!current?.audioBuffer) return;
+
       // Copy the audio channels out of the AudioBuffer at their final level.
-      const numChannels = file.audioBuffer.numberOfChannels;
+      const numChannels = current.audioBuffer.numberOfChannels;
       const audioChannels: Float32Array[] = [];
       for (let i = 0; i < numChannels; i++) {
-        audioChannels.push(new Float32Array(file.audioBuffer.getChannelData(i)));
+        audioChannels.push(new Float32Array(current.audioBuffer.getChannelData(i)));
       }
 
       // Determine format from file extension
@@ -1501,7 +1545,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const format = ext || "wav";
 
       // Export the audio
-      await host.analysis.exportAudio(audioChannels, outputPath, file.audioBuffer.sampleRate, format);
+      await host.analysis.exportAudio(audioChannels, outputPath, current.audioBuffer.sampleRate, format);
 
       // Update file path in openFiles and copy BPM mapping to new path
       const oldFilePath = file.filePath;
@@ -1669,6 +1713,15 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         });
       });
       if (!confirmed) return;
+
+      // The confirmation undertook to remove them. Left in place, the next
+      // stroke with that brush finds no open file at the path and silently
+      // samples the destination instead.
+      set(
+        produce((draft: State) => {
+          clearFileReferences(file.filePath, draft.brushes);
+        }),
+      );
     }
 
     if (state.filesDirty[fileId]) {
@@ -1696,6 +1749,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     // Fire-and-forget: drops on-disk history directory and in-memory state.
     destroyHistoryManager(fileId).catch((err: unknown) => console.error("destroyHistoryManager failed", err));
+    fileSynthesisGeneration.delete(fileId);
 
     state.removeFileFromStemGroup(fileId);
 
@@ -1744,6 +1798,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
 
       setFileSynthesizing(fileId, true);
+
+      // Undo and redo each fire their own synthesis, and the one that finishes
+      // last would otherwise install its audio whatever the canvas now shows.
+      const generation = (fileSynthesisGeneration.get(fileId) ?? 0) + 1;
+      fileSynthesisGeneration.set(fileId, generation);
 
       const originalAnalysis = file.spectrogramData;
       const renderer = file.rendererRef.current;
@@ -1882,6 +1941,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         console.error("[timing] Invalid synthesis result:", synthesisResult);
         throw new Error("Synthesis returned invalid result");
       }
+
+      // A newer synthesis for this file describes the canvas as it now stands.
+      // The dirty region is left for that one to clear, since this result is
+      // dropped rather than applied.
+      if (fileSynthesisGeneration.get(fileId) !== generation) return;
 
       // Clear dirty region after synthesis
       renderer.clearDirtyRegion();
