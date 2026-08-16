@@ -9,7 +9,7 @@ import transmuteEffectFrag from "../glsl/transmute-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
-import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
+import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 class TransmuteEffect extends BaseEffect {
   constructor() {
@@ -17,7 +17,7 @@ class TransmuteEffect extends BaseEffect {
     this.materials = [
       new RawShaderMaterial({
         uniforms: {
-          ...defaultValues,
+          ...createDefaultUniforms(),
           transmuteMode: { value: 0 },
           transmuteAmount: {
             value: {

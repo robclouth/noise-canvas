@@ -1,5 +1,5 @@
-import { GLSL3, RawShaderMaterial, Texture, UniformsUtils, Vector2, WebGLRenderer, WebGLRenderTarget } from "three";
-import { defaultValues } from "@renderer/effects/base-effect";
+import { GLSL3, RawShaderMaterial, Texture, Vector2, WebGLRenderer, WebGLRenderTarget } from "three";
+import { createDefaultUniforms } from "@renderer/effects/base-effect";
 import type { SpectrogramData } from "@renderer/store/types";
 import exportFrag from "../glsl/export.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -141,7 +141,7 @@ function getExportMaterial(): RawShaderMaterial {
   if (exportMaterial) return exportMaterial;
   exportMaterial = new RawShaderMaterial({
     uniforms: {
-      ...UniformsUtils.clone(defaultValues),
+      ...createDefaultUniforms(),
       minDb: { value: -90 },
       maxDb: { value: -10 },
       colormapMode: { value: 1 },

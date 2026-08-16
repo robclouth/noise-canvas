@@ -15,7 +15,7 @@ import passThroughVert from "../glsl/pass-through.vert";
 import attractEffectFrag from "../glsl/attract-effect.frag";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
-import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
+import { BaseEffect, createDefaultUniforms, destinationLayout, UpdateEffectUniformsProps } from "./base-effect";
 
 const defaultUniformValue = {
   value: 0,
@@ -50,7 +50,7 @@ class AttractEffect extends BaseEffect {
       (axis) =>
         new RawShaderMaterial({
           uniforms: {
-            ...defaultValues,
+            ...createDefaultUniforms(),
             attractMap: { value: 0 },
             attractAxis: { value: axis },
             attractAmountX: { value: { ...defaultUniformValue } },
@@ -142,18 +142,15 @@ class AttractEffect extends BaseEffect {
       material.uniforms.attractFieldBpo.value = material.uniforms.destBandsPerOctave.value;
     }
 
-    const { file } = props;
-    const { spectrogramData } = file;
-    if (spectrogramData) {
-      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-      const bpm = state.filepathsBpm[file.filePath] ?? 120;
+    const dest = destinationLayout(props.commonUniforms);
+    if (dest.totalDuration > 0 && dest.numBands > 0) {
       material.uniforms.attractUvPerBeat.value = unitsToUv(
         1,
         0,
-        bpm,
-        totalDuration,
-        spectrogramData.bandsPerOctave,
-        spectrogramData.numBands,
+        dest.bpm,
+        dest.totalDuration,
+        dest.bandsPerOctave,
+        dest.numBands,
       ).x;
     }
   }

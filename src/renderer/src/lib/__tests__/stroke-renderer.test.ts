@@ -560,6 +560,42 @@ describe("StrokeRenderer", () => {
       expect(differences.length).toBeGreaterThan(0);
     });
 
+    it("leaves the destination alone when the source has no frames", async () => {
+      renderer.initialize();
+
+      const state = createMockStateWithSteps([{ name: "Test", overrides: { brushIntensity: 100, accumulate: true } }]);
+      const totalDuration = getSpectrogramDuration(spectrogramData);
+
+      // Every source-space conversion divides by the source's duration and band
+      // count, so an empty source would put NaN into the sampling coordinates.
+      const emptySource = createSourceFileInfo(
+        { ...spectrogramData, numFrames: 0, numBands: 0 },
+        "test-file-1",
+        renderer,
+      );
+
+      const params: StrokeParams = {
+        cursorPos: new Vector2(0.5, 0.5),
+        preview: false,
+        bpm: 120,
+        totalDuration,
+        viewZoomPower: 0,
+        viewOffset: 0,
+        viewZoomPowerY: 0,
+        viewOffsetY: 0,
+        pressure: 0,
+        tiltX: 0,
+        tiltY: 0,
+      };
+
+      const dataBefore = new Float32Array(await renderer.getFBOData());
+      renderer.renderStroke(params, state, emptySource);
+      const dataAfter = await renderer.getFBOData();
+
+      expect(findDifferingPixels(dataBefore, dataAfter).length).toBe(0);
+      expect(Array.from(dataAfter).some((v) => Number.isNaN(v))).toBe(false);
+    });
+
     it("should not modify data in preview mode", async () => {
       renderer.initialize();
 

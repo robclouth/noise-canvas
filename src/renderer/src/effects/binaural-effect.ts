@@ -10,7 +10,7 @@ import passThroughVert from "../glsl/pass-through.vert";
 import { loadHrtfData, getHrtfMetadata, HrtfMetadata } from "../lib/hrtf-loader";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
-import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
+import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 /**
  * Creates a placeholder HRTF texture (1x1, neutral values).
@@ -47,7 +47,7 @@ class BinauralEffect extends BaseEffect {
     this.materials = [
       new RawShaderMaterial({
         uniforms: {
-          ...defaultValues,
+          ...createDefaultUniforms(),
           // HRTF texture uniforms
           hrtfTex: { value: this.hrtfTexture },
           hrtfMinFreq: { value: this.hrtfMetadata.minFreq },
@@ -99,6 +99,8 @@ class BinauralEffect extends BaseEffect {
   async loadHrtf(): Promise<void> {
     try {
       const { texture, metadata } = await loadHrtfData();
+      // The placeholder held a GPU texture no material will reference again.
+      this.hrtfTexture.dispose();
       this.hrtfTexture = texture;
       this.hrtfMetadata = metadata;
       this.hrtfLoaded = true;

@@ -11,7 +11,7 @@ import convolveEffectFrag from "../glsl/convolve-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
-import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
+import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 // Single scalar that brings the convolution output to roughly unity at 0 dB
 // gain, independent of how loud the IR happens to be. Derived from the IR's
@@ -42,7 +42,7 @@ class ConvolveEffect extends BaseEffect {
     this.materials = [
       new RawShaderMaterial({
         uniforms: {
-          ...defaultValues,
+          ...createDefaultUniforms(),
           convolveIrTex: { value: null },
           convolveIrMetadataTex: { value: null },
           convolveIrFrameCount: { value: 0 },

@@ -9,63 +9,65 @@ import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import blurBrushFrag from "../glsl/blur-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { withPlatformDefines } from "../lib/shader-utils";
-import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
+import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
-const uniforms = {
-  ...defaultValues,
-  blurSizeX: {
-    value: {
-      value: 0.01,
-      minValue: 0,
-      maxValue: 100,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
+function createUniforms() {
+  return {
+    ...createDefaultUniforms(),
+    blurSizeX: {
+      value: {
+        value: 0.01,
+        minValue: 0,
+        maxValue: 100,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
     },
-  },
-  blurSizeY: {
-    value: {
-      value: 0.01,
-      minValue: 0,
-      maxValue: 100,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
+    blurSizeY: {
+      value: {
+        value: 0.01,
+        minValue: 0,
+        maxValue: 100,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
     },
-  },
-  blurNoiseX: {
-    value: {
-      value: 0.01,
-      minValue: 0,
-      maxValue: 100,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
+    blurNoiseX: {
+      value: {
+        value: 0.01,
+        minValue: 0,
+        maxValue: 100,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
     },
-  },
-  blurNoiseY: {
-    value: {
-      value: 0.01,
-      minValue: 0,
-      maxValue: 100,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
+    blurNoiseY: {
+      value: {
+        value: 0.01,
+        minValue: 0,
+        maxValue: 100,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
     },
-  },
-  blurDirection: {
-    value: new Vector2(1, 0),
-  },
-  blurEdgeMode: {
-    value: 1,
-  },
-  blurSampleCount: {
-    value: 17,
-  },
-  blurOrigin: {
-    value: 0,
-  },
-};
+    blurDirection: {
+      value: new Vector2(1, 0),
+    },
+    blurEdgeMode: {
+      value: 1,
+    },
+    blurSampleCount: {
+      value: 17,
+    },
+    blurOrigin: {
+      value: 0,
+    },
+  };
+}
 
 class BlurEffect extends BaseEffect {
   materials: RawShaderMaterial[];
@@ -75,7 +77,7 @@ class BlurEffect extends BaseEffect {
     this.materials = [
       new RawShaderMaterial({
         uniforms: {
-          ...uniforms,
+          ...createUniforms(),
           blurDirection: {
             value: new Vector2(1, 0),
           },
@@ -86,7 +88,7 @@ class BlurEffect extends BaseEffect {
       }),
       new RawShaderMaterial({
         uniforms: {
-          ...uniforms,
+          ...createUniforms(),
           blurDirection: {
             value: new Vector2(0, 1),
           },

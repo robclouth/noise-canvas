@@ -4,7 +4,7 @@ import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import sortEffectFrag from "../glsl/sort-effect.frag";
 import { withPlatformDefines } from "../lib/shader-utils";
-import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
+import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 // Pass layout: [H-even, H-odd, V-even, V-odd]
 // sortAxis:        0       0     1       1
@@ -22,7 +22,7 @@ class SortEffect extends BaseEffect {
       (axis, i) =>
         new RawShaderMaterial({
           uniforms: {
-            ...defaultValues,
+            ...createDefaultUniforms(),
             sortDirection: { value: 0 },
             sortOrder: { value: 0 },
             sortBy: { value: 0 },

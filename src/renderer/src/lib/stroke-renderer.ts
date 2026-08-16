@@ -17,7 +17,6 @@ import {
   RGBAFormat,
   Scene,
   Texture,
-  UniformsUtils,
   Vector2,
   Vector4,
   WebGLRenderer,
@@ -25,7 +24,7 @@ import {
 } from "three";
 import { copyMaterial } from "../components/copy-material";
 import { patchMaterial } from "../components/patch-material";
-import { BaseEffect, CommonUniforms, defaultValues } from "../effects/base-effect";
+import { BaseEffect, CommonUniforms, createDefaultUniforms } from "../effects/base-effect";
 import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
 import passThroughVert from "../glsl/pass-through.vert";
@@ -253,7 +252,7 @@ export class StrokeRenderer {
     // the scratch modulatorFbo's two targets. Reuses the common-uniform set so
     // the same modulator/source/dest uniforms drive it as the effects.
     this.modulatorMaterial = new RawShaderMaterial({
-      uniforms: { ...UniformsUtils.clone(defaultValues), nestedModulationActive: { value: false } },
+      uniforms: { ...createDefaultUniforms(), nestedModulationActive: { value: false } },
       vertexShader: passThroughVert,
       fragmentShader: withPlatformDefines(modulatorPrecomputeFrag),
       glslVersion: GLSL3,
@@ -262,7 +261,7 @@ export class StrokeRenderer {
     // Create mask material
     this.maskMaterial = new RawShaderMaterial({
       uniforms: {
-        ...UniformsUtils.clone(defaultValues),
+        ...createDefaultUniforms(),
         currentMaskTex: { value: null },
         destMetadataTex: { value: null },
         destInverseMapTex: { value: null },
@@ -280,10 +279,8 @@ export class StrokeRenderer {
       glslVersion: GLSL3,
     });
 
-    // UniformsUtils.clone does a deep clone for Three primitives (Vectors/Textures)
-    // but leaves plain-object .value fields as shared references with defaultValues.
-    // Give this material its own ParameterUniform objects so we can safely mutate
-    // them in place on the hot path without touching shared defaults.
+    // The mask material mutates these ParameterUniform objects in place on the hot
+    // path, so it holds its own rather than the per-step objects the effects get.
     const mu = this.maskMaterial.uniforms;
     mu.brushIntensity = { value: createParameterUniform(1, 0, 1) };
     mu.brushCurveTime = { value: createParameterUniform(0, -1, 1) };
@@ -659,11 +656,15 @@ export class StrokeRenderer {
       sourceTimeScale: {
         value: (() => {
           const sourceDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
-          return (bpm * totalDuration) / (sourceBpm * sourceDuration);
+          const divisor = sourceBpm * sourceDuration;
+          return divisor > 0 ? (bpm * totalDuration) / divisor : 1;
         })(),
       },
       sourceBandScale: {
-        value: this.spectrogramData.numBands / sourceFile.spectrogramData.numBands,
+        value:
+          sourceFile.spectrogramData.numBands > 0
+            ? this.spectrogramData.numBands / sourceFile.spectrogramData.numBands
+            : 1,
       },
       sourceTimeOffset: {
         value: {
@@ -783,6 +784,12 @@ export class StrokeRenderer {
     } = params;
 
     if (cursorPos.x < 0) return;
+
+    // Every source-space conversion below divides by the source's duration and
+    // band count, so an empty source would put NaN coordinates into the shaders
+    // and write corrupted coefficients over the destination.
+    const sourceSpec = sourceFile.spectrogramData;
+    if (!(sourceSpec.numFrames > 0) || !(sourceSpec.numBands > 0) || !(sourceSpec.sampleRate > 0)) return;
 
     const activeStepState = createStepStateView(state, state.activeStepIndex);
     const activeStep = (state.brushes[state.activeBrushIndex]?.steps ?? [])[state.activeStepIndex];
@@ -1737,5 +1744,7 @@ export class StrokeRenderer {
     this.fbo2.dispose();
     this.maskMaterial.dispose();
     this.modulatorMaterial.dispose();
+    this.fboMesh.geometry.dispose();
+    this.fboScene.remove(this.fboMesh);
   }
 }

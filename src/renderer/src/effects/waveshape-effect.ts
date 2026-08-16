@@ -9,7 +9,7 @@ import waveshapeEffectFrag from "../glsl/waveshape-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
-import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
+import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 class WaveshapeEffect extends BaseEffect {
   constructor() {
@@ -17,7 +17,7 @@ class WaveshapeEffect extends BaseEffect {
     this.materials = [
       new RawShaderMaterial({
         uniforms: {
-          ...defaultValues,
+          ...createDefaultUniforms(),
           waveshapeMode: { value: 0 },
           waveshapeDrive: {
             value: {

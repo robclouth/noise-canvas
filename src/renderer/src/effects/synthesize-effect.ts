@@ -3,7 +3,7 @@ import passThroughVert from "../glsl/pass-through.vert";
 import synthesizeBrushFrag from "../glsl/synthesize-effect.frag";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
-import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
+import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 class SynthesizeEffect extends BaseEffect {
   constructor() {
@@ -11,7 +11,7 @@ class SynthesizeEffect extends BaseEffect {
     this.materials = [
       new RawShaderMaterial({
         uniforms: {
-          ...defaultValues,
+          ...createDefaultUniforms(),
           synthesizeType: { value: 0 },
         },
         vertexShader: passThroughVert,

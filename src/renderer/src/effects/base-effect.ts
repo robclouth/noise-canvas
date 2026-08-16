@@ -110,150 +110,180 @@ export type CommonUniforms = {
   blendOriginalTex?: { value: Texture | null };
 };
 
-export const defaultValues: CommonUniforms = {
-  sourceSpectrogramTex: { value: null },
-  sourceInverseMapTex: { value: null },
-  sourceMetadataTex: { value: null },
-  sourceFrameCount: { value: 0 },
-  sourceBandCount: { value: 0 },
-  sourceSpectrogramTextureSize: { value: new Vector2(0, 0) },
-  sourceChannelCount: { value: 1 },
-  sourceSampleRate: { value: 44100.0 },
-  sourceMinFreq: { value: 20.0 },
-  sourceOnsetTex: { value: null },
-  sourceBandsPerOctave: { value: 24.0 },
-  destSpectrogramTex: { value: null },
-  destInverseMapTex: { value: null },
-  destMetadataTex: { value: null },
-  destFrameCount: { value: 0 },
-  destBandCount: { value: 0 },
-  destSpectrogramTextureSize: { value: new Vector2(0, 0) },
-  destChannelCount: { value: 1 },
-  destSampleRate: { value: 44100.0 },
-  destMinFreq: { value: 20.0 },
-  destBandsPerOctave: { value: 24.0 },
-  originalSpectrogramTex: { value: null },
-  brushBottomLeftUv: { value: new Vector2(0.0, 0.0) },
-  brushSizeUv: { value: new Vector2(0.1, 0.1) },
-  viewZoomPower: { value: 0.0 },
-  viewOffset: { value: 0.0 },
-  viewZoomPowerY: { value: 0.0 },
-  viewOffsetY: { value: 0.0 },
-  brushCurveTime: {
-    value: {
-      value: 0.0,
-      minValue: -1.0,
-      maxValue: 1.0,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
+/**
+ * Fresh common uniform wrappers for one material. Every material must call this
+ * rather than share one object: effects such as Sort and Transmute assign to
+ * `uniforms.useLinearBlend.value` in place, and a shared wrapper would carry
+ * that write into every other effect's material.
+ */
+export function createDefaultUniforms(): CommonUniforms {
+  return {
+    sourceSpectrogramTex: { value: null },
+    sourceInverseMapTex: { value: null },
+    sourceMetadataTex: { value: null },
+    sourceFrameCount: { value: 0 },
+    sourceBandCount: { value: 0 },
+    sourceSpectrogramTextureSize: { value: new Vector2(0, 0) },
+    sourceChannelCount: { value: 1 },
+    sourceSampleRate: { value: 44100.0 },
+    sourceMinFreq: { value: 20.0 },
+    sourceOnsetTex: { value: null },
+    sourceBandsPerOctave: { value: 24.0 },
+    destSpectrogramTex: { value: null },
+    destInverseMapTex: { value: null },
+    destMetadataTex: { value: null },
+    destFrameCount: { value: 0 },
+    destBandCount: { value: 0 },
+    destSpectrogramTextureSize: { value: new Vector2(0, 0) },
+    destChannelCount: { value: 1 },
+    destSampleRate: { value: 44100.0 },
+    destMinFreq: { value: 20.0 },
+    destBandsPerOctave: { value: 24.0 },
+    originalSpectrogramTex: { value: null },
+    brushBottomLeftUv: { value: new Vector2(0.0, 0.0) },
+    brushSizeUv: { value: new Vector2(0.1, 0.1) },
+    viewZoomPower: { value: 0.0 },
+    viewOffset: { value: 0.0 },
+    viewZoomPowerY: { value: 0.0 },
+    viewOffsetY: { value: 0.0 },
+    brushCurveTime: {
+      value: {
+        value: 0.0,
+        minValue: -1.0,
+        maxValue: 1.0,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
     },
-  },
-  brushSkewTime: {
-    value: {
-      value: 0.5,
-      minValue: 0.0,
-      maxValue: 1.0,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
+    brushSkewTime: {
+      value: {
+        value: 0.5,
+        minValue: 0.0,
+        maxValue: 1.0,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
     },
-  },
-  brushCurvePitch: {
-    value: {
-      value: 0.0,
-      minValue: -1.0,
-      maxValue: 1.0,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
+    brushCurvePitch: {
+      value: {
+        value: 0.0,
+        minValue: -1.0,
+        maxValue: 1.0,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
     },
-  },
-  brushSkewPitch: {
-    value: {
-      value: 0.5,
-      minValue: 0.0,
-      maxValue: 1.0,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
+    brushSkewPitch: {
+      value: {
+        value: 0.5,
+        minValue: 0.0,
+        maxValue: 1.0,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
     },
-  },
-  brushIntensity: {
-    value: {
-      value: 1.0,
-      minValue: 0.0,
-      maxValue: 1.0,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
+    brushIntensity: {
+      value: {
+        value: 1.0,
+        minValue: 0.0,
+        maxValue: 1.0,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
     },
-  },
-  sourceOffsetX: {
-    value: 0,
-  },
-  sourceOffsetY: {
-    value: 0,
-  },
-  sourceTimeScale: { value: 1 },
-  sourceBandScale: { value: 1 },
-  sourceTimeOffset: {
-    value: {
+    sourceOffsetX: {
       value: 0,
-      minValue: -1,
-      maxValue: 1,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
     },
-  },
-  sourcePitchOffset: {
-    value: {
+    sourceOffsetY: {
       value: 0,
-      minValue: -1,
-      maxValue: 1,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
     },
-  },
-  brushPan: {
-    value: {
-      value: 0.0,
-      minValue: 0.0,
-      maxValue: 1.0,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
+    sourceTimeScale: { value: 1 },
+    sourceBandScale: { value: 1 },
+    sourceTimeOffset: {
+      value: {
+        value: 0,
+        minValue: -1,
+        maxValue: 1,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
     },
-  },
-  bpm: { value: 120.0 },
-  blendMode: { value: 0 },
-  magnitudeLimit: { value: 0.0 },
-  wrapMode: { value: 0 },
-  algorithm: { value: 0 },
-  useLinearBlend: { value: false },
-  modulators: { value: [] },
-  gainLut: { value: null },
-  modulator1ImageTex: { value: null },
-  modulator2ImageTex: { value: null },
-  modulator3ImageTex: { value: null },
-  modulator1SeqDataTex: { value: null },
-  modulator2SeqDataTex: { value: null },
-  modulator3SeqDataTex: { value: null },
-  modulatorTex0: { value: null },
-  modulatorTex1: { value: null },
-  strokeIterationNormalized: { value: 0 },
-  strokeTimePosition: { value: 0 },
-  strokePitchPosition: { value: 0 },
-  strokeRandom: { value: 0 },
-  strokeStepNormalized: { value: 0 },
-  macroValues: { value: [0.5, 0.5, 0.5, 0.5] },
-  // Non-cumulative stroke uniforms
-  useStrokeMask: { value: false },
-  strokeMaskTex: { value: null },
-  blendOriginalTex: { value: null },
-};
+    sourcePitchOffset: {
+      value: {
+        value: 0,
+        minValue: -1,
+        maxValue: 1,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
+    },
+    brushPan: {
+      value: {
+        value: 0.0,
+        minValue: 0.0,
+        maxValue: 1.0,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
+    },
+    bpm: { value: 120.0 },
+    blendMode: { value: 0 },
+    magnitudeLimit: { value: 0.0 },
+    wrapMode: { value: 0 },
+    algorithm: { value: 0 },
+    useLinearBlend: { value: false },
+    modulators: { value: [] },
+    gainLut: { value: null },
+    modulator1ImageTex: { value: null },
+    modulator2ImageTex: { value: null },
+    modulator3ImageTex: { value: null },
+    modulator1SeqDataTex: { value: null },
+    modulator2SeqDataTex: { value: null },
+    modulator3SeqDataTex: { value: null },
+    modulatorTex0: { value: null },
+    modulatorTex1: { value: null },
+    strokeIterationNormalized: { value: 0 },
+    strokeTimePosition: { value: 0 },
+    strokePitchPosition: { value: 0 },
+    strokeRandom: { value: 0 },
+    strokeStepNormalized: { value: 0 },
+    macroValues: { value: [0.5, 0.5, 0.5, 0.5] },
+    // Non-cumulative stroke uniforms
+    useStrokeMask: { value: false },
+    strokeMaskTex: { value: null },
+    blendOriginalTex: { value: null },
+  };
+}
+
+/**
+ * The layout of the file being painted. Effects that transform in destination
+ * UV space have to convert beats and semitones with this, not with `props.file`
+ * — that is the source, and it differs whenever a stroke paints across files.
+ */
+export function destinationLayout(commonUniforms: CommonUniforms): {
+  bpm: number;
+  totalDuration: number;
+  bandsPerOctave: number;
+  numBands: number;
+  minFreq: number;
+} {
+  const sampleRate = commonUniforms.destSampleRate.value;
+  return {
+    bpm: commonUniforms.bpm.value,
+    totalDuration: sampleRate > 0 ? commonUniforms.destFrameCount.value / sampleRate : 0,
+    bandsPerOctave: commonUniforms.destBandsPerOctave.value,
+    numBands: commonUniforms.destBandCount.value,
+    minFreq: commonUniforms.destMinFreq.value,
+  };
+}
 
 export type UpdateEffectUniformsProps = {
   commonUniforms: CommonUniforms;

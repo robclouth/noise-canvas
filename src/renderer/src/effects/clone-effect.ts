@@ -21,66 +21,68 @@ import {
 import cloneBrushFrag from "../glsl/clone-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { withPlatformDefines } from "../lib/shader-utils";
-import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
+import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 import { activeClonePasses, buildShapeTable, CloneShapeKey } from "./clone-shapes";
 
-const uniforms = {
-  ...defaultValues,
-  cloneSpaceX: {
-    value: {
-      value: 0.5,
-      minValue: 0,
-      maxValue: 1,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
+function createUniforms() {
+  return {
+    ...createDefaultUniforms(),
+    cloneSpaceX: {
+      value: {
+        value: 0.5,
+        minValue: 0,
+        maxValue: 1,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
     },
-  },
-  cloneSpaceY: {
-    value: {
+    cloneSpaceY: {
+      value: {
+        value: 0,
+        minValue: -96,
+        maxValue: 96,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
+    },
+    cloneBeatsLog: {
       value: 0,
-      minValue: -96,
-      maxValue: 96,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
     },
-  },
-  cloneBeatsLog: {
-    value: 0,
-  },
-  cloneBeatsToUv: {
-    value: 0,
-  },
-  cloneCount: {
-    value: 4,
-  },
-  cloneDecay: {
-    value: {
-      value: 0.5,
-      minValue: 0,
-      maxValue: 1,
-      modulationAmounts: [],
-      contextualModAmounts: [],
-      macroAmounts: [],
+    cloneBeatsToUv: {
+      value: 0,
     },
-  },
-  cloneDirection: {
-    value: new Vector2(1, 0),
-  },
-  cloneDirectionMode: {
-    value: 0,
-  },
-  cloneEdgeMode: {
-    value: 1,
-  },
-  cloneScaleSnap: {
-    value: false,
-  },
-  brushBasePitchAbsSemis: {
-    value: 0,
-  },
-};
+    cloneCount: {
+      value: 4,
+    },
+    cloneDecay: {
+      value: {
+        value: 0.5,
+        minValue: 0,
+        maxValue: 1,
+        modulationAmounts: [],
+        contextualModAmounts: [],
+        macroAmounts: [],
+      },
+    },
+    cloneDirection: {
+      value: new Vector2(1, 0),
+    },
+    cloneDirectionMode: {
+      value: 0,
+    },
+    cloneEdgeMode: {
+      value: 1,
+    },
+    cloneScaleSnap: {
+      value: false,
+    },
+    brushBasePitchAbsSemis: {
+      value: 0,
+    },
+  };
+}
 
 type ShapeCacheEntry = { key: string; texture: DataTexture };
 
@@ -106,7 +108,7 @@ class CloneEffect extends BaseEffect {
     this.materials = [
       new RawShaderMaterial({
         uniforms: {
-          ...uniforms,
+          ...createUniforms(),
           cloneDirection: { value: new Vector2(1, 0) },
           cloneShapeTex: { value: null },
           scaleOffsets: { value: new Float32Array(12) },
@@ -117,7 +119,7 @@ class CloneEffect extends BaseEffect {
       }),
       new RawShaderMaterial({
         uniforms: {
-          ...uniforms,
+          ...createUniforms(),
           cloneDirection: { value: new Vector2(0, 1) },
           cloneShapeTex: { value: null },
           scaleOffsets: { value: new Float32Array(12) },

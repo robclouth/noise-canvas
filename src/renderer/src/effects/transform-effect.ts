@@ -11,7 +11,7 @@ import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import transformEffectFrag from "../glsl/transform-effect.frag";
 import { withPlatformDefines } from "../lib/shader-utils";
-import { BaseEffect, defaultValues, UpdateEffectUniformsProps } from "./base-effect";
+import { BaseEffect, createDefaultUniforms, destinationLayout, UpdateEffectUniformsProps } from "./base-effect";
 
 export const boundaryModes = ["smear", "cut", "wrap"] as const;
 export type BoundaryMode = (typeof boundaryModes)[number];
@@ -25,7 +25,7 @@ class TransformEffect extends BaseEffect {
     this.materials = [
       new RawShaderMaterial({
         uniforms: {
-          ...defaultValues,
+          ...createDefaultUniforms(),
           shiftX: {
             value: {
               value: 0.0,
@@ -109,21 +109,19 @@ class TransformEffect extends BaseEffect {
       transformScalePitch,
       transformRotation,
       transformEdgeMode,
-      filepathsBpm,
     } = state;
 
-    const { file, passIndex } = props;
-    const { spectrogramData } = file;
-    if (!spectrogramData) return;
-    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+    const { passIndex } = props;
+    const dest = destinationLayout(props.commonUniforms);
+    if (!(dest.totalDuration > 0) || !(dest.numBands > 0)) return;
 
     const shiftUv = unitsToUv(
       transformShiftBeats,
       transformShiftSemis,
-      filepathsBpm[file.filePath],
-      totalDuration,
-      spectrogramData.bandsPerOctave,
-      spectrogramData.numBands,
+      dest.bpm,
+      dest.totalDuration,
+      dest.bandsPerOctave,
+      dest.numBands,
     );
 
     const material = this.materials[passIndex];
@@ -180,10 +178,10 @@ class TransformEffect extends BaseEffect {
     material.uniforms.scaleSnapEnabled.value = scaleSnapActive;
     material.uniforms.scaleOffsets.value = buildScaleOffsets(scaleTonic, scaleType);
     if (scaleSnapActive) {
-      const bandsPerSemitone = spectrogramData.bandsPerOctave / 12;
-      const bandIndex = props.commonUniforms.brushBottomLeftUv.value.y * spectrogramData.numBands;
+      const bandsPerSemitone = dest.bandsPerOctave / 12;
+      const bandIndex = props.commonUniforms.brushBottomLeftUv.value.y * dest.numBands;
       const semisAboveMinFreq = bandIndex / bandsPerSemitone;
-      material.uniforms.brushBasePitchAbsSemis.value = minFreqSemisAboveC0(spectrogramData.minFreq) + semisAboveMinFreq;
+      material.uniforms.brushBasePitchAbsSemis.value = minFreqSemisAboveC0(dest.minFreq) + semisAboveMinFreq;
     }
   }
 }
