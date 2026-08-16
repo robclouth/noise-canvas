@@ -4,6 +4,7 @@ import { openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
 import { isManagedFilePath } from "@renderer/store/managed-path";
 import { clearCanvasPatchStash } from "./canvas-patch-stash";
+import { clearFileTaskQueue, serializeFileTask } from "./file-task-queue";
 import { host } from "./host";
 import { mergePixelRanges } from "./pixel-ranges";
 
@@ -471,18 +472,19 @@ export class HistoryManager {
     if (this.manifestWriteTimer != null) return;
     this.manifestWriteTimer = setTimeout(() => {
       this.manifestWriteTimer = null;
-      this.flushManifestWrite();
+      void this.flushManifestWrite();
     }, MANIFEST_WRITE_DEBOUNCE_MS);
   }
 
-  private flushManifestWrite(): void {
+  /** Resolves once the pending debounced write has reached disk. */
+  private flushManifestWrite(): Promise<void> {
     if (this.manifestWriteTimer != null) {
       clearTimeout(this.manifestWriteTimer);
       this.manifestWriteTimer = null;
     }
-    if (!this.manifestWritePending) return;
+    if (!this.manifestWritePending) return Promise.resolve();
     this.manifestWritePending = false;
-    void this.writeManifest();
+    return this.writeManifest();
   }
 
   /**
@@ -701,6 +703,8 @@ export class HistoryManager {
     };
 
     await this.writeFullSnapshot(id, opts.data);
+    if (!this.manifest) return id;
+
     this.linkChild(parentId, id);
     this.manifest.nodes[id] = node;
     this.manifest.currentId = id;
@@ -794,6 +798,10 @@ export class HistoryManager {
     } else {
       await writePackedCompressed(this.packedPath(dir, id), opts.data);
     }
+
+    // Closing the file purges the manifest while the delta encoding and the
+    // node write above are still running; there is no tree left to append to.
+    if (!this.manifest) return { id: parentId, isNew: false };
 
     this.linkChild(parentId, id);
     this.manifest.nodes[id] = node;
@@ -991,6 +999,14 @@ export class HistoryManager {
    * Caller should await this; audio is restored from cached WAV if present, else synthesised.
    */
   async navigateTo(targetId: string): Promise<void> {
+    // Queued against stroke commits and against other navigations: both derive
+    // their result from currentId/currentPacked and then replace them, so the
+    // one that finishes last would otherwise win regardless of which was asked
+    // for last.
+    return serializeFileTask(this.fileId, () => this.navigateToNow(targetId));
+  }
+
+  private async navigateToNow(targetId: string): Promise<void> {
     await this.initialize();
     if (!this.manifest) return;
     const target = this.manifest.nodes[targetId];
@@ -1019,6 +1035,9 @@ export class HistoryManager {
     let packedData = this.packedCache.get(targetId);
     if (!packedData) {
       packedData = (await this.reconstruct(targetId)).packedData;
+      // Closing the file purges the manifest and the on-disk tree; the
+      // reconstruction that was already running has nothing left to restore to.
+      if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
     }
 
     // Only rebuild textures and swap spectrogramData when the full-snapshot
@@ -1029,6 +1048,7 @@ export class HistoryManager {
     let hopRegion: UvRegion | null = null;
     if (anchor && anchor.id !== this.lastLoadedAnchorId) {
       await this.restoreSpectrogramFromFull(anchor, packedData);
+      if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
       this.lastLoadedAnchorId = anchor.id;
     } else {
       // When every hop between here and the target is a stroke whose dirty
@@ -1192,16 +1212,23 @@ export class HistoryManager {
     return path;
   }
 
+  // Both resolve their target inside the queue rather than at the call: a
+  // second undo pressed before the first has run must step back from where
+  // that one lands, not from the node they were both asked at.
   async navigateToParent(): Promise<void> {
-    const id = this.manifest?.nodes[this.manifest.currentId]?.parentId;
-    if (!id) return;
-    await this.navigateTo(id);
+    return serializeFileTask(this.fileId, async () => {
+      await this.initialize();
+      const id = this.manifest?.nodes[this.manifest.currentId]?.parentId;
+      if (id) await this.navigateToNow(id);
+    });
   }
 
   async navigateToLastChild(): Promise<void> {
-    const id = this.manifest?.nodes[this.manifest.currentId]?.lastChildId;
-    if (!id) return;
-    await this.navigateTo(id);
+    return serializeFileTask(this.fileId, async () => {
+      await this.initialize();
+      const id = this.manifest?.nodes[this.manifest.currentId]?.lastChildId;
+      if (id) await this.navigateToNow(id);
+    });
   }
 
   private async restoreSpectrogramFromFull(anchor: HistoryNode, packedData: Float32Array): Promise<void> {
@@ -1346,11 +1373,16 @@ export class HistoryManager {
    * subtree, current is moved to the deleted node's parent.
    */
   async deleteSubtree(nodeId: string): Promise<void> {
+    return serializeFileTask(this.fileId, () => this.deleteSubtreeNow(nodeId));
+  }
+
+  private async deleteSubtreeNow(nodeId: string): Promise<void> {
     if (!this.manifest) return;
     const root = this.manifest.nodes[nodeId];
     if (!root || root.id === this.manifest.rootId) return;
 
     const dir = await this.dir;
+    if (!this.manifest) return;
     const toDelete: string[] = [];
     const stack = [nodeId];
     while (stack.length) {
@@ -1382,7 +1414,7 @@ export class HistoryManager {
     if (toDelete.includes(this.manifest.currentId)) {
       const fallback = root.parentId ?? this.manifest.rootId;
       this.manifest.currentId = fallback;
-      await this.navigateTo(fallback);
+      await this.navigateToNow(fallback);
     } else {
       await this.writeManifest();
     }
@@ -1491,6 +1523,10 @@ export class HistoryManager {
    * the dirty flag are preserved — purging history doesn't change the file.
    */
   async resetToCurrent(): Promise<void> {
+    return serializeFileTask(this.fileId, () => this.resetToCurrentNow());
+  }
+
+  private async resetToCurrentNow(): Promise<void> {
     await this.initialize();
     if (!this.manifest) return;
     const currentId = this.manifest.currentId;
@@ -1527,6 +1563,7 @@ export class HistoryManager {
     // root with no ancestors left to reconstruct from.
     host.fs.rm(this.deltaPath(dir, currentId)).catch(() => {});
     await this.writeFullSnapshot(currentId, packed);
+    if (!this.manifest) return;
 
     current.parentId = null;
     current.childIds = [];
@@ -1589,11 +1626,11 @@ export class HistoryManager {
    * Drop in-memory state. On-disk history is preserved so it can be rehydrated
    * on the next launch.
    */
-  dispose(): void {
-    // Persist any debounced navigation before dropping in-memory state, so a
-    // quit mid-undo-spree doesn't lose the latest currentId. writeManifest
-    // snapshots the manifest synchronously, so nulling it below is safe.
-    this.flushManifestWrite();
+  async dispose(): Promise<void> {
+    // Awaited, not fired off: the caller signals the main process that quitting
+    // may proceed as soon as this resolves, and closing the window tears down
+    // the context an unfinished write would still be using.
+    await this.flushManifestWrite();
     this.manifest = null;
     this.currentPacked = null;
     this.packedCache.clear();
@@ -1627,6 +1664,7 @@ export async function destroyHistoryManager(fileId: string): Promise<void> {
   await m.purge();
   managers.delete(fileId);
   clearCanvasPatchStash(fileId);
+  clearFileTaskQueue(fileId);
 }
 
 /**
@@ -1643,7 +1681,7 @@ export async function clearAllHistoryManagers(): Promise<void> {
       } catch (err) {
         console.error("history: pruning cached audio failed", err);
       }
-      m.dispose();
+      await m.dispose();
     }),
   );
 }

@@ -32,6 +32,7 @@ vi.mock("@renderer/store/files", () => ({ openFiles: fakeOpenFiles }));
 vi.mock("../ipc", () => ({ ipcSend: vi.fn() }));
 
 import { clearAllHistoryManagers, getHistoryManager, PackedStateCache } from "../history-manager";
+import { serializeFileTask } from "../file-task-queue";
 import type { SpectrogramData } from "../../store/types";
 
 describe("PackedStateCache", () => {
@@ -527,6 +528,161 @@ describe("HistoryManager resetToCurrent (purge history)", () => {
     expect(Array.from(fbo.last!)).toEqual(Array.from(b));
 
     clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
+});
+
+describe("HistoryManager under concurrent work", () => {
+  const w = 6;
+  const h = 4;
+  const dimensions = {
+    textureWidth: w,
+    textureHeight: h,
+    numFrames: w,
+    numBands: h,
+    numChannels: 1,
+    sampleRate: 44100,
+    minFreq: 20,
+    bandsPerOctave: 12,
+  };
+
+  /** A root plus two strokes, with the manager sitting on the second. */
+  async function seedChain(fileId: string) {
+    const root = lossyFill(w, h, 0);
+    const a = lossyFill(w, h, 1);
+    const b = lossyFill(w, h, 2);
+    const mgr = getHistoryManager(fileId);
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    const { id: aId } = await mgr.addStroke({ data: a, label: "A", dimensions });
+    const { id: bId } = await mgr.addStroke({ data: b, label: "B", dimensions });
+    return { mgr, root, a, b, aId, bId };
+  }
+
+  it("holds a navigation until the stroke commit ahead of it has finished", async () => {
+    const { fbo } = installManagerEnv();
+    clearAllHistoryManagers();
+    const { mgr, a } = await seedChain("f1");
+
+    // Stands in for a commit: it owns the canvas and the history until it is
+    // done, and derives its own delta from the state it started on.
+    let releaseCommit: (() => void) | null = null;
+    const commitRan: string[] = [];
+    const commit = serializeFileTask("f1", async () => {
+      commitRan.push("start");
+      await new Promise<void>((resolve) => (releaseCommit = resolve));
+      commitRan.push("end");
+    });
+
+    const navigating = mgr.navigateToParent();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Undo pressed mid-commit must not have touched the canvas yet, or the
+    // commit would derive its delta from a base the undo replaced.
+    expect(commitRan).toEqual(["start"]);
+    expect(fbo.last).toBeNull();
+
+    releaseCommit!();
+    await commit;
+    await navigating;
+
+    expect(commitRan).toEqual(["start", "end"]);
+    expect(Array.from(fbo.last!)).toEqual(Array.from(a));
+
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it("applies overlapping navigations in the order they were asked for", async () => {
+    const { fbo } = installManagerEnv();
+    clearAllHistoryManagers();
+    const { mgr, root, a } = await seedChain("f1");
+
+    const uploads: Float32Array[] = [];
+    const rendererRef = (fakeOpenFiles["f1"] as { rendererRef: { current: { setFBOData: unknown } } }).rendererRef;
+    rendererRef.current.setFBOData = (d: Float32Array) => {
+      uploads.push(Float32Array.from(d));
+      fbo.last = d;
+    };
+
+    // Both issued before either resolves, as holding Cmd+Z does.
+    const first = mgr.navigateToParent();
+    const second = mgr.navigateToParent();
+    await Promise.all([first, second]);
+
+    expect(uploads.map((u) => Array.from(u))).toEqual([Array.from(a), Array.from(root)]);
+    expect(Array.from(fbo.last!)).toEqual(Array.from(root));
+
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it("drops a navigation whose file closed while it was rebuilding state", async () => {
+    const { fbo } = installManagerEnv();
+    await clearAllHistoryManagers();
+    const { aId } = await seedChain("f1");
+
+    // A manager with no in-memory packed state rebuilds the target from disk,
+    // which is the only path that awaits long enough for a close to land in it.
+    await clearAllHistoryManagers();
+    const mgr = getHistoryManager("f1");
+    await mgr.initialize();
+
+    const nodeFs = (window as unknown as { nodeFs: { readFile: (p: string, e?: string) => Promise<unknown> } }).nodeFs;
+    const realReadFile = nodeFs.readFile;
+    let releaseRead: (() => void) | null = null;
+    nodeFs.readFile = async (path: string, encoding?: string) => {
+      if (path.endsWith(".json")) return realReadFile(path, encoding);
+      await new Promise<void>((resolve) => (releaseRead = resolve));
+      return realReadFile(path, encoding);
+    };
+
+    const navigating = mgr.navigateTo(aId);
+    while (releaseRead === null) await new Promise((resolve) => setTimeout(resolve, 0));
+    const release = releaseRead as () => void;
+
+    // The tab is closed mid-rebuild: the manifest is wiped and the renderer
+    // the restore would have written to is gone.
+    await mgr.purge();
+    delete fakeOpenFiles["f1"];
+
+    release();
+    await expect(navigating).resolves.toBeUndefined();
+    expect(fbo.last).toBeNull();
+
+    nodeFs.readFile = realReadFile;
+    clearAllHistoryManagers();
+  });
+
+  it("has the navigated-to node on disk once dispose resolves", async () => {
+    const { files } = installManagerEnv();
+    clearAllHistoryManagers();
+    const { mgr, aId } = await seedChain("f1");
+
+    // Navigation only schedules a debounced manifest write, so quitting now is
+    // the case where the position is still in memory alone.
+    await mgr.navigateToParent();
+    expect(mgr.getCurrentId()).toBe(aId);
+
+    // A real filesystem write does not land within a microtask, and the main
+    // process closes the window as soon as the quit cleanup resolves.
+    const nodeFs = (window as unknown as { nodeFs: { writeFile: (p: string, d: unknown) => Promise<void> } }).nodeFs;
+    const realWriteFile = nodeFs.writeFile;
+    let manifestWritten = false;
+    nodeFs.writeFile = async (path: string, data: unknown) => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await realWriteFile(path, data);
+      if (path.endsWith("tree.json")) manifestWritten = true;
+    };
+
+    await clearAllHistoryManagers();
+    expect(manifestWritten).toBe(true);
+    nodeFs.writeFile = realWriteFile;
+
+    const manifestPath = [...files.keys()].find((k) => k.endsWith("tree.json"));
+    expect(manifestPath).toBeDefined();
+    expect(JSON.parse(files.get(manifestPath!) as string).currentId).toBe(aId);
+
     delete fakeOpenFiles["f1"];
   });
 });

@@ -2,6 +2,7 @@ import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
 import { notifications } from "@mantine/notifications";
 import { applyCoefficientPatch } from "@renderer/lib/coef-patch";
 import { setCanvasPatchStash, takeCanvasPatchStash } from "@renderer/lib/canvas-patch-stash";
+import { serializeFileTask } from "@renderer/lib/file-task-queue";
 import { buildStrokeCommitSnapshot, projectsWholeFile } from "@renderer/lib/stroke-commit";
 import { mergePixelRanges, scatterPixelRanges, subtractPixelRanges } from "@renderer/lib/pixel-ranges";
 import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
@@ -25,30 +26,6 @@ import { useTransientStore } from "./transient";
 export type { StrokePosition } from "./transient";
 import type { StrokePosition } from "./transient";
 export type StrokeTimeRange = { min: number; max: number };
-
-// Serializes stroke commits per file. A commit (history node write + synthesis
-// + audio cache) must finish before the next begins, or two commits race the
-// HistoryManager's currentPacked/currentId — forking the history tree and
-// mismatching delta bases — and the file's audio buffer. Painting itself is
-// never blocked; only the post-stroke commit tail is queued behind the prior one.
-const strokeCommitChains = new Map<string, Promise<unknown>>();
-
-function serializeStrokeCommit<T>(fileId: string, task: () => Promise<T>): Promise<T> {
-  const prev = strokeCommitChains.get(fileId) ?? Promise.resolve();
-  const result = prev.then(task);
-  // The chain tail must never reject, or one failed commit would wedge the
-  // queue. Drop the entry once it drains so the map doesn't grow unbounded.
-  const tail = result.then(
-    () => {
-      if (strokeCommitChains.get(fileId) === tail) strokeCommitChains.delete(fileId);
-    },
-    () => {
-      if (strokeCommitChains.get(fileId) === tail) strokeCommitChains.delete(fileId);
-    },
-  );
-  strokeCommitChains.set(fileId, tail);
-  return result;
-}
 
 export interface BrushState {
   brushIntensity: number;
@@ -225,7 +202,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       });
       const dataPromise = renderer.getFBOData();
 
-      await serializeStrokeCommit(activeFileId, async () => {
+      await serializeFileTask(activeFileId, async () => {
         const data = await dataPromise;
         if (!data) return;
 
