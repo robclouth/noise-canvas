@@ -1,11 +1,38 @@
 import { spawn } from "child_process";
+import { existsSync } from "fs";
 import { rename, unlink } from "fs/promises";
 import { dirname, extname, join } from "path";
 
-import ffmpegPathStatic from "ffmpeg-static";
+/** Filename ffmpeg-static gives the binary on this platform. */
+export const ffmpegBinaryName = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
 
-const isPackaged = __dirname.includes("app.asar");
-const ffmpegPath = isPackaged ? ffmpegPathStatic!.replace("app.asar", "app.asar.unpacked") : ffmpegPathStatic!;
+/**
+ * Redirects a path that lands inside Electron's app.asar to the unpacked copy
+ * beside it, which is the only one that can be executed. `baseDir` says whether
+ * this build runs from an archive at all.
+ */
+export function runnableFromAsar(packagePath: string, baseDir: string): string {
+  return baseDir.includes("app.asar") ? packagePath.replace("app.asar", "app.asar.unpacked") : packagePath;
+}
+
+/**
+ * Absolute path to the ffmpeg binary, searched beside `baseDir` before falling
+ * back to the ffmpeg-static package. Resolved per call rather than at import:
+ * the Ableton extension's bundled host has no node_modules, so requiring
+ * ffmpeg-static at load would throw before the host could start.
+ */
+export function resolveFfmpegPath(baseDir: string = __dirname): string {
+  // The extension ships the binary beside its bundled entry, which is the only
+  // copy a packaged .ablx carries.
+  const beside = join(baseDir, ffmpegBinaryName);
+  if (existsSync(beside)) return beside;
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fromPackage = require("ffmpeg-static") as string | null;
+  if (!fromPackage) throw new Error(`ffmpeg-static ships no binary for ${process.platform}/${process.arch}`);
+
+  return runnableFromAsar(fromPackage, baseDir);
+}
 
 // Monotonic suffix so concurrent encodes never collide on a temp filename.
 let encodeTempCounter = 0;
@@ -21,7 +48,7 @@ export function probeAudioFile(inputPath: string): Promise<BasicAudioMetadata> {
   return new Promise((resolve, reject) => {
     // This does a "dry run": ffmpeg inspects the file, prints stream info, then errors out
     const args = ["-hide_banner", "-i", inputPath, "-f", "null", "-"];
-    const child = spawn(ffmpegPath, args, { windowsHide: true });
+    const child = spawn(resolveFfmpegPath(), args, { windowsHide: true });
 
     let stderr = "";
     child.stderr.on("data", (d) => {
@@ -89,7 +116,7 @@ export async function decodeAudioFile(
       "pipe:1", // write raw PCM to stdout
     ];
 
-    const child = spawn(ffmpegPath, args, { windowsHide: true });
+    const child = spawn(resolveFfmpegPath(), args, { windowsHide: true });
 
     const chunks: Buffer[] = [];
     child.stdout.on("data", (chunk) => {
@@ -191,7 +218,7 @@ export async function encodeBufferToAudioFile(
       tmpPath,
     ];
 
-    const child = spawn(ffmpegPath, args, { windowsHide: true });
+    const child = spawn(resolveFfmpegPath(), args, { windowsHide: true });
 
     // Swallow stdin errors (e.g. EPIPE if ffmpeg exits early); the close handler
     // reports the real failure. Without this, an EPIPE would crash the process.

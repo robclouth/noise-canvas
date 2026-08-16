@@ -24,7 +24,7 @@
     "build:ext:host": "node src/extension/host/build.mjs",
     "build:ext": "npm run build:ext:webview && npm run build:ext:host",
     "ext:run": "bash scripts/run-extension.sh",
-    "ext:package": "npm run build:ext && cd out-ext && extensions-cli package -i webview -o noise-canvas.ablx",
+    "ext:package": "npm run build:ext && node scripts/package-extension.mjs",
     "build": "npm run typecheck && electron-vite build",
     "build:unpack": "npm run build && electron-builder --dir --publish=never",
     "build:win": "npm run build && electron-builder --win --publish=never",

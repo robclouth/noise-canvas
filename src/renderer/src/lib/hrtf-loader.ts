@@ -9,6 +9,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { ClampToEdgeWrapping, DataTexture, FloatType, LinearFilter, RGBAFormat } from "three";
 import { host } from "./host";
+import { resolveResourceDir } from "./resource-paths";
 
 export interface HrtfMetadata {
   version: number;
@@ -74,26 +75,6 @@ const defaultMetadata: HrtfMetadata = {
 };
 
 /**
- * Get the path to HRTF data directory.
- * In development: uses project's resources/hrtf/
- * In production: uses app's resources directory
- */
-function getHrtfPath(): string {
-  // Check if we're in development by looking for common dev indicators
-  const isDev = host.env.nodeEnv === "development" || window.location.protocol === "http:";
-
-  if (isDev) {
-    // In development, use the project's resources directory
-    // This assumes the dev server is running from the project root
-    return host.path.join(host.env.cwd(), "resources", "hrtf");
-  } else {
-    // In production, use the app's resources path
-    // resourcesPath points to the app's Resources folder
-    return host.path.join(host.env.resourcesPath, "hrtf");
-  }
-}
-
-/**
  * Loads HRTF data from resources/hrtf/.
  * Returns cached data if already loaded.
  */
@@ -111,7 +92,7 @@ export async function loadHrtfData(): Promise<{ texture: DataTexture; metadata: 
   // Start loading
   loadingPromise = (async () => {
     try {
-      const hrtfDir = getHrtfPath();
+      const hrtfDir = resolveResourceDir("hrtf");
 
       // Load metadata
       const metadataPath = host.path.join(hrtfDir, "hrtf-metadata.json");

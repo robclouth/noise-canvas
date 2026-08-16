@@ -25,18 +25,25 @@ async function callRpc(
 describe("host-services RPC", () => {
   let workDir: string;
   let userDataPath: string;
+  let resourcesPath: string;
   let server: EditorServer;
 
   beforeAll(async () => {
     workDir = await fs.mkdtemp(join(tmpdir(), "noise-canvas-rpc-"));
     userDataPath = join(workDir, "userdata");
     await fs.mkdir(userDataPath);
+    resourcesPath = join(workDir, "host");
+    await fs.mkdir(resourcesPath);
     const webviewDir = join(workDir, "webview");
     await fs.mkdir(webviewDir);
     await fs.writeFile(join(webviewDir, "index.html"), "<!doctype html>");
     server = await startEditorServer({
       webviewDir,
-      hostServices: createHostServices({ userDataPath, gpuMemory: { bytes: 8_000_000_000, unified: false } }),
+      hostServices: createHostServices({
+        userDataPath,
+        resourcesPath,
+        gpuMemory: { bytes: 8_000_000_000, unified: false },
+      }),
     });
   });
 
@@ -105,6 +112,9 @@ describe("host-services RPC", () => {
     const res = await fetch(`${server.origin}/host/bootstrap`);
     const boot = (await res.json()) as BootstrapInfo;
     expect(boot.userDataPath).toBe(userDataPath);
+    // The webview joins "samples"/"hrtf" onto this to read bundled assets, so it
+    // must be the directory the build copies them into, not the user-data path.
+    expect(boot.resourcesPath).toBe(resourcesPath);
     expect(typeof boot.homedir).toBe("string");
     expect(boot.platform).toBe(process.platform);
     // The webview budgets analyses against these, so they must survive the

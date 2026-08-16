@@ -13,8 +13,8 @@ import {
 } from "@ableton-extensions/sdk";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, extname, join } from "node:path";
-import { exportAudio, isModelDownloaded } from "../../main/lib/audio-analysis";
+import { join } from "node:path";
+import { isModelDownloaded } from "../../main/lib/audio-analysis";
 import { decodeRenderBatch } from "../shared/render-batch";
 import {
   getGpuMemoryInfo,
@@ -27,6 +27,7 @@ import {
 import { createHostServices } from "./host-services";
 import { startEditorServer, type EditorServer } from "./server";
 import type { ClipMeta } from "./session";
+import { importStagedRender } from "./staging";
 
 const API_VERSION = "1.0.0";
 const COMMAND_ID = "noiseCanvas.editAudioClip";
@@ -40,6 +41,10 @@ const AI_MODEL_FILES = ["htdemucs.onnx"];
 // directory the webview is one level up and across.
 const WEBVIEW_DIR = join(__dirname, "..", "webview");
 
+// The build copies the resources/ trees the renderer reads (samples, hrtf) into
+// the host bundle's own directory.
+const RESOURCES_DIR = __dirname;
+
 type Api = ExtensionContext<"1.0.0">;
 
 // The localhost data plane is shared across every edit; start it once, lazily.
@@ -49,6 +54,7 @@ function getServer(context: Api): Promise<EditorServer> {
     const userDataPath = context.environment.storageDirectory ?? tmpdir();
     const hostServices = createHostServices({
       userDataPath,
+      resourcesPath: RESOURCES_DIR,
       gpuMemory: getGpuMemoryInfo(),
       downloadedModels: () => AI_MODEL_FILES.filter((file) => isModelDownloaded(file)),
     });
@@ -116,18 +122,6 @@ async function copyAsdSidecar(originalFilePath: string, replacementFilePath: str
   await fs.copyFile(source, `${replacementFilePath}.asd`);
 }
 
-// Builds a filesystem-safe basename for the rendered WAV from the render label,
-// stripping any audio extension and illegal path characters and falling back to
-// the source file's name, so the file imported into Live carries that name.
-function stagedFileBase(label: string, sourceFilePath: string): string {
-  const fallback = basename(sourceFilePath, extname(sourceFilePath));
-  const fromLabel = label
-    .replace(extname(label), "")
-    .replace(/[/\\:*?"<>|]/g, "_")
-    .trim();
-  return fromLabel || fallback || "Edit";
-}
-
 async function editAudioClip(context: Api, clip: AudioClip<"1.0.0">): Promise<void> {
   const track = findAudioTrack(clip);
   if (!track) {
@@ -187,17 +181,15 @@ async function editAudioClip(context: Api, clip: AudioClip<"1.0.0">): Promise<vo
 
   // Encode each render to a staged WAV with ffmpeg (the desktop app's export
   // path) and import it into the project; the original's .asd sidecar rides along.
-  // Each render gets its own staging directory so the WAV basename can be the
-  // source file's name without colliding across renders.
   const tempDir = context.environment.tempDirectory ?? tmpdir();
   const prepared: { managedPath: string; label: string }[] = [];
   for (let i = 0; i < renders.length; i++) {
     const render = renders[i];
-    const stagedDir = join(tempDir, `noise-canvas-${session.id}-${i}`);
-    await fs.mkdir(stagedDir, { recursive: true });
-    const stagedPath = join(stagedDir, `${stagedFileBase(render.label, meta.sourceFilePath)}.wav`);
-    await exportAudio(render.channels, stagedPath, render.sampleRate, "wav");
-    const managedPath = await context.resources.importIntoProject(stagedPath);
+    const managedPath = await importStagedRender(render, {
+      stagedDir: join(tempDir, `noise-canvas-${session.id}-${i}`),
+      sourceFilePath: meta.sourceFilePath,
+      importIntoProject: (filePath) => context.resources.importIntoProject(filePath),
+    });
     await copyAsdSidecar(meta.sourceFilePath, managedPath);
     prepared.push({ managedPath, label: render.label });
   }

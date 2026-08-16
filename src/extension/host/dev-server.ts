@@ -52,6 +52,7 @@ async function main(): Promise<void> {
     analysisOp: runAnalysisOpFramed,
     hostServices: createHostServices({
       userDataPath,
+      resourcesPath: join(root, "resources"),
       gpuMemory: getGpuMemoryInfo(),
       downloadedModels: () => ["htdemucs.onnx"].filter((file) => isModelDownloaded(file)),
     }),

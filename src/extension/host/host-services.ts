@@ -14,6 +14,9 @@ const zstdDecompressAsync = promisify(zstdDecompress);
 export interface HostServicesConfig {
   // Directory where the extension persists per-user data (history, presets).
   userDataPath: string;
+  // Directory holding the trees copied from resources/ (samples, hrtf), which
+  // the webview joins onto to read bundled assets.
+  resourcesPath: string;
   // GPU memory the webview budgets analyses against. Injected rather than
   // measured here so this module stays free of the native addon; omitted, the
   // webview falls back to the texture-dimension cap alone.
@@ -123,7 +126,7 @@ export function createHostServices(config: HostServicesConfig): HostServices {
         userDataPath: config.userDataPath,
         platform: process.platform,
         arch: process.arch,
-        resourcesPath: config.userDataPath,
+        resourcesPath: config.resourcesPath,
         cwd: process.cwd(),
         gpuMemoryBytes: config.gpuMemory?.bytes ?? 0,
         gpuMemoryUnified: config.gpuMemory?.unified ?? true,
