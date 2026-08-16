@@ -233,11 +233,9 @@ static void applyLookaheadLimiter(std::vector<std::vector<float>> &channels, dou
  */
 static inline float unwrapForward(float phase, float prevUnwrapped)
 {
-    float diff = phase - std::fmod(prevUnwrapped, 2.0f * (float)M_PI);
-    while (diff > (float)M_PI)
-        diff -= 2.0f * (float)M_PI;
-    while (diff < -(float)M_PI)
-        diff += 2.0f * (float)M_PI;
+    const float twoPi = 2.0f * (float)M_PI;
+    float diff = phase - std::fmod(prevUnwrapped, twoPi);
+    diff -= twoPi * std::round(diff / twoPi);
     return prevUnwrapped + diff;
 }
 
