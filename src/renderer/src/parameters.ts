@@ -1270,7 +1270,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
       { value: 0, label: "Swap Mag/Phase" },
       { value: 1, label: "Complex Power" },
       { value: 2, label: "Phase Rotate" },
-      { value: 3, label: "Phase Quantize" },
+      { value: 3, label: "Phase Quantise" },
       { value: 4, label: "Stereo Cross" },
       { value: 5, label: "Phase Gate" },
     ],
@@ -1941,6 +1941,13 @@ export const isEffectParameter = (key: ParameterKey): boolean => {
 export const getEffectType = (key: ParameterKey): EffectType | undefined => {
   const def = parameterDefs[key];
   return def?.effectType;
+};
+
+/** Every effect parameter, of every effect type. */
+export const getAllEffectParameterKeys = (): ParameterKey[] => {
+  return Object.entries(parameterDefs)
+    .filter(([, def]) => def.effectType !== undefined)
+    .map(([key]) => key as ParameterKey);
 };
 
 /** Get all parameter keys for a specific effect type */

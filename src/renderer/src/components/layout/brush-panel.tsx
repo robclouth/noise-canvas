@@ -1,6 +1,7 @@
 import { Box, SimpleGrid, Stack } from "@mantine/core";
 import { NUM_MACROS, NUM_MODULATORS } from "@renderer/lib/constants";
 import { PANEL_COLUMN_SPACING, SECTION_GAP } from "@renderer/lib/ui-density";
+import { getAllEffectParameterKeys } from "@renderer/parameters";
 import { selectParameter, useStore } from "@renderer/store";
 import { ParameterKey } from "@renderer/store/types";
 import { EnvelopeControl } from "../controls/envelope-control";
@@ -51,29 +52,10 @@ const MODULATOR_PARAMS = Array.from({ length: NUM_MODULATORS }).flatMap((_, i) =
 
 const MACRO_PARAMS = Array.from({ length: NUM_MACROS }, (_, i) => `macro${i + 1}Value` as ParameterKey);
 
-// All effect parameters combined for the Effects section randomizer
-const ALL_EFFECT_PARAMS: ParameterKey[] = [
-  "dynamicsThresholdDb",
-  "dynamicsUpperRatio",
-  "dynamicsLowerRatio",
-  "dynamicsKnee",
-  "dynamicsGainDb",
-  "transformShiftBeats",
-  "transformShiftSemis",
-  "transformScaleTime",
-  "transformScalePitch",
-  "transformRotation",
-  "transformEdgeMode",
-  "blurAmountTime",
-  "blurAmountPitch",
-  "blurNoiseTime",
-  "blurNoisePitch",
-  "blurSamplesX",
-  "blurSamplesY",
-  "blurEdgeMode",
-  "blurOrigin",
-  "synthesizeBrushType",
-];
+// Every effect's parameters, for the Effects section header's reset, randomise
+// and preset actions. Derived rather than listed, so a new effect is covered
+// the moment its parameters declare an effectType.
+const ALL_EFFECT_PARAMS: ParameterKey[] = getAllEffectParameterKeys();
 
 export function BrushPanel() {
   const sourcePositionMode = useStore(selectParameter("sourcePositionMode"));

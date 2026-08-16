@@ -3,9 +3,9 @@ import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
 import { Box, Stack } from "@mantine/core";
 import { openContextModal } from "@renderer/lib/modals";
 import { EFFECT_ITEM_PAD_Y } from "@renderer/lib/ui-density";
-import { EffectItem, EffectType } from "@renderer/effects/types";
+import { EFFECT_KEYS, EffectItem, EffectType } from "@renderer/effects/types";
 import { EFFECT_COLORS, EFFECT_DESCRIPTIONS, EFFECT_LABELS } from "@renderer/lib/constants";
-import { getEffectParameterDefaults } from "@renderer/parameters";
+import { getEffectParameterDefaults, getEffectParameterKeys } from "@renderer/parameters";
 import { Plus } from "lucide-react";
 import { memo, useCallback, useMemo } from "react";
 import { EffectProvider } from "../contexts/effect-context";
@@ -41,66 +41,12 @@ const EFFECT_COMPONENTS: Record<string, React.ReactNode> = {
 
 import { ParameterKey } from "@/store/types";
 
-const EFFECT_PARAMS: Record<string, ParameterKey[]> = {
-  dynamics: ["dynamicsThresholdDb", "dynamicsUpperRatio", "dynamicsLowerRatio", "dynamicsKnee", "dynamicsGainDb"],
-  transform: [
-    "transformShiftBeats",
-    "transformShiftSemis",
-    "transformScaleTime",
-    "transformScalePitch",
-    "transformRotation",
-    "transformEdgeMode",
-  ],
-  blur: [
-    "blurAmountTime",
-    "blurAmountPitch",
-    "blurNoiseTime",
-    "blurNoisePitch",
-    "blurSamplesX",
-    "blurSamplesY",
-    "blurEdgeMode",
-    "blurOrigin",
-  ],
-  clone: [
-    "cloneSpaceBeats",
-    "cloneSpaceSemis",
-    "cloneCountX",
-    "cloneCountY",
-    "cloneShapeX",
-    "cloneShapeY",
-    "cloneDirectionX",
-    "cloneDirectionY",
-    "cloneDecay",
-    "cloneEdgeMode",
-  ],
-  synthesize: ["synthesizeBrushType"],
-  evolve: [
-    "evolveFlow",
-    "evolveSpread",
-    "evolveGrow",
-    "evolveSwirl",
-    "evolveDriftX",
-    "evolveDriftY",
-    "evolveDecay",
-    "evolveScaleX",
-    "evolveScaleY",
-    "evolveEdgeMode",
-  ],
-  binaural: ["binauralAzimuth", "binauralDistance", "binauralStereoAngle"],
-  sort: ["sortDirection", "sortOrder", "sortBy", "sortStereoMode"],
-  transmute: ["transmuteMode", "transmuteAmount", "transmuteCurve"],
-  waveshape: ["waveshapeMode", "waveshapeDrive", "waveshapeTilt"],
-  convolve: [
-    "convolveIrFile",
-    "convolveIrTimeOffset",
-    "convolveIrPitchShift",
-    "convolveIrSize",
-    "convolveIrRate",
-    "convolveGainDb",
-  ],
-  align: [],
-  attract: ["attractMap", "attractSourceFile", "attractAmountX", "attractAmountY", "attractSmoothX", "attractSmoothY"],
-};
+// Each effect's parameters, derived from what parameters.ts declares rather
+// than listed here, so a new parameter is covered as soon as it names its
+// effectType.
+const EFFECT_PARAMS: Record<string, ParameterKey[]> = Object.fromEntries(
+  EFFECT_KEYS.map((key) => [key, getEffectParameterKeys(key)]),
+);
 
 const MAX_EFFECTS = 10;
 
