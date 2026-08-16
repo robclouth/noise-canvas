@@ -43,7 +43,7 @@ function RecentFilesSubmenu() {
                 title={filePath}
                 onClick={() => void useStore.getState().openFilePath(filePath)}
               >
-                {filePath.split("/").pop() || filePath}
+                {filePath.split(/[\\/]/).pop() || filePath}
               </Menu.Item>
             ))}
             <Menu.Divider />

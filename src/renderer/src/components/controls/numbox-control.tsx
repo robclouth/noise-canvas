@@ -239,10 +239,14 @@ export const NumboxControl = (props: NumboxControlProps) => {
   }, [isDragging]);
 
   // A drag cut short by the control going away would otherwise leave the canvas
-  // thinking one is still under way, and never hover again.
+  // thinking one is still under way, and never hover again — and leave text
+  // selection off for the whole app, since the mouseup that restores it is
+  // removed with the listener.
   useEffect(
     () => () => {
-      if (isDraggingRef.current) useTransientStore.getState().setControlDragging(false);
+      if (!isDraggingRef.current) return;
+      useTransientStore.getState().setControlDragging(false);
+      document.body.style.userSelect = "";
     },
     [],
   );

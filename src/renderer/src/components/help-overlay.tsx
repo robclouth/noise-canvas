@@ -287,6 +287,10 @@ export function HelpOverlay(): React.JSX.Element | null {
         event.preventDefault();
         useStore.getState().setHelpOverlayOpen(!useStore.getState().helpOverlayOpen);
       } else if (event.key === "Escape" && useStore.getState().helpOverlayOpen) {
+        // This handler runs in the capture phase, so the key would otherwise
+        // also reach a dialog underneath and close two things at once.
+        event.preventDefault();
+        event.stopPropagation();
         close();
       }
     };

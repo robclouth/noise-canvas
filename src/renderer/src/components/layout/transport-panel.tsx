@@ -49,6 +49,9 @@ export const TransportPanel = memo(() => {
         cancelAnimationFrame(animationFrameId.current);
         animationFrameId.current = null;
       }
+      // One last write: stopping resets the position to the cue point, and the
+      // readout would otherwise freeze at the moment of the stop instead.
+      if (timeRef.current) timeRef.current.innerText = formatTime(useStore.getState().getPlaybackTime());
       return;
     }
 

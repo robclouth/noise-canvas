@@ -16,7 +16,9 @@ function shapeFn(M: number, mode: number, drive: number): number {
     case 0:
       return Math.tanh(x);
     case 1:
-      return Math.min(x, 1.0);
+      // clamp(x, 0.0, 1.0), as the shader does — not min alone, or the negative
+      // half of the preview curve would not be what the effect produces.
+      return Math.min(Math.max(x, 0), 1);
     case 2:
       return Math.abs(x);
     case 3: {
@@ -25,7 +27,8 @@ function shapeFn(M: number, mode: number, drive: number): number {
       return m > 1.0 ? 2.0 - m : m;
     }
     case 4:
-      return x % 1.0;
+      // GLSL mod is floored, so a negative input wraps up rather than down.
+      return x - Math.floor(x);
     case 5:
       return Math.abs(Math.sin(x));
     default:
