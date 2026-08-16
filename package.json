@@ -51,7 +51,6 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "ffmpeg-static": "^5.2.0",
-    "onnxruntime-node": "^1.24.3",
     "simplex-noise": "^4.0.3"
   },
   "devDependencies": {
@@ -118,6 +117,7 @@
     "vite": "^7.0.5",
     "vite-plugin-glsl": "^1.5.1",
     "vitest": "^4.0.18",
-    "zod": "^4.1.12"
+    "zod": "^4.1.12",
+    "zustand": "^5.0.8"
   }
 }

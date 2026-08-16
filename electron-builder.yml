@@ -58,9 +58,9 @@ mac:
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
   extendInfo:
-    - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
-    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
-    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+    NSMicrophoneUsageDescription: Noise Canvas needs the microphone to record audio into a canvas.
+    NSDocumentsFolderUsageDescription: Noise Canvas needs your Documents folder to open and save audio files there.
+    NSDownloadsFolderUsageDescription: Noise Canvas needs your Downloads folder to open and save audio files there.
   hardenedRuntime: true
   gatekeeperAssess: false
   notarize: true
