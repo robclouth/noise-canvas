@@ -169,6 +169,19 @@ export interface FilesState {
 // Open files keyed by file ID
 export const openFiles: Record<string, OpenFile> = {};
 
+/**
+ * Merges `patch` into an open file. Returns false when the file is no longer
+ * open: closing a file deletes its entry, so a write that assumes the entry is
+ * there would put a closed file back into `openFiles` — holding its packed data
+ * for the rest of the session with no tab to close.
+ */
+function updateOpenFile(fileId: string, patch: Partial<OpenFile>): boolean {
+  const file = openFiles[fileId];
+  if (!file) return false;
+  openFiles[fileId] = { ...file, ...patch };
+  return true;
+}
+
 // Walks a single sequence of brush steps and rewrites file-param entries
 // whose path matches `oldPath` to `newPath`. Returns true if anything
 // changed. The steps-array is the common shape of both an in-session Brush
@@ -286,14 +299,16 @@ function openFileTexelCounts(excludeFileId?: string): number[] {
 // Run gaborator analysis on a real on-disk wav and stash the resulting
 // SpectrogramData on the file. Used by first-time-open and as a recovery
 // fallback in reopenPersistedFiles when a real file's history dir is missing.
+// Returns false when the file closed before the analysis finished, which
+// discards the result.
 async function loadRealFileViaGaborator(
   fileId: string,
   filePath: string,
   bandsPerOctave: number,
   minFreq: number,
-): Promise<void> {
+): Promise<boolean> {
   const file = openFiles[fileId];
-  if (!file) return;
+  if (!file) return false;
   const diskPath = isBundledPath(filePath) ? resolveBundledPath(filePath) : filePath;
   const otherTexelCounts = openFileTexelCounts(fileId);
   let result: Awaited<ReturnType<typeof host.analysis.analyze>>;
@@ -333,15 +348,14 @@ async function loadRealFileViaGaborator(
       bandLengths: result.bandLengths,
     },
   };
-  openFiles[fileId] = {
-    ...openFiles[fileId],
+  return updateOpenFile(fileId, {
     spectrogramData,
     onsets: result.onsets,
     onsetReference:
       result.onsetOdfMax !== undefined && result.onsetBandMax
         ? { odfMax: result.onsetOdfMax, bandMax: result.onsetBandMax }
         : undefined,
-  };
+  });
 }
 
 // In-flight AI separation guard — blocks a second concurrent stem split on the same file.
@@ -572,6 +586,8 @@ async function rebuildFileFromAudio(
     false,
   );
 
+  if (!openFiles[fileId]) return;
+
   const channels = transform(synthResult.channels);
   const length = channels[0]?.length ?? 0;
   if (length <= 0) throw new Error("There is no audio left to analyse.");
@@ -583,6 +599,8 @@ async function rebuildFileFromAudio(
   }
 
   const result = await host.analysis.analyseBuffer(audioBuffer, analysisParams);
+
+  if (!openFiles[fileId]) return;
 
   file.spectrogramData = {
     packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
@@ -927,7 +945,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     );
 
     try {
-      await loadRealFileViaGaborator(fileId, filepath, state.bandsPerOctave, state.minFreq);
+      const loaded = await loadRealFileViaGaborator(fileId, filepath, state.bandsPerOctave, state.minFreq);
+      if (!loaded) return;
       set(
         produce((state: State) => {
           delete state.filesLoading[fileId];
@@ -1038,8 +1057,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     try {
       const { harmonic, percussive } = await host.analysis.hpss(fboData, bandLayout(spectrogramData));
 
-      openFiles[ids[0]] = { ...openFiles[ids[0]], spectrogramData: deriveSpectrogramData(spectrogramData, harmonic) };
-      openFiles[ids[1]] = { ...openFiles[ids[1]], spectrogramData: deriveSpectrogramData(spectrogramData, percussive) };
+      updateOpenFile(ids[0], { spectrogramData: deriveSpectrogramData(spectrogramData, harmonic) });
+      updateOpenFile(ids[1], { spectrogramData: deriveSpectrogramData(spectrogramData, percussive) });
     } catch (error) {
       console.error("HPSS separation failed:", error);
       notifications.show({
@@ -1075,10 +1094,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         throw new Error(`Expected ${parts} parts, got ${result.parts.length}`);
       }
       for (let i = 0; i < ids.length; i++) {
-        openFiles[ids[i]] = {
-          ...openFiles[ids[i]],
-          spectrogramData: deriveSpectrogramData(spectrogramData, result.parts[i]),
-        };
+        updateOpenFile(ids[i], { spectrogramData: deriveSpectrogramData(spectrogramData, result.parts[i]) });
       }
     } catch (error) {
       console.error("NMF separation failed:", error);
@@ -1167,8 +1183,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
       const { merged } = await host.analysis.mergeSpectrograms(parts, bandLayout(base));
 
-      openFiles[newFileId] = {
-        ...openFiles[newFileId],
+      updateOpenFile(newFileId, {
         spectrogramData: {
           ...deriveSpectrogramData(base, merged),
           // The parts each carry a slice of the original's energy, so none of
@@ -1177,7 +1192,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           // impulse response against it.
           magnitudeEnergy: originFile?.spectrogramData?.magnitudeEnergy ?? base.magnitudeEnergy,
         },
-      };
+      });
     } catch (error) {
       console.error("Merge failed:", error);
       notifications.show({
@@ -1327,8 +1342,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           maxCoefficients: remainingCoefficientBudget(openFileTexelCounts()),
         });
 
-        openFiles[stemIds[i]] = {
-          ...openFiles[stemIds[i]],
+        updateOpenFile(stemIds[i], {
           spectrogramData: {
             packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
             inverseMap: new Float32Array(
@@ -1360,7 +1374,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
               bandLengths: result.bandLengths,
             },
           },
-        };
+        });
       }
 
       audioContext.close();
@@ -1697,6 +1711,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesPlaybackStartTime[fileId];
           delete state.filesLoopRegion[fileId];
           delete state.filesDirty[fileId];
+          delete state.filesLoading[fileId];
+          delete state.filesSynthesizing[fileId];
           delete state.persistedFilePaths[fileId];
           delete state.fileDisplayNames[fileId];
           state.minimizedFileIds = state.minimizedFileIds.filter((id) => id !== fileId);
@@ -2320,6 +2336,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         },
       };
 
+      if (!openFiles[fileId]) return;
+
       file.spectrogramData = spectrogramData;
       file.unprojectedPaint = false;
 
@@ -2592,7 +2610,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           }
           const spectrogramData = await historyManager.loadSpectrogramAtCurrent();
           if (!spectrogramData) throw new Error("History tree is empty");
-          openFiles[fileId] = { ...openFiles[fileId], spectrogramData };
+          if (!updateOpenFile(fileId, { spectrogramData })) return;
           // Restored from the node the file reopens on, before the loading flag
           // clears, so its first paint already has them.
           const currentId = historyManager.getManifest()?.currentId;
