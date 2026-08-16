@@ -29,7 +29,15 @@ import { fileURLToPath } from "node:url";
 import { _electron as electron } from "playwright";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const DEMO_FILE = "test-audio/tone-440hz-5s.wav";
+/**
+ * The bundled break the walkthrough runs on, so the docs show the same sound.
+ * Opened by its real path rather than as `bundled://`, which only resolves
+ * against `resources/` when NODE_ENV says development — and that also makes the
+ * main process reload the window mid-capture.
+ */
+const DEMO_FILE = "resources/samples/break-loop.mp3";
+/** The break's real tempo. Without it the grid and the time legend read wrong. */
+const DEMO_BPM = 160;
 const DEMO_BRUSH = "Morph (Macros)";
 
 // ---------------------------------------------------------------------------
@@ -123,6 +131,27 @@ async function addEffect(page, label) {
   // Scoped to the modal: the effect's own card carries the same name once added.
   const picker = page.locator("[class*='Modal-content']");
   await clickAndSettle(page, picker.getByText(label, { exact: true }).first());
+}
+
+/**
+ * Types into a NumboxControl, which is addressed by its aria range because the
+ * `data-help` marker sits on the label beside it rather than on the widget. A
+ * click swaps the readout for an input; `fill` replaces what is in it, where
+ * typing would append to the current value and clamp to the maximum. The read
+ * back is the point: a silent miss here ships every screenshot at the wrong
+ * tempo.
+ */
+async function setNumbox(page, { min, max }, value) {
+  const box = page.locator(`[role="slider"][aria-valuemin="${min}"][aria-valuemax="${max}"]`).first();
+  await box.click();
+  await page.waitForTimeout(250);
+  const input = box.locator("input");
+  await input.fill(String(value));
+  await input.press("Enter");
+  await page.waitForTimeout(400);
+
+  const applied = Number(await box.getAttribute("aria-valuenow"));
+  if (applied !== value) throw new Error(`numbox did not take: wanted ${value}, got ${applied}`);
 }
 
 async function removeEffect(page, key) {
@@ -440,6 +469,9 @@ async function main() {
   );
   await page.waitForSelector("[data-anchor='file-lane']", { timeout: 60_000 });
   await page.waitForTimeout(3000);
+
+  console.log(`Setting BPM to ${DEMO_BPM}…`);
+  await setNumbox(page, { min: 10, max: 999 }, DEMO_BPM);
 
   // A brush with several effects and macros in play gives the Effects, Macros
   // and effect-card targets something worth showing.

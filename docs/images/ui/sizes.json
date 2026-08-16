@@ -1,19 +1,19 @@
 {
   "brush-panel": {
     "width": 320,
-    "height": 1178
+    "height": 1153
   },
   "sidebar": {
     "width": 192,
     "height": 144
   },
   "transport": {
-    "width": 1045,
+    "width": 972,
     "height": 60
   },
   "file-lane": {
-    "width": 1088,
-    "height": 484
+    "width": 1068,
+    "height": 482
   },
   "file-header": {
     "width": 1043,
@@ -41,7 +41,7 @@
   },
   "section-effects": {
     "width": 305,
-    "height": 376
+    "height": 352
   },
   "section-modulators": {
     "width": 306,
@@ -69,7 +69,7 @@
   },
   "effect-clone": {
     "width": 305,
-    "height": 179
+    "height": 155
   },
   "effect-synthesize": {
     "width": 298,
@@ -101,7 +101,7 @@
   },
   "modal-add-effect": {
     "width": 452,
-    "height": 597
+    "height": 511
   },
   "modal-brush-picker": {
     "width": 332,
