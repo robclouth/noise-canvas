@@ -240,6 +240,9 @@ export const createPalettesSlice = (set: ZustandSet, get: ZustandGet): PalettesS
     set(
       produce((draft: State) => {
         if (draft.openPalettes.length <= 1) return;
+        // Every active-brush consumer reads brushes[activeBrushIndex], so the
+        // list must never empty — the other palettes have to hold something.
+        if (draft.brushes.every((brush) => brush.paletteId === groupId)) return;
         const active = draft.brushes[draft.activeBrushIndex];
         draft.openPalettes = draft.openPalettes.filter((palette) => palette.id !== groupId);
         draft.brushes = draft.brushes.filter((brush) => brush.paletteId !== groupId);

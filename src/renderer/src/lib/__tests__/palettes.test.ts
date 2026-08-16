@@ -274,6 +274,23 @@ describe("palettes slice", () => {
     expect(store.getState().openPalettes).toHaveLength(1);
   });
 
+  it("refuses to close the palette holding every remaining brush", () => {
+    const store = createTestStore();
+    store.slice.addPalette();
+    const empty = store.lastGroup();
+
+    // The second palette's own brush goes, leaving it empty but still open.
+    store.setBrushes(store.getState().brushes.filter((brush) => brush.paletteId !== empty.id));
+    expect(store.getState().openPalettes).toHaveLength(2);
+
+    store.slice.closePalette(DEFAULT_PALETTE_ID);
+
+    // Closing it would leave brushes empty, and every active-brush reader with
+    // nothing to read.
+    expect(store.getState().brushes.map((b) => b.name)).toEqual(["Mock"]);
+    expect(store.getState().openPalettes).toHaveLength(2);
+  });
+
   it("leaves a palette open and unlinked when its file is deleted", async () => {
     const store = createTestStore([makeBrush("Keep me")]);
     await store.slice.savePaletteAs(DEFAULT_PALETTE_ID, "Kit");

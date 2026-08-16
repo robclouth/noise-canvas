@@ -249,6 +249,10 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
     const state = get();
     if (state.brushes.length <= 1) return;
     if (index < 0 || index >= state.brushes.length) return;
+    // Per palette, not just overall: an empty palette can be closed later, and
+    // closing the one that still holds brushes would leave the app with none.
+    const paletteId = state.brushes[index].paletteId;
+    if (state.brushes.filter((brush) => brush.paletteId === paletteId).length <= 1) return;
 
     set(
       produce((draft: State) => {
