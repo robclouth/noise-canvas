@@ -110,14 +110,14 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     newPlayer.connect(meter);
     set({ meter });
 
+    // Restarting stops the outgoing source, so this fires for a buffer hot-swap
+    // or a scrub as well as for the end of the file. Only the end leaves no
+    // source running, which a position test cannot tell apart from a restart
+    // that lands within a fade of the end.
     newPlayer.onstop = () => {
-      const { loop, getPlaybackTime, isPlaying, playerClock } = get();
-      if (isPlaying) {
-        const t = getPlaybackTime();
-        const end = playerClock.loopEnd;
-        if (!loop && t >= end - 0.01) {
-          get().stopAudio();
-        }
+      const { loop, isPlaying } = get();
+      if (isPlaying && !loop && newPlayer.state !== "started") {
+        get().stopAudio();
       }
     };
 
