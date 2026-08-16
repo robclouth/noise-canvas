@@ -375,16 +375,22 @@ public:
     AnalyzeWorker(Napi::Env env, const Napi::Array &planarInput, int channels, double sampleRate, const Napi::Object &paramsJs)
         : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), channels(channels), sampleRate(sampleRate)
     {
-        size_t length = planarInput.Get(0u).As<Napi::Float32Array>().ElementLength();
         // Reference the channel buffers and read them by pointer on the worker
         // thread rather than copying them into vectors on the main thread.
         audioRefs.reserve(channels);
         audioChannels.reserve(channels);
+        // Every channel is read for numFrames samples, so the shortest one sets
+        // the length — a caller that passes uneven channels must not make the
+        // worker read past the end of the short one.
+        size_t length = 0;
         for (int ch = 0; ch < channels; ++ch)
         {
             Napi::Float32Array channelData = planarInput.Get(static_cast<uint32_t>(ch)).As<Napi::Float32Array>();
             audioRefs.push_back(Napi::Reference<Napi::Float32Array>::New(channelData, 1));
             audioChannels.push_back(channelData.Data());
+            const size_t channelLength = channelData.ElementLength();
+            if (ch == 0 || channelLength < length)
+                length = channelLength;
         }
         numFrames = length;
         bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
@@ -1512,8 +1518,54 @@ public:
 
     ~SynthesizeWorker() {}
 
+    // The band tables and the existing-audio channels come from JS bookkeeping;
+    // every loop below indexes them by channel and by band without re-checking.
+    bool validate()
+    {
+        if (channels <= 0 || numBands <= 0 || numFrames == 0 || sampleRate <= 0.0)
+        {
+            SetError("synthesize: numChannels, numBands, numFrames and sampleRate must all be positive");
+            return false;
+        }
+        if ((int)bandOffsets.size() < numBands || (int)bandLengths.size() < numBands ||
+            (int)bandStepLog2s.size() < numBands)
+        {
+            SetError("synthesize: band tables are shorter than numBands");
+            return false;
+        }
+        for (int b = 0; b < numBands; ++b)
+        {
+            const size_t end = (size_t)bandOffsets[b] + (size_t)bandLengths[b];
+            if (end * 4 > inputDataLen)
+            {
+                SetError("synthesize: band layout runs past the end of the packed buffer");
+                return false;
+            }
+        }
+        if (!existingAudio.empty())
+        {
+            if ((int)existingAudio.size() != channels)
+            {
+                SetError("synthesize: existingAudio has a different channel count from the analysis");
+                return false;
+            }
+            for (size_t i = 0; i < existingAudioLens.size(); ++i)
+            {
+                if (existingAudioLens[i] < numFrames)
+                {
+                    SetError("synthesize: existingAudio channel is shorter than numFrames");
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     void Execute()
     {
+        if (!validate())
+            return;
+
         DEBUG_LOG << "[C++] Execute() started" << std::endl << std::flush;
         DEBUG_LOG << "[C++] requestedStartFrame=" << requestedStartFrame << ", requestedEndFrame=" << requestedEndFrame << std::endl << std::flush;
         DEBUG_LOG << "[C++] requestedStartBand=" << requestedStartBand << ", requestedEndBand=" << requestedEndBand << std::endl << std::flush;
@@ -2756,6 +2808,45 @@ static std::vector<std::vector<float>> freqMedianFilter(
     return P;
 }
 
+/**
+ * True when `numBands` bands of `numChannels` channels can be indexed in a
+ * packed buffer of `packedLen` floats using these tables. The coefficient-domain
+ * workers index the tables by band and the buffer by what the tables hold, both
+ * of which come from JS bookkeeping, so a stale table would otherwise be an
+ * out-of-bounds read on a worker thread rather than a rejected promise.
+ */
+static bool bandTablesFit(int numBands, int numChannels, size_t packedLen,
+                          const std::vector<uint32_t> &bandOffsets,
+                          const std::vector<uint32_t> &bandLengths,
+                          std::string &error)
+{
+    if (numBands <= 0)
+    {
+        error = "numBands must be positive";
+        return false;
+    }
+    if (numChannels < 1 || numChannels > 2)
+    {
+        error = "numChannels must be 1 or 2";
+        return false;
+    }
+    if ((int)bandOffsets.size() < numBands || (int)bandLengths.size() < numBands)
+    {
+        error = "band tables are shorter than numBands";
+        return false;
+    }
+    for (int b = 0; b < numBands; ++b)
+    {
+        const size_t end = (size_t)bandOffsets[b] + (size_t)bandLengths[b];
+        if (end * 4 > packedLen)
+        {
+            error = "band layout runs past the end of the packed buffer";
+            return false;
+        }
+    }
+    return true;
+}
+
 // ─── HpssWorker ──────────────────────────────────────────────────────────────
 
 class HpssWorker : public Napi::AsyncWorker
@@ -2786,6 +2877,13 @@ public:
 
     void Execute() override
     {
+        std::string error;
+        if (!bandTablesFit(numBands, numChannels, packedData.size(), bandOffsets, bandLengths, error))
+        {
+            SetError("hpss: " + error);
+            return;
+        }
+
         const int floatsPerPixel = 4;
         // Start with full copies — phase channels are preserved untouched
         harmonicData   = packedData;
@@ -2935,6 +3033,13 @@ public:
 
     void Execute() override
     {
+        std::string error;
+        if (!bandTablesFit(numBands, numChannels, packedData.size(), bandOffsets, bandLengths, error))
+        {
+            SetError("nmf: " + error);
+            return;
+        }
+
         const int floatsPerPixel = 4;
         const float eps = 1e-10f;
         const int K = numComponents;
@@ -3214,6 +3319,13 @@ public:
                 SetError("mergeSpectrograms inputs must all be the same length");
                 return;
             }
+        }
+
+        std::string error;
+        if (!bandTablesFit(numBands, numChannels, len, bandOffsets, bandLengths, error))
+        {
+            SetError("mergeSpectrograms: " + error);
+            return;
         }
 
         const int floatsPerPixel = 4;
@@ -3814,6 +3926,22 @@ public:
 
     void Execute() override
     {
+        const size_t valueCount = base.byteLength / HISTORY_VALUE_BYTES;
+        if (after.byteLength != base.byteLength)
+        {
+            SetError("history footprint: the painted state is a different size to the base");
+            return;
+        }
+        for (size_t r = 0; r + 1 < ranges.size(); r += 2)
+        {
+            const size_t end = (static_cast<size_t>(ranges[r]) + ranges[r + 1]) * HISTORY_CHANNELS;
+            if (end > valueCount)
+            {
+                SetError("history footprint: footprint range runs past the end of the state");
+                return;
+            }
+        }
+
         const uint32_t *baseBits = reinterpret_cast<const uint32_t *>(base.data);
         const uint32_t *afterBits = reinterpret_cast<const uint32_t *>(after.data);
         for (size_t r = 0; r + 1 < ranges.size(); r += 2)

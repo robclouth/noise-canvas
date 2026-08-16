@@ -7,7 +7,20 @@ static std::unique_ptr<ableton::Link> gLink;
 static Napi::ThreadSafeFunction gTempoTsfn;
 static Napi::ThreadSafeFunction gStartStopTsfn;
 static Napi::ThreadSafeFunction gNumPeersTsfn;
+// Link's callbacks run on its own thread, while SetCallbacks and Destroy
+// release the ThreadSafeFunctions from the JS thread. The mutex makes the
+// "registered?" check and the call one step, so a callback arriving during a
+// release cannot reach a ThreadSafeFunction that has already been let go.
 static bool gCallbacksRegistered = false;
+static std::mutex gCallbacksMutex;
+
+static void releaseCallbacksLocked() {
+  if (!gCallbacksRegistered) return;
+  gTempoTsfn.Release();
+  gStartStopTsfn.Release();
+  gNumPeersTsfn.Release();
+  gCallbacksRegistered = false;
+}
 
 Napi::Value Create(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
@@ -20,6 +33,7 @@ Napi::Value Create(const Napi::CallbackInfo& info) {
   gLink = std::make_unique<ableton::Link>(bpm);
 
   gLink->setTempoCallback([](double tempo) {
+    std::lock_guard<std::mutex> lock(gCallbacksMutex);
     if (gCallbacksRegistered) {
       double* data = new double(tempo);
       gTempoTsfn.NonBlockingCall(data, [](Napi::Env env, Napi::Function fn, double* tempo) {
@@ -30,6 +44,7 @@ Napi::Value Create(const Napi::CallbackInfo& info) {
   });
 
   gLink->setStartStopCallback([](bool isPlaying) {
+    std::lock_guard<std::mutex> lock(gCallbacksMutex);
     if (gCallbacksRegistered) {
       bool* data = new bool(isPlaying);
       gStartStopTsfn.NonBlockingCall(data, [](Napi::Env env, Napi::Function fn, bool* isPlaying) {
@@ -40,6 +55,7 @@ Napi::Value Create(const Napi::CallbackInfo& info) {
   });
 
   gLink->setNumPeersCallback([](std::size_t numPeers) {
+    std::lock_guard<std::mutex> lock(gCallbacksMutex);
     if (gCallbacksRegistered) {
       std::size_t* data = new std::size_t(numPeers);
       gNumPeersTsfn.NonBlockingCall(data, [](Napi::Env env, Napi::Function fn, std::size_t* numPeers) {
@@ -61,11 +77,9 @@ Napi::Value SetCallbacks(const Napi::CallbackInfo& info) {
 
   Napi::Object callbacks = info[0].As<Napi::Object>();
 
-  if (gCallbacksRegistered) {
-    gTempoTsfn.Release();
-    gStartStopTsfn.Release();
-    gNumPeersTsfn.Release();
-    gCallbacksRegistered = false;
+  {
+    std::lock_guard<std::mutex> lock(gCallbacksMutex);
+    releaseCallbacksLocked();
   }
 
   Napi::Function onTempo = callbacks.Get("onTempoChanged").As<Napi::Function>();
@@ -79,16 +93,15 @@ Napi::Value SetCallbacks(const Napi::CallbackInfo& info) {
   gNumPeersTsfn = Napi::ThreadSafeFunction::New(
     env, onNumPeers, "LinkNumPeersCallback", 0, 1);
 
+  std::lock_guard<std::mutex> lock(gCallbacksMutex);
   gCallbacksRegistered = true;
   return env.Undefined();
 }
 
 Napi::Value Destroy(const Napi::CallbackInfo& info) {
-  if (gCallbacksRegistered) {
-    gTempoTsfn.Release();
-    gStartStopTsfn.Release();
-    gNumPeersTsfn.Release();
-    gCallbacksRegistered = false;
+  {
+    std::lock_guard<std::mutex> lock(gCallbacksMutex);
+    releaseCallbacksLocked();
   }
   gLink.reset();
   return info.Env().Undefined();
