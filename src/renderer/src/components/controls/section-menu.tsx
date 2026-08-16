@@ -4,17 +4,12 @@ import { openConfirm, openPrompt } from "@renderer/lib/modals";
 import type { SectionPreset, SectionScope, SectionTarget } from "@renderer/lib/section-presets";
 import { LABEL_WIDTH } from "@renderer/lib/ui-density";
 import { helpProps } from "@renderer/lib/ui-controls";
-import { isEffectParameter, parameterDefs } from "@renderer/parameters";
-import { getEffectParameterValue, getModulationParamKeys, getParameterValue, useStore } from "@renderer/store";
+import { getParameterValue, useStore } from "@renderer/store";
+import { randomizeSectionParameters, resetSectionParameters } from "@renderer/store/section-actions";
 import { ParameterKey } from "@renderer/store/types";
 import { Copy, MoreVertical, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
-import {
-  randomizeBooleanParameter,
-  randomizeEffects,
-  randomizeNumberParameter,
-  randomizeOptionsParameter,
-} from "../../lib/randomize";
+import { randomizeEffects } from "../../lib/randomize";
 import { SectionHeading } from "../section-heading";
 import { Tooltip } from "../tooltip";
 import { HelpActionIcon, HelpButton } from "./help-control";
@@ -125,74 +120,19 @@ export const SectionMenu = ({
 
   const handleReset = () => {
     if (!parameterKeys) return;
-    parameterKeys.forEach((key) => {
-      const def = parameterDefs[key];
-      if (def) {
-        const useEffectScope = effectId && isEffectParameter(key);
-        setParameter(key, def.default, useEffectScope ? effectId : undefined);
-        // Also reset modulation amounts for modulatable params
-        if (def.kind === "number" && def.modulatable) {
-          const modKeys = getModulationParamKeys(key);
-          modKeys.forEach((modKey) => {
-            const modDef = parameterDefs[modKey];
-            if (modDef) {
-              setParameter(modKey, modDef.default, useEffectScope ? effectId : undefined);
-            }
-          });
-        }
-      }
-    });
+    resetSectionParameters(parameterKeys, effectId, useStore.getState, setParameter);
   };
 
   const handleRandomize = () => {
     if (!parameterKeys || amount <= 0) return;
 
-    parameterKeys.forEach((key) => {
-      // Skip excluded params
-      if (excludedFromRandomization.includes(key as string)) return;
-
-      const def = parameterDefs[key];
-      if (!def) return;
-
-      const state = useStore.getState();
-      const useEffectScope = effectId && isEffectParameter(key);
-      const currentValue = useEffectScope
-        ? getEffectParameterValue(state, effectId, key)
-        : getParameterValue(state, key);
-
-      let newValue: unknown;
-      switch (def.kind) {
-        case "number":
-          newValue = randomizeNumberParameter(currentValue as number, def.min, def.max, amount);
-          break;
-        case "options":
-          newValue = randomizeOptionsParameter(
-            currentValue,
-            def.options.map((o: { value: unknown }) => o.value),
-            amount,
-          );
-          break;
-        case "boolean":
-          newValue = randomizeBooleanParameter(currentValue as boolean, amount);
-          break;
-        default:
-          return;
-      }
-
-      setParameter(key, newValue, useEffectScope ? effectId : undefined);
-
-      // Also randomize modulation amounts if enabled and parameter is modulatable
-      if (modulationEnabled && def.kind === "number" && def.modulatable) {
-        const modKeys = getModulationParamKeys(key);
-        modKeys.forEach((modKey) => {
-          const modDef = parameterDefs[modKey];
-          if (modDef && modDef.kind === "number") {
-            const newModValue = randomizeNumberParameter(0, modDef.min, modDef.max, amount);
-            setParameter(modKey, newModValue, useEffectScope ? effectId : undefined);
-          }
-        });
-      }
-    });
+    randomizeSectionParameters(
+      parameterKeys,
+      effectId,
+      { amount, modulationEnabled, excluded: excludedFromRandomization },
+      useStore.getState,
+      setParameter,
+    );
 
     // Randomize effects if enabled
     if (includeEffects) {
