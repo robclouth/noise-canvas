@@ -576,12 +576,18 @@ export class HistoryManager {
     useStore.getState().setFileDirty(this.fileId, this.manifest.currentId !== savedId);
   }
 
-  // Record that the current node's audio has been written to disk, so it becomes
-  // the clean reference for the dirty flag.
-  async markSaved(): Promise<void> {
+  /** The id of the node the file sits on now. Null until the history loads. */
+  async currentNodeId(): Promise<string | null> {
+    await this.initialize();
+    return this.manifest?.currentId ?? null;
+  }
+
+  // Record that a node's audio has been written to disk, so it becomes the
+  // clean reference for the dirty flag. Defaults to the current node.
+  async markSaved(nodeId?: string): Promise<void> {
     await this.initialize();
     if (!this.manifest) return;
-    this.manifest.savedNodeId = this.manifest.currentId;
+    this.manifest.savedNodeId = nodeId ?? this.manifest.currentId;
     this.scheduleManifestWrite();
     this.syncDirty();
   }

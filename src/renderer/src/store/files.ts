@@ -15,7 +15,7 @@ import { computeOutputLevels, outputLevelPoints, spliceOutputLevels, type Output
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
-import { whenFileTasksSettle } from "../lib/file-task-queue";
+import { serializeFileTask } from "../lib/file-task-queue";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import { disposeOnsetTexture, packOnsetState, spliceOnsets, unpackOnsetState } from "../lib/onset-map";
 import { commitStrokeOf, commitWindowOf, projectsWholeFile, type StrokeCommitSnapshot } from "../lib/stroke-commit";
@@ -687,6 +687,25 @@ async function rebuildFileFromAudio(
 async function readCurrentPackedData(file: OpenFile): Promise<Float32Array | undefined> {
   const fboData = await file.rendererRef?.current?.getFBOData();
   return fboData ?? file.spectrogramData?.packedData;
+}
+
+type FileAudioSnapshot = { nodeId: string | null; channels: Float32Array[]; sampleRate: number };
+
+/**
+ * Take `fileId`'s audio channels and the history node they came from together,
+ * queued behind any stroke commit or history navigation still deriving them.
+ */
+async function snapshotFileAudio(fileId: string): Promise<FileAudioSnapshot | null> {
+  return serializeFileTask(fileId, async () => {
+    const current = openFiles[fileId];
+    if (!current?.audioBuffer) return null;
+    const nodeId = await getHistoryManager(fileId).currentNodeId();
+    const channels: Float32Array[] = [];
+    for (let i = 0; i < current.audioBuffer.numberOfChannels; i++) {
+      channels.push(new Float32Array(current.audioBuffer.getChannelData(i)));
+    }
+    return { nodeId, channels, sampleRate: current.audioBuffer.sampleRate };
+  });
 }
 
 // Insert placeholder files for a pending split directly after their source so
@@ -1449,21 +1468,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         danger: true,
         onConfirm: async () => {
           try {
-            // A stroke released just before Save is still deriving its audio and
-            // its history node; without the wait the file on disk is the one
-            // from before it, and markSaved marks the node it superseded.
-            await whenFileTasksSettle(fileId);
-            const current = openFiles[fileId];
-            if (!current?.audioBuffer) {
+            const snapshot = await snapshotFileAudio(fileId);
+            if (!snapshot) {
               resolve();
               return;
-            }
-
-            // Copy the audio channels out of the AudioBuffer at their final level.
-            const numChannels = current.audioBuffer.numberOfChannels;
-            const audioChannels: Float32Array[] = [];
-            for (let i = 0; i < numChannels; i++) {
-              audioChannels.push(new Float32Array(current.audioBuffer.getChannelData(i)));
             }
 
             // Determine format from file extension
@@ -1471,10 +1479,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
             const format = ext || "wav";
 
             // Export the audio
-            await host.analysis.exportAudio(audioChannels, filePath, current.audioBuffer.sampleRate, format);
+            await host.analysis.exportAudio(snapshot.channels, filePath, snapshot.sampleRate, format);
 
-            // The current history node now matches what's on disk.
-            await getHistoryManager(fileId).markSaved();
+            await getHistoryManager(fileId).markSaved(snapshot.nodeId ?? undefined);
             console.log("File saved successfully:", filePath);
 
             // Show success notification
@@ -1527,25 +1534,15 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const truncatedFileName = truncateMiddle(savedFileName, 50);
 
     try {
-      // A stroke released just before Save As is still deriving its audio;
-      // without the wait the exported file is the one from before it.
-      await whenFileTasksSettle(state.activeFileId);
-      const current = openFiles[state.activeFileId];
-      if (!current?.audioBuffer) return;
-
-      // Copy the audio channels out of the AudioBuffer at their final level.
-      const numChannels = current.audioBuffer.numberOfChannels;
-      const audioChannels: Float32Array[] = [];
-      for (let i = 0; i < numChannels; i++) {
-        audioChannels.push(new Float32Array(current.audioBuffer.getChannelData(i)));
-      }
+      const snapshot = await snapshotFileAudio(state.activeFileId);
+      if (!snapshot) return;
 
       // Determine format from file extension
       const ext = host.path.extname(outputPath).slice(1).toLowerCase();
       const format = ext || "wav";
 
       // Export the audio
-      await host.analysis.exportAudio(audioChannels, outputPath, current.audioBuffer.sampleRate, format);
+      await host.analysis.exportAudio(snapshot.channels, outputPath, snapshot.sampleRate, format);
 
       // Update file path in openFiles and copy BPM mapping to new path
       const oldFilePath = file.filePath;
@@ -1578,8 +1575,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         void migrateRefsInPresetFiles(presetsDir, oldFilePath, outputPath);
       }
 
-      // The active file is now a real file whose current node matches disk.
-      await getHistoryManager(state.activeFileId!).markSaved();
+      // The active file is now a real file whose exported node matches disk.
+      await getHistoryManager(state.activeFileId!).markSaved(snapshot.nodeId ?? undefined);
       console.log("File saved as:", outputPath);
 
       // Show success notification
@@ -1636,18 +1633,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const truncatedFileName = truncateMiddle(newFileName, 50);
 
     try {
-      // Copy the audio channels out of the AudioBuffer at their final level.
-      const numChannels = file.audioBuffer.numberOfChannels;
-      const audioChannels: Float32Array[] = [];
-      for (let i = 0; i < numChannels; i++) {
-        audioChannels.push(new Float32Array(file.audioBuffer.getChannelData(i)));
-      }
+      const snapshot = await snapshotFileAudio(state.activeFileId);
+      if (!snapshot) return;
 
       // Determine format from file extension
       const format = ext.slice(1).toLowerCase() || "wav";
 
       // Export the audio
-      await host.analysis.exportAudio(audioChannels, outputPath, file.audioBuffer.sampleRate, format);
+      await host.analysis.exportAudio(snapshot.channels, outputPath, snapshot.sampleRate, format);
 
       // Update file path in openFiles and copy BPM mapping to new path
       const oldFilePath = file.filePath;
@@ -1673,8 +1666,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         void migrateRefsInPresetFiles(presetsDir, oldFilePath, outputPath);
       }
 
-      // The active file now points at the version on disk at the current node.
-      await getHistoryManager(state.activeFileId!).markSaved();
+      // The active file now points at the version on disk at the exported node.
+      await getHistoryManager(state.activeFileId!).markSaved(snapshot.nodeId ?? undefined);
       console.log("File version saved:", outputPath);
 
       // Show success notification
@@ -1693,11 +1686,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
   },
   tryCloseFile: async (fileId: string) => {
-    const state = get();
     const file = openFiles[fileId];
     if (!file) return;
 
-    const refs = findFileReferences(file.filePath, state.brushes);
+    const refs = findFileReferences(file.filePath, get().brushes);
     if (refs.length > 0) {
       const fileName = file.filePath.split("/").pop() || file.filePath;
       const refList = refs.map((r) => `${r.brushName} (${r.paramLabel})`).join(", ");
@@ -1713,32 +1705,33 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         });
       });
       if (!confirmed) return;
+    }
 
-      // The confirmation undertook to remove them. Left in place, the next
-      // stroke with that brush finds no open file at the path and silently
-      // samples the destination instead.
+    if (get().filesDirty[fileId]) {
+      const confirmed = await new Promise<boolean>((resolve) => {
+        openConfirm({
+          title: "Unsaved Changes",
+          message: `Are you sure you want to close this file without saving?`,
+          confirmLabel: "Close",
+          danger: true,
+          onConfirm: () => resolve(true),
+          onCancel: () => resolve(false),
+          onClose: () => resolve(false),
+        });
+      });
+      if (!confirmed) return;
+    }
+
+    // Left in place, the next stroke with that brush finds no open file at the
+    // path and silently samples the destination instead.
+    if (refs.length > 0) {
       set(
         produce((draft: State) => {
           clearFileReferences(file.filePath, draft.brushes);
         }),
       );
     }
-
-    if (state.filesDirty[fileId]) {
-      await new Promise<void>((resolve) => {
-        openConfirm({
-          title: "Unsaved Changes",
-          message: `Are you sure you want to close this file without saving?`,
-          confirmLabel: "Close",
-          danger: true,
-          onConfirm: async () => {
-            state.closeFile(fileId);
-            resolve();
-          },
-          onCancel: () => resolve(),
-        });
-      });
-    } else state.closeFile(fileId);
+    get().closeFile(fileId);
   },
   closeFile: (fileId: string) => {
     const openFile = openFiles[fileId];
@@ -1791,6 +1784,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const { activeFileId, setFileSynthesizing } = get();
     if (!activeFileId) return;
 
+    let generation = 0;
+
     try {
       const file = openFiles[fileId];
       if (!file || !file.rendererRef?.current || !file.spectrogramData) {
@@ -1801,7 +1796,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
       // Undo and redo each fire their own synthesis, and the one that finishes
       // last would otherwise install its audio whatever the canvas now shows.
-      const generation = (fileSynthesisGeneration.get(fileId) ?? 0) + 1;
+      generation = (fileSynthesisGeneration.get(fileId) ?? 0) + 1;
       fileSynthesisGeneration.set(fileId, generation);
 
       const originalAnalysis = file.spectrogramData;
@@ -1959,7 +1954,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     } catch (error) {
       console.error("Error running synthesis:", error);
     } finally {
-      setFileSynthesizing(fileId, false);
+      // A newer synthesis owns the flag and clears it when it finishes.
+      if (fileSynthesisGeneration.get(fileId) === generation) setFileSynthesizing(fileId, false);
     }
   },
   applySynthesizedAudio: async (fileId, result, options = {}) => {

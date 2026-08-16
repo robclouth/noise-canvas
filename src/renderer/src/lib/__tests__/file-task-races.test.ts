@@ -6,6 +6,11 @@ const gate = vi.hoisted(() => ({
   synthesize: [] as ((result: unknown) => void)[],
   exported: [] as { path: string; channels: Float32Array[] }[],
   confirmed: true,
+  declineTitles: [] as string[],
+  nodeId: "n1",
+  markedSaved: [] as (string | undefined)[],
+  holdExport: false,
+  releaseExport: null as (() => void) | null,
 }));
 
 vi.mock("@renderer/effects", () => ({
@@ -13,15 +18,20 @@ vi.mock("@renderer/effects", () => ({
 }));
 vi.mock("@mantine/notifications", () => ({ notifications: { show: vi.fn() } }));
 vi.mock("../modals", () => ({
-  openConfirm: vi.fn((opts: { onConfirm?: () => void; onCancel?: () => void }) => {
-    if (gate.confirmed) void opts.onConfirm?.();
+  openConfirm: vi.fn((opts: { title: string; onConfirm?: () => void; onCancel?: () => void }) => {
+    if (gate.confirmed && !gate.declineTitles.includes(opts.title)) void opts.onConfirm?.();
     else void opts.onCancel?.();
   }),
   openNewFilePrompt: vi.fn(),
 }));
 vi.mock("../history-manager", () => ({
   destroyHistoryManager: vi.fn(async () => {}),
-  getHistoryManager: vi.fn(() => ({ markSaved: vi.fn(async () => {}) })),
+  getHistoryManager: vi.fn(() => ({
+    currentNodeId: vi.fn(async () => gate.nodeId),
+    markSaved: vi.fn(async (nodeId?: string) => {
+      gate.markedSaved.push(nodeId);
+    }),
+  })),
 }));
 vi.mock("../onset-map", () => ({
   disposeOnsetTexture: vi.fn(),
@@ -52,6 +62,7 @@ vi.mock("../host", () => ({
       synthesize: () => new Promise((resolve) => gate.synthesize.push(resolve)),
       exportAudio: async (channels: Float32Array[], path: string) => {
         gate.exported.push({ path, channels: channels.map((c) => Float32Array.from(c)) });
+        if (gate.holdExport) await new Promise<void>((resolve) => (gate.releaseExport = resolve));
       },
     },
   },
@@ -124,6 +135,14 @@ function synthResult(marker: number) {
   return { channels: [Float32Array.from([marker])], peak: 1 };
 }
 
+function audioBuffer(samples: number[]) {
+  return {
+    numberOfChannels: 1,
+    sampleRate: 48000,
+    getChannelData: () => Float32Array.from(samples),
+  } as unknown as AudioBuffer;
+}
+
 describe("two synthesis passes racing", () => {
   beforeEach(() => {
     for (const id of Object.keys(openFiles)) delete openFiles[id];
@@ -153,6 +172,26 @@ describe("two synthesis passes racing", () => {
     expect(get().filesSynthesizing[FILE_ID]).toBeFalsy();
   });
 
+  it("holds the synthesising flag until the newest pass finishes", async () => {
+    const applySynthesizedAudio = vi.fn(async () => {});
+    const { get, files } = makeStore({ applySynthesizedAudio } as unknown as Partial<State>);
+    openTestFile();
+
+    const first = files.synthesizeFile(FILE_ID);
+    await vi.waitFor(() => expect(gate.synthesize).toHaveLength(1));
+    const second = files.synthesizeFile(FILE_ID);
+    await vi.waitFor(() => expect(gate.synthesize).toHaveLength(2));
+
+    // The superseded pass returns first, while the newer one still runs.
+    gate.synthesize[0](synthResult(1));
+    await first;
+    expect(get().filesSynthesizing[FILE_ID]).toBe(true);
+
+    gate.synthesize[1](synthResult(2));
+    await second;
+    expect(get().filesSynthesizing[FILE_ID]).toBe(false);
+  });
+
   it("applies the result when nothing supersedes it", async () => {
     const applySynthesizedAudio = vi.fn(async () => {});
     const { files } = makeStore({ applySynthesizedAudio } as unknown as Partial<State>);
@@ -172,18 +211,15 @@ describe("saving while a stroke is still committing", () => {
     for (const id of Object.keys(openFiles)) delete openFiles[id];
     gate.exported = [];
     gate.confirmed = true;
+    gate.nodeId = "n1";
+    gate.markedSaved = [];
+    gate.holdExport = false;
+    gate.releaseExport = null;
   });
 
   it("writes the audio the queued commit produces, not the one it replaces", async () => {
     const { files } = makeStore();
     openTestFile("/audio/a.wav");
-    const audioBuffer = (samples: number[]) =>
-      ({
-        numberOfChannels: 1,
-        sampleRate: 48000,
-        getChannelData: () => Float32Array.from(samples),
-      }) as unknown as AudioBuffer;
-
     openFiles[FILE_ID].audioBuffer = audioBuffer([1]);
 
     // The commit tail of a stroke released a moment ago.
@@ -202,12 +238,32 @@ describe("saving while a stroke is still committing", () => {
     expect(gate.exported).toHaveLength(1);
     expect(Array.from(gate.exported[0].channels[0])).toEqual([2]);
   });
+
+  it("marks the node it exported, not one a stroke adds during the write", async () => {
+    const { files } = makeStore();
+    openTestFile("/audio/a.wav");
+    openFiles[FILE_ID].audioBuffer = audioBuffer([1]);
+
+    gate.nodeId = "before";
+    gate.holdExport = true;
+
+    const saving = files.saveActiveFile();
+    await vi.waitFor(() => expect(gate.releaseExport).not.toBeNull());
+
+    // A stroke commits while the write is still in flight.
+    gate.nodeId = "after";
+    gate.releaseExport!();
+    await saving;
+
+    expect(gate.markedSaved).toEqual(["before"]);
+  });
 });
 
 describe("closing a file other brushes read from", () => {
   beforeEach(() => {
     for (const id of Object.keys(openFiles)) delete openFiles[id];
     gate.confirmed = true;
+    gate.declineTitles = [];
   });
 
   function brushReferencing(path: string): Brush {
@@ -236,6 +292,21 @@ describe("closing a file other brushes read from", () => {
     gate.confirmed = false;
     const brushes = [brushReferencing("/audio/src.wav")];
     const { get, files } = makeStore({ brushes } as unknown as Partial<State>);
+    openTestFile("/audio/src.wav");
+
+    await files.tryCloseFile(FILE_ID);
+
+    expect(get().brushes[0].steps[0].sourceFile).toEqual({ path: "/audio/src.wav", name: "src.wav" });
+    expect(openFiles[FILE_ID]).toBeDefined();
+  });
+
+  it("keeps the references when the unsaved-changes prompt is cancelled", async () => {
+    gate.declineTitles = ["Unsaved Changes"];
+    const brushes = [brushReferencing("/audio/src.wav")];
+    const { get, files } = makeStore({
+      brushes,
+      filesDirty: { [FILE_ID]: true },
+    } as unknown as Partial<State>);
     openTestFile("/audio/src.wav");
 
     await files.tryCloseFile(FILE_ID);

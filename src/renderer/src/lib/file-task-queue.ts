@@ -24,19 +24,6 @@ export function serializeFileTask<T>(fileId: string, task: () => Promise<T>): Pr
   return result;
 }
 
-/**
- * Resolves once the tasks queued for `fileId` have drained. Rejections in the
- * queue are absorbed: callers wait for quiescence, not for success.
- */
-export function whenFileTasksSettle(fileId: string): Promise<void> {
-  const tail = chains.get(fileId);
-  if (!tail) return Promise.resolve();
-  return tail.then(
-    () => {},
-    () => {},
-  );
-}
-
 /** Forgets `fileId`'s chain. In-flight tasks still run to completion. */
 export function clearFileTaskQueue(fileId: string): void {
   chains.delete(fileId);
