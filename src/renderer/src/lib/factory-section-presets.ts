@@ -363,7 +363,7 @@ const presets: Omit<SectionPreset, "isFactory" | "color">[] = [
     id: "effect-attract-collapse",
     scope: "effect:attract",
     name: "Collapse",
-    description: "One wide valley — everything nearby lands on the energy centre.",
+    description: "One wide valley, so everything nearby lands on the energy centre.",
     values: { attractMap: 0, attractAmountX: 0, attractAmountY: 100, attractSmoothY: 16 },
   },
 

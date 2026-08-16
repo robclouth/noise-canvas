@@ -43,15 +43,15 @@ function getResolutionLabel(bpo: number): string {
 function getResolutionDetail(bpo: number): string {
   switch (bpo) {
     case 12:
-      return "12 bands/octave — sharpest transients, coarsest pitch.";
+      return "12 bands/octave: sharpest transients, coarsest pitch.";
     case 24:
-      return "24 bands/octave — leans toward time, still separates notes.";
+      return "24 bands/octave: leans towards time, still separates notes.";
     case 36:
-      return "36 bands/octave — the default, favouring neither.";
+      return "36 bands/octave: the default, favouring neither.";
     case 48:
-      return "48 bands/octave — leans toward pitch, at some cost to attacks.";
+      return "48 bands/octave: leans towards pitch, at some cost to attacks.";
     case 60:
-      return "60 bands/octave — finest pitch, softest transients.";
+      return "60 bands/octave: finest pitch, softest transients.";
     default:
       return `${bpo} bands/octave.`;
   }
@@ -65,7 +65,7 @@ const CHANNEL_OPTIONS = [
 /** What this file's own channel count means, under the shared sentence about the badge. */
 function getChannelDetail(channelCount: number): string {
   return channelCount === 1
-    ? "One channel — stereo effects have nothing to work across."
+    ? "One channel, so stereo effects have nothing to work across."
     : "Two channels, left and right.";
 }
 

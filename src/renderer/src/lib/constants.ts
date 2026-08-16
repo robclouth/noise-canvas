@@ -207,7 +207,7 @@ export const WRAP_MODES = [
 
 export const BRUSH_ANCHOR_MODES = [
   { value: 0, label: "Corner" },
-  { value: 1, label: "Center" },
+  { value: 1, label: "Centre" },
 ];
 
 export const BRUSH_ANCHOR_MODE_CORNER = 0;
@@ -222,7 +222,7 @@ export const CONTEXTUAL_MOD_SOURCES = [
   { key: "Iteration", label: "Iteration", description: "Iteration index (0-1 across brush iterations)" },
   { key: "Time", label: "Time Pos.", description: "Time position (0-1 across file duration)" },
   { key: "Pitch", label: "Pitch Pos.", description: "Pitch position (0-1 across frequency range)" },
-  { key: "Random", label: "Randomize", description: "Random value per stroke (0-1)" },
+  { key: "Random", label: "Randomise", description: "Random value per stroke (0-1)" },
   { key: "Step", label: "Step", description: "Step index (0-1 across steps)" },
   { key: "Pressure", label: "Pressure", description: "Pen pressure (0-1)" },
   { key: "TiltX", label: "Tilt X", description: "Pen tilt X (0-1, center=0.5)" },
@@ -265,7 +265,7 @@ export const EFFECT_LABELS: Record<string, string> = {
   transform: "Transform",
   blur: "Blur",
   clone: "Repeat",
-  synthesize: "Synthesize",
+  synthesize: "Synthesise",
   evolve: "Evolve",
   binaural: "Binaural",
   sort: "Sort",
@@ -277,20 +277,20 @@ export const EFFECT_LABELS: Record<string, string> = {
 };
 
 // Read at the moment of choosing, by someone who does not yet know what the
-// effect is: one line, verb first, naming the sound rather than the maths.
-// Modes belong on the effect card and mechanism belongs in the manual.
+// effect is: one sentence in two clauses, the operation first and the sound it
+// produces second. Modes and mechanism belong in the manual.
 export const EFFECT_DESCRIPTIONS: Record<string, string> = {
-  dynamics: "Squash, gate, expand or invert whatever the brush covers.",
-  transform: "Move sound through time and pitch — shift, stretch, rotate, reverse.",
-  blur: "Smear energy across time and pitch. Reverb, freeze, and soft edges.",
-  clone: "Copy what's there at beat and semitone offsets. Echoes and harmonies.",
-  synthesize: "Paint new sound from nothing — noise, tones, impulses.",
-  evolve: "Let the sound grow and flow on its own, into fluid or chaotic textures.",
-  binaural: "Place sound anywhere around the listener's head, in 3D.",
-  sort: "Reorder the bins by loudness or phase. Glitched, banded, pixel-sorted.",
-  transmute: "Bend magnitude and phase against each other for metallic, alien tones.",
-  waveshape: "Distort the spectrum itself — clipped, folded, wrapped, inverted.",
-  convolve: "Print the character of another sound onto this one. Reverbs and room tone.",
-  align: "Snap everything into one sharp impulse, then let it drift apart again.",
-  attract: "Pull energy toward a map — the scale, the grid, or the sound's own peaks.",
+  dynamics: "Compresses, gates, expands or inverts each band, into chopped and hollow sound.",
+  transform: "Slides, stretches and rotates the sound through time and pitch, or reverses it.",
+  blur: "Smears energy across time and pitch, into reverb tails, freezes and soft edges.",
+  clone: "Copies the sound at beat and semitone offsets, into echoes and stacked chords.",
+  synthesize: "Fills the brushed area with noise, tones or impulses: sound out of nothing.",
+  evolve: "Grows, spreads and decays the sound on its own, into fluid, unpredictable life.",
+  binaural: "Places the sound around the listener's head: left, right, close, far, behind.",
+  sort: "Reorders the bands by loudness or phase, banking them into glitched stripes.",
+  transmute: "Bends magnitude and phase against each other, into metallic, alien tones.",
+  waveshape: "Distorts the spectrum itself, into clipped, folded and wrapped tones.",
+  convolve: "Prints another sound's character onto this one: rooms, plates, resonant junk.",
+  align: "Snaps everything into one sharp impulse, then lets it drift apart again.",
+  attract: "Pulls energy onto a map of valleys, gathering smear into notes and hits.",
 };

@@ -102,7 +102,7 @@ export const TransportPanel = memo(() => {
                 help="transport-link"
                 detail={
                   linkEnabled
-                    ? `${linkNumPeers} peer${linkNumPeers !== 1 ? "s" : ""} — right-click for latency`
+                    ? `${linkNumPeers} peer${linkNumPeers !== 1 ? "s" : ""} · right-click for latency`
                     : "Right-click for latency"
                 }
                 onClick={() => setLinkEnabled(!linkEnabled)}

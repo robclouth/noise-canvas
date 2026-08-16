@@ -279,7 +279,7 @@ export const SectionMenu = ({
             {/* Randomize section */}
             {parameterKeys && (
               <>
-                <SectionHeading label="Randomize" />
+                <SectionHeading label="Randomise" />
                 <NumboxControl
                   labelComponent={
                     <Text size="xs" w={LABEL_WIDTH}>
@@ -315,7 +315,7 @@ export const SectionMenu = ({
                   size="xs"
                   mt={4}
                 >
-                  Randomize
+                  Randomise
                 </HelpButton>
               </>
             )}

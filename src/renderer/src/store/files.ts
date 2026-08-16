@@ -1071,7 +1071,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     clearLoading(set, ids);
-    registerStemGroup(get, "hpss", fileId, ids, `${baseLabel} — harmonic / percussive`);
+    registerStemGroup(get, "hpss", fileId, ids, `${baseLabel}: harmonic / percussive`);
   },
   nmfFile: async (fileId: string, numComponents: number) => {
     const originalFile = openFiles[fileId];
@@ -1108,7 +1108,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     clearLoading(set, ids);
-    registerStemGroup(get, "nmf", fileId, ids, `${baseLabel} — ${parts} parts`);
+    registerStemGroup(get, "nmf", fileId, ids, `${baseLabel}: ${parts} parts`);
   },
   mergeStems: async (fileIds: string[]) => {
     if (fileIds.length < 2) return;
@@ -1140,7 +1140,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (mismatched) {
       notifications.show({
         title: "Can't merge these files",
-        message: `'${truncateMiddle(mismatched.displayName, 40)}' no longer lines up with the others — its length or resolution has changed.`,
+        message: `'${truncateMiddle(mismatched.displayName, 40)}' no longer lines up with the others. Its length or resolution has changed.`,
         color: "red",
       });
       return;
@@ -1393,7 +1393,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     clearLoading(set, stemIds);
-    registerStemGroup(get, "ai", fileId, stemIds, `${baseLabel} — drums / bass / other / vocals`);
+    registerStemGroup(get, "ai", fileId, stemIds, `${baseLabel}: drums / bass / other / vocals`);
     aiSeparatingFileIds.delete(fileId);
   },
   saveActiveFile: async () => {
@@ -2176,8 +2176,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       .sort((a, b) => a.timestamp - b.timestamp);
     if (favorites.length === 0) {
       notifications.show({
-        title: "No favorites",
-        message: "Favorite nodes via the right-click menu first.",
+        title: "No favourites",
+        message: "Favourite nodes via the right-click menu first.",
         color: "yellow",
       });
       return;

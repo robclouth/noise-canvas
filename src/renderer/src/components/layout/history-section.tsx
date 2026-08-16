@@ -659,7 +659,7 @@ const HistoryRow = memo(function HistoryRow({
           ) : (
             <>
               <Menu.Item onClick={() => onToggleFavorite(node.id)}>
-                {node.favorited ? "Unfavorite" : "Favorite"}
+                {node.favorited ? "Unfavourite" : "Favourite"}
               </Menu.Item>
               <Menu.Item onClick={() => setEditing(true)}>Rename</Menu.Item>
               <Menu.Item onClick={() => onExportBranch(node.id)}>Export branch…</Menu.Item>
@@ -862,7 +862,7 @@ export function HistorySection() {
             void exportHistoryFavorites();
           }}
         >
-          Export Favorites…
+          Export Favourites…
         </Menu.Item>
         <Menu.Divider />
         <Menu.Item color="red" disabled={!manifest} onClick={onPurge}>

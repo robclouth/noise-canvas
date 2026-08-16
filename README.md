@@ -25,15 +25,15 @@ If it's worth money to you, please consider giving that money to people working 
 
 ## What it does
 
-- **Paint on spectrograms.** Brushes stamp effects across time and pitch, snapped to a musical grid and scale.
-- **10 spectral effects** — dynamics, transform, blur, repeat, synthesize, evolve, binaural, sort, convolve, attract — stackable and reorderable, several instances at a time.
+- **Paint on spectrograms.** Brushes paint effects across time and pitch, snapped to a musical grid and scale.
+- **10 spectral effects** — dynamics, transform, blur, repeat, synthesise, evolve, binaural, sort, convolve, attract — stackable and reorderable, several instances at a time.
 - **Multi-step brushes** with four macros, a preset library, and hotkeys.
 - **Deep modulation** — three per-pixel 2D modulators (patterns, procedural textures, your own images, envelope follower, sequencer), plus macros, pen pressure/tilt, and contextual sources.
-- **Branching history** that survives restarts, with favorites and per-branch audio export.
+- **Branching history** that survives restarts, with favourites and per-branch audio export.
 - **Stem splitting** — harmonic/percussive, NMF, or AI separation — with lossless merge back.
 - **Slots into any DAW** as its external sample editor. Ableton Live goes further: a Live 12 extension embeds the whole editor, and Ableton Link keeps tempo in sync.
 
-Everything runs on the GPU and resynthesizes after every stroke, so you hear the real audio immediately.
+Everything runs on the GPU and resynthesises after every stroke, so you hear the real audio immediately.
 
 ---
 

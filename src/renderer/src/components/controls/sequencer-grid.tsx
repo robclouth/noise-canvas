@@ -333,7 +333,7 @@ export function SequencerGrid({ modulatorIndex }: SequencerGridProps) {
   }, [drawCanvas, canvasSize]);
 
   const readout = hover
-    ? `Step ${hover.col + 1} · Band ${hover.row + 1} — ${Math.round(grid.values[hover.row][hover.col] * 100)}%${
+    ? `Step ${hover.col + 1} · Band ${hover.row + 1} · ${Math.round(grid.values[hover.row][hover.col] * 100)}%${
         grid.off[hover.row][hover.col] ? " off" : ""
       }`
     : HINT;
