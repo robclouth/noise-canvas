@@ -10,6 +10,8 @@ import {
 } from "three";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { EffectItem } from "../../effects/types";
+import { createEffectStateView } from "../../store";
 import { SpectrogramData, State } from "../../store/types";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState } from "../../test/mock-state";
@@ -276,6 +278,69 @@ describe("Attract effect", () => {
     const ratio = totalEnergy(outputData) / totalEnergy(initialData);
     expect(ratio).toBeGreaterThan(0.25);
     expect(ratio).toBeLessThan(4);
+
+    renderer.dispose();
+  });
+
+  it("skips the pitch pass when the pitch pull is zero", async () => {
+    const { attractEffect } = await import("../../effects/attract-effect");
+    const state = createAttractState({ attractMap: 0, attractAmountX: 100, attractAmountY: 0 });
+    const step = state.brushes[state.activeBrushIndex]?.steps?.[0] as unknown as { effects: EffectItem[] };
+    const passes = attractEffect.getActivePasses?.(createEffectStateView(state, 0, step.effects[0]));
+    expect(passes).toEqual([1]);
+  });
+
+  it("keeps a time-only pull from carving band-dependent energy structure", async () => {
+    textures.packedDataTex.dispose();
+    textures.originalPackedDataTex.dispose();
+    textures.inverseMapTex.dispose();
+    textures.metadataTex.dispose();
+    spectrogramData = createMockSpectrogramData({
+      numFrames: 256,
+      numBands: 32,
+      sampleRate: 1000,
+      pattern: "sine",
+    });
+    textures = createTexturesFromSpectrogramData(spectrogramData);
+
+    const renderer = createRenderer();
+    const state = createAttractState({
+      attractMap: 0,
+      attractAmountX: 100,
+      attractAmountY: 0,
+      attractSmoothX: 0.05,
+    });
+    const sourceFile = createSourceFile(renderer);
+
+    const initialData = await renderer.getFBOData();
+    renderer.renderStroke(strokeParams(), state, sourceFile);
+    const outputData = await renderer.getFBOData();
+
+    const { numFrames, numBands } = spectrogramData;
+    const ratios: number[] = [];
+    let changed = 0;
+    for (let band = 0; band < numBands; band++) {
+      let eBefore = 0;
+      let eAfter = 0;
+      let bandChanged = false;
+      for (let frame = 0; frame < numFrames; frame++) {
+        const i = (band * numFrames + frame) * 4;
+        eBefore += initialData[i] * initialData[i];
+        eAfter += outputData[i] * outputData[i];
+        if (Math.abs(outputData[i] - initialData[i]) > 1e-4) {
+          changed++;
+          bandChanged = true;
+        }
+      }
+      if (bandChanged && eBefore > 1e-9) ratios.push(eAfter / eBefore);
+    }
+
+    expect(changed).toBeGreaterThan(0);
+    expect(ratios.length).toBeGreaterThan(4);
+    const minRatio = Math.min(...ratios);
+    const maxRatio = Math.max(...ratios);
+    expect(minRatio).toBeGreaterThan(0.7);
+    expect(maxRatio / minRatio).toBeLessThan(1.3);
 
     renderer.dispose();
   });

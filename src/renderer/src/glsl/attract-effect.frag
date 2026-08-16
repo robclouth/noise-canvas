@@ -162,6 +162,8 @@ void main() {
 
   vec2 accL = vec2(0.0);
   vec2 accR = vec2(0.0);
+  float energyL = 0.0;
+  float energyR = 0.0;
 
   if (attractAxis == 0) {
     // ---- Pitch pass: gather bands whose pulled energy lands on this band.
@@ -384,13 +386,28 @@ void main() {
       float tJ = attractCoeffTimeSec(jUv.x, destMeta.b);
       float phaseAdd = contentAdvance(0.0, fcDest, tDCoeff - tJ);
 
-      accL += toComplex(vec2(getMag(jTexel.rg) * hat, jTexel.g + phaseAdd));
-      accR += toComplex(vec2(getMag(jTexel.ba) * hat, jTexel.a + phaseAdd));
+      // A contribution splits over two adjacent bins with weights hat and
+      // 1 - hat, so the pair conserves energy only after this normalisation.
+      float splat = hat * inversesqrt(hat * hat + (1.0 - hat) * (1.0 - hat));
+      float wMagL = getMag(jTexel.rg) * splat;
+      float wMagR = getMag(jTexel.ba) * splat;
+      accL += toComplex(vec2(wMagL, jTexel.g + phaseAdd));
+      accR += toComplex(vec2(wMagR, jTexel.a + phaseAdd));
+      energyL += wMagL * wMagL;
+      energyR += wMagR * wMagR;
     }
   }
 
   vec2 polL = accL == vec2(0.0) ? vec2(0.0) : polarFromComplex(accL);
   vec2 polR = accR == vec2(0.0) ? vec2(0.0) : polarFromComplex(accR);
+  // The time pass takes its magnitude from the energy sum: merged
+  // contributions from different origin times interfere at 2*PI*fc*dt in the
+  // complex sum, which would comb the spectrum; the complex sum only supplies
+  // the phase.
+  if (attractAxis == 1) {
+    polL = energyL > 0.0 ? vec2(sqrt(energyL), polL.y) : vec2(0.0);
+    polR = energyR > 0.0 ? vec2(sqrt(energyR), polR.y) : vec2(0.0);
+  }
   vec4 resultTexel = vec4(limitMagnitude(polL), limitMagnitude(polR));
 
   outColor = applyBrush(originalTexel, resultTexel, weight, coords.dest, vUv);
