@@ -3,11 +3,11 @@ import { host } from "./host";
 // GPU bytes per packed texel one open file keeps resident: two ping-pong FBOs
 // (2 × RGBA32F = 32), the pristine packed texture (RGBA32F = 16) and the
 // inverse map (RG32F = 8).
-const GPU_BYTES_PER_TEXEL_FILE = 56;
+export const GPU_BYTES_PER_TEXEL_FILE = 56;
 // The shared stroke scratch pool, sized to the largest open file: two pass
 // FBOs (32), the stroke-start snapshot (16), two masks (R32F = 8) and the
-// two-target half-float modulator buffer (16).
-const GPU_BYTES_PER_TEXEL_SCRATCH = 72;
+// two-target modulator buffer (2 × RGBA32F = 32).
+export const GPU_BYTES_PER_TEXEL_SCRATCH = 88;
 // CPU-side copies (packedData 16, inverseMap 8); they compete with the
 // textures only on unified-memory GPUs.
 const CPU_BYTES_PER_TEXEL_FILE = 24;
