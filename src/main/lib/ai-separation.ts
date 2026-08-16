@@ -26,10 +26,26 @@ const MODEL_URLS: Record<string, string> = {
   "htdemucs.onnx": "https://huggingface.co/smank/htdemucs-onnx/resolve/main/htdemucs.onnx",
 };
 
+// One download per model, shared by every caller waiting for it. Two files
+// separated at once would otherwise run two transfers through the same `.part`,
+// each renaming or unlinking the other's file.
+const inFlightDownloads = new Map<string, Promise<void>>();
+
 export function downloadModel(
   modelFile: string,
   onProgress?: (downloaded: number, total: number) => void,
 ): Promise<void> {
+  const existing = inFlightDownloads.get(modelFile);
+  if (existing) return existing;
+
+  const download = startDownload(modelFile, onProgress).finally(() => {
+    inFlightDownloads.delete(modelFile);
+  });
+  inFlightDownloads.set(modelFile, download);
+  return download;
+}
+
+function startDownload(modelFile: string, onProgress?: (downloaded: number, total: number) => void): Promise<void> {
   const dest = getModelPath(modelFile);
   const url = MODEL_URLS[modelFile];
   if (!url) throw new Error(`No download URL configured for model: ${modelFile}`);
