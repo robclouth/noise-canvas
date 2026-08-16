@@ -127,8 +127,17 @@ export async function runSynthesizeFramed(request: ArrayBuffer): Promise<Uint8Ar
   result.channels.forEach((channel, i) => (channels[`channel${i}`] = channel));
   channels.gainReductionDb = result.gainReductionDb;
   if (result.onsets) channels.onsets = result.onsets;
+  // Carried, as commitStroke already does: without them the client cannot
+  // establish onsetReference, and every later pass falls back to a whole-file
+  // onset walk instead of the region the stroke touched.
+  if (result.onsetBandMax) channels.onsetBandMax = result.onsetBandMax;
   return encodeFrame({
-    meta: { peak: result.peak, numChannels: result.channels.length, maxGainReductionDb: result.maxGainReductionDb },
+    meta: {
+      peak: result.peak,
+      numChannels: result.channels.length,
+      maxGainReductionDb: result.maxGainReductionDb,
+      ...(result.onsetOdfMax !== undefined ? { onsetOdfMax: result.onsetOdfMax } : {}),
+    },
     arrays: channels,
   });
 }

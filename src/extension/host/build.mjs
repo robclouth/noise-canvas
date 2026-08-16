@@ -67,7 +67,11 @@ if (ffmpegSource) {
 
 const manifestPath = join(root, "src/extension/manifest.json");
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-await copyFile(manifestPath, join(outDir, "manifest.json"));
+// The app's version is the shipped one; the manifest carries no version of its
+// own, or the extension reports a stale number inside Live on every release.
+const appVersion = JSON.parse(await readFile(join(root, "package.json"), "utf8")).version;
+manifest.version = appVersion;
+await writeFile(join(outDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 
 // extensions-cli `run` requires a package.json in the extension directory; the
 // host itself loads via manifest.entry. main mirrors that entry so the dir reads

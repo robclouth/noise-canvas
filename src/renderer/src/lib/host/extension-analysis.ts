@@ -165,6 +165,8 @@ const synthesize: SynthesizeFn = async (
     gainReductionDb: f32(outArrays.gainReductionDb, "gainReductionDb"),
     maxGainReductionDb: Number(outMeta.maxGainReductionDb),
     onsets: outArrays.onsets ? f32(outArrays.onsets, "onsets") : undefined,
+    onsetOdfMax: outMeta.onsetOdfMax !== undefined ? Number(outMeta.onsetOdfMax) : undefined,
+    onsetBandMax: outArrays.onsetBandMax ? f32(outArrays.onsetBandMax, "onsetBandMax") : undefined,
   };
 };
 
