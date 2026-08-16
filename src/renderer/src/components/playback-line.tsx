@@ -72,7 +72,7 @@ export const PlaybackLine = ({ fileId }: PlaybackLineProps) => {
         height: "100%",
         pointerEvents: "none",
         display: "none",
-        zIndex: 1000,
+        zIndex: 11,
       }}
     />
   );
