@@ -386,8 +386,9 @@ void main() {
       float tJ = attractCoeffTimeSec(jUv.x, destMeta.b);
       float phaseAdd = contentAdvance(0.0, fcDest, tDCoeff - tJ);
 
-      // A contribution splits over two adjacent bins with weights hat and
-      // 1 - hat, so the pair conserves energy only after this normalisation.
+      // The tap lattice is anchored to this output, so the only two landings
+      // that can take this contribution sit tapUv apart and carry weights hat
+      // and 1 - hat. The pair conserves energy only after this normalisation.
       float splat = hat * inversesqrt(hat * hat + (1.0 - hat) * (1.0 - hat));
       float wMagL = getMag(jTexel.rg) * splat;
       float wMagR = getMag(jTexel.ba) * splat;

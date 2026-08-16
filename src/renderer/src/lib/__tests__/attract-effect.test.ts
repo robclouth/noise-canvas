@@ -339,8 +339,8 @@ describe("Attract effect", () => {
     expect(ratios.length).toBeGreaterThan(4);
     const minRatio = Math.min(...ratios);
     const maxRatio = Math.max(...ratios);
-    expect(minRatio).toBeGreaterThan(0.7);
-    expect(maxRatio / minRatio).toBeLessThan(1.3);
+    expect(minRatio).toBeGreaterThan(0.95);
+    expect(maxRatio / minRatio).toBeLessThan(1.05);
 
     renderer.dispose();
   });
