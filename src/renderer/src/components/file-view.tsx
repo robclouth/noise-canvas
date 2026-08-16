@@ -287,8 +287,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         newOffset = denom > 0 ? newViewStart / denom : 0;
         newOffset = Math.max(0, Math.min(1, newOffset));
       }
-      state.setFileZoom(fileId, clamped);
-      state.setFileOffset(fileId, newOffset);
+      state.setFileZoomAndOffset(fileId, clamped, newOffset);
     },
     [fileId],
   );

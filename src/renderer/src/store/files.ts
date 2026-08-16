@@ -121,10 +121,14 @@ export interface FilesState {
   setFileZoom: (fileId: string, zoom: number) => void;
   filesOffset: Record<string, number>;
   setFileOffset: (fileId: string, offset: number) => void;
+  /** Writes zoom and offset in one store commit. */
+  setFileZoomAndOffset: (fileId: string, zoom: number, offset: number) => void;
   filesZoomY: Record<string, number>;
   setFileZoomY: (fileId: string, zoom: number) => void;
   filesOffsetY: Record<string, number>;
   setFileOffsetY: (fileId: string, offset: number) => void;
+  /** Writes vertical zoom and offset in one store commit. */
+  setFileZoomAndOffsetY: (fileId: string, zoom: number, offset: number) => void;
   // Maps persistable fileId → filePath (real on-disk path or `managed://<id>`
   // sentinel for files whose only on-disk backing is their history dir).
   // Serialised so the open-file list — including managed files — survives
@@ -2461,6 +2465,15 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         for (const id of viewSyncTargets(state, fileId)) state.filesOffset[id] = offset;
       }),
     ),
+  setFileZoomAndOffset: (fileId: string, zoom: number, offset: number) =>
+    set(
+      produce((state: State) => {
+        for (const id of viewSyncTargets(state, fileId)) {
+          state.filesZoom[id] = zoom;
+          state.filesOffset[id] = offset;
+        }
+      }),
+    ),
   filesZoomY: {},
   setFileZoomY: (fileId: string, zoom: number) =>
     set(
@@ -2473,6 +2486,15 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     set(
       produce((state: State) => {
         for (const id of viewSyncTargets(state, fileId)) state.filesOffsetY[id] = offset;
+      }),
+    ),
+  setFileZoomAndOffsetY: (fileId: string, zoom: number, offset: number) =>
+    set(
+      produce((state: State) => {
+        for (const id of viewSyncTargets(state, fileId)) {
+          state.filesZoomY[id] = zoom;
+          state.filesOffsetY[id] = offset;
+        }
       }),
     ),
   persistedFilePaths: {},

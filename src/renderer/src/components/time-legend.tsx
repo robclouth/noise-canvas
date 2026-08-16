@@ -3,6 +3,8 @@ import { Box } from "@mantine/core";
 import { openFiles } from "@renderer/store/files";
 import { memo, useCallback, useEffect, useRef } from "react";
 import { Vector2 } from "three";
+import { shallow } from "zustand/shallow";
+import { computeTimeMarkers } from "../lib/time-markers";
 import { screenToZoomed, snapToSwungGridRound, zoomedToScreen } from "../lib/utils";
 import { LOOP_DRAG_COLOUR } from "./loop-region";
 
@@ -14,8 +16,6 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
   const file = openFiles[fileId];
   const filePath = file?.filePath;
   const bpm = useStore((state) => state.filepathsBpm[filePath]);
-  const zoom = useStore((state) => state.filesZoom[fileId]);
-  const offset = useStore((state) => state.filesOffset[fileId]);
   const gridSizeBeats = useStore((state) => state.gridSizeBeats);
   const gridSwing = useStore((state) => state.gridSwing);
   const snapTime = useStore((state) => state.snapTime);
@@ -26,6 +26,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
   const setPlaybackTime = useStore((state) => state.setPlaybackTime);
 
   const legendRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragPreviewRef = useRef<HTMLDivElement>(null);
   const dragStartTimeRef = useRef<number | null>(null);
   const isDraggingRef = useRef(false);
@@ -33,8 +34,9 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
   const getTimeFromX = useCallback(
     (clientX: number, rect: DOMRect): number => {
       if (!file?.spectrogramData) return 0;
+      const state = useStore.getState();
       const x = (clientX - rect.left) / rect.width;
-      const uv = screenToZoomed(new Vector2(x, 0.5), zoom, offset);
+      const uv = screenToZoomed(new Vector2(x, 0.5), state.filesZoom[fileId], state.filesOffset[fileId]);
       const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
       let time = uv.x * totalDuration;
       if (snapTime) {
@@ -43,7 +45,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
       }
       return Math.max(0, Math.min(time, totalDuration));
     },
-    [file, zoom, offset, gridSizeBeats, gridSwing, snapTime, bpm],
+    [file, fileId, gridSizeBeats, gridSwing, snapTime, bpm],
   );
 
   const handleMouseDown = useCallback(
@@ -134,69 +136,78 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
     };
   }, [file, fileId, getTimeFromX, setFilePlaybackStartTime, activeFileId, isPlaying, setPlaybackTime, togglePlayback]);
 
-  if (!file?.spectrogramData) return null;
+  useEffect(() => {
+    const draw = () => {
+      const canvas = canvasRef.current;
+      const container = legendRef.current;
+      const spectrogramData = openFiles[fileId]?.spectrogramData;
+      if (!canvas || !container || !spectrogramData) return;
 
-  const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      if (width === 0 || height === 0) return;
 
-  // Generate time markers and ticks based on zoom level and BPM
-  const markers: { position: number; label: string; isTick: boolean }[] = [];
+      const dpr = window.devicePixelRatio || 1;
+      if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+      }
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
 
-  // Calculate the visible time window
-  const zoomFactor = Math.pow(2, zoom);
-  const visibleDuration = totalDuration / zoomFactor;
-  const startTime = offset * (totalDuration - visibleDuration);
-  const endTime = startTime + visibleDuration;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
 
-  // Determine tick interval (always show beat-level ticks)
-  const beatDuration = 60 / bpm; // Duration of one beat in seconds
-  const tickInterval = beatDuration;
-
-  // Determine label interval based on zoom and grid size
-  // Show labels every beat, but limit to prevent overcrowding
-  let labelInterval = beatDuration;
-
-  // If grid is enabled and small, show fewer labels
-  if (gridSizeBeats > 0 && gridSizeBeats < 1) {
-    // For sub-beat grids (1/2, 1/4, etc.), show labels every beat
-    labelInterval = beatDuration;
-  } else {
-    // For beat-level or larger grids, show labels at grid intervals
-    labelInterval = (60 / bpm) * Math.max(1, gridSizeBeats);
-  }
-
-  // If too many labels would appear on screen, increase interval
-  const maxLabels = 20;
-  const potentialLabelCount = visibleDuration / labelInterval;
-  if (potentialLabelCount > maxLabels) {
-    labelInterval = Math.ceil(potentialLabelCount / maxLabels) * beatDuration;
-  }
-
-  // Find the first tick position (align to beat)
-  const firstTickTime = Math.ceil(startTime / tickInterval) * tickInterval;
-
-  // Generate ticks that fall within the visible window
-  for (let time = firstTickTime; time <= endTime; time += tickInterval) {
-    if (time > totalDuration) break;
-
-    const beat = (time / 60) * bpm;
-    const measure = Math.floor(beat / 4) + 1;
-    const beatInMeasure = Math.floor(beat % 4) + 1;
-
-    // Convert time to screen position (0-1 range in visible window)
-    const screenX = (time - startTime) / visibleDuration;
-
-    if (screenX >= 0 && screenX <= 1) {
-      // Determine if this should have a label by checking if it aligns with labelInterval
-      const timeDiff = Math.abs(time - Math.round(time / labelInterval) * labelInterval);
-      const shouldHaveLabel = timeDiff < tickInterval * 0.01; // Within 1% tolerance
-
-      markers.push({
-        position: screenX * 100,
-        label: shouldHaveLabel ? `${measure}.${beatInMeasure}` : "",
-        isTick: !shouldHaveLabel,
+      const state = useStore.getState();
+      const file = openFiles[fileId];
+      const markers = computeTimeMarkers({
+        zoom: state.filesZoom[fileId] ?? 0,
+        offset: state.filesOffset[fileId] ?? 0,
+        totalDuration: spectrogramData.numFrames / spectrogramData.sampleRate,
+        bpm: (file && state.filepathsBpm[file.filePath]) || 120,
+        gridSizeBeats: state.gridSizeBeats,
+        widthPx: width,
       });
-    }
-  }
+
+      ctx.font = "10px -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.textBaseline = "top";
+      for (const marker of markers) {
+        const x = Math.round(marker.position * width) + 0.5;
+        ctx.strokeStyle = marker.isTick ? "rgba(255, 255, 255, 0.2)" : "rgba(255, 255, 255, 0.4)";
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, marker.isTick ? height * 0.4 : height);
+        ctx.stroke();
+        if (marker.label) {
+          ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+          ctx.fillText(marker.label, x + 4, 1);
+        }
+      }
+    };
+
+    const legendFile = openFiles[fileId];
+    const unsubscribe = useStore.subscribe(
+      (state) => ({
+        zoom: state.filesZoom[fileId],
+        offset: state.filesOffset[fileId],
+        bpm: legendFile && state.filepathsBpm[legendFile.filePath],
+        gridSizeBeats: state.gridSizeBeats,
+        loading: state.filesLoading[fileId],
+      }),
+      draw,
+      { equalityFn: shallow, fireImmediately: true },
+    );
+
+    const observer = new ResizeObserver(draw);
+    if (legendRef.current) observer.observe(legendRef.current);
+
+    return () => {
+      unsubscribe();
+      observer.disconnect();
+    };
+  }, [fileId]);
+
+  if (!file?.spectrogramData) return null;
 
   return (
     <Box
@@ -226,35 +237,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
           zIndex: 10,
         }}
       />
-      {markers.map((marker, i) => (
-        <Box
-          key={i}
-          style={{
-            position: "absolute",
-            left: `${marker.position}%`,
-            top: 0,
-            height: marker.isTick ? "40%" : "100%",
-            borderLeft: marker.isTick ? "1px solid rgba(255, 255, 255, 0.2)" : "1px solid rgba(255, 255, 255, 0.4)",
-            pointerEvents: "none",
-          }}
-        >
-          {marker.label && (
-            <Box
-              style={{
-                position: "absolute",
-                left: 4,
-                top: 0,
-                fontSize: 10,
-                color: "rgba(255, 255, 255, 0.7)",
-                userSelect: "none",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {marker.label}
-            </Box>
-          )}
-        </Box>
-      ))}
+      <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%", pointerEvents: "none" }} />
     </Box>
   );
 });

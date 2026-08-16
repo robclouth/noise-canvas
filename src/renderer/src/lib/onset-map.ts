@@ -211,6 +211,36 @@ export function getOnsetTexture(
   return texture;
 }
 
+const STRENGTH_BIN_COUNT = 4096;
+
+type StrengthBinsEntry = { durationSec: number; bins: Float32Array };
+
+const strengthBinsCache = new WeakMap<Onset[], StrengthBinsEntry>();
+
+/**
+ * Max onset strength per fixed time bin across the whole file. Cached per
+ * filtered-list identity.
+ */
+export function getOnsetStrengthBins(onsets: Onset[], durationSec: number): Float32Array {
+  const cached = strengthBinsCache.get(onsets);
+  if (cached && cached.durationSec === durationSec) return cached.bins;
+
+  const bins = new Float32Array(STRENGTH_BIN_COUNT);
+  if (durationSec > 0) {
+    for (const onset of onsets) {
+      const bin = Math.min(
+        STRENGTH_BIN_COUNT - 1,
+        Math.max(0, Math.floor((onset.timeSec / durationSec) * STRENGTH_BIN_COUNT)),
+      );
+      // A zero-strength onset still marks a hit, so presence is floored above zero.
+      const strength = Math.max(onset.strength, 1e-6);
+      if (strength > bins[bin]) bins[bin] = strength;
+    }
+  }
+  strengthBinsCache.set(onsets, { durationSec, bins });
+  return bins;
+}
+
 export function disposeOnsetTexture(fileId: string): void {
   listCache.delete(fileId);
   const cached = textureCache.get(fileId);

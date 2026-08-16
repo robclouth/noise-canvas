@@ -49,6 +49,7 @@ import { renderExportImage as renderExportImageToCanvas, type ImageExportOptions
 import type { PosterInfo } from "../lib/image-export-poster";
 import { captureMaterialToCanvas } from "../lib/snapshot-capture";
 import { SourceFileInfo, StrokeRenderer, StrokeTextures } from "../lib/stroke-renderer";
+import { shallow } from "zustand/shallow";
 import { penState } from "../lib/pen-state";
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import { aimUvToBrushBlUv } from "../lib/brush-anchor";
@@ -268,7 +269,14 @@ const FileRendererInner = memo(
 
     // Subscriptions to global state - consolidated into fewer subscriptions for efficiency
     useEffect(() => {
-      // Consolidate display-related subscriptions that all just trigger invalidate
+      // A live view's uniforms read many store keys per frame (brush footprint,
+      // step params, source offsets), so any store update invalidates it.
+      const unsubInvalidate = useStore.subscribe(() => {
+        invalidateRef.current?.();
+      });
+
+      // A static view won't repaint from the frame loop, so its snapshot must
+      // be refreshed when display state changes.
       const unsubDisplay = useStore.subscribe(
         (state) => {
           const file = openFiles[fileId];
@@ -292,12 +300,10 @@ const FileRendererInner = memo(
           };
         },
         () => {
-          invalidateRef.current?.();
-          // A static view won't repaint from the frame loop, so its snapshot
-          // must be refreshed to reflect the new display state.
           snapshotStaleRef.current = true;
           scheduleSnapshotRefresh();
         },
+        { equalityFn: shallow },
       );
 
       // Transient cursor/hover state lives in its own store; re-render on changes.
@@ -339,6 +345,7 @@ const FileRendererInner = memo(
       );
 
       return () => {
+        unsubInvalidate();
         unsubDisplay();
         unsubTransient();
         unsubActiveFileId();

@@ -4,6 +4,7 @@ import { openFiles } from "@renderer/store/files";
 import { memo, useEffect, useRef } from "react";
 import { Vector2 } from "three";
 import { shallow } from "zustand/shallow";
+import { getMaxPyramid, queryMax } from "../lib/max-pyramid";
 import { screenToZoomed } from "../lib/utils";
 import { ONSET_LEGEND_HEIGHT } from "./onset-legend";
 
@@ -86,24 +87,23 @@ export const LevelStrip = memo(({ fileId }: LevelStripProps) => {
       const offset = state.filesOffset[fileId] ?? 0;
       const points = levels.peaks.length;
 
+      const windowStart = screenToZoomed(new Vector2(0, 0.5), zoom, offset).x;
+      const windowEnd = screenToZoomed(new Vector2(1, 0.5), zoom, offset).x;
+      const windowSpan = windowEnd - windowStart;
+      const peakPyramid = getMaxPyramid(levels.peaks);
+      const overDbPyramid = getMaxPyramid(levels.overDb);
+
       // One column per pixel, carrying the loudest slice it covers so a single
       // overloaded hop survives being zoomed out.
       for (let x = 0; x < width; x++) {
-        const uvStart = screenToZoomed(new Vector2(x / width, 0.5), zoom, offset).x;
-        const uvEnd = screenToZoomed(new Vector2((x + 1) / width, 0.5), zoom, offset).x;
+        const uvStart = windowStart + (x / width) * windowSpan;
+        const uvEnd = windowStart + ((x + 1) / width) * windowSpan;
         if (uvEnd < 0 || uvStart > 1) continue;
 
         const first = Math.max(0, Math.floor(uvStart * points));
         const last = Math.min(points - 1, Math.max(first, Math.ceil(uvEnd * points) - 1));
 
-        let peak = 0;
-        let overDb = 0;
-        for (let point = first; point <= last; point++) {
-          if (levels.peaks[point] > peak) peak = levels.peaks[point];
-          if (levels.overDb[point] > overDb) overDb = levels.overDb[point];
-        }
-
-        ctx.fillStyle = levelColor(peak, overDb);
+        ctx.fillStyle = levelColor(queryMax(peakPyramid, first, last), queryMax(overDbPyramid, first, last));
         ctx.fillRect(x, 0, 1, height);
       }
     };

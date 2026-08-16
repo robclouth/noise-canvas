@@ -74,8 +74,9 @@ export const PitchLegend = memo(({ fileId }: PitchLegendProps) => {
           newOffset = Math.max(0, Math.min(1, shifted));
         }
 
-        if (newPower !== oldPower) state.setFileZoomY(fileId, newPower);
-        if (newOffset !== oldOffset) state.setFileOffsetY(fileId, newOffset);
+        if (newPower !== oldPower || newOffset !== oldOffset) {
+          state.setFileZoomAndOffsetY(fileId, newPower, newOffset);
+        }
       },
     },
     { target: ref, eventOptions: { passive: false } },
