@@ -247,12 +247,14 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
               const uploadStart = performance.now();
               renderer.patchFBOData(data, uploadRanges);
               console.log(`[timing] commit FBO upload: ${(performance.now() - uploadStart).toFixed(2)}ms`);
-            } else {
+            } else if (openFiles[activeFileId]) {
               // A new stroke started while this one was in flight; its dabs
               // are not in `data`, so uploading would paint over them. Stash
               // the patch for the next commit to upload, and make any
               // navigation before then restore in full — the restore also
               // drops the stash, which it makes stale.
+              // Only while the file is still open: a stash for a closed file
+              // holds its whole packed state with no commit left to take it.
               getHistoryManager(activeFileId).markFboOutOfSync();
               setCanvasPatchStash(activeFileId, { data, ranges: uploadRanges });
             }

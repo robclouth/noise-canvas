@@ -28,3 +28,12 @@ export function serializeFileTask<T>(fileId: string, task: () => Promise<T>): Pr
 export function clearFileTaskQueue(fileId: string): void {
   chains.delete(fileId);
 }
+
+/**
+ * Resolves once every task queued now, for every file, has run. Tasks queued
+ * after the call are not waited for. Never rejects — the chain tails already
+ * swallow failures.
+ */
+export async function drainFileTaskQueues(): Promise<void> {
+  await Promise.all([...chains.values()]);
+}

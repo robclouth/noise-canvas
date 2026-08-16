@@ -1,10 +1,10 @@
 import { Vector2 } from "three";
 import { useStore } from "@renderer/store";
-import { openFiles } from "@renderer/store/files";
+import { awaitFileSynthesis, openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
 import { isManagedFilePath } from "@renderer/store/managed-path";
 import { clearCanvasPatchStash } from "./canvas-patch-stash";
-import { clearFileTaskQueue, serializeFileTask } from "./file-task-queue";
+import { clearFileTaskQueue, drainFileTaskQueues, serializeFileTask } from "./file-task-queue";
 import { host } from "./host";
 import { mergePixelRanges } from "./pixel-ranges";
 
@@ -1679,7 +1679,13 @@ export async function destroyHistoryManager(fileId: string): Promise<void> {
  */
 export async function clearAllHistoryManagers(): Promise<void> {
   const open = [...managers.values()];
+  const openIds = [...managers.keys()];
   managers.clear();
+  // A stroke commit or a navigation still on the queue owns the manifest and the
+  // node it is writing; disposing under it leaves the tree on disk half-written.
+  // Main's quit timeout is the backstop if one of them never settles.
+  await drainFileTaskQueues();
+  await Promise.all(openIds.map((fileId) => awaitFileSynthesis(fileId)));
   await Promise.all(
     open.map(async (m) => {
       try {

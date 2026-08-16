@@ -26,7 +26,7 @@ const { fakeOpenFiles, synthesizeFile, loadCachedAudio, setFileDirty, restoreOns
 vi.mock("@renderer/store", () => ({
   useStore: { getState: () => ({ synthesizeFile, loadCachedAudio, setFileDirty, restoreOnsetsForNode }) },
 }));
-vi.mock("@renderer/store/files", () => ({ openFiles: fakeOpenFiles }));
+vi.mock("@renderer/store/files", () => ({ openFiles: fakeOpenFiles, awaitFileSynthesis: async () => {} }));
 
 // Silence the renderer→main menu-state IPC the manager fires on every change.
 vi.mock("../ipc", () => ({ ipcSend: vi.fn() }));
@@ -652,6 +652,37 @@ describe("HistoryManager under concurrent work", () => {
 
     nodeFs.readFile = realReadFile;
     clearAllHistoryManagers();
+  });
+
+  it("holds the quit cleanup until an in-flight commit has finished", async () => {
+    installManagerEnv();
+    clearAllHistoryManagers();
+    await seedChain("f1");
+
+    let releaseCommit: (() => void) | null = null;
+    let committed = false;
+    const commit = serializeFileTask("f1", async () => {
+      await new Promise<void>((resolve) => (releaseCommit = resolve));
+      committed = true;
+    });
+
+    let quitDone = false;
+    const quitting = clearAllHistoryManagers().then(() => {
+      quitDone = true;
+    });
+    await vi.waitFor(() => expect(releaseCommit).not.toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Reporting the cleanup done here would let main destroy the window with
+    // the commit's history write still to come.
+    expect(quitDone).toBe(false);
+
+    releaseCommit!();
+    await commit;
+    await quitting;
+    expect(committed).toBe(true);
+
+    delete fakeOpenFiles["f1"];
   });
 
   it("has the navigated-to node on disk once dispose resolves", async () => {

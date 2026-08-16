@@ -11,6 +11,25 @@ const gate = vi.hoisted(() => ({
   markedSaved: [] as (string | undefined)[],
   holdExport: false,
   releaseExport: null as (() => void) | null,
+  order: [] as string[],
+  analysisResult: () => {
+    const bands = 4;
+    return {
+      data: new Float32Array(64),
+      inverseMap: new Float32Array(16),
+      metadata: new Float32Array(16),
+      textureWidth: 8,
+      textureHeight: 8,
+      numFrames: 64,
+      numBands: bands,
+      numChannels: 1,
+      sampleRate: 48000,
+      magnitudeEnergy: 1,
+      bandOffsets: new Uint32Array(bands),
+      bandStepLog2s: new Int32Array(bands),
+      bandLengths: new Uint32Array(bands),
+    };
+  },
 }));
 
 vi.mock("@renderer/effects", () => ({
@@ -30,6 +49,10 @@ vi.mock("../history-manager", () => ({
     currentNodeId: vi.fn(async () => gate.nodeId),
     markSaved: vi.fn(async (nodeId?: string) => {
       gate.markedSaved.push(nodeId);
+    }),
+    addSnapshot: vi.fn(async () => {
+      gate.order.push("snapshot");
+      return "s1";
     }),
   })),
 }));
@@ -64,11 +87,19 @@ vi.mock("../host", () => ({
         gate.exported.push({ path, channels: channels.map((c) => Float32Array.from(c)) });
         if (gate.holdExport) await new Promise<void>((resolve) => (gate.releaseExport = resolve));
       },
+      analyseBuffer: async () => {
+        gate.order.push("analyse");
+        return gate.analysisResult();
+      },
+      analyze: async () => {
+        gate.order.push("analyse");
+        return gate.analysisResult();
+      },
     },
   },
 }));
 
-import { serializeFileTask } from "../file-task-queue";
+import { drainFileTaskQueues, serializeFileTask } from "../file-task-queue";
 import { clearFileReferences, createFilesSlice, openFiles } from "../../store/files";
 import type { Brush, State, ZustandGet, ZustandSet } from "../../store/types";
 
@@ -126,6 +157,7 @@ function openTestFile(filePath = "/audio/a.wav") {
         getFBOData: async () => new Float32Array(64),
         getDirtyRegion: () => null,
         clearDirtyRegion: vi.fn(),
+        reloadTextures: vi.fn(),
       },
     },
   } as unknown as (typeof openFiles)[string];
@@ -256,6 +288,93 @@ describe("saving while a stroke is still committing", () => {
     await saving;
 
     expect(gate.markedSaved).toEqual(["before"]);
+  });
+});
+
+describe("saving while a synthesis is still running", () => {
+  beforeEach(() => {
+    for (const id of Object.keys(openFiles)) delete openFiles[id];
+    gate.synthesize = [];
+    gate.exported = [];
+    gate.confirmed = true;
+    gate.nodeId = "n1";
+    gate.markedSaved = [];
+    gate.holdExport = false;
+  });
+
+  it("exports the audio the running synthesis produces, not the one it replaces", async () => {
+    const applySynthesizedAudio = vi.fn(async () => {
+      openFiles[FILE_ID].audioBuffer = audioBuffer([2]);
+    });
+    const { files } = makeStore({ applySynthesizedAudio } as unknown as Partial<State>);
+    openTestFile("/audio/a.wav");
+    openFiles[FILE_ID].audioBuffer = audioBuffer([1]);
+
+    // History navigation moves the node and then starts synthesis off the queue.
+    const synthesis = files.synthesizeFile(FILE_ID);
+    await vi.waitFor(() => expect(gate.synthesize).toHaveLength(1));
+    gate.nodeId = "undone";
+
+    const saving = files.saveActiveFile();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(gate.exported).toHaveLength(0);
+
+    gate.synthesize[0](synthResult(2));
+    await synthesis;
+    await saving;
+
+    expect(gate.exported).toHaveLength(1);
+    expect(Array.from(gate.exported[0].channels[0])).toEqual([2]);
+    expect(gate.markedSaved).toEqual(["undone"]);
+  });
+});
+
+describe("re-analysing while a stroke is still committing", () => {
+  beforeEach(() => {
+    for (const id of Object.keys(openFiles)) delete openFiles[id];
+    gate.order = [];
+  });
+
+  it("waits for the queued commit before it replaces the analysis", async () => {
+    const { files } = makeStore();
+    openTestFile("/audio/a.wav");
+    openFiles[FILE_ID].audioBuffer = audioBuffer([1]);
+
+    let releaseCommit: (() => void) | null = null;
+    const commit = serializeFileTask(FILE_ID, async () => {
+      await new Promise<void>((resolve) => (releaseCommit = resolve));
+      gate.order.push("commit");
+    });
+
+    const reanalysing = files.reanalyzeFile(FILE_ID, 24);
+    await vi.waitFor(() => expect(releaseCommit).not.toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(gate.order).toEqual([]);
+
+    releaseCommit!();
+    await commit;
+    await reanalysing;
+
+    expect(gate.order).toEqual(["commit", "analyse", "snapshot"]);
+  });
+});
+
+describe("draining the task queues at quit", () => {
+  it("resolves only after the work already queued has run", async () => {
+    let release: (() => void) | null = null;
+    let ran = false;
+    const task = serializeFileTask("quit-file", async () => {
+      await new Promise<void>((resolve) => (release = resolve));
+      ran = true;
+    });
+
+    const drained = drainFileTaskQueues().then(() => ran);
+    await vi.waitFor(() => expect(release).not.toBeNull());
+    expect(ran).toBe(false);
+
+    release!();
+    await task;
+    expect(await drained).toBe(true);
   });
 });
 

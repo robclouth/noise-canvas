@@ -43,6 +43,7 @@ interface SynthesisAudioResult {
   onsetBandMax?: Float32Array;
 }
 import { selectStemGroupOfFile, stemMemberColor, type StemGroupMethod } from "./stem-groups";
+import { hasSupportedAudioExtension } from "../../../main/lib/audio-extensions";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
 
 export interface FilesState {
@@ -173,6 +174,16 @@ export const openFiles: Record<string, OpenFile> = {};
 // Counts synthesis requests per file, so a result that resolves after a later
 // request started can tell that it has been superseded.
 const fileSynthesisGeneration = new Map<string, number>();
+
+// Resolves when the newest synthesis for a file has installed its audio.
+// History navigation starts synthesis off the per-file task queue, so anything
+// that reads audioBuffer alongside the current node has to wait for this.
+const fileSynthesisSettled = new Map<string, Promise<void>>();
+
+/** Waits for `fileId`'s in-flight synthesis, if one is running. */
+export async function awaitFileSynthesis(fileId: string): Promise<void> {
+  await fileSynthesisSettled.get(fileId);
+}
 
 /**
  * Merges `patch` into an open file. Returns false when the file is no longer
@@ -584,6 +595,22 @@ function bandLayout(data: SpectrogramData) {
 async function rebuildFileFromAudio(
   set: ZustandSet,
   fileId: string,
+  readPackedData: () => Promise<Float32Array | undefined>,
+  transform: (channels: Float32Array[]) => Float32Array[],
+  snapshot: { kind: "resize" | "reanalyze"; label: string },
+): Promise<void> {
+  // The read and the rebuild share one queue slot: a stroke commit landing
+  // between them would be encoded against dimensions this rebuild then replaces.
+  return serializeFileTask(fileId, async () => {
+    const packedData = await readPackedData();
+    if (!packedData) throw new Error("Could not read the current spectrogram state.");
+    await rebuildFileFromAudioNow(set, fileId, packedData, transform, snapshot);
+  });
+}
+
+async function rebuildFileFromAudioNow(
+  set: ZustandSet,
+  fileId: string,
   packedData: Float32Array,
   transform: (channels: Float32Array[]) => Float32Array[],
   snapshot: { kind: "resize" | "reanalyze"; label: string },
@@ -697,6 +724,9 @@ type FileAudioSnapshot = { nodeId: string | null; channels: Float32Array[]; samp
  */
 async function snapshotFileAudio(fileId: string): Promise<FileAudioSnapshot | null> {
   return serializeFileTask(fileId, async () => {
+    // Navigation moves the current node and then starts synthesis off the queue,
+    // so the buffer only belongs to that node once the synthesis has landed.
+    await awaitFileSynthesis(fileId);
     const current = openFiles[fileId];
     if (!current?.audioBuffer) return null;
     const nodeId = await getHistoryManager(fileId).currentNodeId();
@@ -954,6 +984,17 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   openFileIds: [],
   openFilePath: async (filepath: string) => {
     const state = get();
+
+    // Nothing downstream can open a path the analyser will reject, and the
+    // placeholder and the Recent Files entry below would both outlive the toast.
+    if (!isManagedFilePath(filepath) && !hasSupportedAudioExtension(filepath)) {
+      notifications.show({
+        title: "Unsupported file",
+        message: `${host.path.basename(filepath)} is not an audio format Noise Canvas can open.`,
+        color: "red",
+      });
+      return;
+    }
 
     get().addRecentFilePath(filepath);
 
@@ -1781,8 +1822,21 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const synthesizeFileStart = performance.now();
     console.log("[timing] synthesizeFile started");
 
+    let settle: () => void = () => {};
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    fileSynthesisSettled.set(fileId, settled);
+    const finish = (): void => {
+      if (fileSynthesisSettled.get(fileId) === settled) fileSynthesisSettled.delete(fileId);
+      settle();
+    };
+
     const { activeFileId, setFileSynthesizing } = get();
-    if (!activeFileId) return;
+    if (!activeFileId) {
+      finish();
+      return;
+    }
 
     let generation = 0;
 
@@ -1956,6 +2010,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     } finally {
       // A newer synthesis owns the flag and clears it when it finishes.
       if (fileSynthesisGeneration.get(fileId) === generation) setFileSynthesizing(fileId, false);
+      finish();
     }
   },
   applySynthesizedAudio: async (fileId, result, options = {}) => {
@@ -1990,7 +2045,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
     }
     const { autoPlaybackParams } = options;
-    if (autoPlaybackParams) {
+    // The transport belongs to the active file. Painting file A and switching to
+    // B before A's synthesis returns must not restart B over A's loop bounds.
+    if (autoPlaybackParams && get().activeFileId === fileId) {
       const autoPlayStart = performance.now();
       const { startTimeSeconds, endTimeSeconds } = autoPlaybackParams;
       if (get().isPlaying) await get().togglePlayback();
@@ -2236,7 +2293,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }
 
     const result = await host.dialogs.showDirectoryDialog({
-      title: "Export Favorites",
+      title: "Export Favourites",
       buttonLabel: "Export Here",
     });
     if (result.canceled || !result.filePaths || result.filePaths.length === 0) return;
@@ -2354,60 +2411,69 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     );
 
     try {
-      const reanalysisParams: AnalysisParams = {
-        bandsPerOctave,
-        minFreq,
-        maxCoefficients: remainingCoefficientBudget(openFileTexelCounts(fileId)),
-      };
-      const result = audioBuffer
-        ? await host.analysis.analyseBuffer(audioBuffer, reanalysisParams)
-        : await host.analysis.analyze(file.filePath, reanalysisParams);
+      // Queued against stroke commits and history navigation: those derive their
+      // result from the old dimensions, and applying one afterwards would write
+      // old-sized coefficients into the new analysis.
+      await serializeFileTask(fileId, async () => {
+        const reanalysisParams: AnalysisParams = {
+          bandsPerOctave,
+          minFreq,
+          maxCoefficients: remainingCoefficientBudget(openFileTexelCounts(fileId)),
+        };
+        const result = audioBuffer
+          ? await host.analysis.analyseBuffer(audioBuffer, reanalysisParams)
+          : await host.analysis.analyze(file.filePath, reanalysisParams);
 
-      const spectrogramData = {
-        packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
-        inverseMap: new Float32Array(
-          result.inverseMap.buffer,
-          result.inverseMap.byteOffset,
-          result.inverseMap.byteLength / 4,
-        ),
-        metadata: new Float32Array(result.metadata.buffer, result.metadata.byteOffset, result.metadata.byteLength / 4),
-        textureWidth: result.textureWidth,
-        textureHeight: result.textureHeight,
-        numFrames: result.numFrames,
-        numBands: result.numBands,
-        numChannels: result.numChannels,
-        sampleRate: result.sampleRate,
-        packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
-        minFreq,
-        bandsPerOctave,
-        magnitudeEnergy: result.magnitudeEnergy,
-        synthesisMetadata: {
-          bandOffsets: result.bandOffsets,
-          bandStepLog2s: result.bandStepLog2s,
-          bandLengths: result.bandLengths,
-        },
-      };
+        const spectrogramData = {
+          packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+          inverseMap: new Float32Array(
+            result.inverseMap.buffer,
+            result.inverseMap.byteOffset,
+            result.inverseMap.byteLength / 4,
+          ),
+          metadata: new Float32Array(
+            result.metadata.buffer,
+            result.metadata.byteOffset,
+            result.metadata.byteLength / 4,
+          ),
+          textureWidth: result.textureWidth,
+          textureHeight: result.textureHeight,
+          numFrames: result.numFrames,
+          numBands: result.numBands,
+          numChannels: result.numChannels,
+          sampleRate: result.sampleRate,
+          packedTextureSize: new Vector2(result.textureWidth, result.textureHeight),
+          minFreq,
+          bandsPerOctave,
+          magnitudeEnergy: result.magnitudeEnergy,
+          synthesisMetadata: {
+            bandOffsets: result.bandOffsets,
+            bandStepLog2s: result.bandStepLog2s,
+            bandLengths: result.bandLengths,
+          },
+        };
 
-      if (!openFiles[fileId]) return;
+        if (!openFiles[fileId]) return;
 
-      file.spectrogramData = spectrogramData;
-      file.unprojectedPaint = false;
+        file.spectrogramData = spectrogramData;
+        file.unprojectedPaint = false;
 
-      file.rendererRef?.current?.reloadTextures();
+        file.rendererRef?.current?.reloadTextures();
 
-      await getHistoryManager(fileId).addSnapshot({
-        data: spectrogramData.packedData,
-        kind: "reanalyze",
-        label: "Re-analyse",
-        spectrogram: spectrogramData,
+        await getHistoryManager(fileId).addSnapshot({
+          data: spectrogramData.packedData,
+          kind: "reanalyze",
+          label: "Re-analyse",
+          spectrogram: spectrogramData,
+        });
+
+        set(
+          produce((state: State) => {
+            state.bandsPerOctave = bandsPerOctave;
+            state.filesBandsPerOctave[fileId] = bandsPerOctave;
+          }),
+        );
       });
-
-      set(
-        produce((state: State) => {
-          state.bandsPerOctave = bandsPerOctave;
-          state.filesBandsPerOctave[fileId] = bandsPerOctave;
-        }),
-      );
     } catch (error) {
       console.error("Error during re-analysis:", error);
       notifications.show({
@@ -2429,13 +2495,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (!fileId || !file) return;
 
     try {
-      const packedData = await readCurrentPackedData(file);
-      if (!packedData) throw new Error("Could not read the current spectrogram state.");
-
       await rebuildFileFromAudio(
         set,
         fileId,
-        packedData,
+        () => readCurrentPackedData(file),
         (channels) =>
           channels.map((src) => {
             const newLength = factor === 2 ? src.length * 2 : Math.floor(src.length / 2);
@@ -2476,12 +2539,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     );
 
     try {
-      if (!packedData) throw new Error("Could not read the current spectrogram state.");
-
-      await rebuildFileFromAudio(set, fileId, packedData, (channels) => toChannelCount(channels, channelCount), {
-        kind: "reanalyze",
-        label: channelCount === 1 ? "To mono" : "To stereo",
-      });
+      await rebuildFileFromAudio(
+        set,
+        fileId,
+        async () => packedData,
+        (channels) => toChannelCount(channels, channelCount),
+        { kind: "reanalyze", label: channelCount === 1 ? "To mono" : "To stereo" },
+      );
     } catch (error) {
       console.error("Channel change failed:", error);
       notifications.show({

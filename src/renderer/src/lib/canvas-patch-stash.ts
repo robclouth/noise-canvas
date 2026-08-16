@@ -26,3 +26,8 @@ export function setCanvasPatchStash(fileId: string, stash: CanvasPatchStash): vo
 export function clearCanvasPatchStash(fileId: string): void {
   stashes.delete(fileId);
 }
+
+/** Number of files holding a stash. Used by tests to check nothing is retained. */
+export function canvasPatchStashCount(): number {
+  return stashes.size;
+}

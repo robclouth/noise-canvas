@@ -3,7 +3,7 @@ import { notifications } from "@mantine/notifications";
 import { useTransientStore } from "@renderer/store/transient";
 import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
 import { useFrame, useThree } from "@react-three/fiber";
-import { defaultValues } from "@renderer/effects/base-effect";
+import { createDefaultUniforms } from "@renderer/effects/base-effect";
 import { getOpenFileByPath, openFiles } from "@renderer/store/files";
 import { State } from "@renderer/store/types";
 import {
@@ -29,13 +29,13 @@ import {
   RawShaderMaterial,
   RGBAFormat,
   RGFormat,
-  UniformsUtils,
   Vector2,
   WebGLRenderer,
   WebGLRenderTarget,
 } from "three";
 import { effects } from "../effects";
 import { getHistoryManager } from "@renderer/lib/history-manager";
+import { serializeFileTask } from "@renderer/lib/file-task-queue";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { DEFAULT_ONSET_SENSITIVITY } from "../lib/constants";
@@ -357,7 +357,7 @@ const FileRendererInner = memo(
       const state = useStore.getState();
       return new RawShaderMaterial({
         uniforms: {
-          ...UniformsUtils.clone(defaultValues),
+          ...createDefaultUniforms(),
           sourceBrushSizeUv: { value: new Vector2(0.1, 0.1) },
           minDb: { value: state.displayMinDb },
           maxDb: { value: state.displayMaxDb },
@@ -452,13 +452,28 @@ const FileRendererInner = memo(
       spectrogramData.numBands,
     ]);
 
+    /** The textures on the GPU now, so cleanup frees what is actually current. */
+    const liveTexturesRef = useRef<{ packed: DataTexture; inverse: DataTexture; meta: DataTexture } | null>(null);
+
+    const disposeLiveTextures = useCallback(() => {
+      const live = liveTexturesRef.current;
+      if (!live) return;
+      live.packed.dispose();
+      live.inverse.dispose();
+      live.meta.dispose();
+      liveTexturesRef.current = null;
+    }, []);
+
+    const installTextures = useCallback((next: { packed: DataTexture; inverse: DataTexture; meta: DataTexture }) => {
+      liveTexturesRef.current = next;
+      setOriginalPackedDataTex(next.packed);
+      setInverseMapTex(next.inverse);
+      setMetadataTex(next.meta);
+    }, []);
+
     // Effect to create and manage spectrogram textures
     useEffect(() => {
-      const { packed, inverse, meta } = createTextures();
-
-      setOriginalPackedDataTex(packed);
-      setInverseMapTex(inverse);
-      setMetadataTex(meta);
+      installTextures(createTextures());
 
       // Reset StrokeRenderer when textures change
       if (strokeRendererRef.current) {
@@ -467,14 +482,14 @@ const FileRendererInner = memo(
       }
 
       return () => {
-        packed.dispose();
-        inverse.dispose();
-        meta.dispose();
+        // Whatever is live now, not what this run created: reloadTextures
+        // replaces them outside the effect, and those must be freed too.
+        disposeLiveTextures();
         setOriginalPackedDataTex(null);
         setInverseMapTex(null);
         setMetadataTex(null);
       };
-    }, [createTextures]);
+    }, [createTextures, installTextures, disposeLiveTextures]);
 
     // Request a frame once the textures are actually ready. With frameloop="demand"
     // the initial mount frame runs before setState has populated the textures, so
@@ -854,24 +869,32 @@ const FileRendererInner = memo(
 
         (async () => {
           const historyManager = getHistoryManager(fileId);
-          const hadExisting = await historyManager.initialize();
-          if (hadExisting) {
+          // Queued against stroke commits: painting within the first moments of
+          // opening would otherwise append a child while the root is still being
+          // written, and the root's currentPacked would then overwrite the
+          // stroke's — leaving the next delta encoded against the wrong base.
+          const nodeId = await serializeFileTask(fileId, async () => {
+            const hadExisting = await historyManager.initialize();
+            if (hadExisting) return null;
+            const id = await historyManager.addRootSnapshot({
+              data: spectrogramData.packedData,
+              kind: "root",
+              label: "Opened",
+              spectrogram: spectrogramData,
+            });
+            // Analysis has already found this state's onsets, so they are stored
+            // with it rather than found again the next time the file is opened.
+            const opened = openFiles[fileId];
+            if (id && opened?.onsets) {
+              void historyManager
+                .setNodeOnsets(id, packOnsetState({ onsets: opened.onsets, reference: opened.onsetReference }))
+                .catch((error) => console.error("Storing onsets for history node failed:", error));
+            }
+            return id;
+          });
+          if (nodeId === null) {
             await historyManager.restoreCurrentAudio();
             return;
-          }
-          const nodeId = await historyManager.addRootSnapshot({
-            data: spectrogramData.packedData,
-            kind: "root",
-            label: "Opened",
-            spectrogram: spectrogramData,
-          });
-          // Analysis has already found this state's onsets, so they are stored
-          // with it rather than found again the next time the file is opened.
-          const opened = openFiles[fileId];
-          if (nodeId && opened?.onsets) {
-            void historyManager
-              .setNodeOnsets(nodeId, packOnsetState({ onsets: opened.onsets, reference: opened.onsetReference }))
-              .catch((error) => console.error("Storing onsets for history node failed:", error));
           }
           await state.synthesizeFile(fileId);
           const updated = openFiles[fileId];
@@ -1207,10 +1230,7 @@ const FileRendererInner = memo(
      * Used when the file is re-analyzed with different parameters.
      */
     const reloadTextures = () => {
-      // Dispose old textures
-      if (originalPackedDataTex) originalPackedDataTex.dispose();
-      if (inverseMapTex) inverseMapTex.dispose();
-      if (metadataTex) metadataTex.dispose();
+      disposeLiveTextures();
 
       // Dispose and reset StrokeRenderer
       if (strokeRendererRef.current) {
@@ -1218,12 +1238,7 @@ const FileRendererInner = memo(
         strokeRendererRef.current = null;
       }
 
-      // Create new textures using shared helper
-      const { packed, inverse, meta } = createTextures();
-
-      setOriginalPackedDataTex(packed);
-      setInverseMapTex(inverse);
-      setMetadataTex(meta);
+      installTextures(createTextures());
 
       invalidateRef.current();
       snapshotStaleRef.current = true;
