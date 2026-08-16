@@ -89,15 +89,18 @@ float sampleEnvelopeAtUv(int src, vec2 sampleUv, float audioLevelDb, float minDb
       return 0.5;
     #endif
   } else { // Amplitude: map [minDb, maxDb] to [0, 1]
+    // The two dB parameters have overlapping ranges, so the user can set them
+    // equal; the span is floored to keep the division finite.
+    float dbSpan = max(maxDb - minDb, EPSILON);
     #ifdef HAS_SPECTROGRAM_SAMPLING
       vec4 s = sampleSourceInterp(sampleUv);
       float mL = getMag(s.rg);
       float mR = getMag(s.ba);
       float avgMag = max(0.5 * (mL + mR), 1e-6);
       float levelDb = 20.0 * log(avgMag) / log(10.0);
-      return clamp((levelDb - minDb) / (maxDb - minDb), 0.0, 1.0);
+      return clamp((levelDb - minDb) / dbSpan, 0.0, 1.0);
     #else
-      return clamp((audioLevelDb - minDb) / (maxDb - minDb), 0.0, 1.0);
+      return clamp((audioLevelDb - minDb) / dbSpan, 0.0, 1.0);
     #endif
   }
 }

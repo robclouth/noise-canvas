@@ -151,11 +151,14 @@ float voronoi12(vec2 x, float s) {
     for (float y = -1.0; y <= 1.0; y++) {
         vec3 o = hash32(p + vec2(x, y));
         float d = length(vec2(x, y) - f + o.xy);
-        float ww = pow(smoothstep(1.414, 0.0, d), s);
+        // Ascending edges: smoothstep with edge0 > edge1 is undefined in GLSL ES.
+        float ww = pow(1.0 - smoothstep(0.0, 1.414, d), s);
         va += o.z * ww;
         wt += ww;
     }
-    return va / wt;
+    // Every tap can sit at or past the falloff radius near a lattice corner,
+    // which would make this 0/0.
+    return wt > 0.0 ? va / wt : 0.0;
 }
 
 // Craters: ring-shaped impacts.
@@ -238,7 +241,8 @@ float wavelet12(vec2 p, float phase, float scale) {
         g += dot(g, g + 23.234);
         a = fract(g.x * g.y) * 1e3;
         q = (fract(q) - 0.5) * mat2(cos(a), -sin(a), sin(a), cos(a));
-        d += sin(q.x * 10.0 + phase) * smoothstep(0.25, 0.0, dot(q, q)) / s;
+        // Ascending edges: smoothstep with edge0 > edge1 is undefined in GLSL ES.
+        d += sin(q.x * 10.0 + phase) * (1.0 - smoothstep(0.0, 0.25, dot(q, q))) / s;
         p = p * mat2(0.54, -0.84, 0.84, 0.54) + i;
         m += 1.0 / s;
         s *= scale;
