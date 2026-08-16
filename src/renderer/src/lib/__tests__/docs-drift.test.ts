@@ -5,6 +5,7 @@ vi.mock("@renderer/store", () => ({ useStore: { getState: vi.fn() } }));
 
 import manual from "../../../../../docs/manual.md?raw";
 import recipes from "../../../../../docs/recipes.md?raw";
+import { HIDDEN_EFFECTS } from "../../effects/types";
 import { parameterDefs } from "../../parameters";
 import { manualSectionForParameter } from "../ui-areas";
 import { UI_AREA_NAMES, UI_TECHNIQUES, areasWithDeepTours, deepTourFor, getArea } from "../ui-areas";
@@ -87,12 +88,15 @@ describe("parameter deep links", () => {
     .filter((entry): entry is { key: string; section: string } => entry.section !== null);
 
   it("resolves a section for most parameters", () => {
-    // Only the generated modulation amounts should fall through; they are read
-    // from the Modulation section as a whole rather than one heading each.
+    // The generated modulation amounts fall through — they are read from the
+    // Modulation section as a whole rather than one heading each — and so do
+    // the effects the picker hides, which the manual does not cover.
     const unresolved = Object.entries(parameterDefs).filter(
       ([key, def]) => manualSectionForParameter(key, def.effectType) === null,
     );
-    const unexpected = unresolved.filter(([key]) => !/Mod\d|Mod[A-Z]|Macro\d/.test(key));
+    const unexpected = unresolved.filter(
+      ([key, def]) => !/Mod\d|Mod[A-Z]|Macro\d/.test(key) && !HIDDEN_EFFECTS.has(def.effectType ?? ""),
+    );
     expect(unexpected.map(([key]) => key)).toEqual([]);
   });
 

@@ -19,7 +19,7 @@ Every control in the app has a tooltip and an entry in the `?` overlay, and how 
    - [Warp Algorithms](#warp-algorithms)
    - [Blend Modes](#blend-modes)
 4. [Effects](#effects)
-   - [Dynamics](#dynamics) · [Transform](#transform) · [Blur](#blur) · [Repeat](#repeat) · [Synthesize](#synthesize) · [Evolve](#evolve) · [Binaural](#binaural) · [Sort](#sort) · [Transmute](#transmute) · [Waveshape](#waveshape) · [Convolve](#convolve) · [Align](#align) · [Attract](#attract)
+   - [Dynamics](#dynamics) · [Transform](#transform) · [Blur](#blur) · [Repeat](#repeat) · [Synthesize](#synthesize) · [Evolve](#evolve) · [Binaural](#binaural) · [Sort](#sort) · [Convolve](#convolve) · [Attract](#attract)
 5. [Modulation](#modulation)
    - [How Modulation Amount Works](#how-modulation-amount-works)
    - [Modulator Modes](#modulator-modes)
@@ -439,22 +439,6 @@ Reorders the spectrogram's bins by how loud, high or wide they are. Pixel-sortin
 - Digital smear. **Direction** Both, over a busy passage.
 - Stereo mess. **Stereo** to Independent so the channels drift apart.
 
-### Transmute
-
-Rewires magnitude against phase. Results run from metallic to completely unrecognisable, and it is worth auditioning rather than reasoning about.
-
-- **Mode** – Swap Mag/Phase, Complex Power, Phase Rotate, Phase Quantize, Stereo Cross, or Phase Gate.
-- **Amount** – the primary parameter for the selected mode.
-- **Curve** – secondary shaping for the modes that use it.
-
-### Waveshape
-
-Distortion applied to the spectrum rather than to the waveform, so it adds grit and harmonics without the usual mush.
-
-- **Shape** – Soft Clip, Hard Clip, Rectify, Fold, Wrap, or Sine.
-- **Drive** – how hard it is pushed. For Fold, Wrap and Sine this sets how many times the sound folds back on itself.
-- **Tilt** – biases the character of the distortion.
-
 ### Convolve
 
 ![The Convolve effect card](images/ui/effect-convolve.webp)
@@ -474,17 +458,6 @@ Prints the character of one sound onto another: reverbs, room tones, and strange
 - A real room. Pick an impulse response and leave the rest alone.
 - Reverse reverb. **Rate** to −1.
 - Making one sound wear another. Load any recording as the IR — the odder the source, the odder the result.
-
-### Align
-
-![The Align effect card](images/ui/effect-align.webp)
-
-No parameters. It lines up the start of the brush into a single sharp click, then lets the sound go back to normal.
-
-**Try it for**
-
-- Manufacturing a transient out of noise, so a formless sound gets an attack.
-- Tightening an attack that has gone soft.
 
 ### Attract
 
@@ -665,14 +638,12 @@ Files you create in-app (New File, duplicates, stems) are **fully persisted**. T
 
 ### Mono and Stereo
 
-A file is analysed with as many channels as the audio it came from, and the badge next to the resolution badge says which: **Mono** or **Stereo**. It matters because a mono file has no stereo field to work in, so **Binaural**, **Sort**'s Stereo mode, **Transmute**'s Stereo Cross, and a modulator's **Stereo** spread all have nothing to move — they run, and the result is centred.
+A file is analysed with as many channels as the audio it came from, and the badge next to the resolution badge says which: **Mono** or **Stereo**.
 
 The badge is a menu, so a file can go either way. The current painted state is rendered to audio, converted, and analysed again, which adds a node to the file's history rather than replacing anything.
 
 - **Mono → Stereo** copies the single channel into both, so the file sounds the same until you paint on it. This is the step that gives the stereo effects something to place.
 - **Stereo → Mono** mixes the two channels together at equal weight.
-
-Both cost the same graphics memory: one packed coefficient holds both channels either way, so a stereo file is no shorter than a mono one.
 
 ### Splitting a File
 
@@ -714,10 +685,6 @@ A thin strip sits directly above each file's spectrogram, showing how loud the f
 - **Light, up to white** – healthy level.
 - **Yellow** – close to full scale. Still fine, but there is no headroom left to give.
 - **Red** – out of headroom. The deeper the red, the further past it went.
-
-Red means one of two things, depending on [Auto-limit](#transport-and-output). With it on, red marks the moments the limiter is holding down for you, so it is a report rather than a problem. With it off, red is real clipping in the output, and it is worth undoing the stroke or painting it more gently.
-
-The strip describes the whole file's output, not just your last stroke, so a red patch somewhere you are not working is still worth looking at.
 
 ### Navigating the Canvas
 

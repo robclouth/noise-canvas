@@ -243,15 +243,14 @@ async function declaredAnchors() {
  */
 async function addableEffects() {
   const effectsSrc = await readFile(join(repoRoot, "src/renderer/src/effects/types.ts"), "utf-8");
-  const modalsSrc = await readFile(join(repoRoot, "src/renderer/src/components/modals.tsx"), "utf-8");
   const constantsSrc = await readFile(join(repoRoot, "src/renderer/src/lib/constants.ts"), "utf-8");
 
   const keysStart = effectsSrc.indexOf("export const EFFECT_KEYS");
   const keysBlock = effectsSrc.slice(keysStart, effectsSrc.indexOf("] as const", keysStart));
   const keys = [...keysBlock.matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
 
-  const hiddenStart = modalsSrc.indexOf("const HIDDEN_EFFECTS");
-  const hiddenBlock = modalsSrc.slice(hiddenStart, modalsSrc.indexOf("\n", hiddenStart));
+  const hiddenStart = effectsSrc.indexOf("export const HIDDEN_EFFECTS");
+  const hiddenBlock = effectsSrc.slice(hiddenStart, effectsSrc.indexOf("\n", hiddenStart));
   const hidden = new Set([...hiddenBlock.matchAll(/"([a-z-]+)"/g)].map((m) => m[1]));
 
   const labelsStart = constantsSrc.indexOf("export const EFFECT_LABELS");

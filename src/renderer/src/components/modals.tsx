@@ -1,6 +1,6 @@
 import { Box, SimpleGrid, Stack, Text, UnstyledButton } from "@mantine/core";
 import { ContextModalProps } from "@mantine/modals";
-import { EFFECT_KEYS, EffectType } from "@renderer/effects/types";
+import { EFFECT_KEYS, EffectType, HIDDEN_EFFECTS } from "@renderer/effects/types";
 import { EFFECT_COLORS, EFFECT_DESCRIPTIONS, EFFECT_LABELS } from "@renderer/lib/constants";
 import { useStore } from "@/store";
 import { openFiles, selectFileColor } from "@renderer/store/files";
@@ -8,7 +8,6 @@ import { BrushPickerModal } from "./controls/brush-picker";
 import { PalettePickerModal } from "./controls/palette-picker";
 import { ImageExportModal } from "./image-export-modal";
 
-const HIDDEN_EFFECTS = new Set(["transmute", "waveshape"]);
 const AVAILABLE_EFFECTS = EFFECT_KEYS.filter((key) => key !== "passthrough" && !HIDDEN_EFFECTS.has(key)) as Exclude<
   EffectType,
   "passthrough"

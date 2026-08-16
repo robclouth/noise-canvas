@@ -1,3 +1,4 @@
+import { HIDDEN_EFFECTS } from "../effects/types";
 import type { UiAnchor } from "./ui-anchors";
 
 /**
@@ -401,9 +402,11 @@ const PARAMETER_PREFIXES: [string, string][] = [
 /**
  * `effectType` when the parameter belongs to an effect, otherwise the table
  * above, otherwise a prefix rule. Returns null for the generated modulation
- * amounts, which are explained by the Modulation section as a whole.
+ * amounts, which are explained by the Modulation section as a whole, and for
+ * effects the picker hides, which the manual does not cover.
  */
 export function manualSectionForParameter(key: string, effectType?: string): string | null {
+  if (effectType && HIDDEN_EFFECTS.has(effectType)) return null;
   // Effects whose manual heading differs from their state key.
   if (effectType === "clone") return "repeat";
   if (effectType) return effectType;

@@ -230,7 +230,7 @@ _See also:_ [Blur](./manual.md#blur), [Evolve](./manual.md#evolve), [Options](./
 
 **Set up.**
 
-- Effects: **Synthesize**, **Type = Impulse**, then **Align** after it.
+- Effects: **Synthesize**, **Type = Impulse**.
 - Envelope: **Size ↔ = Grid** on a small time grid, **Curve ↔ = −100%** for a sharp spike, **Skew ↔ = −100%** so the peak is at the start.
 - Envelope: **Size ↕** covering the top few octaves only.
 
@@ -238,7 +238,7 @@ _See also:_ [Blur](./manual.md#blur), [Evolve](./manual.md#evolve), [Options](./
 
 **Variations.** **Type = Noise** with the same envelope gives you a snare rather than a hat. Widen **Size ↕** downwards and it becomes a crash. Modulating **Strength** from **Randomize** gives every stroke a different velocity.
 
-_See also:_ [Synthesize](./manual.md#synthesize), [Align](./manual.md#align), [Envelope](./manual.md#envelope), [Contextual Sources](./manual.md#contextual-sources).
+_See also:_ [Synthesize](./manual.md#synthesize), [Envelope](./manual.md#envelope), [Contextual Sources](./manual.md#contextual-sources).
 
 ---
 

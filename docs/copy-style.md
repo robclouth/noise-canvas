@@ -184,9 +184,10 @@ hit it and think something is broken. Never state the reason.
   releases."
 - Keep, but shorten to the fact: "Not available on Windows."
 
-**Anything the picker does not offer.** Transmute and Waveshape are hidden, so
-they leave the manual completely — sections, contents list, and the note that
-explains their absence. A feature the reader cannot reach is not documented.
+**Anything the picker does not offer.** Transmute, Waveshape and Align are
+hidden, so they leave the manual completely — sections, contents list, and the
+note that explains their absence. A feature the reader cannot reach is not
+documented.
 
 **Sales copy.** "This approach makes sound design tangible — almost physical.
 You're literally painting timbre." Show it with an instruction instead.
@@ -329,7 +330,6 @@ the end as a fragment; these fold it into the sentence instead.
 | Binaural   | Place sound anywhere around the listener's head, in 3D.                    | Places the sound around the listener's head — left, right, close, far, behind.  |
 | Sort       | Reorder the bins by loudness or phase. Glitched, banded, pixel-sorted.     | Reorders the bands by loudness or phase, banking them into glitched stripes.    |
 | Convolve   | Print the character of another sound onto this one. Reverbs and room tone. | Prints another sound's character onto this one — rooms, plates, resonant junk.  |
-| Align      | Snap everything into one sharp impulse, then let it drift apart again.     | Snaps every band into one impulse, then lets it drift apart — attack from air.  |
 
 Each keeps the operation in the first clause, so a reader who wants only the
 fact can stop at the comma.

@@ -24,6 +24,13 @@ export const EFFECT_KEYS = [
 // Effect type derived from the keys
 export type EffectType = (typeof EFFECT_KEYS)[number];
 
+/**
+ * Effects the Add Effect picker does not offer. They still run in brushes that
+ * already hold them, but they are absent from the manual, so their parameters
+ * resolve no manual section.
+ */
+export const HIDDEN_EFFECTS = new Set<string>(["transmute", "waveshape", "align"]);
+
 // Per-instance effect parameters
 export type EffectParams = Record<string, unknown>;
 
