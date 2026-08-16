@@ -38,12 +38,15 @@
   z-index: 10002;
 }
 
+/* Matches a Mantine dropdown, so a tour popover and a parameter menu read as
+   the same surface. */
 .driver-popover.walkthrough-popover {
-  background-color: var(--mantine-color-dark-7);
+  --tour-arrow: 7px;
+  background-color: var(--mantine-color-dark-6);
   color: var(--mantine-color-gray-3);
   border: 1px solid var(--mantine-color-dark-4);
-  border-radius: var(--mantine-radius-sm);
-  box-shadow: var(--mantine-shadow-lg);
+  border-radius: var(--mantine-radius-default);
+  box-shadow: var(--mantine-shadow-xl);
   font-family: "Inter Variable", sans-serif;
   max-width: 320px;
 }
@@ -98,16 +101,51 @@
   background-color: var(--mantine-color-dark-4);
 }
 
-/* Arrows inherit the popover background so they don't read as a pale notch. */
+/*
+ * driver.js draws its arrow as a CSS triangle, which carries no border of its
+ * own and so breaks the popover's outline where it meets it. These rules
+ * replace it with the rotated, clipped square Mantine's own popovers use: the
+ * box's background and border, with the two inward edges clipped away. Each
+ * side offsets the arrow by half its size and drops the border on the two
+ * edges that face into the box, exactly as Mantine's FloatingArrow does.
+ */
+.driver-popover.walkthrough-popover .driver-popover-arrow {
+  width: var(--tour-arrow);
+  height: var(--tour-arrow);
+  border: 1px solid var(--mantine-color-dark-4);
+  background-color: inherit;
+  transform: rotate(45deg);
+  z-index: 1;
+}
+
 .driver-popover.walkthrough-popover .driver-popover-arrow-side-top {
-  border-top-color: var(--mantine-color-dark-7);
+  top: auto;
+  bottom: calc(var(--tour-arrow) / -2);
+  border-top-color: transparent;
+  border-left-color: transparent;
+  clip-path: polygon(0 100%, 100% 100%, 100% 0);
 }
+
 .driver-popover.walkthrough-popover .driver-popover-arrow-side-bottom {
-  border-bottom-color: var(--mantine-color-dark-7);
+  bottom: auto;
+  top: calc(var(--tour-arrow) / -2);
+  border-bottom-color: transparent;
+  border-right-color: transparent;
+  clip-path: polygon(0 100%, 0 0, 100% 0);
 }
+
 .driver-popover.walkthrough-popover .driver-popover-arrow-side-left {
-  border-left-color: var(--mantine-color-dark-7);
+  left: auto;
+  right: calc(var(--tour-arrow) / -2);
+  border-left-color: transparent;
+  border-bottom-color: transparent;
+  clip-path: polygon(100% 0, 0 0, 100% 100%);
 }
+
 .driver-popover.walkthrough-popover .driver-popover-arrow-side-right {
-  border-right-color: var(--mantine-color-dark-7);
+  right: auto;
+  left: calc(var(--tour-arrow) / -2);
+  border-right-color: transparent;
+  border-top-color: transparent;
+  clip-path: polygon(0 100%, 0 0, 100% 100%);
 }
