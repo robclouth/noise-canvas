@@ -225,8 +225,8 @@ export const CONTEXTUAL_MOD_SOURCES = [
   { key: "Random", label: "Randomise", description: "Random value per stroke (0-1)" },
   { key: "Step", label: "Step", description: "Step index (0-1 across steps)" },
   { key: "Pressure", label: "Pressure", description: "Pen pressure (0-1)" },
-  { key: "TiltX", label: "Tilt X", description: "Pen tilt X (0-1, center=0.5)" },
-  { key: "TiltY", label: "Tilt Y", description: "Pen tilt Y (0-1, center=0.5)" },
+  { key: "TiltX", label: "Tilt X", description: "Pen tilt X (0-1, centre=0.5)" },
+  { key: "TiltY", label: "Tilt Y", description: "Pen tilt Y (0-1, centre=0.5)" },
 ] as const;
 export const NUM_CONTEXTUAL_MOD_SOURCES = CONTEXTUAL_MOD_SOURCES.length;
 
