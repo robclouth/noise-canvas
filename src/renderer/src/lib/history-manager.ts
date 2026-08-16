@@ -288,8 +288,76 @@ export interface AddStrokeOpts {
   // [pixelStart, pixelCount, ...] list (one range per band). The delta stores
   // exactly these pixels. Absent/null stores a full packed snapshot instead.
   dirtyRanges?: Uint32Array | null;
+  // The uv rect whose audio this stroke changed. A projection's phase re-branch
+  // can spread dirtyRanges to the end of the file while leaving that span's
+  // audio identical, so this can be far smaller. Absent means unknown — the
+  // whole file may have changed.
+  audioRegion?: UvRegion | null;
   // Whether the state this stroke leaves holds paint no projection passed over.
   unprojectedPaint?: boolean;
+}
+
+/** An axis-aligned region in unpacked display uv (Y 0 at the highest band's top). */
+export type UvRegion = { startX: number; endX: number; startY: number; endY: number };
+
+/**
+ * The unpacked-UV rectangle a set of packed-pixel ranges covers, from the
+ * band layout: each linear pixel index is bandOffsets[b] + timeIndex, and a
+ * time index spans 2^bandStepLog2s[b] frames. Null when the ranges cover
+ * nothing. Y follows the display convention: 0 at the highest band's top.
+ */
+export function packedRangesToUvRegion(
+  ranges: Uint32Array,
+  layout: { bandOffsets: Uint32Array; bandLengths: Uint32Array; bandStepLog2s: Int32Array },
+  numFrames: number,
+  numBands: number,
+): UvRegion | null {
+  const { bandOffsets, bandLengths, bandStepLog2s } = layout;
+  if (!(numFrames > 0) || !(numBands > 0) || bandOffsets.length === 0) return null;
+
+  let minFrame = Infinity;
+  let maxFrame = -Infinity;
+  let minBand = Infinity;
+  let maxBand = -Infinity;
+
+  for (let r = 0; r + 1 < ranges.length; r += 2) {
+    let index = ranges[r];
+    const end = ranges[r] + ranges[r + 1];
+
+    // Last band whose offset is at or below the range start.
+    let lo = 0;
+    let hi = bandOffsets.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (bandOffsets[mid] <= index) lo = mid;
+      else hi = mid - 1;
+    }
+
+    for (let band = lo; band < bandOffsets.length && index < end; band++) {
+      const bandStart = bandOffsets[band];
+      const bandEnd = bandStart + bandLengths[band];
+      const spanStart = Math.max(index, bandStart);
+      const spanEnd = Math.min(end, bandEnd);
+      if (spanEnd > spanStart) {
+        const frameSpan = Math.pow(2, bandStepLog2s[band]);
+        const firstFrame = (spanStart - bandStart) * frameSpan;
+        const lastFrame = (spanEnd - bandStart) * frameSpan;
+        if (firstFrame < minFrame) minFrame = firstFrame;
+        if (lastFrame > maxFrame) maxFrame = lastFrame;
+        if (band < minBand) minBand = band;
+        if (band > maxBand) maxBand = band;
+      }
+      index = bandEnd;
+    }
+  }
+
+  if (!(maxFrame > minFrame) || minBand > maxBand) return null;
+  return {
+    startX: Math.max(0, minFrame / numFrames),
+    endX: Math.min(1, maxFrame / numFrames),
+    startY: 1 - (maxBand + 1) / numBands,
+    endY: 1 - minBand / numBands,
+  };
 }
 
 export class HistoryManager {
@@ -316,6 +384,7 @@ export class HistoryManager {
   // instead of the whole packed state. Purely an optimization: a miss falls
   // back to the full upload.
   private readonly nodeDirtyRanges = new Map<string, Uint32Array>();
+  private readonly nodeAudioRegions = new Map<string, UvRegion>();
   // True when the renderer's FBO no longer matches currentId's packed state
   // (e.g. restore-original bypasses history); forces the next navigation to
   // upload the full state rather than a patch.
@@ -734,6 +803,7 @@ export class HistoryManager {
     this.currentPacked = opts.data;
     this.packedCache.set(id, this.currentPacked);
     if (rangesForPatch) this.nodeDirtyRanges.set(id, rangesForPatch);
+    if (opts.audioRegion) this.nodeAudioRegions.set(id, opts.audioRegion);
     // The stroke was read back from the FBO, so the two are in step again.
     this.fboOutOfSync = false;
     await this.writeManifest();
@@ -910,7 +980,7 @@ export class HistoryManager {
       target.audioCached = false;
     }
     const { synthesizeFile } = useStore.getState();
-    void synthesizeFile(this.fileId);
+    void synthesizeFile(this.fileId, undefined, this.currentPacked ?? undefined);
   }
 
   // ---------- Navigation ----------
@@ -956,6 +1026,7 @@ export class HistoryManager {
     // For typical undo/redo within a single analysis, the file's existing
     // inverseMap/metadata/dims are still correct — just push the new FBO bytes.
     const anchor = this.nearestFullAnchor(targetId);
+    let hopRegion: UvRegion | null = null;
     if (anchor && anchor.id !== this.lastLoadedAnchorId) {
       await this.restoreSpectrogramFromFull(anchor, packedData);
       this.lastLoadedAnchorId = anchor.id;
@@ -965,8 +1036,21 @@ export class HistoryManager {
       // already holds — upload just them.
       const ranges = this.fboOutOfSync ? null : this.pathDirtyRanges(this.manifest.currentId, targetId);
       const restoreStart = performance.now();
-      if (ranges) file.rendererRef.current.patchFBOData(packedData, ranges);
-      else file.rendererRef.current.setFBOData(packedData);
+      if (ranges) {
+        file.rendererRef.current.patchFBOData(packedData, ranges);
+        if (file.spectrogramData) {
+          hopRegion =
+            this.pathAudioRegion(this.manifest.currentId, targetId) ??
+            packedRangesToUvRegion(
+              ranges,
+              file.spectrogramData.synthesisMetadata,
+              file.spectrogramData.numFrames,
+              file.spectrogramData.numBands,
+            );
+        }
+      } else {
+        file.rendererRef.current.setFBOData(packedData);
+      }
       console.log(
         `[timing] navigateTo FBO ${ranges ? "patch" : "full"} upload: ${(performance.now() - restoreStart).toFixed(2)}ms`,
       );
@@ -993,7 +1077,18 @@ export class HistoryManager {
     // the onset grid can follow a moment later.
     void useStore.getState().restoreOnsetsForNode(this.fileId, targetId, packedData);
 
-    // Restore audio: cached WAV if present, otherwise re-synthesize.
+    // Restore audio. When the hops' dirty region is known and a buffer exists,
+    // only that window's audio differs between the two states, so only it is
+    // synthesized and spliced.
+    if (hopRegion && file.audioBuffer) {
+      file.rendererRef.current.expandDirtyRegion(hopRegion.startX, hopRegion.endX, hopRegion.startY, hopRegion.endY);
+      // packedData is the state the FBO was just set to, so passing it skips
+      // the full FBO readback.
+      const { synthesizeFile } = useStore.getState();
+      void synthesizeFile(this.fileId, undefined, packedData);
+      return;
+    }
+    // Cached render if present, otherwise re-synthesize in full.
     const dir = await this.dir;
     const audioPath = this.audioPath(dir, targetId);
     if (target.audioCached && target.audioPeak != null) {
@@ -1006,7 +1101,7 @@ export class HistoryManager {
       target.audioCached = false;
     }
     const { synthesizeFile } = useStore.getState();
-    void synthesizeFile(this.fileId);
+    void synthesizeFile(this.fileId, undefined, packedData);
   }
 
   /**
@@ -1028,6 +1123,47 @@ export class HistoryManager {
    * delta its hop crosses, in either direction.
    */
   private pathDirtyRanges(fromId: string, toId: string): Uint32Array | null {
+    const path = this.pathBetween(fromId, toId);
+    if (!path) return null;
+    let ranges: Uint32Array = new Uint32Array(0);
+    for (const id of path) {
+      const r = this.nodeDirtyRanges.get(id);
+      if (!r) return null;
+      ranges = mergePixelRanges(ranges, r);
+    }
+    return ranges;
+  }
+
+  /**
+   * Union of the per-node audio regions along the tree path between two nodes,
+   * or null when any hop's region is unknown — callers then take the audio
+   * window from the full dirty ranges instead.
+   */
+  private pathAudioRegion(fromId: string, toId: string): UvRegion | null {
+    const path = this.pathBetween(fromId, toId);
+    if (!path) return null;
+    let union: UvRegion | null = null;
+    for (const id of path) {
+      const r = this.nodeAudioRegions.get(id);
+      if (!r) return null;
+      union = union
+        ? {
+            startX: Math.min(union.startX, r.startX),
+            endX: Math.max(union.endX, r.endX),
+            startY: Math.min(union.startY, r.startY),
+            endY: Math.max(union.endY, r.endY),
+          }
+        : r;
+    }
+    return union;
+  }
+
+  /**
+   * The nodes standing between two states: every node on the tree path except
+   * the common ancestor, each representing the delta its hop crosses, in
+   * either direction. Null when the nodes do not share a root.
+   */
+  private pathBetween(fromId: string, toId: string): string[] | null {
     if (!this.manifest) return null;
     // Same-node navigation can't be trusted as a no-op: deleteNode reassigns
     // currentId before navigating, so the FBO may hold a deleted state.
@@ -1053,14 +1189,7 @@ export class HistoryManager {
       path.push(cursor);
       cursor = this.manifest.nodes[cursor]?.parentId ?? null;
     }
-
-    let ranges: Uint32Array = new Uint32Array(0);
-    for (const id of path) {
-      const r = this.nodeDirtyRanges.get(id);
-      if (!r) return null;
-      ranges = mergePixelRanges(ranges, r);
-    }
-    return ranges;
+    return path;
   }
 
   async navigateToParent(): Promise<void> {
@@ -1236,6 +1365,7 @@ export class HistoryManager {
       this.packedCache.delete(id);
       this.audioBytes.delete(id);
       this.nodeDirtyRanges.delete(id);
+      this.nodeAudioRegions.delete(id);
       delete this.manifest.nodes[id];
     }
 
@@ -1390,6 +1520,7 @@ export class HistoryManager {
       this.packedCache.delete(id);
       this.audioBytes.delete(id);
       this.nodeDirtyRanges.delete(id);
+      this.nodeAudioRegions.delete(id);
     }
 
     // Rewrite the current node as a standalone full snapshot so it can be the
@@ -1419,6 +1550,7 @@ export class HistoryManager {
     this.packedCache.clear();
     this.packedCache.set(currentId, canonical);
     this.nodeDirtyRanges.clear();
+    this.nodeAudioRegions.clear();
     this.audioLru = current.audioCached ? [currentId] : [];
     this.lastLoadedAnchorId = currentId;
 
@@ -1446,6 +1578,7 @@ export class HistoryManager {
     this.currentPacked = null;
     this.packedCache.clear();
     this.nodeDirtyRanges.clear();
+    this.nodeAudioRegions.clear();
     this.audioLru = [];
     this.audioBytes.clear();
     this.lastLoadedAnchorId = null;
@@ -1465,6 +1598,7 @@ export class HistoryManager {
     this.currentPacked = null;
     this.packedCache.clear();
     this.nodeDirtyRanges.clear();
+    this.nodeAudioRegions.clear();
     this.audioLru = [];
     this.audioBytes.clear();
     this.lastLoadedAnchorId = null;

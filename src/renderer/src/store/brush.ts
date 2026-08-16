@@ -2,7 +2,7 @@ import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
 import { notifications } from "@mantine/notifications";
 import { applyCoefficientPatch } from "@renderer/lib/coef-patch";
 import { setCanvasPatchStash, takeCanvasPatchStash } from "@renderer/lib/canvas-patch-stash";
-import { buildStrokeCommitSnapshot } from "@renderer/lib/stroke-commit";
+import { buildStrokeCommitSnapshot, projectsWholeFile } from "@renderer/lib/stroke-commit";
 import { mergePixelRanges, scatterPixelRanges, subtractPixelRanges } from "@renderer/lib/pixel-ranges";
 import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
 import { BRUSH_ANCHOR_MODE_CENTER } from "@renderer/lib/constants";
@@ -287,6 +287,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
             label: snapshot.brushName,
             dimensions: snapshot.dimensions,
             dirtyRanges: historyDirtyRanges,
+            audioRegion: projectsWholeFile(snapshot) ? null : snapshot.dirtyRegion,
             unprojectedPaint: openFiles[activeFileId]?.unprojectedPaint === true,
           });
 
