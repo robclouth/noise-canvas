@@ -1,19 +1,11 @@
-import { Anchor, Box, Button, Group, Paper, Portal, Stack, Text } from "@mantine/core";
-import { host } from "@renderer/lib/host";
+import { Box, Button, Group, Paper, Portal, Stack, Text } from "@mantine/core";
 import { ANCHOR_ATTR } from "@renderer/lib/ui-anchors";
-import {
-  UI_AREA_NAMES,
-  deepTourFor,
-  getArea,
-  manualSectionForParameter,
-  type UiAreaName,
-} from "@renderer/lib/ui-areas";
+import { UI_AREA_NAMES, getArea, manualSectionForParameter, type UiAreaName } from "@renderer/lib/ui-areas";
 import { HELP_ATTR, UI_CONTROLS, getControl, readHelpInstance, type UiControlName } from "@renderer/lib/ui-controls";
 import { parameterDefs } from "@renderer/parameters";
 import type { ParameterKey } from "@renderer/store/types";
-import { startDeepTour } from "@renderer/lib/walkthrough";
 import { useStore } from "@renderer/store";
-import { BookOpen, Route } from "lucide-react";
+import { BookOpen } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /**
@@ -57,18 +49,6 @@ const WIDE_FRACTION = 0.4;
 const BAR_HEIGHT = 0.25;
 /** Marks the overlay's own layers, which are above everything and never the subject. */
 const LAYER_ATTR = "data-help-layer";
-
-/**
- * Recipes live on GitHub rather than in the build: unlike the manual they grow
- * between releases, and a recipe is worth more up to date than offline.
- */
-const RECIPES_URL = "https://github.com/robclouth/noise-canvas/blob/main/docs/recipes.md";
-
-/** Recipe ids are the slugs of their headings, so the title reads back out. */
-function recipeTitle(id: string): string {
-  const words = id.replace(/-/g, " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
 
 /**
  * The label carries the marker, but the row is what someone points at. Climbs
@@ -363,7 +343,6 @@ export function HelpOverlay(): React.JSX.Element | null {
   const area = target?.kind === "area" ? getArea(target.name) : null;
   const parameter = target?.kind === "param" ? parameterDefs[target.key] : null;
   const control = target?.kind === "control" ? getControl(target.name) : null;
-  const hasTour = target?.kind === "area" && deepTourFor(target.name).length > 0;
   const manualSection =
     target?.kind === "param"
       ? manualSectionForParameter(target.key, parameter?.effectType)
@@ -450,23 +429,8 @@ export function HelpOverlay(): React.JSX.Element | null {
               <Text fz={CARD_TEXT_SIZE} c="gray.4" lh={1.45}>
                 {card.blurb}
               </Text>
-              <Group gap="xs">
-                {hasTour && target?.kind === "area" && (
-                  <Button
-                    size="compact-xs"
-                    variant="light"
-                    color="orange"
-                    leftSection={<Route size={12} />}
-                    onClick={() => {
-                      const name = target.name;
-                      close();
-                      void startDeepTour(name);
-                    }}
-                  >
-                    Show me around
-                  </Button>
-                )}
-                {manualSection && (
+              {manualSection && (
+                <Group gap="xs">
                   <Button
                     size="compact-xs"
                     variant="subtle"
@@ -479,26 +443,7 @@ export function HelpOverlay(): React.JSX.Element | null {
                   >
                     Manual
                   </Button>
-                )}
-              </Group>
-              {area?.recipes && area.recipes.length > 0 && (
-                <Stack gap={2}>
-                  <Text fz={CARD_TEXT_SIZE} c="gray.5">
-                    Things to do with it
-                  </Text>
-                  {area.recipes.map((recipe) => (
-                    <Anchor
-                      key={recipe}
-                      fz={CARD_TEXT_SIZE}
-                      onClick={() => {
-                        close();
-                        host.shell.openExternal(`${RECIPES_URL}#${recipe}`);
-                      }}
-                    >
-                      {recipeTitle(recipe)}
-                    </Anchor>
-                  ))}
-                </Stack>
+                </Group>
               )}
             </Stack>
           </Paper>
@@ -524,7 +469,7 @@ export function HelpOverlay(): React.JSX.Element | null {
               whiteSpace: "nowrap",
             }}
           >
-            Move over anything — a panel or a single control · click or Esc to close
+            Move over anything, a panel or a single control · click or Esc to close
           </Text>
         )}
       </Box>

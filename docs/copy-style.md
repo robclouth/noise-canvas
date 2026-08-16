@@ -19,10 +19,9 @@ Nothing repeats between them.
 | **Label**                   | What is this called?       | 1–3 words                                |
 | **Description** (= tooltip) | What does it do?           | One sentence, ≤ 120 characters           |
 | **Manual**                  | What do the settings mean? | As long as it needs, in a fixed skeleton |
-| **Recipes**                 | What do I make with it?    | A whole walkthrough                      |
 
 If a description needs a second sentence, the second sentence belongs in the
-manual. If a manual section needs a story, it belongs in Recipes.
+manual. The manual is the last layer: there is nothing deeper to push into.
 
 ---
 
@@ -32,7 +31,7 @@ manual. If a manual section needs a story, it belongs in Recipes.
 ending in a full stop.
 
 > Sets how far the modulator swings.
-> Spaces the overtones by the harmonic series, by octaves, or by the selected scale.
+> Spaces the copies evenly, by the harmonic series, by doubling gaps, stretched, or on the selected scale.
 > Slides the sound up or down, in semitones.
 
 **Start with the verb the control performs.** `Sets`, `Picks`, `Moves`, `Adds`,
@@ -59,20 +58,20 @@ or down, **in semitones**" earns it, because the axis is what the reader wants.
 
 ### Length
 
-One sentence, ≤ 120 characters. The current spread is 27–224 characters with a
-median of 85, and the long ones are long because they carry advice or a mode
-list. Both leave.
+One sentence, ≤ 120 characters. After the sweep the spread is 27–114 characters
+with a median of 60. What made the long ones long was advice or a mode list, and
+both belong elsewhere.
 
 ### Effect descriptions
 
 An effect card is the one place the copy has to earn a click. A reader is
-choosing between eleven of them and knows none of the names, so a card that only
+choosing between ten of them and knows none of the names, so a card that only
 states the operation is accurate and useless.
 
 **Say what it does, then what it becomes.** One sentence in two clauses, joined
-by a comma or a dash: the operation first, the sound it produces second. Third
-person, verb first, **≤ 90 characters** — the picker is two columns, so that is
-two lines in a card.
+by a comma or a colon: the operation first, the sound it produces second. Third
+person, verb first, **≤ 80 characters**, which is three lines in the picker's
+two-column card and the point at which a fourth starts.
 
 > Smears energy across time and pitch, into reverb tails, freezes and soft edges.
 > Reorders the bands by loudness or phase, banking them into glitched stripes.
@@ -100,7 +99,7 @@ font that is about **12 characters, or 10 in Compact**. The transport column is
 abbreviation, so:
 
 - **Never make a label longer than it already is.** Existing abbreviations stay:
-  "Dir. ↔", "Warp algo", "Semis". Shorten where the meaning survives.
+  "Dir. ↔", "Warp Algo.", "Semis". Shorten where the meaning survives.
 - **Title Case.** "Grid Size Beats", "Sort By", "Scale Tonic".
 - **Abbreviate by truncating with a full stop** — "Dir.", "Algo.", "Freq." —
   never by dropping vowels or inventing a short form.
@@ -122,9 +121,9 @@ Written for someone making music, not someone reading the source.
 2. **Controls** — one line each, in the order they appear on screen.
 3. **Hints** — optional, a short bullet list of things worth trying.
 
-Lists of modes always use a two-column table (**Mode | What it does**). Today
-Warp Algorithms is a table and Blend Modes is a bullet list for the same kind of
-content; the table wins.
+Lists of modes always use a two-column table (**Mode | What it does**), never a
+bullet list. A table nested inside a bullet does not survive the in-app viewer,
+so the table goes below the Controls list and the bullet points at it.
 
 ### Hints
 
@@ -145,7 +144,8 @@ stops meaning anything and readers skip all of them. So:
 - **At most two per section.**
 - **Never a restatement.** "Turn up Blur ↔ for more blur" is not a hint.
 
-Anything longer than a line is a recipe, not a hint.
+Anything longer than a line is not a hint. Fold it into the prose above, or cut
+it.
 
 ### Not in the manual
 
@@ -178,10 +178,8 @@ what to expect from an edit. These do not:
 **What the app cannot do, and why.** State a limit only where the reader will
 hit it and think something is broken. Never state the reason.
 
-- Cut: "Because the app isn't code-signed, it can't update itself in place."
-  Keep: "Download the new build from the Releases page and replace your copy."
-- Cut: "Those live online rather than in the build, because they grow between
-  releases."
+- Cut: "It is always there and has nothing to set." Nothing to do.
+- Cut: "Saves are atomic, so a crash mid-write can't corrupt your file."
 - Keep, but shorten to the fact: "Not available on Windows."
 
 **Anything the picker does not offer.** Transmute, Waveshape and Align are
@@ -221,44 +219,24 @@ like.
 
 ---
 
-## 6. Missing section: Scales
-
-The scale is set once in the transport and reaches five places. It has no
-section, so nothing tells a reader that the two transport controls change what
-an effect does. A **Scales** section under Core Concepts covers:
-
-1. **Tonic and Type** — the two controls, and what "selected scale" means.
-2. **Pitch snapping** — set the pitch grid to **Scale**, turn on Snap, and the
-   brush lands on in-scale notes only.
-3. **The scale grid** — the canvas draws a line at every in-scale note while
-   scale snapping is on and there is room to show them.
-4. **Transform → Shift ↕** — snaps its shift to scale notes, so a transposed
-   copy stays in key.
-5. **Overtones → Shape: Selected Scale** — spaces the overtones by scale degrees
-   instead of the harmonic series.
-6. **Modulator → Shape: Selected Scale** — the modulator field itself steps by
-   scale notes.
-
----
-
-## 7. Worked examples
+## 6. Worked examples
 
 Real strings, before and after. Each "after" obeys every rule above; the
 displaced material is shown where it goes.
 
 ### Parameter descriptions
 
-**Anchor** — 195 characters, carrying two mode meanings and a suggestion.
+**Anchor**: 195 characters, carrying two mode meanings and a suggestion.
 
 > **Before** Puts the cursor on the stroke's bottom-left onset corner, so snapping locks hits to the grid, or on its centre, so snapping lands the envelope peak on the grid. Corner for rhythm, Center for pads.
 >
 > **After** Sets where the cursor sits on the brush, which decides what snapping locks to the grid.
 >
-> **Manual** Corner puts the cursor on the brush's bottom-left corner, on the onset. Centre puts it on the brush centre, on the envelope peak.
+> **Manual** Corner puts it on the bottom-left corner, on the onset. Centre puts it on the brush centre, on the envelope peak.
 >
-> **Hint** Anchor to Corner for rhythmic strokes and to Centre for pads.
+> **Hint** Set Anchor to Corner for rhythmic strokes and to Centre for pads.
 
-**Skew ↔** — 224 characters, the longest in the app.
+**Skew ↔**: 224 characters, the longest in the app.
 
 > **Before** Moves the envelope peak through time: −100% is an early pluck, 0% centred, +100% a delayed hit. Contextual Time modulation flattens the envelope instead — use a pattern modulator slower than the brush for a peak that slides.
 >
@@ -268,15 +246,13 @@ displaced material is shown where it goes.
 >
 > **Hint** Modulate Skew ↔ with a pattern slower than the brush for a peak that slides from stroke to stroke.
 
-**Magnitude Limit** — mechanism, a code word, and an aside.
+**Magnitude Limit**: mechanism, a code word, and an aside.
 
 > **Before** Soft-clips each bin's magnitude. 0 turns it off — raise it only to stop a feedback effect running away, since the audio limiter already keeps the output safe.
 >
 > **After** Caps how loud any one band can get. 0 turns it off.
->
-> **Manual** The output limiter already keeps playback safe, so this is for stopping a feedback effect inside a brush from running away.
 
-**Grid ↔** — a second sentence explaining another setting.
+**Beats**: a second sentence explaining another setting.
 
 > **Before** Spaces the time grid, in beats. Set it to 'Onsets' to snap to the file's detected hits instead, which lands a stroke exactly on a transient rather than near it.
 >
@@ -284,25 +260,25 @@ displaced material is shown where it goes.
 >
 > **Manual** Set it to Onsets and the grid follows the file's detected hits instead of a fixed division.
 >
-> **Hint** Snap to onsets to land a stroke exactly on a transient rather than near it.
+> **Hint** Snap to onsets with Anchor on Corner, and a stroke lands exactly on a transient rather than near it.
 
-**Iterations** — a trailing fragment.
+**Iterations**: a trailing fragment.
 
 > **Before** Re-runs the whole effect chain this many times inside one stroke, feeding its own output back in. Echoes, feedback, spectral delay.
 >
 > **After** Repeats the whole effect chain inside one stroke, feeding each pass back in.
 >
-> **Hint** Two or three iterations build echoes and spectral delays out of a single effect.
+> **Hint** Two or three iterations turn one effect into echoes and spectral delays.
 
-**Limiter** — mechanism plus advice.
+**Auto-limit**: mechanism plus advice.
 
-> **Before** Bakes a true-peak limiter into the synthesized audio so it can't clip on playback or export. Bypass it to hear or print the raw synthesis.
+> **Before** Holds each stroke's own level down as you paint it, leaving the audio around it untouched. Turn it off to paint as loud as the effect makes it.
 >
 > **After** Stops the output clipping, on playback and on export.
 >
-> **Hint** Switch it off to hear or print the raw synthesis.
+> **Hint** Switch Auto-limit off to paint as loud as the effect makes it, and watch the level strip for clipping.
 
-**Noise ↔** — spelling only.
+**Noise ↔**: spelling and length.
 
 > **Before** Randomizes each time-axis blur tap, roughening the smear into something grainier.
 >
@@ -320,37 +296,38 @@ the end as a fragment; these fold it into the sentence instead.
 
 | Effect     | Before                                                                     | After                                                                           |
 | ---------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Dynamics   | Squash, gate, expand or invert whatever the brush covers.                  | Compresses, gates, expands or inverts each band — squashed, chopped or hollow.  |
+| Dynamics   | Squash, gate, expand or invert whatever the brush covers.                  | Compresses, gates, expands or inverts each band, into chopped and hollow sound. |
 | Transform  | Move sound through time and pitch — shift, stretch, rotate, reverse.       | Slides, stretches and rotates the sound through time and pitch, or reverses it. |
-| Overtones  | Stack harmonics on top of what's there for a richer, brighter timbre.      | Stacks harmonics above what is there, thickening it into something brighter.    |
 | Blur       | Smear energy across time and pitch. Reverb, freeze, and soft edges.        | Smears energy across time and pitch, into reverb tails, freezes and soft edges. |
-| Clone      | Repeat what's there at beat and semitone offsets. Echoes and harmonies.    | Repeats the sound at beat and semitone offsets, into echoes and stacked chords. |
-| Synthesise | Paint new sound from nothing — noise, tones, impulses.                     | Fills the brushed area with noise, tones or impulses — sound out of nothing.    |
+| Repeat     | Copy what's there at beat and semitone offsets. Echoes and harmonies.      | Copies the sound at beat and semitone offsets, into echoes and stacked chords.  |
+| Synthesise | Paint new sound from nothing — noise, tones, impulses.                     | Fills the brushed area with noise, tones or impulses: sound out of nothing.     |
 | Evolve     | Let the sound grow and flow on its own, into fluid or chaotic textures.    | Grows, spreads and decays the sound on its own, into fluid, unpredictable life. |
-| Binaural   | Place sound anywhere around the listener's head, in 3D.                    | Places the sound around the listener's head — left, right, close, far, behind.  |
+| Binaural   | Place sound anywhere around the listener's head, in 3D.                    | Places the sound around the listener's head: left, right, close, far, behind.   |
 | Sort       | Reorder the bins by loudness or phase. Glitched, banded, pixel-sorted.     | Reorders the bands by loudness or phase, banking them into glitched stripes.    |
-| Convolve   | Print the character of another sound onto this one. Reverbs and room tone. | Prints another sound's character onto this one — rooms, plates, resonant junk.  |
+| Convolve   | Print the character of another sound onto this one. Reverbs and room tone. | Prints another sound's character onto this one: rooms, plates, resonant junk.   |
+| Attract    | Pull energy toward a map — the scale, the grid, or the sound's own peaks.  | Pulls energy onto a map of valleys, gathering smear into notes and hits.        |
 
 Each keeps the operation in the first clause, so a reader who wants only the
-fact can stop at the comma.
+fact can stop at the comma. A description must not open with its own label:
+Repeat is "Copies…", not "Repeats…".
 
 ### Manual prose
 
 > **Before** Odd-even transposition sort of the spectrogram bins — pixel-sorting, for sound.
 >
-> **After** Reorders the bands inside the brush by how loud they are, or by phase. Loud content collects at one edge and the rest banks up behind it, which reads as stripes and bands.
+> **After** Reorders the bands inside the brush, so loud content collects at one edge and the rest banks up behind it. It reads as stripes, bands and digital smear.
 
 > **Before** A reaction–advection–diffusion simulation, for fluid, biological, and chaotic patterns.
 >
-> **After** Lets the painted region grow, spread and decay on its own, one step at a time. Small changes to the controls change the result completely.
+> **After** Grows, spreads and decays the sound on its own, into fluid, biological or chaotic textures. It is the least predictable effect here, and rewards small values.
 
 > **Before** HRTF-based binaural spatialization for 3D placement of the painted region.
 >
-> **After** Places the painted region at a point around the listener's head, using a model of how ears tell direction. Wear headphones.
+> **After** Places the painted sound anywhere around the listener's head, in 3D. It is made for headphones. On speakers you mostly hear it as width.
 
-> **Before** **Check for Updates…** … will tell you whether a newer version exists. Installing it is a manual job: grab the new build from the Releases page and replace your copy. Because the app isn't code-signed, it can't update itself in place.
+> **Before** A thin strip sits directly above each file's spectrogram, showing how loud the finished audio is at every moment. It is always there and has nothing to set.
 >
-> **After** **Check for Updates…** tells you whether a newer version exists. Download it from the Releases page and replace your copy.
+> **After** A thin strip sits directly above each file's spectrogram, showing how loud the finished audio is at every moment.
 
 > **Before** Nested modulation is disabled on Windows, where the unrolled shader loops it produces make compile times unusable.
 >
@@ -360,15 +337,21 @@ fact can stop at the comma.
 >
 > **After** (cut)
 
+> **Before** Saves are atomic, so a crash mid-write can't corrupt your file.
+>
+> **After** (cut: nothing to act on)
+
 ### Labels
 
 Same length or shorter, in British English.
 
-| Before          | After           | Why                         |
-| --------------- | --------------- | --------------------------- |
-| Randomize       | Randomise       | British spelling            |
-| Minimize        | Minimise        | British spelling            |
-| Synthesize      | Synthesise      | British spelling            |
-| Re-analyze File | Re-analyse File | British spelling            |
-| Dir. ↔         | Dir. ↔         | Fits; left alone            |
-| Warp algo       | Warp Algo.      | Title Case, truncation mark |
+| Before     | After      | Why                         |
+| ---------- | ---------- | --------------------------- |
+| Randomize  | Randomise  | British spelling            |
+| Minimize   | Minimise   | British spelling            |
+| Synthesize | Synthesise | British spelling            |
+| Center     | Centre     | British spelling            |
+| Favorite   | Favourite  | British spelling            |
+| Blend mode | Blend Mode | Title Case                  |
+| Dir. ↔    | Dir. ↔    | Fits; left alone            |
+| Warp algo  | Warp Algo. | Title Case, truncation mark |

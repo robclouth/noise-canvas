@@ -5,7 +5,6 @@ import { driver, type DriveStep, type Driver } from "driver.js";
 import "driver.js/dist/driver.css";
 import "../assets/walkthrough.css";
 import { anchorSelector, laneSelector, type AnchorName } from "./ui-anchors";
-import { deepTourFor, type UiAreaName } from "./ui-areas";
 
 /** Opened at the start of every run so the tour has something to paint on. */
 const DEMO_FILE = "bundled://break-loop.mp3";
@@ -17,7 +16,7 @@ const DEMO_BPM = 160;
  * A user who collapsed one of these before re-running the tour would otherwise
  * get a spotlight on a bare header.
  */
-const SECTIONS_TO_EXPAND = ["Effects", "Envelope", "Modulators", "Palette", "History", "Generate"];
+const SECTIONS_TO_EXPAND = ["Effects", "Envelope", "Modulators", "Palette", "History"];
 
 /**
  * Arms a one-shot gate: the step advances when the user does the thing rather
@@ -114,7 +113,7 @@ const STEPS: Step[] = [
     side: "right",
     title: "Make it stretch",
     description:
-      "Turn <b>Scale ↔</b> above 1 to stretch the sound out in time, or below 1 to squash it. Negative values play it backwards.<br><br>Every value works the same way. Drag it, hold <b>Ctrl</b> to snap to musical units, or hold <b>Shift</b> for fine control. <b>Right-click</b> a value for a list of preset ones, and <b>click its label</b> for the menu: modulation, randomisation and the rest.",
+      "Turn <b>Scale ↔</b> above 1 to stretch the sound out in time, or below 1 to squash it. Negative values play it backwards.<br><br>Every value works the same way. Drag it, hold <b>Ctrl</b> to snap to musical units, or hold <b>Shift</b> for fine control. <b>Right-click</b> a value for a list of preset ones, <b>click its label</b> for the menu: modulation, randomisation and the rest, and <b>double-click the label</b> to put it back to its default.",
   },
   {
     anchor: "section-envelope",
@@ -268,7 +267,6 @@ export async function startWalkthrough(): Promise<void> {
   useStore.getState().setWalkthroughSeen(true);
 }
 
-/** Shared driver.js setup, so a deep tour looks and behaves like the tour. */
 function run(steps: Step[], fileId: string | null): void {
   const instance = driver({
     showProgress: true,
@@ -293,40 +291,6 @@ function run(steps: Step[], fileId: string | null): void {
 
   active = instance;
   instance.drive();
-}
-
-/**
- * Runs one area's tour, from the discoverability overlay. Deep tours never
- * gate (D4): someone who opened the overlay is looking something up, not being
- * taught to build, so making them perform to advance would only be in the way.
- */
-export async function startDeepTour(area: UiAreaName): Promise<void> {
-  if (active) return;
-
-  const steps = deepTourFor(area);
-  if (steps.length === 0) return;
-
-  expandTourSections();
-
-  // A tour that spotlights a lane needs one on screen; the demo file is the
-  // one the app can always produce.
-  const needsLane = steps.some((step) => (step.anchor ?? area) === "file-lane");
-  let fileId = useStore.getState().activeFileId;
-  if (needsLane && !fileId) {
-    await useStore.getState().openFilePath(DEMO_FILE);
-    fileId = getFileIdByPath(DEMO_FILE) ?? null;
-    if (fileId) await revealLane(fileId);
-  }
-
-  run(
-    steps.map((step) => ({
-      anchor: step.anchor ?? area,
-      title: step.title,
-      description: step.description,
-      ...(step.side ? { side: step.side } : {}),
-    })),
-    fileId,
-  );
 }
 
 export function isWalkthroughRunning(): boolean {

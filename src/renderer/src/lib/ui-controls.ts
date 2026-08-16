@@ -93,7 +93,7 @@ export const UI_CONTROLS = {
     manualSection: "working-with-files",
   },
   "file-minimize": {
-    label: "Minimize",
+    label: "Minimise",
     description: "Moves the file off the canvas to the dock, leaving it open.",
     manualSection: "navigating-the-canvas",
   },
@@ -109,11 +109,11 @@ export const UI_CONTROLS = {
   },
   dock: {
     label: "Dock",
-    description: "Holds minimized files, which stay open and usable as sources while off the canvas.",
+    description: "Holds minimised files, which stay open and usable as sources while off the canvas.",
     manualSection: "navigating-the-canvas",
   },
   "dock-file": {
-    label: "Minimized file",
+    label: "Minimised file",
     description: "Restores this file to the canvas.",
     manualSection: "navigating-the-canvas",
   },
@@ -234,13 +234,13 @@ export const UI_CONTROLS = {
   },
   "section-menu": {
     label: "Section menu",
-    description: "Randomizes, resets or copies the parameters in this section.",
+    description: "Randomises, resets or copies the parameters in this section.",
     manualSection: "parameter-controls",
   },
   "section-randomize": {
-    label: "Randomize section",
-    description: "Randomizes the parameters in this section that are set to take part.",
-    manualSection: "randomization",
+    label: "Randomise section",
+    description: "Randomises the parameters in this section that are set to take part.",
+    manualSection: "randomisation",
   },
   "section-preset": {
     label: "Preset",
@@ -282,14 +282,14 @@ export const UI_CONTROLS = {
 
   // Randomization
   "randomize-dice": {
-    label: "Randomize",
-    description: "Randomizes every parameter that is set to take part.",
-    manualSection: "randomization",
+    label: "Randomise",
+    description: "Randomises every parameter that is set to take part.",
+    manualSection: "randomisation",
   },
   "randomize-amount": {
-    label: "Randomize amount",
-    description: "Sets how far randomizing moves each parameter from its current value.",
-    manualSection: "randomization",
+    label: "Randomise amount",
+    description: "Sets how far randomising moves each parameter from its current value.",
+    manualSection: "randomisation",
   },
 
   // Parameter menu
@@ -310,8 +310,8 @@ export const UI_CONTROLS = {
   },
   "param-randomise": {
     label: "Randomise",
-    description: "Includes this parameter when the dice randomizes the brush.",
-    manualSection: "randomization",
+    description: "Includes this parameter when the dice randomises the brush.",
+    manualSection: "randomisation",
   },
   "param-step-linked": {
     label: "Step Linked",

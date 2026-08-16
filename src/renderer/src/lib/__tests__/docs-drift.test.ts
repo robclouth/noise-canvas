@@ -4,11 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@renderer/store", () => ({ useStore: { getState: vi.fn() } }));
 
 import manual from "../../../../../docs/manual.md?raw";
-import recipes from "../../../../../docs/recipes.md?raw";
 import { HIDDEN_EFFECTS } from "../../effects/types";
 import { parameterDefs } from "../../parameters";
 import { manualSectionForParameter } from "../ui-areas";
-import { UI_AREA_NAMES, UI_TECHNIQUES, areasWithDeepTours, deepTourFor, getArea } from "../ui-areas";
+import { UI_AREA_NAMES, UI_TECHNIQUES, getArea } from "../ui-areas";
 import { UI_ANCHORS } from "../ui-anchors";
 
 /**
@@ -41,8 +40,6 @@ function slugify(heading: string): string {
 
 const manualHeadings = new Set([...manual.matchAll(/^#{2,4}\s+(.+)$/gm)].map((match) => slugify(match[1].trim())));
 
-const recipeIds = new Set([...recipes.matchAll(/^###\s+(.+)$/gm)].map((match) => slugify(match[1].trim())));
-
 const areaNames = UI_AREA_NAMES;
 
 describe("area registry", () => {
@@ -62,13 +59,6 @@ describe("area registry", () => {
     for (const technique of UI_TECHNIQUES) {
       expect(UI_ANCHORS).toContain(technique.demonstrateOn);
     }
-  });
-
-  it("only tags recipes that docs/recipes.md actually has", () => {
-    const broken = areaNames.flatMap((name) =>
-      (getArea(name).recipes ?? []).filter((recipe) => !recipeIds.has(recipe)).map((recipe) => `${name} → ${recipe}`),
-    );
-    expect(broken).toEqual([]);
   });
 
   it("gives every area a title and a blurb", () => {
@@ -103,20 +93,6 @@ describe("parameter deep links", () => {
   it("only points at headings the manual actually has", () => {
     const broken = resolved.filter((entry) => !manualHeadings.has(entry.section));
     expect(broken.map((entry) => `${entry.key} → #${entry.section}`)).toEqual([]);
-  });
-});
-
-describe("deep tours", () => {
-  const withTours = areasWithDeepTours();
-
-  it("has tours for the areas a tooltip can't explain", () => {
-    expect(withTours.length).toBeGreaterThanOrEqual(3);
-  });
-
-  it.each(withTours)("%s only spotlights declared anchors", (name) => {
-    for (const step of deepTourFor(name)) {
-      if (step.anchor) expect(UI_ANCHORS).toContain(step.anchor);
-    }
   });
 });
 
