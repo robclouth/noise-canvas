@@ -2,7 +2,14 @@ import { deepMerge } from "@mantine/core";
 import { EffectItem, syncEffects } from "@renderer/effects/types";
 import { CONTEXTUAL_MOD_SOURCES, NUM_MACROS, NUM_MODULATORS } from "@renderer/lib/constants";
 import { pickNextStepColor } from "@renderer/lib/colors";
-import { BrushStep, getParameterDef, isEffectParameter, isStepParameter, parameterDefs } from "@renderer/parameters";
+import {
+  BrushStep,
+  getParameterDef,
+  isEffectParameter,
+  isStepParameter,
+  parameterDefs,
+  sanitizeStepParams,
+} from "@renderer/parameters";
 import { produce } from "immer";
 import { create } from "zustand";
 import { persist, subscribeWithSelector } from "zustand/middleware";
@@ -22,6 +29,7 @@ import { createPresetsSlice, PRESETS_PERSISTED_KEYS } from "./presets";
 import { createSectionPresetsSlice } from "./section-presets";
 import { createStemGroupsSlice, STEM_GROUPS_PERSISTED_KEYS } from "./stem-groups";
 import { createStepsSlice, STEPS_PERSISTED_KEYS } from "./steps";
+import { clearLinkedEffectParam, writeEffectParam } from "./effect-param-linking";
 import type { ParameterKey, State } from "./types";
 import { isManagedFilePath } from "./utils";
 
@@ -213,25 +221,7 @@ export const useStore = create<State>()(
             set(
               produce((draft: State) => {
                 const brush = draft.brushes[draft.activeBrushIndex];
-                if (!brush) return;
-                const steps = brush.steps;
-
-                const updateEffectParams = (step: (typeof steps)[0]) => {
-                  const effects = (step.effects ?? []) as EffectItem[];
-                  const effectIndex = effects.findIndex((e) => e.id === effectId);
-                  if (effectIndex >= 0) {
-                    if (!effects[effectIndex].params) {
-                      effects[effectIndex].params = {};
-                    }
-                    effects[effectIndex].params[key] = value;
-                  }
-                };
-
-                if (isLinked) {
-                  steps.forEach(updateEffectParams);
-                } else if (steps[draft.activeStepIndex]) {
-                  updateEffectParams(steps[draft.activeStepIndex]);
-                }
+                if (brush) writeEffectParam(brush, draft.activeStepIndex, effectId, key, value, isLinked);
               }),
             );
           } else if (isStepParameter(key)) {
@@ -288,7 +278,7 @@ export const useStore = create<State>()(
             }),
           );
         },
-        setParamLinked: (key: ParameterKey, linked: boolean) => {
+        setParamLinked: (key: ParameterKey, linked: boolean, effectId?: string) => {
           set(
             produce((draft: State) => {
               const keyStr = key as string;
@@ -299,7 +289,15 @@ export const useStore = create<State>()(
               if (linked && index === -1) {
                 linkedParams.push(keyStr);
                 // When enabling linking, sync current value to all steps
-                if (isStepParameter(key)) {
+                if (effectId && isEffectParameter(key)) {
+                  const active = (brush.steps[draft.activeStepIndex]?.effects ?? []) as EffectItem[];
+                  const params = active.find((e) => e.id === effectId)?.params;
+                  if (params && key in params) {
+                    writeEffectParam(brush, draft.activeStepIndex, effectId, key, params[key], true);
+                  } else {
+                    clearLinkedEffectParam(brush, draft.activeStepIndex, effectId, key);
+                  }
+                } else if (isStepParameter(key)) {
                   const currentValue = brush.steps[draft.activeStepIndex]?.[key];
                   brush.steps.forEach((step) => {
                     (step as Record<string, unknown>)[key] = currentValue;
@@ -349,7 +347,7 @@ export const useStore = create<State>()(
           if (Array.isArray(merged.brushes)) {
             merged.brushes = merged.brushes.map((brush) => {
               const steps = ((brush.steps ?? []) as unknown as Record<string, unknown>[]).map((step) => ({
-                ...step,
+                ...sanitizeStepParams(step),
                 effects: syncEffects(step.effects as Parameters<typeof syncEffects>[0]),
               })) as unknown as BrushStep[];
               steps.forEach((step, index) => {

@@ -1902,6 +1902,24 @@ export const isStepParameter = (key: ParameterKey): boolean => {
   return def?.includeInStep === true;
 };
 
+/**
+ * Drops step parameter values that are null where the parameter's kind has no
+ * null form. Only file parameters take null as their unset value; in any other
+ * kind a null fails preset validation, and dropping it leaves the parameter to
+ * read its default. Returns the input unchanged when there is nothing to drop.
+ */
+export const sanitizeStepParams = <T extends Record<string, unknown>>(step: T): T => {
+  let cleaned: T | null = null;
+  for (const [key, value] of Object.entries(step)) {
+    if (value !== null) continue;
+    const def = parameterDefs[key as ParameterKey];
+    if (!def || def.kind === "file") continue;
+    cleaned ??= { ...step };
+    delete cleaned[key];
+  }
+  return cleaned ?? step;
+};
+
 // --- File Parameter Helpers ---
 
 /** Returns all parameter keys with kind: "file". */

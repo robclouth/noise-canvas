@@ -9,7 +9,7 @@ import {
   validatePreset,
 } from "@renderer/lib/preset-schema";
 import { host } from "@renderer/lib/host";
-import { BrushStep, createDefaultStep } from "@renderer/parameters";
+import { BrushStep, createDefaultStep, sanitizeStepParams } from "@renderer/parameters";
 import { produce } from "immer";
 import { factoryPresets } from "../lib/factory-presets";
 import { makeBrushFromPreset, makeEmptyBrush } from "./brush-factory";
@@ -151,7 +151,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       macroValues: preset.macroValues ?? [...DEFAULT_MACRO_VALUES],
     };
     const brushSnapshot = {
-      steps: brush.steps,
+      steps: brush.steps.map(sanitizeStepParams),
       linkedParams: brush.linkedParams,
       macroNames: brush.macroNames,
       macroValues: brush.macroValues,
@@ -349,7 +349,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       ...existing,
       version: CURRENT_PRESET_VERSION,
       color: brush.color,
-      steps: brush.steps,
+      steps: brush.steps.map(sanitizeStepParams),
       linkedParams: brush.linkedParams,
       macroNames: [...brush.macroNames],
       macroValues: [...brush.macroValues],
@@ -399,7 +399,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       isFactory: false,
       version: CURRENT_PRESET_VERSION,
       color: brush.color,
-      steps: brush.steps,
+      steps: brush.steps.map(sanitizeStepParams),
       linkedParams: brush.linkedParams,
       macroNames: [...brush.macroNames],
       macroValues: [...brush.macroValues],

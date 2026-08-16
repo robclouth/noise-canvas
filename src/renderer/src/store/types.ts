@@ -137,7 +137,7 @@ export type State = BrushState &
     setRandomizationAmount: (key: string, amount: number) => void;
     excludedFromRandomization: string[];
     setParamExcluded: (key: ParameterKey, excluded: boolean) => void;
-    setParamLinked: (key: ParameterKey, linked: boolean) => void;
+    setParamLinked: (key: ParameterKey, linked: boolean, effectId?: string) => void;
   };
 
 // Helper type to extract parameter keys from state

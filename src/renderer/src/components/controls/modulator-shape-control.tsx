@@ -68,7 +68,9 @@ export const ModulatorShapeControl = ({ paramKey, modulatorIndex }: ModulatorSha
         setParameter(textureParamKey, texturePathValue);
       } else {
         setParameter(paramKey, parseInt(value));
-        setParameter(textureParamKey, null);
+        // The empty string is this parameter's unset value; null is not a form
+        // a string parameter takes, and fails preset validation on save.
+        setParameter(textureParamKey, "");
       }
     }
     inputRef.current?.blur();

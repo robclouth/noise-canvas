@@ -258,7 +258,7 @@ export const ParamMenu = ({
                 </Text>
               }
               value={isLinked}
-              setValue={(value) => setParamLinked(paramKey, value)}
+              setValue={(value) => setParamLinked(paramKey, value, effectId)}
             />
           </Group>
 
