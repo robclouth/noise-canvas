@@ -332,6 +332,13 @@ export async function synthesize(
   // Pass existing audio as array or empty array if not provided
   const existing = existingAudio ?? [];
 
+  // The worker writes the finished audio into these off the main thread and
+  // hands them back as the result's channels.
+  const outputAudio = Array.from(
+    { length: analysisMetadata.numChannels },
+    () => new Float32Array(analysisMetadata.numFrames),
+  );
+
   return await gab.synthesize(
     processedData,
     analysisMetadata,
@@ -343,6 +350,7 @@ export async function synthesize(
     end,
     bandStart,
     bandEnd,
+    outputAudio,
   );
 }
 
@@ -353,8 +361,9 @@ export async function synthesize(
  * to, the onsets over the span and its output levels.
  *
  * Any failure rejects the whole call — a commit that half happened would leave
- * the canvas, the audio and the history disagreeing. The input buffer is never
- * written; the returned patch alone carries this pass's coefficient changes.
+ * the canvas, the audio and the history disagreeing. The projection writes its
+ * coefficients into `packedData` in place; the returned patch ranges say which
+ * spans changed.
  */
 export async function commitStroke(
   packedData: Float32Array,
@@ -366,7 +375,20 @@ export async function commitStroke(
   stroke: CommitStroke,
 ): Promise<CommitStrokeResult> {
   const gab = init();
-  return await gab.commitStroke(packedData, analysisMetadata, sampleRate, params, existingAudio, window, stroke);
+  const outputAudio = Array.from(
+    { length: analysisMetadata.numChannels },
+    () => new Float32Array(analysisMetadata.numFrames),
+  );
+  return await gab.commitStroke(
+    packedData,
+    analysisMetadata,
+    sampleRate,
+    params,
+    existingAudio,
+    window,
+    stroke,
+    outputAudio,
+  );
 }
 
 export async function hpss(

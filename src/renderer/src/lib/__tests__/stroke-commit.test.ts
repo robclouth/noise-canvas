@@ -278,6 +278,21 @@ describe("coefficient patch", () => {
     expect(extent!.maxFrame).toBe(Math.max(7 << bandStepLog2s[2], 3 << bandStepLog2s[4]));
   });
 
+  it("computes the extent without writing when the patch carries no pixels", () => {
+    const spec = makeSpec();
+    const { bandOffsets, bandStepLog2s } = spec.synthesisMetadata;
+    const totalPixels = bandOffsets[NUM_BANDS - 1] + 1;
+    const data = new Float32Array(totalPixels * 4).fill(7);
+
+    const ranges = new Uint32Array([2, 5, 2, 4, 1, 2]);
+    const extent = applyCoefficientPatch(data, { ranges }, bandOffsets, bandStepLog2s);
+
+    expect(data.every((v) => v === 7)).toBe(true);
+    expect(Array.from(extent!.pixelRanges)).toEqual([bandOffsets[2] + 5, 2, bandOffsets[4] + 1, 2]);
+    expect(extent!.minBand).toBe(2);
+    expect(extent!.maxBand).toBe(4);
+  });
+
   it("reports nothing for an empty patch", () => {
     const spec = makeSpec();
     const data = new Float32Array(16);

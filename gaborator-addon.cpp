@@ -321,6 +321,54 @@ static void crossfadeSpliceInto(std::vector<float> &dest, const float *existing,
     }
 }
 
+/**
+ * References caller-provided audio output buffers (an Array of Float32Arrays)
+ * so a worker can fill them off the main thread. Anything else than an array
+ * of Float32Arrays leaves the vectors empty, and the worker returns copies.
+ */
+static void referenceOutputAudio(const Napi::Value &val,
+                                 std::vector<Napi::Reference<Napi::Float32Array>> &refs,
+                                 std::vector<float *> &ptrs, std::vector<size_t> &lens)
+{
+    if (!val.IsArray())
+        return;
+    Napi::Array arr = val.As<Napi::Array>();
+    const uint32_t n = arr.Length();
+    for (uint32_t i = 0; i < n; i++)
+    {
+        Napi::Value v = arr.Get(i);
+        if (!v.IsTypedArray() || v.As<Napi::TypedArray>().TypedArrayType() != napi_float32_array)
+        {
+            refs.clear();
+            ptrs.clear();
+            lens.clear();
+            return;
+        }
+        Napi::Float32Array ch = v.As<Napi::Float32Array>();
+        refs.push_back(Napi::Reference<Napi::Float32Array>::New(ch, 1));
+        ptrs.push_back(ch.Data());
+        lens.push_back(ch.ElementLength());
+    }
+}
+
+/**
+ * Copies the finished audio into the caller's buffers, on the worker thread.
+ * False when the buffers do not match, so OnOK falls back to copying there.
+ */
+static bool writeOutputAudio(const std::vector<std::vector<float>> &audioChannels,
+                             const std::vector<float *> &outputAudio,
+                             const std::vector<size_t> &outputAudioLens)
+{
+    if (outputAudio.empty() || outputAudio.size() != audioChannels.size())
+        return false;
+    for (size_t ch = 0; ch < audioChannels.size(); ++ch)
+        if (outputAudioLens[ch] != audioChannels[ch].size())
+            return false;
+    for (size_t ch = 0; ch < audioChannels.size(); ++ch)
+        memcpy(outputAudio[ch], audioChannels[ch].data(), audioChannels[ch].size() * sizeof(float));
+    return true;
+}
+
 class AnalyzeWorker : public Napi::AsyncWorker
 {
 public:
@@ -649,21 +697,6 @@ struct DetectedOnset
     float salience;
 };
 
-/**
- * A patch laid over the packed buffer, so a detection can read coefficients a
- * commit has recomputed but not yet written back. Band b's coefficients
- * [k0[b], k0[b] + count[b]) come from `pixels` at pixelBase[b] instead of from
- * the packed data; everything else reads through.
- */
-struct OnsetPatchOverlay
-{
-    const int64_t *k0 = nullptr;
-    const int64_t *count = nullptr;
-    const size_t *pixelBase = nullptr;
-    const float *pixels = nullptr;
-    size_t pixelFloats = 0;
-};
-
 // Time resolution of the detection function.
 static constexpr double ONSET_BIN_SEC = 0.0005;
 // Magnitude compression applied before whitening: log1p(gamma * mag).
@@ -751,8 +784,7 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
                                                 double sampleRate,
                                                 const OnsetRegion *region = nullptr,
                                                 double *odfMaxOut = nullptr,
-                                                std::vector<float> *bandMaxOut = nullptr,
-                                                const OnsetPatchOverlay *overlay = nullptr)
+                                                std::vector<float> *bandMaxOut = nullptr)
 {
     std::vector<DetectedOnset> onsets;
     if (!packed || layout.numBands <= 0 || numFrames <= 0 || sampleRate <= 0.0)
@@ -760,16 +792,6 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
 
     // The four floats of one coefficient, or null when it is out of bounds.
     const auto pixelAt = [&](int b, int64_t k) -> const float * {
-        if (overlay)
-        {
-            const int64_t rel = k - overlay->k0[b];
-            if (rel >= 0 && rel < overlay->count[b])
-            {
-                const size_t px = overlay->pixelBase[b] + (size_t)rel * 4;
-                if (px + 3 < overlay->pixelFloats)
-                    return overlay->pixels + px;
-            }
-        }
         const size_t px = ((size_t)layout.bandOffsets[b] + (size_t)k) * 4;
         if (px + 3 >= packedFloats)
             return nullptr;
@@ -1420,10 +1442,12 @@ public:
                      int64_t startFrame,
                      int64_t endFrame,
                      int64_t startBand,
-                     int64_t endBand)
+                     int64_t endBand,
+                     const Napi::Value &outputAudioVal)
         : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), sampleRate(sampleRate), applyLimiter(applyLimiter),
           requestedStartFrame(startFrame), requestedEndFrame(endFrame), requestedStartBand(startBand), requestedEndBand(endBand)
     {
+        referenceOutputAudio(outputAudioVal, outputAudioRefs, outputAudio, outputAudioLens);
         // Hold the packed FBO buffer by reference and read it straight from its
         // backing store on the worker thread. The reference keeps the JS array
         // alive across the async boundary; the caller does not mutate it while
@@ -1681,6 +1705,8 @@ public:
             DEBUG_LOG << "[C++] Detected " << onsets.size() << " onsets" << std::endl << std::flush;
         }
 
+        outputWritten = writeOutputAudio(audioChannels, outputAudio, outputAudioLens);
+
         DEBUG_LOG << "[C++] Execute() complete" << std::endl << std::flush;
     }
 
@@ -1693,6 +1719,11 @@ public:
         Napi::Array outputChannels = Napi::Array::New(env, channels);
         for (int ch = 0; ch < channels; ++ch)
         {
+            if (outputWritten)
+            {
+                outputChannels[ch] = outputAudioRefs[(size_t)ch].Value();
+                continue;
+            }
             size_t outputLength = audioChannels[ch].size();
             Napi::Float32Array channelBuffer = Napi::Float32Array::New(env, outputLength);
             memcpy(channelBuffer.Data(), audioChannels[ch].data(), outputLength * sizeof(float));
@@ -1755,6 +1786,13 @@ private:
     std::vector<const float *> existingAudio;
     std::vector<size_t> existingAudioLens;
 
+    // Caller-provided buffers the finished audio is written into on the worker
+    // thread; OnOK returns them.
+    std::vector<Napi::Reference<Napi::Float32Array>> outputAudioRefs;
+    std::vector<float *> outputAudio;
+    std::vector<size_t> outputAudioLens;
+    bool outputWritten = false;
+
     // Results
     std::vector<std::vector<float>> audioChannels;
     float peakValue = 0.0f;
@@ -1769,7 +1807,7 @@ Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
 
     if (info.Length() < 6 || !info[0].IsTypedArray() || !info[1].IsObject() || !info[2].IsNumber() || !info[3].IsObject() || !info[4].IsBoolean() || !info[5].IsArray())
     {
-        Napi::TypeError::New(env, "Expected: data (TypedArray), analysisObject (Object), sampleRate (Number), params (Object), applyLimiter (Boolean), existingAudio (Array), [startFrame], [endFrame], [startBand], [endBand]").ThrowAsJavaScriptException();
+        Napi::TypeError::New(env, "Expected: data (TypedArray), analysisObject (Object), sampleRate (Number), params (Object), applyLimiter (Boolean), existingAudio (Array), [startFrame], [endFrame], [startBand], [endBand], [outputAudio (Array)]").ThrowAsJavaScriptException();
         return env.Null();
     }
 
@@ -1803,6 +1841,9 @@ Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
         endBand = info[9].As<Napi::Number>().Int64Value();
     }
 
+    // Optional pre-allocated output channels the audio is written into.
+    Napi::Value outputAudioVal = info.Length() > 10 ? info[10] : (Napi::Value)env.Undefined();
+
     if (!paramsJs.Has("bandsPerOctave") || !paramsJs.Get("bandsPerOctave").IsNumber())
     {
         Napi::TypeError::New(env, "params.bandsPerOctave is missing or not a number").ThrowAsJavaScriptException();
@@ -1814,7 +1855,7 @@ Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
         return env.Null();
     }
 
-    SynthesizeWorker *worker = new SynthesizeWorker(env, inputDataJs, analysisObj, sampleRate, paramsJs, applyLimiter, existingAudioJs, startFrame, endFrame, startBand, endBand);
+    SynthesizeWorker *worker = new SynthesizeWorker(env, inputDataJs, analysisObj, sampleRate, paramsJs, applyLimiter, existingAudioJs, startFrame, endFrame, startBand, endBand, outputAudioVal);
     worker->Queue();
     return worker->GetPromise();
 }
@@ -1826,11 +1867,11 @@ Napi::Value SynthesizeAsync(const Napi::CallbackInfo &info)
 // analyzes to, the onsets and the output levels.
 //
 // The canvas is projected through the audio — synthesize the stroke's window,
-// re-analyze it, hand the coefficients back as a patch. Analysis and synthesis
-// reconstruct perfectly, so the projection is idempotent: committing twice
-// changes nothing the second time. What it buys is that the picture is the
-// analysis of what will be heard, so a phase-only edit shows, and no coefficient
-// survives that synthesis would discard.
+// re-analyze it, write the coefficients back into the packed buffer in place.
+// Analysis and synthesis reconstruct perfectly, so the projection is
+// idempotent: committing twice changes nothing the second time. What it buys
+// is that the picture is the analysis of what will be heard, so a phase-only
+// edit shows, and no coefficient survives that synthesis would discard.
 
 /** How much of the file one point of the levels and the envelope covers. */
 static constexpr double COMMIT_LEVEL_HOP_SEC = 0.005;
@@ -1850,14 +1891,20 @@ public:
                        const Napi::Object &paramsJs,
                        const Napi::Array &existingAudioJs,
                        const Napi::Object &windowObj,
-                       const Napi::Object &strokeObj)
+                       const Napi::Object &strokeObj,
+                       const Napi::Value &outputAudioVal)
         : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), sampleRate(sampleRate)
     {
         // Held by reference and read from its backing store on the worker
-        // thread. Never written: the patch alone carries this pass's changes.
+        // thread. project() writes the coefficients it recomputes back into it
+        // in place; the returned patch ranges say which spans changed. A pass
+        // that fails validation, or fails before the projection, leaves it
+        // untouched.
         packedRef = Napi::Reference<Napi::Float32Array>::New(packedJs, 1);
-        packed = packedJs.Data();
+        packed = packedRef.Value().Data();
         packedLen = packedJs.ElementLength();
+
+        referenceOutputAudio(outputAudioVal, outputAudioRefs, outputAudio, outputAudioLens);
 
         numFrames = metaObj.Get("numFrames").As<Napi::Number>().Int64Value();
         channels = metaObj.Get("numChannels").As<Napi::Number>().Int32Value();
@@ -2029,8 +2076,8 @@ public:
             for (float sample : channel)
                 peakValue = std::max(peakValue, std::abs(sample));
 
-        // 5. Onsets, read through the patch so they answer to the projection
-        //    rather than to the coefficients it replaced.
+        // 5. Onsets, read from the packed buffer the projection wrote, so they
+        //    answer to the coefficients that are kept.
         if (detectOnsets)
         {
             OnsetBandLayout layout;
@@ -2041,20 +2088,14 @@ public:
             layout.bandLengths = bandLengths.data();
             layout.bandStepLog2s = bandStepLog2s.data();
 
-            OnsetPatchOverlay overlay;
-            overlay.k0 = patchK0.data();
-            overlay.count = patchCount.data();
-            overlay.pixelBase = patchPixelBase.data();
-            overlay.pixels = patchPixels.data();
-            overlay.pixelFloats = patchPixels.size();
-
             onsets = computeOnsets(packed, packedLen, layout, numFrames, sampleRate,
-                                   hasOnsetRegion ? &onsetRegion : nullptr, &onsetOdfMax, &onsetBandMaxOut,
-                                   projectEnabled ? &overlay : nullptr);
+                                   hasOnsetRegion ? &onsetRegion : nullptr, &onsetOdfMax, &onsetBandMaxOut);
         }
 
         // 6. Output levels over the window.
         computeLevels(w0, w1, weightedGain);
+
+        outputWritten = writeOutputAudio(audioChannels, outputAudio, outputAudioLens);
     }
 
     void OnOK()
@@ -2066,6 +2107,11 @@ public:
         Napi::Array outputChannels = Napi::Array::New(env, channels);
         for (int ch = 0; ch < channels; ++ch)
         {
+            if (outputWritten)
+            {
+                outputChannels[ch] = outputAudioRefs[(size_t)ch].Value();
+                continue;
+            }
             const size_t len = audioChannels[ch].size();
             Napi::Float32Array buffer = Napi::Float32Array::New(env, len);
             if (len)
@@ -2084,11 +2130,7 @@ public:
             ranges[i * 3 + 1] = rangeStarts[i];
             ranges[i * 3 + 2] = rangeCounts[i];
         }
-        Napi::Float32Array pixels = Napi::Float32Array::New(env, patchPixels.size());
-        if (!patchPixels.empty())
-            memcpy(pixels.Data(), patchPixels.data(), patchPixels.size() * sizeof(float));
         patch.Set("ranges", ranges);
-        patch.Set("pixels", pixels);
         result.Set("patch", patch);
 
         Napi::Float32Array grBuffer = Napi::Float32Array::New(env, gainReductionDb.size());
@@ -2335,9 +2377,10 @@ private:
     }
 
     /**
-     * Re-analyzes the finished audio and hands back the coefficients it reads
-     * as, over every band. A band is rewritten only where its own filter can
-     * see the changed audio; the analysis runs over twice that margin so those
+     * Re-analyzes the finished audio and writes the coefficients it reads as
+     * into the packed buffer, over every band. A band is rewritten only where
+     * its own filter can see the changed audio; the analysis runs over twice
+     * that margin so those
      * coefficients are complete.
      *
      * Phase is written on the branch the packed format keeps — unwrapped
@@ -2364,7 +2407,6 @@ private:
 
         patchK0.assign((size_t)numBands, 0);
         patchCount.assign((size_t)numBands, 0);
-        patchPixelBase.assign((size_t)numBands, 0);
         for (int b = 0; b < numBands; ++b)
         {
             const int32_t step = bandStepLog2s[(size_t)b];
@@ -2462,11 +2504,11 @@ private:
             }
         }
 
-        // Assemble the patch, extending any band whose branch moved.
+        // Write the patch into the packed buffer, extending any band whose
+        // branch moved.
         rangeBands.clear();
         rangeStarts.clear();
         rangeCounts.clear();
-        patchPixels.clear();
         for (int b = 0; b < numBands; ++b)
         {
             const size_t count = (size_t)patchCount[(size_t)b];
@@ -2477,8 +2519,6 @@ private:
 
             const size_t total = needsTail[(size_t)b] ? (size_t)(len - k0) : count;
 
-            patchPixelBase[(size_t)b] = patchPixels.size();
-            patchCount[(size_t)b] = (int64_t)total;
             rangeBands.push_back((uint32_t)b);
             rangeStarts.push_back((uint32_t)k0);
             rangeCounts.push_back((uint32_t)total);
@@ -2487,11 +2527,12 @@ private:
             for (int ch = 0; ch < channels; ++ch)
                 tailPrev[(size_t)ch] = bandPhase[(size_t)b][(count - 1) * (size_t)channels + (size_t)ch];
 
-            const size_t base = patchPixels.size();
-            patchPixels.resize(base + total * 4, 0.0f);
             for (size_t rel = 0; rel < total; ++rel)
             {
-                float *out = patchPixels.data() + base + rel * 4;
+                const size_t off = ((size_t)bandOffsets[(size_t)b] + (size_t)k0 + rel) * 4;
+                if (off + 3 >= packedLen)
+                    continue;
+                float *out = packed + off;
                 if (rel < count)
                 {
                     for (int ch = 0; ch < channels; ++ch)
@@ -2503,15 +2544,10 @@ private:
                 }
                 // Past the re-analyzed span the magnitudes stand, but the phases
                 // are put back on the branch the new values ended on.
-                const size_t srcOff = ((size_t)bandOffsets[(size_t)b] + (size_t)k0 + rel) * 4;
-                if (srcOff + 3 >= packedLen)
-                    continue;
                 for (int ch = 0; ch < channels; ++ch)
                 {
-                    const float rebranched =
-                        unwrapForward(packed[srcOff + (size_t)ch * 2 + 1], tailPrev[(size_t)ch]);
+                    const float rebranched = unwrapForward(out[ch * 2 + 1], tailPrev[(size_t)ch]);
                     tailPrev[(size_t)ch] = rebranched;
-                    out[ch * 2] = packed[srcOff + (size_t)ch * 2];
                     out[ch * 2 + 1] = rebranched;
                 }
             }
@@ -2572,7 +2608,7 @@ private:
     Napi::Promise::Deferred deferred;
 
     Napi::Reference<Napi::Float32Array> packedRef;
-    const float *packed = nullptr;
+    float *packed = nullptr;
     size_t packedLen = 0;
 
     double sampleRate;
@@ -2601,13 +2637,18 @@ private:
     bool applyLimiter = false;
     bool projectEnabled = true;
 
+    // Caller-provided buffers the finished audio is written into on the worker
+    // thread; OnOK returns them.
+    std::vector<Napi::Reference<Napi::Float32Array>> outputAudioRefs;
+    std::vector<float *> outputAudio;
+    std::vector<size_t> outputAudioLens;
+    bool outputWritten = false;
+
     // Results
     std::vector<std::vector<float>> audioChannels;
     float peakValue = 0.0f;
     std::vector<uint32_t> rangeBands, rangeStarts, rangeCounts;
-    std::vector<float> patchPixels;
     std::vector<int64_t> patchK0, patchCount;
-    std::vector<size_t> patchPixelBase;
     std::vector<float> gainReductionDb;
     float maxGainReductionDb = 0.0f;
     int64_t levelStartHop = 0;
@@ -2625,7 +2666,8 @@ Napi::Value CommitStrokeAsync(const Napi::CallbackInfo &info)
         !info[3].IsObject() || !info[4].IsArray() || !info[5].IsObject() || !info[6].IsObject())
     {
         Napi::TypeError::New(env, "Expected: packedData (Float32Array), analysisMetadata (Object), sampleRate "
-                                  "(Number), params (Object), existingAudio (Array), window (Object), stroke (Object)")
+                                  "(Number), params (Object), existingAudio (Array), window (Object), stroke "
+                                  "(Object), [outputAudio (Array)]")
             .ThrowAsJavaScriptException();
         return env.Null();
     }
@@ -2633,7 +2675,8 @@ Napi::Value CommitStrokeAsync(const Napi::CallbackInfo &info)
     auto *worker = new CommitStrokeWorker(env, info[0].As<Napi::Float32Array>(), info[1].As<Napi::Object>(),
                                           info[2].As<Napi::Number>().DoubleValue(), info[3].As<Napi::Object>(),
                                           info[4].As<Napi::Array>(), info[5].As<Napi::Object>(),
-                                          info[6].As<Napi::Object>());
+                                          info[6].As<Napi::Object>(),
+                                          info.Length() > 7 ? info[7] : (Napi::Value)env.Undefined());
     worker->Queue();
     return worker->GetPromise();
 }

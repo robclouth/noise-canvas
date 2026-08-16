@@ -56,10 +56,14 @@ export interface PackedLayout {
   bandLengths: Uint32Array;
 }
 
-/** Coefficients a pass rewrote: per-band [band, k0, count] plus their pixels. */
+/**
+ * Coefficients a pass rewrote: per-band [band, k0, count]. `pixels` runs in
+ * the same order and carries the values only when the pass could not write
+ * them into the packed buffer itself.
+ */
 export interface CoefficientPatch {
   ranges: Uint32Array;
-  pixels: Float32Array;
+  pixels?: Float32Array;
 }
 
 /** The span of the canvas a commit rebuilds: the dirty region, in frames and bands. */

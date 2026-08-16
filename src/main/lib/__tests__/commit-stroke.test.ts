@@ -30,7 +30,7 @@ interface CommitStroke {
 interface CommitResult {
   channels: Float32Array[];
   peak: number;
-  patch: { ranges: Uint32Array; pixels: Float32Array };
+  patch: { ranges: Uint32Array };
   gainReductionDb: Float32Array;
   maxGainReductionDb: number;
   levels: { startHop: number; peaks: Float32Array; overDb: Float32Array };
@@ -138,23 +138,6 @@ function erase(analysis: GaboratorAnalysisResult, from = F0, to = F1): Float32Ar
   return data;
 }
 
-function applyPatch(
-  data: Float32Array,
-  analysis: GaboratorAnalysisResult,
-  patch: { ranges: Uint32Array; pixels: Float32Array },
-): Float32Array {
-  const out = new Float32Array(data);
-  let src = 0;
-  for (let i = 0; i < patch.ranges.length; i += 3) {
-    const band = patch.ranges[i];
-    const k0 = patch.ranges[i + 1];
-    const count = patch.ranges[i + 2];
-    out.set(patch.pixels.subarray(src, src + count * 4), (analysis.bandOffsets[band] + k0) * 4);
-    src += count * 4;
-  }
-  return out;
-}
-
 function fullWindow(analysis: GaboratorAnalysisResult): CommitWindow {
   return { startFrame: F0, endFrame: F1, startBand: 0, endBand: analysis.numBands };
 }
@@ -247,10 +230,10 @@ describe("commit stroke", () => {
       );
       expect(commit.patch.ranges.length).toBeGreaterThan(0);
 
-      // Synthesising the projected canvas must reproduce the audio the commit
-      // returned, over the interior of the window it rebuilt.
-      const projected = applyPatch(erased, analysis, commit.patch);
-      const fromCanvas = await roundTrip(analysis, projected);
+      // Synthesising the projected canvas — written into the input in place —
+      // must reproduce the audio the commit returned, over the interior of the
+      // window it rebuilt.
+      const fromCanvas = await roundTrip(analysis, erased);
 
       const a = Math.round((T0 - 0.2) * SR);
       const b = Math.round((T1 + 0.2) * SR);
@@ -272,7 +255,7 @@ describe("commit stroke", () => {
       const analysis = await addon.analyze([makeNoise()], 1, SR, PARAMS);
       const original = await roundTrip(analysis, analysis.data);
 
-      let canvas = erase(analysis);
+      const canvas = erase(analysis);
       let audio = original;
       const audios: Float32Array[] = [];
       for (let round = 0; round < 4; round++) {
@@ -286,7 +269,6 @@ describe("commit stroke", () => {
           gateStroke(),
         );
         audios.push(commit.channels[0]);
-        canvas = applyPatch(canvas, analysis, commit.patch);
         audio = commit.channels[0];
       }
 
@@ -329,7 +311,7 @@ describe("commit stroke", () => {
         fullWindow(analysis),
         gateStroke(),
       );
-      const projected = applyPatch(erased, analysis, commit.patch);
+      expect(commit.patch.ranges.length).toBeGreaterThan(0);
 
       // The packed format stores phase unwrapped in time, so neighbours never
       // differ by more than pi — including across both seams of the patch. The
@@ -347,7 +329,7 @@ describe("commit stroke", () => {
       };
       // The analysis itself reaches pi exactly, so the projection must not go
       // past whatever a fresh analysis of the same file already stores.
-      expect(worstOf(projected)).toBeLessThanOrEqual(worstOf(analysis.data));
+      expect(worstOf(erased)).toBeLessThanOrEqual(worstOf(analysis.data));
     },
     TIMEOUT,
   );
@@ -371,11 +353,29 @@ describe("commit stroke", () => {
       const window = fullWindow(analysis);
       const stroke = gateStroke({ hardEdgeStart: false, hardEdgeEnd: false });
 
-      const bypassed = await addon.commitStroke(loud, metaOf(analysis), SR, PARAMS, [original], window, stroke);
-      const limited = await addon.commitStroke(loud, metaOf(analysis), SR, PARAMS, [original], window, {
-        ...stroke,
-        applyLimiter: true,
-      });
+      // Each commit projects into its input, so each run gets its own copy of
+      // the painted canvas.
+      const bypassed = await addon.commitStroke(
+        new Float32Array(loud),
+        metaOf(analysis),
+        SR,
+        PARAMS,
+        [original],
+        window,
+        stroke,
+      );
+      const limited = await addon.commitStroke(
+        new Float32Array(loud),
+        metaOf(analysis),
+        SR,
+        PARAMS,
+        [original],
+        window,
+        {
+          ...stroke,
+          applyLimiter: true,
+        },
+      );
 
       expect(bypassed.peak).toBeGreaterThan(1);
       expect(limited.maxGainReductionDb).toBeGreaterThan(1);
@@ -437,11 +437,27 @@ describe("commit stroke", () => {
       const window = fullWindow(analysis);
       const stroke = gateStroke({ hardEdgeStart: false, hardEdgeEnd: false });
 
-      const bypassed = await addon.commitStroke(loud, metaOf(analysis), SR, PARAMS, [original], window, stroke);
-      const limited = await addon.commitStroke(loud, metaOf(analysis), SR, PARAMS, [original], window, {
-        ...stroke,
-        applyLimiter: true,
-      });
+      const bypassed = await addon.commitStroke(
+        new Float32Array(loud),
+        metaOf(analysis),
+        SR,
+        PARAMS,
+        [original],
+        window,
+        stroke,
+      );
+      const limited = await addon.commitStroke(
+        new Float32Array(loud),
+        metaOf(analysis),
+        SR,
+        PARAMS,
+        [original],
+        window,
+        {
+          ...stroke,
+          applyLimiter: true,
+        },
+      );
 
       expect(limited.maxGainReductionDb).toBeGreaterThan(1);
       expect(limited.peak).toBeLessThan(bypassed.peak);
@@ -461,12 +477,20 @@ describe("commit stroke", () => {
 
       // A gated hard edge takes no ramp, so the bound holds over the whole
       // footprint, first sample to last.
-      const hardLimited = await addon.commitStroke(loud, metaOf(analysis), SR, PARAMS, [original], window, {
-        ...stroke,
-        hardEdgeStart: true,
-        hardEdgeEnd: true,
-        applyLimiter: true,
-      });
+      const hardLimited = await addon.commitStroke(
+        new Float32Array(loud),
+        metaOf(analysis),
+        SR,
+        PARAMS,
+        [original],
+        window,
+        {
+          ...stroke,
+          hardEdgeStart: true,
+          hardEdgeEnd: true,
+          applyLimiter: true,
+        },
+      );
       let originalPeakFull = 0;
       let hardInsidePeak = 0;
       for (let i = F0; i < F1; i++) {
@@ -504,7 +528,7 @@ describe("commit stroke", () => {
       }
 
       const commit = await addon.commitStroke(
-        loud,
+        new Float32Array(loud),
         metaOf(analysis),
         SR,
         PARAMS,
@@ -538,7 +562,7 @@ describe("commit stroke", () => {
       // The limiter keeps the same stroke inside headroom, so nothing marks:
       // the levels read the samples the same way whether it ran or not.
       const limited = await addon.commitStroke(
-        loud,
+        new Float32Array(loud),
         metaOf(analysis),
         SR,
         PARAMS,
@@ -553,7 +577,7 @@ describe("commit stroke", () => {
   );
 
   it(
-    "never writes to its input, and fails whole on a bad request",
+    "writes the projection into its input, and a failed request leaves it untouched",
     async () => {
       const analysis = await addon.analyze([makeNoise()], 1, SR, PARAMS);
       const erased = erase(analysis);
@@ -561,13 +585,15 @@ describe("commit stroke", () => {
       const original = await roundTrip(analysis, analysis.data);
 
       await addon.commitStroke(erased, metaOf(analysis), SR, PARAMS, [original], fullWindow(analysis), gateStroke());
-      expect(erased).toEqual(before);
+      expect(erased).not.toEqual(before);
 
       // Existing audio that does not match the analysis is a caller bug, and a
-      // bug must not produce half a commit.
+      // bug must not produce half a commit — nor touch the canvas.
+      const canvas = erase(analysis);
+      const untouched = new Float32Array(canvas);
       await expect(
         addon.commitStroke(
-          erased,
+          canvas,
           metaOf(analysis),
           SR,
           PARAMS,
@@ -576,10 +602,11 @@ describe("commit stroke", () => {
           gateStroke(),
         ),
       ).rejects.toThrow();
+      expect(canvas).toEqual(untouched);
 
       await expect(
         addon.commitStroke(
-          erased,
+          canvas,
           { ...metaOf(analysis), numChannels: 2 },
           SR,
           PARAMS,
@@ -588,6 +615,7 @@ describe("commit stroke", () => {
           gateStroke(),
         ),
       ).rejects.toThrow();
+      expect(canvas).toEqual(untouched);
     },
     TIMEOUT,
   );
@@ -597,6 +625,7 @@ describe("commit stroke", () => {
     async () => {
       const analysis = await addon.analyze([makeNoise()], 1, SR, PARAMS);
       const erased = erase(analysis);
+      const painted = new Float32Array(erased);
 
       const commit = await addon.commitStroke(
         erased,
@@ -613,9 +642,9 @@ describe("commit stroke", () => {
       expect(commit.levels.startHop).toBe(0);
       expect(commit.levels.peaks.length).toBe(Math.floor((N - 1) / HOP) + 1);
 
-      // A full rebuild is the plain synthesis of the canvas: no existing audio
-      // means no hard edge to gate against.
-      const plain = await roundTrip(analysis, erased);
+      // A full rebuild is the plain synthesis of the painted canvas: no
+      // existing audio means no hard edge to gate against.
+      const plain = await roundTrip(analysis, painted);
       let err = 0;
       let ref = 0;
       for (let i = 0; i < N; i++) {
@@ -629,7 +658,7 @@ describe("commit stroke", () => {
   );
 
   it(
-    "finds onsets through the patch, so they answer to the projection",
+    "finds onsets after the projection, so they answer to it",
     async () => {
       // Two clicks, one inside the span the stroke erases and one outside it.
       const sig = new Float32Array(N);
@@ -673,9 +702,9 @@ describe("commit stroke", () => {
       const original = await roundTrip(analysis, analysis.data);
       const erased = erase(analysis);
 
-      const run = (project: boolean) =>
+      const run = (project: boolean, canvas: Float32Array) =>
         addon.commitStroke(
-          erased,
+          canvas,
           metaOf(analysis),
           SR,
           { ...PARAMS, detectOnsets: true },
@@ -683,12 +712,13 @@ describe("commit stroke", () => {
           fullWindow(analysis),
           gateStroke({ project }),
         );
-      const projected = await run(true);
-      const painted = await run(false);
+      const projected = await run(true, new Float32Array(erased));
+      const paintedCanvas = new Float32Array(erased);
+      const painted = await run(false, paintedCanvas);
 
       // No patch: the canvas keeps exactly what was painted.
       expect(painted.patch.ranges.length).toBe(0);
-      expect(painted.patch.pixels.length).toBe(0);
+      expect(paintedCanvas).toEqual(erased);
       expect(projected.patch.ranges.length).toBeGreaterThan(0);
 
       // The projection only reads the audio, so skipping it changes nothing

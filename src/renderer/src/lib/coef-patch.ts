@@ -11,9 +11,10 @@ export interface PatchExtent {
 }
 
 /**
- * Writes a coefficient patch into `data` in place and reports where it
- * reached. The patch's ranges are per band ([band, k0, count]) and its pixels
- * run in the same order.
+ * Applies a coefficient patch to `data` and reports where it reached. The
+ * patch's ranges are per band ([band, k0, count]). Pixels, when present, are
+ * written in place; without them `data` already holds the patched values and
+ * only the extent is computed.
  */
 export function applyCoefficientPatch(
   data: Float32Array,
@@ -36,7 +37,7 @@ export function applyCoefficientPatch(
     const k0 = ranges[i + 1];
     const count = ranges[i + 2];
     const pixelStart = bandOffsets[band] + k0;
-    data.set(pixels.subarray(srcOffset, srcOffset + count * 4), pixelStart * 4);
+    if (pixels) data.set(pixels.subarray(srcOffset, srcOffset + count * 4), pixelStart * 4);
     srcOffset += count * 4;
     pixelRanges[(i / 3) * 2] = pixelStart;
     pixelRanges[(i / 3) * 2 + 1] = count;

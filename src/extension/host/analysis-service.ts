@@ -145,13 +145,16 @@ export async function runCommitStrokeFramed(request: ArrayBuffer): Promise<Uint8
     asF32(arrays[`existing${i}`], `existing${i}`),
   );
 
+  const packedData = asF32(arrays.packedData, "packedData");
+  const bandOffsets = asU32(arrays.bandOffsets, "bandOffsets");
+
   const result = await commitStroke(
-    asF32(arrays.packedData, "packedData"),
+    packedData,
     {
       numFrames: Number(meta.numFrames),
       numChannels: Number(meta.numChannels),
       numBands: Number(meta.numBands),
-      bandOffsets: asU32(arrays.bandOffsets, "bandOffsets"),
+      bandOffsets,
       bandStepLog2s: asI32(arrays.bandStepLog2s, "bandStepLog2s"),
       bandLengths: asU32(arrays.bandLengths, "bandLengths"),
     },
@@ -182,9 +185,23 @@ export async function runCommitStrokeFramed(request: ArrayBuffer): Promise<Uint8
     },
   );
 
+  // The addon wrote the patch into this host's packedData in place; the client
+  // holds its own copy, so the pixels are gathered back out for the wire.
+  const ranges = result.patch.ranges;
+  let patchFloats = 0;
+  for (let i = 0; i < ranges.length; i += 3) patchFloats += ranges[i + 2] * 4;
+  const patchPixels = new Float32Array(patchFloats);
+  let dst = 0;
+  for (let i = 0; i < ranges.length; i += 3) {
+    const start = (bandOffsets[ranges[i]] + ranges[i + 1]) * 4;
+    const count = ranges[i + 2] * 4;
+    patchPixels.set(packedData.subarray(start, start + count), dst);
+    dst += count;
+  }
+
   const out: Record<string, NumericArray> = {
-    patchRanges: result.patch.ranges,
-    patchPixels: result.patch.pixels,
+    patchRanges: ranges,
+    patchPixels,
     gainReductionDb: result.gainReductionDb,
     levelPeaks: result.levels.peaks,
     levelOverDb: result.levels.overDb,
