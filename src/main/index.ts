@@ -3,6 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell, systemPreferences } from "e
 import { installExtension, REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS } from "electron-devtools-installer";
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
+import { hasSupportedAudioExtension } from "./lib/audio-extensions";
 import { createMenu, openFileDialog } from "./lib/menu";
 import { ipcMainOn, webContentsSend } from "./lib/types";
 import { checkForUpdates, initUpdater } from "./lib/updater";
@@ -37,8 +38,19 @@ app.on("open-file", (event, path) => {
   }
 });
 
+/**
+ * The audio file an argv was launched with, or null. A plain launch passes only
+ * the executable — and in dev, the script path too — so an argument is taken as
+ * a file only when it is neither of those and carries a supported extension.
+ */
 function getOpenedPathFromArgv(argv: string[]): string | null {
-  return argv?.slice(-1)[0] || null;
+  if (!argv) return null;
+  const skip = is.dev ? 2 : 1;
+  for (const arg of argv.slice(skip)) {
+    if (!arg || arg.startsWith("-")) continue;
+    if (hasSupportedAudioExtension(arg)) return arg;
+  }
+  return null;
 }
 
 if (!gotTheLock) {
@@ -141,7 +153,9 @@ function createWindow(): void {
 }
 
 app.whenReady().then(async () => {
-  electronApp.setAppUserModelId("com.electron");
+  // Must match electron-builder.yml's appId, or Windows treats the running app
+  // and the installed shortcut as two different apps.
+  electronApp.setAppUserModelId("com.robclouth.noise-canvas");
 
   app.on("browser-window-created", (_, window) => {
     optimizer.watchWindowShortcuts(window);
@@ -177,10 +191,6 @@ app.whenReady().then(async () => {
 
   if (mainWindow) {
     mainWindow.webContents.on("did-finish-load", () => {
-      if (pendingPath) {
-        webContentsSend(mainWindow!, "open-file", pendingPath);
-        pendingPath = null;
-      }
       checkForUpdates();
     });
   }
@@ -188,6 +198,13 @@ app.whenReady().then(async () => {
   app.on("activate", function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+ipcMainOn("renderer-ready", () => {
+  if (mainWindow && pendingPath) {
+    webContentsSend(mainWindow, "open-file", pendingPath);
+    pendingPath = null;
+  }
 });
 
 ipcMainOn("check-for-updates", () => {

@@ -6,7 +6,8 @@
     "src/renderer/src/**/*.tsx",
     "src/extension/webview/**/*",
     "src/preload/*.d.ts",
-    "src/main/lib/types.ts"
+    "src/main/lib/types.ts",
+    "src/main/lib/audio-extensions.ts"
   ],
   "compilerOptions": {
     "composite": true,

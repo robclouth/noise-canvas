@@ -62,6 +62,7 @@ export const host: Host = {
     },
   },
   files: {
+    canResolveDroppedPaths: true,
     getPathForFile(file) {
       return window.electron.webUtils.getPathForFile(file);
     },

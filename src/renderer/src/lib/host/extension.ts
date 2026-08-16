@@ -151,6 +151,7 @@ export const host: Host = {
     showDirectoryDialog,
   },
   files: {
+    canResolveDroppedPaths: false,
     getPathForFile: () => pending("files.getPathForFile"),
   },
   // The extension runs in a browser context inside Live, where a new window is

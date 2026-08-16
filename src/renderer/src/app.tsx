@@ -2,11 +2,11 @@ import { BrushPanel } from "@/components/layout/brush-panel";
 import { SidebarPanel } from "@/components/layout/sidebar-panel";
 import { useStore } from "@/store";
 import { Box, Group, LoadingOverlay, Progress, ScrollArea, Stack, Text } from "@mantine/core";
-import { Notifications } from "@mantine/notifications";
+import { Notifications, notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
 import { Canvas, RootState, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useDropzone } from "react-dropzone";
+import { useDropzone, type FileRejection } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
 import { openImageExportModal } from "./components/image-export-modal";
 import { CanvasPanel, Dock } from "./components/layout/canvas-panel";
@@ -244,6 +244,10 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubAppWillQuit);
 
+    // Main holds a file the app was launched with until this arrives, because
+    // did-finish-load can fire before this effect installs the listeners above.
+    ipcSend("renderer-ready");
+
     return () => {
       unsubscribers.forEach((unsub) => unsub());
     };
@@ -257,6 +261,18 @@ function App(): React.JSX.Element {
     useStore.getState().openFilePath(filePath);
   }, []);
 
+  const onDropRejected = useCallback((rejections: FileRejection[]) => {
+    if (rejections.length === 0) return;
+    const tooMany = rejections.length > 1;
+    notifications.show({
+      title: tooMany ? "One file at a time" : "Unsupported file",
+      message: tooMany
+        ? "Drop a single audio file, or use File ▸ Open to add several."
+        : `${rejections[0].file.name} is not an audio format Noise Canvas can open.`,
+      color: "yellow",
+    });
+  }, []);
+
   const handleShaderCompileFinish = useCallback(() => {
     setIsReady(true);
   }, []);
@@ -267,6 +283,7 @@ function App(): React.JSX.Element {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    onDropRejected,
     getFilesFromEvent: async (event) => {
       return Array.from((event as any).dataTransfer.files);
     },
@@ -274,6 +291,9 @@ function App(): React.JSX.Element {
     accept: { "audio/*": [] },
     noClick: true,
     noKeyboard: true,
+    // The extension's webview cannot resolve a dropped File to a path, so it
+    // offers no drop target rather than swallowing the drop.
+    disabled: !host.files.canResolveDroppedPaths,
   });
 
   return (

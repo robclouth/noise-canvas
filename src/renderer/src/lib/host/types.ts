@@ -56,6 +56,12 @@ export interface HostDialogs {
 }
 
 export interface HostFiles {
+  /**
+   * False where the host cannot resolve a dropped File to a path — the
+   * extension's webview, which has no filesystem. Callers must not offer a drop
+   * target there rather than call `getPathForFile` and catch the failure.
+   */
+  canResolveDroppedPaths: boolean;
   /** Resolve the absolute filesystem path for a dropped File. */
   getPathForFile(file: File): string;
 }

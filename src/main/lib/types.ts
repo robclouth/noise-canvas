@@ -124,6 +124,9 @@ export interface OnsetResult extends OnsetReference {
 export interface IpcMainHandlers {
   // Renderer's answer to "app-will-quit": its shutdown work is finished.
   "quit-cleanup-done": (event: Electron.IpcMainEvent) => void;
+  // Sent once the renderer is listening for "open-file". A file the app was
+  // launched with is held until then, since did-finish-load can precede it.
+  "renderer-ready": (event: Electron.IpcMainEvent) => void;
   "trigger-open-file": (event: Electron.IpcMainEvent) => void;
   "check-for-updates": (event: Electron.IpcMainEvent) => void;
 }

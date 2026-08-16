@@ -29,7 +29,9 @@ const AI_MODEL = {
 
 let gaborator: any = null;
 
-export const allowedExtensions = ["wav", "mp3", "ogg", "flac", "m4a", "aac", "wma", "aiff", "ape", "wv", "mka"];
+import { allowedExtensions } from "./audio-extensions";
+
+export { allowedExtensions };
 
 export function getGaboratorPath(): string {
   // Check if we're running from an asar archive (packaged app)
