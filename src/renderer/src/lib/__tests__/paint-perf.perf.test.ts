@@ -187,6 +187,10 @@ describe("painting performance", () => {
     { label: "dynamics", keys: ["dynamics"] },
     { label: "transform", keys: ["transform"] },
     { label: "blur", keys: ["blur"] },
+    // Max tap counts drive the sampling loops in blur and clone to their full
+    // trip count — the per-fragment worst case for those kernels.
+    { label: "blur:64-taps", keys: ["blur"], stepOverrides: { blurSamplesX: 64, blurSamplesY: 64 } },
+    { label: "clone:63-copies", keys: ["clone"], stepOverrides: { cloneCountX: 63, cloneSpaceBeats: 0.25 } },
     { label: "waveshape", keys: ["waveshape"] },
     { label: "transmute", keys: ["transmute"] },
     { label: "evolve", keys: ["evolve"] },

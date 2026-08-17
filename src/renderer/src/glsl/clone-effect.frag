@@ -112,9 +112,10 @@ void main() {
     float totalWeightL = 0.0;
     float totalWeightR = 0.0;
 
-    for (int s = 0; s < 64; s++) {
-        if (s >= count) break;
-
+    // The bound must stay uniform-derived. A literal bound gives the loop a
+    // constant trip count, which ANGLE's D3D backend fully unrolls, multiplying
+    // this program's link time several times over.
+    for (int s = 0; s < count; s++) {
         float offsetIdx;
         if (cloneDirectionMode == 0) {
             offsetIdx = float(s);

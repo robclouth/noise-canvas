@@ -63,14 +63,15 @@ void main() {
         referencePhaseR = getPhase(sourceCenterTexelR.ba);
     }
 
+    int sampleCount = clamp(blurSampleCount, 1, 64);
     // radius = half the sample count; sigma scaled so 3-sigma covers the radius
-    int radius = blurSampleCount / 2;
+    int radius = sampleCount / 2;
     float sigma = float(max(radius, 1)) / 3.0;
 
-    // Loop up to the max possible sample count (64), breaking early once all samples are processed
-    for (int s = 0; s < 64; s++) {
-        if (s >= blurSampleCount) break;
-
+    // The bound must stay uniform-derived. A literal bound gives the loop a
+    // constant trip count, which ANGLE's D3D backend fully unrolls: measured on
+    // Windows, that takes this program's link from ~12s to ~51s.
+    for (int s = 0; s < sampleCount; s++) {
         int i = s - radius;
 
         if (blurOrigin == 0 && i > 0) continue; // Left: causal, no future samples
