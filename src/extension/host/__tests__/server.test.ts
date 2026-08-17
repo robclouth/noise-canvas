@@ -30,22 +30,14 @@ describe("editor server round-trip", () => {
     await fs.rm(webviewDir, { recursive: true, force: true });
   });
 
-  it("serves the source audio and resolves with the rendered result", async () => {
-    // A multi-megabyte payload, the size class the localhost data plane exists to
-    // carry (data: URLs would not).
-    const source = new Uint8Array(3 * 1024 * 1024);
-    for (let i = 0; i < source.length; i++) source[i] = i % 256;
-    const session = server.sessions.create(META, source);
-
-    const fetchedSource = new Uint8Array(
-      await (await fetch(`${server.origin}/session/${session.id}/source.wav`)).arrayBuffer(),
-    );
-    expect(fetchedSource.byteLength).toBe(source.byteLength);
-    expect(Array.from(fetchedSource.slice(0, 512))).toEqual(Array.from(source.slice(0, 512)));
+  it("serves the clip metadata and resolves with the rendered result", async () => {
+    const session = server.sessions.create(META);
 
     const meta = await (await fetch(`${server.origin}/session/${session.id}/meta`)).json();
     expect(meta).toEqual(META);
 
+    // A multi-megabyte payload, the size class the localhost data plane exists to
+    // carry (data: URLs would not).
     const rendered = new Uint8Array(2 * 1024 * 1024).fill(7);
     const post = await fetch(`${server.origin}/session/${session.id}/result`, {
       method: "POST",
@@ -59,7 +51,7 @@ describe("editor server round-trip", () => {
   });
 
   it("rejects the result promise when the edit is cancelled", async () => {
-    const session = server.sessions.create(META, new Uint8Array(8));
+    const session = server.sessions.create(META);
     const rejected = expect(session.result).rejects.toThrow(/cancelled/);
     await fetch(`${server.origin}/session/${session.id}/cancel`, { method: "POST" });
     await rejected;

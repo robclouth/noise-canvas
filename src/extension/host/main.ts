@@ -11,11 +11,11 @@ import {
   type ExtensionContext,
   type Handle,
 } from "@ableton-extensions/sdk";
-import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isModelDownloaded } from "../../main/lib/audio-analysis";
 import { decodeRenderBatch } from "../shared/render-batch";
+import { copyOutsideSandbox, mirrorRemove, mirrorWrite, syncSharedTree } from "./documents-sync";
 import {
   getGpuMemoryInfo,
   runAnalysisOpFramed,
@@ -47,16 +47,24 @@ const RESOURCES_DIR = __dirname;
 
 type Api = ExtensionContext<"1.0.0">;
 
+function userDataPathOf(context: Api): string {
+  return context.environment.storageDirectory ?? tmpdir();
+}
+
 // The localhost data plane is shared across every edit; start it once, lazily.
 let serverPromise: Promise<EditorServer> | null = null;
 function getServer(context: Api): Promise<EditorServer> {
   if (!serverPromise) {
-    const userDataPath = context.environment.storageDirectory ?? tmpdir();
+    const userDataPath = userDataPathOf(context);
     const hostServices = createHostServices({
       userDataPath,
       resourcesPath: RESOURCES_DIR,
       gpuMemory: getGpuMemoryInfo(),
       downloadedModels: () => AI_MODEL_FILES.filter((file) => isModelDownloaded(file)),
+      mirror: {
+        write: (path) => mirrorWrite(userDataPath, path),
+        remove: (path) => mirrorRemove(userDataPath, path),
+      },
     });
     serverPromise = startEditorServer({
       webviewDir: WEBVIEW_DIR,
@@ -111,15 +119,10 @@ function pickEmptyClipSlots(
 // Copies the original clip's <file>.asd warp/analysis sidecar next to the
 // rendered replacement. Because resynthesis preserves sample length, Live keeps
 // the warp markers when createAudioClip reads the co-located sidecar. A missing
-// sidecar (un-warped clip) is a no-op.
+// sidecar (un-warped clip) is a no-op. Both paths sit outside the sandbox, so
+// the copy runs in a helper child.
 async function copyAsdSidecar(originalFilePath: string, replacementFilePath: string): Promise<void> {
-  const source = `${originalFilePath}.asd`;
-  try {
-    await fs.access(source);
-  } catch {
-    return;
-  }
-  await fs.copyFile(source, `${replacementFilePath}.asd`);
+  await copyOutsideSandbox(`${originalFilePath}.asd`, `${replacementFilePath}.asd`);
 }
 
 async function editAudioClip(context: Api, clip: AudioClip<"1.0.0">): Promise<void> {
@@ -149,12 +152,21 @@ async function editAudioClip(context: Api, clip: AudioClip<"1.0.0">): Promise<vo
   };
 
   const server = await getServer(context);
-  const sourceBytes = new Uint8Array(await fs.readFile(meta.sourceFilePath));
-  const session = server.sessions.create(meta, sourceBytes);
+
+  // Presets saved in either build meet here: newer files win in both
+  // directions, so the editor opens on the same library as the desktop app.
+  try {
+    await syncSharedTree(userDataPathOf(context));
+  } catch (error) {
+    console.error("Noise Canvas: preset sync with Documents failed", error);
+  }
+
+  const session = server.sessions.create(meta);
 
   // showModalDialog supports http://localhost, so the webview loads from the
-  // data plane: it fetches the source over the server, lets the user paint, and
-  // POSTs the rendered audio back (resolving session.result) before closing.
+  // data plane: it reads the clip's path from the session meta, analyses it over
+  // RPC, lets the user paint, and POSTs the rendered audio back (resolving
+  // session.result) before closing.
   const editorUrl = `${server.origin}/?session=${session.id}`;
   const dialogClosed = context.ui.showModalDialog(editorUrl, 1280, 800).catch(() => "");
 

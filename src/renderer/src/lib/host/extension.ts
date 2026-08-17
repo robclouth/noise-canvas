@@ -1,6 +1,7 @@
 import { encodeRenderBatch } from "../../../../extension/shared/render-batch";
 import { createExtensionAnalysis } from "./extension-analysis";
 import { createExtensionEvents } from "./extension-events";
+import { extensionPrefs } from "./extension-prefs";
 import {
   extensionFs,
   extensionOs,
@@ -161,5 +162,6 @@ export const host: Host = {
       window.open(url, "_blank", "noopener,noreferrer");
     },
   },
+  prefs: extensionPrefs,
   events: createExtensionEvents(),
 };

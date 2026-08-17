@@ -171,6 +171,19 @@ export interface HostShell {
   openExternal(url: string): void;
 }
 
+/**
+ * Where the persisted store slice lives: `localStorage` in the Electron app, a
+ * file in Live's per-extension storage directory in the extension, whose modal
+ * webview gets a fresh origin — and so an empty `localStorage` — every run.
+ * Reads are synchronous, so an extension implementation must be primed before
+ * the app mounts.
+ */
+export interface HostPrefs {
+  read(name: string): string | null;
+  write(name: string, value: string): void;
+  remove(name: string): void;
+}
+
 export interface Host {
   readonly fs: HostFs;
   readonly path: HostPath;
@@ -183,6 +196,7 @@ export interface Host {
   readonly dialogs: HostDialogs;
   readonly files: HostFiles;
   readonly shell: HostShell;
+  readonly prefs: HostPrefs;
   readonly events: HostEvents;
   /** Present only when the editor runs against a host-driven clip session. */
   readonly session?: HostSession;

@@ -57,7 +57,7 @@ export const ALL_PERSISTED_KEYS: (keyof State)[] = [
   "excludedFromRandomization",
 ];
 
-// localStorage-backed persistence that coalesces rapid writes. Each store change
+// Host-backed persistence that coalesces rapid writes. Each store change
 // (e.g. one update per frame while dragging a parameter slider) would otherwise
 // serialize the whole persisted slice and write it synchronously. This defers
 // the serialize-and-write to a single trailing write, and flushes any pending
@@ -80,7 +80,7 @@ function createDebouncedStorage<S>(delayMs: number, project: (state: S) => unkno
     }
     if (pending) {
       const serializable = { ...pending.value, state: project(pending.value.state) };
-      localStorage.setItem(pending.name, JSON.stringify(serializable));
+      host.prefs.write(pending.name, JSON.stringify(serializable));
       pending = null;
     }
   };
@@ -95,7 +95,7 @@ function createDebouncedStorage<S>(delayMs: number, project: (state: S) => unkno
 
   return {
     getItem: (name) => {
-      const str = localStorage.getItem(name);
+      const str = host.prefs.read(name);
       return str ? (JSON.parse(str) as StorageValue<S>) : null;
     },
     setItem: (name, value) => {
@@ -109,7 +109,7 @@ function createDebouncedStorage<S>(delayMs: number, project: (state: S) => unkno
         clearTimeout(timer);
         timer = null;
       }
-      localStorage.removeItem(name);
+      host.prefs.remove(name);
     },
   };
 }

@@ -109,28 +109,19 @@ export async function startEditorServer(options: EditorServerOptions): Promise<E
     });
   });
 
-  // GET /session/:id/source.wav        → original clip bytes
   // GET /session/:id/meta              → ClipMeta JSON
   // POST /session/:id/result           → rendered audio frame; resolves session.result
   // POST /session/:id/cancel           → user dismissed; rejects session.result
   // GET  /*                            → static webview asset
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", `http://${host}`);
-    const sessionMatch = url.pathname.match(/^\/session\/([^/]+)\/(source\.wav|meta|result|cancel)$/);
+    const sessionMatch = url.pathname.match(/^\/session\/([^/]+)\/(meta|result|cancel)$/);
 
     if (sessionMatch) {
       const [, id, action] = sessionMatch;
       const session = sessions.get(id);
       if (!session) return sendJson(res, 404, { error: "unknown session" });
 
-      if (action === "source.wav" && req.method === "GET") {
-        res.writeHead(200, {
-          "content-type": MIME[".wav"],
-          "content-length": session.sourceBytes.byteLength,
-        });
-        res.end(Buffer.from(session.sourceBytes));
-        return;
-      }
       if (action === "meta" && req.method === "GET") {
         return sendJson(res, 200, session.meta);
       }

@@ -72,6 +72,11 @@ export const host: Host = {
       window.ipcRenderer.send("open-external", url);
     },
   },
+  prefs: {
+    read: (name) => localStorage.getItem(name),
+    write: (name, value) => localStorage.setItem(name, value),
+    remove: (name) => localStorage.removeItem(name),
+  },
   events: {
     send(channel, ...args) {
       window.ipcRenderer.send(channel, ...args);

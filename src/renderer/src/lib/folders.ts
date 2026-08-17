@@ -14,11 +14,17 @@ let modulatorPresetsDir: string;
 let palettesDir: string;
 let texturesDir: string;
 
-export async function getFolders() {
-  if (appDir && presetsDir && effectPresetsDir && modulatorPresetsDir && palettesDir && texturesDir) {
-    return { appDir, presetsDir, effectPresetsDir, modulatorPresetsDir, palettesDir, texturesDir };
-  }
+/**
+ * Root of the user's preset tree. The Electron app keeps it in the Documents
+ * folder; the extension host may only write inside the per-extension storage
+ * directory Live hands it, so the tree lives there instead.
+ */
+async function getAppDir(): Promise<string> {
+  if (host.env.isExtension) return await host.dialogs.getUserDataPath();
+  return host.path.join(await getDocumentsDir(), PRESETS_FOLDER_NAME);
+}
 
+async function getDocumentsDir(): Promise<string> {
   const homeDir = host.os.homedir();
   let documentsDir: string;
 
@@ -48,7 +54,15 @@ export async function getFolders() {
     }
   }
 
-  appDir = host.path.join(documentsDir, PRESETS_FOLDER_NAME);
+  return documentsDir;
+}
+
+export async function getFolders() {
+  if (appDir && presetsDir && effectPresetsDir && modulatorPresetsDir && palettesDir && texturesDir) {
+    return { appDir, presetsDir, effectPresetsDir, modulatorPresetsDir, palettesDir, texturesDir };
+  }
+
+  appDir = await getAppDir();
   presetsDir = host.path.join(appDir, PRESETS_SUBFOLDER_NAME);
   effectPresetsDir = host.path.join(presetsDir, EFFECTS_SUBFOLDER_NAME);
   modulatorPresetsDir = host.path.join(presetsDir, MODULATORS_SUBFOLDER_NAME);

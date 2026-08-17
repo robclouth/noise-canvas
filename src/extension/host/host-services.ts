@@ -24,6 +24,9 @@ export interface HostServicesConfig {
   // AI-model files cached on disk, checked at each bootstrap so a model
   // downloaded in an earlier session reads as present.
   downloadedModels?: () => string[];
+  // Invoked after a mutation succeeds, so preset writes can be mirrored into
+  // the user's Documents tree. Optional: the dev server and tests run without.
+  mirror?: { write(path: string): void; remove(path: string): void };
 }
 
 export interface RpcResult {
@@ -55,6 +58,7 @@ export function createHostServices(config: HostServicesConfig): HostServices {
       case "writeFile": {
         const data = typeof json.text === "string" ? json.text : Buffer.from(binary);
         await fs.writeFile(path, data);
+        config.mirror?.write(path);
         return {};
       }
       case "readdir": {
@@ -72,9 +76,11 @@ export function createHostServices(config: HostServicesConfig): HostServices {
       }
       case "rm":
         await fs.rm(path, { recursive: asBool(json.recursive), force: asBool(json.force) });
+        config.mirror?.remove(path);
         return {};
       case "unlink":
         await fs.unlink(path);
+        config.mirror?.remove(path);
         return {};
       case "stat": {
         const s = await fs.stat(path);

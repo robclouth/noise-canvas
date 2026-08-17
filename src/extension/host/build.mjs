@@ -29,6 +29,20 @@ await build({
   external: ["ffmpeg-static", "onnxruntime-node"],
 });
 
+// The sync helper runs as its own spawned process (it does the file traffic
+// the sandboxed host cannot), so it is bundled as a separate entry beside the
+// host bundle.
+await build({
+  entryPoints: [join(root, "src/extension/host/sync-helper.ts")],
+  outfile: join(outDir, "host/sync-helper.cjs"),
+  bundle: true,
+  platform: "node",
+  format: "cjs",
+  target: "node22",
+  sourcesContent: false,
+  logLevel: "info",
+});
+
 // The gaborator addon is a dynamic require, so esbuild leaves it out of the
 // bundle. Copy it next to the host entry — getGaboratorPath() looks there
 // first, and without it every stroke in a packaged extension fails.

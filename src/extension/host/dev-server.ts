@@ -60,10 +60,13 @@ async function main(): Promise<void> {
 
   const clipPath = join(tmpdir(), "noise-canvas-dev-clip.wav");
   await makeTestClip(clipPath);
-  const session = server.sessions.create(
-    { sourceFilePath: clipPath, name: "dev clip", startTime: 0, duration: 8, isWarped: false },
-    new Uint8Array(await fs.readFile(clipPath)),
-  );
+  const session = server.sessions.create({
+    sourceFilePath: clipPath,
+    name: "dev clip",
+    startTime: 0,
+    duration: 8,
+    isWarped: false,
+  });
 
   console.log(`dev server: ${server.origin}`);
   console.log(`empty:      ${server.origin}/`);

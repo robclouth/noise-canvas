@@ -1,4 +1,5 @@
 import { Buffer } from "buffer";
+import { loadPrefs } from "@renderer/lib/host/extension-prefs";
 import { loadBootstrap } from "@renderer/lib/host/extension-rpc";
 
 // The renderer core uses Node's Buffer directly (e.g. history compression), which
@@ -31,6 +32,13 @@ async function start(): Promise<void> {
     await loadBootstrap();
   } catch (error) {
     console.error("Noise Canvas: host bootstrap failed", error);
+  }
+  // The persisted store is read synchronously while the app mounts, so its file
+  // has to be in memory first.
+  try {
+    await loadPrefs();
+  } catch (error) {
+    console.error("Noise Canvas: failed to load saved settings", error);
   }
   await import("@renderer/main");
   try {
