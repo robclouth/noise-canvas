@@ -7,6 +7,7 @@ import { Check, CircleHelp } from "lucide-react";
 import { memo, useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { HelpActionIcon } from "../controls/help-control";
 import { MemoryReadout } from "./memory-readout";
+import { ShaderWarmupReadout } from "./shader-warmup-readout";
 
 const BAR_HEIGHT = 26;
 
@@ -155,6 +156,8 @@ export const AppMenuBar = memo(function AppMenuBar() {
       })}
 
       <Box style={{ flex: 1 }} />
+
+      <ShaderWarmupReadout />
 
       <MemoryReadout />
 

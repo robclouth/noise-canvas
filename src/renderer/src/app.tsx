@@ -1,7 +1,7 @@
 import { BrushPanel } from "@/components/layout/brush-panel";
 import { SidebarPanel } from "@/components/layout/sidebar-panel";
 import { useStore } from "@/store";
-import { Box, Group, LoadingOverlay, Progress, ScrollArea, Stack, Text } from "@mantine/core";
+import { Box, Group, LoadingOverlay, ScrollArea, Stack } from "@mantine/core";
 import { Notifications, notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
 import { Canvas, RootState, useThree } from "@react-three/fiber";
@@ -21,7 +21,8 @@ import { host } from "./lib/host";
 import { ipcOn, ipcSend } from "./lib/ipc";
 import { anchorProps } from "./lib/ui-anchors";
 import { BRUSH_PANEL_WIDTH } from "./lib/ui-density";
-import { precompileAllShaders, warmEffectPipelines } from "./lib/precompile-shaders";
+import { precompileDisplayShader, precompileRemainingShaders, warmEffectPipelines } from "./lib/precompile-shaders";
+import { setShaderWarmupProgress } from "./lib/shader-warmup-progress";
 import { clearAllHistoryManagers, getHistoryManager, pruneOrphanHistoryDirs } from "./lib/history-manager";
 import { useLinkSync } from "./lib/use-link-sync";
 import { useShortcuts } from "./lib/useShortcuts";
@@ -37,38 +38,45 @@ const CanvasInvalidator = ({ onReady }: { onReady: (invalidate: Invalidator) => 
   return null;
 };
 
-const ShaderCompiler = ({
-  onProgress,
-  onFinish,
-}: {
-  onProgress: (done: number, total: number) => void;
-  onFinish: () => void;
-}) => {
+/**
+ * Drives shader compilation. The app is held back only for the display shaders,
+ * which take a fraction of a second; the effect programs, which take far longer
+ * on Windows, are linked afterwards in the background while the app is already
+ * usable, with the menu bar showing how far along they are.
+ */
+const ShaderCompiler = ({ onDisplayReady }: { onDisplayReady: () => void }) => {
   const gl = useThree((s) => s.gl);
   useEffect(() => {
     let cancelled = false;
-    // Link programs (fast), then warm each effect's pipeline state on a worker.
-    // The loading overlay stays up with per-shader progress until warming is
-    // done, since the effects can't be used until their shaders are compiled.
-    precompileAllShaders(gl)
-      .catch((err) => {
-        console.error("Shader linking failed:", err);
-      })
-      .finally(() => {
-        if (cancelled) return;
-        warmEffectPipelines({
-          onProgress: (done, total) => {
-            if (!cancelled) onProgress(done, total);
-          },
-          onDone: () => {
-            if (!cancelled) onFinish();
-          },
-        });
+
+    const run = async (): Promise<void> => {
+      try {
+        await precompileDisplayShader(gl);
+      } catch (err) {
+        console.error("Display shader linking failed:", err);
+      }
+      if (cancelled) return;
+      onDisplayReady();
+
+      // The effects the brush already holds are the ones the next stroke needs.
+      const priority = useStore.getState().effects.map((item) => item.effect);
+      try {
+        await precompileRemainingShaders(gl, priority, setShaderWarmupProgress);
+      } catch (err) {
+        console.error("Effect shader linking failed:", err);
+      }
+      if (cancelled) return;
+      warmEffectPipelines({
+        onProgress: setShaderWarmupProgress,
+        onDone: () => setShaderWarmupProgress(0, 0),
       });
+    };
+
+    void run();
     return () => {
       cancelled = true;
     };
-  }, [gl, onProgress, onFinish]);
+  }, [gl, onDisplayReady]);
   return null;
 };
 
@@ -76,7 +84,6 @@ function App(): React.JSX.Element {
   useShortcuts();
   useLinkSync();
   const [isReady, setIsReady] = useState(false);
-  const [shaderProgress, setShaderProgress] = useState<{ done: number; total: number } | null>(null);
   const openFileIds = useStore((state) => state.openFileIds);
   const fullscreenFileId = useStore((state) => state.fullscreenFileId);
   const uiSize = useStore((state) => state.uiSize);
@@ -273,12 +280,8 @@ function App(): React.JSX.Element {
     });
   }, []);
 
-  const handleShaderCompileFinish = useCallback(() => {
+  const handleDisplayShadersReady = useCallback(() => {
     setIsReady(true);
-  }, []);
-
-  const handleShaderProgress = useCallback((done: number, total: number) => {
-    setShaderProgress({ done, total });
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -300,28 +303,7 @@ function App(): React.JSX.Element {
     <Stack h="100vh" w="100vw" gap={0}>
       <AppMenuBar />
       <Group flex={1} mih={0} w="100vw" wrap="nowrap" gap={0} {...getRootProps()}>
-        <LoadingOverlay
-          visible={!isReady}
-          zIndex={10001}
-          overlayProps={{ blur: 8, backgroundOpacity: 0.6 }}
-          loaderProps={{
-            children: (
-              <Stack align="center" gap="sm">
-                <Text size="sm" c="dimmed">
-                  Loading
-                </Text>
-                <Progress
-                  w={220}
-                  color="orange"
-                  value={
-                    shaderProgress && shaderProgress.total ? (shaderProgress.done / shaderProgress.total) * 100 : 0
-                  }
-                  transitionDuration={200}
-                />
-              </Stack>
-            ),
-          }}
-        />
+        <LoadingOverlay visible={!isReady} zIndex={10001} overlayProps={{ blur: 8, backgroundOpacity: 0.6 }} />
         {isDragActive && (
           <Box
             pos="absolute"
@@ -351,7 +333,7 @@ function App(): React.JSX.Element {
           <View.Port />
           <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
 
-          <ShaderCompiler onProgress={handleShaderProgress} onFinish={handleShaderCompileFinish} />
+          <ShaderCompiler onDisplayReady={handleDisplayShadersReady} />
         </Canvas>
         <ScrollArea
           scrollbarSize={4}
