@@ -17,6 +17,7 @@ import type {
   PackedOnsets,
 } from "./types";
 import { getModelPath } from "./ai-separation";
+import { loadNativeAddon } from "./native-addon";
 export { isModelDownloaded, downloadModel } from "./ai-separation";
 export type { FourStemName, TwoStemName } from "./ai-separation";
 
@@ -57,8 +58,7 @@ export function init() {
     const path = getGaboratorPath();
     console.log("Loading gaborator from:", path);
     console.log("__dirname is:", __dirname);
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    gaborator = require(path);
+    gaborator = loadNativeAddon(path);
     console.log("Gaborator loaded successfully");
   }
   return gaborator;

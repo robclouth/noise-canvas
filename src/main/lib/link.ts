@@ -1,4 +1,5 @@
 import { join } from "path";
+import { loadNativeAddon } from "./native-addon";
 
 interface LinkCallbacks {
   onTempoChanged: (tempo: number) => void;
@@ -44,8 +45,7 @@ export function init(): LinkAddon {
   if (!linkAddon) {
     const path = getLinkAddonPath();
     console.log("Loading link addon from:", path);
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    linkAddon = require(path);
+    linkAddon = loadNativeAddon<LinkAddon>(path);
     console.log("Link addon loaded successfully");
   }
   return linkAddon!;
