@@ -38,7 +38,7 @@
     "release:minor": "npm version minor -m 'Release v%s'",
     "release:major": "npm version major -m 'Release v%s'",
     "prepare": "husky",
-    "install": "bash scripts/fetch-link.sh && bash scripts/fetch-onnx.sh && node node_modules/node-gyp/bin/node-gyp.js rebuild"
+    "install": "node scripts/fetch-link.mjs && node scripts/fetch-onnx.mjs && node node_modules/node-gyp/bin/node-gyp.js rebuild"
   },
   "lint-staged": {
     "*": "prettier --write --ignore-unknown"
