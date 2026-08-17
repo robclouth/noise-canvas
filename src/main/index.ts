@@ -8,12 +8,25 @@ import { createMenu, openFileDialog } from "./lib/menu";
 import { ipcMainOn, webContentsSend } from "./lib/types";
 import { checkForUpdates, initUpdater } from "./lib/updater";
 
-// On macOS, ANGLE's Metal backend stalls each canvas present on a CoreAnimation
+// Which ANGLE backend translates our shaders, chosen per platform because the
+// default is the wrong trade on both. Set NOISE_CANVAS_ANGLE (gl, vulkan, d3d11,
+// metal, default) to override on a machine whose driver disagrees.
+//
+// macOS: ANGLE's Metal backend stalls each canvas present on a CoreAnimation
 // backpressure fence once a frame does any extra GPU work (e.g. a modulator
 // precompute pass), which halves the framerate while painting. The OpenGL
-// backend presents without that fence, so use it on macOS.
+// backend presents without that fence.
+//
+// Windows: the default D3D11 backend compiles the effect shaders through the
+// HLSL compiler, which costs ~50s for the set, and its program binaries are not
+// reused across launches — so every cold start pays it again. Vulkan compiles
+// the same set in ~11s and reuses its cache afterwards (~0.5s), with paint
+// throughput equal or slightly better.
+const angleBackend = process.env.NOISE_CANVAS_ANGLE;
 if (process.platform === "darwin") {
-  app.commandLine.appendSwitch("use-angle", "gl");
+  app.commandLine.appendSwitch("use-angle", angleBackend || "gl");
+} else if (process.platform === "win32") {
+  app.commandLine.appendSwitch("use-angle", angleBackend || "vulkan");
 }
 
 // Remove dictation and character palette menu items on macOS
