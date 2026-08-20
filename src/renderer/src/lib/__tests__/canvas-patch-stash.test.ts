@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { clearCanvasPatchStash, setCanvasPatchStash, takeCanvasPatchStash } from "../canvas-patch-stash";
 
 function makeStash() {
-  return { data: new Float32Array(8), ranges: new Uint32Array([0, 2]) };
+  return { data: new Float32Array(8), ranges: new Uint32Array([0, 2]), turns: [] };
 }
 
 describe("canvas patch stash", () => {

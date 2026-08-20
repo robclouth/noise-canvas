@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeOutputLevels,
   LEVEL_HOP_SECONDS,
+  measureOutputLevels,
   outputLevelPoints,
   OVER_TOLERANCE_DB,
   spliceOutputLevels,
@@ -129,5 +130,31 @@ describe("spliceOutputLevels", () => {
     );
     expectPeaks(spliced.peaks, [0, 0.5, 0]);
     expectPeaks(spliced.overDb, [0, 1, 0]);
+  });
+});
+
+describe("measureOutputLevels", () => {
+  it("reads a span exactly as the whole-buffer pass does, hop-aligned around it", () => {
+    const samples = new Float32Array(HOP * 10);
+    for (let i = 0; i < samples.length; i++) samples[i] = ((i * 7919) % 1000) / 700;
+    const buffer = makeBuffer([samples]);
+    const whole = computeOutputLevels(buffer)!;
+
+    const span = measureOutputLevels(buffer, HOP * 3 + 5, HOP * 6 - 5);
+    expect(span.startHop).toBe(3);
+    expect(span.peaks.length).toBe(3);
+    expect(Array.from(span.peaks)).toEqual(Array.from(whole.peaks.subarray(3, 6)));
+    expect(Array.from(span.overDb)).toEqual(Array.from(whole.overDb.subarray(3, 6)));
+
+    const spliced = spliceOutputLevels(whole, span, outputLevelPoints(buffer));
+    expect(Array.from(spliced.peaks)).toEqual(Array.from(whole.peaks));
+  });
+
+  it("clamps a span that runs past the buffer", () => {
+    const buffer = makeBuffer([new Float32Array(HOP * 4 + 7).fill(0.25)]);
+    const span = measureOutputLevels(buffer, HOP * 3, HOP * 40);
+    expect(span.startHop).toBe(3);
+    expect(span.peaks.length).toBe(outputLevelPoints(buffer) - 3);
+    expect(Array.from(span.peaks)).toEqual([0.25, 0.25]);
   });
 });

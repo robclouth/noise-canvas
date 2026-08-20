@@ -5,6 +5,7 @@ import { extname, join } from "path";
 import { promisify } from "util";
 import { zstdCompress, zstdDecompress } from "zlib";
 import { decodeAudioFile, encodeBufferToAudioFile, probeAudioFile } from "./ffmpeg";
+import { parseHistoryDeltaTurns } from "./history-delta";
 import type {
   AnalysisParams,
   CommitStroke,
@@ -15,6 +16,7 @@ import type {
   OnsetResult,
   PackedLayout,
   PackedOnsets,
+  PhaseTurns,
 } from "./types";
 import { getModelPath } from "./ai-separation";
 import { loadNativeAddon } from "./native-addon";
@@ -88,9 +90,26 @@ export function getGpuMemoryInfo(): { bytes: number; unified: boolean } {
 interface HistoryCodecAddon {
   historyEncodePlanes(src: Float32Array | Uint32Array): Promise<Buffer>;
   historyDecodePlanes(bytes: Uint8Array): Promise<Float32Array>;
-  historyFootprintChanged(base: Float32Array, after: Float32Array, ranges: Uint32Array): Promise<boolean>;
-  historyEncodeDelta(base: Float32Array, after: Float32Array, ranges: Uint32Array): Promise<Buffer>;
+  historyFootprintChanged(
+    base: Float32Array,
+    after: Float32Array,
+    ranges: Uint32Array,
+    baseCompact: boolean,
+  ): Promise<boolean>;
+  historyEncodeDelta(
+    base: Float32Array,
+    after: Float32Array,
+    ranges: Uint32Array,
+    baseCompact: boolean,
+    turns: PhaseTurns | undefined,
+  ): Promise<Buffer>;
   historyApplyDelta(base: Float32Array, delta: Uint8Array): Promise<Float32Array>;
+  historyApplyDeltas(
+    base: Float32Array,
+    out: Float32Array,
+    deltas: Uint8Array[],
+    inverts: boolean[],
+  ): Promise<Float32Array>;
   historyInverseMap(
     bandOffsets: Uint32Array,
     bandLengths: Uint32Array,
@@ -115,27 +134,58 @@ export async function decodeHistorySnapshot(bytes: Uint8Array): Promise<Float32A
   return await historyCodec().historyDecodePlanes(await zstdDecompressAsync(bytes));
 }
 
-/** True if a stroke changed anything inside the footprint it claims to cover. */
+/**
+ * True if a stroke changed anything inside the footprint it claims to cover.
+ * `base` is the whole state the stroke was painted onto, or, with
+ * `baseCompact`, just the footprint's values laid end to end in range order.
+ */
 export async function historyFootprintChanged(
   base: Float32Array,
   after: Float32Array,
   ranges: Uint32Array,
+  baseCompact = false,
 ): Promise<boolean> {
-  return await historyCodec().historyFootprintChanged(base, after, ranges);
+  return await historyCodec().historyFootprintChanged(base, after, ranges, baseCompact);
 }
 
-/** Encode a stroke as the difference from the state it was painted onto. */
+/**
+ * Encode a stroke as the difference from the state it was painted onto; `base`
+ * is whole or compact as for historyFootprintChanged. `turns` carries the
+ * phase shifts the stroke made past its ranges.
+ */
 export async function encodeHistoryDelta(
   base: Float32Array,
   after: Float32Array,
   ranges: Uint32Array,
+  baseCompact = false,
+  turns?: PhaseTurns,
 ): Promise<Buffer> {
-  return await zstdCompressAsync(await historyCodec().historyEncodeDelta(base, after, ranges));
+  return await zstdCompressAsync(await historyCodec().historyEncodeDelta(base, after, ranges, baseCompact, turns));
+}
+
+/** The phase turns a stored delta carries, or null when it has none. */
+export async function readHistoryDeltaTurns(bytes: Uint8Array): Promise<PhaseTurns | null> {
+  return parseHistoryDeltaTurns(await zstdDecompressAsync(bytes));
 }
 
 /** Rebuild the state a stroke produced, given the state it was painted onto. */
 export async function applyHistoryDelta(base: Float32Array, bytes: Uint8Array): Promise<Float32Array> {
   return await historyCodec().historyApplyDelta(base, await zstdDecompressAsync(bytes));
+}
+
+/**
+ * Walk a chain of stroke deltas from `base` into `out`, applying each in order:
+ * subtracted where `inverts` is set (a hop to a parent), added otherwise.
+ * `out` must be the same length as `base`; it is returned filled.
+ */
+export async function applyHistoryDeltas(
+  base: Float32Array,
+  out: Float32Array,
+  deltas: Uint8Array[],
+  inverts: boolean[],
+): Promise<Float32Array> {
+  const raw = await Promise.all(deltas.map((bytes) => zstdDecompressAsync(bytes)));
+  return await historyCodec().historyApplyDeltas(base, out, raw, inverts);
 }
 
 /** Each packed pixel's time offset and band index, from the band layout. */

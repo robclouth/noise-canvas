@@ -3,7 +3,9 @@ import {
   analyseChannels,
   analyze,
   applyHistoryDelta,
+  applyHistoryDeltas,
   buildHistoryInverseMap,
+  readHistoryDeltaTurns,
   commitStroke,
   copyAudioFile,
   decodeAudio,
@@ -211,6 +213,11 @@ export async function runCommitStrokeFramed(request: ArrayBuffer): Promise<Uint8
   const out: Record<string, NumericArray> = {
     patchRanges: ranges,
     patchPixels,
+    patchPrevious: result.patch.previous ?? new Float32Array(0),
+    tailPixelStarts: result.tail.pixelStarts,
+    tailPixelCounts: result.tail.pixelCounts,
+    tailOffsets: result.tail.offsets,
+    tailResiduals: result.tail.residuals,
     gainReductionDb: result.gainReductionDb,
     levelPeaks: result.levels.peaks,
     levelOverDb: result.levels.overDb,
@@ -224,6 +231,8 @@ export async function runCommitStrokeFramed(request: ArrayBuffer): Promise<Uint8
       numChannels: result.channels.length,
       peak: result.peak,
       maxGainReductionDb: result.maxGainReductionDb,
+      audioWindowStart: result.audioWindow.start,
+      audioWindowEnd: result.audioWindow.end,
       levelStartHop: result.levels.startHop,
       ...(result.onsetOdfMax !== undefined ? { onsetOdfMax: result.onsetOdfMax } : {}),
     },
@@ -413,6 +422,7 @@ export async function runHistoryCodecFramed(request: ArrayBuffer): Promise<Uint8
         asF32(arrays.base, "base"),
         asF32(arrays.after, "after"),
         asU32(arrays.ranges, "ranges"),
+        Number(meta.baseCompact) === 1,
       );
       return encodeFrame({ meta: { changed: changed ? 1 : 0 }, arrays: {} });
     }
@@ -424,6 +434,15 @@ export async function runHistoryCodecFramed(request: ArrayBuffer): Promise<Uint8
             asF32(arrays.base, "base"),
             asF32(arrays.after, "after"),
             asU32(arrays.ranges, "ranges"),
+            Number(meta.baseCompact) === 1,
+            arrays.tailPixelStarts
+              ? {
+                  pixelStarts: asU32(arrays.tailPixelStarts, "tailPixelStarts"),
+                  pixelCounts: asU32(arrays.tailPixelCounts, "tailPixelCounts"),
+                  offsets: asF32(arrays.tailOffsets, "tailOffsets"),
+                  residuals: asU32(arrays.tailResiduals, "tailResiduals"),
+                }
+              : undefined,
           ),
         },
       });
@@ -432,6 +451,32 @@ export async function runHistoryCodecFramed(request: ArrayBuffer): Promise<Uint8
         meta: {},
         arrays: { packed: await applyHistoryDelta(asF32(arrays.base, "base"), asU8(arrays.bytes, "bytes")) },
       });
+    case "readDeltaTurns": {
+      const turns = await readHistoryDeltaTurns(asU8(arrays.bytes, "bytes"));
+      return encodeFrame({
+        meta: { hasTurns: turns ? 1 : 0 },
+        arrays: turns
+          ? {
+              tailPixelStarts: turns.pixelStarts,
+              tailPixelCounts: turns.pixelCounts,
+              tailOffsets: turns.offsets,
+              tailResiduals: turns.residuals,
+            }
+          : {},
+      });
+    }
+    case "applyDeltas": {
+      const count = Number(meta.deltaCount);
+      const deltas = Array.from({ length: count }, (_, i) => asU8(arrays[`delta${i}`], `delta${i}`));
+      const inverts = String(meta.inverts)
+        .split("")
+        .map((flag) => flag === "1");
+      const base = asF32(arrays.base, "base");
+      return encodeFrame({
+        meta: {},
+        arrays: { packed: await applyHistoryDeltas(base, new Float32Array(base.length), deltas, inverts) },
+      });
+    }
     case "inverseMap":
       return encodeFrame({
         meta: {},

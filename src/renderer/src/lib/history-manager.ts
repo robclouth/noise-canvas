@@ -3,7 +3,11 @@ import { useStore } from "@renderer/store";
 import { awaitFileSynthesis, openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
 import { isManagedFilePath } from "@renderer/store/managed-path";
-import { clearCanvasPatchStash } from "./canvas-patch-stash";
+import type { PhaseTurns } from "../../../main/lib/types";
+import { hasPhaseTurns, phaseTurnResidualRanges } from "../../../main/lib/history-delta";
+import { audioHopBytes, editsAlongHops, type AudioHop } from "./audio-hop";
+import { applyCanvasTurns, type CanvasTurn } from "./canvas-phase-turns";
+import { clearCanvasPatchStash, takeCanvasPatchStash } from "./canvas-patch-stash";
 import { clearFileTaskQueue, drainFileTaskQueues, serializeFileTask } from "./file-task-queue";
 import { host } from "./host";
 import { mergePixelRanges } from "./pixel-ranges";
@@ -17,6 +21,10 @@ const AUDIO_LRU_BYTES = 512 * 1024 * 1024;
 const AUDIO_CACHE_FORMAT = "wv";
 const MANIFEST_WRITE_DEBOUNCE_MS = 400;
 const PACKED_STATE_CACHE_BYTES = 256 * 1024 * 1024;
+// In-memory budgets for the per-stroke deltas that carry undo and redo: the
+// coefficient delta of each hop, and the audio either side of its window.
+const NODE_DELTA_BYTES = 128 * 1024 * 1024;
+const AUDIO_HOP_BYTES = 256 * 1024 * 1024;
 
 export type HistoryNodeKind = "root" | "stroke" | "resize" | "reanalyze" | "checkpoint";
 
@@ -134,6 +142,65 @@ export class PackedStateCache {
     const existing = this.map.get(id);
     if (!existing) return;
     this.bytes -= existing.byteLength;
+    this.map.delete(id);
+  }
+
+  /** Drops every entry holding this very array, except the one named. */
+  deleteValue(value: Float32Array, exceptId?: string): void {
+    for (const [id, v] of [...this.map.entries()]) {
+      if (v === value && id !== exceptId) this.delete(id);
+    }
+  }
+
+  clear(): void {
+    this.map.clear();
+    this.bytes = 0;
+  }
+
+  has(id: string): boolean {
+    return this.map.has(id);
+  }
+
+  get size(): number {
+    return this.map.size;
+  }
+}
+
+/** LRU keyed by node id, bounded by the bytes its values hold. */
+export class ByteBudgetCache<T> {
+  private readonly map = new Map<string, T>();
+  private bytes = 0;
+
+  constructor(
+    private readonly maxBytes: number,
+    private readonly sizeOf: (value: T) => number,
+  ) {}
+
+  get(id: string): T | undefined {
+    const v = this.map.get(id);
+    if (v === undefined) return undefined;
+    this.map.delete(id);
+    this.map.set(id, v);
+    return v;
+  }
+
+  /** Stores the value unless it alone would overrun the budget. */
+  set(id: string, value: T): void {
+    const size = this.sizeOf(value);
+    if (size > this.maxBytes) return;
+    this.delete(id);
+    this.map.set(id, value);
+    this.bytes += size;
+    while (this.bytes > this.maxBytes && this.map.size > 1) {
+      const oldest = this.map.keys().next().value as string;
+      this.delete(oldest);
+    }
+  }
+
+  delete(id: string): void {
+    const existing = this.map.get(id);
+    if (existing === undefined) return;
+    this.bytes -= this.sizeOf(existing);
     this.map.delete(id);
   }
 
@@ -296,6 +363,11 @@ export interface AddStrokeOpts {
   audioRegion?: UvRegion | null;
   // Whether the state this stroke leaves holds paint no projection passed over.
   unprojectedPaint?: boolean;
+  // When `data` is the current packed state written in place, the values the
+  // dirty ranges held before the stroke, laid end to end in range order.
+  baseFootprint?: Float32Array;
+  // Whole-turn phase shifts the stroke's projection made past its ranges.
+  turns?: PhaseTurns;
 }
 
 /** An axis-aligned region in unpacked display uv (Y 0 at the highest band's top). */
@@ -379,20 +451,33 @@ export class HistoryManager {
   private version = 0;
   private manifestWriteTimer: ReturnType<typeof setTimeout> | null = null;
   private manifestWritePending = false;
-  private readonly packedCache = new PackedStateCache(PACKED_STATE_CACHE_BYTES);
+  private readonly packedCache: PackedStateCache;
   // Dirty ranges of strokes added this session, keyed by node id. Lets
   // navigation between such nodes upload only the changed texture rows
   // instead of the whole packed state. Purely an optimization: a miss falls
   // back to the full upload.
   private readonly nodeDirtyRanges = new Map<string, Uint32Array>();
   private readonly nodeAudioRegions = new Map<string, UvRegion>();
+  // Each stroke's encoded coefficient delta against its parent, kept this
+  // session so a hop in either direction is one pass over the current state
+  // rather than a rebuild from the nearest snapshot on disk.
+  private readonly nodeDeltas = new ByteBudgetCache<Uint8Array>(NODE_DELTA_BYTES, (bytes) => bytes.byteLength);
+  // The audio each stroke rewrote, before and after, so a hop restores the
+  // audio the state had rather than synthesising it again.
+  private readonly nodeAudioHops = new ByteBudgetCache<AudioHop>(AUDIO_HOP_BYTES, audioHopBytes);
+  // The phase turns each stroke made past its ranges; null for a stroke that
+  // made none. A node absent here is read back from its delta on disk.
+  private readonly nodeTurns = new Map<string, PhaseTurns | null>();
   // True when the renderer's FBO no longer matches currentId's packed state
   // (e.g. restore-original bypasses history); forces the next navigation to
   // upload the full state rather than a patch.
   private fboOutOfSync = false;
+  // The onset restore still reading currentPacked, if any.
+  private onsetRestore: Promise<void> | null = null;
 
-  constructor(fileId: string) {
+  constructor(fileId: string, options: { packedCacheBytes?: number } = {}) {
     this.fileId = fileId;
+    this.packedCache = new PackedStateCache(options.packedCacheBytes ?? PACKED_STATE_CACHE_BYTES);
     this.dir = this.resolveDir();
   }
 
@@ -747,6 +832,10 @@ export class HistoryManager {
     let footprintPixels = 0;
     if (ranges) for (let r = 1; r < ranges.length; r += 2) footprintPixels += ranges[r];
     const texturePixels = opts.dimensions.textureWidth * opts.dimensions.textureHeight;
+    // A stroke written into the current state in place compares against the
+    // footprint values it saved; any other compares against the whole base.
+    const compact = opts.baseFootprint;
+    const deltaBase = compact ?? base;
 
     let storage: "delta" | "packed";
     let deltaBytes: Uint8Array | undefined;
@@ -754,14 +843,14 @@ export class HistoryManager {
 
     if (
       sameDims &&
-      base != null &&
-      base.length === opts.data.length &&
+      deltaBase != null &&
+      (compact ? compact.length === footprintPixels * 4 : deltaBase.length === opts.data.length) &&
       ranges != null &&
       ranges.length > 0 &&
       footprintPixels < texturePixels * 0.5
     ) {
       const deltaStart = performance.now();
-      if (!(await host.analysis.historyFootprintChanged(base, opts.data, ranges))) {
+      if (!(await host.analysis.historyFootprintChanged(deltaBase, opts.data, ranges, compact != null))) {
         // The stroke changed nothing, so it gets no node of its own. The
         // caller must not then write its audio against the parent's id. The
         // canvas is still the parent's, so its projection state is too.
@@ -770,13 +859,16 @@ export class HistoryManager {
         return { id: parentId, isNew: false };
       }
       rangesForPatch = ranges;
-      const stepsSinceSnap = this.deltaStepsSinceLastSnap(parentId);
-      if (stepsSinceSnap >= CHECKPOINT_INTERVAL) {
-        storage = "packed";
-      } else {
-        storage = "delta";
-        deltaBytes = await host.analysis.encodeHistoryDelta(base, opts.data, ranges);
-      }
+      // A checkpoint is stored whole on disk, but its delta still carries the
+      // hops to and from it in memory.
+      deltaBytes = await host.analysis.encodeHistoryDelta(
+        deltaBase,
+        opts.data,
+        ranges,
+        compact != null,
+        hasPhaseTurns(opts.turns) ? opts.turns : undefined,
+      );
+      storage = this.deltaStepsSinceLastSnap(parentId) >= CHECKPOINT_INTERVAL ? "packed" : "delta";
       console.log(
         `[timing] addStroke: footprint delta ${(performance.now() - deltaStart).toFixed(1)}ms ` +
           `(${ranges.length / 2} ranges, ${footprintPixels} px)`,
@@ -812,11 +904,16 @@ export class HistoryManager {
     this.linkChild(parentId, id);
     this.manifest.nodes[id] = node;
     this.manifest.currentId = id;
-    // opts.data is the fresh readback buffer and is never mutated, so it can be
-    // retained directly rather than copied.
+    // opts.data is either a fresh readback or the current state written in
+    // place; either way it now holds this node and no other.
     this.currentPacked = opts.data;
+    this.packedCache.deleteValue(opts.data);
     this.packedCache.set(id, this.currentPacked);
     if (rangesForPatch) this.nodeDirtyRanges.set(id, rangesForPatch);
+    if (deltaBytes) {
+      this.nodeDeltas.set(id, deltaBytes);
+      this.nodeTurns.set(id, hasPhaseTurns(opts.turns) ? opts.turns : null);
+    }
     if (opts.audioRegion) this.nodeAudioRegions.set(id, opts.audioRegion);
     // The stroke was read back from the FBO, so the two are in step again.
     this.fboOutOfSync = false;
@@ -1034,13 +1131,20 @@ export class HistoryManager {
       if (parent) parent.lastChildId = toRoot[i - 1];
     }
 
+    // A hop walks the current packed state in place, so whatever still reads
+    // it — a synthesis it was handed, an onset pass — has to land first.
+    await this.awaitPackedReaders();
+    if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
+    const fromId = this.manifest.currentId;
+
     // Reuse the cached canonical packed state when we've recently visited the
     // target (the common undo/redo case) — it's the exact array that was last on
     // screen, so round-trips are lossless and need no disk read / decompress /
-    // delta replay. On a miss, rebuild from the nearest checkpoint on disk.
+    // delta replay. On a miss, walk the hops' deltas over the current state,
+    // and failing that rebuild from the nearest checkpoint on disk.
     let packedData = this.packedCache.get(targetId);
     if (!packedData) {
-      packedData = (await this.reconstruct(targetId)).packedData;
+      packedData = (await this.reconstructByHops(fromId, targetId)) ?? (await this.reconstruct(targetId)).packedData;
       // Closing the file purges the manifest and the on-disk tree; the
       // reconstruction that was already running has nothing left to restore to.
       if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
@@ -1059,10 +1163,29 @@ export class HistoryManager {
     } else {
       // When every hop between here and the target is a stroke whose dirty
       // ranges are known, only those texture rows differ from what the FBO
-      // already holds — upload just them.
-      const ranges = this.fboOutOfSync ? null : this.pathDirtyRanges(this.manifest.currentId, targetId);
+      // already holds — upload just them. A commit's patch still waiting in
+      // the stash names pixels the FBO also misses, so they go in the same
+      // upload.
+      let ranges = this.fboOutOfSync ? null : this.pathDirtyRanges(fromId, targetId);
+      const stash = takeCanvasPatchStash(this.fileId);
+      if (ranges && stash) ranges = mergePixelRanges(ranges, stash.ranges);
+      // Each hop's phase turns go on the canvas as operations, in walking
+      // order, with the stash's first; the pixels an undone turn cannot
+      // subtract back exactly come with the patch.
+      const turns = ranges ? await this.pathTurns(fromId, targetId) : null;
+      if (!turns) ranges = null;
+      if (ranges && turns) {
+        for (const stashed of stash?.turns ?? []) turns.unshift({ turns: stashed, invert: false });
+        for (const turn of turns) {
+          if (turn.invert) ranges = mergePixelRanges(ranges, phaseTurnResidualRanges(turn.turns));
+        }
+      }
       const restoreStart = performance.now();
-      if (ranges) {
+      if (ranges && turns) {
+        // The patch writes its pixels from the state afterwards, so the turns
+        // leave them out.
+        if (turns.length) await applyCanvasTurns(file.rendererRef.current, packedData, turns, ranges);
+        if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
         file.rendererRef.current.patchFBOData(packedData, ranges);
         if (file.spectrogramData) {
           hopRegion =
@@ -1091,9 +1214,10 @@ export class HistoryManager {
     // unprojected paint is its answer too — the next re-analysing stroke reads
     // it to decide whether it settles the whole file.
     file.unprojectedPaint = target.unprojectedPaint === true;
-    // packedData is either a cache entry or a freshly reconstructed array; both
-    // are safe to share (currentPacked is never mutated in place, only replaced).
+    // packedData is a cache entry, a fresh rebuild, or the current array walked
+    // in place — which then no longer holds the node it was cached under.
     this.currentPacked = packedData;
+    this.packedCache.deleteValue(packedData, targetId);
     this.packedCache.set(targetId, packedData);
     this.scheduleManifestWrite();
     this.notifyStateChange();
@@ -1101,10 +1225,14 @@ export class HistoryManager {
     // Onsets describe the coefficients they were found in, so they move with
     // the state. Not awaited: the picture is already back, and the markers and
     // the onset grid can follow a moment later.
-    void useStore.getState().restoreOnsetsForNode(this.fileId, targetId, packedData);
+    this.onsetRestore = useStore.getState().restoreOnsetsForNode(this.fileId, targetId, packedData);
 
-    // Restore audio. When the hops' dirty region is known and a buffer exists,
-    // only that window's audio differs between the two states, so only it is
+    // Every hop that kept the audio it rewrote puts it straight back, so the
+    // state's audio returns exactly — limiting and all — without a synthesis.
+    if (await this.restoreAudioByHops(fromId, targetId)) return;
+
+    // When the hops' dirty region is known and a buffer exists, only that
+    // window's audio differs between the two states, so only it is
     // synthesized and spliced.
     if (hopRegion && file.audioBuffer) {
       file.rendererRef.current.expandDirtyRegion(hopRegion.startX, hopRegion.endX, hopRegion.startY, hopRegion.endY);
@@ -1139,6 +1267,192 @@ export class HistoryManager {
   markFboOutOfSync(): void {
     this.fboOutOfSync = true;
     clearCanvasPatchStash(this.fileId);
+  }
+
+  /**
+   * The packed state of the current node. Commits write their footprint into
+   * it in place and hops walk it in place, so it only changes between the
+   * file's queued tasks, and only after {@link awaitPackedReaders}.
+   */
+  currentPackedState(): Float32Array | null {
+    return this.currentPacked;
+  }
+
+  /**
+   * Resolves once nothing outside the queue still reads the current packed
+   * state: a synthesis it was handed, or an onset pass over it.
+   */
+  async awaitPackedReaders(): Promise<void> {
+    await awaitFileSynthesis(this.fileId);
+    if (this.onsetRestore) {
+      try {
+        await this.onsetRestore;
+      } catch {
+        // The restore reports its own failure.
+      }
+    }
+  }
+
+  /**
+   * The hops from one state to another, in walking order: `up` climbs from
+   * `fromId` to the child of the common ancestor, `down` descends from the
+   * ancestor's other child to `toId`. Each id stands for the change its node
+   * made on its parent. Null when the nodes do not share a root, or are the
+   * same node.
+   */
+  private hopsBetween(fromId: string, toId: string): { up: string[]; down: string[] } | null {
+    if (!this.manifest) return null;
+    // Same-node navigation can't be trusted as a no-op: deleteNode reassigns
+    // currentId before navigating, so the FBO may hold a deleted state.
+    if (fromId === toId) return null;
+
+    const fromAncestors = new Set<string>();
+    let cursor: string | null = fromId;
+    while (cursor) {
+      fromAncestors.add(cursor);
+      cursor = this.manifest.nodes[cursor]?.parentId ?? null;
+    }
+
+    const down: string[] = [];
+    cursor = toId;
+    while (cursor && !fromAncestors.has(cursor)) {
+      down.push(cursor);
+      cursor = this.manifest.nodes[cursor]?.parentId ?? null;
+    }
+    if (!cursor) return null;
+    const lca = cursor;
+    const up: string[] = [];
+    cursor = fromId;
+    while (cursor && cursor !== lca) {
+      up.push(cursor);
+      cursor = this.manifest.nodes[cursor]?.parentId ?? null;
+    }
+    down.reverse();
+    return { up, down };
+  }
+
+  /**
+   * The phase turns of every hop between two states, in walking order and
+   * signed for it, or null when any hop's are unknown.
+   */
+  private async pathTurns(fromId: string, toId: string): Promise<CanvasTurn[] | null> {
+    const hops = this.hopsBetween(fromId, toId);
+    if (!hops) return null;
+    const out: CanvasTurn[] = [];
+    for (const [ids, invert] of [
+      [hops.up, true],
+      [hops.down, false],
+    ] as const) {
+      for (const id of ids) {
+        const turns = await this.nodeTurnsOf(id);
+        if (turns === undefined) return null;
+        if (turns) out.push({ turns, invert });
+      }
+    }
+    return out;
+  }
+
+  /** A node's phase turns: null when it made none, undefined when unknown. */
+  private async nodeTurnsOf(id: string): Promise<PhaseTurns | null | undefined> {
+    if (this.nodeTurns.has(id)) return this.nodeTurns.get(id);
+    const bytes = await this.nodeDelta(id);
+    if (!bytes) return undefined;
+    try {
+      const turns = await host.analysis.readHistoryDeltaTurns(bytes);
+      const kept = hasPhaseTurns(turns) ? turns : null;
+      this.nodeTurns.set(id, kept);
+      return kept;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * The coefficient delta a node made on its parent: kept from this session,
+   * or read back from disk for a stroke stored as one. Null for a node stored
+   * whole, whose hop is a rebuild.
+   */
+  private async nodeDelta(id: string): Promise<Uint8Array | null> {
+    const kept = this.nodeDeltas.get(id);
+    if (kept) return kept;
+    const node = this.manifest?.nodes[id];
+    if (!node || node.storage !== "delta") return null;
+    try {
+      const dir = await this.dir;
+      const buf = await host.fs.readFile(this.deltaPath(dir, id));
+      const bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+      this.nodeDeltas.set(id, bytes);
+      return bytes;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Builds the target state from the current one by walking the hops'
+   * deltas — subtracted going up, added going down — in one pass over the
+   * packed array. Null when a hop has no delta, which leaves the rebuild from
+   * the nearest snapshot on disk.
+   */
+  private async reconstructByHops(fromId: string, toId: string): Promise<Float32Array | null> {
+    const base = this.currentPacked;
+    const hops = this.hopsBetween(fromId, toId);
+    if (!base || !hops) return null;
+    const ids = [...hops.up, ...hops.down];
+    if (!ids.length) return null;
+    const deltas: Uint8Array[] = [];
+    for (const id of ids) {
+      const bytes = await this.nodeDelta(id);
+      if (!bytes) return null;
+      deltas.push(bytes);
+    }
+    if (!this.manifest) return null;
+    const inverts = ids.map((_, i) => i < hops.up.length);
+    const start = performance.now();
+    try {
+      // Walked in place: the array stops being `fromId`'s state and becomes
+      // the target's, which the caller records in the cache.
+      const packed = await host.analysis.applyHistoryDeltas(base, base, deltas, inverts);
+      console.log(`[timing] navigateTo delta hops (${ids.length}): ${(performance.now() - start).toFixed(1)}ms`);
+      return packed;
+    } catch (error) {
+      console.error("history: walking the stroke deltas failed", error);
+      return null;
+    }
+  }
+
+  /** Keeps the audio a stroke rewrote, so hops over it restore rather than synthesise. */
+  setNodeAudioHop(nodeId: string, hop: AudioHop): void {
+    this.nodeAudioHops.set(nodeId, hop);
+  }
+
+  /**
+   * Writes the audio of the target state back from the hops' kept windows.
+   * False when a hop has none, which leaves the audio to synthesis.
+   */
+  private async restoreAudioByHops(fromId: string, toId: string): Promise<boolean> {
+    const hops = this.hopsBetween(fromId, toId);
+    if (!hops) return false;
+    const up: AudioHop[] = [];
+    const down: AudioHop[] = [];
+    for (const id of hops.up) {
+      const hop = this.nodeAudioHops.get(id);
+      if (!hop) return false;
+      up.push(hop);
+    }
+    for (const id of hops.down) {
+      const hop = this.nodeAudioHops.get(id);
+      if (!hop) return false;
+      down.push(hop);
+    }
+    const walk = editsAlongHops(up, down);
+    if (!walk) return false;
+    const start = performance.now();
+    const applied = await useStore.getState().spliceFileAudio(this.fileId, walk.edits, walk.meta);
+    if (applied) {
+      console.log(`[timing] navigateTo audio hops (${walk.edits.length}): ${(performance.now() - start).toFixed(1)}ms`);
+    }
+    return applied;
   }
 
   /**
@@ -1190,32 +1504,8 @@ export class HistoryManager {
    * either direction. Null when the nodes do not share a root.
    */
   private pathBetween(fromId: string, toId: string): string[] | null {
-    if (!this.manifest) return null;
-    // Same-node navigation can't be trusted as a no-op: deleteNode reassigns
-    // currentId before navigating, so the FBO may hold a deleted state.
-    if (fromId === toId) return null;
-
-    const fromAncestors = new Set<string>();
-    let cursor: string | null = fromId;
-    while (cursor) {
-      fromAncestors.add(cursor);
-      cursor = this.manifest.nodes[cursor]?.parentId ?? null;
-    }
-
-    const path: string[] = [];
-    cursor = toId;
-    while (cursor && !fromAncestors.has(cursor)) {
-      path.push(cursor);
-      cursor = this.manifest.nodes[cursor]?.parentId ?? null;
-    }
-    if (!cursor) return null;
-    const lca = cursor;
-    cursor = fromId;
-    while (cursor && cursor !== lca) {
-      path.push(cursor);
-      cursor = this.manifest.nodes[cursor]?.parentId ?? null;
-    }
-    return path;
+    const hops = this.hopsBetween(fromId, toId);
+    return hops ? [...hops.down, ...hops.up] : null;
   }
 
   // Both resolve their target inside the queue rather than at the call: a
@@ -1404,6 +1694,9 @@ export class HistoryManager {
       this.audioBytes.delete(id);
       this.nodeDirtyRanges.delete(id);
       this.nodeAudioRegions.delete(id);
+      this.nodeDeltas.delete(id);
+      this.nodeAudioHops.delete(id);
+      this.nodeTurns.delete(id);
       delete this.manifest.nodes[id];
     }
 
@@ -1594,6 +1887,9 @@ export class HistoryManager {
     this.packedCache.set(currentId, canonical);
     this.nodeDirtyRanges.clear();
     this.nodeAudioRegions.clear();
+    this.nodeDeltas.clear();
+    this.nodeAudioHops.clear();
+    this.nodeTurns.clear();
     this.audioLru = current.audioCached ? [currentId] : [];
     this.lastLoadedAnchorId = currentId;
 
@@ -1622,6 +1918,9 @@ export class HistoryManager {
     this.packedCache.clear();
     this.nodeDirtyRanges.clear();
     this.nodeAudioRegions.clear();
+    this.nodeDeltas.clear();
+    this.nodeAudioHops.clear();
+    this.nodeTurns.clear();
     this.audioLru = [];
     this.audioBytes.clear();
     this.lastLoadedAnchorId = null;
@@ -1642,6 +1941,9 @@ export class HistoryManager {
     this.packedCache.clear();
     this.nodeDirtyRanges.clear();
     this.nodeAudioRegions.clear();
+    this.nodeDeltas.clear();
+    this.nodeAudioHops.clear();
+    this.nodeTurns.clear();
     this.audioLru = [];
     this.audioBytes.clear();
     this.lastLoadedAnchorId = null;
@@ -1652,10 +1954,10 @@ export class HistoryManager {
 // Global instances per fileId.
 const managers = new Map<string, HistoryManager>();
 
-export function getHistoryManager(fileId: string): HistoryManager {
+export function getHistoryManager(fileId: string, options: { packedCacheBytes?: number } = {}): HistoryManager {
   let m = managers.get(fileId);
   if (!m) {
-    m = new HistoryManager(fileId);
+    m = new HistoryManager(fileId, options);
     managers.set(fileId, m);
   }
   return m;

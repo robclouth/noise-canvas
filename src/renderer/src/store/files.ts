@@ -11,7 +11,14 @@ import { remainingCoefficientBudget } from "../lib/gpu-budget";
 import { toChannelCount } from "../lib/channel-mix";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type { AnalysisParams, CommitLevels, CommitStrokeResult, PackedOnsets } from "../../../main/lib/types";
-import { computeOutputLevels, outputLevelPoints, spliceOutputLevels, type OutputLevels } from "../lib/output-levels";
+import {
+  computeOutputLevels,
+  measureOutputLevels,
+  outputLevelPoints,
+  spliceOutputLevels,
+  type OutputLevels,
+} from "../lib/output-levels";
+import { applyAudioEdits, buildAudioHop, type AudioEdit, type AudioHop, type AudioStateMeta } from "../lib/audio-hop";
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
@@ -45,6 +52,13 @@ interface SynthesisAudioResult {
 import { selectStemGroupOfFile, stemMemberColor, type StemGroupMethod } from "./stem-groups";
 import { hasSupportedAudioExtension } from "../../../main/lib/audio-extensions";
 import { generateFileId, isManagedFilePath, makeManagedFilePath } from "./utils";
+
+/** What a finished commit hands back: the addon's result, the audio it installed, and the hop for history. */
+export interface CommitOutcome {
+  result: CommitStrokeResult;
+  audioBuffer: AudioBuffer | null;
+  audioHop: AudioHop | null;
+}
 
 export interface FilesState {
   newFile: () => Promise<void>;
@@ -89,7 +103,13 @@ export interface FilesState {
       /** A commit's own measurements of the window it rebuilt. */
       levelWindow?: CommitLevels;
     },
-  ) => Promise<void>;
+  ) => Promise<AudioBuffer | null>;
+  /**
+   * Writes spans of kept audio into a copy of the file's buffer and installs
+   * it with the readings of the state it belongs to. Any synthesis still in
+   * flight described the buffer this replaces, so its result is dropped.
+   */
+  spliceFileAudio: (fileId: string, edits: AudioEdit[], meta: AudioStateMeta) => Promise<boolean>;
   /**
    * Derives everything a finished stroke means from one snapshot: the audio,
    * its hard edges, its limiting, its onsets and levels, and the coefficients
@@ -98,11 +118,7 @@ export interface FilesState {
    * Rejects whole — a commit that half happened would leave the three
    * disagreeing.
    */
-  commitStroke: (
-    fileId: string,
-    snapshot: StrokeCommitSnapshot,
-    data: Float32Array,
-  ) => Promise<CommitStrokeResult | null>;
+  commitStroke: (fileId: string, snapshot: StrokeCommitSnapshot, data: Float32Array) => Promise<CommitOutcome | null>;
   loadCachedAudio: (fileId: string, audioPath: string, peak: number) => Promise<boolean>;
   restoreOnsetsForNode: (fileId: string, nodeId: string, packedData: Float32Array) => Promise<void>;
   exportHistory: () => Promise<void>;
@@ -2015,7 +2031,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
   },
   applySynthesizedAudio: async (fileId, result, options = {}) => {
     const file = openFiles[fileId];
-    if (!file?.spectrogramData || !result.channels.length) return;
+    if (!file?.spectrogramData || !result.channels.length) return null;
 
     const audioBufferStart = performance.now();
     const numChannels = result.channels.length;
@@ -2062,6 +2078,39 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       get().swapPlayingBuffer(audioBuffer);
       console.log(`[timing] buffer hot-swap: ${(performance.now() - bufferSwapStart).toFixed(2)}ms`);
     }
+    return audioBuffer;
+  },
+  spliceFileAudio: async (fileId, edits, meta) => {
+    const file = openFiles[fileId];
+    const source = file?.audioBuffer;
+    if (!file?.spectrogramData || !source) return false;
+
+    const channels: Float32Array[] = [];
+    for (let i = 0; i < source.numberOfChannels; i++) channels.push(source.getChannelData(i).slice());
+    const span = applyAudioEdits(channels, edits);
+
+    const audioContext = Tone.getContext().rawContext;
+    const audioBuffer = audioContext.createBuffer(source.numberOfChannels, source.length, source.sampleRate);
+    channels.forEach((channel, i) => audioBuffer.copyToChannel(channel as Float32Array<ArrayBuffer>, i));
+
+    // Drop what any synthesis still in flight would install, and take over the
+    // busy flag it would have cleared.
+    fileSynthesisGeneration.set(fileId, (fileSynthesisGeneration.get(fileId) ?? 0) + 1);
+    get().setFileSynthesizing(fileId, false);
+
+    file.audioBuffer = audioBuffer;
+    file.audioPeak = meta.peak > 0 ? meta.peak : 1;
+    file.gainReductionDb = meta.gainReductionDb;
+    file.maxGainReductionDb = meta.maxGainReductionDb;
+    if (span) {
+      file.outputLevels = spliceOutputLevels(
+        file.outputLevels,
+        measureOutputLevels(audioBuffer, span.start, span.end),
+        outputLevelPoints(audioBuffer),
+      );
+    }
+    if (get().isPlaying && get().activeFileId === fileId) get().swapPlayingBuffer(audioBuffer);
+    return true;
   },
   commitStroke: async (fileId, snapshot, data) => {
     const file = openFiles[fileId];
@@ -2100,6 +2149,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (existingBuffer) {
       for (let i = 0; i < existingBuffer.numberOfChannels; i++) existingAudio.push(existingBuffer.getChannelData(i));
     }
+    const beforeMeta: AudioStateMeta = {
+      peak: file.audioPeak ?? 1,
+      gainReductionDb: file.gainReductionDb,
+      maxGainReductionDb: file.maxGainReductionDb,
+    };
 
     get().setFileSynthesizing(fileId, true);
     try {
@@ -2128,13 +2182,28 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       if (snapshot.reanalyzeEnabled) file.unprojectedPaint = false;
       else if (snapshot.dirtyRegion) file.unprojectedPaint = true;
 
-      await get().applySynthesizedAudio(fileId, result, {
+      // Cut before the result is installed: the slices read the buffer the
+      // commit was measured against.
+      const audioHop = buildAudioHop({
+        existing: existingAudio,
+        result: result.channels,
+        start: result.audioWindow.start,
+        end: result.audioWindow.end,
+        beforeMeta,
+        afterMeta: {
+          peak: result.peak > 0 ? result.peak : 1,
+          gainReductionDb: result.gainReductionDb,
+          maxGainReductionDb: result.maxGainReductionDb,
+        },
+      });
+
+      const audioBuffer = await get().applySynthesizedAudio(fileId, result, {
         autoPlaybackParams: snapshot.autoPlaybackParams,
         onsetStartSec: params.onsetStartSec,
         onsetEndSec: params.onsetEndSec,
         levelWindow: window ? result.levels : undefined,
       });
-      return result;
+      return { result, audioBuffer, audioHop };
     } finally {
       get().setFileSynthesizing(fileId, false);
     }

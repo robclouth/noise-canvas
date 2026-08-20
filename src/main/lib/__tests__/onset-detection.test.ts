@@ -371,4 +371,45 @@ describe("addon onset detection", () => {
     },
     TIMEOUT,
   );
+
+  it(
+    "judges a span's quiet hits against the loud one before it, as the whole-file pass does",
+    async () => {
+      // One loud hat a second and a half before the span, then hats 40 dB
+      // down inside it: their whitened level depends on how far the loud
+      // one's peak has decayed, which a regional pass has to carry in from
+      // its warm-up. At this level the whole-file pass keeps some of them
+      // and drops the rest, so a pass that whitens against the floor
+      // instead reports more.
+      const durationSec = 30;
+      const buf = silence(durationSec);
+      mixInto(buf, makeHat(durationSec, 18.5, 0.12));
+      for (const t of [20.3, 20.8, 21.3, 21.8]) {
+        const quiet = makeHat(durationSec, t, 0.12);
+        for (let i = 0; i < quiet.length; i++) quiet[i] *= 0.01;
+        mixInto(buf, quiet);
+      }
+      const analysis = await addon.analyze([buf], 1, SR, PARAMS);
+      const full = await addon.detectOnsets(analysis.data, metaOf(analysis), SR);
+      const startSec = 20;
+      const endSec = 22;
+      const region = await addon.detectOnsets(analysis.data, metaOf(analysis), SR, {
+        startSec,
+        endSec,
+        odfReference: full.odfMax,
+        bandMax: full.bandMax,
+      });
+
+      const inSpan = unpack(full.onsets).filter((o) => o.timeSec >= startSec && o.timeSec < endSec);
+      expect(inSpan.length).toBeGreaterThan(0);
+      expect(inSpan.length).toBeLessThan(4);
+      const reported = unpack(region.onsets);
+      expect(reported.length).toBe(inSpan.length);
+      reported.forEach((onset, i) => {
+        expect(onset.timeSec).toBe(inSpan[i].timeSec);
+        expect(onset.salience).toBe(inSpan[i].salience);
+      });
+    },
+    TIMEOUT,
+  );
 });

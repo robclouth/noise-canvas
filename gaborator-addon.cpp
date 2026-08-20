@@ -826,6 +826,17 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         ONSET_LEVEL_POST_SEC + ONSET_MEAN_POST_SEC + ONSET_RIDGE_SEARCH_SEC + 2.0 * maxStrideSec;
     const double readStartSec = region ? std::max(0.0, emitStartSec - leadSec) : 0.0;
     const double readEndSec = region ? std::min(durationSec, emitEndSec + trailSec) : durationSec;
+    // The detection curves only have to be right where candidates are picked
+    // and measured: the peak window, the mean before a peak and the walk down
+    // an attack ahead of the span, plus the spread of the widest coefficient.
+    // The whitening's warm-up ahead of that is read but not summed.
+    const double curveLeadSec = ONSET_PEAK_WINDOW_SEC + ONSET_MEAN_PRE_SEC + ONSET_RIDGE_SEARCH_SEC +
+                                ONSET_ATTACK_SEARCH_SEC + 2.0 * maxStrideSec;
+    const double curveStartSec = region ? std::max(readStartSec, emitStartSec - curveLeadSec) : 0.0;
+    // Whitened values are kept from a stride's reach ahead of the curves, where
+    // the max filter starts reading them; before that the warm-up only has to
+    // carry the whitening's peak tracker to that point.
+    const double keepStartSec = region ? std::max(readStartSec, curveStartSec - 2.0 * maxStrideSec) : 0.0;
 
     // That span as a coefficient range on a band of the given stride.
     const auto coefLo = [readStartSec](uint32_t len, double strideSec) -> uint32_t {
@@ -856,7 +867,7 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     uint32_t longestBand = 0;
     for (int b = 0; b < layout.numBands; ++b)
         longestBand = std::max(longestBand, layout.bandLengths[b]);
-    std::vector<float> compressed(longestBand, 0.0f);
+    std::vector<float> mags(longestBand, 0.0f);
 
     for (int b = 0; b < layout.numBands; ++b)
     {
@@ -867,20 +878,27 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         const float decay = (float)std::exp(-strideSec / ONSET_WHITEN_TAU_SEC);
         const uint32_t kLo = coefLo(len, strideSec);
         const uint32_t kHi = coefHi(len, strideSec);
-        bandKLo[(size_t)b] = kLo;
+        const uint32_t kKeep = std::min(
+            kHi, std::max(kLo, (uint32_t)std::min<int64_t>((int64_t)len, std::max<int64_t>(
+                                                                         0, (int64_t)std::floor(keepStartSec / strideSec)))));
+        bandKLo[(size_t)b] = kKeep;
         bandKHi[(size_t)b] = kHi;
-        whitened[b].assign(kHi > kLo ? (size_t)(kHi - kLo) : 0, 0.0f);
+        whitened[b].assign(kHi > kKeep ? (size_t)(kHi - kKeep) : 0, 0.0f);
 
+        // Magnitudes over the span read; the compression is monotonic, so the
+        // largest of them gives the largest compressed value.
+        float maxMag = 0.0f;
         for (uint32_t k = kLo; k < kHi; ++k)
         {
-            compressed[k] = 0.0f;
+            mags[k] = 0.0f;
             const float *p = pixelAt(b, (int64_t)k);
             if (!p)
                 continue;
             float mag = 0.0f;
             for (int ch = 0; ch < channels; ++ch)
                 mag += p[ch * 2];
-            compressed[k] = std::log1p(ONSET_LOG_GAMMA * std::max(0.0f, mag * channelScale));
+            mags[k] = std::max(0.0f, mag * channelScale);
+            maxMag = std::max(maxMag, mags[k]);
         }
 
         // The band's loudest moment anywhere in the file, so the floor below is
@@ -888,9 +906,7 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         // pass reads. What has been painted into the span being read can be
         // louder than the file used to be, which is why the reference is a
         // starting point rather than the answer.
-        float bandMax = 0.0f;
-        for (uint32_t k = kLo; k < kHi; ++k)
-            bandMax = std::max(bandMax, compressed[k]);
+        float bandMax = std::log1p(ONSET_LOG_GAMMA * maxMag);
         if (region && b < region->bandMaxCount && region->bandMaxReference)
         {
             bandMax = std::max(bandMax, region->bandMaxReference[b]);
@@ -901,7 +917,7 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
             // rather than the compressed values: the compression is monotonic,
             // so the largest magnitude is the largest compressed value, and the
             // scan then costs no transcendentals.
-            float maxMag = 0.0f;
+            float fileMaxMag = 0.0f;
             for (uint32_t k = 0; k < len; ++k)
             {
                 const float *p = pixelAt(b, (int64_t)k);
@@ -910,9 +926,9 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
                 float mag = 0.0f;
                 for (int ch = 0; ch < channels; ++ch)
                     mag += p[ch * 2];
-                maxMag = std::max(maxMag, mag * channelScale);
+                fileMaxMag = std::max(fileMaxMag, mag * channelScale);
             }
-            bandMax = std::max(bandMax, std::log1p(ONSET_LOG_GAMMA * std::max(0.0f, maxMag)));
+            bandMax = std::max(bandMax, std::log1p(ONSET_LOG_GAMMA * std::max(0.0f, fileMaxMag)));
         }
         if (bandMaxOut)
             (*bandMaxOut)[b] = bandMax;
@@ -926,10 +942,35 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         // full and read as an event of its own.
         const float floorLevel = std::max(ONSET_WHITEN_FLOOR, ONSET_WHITEN_FLOOR_RATIO * bandMax);
         float peak = floorLevel;
-        for (uint32_t k = kLo; k < kHi; ++k)
+
+        // The warm-up only carries the tracker. A coefficient that, decayed to
+        // the kept span, would still sit under the floor can never be the peak
+        // there, so it goes by unmeasured; the bound is tightened by a margin
+        // wider than the rounding the decay's run can accumulate.
+        uint32_t k = kLo;
+        while (k < kKeep)
         {
-            peak = std::max(std::max(compressed[k], decay * peak), floorLevel);
-            whitened[b][k - kLo] = compressed[k] / peak;
+            const uint32_t blockEnd = std::min(kKeep, k + 256u);
+            const double reach =
+                0.95 * (double)floorLevel *
+                std::exp((double)(kKeep - (blockEnd - 1)) * strideSec / ONSET_WHITEN_TAU_SEC);
+            const float magReach = (float)(std::expm1(reach) / ONSET_LOG_GAMMA);
+            for (; k < blockEnd; ++k)
+            {
+                if (mags[k] <= magReach)
+                {
+                    peak = std::max(decay * peak, floorLevel);
+                    continue;
+                }
+                const float c = std::log1p(ONSET_LOG_GAMMA * mags[k]);
+                peak = std::max(std::max(c, decay * peak), floorLevel);
+            }
+        }
+        for (; k < kHi; ++k)
+        {
+            const float c = std::log1p(ONSET_LOG_GAMMA * mags[k]);
+            peak = std::max(std::max(c, decay * peak), floorLevel);
+            whitened[b][k - kKeep] = c / peak;
         }
     }
 
@@ -987,7 +1028,9 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         const double spread = 1.0 / (double)span;
         const int nbLo = std::max(0, b - ONSET_MAX_FILTER_BANDS);
         const int nbHi = std::min(layout.numBands - 1, b + ONSET_MAX_FILTER_BANDS);
-        const uint32_t kLo = coefLo(len, strideSec);
+        const uint32_t kLo = std::max(
+            coefLo(len, strideSec),
+            (uint32_t)std::min<int64_t>((int64_t)len, std::max<int64_t>(0, (int64_t)std::floor(curveStartSec / strideSec))));
         const uint32_t kHi = coefHi(len, strideSec);
 
         for (uint32_t k = kLo; k < kHi; ++k)
@@ -2146,6 +2189,8 @@ public:
 
         // 6. Output levels over the window.
         computeLevels(w0, w1, weightedGain);
+        audioWindowStart = w0;
+        audioWindowEnd = w1;
 
         outputWritten = writeOutputAudio(audioChannels, outputAudio, outputAudioLens);
     }
@@ -2183,13 +2228,41 @@ public:
             ranges[i * 3 + 2] = rangeCounts[i];
         }
         patch.Set("ranges", ranges);
+        Napi::Float32Array previous = Napi::Float32Array::New(env, patchPrevious.size());
+        if (!patchPrevious.empty())
+            memcpy(previous.Data(), patchPrevious.data(), patchPrevious.size() * sizeof(float));
+        patch.Set("previous", previous);
         result.Set("patch", patch);
+
+        Napi::Object tail = Napi::Object::New(env);
+        Napi::Uint32Array tailStarts = Napi::Uint32Array::New(env, tailPixelStarts.size());
+        Napi::Uint32Array tailCounts = Napi::Uint32Array::New(env, tailPixelCounts.size());
+        Napi::Float32Array tailOffs = Napi::Float32Array::New(env, tailOffsets.size());
+        Napi::Uint32Array residuals = Napi::Uint32Array::New(env, tailResiduals.size());
+        if (!tailPixelStarts.empty())
+        {
+            memcpy(tailStarts.Data(), tailPixelStarts.data(), tailPixelStarts.size() * sizeof(uint32_t));
+            memcpy(tailCounts.Data(), tailPixelCounts.data(), tailPixelCounts.size() * sizeof(uint32_t));
+            memcpy(tailOffs.Data(), tailOffsets.data(), tailOffsets.size() * sizeof(float));
+        }
+        if (!tailResiduals.empty())
+            memcpy(residuals.Data(), tailResiduals.data(), tailResiduals.size() * sizeof(uint32_t));
+        tail.Set("pixelStarts", tailStarts);
+        tail.Set("pixelCounts", tailCounts);
+        tail.Set("offsets", tailOffs);
+        tail.Set("residuals", residuals);
+        result.Set("tail", tail);
 
         Napi::Float32Array grBuffer = Napi::Float32Array::New(env, gainReductionDb.size());
         if (!gainReductionDb.empty())
             memcpy(grBuffer.Data(), gainReductionDb.data(), gainReductionDb.size() * sizeof(float));
         result.Set("gainReductionDb", grBuffer);
         result.Set("maxGainReductionDb", Napi::Number::New(env, maxGainReductionDb));
+
+        Napi::Object audioWindow = Napi::Object::New(env);
+        audioWindow.Set("start", Napi::Number::New(env, (double)audioWindowStart));
+        audioWindow.Set("end", Napi::Number::New(env, (double)audioWindowEnd));
+        result.Set("audioWindow", audioWindow);
 
         Napi::Object levels = Napi::Object::New(env);
         levels.Set("startHop", Napi::Number::New(env, (double)levelStartHop));
@@ -2362,7 +2435,6 @@ private:
                 exWin[(size_t)ch].assign(n, 0.0f);
         }
 
-        const std::vector<float> mixPeak = truePeakPerSample(mixWin);
         // The existing audio's loudness, held over the limiter's hold window
         // so its zero crossings do not read as headroom.
         const int holdSamples = (int)std::max(0.0, sampleRate * 0.040);
@@ -2394,18 +2466,36 @@ private:
             }
         }
 
-        // Required gain per sample: bring the mix down to the ceiling. Where
-        // the mask is 1 that bounds the output exactly. Over a soft edge's
-        // ramp the unscaled share of the existing audio can carry the output
-        // at most (1-w)*(1-g)*exLoud past it — but a soft stroke tapers to
-        // nothing at its edge, so where that share is large the stroke is
-        // quiet and the bound is slack anyway.
+        // Required gain per sample. The output is keep + g*act, where keep =
+        // (1-w)*ex is the share of the existing audio the mask leaves
+        // unscaled and act = mix - keep is what the gain acts on, so
+        // |out| <= peak(keep) + g*peak(act). Holding that to the ceiling
+        // bounds the output wherever the window differs from the existing
+        // audio — inside the footprint (keep = 0, the plain mix requirement)
+        // and in the margins beyond it, where re-synthesised paint from an
+        // earlier stroke can make act large. Where mix == ex, act is zero
+        // and the gain has nothing to do.
+        std::vector<std::vector<float>> keepWin((size_t)channels), actWin((size_t)channels);
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            keepWin[(size_t)ch].resize(n);
+            actWin[(size_t)ch].resize(n);
+            for (size_t i = 0; i < n; ++i)
+            {
+                const float keep = (1.0f - mask[i]) * exWin[(size_t)ch][i];
+                keepWin[(size_t)ch][i] = keep;
+                actWin[(size_t)ch][i] = mixWin[(size_t)ch][i] - keep;
+            }
+        }
+        const std::vector<float> keepPeak = truePeakPerSample(keepWin);
+        const std::vector<float> actPeak = truePeakPerSample(actWin);
         std::vector<float> gain(n, 1.0f);
         for (size_t i = 0; i < n; ++i)
         {
             const float ceiling = std::max(LIMITER_CEILING, exLoud[i]);
-            if (mixPeak[i] > ceiling)
-                gain[i] = ceiling / mixPeak[i];
+            const float room = std::max(0.0f, ceiling - keepPeak[i]);
+            if (actPeak[i] > room)
+                gain[i] = actPeak[i] > 0.0f ? room / actPeak[i] : 1.0f;
         }
         smoothLimiterGain(gain, sampleRate, 40.0f, 200.0f);
 
@@ -2556,11 +2646,19 @@ private:
             }
         }
 
-        // Write the patch into the packed buffer, extending any band whose
-        // branch moved.
+        // Write the patch into the packed buffer, keeping the values it
+        // replaces. A band whose branch moved gets the rest of its phases
+        // shifted by the whole turns the seam needs, as one constant per
+        // channel, so the shift travels as an operation rather than as pixels.
         rangeBands.clear();
         rangeStarts.clear();
         rangeCounts.clear();
+        patchPrevious.clear();
+        tailPixelStarts.clear();
+        tailPixelCounts.clear();
+        tailOffsets.clear();
+        tailResiduals.clear();
+        const double twoPi = 2.0 * M_PI;
         for (int b = 0; b < numBands; ++b)
         {
             const size_t count = (size_t)patchCount[(size_t)b];
@@ -2569,38 +2667,74 @@ private:
             const int64_t k0 = patchK0[(size_t)b];
             const int64_t len = (int64_t)bandLengths[(size_t)b];
 
-            const size_t total = needsTail[(size_t)b] ? (size_t)(len - k0) : count;
-
             rangeBands.push_back((uint32_t)b);
             rangeStarts.push_back((uint32_t)k0);
-            rangeCounts.push_back((uint32_t)total);
+            rangeCounts.push_back((uint32_t)count);
 
-            std::vector<float> tailPrev((size_t)channels, 0.0f);
-            for (int ch = 0; ch < channels; ++ch)
-                tailPrev[(size_t)ch] = bandPhase[(size_t)b][(count - 1) * (size_t)channels + (size_t)ch];
-
-            for (size_t rel = 0; rel < total; ++rel)
+            for (size_t rel = 0; rel < count; ++rel)
             {
                 const size_t off = ((size_t)bandOffsets[(size_t)b] + (size_t)k0 + rel) * 4;
                 if (off + 3 >= packedLen)
-                    continue;
-                float *out = packed + off;
-                if (rel < count)
                 {
-                    for (int ch = 0; ch < channels; ++ch)
-                    {
-                        out[ch * 2] = bandMag[(size_t)b][rel * (size_t)channels + (size_t)ch];
-                        out[ch * 2 + 1] = bandPhase[(size_t)b][rel * (size_t)channels + (size_t)ch];
-                    }
+                    for (int c = 0; c < 4; ++c)
+                        patchPrevious.push_back(0.0f);
                     continue;
                 }
-                // Past the re-analyzed span the magnitudes stand, but the phases
-                // are put back on the branch the new values ended on.
+                float *out = packed + off;
+                for (int c = 0; c < 4; ++c)
+                    patchPrevious.push_back(out[c]);
                 for (int ch = 0; ch < channels; ++ch)
                 {
-                    const float rebranched = unwrapForward(out[ch * 2 + 1], tailPrev[(size_t)ch]);
-                    tailPrev[(size_t)ch] = rebranched;
-                    out[ch * 2 + 1] = rebranched;
+                    out[ch * 2] = bandMag[(size_t)b][rel * (size_t)channels + (size_t)ch];
+                    out[ch * 2 + 1] = bandPhase[(size_t)b][rel * (size_t)channels + (size_t)ch];
+                }
+            }
+
+            if (!needsTail[(size_t)b] || k0 + (int64_t)count >= len)
+                continue;
+            const int64_t tailK = k0 + (int64_t)count;
+            const size_t tailOff = ((size_t)bandOffsets[(size_t)b] + (size_t)tailK) * 4;
+            if (tailOff + 3 >= packedLen)
+                continue;
+            float offsets[2] = {0.0f, 0.0f};
+            bool any = false;
+            for (int ch = 0; ch < channels && ch < 2; ++ch)
+            {
+                const float prev = bandPhase[(size_t)b][(count - 1) * (size_t)channels + (size_t)ch];
+                const float stored = packed[tailOff + (size_t)ch * 2 + 1];
+                const double turns = std::round(((double)prev - (double)stored) / twoPi);
+                offsets[ch] = (float)(twoPi * turns);
+                any = any || offsets[ch] != 0.0f;
+            }
+            if (!any)
+                continue;
+            const size_t tailCount = (size_t)(len - tailK);
+            tailPixelStarts.push_back((uint32_t)((size_t)bandOffsets[(size_t)b] + (size_t)tailK));
+            tailPixelCounts.push_back((uint32_t)tailCount);
+            tailOffsets.push_back(offsets[0]);
+            tailOffsets.push_back(offsets[1]);
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                const float c = offsets[ch];
+                if (c == 0.0f)
+                    continue;
+                for (size_t rel = 0; rel < tailCount; ++rel)
+                {
+                    const size_t idx = tailOff + rel * 4 + (size_t)ch * 2 + 1;
+                    if (idx >= packedLen)
+                        break;
+                    const float before = packed[idx];
+                    const float after = before + c;
+                    // Where subtracting the turn back would not land on the
+                    // old value, keep that value so undo stays exact.
+                    if (after - c != before)
+                    {
+                        uint32_t bits;
+                        memcpy(&bits, &before, 4);
+                        tailResiduals.push_back((uint32_t)idx);
+                        tailResiduals.push_back(bits);
+                    }
+                    packed[idx] = after;
                 }
             }
         }
@@ -2701,9 +2835,19 @@ private:
     float peakValue = 0.0f;
     std::vector<uint32_t> rangeBands, rangeStarts, rangeCounts;
     std::vector<int64_t> patchK0, patchCount;
+    // The window's values before the projection wrote it, in range order.
+    std::vector<float> patchPrevious;
+    // Whole-turn phase shifts past the window: pixel span and the float
+    // offset per channel, plus the floats the shift cannot undo exactly.
+    std::vector<uint32_t> tailPixelStarts, tailPixelCounts;
+    std::vector<float> tailOffsets;
+    std::vector<uint32_t> tailResiduals;
     std::vector<float> gainReductionDb;
     float maxGainReductionDb = 0.0f;
     int64_t levelStartHop = 0;
+    // Span of samples the commit rewrote; everything outside it is the
+    // existing audio unchanged.
+    int64_t audioWindowStart = 0, audioWindowEnd = 0;
     std::vector<float> levelPeaks;
     std::vector<float> levelOverDb;
     std::vector<DetectedOnset> onsets;
@@ -3911,13 +4055,71 @@ private:
     std::vector<uint8_t> out;
 };
 
+/**
+ * One whole-turn phase shift a stroke made past its window: a span of pixels
+ * and the float offset added to each channel's phase.
+ */
+struct HistoryPhaseTurn
+{
+    uint32_t pixelStart;
+    uint32_t pixelCount;
+    float offset[2];
+};
+
+/**
+ * A stroke delta unpacked: its footprint ranges and the differences over them,
+ * plus any phase turns and the floats whose shift does not subtract back
+ * exactly (index and original bits).
+ */
+struct HistoryDecodedDelta
+{
+    std::vector<uint32_t> ranges;
+    std::vector<uint32_t> diff;
+    std::vector<HistoryPhaseTurn> turns;
+    std::vector<uint32_t> residuals;
+};
+
+// Set on the range count when the delta carries a phase-turn section.
+static const uint32_t HISTORY_DELTA_TURNS_FLAG = 0x80000000u;
+
+/**
+ * Checks a footprint against its two states. `base` is either a whole state
+ * the size of `after`, or, when `baseCompact` is set, just the footprint's
+ * values laid end to end in range order. Returns an error message, or null.
+ */
+static const char *historyCheckFootprint(const HistoryBufferRef &base, const HistoryBufferRef &after,
+                                         const std::vector<uint32_t> &ranges, bool baseCompact,
+                                         const char *what)
+{
+    static thread_local std::string message;
+    size_t total = 0;
+    const size_t valueCount = after.byteLength / HISTORY_VALUE_BYTES;
+    for (size_t r = 0; r + 1 < ranges.size(); r += 2)
+    {
+        const size_t end = (static_cast<size_t>(ranges[r]) + ranges[r + 1]) * HISTORY_CHANNELS;
+        if (end > valueCount)
+        {
+            message = std::string(what) + ": footprint range runs past the end of the state";
+            return message.c_str();
+        }
+        total += static_cast<size_t>(ranges[r + 1]) * HISTORY_CHANNELS;
+    }
+    if (baseCompact ? base.byteLength / HISTORY_VALUE_BYTES != total : base.byteLength != after.byteLength)
+    {
+        message = std::string(what) + (baseCompact ? ": the compact base does not match the footprint"
+                                                   : ": the painted state is a different size to the base");
+        return message.c_str();
+    }
+    return nullptr;
+}
+
 // True if any value inside the footprint ranges differs between base and after.
 class HistoryFootprintChangedWorker : public Napi::AsyncWorker
 {
 public:
     HistoryFootprintChangedWorker(Napi::Env env, const Napi::Value &baseJs, const Napi::Value &afterJs,
-                                  const Napi::Uint32Array &rangesJs)
-        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env))
+                                  const Napi::Uint32Array &rangesJs, bool baseCompact)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), baseCompact(baseCompact)
     {
         base.hold(baseJs);
         after.hold(afterJs);
@@ -3926,36 +4128,30 @@ public:
 
     void Execute() override
     {
-        const size_t valueCount = base.byteLength / HISTORY_VALUE_BYTES;
-        if (after.byteLength != base.byteLength)
+        const char *err = historyCheckFootprint(base, after, ranges, baseCompact, "history footprint");
+        if (err)
         {
-            SetError("history footprint: the painted state is a different size to the base");
+            SetError(err);
             return;
-        }
-        for (size_t r = 0; r + 1 < ranges.size(); r += 2)
-        {
-            const size_t end = (static_cast<size_t>(ranges[r]) + ranges[r + 1]) * HISTORY_CHANNELS;
-            if (end > valueCount)
-            {
-                SetError("history footprint: footprint range runs past the end of the state");
-                return;
-            }
         }
 
         const uint32_t *baseBits = reinterpret_cast<const uint32_t *>(base.data);
         const uint32_t *afterBits = reinterpret_cast<const uint32_t *>(after.data);
+        size_t p = 0;
         for (size_t r = 0; r + 1 < ranges.size(); r += 2)
         {
             const size_t start = static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
             const size_t count = static_cast<size_t>(ranges[r + 1]) * HISTORY_CHANNELS;
+            const uint32_t *baseRun = baseBits + (baseCompact ? p : start);
             for (size_t i = 0; i < count; ++i)
             {
-                if (baseBits[start + i] != afterBits[start + i])
+                if (baseRun[i] != afterBits[start + i])
                 {
                     changed = true;
                     return;
                 }
             }
+            p += count;
         }
     }
 
@@ -3973,6 +4169,7 @@ private:
     HistoryBufferRef base, after;
     std::vector<uint32_t> ranges;
     bool changed = false;
+    bool baseCompact = false;
 };
 
 // Builds a stroke's on-disk delta. Layout:
@@ -3988,12 +4185,31 @@ class HistoryEncodeDeltaWorker : public Napi::AsyncWorker
 {
 public:
     HistoryEncodeDeltaWorker(Napi::Env env, const Napi::Value &baseJs, const Napi::Value &afterJs,
-                             const Napi::Uint32Array &rangesJs)
-        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env))
+                             const Napi::Uint32Array &rangesJs, bool baseCompact, const Napi::Value &turnsJs)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), baseCompact(baseCompact)
     {
         base.hold(baseJs);
         after.hold(afterJs);
         ranges.assign(rangesJs.Data(), rangesJs.Data() + rangesJs.ElementLength());
+        if (turnsJs.IsObject())
+        {
+            Napi::Object t = turnsJs.As<Napi::Object>();
+            Napi::Uint32Array starts = t.Get("pixelStarts").As<Napi::Uint32Array>();
+            Napi::Uint32Array counts = t.Get("pixelCounts").As<Napi::Uint32Array>();
+            Napi::Float32Array offsets = t.Get("offsets").As<Napi::Float32Array>();
+            Napi::Uint32Array residualsJs = t.Get("residuals").As<Napi::Uint32Array>();
+            const size_t n = std::min(starts.ElementLength(), std::min(counts.ElementLength(), offsets.ElementLength() / 2));
+            turns.resize(n);
+            for (size_t i = 0; i < n; ++i)
+            {
+                turns[i].pixelStart = starts[i];
+                turns[i].pixelCount = counts[i];
+                turns[i].offset[0] = offsets[i * 2];
+                turns[i].offset[1] = offsets[i * 2 + 1];
+            }
+            residuals.assign(residualsJs.Data(), residualsJs.Data() + (residualsJs.ElementLength() / 2) * 2);
+            hasTurns = true;
+        }
     }
 
     void Execute() override
@@ -4002,20 +4218,11 @@ public:
         for (size_t r = 1; r < ranges.size(); r += 2)
             total += static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
 
-        const size_t valueCount = base.byteLength / HISTORY_VALUE_BYTES;
-        if (after.byteLength != base.byteLength)
+        const char *err = historyCheckFootprint(base, after, ranges, baseCompact, "history delta");
+        if (err)
         {
-            SetError("history delta: the painted state is a different size to the base");
+            SetError(err);
             return;
-        }
-        for (size_t r = 0; r + 1 < ranges.size(); r += 2)
-        {
-            const size_t end = (static_cast<size_t>(ranges[r]) + ranges[r + 1]) * HISTORY_CHANNELS;
-            if (end > valueCount)
-            {
-                SetError("history delta: footprint range runs past the end of the state");
-                return;
-            }
         }
 
         const uint32_t *baseBits = reinterpret_cast<const uint32_t *>(base.data);
@@ -4027,17 +4234,39 @@ public:
         {
             const size_t start = static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
             const size_t count = static_cast<size_t>(ranges[r + 1]) * HISTORY_CHANNELS;
+            const uint32_t *baseRun = baseBits + (baseCompact ? p : start);
             for (size_t i = 0; i < count; ++i)
-                diff[p + i] = afterBits[start + i] - baseBits[start + i];
+                diff[p + i] = afterBits[start + i] - baseRun[i];
             p += count;
         }
 
-        const size_t headerBytes = 4 + ranges.size() * sizeof(uint32_t);
+        const size_t turnsBytes = hasTurns ? 4 + turns.size() * 16 + 4 + residuals.size() * 4 : 0;
+        const size_t headerBytes = 4 + ranges.size() * sizeof(uint32_t) + turnsBytes;
         out.resize(headerBytes + total * sizeof(uint32_t));
-        const uint32_t numRanges = static_cast<uint32_t>(ranges.size() / 2);
-        memcpy(out.data(), &numRanges, 4);
+        const uint32_t header = static_cast<uint32_t>(ranges.size() / 2) | (hasTurns ? HISTORY_DELTA_TURNS_FLAG : 0u);
+        memcpy(out.data(), &header, 4);
         if (!ranges.empty())
             memcpy(out.data() + 4, ranges.data(), ranges.size() * sizeof(uint32_t));
+        if (hasTurns)
+        {
+            uint8_t *p = out.data() + 4 + ranges.size() * sizeof(uint32_t);
+            const uint32_t turnCount = static_cast<uint32_t>(turns.size());
+            memcpy(p, &turnCount, 4);
+            p += 4;
+            for (const HistoryPhaseTurn &turn : turns)
+            {
+                memcpy(p, &turn.pixelStart, 4);
+                memcpy(p + 4, &turn.pixelCount, 4);
+                memcpy(p + 8, &turn.offset[0], 4);
+                memcpy(p + 12, &turn.offset[1], 4);
+                p += 16;
+            }
+            const uint32_t residualCount = static_cast<uint32_t>(residuals.size() / 2);
+            memcpy(p, &residualCount, 4);
+            p += 4;
+            if (!residuals.empty())
+                memcpy(p, residuals.data(), residuals.size() * 4);
+        }
         if (total > 0)
             historyEncodePlanes(reinterpret_cast<const uint8_t *>(diff.data()), total, out.data() + headerBytes);
     }
@@ -4056,7 +4285,154 @@ private:
     HistoryBufferRef base, after;
     std::vector<uint32_t> ranges;
     std::vector<uint8_t> out;
+    bool baseCompact = false;
+    bool hasTurns = false;
+    std::vector<HistoryPhaseTurn> turns;
+    std::vector<uint32_t> residuals;
 };
+
+/**
+ * Adds (or, inverted, subtracts) one stroke delta's bit-pattern differences
+ * over its footprint ranges, in place. Returns an error message, or null.
+ */
+
+/**
+ * Unpacks a stroke delta and checks every range against the state's size, so
+ * a walk over several deltas can refuse the whole chain before it writes
+ * anything. Returns an error message, or null.
+ */
+static const char *historyDecodeDelta(const uint8_t *delta, size_t deltaBytes, size_t valueCount,
+                                      HistoryDecodedDelta &out)
+{
+    if (deltaBytes < 4)
+        return "history delta is truncated";
+    uint32_t header = 0;
+    memcpy(&header, delta, 4);
+    const bool hasTurns = (header & HISTORY_DELTA_TURNS_FLAG) != 0;
+    const uint32_t numRanges = header & ~HISTORY_DELTA_TURNS_FLAG;
+    const size_t rangeValues = static_cast<size_t>(numRanges) * 2;
+    size_t headerBytes = 4 + rangeValues * sizeof(uint32_t);
+    if (deltaBytes < headerBytes)
+        return "history delta header is truncated";
+    out.ranges.resize(rangeValues);
+    if (rangeValues > 0)
+        memcpy(out.ranges.data(), delta + 4, rangeValues * sizeof(uint32_t));
+
+    out.turns.clear();
+    out.residuals.clear();
+    if (hasTurns)
+    {
+        const uint8_t *p = delta + headerBytes;
+        size_t left = deltaBytes - headerBytes;
+        uint32_t turnCount = 0, residualCount = 0;
+        if (left < 4)
+            return "history delta turns are truncated";
+        memcpy(&turnCount, p, 4);
+        p += 4;
+        left -= 4;
+        if (left < (size_t)turnCount * 16)
+            return "history delta turns are truncated";
+        out.turns.resize(turnCount);
+        for (uint32_t i = 0; i < turnCount; ++i)
+        {
+            memcpy(&out.turns[i].pixelStart, p, 4);
+            memcpy(&out.turns[i].pixelCount, p + 4, 4);
+            memcpy(&out.turns[i].offset[0], p + 8, 4);
+            memcpy(&out.turns[i].offset[1], p + 12, 4);
+            p += 16;
+            left -= 16;
+            const size_t end = ((size_t)out.turns[i].pixelStart + out.turns[i].pixelCount) * HISTORY_CHANNELS;
+            if (end > valueCount)
+                return "history delta turn runs past the end of the state";
+        }
+        if (left < 4)
+            return "history delta residuals are truncated";
+        memcpy(&residualCount, p, 4);
+        p += 4;
+        left -= 4;
+        if (left < (size_t)residualCount * 8)
+            return "history delta residuals are truncated";
+        out.residuals.resize((size_t)residualCount * 2);
+        if (residualCount)
+            memcpy(out.residuals.data(), p, (size_t)residualCount * 8);
+        for (size_t i = 0; i < out.residuals.size(); i += 2)
+            if (out.residuals[i] >= valueCount)
+                return "history delta residual runs past the end of the state";
+        p += (size_t)residualCount * 8;
+        headerBytes = (size_t)(p - delta);
+    }
+
+    const size_t diffBytes = deltaBytes - headerBytes;
+    out.diff.resize(diffBytes / sizeof(uint32_t));
+    if (!out.diff.empty())
+        historyDecodePlanes(delta + headerBytes, out.diff.size(), reinterpret_cast<uint8_t *>(out.diff.data()));
+
+    size_t p = 0;
+    for (size_t r = 0; r + 1 < out.ranges.size(); r += 2)
+    {
+        const size_t start = static_cast<size_t>(out.ranges[r]) * HISTORY_CHANNELS;
+        const size_t count = static_cast<size_t>(out.ranges[r + 1]) * HISTORY_CHANNELS;
+        if (start + count > valueCount || p + count > out.diff.size())
+            return "history delta range is out of bounds";
+        p += count;
+    }
+    return nullptr;
+}
+
+/**
+ * Adds (or, inverted, subtracts) a decoded delta in place: the bit
+ * differences over its ranges, and each phase turn's offset over its span.
+ * Inverting a turn subtracts the offset and then puts back the floats the
+ * subtraction does not reach, so the state returns bit for bit.
+ */
+static void historyApplyDecodedDelta(uint32_t *bits, const HistoryDecodedDelta &delta, bool invert)
+{
+    size_t p = 0;
+    for (size_t r = 0; r + 1 < delta.ranges.size(); r += 2)
+    {
+        const size_t start = static_cast<size_t>(delta.ranges[r]) * HISTORY_CHANNELS;
+        const size_t count = static_cast<size_t>(delta.ranges[r + 1]) * HISTORY_CHANNELS;
+        if (invert)
+            for (size_t i = 0; i < count; ++i)
+                bits[start + i] -= delta.diff[p + i];
+        else
+            for (size_t i = 0; i < count; ++i)
+                bits[start + i] += delta.diff[p + i];
+        p += count;
+    }
+
+    float *floats = reinterpret_cast<float *>(bits);
+    for (const HistoryPhaseTurn &turn : delta.turns)
+    {
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            const float c = invert ? -turn.offset[ch] : turn.offset[ch];
+            if (c == 0.0f)
+                continue;
+            float *f = floats + (size_t)turn.pixelStart * HISTORY_CHANNELS + (size_t)ch * 2 + 1;
+            for (size_t i = 0; i < turn.pixelCount; ++i)
+                f[i * HISTORY_CHANNELS] += c;
+        }
+    }
+    if (invert)
+        for (size_t i = 0; i + 1 < delta.residuals.size(); i += 2)
+            bits[delta.residuals[i]] = delta.residuals[i + 1];
+}
+
+/**
+ * Adds (or, inverted, subtracts) one stroke delta's bit-pattern differences
+ * over its footprint ranges, in place. Returns an error message, or null.
+ */
+static const char *historyApplyDeltaInPlace(uint32_t *bits, size_t valueCount, const uint8_t *delta,
+                                            size_t deltaBytes, bool invert)
+{
+    HistoryDecodedDelta decoded;
+    const char *err = historyDecodeDelta(delta, deltaBytes, valueCount, decoded);
+    if (err)
+        return err;
+    historyApplyDecodedDelta(bits, decoded, invert);
+    return nullptr;
+}
 
 // Reconstructs the state a delta describes: a copy of the base with the stored
 // bit-pattern differences added back over the footprint ranges.
@@ -4072,48 +4448,12 @@ public:
 
     void Execute() override
     {
-        if (delta.byteLength < 4)
-        {
-            SetError("history delta is truncated");
-            return;
-        }
-        uint32_t numRanges = 0;
-        memcpy(&numRanges, delta.data, 4);
-        const size_t rangeValues = static_cast<size_t>(numRanges) * 2;
-        const size_t headerBytes = 4 + rangeValues * sizeof(uint32_t);
-        if (delta.byteLength < headerBytes)
-        {
-            SetError("history delta header is truncated");
-            return;
-        }
-        std::vector<uint32_t> ranges(rangeValues);
-        if (rangeValues > 0)
-            memcpy(ranges.data(), delta.data + 4, rangeValues * sizeof(uint32_t));
-
-        const size_t diffBytes = delta.byteLength - headerBytes;
-        std::vector<uint32_t> diff(diffBytes / sizeof(uint32_t));
-        if (!diff.empty())
-            historyDecodePlanes(delta.data + headerBytes, diff.size(), reinterpret_cast<uint8_t *>(diff.data()));
-
         out.assign(base.data, base.data + base.byteLength);
-        uint32_t *outBits = reinterpret_cast<uint32_t *>(out.data());
-        const uint32_t *baseBits = reinterpret_cast<const uint32_t *>(base.data);
-        const size_t valueCount = base.byteLength / HISTORY_VALUE_BYTES;
-
-        size_t p = 0;
-        for (size_t r = 0; r + 1 < ranges.size(); r += 2)
-        {
-            const size_t start = static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
-            const size_t count = static_cast<size_t>(ranges[r + 1]) * HISTORY_CHANNELS;
-            if (start + count > valueCount || p + count > diff.size())
-            {
-                SetError("history delta range is out of bounds");
-                return;
-            }
-            for (size_t i = 0; i < count; ++i)
-                outBits[start + i] = baseBits[start + i] + diff[p + i];
-            p += count;
-        }
+        const char *err = historyApplyDeltaInPlace(reinterpret_cast<uint32_t *>(out.data()),
+                                                   base.byteLength / HISTORY_VALUE_BYTES, delta.data,
+                                                   delta.byteLength, false);
+        if (err)
+            SetError(err);
     }
 
     void OnOK() override
@@ -4131,6 +4471,76 @@ private:
     Napi::Promise::Deferred deferred;
     HistoryBufferRef base, delta;
     std::vector<uint8_t> out;
+};
+
+/**
+ * Walks a chain of stroke deltas from one state to another: copies the base
+ * into the caller's output buffer (or works in place when the two are the same
+ * buffer), then applies each delta in order, subtracted where its flag is set
+ * (a hop up to a parent) and added otherwise (a hop down to a child). Every
+ * delta is checked before the first write, so a bad one leaves the state
+ * untouched. Bit-pattern arithmetic makes both directions exact.
+ */
+class HistoryApplyDeltasWorker : public Napi::AsyncWorker
+{
+public:
+    HistoryApplyDeltasWorker(Napi::Env env, const Napi::Value &baseJs, const Napi::Value &outJs,
+                             const Napi::Array &deltasJs, const Napi::Array &invertsJs)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env))
+    {
+        base.hold(baseJs);
+        out.hold(outJs);
+        const uint32_t n = deltasJs.Length();
+        deltas.resize(n);
+        inverts.resize(n);
+        for (uint32_t i = 0; i < n; ++i)
+        {
+            deltas[i].hold(deltasJs.Get(i));
+            inverts[i] = invertsJs.Get(i).ToBoolean().Value();
+        }
+    }
+
+    void Execute() override
+    {
+        if (out.byteLength != base.byteLength)
+        {
+            SetError("history deltas: the output buffer is a different size to the base");
+            return;
+        }
+        const size_t valueCount = base.byteLength / HISTORY_VALUE_BYTES;
+        std::vector<HistoryDecodedDelta> decoded(deltas.size());
+        for (size_t i = 0; i < deltas.size(); ++i)
+        {
+            const char *err = historyDecodeDelta(deltas[i].data, deltas[i].byteLength, valueCount, decoded[i]);
+            if (err)
+            {
+                SetError(err);
+                return;
+            }
+        }
+
+        uint8_t *dst = const_cast<uint8_t *>(out.data);
+        if (dst != base.data)
+            memcpy(dst, base.data, base.byteLength);
+        uint32_t *bits = reinterpret_cast<uint32_t *>(dst);
+        for (size_t i = 0; i < decoded.size(); ++i)
+            historyApplyDecodedDelta(bits, decoded[i], inverts[i]);
+    }
+
+    void OnOK() override
+    {
+        Napi::HandleScope scope(Env());
+        deferred.Resolve(out.ref.Value());
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+private:
+    Napi::Promise::Deferred deferred;
+    HistoryBufferRef base, out;
+    std::vector<HistoryBufferRef> deltas;
+    std::vector<bool> inverts;
 };
 
 // Rebuilds the inverse map (each packed pixel's time offset and band index) from
@@ -4202,14 +4612,18 @@ Napi::Value HistoryDecodePlanesAsync(const Napi::CallbackInfo &info)
 
 Napi::Value HistoryFootprintChangedAsync(const Napi::CallbackInfo &info)
 {
-    auto *worker = new HistoryFootprintChangedWorker(info.Env(), info[0], info[1], info[2].As<Napi::Uint32Array>());
+    const bool baseCompact = info.Length() > 3 && info[3].ToBoolean().Value();
+    auto *worker = new HistoryFootprintChangedWorker(info.Env(), info[0], info[1], info[2].As<Napi::Uint32Array>(),
+                                                     baseCompact);
     worker->Queue();
     return worker->GetPromise();
 }
 
 Napi::Value HistoryEncodeDeltaAsync(const Napi::CallbackInfo &info)
 {
-    auto *worker = new HistoryEncodeDeltaWorker(info.Env(), info[0], info[1], info[2].As<Napi::Uint32Array>());
+    const bool baseCompact = info.Length() > 3 && info[3].ToBoolean().Value();
+    auto *worker = new HistoryEncodeDeltaWorker(info.Env(), info[0], info[1], info[2].As<Napi::Uint32Array>(),
+                                                baseCompact, info.Length() > 4 ? info[4] : info.Env().Undefined());
     worker->Queue();
     return worker->GetPromise();
 }
@@ -4217,6 +4631,22 @@ Napi::Value HistoryEncodeDeltaAsync(const Napi::CallbackInfo &info)
 Napi::Value HistoryApplyDeltaAsync(const Napi::CallbackInfo &info)
 {
     auto *worker = new HistoryApplyDeltaWorker(info.Env(), info[0], info[1]);
+    worker->Queue();
+    return worker->GetPromise();
+}
+
+Napi::Value HistoryApplyDeltasAsync(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 4 || !info[0].IsTypedArray() || !info[1].IsTypedArray() || !info[2].IsArray() ||
+        !info[3].IsArray())
+    {
+        Napi::TypeError::New(env, "Expected: base (Float32Array), out (Float32Array), deltas (Array), inverts (Array)")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    auto *worker = new HistoryApplyDeltasWorker(env, info[0], info[1], info[2].As<Napi::Array>(),
+                                                info[3].As<Napi::Array>());
     worker->Queue();
     return worker->GetPromise();
 }
@@ -4271,6 +4701,7 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
     exports.Set("historyFootprintChanged", Napi::Function::New(env, HistoryFootprintChangedAsync));
     exports.Set("historyEncodeDelta", Napi::Function::New(env, HistoryEncodeDeltaAsync));
     exports.Set("historyApplyDelta", Napi::Function::New(env, HistoryApplyDeltaAsync));
+    exports.Set("historyApplyDeltas", Napi::Function::New(env, HistoryApplyDeltasAsync));
     exports.Set("historyInverseMap", Napi::Function::New(env, HistoryInverseMapAsync));
     exports.Set("analyze", Napi::Function::New(env, AnalyzeAsync));
     exports.Set("getGpuMemoryBytes", Napi::Function::New(env, GetGpuMemoryBytes));

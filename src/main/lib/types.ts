@@ -64,6 +64,20 @@ export interface PackedLayout {
 export interface CoefficientPatch {
   ranges: Uint32Array;
   pixels?: Float32Array;
+  /** The values the patch replaced, in range order; absent when the host did not keep them. */
+  previous?: Float32Array;
+}
+
+/**
+ * Whole-turn phase shifts a projection made past its window: per entry a span
+ * of packed pixels and the float offset added to each channel's phase, plus
+ * the floats (index, original bits) whose shift does not subtract back exactly.
+ */
+export interface PhaseTurns {
+  pixelStarts: Uint32Array;
+  pixelCounts: Uint32Array;
+  offsets: Float32Array;
+  residuals: Uint32Array;
 }
 
 /** The span of the canvas a commit rebuilds: the dirty region, in frames and bands. */
@@ -100,6 +114,9 @@ export interface CommitStrokeResult {
   patch: CoefficientPatch;
   gainReductionDb: Float32Array;
   maxGainReductionDb: number;
+  /** Sample span the commit rewrote; outside it the audio is the existing audio unchanged. */
+  audioWindow: { start: number; end: number };
+  tail: PhaseTurns;
   levels: CommitLevels;
   onsets?: PackedOnsets;
   onsetOdfMax?: number;

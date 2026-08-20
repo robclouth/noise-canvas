@@ -408,6 +408,63 @@ describe("commit stroke", () => {
   );
 
   it(
+    "holds the ceiling in the margins, where an earlier stroke's paint is synthesised again",
+    async () => {
+      // Hot bed, as above: the ceiling is the loudness that was there.
+      const noise = makeNoise(0.1, 24681357);
+      const hot = new Float32Array(N);
+      for (let i = 0; i < N; i++) hot[i] = 0.72 * Math.sin((2 * Math.PI * 220 * i) / SR) + noise[i];
+      const analysis = await addon.analyze([hot], 1, SR, PARAMS);
+      const original = await roundTrip(analysis, analysis.data);
+
+      // An earlier stroke boosted the top bands just before this one's
+      // footprint. Its audio was held down when it was committed, so the
+      // existing audio stays at the bed's level while the canvas keeps the
+      // boost; this commit's window reaches into it.
+      const earlierStart = F0 - Math.round(0.5 * SR);
+      const minStep = Math.min(...Array.from(analysis.bandStepLog2s));
+      const loud = new Float32Array(analysis.data);
+      for (let b = 0; b < analysis.numBands; b++) {
+        if (analysis.bandStepLog2s[b] > minStep + 1) continue;
+        const s = 1 << analysis.bandStepLog2s[b];
+        const off = analysis.bandOffsets[b];
+        for (let k = 0; k < analysis.bandLengths[b]; k++) {
+          const t = k * s;
+          if (t >= earlierStart && t < F1) loud[(off + k) * 4] *= 16;
+        }
+      }
+      const window = fullWindow(analysis);
+      const stroke = gateStroke({ hardEdgeStart: false, hardEdgeEnd: false });
+      const commit = (applyLimiter: boolean) =>
+        addon.commitStroke(new Float32Array(loud), metaOf(analysis), SR, PARAMS, [original], window, {
+          ...stroke,
+          applyLimiter,
+        });
+      const bypassed = await commit(false);
+      const limited = await commit(true);
+
+      const peakOver = (audio: Float32Array, from: number, to: number): number => {
+        let peak = 0;
+        for (let i = from; i < to; i++) peak = Math.max(peak, Math.abs(audio[i]));
+        return peak;
+      };
+      let bedPeak = 0;
+      for (let i = earlierStart; i < F1; i++) bedPeak = Math.max(bedPeak, Math.abs(original[i]));
+
+      // The margin before the footprint carries the earlier boost when
+      // nothing holds it, and stays at the bed's loudness when the limiter
+      // does.
+      expect(peakOver(bypassed.channels[0], earlierStart, F0)).toBeGreaterThan(1);
+      expect(peakOver(limited.channels[0], earlierStart, F0)).toBeLessThan(bedPeak * 1.2);
+      expect(peakOver(limited.channels[0], F0, F1)).toBeLessThan(bedPeak * 1.2);
+      // Beyond the window's reach the existing audio passes through untouched.
+      const before = Math.round(0.2 * SR);
+      for (let i = 0; i < before; i++) expect(limited.channels[0][i]).toBe(original[i]);
+    },
+    TIMEOUT,
+  );
+
+  it(
     "keeps a stroke audible on already-hot audio, held to the loudness that was there",
     async () => {
       // A hot bed whose inter-sample true peak sits at its sample peak: a

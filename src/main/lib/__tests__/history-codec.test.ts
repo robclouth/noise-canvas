@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyHistoryDelta,
+  applyHistoryDeltas,
   buildHistoryInverseMap,
   decodeHistorySnapshot,
   encodeHistoryDelta,
   encodeHistorySnapshot,
   historyFootprintChanged,
+  readHistoryDeltaTurns,
 } from "../audio-analysis";
 
 /**
@@ -161,6 +163,108 @@ describe("history stroke delta", () => {
   });
 });
 
+describe("history delta walk", () => {
+  const PIXELS = 1024;
+  const paint = (base: Float32Array, start: number, count: number, salt: number): Float32Array => {
+    const out = new Float32Array(base);
+    for (let p = start; p < start + count; p++)
+      for (let c = 0; c < 4; c++) out[p * 4 + c] = ((p * 7 + c + salt) % 91) / 91;
+    return out;
+  };
+
+  it("walks a chain of deltas up and down exactly, in one pass", async () => {
+    const root = packedState(PIXELS, 3);
+    const a = paint(root, 100, 50, 1);
+    const b = paint(a, 120, 80, 2);
+    const c = paint(a, 300, 10, 3);
+    const dA = await encodeHistoryDelta(root, a, ranges([100, 50]));
+    const dB = await encodeHistoryDelta(a, b, ranges([120, 80]));
+    const dC = await encodeHistoryDelta(a, c, ranges([300, 10]));
+
+    // b → root: two hops up.
+    const up = await applyHistoryDeltas(b, new Float32Array(b.length), [dB, dA], [true, true]);
+    expect(Array.from(bits(up))).toEqual(Array.from(bits(root)));
+    // root → b: two hops down.
+    const down = await applyHistoryDeltas(root, new Float32Array(root.length), [dA, dB], [false, false]);
+    expect(Array.from(bits(down))).toEqual(Array.from(bits(b)));
+    // b → c across the fork: up through B, down through C.
+    const across = await applyHistoryDeltas(b, new Float32Array(b.length), [dB, dC], [true, false]);
+    expect(Array.from(bits(across))).toEqual(Array.from(bits(c)));
+  });
+
+  it("fills the caller's buffer and hands it back", async () => {
+    const base = packedState(PIXELS, 4);
+    const after = paint(base, 0, 8, 5);
+    const out = new Float32Array(base.length);
+    const returned = await applyHistoryDeltas(
+      base,
+      out,
+      [await encodeHistoryDelta(base, after, ranges([0, 8]))],
+      [false],
+    );
+    expect(returned).toBe(out);
+    expect(Array.from(bits(out))).toEqual(Array.from(bits(after)));
+  });
+
+  it("refuses an output buffer of another size", async () => {
+    const base = packedState(PIXELS, 5);
+    await expect(applyHistoryDeltas(base, new Float32Array(base.length - 4), [], [])).rejects.toThrow(/size/);
+  });
+});
+
+describe("compact base", () => {
+  const PIXELS = 512;
+  const gather = (state: Float32Array, rs: Uint32Array): Float32Array => {
+    const parts: number[] = [];
+    for (let r = 0; r < rs.length; r += 2) {
+      for (let p = rs[r]; p < rs[r] + rs[r + 1]; p++) for (let c = 0; c < 4; c++) parts.push(state[p * 4 + c]);
+    }
+    return Float32Array.from(parts);
+  };
+
+  it("encodes the same delta from the footprint's saved values as from the whole base", async () => {
+    const base = packedState(PIXELS, 8);
+    const after = new Float32Array(base);
+    for (let p = 40; p < 60; p++) for (let c = 0; c < 4; c++) after[p * 4 + c] = ((p * 5 + c) % 83) / 83;
+    for (let p = 200; p < 210; p++) for (let c = 0; c < 4; c++) after[p * 4 + c] = -((p * 3 + c) % 79) / 79;
+    const rs = ranges([40, 20], [200, 10]);
+
+    const whole = await encodeHistoryDelta(base, after, rs);
+    const compact = await encodeHistoryDelta(gather(base, rs), after, rs, true);
+    expect(Array.from(compact)).toEqual(Array.from(whole));
+
+    // Written in place, `after` is the only whole state left; walking the
+    // compact delta back over it restores the base exactly.
+    const restored = await applyHistoryDeltas(after, after, [compact], [true]);
+    expect(Array.from(bits(restored))).toEqual(Array.from(bits(base)));
+  });
+
+  it("compares the footprint against its saved values", async () => {
+    const base = packedState(PIXELS, 9);
+    const after = new Float32Array(base);
+    const rs = ranges([10, 5]);
+    expect(await historyFootprintChanged(gather(base, rs), after, rs, true)).toBe(false);
+    after[12 * 4 + 2] += 1;
+    expect(await historyFootprintChanged(gather(base, rs), after, rs, true)).toBe(true);
+  });
+
+  it("refuses a compact base of the wrong size", async () => {
+    const base = packedState(PIXELS, 10);
+    await expect(encodeHistoryDelta(new Float32Array(3), base, ranges([0, 4]), true)).rejects.toThrow(/compact/);
+  });
+
+  it("leaves the state untouched when a delta in the chain runs past it", async () => {
+    const base = packedState(PIXELS, 11);
+    const after = new Float32Array(base);
+    after[0] = 42;
+    const first = await encodeHistoryDelta(base, after, ranges([0, 1]));
+    const far = await encodeHistoryDelta(base, after, ranges([PIXELS - 1, 1]));
+    const tiny = new Float32Array(base.subarray(0, 8));
+    await expect(applyHistoryDeltas(tiny, tiny, [first, far], [false, false])).rejects.toThrow(/out of bounds/);
+    expect(Array.from(bits(tiny))).toEqual(Array.from(bits(base.subarray(0, 8))));
+  });
+});
+
 describe("historyFootprintChanged", () => {
   it("is false when the stroke changed nothing it covered", async () => {
     const base = packedState(512, 7);
@@ -199,5 +303,89 @@ describe("buildHistoryInverseMap", () => {
     const inverseMap = await buildHistoryInverseMap(new Uint32Array([0]), new Uint32Array([2]), new Int32Array([0]), 8);
     expect(inverseMap.length).toBe(16);
     expect(Array.from(inverseMap.subarray(4))).toEqual(new Array(12).fill(0));
+  });
+});
+
+describe("phase turns", () => {
+  const PIXELS = 4096;
+  const TWO_PI = 2 * Math.PI;
+
+  /** A state whose phases run large, as an unwrapped analysis does late in a file. */
+  function phasedState(pixels: number, scale: number): Float32Array {
+    const out = new Float32Array(pixels * 4);
+    for (let p = 0; p < pixels; p++) {
+      out[p * 4] = ((p * 7) % 91) / 91;
+      out[p * 4 + 1] = Math.fround(scale * p + ((p * 13) % 97) / 97);
+      out[p * 4 + 2] = ((p * 5) % 89) / 89;
+      out[p * 4 + 3] = Math.fround(-scale * p * 0.5 + ((p * 11) % 83) / 83);
+    }
+    return out;
+  }
+
+  async function roundTrip(scale: number) {
+    const base = phasedState(PIXELS, scale);
+    const after = new Float32Array(base);
+    // The stroke rewrote pixels 100..119 and turned the rest of the band.
+    for (let p = 100; p < 120; p++) for (let c = 0; c < 4; c++) after[p * 4 + c] = ((p * 3 + c) % 79) / 79;
+    const turns = {
+      pixelStarts: Uint32Array.from([120]),
+      pixelCounts: Uint32Array.from([PIXELS - 120]),
+      offsets: Float32Array.from([Math.fround(TWO_PI * 3), Math.fround(-TWO_PI)]),
+      residuals: new Uint32Array(0),
+    };
+    // The addon adds the turn in float32 and keeps what would not subtract back.
+    const residuals: number[] = [];
+    const bits = new Uint32Array(after.buffer);
+    for (let p = 120; p < PIXELS; p++) {
+      for (let ch = 0; ch < 2; ch++) {
+        const i = p * 4 + ch * 2 + 1;
+        const before = after[i];
+        const shifted = Math.fround(before + turns.offsets[ch]);
+        if (Math.fround(shifted - turns.offsets[ch]) !== before) residuals.push(i, bits[i]);
+        after[i] = shifted;
+      }
+    }
+    turns.residuals = Uint32Array.from(residuals);
+    const delta = await encodeHistoryDelta(base, after, ranges([100, 20]), false, turns);
+    return { base, after, delta, residualCount: residuals.length / 2 };
+  }
+
+  it("walks a turned tail down and back up exactly, with a tiny delta", async () => {
+    const { base, after, delta, residualCount } = await roundTrip(1000);
+    expect(delta.byteLength).toBeLessThan(4096);
+    const down = await applyHistoryDeltas(base, new Float32Array(base.length), [delta], [false]);
+    expect(Array.from(bits(down))).toEqual(Array.from(bits(after)));
+    const up = await applyHistoryDeltas(after, new Float32Array(after.length), [delta], [true]);
+    expect(Array.from(bits(up))).toEqual(Array.from(bits(base)));
+    expect(residualCount).toBeGreaterThanOrEqual(0);
+  });
+
+  it("stays exact where the phases are small and the shift does not subtract back cleanly", async () => {
+    const { base, after, delta, residualCount } = await roundTrip(1e-3);
+    expect(residualCount).toBeGreaterThan(0);
+    const up = await applyHistoryDeltas(after, after, [delta], [true]);
+    expect(Array.from(bits(up))).toEqual(Array.from(bits(base)));
+  });
+
+  it("reads the turns back out of the stored delta", async () => {
+    const { delta } = await roundTrip(1000);
+    const turns = await readHistoryDeltaTurns(delta);
+    expect(turns).not.toBeNull();
+    expect(Array.from(turns!.pixelStarts)).toEqual([120]);
+    expect(Array.from(turns!.pixelCounts)).toEqual([PIXELS - 120]);
+    expect(turns!.offsets[0]).toBeCloseTo(TWO_PI * 3, 5);
+    const plain = await encodeHistoryDelta(phasedState(8, 1), phasedState(8, 2), ranges([0, 8]));
+    expect(await readHistoryDeltaTurns(plain)).toBeNull();
+  });
+
+  it("refuses a turn that runs past the state", async () => {
+    const base = phasedState(64, 1);
+    const delta = await encodeHistoryDelta(base, base, ranges([0, 1]), false, {
+      pixelStarts: Uint32Array.from([60]),
+      pixelCounts: Uint32Array.from([10]),
+      offsets: Float32Array.from([1, 1]),
+      residuals: new Uint32Array(0),
+    });
+    await expect(applyHistoryDeltas(base, base, [delta], [false])).rejects.toThrow(/past the end/);
   });
 });

@@ -29,6 +29,7 @@ import { createMockState, createMockStateForIterations, createMockStateWithSteps
 import { withPlatformDefines } from "../shader-utils";
 import { brushEnvelopeShape } from "../brush-envelope";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
+import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";
 
 // Mock shaders check brush bounds in packed UV space, which doesn't align with
 // the scissor's unpacked band-index row calculation. Disable scissor for tests.
@@ -709,6 +710,72 @@ describe("StrokeRenderer", () => {
 
       const after = await renderer.getFBOData();
       expect(countDiffs(after, modified)).toBe(0);
+    });
+
+    it("reads back exactly the pixels of the given ranges, in range order", async () => {
+      renderer.initialize();
+      const before = new Float32Array(await renderer.getFBOData());
+      const width = spectrogramData.packedTextureSize.x;
+      const ranges = new Uint32Array([5, 10, width * 3 - 4, 8, width * 7 + 20, width]);
+      const modified = modifyRanges(before, ranges);
+      renderer.patchFBOData(modified, ranges);
+
+      const block = await renderer.readPixelRanges(ranges);
+      const expected = gatherPixelRanges(modified, ranges);
+      expect(block.length).toBe(expected.length);
+      expect(countDiffs(block, expected)).toBe(0);
+
+      // Written back over the state it came from, the block reproduces the canvas.
+      const rebuilt = new Float32Array(before);
+      scatterCompactPixelRanges(rebuilt, block, ranges);
+      expect(countDiffs(rebuilt, await renderer.getFBOData())).toBe(0);
+    });
+
+    it("turns phases on the GPU bit for bit as float32 adds do, and back", async () => {
+      renderer.initialize();
+      const width = spectrogramData.packedTextureSize.x;
+      // Phases of every size, from a fresh analysis to late in a long file.
+      const seeded = new Float32Array(await renderer.getFBOData());
+      for (let p = 0; p < seeded.length / 4; p++) {
+        const scale = [1e-3, 1, 1e3, 1e6][p % 4];
+        seeded[p * 4 + 1] = Math.fround(scale * (((p * 7919) % 1000) / 1000 - 0.5));
+        seeded[p * 4 + 3] = Math.fround(-scale * (((p * 104729) % 1000) / 1000 - 0.5));
+      }
+      renderer.setFBOData(seeded);
+
+      const c0 = Math.fround(2 * Math.PI * 3);
+      const c1 = Math.fround(-2 * Math.PI);
+      const turns = [5, 10, c0, c1, width * 3 - 4, 8, c0, 0, width * 7 + 20, width, 0, c1];
+      const expected = new Float32Array(seeded);
+      for (let i = 0; i < turns.length; i += 4) {
+        for (let p = turns[i]; p < turns[i] + turns[i + 1]; p++) {
+          if (turns[i + 2] !== 0) expected[p * 4 + 1] = Math.fround(expected[p * 4 + 1] + turns[i + 2]);
+          if (turns[i + 3] !== 0) expected[p * 4 + 3] = Math.fround(expected[p * 4 + 3] + turns[i + 3]);
+        }
+      }
+
+      renderer.applyPhaseTurns(turns);
+      const turned = await renderer.getFBOData();
+      expect(countDiffs(turned, expected)).toBe(0);
+
+      // Subtracting the same offsets on the GPU matches the same subtraction
+      // on the CPU, so the residuals the addon keeps are the only fix-ups.
+      const back = turns.map((v, i) => (i % 4 >= 2 ? -v : v));
+      const expectedBack = new Float32Array(expected);
+      for (let i = 0; i < back.length; i += 4) {
+        for (let p = back[i]; p < back[i] + back[i + 1]; p++) {
+          if (back[i + 2] !== 0) expectedBack[p * 4 + 1] = Math.fround(expectedBack[p * 4 + 1] + back[i + 2]);
+          if (back[i + 3] !== 0) expectedBack[p * 4 + 3] = Math.fround(expectedBack[p * 4 + 3] + back[i + 3]);
+        }
+      }
+      renderer.applyPhaseTurns(back);
+      expect(countDiffs(await renderer.getFBOData(), expectedBack)).toBe(0);
+    });
+
+    it("reads back nothing for empty ranges", async () => {
+      renderer.initialize();
+      expect((await renderer.readPixelRanges(new Uint32Array(0))).length).toBe(0);
+      expect((await renderer.readPixelRanges(new Uint32Array([3, 0]))).length).toBe(0);
     });
 
     it("is a no-op for empty ranges", async () => {

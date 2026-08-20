@@ -23,7 +23,9 @@ import {
   WebGLRenderTarget,
 } from "three";
 import { copyMaterial } from "../components/copy-material";
+import { gatherMaterial } from "../components/gather-material";
 import { patchMaterial } from "../components/patch-material";
+import { phaseTurnMaterial } from "../components/phase-turn-material";
 import { BaseEffect, CommonUniforms, createDefaultUniforms } from "../effects/base-effect";
 import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
@@ -1382,6 +1384,146 @@ export class StrokeRenderer {
     }
 
     return data;
+  }
+
+  /**
+   * Reads just the pixels of `pixelRanges` (a flat [pixelStart, pixelCount, ...]
+   * list) from the committed FBO as it stands at the call, as one block in
+   * range order. The ranges are gathered on the GPU into a compact target and
+   * only that is read back, so the cost follows the footprint, not the file.
+   */
+  async readPixelRanges(pixelRanges: Uint32Array): Promise<Float32Array> {
+    const { packedTextureSize } = this.spectrogramData;
+    const width = packedTextureSize.x;
+
+    let patchPixels = 0;
+    let numRanges = 0;
+    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
+      if (pixelRanges[i + 1] === 0) continue;
+      patchPixels += pixelRanges[i + 1];
+      numRanges++;
+    }
+    if (patchPixels === 0) return new Float32Array(0);
+
+    const instances = new Uint32Array(numRanges * 3);
+    let dstPixel = 0;
+    let inst = 0;
+    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
+      const count = pixelRanges[i + 1];
+      if (count === 0) continue;
+      instances[inst * 3] = pixelRanges[i];
+      instances[inst * 3 + 1] = count;
+      instances[inst * 3 + 2] = dstPixel;
+      dstPixel += count;
+      inst++;
+    }
+
+    const blockWidth = Math.min(width, patchPixels);
+    const blockHeight = Math.ceil(patchPixels / blockWidth);
+    const block = new WebGLRenderTarget(blockWidth, blockHeight, {
+      format: RGBAFormat,
+      type: FloatType,
+      minFilter: NearestFilter,
+      magFilter: NearestFilter,
+      depthBuffer: false,
+      stencilBuffer: false,
+    });
+
+    const geometry = new InstancedBufferGeometry();
+    geometry.setAttribute("position", new BufferAttribute(PATCH_QUAD_POSITIONS, 3));
+    geometry.setIndex(new BufferAttribute(PATCH_QUAD_INDICES, 1));
+    geometry.setAttribute("aRange", new InstancedBufferAttribute(instances, 3));
+    geometry.instanceCount = numRanges;
+
+    const committed = this.pingPong === 0 ? this.fbo1 : this.fbo2;
+    gatherMaterial.uniforms.sourceTex.value = committed.texture;
+    gatherMaterial.uniforms.sourceWidth.value = width;
+    gatherMaterial.uniforms.destWidth.value = blockWidth;
+    gatherMaterial.uniforms.destHeight.value = blockHeight;
+
+    const mesh = new Mesh(geometry, gatherMaterial);
+    mesh.frustumCulled = false;
+    const scene = new Scene();
+    scene.add(mesh);
+
+    this.gl.setRenderTarget(block);
+    this.gl.render(scene, this.camera);
+    this.gl.setRenderTarget(null);
+    gatherMaterial.uniforms.sourceTex.value = null;
+    geometry.dispose();
+
+    try {
+      const padded = await readRenderTargetPixelsAsync(this.gl, block, 0, 0, blockWidth, blockHeight);
+      return padded.length === patchPixels * 4 ? padded : padded.slice(0, patchPixels * 4);
+    } finally {
+      block.dispose();
+    }
+  }
+
+  /**
+   * Adds a phase offset per channel to the pixels of each range in the
+   * committed FBO (and the stroke-start snapshot), as a projection's whole-turn
+   * re-branch of a band's tail. `turns` is a flat list of
+   * [pixelStart, pixelCount, offsetLeft, offsetRight, ...] with the offsets
+   * already signed for the direction wanted. The turned pixels go through the
+   * other ping-pong buffer and are copied back, so nothing is uploaded.
+   */
+  applyPhaseTurns(turns: ArrayLike<number>): void {
+    const { packedTextureSize } = this.spectrogramData;
+    const width = packedTextureSize.x;
+    const height = packedTextureSize.y;
+
+    let numRanges = 0;
+    for (let i = 0; i + 3 < turns.length; i += 4) if (turns[i + 1] > 0) numRanges++;
+    if (numRanges === 0) return;
+
+    const ranges = new Uint32Array(numRanges * 2);
+    const offsets = new Float32Array(numRanges * 2);
+    const zeros = new Float32Array(numRanges * 2);
+    let inst = 0;
+    for (let i = 0; i + 3 < turns.length; i += 4) {
+      if (turns[i + 1] <= 0) continue;
+      ranges[inst * 2] = turns[i];
+      ranges[inst * 2 + 1] = turns[i + 1];
+      offsets[inst * 2] = turns[i + 2];
+      offsets[inst * 2 + 1] = turns[i + 3];
+      inst++;
+    }
+
+    const draw = (source: WebGLRenderTarget, targets: WebGLRenderTarget[], offs: Float32Array): void => {
+      const geometry = new InstancedBufferGeometry();
+      geometry.setAttribute("position", new BufferAttribute(PATCH_QUAD_POSITIONS, 3));
+      geometry.setIndex(new BufferAttribute(PATCH_QUAD_INDICES, 1));
+      geometry.setAttribute("aRange", new InstancedBufferAttribute(ranges, 2));
+      geometry.setAttribute("aOffset", new InstancedBufferAttribute(offs, 2));
+      geometry.instanceCount = numRanges;
+      phaseTurnMaterial.uniforms.sourceTex.value = source.texture;
+      phaseTurnMaterial.uniforms.width.value = width;
+      phaseTurnMaterial.uniforms.height.value = height;
+      const mesh = new Mesh(geometry, phaseTurnMaterial);
+      mesh.frustumCulled = false;
+      const scene = new Scene();
+      scene.add(mesh);
+      for (const target of targets) {
+        this.gl.setRenderTarget(target);
+        this.gl.render(scene, this.camera);
+      }
+      this.gl.setRenderTarget(null);
+      phaseTurnMaterial.uniforms.sourceTex.value = null;
+      geometry.dispose();
+    };
+
+    const prevAutoClear = this.gl.autoClear;
+    this.gl.autoClear = false;
+    const committed = this.pingPong === 0 ? this.fbo1 : this.fbo2;
+    const other = this.pingPong === 0 ? this.fbo2 : this.fbo1;
+    draw(committed, [other], offsets);
+    const back = [committed];
+    if (this.pool.ownedBy(this) && this.scratch) back.push(this.scratch.strokeStartFbo);
+    draw(other, back, zeros);
+    this.gl.autoClear = prevAutoClear;
+
+    this.invalidateFboData();
   }
 
   /**

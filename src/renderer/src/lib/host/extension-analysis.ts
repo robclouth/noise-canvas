@@ -229,9 +229,17 @@ const commitStroke: CommitStrokeFn = async (
     patch: {
       ranges: u32(outArrays.patchRanges, "patchRanges"),
       pixels: f32(outArrays.patchPixels, "patchPixels"),
+      previous: f32(outArrays.patchPrevious, "patchPrevious"),
+    },
+    tail: {
+      pixelStarts: u32(outArrays.tailPixelStarts, "tailPixelStarts"),
+      pixelCounts: u32(outArrays.tailPixelCounts, "tailPixelCounts"),
+      offsets: f32(outArrays.tailOffsets, "tailOffsets"),
+      residuals: u32(outArrays.tailResiduals, "tailResiduals"),
     },
     gainReductionDb: f32(outArrays.gainReductionDb, "gainReductionDb"),
     maxGainReductionDb: Number(outMeta.maxGainReductionDb),
+    audioWindow: { start: Number(outMeta.audioWindowStart), end: Number(outMeta.audioWindowEnd) },
     levels: {
       startHop: Number(outMeta.levelStartHop),
       peaks: f32(outArrays.levelPeaks, "levelPeaks"),
@@ -400,12 +408,51 @@ export function createExtensionAnalysis(): AnalysisApi {
       u8((await historyCodec("encodeSnapshot", { packed })).arrays.bytes, "bytes"),
     decodeHistorySnapshot: async (bytes) =>
       f32((await historyCodec("decodeSnapshot", { bytes })).arrays.packed, "packed"),
-    historyFootprintChanged: async (base, after, ranges) =>
-      Number((await historyCodec("footprintChanged", { base, after, ranges })).meta.changed) === 1,
-    encodeHistoryDelta: async (base, after, ranges) =>
-      u8((await historyCodec("encodeDelta", { base, after, ranges })).arrays.bytes, "bytes"),
+    historyFootprintChanged: async (base, after, ranges, baseCompact = false) =>
+      Number(
+        (await historyCodec("footprintChanged", { base, after, ranges }, { baseCompact: baseCompact ? 1 : 0 })).meta
+          .changed,
+      ) === 1,
+    encodeHistoryDelta: async (base, after, ranges, baseCompact = false, turns) => {
+      const arrays: Record<string, NumericArray> = { base, after, ranges };
+      if (turns) {
+        arrays.tailPixelStarts = turns.pixelStarts;
+        arrays.tailPixelCounts = turns.pixelCounts;
+        arrays.tailOffsets = turns.offsets;
+        arrays.tailResiduals = turns.residuals;
+      }
+      return u8(
+        (await historyCodec("encodeDelta", arrays, { baseCompact: baseCompact ? 1 : 0 })).arrays.bytes,
+        "bytes",
+      );
+    },
+    readHistoryDeltaTurns: async (bytes) => {
+      const { meta, arrays } = await historyCodec("readDeltaTurns", { bytes });
+      if (Number(meta.hasTurns) !== 1) return null;
+      return {
+        pixelStarts: u32(arrays.tailPixelStarts, "tailPixelStarts"),
+        pixelCounts: u32(arrays.tailPixelCounts, "tailPixelCounts"),
+        offsets: f32(arrays.tailOffsets, "tailOffsets"),
+        residuals: u32(arrays.tailResiduals, "tailResiduals"),
+      };
+    },
     applyHistoryDelta: async (base, bytes) =>
       f32((await historyCodec("applyDelta", { base, bytes })).arrays.packed, "packed"),
+    applyHistoryDeltas: async (base, out, deltas, inverts) => {
+      const arrays: Record<string, NumericArray> = { base };
+      deltas.forEach((bytes, i) => (arrays[`delta${i}`] = bytes));
+      const packed = f32(
+        (
+          await historyCodec("applyDeltas", arrays, {
+            deltaCount: deltas.length,
+            inverts: inverts.map((flag) => (flag ? "1" : "0")).join(""),
+          })
+        ).arrays.packed,
+        "packed",
+      );
+      out.set(packed);
+      return out;
+    },
     buildHistoryInverseMap: async (bandOffsets, bandLengths, bandStepLog2s, pixelCount) =>
       f32(
         (await historyCodec("inverseMap", { bandOffsets, bandLengths, bandStepLog2s }, { pixelCount })).arrays

@@ -1,6 +1,13 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 import type { IpcRenderer } from "electron";
-import { AnalysisParams, CommitStroke, CommitStrokeResult, CommitWindow, PackedLayout } from "../main/lib/types";
+import {
+  AnalysisParams,
+  CommitStroke,
+  CommitStrokeResult,
+  CommitWindow,
+  PackedLayout,
+  PhaseTurns,
+} from "../main/lib/types";
 
 // Type definitions for window globals
 
@@ -167,9 +174,27 @@ declare global {
       // the addon off the renderer thread.
       encodeHistorySnapshot: (packed: Float32Array) => Promise<Uint8Array>;
       decodeHistorySnapshot: (bytes: Uint8Array) => Promise<Float32Array>;
-      historyFootprintChanged: (base: Float32Array, after: Float32Array, ranges: Uint32Array) => Promise<boolean>;
-      encodeHistoryDelta: (base: Float32Array, after: Float32Array, ranges: Uint32Array) => Promise<Uint8Array>;
+      historyFootprintChanged: (
+        base: Float32Array,
+        after: Float32Array,
+        ranges: Uint32Array,
+        baseCompact?: boolean,
+      ) => Promise<boolean>;
+      encodeHistoryDelta: (
+        base: Float32Array,
+        after: Float32Array,
+        ranges: Uint32Array,
+        baseCompact?: boolean,
+        turns?: PhaseTurns,
+      ) => Promise<Uint8Array>;
+      readHistoryDeltaTurns: (bytes: Uint8Array) => Promise<PhaseTurns | null>;
       applyHistoryDelta: (base: Float32Array, bytes: Uint8Array) => Promise<Float32Array>;
+      applyHistoryDeltas: (
+        base: Float32Array,
+        out: Float32Array,
+        deltas: Uint8Array[],
+        inverts: boolean[],
+      ) => Promise<Float32Array>;
       buildHistoryInverseMap: (
         bandOffsets: Uint32Array,
         bandLengths: Uint32Array,

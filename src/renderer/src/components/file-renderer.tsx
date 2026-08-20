@@ -109,6 +109,16 @@ export interface FileRendererHandle {
   keepStrokePreview: () => void;
   /** Gets the raw data from the current frame buffer object asynchronously. */
   getFBOData: () => Promise<Float32Array>;
+  /**
+   * Reads only the pixels of the flat [pixelStart, pixelCount, ...] ranges from
+   * the committed frame buffer, as one block in range order.
+   */
+  readPixelRanges: (pixelRanges: Uint32Array) => Promise<Float32Array>;
+  /**
+   * Adds per-range phase offsets to the committed frame buffer in place:
+   * [pixelStart, pixelCount, offsetLeft, offsetRight, ...].
+   */
+  applyPhaseTurns: (turns: ArrayLike<number>) => void;
   /** Sets the data of the frame buffer object. */
   setFBOData: (data: Float32Array) => void;
   /**
@@ -1174,6 +1184,13 @@ const FileRendererInner = memo(
       return strokeRendererRef.current.getFBOData();
     };
 
+    const readPixelRanges = async (pixelRanges: Uint32Array): Promise<Float32Array> => {
+      if (!strokeRendererRef.current) {
+        throw new Error("StrokeRenderer not initialized");
+      }
+      return strokeRendererRef.current.readPixelRanges(pixelRanges);
+    };
+
     /**
      * Sets the FBO data from an external source (e.g., for undo/redo).
      */
@@ -1181,6 +1198,16 @@ const FileRendererInner = memo(
       if (!strokeRendererRef.current) return;
 
       strokeRendererRef.current.setFBOData(data);
+      applyStroke.current = false;
+      displayMode.current = "committed";
+      invalidateRef.current();
+      snapshotStaleRef.current = true;
+      scheduleSnapshotRefresh();
+    };
+
+    const applyPhaseTurns = (turns: ArrayLike<number>) => {
+      if (!strokeRendererRef.current) return;
+      strokeRendererRef.current.applyPhaseTurns(turns);
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();
@@ -1309,6 +1336,8 @@ const FileRendererInner = memo(
       discardStrokePreview,
       keepStrokePreview: () => strokeRendererRef.current?.releaseRollback(),
       getFBOData,
+      readPixelRanges,
+      applyPhaseTurns,
       setFBOData,
       patchFBOData,
       getTextures,

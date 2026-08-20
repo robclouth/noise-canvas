@@ -83,3 +83,37 @@ export function outputLevelPoints(audioBuffer: AudioBuffer): number {
   const hop = Math.max(1, Math.round(audioBuffer.sampleRate * LEVEL_HOP_SECONDS));
   return Math.max(1, Math.ceil(audioBuffer.length / hop));
 }
+
+/**
+ * A buffer's levels over one span of samples, in the form a commit reports for
+ * its window, so a spliced edit can refresh just the hops it touched.
+ */
+export function measureOutputLevels(
+  audioBuffer: AudioBuffer,
+  startFrame: number,
+  endFrame: number,
+): { startHop: number; peaks: Float32Array; overDb: Float32Array } {
+  const { sampleRate, length, numberOfChannels } = audioBuffer;
+  const hop = Math.max(1, Math.round(sampleRate * LEVEL_HOP_SECONDS));
+  const startHop = Math.max(0, Math.floor(startFrame / hop));
+  const endHop = Math.min(outputLevelPoints(audioBuffer), Math.max(startHop, Math.ceil(endFrame / hop)));
+  const points = Math.max(0, endHop - startHop);
+  const peaks = new Float32Array(points);
+  const overDb = new Float32Array(points);
+  const first = startHop * hop;
+  const last = Math.min(length, endHop * hop);
+  for (let channel = 0; channel < numberOfChannels; channel++) {
+    const samples = audioBuffer.getChannelData(channel);
+    for (let i = first; i < last; i++) {
+      const magnitude = Math.abs(samples[i]);
+      const point = ((i / hop) | 0) - startHop;
+      if (magnitude > peaks[point]) peaks[point] = magnitude;
+    }
+  }
+  for (let point = 0; point < points; point++) {
+    if (peaks[point] <= 1) continue;
+    const db = 20 * Math.log10(peaks[point]);
+    if (db > OVER_TOLERANCE_DB) overDb[point] = db - OVER_TOLERANCE_DB;
+  }
+  return { startHop, peaks, overDb };
+}
