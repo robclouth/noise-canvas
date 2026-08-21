@@ -1,8 +1,9 @@
+import { spawnSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { sharedTwinPath } from "../documents-sync";
+import { helperLaunch, sharedTwinPath } from "../documents-sync";
 import { copyIfExists, mergeNewer, removeIfExists, syncTrees } from "../sync-ops";
 
 // Far enough apart that the 1 s mtime tolerance cannot blur them.
@@ -103,5 +104,67 @@ describe("sharedTwinPath", () => {
     expect(sharedTwinPath(storage, join(storage, "prefs", "noise-canvas-storage.json"), docs)).toBeNull();
     expect(sharedTwinPath(storage, storage, docs)).toBeNull();
     expect(sharedTwinPath(storage, join(sep, "elsewhere", "Presets", "a.json"), docs)).toBeNull();
+  });
+});
+
+describe("helperLaunch", () => {
+  it("wraps the Node child in env -u NODE_OPTIONS on POSIX", () => {
+    const launch = helperLaunch("/live/node", "/ext/host/sync-helper.cjs", ["copy", "/a b", "/c"], "darwin");
+    expect(launch).toEqual({
+      command: "/usr/bin/env",
+      args: ["-u", "NODE_OPTIONS", "/live/node", "/ext/host/sync-helper.cjs", "copy", "/a b", "/c"],
+      windowsVerbatimArguments: false,
+    });
+  });
+
+  it("clears NODE_OPTIONS through cmd.exe on Windows, quoting every argument", () => {
+    const launch = helperLaunch(
+      "C:\\Live\\node.exe",
+      "C:\\ext\\sync-helper.cjs",
+      ["copy", "C:\\a b", "C:\\c"],
+      "win32",
+    );
+    expect(launch.args.slice(0, 3)).toEqual(["/d", "/s", "/c"]);
+    expect(launch.args[3]).toBe(
+      'set "NODE_OPTIONS=" && "C:\\Live\\node.exe" "C:\\ext\\sync-helper.cjs" "copy" "C:\\a b" "C:\\c"',
+    );
+    expect(launch.windowsVerbatimArguments).toBe(true);
+  });
+
+  it("starts a child that escapes a --permission parent", async () => {
+    // --allow-fs-read compares real paths, and tmpdir is a symlink on macOS.
+    const dir = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "noise-canvas-perm-")));
+    try {
+      // The child proves it is unrestricted by reading a file outside the
+      // parent's only allowed root.
+      const outside = resolve(__dirname, "..", "..", "..", "..", "package.json");
+      const child = join(dir, "child.cjs");
+      await fs.writeFile(
+        child,
+        `require("node:fs").readFileSync(${JSON.stringify(outside)}); process.stdout.write("read ok");`,
+      );
+      const launch = helperLaunch(process.execPath, child, [], process.platform);
+      const parent = join(dir, "parent.cjs");
+      await fs.writeFile(
+        parent,
+        `const { spawnSync } = require("node:child_process");
+         const launch = ${JSON.stringify(launch)};
+         const r = spawnSync(launch.command, launch.args, {
+           encoding: "utf8",
+           windowsVerbatimArguments: launch.windowsVerbatimArguments,
+         });
+         process.stdout.write(r.stdout);
+         process.exit(r.status ?? 1);`,
+      );
+      const result = spawnSync(
+        process.execPath,
+        ["--permission", "--allow-child-process", `--allow-fs-read=${dir}`, parent],
+        { encoding: "utf8" },
+      );
+      expect(result.stdout, result.stderr).toBe("read ok");
+      expect(result.status).toBe(0);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });

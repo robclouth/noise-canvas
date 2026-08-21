@@ -120,9 +120,14 @@ function pickEmptyClipSlots(
 // rendered replacement. Because resynthesis preserves sample length, Live keeps
 // the warp markers when createAudioClip reads the co-located sidecar. A missing
 // sidecar (un-warped clip) is a no-op. Both paths sit outside the sandbox, so
-// the copy runs in a helper child.
+// the copy runs in a helper child; if that fails the clip is still imported,
+// without its warp markers.
 async function copyAsdSidecar(originalFilePath: string, replacementFilePath: string): Promise<void> {
-  await copyOutsideSandbox(`${originalFilePath}.asd`, `${replacementFilePath}.asd`);
+  try {
+    await copyOutsideSandbox(`${originalFilePath}.asd`, `${replacementFilePath}.asd`);
+  } catch (error) {
+    console.error("Noise Canvas: copying the clip's .asd sidecar failed; warp markers are not carried over", error);
+  }
 }
 
 async function editAudioClip(context: Api, clip: AudioClip<"1.0.0">): Promise<void> {

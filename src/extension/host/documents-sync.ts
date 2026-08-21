@@ -16,15 +16,41 @@ export function documentsRoot(): string {
 // Helper runs are serialised so rapid writes to one file land in order.
 let queue: Promise<unknown> = Promise.resolve();
 
+/** How to start a Node child so it runs without the parent's permission flags. */
+export interface HelperLaunch {
+  command: string;
+  args: string[];
+  windowsVerbatimArguments: boolean;
+}
+
+// A --permission parent writes its own flags into NODE_OPTIONS of every child it
+// spawns, on top of whatever env the caller passes, so the child is started by
+// an OS shell that drops the variable before exec'ing Node.
+export function helperLaunch(
+  execPath: string,
+  helperPath: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+): HelperLaunch {
+  const nodeArgv = [execPath, helperPath, ...args];
+  if (platform !== "win32") {
+    return { command: "/usr/bin/env", args: ["-u", "NODE_OPTIONS", ...nodeArgv], windowsVerbatimArguments: false };
+  }
+  const quoted = nodeArgv.map((arg) => `"${arg}"`).join(" ");
+  return {
+    command: process.env.ComSpec ?? "cmd.exe",
+    args: ["/d", "/s", "/c", `set "NODE_OPTIONS=" && ${quoted}`],
+    windowsVerbatimArguments: true,
+  };
+}
+
 function runHelper(args: string[]): Promise<void> {
   const run = (): Promise<void> =>
     new Promise((resolvePromise, rejectPromise) => {
-      // A fresh child carries none of the parent's --permission flags, so it
-      // can reach the Documents tree. NODE_OPTIONS is cleared so no inherited
-      // flag re-sandboxes it.
-      const child = spawn(process.execPath, [HELPER_PATH, ...args], {
+      const launch = helperLaunch(process.execPath, HELPER_PATH, args);
+      const child = spawn(launch.command, launch.args, {
         stdio: ["ignore", "ignore", "pipe"],
-        env: { ...process.env, NODE_OPTIONS: "" },
+        windowsVerbatimArguments: launch.windowsVerbatimArguments,
         windowsHide: true,
       });
       let stderr = "";
