@@ -1,13 +1,6 @@
 import { useStore } from "@/store";
-import { getNumberParameterDef } from "@renderer/parameters";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "@renderer/lib/scale-snap";
-import {
-  getContextualModAmountsNormalized,
-  getModAmountValuesNormalized,
-  getMacroAmountValuesNormalized,
-} from "@renderer/store/modulators";
 import type { State } from "@renderer/store/types";
-import { normalizeParameterValue } from "@renderer/store/utils";
 import {
   ClampToEdgeWrapping,
   DataTexture,
@@ -20,32 +13,15 @@ import {
 } from "three";
 import cloneBrushFrag from "../glsl/clone-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
+import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 import { activeClonePasses, buildShapeTable, CloneShapeKey } from "./clone-shapes";
 
 function createUniforms() {
   return {
     ...createDefaultUniforms(),
-    cloneSpaceX: {
-      value: {
-        value: 0.5,
-        minValue: 0,
-        maxValue: 1,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
-    cloneSpaceY: {
-      value: {
-        value: 0,
-        minValue: -96,
-        maxValue: 96,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
+    cloneSpaceX: { value: defaultParameterUniform(0.25, -32, 32) },
+    cloneSpaceY: { value: defaultParameterUniform(0, -96, 96) },
     cloneBeatsLog: {
       value: 0,
     },
@@ -55,16 +31,7 @@ function createUniforms() {
     cloneCount: {
       value: 4,
     },
-    cloneDecay: {
-      value: {
-        value: 0.5,
-        minValue: 0,
-        maxValue: 1,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
+    cloneDecay: { value: defaultParameterUniform(0.5, 0, 1) },
     cloneDirection: {
       value: new Vector2(1, 0),
     },
@@ -154,8 +121,6 @@ class CloneEffect extends BaseEffect {
 
     const state = props.state ?? useStore.getState();
     const {
-      cloneSpaceBeats,
-      cloneSpaceSemis,
       cloneCountX,
       cloneCountY,
       cloneDecay,
@@ -174,40 +139,19 @@ class CloneEffect extends BaseEffect {
     const bpm = filepathsBpm[filePath] || 120;
     const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
 
-    // The beats gap crosses to the shader as its knob position, so modulation
-    // sweeps the log-bipolar arc the knob has, not the file's raw UV span.
-    const beatsDef = getNumberParameterDef("cloneSpaceBeats");
-    material.uniforms.cloneSpaceX.value = {
-      value: normalizeParameterValue("cloneSpaceBeats", cloneSpaceBeats),
-      minValue: 0,
-      maxValue: 1,
-      modulationAmounts: getModAmountValuesNormalized(state, "cloneSpaceBeats"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "cloneSpaceBeats"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "cloneSpaceBeats"),
-    };
-    material.uniforms.cloneBeatsLog.value = Math.log1p(Math.max(Math.abs(beatsDef.min), Math.abs(beatsDef.max)));
+    // The gap reaches the shader in beats; the beat-to-UV factor carries the file's tempo.
+    material.uniforms.cloneSpaceX.value = parameterUniform(state, "cloneSpaceBeats", props.modContext);
     material.uniforms.cloneBeatsToUv.value = 60 / bpm / (totalDuration > 0 ? totalDuration : 1);
 
-    const semisDef = getNumberParameterDef("cloneSpaceSemis");
-    material.uniforms.cloneSpaceY.value = {
-      value: cloneSpaceSemis,
-      minValue: semisDef.min,
-      maxValue: semisDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "cloneSpaceSemis"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "cloneSpaceSemis"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "cloneSpaceSemis"),
-    };
+    material.uniforms.cloneSpaceY.value = parameterUniform(state, "cloneSpaceSemis", props.modContext);
     // Counts are copies added; the shader's tap count includes the original.
     const count = (passIndex === 0 ? cloneCountX : cloneCountY) + 1;
     material.uniforms.cloneCount.value = count;
-    material.uniforms.cloneDecay.value = {
+    material.uniforms.cloneDecay.value = parameterUniform(state, "cloneDecay", props.modContext, {
       value: cloneDecay / 100,
-      minValue: 0,
-      maxValue: 1,
-      modulationAmounts: getModAmountValuesNormalized(state, "cloneDecay"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "cloneDecay"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "cloneDecay"),
-    };
+      min: 0,
+      max: 1,
+    });
     material.uniforms.cloneDirectionMode.value = passIndex === 0 ? cloneDirectionX : cloneDirectionY;
     material.uniforms.cloneEdgeMode.value = cloneEdgeMode;
 

@@ -9,13 +9,13 @@ struct Modulator {
   int modulatorMode;
   int modulatorPatternShape;
   int modulatorPhaseMode;
-  Parameter modulatorPhaseX;
-  Parameter modulatorPhaseY;
-  Parameter modulatorPatternRateX;
-  Parameter modulatorPatternRateY;
-  Parameter modulatorStrength;
-  Parameter modulatorRotation;
-  Parameter modulatorStereoSpread; // read-position offset applied as ∓spread/2 per channel
+  ModulatorParameter modulatorPhaseX;
+  ModulatorParameter modulatorPhaseY;
+  ModulatorParameter modulatorPatternRateX;
+  ModulatorParameter modulatorPatternRateY;
+  ModulatorParameter modulatorStrength;
+  ModulatorParameter modulatorRotation;
+  ModulatorParameter modulatorStereoSpread; // read-position offset applied as ∓spread/2 per channel
   float modulatorEnvelopeSmoothing; // UV half-width of the averaging window
   int modulatorEnvelopeSource; // 0=Amplitude, 1=Phase, 2=Panning
   float modulatorEnvelopeMinDb;
@@ -23,9 +23,9 @@ struct Modulator {
   // Sequencer parameters
   int seqStepsX;
   int seqStepsY;
-  Parameter seqLoopX;
-  Parameter seqLoopY;
-  Parameter seqSwing;
+  ModulatorParameter seqLoopX;
+  ModulatorParameter seqLoopY;
+  ModulatorParameter seqSwing;
 };
 
 uniform Modulator[NUM_MODULATORS] modulators;
@@ -321,7 +321,7 @@ vec2 getModulationBase(vec2 uv, int modulatorIndex, float patternRateX, float pa
 // Blends one nested pattern-modulator contribution into a modulator parameter.
 // modScalar is the source modulator's evaluated output, shared across every
 // parameter for a given source index so it is evaluated once and reused.
-float applyNestedParam(float current, Parameter p, float modScalar, int i) {
+float applyNestedParam(float current, ModulatorParameter p, float modScalar, int i) {
   float a = p.modulationAmounts[i];
   if (a == 0.0) return current;
   float minV = a < 0.0 ? p.maxValue : p.minValue;
@@ -329,14 +329,10 @@ float applyNestedParam(float current, Parameter p, float modScalar, int i) {
   return mix(current, mix(minV, maxV, modScalar), clamp(abs(a), 0.0, 1.0));
 }
 
-// Blends one macro contribution into a modulator parameter. Macros are global
-// scalars (macroValues[m]) broadcast identically to both stereo lanes.
-float applyNestedMacro(float current, Parameter p, float macroVal, int m) {
-  float a = p.macroAmounts[m];
-  if (a == 0.0) return current;
-  float minV = a < 0.0 ? p.maxValue : p.minValue;
-  float maxV = a < 0.0 ? p.minValue : p.maxValue;
-  return mix(current, mix(minV, maxV, macroVal), clamp(abs(a), 0.0, 1.0));
+// Applies a modulator parameter's stroke-context and macro contributions. The CPU
+// folds that chain of sequential mixes into one affine map per parameter.
+float applyNestedStatic(float current, ModulatorParameter p) {
+  return p.staticScale * current + p.staticOffset;
 }
 
 // Evaluates each modulator's own scalar output at uv with no nesting. These are
@@ -398,24 +394,23 @@ vec2 getModulationWithNested(vec2 uv, int modulatorIndex, bool useNested, float 
       seqSwing = applyNestedParam(seqSwing, modulator.seqSwing, modI, i);
       stereoSpread = applyNestedParam(stereoSpread, modulator.modulatorStereoSpread, modI, i);
     }
-
-    // Apply macro modulation to each modulator parameter. Unlike the pattern
-    // loop above, macros also modulate phaseX/phaseY.
-    for (int m = 0; m < NUM_MACROS; m++) {
-      float macroVal = macroValues[m];
-      patternRateX = applyNestedMacro(patternRateX, modulator.modulatorPatternRateX, macroVal, m);
-      patternRateY = applyNestedMacro(patternRateY, modulator.modulatorPatternRateY, macroVal, m);
-      strength = applyNestedMacro(strength, modulator.modulatorStrength, macroVal, m);
-      rotation = applyNestedMacro(rotation, modulator.modulatorRotation, macroVal, m);
-      phaseX = applyNestedMacro(phaseX, modulator.modulatorPhaseX, macroVal, m);
-      phaseY = applyNestedMacro(phaseY, modulator.modulatorPhaseY, macroVal, m);
-      seqLoopX = applyNestedMacro(seqLoopX, modulator.seqLoopX, macroVal, m);
-      seqLoopY = applyNestedMacro(seqLoopY, modulator.seqLoopY, macroVal, m);
-      seqSwing = applyNestedMacro(seqSwing, modulator.seqSwing, macroVal, m);
-      stereoSpread = applyNestedMacro(stereoSpread, modulator.modulatorStereoSpread, macroVal, m);
-    }
   }
   #endif
+
+  // Stroke-context and macro contributions, pre-folded on the CPU. Unlike the
+  // pattern loop these also reach phaseX/phaseY.
+  if (useNested) {
+    patternRateX = applyNestedStatic(patternRateX, modulator.modulatorPatternRateX);
+    patternRateY = applyNestedStatic(patternRateY, modulator.modulatorPatternRateY);
+    strength = applyNestedStatic(strength, modulator.modulatorStrength);
+    rotation = applyNestedStatic(rotation, modulator.modulatorRotation);
+    phaseX = applyNestedStatic(phaseX, modulator.modulatorPhaseX);
+    phaseY = applyNestedStatic(phaseY, modulator.modulatorPhaseY);
+    seqLoopX = applyNestedStatic(seqLoopX, modulator.seqLoopX);
+    seqLoopY = applyNestedStatic(seqLoopY, modulator.seqLoopY);
+    seqSwing = applyNestedStatic(seqSwing, modulator.seqSwing);
+    stereoSpread = applyNestedStatic(stereoSpread, modulator.modulatorStereoSpread);
+  }
 
   return getModulationBase(uv, modulatorIndex, patternRateX, patternRateY, strength, rotation, phaseX, phaseY, seqLoopX, seqLoopY, seqSwing, stereoSpread, audioLevelDb);
 }
@@ -437,7 +432,7 @@ vec2 getModulation(vec2 uv, int modulatorIndex, bool allowNestedModulation, floa
 // Blends precomputed modulator outputs, contextual sources and macros into a
 // parameter. Identical to applyModulation but takes the modulator outputs from
 // evalModulators instead of evaluating them here.
-vec2 applyModulationCached(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float[NUM_CONTEXTUAL_MOD_SOURCES] contextualModAmounts, float[NUM_MACROS] macroAmounts, vec2 mods[NUM_MODULATORS]) {
+vec2 applyModulationCached(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float staticSum, float staticWeight, vec2 mods[NUM_MODULATORS]) {
 #ifdef ABLATE_MODULATION
   return vec2(value);
 #endif
@@ -462,67 +457,15 @@ vec2 applyModulationCached(float value, float minValue, float maxValue, float[NU
 
     vec2 modulatedValue = mix(vec2(minV), vec2(maxV), modulation);
 
-    totalModulation += modulatedValue * abs(modulationAmount);
-    totalModulationAmount += abs(modulationAmount);
+    float weight = abs(modulationAmount);
+    totalModulation += modulatedValue * weight;
+    totalModulationAmount += weight;
   }
 
-  // Apply contextual modulation sources — scalar, broadcast to both lanes.
-  // Order: iteration, time, pitch, random, step, pressure, tiltX, tiltY
-  float contextualValues[NUM_CONTEXTUAL_MOD_SOURCES] = float[NUM_CONTEXTUAL_MOD_SOURCES](
-    strokeIterationNormalized,
-    strokeTimePosition,
-    strokePitchPosition,
-    strokeRandom,
-    strokeStepNormalized,
-    strokePressure,
-    strokeTiltX,
-    strokeTiltY
-  );
-
-  for (int i = 0; i < NUM_CONTEXTUAL_MOD_SOURCES; i++) {
-    float modulationAmount = contextualModAmounts[i];
-    if (modulationAmount == 0.0) {
-      continue;
-    }
-
-    float modulation = contextualValues[i];  // Already 0-1
-
-    float minV = minValue;
-    float maxV = maxValue;
-
-    if (modulationAmount < 0.0) {
-      minV = maxValue;
-      maxV = minValue;
-    }
-
-    float modulatedValue = mix(minV, maxV, modulation);
-
-    totalModulation += vec2(modulatedValue * abs(modulationAmount));
-    totalModulationAmount += abs(modulationAmount);
-  }
-
-  // Apply macro modulation sources — scalar, broadcast to both lanes.
-  for (int i = 0; i < NUM_MACROS; i++) {
-    float modulationAmount = macroAmounts[i];
-    if (modulationAmount == 0.0) {
-      continue;
-    }
-
-    float modulation = macroValues[i];  // Already 0-1
-
-    float minV = minValue;
-    float maxV = maxValue;
-
-    if (modulationAmount < 0.0) {
-      minV = maxValue;
-      maxV = minValue;
-    }
-
-    float modulatedValue = mix(minV, maxV, modulation);
-
-    totalModulation += vec2(modulatedValue * abs(modulationAmount));
-    totalModulationAmount += abs(modulationAmount);
-  }
+  // Stroke-context and macro sources are constant across a dab, so the CPU
+  // pre-sums their swept values and weights into one term.
+  totalModulation += vec2(staticSum);
+  totalModulationAmount += staticWeight;
 
   if (totalModulationAmount == 0.0) {
     return vec2(value);
@@ -534,22 +477,61 @@ vec2 applyModulationCached(float value, float minValue, float maxValue, float[NU
 }
 
 // Stereo modulation entry point. Evaluates the modulators at this uv then blends.
-vec2 applyModulation(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float[NUM_CONTEXTUAL_MOD_SOURCES] contextualModAmounts, float[NUM_MACROS] macroAmounts, vec2 uv, int depth, float audioLevelDb) {
+vec2 applyModulation(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float staticSum, float staticWeight, vec2 uv, int depth, float audioLevelDb) {
 #ifdef ABLATE_MODULATION
   return vec2(value);
 #endif
   vec2 mods[NUM_MODULATORS];
   sampleModulators(mods);
-  return applyModulationCached(value, minValue, maxValue, modulationAmounts, contextualModAmounts, macroAmounts, mods);
+  return applyModulationCached(value, minValue, maxValue, modulationAmounts, staticSum, staticWeight, mods);
 }
 
 // Mono helper for callsites where only a single scalar is needed (geometric /
 // brush-envelope shape values that have no natural per-channel meaning).
-float applyModulationMono(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float[NUM_CONTEXTUAL_MOD_SOURCES] contextualModAmounts, float[NUM_MACROS] macroAmounts, vec2 uv, int depth, float audioLevelDb) {
-  return applyModulation(value, minValue, maxValue, modulationAmounts, contextualModAmounts, macroAmounts, uv, depth, audioLevelDb).x;
+float applyModulationMono(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float staticSum, float staticWeight, vec2 uv, int depth, float audioLevelDb) {
+  return applyModulation(value, minValue, maxValue, modulationAmounts, staticSum, staticWeight, uv, depth, audioLevelDb).x;
 }
 
 // Mono helper using precomputed modulator outputs from evalModulators.
-float applyModulationCachedMono(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float[NUM_CONTEXTUAL_MOD_SOURCES] contextualModAmounts, float[NUM_MACROS] macroAmounts, vec2 mods[NUM_MODULATORS]) {
-  return applyModulationCached(value, minValue, maxValue, modulationAmounts, contextualModAmounts, macroAmounts, mods).x;
+float applyModulationCachedMono(float value, float minValue, float maxValue, float[NUM_MODULATORS] modulationAmounts, float staticSum, float staticWeight, vec2 mods[NUM_MODULATORS]) {
+  return applyModulationCached(value, minValue, maxValue, modulationAmounts, staticSum, staticWeight, mods).x;
+}
+
+// True when any source reaches the parameter, so its value is not its own.
+bool isParameterModulated(Parameter p) {
+  if (p.staticWeight != 0.0) return true;
+  for (int i = 0; i < NUM_MODULATORS; i++) {
+    if (p.modulationAmounts[i] != 0.0) return true;
+  }
+  return false;
+}
+
+// A parameter's modulated (L, R) value in its own units, from precomputed
+// modulator outputs. A log slider is swept in knob position and mapped back;
+// unmodulated, the exact value passes through.
+vec2 resolveParameter(Parameter p, vec2 mods[NUM_MODULATORS]) {
+  if (p.scaleKind == 0) {
+    return applyModulationCached(p.value, p.minValue, p.maxValue, p.modulationAmounts, p.staticSum, p.staticWeight, mods);
+  }
+  if (!isParameterModulated(p)) return vec2(p.value);
+  vec2 pos = applyModulationCached(p.position, 0.0, 1.0, p.modulationAmounts, p.staticSum, p.staticWeight, mods);
+  return fromKnobPosition(pos, p.scaleKind, p.logEnds);
+}
+
+float resolveParameterMono(Parameter p, vec2 mods[NUM_MODULATORS]) {
+  return resolveParameter(p, mods).x;
+}
+
+// As resolveParameter, evaluating the modulators at uv.
+vec2 resolveParameterAt(Parameter p, vec2 uv, int depth, float audioLevelDb) {
+  if (p.scaleKind == 0) {
+    return applyModulation(p.value, p.minValue, p.maxValue, p.modulationAmounts, p.staticSum, p.staticWeight, uv, depth, audioLevelDb);
+  }
+  if (!isParameterModulated(p)) return vec2(p.value);
+  vec2 pos = applyModulation(p.position, 0.0, 1.0, p.modulationAmounts, p.staticSum, p.staticWeight, uv, depth, audioLevelDb);
+  return fromKnobPosition(pos, p.scaleKind, p.logEnds);
+}
+
+float resolveParameterMonoAt(Parameter p, vec2 uv, int depth, float audioLevelDb) {
+  return resolveParameterAt(p, uv, depth, audioLevelDb).x;
 }

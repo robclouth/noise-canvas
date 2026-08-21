@@ -20,10 +20,7 @@ void main() {
   float audioLevelDb = getAudioLevelDb(unpackedUv);
   vec2 envelopeWeight = getBrushWeight(unpackedUv, audioLevelDb);
 
-  vec2 intensity = applyModulation(
-    brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue,
-    brushIntensity.modulationAmounts, brushIntensity.contextualModAmounts, brushIntensity.macroAmounts, unpackedUv, 0, audioLevelDb
-  );
+  vec2 intensity = resolveParameterAt(brushIntensity, unpackedUv, 0, audioLevelDb);
 
   // Mask is a single scalar per pixel; use the stronger of L/R so the gate
   // opens wherever either channel has contributed.

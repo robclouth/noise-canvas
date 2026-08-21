@@ -11,6 +11,7 @@ import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import modulatorFrag from "../glsl/modulator.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { buildModulatorUniforms, modulatorParamsEqual, useModulatorScaleLut } from "../lib/modulator-utils";
+import { createModContext, NEUTRAL_STROKE_CONTEXT } from "../lib/static-modulation";
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
 import { ModulatorShapeControl } from "./controls/modulator-shape-control";
 import { ParameterControl } from "./controls/parameter-control";
@@ -46,14 +47,19 @@ const Scene = ({
   const material = useMemo(() => {
     const state = useStore.getState();
     const stepState = createStepStateView(state, state.activeStepIndex);
-    const modulators = buildModulatorUniforms(120, 10, 12, 96, stepState);
-    const macroValues = (state.brushes[state.activeBrushIndex]?.macroValues ?? [50, 50, 50, 50]).map((v) => v / 100);
+    const modulators = buildModulatorUniforms(
+      120,
+      10,
+      12,
+      96,
+      stepState,
+      createModContext(stepState, NEUTRAL_STROKE_CONTEXT),
+    );
 
     return new RawShaderMaterial({
       uniforms: {
         modulatorIndex: { value: modulatorIndex },
         modulators: { value: modulators },
-        macroValues: { value: macroValues },
         gainLut: { value: modulatorScaleLut },
         modulator1ImageTex: { value: placeholderTexture },
         modulator2ImageTex: { value: placeholderTexture },
@@ -96,7 +102,14 @@ const Scene = ({
     const applyModulators = () => {
       const state = useStore.getState();
       const stepState = createStepStateView(state, state.activeStepIndex);
-      const modulators = buildModulatorUniforms(120, 10, 12, 96, stepState);
+      const modulators = buildModulatorUniforms(
+        120,
+        10,
+        12,
+        96,
+        stepState,
+        createModContext(stepState, NEUTRAL_STROKE_CONTEXT),
+      );
       material.uniforms.modulators.value = modulators;
       if (modulators[0]?.seqDataTex) material.uniforms.modulator1SeqDataTex.value = modulators[0].seqDataTex;
       if (modulators[1]?.seqDataTex) material.uniforms.modulator2SeqDataTex.value = modulators[1].seqDataTex;
@@ -106,9 +119,9 @@ const Scene = ({
 
     // The preview output depends on the active step's modulator params: each
     // modulator's own params AND the modulation amounts routed into them (nested
-    // modulation) AND the macro amounts. The macro *values* are watched by the
-    // separate subscription below; everything else lives on the step under a
-    // `modulator<n>` key. Subscribe to the step object but compare only those keys
+    // modulation) AND the macro amounts. The macro *values* are folded into the
+    // modulator uniforms on the CPU, so the separate subscription below rebuilds
+    // them too; everything else lives on the step under a `modulator<n>` key. Subscribe to the step object but compare only those keys
     // (`modulatorParamsEqual`) so the rebuild — and the canvas invalidate it
     // triggers — fires only when a modulator param actually changes, not on every
     // unrelated step-param drag. Deriving the key set from parameterDefs keeps it
@@ -126,27 +139,23 @@ const Scene = ({
       applyModulators,
     );
 
-    return () => {
-      unsubscribe();
-      unsubscribeGrid();
-    };
-  }, [material, invalidate]);
-
-  useEffect(() => {
+    // Macro values are folded into the modulator uniforms on the CPU.
     const macrosEqual = (a: number[], b: number[]): boolean => {
       if (a.length !== b.length) return false;
       for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
       return true;
     };
-    const unsubscribe = useStore.subscribe(
+    const unsubscribeMacros = useStore.subscribe(
       (state) => state.brushes[state.activeBrushIndex]?.macroValues ?? [50, 50, 50, 50],
-      (macroValues) => {
-        material.uniforms.macroValues.value = macroValues.map((v) => v / 100);
-        invalidate();
-      },
+      applyModulators,
       { equalityFn: macrosEqual },
     );
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribe();
+      unsubscribeGrid();
+      unsubscribeMacros();
+    };
   }, [material, invalidate]);
 
   return (

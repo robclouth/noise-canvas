@@ -1,58 +1,18 @@
 import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
-import {
-  getContextualModAmountsNormalized,
-  getModAmountValuesNormalized,
-  getMacroAmountValuesNormalized,
-} from "@renderer/store/modulators";
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import blurBrushFrag from "../glsl/blur-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
+import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 function createUniforms() {
   return {
     ...createDefaultUniforms(),
-    blurSizeX: {
-      value: {
-        value: 0.01,
-        minValue: 0,
-        maxValue: 100,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
-    blurSizeY: {
-      value: {
-        value: 0.01,
-        minValue: 0,
-        maxValue: 100,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
-    blurNoiseX: {
-      value: {
-        value: 0.01,
-        minValue: 0,
-        maxValue: 100,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
-    blurNoiseY: {
-      value: {
-        value: 0.01,
-        minValue: 0,
-        maxValue: 100,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
+    blurSizeX: { value: defaultParameterUniform(0.01, 0, 100) },
+    blurSizeY: { value: defaultParameterUniform(0.01, 0, 100) },
+    blurNoiseX: { value: defaultParameterUniform(0.01, 0, 100) },
+    blurNoiseY: { value: defaultParameterUniform(0.01, 0, 100) },
     blurDirection: {
       value: new Vector2(1, 0),
     },
@@ -142,38 +102,26 @@ class BlurEffect extends BaseEffect {
       spectrogramData.numBands,
     );
 
-    material.uniforms.blurSizeX.value = {
+    material.uniforms.blurSizeX.value = parameterUniform(state, "blurAmountTime", props.modContext, {
       value: blurSizeUv.x,
-      minValue: 0,
-      maxValue: 0.1,
-      modulationAmounts: getModAmountValuesNormalized(state, "blurAmountTime"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "blurAmountTime"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "blurAmountTime"),
-    };
-    material.uniforms.blurSizeY.value = {
+      min: 0,
+      max: 0.1,
+    });
+    material.uniforms.blurSizeY.value = parameterUniform(state, "blurAmountPitch", props.modContext, {
       value: blurSizeUv.y,
-      minValue: 0,
-      maxValue: 0.1,
-      modulationAmounts: getModAmountValuesNormalized(state, "blurAmountPitch"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "blurAmountPitch"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "blurAmountPitch"),
-    };
-    material.uniforms.blurNoiseX.value = {
+      min: 0,
+      max: 0.1,
+    });
+    material.uniforms.blurNoiseX.value = parameterUniform(state, "blurNoiseTime", props.modContext, {
       value: blurNoiseUv.x / 5,
-      minValue: 0,
-      maxValue: 0.1,
-      modulationAmounts: getModAmountValuesNormalized(state, "blurNoiseTime"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "blurNoiseTime"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "blurNoiseTime"),
-    };
-    material.uniforms.blurNoiseY.value = {
+      min: 0,
+      max: 0.1,
+    });
+    material.uniforms.blurNoiseY.value = parameterUniform(state, "blurNoisePitch", props.modContext, {
       value: blurNoiseUv.y / 5,
-      minValue: 0,
-      maxValue: 0.1,
-      modulationAmounts: getModAmountValuesNormalized(state, "blurNoisePitch"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "blurNoisePitch"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "blurNoisePitch"),
-    };
+      min: 0,
+      max: 0.1,
+    });
     material.uniforms.blurEdgeMode.value = blurEdgeMode;
     material.uniforms.blurSampleCount.value = passIndex === 0 ? blurSamplesX : blurSamplesY;
     material.uniforms.blurOrigin.value = blurOrigin;

@@ -61,16 +61,8 @@ float readSource(vec2 magPhase, float magOther, vec2 brushUnit, bool right) {
 vec4 applyEffectStroke(vec4 src, ProcessingUvs coords, float audioLevelDb) {
   vec2 mods[NUM_MODULATORS];
   sampleModulators(mods);
-  vec2 amount = applyModulationCached(
-    transmuteAmount.value, transmuteAmount.minValue, transmuteAmount.maxValue,
-    transmuteAmount.modulationAmounts, transmuteAmount.contextualModAmounts, transmuteAmount.macroAmounts,
-    mods
-  );
-  vec2 curve = applyModulationCached(
-    transmuteCurve.value, transmuteCurve.minValue, transmuteCurve.maxValue,
-    transmuteCurve.modulationAmounts, transmuteCurve.contextualModAmounts, transmuteCurve.macroAmounts,
-    mods
-  );
+  vec2 amount = resolveParameter(transmuteAmount, mods);
+  vec2 curve = resolveParameter(transmuteCurve, mods);
 
   vec2 inL = src.rg;
   vec2 inR = src.ba;

@@ -1,14 +1,9 @@
-import { getNumberParameterDef } from "@renderer/parameters";
-import {
-  getContextualModAmountsNormalized,
-  getModAmountValuesNormalized,
-  getMacroAmountValuesNormalized,
-} from "@renderer/store/modulators";
 import { GLSL3, RawShaderMaterial } from "three";
 import transmuteEffectFrag from "../glsl/transmute-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useStore } from "../store";
 import type { State } from "../store/types";
+import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 const PART_MAG = 0;
@@ -32,26 +27,8 @@ class TransmuteEffect extends BaseEffect {
           transmuteFrom: { value: 1 },
           transmuteTo: { value: 0 },
           transmuteBeatsToUv: { value: 0 },
-          transmuteAmount: {
-            value: {
-              value: 1.0,
-              minValue: -8.0,
-              maxValue: 8.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
-          transmuteCurve: {
-            value: {
-              value: 1.0,
-              minValue: -4.0,
-              maxValue: 4.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
+          transmuteAmount: { value: defaultParameterUniform(1.0, -8.0, 8.0) },
+          transmuteCurve: { value: defaultParameterUniform(1.0, -4.0, 4.0) },
         },
         vertexShader: passThroughVert,
         fragmentShader: transmuteEffectFrag,
@@ -78,25 +55,9 @@ class TransmuteEffect extends BaseEffect {
     const totalDuration = spectrogramData ? spectrogramData.numFrames / spectrogramData.sampleRate : 0;
     this.materials[0].uniforms.transmuteBeatsToUv.value = 60 / bpm / (totalDuration > 0 ? totalDuration : 1);
 
-    const transmuteAmountDef = getNumberParameterDef("transmuteAmount");
-    this.materials[0].uniforms.transmuteAmount.value = {
-      value: state.transmuteAmount,
-      minValue: transmuteAmountDef.min,
-      maxValue: transmuteAmountDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "transmuteAmount"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "transmuteAmount"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "transmuteAmount"),
-    };
+    this.materials[0].uniforms.transmuteAmount.value = parameterUniform(state, "transmuteAmount", props.modContext);
 
-    const transmuteCurveDef = getNumberParameterDef("transmuteCurve");
-    this.materials[0].uniforms.transmuteCurve.value = {
-      value: state.transmuteCurve,
-      minValue: transmuteCurveDef.min,
-      maxValue: transmuteCurveDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "transmuteCurve"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "transmuteCurve"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "transmuteCurve"),
-    };
+    this.materials[0].uniforms.transmuteCurve.value = parameterUniform(state, "transmuteCurve", props.modContext);
 
     // The two routes that move the pair between domains only reverse when the
     // blend is an exact linear mix of the whole footprint. Every other route,

@@ -1,13 +1,8 @@
-import { getNumberParameterDef } from "@renderer/parameters";
-import {
-  getContextualModAmountsNormalized,
-  getModAmountValuesNormalized,
-  getMacroAmountValuesNormalized,
-} from "@renderer/store/modulators";
 import { GLSL3, RawShaderMaterial } from "three";
 import waveshapeEffectFrag from "../glsl/waveshape-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useStore } from "../store";
+import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 class WaveshapeEffect extends BaseEffect {
@@ -18,26 +13,8 @@ class WaveshapeEffect extends BaseEffect {
         uniforms: {
           ...createDefaultUniforms(),
           waveshapeMode: { value: 0 },
-          waveshapeDrive: {
-            value: {
-              value: 1.0,
-              minValue: 0.01,
-              maxValue: 16.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
-          waveshapeTilt: {
-            value: {
-              value: 0.0,
-              minValue: -1.0,
-              maxValue: 1.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
+          waveshapeDrive: { value: defaultParameterUniform(1.0, 0.01, 16.0) },
+          waveshapeTilt: { value: defaultParameterUniform(0.0, -1.0, 1.0) },
         },
         vertexShader: passThroughVert,
         fragmentShader: waveshapeEffectFrag,
@@ -52,25 +29,9 @@ class WaveshapeEffect extends BaseEffect {
 
     this.materials[0].uniforms.waveshapeMode.value = state.waveshapeMode;
 
-    const driveDef = getNumberParameterDef("waveshapeDrive");
-    this.materials[0].uniforms.waveshapeDrive.value = {
-      value: state.waveshapeDrive,
-      minValue: driveDef.min,
-      maxValue: driveDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "waveshapeDrive"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "waveshapeDrive"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "waveshapeDrive"),
-    };
+    this.materials[0].uniforms.waveshapeDrive.value = parameterUniform(state, "waveshapeDrive", props.modContext);
 
-    const tiltDef = getNumberParameterDef("waveshapeTilt");
-    this.materials[0].uniforms.waveshapeTilt.value = {
-      value: state.waveshapeTilt,
-      minValue: tiltDef.min,
-      maxValue: tiltDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "waveshapeTilt"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "waveshapeTilt"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "waveshapeTilt"),
-    };
+    this.materials[0].uniforms.waveshapeTilt.value = parameterUniform(state, "waveshapeTilt", props.modContext);
   }
 }
 

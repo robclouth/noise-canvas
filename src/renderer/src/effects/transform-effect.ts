@@ -1,15 +1,10 @@
 import { useStore } from "@/store";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "@renderer/lib/scale-snap";
-import { unitsToUv } from "@renderer/lib/utils";
 import type { EffectsState } from "@renderer/store/effects";
-import {
-  getContextualModAmountsNormalized,
-  getModAmountValuesNormalized,
-  getMacroAmountValuesNormalized,
-} from "@renderer/store/modulators";
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import transformEffectFrag from "../glsl/transform-effect.frag";
+import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, destinationLayout, UpdateEffectUniformsProps } from "./base-effect";
 
 export const boundaryModes = ["smear", "cut", "wrap"] as const;
@@ -30,57 +25,12 @@ class TransformEffect extends BaseEffect {
       new RawShaderMaterial({
         uniforms: {
           ...createDefaultUniforms(),
-          shiftX: {
-            value: {
-              value: 0.0,
-              minValue: -1.0,
-              maxValue: 1.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
-
-          shiftY: {
-            value: {
-              value: 0.0,
-              minValue: -1.0,
-              maxValue: 1.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
-          scaleX: {
-            value: {
-              value: 1.0,
-              minValue: -4.0,
-              maxValue: 4.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
-          scaleY: {
-            value: {
-              value: 1.0,
-              minValue: -4.0,
-              maxValue: 4.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
-          rotation: {
-            value: {
-              value: 0.0,
-              minValue: -180.0,
-              maxValue: 180.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
+          shiftX: { value: defaultParameterUniform(0.0, -32, 32) },
+          shiftY: { value: defaultParameterUniform(0.0, -96.0, 96.0) },
+          scaleX: { value: defaultParameterUniform(1.0, -256, 256) },
+          scaleY: { value: defaultParameterUniform(1.0, -256, 256) },
+          transformBeatsToUv: { value: 0.0 },
+          rotation: { value: defaultParameterUniform(0.0, -180.0, 180.0) },
           boundaryMode: {
             value: 0,
           },
@@ -109,73 +59,26 @@ class TransformEffect extends BaseEffect {
   updateEffectUniforms(props: UpdateEffectUniformsProps): void {
     this.updateCommonUniforms(props);
     const state = props.state ?? useStore.getState();
-    const {
-      transformShiftBeats,
-      transformShiftSemis,
-      transformScaleTime,
-      transformScalePitch,
-      transformRotation,
-      transformEdgeMode,
-      transformOriginTime,
-      transformOriginPitch,
-    } = state;
+    const { transformRotation, transformEdgeMode, transformOriginTime, transformOriginPitch } = state;
 
     const { passIndex } = props;
     const dest = destinationLayout(props.commonUniforms);
     if (!(dest.totalDuration > 0) || !(dest.numBands > 0)) return;
 
-    const shiftUv = unitsToUv(
-      transformShiftBeats,
-      transformShiftSemis,
-      dest.bpm,
-      dest.totalDuration,
-      dest.bandsPerOctave,
-      dest.numBands,
-    );
-
     const material = this.materials[passIndex];
     if (!material) return;
 
-    material.uniforms.shiftX.value = {
-      value: shiftUv.x,
-      minValue: -0.5,
-      maxValue: 0.5,
-      modulationAmounts: getModAmountValuesNormalized(state, "transformShiftBeats"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "transformShiftBeats"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "transformShiftBeats"),
-    };
-    material.uniforms.shiftY.value = {
-      value: shiftUv.y,
-      minValue: -0.5,
-      maxValue: 0.5,
-      modulationAmounts: getModAmountValuesNormalized(state, "transformShiftSemis"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "transformShiftSemis"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "transformShiftSemis"),
-    };
-    material.uniforms.scaleX.value = {
-      value: transformScaleTime,
-      minValue: -4,
-      maxValue: 4,
-      modulationAmounts: getModAmountValuesNormalized(state, "transformScaleTime"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "transformScaleTime"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "transformScaleTime"),
-    };
-    material.uniforms.scaleY.value = {
-      value: transformScalePitch,
-      minValue: -4,
-      maxValue: 4,
-      modulationAmounts: getModAmountValuesNormalized(state, "transformScalePitch"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "transformScalePitch"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "transformScalePitch"),
-    };
-    material.uniforms.rotation.value = {
+    // Shift ↔ reaches the shader in beats, and the beat-to-UV factor carries the destination's tempo.
+    material.uniforms.shiftX.value = parameterUniform(state, "transformShiftBeats", props.modContext);
+    material.uniforms.transformBeatsToUv.value = 60 / dest.bpm / dest.totalDuration;
+    material.uniforms.shiftY.value = parameterUniform(state, "transformShiftSemis", props.modContext);
+    material.uniforms.scaleX.value = parameterUniform(state, "transformScaleTime", props.modContext);
+    material.uniforms.scaleY.value = parameterUniform(state, "transformScalePitch", props.modContext);
+    material.uniforms.rotation.value = parameterUniform(state, "transformRotation", props.modContext, {
       value: transformRotation,
-      minValue: -180,
-      maxValue: 180,
-      modulationAmounts: getModAmountValuesNormalized(state, "transformRotation"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "transformRotation"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "transformRotation"),
-    };
+      min: -180,
+      max: 180,
+    });
     material.uniforms.boundaryMode.value = transformEdgeMode;
     material.uniforms.transformOrigin.value.set(
       originFraction(transformOriginTime),

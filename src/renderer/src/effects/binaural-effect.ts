@@ -1,14 +1,10 @@
 import { getNumberParameterDef } from "@renderer/parameters";
-import {
-  getContextualModAmountsNormalized,
-  getModAmountValuesNormalized,
-  getMacroAmountValuesNormalized,
-} from "@renderer/store/modulators";
 import { ClampToEdgeWrapping, DataTexture, FloatType, GLSL3, LinearFilter, RawShaderMaterial, RGBAFormat } from "three";
 import binauralEffectFrag from "../glsl/binaural-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { loadHrtfData, getHrtfMetadata, HrtfMetadata } from "../lib/hrtf-loader";
 import { useStore } from "../store";
+import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 /**
@@ -54,36 +50,9 @@ class BinauralEffect extends BaseEffect {
           hrtfNumAzimuths: { value: this.hrtfMetadata.numAzimuths },
           hrtfNumFreqBands: { value: this.hrtfMetadata.numFrequencyBands },
           // Effect parameters
-          azimuth: {
-            value: {
-              value: 0.0,
-              minValue: -180.0,
-              maxValue: 180.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
-          distance: {
-            value: {
-              value: 1.0,
-              minValue: 0.1,
-              maxValue: 10.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
-          stereoAngle: {
-            value: {
-              value: 180.0,
-              minValue: 0.0,
-              maxValue: 180.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
+          azimuth: { value: defaultParameterUniform(0.0, -180.0, 180.0) },
+          distance: { value: defaultParameterUniform(1.0, 0.1, 10.0) },
+          stereoAngle: { value: defaultParameterUniform(180.0, 0.0, 180.0) },
         },
         vertexShader: passThroughVert,
         fragmentShader: binauralEffectFrag,
@@ -138,38 +107,29 @@ class BinauralEffect extends BaseEffect {
     // Azimuth parameter
     const azimuthValue = state.binauralAzimuth;
     const azimuthDef = getNumberParameterDef("binauralAzimuth");
-    material.uniforms.azimuth.value = {
+    material.uniforms.azimuth.value = parameterUniform(state, "binauralAzimuth", props.modContext, {
       value: azimuthValue,
-      minValue: azimuthDef.min,
-      maxValue: azimuthDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "binauralAzimuth"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "binauralAzimuth"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "binauralAzimuth"),
-    };
+      min: azimuthDef.min,
+      max: azimuthDef.max,
+    });
 
     // Distance parameter
     const distanceValue = state.binauralDistance;
     const distanceDef = getNumberParameterDef("binauralDistance");
-    material.uniforms.distance.value = {
+    material.uniforms.distance.value = parameterUniform(state, "binauralDistance", props.modContext, {
       value: distanceValue,
-      minValue: distanceDef.min,
-      maxValue: distanceDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "binauralDistance"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "binauralDistance"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "binauralDistance"),
-    };
+      min: distanceDef.min,
+      max: distanceDef.max,
+    });
 
     // Stereo angle parameter
     const stereoAngleValue = state.binauralStereoAngle;
     const stereoAngleDef = getNumberParameterDef("binauralStereoAngle");
-    material.uniforms.stereoAngle.value = {
+    material.uniforms.stereoAngle.value = parameterUniform(state, "binauralStereoAngle", props.modContext, {
       value: stereoAngleValue,
-      minValue: stereoAngleDef.min,
-      maxValue: stereoAngleDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "binauralStereoAngle"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "binauralStereoAngle"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "binauralStereoAngle"),
-    };
+      min: stereoAngleDef.min,
+      max: stereoAngleDef.max,
+    });
   }
 }
 

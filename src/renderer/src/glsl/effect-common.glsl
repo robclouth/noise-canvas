@@ -365,16 +365,8 @@ ProcessingUvs getProcessingUvs(vec2 destPackedUv) {
   // falls out true — effects then take the single-sample fast path.
   vec2 srcMods[NUM_MODULATORS];
   sampleModulators(srcMods);
-  vec2 modTimeOff = applyModulationCached(
-    sourceTimeOffset.value, sourceTimeOffset.minValue, sourceTimeOffset.maxValue,
-    sourceTimeOffset.modulationAmounts, sourceTimeOffset.contextualModAmounts, sourceTimeOffset.macroAmounts,
-    srcMods
-  );
-  vec2 modPitchOff = applyModulationCached(
-    sourcePitchOffset.value, sourcePitchOffset.minValue, sourcePitchOffset.maxValue,
-    sourcePitchOffset.modulationAmounts, sourcePitchOffset.contextualModAmounts, sourcePitchOffset.macroAmounts,
-    srcMods
-  );
+  vec2 modTimeOff = resolveParameter(sourceTimeOffset, srcMods);
+  vec2 modPitchOff = resolveParameter(sourcePitchOffset, srcMods);
 
   float baseX = uvs.dest.x * sourceTimeScale + sourceOffsetX;
   float baseY = destToSourceBandUv(uvs.dest) + sourceOffsetY;
@@ -1243,22 +1235,10 @@ vec2 getBrushWeight(vec2 unpackedUv, float audioLevelDb) {
 
   vec2 brushMods[NUM_MODULATORS];
   sampleModulators(brushMods);
-  vec2 curveX = applyModulationCached(
-    brushCurveTime.value, brushCurveTime.minValue, brushCurveTime.maxValue,
-    brushCurveTime.modulationAmounts, brushCurveTime.contextualModAmounts, brushCurveTime.macroAmounts, brushMods
-  );
-  vec2 skewX = applyModulationCached(
-    brushSkewTime.value, brushSkewTime.minValue, brushSkewTime.maxValue,
-    brushSkewTime.modulationAmounts, brushSkewTime.contextualModAmounts, brushSkewTime.macroAmounts, brushMods
-  );
-  vec2 curveY = applyModulationCached(
-    brushCurvePitch.value, brushCurvePitch.minValue, brushCurvePitch.maxValue,
-    brushCurvePitch.modulationAmounts, brushCurvePitch.contextualModAmounts, brushCurvePitch.macroAmounts, brushMods
-  );
-  vec2 skewY = applyModulationCached(
-    brushSkewPitch.value, brushSkewPitch.minValue, brushSkewPitch.maxValue,
-    brushSkewPitch.modulationAmounts, brushSkewPitch.contextualModAmounts, brushSkewPitch.macroAmounts, brushMods
-  );
+  vec2 curveX = resolveParameter(brushCurveTime, brushMods);
+  vec2 skewX = resolveParameter(brushSkewTime, brushMods);
+  vec2 curveY = resolveParameter(brushCurvePitch, brushMods);
+  vec2 skewY = resolveParameter(brushSkewPitch, brushMods);
 
   // X (time): edge-of-bin membership so adjacent grid stamps tile each band
   // exactly. coverage is 0 or 1; the envelope shapes the weight across the span.
@@ -1353,15 +1333,9 @@ vec4 applyBrush(vec4 original, vec4 modified, vec2 weight, vec2 destUv, vec2 pac
 
   vec2 brushMods[NUM_MODULATORS];
   sampleModulators(brushMods);
-  vec2 intensity = applyModulationCached(
-    brushIntensity.value, brushIntensity.minValue, brushIntensity.maxValue,
-    brushIntensity.modulationAmounts, brushIntensity.contextualModAmounts, brushIntensity.macroAmounts, brushMods
-  );
+  vec2 intensity = resolveParameter(brushIntensity, brushMods);
 
-  vec2 pan = applyModulationCached(
-    brushPan.value, brushPan.minValue, brushPan.maxValue,
-    brushPan.modulationAmounts, brushPan.contextualModAmounts, brushPan.macroAmounts, brushMods
-  );
+  vec2 pan = resolveParameter(brushPan, brushMods);
 
   vec2 pannedModifiedL = fromPolar(getMag(modifiedL) * clamp(1.0 - pan.x, 0.0, 1.0), getPhase(modifiedL));
   vec2 pannedModifiedR = fromPolar(getMag(modifiedR) * clamp(1.0 + pan.y, 0.0, 1.0), getPhase(modifiedR));

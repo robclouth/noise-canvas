@@ -1,15 +1,11 @@
 import { getNumberParameterDef } from "@renderer/parameters";
-import {
-  getContextualModAmountsNormalized,
-  getModAmountValuesNormalized,
-  getMacroAmountValuesNormalized,
-} from "@renderer/store/modulators";
 import { getOpenFileByPath, openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
 import { GLSL3, RawShaderMaterial } from "three";
 import convolveEffectFrag from "../glsl/convolve-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useStore } from "../store";
+import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 // Single scalar that brings the convolution output to roughly unity at 0 dB
@@ -26,13 +22,7 @@ function getIrNormScale(data: SpectrogramData | undefined): number {
 }
 
 const paramUniform = (value = 0, minValue = 0, maxValue = 1) => ({
-  value: {
-    value,
-    minValue,
-    maxValue,
-    modulationAmounts: [] as number[],
-    contextualModAmounts: [] as number[],
-  },
+  value: defaultParameterUniform(value, minValue, maxValue),
 });
 
 class ConvolveEffect extends BaseEffect {
@@ -53,7 +43,7 @@ class ConvolveEffect extends BaseEffect {
           convolveIrTimeOffset: paramUniform(),
           convolveIrPitchShiftSemi: paramUniform(0, -24, 24),
           convolveIrRate: paramUniform(1, -256, 256),
-          convolveGain: paramUniform(1, 0, 64),
+          convolveGainDb: paramUniform(0, -36, 36),
           convolveIrNormScale: { value: 1 },
           convolveEdgeMode: { value: 1 },
         },
@@ -111,45 +101,20 @@ class ConvolveEffect extends BaseEffect {
     material.uniforms.convolveEdgeMode.value = state.convolveEdgeMode;
 
     const timeOffsetDef = getNumberParameterDef("convolveIrTimeOffset");
-    material.uniforms.convolveIrTimeOffset.value = {
+    material.uniforms.convolveIrTimeOffset.value = parameterUniform(state, "convolveIrTimeOffset", props.modContext, {
       value: state.convolveIrTimeOffset / 100,
-      minValue: timeOffsetDef.min / 100,
-      maxValue: timeOffsetDef.max / 100,
-      modulationAmounts: getModAmountValuesNormalized(state, "convolveIrTimeOffset"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "convolveIrTimeOffset"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "convolveIrTimeOffset"),
-    };
+      min: timeOffsetDef.min / 100,
+      max: timeOffsetDef.max / 100,
+    });
 
-    const pitchShiftDef = getNumberParameterDef("convolveIrPitchShift");
-    material.uniforms.convolveIrPitchShiftSemi.value = {
-      value: state.convolveIrPitchShift,
-      minValue: pitchShiftDef.min,
-      maxValue: pitchShiftDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "convolveIrPitchShift"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "convolveIrPitchShift"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "convolveIrPitchShift"),
-    };
+    material.uniforms.convolveIrPitchShiftSemi.value = parameterUniform(
+      state,
+      "convolveIrPitchShift",
+      props.modContext,
+    );
 
-    const rateDef = getNumberParameterDef("convolveIrRate");
-    material.uniforms.convolveIrRate.value = {
-      value: state.convolveIrRate,
-      minValue: rateDef.min,
-      maxValue: rateDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "convolveIrRate"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "convolveIrRate"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "convolveIrRate"),
-    };
-
-    const gainDef = getNumberParameterDef("convolveGainDb");
-    const dbToLinear = (db: number) => Math.pow(10, db / 20);
-    material.uniforms.convolveGain.value = {
-      value: dbToLinear(state.convolveGainDb),
-      minValue: dbToLinear(gainDef.min),
-      maxValue: dbToLinear(gainDef.max),
-      modulationAmounts: getModAmountValuesNormalized(state, "convolveGainDb"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "convolveGainDb"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "convolveGainDb"),
-    };
+    material.uniforms.convolveIrRate.value = parameterUniform(state, "convolveIrRate", props.modContext);
+    material.uniforms.convolveGainDb.value = parameterUniform(state, "convolveGainDb", props.modContext);
   }
 }
 

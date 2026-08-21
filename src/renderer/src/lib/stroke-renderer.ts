@@ -31,20 +31,23 @@ import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { createEffectStateView, createStepStateView } from "../store";
-import {
-  getContextualModAmountsNormalized,
-  getMacroAmountValuesNormalized,
-  getModAmountValuesNormalized,
-  hasActiveModulatorRouting,
-  hasNestedModulatorRouting,
-  paramsRouteModulators,
-} from "../store/modulators";
+import { hasActiveModulatorRouting, hasNestedModulatorRouting, paramsRouteModulators } from "../store/modulators";
 import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { ATTRACT_MODULATOR_MAP_START } from "./constants";
 import { getFileOnsets } from "./file-onsets";
 import { buildModulatorUniforms } from "./modulator-utils";
+import {
+  createModContext,
+  defaultParameterUniform,
+  ModContext,
+  parameterUniform,
+  ShaderRange,
+  staticModulation,
+  StrokeContext,
+  writeParameterUniform,
+} from "./static-modulation";
 import { getStrokeScratchPool, StrokeScratch, StrokeScratchPool } from "./stroke-scratch-pool";
 import {
   pitchUvToBandIndex,
@@ -68,33 +71,68 @@ const noise2D = createNoise2D();
 const PATCH_QUAD_POSITIONS = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
 const PATCH_QUAD_INDICES = new Uint16Array([0, 1, 2, 0, 2, 3]);
 
-function createParameterUniform(value: number, minValue: number, maxValue: number): ParameterUniform {
-  return {
-    value,
-    minValue,
-    maxValue,
-    modulationAmounts: [],
-    contextualModAmounts: [],
-    macroAmounts: [],
-  };
+const createParameterUniform = defaultParameterUniform;
+
+/** Shader-unit ranges of the brush-level parameters, whose sliders run in percent. */
+const BRUSH_SHADER_RANGES = {
+  brushCurveTime: (step: State): ShaderRange => ({ value: (step.brushCurveTime as number) / 100, min: -1, max: 1 }),
+  brushSkewTime: (step: State): ShaderRange => ({
+    value: ((step.brushSkewTime as number) + 100) / 200,
+    min: 0,
+    max: 1,
+  }),
+  brushCurvePitch: (step: State): ShaderRange => ({ value: (step.brushCurvePitch as number) / 100, min: -1, max: 1 }),
+  brushSkewPitch: (step: State): ShaderRange => ({
+    value: ((step.brushSkewPitch as number) + 100) / 200,
+    min: 0,
+    max: 1,
+  }),
+  brushIntensity: (step: State): ShaderRange => ({ value: step.brushIntensity / 100, min: 0, max: 1 }),
+  brushPan: (step: State): ShaderRange => ({ value: step.brushPan / 100, min: -1, max: 1 }),
+} satisfies Partial<Record<ParameterKey, (step: State) => ShaderRange>>;
+
+type BrushRangeKey = keyof typeof BRUSH_SHADER_RANGES;
+
+// Source offsets read relative to the brush and carry no modulation in follow mode.
+function sourceOffsetUniform(
+  step: State,
+  key: "sourceTimeOffset" | "sourcePitchOffset",
+  ctx: ModContext,
+): ParameterUniform {
+  if (step.sourcePositionMode === "follow") return defaultParameterUniform(0, -1, 1);
+  return parameterUniform(step, key, ctx, { value: (step[key] as number) / 100, min: -1, max: 1 });
 }
 
-// Mutate a ParameterUniform slot in place from step state, avoiding the wrapper
-// allocation that `slot.value = { ... }` would incur.
-function writeModulatableParam(
-  target: ParameterUniform,
-  value: number,
-  minValue: number,
-  maxValue: number,
-  step: State,
-  key: ParameterKey,
-): void {
-  target.value = value;
-  target.minValue = minValue;
-  target.maxValue = maxValue;
-  target.modulationAmounts = getModAmountValuesNormalized(step, key);
-  target.contextualModAmounts = getContextualModAmountsNormalized(step, key);
-  target.macroAmounts = getMacroAmountValuesNormalized(step, key);
+function brushParamUniform(step: State, key: BrushRangeKey, ctx: ModContext): ParameterUniform {
+  return parameterUniform(step, key, ctx, BRUSH_SHADER_RANGES[key](step));
+}
+
+// Brush-level modulatable uniforms whose static term is refreshed per iteration.
+// Source offsets carry no modulation in follow mode.
+const BRUSH_PARAM_UNIFORMS: Array<{ uniform: keyof CommonUniforms; key: ParameterKey; followZero: boolean }> = [
+  { uniform: "brushCurveTime", key: "brushCurveTime", followZero: false },
+  { uniform: "brushSkewTime", key: "brushSkewTime", followZero: false },
+  { uniform: "brushCurvePitch", key: "brushCurvePitch", followZero: false },
+  { uniform: "brushSkewPitch", key: "brushSkewPitch", followZero: false },
+  { uniform: "brushIntensity", key: "brushIntensity", followZero: false },
+  { uniform: "brushPan", key: "brushPan", followZero: false },
+  { uniform: "sourceTimeOffset", key: "sourceTimeOffset", followZero: true },
+  { uniform: "sourcePitchOffset", key: "sourcePitchOffset", followZero: true },
+];
+
+function writeBrushParamStatics(uniforms: CommonUniforms, step: State, ctx: ModContext): void {
+  const follow = step.sourcePositionMode === "follow";
+  for (const { uniform, key, followZero } of BRUSH_PARAM_UNIFORMS) {
+    const target = (uniforms[uniform] as { value: ParameterUniform }).value;
+    if (followZero && follow) {
+      target.staticSum = 0;
+      target.staticWeight = 0;
+      continue;
+    }
+    const { staticSum, staticWeight } = staticModulation(step, key, target.minValue, target.maxValue, ctx);
+    target.staticSum = staticSum;
+    target.staticWeight = staticWeight;
+  }
 }
 
 /**
@@ -177,10 +215,6 @@ export class StrokeRenderer {
   // Materials
   private maskMaterial: RawShaderMaterial;
   private modulatorMaterial: RawShaderMaterial;
-
-  // Preallocated buffer reused across mask-update iterations to avoid allocating
-  // a fresh macro array on every step.
-  private maskMacroValuesBuf: number[] = [0, 0, 0, 0];
 
   // State
   // The spectrogram as it was before a preview run of committed strokes.
@@ -271,9 +305,6 @@ export class StrokeRenderer {
         destBandCount: { value: 0 },
         brushBottomLeftUv: { value: new Vector2(0, 0) },
         brushSizeUv: { value: new Vector2(0, 0) },
-        strokePressure: { value: 0 },
-        strokeTiltX: { value: 0.5 },
-        strokeTiltY: { value: 0.5 },
       },
       vertexShader: passThroughVert,
       fragmentShader: maskUpdateFrag,
@@ -288,7 +319,6 @@ export class StrokeRenderer {
     mu.brushSkewTime = { value: createParameterUniform(0.5, 0, 1) };
     mu.brushCurvePitch = { value: createParameterUniform(0, -1, 1) };
     mu.brushSkewPitch = { value: createParameterUniform(0.5, 0, 1) };
-    mu.macroValues = { value: this.maskMacroValuesBuf };
   }
 
   /**
@@ -533,6 +563,7 @@ export class StrokeRenderer {
    */
   buildStepUniforms(
     stepState: State,
+    ctx: ModContext,
     brushSizeUv: Vector2,
     sourceOffsetUv: Vector2,
     destTexture: WebGLRenderTarget | { texture: DataTexture | Texture },
@@ -556,6 +587,7 @@ export class StrokeRenderer {
       this.spectrogramData.bandsPerOctave,
       this.spectrogramData.numBands,
       stepState,
+      ctx,
     );
 
     return {
@@ -589,67 +621,13 @@ export class StrokeRenderer {
       viewZoomPowerY: { value: viewZoomPowerY },
       viewOffsetY: { value: viewOffsetY },
       brushBottomLeftUv: { value: cursorPos },
-      brushCurveTime: {
-        value: {
-          value: (stepState.brushCurveTime as number) / 100,
-          minValue: -1,
-          maxValue: 1,
-          modulationAmounts: getModAmountValuesNormalized(stepState, "brushCurveTime"),
-          contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushCurveTime"),
-          macroAmounts: getMacroAmountValuesNormalized(stepState, "brushCurveTime"),
-        },
-      },
-      brushSkewTime: {
-        value: {
-          value: ((stepState.brushSkewTime as number) + 100) / 200,
-          minValue: 0,
-          maxValue: 1,
-          modulationAmounts: getModAmountValuesNormalized(stepState, "brushSkewTime"),
-          contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushSkewTime"),
-          macroAmounts: getMacroAmountValuesNormalized(stepState, "brushSkewTime"),
-        },
-      },
-      brushCurvePitch: {
-        value: {
-          value: (stepState.brushCurvePitch as number) / 100,
-          minValue: -1,
-          maxValue: 1,
-          modulationAmounts: getModAmountValuesNormalized(stepState, "brushCurvePitch"),
-          contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushCurvePitch"),
-          macroAmounts: getMacroAmountValuesNormalized(stepState, "brushCurvePitch"),
-        },
-      },
-      brushSkewPitch: {
-        value: {
-          value: ((stepState.brushSkewPitch as number) + 100) / 200,
-          minValue: 0,
-          maxValue: 1,
-          modulationAmounts: getModAmountValuesNormalized(stepState, "brushSkewPitch"),
-          contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushSkewPitch"),
-          macroAmounts: getMacroAmountValuesNormalized(stepState, "brushSkewPitch"),
-        },
-      },
+      brushCurveTime: { value: brushParamUniform(stepState, "brushCurveTime", ctx) },
+      brushSkewTime: { value: brushParamUniform(stepState, "brushSkewTime", ctx) },
+      brushCurvePitch: { value: brushParamUniform(stepState, "brushCurvePitch", ctx) },
+      brushSkewPitch: { value: brushParamUniform(stepState, "brushSkewPitch", ctx) },
       brushSizeUv: { value: brushSizeUv },
-      brushIntensity: {
-        value: {
-          value: stepState.brushIntensity / 100,
-          minValue: 0,
-          maxValue: 1,
-          modulationAmounts: getModAmountValuesNormalized(stepState, "brushIntensity"),
-          contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushIntensity"),
-          macroAmounts: getMacroAmountValuesNormalized(stepState, "brushIntensity"),
-        },
-      },
-      brushPan: {
-        value: {
-          value: stepState.brushPan / 100,
-          minValue: -1,
-          maxValue: 1,
-          modulationAmounts: getModAmountValuesNormalized(stepState, "brushPan"),
-          contextualModAmounts: getContextualModAmountsNormalized(stepState, "brushPan"),
-          macroAmounts: getMacroAmountValuesNormalized(stepState, "brushPan"),
-        },
-      },
+      brushIntensity: { value: brushParamUniform(stepState, "brushIntensity", ctx) },
+      brushPan: { value: brushParamUniform(stepState, "brushPan", ctx) },
       bpm: { value: bpm },
       sourceOffsetX: { value: sourceOffsetUv.x },
       sourceOffsetY: { value: sourceOffsetUv.y },
@@ -667,44 +645,8 @@ export class StrokeRenderer {
             ? this.spectrogramData.numBands / sourceFile.spectrogramData.numBands
             : 1,
       },
-      sourceTimeOffset: {
-        value: {
-          value: stepState.sourcePositionMode === "follow" ? 0 : (stepState.sourceTimeOffset as number) / 100,
-          minValue: -1,
-          maxValue: 1,
-          modulationAmounts:
-            stepState.sourcePositionMode === "follow"
-              ? getModAmountValuesNormalized(stepState, "sourceTimeOffset").map(() => 0)
-              : getModAmountValuesNormalized(stepState, "sourceTimeOffset"),
-          contextualModAmounts:
-            stepState.sourcePositionMode === "follow"
-              ? getContextualModAmountsNormalized(stepState, "sourceTimeOffset").map(() => 0)
-              : getContextualModAmountsNormalized(stepState, "sourceTimeOffset"),
-          macroAmounts:
-            stepState.sourcePositionMode === "follow"
-              ? getMacroAmountValuesNormalized(stepState, "sourceTimeOffset").map(() => 0)
-              : getMacroAmountValuesNormalized(stepState, "sourceTimeOffset"),
-        },
-      },
-      sourcePitchOffset: {
-        value: {
-          value: stepState.sourcePositionMode === "follow" ? 0 : (stepState.sourcePitchOffset as number) / 100,
-          minValue: -1,
-          maxValue: 1,
-          modulationAmounts:
-            stepState.sourcePositionMode === "follow"
-              ? getModAmountValuesNormalized(stepState, "sourcePitchOffset").map(() => 0)
-              : getModAmountValuesNormalized(stepState, "sourcePitchOffset"),
-          contextualModAmounts:
-            stepState.sourcePositionMode === "follow"
-              ? getContextualModAmountsNormalized(stepState, "sourcePitchOffset").map(() => 0)
-              : getContextualModAmountsNormalized(stepState, "sourcePitchOffset"),
-          macroAmounts:
-            stepState.sourcePositionMode === "follow"
-              ? getMacroAmountValuesNormalized(stepState, "sourcePitchOffset").map(() => 0)
-              : getMacroAmountValuesNormalized(stepState, "sourcePitchOffset"),
-        },
-      },
+      sourceTimeOffset: { value: sourceOffsetUniform(stepState, "sourceTimeOffset", ctx) },
+      sourcePitchOffset: { value: sourceOffsetUniform(stepState, "sourcePitchOffset", ctx) },
       blendMode: { value: stepState.blendMode },
       algorithm: { value: stepState.algorithm },
       magnitudeLimit: { value: magnitudeLimit },
@@ -717,9 +659,6 @@ export class StrokeRenderer {
       modulator1SeqDataTex: { value: modulatorUniforms[0]?.seqDataTex || placeholderTexture },
       modulator2SeqDataTex: { value: modulatorUniforms[1]?.seqDataTex || placeholderTexture },
       modulator3SeqDataTex: { value: modulatorUniforms[2]?.seqDataTex || placeholderTexture },
-      macroValues: {
-        value: (stepState.brushes[stepState.activeBrushIndex]?.macroValues ?? [50, 50, 50, 50]).map((v) => v / 100),
-      },
     };
   }
 
@@ -904,10 +843,25 @@ export class StrokeRenderer {
       // Determine the blend destination for this step
       const blendDestFbo = stepIndex === 0 ? currentReadFBO : stepInputFbo;
 
+      // The Time/Pitch sources track the painted aim. On a full-size axis the
+      // footprint anchors to 0, so the aim is read straight from the cursor.
+      const stepContext: StrokeContext = {
+        iteration: 0,
+        time: stepFootprint.fullTime ? cursorPos.x : stepAnchor.x + stepBrushSizeUv.x / 2,
+        pitch: stepFootprint.fullPitch ? cursorPos.y : stepAnchor.y + stepBrushSizeUv.y / 2,
+        random: strokeRandom,
+        step: numSteps > 1 ? stepIndex / (numSteps - 1) : 0,
+        pressure,
+        tiltX: (tiltX + 90) / 180,
+        tiltY: (tiltY + 90) / 180,
+      };
+      const stepModContext = createModContext(stepState, stepContext);
+
       // Build common uniforms for this step
       const sourceBpm = state.filepathsBpm?.[sourceFile.filePath] || bpm;
       const commonUniforms = this.buildStepUniforms(
         stepState,
+        stepModContext,
         stepBrushSizeUv,
         sourceOffsetUv,
         blendDestFbo,
@@ -988,26 +942,8 @@ export class StrokeRenderer {
         sourceOffsetY: { value: 0 },
         sourceTimeScale: { value: 1.0 },
         sourceBandScale: { value: 1.0 },
-        sourceTimeOffset: {
-          value: {
-            value: 0,
-            minValue: -1,
-            maxValue: 1,
-            modulationAmounts: [0, 0, 0],
-            contextualModAmounts: [0, 0, 0, 0, 0, 0, 0, 0],
-            macroAmounts: [0, 0, 0, 0],
-          },
-        },
-        sourcePitchOffset: {
-          value: {
-            value: 0,
-            minValue: -1,
-            maxValue: 1,
-            modulationAmounts: [0, 0, 0],
-            contextualModAmounts: [0, 0, 0, 0, 0, 0, 0, 0],
-            macroAmounts: [0, 0, 0, 0],
-          },
-        },
+        sourceTimeOffset: { value: defaultParameterUniform(0, -1, 1) },
+        sourcePitchOffset: { value: defaultParameterUniform(0, -1, 1) },
       };
 
       // Reset currentReadFbo to the step's input for effect processing
@@ -1059,34 +995,28 @@ export class StrokeRenderer {
         }
       }
 
+      const iterationContexts = Array.from({ length: brushIterations }, (_, i) =>
+        createModContext(stepState, { ...stepContext, iteration: brushIterations > 1 ? i / (brushIterations - 1) : 0 }),
+      );
+      let staticsIteration = -1;
+
       // Apply each planned pass in order
       for (let passOrdinal = 0; passOrdinal < plannedPasses.length; passOrdinal++) {
         const { effect, effectState, passIndex: p, iteration: i, inSwappedDomain } = plannedPasses[passOrdinal];
         const isFirstOfStep = passOrdinal === 0;
         const uniformsForThisIteration = isFirstOfStep ? { ...commonUniforms } : { ...iterativeUniforms };
 
-        // Add contextual modulation uniforms for this iteration/step.
-        // The Time/Pitch position sources track the painted aim. On a
-        // full-size axis the footprint anchors to 0, so the aim is read
-        // straight from the cursor instead of the footprint center, letting
-        // full-axis effects still be modulated by where you paint.
-        const brushSizeUv = commonUniforms.brushSizeUv.value as Vector2;
-        const brushCenterTime = stepFootprint.fullTime ? cursorPos.x : stepAnchor.x + brushSizeUv.x / 2;
-        const brushCenterPitch = stepFootprint.fullPitch ? cursorPos.y : stepAnchor.y + brushSizeUv.y / 2;
-        uniformsForThisIteration.strokeIterationNormalized = {
-          value: brushIterations > 1 ? i / (brushIterations - 1) : 0,
-        };
-        uniformsForThisIteration.strokeTimePosition = { value: brushCenterTime };
-        uniformsForThisIteration.strokePitchPosition = { value: brushCenterPitch };
-        uniformsForThisIteration.strokeRandom = { value: strokeRandom };
         uniformsForThisIteration.inSwappedDomain = { value: inSwappedDomain };
-        uniformsForThisIteration.strokeStepNormalized = {
-          value: numSteps > 1 ? stepIndex / (numSteps - 1) : 0,
-        };
-        uniformsForThisIteration.strokePressure = { value: pressure };
-        // Normalize tilt from [-90,90] degrees to [0,1] range (center=0.5)
-        uniformsForThisIteration.strokeTiltX = { value: (tiltX + 90) / 180 };
-        uniformsForThisIteration.strokeTiltY = { value: (tiltY + 90) / 180 };
+
+        // The Iteration source moves between passes, so the static terms that
+        // depend on it are refreshed when it changes. The brush-level uniforms
+        // are shared across the pass copies, so writing them in place reaches
+        // every pass.
+        const iterationContext = iterationContexts[i];
+        if (i !== staticsIteration) {
+          writeBrushParamStatics(commonUniforms, stepState, iterationContext);
+          staticsIteration = i;
+        }
 
         const material = effect.materials[p];
         this.fboMesh.material = material;
@@ -1125,6 +1055,7 @@ export class StrokeRenderer {
           passIndex: p,
           file: sourceFile,
           state: effectState,
+          modContext: iterationContext,
         });
 
         this.gl.setRenderTarget(currentWriteFbo);
@@ -1253,16 +1184,6 @@ export class StrokeRenderer {
     uniforms.modulator1ImageTex.value = modulator1Texture || placeholderTexture;
     uniforms.modulator2ImageTex.value = modulator2Texture || placeholderTexture;
     uniforms.modulator3ImageTex.value = modulator3Texture || placeholderTexture;
-    uniforms.strokeIterationNormalized.value = 1;
-    uniforms.strokeRandom.value = strokeRandom;
-    uniforms.strokePressure.value = pressure;
-    uniforms.strokeTiltX.value = (tiltX + 90) / 180;
-    uniforms.strokeTiltY.value = (tiltY + 90) / 180;
-
-    // Fill the preallocated macro buffer in place — the uniform slot was wired
-    // to this.maskMacroValuesBuf at construction time.
-    const macros = state.brushes[state.activeBrushIndex]?.macroValues ?? [50, 50, 50, 50];
-    for (let i = 0; i < 4; i++) this.maskMacroValuesBuf[i] = (macros[i] ?? 50) / 100;
 
     this.fboMesh.material = this.maskMaterial;
 
@@ -1276,6 +1197,18 @@ export class StrokeRenderer {
       const brushSizeUv = footprint.sizeUv;
       const brushAnchor = resolveBrushAnchor(cursorPos, footprint.fullTime, footprint.fullPitch);
 
+      // The mask is the envelope of the whole stroke, so it reads the last iteration.
+      const maskContext = createModContext(stepState, {
+        iteration: 1,
+        time: footprint.fullTime ? cursorPos.x : brushAnchor.x + brushSizeUv.x / 2,
+        pitch: footprint.fullPitch ? cursorPos.y : brushAnchor.y + brushSizeUv.y / 2,
+        random: strokeRandom,
+        step: numSteps > 1 ? stepIndex / (numSteps - 1) : 0,
+        pressure,
+        tiltX: (tiltX + 90) / 180,
+        tiltY: (tiltY + 90) / 180,
+      });
+
       // Modulator params are per-step; rebuild for each step.
       const modulatorUniforms = buildModulatorUniforms(
         bpm,
@@ -1283,58 +1216,50 @@ export class StrokeRenderer {
         this.spectrogramData.bandsPerOctave,
         this.spectrogramData.numBands,
         stepState,
+        maskContext,
       );
       uniforms.modulators.value = modulatorUniforms;
       uniforms.modulator1SeqDataTex.value = modulatorUniforms[0]?.seqDataTex || placeholderTexture;
       uniforms.modulator2SeqDataTex.value = modulatorUniforms[1]?.seqDataTex || placeholderTexture;
       uniforms.modulator3SeqDataTex.value = modulatorUniforms[2]?.seqDataTex || placeholderTexture;
 
-      uniforms.strokeTimePosition.value = footprint.fullTime ? cursorPos.x : brushAnchor.x + brushSizeUv.x / 2;
-      uniforms.strokePitchPosition.value = footprint.fullPitch ? cursorPos.y : brushAnchor.y + brushSizeUv.y / 2;
-      uniforms.strokeStepNormalized.value = numSteps > 1 ? stepIndex / (numSteps - 1) : 0;
-
       (uniforms.brushBottomLeftUv.value as Vector2).copy(brushAnchor);
       (uniforms.brushSizeUv.value as Vector2).copy(brushSizeUv);
 
-      writeModulatableParam(
+      writeParameterUniform(
         uniforms.brushIntensity.value as ParameterUniform,
-        (stepState.brushIntensity as number) / 100,
-        0,
-        1,
         stepState,
         "brushIntensity",
+        maskContext,
+        BRUSH_SHADER_RANGES.brushIntensity(stepState),
       );
-      writeModulatableParam(
+      writeParameterUniform(
         uniforms.brushCurveTime.value as ParameterUniform,
-        (stepState.brushCurveTime as number) / 100,
-        -1,
-        1,
         stepState,
         "brushCurveTime",
+        maskContext,
+        BRUSH_SHADER_RANGES.brushCurveTime(stepState),
       );
-      writeModulatableParam(
+      writeParameterUniform(
         uniforms.brushSkewTime.value as ParameterUniform,
-        ((stepState.brushSkewTime as number) + 100) / 200,
-        0,
-        1,
         stepState,
         "brushSkewTime",
+        maskContext,
+        BRUSH_SHADER_RANGES.brushSkewTime(stepState),
       );
-      writeModulatableParam(
+      writeParameterUniform(
         uniforms.brushCurvePitch.value as ParameterUniform,
-        (stepState.brushCurvePitch as number) / 100,
-        -1,
-        1,
         stepState,
         "brushCurvePitch",
+        maskContext,
+        BRUSH_SHADER_RANGES.brushCurvePitch(stepState),
       );
-      writeModulatableParam(
+      writeParameterUniform(
         uniforms.brushSkewPitch.value as ParameterUniform,
-        ((stepState.brushSkewPitch as number) + 100) / 200,
-        0,
-        1,
         stepState,
         "brushSkewPitch",
+        maskContext,
+        BRUSH_SHADER_RANGES.brushSkewPitch(stepState),
       );
 
       // The mask shader samples the precomputed modulator textures (via

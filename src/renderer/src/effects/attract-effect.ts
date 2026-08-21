@@ -1,4 +1,3 @@
-import { getNumberParameterDef } from "@renderer/parameters";
 import { buildScaleOffsets } from "@renderer/lib/scale-snap";
 import { ONSETS_GRID_VALUE } from "@renderer/lib/constants";
 import { unitsToUv } from "@renderer/lib/utils";
@@ -14,16 +13,10 @@ import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import attractEffectFrag from "../glsl/attract-effect.frag";
 import { useStore } from "../store";
+import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, destinationLayout, UpdateEffectUniformsProps } from "./base-effect";
 
-const defaultUniformValue = {
-  value: 0,
-  minValue: -100,
-  maxValue: 100,
-  modulationAmounts: [] as number[],
-  contextualModAmounts: [] as number[],
-  macroAmounts: [] as number[],
-};
+const defaultUniformValue = defaultParameterUniform(0, -100, 100);
 
 // Pass layout: [pitch axis, time axis]
 const PASS_AXES = [0, 1];
@@ -92,16 +85,7 @@ class AttractEffect extends BaseEffect {
     if (!material) return;
 
     const updateParam = (uniformName: string, stateKey: keyof typeof state) => {
-      const value = state[stateKey] as number;
-      const def = getNumberParameterDef(stateKey);
-      material.uniforms[uniformName].value = {
-        value,
-        minValue: def.min,
-        maxValue: def.max,
-        modulationAmounts: getModAmountValuesNormalized(state, stateKey),
-        contextualModAmounts: getContextualModAmountsNormalized(state, stateKey),
-        macroAmounts: getMacroAmountValuesNormalized(state, stateKey),
-      };
+      material.uniforms[uniformName].value = parameterUniform(state, stateKey, props.modContext);
     };
 
     updateParam("attractAmountX", "attractAmountX");

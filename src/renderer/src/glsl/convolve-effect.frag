@@ -13,7 +13,7 @@ uniform int       convolveEdgeMode;
 uniform Parameter convolveIrTimeOffset;
 uniform Parameter convolveIrPitchShiftSemi;
 uniform Parameter convolveIrRate;
-uniform Parameter convolveGain;
+uniform Parameter convolveGainDb;
 uniform float     convolveIrNormScale;
 
 void main() {
@@ -35,26 +35,10 @@ void main() {
   // Convolution parameters drive tap geometry shared by both channels; keep mono.
   vec2 mods[NUM_MODULATORS];
   sampleModulators(mods);
-  float irTimeOff = applyModulationCachedMono(
-    convolveIrTimeOffset.value, convolveIrTimeOffset.minValue, convolveIrTimeOffset.maxValue,
-    convolveIrTimeOffset.modulationAmounts, convolveIrTimeOffset.contextualModAmounts, convolveIrTimeOffset.macroAmounts,
-    mods
-  );
-  float irPitchShiftSemi = applyModulationCachedMono(
-    convolveIrPitchShiftSemi.value, convolveIrPitchShiftSemi.minValue, convolveIrPitchShiftSemi.maxValue,
-    convolveIrPitchShiftSemi.modulationAmounts, convolveIrPitchShiftSemi.contextualModAmounts, convolveIrPitchShiftSemi.macroAmounts,
-    mods
-  );
-  float rate = applyModulationCachedMono(
-    convolveIrRate.value, convolveIrRate.minValue, convolveIrRate.maxValue,
-    convolveIrRate.modulationAmounts, convolveIrRate.contextualModAmounts, convolveIrRate.macroAmounts,
-    mods
-  );
-  float gain = applyModulationCachedMono(
-    convolveGain.value, convolveGain.minValue, convolveGain.maxValue,
-    convolveGain.modulationAmounts, convolveGain.contextualModAmounts, convolveGain.macroAmounts,
-    mods
-  );
+  float irTimeOff = resolveParameterMono(convolveIrTimeOffset, mods);
+  float irPitchShiftSemi = resolveParameterMono(convolveIrPitchShiftSemi, mods);
+  float rate = resolveParameterMono(convolveIrRate, mods);
+  float gain = pow(10.0, resolveParameterMono(convolveGainDb, mods) / 20.0);
 
   // ---- Hoisted band metadata ------------------------------------------------
   // gaborator: each band has its own time resolution. We must iterate one tap per

@@ -1,5 +1,7 @@
+import { defaultParameterUniform } from "@renderer/lib/static-modulation";
 import { OpenFile, State } from "@renderer/store/types";
-import { ParameterUniform } from "@renderer/types";
+import { ModulatorParameterUniform, ParameterUniform } from "@renderer/types";
+import type { ModContext } from "@renderer/lib/static-modulation";
 import * as THREE from "three";
 import { Texture, Vector2 } from "three";
 
@@ -7,18 +9,21 @@ export type Modulator = {
   modulatorMode: number;
   modulatorPatternShape: number;
   modulatorPhaseMode: number;
-  modulatorPatternRateX: ParameterUniform;
-  modulatorPatternRateY: ParameterUniform;
-  modulatorStrength: ParameterUniform;
-  modulatorRotation: ParameterUniform;
+  modulatorPhaseX: ModulatorParameterUniform;
+  modulatorPhaseY: ModulatorParameterUniform;
+  modulatorPatternRateX: ModulatorParameterUniform;
+  modulatorPatternRateY: ModulatorParameterUniform;
+  modulatorStrength: ModulatorParameterUniform;
+  modulatorRotation: ModulatorParameterUniform;
+  modulatorStereoSpread: ModulatorParameterUniform;
   modulatorEnvelopeMinDb: number;
   modulatorEnvelopeMaxDb: number;
   // Sequencer fields
   seqStepsX: number;
   seqStepsY: number;
-  seqLoopX: ParameterUniform;
-  seqLoopY: ParameterUniform;
-  seqSwing: ParameterUniform;
+  seqLoopX: ModulatorParameterUniform;
+  seqLoopY: ModulatorParameterUniform;
+  seqSwing: ModulatorParameterUniform;
   seqDataTex: THREE.DataTexture | null;
 };
 
@@ -95,17 +100,6 @@ export type CommonUniforms = {
   // step). tex0 packs modulators 0 and 1 (xy/zw), tex1 packs modulator 2 (xy).
   modulatorTex0: { value: Texture | null };
   modulatorTex1: { value: Texture | null };
-  // Contextual stroke uniforms for contextual modulation sources
-  strokeIterationNormalized?: { value: number };
-  strokeTimePosition?: { value: number };
-  strokePitchPosition?: { value: number };
-  strokeRandom?: { value: number };
-  strokeStepNormalized?: { value: number };
-  strokePressure?: { value: number };
-  strokeTiltX?: { value: number };
-  strokeTiltY?: { value: number };
-  // Macro values for the active brush, used as modulation sources
-  macroValues: { value: number[] };
   // Non-cumulative stroke uniforms for preventing accumulation
   useStrokeMask?: { value: boolean };
   strokeMaskTex?: { value: Texture | null };
@@ -148,56 +142,11 @@ export function createDefaultUniforms(): CommonUniforms {
     viewOffset: { value: 0.0 },
     viewZoomPowerY: { value: 0.0 },
     viewOffsetY: { value: 0.0 },
-    brushCurveTime: {
-      value: {
-        value: 0.0,
-        minValue: -1.0,
-        maxValue: 1.0,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
-    brushSkewTime: {
-      value: {
-        value: 0.5,
-        minValue: 0.0,
-        maxValue: 1.0,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
-    brushCurvePitch: {
-      value: {
-        value: 0.0,
-        minValue: -1.0,
-        maxValue: 1.0,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
-    brushSkewPitch: {
-      value: {
-        value: 0.5,
-        minValue: 0.0,
-        maxValue: 1.0,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
-    brushIntensity: {
-      value: {
-        value: 1.0,
-        minValue: 0.0,
-        maxValue: 1.0,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
+    brushCurveTime: { value: defaultParameterUniform(0.0, -1.0, 1.0) },
+    brushSkewTime: { value: defaultParameterUniform(0.5, 0.0, 1.0) },
+    brushCurvePitch: { value: defaultParameterUniform(0.0, -1.0, 1.0) },
+    brushSkewPitch: { value: defaultParameterUniform(0.5, 0.0, 1.0) },
+    brushIntensity: { value: defaultParameterUniform(1.0, 0.0, 1.0) },
     sourceOffsetX: {
       value: 0,
     },
@@ -206,36 +155,9 @@ export function createDefaultUniforms(): CommonUniforms {
     },
     sourceTimeScale: { value: 1 },
     sourceBandScale: { value: 1 },
-    sourceTimeOffset: {
-      value: {
-        value: 0,
-        minValue: -1,
-        maxValue: 1,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
-    sourcePitchOffset: {
-      value: {
-        value: 0,
-        minValue: -1,
-        maxValue: 1,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
-    brushPan: {
-      value: {
-        value: 0.0,
-        minValue: 0.0,
-        maxValue: 1.0,
-        modulationAmounts: [],
-        contextualModAmounts: [],
-        macroAmounts: [],
-      },
-    },
+    sourceTimeOffset: { value: defaultParameterUniform(0, -1, 1) },
+    sourcePitchOffset: { value: defaultParameterUniform(0, -1, 1) },
+    brushPan: { value: defaultParameterUniform(0.0, 0.0, 1.0) },
     bpm: { value: 120.0 },
     blendMode: { value: 0 },
     magnitudeLimit: { value: 0.0 },
@@ -254,12 +176,6 @@ export function createDefaultUniforms(): CommonUniforms {
     modulator3SeqDataTex: { value: null },
     modulatorTex0: { value: null },
     modulatorTex1: { value: null },
-    strokeIterationNormalized: { value: 0 },
-    strokeTimePosition: { value: 0 },
-    strokePitchPosition: { value: 0 },
-    strokeRandom: { value: 0 },
-    strokeStepNormalized: { value: 0 },
-    macroValues: { value: [0.5, 0.5, 0.5, 0.5] },
     // Non-cumulative stroke uniforms
     useStrokeMask: { value: false },
     strokeMaskTex: { value: null },
@@ -294,6 +210,7 @@ export type UpdateEffectUniformsProps = {
   passIndex: number;
   file: OpenFile;
   state?: State;
+  modContext: ModContext;
 };
 
 export abstract class BaseEffect {

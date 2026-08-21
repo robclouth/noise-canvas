@@ -69,23 +69,11 @@ vec4 applyEffectStroke(vec4 sourceTexel, ProcessingUvs coords, float audioLevelD
   // collapse modulation to scalar.
   vec2 mods[NUM_MODULATORS];
   sampleModulators(mods);
-  float azValue = applyModulationCachedMono(
-    azimuth.value, azimuth.minValue, azimuth.maxValue,
-    azimuth.modulationAmounts, azimuth.contextualModAmounts, azimuth.macroAmounts,
-    mods
-  );
+  float azValue = resolveParameterMono(azimuth, mods);
 
-  float distValue = applyModulationCachedMono(
-    distance.value, distance.minValue, distance.maxValue,
-    distance.modulationAmounts, distance.contextualModAmounts, distance.macroAmounts,
-    mods
-  );
+  float distValue = resolveParameterMono(distance, mods);
 
-  float stereoAngleValue = applyModulationCachedMono(
-    stereoAngle.value, stereoAngle.minValue, stereoAngle.maxValue,
-    stereoAngle.modulationAmounts, stereoAngle.contextualModAmounts, stereoAngle.macroAmounts,
-    mods
-  );
+  float stereoAngleValue = resolveParameterMono(stereoAngle, mods);
 
   // Get frequency of this band from metadata
   vec4 meta = getDestMetadata(coords.dest);

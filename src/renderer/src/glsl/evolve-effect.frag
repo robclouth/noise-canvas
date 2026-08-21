@@ -32,16 +32,16 @@ void main() {
     // Per-channel dynamics scalars (applied to pre-computed L/R samples).
     vec2 mods[NUM_MODULATORS];
     sampleModulators(mods);
-    vec2 flow = applyModulationCached(evolveFlow.value, evolveFlow.minValue, evolveFlow.maxValue, evolveFlow.modulationAmounts, evolveFlow.contextualModAmounts, evolveFlow.macroAmounts, mods) / 100.0;
-    vec2 spread = applyModulationCached(evolveSpread.value, evolveSpread.minValue, evolveSpread.maxValue, evolveSpread.modulationAmounts, evolveSpread.contextualModAmounts, evolveSpread.macroAmounts, mods) / 100.0;
-    vec2 grow = applyModulationCached(evolveGrow.value, evolveGrow.minValue, evolveGrow.maxValue, evolveGrow.modulationAmounts, evolveGrow.contextualModAmounts, evolveGrow.macroAmounts, mods) / 100.0;
-    vec2 swirl = applyModulationCached(evolveSwirl.value, evolveSwirl.minValue, evolveSwirl.maxValue, evolveSwirl.modulationAmounts, evolveSwirl.contextualModAmounts, evolveSwirl.macroAmounts, mods) / 100.0;
-    vec2 driftX = applyModulationCached(evolveDriftX.value, evolveDriftX.minValue, evolveDriftX.maxValue, evolveDriftX.modulationAmounts, evolveDriftX.contextualModAmounts, evolveDriftX.macroAmounts, mods) / 100.0;
-    vec2 driftY = applyModulationCached(evolveDriftY.value, evolveDriftY.minValue, evolveDriftY.maxValue, evolveDriftY.modulationAmounts, evolveDriftY.contextualModAmounts, evolveDriftY.macroAmounts, mods) / 100.0;
-    vec2 decay = applyModulationCached(evolveDecay.value, evolveDecay.minValue, evolveDecay.maxValue, evolveDecay.modulationAmounts, evolveDecay.contextualModAmounts, evolveDecay.macroAmounts, mods) / 100.0;
+    vec2 flow = resolveParameter(evolveFlow, mods) / 100.0;
+    vec2 spread = resolveParameter(evolveSpread, mods) / 100.0;
+    vec2 grow = resolveParameter(evolveGrow, mods) / 100.0;
+    vec2 swirl = resolveParameter(evolveSwirl, mods) / 100.0;
+    vec2 driftX = resolveParameter(evolveDriftX, mods) / 100.0;
+    vec2 driftY = resolveParameter(evolveDriftY, mods) / 100.0;
+    vec2 decay = resolveParameter(evolveDecay, mods) / 100.0;
     // Neighborhood scale feeds source sampling; stereo-aware with fast-path.
-    vec2 scaleX = applyModulationCached(evolveScaleX.value, evolveScaleX.minValue, evolveScaleX.maxValue, evolveScaleX.modulationAmounts, evolveScaleX.contextualModAmounts, evolveScaleX.macroAmounts, mods) / 100.0;
-    vec2 scaleY = applyModulationCached(evolveScaleY.value, evolveScaleY.minValue, evolveScaleY.maxValue, evolveScaleY.modulationAmounts, evolveScaleY.contextualModAmounts, evolveScaleY.macroAmounts, mods) / 100.0;
+    vec2 scaleX = resolveParameter(evolveScaleX, mods) / 100.0;
+    vec2 scaleY = resolveParameter(evolveScaleY, mods) / 100.0;
 
     bool sameNeighborhood = (scaleX.x == scaleX.y) && (scaleY.x == scaleY.y) && coords.sameSourceUv;
 

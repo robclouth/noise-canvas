@@ -135,22 +135,10 @@ void main() {
 
   vec2 mods[NUM_MODULATORS];
   sampleModulators(mods);
-  float amountX = applyModulationCachedMono(
-    attractAmountX.value, attractAmountX.minValue, attractAmountX.maxValue,
-    attractAmountX.modulationAmounts, attractAmountX.contextualModAmounts, attractAmountX.macroAmounts,
-    mods) / 100.0;
-  float amountY = applyModulationCachedMono(
-    attractAmountY.value, attractAmountY.minValue, attractAmountY.maxValue,
-    attractAmountY.modulationAmounts, attractAmountY.contextualModAmounts, attractAmountY.macroAmounts,
-    mods) / 100.0;
-  float smoothXBeats = applyModulationCachedMono(
-    attractSmoothX.value, attractSmoothX.minValue, attractSmoothX.maxValue,
-    attractSmoothX.modulationAmounts, attractSmoothX.contextualModAmounts, attractSmoothX.macroAmounts,
-    mods);
-  float smoothYSemis = applyModulationCachedMono(
-    attractSmoothY.value, attractSmoothY.minValue, attractSmoothY.maxValue,
-    attractSmoothY.modulationAmounts, attractSmoothY.contextualModAmounts, attractSmoothY.macroAmounts,
-    mods);
+  float amountX = resolveParameterMono(attractAmountX, mods) / 100.0;
+  float amountY = resolveParameterMono(attractAmountY, mods) / 100.0;
+  float smoothXBeats = resolveParameterMono(attractSmoothX, mods);
+  float smoothYSemis = resolveParameterMono(attractSmoothY, mods);
 
   float bandsPerSemi = destBandsPerOctave / 12.0;
   float anchorUvX = destUv.x - getEffectiveBrushOffset(destUv).x;

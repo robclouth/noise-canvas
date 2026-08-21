@@ -256,6 +256,8 @@ export function hasNestedModulatorRouting(state: ModulatorsState): boolean {
     if (modAmounts.some((amount) => amount !== 0)) return true;
     const macroAmounts = getMacroAmountValuesNormalized(state, key as ParameterKey);
     if (macroAmounts.some((amount) => amount !== 0)) return true;
+    const contextualAmounts = getContextualModAmountsNormalized(state, key as ParameterKey);
+    if (contextualAmounts.some((amount) => amount !== 0)) return true;
   }
   return false;
 }

@@ -1,23 +1,11 @@
-import { getNumberParameterDef } from "@renderer/parameters";
-import {
-  getContextualModAmountsNormalized,
-  getModAmountValuesNormalized,
-  getMacroAmountValuesNormalized,
-} from "@renderer/store/modulators";
 import { GLSL3, RawShaderMaterial } from "three";
 import evolveEffectFrag from "../glsl/evolve-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useStore } from "../store";
+import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
-const defaultUniformValue = {
-  value: 0,
-  minValue: -100,
-  maxValue: 100,
-  modulationAmounts: [] as number[],
-  contextualModAmounts: [] as number[],
-  macroAmounts: [] as number[],
-};
+const defaultUniformValue = defaultParameterUniform(0, -100, 100);
 
 class EvolveEffect extends BaseEffect {
   constructor() {
@@ -51,16 +39,7 @@ class EvolveEffect extends BaseEffect {
 
     // Helper to update a parameter uniform
     const updateParam = (uniformName: string, stateKey: keyof typeof state) => {
-      const value = state[stateKey] as number;
-      const def = getNumberParameterDef(stateKey);
-      material.uniforms[uniformName].value = {
-        value,
-        minValue: def.min,
-        maxValue: def.max,
-        modulationAmounts: getModAmountValuesNormalized(state, stateKey),
-        contextualModAmounts: getContextualModAmountsNormalized(state, stateKey),
-        macroAmounts: getMacroAmountValuesNormalized(state, stateKey),
-      };
+      material.uniforms[uniformName].value = parameterUniform(state, stateKey, props.modContext);
     };
 
     updateParam("evolveFlow", "evolveFlow");

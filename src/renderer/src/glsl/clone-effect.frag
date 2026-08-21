@@ -6,7 +6,6 @@
 // on Y — so modulation sweeps the knob's own arc. They convert to UV here.
 uniform Parameter cloneSpaceX;
 uniform Parameter cloneSpaceY;
-uniform float cloneBeatsLog; // log1p of the beats range, the log-bipolar curve constant
 uniform float cloneBeatsToUv; // file UV per beat
 uniform int cloneCount;
 uniform Parameter cloneDecay;
@@ -73,12 +72,9 @@ void main() {
     vec2 space;
     vec2 spaceSemis = vec2(0.0);
     if (isXPass) {
-        vec2 pos = clamp(applyModulationCached(cloneSpaceX.value, cloneSpaceX.minValue, cloneSpaceX.maxValue, cloneSpaceX.modulationAmounts, cloneSpaceX.contextualModAmounts, cloneSpaceX.macroAmounts, mods), 0.0, 1.0);
-        vec2 arc = pos * 2.0 - 1.0;
-        vec2 beats = sign(arc) * (exp(abs(arc) * cloneBeatsLog) - 1.0);
-        space = beats * cloneBeatsToUv;
+        space = resolveParameter(cloneSpaceX, mods) * cloneBeatsToUv;
     } else {
-        spaceSemis = applyModulationCached(cloneSpaceY.value, cloneSpaceY.minValue, cloneSpaceY.maxValue, cloneSpaceY.modulationAmounts, cloneSpaceY.contextualModAmounts, cloneSpaceY.macroAmounts, mods);
+        spaceSemis = resolveParameter(cloneSpaceY, mods);
         space = vec2(semisToUv(spaceSemis.x), semisToUv(spaceSemis.y));
     }
 
@@ -86,7 +82,7 @@ void main() {
     int tableSize = textureSize(cloneShapeTex, 0).x;
 
     vec2 decayFactor = clamp(
-        applyModulationCached(cloneDecay.value, cloneDecay.minValue, cloneDecay.maxValue, cloneDecay.modulationAmounts, cloneDecay.contextualModAmounts, cloneDecay.macroAmounts, mods),
+        resolveParameter(cloneDecay, mods),
         0.0, 1.0
     );
 

@@ -1,11 +1,8 @@
 import { BrushStep, NumberParameter, parameterDefs } from "@renderer/parameters";
 import { openFiles } from "@renderer/store/files";
-import {
-  getContextualModAmountsNormalized,
-  getMacroAmountValuesNormalized,
-  getModAmountValuesNormalized,
-} from "@renderer/store/modulators";
+import { getModAmountValuesNormalized } from "@renderer/store/modulators";
 import { ParameterKey, State } from "@renderer/store/types";
+import { ModulatorParameterUniform } from "@renderer/types";
 import { useMemo } from "react";
 import { DataTexture, FloatType, RedFormat } from "three";
 import { Note, Scale } from "tonal";
@@ -21,6 +18,7 @@ import {
   NUM_MODULATORS,
 } from "./constants";
 import { perfMark } from "./perf-probe";
+import { ModContext, nestedStaticModulation } from "./static-modulation";
 import { bandIndexToPitchUv, gridCellBeats, gridCellSemis, resolveBrushFootprint, unitsToUv } from "./utils";
 
 // Every step parameter the modulator preview reads is prefixed `modulator<n>` —
@@ -51,15 +49,7 @@ export const modulatorParamsEqual = (a?: BrushStep, b?: BrushStep): boolean => {
   return true;
 };
 
-// Type for modulatable parameter with modulation amounts
-interface ModulatableParam {
-  value: number;
-  minValue: number;
-  maxValue: number;
-  modulationAmounts: number[];
-  contextualModAmounts: number[];
-  macroAmounts: number[];
-}
+type ModulatableParam = ModulatorParameterUniform;
 
 // Type for a single modulator's uniforms
 export interface ModulatorUniform {
@@ -192,12 +182,40 @@ function createSpanResolver(
   };
 }
 
+// Modulator parameter fields paired with the parameter key suffix they are built from.
+const NESTED_PARAM_FIELDS: Array<[keyof ModulatorUniform, string]> = [
+  ["modulatorPhaseX", "PhaseX"],
+  ["modulatorPhaseY", "PhaseY"],
+  ["modulatorPatternRateX", "PatternRateBeats"],
+  ["modulatorPatternRateY", "PatternRateSemis"],
+  ["modulatorStrength", "Strength"],
+  ["modulatorRotation", "Rotation"],
+  ["modulatorStereoSpread", "StereoSpread"],
+  ["seqLoopX", "SeqLoopBeats"],
+  ["seqLoopY", "SeqLoopSemis"],
+  ["seqSwing", "SeqSwing"],
+];
+
+/** Writes each modulator parameter's stroke-context and macro contributions for the dab described by `ctx`. */
+export function writeModulatorStatics(modulators: ModulatorUniform[], state: State, ctx: ModContext): void {
+  for (let i = 0; i < modulators.length; i++) {
+    for (const [field, suffix] of NESTED_PARAM_FIELDS) {
+      const param = modulators[i][field] as ModulatorParameterUniform;
+      const key = `modulator${i + 1}${suffix}` as ParameterKey;
+      const { staticScale, staticOffset } = nestedStaticModulation(state, key, param.minValue, param.maxValue, ctx);
+      param.staticScale = staticScale;
+      param.staticOffset = staticOffset;
+    }
+  }
+}
+
 export const buildModulatorUniforms = (
   bpm: number,
   totalDuration: number,
   bandsPerOctave: number,
   numBands: number,
   stateOverride?: State,
+  ctx?: ModContext,
 ) =>
   perfMark("buildModulatorUniforms", () => {
     const state = stateOverride ?? useStore.getState();
@@ -238,65 +256,56 @@ export const buildModulatorUniforms = (
           minValue: 0.0,
           maxValue: 1.0,
           modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}PhaseX` as ParameterKey),
-          contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}PhaseX` as ParameterKey),
-          macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}PhaseX` as ParameterKey),
+          staticScale: 1,
+          staticOffset: 0,
         },
         modulatorPhaseY: {
           value: phaseY / 100,
           minValue: 0.0,
           maxValue: 1.0,
           modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}PhaseY` as ParameterKey),
-          contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}PhaseY` as ParameterKey),
-          macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}PhaseY` as ParameterKey),
+          staticScale: 1,
+          staticOffset: 0,
         },
         modulatorPatternRateX: {
           value: modulatorPatternRate.x,
           minValue: 0.0,
           maxValue: maxRateUv.x,
           modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}PatternRateBeats` as ParameterKey),
-          contextualModAmounts: getContextualModAmountsNormalized(
-            state,
-            `modulator${i + 1}PatternRateBeats` as ParameterKey,
-          ),
-          macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}PatternRateBeats` as ParameterKey),
+          staticScale: 1,
+          staticOffset: 0,
         },
         modulatorPatternRateY: {
           value: modulatorPatternRate.y,
           minValue: 0.0,
           maxValue: maxRateUv.y,
           modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}PatternRateSemis` as ParameterKey),
-          contextualModAmounts: getContextualModAmountsNormalized(
-            state,
-            `modulator${i + 1}PatternRateSemis` as ParameterKey,
-          ),
-          macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}PatternRateSemis` as ParameterKey),
+          staticScale: 1,
+          staticOffset: 0,
         },
         modulatorStrength: {
           value: strength / 100,
           minValue: 0.0,
           maxValue: 1.0,
           modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}Strength` as ParameterKey),
-          contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}Strength` as ParameterKey),
-          macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}Strength` as ParameterKey),
+          staticScale: 1,
+          staticOffset: 0,
         },
         modulatorRotation: {
           value: rotation,
           minValue: rotationDef.min,
           maxValue: rotationDef.max,
           modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}Rotation` as ParameterKey),
-          contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}Rotation` as ParameterKey),
-          macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}Rotation` as ParameterKey),
+          staticScale: 1,
+          staticOffset: 0,
         },
         modulatorStereoSpread: {
           value: stereoSpread / 100,
           minValue: -1.0,
           maxValue: 1.0,
           modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}StereoSpread` as ParameterKey),
-          contextualModAmounts: getContextualModAmountsNormalized(
-            state,
-            `modulator${i + 1}StereoSpread` as ParameterKey,
-          ),
-          macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}StereoSpread` as ParameterKey),
+          staticScale: 1,
+          staticOffset: 0,
         },
         modulatorEnvelopeSmoothing: envelopeSmoothingUv,
         modulatorEnvelopeSource: envelopeSource,
@@ -313,11 +322,8 @@ export const buildModulatorUniforms = (
             minValue: span.uvY(loopSemisDef?.min || 1),
             maxValue: span.uvY(loopSemisDef?.max || 96),
             modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}SeqLoopSemis` as ParameterKey),
-            contextualModAmounts: getContextualModAmountsNormalized(
-              state,
-              `modulator${i + 1}SeqLoopSemis` as ParameterKey,
-            ),
-            macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}SeqLoopSemis` as ParameterKey),
+            staticScale: 1,
+            staticOffset: 0,
           };
         })(),
         seqSwing: {
@@ -325,8 +331,8 @@ export const buildModulatorUniforms = (
           minValue: 0.0,
           maxValue: 1.0,
           modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}SeqSwing` as ParameterKey),
-          contextualModAmounts: getContextualModAmountsNormalized(state, `modulator${i + 1}SeqSwing` as ParameterKey),
-          macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}SeqSwing` as ParameterKey),
+          staticScale: 1,
+          staticOffset: 0,
         },
         seqLoopX: (() => {
           const loopBeats = (state[`modulator${i + 1}SeqLoopBeats`] as number) || 1;
@@ -336,11 +342,8 @@ export const buildModulatorUniforms = (
             minValue: span.uvX(loopBeatsDef?.min || 1 / 64),
             maxValue: span.uvX(loopBeatsDef?.max || 32),
             modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}SeqLoopBeats` as ParameterKey),
-            contextualModAmounts: getContextualModAmountsNormalized(
-              state,
-              `modulator${i + 1}SeqLoopBeats` as ParameterKey,
-            ),
-            macroAmounts: getMacroAmountValuesNormalized(state, `modulator${i + 1}SeqLoopBeats` as ParameterKey),
+            staticScale: 1,
+            staticOffset: 0,
           };
         })(),
         seqDataTex: (() => {
@@ -350,6 +353,7 @@ export const buildModulatorUniforms = (
       });
     }
 
+    if (ctx) writeModulatorStatics(modulators, state, ctx);
     return modulators;
   });
 

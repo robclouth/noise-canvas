@@ -32,6 +32,16 @@ export const ENVELOPE_SHAPES: readonly EnvelopeShape[] = [
     preview: { brushCurveTime: 30, brushSkewTime: 0, brushCurvePitch: 30, brushSkewPitch: 0 },
   },
   {
+    name: "Soft Time",
+    values: { brushCurveTime: 70, brushSkewTime: 0, brushCurvePitch: 100, brushSkewPitch: 0 },
+    preview: { brushCurveTime: 30, brushSkewTime: 0, brushCurvePitch: 100, brushSkewPitch: 0 },
+  },
+  {
+    name: "Soft Pitch",
+    values: { brushCurveTime: 100, brushSkewTime: 0, brushCurvePitch: 70, brushSkewPitch: 0 },
+    preview: { brushCurveTime: 100, brushSkewTime: 0, brushCurvePitch: 30, brushSkewPitch: 0 },
+  },
+  {
     name: "Fade Out",
     values: { brushCurveTime: 0, brushSkewTime: -100, brushCurvePitch: 100, brushSkewPitch: 0 },
   },
@@ -46,16 +56,6 @@ export const ENVELOPE_SHAPES: readonly EnvelopeShape[] = [
   {
     name: "Fade Up",
     values: { brushCurveTime: 100, brushSkewTime: 0, brushCurvePitch: 0, brushSkewPitch: 100 },
-  },
-  {
-    name: "Streak",
-    values: { brushCurveTime: 100, brushSkewTime: 0, brushCurvePitch: -80, brushSkewPitch: 0 },
-    preview: { brushCurveTime: 100, brushSkewTime: 0, brushCurvePitch: -45, brushSkewPitch: 0 },
-  },
-  {
-    name: "Hit",
-    values: { brushCurveTime: -80, brushSkewTime: 0, brushCurvePitch: 100, brushSkewPitch: 0 },
-    preview: { brushCurveTime: -45, brushSkewTime: 0, brushCurvePitch: 100, brushSkewPitch: 0 },
   },
 ];
 

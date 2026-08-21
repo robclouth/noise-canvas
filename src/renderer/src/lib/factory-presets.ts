@@ -297,7 +297,7 @@ export const factoryPresets: PresetType[] = [
     ],
     linkedParams: [],
     macroNames: ["Speed", "Blend", "Macro 3", "Macro 4"],
-    macroValues: [37.5, 100, 50, 50],
+    macroValues: [43.75, 100, 50, 50],
   },
 
   // --- Classic filters ---
@@ -1019,7 +1019,7 @@ export const factoryPresets: PresetType[] = [
     ],
     linkedParams: [],
     macroNames: ["Stretch", "Formant", "Smear", "Macro 4"],
-    macroValues: [75, 62.5, 0, 50],
+    macroValues: [59.9, 56.25, 0, 50],
   },
   // Repeats the slice under the brush forward at every quarter beat: a retrigger fill.
   // Macro 1 fades the repeats out, Macro 2 blends the fill against what is there.
@@ -1109,7 +1109,7 @@ export const factoryPresets: PresetType[] = [
     ],
     linkedParams: [],
     macroNames: ["Spin", "Trail", "Macro 3", "Macro 4"],
-    macroValues: [37.5, 30, 50, 50],
+    macroValues: [43.75, 30, 50, 50],
   },
 
   // --- Waveshape ---
@@ -1188,7 +1188,7 @@ export const factoryPresets: PresetType[] = [
     ],
     linkedParams: [],
     macroNames: ["Pull", "Reach", "Macro 3", "Macro 4"],
-    macroValues: [100, 8, 50, 50],
+    macroValues: [100, 54.66, 50, 50],
   },
 
   // --- Blur (freeze) ---

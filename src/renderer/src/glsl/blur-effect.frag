@@ -37,10 +37,10 @@ void main() {
     // per-sample fast path picks the single-read branch.
     vec2 mods[NUM_MODULATORS];
     sampleModulators(mods);
-    vec2 blurSizeXValue = applyModulationCached(blurSizeX.value, blurSizeX.minValue, blurSizeX.maxValue, blurSizeX.modulationAmounts, blurSizeX.contextualModAmounts, blurSizeX.macroAmounts, mods);
-    vec2 blurSizeYValue = applyModulationCached(blurSizeY.value, blurSizeY.minValue, blurSizeY.maxValue, blurSizeY.modulationAmounts, blurSizeY.contextualModAmounts, blurSizeY.macroAmounts, mods);
-    vec2 blurNoiseXValue = applyModulationCached(blurNoiseX.value, blurNoiseX.minValue, blurNoiseX.maxValue, blurNoiseX.modulationAmounts, blurNoiseX.contextualModAmounts, blurNoiseX.macroAmounts, mods);
-    vec2 blurNoiseYValue = applyModulationCached(blurNoiseY.value, blurNoiseY.minValue, blurNoiseY.maxValue, blurNoiseY.modulationAmounts, blurNoiseY.contextualModAmounts, blurNoiseY.macroAmounts, mods);
+    vec2 blurSizeXValue = resolveParameter(blurSizeX, mods);
+    vec2 blurSizeYValue = resolveParameter(blurSizeY, mods);
+    vec2 blurNoiseXValue = resolveParameter(blurNoiseX, mods);
+    vec2 blurNoiseYValue = resolveParameter(blurNoiseY, mods);
 
     bool sameKernel = (blurSizeXValue.x == blurSizeXValue.y)
                    && (blurSizeYValue.x == blurSizeYValue.y)

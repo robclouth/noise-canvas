@@ -1,13 +1,9 @@
 import { getNumberParameterDef } from "@renderer/parameters";
-import {
-  getContextualModAmountsNormalized,
-  getModAmountValuesNormalized,
-  getMacroAmountValuesNormalized,
-} from "@renderer/store/modulators";
 import { GLSL3, RawShaderMaterial } from "three";
 import dynamicsEffectFrag from "../glsl/dynamics-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { useStore } from "../store";
+import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 class DynamicsEffect extends BaseEffect {
@@ -17,56 +13,11 @@ class DynamicsEffect extends BaseEffect {
       new RawShaderMaterial({
         uniforms: {
           ...createDefaultUniforms(),
-          thresholdDb: {
-            value: {
-              value: -20.0,
-              minValue: -60,
-              maxValue: 0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
-          upperRatio: {
-            value: {
-              value: 1.0,
-              minValue: -2.0,
-              maxValue: 2.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
-          lowerRatio: {
-            value: {
-              value: 1.0,
-              minValue: -2.0,
-              maxValue: 2.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
-          knee: {
-            value: {
-              value: 6.0,
-              minValue: 0.0,
-              maxValue: 24.0,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
-          gainDb: {
-            value: {
-              value: 0.0,
-              minValue: -80,
-              maxValue: 24,
-              modulationAmounts: [],
-              contextualModAmounts: [],
-              macroAmounts: [],
-            },
-          },
+          thresholdDb: { value: defaultParameterUniform(-20.0, -60, 0) },
+          upperRatio: { value: defaultParameterUniform(1.0, -2.0, 2.0) },
+          lowerRatio: { value: defaultParameterUniform(1.0, -2.0, 2.0) },
+          knee: { value: defaultParameterUniform(6.0, 0.0, 24.0) },
+          gainDb: { value: defaultParameterUniform(0.0, -80, 24) },
         },
         vertexShader: passThroughVert,
         fragmentShader: dynamicsEffectFrag,
@@ -81,58 +32,47 @@ class DynamicsEffect extends BaseEffect {
 
     const thresholdDb = state.dynamicsThresholdDb;
     const thresholdDbDef = getNumberParameterDef("dynamicsThresholdDb");
-    this.materials[props.passIndex].uniforms.thresholdDb.value = {
-      value: thresholdDb,
-      minValue: thresholdDbDef.min,
-      maxValue: thresholdDbDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "dynamicsThresholdDb"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "dynamicsThresholdDb"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "dynamicsThresholdDb"),
-    };
+    this.materials[props.passIndex].uniforms.thresholdDb.value = parameterUniform(
+      state,
+      "dynamicsThresholdDb",
+      props.modContext,
+      { value: thresholdDb, min: thresholdDbDef.min, max: thresholdDbDef.max },
+    );
 
     const upperRatio = state.dynamicsUpperRatio;
     const upperRatioDef = getNumberParameterDef("dynamicsUpperRatio");
-    this.materials[props.passIndex].uniforms.upperRatio.value = {
-      value: upperRatio,
-      minValue: upperRatioDef.min,
-      maxValue: upperRatioDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "dynamicsUpperRatio"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "dynamicsUpperRatio"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "dynamicsUpperRatio"),
-    };
+    this.materials[props.passIndex].uniforms.upperRatio.value = parameterUniform(
+      state,
+      "dynamicsUpperRatio",
+      props.modContext,
+      { value: upperRatio, min: upperRatioDef.min, max: upperRatioDef.max },
+    );
 
     const lowerRatio = state.dynamicsLowerRatio;
     const lowerRatioDef = getNumberParameterDef("dynamicsLowerRatio");
-    this.materials[props.passIndex].uniforms.lowerRatio.value = {
-      value: lowerRatio,
-      minValue: lowerRatioDef.min,
-      maxValue: lowerRatioDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "dynamicsLowerRatio"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "dynamicsLowerRatio"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "dynamicsLowerRatio"),
-    };
+    this.materials[props.passIndex].uniforms.lowerRatio.value = parameterUniform(
+      state,
+      "dynamicsLowerRatio",
+      props.modContext,
+      { value: lowerRatio, min: lowerRatioDef.min, max: lowerRatioDef.max },
+    );
 
     const knee = state.dynamicsKnee;
     const kneeDef = getNumberParameterDef("dynamicsKnee");
-    this.materials[props.passIndex].uniforms.knee.value = {
+    this.materials[props.passIndex].uniforms.knee.value = parameterUniform(state, "dynamicsKnee", props.modContext, {
       value: knee,
-      minValue: kneeDef.min,
-      maxValue: kneeDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "dynamicsKnee"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "dynamicsKnee"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "dynamicsKnee"),
-    };
+      min: kneeDef.min,
+      max: kneeDef.max,
+    });
 
     const gainDb = state.dynamicsGainDb;
     const gainDbDef = getNumberParameterDef("dynamicsGainDb");
-    this.materials[props.passIndex].uniforms.gainDb.value = {
-      value: gainDb,
-      minValue: gainDbDef.min,
-      maxValue: gainDbDef.max,
-      modulationAmounts: getModAmountValuesNormalized(state, "dynamicsGainDb"),
-      contextualModAmounts: getContextualModAmountsNormalized(state, "dynamicsGainDb"),
-      macroAmounts: getMacroAmountValuesNormalized(state, "dynamicsGainDb"),
-    };
+    this.materials[props.passIndex].uniforms.gainDb.value = parameterUniform(
+      state,
+      "dynamicsGainDb",
+      props.modContext,
+      { value: gainDb, min: gainDbDef.min, max: gainDbDef.max },
+    );
   }
 }
 

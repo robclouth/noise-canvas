@@ -6,6 +6,8 @@ import { effects } from "../../effects";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState } from "../../test/mock-state";
 import type { OpenFile, State } from "../../store/types";
+import { normalizeParameterValue } from "../../store/utils";
+import { createModContext, NEUTRAL_STROKE_CONTEXT } from "../static-modulation";
 
 /**
  * Transform and Attract convert beats and semitones into UV and then move the
@@ -47,6 +49,8 @@ function stateWith(overrides: Partial<State>): State {
   } as Partial<State>);
 }
 
+const withContext = (state: State) => ({ state, modContext: createModContext(state, NEUTRAL_STROKE_CONTEXT) });
+
 describe("effects that transform in destination space", () => {
   it("converts Transform's beat shift with the destination's tempo and length", () => {
     const commonUniforms = destUniforms();
@@ -54,32 +58,35 @@ describe("effects that transform in destination space", () => {
       commonUniforms,
       passIndex: 0,
       file: sourceFile(),
-      state: stateWith({ transformShiftBeats: 1, transformShiftSemis: 0 } as Partial<State>),
+      ...withContext(stateWith({ transformShiftBeats: 1, transformShiftSemis: 0 } as Partial<State>)),
     });
 
-    // One beat at the destination's tempo, as a fraction of its own length.
+    // The shift crosses in beats, with its knob position alongside for the
+    // sweep; the beat-to-UV factor carries the destination's tempo as a
+    // fraction of its own length.
     const destDuration = DEST.numFrames / DEST.sampleRate;
     const expected = 60 / DEST_BPM / destDuration;
-    const shiftX = effects.transform.materials[0].uniforms.shiftX.value as { value: number };
-    expect(shiftX.value).toBeCloseTo(expected, 6);
+    const shiftX = effects.transform.materials[0].uniforms.shiftX.value as { value: number; position: number };
+    expect(shiftX.value).toBe(1);
+    expect(shiftX.position).toBeCloseTo(normalizeParameterValue("transformShiftBeats", 1), 6);
+    expect(effects.transform.materials[0].uniforms.transformBeatsToUv.value as number).toBeCloseTo(expected, 6);
 
     // The source's own layout would give a different, wrong answer.
     const sourceDuration = SOURCE.numFrames / SOURCE.sampleRate;
     expect(expected).not.toBeCloseTo(60 / SOURCE_BPM / sourceDuration, 6);
   });
 
-  it("converts Transform's semitone shift with the destination's band layout", () => {
+  it("passes Transform's semitone shift through for the shader's destination band layout", () => {
     const commonUniforms = destUniforms();
     effects.transform.updateEffectUniforms({
       commonUniforms,
       passIndex: 0,
       file: sourceFile(),
-      state: stateWith({ transformShiftBeats: 0, transformShiftSemis: 12 } as Partial<State>),
+      ...withContext(stateWith({ transformShiftBeats: 0, transformShiftSemis: 12 } as Partial<State>)),
     });
 
-    const expected = (12 * (DEST.bandsPerOctave / 12)) / DEST.numBands;
     const shiftY = effects.transform.materials[0].uniforms.shiftY.value as { value: number };
-    expect(shiftY.value).toBeCloseTo(expected, 6);
+    expect(shiftY.value).toBe(12);
   });
 
   it("sizes Attract's beat lattice from the destination", () => {
@@ -88,7 +95,7 @@ describe("effects that transform in destination space", () => {
       commonUniforms,
       passIndex: 1,
       file: sourceFile(),
-      state: stateWith({ attractMap: 0 } as Partial<State>),
+      ...withContext(stateWith({ attractMap: 0 } as Partial<State>)),
     });
 
     const destDuration = DEST.numFrames / DEST.sampleRate;

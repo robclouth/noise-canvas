@@ -2,11 +2,12 @@
 #include "edge-mode.glsl"
 #include "scale-snap.glsl"
 
-uniform Parameter shiftX;
-uniform Parameter shiftY;
+uniform Parameter shiftX; // beats, converted via transformBeatsToUv
+uniform Parameter shiftY; // semitones
 uniform Parameter scaleX;
 uniform Parameter scaleY;
 uniform Parameter rotation;
+uniform float transformBeatsToUv; // file UV per beat
 uniform int boundaryMode;
 // Where in the brush the pivot sits, as a fraction of the brush size on each axis.
 uniform vec2 transformOrigin;
@@ -38,17 +39,17 @@ void main() {
     // them have stereoSpread == 0, .x == .y and the fast path below kicks in.
     vec2 mods[NUM_MODULATORS];
     sampleModulators(mods);
-    vec2 rotationValue = applyModulationCached(rotation.value, rotation.minValue, rotation.maxValue, rotation.modulationAmounts, rotation.contextualModAmounts, rotation.macroAmounts, mods);
-    vec2 scaleXValue = applyModulationCached(scaleX.value, scaleX.minValue, scaleX.maxValue, scaleX.modulationAmounts, scaleX.contextualModAmounts, scaleX.macroAmounts, mods);
-    vec2 scaleYValue = applyModulationCached(scaleY.value, scaleY.minValue, scaleY.maxValue, scaleY.modulationAmounts, scaleY.contextualModAmounts, scaleY.macroAmounts, mods);
-    vec2 rawShiftX = applyModulationCached(shiftX.value, shiftX.minValue, shiftX.maxValue, shiftX.modulationAmounts, shiftX.contextualModAmounts, shiftX.macroAmounts, mods);
-    vec2 rawShiftY = applyModulationCached(shiftY.value, shiftY.minValue, shiftY.maxValue, shiftY.modulationAmounts, shiftY.contextualModAmounts, shiftY.macroAmounts, mods);
+    vec2 rotationValue = resolveParameter(rotation, mods);
+    vec2 scaleXValue = resolveParameter(scaleX, mods);
+    vec2 scaleYValue = resolveParameter(scaleY, mods);
+    vec2 rawShiftX = resolveParameter(shiftX, mods) * transformBeatsToUv;
+    vec2 rawShiftSemis = resolveParameter(shiftY, mods);
 
     bool sameParams = (rotationValue.x == rotationValue.y)
                    && (scaleXValue.x == scaleXValue.y)
                    && (scaleYValue.x == scaleYValue.y)
                    && (rawShiftX.x == rawShiftX.y)
-                   && (rawShiftY.x == rawShiftY.y)
+                   && (rawShiftSemis.x == rawShiftSemis.y)
                    && coords.sameSourceUv;
 
     float bandsPerSemi = destBandsPerOctave / 12.0;
@@ -82,7 +83,7 @@ void main() {
         if ((sxV) < 0.0) transformedDest.x += (1.0 - 2.0 * transformOrigin.x) * brushSizeUv.x; \
         if ((syV) < 0.0) transformedDest.y += (1.0 - 2.0 * transformOrigin.y) * brushSizeUv.y; \
         float appliedShiftX = -(shXV); \
-        float shiftSemisApplied = -(shYV) * destBandCount / bandsPerSemi; \
+        float shiftSemisApplied = -(shYV); \
         if (scaleSnapEnabled) { \
             float target = brushBasePitchAbsSemis + shiftSemisApplied; \
             shiftSemisApplied += snapToScale(target) - target; \
@@ -113,12 +114,12 @@ void main() {
 
     vec4 transformedTexel;
     if (sameParams) {
-        COMPUTE_CHANNEL(transformedTexel, modOffsetL, rotationValue.x, scaleXValue.x, scaleYValue.x, rawShiftX.x, rawShiftY.x)
+        COMPUTE_CHANNEL(transformedTexel, modOffsetL, rotationValue.x, scaleXValue.x, scaleYValue.x, rawShiftX.x, rawShiftSemis.x)
     } else {
         vec4 texL;
         vec4 texR;
-        COMPUTE_CHANNEL(texL, modOffsetL, rotationValue.x, scaleXValue.x, scaleYValue.x, rawShiftX.x, rawShiftY.x)
-        COMPUTE_CHANNEL(texR, modOffsetR, rotationValue.y, scaleXValue.y, scaleYValue.y, rawShiftX.y, rawShiftY.y)
+        COMPUTE_CHANNEL(texL, modOffsetL, rotationValue.x, scaleXValue.x, scaleYValue.x, rawShiftX.x, rawShiftSemis.x)
+        COMPUTE_CHANNEL(texR, modOffsetR, rotationValue.y, scaleXValue.y, scaleYValue.y, rawShiftX.y, rawShiftSemis.y)
         transformedTexel = vec4(texL.rg, texR.ba);
     }
 
