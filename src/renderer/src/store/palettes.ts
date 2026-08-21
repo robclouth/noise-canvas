@@ -181,10 +181,11 @@ export const createPalettesSlice = (set: ZustandSet, get: ZustandGet): PalettesS
         if (!file.endsWith(".json")) continue;
         try {
           const contents = await host.fs.readFile(host.path.join(palettesDir, file), "utf-8");
-          const result = validatePalette(JSON.parse(contents));
+          const result = validatePalette(JSON.parse(contents), file.replace(/\.json$/, ""));
           if (result.success) {
             userPalettes.push(result.data);
           } else {
+            console.error(`Invalid palette file ${file}:`, result.errors);
             notifications.show({
               title: "Invalid palette",
               message: `Invalid palette ${file}`,
@@ -224,9 +225,13 @@ export const createPalettesSlice = (set: ZustandSet, get: ZustandGet): PalettesS
     set(
       produce((draft: State) => {
         draft.openPalettes.push(group);
-        draft.activeBrushIndex = draft.brushes.length;
-        draft.brushes.push(...brushes);
-        draft.activeStepIndex = 0;
+        // An empty palette brings nothing to make active, so the current brush
+        // stays selected rather than the index pointing past the list.
+        if (brushes.length > 0) {
+          draft.activeBrushIndex = draft.brushes.length;
+          draft.brushes.push(...brushes);
+          draft.activeStepIndex = 0;
+        }
       }),
     );
 

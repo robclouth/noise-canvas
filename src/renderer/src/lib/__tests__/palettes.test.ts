@@ -317,6 +317,32 @@ describe("palettes slice", () => {
     expect(store.getState().openPalettes).toHaveLength(1);
   });
 
+  it("opens a palette that holds no brushes, leaving the active one alone", () => {
+    const store = createTestStore();
+    disk.set(
+      "empty.json",
+      JSON.stringify({ id: "empty", name: "Empty Kit", isFactory: false, version: 1, brushes: [] }),
+    );
+    return store.slice.initPalettes().then(() => {
+      const before = store.getState().activeBrushIndex;
+      store.slice.openPaletteFromLibrary("empty");
+      expect(store.getState().openPalettes).toHaveLength(2);
+      expect(store.getState().brushes.map((b) => b.name)).toEqual(["Mock"]);
+      expect(store.getState().activeBrushIndex).toBe(before);
+    });
+  });
+
+  it("saves a palette that has been emptied, and reads it back empty", async () => {
+    const store = createTestStore([makeBrush("One", DEFAULT_PALETTE_ID), makeBrush("Two", "other")]);
+    store.setBrushes(store.getState().brushes.filter((brush) => brush.paletteId !== DEFAULT_PALETTE_ID));
+    await store.slice.savePaletteAs(DEFAULT_PALETTE_ID, "Emptied");
+
+    const reopened = createTestStore();
+    await reopened.slice.initPalettes();
+    const saved = reopened.getState().availablePalettes.find((p) => p.name === "Emptied");
+    expect(saved?.brushes).toEqual([]);
+  });
+
   it("refuses to close the palette holding every remaining brush", () => {
     const store = createTestStore();
     store.slice.addPalette();
