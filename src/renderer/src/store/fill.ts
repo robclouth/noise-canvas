@@ -1,3 +1,4 @@
+import { notifications } from "@mantine/notifications";
 import type { StrokeDispatch } from "@renderer/components/file-renderer";
 import { resolveGridFill, type GridFillTarget } from "@renderer/lib/grid/grid-fill";
 import { activeLoopRegion, openFiles } from "./files";
@@ -57,6 +58,17 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
 
   fillGrid: async () => {
     if (get().isFilling) return;
+
+    // With both axes unsnapped the grid is one cell covering the whole file, so
+    // the fill would be a single full-canvas stroke.
+    if (!get().snapTime && !get().snapPitch) {
+      notifications.show({
+        title: "Nothing to fill",
+        message: "Turn on time snapping or pitch snapping to give the fill a grid.",
+        color: "yellow",
+      });
+      return;
+    }
 
     cancelRequested = false;
     set({ isFilling: true });
