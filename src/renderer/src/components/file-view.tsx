@@ -8,6 +8,7 @@ import { memo, PointerEventHandler, useCallback, useEffect, useMemo, useRef, use
 import { Vector2 } from "three";
 import { resolveAimUv, type AimUv } from "../lib/aim";
 import { aimUvToBrushBlUv } from "../lib/brush-anchor";
+import { heldRepeatIntervalMs } from "../lib/brush-repeat";
 import { getFileOnsets } from "../lib/file-onsets";
 import { penState } from "../lib/pen-state";
 import { sourceBandUvSlope, uvToUnits } from "../lib/utils";
@@ -132,6 +133,10 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const viewRef = useRef<HTMLDivElement>(null);
   const isStrokingRef = useRef(false);
   const momentumRef = useRef<{ vx: number; vy: number; raf: number | null }>({ vx: 0, vy: 0, raf: null });
+  // Non-null while the held brush repeats on its own clock; the move handlers
+  // then leave the painting to the clock instead of dabbing per movement.
+  const repeatIntervalRef = useRef<number | null>(null);
+  const repeatClockRef = useRef<number | null>(null);
   const snapshotCanvasRef = useRef<HTMLCanvasElement>(null);
 
   // A view is live only while it can show cursor-dependent UI: hovered (brush
@@ -435,7 +440,8 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
         // Only call renderStroke when actually dragging (applying stroke)
         // Preview is handled by the renderer watching cursorPosition
-        if (rendererRef.current) {
+        const repeating = isStrokingRef.current && repeatIntervalRef.current !== null;
+        if (rendererRef.current && !repeating) {
           rendererRef.current.renderStroke(!isStrokingRef.current);
         }
       }
@@ -478,6 +484,41 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     rendererRef.current?.clearPreview();
     lastSnappedPositionRef.current = null;
   }, []);
+
+  const stopRepeatClock = useCallback(() => {
+    if (repeatClockRef.current !== null) cancelAnimationFrame(repeatClockRef.current);
+    repeatClockRef.current = null;
+    repeatIntervalRef.current = null;
+  }, []);
+
+  /**
+   * Paints the held brush again at a fixed rate, so a stroke keeps building
+   * while the pointer stays still. Does nothing when no step accumulates,
+   * where a repeat would land on the same result.
+   */
+  const startRepeatClock = useCallback(() => {
+    stopRepeatClock();
+    const interval = heldRepeatIntervalMs(useStore.getState());
+    if (interval === null) return;
+    repeatIntervalRef.current = interval;
+
+    let nextAt = performance.now() + interval;
+    const tick = (now: number) => {
+      if (!isStrokingRef.current) {
+        repeatClockRef.current = null;
+        return;
+      }
+      if (now >= nextAt) {
+        rendererRef.current?.renderStroke(false);
+        // A repeat missed by a slow frame is dropped, not repaid as a burst.
+        nextAt = Math.max(now, nextAt + interval);
+      }
+      repeatClockRef.current = requestAnimationFrame(tick);
+    };
+    repeatClockRef.current = requestAnimationFrame(tick);
+  }, [stopRepeatClock]);
+
+  useEffect(() => stopRepeatClock, [stopRepeatClock]);
 
   const handleCanvasMouseDown: PointerEventHandler<HTMLDivElement> = useCallback(
     async (event) => {
@@ -549,9 +590,10 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         }
 
         rendererRef.current.renderStroke(false);
+        startRepeatClock();
       }
     },
-    [fileId, isActive, aimToBeatsAndPitch, file],
+    [fileId, isActive, aimToBeatsAndPitch, file, startRepeatClock],
   );
 
   const handleCanvasMouseUp: PointerEventHandler<HTMLDivElement> = useCallback(
@@ -568,6 +610,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const finishStroke = useCallback(async () => {
     if (!isStrokingRef.current) return;
     isStrokingRef.current = false;
+    stopRepeatClock();
 
     const state = useStore.getState();
     state.setIsStroking(false);
@@ -582,7 +625,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     rendererRef.current?.endStroke();
 
     strokeTimeRangeRef.current = { min: null, max: null };
-  }, []);
+  }, [stopRepeatClock]);
 
   // Window-level event listeners to handle mouse movements and releases outside the file view
   useEffect(() => {
@@ -637,7 +680,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       lastSnappedPositionRef.current = { x: aim.x, y: aim.y };
 
       // Only render if position actually changed (prevents duplicate iterations at same grid cell)
-      if (positionChanged && rendererRef.current) {
+      if (positionChanged && rendererRef.current && repeatIntervalRef.current === null) {
         rendererRef.current.renderStroke(false);
       }
     };

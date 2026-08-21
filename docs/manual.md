@@ -303,7 +303,7 @@ The brush envelope decides where the stroke deposits energy and how much.
 - **Iterations** – how many times the effect chain re-runs inside one stroke, feeding each pass back in.
 - **Wrap** – what a stroke does when it runs off an edge: Off, Time, Pitch, or Time & Pitch.
 - **Warp Algo.** – how sound is rebuilt when it moves. See [Warp Algorithms](#warp-algorithms).
-- **Accumulate** – on, painting over the same area builds up. Off, a single stroke will not overlap itself, so dragging back and forth does not double-apply.
+- **Accumulate** – on, painting over the same area builds up, and holding the mouse still keeps it building until you let go. Off, a single stroke will not overlap itself, so dragging back and forth does not double-apply.
 
 **Hints**
 
