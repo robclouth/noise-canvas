@@ -6,6 +6,7 @@ uniform Parameter shiftX; // beats, converted via transformBeatsToUv
 uniform Parameter shiftY; // semitones
 uniform Parameter scaleX;
 uniform Parameter scaleY;
+uniform Parameter speed;
 uniform Parameter rotation;
 uniform float transformBeatsToUv; // file UV per beat
 uniform int boundaryMode;
@@ -40,10 +41,12 @@ void main() {
     vec2 mods[NUM_MODULATORS];
     sampleModulators(mods);
     vec2 rotationValue = resolveParameter(rotation, mods);
-    vec2 scaleXValue = resolveParameter(scaleX, mods);
+    // Varispeed: the time scale divides by Speed and the pitch rises by the same ratio.
+    vec2 speedValue = resolveParameter(speed, mods);
+    vec2 scaleXValue = resolveParameter(scaleX, mods) / speedValue;
     vec2 scaleYValue = resolveParameter(scaleY, mods);
     vec2 rawShiftX = resolveParameter(shiftX, mods) * transformBeatsToUv;
-    vec2 rawShiftSemis = resolveParameter(shiftY, mods);
+    vec2 rawShiftSemis = resolveParameter(shiftY, mods) + 12.0 * log2(speedValue);
 
     bool sameParams = (rotationValue.x == rotationValue.y)
                    && (scaleXValue.x == scaleXValue.y)

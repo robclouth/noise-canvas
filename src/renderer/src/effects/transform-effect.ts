@@ -29,6 +29,7 @@ class TransformEffect extends BaseEffect {
           shiftY: { value: defaultParameterUniform(0.0, -96.0, 96.0) },
           scaleX: { value: defaultParameterUniform(1.0, -256, 256) },
           scaleY: { value: defaultParameterUniform(1.0, -256, 256) },
+          speed: { value: defaultParameterUniform(1.0, 1 / 16, 16) },
           transformBeatsToUv: { value: 0.0 },
           rotation: { value: defaultParameterUniform(0.0, -180.0, 180.0) },
           boundaryMode: {
@@ -49,6 +50,7 @@ class TransformEffect extends BaseEffect {
       "transformShiftSemis",
       "transformScaleTime",
       "transformScalePitch",
+      "transformSpeed",
       "transformRotation",
       "transformEdgeMode",
       "transformOriginTime",
@@ -74,6 +76,7 @@ class TransformEffect extends BaseEffect {
     material.uniforms.shiftY.value = parameterUniform(state, "transformShiftSemis", props.modContext);
     material.uniforms.scaleX.value = parameterUniform(state, "transformScaleTime", props.modContext);
     material.uniforms.scaleY.value = parameterUniform(state, "transformScalePitch", props.modContext);
+    material.uniforms.speed.value = parameterUniform(state, "transformSpeed", props.modContext);
     material.uniforms.rotation.value = parameterUniform(state, "transformRotation", props.modContext, {
       value: transformRotation,
       min: -180,

@@ -396,13 +396,14 @@ Slides, stretches and rotates sound through time and pitch, or reverses it. How 
 
 - **Shift ↔ / ↕** – moves content in time (beats) or pitch (semitones). Shift ↕ snaps to the selected scale when the pitch grid is set to Scale. See [Scales](#scales).
 - **Scale ↔ / ↕** – stretches or squashes in time or pitch. Negative values reverse or mirror.
+- **Speed** – plays the region faster or slower, moving pitch and length together. It multiplies whatever Scale ↔ and Shift ↕ already do.
 - **Origin ↔ / ↕** – the point a Scale or a Rotation turns around. A negative Scale still mirrors inside the brush wherever the origin sits.
 - **Rotation** – turns the painted region, in degrees.
 - **Edge** – what happens at the brush borders.
 
 **Hints**
 
-- Time and pitch are independent, so a stretch does not move the pitch. Add **Shift ↕** if you want the tape-speed version.
+- Shift ↕ and Scale ↔ are independent, so a stretch alone does not move the pitch. Speed is the tape version, where both move at once.
 - **Edit → Double Length** first, then **Scale ↔** to 2, and the stretch has somewhere to go.
 
 ### Blur

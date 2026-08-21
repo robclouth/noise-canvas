@@ -12,9 +12,10 @@ export const TransformEffect = memo(function TransformEffect() {
       <ParameterControl paramKey="transformShiftSemis" color={COLOR} />
       <ParameterControl paramKey="transformScaleTime" color={COLOR} />
       <ParameterControl paramKey="transformScalePitch" color={COLOR} />
+      <ParameterControl paramKey="transformSpeed" color={COLOR} />
+      <ParameterControl paramKey="transformRotation" color={COLOR} />
       <ParameterControl paramKey="transformOriginTime" color={COLOR} />
       <ParameterControl paramKey="transformOriginPitch" color={COLOR} />
-      <ParameterControl paramKey="transformRotation" color={COLOR} />
       <ParameterControl paramKey="transformEdgeMode" color={COLOR} />
     </SimpleGrid>
   );

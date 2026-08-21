@@ -14,6 +14,7 @@ export interface EffectsState {
   transformShiftSemis: number;
   transformScaleTime: number;
   transformScalePitch: number;
+  transformSpeed: number;
   transformRotation: number;
   transformEdgeMode: number;
   transformOriginTime: number;
@@ -92,6 +93,7 @@ export const createEffectsSlice = (): EffectsState => {
     transformShiftSemis: getParameterDef("transformShiftSemis").default,
     transformScaleTime: getParameterDef("transformScaleTime").default,
     transformScalePitch: getParameterDef("transformScalePitch").default,
+    transformSpeed: getParameterDef("transformSpeed").default,
     transformRotation: getParameterDef("transformRotation").default,
     transformEdgeMode: getParameterDef("transformEdgeMode").default,
     transformOriginTime: getParameterDef("transformOriginTime").default,
