@@ -8,6 +8,8 @@ uniform Parameter scaleX;
 uniform Parameter scaleY;
 uniform Parameter rotation;
 uniform int boundaryMode;
+// Where in the brush the pivot sits, as a fraction of the brush size on each axis.
+uniform vec2 transformOrigin;
 
 uniform bool scaleSnapEnabled;
 
@@ -26,9 +28,11 @@ void main() {
         return;
     }
 
-    // Scale/rotation pivot: the brush's bottom-left corner. Negative scales add
-    // back the brush size below so the flip stays centred on the brush.
-    vec2 pivot = brushBottomLeftUv;
+    // Scale/rotation pivot: the point the origin picks out inside the brush.
+    // Negative scales are corrected below so a flip still lands on the brush
+    // whichever origin is chosen.
+    vec2 originUv = transformOrigin * brushSizeUv;
+    vec2 pivot = brushBottomLeftUv + originUv;
 
     // Resolve the geometric params as vec2 (L, R). When all modulators driving
     // them have stereoSpread == 0, .x == .y and the fast path below kicks in.
@@ -69,14 +73,14 @@ void main() {
     // given its per-channel source-read offset and scalar params. Returns the
     // sample to write into that channel.
     #define COMPUTE_CHANNEL(outTexel, modOffset, rotV, sxV, syV, shXV, shYV) { \
-        vec2 relativeUv = brushLocalUv; \
+        vec2 relativeUv = brushLocalUv - originUv; \
         float rad = radians(-(rotV)); \
         mat2 rotMat = mat2(cos(rad), -sin(rad), sin(rad), cos(rad)); \
         vec2 scaledUv = rotMat * relativeUv; \
         if (abs(sxV) > 1e-5 && abs(syV) > 1e-5) { scaledUv /= vec2(sxV, syV); } \
         vec2 transformedDest = scaledUv + pivot; \
-        if ((sxV) < 0.0) transformedDest.x += brushSizeUv.x; \
-        if ((syV) < 0.0) transformedDest.y += brushSizeUv.y; \
+        if ((sxV) < 0.0) transformedDest.x += (1.0 - 2.0 * transformOrigin.x) * brushSizeUv.x; \
+        if ((syV) < 0.0) transformedDest.y += (1.0 - 2.0 * transformOrigin.y) * brushSizeUv.y; \
         float appliedShiftX = -(shXV); \
         float shiftSemisApplied = -(shYV) * destBandCount / bandsPerSemi; \
         if (scaleSnapEnabled) { \

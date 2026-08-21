@@ -14,6 +14,7 @@ import { SpectrogramData, State } from "../../store/types";
 import { createMockSpectrogramData, getPixelAtUv, readSpectrogramPixel } from "../../test/mock-spectrogram";
 import { createMockState, createMockStateWithSteps } from "../../test/mock-state";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
+import { BRUSH_SIZE_PITCH_FULL, BRUSH_SIZE_TIME_FULL } from "../utils";
 
 /**
  * Creates WebGL textures from SpectrogramData for testing.
@@ -1050,6 +1051,151 @@ describe("Effects", () => {
       rawTextures.originalPackedDataTex.dispose();
       rawTextures.inverseMapTex.dispose();
       rawTextures.metadataTex.dispose();
+    });
+  });
+
+  // The transform's origin picks the point a scale or a rotation holds still.
+  // A brush covering the whole file, squashed to half its length, must collect
+  // the file's opening burst around that point.
+  describe("transform origin", () => {
+    const numBands = 8;
+    const numFrames = 64;
+    /** Frames the burst occupies at the start of the file, as a fraction. */
+    const burstSpan = 0.25;
+
+    function createBurstSpectrogram(): SpectrogramData {
+      const spec = createMockSpectrogramData({ numFrames, numBands, pattern: "silence" });
+      for (let band = 0; band < numBands; band++) {
+        for (let frame = 0; frame < numFrames * burstSpan; frame++) {
+          const pixelIndex = band * numFrames + frame;
+          spec.packedData[pixelIndex * 4 + 0] = 1;
+          spec.packedData[pixelIndex * 4 + 2] = 1;
+        }
+      }
+      return spec;
+    }
+
+    /** Magnitude-weighted mean frame of the output, as a fraction of the file. */
+    function timeCentroid(output: Float32Array, spec: SpectrogramData): number {
+      let weighted = 0;
+      let total = 0;
+      for (let band = 0; band < spec.numBands; band++) {
+        for (let frame = 0; frame < spec.numFrames; frame++) {
+          const pixel = readSpectrogramPixel(
+            output,
+            frame,
+            band,
+            spec.numFrames,
+            spec.numBands,
+            spec.textureWidth,
+            spec.textureHeight,
+          );
+          if (!pixel) continue;
+          weighted += pixel[0] * frame;
+          total += pixel[0];
+        }
+      }
+      return total > 0 ? weighted / total / spec.numFrames : Number.NaN;
+    }
+
+    async function paintTransform(params: Record<string, unknown>): Promise<number> {
+      const spec = createBurstSpectrogram();
+      const rawTextures = createTexturesFromSpectrogramData(spec);
+      const strokeTextures: StrokeTextures = {
+        originalPackedDataTex: rawTextures.originalPackedDataTex,
+        inverseMapTex: rawTextures.inverseMapTex,
+        metadataTex: rawTextures.metadataTex,
+        placeholderTexture,
+        modulatorScaleLut,
+        modulator1Texture: placeholderTexture,
+        modulator2Texture: placeholderTexture,
+        modulator3Texture: placeholderTexture,
+      };
+      const renderer = new StrokeRenderer(gl, spec, strokeTextures, "origin-test", effects);
+      renderer.initialize();
+
+      const rendererTextures = renderer.getTextures();
+      const sourceFile: SourceFileInfo = {
+        id: "origin-test",
+        filePath: "/test/origin-test.wav",
+        displayName: "origin-test.wav",
+        spectrogramData: spec,
+        textures: {
+          packed: rendererTextures.packed,
+          inverse: rendererTextures.inverse,
+          metadata: rendererTextures.metadata,
+          original: rendererTextures.original,
+        },
+      };
+
+      const state = createMockStateWithSteps(
+        [
+          {
+            name: "Origin",
+            overrides: {
+              brushIntensity: 100,
+              brushSizeTime: BRUSH_SIZE_TIME_FULL,
+              brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+              accumulate: false,
+              blendMode: 0,
+              sourcePositionMode: "follow",
+              effects: [{ id: "test-transform", effect: "transform" as const, enabled: true, params }],
+            },
+          },
+        ],
+        { filepathsBpm: { "/test/origin-test.wav": 120 } },
+      ) as State;
+
+      renderer.renderStroke(
+        {
+          cursorPos: new Vector2(0, 0),
+          preview: false,
+          bpm: 120,
+          totalDuration: spec.numFrames / spec.sampleRate,
+          viewZoomPower: 0,
+          viewOffset: 0,
+          viewZoomPowerY: 0,
+          viewOffsetY: 0,
+          pressure: 1,
+          tiltX: 0,
+          tiltY: 0,
+        },
+        state,
+        sourceFile,
+      );
+      const output = await renderer.getFBOData();
+      const centroid = timeCentroid(output, spec);
+
+      renderer.dispose();
+      rawTextures.packedDataTex.dispose();
+      rawTextures.originalPackedDataTex.dispose();
+      rawTextures.inverseMapTex.dispose();
+      rawTextures.metadataTex.dispose();
+      return centroid;
+    }
+
+    // Squashing to half about origin fraction o leaves the burst centred on
+    // o/2 + burstSpan/4 of the file.
+    it.each([
+      { origin: 0, fraction: 0 },
+      { origin: 1, fraction: 0.5 },
+      { origin: 2, fraction: 1 },
+    ])("origin $origin squashes the burst towards its own point", async ({ origin, fraction }) => {
+      const centroid = await paintTransform({
+        transformScaleTime: 0.5,
+        transformOriginTime: origin,
+        transformEdgeMode: 0,
+      });
+      expect(centroid).toBeCloseTo(fraction / 2 + burstSpan / 4, 1);
+    });
+
+    it.each([0, 1, 2])("a reversed scale still mirrors inside the brush at origin %i", async (origin) => {
+      const centroid = await paintTransform({
+        transformScaleTime: -1,
+        transformOriginTime: origin,
+        transformEdgeMode: 0,
+      });
+      expect(centroid).toBeCloseTo(1 - burstSpan / 2, 1);
     });
   });
 });

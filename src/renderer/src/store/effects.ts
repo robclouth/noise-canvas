@@ -16,6 +16,8 @@ export interface EffectsState {
   transformScalePitch: number;
   transformRotation: number;
   transformEdgeMode: number;
+  transformOriginTime: number;
+  transformOriginPitch: number;
   synthesizeBrushType: number;
   blurAmountTime: number;
   blurAmountPitch: number;
@@ -91,6 +93,8 @@ export const createEffectsSlice = (): EffectsState => {
     transformScalePitch: getParameterDef("transformScalePitch").default,
     transformRotation: getParameterDef("transformRotation").default,
     transformEdgeMode: getParameterDef("transformEdgeMode").default,
+    transformOriginTime: getParameterDef("transformOriginTime").default,
+    transformOriginPitch: getParameterDef("transformOriginPitch").default,
 
     // ---------------- Blur ----------------
     blurAmountTime: getParameterDef("blurAmountTime").default,

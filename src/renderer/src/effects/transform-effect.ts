@@ -7,7 +7,7 @@ import {
   getModAmountValuesNormalized,
   getMacroAmountValuesNormalized,
 } from "@renderer/store/modulators";
-import { GLSL3, RawShaderMaterial } from "three";
+import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import transformEffectFrag from "../glsl/transform-effect.frag";
 import { withPlatformDefines } from "../lib/shader-utils";
@@ -15,6 +15,11 @@ import { BaseEffect, createDefaultUniforms, destinationLayout, UpdateEffectUnifo
 
 export const boundaryModes = ["smear", "cut", "wrap"] as const;
 export type BoundaryMode = (typeof boundaryModes)[number];
+
+/** Turns an origin option (0 low, 1 middle, 2 high) into its fraction of the brush. */
+function originFraction(option: number): number {
+  return Math.min(2, Math.max(0, option)) * 0.5;
+}
 
 class TransformEffect extends BaseEffect {
   materials: RawShaderMaterial[];
@@ -80,6 +85,7 @@ class TransformEffect extends BaseEffect {
           boundaryMode: {
             value: 0,
           },
+          transformOrigin: { value: new Vector2(0, 0) },
           scaleSnapEnabled: { value: false },
           scaleOffsets: { value: new Float32Array(12) },
           brushBasePitchAbsSemis: { value: 0.0 },
@@ -96,6 +102,8 @@ class TransformEffect extends BaseEffect {
       "transformScalePitch",
       "transformRotation",
       "transformEdgeMode",
+      "transformOriginTime",
+      "transformOriginPitch",
     ];
   }
 
@@ -109,6 +117,8 @@ class TransformEffect extends BaseEffect {
       transformScalePitch,
       transformRotation,
       transformEdgeMode,
+      transformOriginTime,
+      transformOriginPitch,
     } = state;
 
     const { passIndex } = props;
@@ -168,6 +178,10 @@ class TransformEffect extends BaseEffect {
       macroAmounts: getMacroAmountValuesNormalized(state, "transformRotation"),
     };
     material.uniforms.boundaryMode.value = transformEdgeMode;
+    material.uniforms.transformOrigin.value.set(
+      originFraction(transformOriginTime),
+      originFraction(transformOriginPitch),
+    );
 
     // Scale snapping: anchor the snap to the brush's pitch-low edge (= the UV position the
     // pointer snap places on a scale note). brushBottomLeftUv is in pitch-UV convention
