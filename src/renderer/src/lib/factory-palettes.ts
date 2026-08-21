@@ -20,15 +20,18 @@ const SPECS: FactoryPaletteSpec[] = [
     id: "factory-breaks",
     name: "Breaks",
     presetIds: [
-      "stamp",
-      "jungle-stretch",
+      "shuffler",
+      "time-stretch",
       "stutter",
-      "rewind",
-      "eraser",
+      "resample",
       "reverse",
+      "rewind",
       "echo",
       "step-gate",
-      "octave-down",
+      "pitch-ramp",
+      "stamp",
+      "paul-stretch",
+      "eraser",
     ],
   },
   {
@@ -49,12 +52,22 @@ const SPECS: FactoryPaletteSpec[] = [
   {
     id: "factory-space",
     name: "Space",
-    presetIds: ["reverb", "echo", "shimmer", "freeze", "3d-orbit", "stereo-widening"],
+    presetIds: ["reverb", "echo", "shimmer", "freeze", "3d-orbit", "cathedral", "convolution", "stereo-widening"],
   },
   {
     id: "factory-mangle",
     name: "Mangle",
-    presetIds: ["pixel-sort", "crush", "updraft", "flow", "smudge", "reverse", "octave-down", "morph"],
+    presetIds: [
+      "pixel-sort",
+      "crush",
+      "interference",
+      "crystallise",
+      "barberpole",
+      "frequency-stretch",
+      "flow",
+      "updraft",
+      "morph",
+    ],
   },
 ];
 
