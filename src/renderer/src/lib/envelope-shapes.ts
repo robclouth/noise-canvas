@@ -33,13 +33,11 @@ export const ENVELOPE_SHAPES: readonly EnvelopeShape[] = [
   },
   {
     name: "Soft Time",
-    values: { brushCurveTime: 70, brushSkewTime: 0, brushCurvePitch: 100, brushSkewPitch: 0 },
-    preview: { brushCurveTime: 30, brushSkewTime: 0, brushCurvePitch: 100, brushSkewPitch: 0 },
+    values: { brushCurveTime: -50, brushSkewTime: 0, brushCurvePitch: 100, brushSkewPitch: 0 },
   },
   {
     name: "Soft Pitch",
-    values: { brushCurveTime: 100, brushSkewTime: 0, brushCurvePitch: 70, brushSkewPitch: 0 },
-    preview: { brushCurveTime: 100, brushSkewTime: 0, brushCurvePitch: 30, brushSkewPitch: 0 },
+    values: { brushCurveTime: 100, brushSkewTime: 0, brushCurvePitch: -50, brushSkewPitch: 0 },
   },
   {
     name: "Fade Out",
