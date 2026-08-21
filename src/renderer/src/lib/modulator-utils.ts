@@ -285,7 +285,7 @@ export const buildModulatorUniforms = (
         },
         modulatorStrength: {
           value: strength / 100,
-          minValue: 0.0,
+          minValue: -1.0,
           maxValue: 1.0,
           modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}Strength` as ParameterKey),
           staticScale: 1,

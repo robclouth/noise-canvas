@@ -7,6 +7,7 @@ import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState } from "../../test/mock-state";
 import { normalizeParameterValue } from "../../store/utils";
 import { createHarnessTextures, disposeHarnessTextures, toStrokeTextures } from "../../test/render-harness";
+import { buildModulatorUniforms } from "../modulator-utils";
 import {
   createModContext,
   NEUTRAL_STROKE_CONTEXT,
@@ -90,6 +91,14 @@ describe("static modulation fold", () => {
     // mix(x, 0.8, 0.5) == 0.5 x + 0.4.
     expect(one.staticScale).toBeCloseTo(0.5, 9);
     expect(one.staticOffset).toBeCloseTo(0.4, 9);
+  });
+
+  it("sweeps a modulator's Depth across its own slider", () => {
+    const step = stepStateWith({ modulator1StrengthModMacro1Amount: 100 });
+    const macros = [normalizeParameterValue("modulator1Strength", 25), 0.5, 0.5, 0.5];
+    const [modulator] = buildModulatorUniforms(120, 10, 36, 96, step, { ...NEUTRAL_STROKE_CONTEXT, macros });
+    expect(modulator.modulatorStrength.staticScale).toBeCloseTo(0, 9);
+    expect(modulator.modulatorStrength.staticOffset).toBeCloseTo(0.25, 9);
   });
 
   it("moves a macro knob from pen pressure", () => {

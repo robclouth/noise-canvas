@@ -40,7 +40,9 @@ export type ModulatableParameterKey =
   | "transformShiftSemis"
   | "transformScaleTime"
   | "transformScalePitch"
-  | "transformRotation";
+  | "transformSpeed"
+  | "transformRotation"
+  | `modulator${Range<1, 4>}Strength`;
 
 export type ModulatorAmountParameters = {
   [K in ModulatableParameterKey as `${K}Mod${Range<1, 4>}Amount`]: number;
