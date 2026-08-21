@@ -7,7 +7,6 @@ import {
 import { GLSL3, RawShaderMaterial } from "three";
 import evolveEffectFrag from "../glsl/evolve-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
-import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
@@ -39,7 +38,7 @@ class EvolveEffect extends BaseEffect {
           evolveEdgeMode: { value: 1 },
         },
         vertexShader: passThroughVert,
-        fragmentShader: withPlatformDefines(evolveEffectFrag),
+        fragmentShader: evolveEffectFrag,
         glslVersion: GLSL3,
       }),
     ];

@@ -20,7 +20,6 @@ import {
 } from "three";
 import cloneBrushFrag from "../glsl/clone-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
-import { withPlatformDefines } from "../lib/shader-utils";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 import { activeClonePasses, buildShapeTable, CloneShapeKey } from "./clone-shapes";
 
@@ -114,7 +113,7 @@ class CloneEffect extends BaseEffect {
           scaleOffsets: { value: new Float32Array(12) },
         },
         vertexShader: passThroughVert,
-        fragmentShader: withPlatformDefines(cloneBrushFrag),
+        fragmentShader: cloneBrushFrag,
         glslVersion: GLSL3,
       }),
       new RawShaderMaterial({
@@ -125,7 +124,7 @@ class CloneEffect extends BaseEffect {
           scaleOffsets: { value: new Float32Array(12) },
         },
         vertexShader: passThroughVert,
-        fragmentShader: withPlatformDefines(cloneBrushFrag),
+        fragmentShader: cloneBrushFrag,
         glslVersion: GLSL3,
       }),
     ];

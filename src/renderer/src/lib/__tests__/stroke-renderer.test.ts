@@ -26,7 +26,6 @@ import {
   verifyPhasesUnchanged,
 } from "../../test/mock-spectrogram";
 import { createMockState, createMockStateForIterations, createMockStateWithSteps } from "../../test/mock-state";
-import { withPlatformDefines } from "../shader-utils";
 import { brushEnvelopeShape } from "../brush-envelope";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";
@@ -142,7 +141,7 @@ void main() {
 function createAdditiveBlendEffect(): BaseEffect {
   const material = new RawShaderMaterial({
     vertexShader: passThroughVert,
-    fragmentShader: withPlatformDefines(createAdditiveBlendShader()),
+    fragmentShader: createAdditiveBlendShader(),
     glslVersion: GLSL3,
     uniforms: {
       sourceSpectrogramTex: { value: null },
@@ -206,7 +205,7 @@ function createMockEffectsWithAdditiveBlend(): EffectsRegistry {
 function createConfigurableAdditiveEffect(amount: number): BaseEffect {
   const material = new RawShaderMaterial({
     vertexShader: passThroughVert,
-    fragmentShader: withPlatformDefines(createConfigurableAdditiveShader(amount)),
+    fragmentShader: createConfigurableAdditiveShader(amount),
     glslVersion: GLSL3,
     uniforms: {
       sourceSpectrogramTex: { value: null },
@@ -278,7 +277,7 @@ void main() {
 function createMockPassthroughEffect(): BaseEffect {
   const material = new RawShaderMaterial({
     vertexShader: passThroughVert,
-    fragmentShader: withPlatformDefines(passthroughTestShader),
+    fragmentShader: passthroughTestShader,
     glslVersion: GLSL3,
     uniforms: {
       sourceSpectrogramTex: { value: null },

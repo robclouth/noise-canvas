@@ -380,8 +380,8 @@ vec2 getModulationWithNested(vec2 uv, int modulatorIndex, bool useNested, float 
   float seqSwing = modulator.seqSwing.value;
   float stereoSpread = modulator.modulatorStereoSpread.value;
 
-  // Only apply modulation to modulator parameters if we're at depth 0 (not nested)
-  // This is disabled on Windows due to shader compilation performance issues
+  // Nested modulation of modulator parameters runs only at depth 0.
+  // DISABLE_NESTED_MODULATION is an ablation knob for the compile-cost probe.
   #ifndef DISABLE_NESTED_MODULATION
   if (useNested) {
     // Apply one level of pattern modulation to each modulator parameter, reusing

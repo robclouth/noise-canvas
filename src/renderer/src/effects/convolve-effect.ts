@@ -9,7 +9,6 @@ import type { SpectrogramData } from "@renderer/store/types";
 import { GLSL3, RawShaderMaterial } from "three";
 import convolveEffectFrag from "../glsl/convolve-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
-import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
@@ -59,7 +58,7 @@ class ConvolveEffect extends BaseEffect {
           convolveEdgeMode: { value: 1 },
         },
         vertexShader: passThroughVert,
-        fragmentShader: withPlatformDefines(convolveEffectFrag),
+        fragmentShader: convolveEffectFrag,
         glslVersion: GLSL3,
       }),
     ];

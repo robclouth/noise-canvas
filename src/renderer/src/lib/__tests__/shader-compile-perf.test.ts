@@ -27,11 +27,10 @@ import transformFrag from "../../glsl/transform-effect.frag";
 import transmuteFrag from "../../glsl/transmute-effect.frag";
 import waveshapeFrag from "../../glsl/waveshape-effect.frag";
 import modulatorPrecomputeFrag from "../../glsl/modulator-precompute.frag";
-import { withPlatformDefines } from "../shader-utils";
 
 // Measures the wall-clock cost of the first draw of each effect shader -- the
 // point at which the backend compiles the pipeline state. Each effect's program
-// is reproduced exactly as the app builds it: withPlatformDefines(frag) +
+// is reproduced exactly as the app builds it: frag +
 // passThroughVert + GLSL3 (effects add no per-pass frag defines). Importing the
 // .frag files directly keeps the store -- and its circular init -- out of the
 // way. gl.finish() bounds the GPU work so the timing captures the real compile.
@@ -123,7 +122,7 @@ describe("shader compile cost", () => {
 
     const rows: { name: string; ms: number; chars: number }[] = [];
     for (const { name, frag } of EFFECT_FRAGS) {
-      const src = withAblationDefines(withPlatformDefines(frag));
+      const src = withAblationDefines(frag);
       const ms = drawOnce(src);
       rows.push({ name, ms, chars: src.length });
     }

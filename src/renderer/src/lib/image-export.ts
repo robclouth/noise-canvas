@@ -5,7 +5,6 @@ import exportFrag from "../glsl/export.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { colormapMountColor, getColormapTexture, type ColormapId } from "./image-export-colormaps";
 import { computePosterLayout, drawPoster, type PosterInfo } from "./image-export-poster";
-import { withPlatformDefines } from "./shader-utils";
 import { createByteTarget, renderMaterialToBytes } from "./snapshot-capture";
 
 export type AspectId = "square" | "portrait" | "story" | "landscape" | "wide";
@@ -157,7 +156,7 @@ function getExportMaterial(): RawShaderMaterial {
       wrapMode: { value: 0 },
     },
     vertexShader: passThroughVert,
-    fragmentShader: withPlatformDefines(exportFrag),
+    fragmentShader: exportFrag,
     glslVersion: GLSL3,
   });
   return exportMaterial;

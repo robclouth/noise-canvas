@@ -3,7 +3,6 @@ import type { EffectsState } from "@renderer/store/effects";
 import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import sortEffectFrag from "../glsl/sort-effect.frag";
-import { withPlatformDefines } from "../lib/shader-utils";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 // Pass layout: [H-even, H-odd, V-even, V-odd]
@@ -31,7 +30,7 @@ class SortEffect extends BaseEffect {
             passIndexOffset: { value: PASS_PARITY[i] },
           },
           vertexShader: passThroughVert,
-          fragmentShader: withPlatformDefines(sortEffectFrag),
+          fragmentShader: sortEffectFrag,
           glslVersion: GLSL3,
         }),
     );

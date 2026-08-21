@@ -10,7 +10,6 @@ import {
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import transformEffectFrag from "../glsl/transform-effect.frag";
-import { withPlatformDefines } from "../lib/shader-utils";
 import { BaseEffect, createDefaultUniforms, destinationLayout, UpdateEffectUniformsProps } from "./base-effect";
 
 export const boundaryModes = ["smear", "cut", "wrap"] as const;
@@ -91,7 +90,7 @@ class TransformEffect extends BaseEffect {
           brushBasePitchAbsSemis: { value: 0.0 },
         },
         vertexShader: passThroughVert,
-        fragmentShader: withPlatformDefines(transformEffectFrag),
+        fragmentShader: transformEffectFrag,
         glslVersion: GLSL3,
       }),
     ];

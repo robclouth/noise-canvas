@@ -7,7 +7,6 @@ import {
 import { GLSL3, RawShaderMaterial } from "three";
 import waveshapeEffectFrag from "../glsl/waveshape-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
-import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
@@ -41,7 +40,7 @@ class WaveshapeEffect extends BaseEffect {
           },
         },
         vertexShader: passThroughVert,
-        fragmentShader: withPlatformDefines(waveshapeEffectFrag),
+        fragmentShader: waveshapeEffectFrag,
         glslVersion: GLSL3,
       }),
     ];

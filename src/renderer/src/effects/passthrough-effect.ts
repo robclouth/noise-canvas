@@ -1,7 +1,6 @@
 import { GLSL3, RawShaderMaterial } from "three";
 import passThroughVert from "../glsl/pass-through.vert";
 import passthroughFrag from "../glsl/passthrough-effect.frag";
-import { withPlatformDefines } from "../lib/shader-utils";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 /**
@@ -17,7 +16,7 @@ class PassthroughEffect extends BaseEffect {
           ...createDefaultUniforms(),
         },
         vertexShader: passThroughVert,
-        fragmentShader: withPlatformDefines(passthroughFrag),
+        fragmentShader: passthroughFrag,
         glslVersion: GLSL3,
       }),
     ];

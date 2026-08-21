@@ -7,7 +7,6 @@ import {
 import { GLSL3, RawShaderMaterial } from "three";
 import dynamicsEffectFrag from "../glsl/dynamics-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
-import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
@@ -70,7 +69,7 @@ class DynamicsEffect extends BaseEffect {
           },
         },
         vertexShader: passThroughVert,
-        fragmentShader: withPlatformDefines(dynamicsEffectFrag),
+        fragmentShader: dynamicsEffectFrag,
         glslVersion: GLSL3,
       }),
     ];

@@ -1,7 +1,6 @@
 import { GLSL3, RawShaderMaterial } from "three";
 import alignFrag from "../glsl/align-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
-import { withPlatformDefines } from "../lib/shader-utils";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 class AlignEffect extends BaseEffect {
@@ -13,7 +12,7 @@ class AlignEffect extends BaseEffect {
       new RawShaderMaterial({
         uniforms: { ...createDefaultUniforms() },
         vertexShader: passThroughVert,
-        fragmentShader: withPlatformDefines(alignFrag),
+        fragmentShader: alignFrag,
         glslVersion: GLSL3,
       }),
     ];

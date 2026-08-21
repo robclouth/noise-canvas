@@ -29,7 +29,6 @@ import {
   SYNTHESIZE_TYPES,
   WRAP_MODES,
 } from "./lib/constants";
-import { host } from "./lib/host";
 import { BrushColor, ParameterKey } from "./store/types";
 
 // --- Base Interfaces ---
@@ -129,9 +128,6 @@ const loopBeatMarks = [...linkedBeatMarks, ...BEAT_VALUES];
 const loopSemitoneMarks = [...linkedSemitoneMarks, ...PITCH_VALUES_NO_FRACTIONS];
 
 // --- Modulator Definitions ---
-// Nested modulation (modulating modulator parameters) is disabled on Windows
-// due to shader compilation performance issues with unrolled loops
-const isWindows = typeof window !== "undefined" && host.env.platform === "win32";
 const modulatorDefs: Record<string, ParameterDefInput> = {};
 for (let i = 0; i < NUM_MODULATORS; i++) {
   const idx = i + 1;
@@ -164,7 +160,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "%",
     includeInStep: true,
-    modulatable: !isWindows,
+    modulatable: true,
   };
   modulatorDefs[`modulator${idx}PatternRateBeats`] = {
     kind: "number",
@@ -180,7 +176,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     scale: "log",
     unit: BEAT_UNIT,
     includeInStep: true,
-    modulatable: !isWindows,
+    modulatable: true,
   };
   modulatorDefs[`modulator${idx}PatternRateSemis`] = {
     kind: "number",
@@ -196,7 +192,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     marks: rateSemitoneMarks,
     unit: SEMITONE_UNIT,
     includeInStep: true,
-    modulatable: !isWindows,
+    modulatable: true,
   };
   modulatorDefs[`modulator${idx}Rotation`] = {
     kind: "number",
@@ -209,7 +205,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "°",
     includeInStep: true,
-    modulatable: !isWindows,
+    modulatable: true,
   };
   modulatorDefs[`modulator${idx}StereoSpread`] = {
     kind: "number",
@@ -222,7 +218,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "%",
     includeInStep: true,
-    modulatable: !isWindows,
+    modulatable: true,
   };
   modulatorDefs[`modulator${idx}PhaseMode`] = {
     kind: "options",
@@ -247,7 +243,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "%",
     includeInStep: true,
-    modulatable: !isWindows,
+    modulatable: true,
   };
   modulatorDefs[`modulator${idx}PhaseY`] = {
     kind: "number",
@@ -260,7 +256,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "%",
     includeInStep: true,
-    modulatable: !isWindows,
+    modulatable: true,
   };
   modulatorDefs[`modulator${idx}EnvelopeSmoothingBeats`] = {
     kind: "number",
@@ -300,7 +296,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "dB",
     includeInStep: true,
-    modulatable: !isWindows,
+    modulatable: true,
   };
   modulatorDefs[`modulator${idx}EnvelopeMaxDb`] = {
     kind: "number",
@@ -313,7 +309,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "dB",
     includeInStep: true,
-    modulatable: !isWindows,
+    modulatable: true,
   };
   modulatorDefs[`modulator${idx}TexturePath`] = {
     kind: "string",
@@ -360,7 +356,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     scale: "log",
     unit: BEAT_UNIT,
     includeInStep: true,
-    modulatable: !isWindows,
+    modulatable: true,
   };
   modulatorDefs[`modulator${idx}SeqLoopSemis`] = {
     kind: "number",
@@ -376,7 +372,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     marks: loopSemitoneMarks,
     unit: SEMITONE_UNIT,
     includeInStep: true,
-    modulatable: !isWindows,
+    modulatable: true,
   };
   modulatorDefs[`modulator${idx}SeqSwing`] = {
     kind: "number",
@@ -389,7 +385,7 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     step: 1,
     unit: "%",
     includeInStep: true,
-    modulatable: !isWindows,
+    modulatable: true,
   };
   modulatorDefs[`modulator${idx}SeqData`] = {
     kind: "string",

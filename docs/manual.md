@@ -675,8 +675,6 @@ Beyond the three modulators and four macros, every modulatable parameter can als
 
 Modulator parameters are themselves modulatable. You can modulate modulator 2's rate with modulator 1, or drive a modulator's depth from a macro. One level of nesting is supported.
 
-> Not available on Windows.
-
 ---
 
 ## Fill Grid

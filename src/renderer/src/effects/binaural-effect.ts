@@ -8,7 +8,6 @@ import { ClampToEdgeWrapping, DataTexture, FloatType, GLSL3, LinearFilter, RawSh
 import binauralEffectFrag from "../glsl/binaural-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { loadHrtfData, getHrtfMetadata, HrtfMetadata } from "../lib/hrtf-loader";
-import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
@@ -87,7 +86,7 @@ class BinauralEffect extends BaseEffect {
           },
         },
         vertexShader: passThroughVert,
-        fragmentShader: withPlatformDefines(binauralEffectFrag),
+        fragmentShader: binauralEffectFrag,
         glslVersion: GLSL3,
       }),
     ];

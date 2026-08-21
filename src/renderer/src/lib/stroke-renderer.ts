@@ -45,7 +45,6 @@ import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { ATTRACT_MODULATOR_MAP_START } from "./constants";
 import { getFileOnsets } from "./file-onsets";
 import { buildModulatorUniforms } from "./modulator-utils";
-import { withPlatformDefines } from "./shader-utils";
 import { getStrokeScratchPool, StrokeScratch, StrokeScratchPool } from "./stroke-scratch-pool";
 import {
   pitchUvToBandIndex,
@@ -256,7 +255,7 @@ export class StrokeRenderer {
     this.modulatorMaterial = new RawShaderMaterial({
       uniforms: { ...createDefaultUniforms(), nestedModulationActive: { value: false } },
       vertexShader: passThroughVert,
-      fragmentShader: withPlatformDefines(modulatorPrecomputeFrag),
+      fragmentShader: modulatorPrecomputeFrag,
       glslVersion: GLSL3,
     });
 
@@ -277,7 +276,7 @@ export class StrokeRenderer {
         strokeTiltY: { value: 0.5 },
       },
       vertexShader: passThroughVert,
-      fragmentShader: withPlatformDefines(maskUpdateFrag),
+      fragmentShader: maskUpdateFrag,
       glslVersion: GLSL3,
     });
 

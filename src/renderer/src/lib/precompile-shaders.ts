@@ -6,7 +6,6 @@ import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorFrag from "../glsl/modulator.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { host } from "./host";
-import { withPlatformDefines } from "./shader-utils";
 import type { ShaderDescriptor, WarmupMessage } from "./shader-warmup-types";
 
 const DUMMY_GEOMETRY = new PlaneGeometry(2, 2);
@@ -36,7 +35,7 @@ function auxiliaryMaterial(frag: string): RawShaderMaterial {
   if (!material) {
     material = new RawShaderMaterial({
       vertexShader: passThroughVert,
-      fragmentShader: withPlatformDefines(frag),
+      fragmentShader: frag,
       glslVersion: GLSL3,
     });
     auxiliaryMaterials.set(frag, material);

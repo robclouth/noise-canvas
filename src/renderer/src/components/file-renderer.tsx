@@ -44,7 +44,6 @@ import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
 import { FULL_SCALE_DB_OFFSET } from "../lib/constants";
-import { withPlatformDefines } from "../lib/shader-utils";
 import { renderExportImage as renderExportImageToCanvas, type ImageExportOptions } from "../lib/image-export";
 import type { PosterInfo } from "../lib/image-export-poster";
 import { captureMaterialToCanvas } from "../lib/snapshot-capture";
@@ -397,7 +396,7 @@ const FileRendererInner = memo(
           fullScaleDbOffset: { value: FULL_SCALE_DB_OFFSET },
         },
         vertexShader: passThroughVert,
-        fragmentShader: withPlatformDefines(displayFrag),
+        fragmentShader: displayFrag,
         glslVersion: GLSL3,
       });
     }, []);

@@ -8,7 +8,6 @@ import {
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import blurBrushFrag from "../glsl/blur-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
-import { withPlatformDefines } from "../lib/shader-utils";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 function createUniforms() {
@@ -83,7 +82,7 @@ class BlurEffect extends BaseEffect {
           },
         },
         vertexShader: passThroughVert,
-        fragmentShader: withPlatformDefines(blurBrushFrag),
+        fragmentShader: blurBrushFrag,
         glslVersion: GLSL3,
       }),
       new RawShaderMaterial({
@@ -94,7 +93,7 @@ class BlurEffect extends BaseEffect {
           },
         },
         vertexShader: passThroughVert,
-        fragmentShader: withPlatformDefines(blurBrushFrag),
+        fragmentShader: blurBrushFrag,
         glslVersion: GLSL3,
       }),
     ];
