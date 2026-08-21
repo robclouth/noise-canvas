@@ -1,5 +1,5 @@
 import { useStore } from "@/store";
-import { Box, Button, Divider, Group, Menu, ScrollArea, Stack, Text, TextInput, useMantineTheme } from "@mantine/core";
+import { Box, Button, Group, Menu, ScrollArea, Stack, Tabs, Text, TextInput, useMantineTheme } from "@mantine/core";
 import { buildPresetPaletteIndex, type PaletteTag } from "@renderer/store/palettes";
 import { ContextModalProps, modals } from "@mantine/modals";
 import { resolveBrushColor } from "@renderer/lib/colors";
@@ -115,6 +115,7 @@ function PresetRow({
 
 export function BrushPickerModal({ context, id, innerProps }: BrushPickerModalProps): React.JSX.Element {
   const [query, setQuery] = useState("");
+  const [tab, setTab] = useState<"factory" | "user">("factory");
   const availablePresets = useStore((state) => state.availablePresets);
   const availablePalettes = useStore((state) => state.availablePalettes);
   const addEmptyBrush = useStore((state) => state.addEmptyBrush);
@@ -127,6 +128,15 @@ export function BrushPickerModal({ context, id, innerProps }: BrushPickerModalPr
 
   const factoryPresets = availablePresets.filter((p) => p.isFactory && matchesQuery(p.name));
   const userPresets = availablePresets.filter((p) => !p.isFactory && matchesQuery(p.name));
+
+  const shown = tab === "user" ? userPresets : factoryPresets;
+  const other = tab === "user" ? factoryPresets : userPresets;
+  const emptyMessage =
+    query.trim().length > 0
+      ? other.length > 0
+        ? `Nothing here matches "${query}" — the other tab has ${other.length}`
+        : `Nothing matches "${query}"`
+      : "Save a brush to keep it here";
 
   const close = () => context.closeModal(id);
 
@@ -153,66 +163,48 @@ export function BrushPickerModal({ context, id, innerProps }: BrushPickerModalPr
         }
       />
 
+      <Tabs value={tab} onChange={(value) => setTab(value === "user" ? "user" : "factory")} variant="default">
+        <Tabs.List>
+          <Tabs.Tab value="factory" fz="xs" rightSection={<TabCount count={factoryPresets.length} />}>
+            Factory
+          </Tabs.Tab>
+          <Tabs.Tab value="user" fz="xs" rightSection={<TabCount count={userPresets.length} />}>
+            User
+          </Tabs.Tab>
+        </Tabs.List>
+      </Tabs>
+
       <ScrollArea.Autosize mah={420} scrollbarSize={4} type="auto">
         <Stack gap={2}>
-          {factoryPresets.length > 0 && (
-            <>
-              <Divider
-                my={4}
-                label={
-                  <Text size="xs" c="dimmed">
-                    Factory
-                  </Text>
-                }
-                labelPosition="left"
-              />
-              {factoryPresets.map((preset) => (
-                <PresetRow
-                  key={preset.id}
-                  preset={preset}
-                  tags={paletteIndex.get(preset.id)}
-                  onSelect={() => {
-                    addBrushFromPreset(preset.id, innerProps.paletteId);
-                    close();
-                  }}
-                />
-              ))}
-            </>
-          )}
+          {shown.map((preset) => (
+            <PresetRow
+              key={preset.id}
+              preset={preset}
+              tags={paletteIndex.get(preset.id)}
+              onSelect={() => {
+                addBrushFromPreset(preset.id, innerProps.paletteId);
+                close();
+              }}
+            />
+          ))}
 
-          {userPresets.length > 0 && (
-            <>
-              <Divider
-                my={4}
-                label={
-                  <Text size="xs" c="dimmed">
-                    User
-                  </Text>
-                }
-                labelPosition="left"
-              />
-              {userPresets.map((preset) => (
-                <PresetRow
-                  key={preset.id}
-                  preset={preset}
-                  tags={paletteIndex.get(preset.id)}
-                  onSelect={() => {
-                    addBrushFromPreset(preset.id, innerProps.paletteId);
-                    close();
-                  }}
-                />
-              ))}
-            </>
-          )}
-
-          {factoryPresets.length === 0 && userPresets.length === 0 && query.trim().length > 0 && (
+          {shown.length === 0 && (
             <Text size="xs" c="dimmed" ta="center" py={8}>
-              No brushes match &quot;{query}&quot;
+              {emptyMessage}
             </Text>
           )}
         </Stack>
       </ScrollArea.Autosize>
     </Stack>
+  );
+}
+
+/** How many brushes a tab holds, so a search shows where its matches are. */
+function TabCount({ count }: { count: number }) {
+  return (
+    <Text size="xs" c="dimmed">
+      {count}
+    </Text>
   );
 }
 
