@@ -1,10 +1,9 @@
 import { CURRENT_PRESET_VERSION, PresetType } from "./preset-schema";
 
-// A positive `<param>ModMacroNAmount` of 100 makes the macro knob sweep that
-// parameter linearly across its modulation range, replacing the base value, so
-// each preset's macroValues place the parameter at the sound the preset ships
-// with. Negative amounts negate the swept value on asymmetric ranges — never
-// use them here.
+// A `<param>ModMacroNAmount` of 100 makes the macro knob sweep that parameter
+// along its slider, replacing the base value, so each preset's macroValues place
+// the parameter at the sound the preset ships with. A negative amount runs the
+// sweep the other way.
 
 export const factoryPresets: PresetType[] = [
   // Macro 1 sets the level the erased region drops to; 0 is a clean wipe.

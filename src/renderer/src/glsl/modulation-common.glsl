@@ -462,7 +462,7 @@ vec2 applyModulationCached(float value, float minValue, float maxValue, float[NU
 
     vec2 modulatedValue = mix(vec2(minV), vec2(maxV), modulation);
 
-    totalModulation += modulatedValue * modulationAmount;
+    totalModulation += modulatedValue * abs(modulationAmount);
     totalModulationAmount += abs(modulationAmount);
   }
 
@@ -497,7 +497,7 @@ vec2 applyModulationCached(float value, float minValue, float maxValue, float[NU
 
     float modulatedValue = mix(minV, maxV, modulation);
 
-    totalModulation += vec2(modulatedValue * modulationAmount);
+    totalModulation += vec2(modulatedValue * abs(modulationAmount));
     totalModulationAmount += abs(modulationAmount);
   }
 
@@ -520,7 +520,7 @@ vec2 applyModulationCached(float value, float minValue, float maxValue, float[NU
 
     float modulatedValue = mix(minV, maxV, modulation);
 
-    totalModulation += vec2(modulatedValue * modulationAmount);
+    totalModulation += vec2(modulatedValue * abs(modulationAmount));
     totalModulationAmount += abs(modulationAmount);
   }
 
