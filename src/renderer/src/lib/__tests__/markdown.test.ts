@@ -56,6 +56,12 @@ describe("parsing the manual", () => {
     }
   });
 
+  it("parses a CRLF copy of the manual identically", () => {
+    // A Windows-checkout build ships the manual with \r\n; 1.0.0 hung at boot
+    // because the parser looped forever on its first line.
+    expect(parseMarkdown(manual.replace(/\n/g, "\r\n"))).toEqual(blocks);
+  });
+
   it("consumes every non-blank line", () => {
     const rendered = blocks
       .map((block) => {

@@ -79,7 +79,11 @@ function splitRow(line: string): string[] {
 const TABLE_SEPARATOR = /^\|?[\s:-]+\|[\s|:-]*$/;
 
 export function parseMarkdown(source: string): MarkdownBlock[] {
-  const lines = source.split("\n");
+  // CRLF sources must not leave a trailing \r on each line: the branch regexes
+  // end in `(.*)$`, which cannot match past a \r, so every line would fall
+  // through to the paragraph fallback while still matching its stop pattern —
+  // an infinite loop.
+  const lines = source.split(/\r?\n/);
   const blocks: MarkdownBlock[] = [];
   let i = 0;
 
@@ -166,6 +170,10 @@ export function parseMarkdown(source: string): MarkdownBlock[] {
     while (i < lines.length && lines[i].trim() !== "" && !/^(#{1,6}\s|```|\||>|\s*([-*]|\d+\.)\s)/.test(lines[i])) {
       paragraph.push(lines[i++].trim());
     }
+    // A line every branch declined but the stop pattern above claims would
+    // otherwise never be consumed, pinning the outer loop forever; taken as
+    // prose instead, the parser is total over any input.
+    if (paragraph.length === 0) paragraph.push(lines[i++].trim());
     blocks.push({ kind: "paragraph", text: paragraph.join(" ") });
   }
 

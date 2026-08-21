@@ -1,0 +1,5 @@
+# The renderer bundles text files verbatim (`?raw` imports: docs/manual.md,
+# GLSL), so checkout line endings reach users. A CRLF checkout on the build
+# machine shipped a manual that hung the markdown parser in 1.0.0 — every
+# machine checks out LF so builds are byte-identical.
+* text=auto eol=lf
