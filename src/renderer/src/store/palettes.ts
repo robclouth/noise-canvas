@@ -2,6 +2,7 @@ import { notifications } from "@mantine/notifications";
 import { factoryPalettes } from "@renderer/lib/factory-palettes";
 import { getFolders } from "@renderer/lib/folders";
 import { host } from "@renderer/lib/host";
+import { isBrushUnsaved } from "@renderer/lib/preset-schema";
 import {
   CURRENT_PALETTE_VERSION,
   makePaletteId,
@@ -57,13 +58,33 @@ export function selectBrushesInPalette(state: State, groupId: string): Brush[] {
   return state.brushes.filter((brush) => brush.paletteId === groupId);
 }
 
-/** True when a group's brushes differ from the file it was opened from. */
-export function selectPaletteDirty(state: State, groupId: string): boolean {
-  const group = selectOpenPalette(state, groupId);
-  if (!group?.libraryId) return false;
-  const saved = state.availablePalettes.find((palette) => palette.id === group.libraryId);
+/**
+ * True when a group's brushes differ from the file it was opened from. A group
+ * that belongs to no file is dirty as soon as it holds a brush.
+ */
+export function isPaletteDirty(
+  group: OpenPalette | undefined,
+  brushesInPalette: readonly Brush[],
+  availablePalettes: readonly PaletteType[],
+): boolean {
+  if (!group) return false;
+  if (!group.libraryId) return brushesInPalette.length > 0;
+  const saved = availablePalettes.find((palette) => palette.id === group.libraryId);
   if (!saved) return true;
-  return paletteFingerprint(selectBrushesInPalette(state, groupId)) !== paletteFingerprint(saved.brushes);
+  return paletteFingerprint(brushesInPalette) !== paletteFingerprint(saved.brushes);
+}
+
+export function selectPaletteDirty(state: State, groupId: string): boolean {
+  return isPaletteDirty(
+    selectOpenPalette(state, groupId),
+    selectBrushesInPalette(state, groupId),
+    state.availablePalettes,
+  );
+}
+
+/** The brushes in a group that no library preset holds, or that differ from one. */
+export function selectUnsavedBrushes(state: State, groupId: string): Brush[] {
+  return selectBrushesInPalette(state, groupId).filter((brush) => isBrushUnsaved(brush, state.availablePresets));
 }
 
 /**

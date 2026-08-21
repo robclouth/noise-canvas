@@ -18,9 +18,14 @@ export type BaseHue = (typeof BASE_HUES)[number];
 
 // Variations are ordered from most-distinguishable primary row to
 // secondary/lighter rows. None are dark enough to read as black or low-contrast.
+// A saved brush stores its variation by index, so rows are only ever appended.
 export const PALETTE_VARIATIONS: readonly { shade: number; saturation: number }[] = [
   { shade: 5, saturation: 1.0 }, // primary vivid
   { shade: 3, saturation: 1.0 }, // light pastel
+  { shade: 7, saturation: 1.0 }, // deep
+  { shade: 1, saturation: 1.0 }, // pale
+  { shade: 5, saturation: 0.45 }, // muted
+  { shade: 3, saturation: 0.3 }, // washed
 ];
 
 const keyOf = (c: BrushColor) => `${c.hue}:${c.variation}`;

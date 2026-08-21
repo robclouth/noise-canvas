@@ -203,14 +203,14 @@ A palette is a folder of brushes for one job. The sidebar shows each open palett
 
 - **Click a band** to fold its brushes away.
 - **Drag a band** up or down to reorder the palettes. The top palette is the one the number keys reach.
-- **Drag** a brush from one palette to another to move it between them.
+- **Drag** a brush from one palette to another to move it between them. Dropping it on a band sends it to the top of that palette, which is how you reach a folded one.
 - The band's **⋮** offers Save, Save as…, Rename, Close and Delete file….
 - **Add palette** at the bottom of the sidebar opens the browser: **New** for an empty palette, or any saved one below it.
 
 ![The Add palette browser](images/ui/modal-palette-picker.webp)
 
 - **Add brush** sits at the end of each palette's own list, so a new brush lands where you asked for it.
-- A band shows its name in _italics_ once its brushes drift from the saved file. Closing a dirty palette asks first, and its brushes close with it.
+- A band shows its name in _italics_ until its brushes match a saved file, so a palette you have never saved stays italic. Closing one asks first, and counts the brushes that go with it.
 - The last open palette cannot be closed, so there is always somewhere for a new brush to go.
 
 Palettes are JSON in `Documents/Noise Canvas/Palettes/`, beside the `Presets/` folder single brushes save to. Opening one makes a fresh copy, so the same palette can be open twice and edits do not reach the file until you Save.
@@ -221,10 +221,10 @@ A brush can sit in several palettes. The picker shows which ones under each brus
 
 Brushes live inside a palette. Each is an independent set of steps, effects, modulators and macros, and you can have as many open as you like. **Add brush** puts a new one in the palette holding the brush you have selected.
 
-- A **colour bar** down the left edge identifies each brush, and the same colour marks it wherever it is referenced.
+- A **colour bar** down the left edge identifies each brush, and the same colour marks it wherever it is referenced. ⋮ → _Colour_ opens a grid of every hue, one shade to a row.
 - **Hover** a row to see what is in it: each step's effects, in order.
 - **Click** a row to make it active.
-- The **⋮ menu** offers Rename, Duplicate, Save, Save as…, Load referenced files, Assign key…, Remove key, and Close.
+- The **⋮ menu** offers Rename, Colour, Duplicate, Save, Save as…, Load referenced files, Assign key…, Remove key, and Close.
 - **Drag** rows to reorder them, or to move a brush into another palette.
 - **Add brush** at the end of each palette opens the picker: **New** for an empty brush, or any preset below it.
 
@@ -232,7 +232,7 @@ Brushes live inside a palette. Each is an independent set of steps, effects, mod
 
 **Hotkeys.** Any brush can be bound to a letter key (⋮ → _Assign key…_, then press a letter). Pressing that letter anywhere in the app jumps to that brush. The number keys **1–9 and 0** select the first ten brushes of the **top palette**, so dragging a palette to the top puts its brushes under your fingers.
 
-**The library.** Brushes are saved as JSON presets in `Documents/Noise Canvas/Presets/`. A brush loaded from the library remembers where it came from: _Save_ overwrites it, _Save as…_ creates a new one, and a dirty marker appears once it drifts from its saved version. This is the level below the palette, one brush to a file, where a palette is a whole set.
+**The library.** Brushes are saved as JSON presets in `Documents/Noise Canvas/Presets/`. A brush loaded from the library remembers where it came from: _Save_ overwrites it, _Save as…_ creates a new one, and its name sits in italics until it matches a saved preset, so a brush you have never saved stays italic. This is the level below the palette, one brush to a file, where a palette is a whole set.
 
 ### Steps
 

@@ -18,8 +18,11 @@ import { memo, useCallback, useEffect, useState } from "react";
 import { BrushPickerOpenButton, PalettePickerOpenButton } from "../controls/brush-picker";
 import { LIST_ROW_HOST, ListRowMenu } from "../controls/list-row";
 import { BrushRow } from "../controls/brush-row";
+import { BrushColorSubmenu } from "../controls/brush-color-menu";
 import { PaletteHeader } from "../controls/palette-header";
-import { paletteFingerprint } from "@renderer/lib/palette-schema";
+import { headerDroppableId, resolveBrushDrop } from "@renderer/lib/brush-drag";
+import { isBrushUnsaved } from "@renderer/lib/preset-schema";
+import { isPaletteDirty } from "@renderer/store/palettes";
 
 const PANEL_WIDTH = 200;
 
@@ -84,7 +87,8 @@ type BrushTileProps = {
   brush: Brush;
   index: number;
   active: boolean;
-  dirty: boolean;
+  /** No library preset holds this brush, or its settings differ from the one that does. */
+  unsaved: boolean;
   /** The digit key that selects this brush, or null when no key does. */
   numberKey: number | null;
   listeningForHotkey: boolean;
@@ -95,7 +99,7 @@ const BrushTile = memo(function BrushTile({
   brush,
   index,
   active,
-  dirty,
+  unsaved,
   numberKey,
   listeningForHotkey,
   onStartHotkeyAssign,
@@ -136,7 +140,7 @@ const BrushTile = memo(function BrushTile({
   const brushColor = resolveBrushColor(brush.color, theme);
   const effectHues = getBrushEffectHues(brush);
 
-  const canSave = brush.libraryId !== null && dirty;
+  const canSave = brush.libraryId !== null && unsaved;
 
   const DOT_SIZE = 5;
   const DOT_GAP = 2;
@@ -171,6 +175,7 @@ const BrushTile = memo(function BrushTile({
       {effectDots}
       <ListRowMenu help="brush-menu">
         <Menu.Item onClick={() => setEditing(true)}>Rename</Menu.Item>
+        <BrushColorSubmenu index={index} color={brush.color} />
         <Menu.Item onClick={() => duplicateBrush(index)}>Duplicate</Menu.Item>
         <Menu.Item
           disabled={!canSave || !libraryName}
@@ -188,7 +193,7 @@ const BrushTile = memo(function BrushTile({
         <Menu.Item
           color="red"
           onClick={() => {
-            if (dirty || brush.libraryId === null) {
+            if (unsaved) {
               openCloseConfirm(index, brush.name);
             } else {
               useStore.getState().closeBrush(index);
@@ -249,7 +254,7 @@ const BrushTile = memo(function BrushTile({
           <Text
             size="sm"
             truncate
-            fs={dirty ? "italic" : "normal"}
+            fs={unsaved ? "italic" : "normal"}
             fw={active ? 700 : undefined}
             c={active ? "white" : undefined}
             style={{ flex: 1, minWidth: 0 }}
@@ -303,7 +308,8 @@ export function SidebarPanel() {
         movePalette(source.index, destination.index);
         return;
       }
-      moveBrushToPalette(draggableId, destination.droppableId, destination.index);
+      const drop = resolveBrushDrop(destination);
+      moveBrushToPalette(draggableId, drop.groupId, drop.indexInGroup);
     },
     [moveBrushToPalette, movePalette],
   );
@@ -314,24 +320,21 @@ export function SidebarPanel() {
     entries: brushes.map((brush, index) => ({ brush, index })).filter((entry) => entry.brush.paletteId === group.id),
   }));
 
-  const paletteDirty = new Map(
-    openPalettes.map((group) => {
-      if (!group.libraryId) return [group.id, false] as const;
-      const saved = availablePalettes.find((palette) => palette.id === group.libraryId);
-      if (!saved) return [group.id, true] as const;
-      const open = brushes.filter((brush) => brush.paletteId === group.id);
-      return [group.id, paletteFingerprint(open) !== paletteFingerprint(saved.brushes)] as const;
-    }),
+  const paletteUnsaved = new Map(
+    groups.map(
+      ({ group, entries }) =>
+        [
+          group.id,
+          isPaletteDirty(
+            group,
+            entries.map((entry) => entry.brush),
+            availablePalettes,
+          ),
+        ] as const,
+    ),
   );
 
-  const dirtyByIndex = brushes.map((brush) => {
-    if (brush.libraryId === null) return false;
-    const preset = availablePresets.find((p) => p.id === brush.libraryId);
-    if (!preset) return true;
-    const a = { steps: preset.steps ?? [], linkedParams: preset.linkedParams ?? [] };
-    const b = { steps: brush.steps, linkedParams: brush.linkedParams };
-    return JSON.stringify(a) !== JSON.stringify(b);
-  });
+  const unsavedByIndex = brushes.map((brush) => isBrushUnsaved(brush, availablePresets));
 
   return (
     <Stack
@@ -381,13 +384,31 @@ export function SidebarPanel() {
                                 ...(paletteSnapshot.isDragging && { boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)" }),
                               }}
                             >
-                              <PaletteHeader
-                                group={group}
-                                brushes={entries.map((entry) => entry.brush)}
-                                dirty={paletteDirty.get(group.id) ?? false}
-                                closable={openPalettes.length > 1}
-                                dragHandleProps={paletteProvided.dragHandleProps}
-                              />
+                              <Droppable droppableId={headerDroppableId(group.id)}>
+                                {(headerProvided, headerSnapshot) => (
+                                  <Box
+                                    ref={headerProvided.innerRef}
+                                    {...headerProvided.droppableProps}
+                                    style={{
+                                      borderRadius: "var(--mantine-radius-sm)",
+                                      outline: headerSnapshot.isDraggingOver
+                                        ? "1px solid var(--mantine-color-orange-5)"
+                                        : undefined,
+                                    }}
+                                  >
+                                    <PaletteHeader
+                                      group={group}
+                                      brushes={entries.map((entry) => entry.brush)}
+                                      unsaved={paletteUnsaved.get(group.id) ?? false}
+                                      closable={openPalettes.length > 1}
+                                      dragHandleProps={paletteProvided.dragHandleProps}
+                                    />
+                                    {/* The header holds no draggables, so its placeholder would
+                                        only push the palette open as a brush passes over it. */}
+                                    <Box style={{ display: "none" }}>{headerProvided.placeholder}</Box>
+                                  </Box>
+                                )}
+                              </Droppable>
                               {!group.collapsed && (
                                 <Droppable droppableId={group.id}>
                                   {(provided, droppableSnapshot) => (
@@ -422,7 +443,7 @@ export function SidebarPanel() {
                                                 brush={brush}
                                                 index={index}
                                                 active={activeBrushIndex === index}
-                                                dirty={dirtyByIndex[index]}
+                                                unsaved={unsavedByIndex[index]}
                                                 numberKey={
                                                   paletteIndex === 0 && indexInGroup < 10
                                                     ? (indexInGroup + 1) % 10

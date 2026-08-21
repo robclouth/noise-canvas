@@ -4,7 +4,7 @@ import { ActionIcon, Box, Group, Menu, Text, TextInput, useMantineTheme } from "
 import { openConfirm, openPrompt } from "@renderer/lib/modals";
 import { SECTION_HEADER_FONT } from "@renderer/lib/ui-density";
 import { helpProps } from "@renderer/lib/ui-controls";
-import type { OpenPalette } from "@renderer/store/palettes";
+import { selectUnsavedBrushes, type OpenPalette } from "@renderer/store/palettes";
 import type { Brush } from "@renderer/store/types";
 import { SwatchStrip } from "./swatch-strip";
 import { ChevronDown, ChevronRight, MoreVertical } from "lucide-react";
@@ -25,14 +25,20 @@ function promptForSaveAs(group: OpenPalette) {
   });
 }
 
-function confirmClose(group: OpenPalette, dirty: boolean) {
-  if (!dirty) {
+function closeMessage(unsavedBrushes: number): string {
+  if (unsavedBrushes === 0) return "It has unsaved changes. Its brushes close with it.";
+  if (unsavedBrushes === 1) return "One of its brushes is unsaved. It closes with the palette.";
+  return `${unsavedBrushes} of its brushes are unsaved. They close with the palette.`;
+}
+
+function confirmClose(group: OpenPalette, unsaved: boolean) {
+  if (!unsaved) {
     useStore.getState().closePalette(group.id);
     return;
   }
   openConfirm({
     title: `Close "${group.name}"?`,
-    message: "It has unsaved changes. Its brushes close with it.",
+    message: closeMessage(selectUnsavedBrushes(useStore.getState(), group.id).length),
     confirmLabel: "Close",
     danger: true,
     onConfirm: () => useStore.getState().closePalette(group.id),
@@ -56,7 +62,8 @@ type PaletteHeaderProps = {
   group: OpenPalette;
   /** The palette's brushes, shown as a swatch strip while it is folded. */
   brushes: readonly Brush[];
-  dirty: boolean;
+  /** The palette belongs to no file, or its brushes differ from the one it came from. */
+  unsaved: boolean;
   /** False when this is the only palette open, which cannot be closed. */
   closable: boolean;
   /** Makes the whole band the handle that drags the palette up and down the list. */
@@ -68,7 +75,7 @@ type PaletteHeaderProps = {
  * band, an uppercase label and a disclosure arrow rather than a pressable tile
  * with a colour bar.
  */
-export function PaletteHeader({ group, brushes, dirty, closable, dragHandleProps }: PaletteHeaderProps) {
+export function PaletteHeader({ group, brushes, unsaved, closable, dragHandleProps }: PaletteHeaderProps) {
   const theme = useMantineTheme();
   const toggle = useStore((state) => state.togglePaletteCollapsed);
   const rename = useStore((state) => state.renameOpenPalette);
@@ -138,7 +145,7 @@ export function PaletteHeader({ group, brushes, dirty, closable, dragHandleProps
           tt="uppercase"
           c="dark.0"
           truncate
-          fs={dirty ? "italic" : undefined}
+          fs={unsaved ? "italic" : undefined}
           style={{ letterSpacing: "0.07em", flex: 1, minWidth: 0, cursor: "pointer", userSelect: "none" }}
           onClick={() => toggle(group.id)}
         >
@@ -157,7 +164,7 @@ export function PaletteHeader({ group, brushes, dirty, closable, dragHandleProps
             </Menu.Target>
             <Menu.Dropdown>
               <Menu.Item
-                disabled={!group.libraryId || !dirty}
+                disabled={!group.libraryId || !unsaved}
                 onClick={() => void useStore.getState().savePalette(group.id)}
               >
                 Save
@@ -165,7 +172,7 @@ export function PaletteHeader({ group, brushes, dirty, closable, dragHandleProps
               <Menu.Item onClick={() => promptForSaveAs(group)}>Save as…</Menu.Item>
               <Menu.Item onClick={() => setEditing(true)}>Rename</Menu.Item>
               <Menu.Divider />
-              <Menu.Item color="red" disabled={!closable} onClick={() => confirmClose(group, dirty)}>
+              <Menu.Item color="red" disabled={!closable} onClick={() => confirmClose(group, unsaved)}>
                 Close
               </Menu.Item>
               <Menu.Item color="red" disabled={!group.libraryId} onClick={() => confirmDelete(group)}>

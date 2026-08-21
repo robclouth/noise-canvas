@@ -54,12 +54,14 @@ import {
   selectNumberKeyBrushIndices,
   selectPaletteDirty,
   selectTargetPaletteId,
+  selectUnsavedBrushes,
   type OpenPalette,
 } from "../../store/palettes";
 import { DEFAULT_PALETTE_ID } from "../../store/palette-id";
 import type { Brush, State } from "../../store/types";
 import { factoryPalettes } from "../factory-palettes";
 import { validatePalette } from "../palette-schema";
+import { CURRENT_PRESET_VERSION, sanitizeStepParams, type PresetType } from "../preset-schema";
 
 function makeBrush(name: string, paletteId = DEFAULT_PALETTE_ID, libraryId: string | null = null): Brush {
   return {
@@ -76,12 +78,27 @@ function makeBrush(name: string, paletteId = DEFAULT_PALETTE_ID, libraryId: stri
   };
 }
 
+/** The library entry a brush was saved from, matching it field for field. */
+function makePreset(id: string, brush: Brush): PresetType {
+  return {
+    id,
+    name: brush.name,
+    isFactory: false,
+    version: CURRENT_PRESET_VERSION,
+    steps: brush.steps.map(sanitizeStepParams),
+    linkedParams: brush.linkedParams,
+    macroNames: brush.macroNames,
+    macroValues: brush.macroValues,
+  };
+}
+
 /** The real slice, wired to a plain object standing in for the zustand store. */
 function createTestStore(initialBrushes: Brush[] = [makeBrush("Mock")], openPalettes?: OpenPalette[]) {
   let state = {
     brushes: initialBrushes,
     activeBrushIndex: 0,
     activeStepIndex: 0,
+    availablePresets: [],
   } as unknown as State;
 
   const get = () => state;
@@ -97,6 +114,7 @@ function createTestStore(initialBrushes: Brush[] = [makeBrush("Mock")], openPale
     slice,
     getState: () => state,
     setBrushes: (brushes: Brush[]) => set({ brushes }),
+    setPresets: (availablePresets: PresetType[]) => set({ availablePresets }),
     /** The group that is not the default one, i.e. whatever was just opened. */
     lastGroup: () => state.openPalettes[state.openPalettes.length - 1],
   };
@@ -155,11 +173,40 @@ describe("flatInsertIndex", () => {
 });
 
 describe("palettes slice", () => {
-  it("starts with one untitled palette, which is never dirty", () => {
+  it("starts with one untitled palette, dirty because it belongs to no file", () => {
     const store = createTestStore();
     expect(store.getState().openPalettes).toEqual([makeDefaultPalette()]);
-    expect(selectPaletteDirty(store.getState(), DEFAULT_PALETTE_ID)).toBe(false);
+    expect(selectPaletteDirty(store.getState(), DEFAULT_PALETTE_ID)).toBe(true);
     expect(selectTargetPaletteId(store.getState())).toBe(DEFAULT_PALETTE_ID);
+  });
+
+  it("leaves an untitled palette clean while it holds no brushes", () => {
+    const store = createTestStore([makeBrush("Mock", "other")]);
+    expect(selectPaletteDirty(store.getState(), DEFAULT_PALETTE_ID)).toBe(false);
+  });
+
+  it("counts the brushes a close would lose", () => {
+    const untouched = makeBrush("Untouched", DEFAULT_PALETTE_ID, "eraser");
+    const edited = makeBrush("Edited", DEFAULT_PALETTE_ID, "smudge");
+    const store = createTestStore([
+      makeBrush("Never saved", DEFAULT_PALETTE_ID),
+      untouched,
+      edited,
+      makeBrush("Elsewhere", "other"),
+    ]);
+    store.setPresets([makePreset("eraser", untouched), makePreset("smudge", edited)]);
+
+    expect(selectUnsavedBrushes(store.getState(), DEFAULT_PALETTE_ID).map((b) => b.name)).toEqual(["Never saved"]);
+
+    store.setBrushes(
+      store
+        .getState()
+        .brushes.map((brush) => (brush.id === edited.id ? { ...brush, linkedParams: ["brushSize"] } : brush)),
+    );
+    expect(selectUnsavedBrushes(store.getState(), DEFAULT_PALETTE_ID).map((b) => b.name)).toEqual([
+      "Never saved",
+      "Edited",
+    ]);
   });
 
   it("opens a palette as a new group beside the existing one", () => {

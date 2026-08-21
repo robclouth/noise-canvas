@@ -2,9 +2,8 @@ import { notifications } from "@mantine/notifications";
 import { pickNextBrushColor, pickNextStepColor } from "@renderer/lib/colors";
 import { getFolders } from "@renderer/lib/folders";
 import {
+  isBrushUnsaved,
   CURRENT_PRESET_VERSION,
-  DEFAULT_MACRO_NAMES,
-  DEFAULT_MACRO_VALUES,
   PresetType,
   sanitizeStepParams,
   validatePreset,
@@ -17,7 +16,7 @@ import { makeBrushFromPreset, makeEmptyBrush } from "./brush-factory";
 import { DEFAULT_PALETTE_ID } from "./palette-id";
 import { flatInsertIndex, selectTargetPaletteId } from "./palettes";
 import { collectBrushReferencedPaths, openReferencedPaths } from "./files";
-import type { Brush, State, ZustandGet, ZustandSet } from "./types";
+import type { Brush, BrushColor, State, ZustandGet, ZustandSet } from "./types";
 
 export interface PresetsState {
   isInitialized: boolean;
@@ -34,6 +33,7 @@ export interface PresetsState {
   duplicateBrush: (index: number) => void;
   closeBrush: (index: number) => void;
   renameBrush: (index: number, name: string) => void;
+  setBrushColor: (index: number, color: BrushColor) => void;
   renameMacro: (macroIndex: number, newName: string) => void;
   setMacroValue: (macroIndex: number, value: number) => void;
   setBrushHotkey: (index: number, hotkey: string | null) => void;
@@ -141,24 +141,7 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
   isBrushDirty: (index: number): boolean => {
     const state = get();
     const brush = state.brushes[index];
-    if (!brush || brush.libraryId === null) return false;
-
-    const preset = state.availablePresets.find((p) => p.id === brush.libraryId);
-    if (!preset) return true;
-
-    const presetSnapshot = {
-      steps: preset.steps ?? [],
-      linkedParams: preset.linkedParams ?? [],
-      macroNames: preset.macroNames ?? [...DEFAULT_MACRO_NAMES],
-      macroValues: preset.macroValues ?? [...DEFAULT_MACRO_VALUES],
-    };
-    const brushSnapshot = {
-      steps: brush.steps.map(sanitizeStepParams),
-      linkedParams: brush.linkedParams,
-      macroNames: brush.macroNames,
-      macroValues: brush.macroValues,
-    };
-    return JSON.stringify(presetSnapshot) !== JSON.stringify(brushSnapshot);
+    return brush ? isBrushUnsaved(brush, state.availablePresets) : false;
   },
 
   setActiveBrush: (index: number) => {
@@ -272,6 +255,15 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
       produce((draft: State) => {
         const brush = draft.brushes[index];
         if (brush) brush.name = name;
+      }),
+    );
+  },
+
+  setBrushColor: (index: number, color: BrushColor) => {
+    set(
+      produce((draft: State) => {
+        const brush = draft.brushes[index];
+        if (brush) brush.color = color;
       }),
     );
   },

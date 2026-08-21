@@ -8,7 +8,7 @@ import {
   isStorableOptionValue,
   parameterDefs,
 } from "@renderer/parameters";
-import { ParameterKey } from "@renderer/store/types";
+import { ParameterKey, type Brush } from "@renderer/store/types";
 import { z } from "zod";
 
 // Current preset version
@@ -113,6 +113,28 @@ export type PresetType = Omit<z.infer<ReturnType<typeof createSchema>>, "steps">
   macroNames: string[];
   macroValues: number[];
 };
+
+/** True when no library preset holds this brush, or its settings differ from the one that does. */
+export function isBrushUnsaved(brush: Brush, presets: readonly PresetType[]): boolean {
+  if (brush.libraryId === null) return true;
+
+  const preset = presets.find((candidate) => candidate.id === brush.libraryId);
+  if (!preset) return true;
+
+  const presetSnapshot = {
+    steps: preset.steps ?? [],
+    linkedParams: preset.linkedParams ?? [],
+    macroNames: preset.macroNames ?? [...DEFAULT_MACRO_NAMES],
+    macroValues: preset.macroValues ?? [...DEFAULT_MACRO_VALUES],
+  };
+  const brushSnapshot = {
+    steps: brush.steps.map(sanitizeStepParams),
+    linkedParams: brush.linkedParams,
+    macroNames: brush.macroNames,
+    macroValues: brush.macroValues,
+  };
+  return JSON.stringify(presetSnapshot) !== JSON.stringify(brushSnapshot);
+}
 
 // --- Repair ---
 //
