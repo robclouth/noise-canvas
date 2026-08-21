@@ -489,7 +489,7 @@ vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float s
   return vec4(correctedL, correctedR);
 }
 
-vec4 getTransformedSampleSnappy(vec2 sourceUv, bool shouldRandomisePhase, vec2 destUv, float scaleX) {
+vec4 getTransformedSampleSnappy(vec2 sourceUv, vec2 destUv, float scaleX) {
   vec4 original = sampleSourceNoInterp(destUv);
   float originalPhaseL = getPhase(original.rg);
   float originalPhaseR = getPhase(original.ba);
@@ -1125,7 +1125,7 @@ vec4 getTransformedSample(vec2 sourceUv, vec2 destUv, float scaleX, float scaleY
   } else if (algorithm == 1) {
     return getTransformedSampleBasic(wrappedSourceUv, true, scaleX, destUv);
   } else if (algorithm == 2) {
-    return getTransformedSampleSnappy(wrappedSourceUv, true, destUv, scaleX);
+    return getTransformedSampleSnappy(wrappedSourceUv, destUv, scaleX);
   } else if (algorithm == 3) {
     return getTransformedSampleNeutralish(sourceUv, destUv, scaleX, scaleY, shiftX, shiftY);
   } else if (algorithm == 4) {

@@ -312,15 +312,15 @@ The brush envelope decides where the stroke deposits energy and how much.
 
 ### Warp Algorithms
 
-Moving sound in time or pitch means rebuilding it, and each option colours the result differently. Pick by ear:
+Moving sound in time or pitch means rebuilding it, and each option colours the result differently. The picker splits them in two: the **Natural** pair rebuilds the sound as it was, and the **Coloured** three rebuild it into something else. Pick by ear:
 
-| Algorithm      | Sounds like                                                | Reach for it on                                          |
-| -------------- | ---------------------------------------------------------- | -------------------------------------------------------- |
-| **Neutral**    | Clean and faithful. Attacks stay sharp, notes stay steady. | Anything. Start here and only change if you want colour. |
-| **Neutralish** | Neutral with a slightly softer edge.                       | Sustained material that Neutral makes sound too tight.   |
-| **Percussive** | Hard and snappy, attacks pushed forward.                   | Drums, and anything that needs to snap.                  |
-| **Flangey**    | Hollow and metallic, like a comb filter.                   | Adding a phasey, robotic character on purpose.           |
-| **Noisey**     | Diffuse and breathy, edges blurred away.                   | Pads, textures, and turning a sound into a wash.         |
+| Algorithm   | Group    | Sounds like                                                | Reach for it on                                          |
+| ----------- | -------- | ---------------------------------------------------------- | -------------------------------------------------------- |
+| **Sharp**   | Natural  | Clean and faithful. Attacks stay sharp, notes stay steady. | Anything. This is the default, and it holds up on drums. |
+| **Soft**    | Natural  | Faithful with a slightly softer edge.                      | Sustained material that Sharp makes sound too tight.     |
+| **Locked**  | Coloured | Hard and robotic, pinned to the spot you paint into.       | Bending a move into a machine-like rhythm.               |
+| **Flangey** | Coloured | Hollow and metallic, like a comb filter.                   | Adding a phasey, robotic character on purpose.           |
+| **Noisey**  | Coloured | Diffuse and breathy, edges blurred away.                   | Pads, textures, and turning a sound into a wash.         |
 
 ### Blend Modes
 
@@ -797,14 +797,14 @@ Onsets show up in three places:
 - **Onsets sensitivity** – the **Onsets** control in the file header. It sets how far down this file's own level range a hit still counts: **0%** keeps only the loudest, **100%** keeps everything the detector found. The range is per file, so the same percentage means something comparable on a quiet pad and a hot drum loop. It applies to that file's path, so it survives closing and reopening.
 - **Onset snapping** – set the time grid (**Beats**) to **Onsets** in the transport bar. Strokes then snap to detected hits instead of beat divisions.
 
-Onsets also drive the [warp algorithms](#warp-algorithms). **Neutral** re-anchors phase at each detected onset when it moves audio, which is what keeps a moved drum hit cracking instead of smearing into pre-echo.
+Onsets also drive the [warp algorithms](#warp-algorithms). **Sharp** re-anchors phase at each detected onset when it moves audio, which is what keeps a moved drum hit cracking instead of smearing into pre-echo.
 
 Onsets are recomputed around a stroke after you paint, so they track your edits.
 
 **Hints**
 
 - Snap to onsets with **Anchor** on **Corner**, and a stroke lands exactly on a transient rather than near it.
-- Lower the sensitivity if a busy file is being over-anchored by Neutral, and raise it if quiet hits are smearing.
+- Lower the sensitivity if a busy file is being over-anchored by Sharp, and raise it if quiet hits are smearing.
 
 ### The Level Strip
 

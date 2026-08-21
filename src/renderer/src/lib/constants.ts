@@ -265,11 +265,36 @@ export const NUM_CONTEXTUAL_MOD_SOURCES = CONTEXTUAL_MOD_SOURCES.length;
 export const NEUTRAL_ALGORITHM = 6;
 
 export const ALGORITHMS = [
-  { value: NEUTRAL_ALGORITHM, label: "Neutral" },
-  { value: 3, label: "Neutralish" },
-  { value: 2, label: "Percussive" },
-  { value: 0, label: "Flangey" },
-  { value: 1, label: "Noisey" },
+  {
+    value: NEUTRAL_ALGORITHM,
+    label: "Sharp",
+    group: "Natural",
+    description: "Default. Best on drums and most sounds.",
+  },
+  {
+    value: 3,
+    label: "Soft",
+    group: "Natural",
+    description: "Best on sustained, non-percussive sounds.",
+  },
+  {
+    value: 2,
+    label: "Locked",
+    group: "Coloured",
+    description: "Hard and robotic, pinned in place.",
+  },
+  {
+    value: 0,
+    label: "Flangey",
+    group: "Coloured",
+    description: "Hollow and metallic, like a comb filter.",
+  },
+  {
+    value: 1,
+    label: "Noisey",
+    group: "Coloured",
+    description: "Diffuse and breathy, edges blurred away.",
+  },
 ];
 
 const [HUE_GRAPE, HUE_RED, , HUE_GREEN, HUE_VIOLET, HUE_CYAN, HUE_PINK, HUE_ORANGE, HUE_INDIGO, HUE_TEAL] = BASE_HUES;

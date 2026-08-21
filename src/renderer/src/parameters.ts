@@ -75,7 +75,7 @@ export interface StringParameter extends ParameterBase {
 export interface OptionsParameter<T = any> extends ParameterBase {
   kind: "options";
   default: T;
-  options: { value: T; label: string }[];
+  options: { value: T; label: string; group?: string; description?: string }[];
 }
 
 export interface FileParameter extends ParameterBase {
