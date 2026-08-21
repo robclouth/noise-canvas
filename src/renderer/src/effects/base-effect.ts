@@ -81,6 +81,8 @@ export type CommonUniforms = {
   wrapMode: { value: number };
   algorithm: { value: number };
   useLinearBlend?: { value: boolean };
+  bypassBrushWeight?: { value: boolean };
+  inSwappedDomain?: { value: boolean };
   magnitudeLimit: { value: number };
   gainLut: { value: Texture | null };
   modulator1ImageTex: { value: Texture | null };
@@ -240,6 +242,8 @@ export function createDefaultUniforms(): CommonUniforms {
     wrapMode: { value: 0 },
     algorithm: { value: 0 },
     useLinearBlend: { value: false },
+    bypassBrushWeight: { value: false },
+    inSwappedDomain: { value: false },
     modulators: { value: [] },
     gainLut: { value: null },
     modulator1ImageTex: { value: null },
@@ -303,6 +307,13 @@ export abstract class BaseEffect {
    * effect. Left undefined, every pass runs.
    */
   getActivePasses?(state: State): number[];
+
+  /**
+   * True when the effect hands the next pass a pair that no longer holds a
+   * magnitude and a phase. The renderer tracks the running parity of these and
+   * tells each pass, through `inSwappedDomain`, which domain it receives.
+   */
+  togglesDomain?(state: State): boolean;
 
   updateCommonUniforms({ commonUniforms, passIndex }: { commonUniforms: CommonUniforms; passIndex: number }): void {
     const material = this.materials[passIndex];

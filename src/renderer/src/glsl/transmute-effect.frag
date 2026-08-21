@@ -5,6 +5,28 @@ uniform int transmuteMode;
 uniform Parameter transmuteAmount;
 uniform Parameter transmuteCurve;
 
+// Draws the wrapped phase into the level slot as a 0..window image, and leaves
+// the phase itself alone so the passes in between still read a real one.
+vec2 openSwap(vec2 magPhase, float window) {
+  return vec2((unwrapPhase(magPhase.y) + PI) / TWO_PI * window, magPhase.y);
+}
+
+// Reads the image back out as the phase, and takes the level from what the
+// pixel held when the stroke began. That reference is what stops content a pass
+// in between dragged in from outside the swap — which still carries a full,
+// unwrapped phase — from coming back as a band at full level.
+vec2 closeSwap(vec2 magPhase, vec2 strokeStart, float window) {
+  float wrapped = clamp(magPhase.x / window, 0.0, 1.0) * TWO_PI - PI;
+  return vec2(strokeStart.x, round(strokeStart.y / TWO_PI) * TWO_PI + wrapped);
+}
+
+// Quantises the phase to `steps` around the circle, keeping the whole turns.
+float quantisePhase(float phase, float steps) {
+  float wrapped = unwrapPhase(phase);
+  float stepSize = TWO_PI / steps;
+  return phase - wrapped + round(wrapped / stepSize) * stepSize;
+}
+
 vec4 applyEffectStroke(vec4 src, ProcessingUvs coords, float audioLevelDb) {
   vec2 mods[NUM_MODULATORS];
   sampleModulators(mods);
@@ -27,45 +49,47 @@ vec4 applyEffectStroke(vec4 src, ProcessingUvs coords, float audioLevelDb) {
   vec2 outL, outR;
 
   if (transmuteMode == 0) {
-    // Swap Mag<->Phase: places phase into the magnitude slot and vice versa.
-    // Use as bookends to sculpt phase via amplitude-targeting effects:
+    // Swap Mag/Phase: puts the phase in the level slot so level-shaping effects
+    // reach it. A second Transmute in swap mode later in the chain puts it back:
     //   Transmute(swap) -> [Effect] -> Transmute(swap)
-    // amount blends between identity (0) and full swap (1).
-    float blendL = clamp(abs(amount.x), 0.0, 1.0);
-    float blendR = clamp(abs(amount.y), 0.0, 1.0);
-    outL = mix(vec2(magL, phaseL), vec2(phaseL, magL), blendL);
-    outR = mix(vec2(magR, phaseR), vec2(phaseR, magR), blendR);
+    // amount is the window, in level units, the phase image spans.
+    float windowL = max(abs(amount.x), 1e-3);
+    float windowR = max(abs(amount.y), 1e-3);
+    if (inSwappedDomain) {
+      vec4 strokeStart = texture(blendOriginalTex, vUv);
+      outL = closeSwap(vec2(magL, phaseL), strokeStart.rg, windowL);
+      outR = closeSwap(vec2(magR, phaseR), strokeStart.ba, windowR);
+    } else {
+      outL = openSwap(vec2(magL, phaseL), windowL);
+      outR = openSwap(vec2(magR, phaseR), windowR);
+    }
 
   } else if (transmuteMode == 1) {
-    // Complex Power: raise z = mag*e^(i*phase) to exponent p.
-    // new mag = mag^p,  new phase = phase * p  (wrapped to [-pi, pi]).
-    // p=2 doubles phase (harmonic redistribution); p=0.5 compresses both.
-    // p=-1 inverts magnitude and negates phase.
-    outL = vec2(pow(max(magL, EPSILON), amount.x), unwrapPhase(phaseL * amount.x));
-    outR = vec2(pow(max(magR, EPSILON), amount.y), unwrapPhase(phaseR * amount.y));
+    // Phase Multiply: scales the phase advance, which multiplies the frequency
+    // each band's content runs at while its level stays where it is. 2 doubles
+    // it, 0 flattens every band to cosine phase, -1 runs it backwards.
+    // curve is the level exponent, capped so a negative one cannot blow up.
+    outL = vec2(min(pow(max(magL, EPSILON), curve.x), 16.0), phaseL * amount.x);
+    outR = vec2(min(pow(max(magR, EPSILON), curve.y), 16.0), phaseR * amount.y);
 
   } else if (transmuteMode == 2) {
-    // Phase Rotate: frequency-proportional phase rotation.
-    // Adds  amount * 2pi * freqNorm^|curve|  radians to each bin's phase.
-    // curve=1 -> linear sweep across spectrum; curve>1 -> concentrated at high freqs.
-    float freqNorm = 1.0 - coords.dest.y;
-    float rotationL = amount.x * TWO_PI * pow(freqNorm, max(abs(curve.x), 0.001));
-    float rotationR = amount.y * TWO_PI * pow(freqNorm, max(abs(curve.y), 0.001));
-    outL = vec2(magL, unwrapPhase(phaseL + rotationL));
-    outR = vec2(magR, unwrapPhase(phaseR + rotationR));
+    // Disperse: delays each band by 2pi*f*delay radians of its own phase, with
+    // the delay growing toward the top of the spectrum, which smears transients
+    // into a chirp. amount is the delay at the top band, in units of 20 ms, and
+    // curve tilts how far down the spectrum the delay reaches.
+    float freqHz = getDestMetadata(coords.dest).a;
+    float topFreqHz = max(fetchBandMetadata(destMetadataTex, 0.0).a, 1e-6);
+    float freqNorm = clamp(freqHz / topFreqHz, 0.0, 1.0);
+    float tiltL = pow(freqNorm, max(abs(curve.x), 0.001));
+    float tiltR = pow(freqNorm, max(abs(curve.y), 0.001));
+    outL = vec2(magL, phaseL + TWO_PI * freqHz * amount.x * 0.02 * tiltL);
+    outR = vec2(magR, phaseR + TWO_PI * freqHz * amount.y * 0.02 * tiltR);
 
   } else if (transmuteMode == 3) {
-    // Phase Quantize: snaps phase to discrete steps around the unit circle.
-    // amount*8 = step count (amount=1 -> 8 steps, amount=8 -> 64 steps).
-    // Low step counts create digital, crystalline harmonic artifacts.
-    float stepsL = max(2.0, abs(amount.x) * 8.0);
-    float stepsR = max(2.0, abs(amount.y) * 8.0);
-    float stepSizeL = TWO_PI / stepsL;
-    float stepSizeR = TWO_PI / stepsR;
-    float wL = unwrapPhase(phaseL);
-    float wR = unwrapPhase(phaseR);
-    outL = vec2(magL, round(wL / stepSizeL) * stepSizeL);
-    outR = vec2(magR, round(wR / stepSizeR) * stepSizeR);
+    // Phase Quantize: snaps the phase to discrete steps around the unit circle.
+    // steps = 2^|amount|, so 1 is the two-step crunch and 8 is 256 steps.
+    outL = vec2(magL, quantisePhase(phaseL, clamp(pow(2.0, abs(amount.x)), 2.0, 4096.0)));
+    outR = vec2(magR, quantisePhase(phaseR, clamp(pow(2.0, abs(amount.y)), 2.0, 4096.0)));
 
   } else if (transmuteMode == 4) {
     // Stereo Cross: independently cross-blend L/R magnitudes and phases.
@@ -81,15 +105,15 @@ vec4 applyEffectStroke(vec4 src, ProcessingUvs coords, float audioLevelDb) {
   } else {
     // Phase Gate: gates magnitude by a sinusoidal function of the phase value.
     // Bins whose phase aligns with gate peaks keep amplitude; others are silenced.
-    // amount=oscillation count, curve=gate sharpness (higher -> narrower peaks).
+    // amount sets the lobe count, curve the gate sharpness.
     float normPhaseL = (unwrapPhase(phaseL) + PI) / TWO_PI;
     float normPhaseR = (unwrapPhase(phaseR) + PI) / TWO_PI;
-    float oscL   = max(1.0, abs(amount.x));
-    float oscR   = max(1.0, abs(amount.y));
-    float powerL = max(0.1, abs(curve.x));
-    float powerR = max(0.1, abs(curve.y));
-    outL = vec2(magL * pow(abs(sin(normPhaseL * oscL * PI)), powerL), phaseL);
-    outR = vec2(magR * pow(abs(sin(normPhaseR * oscR * PI)), powerR), phaseR);
+    float lobesL = 1.0 + abs(amount.x) * 3.0;
+    float lobesR = 1.0 + abs(amount.y) * 3.0;
+    float sharpL = pow(3.0, abs(curve.x));
+    float sharpR = pow(3.0, abs(curve.y));
+    outL = vec2(magL * pow(abs(sin(normPhaseL * lobesL * PI)), sharpL), phaseL);
+    outR = vec2(magR * pow(abs(sin(normPhaseR * lobesR * PI)), sharpR), phaseR);
   }
 
   return vec4(outL, outR);

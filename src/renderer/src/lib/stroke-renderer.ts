@@ -1021,16 +1021,27 @@ export class StrokeRenderer {
       // Flatten every (effect, iteration, pass) the step will render. Effects
       // drop passes that would be a no-op at the current settings, so first/last
       // pass bookkeeping has to count what actually renders, not what exists.
-      const plannedPasses: { effect: BaseEffect; effectState: State; passIndex: number; iteration: number }[] = [];
+      const plannedPasses: {
+        effect: BaseEffect;
+        effectState: State;
+        passIndex: number;
+        iteration: number;
+        inSwappedDomain: boolean;
+      }[] = [];
+      // A pass that swaps the pair into another domain leaves every pass after
+      // it reading that domain, until a second one swaps it back.
+      let swapped = false;
       for (const effectItem of enabledEffectItems) {
         const effect = this.effects[effectItem.effect];
         if (!effect) continue;
         const effectState = createEffectStateView(state, stepIndex, effectItem);
         const activePasses = effect.getActivePasses?.(effectState) ?? effect.materials.map((_, index) => index);
         if (activePasses.length === 0) continue;
+        const toggles = effect.togglesDomain?.(effectState) ?? false;
         for (let i = 0; i < brushIterations; i++) {
           for (const passIndex of activePasses) {
-            plannedPasses.push({ effect, effectState, passIndex, iteration: i });
+            plannedPasses.push({ effect, effectState, passIndex, iteration: i, inSwappedDomain: swapped });
+            if (toggles) swapped = !swapped;
           }
         }
       }
@@ -1045,13 +1056,14 @@ export class StrokeRenderer {
             effectState: createStepStateView(state, stepIndex),
             passIndex: 0,
             iteration: 0,
+            inSwappedDomain: false,
           });
         }
       }
 
       // Apply each planned pass in order
       for (let passOrdinal = 0; passOrdinal < plannedPasses.length; passOrdinal++) {
-        const { effect, effectState, passIndex: p, iteration: i } = plannedPasses[passOrdinal];
+        const { effect, effectState, passIndex: p, iteration: i, inSwappedDomain } = plannedPasses[passOrdinal];
         const isFirstOfStep = passOrdinal === 0;
         const uniformsForThisIteration = isFirstOfStep ? { ...commonUniforms } : { ...iterativeUniforms };
 
@@ -1069,6 +1081,7 @@ export class StrokeRenderer {
         uniformsForThisIteration.strokeTimePosition = { value: brushCenterTime };
         uniformsForThisIteration.strokePitchPosition = { value: brushCenterPitch };
         uniformsForThisIteration.strokeRandom = { value: strokeRandom };
+        uniformsForThisIteration.inSwappedDomain = { value: inSwappedDomain };
         uniformsForThisIteration.strokeStepNormalized = {
           value: numSteps > 1 ? stepIndex / (numSteps - 1) : 0,
         };
@@ -1101,13 +1114,13 @@ export class StrokeRenderer {
           const currentMaskFbo = this.maskPingPong === 0 ? scratch.strokeMaskFbo : scratch.strokeMaskFbo2;
           (uniformsForThisIteration as any).useStrokeMask = { value: true };
           (uniformsForThisIteration as any).strokeMaskTex = { value: currentMaskFbo.texture };
-          // Pass stroke start texture for blend calculations to prevent accumulation with additive blend modes
-          (uniformsForThisIteration as any).blendOriginalTex = { value: scratch.strokeStartFbo.texture };
         } else {
           (uniformsForThisIteration as any).useStrokeMask = { value: false };
           (uniformsForThisIteration as any).strokeMaskTex = { value: this.textures.placeholderTexture };
-          (uniformsForThisIteration as any).blendOriginalTex = { value: this.textures.placeholderTexture };
         }
+        // The blend path reads this only for non-cumulative strokes, but an
+        // effect undoing a domain swap needs the same snapshot either way.
+        (uniformsForThisIteration as any).blendOriginalTex = { value: scratch.strokeStartFbo.texture };
 
         effect.updateEffectUniforms({
           commonUniforms: uniformsForThisIteration,

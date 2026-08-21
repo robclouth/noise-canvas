@@ -29,7 +29,7 @@ export type EffectType = (typeof EFFECT_KEYS)[number];
  * already hold them, but they are absent from the manual, so their parameters
  * resolve no manual section.
  */
-export const HIDDEN_EFFECTS = new Set<string>(["transmute", "waveshape", "align"]);
+export const HIDDEN_EFFECTS = new Set<string>(["waveshape", "align"]);
 
 // Per-instance effect parameters
 export type EffectParams = Record<string, unknown>;

@@ -9,6 +9,7 @@ import transmuteEffectFrag from "../glsl/transmute-effect.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { withPlatformDefines } from "../lib/shader-utils";
 import { useStore } from "../store";
+import type { State } from "../store/types";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
 class TransmuteEffect extends BaseEffect {
@@ -47,6 +48,10 @@ class TransmuteEffect extends BaseEffect {
     ];
   }
 
+  togglesDomain(state: State): boolean {
+    return state.transmuteMode === 0;
+  }
+
   updateEffectUniforms(props: UpdateEffectUniformsProps): void {
     this.updateCommonUniforms(props);
     const state = props.state ?? useStore.getState();
@@ -73,11 +78,13 @@ class TransmuteEffect extends BaseEffect {
       macroAmounts: getMacroAmountValuesNormalized(state, "transmuteCurve"),
     };
 
-    // Swap mode places phase values (can be negative) in the magnitude slot.
-    // Phase-aware interpolation would log(negative) -> NaN, so opt this one
-    // material into linear blend. All other effects keep the proper phase-aware
-    // path.
-    this.materials[0].uniforms.useLinearBlend.value = state.transmuteMode === 0;
+    // Swap mode moves the pair into another domain, which only reverses when
+    // the blend is an exact linear mix of the whole footprint. All other
+    // effects keep the phase-aware, envelope-weighted, step-blended path.
+    const isSwap = state.transmuteMode === 0;
+    this.materials[0].uniforms.useLinearBlend.value = isSwap;
+    this.materials[0].uniforms.bypassBrushWeight.value = isSwap;
+    if (isSwap) this.materials[0].uniforms.blendMode.value = 0;
   }
 }
 

@@ -54,6 +54,15 @@ uniform int   algorithm;
 // places non-magnitude values in the magnitude slot. Phase-aware interpolation
 // would log-blend negative "magnitudes" and produce NaN for those cases.
 uniform bool  useLinearBlend;
+// Applies the effect at full weight everywhere the brush reaches. An effect
+// that maps the pair into another domain (transmute swap) is only reversible
+// when both passes cover the footprint whole, and a partial envelope weight
+// leaves a blend of the two domains behind.
+uniform bool  bypassBrushWeight;
+// True when the pass before this one handed over a pair that no longer holds a
+// magnitude and a phase. Only the effect that made the swap reads it, to know
+// whether it is opening the swap or closing it again.
+uniform bool  inSwappedDomain;
 
 // New uniform to prevent runaway feedback. Set to > 0 to enable.
 // A value of 1.0 is a good starting point.
@@ -1357,7 +1366,7 @@ vec4 applyBrush(vec4 original, vec4 modified, vec2 weight, vec2 destUv, vec2 pac
   vec2 pannedModifiedL = fromPolar(getMag(modifiedL) * clamp(1.0 - pan.x, 0.0, 1.0), getPhase(modifiedL));
   vec2 pannedModifiedR = fromPolar(getMag(modifiedR) * clamp(1.0 + pan.y, 0.0, 1.0), getPhase(modifiedR));
 
-  vec2 effectiveWeight = weight * intensity;
+  vec2 effectiveWeight = bypassBrushWeight ? vec2(1.0) : weight * intensity;
 
   // Non-cumulative stroke: use the max weight seen at this pixel
   // Since we always blend from strokeStart, using max(current, stored) ensures:
