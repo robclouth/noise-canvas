@@ -140,13 +140,13 @@ jobs:
           # release-notes.sh walks back to the previous tag.
           fetch-depth: 0
 
-      - name: Build release notes from commit titles
-        run: bash scripts/release-notes.sh "${{ github.ref_name }}" | tee release-notes.md
-
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Build the release body
+        run: bash scripts/release-notes.sh "${{ github.ref_name }}" artifacts | tee release-notes.md
 
       # electron-builder writes one latest-mac.yml per arch, each listing only
       # its own build. electron-updater filters that list by arch, so an
