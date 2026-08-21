@@ -158,7 +158,7 @@ export const UI_TECHNIQUES: readonly UiTechnique[] = [
   {
     id: "brush-hotkeys",
     title: "Bind a brush to a letter",
-    blurb: "⋮ → Assign key…, then press a letter. 1–0 always select the first ten.",
+    blurb: "⋮ → Assign key…, then press a letter. 1–0 always select the top palette's brushes.",
     demonstrateOn: "section-palette",
     manualSection: "the-brush-list",
   },

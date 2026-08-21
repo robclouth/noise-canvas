@@ -51,6 +51,7 @@ import {
   createPalettesSlice,
   flatInsertIndex,
   selectBrushesInPalette,
+  selectNumberKeyBrushIndices,
   selectPaletteDirty,
   selectTargetPaletteId,
   type OpenPalette,
@@ -220,6 +221,48 @@ describe("palettes slice", () => {
     expect(state.brushes.find((b) => b.id === moving.id)!.paletteId).toBe(DEFAULT_PALETTE_ID);
     expect(selectBrushesInPalette(state, DEFAULT_PALETTE_ID)[0].id).toBe(moving.id);
     expect(selectPaletteDirty(state, group.id)).toBe(true);
+  });
+
+  it("reorders the open palettes without touching the brushes", () => {
+    const store = createTestStore();
+    store.slice.openPaletteFromLibrary("factory-space");
+    const before = store.getState().brushes.map((brush) => brush.id);
+    const opened = store.lastGroup();
+
+    store.slice.movePalette(1, 0);
+
+    const state = store.getState();
+    expect(state.openPalettes.map((palette) => palette.id)).toEqual([opened.id, DEFAULT_PALETTE_ID]);
+    expect(state.brushes.map((brush) => brush.id)).toEqual(before);
+  });
+
+  it("leaves the order alone when a palette is dropped where it already is", () => {
+    const store = createTestStore();
+    store.slice.openPaletteFromLibrary("factory-space");
+    const before = store.getState().openPalettes.map((palette) => palette.id);
+
+    store.slice.movePalette(0, 0);
+    store.slice.movePalette(5, 0);
+
+    expect(store.getState().openPalettes.map((palette) => palette.id)).toEqual(before);
+  });
+
+  it("points the number keys at the top palette, following a reorder", () => {
+    const store = createTestStore([makeBrush("Own A"), makeBrush("Own B")]);
+    store.slice.openPaletteFromLibrary("factory-space");
+    const opened = store.lastGroup();
+
+    const brushes = store.getState().brushes;
+    expect(selectNumberKeyBrushIndices(store.getState())).toEqual([0, 1]);
+
+    store.slice.movePalette(1, 0);
+
+    const openedIndices = brushes
+      .map((brush, index) => ({ brush, index }))
+      .filter((entry) => entry.brush.paletteId === opened.id)
+      .map((entry) => entry.index)
+      .slice(0, 10);
+    expect(selectNumberKeyBrushIndices(store.getState())).toEqual(openedIndices);
   });
 
   it("refuses to overwrite a factory palette", async () => {

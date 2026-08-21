@@ -23,6 +23,11 @@ import { paletteFingerprint } from "@renderer/lib/palette-schema";
 
 const PANEL_WIDTH = 200;
 
+// Palettes and brushes drag in separate lists, so a brush cannot be dropped
+// between palettes and a palette cannot be dropped inside one.
+const PALETTE_DRAG_TYPE = "palette";
+const PALETTE_LIST_DROPPABLE = "palette-list";
+
 // Per-effect hue dots on each brush tile, currently hidden in favour of the
 // color bar + hotkey keycaps.
 const SHOW_EFFECT_DOTS = false;
@@ -80,6 +85,8 @@ type BrushTileProps = {
   index: number;
   active: boolean;
   dirty: boolean;
+  /** The digit key that selects this brush, or null when no key does. */
+  numberKey: number | null;
   listeningForHotkey: boolean;
   onStartHotkeyAssign: (index: number) => void;
 };
@@ -89,6 +96,7 @@ const BrushTile = memo(function BrushTile({
   index,
   active,
   dirty,
+  numberKey,
   listeningForHotkey,
   onStartHotkeyAssign,
 }: BrushTileProps) {
@@ -207,9 +215,9 @@ const BrushTile = memo(function BrushTile({
         asDiv
         editing={editing}
       >
-        {index < 10 && (
+        {numberKey !== null && (
           <Kbd size="xs" style={{ flexShrink: 0 }}>
-            {(index + 1) % 10}
+            {numberKey}
           </Kbd>
         )}
         {brush.hotkey && (
@@ -264,6 +272,7 @@ export function SidebarPanel() {
   const openPalettes = useStore((state) => state.openPalettes);
   const availablePalettes = useStore((state) => state.availablePalettes);
   const moveBrushToPalette = useStore((state) => state.moveBrushToPalette);
+  const movePalette = useStore((state) => state.movePalette);
 
   const [hotkeyListenIndex, setHotkeyListenIndex] = useState<number | null>(null);
 
@@ -282,6 +291,7 @@ export function SidebarPanel() {
 
   const handleDragEnd = useCallback(
     (result: {
+      type?: string;
       draggableId: string;
       destination?: { droppableId: string; index: number } | null;
       source: { droppableId: string; index: number };
@@ -289,9 +299,13 @@ export function SidebarPanel() {
       const { destination, source, draggableId } = result;
       if (!destination) return;
       if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+      if (result.type === PALETTE_DRAG_TYPE) {
+        movePalette(source.index, destination.index);
+        return;
+      }
       moveBrushToPalette(draggableId, destination.droppableId, destination.index);
     },
-    [moveBrushToPalette],
+    [moveBrushToPalette, movePalette],
   );
 
   // Each group's rows, carrying the flat index every brush action still takes.
@@ -352,68 +366,93 @@ export function SidebarPanel() {
           <Section label="Palettes" fill anchor="section-palette">
             <ScrollArea type="auto" scrollbarSize={4} style={{ flex: 1, minHeight: 0 }}>
               <DragDropContext onDragEnd={handleDragEnd}>
-                <Stack gap={6} pr={8}>
-                  {groups.map(({ group, entries }) => (
-                    <Stack key={group.id} gap={2}>
-                      <PaletteHeader
-                        group={group}
-                        brushes={entries.map((entry) => entry.brush)}
-                        dirty={paletteDirty.get(group.id) ?? false}
-                        closable={openPalettes.length > 1}
-                      />
-                      {!group.collapsed && (
-                        <Droppable droppableId={group.id}>
-                          {(provided, droppableSnapshot) => (
+                <Droppable droppableId={PALETTE_LIST_DROPPABLE} type={PALETTE_DRAG_TYPE}>
+                  {(listProvided) => (
+                    <Stack ref={listProvided.innerRef} {...listProvided.droppableProps} gap={6} pr={8}>
+                      {groups.map(({ group, entries }, paletteIndex) => (
+                        <Draggable key={group.id} draggableId={group.id} index={paletteIndex}>
+                          {(paletteProvided, paletteSnapshot) => (
                             <Stack
-                              ref={provided.innerRef}
-                              {...provided.droppableProps}
+                              ref={paletteProvided.innerRef}
+                              {...paletteProvided.draggableProps}
                               gap={2}
-                              pl={6}
-                              mih={entries.length === 0 ? 20 : undefined}
                               style={{
-                                borderRadius: "var(--mantine-radius-sm)",
-                                background: droppableSnapshot.isDraggingOver
-                                  ? "var(--mantine-color-dark-6)"
-                                  : undefined,
+                                ...paletteProvided.draggableProps.style,
+                                ...(paletteSnapshot.isDragging && { boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)" }),
                               }}
                             >
-                              {entries.map(({ brush, index }, indexInGroup) => (
-                                <Draggable key={brush.id} draggableId={brush.id} index={indexInGroup}>
-                                  {(draggableProvided, snapshot) => (
-                                    <Box
-                                      ref={draggableProvided.innerRef}
-                                      {...draggableProvided.draggableProps}
-                                      {...draggableProvided.dragHandleProps}
+                              <PaletteHeader
+                                group={group}
+                                brushes={entries.map((entry) => entry.brush)}
+                                dirty={paletteDirty.get(group.id) ?? false}
+                                closable={openPalettes.length > 1}
+                                dragHandleProps={paletteProvided.dragHandleProps}
+                              />
+                              {!group.collapsed && (
+                                <Droppable droppableId={group.id}>
+                                  {(provided, droppableSnapshot) => (
+                                    <Stack
+                                      ref={provided.innerRef}
+                                      {...provided.droppableProps}
+                                      gap={2}
+                                      pl={6}
+                                      mih={entries.length === 0 ? 20 : undefined}
                                       style={{
-                                        ...draggableProvided.draggableProps.style,
-                                        ...(snapshot.isDragging && { boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)" }),
+                                        borderRadius: "var(--mantine-radius-sm)",
+                                        background: droppableSnapshot.isDraggingOver
+                                          ? "var(--mantine-color-dark-6)"
+                                          : undefined,
                                       }}
                                     >
-                                      <BrushTile
-                                        brush={brush}
-                                        index={index}
-                                        active={activeBrushIndex === index}
-                                        dirty={dirtyByIndex[index]}
-                                        listeningForHotkey={hotkeyListenIndex === index}
-                                        onStartHotkeyAssign={setHotkeyListenIndex}
-                                      />
-                                    </Box>
+                                      {entries.map(({ brush, index }, indexInGroup) => (
+                                        <Draggable key={brush.id} draggableId={brush.id} index={indexInGroup}>
+                                          {(draggableProvided, snapshot) => (
+                                            <Box
+                                              ref={draggableProvided.innerRef}
+                                              {...draggableProvided.draggableProps}
+                                              {...draggableProvided.dragHandleProps}
+                                              style={{
+                                                ...draggableProvided.draggableProps.style,
+                                                ...(snapshot.isDragging && {
+                                                  boxShadow: "0 0 24px rgba(0, 0, 0, 0.4)",
+                                                }),
+                                              }}
+                                            >
+                                              <BrushTile
+                                                brush={brush}
+                                                index={index}
+                                                active={activeBrushIndex === index}
+                                                dirty={dirtyByIndex[index]}
+                                                numberKey={
+                                                  paletteIndex === 0 && indexInGroup < 10
+                                                    ? (indexInGroup + 1) % 10
+                                                    : null
+                                                }
+                                                listeningForHotkey={hotkeyListenIndex === index}
+                                                onStartHotkeyAssign={setHotkeyListenIndex}
+                                              />
+                                            </Box>
+                                          )}
+                                        </Draggable>
+                                      ))}
+                                      {provided.placeholder}
+                                    </Stack>
                                   )}
-                                </Draggable>
-                              ))}
-                              {provided.placeholder}
+                                </Droppable>
+                              )}
+                              {!group.collapsed && (
+                                <Box pl={6}>
+                                  <BrushPickerOpenButton paletteId={group.id} />
+                                </Box>
+                              )}
                             </Stack>
                           )}
-                        </Droppable>
-                      )}
-                      {!group.collapsed && (
-                        <Box pl={6}>
-                          <BrushPickerOpenButton paletteId={group.id} />
-                        </Box>
-                      )}
+                        </Draggable>
+                      ))}
+                      {listProvided.placeholder}
                     </Stack>
-                  ))}
-                </Stack>
+                  )}
+                </Droppable>
               </DragDropContext>
             </ScrollArea>
             <Box mt={4} pr={8}>

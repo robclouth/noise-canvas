@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useStore } from "../store";
+import { selectNumberKeyBrushIndices } from "../store/palettes";
 import { acceleratorCommands, matchesAccelerator, runCommand } from "./app-menu";
 import { host } from "./host";
 
@@ -153,20 +154,21 @@ export function useShortcuts() {
         state.setActiveBrush(targetIndex);
       }
     } else {
-      // Digit keys jump to the first ten brushes (1..9 → 0..8, 0 → 9).
+      // Digit keys jump to the top palette's first ten brushes (1..9 → 0..8, 0 → 9).
       const code = event.code;
-      let brushIndex = -1;
+      let slot = -1;
 
       if (code.startsWith("Digit")) {
         const digit = parseInt(code.replace("Digit", ""), 10);
         if (!isNaN(digit)) {
-          brushIndex = digit === 0 ? 9 : digit - 1;
+          slot = digit === 0 ? 9 : digit - 1;
         }
       }
 
-      if (brushIndex >= 0 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+      if (slot >= 0 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
         const state = useStore.getState();
-        if (brushIndex < state.brushes.length) {
+        const brushIndex = selectNumberKeyBrushIndices(state)[slot];
+        if (brushIndex !== undefined) {
           event.preventDefault();
           state.setActiveBrush(brushIndex);
         }

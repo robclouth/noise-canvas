@@ -165,7 +165,7 @@ export const UI_CONTROLS = {
   // Palettes
   "palette-header": {
     label: "Palette",
-    description: "Names one open palette, and folds its brushes away.",
+    description: "Names one open palette, folds its brushes away, and drags to reorder the list.",
     manualSection: "the-palette",
   },
   "palette-add": {

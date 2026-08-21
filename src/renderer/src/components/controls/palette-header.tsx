@@ -1,4 +1,5 @@
 import { useStore } from "@/store";
+import type { DraggableProvidedDragHandleProps } from "@hello-pangea/dnd";
 import { ActionIcon, Box, Group, Menu, Text, TextInput, useMantineTheme } from "@mantine/core";
 import { openConfirm, openPrompt } from "@renderer/lib/modals";
 import { SECTION_HEADER_FONT } from "@renderer/lib/ui-density";
@@ -58,6 +59,8 @@ type PaletteHeaderProps = {
   dirty: boolean;
   /** False when this is the only palette open, which cannot be closed. */
   closable: boolean;
+  /** Makes the whole band the handle that drags the palette up and down the list. */
+  dragHandleProps?: DraggableProvidedDragHandleProps | null;
 };
 
 /**
@@ -65,7 +68,7 @@ type PaletteHeaderProps = {
  * band, an uppercase label and a disclosure arrow rather than a pressable tile
  * with a colour bar.
  */
-export function PaletteHeader({ group, brushes, dirty, closable }: PaletteHeaderProps) {
+export function PaletteHeader({ group, brushes, dirty, closable, dragHandleProps }: PaletteHeaderProps) {
   const theme = useMantineTheme();
   const toggle = useStore((state) => state.togglePaletteCollapsed);
   const rename = useStore((state) => state.renameOpenPalette);
@@ -97,8 +100,10 @@ export function PaletteHeader({ group, brushes, dirty, closable }: PaletteHeader
       style={{
         background: "var(--mantine-color-dark-6)",
         borderRadius: "var(--mantine-radius-sm)",
+        cursor: dragHandleProps ? "grab" : undefined,
       }}
       {...helpProps("palette-header")}
+      {...dragHandleProps}
     >
       <Box
         style={{ display: "flex", alignItems: "center", cursor: "pointer", flexShrink: 0 }}

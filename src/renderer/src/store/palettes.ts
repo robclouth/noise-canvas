@@ -42,6 +42,7 @@ export interface PalettesState {
   renameLibraryPalette: (libraryId: string, name: string) => Promise<void>;
   togglePaletteCollapsed: (groupId: string) => void;
   moveBrushToPalette: (brushId: string, toGroupId: string, toIndexInGroup: number) => void;
+  movePalette: (fromIndex: number, toIndex: number) => void;
   savePalette: (groupId: string) => Promise<void>;
   savePaletteAs: (groupId: string, name: string) => Promise<void>;
   deletePaletteFromLibrary: (libraryId: string) => Promise<void>;
@@ -63,6 +64,20 @@ export function selectPaletteDirty(state: State, groupId: string): boolean {
   const saved = state.availablePalettes.find((palette) => palette.id === group.libraryId);
   if (!saved) return true;
   return paletteFingerprint(selectBrushesInPalette(state, groupId)) !== paletteFingerprint(saved.brushes);
+}
+
+/**
+ * The flat brush indices the digit keys select, in key order: the first ten
+ * brushes of the top palette.
+ */
+export function selectNumberKeyBrushIndices(state: State): number[] {
+  const top = state.openPalettes[0];
+  if (!top) return [];
+  const indices: number[] = [];
+  for (let i = 0; i < state.brushes.length && indices.length < 10; i++) {
+    if (state.brushes[i].paletteId === top.id) indices.push(i);
+  }
+  return indices;
 }
 
 /** The group `Add brush` puts a new brush in: the one holding the active brush. */
@@ -309,6 +324,19 @@ export const createPalettesSlice = (set: ZustandSet, get: ZustandGet): PalettesS
 
         const activeIndex = active ? draft.brushes.indexOf(active) : -1;
         if (activeIndex >= 0) draft.activeBrushIndex = activeIndex;
+      }),
+    );
+  },
+
+  movePalette: (fromIndex: number, toIndex: number) => {
+    set(
+      produce((draft: State) => {
+        const palettes = draft.openPalettes;
+        if (fromIndex < 0 || fromIndex >= palettes.length) return;
+        const clamped = Math.min(Math.max(toIndex, 0), palettes.length - 1);
+        if (clamped === fromIndex) return;
+        const [moved] = palettes.splice(fromIndex, 1);
+        palettes.splice(clamped, 0, moved);
       }),
     );
   },
