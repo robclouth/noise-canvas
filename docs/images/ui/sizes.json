@@ -61,7 +61,7 @@
   },
   "effect-transform": {
     "width": 305,
-    "height": 107
+    "height": 131
   },
   "effect-blur": {
     "width": 305,
@@ -87,6 +87,10 @@
     "width": 305,
     "height": 83
   },
+  "effect-transmute": {
+    "width": 301,
+    "height": 82
+  },
   "effect-convolve": {
     "width": 301,
     "height": 131
@@ -101,7 +105,7 @@
   },
   "modal-add-effect": {
     "width": 452,
-    "height": 511
+    "height": 597
   },
   "modal-brush-picker": {
     "width": 332,

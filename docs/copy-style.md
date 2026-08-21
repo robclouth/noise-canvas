@@ -182,7 +182,7 @@ hit it and think something is broken. Never state the reason.
 - Cut: "Saves are atomic, so a crash mid-write can't corrupt your file."
 - Keep, but shorten to the fact: "Not available on Windows."
 
-**Anything the picker does not offer.** Transmute, Waveshape and Align are
+**Anything the picker does not offer.** Waveshape and Align are
 hidden, so they leave the manual completely — sections, contents list, and the
 note that explains their absence. A feature the reader cannot reach is not
 documented.

@@ -2,16 +2,22 @@
 
 The complete guide to Noise Canvas. For downloads, installation, and build instructions, see the [README](../README.md).
 
-Every control has a tooltip and an entry in the `?` overlay. This manual is for what a single sentence cannot hold.
+Every control has a tooltip and an entry in the `?` overlay.
 
 ## Contents
 
-1. [Core Concepts](#core-concepts)
+1. [First Steps](#first-steps)
+   - [1. Open a Sound](#1-open-a-sound)
+   - [2. Choose a Brush](#2-choose-a-brush)
+   - [3. Aim the Brush](#3-aim-the-brush)
+   - [4. Paint a Stroke](#4-paint-a-stroke)
+   - [5. Listen, Undo, Save](#5-listen-undo-save)
+2. [Core Concepts](#core-concepts)
    - [Why Constant-Q](#why-constant-q)
    - [Analysis Resolution](#analysis-resolution)
    - [Scales](#scales)
-2. [The Interface](#the-interface)
-3. [Brushes](#brushes)
+3. [The Interface](#the-interface)
+4. [Brushes](#brushes)
    - [The Palette](#the-palette)
    - [The Brush List](#the-brush-list)
    - [Steps](#steps)
@@ -21,9 +27,9 @@ Every control has a tooltip and an entry in the `?` overlay. This manual is for 
    - [Options](#options)
    - [Warp Algorithms](#warp-algorithms)
    - [Blend Modes](#blend-modes)
-4. [Effects](#effects)
-   - [Dynamics](#dynamics) · [Transform](#transform) · [Blur](#blur) · [Repeat](#repeat) · [Synthesise](#synthesise) · [Evolve](#evolve) · [Binaural](#binaural) · [Sort](#sort) · [Convolve](#convolve) · [Attract](#attract)
-5. [Modulation](#modulation)
+5. [Effects](#effects)
+   - [Dynamics](#dynamics) · [Transform](#transform) · [Blur](#blur) · [Repeat](#repeat) · [Synthesise](#synthesise) · [Evolve](#evolve) · [Binaural](#binaural) · [Sort](#sort) · [Transmute](#transmute) · [Convolve](#convolve) · [Attract](#attract)
+6. [Modulation](#modulation)
    - [How Modulation Amount Works](#how-modulation-amount-works)
    - [Modulator Modes](#modulator-modes)
    - [Pattern Shapes and Images](#pattern-shapes-and-images)
@@ -31,25 +37,77 @@ Every control has a tooltip and an entry in the `?` overlay. This manual is for 
    - [The Sequencer Grid](#the-sequencer-grid)
    - [Contextual Sources](#contextual-sources)
    - [Nested Modulation](#nested-modulation)
-6. [Fill Grid](#fill-grid)
-7. [Parameter Controls](#parameter-controls)
+7. [Fill Grid](#fill-grid)
+8. [Parameter Controls](#parameter-controls)
    - [Section Presets](#section-presets)
    - [Randomisation](#randomisation)
    - [Linking Parameters Across Steps](#linking-parameters-across-steps)
-8. [Working with Files](#working-with-files)
+9. [Working with Files](#working-with-files)
    - [Mono and Stereo](#mono-and-stereo)
    - [Splitting a File](#splitting-a-file)
    - [Stem Groups](#stem-groups)
    - [Onsets](#onsets)
    - [The Level Strip](#the-level-strip)
    - [Navigating the Canvas](#navigating-the-canvas)
-9. [History](#history)
-10. [Transport and Output](#transport-and-output)
-11. [Menus](#menus)
-12. [Keyboard Shortcuts](#keyboard-shortcuts)
-13. [Getting Help](#getting-help)
-14. [Where Things Are Saved](#where-things-are-saved)
-15. [Working with Ableton Live](#working-with-ableton-live)
+10. [History](#history)
+11. [Transport and Output](#transport-and-output)
+12. [Menus](#menus)
+13. [Keyboard Shortcuts](#keyboard-shortcuts)
+14. [Getting Help](#getting-help)
+15. [Where Things Are Saved](#where-things-are-saved)
+16. [Working with Ableton Live](#working-with-ableton-live)
+
+---
+
+## First Steps
+
+The first launch offers a walkthrough. It opens a demo loop, has you build a brush and paint with it, and takes about a minute. **Help → Run Walkthrough** replays it whenever you want it.
+
+### 1. Open a Sound
+
+**File → Open** (`Cmd/Ctrl+O`), or drag an audio file onto the window. It is analysed and drawn as a spectrogram in the middle area: beats across, semitones up, brightness for loudness, orange and blue for the stereo image.
+
+Set **BPM** in the file header to the tempo of the audio. A file opens at the last tempo you used, or 120, and every beat-based size, offset and grid line is measured from it.
+
+Press `Space` to hear the file. Click along the time legend under it to move the start position, or drag along the legend to loop a region.
+
+### 2. Choose a Brush
+
+A brush is a stack of effects plus the envelope that places them. A fresh install has one empty palette holding one empty brush, and a brush with no effects does nothing to the sound, so start from the ones that ship with the app:
+
+1. Click **Add palette** at the bottom of the sidebar.
+2. Pick a pack: Restoration, Breaks, Vocals, From Scratch, Mixing, Space or Mangle.
+3. Click a brush in it to make it active. The number keys `1`–`9` and `0` reach the top palette's brushes.
+
+Hover a brush row to see the effects inside it, and the [brush panel](#brushes) down the left edge to see them laid out in full. Try **Space → Reverb** on anything, or **Breaks → Stutter** on a drum loop.
+
+### 3. Aim the Brush
+
+Move the pointer over the spectrogram. The rectangle that follows it is the brush, and what it covers is what the next stroke changes. It is sized in the [Envelope](#envelope) section:
+
+- **Size ↔** in beats and **Size ↕** in semitones. At **Full**, the brush covers the whole file in that axis.
+- **Strength** at 100% applies the effect at full force, and lower values blend the stroke into what is already there.
+
+The brush snaps to the grid as it moves. **Beats** and **Semis** in the transport bar space that grid, and the **Snap** switch beside each turns it off for free positioning.
+
+### 4. Paint a Stroke
+
+**Drag with the left mouse button** across the spectrogram. A single click lays down one brush-sized stamp instead. Either one is a **stroke**: the picture follows the pointer as you go, and the audio is rebuilt when you let go.
+
+The arrow keys move the brush one grid cell at a time and `Enter` applies it where it stands, which is the way to place strokes exactly rather than by hand.
+
+### 5. Listen, Undo, Save
+
+- **Auto-play stroke**, the brush icon in the transport bar, plays each stroke back as soon as you finish it. It is off until you switch it on.
+- `Cmd/Ctrl+Z` undoes. Every state is kept in the [History](#history) panel as a branching tree, so undoing a few strokes and painting something else keeps both.
+- **Save** (`Cmd/Ctrl+S`) writes back over the original audio file. **Save Version** (`Cmd/Ctrl+Alt+S`) writes a numbered copy alongside it and leaves the original where it is.
+
+From here: build a brush of your own with **Add brush → New** and **Add effect**, make one move across a stroke with [Modulation](#modulation), paint from a second file with [Source](#source), or skip painting altogether and lay the brush on every cell of the grid at once with [Fill Grid](#fill-grid).
+
+**Hints**
+
+- If strokes land in the wrong place, check the file's BPM before you touch the brush.
+- Drop **Strength** to around 30% and paint the same area two or three times, and you can hear the effect arrive rather than land all at once.
 
 ---
 
@@ -83,17 +141,17 @@ This matches how hearing works, so transients and harmonics come out closer to n
 
 ### Analysis Resolution
 
-Where a file sits on that trade-off is set when it is analysed, and shown as a badge in its header. The badge is a menu: pick a resolution from it and the file is analysed again at once, which adds a node to its history rather than replacing anything. The setting is bands per octave. More bands separate pitches more finely, and each band then needs a longer window to do it, which smears events in time.
+Where a file sits on that trade-off is set when it is analysed, and shown as a badge in its header. The badge is a menu: pick a resolution from it and the file is analysed again at once.
 
-| Badge            | Bands/octave | What it does                                                                                 |
-| ---------------- | ------------ | -------------------------------------------------------------------------------------------- |
-| **Best Time**    | 12           | Sharpest transients, coarsest pitch. Drums, percussive edits, anything where attacks matter. |
-| **Better Time**  | 24           | Leans towards time, and still separates notes usefully.                                      |
-| **Balanced**     | 36           | The default. Handles pitched material and transients without favouring either.               |
-| **Better Pitch** | 48           | Leans towards pitch, at some cost to attacks.                                                |
-| **Best Pitch**   | 60           | Finest pitch separation, softest transients. Pads, drones, harmonic work.                    |
+| Badge            | What it does                                                                                 |
+| ---------------- | -------------------------------------------------------------------------------------------- |
+| **Best Time**    | Sharpest transients, coarsest pitch. Drums, percussive edits, anything where attacks matter. |
+| **Better Time**  | Leans towards time, and still separates notes usefully.                                      |
+| **Balanced**     | The default. Handles pitched material and transients without favouring either.               |
+| **Better Pitch** | Leans towards pitch, at some cost to attacks.                                                |
+| **Best Pitch**   | Finest pitch separation, softest transients. Pads, drones, harmonic work.                    |
 
-The choice changes what edits sound like, not just how the spectrogram looks: a shift or a stretch is rebuilt from these bands, so a file analysed at 12 bands per octave keeps its clicks crisp while one at 60 keeps its harmonics clean.
+The choice changes what edits sound like, not just how the spectrogram looks: a shift or a stretch is rebuilt from these bands, so a file analysed with **Best Time** keeps its clicks crisp while one with **Best Pitch** keeps its harmonics clean.
 
 Files run to a little over five minutes at 44.1 kHz, and less at higher sample rates or with several files already open.
 
@@ -144,6 +202,7 @@ The brush is the link between what you see and what you hear. When you paint, it
 A palette is a folder of brushes for one job. The sidebar shows each open palette as a grey band with its brushes indented under it, and you can have as many open at once as you like.
 
 - **Click a band** to fold its brushes away.
+- **Drag a band** up or down to reorder the palettes. The top palette is the one the number keys reach.
 - **Drag** a brush from one palette to another to move it between them.
 - The band's **⋮** offers Save, Save as…, Rename, Close and Delete file….
 - **Add palette** at the bottom of the sidebar opens the browser: **New** for an empty palette, or any saved one below it.
@@ -154,17 +213,7 @@ A palette is a folder of brushes for one job. The sidebar shows each open palett
 - A band shows its name in _italics_ once its brushes drift from the saved file. Closing a dirty palette asks first, and its brushes close with it.
 - The last open palette cannot be closed, so there is always somewhere for a new brush to go.
 
-Palettes are JSON in `Documents/Noise Canvas/Palettes/`, beside the `Presets/` folder single brushes save to. Opening one makes a fresh copy, so the same palette can be open twice and edits do not reach the file until you Save. Seven ship with the app, one per job:
-
-| Palette      | Brushes                                                                                           |
-| ------------ | ------------------------------------------------------------------------------------------------- |
-| Restoration  | Eraser · Noise Gate · Restore · High-Pass · Compressor · Smudge                                   |
-| Breaks       | Stamp · Jungle Stretch · Stutter · Rewind · Eraser · Reverse · Echo · Step Gate · Octave Down     |
-| Vocals       | Eraser · Noise Gate · Magnet · Compressor · Harmonics · Shimmer · Reverb (Blur) · Stereo Widening |
-| From Scratch | Paint Tone · Paint Noise · Stack · Crackle · Harmonics · Octave Up · Sampler · Convolution        |
-| Mixing       | Booster · Compressor · Dynamic Bloom · Low-Pass Sweep · High-Pass · Stereo Widening               |
-| Space        | Reverb (Blur) · Echo · Shimmer · Freeze · 3D Orbit · Stereo Widening                              |
-| Mangle       | Pixel Sort · Crush · Updraft · Flow · Smudge · Reverse · Octave Down · Morph (Macros)             |
+Palettes are JSON in `Documents/Noise Canvas/Palettes/`, beside the `Presets/` folder single brushes save to. Opening one makes a fresh copy, so the same palette can be open twice and edits do not reach the file until you Save.
 
 A brush can sit in several palettes. The picker shows which ones under each brush's name.
 
@@ -181,7 +230,7 @@ Brushes live inside a palette. Each is an independent set of steps, effects, mod
 
 ![The Add brush picker](images/ui/modal-brush-picker.webp)
 
-**Hotkeys.** Any brush can be bound to a letter key (⋮ → _Assign key…_, then press a letter). Pressing that letter anywhere in the app jumps to that brush. The number keys **1–9 and 0** select the first ten brushes in the sidebar, counting across every open palette in order.
+**Hotkeys.** Any brush can be bound to a letter key (⋮ → _Assign key…_, then press a letter). Pressing that letter anywhere in the app jumps to that brush. The number keys **1–9 and 0** select the first ten brushes of the **top palette**, so dragging a palette to the top puts its brushes under your fingers.
 
 **The library.** Brushes are saved as JSON presets in `Documents/Noise Canvas/Presets/`. A brush loaded from the library remembers where it came from: _Save_ overwrites it, _Save as…_ creates a new one, and a dirty marker appears once it drifts from its saved version. This is the level below the palette, one brush to a file, where a palette is a whole set.
 
@@ -344,6 +393,7 @@ Slides, stretches and rotates sound through time and pitch, or reverses it. How 
 
 - **Shift ↔ / ↕** – moves content in time (beats) or pitch (semitones). Shift ↕ snaps to the selected scale when the pitch grid is set to Scale. See [Scales](#scales).
 - **Scale ↔ / ↕** – stretches or squashes in time or pitch. Negative values reverse or mirror.
+- **Origin ↔ / ↕** – the point a Scale or a Rotation turns around. A negative Scale still mirrors inside the brush wherever the origin sits.
 - **Rotation** – turns the painted region, in degrees.
 - **Edge** – what happens at the brush borders.
 
@@ -466,6 +516,31 @@ Reorders the bands inside the brush, so loud content collects at one edge and th
 - **Order** – Forwards or Backwards.
 - **Sort By** – Magnitude, Phase, dB, Frequency, or Pan.
 - **Stereo** – sorts the channels Linked or Independent.
+
+### Transmute
+
+![The Transmute effect card](images/ui/effect-transmute.webp)
+
+Bends magnitude and phase against each other. It gives metallic, glassy, alien tones, and small moves go a long way.
+
+- **Mode** – which of the six operations runs. See the table below.
+- **Amount** – drives the mode, and means something different in each.
+- **Curve** – shapes the mode a second time, where the mode uses it.
+
+| Mode               | What it does                                                                                                                                                                   |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Swap Mag/Phase** | Puts the phase in the level slot, where the level-shaping effects reach it, and a second Transmute in swap mode puts it back. Amount is the level the phase spans.             |
+| **Phase Multiply** | Multiplies the frequency each band runs at and leaves its level alone. 2 doubles it, 0 flattens the brush to one phase, −1 runs it backwards. Curve is the level exponent.     |
+| **Disperse**       | Holds the top of the spectrum back against the bottom, which smears every transient into a chirp. Amount is the delay, in steps of 20 ms. Curve tilts how far down it reaches. |
+| **Phase Quantise** | Snaps the phase to a ring of equal steps: two steps at 1, doubling with every step up to 256 at 8. Few steps ring and crystallise.                                             |
+| **Stereo Cross**   | Trades levels between left and right with Amount, and phases with Curve.                                                                                                       |
+| **Phase Gate**     | Silences the bands whose phase falls between the peaks of a gate. Amount sets how many peaks there are, Curve how narrow.                                                      |
+
+**Hints**
+
+- Put a **Swap Mag/Phase** either side of another effect. Everything between them shapes the phase instead of the level.
+- The pair hands the level back as the stroke found it, so put any level work after the second swap.
+- **Phase Multiply** at 1 leaves the sound alone. A few hundredths off it already rings.
 
 ### Convolve
 
@@ -858,7 +933,7 @@ File and Edit shortcuts (`Cmd/Ctrl+N`, `+O`, `+S`, `+W`, `+D`, …) are listed u
 | `-` / `=`             | Decrease / increase the time grid                      |
 | `Shift` + `-` / `=`   | Decrease / increase the pitch grid                     |
 | `Tab` / `Shift+Tab`   | Next / previous file                                   |
-| `1`–`9`, `0`          | Select the first ten brushes                           |
+| `1`–`9`, `0`          | Select the top palette's first ten brushes             |
 | `a`–`z`               | Select the brush bound to that key                     |
 | Hold `Shift` + click  | Pick a source file and position                        |
 | `Cmd`/`Ctrl` + scroll | Zoom                                                   |
