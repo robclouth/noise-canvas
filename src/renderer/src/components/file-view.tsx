@@ -674,7 +674,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       pos="relative"
       bd={isActive ? "2px solid orange" : "2px solid dark.7"}
       h={isFullscreen ? "100%" : undefined}
-      style={isFullscreen ? { display: "flex", flexDirection: "column" } : undefined}
+      style={isFullscreen ? { display: "flex", flexDirection: "column", minHeight: 0 } : undefined}
       onPointerDown={() => {
         if (!isActive) {
           useStore.getState().setActiveFileId(fileId);

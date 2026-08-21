@@ -358,9 +358,20 @@ function App(): React.JSX.Element {
               h="100%"
               style={{ flex: 1, minHeight: 0 }}
               viewportProps={{ style: { overflowY: fullscreenFileId ? "hidden" : undefined } }}
+              // The scroll viewport's content wrapper sizes to its content, which
+              // breaks a percentage height chain, so a fullscreen lane gets a flex
+              // column to grow into instead.
+              styles={
+                fullscreenFileId ? { content: { height: "100%", display: "flex", flexDirection: "column" } } : undefined
+              }
               onScrollPositionChange={() => invalidateRef.current?.()}
             >
-              <Box p="xs">
+              <Box
+                p="xs"
+                style={
+                  fullscreenFileId ? { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" } : undefined
+                }
+              >
                 <CanvasPanel />
               </Box>
             </ScrollArea>

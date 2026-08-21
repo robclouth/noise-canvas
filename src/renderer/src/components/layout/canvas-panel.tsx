@@ -119,7 +119,7 @@ const FileLane = memo(({ fileId, activeFileId, activeRef, fullscreenFileId, mini
   return (
     <Box
       ref={fileId === activeFileId ? activeRef : undefined}
-      style={{ display: hidden ? "none" : undefined }}
+      style={{ display: hidden ? "none" : undefined, minHeight: isFullscreen ? 0 : undefined }}
       h={isFullscreen ? "100%" : undefined}
       flex={isFullscreen ? 1 : undefined}
     >
@@ -208,7 +208,7 @@ const StemGroupSection = memo(
             </HelpActionIcon>
           </Group>
         )}
-        <Stack gap="xs">
+        <Stack gap="xs" h={chromeHidden ? "100%" : undefined} style={chromeHidden ? { minHeight: 0 } : undefined}>
           {fileIds.map((fileId) => (
             <FileLane key={fileId} fileId={fileId} {...laneProps} />
           ))}
@@ -240,7 +240,13 @@ export const CanvasPanel = memo(() => {
   );
 
   return (
-    <Stack h={fullscreenFileId ? "100%" : undefined} pos="relative" gap={"xs"}>
+    <Stack
+      h={fullscreenFileId ? "100%" : undefined}
+      flex={fullscreenFileId ? 1 : undefined}
+      style={fullscreenFileId ? { minHeight: 0 } : undefined}
+      pos="relative"
+      gap={"xs"}
+    >
       {segments.map((segment, index) =>
         segment.groupId !== null ? (
           <StemGroupSection
