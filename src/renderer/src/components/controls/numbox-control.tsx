@@ -330,6 +330,8 @@ export const NumboxControl = (props: NumboxControlProps) => {
 
               if (rightValue && numberValue >= max) {
                 setValue(rightValue.value);
+              } else if (leftValue && numberValue <= min) {
+                setValue(leftValue.value);
               } else if (numberValue <= min) {
                 setValue(min);
               } else if (numberValue >= max) {

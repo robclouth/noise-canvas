@@ -9,8 +9,12 @@ import {
   BEAT_VALUES,
   BLEND_MODES,
   BRUSH_ANCHOR_MODES,
+  BRUSH_SPAN_BEATS_VALUE,
+  BRUSH_SPAN_SEMIS_VALUE,
   CONTEXTUAL_MOD_SOURCES,
   EDGE_MODE,
+  GRID_SPAN_BEATS_VALUE,
+  GRID_SPAN_SEMIS_VALUE,
   NEUTRAL_ALGORITHM,
   MODULATOR_MODES,
   MULTIPLIER_UNIT,
@@ -107,9 +111,22 @@ const zeroPitchMark = { value: 0, label: "0" };
 const posPitchMarks = PITCH_VALUES;
 const negMultMarks = MULTIPLIER_VALUES.map((v) => ({ value: -v.value, label: `-${v.label}` })).reverse();
 const posMultMarks = MULTIPLIER_VALUES;
-const beatMarksWithOff = [{ value: 0, label: "Off" }, ...BEAT_VALUES];
 const beatMarksWithZero = [{ value: 0, label: "0" }, ...BEAT_VALUES];
-const semitoneMarksWithOff = [{ value: 0, label: "Off" }, ...PITCH_VALUES];
+// Grid and Brush sit below the smallest real span on every control that measures
+// one out, so the travel between the smallest and largest span stays even and
+// the sentinels are reached by taking the control down.
+const linkedBeatMarks = [
+  { value: GRID_SPAN_BEATS_VALUE, label: "Grid" },
+  { value: BRUSH_SPAN_BEATS_VALUE, label: "Brush" },
+];
+const linkedSemitoneMarks = [
+  { value: GRID_SPAN_SEMIS_VALUE, label: "Grid" },
+  { value: BRUSH_SPAN_SEMIS_VALUE, label: "Brush" },
+];
+const rateBeatMarks = [{ value: 0, label: "Off" }, ...linkedBeatMarks, ...BEAT_VALUES];
+const rateSemitoneMarks = [{ value: 0, label: "Off" }, ...linkedSemitoneMarks, ...PITCH_VALUES];
+const loopBeatMarks = [...linkedBeatMarks, ...BEAT_VALUES];
+const loopSemitoneMarks = [...linkedSemitoneMarks, ...PITCH_VALUES_NO_FRACTIONS];
 
 // --- Modulator Definitions ---
 // Nested modulation (modulating modulator parameters) is disabled on Windows
@@ -153,12 +170,13 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     kind: "number",
     name: `Modulator Pattern Rate Beats ${idx}`,
     label: "Rate ↔",
-    description: "Spans one cycle of the pattern over this many beats.",
+    description: "Spans one cycle of the pattern over this many beats, over one time-grid cell, or over the brush.",
     default: 1,
-    min: 0,
+    min: BEAT_VALUES[0].value,
     max: 32,
     step: 0.0001,
-    marks: beatMarksWithOff,
+    leftValue: { value: 0, label: "Off" },
+    marks: rateBeatMarks,
     scale: "log",
     unit: BEAT_UNIT,
     includeInStep: true,
@@ -168,12 +186,14 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     kind: "number",
     name: `Modulator Pattern Rate Semis ${idx}`,
     label: "Rate ↕",
-    description: "Spans one cycle of the pattern over this many semitones.",
+    description:
+      "Spans one cycle of the pattern over this many semitones, over one pitch-grid cell, or over the brush.",
     default: 12,
-    min: 0,
+    min: PITCH_VALUES[0].value,
     max: 96,
     step: 1,
-    marks: semitoneMarksWithOff,
+    leftValue: { value: 0, label: "Off" },
+    marks: rateSemitoneMarks,
     unit: SEMITONE_UNIT,
     includeInStep: true,
     modulatable: !isWindows,
@@ -330,12 +350,13 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     kind: "number",
     name: `Sequencer Loop Beats ${idx}`,
     label: "Loop ↔",
-    description: "Repeats the whole grid every this many beats.",
+    description: "Repeats the whole grid every this many beats, every time-grid cell, or every brush width.",
     default: 1,
     min: 1 / 64,
     max: 32,
     step: 0.0001,
-    marks: beatMarksWithOff,
+    leftValue: { value: GRID_SPAN_BEATS_VALUE, label: "Grid" },
+    marks: loopBeatMarks,
     scale: "log",
     unit: BEAT_UNIT,
     includeInStep: true,
@@ -345,12 +366,14 @@ for (let i = 0; i < NUM_MODULATORS; i++) {
     kind: "number",
     name: `Sequencer Loop Semis ${idx}`,
     label: "Loop ↕",
-    description: "Spreads the grid's rows over this many semitones before repeating.",
+    description:
+      "Spreads the grid's rows over this many semitones, over one pitch-grid cell, or over the brush, before repeating.",
     default: 12,
     min: 1,
     max: 96,
     step: 1,
-    marks: PITCH_VALUES_NO_FRACTIONS,
+    leftValue: { value: GRID_SPAN_SEMIS_VALUE, label: "Grid" },
+    marks: loopSemitoneMarks,
     unit: SEMITONE_UNIT,
     includeInStep: true,
     modulatable: !isWindows,

@@ -21,6 +21,36 @@ export function isOnsetGrid(gridSizeBeats: number): boolean {
   return gridSizeBeats < BEAT_VALUES[0].value;
 }
 
+// Sentinel positions below the smallest real span on the controls that measure
+// one out in beats or semitones — the modulator rates and the sequencer loops.
+// A span set to one of these follows the grid cell or the brush instead of
+// holding a fixed size. Matched exactly rather than as a band: every other value
+// on those parameters is a real span.
+export const GRID_SPAN_BEATS_VALUE = 1 / 256;
+export const BRUSH_SPAN_BEATS_VALUE = 1 / 128;
+export const GRID_SPAN_SEMIS_VALUE = 1 / 32;
+export const BRUSH_SPAN_SEMIS_VALUE = 1 / 16;
+
+/** True where a span in beats follows the time grid. */
+export function isGridSpanBeats(beats: number): boolean {
+  return beats === GRID_SPAN_BEATS_VALUE;
+}
+
+/** True where a span in beats follows the brush's width. */
+export function isBrushSpanBeats(beats: number): boolean {
+  return beats === BRUSH_SPAN_BEATS_VALUE;
+}
+
+/** True where a span in semitones follows the pitch grid. */
+export function isGridSpanSemis(semis: number): boolean {
+  return semis === GRID_SPAN_SEMIS_VALUE;
+}
+
+/** True where a span in semitones follows the brush's height. */
+export function isBrushSpanSemis(semis: number): boolean {
+  return semis === BRUSH_SPAN_SEMIS_VALUE;
+}
+
 // attractMap values at and above this read a modulator's precomputed field
 // (3/4/5 = Modulator 1/2/3).
 export const ATTRACT_MODULATOR_MAP_START = 3;

@@ -167,7 +167,19 @@ describe("section presets", () => {
       for (const [id, value] of Object.entries(preset.values)) {
         const def = parameterDefs[toParameterKey({ scope: preset.scope, modulatorIndex: 1 }, id)];
 
-        if (def?.kind === "number" && typeof value === "number" && (value < def.min || value > def.max)) {
+        // Sentinels (Off, Onsets, Grid) sit past the ends of the range on purpose.
+        const isSentinel =
+          def?.kind === "number" &&
+          (value === def.leftValue?.value ||
+            value === def.rightValue?.value ||
+            def.marks?.some((m) => m.value === value));
+
+        if (
+          def?.kind === "number" &&
+          typeof value === "number" &&
+          !isSentinel &&
+          (value < def.min || value > def.max)
+        ) {
           wrong.push(`${preset.id}: ${id} = ${value} outside ${def.min}–${def.max}`);
         }
         if (def?.kind === "options" && !def.options.some((option: { value: unknown }) => option.value === value)) {

@@ -120,7 +120,17 @@ const Scene = ({
       { equalityFn: modulatorParamsEqual },
     );
 
-    return () => unsubscribe();
+    // A rate set to Grid follows the grid sizes, which are global rather than
+    // part of the step.
+    const unsubscribeGrid = useStore.subscribe(
+      (state) => `${state.gridSizeBeats}:${state.gridSizeSemis}`,
+      applyModulators,
+    );
+
+    return () => {
+      unsubscribe();
+      unsubscribeGrid();
+    };
   }, [material, invalidate]);
 
   useEffect(() => {

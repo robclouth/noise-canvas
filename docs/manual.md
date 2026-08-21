@@ -641,8 +641,8 @@ They appear in the shape picker under a "User" group.
 ### Modulator Controls
 
 - **Depth** – how far the modulator swings. Negative inverts it.
-- **Rate ↔** – how many beats one cycle of the pattern spans. Bigger is slower. At 0, **Off**, the pattern stops varying along time.
-- **Rate ↕** – how many semitones one cycle spans. At 0, **Off**, it stops varying along pitch.
+- **Rate ↔** – how many beats one cycle of the pattern spans. Bigger is slower. Two linked settings sit below the shortest span: **Grid** covers one cell of the time grid, **Brush** covers the width of the brush, and each follows that size as you change it. At the bottom, **Off**, the pattern stops varying along time.
+- **Rate ↕** – how many semitones one cycle spans, with the same **Grid**, **Brush** and **Off** settings against the pitch grid and the height of the brush.
 - **Rotation** – turns the pattern on the canvas, so it cuts diagonally.
 - **Stereo** – reads the modulator at two places at once, one per channel. The gap is measured in the modulator's own cycle, so it works at any rate: at 100% the channels sit half a cycle apart. In Envelope mode the gap is time instead, up to half the file. Negative values swap the channels.
 - **Phase Mode** – **Canvas** pins the pattern to the file, so separate strokes uncover one stationary field. **Brush** carries it along with each stroke.
@@ -666,7 +666,7 @@ In Sequence mode the modulator reads a grid instead of a shape. Steps run left t
 
 A step switched off keeps its value and shows it as a faint line, so switching it back on returns the level you left. **Randomise** fills every cell with a random value, **Fill** switches the whole grid on, and **Clear** switches it off without losing the values.
 
-**Steps ↔** and **Rows ↕** set the size of the grid, **Loop ↔** and **Loop ↕** set how far it stretches before repeating, and **Swing** pushes odd-numbered steps later.
+**Steps ↔** and **Rows ↕** set the size of the grid, **Loop ↔** and **Loop ↕** set how far it stretches before repeating, and **Swing** pushes odd-numbered steps later. Both loops also take **Grid** and **Brush**, below their shortest span, so the sequence can run once per grid cell or once across the brush.
 
 **Hints**
 

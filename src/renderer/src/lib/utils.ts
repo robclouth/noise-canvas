@@ -9,15 +9,25 @@ export const BRUSH_SIZE_TIME_FULL = 32;
 export const BRUSH_SIZE_PITCH_FULL = 128;
 
 // Fallback grid interval in semis when the pitch grid is set to "Scale" mode
-// (gridSizeSemis <= 0) but the brush size is linked to Grid.
+// (gridSizeSemis <= 0) but a control is linked to Grid.
 const PITCH_GRID_SCALE_FALLBACK_SEMIS = 12;
 
-// Fallback grid interval in beats when the time grid is set to "Onsets" but the
-// brush size is linked to Grid. Onset spans are measured per hit, so this only
+// Fallback grid interval in beats when the time grid is set to "Onsets" but a
+// control is linked to Grid. Onset spans are measured per hit, so this only
 // applies where there is no hit to measure — time snap off, or a file with no
 // detected onsets — and the sentinel's own value (a 128th of a beat) would
 // otherwise leave a brush too small to paint with.
 const TIME_GRID_ONSET_FALLBACK_BEATS = 1;
+
+/** Width of one time-grid cell in beats, resolving the Onsets grid to a fixed span. */
+export function gridCellBeats(gridSizeBeats: number): number {
+  return isOnsetGrid(gridSizeBeats) ? TIME_GRID_ONSET_FALLBACK_BEATS : gridSizeBeats;
+}
+
+/** Height of one pitch-grid cell in semitones, resolving the Scale grid to a fixed span. */
+export function gridCellSemis(gridSizeSemis: number): number {
+  return gridSizeSemis > 0 ? gridSizeSemis : PITCH_GRID_SCALE_FALLBACK_SEMIS;
+}
 
 // The anchor round-trips through UV, so a value on an onset can come back a
 // hair below it. Nudge forward by a microsecond so it resolves to that onset's
@@ -48,12 +58,8 @@ export function resolveBrushFootprint(params: {
   const gridTime = brushSizeTime <= 0;
   const gridPitch = brushSizePitch <= 0;
 
-  const timeBeats = gridTime
-    ? isOnsetGrid(gridSizeBeats)
-      ? TIME_GRID_ONSET_FALLBACK_BEATS
-      : gridSizeBeats
-    : brushSizeTime;
-  const pitchSemis = gridPitch ? (gridSizeSemis > 0 ? gridSizeSemis : PITCH_GRID_SCALE_FALLBACK_SEMIS) : brushSizePitch;
+  const timeBeats = gridTime ? gridCellBeats(gridSizeBeats) : brushSizeTime;
+  const pitchSemis = gridPitch ? gridCellSemis(gridSizeSemis) : brushSizePitch;
 
   const timeUv = fullTime ? 1 : unitsToUv(timeBeats, 0, bpm, totalDuration, bandsPerOctave, numBands).x;
   const pitchUv = fullPitch ? 1 : unitsToUv(0, pitchSemis, bpm, totalDuration, bandsPerOctave, numBands).y;

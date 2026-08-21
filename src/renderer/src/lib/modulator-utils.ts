@@ -10,24 +10,36 @@ import { useMemo } from "react";
 import { DataTexture, FloatType, RedFormat } from "three";
 import { Note, Scale } from "tonal";
 import { useStore } from "../store";
-import { MAX_SEQ_SIZE, MAX_SEQ_STEPS_X, MAX_SEQ_STEPS_Y, NUM_MODULATORS } from "./constants";
+import {
+  isBrushSpanBeats,
+  isBrushSpanSemis,
+  isGridSpanBeats,
+  isGridSpanSemis,
+  MAX_SEQ_SIZE,
+  MAX_SEQ_STEPS_X,
+  MAX_SEQ_STEPS_Y,
+  NUM_MODULATORS,
+} from "./constants";
 import { perfMark } from "./perf-probe";
-import { bandIndexToPitchUv, unitsToUv } from "./utils";
+import { bandIndexToPitchUv, gridCellBeats, gridCellSemis, resolveBrushFootprint, unitsToUv } from "./utils";
 
 // Every step parameter the modulator preview reads is prefixed `modulator<n>` —
 // the modulators' own params plus the nested mod/contextual/macro amounts routed
 // into them (all generated into parameterDefs with that prefix). Deriving the key
 // set from parameterDefs keeps it complete: it cannot silently miss a nested mod
-// amount the way a hand-maintained list could.
-export const MODULATOR_PREVIEW_KEYS = (Object.keys(parameterDefs) as ParameterKey[]).filter((key) =>
-  /^modulator\d/.test(key),
-);
+// amount the way a hand-maintained list could. The brush size joins them because
+// a rate or loop set to Brush spans it.
+const BRUSH_SPAN_KEYS: ParameterKey[] = ["brushSizeTime", "brushSizePitch"];
+export const MODULATOR_PREVIEW_KEYS: ParameterKey[] = [
+  ...(Object.keys(parameterDefs) as ParameterKey[]).filter((key) => /^modulator\d/.test(key)),
+  ...BRUSH_SPAN_KEYS,
+];
 
 // Equality over only the step parameters the modulator preview depends on. Used
 // as the active-step subscription's equalityFn so the preview rebuild — and the
 // shared-canvas invalidate it triggers — fires only when a modulator param
-// actually changes, not on every unrelated step-param drag (a brush size, an
-// effect amount). The macro *values* are watched by a separate subscription.
+// actually changes, not on every unrelated step-param drag (an effect amount, a
+// blend mode). The macro *values* are watched by a separate subscription.
 export const modulatorParamsEqual = (a?: BrushStep, b?: BrushStep): boolean => {
   if (a === b) return true;
   if (!a || !b) return false;
@@ -135,6 +147,51 @@ function getSeqDataTexture(mode: number, seqDataStr: string): DataTexture {
   return tex;
 }
 
+/**
+ * Resolves a span parameter — a modulator rate or a sequencer loop — into a UV
+ * size on each axis. The Grid and Brush sentinels take the size of one grid cell
+ * or of the brush itself, so they track those as they change.
+ */
+function createSpanResolver(
+  state: State,
+  bpm: number,
+  totalDuration: number,
+  bandsPerOctave: number,
+  numBands: number,
+) {
+  const gridUv = unitsToUv(
+    gridCellBeats(state.gridSizeBeats),
+    gridCellSemis(state.gridSizeSemis),
+    bpm,
+    totalDuration,
+    bandsPerOctave,
+    numBands,
+  );
+  const brushUv = resolveBrushFootprint({
+    brushSizeTime: state.brushSizeTime,
+    brushSizePitch: state.brushSizePitch,
+    gridSizeBeats: state.gridSizeBeats,
+    gridSizeSemis: state.gridSizeSemis,
+    bpm,
+    totalDuration,
+    bandsPerOctave,
+    numBands,
+  }).sizeUv;
+
+  return {
+    uvX: (beats: number): number => {
+      if (isGridSpanBeats(beats)) return gridUv.x;
+      if (isBrushSpanBeats(beats)) return brushUv.x;
+      return unitsToUv(beats, 0, bpm, totalDuration, bandsPerOctave, numBands).x;
+    },
+    uvY: (semis: number): number => {
+      if (isGridSpanSemis(semis)) return gridUv.y;
+      if (isBrushSpanSemis(semis)) return brushUv.y;
+      return unitsToUv(0, semis, bpm, totalDuration, bandsPerOctave, numBands).y;
+    },
+  };
+}
+
 export const buildModulatorUniforms = (
   bpm: number,
   totalDuration: number,
@@ -144,6 +201,7 @@ export const buildModulatorUniforms = (
 ) =>
   perfMark("buildModulatorUniforms", () => {
     const state = stateOverride ?? useStore.getState();
+    const span = createSpanResolver(state, bpm, totalDuration, bandsPerOctave, numBands);
     const modulators: ModulatorUniform[] = [];
     for (let i = 0; i < NUM_MODULATORS; i++) {
       const mode = state[`modulator${i + 1}Mode`] as number;
@@ -163,7 +221,7 @@ export const buildModulatorUniforms = (
       // Convert smoothing beats to UV half-width
       const envelopeSmoothingUv = (envelopeSmoothingBeats * 60) / bpm / totalDuration / 2;
 
-      const modulatorPatternRate = unitsToUv(rateBeats, rateSemis, bpm, totalDuration, bandsPerOctave, numBands);
+      const modulatorPatternRate = { x: span.uvX(rateBeats), y: span.uvY(rateSemis) };
 
       const rateBeatsDef = parameterDefs[`modulator${i + 1}PatternRateBeats`] as NumberParameter;
       const rateSemisDef = parameterDefs[`modulator${i + 1}PatternRateSemis`] as NumberParameter;
@@ -250,13 +308,10 @@ export const buildModulatorUniforms = (
         seqLoopY: (() => {
           const loopSemis = (state[`modulator${i + 1}SeqLoopSemis`] as number) || 12;
           const loopSemisDef = parameterDefs[`modulator${i + 1}SeqLoopSemis`] as NumberParameter;
-          // Convert semitones to UV space
-          const loopYUv = loopSemis / (bandsPerOctave * (numBands / bandsPerOctave));
-          const maxLoopYUv = (loopSemisDef?.max || 96) / (bandsPerOctave * (numBands / bandsPerOctave));
           return {
-            value: loopYUv,
-            minValue: 1 / (bandsPerOctave * (numBands / bandsPerOctave)),
-            maxValue: maxLoopYUv,
+            value: span.uvY(loopSemis),
+            minValue: span.uvY(loopSemisDef?.min || 1),
+            maxValue: span.uvY(loopSemisDef?.max || 96),
             modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}SeqLoopSemis` as ParameterKey),
             contextualModAmounts: getContextualModAmountsNormalized(
               state,
@@ -276,15 +331,10 @@ export const buildModulatorUniforms = (
         seqLoopX: (() => {
           const loopBeats = (state[`modulator${i + 1}SeqLoopBeats`] as number) || 1;
           const loopBeatsDef = parameterDefs[`modulator${i + 1}SeqLoopBeats`] as NumberParameter;
-          // Convert beats to UV space
-          const seconds = (loopBeats * 60) / bpm;
-          const loopXUv = seconds / totalDuration;
-          const maxSeconds = ((loopBeatsDef?.max || 32) * 60) / bpm;
-          const maxLoopXUv = maxSeconds / totalDuration;
           return {
-            value: loopXUv,
-            minValue: ((loopBeatsDef?.min || 1 / 64) * 60) / bpm / totalDuration,
-            maxValue: maxLoopXUv,
+            value: span.uvX(loopBeats),
+            minValue: span.uvX(loopBeatsDef?.min || 1 / 64),
+            maxValue: span.uvX(loopBeatsDef?.max || 32),
             modulationAmounts: getModAmountValuesNormalized(state, `modulator${i + 1}SeqLoopBeats` as ParameterKey),
             contextualModAmounts: getContextualModAmountsNormalized(
               state,
