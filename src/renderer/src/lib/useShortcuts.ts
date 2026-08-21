@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useStore } from "../store";
 import { selectNumberKeyBrushIndices } from "../store/palettes";
+import { useTransientStore } from "../store/transient";
 import { acceleratorCommands, matchesAccelerator, runCommand } from "./app-menu";
 import { host } from "./host";
 
@@ -79,9 +80,13 @@ export function useShortcuts() {
     // the canvas into source-pick mode.
     if (isTextEntry(event.target as HTMLElement)) return;
 
-    // Special handling for Shift (hold) - Pick source file position
+    // Special handling for Shift (hold) - Pick source file position. Shift is
+    // also the fine modifier on a parameter control, so a drag under way keeps
+    // it off the canvas.
     if (event.key === "Shift") {
-      useStore.getState().setPickingFileParam("sourceFile" as import("@renderer/store/types").ParameterKey);
+      if (!useTransientStore.getState().controlDragging) {
+        useStore.getState().setPickingFileParam("sourceFile" as import("@renderer/store/types").ParameterKey);
+      }
       return;
     }
 

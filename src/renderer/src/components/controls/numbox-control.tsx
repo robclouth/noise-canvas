@@ -20,10 +20,14 @@ import {
 import type { SliderMark } from "@renderer/store/types";
 import { useTransientStore } from "@renderer/store/transient";
 import { ChevronDown } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
-
-const BASE_SENSITIVITY = 1 / 200;
-const SHIFT_SENSITIVITY = 1 / 600;
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  advanceMarkFraction,
+  BASE_SENSITIVITY,
+  FINE_SENSITIVITY,
+  markFraction,
+  markIndexFromFraction,
+} from "@renderer/lib/numbox-drag";
 
 type NumboxControlProps = {
   labelComponent: React.ReactNode;
@@ -72,62 +76,28 @@ export const NumboxControl = (props: NumboxControlProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const isDraggingRef = useRef(false);
-  const isSnappingRef = useRef(false);
-  const sensitivityRef = useRef(1 / 200);
-  const dragStartY = useRef<number>(0);
-  const dragStartValue = useRef<number>(0);
-  const virtualPositionRef = useRef<number>(0); // Track the continuous drag position
+  const isFineRef = useRef(false);
+  const virtualPositionRef = useRef<number>(0);
+  const markFractionRef = useRef<number>(0);
   const combobox = useCombobox();
   const numberBoxRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { ref: focusRef, focused } = useFocusWithin();
   const mergedRef = useMergedRef(containerRef, focusRef);
 
-  useEffect(() => {
-    // Check if the current value matches any mark exactly
-    if (marks?.length) {
-      const matchingMark = marks.find((m) => m.value === value);
-      if (matchingMark) {
-        setActiveMark(matchingMark);
-        return;
-      }
-    }
-    if (leftValue && value === leftValue.value) {
-      setActiveMark(leftValue);
-      return;
-    }
-    if (rightValue && value === rightValue.value) {
-      setActiveMark(rightValue);
-      return;
-    }
-    // No exact mark match - clear activeMark
-    setActiveMark(null);
+  const sortedMarks = useMemo(() => (marks ? [...marks].sort((a, b) => a.value - b.value) : []), [marks]);
+
+  const resolveActiveMark = useCallback((): SliderMark | null => {
+    const exact = marks?.find((m) => m.value === value);
+    if (exact) return exact;
+    if (leftValue && value === leftValue.value) return leftValue;
+    if (rightValue && value === rightValue.value) return rightValue;
+    return null;
   }, [value, marks, leftValue, rightValue]);
 
-  const nearestMark = useCallback(
-    (position: number) => {
-      if (!marks?.length) return null;
-      let nearestMark: { mark: SliderMark; position: number; dist: number } | null = null;
-      for (const mark of marks) {
-        const markPosition = rightValue && mark.value === rightValue.value ? 1 : toNormalized(mark.value);
-        const dist = Math.abs(markPosition - position);
-        if (!nearestMark || dist < nearestMark.dist) nearestMark = { mark, position: markPosition, dist };
-      }
-      return nearestMark;
-    },
-    [marks, rightValue, toNormalized],
-  );
-
-  const snapPositionToNearestMark = useCallback(
-    (position: number) => {
-      if (!marks?.length) return position;
-      const near = nearestMark(position);
-      if (!near) return position;
-      setActiveMark(near.mark);
-      return near.position;
-    },
-    [marks, nearestMark],
-  );
+  useEffect(() => {
+    setActiveMark(resolveActiveMark());
+  }, [resolveActiveMark]);
 
   const snapPositionToStep = useCallback(
     (position: number) => {
@@ -138,23 +108,6 @@ export const NumboxControl = (props: NumboxControlProps) => {
       return steppedPosition;
     },
     [fromNormalized, step, toNormalized],
-  );
-
-  const updateActiveMark = useCallback(
-    (position: number) => {
-      if (leftValue && position <= 0) {
-        setActiveMark(leftValue);
-      } else if (rightValue && position >= 1) {
-        setActiveMark(rightValue);
-      } else if (isSnappingRef.current) {
-        const near = nearestMark(position);
-        if (near) setActiveMark(near.mark);
-        else setActiveMark(null);
-      } else {
-        setActiveMark(null);
-      }
-    },
-    [leftValue, rightValue, nearestMark],
   );
 
   const handleValueChange = useCallback(
@@ -171,15 +124,12 @@ export const NumboxControl = (props: NumboxControlProps) => {
         return;
       }
 
-      position = snapPositionToStep(position);
-      if (isSnappingRef.current) position = snapPositionToNearestMark(position);
-
-      setValue(fromNormalized(position));
-      // Leave activeMark management to the `[value, marks, ...]` effect below so
-      // that clamped edges (where `value` doesn't change) still resolve to their
-      // mark label — e.g. "Grid" / "Full" on the brush-size sliders.
+      setValue(fromNormalized(snapPositionToStep(position)));
+      // Leave activeMark to the `resolveActiveMark` effect so that clamped edges
+      // (where `value` doesn't change) still resolve to their mark label — e.g.
+      // "Grid" / "Full" on the brush-size controls.
     },
-    [leftValue, rightValue, snapPositionToStep, snapPositionToNearestMark, setValue, fromNormalized],
+    [leftValue, rightValue, snapPositionToStep, setValue, fromNormalized],
   );
 
   const handleMouseDown = useCallback(
@@ -199,10 +149,8 @@ export const NumboxControl = (props: NumboxControlProps) => {
         setIsDragging(true);
         isDraggingRef.current = true;
         useTransientStore.getState().setControlDragging(true);
-        dragStartY.current = e.clientY;
-        const currentPosition = toNormalized(value);
-        dragStartValue.current = currentPosition;
-        virtualPositionRef.current = currentPosition; // Initialize virtual position
+        virtualPositionRef.current = toNormalized(value);
+        markFractionRef.current = markFraction(value, sortedMarks);
 
         // Explicitly focus the container so global shortcuts are blocked and visual focus is clear
         containerRef.current?.focus();
@@ -211,22 +159,23 @@ export const NumboxControl = (props: NumboxControlProps) => {
         document.body.style.userSelect = "none";
       }
     },
-    [disabled, isEditing, marks, combobox, value, toNormalized],
+    [disabled, isEditing, marks, combobox, value, toNormalized, sortedMarks],
   );
 
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {
       if (!isDragging) return;
 
-      const deltaPosition = -e.movementY * sensitivityRef.current;
+      if (sortedMarks.length > 0 && !isFineRef.current) {
+        markFractionRef.current = advanceMarkFraction(markFractionRef.current, -e.movementY, sortedMarks.length);
+        setValue(sortedMarks[markIndexFromFraction(markFractionRef.current, sortedMarks.length)].value);
+        return;
+      }
 
-      // Update virtual position (continuous, not snapped)
-      virtualPositionRef.current += deltaPosition;
-      const newPosition = Math.max(0, Math.min(1, virtualPositionRef.current));
-
-      handleValueChange(newPosition);
+      virtualPositionRef.current += -e.movementY * (isFineRef.current ? FINE_SENSITIVITY : BASE_SENSITIVITY);
+      handleValueChange(Math.max(0, Math.min(1, virtualPositionRef.current)));
     },
-    [isDragging, handleValueChange],
+    [isDragging, handleValueChange, setValue, sortedMarks],
   );
 
   const handleMouseUp = useCallback(() => {
@@ -263,26 +212,18 @@ export const NumboxControl = (props: NumboxControlProps) => {
     return undefined;
   }, [isDragging, handleMouseMove, handleMouseUp]);
 
+  // Shift can be taken and released mid-drag, so each handover reseeds the mode
+  // it passes to from the value on screen.
   useWindowEvent("keydown", (e) => {
-    if (e.key === "Control") {
-      isSnappingRef.current = true;
-      if (isDragging) {
-        // Snap the virtual position to nearest mark
-        const snappedPosition = snapPositionToNearestMark(virtualPositionRef.current);
-        virtualPositionRef.current = snappedPosition;
-        setValue(fromNormalized(snappedPosition));
-      }
-    } else if (e.key === "Shift") {
-      sensitivityRef.current = SHIFT_SENSITIVITY;
-    }
+    if (e.key !== "Shift" || isFineRef.current) return;
+    isFineRef.current = true;
+    virtualPositionRef.current = toNormalized(value);
   });
 
   useWindowEvent("keyup", (e) => {
-    if (e.key === "Control") {
-      isSnappingRef.current = false;
-    } else if (e.key === "Shift") {
-      sensitivityRef.current = BASE_SENSITIVITY;
-    }
+    if (e.key !== "Shift") return;
+    isFineRef.current = false;
+    markFractionRef.current = markFraction(value, sortedMarks);
   });
 
   const handleClick = useCallback(
@@ -308,8 +249,8 @@ export const NumboxControl = (props: NumboxControlProps) => {
 
   const handleBlur = useCallback(() => {
     setIsEditing(false);
-    updateActiveMark(toNormalized(value));
-  }, [value, toNormalized, updateActiveMark]);
+    setActiveMark(resolveActiveMark());
+  }, [resolveActiveMark]);
 
   const position = toNormalized(value);
   // Mark labels that start with a letter (e.g. "Grid", "Full", "Off", "Scale")

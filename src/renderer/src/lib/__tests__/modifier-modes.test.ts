@@ -29,6 +29,7 @@ vi.mock("../app-menu", () => ({
   runCommand: vi.fn(),
 }));
 
+import { useTransientStore } from "../../store/transient";
 import { useShortcuts } from "../useShortcuts";
 
 /**
@@ -62,6 +63,7 @@ describe("modifier-driven modes", () => {
   beforeEach(() => {
     state.pickingFileParam = null;
     state.isZooming = false;
+    useTransientStore.getState().setControlDragging(false);
     for (const root of roots.splice(0)) act(() => root.unmount());
   });
 
@@ -69,6 +71,13 @@ describe("modifier-driven modes", () => {
     mountShortcuts(roots);
     press("Shift");
     expect(state.pickingFileParam).toBe("sourceFile");
+  });
+
+  it("does not enter source-pick mode while a parameter control is dragged", () => {
+    mountShortcuts(roots);
+    useTransientStore.getState().setControlDragging(true);
+    press("Shift");
+    expect(state.pickingFileParam).toBeNull();
   });
 
   it("does not enter source-pick mode while typing", () => {
