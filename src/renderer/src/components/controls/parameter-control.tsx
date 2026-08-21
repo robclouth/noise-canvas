@@ -1,13 +1,16 @@
 import type { ParameterKey } from "@/store/types";
 import { useEffectId } from "@renderer/contexts/effect-context";
 import { getParameterDef, isEffectParameter } from "@renderer/parameters";
-import { getEffectParameterValue, getParameterValue, useStore } from "@renderer/store";
-import {
-  getContextualModAmountParamKeys,
-  getMacroAmountParamKeys,
-  getModAmountParamKeys,
-} from "@renderer/store/modulators";
+import { getEffectParameterValue, getMacroValueIndex, getParameterValue, useStore } from "@renderer/store";
 import { denormalizeParameterValue, normalizeParameterValue } from "@renderer/store/utils";
+import {
+  formatParameterValue,
+  hasDynamicSources,
+  macroTargets,
+  resolvedStaticValue,
+  scopedStateView,
+  totalModulationWeight,
+} from "@renderer/lib/macro-targets";
 import { LABEL_WIDTH } from "@renderer/lib/ui-density";
 import { memo } from "react";
 import { useShallow } from "zustand/shallow";
@@ -44,36 +47,69 @@ export const ParameterControl = memo(function ParameterControl({
   const isEffectParam = isEffectParameter(paramKey);
   const useEffectScope = effectId !== null && isEffectParam;
 
+  const macroIndex = getMacroValueIndex(paramKey);
+
   // Combine selectors into a single subscription with shallow comparison
-  const { isModulated, parameterValue, setParameter } = useStore(
+  const { isModulated, parameterValue, setParameter, display, dimmed, targetSummary } = useStore(
     useShallow((state) => {
-      // Check if parameter is modulated
-      let modulated = false;
-      if (isModulatable) {
-        const allAmountKeys = [
-          ...getModAmountParamKeys(paramKey),
-          ...getContextualModAmountParamKeys(paramKey),
-          ...getMacroAmountParamKeys(paramKey),
-        ];
-
-        for (const key of allAmountKeys) {
-          const amount = useEffectScope ? getEffectParameterValue(state, effectId, key) : getParameterValue(state, key);
-          if (amount !== 0) {
-            modulated = true;
-            break;
-          }
-        }
-      }
-
-      // Get parameter value
       const value = useEffectScope
         ? getEffectParameterValue(state, effectId, paramKey)
         : getParameterValue(state, paramKey);
 
+      // A macro knob reads as the value of its one target, or as a percentage
+      // when it drives several. With no target it is greyed out.
+      if (macroIndex !== null) {
+        const targets = macroTargets(state, macroIndex).map((target) => {
+          const view = scopedStateView(state, target.stepIndex, target.effectId);
+          const resolved = hasDynamicSources(view, target.key)
+            ? null
+            : formatParameterValue(target.key, resolvedStaticValue(view, target.key));
+          return { name: getParameterDef(target.key).name, resolved };
+        });
+        const only = targets.length === 1 ? targets[0] : null;
+        const knobView = scopedStateView(state, state.activeStepIndex);
+        return {
+          isModulated: totalModulationWeight(knobView, paramKey) > 0,
+          parameterValue: value,
+          setParameter: state.setParameter,
+          display: only?.resolved ?? undefined,
+          dimmed: targets.length === 0,
+          targetSummary:
+            targets.length > 0
+              ? targets
+                  .map((target) => (target.resolved ? `${target.name} ${target.resolved}` : target.name))
+                  .join(" · ")
+              : undefined,
+        };
+      }
+
+      if (!isModulatable) {
+        return {
+          isModulated: false,
+          parameterValue: value,
+          setParameter: state.setParameter,
+          display: undefined,
+          dimmed: false,
+          targetSummary: undefined,
+        };
+      }
+
+      // Past a total weight of 1 the base value no longer reaches the shader, so
+      // the box dims and, when every source is static, shows the resolved value.
+      const view = scopedStateView(state, state.activeStepIndex, useEffectScope ? effectId : undefined);
+      const weight = totalModulationWeight(view, paramKey);
+      const fullyModulated = weight >= 1;
+      const resolved =
+        fullyModulated && !hasDynamicSources(view, paramKey)
+          ? formatParameterValue(paramKey, resolvedStaticValue(view, paramKey))
+          : undefined;
       return {
-        isModulated: modulated,
+        isModulated: weight > 0,
         parameterValue: value,
         setParameter: state.setParameter,
+        display: resolved,
+        dimmed: fullyModulated,
+        targetSummary: undefined,
       };
     }),
   );
@@ -95,6 +131,8 @@ export const ParameterControl = memo(function ParameterControl({
       isModulated={isModulated}
       effectId={effectId ?? undefined}
       displayLabel={displayLabel}
+      displayDescription={targetSummary}
+      dimmed={dimmed}
     >
       {parameter.label}
     </ParamMenu>
@@ -129,6 +167,8 @@ export const ParameterControl = memo(function ParameterControl({
         color={color}
         leftValue={parameter.leftValue}
         rightValue={parameter.rightValue}
+        displayValue={display}
+        dimmed={dimmed}
         fromNormalized={(value) => denormalizeParameterValue(paramKey, value)}
         toNormalized={(value) => normalizeParameterValue(paramKey, value)}
       />

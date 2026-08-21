@@ -250,6 +250,8 @@ A brush can have up to **5 steps**, shown as a tab strip. Each step is a complet
 
 Four renamable **Macros** per brush. A macro is a knob that can drive any modulatable parameter, at any depth, positive or negative. Rename one from its parameter label menu (the pencil icon).
 
+A macro that drives one parameter shows that parameter's value in place of a percentage, so **Speed** reads `2×` rather than `60%`. With several targets it shows a percentage, and its tooltip lists each target with the value it sits at. A macro with nothing wired to it is greyed out.
+
 **Hints**
 
 - Wire several parameters to one macro to collapse a complicated brush into a single performance control.
@@ -288,7 +290,7 @@ The brush envelope decides where the stroke deposits energy and how much.
 - **Size ↔ (beats) / Size ↕ (semitones)** – the size of the brush. At the minimum, **Grid**, the brush tracks the current grid spacing. At the maximum, **Full**, it fills the whole file in that axis and anchors to the edge.
 - **Curve ↔ / ↕** – the shape of the envelope in each axis. −100% is a sharp spike, 0% a linear triangle, +100% a hard rectangle.
 - **Skew ↔ / ↕** – where the envelope peak sits. In time, −100% is an early pluck, 0% is centred, +100% is a delayed hit. In pitch, −100% is the bottom and +100% the top. Contextual Time or Pitch modulation flattens the envelope rather than moving its peak.
-- **Shapes** – a row of tiles under the controls, each setting Curve ↔ / ↕ and Skew ↔ / ↕ in one click: a hard box, softened edges, a fade in or out in either axis, a streak and a hit.
+- **Shapes** – a row of tiles under the controls, each setting Curve ↔ / ↕ and Skew ↔ / ↕ in one click: a hard box, softened edges in both axes or in one, and a fade in or out in either axis.
 
 **Hints**
 
@@ -583,7 +585,7 @@ Pulls energy across time and pitch toward a map: a landscape of valleys that sou
 
 **Hints**
 
-- Paint the same spot repeatedly. Each pass gathers more content into the valleys and settles it there.
+- Paint the same spot repeatedly, or enable accumulate. Each pass gathers more content into the valleys and settles it there.
 - Point **Map** at a modulator running an image, and the picture becomes terrain the sound falls into.
 
 ---
@@ -605,7 +607,9 @@ Think of the amount as a crossfade between the parameter's slider value and a fu
 - **Amount = −100%** – the same, inverted: the modulator is mapped from maximum down to minimum.
 - **Amounts in between** blend between the slider value and the modulated value.
 
-The parameter menu shows the resulting live range in real units next to the Modulation heading, so you can dial amounts in against concrete values rather than percentages.
+Sources sweep along the slider, so a parameter with a logarithmic slider, such as a time scale, is swept logarithmically: each doubling takes the same amount of travel.
+
+The parameter menu shows the resulting live range in real units next to the Modulation heading, so you can dial amounts in against concrete values rather than percentages. Once the amounts on a parameter add up to 100% or more, its own value no longer counts, and its box dims. If every source is a macro or a stroke property, the dimmed box shows the value the parameter resolves to.
 
 ### Modulator Modes
 

@@ -44,6 +44,10 @@ type NumboxControlProps = {
   leftValue?: SliderMark;
   rightValue?: SliderMark;
   rightIcon?: React.ReactNode;
+  /** Text shown in place of the value while not editing, e.g. the value a macro resolves to. */
+  displayValue?: string;
+  /** Draws the box greyed out while it stays live, for a value that has no effect right now. */
+  dimmed?: boolean;
   toNormalized: (value: number) => number;
   fromNormalized: (value: number) => number;
 };
@@ -64,6 +68,8 @@ export const NumboxControl = (props: NumboxControlProps) => {
     leftValue,
     rightValue,
     rightIcon,
+    displayValue: displayValueOverride,
+    dimmed = false,
     toNormalized,
     fromNormalized,
   } = props;
@@ -256,11 +262,14 @@ export const NumboxControl = (props: NumboxControlProps) => {
   // Mark labels that start with a letter (e.g. "Grid", "Full", "Off", "Scale")
   // aren't values in the parameter's unit — render them bare.
   const markLabelIsNumeric = activeMark ? /^-?[\d.]/.test(activeMark.label) : false;
-  const displayValue = activeMark
-    ? markLabelIsNumeric
-      ? `${activeMark.label}${unit || ""}`
-      : activeMark.label
-    : `${parseFloat(value.toFixed(2))}${unit || ""}`;
+  const displayValue =
+    displayValueOverride ??
+    (activeMark
+      ? markLabelIsNumeric
+        ? `${activeMark.label}${unit || ""}`
+        : activeMark.label
+      : `${parseFloat(value.toFixed(2))}${unit || ""}`);
+  const muted = disabled || dimmed;
 
   const numboxContent = (
     <Box
@@ -278,7 +287,7 @@ export const NumboxControl = (props: NumboxControlProps) => {
         cursor: isDragging ? "ns-resize" : disabled ? "default" : "pointer",
         overflow: "hidden",
         borderRadius: 2,
-        border: `1px solid ${focused || isDragging ? themeColor : disabled ? "#444" : "#666"}`,
+        border: `1px solid ${focused || isDragging ? themeColor : muted ? "#444" : "#666"}`,
         backgroundColor: "#2c2c2c",
         outline: "none",
       }}
@@ -293,6 +302,7 @@ export const NumboxControl = (props: NumboxControlProps) => {
           left: 0,
           width: `${position * 100}%`,
           height: 2,
+          opacity: dimmed ? 0.35 : 1,
         }}
       />
 
@@ -362,7 +372,7 @@ export const NumboxControl = (props: NumboxControlProps) => {
             style={{
               fontSize: "var(--ui-font-xs)",
               lineHeight: 1,
-              color: disabled ? "#666" : "#fff",
+              color: muted ? "#666" : "#fff",
               pointerEvents: "none",
               userSelect: "none",
               textAlign: "center",

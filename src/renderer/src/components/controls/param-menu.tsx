@@ -17,6 +17,7 @@ import {
 } from "@renderer/store/modulators";
 import { manualSectionForParameter } from "@renderer/lib/ui-areas";
 import { ParameterKey } from "@renderer/store/types";
+import { denormalizeParameterValue, normalizeParameterValue } from "@renderer/store/utils";
 import { BookOpen, Link2, Pencil, RotateCcw } from "lucide-react";
 import React, { useState } from "react";
 import { useShallow } from "zustand/shallow";
@@ -55,8 +56,10 @@ const ModulationRange = ({ paramKey, effectId }: { paramKey: ParameterKey; effec
 
   if (parameter.kind !== "number" || totalAbs === 0) return null;
 
-  const lower = value - totalAbs * (value - parameter.min);
-  const upper = value + totalAbs * (parameter.max - value);
+  // Sources sweep the slider's own arc, so the reach is measured in knob position.
+  const position = normalizeParameterValue(paramKey, value);
+  const lower = denormalizeParameterValue(paramKey, position * (1 - totalAbs));
+  const upper = denormalizeParameterValue(paramKey, position + totalAbs * (1 - position));
 
   return (
     <Text size="xs" c="dimmed">
@@ -71,6 +74,10 @@ type ParamMenuProps = {
   isModulated?: boolean;
   effectId?: string;
   displayLabel?: string;
+  /** Replaces the parameter's description in the tooltip, e.g. a macro's list of targets. */
+  displayDescription?: string;
+  /** Greys the label out while it stays live, for a control that has no effect right now. */
+  dimmed?: boolean;
   children?: React.ReactNode; // Not used, but accepted for flexibility
 };
 
@@ -84,6 +91,8 @@ export const ParamMenu = ({
   isModulated = false,
   effectId,
   displayLabel,
+  displayDescription,
+  dimmed = false,
 }: ParamMenuProps) => {
   const theme = useMantineTheme();
   const [opened, setOpened] = useState(false);
@@ -152,7 +161,7 @@ export const ParamMenu = ({
 
   return (
     <Menu opened={opened} onChange={setOpened} position="bottom" withArrow>
-      <Tooltip label={description}>
+      <Tooltip label={displayDescription ?? description}>
         <Menu.Target>
           <Group
             gap={4}
@@ -189,7 +198,7 @@ export const ParamMenu = ({
               lineClamp={1}
               truncate="end"
               ta="right"
-              c={isModulated ? "blue" : hovered || opened ? "white" : "dark.0"}
+              c={isModulated ? "blue" : hovered || opened ? "white" : dimmed ? "dark.3" : "dark.0"}
               style={{
                 transition: "color 0.1s ease",
                 overflow: "hidden",
