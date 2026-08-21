@@ -1,6 +1,6 @@
 {
   "name": "noise-canvas",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "productName": "Noise Canvas",
   "description": "Photoshop for sound",
   "main": "./out/main/index.js",
