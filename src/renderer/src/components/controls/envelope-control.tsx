@@ -1,5 +1,6 @@
 import { SimpleGrid, Stack } from "@mantine/core";
 import { PANEL_COLUMN_SPACING } from "@renderer/lib/ui-density";
+import { EnvelopeShapeTiles } from "./envelope-shape-tiles";
 import { EnvelopeVisualizer } from "./envelope-visualizer";
 import { ParameterControl } from "./parameter-control";
 
@@ -16,6 +17,7 @@ export const EnvelopeControl = () => {
         <ParameterControl paramKey="brushSkewTime" />
         <ParameterControl paramKey="brushSkewPitch" />
       </SimpleGrid>
+      <EnvelopeShapeTiles />
       <EnvelopeVisualizer height={60} />
     </Stack>
   );

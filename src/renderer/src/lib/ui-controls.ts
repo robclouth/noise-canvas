@@ -280,6 +280,13 @@ export const UI_CONTROLS = {
     manualSection: "steps",
   },
 
+  // Envelope
+  "envelope-shape": {
+    label: "Envelope Shape",
+    description: "Sets Curve and Skew on both axes to a ready-made envelope shape.",
+    manualSection: "envelope",
+  },
+
   // Randomization
   "randomize-dice": {
     label: "Randomise",

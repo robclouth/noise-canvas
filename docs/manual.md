@@ -288,6 +288,7 @@ The brush envelope decides where the stroke deposits energy and how much.
 - **Size ↔ (beats) / Size ↕ (semitones)** – the size of the brush. At the minimum, **Grid**, the brush tracks the current grid spacing. At the maximum, **Full**, it fills the whole file in that axis and anchors to the edge.
 - **Curve ↔ / ↕** – the shape of the envelope in each axis. −100% is a sharp spike, 0% a linear triangle, +100% a hard rectangle.
 - **Skew ↔ / ↕** – where the envelope peak sits. In time, −100% is an early pluck, 0% is centred, +100% is a delayed hit. In pitch, −100% is the bottom and +100% the top. Contextual Time or Pitch modulation flattens the envelope rather than moving its peak.
+- **Shapes** – a row of tiles under the controls, each setting Curve ↔ / ↕ and Skew ↔ / ↕ in one click: a hard box, softened edges, a fade in or out in either axis, a streak and a hit.
 
 **Hints**
 
