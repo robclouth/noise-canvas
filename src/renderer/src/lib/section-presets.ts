@@ -1,6 +1,6 @@
 import type { EffectType } from "@renderer/effects/types";
 import { pickNextBrushColor } from "@renderer/lib/colors";
-import { parameterDefs, type FileParameterValue } from "@renderer/parameters";
+import { isStorableOptionValue, parameterDefs, type FileParameterValue } from "@renderer/parameters";
 import type { BrushColor, ParameterKey } from "@renderer/store/types";
 import { z } from "zod";
 
@@ -73,7 +73,9 @@ export function resolveSectionPreset(
 
   for (const key of keys) {
     const id = toStorageId(target.scope, key);
-    if (Object.prototype.hasOwnProperty.call(preset.values, id)) {
+    // A stored value for an option the parameter no longer offers reads as
+    // absent, so the parameter takes its default rather than the retired one.
+    if (Object.prototype.hasOwnProperty.call(preset.values, id) && isStorableOptionValue(key, preset.values[id])) {
       resolved.push({ key, value: preset.values[id] });
     } else if (parameterDefs[key]?.kind !== "file") {
       resolved.push({ key, value: parameterDefs[key]?.default });

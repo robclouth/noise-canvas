@@ -23,6 +23,30 @@ vi.mock("@renderer/lib/folders", () => ({
   getFolders: vi.fn().mockResolvedValue({ presetsDir: "/mock/presets" }),
 }));
 
+/** In-memory stand-in for the presets folder. */
+const disk = new Map<string, string>();
+
+vi.mock("@renderer/lib/host", () => ({
+  host: {
+    fs: {
+      readdir: vi.fn(async () => [...disk.keys()]),
+      readFile: vi.fn(async (path: string) => {
+        const contents = disk.get(path.replace("/mock/presets/", ""));
+        if (contents === undefined) throw new Error(`ENOENT ${path}`);
+        return contents;
+      }),
+      writeFile: vi.fn(async (path: string, contents: string) => {
+        disk.set(path.replace("/mock/presets/", ""), contents);
+      }),
+      unlink: vi.fn(async (path: string) => {
+        disk.delete(path.replace("/mock/presets/", ""));
+      }),
+    },
+    path: { join: (...parts: string[]) => parts.join("/") },
+    env: { platform: "darwin" },
+  },
+}));
+
 // Mock the store index to break circular dependency
 vi.mock("@renderer/store", () => ({
   useStore: { getState: vi.fn() },
@@ -104,6 +128,7 @@ function createTestStore(initialState: Partial<State> = {}) {
   } as State;
 
   return {
+    slice,
     captureState: slice.captureState,
     getState: () => state,
     setState: (updates: Partial<State>) => {
@@ -299,5 +324,74 @@ describe("Preset captureState with slots", () => {
         );
       }
     });
+  });
+});
+
+/**
+ * A palette is allowed to hold nothing. Only the flat brush list has to stay
+ * non-empty, because every active-brush consumer reads brushes[activeBrushIndex].
+ */
+describe("closing brushes", () => {
+  it("empties a palette rather than keeping its last brush", () => {
+    const only = makeBrush([createDefaultStep("Step 1")], "Only");
+    const elsewhere = { ...makeBrush([createDefaultStep("Step 1")], "Elsewhere"), paletteId: "other" };
+    const store = createTestStore({ brushes: [only, elsewhere], activeBrushIndex: 0 });
+
+    store.slice.closeBrush(0);
+
+    const state = store.getState();
+    expect(state.brushes.map((b) => b.name)).toEqual(["Elsewhere"]);
+    expect(state.brushes.some((b) => b.paletteId === DEFAULT_PALETTE_ID)).toBe(false);
+    expect(state.brushes[state.activeBrushIndex]).toBeDefined();
+  });
+
+  it("keeps the very last brush, whatever palette it is in", () => {
+    const store = createTestStore({ brushes: [makeBrush([createDefaultStep("Step 1")], "Last")] });
+    store.slice.closeBrush(0);
+    expect(store.getState().brushes.map((b) => b.name)).toEqual(["Last"]);
+  });
+});
+
+/**
+ * Loading repairs in memory; the file on disk only changes when the user saves.
+ * What gets written then is the repaired preset, so the retired setting is gone
+ * for good rather than being repaired again on every launch.
+ */
+describe("saving a preset that needed repair", () => {
+  it("writes the repaired preset back, not the damaged one", async () => {
+    disk.clear();
+    const damaged = {
+      id: "freq-stretch-1",
+      name: "Freq Stretch",
+      isFactory: false,
+      version: 6,
+      color: { hue: "orange", variation: 0 },
+      steps: [{ id: "s1", name: "Step 1", transmuteMode: 0, brushIntensity: 42 }],
+      linkedParams: [],
+      macroNames: ["Macro 1", "Macro 2", "Macro 3", "Macro 4"],
+      macroValues: [50, 50, 50, 50],
+    };
+    disk.set("freq-stretch-1.json", JSON.stringify(damaged));
+
+    const store = createTestStore();
+    await store.slice.init();
+
+    // It loads, without the parameter that no longer exists.
+    const loaded = store.getState().availablePresets.find((p) => p.id === "freq-stretch-1");
+    expect(loaded).toBeDefined();
+    expect(loaded).not.toHaveProperty("steps.0.transmuteMode");
+    // Loading alone leaves the file as it was.
+    expect(JSON.parse(disk.get("freq-stretch-1.json")!).steps[0]).toHaveProperty("transmuteMode");
+
+    // Saving over it writes the repaired shape, in the same file.
+    const brush = { ...makeBrush(loaded!.steps as BrushStep[], "Freq Stretch"), libraryId: "freq-stretch-1" };
+    store.setState({ brushes: [brush], activeBrushIndex: 0 });
+    await store.slice.saveBrushToLibrary(0);
+
+    expect([...disk.keys()]).toEqual(["freq-stretch-1.json"]);
+    const written = JSON.parse(disk.get("freq-stretch-1.json")!);
+    expect(written.steps[0]).not.toHaveProperty("transmuteMode");
+    expect(written.steps[0].brushIntensity).toBe(42);
+    expect(written.id).toBe("freq-stretch-1");
   });
 });

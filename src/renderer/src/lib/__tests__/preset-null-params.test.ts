@@ -7,8 +7,8 @@ vi.mock("@renderer/effects", () => ({
 }));
 vi.mock("@renderer/lib/factory-presets", () => ({ factoryPresets: [] }));
 
-import { parameterDefs, sanitizeStepParams } from "../../parameters";
-import { CURRENT_PRESET_VERSION, validatePreset } from "../preset-schema";
+import { parameterDefs } from "../../parameters";
+import { CURRENT_PRESET_VERSION, sanitizeStepParams, validatePreset } from "../preset-schema";
 import type { ParameterKey } from "../../store/types";
 
 /**
@@ -20,6 +20,27 @@ import type { ParameterKey } from "../../store/types";
 
 const TEXTURE_PATH = "modulator1TexturePath" as ParameterKey;
 const SOURCE_FILE = "sourceFile" as ParameterKey;
+const NON_STEP_PARAM = "limiterEnabled" as ParameterKey;
+const OPTION_PARAM = "algorithm" as ParameterKey;
+
+function optionValues(): unknown[] {
+  const def = parameterDefs[OPTION_PARAM];
+  if (def?.kind !== "options") throw new Error(`${OPTION_PARAM} is not an options parameter`);
+  return def.options.map((option) => option.value);
+}
+
+/** The first value the parameter offers. */
+function offeredOptionValue(): unknown {
+  return optionValues()[0];
+}
+
+/** A number the parameter does not offer, standing in for an option since removed. */
+function retiredOptionValue(): number {
+  const offered = optionValues();
+  let value = 0;
+  while (offered.includes(value)) value++;
+  return value;
+}
 
 function presetWithStep(step: Record<string, unknown>) {
   return {
@@ -74,8 +95,50 @@ describe("sanitizeStepParams", () => {
     expect(sanitizeStepParams(step)).toBe(step);
   });
 
-  it("leaves keys it knows nothing about", () => {
+  it("leaves the step's own id, name and colour alone", () => {
     const step = { id: "s1", name: "Step 1", color: { hue: "blue", variation: 0 } };
     expect(sanitizeStepParams(step)).toBe(step);
+  });
+
+  it("drops a key whose parameter no longer exists", () => {
+    expect(sanitizeStepParams({ id: "s1", transmuteMode: 0 })).toEqual({ id: "s1" });
+  });
+
+  it("drops a parameter that is not a step parameter", () => {
+    expect(parameterDefs[NON_STEP_PARAM]?.includeInStep).not.toBe(true);
+    expect(sanitizeStepParams({ [NON_STEP_PARAM]: 1 })).toEqual({});
+  });
+
+  it("drops an option value that is no longer offered", () => {
+    expect(sanitizeStepParams({ [OPTION_PARAM]: retiredOptionValue() })).toEqual({});
+  });
+
+  it("keeps an option value that is still offered", () => {
+    const value = offeredOptionValue();
+    expect(sanitizeStepParams({ [OPTION_PARAM]: value })).toEqual({ [OPTION_PARAM]: value });
+  });
+
+  it("keeps the effect chain, which is a list rather than one of the options", () => {
+    const step = { effects: [{ id: "e1", effect: "transform", enabled: true, params: {} }] };
+    expect(sanitizeStepParams(step)).toBe(step);
+  });
+});
+
+/**
+ * Steps are validated against the current parameter list, so anything left
+ * behind by a removed parameter or a retired option would otherwise fail the
+ * whole preset and drop it from the library.
+ */
+describe("presets written before a parameter or option was removed", () => {
+  it("loads a preset carrying a step key with no parameter left", () => {
+    const result = validatePreset(presetWithStep({ transmuteMode: 0 }));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.steps[0]).not.toHaveProperty("transmuteMode");
+  });
+
+  it("loads a preset whose option value has since been retired", () => {
+    const result = validatePreset(presetWithStep({ [OPTION_PARAM]: retiredOptionValue() }));
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.steps[0]).not.toHaveProperty(OPTION_PARAM);
   });
 });

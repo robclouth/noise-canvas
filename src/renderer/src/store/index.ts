@@ -2,13 +2,14 @@ import { deepMerge } from "@mantine/core";
 import { EffectItem, syncEffects } from "@renderer/effects/types";
 import { CONTEXTUAL_MOD_SOURCES, NUM_MACROS, NUM_MODULATORS } from "@renderer/lib/constants";
 import { pickNextStepColor } from "@renderer/lib/colors";
+import { sanitizeEffectParams, sanitizeStepParams } from "@renderer/lib/preset-schema";
 import {
   BrushStep,
   getParameterDef,
   isEffectParameter,
   isStepParameter,
+  isStorableOptionValue,
   parameterDefs,
-  sanitizeStepParams,
 } from "@renderer/parameters";
 import { produce } from "immer";
 import { create } from "zustand";
@@ -318,7 +319,15 @@ export const useStore = create<State>()(
         storage: createDebouncedStorage(300, persistProjection),
         partialize: (state) => state,
         merge: (persistedState, currentState) => {
-          const merged = deepMerge(currentState, persistedState as object) as State;
+          // App-wide parameters persist beside the brushes. Dropping a stored
+          // value for an option that has since been retired leaves the current
+          // default in its place, rather than merging it over the top.
+          const stored = (persistedState ?? {}) as Record<string, unknown>;
+          for (const key of Object.keys(parameterDefs) as ParameterKey[]) {
+            if (key in stored && !isStorableOptionValue(key, stored[key])) delete stored[key];
+          }
+
+          const merged = deepMerge(currentState, stored) as State;
 
           if (host.env.isExtension) {
             // The Ableton extension always runs at compact density, regardless
@@ -329,17 +338,19 @@ export const useStore = create<State>()(
             merged.activeFileId = null;
           }
 
-          // Brushes saved before palettes existed have no group. Put the whole
-          // flat list into one untitled palette, and drop any group whose
-          // brushes are all gone so the sidebar never shows an orphan header.
+          // Brushes saved before palettes existed have no group, and so do any
+          // whose group is gone. Both land in the default palette, which has to
+          // be open for them to show up. A palette that holds nothing stays.
           if (Array.isArray(merged.brushes)) {
-            const groupIds = new Set((merged.openPalettes ?? []).map((palette) => palette.id));
+            const palettes = merged.openPalettes ?? [];
+            const groupIds = new Set(palettes.map((palette) => palette.id));
             merged.brushes = merged.brushes.map((brush) =>
               brush.paletteId && groupIds.has(brush.paletteId) ? brush : { ...brush, paletteId: DEFAULT_PALETTE_ID },
             );
-            const used = new Set(merged.brushes.map((brush) => brush.paletteId));
-            const kept = (merged.openPalettes ?? []).filter((palette) => used.has(palette.id));
-            merged.openPalettes = kept.length > 0 ? kept : [makeDefaultPalette()];
+            const needsDefault = merged.brushes.some((brush) => brush.paletteId === DEFAULT_PALETTE_ID);
+            merged.openPalettes =
+              needsDefault && !groupIds.has(DEFAULT_PALETTE_ID) ? [makeDefaultPalette(), ...palettes] : palettes;
+            if (merged.openPalettes.length === 0) merged.openPalettes = [makeDefaultPalette()];
           }
 
           // Sync effects in all steps to handle added/removed effects, and
@@ -348,7 +359,10 @@ export const useStore = create<State>()(
             merged.brushes = merged.brushes.map((brush) => {
               const steps = ((brush.steps ?? []) as unknown as Record<string, unknown>[]).map((step) => ({
                 ...sanitizeStepParams(step),
-                effects: syncEffects(step.effects as Parameters<typeof syncEffects>[0]),
+                effects: syncEffects(step.effects as Parameters<typeof syncEffects>[0]).map((item) => ({
+                  ...item,
+                  params: sanitizeEffectParams(item.params),
+                })),
               })) as unknown as BrushStep[];
               steps.forEach((step, index) => {
                 if (!step.color) {

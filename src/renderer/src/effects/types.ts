@@ -78,9 +78,9 @@ function migrateOvertonesParams(params: EffectParams): EffectParams {
 /**
  * Synchronizes an effects array with the current EFFECT_KEYS.
  * - Rewrites retired effects onto their replacement
- * - Removes effects that no longer exist in EFFECT_KEYS
+ * - Removes entries that are not an effect the app still has
  * - Adds unique IDs to entries that don't have them (migration from old format)
- * - Adds empty params object if missing
+ * - Fills in an enabled flag and params object that are missing or malformed
  * - Preserves the order and enabled state of existing effects
  */
 export function syncEffects(
@@ -96,18 +96,26 @@ export function syncEffects(
 
   // Filter out effects that no longer exist and ensure all fields are present
   return effects
+    .filter((item): item is NonNullable<typeof item> => typeof item === "object" && item !== null)
     .map((item) =>
       item.effect === "overtones"
-        ? { ...item, effect: "clone", params: migrateOvertonesParams(item.params ?? {}) }
+        ? { ...item, effect: "clone", params: migrateOvertonesParams(asParams(item.params)) }
         : item,
     )
     .filter((item) => validEffectKeys.includes(item.effect as EffectType))
     .map((item) => ({
-      id: item.id ?? crypto.randomUUID(),
+      id: typeof item.id === "string" ? item.id : crypto.randomUUID(),
       effect: item.effect as EffectType,
-      enabled: item.enabled,
-      params: item.params ?? {},
+      // Only an absent flag defaults on; anything else keeps its truthiness, so
+      // a stored `0` does not come back as an effect the user hears again.
+      enabled: item.enabled === undefined ? true : Boolean(item.enabled),
+      params: asParams(item.params),
     }));
+}
+
+/** An effect item's params, or an empty set when what is stored is not usable. */
+function asParams(params: unknown): EffectParams {
+  return typeof params === "object" && params !== null && !Array.isArray(params) ? (params as EffectParams) : {};
 }
 
 // Backward compatibility alias

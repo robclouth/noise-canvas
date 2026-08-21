@@ -43,6 +43,7 @@ async function readPresetsIn(dir: string): Promise<SectionPreset[]> {
       const contents = await host.fs.readFile(host.path.join(dir, file), "utf-8");
       const result = validateSectionPreset(JSON.parse(contents));
       if (result.success) presets.push(result.data);
+      else console.error(`Invalid section preset file ${file}`);
     } catch (error) {
       console.error(`Failed to load section preset ${file}:`, error);
     }

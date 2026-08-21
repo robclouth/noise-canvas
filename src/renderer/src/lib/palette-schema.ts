@@ -1,11 +1,17 @@
 // Zod schema for validating palettes: a named, ordered set of brushes.
+import { UNTITLED_PALETTE_NAME } from "@renderer/store/palette-id";
 import type { Brush } from "@renderer/store/types";
 import { z } from "zod";
-import { createBrushStepSchema, DEFAULT_MACRO_NAMES, DEFAULT_MACRO_VALUES, migratePreset } from "./preset-schema";
+import { pickNextBrushColor } from "./colors";
+import {
+  brushColorSchema,
+  createBrushStepSchema,
+  DEFAULT_MACRO_NAMES,
+  DEFAULT_MACRO_VALUES,
+  migratePreset,
+} from "./preset-schema";
 
 export const CURRENT_PALETTE_VERSION = 1;
-
-const brushColorSchema = z.object({ hue: z.string(), variation: z.number() });
 
 function createPaletteBrushSchema() {
   return z.strictObject({
@@ -33,7 +39,7 @@ export function createPaletteSchema() {
     name: z.string(),
     isFactory: z.boolean(),
     version: z.number().int().min(1).optional().default(CURRENT_PALETTE_VERSION),
-    brushes: z.array(createPaletteBrushSchema()).min(1),
+    brushes: z.array(createPaletteBrushSchema()),
   });
 }
 
@@ -62,30 +68,60 @@ export function toStoredBrushes(brushes: readonly Brush[]): PaletteBrush[] {
  * through the preset migration, so a palette written before an effect changed
  * loads the same way a preset of that age does.
  */
-export function migratePalette(data: unknown): unknown {
+export function migratePalette(data: unknown, fallbackId?: string): unknown {
   if (typeof data !== "object" || data === null) return data;
-  const migrated = { ...(data as Record<string, unknown>) };
+  const source = data as Record<string, unknown>;
+  const shape = createPaletteSchema().shape;
+  const migrated: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(source)) {
+    // Own fields only: a JSON key like "__proto__" resolves off the prototype.
+    if (Object.hasOwn(shape, key)) migrated[key] = value;
+  }
 
-  if (!migrated.version) migrated.version = CURRENT_PALETTE_VERSION;
-  // Palettes carried an accent colour before they became folders.
-  delete migrated.color;
+  if (!Number.isInteger(migrated.version) || (migrated.version as number) < 1) {
+    migrated.version = CURRENT_PALETTE_VERSION;
+  }
+  // The file is named for the id, so a palette that lost its own takes the one
+  // its filename gives rather than a fresh one on every launch.
+  if (typeof migrated.id !== "string") migrated.id = fallbackId ?? crypto.randomUUID();
+  if (typeof migrated.name !== "string") migrated.name = UNTITLED_PALETTE_NAME;
+  if (typeof migrated.isFactory !== "boolean") migrated.isFactory = false;
 
   const brushes = Array.isArray(migrated.brushes) ? migrated.brushes : [];
-  migrated.brushes = brushes.map((brush: unknown) => {
-    const record = brush as Record<string, unknown>;
-    const asPreset = migratePreset({ ...record, version: record.version ?? 6 }) as Record<string, unknown>;
-    delete asPreset.version;
-    return asPreset;
-  });
+  const taken: Brush["color"][] = [];
+  migrated.brushes = brushes
+    .filter((brush: unknown) => typeof brush === "object" && brush !== null && !Array.isArray(brush))
+    .map((brush: Record<string, unknown>) => {
+      const asPreset = migratePreset({ ...brush, version: brush.version ?? 6 }) as Record<string, unknown>;
+      delete asPreset.version;
+
+      // The preset repair works to the preset schema, which has no room for what
+      // only a palette brush carries and no need of what only a preset carries.
+      delete asPreset.isFactory;
+      asPreset.hotkey = typeof brush.hotkey === "string" ? brush.hotkey : null;
+      asPreset.libraryId = typeof brush.libraryId === "string" ? brush.libraryId : null;
+
+      const color = brushColorSchema.safeParse(asPreset.color);
+      asPreset.color = color.success ? color.data : pickNextBrushColor(taken);
+      taken.push(asPreset.color as Brush["color"]);
+      return asPreset;
+    });
 
   return migrated;
 }
 
 export function validatePalette(
   data: unknown,
+  fallbackId?: string,
 ): { success: true; data: PaletteType } | { success: false; errors: string[] } {
+  // An emptied palette is a real palette and keeps its brushes list; a stray
+  // .json in the palettes folder has none, and must not become one.
+  const record = data as Record<string, unknown> | null;
+  if (typeof data !== "object" || record === null || Array.isArray(data) || !Array.isArray(record.brushes)) {
+    return { success: false, errors: ["Not a palette"] };
+  }
   try {
-    const parsed = createPaletteSchema().parse(migratePalette(data));
+    const parsed = createPaletteSchema().parse(migratePalette(data, fallbackId));
     return { success: true, data: parsed as PaletteType };
   } catch (error) {
     if (error instanceof z.ZodError) {

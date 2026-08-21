@@ -6,10 +6,11 @@ import {
   DEFAULT_MACRO_NAMES,
   DEFAULT_MACRO_VALUES,
   PresetType,
+  sanitizeStepParams,
   validatePreset,
 } from "@renderer/lib/preset-schema";
 import { host } from "@renderer/lib/host";
-import { BrushStep, createDefaultStep, sanitizeStepParams } from "@renderer/parameters";
+import { BrushStep, createDefaultStep } from "@renderer/parameters";
 import { produce } from "immer";
 import { factoryPresets } from "../lib/factory-presets";
 import { makeBrushFromPreset, makeEmptyBrush } from "./brush-factory";
@@ -94,10 +95,11 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
             const fileContent = await host.fs.readFile(filePath, "utf-8");
             const rawPreset = JSON.parse(fileContent);
 
-            const validationResult = validatePreset(rawPreset);
+            const validationResult = validatePreset(rawPreset, file.replace(/\.json$/, ""));
             if (validationResult.success) {
               userPresets.push(validationResult.data);
             } else {
+              console.error(`Invalid preset file ${file}:`, validationResult.errors);
               notifications.show({
                 title: "Invalid preset",
                 message: `Invalid preset ${file}`,
@@ -247,12 +249,10 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
 
   closeBrush: (index: number) => {
     const state = get();
+    // A palette may empty, but the app may not: every active-brush consumer
+    // reads brushes[activeBrushIndex].
     if (state.brushes.length <= 1) return;
     if (index < 0 || index >= state.brushes.length) return;
-    // Per palette, not just overall: an empty palette can be closed later, and
-    // closing the one that still holds brushes would leave the app with none.
-    const paletteId = state.brushes[index].paletteId;
-    if (state.brushes.filter((brush) => brush.paletteId === paletteId).length <= 1) return;
 
     set(
       produce((draft: State) => {
@@ -365,13 +365,16 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
         throw new Error(`Invalid preset: ${validationResult.errors.join(", ")}`);
       }
 
-      const fileName = `${updated.id}.json`;
+      // The repaired preset is what goes to disk, so the file and the library
+      // hold what a fresh load would give back.
+      const saved = validationResult.data;
+      const fileName = `${saved.id}.json`;
       const filePath = host.path.join(state.presetsDir!, fileName);
-      await host.fs.writeFile(filePath, JSON.stringify(updated, null, 2), "utf-8");
+      await host.fs.writeFile(filePath, JSON.stringify(saved, null, 2), "utf-8");
 
       set(
         produce((draft: State) => {
-          draft.availablePresets = draft.availablePresets.map((p) => (p.id === updated.id ? updated : p));
+          draft.availablePresets = draft.availablePresets.map((p) => (p.id === saved.id ? saved : p));
         }),
       );
 
@@ -415,13 +418,14 @@ export const createPresetsSlice = (set: ZustandSet, get: ZustandGet): PresetsSta
         throw new Error(`Invalid preset: ${validationResult.errors.join(", ")}`);
       }
 
+      const saved = validationResult.data;
       const fileName = `${id}.json`;
       const filePath = host.path.join(state.presetsDir!, fileName);
-      await host.fs.writeFile(filePath, JSON.stringify(preset, null, 2), "utf-8");
+      await host.fs.writeFile(filePath, JSON.stringify(saved, null, 2), "utf-8");
 
       set(
         produce((draft: State) => {
-          draft.availablePresets = [...draft.availablePresets, preset];
+          draft.availablePresets = [...draft.availablePresets, saved];
           const b = draft.brushes[index];
           if (b) {
             b.libraryId = id;
