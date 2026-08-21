@@ -24,6 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   advanceMarkFraction,
   BASE_SENSITIVITY,
+  DRAG_DEAD_ZONE_PX,
   FINE_SENSITIVITY,
   markFraction,
   markIndexFromFraction,
@@ -83,6 +84,8 @@ export const NumboxControl = (props: NumboxControlProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const isDraggingRef = useRef(false);
   const isFineRef = useRef(false);
+  const dragTravelRef = useRef(0);
+  const movedRef = useRef(false);
   const virtualPositionRef = useRef<number>(0);
   const markFractionRef = useRef<number>(0);
   const combobox = useCombobox();
@@ -154,6 +157,8 @@ export const NumboxControl = (props: NumboxControlProps) => {
         e.preventDefault();
         setIsDragging(true);
         isDraggingRef.current = true;
+        dragTravelRef.current = 0;
+        movedRef.current = false;
         useTransientStore.getState().setControlDragging(true);
         virtualPositionRef.current = toNormalized(value);
         markFractionRef.current = markFraction(value, sortedMarks);
@@ -171,6 +176,10 @@ export const NumboxControl = (props: NumboxControlProps) => {
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {
       if (!isDragging) return;
+
+      dragTravelRef.current += Math.abs(e.movementY);
+      if (dragTravelRef.current < DRAG_DEAD_ZONE_PX) return;
+      movedRef.current = true;
 
       if (sortedMarks.length > 0 && !isFineRef.current) {
         markFractionRef.current = advanceMarkFraction(markFractionRef.current, -e.movementY, sortedMarks.length);
@@ -234,6 +243,9 @@ export const NumboxControl = (props: NumboxControlProps) => {
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
+      // A press that moved the value is a drag, so it must not open the editor.
+      if (movedRef.current) return;
+
       // Single click to focus for editing
       if (!isDragging && !disabled) {
         if (e.button === 0 && !isEditing) {

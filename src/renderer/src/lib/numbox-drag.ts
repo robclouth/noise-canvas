@@ -6,6 +6,9 @@ export const BASE_SENSITIVITY = 1 / 200;
 /** Normalised position covered by one pixel while the fine modifier is held. */
 export const FINE_SENSITIVITY = 1 / 600;
 
+/** Vertical travel a press must pass before it moves the value instead of counting as a click. */
+export const DRAG_DEAD_ZONE_PX = 3;
+
 const MARK_SWEEP_PX = 200;
 const MIN_PX_PER_MARK = 3;
 const MAX_PX_PER_MARK = 16;
