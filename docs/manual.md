@@ -531,21 +531,13 @@ Turns one part of the sound into another: the level into the pitch, the phase in
 
 Every route works the same way. Each band's **From** is read as a drive from 0 to 1, bent by **Curve**, scaled by **Amount**, and written to **To**. A route from a part to itself is a transfer curve on that part. A route into Time or Pitch moves each band by what it holds, so the loud bands travel and the quiet ones stay, or the other way round with a negative Curve.
 
-| From      | What is read                                                        |
-| --------- | ------------------------------------------------------------------- |
-| **Mag.**  | The band's level, from silence at 0 to full scale at 1, over 80 dB. |
-| **Phase** | The band's phase, once round the circle.                            |
-| **Time**  | Where the band sits in the brush, from its left edge to its right.  |
-| **Pitch** | Where the band sits in the brush, from its bottom to its top.       |
-| **Pan**   | Where the band sits between the speakers, from left to right.       |
-
-| To        | What is written                                                                                                                  |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **Mag.**  | The drive becomes the level, silence at 0 and full scale at 1. Amount is the gain.                                               |
-| **Phase** | The drive becomes the phase, around the turns the band already holds. Amount is how far round the circle it reaches.             |
-| **Time**  | The band reads from earlier or later, both ways from the middle of the drive. Amount is how far, in beats.                       |
-| **Pitch** | The band reads from lower or higher, both ways from the middle of the drive. Amount is how far, in semitones.                    |
-| **Pan**   | The band's energy is placed between the speakers. Amount is the width: 1 reaches both, 0 folds to the centre, past 1 pushes out. |
+| From / To | What is read / written                                             |
+| --------- | ------------------------------------------------------------------ |
+| **Mag.**  | The band's level.                                                  |
+| **Phase** | The band's phase.                                                  |
+| **Time**  | Where the band sits in the brush, from its left edge to its right. |
+| **Pitch** | Where the band sits in the brush, from its bottom to its top.      |
+| **Pan**   | Where the band sits between the speakers, from left to right.      |
 
 **Hints**
 
