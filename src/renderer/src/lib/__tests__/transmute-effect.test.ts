@@ -234,11 +234,19 @@ describe("Transmute effect", () => {
     return peak;
   }
 
-  const swap = (id: string): ChainItem => ({
+  const PART = { mag: 0, phase: 1, time: 2, pitch: 3, pan: 4 } as const;
+  type Part = keyof typeof PART;
+  const PARTS = Object.keys(PART) as Part[];
+
+  const route = (id: string, from: Part, to: Part, params: Record<string, number> = {}): ChainItem => ({
     id,
     effect: "transmute",
-    params: { transmuteMode: 0, transmuteAmount: 1, transmuteCurve: 1 },
+    params: { transmuteFrom: PART[from], transmuteTo: PART[to], transmuteAmount: 1, transmuteCurve: 1, ...params },
   });
+
+  /** Phase→Magnitude opens the swap, Magnitude→Phase closes it. */
+  const openSwap = (id: string): ChainItem => route(id, "phase", "mag");
+  const closeSwap = (id: string): ChainItem => route(id, "mag", "phase");
 
   const neutralTransform: ChainItem = { id: "neutral", effect: "transform", params: {} };
 
@@ -262,7 +270,7 @@ describe("Transmute effect", () => {
       ["shifted a beat", { transformShiftBeats: 0.25 }],
     ];
     for (const [name, params] of middles) {
-      const state = smallBrushState([swap("in"), { id: "mid", effect: "transform", params }, swap("out")]);
+      const state = smallBrushState([openSwap("in"), { id: "mid", effect: "transform", params }, closeSwap("out")]);
       const renderer = createRenderer();
       const sourceFile = createSourceFile(renderer);
       const before = (await renderer.getFBOData()).slice();
@@ -275,7 +283,7 @@ describe("Transmute effect", () => {
   });
 
   it("puts the pair back when a second swap undoes the first", async () => {
-    const bookends = await runChain([swap("in"), neutralTransform, swap("out")]);
+    const bookends = await runChain([openSwap("in"), neutralTransform, closeSwap("out")]);
 
     // 1e-4 of the loudest input bin is 80 dB down on it.
     expect(relativeError(bookends.before, bookends.after)).toBeLessThan(1e-4);
@@ -291,7 +299,7 @@ describe("Transmute effect", () => {
     // exact. The phase is rebuilt around that snapshot's whole turns, and at
     // tens of thousands of radians one float32 step is already 0.008 rad, so it
     // lands a step or two off.
-    const pair = await runChain([swap("in"), swap("out")]);
+    const pair = await runChain([openSwap("in"), closeSwap("out")]);
     let worstLevel = 0;
     let worstAngle = 0;
     for (let i = 0; i < pair.before.length; i += 4) {
@@ -305,25 +313,92 @@ describe("Transmute effect", () => {
     expect(worstAngle).toBeLessThan(0.02);
   });
 
-  it("keeps the swapped phase image inside the level window", async () => {
-    const swapped = await runChain([swap("only")]);
-    expect(peakMagnitude(swapped.after)).toBeLessThanOrEqual(1.0);
-  });
-
-  it("changes the sound in every mode at its default settings", async () => {
-    // Phase Multiply is the identity at amount 1 by construction; the rest have
-    // to do something audible without being asked twice.
-    for (const mode of [2, 3, 4, 5]) {
-      const run = await runChain([{ id: `m${mode}`, effect: "transmute", params: { transmuteMode: mode } }]);
-      expect(relativeError(run.before, run.after), `mode ${mode}`).toBeGreaterThan(0.5);
+  it("is the identity on the routes from a part to itself, and moves everything else", async () => {
+    // Time → Time and Pitch → Pitch are stretches, not identities: a band at
+    // the edge of the brush reads from a beat or a semitone away.
+    const identities = new Set(["mag-mag", "phase-phase", "pan-pan"]);
+    for (const from of PARTS) {
+      for (const to of PARTS) {
+        const run = await runChain([route(`${from}-${to}`, from, to)]);
+        const change = relativeError(run.before, run.after);
+        if (identities.has(`${from}-${to}`)) expect(change, `${from}→${to}`).toBeLessThan(1e-4);
+        else expect(change, `${from}→${to}`).toBeGreaterThan(0.3);
+      }
     }
   });
 
-  it("multiplies the phase without collapsing the level", async () => {
-    const doubled = await runChain([
-      { id: "mul", effect: "transmute", params: { transmuteMode: 1, transmuteAmount: 2 } },
-    ]);
-    expect(relativeError(doubled.before, doubled.after)).toBeGreaterThan(0.5);
-    expect(peakMagnitude(doubled.after)).toBeCloseTo(peakMagnitude(doubled.before), 4);
+  it("turns the spectrum inside out when Magnitude→Magnitude runs a negative curve", async () => {
+    const inverted = await runChain([route("neg", "mag", "mag", { transmuteCurve: -1 })]);
+    let loudest = 0;
+    let quietest = 0;
+    for (let i = 0; i < inverted.before.length; i += 4) {
+      if (inverted.before[i] > inverted.before[loudest]) loudest = i;
+      if (inverted.before[i] < inverted.before[quietest]) quietest = i;
+    }
+    expect(inverted.after[loudest]).toBeLessThan(inverted.after[quietest]);
+  });
+
+  it("moves content when a route reaches into time or pitch", async () => {
+    // A displacement route reads each bin from somewhere else, so the level
+    // pattern has to change while the loudest bin stays a real level.
+    for (const to of ["time", "pitch"] as const) {
+      for (const from of ["mag", "phase"] as const) {
+        const run = await runChain([route(`${from}-${to}`, from, to, { transmuteAmount: 4 })]);
+        let moved = 0;
+        for (let i = 0; i < run.before.length; i += 4) {
+          if (Math.abs(run.before[i] - run.after[i]) > 1e-4) moved++;
+        }
+        expect(moved, `${from}→${to}`).toBeGreaterThan(0);
+        expect(peakMagnitude(run.after), `${from}→${to}`).toBeLessThanOrEqual(peakMagnitude(run.before) * 1.01);
+      }
+    }
+  });
+
+  it("sweeps the sound across the speakers when time drives pan", async () => {
+    // Time is read as the position inside the brush, so the brush has to sit
+    // inside the file for its edges to land on frames: a quarter beat at 120
+    // is 125 of the mock's 128 frames, and six semitones its bottom 12 bands.
+    const { numFrames } = spectrogramData;
+    const state = smallBrushState([route("sweep", "time", "pan")]);
+    const renderer = createRenderer();
+    const sourceFile = createSourceFile(renderer);
+    const before = (await renderer.getFBOData()).slice();
+    renderer.renderStroke(strokeParams(), state, sourceFile);
+    const after = (await renderer.getFBOData()).slice();
+    renderer.dispose();
+
+    const band = 25;
+    const place = (frame: number): number => {
+      const i = (band * numFrames + frame) * 4;
+      return after[i + 2] / (after[i] + after[i + 2]);
+    };
+    expect(place(2)).toBeLessThan(0.1);
+    expect(place(120)).toBeGreaterThan(0.9);
+    // The band's energy went nowhere; it was only split.
+    const i = (band * numFrames + 60) * 4;
+    expect(after[i] + after[i + 2]).toBeCloseTo(before[i] + before[i + 2], 5);
+  });
+
+  it("moves the sound the same way as the Transform for the same distance", async () => {
+    // The mock's pan is the same in every bin, so Pan → Time is one flat move
+    // of 2 × (pan − ½) × Amount beats. Transform shifting that far has to land
+    // on the same pixels, away from the edges where their edge rules differ.
+    const { numFrames, numBands } = spectrogramData;
+    const pan = 0.8 / 1.8;
+    const beats = (pan - 0.5) * 2;
+    const viaRoute = await runChain([route("pan-time", "pan", "time", { transmuteAmount: 1 })]);
+    const viaTransform = await runChain([{ id: "shift", effect: "transform", params: { transformShiftBeats: beats } }]);
+
+    // The sound moves earlier here, so the last frames of the row read past
+    // the end of the file and are left out.
+    const shiftFrames = Math.round(-beats * 0.5 * 1000);
+    let worst = 0;
+    for (let band = 0; band < numBands; band++) {
+      for (let frame = 2; frame < numFrames - shiftFrames - 2; frame++) {
+        const i = (band * numFrames + frame) * 4;
+        worst = Math.max(worst, Math.abs(viaRoute.after[i] - viaTransform.after[i]));
+      }
+    }
+    expect(worst).toBeLessThan(1e-4);
   });
 });

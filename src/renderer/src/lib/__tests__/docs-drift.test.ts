@@ -6,6 +6,10 @@ vi.mock("@renderer/store", () => ({ useStore: { getState: vi.fn() } }));
 import manual from "../../../../../docs/manual.md?raw";
 import { HIDDEN_EFFECTS } from "../../effects/types";
 import { parameterDefs } from "../../parameters";
+import { EFFECT_LABELS } from "../constants";
+import { factoryPalettes } from "../factory-palettes";
+import { factoryPresets } from "../factory-presets";
+import { factorySectionPresets } from "../factory-section-presets";
 import { manualSectionForParameter } from "../ui-areas";
 import { UI_AREA_NAMES, UI_TECHNIQUES, getArea } from "../ui-areas";
 import { UI_ANCHORS } from "../ui-anchors";
@@ -69,6 +73,29 @@ describe("area registry", () => {
       // The overlay lays these out as one line under the title.
       expect(area.blurb.length).toBeLessThanOrEqual(110);
     }
+  });
+});
+
+describe("shipped content", () => {
+  // Presets, palettes and the brushes in them get added, renamed and dropped
+  // without the manual hearing about it, so the manual describes settings and
+  // never points at one by name. Bold is how the manual marks a name; a name
+  // that is also a label the UI shows is a control, not a pointer.
+  it("is never named in the manual", () => {
+    const uiLabels = new Set<string>(Object.values(EFFECT_LABELS));
+    for (const def of Object.values(parameterDefs)) {
+      uiLabels.add(def.label);
+      if (def.kind === "options") for (const option of def.options) uiLabels.add(String(option.label));
+    }
+    const shipped = new Set<string>([
+      ...factorySectionPresets.map((preset) => preset.name),
+      ...factoryPresets.map((preset) => preset.name),
+      ...factoryPalettes.map((palette) => palette.name),
+    ]);
+    const named = [...manual.matchAll(/\*\*([^*]+)\*\*/g)]
+      .map((match) => match[1])
+      .filter((bold) => shipped.has(bold) && !uiLabels.has(bold));
+    expect([...new Set(named)]).toEqual([]);
   });
 });
 

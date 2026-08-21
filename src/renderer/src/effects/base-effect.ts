@@ -309,11 +309,12 @@ export abstract class BaseEffect {
   getActivePasses?(state: State): number[];
 
   /**
-   * True when the effect hands the next pass a pair that no longer holds a
-   * magnitude and a phase. The renderer tracks the running parity of these and
-   * tells each pass, through `inSwappedDomain`, which domain it receives.
+   * The domain the pass hands on, given the one it receives: true once a pass
+   * has moved the pair out of magnitude and phase, false again once one has
+   * moved it back. The renderer runs this along the chain and tells each pass,
+   * through `inSwappedDomain`, which domain reaches it.
    */
-  togglesDomain?(state: State): boolean;
+  domainAfter?(state: State, inSwappedDomain: boolean): boolean;
 
   updateCommonUniforms({ commonUniforms, passIndex }: { commonUniforms: CommonUniforms; passIndex: number }): void {
     const material = this.materials[passIndex];

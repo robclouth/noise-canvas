@@ -12,6 +12,17 @@ import { useStore } from "../store";
 import type { State } from "../store/types";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
+const PART_MAG = 0;
+const PART_PHASE = 1;
+
+/** Phase → Magnitude carries the pair out of magnitude and phase; Magnitude → Phase brings it back. */
+function opensSwap(state: State): boolean {
+  return state.transmuteFrom === PART_PHASE && state.transmuteTo === PART_MAG;
+}
+function closesSwap(state: State): boolean {
+  return state.transmuteFrom === PART_MAG && state.transmuteTo === PART_PHASE;
+}
+
 class TransmuteEffect extends BaseEffect {
   constructor() {
     super();
@@ -19,7 +30,9 @@ class TransmuteEffect extends BaseEffect {
       new RawShaderMaterial({
         uniforms: {
           ...createDefaultUniforms(),
-          transmuteMode: { value: 0 },
+          transmuteFrom: { value: 1 },
+          transmuteTo: { value: 0 },
+          transmuteBeatsToUv: { value: 0 },
           transmuteAmount: {
             value: {
               value: 1.0,
@@ -48,15 +61,23 @@ class TransmuteEffect extends BaseEffect {
     ];
   }
 
-  togglesDomain(state: State): boolean {
-    return state.transmuteMode === 0;
+  domainAfter(state: State, inSwappedDomain: boolean): boolean {
+    if (opensSwap(state)) return true;
+    if (closesSwap(state)) return false;
+    return inSwappedDomain;
   }
 
   updateEffectUniforms(props: UpdateEffectUniformsProps): void {
     this.updateCommonUniforms(props);
     const state = props.state ?? useStore.getState();
 
-    this.materials[0].uniforms.transmuteMode.value = state.transmuteMode;
+    this.materials[0].uniforms.transmuteFrom.value = state.transmuteFrom;
+    this.materials[0].uniforms.transmuteTo.value = state.transmuteTo;
+
+    const { spectrogramData, filePath } = props.file;
+    const bpm = state.filepathsBpm[filePath] || 120;
+    const totalDuration = spectrogramData ? spectrogramData.numFrames / spectrogramData.sampleRate : 0;
+    this.materials[0].uniforms.transmuteBeatsToUv.value = 60 / bpm / (totalDuration > 0 ? totalDuration : 1);
 
     const transmuteAmountDef = getNumberParameterDef("transmuteAmount");
     this.materials[0].uniforms.transmuteAmount.value = {
@@ -78,13 +99,14 @@ class TransmuteEffect extends BaseEffect {
       macroAmounts: getMacroAmountValuesNormalized(state, "transmuteCurve"),
     };
 
-    // Swap mode moves the pair into another domain, which only reverses when
-    // the blend is an exact linear mix of the whole footprint. All other
-    // effects keep the phase-aware, envelope-weighted, step-blended path.
-    const isSwap = state.transmuteMode === 0;
-    this.materials[0].uniforms.useLinearBlend.value = isSwap;
-    this.materials[0].uniforms.bypassBrushWeight.value = isSwap;
-    if (isSwap) this.materials[0].uniforms.blendMode.value = 0;
+    // The two routes that move the pair between domains only reverse when the
+    // blend is an exact linear mix of the whole footprint. Every other route,
+    // and every other effect, keeps the phase-aware, envelope-weighted,
+    // step-blended path.
+    const movesDomain = opensSwap(state) || closesSwap(state);
+    this.materials[0].uniforms.useLinearBlend.value = movesDomain;
+    this.materials[0].uniforms.bypassBrushWeight.value = movesDomain;
+    if (movesDomain) this.materials[0].uniforms.blendMode.value = 0;
   }
 }
 

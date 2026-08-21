@@ -2,7 +2,7 @@ import { Box, Divider, Group, Menu, Stack, Text, useMantineTheme } from "@mantin
 import { openPrompt } from "@renderer/lib/modals";
 import { helpProps } from "@renderer/lib/ui-controls";
 import { CONTROL_ROW_HEIGHT, LABEL_WIDTH } from "@renderer/lib/ui-density";
-import { getParameterDef, isEffectParameter, parameterDefs } from "@renderer/parameters";
+import { getParameterDef, isEffectParameter, parameterDefs, resolveDescription } from "@renderer/parameters";
 import {
   getMacroValueIndex,
   getModulationParamKeys,
@@ -97,6 +97,15 @@ export const ParamMenu = ({
 
   const manualSection = manualSectionForParameter(paramKey, parameter.effectType);
   const openManual = useStore((state) => state.openManual);
+  const description = useStore((state) => {
+    const by = parameter.descriptionBy;
+    if (!by) return parameter.description;
+    const useEffectScope = !!effectId && isEffectParameter(by.param);
+    const sibling = useEffectScope
+      ? selectEffectParameter(effectId, by.param)(state)
+      : selectParameter(by.param)(state);
+    return resolveDescription(parameter, sibling);
+  });
 
   const excludedFromRandomization = useStore((state) => state.excludedFromRandomization);
   const linkedParams = useStore(
@@ -143,7 +152,7 @@ export const ParamMenu = ({
 
   return (
     <Menu opened={opened} onChange={setOpened} position="bottom" withArrow>
-      <Tooltip label={parameter.description}>
+      <Tooltip label={description}>
         <Menu.Target>
           <Group
             gap={4}

@@ -54,7 +54,8 @@ export interface EffectsState {
   sortOrder: number;
   sortBy: number;
   sortStereoMode: number;
-  transmuteMode: number;
+  transmuteFrom: number;
+  transmuteTo: number;
   transmuteAmount: number;
   transmuteCurve: number;
   attractMap: number;
@@ -145,7 +146,8 @@ export const createEffectsSlice = (): EffectsState => {
     sortStereoMode: getParameterDef("sortStereoMode").default,
 
     // ---------------- Transmute ----------------
-    transmuteMode: getParameterDef("transmuteMode").default,
+    transmuteFrom: getParameterDef("transmuteFrom").default,
+    transmuteTo: getParameterDef("transmuteTo").default,
     transmuteAmount: getParameterDef("transmuteAmount").default,
     transmuteCurve: getParameterDef("transmuteCurve").default,
 

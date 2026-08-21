@@ -38,6 +38,8 @@ export interface ParameterBase {
   name: string;
   label: string;
   description: string;
+  /** Descriptions that stand in for `description` while `param` holds one of these values. */
+  descriptionBy?: { param: ParameterKey; descriptions: Record<number, string> };
   includeInStep?: boolean;
   effectType?: EffectType;
 }
@@ -1288,19 +1290,54 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     effectType: "binaural",
   },
   // --- Transmute Parameters ---
-  transmuteMode: {
+  transmuteFrom: {
     kind: "options",
-    name: "Transmute Mode",
-    label: "Mode",
-    description: "Picks which way magnitude and phase get bent against each other.",
+    name: "Transmute From",
+    label: "From",
+    description: "Picks what is read from each band to drive the route.",
+    descriptionBy: {
+      param: "transmuteFrom",
+      descriptions: {
+        0: "Reads each band's level, from silence to full scale.",
+        1: "Reads each band's phase, once round the circle.",
+        2: "Reads where each band sits in the brush, from its left edge to its right.",
+        3: "Reads where each band sits in the brush, from its bottom to its top.",
+        4: "Reads where each band sits between the speakers.",
+      },
+    },
+    default: 1,
+    options: [
+      { value: 0, label: "Mag." },
+      { value: 1, label: "Phase" },
+      { value: 2, label: "Time" },
+      { value: 3, label: "Pitch" },
+      { value: 4, label: "Pan" },
+    ],
+    includeInStep: true,
+    effectType: "transmute",
+  },
+  transmuteTo: {
+    kind: "options",
+    name: "Transmute To",
+    label: "To",
+    description: "Picks what the drive is written to.",
+    descriptionBy: {
+      param: "transmuteTo",
+      descriptions: {
+        0: "Writes the drive as each band's level.",
+        1: "Writes the drive as each band's phase, around the turns it already holds.",
+        2: "Moves each band along time by the drive, both ways from the middle.",
+        3: "Moves each band across pitch by the drive, both ways from the middle.",
+        4: "Places each band between the speakers by the drive.",
+      },
+    },
     default: 0,
     options: [
-      { value: 0, label: "Swap Mag/Phase" },
-      { value: 1, label: "Phase Multiply" },
-      { value: 2, label: "Disperse" },
-      { value: 3, label: "Phase Quantise" },
-      { value: 4, label: "Stereo Cross" },
-      { value: 5, label: "Phase Gate" },
+      { value: 0, label: "Mag." },
+      { value: 1, label: "Phase" },
+      { value: 2, label: "Time" },
+      { value: 3, label: "Pitch" },
+      { value: 4, label: "Pan" },
     ],
     includeInStep: true,
     effectType: "transmute",
@@ -1309,7 +1346,17 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "number",
     name: "Amount",
     label: "Amount",
-    description: "Drives whichever mode is selected, and means something different in each.",
+    description: "Sets how much of the drive is written.",
+    descriptionBy: {
+      param: "transmuteTo",
+      descriptions: {
+        0: "Sets the gain on the written level: 1 puts the top of the drive at full scale.",
+        1: "Sets how far round the circle the written phase reaches: 1 is a full turn.",
+        2: "Sets how far a band can move, in beats.",
+        3: "Sets how far a band can move, in semitones.",
+        4: "Sets how wide the pan spreads: 1 reaches both speakers, 0 folds to the centre.",
+      },
+    },
     default: 1.0,
     min: -8.0,
     max: 8.0,
@@ -1323,7 +1370,7 @@ const baseParameterDefs: Partial<Record<ParameterKey, ParameterDefInput>> = {
     kind: "number",
     name: "Curve",
     label: "Curve",
-    description: "Shapes the selected mode a second time.",
+    description: "Bends the drive before it is written: 1 is straight, and negative turns it over.",
     default: 1.0,
     min: -4.0,
     max: 4.0,
@@ -1843,6 +1890,13 @@ export const getParameterDef = (key: ParameterKey): ParameterDef => {
 
   return parameterDef;
 };
+
+/** The description to show for `def` while its `descriptionBy` parameter holds `siblingValue`. */
+export function resolveDescription(def: ParameterDef, siblingValue: unknown): string {
+  const by = def.descriptionBy;
+  if (!by || typeof siblingValue !== "number") return def.description;
+  return by.descriptions[siblingValue] ?? def.description;
+}
 
 export const getNumberParameterDef = (key: ParameterKey): NumberParameter => {
   const parameterDef = getParameterDef(key);

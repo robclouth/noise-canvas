@@ -8,7 +8,8 @@ const COLOR = EFFECT_COLORS.transmute;
 export const TransmuteEffect = memo(function TransmuteEffect() {
   return (
     <SimpleGrid cols={2} spacing="xs" verticalSpacing={0}>
-      <ParameterControl paramKey="transmuteMode" color={COLOR} />
+      <ParameterControl paramKey="transmuteFrom" color={COLOR} />
+      <ParameterControl paramKey="transmuteTo" color={COLOR} />
       <ParameterControl paramKey="transmuteAmount" color={COLOR} />
       <ParameterControl paramKey="transmuteCurve" color={COLOR} />
     </SimpleGrid>

@@ -28,7 +28,18 @@ function isGenerated(name: string): boolean {
 }
 
 describe("parameter descriptions", () => {
-  const authored = params.filter((p) => !isGenerated(p.name));
+  // A parameter whose description follows another's value carries one string
+  // per value, and every one of them is read the same way.
+  const authored = params
+    .filter((p) => !isGenerated(p.name))
+    .flatMap((p) => [
+      p,
+      ...Object.entries(p.descriptionBy?.descriptions ?? {}).map(([value, description]) => ({
+        ...p,
+        name: `${p.name} (${value})`,
+        description,
+      })),
+    ]);
 
   it.each(authored.map((p) => [p.name, p.description] as const))("%s opens with a verb", (_name, description) => {
     for (const banned of BANNED_OPENINGS) expect(description).not.toMatch(banned);

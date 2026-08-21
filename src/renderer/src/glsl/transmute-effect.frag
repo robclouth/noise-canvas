@@ -1,30 +1,61 @@
 #include "effect-common.glsl";
 #include "effect-wrapper.glsl"
 
-uniform int transmuteMode;
+uniform int transmuteFrom;
+uniform int transmuteTo;
 uniform Parameter transmuteAmount;
 uniform Parameter transmuteCurve;
+uniform float transmuteBeatsToUv;
 
-// Draws the wrapped phase into the level slot as a 0..window image, and leaves
-// the phase itself alone so the passes in between still read a real one.
-vec2 openSwap(vec2 magPhase, float window) {
-  return vec2((unwrapPhase(magPhase.y) + PI) / TWO_PI * window, magPhase.y);
+// Sources and targets, in the order the pickers list them.
+const int PART_MAG   = 0;
+const int PART_PHASE = 1;
+const int PART_TIME  = 2;
+const int PART_PITCH = 3;
+const int PART_PAN   = 4;
+
+// The span the level reads across as a drive, and is written back over.
+const float TRANSMUTE_SPAN_DB = 80.0;
+
+float levelToUnit(float mag) {
+  float db = 20.0 * log(max(mag, 1e-9)) / log(10.0);
+  return clamp((db + TRANSMUTE_SPAN_DB) / TRANSMUTE_SPAN_DB, 0.0, 1.0);
 }
 
-// Reads the image back out as the phase, and takes the level from what the
-// pixel held when the stroke began. That reference is what stops content a pass
-// in between dragged in from outside the swap — which still carries a full,
-// unwrapped phase — from coming back as a band at full level.
-vec2 closeSwap(vec2 magPhase, vec2 strokeStart, float window) {
-  float wrapped = clamp(magPhase.x / window, 0.0, 1.0) * TWO_PI - PI;
-  return vec2(strokeStart.x, round(strokeStart.y / TWO_PI) * TWO_PI + wrapped);
+float unitToLevel(float unit) {
+  return pow(10.0, (clamp(unit, 0.0, 1.0) * TRANSMUTE_SPAN_DB - TRANSMUTE_SPAN_DB) / 20.0);
 }
 
-// Quantises the phase to `steps` around the circle, keeping the whole turns.
-float quantisePhase(float phase, float steps) {
-  float wrapped = unwrapPhase(phase);
-  float stepSize = TWO_PI / steps;
-  return phase - wrapped + round(wrapped / stepSize) * stepSize;
+float phaseToUnit(float phase) {
+  return (unwrapPhase(phase) + PI) / TWO_PI;
+}
+
+float unitToPhase(float unit) {
+  return clamp(unit, 0.0, 1.0) * TWO_PI - PI;
+}
+
+// Where the band sits between the speakers, 0 at the left and 1 at the right.
+float panToUnit(float magL, float magR) {
+  return magR / max(magL + magR, 1e-9);
+}
+
+// The drive, shaped by curve. A negative curve reads it upside down.
+float shapeDrive(float unit, float curve) {
+  float shaped = pow(clamp(unit, 0.0, 1.0), max(abs(curve), 0.001));
+  return curve < 0.0 ? 1.0 - shaped : shaped;
+}
+
+float semisToUv(float semis) {
+  return semis * (destBandsPerOctave / 12.0) / max(destBandCount, 1.0);
+}
+
+// What one channel of the band reads as a 0..1 drive.
+float readSource(vec2 magPhase, float magOther, vec2 brushUnit, bool right) {
+  if (transmuteFrom == PART_MAG)   return levelToUnit(magPhase.x);
+  if (transmuteFrom == PART_PHASE) return phaseToUnit(magPhase.y);
+  if (transmuteFrom == PART_TIME)  return brushUnit.x;
+  if (transmuteFrom == PART_PITCH) return brushUnit.y;
+  return right ? panToUnit(magOther, magPhase.x) : panToUnit(magPhase.x, magOther);
 }
 
 vec4 applyEffectStroke(vec4 src, ProcessingUvs coords, float audioLevelDb) {
@@ -41,79 +72,64 @@ vec4 applyEffectStroke(vec4 src, ProcessingUvs coords, float audioLevelDb) {
     mods
   );
 
-  float magL   = src.x;
-  float phaseL = src.y;
-  float magR   = src.z;
-  float phaseR = src.w;
+  vec2 inL = src.rg;
+  vec2 inR = src.ba;
 
-  vec2 outL, outR;
+  // Position inside the brush footprint, 0..1 on each axis.
+  vec2 brushUnit = clamp(getEffectiveBrushOffset(coords.dest) / max(brushSizeUv, vec2(EPSILON)), 0.0, 1.0);
 
-  if (transmuteMode == 0) {
-    // Swap Mag/Phase: puts the phase in the level slot so level-shaping effects
-    // reach it. A second Transmute in swap mode later in the chain puts it back:
-    //   Transmute(swap) -> [Effect] -> Transmute(swap)
-    // amount is the window, in level units, the phase image spans.
-    float windowL = max(abs(amount.x), 1e-3);
-    float windowR = max(abs(amount.y), 1e-3);
-    if (inSwappedDomain) {
-      vec4 strokeStart = texture(blendOriginalTex, vUv);
-      outL = closeSwap(vec2(magL, phaseL), strokeStart.rg, windowL);
-      outR = closeSwap(vec2(magR, phaseR), strokeStart.ba, windowR);
-    } else {
-      outL = openSwap(vec2(magL, phaseL), windowL);
-      outR = openSwap(vec2(magR, phaseR), windowR);
-    }
+  float driveL = shapeDrive(readSource(inL, inR.x, brushUnit, false), curve.x);
+  float driveR = shapeDrive(readSource(inR, inL.x, brushUnit, true), curve.y);
 
-  } else if (transmuteMode == 1) {
-    // Phase Multiply: scales the phase advance, which multiplies the frequency
-    // each band's content runs at while its level stays where it is. 2 doubles
-    // it, 0 flattens every band to cosine phase, -1 runs it backwards.
-    // curve is the level exponent, capped so a negative one cannot blow up.
-    outL = vec2(min(pow(max(magL, EPSILON), curve.x), 16.0), phaseL * amount.x);
-    outR = vec2(min(pow(max(magR, EPSILON), curve.y), 16.0), phaseR * amount.y);
+  vec2 outL = inL;
+  vec2 outR = inR;
 
-  } else if (transmuteMode == 2) {
-    // Disperse: delays each band by 2pi*f*delay radians of its own phase, with
-    // the delay growing toward the top of the spectrum, which smears transients
-    // into a chirp. amount is the delay at the top band, in units of 20 ms, and
-    // curve tilts how far down the spectrum the delay reaches.
-    float freqHz = getDestMetadata(coords.dest).a;
-    float topFreqHz = max(fetchBandMetadata(destMetadataTex, 0.0).a, 1e-6);
-    float freqNorm = clamp(freqHz / topFreqHz, 0.0, 1.0);
-    float tiltL = pow(freqNorm, max(abs(curve.x), 0.001));
-    float tiltR = pow(freqNorm, max(abs(curve.y), 0.001));
-    outL = vec2(magL, phaseL + TWO_PI * freqHz * amount.x * 0.02 * tiltL);
-    outR = vec2(magR, phaseR + TWO_PI * freqHz * amount.y * 0.02 * tiltR);
+  if (transmuteTo == PART_MAG) {
+    // The drive becomes the level. Phase -> Mag draws the phase where the
+    // level effects reach it and leaves the phase itself alone, so the passes
+    // in between still read a real one; a later Mag -> Phase reads it back.
+    outL.x = unitToLevel(driveL) * max(abs(amount.x), 1e-6);
+    outR.x = unitToLevel(driveR) * max(abs(amount.y), 1e-6);
 
-  } else if (transmuteMode == 3) {
-    // Phase Quantize: snaps the phase to discrete steps around the unit circle.
-    // steps = 2^|amount|, so 1 is the two-step crunch and 8 is 256 steps.
-    outL = vec2(magL, quantisePhase(phaseL, clamp(pow(2.0, abs(amount.x)), 2.0, 4096.0)));
-    outR = vec2(magR, quantisePhase(phaseR, clamp(pow(2.0, abs(amount.y)), 2.0, 4096.0)));
+  } else if (transmuteTo == PART_PHASE) {
+    // The drive becomes the phase, written around the whole turns the pixel
+    // already holds. Closing a Phase -> Mag, the turns and the level both come
+    // off the stroke-start snapshot, since the level slot holds a picture by
+    // then — which is what keeps content a pass in between dragged in from
+    // outside the pair, still carrying a full unwrapped phase, from returning
+    // at full level.
+    vec4 strokeStart = texture(blendOriginalTex, vUv);
+    vec2 baseL = inSwappedDomain ? strokeStart.rg : inL;
+    vec2 baseR = inSwappedDomain ? strokeStart.ba : inR;
+    outL = vec2(baseL.x, round(baseL.y / TWO_PI) * TWO_PI + unitToPhase(driveL) * amount.x);
+    outR = vec2(baseR.x, round(baseR.y / TWO_PI) * TWO_PI + unitToPhase(driveR) * amount.y);
 
-  } else if (transmuteMode == 4) {
-    // Stereo Cross: independently cross-blend L/R magnitudes and phases.
-    // amount: 0=no change, 1=full mag swap between channels.
-    // curve:  0=no change, 1=full phase swap between channels.
-    float magBlendL   = clamp(abs(amount.x), 0.0, 1.0);
-    float magBlendR   = clamp(abs(amount.y), 0.0, 1.0);
-    float phaseBlendL = clamp(abs(curve.x),  0.0, 1.0);
-    float phaseBlendR = clamp(abs(curve.y),  0.0, 1.0);
-    outL = vec2(mix(magL, magR, magBlendL),   mix(phaseL, phaseR, phaseBlendL));
-    outR = vec2(mix(magR, magL, magBlendR),   mix(phaseR, phaseL, phaseBlendR));
+  } else if (transmuteTo == PART_TIME || transmuteTo == PART_PITCH) {
+    // The drive moves the band: each bin reads from somewhere else, as far as
+    // the drive says. The drive is centred, so it pushes both ways. amount is
+    // beats for time, semitones for pitch, and as in Transform a positive move
+    // carries the sound later and higher, so the read goes the other way.
+    float reachL = -(driveL - 0.5) * 2.0 * amount.x;
+    float reachR = -(driveR - 0.5) * 2.0 * amount.y;
+    bool toPitch = transmuteTo == PART_PITCH;
+    vec2 stepL = toPitch ? vec2(0.0, semisToUv(reachL)) : vec2(reachL * transmuteBeatsToUv, 0.0);
+    vec2 stepR = toPitch ? vec2(0.0, semisToUv(reachR)) : vec2(reachR * transmuteBeatsToUv, 0.0);
+    vec4 readL = getTransformedSample(coords.sourceL + stepL, coords.dest, 1.0, 1.0,
+                                      sourceOffsetX + stepL.x, sourceOffsetY + stepL.y);
+    vec4 readR = getTransformedSample(coords.sourceR + stepR, coords.dest, 1.0, 1.0,
+                                      sourceOffsetX + stepR.x, sourceOffsetY + stepR.y);
+    outL = readL.rg;
+    outR = readR.ba;
 
   } else {
-    // Phase Gate: gates magnitude by a sinusoidal function of the phase value.
-    // Bins whose phase aligns with gate peaks keep amplitude; others are silenced.
-    // amount sets the lobe count, curve the gate sharpness.
-    float normPhaseL = (unwrapPhase(phaseL) + PI) / TWO_PI;
-    float normPhaseR = (unwrapPhase(phaseR) + PI) / TWO_PI;
-    float lobesL = 1.0 + abs(amount.x) * 3.0;
-    float lobesR = 1.0 + abs(amount.y) * 3.0;
-    float sharpL = pow(3.0, abs(curve.x));
-    float sharpR = pow(3.0, abs(curve.y));
-    outL = vec2(magL * pow(abs(sin(normPhaseL * lobesL * PI)), sharpL), phaseL);
-    outR = vec2(magR * pow(abs(sin(normPhaseR * lobesR * PI)), sharpR), phaseR);
+    // The drive places the band between the speakers. The band's energy is
+    // kept and split, so Pan -> Pan at 1 leaves it where it was, 0 folds it to
+    // the centre and past 1 pushes it out to the sides.
+    float total = inL.x + inR.x;
+    float placeL = clamp(0.5 + (driveL - 0.5) * amount.x, 0.0, 1.0);
+    float placeR = clamp(0.5 + (driveR - 0.5) * amount.y, 0.0, 1.0);
+    outL.x = total * (1.0 - placeL);
+    outR.x = total * placeR;
   }
 
   return vec4(outL, outR);

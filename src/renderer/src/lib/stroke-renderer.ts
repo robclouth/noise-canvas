@@ -1028,8 +1028,8 @@ export class StrokeRenderer {
         iteration: number;
         inSwappedDomain: boolean;
       }[] = [];
-      // A pass that swaps the pair into another domain leaves every pass after
-      // it reading that domain, until a second one swaps it back.
+      // A pass that moves the pair out of magnitude and phase leaves every pass
+      // after it reading that domain, until one moves it back.
       let swapped = false;
       for (const effectItem of enabledEffectItems) {
         const effect = this.effects[effectItem.effect];
@@ -1037,11 +1037,10 @@ export class StrokeRenderer {
         const effectState = createEffectStateView(state, stepIndex, effectItem);
         const activePasses = effect.getActivePasses?.(effectState) ?? effect.materials.map((_, index) => index);
         if (activePasses.length === 0) continue;
-        const toggles = effect.togglesDomain?.(effectState) ?? false;
         for (let i = 0; i < brushIterations; i++) {
           for (const passIndex of activePasses) {
             plannedPasses.push({ effect, effectState, passIndex, iteration: i, inSwappedDomain: swapped });
-            if (toggles) swapped = !swapped;
+            swapped = effect.domainAfter?.(effectState, swapped) ?? swapped;
           }
         }
       }

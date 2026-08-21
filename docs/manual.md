@@ -76,10 +76,10 @@ Press `Space` to hear the file. Click along the time legend under it to move the
 A brush is a stack of effects plus the envelope that places them. A fresh install has one empty palette holding one empty brush, and a brush with no effects does nothing to the sound, so start from the ones that ship with the app:
 
 1. Click **Add palette** at the bottom of the sidebar.
-2. Pick a pack: Restoration, Breaks, Vocals, From Scratch, Mixing, Space or Mangle.
+2. Pick one of the palettes that come with the app. Each is a set of brushes for one kind of job, and its name says which.
 3. Click a brush in it to make it active. The number keys `1`–`9` and `0` reach the top palette's brushes.
 
-Hover a brush row to see the effects inside it, and the [brush panel](#brushes) down the left edge to see them laid out in full. Try **Space → Reverb** on anything, or **Breaks → Stutter** on a drum loop.
+Hover a brush row to see the effects inside it, and the [brush panel](#brushes) down the left edge to see them laid out in full. Try a few on anything, and a drum loop on the rhythmic ones.
 
 ### 3. Aim the Brush
 
@@ -521,26 +521,35 @@ Reorders the bands inside the brush, so loud content collects at one edge and th
 
 ![The Transmute effect card](images/ui/effect-transmute.webp)
 
-Bends magnitude and phase against each other. It gives metallic, glassy, alien tones, and small moves go a long way.
+Turns one part of the sound into another: the level into the pitch, the phase into the pan, the position in the brush into the level. Each Transmute carries one route, so add a second and a third to run several at once.
 
-- **Mode** – which of the six operations runs. See the table below.
-- **Amount** – drives the mode, and means something different in each.
-- **Curve** – shapes the mode a second time, where the mode uses it.
+- **From** – what is read from each band. See the first table.
+- **To** – what it is written as. See the second table.
+- **Amount** – how much is written. Its unit follows **To**: a gain, a span round the circle, beats, semitones, or a width between the speakers.
+- **Curve** – bends the drive before it is written. 1 is straight, above 1 hugs the bottom, below 1 hugs the top, and negative turns it over.
 
-| Mode               | What it does                                                                                                                                                                   |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Swap Mag/Phase** | Puts the phase in the level slot, where the level-shaping effects reach it, and a second Transmute in swap mode puts it back. Amount is the level the phase spans.             |
-| **Phase Multiply** | Multiplies the frequency each band runs at and leaves its level alone. 2 doubles it, 0 flattens the brush to one phase, −1 runs it backwards. Curve is the level exponent.     |
-| **Disperse**       | Holds the top of the spectrum back against the bottom, which smears every transient into a chirp. Amount is the delay, in steps of 20 ms. Curve tilts how far down it reaches. |
-| **Phase Quantise** | Snaps the phase to a ring of equal steps: two steps at 1, doubling with every step up to 256 at 8. Few steps ring and crystallise.                                             |
-| **Stereo Cross**   | Trades levels between left and right with Amount, and phases with Curve.                                                                                                       |
-| **Phase Gate**     | Silences the bands whose phase falls between the peaks of a gate. Amount sets how many peaks there are, Curve how narrow.                                                      |
+Every route works the same way. Each band's **From** is read as a drive from 0 to 1, bent by **Curve**, scaled by **Amount**, and written to **To**. A route from a part to itself is a transfer curve on that part. A route into Time or Pitch moves each band by what it holds, so the loud bands travel and the quiet ones stay, or the other way round with a negative Curve.
+
+| From      | What is read                                                        |
+| --------- | ------------------------------------------------------------------- |
+| **Mag.**  | The band's level, from silence at 0 to full scale at 1, over 80 dB. |
+| **Phase** | The band's phase, once round the circle.                            |
+| **Time**  | Where the band sits in the brush, from its left edge to its right.  |
+| **Pitch** | Where the band sits in the brush, from its bottom to its top.       |
+| **Pan**   | Where the band sits between the speakers, from left to right.       |
+
+| To        | What is written                                                                                                                  |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **Mag.**  | The drive becomes the level, silence at 0 and full scale at 1. Amount is the gain.                                               |
+| **Phase** | The drive becomes the phase, around the turns the band already holds. Amount is how far round the circle it reaches.             |
+| **Time**  | The band reads from earlier or later, both ways from the middle of the drive. Amount is how far, in beats.                       |
+| **Pitch** | The band reads from lower or higher, both ways from the middle of the drive. Amount is how far, in semitones.                    |
+| **Pan**   | The band's energy is placed between the speakers. Amount is the width: 1 reaches both, 0 folds to the centre, past 1 pushes out. |
 
 **Hints**
 
-- Put a **Swap Mag/Phase** either side of another effect. Everything between them shapes the phase instead of the level.
-- The pair hands the level back as the stroke found it, so put any level work after the second swap.
-- **Phase Multiply** at 1 leaves the sound alone. A few hundredths off it already rings.
+- Put a **Phase→Mag.** and a **Mag.→Phase** either side of another effect. Everything between them shapes the phase instead of the level, and the pair hands the level back as the stroke found it.
+- **Mag.→Mag.** with Curve at −1 turns the spectrum inside out: the noise floor comes up and the notes sink into it.
 
 ### Convolve
 
@@ -696,7 +705,8 @@ Drag on the time legend to set a loop region and the fill covers only that span.
 
 ![A parameter's label menu](images/ui/menu-parameter.webp)
 
-- **Drag** a value to change it. **Hold Ctrl while dragging** to snap to that parameter's preset values, which are musical beat divisions, semitone intervals and the like. **Hold Shift while dragging** for fine control, three times slower than a plain drag.
+- **Drag** a value to change it. Where a parameter has preset values — musical beat divisions, semitone intervals and the like — a drag steps through them one at a time, so a stroke lands on 1/8 rather than 0.13.
+- **Hold Shift while dragging** to leave the presets and set any value in between, three times slower than a plain drag. Let go of Shift and the drag steps again from wherever you left it.
 - **Right-click** a value to pick from its list of preset values. A small chevron marks the values that have one.
 - **Click** a value to type a number in.
 - **Double-click the label** to reset a parameter to its default. This also clears every modulation amount on it.

@@ -325,6 +325,56 @@ const presets: Omit<SectionPreset, "isFactory" | "color">[] = [
   },
 
   {
+    id: "effect-transmute-photo-negative",
+    scope: "effect:transmute",
+    name: "Photo Negative",
+    description: "The noise floor comes up and the notes sink into it.",
+    values: { transmuteFrom: 0, transmuteTo: 0, transmuteAmount: 0.3, transmuteCurve: -1 },
+  },
+  {
+    id: "effect-transmute-glide",
+    scope: "effect:transmute",
+    name: "Glide",
+    description: "Pitch slides up an octave across the brush.",
+    values: { transmuteFrom: 2, transmuteTo: 3, transmuteAmount: 6, transmuteCurve: 1 },
+  },
+  {
+    id: "effect-transmute-shimmer",
+    scope: "effect:transmute",
+    name: "Shimmer",
+    description: "Every band detuned by its own phase, into a chorus.",
+    values: { transmuteFrom: 1, transmuteTo: 3, transmuteAmount: 0.5, transmuteCurve: 1 },
+  },
+  {
+    id: "effect-transmute-scatter",
+    scope: "effect:transmute",
+    name: "Scatter",
+    description: "Every band thrown along time by its own phase, into grain.",
+    values: { transmuteFrom: 1, transmuteTo: 2, transmuteAmount: 0.25, transmuteCurve: 1 },
+  },
+  {
+    id: "effect-transmute-widen",
+    scope: "effect:transmute",
+    name: "Widen",
+    description: "The phase decides which speaker each band sits in.",
+    values: { transmuteFrom: 1, transmuteTo: 4, transmuteAmount: 1, transmuteCurve: 1 },
+  },
+  {
+    id: "effect-transmute-expose-phase",
+    scope: "effect:transmute",
+    name: "Expose Phase",
+    description: "Draws the phase as the level, so the effects after it shape the phase.",
+    values: { transmuteFrom: 1, transmuteTo: 0, transmuteAmount: 1, transmuteCurve: 1 },
+  },
+  {
+    id: "effect-transmute-restore-phase",
+    scope: "effect:transmute",
+    name: "Restore Phase",
+    description: "Reads the drawn phase back, and hands the level back with it.",
+    values: { transmuteFrom: 0, transmuteTo: 1, transmuteAmount: 1, transmuteCurve: 1 },
+  },
+
+  {
     id: "effect-attract-snap-to-scale",
     scope: "effect:attract",
     name: "Snap to Scale",

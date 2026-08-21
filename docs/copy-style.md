@@ -187,6 +187,13 @@ hidden, so they leave the manual completely — sections, contents list, and the
 note that explains their absence. A feature the reader cannot reach is not
 documented.
 
+**Names of shipped content.** The manual never names a section preset, a
+factory palette, or a brush inside one. They get added, renamed and dropped
+without the manual hearing about it, and a named one is a broken reference the
+moment that happens. Say that some come with the app, and describe settings
+rather than pointing at a preset — "Mag.→Mag. with Curve at −1" stays true
+whatever the preset list does.
+
 **Sales copy.** "This approach makes sound design tangible — almost physical.
 You're literally painting timbre." Show it with an instruction instead.
 
