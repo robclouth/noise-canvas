@@ -4,6 +4,26 @@ Noise Canvas is a tool for doing spectral sound design. It loads audio files, sh
 
 ![Noise Canvas Screenshot](./docs/images/screenshot.webp)
 
+## Download
+
+| Your computer                        | Get it                                                                                                                                                                                                                        |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Mac**, Apple Silicon (M1 or newer) | [Download `.dmg`](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-mac-arm64.dmg)                                                                                                              |
+| **Mac**, Intel                       | [Download `.dmg`](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-mac-x64.dmg)                                                                                                                |
+| **Windows** 10 or 11                 | [Download the installer](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-windows-setup.exe)                                                                                                   |
+| **Linux**                            | [Download `.AppImage`](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-linux.AppImage) or [`.deb`](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas-linux.deb) |
+| **Ableton Live 12** extension (beta) | [Download `.ablx`](https://github.com/robclouth/noise-canvas/releases/latest/download/noise-canvas.ablx)                                                                                                                      |
+
+Not sure which Mac you have? Apple menu → **About This Mac**. A "Chip" line means Apple Silicon. A "Processor" line means Intel.
+
+**Which macOS?** The app needs macOS 11 Big Sur or newer. I've only tested it on Sequoia (15), and one person reported problems on Monterey (12). If it won't run on yours, [open an issue](https://github.com/robclouth/noise-canvas/issues) and say which version you're on.
+
+**It leans on your graphics card.** Every effect is a shader, so the GPU does the work rather than the CPU, and each open file holds two full-size 32-bit float buffers in GPU memory. Both the memory and the work per stroke grow with the length of the file. Integrated graphics are fine, but an older machine will paint slowly on long files, and can run out of GPU memory on very long ones. Shorter files are the fix.
+
+> The green **Code** button at the top of this page gives you the source code, not the app. Use the table above.
+
+Open the downloaded file to install it. [Download and install](#download-and-install) covers each platform, and the warning Windows shows the first time.
+
 ## 📖 [Read the manual →](./docs/manual.md)
 
 Or just open it up and play around. All the parameters have got tooltips, there's a walkthrough on first launch, and `?` outlines every part of the window at once. I'm of the belief that how to use a tool should be mostly obvious just by using it. If it's not then I probably need to fix something.
@@ -55,9 +75,15 @@ Horizontally you're in beats, not seconds. Every file has a tempo, the grid snap
 
 ---
 
-## Getting Started
+## Download and install
 
-Download the build for your platform from [**Releases**](../../releases). macOS (Apple Silicon and Intel), Windows, and Linux are all published.
+Take the file for your platform from the [Download](#download) table, then:
+
+- **macOS** — open the `.dmg` and drag Noise Canvas into Applications. The Mac builds are signed and notarised, so they open with no warning.
+- **Windows** — run the installer, and read the next section first.
+- **Linux** — run `chmod +x noise-canvas-linux.AppImage` and open it, or install the `.deb` with `sudo dpkg -i noise-canvas-linux.deb`.
+
+Every version, with its release notes, is on the [releases page](https://github.com/robclouth/noise-canvas/releases).
 
 Open an audio file (or drag one onto the window), paint on its spectrogram, and hear the results instantly.
 
