@@ -4,6 +4,8 @@ import { installExtension, REACT_DEVELOPER_TOOLS, REDUX_DEVTOOLS } from "electro
 import { join } from "path";
 import icon from "../../resources/icon.png?asset";
 import { hasSupportedAudioExtension } from "./lib/audio-extensions";
+import { diagLog, diagLogPath, initDiagLog } from "./lib/diag-log";
+import { installProcessErrorCapture, logSessionHeader, startMainMetricsSampler } from "./lib/diag-session";
 import { createMenu, openFileDialog } from "./lib/menu";
 import { ipcMainOn, webContentsSend } from "./lib/types";
 import { checkForUpdates, initUpdater } from "./lib/updater";
@@ -23,11 +25,15 @@ import { checkForUpdates, initUpdater } from "./lib/updater";
 // the same set in ~11s and reuses its cache afterwards (~0.5s), with paint
 // throughput equal or slightly better.
 const angleBackend = process.env.NOISE_CANVAS_ANGLE;
+let angleSwitch: string | undefined;
 if (process.platform === "darwin") {
-  app.commandLine.appendSwitch("use-angle", angleBackend || "gl");
+  angleSwitch = angleBackend || "gl";
 } else if (process.platform === "win32") {
-  app.commandLine.appendSwitch("use-angle", angleBackend || "vulkan");
+  angleSwitch = angleBackend || "vulkan";
 }
+if (angleSwitch) app.commandLine.appendSwitch("use-angle", angleSwitch);
+
+installProcessErrorCapture();
 
 // Remove dictation and character palette menu items on macOS
 if (process.platform === "darwin") {
@@ -111,6 +117,7 @@ function createWindow(): void {
   });
 
   mainWindow.on("ready-to-show", () => {
+    diagLog("info", "session", "window shown", { sinceLaunchMs: Math.round(process.uptime() * 1000) });
     mainWindow?.show();
   });
 
@@ -170,6 +177,10 @@ app.whenReady().then(async () => {
   // and the installed shortcut as two different apps.
   electronApp.setAppUserModelId("com.robclouth.noise-canvas");
 
+  await initDiagLog(join(app.getPath("userData"), "logs"), is.dev);
+  void logSessionHeader(angleSwitch);
+  startMainMetricsSampler();
+
   app.on("browser-window-created", (_, window) => {
     optimizer.watchWindowShortcuts(window);
   });
@@ -228,6 +239,15 @@ ipcMainOn("trigger-open-file", () => {
   if (mainWindow) {
     openFileDialog(mainWindow);
   }
+});
+
+ipcMainOn("diag-log", (_event, level, scope, message, data) => {
+  diagLog(level, scope, message, data);
+});
+
+ipcMainOn("reveal-log-file", () => {
+  const path = diagLogPath();
+  if (path) shell.showItemInFolder(path);
 });
 
 // Handle save dialog from renderer

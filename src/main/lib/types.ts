@@ -1,5 +1,9 @@
 import { BrowserWindow, ipcMain } from "electron";
 import type { ProgressInfo, UpdateInfo } from "electron-updater";
+
+export type DiagLevel = "info" | "warn" | "error";
+/** Structured payload of one diagnostic-log line, written as JSON after the message. */
+export type DiagData = Record<string, unknown>;
 // Describes the flat object returned directly from the C++ addon
 export interface GaboratorAnalysisResult {
   data: Float32Array;
@@ -146,6 +150,9 @@ export interface IpcMainHandlers {
   "renderer-ready": (event: Electron.IpcMainEvent) => void;
   "trigger-open-file": (event: Electron.IpcMainEvent) => void;
   "check-for-updates": (event: Electron.IpcMainEvent) => void;
+  // One renderer line for the diagnostic log file.
+  "diag-log": (event: Electron.IpcMainEvent, level: DiagLevel, scope: string, message: string, data?: DiagData) => void;
+  "reveal-log-file": (event: Electron.IpcMainEvent) => void;
 }
 
 export interface IpcRendererEvents {

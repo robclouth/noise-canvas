@@ -9,7 +9,7 @@ import { ipcEmitLocal, ipcSend } from "./ipc";
  */
 
 /** Actions that leave the renderer, so they have no renderer event channel. */
-export type HostCommand = "open-file-dialog" | "check-for-updates" | "quit-app" | "save-to-live";
+export type HostCommand = "open-file-dialog" | "check-for-updates" | "quit-app" | "save-to-live" | "reveal-log-file";
 
 /** Renderer events a menu item can fire, which are the ones needing no payload. */
 type NoArgEvent = {
@@ -132,6 +132,8 @@ export const APP_MENUS: AppMenu[] = [
       { type: "item", label: "Manual", command: "open-manual", accelerator: { code: "Slash" } },
       { type: "item", label: "Run Walkthrough", command: "run-walkthrough" },
       { type: "item", label: "Check for Updates…", command: "check-for-updates", only: "electron" },
+      { type: "separator" },
+      { type: "item", label: "Show Log File", command: "reveal-log-file", only: "electron" },
     ],
   },
 ];
@@ -208,6 +210,9 @@ export function runCommand(command: AppCommand): void {
       return;
     case "save-to-live":
       void import("./save-to-live").then(({ saveToLive }) => saveToLive());
+      return;
+    case "reveal-log-file":
+      host.diag.revealLogFile();
       return;
     default:
       ipcEmitLocal(command);

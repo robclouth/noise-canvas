@@ -8,6 +8,7 @@ import { hasPhaseTurns, phaseTurnResidualRanges } from "../../../main/lib/histor
 import { audioHopBytes, editsAlongHops, type AudioHop } from "./audio-hop";
 import { applyCanvasTurns, type CanvasTurn } from "./canvas-phase-turns";
 import { clearCanvasPatchStash, takeCanvasPatchStash } from "./canvas-patch-stash";
+import { diag } from "./diag-log";
 import { clearFileTaskQueue, drainFileTaskQueues, serializeFileTask } from "./file-task-queue";
 import { host } from "./host";
 import { mergePixelRanges } from "./pixel-ranges";
@@ -164,6 +165,10 @@ export class PackedStateCache {
   get size(): number {
     return this.map.size;
   }
+
+  get byteCount(): number {
+    return this.bytes;
+  }
 }
 
 /** LRU keyed by node id, bounded by the bytes its values hold. */
@@ -175,6 +180,10 @@ export class ByteBudgetCache<T> {
     private readonly maxBytes: number,
     private readonly sizeOf: (value: T) => number,
   ) {}
+
+  get byteCount(): number {
+    return this.bytes;
+  }
 
   get(id: string): T | undefined {
     const v = this.map.get(id);
@@ -869,10 +878,10 @@ export class HistoryManager {
         hasPhaseTurns(opts.turns) ? opts.turns : undefined,
       );
       storage = this.deltaStepsSinceLastSnap(parentId) >= CHECKPOINT_INTERVAL ? "packed" : "delta";
-      console.log(
-        `[timing] addStroke: footprint delta ${(performance.now() - deltaStart).toFixed(1)}ms ` +
-          `(${ranges.length / 2} ranges, ${footprintPixels} px)`,
-      );
+      diag.timing("timing", "addStroke footprint delta", performance.now() - deltaStart, {
+        ranges: ranges.length / 2,
+        footprintPixels,
+      });
     } else {
       storage = "packed";
     }
@@ -1200,9 +1209,9 @@ export class HistoryManager {
       } else {
         file.rendererRef.current.setFBOData(packedData);
       }
-      console.log(
-        `[timing] navigateTo FBO ${ranges ? "patch" : "full"} upload: ${(performance.now() - restoreStart).toFixed(2)}ms`,
-      );
+      diag.timing("timing", "navigateTo FBO upload", performance.now() - restoreStart, {
+        mode: ranges ? "patch" : "full",
+      });
     }
     this.fboOutOfSync = false;
     // The FBO now holds the target state; a patch stashed against the old
@@ -1413,7 +1422,7 @@ export class HistoryManager {
       // Walked in place: the array stops being `fromId`'s state and becomes
       // the target's, which the caller records in the cache.
       const packed = await host.analysis.applyHistoryDeltas(base, base, deltas, inverts);
-      console.log(`[timing] navigateTo delta hops (${ids.length}): ${(performance.now() - start).toFixed(1)}ms`);
+      diag.timing("timing", "navigateTo delta hops", performance.now() - start, { hops: ids.length });
       return packed;
     } catch (error) {
       console.error("history: walking the stroke deltas failed", error);
@@ -1450,7 +1459,7 @@ export class HistoryManager {
     const start = performance.now();
     const applied = await useStore.getState().spliceFileAudio(this.fileId, walk.edits, walk.meta);
     if (applied) {
-      console.log(`[timing] navigateTo audio hops (${walk.edits.length}): ${(performance.now() - start).toFixed(1)}ms`);
+      diag.timing("timing", "navigateTo audio hops", performance.now() - start, { hops: walk.edits.length });
     }
     return applied;
   }
@@ -1599,6 +1608,15 @@ export class HistoryManager {
     let total = 0;
     for (const id of this.audioLru) total += this.audioBytes.get(id) ?? 0;
     return total;
+  }
+
+  /** Bytes the in-memory caches hold: packed states, node deltas and audio hops. */
+  memoryCacheBytes(): { packedStates: number; deltas: number; audioHops: number } {
+    return {
+      packedStates: this.packedCache.byteCount,
+      deltas: this.nodeDeltas.byteCount,
+      audioHops: this.nodeAudioHops.byteCount,
+    };
   }
 
   // Bounded by both a count and a byte budget: one cached render of a short file
@@ -1961,6 +1979,18 @@ export function getHistoryManager(fileId: string, options: { packedCacheBytes?: 
     managers.set(fileId, m);
   }
   return m;
+}
+
+/** In-memory history cache bytes summed over every open file. */
+export function historyMemoryCacheBytes(): { packedStates: number; deltas: number; audioHops: number } {
+  const total = { packedStates: 0, deltas: 0, audioHops: 0 };
+  for (const manager of managers.values()) {
+    const bytes = manager.memoryCacheBytes();
+    total.packedStates += bytes.packedStates;
+    total.deltas += bytes.deltas;
+    total.audioHops += bytes.audioHops;
+  }
+  return total;
 }
 
 /**

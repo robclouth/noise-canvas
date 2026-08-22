@@ -7,7 +7,8 @@ import { produce } from "immer";
 import { Vector2 } from "three";
 import * as Tone from "tone";
 import { host } from "../lib/host";
-import { remainingCoefficientBudget } from "../lib/gpu-budget";
+import { diag } from "../lib/diag-log";
+import { remainingCoefficientBudget, usedBudgetFraction } from "../lib/gpu-budget";
 import { toChannelCount } from "../lib/channel-mix";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type { AnalysisParams, CommitLevels, CommitStrokeResult, PackedOnsets } from "../../../main/lib/types";
@@ -331,6 +332,26 @@ function openFileTexelCounts(excludeFileId?: string): number[] {
   return counts;
 }
 
+/** Logs a file's spectrogram footprint and the share of the graphics budget all open files now hold. */
+export function logFileFootprint(fileId: string, event: string, extra?: Record<string, unknown>): void {
+  const file = openFiles[fileId];
+  const data = file?.spectrogramData;
+  if (!file || !data) return;
+  diag.info("file", event, {
+    name: host.path.basename(file.filePath),
+    seconds: Math.round((data.numFrames / data.sampleRate) * 10) / 10,
+    sampleRate: data.sampleRate,
+    channels: data.numChannels,
+    bandsPerOctave: data.bandsPerOctave,
+    textureWidth: data.textureWidth,
+    textureHeight: data.textureHeight,
+    texels: data.textureWidth * data.textureHeight,
+    openFiles: Object.keys(openFiles).length,
+    budgetPercent: Math.round((usedBudgetFraction(openFileTexelCounts()) ?? 0) * 100),
+    ...extra,
+  });
+}
+
 // Run gaborator analysis on a real on-disk wav and stash the resulting
 // SpectrogramData on the file. Used by first-time-open and as a recovery
 // fallback in reopenPersistedFiles when a real file's history dir is missing.
@@ -346,6 +367,7 @@ async function loadRealFileViaGaborator(
   if (!file) return false;
   const diskPath = isBundledPath(filePath) ? resolveBundledPath(filePath) : filePath;
   const otherTexelCounts = openFileTexelCounts(fileId);
+  const analysisStart = performance.now();
   let result: Awaited<ReturnType<typeof host.analysis.analyze>>;
   try {
     result = await host.analysis.analyze(diskPath, {
@@ -354,11 +376,13 @@ async function loadRealFileViaGaborator(
       maxCoefficients: remainingCoefficientBudget(otherTexelCounts),
     });
   } catch (error) {
+    diag.error("file", "analysis failed", { name: host.path.basename(filePath), bandsPerOctave, error });
     if (error instanceof Error && error.message.includes("maximum audio duration") && otherTexelCounts.length > 0) {
       throw new Error(`${error.message} Close another file to free graphics memory.`);
     }
     throw error;
   }
+  const analysisMs = performance.now() - analysisStart;
   const spectrogramData = {
     packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
     inverseMap: new Float32Array(
@@ -383,6 +407,7 @@ async function loadRealFileViaGaborator(
       bandLengths: result.bandLengths,
     },
   };
+  diag.timing("file", "analysis", analysisMs, { name: host.path.basename(filePath), bandsPerOctave });
   return updateOpenFile(fileId, {
     spectrogramData,
     onsets: result.onsets,
@@ -1799,6 +1824,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (state.isPlaying && state.activeFileId === fileId) {
       state.stopAudio();
     }
+    logFileFootprint(fileId, "closed");
 
     // Fire-and-forget: drops on-disk history directory and in-memory state.
     destroyHistoryManager(fileId).catch((err: unknown) => console.error("destroyHistoryManager failed", err));
@@ -1883,7 +1909,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       } else {
         const fboStart = performance.now();
         fboData = await renderer.getFBOData();
-        console.log(`[timing] getFBOData (for synthesis): ${(performance.now() - fboStart).toFixed(2)}ms`);
+        diag.timing("timing", "getFBOData for synthesis", performance.now() - fboStart);
       }
 
       const payload = {
@@ -1941,7 +1967,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         for (let i = 0; i < existingBuffer.numberOfChannels; i++) {
           existingAudio.push(existingBuffer.getChannelData(i));
         }
-        console.log(`[timing] extract existing audio channels: ${(performance.now() - extractStart).toFixed(2)}ms`);
+        diag.timing("timing", "extract existing audio channels", performance.now() - extractStart);
 
         console.log("[timing] Partial synthesis range:", { startFrame, endFrame, startBand, endBand });
       }
@@ -1991,19 +2017,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           startBand,
           endBand,
         );
-        console.log(
-          `[timing] synthesize marshaling (MAIN THREAD, sync) ${(performance.now() - cppSynthStart).toFixed(1)}ms`,
-        );
+        diag.timing("timing", "synthesize marshaling on main thread", performance.now() - cppSynthStart);
         synthesisResult = await synthPromise;
       } catch (synthError) {
         console.error("[timing] Synthesis failed:", synthError);
         throw synthError;
       }
       const isPartial = startFrame !== undefined;
-      console.log(
-        `[timing] C++ synthesis: ${(performance.now() - cppSynthStart).toFixed(2)}ms` +
-          (isPartial ? " (partial)" : " (full)"),
-      );
+      diag.timing("timing", "C++ synthesis", performance.now() - cppSynthStart, { partial: isPartial });
 
       if (!synthesisResult || !synthesisResult.channels) {
         console.error("[timing] Invalid synthesis result:", synthesisResult);
@@ -2023,7 +2044,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         onsetStartSec: analysisParams.onsetStartSec,
         onsetEndSec: analysisParams.onsetEndSec,
       });
-      console.log(`[timing] synthesizeFile total: ${(performance.now() - synthesizeFileStart).toFixed(2)}ms`);
+      diag.timing("timing", "synthesizeFile total", performance.now() - synthesizeFileStart);
     } catch (error) {
       console.error("Error running synthesis:", error);
     } finally {
@@ -2044,7 +2065,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     for (let i = 0; i < numChannels; i++) {
       audioBuffer.copyToChannel(result.channels[i] as Float32Array<ArrayBuffer>, i);
     }
-    console.log(`[timing] create AudioBuffer: ${(performance.now() - audioBufferStart).toFixed(2)}ms`);
+    diag.timing("timing", "create AudioBuffer", performance.now() - audioBufferStart);
 
     file.audioBuffer = audioBuffer;
     file.audioPeak = result.peak > 0 ? result.peak : 1;
@@ -2073,13 +2094,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       get().setLoopRegion({ start: startTimeSeconds, end: endTimeSeconds });
       get().setFilePlaybackStartTime(fileId, startTimeSeconds);
       await get().togglePlayback();
-      console.log(`[timing] auto-playback setup: ${(performance.now() - autoPlayStart).toFixed(2)}ms`);
+      diag.timing("timing", "auto-playback setup", performance.now() - autoPlayStart);
     } else if (get().isPlaying && get().activeFileId === fileId) {
       // Swap the buffer under the player and restart it from where it was, so
       // the edit is heard without the transport moving.
       const bufferSwapStart = performance.now();
       get().swapPlayingBuffer(audioBuffer);
-      console.log(`[timing] buffer hot-swap: ${(performance.now() - bufferSwapStart).toFixed(2)}ms`);
+      diag.timing("timing", "buffer hot-swap", performance.now() - bufferSwapStart);
     }
     return audioBuffer;
   },
@@ -2177,10 +2198,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         window ?? { startFrame: -1, endFrame: -1, startBand: -1, endBand: -1 },
         stroke,
       );
-      console.log(
-        `[timing] commitStroke: ${(performance.now() - commitStart).toFixed(2)}ms ` +
-          `(${result.patch.ranges.length / 3} band ranges)`,
-      );
+      diag.timing("timing", "commitStroke", performance.now() - commitStart, {
+        bandRanges: result.patch.ranges.length / 3,
+      });
 
       if (snapshot.reanalyzeEnabled) file.unprojectedPaint = false;
       else if (snapshot.dirtyRegion) file.unprojectedPaint = true;
@@ -2492,9 +2512,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           minFreq,
           maxCoefficients: remainingCoefficientBudget(openFileTexelCounts(fileId)),
         };
+        const analysisStart = performance.now();
         const result = audioBuffer
           ? await host.analysis.analyseBuffer(audioBuffer, reanalysisParams)
           : await host.analysis.analyze(file.filePath, reanalysisParams);
+        const analysisMs = performance.now() - analysisStart;
 
         const spectrogramData = {
           packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
@@ -2529,6 +2551,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
         file.spectrogramData = spectrogramData;
         file.unprojectedPaint = false;
+        diag.timing("file", "re-analysis", analysisMs, { name: host.path.basename(file.filePath), bandsPerOctave });
 
         file.rendererRef?.current?.reloadTextures();
 

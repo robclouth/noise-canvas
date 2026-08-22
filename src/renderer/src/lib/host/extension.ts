@@ -162,6 +162,10 @@ export const host: Host = {
       window.open(url, "_blank", "noopener,noreferrer");
     },
   },
+  diag: {
+    write: () => {},
+    revealLogFile: () => {},
+  },
   prefs: extensionPrefs,
   events: createExtensionEvents(),
 };

@@ -72,6 +72,14 @@ export const host: Host = {
       window.ipcRenderer.send("open-external", url);
     },
   },
+  diag: {
+    write(level, scope, message, data) {
+      window.ipcRenderer.send("diag-log", level, scope, message, data);
+    },
+    revealLogFile() {
+      window.ipcRenderer.send("reveal-log-file");
+    },
+  },
   prefs: {
     read: (name) => localStorage.getItem(name),
     write: (name, value) => localStorage.setItem(name, value),

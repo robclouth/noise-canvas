@@ -1,10 +1,11 @@
 import { createStepStateView, useStore } from "@/store";
 import { notifications } from "@mantine/notifications";
 import { useTransientStore } from "@renderer/store/transient";
+import { countDiagStroke } from "@renderer/lib/diag-sampler";
 import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
 import { useFrame, useThree } from "@react-three/fiber";
 import { createDefaultUniforms } from "@renderer/effects/base-effect";
-import { getOpenFileByPath, openFiles } from "@renderer/store/files";
+import { getOpenFileByPath, logFileFootprint, openFiles } from "@renderer/store/files";
 import { State } from "@renderer/store/types";
 import {
   forwardRef,
@@ -739,6 +740,7 @@ const FileRendererInner = memo(
       // comparing upper- vs lower-band paint latency.
       const paintTiming = (globalThis as { __paintTiming?: boolean }).__paintTiming === true;
       const paintT0 = paintTiming ? performance.now() : 0;
+      countDiagStroke(preview);
       perfMark("renderStroke", () =>
         strokeRenderer.renderStroke(
           {
@@ -850,6 +852,7 @@ const FileRendererInner = memo(
           useStore.getState().closeFile(fileId);
           return;
         }
+        logFileFootprint(fileId, "textures allocated");
         hasDrawnDisplayRef.current = false;
       }
 

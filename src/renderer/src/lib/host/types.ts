@@ -3,6 +3,8 @@
 // each shell supplies a concrete implementation (see electron.ts). This is the
 // single seam that lets one renderer core run in two host environments.
 
+import type { DiagData, DiagLevel } from "../../../../main/lib/types";
+
 /** Options accepted by the native "save file" dialog. */
 export interface SaveDialogOptions {
   defaultPath?: string;
@@ -184,8 +186,20 @@ export interface HostPrefs {
   remove(name: string): void;
 }
 
+/**
+ * The diagnostic log: timings, memory readings and errors a user can send back.
+ * The Electron app appends to a file in its user-data folder; the extension
+ * has no writable log and only echoes to the console.
+ */
+export interface HostDiag {
+  write(level: DiagLevel, scope: string, message: string, data?: DiagData): void;
+  /** Selects the log file in the OS file manager; a no-op where there is none. */
+  revealLogFile(): void;
+}
+
 export interface Host {
   readonly fs: HostFs;
+  readonly diag: HostDiag;
   readonly path: HostPath;
   readonly os: HostOs;
   readonly zlib: HostZlib;

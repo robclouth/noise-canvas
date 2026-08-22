@@ -1,5 +1,6 @@
 import { BrowserWindow, ipcMain } from "electron";
 import { autoUpdater, type ProgressInfo, type UpdateInfo } from "electron-updater";
+import { diagLog } from "./diag-log";
 import { webContentsSend } from "./types";
 
 /**
@@ -33,6 +34,7 @@ export function initUpdater(getWindow: () => BrowserWindow | null): void {
   });
 
   autoUpdater.on("error", (error: Error) => {
+    diagLog("error", "updater", "update failed", { error });
     const window = getWindow();
     if (window) webContentsSend(window, "update-error", error.message);
   });

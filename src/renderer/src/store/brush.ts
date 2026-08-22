@@ -1,6 +1,7 @@
 import { getParameterDef, type FileParameterValue } from "@renderer/parameters";
 import { notifications } from "@mantine/notifications";
 import { applyCoefficientPatch } from "@renderer/lib/coef-patch";
+import { diag } from "@renderer/lib/diag-log";
 import { setCanvasPatchStash, takeCanvasPatchStash } from "@renderer/lib/canvas-patch-stash";
 import { serializeFileTask } from "@renderer/lib/file-task-queue";
 import { buildStrokeCommitSnapshot, projectsWholeFile } from "@renderer/lib/stroke-commit";
@@ -319,7 +320,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
                   setCanvasPatchStash(activeFileId, { data, ranges: uploadRanges, turns: [] });
                 }
               }
-              console.log(`[timing] commit FBO upload: ${(performance.now() - uploadStart).toFixed(2)}ms`);
+              diag.timing("timing", "commit FBO upload", performance.now() - uploadStart);
             } else if (openFiles[activeFileId]) {
               // A new stroke started while this one was in flight; its dabs
               // are not in `data`, so uploading would paint over them. Stash

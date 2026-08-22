@@ -83,6 +83,11 @@ export class StrokeScratchPool {
     return this.owner === owner && this.targets !== null;
   }
 
+  /** Texels each allocated target spans; 0 before the first acquire. */
+  get allocatedTexels(): number {
+    return this.targets ? this.width * this.height : 0;
+  }
+
   /** Drops ownership without freeing, so the next acquire refreshes the content. */
   disown(owner: unknown): void {
     if (this.owner === owner) this.owner = null;

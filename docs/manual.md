@@ -923,6 +923,7 @@ Memory climbs with the length and resolution of everything you have open, not wi
 - **Manual** (`Cmd/Ctrl+/`) – opens this document in a window inside the app.
 - **Run Walkthrough** – replays the first-run tour. See [Getting Help](#getting-help).
 - **Check for Updates…** – looks for a newer version. If one exists the app offers to download it, then installs it when you restart. On macOS this also sits in the **Noise Canvas** menu.
+- **Show Log File** – opens the folder that holds the app's log. The log records timings, memory use and any errors. If something goes wrong, send this file with your report.
 
 Re-analysing a file is not in these menus. The resolution badge in each file's header does it, so it acts on the file you point at rather than on whichever one is active. See [Analysis Resolution](#analysis-resolution).
 

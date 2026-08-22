@@ -4,7 +4,7 @@ import { useStore } from "@/store";
 import { Box, Group, LoadingOverlay, ScrollArea, Stack } from "@mantine/core";
 import { Notifications, notifications } from "@mantine/notifications";
 import { View } from "@react-three/drei";
-import { Canvas, RootState, useThree } from "@react-three/fiber";
+import { Canvas, RootState, useFrame, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone, type FileRejection } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
@@ -17,6 +17,8 @@ import { FillProgressModal } from "./components/fill-progress-modal";
 import { HelpOverlay } from "./components/help-overlay";
 import { ManualViewer } from "./components/manual-viewer";
 import { Walkthrough } from "./components/walkthrough";
+import { diag } from "./lib/diag-log";
+import { recordDiagFrame, startDiagSampler } from "./lib/diag-sampler";
 import { host } from "./lib/host";
 import { ipcOn, ipcSend } from "./lib/ipc";
 import { anchorProps } from "./lib/ui-anchors";
@@ -50,25 +52,33 @@ const ShaderCompiler = ({ onDisplayReady }: { onDisplayReady: () => void }) => {
     let cancelled = false;
 
     const run = async (): Promise<void> => {
+      const displayT0 = performance.now();
       try {
         await precompileDisplayShader(gl);
       } catch (err) {
         console.error("Display shader linking failed:", err);
       }
+      diag.timing("shaders", "display shader linked", performance.now() - displayT0);
       if (cancelled) return;
       onDisplayReady();
 
       // The effects the brush already holds are the ones the next stroke needs.
       const priority = useStore.getState().effects.map((item) => item.effect);
+      const effectsT0 = performance.now();
       try {
         await precompileRemainingShaders(gl, priority, setShaderWarmupProgress);
       } catch (err) {
         console.error("Effect shader linking failed:", err);
       }
+      diag.timing("shaders", "effect shaders linked", performance.now() - effectsT0);
       if (cancelled) return;
+      const warmT0 = performance.now();
       warmEffectPipelines({
         onProgress: setShaderWarmupProgress,
-        onDone: () => setShaderWarmupProgress(0, 0),
+        onDone: () => {
+          setShaderWarmupProgress(0, 0);
+          diag.timing("shaders", "effect pipelines warmed", performance.now() - warmT0);
+        },
       });
     };
 
@@ -77,6 +87,58 @@ const ShaderCompiler = ({ onDisplayReady }: { onDisplayReady: () => void }) => {
       cancelled = true;
     };
   }, [gl, onDisplayReady]);
+  return null;
+};
+
+const navigatorWithMemory: Navigator & { deviceMemory?: number } = navigator;
+
+/**
+ * Logs the WebGL context's identity and limits once, reports context loss,
+ * feeds the frame-cadence probe and runs the memory sampler.
+ */
+const DiagProbe = () => {
+  const gl = useThree((s) => s.gl);
+  useEffect(() => {
+    const context = gl.getContext();
+    const debugInfo = context.getExtension("WEBGL_debug_renderer_info");
+    diag.info("gl", "context", {
+      renderer: debugInfo
+        ? context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
+        : context.getParameter(context.RENDERER),
+      vendor: debugInfo ? context.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : context.getParameter(context.VENDOR),
+      version: context.getParameter(context.VERSION),
+      maxTextureSize: context.getParameter(context.MAX_TEXTURE_SIZE),
+      maxRenderbufferSize: context.getParameter(context.MAX_RENDERBUFFER_SIZE),
+      colorBufferFloat: context.getExtension("EXT_color_buffer_float") !== null,
+      textureFloatLinear: context.getExtension("OES_texture_float_linear") !== null,
+      devicePixelRatio: window.devicePixelRatio,
+      windowWidth: window.innerWidth,
+      windowHeight: window.innerHeight,
+      hardwareConcurrency: navigator.hardwareConcurrency,
+      deviceMemoryGB: navigatorWithMemory.deviceMemory ?? null,
+    });
+
+    const canvas = gl.domElement;
+    const onLost = (event: Event): void => {
+      const statusMessage = event instanceof WebGLContextEvent ? event.statusMessage : "";
+      diag.error("gl", "context lost", { statusMessage });
+    };
+    const onRestored = (): void => {
+      diag.info("gl", "context restored");
+    };
+    canvas.addEventListener("webglcontextlost", onLost);
+    canvas.addEventListener("webglcontextrestored", onRestored);
+    const stopSampler = host.env.isExtension ? () => {} : startDiagSampler(gl);
+    return () => {
+      canvas.removeEventListener("webglcontextlost", onLost);
+      canvas.removeEventListener("webglcontextrestored", onRestored);
+      stopSampler();
+    };
+  }, [gl]);
+
+  useFrame(() => {
+    recordDiagFrame(performance.now());
+  });
   return null;
 };
 
@@ -332,6 +394,7 @@ function App(): React.JSX.Element {
         >
           <View.Port />
           <CanvasInvalidator onReady={(invalidate) => (invalidateRef.current = invalidate)} />
+          <DiagProbe />
 
           <ShaderCompiler onDisplayReady={handleDisplayShadersReady} />
         </Canvas>

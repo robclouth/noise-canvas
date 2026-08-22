@@ -8,7 +8,10 @@ import ReactDOM from "react-dom/client";
 import App from "./app";
 import "./assets/main.css";
 import { modals } from "./components/modals";
+import { installDiagErrorCapture } from "./lib/diag-log";
 import { APP_MODAL_PROPS } from "./lib/modals";
+
+installDiagErrorCapture();
 
 const theme = createTheme({
   primaryColor: "orange",
