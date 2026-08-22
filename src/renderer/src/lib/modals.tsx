@@ -1,8 +1,24 @@
-import { NumberInput, SimpleGrid, Stack, Text, TextInput } from "@mantine/core";
+import { NumberInput, SimpleGrid, Stack, Text, TextInput, type ModalProps } from "@mantine/core";
 import { modals, openContextModal } from "@mantine/modals";
 import { type ReactNode, type RefObject } from "react";
 
 export { openContextModal };
+
+/**
+ * The frame every dialog shares. Mantine's own modal defaults are set for a
+ * page-sized type scale rather than this interface's, so the title and body
+ * sizes are pinned here and applied both to the context modals, through
+ * ModalsProvider, and to the few dialogs that render `<Modal>` themselves.
+ */
+export const APP_MODAL_PROPS: Partial<ModalProps> = {
+  zIndex: 1000,
+  size: "xs",
+  shadow: "xl",
+  styles: {
+    title: { fontSize: 14, fontWeight: 600 },
+    body: { fontSize: "var(--mantine-font-size-sm)" },
+  },
+};
 
 type ConfirmModalParams = Parameters<typeof modals.openConfirmModal>[0];
 

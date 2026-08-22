@@ -1,8 +1,9 @@
-import { Button, Group, Modal, Progress, Stack, Text, Title } from "@mantine/core";
+import { Box, Button, Group, Modal, Progress, Stack, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useState } from "react";
 import type { ProgressInfo, UpdateInfo } from "electron-updater";
 import { host } from "../lib/host";
+import { APP_MODAL_PROPS } from "../lib/modals";
 import { ipcOn } from "../lib/ipc";
 
 export function UpdateNotification() {
@@ -124,7 +125,7 @@ export function UpdateNotification() {
     }
     return notes.map(({ version, note }) => (
       <Stack key={version} gap={2}>
-        <Text size="sm" fw={500}>
+        <Text size="xs" fw={600}>
           {version}
         </Text>
         {note && <div dangerouslySetInnerHTML={{ __html: note }} />}
@@ -136,23 +137,27 @@ export function UpdateNotification() {
   if (updateReady) {
     return (
       <Modal
+        {...APP_MODAL_PROPS}
         opened={showModal}
         onClose={() => setShowModal(false)}
-        title={<Title order={3}>Update Ready to Install</Title>}
+        title="Update Ready to Install"
+        size="sm"
         centered
       >
-        <Stack gap="md">
-          <Text>
-            Version <strong>{updateInfo?.version}</strong> has been downloaded and is ready to install.
+        <Stack gap="sm">
+          <Text size="sm">
+            Version <strong>{updateInfo?.version}</strong> has been downloaded.
           </Text>
-          <Text size="sm" c="dimmed">
-            The app will restart to complete the installation.
+          <Text size="xs" c="dimmed">
+            The app restarts to finish installing.
           </Text>
-          <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={() => setShowModal(false)}>
+          <Group justify="flex-end">
+            <Button size="xs" variant="default" onClick={() => setShowModal(false)}>
               Later
             </Button>
-            <Button onClick={handleInstallUpdate}>Restart & Install</Button>
+            <Button size="xs" onClick={handleInstallUpdate}>
+              Restart & Install
+            </Button>
           </Group>
         </Stack>
       </Modal>
@@ -163,35 +168,42 @@ export function UpdateNotification() {
   if (updateInfo && !isDownloading) {
     return (
       <Modal
+        {...APP_MODAL_PROPS}
         opened={showModal}
         onClose={() => setShowModal(false)}
-        title={<Title order={3}>Update Available</Title>}
+        title="Update Available"
+        size="sm"
         centered
-        size="md"
       >
-        <Stack gap="md">
-          <Text>
+        <Stack gap="sm">
+          <Text size="sm">
             Version <strong>{updateInfo.version}</strong> is now available.
           </Text>
 
           {updateInfo.releaseName && (
-            <Title order={4} c="dimmed">
+            <Text size="xs" c="dimmed">
               {updateInfo.releaseName}
-            </Title>
+            </Text>
           )}
 
           {updateInfo.releaseNotes && (
-            <Stack gap="xs">
-              <Text fw={500}>What&apos;s New:</Text>
-              <div style={{ maxHeight: "300px", overflowY: "auto" }}>{formatReleaseNotes(updateInfo.releaseNotes)}</div>
+            <Stack gap={4}>
+              <Text size="xs" fw={600}>
+                What&apos;s new
+              </Text>
+              <Box className="release-notes" style={{ maxHeight: 260, overflowY: "auto" }}>
+                {formatReleaseNotes(updateInfo.releaseNotes)}
+              </Box>
             </Stack>
           )}
 
-          <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={() => setShowModal(false)}>
-              Skip This Version
+          <Group justify="flex-end">
+            <Button size="xs" variant="default" onClick={() => setShowModal(false)}>
+              Skip
             </Button>
-            <Button onClick={handleDownloadUpdate}>Download Update</Button>
+            <Button size="xs" onClick={handleDownloadUpdate}>
+              Download
+            </Button>
           </Group>
         </Stack>
       </Modal>
@@ -202,18 +214,20 @@ export function UpdateNotification() {
   if (isDownloading) {
     return (
       <Modal
+        {...APP_MODAL_PROPS}
         opened={true}
         onClose={() => {}}
-        title={<Title order={3}>Downloading Update</Title>}
+        title="Downloading Update"
+        size="sm"
         centered
         closeOnClickOutside={false}
         closeOnEscape={false}
         withCloseButton={false}
       >
-        <Stack gap="md">
-          <Text>Downloading version {updateInfo?.version}...</Text>
-          <Progress value={downloadProgress} size="lg" animated />
-          <Text size="sm" ta="center" c="dimmed">
+        <Stack gap="sm">
+          <Text size="sm">Version {updateInfo?.version}</Text>
+          <Progress value={downloadProgress} animated />
+          <Text size="xs" ta="center" c="dimmed">
             {downloadProgress}%
           </Text>
         </Stack>

@@ -8,6 +8,7 @@ import ReactDOM from "react-dom/client";
 import App from "./app";
 import "./assets/main.css";
 import { modals } from "./components/modals";
+import { APP_MODAL_PROPS } from "./lib/modals";
 
 const theme = createTheme({
   primaryColor: "orange",
@@ -71,18 +72,7 @@ document.addEventListener(
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <MantineProvider forceColorScheme="dark" theme={theme}>
-    <ModalsProvider
-      modals={modals}
-      modalProps={{
-        zIndex: 1000,
-        size: "xs",
-        shadow: "xl",
-        styles: {
-          title: { fontSize: 14, fontWeight: 600 },
-          body: { fontSize: "var(--mantine-font-size-sm)" },
-        },
-      }}
-    >
+    <ModalsProvider modals={modals} modalProps={APP_MODAL_PROPS}>
       <Notifications zIndex={1000} />
       <App />
     </ModalsProvider>

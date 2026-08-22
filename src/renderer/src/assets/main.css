@@ -124,3 +124,39 @@
   ) {
   box-shadow: none !important;
 }
+
+/* Release notes arrive as HTML from the update feed, at whatever heading levels
+   and spacing the release used, so they are pulled back to the interface's
+   type scale here. */
+.release-notes {
+  font-size: var(--ui-font-sm);
+  color: var(--mantine-color-gray-4);
+}
+
+.release-notes h1,
+.release-notes h2,
+.release-notes h3,
+.release-notes h4 {
+  font-size: var(--ui-font-sm);
+  font-weight: 600;
+  color: var(--mantine-color-gray-2);
+  margin: 8px 0 4px;
+}
+
+.release-notes p {
+  margin: 4px 0;
+}
+
+.release-notes ul,
+.release-notes ol {
+  margin: 4px 0;
+  padding-left: 16px;
+}
+
+.release-notes li {
+  margin: 2px 0;
+}
+
+.release-notes a {
+  color: var(--mantine-color-orange-4);
+}
