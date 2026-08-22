@@ -920,9 +920,6 @@ export class StrokeRenderer {
           ? currentReadFBO
           : sourceFile.textures.packed;
 
-    let tempFboA = scratch.passFbo1;
-    let tempFboB = scratch.passFbo2;
-
     // For multi-step rendering, we iterate through all steps sequentially
     let stepInputFbo: WebGLRenderTarget | { texture: DataTexture } = initialSourceFbo;
 
@@ -1171,6 +1168,23 @@ export class StrokeRenderer {
       );
       let staticsIteration = -1;
 
+      // Every pass of a step reads the step's input as its blend base, so no
+      // pass may write into that buffer. The stroke's last pass writes the
+      // partner; an earlier step ends in a pass buffer so the next step can
+      // still reach the partner. Working back from that end, each pass writes
+      // a buffer its successor does not, which is also the one it reads.
+      const writable = [scratch.passFbo1, scratch.passFbo2, destinationFbo].filter((t) => t !== stepInputFbo);
+      const endTarget = isLastStep ? destinationFbo : writable.find((t) => t !== destinationFbo);
+      if (!endTarget) throw new Error("No pass buffer is free for the step's output.");
+      const passTargets: WebGLRenderTarget[] = new Array(plannedPasses.length);
+      passTargets[plannedPasses.length - 1] = endTarget;
+      for (let k = plannedPasses.length - 2; k >= 0; k--) {
+        const next = passTargets[k + 1];
+        const target = writable.find((t) => t !== next);
+        if (!target) throw new Error("No pass buffer is free for an intermediate pass.");
+        passTargets[k] = target;
+      }
+
       // Apply each planned pass in order
       for (let passOrdinal = 0; passOrdinal < plannedPasses.length; passOrdinal++) {
         const { effect, effectState, passIndex: p, iteration: i, inSwappedDomain } = plannedPasses[passOrdinal];
@@ -1193,7 +1207,7 @@ export class StrokeRenderer {
 
         const isFinalPassOfStep = passOrdinal === plannedPasses.length - 1;
         const isFinalPass = isFinalPassOfStep && isLastStep;
-        const currentWriteFbo = isFinalPass ? destinationFbo : tempFboA;
+        const currentWriteFbo = passTargets[passOrdinal];
 
         const inputTexture = currentReadFbo.texture;
 
@@ -1238,10 +1252,6 @@ export class StrokeRenderer {
         this.drawRanges(material, currentWriteFbo, isFinalPass ? finalRanges : passRanges);
 
         currentReadFbo = currentWriteFbo;
-
-        if (!isFinalPass) {
-          [tempFboA, tempFboB] = [tempFboB, tempFboA];
-        }
       }
 
       // The output of this step becomes the input for the next step

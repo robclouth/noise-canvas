@@ -1,6 +1,7 @@
-import { Vector2, WebGLRenderer } from "three";
+import { BufferGeometry, Mesh, RawShaderMaterial, Texture, Vector2, WebGLRenderer } from "three";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
+import { createMockStateWithSteps } from "../../test/mock-state";
 import {
   createHarnessTextures,
   createSourceFile,
@@ -236,6 +237,73 @@ describe("footprint copy-back equivalence", () => {
       expect(after).toEqual(before);
     } finally {
       previewRenderer.dispose();
+    }
+  });
+});
+
+describe("multi-pass steps after the first", () => {
+  let gl: WebGLRenderer;
+  let spectrogramData: SpectrogramData;
+  let textures: HarnessTextures;
+
+  beforeEach(() => {
+    gl = new WebGLRenderer({ antialias: false });
+    gl.setSize(256, 256);
+    spectrogramData = createMockSpectrogramData({ numFrames: 1024, numBands: 256, pattern: "gradient" });
+    textures = createHarnessTextures(spectrogramData);
+  });
+
+  afterEach(() => {
+    disposeHarnessTextures(textures);
+    gl.dispose();
+  });
+
+  // A later step blends out of its own input, which it reads on every pass,
+  // so none of its passes may write into that buffer: a draw that samples
+  // its own target is a feedback loop the driver drops.
+  it("never draws into a buffer the pass samples", async () => {
+    const r = new StrokeRenderer(gl, spectrogramData, toStrokeTextures(textures), "steps", effects);
+    r.initialize();
+    try {
+      const sourceFile = createSourceFile(r, spectrogramData);
+      const effect = (id: string, name: EffectType) => ({ id, effect: name, enabled: true, params: {} });
+      const state = createMockStateWithSteps(
+        [
+          { name: "one", overrides: { brushSizeTime: 0.5, brushSizePitch: 12, effects: [effect("t", "transform")] } },
+          { name: "two", overrides: { brushSizeTime: 0.5, brushSizePitch: 12, effects: [effect("s", "sort")] } },
+          { name: "three", overrides: { brushSizeTime: 0.5, brushSizePitch: 12, effects: [effect("b", "blur")] } },
+        ],
+        { filepathsBpm: { [sourceFile.filePath]: 120 } },
+      );
+
+      const render = gl.render.bind(gl);
+      const feedbackDraws: string[] = [];
+      let draws = 0;
+      gl.render = (scene, camera) => {
+        const target = gl.getRenderTarget();
+        const mesh = scene.children[0] as Mesh<BufferGeometry, RawShaderMaterial>;
+        if (target) {
+          const written = new Set<Texture>(target.textures.length ? target.textures : [target.texture]);
+          for (const [name, uniform] of Object.entries(mesh.material.uniforms)) {
+            if (uniform.value instanceof Texture && written.has(uniform.value)) {
+              feedbackDraws.push(`draw ${draws}: ${name}`);
+            }
+          }
+        }
+        draws++;
+        render(scene, camera);
+      };
+
+      const before = await r.getFBOData();
+      r.renderStroke(makeStrokeParams(new Vector2(0.5, 0.5), spectrogramData, { totalDuration: 4 }), state, sourceFile);
+      expect(draws).toBeGreaterThanOrEqual(7);
+      expect(feedbackDraws).toEqual([]);
+      const after = await r.getFBOData();
+      let changed = 0;
+      for (let i = 0; i < after.length; i++) if (after[i] !== before[i]) changed++;
+      expect(changed).toBeGreaterThan(0);
+    } finally {
+      r.dispose();
     }
   });
 });
