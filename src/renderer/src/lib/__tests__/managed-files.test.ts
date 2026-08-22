@@ -75,6 +75,7 @@ function installFakeFs(entries: string[]): FakeFs {
   w.nodePath = {
     join: (...parts: string[]) => parts.join("/"),
   };
+  w.nodeOs = { homedir: () => "/home", totalmem: () => 16 * 1024 ** 3 };
   w.nodeFs = {
     readdir: vi.fn(async (dir: string) => {
       fake.readdirCalls.push(dir);
@@ -224,6 +225,7 @@ describe("migrateRefsInPresetFiles", () => {
     w.nodePath = {
       join: (...parts: string[]) => parts.join("/"),
     };
+    w.nodeOs = { homedir: () => "/home", totalmem: () => 16 * 1024 ** 3 };
     w.nodeFs = {
       readdir: vi.fn(async (dir: string) => {
         readdirCalls.push(dir);

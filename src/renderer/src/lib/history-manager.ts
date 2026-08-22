@@ -21,11 +21,28 @@ const AUDIO_LRU_BYTES = 512 * 1024 * 1024;
 // quarter smaller than the float32 WAV it replaces.
 const AUDIO_CACHE_FORMAT = "wv";
 const MANIFEST_WRITE_DEBOUNCE_MS = 400;
-const PACKED_STATE_CACHE_BYTES = 256 * 1024 * 1024;
-// In-memory budgets for the per-stroke deltas that carry undo and redo: the
-// coefficient delta of each hop, and the audio either side of its window.
-const NODE_DELTA_BYTES = 128 * 1024 * 1024;
-const AUDIO_HOP_BYTES = 256 * 1024 * 1024;
+const MIB = 1024 * 1024;
+const GIB = 1024 * MIB;
+
+/**
+ * In-memory cache budgets: decoded packed states, the per-stroke coefficient
+ * deltas that carry undo and redo, and the audio either side of each hop's
+ * window. Full size from 16 GiB of system memory, a quarter of it at 8 GiB,
+ * and in proportion between.
+ */
+export function historyCacheBudgets(totalMemoryBytes: number): {
+  packedStates: number;
+  deltas: number;
+  audioHops: number;
+} {
+  const position = Math.min(1, Math.max(0, (totalMemoryBytes - 8 * GIB) / (8 * GIB)));
+  const scale = 0.25 + 0.75 * position;
+  return {
+    packedStates: Math.round(256 * MIB * scale),
+    deltas: Math.round(128 * MIB * scale),
+    audioHops: Math.round(256 * MIB * scale),
+  };
+}
 
 export type HistoryNodeKind = "root" | "stroke" | "resize" | "reanalyze" | "checkpoint";
 
@@ -470,10 +487,10 @@ export class HistoryManager {
   // Each stroke's encoded coefficient delta against its parent, kept this
   // session so a hop in either direction is one pass over the current state
   // rather than a rebuild from the nearest snapshot on disk.
-  private readonly nodeDeltas = new ByteBudgetCache<Uint8Array>(NODE_DELTA_BYTES, (bytes) => bytes.byteLength);
+  private readonly nodeDeltas: ByteBudgetCache<Uint8Array>;
   // The audio each stroke rewrote, before and after, so a hop restores the
   // audio the state had rather than synthesising it again.
-  private readonly nodeAudioHops = new ByteBudgetCache<AudioHop>(AUDIO_HOP_BYTES, audioHopBytes);
+  private readonly nodeAudioHops: ByteBudgetCache<AudioHop>;
   // The phase turns each stroke made past its ranges; null for a stroke that
   // made none. A node absent here is read back from its delta on disk.
   private readonly nodeTurns = new Map<string, PhaseTurns | null>();
@@ -486,7 +503,10 @@ export class HistoryManager {
 
   constructor(fileId: string, options: { packedCacheBytes?: number } = {}) {
     this.fileId = fileId;
-    this.packedCache = new PackedStateCache(options.packedCacheBytes ?? PACKED_STATE_CACHE_BYTES);
+    const budgets = historyCacheBudgets(host.os.totalmem());
+    this.packedCache = new PackedStateCache(options.packedCacheBytes ?? budgets.packedStates);
+    this.nodeDeltas = new ByteBudgetCache<Uint8Array>(budgets.deltas, (bytes) => bytes.byteLength);
+    this.nodeAudioHops = new ByteBudgetCache<AudioHop>(budgets.audioHops, audioHopBytes);
     this.dir = this.resolveDir();
   }
 

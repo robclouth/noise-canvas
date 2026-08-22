@@ -9,6 +9,7 @@
 // accessors (os.homedir, env.platform) resolve without an async round-trip.
 export interface BootstrapInfo {
   homedir: string;
+  totalMemoryBytes: number;
   userDataPath: string;
   platform: NodeJS.Platform;
   arch: NodeJS.Architecture;

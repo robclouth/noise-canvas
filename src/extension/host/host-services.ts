@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, totalmem } from "node:os";
 import { promisify } from "node:util";
 import { zstdCompress, zstdDecompress } from "node:zlib";
 import type { BootstrapInfo, RpcRequest } from "../shared/rpc-protocol";
@@ -129,6 +129,7 @@ export function createHostServices(config: HostServicesConfig): HostServices {
     bootstrap() {
       return {
         homedir: homedir(),
+        totalMemoryBytes: totalmem(),
         userDataPath: config.userDataPath,
         platform: process.platform,
         arch: process.arch,

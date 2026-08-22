@@ -46,13 +46,35 @@ vi.mock("@renderer/store/files", () => ({
 // Silence the renderer→main menu-state IPC the manager fires on every change.
 vi.mock("../ipc", () => ({ ipcSend: vi.fn() }));
 
-import { clearAllHistoryManagers, getHistoryManager, PackedStateCache } from "../history-manager";
+import { clearAllHistoryManagers, getHistoryManager, historyCacheBudgets, PackedStateCache } from "../history-manager";
 import { serializeFileTask } from "../file-task-queue";
 import { canvasPatchStashCount, setCanvasPatchStash } from "../canvas-patch-stash";
 import type { AudioHop } from "../audio-hop";
 import type { PhaseTurns } from "../../../../main/lib/types";
 import { applyPhaseTurns } from "../../../../main/lib/history-delta";
 import type { SpectrogramData } from "../../store/types";
+
+describe("historyCacheBudgets", () => {
+  const GIB = 1024 ** 3;
+  const MIB = 1024 ** 2;
+
+  it("gives the full budgets from 16 GiB up", () => {
+    expect(historyCacheBudgets(16 * GIB)).toEqual({ packedStates: 256 * MIB, deltas: 128 * MIB, audioHops: 256 * MIB });
+    expect(historyCacheBudgets(64 * GIB)).toEqual(historyCacheBudgets(16 * GIB));
+  });
+
+  it("gives a quarter of the budgets at 8 GiB and below", () => {
+    expect(historyCacheBudgets(8 * GIB)).toEqual({ packedStates: 64 * MIB, deltas: 32 * MIB, audioHops: 64 * MIB });
+    expect(historyCacheBudgets(4 * GIB)).toEqual(historyCacheBudgets(8 * GIB));
+  });
+
+  it("scales in proportion between", () => {
+    const budgets = historyCacheBudgets(12 * GIB);
+    expect(budgets.packedStates).toBe(160 * MIB);
+    expect(budgets.deltas).toBe(80 * MIB);
+    expect(budgets.audioHops).toBe(160 * MIB);
+  });
+});
 
 describe("PackedStateCache", () => {
   const a = new Float32Array([1, 2, 3, 4]); // 16 bytes each
@@ -252,6 +274,7 @@ function installManagerEnv(): { fbo: { last: Float32Array | null }; files: Map<s
     invoke: vi.fn(async (channel: string) => (channel === "get-user-data-path" ? "/userdata" : undefined)),
   };
   w.nodePath = { join: (...parts: string[]) => parts.join("/") };
+  w.nodeOs = { homedir: () => "/home", totalmem: () => 16 * 1024 ** 3 };
   w.nodeZlib = {
     zstdCompress: (buf: Uint8Array, cb: (e: Error | null, out: Uint8Array) => void) => cb(null, new Uint8Array(buf)),
     zstdDecompress: (buf: Uint8Array, cb: (e: Error | null, out: Uint8Array) => void) => cb(null, new Uint8Array(buf)),

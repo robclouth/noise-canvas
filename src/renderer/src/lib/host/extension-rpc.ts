@@ -133,6 +133,7 @@ export function getBootstrapOrNull(): BootstrapInfo | null {
 
 export const extensionOs: HostOs = {
   homedir: () => getBootstrap().homedir,
+  totalmem: () => getBootstrap().totalMemoryBytes,
 };
 
 export async function getUserDataPath(): Promise<string> {

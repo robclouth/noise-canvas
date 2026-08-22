@@ -128,9 +128,11 @@ export interface HostFs {
   access(path: string): Promise<void>;
 }
 
-/** The single `os` member the core uses. */
+/** The `os` members the core uses. */
 export interface HostOs {
   homedir(): string;
+  /** Total system memory in bytes. */
+  totalmem(): number;
 }
 
 /**
