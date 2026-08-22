@@ -1,7 +1,7 @@
 import { getNumberParameterDef } from "@renderer/parameters";
 import { GLSL3, RawShaderMaterial } from "three";
 import dynamicsEffectFrag from "../glsl/dynamics-effect.frag";
-import passThroughVert from "../glsl/pass-through.vert";
+import rangeQuadVert from "../glsl/range-quad.vert";
 import { useStore } from "../store";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
@@ -19,7 +19,7 @@ class DynamicsEffect extends BaseEffect {
           knee: { value: defaultParameterUniform(6.0, 0.0, 24.0) },
           gainDb: { value: defaultParameterUniform(0.0, -80, 24) },
         },
-        vertexShader: passThroughVert,
+        vertexShader: rangeQuadVert,
         fragmentShader: dynamicsEffectFrag,
         glslVersion: GLSL3,
       }),

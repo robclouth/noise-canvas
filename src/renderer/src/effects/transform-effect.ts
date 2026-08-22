@@ -2,7 +2,7 @@ import { useStore } from "@/store";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "@renderer/lib/scale-snap";
 import type { EffectsState } from "@renderer/store/effects";
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
-import passThroughVert from "../glsl/pass-through.vert";
+import rangeQuadVert from "../glsl/range-quad.vert";
 import transformEffectFrag from "../glsl/transform-effect.frag";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, destinationLayout, UpdateEffectUniformsProps } from "./base-effect";
@@ -40,7 +40,7 @@ class TransformEffect extends BaseEffect {
           scaleOffsets: { value: new Float32Array(12) },
           brushBasePitchAbsSemis: { value: 0.0 },
         },
-        vertexShader: passThroughVert,
+        vertexShader: rangeQuadVert,
         fragmentShader: transformEffectFrag,
         glslVersion: GLSL3,
       }),

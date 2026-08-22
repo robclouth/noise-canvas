@@ -243,6 +243,42 @@ void bandTimeIndices(float scaledTime, float bandLength, out float index0, out f
 }
 
 /**
+ * The band an interpolated read lands in, the two bins of that band it blends,
+ * and the weight of the second.
+ */
+void packedInterpBins(vec2 unpackedUv,
+                      sampler2D metaTex,
+                      float frameCount,
+                      float bandCount,
+                      out float bandIndex,
+                      out float bandStartOffset,
+                      out float timeIndex0,
+                      out float timeIndex1,
+                      out float fraction) {
+  bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
+
+  vec4 meta = fetchBandMetadata(metaTex, bandIndex);
+  bandStartOffset        = meta.r;
+  float bandLength       = meta.g;
+  float bandTimeScaleExp = meta.b;
+
+  float timeInFrames = unpackedUv.x * frameCount;
+  float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
+
+  bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, fraction);
+}
+
+/** The texel of a packed texture of `texSize` at a linear pixel index. */
+ivec2 packedTexel(float linearIndex, ivec2 texSize) {
+  float widthFloat = float(max(texSize.x, 1));
+  int px = int(mod(linearIndex, widthFloat));
+  int py = int(floor(linearIndex / widthFloat));
+  px = clamp(px, 0, max(texSize.x - 1, 0));
+  py = clamp(py, 0, max(texSize.y - 1, 0));
+  return ivec2(px, py);
+}
+
+/**
  * The two packed texels an interpolated read blends, and the weight of the
  * second, for a texture of `texSize`.
  */
@@ -254,34 +290,10 @@ void packedInterpCoords(vec2 unpackedUv,
                         out ivec2 texel1,
                         out ivec2 texel2,
                         out float fraction) {
-  float bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
-
-  vec4 meta = fetchBandMetadata(metaTex, bandIndex);
-  float bandStartOffset  = meta.r;
-  float bandLength       = meta.g;
-  float bandTimeScaleExp = meta.b;
-
-  float timeInFrames = unpackedUv.x * frameCount;
-  float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
-
-  float timeIndex0, timeIndex1;
-  bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, fraction);
-
-  float widthFloat = float(max(texSize.x, 1));
-
-  float linearIndex1 = bandStartOffset + timeIndex0;
-  int px1 = int(mod(linearIndex1, widthFloat));
-  int py1 = int(floor(linearIndex1 / widthFloat));
-  px1 = clamp(px1, 0, max(texSize.x - 1, 0));
-  py1 = clamp(py1, 0, max(texSize.y - 1, 0));
-  texel1 = ivec2(px1, py1);
-
-  float linearIndex2 = bandStartOffset + timeIndex1;
-  int px2 = int(mod(linearIndex2, widthFloat));
-  int py2 = int(floor(linearIndex2 / widthFloat));
-  px2 = clamp(px2, 0, max(texSize.x - 1, 0));
-  py2 = clamp(py2, 0, max(texSize.y - 1, 0));
-  texel2 = ivec2(px2, py2);
+  float bandIndex, bandStartOffset, timeIndex0, timeIndex1;
+  packedInterpBins(unpackedUv, metaTex, frameCount, bandCount, bandIndex, bandStartOffset, timeIndex0, timeIndex1, fraction);
+  texel1 = packedTexel(bandStartOffset + timeIndex0, texSize);
+  texel2 = packedTexel(bandStartOffset + timeIndex1, texSize);
 }
 
 /**

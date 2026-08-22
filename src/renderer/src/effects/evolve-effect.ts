@@ -1,6 +1,6 @@
 import { GLSL3, RawShaderMaterial } from "three";
 import evolveEffectFrag from "../glsl/evolve-effect.frag";
-import passThroughVert from "../glsl/pass-through.vert";
+import rangeQuadVert from "../glsl/range-quad.vert";
 import { useStore } from "../store";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
@@ -25,7 +25,7 @@ class EvolveEffect extends BaseEffect {
           evolveScaleY: { value: { ...defaultUniformValue, value: 50 } },
           evolveEdgeMode: { value: 1 },
         },
-        vertexShader: passThroughVert,
+        vertexShader: rangeQuadVert,
         fragmentShader: evolveEffectFrag,
         glslVersion: GLSL3,
       }),

@@ -1,6 +1,6 @@
 import { GLSL3, RawShaderMaterial } from "three";
 import waveshapeEffectFrag from "../glsl/waveshape-effect.frag";
-import passThroughVert from "../glsl/pass-through.vert";
+import rangeQuadVert from "../glsl/range-quad.vert";
 import { useStore } from "../store";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
@@ -16,7 +16,7 @@ class WaveshapeEffect extends BaseEffect {
           waveshapeDrive: { value: defaultParameterUniform(1.0, 0.01, 16.0) },
           waveshapeTilt: { value: defaultParameterUniform(0.0, -1.0, 1.0) },
         },
-        vertexShader: passThroughVert,
+        vertexShader: rangeQuadVert,
         fragmentShader: waveshapeEffectFrag,
         glslVersion: GLSL3,
       }),

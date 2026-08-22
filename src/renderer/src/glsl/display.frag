@@ -32,25 +32,31 @@ uniform float pitchOffsetSemisFromC0; // semitones above C0 at band index 0
 // so this offset is what turns a raw coefficient magnitude into dBFS.
 uniform float fullScaleDbOffset;
 
-// The brush preview, valid only in packed rows [previewRowStart, previewRowEnd);
-// every other row is read from the committed spectrogram. An empty range
-// shows the committed spectrogram alone.
+// The brush preview, valid in each band only for the bins [start, end) that
+// previewBinRangesTex holds for it in .rg; every other bin is read from the
+// committed spectrogram. With previewActive off the committed spectrogram
+// shows alone.
 uniform sampler2D previewTex;
-uniform int previewRowStart;
-uniform int previewRowEnd;
+uniform sampler2D previewBinRangesTex;
+uniform bool previewActive;
 
-vec4 fetchDisplayTexel(ivec2 texel) {
-    if (texel.y >= previewRowStart && texel.y < previewRowEnd) return texelFetch(previewTex, texel, 0);
+vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, ivec2 texSize) {
+    ivec2 texel = packedTexel(bandStartOffset + timeIndex, texSize);
+    if (previewActive) {
+        vec2 bins = texelFetch(previewBinRangesTex, ivec2(bandIndex, 0), 0).rg;
+        if (timeIndex >= bins.x && timeIndex < bins.y) return texelFetch(previewTex, texel, 0);
+    }
     return texelFetch(sourceSpectrogramTex, texel, 0);
 }
 
 vec4 sampleDisplayInterp(vec2 uv) {
-    ivec2 texel1, texel2;
-    float timeFraction;
-    packedInterpCoords(uv, sourceMetadataTex, sourceFrameCount, sourceBandCount,
-                       textureSize(sourceSpectrogramTex, 0), texel1, texel2, timeFraction);
-    vec4 sample1 = fetchDisplayTexel(texel1);
-    vec4 sample2 = fetchDisplayTexel(texel2);
+    float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
+    packedInterpBins(uv, sourceMetadataTex, sourceFrameCount, sourceBandCount,
+                     bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
+    ivec2 texSize = textureSize(sourceSpectrogramTex, 0);
+    int band = int(bandIndex);
+    vec4 sample1 = fetchDisplayTexel(band, bandStartOffset, timeIndex0, texSize);
+    vec4 sample2 = fetchDisplayTexel(band, bandStartOffset, timeIndex1, texSize);
     return vec4(interpolateComplex(sample1.rg, sample2.rg, timeFraction),
                 interpolateComplex(sample1.ba, sample2.ba, timeFraction));
 }

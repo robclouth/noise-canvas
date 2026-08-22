@@ -5,6 +5,7 @@ import displayFrag from "../glsl/display.frag";
 import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorFrag from "../glsl/modulator.frag";
 import passThroughVert from "../glsl/pass-through.vert";
+import rangeQuadVert from "../glsl/range-quad.vert";
 import { host } from "./host";
 import type { ShaderDescriptor, WarmupMessage } from "./shader-warmup-types";
 
@@ -30,11 +31,11 @@ const auxiliaryMaterials = new Map<string, RawShaderMaterial>();
  * are intentionally never disposed: disposing would release the cached program
  * and undo the warmup.
  */
-function auxiliaryMaterial(frag: string): RawShaderMaterial {
+function auxiliaryMaterial(frag: string, vert: string = passThroughVert): RawShaderMaterial {
   let material = auxiliaryMaterials.get(frag);
   if (!material) {
     material = new RawShaderMaterial({
-      vertexShader: passThroughVert,
+      vertexShader: vert,
       fragmentShader: frag,
       glslVersion: GLSL3,
     });
@@ -122,7 +123,7 @@ export async function precompileRemainingShaders(
 ): Promise<void> {
   const startTime = performance.now();
   const materials = [
-    auxiliaryMaterial(maskUpdateFrag),
+    auxiliaryMaterial(maskUpdateFrag, rangeQuadVert),
     auxiliaryMaterial(modulatorFrag),
     ...effectMaterialsByPriority(priority),
   ];

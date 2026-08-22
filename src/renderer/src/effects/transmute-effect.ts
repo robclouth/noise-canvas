@@ -1,6 +1,6 @@
 import { GLSL3, RawShaderMaterial } from "three";
 import transmuteEffectFrag from "../glsl/transmute-effect.frag";
-import passThroughVert from "../glsl/pass-through.vert";
+import rangeQuadVert from "../glsl/range-quad.vert";
 import { useStore } from "../store";
 import type { State } from "../store/types";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
@@ -30,7 +30,7 @@ class TransmuteEffect extends BaseEffect {
           transmuteAmount: { value: defaultParameterUniform(1.0, -8.0, 8.0) },
           transmuteCurve: { value: defaultParameterUniform(1.0, -4.0, 4.0) },
         },
-        vertexShader: passThroughVert,
+        vertexShader: rangeQuadVert,
         fragmentShader: transmuteEffectFrag,
         glslVersion: GLSL3,
       }),

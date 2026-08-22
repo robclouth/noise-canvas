@@ -1,5 +1,5 @@
 import { GLSL3, RawShaderMaterial } from "three";
-import passThroughVert from "../glsl/pass-through.vert";
+import rangeQuadVert from "../glsl/range-quad.vert";
 import synthesizeBrushFrag from "../glsl/synthesize-effect.frag";
 import { useStore } from "../store";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
@@ -13,7 +13,7 @@ class SynthesizeEffect extends BaseEffect {
           ...createDefaultUniforms(),
           synthesizeType: { value: 0 },
         },
-        vertexShader: passThroughVert,
+        vertexShader: rangeQuadVert,
         fragmentShader: synthesizeBrushFrag,
         glslVersion: GLSL3,
       }),

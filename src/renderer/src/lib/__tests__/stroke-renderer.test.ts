@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 // Static imports - circular dependency has been resolved via effects/types.ts
 import { BaseEffect, UpdateEffectUniformsProps } from "../../effects/base-effect";
-import passThroughVert from "../../glsl/pass-through.vert";
+import rangeQuadVert from "../../glsl/range-quad.vert";
 import { SpectrogramData, State } from "../../store/types";
 import {
   compareSpectrogramData,
@@ -31,10 +31,12 @@ import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTe
 import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";
 
 // Mock shaders check brush bounds in packed UV space, which doesn't align with
-// the scissor's unpacked band-index row calculation. Disable scissor for tests.
+// the unpacked band-index rows and footprint the real brush occupies. Draw the
+// whole texture for tests.
 function createTestStrokeRenderer(...args: ConstructorParameters<typeof StrokeRenderer>): StrokeRenderer {
   const r = new StrokeRenderer(...args);
   r.calculateScissorRows = () => null;
+  r.calculateFootprint = () => null;
   return r;
 }
 
@@ -140,7 +142,7 @@ void main() {
  */
 function createAdditiveBlendEffect(): BaseEffect {
   const material = new RawShaderMaterial({
-    vertexShader: passThroughVert,
+    vertexShader: rangeQuadVert,
     fragmentShader: createAdditiveBlendShader(),
     glslVersion: GLSL3,
     uniforms: {
@@ -204,7 +206,7 @@ function createMockEffectsWithAdditiveBlend(): EffectsRegistry {
  */
 function createConfigurableAdditiveEffect(amount: number): BaseEffect {
   const material = new RawShaderMaterial({
-    vertexShader: passThroughVert,
+    vertexShader: rangeQuadVert,
     fragmentShader: createConfigurableAdditiveShader(amount),
     glslVersion: GLSL3,
     uniforms: {
@@ -276,7 +278,7 @@ void main() {
  */
 function createMockPassthroughEffect(): BaseEffect {
   const material = new RawShaderMaterial({
-    vertexShader: passThroughVert,
+    vertexShader: rangeQuadVert,
     fragmentShader: passthroughTestShader,
     glslVersion: GLSL3,
     uniforms: {
@@ -2059,7 +2061,7 @@ describe("StrokeRenderer", () => {
     // Call the real calculateScissorRows via prototype (bypasses the test override)
     function realScissorRows(brushPos: Vector2, brushSize: Vector2) {
       return StrokeRenderer.prototype.calculateScissorRows.call(
-        { spectrogramData } as unknown as StrokeRenderer,
+        { spectrogramData, brushBandRange: StrokeRenderer.prototype.brushBandRange } as unknown as StrokeRenderer,
         brushPos,
         brushSize,
       );

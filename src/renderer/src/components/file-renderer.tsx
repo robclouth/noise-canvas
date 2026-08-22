@@ -398,8 +398,8 @@ const FileRendererInner = memo(
           wrapMode: { value: 0 },
           fullScaleDbOffset: { value: FULL_SCALE_DB_OFFSET },
           previewTex: { value: null as Texture | null },
-          previewRowStart: { value: 0 },
-          previewRowEnd: { value: 0 },
+          previewBinRangesTex: { value: null as Texture | null },
+          previewActive: { value: false },
         },
         vertexShader: passThroughVert,
         fragmentShader: displayFrag,
@@ -652,8 +652,7 @@ const FileRendererInner = memo(
       const state = useStore.getState();
       applyStaticDisplayUniforms(state, gl.domElement.width, gl.domElement.height);
       displayMaterial.uniforms.sourceSpectrogramTex.value = strokeRenderer.getDisplayTexture();
-      displayMaterial.uniforms.previewRowStart.value = 0;
-      displayMaterial.uniforms.previewRowEnd.value = 0;
+      displayMaterial.uniforms.previewActive.value = false;
       displayMaterial.uniforms.showTargetRectangle.value = false;
       displayMaterial.uniforms.showSourceRectangle.value = false;
 
@@ -1091,8 +1090,8 @@ const FileRendererInner = memo(
       applyStaticDisplayUniforms(state, gl.domElement.width, gl.domElement.height);
       displayMaterial.uniforms.sourceSpectrogramTex.value = previewDisplay.committed;
       displayMaterial.uniforms.previewTex.value = previewDisplay.preview;
-      displayMaterial.uniforms.previewRowStart.value = isPreview ? previewDisplay.rowStart : 0;
-      displayMaterial.uniforms.previewRowEnd.value = isPreview ? previewDisplay.rowEnd : 0;
+      displayMaterial.uniforms.previewBinRangesTex.value = previewDisplay.binRanges;
+      displayMaterial.uniforms.previewActive.value = isPreview && previewDisplay.active;
 
       // In Full mode, the displayed brush rectangle anchors to 0 on that axis so it
       // spans the full file extent regardless of cursor position.

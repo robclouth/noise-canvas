@@ -1,7 +1,7 @@
 import { getNumberParameterDef } from "@renderer/parameters";
 import { ClampToEdgeWrapping, DataTexture, FloatType, GLSL3, LinearFilter, RawShaderMaterial, RGBAFormat } from "three";
 import binauralEffectFrag from "../glsl/binaural-effect.frag";
-import passThroughVert from "../glsl/pass-through.vert";
+import rangeQuadVert from "../glsl/range-quad.vert";
 import { loadHrtfData, getHrtfMetadata, HrtfMetadata } from "../lib/hrtf-loader";
 import { useStore } from "../store";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
@@ -54,7 +54,7 @@ class BinauralEffect extends BaseEffect {
           distance: { value: defaultParameterUniform(1.0, 0.1, 10.0) },
           stereoAngle: { value: defaultParameterUniform(180.0, 0.0, 180.0) },
         },
-        vertexShader: passThroughVert,
+        vertexShader: rangeQuadVert,
         fragmentShader: binauralEffectFrag,
         glslVersion: GLSL3,
       }),

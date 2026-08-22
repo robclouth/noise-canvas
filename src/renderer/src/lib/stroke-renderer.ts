@@ -18,7 +18,6 @@ import {
   Scene,
   Texture,
   Vector2,
-  Vector4,
   WebGLRenderer,
   WebGLRenderTarget,
 } from "three";
@@ -29,7 +28,7 @@ import { phaseTurnMaterial } from "../components/phase-turn-material";
 import { BaseEffect, CommonUniforms, createDefaultUniforms } from "../effects/base-effect";
 import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
-import passThroughVert from "../glsl/pass-through.vert";
+import rangeQuadVert from "../glsl/range-quad.vert";
 import { createEffectStateView, createStepStateView } from "../store";
 import { hasActiveModulatorRouting, hasNestedModulatorRouting, paramsRouteModulators } from "../store/modulators";
 import type { ParameterKey, SpectrogramData, State } from "../store/types";
@@ -38,6 +37,14 @@ import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { ATTRACT_MODULATOR_MAP_START } from "./constants";
 import { getFileOnsets } from "./file-onsets";
 import { buildModulatorUniforms } from "./modulator-utils";
+import {
+  brushFootprintRanges,
+  fullTextureRange,
+  FrameWindow,
+  PixelRangeList,
+  RangeQuadGeometry,
+  rowRange,
+} from "./range-quads";
 import {
   createModContext,
   defaultParameterUniform,
@@ -72,6 +79,44 @@ const PATCH_QUAD_POSITIONS = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 
 const PATCH_QUAD_INDICES = new Uint16Array([0, 1, 2, 0, 2, 3]);
 
 const createParameterUniform = defaultParameterUniform;
+
+// Bins of margin around the brush's time window in the final-pass footprint,
+// covering the sub-bin fallback and the float32 rounding of band offsets.
+const FOOTPRINT_MARGIN_BINS = 4;
+
+// Copies the pixels of the drawn ranges from inputTex into the bound target.
+const rangeCopyMaterial = new RawShaderMaterial({
+  uniforms: {
+    inputTex: { value: null },
+    destSpectrogramTextureSize: { value: new Vector2(1, 1) },
+  },
+  vertexShader: rangeQuadVert,
+  fragmentShader: /*glsl*/ `
+    precision highp float;
+    precision highp sampler2D;
+    precision highp int;
+
+    uniform sampler2D inputTex;
+    out vec4 outColor;
+
+    void main() {
+      outColor = texelFetch(inputTex, ivec2(gl_FragCoord.xy), 0);
+    }
+  `,
+  glslVersion: GLSL3,
+  depthTest: false,
+  depthWrite: false,
+});
+
+// Fraction of the texture above which a stroke's footprint is written by a
+// whole-texture draw and a buffer swap, rather than folded back by a copy.
+const SWAP_FOOTPRINT_FRACTION = 0.5;
+
+/** The packed pixels a stroke's final pass writes, and the bins they hold per band. */
+export interface StrokeFootprint extends PixelRangeList {
+  binRanges: Float32Array;
+  pixels: number;
+}
 
 /** Shader-unit ranges of the brush-level parameters, whose sliders run in percent. */
 const BRUSH_SHADER_RANGES = {
@@ -210,6 +255,11 @@ export class StrokeRenderer {
   // Scene objects
   private fboScene: Scene;
   private fboMesh: Mesh;
+  // Instanced range quads: every effect, mask and modulator pass draws only
+  // the packed pixel ranges set on it.
+  private rangeScene: Scene;
+  private rangeMesh: Mesh;
+  private rangeGeometry: RangeQuadGeometry;
   private camera: Camera;
 
   // Materials
@@ -223,21 +273,25 @@ export class StrokeRenderer {
   private pingPong = 0;
   private maskPingPong = 0;
   private isInitialized = false;
-  // Packed rows the last preview dab wrote into the ping-pong partner; null
-  // once a stroke commits, when the partner holds nothing worth showing.
-  private previewRows: { rowStart: number; rowCount: number } | null = null;
+  // The footprint of the stroke being rendered. Its ranges and bin ranges are
+  // reused across dabs.
+  private footprint: StrokeFootprint;
+  // Per-band bin ranges the ping-pong partner holds a preview for, as the
+  // display's lookup texture. Cleared (and previewActive dropped) on commit.
+  private previewRangeTex: DataTexture;
+  private previewActive = false;
   // Union of the packed rows [rowStart, rowEnd) every dab since the masks were
   // last cleared has written. Outside it both mask buffers are still zero, so a
-  // mask update scissored to it loses nothing across the ping-pong.
+  // mask update drawn over it alone loses nothing across the ping-pong.
   private maskRows: { rowStart: number; rowEnd: number } | null = null;
   // Set when the scratch targets were (re)allocated and no stroke has yet
   // confirmed the driver accepted them.
   private scratchUnverified = false;
 
-  // Test seam: forces committed scissored strokes back onto the legacy
-  // full-texture blit + ping-pong-swap path instead of the brush-sized
-  // copy-back, and the stroke mask onto a full-texture update, so
-  // equivalence between the two can be asserted.
+  // Test seam: forces every stroke onto the legacy full-texture render +
+  // ping-pong-swap path instead of the footprint draw and copy-back, and the
+  // stroke mask onto a full-texture update, so equivalence between the two
+  // can be asserted.
   disableScissorCopyBack = false;
 
   // FBO data cache
@@ -287,8 +341,26 @@ export class StrokeRenderer {
     this.fboMesh = new Mesh(new PlaneGeometry(2, 2));
     this.fboScene.add(this.fboMesh);
 
+    const { textureWidth, textureHeight, numBands } = spectrogramData;
+
+    this.rangeScene = new Scene();
+    this.rangeGeometry = new RangeQuadGeometry(numBands * 3);
+    this.rangeMesh = new Mesh(this.rangeGeometry.geometry);
+    this.rangeMesh.frustumCulled = false;
+    this.rangeScene.add(this.rangeMesh);
+
+    this.footprint = {
+      ranges: new Uint32Array(numBands * 6),
+      count: 0,
+      binRanges: new Float32Array(numBands * 4),
+      pixels: 0,
+    };
+    this.previewRangeTex = new DataTexture(this.footprint.binRanges, numBands, 1, RGBAFormat, FloatType);
+    this.previewRangeTex.minFilter = NearestFilter;
+    this.previewRangeTex.magFilter = NearestFilter;
+    this.previewRangeTex.needsUpdate = true;
+
     // Create FBOs
-    const { textureWidth, textureHeight } = spectrogramData;
 
     this.fbo1 = this.createFBO(textureWidth, textureHeight, RGBAFormat);
     this.fbo2 = this.createFBO(textureWidth, textureHeight, RGBAFormat);
@@ -299,7 +371,7 @@ export class StrokeRenderer {
     // the same modulator/source/dest uniforms drive it as the effects.
     this.modulatorMaterial = new RawShaderMaterial({
       uniforms: { ...createDefaultUniforms(), nestedModulationActive: { value: false } },
-      vertexShader: passThroughVert,
+      vertexShader: rangeQuadVert,
       fragmentShader: modulatorPrecomputeFrag,
       glslVersion: GLSL3,
     });
@@ -317,7 +389,7 @@ export class StrokeRenderer {
         brushBottomLeftUv: { value: new Vector2(0, 0) },
         brushSizeUv: { value: new Vector2(0, 0) },
       },
-      vertexShader: passThroughVert,
+      vertexShader: rangeQuadVert,
       fragmentShader: maskUpdateFrag,
       glslVersion: GLSL3,
     });
@@ -330,6 +402,43 @@ export class StrokeRenderer {
     mu.brushSkewTime = { value: createParameterUniform(0.5, 0, 1) };
     mu.brushCurvePitch = { value: createParameterUniform(0, -1, 1) };
     mu.brushSkewPitch = { value: createParameterUniform(0.5, 0, 1) };
+  }
+
+  /**
+   * Draws `material` over the packed pixel ranges of `list` into `target`,
+   * leaving every other pixel of the target as it was.
+   */
+  private drawRanges(material: RawShaderMaterial, target: WebGLRenderTarget, list: PixelRangeList): void {
+    if (list.count === 0) return;
+    this.rangeGeometry.setRanges(list);
+    const size = this.spectrogramData.packedTextureSize;
+    if (material.uniforms.destSpectrogramTextureSize) {
+      material.uniforms.destSpectrogramTextureSize.value = size;
+    } else {
+      material.uniforms.destSpectrogramTextureSize = { value: size };
+    }
+    this.rangeMesh.material = material;
+    const prevAutoClear = this.gl.autoClear;
+    this.gl.autoClear = false;
+    this.gl.setRenderTarget(target);
+    this.gl.render(this.rangeScene, this.camera);
+    this.gl.autoClear = prevAutoClear;
+  }
+
+  /** The whole packed texture as one range. */
+  private fullRange(): PixelRangeList {
+    const { textureWidth, textureHeight } = this.spectrogramData;
+    return fullTextureRange(textureWidth, textureHeight);
+  }
+
+  /** Marks every bin of every band as holding a preview. */
+  private markWholeTexturePreview(): void {
+    const { numBands, metadata } = this.spectrogramData;
+    const binRanges = this.footprint.binRanges;
+    for (let band = 0; band < numBands; band++) {
+      binRanges[band * 4] = 0;
+      binRanges[band * 4 + 1] = metadata[band * 4 + 1];
+    }
   }
 
   /**
@@ -353,28 +462,6 @@ export class StrokeRenderer {
     this.gl.setRenderTarget(null);
   }
 
-  /**
-   * Copy a contiguous band of rows [rowStart, rowStart+rowCount) from src to dst,
-   * leaving all other rows of dst untouched. Used by the committed-stroke
-   * copy-back path so only the brush-sized region is moved each stroke.
-   */
-  private blitFBORows(src: WebGLRenderTarget, dst: WebGLRenderTarget, rowStart: number, rowCount: number): void {
-    const gl2 = this.gl.getContext() as WebGL2RenderingContext;
-    this.gl.setRenderTarget(src);
-    this.gl.setRenderTarget(dst);
-
-    const props = (this.gl as any).properties as { get(obj: unknown): Record<string, unknown> };
-    const srcFb = props.get(src).__webglFramebuffer as WebGLFramebuffer;
-    const dstFb = props.get(dst).__webglFramebuffer as WebGLFramebuffer;
-    const w = src.width;
-    const y0 = Math.max(0, rowStart);
-    const y1 = Math.min(src.height, rowStart + rowCount);
-    gl2.bindFramebuffer(gl2.READ_FRAMEBUFFER, srcFb);
-    gl2.bindFramebuffer(gl2.DRAW_FRAMEBUFFER, dstFb);
-    gl2.blitFramebuffer(0, y0, w, y1, 0, y0, w, y1, gl2.COLOR_BUFFER_BIT, gl2.NEAREST);
-    this.gl.setRenderTarget(null);
-  }
-
   private createFBO(width: number, height: number, format: typeof RGBAFormat | typeof RedFormat): WebGLRenderTarget {
     return new WebGLRenderTarget(width, height, {
       format,
@@ -386,11 +473,11 @@ export class StrokeRenderer {
 
   /**
    * Evaluates every modulator's stereo output per pixel into the scratch
-   * modulator MRT's two targets, using the step's common uniforms, within
-   * `scissor` when given. Effects then sample these textures instead of
+   * modulator MRT's two targets, using the step's common uniforms, over
+   * `ranges`. Effects then sample these textures instead of
    * evaluating the modulators inline. Runs once per step. Returns the target.
    */
-  private renderModulatorTextures(commonUniforms: CommonUniforms, scissor: Vector4 | null): WebGLRenderTarget {
+  private renderModulatorTextures(commonUniforms: CommonUniforms, ranges: PixelRangeList): WebGLRenderTarget {
     const m = this.modulatorMaterial;
     for (const key in commonUniforms) {
       const src = (commonUniforms as Record<string, { value: unknown } | undefined>)[key];
@@ -402,11 +489,7 @@ export class StrokeRenderer {
       }
     }
     const target = this.pool.modulatorFbo();
-    if (scissor) target.scissor.copy(scissor);
-    target.scissorTest = scissor !== null;
-    this.fboMesh.material = m;
-    this.gl.setRenderTarget(target);
-    this.gl.render(this.fboScene, this.camera);
+    this.drawRanges(m, target, ranges);
     return target;
   }
 
@@ -694,6 +777,24 @@ export class StrokeRenderer {
   }
 
   /**
+   * The packed band indices [lowBand, highBand] a brush of the given UV extent
+   * can paint, widened by the neighbouring bands effects sample.
+   */
+  brushBandRange(brushBottomLeftUv: Vector2, brushSizeUv: Vector2): { lowBand: number; highBand: number } {
+    const { numBands } = this.spectrogramData;
+
+    // Band indices count down in frequency, so the brush's low pitch edge is
+    // the highest index.
+    const brushLowPitchY = brushBottomLeftUv.y;
+    const brushHighPitchY = brushBottomLeftUv.y + brushSizeUv.y;
+
+    const margin = 4;
+    const highBand = Math.min(numBands - 1, Math.floor(pitchUvToBandIndex(brushLowPitchY, numBands)) + margin);
+    const lowBand = Math.max(0, Math.floor(pitchUvToBandIndex(brushHighPitchY, numBands)) - margin);
+    return { lowBand, highBand };
+  }
+
+  /**
    * Calculate the scissor row range in the packed texture for a given brush UV extent.
    * Returns null if scissoring wouldn't help (brush covers most of the texture).
    */
@@ -702,16 +803,7 @@ export class StrokeRenderer {
     brushSizeUv: Vector2,
   ): { rowStart: number; rowCount: number } | null {
     const { numBands, textureWidth, textureHeight, metadata } = this.spectrogramData;
-
-    // Band indices count down in frequency, so the brush's low pitch edge is
-    // the highest index.
-    const brushLowPitchY = brushBottomLeftUv.y;
-    const brushHighPitchY = brushBottomLeftUv.y + brushSizeUv.y;
-
-    // Add margin for effects that sample neighboring bands
-    const margin = 4;
-    const highBand = Math.min(numBands - 1, Math.floor(pitchUvToBandIndex(brushLowPitchY, numBands)) + margin);
-    const lowBand = Math.max(0, Math.floor(pitchUvToBandIndex(brushHighPitchY, numBands)) - margin);
+    const { lowBand, highBand } = this.brushBandRange(brushBottomLeftUv, brushSizeUv);
 
     // If brush covers most of the bands, don't bother with scissor
     const bandSpan = highBand - lowBand + 1;
@@ -729,6 +821,37 @@ export class StrokeRenderer {
     const rowEnd = Math.min(textureHeight, Math.ceil(lastPixel / textureWidth));
 
     return { rowStart, rowCount: rowEnd - rowStart };
+  }
+
+  /**
+   * The packed pixels a stroke's final pass writes: the bins of every band in
+   * the brush's pitch extent that fall in its time window, with margins.
+   * `wholeBands` spreads it over every band and a null `window` over every
+   * bin. Returns null when the whole texture is to be drawn instead.
+   */
+  calculateFootprint(
+    brushBottomLeftUv: Vector2,
+    brushSizeUv: Vector2,
+    window: FrameWindow,
+    wholeBands: boolean,
+  ): StrokeFootprint | null {
+    const { numBands } = this.spectrogramData;
+    const bands = wholeBands
+      ? { lowBand: 0, highBand: numBands - 1 }
+      : this.brushBandRange(brushBottomLeftUv, brushSizeUv);
+    const footprint = this.footprint;
+    footprint.count = brushFootprintRanges(
+      this.spectrogramData,
+      bands.lowBand,
+      bands.highBand,
+      window,
+      FOOTPRINT_MARGIN_BINS,
+      footprint.ranges,
+      footprint.binRanges,
+    );
+    footprint.pixels = 0;
+    for (let i = 0; i < footprint.count; i++) footprint.pixels += footprint.ranges[i * 2 + 1];
+    return footprint;
   }
 
   /**
@@ -815,13 +938,14 @@ export class StrokeRenderer {
     const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
     const numSteps = steps.length;
 
-    // Calculate scissor rows from maximum brush extent across all steps.
-    // If any step wraps in Y and its brush crosses the [0,1] boundary, skip scissoring
-    // so wrapped bands are painted too. When any step is Full-Y the union anchor
-    // collapses to y=0 and the extent reaches y=1, so scissoring is a no-op but safe.
+    // The brush extent across all steps, in pitch and in time. A step that
+    // wraps an axis with its brush crossing the [0,1] boundary paints at both
+    // ends of that axis, so the extent becomes the whole axis. When any step is
+    // Full on an axis the union anchor collapses to 0 and the extent reaches 1.
     const maxBrushSizeUv = new Vector2(0, 0);
     const unionAnchor = new Vector2(cursorPos.x, cursorPos.y);
     let yWrapsOutOfBounds = false;
+    let wholeTime = false;
     for (let i = 0; i < numSteps; i++) {
       const s = createStepStateView(state, i);
       const fp = this.resolveBrushFootprint(s, bpm, totalDuration, cursorPos.x);
@@ -829,37 +953,53 @@ export class StrokeRenderer {
       maxBrushSizeUv.y = Math.max(maxBrushSizeUv.y, fp.sizeUv.y);
       if (fp.fullTime) unionAnchor.x = 0;
       if (fp.fullPitch) unionAnchor.y = 0;
+      if (fp.fullTime) wholeTime = true;
       const wrapMode = s.brushWrapMode as number;
       const wrapsY = wrapMode === 2 || wrapMode === 3;
+      const wrapsX = wrapMode === 1 || wrapMode === 3;
       const stepAnchorY = fp.fullPitch ? 0 : cursorPos.y;
+      const stepAnchorX = fp.fullTime ? 0 : cursorPos.x;
       if (wrapsY && (stepAnchorY < 0 || stepAnchorY + fp.sizeUv.y > 1)) {
         yWrapsOutOfBounds = true;
       }
-    }
-    const scissorRows = yWrapsOutOfBounds ? null : this.calculateScissorRows(unionAnchor, maxBrushSizeUv);
-
-    // Committed strokes use a copy-back path: render only the brush rows into
-    // destinationFbo, then fold those rows back into the canonical buffer, so
-    // per-stroke cost stays proportional to the brush rather than the whole
-    // texture. A preview renders only those rows too; the display reads them
-    // from destinationFbo and every other row from the canonical buffer.
-    const committedScissor = scissorRows !== null && !preview && !this.disableScissorCopyBack;
-    // The modulator precompute is scissored to the same rows, since only those
-    // are read.
-    const scissorVec = scissorRows
-      ? new Vector4(0, scissorRows.rowStart, this.spectrogramData.textureWidth, scissorRows.rowCount)
-      : null;
-    if (scissorVec) {
-      if (!committedScissor && !preview) {
-        this.blitFBO(currentReadFBO, destinationFbo);
+      if (wrapsX && (stepAnchorX < 0 || stepAnchorX + fp.sizeUv.x > 1)) {
+        wholeTime = true;
       }
+    }
 
-      destinationFbo.scissor.copy(scissorVec);
-      destinationFbo.scissorTest = true;
-      tempFboA.scissor.copy(scissorVec);
-      tempFboA.scissorTest = true;
-      tempFboB.scissor.copy(scissorVec);
-      tempFboB.scissorTest = true;
+    // Every pass but the last is read by the passes after it, with whatever
+    // reach in time their effect has, so those passes write the brush's full
+    // packed rows. The last pass is only ever read at the pixels it paints, so
+    // it writes the brush footprint alone. The brush's time window is rounded
+    // to frames the way the brush shader rounds it.
+    const scissorRows = yWrapsOutOfBounds ? null : this.calculateScissorRows(unionAnchor, maxBrushSizeUv);
+    const { textureWidth, numFrames } = this.spectrogramData;
+    const window: FrameWindow = wholeTime
+      ? null
+      : {
+          frameStart: Math.floor(unionAnchor.x * numFrames + 0.5),
+          frameEnd: Math.floor((unionAnchor.x + maxBrushSizeUv.x) * numFrames + 0.5),
+        };
+    const footprint = this.disableScissorCopyBack
+      ? null
+      : this.calculateFootprint(unionAnchor, maxBrushSizeUv, window, yWrapsOutOfBounds);
+    const passRanges = scissorRows
+      ? rowRange(textureWidth, scissorRows.rowStart, scissorRows.rowCount)
+      : this.fullRange();
+    // A footprint that covers most of the texture is cheaper to write with a
+    // whole-texture draw and a buffer swap than to copy back, and with no
+    // rows every pass has written the whole texture, so the swap is sound.
+    const { textureHeight } = this.spectrogramData;
+    const swapWhole =
+      footprint !== null &&
+      scissorRows === null &&
+      footprint.pixels >= SWAP_FOOTPRINT_FRACTION * textureWidth * textureHeight;
+    const copyBack = footprint !== null && !swapWhole;
+    // On the legacy path the partner buffer is swapped (or shown) in whole, so
+    // the rows the passes leave alone are copied over first.
+    const finalRanges = copyBack ? footprint : passRanges;
+    if (!footprint && scissorRows) {
+      this.blitFBO(currentReadFBO, destinationFbo);
     }
 
     // Generate random value seeded by position using Perlin noise
@@ -943,7 +1083,7 @@ export class StrokeRenderer {
         // per-step parameters), so resolve the gate from the step state, not the
         // global state, before rendering this step's modulators.
         this.modulatorMaterial.uniforms.nestedModulationActive.value = hasNestedModulatorRouting(stepState);
-        const modulatorFbo = this.renderModulatorTextures(commonUniforms, scissorVec);
+        const modulatorFbo = this.renderModulatorTextures(commonUniforms, passRanges);
         commonUniforms.modulatorTex0 = { value: modulatorFbo.textures[0] };
         commonUniforms.modulatorTex1 = { value: modulatorFbo.textures[1] };
       } else {
@@ -1050,7 +1190,6 @@ export class StrokeRenderer {
         }
 
         const material = effect.materials[p];
-        this.fboMesh.material = material;
 
         const isFinalPassOfStep = passOrdinal === plannedPasses.length - 1;
         const isFinalPass = isFinalPassOfStep && isLastStep;
@@ -1096,8 +1235,7 @@ export class StrokeRenderer {
           modContext: iterationContext,
         });
 
-        this.gl.setRenderTarget(currentWriteFbo);
-        this.gl.render(this.fboScene, this.camera);
+        this.drawRanges(material, currentWriteFbo, isFinalPass ? finalRanges : passRanges);
 
         currentReadFbo = currentWriteFbo;
 
@@ -1110,33 +1248,28 @@ export class StrokeRenderer {
       stepInputFbo = currentReadFbo;
     }
 
+    // A committed stroke folds its footprint back into the canonical buffer,
+    // which keeps currentReadFBO canonical; a preview leaves it in the partner
+    // for the display to composite. On the legacy full-texture path the
+    // partner holds the whole result, so the buffers swap instead.
+    if (!preview && copyBack) {
+      rangeCopyMaterial.uniforms.inputTex.value = destinationFbo.texture;
+      this.drawRanges(rangeCopyMaterial, currentReadFBO, footprint);
+      rangeCopyMaterial.uniforms.inputTex.value = null;
+    }
     this.gl.setRenderTarget(null);
 
-    // For committed scissored strokes, fold the freshly painted rows back into
-    // the canonical read buffer. This region blit is brush-sized, not
-    // full-texture, which is what keeps small-brush cost flat as files grow.
-    if (committedScissor && scissorRows) {
-      this.blitFBORows(destinationFbo, currentReadFBO, scissorRows.rowStart, scissorRows.rowCount);
+    this.previewActive = preview;
+    if (preview) {
+      if (!footprint) this.markWholeTexturePreview();
+      this.previewRangeTex.needsUpdate = true;
     }
-
-    // Reset scissor on FBOs if it was enabled
-    if (scissorRows) {
-      destinationFbo.scissorTest = false;
-      scratch.passFbo1.scissorTest = false;
-      scratch.passFbo2.scissorTest = false;
-    }
-
-    this.previewRows = preview ? (scissorRows ?? { rowStart: 0, rowCount: this.spectrogramData.textureHeight }) : null;
 
     this.verifyScratchAllocation();
 
     // If the stroke is not a preview, commit the changes
     if (!preview) {
-      // A committed scissored stroke already folded its result into the
-      // canonical buffer via copy-back, so the ping-pong must NOT swap;
-      // currentReadFBO stays canonical. Every other committed stroke (including
-      // the legacy full-blit path) wrote the whole destinationFbo and swaps.
-      if (!committedScissor) {
+      if (!copyBack) {
         this.pingPong = 1 - this.pingPong;
       }
 
@@ -1236,20 +1369,11 @@ export class StrokeRenderer {
     uniforms.modulator2ImageTex.value = modulator2Texture || placeholderTexture;
     uniforms.modulator3ImageTex.value = modulator3Texture || placeholderTexture;
 
-    this.fboMesh.material = this.maskMaterial;
-
     const rows = this.maskRows;
-    const scissorVec =
+    const maskRanges =
       rows !== null && !this.disableScissorCopyBack && rows.rowEnd - rows.rowStart < this.spectrogramData.textureHeight
-        ? new Vector4(0, rows.rowStart, this.spectrogramData.textureWidth, rows.rowEnd - rows.rowStart)
-        : null;
-    const maskTargets = [scratch.strokeMaskFbo, scratch.strokeMaskFbo2];
-    if (scissorVec) {
-      for (const target of maskTargets) {
-        target.scissor.copy(scissorVec);
-        target.scissorTest = true;
-      }
-    }
+        ? rowRange(this.spectrogramData.textureWidth, rows.rowStart, rows.rowEnd - rows.rowStart)
+        : this.fullRange();
 
     let renderedAny = false;
 
@@ -1332,30 +1456,24 @@ export class StrokeRenderer {
       // nothing routes to a modulator (zero placeholder yields the same result).
       if (hasActiveModulatorRouting(stepState)) {
         this.modulatorMaterial.uniforms.nestedModulationActive.value = hasNestedModulatorRouting(stepState);
-        const modulatorFbo = this.renderModulatorTextures(uniforms as unknown as CommonUniforms, scissorVec);
+        const modulatorFbo = this.renderModulatorTextures(uniforms as unknown as CommonUniforms, maskRanges);
         uniforms.modulatorTex0.value = modulatorFbo.textures[0];
         uniforms.modulatorTex1.value = modulatorFbo.textures[1];
       } else {
         uniforms.modulatorTex0.value = this.textures.placeholderTexture;
         uniforms.modulatorTex1.value = this.textures.placeholderTexture;
       }
-      this.fboMesh.material = this.maskMaterial;
-
       const currentMaskFbo = this.maskPingPong === 0 ? scratch.strokeMaskFbo : scratch.strokeMaskFbo2;
       const nextMaskFbo = this.maskPingPong === 0 ? scratch.strokeMaskFbo2 : scratch.strokeMaskFbo;
       uniforms.currentMaskTex.value = currentMaskFbo.texture;
 
-      this.gl.setRenderTarget(nextMaskFbo);
-      this.gl.render(this.fboScene, this.camera);
+      this.drawRanges(this.maskMaterial, nextMaskFbo, maskRanges);
 
       this.maskPingPong = 1 - this.maskPingPong;
       renderedAny = true;
     }
 
     if (renderedAny) this.gl.setRenderTarget(null);
-    if (scissorVec) {
-      for (const target of maskTargets) target.scissorTest = false;
-    }
   }
 
   /** Marks the cached packed state stale, so the next read goes to the GPU. */
@@ -1687,18 +1805,18 @@ export class StrokeRenderer {
 
   /**
    * The textures the display composites when a preview is up: the committed
-   * spectrogram, the preview, and the packed row range [rowStart, rowEnd) the
-   * preview is valid in. The range is empty when there is no preview to show.
+   * spectrogram, the preview, and the per-band bin ranges [start, end) the
+   * preview is valid in, as a numBands×1 texture. `active` is false when there
+   * is no preview to show.
    */
-  getPreviewDisplay(): { committed: Texture; preview: Texture; rowStart: number; rowEnd: number } {
+  getPreviewDisplay(): { committed: Texture; preview: Texture; binRanges: Texture; active: boolean } {
     const currentFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
     const nextFBO = this.pingPong === 0 ? this.fbo2 : this.fbo1;
-    const rows = this.previewRows;
     return {
       committed: currentFBO.texture,
       preview: nextFBO.texture,
-      rowStart: rows ? rows.rowStart : 0,
-      rowEnd: rows ? rows.rowStart + rows.rowCount : 0,
+      binRanges: this.previewRangeTex,
+      active: this.previewActive,
     };
   }
 
@@ -1904,5 +2022,8 @@ export class StrokeRenderer {
     this.modulatorMaterial.dispose();
     this.fboMesh.geometry.dispose();
     this.fboScene.remove(this.fboMesh);
+    this.rangeGeometry.dispose();
+    this.rangeScene.remove(this.rangeMesh);
+    this.previewRangeTex.dispose();
   }
 }

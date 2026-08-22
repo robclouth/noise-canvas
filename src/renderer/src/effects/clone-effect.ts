@@ -12,7 +12,7 @@ import {
   Vector2,
 } from "three";
 import cloneBrushFrag from "../glsl/clone-effect.frag";
-import passThroughVert from "../glsl/pass-through.vert";
+import rangeQuadVert from "../glsl/range-quad.vert";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 import { activeClonePasses, buildShapeTable, CloneShapeKey } from "./clone-shapes";
@@ -79,7 +79,7 @@ class CloneEffect extends BaseEffect {
           cloneShapeTex: { value: null },
           scaleOffsets: { value: new Float32Array(12) },
         },
-        vertexShader: passThroughVert,
+        vertexShader: rangeQuadVert,
         fragmentShader: cloneBrushFrag,
         glslVersion: GLSL3,
       }),
@@ -90,7 +90,7 @@ class CloneEffect extends BaseEffect {
           cloneShapeTex: { value: null },
           scaleOffsets: { value: new Float32Array(12) },
         },
-        vertexShader: passThroughVert,
+        vertexShader: rangeQuadVert,
         fragmentShader: cloneBrushFrag,
         glslVersion: GLSL3,
       }),

@@ -1,6 +1,8 @@
 import {
   Camera,
   FloatType,
+  InstancedBufferAttribute,
+  InstancedBufferGeometry,
   Mesh,
   NearestFilter,
   PlaneGeometry,
@@ -52,7 +54,16 @@ async function warmShaders(descriptors: ShaderDescriptor[]): Promise<WarmStats> 
   });
   const scene = new Scene();
   const camera = new Camera();
-  const mesh = new Mesh(new PlaneGeometry(2, 2));
+  // A full-screen quad that also carries one `aRange` instance spanning the
+  // target, so materials on either vertex shader draw.
+  const plane = new PlaneGeometry(2, 2);
+  const geometry = new InstancedBufferGeometry();
+  geometry.setAttribute("position", plane.getAttribute("position"));
+  geometry.setAttribute("uv", plane.getAttribute("uv"));
+  geometry.setIndex(plane.getIndex());
+  geometry.setAttribute("aRange", new InstancedBufferAttribute(new Uint32Array([0, 16]), 2));
+  geometry.instanceCount = 1;
+  const mesh = new Mesh(geometry);
   mesh.frustumCulled = false;
   scene.add(mesh);
   renderer.setRenderTarget(target);

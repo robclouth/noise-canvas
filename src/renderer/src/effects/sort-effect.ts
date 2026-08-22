@@ -1,7 +1,7 @@
 import { useStore } from "@/store";
 import type { EffectsState } from "@renderer/store/effects";
 import { GLSL3, RawShaderMaterial } from "three";
-import passThroughVert from "../glsl/pass-through.vert";
+import rangeQuadVert from "../glsl/range-quad.vert";
 import sortEffectFrag from "../glsl/sort-effect.frag";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
@@ -29,7 +29,7 @@ class SortEffect extends BaseEffect {
             sortAxis: { value: axis },
             passIndexOffset: { value: PASS_PARITY[i] },
           },
-          vertexShader: passThroughVert,
+          vertexShader: rangeQuadVert,
           fragmentShader: sortEffectFrag,
           glslVersion: GLSL3,
         }),

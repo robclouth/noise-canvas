@@ -2,7 +2,7 @@ import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import blurBrushFrag from "../glsl/blur-effect.frag";
-import passThroughVert from "../glsl/pass-through.vert";
+import rangeQuadVert from "../glsl/range-quad.vert";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
 
@@ -41,7 +41,7 @@ class BlurEffect extends BaseEffect {
             value: new Vector2(1, 0),
           },
         },
-        vertexShader: passThroughVert,
+        vertexShader: rangeQuadVert,
         fragmentShader: blurBrushFrag,
         glslVersion: GLSL3,
       }),
@@ -52,7 +52,7 @@ class BlurEffect extends BaseEffect {
             value: new Vector2(0, 1),
           },
         },
-        vertexShader: passThroughVert,
+        vertexShader: rangeQuadVert,
         fragmentShader: blurBrushFrag,
         glslVersion: GLSL3,
       }),

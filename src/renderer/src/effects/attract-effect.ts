@@ -10,7 +10,7 @@ import {
 import type { EffectsState } from "@renderer/store/effects";
 import type { State } from "@renderer/store/types";
 import { GLSL3, RawShaderMaterial } from "three";
-import passThroughVert from "../glsl/pass-through.vert";
+import rangeQuadVert from "../glsl/range-quad.vert";
 import attractEffectFrag from "../glsl/attract-effect.frag";
 import { useStore } from "../store";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
@@ -61,7 +61,7 @@ class AttractEffect extends BaseEffect {
             attractFieldMinFreq: { value: 20 },
             attractFieldBpo: { value: 12 },
           },
-          vertexShader: passThroughVert,
+          vertexShader: rangeQuadVert,
           fragmentShader: attractEffectFrag,
           glslVersion: GLSL3,
         }),

@@ -3,7 +3,7 @@ import { getOpenFileByPath, openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
 import { GLSL3, RawShaderMaterial } from "three";
 import convolveEffectFrag from "../glsl/convolve-effect.frag";
-import passThroughVert from "../glsl/pass-through.vert";
+import rangeQuadVert from "../glsl/range-quad.vert";
 import { useStore } from "../store";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
 import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
@@ -47,7 +47,7 @@ class ConvolveEffect extends BaseEffect {
           convolveIrNormScale: { value: 1 },
           convolveEdgeMode: { value: 1 },
         },
-        vertexShader: passThroughVert,
+        vertexShader: rangeQuadVert,
         fragmentShader: convolveEffectFrag,
         glslVersion: GLSL3,
       }),
