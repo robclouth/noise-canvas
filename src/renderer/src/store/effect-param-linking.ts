@@ -70,3 +70,33 @@ export function clearLinkedEffectParam(
     if (effects[index].params) delete effects[index].params[key];
   }
 }
+
+/**
+ * Seeds a freshly linked effect parameter across every step. The value comes
+ * from the first step holding the matching effect, not from the step the switch
+ * was flipped on, so a step added later cannot overwrite the earlier ones. When
+ * no step holds a value the parameter is dropped everywhere, so each falls back
+ * to its step value.
+ */
+export function seedLinkedEffectParam(
+  brush: Brush,
+  activeStepIndex: number,
+  effectId: string,
+  key: ParameterKey,
+): void {
+  const seed = matchingEffects(brush, activeStepIndex, effectId)[0];
+  const seedParams = seed && seed.effects[seed.index].params;
+  if (seedParams && key in seedParams) {
+    writeEffectParam(brush, activeStepIndex, effectId, key, seedParams[key], true);
+  } else {
+    clearLinkedEffectParam(brush, activeStepIndex, effectId, key);
+  }
+}
+
+/** Seeds a freshly linked step parameter across every step from the first step's value. */
+export function seedLinkedStepParam(brush: Brush, key: ParameterKey): void {
+  const firstValue = brush.steps[0]?.[key];
+  brush.steps.forEach((step) => {
+    (step as Record<string, unknown>)[key] = firstValue;
+  });
+}

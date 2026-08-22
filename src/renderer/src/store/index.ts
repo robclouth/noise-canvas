@@ -30,7 +30,7 @@ import { createPresetsSlice, PRESETS_PERSISTED_KEYS } from "./presets";
 import { createSectionPresetsSlice } from "./section-presets";
 import { createStemGroupsSlice, STEM_GROUPS_PERSISTED_KEYS } from "./stem-groups";
 import { createStepsSlice, STEPS_PERSISTED_KEYS } from "./steps";
-import { clearLinkedEffectParam, writeEffectParam } from "./effect-param-linking";
+import { seedLinkedEffectParam, seedLinkedStepParam, writeEffectParam } from "./effect-param-linking";
 import type { ParameterKey, State } from "./types";
 import { isManagedFilePath } from "./utils";
 
@@ -289,20 +289,11 @@ export const useStore = create<State>()(
               const index = linkedParams.indexOf(keyStr);
               if (linked && index === -1) {
                 linkedParams.push(keyStr);
-                // When enabling linking, sync current value to all steps
+                // Linking is one brush-wide switch, so every step joins at once.
                 if (effectId && isEffectParameter(key)) {
-                  const active = (brush.steps[draft.activeStepIndex]?.effects ?? []) as EffectItem[];
-                  const params = active.find((e) => e.id === effectId)?.params;
-                  if (params && key in params) {
-                    writeEffectParam(brush, draft.activeStepIndex, effectId, key, params[key], true);
-                  } else {
-                    clearLinkedEffectParam(brush, draft.activeStepIndex, effectId, key);
-                  }
+                  seedLinkedEffectParam(brush, draft.activeStepIndex, effectId, key);
                 } else if (isStepParameter(key)) {
-                  const currentValue = brush.steps[draft.activeStepIndex]?.[key];
-                  brush.steps.forEach((step) => {
-                    (step as Record<string, unknown>)[key] = currentValue;
-                  });
+                  seedLinkedStepParam(brush, key);
                 }
               } else if (!linked && index !== -1) {
                 linkedParams.splice(index, 1);

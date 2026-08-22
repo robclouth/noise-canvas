@@ -1,7 +1,13 @@
 import { produce } from "immer";
 import { describe, expect, it } from "vitest";
 import type { EffectItem } from "../../effects/types";
-import { clearLinkedEffectParam, matchingEffects, writeEffectParam } from "../../store/effect-param-linking";
+import {
+  clearLinkedEffectParam,
+  matchingEffects,
+  seedLinkedEffectParam,
+  seedLinkedStepParam,
+  writeEffectParam,
+} from "../../store/effect-param-linking";
 import type { Brush, ParameterKey } from "../../store/types";
 
 /**
@@ -95,5 +101,66 @@ describe("linking an effect parameter across steps", () => {
     });
 
     expect(THRESHOLD in paramsOf(next, 1, 0)).toBe(false);
+  });
+});
+
+/**
+ * Switching "Step Linked" on links every step of the brush at once, so the
+ * value they all take must not depend on which step the switch was flipped
+ * from. A step added later carries defaults, and seeding from it would wipe the
+ * steps already tuned.
+ */
+describe("seeding a parameter when linking is switched on", () => {
+  const SIZE = "brushSizeTime" as ParameterKey;
+
+  /** Steps holding a plain step parameter, no effects. */
+  function stepsWith(...values: number[]): Brush {
+    return {
+      name: "B",
+      linkedParams: [],
+      macroValues: [],
+      steps: values.map((brushSizeTime) => ({ brushSizeTime, effects: [] })),
+    } as unknown as Brush;
+  }
+
+  const sizeOf = (brush: Brush, stepIndex: number) =>
+    (brush.steps[stepIndex] as unknown as Record<string, unknown>)[SIZE];
+
+  it("takes a step parameter from the first step, not the step it was switched on from", () => {
+    const brush = stepsWith(2, 4, 1);
+
+    const next = produce(brush, (draft) => {
+      seedLinkedStepParam(draft, SIZE);
+    });
+
+    expect([sizeOf(next, 0), sizeOf(next, 1), sizeOf(next, 2)]).toEqual([2, 2, 2]);
+  });
+
+  it("takes an effect parameter from the first step that holds the effect", () => {
+    const brush = brushWith(
+      [effect("s1-dyn", "dynamics", { [THRESHOLD]: -30 })],
+      [effect("s2-dyn", "dynamics", { [THRESHOLD]: -6 })],
+      [effect("s3-dyn", "dynamics", { [THRESHOLD]: -12 })],
+    );
+
+    // Switched on from the last step, which holds its own value.
+    const next = produce(brush, (draft) => {
+      seedLinkedEffectParam(draft, 2, "s3-dyn", THRESHOLD);
+    });
+
+    expect(paramsOf(next, 0, 0)[THRESHOLD]).toBe(-30);
+    expect(paramsOf(next, 1, 0)[THRESHOLD]).toBe(-30);
+    expect(paramsOf(next, 2, 0)[THRESHOLD]).toBe(-30);
+  });
+
+  it("drops the effect parameter everywhere when no step holds one", () => {
+    const brush = brushWith([effect("s1-dyn", "dynamics")], [effect("s2-dyn", "dynamics", { [THRESHOLD]: -6 })]);
+
+    const next = produce(brush, (draft) => {
+      seedLinkedEffectParam(draft, 1, "s2-dyn", THRESHOLD);
+    });
+
+    expect(paramsOf(next, 0, 0)).toEqual({});
+    expect(paramsOf(next, 1, 0)).toEqual({});
   });
 });
