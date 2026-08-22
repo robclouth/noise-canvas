@@ -24,14 +24,19 @@ const BYTES: Record<number, number> = {
   [UnsignedByteType]: 1,
 };
 
+// A target with depthBuffer set gets a DEPTH_COMPONENT24 renderbuffer (four
+// bytes a texel) from three whether or not anything writes depth.
+const DEPTH_BYTES_PER_TEXEL = 4;
+
 function bytesPerTexel(target: WebGLRenderTarget): number {
-  return target.textures.reduce((sum, texture) => {
+  const colour = target.textures.reduce((sum, texture) => {
     const channels = CHANNELS[texture.format];
     const bytes = BYTES[texture.type];
     expect(channels, `unhandled texture format ${texture.format}`).toBeDefined();
     expect(bytes, `unhandled texture type ${texture.type}`).toBeDefined();
     return sum + channels * bytes;
   }, 0);
+  return colour + (target.depthBuffer ? DEPTH_BYTES_PER_TEXEL : 0);
 }
 
 describe("GPU budget rates", () => {

@@ -41,6 +41,8 @@ function createTargets(width: number, height: number): StrokeScratch {
       type,
       minFilter: NearestFilter,
       magFilter: NearestFilter,
+      depthBuffer: false,
+      stencilBuffer: false,
     });
   return {
     passFbo1: fbo(RGBAFormat, FloatType),
@@ -59,6 +61,8 @@ function createModulatorTarget(width: number, height: number): WebGLRenderTarget
     type: HalfFloatType,
     minFilter: NearestFilter,
     magFilter: NearestFilter,
+    depthBuffer: false,
+    stencilBuffer: false,
   });
 }
 

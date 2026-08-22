@@ -468,6 +468,8 @@ export class StrokeRenderer {
       type: FloatType,
       minFilter: NearestFilter,
       magFilter: NearestFilter,
+      depthBuffer: false,
+      stencilBuffer: false,
     });
   }
 

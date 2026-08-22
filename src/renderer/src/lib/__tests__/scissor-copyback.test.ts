@@ -105,6 +105,20 @@ describe("footprint copy-back equivalence", () => {
     return () => createStateForEffects(enabled, options);
   }
 
+  // Nothing in the paint path writes depth, and three would otherwise give
+  // each target a depth renderbuffer the GPU budget does not count.
+  it("allocates its packed targets without depth buffers", () => {
+    const r = makeRenderer(false);
+    try {
+      for (const target of [r["fbo1"], r["fbo2"]]) {
+        expect(target.depthBuffer).toBe(false);
+        expect(target.stencilBuffer).toBe(false);
+      }
+    } finally {
+      r.dispose();
+    }
+  });
+
   it("scissors a localized brush (precondition: not the full-texture fallback)", () => {
     const r = makeRenderer(false);
     try {
