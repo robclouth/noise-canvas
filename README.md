@@ -18,7 +18,7 @@ Not sure which Mac you have? Apple menu → **About This Mac**. A "Chip" line me
 
 **Which macOS?** The app needs macOS 11 Big Sur or newer. I've only tested it on Sequoia (15), and one person reported problems on Monterey (12). If it won't run on yours, [open an issue](https://github.com/robclouth/noise-canvas/issues) and say which version you're on.
 
-**It leans on your graphics card.** Every effect is a shader, so the GPU does the work rather than the CPU, and each open file holds two full-size 32-bit float buffers in GPU memory. Both the memory and the work per stroke grow with the length of the file. Integrated graphics are fine, but an older machine will paint slowly on long files, and can run out of GPU memory on very long ones. Shorter files are the fix.
+**It leans on your graphics card.** Every effect is a shader, so the GPU does the work rather than the CPU. Integrated graphics are fine, but an older machine will paint slowly on long files, and can run out of GPU memory on very long ones. Shorter files are the fix. I'm currently investigating how to improve performance on older computers.
 
 > The green **Code** button at the top of this page gives you the source code, not the app. Use the table above.
 
