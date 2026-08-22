@@ -1049,6 +1049,13 @@ export class StrokeRenderer {
         // The blend path reads this only for non-cumulative strokes, but an
         // effect undoing a domain swap needs the same snapshot either way.
         (uniformsForThisIteration as any).blendOriginalTex = { value: scratch.strokeStartFbo.texture };
+        // Step 0 blends out of the stroke-start snapshot, so dabs over the same
+        // area cannot accumulate. Every later step blends out of its own input,
+        // which holds the previous step's output — blending those steps out of
+        // the snapshot instead would discard everything the earlier steps wrote.
+        uniformsForThisIteration.blendBaseTex = {
+          value: stepIndex === 0 ? scratch.strokeStartFbo.texture : stepInputFbo.texture,
+        };
 
         effect.updateEffectUniforms({
           commonUniforms: uniformsForThisIteration,

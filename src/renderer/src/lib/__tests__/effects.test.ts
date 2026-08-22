@@ -601,6 +601,133 @@ describe("Effects", () => {
       constantTextures.inverseMapTex.dispose();
       constantTextures.metadataTex.dispose();
     });
+
+    // Step 1 halves a constant 0.5 canvas to 0.25 through Mix. Step 2 adds a
+    // passthrough of its own input on top. A later step blends out of the step
+    // before it, so the sum is 0.25 + 0.25; blending out of the stroke-start
+    // snapshot instead would discard step 1 and give 0.5 + 0.25.
+    it("blends a later step out of the previous step's output, not the stroke start", async () => {
+      const constantSpectrogramData = createMockSpectrogramData({
+        numFrames: 16,
+        numBands: 8,
+        pattern: "constant",
+        constantMagnitude: 0.5,
+      });
+
+      const constantTextures = createTexturesFromSpectrogramData(constantSpectrogramData);
+
+      const constantStrokeTextures: StrokeTextures = {
+        originalPackedDataTex: constantTextures.originalPackedDataTex,
+        inverseMapTex: constantTextures.inverseMapTex,
+        metadataTex: constantTextures.metadataTex,
+        placeholderTexture,
+        modulatorScaleLut,
+        modulator1Texture: placeholderTexture,
+        modulator2Texture: placeholderTexture,
+        modulator3Texture: placeholderTexture,
+      };
+
+      const renderer = new StrokeRenderer(gl, constantSpectrogramData, constantStrokeTextures, "step-chain", effects);
+      renderer.initialize();
+
+      // Full-coverage brush anchored at the cursor, so the sample point takes
+      // the full brush weight in both steps.
+      const brush = {
+        brushIntensity: 100,
+        brushSizeTime: 10,
+        brushCurveTime: 100,
+        brushSkewTime: -100,
+        brushSizePitch: 100,
+        brushCurvePitch: 100,
+        brushSkewPitch: -100,
+        accumulate: false,
+      };
+
+      const state = createMockStateWithSteps(
+        [
+          {
+            name: "Halve",
+            overrides: {
+              ...brush,
+              blendMode: 0,
+              effects: [
+                {
+                  id: "chain-dynamics",
+                  effect: "dynamics",
+                  enabled: true,
+                  // Ratios of 1 leave the level alone, so Gain is a pure -6.02 dB scale by 0.5.
+                  params: {
+                    dynamicsThresholdDb: -20,
+                    dynamicsUpperRatio: 1,
+                    dynamicsLowerRatio: 1,
+                    dynamicsGainDb: -6.0206,
+                  },
+                },
+              ],
+            },
+          },
+          {
+            name: "Add",
+            overrides: {
+              ...brush,
+              blendMode: 1,
+              effects: [{ id: "chain-passthrough", effect: "transform", enabled: false, params: {} }],
+            },
+          },
+        ],
+        { filepathsBpm: { "/test/step-chain.wav": 120 } },
+      ) as State;
+
+      const totalDuration = constantSpectrogramData.numFrames / constantSpectrogramData.sampleRate;
+      const rendererTextures = renderer.getTextures();
+      const sourceFile: SourceFileInfo = {
+        id: "step-chain",
+        filePath: "/test/step-chain.wav",
+        displayName: "step-chain.wav",
+        spectrogramData: constantSpectrogramData,
+        textures: {
+          packed: rendererTextures.packed,
+          inverse: rendererTextures.inverse,
+          metadata: rendererTextures.metadata,
+          original: rendererTextures.original,
+        },
+      };
+
+      const sampleUv = new Vector2(0.5, 0.5);
+      const originalPixel = getPixelAtUv(await renderer.getFBOData(), sampleUv, constantSpectrogramData);
+      expect(originalPixel).not.toBeNull();
+      expect(originalPixel![0]).toBeCloseTo(0.5, 2);
+
+      renderer.beginStroke();
+      renderer.renderStroke(
+        {
+          cursorPos: new Vector2(0.0, 0.0),
+          preview: false,
+          bpm: 120,
+          totalDuration,
+          viewZoomPower: 0,
+          viewOffset: 0,
+          viewZoomPowerY: 0,
+          viewOffsetY: 0,
+          pressure: 1,
+          tiltX: 0,
+          tiltY: 0,
+        },
+        state,
+        sourceFile,
+      );
+
+      const painted = getPixelAtUv(await renderer.getFBOData(), sampleUv, constantSpectrogramData);
+      expect(painted).not.toBeNull();
+      expect(painted![0]).toBeCloseTo(0.5, 2);
+
+      renderer.endStroke();
+      renderer.dispose();
+      constantTextures.packedDataTex.dispose();
+      constantTextures.originalPackedDataTex.dispose();
+      constantTextures.inverseMapTex.dispose();
+      constantTextures.metadataTex.dispose();
+    });
   });
 
   describe("stereo spread", () => {

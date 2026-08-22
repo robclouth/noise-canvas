@@ -71,6 +71,10 @@ uniform float magnitudeLimit;
 uniform sampler2D strokeMaskTex;
 uniform bool useStrokeMask;
 uniform sampler2D blendOriginalTex;
+// The state the blend builds its target from and interpolates out of. Step 0
+// takes the stroke-start snapshot, so repeated dabs cannot accumulate; every
+// later step takes its own input, which is the previous step's output.
+uniform sampler2D blendBaseTex;
 
 // ============================================================================
 // DEFINES & HELPERS
@@ -1317,16 +1321,16 @@ vec4 applyBrush(vec4 original, vec4 modified, vec2 weight, vec2 destUv, vec2 pac
   vec2 modifiedL = modified.rg;
   vec2 modifiedR = modified.ba;
 
-  // For non-cumulative mode with additive blend modes, use the stroke start state
-  // for blend formula calculations to prevent accumulation when painting over the same area
-  // Note: blendOriginal is only used for computing the blend target, not for the final interpolation
+  // Non-cumulative strokes blend from blendBaseTex rather than from the incoming
+  // data, so painting over the same area again cannot pile the blend up. The
+  // base feeds both the blend target and the final interpolation.
   // Use packedUv for sampling textures that are in packed format
   vec2 blendOriginalL = originalL;
   vec2 blendOriginalR = originalR;
   if (useStrokeMask) {
-    vec4 strokeStart = texture(blendOriginalTex, packedUv);
-    blendOriginalL = strokeStart.rg;
-    blendOriginalR = strokeStart.ba;
+    vec4 blendBase = texture(blendBaseTex, packedUv);
+    blendOriginalL = blendBase.rg;
+    blendOriginalR = blendBase.ba;
   }
 
   float audioLevelDb = getAudioLevelDb(destUv);

@@ -104,6 +104,7 @@ export type CommonUniforms = {
   useStrokeMask?: { value: boolean };
   strokeMaskTex?: { value: Texture | null };
   blendOriginalTex?: { value: Texture | null };
+  blendBaseTex?: { value: Texture | null };
 };
 
 /**
@@ -180,6 +181,7 @@ export function createDefaultUniforms(): CommonUniforms {
     useStrokeMask: { value: false },
     strokeMaskTex: { value: null },
     blendOriginalTex: { value: null },
+    blendBaseTex: { value: null },
   };
 }
 
