@@ -187,6 +187,17 @@ describe("poster layout", () => {
     expect(large.margin / large.width).toBeCloseTo(small.margin / small.width, 3);
     expect(large.plotH / large.height).toBeCloseTo(small.plotH / small.height, 3);
   });
+
+  it("keeps the title out of the bottom safe area of a story", () => {
+    const layout = computePosterLayout(1080, 1920);
+    const titleBottom = layout.titleY + layout.titleSize / 2;
+    expect(1920 - titleBottom).toBeGreaterThanOrEqual(250);
+  });
+
+  it("hangs the title a margin below the plot", () => {
+    const layout = computePosterLayout(2000, 2000);
+    expect(layout.titleY - layout.titleSize / 2 - (layout.plotY + layout.plotH)).toBe(layout.margin);
+  });
 });
 
 describe("renderSpectrogramPlot", () => {

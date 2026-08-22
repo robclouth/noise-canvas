@@ -1,7 +1,9 @@
 /**
  * Poster layout: the spectrogram floated on a light-grey mount with a soft drop
- * shadow, and the file's name set in the band below it. Every dimension derives
- * from the image's shorter edge, so the plate looks the same at 2K and at 8K.
+ * shadow, and the file's name set in the band below it. The plate's dimensions
+ * derive from the image's shorter edge, so it looks the same at 2K and at 8K,
+ * except for the clear space under the title, which follows the image height so
+ * the title stays above the bottom of a story-shaped crop.
  */
 export interface PosterLayout {
   width: number;
@@ -12,30 +14,40 @@ export interface PosterLayout {
   plotH: number;
   margin: number;
   captionH: number;
+  titleSize: number;
+  /** Centre line of the title, for a "middle" text baseline. */
+  titleY: number;
 }
 
 const TITLE_COLOR = "rgba(255, 255, 255, 0.94)";
 const SHADOW_COLOR = "rgba(0, 0, 0, 0.85)";
 const FONT_STACK = '"Inter Variable", Inter, -apple-system, BlinkMacSystemFont, sans-serif';
 
-const MARGIN_FRACTION = 0.055;
-const CAPTION_FRACTION = 0.135;
+const MARGIN_FRACTION = 0.085;
+const TITLE_FRACTION = 0.043;
+/** Instagram keeps its own overlays inside the bottom 250 px of a 1080x1920 story. */
+const BOTTOM_SAFE_FRACTION = 0.13;
 const SHADOW_BLUR_FRACTION = 0.032;
 const SHADOW_OFFSET_FRACTION = 0.013;
 
 export function computePosterLayout(width: number, height: number): PosterLayout {
   const shortEdge = Math.min(width, height);
   const margin = Math.round(shortEdge * MARGIN_FRACTION);
-  const captionH = Math.round(shortEdge * CAPTION_FRACTION);
+  const titleSize = Math.round(shortEdge * TITLE_FRACTION);
+  const captionH = margin + titleSize + Math.round(height * BOTTOM_SAFE_FRACTION);
+  const plotY = margin;
+  const plotH = Math.max(2, height - margin - captionH);
   return {
     width,
     height,
     plotX: margin,
-    plotY: margin,
+    plotY,
     plotW: Math.max(2, width - margin * 2),
-    plotH: Math.max(2, height - margin - captionH),
+    plotH,
     margin,
     captionH,
+    titleSize,
+    titleY: plotY + plotH + margin + titleSize / 2,
   };
 }
 
@@ -55,7 +67,7 @@ export function drawPoster(
   info: PosterInfo,
   mountColor: string,
 ): void {
-  const { width, height, plotX, plotY, plotW, plotH, captionH } = layout;
+  const { width, height, plotX, plotY, plotW, plotH, titleSize, titleY } = layout;
   const shortEdge = Math.min(width, height);
 
   ctx.fillStyle = mountColor;
@@ -68,11 +80,9 @@ export function drawPoster(
   ctx.drawImage(plot, plotX, plotY, plotW, plotH);
   ctx.restore();
 
-  // The title sits in the middle of the band the plot leaves below it.
-  const titleSize = Math.round(captionH * 0.32);
   ctx.fillStyle = TITLE_COLOR;
   ctx.font = `600 ${titleSize}px ${FONT_STACK}`;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  ctx.fillText(info.title, plotX, plotY + plotH + captionH / 2);
+  ctx.fillText(info.title, plotX, titleY);
 }
