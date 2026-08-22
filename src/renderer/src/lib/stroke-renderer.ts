@@ -230,6 +230,9 @@ export class StrokeRenderer {
   // last cleared has written. Outside it both mask buffers are still zero, so a
   // mask update scissored to it loses nothing across the ping-pong.
   private maskRows: { rowStart: number; rowEnd: number } | null = null;
+  // Set when the scratch targets were (re)allocated and no stroke has yet
+  // confirmed the driver accepted them.
+  private scratchUnverified = false;
 
   // Test seam: forces committed scissored strokes back onto the legacy
   // full-texture blit + ping-pong-swap path instead of the brush-sized
@@ -461,8 +464,23 @@ export class StrokeRenderer {
       this.maskPingPong = 0;
       const currentReadFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
       this.snapshotToStrokeStart(scratch, currentReadFBO.texture);
+      this.scratchUnverified = true;
     }
     return scratch;
+  }
+
+  /**
+   * Throws when the driver refused the scratch allocations. The targets are
+   * created lazily on first bind, so the refusal only shows up as a GL error
+   * after the first stroke that uses them; the check runs once per refresh.
+   */
+  private verifyScratchAllocation(): void {
+    if (!this.scratchUnverified) return;
+    this.scratchUnverified = false;
+    const context = this.gl.getContext();
+    if (context.getError() === context.OUT_OF_MEMORY) {
+      throw new Error("The graphics device ran out of memory allocating the stroke buffers.");
+    }
   }
 
   private clearMasks(scratch: StrokeScratch): void {
@@ -1109,6 +1127,8 @@ export class StrokeRenderer {
     }
 
     this.previewRows = preview ? (scissorRows ?? { rowStart: 0, rowCount: this.spectrogramData.textureHeight }) : null;
+
+    this.verifyScratchAllocation();
 
     // If the stroke is not a preview, commit the changes
     if (!preview) {

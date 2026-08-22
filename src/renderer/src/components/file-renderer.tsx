@@ -1,6 +1,7 @@
 import { createStepStateView, useStore } from "@/store";
 import { notifications } from "@mantine/notifications";
 import { useTransientStore } from "@renderer/store/transient";
+import { diag } from "@renderer/lib/diag-log";
 import { countDiagStroke } from "@renderer/lib/diag-sampler";
 import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
 import { useFrame, useThree } from "@react-three/fiber";
@@ -746,26 +747,39 @@ const FileRendererInner = memo(
       const paintTiming = (globalThis as { __paintTiming?: boolean }).__paintTiming === true;
       const paintT0 = paintTiming ? performance.now() : 0;
       countDiagStroke(preview);
-      perfMark("renderStroke", () =>
-        strokeRenderer.renderStroke(
-          {
-            cursorPos,
-            preview,
-            bpm,
-            totalDuration,
-            viewZoomPower: state.filesZoom[fileId],
-            viewOffset: state.filesOffset[fileId],
-            viewZoomPowerY: state.filesZoomY[fileId] ?? 0,
-            viewOffsetY: state.filesOffsetY[fileId] ?? 0,
-            pressure: penState.pressure,
-            tiltX: penState.tiltX,
-            tiltY: penState.tiltY,
-            destOnsetTexture,
-          },
-          state,
-          sourceFileInfo,
-        ),
-      );
+      // The GPU can refuse the scratch allocations even after analysis fit the
+      // budget; closing the file keeps the context alive.
+      try {
+        perfMark("renderStroke", () =>
+          strokeRenderer.renderStroke(
+            {
+              cursorPos,
+              preview,
+              bpm,
+              totalDuration,
+              viewZoomPower: state.filesZoom[fileId],
+              viewOffset: state.filesOffset[fileId],
+              viewZoomPowerY: state.filesZoomY[fileId] ?? 0,
+              viewOffsetY: state.filesOffsetY[fileId] ?? 0,
+              pressure: penState.pressure,
+              tiltX: penState.tiltX,
+              tiltY: penState.tiltY,
+              destOnsetTexture,
+            },
+            state,
+            sourceFileInfo,
+          ),
+        );
+      } catch (error) {
+        diag.error("gl", "stroke render failed", { error });
+        notifications.show({
+          title: "Not enough graphics memory",
+          message: "The file was closed because the graphics device could not allocate its buffers.",
+          color: "red",
+        });
+        useStore.getState().closeFile(fileId);
+        return false;
+      }
       if (paintTiming) {
         strokeRenderer.finishGpu();
         console.log(`[paint] stroke ${(performance.now() - paintT0).toFixed(2)}ms`);

@@ -17,6 +17,7 @@ import { FillProgressModal } from "./components/fill-progress-modal";
 import { HelpOverlay } from "./components/help-overlay";
 import { ManualViewer } from "./components/manual-viewer";
 import { Walkthrough } from "./components/walkthrough";
+import { ANALYSIS_MAX_TEXTURE_SIZE } from "./lib/constants";
 import { diag } from "./lib/diag-log";
 import { recordDiagFrame, startDiagSampler } from "./lib/diag-sampler";
 import { host } from "./lib/host";
@@ -101,15 +102,17 @@ const DiagProbe = () => {
   useEffect(() => {
     const context = gl.getContext();
     const debugInfo = context.getExtension("WEBGL_debug_renderer_info");
+    const maxTextureSize: number = context.getParameter(context.MAX_TEXTURE_SIZE);
+    const colorBufferFloat = context.getExtension("EXT_color_buffer_float") !== null;
     diag.info("gl", "context", {
       renderer: debugInfo
         ? context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL)
         : context.getParameter(context.RENDERER),
       vendor: debugInfo ? context.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : context.getParameter(context.VENDOR),
       version: context.getParameter(context.VERSION),
-      maxTextureSize: context.getParameter(context.MAX_TEXTURE_SIZE),
+      maxTextureSize,
       maxRenderbufferSize: context.getParameter(context.MAX_RENDERBUFFER_SIZE),
-      colorBufferFloat: context.getExtension("EXT_color_buffer_float") !== null,
+      colorBufferFloat,
       textureFloatLinear: context.getExtension("OES_texture_float_linear") !== null,
       devicePixelRatio: window.devicePixelRatio,
       windowWidth: window.innerWidth,
@@ -117,6 +120,18 @@ const DiagProbe = () => {
       hardwareConcurrency: navigator.hardwareConcurrency,
       deviceMemoryGB: navigatorWithMemory.deviceMemory ?? null,
     });
+
+    // The spectrogram lives in float render targets up to 8192 texels wide;
+    // a device without either cannot paint at all.
+    if (!colorBufferFloat || maxTextureSize < ANALYSIS_MAX_TEXTURE_SIZE) {
+      diag.error("gl", "device cannot render the spectrogram", { colorBufferFloat, maxTextureSize });
+      notifications.show({
+        title: "Graphics device not supported",
+        message: "This graphics device cannot hold the spectrogram, so files will not open or paint.",
+        color: "red",
+        autoClose: false,
+      });
+    }
 
     const canvas = gl.domElement;
     const onLost = (event: Event): void => {

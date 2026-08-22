@@ -2,6 +2,9 @@ import { BASE_HUES } from "./colors";
 
 export const MULTIPLIER_UNIT = "x";
 
+// Widest packed texture the analyser produces (gaborator-addon.cpp MAX_TEXTURE_SIZE).
+export const ANALYSIS_MAX_TEXTURE_SIZE = 8192;
+
 // Sentinel bottom position of the time-grid slider: below the smallest real
 // beat value, the grid is the file's detected onsets instead of beats.
 export const ONSETS_GRID_VALUE = 1 / 128;
