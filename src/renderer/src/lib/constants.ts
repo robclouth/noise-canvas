@@ -1,7 +1,5 @@
 import { BASE_HUES } from "./colors";
 
-export const BEAT_UNIT = " b";
-export const SEMITONE_UNIT = " st";
 export const MULTIPLIER_UNIT = "x";
 
 // Sentinel bottom position of the time-grid slider: below the smallest real
