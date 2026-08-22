@@ -28,8 +28,13 @@
                     'OS=="mac"',
                     {
                         "defines": ["GABORATOR_USE_VDSP=1"],
+                        "sources": ["gpu-memory-mac.mm"],
                         "link_settings": {
-                            "libraries": ["-framework Accelerate"],
+                            "libraries": [
+                                "-framework Accelerate",
+                                "-framework Foundation",
+                                "-framework Metal",
+                            ],
                         },
                         "xcode_settings": {
                             "OTHER_LDFLAGS": ["-Wl,-rpath,@loader_path"],

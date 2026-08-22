@@ -19,9 +19,9 @@ declare global {
     audioAnalysis: {
       /**
        * GPU memory available to textures in bytes; `unified` marks a GPU that
-       * shares system RAM. Zero bytes means no budget is known.
+       * shares system RAM; `name` is the device, or empty when unknown.
        */
-      getGpuMemoryInfo: () => { bytes: number; unified: boolean };
+      getGpuMemoryInfo: () => { bytes: number; unified: boolean; name: string };
       analyze: (
         filePath: string,
         params: AnalysisParams,

@@ -29,6 +29,7 @@ export async function logSessionHeader(angleBackend: string | undefined): Promis
 
   const memory = getGpuMemoryInfo();
   diagLog("info", "session", "gpu memory budget source", {
+    device: memory.name || "unknown",
     bytesMB: Math.round(memory.bytes / 1048576),
     unified: memory.unified,
   });

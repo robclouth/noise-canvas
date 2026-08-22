@@ -66,15 +66,19 @@ export function init() {
   return gaborator;
 }
 
+// Budget for a GPU no query covers: enough for a few minutes of audio, never
+// a multi-gigabyte figure taken from system RAM.
+const UNKNOWN_GPU_BYTES = 2 * 1024 ** 3;
+
 /**
- * GPU memory available to textures, in bytes. `unified` is true when the GPU
- * shares system RAM (no separate VRAM query exists), so CPU-side copies of the
- * spectrogram compete with the textures for the same pool.
+ * GPU memory available to textures, in bytes, from the native query. `unified`
+ * is true when the GPU shares system RAM, so CPU-side copies of the spectrogram
+ * compete with the textures for the same pool. `name` is empty when unknown.
  */
-export function getGpuMemoryInfo(): { bytes: number; unified: boolean } {
-  const queried: number = init().getGpuMemoryBytes();
-  if (queried > 0) return { bytes: queried, unified: false };
-  return { bytes: totalmem(), unified: true };
+export function getGpuMemoryInfo(): { bytes: number; unified: boolean; name: string } {
+  const queried: { bytes: number; unified: boolean; name: string } = init().getGpuMemoryInfo();
+  if (queried.bytes > 0) return queried;
+  return { bytes: Math.min(totalmem(), UNKNOWN_GPU_BYTES), unified: true, name: "" };
 }
 
 /**

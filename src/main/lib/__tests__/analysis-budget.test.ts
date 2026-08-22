@@ -17,7 +17,7 @@ const addon = require(join(__dirname, "../../../../build/Release/gaborator_addon
     sampleRate: number,
     params: { bandsPerOctave: number; minFreq: number; maxCoefficients?: number },
   ) => Promise<GaboratorAnalysisResult>;
-  getGpuMemoryBytes: () => number;
+  getGpuMemoryInfo: () => { bytes: number; unified: boolean; name: string };
 };
 
 const SAMPLE_RATE = 44100;
@@ -98,7 +98,7 @@ describe("analysis coefficient budget", () => {
   });
 
   it("reports GPU memory as a non-negative number", () => {
-    const bytes = addon.getGpuMemoryBytes();
+    const { bytes } = addon.getGpuMemoryInfo();
     expect(Number.isFinite(bytes)).toBe(true);
     expect(bytes).toBeGreaterThanOrEqual(0);
   });

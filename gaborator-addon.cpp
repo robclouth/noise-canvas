@@ -24,6 +24,9 @@
 #include <windows.h>
 #include <dxgi.h>
 #endif
+#ifdef __APPLE__
+#include "gpu-memory-mac.h"
+#endif
 
 #define OVERLAP 0.7
 #define MAX_TEXTURE_SIZE 8192
@@ -4661,15 +4664,19 @@ Napi::Value HistoryInverseMapAsync(const Napi::CallbackInfo &info)
 }
 
 /**
- * Reports the GPU memory available to textures, in bytes. On Windows this
- * queries DXGI across all adapters; integrated GPUs report almost no dedicated
- * memory but render from the shared system pool, so the larger of dedicated
- * and half the shared pool is used. Returns 0 where no query exists (macOS
- * has unified memory, so the caller uses total system RAM instead).
+ * Reports the GPU memory available to textures as { bytes, unified, name }.
+ * On Windows this queries DXGI across all adapters; integrated GPUs report
+ * almost no dedicated memory but render from the shared system pool, so the
+ * larger of dedicated and half the shared pool is used. On macOS it is the
+ * default Metal device's recommended working set. Bytes is 0 where no query
+ * exists, and the caller falls back to a figure of its own.
  */
-Napi::Value GetGpuMemoryBytes(const Napi::CallbackInfo &info)
+Napi::Value GetGpuMemoryInfo(const Napi::CallbackInfo &info)
 {
     Napi::Env env = info.Env();
+    double bytes = 0.0;
+    bool unified = false;
+    std::string name;
 #ifdef _WIN32
     IDXGIFactory *factory = nullptr;
     if (SUCCEEDED(CreateDXGIFactory(__uuidof(IDXGIFactory), (void **)&factory)))
@@ -4682,16 +4689,35 @@ Napi::Value GetGpuMemoryBytes(const Napi::CallbackInfo &info)
             if (SUCCEEDED(adapter->GetDesc(&desc)))
             {
                 SIZE_T usable = std::max(desc.DedicatedVideoMemory, desc.SharedSystemMemory / 2);
-                best = std::max(best, usable);
+                if (usable > best)
+                {
+                    best = usable;
+                    unified = desc.DedicatedVideoMemory < desc.SharedSystemMemory / 2;
+                    int length = WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, nullptr, 0, nullptr, nullptr);
+                    if (length > 0)
+                    {
+                        std::string utf8(length, '\0');
+                        WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, &utf8[0], length, nullptr, nullptr);
+                        utf8.resize(length - 1);
+                        name = utf8;
+                    }
+                }
             }
             adapter->Release();
         }
         factory->Release();
-        if (best > 0)
-            return Napi::Number::New(env, (double)best);
+        bytes = (double)best;
     }
+#elif defined(__APPLE__)
+    char deviceName[256];
+    if (macGpuMemoryInfo(&bytes, &unified, deviceName, sizeof(deviceName)))
+        name = deviceName;
 #endif
-    return Napi::Number::New(env, 0.0);
+    Napi::Object result = Napi::Object::New(env);
+    result.Set("bytes", Napi::Number::New(env, bytes));
+    result.Set("unified", Napi::Boolean::New(env, unified));
+    result.Set("name", Napi::String::New(env, name));
+    return result;
 }
 
 Napi::Object init(Napi::Env env, Napi::Object exports)
@@ -4704,7 +4730,7 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
     exports.Set("historyApplyDeltas", Napi::Function::New(env, HistoryApplyDeltasAsync));
     exports.Set("historyInverseMap", Napi::Function::New(env, HistoryInverseMapAsync));
     exports.Set("analyze", Napi::Function::New(env, AnalyzeAsync));
-    exports.Set("getGpuMemoryBytes", Napi::Function::New(env, GetGpuMemoryBytes));
+    exports.Set("getGpuMemoryInfo", Napi::Function::New(env, GetGpuMemoryInfo));
     exports.Set("synthesize", Napi::Function::New(env, SynthesizeAsync));
     exports.Set("commitStroke", Napi::Function::New(env, CommitStrokeAsync));
     exports.Set("detectOnsets", Napi::Function::New(env, DetectOnsetsAsync));

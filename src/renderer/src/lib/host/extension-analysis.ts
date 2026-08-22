@@ -398,7 +398,7 @@ export function createExtensionAnalysis(): AnalysisApi {
   return {
     getGpuMemoryInfo: () => {
       const boot = getBootstrapOrNull();
-      return { bytes: boot?.gpuMemoryBytes ?? 0, unified: boot?.gpuMemoryUnified ?? true };
+      return { bytes: boot?.gpuMemoryBytes ?? 0, unified: boot?.gpuMemoryUnified ?? true, name: "" };
     },
     analyze,
     analyseBuffer,
