@@ -44,17 +44,19 @@ asarUnpack:
   - "**/*.dll"
   - "**/*.so.*"
   - "**/node_modules/ffmpeg-static/ffmpeg*"
+# Every artifactName below omits ${version}. The names must stay constant across
+# releases, because the README links to /releases/latest/download/<name>.
 win:
   icon: resources/icon.png
   executableName: "Noise Canvas"
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
+  artifactName: ${name}-windows-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
   icon: resources/icon.png
-  artifactName: ${name}-${version}-${arch}.${ext}
+  artifactName: ${name}-mac-${arch}.${ext}
   entitlements: resources/entitlements.mac.plist
   entitlementsInherit: resources/entitlements.mac.plist
   extendInfo:
@@ -65,7 +67,7 @@ mac:
   gatekeeperAssess: false
   notarize: true
 dmg:
-  artifactName: ${name}-${version}-${arch}.${ext}
+  artifactName: ${name}-mac-${arch}.${ext}
   icon: resources/icon.png
 linux:
   icon: resources/icon.png
@@ -76,7 +78,9 @@ linux:
   maintainer: electronjs.org
   category: Utility
 appImage:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: ${name}-linux.${ext}
+deb:
+  artifactName: ${name}-linux.${ext}
 publish:
   provider: github
   owner: robclouth

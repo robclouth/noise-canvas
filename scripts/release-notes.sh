@@ -20,11 +20,11 @@ base="https://github.com/robclouth/noise-canvas/releases/download/${tag}"
 
 # Glob, then the platform it is built for. Order sets the table's row order.
 platforms=(
-  "*-arm64.dmg|macOS, Apple Silicon"
-  "*-x64.dmg|macOS, Intel"
-  "*-setup.exe|Windows x64"
-  "*.AppImage|Linux, AppImage"
-  "*_amd64.deb|Linux, Debian and Ubuntu"
+  "*-mac-arm64.dmg|macOS, Apple Silicon"
+  "*-mac-x64.dmg|macOS, Intel"
+  "*-windows-setup.exe|Windows x64"
+  "*-linux.AppImage|Linux, AppImage"
+  "*-linux.deb|Linux, Debian and Ubuntu"
   "*.ablx|Ableton Live extension"
 )
 

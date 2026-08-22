@@ -39,3 +39,47 @@ describe("electron-builder macOS config", () => {
     expect(match?.[1]).toBe(config.appId);
   });
 });
+
+/**
+ * The README links to https://.../releases/latest/download/<file>. GitHub
+ * resolves that only when the newest release holds an asset with exactly that
+ * name, so a rename here breaks every download button in the README.
+ */
+describe("electron-builder artifact names", () => {
+  const config = load(readFileSync(join(process.cwd(), "electron-builder.yml"), "utf8")) as {
+    nsis: { artifactName: string };
+    dmg: { artifactName: string };
+    appImage: { artifactName: string };
+    deb: { artifactName: string };
+  };
+  const { name } = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
+    name: string;
+  };
+  const templates = [config.nsis, config.dmg, config.appImage, config.deb].map((target) => target.artifactName);
+
+  /** Expand an artifactName template the way electron-builder does. */
+  const expand = (template: string, ext: string, arch = ""): string =>
+    template.replace("${name}", name).replace("${arch}", arch).replace("${ext}", ext);
+
+  const published = new Set([
+    expand(config.dmg.artifactName, "dmg", "arm64"),
+    expand(config.dmg.artifactName, "dmg", "x64"),
+    expand(config.nsis.artifactName, "exe"),
+    expand(config.appImage.artifactName, "AppImage"),
+    expand(config.deb.artifactName, "deb"),
+    // Packaged by scripts/package-extension.mjs, not electron-builder.
+    "noise-canvas.ablx",
+  ]);
+
+  it("omits the version from every artifact name", () => {
+    for (const template of templates) expect(template).not.toContain("${version}");
+  });
+
+  it("produces every file the README offers for download", () => {
+    const readme = readFileSync(join(process.cwd(), "README.md"), "utf8");
+    const linked = [...readme.matchAll(/releases\/latest\/download\/([^)\s]+)/g)].map((match) => match[1]);
+
+    expect(linked.length).toBeGreaterThan(0);
+    for (const file of linked) expect([...published]).toContain(file);
+  });
+});
