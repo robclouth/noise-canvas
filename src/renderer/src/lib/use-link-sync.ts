@@ -205,18 +205,20 @@ export function useLinkSync(): void {
     return unsub;
   }, [linkEnabled]);
 
-  // Debug metronome — enable via window.__linkMetronome = true
+  // Debug metronome — enable via window.__linkMetronome = true. The flag is
+  // polled on a slow timer; the per-frame loop runs only while it is set.
   useEffect(() => {
     if (!linkEnabled) return;
 
-    let rafId: number;
+    let rafId = 0;
     let lastBeatInt = -1;
     let audioCtx: AudioContext | null = null;
+    const metronomeOn = () => Boolean((window as unknown as Record<string, unknown>).__linkMetronome);
 
     const tick = () => {
-      if (!(window as unknown as Record<string, unknown>).__linkMetronome) {
+      if (!metronomeOn()) {
         lastBeatInt = -1;
-        rafId = requestAnimationFrame(tick);
+        rafId = 0;
         return;
       }
 
@@ -241,8 +243,11 @@ export function useLinkSync(): void {
       rafId = requestAnimationFrame(tick);
     };
 
-    rafId = requestAnimationFrame(tick);
+    const flagPoll = setInterval(() => {
+      if (metronomeOn() && rafId === 0) rafId = requestAnimationFrame(tick);
+    }, 500);
     return () => {
+      clearInterval(flagPoll);
       cancelAnimationFrame(rafId);
       if (audioCtx) audioCtx.close();
     };

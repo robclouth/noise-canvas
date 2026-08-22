@@ -219,19 +219,16 @@ export const ModulatorView = () => {
     invalidateRef.current = invalidate;
   };
 
-  // Watch for position changes so the Three.js View re-renders correctly when
-  // scrolling or when controls above it change height. Polling is the robust way
-  // to catch layout shifts that don't fire scroll/resize, but it only runs while
-  // the preview is actually on screen — a collapsed or scrolled-away modulator
+  // Re-render the Three.js View when its place on screen moves: on any scroll,
+  // and when the view or any ancestor changes size, which is how controls
+  // above it changing height reach it. Both only fire on change, and only
+  // while the preview is on screen — a collapsed or scrolled-away modulator
   // panel costs nothing.
   useEffect(() => {
     const element = viewRef.current;
     if (!element) {
       return;
     }
-
-    let animationFrameId = 0;
-    let polling = false;
 
     const checkPosition = () => {
       const rect = element.getBoundingClientRect();
@@ -247,17 +244,25 @@ export const ModulatorView = () => {
       }
 
       lastPositionRef.current = currentPosition;
-      animationFrameId = requestAnimationFrame(checkPosition);
     };
 
+    const resizeObserver = new ResizeObserver(checkPosition);
+    let watching = false;
+
     const start = () => {
-      if (polling) return;
-      polling = true;
-      animationFrameId = requestAnimationFrame(checkPosition);
+      if (watching) return;
+      watching = true;
+      for (let node: HTMLElement | null = element; node; node = node.parentElement) {
+        resizeObserver.observe(node);
+      }
+      document.addEventListener("scroll", checkPosition, { capture: true, passive: true });
+      checkPosition();
     };
     const stop = () => {
-      polling = false;
-      cancelAnimationFrame(animationFrameId);
+      if (!watching) return;
+      watching = false;
+      resizeObserver.disconnect();
+      document.removeEventListener("scroll", checkPosition, { capture: true });
     };
 
     const observer = new IntersectionObserver(([entry]) => {
