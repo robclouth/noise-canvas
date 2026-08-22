@@ -223,10 +223,18 @@ export class StrokeRenderer {
   private pingPong = 0;
   private maskPingPong = 0;
   private isInitialized = false;
+  // Packed rows the last preview dab wrote into the ping-pong partner; null
+  // once a stroke commits, when the partner holds nothing worth showing.
+  private previewRows: { rowStart: number; rowCount: number } | null = null;
+  // Union of the packed rows [rowStart, rowEnd) every dab since the masks were
+  // last cleared has written. Outside it both mask buffers are still zero, so a
+  // mask update scissored to it loses nothing across the ping-pong.
+  private maskRows: { rowStart: number; rowEnd: number } | null = null;
 
   // Test seam: forces committed scissored strokes back onto the legacy
   // full-texture blit + ping-pong-swap path instead of the brush-sized
-  // copy-back, so equivalence between the two can be asserted.
+  // copy-back, and the stroke mask onto a full-texture update, so
+  // equivalence between the two can be asserted.
   disableScissorCopyBack = false;
 
   // FBO data cache
@@ -375,11 +383,11 @@ export class StrokeRenderer {
 
   /**
    * Evaluates every modulator's stereo output per pixel into the scratch
-   * modulatorFbo's two targets, using the step's common uniforms. Effects then
-   * sample these textures instead of evaluating the modulators inline. Runs
-   * once per step.
+   * modulator MRT's two targets, using the step's common uniforms, within
+   * `scissor` when given. Effects then sample these textures instead of
+   * evaluating the modulators inline. Runs once per step. Returns the target.
    */
-  private renderModulatorTextures(scratch: StrokeScratch, commonUniforms: CommonUniforms): void {
+  private renderModulatorTextures(commonUniforms: CommonUniforms, scissor: Vector4 | null): WebGLRenderTarget {
     const m = this.modulatorMaterial;
     for (const key in commonUniforms) {
       const src = (commonUniforms as Record<string, { value: unknown } | undefined>)[key];
@@ -390,9 +398,13 @@ export class StrokeRenderer {
         m.uniforms[key] = { value: src.value };
       }
     }
+    const target = this.pool.modulatorFbo();
+    if (scissor) target.scissor.copy(scissor);
+    target.scissorTest = scissor !== null;
     this.fboMesh.material = m;
-    this.gl.setRenderTarget(scratch.modulatorFbo);
+    this.gl.setRenderTarget(target);
     this.gl.render(this.fboScene, this.camera);
+    return target;
   }
 
   /**
@@ -464,6 +476,7 @@ export class StrokeRenderer {
     this.gl.clear(true, false, false);
     this.gl.setRenderTarget(null);
     this.gl.setClearColor(oldClearColor, oldClearAlpha);
+    this.maskRows = null;
   }
 
   /**
@@ -810,25 +823,25 @@ export class StrokeRenderer {
     // Committed strokes use a copy-back path: render only the brush rows into
     // destinationFbo, then fold those rows back into the canonical buffer, so
     // per-stroke cost stays proportional to the brush rather than the whole
-    // texture. Preview strokes still need a fully-valid destination because the
-    // display samples destinationFbo directly (getDisplayTexture), so its
-    // untouched rows must hold the current spectrogram.
+    // texture. A preview renders only those rows too; the display reads them
+    // from destinationFbo and every other row from the canonical buffer.
     const committedScissor = scissorRows !== null && !preview && !this.disableScissorCopyBack;
-    if (scissorRows) {
-      if (!committedScissor) {
+    // The modulator precompute is scissored to the same rows, since only those
+    // are read.
+    const scissorVec = scissorRows
+      ? new Vector4(0, scissorRows.rowStart, this.spectrogramData.textureWidth, scissorRows.rowCount)
+      : null;
+    if (scissorVec) {
+      if (!committedScissor && !preview) {
         this.blitFBO(currentReadFBO, destinationFbo);
       }
 
-      const scissorVec = new Vector4(0, scissorRows.rowStart, this.spectrogramData.textureWidth, scissorRows.rowCount);
       destinationFbo.scissor.copy(scissorVec);
       destinationFbo.scissorTest = true;
       tempFboA.scissor.copy(scissorVec);
       tempFboA.scissorTest = true;
       tempFboB.scissor.copy(scissorVec);
       tempFboB.scissorTest = true;
-      // Only precompute modulators for the rows effects will actually read.
-      scratch.modulatorFbo.scissor.copy(scissorVec);
-      scratch.modulatorFbo.scissorTest = true;
     }
 
     // Generate random value seeded by position using Perlin noise
@@ -912,9 +925,9 @@ export class StrokeRenderer {
         // per-step parameters), so resolve the gate from the step state, not the
         // global state, before rendering this step's modulators.
         this.modulatorMaterial.uniforms.nestedModulationActive.value = hasNestedModulatorRouting(stepState);
-        this.renderModulatorTextures(scratch, commonUniforms);
-        commonUniforms.modulatorTex0 = { value: scratch.modulatorFbo.textures[0] };
-        commonUniforms.modulatorTex1 = { value: scratch.modulatorFbo.textures[1] };
+        const modulatorFbo = this.renderModulatorTextures(commonUniforms, scissorVec);
+        commonUniforms.modulatorTex0 = { value: modulatorFbo.textures[0] };
+        commonUniforms.modulatorTex1 = { value: modulatorFbo.textures[1] };
       } else {
         commonUniforms.modulatorTex0 = { value: this.textures.placeholderTexture };
         commonUniforms.modulatorTex1 = { value: this.textures.placeholderTexture };
@@ -1093,8 +1106,9 @@ export class StrokeRenderer {
       destinationFbo.scissorTest = false;
       scratch.passFbo1.scissorTest = false;
       scratch.passFbo2.scissorTest = false;
-      scratch.modulatorFbo.scissorTest = false;
     }
+
+    this.previewRows = preview ? (scissorRows ?? { rowStart: 0, rowCount: this.spectrogramData.textureHeight }) : null;
 
     // If the stroke is not a preview, commit the changes
     if (!preview) {
@@ -1118,6 +1132,16 @@ export class StrokeRenderer {
         }
       }
       if (anyNonAccumulate) {
+        const dabRowStart = scissorRows ? scissorRows.rowStart : 0;
+        const dabRowEnd = scissorRows
+          ? scissorRows.rowStart + scissorRows.rowCount
+          : this.spectrogramData.textureHeight;
+        this.maskRows = this.maskRows
+          ? {
+              rowStart: Math.min(this.maskRows.rowStart, dabRowStart),
+              rowEnd: Math.max(this.maskRows.rowEnd, dabRowEnd),
+            }
+          : { rowStart: dabRowStart, rowEnd: dabRowEnd };
         this.updateStrokeMask(scratch, state, cursorPos, bpm, totalDuration, strokeRandom, pressure, tiltX, tiltY);
       }
 
@@ -1193,6 +1217,19 @@ export class StrokeRenderer {
     uniforms.modulator3ImageTex.value = modulator3Texture || placeholderTexture;
 
     this.fboMesh.material = this.maskMaterial;
+
+    const rows = this.maskRows;
+    const scissorVec =
+      rows !== null && !this.disableScissorCopyBack && rows.rowEnd - rows.rowStart < this.spectrogramData.textureHeight
+        ? new Vector4(0, rows.rowStart, this.spectrogramData.textureWidth, rows.rowEnd - rows.rowStart)
+        : null;
+    const maskTargets = [scratch.strokeMaskFbo, scratch.strokeMaskFbo2];
+    if (scissorVec) {
+      for (const target of maskTargets) {
+        target.scissor.copy(scissorVec);
+        target.scissorTest = true;
+      }
+    }
 
     let renderedAny = false;
 
@@ -1275,9 +1312,9 @@ export class StrokeRenderer {
       // nothing routes to a modulator (zero placeholder yields the same result).
       if (hasActiveModulatorRouting(stepState)) {
         this.modulatorMaterial.uniforms.nestedModulationActive.value = hasNestedModulatorRouting(stepState);
-        this.renderModulatorTextures(scratch, uniforms as unknown as CommonUniforms);
-        uniforms.modulatorTex0.value = scratch.modulatorFbo.textures[0];
-        uniforms.modulatorTex1.value = scratch.modulatorFbo.textures[1];
+        const modulatorFbo = this.renderModulatorTextures(uniforms as unknown as CommonUniforms, scissorVec);
+        uniforms.modulatorTex0.value = modulatorFbo.textures[0];
+        uniforms.modulatorTex1.value = modulatorFbo.textures[1];
       } else {
         uniforms.modulatorTex0.value = this.textures.placeholderTexture;
         uniforms.modulatorTex1.value = this.textures.placeholderTexture;
@@ -1296,6 +1333,9 @@ export class StrokeRenderer {
     }
 
     if (renderedAny) this.gl.setRenderTarget(null);
+    if (scissorVec) {
+      for (const target of maskTargets) target.scissorTest = false;
+    }
   }
 
   /** Marks the cached packed state stale, so the next read goes to the GPU. */
@@ -1620,13 +1660,26 @@ export class StrokeRenderer {
     };
   }
 
+  /** The committed spectrogram texture. */
+  getDisplayTexture(): Texture {
+    return (this.pingPong === 0 ? this.fbo1 : this.fbo2).texture;
+  }
+
   /**
-   * Get the display texture (for the React component to render).
+   * The textures the display composites when a preview is up: the committed
+   * spectrogram, the preview, and the packed row range [rowStart, rowEnd) the
+   * preview is valid in. The range is empty when there is no preview to show.
    */
-  getDisplayTexture(isPreview: boolean): Texture {
+  getPreviewDisplay(): { committed: Texture; preview: Texture; rowStart: number; rowEnd: number } {
     const currentFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
     const nextFBO = this.pingPong === 0 ? this.fbo2 : this.fbo1;
-    return isPreview ? nextFBO.texture : currentFBO.texture;
+    const rows = this.previewRows;
+    return {
+      committed: currentFBO.texture,
+      preview: nextFBO.texture,
+      rowStart: rows ? rows.rowStart : 0,
+      rowEnd: rows ? rows.rowStart + rows.rowCount : 0,
+    };
   }
 
   // Blocks until all GPU work submitted so far has finished. Lets opt-in paint

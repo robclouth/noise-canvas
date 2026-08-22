@@ -11,6 +11,7 @@ import {
   type HarnessTextures,
 } from "../../test/render-harness";
 import type { SpectrogramData } from "../../store/types";
+import { readRenderTargetPixelsAsync } from "../async-readpixels";
 import { StrokeRenderer, type EffectsRegistry } from "../stroke-renderer";
 
 /**
@@ -57,12 +58,21 @@ describe("scissor copy-back equivalence", () => {
   }
 
   // A small brush at a few positions, forcing the scissored committed path.
+  // The state's steps do not accumulate, so every dab also updates the stroke
+  // mask; the last dab sits far from the others in pitch, so the mask's row
+  // union has to widen rather than follow one dab.
   async function paintAndRead(legacy: boolean): Promise<Float32Array> {
     const r = makeRenderer(legacy);
     try {
       const sourceFile = createSourceFile(r, spectrogramData);
       const state = createStateForEffects(["blur"], { brushSizeTime: 0.5, brushSizePitch: 12 });
-      const positions = [new Vector2(0.45, 0.5), new Vector2(0.5, 0.55), new Vector2(0.55, 0.5)];
+      const positions = [
+        new Vector2(0.45, 0.5),
+        new Vector2(0.5, 0.55),
+        new Vector2(0.55, 0.5),
+        new Vector2(0.5, 0.8),
+        new Vector2(0.5, 0.5),
+      ];
       for (const p of positions) {
         r.renderStroke(makeStrokeParams(p, spectrogramData, { totalDuration: 4 }), state, sourceFile);
       }
@@ -98,5 +108,61 @@ describe("scissor copy-back equivalence", () => {
     }
     // Same shader math on both paths → expect exact equality.
     expect(maxDiff, `first diff at index ${firstDiffIndex}`).toBe(0);
+  });
+
+  // The display composites a preview from two textures: the committed buffer
+  // everywhere, and the ping-pong partner inside the rows the preview wrote.
+  // So a preview dab renders only those rows, and they must hold exactly what
+  // committing the same dab would.
+  it("a preview writes only its scissor rows, and they match a committed dab", async () => {
+    const position = new Vector2(0.5, 0.5);
+    const makeState = () => createStateForEffects(["blur"], { brushSizeTime: 0.5, brushSizePitch: 12 });
+
+    const committedRenderer = makeRenderer(false);
+    let committed: Float32Array;
+    try {
+      const sourceFile = createSourceFile(committedRenderer, spectrogramData);
+      committedRenderer.renderStroke(
+        makeStrokeParams(position, spectrogramData, { totalDuration: 4 }),
+        makeState(),
+        sourceFile,
+      );
+      committed = await committedRenderer.getFBOData();
+    } finally {
+      committedRenderer.dispose();
+    }
+
+    const previewRenderer = makeRenderer(false);
+    try {
+      const sourceFile = createSourceFile(previewRenderer, spectrogramData);
+      const before = await previewRenderer.getFBOData();
+      previewRenderer.renderStroke(
+        makeStrokeParams(position, spectrogramData, { totalDuration: 4, preview: true }),
+        makeState(),
+        sourceFile,
+      );
+
+      const display = previewRenderer.getPreviewDisplay();
+      const rowCount = display.rowEnd - display.rowStart;
+      expect(rowCount).toBeGreaterThan(0);
+      expect(rowCount).toBeLessThan(spectrogramData.textureHeight);
+      expect(display.committed).toBe(previewRenderer.getDisplayTexture());
+
+      const previewTarget = previewRenderer["pingPong"] === 0 ? previewRenderer["fbo2"] : previewRenderer["fbo1"];
+      expect(previewTarget.texture).toBe(display.preview);
+      const width = spectrogramData.textureWidth;
+      const previewRows = await readRenderTargetPixelsAsync(gl, previewTarget, 0, display.rowStart, width, rowCount);
+      const committedRows = committed.subarray(display.rowStart * width * 4, display.rowEnd * width * 4);
+      let maxDiff = 0;
+      for (let i = 0; i < previewRows.length; i++) {
+        maxDiff = Math.max(maxDiff, Math.abs(previewRows[i] - committedRows[i]));
+      }
+      expect(maxDiff).toBe(0);
+
+      const after = await previewRenderer.getFBOData();
+      expect(after).toEqual(before);
+    } finally {
+      previewRenderer.dispose();
+    }
   });
 });

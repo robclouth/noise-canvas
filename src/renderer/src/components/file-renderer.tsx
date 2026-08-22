@@ -30,6 +30,7 @@ import {
   RawShaderMaterial,
   RGBAFormat,
   RGFormat,
+  Texture,
   Vector2,
   WebGLRenderer,
   WebGLRenderTarget,
@@ -395,6 +396,9 @@ const FileRendererInner = memo(
           viewOffsetY: { value: 0.0 },
           wrapMode: { value: 0 },
           fullScaleDbOffset: { value: FULL_SCALE_DB_OFFSET },
+          previewTex: { value: null as Texture | null },
+          previewRowStart: { value: 0 },
+          previewRowEnd: { value: 0 },
         },
         vertexShader: passThroughVert,
         fragmentShader: displayFrag,
@@ -646,8 +650,9 @@ const FileRendererInner = memo(
       snapshotStaleRef.current = false;
       const state = useStore.getState();
       applyStaticDisplayUniforms(state, gl.domElement.width, gl.domElement.height);
-      displayMaterial.uniforms.sourceSpectrogramTex.value =
-        strokeRenderer.getDisplayTexture(false) || placeholderTexture;
+      displayMaterial.uniforms.sourceSpectrogramTex.value = strokeRenderer.getDisplayTexture();
+      displayMaterial.uniforms.previewRowStart.value = 0;
+      displayMaterial.uniforms.previewRowEnd.value = 0;
       displayMaterial.uniforms.showTargetRectangle.value = false;
       displayMaterial.uniforms.showSourceRectangle.value = false;
 
@@ -674,7 +679,7 @@ const FileRendererInner = memo(
       return renderExportImageToCanvas(
         gl,
         {
-          texture: strokeRenderer.getDisplayTexture(false),
+          texture: strokeRenderer.getDisplayTexture(),
           metadataTexture: strokeRenderer.getTextures().metadata,
           spectrogramData,
         },
@@ -1065,12 +1070,15 @@ const FileRendererInner = memo(
         displayMode.current = "committed";
       }
       const isPreview = displayMode.current === "preview";
-      const displayTexture = strokeRenderer.getDisplayTexture(isPreview);
+      const previewDisplay = strokeRenderer.getPreviewDisplay();
 
       const hoveredFile = hoveredFileId ? openFiles[hoveredFileId] : null;
 
       applyStaticDisplayUniforms(state, gl.domElement.width, gl.domElement.height);
-      displayMaterial.uniforms.sourceSpectrogramTex.value = displayTexture || placeholderTexture;
+      displayMaterial.uniforms.sourceSpectrogramTex.value = previewDisplay.committed;
+      displayMaterial.uniforms.previewTex.value = previewDisplay.preview;
+      displayMaterial.uniforms.previewRowStart.value = isPreview ? previewDisplay.rowStart : 0;
+      displayMaterial.uniforms.previewRowEnd.value = isPreview ? previewDisplay.rowEnd : 0;
 
       // In Full mode, the displayed brush rectangle anchors to 0 on that axis so it
       // spans the full file extent regardless of cursor position.

@@ -295,4 +295,34 @@ describe("painting performance", () => {
       expect(large).toBeGreaterThan(small * 1.2);
     });
   });
+
+  // 3) The hover preview: a preview dab of a small brush runs on every pointer
+  // move over the canvas, so its cost is what "moving the mouse feels slow"
+  // measures. It renders only the brush's rows, so it must not scale with the
+  // file the way a full-texture pass does.
+  describe("hover preview scaling (blur)", () => {
+    const perSize: Record<string, number> = {};
+    for (const size of SCALING_SIZES) {
+      it(`preview blur [small] @ ${size.label}`, () => {
+        const h = makeHarness(size);
+        try {
+          const cov = coverageBrush("small");
+          const state = createStateForEffects(["blur"], {
+            brushSizeTime: cov.brushSizeTime,
+            brushSizePitch: cov.brushSizePitch,
+          });
+          const ms = measure(h, state, { totalDuration: COVERAGE_DURATION, preview: true });
+          perSize[size.label] = ms;
+          collected.push({ scenario: "preview:blur [small]", size: size.label, msPerStroke: ms });
+          expect(ms).toBeGreaterThan(0);
+        } finally {
+          disposeHarness(h);
+        }
+      });
+    }
+    it("a preview dab costs no more than a committed dab's order of magnitude at 90s", () => {
+      const committedSmall = perSize[SCALING_SIZES[SCALING_SIZES.length - 1].label];
+      expect(committedSmall).toBeLessThan(10);
+    });
+  });
 });

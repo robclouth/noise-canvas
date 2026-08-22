@@ -243,13 +243,17 @@ void bandTimeIndices(float scaledTime, float bandLength, out float index0, out f
 }
 
 /**
- * Interpolated read between two time samples (uses texelFetch for the exact texels).
+ * The two packed texels an interpolated read blends, and the weight of the
+ * second, for a texture of `texSize`.
  */
-vec4 readPackedDataInterpolated(vec2 unpackedUv,
-                                sampler2D dataTex,
-                                sampler2D metaTex,
-                                float frameCount,
-                                float bandCount) {
+void packedInterpCoords(vec2 unpackedUv,
+                        sampler2D metaTex,
+                        float frameCount,
+                        float bandCount,
+                        ivec2 texSize,
+                        out ivec2 texel1,
+                        out ivec2 texel2,
+                        out float fraction) {
   float bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
 
   vec4 meta = fetchBandMetadata(metaTex, bandIndex);
@@ -260,10 +264,9 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv,
   float timeInFrames = unpackedUv.x * frameCount;
   float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
 
-  float timeIndex0, timeIndex1, timeFraction;
-  bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, timeFraction);
+  float timeIndex0, timeIndex1;
+  bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, fraction);
 
-  ivec2 texSize    = textureSize(dataTex, 0);
   float widthFloat = float(max(texSize.x, 1));
 
   float linearIndex1 = bandStartOffset + timeIndex0;
@@ -271,14 +274,29 @@ vec4 readPackedDataInterpolated(vec2 unpackedUv,
   int py1 = int(floor(linearIndex1 / widthFloat));
   px1 = clamp(px1, 0, max(texSize.x - 1, 0));
   py1 = clamp(py1, 0, max(texSize.y - 1, 0));
-  vec4 sample1 = texelFetch(dataTex, ivec2(px1, py1), 0);
+  texel1 = ivec2(px1, py1);
 
   float linearIndex2 = bandStartOffset + timeIndex1;
   int px2 = int(mod(linearIndex2, widthFloat));
   int py2 = int(floor(linearIndex2 / widthFloat));
   px2 = clamp(px2, 0, max(texSize.x - 1, 0));
   py2 = clamp(py2, 0, max(texSize.y - 1, 0));
-  vec4 sample2 = texelFetch(dataTex, ivec2(px2, py2), 0);
+  texel2 = ivec2(px2, py2);
+}
+
+/**
+ * Interpolated read between two time samples (uses texelFetch for the exact texels).
+ */
+vec4 readPackedDataInterpolated(vec2 unpackedUv,
+                                sampler2D dataTex,
+                                sampler2D metaTex,
+                                float frameCount,
+                                float bandCount) {
+  ivec2 texel1, texel2;
+  float timeFraction;
+  packedInterpCoords(unpackedUv, metaTex, frameCount, bandCount, textureSize(dataTex, 0), texel1, texel2, timeFraction);
+  vec4 sample1 = texelFetch(dataTex, texel1, 0);
+  vec4 sample2 = texelFetch(dataTex, texel2, 0);
 
   vec2 magPhaseL = interpolateComplex(sample1.rg, sample2.rg, timeFraction);
   vec2 magPhaseR = interpolateComplex(sample1.ba, sample2.ba, timeFraction);

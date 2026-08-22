@@ -32,6 +32,29 @@ uniform float pitchOffsetSemisFromC0; // semitones above C0 at band index 0
 // so this offset is what turns a raw coefficient magnitude into dBFS.
 uniform float fullScaleDbOffset;
 
+// The brush preview, valid only in packed rows [previewRowStart, previewRowEnd);
+// every other row is read from the committed spectrogram. An empty range
+// shows the committed spectrogram alone.
+uniform sampler2D previewTex;
+uniform int previewRowStart;
+uniform int previewRowEnd;
+
+vec4 fetchDisplayTexel(ivec2 texel) {
+    if (texel.y >= previewRowStart && texel.y < previewRowEnd) return texelFetch(previewTex, texel, 0);
+    return texelFetch(sourceSpectrogramTex, texel, 0);
+}
+
+vec4 sampleDisplayInterp(vec2 uv) {
+    ivec2 texel1, texel2;
+    float timeFraction;
+    packedInterpCoords(uv, sourceMetadataTex, sourceFrameCount, sourceBandCount,
+                       textureSize(sourceSpectrogramTex, 0), texel1, texel2, timeFraction);
+    vec4 sample1 = fetchDisplayTexel(texel1);
+    vec4 sample2 = fetchDisplayTexel(texel2);
+    return vec4(interpolateComplex(sample1.rg, sample2.rg, timeFraction),
+                interpolateComplex(sample1.ba, sample2.ba, timeFraction));
+}
+
 // Convert screen UV (what we see) to zoomed UV (actual data coordinates).
 // screenUv.y and the result are pitch UV — 0 at the file's lowest band — but
 // offsetY arrives in the view space the DOM pans in, y measured down from the
@@ -91,7 +114,7 @@ void main() {
     // Time axis samples edge-aligned: the stored coefficient for bin k is the
     // analysis atom centered at frame k * 2^step, so an impulse reads as a
     // vertical ridge at the same time in every band regardless of bin stride.
-    vec4 packedValue = mix(sampleSourceInterp(uv0), sampleSourceInterp(uv1), bandFrac);
+    vec4 packedValue = mix(sampleDisplayInterp(uv0), sampleDisplayInterp(uv1), bandFrac);
 
     // packedValue stores [leftMagnitude, leftPhase, rightMagnitude, rightPhase]
     vec2 leftMagPhase = packedValue.rg;
