@@ -92,6 +92,11 @@ export const UI_CONTROLS = {
     description: "Copies the file into a new lane you can edit on its own.",
     manualSection: "working-with-files",
   },
+  "file-reorder": {
+    label: "Reorder",
+    description: "Moves the file up or down the canvas.",
+    manualSection: "navigating-the-canvas",
+  },
   "file-minimize": {
     label: "Minimise",
     description: "Moves the file off the canvas to the dock, leaving it open.",

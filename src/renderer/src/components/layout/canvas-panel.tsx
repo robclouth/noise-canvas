@@ -6,7 +6,9 @@ import { HelpActionIcon } from "@renderer/components/controls/help-control";
 import { useUiSize } from "@renderer/lib/ui-density";
 import { helpProps } from "@renderer/lib/ui-controls";
 import { Layers, Link2, Link2Off, Merge, X } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, type RefObject } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { FileReorderProvider } from "@renderer/contexts/file-reorder";
+import { type FileDropTarget } from "@renderer/lib/file-reorder";
 import { FileView } from "../file-view";
 import { Tooltip } from "../tooltip";
 
@@ -233,6 +235,10 @@ export const CanvasPanel = memo(() => {
     activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [activeFileId]);
 
+  const stackRef = useRef<HTMLDivElement>(null);
+  const [dropTarget, setDropTarget] = useState<FileDropTarget | null>(null);
+  const handleTargetChange = useCallback((target: FileDropTarget | null) => setDropTarget(target), []);
+
   const segments = useMemo(() => getFileSegments(openFileIds, stemGroupOfFile), [openFileIds, stemGroupOfFile]);
   const laneProps = useMemo(
     () => ({ activeFileId, activeRef, fullscreenFileId, minimizedFileIds }),
@@ -240,26 +246,40 @@ export const CanvasPanel = memo(() => {
   );
 
   return (
-    <Stack
-      h={fullscreenFileId ? "100%" : undefined}
-      flex={fullscreenFileId ? 1 : undefined}
-      style={fullscreenFileId ? { minHeight: 0 } : undefined}
-      pos="relative"
-      gap={"xs"}
-    >
-      {segments.map((segment, index) =>
-        segment.groupId !== null ? (
-          <StemGroupSection
-            key={`${segment.groupId}-${index}`}
-            groupId={segment.groupId}
-            fileIds={segment.fileIds}
-            {...laneProps}
+    <FileReorderProvider containerRef={stackRef} onTargetChange={handleTargetChange}>
+      <Stack
+        ref={stackRef}
+        h={fullscreenFileId ? "100%" : undefined}
+        flex={fullscreenFileId ? 1 : undefined}
+        style={fullscreenFileId ? { minHeight: 0 } : undefined}
+        pos="relative"
+        gap={"xs"}
+      >
+        {segments.map((segment, index) =>
+          segment.groupId !== null ? (
+            <StemGroupSection
+              key={`${segment.groupId}-${index}`}
+              groupId={segment.groupId}
+              fileIds={segment.fileIds}
+              {...laneProps}
+            />
+          ) : (
+            segment.fileIds.map((fileId) => <FileLane key={fileId} fileId={fileId} {...laneProps} />)
+          ),
+        )}
+        {dropTarget && (
+          <Box
+            pos="absolute"
+            left={0}
+            right={0}
+            top={dropTarget.y - 1}
+            h={2}
+            bg="orange.5"
+            style={{ pointerEvents: "none", zIndex: 3, borderRadius: 2 }}
           />
-        ) : (
-          segment.fileIds.map((fileId) => <FileLane key={fileId} fileId={fileId} {...laneProps} />)
-        ),
-      )}
-    </Stack>
+        )}
+      </Stack>
+    </FileReorderProvider>
   );
 });
 

@@ -8,10 +8,11 @@ import { anchorProps } from "@renderer/lib/ui-anchors";
 import { helpProps, type UiControlName } from "@renderer/lib/ui-controls";
 import { FILE_HEADER_FONT, FILE_HEADER_PAD, useUiSize } from "@renderer/lib/ui-density";
 import { getHistoryManager } from "@renderer/lib/history-manager";
+import { useFileReorder } from "@renderer/contexts/file-reorder";
 import { openFiles, selectFileColor } from "@renderer/store/files";
 import { isManagedFilePath } from "@renderer/store/utils";
 import truncateMiddle from "@stdlib/string-truncate-middle";
-import { ChevronDown, Copy, Grid3x3, Maximize2, Minimize2, Split, X } from "lucide-react";
+import { ChevronDown, Copy, Grid3x3, GripVertical, Maximize2, Minimize2, Split, X } from "lucide-react";
 import { memo, useCallback, useMemo, useSyncExternalStore } from "react";
 import { host } from "../lib/host";
 import { Tooltip } from "./tooltip";
@@ -166,8 +167,11 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
   const isHighlighted = useStore((state) => state.highlightedSourcePath === filePath);
   const fileColor = useStore((state) => selectFileColor(state, fileId));
   const channelCount = useFileChannelCount(fileId);
+  const reorder = useFileReorder();
+  const laneCount = useStore((state) => state.openFileIds.filter((id) => !state.minimizedFileIds.includes(id)).length);
 
   const isFullscreen = fullscreenFileId === fileId;
+  const canReorder = reorder !== null && laneCount > 1 && fullscreenFileId === null;
   // Tooltip shows full path for real files (helpful when basenames truncate);
   // for managed files the path is the opaque sentinel, so just show the label.
   const tooltipLabel = isManagedFilePath(filePath) ? displayName : filePath;
@@ -186,6 +190,18 @@ export default memo(function FileHeader({ fileId }: { fileId: string }) {
       {...anchorProps("file-header")}
     >
       <Group gap="xs" style={{ minWidth: 0, flex: 1 }}>
+        {canReorder && (
+          <Tooltip help="file-reorder">
+            <Box
+              {...helpProps("file-reorder")}
+              c="dark.2"
+              style={{ display: "flex", alignItems: "center", flexShrink: 0, cursor: "grab" }}
+              onPointerDown={(e) => reorder.beginDrag(fileId, e)}
+            >
+              <GripVertical size={14} />
+            </Box>
+          </Tooltip>
+        )}
         <Tooltip label={tooltipLabel}>
           <Box style={{ minWidth: 0, flex: 1 }}>
             <TruncatedFilename displayName={displayName} isDirty={isDirty} />

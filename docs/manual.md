@@ -744,6 +744,7 @@ Open a file from **File → Open**, from **Open Recent**, or by **dragging an au
 
 Open files stack vertically in the canvas column. Each header gives you:
 
+- The **grip** at the far left – drag it up or down to reorder the stack.
 - The **filename**, italic when it has unsaved changes, a **resolution badge**, and a **channel badge**.
 - **BPM** – this file's tempo, which drives grid snapping and every beat-based parameter.
 - **Onsets** – how sensitive the hit detector is for this file. See [Onsets](#onsets).

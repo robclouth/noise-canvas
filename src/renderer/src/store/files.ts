@@ -20,6 +20,7 @@ import {
 } from "../lib/output-levels";
 import { applyAudioEdits, buildAudioHop, type AudioEdit, type AudioHop, type AudioStateMeta } from "../lib/audio-hop";
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
+import { reorderFileIds } from "../lib/file-reorder";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
 import { serializeFileTask } from "../lib/file-task-queue";
@@ -179,6 +180,8 @@ export interface FilesState {
   setFullscreenFileId: (fileId: string | null) => void;
   minimizedFileIds: string[];
   setFileMinimized: (fileId: string, minimized: boolean) => void;
+  /** Moves a file so it sits directly before `beforeFileId`, or last when null. */
+  moveFileBefore: (fileId: string, beforeFileId: string | null) => void;
   openFileMinimized: (filePath: string) => Promise<void>;
   switchToNextFile: () => void;
   switchToPreviousFile: () => void;
@@ -2924,6 +2927,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         }
       }),
     );
+  },
+  moveFileBefore: (fileId, beforeFileId) => {
+    set((state) => ({ openFileIds: reorderFileIds(state.openFileIds, fileId, beforeFileId) }));
   },
   openFileMinimized: async (filePath) => {
     // Check if already open
