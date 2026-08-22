@@ -150,7 +150,7 @@ export function defaultParameterUniform(value: number, minValue: number, maxValu
     position: 0,
     minValue,
     maxValue,
-    modulationAmounts: [],
+    modulationAmounts: [0, 0, 0],
     staticSum: 0,
     staticWeight: 0,
     scaleKind: ParameterScaleKind.Linear,
