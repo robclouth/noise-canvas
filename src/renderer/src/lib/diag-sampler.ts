@@ -1,7 +1,7 @@
 import type { WebGLRenderer } from "three";
 import { openFiles } from "../store/files";
 import { diag } from "./diag-log";
-import { GPU_BYTES_PER_TEXEL_SCRATCH, spectrogramBytes, usedBudgetFraction } from "./gpu-budget";
+import { spectrogramBytes, usedBudgetFraction } from "./gpu-budget";
 import { historyMemoryCacheBytes } from "./history-manager";
 import { host } from "./host";
 import { getStrokeScratchPool } from "./stroke-scratch-pool";
@@ -94,7 +94,7 @@ async function memoryFigures(gl: WebGLRenderer): Promise<MemoryFigures> {
   const figures: MemoryFigures = {
     spectrogramMB: toMB(spectrogramBytes(texels, unified)),
     budgetPercent: Math.round((usedBudgetFraction(texels) ?? 0) * 100),
-    scratchMB: toMB(getStrokeScratchPool(gl).allocatedTexels * GPU_BYTES_PER_TEXEL_SCRATCH),
+    scratchMB: toMB(getStrokeScratchPool(gl).allocatedBytes),
     openFiles: texels.length,
   };
   const history = historyMemoryCacheBytes();

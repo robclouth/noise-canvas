@@ -35,13 +35,34 @@ function bytesPerTexel(target: WebGLRenderTarget): number {
 }
 
 describe("GPU budget rates", () => {
+  // The budget charges the pool at its fullest, with the modulator target a
+  // step can ask for at any time already allocated.
   it("charges scratch at what the pool really allocates", () => {
     const pool = new StrokeScratchPool();
     const owner = {};
     try {
       const { scratch } = pool.acquire(owner, 32, 16);
-      const allocated = Object.values(scratch).reduce((sum, target) => sum + bytesPerTexel(target), 0);
+      pool.modulatorFbo();
+      const allocated = Object.values(scratch).reduce((sum, target) => sum + (target ? bytesPerTexel(target) : 0), 0);
       expect(GPU_BYTES_PER_TEXEL_SCRATCH).toBe(allocated);
+      expect(pool.allocatedBytes).toBe(allocated * 32 * 16);
+    } finally {
+      pool.release(owner);
+    }
+  });
+
+  it("allocates the modulator target only when asked for it", () => {
+    const pool = new StrokeScratchPool();
+    const owner = {};
+    try {
+      const { scratch } = pool.acquire(owner, 32, 16);
+      expect(scratch.modulatorFbo).toBeNull();
+      const withoutModulator = pool.allocatedBytes;
+      const target = pool.modulatorFbo();
+      expect(scratch.modulatorFbo).toBe(target);
+      expect(target.width).toBe(32);
+      expect(target.height).toBe(16);
+      expect(pool.allocatedBytes - withoutModulator).toBe(bytesPerTexel(target) * 32 * 16);
     } finally {
       pool.release(owner);
     }

@@ -4,10 +4,10 @@ import { host } from "./host";
 // (2 × RGBA32F = 32), the pristine packed texture (RGBA32F = 16) and the
 // inverse map (RG32F = 8).
 export const GPU_BYTES_PER_TEXEL_FILE = 56;
-// The shared stroke scratch pool, sized to the largest open file: two pass
-// FBOs (32), the stroke-start snapshot (16), two masks (R32F = 8) and the
-// two-target modulator buffer (2 × RGBA32F = 32).
-export const GPU_BYTES_PER_TEXEL_SCRATCH = 88;
+// The shared stroke scratch pool at its fullest, sized to the largest open
+// file: two pass FBOs (32), the stroke-start snapshot (16), two masks
+// (R16F = 4) and the two-target modulator buffer (2 × RGBA16F = 16).
+export const GPU_BYTES_PER_TEXEL_SCRATCH = 68;
 // CPU-side copies (packedData 16, inverseMap 8); they compete with the
 // textures only on unified-memory GPUs.
 const CPU_BYTES_PER_TEXEL_FILE = 24;
