@@ -158,22 +158,33 @@ export function serializePalette(palette: PaletteType): string {
  * describes counts, never which copy of it this is.
  */
 export function paletteFingerprint(brushes: readonly PaletteBrush[]): string {
-  return JSON.stringify(
-    brushes.map((brush) => ({
-      name: brush.name,
-      color: brush.color,
-      hotkey: brush.hotkey,
-      steps: brush.steps.map((step) => {
-        const withoutId = { ...step } as Partial<PaletteBrush["steps"][number]>;
-        delete withoutId.id;
-        return withoutId;
-      }),
-      linkedParams: brush.linkedParams,
-      libraryId: brush.libraryId,
-      macroNames: brush.macroNames,
-      macroValues: brush.macroValues,
-    })),
-  );
+  return brushes.map(brushFingerprint).join("\n");
+}
+
+// Brush objects are replaced, never mutated, so a brush's fingerprint is
+// cached against its identity: a parameter edit re-serialises only the brush
+// it changed.
+const brushFingerprints = new WeakMap<PaletteBrush, string>();
+
+function brushFingerprint(brush: PaletteBrush): string {
+  const cached = brushFingerprints.get(brush);
+  if (cached !== undefined) return cached;
+  const fingerprint = JSON.stringify({
+    name: brush.name,
+    color: brush.color,
+    hotkey: brush.hotkey,
+    steps: brush.steps.map((step) => {
+      const withoutId = { ...step } as Partial<PaletteBrush["steps"][number]>;
+      delete withoutId.id;
+      return withoutId;
+    }),
+    linkedParams: brush.linkedParams,
+    libraryId: brush.libraryId,
+    macroNames: brush.macroNames,
+    macroValues: brush.macroValues,
+  });
+  brushFingerprints.set(brush, fingerprint);
+  return fingerprint;
 }
 
 export function makePaletteId(name: string, existingIds: Set<string>): string {

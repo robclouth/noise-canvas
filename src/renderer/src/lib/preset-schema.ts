@@ -114,6 +114,38 @@ export type PresetType = Omit<z.infer<ReturnType<typeof createSchema>>, "steps">
   macroValues: number[];
 };
 
+// Brush and preset objects are replaced, never mutated, so each one's settings
+// serialise once per identity: a parameter edit re-serialises only the brush
+// it changed, not every brush in the sidebar.
+const brushSettings = new WeakMap<Brush, string>();
+const presetSettings = new WeakMap<PresetType, string>();
+
+function serialisedBrushSettings(brush: Brush): string {
+  const cached = brushSettings.get(brush);
+  if (cached !== undefined) return cached;
+  const settings = JSON.stringify({
+    steps: brush.steps.map(sanitizeStepParams),
+    linkedParams: brush.linkedParams,
+    macroNames: brush.macroNames,
+    macroValues: brush.macroValues,
+  });
+  brushSettings.set(brush, settings);
+  return settings;
+}
+
+function serialisedPresetSettings(preset: PresetType): string {
+  const cached = presetSettings.get(preset);
+  if (cached !== undefined) return cached;
+  const settings = JSON.stringify({
+    steps: preset.steps ?? [],
+    linkedParams: preset.linkedParams ?? [],
+    macroNames: preset.macroNames ?? [...DEFAULT_MACRO_NAMES],
+    macroValues: preset.macroValues ?? [...DEFAULT_MACRO_VALUES],
+  });
+  presetSettings.set(preset, settings);
+  return settings;
+}
+
 /** True when no library preset holds this brush, or its settings differ from the one that does. */
 export function isBrushUnsaved(brush: Brush, presets: readonly PresetType[]): boolean {
   if (brush.libraryId === null) return true;
@@ -121,19 +153,7 @@ export function isBrushUnsaved(brush: Brush, presets: readonly PresetType[]): bo
   const preset = presets.find((candidate) => candidate.id === brush.libraryId);
   if (!preset) return true;
 
-  const presetSnapshot = {
-    steps: preset.steps ?? [],
-    linkedParams: preset.linkedParams ?? [],
-    macroNames: preset.macroNames ?? [...DEFAULT_MACRO_NAMES],
-    macroValues: preset.macroValues ?? [...DEFAULT_MACRO_VALUES],
-  };
-  const brushSnapshot = {
-    steps: brush.steps.map(sanitizeStepParams),
-    linkedParams: brush.linkedParams,
-    macroNames: brush.macroNames,
-    macroValues: brush.macroValues,
-  };
-  return JSON.stringify(presetSnapshot) !== JSON.stringify(brushSnapshot);
+  return serialisedPresetSettings(preset) !== serialisedBrushSettings(brush);
 }
 
 // --- Repair ---
