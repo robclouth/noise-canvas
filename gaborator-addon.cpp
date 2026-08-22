@@ -35,12 +35,21 @@
 // file that opens at one resolution fails to re-analyse at another.
 #define MAX_COEFFICIENT_DENSITY 4.79
 
-// Debug logging to file
-static std::ofstream &getDebugLog()
+// Debug logging to file, compiled in by Debug builds only (see binding.gyp).
+#ifdef GABORATOR_DEBUG_LOG
+static std::ostream &getDebugLog()
 {
     static std::ofstream debugLog("/tmp/gaborator_debug.log", std::ios::out | std::ios::app);
     return debugLog;
 }
+#else
+// A stream with no buffer: every insertion fails fast and writes nothing.
+static std::ostream &getDebugLog()
+{
+    static std::ostream nullLog(nullptr);
+    return nullLog;
+}
+#endif
 
 #define DEBUG_LOG getDebugLog()
 
