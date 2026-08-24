@@ -1,4 +1,14 @@
-import { DataUtils } from "three";
+import {
+  ClampToEdgeWrapping,
+  DataTexture,
+  DataUtils,
+  FloatType,
+  HalfFloatType,
+  NearestFilter,
+  RGBAFormat,
+  RGFormat,
+} from "three";
+import type { PixelFormatGPU } from "three";
 import type { PackedLayout } from "./window-layout";
 import { bandOfFilePixel } from "./window-layout";
 
@@ -168,4 +178,27 @@ export function updateOverviewRanges(
       start = chunkEnd;
     }
   }
+}
+
+function configure(texture: DataTexture, internalFormat: PixelFormatGPU): DataTexture {
+  texture.internalFormat = internalFormat;
+  texture.minFilter = NearestFilter;
+  texture.magFilter = NearestFilter;
+  texture.wrapS = ClampToEdgeWrapping;
+  texture.wrapT = ClampToEdgeWrapping;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/** The overview's GPU textures: RG16F dB, and the one-row band metadata. */
+export function createOverviewTextures(overview: Overview): { data: DataTexture; meta: DataTexture } {
+  const { layout } = overview;
+  return {
+    data: configure(
+      new DataTexture(overview.data, layout.textureWidth, layout.textureHeight, RGFormat, HalfFloatType),
+      "RG16F",
+    ),
+    meta: configure(new DataTexture(overview.metadata, layout.numBands, 1, RGBAFormat, FloatType), "RGBA32F"),
+  };
 }

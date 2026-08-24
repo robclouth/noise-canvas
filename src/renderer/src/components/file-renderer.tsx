@@ -18,6 +18,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import {
   Camera,
@@ -44,6 +45,9 @@ import passThroughVert from "../glsl/pass-through.vert";
 import { DEFAULT_ONSET_SENSITIVITY } from "../lib/constants";
 import { getFileOnsets } from "../lib/file-onsets";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
+import { buildOverview, createOverviewTextures, updateOverviewRanges, type Overview } from "../lib/overview";
+import { getPretendWindowFraction, subscribePretendWindow } from "../lib/paging-debug";
+import { buildInPlaceWindowMetadata, buildWindowLayout, fileLayoutOf, type PackedLayout } from "../lib/window-layout";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
 import { FULL_SCALE_DB_OFFSET } from "../lib/constants";
@@ -400,6 +404,9 @@ const FileRendererInner = memo(
           previewTex: { value: null as Texture | null },
           previewBinRangesTex: { value: null as Texture | null },
           previewActive: { value: false },
+          overviewTex: { value: null as Texture | null },
+          overviewMetaTex: { value: null as Texture | null },
+          overviewActive: { value: false },
         },
         vertexShader: passThroughVert,
         fragmentShader: displayFrag,
@@ -515,6 +522,84 @@ const FileRendererInner = memo(
       }
     }, [originalPackedDataTex, inverseMapTex, metadataTex]);
 
+    // The decimated whole-file view the display falls back to outside the
+    // resident window, and the file layout its updater indexes by.
+    const overviewRef = useRef<{ overview: Overview; data: DataTexture; meta: DataTexture } | null>(null);
+    const fileLayoutRef = useRef<PackedLayout | null>(null);
+
+    const disposeOverview = useCallback(() => {
+      const live = overviewRef.current;
+      if (!live) return;
+      live.data.dispose();
+      live.meta.dispose();
+      overviewRef.current = null;
+    }, []);
+
+    const rebuildOverview = useCallback(
+      (packedData: Float32Array = spectrogramData.packedData) => {
+        disposeOverview();
+        const started = performance.now();
+        const layout = fileLayoutOf(spectrogramData);
+        const overview = buildOverview(packedData, layout, spectrogramData.metadata);
+        const textures = createOverviewTextures(overview);
+        fileLayoutRef.current = layout;
+        overviewRef.current = { overview, data: textures.data, meta: textures.meta };
+        diag.timing("paging", "overview build", performance.now() - started, {
+          texels: overview.layout.textureWidth * overview.layout.textureHeight,
+        });
+      },
+      [disposeOverview, spectrogramData],
+    );
+
+    useEffect(() => {
+      rebuildOverview();
+      invalidateRef.current?.();
+      return disposeOverview;
+    }, [rebuildOverview, disposeOverview]);
+
+    // A max cannot follow a value downwards, so the updater re-reads every file
+    // bin of a touched group; the whole texture is then re-uploaded, because a
+    // stroke's bins scatter across nearly every row of it.
+    const patchOverview = (packedData: Float32Array, pixelRanges: Uint32Array): void => {
+      const live = overviewRef.current;
+      const layout = fileLayoutRef.current;
+      if (!live || !layout) return;
+      const started = performance.now();
+      updateOverviewRanges(live.overview, packedData, layout, pixelRanges);
+      live.data.needsUpdate = true;
+      diag.timing("paging", "overview update", performance.now() - started, { ranges: pixelRanges.length / 2 });
+    };
+
+    // Before real windows exist, a forced pretend-window over the whole-file
+    // packed texture drives the display's fallback. Only the display reads it:
+    // the shared metadata texture stays whole-file, so painting is untouched.
+    const pretendWindowFraction = useSyncExternalStore(subscribePretendWindow, getPretendWindowFraction);
+    const [pretendMetadataTex, setPretendMetadataTex] = useState<DataTexture | null>(null);
+
+    useEffect(() => {
+      if (pretendWindowFraction <= 0 || pretendWindowFraction >= 1) {
+        setPretendMetadataTex(null);
+        return;
+      }
+      const { numFrames, numBands, metadata } = spectrogramData;
+      const span = Math.max(1, Math.round(numFrames * pretendWindowFraction));
+      const start = Math.round((numFrames - span) / 2);
+      const window = buildWindowLayout(fileLayoutOf(spectrogramData), start, start + span);
+      const tex = new DataTexture(buildInPlaceWindowMetadata(window, metadata), numBands, 2, RGBAFormat, FloatType);
+      tex.internalFormat = "RGBA32F";
+      tex.minFilter = NearestFilter;
+      tex.magFilter = NearestFilter;
+      tex.wrapS = ClampToEdgeWrapping;
+      tex.wrapT = ClampToEdgeWrapping;
+      tex.generateMipmaps = false;
+      tex.needsUpdate = true;
+      setPretendMetadataTex(tex);
+      invalidateRef.current?.();
+      return () => {
+        tex.dispose();
+      };
+    }, [pretendWindowFraction, spectrogramData]);
+
     /**
      * Calculate clone-stamp offset from the cursor, scaled to source UV space.
      * Base position is in sourceTimeOffset/sourcePitchOffset params (handled in shader with modulation).
@@ -571,7 +656,10 @@ const FileRendererInner = memo(
 
       const uniforms = displayMaterial.uniforms;
       uniforms.sourceInverseMapTex.value = inverseMapTex;
-      uniforms.sourceMetadataTex.value = metadataTex;
+      uniforms.sourceMetadataTex.value = pretendMetadataTex ?? metadataTex;
+      uniforms.overviewTex.value = overviewRef.current?.data ?? null;
+      uniforms.overviewMetaTex.value = overviewRef.current?.meta ?? null;
+      uniforms.overviewActive.value = overviewRef.current !== null;
       uniforms.sourceMinFreq.value = spectrogramData.minFreq;
       uniforms.sourceBandsPerOctave.value = spectrogramData.bandsPerOctave;
       uniforms.sourceFrameCount.value = spectrogramData.numFrames;
@@ -1222,6 +1310,7 @@ const FileRendererInner = memo(
       if (!strokeRendererRef.current) return;
 
       strokeRendererRef.current.setFBOData(data);
+      rebuildOverview(data);
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();
@@ -1243,6 +1332,7 @@ const FileRendererInner = memo(
       if (!strokeRendererRef.current) return;
 
       strokeRendererRef.current.patchFBOData(data, pixelRanges);
+      patchOverview(data, pixelRanges);
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();
@@ -1270,6 +1360,7 @@ const FileRendererInner = memo(
       if (strokeRendererRef.current) {
         strokeRendererRef.current.restoreOriginal();
       }
+      rebuildOverview(spectrogramData.packedData);
       invalidateRef.current();
       snapshotStaleRef.current = true;
       scheduleSnapshotRefresh();
@@ -1290,6 +1381,7 @@ const FileRendererInner = memo(
       }
 
       installTextures(createTextures());
+      rebuildOverview();
 
       invalidateRef.current();
       snapshotStaleRef.current = true;

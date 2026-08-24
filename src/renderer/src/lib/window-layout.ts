@@ -282,3 +282,17 @@ export function frameSpanOfRanges(file: PackedLayout, ranges: Uint32Array): { st
   if (startFrame === Infinity) return { startFrame: 0, endFrame: 0 };
   return { startFrame, endFrame: Math.min(endFrame, file.numFrames) };
 }
+
+/**
+ * Metadata presenting `window` as the resident part of a **whole-file** packed
+ * texture. Row 0's offsets address the file's own texels, so a read inside the
+ * window lands exactly where it would with whole-file metadata, while a read
+ * outside it reports a miss instead of returning the data that is still there.
+ */
+export function buildInPlaceWindowMetadata(window: WindowLayout, fileMetadata: Float32Array): Float32Array {
+  const out = buildWindowMetadata(window, fileMetadata);
+  for (let b = 0; b < window.numBands; b++) {
+    out[b * 4 + 0] = window.file.bandOffsets[b] + window.firstBins[b];
+  }
+  return out;
+}

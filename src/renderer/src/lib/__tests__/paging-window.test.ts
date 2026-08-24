@@ -19,6 +19,7 @@ import probeVert from "../../test/paging-probe.vert";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { gatherPixelRanges } from "../pixel-ranges";
 import {
+  buildInPlaceWindowMetadata,
   buildWindowLayout,
   buildWindowMetadata,
   fileLayoutOf,
@@ -240,6 +241,49 @@ describe("paged window reads", () => {
       }
       expect(resident).toBeGreaterThan(0);
     }
+  });
+
+  it("presents a pretend window over the whole file without moving a resident read", () => {
+    const start = Math.floor(layout.numFrames / 3);
+    const window = buildWindowLayout(layout, start, start + Math.floor(layout.numFrames / 3));
+    const file = fileTextures();
+    // The file's own packed texture, described as if only the window were there.
+    const pretend: ProbeTextures = {
+      packed: file.packed,
+      metadata: makeTextures(
+        data.packedData,
+        buildInPlaceWindowMetadata(window, data.metadata),
+        layout.textureWidth,
+        layout.textureHeight,
+        layout.numBands,
+        2,
+      ).metadata,
+    };
+    disposables.push(file.packed, file.metadata, pretend.metadata);
+
+    const columns = 512;
+    const stride = Math.floor(layout.numFrames / columns);
+    const baseline = probe(file, 0, stride, columns);
+    const paged = probe(pretend, 0, stride, columns);
+
+    let resident = 0;
+    let miss = 0;
+    for (let y = 0; y < layout.numBands; y++) {
+      for (let x = 0; x < columns; x++) {
+        const i = (y * columns + x) * 4;
+        const frame = x * stride;
+        if (paged[i + 1] === 1) {
+          resident++;
+          expect(paged[i]).toBe(baseline[i]);
+          expect(frame >= window.startFrame && frame < window.endFrame).toBe(true);
+        } else {
+          miss++;
+          expect(frame >= window.startFrame && frame < window.endFrame).toBe(false);
+        }
+      }
+    }
+    expect(resident).toBeGreaterThan(0);
+    expect(miss).toBeGreaterThan(0);
   });
 
   it("wraps over the file, not over the window", () => {

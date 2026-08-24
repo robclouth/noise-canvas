@@ -3,14 +3,12 @@ import {
   DataTexture,
   FloatType,
   GLSL3,
-  HalfFloatType,
   Mesh,
   NearestFilter,
   OrthographicCamera,
   PlaneGeometry,
   RawShaderMaterial,
   RGBAFormat,
-  RGFormat,
   Scene,
   WebGLRenderer,
   WebGLRenderTarget,
@@ -19,7 +17,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import overviewProbeFrag from "../../test/overview-probe.frag";
 import probeVert from "../../test/paging-probe.vert";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
-import { buildOverview, magnitudeToDb, OVERVIEW_DECIMATION } from "../overview";
+import { buildOverview, createOverviewTextures, magnitudeToDb, OVERVIEW_DECIMATION } from "../overview";
 import { gatherPixelRanges } from "../pixel-ranges";
 import {
   buildWindowLayout,
@@ -68,19 +66,7 @@ describe("display overview fallback", () => {
   beforeAll(() => {
     renderer = new WebGLRenderer({ antialias: false });
 
-    const overviewTex = new DataTexture(
-      overview.data,
-      overview.layout.textureWidth,
-      overview.layout.textureHeight,
-      RGFormat,
-      HalfFloatType,
-    );
-    overviewTex.internalFormat = "RG16F";
-    overviewTex.minFilter = NearestFilter;
-    overviewTex.magFilter = NearestFilter;
-    overviewTex.wrapS = ClampToEdgeWrapping;
-    overviewTex.wrapT = ClampToEdgeWrapping;
-    overviewTex.needsUpdate = true;
+    const overviewTextures = createOverviewTextures(overview);
 
     material = new RawShaderMaterial({
       uniforms: {
@@ -89,8 +75,8 @@ describe("display overview fallback", () => {
         sourceFrameCount: { value: layout.numFrames },
         sourceBandCount: { value: layout.numBands },
         wrapMode: { value: 0 },
-        overviewTex: { value: overviewTex },
-        overviewMetaTex: { value: floatTexture(overview.metadata, overview.layout.numBands, 1) },
+        overviewTex: { value: overviewTextures.data },
+        overviewMetaTex: { value: overviewTextures.meta },
         overviewActive: { value: true },
         probeFrameOrigin: { value: 0 },
         probeFrameStride: { value: 1 },
