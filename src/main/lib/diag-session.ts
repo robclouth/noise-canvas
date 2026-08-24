@@ -63,9 +63,13 @@ function withoutLongStrings(value: unknown): unknown {
   return value;
 }
 
-/** Routes process-level failures into the log without changing how they end the app. */
+/**
+ * Routes process-level failures into the log. Exceptions are observed through
+ * the monitor hook, so Electron's own handler still shows its error dialog;
+ * rejections only ever warned, and still do, through the log.
+ */
 export function installProcessErrorCapture(): void {
-  process.on("uncaughtException", (error) => {
+  process.on("uncaughtExceptionMonitor", (error) => {
     diagLog("error", "main", "uncaught exception", { error });
   });
   process.on("unhandledRejection", (reason) => {

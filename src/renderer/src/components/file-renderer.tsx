@@ -50,7 +50,7 @@ import { FULL_SCALE_DB_OFFSET } from "../lib/constants";
 import { renderExportImage as renderExportImageToCanvas, type ImageExportOptions } from "../lib/image-export";
 import type { PosterInfo } from "../lib/image-export-poster";
 import { captureMaterialToCanvas } from "../lib/snapshot-capture";
-import { SourceFileInfo, StrokeRenderer, StrokeTextures } from "../lib/stroke-renderer";
+import { GpuMemoryError, SourceFileInfo, StrokeRenderer, StrokeTextures } from "../lib/stroke-renderer";
 import { shallow } from "zustand/shallow";
 import { penState } from "../lib/pen-state";
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
@@ -770,6 +770,7 @@ const FileRendererInner = memo(
           ),
         );
       } catch (error) {
+        if (!(error instanceof GpuMemoryError)) throw error;
         diag.error("gl", "stroke render failed", { error });
         notifications.show({
           title: "Not enough graphics memory",

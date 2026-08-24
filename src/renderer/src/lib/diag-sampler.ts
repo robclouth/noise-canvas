@@ -1,9 +1,8 @@
 import type { WebGLRenderer } from "three";
 import { openFiles } from "../store/files";
 import { diag } from "./diag-log";
-import { spectrogramBytes, usedBudgetFraction } from "./gpu-budget";
+import { gpuMemoryInfo, spectrogramBytes, usedBudgetFraction } from "./gpu-budget";
 import { historyMemoryCacheBytes } from "./history-manager";
-import { host } from "./host";
 import { getStrokeScratchPool } from "./stroke-scratch-pool";
 
 const SAMPLE_INTERVAL_MS = 10_000;
@@ -90,7 +89,7 @@ const performanceWithMemory: Performance & { memory?: { usedJSHeapSize: number; 
 async function memoryFigures(gl: WebGLRenderer): Promise<MemoryFigures> {
   const toMB = (bytes: number): number => Math.round(bytes / 1048576);
   const texels = openTexelCounts();
-  const unified = host.analysis.getGpuMemoryInfo().unified;
+  const unified = gpuMemoryInfo().unified;
   const figures: MemoryFigures = {
     spectrogramMB: toMB(spectrogramBytes(texels, unified)),
     budgetPercent: Math.round((usedBudgetFraction(texels) ?? 0) * 100),

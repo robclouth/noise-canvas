@@ -17,6 +17,12 @@ const GPU_BUDGET_SHARE = 0.5;
 
 let cachedInfo: { bytes: number; unified: boolean } | null = null;
 
+/** The GPU's memory figure, queried once per session. */
+export function gpuMemoryInfo(): { bytes: number; unified: boolean } {
+  if (!cachedInfo) cachedInfo = host.analysis.getGpuMemoryInfo();
+  return cachedInfo;
+}
+
 /** Bytes the open files hold, by the same rates the budget is spent at. */
 export function spectrogramBytes(openTexelCounts: number[], unified: boolean): number {
   let sum = 0;
@@ -35,10 +41,10 @@ export function spectrogramBytes(openTexelCounts: number[], unified: boolean): n
  * which leaves no budget to measure against.
  */
 export function usedBudgetFraction(openTexelCounts: number[]): number | undefined {
-  if (!cachedInfo) cachedInfo = host.analysis.getGpuMemoryInfo();
-  if (cachedInfo.bytes <= 0) return undefined;
-  const budget = cachedInfo.bytes * GPU_BUDGET_SHARE;
-  return spectrogramBytes(openTexelCounts, cachedInfo.unified) / budget;
+  const info = gpuMemoryInfo();
+  if (info.bytes <= 0) return undefined;
+  const budget = info.bytes * GPU_BUDGET_SHARE;
+  return spectrogramBytes(openTexelCounts, info.unified) / budget;
 }
 
 /**
@@ -47,11 +53,11 @@ export function usedBudgetFraction(openTexelCounts: number[]): number | undefine
  * GPU memory figure, leaving only the analyzer's texture-dimension cap.
  */
 export function remainingCoefficientBudget(openTexelCounts: number[]): number | undefined {
-  if (!cachedInfo) cachedInfo = host.analysis.getGpuMemoryInfo();
-  if (cachedInfo.bytes <= 0) return undefined;
+  const info = gpuMemoryInfo();
+  if (info.bytes <= 0) return undefined;
 
-  const perTexel = GPU_BYTES_PER_TEXEL_FILE + (cachedInfo.unified ? CPU_BYTES_PER_TEXEL_FILE : 0);
-  const budget = cachedInfo.bytes * GPU_BUDGET_SHARE;
+  const perTexel = GPU_BYTES_PER_TEXEL_FILE + (info.unified ? CPU_BYTES_PER_TEXEL_FILE : 0);
+  const budget = info.bytes * GPU_BUDGET_SHARE;
 
   let sum = 0;
   let largest = 0;

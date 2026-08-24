@@ -13,6 +13,9 @@ let mirrorToConsole = false;
 let fileBytes = 0;
 let queue: string[] = [];
 let flushing = false;
+// Cleared after a write fails, so an unwritable directory costs one warning
+// rather than one per line.
+let fileWritable = true;
 
 /** Absolute path of the current log file; empty until `initDiagLog` runs. */
 export function diagLogPath(): string {
@@ -21,11 +24,20 @@ export function diagLogPath(): string {
 
 /**
  * Creates the log directory and starts flushing. Lines written before this
- * call are held and flushed once the file is ready.
+ * call are held and flushed once the file is ready. When the directory cannot
+ * be created, lines go to the console only and the app carries on.
  */
 export async function initDiagLog(dir: string, mirror: boolean): Promise<void> {
   mirrorToConsole = mirror;
-  await mkdir(dir, { recursive: true });
+  try {
+    await mkdir(dir, { recursive: true });
+  } catch (error) {
+    console.error("Diagnostic log directory could not be created:", error);
+    mirrorToConsole = true;
+    fileWritable = false;
+    queue = [];
+    return;
+  }
   logDir = dir;
   try {
     fileBytes = (await stat(diagLogPath())).size;
@@ -42,6 +54,7 @@ export function diagLog(level: DiagLevel, scope: string, message: string, data?:
     const print = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
     print(line);
   }
+  if (!fileWritable) return;
   queue.push(line);
   void flush();
 }
@@ -78,7 +91,10 @@ async function flush(): Promise<void> {
       fileBytes += Buffer.byteLength(chunk, "utf-8");
     }
   } catch (error) {
-    console.error("Diagnostic log write failed:", error);
+    console.error("Diagnostic log write failed; file logging is off for this session:", error);
+    fileWritable = false;
+    mirrorToConsole = true;
+    queue = [];
   } finally {
     flushing = false;
   }

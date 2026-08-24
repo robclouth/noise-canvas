@@ -25,6 +25,7 @@ import { copyMaterial } from "../components/copy-material";
 import { gatherMaterial } from "../components/gather-material";
 import { patchMaterial } from "../components/patch-material";
 import { phaseTurnMaterial } from "../components/phase-turn-material";
+import { rangeCopyMaterial } from "../components/range-copy-material";
 import { BaseEffect, CommonUniforms, createDefaultUniforms } from "../effects/base-effect";
 import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
@@ -84,33 +85,17 @@ const createParameterUniform = defaultParameterUniform;
 // covering the sub-bin fallback and the float32 rounding of band offsets.
 const FOOTPRINT_MARGIN_BINS = 4;
 
-// Copies the pixels of the drawn ranges from inputTex into the bound target.
-const rangeCopyMaterial = new RawShaderMaterial({
-  uniforms: {
-    inputTex: { value: null },
-    destSpectrogramTextureSize: { value: new Vector2(1, 1) },
-  },
-  vertexShader: rangeQuadVert,
-  fragmentShader: /*glsl*/ `
-    precision highp float;
-    precision highp sampler2D;
-    precision highp int;
-
-    uniform sampler2D inputTex;
-    out vec4 outColor;
-
-    void main() {
-      outColor = texelFetch(inputTex, ivec2(gl_FragCoord.xy), 0);
-    }
-  `,
-  glslVersion: GLSL3,
-  depthTest: false,
-  depthWrite: false,
-});
-
 // Fraction of the texture above which a stroke's footprint is written by a
 // whole-texture draw and a buffer swap, rather than folded back by a copy.
 const SWAP_FOOTPRINT_FRACTION = 0.5;
+
+/** Thrown when the graphics device refuses the memory a stroke needs. */
+export class GpuMemoryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GpuMemoryError";
+  }
+}
 
 /** The packed pixels a stroke's final pass writes, and the bins they hold per band. */
 export interface StrokeFootprint extends PixelRangeList {
@@ -490,7 +475,9 @@ export class StrokeRenderer {
         m.uniforms[key] = { value: src.value };
       }
     }
+    const fresh = this.scratch !== null && this.scratch.modulatorFbo === null;
     const target = this.pool.modulatorFbo();
+    if (fresh) this.scratchUnverified = true;
     this.drawRanges(m, target, ranges);
     return target;
   }
@@ -564,7 +551,7 @@ export class StrokeRenderer {
     this.scratchUnverified = false;
     const context = this.gl.getContext();
     if (context.getError() === context.OUT_OF_MEMORY) {
-      throw new Error("The graphics device ran out of memory allocating the stroke buffers.");
+      throw new GpuMemoryError("The graphics device ran out of memory allocating the stroke buffers.");
     }
   }
 
@@ -1277,8 +1264,6 @@ export class StrokeRenderer {
       this.previewRangeTex.needsUpdate = true;
     }
 
-    this.verifyScratchAllocation();
-
     // If the stroke is not a preview, commit the changes
     if (!preview) {
       if (!copyBack) {
@@ -1342,6 +1327,8 @@ export class StrokeRenderer {
 
       this.invalidateFboData();
     }
+
+    this.verifyScratchAllocation();
   }
 
   /**

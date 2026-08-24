@@ -3,7 +3,9 @@ import type { EffectType } from "@renderer/effects/types";
 import { Camera, GLSL3, Mesh, PlaneGeometry, RawShaderMaterial, Scene, WebGLRenderer } from "three";
 import displayFrag from "../glsl/display.frag";
 import maskUpdateFrag from "../glsl/mask-update.frag";
+import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
 import modulatorFrag from "../glsl/modulator.frag";
+import { rangeCopyMaterial } from "../components/range-copy-material";
 import passThroughVert from "../glsl/pass-through.vert";
 import rangeQuadVert from "../glsl/range-quad.vert";
 import { host } from "./host";
@@ -124,6 +126,8 @@ export async function precompileRemainingShaders(
   const startTime = performance.now();
   const materials = [
     auxiliaryMaterial(maskUpdateFrag, rangeQuadVert),
+    auxiliaryMaterial(modulatorPrecomputeFrag, rangeQuadVert),
+    rangeCopyMaterial,
     auxiliaryMaterial(modulatorFrag),
     ...effectMaterialsByPriority(priority),
   ];
