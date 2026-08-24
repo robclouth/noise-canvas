@@ -104,12 +104,14 @@ void main() {
     int bandIndex = int(round(invData.g));
     bandIndex = clamp(bandIndex, 0, int(destBandCount) - 1);
 
-    vec4 meta = fetchBandMetadata(destMetadataTex, float(bandIndex));
-    int bandLength = int(round(meta.g));
-    float timeStep = exp2(meta.b);
-    float bandHz   = meta.a;
+    PackedBand band = fetchPackedBand(destMetadataTex, float(bandIndex));
+    int bandLength = int(round(band.length));
+    float timeStep = exp2(band.stepLog2);
+    float bandHz   = band.freqHz;
 
-    int timeIdx = int(round(invData.r / timeStep));
+    // The inverse map holds a FILE frame, so the band's own first resident bin
+    // comes off before the index is used against the texture.
+    int timeIdx = int(round(invData.r / timeStep) - bandFirstBin(band));
 
     if (timeIdx < 0 || timeIdx >= bandLength) {
         outColor = applyBrush(currentTexel, currentTexel, weight, coords.dest, vUv);
@@ -179,13 +181,15 @@ void main() {
         int neighborBandIdx = isLeft ? bandIndex + 1 : bandIndex - 1;
 
         if (neighborBandIdx >= 0 && neighborBandIdx < int(destBandCount)) {
-            vec4 neighborMeta = fetchBandMetadata(destMetadataTex, float(neighborBandIdx));
-            int neighborBandStart = int(round(neighborMeta.r));
-            int neighborBandLength = int(round(neighborMeta.g));
+            PackedBand neighborBand = fetchPackedBand(destMetadataTex, float(neighborBandIdx));
+            int neighborBandStart = int(round(neighborBand.offset));
 
-            float absoluteFrames = float(timeIdx) * timeStep;
-            int neighborTimeIdx = int(floor(absoluteFrames / exp2(neighborMeta.b)));
-            neighborTimeIdx = clamp(neighborTimeIdx, 0, neighborBandLength - 1);
+            bool neighborResident;
+            int neighborTimeIdx = int(bandBinOfFrame(neighborBand, invData.r, neighborResident));
+            if (!neighborResident) {
+                outColor = applyBrush(currentTexel, currentTexel, weight, coords.dest, vUv);
+                return;
+            }
 
             int neighborLinear = neighborBandStart + neighborTimeIdx;
             ivec2 neighborPixel = clamp(
@@ -212,7 +216,7 @@ void main() {
             vec4 neighborTexel = texelFetch(destSpectrogramTex, neighborPixel, 0);
 
             float neighborInstFreqDev = (sortBy == 3)
-                ? computeInstFreqDev(neighborTexel, neighborLinear, neighborBandIdx, neighborMeta.a, exp2(neighborMeta.b), neighborTimeIdx, texSize)
+                ? computeInstFreqDev(neighborTexel, neighborLinear, neighborBandIdx, neighborBand.freqHz, exp2(neighborBand.stepLog2), neighborTimeIdx, texSize)
                 : 0.0;
 
             if (sortStereoMode == 0 || sortBy == 4) {

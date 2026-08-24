@@ -46,14 +46,11 @@ float attractKernelWeight(float u) {
 
 // Packed read with the band's metadata already in hand, so repeated reads on
 // one band pay a single texel fetch each instead of a metadata fetch too.
-vec4 attractPackedRead(sampler2D dataTex, vec4 meta, float xUv, float frameCount) {
-  float timeIndex = clamp(floor(clamp(xUv, 0.0, 1.0) * frameCount / exp2(meta.b)), 0.0, meta.g - 1.0);
+vec4 attractPackedRead(sampler2D dataTex, PackedBand band, float xUv, float frameCount) {
+  bool resident;
+  float timeIndex = bandBin(band, clamp(xUv, 0.0, 1.0) * frameCount, resident);
   ivec2 texSize = textureSize(dataTex, 0);
-  float widthF = float(max(texSize.x, 1));
-  float linearIndex = meta.r + timeIndex;
-  int px = clamp(int(mod(linearIndex, widthF)), 0, max(texSize.x - 1, 0));
-  int py = clamp(int(floor(linearIndex / widthF)), 0, max(texSize.y - 1, 0));
-  return texelFetch(dataTex, ivec2(px, py), 0);
+  return markResidency(texelFetch(dataTex, packedTexel(band.offset + timeIndex, texSize), 0), resident);
 }
 
 // Coefficient time in seconds at a dest position: dyadic bands store one
@@ -100,21 +97,21 @@ float attractCombPullSemis(float absSemis, float smoothSemis) {
 // Mass of a modulator's field at a dest position. The precomputed modulator
 // textures share the packed spectrogram layout, so the read uses the band's
 // metadata; the stereo lanes average to a mono field.
-float attractModFieldMag(vec4 meta, float xUv) {
+float attractModFieldMag(PackedBand band, float xUv) {
   if (attractMap == 5) {
-    vec4 t = attractPackedRead(modulatorTex1, meta, xUv, destFrameCount);
+    vec4 t = attractPackedRead(modulatorTex1, band, xUv, destFrameCount);
     return max(0.5 * (t.x + t.y), 0.0);
   }
-  vec4 t = attractPackedRead(modulatorTex0, meta, xUv, destFrameCount);
+  vec4 t = attractPackedRead(modulatorTex0, band, xUv, destFrameCount);
   return attractMap == 3 ? max(0.5 * (t.x + t.y), 0.0) : max(0.5 * (t.z + t.w), 0.0);
 }
 
 // Deviation of a band's instantaneous frequency from its center, in Hz,
 // measured from the canvas phase steps around x. The center phase comes from
 // the texel already read.
-float attractDevHz(vec4 meta, float xUv, float pCenter, float strideUv, float dtSec) {
-  float p0 = attractPackedRead(destSpectrogramTex, meta, xUv - strideUv, destFrameCount).y;
-  float p2 = attractPackedRead(destSpectrogramTex, meta, xUv + strideUv, destFrameCount).y;
+float attractDevHz(PackedBand band, float xUv, float pCenter, float strideUv, float dtSec) {
+  float p0 = attractPackedRead(destSpectrogramTex, band, xUv - strideUv, destFrameCount).y;
+  float p2 = attractPackedRead(destSpectrogramTex, band, xUv + strideUv, destFrameCount).y;
   return instFreqDevHz(p0, pCenter, p2, dtSec);
 }
 
@@ -144,8 +141,8 @@ void main() {
   float anchorUvX = destUv.x - getEffectiveBrushOffset(destUv).x;
   float safeBrushY = max(EPSILON, brushSizeUv.y);
 
-  vec4 destMeta = getDestMetadata(destUv);
-  float fcDest = max(destMeta.a, 1e-6);
+  PackedBand destMeta = fetchPackedBand(destMetadataTex, (1.0 - destUv.y) * destBandCount);
+  float fcDest = max(destMeta.freqHz, 1e-6);
   float myBand = floor((1.0 - destUv.y) * destBandCount);
 
   vec2 accL = vec2(0.0);
@@ -166,7 +163,7 @@ void main() {
     int stride = max(1, int(ceil(windowBands / float(halfTaps))));
     float stepSemis = float(stride) / bandsPerSemi;
     int iMax = min(halfTaps + 1, int(windowBands / float(stride)) + 1);
-    float tD = attractCoeffTimeSec(destUv.x, destMeta.b);
+    float tD = attractCoeffTimeSec(destUv.x, destMeta.stepLog2);
     float tAnchorSec = anchorUvX * destFrameCount / max(destSampleRate, 1e-6);
 
     float fieldMag[ATTRACT_LATTICE];
@@ -184,7 +181,7 @@ void main() {
             float fHz = destMinFreq * exp2((destBandCount - 1.0 - b) / destBandsPerOctave);
             mag = attractFileFieldMag(destUv.x, fHz);
           } else {
-            vec4 bMeta = getDestMetadata(vec2(destUv.x, 1.0 - (b + 0.5) / destBandCount));
+            PackedBand bMeta = fetchPackedBand(destMetadataTex, b + 0.5);
             if (attractMap >= 3) {
               mag = attractModFieldMag(bMeta, destUv.x);
             } else {
@@ -224,15 +221,15 @@ void main() {
 
         vec2 jOff = getEffectiveBrushOffset(jUv);
         if (jOff.y < 0.0 || jOff.y > safeBrushY) continue;
-        vec4 jMeta = getDestMetadata(jUv);
+        PackedBand jMeta = fetchPackedBand(destMetadataTex, (1.0 - jUv.y) * destBandCount);
         float localX;
         if (getBrushTimeCoverage(jUv, jMeta, localX) <= 0.0) continue;
         vec4 jTexel = attractPackedRead(destSpectrogramTex, jMeta, destUv.x, destFrameCount);
         if (getMag(jTexel.rg) + getMag(jTexel.ba) < 1e-7) continue;
 
-        float fcJ = max(jMeta.a, 1e-6);
-        float dtJ = exp2(jMeta.b) / max(destSampleRate, 1e-6);
-        float strideJUv = exp2(jMeta.b) / max(destFrameCount, 1.0);
+        float fcJ = max(jMeta.freqHz, 1e-6);
+        float dtJ = exp2(jMeta.stepLog2) / max(destSampleRate, 1e-6);
+        float strideJUv = exp2(jMeta.stepLog2) / max(destFrameCount, 1.0);
         float devJ = attractDevHz(jMeta, destUv.x, jTexel.y, strideJUv, dtJ);
         float fTrueJ = fcJ + clamp(devJ, -FREQ_DEV_CLAMP * fcJ, FREQ_DEV_CLAMP * fcJ);
 
@@ -240,7 +237,7 @@ void main() {
         // dyadic coefficient time: detrend swap at tJ, retune ramp from the
         // brush anchor, then extrapolation from tJ to this band's coefficient
         // time at the landed frequency.
-        float tJ = attractCoeffTimeSec(destUv.x, jMeta.b);
+        float tJ = attractCoeffTimeSec(destUv.x, jMeta.stepLog2);
         float fTargetHz = fTrueJ * exp2(dispSemis / 12.0);
         float phaseAdd = carrierRebase(fcJ, fcDest, tJ)
                        + contentAdvance(fTargetHz, fTrueJ, tJ - tAnchorSec)
@@ -253,15 +250,15 @@ void main() {
         // first here.
         vec2 jOff = getEffectiveBrushOffset(jUv);
         if (jOff.y < 0.0 || jOff.y > safeBrushY) continue;
-        vec4 jMeta = getDestMetadata(jUv);
+        PackedBand jMeta = fetchPackedBand(destMetadataTex, (1.0 - jUv.y) * destBandCount);
         float localX;
         if (getBrushTimeCoverage(jUv, jMeta, localX) <= 0.0) continue;
         vec4 jTexel = attractPackedRead(destSpectrogramTex, jMeta, destUv.x, destFrameCount);
         if (getMag(jTexel.rg) + getMag(jTexel.ba) < 1e-7) continue;
 
-        float fcJ = max(jMeta.a, 1e-6);
-        float dtJ = exp2(jMeta.b) / max(destSampleRate, 1e-6);
-        float strideJUv = exp2(jMeta.b) / max(destFrameCount, 1.0);
+        float fcJ = max(jMeta.freqHz, 1e-6);
+        float dtJ = exp2(jMeta.stepLog2) / max(destSampleRate, 1e-6);
+        float strideJUv = exp2(jMeta.stepLog2) / max(destFrameCount, 1.0);
         float devJ = attractDevHz(jMeta, destUv.x, jTexel.y, strideJUv, dtJ);
         float fTrueJ = fcJ + clamp(devJ, -FREQ_DEV_CLAMP * fcJ, FREQ_DEV_CLAMP * fcJ);
 
@@ -273,7 +270,7 @@ void main() {
         float hat = 1.0 - abs(landBand - myBand) / max(float(stride), 1.0);
         if (hat <= 0.0) continue;
 
-        float tJ = attractCoeffTimeSec(destUv.x, jMeta.b);
+        float tJ = attractCoeffTimeSec(destUv.x, jMeta.stepLog2);
         float fTargetHz = fTrueJ * exp2(dispSemis / 12.0);
         float phaseAdd = carrierRebase(fcJ, fcDest, tJ)
                        + contentAdvance(fTargetHz, fTrueJ, tJ - tAnchorSec)
@@ -292,7 +289,7 @@ void main() {
       outColor = originalTexel;
       return;
     }
-    float strideUv = exp2(destMeta.b) / max(destFrameCount, 1.0);
+    float strideUv = exp2(destMeta.stepLog2) / max(destFrameCount, 1.0);
     float smoothXUv = max(smoothXBeats * attractUvPerBeat, strideUv);
     float windowUv = 3.0 * smoothXUv;
     bool fieldMap = attractMap == 0 || attractMap >= 3;
@@ -303,7 +300,7 @@ void main() {
     float tapUv = strideUv * float(strideT);
     int iMax = min(halfTaps + 1, int((windowUv + strideUv) / tapUv));
     float uvPerTooth = attractUvPerBeat * max(attractGridBeats, 1e-6);
-    float tDCoeff = attractCoeffTimeSec(destUv.x, destMeta.b);
+    float tDCoeff = attractCoeffTimeSec(destUv.x, destMeta.stepLog2);
 
     float fieldMag[ATTRACT_LATTICE];
     int mHalf = 0;
@@ -313,7 +310,7 @@ void main() {
       float fileIdx = (attractFieldBands - 1.0)
                     - attractFieldBpo * log2(fcDest / max(attractFieldMinFreq, 1e-6));
       bool fileInRange = fileIdx >= 0.0 && fileIdx <= attractFieldBands - 1.0;
-      vec4 fieldMeta = fetchBandMetadata(attractFieldMetaTex, fileIdx + 0.5);
+      PackedBand fieldMeta = fetchPackedBand(attractFieldMetaTex, fileIdx + 0.5);
       int nMax = iMax + mHalf;
       for (int n = -nMax; n <= nMax; n++) {
         float xn = destUv.x + float(n) * tapUv;
@@ -371,7 +368,7 @@ void main() {
       // Time-move carrier correction at exact coefficient times: the moved
       // waveform keeps its absolute phase, and the new slot detrends by
       // fc * tD instead of fc * tJ.
-      float tJ = attractCoeffTimeSec(jUv.x, destMeta.b);
+      float tJ = attractCoeffTimeSec(jUv.x, destMeta.stepLog2);
       float phaseAdd = contentAdvance(0.0, fcDest, tDCoeff - tJ);
 
       // The tap lattice is anchored to this output, so the only two landings

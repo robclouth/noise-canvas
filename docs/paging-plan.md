@@ -63,12 +63,12 @@ Overview at RG16F (4 B/texel) decimated 16× in time is 0.25 bytes per original 
 | 5 min stereo                   |   65 M | 9174 MiB |            473 MiB | 19.4× |
 | 20 min stereo                  |  259 M | 35.7 GiB |            519 MiB | 70.4× |
 
+The 20-minute row is **out of reach for paging alone**: Stage 0 measured the addressing ceiling at 2^24 frames, which is 349.5 s at 48 kHz. It stays in the table because the memory arithmetic is what it is, and because the row is what integer addressing would buy on top of this plan.
+
 Two things that column does **not** say, and the first draft wrongly implied:
 
 - **It is the figure after Stage 4, not after Stage 3.** Until the CPU backing store lands, `packedData` stays whole-file at 16 B/texel — 3.9 GiB on its own for 20 minutes, on top of the window. Each stage below states its own peak.
 - **It excludes audio.** `file.audioBuffer` is 440 MiB for 20 minutes of 48 kHz stereo float32, and partial synthesis copies every channel again in C++. Paging the spectrogram does not page the audio, and at these durations audio becomes the second-largest allocation. It needs its own plan or its own budget line; it is out of scope here but must not be out of sight.
-
-The 20-minute row is also **gated on the precision spike in Stage 0** — see decision 1.
 
 Window size becomes the memory setting: 8 s holds about 250 MiB, 30 s about 930 MiB. That is the honest version of a low-memory mode — less of the file resident at once, rather than fewer features or less bandwidth.
 
@@ -116,8 +116,8 @@ Verified sites that convert a file time to a bin: `readPackedData`, `packedInter
 
 The first draft did not mention the last two at all — it confused Attract's field with Attract's scratch modulator map. So the window origin **must travel with the texture, not as a global uniform**. Carry it in the metadata texture: build the window's metadata as `numBands × 2`, row 0 as today (`bandStartOffset`, `bandLength`, `stepLog2`, `freq`), row 1 as (`windowStartFrame`, `fileBandLength`, `fileBandOffset`, spare). `fetchBandMetadata` gains a sibling and the origin arrives wherever the metadata does — including for textures added later.
 
-**d. Float precision does not improve, and it caps the plan at about 5 minutes.**
-`timeInFrames = uv.x * frameCount` is formed in **file** space, before any subtraction, so the window buys nothing. The code already records the loss (`getBrushTimeCoverage`: "frame 256 comes back as 255.99998"). At 20 minutes and 48 kHz that is 57.6 M frames, where float32 spacing is 4 frames — a whole bin at the top band. **The 20-minute row needs integer or view-local addressing, which is its own piece of work.** Stage 0 spikes it and the answer decides whether the plan aims at 5 minutes or at 20.
+**d. Float precision does not improve, and it caps the plan at 2^24 frames. Measured.**
+`timeInFrames = uv.x * frameCount` is formed in **file** space, before any subtraction, so the window buys nothing. The code already records the loss (`getBrushTimeCoverage`: "frame 256 comes back as 255.99998"). Stage 0 measured it on the GPU through the real helper: bin addressing is **exact below 2^24 frames and wrong above it** — by one bin at 6 minutes and two at 20, at 48 kHz. That is 349.5 s at 48 kHz, 380.4 s at 44.1 kHz, 174.8 s at 96 kHz. **Longer files need integer or view-local addressing, which is its own piece of work.** The plan aims at about 5 minutes.
 
 ## 2. File-space packed indices stay the app's currency
 
@@ -170,19 +170,53 @@ So the plan divides effects, and says so in the UI rather than pretending:
 
 Stage 0 and Stage 1 are both gates. The order is deliberate: **the cheapest question that can kill the plan is asked first**, and it is not the display's frame time.
 
-## Stage 0 — centralise addressing, then spike the two things that can kill this
+## Stage 0 — centralise addressing, then spike the two things that can kill this — **done**
 
-No behaviour change. Both reviews independently asked for this to come before the overview work.
+No behaviour change: 1222 existing tests pass unchanged, and 29 new ones cover the addressing.
 
-- **Centralise the addressing.** Put every file-time-to-bin conversion behind one helper pair that takes a layout, with the residency flag from decision 1a and the file-length modulus from 1b. That is the nine sites listed above, plus the four texture identities. This is refactoring against the existing tests, and nothing else in the plan is safe until it is done.
-- `lib/window-layout.ts` (new). Pure functions over a `PackedLayout`: `alignWindow`, `buildWindowLayout` (offsets, lengths, texture dimensions, the two-row metadata array, and the file ranges the window covers), `mapFileRangesToWindow` returning inside **and** outside, and `frameSpanOfRanges`. Texture sizing reuses the analyser's, so a window and a whole file size alike.
-- **Spike A — precision.** A 20-minute synthetic file: does the top band still address the right bin through the existing UV round trip? This decides whether the plan's ceiling is 5 minutes or 20, and it is a day's work, not a stage's.
-- **Spike B — correctness under a forced half-file window.** With the addressing centralised, force a window covering half a mock file and run the existing `stroke-renderer.test.ts` and `effects.test.ts`. Whole-file-window must be byte-identical to today; half-file must match inside the window. Add an out-of-window **sentinel** so a clamped read fails a test instead of painting.
-- Diag lines: `[paging] gather`, `[paging] overview update`, `[paging] miss`.
+**What landed**
 
-**Gate: if the half-file spike cannot be made exact for the page-exact effect set, stop here.** The display branch is comparatively cheap and answers nothing about whether painting stays correct.
+- **The addressing is centralised.** A `PackedBand` struct plus `fetchPackedBand`, `bandBin` (point), `bandBins` (interpolated) and `bandBinOfFrame` (from a raw file frame) in `effect-common.glsl`. Every one carries the residency flag from decision 1a and wraps over the file's band length per decision 1b. `grep -nE "[Mm]eta\.[rg]\b" src/renderer/src/glsl/` now returns nothing: no shader reads a band offset or length out of a raw `vec4` any more. The remaining `fetchBandMetadata` callers read only centre frequency and step exponent, which no window changes.
+- **The window origin travels in the metadata texture**, exactly as decision 1c requires. `fetchPackedBand` reads row 1 when the texture has one and otherwise describes itself, so a whole-file texture is unchanged and every existing 1-row texture — including all four packed identities and every test fixture — keeps working untouched.
+- **The sentinel exists.** `markResidency` poisons a non-resident read under `#define PAGING_SENTINEL`, and is compiled out otherwise.
+- **`lib/window-layout.ts`** with `windowAlignment`, `alignWindow`, `buildWindowLayout`, `buildWindowMetadata`, `buildWindowInverseMap`, `windowFileRanges`, `mapFileRangesToWindow` and `frameSpanOfRanges`. 17 tests.
+- **Sort and Convolve now report misses instead of absorbing them.** Sort takes the neighbour's window bin from `bandBinOfFrame` against the file frame the inverse map holds, and bails when it is not resident. Convolve bounds-checks its source and IR taps in file bins, then tests residency separately, so a tap the window misses is distinguishable from a tap past the end of the file.
 
-**Exit:** the addressing refactor and `window-layout.ts` land with tests; both spikes answered in writing, here.
+**Spike A — precision. Answered: the ceiling is 2^24 frames, and paging cannot lift it.**
+
+Measured on the GPU through the real helper (`paging-precision.test.ts`), over contiguous runs at the start, middle and end of each file:
+
+| File             |   Frames | Worst bin error, top band |
+| ---------------- | -------: | ------------------------: |
+| 1–5 min @ 48 kHz | ≤ 14.4 M |                     **0** |
+| 6 min @ 48 kHz   |  17.28 M |                         1 |
+| 20 min @ 48 kHz  |   57.6 M |                         2 |
+
+The break is at 2^24 frames, where float32 stops naming every whole integer — **349.5 s at 48 kHz, 380.4 s at 44.1 kHz, 174.8 s at 96 kHz**, all three verified. Decision 1d said the window buys no precision because `uv.x * frameCount` is formed in file space before any origin comes off; that is confirmed, so **the 20-minute row in "The numbers" is not reachable by paging alone.** It needs integer or view-local addressing, which is a separate piece of work with its own risk. Two caveats worth keeping: the error is not monotonic in duration — it depends on how a particular frame count factors, so 10 minutes measures cleaner than 6 — and a sparse probe misses the worst case, which is why the figures above come from contiguous runs.
+
+**Spike B — half-file correctness. Answered for addressing; not yet for a whole stroke.**
+
+`paging-window.test.ts` renders the real helpers against a whole-file texture and against a window gathered out of the same file, with a distinct magnitude in every packed pixel so a mis-addressed read cannot pass:
+
+- A whole-file window is **byte-identical** to the file, and reports every read resident.
+- A half-file window matches the file **exactly** at every resident read, at five different window offsets, and reports every out-of-window read as a miss rather than clamping.
+- With a wrapping time axis, a window tiles the **file** — probed a full file length past the end, where a window that wrapped itself would land somewhere else.
+
+The suite was mutation-checked; each of the three failure modes the reviews found is caught:
+
+| Mutation                                 | Result       |
+| ---------------------------------------- | ------------ |
+| `resident = true` (the old silent clamp) | 2 tests fail |
+| wrap over the window instead of the file | 1 test fails |
+| ignore the window origin                 | 3 tests fail |
+
+**What Spike B does not yet prove:** the plan asked for the existing `stroke-renderer.test.ts` and `effects.test.ts` to run under a forced half-file window. They cannot yet — `StrokeRenderer` sizes its FBOs, its scratch pool and its footprint from `spectrogramData`, and splitting `fileLayout` from `windowLayout` is Stage 2 work. So the _addressing_ is proven exact under a window; a whole stroke through the page-exact effect set is not. The golden test still belongs before Stage 3's tiling code, as planned.
+
+**A fourth silent failure mode, found while doing this.** A GLSL compile error is silent: three logs nothing the test harness surfaces, the draw produces a black target, and the suite reads it as an effect that output zeros. A `vec4` passed where a `PackedBand` was expected cost real time to find because `attract-effect.frag` was not in any compile check — `shader-compile-perf.test.ts` draws every effect but asserts only timing. `shader-compile.test.ts` now globs `glsl/*.frag` and `glsl/*.vert` and asserts each compiles, naming the file that failed, in about 250 ms for all 22. This belongs on the risk list beside the other silent failures.
+
+**Still open from this stage:** the diag lines (`[paging] gather`, `[paging] overview update`, `[paging] miss`) wait for the operations that emit them, in Stages 1 and 2.
+
+**Gate: passed.** The addressing is exact under a window, and the precision ceiling is known.
 
 ## Stage 1 — the overview, the display fallback, and image export
 
@@ -249,9 +283,9 @@ The least-built part, and the one to schedule most time for.
 
 # Risks, in the order they can kill the plan
 
-1. **Silent wrongness.** Every failure mode found in review — out-of-window reads, wrap, brush coverage, Sort's inverse map, the phase-turn verdict, image export — produces a plausible wrong picture or a quietly disabled feature, not an error. The sentinel from Stage 0 is the mitigation, and it has to exist before Stage 2 is switched on for anyone.
+1. **Silent wrongness.** Every failure mode found in review — out-of-window reads, wrap, brush coverage, Sort's inverse map, the phase-turn verdict, image export — produces a plausible wrong picture or a quietly disabled feature, not an error. Stage 0 added a fourth: a **GLSL compile failure is silent too**, and reads as an effect that output zeros. The sentinel and `shader-compile.test.ts` both landed in Stage 0; the remaining mitigations must exist before Stage 2 is switched on for anyone.
 2. **Tiling correctness for the page-exact set.** The golden test is the answer and it comes before the code.
-3. **Float precision.** Decides whether the plan reaches 5 minutes or 20. Answered in Stage 0.
+3. ~~**Float precision.**~~ Answered in Stage 0: the ceiling is 2^24 frames (349.5 s at 48 kHz), it is a property of file-space UV rather than of paging, and lifting it is separate work.
 4. **The CPU backing store and the addon accessor.** The most new code, under the two subsystems with the strictest invariants.
 5. **Re-gather stutter** on a pan across a long file.
 6. **The display branch cost on Intel.** Demoted from first place: it is measurable, it has a known fallback in the scissored variant, and it is not what makes the plan hard.

@@ -158,37 +158,160 @@ vec4 fetchBandMetadata(sampler2D metaTex, float bandIndexFloat) {
   return texelFetch(metaTex, ivec2(x, y), 0);
 }
 
+// ============================================================================
+// PACKED ADDRESSING
+//
+// Every conversion from a file time to a packed bin goes through this block.
+// A packed texture may hold the whole file or a window of it; which one is
+// carried by the texture's own metadata, because a source, Attract field or
+// Convolve IR texture belongs to another file whose window no global uniform
+// names.
+// ============================================================================
+
+// One band of a packed texture: where it sits in that texture, and where the
+// texture sits in the file.
+struct PackedBand {
+  float offset;       // this band's first bin, in the texture's packed pixels
+  float length;       // bins the texture holds for this band
+  float stepLog2;     // frames one bin covers, as a power of two
+  float freqHz;       // band centre frequency
+  float windowStart;  // first file frame the texture holds
+  float fileLength;   // bins the whole file has in this band
+  float fileOffset;   // this band's first bin in the file's packed array
+};
+
+// A metadata texture is `numBands` wide. A second row, when present, carries
+// the window origin and the file's own geometry; a one-row texture is a
+// whole-file texture and describes itself.
+PackedBand fetchPackedBand(sampler2D metaTex, float bandIndexFloat) {
+  int bandIndex = int(clamp(floor(bandIndexFloat), 0.0, 1e9));
+  ivec2 metaSize = textureSize(metaTex, 0);
+  int x = clamp(bandIndex, 0, max(metaSize.x - 1, 0));
+  vec4 row0 = texelFetch(metaTex, ivec2(x, 0), 0);
+
+  PackedBand band;
+  band.offset   = row0.r;
+  band.length   = row0.g;
+  band.stepLog2 = row0.b;
+  band.freqHz   = row0.a;
+
+  if (metaSize.y >= 2) {
+    vec4 row1 = texelFetch(metaTex, ivec2(x, 1), 0);
+    band.windowStart = row1.r;
+    band.fileLength  = row1.g;
+    band.fileOffset  = row1.b;
+  } else {
+    band.windowStart = 0.0;
+    band.fileLength  = row0.g;
+    band.fileOffset  = row0.r;
+  }
+  return band;
+}
+
+/** The texel of a packed texture of `texSize` at a linear pixel index. */
+ivec2 packedTexel(float linearIndex, ivec2 texSize) {
+  float widthFloat = float(max(texSize.x, 1));
+  int px = int(mod(linearIndex, widthFloat));
+  int py = int(floor(linearIndex / widthFloat));
+  px = clamp(px, 0, max(texSize.x - 1, 0));
+  py = clamp(py, 0, max(texSize.y - 1, 0));
+  return ivec2(px, py);
+}
+
+/** The band's first resident bin, as a file bin index. */
+float bandFirstBin(PackedBand band) {
+  return floor(band.windowStart / exp2(band.stepLog2));
+}
+
+/**
+ * The bin a file frame lands in, in the texture's own indices. `resident` is
+ * false when the texture does not hold that frame; the returned index is
+ * clamped, so a caller that ignores the flag reads edge data.
+ */
+float bandBinOfFrame(PackedBand band, float fileFrame, out bool resident) {
+  float local = floor(fileFrame / exp2(band.stepLog2)) - bandFirstBin(band);
+  float bins = max(band.length, 1.0);
+  resident = local >= 0.0 && local < bins;
+  return clamp(local, 0.0, bins - 1.0);
+}
+
+/**
+ * The bin a point-sampled read lands in. Time is clamped into the file, matching
+ * the callers that wrap their UV before the read rather than here.
+ */
+float bandBin(PackedBand band, float timeInFrames, out bool resident) {
+  float fileBins = max(band.fileLength, 1.0);
+  float scaled = timeInFrames / exp2(band.stepLog2);
+  float fileIndex = clamp(floor(scaled), 0.0, fileBins - 1.0);
+  float local = fileIndex - bandFirstBin(band);
+  float bins = max(band.length, 1.0);
+  resident = local >= 0.0 && local < bins;
+  return clamp(local, 0.0, bins - 1.0);
+}
+
+/**
+ * The two bins an interpolated read straddles and the weight of the second.
+ *
+ * Wrapping and clamping happen in FILE bins, so a looping axis tiles the file
+ * rather than the window, and the last file frame's partner is the file's first.
+ * `resident` needs both bins present, because blending a held bin with a clamped
+ * one draws a bright edge rather than a join.
+ */
+void bandBins(PackedBand band, float timeInFrames,
+              out float index0, out float index1, out float fraction, out bool resident) {
+  float fileBins = max(band.fileLength, 1.0);
+  float scaled = timeInFrames / exp2(band.stepLog2);
+  float t = wrapsTimeAxis() ? mod(scaled, fileBins) : clamp(scaled, 0.0, fileBins - 1.0);
+  float fileIndex0 = floor(t);
+  fraction = t - fileIndex0;
+  float fileIndex1 = wrapsTimeAxis() ? mod(fileIndex0 + 1.0, fileBins) : min(fileIndex0 + 1.0, fileBins - 1.0);
+
+  float first = bandFirstBin(band);
+  float bins = max(band.length, 1.0);
+  float local0 = fileIndex0 - first;
+  float local1 = fileIndex1 - first;
+  resident = local0 >= 0.0 && local0 < bins && local1 >= 0.0 && local1 < bins;
+  index0 = clamp(local0, 0.0, bins - 1.0);
+  index1 = clamp(local1, 0.0, bins - 1.0);
+}
+
+// A read that misses the resident window is poisoned in the sentinel build, so
+// a test fails on it instead of accepting window-edge data as the answer.
+#ifdef PAGING_SENTINEL
+const float PAGING_MISS_MAGNITUDE = 1.0e30;
+vec4 markResidency(vec4 texel, bool resident) {
+  return resident ? texel : vec4(PAGING_MISS_MAGNITUDE, 0.0, PAGING_MISS_MAGNITUDE, 0.0);
+}
+#else
+vec4 markResidency(vec4 texel, bool resident) { return texel; }
+#endif
+
 /**
  * Read a single complex value pair (stereo) from a packed spectrogram at an unpacked UV.
  * Point-sampled, no interpolation. Uses texelFetch for exact reads.
  */
+vec4 readPackedDataResident(vec2 unpackedUv,
+                            sampler2D dataTex,
+                            sampler2D metaTex,
+                            float frameCount,
+                            float bandCount,
+                            out bool resident) {
+  float bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
+  PackedBand band = fetchPackedBand(metaTex, bandIndex);
+  float timeIndexInBand = bandBin(band, unpackedUv.x * frameCount, resident);
+
+  ivec2 texSize = textureSize(dataTex, 0);
+  return texelFetch(dataTex, packedTexel(band.offset + timeIndexInBand, texSize), 0);
+}
+
 vec4 readPackedData(vec2 unpackedUv,
                     sampler2D dataTex,
                     sampler2D metaTex,
                     float frameCount,
                     float bandCount) {
-  float bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
-  vec4 meta = fetchBandMetadata(metaTex, bandIndex);
-  float bandStartOffset   = meta.r;
-  float bandLength        = meta.g;
-  float bandTimeScaleExp  = meta.b;
-
-  float timeInFrames      = unpackedUv.x * frameCount;
-  float scaledTime        = timeInFrames / exp2(bandTimeScaleExp);
-  float timeIndexInBand   = floor(scaledTime);
-  timeIndexInBand         = clamp(timeIndexInBand, 0.0, bandLength - 1.0);
-
-  // Map linear pixel index -> integer texel coords
-  ivec2 texSize = textureSize(dataTex, 0);
-  float safeWidthF = float(max(texSize.x, 1));
-  float linearPixelIndex = bandStartOffset + timeIndexInBand;
-
-  int px = int(mod(linearPixelIndex, safeWidthF));
-  int py = int(floor(linearPixelIndex / safeWidthF));
-  px = clamp(px, 0, max(texSize.x - 1, 0));
-  py = clamp(py, 0, max(texSize.y - 1, 0));
-
-  return texelFetch(dataTex, ivec2(px, py), 0);
+  bool resident;
+  vec4 texel = readPackedDataResident(unpackedUv, dataTex, metaTex, frameCount, bandCount, resident);
+  return markResidency(texel, resident);
 }
 
 // Public sampling helpers
@@ -209,15 +332,7 @@ vec4 getDestMetadata(vec2 uv) {
 
 vec4 readSourceAtTimeIndex(float timeIndex, float bandStartOffset) {
   ivec2 texSize = textureSize(sourceSpectrogramTex, 0);
-  float safeWidthF = float(max(texSize.x, 1));
-  float linearPixelIndex = bandStartOffset + timeIndex;
-
-  int px = int(mod(linearPixelIndex, safeWidthF));
-  int py = int(floor(linearPixelIndex / safeWidthF));
-  px = clamp(px, 0, max(texSize.x - 1, 0));
-  py = clamp(py, 0, max(texSize.y - 1, 0));
-
-  return texelFetch(sourceSpectrogramTex, ivec2(px, py), 0);
+  return texelFetch(sourceSpectrogramTex, packedTexel(bandStartOffset + timeIndex, texSize), 0);
 }
 
 // Interpolate between two magnitude/phase pairs. Magnitudes blend in log space
@@ -229,22 +344,9 @@ vec2 interpolateComplex(vec2 magPhase1, vec2 magPhase2, float amount) {
   return vec2(magMix, phaseMix);
 }
 
-// The two time indices a linear read straddles inside one band, plus the
-// fraction between them. On a wrapping time axis the last frame's partner is
-// the band's first frame, so a loop has no seam; otherwise both indices stay
-// clamped inside the band, since index bandLength is the START of the next
-// (lower-frequency) band in the packed layout, not a later time.
-void bandTimeIndices(float scaledTime, float bandLength, out float index0, out float index1, out float fraction) {
-  float frames = max(bandLength, 1.0);
-  float t = wrapsTimeAxis() ? mod(scaledTime, frames) : clamp(scaledTime, 0.0, frames - 1.0);
-  index0 = floor(t);
-  fraction = t - index0;
-  index1 = wrapsTimeAxis() ? mod(index0 + 1.0, frames) : min(index0 + 1.0, frames - 1.0);
-}
-
 /**
  * The band an interpolated read lands in, the two bins of that band it blends,
- * and the weight of the second.
+ * the weight of the second, and whether the texture holds both.
  */
 void packedInterpBins(vec2 unpackedUv,
                       sampler2D metaTex,
@@ -254,28 +356,12 @@ void packedInterpBins(vec2 unpackedUv,
                       out float bandStartOffset,
                       out float timeIndex0,
                       out float timeIndex1,
-                      out float fraction) {
+                      out float fraction,
+                      out bool resident) {
   bandIndex = floor((1.0 - unpackedUv.y) * bandCount);
-
-  vec4 meta = fetchBandMetadata(metaTex, bandIndex);
-  bandStartOffset        = meta.r;
-  float bandLength       = meta.g;
-  float bandTimeScaleExp = meta.b;
-
-  float timeInFrames = unpackedUv.x * frameCount;
-  float scaledTime = timeInFrames / exp2(bandTimeScaleExp);
-
-  bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, fraction);
-}
-
-/** The texel of a packed texture of `texSize` at a linear pixel index. */
-ivec2 packedTexel(float linearIndex, ivec2 texSize) {
-  float widthFloat = float(max(texSize.x, 1));
-  int px = int(mod(linearIndex, widthFloat));
-  int py = int(floor(linearIndex / widthFloat));
-  px = clamp(px, 0, max(texSize.x - 1, 0));
-  py = clamp(py, 0, max(texSize.y - 1, 0));
-  return ivec2(px, py);
+  PackedBand band = fetchPackedBand(metaTex, bandIndex);
+  bandStartOffset = band.offset;
+  bandBins(band, unpackedUv.x * frameCount, timeIndex0, timeIndex1, fraction, resident);
 }
 
 /**
@@ -289,9 +375,10 @@ void packedInterpCoords(vec2 unpackedUv,
                         ivec2 texSize,
                         out ivec2 texel1,
                         out ivec2 texel2,
-                        out float fraction) {
+                        out float fraction,
+                        out bool resident) {
   float bandIndex, bandStartOffset, timeIndex0, timeIndex1;
-  packedInterpBins(unpackedUv, metaTex, frameCount, bandCount, bandIndex, bandStartOffset, timeIndex0, timeIndex1, fraction);
+  packedInterpBins(unpackedUv, metaTex, frameCount, bandCount, bandIndex, bandStartOffset, timeIndex0, timeIndex1, fraction, resident);
   texel1 = packedTexel(bandStartOffset + timeIndex0, texSize);
   texel2 = packedTexel(bandStartOffset + timeIndex1, texSize);
 }
@@ -299,20 +386,31 @@ void packedInterpCoords(vec2 unpackedUv,
 /**
  * Interpolated read between two time samples (uses texelFetch for the exact texels).
  */
-vec4 readPackedDataInterpolated(vec2 unpackedUv,
-                                sampler2D dataTex,
-                                sampler2D metaTex,
-                                float frameCount,
-                                float bandCount) {
+vec4 readPackedDataInterpolatedResident(vec2 unpackedUv,
+                                        sampler2D dataTex,
+                                        sampler2D metaTex,
+                                        float frameCount,
+                                        float bandCount,
+                                        out bool resident) {
   ivec2 texel1, texel2;
   float timeFraction;
-  packedInterpCoords(unpackedUv, metaTex, frameCount, bandCount, textureSize(dataTex, 0), texel1, texel2, timeFraction);
+  packedInterpCoords(unpackedUv, metaTex, frameCount, bandCount, textureSize(dataTex, 0), texel1, texel2, timeFraction, resident);
   vec4 sample1 = texelFetch(dataTex, texel1, 0);
   vec4 sample2 = texelFetch(dataTex, texel2, 0);
 
   vec2 magPhaseL = interpolateComplex(sample1.rg, sample2.rg, timeFraction);
   vec2 magPhaseR = interpolateComplex(sample1.ba, sample2.ba, timeFraction);
   return vec4(magPhaseL, magPhaseR);
+}
+
+vec4 readPackedDataInterpolated(vec2 unpackedUv,
+                                sampler2D dataTex,
+                                sampler2D metaTex,
+                                float frameCount,
+                                float bandCount) {
+  bool resident;
+  vec4 texel = readPackedDataInterpolatedResident(unpackedUv, dataTex, metaTex, frameCount, bandCount, resident);
+  return markResidency(texel, resident);
 }
 
 vec4 sampleSourceInterp(vec2 sourceUv) {
@@ -469,39 +567,23 @@ vec2 modifyPhase(vec2 magPhase, vec2 uv, bool shouldRandomise) {
 
 vec4 getTransformedSampleBasic(vec2 sourceUv, bool shouldRandomisePhase, float scaleX, vec2 destUv) {
   float bandIndex = floor((1.0 - sourceUv.y) * sourceBandCount);
-  vec4 meta = fetchBandMetadata(sourceMetadataTex, bandIndex);
-  float bandStartOffset  = meta.r;
-  float bandLength       = meta.g;
-  float bandTimeScaleExp = meta.b;
-
-  float timeInFrames   = sourceUv.x * sourceFrameCount;
-  float scaledTime     = timeInFrames / exp2(bandTimeScaleExp);
+  PackedBand band = fetchPackedBand(sourceMetadataTex, bandIndex);
 
   float timeIndex0, timeIndex1, timeFraction;
-  bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, timeFraction);
+  bool resident;
+  bandBins(band, sourceUv.x * sourceFrameCount, timeIndex0, timeIndex1, timeFraction, resident);
 
-  ivec2 sSize    = textureSize(sourceSpectrogramTex, 0);
-  float widthF   = float(max(sSize.x, 1));
-
-  float linearIndex1 = bandStartOffset + timeIndex0;
-  int px1 = int(mod(linearIndex1, widthF));
-  int py1 = int(floor(linearIndex1 / widthF));
-  px1 = clamp(px1, 0, max(sSize.x - 1, 0));
-  py1 = clamp(py1, 0, max(sSize.y - 1, 0));
-  vec4 sample0 = texelFetch(sourceSpectrogramTex, ivec2(px1, py1), 0);
-
-  float linearIndex2 = bandStartOffset + timeIndex1;
-  int px2 = int(mod(linearIndex2, widthF));
-  int py2 = int(floor(linearIndex2 / widthF));
-  px2 = clamp(px2, 0, max(sSize.x - 1, 0));
-  py2 = clamp(py2, 0, max(sSize.y - 1, 0));
-  vec4 sample1 = texelFetch(sourceSpectrogramTex, ivec2(px2, py2), 0);
+  ivec2 sSize = textureSize(sourceSpectrogramTex, 0);
+  ivec2 texel0 = packedTexel(band.offset + timeIndex0, sSize);
+  ivec2 texel1 = packedTexel(band.offset + timeIndex1, sSize);
+  vec4 sample0 = texelFetch(sourceSpectrogramTex, texel0, 0);
+  vec4 sample1 = texelFetch(sourceSpectrogramTex, texel1, 0);
 
   vec2 correctedL = interpolateComplex(sample0.rg, sample1.rg, timeFraction);
   vec2 correctedR = interpolateComplex(sample0.ba, sample1.ba, timeFraction);
 
-  correctedL = modifyPhase(correctedL, vec2(px1, py1), shouldRandomisePhase);
-  correctedR = modifyPhase(correctedR, vec2(px1, py1), shouldRandomisePhase);
+  correctedL = modifyPhase(correctedL, vec2(texel0), shouldRandomisePhase);
+  correctedR = modifyPhase(correctedR, vec2(texel0), shouldRandomisePhase);
 
   // Time reversal: dest_phase = -src_phase - 2π·f·T
   // Derived from: C_rev(tc, f) = exp(-i·2π·f·T) · conj( C_src(T−tc, f) )
@@ -521,32 +603,15 @@ vec4 getTransformedSampleSnappy(vec2 sourceUv, vec2 destUv, float scaleX) {
   float originalPhaseR = getPhase(original.ba);
 
   float bandIndex = floor((1.0 - sourceUv.y) * sourceBandCount);
-  vec4 meta = fetchBandMetadata(sourceMetadataTex, bandIndex);
-  float bandStartOffset  = meta.r;
-  float bandLength       = meta.g;
-  float bandTimeScaleExp = meta.b;
+  PackedBand band = fetchPackedBand(sourceMetadataTex, bandIndex);
 
-  float timeInFrames   = sourceUv.x * sourceFrameCount;
-  float scaledTime     = timeInFrames / exp2(bandTimeScaleExp);
   float timeIndex0, timeIndex1, timeFraction;
-  bandTimeIndices(scaledTime, bandLength, timeIndex0, timeIndex1, timeFraction);
+  bool resident;
+  bandBins(band, sourceUv.x * sourceFrameCount, timeIndex0, timeIndex1, timeFraction, resident);
 
-  ivec2 sSize    = textureSize(sourceSpectrogramTex, 0);
-  float widthF   = float(max(sSize.x, 1));
-
-  float linearIndex1 = bandStartOffset + timeIndex0;
-  int px1 = int(mod(linearIndex1, widthF));
-  int py1 = int(floor(linearIndex1 / widthF));
-  px1 = clamp(px1, 0, max(sSize.x - 1, 0));
-  py1 = clamp(py1, 0, max(sSize.y - 1, 0));
-  vec4 smp0 = texelFetch(sourceSpectrogramTex, ivec2(px1, py1), 0);
-
-  float linearIndex2 = bandStartOffset + timeIndex1;
-  int px2 = int(mod(linearIndex2, widthF));
-  int py2 = int(floor(linearIndex2 / widthF));
-  px2 = clamp(px2, 0, max(sSize.x - 1, 0));
-  py2 = clamp(py2, 0, max(sSize.y - 1, 0));
-  vec4 smp1 = texelFetch(sourceSpectrogramTex, ivec2(px2, py2), 0);
+  ivec2 sSize = textureSize(sourceSpectrogramTex, 0);
+  vec4 smp0 = texelFetch(sourceSpectrogramTex, packedTexel(band.offset + timeIndex0, sSize), 0);
+  vec4 smp1 = texelFetch(sourceSpectrogramTex, packedTexel(band.offset + timeIndex1, sSize), 0);
 
   float magL = mix(getMag(smp0.rg), getMag(smp1.rg), timeFraction);
   float magR = mix(getMag(smp0.ba), getMag(smp1.ba), timeFraction);
@@ -1202,9 +1267,12 @@ float calculateEnvelopeGain(float localPos, float curve, float skew) {
 // stamps still partition each band's bins exactly (half-open span, one owner
 // per bin). Returns coverage as 0.0 or 1.0 and outputs localX, the bin edge's
 // position within the span, for the envelope.
-float getBrushTimeCoverage(vec2 unpackedUv, vec4 meta, out float localX) {
-  float cellFrames = exp2(meta.b);
-  float bandLength = meta.g;
+float getBrushTimeCoverage(vec2 unpackedUv, PackedBand band, out float localX) {
+  float cellFrames = exp2(band.stepLog2);
+  // The bin index is a FILE bin — brush space is file space — so it clamps
+  // against the file's band length, not against however much of the band a
+  // windowed texture happens to hold.
+  float bandLength = band.fileLength;
 
   // Recover the fragment's frame as a whole number before choosing its bin.
   // The inverse map stores an exact integer frame, but it reaches the shader
@@ -1262,7 +1330,7 @@ float getBrushTimeCoverage(vec2 unpackedUv, vec4 meta, out float localX) {
 // Returns vec2(weightL, weightR) — brush weight can decorrelate per channel
 // when the modulators driving envelope curve/skew have non-zero stereo spread.
 vec2 getBrushWeight(vec2 unpackedUv, float audioLevelDb) {
-  vec4 meta = getDestMetadata(unpackedUv);
+  PackedBand band = fetchPackedBand(destMetadataTex, (1.0 - unpackedUv.y) * destBandCount);
 
   vec2 off = getEffectiveBrushOffset(unpackedUv);
   vec2 safeBrush = max(vec2(EPSILON), brushSizeUv);
@@ -1277,7 +1345,7 @@ vec2 getBrushWeight(vec2 unpackedUv, float audioLevelDb) {
   // X (time): edge-of-bin membership so adjacent grid stamps tile each band
   // exactly. coverage is 0 or 1; the envelope shapes the weight across the span.
   float localX;
-  float coverage = getBrushTimeCoverage(unpackedUv, meta, localX);
+  float coverage = getBrushTimeCoverage(unpackedUv, band, localX);
 
   vec2 weightX = vec2(0.0);
   if (coverage > 0.0) {
@@ -1306,7 +1374,7 @@ bool isInsideBrush(vec2 unpackedUv) {
   // footprint test and the painted region agree bin-for-bin at every band.
   if (brushSizeUv.x > 0.0) {
     float localX;
-    if (getBrushTimeCoverage(unpackedUv, getDestMetadata(unpackedUv), localX) <= 0.0) {
+    if (getBrushTimeCoverage(unpackedUv, fetchPackedBand(destMetadataTex, (1.0 - unpackedUv.y) * destBandCount), localX) <= 0.0) {
       return false;
     }
   }
@@ -1337,7 +1405,7 @@ bool brushWeightIsZero(vec2 unpackedUv) {
   float safeBrushY = max(EPSILON, brushSizeUv.y);
   if (off.y < 0.0 || off.y > safeBrushY) return true;
   float localX;
-  return getBrushTimeCoverage(unpackedUv, getDestMetadata(unpackedUv), localX) <= 0.0;
+  return getBrushTimeCoverage(unpackedUv, fetchPackedBand(destMetadataTex, (1.0 - unpackedUv.y) * destBandCount), localX) <= 0.0;
 #endif
 }
 

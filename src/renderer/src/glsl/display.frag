@@ -49,10 +49,12 @@ vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, iv
     return texelFetch(sourceSpectrogramTex, texel, 0);
 }
 
-vec4 sampleDisplayInterp(vec2 uv) {
+// `resident` is false where the packed texture holds a window that does not
+// reach this time; the caller draws that span from the overview instead.
+vec4 sampleDisplayInterp(vec2 uv, out bool resident) {
     float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
     packedInterpBins(uv, sourceMetadataTex, sourceFrameCount, sourceBandCount,
-                     bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
+                     bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction, resident);
     ivec2 texSize = textureSize(sourceSpectrogramTex, 0);
     int band = int(bandIndex);
     vec4 sample1 = fetchDisplayTexel(band, bandStartOffset, timeIndex0, texSize);
@@ -120,7 +122,10 @@ void main() {
     // Time axis samples edge-aligned: the stored coefficient for bin k is the
     // analysis atom centered at frame k * 2^step, so an impulse reads as a
     // vertical ridge at the same time in every band regardless of bin stride.
-    vec4 packedValue = mix(sampleDisplayInterp(uv0), sampleDisplayInterp(uv1), bandFrac);
+    bool resident0, resident1;
+    vec4 sample0 = sampleDisplayInterp(uv0, resident0);
+    vec4 sample1 = sampleDisplayInterp(uv1, resident1);
+    vec4 packedValue = markResidency(mix(sample0, sample1, bandFrac), resident0 && resident1);
 
     // packedValue stores [leftMagnitude, leftPhase, rightMagnitude, rightPhase]
     vec2 leftMagPhase = packedValue.rg;
