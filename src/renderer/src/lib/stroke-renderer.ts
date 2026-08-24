@@ -1170,7 +1170,8 @@ export class StrokeRenderer {
       // partner; an earlier step ends in a pass buffer so the next step can
       // still reach the partner. Working back from that end, each pass writes
       // a buffer its successor does not, which is also the one it reads.
-      const writable = [scratch.passFbo1, scratch.passFbo2, destinationFbo].filter((t) => t !== stepInputFbo);
+      const passBuffers = isLastStep && plannedPasses.length === 1 ? [] : this.pool.passFbos(2);
+      const writable = [...passBuffers, destinationFbo].filter((t) => t !== stepInputFbo);
       const endTarget = isLastStep ? destinationFbo : writable.find((t) => t !== destinationFbo);
       if (!endTarget) throw new Error("No pass buffer is free for the step's output.");
       const passTargets: WebGLRenderTarget[] = new Array(plannedPasses.length);

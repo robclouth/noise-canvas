@@ -2,7 +2,7 @@ import { FloatType, HalfFloatType, RedFormat, RGFormat, RGBAFormat, UnsignedByte
 import type { WebGLRenderTarget } from "three";
 import { describe, expect, it } from "vitest";
 import { GPU_BYTES_PER_TEXEL_FILE, GPU_BYTES_PER_TEXEL_SCRATCH, spectrogramBytes } from "../gpu-budget";
-import { StrokeScratchPool } from "../stroke-scratch-pool";
+import { StrokeScratch, StrokeScratchPool } from "../stroke-scratch-pool";
 
 /**
  * The budget caps how large a file may be analysed against the GPU memory the
@@ -39,35 +39,46 @@ function bytesPerTexel(target: WebGLRenderTarget): number {
   return colour + (target.depthBuffer ? DEPTH_BYTES_PER_TEXEL : 0);
 }
 
+function allocatedBytesPerTexel(scratch: StrokeScratch): number {
+  return Object.values(scratch).reduce((sum: number, target) => sum + (target ? bytesPerTexel(target) : 0), 0);
+}
+
 describe("GPU budget rates", () => {
-  // The budget charges the pool at its fullest, with the modulator target a
-  // step can ask for at any time already allocated.
-  it("charges scratch at what the pool really allocates", () => {
+  // The budget is charged for the pool at its fullest: both pass buffers and the
+  // modulator target a brush can ask for at any time, even though each is only
+  // allocated on first use.
+  it("charges scratch at what the pool really allocates when full", () => {
     const pool = new StrokeScratchPool();
     const owner = {};
     try {
       const { scratch } = pool.acquire(owner, 32, 16);
+      pool.passFbos(2);
       pool.modulatorFbo();
-      const allocated = Object.values(scratch).reduce((sum, target) => sum + (target ? bytesPerTexel(target) : 0), 0);
-      expect(GPU_BYTES_PER_TEXEL_SCRATCH).toBe(allocated);
-      expect(pool.allocatedBytes).toBe(allocated * 32 * 16);
+      expect(GPU_BYTES_PER_TEXEL_SCRATCH).toBe(allocatedBytesPerTexel(scratch));
+      expect(pool.allocatedBytes).toBe(GPU_BYTES_PER_TEXEL_SCRATCH * 32 * 16);
     } finally {
       pool.release(owner);
     }
   });
 
-  it("allocates the modulator target only when asked for it", () => {
+  it("allocates the pass buffers and the modulator target only when asked for them", () => {
     const pool = new StrokeScratchPool();
     const owner = {};
     try {
       const { scratch } = pool.acquire(owner, 32, 16);
+      expect(scratch.passFbo1).toBeNull();
       expect(scratch.modulatorFbo).toBeNull();
-      const withoutModulator = pool.allocatedBytes;
+      const bare = pool.allocatedBytes;
+
+      expect(pool.passFbos(1)).toHaveLength(1);
+      expect(scratch.passFbo2).toBeNull();
+      const withOnePass = pool.allocatedBytes;
+      expect(withOnePass - bare).toBe(bytesPerTexel(scratch.passFbo1!) * 32 * 16);
+
       const target = pool.modulatorFbo();
-      expect(scratch.modulatorFbo).toBe(target);
       expect(target.width).toBe(32);
       expect(target.height).toBe(16);
-      expect(pool.allocatedBytes - withoutModulator).toBe(bytesPerTexel(target) * 32 * 16);
+      expect(pool.allocatedBytes - withOnePass).toBe(bytesPerTexel(target) * 32 * 16);
     } finally {
       pool.release(owner);
     }

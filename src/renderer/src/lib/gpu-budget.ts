@@ -6,7 +6,9 @@ import { host } from "./host";
 export const GPU_BYTES_PER_TEXEL_FILE = 56;
 // The shared stroke scratch pool at its fullest, sized to the largest open
 // file: two pass FBOs (32), the stroke-start snapshot (16), two masks
-// (R16F = 4) and the two-target modulator buffer (2 × RGBA16F = 16).
+// (R16F = 4) and the two-target modulator buffer (2 × RGBA16F = 16). The pass
+// FBOs and the modulator buffer are allocated on first use, but a brush can ask
+// for them at any time, so the budget is charged for them from the start.
 export const GPU_BYTES_PER_TEXEL_SCRATCH = 68;
 // CPU-side copies (packedData 16, inverseMap 8); they compete with the
 // textures only on unified-memory GPUs.

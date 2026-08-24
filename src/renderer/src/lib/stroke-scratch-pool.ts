@@ -13,43 +13,56 @@ import {
  * stroke masks, the stroke-start snapshot, and the modulator precompute MRT.
  * One set is shared by every open file's StrokeRenderer, which holds because
  * only one file is painted at a time.
+ *
+ * The pass buffers and the modulator MRT are allocated on first use: a brush of
+ * one step, one effect and one iteration reaches the destination in a single
+ * pass and touches neither, which is the default brush and every brush Reduced
+ * Mode allows.
  */
 export interface StrokeScratch {
-  passFbo1: WebGLRenderTarget;
-  passFbo2: WebGLRenderTarget;
+  passFbo1: WebGLRenderTarget | null;
+  passFbo2: WebGLRenderTarget | null;
   strokeMaskFbo: WebGLRenderTarget;
   strokeMaskFbo2: WebGLRenderTarget;
   strokeStartFbo: WebGLRenderTarget;
   // Two half-float targets (MRT) holding the precomputed per-pixel modulator
   // outputs for the current step. tex[0] = (mod0.xy, mod1.xy); tex[1] = mod2.xy.
-  // Allocated by the pool's `modulatorFbo()` the first time a step routes a
-  // modulator, since most brushes never do.
   modulatorFbo: WebGLRenderTarget | null;
 }
 
-// The pass and stroke-start targets carry phase, which must stay float32. The
-// masks hold weights in [0, 1] and the modulator targets bounded modulator
+// A packed magnitude/phase target is RGBA32F: (magL, phaseL, magR, phaseR).
+// It must stay float32, because the phase channel carries large accumulated
+// values. A mono file leaves the second pair unused and still pays for it,
+// matching the canonical FBOs it is copied from.
+const PACKED_BYTES_PER_TEXEL = 16;
+// The masks hold weights in [0, 1] and the modulator targets bounded modulator
 // outputs, so half precision is enough for both.
-const PASS_BYTES_PER_TEXEL = 16;
 const MASK_BYTES_PER_TEXEL = 2;
 const MODULATOR_BYTES_PER_TEXEL = 2 * 8;
 
+function createTarget(
+  width: number,
+  height: number,
+  format: typeof RGBAFormat | typeof RedFormat,
+  type: typeof FloatType | typeof HalfFloatType,
+): WebGLRenderTarget {
+  return new WebGLRenderTarget(width, height, {
+    format,
+    type,
+    minFilter: NearestFilter,
+    magFilter: NearestFilter,
+    depthBuffer: false,
+    stencilBuffer: false,
+  });
+}
+
 function createTargets(width: number, height: number): StrokeScratch {
-  const fbo = (format: typeof RGBAFormat | typeof RedFormat, type: typeof FloatType | typeof HalfFloatType) =>
-    new WebGLRenderTarget(width, height, {
-      format,
-      type,
-      minFilter: NearestFilter,
-      magFilter: NearestFilter,
-      depthBuffer: false,
-      stencilBuffer: false,
-    });
   return {
-    passFbo1: fbo(RGBAFormat, FloatType),
-    passFbo2: fbo(RGBAFormat, FloatType),
-    strokeMaskFbo: fbo(RedFormat, HalfFloatType),
-    strokeMaskFbo2: fbo(RedFormat, HalfFloatType),
-    strokeStartFbo: fbo(RGBAFormat, FloatType),
+    passFbo1: null,
+    passFbo2: null,
+    strokeMaskFbo: createTarget(width, height, RedFormat, HalfFloatType),
+    strokeMaskFbo2: createTarget(width, height, RedFormat, HalfFloatType),
+    strokeStartFbo: createTarget(width, height, RGBAFormat, FloatType),
     modulatorFbo: null,
   };
 }
@@ -67,7 +80,9 @@ function createModulatorTarget(width: number, height: number): WebGLRenderTarget
 }
 
 function allocatedTargets(t: StrokeScratch): WebGLRenderTarget[] {
-  const targets = [t.passFbo1, t.passFbo2, t.strokeMaskFbo, t.strokeMaskFbo2, t.strokeStartFbo];
+  const targets = [t.strokeMaskFbo, t.strokeMaskFbo2, t.strokeStartFbo];
+  if (t.passFbo1) targets.push(t.passFbo1);
+  if (t.passFbo2) targets.push(t.passFbo2);
   if (t.modulatorFbo) targets.push(t.modulatorFbo);
   return targets;
 }
@@ -76,8 +91,8 @@ function allocatedTargets(t: StrokeScratch): WebGLRenderTarget[] {
  * Shared pool of stroke scratch targets, one set per WebGL renderer. A
  * StrokeRenderer acquires the set before painting; when a different renderer
  * painted last (or the texture size changed), `refreshed` tells the caller to
- * rebuild ownership-dependent content — the stroke-start snapshot and the
- * mask clears — before using it.
+ * rebuild ownership-dependent content — the stroke-start snapshot and the mask
+ * clears — before using it.
  */
 export class StrokeScratchPool {
   private targets: StrokeScratch | null = null;
@@ -99,6 +114,19 @@ export class StrokeScratchPool {
     this.width = width;
     this.height = height;
     return { scratch: this.targets, refreshed };
+  }
+
+  /**
+   * The first `count` pass buffers at the pool's current size, created on first
+   * call. A stroke that reaches its destination in one pass asks for none.
+   */
+  passFbos(count: number): WebGLRenderTarget[] {
+    if (!this.targets) throw new Error("Scratch targets are acquired before the pass buffers are used.");
+    const targets = this.targets;
+    const make = (): WebGLRenderTarget => createTarget(this.width, this.height, RGBAFormat, FloatType);
+    if (count >= 1) targets.passFbo1 ??= make();
+    if (count >= 2) targets.passFbo2 ??= make();
+    return [targets.passFbo1, targets.passFbo2].filter((t): t is WebGLRenderTarget => t !== null).slice(0, count);
   }
 
   /** The modulator MRT at the pool's current size, created on first call. */
@@ -124,9 +152,11 @@ export class StrokeScratchPool {
   get allocatedBytes(): number {
     if (!this.targets) return 0;
     const texels = this.width * this.height;
-    const fixed = 3 * PASS_BYTES_PER_TEXEL + 2 * MASK_BYTES_PER_TEXEL;
-    const modulator = this.targets.modulatorFbo ? MODULATOR_BYTES_PER_TEXEL : 0;
-    return texels * (fixed + modulator);
+    let perTexel = PACKED_BYTES_PER_TEXEL + 2 * MASK_BYTES_PER_TEXEL;
+    if (this.targets.passFbo1) perTexel += PACKED_BYTES_PER_TEXEL;
+    if (this.targets.passFbo2) perTexel += PACKED_BYTES_PER_TEXEL;
+    if (this.targets.modulatorFbo) perTexel += MODULATOR_BYTES_PER_TEXEL;
+    return texels * perTexel;
   }
 
   /** Drops ownership without freeing, so the next acquire refreshes the content. */
