@@ -17,7 +17,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import overviewProbeFrag from "../../test/overview-probe.frag";
 import probeVert from "../../test/paging-probe.vert";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
-import { buildOverview, createOverviewTextures, magnitudeToDb, OVERVIEW_DECIMATION } from "../overview";
+import { buildOverview, createOverviewTextures, magnitudeToDb, overviewDecimationOf } from "../overview";
 import { gatherPixelRanges } from "../pixel-ranges";
 import {
   buildWindowLayout,
@@ -34,6 +34,9 @@ import {
  */
 
 const FADE_BINS = 8;
+// Coarse enough that the mock's short bands still reach both sides of the
+// crossover in glsl/overview.glsl, which is stated in overview bins per pixel.
+const OVERVIEW_STEP_LOG2 = 6;
 
 describe("display overview fallback", () => {
   const data = createConstantQMockSpectrogramData({ durationSeconds: 4, sampleRate: 8000, bandsPerOctave: 4 });
@@ -45,7 +48,7 @@ describe("display overview fallback", () => {
       data.packedData[pixel + 2] = data.packedData[pixel];
     }
   }
-  const overview = buildOverview(data.packedData, layout, data.metadata);
+  const overview = buildOverview(data.packedData, layout, data.metadata, OVERVIEW_STEP_LOG2);
 
   let renderer: WebGLRenderer;
   let scene: Scene;
@@ -78,6 +81,7 @@ describe("display overview fallback", () => {
         overviewTex: { value: overviewTextures.data },
         overviewMetaTex: { value: overviewTextures.meta },
         overviewActive: { value: true },
+        overviewStepLog2: { value: OVERVIEW_STEP_LOG2 },
         probeFrameOrigin: { value: 0 },
         probeFrameStride: { value: 1 },
       },
@@ -142,9 +146,11 @@ describe("display overview fallback", () => {
   it("takes the overview whole beyond the window and the window whole well inside it", () => {
     const window = buildWindowLayout(layout, layout.numFrames / 4, layout.numFrames / 2);
     bindWindow(window);
-    const columns = 512;
-    const stride = Math.floor(layout.numFrames / columns);
-    const out = probe(0, stride, columns);
+    const columns = 2048;
+    // Fine enough that no band's overview bin reaches a pixel, so the seam is
+    // the only thing that can pull the read toward the overview.
+    const stride = 4;
+    const out = probe(window.startFrame - (columns / 2) * stride, stride, columns);
 
     let deepInside = 0;
     let outside = 0;
@@ -162,6 +168,53 @@ describe("display overview fallback", () => {
     }
     expect(deepInside).toBeGreaterThan(0);
     expect(outside).toBeGreaterThan(0);
+  });
+
+  // Which source a read takes is decided by zoom, not by residency, so the two
+  // sides of a window edge cannot differ in what they are made of. The overview
+  // is on one time step in every band, so the switch happens everywhere at once.
+  it("takes the overview on both sides of the seam once its bins are sub-pixel", () => {
+    const window = buildWindowLayout(layout, layout.numFrames / 4, layout.numFrames / 2);
+    bindWindow(window);
+    const columns = 48;
+    const stride = 512;
+    const out = probe(0, stride, columns);
+
+    let deepInside = 0;
+    let outside = 0;
+    for (let y = 0; y < layout.numBands; y++) {
+      for (let x = 0; x < columns; x++) {
+        const i = (y * columns + x) * 4;
+        expect(out[i + 1]).toBe(1);
+        if (out[i + 3] >= FADE_BINS) deepInside++;
+        if (out[i + 3] < 0) outside++;
+      }
+    }
+    // The overview won it well inside the window, where residency alone would
+    // have kept the window's own bins.
+    expect(deepInside).toBeGreaterThan(0);
+    expect(outside).toBeGreaterThan(0);
+  });
+
+  // The overview is on one time step, so the zoom at which the display starts
+  // preferring it is the same everywhere: no band boundary shows a join.
+  it("crosses at the same zoom in every band", () => {
+    const window = buildWindowLayout(layout, layout.numFrames / 4, layout.numFrames / 2);
+    bindWindow(window);
+    const columns = 64;
+    // One overview bin per pixel, halfway along the crossover.
+    const stride = 2 ** OVERVIEW_STEP_LOG2;
+    // Clear of both window edges, so the seam fade cannot reach these reads.
+    const out = probe(window.startFrame + 2048, stride, columns);
+
+    for (let x = 0; x < columns; x++) {
+      const blend = out[x * 4 + 1];
+      expect(blend).toBeGreaterThan(0);
+      expect(blend).toBeLessThan(1);
+      for (let y = 1; y < layout.numBands; y++) {
+        expect(out[(y * columns + x) * 4 + 1]).toBeCloseTo(blend, 5);
+      }
+    }
   });
 
   it("crosses the seam gradually rather than in one step", () => {
@@ -186,15 +239,18 @@ describe("display overview fallback", () => {
   it("supplies a level between the two overview bins it blends", () => {
     const window = buildWindowLayout(layout, layout.numFrames / 2, layout.numFrames);
     bindWindow(window);
-    const columns = 256;
-    const stride = Math.floor(layout.numFrames / columns);
+    const columns = 62;
+    // Not a multiple of any band's overview step, so the reads land between
+    // bins rather than on them.
+    const stride = 500;
     const out = probe(0, stride, columns);
 
     /** Max magnitude over one overview group of a band. */
     const groupPeak = (band: number, group: number): number => {
       let peak = 0;
-      for (let k = 0; k < OVERVIEW_DECIMATION; k++) {
-        const bin = group * OVERVIEW_DECIMATION + k;
+      const decimation = overviewDecimationOf(layout, band, OVERVIEW_STEP_LOG2);
+      for (let k = 0; k < decimation; k++) {
+        const bin = group * decimation + k;
         if (bin >= layout.bandLengths[band]) break;
         peak = Math.max(peak, data.packedData[(layout.bandOffsets[band] + bin) * 4]);
       }
@@ -203,7 +259,7 @@ describe("display overview fallback", () => {
 
     let checked = 0;
     for (let y = 0; y < layout.numBands; y++) {
-      const overviewStep = 2 ** (layout.bandStepLog2s[y] + Math.log2(OVERVIEW_DECIMATION));
+      const overviewStep = 2 ** overview.layout.bandStepLog2s[y];
       const lastGroup = overview.layout.bandLengths[y] - 1;
       for (let x = 0; x < columns; x++) {
         const i = (y * columns + x) * 4;
@@ -230,21 +286,24 @@ describe("display overview fallback", () => {
   it("never loses a group's peak", () => {
     const window = buildWindowLayout(layout, layout.numFrames / 2, layout.numFrames);
     bindWindow(window);
-    const columns = 256;
-    const stride = 2 ** Math.max(...Array.from(layout.bandStepLog2s)) * OVERVIEW_DECIMATION;
+    const columns = 62;
+    // A multiple of every band's overview step, so each read lands on a group
+    // boundary, and coarse enough that the zoom takes the overview whole.
+    const stride = 2 ** Math.max(...Array.from(overview.layout.bandStepLog2s)) * 4;
     const out = probe(0, stride, columns);
 
     let checked = 0;
     for (let y = 0; y < layout.numBands; y++) {
-      const overviewStep = 2 ** (layout.bandStepLog2s[y] + Math.log2(OVERVIEW_DECIMATION));
+      const overviewStep = 2 ** overview.layout.bandStepLog2s[y];
+      const decimation = overviewDecimationOf(layout, y, OVERVIEW_STEP_LOG2);
       for (let x = 0; x < columns; x++) {
         const i = (y * columns + x) * 4;
         if (out[i + 1] !== 1) continue;
         const group = Math.floor((x * stride) / overviewStep);
         if (group >= overview.layout.bandLengths[y]) continue;
         let peak = 0;
-        for (let k = 0; k < OVERVIEW_DECIMATION; k++) {
-          const bin = group * OVERVIEW_DECIMATION + k;
+        for (let k = 0; k < decimation; k++) {
+          const bin = group * decimation + k;
           if (bin >= layout.bandLengths[y]) break;
           peak = Math.max(peak, data.packedData[(layout.bandOffsets[y] + bin) * 4]);
         }

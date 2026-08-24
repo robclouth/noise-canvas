@@ -67,6 +67,7 @@ describe("pretend window over a whole-file texture", () => {
         overviewTex: { value: overviewTextures.data },
         overviewMetaTex: { value: overviewTextures.meta },
         overviewActive: { value: true },
+        overviewStepLog2: { value: overview.stepLog2 },
         probeFrameOrigin: { value: 0 },
         probeFrameStride: { value: 1 },
       },

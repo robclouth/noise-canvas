@@ -5,8 +5,17 @@
 uniform sampler2D overviewTex;      // RG16F: dB per channel, before the full-scale offset
 uniform sampler2D overviewMetaTex;
 uniform bool overviewActive;
+// Frames one overview bin covers, as a power of two. One number for the whole
+// overview, so the display prefers it at the same zoom in every band.
+uniform float overviewStepLog2;
 // Bins over which the display crosses from the window to the overview.
 const float OVERVIEW_FADE_BINS = 8.0;
+// Overview bins per screen pixel between which the display crosses from the
+// window to the overview: below the first the window resolves detail the
+// overview has already collapsed, above the second the window's own bins are
+// the ones that alias.
+const float OVERVIEW_ZOOM_LO = 0.5;
+const float OVERVIEW_ZOOM_HI = 2.0;
 
 /**
  * Magnitudes from the overview at an unpacked UV, in the same
@@ -31,15 +40,31 @@ vec4 sampleOverviewMagnitudes(vec2 uv, float frameCount, float bandCount) {
 }
 
 /**
- * How much of a read the overview should supply at this position: 0 inside the
- * window, 1 beyond it, ramping across the last OVERVIEW_FADE_BINS bins.
+ * How much of a read the overview should supply once its bins are near or below
+ * one screen pixel. It depends on the zoom alone, so it holds the same value on
+ * both sides of a window edge and across every band boundary, and puts no step
+ * at either.
+ */
+float overviewZoomBlend(float framesPerPixel) {
+  float binsPerPixel = framesPerPixel / exp2(overviewStepLog2);
+  float span = log2(OVERVIEW_ZOOM_HI / OVERVIEW_ZOOM_LO);
+  return clamp(log2(binsPerPixel / OVERVIEW_ZOOM_LO) / span, 0.0, 1.0);
+}
+
+/**
+ * How much of a read the overview should supply at this position: the larger of
+ * the seam fade across the window's last OVERVIEW_FADE_BINS bins and the zoom
+ * blend.
  */
 float overviewBlend(vec2 uv, sampler2D metaTex, float frameCount, float bandCount) {
   if (!overviewActive) return 0.0;
+  // Taken before any branch on the band, which varies within a quad.
+  float framesPerPixel = fwidth(uv.x) * frameCount;
   PackedBand band = fetchPackedBand(metaTex, floor((1.0 - uv.y) * bandCount));
   // A whole-file texture has no seam; without this the fade would fire at the
   // file's own first and last bins, where nothing is missing.
   if (bandIsWholeFile(band)) return 0.0;
   float margin = bandResidencyMargin(band, uv.x * frameCount);
-  return 1.0 - clamp(margin / OVERVIEW_FADE_BINS, 0.0, 1.0);
+  float seam = 1.0 - clamp(margin / OVERVIEW_FADE_BINS, 0.0, 1.0);
+  return max(seam, overviewZoomBlend(framesPerPixel));
 }

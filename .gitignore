@@ -22,3 +22,4 @@ vendor/
 listening/
 # Agent worktrees: full repo copies, never part of a commit.
 .claude/worktrees/
+paging-review/

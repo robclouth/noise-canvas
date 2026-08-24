@@ -241,6 +241,18 @@ The suite was mutation-checked; each of the three failure modes the reviews foun
 
 **Also unchecked: the by-eye pass at Min dB −110**, not at the default −70, on material with sharp transients — does 16× read mushy, and does the overview floor hold? The arithmetic says it should (dB has no subnormal region), but the question was always visual.
 
+### The seam, measured in the app, and what closed it
+
+Driven with Playwright on a 240 s file, the pretend window at 0.5, Min dB −70, 1× zoom: **outside the window read 100 against 77 inside it** — a bright block over half the lane, not the join the 8-bin fade was written to hide. The fade cannot help, because the step is not at the boundary; it is between what the two sources _are_. A screen pixel at 1× zoom on that file spans about 5600 frames. The window read point-samples one bin of the hundreds under the pixel; the overview read returns a max. The window is the one that is wrong: it drops transients on zoom-out, and it always has.
+
+So the source is now decided by **zoom, not by residency**: `overviewZoomBlend` ramps from the window to the overview as an overview bin falls from twice a screen pixel to half of one, and `overviewBlend` returns the larger of that and the seam fade. Because the ramp depends on the zoom alone, it is equal on both sides of a window edge and adds nothing there. `fwidth(uv.x)` supplies the frames per pixel, taken before the band branch, which varies within a quad.
+
+That alone fixed the top half of the lane and left the bass stepping by up to 32. The cause was the fixed 16× decimation: a band's overview step is `16·2^s`, and `s` spans about eight octaves, so the crossover zoom differed by 256× between the top band and the bottom one, and the two sides of the edge disagreed wherever a band had not yet crossed. **The overview now decimates to one time step**, `OVERVIEW_STEP_LOG2 = 11` — 2048 frames, about 45 ms — per band, `2^max(0, 11 − s)` bins into one. A band already coarser than that keeps its own bins, so the overview _is_ the file there and both sources read the same level exactly. One `overviewStepLog2` uniform drives the ramp, so the crossover is simultaneous in every band and no band boundary shows a join either.
+
+Measured again the same way: the step is **under one unit of 255 in every band**, zero in the two lowest groups, and at 64× zoom the window-on and window-off frames are byte-identical. The overview also got smaller — 1.64 M texels against 2.97 M on that file, 6.6 MiB against 11.9 MiB, and 167 ms to build against 210 ms.
+
+Two things this leaves. The zoomed-out picture is now brighter than today's app draws it (mean 89 against 77 at 1× on that file) because it stops aliasing; nothing changes for a whole-file texture, where `bandIsWholeFile` still returns 0. And the overview is no longer a fixed fraction of the file: bands whose own step is at or past 2048 frames cost a full RG16F texel each, so `gpu-budget.ts` must charge `layoutPixelCount(buildOverviewLayout(file))`, not `filePixels / 16`.
+
 ## Stage 2 — the window becomes real for display
 
 Memory drops for the first time.
@@ -250,7 +262,7 @@ Memory drops for the first time.
 - Change `getFBOData` to fill a caller-owned array. Guard the aliasing: the addon takes inputs by reference and writes the commit patch in place, so a paged read must not hand back an array the paint path also patches while a promise is in flight.
 - **The inverse map is generated on the GPU** by a range-quad pass, removing an 8 B/texel CPU array. Set `NearestFilter` explicitly on the render target — `packedToUnpackedUv` uses a filtered read, and a linear filter blends frames across band boundaries. **Keep its frames in file space**: Sort reads `neighborInvRG.r / destFrameCount` raw, so window-relative frames would push its brush-membership guard permanently false and turn Sort into a silent no-op. That drops the float-exactness argument, which decision 1d already withdrew.
 - Gather on view change with a margin and hysteresis. **Measure the gather** — 3.2 M texels is a 50 MiB upload — and if it stutters, split it across frames by band range.
-- `gpu-budget.ts`: charge per window texel for the resident buffers, per file texel for the overview and (until Stage 4) for `packedData`.
+- `gpu-budget.ts`: charge per window texel for the resident buffers, per overview texel (from `buildOverviewLayout`, not a fixed fraction) for the overview, and per file texel — until Stage 4 — for `packedData`.
 - Painting stays confined to the window, and **the refusal must be real**: the footprint is the write set, and every clone, transform, blur and evolve read is larger. Without the Stage 0 residency flag this stage does not refuse anything — it paints window-edge data smeared across the read, with no log line.
 
 **Exit:** measured memory on the three files, with the scratch pool included, plus the sentinel test green. Peak still includes whole-file `packedData`. Shippable behind the hidden switch.

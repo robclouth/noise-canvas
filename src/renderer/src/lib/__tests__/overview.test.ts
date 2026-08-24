@@ -5,7 +5,8 @@ import {
   buildOverview,
   buildOverviewLayout,
   magnitudeToDb,
-  OVERVIEW_DECIMATION,
+  OVERVIEW_STEP_LOG2,
+  overviewDecimationOf,
   updateOverviewRanges,
 } from "../overview";
 import { fileLayoutOf, layoutPixelCount, type PackedLayout } from "../window-layout";
@@ -38,13 +39,15 @@ function readBin(data: Uint16Array, pixel: number): { left: number; right: numbe
 }
 
 describe("overview layout", () => {
-  it("shifts each band's step by the decimation and keeps at least one bin", () => {
+  it("puts every band on one step, or the file's own where that is already coarser", () => {
     const { layout } = mockFile();
     const overview = buildOverviewLayout(layout);
     for (let b = 0; b < layout.numBands; b++) {
-      expect(overview.bandStepLog2s[b]).toBe(layout.bandStepLog2s[b] + 4);
-      expect(overview.bandLengths[b]).toBe(Math.max(1, Math.ceil(layout.bandLengths[b] / OVERVIEW_DECIMATION)));
+      expect(overview.bandStepLog2s[b]).toBe(Math.max(OVERVIEW_STEP_LOG2, layout.bandStepLog2s[b]));
+      const decimation = overviewDecimationOf(layout, b);
+      expect(overview.bandLengths[b]).toBe(Math.max(1, Math.ceil(layout.bandLengths[b] / decimation)));
       expect(overview.bandLengths[b]).toBeGreaterThanOrEqual(1);
+      expect(overview.bandLengths[b]).toBeLessThanOrEqual(Math.max(1, layout.bandLengths[b]));
     }
   });
 
@@ -57,25 +60,26 @@ describe("overview layout", () => {
     for (let b = 0; b < layout.numBands; b++) {
       const fileStep = 2 ** layout.bandStepLog2s[b];
       const overviewStep = 2 ** overview.bandStepLog2s[b];
-      expect(overviewStep).toBe(fileStep * OVERVIEW_DECIMATION);
+      const decimation = overviewDecimationOf(layout, b);
+      expect(overviewStep).toBe(fileStep * decimation);
       for (let k = 0; k < overview.bandLengths[b]; k++) {
-        expect(k * overviewStep).toBe(k * OVERVIEW_DECIMATION * fileStep);
+        expect(k * overviewStep).toBe(k * decimation * fileStep);
       }
     }
   });
 
-  it("costs a quarter of a byte per file texel", () => {
+  it("costs under a quarter of a byte per file texel", () => {
     const { layout } = mockFile();
     const overview = buildOverviewLayout(layout);
     const bytesPerOverviewTexel = 4; // RG16F
+    expect(layoutPixelCount(overview)).toBeGreaterThan(0);
     const ratio = (layoutPixelCount(overview) * bytesPerOverviewTexel) / layoutPixelCount(layout);
-    expect(ratio).toBeGreaterThan(0.24);
-    expect(ratio).toBeLessThan(0.3);
+    expect(ratio).toBeLessThan(0.25);
   });
 
-  it("rejects a decimation that is not a power of two", () => {
+  it("rejects a step exponent that is not a whole number", () => {
     const { layout } = mockFile();
-    expect(() => buildOverviewLayout(layout, 10)).toThrow();
+    expect(() => buildOverviewLayout(layout, 10.5)).toThrow();
   });
 });
 
@@ -86,9 +90,10 @@ describe("overview contents", () => {
     const overview = buildOverview(data.packedData, layout, data.metadata);
 
     for (let b = 0; b < layout.numBands; b++) {
+      const decimation = overviewDecimationOf(layout, b);
       for (let k = 0; k < overview.layout.bandLengths[b]; k++) {
-        const first = k * OVERVIEW_DECIMATION;
-        const count = Math.min(OVERVIEW_DECIMATION, layout.bandLengths[b] - first);
+        const first = k * decimation;
+        const count = Math.min(decimation, layout.bandLengths[b] - first);
         let left = 0;
         let right = 0;
         for (let i = 0; i < count; i++) {
@@ -114,7 +119,7 @@ describe("overview contents", () => {
     data.packedData[spike * 4 + 2] = 0.5;
 
     const overview = buildOverview(data.packedData, layout, data.metadata);
-    const bin = overview.layout.bandOffsets[band] + Math.floor(5 / OVERVIEW_DECIMATION);
+    const bin = overview.layout.bandOffsets[band] + Math.floor(5 / overviewDecimationOf(layout, band));
     expect(readBin(overview.data, bin).left).toBeCloseTo(magnitudeToDb(0.5), 1);
   });
 
@@ -207,7 +212,8 @@ describe("overview updates", () => {
     data.packedData.fill(0);
     const band = 1;
     const groupStart = layout.bandOffsets[band];
-    for (let i = 0; i < OVERVIEW_DECIMATION; i++) data.packedData[(groupStart + i) * 4] = 0.1;
+    const decimation = overviewDecimationOf(layout, band);
+    for (let i = 0; i < decimation; i++) data.packedData[(groupStart + i) * 4] = 0.1;
     data.packedData[(groupStart + 3) * 4] = 0.8;
 
     const overview = buildOverview(data.packedData, layout, data.metadata);
@@ -224,9 +230,10 @@ describe("overview updates", () => {
     const overview = buildOverview(data.packedData, layout, data.metadata);
 
     const band = 2;
+    const decimation = overviewDecimationOf(layout, band);
     // Start and end inside groups rather than on their boundaries.
-    const start = layout.bandOffsets[band] + OVERVIEW_DECIMATION + 3;
-    const count = OVERVIEW_DECIMATION * 2 + 5;
+    const start = layout.bandOffsets[band] + decimation + 3;
+    const count = decimation * 2 + 5;
     for (let i = 0; i < count; i++) data.packedData[(start + i) * 4] = 0.7;
 
     updateOverviewRanges(overview, data.packedData, layout, Uint32Array.of(start, count));

@@ -16,11 +16,19 @@ import { bandOfFilePixel } from "./window-layout";
 const MAX_TEXTURE_SIZE = 8192;
 
 /**
- * Bins of the file collapsed into one overview bin. A power of two, so an
- * overview band's step exponent stays a whole number and `packedTexel` and the
- * band metadata address it unchanged.
+ * Frames one overview bin covers, as a power of two. Bands whose own bins are
+ * already this coarse keep them, so the overview holds the file itself there
+ * and the display reads the same level from either. Every other band collapses
+ * to this step, which puts the whole overview on one time resolution: the zoom
+ * at which the display prefers it is then the same in every band, and no band
+ * boundary shows a join.
  */
-export const OVERVIEW_DECIMATION = 16;
+export const OVERVIEW_STEP_LOG2 = 11;
+
+/** Bins of `file` band `band` that one overview bin collapses. */
+export function overviewDecimationOf(file: PackedLayout, band: number, stepLog2 = OVERVIEW_STEP_LOG2): number {
+  return 2 ** Math.max(0, stepLog2 - file.bandStepLog2s[band]);
+}
 
 /**
  * The overview holds dB, not linear magnitude. Half float's smallest normal is
@@ -37,20 +45,19 @@ export function magnitudeToDb(magnitude: number): number {
   return 20 * Math.log10(magnitude + 1e-7);
 }
 
-/** A decimated whole-file view: the same dyadic layout, `decimation` bins wide. */
+/** A decimated whole-file view, on the file's dyadic layout at one time step. */
 export interface Overview {
   layout: PackedLayout;
   /** RG16F: (dB left, dB right) per overview bin. */
   data: Uint16Array;
   /** The `numBands × 1` metadata the overview is addressed by. */
   metadata: Float32Array;
-  decimation: number;
+  stepLog2: number;
 }
 
 /** The packed layout of an overview over `file`. */
-export function buildOverviewLayout(file: PackedLayout, decimation = OVERVIEW_DECIMATION): PackedLayout {
-  const shift = Math.log2(decimation);
-  if (!Number.isInteger(shift)) throw new Error("The overview decimation must be a power of two.");
+export function buildOverviewLayout(file: PackedLayout, stepLog2 = OVERVIEW_STEP_LOG2): PackedLayout {
+  if (!Number.isInteger(stepLog2)) throw new Error("The overview step exponent must be a whole number.");
 
   const bandOffsets = new Uint32Array(file.numBands);
   const bandLengths = new Uint32Array(file.numBands);
@@ -58,7 +65,8 @@ export function buildOverviewLayout(file: PackedLayout, decimation = OVERVIEW_DE
 
   let total = 0;
   for (let b = 0; b < file.numBands; b++) {
-    bandStepLog2s[b] = file.bandStepLog2s[b] + shift;
+    const decimation = overviewDecimationOf(file, b, stepLog2);
+    bandStepLog2s[b] = file.bandStepLog2s[b] + Math.log2(decimation);
     bandLengths[b] = Math.max(1, Math.ceil(file.bandLengths[b] / decimation));
     bandOffsets[b] = total;
     total += bandLengths[b];
@@ -121,14 +129,15 @@ export function buildOverview(
   packedData: Float32Array,
   file: PackedLayout,
   fileMetadata: Float32Array,
-  decimation = OVERVIEW_DECIMATION,
+  stepLog2 = OVERVIEW_STEP_LOG2,
 ): Overview {
-  const layout = buildOverviewLayout(file, decimation);
+  const layout = buildOverviewLayout(file, stepLog2);
   const data = new Uint16Array(layout.textureWidth * layout.textureHeight * 2);
 
   for (let b = 0; b < file.numBands; b++) {
     const fileBandStart = file.bandOffsets[b];
     const fileLength = file.bandLengths[b];
+    const decimation = overviewDecimationOf(file, b, stepLog2);
     for (let k = 0; k < layout.bandLengths[b]; k++) {
       const first = k * decimation;
       const count = Math.min(decimation, fileLength - first);
@@ -138,7 +147,7 @@ export function buildOverview(
     }
   }
 
-  return { layout, data, metadata: buildOverviewMetadata(layout, fileMetadata), decimation };
+  return { layout, data, metadata: buildOverviewMetadata(layout, fileMetadata), stepLog2 };
 }
 
 /**
@@ -153,7 +162,7 @@ export function updateOverviewRanges(
   file: PackedLayout,
   ranges: Uint32Array,
 ): void {
-  const { layout, data, decimation } = overview;
+  const { layout, data } = overview;
 
   for (let i = 0; i < ranges.length; i += 2) {
     let start = ranges[i];
@@ -163,6 +172,7 @@ export function updateOverviewRanges(
       if (band < 0) break;
       const fileBandStart = file.bandOffsets[band];
       const fileLength = file.bandLengths[band];
+      const decimation = overviewDecimationOf(file, band, overview.stepLog2);
       const chunkEnd = Math.min(end, fileBandStart + fileLength);
 
       const firstGroup = Math.floor((start - fileBandStart) / decimation);

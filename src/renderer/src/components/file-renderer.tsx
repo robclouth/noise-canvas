@@ -427,6 +427,7 @@ const FileRendererInner = memo(
           overviewTex: { value: null as Texture | null },
           overviewMetaTex: { value: null as Texture | null },
           overviewActive: { value: false },
+          overviewStepLog2: { value: 0 },
         },
         vertexShader: passThroughVert,
         fragmentShader: displayFrag,
@@ -602,7 +603,8 @@ const FileRendererInner = memo(
     useEffect(() => {
       invalidateRef.current?.();
       snapshotStaleRef.current = true;
-    }, [pretendMetadataTex]);
+      scheduleSnapshotRefresh();
+    }, [pretendMetadataTex, scheduleSnapshotRefresh]);
 
     /**
      * Calculate clone-stamp offset from the cursor, scaled to source UV space.
@@ -664,6 +666,7 @@ const FileRendererInner = memo(
       uniforms.overviewTex.value = overviewRef.current?.data ?? null;
       uniforms.overviewMetaTex.value = overviewRef.current?.meta ?? null;
       uniforms.overviewActive.value = overviewRef.current !== null;
+      uniforms.overviewStepLog2.value = overviewRef.current?.overview.stepLog2 ?? 0;
       uniforms.sourceMinFreq.value = spectrogramData.minFreq;
       uniforms.sourceBandsPerOctave.value = spectrogramData.bandsPerOctave;
       uniforms.sourceFrameCount.value = spectrogramData.numFrames;
