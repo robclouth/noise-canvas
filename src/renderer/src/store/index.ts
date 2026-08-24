@@ -391,9 +391,10 @@ export const useStore = create<State>()(
   ),
 );
 
-// Dev-only: expose the store on window so a CDP-attached driver can read state
-// and toggle parameters for controlled, reproducible performance measurements.
-if (import.meta.env.DEV) {
+// Exposed on window in a dev build, and in a build made with
+// VITE_DEBUG_GLOBALS set, so a CDP-attached driver can read state and toggle
+// parameters for controlled, reproducible measurements.
+if (import.meta.env.DEV || import.meta.env.VITE_DEBUG_GLOBALS) {
   (globalThis as unknown as { __store?: typeof useStore }).__store = useStore;
 }
 

@@ -28,7 +28,7 @@ export function subscribePretendWindow(listener: () => void): () => void {
   };
 }
 
-if (import.meta.env.DEV) {
+if (import.meta.env.DEV || import.meta.env.VITE_DEBUG_GLOBALS) {
   (globalThis as unknown as { __paging?: unknown }).__paging = {
     getPretendWindowFraction,
     setPretendWindowFraction,

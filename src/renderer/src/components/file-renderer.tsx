@@ -146,6 +146,13 @@ export interface FileRendererHandle {
   patchFBOData: (data: Float32Array, pixelRanges: Uint32Array) => void;
   /** The parts of the flat [pixelStart, pixelCount, ...] ranges the canvas holds. */
   residentRanges: (pixelRanges: Uint32Array) => Uint32Array;
+  /**
+   * Re-decimates the zoomed-out overview over `pixelRanges` from `data` (the
+   * full packed state), or over the whole file when they are null. A stroke
+   * paints straight into the canvas without going through patchFBOData, so the
+   * overview would otherwise keep showing the file as it was before it.
+   */
+  updateOverview: (data: Float32Array, pixelRanges: Uint32Array | null) => void;
   /** Returns the textures used for rendering. */
   getTextures: () => {
     packed: WebGLRenderTarget;
@@ -584,11 +591,18 @@ const FileRendererInner = memo(
       tex.generateMipmaps = false;
       tex.needsUpdate = true;
       setPretendMetadataTex(tex);
-      invalidateRef.current?.();
       return () => {
         tex.dispose();
       };
     }, [pretendWindowFraction, spectrogramData]);
+
+    // After the texture is on the material, not while the state that carries it
+    // is still being committed: a frame drawn in between reads the old one and
+    // nothing asks for another.
+    useEffect(() => {
+      invalidateRef.current?.();
+      snapshotStaleRef.current = true;
+    }, [pretendMetadataTex]);
 
     /**
      * Calculate clone-stamp offset from the cursor, scaled to source UV space.
@@ -1340,6 +1354,12 @@ const FileRendererInner = memo(
     const residentRanges = (pixelRanges: Uint32Array): Uint32Array =>
       strokeRendererRef.current?.residentRanges(pixelRanges) ?? new Uint32Array(0);
 
+    const updateOverview = (data: Float32Array, pixelRanges: Uint32Array | null): void => {
+      if (pixelRanges) patchOverview(data, pixelRanges);
+      else rebuildOverview(data);
+      invalidateRef.current?.();
+    };
+
     /**
      * Returns the current set of textures.
      */
@@ -1457,6 +1477,7 @@ const FileRendererInner = memo(
       setFBOData,
       patchFBOData,
       residentRanges,
+      updateOverview,
       getTextures,
       restoreOriginal,
       clearPreview,
