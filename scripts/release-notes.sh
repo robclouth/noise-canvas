@@ -48,8 +48,6 @@ download_table() {
   echo "| --- | --- |"
   printf '%s' "$rows"
   echo
-  echo "The .zip and .yml files under Assets are for the in-app updater, and are not downloads."
-  echo
   echo "---"
   echo
 }

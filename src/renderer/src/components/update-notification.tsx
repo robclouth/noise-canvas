@@ -1,9 +1,10 @@
-import { Box, Button, Group, Modal, Progress, Stack, Text } from "@mantine/core";
+import { Button, Group, Modal, Progress, ScrollArea, Stack, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useState } from "react";
 import type { ProgressInfo, UpdateInfo } from "electron-updater";
 import { host } from "../lib/host";
 import { APP_MODAL_PROPS } from "../lib/modals";
+import { stripDownloadTable } from "../lib/release-notes";
 import { ipcOn } from "../lib/ipc";
 
 export function UpdateNotification() {
@@ -121,14 +122,14 @@ export function UpdateNotification() {
   const formatReleaseNotes = (notes: UpdateInfo["releaseNotes"]) => {
     if (!notes) return null;
     if (typeof notes === "string") {
-      return <div dangerouslySetInnerHTML={{ __html: notes }} />;
+      return <div dangerouslySetInnerHTML={{ __html: stripDownloadTable(notes) }} />;
     }
     return notes.map(({ version, note }) => (
       <Stack key={version} gap={2}>
         <Text size="xs" fw={600}>
           {version}
         </Text>
-        {note && <div dangerouslySetInnerHTML={{ __html: note }} />}
+        {note && <div dangerouslySetInnerHTML={{ __html: stripDownloadTable(note) }} />}
       </Stack>
     ));
   };
@@ -191,9 +192,9 @@ export function UpdateNotification() {
               <Text size="xs" fw={600}>
                 What&apos;s new
               </Text>
-              <Box className="release-notes" style={{ maxHeight: 260, overflowY: "auto" }}>
+              <ScrollArea.Autosize className="release-notes" mah={220} scrollbarSize={4} type="auto">
                 {formatReleaseNotes(updateInfo.releaseNotes)}
-              </Box>
+              </ScrollArea.Autosize>
             </Stack>
           )}
 
