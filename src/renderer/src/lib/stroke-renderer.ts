@@ -33,9 +33,11 @@ import {
   fileLayoutOf,
   isWholeFileWindow,
   mapFileRangesToWindow,
+  windowFileRanges,
   type MappedRanges,
   type WindowLayout,
 } from "./window-layout";
+import { scatterCompactPixelRanges } from "./pixel-ranges";
 import { gatherWindowPacked } from "./window-textures";
 import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
@@ -242,6 +244,7 @@ export class StrokeRenderer {
   private windowLayout: WindowLayout;
   private windowTextureSize: Vector2;
   private wholeFileWindow: boolean;
+  private windowRangesCache: Uint32Array | null = null;
   private textures: StrokeTextures;
   private fileId: string;
   private effects: EffectsRegistry;
@@ -1523,12 +1526,8 @@ export class StrokeRenderer {
     this.fboDataEpoch++;
   }
 
-  /**
-   * Get the current FBO data asynchronously. The readback is issued against the
-   * FBO as it stands at the call, so the resolved array is that caller's
-   * snapshot even when later paint lands before it resolves.
-   */
-  async getFBOData(): Promise<Float32Array> {
+  /** The committed FBO read back at its own (window) dimensions, cached. */
+  private async readWindowFbo(): Promise<Float32Array> {
     if (this.fboDataCache && !this.fboDataDirty) {
       return this.fboDataCache;
     }
@@ -1546,6 +1545,52 @@ export class StrokeRenderer {
     }
 
     return data;
+  }
+
+  /**
+   * Get the current FBO data asynchronously, in the file's packed layout. The
+   * readback is issued against the FBO as it stands at the call, so the
+   * resolved array is that caller's snapshot even when later paint lands before
+   * it resolves.
+   *
+   * `into` is written only after the read resolves, and only at the pixels the
+   * window holds, so a caller that also patches it must not do so while this
+   * promise is in flight.
+   */
+  async getFBOData(into?: Float32Array): Promise<Float32Array> {
+    const windowData = await this.readWindowFbo();
+    if (this.wholeFileWindow) {
+      if (into && into !== windowData) into.set(windowData.subarray(0, into.length));
+      return into ?? windowData;
+    }
+
+    const { textureWidth, textureHeight } = this.spectrogramData;
+    const out = into ?? new Float32Array(textureWidth * textureHeight * 4);
+    scatterCompactPixelRanges(out, windowData, this.windowFileRanges());
+    return out;
+  }
+
+  /**
+   * The parts of `fileRanges` the window holds, still in file indices. A caller
+   * that must compare the canvas with the packed state samples only these:
+   * everything else reads back as a miss and would fail the comparison for a
+   * reason that has nothing to do with what it is testing.
+   */
+  residentRanges(fileRanges: Uint32Array): Uint32Array {
+    if (this.wholeFileWindow) return fileRanges;
+    const { mapped } = mapFileRangesToWindow(this.windowLayout, fileRanges);
+    const out = new Uint32Array((mapped.length / 3) * 2);
+    for (let i = 0, j = 0; i + 2 < mapped.length; i += 3, j += 2) {
+      out[j] = mapped[i];
+      out[j + 1] = mapped[i + 2];
+    }
+    return out;
+  }
+
+  /** The file packed ranges the window holds, built once per layout. */
+  private windowFileRanges(): Uint32Array {
+    this.windowRangesCache ??= windowFileRanges(this.windowLayout);
+    return this.windowRangesCache;
   }
 
   /**

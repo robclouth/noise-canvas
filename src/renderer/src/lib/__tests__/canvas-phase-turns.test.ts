@@ -8,6 +8,7 @@ import {
   samplePixelRanges,
   type PhaseTurnCanvas,
 } from "../canvas-phase-turns";
+import { subtractPixelRanges } from "../pixel-ranges";
 
 const pixels = 64;
 
@@ -31,13 +32,24 @@ function makePacked(): Float32Array {
   return packed;
 }
 
-/** A canvas that adds like the CPU, or, when `slip` is set, a little off. */
-function makeCanvas(start: Float32Array, slip = 0): PhaseTurnCanvas & { canvas: Float32Array; patches: Uint32Array[] } {
+/**
+ * A canvas that adds like the CPU, or, when `slip` is set, a little off.
+ * `resident` narrows what it holds, the way a window does: everything else
+ * reads back as zero.
+ */
+function makeCanvas(
+  start: Float32Array,
+  slip = 0,
+  resident?: Uint32Array,
+): PhaseTurnCanvas & { canvas: Float32Array; patches: Uint32Array[] } {
   const canvas = new Float32Array(start);
   const patches: Uint32Array[] = [];
+  const held = (r: Uint32Array): Uint32Array =>
+    resident ? subtractPixelRanges(r, subtractPixelRanges(r, resident)) : r;
   return {
     canvas,
     patches,
+    residentRanges: held,
     applyPhaseTurns: (flat) => {
       for (let i = 0; i + 3 < flat.length; i += 4) {
         for (let p = flat[i]; p < flat[i] + flat[i + 1]; p++) {
@@ -52,8 +64,10 @@ function makeCanvas(start: Float32Array, slip = 0): PhaseTurnCanvas & { canvas: 
       const out = new Float32Array(n * 4);
       let at = 0;
       for (let i = 0; i + 1 < r.length; i += 2) {
-        out.set(canvas.subarray(r[i] * 4, (r[i] + r[i + 1]) * 4), at);
-        at += r[i + 1] * 4;
+        for (let p = r[i]; p < r[i] + r[i + 1]; p++, at += 4) {
+          if (held(Uint32Array.of(p, 1)).length === 0) continue;
+          out.set(canvas.subarray(p * 4, p * 4 + 4), at);
+        }
       }
       return out;
     }),
@@ -103,6 +117,28 @@ describe("canvas phase turns", () => {
     expect(canvas.readPixelRanges).toHaveBeenCalledTimes(1);
     expect(Array.from(canvas.canvas)).toEqual(Array.from(packed));
     expect(canvas.patches).toHaveLength(0);
+  });
+
+  it("settles the verdict on the pixels a window holds, not on the ones it misses", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const packed = makePacked();
+    // A window over the first quarter: a turn lands on band tails, so most of
+    // the turned range is outside it.
+    const canvas = makeCanvas(packed, 0, Uint32Array.of(0, pixels / 4));
+    const c0 = Math.fround(2 * Math.PI);
+    const turns = makeTurns(8, pixels - 8, c0, 0);
+    applyPhaseTurns(packed, turns, false);
+
+    await applyCanvasTurns(canvas, packed, [{ turns, invert: false }]);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(canvas.patches).toHaveLength(0);
+
+    // And the verdict holds for the next turn, with no second readback.
+    const second = makeTurns(8, pixels - 8, 0, -c0);
+    applyPhaseTurns(packed, second, false);
+    await applyCanvasTurns(canvas, packed, [{ turns: second, invert: false }]);
+    expect(canvas.readPixelRanges).toHaveBeenCalledTimes(1);
   });
 
   it("uploads the turned ranges when the GPU's add is off, from then on", async () => {

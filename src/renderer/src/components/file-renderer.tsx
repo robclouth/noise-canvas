@@ -119,8 +119,13 @@ export interface FileRendererHandle {
   discardStrokePreview: () => boolean;
   /** Keeps the previewed pixels and forgets the saved ones, so they can be committed. */
   keepStrokePreview: () => void;
-  /** Gets the raw data from the current frame buffer object asynchronously. */
-  getFBOData: () => Promise<Float32Array>;
+  /**
+   * Gets the raw data from the current frame buffer object asynchronously, in
+   * the file's packed layout. `into` receives it in place; it is written only
+   * after the read resolves, so a caller that also patches it must not do so
+   * while the promise is in flight.
+   */
+  getFBOData: (into?: Float32Array) => Promise<Float32Array>;
   /**
    * Reads only the pixels of the flat [pixelStart, pixelCount, ...] ranges from
    * the committed frame buffer, as one block in range order.
@@ -139,6 +144,8 @@ export interface FileRendererHandle {
    * everything outside the ranges already matches the FBO, but far cheaper.
    */
   patchFBOData: (data: Float32Array, pixelRanges: Uint32Array) => void;
+  /** The parts of the flat [pixelStart, pixelCount, ...] ranges the canvas holds. */
+  residentRanges: (pixelRanges: Uint32Array) => Uint32Array;
   /** Returns the textures used for rendering. */
   getTextures: () => {
     packed: WebGLRenderTarget;
@@ -1279,11 +1286,11 @@ const FileRendererInner = memo(
     /**
      * Reads the pixel data from the current FBO asynchronously.
      */
-    const getFBOData = async (): Promise<Float32Array> => {
+    const getFBOData = async (into?: Float32Array): Promise<Float32Array> => {
       if (!strokeRendererRef.current) {
         throw new Error("StrokeRenderer not initialized");
       }
-      return strokeRendererRef.current.getFBOData();
+      return strokeRendererRef.current.getFBOData(into);
     };
 
     const readPixelRanges = async (pixelRanges: Uint32Array): Promise<Float32Array> => {
@@ -1329,6 +1336,9 @@ const FileRendererInner = memo(
       snapshotStaleRef.current = true;
       scheduleSnapshotRefresh();
     };
+
+    const residentRanges = (pixelRanges: Uint32Array): Uint32Array =>
+      strokeRendererRef.current?.residentRanges(pixelRanges) ?? new Uint32Array(0);
 
     /**
      * Returns the current set of textures.
@@ -1446,6 +1456,7 @@ const FileRendererInner = memo(
       applyPhaseTurns,
       setFBOData,
       patchFBOData,
+      residentRanges,
       getTextures,
       restoreOriginal,
       clearPreview,

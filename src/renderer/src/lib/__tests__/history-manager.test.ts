@@ -583,6 +583,7 @@ describe("HistoryManager hops", () => {
             }
             return out;
           },
+          residentRanges: (r: Uint32Array) => r,
           expandDirtyRegion: vi.fn(),
           reloadTextures: vi.fn(),
         },

@@ -7,6 +7,8 @@ export interface PhaseTurnCanvas {
   applyPhaseTurns: (turns: ArrayLike<number>) => void;
   readPixelRanges: (pixelRanges: Uint32Array) => Promise<Float32Array>;
   patchFBOData: (data: Float32Array, pixelRanges: Uint32Array) => void;
+  /** The parts of the ranges the canvas actually holds. */
+  residentRanges: (pixelRanges: Uint32Array) => Uint32Array;
 }
 
 /** A turn to put on the canvas, subtracted when it is being undone. */
@@ -107,7 +109,11 @@ export async function applyCanvasTurns(
   }
   if (canvasAddsExactly === true) return;
 
-  const sample = samplePixelRanges(all, 64, except);
+  // Only pixels the canvas holds: a phase turn lands on a band's tail, so with
+  // a window near the start of the file most of the turned ranges are absent,
+  // and comparing them would settle the verdict on residency rather than on
+  // how the GPU adds.
+  const sample = samplePixelRanges(canvas.residentRanges(all), 64, except);
   if (!sample.length) return;
   const read = await canvas.readPixelRanges(sample);
   let exact = true;
