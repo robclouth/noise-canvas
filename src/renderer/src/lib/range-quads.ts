@@ -74,15 +74,18 @@ export type BinRanges = Float32Array;
  * range count; `ranges` needs room for three ranges per band.
  */
 export function brushFootprintRanges(
-  layout: { metadata: Float32Array; numBands: number; textureWidth: number },
+  layout: { metadata: Float32Array; numBands: number; textureWidth: number; textureHeight: number },
   lowBand: number,
   highBand: number,
   window: FrameWindow,
   marginBins: number,
   ranges: Uint32Array,
   binRanges: BinRanges,
+  pixelClamp?: { start: number; end: number },
 ): number {
-  const { metadata, numBands, textureWidth } = layout;
+  const { metadata, numBands, textureWidth, textureHeight } = layout;
+  const clampStart = pixelClamp ? pixelClamp.start : 0;
+  const clampEnd = pixelClamp ? pixelClamp.end : textureWidth * textureHeight;
   binRanges.fill(0);
   let count = 0;
   for (let band = Math.max(0, lowBand); band <= Math.min(numBands - 1, highBand); band++) {
@@ -99,8 +102,12 @@ export function brushFootprintRanges(
     binRanges[band * 4] = binStart;
     binRanges[band * 4 + 1] = binEnd;
 
-    const start = offset + binStart;
-    const end = offset + binEnd;
+    // The band offsets are float32 and lose exactness past 2^24 texels, so a
+    // whole-band range is widened in pixels to keep the band's true edges
+    // covered; a windowed range already carries the margin in bins. The clamp
+    // holds the widening inside the pixels earlier passes wrote.
+    const start = window ? offset + binStart : Math.max(clampStart, offset - marginBins);
+    const end = window ? offset + binEnd : Math.min(clampEnd, offset + binEnd + marginBins);
     const firstRow = Math.floor(start / textureWidth);
     const lastRow = Math.floor((end - 1) / textureWidth);
     if (firstRow === lastRow) {

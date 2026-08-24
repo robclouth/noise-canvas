@@ -550,7 +550,13 @@ export class StrokeRenderer {
     if (!this.scratchUnverified) return;
     this.scratchUnverified = false;
     const context = this.gl.getContext();
-    if (context.getError() === context.OUT_OF_MEMORY) {
+    // Several error flags can be latched at once and getError returns one per
+    // call, so drain them all rather than trusting the first.
+    let outOfMemory = false;
+    for (let error = context.getError(); error !== context.NO_ERROR; error = context.getError()) {
+      if (error === context.OUT_OF_MEMORY) outOfMemory = true;
+    }
+    if (outOfMemory) {
       throw new GpuMemoryError("The graphics device ran out of memory allocating the stroke buffers.");
     }
   }
@@ -823,8 +829,9 @@ export class StrokeRenderer {
     brushSizeUv: Vector2,
     window: FrameWindow,
     wholeBands: boolean,
+    rows: { rowStart: number; rowCount: number } | null,
   ): StrokeFootprint | null {
-    const { numBands } = this.spectrogramData;
+    const { numBands, textureWidth } = this.spectrogramData;
     const bands = wholeBands
       ? { lowBand: 0, highBand: numBands - 1 }
       : this.brushBandRange(brushBottomLeftUv, brushSizeUv);
@@ -837,6 +844,7 @@ export class StrokeRenderer {
       FOOTPRINT_MARGIN_BINS,
       footprint.ranges,
       footprint.binRanges,
+      rows ? { start: rows.rowStart * textureWidth, end: (rows.rowStart + rows.rowCount) * textureWidth } : undefined,
     );
     footprint.pixels = 0;
     for (let i = 0; i < footprint.count; i++) footprint.pixels += footprint.ranges[i * 2 + 1];
@@ -968,7 +976,7 @@ export class StrokeRenderer {
         };
     const footprint = this.disableScissorCopyBack
       ? null
-      : this.calculateFootprint(unionAnchor, maxBrushSizeUv, window, yWrapsOutOfBounds);
+      : this.calculateFootprint(unionAnchor, maxBrushSizeUv, window, yWrapsOutOfBounds, scissorRows);
     const passRanges = scissorRows
       ? rowRange(textureWidth, scissorRows.rowStart, scissorRows.rowCount)
       : this.fullRange();
@@ -1295,13 +1303,13 @@ export class StrokeRenderer {
         this.updateStrokeMask(scratch, state, cursorPos, bpm, totalDuration, strokeRandom, pressure, tiltX, tiltY);
       }
 
-      // Update dirty region to include this stroke's bounds
-      const dirtyFp = this.resolveBrushFootprint(activeStepState, bpm, totalDuration, cursorPos.x);
-      const dirtyAnchor = resolveBrushAnchor(cursorPos, dirtyFp.fullTime, dirtyFp.fullPitch);
-      const strokeStartX = dirtyAnchor.x;
-      const strokeEndX = dirtyAnchor.x + dirtyFp.sizeUv.x;
-      const strokeStartY = dirtyAnchor.y;
-      const strokeEndY = dirtyAnchor.y + dirtyFp.sizeUv.y;
+      // Update dirty region to include this stroke's bounds. Every step of
+      // the brush painted, so the bounds are the union of the steps' extents,
+      // not the active step's alone.
+      const strokeStartX = unionAnchor.x;
+      const strokeEndX = unionAnchor.x + maxBrushSizeUv.x;
+      const strokeStartY = unionAnchor.y;
+      const strokeEndY = unionAnchor.y + maxBrushSizeUv.y;
 
       if (this.dirtyRegion) {
         this.dirtyRegion.startX = Math.min(this.dirtyRegion.startX, strokeStartX);

@@ -8,11 +8,22 @@ function footprint(
   highBand: number,
   window: { frameStart: number; frameEnd: number } | null,
   marginBins = 4,
+  pixelClamp?: { start: number; end: number },
 ) {
   const ranges = new Uint32Array(data.numBands * 6);
   const binRanges = new Float32Array(data.numBands * 4);
-  const count = brushFootprintRanges(data, lowBand, highBand, window, marginBins, ranges, binRanges);
+  const count = brushFootprintRanges(data, lowBand, highBand, window, marginBins, ranges, binRanges, pixelClamp);
   return { ranges: ranges.subarray(0, count * 2), count, binRanges };
+}
+
+function pixelBounds(ranges: Uint32Array): { first: number; last: number } {
+  let first = Infinity;
+  let last = -Infinity;
+  for (let i = 0; i < ranges.length; i += 2) {
+    first = Math.min(first, ranges[i]);
+    last = Math.max(last, ranges[i] + ranges[i + 1]);
+  }
+  return { first, last };
 }
 
 function pixelsOf(ranges: Uint32Array): Set<number> {
@@ -72,6 +83,19 @@ describe("brushFootprintRanges", () => {
       expect(binRanges[band * 4]).toBeGreaterThanOrEqual(0);
       expect(binRanges[band * 4 + 1]).toBeLessThanOrEqual(length);
     }
+  });
+
+  // Band offsets are float32 and can round a whole-band range's true edges
+  // away above 2^24 texels; margin pixels cover them, held inside the clamp.
+  it("widens a whole-band range by margin pixels, inside the clamp", () => {
+    const margin = 4;
+    const clamp = { start: data.metadata[2 * 4] - 1, end: data.metadata[4 * 4] + data.metadata[4 * 4 + 1] + 2 };
+    const { first, last } = pixelBounds(footprint(data, 2, 4, null, margin, clamp).ranges);
+    expect(first).toBe(clamp.start);
+    expect(last).toBe(clamp.end);
+    const unclamped = pixelBounds(footprint(data, 2, 4, null, margin).ranges);
+    expect(unclamped.first).toBe(data.metadata[2 * 4] - margin);
+    expect(unclamped.last).toBe(data.metadata[4 * 4] + data.metadata[4 * 4 + 1] + margin);
   });
 
   it("spans whole bands when the window is null", () => {

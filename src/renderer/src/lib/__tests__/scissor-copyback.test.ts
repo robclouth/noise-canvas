@@ -320,4 +320,33 @@ describe("multi-pass steps after the first", () => {
       r.dispose();
     }
   });
+
+  // Every step paints, so the dirty region and the undo footprint span the
+  // union of the steps' extents, not just the step being edited.
+  it("spans the dirty region over every step's brush, not the active one", () => {
+    const r = new StrokeRenderer(gl, spectrogramData, toStrokeTextures(textures), "dirty", effects);
+    r.initialize();
+    try {
+      const sourceFile = createSourceFile(r, spectrogramData);
+      const effect = (id: string) => ({ id, effect: "passthrough" as EffectType, enabled: true, params: {} });
+      const state = createMockStateWithSteps(
+        [
+          { name: "small", overrides: { brushSizeTime: 0.25, brushSizePitch: 6, effects: [effect("p1")] } },
+          { name: "large", overrides: { brushSizeTime: 2, brushSizePitch: 36, effects: [effect("p2")] } },
+        ],
+        { activeStepIndex: 0, filepathsBpm: { [sourceFile.filePath]: 120 } },
+      );
+      r.renderStroke(makeStrokeParams(new Vector2(0.4, 0.5), spectrogramData, { totalDuration: 4 }), state, sourceFile);
+
+      const smallWidthUv = 0.25 / 2 / 4;
+      const largeWidthUv = 2 / 2 / 4;
+      const region = r.getDirtyRegion();
+      expect(region).not.toBeNull();
+      const width = region!.endX - region!.startX;
+      expect(width).toBeGreaterThanOrEqual(largeWidthUv * 0.99);
+      expect(width).toBeGreaterThan(smallWidthUv * 2);
+    } finally {
+      r.dispose();
+    }
+  });
 });

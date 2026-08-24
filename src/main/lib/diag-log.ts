@@ -84,8 +84,14 @@ async function flush(): Promise<void> {
       const chunk = queue.join("\n") + "\n";
       queue = [];
       if (fileBytes > MAX_BYTES) {
-        await rename(diagLogPath(), join(logDir, OLD_FILE_NAME)).catch(() => undefined);
-        fileBytes = 0;
+        // The counter resets only when rotation really happened; a locked old
+        // file otherwise makes the live one look empty and grow unbounded.
+        try {
+          await rename(diagLogPath(), join(logDir, OLD_FILE_NAME));
+          fileBytes = 0;
+        } catch {
+          // Keep appending; rotation is retried on the next write.
+        }
       }
       await appendFile(diagLogPath(), chunk, "utf-8");
       fileBytes += Buffer.byteLength(chunk, "utf-8");

@@ -74,10 +74,16 @@ export function installDiagErrorCapture(): void {
     (level: "warn" | "error", native: (...args: unknown[]) => void) =>
     (...args: unknown[]): void => {
       native(...args);
-      const [first, ...rest] = args;
-      const message = typeof first === "string" ? first : String(first);
-      const detail = rest.map(describeArg);
-      send(level, "console", message, detail.length ? { detail } : undefined);
+      // Capture must never throw into the caller of console.*: String() can
+      // throw for objects with no usable primitive conversion.
+      try {
+        const [first, ...rest] = args;
+        const message = typeof first === "string" ? first : String(first);
+        const detail = rest.map(describeArg);
+        send(level, "console", message, detail.length ? { detail } : undefined);
+      } catch {
+        // The native print above already happened; drop the log line.
+      }
     };
   console.warn = capture("warn", nativeConsole.warn);
   console.error = capture("error", nativeConsole.error);
