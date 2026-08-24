@@ -1,6 +1,8 @@
 import { NumberInput, SimpleGrid, Stack, Text, TextInput, type ModalProps } from "@mantine/core";
 import { modals, openContextModal } from "@mantine/modals";
 import { type ReactNode, type RefObject } from "react";
+import { InsertSilenceFields } from "../components/insert-silence-fields";
+import type { InsertSilenceValues } from "./insert-silence";
 
 export { openContextModal };
 
@@ -308,6 +310,35 @@ export function openSplitPartsPrompt({
       const parts = parseInt(partsRef.current?.value ?? "");
       if (!Number.isFinite(parts)) return;
       await onConfirm(Math.min(16, Math.max(2, parts)));
+    },
+    onCancel,
+    onClose,
+  });
+}
+
+// Last-used settings, so reopening the dialog picks up where it left off.
+let lastSilenceValues: InsertSilenceValues = { length: 4, unit: "beats", position: "play-start" };
+
+type OpenInsertSilencePromptOptions = {
+  onConfirm: (values: InsertSilenceValues) => void | Promise<void>;
+  onCancel?: () => void;
+  onClose?: () => void;
+};
+
+export function openInsertSilencePrompt({ onConfirm, onCancel, onClose }: OpenInsertSilencePromptOptions): string {
+  const values: RefObject<InsertSilenceValues> = { current: lastSilenceValues };
+
+  return openConfirmModal({
+    title: "Insert Silence",
+    size: "sm",
+    children: <InsertSilenceFields values={values} />,
+    labels: { confirm: "Insert", cancel: "Cancel" },
+    confirmProps: { size: "xs" },
+    cancelProps: { size: "xs" },
+    onConfirm: async () => {
+      if (!Number.isFinite(values.current.length) || values.current.length <= 0) return;
+      lastSilenceValues = values.current;
+      await onConfirm(values.current);
     },
     onCancel,
     onClose,

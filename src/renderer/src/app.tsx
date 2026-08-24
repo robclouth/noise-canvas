@@ -339,6 +339,11 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubHalveActiveFileLength);
 
+    const unsubInsertSilence = ipcOn("insert-silence", () => {
+      void useStore.getState().insertSilenceIntoActiveFile();
+    });
+    unsubscribers.push(unsubInsertSilence);
+
     const unsubAppWillQuit = ipcOn("app-will-quit", () => {
       // Main holds the quit until this reports back (or times out).
       void clearAllHistoryManagers().finally(() => ipcSend("quit-cleanup-done"));

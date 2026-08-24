@@ -922,6 +922,7 @@ Memory climbs with the length and resolution of everything you have open, not wi
 - **Restore Original** – reloads the unedited file.
 - **Duplicate File** (`Cmd/Ctrl+D`).
 - **Double Length / Half Length** – stretches or shrinks the file's length.
+- **Insert Silence…** – pushes the file apart and drops empty time in. **Length** is in beats or seconds, and **At** puts it at the file start, at the play start on the time legend, or at the file end.
 
 **View**
 

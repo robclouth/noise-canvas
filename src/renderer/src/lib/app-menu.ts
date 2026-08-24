@@ -114,6 +114,7 @@ export const APP_MENUS: AppMenu[] = [
       { type: "separator" },
       { type: "item", label: "Double Length", command: "double-active-file-length" },
       { type: "item", label: "Half Length", command: "halve-active-file-length" },
+      { type: "item", label: "Insert Silence…", command: "insert-silence" },
     ],
   },
   {

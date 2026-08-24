@@ -8,7 +8,11 @@ vi.mock("@renderer/effects", () => ({
   effects: { transform: {}, dynamics: {}, blur: {}, synthesize: {}, passthrough: {} },
 }));
 vi.mock("@mantine/notifications", () => ({ notifications: { show: vi.fn() } }));
-vi.mock("../modals", () => ({ openConfirm: vi.fn(), openNewFilePrompt: vi.fn() }));
+vi.mock("../modals", () => ({
+  openConfirm: vi.fn(),
+  openNewFilePrompt: vi.fn(),
+  openInsertSilencePrompt: vi.fn(),
+}));
 vi.mock("../history-manager", () => ({
   destroyHistoryManager: vi.fn(async () => {}),
   getHistoryManager: vi.fn(),

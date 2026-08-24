@@ -1,4 +1,4 @@
-import { openConfirm, openNewFilePrompt } from "../lib/modals";
+import { openConfirm, openInsertSilencePrompt, openNewFilePrompt } from "../lib/modals";
 import { notifications } from "@mantine/notifications";
 import truncateMiddle from "@stdlib/string-truncate-middle";
 import { EffectItem } from "@renderer/effects/types";
@@ -10,6 +10,7 @@ import { host } from "../lib/host";
 import { diag } from "../lib/diag-log";
 import { remainingCoefficientBudget, usedBudgetFraction } from "../lib/gpu-budget";
 import { toChannelCount } from "../lib/channel-mix";
+import { insertSilence, type InsertSilenceValues } from "../lib/insert-silence";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type { AnalysisParams, CommitLevels, CommitStrokeResult, PackedOnsets } from "../../../main/lib/types";
 import {
@@ -83,6 +84,8 @@ export interface FilesState {
   /** Analyse a file again at a new resolution, keeping its audio and history. */
   reanalyzeFile: (fileId: string, bandsPerOctave: number) => Promise<void>;
   resizeActiveFileLength: (factor: 2 | 0.5) => Promise<void>;
+  /** Ask for a length and a place, then splice that much silence into the active file. */
+  insertSilenceIntoActiveFile: () => Promise<void>;
   /** Analyse a file again as mono or stereo, keeping its paint and history. */
   setFileChannelCount: (fileId: string, channelCount: number) => Promise<void>;
   synthesizeFile: (
@@ -723,6 +726,13 @@ async function rebuildFileFromAudioNow(
   };
   file.audioBuffer = audioBuffer;
   file.unprojectedPaint = false;
+  // The rebuild moves every frame, so the onsets this analysis found replace
+  // the ones detected against the old length.
+  file.onsets = result.onsets;
+  file.onsetReference =
+    result.onsetOdfMax !== undefined && result.onsetBandMax
+      ? { odfMax: result.onsetOdfMax, bandMax: result.onsetBandMax }
+      : undefined;
 
   let newPeak = 0;
   for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) {
@@ -736,12 +746,19 @@ async function rebuildFileFromAudioNow(
 
   file.rendererRef?.current?.reloadTextures();
 
-  await getHistoryManager(fileId).addSnapshot({
+  const nodeId = await getHistoryManager(fileId).addSnapshot({
     data: file.spectrogramData.packedData,
     kind: snapshot.kind,
     label: snapshot.label,
     spectrogram: file.spectrogramData,
   });
+
+  if (file.onsets && file.onsetReference) {
+    await getHistoryManager(fileId).setNodeOnsets(
+      nodeId,
+      packOnsetState({ onsets: file.onsets, reference: file.onsetReference }),
+    );
+  }
 
   set(
     produce((state: State) => {
@@ -2613,6 +2630,68 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         message: error instanceof Error ? error.message : "Unknown error",
         color: "red",
       });
+    }
+  },
+  insertSilenceIntoActiveFile: async () => {
+    const fileId = get().activeFileId;
+    const file = fileId ? openFiles[fileId] : undefined;
+    if (!fileId || !file?.spectrogramData) return;
+    if (get().filesLoading[fileId]) return;
+
+    const values = await new Promise<InsertSilenceValues | null>((resolve) => {
+      let confirmed = false;
+      openInsertSilencePrompt({
+        onConfirm: (v) => {
+          confirmed = true;
+          resolve(v);
+        },
+        onClose: () => {
+          if (!confirmed) resolve(null);
+        },
+      });
+    });
+    if (!values) return;
+
+    const current = openFiles[fileId];
+    if (!current?.spectrogramData) return;
+    const { sampleRate } = current.spectrogramData;
+    const bpm = get().filepathsBpm[current.filePath] || 120;
+    const seconds = values.unit === "beats" ? (60 / bpm) * values.length : values.length;
+    const padSamples = Math.round(seconds * sampleRate);
+    if (padSamples <= 0) return;
+    const playStartSample = (get().filesPlaybackStartTime[fileId] ?? 0) * sampleRate;
+
+    // Read the painted state first: the loading message below takes the
+    // renderer, and with it the FBO, off the screen.
+    const packedData = await readCurrentPackedData(current);
+
+    set(
+      produce((state: State) => {
+        state.filesLoading[fileId] = "Inserting silence...";
+      }),
+    );
+
+    try {
+      await rebuildFileFromAudio(
+        set,
+        fileId,
+        async () => packedData,
+        (channels) => insertSilence(channels, values.position, padSamples, playStartSample),
+        { kind: "resize", label: "Insert silence" },
+      );
+    } catch (error) {
+      console.error("Insert silence failed:", error);
+      notifications.show({
+        title: "Insert silence failed",
+        message: error instanceof Error ? error.message : "Unknown error",
+        color: "red",
+      });
+    } finally {
+      set(
+        produce((state: State) => {
+          delete state.filesLoading[fileId];
+        }),
+      );
     }
   },
   setFileChannelCount: async (fileId, channelCount) => {

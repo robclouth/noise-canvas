@@ -12,6 +12,10 @@ const gate = vi.hoisted(() => ({
   holdExport: false,
   releaseExport: null as (() => void) | null,
   order: [] as string[],
+  analysed: [] as Float32Array[],
+  snapshotLabels: [] as string[],
+  storedOnsets: [] as { nodeId: string; packed: Float32Array }[],
+  silenceValues: null as { length: number; unit: "beats" | "seconds"; position: string } | null,
   analysisResult: () => {
     const bands = 4;
     return {
@@ -28,6 +32,9 @@ const gate = vi.hoisted(() => ({
       bandOffsets: new Uint32Array(bands),
       bandStepLog2s: new Int32Array(bands),
       bandLengths: new Uint32Array(bands),
+      onsets: Float32Array.from([0.25, 1]),
+      onsetOdfMax: 3,
+      onsetBandMax: Float32Array.from([1, 2, 3, 4]),
     };
   },
 }));
@@ -42,6 +49,10 @@ vi.mock("../modals", () => ({
     else void opts.onCancel?.();
   }),
   openNewFilePrompt: vi.fn(),
+  openInsertSilencePrompt: vi.fn((opts: { onConfirm: (values: unknown) => void; onClose?: () => void }) => {
+    if (gate.silenceValues) opts.onConfirm(gate.silenceValues);
+    else opts.onClose?.();
+  }),
 }));
 vi.mock("../history-manager", () => ({
   destroyHistoryManager: vi.fn(async () => {}),
@@ -50,21 +61,39 @@ vi.mock("../history-manager", () => ({
     markSaved: vi.fn(async (nodeId?: string) => {
       gate.markedSaved.push(nodeId);
     }),
-    addSnapshot: vi.fn(async () => {
+    addSnapshot: vi.fn(async (opts: { label: string }) => {
       gate.order.push("snapshot");
+      gate.snapshotLabels.push(opts.label);
       return "s1";
+    }),
+    setNodeOnsets: vi.fn(async (nodeId: string, packed: Float32Array) => {
+      gate.storedOnsets.push({ nodeId, packed });
     }),
   })),
 }));
 vi.mock("../onset-map", () => ({
   disposeOnsetTexture: vi.fn(),
-  packOnsetState: vi.fn(),
+  packOnsetState: vi.fn(({ onsets, reference }: { onsets: Float32Array; reference: { odfMax: number } }) =>
+    Float32Array.from([reference.odfMax, ...onsets]),
+  ),
   spliceOnsets: vi.fn(),
   unpackOnsetState: vi.fn(),
 }));
 vi.mock("tone", () => ({
   getTransport: () => ({ bpm: { value: 120 } }),
-  getContext: () => ({ rawContext: {} }),
+  getContext: () => ({
+    rawContext: {
+      createBuffer: (numberOfChannels: number, length: number, sampleRate: number) => {
+        const data = Array.from({ length: numberOfChannels }, () => new Float32Array(length));
+        return {
+          numberOfChannels,
+          length,
+          sampleRate,
+          getChannelData: (channel: number) => data[channel],
+        } as unknown as AudioBuffer;
+      },
+    },
+  }),
   Player: class {
     toDestination() {
       return this;
@@ -87,8 +116,9 @@ vi.mock("../host", () => ({
         gate.exported.push({ path, channels: channels.map((c) => Float32Array.from(c)) });
         if (gate.holdExport) await new Promise<void>((resolve) => (gate.releaseExport = resolve));
       },
-      analyseBuffer: async () => {
+      analyseBuffer: async (buffer: AudioBuffer) => {
         gate.order.push("analyse");
+        gate.analysed.push(Float32Array.from(buffer.getChannelData(0)));
         return gate.analysisResult();
       },
       analyze: async () => {
@@ -438,5 +468,92 @@ describe("closing a file other brushes read from", () => {
     const brushes = [brushReferencing("/audio/keep.wav")];
     clearFileReferences("/audio/src.wav", brushes);
     expect(brushes[0].steps[0].sourceFile).toEqual({ path: "/audio/keep.wav", name: "src.wav" });
+  });
+});
+
+describe("rebuilding a file from its audio", () => {
+  beforeEach(() => {
+    for (const id of Object.keys(openFiles)) delete openFiles[id];
+    gate.synthesize = [];
+    gate.analysed = [];
+    gate.storedOnsets = [];
+    gate.snapshotLabels = [];
+    gate.silenceValues = null;
+  });
+
+  /** Hands the queued synthesis `samples` and waits for the rebuild to finish. */
+  async function runRebuild(rebuild: Promise<void>, samples: number[]): Promise<void> {
+    await vi.waitFor(() => expect(gate.synthesize).toHaveLength(1));
+    gate.synthesize[0]({ channels: [Float32Array.from(samples)], peak: 1 });
+    await rebuild;
+  }
+
+  it("replaces the onsets with the ones the rebuild's own analysis found", async () => {
+    const { files } = makeStore();
+    openTestFile();
+    openFiles[FILE_ID].onsets = Float32Array.from([9, 1]);
+    openFiles[FILE_ID].onsetReference = { odfMax: 99, bandMax: Float32Array.from([9]) };
+
+    await runRebuild(files.resizeActiveFileLength(2), [1, 2, 3, 4]);
+
+    expect(Array.from(openFiles[FILE_ID].onsets!)).toEqual([0.25, 1]);
+    expect(openFiles[FILE_ID].onsetReference?.odfMax).toBe(3);
+  });
+
+  it("stores the fresh onsets on the node the rebuild added", async () => {
+    const { files } = makeStore();
+    openTestFile();
+
+    await runRebuild(files.resizeActiveFileLength(2), [1, 2, 3, 4]);
+
+    expect(gate.storedOnsets).toHaveLength(1);
+    expect(gate.storedOnsets[0].nodeId).toBe("s1");
+    // packOnsetState is mocked as [odfMax, ...onsets].
+    expect(Array.from(gate.storedOnsets[0].packed)).toEqual([3, 0.25, 1]);
+  });
+
+  it("analyses the doubled audio for a resize", async () => {
+    const { files } = makeStore();
+    openTestFile();
+
+    await runRebuild(files.resizeActiveFileLength(2), [1, 2, 3, 4]);
+
+    expect(Array.from(gate.analysed[0])).toEqual([1, 2, 3, 4, 1, 2, 3, 4]);
+  });
+
+  it("splices silence at the play start, and refreshes the onsets with it", async () => {
+    gate.silenceValues = { length: 3 / 48000, unit: "seconds", position: "play-start" };
+    const { files } = makeStore({
+      filesPlaybackStartTime: { [FILE_ID]: 2 / 48000 },
+    } as unknown as Partial<State>);
+    openTestFile();
+
+    await runRebuild(files.insertSilenceIntoActiveFile(), [1, 2, 3, 4]);
+
+    expect(Array.from(gate.analysed[0])).toEqual([1, 2, 0, 0, 0, 3, 4]);
+    expect(gate.snapshotLabels).toEqual(["Insert silence"]);
+    expect(Array.from(gate.storedOnsets[0].packed)).toEqual([3, 0.25, 1]);
+  });
+
+  it("takes the length in beats from the file's BPM", async () => {
+    gate.silenceValues = { length: 1, unit: "beats", position: "end" };
+    // 240 BPM is a quarter-second beat, so one beat is 12000 samples at 48 kHz.
+    const { files } = makeStore({ filepathsBpm: { "/audio/a.wav": 240 } } as unknown as Partial<State>);
+    openTestFile("/audio/a.wav");
+
+    await runRebuild(files.insertSilenceIntoActiveFile(), [1, 2]);
+
+    expect(gate.analysed[0]).toHaveLength(2 + 12000);
+    expect(Array.from(gate.analysed[0].subarray(0, 3))).toEqual([1, 2, 0]);
+  });
+
+  it("does nothing when the dialog is dismissed", async () => {
+    const { files } = makeStore();
+    openTestFile();
+
+    await files.insertSilenceIntoActiveFile();
+
+    expect(gate.synthesize).toHaveLength(0);
+    expect(gate.analysed).toHaveLength(0);
   });
 });
