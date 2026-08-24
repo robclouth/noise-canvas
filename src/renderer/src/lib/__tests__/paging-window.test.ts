@@ -17,16 +17,15 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import probeFrag from "../../test/paging-probe.frag";
 import probeVert from "../../test/paging-probe.vert";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
-import { gatherPixelRanges } from "../pixel-ranges";
 import {
   buildInPlaceWindowMetadata,
   buildWindowLayout,
-  buildWindowMetadata,
   fileLayoutOf,
-  windowFileRanges,
   type PackedLayout,
   type WindowLayout,
 } from "../window-layout";
+import { buildWindowTextures } from "../window-textures";
+import type { SpectrogramData } from "../../store/types";
 
 /**
  * Stage 0's gate: with the addressing centralised, a window of a file must
@@ -82,19 +81,11 @@ function makeTextures(
   return { packed, metadata: meta };
 }
 
-/** The window's own packed texture: its pixels gathered out of the file array. */
-function windowTextures(fileData: Float32Array, fileMetadata: Float32Array, window: WindowLayout): ProbeTextures {
-  const gathered = gatherPixelRanges(fileData, windowFileRanges(window));
-  const padded = new Float32Array(window.textureWidth * window.textureHeight * 4);
-  padded.set(gathered);
-  return makeTextures(
-    padded,
-    buildWindowMetadata(window, fileMetadata),
-    window.textureWidth,
-    window.textureHeight,
-    window.numBands,
-    2,
-  );
+/** The window's own textures, as the app builds them. */
+function windowTextures(data: SpectrogramData, window: WindowLayout): ProbeTextures {
+  const built = buildWindowTextures(data, window);
+  built.inverse.dispose();
+  return { packed: built.packed, metadata: built.meta };
 }
 
 describe("paged window reads", () => {
@@ -167,7 +158,7 @@ describe("paged window reads", () => {
   it("reads a whole-file window exactly as the file does", () => {
     const window = buildWindowLayout(layout, 0, layout.numFrames);
     const file = fileTextures();
-    const win = windowTextures(data.packedData, data.metadata, window);
+    const win = windowTextures(data, window);
     disposables.push(file.packed, file.metadata, win.packed, win.metadata);
 
     const columns = 512;
@@ -184,7 +175,7 @@ describe("paged window reads", () => {
     const end = Math.floor((layout.numFrames * 3) / 4);
     const window = buildWindowLayout(layout, start, end);
     const file = fileTextures();
-    const win = windowTextures(data.packedData, data.metadata, window);
+    const win = windowTextures(data, window);
     disposables.push(file.packed, file.metadata, win.packed, win.metadata);
 
     const columns = 512;
@@ -228,7 +219,7 @@ describe("paged window reads", () => {
     for (const fraction of [0, 0.1, 0.37, 0.5, 0.9]) {
       const start = Math.floor(layout.numFrames * fraction);
       const window = buildWindowLayout(layout, start, start + layout.numFrames / 8);
-      const win = windowTextures(data.packedData, data.metadata, window);
+      const win = windowTextures(data, window);
       const paged = probe(win, 0, stride, columns);
       win.packed.dispose();
       win.metadata.dispose();
@@ -290,7 +281,7 @@ describe("paged window reads", () => {
     const start = Math.floor(layout.numFrames / 2);
     const window = buildWindowLayout(layout, start, layout.numFrames);
     const file = fileTextures();
-    const win = windowTextures(data.packedData, data.metadata, window);
+    const win = windowTextures(data, window);
     disposables.push(file.packed, file.metadata, win.packed, win.metadata);
 
     material.uniforms.wrapMode.value = 1;

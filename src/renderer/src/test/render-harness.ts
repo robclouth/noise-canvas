@@ -1,17 +1,10 @@
-import {
-  ClampToEdgeWrapping,
-  DataTexture,
-  FloatType,
-  NearestFilter,
-  RGBAFormat,
-  RGFormat,
-  Vector2,
-  WebGLRenderer,
-} from "three";
+import { DataTexture, FloatType, RGBAFormat, Vector2, WebGLRenderer } from "three";
 import type { EffectType } from "../effects/types";
 import type { SpectrogramData, State } from "../store/types";
 import { createMockState } from "./mock-state";
 import type { SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../lib/stroke-renderer";
+import { buildWindowLayout, fileLayoutOf, type WindowLayout } from "../lib/window-layout";
+import { buildWindowTextures } from "../lib/window-textures";
 
 /**
  * Shared rendering harness for tests that need a real WebGL StrokeRenderer
@@ -30,42 +23,28 @@ export interface HarnessTextures {
 }
 
 /** Uploads packed spectrogram data into the GPU textures the renderer samples from. */
-export function createSpectrogramTextures(spectrogramData: SpectrogramData): {
+export function createSpectrogramTextures(
+  spectrogramData: SpectrogramData,
+  window?: WindowLayout,
+): {
   packedDataTex: DataTexture;
   originalPackedDataTex: DataTexture;
   inverseMapTex: DataTexture;
   metadataTex: DataTexture;
 } {
-  const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
+  const fileLayout = fileLayoutOf(spectrogramData);
+  const resident = window ?? buildWindowLayout(fileLayout, 0, fileLayout.numFrames);
+  const built = buildWindowTextures(spectrogramData, resident);
 
-  const packedDataTex = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
-  packedDataTex.internalFormat = "RGBA32F";
-  packedDataTex.minFilter = NearestFilter;
-  packedDataTex.magFilter = NearestFilter;
-  packedDataTex.wrapS = ClampToEdgeWrapping;
-  packedDataTex.wrapT = ClampToEdgeWrapping;
-  packedDataTex.needsUpdate = true;
-
-  const originalPackedDataTex = packedDataTex.clone();
+  const originalPackedDataTex = built.packed.clone();
   originalPackedDataTex.needsUpdate = true;
 
-  const inverseMapTex = new DataTexture(inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
-  inverseMapTex.internalFormat = "RG32F";
-  inverseMapTex.minFilter = NearestFilter;
-  inverseMapTex.magFilter = NearestFilter;
-  inverseMapTex.wrapS = ClampToEdgeWrapping;
-  inverseMapTex.wrapT = ClampToEdgeWrapping;
-  inverseMapTex.needsUpdate = true;
-
-  const metadataTex = new DataTexture(metadata, numBands, 1, RGBAFormat, FloatType);
-  metadataTex.internalFormat = "RGBA32F";
-  metadataTex.minFilter = NearestFilter;
-  metadataTex.magFilter = NearestFilter;
-  metadataTex.wrapS = ClampToEdgeWrapping;
-  metadataTex.wrapT = ClampToEdgeWrapping;
-  metadataTex.needsUpdate = true;
-
-  return { packedDataTex, originalPackedDataTex, inverseMapTex, metadataTex };
+  return {
+    packedDataTex: built.packed,
+    originalPackedDataTex,
+    inverseMapTex: built.inverse,
+    metadataTex: built.meta,
+  };
 }
 
 function createPlaceholderTexture(): DataTexture {
@@ -88,8 +67,8 @@ function createModulatorScaleLut(): DataTexture {
 }
 
 /** Builds the full texture set, including placeholders and the modulator LUT. */
-export function createHarnessTextures(spectrogramData: SpectrogramData): HarnessTextures {
-  const spec = createSpectrogramTextures(spectrogramData);
+export function createHarnessTextures(spectrogramData: SpectrogramData, window?: WindowLayout): HarnessTextures {
+  const spec = createSpectrogramTextures(spectrogramData, window);
   return {
     ...spec,
     placeholderTexture: createPlaceholderTexture(),

@@ -27,7 +27,16 @@ import { patchMaterial } from "../components/patch-material";
 import { phaseTurnMaterial } from "../components/phase-turn-material";
 import { rangeCopyMaterial } from "../components/range-copy-material";
 import { BaseEffect, CommonUniforms, createDefaultUniforms } from "../effects/base-effect";
-import { buildWindowLayout, fileLayoutOf, type WindowLayout } from "./window-layout";
+import { diag } from "./diag-log";
+import {
+  buildWindowLayout,
+  fileLayoutOf,
+  isWholeFileWindow,
+  mapFileRangesToWindow,
+  type MappedRanges,
+  type WindowLayout,
+} from "./window-layout";
+import { gatherWindowPacked } from "./window-textures";
 import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
 import rangeQuadVert from "../glsl/range-quad.vert";
@@ -232,6 +241,7 @@ export class StrokeRenderer {
   // stands for neither.
   private windowLayout: WindowLayout;
   private windowTextureSize: Vector2;
+  private wholeFileWindow: boolean;
   private textures: StrokeTextures;
   private fileId: string;
   private effects: EffectsRegistry;
@@ -317,12 +327,14 @@ export class StrokeRenderer {
     textures: StrokeTextures,
     fileId: string,
     effects: EffectsRegistry,
+    windowLayout?: WindowLayout | null,
   ) {
     this.gl = gl;
     this.spectrogramData = spectrogramData;
     const fileLayout = fileLayoutOf(spectrogramData);
-    this.windowLayout = buildWindowLayout(fileLayout, 0, fileLayout.numFrames);
+    this.windowLayout = windowLayout ?? buildWindowLayout(fileLayout, 0, fileLayout.numFrames);
     this.windowTextureSize = new Vector2(this.windowLayout.textureWidth, this.windowLayout.textureHeight);
+    this.wholeFileWindow = isWholeFileWindow(this.windowLayout);
     this.textures = textures;
     this.fileId = fileId;
     this.effects = effects;
@@ -398,6 +410,19 @@ export class StrokeRenderer {
     mu.brushSkewTime = { value: createParameterUniform(0.5, 0, 1) };
     mu.brushCurvePitch = { value: createParameterUniform(0, -1, 1) };
     mu.brushSkewPitch = { value: createParameterUniform(0.5, 0, 1) };
+  }
+
+  /**
+   * File packed ranges as window ranges. Pixels the window does not hold are
+   * dropped and logged: substituting the window's edge for them would write
+   * plausible data the caller never asked for.
+   */
+  private mapRanges(fileRanges: Uint32Array, operation: string): MappedRanges {
+    const mapped = mapFileRangesToWindow(this.windowLayout, fileRanges);
+    if (mapped.missingPixels > 0) {
+      diag.warn("paging", "miss", { operation, pixels: mapped.missingPixels, fileId: this.fileId });
+    }
+    return mapped;
   }
 
   /**
@@ -1534,24 +1559,24 @@ export class StrokeRenderer {
     const width = packedTextureSize.x;
 
     let patchPixels = 0;
-    let numRanges = 0;
-    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
-      if (pixelRanges[i + 1] === 0) continue;
-      patchPixels += pixelRanges[i + 1];
-      numRanges++;
-    }
+    for (let i = 0; i + 1 < pixelRanges.length; i += 2) patchPixels += pixelRanges[i + 1];
     if (patchPixels === 0) return new Float32Array(0);
 
+    // The block is keyed to the file ranges asked for, so a pixel the window
+    // misses keeps its place and reads back zero rather than shifting the rest.
+    const { mapped, blockOffsets } = this.mapRanges(pixelRanges, "read");
+    let numRanges = 0;
+    for (let i = 0; i + 2 < mapped.length; i += 3) if (mapped[i + 2] > 0) numRanges++;
+    if (numRanges === 0) return new Float32Array(patchPixels * 4);
+
     const instances = new Uint32Array(numRanges * 3);
-    let dstPixel = 0;
     let inst = 0;
-    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
-      const count = pixelRanges[i + 1];
+    for (let i = 0, piece = 0; i + 2 < mapped.length; i += 3, piece++) {
+      const count = mapped[i + 2];
       if (count === 0) continue;
-      instances[inst * 3] = pixelRanges[i];
+      instances[inst * 3] = mapped[i + 1];
       instances[inst * 3 + 1] = count;
-      instances[inst * 3 + 2] = dstPixel;
-      dstPixel += count;
+      instances[inst * 3 + 2] = blockOffsets[piece];
       inst++;
     }
 
@@ -1610,22 +1635,29 @@ export class StrokeRenderer {
     const width = packedTextureSize.x;
     const height = packedTextureSize.y;
 
-    let numRanges = 0;
-    for (let i = 0; i + 3 < turns.length; i += 4) if (turns[i + 1] > 0) numRanges++;
-    if (numRanges === 0) return;
-
-    const ranges = new Uint32Array(numRanges * 2);
-    const offsets = new Float32Array(numRanges * 2);
-    const zeros = new Float32Array(numRanges * 2);
-    let inst = 0;
+    // Each turn range is mapped on its own, so the pieces the window holds keep
+    // the offsets of the range they came from.
+    const windowRanges: number[] = [];
+    const windowOffsets: number[] = [];
+    let missingPixels = 0;
     for (let i = 0; i + 3 < turns.length; i += 4) {
       if (turns[i + 1] <= 0) continue;
-      ranges[inst * 2] = turns[i];
-      ranges[inst * 2 + 1] = turns[i + 1];
-      offsets[inst * 2] = turns[i + 2];
-      offsets[inst * 2 + 1] = turns[i + 3];
-      inst++;
+      const piece = mapFileRangesToWindow(this.windowLayout, Uint32Array.of(turns[i], turns[i + 1]));
+      missingPixels += piece.missingPixels;
+      for (let j = 0; j + 2 < piece.mapped.length; j += 3) {
+        windowRanges.push(piece.mapped[j + 1], piece.mapped[j + 2]);
+        windowOffsets.push(turns[i + 2], turns[i + 3]);
+      }
     }
+    if (missingPixels > 0) {
+      diag.warn("paging", "miss", { operation: "phaseTurns", pixels: missingPixels, fileId: this.fileId });
+    }
+    const numRanges = windowRanges.length / 2;
+    if (numRanges === 0) return;
+
+    const ranges = Uint32Array.from(windowRanges);
+    const offsets = Float32Array.from(windowOffsets);
+    const zeros = new Float32Array(numRanges * 2);
 
     const draw = (source: WebGLRenderTarget, targets: WebGLRenderTarget[], offs: Float32Array): void => {
       const geometry = new InstancedBufferGeometry();
@@ -1668,11 +1700,12 @@ export class StrokeRenderer {
    */
   setFBOData(data: Float32Array): void {
     const packedTextureSize = this.windowTextureSize;
+    const windowData = this.wholeFileWindow ? data : gatherWindowPacked(data, this.windowLayout);
 
     this.releaseRollback();
     this.pingPong = 0;
 
-    const dataTex = new DataTexture(data, packedTextureSize.x, packedTextureSize.y, RGBAFormat, FloatType);
+    const dataTex = new DataTexture(windowData, packedTextureSize.x, packedTextureSize.y, RGBAFormat, FloatType);
     dataTex.needsUpdate = true;
 
     this.gl.initTexture(dataTex);
@@ -1709,12 +1742,13 @@ export class StrokeRenderer {
     const packedTextureSize = this.windowTextureSize;
     const width = packedTextureSize.x;
     const height = packedTextureSize.y;
+    const { mapped } = this.mapRanges(pixelRanges, "patch");
 
     let patchPixels = 0;
     let numRanges = 0;
-    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
-      if (pixelRanges[i + 1] === 0) continue;
-      patchPixels += pixelRanges[i + 1];
+    for (let i = 0; i + 2 < mapped.length; i += 3) {
+      if (mapped[i + 2] === 0) continue;
+      patchPixels += mapped[i + 2];
       numRanges++;
     }
     if (patchPixels === 0) return;
@@ -1731,12 +1765,13 @@ export class StrokeRenderer {
     const instances = new Uint32Array(numRanges * 3);
     let srcPixel = 0;
     let inst = 0;
-    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
-      const start = pixelRanges[i];
-      const count = pixelRanges[i + 1];
+    for (let i = 0; i + 2 < mapped.length; i += 3) {
+      const fileStart = mapped[i];
+      const windowStart = mapped[i + 1];
+      const count = mapped[i + 2];
       if (count === 0) continue;
-      patch.set(data.subarray(start * 4, (start + count) * 4), srcPixel * 4);
-      instances[inst * 3] = start;
+      patch.set(data.subarray(fileStart * 4, (fileStart + count) * 4), srcPixel * 4);
+      instances[inst * 3] = windowStart;
       instances[inst * 3 + 1] = count;
       instances[inst * 3 + 2] = srcPixel;
       srcPixel += count;
@@ -1805,12 +1840,14 @@ export class StrokeRenderer {
     inverse: DataTexture;
     metadata: DataTexture;
     original: DataTexture;
+    window: WindowLayout;
   } {
     return {
       packed: this.pingPong === 0 ? this.fbo1 : this.fbo2,
       inverse: this.textures.inverseMapTex,
       metadata: this.textures.metadataTex,
       original: this.textures.originalPackedDataTex,
+      window: this.windowLayout,
     };
   }
 

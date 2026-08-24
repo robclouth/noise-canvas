@@ -123,6 +123,14 @@ export function buildWindowLayout(file: PackedLayout, startFrame: number, endFra
   };
 }
 
+/** True when the window holds every bin the file has. */
+export function isWholeFileWindow(window: WindowLayout): boolean {
+  for (let b = 0; b < window.numBands; b++) {
+    if (window.firstBins[b] !== 0 || window.bandLengths[b] !== window.file.bandLengths[b]) return false;
+  }
+  return true;
+}
+
 /** Packed pixels a layout spans. */
 export function layoutPixelCount(layout: PackedLayout): number {
   let total = 0;
@@ -210,6 +218,14 @@ export interface MappedRanges {
   mapped: Uint32Array;
   /** Flat [fileStart, count, ...] for the parts it does not. */
   outside: Uint32Array;
+  /**
+   * Per mapped piece, where it starts in the block a read of the whole range
+   * list returns — the pixels of `ranges` that precede it, misses included, so
+   * a caller can key the result to the file ranges it asked for.
+   */
+  blockOffsets: Uint32Array;
+  /** Pixels of `ranges` the window does not hold. */
+  missingPixels: number;
 }
 
 /**
@@ -220,15 +236,20 @@ export interface MappedRanges {
 export function mapFileRangesToWindow(window: WindowLayout, ranges: Uint32Array): MappedRanges {
   const mapped: number[] = [];
   const outside: number[] = [];
+  const blockOffsets: number[] = [];
   const file = window.file;
+  let missingPixels = 0;
+  let blockBase = 0;
 
   for (let i = 0; i < ranges.length; i += 2) {
-    let start = ranges[i];
+    const rangeStart = ranges[i];
+    let start = rangeStart;
     const end = start + ranges[i + 1];
     while (start < end) {
       const band = bandOfFilePixel(file, start);
       if (band < 0) {
         outside.push(start, end - start);
+        missingPixels += end - start;
         break;
       }
       const bandStart = file.bandOffsets[band];
@@ -239,22 +260,35 @@ export function mapFileRangesToWindow(window: WindowLayout, ranges: Uint32Array)
       const heldEnd = heldStart + window.bandLengths[band];
 
       const beforeEnd = Math.min(chunkEnd, heldStart);
-      if (beforeEnd > start) outside.push(start, beforeEnd - start);
+      if (beforeEnd > start) {
+        outside.push(start, beforeEnd - start);
+        missingPixels += beforeEnd - start;
+      }
 
       const inStart = Math.max(start, heldStart);
       const inEnd = Math.min(chunkEnd, heldEnd);
       if (inEnd > inStart) {
         mapped.push(inStart, window.bandOffsets[band] + (inStart - heldStart), inEnd - inStart);
+        blockOffsets.push(blockBase + (inStart - rangeStart));
       }
 
       const afterStart = Math.max(start, heldEnd);
-      if (chunkEnd > afterStart) outside.push(afterStart, chunkEnd - afterStart);
+      if (chunkEnd > afterStart) {
+        outside.push(afterStart, chunkEnd - afterStart);
+        missingPixels += chunkEnd - afterStart;
+      }
 
       start = chunkEnd;
     }
+    blockBase += ranges[i + 1];
   }
 
-  return { mapped: Uint32Array.from(mapped), outside: Uint32Array.from(outside) };
+  return {
+    mapped: Uint32Array.from(mapped),
+    outside: Uint32Array.from(outside),
+    blockOffsets: Uint32Array.from(blockOffsets),
+    missingPixels,
+  };
 }
 
 /**

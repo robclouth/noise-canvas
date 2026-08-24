@@ -31,7 +31,6 @@ import {
   NearestFilter,
   RawShaderMaterial,
   RGBAFormat,
-  RGFormat,
   Texture,
   Vector2,
   WebGLRenderer,
@@ -47,7 +46,14 @@ import { getFileOnsets } from "../lib/file-onsets";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { buildOverview, createOverviewTextures, updateOverviewRanges, type Overview } from "../lib/overview";
 import { getPretendWindowFraction, subscribePretendWindow } from "../lib/paging-debug";
-import { buildInPlaceWindowMetadata, buildWindowLayout, fileLayoutOf, type PackedLayout } from "../lib/window-layout";
+import {
+  buildInPlaceWindowMetadata,
+  buildWindowLayout,
+  fileLayoutOf,
+  type PackedLayout,
+  type WindowLayout,
+} from "../lib/window-layout";
+import { buildWindowTextures } from "../lib/window-textures";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
 import { FULL_SCALE_DB_OFFSET } from "../lib/constants";
@@ -429,41 +435,18 @@ const FileRendererInner = memo(
       };
     }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
 
+    // The span the packed, inverse-map and metadata textures hold.
+    const windowLayoutRef = useRef<WindowLayout | null>(null);
+
     /**
-     * Creates DataTextures from spectrogram data.
-     * Used both on initial load and when reloading textures.
+     * Creates the packed, inverse-map and metadata textures for the resident
+     * window. Used both on initial load and when reloading textures.
      */
     const createTextures = useCallback(() => {
-      const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
-
-      const packed = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
-      packed.internalFormat = "RGBA32F";
-      packed.minFilter = NearestFilter;
-      packed.magFilter = NearestFilter;
-      packed.wrapS = ClampToEdgeWrapping;
-      packed.wrapT = ClampToEdgeWrapping;
-      packed.generateMipmaps = false;
-      packed.needsUpdate = true;
-
-      const inverse = new DataTexture(inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
-      inverse.internalFormat = "RG32F";
-      inverse.minFilter = NearestFilter;
-      inverse.magFilter = NearestFilter;
-      inverse.wrapS = ClampToEdgeWrapping;
-      inverse.wrapT = ClampToEdgeWrapping;
-      inverse.generateMipmaps = false;
-      inverse.needsUpdate = true;
-
-      const meta = new DataTexture(metadata, numBands, 1, RGBAFormat, FloatType);
-      meta.internalFormat = "RGBA32F";
-      meta.minFilter = NearestFilter;
-      meta.magFilter = NearestFilter;
-      meta.wrapS = ClampToEdgeWrapping;
-      meta.wrapT = ClampToEdgeWrapping;
-      meta.generateMipmaps = false;
-      meta.needsUpdate = true;
-
-      return { packed, inverse, meta };
+      const fileLayout = fileLayoutOf(spectrogramData);
+      const window = buildWindowLayout(fileLayout, 0, fileLayout.numFrames);
+      windowLayoutRef.current = window;
+      return buildWindowTextures(spectrogramData, window);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
       spectrogramData.packedData,
@@ -948,7 +931,14 @@ const FileRendererInner = memo(
         // The GPU can refuse the allocations even after analysis fit the
         // budget; closing the file keeps the context alive.
         try {
-          strokeRendererRef.current = new StrokeRenderer(gl, spectrogramData, textures, fileId, effects);
+          strokeRendererRef.current = new StrokeRenderer(
+            gl,
+            spectrogramData,
+            textures,
+            fileId,
+            effects,
+            windowLayoutRef.current,
+          );
         } catch (error) {
           console.error("Creating the stroke renderer failed:", error);
           notifications.show({
