@@ -7,6 +7,7 @@ import { openFiles, selectFileColor } from "@renderer/store/files";
 import { BrushPickerModal } from "./controls/brush-picker";
 import { PalettePickerModal } from "./controls/palette-picker";
 import { ImageExportModal } from "./image-export-modal";
+import { PreferencesModal } from "./preferences-modal";
 
 const AVAILABLE_EFFECTS = EFFECT_KEYS.filter((key) => key !== "passthrough" && !HIDDEN_EFFECTS.has(key)) as Exclude<
   EffectType,
@@ -130,4 +131,5 @@ export const modals = {
   palettePicker: PalettePickerModal,
   filePicker: FilePickerModal,
   imageExport: ImageExportModal,
+  preferences: PreferencesModal,
 };
