@@ -149,9 +149,9 @@ Not a dense band×time image — that would only be about 9× smaller. The overv
 **Store dB, not linear magnitude.** Half-float cannot hold the range the display offers:
 
 - Min dB is user-adjustable to **−120 dBFS**, which is magnitude 4.6e-7. The smallest normal binary16 is 6.1e-5, about −77.5 dBFS. WebGL2 does not require subnormal support, so on a flush-to-zero driver the overview floors to black at −77.5 dBFS while the window keeps drawing to −133. The seam appears the moment a user drags Min dB below −77, and the default −70…0 range means a Stage 1 eyeball check at defaults would not see it.
-- `MAGNITUDE_HARD_CEILING` is 1e15 against a half-float maximum of 65504, so a boosted or fed-back region overflows to `Inf` and renders as flat white.
+- `MAGNITUDE_HARD_CEILING` is 1e15 against a half-float maximum of 65504. Measured: the CPU encoder **saturates** rather than overflowing, so a magnitude of 1e6 reads back 23 dB quieter than it is. (`Inf` was the first draft's claim; it is wrong for `DataUtils.toHalfFloat`, though a GPU-written RG16F target would produce it.) Either way the value is wrong.
 
-`20·log10(mag) + FULL_SCALE_DB_OFFSET` over −140…+24 fits half float at about 0.01 dB, has no subnormal region, cannot overflow, and — because `max` commutes with a monotone map — leaves the decimation rule unchanged. The overview branch then returns dB directly and skips a log.
+`20·log10(mag)` over −140…+24 fits half float to a measured worst of **0.125 dB**, at the −128 end where the exponent is largest and finer everywhere the display normally sits (the first draft said 0.01 dB, which was optimistic by an order of magnitude; an eighth of a dB is still far below what the eye reads off a spectrogram). It has no subnormal region, cannot saturate, and — because `max` commutes with a monotone map — leaves the decimation rule unchanged. The full-scale offset stays **out** of the store: the display adds it, and it is a calibration the overview should not need rebuilding for.
 
 **The seam needs a fade.** A full-precision bin next to a 16-bin max is systematically darker; blending one of each through `interpolateComplex` reads as a bright edge, not a join. Take both taps from the overview within one bin of the boundary, or cross-fade over about 8 bins.
 
