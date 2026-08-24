@@ -1,112 +1,272 @@
 # Paged Residency
 
+Reviewed twice against the source (Codex, Gemini) on 2026-08-24. Every claim below that says "verified" was checked at a file and line. The findings from that review are folded in; where a first draft was wrong, the correction is stated rather than the original.
+
 ## Why
 
-GPU memory costs 148 bytes per packed texel (`gpu-budget.ts`), and texel count is fixed by duration: about 4.5 texels per input frame at every Resolution setting. Memory therefore scales with file length and nothing else. A 60 s stereo file holds 1.8 GB while painting; five minutes holds 9.2 GB.
+GPU memory costs 148 bytes per packed texel (`gpu-budget.ts`: 56 per file, 68 scratch, 24 CPU on unified memory), and texel count is fixed by duration: about 4.5 texels per input frame at every Resolution setting. Memory therefore scales with file length and nothing else. A 60 s stereo file holds 1.8 GiB while painting; five minutes holds 9.0 GiB.
 
 The August 2026 work (`docs/perf-low-end-mac.md`) cut the constant as far as it goes: depth buffers removed, masks and modulator targets to half precision, the modulator MRT made lazy, and — as of `07a5e67` — the pass buffers allocated on first use, which drops a default brush from 132 to 100 resident bytes per texel. The charge stays at 148 because a brush can grow at any time.
 
-Two other levers were priced and rejected:
+Everything else that was priced:
 
-- **Feature stripping.** Only the scratch pool is reachable, and only the pass buffers (32 B) can honestly be refused up front. Every other scratch buffer has a reader with reach: the stroke-start snapshot doubles as `sourceSpectrogramTex` for non-cumulative strokes (`stroke-renderer.ts`, the `!accumulate && isSameFile` branch), and Attract reads the modulator map by `texelFetch` at a computed pixel (`attract-effect.frag`, `attractPackedRead`). A whole Reduced Mode measured 148 → 116, or 24 s → 31 s of admissible audio on a 1.5 GB device. Not worth the feature loss; reverted before commit.
-- **A mono packed layout.** Real (92 B/texel) but it changes the on-disk packed format, which wipes history — and history _is_ the painted state for a reopened file.
+| Lever                                            | Saving                 | Verdict                                                                                                                                                                                                                         |
+| ------------------------------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Feature stripping (Reduced Mode)                 | 148 → 116              | Rejected and reverted. 24 s → 31 s of admissible audio on a 1.5 GB device, for real feature loss.                                                                                                                               |
+| A mono packed layout                             | 148 → 92               | Rejected. Changes the on-disk packed format, which wipes history — and history _is_ the painted state for a reopened file.                                                                                                      |
+| Charge the budget for what is actually held      | 0                      | **Worth doing now, independently of this plan.** The pool starts at 20 B/texel (`stroke-scratch-pool.ts`) but is charged at 68 up front, so admission refuses files it could open. Reporting and admission only; no memory won. |
+| Page only the pristine texture and inverse map   | 24 GPU + 8 CPU B/texel | Worth doing later. About 22 %. Does not change the scaling with duration.                                                                                                                                                       |
+| Delete the inverse map, derive it in range draws | 8 GPU + 8 CPU B/texel  | Blocked by full-screen draws, which take no per-band varying, and by Sort, which needs a neighbour's band and frame. Revisit alongside the GPU-generated window map.                                                            |
+| Split into RG16F magnitude + RG32F phase         | 4 B/texel              | Dead end. Every read becomes two fetches across 11 GLSL units.                                                                                                                                                                  |
+| Footprint-sized `fbo2`                           | —                      | Dead end without the same remapping this plan does. The 2026-08 verdict stands (`docs/perf-low-end-mac.md`).                                                                                                                    |
+| Whole-file magnitude, windowed phase             | —                      | Dead end. A phase miss during ordinary painting needs the same gather, reach and tile machinery as paging, for less of the saving.                                                                                              |
 
-Paging is the only lever that changes the shape of the problem rather than shaving the constant. It also costs no sound quality, which rules out the remaining alternative of importing at a lower sample rate.
+None of them touch the whole-file FBO pair that dominates duration-scaled residency. Paging is the first design that does, and it costs no sound quality, which rules out the remaining alternative of importing at a lower sample rate.
 
 ## The idea
 
 Stop treating "the file" as the unit of residency. Keep two things instead:
 
-- **An overview** — the whole file, decimated, magnitudes only. Backs the display wherever the window does not reach. Grows with file length, but at 1/64th the rate.
+- **An overview** — the whole file, decimated, magnitudes only, in dB. Backs the display wherever the window does not reach. Grows with file length, but at 1/64th the rate.
 - **A window** — the visible viewport plus whatever a stroke reads or writes, at full precision. Its size is a **setting**, not a function of file length.
 
 The packed array on disk is the backing store. Memory stops scaling with duration.
 
 ## What the current code already gives us
 
-Verified in the source, not assumed:
+Verified in the source, with the review's corrections applied:
 
-| Piece                                    | Where                                 | Why it matters                                                                                                                                                                   |
-| ---------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| One choke point for display reads        | `fetchDisplayTexel`, `display.frag`   | Every display sample of the packed data goes through it, including both taps of `sampleDisplayInterp`.                                                                           |
-| A per-band residency test, already exact | `previewBinRangesTex`, same function  | It picks preview-versus-committed per texel from a per-band `[start, end)` table written by the same code that builds the draw ranges. Window-versus-overview is the same shape. |
-| The display never reads phase            | `display.frag`, colour block          | Only `.r` and `.b` reach `magnitudeToDb`. The overview can be magnitudes only.                                                                                                   |
-| Time window to packed ranges             | `coef-patch.ts`                       | `(band, k0, count)` triples become packed pixel ranges with frame bounds. This is the residency mapping.                                                                         |
-| Range algebra                            | `pixel-ranges.ts`                     | Merge, subtract, gather and scatter over packed ranges, tested.                                                                                                                  |
-| Partial GPU upload                       | `patchFBOData`, `stroke-renderer.ts`  | Scatters only changed packed pixels, 1–7 ms.                                                                                                                                     |
-| Drawing arbitrary ranges                 | `range-quads.ts`, `range-quad.vert`   | Instanced quads over packed pixel ranges.                                                                                                                                        |
-| Max-reduction precedent                  | `max-pyramid.ts`                      | The decimation rule for the overview: max, not mean, so transients survive zoom-out.                                                                                             |
-| Partial synthesis                        | `files.ts`, `C++ synthesis {partial}` | Synthesis is already regional.                                                                                                                                                   |
-| Packed state on disk                     | `history-manager.ts`                  | The backing store's format and writer already exist.                                                                                                                             |
+| Piece                                    | Where                                  | What it actually gives us                                                                                                                                                                                                |
+| ---------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A choke point for _canvas_ display reads | `fetchDisplayTexel`, `display.frag`    | Every canvas display sample goes through it, including both taps of `sampleDisplayInterp`. **Image export does not** — `export.frag` samples through `sampleSourceInterp`, so there are two display paths, not one.      |
+| A per-band range table, already exact    | `previewBinRangesTex`, same function   | It picks preview-versus-committed per texel from a per-band `[start, end)` table written by the same code that builds the draw ranges. The pattern generalises; the residency test itself does not reuse it (see below). |
+| The display never reads phase            | `display.frag`, `export.frag`          | Only `.x` of each `interpolateComplex` result reaches the colour block, and `interpolateComplex` derives its magnitude from magnitudes alone. Verified for both display paths. The overview can be magnitudes only.      |
+| Left-edge dyadic bins                    | `gaborator-addon.cpp`, `coef-patch.ts` | `len = ((numFrames-1) >> stepLog2) + 1`, `inverseMap[i] = i * timeStep`, `minFrame = k0 << stepLog2`. Bins really do sit at `k·2^s`. This is what makes the window alignment below exact.                                |
+| Time window to packed ranges             | `coef-patch.ts`                        | The mapping arithmetic is there, inside an apply-and-mutate function. It has to be extracted, not called.                                                                                                                |
+| Range algebra                            | `pixel-ranges.ts`                      | Merge, subtract, gather and scatter over packed ranges, tested. Reusable as is.                                                                                                                                          |
+| Partial GPU upload                       | `patchFBOData`, `stroke-renderer.ts`   | Scatters only changed packed pixels, 1–7 ms. Its 50 %-of-texture fallback needs re-tuning against window texels.                                                                                                         |
+| Drawing arbitrary ranges                 | `range-quads.ts`, `range-quad.vert`    | Instanced quads over packed pixel ranges. Reusable as is.                                                                                                                                                                |
+| The decimation rule                      | `max-pyramid.ts`                       | Precedent only — a CPU max pyramid over a 1-D `Float32Array` for the navigation strips. It tells us max, not mean, so transients survive zoom-out. The overview needs its own reducer.                                   |
+| Partial synthesis                        | `files.ts`, `C++ synthesis {partial}`  | Synthesis narrows its **time span**. It still indexes one contiguous packed buffer.                                                                                                                                      |
+| Packed state on disk                     | `history-manager.ts`                   | The backing store's format and writer already exist.                                                                                                                                                                     |
 
-The parts that assume whole-file residency are fewer than expected. This is a large change, but it is not a rewrite.
+The recorded 2026-08 verdict — that `fbo2` cannot shrink because every read site would need remapping — was right about the count of read sites. This plan accepts that cost and enumerates it below.
 
 ## The numbers
 
-Overview at RG16F (4 B/texel) decimated 16× in time is 0.25 bytes per original texel. A 15 s window at 48 kHz is 3.24 M texels at the full 148 B.
+Overview at RG16F (4 B/texel) decimated 16× in time is 0.25 bytes per original texel. A 15 s window at 48 kHz is 3.24 M texels at the full 148 B. All figures MiB, consistently.
 
-| File                           | Texels |   Today | Paged, 15 s window |      |
-| ------------------------------ | -----: | ------: | -----------------: | ---: |
-| 60 s stereo                    |   13 M | 1835 MB |             483 MB | 3.8× |
-| 71.2 s mono (the field report) | 15.4 M | 2168 MB |             483 MB | 4.5× |
-| 5 min stereo                   |   65 M | 9160 MB |             496 MB |  18× |
-| 20 min stereo                  |  259 M | 36.6 GB |             545 MB |  67× |
+| File                           | Texels |    Today | Paged, 15 s window |       |
+| ------------------------------ | -----: | -------: | -----------------: | ----: |
+| 60 s stereo                    |   13 M | 1835 MiB |            460 MiB |  4.0× |
+| 71.2 s mono (the field report) | 15.4 M | 2174 MiB |            461 MiB |  4.7× |
+| 5 min stereo                   |   65 M | 9174 MiB |            473 MiB | 19.4× |
+| 20 min stereo                  |  259 M | 35.7 GiB |            519 MiB | 70.4× |
 
-The window is constant; only the overview grows, and slowly. The multiplier is file length ÷ window length, so it has no ceiling.
+Two things that column does **not** say, and the first draft wrongly implied:
 
-Window size becomes the memory setting: 8 s holds 256 MB, 30 s holds 960 MB. That is the honest version of a low-memory mode — less of the file resident at once, rather than fewer features or less bandwidth.
+- **It is the figure after Stage 4, not after Stage 3.** Until the CPU backing store lands, `packedData` stays whole-file at 16 B/texel — 3.9 GiB on its own for 20 minutes, on top of the window. Each stage below states its own peak.
+- **It excludes audio.** `file.audioBuffer` is 440 MiB for 20 minutes of 48 kHz stereo float32, and partial synthesis copies every channel again in C++. Paging the spectrogram does not page the audio, and at these durations audio becomes the second-largest allocation. It needs its own plan or its own budget line; it is out of scope here but must not be out of sight.
 
-## Stages
+The 20-minute row is also **gated on the precision spike in Stage 0** — see decision 1.
 
-Each stage ends somewhere shippable. Stage 1 is a gate: if it fails, nothing after it is worth building.
+Window size becomes the memory setting: 8 s holds about 250 MiB, 30 s about 930 MiB. That is the honest version of a low-memory mode — less of the file resident at once, rather than fewer features or less bandwidth.
 
-### Stage 1 — the overview and the residency branch, display only
+---
 
-Build the overview at analysis time (max-decimated magnitudes, RG16F) and extend `fetchDisplayTexel` with a third case: not resident, read the overview. Keep the full packed texture resident, and drive the branch with a forced pretend-window so the overview path actually renders.
+# The design
 
-Nothing is saved yet. The point is the measurement.
+Four decisions carry the plan.
 
-**Gate: frame time on the Iris 655 with the branch in.** The display is fill-bound there, and this adds a table lookup and a branch to every display texel. If it costs more than the paging saves, stop. Compare against the existing `[frame] cadence` p50/p95 lines in the diag log, on the same file.
+## 1. The window is a frame span aligned to the coarsest dyadic step
 
-### Stage 2 — the window becomes real for display
+```
+align = 1 << max(bandStepLog2s)
+windowStartFrame ≡ 0 (mod align),  windowEndFrame ≡ 0 (mod align)
+```
 
-Allocate the packed FBO at window size. Gather the window out of the CPU packed array on view change, using `coef-patch` for the mapping and `patchFBOData` for the upload. Painting stays confined to the window or disabled.
+Under that alignment every band's first window bin is exactly `windowStartFrame >> stepLog2[band]`, with no rounding disagreement between bands, and every band gets at least one bin because the window spans at least `align` frames. **Both reviews verified this against the addon's own layout arithmetic**, and it earns more than it was claimed to: Sort's neighbour lookup (`sort-effect.frag`, `absoluteFrames = timeIdx * timeStep`, then divide by the neighbour's step) stays correct in window-relative frames without an edit, purely because of the alignment.
 
-Memory drops here for the first time. Measure against the table above.
+Every shader that addresses packed data does
 
-### Stage 3 — painting inside the window
+```
+timeInFrames = uv.x * frameCount
+scaledTime   = timeInFrames / exp2(bandTimeScaleExp)
+```
 
-Strokes already work in packed ranges, so the paint path mostly moves under a coordinate offset. Commit patches the window, then scatters to the CPU array.
+and the windowed form subtracts the window origin before the band scale. Unpacked UV therefore stays in file space everywhere outside the addressing helpers — brush space, modulators, onsets, grid and mouse mapping are untouched. That part of the first draft survives. Three parts of it did not:
 
-The new work is **reach**: before a stroke draws, compute the source span its effects will read — clone and transform offsets are known before the draw — and page it in, or widen the window. A brush whose footprint exceeds the window runs tile by tile.
+**a. The residency test does not exist yet. It is not the existing bounds check.**
+`bandTimeIndices` **clamps** — `clamp(scaledTime, 0.0, frames - 1.0)` — and discards the fact that it clamped. `packedInterpBins` outputs only the clamped indices, so a test in `fetchDisplayTexel` downstream of it always passes. The same clamp sits in `readPackedData` and in `attractPackedRead`, so out-of-window **effect** reads return window-edge data silently. That is worse than a crash and it is the single most dangerous thing in this plan.
 
-### Stage 4 — the CPU backing store
+The fix is a signature change, not a third case: `bandTimeIndices` gains an `out bool resident`, decided in **file frames before the band scale**, and both `packedInterpBins` and `readPackedData` thread it out. `fetchDisplayTexel` needs both the window bin index and the file time index, because the overview addresses itself in file space.
 
-Until this lands, `packedData` is still whole-file resident at 16 B/texel, which on a unified GPU counts against the same budget: five minutes is 1 GB on its own. Chunked, disk-backed packed storage, reusing the history writer's format.
+**b. Wrap mode wraps the window unless it is given the file's band length.**
+`mod(scaledTime, frames)` with `frames = bandLength` tiles the **window** across the canvas once `bandLength` is the window's. Meanwhile `getBrushTimeCoverage` folds its offset in **file** frames, so the two disagree. `bandTimeIndices` needs the file band length as a separate modulus argument, distinct from the window's length. Wrap is an arithmetic problem as well as a reach problem.
 
-This is the least-built part of the plan and the one to schedule most time for.
+**c. There is no single addressing site, and no single packed texture.**
+Verified sites that convert a file time to a bin: `readPackedData`, `packedInterpBins`, `getTransformedSampleBasic`, `getTransformedSampleSnappy`, `getBrushTimeCoverage`, `attractPackedRead`, `attractFileFieldMag`, the convolve source and IR reads, and Sort's vertical neighbour. And there are **four** packed-texture identities, not two:
 
-### Stage 5 — the setting and the fallbacks
+| Texture                | Bound from                                           | Reach                                               |
+| ---------------------- | ---------------------------------------------------- | --------------------------------------------------- |
+| `sourceSpectrogramTex` | the file, another file, or the stroke-start snapshot | brush footprint plus effect reach                   |
+| `destSpectrogramTex`   | the canvas                                           | footprint, plus Sort's and Attract's neighbourhood  |
+| `attractFieldTex`      | **another open file's committed FBO**                | whole field file, by definition of Field mode       |
+| `convolveIrTex`        | **another open file's committed FBO**                | whole IR file, by definition of an impulse response |
 
-Window size in Preferences, defaulted from the queried GPU budget. Whole-file brushes and long-reach sources run tile by tile. Export and synthesis stream over the backing store rather than a resident array.
+The first draft did not mention the last two at all — it confused Attract's field with Attract's scratch modulator map. So the window origin **must travel with the texture, not as a global uniform**. Carry it in the metadata texture: build the window's metadata as `numBands × 2`, row 0 as today (`bandStartOffset`, `bandLength`, `stepLog2`, `freq`), row 1 as (`windowStartFrame`, `fileBandLength`, `fileBandOffset`, spare). `fetchBandMetadata` gains a sibling and the origin arrives wherever the metadata does — including for textures added later.
 
-## Risks
+**d. Float precision does not improve, and it caps the plan at about 5 minutes.**
+`timeInFrames = uv.x * frameCount` is formed in **file** space, before any subtraction, so the window buys nothing. The code already records the loss (`getBrushTimeCoverage`: "frame 256 comes back as 255.99998"). At 20 minutes and 48 kHz that is 57.6 M frames, where float32 spacing is 4 frames — a whole bin at the top band. **The 20-minute row needs integer or view-local addressing, which is its own piece of work.** Stage 0 spikes it and the answer decides whether the plan aims at 5 minutes or at 20.
 
-1. **The display branch cost on Intel.** Stage 1 exists to answer this before anything depends on it.
-2. **Reads that leave the window.** A Full-time brush genuinely needs the file. Tiling makes it slow, not broken, but the slow path has to exist and be correct.
-3. **The CPU backing store.** The most new code, and it sits under synthesis and history.
-4. **History navigation.** Undo and redo are already footprint-based, but `navigateTo` uploads FBO data sized to the file. It needs the same window treatment.
-5. **Painting while zoomed out.** The footprint can exceed the window on purpose. Same tiling path as (2).
+## 2. File-space packed indices stay the app's currency
 
-## Open questions
+Verified as the right call: `history-manager.ts`, `store/brush.ts`, `pixel-ranges.ts` and `main/lib/history-delta.ts` all trade in file ranges, and rebasing them would touch far more code than translating at the renderer boundary. The boundary is bigger than the first draft drew it.
 
-- Decimation factor, and whether the overview keeps both channels or a sum. 16× and both channels are the starting assumption; the display colours left and right separately, so a sum changes the look when zoomed out.
-- How the overview stays current. The painted region must be re-decimated after each commit. Cheap in principle, on the commit path in practice.
-- Whether `previewBinRangesTex` generalises to carry residency too, or whether a second per-band table is cleaner.
-- Whether the window should follow the viewport, the playhead, or the last stroke. Probably the viewport, widened by recent strokes.
+**Outward, at the renderer's public methods:**
 
-## Deliberately unchanged
+| Method            | Change                                                                                                                                                                                                                                                                           |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `patchFBOData`    | Intersect file ranges with the window, remap, upload; drop the rest and record that the CPU array is now ahead of the canvas. Re-tune the 50 % full-upload fallback against **window** texels.                                                                                   |
+| `readPixelRanges` | Map inwards; read the window; return values keyed to the file ranges. Ranges outside the window are a miss the caller must handle, not a clamp.                                                                                                                                  |
+| `getFBOData`      | Becomes `getFBOData(into: Float32Array)`. Today it allocates a fresh file-sized array; paged, it must scatter a window into a caller-owned array, and callers already hold `currentPackedState()`. Left alone it would allocate and copy 1 GiB per synthesis on a 5-minute file. |
+| `setFBOData`      | Gather the window out of the file array and upload it.                                                                                                                                                                                                                           |
+| `applyPhaseTurns` | Sixth method, missed by the first draft. Takes file pixel indices and `packedTextureSize`; same mapping, same miss rule.                                                                                                                                                         |
+| `getTextures`     | Hands out window textures **and** the window layout, so a cross-file reader knows what it got.                                                                                                                                                                                   |
+
+**Inward, and this is the part the first draft got wrong:** the file/window split runs _through the middle of `StrokeRenderer`_, not around it. `calculateFootprint`, `calculateScissorRows`, `drawRanges` and `previewRangeTex` all need **window** pixel indices; `getDirtyPixelRanges`, `patchFBOData`, `readPixelRanges` and `applyPhaseTurns` all need **file** indices. Both read `this.spectrogramData` today. Hold `this.fileLayout` and `this.windowLayout` explicitly and never let `spectrogramData` stand for either.
+
+**And two things outside the renderer do need edits after all:**
+
+- `store/brush.ts` gates its footprint-only read on `base.length === textureWidth * textureHeight * 4`.
+- `canvas-phase-turns.ts` verifies the GPU's float addition once per process by reading back 64 sampled pixels and comparing exactly. Phase turns are band **tails**, so with a window near the start of the file most sampled pixels are not resident; they come back clamped, the verdict latches false for the process, and every later re-analysing stroke falls back to the whole-tail upload the verdict exists to avoid — with a warning each time. `samplePixelRanges` must sample only resident pixels, and the verdict must be keyed to the layout.
+- `StrokeScratchPool.acquire` is called with `spectrogramData` dimensions. **That is 68 of the 148 bytes.** Leave it and a 5-minute file still holds 4.4 GiB of scratch and the Stage 2 memory target is unreachable. Size the pool to the largest **window** across open files, and never shrink it — a file shorter than the window is whole-file resident at smaller dimensions and would otherwise make the pool churn on every file switch.
+
+## 3. The overview is the same dyadic layout, decimated in bins, holding dB
+
+Not a dense band×time image — that would only be about 9× smaller. The overview keeps the packed layout and divides each band's bin count by `D = 16`, taking the **max** over each group of 16 consecutive bins, per channel, into RG16F: `4/16 = 0.25` bytes per original packed texel. Because bin `k` covers frames `[k·2^s, (k+1)·2^s)`, a group of 16 covers `16·2^s` frames exactly, so the overview is addressed by the file time index with `stepLog2 + 4`, reusing `packedTexel` and `fetchBandMetadata` unchanged. Bands clamp to a minimum of one bin.
+
+**Store dB, not linear magnitude.** Half-float cannot hold the range the display offers:
+
+- Min dB is user-adjustable to **−120 dBFS**, which is magnitude 4.6e-7. The smallest normal binary16 is 6.1e-5, about −77.5 dBFS. WebGL2 does not require subnormal support, so on a flush-to-zero driver the overview floors to black at −77.5 dBFS while the window keeps drawing to −133. The seam appears the moment a user drags Min dB below −77, and the default −70…0 range means a Stage 1 eyeball check at defaults would not see it.
+- `MAGNITUDE_HARD_CEILING` is 1e15 against a half-float maximum of 65504, so a boosted or fed-back region overflows to `Inf` and renders as flat white.
+
+`20·log10(mag) + FULL_SCALE_DB_OFFSET` over −140…+24 fits half float at about 0.01 dB, has no subnormal region, cannot overflow, and — because `max` commutes with a monotone map — leaves the decimation rule unchanged. The overview branch then returns dB directly and skips a log.
+
+**The seam needs a fade.** A full-precision bin next to a 16-bin max is systematically darker; blending one of each through `interpolateComplex` reads as a bright edge, not a join. Take both taps from the overview within one bin of the boundary, or cross-fade over about 8 bins.
+
+## 4. Exactness is promised only where it can be delivered
+
+The first draft's target — every effect tiles exactly — does not survive the source. Intermediate passes deliberately write the brush's full packed **rows** because later passes read with reach. Evolve's neighbourhood offset is `|scaleX| · 0.05` of the **whole file's UV width per iteration**, so at the default Scale X of 50 one iteration reaches 7.5 s of a 5-minute file and two iterations always exceed a 15 s window. Convolve takes up to 512 source taps. Sort walks packed neighbours against the inverse map. Transmute routes values into time and pitch reads.
+
+So the plan divides effects, and says so in the UI rather than pretending:
+
+- **Page-exact:** pointwise effects and finite-radius ones whose reach is expressible in seconds or beats (Blur measures in beats and is safe). These tile exactly, with a materialised halo for every intermediate pass.
+- **Whole-file:** wrap mode, Evolve, Sort, Convolve, Attract in Field mode, and domain-routing Transmute. These page the whole file in, or run tile by tile with an explicit accuracy caveat, or are refused above a length. Changing Evolve's stencil from UV to seconds or beats is a separate and arguably correct fix that would move it into the first group.
+
+---
+
+# Stages
+
+Stage 0 and Stage 1 are both gates. The order is deliberate: **the cheapest question that can kill the plan is asked first**, and it is not the display's frame time.
+
+## Stage 0 — centralise addressing, then spike the two things that can kill this
+
+No behaviour change. Both reviews independently asked for this to come before the overview work.
+
+- **Centralise the addressing.** Put every file-time-to-bin conversion behind one helper pair that takes a layout, with the residency flag from decision 1a and the file-length modulus from 1b. That is the nine sites listed above, plus the four texture identities. This is refactoring against the existing tests, and nothing else in the plan is safe until it is done.
+- `lib/window-layout.ts` (new). Pure functions over a `PackedLayout`: `alignWindow`, `buildWindowLayout` (offsets, lengths, texture dimensions, the two-row metadata array, and the file ranges the window covers), `mapFileRangesToWindow` returning inside **and** outside, and `frameSpanOfRanges`. Texture sizing reuses the analyser's, so a window and a whole file size alike.
+- **Spike A — precision.** A 20-minute synthetic file: does the top band still address the right bin through the existing UV round trip? This decides whether the plan's ceiling is 5 minutes or 20, and it is a day's work, not a stage's.
+- **Spike B — correctness under a forced half-file window.** With the addressing centralised, force a window covering half a mock file and run the existing `stroke-renderer.test.ts` and `effects.test.ts`. Whole-file-window must be byte-identical to today; half-file must match inside the window. Add an out-of-window **sentinel** so a clamped read fails a test instead of painting.
+- Diag lines: `[paging] gather`, `[paging] overview update`, `[paging] miss`.
+
+**Gate: if the half-file spike cannot be made exact for the page-exact effect set, stop here.** The display branch is comparatively cheap and answers nothing about whether painting stays correct.
+
+**Exit:** the addressing refactor and `window-layout.ts` land with tests; both spikes answered in writing, here.
+
+## Stage 1 — the overview, the display fallback, and image export
+
+- `lib/overview.ts` (new): `buildOverview` → `{ data (half float dB), metadata, dimensions, layout }`; `updateOverviewRanges` re-decimates only the groups a range list touches. Note that a max cannot be updated incrementally when a value **decreases** — the whole group of 16 must be re-read, which matters once Stage 4 makes those 16 possibly straddle a chunk.
+- Built once at analysis, off the paint path. Re-derived on re-analyse, patched at the single patch choke point so no caller can forget.
+- `display.frag`: the residency flag from Stage 0 selects the overview, which returns dB directly. Fade the seam.
+- **`export.frag` too.** Image export binds the display FBO and samples the whole file's UV range; the moment Stage 2 lands it would export the window stretched across the image, silently. Two answers, and the cheap one has a cost: reading the overview is nearly free and loses nothing in the high bands (an 8K export of a 5-minute file spans about 1875 frames per output pixel, so a 16× overview still supplies over a hundred bins there), but the coarsest bands — whose bins already span tens of milliseconds — become 16× coarser again and visibly blocky. The correct answer is to render the export in horizontal tiles, paging the window across the file, since export is offline; the overview backs the quick preview. Set `timeTaps` against whichever stride is in play. Snapshot capture uses `displayMaterial` and follows the display fix, not this one.
+- Keep the full packed texture resident; drive the branch from a forced pretend-window.
+- **Build the scissored variant too.** Residency depends on time only, so "inside the window" is a contiguous interval of screen x, and a view draws in up to three scissor rects with the window rect compiled with the branch defined out. Register the second program in `precompile-shaders.ts` — the warmup cache keys on source text, so it is a distinct program and will otherwise stall on the first pan across a seam.
+
+**Gate: the display pass's GPU cost on the Iris 655.** Measure with `EXT_disjoint_timer_query_webgl2` around the display draw, not `[frame] cadence` — the canvas runs `frameloop="demand"` and gaps quantise to vsync, so a 3 ms regression inside a 16.7 ms budget reads as identical p50, and the cadence ring holds only about 34 s. **Threshold: display-pass GPU time grows by no more than 20 % at 1× zoom on a 5-minute file, or the scissored variant recovers it.**
+
+**Also check by eye at Min dB −110, not at the default −70**, on material with sharp transients: does 16× read mushy, and does the overview floor hold?
+
+**Exit:** both measurements written here. Shippable as a hidden switch; no memory saved yet.
+
+## Stage 2 — the window becomes real for display
+
+Memory drops for the first time.
+
+- Allocate `fbo1`, `fbo2`, the pristine packed texture and the inverse map at window size — **and the scratch pool**, sized to the largest window across open files.
+- Split `fileLayout` from `windowLayout` inside `StrokeRenderer` per decision 2.
+- Change `getFBOData` to fill a caller-owned array. Guard the aliasing: the addon takes inputs by reference and writes the commit patch in place, so a paged read must not hand back an array the paint path also patches while a promise is in flight.
+- **The inverse map is generated on the GPU** by a range-quad pass, removing an 8 B/texel CPU array. Set `NearestFilter` explicitly on the render target — `packedToUnpackedUv` uses a filtered read, and a linear filter blends frames across band boundaries. **Keep its frames in file space**: Sort reads `neighborInvRG.r / destFrameCount` raw, so window-relative frames would push its brush-membership guard permanently false and turn Sort into a silent no-op. That drops the float-exactness argument, which decision 1d already withdrew.
+- Gather on view change with a margin and hysteresis. **Measure the gather** — 3.2 M texels is a 50 MiB upload — and if it stutters, split it across frames by band range.
+- `gpu-budget.ts`: charge per window texel for the resident buffers, per file texel for the overview and (until Stage 4) for `packedData`.
+- Painting stays confined to the window, and **the refusal must be real**: the footprint is the write set, and every clone, transform, blur and evolve read is larger. Without the Stage 0 residency flag this stage does not refuse anything — it paints window-edge data smeared across the read, with no log line.
+
+**Exit:** measured memory on the three files, with the scratch pool included, plus the sentinel test green. Peak still includes whole-file `packedData`. Shippable behind the hidden switch.
+
+## Stage 3 — painting inside the window
+
+- `lib/stroke-reach.ts` (new): the file frame span a stroke will **read**, from the resolved step parameters and the effect chain — `sourceTimeOffset`, `sourceTimeScale` and their modulated extremes, each effect's declared stencil, and the whole-file cases from decision 4.
+- At stroke start: `required = footprint ∪ reach`. Inside the window, paint. Inside the budget, widen and re-gather **once, at stroke start** — never mid-stroke, which would move the ping-pong state under the dabs. Otherwise tile, or run the whole-file path.
+- **Cross-file sources must be asked, not assumed.** A source, Attract field or Convolve IR texture is another file's **window**, driven by that file's own viewport. Add `requestWindow(frameSpan)` to the renderer and call it at stroke start, with a budget that accounts for two or three files' windows at once. This is also what makes the source-file lane's rectangle honest.
+- **Brush coverage needs the window origin.** `getBrushTimeCoverage` derives its bin from `unpackedUv.x * destFrameCount` and clamps against `bandLength`; with a windowed `bandLength` it mis-assigns bins, so the mask and envelope are **not** tile-invariant as the first draft claimed. The stroke mask also keeps a running max across dabs at local packed UV, so a page change loses the previous tile's mask — hold a stroke-global mask keyed by file ranges.
+- Tiling, for the page-exact set only: per-tile stroke-start snapshot and `blendBaseTex` derived from the same stroke-start state, a materialised halo for every intermediate pass, and a tile seam that is explicitly **not** a hard edge for boundary conditioning.
+- Commit patches the window, scatters to the CPU array, and updates the overview at the same choke point.
+- History navigation: a hop's dirty ranges may lie wholly outside the window, in which case only the CPU array and the overview change. `fboOutOfSync` has to stay honest across that, and `restoreSpectrogramFromFull` must rebuild the window layout after a re-analyse.
+
+**Tests:** the windowed-versus-resident golden test, written **before** the tiling code, over the page-exact set. The whole-file set gets a different test: that it correctly refuses or pages, never that it tiles exactly.
+
+**Exit:** the page-exact set paints identically under a two-tile window; the whole-file set pages or refuses, loudly.
+
+## Stage 4 — the CPU backing store
+
+The least-built part, and the one to schedule most time for.
+
+- Chunked, disk-backed packed storage in aligned frame spans, reusing the history writer's format and its full-snapshot anchors. An LRU of decoded chunks sized from the same budget.
+- **The addon needs a chunk provider.** Its packed accessor is one `const float *data` with file-space band offsets, checked per band, indexed in the inner fill lambda. "Iterate chunk spans instead of indexing one array" understates it: this is a C++ accessor rewrite, and the re-analyse tail walks a band to the end of the file, so the store must serve whole bands. The alternative — assemble a contiguous buffer per call — must have its peak budgeted, because it is the thing paging exists to avoid. Design and benchmark this before committing to the stage.
+- **Phase turns and history deltas are chunk-hostile today**: they mutate long file-indexed tails in place and store residuals as absolute float indices. Deltas, turns, patches, snapshots and reconstruction all become chunk-native, with chunk-relative residuals.
+- Readers to convert, in dependency order: `readCurrentPackedData` and `getFBOData`, the history delta encoder and `restoreSpectrogramFromFull`, onset restore, synthesis and export, the overview updater (its 16-bin groups can straddle a chunk).
+
+**Exit:** measured resident bytes for the longest file the Stage 0 precision spike admits, painting and exporting.
+
+## Stage 5 — the setting and the fallbacks
+
+- Window size in Preferences, defaulted from the queried GPU budget. Copy follows `docs/copy-style.md`; the manual gains it, naming no shipped content.
+- The whole-file effect set gets progress indication rather than silent slowness, and an honest message when a file is too long for it.
+- The maximum-duration analysis error changes meaning — length is no longer the limit — so it and `remainingCoefficientBudget` need rewriting against the new charge.
+- Docs: `docs/perf-low-end-mac.md` gains the new per-texel table; this document records what was measured.
+
+---
+
+# Risks, in the order they can kill the plan
+
+1. **Silent wrongness.** Every failure mode found in review — out-of-window reads, wrap, brush coverage, Sort's inverse map, the phase-turn verdict, image export — produces a plausible wrong picture or a quietly disabled feature, not an error. The sentinel from Stage 0 is the mitigation, and it has to exist before Stage 2 is switched on for anyone.
+2. **Tiling correctness for the page-exact set.** The golden test is the answer and it comes before the code.
+3. **Float precision.** Decides whether the plan reaches 5 minutes or 20. Answered in Stage 0.
+4. **The CPU backing store and the addon accessor.** The most new code, under the two subsystems with the strictest invariants.
+5. **Re-gather stutter** on a pan across a long file.
+6. **The display branch cost on Intel.** Demoted from first place: it is measurable, it has a known fallback in the scissored variant, and it is not what makes the plan hard.
+7. **Overview drift.** Any write that skips the patch choke point leaves the zoomed-out view stale.
+
+# Deliberately unchanged
 
 - **Sound quality.** No decimation reaches the audio path. The overview is a display structure; synthesis always reads full-precision packed data.
 - **The packed layout on disk.** Paging is layout-neutral, which is what keeps existing history readable.
-- **The brush model.** No steps, effects, iterations or modulators are removed. That was Reduced Mode, and it was reverted.
+- **The brush model.** No steps, effects, iterations or modulators are removed. That was Reduced Mode, and it was reverted. Some effects gain a whole-file cost on long files, which is a different thing and is stated in the UI.
+- **Unpacked UV semantics.** File space everywhere outside the addressing helpers.
+
+# Open questions
+
+- Decimation factor. 16× and both channels are the starting assumption; the display colours left and right separately, so a summed overview changes the look when zoomed out. Stage 1 answers it by eye, at a low Min dB.
+- Whether Evolve's stencil should move from UV to seconds or beats. It would move Evolve into the page-exact set and is defensible on its own terms.
+- Whether the pristine packed texture can be dropped for windows and re-gathered on demand, saving 16 B/window texel for a stall on the first Original-blend stroke.
+- Whether the audio buffer gets its own paging plan, or a budget line and a length limit.
