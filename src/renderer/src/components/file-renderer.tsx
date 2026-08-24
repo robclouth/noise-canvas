@@ -37,6 +37,8 @@ import {
   WebGLRenderTarget,
 } from "three";
 import { effects } from "../effects";
+import { hasCanvasPatchStash } from "@renderer/lib/canvas-patch-stash";
+import { hasFileTask } from "@renderer/lib/file-task-queue";
 import { getHistoryManager } from "@renderer/lib/history-manager";
 import { serializeFileTask } from "@renderer/lib/file-task-queue";
 import displayFrag from "../glsl/display.frag";
@@ -45,14 +47,16 @@ import { DEFAULT_ONSET_SENSITIVITY } from "../lib/constants";
 import { getFileOnsets } from "../lib/file-onsets";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { buildOverview, createOverviewTextures, updateOverviewRanges, type Overview } from "../lib/overview";
-import { getPretendWindowFraction, subscribePretendWindow } from "../lib/paging-debug";
+import { getPagedWindows, getPretendWindowFraction, subscribePaging } from "../lib/paging-debug";
 import {
   buildInPlaceWindowMetadata,
   buildWindowLayout,
   fileLayoutOf,
+  layoutPixelCount,
   type PackedLayout,
   type WindowLayout,
 } from "../lib/window-layout";
+import { chooseWindow, viewFrameSpan, DEFAULT_WINDOW_POLICY } from "../lib/window-policy";
 import { buildWindowTextures } from "../lib/window-textures";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
@@ -452,6 +456,28 @@ const FileRendererInner = memo(
 
     // The span the packed, inverse-map and metadata textures hold.
     const windowLayoutRef = useRef<WindowLayout | null>(null);
+    // The committed packed state to put back on the canvas once the renderer
+    // has been rebuilt at a new window.
+    const pendingWindowUploadRef = useRef<Float32Array | null>(null);
+
+    /**
+     * The window the current view calls for, or null to keep `current`. With
+     * paged windows off this is the whole file, which is the state every path
+     * outside this file still assumes.
+     */
+    const chooseWindowForView = useCallback(
+      (current: WindowLayout | null): WindowLayout | null => {
+        const fileLayout = fileLayoutOf(spectrogramData);
+        if (!getPagedWindows()) {
+          if (current && current.startFrame === 0 && current.endFrame >= fileLayout.numFrames) return null;
+          return buildWindowLayout(fileLayout, 0, fileLayout.numFrames);
+        }
+        const state = useStore.getState();
+        const view = viewFrameSpan(fileLayout.numFrames, state.filesZoom[fileId] ?? 0, state.filesOffset[fileId] ?? 0);
+        return chooseWindow(fileLayout, view.startFrame, view.endFrame, current, DEFAULT_WINDOW_POLICY);
+      },
+      [fileId, spectrogramData],
+    );
 
     /**
      * Creates the packed, inverse-map and metadata textures for the resident
@@ -459,11 +485,12 @@ const FileRendererInner = memo(
      */
     const createTextures = useCallback(() => {
       const fileLayout = fileLayoutOf(spectrogramData);
-      const window = buildWindowLayout(fileLayout, 0, fileLayout.numFrames);
+      const window = chooseWindowForView(null) ?? buildWindowLayout(fileLayout, 0, fileLayout.numFrames);
       windowLayoutRef.current = window;
       return buildWindowTextures(spectrogramData, window);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
+      chooseWindowForView,
       spectrogramData.packedData,
       spectrogramData.inverseMap,
       spectrogramData.metadata,
@@ -490,6 +517,34 @@ const FileRendererInner = memo(
       setInverseMapTex(next.inverse);
       setMetadataTex(next.meta);
     }, []);
+
+    /**
+     * Rebuilds the textures and the renderer at `next`, and queues the
+     * committed state to go back on the canvas. The canvas is dropped by the
+     * rebuild, so the caller must be sure the history holds everything on it.
+     */
+    const moveWindow = useCallback(
+      (next: WindowLayout) => {
+        const start = performance.now();
+        pendingWindowUploadRef.current = getHistoryManager(fileId).currentPackedState();
+        disposeLiveTextures();
+        strokeRendererRef.current?.dispose();
+        strokeRendererRef.current = null;
+        windowLayoutRef.current = next;
+        displayMode.current = "committed";
+        installTextures(buildWindowTextures(spectrogramData, next));
+        diag.timing("paging", "gather", performance.now() - start, {
+          startFrame: next.startFrame,
+          frames: next.endFrame - next.startFrame,
+          texels: layoutPixelCount(next),
+          seeded: pendingWindowUploadRef.current ? 1 : 0,
+        });
+        invalidateRef.current?.();
+        snapshotStaleRef.current = true;
+        scheduleSnapshotRefresh();
+      },
+      [fileId, spectrogramData, disposeLiveTextures, installTextures, scheduleSnapshotRefresh],
+    );
 
     // Effect to create and manage spectrogram textures
     useEffect(() => {
@@ -571,7 +626,14 @@ const FileRendererInner = memo(
     // Before real windows exist, a forced pretend-window over the whole-file
     // packed texture drives the display's fallback. Only the display reads it:
     // the shared metadata texture stays whole-file, so painting is untouched.
-    const pretendWindowFraction = useSyncExternalStore(subscribePretendWindow, getPretendWindowFraction);
+    const pretendWindowFraction = useSyncExternalStore(subscribePaging, getPretendWindowFraction);
+    const pagedWindows = useSyncExternalStore(subscribePaging, getPagedWindows);
+
+    // The frame loop is what moves the window, and turning paging on or off
+    // changes nothing the loop already watches.
+    useEffect(() => {
+      invalidateRef.current?.();
+    }, [pagedWindows]);
     const [pretendMetadataTex, setPretendMetadataTex] = useState<DataTexture | null>(null);
 
     useEffect(() => {
@@ -900,6 +962,19 @@ const FileRendererInner = memo(
       const file = openFiles[fileId];
       if (!file || !file.spectrogramData) return;
 
+      // Before anything reads the textures: the rebuild replaces them, and this
+      // frame's closure would still be holding the ones it disposed. The rebuild
+      // drops the canvas and puts back what the history holds, so it must wait
+      // for everything on the canvas to have reached the history: a dab, a
+      // stroke, the commit that follows it, and a patch the canvas never took.
+      const nextWindow = chooseWindowForView(windowLayoutRef.current);
+      const canMoveWindow =
+        !applyStroke.current && !state.isStroking && !hasFileTask(fileId) && !hasCanvasPatchStash(fileId);
+      if (nextWindow && canMoveWindow) {
+        moveWindow(nextWindow);
+        return;
+      }
+
       const bpm = state.filepathsBpm[file.filePath] || 120;
       const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
 
@@ -982,6 +1057,13 @@ const FileRendererInner = memo(
       // Initialize StrokeRenderer if not done yet
       if (!strokeRenderer.getIsInitialized()) {
         strokeRenderer.initialize();
+      }
+
+      // The committed state a window move dropped off the canvas.
+      const pendingUpload = pendingWindowUploadRef.current;
+      if (pendingUpload) {
+        pendingWindowUploadRef.current = null;
+        strokeRenderer.setFBOData(pendingUpload);
       }
 
       // Hook up the history manager exactly once per component lifetime.

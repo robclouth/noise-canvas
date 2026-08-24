@@ -124,6 +124,27 @@ describe("paged renderer boundary", () => {
     expect(windowed[1]).toBeCloseTo(baseline[1], 5);
   });
 
+  it("takes a whole-file array through setFBOData and reads back what the whole file does", async () => {
+    const whole = makeRenderer(wholeFile);
+    const paged = makeRenderer(half);
+    const ranges = windowFileRanges(half);
+
+    const altered = Float32Array.from(data.packedData);
+    for (let i = 0; i < altered.length; i += 4) {
+      altered[i] += 0.5;
+      altered[i + 2] += 0.25;
+    }
+
+    whole.setFBOData(altered);
+    paged.setFBOData(altered);
+
+    const baseline = await whole.readPixelRanges(ranges);
+    const windowed = await paged.readPixelRanges(ranges);
+    expect(Array.from(windowed)).toEqual(Array.from(baseline));
+    // And the upload landed, so the comparison is not of two untouched canvases.
+    expect(windowed[0]).toBe(data.packedData[ranges[0] * 4] + 0.5);
+  });
+
   it("drops the pixels it does not hold instead of substituting the window's edge", async () => {
     const paged = makeRenderer(half);
     // One band's whole file span: the window holds its middle and nothing else.

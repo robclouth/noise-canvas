@@ -255,6 +255,16 @@ Two things this leaves. The zoomed-out picture is now brighter than today's app 
 
 ## Stage 2 — the window becomes real for display
 
+### What the first paged windows showed
+
+`window-policy.ts` chooses the window from the view: the visible span widened by half its width on each side, capped, aligned. The margin is the hysteresis — the window is kept while it still covers the view, so panning inside the margin costs nothing. `file-renderer` moves the window from the frame loop, because that is where it can act before anything reads the textures it is about to replace. A move drops the canvas and puts the history's packed state back on it, so it waits for everything on the canvas to have reached the history: no dab in flight, no stroke, no queued file task, no canvas patch stash.
+
+Measured on the 240 s file with `__paging.setPagedWindows(true)`: at 8× zoom the window holds 11,934,864 of the file's 47,398,184 texels and a move costs 95–190 ms; at 256× it holds 442,032 and costs 7–14 ms. The move is the gather the plan asked to measure, and at the wide end it is a visible stutter — splitting it by band range across frames is still open.
+
+**The paged display does not match the whole-file display, and the paged one is right.** A packed texel is addressed by adding a band's offset to a bin index in a float32. Past 2^24 that sum stops naming texels one at a time: the step is 2 texels above 16.8 M and 4 above 33.6 M, and **64.6 % of that file sits past the ceiling**, so up to four consecutive bins resolve to one texel. Measured on the rendered pixels at 256× zoom, runs of equal value along a row average 2.99 with the whole file and 1.80 with a window. Decision 1d withdrew the float-exactness argument for the inverse map; it stands for the packed texture, and paging is what removes it. `DEFAULT_WINDOW_POLICY.maxPixels` is `EXACT_ADDRESS_PIXELS = 2 ** 24` so a window is exact by construction rather than by luck.
+
+The crossover to the overview sits at **one overview bin per screen pixel**, ramping to four. Below one bin per pixel the overview is coarser than the display and the window still resolves more; above it the overview loses nothing and the window's point sample is the read that aliases. The first draft crossed at half a bin per pixel, which mixed in something coarser than the screen and read as a brightness lift at zoom levels where the window was still the better source.
+
 Memory drops for the first time.
 
 - Allocate `fbo1`, `fbo2`, the pristine packed texture and the inverse map at window size — **and the scratch pool**, sized to the largest window across open files.

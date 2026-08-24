@@ -18,14 +18,8 @@ import overviewProbeFrag from "../../test/overview-probe.frag";
 import probeVert from "../../test/paging-probe.vert";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { buildOverview, createOverviewTextures, magnitudeToDb, overviewDecimationOf } from "../overview";
-import { gatherPixelRanges } from "../pixel-ranges";
-import {
-  buildWindowLayout,
-  buildWindowMetadata,
-  fileLayoutOf,
-  windowFileRanges,
-  type WindowLayout,
-} from "../window-layout";
+import { gatherWindowPacked } from "../window-textures";
+import { buildWindowLayout, buildWindowMetadata, fileLayoutOf, type WindowLayout } from "../window-layout";
 
 /**
  * Stage 1's correctness gate: with only a window resident, the display must
@@ -95,10 +89,8 @@ describe("display overview fallback", () => {
   });
 
   function bindWindow(window: WindowLayout): void {
-    const gathered = gatherPixelRanges(data.packedData, windowFileRanges(window));
-    const padded = new Float32Array(window.textureWidth * window.textureHeight * 4);
-    padded.set(gathered);
-    material.uniforms.sourceSpectrogramTex.value = floatTexture(padded, window.textureWidth, window.textureHeight);
+    const packed = gatherWindowPacked(data.packedData, window);
+    material.uniforms.sourceSpectrogramTex.value = floatTexture(packed, window.textureWidth, window.textureHeight);
     material.uniforms.sourceMetadataTex.value = floatTexture(
       buildWindowMetadata(window, data.metadata),
       window.numBands,
@@ -201,9 +193,9 @@ describe("display overview fallback", () => {
   it("crosses at the same zoom in every band", () => {
     const window = buildWindowLayout(layout, layout.numFrames / 4, layout.numFrames / 2);
     bindWindow(window);
-    const columns = 64;
-    // One overview bin per pixel, halfway along the crossover.
-    const stride = 2 ** OVERVIEW_STEP_LOG2;
+    const columns = 32;
+    // Two overview bins per pixel, halfway along the crossover.
+    const stride = 2 ** (OVERVIEW_STEP_LOG2 + 1);
     // Clear of both window edges, so the seam fade cannot reach these reads.
     const out = probe(window.startFrame + 2048, stride, columns);
 
@@ -215,6 +207,30 @@ describe("display overview fallback", () => {
         expect(out[(y * columns + x) * 4 + 1]).toBeCloseTo(blend, 5);
       }
     }
+  });
+
+  // The gathered window must address the same values the file does: a display
+  // read inside it is the same read, not a near one.
+  it("reads exactly what the whole file reads, well inside the window", () => {
+    const window = buildWindowLayout(layout, layout.numFrames / 4, layout.numFrames / 2);
+    const columns = 512;
+    const stride = 4;
+    const origin = window.startFrame + 2048;
+
+    bindWholeFile();
+    const whole = probe(origin, stride, columns);
+    bindWindow(window);
+    const windowed = probe(origin, stride, columns);
+
+    let compared = 0;
+    for (let i = 0; i < whole.length; i += 4) {
+      // Only where the window holds both taps, clear of the seam fade.
+      if (windowed[i + 3] < FADE_BINS) continue;
+      expect(windowed[i + 1]).toBe(0);
+      expect(windowed[i]).toBe(whole[i]);
+      compared++;
+    }
+    expect(compared).toBeGreaterThan(1000);
   });
 
   it("crosses the seam gradually rather than in one step", () => {

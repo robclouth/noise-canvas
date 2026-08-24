@@ -24,6 +24,11 @@ export function serializeFileTask<T>(fileId: string, task: () => Promise<T>): Pr
   return result;
 }
 
+/** True while a queued task still owns `fileId`'s canvas, history or audio. */
+export function hasFileTask(fileId: string): boolean {
+  return chains.has(fileId);
+}
+
 /** Forgets `fileId`'s chain. In-flight tasks still run to completion. */
 export function clearFileTaskQueue(fileId: string): void {
   chains.delete(fileId);

@@ -11,11 +11,11 @@ uniform float overviewStepLog2;
 // Bins over which the display crosses from the window to the overview.
 const float OVERVIEW_FADE_BINS = 8.0;
 // Overview bins per screen pixel between which the display crosses from the
-// window to the overview: below the first the window resolves detail the
-// overview has already collapsed, above the second the window's own bins are
-// the ones that alias.
-const float OVERVIEW_ZOOM_LO = 0.5;
-const float OVERVIEW_ZOOM_HI = 2.0;
+// window to the overview. Below one bin per pixel the overview is coarser than
+// the display and the window still resolves more; above it the overview loses
+// nothing and the window's own point sample is the read that aliases.
+const float OVERVIEW_ZOOM_LO = 1.0;
+const float OVERVIEW_ZOOM_HI = 4.0;
 
 /**
  * Magnitudes from the overview at an unpacked UV, in the same
