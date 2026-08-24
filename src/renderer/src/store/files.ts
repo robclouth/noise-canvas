@@ -586,9 +586,6 @@ export function collectBrushReferencedPaths(brush: Brush): string[] {
   return [...paths];
 }
 
-// Tone.js player for audio playback
-export const player = new Tone.Player().toDestination();
-
 // Helper to get file by ID
 export function getFileById(fileId: string): OpenFile | undefined {
   return openFiles[fileId];

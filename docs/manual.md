@@ -51,6 +51,7 @@ Every control has a tooltip and an entry in the `?` overlay.
    - [Navigating the Canvas](#navigating-the-canvas)
 10. [History](#history)
 11. [Transport and Output](#transport-and-output)
+    - [Which Device the Sound Plays Through](#which-device-the-sound-plays-through)
 12. [Menus](#menus)
 13. [Keyboard Shortcuts](#keyboard-shortcuts)
 14. [Getting Help](#getting-help)
@@ -878,9 +879,16 @@ The transport bar, left to right:
 - **Re-analyse** – redraws each stroke as the analysis of the audio it made, so the picture settles into what plays, even for edits that only move phase. Off, the canvas keeps exactly what you painted, and commits are faster. The sound is the same either way. Like Auto-limit, it is read at the end of each stroke.
 - **?** – outlines every area of the window at once. See [Getting Help](#getting-help).
 
+### Which Device the Sound Plays Through
+
+**Preferences → Audio → Output** picks it. The list holds every output the computer offers, plus **System default**, which follows whatever the computer itself is set to and is where a fresh install starts.
+
+The choice is remembered by name, so an interface that is unplugged and plugged back in takes the sound back on its own. While it is away the list marks it _not connected_ and playback falls back to the system's output.
+
 **Hints**
 
 - Switch **Auto-limit** off to paint as loud as the effect makes it, and watch the level strip for clipping.
+- Hearing nothing? Press `Space` to play, since painting alone is silent until **Auto-play stroke** is on, then check the output meter and the **Output** setting.
 
 ---
 

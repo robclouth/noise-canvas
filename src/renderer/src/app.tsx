@@ -22,6 +22,7 @@ import { diag } from "./lib/diag-log";
 import { recordDiagFrame, startDiagSampler } from "./lib/diag-sampler";
 import { host } from "./lib/host";
 import { ipcOn, ipcSend } from "./lib/ipc";
+import { watchAudioOutputs } from "./lib/audio-devices";
 import { anchorProps } from "./lib/ui-anchors";
 import { BRUSH_PANEL_WIDTH } from "./lib/ui-density";
 import { precompileDisplayShader, precompileRemainingShaders, warmEffectPipelines } from "./lib/precompile-shaders";
@@ -185,6 +186,16 @@ function App(): React.JSX.Element {
     // close paths that didn't call destroyHistoryManager. Runs after persisted
     // state is loaded so we know which fileIds are still alive.
     void pruneOrphanHistoryDirs(new Set(Object.keys(useStore.getState().persistedFilePaths)));
+  }, []);
+
+  // Route playback to the chosen output, and again whenever one is plugged in
+  // or removed, so an output that reconnects takes the sound back.
+  useEffect(() => {
+    const apply = (): void => {
+      void useStore.getState().applyOutputDevice();
+    };
+    apply();
+    return watchAudioOutputs(apply);
   }, []);
 
   useEffect(() => {

@@ -1,4 +1,6 @@
 import * as Tone from "tone";
+import { listAudioOutputs, resolveOutputId, SYSTEM_DEFAULT_OUTPUT_ID, type AudioOutput } from "../lib/audio-devices";
+import { diag } from "../lib/diag-log";
 import { host } from "../lib/host";
 import { activeLoopRegion, openFiles } from "./files";
 import type { LoopRegion, PlayerClock, ZustandGet, ZustandSet } from "./types";
@@ -29,15 +31,35 @@ export interface AudioState {
   swapPlayingBuffer: (audioBuffer: AudioBuffer) => void;
   togglePlayback: () => Promise<void>;
   stopAudio: () => void;
+
+  /** Output playback is routed to, or `SYSTEM_DEFAULT_OUTPUT_ID` to follow the system. */
+  outputDeviceId: string;
+  /** Name the chosen output was last seen under, which re-finds it after a reconnect. */
+  outputDeviceLabel: string;
+  /** Routes playback to `device`, or to the system's own output when it is null. */
+  setOutputDevice: (device: AudioOutput | null) => Promise<void>;
+  /** Points the audio context at the chosen output, falling back to the system's. */
+  applyOutputDevice: () => Promise<void>;
 }
 
-export const AUDIO_PERSISTED_KEYS = ["autoPlayStroke", "loop", "limiterEnabled", "reanalyzeStrokes"] as const;
+export const AUDIO_PERSISTED_KEYS = [
+  "autoPlayStroke",
+  "loop",
+  "limiterEnabled",
+  "reanalyzeStrokes",
+  "outputDeviceId",
+  "outputDeviceLabel",
+] as const;
 
 // Fade on every source the player makes, so a restart overlaps the outgoing and
 // incoming sources into a crossfade rather than a hard splice. Tone copies it
 // onto a source when it is made, so it must be set before playback starts —
 // setting it later leaves the outgoing source stopping dead.
 const PLAYER_FADE_SEC = 0.01;
+
+// False until the log carries a line for where playback goes. The first apply
+// writes one even when it changes nothing; later ones write only on a change.
+let outputRouteLogged = false;
 
 export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState => ({
   player: null,
@@ -384,6 +406,56 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
         loopEnd: end,
       } as PlayerClock,
     });
+  },
+
+  outputDeviceId: SYSTEM_DEFAULT_OUTPUT_ID,
+  outputDeviceLabel: "",
+
+  setOutputDevice: async (device) => {
+    set({
+      outputDeviceId: device?.id ?? SYSTEM_DEFAULT_OUTPUT_ID,
+      outputDeviceLabel: device?.label ?? "",
+    });
+    await get().applyOutputDevice();
+  },
+
+  applyOutputDevice: async () => {
+    const context = Tone.getContext().rawContext;
+    if (!("setSinkId" in context)) return;
+
+    const { outputDeviceId, outputDeviceLabel } = get();
+    let target = SYSTEM_DEFAULT_OUTPUT_ID;
+    let connected = true;
+
+    if (outputDeviceId !== SYSTEM_DEFAULT_OUTPUT_ID) {
+      const resolved = resolveOutputId(await listAudioOutputs(), outputDeviceId, outputDeviceLabel);
+      connected = resolved !== null;
+      if (resolved !== null) {
+        target = resolved;
+        // The chosen output kept its name but came back under a new id.
+        if (resolved !== outputDeviceId) set({ outputDeviceId: resolved });
+      }
+    }
+
+    const changing = context.sinkId !== target;
+    if (!changing && outputRouteLogged) return;
+
+    try {
+      if (changing) await context.setSinkId(target);
+      outputRouteLogged = true;
+      const route = {
+        label: outputDeviceLabel || "system default",
+        sampleRate: context.sampleRate,
+        channels: context.destination.maxChannelCount,
+      };
+      if (connected) diag.info("audio", "playback output", route);
+      else diag.warn("audio", "playback output, chosen device not connected", route);
+    } catch (error) {
+      diag.error("audio", "output device refused", {
+        label: outputDeviceLabel,
+        error: String(error),
+      });
+    }
   },
 
   stopAudio: () => {
