@@ -2821,6 +2821,20 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           }
           const spectrogramData = await historyManager.loadSpectrogramAtCurrent();
           if (!spectrogramData) throw new Error("History tree is empty");
+          // History restores a file without going near the analyser, so the
+          // admission check every other path runs has to be repeated here.
+          // Without it a file admitted by an earlier version, or on a roomier
+          // machine, reopens at any size and exhausts the GPU pool.
+          const otherTexelCounts = openFileTexelCounts(fileId);
+          const allowed = remainingCoefficientBudget(otherTexelCounts);
+          const coefficients = spectrogramData.textureWidth * spectrogramData.textureHeight;
+          if (allowed !== undefined && coefficients > allowed) {
+            throw new Error(
+              otherTexelCounts.length > 0
+                ? "There is not enough graphics memory for this file. Close another file to free graphics memory."
+                : "There is not enough graphics memory for this file.",
+            );
+          }
           if (!updateOpenFile(fileId, { spectrogramData })) return;
           // Restored from the node the file reopens on, before the loading flag
           // clears, so its first paint already has them.

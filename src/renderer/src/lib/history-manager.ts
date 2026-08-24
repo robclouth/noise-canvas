@@ -1070,7 +1070,9 @@ export class HistoryManager {
     if (!fullAnchor || !fullAnchor.synthesisMetadata) return null;
 
     const { inverseMap, metadata } = await deriveSideData(fullAnchor);
-    this.currentPacked = new Float32Array(packedData);
+    // `packedData` is handed straight to the caller as the file's live state, so
+    // tracking it here is a second reference, not a second copy.
+    this.currentPacked = packedData;
 
     const dims = fullAnchor.dimensions;
     return {
