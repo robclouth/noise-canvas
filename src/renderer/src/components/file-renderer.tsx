@@ -39,6 +39,7 @@ import {
 import { effects } from "../effects";
 import { hasCanvasPatchStash } from "@renderer/lib/canvas-patch-stash";
 import { hasFileTask } from "@renderer/lib/file-task-queue";
+import { type FileFootprint } from "@renderer/lib/gpu-budget";
 import { getHistoryManager } from "@renderer/lib/history-manager";
 import { serializeFileTask } from "@renderer/lib/file-task-queue";
 import displayFrag from "../glsl/display.frag";
@@ -130,6 +131,8 @@ export interface FileRendererHandle {
    * while the promise is in flight.
    */
   getFBOData: (into?: Float32Array) => Promise<Float32Array>;
+  /** Texel counts of what this file holds on the GPU, at the budget's rates. */
+  gpuFootprint: () => FileFootprint;
   /**
    * Reads only the pixels of the flat [pixelStart, pixelCount, ...] ranges from
    * the committed frame buffer, as one block in range order.
@@ -1439,6 +1442,17 @@ const FileRendererInner = memo(
     const residentRanges = (pixelRanges: Uint32Array): Uint32Array =>
       strokeRendererRef.current?.residentRanges(pixelRanges) ?? new Uint32Array(0);
 
+    const gpuFootprint = (): FileFootprint => {
+      const fileTexels = spectrogramData.textureWidth * spectrogramData.textureHeight;
+      const window = windowLayoutRef.current;
+      const overview = overviewRef.current?.overview.layout;
+      return {
+        fileTexels,
+        windowTexels: window ? window.textureWidth * window.textureHeight : fileTexels,
+        overviewTexels: overview ? overview.textureWidth * overview.textureHeight : 0,
+      };
+    };
+
     const updateOverview = (data: Float32Array, pixelRanges: Uint32Array | null): void => {
       if (pixelRanges) patchOverview(data, pixelRanges);
       else rebuildOverview(data);
@@ -1557,6 +1571,7 @@ const FileRendererInner = memo(
       discardStrokePreview,
       keepStrokePreview: () => strokeRendererRef.current?.releaseRollback(),
       getFBOData,
+      gpuFootprint,
       readPixelRanges,
       applyPhaseTurns,
       setFBOData,

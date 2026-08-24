@@ -1,5 +1,5 @@
 import type { WebGLRenderer } from "three";
-import { openFiles } from "../store/files";
+import { openFileFootprints } from "../store/files";
 import { diag } from "./diag-log";
 import { gpuMemoryInfo, spectrogramBytes, usedBudgetFraction } from "./gpu-budget";
 import { historyMemoryCacheBytes } from "./history-manager";
@@ -62,15 +62,6 @@ function logFrameCadence(): void {
   previews = 0;
 }
 
-function openTexelCounts(): number[] {
-  const counts: number[] = [];
-  for (const file of Object.values(openFiles)) {
-    const data = file.spectrogramData;
-    if (data) counts.push(data.textureWidth * data.textureHeight);
-  }
-  return counts;
-}
-
 type MemoryFigures = Record<string, number>;
 
 function changedBeyond(previous: MemoryFigures | null, next: MemoryFigures): boolean {
@@ -88,13 +79,13 @@ const performanceWithMemory: Performance & { memory?: { usedJSHeapSize: number; 
 
 async function memoryFigures(gl: WebGLRenderer): Promise<MemoryFigures> {
   const toMB = (bytes: number): number => Math.round(bytes / 1048576);
-  const texels = openTexelCounts();
+  const files = openFileFootprints();
   const unified = gpuMemoryInfo().unified;
   const figures: MemoryFigures = {
-    spectrogramMB: toMB(spectrogramBytes(texels, unified)),
-    budgetPercent: Math.round((usedBudgetFraction(texels) ?? 0) * 100),
+    spectrogramMB: toMB(spectrogramBytes(files, unified)),
+    budgetPercent: Math.round((usedBudgetFraction(files) ?? 0) * 100),
     scratchMB: toMB(getStrokeScratchPool(gl).allocatedBytes),
-    openFiles: texels.length,
+    openFiles: files.length,
   };
   const history = historyMemoryCacheBytes();
   figures.historyPackedMB = toMB(history.packedStates);

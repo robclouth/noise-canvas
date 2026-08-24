@@ -8,7 +8,12 @@ import { Vector2 } from "three";
 import * as Tone from "tone";
 import { host } from "../lib/host";
 import { diag } from "../lib/diag-log";
-import { remainingCoefficientBudget, usedBudgetFraction } from "../lib/gpu-budget";
+import {
+  remainingCoefficientBudget,
+  usedBudgetFraction,
+  wholeFileFootprint,
+  type FileFootprint,
+} from "../lib/gpu-budget";
 import { toChannelCount } from "../lib/channel-mix";
 import { insertSilence, type InsertSilenceValues } from "../lib/insert-silence";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
@@ -325,6 +330,19 @@ function stripExtensionForLabel(name: string): string {
 }
 
 /** Texel counts of the open files' packed textures, skipping `excludeFileId`. */
+/** What each open file holds on the GPU, whole-file when no renderer is mounted. */
+export function openFileFootprints(): FileFootprint[] {
+  const footprints: FileFootprint[] = [];
+  for (const file of Object.values(openFiles)) {
+    const data = file.spectrogramData;
+    if (!data) continue;
+    footprints.push(
+      file.rendererRef?.current?.gpuFootprint() ?? wholeFileFootprint(data.textureWidth * data.textureHeight),
+    );
+  }
+  return footprints;
+}
+
 function openFileTexelCounts(excludeFileId?: string): number[] {
   const counts: number[] = [];
   for (const [id, file] of Object.entries(openFiles)) {
@@ -350,7 +368,7 @@ export function logFileFootprint(fileId: string, event: string, extra?: Record<s
     textureHeight: data.textureHeight,
     texels: data.textureWidth * data.textureHeight,
     openFiles: Object.keys(openFiles).length,
-    budgetPercent: Math.round((usedBudgetFraction(openFileTexelCounts()) ?? 0) * 100),
+    budgetPercent: Math.round((usedBudgetFraction(openFileFootprints()) ?? 0) * 100),
     ...extra,
   });
 }
