@@ -56,6 +56,11 @@ download_table() {
 
 # Turn "✨ (scope): does a thing" into "- **scope**: does a thing", and a subject
 # with no scope into a plain bullet.
+#
+# A subject may carry a variation selector after the emoji ("⚡️", not "⚡"), which
+# grep matches on the bare emoji but sed leaves behind, so strip it separately.
+vs16="$(printf '\357\270\217')"
+
 group() {
   local emoji="$1" heading="$2" subjects
   subjects="$(git log --no-merges --invert-grep --grep='^Release v' \
@@ -64,7 +69,7 @@ group() {
 
   echo "### ${heading}"
   echo
-  printf '%s\n' "$subjects" | sed "s/^${emoji}[[:space:]]*//" | awk '
+  printf '%s\n' "$subjects" | sed "s/^${emoji}//; s/^${vs16}//; s/^[[:space:]]*//" | awk '
     match($0, /^\(([^)]*)\): /) {
       scope = substr($0, RSTART + 1, RLENGTH - 4)
       print "- **" scope "**: " substr($0, RSTART + RLENGTH)
