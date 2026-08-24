@@ -87,6 +87,8 @@ export const APP_MENUS: AppMenu[] = [
         only: "electron",
       },
       { type: "separator" },
+      { type: "item", label: "Preferences…", command: "open-preferences", accelerator: { code: "Comma" } },
+      { type: "separator" },
       { type: "item", label: "Export Image…", command: "export-image" },
       { type: "item", label: "Export History…", command: "export-history" },
       { type: "separator" },

@@ -3,9 +3,10 @@ import { Box, Group, Menu, Text, UnstyledButton } from "@mantine/core";
 import { acceleratorLabel, APP_MENUS, runCommand, visibleItems, type AppMenuItem } from "@renderer/lib/app-menu";
 import { getHistoryManager } from "@renderer/lib/history-manager";
 import { anchorProps } from "@renderer/lib/ui-anchors";
-import { Check, CircleHelp } from "lucide-react";
+import { Check, CircleHelp, Settings } from "lucide-react";
 import { memo, useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { HelpActionIcon } from "../controls/help-control";
+import { openPreferencesModal } from "../preferences-modal";
 import { MemoryReadout } from "./memory-readout";
 import { ShaderWarmupReadout } from "./shader-warmup-readout";
 
@@ -60,8 +61,8 @@ function RecentFilesSubmenu() {
 
 /**
  * The app's menu bar, inside the window on every platform and in both builds.
- * Items and their shortcuts come from `APP_MENUS`; the help button and the
- * memory readout sit at the far end.
+ * Items and their shortcuts come from `APP_MENUS`; the preferences and help
+ * buttons and the memory readout sit at the far end.
  */
 export const AppMenuBar = memo(function AppMenuBar() {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -160,6 +161,16 @@ export const AppMenuBar = memo(function AppMenuBar() {
       <ShaderWarmupReadout />
 
       <MemoryReadout />
+
+      <HelpActionIcon
+        help="menu-preferences"
+        onClick={() => openPreferencesModal()}
+        size="sm"
+        variant="subtle"
+        color="dark.2"
+      >
+        <Settings size={16} />
+      </HelpActionIcon>
 
       <HelpActionIcon
         help="menu-help"

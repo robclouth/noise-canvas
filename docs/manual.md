@@ -898,6 +898,7 @@ Memory climbs with the length and resolution of everything you have open, not wi
 - **Save As…** (`Cmd/Ctrl+Shift+S`).
 - **Save Version** (`Cmd/Ctrl+Alt+S`) – saves a numbered copy alongside the original without overwriting it.
 - **Close File** (`Cmd/Ctrl+W`).
+- **Preferences…** (`Cmd/Ctrl+,`) – opens the settings that apply to the whole app.
 - **Export Image…** – saves the active file's spectrogram as a PNG, for artwork rather than for audio. A live preview shows what you will get.
   - **Colour** – Editor keeps the app's own look. Mono, Magma, Viridis and Ice restyle it, and Random rolls a new palette each time you pick it.
   - **Shape** – 1:1, 4:5, 3:2, 16:9, or 9:16 for a phone screen.

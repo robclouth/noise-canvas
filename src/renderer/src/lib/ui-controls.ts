@@ -45,6 +45,11 @@ export const UI_CONTROLS = {
   },
 
   // Menu bar
+  "menu-preferences": {
+    label: "Preferences",
+    description: "Opens the settings that apply to the whole app.",
+    manualSection: "menus",
+  },
   "menu-help": {
     label: "Help overlay",
     description: "Dims the interface and describes whatever the pointer is over.",

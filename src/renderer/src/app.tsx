@@ -30,6 +30,7 @@ import { clearAllHistoryManagers, getHistoryManager, pruneOrphanHistoryDirs } fr
 import { useLinkSync } from "./lib/use-link-sync";
 import { useShortcuts } from "./lib/useShortcuts";
 import { openFiles } from "./store/files";
+import { openPreferencesModal } from "./components/preferences-modal";
 
 type Invalidator = RootState["invalidate"];
 
@@ -246,6 +247,11 @@ function App(): React.JSX.Element {
       saveActiveFileVersion();
     });
     unsubscribers.push(unsubSaveActiveFileVersion);
+
+    const unsubOpenPreferences = ipcOn("open-preferences", () => {
+      openPreferencesModal();
+    });
+    unsubscribers.push(unsubOpenPreferences);
 
     const unsubExportImage = ipcOn("export-image", () => {
       const { activeFileId } = useStore.getState();
