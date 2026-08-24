@@ -40,6 +40,9 @@ uniform sampler2D previewTex;
 uniform sampler2D previewBinRangesTex;
 uniform bool previewActive;
 
+#include "overview.glsl";
+
+
 vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, ivec2 texSize) {
     ivec2 texel = packedTexel(bandStartOffset + timeIndex, texSize);
     if (previewActive) {
@@ -49,18 +52,23 @@ vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, iv
     return texelFetch(sourceSpectrogramTex, texel, 0);
 }
 
-// `resident` is false where the packed texture holds a window that does not
-// reach this time; the caller draws that span from the overview instead.
+// Blends toward the overview across the window's last bins and takes it whole
+// beyond them, so a decimated bin never sits hard against a full-precision one.
 vec4 sampleDisplayInterp(vec2 uv, out bool resident) {
     float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
     packedInterpBins(uv, sourceMetadataTex, sourceFrameCount, sourceBandCount,
                      bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction, resident);
     ivec2 texSize = textureSize(sourceSpectrogramTex, 0);
     int band = int(bandIndex);
+    float blend = overviewBlend(uv, sourceMetadataTex, sourceFrameCount, sourceBandCount);
+    if (blend >= 1.0) return sampleOverviewMagnitudes(uv, sourceFrameCount, sourceBandCount);
+
     vec4 sample1 = fetchDisplayTexel(band, bandStartOffset, timeIndex0, texSize);
     vec4 sample2 = fetchDisplayTexel(band, bandStartOffset, timeIndex1, texSize);
-    return vec4(interpolateComplex(sample1.rg, sample2.rg, timeFraction),
-                interpolateComplex(sample1.ba, sample2.ba, timeFraction));
+    vec4 windowed = vec4(interpolateComplex(sample1.rg, sample2.rg, timeFraction),
+                         interpolateComplex(sample1.ba, sample2.ba, timeFraction));
+    if (blend <= 0.0) return windowed;
+    return mix(windowed, sampleOverviewMagnitudes(uv, sourceFrameCount, sourceBandCount), blend);
 }
 
 // Convert screen UV (what we see) to zoomed UV (actual data coordinates).
@@ -125,7 +133,7 @@ void main() {
     bool resident0, resident1;
     vec4 sample0 = sampleDisplayInterp(uv0, resident0);
     vec4 sample1 = sampleDisplayInterp(uv1, resident1);
-    vec4 packedValue = markResidency(mix(sample0, sample1, bandFrac), resident0 && resident1);
+    vec4 packedValue = markResidency(mix(sample0, sample1, bandFrac), (resident0 && resident1) || overviewActive);
 
     // packedValue stores [leftMagnitude, leftPhase, rightMagnitude, rightPhase]
     vec2 leftMagPhase = packedValue.rg;

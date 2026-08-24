@@ -218,20 +218,25 @@ The suite was mutation-checked; each of the three failure modes the reviews foun
 
 **Gate: passed.** The addressing is exact under a window, and the precision ceiling is known.
 
-## Stage 1 — the overview, the display fallback, and image export
+## Stage 1 — the overview, the display fallback, and image export — **shader side done, app wiring open**
 
-- `lib/overview.ts` (new): `buildOverview` → `{ data (half float dB), metadata, dimensions, layout }`; `updateOverviewRanges` re-decimates only the groups a range list touches. Note that a max cannot be updated incrementally when a value **decreases** — the whole group of 16 must be re-read, which matters once Stage 4 makes those 16 possibly straddle a chunk.
-- Built once at analysis, off the paint path. Re-derived on re-analyse, patched at the single patch choke point so no caller can forget.
-- `display.frag`: the residency flag from Stage 0 selects the overview, which returns dB directly. Fade the seam.
-- **`export.frag` too.** Image export binds the display FBO and samples the whole file's UV range; the moment Stage 2 lands it would export the window stretched across the image, silently. Two answers, and the cheap one has a cost: reading the overview is nearly free and loses nothing in the high bands (an 8K export of a 5-minute file spans about 1875 frames per output pixel, so a 16× overview still supplies over a hundred bins there), but the coarsest bands — whose bins already span tens of milliseconds — become 16× coarser again and visibly blocky. The correct answer is to render the export in horizontal tiles, paging the window across the file, since export is offline; the overview backs the quick preview. Set `timeTaps` against whichever stride is in play. Snapshot capture uses `displayMaterial` and follows the display fix, not this one.
-- Keep the full packed texture resident; drive the branch from a forced pretend-window.
-- **Build the scissored variant too.** Residency depends on time only, so "inside the window" is a contiguous interval of screen x, and a view draws in up to three scissor rects with the window rect compiled with the branch defined out. Register the second program in `precompile-shaders.ts` — the warmup cache keys on source text, so it is a distinct program and will otherwise stall on the first pan across a seam.
+**Landed**
 
-**Gate: the display pass's GPU cost on the Iris 655.** Measure with `EXT_disjoint_timer_query_webgl2` around the display draw, not `[frame] cadence` — the canvas runs `frameloop="demand"` and gaps quantise to vsync, so a 3 ms regression inside a 16.7 ms budget reads as identical p50, and the cadence ring holds only about 34 s. **Threshold: display-pass GPU time grows by no more than 20 % at 1× zoom on a 5-minute file, or the scissored variant recovers it.**
+- **`lib/overview.ts`.** `buildOverview` and `updateOverviewRanges`, over a layout that is the file's own with each band's step exponent shifted by 4, so `packedTexel` and the band metadata read it with no special case. Max, not mean, per channel, stored as dB in RG16F. 13 tests, mutation-checked: switching max for mean fails 5 of them, and updating only the first group of a straddling range fails 2.
+- **Two claims corrected by measurement**, both in decision 3 above: the CPU encoder **saturates** at 65504 rather than overflowing to `Inf`, and dB quantisation is **0.125 dB** at the −128 end rather than 0.01.
+- **`glsl/overview.glsl`.** `sampleOverviewMagnitudes` returns the overview in the `(magL, phaseL, magR, phaseR)` shape a packed read returns, so the caller's band interpolation and dB mapping are untouched; `overviewBlend` gives the overview's share.
+- **`display.frag` falls back and fades.** `bandResidencyMargin` (in the addressing block, so it reuses `bandFirstBin` rather than re-deriving) drives an 8-bin cross-fade; beyond the window the overview is taken whole. `bandIsWholeFile` guards it — without that, the fade fires at the **file's own first and last bins**, where nothing is missing. Found by writing the test, not by reading the code.
+- **`overview-display.test.ts`**: a whole-file texture takes nothing from the overview; beyond a window the overview is taken whole and well inside it the window is; the seam is monotone and spreads over the full 8 bins rather than stepping; and the level read out sits between the two overview bins the read blends, matching a group's own peak exactly when probed on a group boundary.
 
-**Also check by eye at Min dB −110, not at the default −70**, on material with sharp transients: does 16× read mushy, and does the overview floor hold?
+**Still open**
 
-**Exit:** both measurements written here. Shippable as a hidden switch; no memory saved yet.
+- **App wiring.** Building the overview at analysis, uploading it as an RG16F texture, patching it at the single patch choke point, and the forced pretend-window that drives the branch before Stage 2 makes windows real. Nothing in the app reads the overview yet.
+- **`export.frag`.** Unchanged, and it still samples the whole file's UV range through `sampleSourceInterp`. It breaks the moment Stage 2 lands. Render it in horizontal tiles, paging the window across the file, since export is offline; the overview backs the quick preview only. Reading the overview is nearly free and loses nothing in the high bands (an 8K export of a 5-minute file spans about 1875 frames per output pixel, so a 16× overview still supplies over a hundred bins there), but the coarsest bands — whose bins already span tens of milliseconds — become 16× coarser again and visibly blocky. Set `timeTaps` against whichever stride is in play. Snapshot capture uses `displayMaterial` and already follows the display fix.
+- **The scissored variant.** Residency depends on time only, so "inside the window" is a contiguous interval of screen x, and a view draws in up to three scissor rects with the window rect compiled with the branch defined out. Register the second program in `precompile-shaders.ts` — the warmup cache keys on source text, so it is a distinct program and will otherwise stall on the first pan across a seam.
+
+**Gate: not yet measured, and it needs hardware this work cannot reach.** The display pass's GPU cost on the Iris 655, with `EXT_disjoint_timer_query_webgl2` around the display draw rather than `[frame] cadence` — the canvas runs `frameloop="demand"`, so gaps quantise to vsync and a 3 ms regression inside a 16.7 ms budget reads as identical p50, and the cadence ring holds only about 34 s. **Threshold: display-pass GPU time grows by no more than 20 % at 1× zoom on a 5-minute file, or the scissored variant recovers it.**
+
+**Also unchecked: the by-eye pass at Min dB −110**, not at the default −70, on material with sharp transients — does 16× read mushy, and does the overview floor hold? The arithmetic says it should (dB has no subnormal region), but the question was always visual.
 
 ## Stage 2 — the window becomes real for display
 
