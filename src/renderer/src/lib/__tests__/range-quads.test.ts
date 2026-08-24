@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { brushFootprintRanges, fullTextureRange, rowRange } from "../range-quads";
+import { fileLayoutOf } from "../window-layout";
 
 function footprint(
   data: ReturnType<typeof createConstantQMockSpectrogramData>,
@@ -12,7 +13,16 @@ function footprint(
 ) {
   const ranges = new Uint32Array(data.numBands * 6);
   const binRanges = new Float32Array(data.numBands * 4);
-  const count = brushFootprintRanges(data, lowBand, highBand, window, marginBins, ranges, binRanges, pixelClamp);
+  const count = brushFootprintRanges(
+    fileLayoutOf(data),
+    lowBand,
+    highBand,
+    window,
+    marginBins,
+    ranges,
+    binRanges,
+    pixelClamp,
+  );
   return { ranges: ranges.subarray(0, count * 2), count, binRanges };
 }
 

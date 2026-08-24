@@ -101,13 +101,17 @@ export function buildWindowLayout(file: PackedLayout, startFrame: number, endFra
     total += bandLengths[b];
   }
 
-  const textureWidth = Math.min(MAX_TEXTURE_SIZE, total);
-  const textureHeight = total > 0 ? Math.ceil(total / textureWidth) : 0;
+  // A window that holds every bin is the file, and must keep the file's own
+  // packing: the analyser's texture may be padded or shaped differently from
+  // what this rule would pick, and the two must address the same texels.
+  const wholeFile = total === layoutPixelCount(file) && firstBins.every((first) => first === 0);
+  const textureWidth = wholeFile ? file.textureWidth : Math.min(MAX_TEXTURE_SIZE, total);
+  const textureHeight = wholeFile ? file.textureHeight : total > 0 ? Math.ceil(total / textureWidth) : 0;
 
   return {
     numFrames: span.endFrame - span.startFrame,
     numBands: file.numBands,
-    bandOffsets,
+    bandOffsets: wholeFile ? file.bandOffsets : bandOffsets,
     bandLengths,
     bandStepLog2s: file.bandStepLog2s,
     textureWidth,
