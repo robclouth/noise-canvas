@@ -46,7 +46,8 @@ vi.mock("@renderer/store/files", () => ({
 // Silence the renderer→main menu-state IPC the manager fires on every change.
 vi.mock("../ipc", () => ({ ipcSend: vi.fn() }));
 
-import { clearAllHistoryManagers, getHistoryManager, historyCacheBudgets, PackedStateCache } from "../history-manager";
+import { clearAllHistoryManagers, getHistoryManager, PackedStateCache } from "../history-manager";
+import { historyCacheBudgets } from "../history-cache-budgets";
 import { serializeFileTask } from "../file-task-queue";
 import { canvasPatchStashCount, setCanvasPatchStash } from "../canvas-patch-stash";
 import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";

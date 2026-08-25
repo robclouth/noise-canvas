@@ -1,3 +1,4 @@
+import { historyCacheBudgets } from "./history-cache-budgets";
 import { host } from "./host";
 
 // GPU bytes per packed texel one open file keeps resident: two ping-pong FBOs
@@ -13,17 +14,31 @@ export const GPU_BYTES_PER_TEXEL_FILE = 56;
 export const GPU_BYTES_PER_TEXEL_SCRATCH = 74;
 // CPU-side copies (packedData 16, inverseMap 8); they compete with the
 // textures only on unified-memory GPUs.
-const CPU_BYTES_PER_TEXEL_FILE = 24;
+export const CPU_BYTES_PER_TEXEL_FILE = 24;
 // Fraction of the GPU pool the spectrogram data may claim; the rest stays for
 // the compositor, other apps, and everything else the app allocates.
 const GPU_BUDGET_SHARE = 0.5;
 
 let cachedInfo: { bytes: number; unified: boolean } | null = null;
+let cachedHistoryBytes: number | null = null;
 
 /** The GPU's memory figure, queried once per session. */
 export function gpuMemoryInfo(): { bytes: number; unified: boolean } {
   if (!cachedInfo) cachedInfo = host.analysis.getGpuMemoryInfo();
   return cachedInfo;
+}
+
+/**
+ * RAM the history caches may hold — decoded packed states, stroke deltas and
+ * hop audio. A flat overhead, not a per-texel rate: the budgets are the same
+ * whatever length is open, and painting fills them.
+ */
+export function historyCacheBytes(): number {
+  if (cachedHistoryBytes === null) {
+    const budgets = historyCacheBudgets(host.os.totalmem());
+    cachedHistoryBytes = budgets.packedStates + budgets.deltas + budgets.audioHops;
+  }
+  return cachedHistoryBytes;
 }
 
 /** Bytes the open files hold, by the same rates the budget is spent at. */
@@ -35,7 +50,9 @@ export function spectrogramBytes(openTexelCounts: number[], unified: boolean): n
     largest = Math.max(largest, texels);
   }
   const perTexel = GPU_BYTES_PER_TEXEL_FILE + (unified ? CPU_BYTES_PER_TEXEL_FILE : 0);
-  return perTexel * sum + GPU_BYTES_PER_TEXEL_SCRATCH * largest;
+  // No open file, no history manager, so nothing holds the caches yet.
+  const overhead = unified && openTexelCounts.length > 0 ? historyCacheBytes() : 0;
+  return perTexel * sum + GPU_BYTES_PER_TEXEL_SCRATCH * largest + overhead;
 }
 
 /**
@@ -60,7 +77,7 @@ export function remainingCoefficientBudget(openTexelCounts: number[]): number | 
   if (info.bytes <= 0) return undefined;
 
   const perTexel = GPU_BYTES_PER_TEXEL_FILE + (info.unified ? CPU_BYTES_PER_TEXEL_FILE : 0);
-  const budget = info.bytes * GPU_BUDGET_SHARE;
+  const budget = info.bytes * GPU_BUDGET_SHARE - (info.unified ? historyCacheBytes() : 0);
 
   let sum = 0;
   let largest = 0;

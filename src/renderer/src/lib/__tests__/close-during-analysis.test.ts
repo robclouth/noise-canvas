@@ -40,6 +40,7 @@ vi.mock("../host", () => ({
       extname: () => ".wav",
       join: (...parts: string[]) => parts.join("/"),
     },
+    os: { totalmem: () => 8 * 1024 ** 3 },
     analysis: {
       getGpuMemoryInfo: () => ({ bytes: 8 * 1024 ** 3, unified: true }),
       analyze: () => new Promise((resolve) => (gate.resolve = resolve)),

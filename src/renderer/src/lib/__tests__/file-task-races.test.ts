@@ -109,6 +109,7 @@ vi.mock("../host", () => ({
       extname: (p: string) => `.${p.split(".").pop()}`,
       join: (...parts: string[]) => parts.join("/"),
     },
+    os: { totalmem: () => 8 * 1024 ** 3 },
     analysis: {
       getGpuMemoryInfo: () => ({ bytes: 8 * 1024 ** 3, unified: true }),
       synthesize: () => new Promise((resolve) => gate.synthesize.push(resolve)),

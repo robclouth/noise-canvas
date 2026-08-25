@@ -1,7 +1,16 @@
 import { FloatType, HalfFloatType, RedFormat, RGFormat, RGBAFormat, UnsignedByteType } from "three";
 import type { WebGLRenderTarget } from "three";
-import { describe, expect, it } from "vitest";
-import { GPU_BYTES_PER_TEXEL_FILE, GPU_BYTES_PER_TEXEL_SCRATCH, spectrogramBytes } from "../gpu-budget";
+import { beforeAll, describe, expect, it } from "vitest";
+import {
+  CPU_BYTES_PER_TEXEL_FILE,
+  GPU_BYTES_PER_TEXEL_FILE,
+  GPU_BYTES_PER_TEXEL_SCRATCH,
+  historyCacheBytes,
+  remainingCoefficientBudget,
+  spectrogramBytes,
+  usedBudgetFraction,
+} from "../gpu-budget";
+import { historyCacheBudgets } from "../history-cache-budgets";
 import { MAX_STEPS } from "../constants";
 import { StrokeScratch, StrokeScratchPool } from "../stroke-scratch-pool";
 
@@ -100,5 +109,59 @@ describe("GPU budget rates", () => {
     const two = spectrogramBytes([texels, texels], false);
     expect(one).toBe((GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH) * texels);
     expect(two - one).toBe(GPU_BYTES_PER_TEXEL_FILE * texels);
+  });
+});
+
+describe("history cache overhead", () => {
+  const TOTAL_MEMORY = 8 * 1024 ** 3;
+  const GPU_MEMORY = 4 * 1024 ** 3;
+  const GPU_BUDGET_SHARE = 0.5;
+
+  beforeAll(() => {
+    // Both figures are read once and cached, so stub them before the first
+    // call rather than per test.
+    const w = window as unknown as Record<string, unknown>;
+    w.nodeOs = { homedir: () => "/home", totalmem: () => TOTAL_MEMORY };
+    w.audioAnalysis = { getGpuMemoryInfo: () => ({ bytes: GPU_MEMORY, unified: true }) };
+  });
+
+  const overhead = (): number => {
+    const budgets = historyCacheBudgets(TOTAL_MEMORY);
+    return budgets.packedStates + budgets.deltas + budgets.audioHops;
+  };
+
+  it("sums the three history cache budgets", () => {
+    expect(historyCacheBytes()).toBe(overhead());
+  });
+
+  it("charges the caches once, however many files are open", () => {
+    const texels = 1000;
+    const one = spectrogramBytes([texels], true);
+    const two = spectrogramBytes([texels, texels], true);
+    expect(one).toBe(
+      (GPU_BYTES_PER_TEXEL_FILE + CPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH) * texels + overhead(),
+    );
+    expect((two - one) / texels).toBe(GPU_BYTES_PER_TEXEL_FILE + CPU_BYTES_PER_TEXEL_FILE);
+  });
+
+  it("charges nothing before a file is open", () => {
+    expect(spectrogramBytes([], true)).toBe(0);
+  });
+
+  it("leaves the caches uncharged when the GPU has its own memory", () => {
+    const texels = 1000;
+    expect(spectrogramBytes([texels], false)).toBe((GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH) * texels);
+  });
+
+  it("takes the caches out of the budget a new file is measured against", () => {
+    const budget = GPU_MEMORY * GPU_BUDGET_SHARE - overhead();
+    const perTexel = GPU_BYTES_PER_TEXEL_FILE + CPU_BYTES_PER_TEXEL_FILE;
+    // With nothing open the new file grows the scratch pool with it.
+    expect(remainingCoefficientBudget([])).toBe(Math.floor(budget / (perTexel + GPU_BYTES_PER_TEXEL_SCRATCH)));
+  });
+
+  it("reports the open files' share of the budget, caches included", () => {
+    const texels = 1000;
+    expect(usedBudgetFraction([texels])).toBe(spectrogramBytes([texels], true) / (GPU_MEMORY * GPU_BUDGET_SHARE));
   });
 });
