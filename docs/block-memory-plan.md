@@ -270,7 +270,9 @@ Tests:
 Exit: no read of `fbo1`/`fbo2` remains in the display path; parity and perf
 measurements pass. **STOP-ASK** with the measurements before Phase 2.
 
-Status: not started.
+Status: pyramid built, wired and measured; tiles not started, so the canvas
+still covers views finer than the finest resident level. Awaiting the call on
+tiles.
 
 ---
 
