@@ -189,7 +189,7 @@ export const useStore = create<State>()(
         ...createModulatorsSlice(),
         ...createFilesSlice(set, get),
         ...createAudioSlice(set, get),
-        ...createAppSlice(set, get),
+        ...createAppSlice(set),
         ...createPresetsSlice(set, get),
         ...createPalettesSlice(set, get),
         ...createSectionPresetsSlice(set, get),

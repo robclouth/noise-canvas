@@ -5,11 +5,16 @@ import { getAllEffectParameterKeys, getEffectParameterKeys, parameterDefs } from
 import type { ParameterKey } from "../../store/types";
 
 /** Vite inlines these at build time, so the scan reads what is actually on disk. */
-const sources = import.meta.glob("../../components/**/*.tsx", {
-  query: "?raw",
-  eager: true,
-  import: "default",
-}) as Record<string, string>;
+const sources = {
+  ...(import.meta.glob("../../components/**/*.tsx", { query: "?raw", eager: true, import: "default" }) as Record<
+    string,
+    string
+  >),
+  ...(import.meta.glob("../brush-sections.ts", { query: "?raw", eager: true, import: "default" }) as Record<
+    string,
+    string
+  >),
+};
 
 /**
  * The Effects section header's reset, randomise and section-preset actions act
@@ -44,10 +49,10 @@ describe("effect parameter coverage", () => {
   });
 
   it("derives both lists rather than spelling them out", () => {
-    const brushPanel = Object.entries(sources).find(([path]) => path.endsWith("layout/brush-panel.tsx"))?.[1] ?? "";
+    const brushSections = Object.entries(sources).find(([path]) => path.endsWith("brush-sections.ts"))?.[1] ?? "";
     const effectsList =
       Object.entries(sources).find(([path]) => path.endsWith("components/effects-list.tsx"))?.[1] ?? "";
-    expect(brushPanel).toContain("getAllEffectParameterKeys()");
+    expect(brushSections).toContain("getAllEffectParameterKeys()");
     expect(effectsList).toContain("getEffectParameterKeys(key)");
   });
 });

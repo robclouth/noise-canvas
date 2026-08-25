@@ -1,7 +1,6 @@
-import { BEAT_VALUES, ONSETS_GRID_VALUE, PITCH_VALUES } from "@renderer/lib/constants";
 import { getParameterDef } from "@renderer/parameters";
 import { Vector2 } from "three";
-import type { ZustandGet, ZustandSet } from "./types";
+import type { ZustandSet } from "./types";
 
 // Global UI density token. Doubles as the Mantine `size` token for components
 // whose size prop should track density (e.g. "md" = normal, "sm" = compact).
@@ -52,13 +51,11 @@ export interface AppState {
   setMousePos: (mousePos: Vector2 | null) => void;
   sectionCollapsed: Record<string, boolean>;
   setSectionCollapsed: (label: string, collapsed: boolean) => void;
-  cycleHorizontalGrid: (direction: 1 | -1) => void;
-  cycleVerticalGrid: (direction: 1 | -1) => void;
   isZooming: boolean;
   setIsZooming: (isZooming: boolean) => void;
 }
 
-export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
+export const createAppSlice = (set: ZustandSet): AppState => {
   return {
     uiSize: DEFAULT_UI_SIZE,
     setUiSize: (uiSize) => set({ uiSize }),
@@ -91,24 +88,6 @@ export const createAppSlice = (set: ZustandSet, get: ZustandGet): AppState => {
       set((state) => ({
         sectionCollapsed: { ...state.sectionCollapsed, [label]: collapsed },
       })),
-    cycleHorizontalGrid: (direction) => {
-      // Onsets sits below the smallest beat value as the grid's bottom stop.
-      const values = [ONSETS_GRID_VALUE, ...BEAT_VALUES.map((v) => v.value)];
-      const { gridSizeBeats } = get();
-      const currentIndex = values.findIndex((v) => Math.abs(v - gridSizeBeats) < 0.0001);
-      let nextIndex = currentIndex + direction;
-      if (nextIndex < 0) nextIndex = values.length - 1;
-      if (nextIndex >= values.length) nextIndex = 0;
-      set({ gridSizeBeats: values[nextIndex] });
-    },
-    cycleVerticalGrid: (direction) => {
-      const { gridSizeSemis } = get();
-      const currentIndex = PITCH_VALUES.findIndex((v) => Math.abs(v.value - gridSizeSemis) < 0.0001);
-      let nextIndex = currentIndex + direction;
-      if (nextIndex < 0) nextIndex = PITCH_VALUES.length - 1;
-      if (nextIndex >= PITCH_VALUES.length) nextIndex = 0;
-      set({ gridSizeSemis: PITCH_VALUES[nextIndex].value });
-    },
     isZooming: false,
     setIsZooming: (isZooming) => set({ isZooming }),
   };

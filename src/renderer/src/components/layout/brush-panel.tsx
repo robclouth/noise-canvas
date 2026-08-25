@@ -1,9 +1,13 @@
 import { Box, SimpleGrid, Stack } from "@mantine/core";
-import { NUM_MACROS, NUM_MODULATORS } from "@renderer/lib/constants";
+import {
+  ALL_EFFECT_PARAMS,
+  ENVELOPE_PARAMS,
+  MACRO_PARAMS,
+  MODULATOR_PARAMS,
+  OPTIONS_PARAMS,
+} from "@renderer/lib/brush-sections";
 import { PANEL_COLUMN_SPACING, SECTION_GAP } from "@renderer/lib/ui-density";
-import { getAllEffectParameterKeys } from "@renderer/parameters";
 import { selectParameter, useStore } from "@renderer/store";
-import { ParameterKey } from "@renderer/store/types";
 import { EnvelopeControl } from "../controls/envelope-control";
 import { MacroControls } from "../controls/macro-controls";
 import { ParameterControl } from "../controls/parameter-control";
@@ -11,51 +15,6 @@ import { StepScope, Steps } from "../controls/steps";
 import { EffectsList } from "../effects-list";
 import { ModulatorView } from "../modulator-view";
 import { Section } from "../section";
-
-// Envelope parameters: size/curve/skew per axis plus intensity
-const ENVELOPE_PARAMS: ParameterKey[] = [
-  "brushIntensity",
-  "brushAnchorMode",
-  "brushSizeTime",
-  "brushCurveTime",
-  "brushSkewTime",
-  "brushSizePitch",
-  "brushCurvePitch",
-  "brushSkewPitch",
-];
-
-// Options parameters (split from envelope)
-const OPTIONS_PARAMS: ParameterKey[] = [
-  "blendMode",
-  "brushPan",
-  "brushIterations",
-  "brushWrapMode",
-  "algorithm",
-  "sourceDataMode",
-  "accumulate",
-];
-
-const MODULATOR_PARAMS = Array.from({ length: NUM_MODULATORS }).flatMap((_, i) => {
-  const idx = i + 1;
-  return [
-    `modulator${idx}Mode`,
-    `modulator${idx}PatternShape`,
-    `modulator${idx}PatternRateBeats`,
-    `modulator${idx}PatternRateSemis`,
-    `modulator${idx}Rotation`,
-    `modulator${idx}PhaseMode`,
-    `modulator${idx}Strength`,
-    `modulator${idx}EnvelopeMinDb`,
-    `modulator${idx}EnvelopeMaxDb`,
-  ] as ParameterKey[];
-});
-
-const MACRO_PARAMS = Array.from({ length: NUM_MACROS }, (_, i) => `macro${i + 1}Value` as ParameterKey);
-
-// Every effect's parameters, for the Effects section header's reset, randomise
-// and preset actions. Derived rather than listed, so a new effect is covered
-// the moment its parameters declare an effectType.
-const ALL_EFFECT_PARAMS: ParameterKey[] = getAllEffectParameterKeys();
 
 export function BrushPanel() {
   const sourcePositionMode = useStore(selectParameter("sourcePositionMode"));

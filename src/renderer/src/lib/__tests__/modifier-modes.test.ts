@@ -28,6 +28,10 @@ vi.mock("../app-menu", () => ({
   matchesAccelerator: () => false,
   runCommand: vi.fn(),
 }));
+vi.mock("../shortcut-actions", () => ({
+  cycleParameterMark: vi.fn(),
+  randomizeBrush: vi.fn(),
+}));
 
 import { useTransientStore } from "../../store/transient";
 import { useShortcuts } from "../useShortcuts";

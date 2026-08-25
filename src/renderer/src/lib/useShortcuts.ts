@@ -4,6 +4,8 @@ import { selectNumberKeyBrushIndices } from "../store/palettes";
 import { useTransientStore } from "../store/transient";
 import { acceleratorCommands, matchesAccelerator, runCommand } from "./app-menu";
 import { host } from "./host";
+import { digitFor, isUnmodifiedPress, letterFor, matchesChar, matchesCode, type KeyMatch } from "./keyboard";
+import { cycleParameterMark, randomizeBrush } from "./shortcut-actions";
 
 const isTextEntry = (t: HTMLElement | null): boolean => {
   if (!t) return false;
@@ -29,38 +31,85 @@ export enum ShortcutAction {
   DecreaseHorizontalGrid = "DecreaseHorizontalGrid",
   IncreaseVerticalGrid = "IncreaseVerticalGrid",
   DecreaseVerticalGrid = "DecreaseVerticalGrid",
+  IncreaseBrushSizeTime = "IncreaseBrushSizeTime",
+  DecreaseBrushSizeTime = "DecreaseBrushSizeTime",
+  IncreaseBrushSizePitch = "IncreaseBrushSizePitch",
+  DecreaseBrushSizePitch = "DecreaseBrushSizePitch",
+  ToggleSnapTime = "ToggleSnapTime",
+  ToggleSnapPitch = "ToggleSnapPitch",
+  RandomizeBrush = "RandomizeBrush",
+  RandomizeBrushAndEffects = "RandomizeBrushAndEffects",
+  ToggleLoop = "ToggleLoop",
+  ToggleAutoPlayStroke = "ToggleAutoPlayStroke",
   NextFile = "NextFile",
   PreviousFile = "PreviousFile",
   TogglePlayback = "TogglePlayback",
-  SetSourceMode = "SetSourceMode",
 }
 
-interface ShortcutDefinition {
-  key: string;
-  shift?: boolean;
+interface ShortcutDefinition extends KeyMatch {
   action: ShortcutAction;
 }
 
 export const SHORTCUTS: ShortcutDefinition[] = [
-  { key: "ArrowUp", action: ShortcutAction.MoveBrushUp },
-  { key: "ArrowDown", action: ShortcutAction.MoveBrushDown },
-  { key: "ArrowLeft", action: ShortcutAction.MoveBrushLeft },
-  { key: "ArrowRight", action: ShortcutAction.MoveBrushRight },
-  { key: "Enter", action: ShortcutAction.ApplyBrush },
-  { key: "NumpadEnter", action: ShortcutAction.ApplyBrush },
-  { key: "=", action: ShortcutAction.IncreaseHorizontalGrid },
-  { key: "+", action: ShortcutAction.IncreaseHorizontalGrid },
-  { key: "-", action: ShortcutAction.DecreaseHorizontalGrid },
-  { key: "=", shift: true, action: ShortcutAction.IncreaseVerticalGrid },
-  { key: "+", shift: true, action: ShortcutAction.IncreaseVerticalGrid },
-  { key: "-", shift: true, action: ShortcutAction.DecreaseVerticalGrid },
-  { key: "Tab", action: ShortcutAction.NextFile },
-  { key: "Tab", shift: true, action: ShortcutAction.PreviousFile },
-  { key: " ", action: ShortcutAction.TogglePlayback },
-  { key: "Shift", action: ShortcutAction.SetSourceMode },
+  { code: "ArrowUp", action: ShortcutAction.MoveBrushUp },
+  { code: "ArrowDown", action: ShortcutAction.MoveBrushDown },
+  { code: "ArrowLeft", action: ShortcutAction.MoveBrushLeft },
+  { code: "ArrowRight", action: ShortcutAction.MoveBrushRight },
+  { code: "Enter", action: ShortcutAction.ApplyBrush },
+  { code: "NumpadEnter", action: ShortcutAction.ApplyBrush },
+  { code: "Minus", chars: ["-"], action: ShortcutAction.DecreaseHorizontalGrid },
+  { code: "NumpadSubtract", action: ShortcutAction.DecreaseHorizontalGrid },
+  { code: "Equal", chars: ["="], action: ShortcutAction.IncreaseHorizontalGrid },
+  { code: "NumpadAdd", action: ShortcutAction.IncreaseHorizontalGrid },
+  { code: "Minus", shift: true, chars: ["_"], action: ShortcutAction.DecreaseVerticalGrid },
+  { code: "Equal", shift: true, chars: ["+"], action: ShortcutAction.IncreaseVerticalGrid },
+  { code: "BracketLeft", chars: ["["], action: ShortcutAction.DecreaseBrushSizeTime },
+  { code: "BracketRight", chars: ["]"], action: ShortcutAction.IncreaseBrushSizeTime },
+  { code: "BracketLeft", shift: true, chars: ["{"], action: ShortcutAction.DecreaseBrushSizePitch },
+  { code: "BracketRight", shift: true, chars: ["}"], action: ShortcutAction.IncreaseBrushSizePitch },
+  { code: "Semicolon", chars: [";"], action: ShortcutAction.ToggleSnapTime },
+  { code: "Quote", chars: ["'"], action: ShortcutAction.ToggleSnapPitch },
+  { code: "Backslash", chars: ["\\"], action: ShortcutAction.RandomizeBrush },
+  { code: "Backslash", shift: true, chars: ["|"], action: ShortcutAction.RandomizeBrushAndEffects },
+  { code: "Comma", chars: [","], action: ShortcutAction.ToggleLoop },
+  { code: "Period", chars: ["."], action: ShortcutAction.ToggleAutoPlayStroke },
+  { code: "Tab", action: ShortcutAction.NextFile },
+  { code: "Tab", shift: true, action: ShortcutAction.PreviousFile },
+  { code: "Space", chars: [" "], action: ShortcutAction.TogglePlayback },
 ];
 
-export const RESERVED_KEYS = new Set(SHORTCUTS.map((s) => s.key));
+/** Characters a shortcut owns, so a brush cannot be bound to one of them. */
+export const RESERVED_KEYS = new Set(SHORTCUTS.flatMap((shortcut) => shortcut.chars ?? []));
+
+/**
+ * The shortcut a press runs. The character a layout prints wins over the key's
+ * place on the board, so a layout that moved a character keeps the shortcut on
+ * it and the key left behind still carries the one that lives at that place.
+ */
+export function resolveShortcut(event: KeyboardEvent): ShortcutDefinition | undefined {
+  return (
+    SHORTCUTS.find((shortcut) => matchesChar(event, shortcut)) ??
+    SHORTCUTS.find((shortcut) => matchesCode(event, shortcut))
+  );
+}
+
+/** The brush a press selects, by its bound letter or by its place in the top palette. */
+function resolveBrushIndex(event: KeyboardEvent): number | undefined {
+  if (!isUnmodifiedPress(event)) return undefined;
+  const state = useStore.getState();
+
+  if (!event.shiftKey) {
+    const letter = letterFor(event);
+    if (letter) {
+      const index = state.brushes.findIndex((brush) => brush.hotkey === letter);
+      return index >= 0 ? index : undefined;
+    }
+  }
+
+  const digit = digitFor(event);
+  if (digit === null) return undefined;
+  return selectNumberKeyBrushIndices(state)[digit === 0 ? 9 : digit - 1];
+}
 
 export function useShortcuts() {
   const handleKeyDown = (event: KeyboardEvent) => {
@@ -101,10 +150,7 @@ export function useShortcuts() {
       // However, standard Zoom logic (wheel) relies on this state.
     }
 
-    // Match shortcuts
-    const shortcut = SHORTCUTS.find(
-      (s) => s.key === event.key && !!s.shift === event.shiftKey && s.action !== ShortcutAction.SetSourceMode, // Handled separately
-    );
+    const shortcut = resolveShortcut(event);
 
     if (shortcut) {
       event.preventDefault();
@@ -129,16 +175,46 @@ export function useShortcuts() {
           state.applyBrushAtPosition();
           break;
         case ShortcutAction.IncreaseHorizontalGrid:
-          state.cycleHorizontalGrid(1);
+          cycleParameterMark("gridSizeBeats", 1);
           break;
         case ShortcutAction.DecreaseHorizontalGrid:
-          state.cycleHorizontalGrid(-1);
+          cycleParameterMark("gridSizeBeats", -1);
           break;
         case ShortcutAction.IncreaseVerticalGrid:
-          state.cycleVerticalGrid(1);
+          cycleParameterMark("gridSizeSemis", 1);
           break;
         case ShortcutAction.DecreaseVerticalGrid:
-          state.cycleVerticalGrid(-1);
+          cycleParameterMark("gridSizeSemis", -1);
+          break;
+        case ShortcutAction.IncreaseBrushSizeTime:
+          cycleParameterMark("brushSizeTime", 1);
+          break;
+        case ShortcutAction.DecreaseBrushSizeTime:
+          cycleParameterMark("brushSizeTime", -1);
+          break;
+        case ShortcutAction.IncreaseBrushSizePitch:
+          cycleParameterMark("brushSizePitch", 1);
+          break;
+        case ShortcutAction.DecreaseBrushSizePitch:
+          cycleParameterMark("brushSizePitch", -1);
+          break;
+        case ShortcutAction.ToggleSnapTime:
+          state.setParameter("snapTime", !state.snapTime);
+          break;
+        case ShortcutAction.ToggleSnapPitch:
+          state.setParameter("snapPitch", !state.snapPitch);
+          break;
+        case ShortcutAction.RandomizeBrush:
+          randomizeBrush(false);
+          break;
+        case ShortcutAction.RandomizeBrushAndEffects:
+          randomizeBrush(true);
+          break;
+        case ShortcutAction.ToggleLoop:
+          state.setLoop(!state.loop);
+          break;
+        case ShortcutAction.ToggleAutoPlayStroke:
+          state.setAutoPlayStroke(!state.autoPlayStroke);
           break;
         case ShortcutAction.NextFile:
           state.switchToNextFile();
@@ -150,34 +226,13 @@ export function useShortcuts() {
           state.togglePlayback();
           break;
       }
-    } else if (/^[a-z]$/.test(event.key) && !event.ctrlKey && !event.altKey && !event.metaKey) {
-      // Brush hotkey — jump to the brush whose `hotkey` matches the pressed letter.
-      const state = useStore.getState();
-      const targetIndex = state.brushes.findIndex((b) => b.hotkey === event.key);
-      if (targetIndex >= 0) {
-        event.preventDefault();
-        state.setActiveBrush(targetIndex);
-      }
-    } else {
-      // Digit keys jump to the top palette's first ten brushes (1..9 → 0..8, 0 → 9).
-      const code = event.code;
-      let slot = -1;
+      return;
+    }
 
-      if (code.startsWith("Digit")) {
-        const digit = parseInt(code.replace("Digit", ""), 10);
-        if (!isNaN(digit)) {
-          slot = digit === 0 ? 9 : digit - 1;
-        }
-      }
-
-      if (slot >= 0 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
-        const state = useStore.getState();
-        const brushIndex = selectNumberKeyBrushIndices(state)[slot];
-        if (brushIndex !== undefined) {
-          event.preventDefault();
-          state.setActiveBrush(brushIndex);
-        }
-      }
+    const brushIndex = resolveBrushIndex(event);
+    if (brushIndex !== undefined) {
+      event.preventDefault();
+      useStore.getState().setActiveBrush(brushIndex);
     }
   };
 

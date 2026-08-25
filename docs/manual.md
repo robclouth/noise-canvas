@@ -727,6 +727,8 @@ Every section header has a **⋮ menu** with a Randomise block:
 
 The Effects section also shuffles effect order and enabled states.
 
+`\` re-rolls Envelope, Options and Effects in one press, each at the amount its own menu holds. `Shift+\` shuffles the effect chain with them. Modulators and Macros are left alone, so a patch keeps its wiring.
+
 **Hints**
 
 - Exclude a parameter from randomisation from its label menu, so you can lock the parts you like and re-roll the rest.
@@ -943,6 +945,8 @@ Re-analysing a file is not in these menus. The resolution badge in each file's h
 
 File and Edit shortcuts (`Cmd/Ctrl+N`, `+O`, `+S`, `+W`, `+D`, …) are listed under [Menus](#menus).
 
+The keys below are the ones your keyboard prints. On a layout that prints something else, the shortcut stays on the key in the same place on the board.
+
 | Key                   | Action                                                 |
 | --------------------- | ------------------------------------------------------ |
 | `Space`               | Play / stop                                            |
@@ -950,6 +954,12 @@ File and Edit shortcuts (`Cmd/Ctrl+N`, `+O`, `+S`, `+W`, `+D`, …) are listed u
 | `Enter`               | Apply the brush at the current position                |
 | `-` / `=`             | Decrease / increase the time grid                      |
 | `Shift` + `-` / `=`   | Decrease / increase the pitch grid                     |
+| `[` / `]`             | Shrink / grow the brush, in time                       |
+| `Shift` + `[` / `]`   | Shrink / grow the brush, in pitch                      |
+| `;` / `'`             | Snap to the time grid / to the pitch grid              |
+| `\`                   | Randomise the brush                                    |
+| `Shift+\`             | Randomise the brush and shuffle the effect chain       |
+| `,` / `.`             | Loop / auto-play stroke                                |
 | `Tab` / `Shift+Tab`   | Next / previous file                                   |
 | `1`–`9`, `0`          | Select the top palette's first ten brushes             |
 | `a`–`z`               | Select the brush bound to that key                     |
