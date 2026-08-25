@@ -1,19 +1,18 @@
 // Mask Update Shader
-// Stores effective weight (envelope * intensity) for single-stroke mode
-// Uses manual max calculation instead of relying on GPU blend mode
+// Stores effective weight (envelope * intensity) for single-stroke mode.
+// The target blends with MAX, so each dab writes only its own weight and the
+// strongest one across the stroke survives.
 
 #include "effect-common.glsl"
-
-uniform sampler2D currentMaskTex;
 
 void main() {
   vec2 packedUv = vUv;
   vec2 unpackedUv = packedToUnpackedUv(destInverseMapTex, packedUv, destFrameCount, destBandCount);
 
-  // Outside the brush footprint the new weight is zero, so max() leaves the
-  // stored mask untouched — bail before the expensive weight evaluation.
+  // Outside the brush footprint the weight is zero, which MAX discards — bail
+  // before the expensive weight evaluation.
   if (brushWeightIsZero(unpackedUv)) {
-    outColor = vec4(texture(currentMaskTex, packedUv).r, 0.0, 0.0, 1.0);
+    outColor = vec4(0.0, 0.0, 0.0, 1.0);
     return;
   }
 
@@ -26,10 +25,6 @@ void main() {
   // opens wherever either channel has contributed.
   vec2 combinedWeight = envelopeWeight * intensity;
   float newWeight = max(combinedWeight.x, combinedWeight.y);
-  
-  // Read current mask value and take maximum
-  float currentWeight = texture(currentMaskTex, packedUv).r;
-  float maxWeight = max(currentWeight, newWeight);
-  
-  outColor = vec4(maxWeight, 0.0, 0.0, 1.0);
+
+  outColor = vec4(newWeight, 0.0, 0.0, 1.0);
 }

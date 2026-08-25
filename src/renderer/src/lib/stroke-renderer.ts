@@ -3,13 +3,16 @@ import {
   BufferAttribute,
   Camera,
   Color,
+  CustomBlending,
   DataTexture,
   FloatType,
   GLSL3,
   InstancedBufferAttribute,
   InstancedBufferGeometry,
+  MaxEquation,
   Mesh,
   NearestFilter,
+  OneFactor,
   OrthographicCamera,
   PlaneGeometry,
   RawShaderMaterial,
@@ -256,7 +259,6 @@ export class StrokeRenderer {
   // Allocated only while a preview is up.
   private rollbackFbo: WebGLRenderTarget | null = null;
   private pingPong = 0;
-  private maskPingPong = 0;
   private isInitialized = false;
   // The footprint of the stroke being rendered. Its ranges and bin ranges are
   // reused across dabs.
@@ -266,8 +268,7 @@ export class StrokeRenderer {
   private previewRangeTex: DataTexture;
   private previewActive = false;
   // Union of the packed rows [rowStart, rowEnd) every dab since the masks were
-  // last cleared has written. Outside it both mask buffers are still zero, so a
-  // mask update drawn over it alone loses nothing across the ping-pong.
+  // last cleared has written; the mask update is drawn over it.
   private maskRows: { rowStart: number; rowEnd: number } | null = null;
   // Set when the scratch targets were (re)allocated and no stroke has yet
   // confirmed the driver accepted them.
@@ -365,7 +366,6 @@ export class StrokeRenderer {
     this.maskMaterial = new RawShaderMaterial({
       uniforms: {
         ...createDefaultUniforms(),
-        currentMaskTex: { value: null },
         destMetadataTex: { value: null },
         destInverseMapTex: { value: null },
         destSpectrogramTextureSize: { value: new Vector2(1, 1) },
@@ -377,6 +377,12 @@ export class StrokeRenderer {
       vertexShader: rangeQuadVert,
       fragmentShader: maskUpdateFrag,
       glslVersion: GLSL3,
+      // The blend keeps the strongest weight the step reached at each pixel, so
+      // a dab writes only its own and never has to read the mask back.
+      blending: CustomBlending,
+      blendEquation: MaxEquation,
+      blendSrc: OneFactor,
+      blendDst: OneFactor,
     });
 
     // The mask material mutates these ParameterUniform objects in place on the hot
@@ -533,7 +539,6 @@ export class StrokeRenderer {
     this.scratch = scratch;
     if (refreshed) {
       this.clearMasks(scratch);
-      this.maskPingPong = 0;
       const currentReadFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
       this.snapshotToStrokeStart(scratch, currentReadFBO.texture);
       this.scratchUnverified = true;
@@ -563,8 +568,8 @@ export class StrokeRenderer {
 
   private clearMasks(scratch: StrokeScratch): void {
     const targets: WebGLRenderTarget[] = [];
-    for (const pair of scratch.strokeMaskFbos) {
-      if (pair) targets.push(pair[0], pair[1]);
+    for (const mask of scratch.strokeMaskFbos) {
+      if (mask) targets.push(mask);
     }
     this.clearMaskTargets(targets);
     this.maskRows = null;
@@ -1230,13 +1235,13 @@ export class StrokeRenderer {
 
         // Pass the mask if enabled (non-cumulative mode). The step reads its own
         // mask, so a step with a different envelope cannot raise its weight. No
-        // pair exists until this step first commits, and the zero placeholder is
-        // what a cleared mask holds.
+        // target exists until this step first commits, and the zero placeholder
+        // is what a cleared mask holds.
         if (!stepState.accumulate) {
-          const maskPair = scratch.strokeMaskFbos[stepIndex];
+          const maskFbo = scratch.strokeMaskFbos[stepIndex];
           (uniformsForThisIteration as any).useStrokeMask = { value: true };
           (uniformsForThisIteration as any).strokeMaskTex = {
-            value: maskPair ? maskPair[this.maskPingPong].texture : this.textures.placeholderTexture,
+            value: maskFbo ? maskFbo.texture : this.textures.placeholderTexture,
           };
         } else {
           (uniformsForThisIteration as any).useStrokeMask = { value: false };
@@ -1491,19 +1496,15 @@ export class StrokeRenderer {
         uniforms.modulatorTex0.value = this.textures.placeholderTexture;
         uniforms.modulatorTex1.value = this.textures.placeholderTexture;
       }
-      const { fbos, created } = this.pool.maskFbos(stepIndex);
-      if (created) this.clearMaskTargets([fbos[0], fbos[1]]);
-      uniforms.currentMaskTex.value = fbos[this.maskPingPong].texture;
+      const { fbo, created } = this.pool.maskFbo(stepIndex);
+      if (created) this.clearMaskTargets([fbo]);
 
-      this.drawRanges(this.maskMaterial, fbos[1 - this.maskPingPong], maskRanges);
+      this.drawRanges(this.maskMaterial, fbo, maskRanges);
 
       renderedAny = true;
     }
 
-    // Every step wrote the same side of its own pair, so one flip switches them
-    // all over together.
     if (renderedAny) {
-      this.maskPingPong = 1 - this.maskPingPong;
       this.gl.setRenderTarget(null);
     }
   }
@@ -1994,9 +1995,7 @@ export class StrokeRenderer {
     const currentReadFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
     this.snapshotToStrokeStart(this.scratch, currentReadFBO.texture);
 
-    // Clear both Mask FBOs and reset ping-pong
     this.clearMasks(this.scratch);
-    this.maskPingPong = 0;
   }
 
   /**
