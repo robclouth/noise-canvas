@@ -24,6 +24,7 @@ vi.mock("../modals", () => ({
 
 vi.mock("../history-manager", () => ({
   getHistoryManager: vi.fn(),
+  dimensionsFromSpectrogram: vi.fn(),
   destroyHistoryManager: vi.fn(),
   clearAllHistoryManagers: vi.fn(),
 }));

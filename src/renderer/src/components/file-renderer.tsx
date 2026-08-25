@@ -144,8 +144,6 @@ export interface FileRendererHandle {
     metadata: DataTexture;
     original: DataTexture;
   } | null;
-  /** Restores the spectrogram to its original state. */
-  restoreOriginal: () => void;
   /** Clears the stroke preview. */
   clearPreview: () => void;
   /** Reloads all textures from the current spectrogramData (used after re-analysis). */
@@ -1290,19 +1288,6 @@ const FileRendererInner = memo(
     };
 
     /**
-     * Restores the spectrogram to its original, unmodified state.
-     */
-    const restoreOriginal = () => {
-      if (strokeRendererRef.current) {
-        strokeRendererRef.current.restoreOriginal();
-      }
-      invalidateRef.current();
-      snapshotStaleRef.current = true;
-      scheduleSnapshotRefresh();
-      useStore.getState().synthesizeFile(fileId);
-    };
-
-    /**
      * Reloads all textures from the current spectrogramData.
      * Used when the file is re-analyzed with different parameters.
      */
@@ -1393,7 +1378,6 @@ const FileRendererInner = memo(
       patchFBOData,
       residentRanges,
       getTextures,
-      restoreOriginal,
       clearPreview,
       reloadTextures,
       beginStroke,

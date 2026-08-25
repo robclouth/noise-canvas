@@ -29,7 +29,7 @@ import { applyAudioEdits, buildAudioHop, type AudioEdit, type AudioHop, type Aud
 import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import { reorderFileIds } from "../lib/file-reorder";
 import type { HostRender } from "../lib/host/types";
-import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
+import { destroyHistoryManager, dimensionsFromSpectrogram, getHistoryManager } from "../lib/history-manager";
 import { serializeFileTask } from "../lib/file-task-queue";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import { disposeOnsetTexture, packOnsetState, spliceOnsets, unpackOnsetState } from "../lib/onset-map";
@@ -73,6 +73,7 @@ export interface FilesState {
   openFileIds: string[];
   openFilePath: (filePath: string) => Promise<void>;
   duplicateFile: (fileId: string) => Promise<void>;
+  restoreOriginalFile: (fileId: string) => Promise<void>;
   hpssFile: (fileId: string) => Promise<void>;
   aiSeparateFile: (fileId: string) => Promise<void>;
   nmfFile: (fileId: string, numComponents: number) => Promise<void>;
@@ -785,11 +786,20 @@ async function rebuildFileFromAudioNow(
   );
 }
 
-// The current painted state of a file, falling back to its analysed
-// coefficients when no renderer is mounted to read an FBO from.
+// The current painted state of a file: the history's packed state, which
+// commits and navigation keep exactly at the canvas. Copied, because later
+// tasks mutate that array in place. Falls back to the analysed coefficients
+// before history is seeded. Callers already inside the file's task queue use
+// this directly; the rest go through readCurrentPackedData.
+function currentPackedSnapshot(file: OpenFile): Float32Array | undefined {
+  const packed = getHistoryManager(file.id).currentPackedState() ?? file.spectrogramData?.packedData;
+  return packed ? new Float32Array(packed) : undefined;
+}
+
+// The current painted state of a file, taken behind any commit or navigation
+// still in the file's task queue.
 async function readCurrentPackedData(file: OpenFile): Promise<Float32Array | undefined> {
-  const fboData = await file.rendererRef?.current?.getFBOData();
-  return fboData ?? file.spectrogramData?.packedData;
+  return serializeFileTask(file.id, async () => currentPackedSnapshot(file));
 }
 
 type FileAudioSnapshot = { nodeId: string | null; channels: Float32Array[]; sampleRate: number };
@@ -1143,13 +1153,43 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       });
     }
   },
+  /**
+   * Puts the file's analysed coefficients back on the canvas as a history
+   * node, so the restore is undoable and the history's packed state stays
+   * exactly what the canvas holds.
+   */
+  restoreOriginalFile: async (fileId: string) => {
+    await serializeFileTask(fileId, async () => {
+      const file = openFiles[fileId];
+      const spectrogramData = file?.spectrogramData;
+      if (!file || !spectrogramData) return;
+      const historyManager = getHistoryManager(fileId);
+      await historyManager.awaitPackedReaders();
+      if (!openFiles[fileId]) return;
+
+      const data = new Float32Array(spectrogramData.packedData);
+      const node = await historyManager.addStroke({
+        data,
+        label: "Restore original",
+        dimensions: dimensionsFromSpectrogram(spectrogramData),
+      });
+      file.unprojectedPaint = false;
+      file.rendererRef?.current?.setFBOData(data);
+
+      await get().synthesizeFile(fileId, undefined, data);
+      const updated = openFiles[fileId];
+      if (node.isNew && updated?.audioBuffer) {
+        historyManager.setStateAudio(node.id, updated.audioBuffer, updated.audioPeak ?? 1);
+      }
+    });
+  },
   duplicateFile: async (fileId: string) => {
     const originalFile = openFiles[fileId];
     if (!originalFile?.spectrogramData) return;
 
-    const fboData = await originalFile.rendererRef?.current?.getFBOData();
+    const fboData = await readCurrentPackedData(originalFile);
     if (!fboData) {
-      console.error("Failed to duplicate file: could not get FBO data");
+      console.error("Failed to duplicate file: could not read the painted state");
       return;
     }
 
@@ -1202,7 +1242,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const originalFile = openFiles[fileId];
     if (!originalFile) return;
 
-    const fboData = await originalFile.rendererRef?.current?.getFBOData();
+    const fboData = await readCurrentPackedData(originalFile);
     if (!fboData) return;
 
     const { spectrogramData } = originalFile;
@@ -1240,7 +1280,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const originalFile = openFiles[fileId];
     if (!originalFile) return;
 
-    const fboData = await originalFile.rendererRef?.current?.getFBOData();
+    const fboData = await readCurrentPackedData(originalFile);
     if (!fboData) return;
 
     const { spectrogramData } = originalFile;
@@ -1465,7 +1505,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     let audioContext: AudioContext | null = null;
     try {
       // Step 1: Synthesize the current painted state via Gaborator → get audio channels
-      const fboData = await originalFile.rendererRef?.current?.getFBOData();
+      const fboData = await readCurrentPackedData(originalFile);
       if (!fboData) throw new Error("Could not read current spectrogram state");
 
       const synthesisResult = await host.analysis.synthesize(
@@ -1933,15 +1973,17 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const originalAnalysis = file.spectrogramData;
       const renderer = file.rendererRef.current;
 
-      // Use prefetched FBO data if provided, otherwise fetch it
+      // Use prefetched packed data if provided, otherwise read the history's
+      // current state. Handed by reference: awaitPackedReaders keeps commits
+      // and navigation from mutating it while this synthesis reads it.
       let fboData: Float32Array;
       if (prefetchedFboData) {
-        console.log("[timing] using prefetched FBO data");
         fboData = prefetchedFboData;
       } else {
-        const fboStart = performance.now();
-        fboData = await renderer.getFBOData();
-        diag.timing("timing", "getFBOData for synthesis", performance.now() - fboStart);
+        // Synthesis reads the array through its raw buffer, so a view into a
+        // larger buffer must be compacted first.
+        const packed = getHistoryManager(fileId).currentPackedState() ?? originalAnalysis.packedData;
+        fboData = packed.byteOffset === 0 && packed.byteLength === packed.buffer.byteLength ? packed : packed.slice();
       }
 
       const payload = {
@@ -2625,7 +2667,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       await rebuildFileFromAudio(
         set,
         fileId,
-        () => readCurrentPackedData(file),
+        async () => currentPackedSnapshot(file),
         (channels) =>
           channels.map((src) => {
             const newLength = factor === 2 ? src.length * 2 : Math.floor(src.length / 2);
@@ -2679,10 +2721,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (padSamples <= 0) return;
     const playStartSample = (get().filesPlaybackStartTime[fileId] ?? 0) * sampleRate;
 
-    // Read the painted state first: the loading message below takes the
-    // renderer, and with it the FBO, off the screen.
-    const packedData = await readCurrentPackedData(current);
-
     set(
       produce((state: State) => {
         state.filesLoading[fileId] = "Inserting silence...";
@@ -2693,7 +2731,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       await rebuildFileFromAudio(
         set,
         fileId,
-        async () => packedData,
+        async () => currentPackedSnapshot(current),
         (channels) => insertSilence(channels, values.position, padSamples, playStartSample),
         { kind: "resize", label: "Insert silence" },
       );
@@ -2717,10 +2755,6 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (!file?.spectrogramData || file.spectrogramData.numChannels === channelCount) return;
     if (get().filesLoading[fileId]) return;
 
-    // Read the painted state first: the loading message below takes the
-    // renderer, and with it the FBO, off the screen.
-    const packedData = await readCurrentPackedData(file);
-
     set(
       produce((state: State) => {
         state.filesLoading[fileId] = channelCount === 1 ? "Mixing down to mono..." : "Spreading to stereo...";
@@ -2731,7 +2765,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       await rebuildFileFromAudio(
         set,
         fileId,
-        async () => packedData,
+        async () => currentPackedSnapshot(file),
         (channels) => toChannelCount(channels, channelCount),
         { kind: "reanalyze", label: channelCount === 1 ? "To mono" : "To stereo" },
       );

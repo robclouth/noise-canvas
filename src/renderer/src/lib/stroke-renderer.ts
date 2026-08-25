@@ -2124,15 +2124,6 @@ export class StrokeRenderer {
   }
 
   /**
-   * Restore to original state.
-   */
-  restoreOriginal(): void {
-    this.isInitialized = false;
-    this.invalidateFboData();
-    this.dirtyRegion = null;
-  }
-
-  /**
    * Check if the renderer is initialized.
    */
   getIsInitialized(): boolean {

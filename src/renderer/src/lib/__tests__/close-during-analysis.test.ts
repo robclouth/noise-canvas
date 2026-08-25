@@ -16,6 +16,7 @@ vi.mock("../modals", () => ({
 vi.mock("../history-manager", () => ({
   destroyHistoryManager: vi.fn(async () => {}),
   getHistoryManager: vi.fn(),
+  dimensionsFromSpectrogram: vi.fn(),
 }));
 vi.mock("../onset-map", () => ({
   disposeOnsetTexture: vi.fn(),
