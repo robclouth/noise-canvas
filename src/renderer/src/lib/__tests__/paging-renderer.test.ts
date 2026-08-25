@@ -1,8 +1,17 @@
-import { WebGLRenderer } from "three";
+import { Vector2, WebGLRenderer } from "three";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { State } from "../../store/types";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
-import { createHarnessTextures, disposeHarnessTextures, toStrokeTextures } from "../../test/render-harness";
-import { StrokeRenderer } from "../stroke-renderer";
+import { createMockStateWithSteps } from "../../test/mock-state";
+import {
+  createHarnessTextures,
+  createSourceFile,
+  disposeHarnessTextures,
+  makeStrokeParams,
+  toStrokeTextures,
+} from "../../test/render-harness";
+import { StrokeRenderer, type EffectsRegistry } from "../stroke-renderer";
+import { BRUSH_SIZE_PITCH_FULL } from "../utils";
 import { buildWindowLayout, fileLayoutOf, windowFileRanges, type WindowLayout } from "../window-layout";
 
 /**
@@ -37,17 +46,19 @@ describe("paged renderer boundary", () => {
   const half = buildWindowLayout(layout, Math.floor(layout.numFrames / 4), Math.floor((layout.numFrames * 3) / 4));
 
   let gl: WebGLRenderer;
+  let effects: EffectsRegistry;
   const built: { renderer: StrokeRenderer; textures: ReturnType<typeof createHarnessTextures> }[] = [];
 
   function makeRenderer(window: WindowLayout): StrokeRenderer {
     const textures = createHarnessTextures(data, window);
-    const renderer = new StrokeRenderer(gl, data, toStrokeTextures(textures), "paging-test", {}, window);
+    const renderer = new StrokeRenderer(gl, data, toStrokeTextures(textures), "paging-test", effects, window);
     renderer.initialize();
     built.push({ renderer, textures });
     return renderer;
   }
 
-  beforeAll(() => {
+  beforeAll(async () => {
+    effects = (await import("../../effects")).effects as EffectsRegistry;
     gl = new WebGLRenderer({ antialias: false });
   });
 
@@ -143,6 +154,48 @@ describe("paged renderer boundary", () => {
     expect(Array.from(windowed)).toEqual(Array.from(baseline));
     // And the upload landed, so the comparison is not of two untouched canvases.
     expect(windowed[0]).toBe(data.packedData[ranges[0] * 4] + 0.5);
+  });
+
+  it("paints a committed stroke identically under a window", async () => {
+    const whole = makeRenderer(wholeFile);
+    const paged = makeRenderer(half);
+    const ranges = interiorRanges();
+
+    const state = createMockStateWithSteps([
+      {
+        name: "Gain",
+        overrides: {
+          brushIntensity: 100,
+          brushSizeTime: 1,
+          brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+          effects: [{ id: "paging-dyn", effect: "dynamics" as const, enabled: true, params: { dynamicsGainDb: -18 } }],
+        },
+      },
+    ]) as State;
+
+    // Two overlapping dabs well inside the window, so the stroke mask's
+    // running max is on the path under test too.
+    for (const renderer of [whole, paged]) {
+      const source = createSourceFile(renderer, data);
+      renderer.beginStroke();
+      renderer.renderStroke(makeStrokeParams(new Vector2(0.4, 0.0), data), state, source);
+      renderer.renderStroke(makeStrokeParams(new Vector2(0.45, 0.0), data), state, source);
+    }
+
+    const baseline = await whole.readPixelRanges(ranges);
+    const windowed = await paged.readPixelRanges(ranges);
+    expect(Array.from(windowed)).toEqual(Array.from(baseline));
+
+    // And the stroke changed something, so equality is not of two no-ops.
+    let changed = 0;
+    let cursor = 0;
+    for (let i = 0; i < ranges.length; i += 2) {
+      for (let p = 0; p < ranges[i + 1]; p++) {
+        if (baseline[(cursor + p) * 4] !== data.packedData[(ranges[i] + p) * 4]) changed++;
+      }
+      cursor += ranges[i + 1];
+    }
+    expect(changed).toBeGreaterThan(100);
   });
 
   it("drops the pixels it does not hold instead of substituting the window's edge", async () => {
