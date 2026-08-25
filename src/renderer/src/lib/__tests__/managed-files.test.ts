@@ -44,7 +44,13 @@ vi.mock("@renderer/store", () => ({
 }));
 
 import { isManagedFilePath, makeManagedFilePath } from "../../store/utils";
-import { migrateBrushRefs, migrateRefsInPresetFiles, migrateRefsInSteps } from "../../store/files";
+import {
+  deriveSpectrogramData,
+  migrateBrushRefs,
+  migrateRefsInPresetFiles,
+  migrateRefsInSteps,
+} from "../../store/files";
+import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { pruneOrphanHistoryDirs } from "../history-manager";
 import type { Brush } from "../../store/types";
 import type { EffectItem } from "../../effects/types";
@@ -339,5 +345,34 @@ describe("pruneOrphanHistoryDirs", () => {
     });
     await expect(pruneOrphanHistoryDirs(new Set(["x"]))).resolves.toBeUndefined();
     expect(fake.rmCalls).toEqual([]);
+  });
+});
+
+describe("deriveSpectrogramData", () => {
+  const base = createMockSpectrogramData({ numFrames: 64, numBands: 16, pattern: "gradient" });
+
+  it("shares the inverse map with the derived file", () => {
+    const derived = deriveSpectrogramData(base, new Float32Array(base.packedData.length));
+    expect(derived.inverseMap).toBe(base.inverseMap);
+  });
+
+  it("gives the derived file its own copy of the small layout arrays", () => {
+    const derived = deriveSpectrogramData(base, new Float32Array(base.packedData.length));
+    expect(derived.metadata).not.toBe(base.metadata);
+    expect(Array.from(derived.metadata)).toEqual(Array.from(base.metadata));
+    expect(derived.synthesisMetadata.bandOffsets).not.toBe(base.synthesisMetadata.bandOffsets);
+    expect(derived.synthesisMetadata.bandLengths).not.toBe(base.synthesisMetadata.bandLengths);
+    expect(derived.synthesisMetadata.bandStepLog2s).not.toBe(base.synthesisMetadata.bandStepLog2s);
+    expect(Array.from(derived.synthesisMetadata.bandOffsets)).toEqual(Array.from(base.synthesisMetadata.bandOffsets));
+  });
+
+  it("takes the coefficients it is handed and keeps the base's grid", () => {
+    const packed = new Float32Array(base.packedData.length).fill(0.5);
+    const derived = deriveSpectrogramData(base, packed);
+    expect(derived.packedData).toBe(packed);
+    expect(derived.textureWidth).toBe(base.textureWidth);
+    expect(derived.textureHeight).toBe(base.textureHeight);
+    expect(derived.numFrames).toBe(base.numFrames);
+    expect(derived.numBands).toBe(base.numBands);
   });
 });

@@ -601,14 +601,17 @@ export function getFileIdByPath(filePath: string): string | undefined {
 
 // ─── Stem splitting ──────────────────────────────────────────────────────────
 
-// Derive a child spectrogram from the file it was split from: same grid, same
-// metadata, new coefficients. The typed arrays are copied so editing the child
-// never writes through to its source.
-function deriveSpectrogramData(base: SpectrogramData, packedData: Float32Array): SpectrogramData {
+/**
+ * Derive a child spectrogram from the file it came from: same grid, same
+ * metadata, new coefficients. The small typed arrays are copied so editing the
+ * child never writes through to its source; the file-sized inverse map is
+ * shared, because nothing writes it — a re-analysis builds a fresh one.
+ */
+export function deriveSpectrogramData(base: SpectrogramData, packedData: Float32Array): SpectrogramData {
   return {
     ...base,
     packedData,
-    inverseMap: base.inverseMap.slice(),
+    inverseMap: base.inverseMap,
     metadata: base.metadata.slice(),
     synthesisMetadata: {
       bandLengths: base.synthesisMetadata.bandLengths.slice(),
@@ -1144,17 +1147,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       filePath: newFilePath,
       displayName,
       unprojectedPaint: originalFile.unprojectedPaint,
-      spectrogramData: {
-        ...originalFile.spectrogramData,
-        packedData: fboData,
-        inverseMap: originalFile.spectrogramData.inverseMap.slice(),
-        metadata: originalFile.spectrogramData.metadata.slice(),
-        synthesisMetadata: {
-          bandLengths: originalFile.spectrogramData.synthesisMetadata.bandLengths.slice(),
-          bandOffsets: originalFile.spectrogramData.synthesisMetadata.bandOffsets.slice(),
-          bandStepLog2s: originalFile.spectrogramData.synthesisMetadata.bandStepLog2s.slice(),
-        },
-      },
+      spectrogramData: deriveSpectrogramData(originalFile.spectrogramData, fboData),
     };
 
     openFiles[newFileId] = newFile;
