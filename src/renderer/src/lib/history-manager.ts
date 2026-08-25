@@ -793,8 +793,10 @@ export class HistoryManager {
     this.manifest = { version: HISTORY_MANIFEST_VERSION, rootId: id, currentId: id, nodes: { [id]: node } };
     await this.writeFullSnapshot(id, opts.data);
     await this.writeManifest();
-    this.currentPacked = new Float32Array(opts.data);
-    this.packedCache.set(id, this.currentPacked);
+    // Aliased, not copied: `opts.data` is the file's live packed state, and a
+    // commit writes its footprint into that array in place. The node is on
+    // disk, so navigating back to it rebuilds rather than reading the cache.
+    this.currentPacked = opts.data;
     this.lastLoadedAnchorId = id;
     this.notifyStateChange();
     return id;
@@ -828,8 +830,7 @@ export class HistoryManager {
     this.linkChild(parentId, id);
     this.manifest.nodes[id] = node;
     this.manifest.currentId = id;
-    this.currentPacked = new Float32Array(opts.data);
-    this.packedCache.set(id, this.currentPacked);
+    this.currentPacked = opts.data;
     this.lastLoadedAnchorId = id;
     this.fboOutOfSync = false;
     // The packed layout changes with the new dimensions, so a patch stashed
@@ -1921,10 +1922,8 @@ export class HistoryManager {
     // whether the current audio matches the last save, so the dirty flag carries
     // over (a now-deleted savedNodeId still reads as "differs from saved").
 
-    const canonical = new Float32Array(packed);
-    this.currentPacked = canonical;
+    this.currentPacked = packed;
     this.packedCache.clear();
-    this.packedCache.set(currentId, canonical);
     this.nodeDirtyRanges.clear();
     this.nodeAudioRegions.clear();
     this.nodeDeltas.clear();

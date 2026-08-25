@@ -49,6 +49,7 @@ vi.mock("../ipc", () => ({ ipcSend: vi.fn() }));
 import { clearAllHistoryManagers, getHistoryManager, historyCacheBudgets, PackedStateCache } from "../history-manager";
 import { serializeFileTask } from "../file-task-queue";
 import { canvasPatchStashCount, setCanvasPatchStash } from "../canvas-patch-stash";
+import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";
 import type { AudioHop } from "../audio-hop";
 import type { PhaseTurns } from "../../../../main/lib/types";
 import { applyPhaseTurns } from "../../../../main/lib/history-delta";
@@ -353,6 +354,67 @@ function lossyFill(w: number, h: number, salt: number): Float32Array {
   return arr;
 }
 
+/**
+ * A renderer that records partial uploads, as the real one receives them,
+ * over a simulated canvas the turns and patches act on.
+ */
+function installPatchRenderer(
+  w: number,
+  h: number,
+  spectrogram?: SpectrogramData,
+): {
+  patches: { data: Float32Array; ranges: Uint32Array }[];
+  full: Float32Array[];
+  turns: number[][];
+  canvas: Float32Array;
+  file: { spectrogramData: SpectrogramData };
+} {
+  const patches: { data: Float32Array; ranges: Uint32Array }[] = [];
+  const full: Float32Array[] = [];
+  const turns: number[][] = [];
+  const canvas = new Float32Array(w * h * 4);
+  const file = {
+    spectrogramData: spectrogram ?? makeSpectrogram(new Float32Array(w * h * 4), w, h),
+    audioBuffer: {},
+    rendererRef: {
+      current: {
+        setFBOData: (d: Float32Array) => {
+          full.push(d);
+          canvas.set(d);
+        },
+        patchFBOData: (d: Float32Array, r: Uint32Array) => {
+          patches.push({ data: d, ranges: r });
+          for (let i = 0; i + 1 < r.length; i += 2) canvas.set(d.subarray(r[i] * 4, (r[i] + r[i + 1]) * 4), r[i] * 4);
+        },
+        applyPhaseTurns: (flat: ArrayLike<number>) => {
+          turns.push(Array.from(flat));
+          for (let i = 0; i + 3 < flat.length; i += 4) {
+            for (let p = flat[i]; p < flat[i] + flat[i + 1]; p++) {
+              if (flat[i + 2] !== 0) canvas[p * 4 + 1] = Math.fround(canvas[p * 4 + 1] + flat[i + 2]);
+              if (flat[i + 3] !== 0) canvas[p * 4 + 3] = Math.fround(canvas[p * 4 + 3] + flat[i + 3]);
+            }
+          }
+        },
+        readPixelRanges: async (r: Uint32Array) => {
+          let n = 0;
+          for (let i = 1; i < r.length; i += 2) n += r[i];
+          const out = new Float32Array(n * 4);
+          let at = 0;
+          for (let i = 0; i + 1 < r.length; i += 2) {
+            out.set(canvas.subarray(r[i] * 4, (r[i] + r[i + 1]) * 4), at);
+            at += r[i + 1] * 4;
+          }
+          return out;
+        },
+        expandDirtyRegion: vi.fn(),
+        reloadTextures: vi.fn(),
+      },
+    },
+  };
+  fakeOpenFiles["f1"] = file;
+  return { patches, full, turns, canvas, file };
+}
+
 describe("HistoryManager undo/redo round-trip", () => {
   it("restores the exact painted state across repeated undo/redo (lossless)", async () => {
     const { fbo } = installManagerEnv();
@@ -536,61 +598,6 @@ describe("HistoryManager hops", () => {
     return out;
   }
 
-  /**
-   * A renderer that records partial uploads, as the real one receives them,
-   * over a simulated canvas the turns and patches act on.
-   */
-  function installPatchRenderer(): {
-    patches: { data: Float32Array; ranges: Uint32Array }[];
-    full: Float32Array[];
-    turns: number[][];
-    canvas: Float32Array;
-  } {
-    const patches: { data: Float32Array; ranges: Uint32Array }[] = [];
-    const full: Float32Array[] = [];
-    const turns: number[][] = [];
-    const canvas = new Float32Array(w * h * 4);
-    fakeOpenFiles["f1"] = {
-      spectrogramData: makeSpectrogram(new Float32Array(w * h * 4), w, h),
-      audioBuffer: {},
-      rendererRef: {
-        current: {
-          setFBOData: (d: Float32Array) => {
-            full.push(d);
-            canvas.set(d);
-          },
-          patchFBOData: (d: Float32Array, r: Uint32Array) => {
-            patches.push({ data: d, ranges: r });
-            for (let i = 0; i + 1 < r.length; i += 2) canvas.set(d.subarray(r[i] * 4, (r[i] + r[i + 1]) * 4), r[i] * 4);
-          },
-          applyPhaseTurns: (flat: ArrayLike<number>) => {
-            turns.push(Array.from(flat));
-            for (let i = 0; i + 3 < flat.length; i += 4) {
-              for (let p = flat[i]; p < flat[i] + flat[i + 1]; p++) {
-                if (flat[i + 2] !== 0) canvas[p * 4 + 1] = Math.fround(canvas[p * 4 + 1] + flat[i + 2]);
-                if (flat[i + 3] !== 0) canvas[p * 4 + 3] = Math.fround(canvas[p * 4 + 3] + flat[i + 3]);
-              }
-            }
-          },
-          readPixelRanges: async (r: Uint32Array) => {
-            let n = 0;
-            for (let i = 1; i < r.length; i += 2) n += r[i];
-            const out = new Float32Array(n * 4);
-            let at = 0;
-            for (let i = 0; i + 1 < r.length; i += 2) {
-              out.set(canvas.subarray(r[i] * 4, (r[i] + r[i + 1]) * 4), at);
-              at += r[i + 1] * 4;
-            }
-            return out;
-          },
-          expandDirtyRegion: vi.fn(),
-          reloadTextures: vi.fn(),
-        },
-      },
-    };
-    return { patches, full, turns, canvas };
-  }
-
   beforeEach(() => {
     synthesizeFile.mockClear();
     spliceFileAudio.mockClear();
@@ -599,7 +606,7 @@ describe("HistoryManager hops", () => {
 
   it("walks the kept stroke deltas both ways instead of rebuilding from disk", async () => {
     const { files } = installManagerEnv();
-    const { patches } = installPatchRenderer();
+    const { patches } = installPatchRenderer(w, h);
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
     const a = paint(root, 2, 3, 1);
@@ -634,7 +641,7 @@ describe("HistoryManager hops", () => {
 
   it("reads a stroke's delta back from disk for a hop it no longer holds", async () => {
     installManagerEnv();
-    const { patches, full } = installPatchRenderer();
+    const { patches, full } = installPatchRenderer(w, h);
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
     const a = paint(root, 1, 4, 3);
@@ -664,7 +671,7 @@ describe("HistoryManager hops", () => {
 
   it("puts a stroke's kept audio back on undo and redo without synthesising", async () => {
     installManagerEnv();
-    installPatchRenderer();
+    installPatchRenderer(w, h);
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
     const a = paint(root, 2, 3, 1);
@@ -695,7 +702,7 @@ describe("HistoryManager hops", () => {
 
   it("synthesises the hop's window when a stroke kept no audio", async () => {
     installManagerEnv();
-    installPatchRenderer();
+    installPatchRenderer(w, h);
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
     const a = paint(root, 2, 3, 1);
@@ -713,13 +720,14 @@ describe("HistoryManager hops", () => {
 
   it("takes a stroke written into the current state in place, and hops it in place", async () => {
     installManagerEnv();
-    const { patches } = installPatchRenderer();
+    const { patches } = installPatchRenderer(w, h);
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
     const mgr = getHistoryManager("f1", { packedCacheBytes: 0 });
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
     const current = mgr.currentPackedState()!;
-    expect(current).not.toBe(root);
+    expect(current).toBe(root);
+    const rootBytes = new Float32Array(root);
 
     // A commit with projection off: save the footprint's values, then write
     // the stroke over them in the very same array.
@@ -741,7 +749,7 @@ describe("HistoryManager hops", () => {
 
     await mgr.navigateToParent();
     expect(mgr.currentPackedState()).toBe(current);
-    expect(Array.from(current)).toEqual(Array.from(root));
+    expect(Array.from(current)).toEqual(Array.from(rootBytes));
     expect(patches.at(-1)!.data).toBe(current);
 
     await mgr.navigateToLastChild();
@@ -765,7 +773,7 @@ describe("HistoryManager hops", () => {
 
   it("lets a synthesis and an onset pass finish reading the state before a hop writes it", async () => {
     installManagerEnv();
-    installPatchRenderer();
+    installPatchRenderer(w, h);
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
     const a = paint(root, 2, 3, 1);
@@ -802,7 +810,7 @@ describe("HistoryManager hops", () => {
 
   it("undoes and redoes a stroke's phase turns on the canvas as operations, exactly", async () => {
     installManagerEnv();
-    const { patches, full, turns: canvasTurns, canvas } = installPatchRenderer();
+    const { patches, full, turns: canvasTurns, canvas } = installPatchRenderer(w, h);
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
     // Phases past pixel 8 run large, as late in a file.
@@ -813,6 +821,7 @@ describe("HistoryManager hops", () => {
     const mgr = getHistoryManager("f1", { packedCacheBytes: 0 });
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
     const current = mgr.currentPackedState()!;
+    const rootBytes = new Float32Array(root);
     canvas.set(current);
 
     // A projecting stroke: the window is pixels 4..7, the tail from 8 turns
@@ -844,8 +853,8 @@ describe("HistoryManager hops", () => {
     expect(full).toHaveLength(0);
     expect(canvasTurns).toHaveLength(1);
     expect(canvasTurns[0]).toEqual([8, w * h - 8, -c0, -0]);
-    expect(Array.from(current)).toEqual(Array.from(root));
-    expect(Array.from(canvas)).toEqual(Array.from(root));
+    expect(Array.from(current)).toEqual(Array.from(rootBytes));
+    expect(Array.from(canvas)).toEqual(Array.from(rootBytes));
     // Only the window was uploaded; the tail travelled as an operation.
     expect(Array.from(patches.at(-1)!.ranges)).toEqual([4, 4]);
 
@@ -862,7 +871,7 @@ describe("HistoryManager hops", () => {
 
   it("uploads a stashed commit patch with the navigation's own ranges", async () => {
     installManagerEnv();
-    const { patches, full } = installPatchRenderer();
+    const { patches, full } = installPatchRenderer(w, h);
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
     const a = paint(root, 2, 3, 1);
@@ -995,6 +1004,8 @@ describe("HistoryManager resetToCurrent (purge history)", () => {
 
     await mgr.resetToCurrent();
 
+    // The new root keeps the array the state was already in, not a copy of it.
+    expect(mgr.currentPackedState()).toBe(b);
     // Only the current state survives, as the new root — nothing left to undo to.
     expect(mgr.listNodes().length).toBe(1);
     expect(mgr.getCurrentId()).toBe(bId);
@@ -1012,6 +1023,116 @@ describe("HistoryManager resetToCurrent (purge history)", () => {
     expect(Array.from(fbo.last!)).toEqual(Array.from(b));
 
     clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
+});
+
+describe("HistoryManager root state alias", () => {
+  const w = 8;
+  const h = 4;
+  const dimensions = {
+    textureWidth: w,
+    textureHeight: h,
+    numFrames: w,
+    numBands: h,
+    numChannels: 1,
+    sampleRate: 44100,
+    minFreq: 20,
+    bandsPerOctave: 12,
+  };
+  const ranges = new Uint32Array([2, 3]);
+
+  /**
+   * A footprint commit as brush.ts issues one: the old values are gathered, the
+   * new ones are scattered into the very same array, and that array is stored.
+   */
+  async function commitInPlace(mgr: ReturnType<typeof getHistoryManager>, salt: number): Promise<Float32Array> {
+    const current = mgr.currentPackedState()!;
+    const read = gatherPixelRanges(lossyFill(w, h, salt), ranges);
+    const baseFootprint = gatherPixelRanges(current, ranges);
+    scatterCompactPixelRanges(current, read, ranges);
+    await mgr.addStroke({ data: current, label: "A", dimensions, dirtyRanges: ranges, baseFootprint });
+    return current;
+  }
+
+  it("takes the analysed packed array as the current state rather than copying it", async () => {
+    installManagerEnv();
+    const spectrogram = makeSpectrogram(lossyFill(w, h, 0), w, h);
+    installPatchRenderer(w, h, spectrogram);
+    clearAllHistoryManagers();
+
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: spectrogram.packedData, kind: "root", label: "root", spectrogram });
+    expect(mgr.currentPackedState()).toBe(spectrogram.packedData);
+
+    mgr.dispose();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it("undoes to the analysed bytes and redoes to the painted ones", async () => {
+    installManagerEnv();
+    const spectrogram = makeSpectrogram(lossyFill(w, h, 0), w, h);
+    const { canvas } = installPatchRenderer(w, h, spectrogram);
+    clearAllHistoryManagers();
+
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: spectrogram.packedData, kind: "root", label: "root", spectrogram });
+    const analysed = new Float32Array(spectrogram.packedData);
+    canvas.set(spectrogram.packedData);
+
+    const current = await commitInPlace(mgr, 1);
+    expect(current).toBe(spectrogram.packedData);
+    const painted = new Float32Array(current);
+    expect(Array.from(painted)).not.toEqual(Array.from(analysed));
+    canvas.set(current);
+
+    await mgr.navigateToParent();
+    expect(Array.from(mgr.currentPackedState()!)).toEqual(Array.from(analysed));
+    expect(Array.from(canvas)).toEqual(Array.from(analysed));
+
+    await mgr.navigateToLastChild();
+    expect(Array.from(mgr.currentPackedState()!)).toEqual(Array.from(painted));
+    expect(Array.from(canvas)).toEqual(Array.from(painted));
+
+    mgr.dispose();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it("takes the re-analysed array too, and rounds a stroke on it trip for trip", async () => {
+    installManagerEnv();
+    const spectrogram = makeSpectrogram(lossyFill(w, h, 0), w, h);
+    const { canvas, file } = installPatchRenderer(w, h, spectrogram);
+    clearAllHistoryManagers();
+
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: spectrogram.packedData, kind: "root", label: "root", spectrogram });
+
+    const reanalysed = makeSpectrogram(lossyFill(w, h, 5), w, h);
+    file.spectrogramData = reanalysed;
+    await mgr.addSnapshot({
+      data: reanalysed.packedData,
+      kind: "reanalyze",
+      label: "Re-analyse",
+      spectrogram: reanalysed,
+    });
+    expect(mgr.currentPackedState()).toBe(reanalysed.packedData);
+    const settled = new Float32Array(reanalysed.packedData);
+    canvas.set(reanalysed.packedData);
+
+    const current = await commitInPlace(mgr, 6);
+    expect(current).toBe(reanalysed.packedData);
+    const painted = new Float32Array(current);
+    canvas.set(current);
+
+    await mgr.navigateToParent();
+    expect(Array.from(mgr.currentPackedState()!)).toEqual(Array.from(settled));
+    expect(Array.from(canvas)).toEqual(Array.from(settled));
+
+    await mgr.navigateToLastChild();
+    expect(Array.from(mgr.currentPackedState()!)).toEqual(Array.from(painted));
+    expect(Array.from(canvas)).toEqual(Array.from(painted));
+
+    mgr.dispose();
     delete fakeOpenFiles["f1"];
   });
 });
