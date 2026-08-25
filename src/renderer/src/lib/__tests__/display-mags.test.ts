@@ -18,6 +18,8 @@ import passThroughVert from "../../glsl/pass-through.vert";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import type { State } from "../../store/types";
 import { createMockStateWithSteps } from "../../test/mock-state";
+import { DisplayMags } from "../display-mags";
+import { buildWindowLayout, fileLayoutOf } from "../window-layout";
 import {
   createHarnessTextures,
   createSourceFile,
@@ -46,6 +48,7 @@ describe("display mags parity", () => {
   let effects: EffectsRegistry;
   let textures: ReturnType<typeof createHarnessTextures>;
   let renderer: StrokeRendererType;
+  let displayMags: DisplayMags;
   let material: RawShaderMaterial;
   let scene: Scene;
   let camera: OrthographicCamera;
@@ -62,7 +65,16 @@ describe("display mags parity", () => {
     gl.setSize(WIDTH, HEIGHT);
 
     textures = createHarnessTextures(spectrogramData);
-    renderer = new StrokeRenderer(gl, spectrogramData, toStrokeTextures(textures), "display-mags-test", effects);
+    displayMags = new DisplayMags(fileLayoutOf(spectrogramData));
+    renderer = new StrokeRenderer(
+      gl,
+      spectrogramData,
+      toStrokeTextures(textures),
+      "display-mags-test",
+      effects,
+      null,
+      displayMags,
+    );
     renderer.initialize();
 
     material = new RawShaderMaterial({
@@ -117,11 +129,12 @@ describe("display mags parity", () => {
     target.dispose();
     material.dispose();
     renderer.dispose();
+    displayMags.dispose();
     disposeHarnessTextures(textures);
     gl.dispose();
   });
 
-  function renderDisplay(fromMags: boolean): Uint8Array {
+  function renderDisplay(fromMags: boolean, magsTexture = renderer.getDisplayMagsTexture()): Uint8Array {
     const preview = renderer.getPreviewDisplay();
     const u = material.uniforms;
     u.sourceSpectrogramTex.value = preview.committed;
@@ -134,7 +147,7 @@ describe("display mags parity", () => {
     u.sourceChannelCount.value = spectrogramData.numChannels;
     u.sourceSampleRate.value = spectrogramData.sampleRate;
     u.sourceSpectrogramTextureSize.value = spectrogramData.packedTextureSize;
-    u.displayMagsTex.value = renderer.getDisplayMagsTexture();
+    u.displayMagsTex.value = magsTexture;
     u.displayMagsActive.value = fromMags;
 
     gl.setRenderTarget(target);
@@ -212,6 +225,61 @@ describe("display mags parity", () => {
     const after = renderDisplay(true);
     expect(maxChannelDiff(before, after)).toBeGreaterThan(1);
     expect(maxChannelDiff(after, renderDisplay(false))).toBeLessThanOrEqual(1);
+  });
+
+  it("scatters a window canvas into the file positions the whole file writes", async () => {
+    const fileLayout = fileLayoutOf(spectrogramData);
+    const half = buildWindowLayout(
+      fileLayout,
+      Math.floor(fileLayout.numFrames / 4),
+      Math.floor((fileLayout.numFrames * 3) / 4),
+    );
+    const halfTextures = createHarnessTextures(spectrogramData, half);
+    const halfMags = new DisplayMags(fileLayout);
+    const halfRenderer = new StrokeRenderer(
+      gl,
+      spectrogramData,
+      toStrokeTextures(halfTextures),
+      "display-mags-window-test",
+      effects,
+      half,
+      halfMags,
+    );
+    halfRenderer.initialize();
+
+    const before = renderDisplay(true);
+    const boosted = new Float32Array(spectrogramData.packedData);
+    for (let i = 0; i < boosted.length; i += 4) {
+      boosted[i] *= 3;
+      boosted[i + 2] *= 3;
+    }
+    renderer.setFBOData(boosted);
+    halfRenderer.setFBOData(boosted);
+
+    const whole = renderDisplay(true);
+    const windowed = renderDisplay(true, halfMags.texture());
+
+    // Compare only the columns well inside the window; beyond it the windowed
+    // texture holds nothing.
+    let maxDiff = 0;
+    const x0 = Math.ceil(WIDTH * 0.3);
+    const x1 = Math.floor(WIDTH * 0.7);
+    for (let y = 0; y < HEIGHT; y++) {
+      for (let x = x0; x < x1; x++) {
+        for (let c = 0; c < 4; c++) {
+          const i = (y * WIDTH + x) * 4 + c;
+          maxDiff = Math.max(maxDiff, Math.abs(whole[i] - windowed[i]));
+        }
+      }
+    }
+    expect(maxDiff).toBeLessThanOrEqual(1);
+
+    expect(maxChannelDiff(before, whole)).toBeGreaterThan(1);
+
+    halfRenderer.dispose();
+    halfMags.dispose();
+    disposeHarnessTextures(halfTextures);
+    renderer.setFBOData(spectrogramData.packedData);
   });
 
   it("follows patchFBOData over its ranges alone", () => {

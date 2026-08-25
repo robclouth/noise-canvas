@@ -6,7 +6,6 @@ import {
   DataTexture,
   FloatType,
   GLSL3,
-  HalfFloatType,
   InstancedBufferAttribute,
   InstancedBufferGeometry,
   Mesh,
@@ -16,7 +15,6 @@ import {
   RawShaderMaterial,
   RedFormat,
   RGBAFormat,
-  RGFormat,
   Scene,
   Texture,
   Vector2,
@@ -24,13 +22,13 @@ import {
   WebGLRenderTarget,
 } from "three";
 import { copyMaterial } from "../components/copy-material";
-import { displayMagsMaterial } from "../components/display-mags-material";
 import { gatherMaterial } from "../components/gather-material";
 import { patchMaterial } from "../components/patch-material";
 import { phaseTurnMaterial } from "../components/phase-turn-material";
 import { rangeCopyMaterial } from "../components/range-copy-material";
 import { BaseEffect, CommonUniforms, createDefaultUniforms } from "../effects/base-effect";
 import { diag } from "./diag-log";
+import type { DisplayMags } from "./display-mags";
 import {
   buildWindowLayout,
   fileLayoutOf,
@@ -255,10 +253,11 @@ export class StrokeRenderer {
   // FBOs for ping-pong rendering
   private fbo1: WebGLRenderTarget;
   private fbo2: WebGLRenderTarget;
-  // Whole-window RG16F dB magnitudes the display reads as its committed base.
-  // Every write to the committed FBO re-encodes its ranges here; phase-only
-  // writes are exempt, because the display never reads phase.
-  private displayMags: WebGLRenderTarget | null = null;
+  // File-sized dB magnitudes the display reads as its committed base, owned
+  // by the file view so it survives this renderer rebuilding. Every write to
+  // the committed FBO re-encodes its ranges there; phase-only writes are
+  // exempt, because the display never reads phase.
+  private displayMags: DisplayMags | null;
   // Per-stroke scratch targets, shared across all files through the pool.
   // Bound (and refreshed if another file painted since) by acquireScratch().
   private pool: StrokeScratchPool;
@@ -338,7 +337,9 @@ export class StrokeRenderer {
     fileId: string,
     effects: EffectsRegistry,
     windowLayout?: WindowLayout | null,
+    displayMags?: DisplayMags | null,
   ) {
+    this.displayMags = displayMags ?? null;
     this.gl = gl;
     this.spectrogramData = spectrogramData;
     const fileLayout = fileLayoutOf(spectrogramData);
@@ -458,11 +459,7 @@ export class StrokeRenderer {
 
   /** Re-encodes the committed FBO's magnitudes into the display texture over `list`. */
   private refreshDisplayMags(list: PixelRangeList): void {
-    if (!this.displayMags) return;
-    displayMagsMaterial.uniforms.inputTex.value = this.getDisplayTexture();
-    this.drawRanges(displayMagsMaterial, this.displayMags, list);
-    displayMagsMaterial.uniforms.inputTex.value = null;
-    this.gl.setRenderTarget(null);
+    this.displayMags?.refreshFrom(this.gl, this.getDisplayTexture(), this.windowLayout, list);
   }
 
   /** The whole packed texture as one range. */
@@ -568,17 +565,6 @@ export class StrokeRenderer {
 
     this.pingPong = 0;
 
-    if (!this.displayMags) {
-      const { textureWidth, textureHeight } = this.windowLayout;
-      this.displayMags = new WebGLRenderTarget(textureWidth, textureHeight, {
-        format: RGFormat,
-        type: HalfFloatType,
-        minFilter: NearestFilter,
-        magFilter: NearestFilter,
-        depthBuffer: false,
-        stencilBuffer: false,
-      });
-    }
     this.refreshDisplayMags(this.fullRange());
 
     // The stroke-start snapshot no longer matches the reset canvas; force the
@@ -1983,13 +1969,13 @@ export class StrokeRenderer {
       preview: nextFBO.texture,
       binRanges: this.previewRangeTex,
       active: this.previewActive,
-      displayMags: this.displayMags?.texture ?? null,
+      displayMags: this.displayMags?.texture() ?? null,
     };
   }
 
   /** The RG16F dB magnitudes texture the display reads as its committed base. */
   getDisplayMagsTexture(): Texture | null {
-    return this.displayMags?.texture ?? null;
+    return this.displayMags?.texture() ?? null;
   }
 
   // Blocks until all GPU work submitted so far has finished. Lets opt-in paint
@@ -2188,8 +2174,6 @@ export class StrokeRenderer {
     this.scratch = null;
     this.fbo1.dispose();
     this.fbo2.dispose();
-    this.displayMags?.dispose();
-    this.displayMags = null;
     this.maskMaterial.dispose();
     this.modulatorMaterial.dispose();
     this.fboMesh.geometry.dispose();

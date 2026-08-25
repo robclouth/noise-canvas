@@ -198,6 +198,31 @@ export function windowFileRanges(window: WindowLayout): Uint32Array {
   return Uint32Array.from(ranges);
 }
 
+/**
+ * Maps window packed pixel ranges to the file pixels they hold, split at band
+ * boundaries. Returns flat [fileStart, count, windowStart, ...] triplets, the
+ * shape a scatter draw's instances take.
+ */
+export function mapWindowRangesToFile(window: WindowLayout, ranges: Uint32Array, count: number): Uint32Array {
+  const out: number[] = [];
+  for (let r = 0; r < count; r++) {
+    let start = ranges[r * 2];
+    let remaining = ranges[r * 2 + 1];
+    for (let b = 0; b < window.numBands && remaining > 0; b++) {
+      const bandStart = window.bandOffsets[b];
+      const bandEnd = bandStart + window.bandLengths[b];
+      if (start >= bandEnd || start + remaining <= bandStart) continue;
+      const from = Math.max(start, bandStart);
+      const to = Math.min(start + remaining, bandEnd);
+      const local = from - bandStart;
+      out.push(window.file.bandOffsets[b] + window.firstBins[b] + local, to - from, from);
+      remaining -= to - start;
+      start = to;
+    }
+  }
+  return Uint32Array.from(out);
+}
+
 /** The band a file packed pixel belongs to, or -1 when it is padding. */
 export function bandOfFilePixel(file: PackedLayout, pixel: number): number {
   let lo = 0;

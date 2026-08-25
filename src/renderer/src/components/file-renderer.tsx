@@ -40,6 +40,7 @@ import passThroughVert from "../glsl/pass-through.vert";
 import { DEFAULT_ONSET_SENSITIVITY } from "../lib/constants";
 import { getFileOnsets } from "../lib/file-onsets";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
+import { DisplayMags } from "../lib/display-mags";
 import { buildWindowLayout, fileLayoutOf, type WindowLayout } from "../lib/window-layout";
 import { buildWindowTextures } from "../lib/window-textures";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
@@ -453,6 +454,20 @@ const FileRendererInner = memo(
       spectrogramData.numBands,
     ]);
 
+    // The display's committed base, file-sized, recreated with the textures so
+    // a re-analysis that changes the layout gets a matching target.
+    const displayMagsRef = useRef<DisplayMags | null>(null);
+
+    useEffect(() => {
+      const mags = new DisplayMags(fileLayoutOf(spectrogramData));
+      displayMagsRef.current = mags;
+      return () => {
+        displayMagsRef.current = null;
+        mags.dispose();
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [spectrogramData.textureWidth, spectrogramData.textureHeight, spectrogramData.numBands]);
+
     /** The textures on the GPU now, so cleanup frees what is actually current. */
     const liveTexturesRef = useRef<{ packed: DataTexture; inverse: DataTexture; meta: DataTexture } | null>(null);
 
@@ -856,6 +871,7 @@ const FileRendererInner = memo(
             fileId,
             effects,
             windowLayoutRef.current,
+            displayMagsRef.current,
           );
         } catch (error) {
           console.error("Creating the stroke renderer failed:", error);
@@ -1256,7 +1272,7 @@ const FileRendererInner = memo(
       return {
         fileTexels,
         windowTexels,
-        displayTexels: strokeRendererRef.current?.getDisplayMagsTexture() ? windowTexels : 0,
+        displayTexels: displayMagsRef.current?.texture() ? displayMagsRef.current.texelCount() : 0,
       };
     };
 
