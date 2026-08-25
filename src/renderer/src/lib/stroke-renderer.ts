@@ -479,6 +479,20 @@ export class StrokeRenderer {
   }
 
   /**
+   * Writes each band's window packed offset and first file bin into the
+   * preview range table's .ba, so the display can address the window-sized
+   * preview texture from the file bins its metadata gives it.
+   */
+  private fillPreviewWindowColumns(): void {
+    const { numBands, bandOffsets, firstBins } = this.windowLayout;
+    const binRanges = this.footprint.binRanges;
+    for (let band = 0; band < numBands; band++) {
+      binRanges[band * 4 + 2] = bandOffsets[band];
+      binRanges[band * 4 + 3] = firstBins[band];
+    }
+  }
+
+  /**
    * Hardware blit between two FBOs using WebGL2 blitFramebuffer (GPU DMA copy).
    */
   private blitFBO(src: WebGLRenderTarget, dst: WebGLRenderTarget): void {
@@ -1344,6 +1358,7 @@ export class StrokeRenderer {
     this.previewActive = preview;
     if (preview) {
       if (!footprint) this.markWholeTexturePreview();
+      this.fillPreviewWindowColumns();
       this.previewRangeTex.needsUpdate = true;
     }
 

@@ -42,7 +42,8 @@ import { getFileOnsets } from "../lib/file-onsets";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { DisplayMags } from "../lib/display-mags";
 import { buildWindowLayout, fileLayoutOf, type WindowLayout } from "../lib/window-layout";
-import { buildWindowTextures } from "../lib/window-textures";
+import { buildFileMetadataTexture, buildWindowTextures } from "../lib/window-textures";
+import { subtractPixelRanges } from "../lib/pixel-ranges";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
 import { FULL_SCALE_DB_OFFSET } from "../lib/constants";
@@ -456,15 +457,44 @@ const FileRendererInner = memo(
     // a re-analysis that changes the layout gets a matching target.
     const displayMagsRef = useRef<DisplayMags | null>(null);
 
+    // The file's own band geometry for the display: the committed base is
+    // file-sized whatever window the paint textures hold.
+    const fileMetadataTexRef = useRef<DataTexture | null>(null);
+
     useEffect(() => {
       const mags = new DisplayMags(fileLayoutOf(spectrogramData));
       displayMagsRef.current = mags;
+      const fileMeta = buildFileMetadataTexture(spectrogramData);
+      fileMetadataTexRef.current = fileMeta;
       return () => {
         displayMagsRef.current = null;
         mags.dispose();
+        fileMetadataTexRef.current = null;
+        fileMeta.dispose();
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [spectrogramData.textureWidth, spectrogramData.textureHeight, spectrogramData.numBands]);
+
+    /**
+     * Encodes into the display texture whatever part of `data` the stroke
+     * renderer's own refresh did not cover: the ranges its window misses, or
+     * everything when no renderer is alive. `ranges` null means the whole
+     * packed state.
+     */
+    const refreshDisplayFromPacked = (data: Float32Array, ranges: Uint32Array | null): void => {
+      const gl = glRef.current;
+      const mags = displayMagsRef.current;
+      if (!gl || !mags) return;
+      const renderer = strokeRendererRef.current;
+      if (!renderer) {
+        if (ranges) mags.patchFromPacked(gl, data, ranges);
+        else mags.seedFromPacked(gl, data);
+        return;
+      }
+      const full = ranges ?? Uint32Array.of(0, spectrogramData.textureWidth * spectrogramData.textureHeight);
+      const missing = subtractPixelRanges(full, renderer.residentRanges(full));
+      if (missing.length > 0) mags.patchFromPacked(gl, data, missing);
+    };
 
     /** The textures on the GPU now, so cleanup frees what is actually current. */
     const liveTexturesRef = useRef<{ packed: DataTexture; inverse: DataTexture; meta: DataTexture } | null>(null);
@@ -570,8 +600,8 @@ const FileRendererInner = memo(
 
       const uniforms = displayMaterial.uniforms;
       uniforms.sourceInverseMapTex.value = inverseMapTex;
-      uniforms.sourceMetadataTex.value = metadataTex;
-      const displayMags = strokeRendererRef.current?.getDisplayMagsTexture() ?? null;
+      uniforms.sourceMetadataTex.value = fileMetadataTexRef.current ?? metadataTex;
+      const displayMags = displayMagsRef.current?.texture() ?? null;
       uniforms.displayMagsTex.value = displayMags;
       uniforms.displayMagsActive.value = displayMags !== null;
       uniforms.sourceMinFreq.value = spectrogramData.minFreq;
@@ -1229,9 +1259,8 @@ const FileRendererInner = memo(
      * Sets the FBO data from an external source (e.g., for undo/redo).
      */
     const setFBOData = (data: Float32Array) => {
-      if (!strokeRendererRef.current) return;
-
-      strokeRendererRef.current.setFBOData(data);
+      strokeRendererRef.current?.setFBOData(data);
+      refreshDisplayFromPacked(data, null);
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();
@@ -1250,9 +1279,8 @@ const FileRendererInner = memo(
     };
 
     const patchFBOData = (data: Float32Array, pixelRanges: Uint32Array) => {
-      if (!strokeRendererRef.current) return;
-
-      strokeRendererRef.current.patchFBOData(data, pixelRanges);
+      strokeRendererRef.current?.patchFBOData(data, pixelRanges);
+      refreshDisplayFromPacked(data, pixelRanges);
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();

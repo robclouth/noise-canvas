@@ -51,9 +51,13 @@ uniform bool displayMagsActive;
 
 vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, ivec2 texSize, ivec2 magsSize) {
     if (previewActive) {
-        vec2 bins = texelFetch(previewBinRangesTex, ivec2(bandIndex, 0), 0).rg;
-        if (timeIndex >= bins.x && timeIndex < bins.y) {
-            return texelFetch(previewTex, packedTexel(bandStartOffset + timeIndex, texSize), 0);
+        // The preview texture is window-sized: .a holds the band's first file
+        // bin, so subtracting it turns the file bin into a window bin, and .b
+        // holds the band's offset into the window texture.
+        vec4 previewBins = texelFetch(previewBinRangesTex, ivec2(bandIndex, 0), 0);
+        float windowBin = timeIndex - previewBins.a;
+        if (windowBin >= previewBins.x && windowBin < previewBins.y) {
+            return texelFetch(previewTex, packedTexel(previewBins.b + windowBin, texSize), 0);
         }
     }
     if (displayMagsActive) {

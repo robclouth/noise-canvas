@@ -35,6 +35,15 @@ function configure(texture: DataTexture, internalFormat: PixelFormatGPU): DataTe
   return texture;
 }
 
+/**
+ * The file's own one-row metadata texture. The display reads band geometry
+ * through it whatever window the paint textures hold, since its committed
+ * base is always file-sized.
+ */
+export function buildFileMetadataTexture(data: SpectrogramData): DataTexture {
+  return configure(new DataTexture(data.metadata, data.numBands, 1, RGBAFormat, FloatType), "RGBA32F");
+}
+
 /** The window's packed magnitudes, gathered out of the file array and padded to its texture. */
 export function gatherWindowPacked(packedData: Float32Array, window: WindowLayout): Float32Array {
   const padded = new Float32Array(window.textureWidth * window.textureHeight * 4);
