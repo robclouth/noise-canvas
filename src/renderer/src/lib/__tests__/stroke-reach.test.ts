@@ -3,7 +3,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import type { BaseEffect } from "../../effects/base-effect";
 import type { EffectType } from "../../effects/types";
 import type { ParameterKey } from "../../store/types";
-import { strokeReadSpan, type StepReach, type TimeReachContext } from "../stroke-reach";
+import { createMockStateWithSteps } from "../../test/mock-state";
+import { resolveStrokeReach, strokeReadSpan, type StepReach, type TimeReachContext } from "../stroke-reach";
 
 // Loaded at run time: importing an effect module at module scope trips the
 // effects registry's circular imports.
@@ -176,5 +177,94 @@ describe("effect reach declarations", () => {
   it("a time scale that modulation can push through zero caps at the file", () => {
     const reach = effects.transform.timeReach(ctx({ transformScaleTime: [-256, 256] }));
     expect(reach).toEqual({ kind: "frames", frames: NUM_FRAMES });
+  });
+});
+
+describe("resolveStrokeReach", () => {
+  const OPTS = {
+    bpm: 120,
+    numFrames: NUM_FRAMES,
+    sampleRate: 8_000,
+    bandsPerOctave: 12,
+    numBands: 96,
+    destFilePath: "/test/self.wav",
+  };
+  const FRAMES_PER_BEAT = (OPTS.sampleRate * 60) / OPTS.bpm;
+
+  type StepSpec = Parameters<typeof createMockStateWithSteps>[0][number];
+
+  function resolve(specs: StepSpec[], opts: Partial<typeof OPTS> = {}) {
+    const state = createMockStateWithSteps(specs);
+    return resolveStrokeReach(state, effects, { ...OPTS, ...opts });
+  }
+
+  it("resolves a plain step as pointwise self-source reads", () => {
+    const [reach] = resolve([
+      { name: "Plain", overrides: { effects: [{ id: "d", effect: "dynamics", enabled: true, params: {} }] } },
+    ]);
+    expect(reach).toEqual({
+      wrap: false,
+      selfSource: true,
+      sourceTimeScale: 1,
+      sourceOffsetUvLow: 0,
+      sourceOffsetUvHigh: 0,
+      iterations: 1,
+      effectReaches: [{ kind: "none" }],
+    });
+  });
+
+  it("reads effect parameters from the effect item, not the step", () => {
+    const [reach] = resolve([
+      {
+        name: "Blur",
+        overrides: { effects: [{ id: "b", effect: "blur", enabled: true, params: { blurAmountTime: 50 } }] },
+      },
+    ]);
+    // 50% of the 4-beat range = 2 beats.
+    expect(reach.effectReaches).toEqual([{ kind: "frames", frames: 2 * FRAMES_PER_BEAT }]);
+  });
+
+  it("takes a modulated effect parameter at its range", () => {
+    // The noise jitter rests at 0; a routed modulator can push it to 100,
+    // which doubles the default 4-beat box.
+    const [reach] = resolve([
+      {
+        name: "Blur",
+        overrides: {
+          effects: [{ id: "b", effect: "blur", enabled: true, params: { blurNoiseTimeMod1Amount: 40 } }],
+        },
+      },
+    ]);
+    expect(reach.effectReaches).toEqual([{ kind: "frames", frames: 8 * FRAMES_PER_BEAT }]);
+  });
+
+  it("skips a disabled effect", () => {
+    const [reach] = resolve([
+      { name: "Off", overrides: { effects: [{ id: "e", effect: "evolve", enabled: false, params: {} }] } },
+    ]);
+    expect(reach.effectReaches).toEqual([]);
+  });
+
+  it("takes a modulated source offset across the whole file", () => {
+    const [reach] = resolve([{ name: "Mod", overrides: { sourceTimeOffsetMod1Amount: 50, effects: [] } }]);
+    expect(reach.sourceOffsetUvLow).toBe(0);
+    expect(reach.sourceOffsetUvHigh).toBe(1);
+  });
+
+  it("maps wrap modes to time wrapping alone", () => {
+    const reaches = resolve([
+      { name: "Time", overrides: { brushWrapMode: 1, effects: [] } },
+      { name: "Pitch", overrides: { brushWrapMode: 2, effects: [] } },
+      { name: "Both", overrides: { brushWrapMode: 3, effects: [] } },
+    ]);
+    expect(reaches.map((reach) => reach.wrap)).toEqual([true, false, true]);
+  });
+
+  it("marks a cross-file step and carries iterations", () => {
+    const [cross] = resolve([
+      { name: "Cross", overrides: { sourceFile: { path: "/test/other.wav" }, brushIterations: 4, effects: [] } },
+    ]);
+    expect(cross.selfSource).toBe(false);
+    expect(cross.iterations).toBe(4);
   });
 });
