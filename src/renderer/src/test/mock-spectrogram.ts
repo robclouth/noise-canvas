@@ -192,23 +192,21 @@ const MAX_TEXTURE_SIZE = 8192;
  * layout stacks variable-length bands — the property that makes the scissor
  * over-cover the upper bands and the precompute pass span most of the texture.
  */
-export function createConstantQMockSpectrogramData(
-  options: {
-    durationSeconds?: number;
-    sampleRate?: number;
-    bandsPerOctave?: number;
-    minFreq?: number;
-    constantMagnitude?: number;
-  } = {},
-): SpectrogramData {
-  const {
-    durationSeconds = 10,
-    sampleRate = 44100,
-    bandsPerOctave = 24,
-    minFreq = 20,
-    constantMagnitude = 0.5,
-  } = options;
-
+/**
+ * The band layout of a constant-Q analysis, without the coefficient arrays, so
+ * a test can describe a file far longer than one it could allocate.
+ */
+export function constantQBandLayout(
+  options: { durationSeconds?: number; sampleRate?: number; bandsPerOctave?: number; minFreq?: number } = {},
+): {
+  numFrames: number;
+  numBands: number;
+  bandLengths: Uint32Array;
+  bandStepLog2s: Int32Array;
+  bandOffsets: Uint32Array;
+  totalPacked: number;
+} {
+  const { durationSeconds = 10, sampleRate = 44100, bandsPerOctave = 24, minFreq = 20 } = options;
   const numFrames = Math.round(durationSeconds * sampleRate);
   const octaves = Math.log2(sampleRate / 2 / minFreq);
   const numBands = Math.max(1, Math.round(octaves * bandsPerOctave));
@@ -228,7 +226,48 @@ export function createConstantQMockSpectrogramData(
     bandOffsets[band] = offset;
     offset += len;
   }
-  const totalPacked = offset;
+  return { numFrames, numBands, bandLengths, bandStepLog2s, bandOffsets, totalPacked: offset };
+}
+
+/** Per-band metadata rows (offset, bins, step log2, centre frequency) for a constant-Q layout. */
+export function constantQMetadata(
+  layout: ReturnType<typeof constantQBandLayout>,
+  options: { bandsPerOctave?: number; minFreq?: number } = {},
+): Float32Array {
+  const { bandsPerOctave = 24, minFreq = 20 } = options;
+  const metadata = new Float32Array(layout.numBands * 4);
+  for (let band = 0; band < layout.numBands; band++) {
+    metadata[band * 4] = layout.bandOffsets[band];
+    metadata[band * 4 + 1] = layout.bandLengths[band];
+    metadata[band * 4 + 2] = layout.bandStepLog2s[band];
+    metadata[band * 4 + 3] = minFreq * Math.pow(2, (layout.numBands - 1 - band) / bandsPerOctave);
+  }
+  return metadata;
+}
+
+export function createConstantQMockSpectrogramData(
+  options: {
+    durationSeconds?: number;
+    sampleRate?: number;
+    bandsPerOctave?: number;
+    minFreq?: number;
+    constantMagnitude?: number;
+  } = {},
+): SpectrogramData {
+  const {
+    durationSeconds = 10,
+    sampleRate = 44100,
+    bandsPerOctave = 24,
+    minFreq = 20,
+    constantMagnitude = 0.5,
+  } = options;
+
+  const { numFrames, numBands, bandLengths, bandStepLog2s, bandOffsets, totalPacked } = constantQBandLayout({
+    durationSeconds,
+    sampleRate,
+    bandsPerOctave,
+    minFreq,
+  });
 
   const textureWidth = Math.min(MAX_TEXTURE_SIZE, totalPacked);
   const textureHeight = totalPacked > 0 ? Math.ceil(totalPacked / textureWidth) : 0;
@@ -264,14 +303,10 @@ export function createConstantQMockSpectrogramData(
     }
   }
 
-  const metadata = new Float32Array(numBands * 4);
-  for (let band = 0; band < numBands; band++) {
-    const baseIndex = band * 4;
-    metadata[baseIndex] = bandOffsets[band];
-    metadata[baseIndex + 1] = bandLengths[band];
-    metadata[baseIndex + 2] = bandStepLog2s[band];
-    metadata[baseIndex + 3] = minFreq * Math.pow(2, (numBands - 1 - band) / bandsPerOctave);
-  }
+  const metadata = constantQMetadata(
+    { numFrames, numBands, bandLengths, bandStepLog2s, bandOffsets, totalPacked },
+    { bandsPerOctave, minFreq },
+  );
 
   return {
     packedData,
