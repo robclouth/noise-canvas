@@ -91,7 +91,7 @@ export const createFillSlice = (set: ZustandSet, get: ZustandGet): FillState => 
       for (let start = 0; start < total; start += FILL_CHUNK) {
         const chunk: StrokeDispatch[] = anchors
           .slice(start, start + FILL_CHUNK)
-          .map((anchor) => ({ blX: anchor.blX, blY: anchor.blY, state: painted }));
+          .map((anchor) => ({ aimX: anchor.aimX, aimY: anchor.aimY, state: painted }));
         strokesPainted += renderer.renderStrokeBatch(chunk);
         if (!showProgress) continue;
 

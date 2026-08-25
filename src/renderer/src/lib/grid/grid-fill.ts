@@ -1,4 +1,3 @@
-import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
 import { getFileOnsets } from "@renderer/lib/file-onsets";
 import { BRUSH_SIZE_PITCH_FULL, BRUSH_SIZE_TIME_FULL, unitsToUv } from "@renderer/lib/utils";
 import type { BrushStep } from "@renderer/parameters";
@@ -17,10 +16,10 @@ export interface GridFillTarget {
   region: LoopRegion | null;
 }
 
-/** Where one stroke's brush origin sits, in pitch UV. */
+/** Where one stroke is aimed, in pitch UV. Each step anchors its own brush to it. */
 export interface FillAnchor {
-  blX: number;
-  blY: number;
+  aimX: number;
+  aimY: number;
 }
 
 export interface GridFill {
@@ -120,7 +119,7 @@ export function resolveGridFill(state: State, target: GridFillTarget): GridFill 
         bandsPerOctave,
         numBands,
       );
-      anchors.push(aimUvToBrushBlUv(painted, aim.x, aim.y, bpm, totalDuration, bandsPerOctave, numBands));
+      anchors.push({ aimX: aim.x, aimY: aim.y });
     }
   }
   return { anchors, state: painted };

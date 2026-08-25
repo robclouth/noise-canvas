@@ -7,7 +7,8 @@ import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/p
 import { useFrame, useThree } from "@react-three/fiber";
 import { createDefaultUniforms } from "@renderer/effects/base-effect";
 import { getOpenFileByPath, logFileFootprint, openFiles } from "@renderer/store/files";
-import { State } from "@renderer/store/types";
+import type { BrushStep } from "@renderer/parameters";
+import { State, type OpenFile } from "@renderer/store/types";
 import {
   forwardRef,
   memo,
@@ -54,7 +55,7 @@ import { GpuMemoryError, SourceFileInfo, StrokeRenderer, StrokeTextures } from "
 import { shallow } from "zustand/shallow";
 import { penState } from "../lib/pen-state";
 import { useModulatorTexture, usePlaceholderTexture } from "../lib/textures";
-import { aimUvToBrushBlUv } from "../lib/brush-anchor";
+import { aimUvToBrushBlUv, footprintAimToBlUv } from "../lib/brush-anchor";
 import {
   destToSourceBandUv,
   resolveBrushAnchor,
@@ -80,12 +81,19 @@ interface FileRendererProps {
   onLiveFrame?: () => void;
 }
 
-/** One stroke of a batch: where its brush origin sits, and the state to paint it with. */
+/** One stroke of a batch: where it is aimed, and the state to paint it with. */
 export interface StrokeDispatch {
-  /** Brush bottom-left in pitch UV — y up from the file's lowest band, as unitsToUv gives it. */
-  blX: number;
-  blY: number;
+  /** Aim point in pitch UV — y up from the file's lowest band, as unitsToUv gives it. */
+  aimX: number;
+  aimY: number;
   state: State;
+}
+
+/** The file a step samples from: the one it names, or the file being painted. */
+function resolveStepSourceFile(state: State, step: BrushStep | undefined): OpenFile | undefined {
+  const named = step?.sourceFile ?? null;
+  if (named) return getOpenFileByPath(named.path);
+  return state.activeFileId ? openFiles[state.activeFileId] : undefined;
 }
 
 /**
@@ -703,36 +711,47 @@ const FileRendererInner = memo(
       const bpm = state.filepathsBpm[file.filePath] || 120;
       const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
 
-      // The active step names the file the brush samples from; null means this
-      // file paints from itself.
-      const activeStepRaw = (state.brushes[state.activeBrushIndex]?.steps ?? [])[state.activeStepIndex];
-      const activeStepSourceFile = activeStepRaw?.sourceFile ?? null;
-      const sourceFileData = activeStepSourceFile
-        ? getOpenFileByPath(activeStepSourceFile.path)
-        : state.activeFileId
-          ? openFiles[state.activeFileId]
-          : null;
-      const resolvedSourceFile = sourceFileData ?? openFiles[fileId];
-      const resolvedSourceTextures = resolvedSourceFile?.rendererRef?.current?.getTextures();
-      if (!resolvedSourceTextures || !resolvedSourceFile?.spectrogramData) return false;
-
       // Both onset maps are baked here rather than inside the renderer so the
       // sensitivity control and the file's latest detections reach the shader
       // through one path. Sensitivity is per file — each side of a cross-file
       // paint uses its own.
-      const sourceFileInfo: SourceFileInfo = {
-        id: resolvedSourceFile.id,
-        filePath: resolvedSourceFile.filePath,
-        displayName: resolvedSourceFile.displayName,
-        spectrogramData: resolvedSourceFile.spectrogramData,
-        textures: resolvedSourceTextures,
-        onsetTexture: getOnsetTexture(
-          resolvedSourceFile.id,
-          resolvedSourceFile.onsets,
-          resolvedSourceFile.spectrogramData.numFrames / resolvedSourceFile.spectrogramData.sampleRate,
-          state.filepathsOnsetSensitivity[resolvedSourceFile.filePath] ?? DEFAULT_ONSET_SENSITIVITY,
-        ),
+      const toSourceInfo = (openFile: OpenFile | undefined): SourceFileInfo | undefined => {
+        const textures = openFile?.rendererRef?.current?.getTextures();
+        if (!textures || !openFile?.spectrogramData) return undefined;
+        return {
+          id: openFile.id,
+          filePath: openFile.filePath,
+          displayName: openFile.displayName,
+          spectrogramData: openFile.spectrogramData,
+          textures,
+          onsetTexture: getOnsetTexture(
+            openFile.id,
+            openFile.onsets,
+            openFile.spectrogramData.numFrames / openFile.spectrogramData.sampleRate,
+            state.filepathsOnsetSensitivity[openFile.filePath] ?? DEFAULT_ONSET_SENSITIVITY,
+          ),
+        };
       };
+
+      // A step with no Source of its own falls back to this: the file being
+      // painted, which is what "paint from myself" means.
+      const sourceFileInfo =
+        toSourceInfo(state.activeFileId ? openFiles[state.activeFileId] : undefined) ?? toSourceInfo(openFiles[fileId]);
+      if (!sourceFileInfo) return false;
+
+      // Every step samples from the file its own Source control names, so the
+      // renderer gets one entry per step rather than one file for the brush. A
+      // step naming a file that is no longer open falls back to painting from
+      // the file under the brush.
+      const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+      const resolved = new Map<string, SourceFileInfo | undefined>();
+      const stepSources = steps.map((step) => {
+        const path = step.sourceFile?.path;
+        if (path === undefined) return undefined;
+        if (!resolved.has(path)) resolved.set(path, toSourceInfo(getOpenFileByPath(path)));
+        return resolved.get(path);
+      });
+
       const destOnsetTexture = getOnsetTexture(
         fileId,
         file.onsets,
@@ -764,6 +783,7 @@ const FileRendererInner = memo(
               tiltX: penState.tiltX,
               tiltY: penState.tiltY,
               destOnsetTexture,
+              stepSources,
             },
             state,
             sourceFileInfo,
@@ -808,9 +828,8 @@ const FileRendererInner = memo(
       const bpm = state.filepathsBpm[file.filePath] || 120;
       const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
 
-      // Resolve the brush's bottom-left UV from the stored aim point.
-      // cursorPosition is the user's aim; the renderer's shaders expect the
-      // BL origin, which in center-anchor mode sits half a footprint away.
+      // The user's aim point. Brush size and anchor mode are per-step, so each
+      // step turns this into its own bottom-left origin.
       let cursorPos = new Vector2(-1, -1);
 
       if ((state.activeFileId === fileId || hoveredFileId === fileId) && cursorPosition) {
@@ -822,28 +841,18 @@ const FileRendererInner = memo(
           spectrogramData.bandsPerOctave,
           spectrogramData.numBands,
         );
-        const { blX, blY } = aimUvToBrushBlUv(
-          state,
-          aim.x,
-          aim.y,
-          bpm,
-          totalDuration,
-          spectrogramData.bandsPerOctave,
-          spectrogramData.numBands,
-        );
-        cursorPos = new Vector2(blX, blY);
+        cursorPos = new Vector2(aim.x, aim.y);
       }
 
-      // Check if this file is referenced as source by the active step.
-      // When sourceFile is null, the active file is the implicit "self" source.
-      const activeStepRaw = (state.brushes[state.activeBrushIndex]?.steps ?? [])[state.activeStepIndex];
-      const activeStepSourceFile = activeStepRaw?.sourceFile ?? null;
-      const sourceFileData = activeStepSourceFile
-        ? getOpenFileByPath(activeStepSourceFile.path)
-        : state.activeFileId
-          ? openFiles[state.activeFileId]
-          : null;
-      const isSourceFile = sourceFileData?.id === fileId;
+      // Each step names the file it samples; a step with none reads the file
+      // being painted, which makes that file the implicit source. This file is
+      // a source when any step points at it, and the first such step draws the
+      // sampling rectangle.
+      const brushSteps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+      const sourceStepIndex = brushSteps.findIndex((step) => resolveStepSourceFile(state, step)?.id === fileId);
+      const sourceStepRaw = sourceStepIndex >= 0 ? brushSteps[sourceStepIndex] : undefined;
+      const sourceFileData = resolveStepSourceFile(state, sourceStepRaw);
+      const isSourceFile = sourceStepIndex >= 0;
 
       // Create StrokeRenderer if not exists
       if (!strokeRendererRef.current) {
@@ -962,17 +971,20 @@ const FileRendererInner = memo(
           numBands: spectrogramData.numBands,
         });
 
-      // Calculate maximum brush size across all steps (for display purposes)
-      const activeStepState = createStepStateView(state, state.activeStepIndex);
+      // The rectangle the brush paints inside: the union of the steps' own
+      // rectangles, since size and anchor mode are per-step. Wrapping is a
+      // union too — the rectangle tiles on an axis any step wraps.
       const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
-      const brushSizeUv = new Vector2(0, 0);
+      const brushUnionMin = new Vector2(Infinity, Infinity);
+      const brushUnionMax = new Vector2(-Infinity, -Infinity);
       const displayFullAxes = { fullTime: false, fullPitch: false };
+      let displayWrapsTime = false;
+      let displayWrapsPitch = false;
       for (let i = 0; i < steps.length; i++) {
         const stepState = createStepStateView(state, i);
         const stepFp = calculateBrushFootprint(stepState);
         // Match the painted footprint: a snapped Grid-mode time brush fills the
         // swung cell under the cursor, so the preview rectangle must too.
-        let stepTimeUv = stepFp.sizeUv.x;
         if (cursorPos.x >= 0 && !stepFp.fullTime) {
           const swungTimeUv = swungGridCellWidthUv(
             cursorPos.x,
@@ -986,24 +998,40 @@ const FileRendererInner = memo(
             bpm,
             totalDuration,
           );
-          if (swungTimeUv !== null) stepTimeUv = swungTimeUv;
+          if (swungTimeUv !== null) stepFp.sizeUv.x = swungTimeUv;
         }
-        brushSizeUv.x = Math.max(brushSizeUv.x, stepTimeUv);
-        brushSizeUv.y = Math.max(brushSizeUv.y, stepFp.sizeUv.y);
+        const { blX, blY } = footprintAimToBlUv(cursorPos.x, cursorPos.y, stepFp, {
+          anchorMode: stepState.brushAnchorMode as number,
+          brushSizeTime: stepState.brushSizeTime,
+          gridSizeBeats: stepState.gridSizeBeats,
+          snapTime: stepState.snapTime,
+        });
+        const stepAnchor = resolveBrushAnchor(new Vector2(blX, blY), stepFp.fullTime, stepFp.fullPitch);
+        brushUnionMin.x = Math.min(brushUnionMin.x, stepAnchor.x);
+        brushUnionMin.y = Math.min(brushUnionMin.y, stepAnchor.y);
+        brushUnionMax.x = Math.max(brushUnionMax.x, stepAnchor.x + stepFp.sizeUv.x);
+        brushUnionMax.y = Math.max(brushUnionMax.y, stepAnchor.y + stepFp.sizeUv.y);
         if (stepFp.fullTime) displayFullAxes.fullTime = true;
         if (stepFp.fullPitch) displayFullAxes.fullPitch = true;
+        const stepWrap = stepState.brushWrapMode as number;
+        if (stepWrap === 1 || stepWrap === 3) displayWrapsTime = true;
+        if (stepWrap === 2 || stepWrap === 3) displayWrapsPitch = true;
       }
+      const brushSizeUv = steps.length
+        ? new Vector2(brushUnionMax.x - brushUnionMin.x, brushUnionMax.y - brushUnionMin.y)
+        : new Vector2(0, 0);
+      const brushOriginUv = steps.length ? brushUnionMin : cursorPos;
 
       // For source file: compute the sampling position in this file's UV space.
       let sourceDisplayPos = new Vector2(-1, -1);
       if (isSourceFile) {
-        const mode = String(activeStepRaw?.sourcePositionMode ?? "follow");
+        const mode = String(sourceStepRaw?.sourcePositionMode ?? "follow");
         const sourcePositionUv =
           mode === "follow"
             ? new Vector2(0, 0)
             : new Vector2(
-                (Number(activeStepRaw?.sourceTimeOffset) || 0) / 100,
-                (Number(activeStepRaw?.sourcePitchOffset) || 0) / 100,
+                (Number(sourceStepRaw?.sourceTimeOffset) || 0) / 100,
+                (Number(sourceStepRaw?.sourcePitchOffset) || 0) / 100,
               );
         const shouldTrackCursor =
           (mode === "follow" || mode === "fixed" || (mode === "anchored" && state.isStroking)) &&
@@ -1032,14 +1060,15 @@ const FileRendererInner = memo(
               activeDuration,
               activeFile.spectrogramData.bandsPerOctave,
               activeFile.spectrogramData.numBands,
+              sourceStepIndex,
             );
             const destCursorUv = new Vector2(destCursorX, destCursorY);
 
-            // Resolve the active step's footprint in the active file's space so that the
+            // Resolve the sampling step's footprint in the active file's space so that the
             // source display rectangle honours Full-axis anchoring (brush anchors to 0).
-            const activeStepFp = resolveBrushFootprint({
-              brushSizeTime: Number(activeStepRaw?.brushSizeTime ?? 0),
-              brushSizePitch: Number(activeStepRaw?.brushSizePitch ?? 0),
+            const sourceStepFp = resolveBrushFootprint({
+              brushSizeTime: Number(sourceStepRaw?.brushSizeTime ?? 0),
+              brushSizePitch: Number(sourceStepRaw?.brushSizePitch ?? 0),
               gridSizeBeats: state.gridSizeBeats,
               gridSizeSemis: state.gridSizeSemis,
               bpm: activeBpm,
@@ -1047,12 +1076,12 @@ const FileRendererInner = memo(
               bandsPerOctave: activeFile.spectrogramData.bandsPerOctave,
               numBands: activeFile.spectrogramData.numBands,
             });
-            const destAnchorUv = resolveBrushAnchor(destCursorUv, activeStepFp.fullTime, activeStepFp.fullPitch);
+            const destAnchorUv = resolveBrushAnchor(destCursorUv, sourceStepFp.fullTime, sourceStepFp.fullPitch);
 
             const tScale = (activeBpm * activeDuration) / (bpm * totalDuration);
             const bScale = sourceBandUvSlope(activeFile.spectrogramData, spectrogramData);
 
-            const offset = calculateSourceOffset(activeStepRaw?.lockedOffset, mode, destAnchorUv, tScale, bScale);
+            const offset = calculateSourceOffset(sourceStepRaw?.lockedOffset, mode, destAnchorUv, tScale, bScale);
             sourceDisplayPos = new Vector2(
               destAnchorUv.x * tScale + offset.x + sourcePositionUv.x,
               destToSourceBandUv(destAnchorUv.y, activeFile.spectrogramData, spectrogramData) +
@@ -1096,7 +1125,7 @@ const FileRendererInner = memo(
 
       // In Full mode, the displayed brush rectangle anchors to 0 on that axis so it
       // spans the full file extent regardless of cursor position.
-      const displayBrushAnchor = resolveBrushAnchor(cursorPos, displayFullAxes.fullTime, displayFullAxes.fullPitch);
+      const displayBrushAnchor = resolveBrushAnchor(brushOriginUv, displayFullAxes.fullTime, displayFullAxes.fullPitch);
       displayMaterial.uniforms.brushBottomLeftUv.value = displayBrushAnchor;
       displayMaterial.uniforms.sourceSamplingBottomLeftUv.value = sourceDisplayPos;
       displayMaterial.uniforms.brushSizeUv.value = brushSizeUv;
@@ -1164,19 +1193,19 @@ const FileRendererInner = memo(
       if (isPicking && hoveredFileId === fileId) {
         invalidate();
       }
-      displayMaterial.uniforms.wrapMode.value = activeStepState.brushWrapMode;
+      displayMaterial.uniforms.wrapMode.value = (displayWrapsTime ? 1 : 0) + (displayWrapsPitch ? 2 : 0);
 
       // Update source offset uniforms (for display preview)
-      if (activeStepSourceFile && sourceFileData?.spectrogramData) {
+      if (sourceStepRaw?.sourceFile && sourceFileData?.spectrogramData) {
         const srcBpm = state.filepathsBpm[sourceFileData.filePath] || 120;
         const srcDur = sourceFileData.spectrogramData.numFrames / sourceFileData.spectrogramData.sampleRate;
         const tScale = (bpm * totalDuration) / (srcBpm * srcDur);
         const bScale = sourceBandUvSlope(spectrogramData, sourceFileData.spectrogramData);
 
         const sourceOffsetUv = calculateSourceOffset(
-          activeStepRaw?.lockedOffset,
-          String(activeStepRaw?.sourcePositionMode ?? "follow"),
-          cursorPos,
+          sourceStepRaw?.lockedOffset,
+          String(sourceStepRaw?.sourcePositionMode ?? "follow"),
+          brushOriginUv,
           tScale,
           bScale,
         );
@@ -1344,7 +1373,7 @@ const FileRendererInner = memo(
         if (!strokeRenderer?.getIsInitialized()) return 0;
         let painted = 0;
         for (const stroke of strokes) {
-          if (dispatchStroke(stroke.state, new Vector2(stroke.blX, stroke.blY), false)) painted++;
+          if (dispatchStroke(stroke.state, new Vector2(stroke.aimX, stroke.aimY), false)) painted++;
         }
         if (painted > 0) displayMode.current = "committed";
         invalidateRef.current?.();
