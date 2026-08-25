@@ -336,10 +336,6 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
             }
           }
 
-          // The canvas already holds the stroke, but the decimated overview the
-          // zoomed-out display falls back to was built from the state before it.
-          renderer.updateOverview(data, historyDirtyRanges);
-
           const node = await historyManager.addStroke({
             data,
             label: snapshot.brushName,

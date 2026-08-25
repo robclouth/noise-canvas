@@ -73,8 +73,7 @@ function capSpan(file: PackedLayout, centre: number, wanted: number, maxPixels: 
 /**
  * The span a window would hold for this view: the view widened by the margin,
  * or — when that is past the cap — the largest allowed span around the view's
- * centre. A view wider than the cap keeps its centre resident and leaves the
- * rest to the overview, which is what the display reads at that zoom anyway.
+ * centre.
  */
 function demandSpan(
   file: PackedLayout,

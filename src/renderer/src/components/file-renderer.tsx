@@ -18,27 +18,20 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import {
   Camera,
-  ClampToEdgeWrapping,
   Color,
   DataTexture,
-  FloatType,
   GLSL3,
   Mesh,
-  NearestFilter,
   RawShaderMaterial,
-  RGBAFormat,
   Texture,
   Vector2,
   WebGLRenderer,
   WebGLRenderTarget,
 } from "three";
 import { effects } from "../effects";
-import { hasCanvasPatchStash } from "@renderer/lib/canvas-patch-stash";
-import { hasFileTask } from "@renderer/lib/file-task-queue";
 import { type FileFootprint } from "@renderer/lib/gpu-budget";
 import { getHistoryManager } from "@renderer/lib/history-manager";
 import { serializeFileTask } from "@renderer/lib/file-task-queue";
@@ -47,17 +40,7 @@ import passThroughVert from "../glsl/pass-through.vert";
 import { DEFAULT_ONSET_SENSITIVITY } from "../lib/constants";
 import { getFileOnsets } from "../lib/file-onsets";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
-import { buildOverview, createOverviewTextures, updateOverviewRanges, type Overview } from "../lib/overview";
-import { getPagedWindows, getPretendWindowFraction, subscribePaging } from "../lib/paging-debug";
-import {
-  buildInPlaceWindowMetadata,
-  buildWindowLayout,
-  fileLayoutOf,
-  layoutPixelCount,
-  type PackedLayout,
-  type WindowLayout,
-} from "../lib/window-layout";
-import { chooseWindow, viewFrameSpan, DEFAULT_WINDOW_POLICY } from "../lib/window-policy";
+import { buildWindowLayout, fileLayoutOf, type WindowLayout } from "../lib/window-layout";
 import { buildWindowTextures } from "../lib/window-textures";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
@@ -153,13 +136,6 @@ export interface FileRendererHandle {
   patchFBOData: (data: Float32Array, pixelRanges: Uint32Array) => void;
   /** The parts of the flat [pixelStart, pixelCount, ...] ranges the canvas holds. */
   residentRanges: (pixelRanges: Uint32Array) => Uint32Array;
-  /**
-   * Re-decimates the zoomed-out overview over `pixelRanges` from `data` (the
-   * full packed state), or over the whole file when they are null. A stroke
-   * paints straight into the canvas without going through patchFBOData, so the
-   * overview would otherwise keep showing the file as it was before it.
-   */
-  updateOverview: (data: Float32Array, pixelRanges: Uint32Array | null) => void;
   /** Returns the textures used for rendering. */
   getTextures: () => {
     packed: WebGLRenderTarget;
@@ -431,10 +407,8 @@ const FileRendererInner = memo(
           previewTex: { value: null as Texture | null },
           previewBinRangesTex: { value: null as Texture | null },
           previewActive: { value: false },
-          overviewTex: { value: null as Texture | null },
-          overviewMetaTex: { value: null as Texture | null },
-          overviewActive: { value: false },
-          overviewStepLog2: { value: 0 },
+          displayMagsTex: { value: null as Texture | null },
+          displayMagsActive: { value: false },
         },
         vertexShader: passThroughVert,
         fragmentShader: displayFrag,
@@ -459,28 +433,6 @@ const FileRendererInner = memo(
 
     // The span the packed, inverse-map and metadata textures hold.
     const windowLayoutRef = useRef<WindowLayout | null>(null);
-    // The committed packed state to put back on the canvas once the renderer
-    // has been rebuilt at a new window.
-    const pendingWindowUploadRef = useRef<Float32Array | null>(null);
-
-    /**
-     * The window the current view calls for, or null to keep `current`. With
-     * paged windows off this is the whole file, which is the state every path
-     * outside this file still assumes.
-     */
-    const chooseWindowForView = useCallback(
-      (current: WindowLayout | null): WindowLayout | null => {
-        const fileLayout = fileLayoutOf(spectrogramData);
-        if (!getPagedWindows()) {
-          if (current && current.startFrame === 0 && current.endFrame >= fileLayout.numFrames) return null;
-          return buildWindowLayout(fileLayout, 0, fileLayout.numFrames);
-        }
-        const state = useStore.getState();
-        const view = viewFrameSpan(fileLayout.numFrames, state.filesZoom[fileId] ?? 0, state.filesOffset[fileId] ?? 0);
-        return chooseWindow(fileLayout, view.startFrame, view.endFrame, current, DEFAULT_WINDOW_POLICY);
-      },
-      [fileId, spectrogramData],
-    );
 
     /**
      * Creates the packed, inverse-map and metadata textures for the resident
@@ -488,12 +440,11 @@ const FileRendererInner = memo(
      */
     const createTextures = useCallback(() => {
       const fileLayout = fileLayoutOf(spectrogramData);
-      const window = chooseWindowForView(null) ?? buildWindowLayout(fileLayout, 0, fileLayout.numFrames);
+      const window = buildWindowLayout(fileLayout, 0, fileLayout.numFrames);
       windowLayoutRef.current = window;
       return buildWindowTextures(spectrogramData, window);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
-      chooseWindowForView,
       spectrogramData.packedData,
       spectrogramData.inverseMap,
       spectrogramData.metadata,
@@ -520,34 +471,6 @@ const FileRendererInner = memo(
       setInverseMapTex(next.inverse);
       setMetadataTex(next.meta);
     }, []);
-
-    /**
-     * Rebuilds the textures and the renderer at `next`, and queues the
-     * committed state to go back on the canvas. The canvas is dropped by the
-     * rebuild, so the caller must be sure the history holds everything on it.
-     */
-    const moveWindow = useCallback(
-      (next: WindowLayout) => {
-        const start = performance.now();
-        pendingWindowUploadRef.current = getHistoryManager(fileId).currentPackedState();
-        disposeLiveTextures();
-        strokeRendererRef.current?.dispose();
-        strokeRendererRef.current = null;
-        windowLayoutRef.current = next;
-        displayMode.current = "committed";
-        installTextures(buildWindowTextures(spectrogramData, next));
-        diag.timing("paging", "gather", performance.now() - start, {
-          startFrame: next.startFrame,
-          frames: next.endFrame - next.startFrame,
-          texels: layoutPixelCount(next),
-          seeded: pendingWindowUploadRef.current ? 1 : 0,
-        });
-        invalidateRef.current?.();
-        snapshotStaleRef.current = true;
-        scheduleSnapshotRefresh();
-      },
-      [fileId, spectrogramData, disposeLiveTextures, installTextures, scheduleSnapshotRefresh],
-    );
 
     // Effect to create and manage spectrogram textures
     useEffect(() => {
@@ -577,99 +500,6 @@ const FileRendererInner = memo(
         invalidateRef.current?.();
       }
     }, [originalPackedDataTex, inverseMapTex, metadataTex]);
-
-    // The decimated whole-file view the display falls back to outside the
-    // resident window, and the file layout its updater indexes by.
-    const overviewRef = useRef<{ overview: Overview; data: DataTexture; meta: DataTexture } | null>(null);
-    const fileLayoutRef = useRef<PackedLayout | null>(null);
-
-    const disposeOverview = useCallback(() => {
-      const live = overviewRef.current;
-      if (!live) return;
-      live.data.dispose();
-      live.meta.dispose();
-      overviewRef.current = null;
-    }, []);
-
-    const rebuildOverview = useCallback(
-      (packedData: Float32Array = spectrogramData.packedData) => {
-        disposeOverview();
-        const started = performance.now();
-        const layout = fileLayoutOf(spectrogramData);
-        const overview = buildOverview(packedData, layout, spectrogramData.metadata);
-        const textures = createOverviewTextures(overview);
-        fileLayoutRef.current = layout;
-        overviewRef.current = { overview, data: textures.data, meta: textures.meta };
-        diag.timing("paging", "overview build", performance.now() - started, {
-          texels: overview.layout.textureWidth * overview.layout.textureHeight,
-        });
-      },
-      [disposeOverview, spectrogramData],
-    );
-
-    useEffect(() => {
-      rebuildOverview();
-      invalidateRef.current?.();
-      return disposeOverview;
-    }, [rebuildOverview, disposeOverview]);
-
-    // A max cannot follow a value downwards, so the updater re-reads every file
-    // bin of a touched group; the whole texture is then re-uploaded, because a
-    // stroke's bins scatter across nearly every row of it.
-    const patchOverview = (packedData: Float32Array, pixelRanges: Uint32Array): void => {
-      const live = overviewRef.current;
-      const layout = fileLayoutRef.current;
-      if (!live || !layout) return;
-      const started = performance.now();
-      updateOverviewRanges(live.overview, packedData, layout, pixelRanges);
-      live.data.needsUpdate = true;
-      diag.timing("paging", "overview update", performance.now() - started, { ranges: pixelRanges.length / 2 });
-    };
-
-    // Before real windows exist, a forced pretend-window over the whole-file
-    // packed texture drives the display's fallback. Only the display reads it:
-    // the shared metadata texture stays whole-file, so painting is untouched.
-    const pretendWindowFraction = useSyncExternalStore(subscribePaging, getPretendWindowFraction);
-    const pagedWindows = useSyncExternalStore(subscribePaging, getPagedWindows);
-
-    // The frame loop is what moves the window, and turning paging on or off
-    // changes nothing the loop already watches.
-    useEffect(() => {
-      invalidateRef.current?.();
-    }, [pagedWindows]);
-    const [pretendMetadataTex, setPretendMetadataTex] = useState<DataTexture | null>(null);
-
-    useEffect(() => {
-      if (pretendWindowFraction <= 0 || pretendWindowFraction >= 1) {
-        setPretendMetadataTex(null);
-        return;
-      }
-      const { numFrames, numBands, metadata } = spectrogramData;
-      const span = Math.max(1, Math.round(numFrames * pretendWindowFraction));
-      const start = Math.round((numFrames - span) / 2);
-      const window = buildWindowLayout(fileLayoutOf(spectrogramData), start, start + span);
-      const tex = new DataTexture(buildInPlaceWindowMetadata(window, metadata), numBands, 2, RGBAFormat, FloatType);
-      tex.internalFormat = "RGBA32F";
-      tex.minFilter = NearestFilter;
-      tex.magFilter = NearestFilter;
-      tex.wrapS = ClampToEdgeWrapping;
-      tex.wrapT = ClampToEdgeWrapping;
-      tex.generateMipmaps = false;
-      tex.needsUpdate = true;
-      setPretendMetadataTex(tex);
-      return () => {
-        tex.dispose();
-      };
-    }, [pretendWindowFraction, spectrogramData]);
-
-    // After the texture is on the material, not while the state that carries it
-    // is still being committed: a frame drawn in between reads the old one and
-    // nothing asks for another.
-    useEffect(() => {
-      invalidateRef.current?.();
-      snapshotStaleRef.current = true;
-      scheduleSnapshotRefresh();
-    }, [pretendMetadataTex, scheduleSnapshotRefresh]);
 
     /**
      * Calculate clone-stamp offset from the cursor, scaled to source UV space.
@@ -727,11 +557,10 @@ const FileRendererInner = memo(
 
       const uniforms = displayMaterial.uniforms;
       uniforms.sourceInverseMapTex.value = inverseMapTex;
-      uniforms.sourceMetadataTex.value = pretendMetadataTex ?? metadataTex;
-      uniforms.overviewTex.value = overviewRef.current?.data ?? null;
-      uniforms.overviewMetaTex.value = overviewRef.current?.meta ?? null;
-      uniforms.overviewActive.value = overviewRef.current !== null;
-      uniforms.overviewStepLog2.value = overviewRef.current?.overview.stepLog2 ?? 0;
+      uniforms.sourceMetadataTex.value = metadataTex;
+      const displayMags = strokeRendererRef.current?.getDisplayMagsTexture() ?? null;
+      uniforms.displayMagsTex.value = displayMags;
+      uniforms.displayMagsActive.value = displayMags !== null;
       uniforms.sourceMinFreq.value = spectrogramData.minFreq;
       uniforms.sourceBandsPerOctave.value = spectrogramData.bandsPerOctave;
       uniforms.sourceFrameCount.value = spectrogramData.numFrames;
@@ -965,19 +794,6 @@ const FileRendererInner = memo(
       const file = openFiles[fileId];
       if (!file || !file.spectrogramData) return;
 
-      // Before anything reads the textures: the rebuild replaces them, and this
-      // frame's closure would still be holding the ones it disposed. The rebuild
-      // drops the canvas and puts back what the history holds, so it must wait
-      // for everything on the canvas to have reached the history: a dab, a
-      // stroke, the commit that follows it, and a patch the canvas never took.
-      const nextWindow = chooseWindowForView(windowLayoutRef.current);
-      const canMoveWindow =
-        !applyStroke.current && !state.isStroking && !hasFileTask(fileId) && !hasCanvasPatchStash(fileId);
-      if (nextWindow && canMoveWindow) {
-        moveWindow(nextWindow);
-        return;
-      }
-
       const bpm = state.filepathsBpm[file.filePath] || 120;
       const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
 
@@ -1060,13 +876,6 @@ const FileRendererInner = memo(
       // Initialize StrokeRenderer if not done yet
       if (!strokeRenderer.getIsInitialized()) {
         strokeRenderer.initialize();
-      }
-
-      // The committed state a window move dropped off the canvas.
-      const pendingUpload = pendingWindowUploadRef.current;
-      if (pendingUpload) {
-        pendingWindowUploadRef.current = null;
-        strokeRenderer.setFBOData(pendingUpload);
       }
 
       // Hook up the history manager exactly once per component lifetime.
@@ -1409,7 +1218,6 @@ const FileRendererInner = memo(
       if (!strokeRendererRef.current) return;
 
       strokeRendererRef.current.setFBOData(data);
-      rebuildOverview(data);
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();
@@ -1431,7 +1239,6 @@ const FileRendererInner = memo(
       if (!strokeRendererRef.current) return;
 
       strokeRendererRef.current.patchFBOData(data, pixelRanges);
-      patchOverview(data, pixelRanges);
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();
@@ -1445,18 +1252,12 @@ const FileRendererInner = memo(
     const gpuFootprint = (): FileFootprint => {
       const fileTexels = spectrogramData.textureWidth * spectrogramData.textureHeight;
       const window = windowLayoutRef.current;
-      const overview = overviewRef.current?.overview.layout;
+      const windowTexels = window ? window.textureWidth * window.textureHeight : fileTexels;
       return {
         fileTexels,
-        windowTexels: window ? window.textureWidth * window.textureHeight : fileTexels,
-        overviewTexels: overview ? overview.textureWidth * overview.textureHeight : 0,
+        windowTexels,
+        displayTexels: strokeRendererRef.current?.getDisplayMagsTexture() ? windowTexels : 0,
       };
-    };
-
-    const updateOverview = (data: Float32Array, pixelRanges: Uint32Array | null): void => {
-      if (pixelRanges) patchOverview(data, pixelRanges);
-      else rebuildOverview(data);
-      invalidateRef.current?.();
     };
 
     /**
@@ -1479,7 +1280,6 @@ const FileRendererInner = memo(
       if (strokeRendererRef.current) {
         strokeRendererRef.current.restoreOriginal();
       }
-      rebuildOverview(spectrogramData.packedData);
       invalidateRef.current();
       snapshotStaleRef.current = true;
       scheduleSnapshotRefresh();
@@ -1500,7 +1300,6 @@ const FileRendererInner = memo(
       }
 
       installTextures(createTextures());
-      rebuildOverview();
 
       invalidateRef.current();
       snapshotStaleRef.current = true;
@@ -1577,7 +1376,6 @@ const FileRendererInner = memo(
       setFBOData,
       patchFBOData,
       residentRanges,
-      updateOverview,
       getTextures,
       restoreOriginal,
       clearPreview,

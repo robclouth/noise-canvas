@@ -6,6 +6,7 @@ import {
   DataTexture,
   FloatType,
   GLSL3,
+  HalfFloatType,
   InstancedBufferAttribute,
   InstancedBufferGeometry,
   Mesh,
@@ -15,6 +16,7 @@ import {
   RawShaderMaterial,
   RedFormat,
   RGBAFormat,
+  RGFormat,
   Scene,
   Texture,
   Vector2,
@@ -22,6 +24,7 @@ import {
   WebGLRenderTarget,
 } from "three";
 import { copyMaterial } from "../components/copy-material";
+import { displayMagsMaterial } from "../components/display-mags-material";
 import { gatherMaterial } from "../components/gather-material";
 import { patchMaterial } from "../components/patch-material";
 import { phaseTurnMaterial } from "../components/phase-turn-material";
@@ -252,6 +255,10 @@ export class StrokeRenderer {
   // FBOs for ping-pong rendering
   private fbo1: WebGLRenderTarget;
   private fbo2: WebGLRenderTarget;
+  // Whole-window RG16F dB magnitudes the display reads as its committed base.
+  // Every write to the committed FBO re-encodes its ranges here; phase-only
+  // writes are exempt, because the display never reads phase.
+  private displayMags: WebGLRenderTarget | null = null;
   // Per-stroke scratch targets, shared across all files through the pool.
   // Bound (and refreshed if another file painted since) by acquireScratch().
   private pool: StrokeScratchPool;
@@ -449,6 +456,15 @@ export class StrokeRenderer {
     this.gl.autoClear = prevAutoClear;
   }
 
+  /** Re-encodes the committed FBO's magnitudes into the display texture over `list`. */
+  private refreshDisplayMags(list: PixelRangeList): void {
+    if (!this.displayMags) return;
+    displayMagsMaterial.uniforms.inputTex.value = this.getDisplayTexture();
+    this.drawRanges(displayMagsMaterial, this.displayMags, list);
+    displayMagsMaterial.uniforms.inputTex.value = null;
+    this.gl.setRenderTarget(null);
+  }
+
   /** The whole packed texture as one range. */
   private fullRange(): PixelRangeList {
     const { textureWidth, textureHeight } = this.windowLayout;
@@ -551,6 +567,19 @@ export class StrokeRenderer {
     this.gl.setRenderTarget(null);
 
     this.pingPong = 0;
+
+    if (!this.displayMags) {
+      const { textureWidth, textureHeight } = this.windowLayout;
+      this.displayMags = new WebGLRenderTarget(textureWidth, textureHeight, {
+        format: RGFormat,
+        type: HalfFloatType,
+        minFilter: NearestFilter,
+        magFilter: NearestFilter,
+        depthBuffer: false,
+        stencilBuffer: false,
+      });
+    }
+    this.refreshDisplayMags(this.fullRange());
 
     // The stroke-start snapshot no longer matches the reset canvas; force the
     // next acquireScratch to rebuild it.
@@ -1337,6 +1366,7 @@ export class StrokeRenderer {
       if (!copyBack) {
         this.pingPong = 1 - this.pingPong;
       }
+      this.refreshDisplayMags(copyBack && footprint ? footprint : this.fullRange());
 
       // Update stroke mask for non-cumulative mode. Any step being non-accumulate
       // means the per-step gate in the render loop will sample the mask for that
@@ -1795,6 +1825,7 @@ export class StrokeRenderer {
 
     dataTex.dispose();
 
+    this.refreshDisplayMags(this.fullRange());
     this.invalidateFboData();
   }
 
@@ -1896,6 +1927,13 @@ export class StrokeRenderer {
     this.gl.setRenderTarget(null);
     this.gl.autoClear = prevAutoClear;
 
+    const patched = new Uint32Array(numRanges * 2);
+    for (let i = 0; i < numRanges; i++) {
+      patched[i * 2] = instances[i * 3];
+      patched[i * 2 + 1] = instances[i * 3 + 1];
+    }
+    this.refreshDisplayMags({ ranges: patched, count: numRanges });
+
     geometry.dispose();
     patchTex.dispose();
     this.invalidateFboData();
@@ -1931,7 +1969,13 @@ export class StrokeRenderer {
    * preview is valid in, as a numBands×1 texture. `active` is false when there
    * is no preview to show.
    */
-  getPreviewDisplay(): { committed: Texture; preview: Texture; binRanges: Texture; active: boolean } {
+  getPreviewDisplay(): {
+    committed: Texture;
+    preview: Texture;
+    binRanges: Texture;
+    active: boolean;
+    displayMags: Texture | null;
+  } {
     const currentFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
     const nextFBO = this.pingPong === 0 ? this.fbo2 : this.fbo1;
     return {
@@ -1939,7 +1983,13 @@ export class StrokeRenderer {
       preview: nextFBO.texture,
       binRanges: this.previewRangeTex,
       active: this.previewActive,
+      displayMags: this.displayMags?.texture ?? null,
     };
+  }
+
+  /** The RG16F dB magnitudes texture the display reads as its committed base. */
+  getDisplayMagsTexture(): Texture | null {
+    return this.displayMags?.texture ?? null;
   }
 
   // Blocks until all GPU work submitted so far has finished. Lets opt-in paint
@@ -1957,6 +2007,7 @@ export class StrokeRenderer {
   captureRollback(): void {
     if (this.rollbackFbo) {
       this.blitFBO(this.rollbackFbo, this.pingPong === 0 ? this.fbo1 : this.fbo2);
+      this.refreshDisplayMags(this.fullRange());
     } else {
       this.rollbackFbo = this.createFBO(this.windowLayout.textureWidth, this.windowLayout.textureHeight, RGBAFormat);
       this.blitFBO(this.pingPong === 0 ? this.fbo1 : this.fbo2, this.rollbackFbo);
@@ -1976,6 +2027,7 @@ export class StrokeRenderer {
   restoreRollback(): boolean {
     if (!this.rollbackFbo) return false;
     this.blitFBO(this.rollbackFbo, this.pingPong === 0 ? this.fbo1 : this.fbo2);
+    this.refreshDisplayMags(this.fullRange());
     this.releaseRollback();
     this.dirtyRegion = null;
     this.invalidateFboData();
@@ -2136,6 +2188,8 @@ export class StrokeRenderer {
     this.scratch = null;
     this.fbo1.dispose();
     this.fbo2.dispose();
+    this.displayMags?.dispose();
+    this.displayMags = null;
     this.maskMaterial.dispose();
     this.modulatorMaterial.dispose();
     this.fboMesh.geometry.dispose();

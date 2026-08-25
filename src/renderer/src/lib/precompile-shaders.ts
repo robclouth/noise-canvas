@@ -5,6 +5,7 @@ import displayFrag from "../glsl/display.frag";
 import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
 import modulatorFrag from "../glsl/modulator.frag";
+import { displayMagsMaterial } from "../components/display-mags-material";
 import { rangeCopyMaterial } from "../components/range-copy-material";
 import passThroughVert from "../glsl/pass-through.vert";
 import rangeQuadVert from "../glsl/range-quad.vert";
@@ -128,6 +129,7 @@ export async function precompileRemainingShaders(
     auxiliaryMaterial(maskUpdateFrag, rangeQuadVert),
     auxiliaryMaterial(modulatorPrecomputeFrag, rangeQuadVert),
     rangeCopyMaterial,
+    displayMagsMaterial,
     auxiliaryMaterial(modulatorFrag),
     ...effectMaterialsByPriority(priority),
   ];

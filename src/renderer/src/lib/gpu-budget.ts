@@ -5,8 +5,8 @@ import { host } from "./host";
 // inverse map (RG32F = 8). Charged per texel of the resident window, which is
 // the whole file until paging moves it.
 export const GPU_BYTES_PER_TEXEL_FILE = 56;
-// The decimated whole-file overview, RG16F.
-export const GPU_BYTES_PER_TEXEL_OVERVIEW = 4;
+// The whole-window RG16F dB display texture.
+export const GPU_BYTES_PER_TEXEL_DISPLAY = 4;
 // The shared stroke scratch pool at its fullest, sized to the largest open
 // file: two pass FBOs (32), the stroke-start snapshot (16), a mask ping-pong
 // pair per brush step (MAX_STEPS × 2 × R16F = 20) and the two-target modulator
@@ -35,13 +35,13 @@ export interface FileFootprint {
   fileTexels: number;
   /** Packed texels resident on the GPU. Equal to `fileTexels` until paging moves the window. */
   windowTexels: number;
-  /** Texels the decimated overview holds. Zero before it is built. */
-  overviewTexels: number;
+  /** Texels the RG16F display texture holds. Zero before it is built. */
+  displayTexels: number;
 }
 
-/** A file with everything resident and no overview. */
+/** A file with everything resident, charged as if the display texture is up. */
 export function wholeFileFootprint(fileTexels: number): FileFootprint {
-  return { fileTexels, windowTexels: fileTexels, overviewTexels: 0 };
+  return { fileTexels, windowTexels: fileTexels, displayTexels: fileTexels };
 }
 
 /** Bytes the open files hold, by the same rates the budget is spent at. */
@@ -49,17 +49,17 @@ export function spectrogramBytes(files: FileFootprint[], unified: boolean): numb
   let resident = 0;
   let largest = 0;
   let onCpu = 0;
-  let overview = 0;
+  let display = 0;
   for (const file of files) {
     resident += file.windowTexels;
     largest = Math.max(largest, file.windowTexels);
     onCpu += file.fileTexels;
-    overview += file.overviewTexels;
+    display += file.displayTexels;
   }
   return (
     GPU_BYTES_PER_TEXEL_FILE * resident +
     GPU_BYTES_PER_TEXEL_SCRATCH * largest +
-    GPU_BYTES_PER_TEXEL_OVERVIEW * overview +
+    GPU_BYTES_PER_TEXEL_DISPLAY * display +
     (unified ? CPU_BYTES_PER_TEXEL_FILE * onCpu : 0)
   );
 }

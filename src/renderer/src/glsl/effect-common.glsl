@@ -282,17 +282,6 @@ bool bandIsWholeFile(PackedBand band) {
   return band.windowStart <= 0.0 && band.length >= band.fileLength;
 }
 
-/**
- * Bins from the nearer edge of what the texture holds, negative outside it.
- * The display cross-fades to the overview across the last few bins, because a
- * full-precision bin drawn next to a decimated one reads as a bright edge
- * rather than a join.
- */
-float bandResidencyMargin(PackedBand band, float fileFrame) {
-  float local = floor(fileFrame / exp2(band.stepLog2)) - bandFirstBin(band);
-  return min(local, band.length - 1.0 - local);
-}
-
 // A read that misses the resident window is poisoned in the sentinel build, so
 // a test fails on it instead of accepting window-edge data as the answer.
 #ifdef PAGING_SENTINEL

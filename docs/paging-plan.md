@@ -2,6 +2,39 @@
 
 Reviewed twice against the source (Codex, Gemini) on 2026-08-24. Every claim below that says "verified" was checked at a file and line. The findings from that review are folded in; where a first draft was wrong, the correction is stated rather than the original.
 
+# The pivot — windows follow strokes, not the view (2026-08-25)
+
+Stage 2 was built and measured, and the measurement rejected the design. A window that follows the view must gather on pan and zoom, and the gather costs 95-190 ms at wide zoom — a stutter in the one interaction that must never stutter. The two-source display it forced (window plus overview, crossed over by zoom) changed the zoomed-out look and put a drift hazard on every future write path. Both problems came from one dependency: the display read the painting FBO, so paging the painting stack meant paging the display.
+
+The pivot cuts that dependency.
+
+- **The display gets its own whole-file texture** — full resolution, magnitudes only, in dB, RG16F, in the packed layout the metadata texture already describes. 4 B/texel: 190 MB for the 240 s file, about 1 GB for 20 minutes. Pan and zoom read it directly at every zoom. No gather, no crossover, no look change, no stutter — and the per-load decimated overview build comes out. `display.frag` never reads phase (verified in the table below), so nothing is lost.
+- **The painting stack becomes per-stroke.** At stroke start the renderer gathers footprint ∪ reach into a full-precision window; the FBO pair, the pristine texture, the inverse map and the scratch pool are sized to that window and returned to the pool after the commit. Between strokes the painting stack holds nothing — the truth lives in `packedData`, and the picture in the display texture. The live stroke is overlaid on the display texture inside its rectangle by the preview mechanism `display.frag` already has.
+- **Commit keeps its shape**: footprint readback, scatter into `packedData` in place, then patch the display texture on the GPU from the stroke FBO — magnitudes to dB, range quads, no CPU walk.
+- **A stroke larger than the cap tiles like Grid Apply, or refuses honestly.** The interactive cap is a budget knob at or under `EXACT_ADDRESS_PIXELS = 2^24`, which keeps every stroke window exact by construction. The old Stage 3 reach and tiling design carries over unchanged.
+- **The CPU backing store is untouched by the pivot** — `packedData` stays whole-file at 16 B/texel until the chunk store lands, exactly as before.
+
+What a miss costs is the design's real improvement: a gather miss now delays a stroke by milliseconds at stroke start, where a hitch already lives. It can never put wrong pixels on screen.
+
+What survives from Stages 0-2: the window layout and gather (they become the stroke-window builder and the tile builder), `packed-addressing.test.ts` and the 2^24 cap, the budget footprints (retargeted: window texels become stroke-stack texels, overview texels become display-texture texels), `patchFBOData`, the render harness, and the addressing helpers. What comes out: the view-following use of `window-policy.ts` in the frame loop, the zoom crossover in `display.frag`, and the per-load overview build. `lib/overview.ts` stays — at `stepLog2 = 0` its layout is the file's own, which is the display texture's layout, and a decimated build remains the candidate low-resolution preview if files past the addressing ceiling ever need one.
+
+Two consequences to keep in sight:
+
+- The whole-file display texture inherits the 2^24 addressing ceiling — the same aliasing today's whole-file display has always had, no worse. The fix is integer addressing on the display read path (offsets past 2^24 no longer fit a float32, so the metadata needs split or integer offsets), and it is contained to that path. Stroke windows never see it.
+- The display texture is a second copy of the truth, patched at the same choke points that patch the canvas today. The discipline is the overview's, moved to full resolution: any write that skips the choke point leaves a stale picture. The choke-point count does not grow.
+
+## Stages, re-cut
+
+- **Stage A — the display split — landed 2026-08-25.** `StrokeRenderer` owns a whole-window RG16F dB texture (`displayMags`) and re-encodes it with a range-quad pass at every committed write: initialize, every committed dab (footprint ranges), `setFBOData`, `patchFBOData` (patched ranges), and both rollback restores. `applyPhaseTurns` is exempt — it writes phase alone, and the display never reads phase. `display.frag` reads it as the committed base through `displayMagsTex` / `displayMagsActive` (the inactive path still reads the canvas, which is what the parity test compares against); the preview overlay still reads the full-precision FBO. The zoom crossover, the view-window frame-loop code, `paging-debug.ts`, the per-load overview build and `glsl/overview.glsl` came out; `lib/overview.ts` and its tests stay as the future low-resolution builder. The budget's overview line became the display line (`displayTexels`, 4 B/texel) — note Stage A **adds** those bytes; Stage B is what takes the idle FBOs away. Exit held: `display-mags.test.ts` pins parity within one grey unit after a stroke, `setFBOData` and a range patch (both refresh hooks mutation-checked), and in the app a zoom round trip is byte-identical, undo/redo restores the stroke's pixels exactly, and no frame ever gathers.
+- **Stage B — the painting stack becomes per-stroke.** `stroke-reach.ts` (from the old Stage 3), stroke-start gather of footprint ∪ reach, per-stroke FBO allocation from the pool, commit patches the display texture. Every between-stroke reader of the canvas FBO must be enumerated and moved — to the display texture, to `packedData`, or to its own gather: the hover preview, snapshot capture, `getFBOData`, image export. Exit: idle GPU memory is the display texture alone; a local stroke on the 240 s file allocates under ~200 MB; the windowed-versus-resident golden test passes.
+- **Stage C — tiling and the honest refusal.** Beyond-cap strokes and whole-file-reach effects tile like Grid Apply with progress, or refuse loudly. `export.frag` tiles the same way. The `PAGING_SENTINEL` test guards every read.
+- **Stage D — the CPU chunk store.** Unchanged from the old Stage 4.
+- **Stage E — the setting and the fallbacks.** Unchanged from the old Stage 5, except the window-size setting becomes the stroke-stack cap.
+
+The sections below this line predate the pivot. The measurements, the addressing findings and the Stage 0-1 machinery all still hold; the view-window design in Stages 2-3 is superseded as marked.
+
+---
+
 ## Why
 
 GPU memory costs 148 bytes per packed texel (`gpu-budget.ts`: 56 per file, 68 scratch, 24 CPU on unified memory), and texel count is fixed by duration: about 4.5 texels per input frame at every Resolution setting. Memory therefore scales with file length and nothing else. A 60 s stereo file holds 1.8 GiB while painting; five minutes holds 9.0 GiB.
@@ -24,6 +57,8 @@ Everything else that was priced:
 None of them touch the whole-file FBO pair that dominates duration-scaled residency. Paging is the first design that does, and it costs no sound quality, which rules out the remaining alternative of importing at a lower sample rate.
 
 ## The idea
+
+**Superseded by the pivot:** the window described here follows the view; it now follows the stroke, and the overview no longer backs the display — the full-resolution display texture does.
 
 Stop treating "the file" as the unit of residency. Keep two things instead:
 
@@ -253,7 +288,7 @@ Measured again the same way: the step is **under one unit of 255 in every band**
 
 Two things this leaves. The zoomed-out picture is now brighter than today's app draws it (mean 89 against 77 at 1× on that file) because it stops aliasing; nothing changes for a whole-file texture, where `bandIsWholeFile` still returns 0. And the overview is no longer a fixed fraction of the file: bands whose own step is at or past 2048 frames cost a full RG16F texel each, so `gpu-budget.ts` must charge `layoutPixelCount(buildOverviewLayout(file))`, not `filePixels / 16`.
 
-## Stage 2 — the window becomes real for display
+## Stage 2 — the window becomes real for display — **landed, measured, superseded by the pivot**
 
 ### What the first paged windows showed
 
@@ -279,7 +314,7 @@ Memory drops for the first time.
 
 **Exit:** measured memory on the three files, with the scratch pool included, plus the sentinel test green. Peak still includes whole-file `packedData`. Shippable behind the hidden switch.
 
-## Stage 3 — painting inside the window
+## Stage 3 — painting inside the window — **subsumed into Stages B and C**
 
 - `lib/stroke-reach.ts` (new): the file frame span a stroke will **read**, from the resolved step parameters and the effect chain — `sourceTimeOffset`, `sourceTimeScale` and their modulated extremes, each effect's declared stencil, and the whole-file cases from decision 4.
 - At stroke start: `required = footprint ∪ reach`. Inside the window, paint. Inside the budget, widen and re-gather **once, at stroke start** — never mid-stroke, which would move the ping-pong state under the dabs. Otherwise tile, or run the whole-file path.

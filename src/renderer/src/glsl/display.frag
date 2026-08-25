@@ -40,35 +40,41 @@ uniform sampler2D previewTex;
 uniform sampler2D previewBinRangesTex;
 uniform bool previewActive;
 
-#include "overview.glsl";
+// The committed base: whole-window magnitudes as dB in RG16F, kept current by
+// the stroke renderer at every committed write. With it inactive the canvas
+// itself is read, which only tests and the first frames before a build use.
+uniform sampler2D displayMagsTex;
+uniform bool displayMagsActive;
+
+#include "display-mags.glsl";
 
 
-vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, ivec2 texSize) {
-    ivec2 texel = packedTexel(bandStartOffset + timeIndex, texSize);
+vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, ivec2 texSize, ivec2 magsSize) {
     if (previewActive) {
         vec2 bins = texelFetch(previewBinRangesTex, ivec2(bandIndex, 0), 0).rg;
-        if (timeIndex >= bins.x && timeIndex < bins.y) return texelFetch(previewTex, texel, 0);
+        if (timeIndex >= bins.x && timeIndex < bins.y) {
+            return texelFetch(previewTex, packedTexel(bandStartOffset + timeIndex, texSize), 0);
+        }
     }
-    return texelFetch(sourceSpectrogramTex, texel, 0);
+    if (displayMagsActive) {
+        vec2 db = texelFetch(displayMagsTex, packedTexel(bandStartOffset + timeIndex, magsSize), 0).rg;
+        return vec4(displayDbToMag(db.x), 0.0, displayDbToMag(db.y), 0.0);
+    }
+    return texelFetch(sourceSpectrogramTex, packedTexel(bandStartOffset + timeIndex, texSize), 0);
 }
 
-// Blends toward the overview across the window's last bins and takes it whole
-// beyond them, so a decimated bin never sits hard against a full-precision one.
 vec4 sampleDisplayInterp(vec2 uv, out bool resident) {
     float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
     packedInterpBins(uv, sourceMetadataTex, sourceFrameCount, sourceBandCount,
                      bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction, resident);
     ivec2 texSize = textureSize(sourceSpectrogramTex, 0);
+    ivec2 magsSize = textureSize(displayMagsTex, 0);
     int band = int(bandIndex);
-    float blend = overviewBlend(uv, sourceMetadataTex, sourceFrameCount, sourceBandCount);
-    if (blend >= 1.0) return sampleOverviewMagnitudes(uv, sourceFrameCount, sourceBandCount);
 
-    vec4 sample1 = fetchDisplayTexel(band, bandStartOffset, timeIndex0, texSize);
-    vec4 sample2 = fetchDisplayTexel(band, bandStartOffset, timeIndex1, texSize);
-    vec4 windowed = vec4(interpolateComplex(sample1.rg, sample2.rg, timeFraction),
-                         interpolateComplex(sample1.ba, sample2.ba, timeFraction));
-    if (blend <= 0.0) return windowed;
-    return mix(windowed, sampleOverviewMagnitudes(uv, sourceFrameCount, sourceBandCount), blend);
+    vec4 sample1 = fetchDisplayTexel(band, bandStartOffset, timeIndex0, texSize, magsSize);
+    vec4 sample2 = fetchDisplayTexel(band, bandStartOffset, timeIndex1, texSize, magsSize);
+    return vec4(interpolateComplex(sample1.rg, sample2.rg, timeFraction),
+                interpolateComplex(sample1.ba, sample2.ba, timeFraction));
 }
 
 // Convert screen UV (what we see) to zoomed UV (actual data coordinates).
@@ -133,7 +139,7 @@ void main() {
     bool resident0, resident1;
     vec4 sample0 = sampleDisplayInterp(uv0, resident0);
     vec4 sample1 = sampleDisplayInterp(uv1, resident1);
-    vec4 packedValue = markResidency(mix(sample0, sample1, bandFrac), (resident0 && resident1) || overviewActive);
+    vec4 packedValue = markResidency(mix(sample0, sample1, bandFrac), resident0 && resident1);
 
     // packedValue stores [leftMagnitude, leftPhase, rightMagnitude, rightPhase]
     vec2 leftMagPhase = packedValue.rg;
