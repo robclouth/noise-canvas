@@ -1,3 +1,4 @@
+import type { TimeReach } from "../lib/stroke-reach";
 import { GLSL3, RawShaderMaterial } from "three";
 import transmuteEffectFrag from "../glsl/transmute-effect.frag";
 import rangeQuadVert from "../glsl/range-quad.vert";
@@ -67,6 +68,9 @@ class TransmuteEffect extends BaseEffect {
     this.materials[0].uniforms.useLinearBlend.value = movesDomain;
     this.materials[0].uniforms.bypassBrushWeight.value = movesDomain;
     if (movesDomain) this.materials[0].uniforms.blendMode.value = 0;
+  }
+  timeReach(): TimeReach {
+    return { kind: "wholeFile" };
   }
 }
 

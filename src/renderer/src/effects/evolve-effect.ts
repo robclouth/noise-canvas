@@ -1,3 +1,4 @@
+import type { TimeReach } from "../lib/stroke-reach";
 import { GLSL3, RawShaderMaterial } from "three";
 import evolveEffectFrag from "../glsl/evolve-effect.frag";
 import rangeQuadVert from "../glsl/range-quad.vert";
@@ -52,6 +53,9 @@ class EvolveEffect extends BaseEffect {
     updateParam("evolveScaleX", "evolveScaleX");
     updateParam("evolveScaleY", "evolveScaleY");
     material.uniforms.evolveEdgeMode.value = state.evolveEdgeMode;
+  }
+  timeReach(): TimeReach {
+    return { kind: "wholeFile" };
   }
 }
 

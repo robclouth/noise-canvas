@@ -1,3 +1,4 @@
+import type { TimeReach, TimeReachContext } from "../lib/stroke-reach";
 import { useStore } from "@/store";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "@renderer/lib/scale-snap";
 import type { EffectsState } from "@renderer/store/effects";
@@ -102,6 +103,20 @@ class TransformEffect extends BaseEffect {
       const semisAboveMinFreq = bandIndex / bandsPerSemitone;
       material.uniforms.brushBasePitchAbsSemis.value = minFreqSemisAboveC0(dest.minFreq) + semisAboveMinFreq;
     }
+  }
+
+  // Reads sit at the inverse transform of the dab's pixels: the shift in
+  // beats, plus the brush box grown by 1/scale (varispeed divides the scale by
+  // Speed), plus the box's pitch extent folded into time by any rotation. A
+  // scale that can pass through zero bounds nothing, so the reach caps at the
+  // file and the combiner treats that as whole-file cost, not an error.
+  timeReach(ctx: TimeReachContext): TimeReach {
+    const shift = ctx.maxAbs("transformShiftBeats") * ctx.framesPerBeat;
+    const speed = Math.max(1, ctx.maxAbs("transformSpeed"));
+    const minScale = ctx.minAbs("transformScaleTime") / 100 / speed;
+    const grow = ctx.brushSpanFrames / Math.max(minScale, 1e-6);
+    const rotated = ctx.maxAbs("transformRotation") > 0 ? ctx.brushPitchUvSpan * ctx.numFrames : 0;
+    return { kind: "frames", frames: Math.ceil(Math.min(ctx.numFrames, shift + grow + rotated)) };
   }
 }
 
