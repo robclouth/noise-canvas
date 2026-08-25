@@ -7,7 +7,7 @@ import { useGesture } from "@use-gesture/react";
 import { memo, PointerEventHandler, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Vector2 } from "three";
 import { resolveAimUv, type AimUv } from "../lib/aim";
-import { aimUvToBrushBlUv } from "../lib/brush-anchor";
+import { aimUvToBrushBlUv, brushUnionForAim } from "../lib/brush-anchor";
 import { heldRepeatIntervalMs } from "../lib/brush-repeat";
 import { getFileOnsets } from "../lib/file-onsets";
 import { penState } from "../lib/pen-state";
@@ -49,9 +49,10 @@ function getSnappedCoordinates(clientX: number, clientY: number, rect: DOMRect, 
   if (!spectrogramData) return null;
 
   const state = useStore.getState();
-  const activeStep = state.brushes[state.activeBrushIndex]?.steps?.[state.activeStepIndex] as
-    | Record<string, unknown>
-    | undefined;
+  // Snapping follows the brush's first step, not the selected one: with mixed
+  // anchor modes no aim suits every step, and selecting a step must not move
+  // where the brush lands.
+  const anchorStep = state.brushes[state.activeBrushIndex]?.steps?.[0] as Record<string, unknown> | undefined;
 
   return resolveAimUv({
     viewUv: new Vector2((clientX - rect.left) / rect.width, (clientY - rect.top) / rect.height),
@@ -72,15 +73,15 @@ function getSnappedCoordinates(clientX: number, clientY: number, rect: DOMRect, 
       gridSwing: state.gridSwing,
       scaleTonic: state.scaleTonic,
       scaleType: state.scaleType,
-      anchorMode: (activeStep?.brushAnchorMode as number | undefined) ?? state.brushAnchorMode,
+      anchorMode: (anchorStep?.brushAnchorMode as number | undefined) ?? state.brushAnchorMode,
     },
     onsets: getFileOnsets(fileId),
   });
 }
 
-// Resolves the aim point to the brush's bottom-left UV for the active file,
-// using the shared brush-anchor helper.
-function aimToBrushBlUv(aim: AimUv, fileId: string, bpm: number): { blX: number; blY: number } {
+// Resolves the aim point to one step's brush bottom-left UV for the active
+// file, using the shared brush-anchor helper.
+function aimToBrushBlUv(aim: AimUv, fileId: string, bpm: number, stepIndex: number): { blX: number; blY: number } {
   const spectrogramData = openFiles[fileId]?.spectrogramData;
   if (!spectrogramData) return { blX: aim.x, blY: aim.y };
   const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
@@ -92,7 +93,26 @@ function aimToBrushBlUv(aim: AimUv, fileId: string, bpm: number): { blX: number;
     totalDuration,
     spectrogramData.bandsPerOctave,
     spectrogramData.numBands,
+    stepIndex,
   );
+}
+
+// Where the earliest step of the brush starts painting, in seconds. The stroke
+// covers every step, so the region it reports starts at the earliest of them.
+function aimToStrokeStartSeconds(aim: AimUv, fileId: string, bpm: number): number {
+  const spectrogramData = openFiles[fileId]?.spectrogramData;
+  if (!spectrogramData) return aim.x;
+  const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+  const union = brushUnionForAim(
+    useStore.getState(),
+    aim.x,
+    aim.y,
+    bpm,
+    totalDuration,
+    spectrogramData.bandsPerOctave,
+    spectrogramData.numBands,
+  );
+  return union.blX * totalDuration;
 }
 
 export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) => {
@@ -114,9 +134,10 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   );
   const cursorVisible = useTransientStore((state) => state.cursorVisible);
   const isStroking = useStore((state) => state.isStroking);
-  const explicitSourcePath = useStore((state) => {
+  // Every step names its own source file, so any of them keeps this lane live.
+  const isExplicitSource = useStore((state) => {
     const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
-    return steps[state.activeStepIndex]?.sourceFile?.path ?? null;
+    return steps.some((step) => step.sourceFile?.path === filePath);
   });
 
   const [isPanning, setIsPanning] = useState(false);
@@ -141,15 +162,11 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
   // A view is live only while it can show cursor-dependent UI: hovered (brush
   // preview), active with a cursor anywhere (stroking + implicit-source
-  // rectangle), the active step's explicit source file (sampling rectangle),
-  // fullscreen, or an axis-legend drag zooming/panning the view. Everything
-  // else is presented as a static snapshot.
+  // rectangle), a step's explicit source file (sampling rectangle), fullscreen,
+  // or an axis-legend drag zooming/panning the view. Everything else is
+  // presented as a static snapshot.
   const wantsLive =
-    isHovered ||
-    isFullscreen ||
-    isAxisDragging ||
-    (isActive && (cursorVisible || isStroking)) ||
-    (explicitSourcePath !== null && explicitSourcePath === filePath);
+    isHovered || isFullscreen || isAxisDragging || (isActive && (cursorVisible || isStroking)) || isExplicitSource;
 
   const [phase, setPhase] = useState<ViewPhase>("live");
   const phaseRef = useRef(phase);
@@ -418,9 +435,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       if (isStrokingRef.current && strokeTimeRangeRef.current.min !== null) {
         const { spectrogramData } = file;
         if (!spectrogramData) return;
-        const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const { blX } = aimToBrushBlUv(aim, fileId, bpm);
-        const currentBrushTime = blX * totalDuration;
+        const currentBrushTime = aimToStrokeStartSeconds(aim, fileId, bpm);
         strokeTimeRangeRef.current.min = Math.min(strokeTimeRangeRef.current.min!, currentBrushTime);
         strokeTimeRangeRef.current.max = Math.max(strokeTimeRangeRef.current.max!, currentBrushTime);
       }
@@ -558,36 +573,29 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         const { beats, pitch } = aimToBeatsAndPitch(aim);
         useTransientStore.getState().setCursorPosition({ beats, pitch });
 
-        const { blX, blY } = aimToBrushBlUv(aim, fileId, bpm);
-
         const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-        const strokeStartSeconds = blX * totalDuration;
+        const strokeStartSeconds = aimToStrokeStartSeconds(aim, fileId, bpm);
         strokeTimeRangeRef.current = { min: strokeStartSeconds, max: strokeStartSeconds };
 
-        // Compute the locked offset for anchored source mode using the brush
-        // BL (the shader's stroke origin) so source sampling stays anchored to
-        // the onset corner in both anchor modes.
-        const { getActiveStep } = state;
-        const activeStep = getActiveStep();
-        const sourceFileValue = activeStep?.sourceFile ?? null;
-        if (sourceFileValue) {
-          const sourcePositionMode = activeStep?.sourcePositionMode ?? "anchored";
-          if (sourcePositionMode === "anchored") {
+        // Lock the source offset of every anchored step. Tracking, Source and
+        // the brush origin are all per-step, so each step measures its own
+        // offset from its own origin against its own source file.
+        const destBpm = state.filepathsBpm[file.filePath] || 120;
+        state.lockStepSourceOffsets(
+          state.getSteps().map((step, index) => {
+            const sourceFileValue = step?.sourceFile ?? null;
+            if (!sourceFileValue) return null;
+            if ((step?.sourcePositionMode ?? "anchored") !== "anchored") return null;
             const sourceOpenFile = Object.values(openFiles).find((f) => f.filePath === sourceFileValue.path);
-            if (sourceOpenFile?.spectrogramData && spectrogramData) {
-              const destBpm = state.filepathsBpm[file.filePath] || 120;
-              const destDur = spectrogramData.numFrames / spectrogramData.sampleRate;
-              const srcBpm = state.filepathsBpm[sourceOpenFile.filePath] || 120;
-              const srcDur = sourceOpenFile.spectrogramData.numFrames / sourceOpenFile.spectrogramData.sampleRate;
-              const tScale = (destBpm * destDur) / (srcBpm * srcDur);
-              const bScale = sourceBandUvSlope(spectrogramData, sourceOpenFile.spectrogramData);
-
-              const offsetX = -blX * tScale;
-              const offsetY = -blY * bScale;
-              state.updateActiveStepLockedOffset({ beats: offsetX, pitch: offsetY });
-            }
-          }
-        }
+            if (!sourceOpenFile?.spectrogramData) return null;
+            const srcBpm = state.filepathsBpm[sourceOpenFile.filePath] || 120;
+            const srcDur = sourceOpenFile.spectrogramData.numFrames / sourceOpenFile.spectrogramData.sampleRate;
+            const tScale = (destBpm * totalDuration) / (srcBpm * srcDur);
+            const bScale = sourceBandUvSlope(spectrogramData, sourceOpenFile.spectrogramData);
+            const { blX, blY } = aimToBrushBlUv(aim, fileId, bpm, index);
+            return { beats: -blX * tScale, pitch: -blY * bScale };
+          }),
+        );
 
         rendererRef.current.renderStroke(false);
         startRepeatClock();
@@ -659,12 +667,9 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       const aim = getSnappedCoordinates(event.clientX, event.clientY, rect, fileId, bpm);
       if (!aim) return;
 
-      const { blX } = aimToBrushBlUv(aim, fileId, bpm);
-
       // Track time range using brush BL (stroke start), so autoplay duration
       // lines up with the painted region regardless of anchor mode.
-      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
-      const currentBrushTime = blX * totalDuration;
+      const currentBrushTime = aimToStrokeStartSeconds(aim, fileId, bpm);
       if (strokeTimeRangeRef.current.min !== null) {
         strokeTimeRangeRef.current.min = Math.min(strokeTimeRangeRef.current.min, currentBrushTime);
         strokeTimeRangeRef.current.max = Math.max(strokeTimeRangeRef.current.max!, currentBrushTime);

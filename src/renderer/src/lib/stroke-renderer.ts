@@ -35,6 +35,7 @@ import { hasActiveModulatorRouting, hasNestedModulatorRouting, paramsRouteModula
 import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
+import { footprintAimToBlUv } from "./brush-anchor";
 import { ATTRACT_MODULATOR_MAP_START } from "./constants";
 import { getFileOnsets } from "./file-onsets";
 import { buildModulatorUniforms } from "./modulator-utils";
@@ -202,6 +203,8 @@ export interface SourceFileInfo {
  * Parameters for a single stroke operation
  */
 export interface StrokeParams {
+  // Where the user is aiming, in pitch UV. Brush size and anchor mode are
+  // per-step, so each step turns this into its own bottom-left origin.
   cursorPos: Vector2;
   preview: boolean;
   bpm: number;
@@ -216,6 +219,20 @@ export interface StrokeParams {
   // The painted file's own onset map, read by passes after the first, which
   // sample the destination rather than the source file.
   destOnsetTexture?: Texture | null;
+  // The file each step samples from, indexed by step. A step with no entry
+  // names no source file of its own, so it reads what the steps before it
+  // produced (or, for the first step, the `sourceFile` argument).
+  stepSources?: readonly (SourceFileInfo | undefined)[];
+}
+
+/** Where one step's brush lands, from that step's own size and anchor mode. */
+interface StepGeometry {
+  state: State;
+  sizeUv: Vector2;
+  /** Bottom-left origin in pitch UV, after Full-axis anchoring. */
+  anchor: Vector2;
+  fullTime: boolean;
+  fullPitch: boolean;
 }
 
 /**
@@ -644,6 +661,52 @@ export class StrokeRenderer {
   }
 
   /**
+   * Where every step of the active brush lands for one aim point. Size and
+   * anchor mode are per-step parameters, so each step gets its own origin.
+   */
+  private resolveStepGeometries(state: State, aim: Vector2, bpm: number, totalDuration: number): StepGeometry[] {
+    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+    const geometries: StepGeometry[] = [];
+    for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+      const stepState = createStepStateView(state, stepIndex);
+      const footprint = this.resolveBrushFootprint(stepState, bpm, totalDuration, aim.x);
+      const { blX, blY } = footprintAimToBlUv(aim.x, aim.y, footprint, {
+        anchorMode: stepState.brushAnchorMode as number,
+        brushSizeTime: stepState.brushSizeTime as number,
+        gridSizeBeats: stepState.gridSizeBeats,
+        snapTime: stepState.snapTime,
+      });
+      geometries.push({
+        state: stepState,
+        sizeUv: footprint.sizeUv,
+        anchor: resolveBrushAnchor(new Vector2(blX, blY), footprint.fullTime, footprint.fullPitch),
+        fullTime: footprint.fullTime,
+        fullPitch: footprint.fullPitch,
+      });
+    }
+    return geometries;
+  }
+
+  /**
+   * Points the source half of a step's uniforms at the painted file, for a step
+   * that reads what the steps before it produced rather than a source file.
+   */
+  private pointSourceAtDest(uniforms: CommonUniforms, destOnsetTexture: Texture | null | undefined): void {
+    uniforms.sourceInverseMapTex = uniforms.destInverseMapTex;
+    uniforms.sourceMetadataTex = uniforms.destMetadataTex;
+    uniforms.sourceMinFreq = uniforms.destMinFreq;
+    uniforms.sourceBandsPerOctave = uniforms.destBandsPerOctave;
+    uniforms.sourceFrameCount = uniforms.destFrameCount;
+    uniforms.sourceBandCount = uniforms.destBandCount;
+    uniforms.sourceChannelCount = uniforms.destChannelCount;
+    uniforms.sourceSampleRate = uniforms.destSampleRate;
+    uniforms.sourceSpectrogramTextureSize = uniforms.destSpectrogramTextureSize;
+    uniforms.sourceOnsetTex = { value: destOnsetTexture ?? this.textures.placeholderTexture };
+    uniforms.sourceTimeScale = { value: 1 };
+    uniforms.sourceBandScale = { value: 1 };
+  }
+
+  /**
    * Calculate clone-stamp offset from the cursor position, scaled to source UV space.
    * The base source position lives in sourceTimeOffset/sourcePitchOffset params and is
    * added (with modulation) inside the shader, so this helper must not include it.
@@ -891,84 +954,57 @@ export class StrokeRenderer {
     const sourceSpec = sourceFile.spectrogramData;
     if (!(sourceSpec.numFrames > 0) || !(sourceSpec.numBands > 0) || !(sourceSpec.sampleRate > 0)) return;
 
-    const activeStepState = createStepStateView(state, state.activeStepIndex);
-    const activeStep = (state.brushes[state.activeBrushIndex]?.steps ?? [])[state.activeStepIndex];
-
-    // Beat-based scale: converts dest UV to source UV so 1 beat = 1 beat
-    const srcBpm = state.filepathsBpm?.[sourceFile.filePath] || bpm;
-    const srcDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
-    const timeScale = (bpm * totalDuration) / (srcBpm * srcDuration);
-    const bandScale = sourceBandUvSlope(this.spectrogramData, sourceFile.spectrogramData);
-
-    // Active step's footprint determines source offset semantics. In Full mode the
-    // brush anchors to 0 on that axis, so the source offset is computed from that
-    // anchor rather than the raw cursor.
-    const activeFootprint = this.resolveBrushFootprint(activeStepState, bpm, totalDuration, cursorPos.x);
-    const activeAnchor = resolveBrushAnchor(cursorPos, activeFootprint.fullTime, activeFootprint.fullPitch);
-
-    const sourceOffsetUv = this.calculateSourceOffset(
-      state.isStroking ? activeStep?.lockedOffset : null,
-      activeStepState.sourcePositionMode as string,
-      activeAnchor,
-      timeScale,
-      bandScale,
-    );
+    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
+    const stepGeometries = this.resolveStepGeometries(state, cursorPos, bpm, totalDuration);
+    const numSteps = stepGeometries.length;
+    if (numSteps === 0) return;
 
     const currentReadFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
     const destinationFbo = this.pingPong === 0 ? this.fbo2 : this.fbo1;
 
-    // Determine the initial source FBO based on sourceDataMode
+    // What the first step reads when it names no source file of its own. A
+    // non-cumulative stroke reads the stroke-start snapshot so its dabs cannot
+    // feed back into themselves.
     const isSameFile = sourceFile.id === this.fileId;
-    let initialSourceFbo: WebGLRenderTarget | { texture: DataTexture } =
-      activeStepState.sourceDataMode === "original"
-        ? { texture: sourceFile.textures.original }
-        : isSameFile
-          ? currentReadFBO
-          : sourceFile.textures.packed;
-
-    // For multi-step rendering, we iterate through all steps sequentially
-    let stepInputFbo: WebGLRenderTarget | { texture: DataTexture } = initialSourceFbo;
-
-    // Non-cumulative strokes: use snapshot as source to prevent self-feedback.
-    // Gated by step 0's flags since step 0 is the step that actually consumes
-    // initialSourceFbo; subsequent steps read each other's output.
-    const firstStepState = createStepStateView(state, 0);
+    const firstStepState = stepGeometries[0].state;
+    let selfInputFbo: WebGLRenderTarget | { texture: DataTexture } = isSameFile
+      ? currentReadFBO
+      : sourceFile.textures.packed;
     if (!firstStepState.accumulate && isSameFile && firstStepState.sourceDataMode !== "original") {
-      stepInputFbo = scratch.strokeStartFbo;
-      initialSourceFbo = scratch.strokeStartFbo;
+      selfInputFbo = scratch.strokeStartFbo;
     }
 
-    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
-    const numSteps = steps.length;
+    // The previous step's output: what the next step blends over, and what it
+    // reads when it names no source file of its own.
+    let chainFbo: WebGLRenderTarget | { texture: DataTexture } = selfInputFbo;
 
-    // The brush extent across all steps, in pitch and in time. A step that
-    // wraps an axis with its brush crossing the [0,1] boundary paints at both
-    // ends of that axis, so the extent becomes the whole axis. When any step is
-    // Full on an axis the union anchor collapses to 0 and the extent reaches 1.
-    const maxBrushSizeUv = new Vector2(0, 0);
-    const unionAnchor = new Vector2(cursorPos.x, cursorPos.y);
+    // The brush extent across all steps, in pitch and in time. Each step brings
+    // its own origin, so the extent is the union of the steps' rectangles. A
+    // step that wraps an axis with its brush crossing the [0,1] boundary paints
+    // at both ends of that axis, so the extent becomes the whole axis.
+    const unionMin = new Vector2(Infinity, Infinity);
+    const unionMax = new Vector2(-Infinity, -Infinity);
     let yWrapsOutOfBounds = false;
     let wholeTime = false;
-    for (let i = 0; i < numSteps; i++) {
-      const s = createStepStateView(state, i);
-      const fp = this.resolveBrushFootprint(s, bpm, totalDuration, cursorPos.x);
-      maxBrushSizeUv.x = Math.max(maxBrushSizeUv.x, fp.sizeUv.x);
-      maxBrushSizeUv.y = Math.max(maxBrushSizeUv.y, fp.sizeUv.y);
-      if (fp.fullTime) unionAnchor.x = 0;
-      if (fp.fullPitch) unionAnchor.y = 0;
-      if (fp.fullTime) wholeTime = true;
-      const wrapMode = s.brushWrapMode as number;
+    for (const geometry of stepGeometries) {
+      const { anchor, sizeUv } = geometry;
+      unionMin.x = Math.min(unionMin.x, anchor.x);
+      unionMin.y = Math.min(unionMin.y, anchor.y);
+      unionMax.x = Math.max(unionMax.x, anchor.x + sizeUv.x);
+      unionMax.y = Math.max(unionMax.y, anchor.y + sizeUv.y);
+      if (geometry.fullTime) wholeTime = true;
+      const wrapMode = geometry.state.brushWrapMode as number;
       const wrapsY = wrapMode === 2 || wrapMode === 3;
       const wrapsX = wrapMode === 1 || wrapMode === 3;
-      const stepAnchorY = fp.fullPitch ? 0 : cursorPos.y;
-      const stepAnchorX = fp.fullTime ? 0 : cursorPos.x;
-      if (wrapsY && (stepAnchorY < 0 || stepAnchorY + fp.sizeUv.y > 1)) {
+      if (wrapsY && (anchor.y < 0 || anchor.y + sizeUv.y > 1)) {
         yWrapsOutOfBounds = true;
       }
-      if (wrapsX && (stepAnchorX < 0 || stepAnchorX + fp.sizeUv.x > 1)) {
+      if (wrapsX && (anchor.x < 0 || anchor.x + sizeUv.x > 1)) {
         wholeTime = true;
       }
     }
+    const unionAnchor = unionMin;
+    const maxBrushSizeUv = new Vector2(unionMax.x - unionMin.x, unionMax.y - unionMin.y);
 
     // Every pass but the last is read by the passes after it, with whatever
     // reach in time their effect has, so those passes write the brush's full
@@ -1009,20 +1045,42 @@ export class StrokeRenderer {
     const strokeRandom = (noise2D(cursorPos.x * 50, cursorPos.y * 50) + 1) / 2;
 
     for (let stepIndex = 0; stepIndex < numSteps; stepIndex++) {
-      const stepState = createStepStateView(state, stepIndex);
-      const stepFootprint = this.resolveBrushFootprint(stepState, bpm, totalDuration, cursorPos.x);
-      const stepBrushSizeUv = stepFootprint.sizeUv;
-      const stepAnchor = resolveBrushAnchor(cursorPos, stepFootprint.fullTime, stepFootprint.fullPitch);
+      const geometry = stepGeometries[stepIndex];
+      const stepState = geometry.state;
+      const stepBrushSizeUv = geometry.sizeUv;
+      const stepAnchor = geometry.anchor;
+
+      // The step's own Source control names the file it samples. A step with no
+      // source of its own reads what the steps before it produced, so its
+      // effects work on the running result rather than on another file.
+      const namedSource = params.stepSources?.[stepIndex];
+      const namedSpec = namedSource?.spectrogramData;
+      const hasOwnSource = Boolean(
+        namedSource && namedSpec && namedSpec.numFrames > 0 && namedSpec.numBands > 0 && namedSpec.sampleRate > 0,
+      );
+      const stepSource = hasOwnSource && namedSource ? namedSource : sourceFile;
+      const readsNamedFile = hasOwnSource ? stepSource.id !== this.fileId : stepIndex === 0 && !isSameFile;
+
+      let stepInputFbo: WebGLRenderTarget | { texture: DataTexture };
+      let readsSourceFile = true;
+      if (stepState.sourceDataMode === "original") {
+        stepInputFbo = { texture: stepSource.textures.original };
+      } else if (readsNamedFile) {
+        stepInputFbo = stepSource.textures.packed;
+      } else {
+        stepInputFbo = stepIndex === 0 ? selfInputFbo : chainFbo;
+        readsSourceFile = false;
+      }
 
       // Determine the blend destination for this step
-      const blendDestFbo = stepIndex === 0 ? currentReadFBO : stepInputFbo;
+      const blendDestFbo = stepIndex === 0 ? currentReadFBO : chainFbo;
 
       // The Time/Pitch sources track the painted aim. On a full-size axis the
       // footprint anchors to 0, so the aim is read straight from the cursor.
       const stepContext: StrokeContext = {
         iteration: 0,
-        time: stepFootprint.fullTime ? cursorPos.x : stepAnchor.x + stepBrushSizeUv.x / 2,
-        pitch: stepFootprint.fullPitch ? cursorPos.y : stepAnchor.y + stepBrushSizeUv.y / 2,
+        time: geometry.fullTime ? cursorPos.x : stepAnchor.x + stepBrushSizeUv.x / 2,
+        pitch: geometry.fullPitch ? cursorPos.y : stepAnchor.y + stepBrushSizeUv.y / 2,
         random: strokeRandom,
         step: numSteps > 1 ? stepIndex / (numSteps - 1) : 0,
         pressure,
@@ -1031,8 +1089,20 @@ export class StrokeRenderer {
       };
       const stepModContext = createModContext(stepState, stepContext);
 
+      // Tracking is per step too, so the clone offset is measured against this
+      // step's own origin and its own source file's timeline. A step reading the
+      // running result stays in this file's space, where both scales are 1.
+      const sourceBpm = state.filepathsBpm?.[stepSource.filePath] || bpm;
+      const stepSourceDuration = stepSource.spectrogramData.numFrames / stepSource.spectrogramData.sampleRate;
+      const sourceOffsetUv = this.calculateSourceOffset(
+        state.isStroking ? steps[stepIndex]?.lockedOffset : null,
+        stepState.sourcePositionMode as string,
+        stepAnchor,
+        readsSourceFile ? (bpm * totalDuration) / (sourceBpm * stepSourceDuration) : 1,
+        readsSourceFile ? sourceBandUvSlope(this.spectrogramData, stepSource.spectrogramData) : 1,
+      );
+
       // Build common uniforms for this step
-      const sourceBpm = state.filepathsBpm?.[sourceFile.filePath] || bpm;
       const commonUniforms = this.buildStepUniforms(
         stepState,
         stepModContext,
@@ -1040,7 +1110,7 @@ export class StrokeRenderer {
         sourceOffsetUv,
         blendDestFbo,
         stepAnchor,
-        sourceFile,
+        stepSource,
         bpm,
         totalDuration,
         sourceBpm,
@@ -1051,13 +1121,10 @@ export class StrokeRenderer {
         state.magnitudeLimit,
       );
 
-      // Determine source texture based on this step's sourceDataMode
-      const stepSourceDataMode = stepState.sourceDataMode;
-      const stepSourceFbo =
-        stepSourceDataMode === "original" ? { texture: sourceFile.textures.original } : stepInputFbo;
-
-      // Override the source texture to use the correct input for this step
-      commonUniforms.sourceSpectrogramTex.value = stepSourceFbo.texture;
+      // The source half of the uniforms has to describe whatever texture the
+      // step reads, or the shader samples this file's layout as another file's.
+      if (!readsSourceFile) this.pointSourceAtDest(commonUniforms, params.destOnsetTexture);
+      commonUniforms.sourceSpectrogramTex.value = stepInputFbo.texture;
 
       // Get enabled effects in order for this step
       const stepEffects = stepState.effects as {
@@ -1180,7 +1247,7 @@ export class StrokeRenderer {
       // still reach the partner. Working back from that end, each pass writes
       // a buffer its successor does not, which is also the one it reads.
       const passBuffers = isLastStep && plannedPasses.length === 1 ? [] : this.pool.passFbos(2);
-      const writable = [...passBuffers, destinationFbo].filter((t) => t !== stepInputFbo);
+      const writable = [...passBuffers, destinationFbo].filter((t) => t !== stepInputFbo && t !== chainFbo);
       const endTarget = isLastStep ? destinationFbo : writable.find((t) => t !== destinationFbo);
       if (!endTarget) throw new Error("No pass buffer is free for the step's output.");
       const passTargets: WebGLRenderTarget[] = new Array(plannedPasses.length);
@@ -1257,13 +1324,13 @@ export class StrokeRenderer {
             ? currentReadFBO.texture
             : stepIndex === 0
               ? scratch.strokeStartFbo.texture
-              : stepInputFbo.texture,
+              : chainFbo.texture,
         };
 
         effect.updateEffectUniforms({
           commonUniforms: uniformsForThisIteration,
           passIndex: p,
-          file: sourceFile,
+          file: stepSource,
           state: effectState,
           modContext: iterationContext,
         });
@@ -1274,7 +1341,7 @@ export class StrokeRenderer {
       }
 
       // The output of this step becomes the input for the next step
-      stepInputFbo = currentReadFbo;
+      chainFbo = currentReadFbo;
     }
 
     // A committed stroke folds its footprint back into the canonical buffer,
@@ -1305,8 +1372,8 @@ export class StrokeRenderer {
       // step, so we need a fresh composite covering every non-accumulate step.
       // updateStrokeMask is a no-op when every step is accumulate.
       let anyNonAccumulate = false;
-      for (let i = 0; i < numSteps; i++) {
-        if (!createStepStateView(state, i).accumulate) {
+      for (const geometry of stepGeometries) {
+        if (!geometry.state.accumulate) {
           anyNonAccumulate = true;
           break;
         }
@@ -1322,7 +1389,7 @@ export class StrokeRenderer {
               rowEnd: Math.max(this.maskRows.rowEnd, dabRowEnd),
             }
           : { rowStart: dabRowStart, rowEnd: dabRowEnd };
-        this.updateStrokeMask(state, cursorPos, bpm, totalDuration, strokeRandom, pressure, tiltX, tiltY);
+        this.updateStrokeMask(stepGeometries, cursorPos, bpm, totalDuration, strokeRandom, pressure, tiltX, tiltY);
       }
 
       // Update dirty region to include this stroke's bounds. Every step of
@@ -1368,7 +1435,7 @@ export class StrokeRenderer {
    * shader). A pure no-op when every step is set to accumulate.
    */
   private updateStrokeMask(
-    state: State,
+    stepGeometries: StepGeometry[],
     cursorPos: Vector2,
     bpm: number,
     totalDuration: number,
@@ -1377,8 +1444,7 @@ export class StrokeRenderer {
     tiltX: number,
     tiltY: number,
   ): void {
-    const steps = state.brushes[state.activeBrushIndex]?.steps ?? [];
-    const numSteps = steps.length;
+    const numSteps = stepGeometries.length;
     if (numSteps === 0) return;
 
     const { placeholderTexture, modulator1Texture, modulator2Texture, modulator3Texture, modulatorScaleLut } =
@@ -1406,18 +1472,18 @@ export class StrokeRenderer {
     let renderedAny = false;
 
     for (let stepIndex = 0; stepIndex < numSteps; stepIndex++) {
-      const stepState = createStepStateView(state, stepIndex);
+      const geometry = stepGeometries[stepIndex];
+      const stepState = geometry.state;
       if (stepState.accumulate) continue;
 
-      const footprint = this.resolveBrushFootprint(stepState, bpm, totalDuration, cursorPos.x);
-      const brushSizeUv = footprint.sizeUv;
-      const brushAnchor = resolveBrushAnchor(cursorPos, footprint.fullTime, footprint.fullPitch);
+      const brushSizeUv = geometry.sizeUv;
+      const brushAnchor = geometry.anchor;
 
       // The mask is the envelope of the whole stroke, so it reads the last iteration.
       const maskContext = createModContext(stepState, {
         iteration: 1,
-        time: footprint.fullTime ? cursorPos.x : brushAnchor.x + brushSizeUv.x / 2,
-        pitch: footprint.fullPitch ? cursorPos.y : brushAnchor.y + brushSizeUv.y / 2,
+        time: geometry.fullTime ? cursorPos.x : brushAnchor.x + brushSizeUv.x / 2,
+        pitch: geometry.fullPitch ? cursorPos.y : brushAnchor.y + brushSizeUv.y / 2,
         random: strokeRandom,
         step: numSteps > 1 ? stepIndex / (numSteps - 1) : 0,
         pressure,
