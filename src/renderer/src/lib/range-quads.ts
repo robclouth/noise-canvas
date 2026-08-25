@@ -1,5 +1,4 @@
 import { BufferAttribute, DynamicDrawUsage, InstancedBufferAttribute, InstancedBufferGeometry } from "three";
-import type { PackedLayout } from "./window-layout";
 
 const QUAD_POSITIONS = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
 const QUAD_INDICES = new Uint16Array([0, 1, 2, 0, 2, 3]);
@@ -75,7 +74,7 @@ export type BinRanges = Float32Array;
  * range count; `ranges` needs room for three ranges per band.
  */
 export function brushFootprintRanges(
-  layout: PackedLayout,
+  layout: { metadata: Float32Array; numBands: number; textureWidth: number; textureHeight: number },
   lowBand: number,
   highBand: number,
   window: FrameWindow,
@@ -83,25 +82,21 @@ export function brushFootprintRanges(
   ranges: Uint32Array,
   binRanges: BinRanges,
   pixelClamp?: { start: number; end: number },
-  firstBins?: Uint32Array,
 ): number {
-  const { bandOffsets, bandLengths, bandStepLog2s, numBands, textureWidth, textureHeight } = layout;
+  const { metadata, numBands, textureWidth, textureHeight } = layout;
   const clampStart = pixelClamp ? pixelClamp.start : 0;
   const clampEnd = pixelClamp ? pixelClamp.end : textureWidth * textureHeight;
   binRanges.fill(0);
   let count = 0;
   for (let band = Math.max(0, lowBand); band <= Math.min(numBands - 1, highBand); band++) {
-    const offset = bandOffsets[band];
-    const length = bandLengths[band];
-    const cell = 2 ** bandStepLog2s[band];
-    // The window's bins are numbered from its own start, so a frame window
-    // given in file frames drops that many bins before it indexes them.
-    const firstBin = firstBins ? firstBins[band] : 0;
+    const offset = metadata[band * 4];
+    const length = metadata[band * 4 + 1];
+    const cell = 2 ** metadata[band * 4 + 2];
     let binStart = 0;
     let binEnd = length;
     if (window) {
-      binStart = Math.max(0, Math.floor(window.frameStart / cell) - marginBins - firstBin);
-      binEnd = Math.min(length, Math.ceil(window.frameEnd / cell) + marginBins + 1 - firstBin);
+      binStart = Math.max(0, Math.floor(window.frameStart / cell) - marginBins);
+      binEnd = Math.min(length, Math.ceil(window.frameEnd / cell) + marginBins + 1);
     }
     if (binEnd <= binStart) continue;
     binRanges[band * 4] = binStart;

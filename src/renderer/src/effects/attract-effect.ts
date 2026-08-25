@@ -1,4 +1,3 @@
-import type { TimeReach } from "../lib/stroke-reach";
 import { buildScaleOffsets } from "@renderer/lib/scale-snap";
 import { ONSETS_GRID_VALUE } from "@renderer/lib/constants";
 import { unitsToUv } from "@renderer/lib/utils";
@@ -137,9 +136,6 @@ class AttractEffect extends BaseEffect {
         dest.numBands,
       ).x;
     }
-  }
-  timeReach(): TimeReach {
-    return { kind: "wholeFile" };
   }
 }
 

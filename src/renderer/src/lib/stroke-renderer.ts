@@ -27,19 +27,6 @@ import { patchMaterial } from "../components/patch-material";
 import { phaseTurnMaterial } from "../components/phase-turn-material";
 import { rangeCopyMaterial } from "../components/range-copy-material";
 import { BaseEffect, CommonUniforms, createDefaultUniforms } from "../effects/base-effect";
-import { diag } from "./diag-log";
-import type { DisplayMags } from "./display-mags";
-import {
-  buildWindowLayout,
-  fileLayoutOf,
-  isWholeFileWindow,
-  mapFileRangesToWindow,
-  windowFileRanges,
-  type MappedRanges,
-  type WindowLayout,
-} from "./window-layout";
-import { scatterCompactPixelRanges } from "./pixel-ranges";
-import { gatherWindowPacked } from "./window-textures";
 import maskUpdateFrag from "../glsl/mask-update.frag";
 import modulatorPrecomputeFrag from "../glsl/modulator-precompute.frag";
 import rangeQuadVert from "../glsl/range-quad.vert";
@@ -238,14 +225,6 @@ export interface StrokeParams {
 export class StrokeRenderer {
   private gl: WebGLRenderer;
   private spectrogramData: SpectrogramData;
-  // The packed geometry of the whole file, and of the span actually resident in
-  // the FBOs. Every texture dimension and packed pixel index inside this class
-  // is the window's; every frame and band count is the file's. `spectrogramData`
-  // stands for neither.
-  private windowLayout: WindowLayout;
-  private windowTextureSize: Vector2;
-  private wholeFileWindow: boolean;
-  private windowRangesCache: Uint32Array | null = null;
   private textures: StrokeTextures;
   private fileId: string;
   private effects: EffectsRegistry;
@@ -253,11 +232,6 @@ export class StrokeRenderer {
   // FBOs for ping-pong rendering
   private fbo1: WebGLRenderTarget;
   private fbo2: WebGLRenderTarget;
-  // File-sized dB magnitudes the display reads as its committed base, owned
-  // by the file view so it survives this renderer rebuilding. Every write to
-  // the committed FBO re-encodes its ranges there; phase-only writes are
-  // exempt, because the display never reads phase.
-  private displayMags: DisplayMags | null;
   // Per-stroke scratch targets, shared across all files through the pool.
   // Bound (and refreshed if another file painted since) by acquireScratch().
   private pool: StrokeScratchPool;
@@ -336,16 +310,9 @@ export class StrokeRenderer {
     textures: StrokeTextures,
     fileId: string,
     effects: EffectsRegistry,
-    windowLayout?: WindowLayout | null,
-    displayMags?: DisplayMags | null,
   ) {
-    this.displayMags = displayMags ?? null;
     this.gl = gl;
     this.spectrogramData = spectrogramData;
-    const fileLayout = fileLayoutOf(spectrogramData);
-    this.windowLayout = windowLayout ?? buildWindowLayout(fileLayout, 0, fileLayout.numFrames);
-    this.windowTextureSize = new Vector2(this.windowLayout.textureWidth, this.windowLayout.textureHeight);
-    this.wholeFileWindow = isWholeFileWindow(this.windowLayout);
     this.textures = textures;
     this.fileId = fileId;
     this.effects = effects;
@@ -359,8 +326,7 @@ export class StrokeRenderer {
     this.fboMesh = new Mesh(new PlaneGeometry(2, 2));
     this.fboScene.add(this.fboMesh);
 
-    const { numBands } = fileLayout;
-    const { textureWidth, textureHeight } = this.windowLayout;
+    const { textureWidth, textureHeight, numBands } = spectrogramData;
 
     this.rangeScene = new Scene();
     this.rangeGeometry = new RangeQuadGeometry(numBands * 3);
@@ -424,26 +390,13 @@ export class StrokeRenderer {
   }
 
   /**
-   * File packed ranges as window ranges. Pixels the window does not hold are
-   * dropped and logged: substituting the window's edge for them would write
-   * plausible data the caller never asked for.
-   */
-  private mapRanges(fileRanges: Uint32Array, operation: string): MappedRanges {
-    const mapped = mapFileRangesToWindow(this.windowLayout, fileRanges);
-    if (mapped.missingPixels > 0) {
-      diag.warn("paging", "miss", { operation, pixels: mapped.missingPixels, fileId: this.fileId });
-    }
-    return mapped;
-  }
-
-  /**
    * Draws `material` over the packed pixel ranges of `list` into `target`,
    * leaving every other pixel of the target as it was.
    */
   private drawRanges(material: RawShaderMaterial, target: WebGLRenderTarget, list: PixelRangeList): void {
     if (list.count === 0) return;
     this.rangeGeometry.setRanges(list);
-    const size = this.windowTextureSize;
+    const size = this.spectrogramData.packedTextureSize;
     if (material.uniforms.destSpectrogramTextureSize) {
       material.uniforms.destSpectrogramTextureSize.value = size;
     } else {
@@ -457,38 +410,19 @@ export class StrokeRenderer {
     this.gl.autoClear = prevAutoClear;
   }
 
-  /** Re-encodes the committed FBO's magnitudes into the display texture over `list`. */
-  private refreshDisplayMags(list: PixelRangeList): void {
-    this.displayMags?.refreshFrom(this.gl, this.getDisplayTexture(), this.windowLayout, list);
-  }
-
   /** The whole packed texture as one range. */
   private fullRange(): PixelRangeList {
-    const { textureWidth, textureHeight } = this.windowLayout;
+    const { textureWidth, textureHeight } = this.spectrogramData;
     return fullTextureRange(textureWidth, textureHeight);
   }
 
   /** Marks every bin of every band as holding a preview. */
   private markWholeTexturePreview(): void {
-    const { numBands, bandLengths } = this.windowLayout;
+    const { numBands, metadata } = this.spectrogramData;
     const binRanges = this.footprint.binRanges;
     for (let band = 0; band < numBands; band++) {
       binRanges[band * 4] = 0;
-      binRanges[band * 4 + 1] = bandLengths[band];
-    }
-  }
-
-  /**
-   * Writes each band's window packed offset and first file bin into the
-   * preview range table's .ba, so the display can address the window-sized
-   * preview texture from the file bins its metadata gives it.
-   */
-  private fillPreviewWindowColumns(): void {
-    const { numBands, bandOffsets, firstBins } = this.windowLayout;
-    const binRanges = this.footprint.binRanges;
-    for (let band = 0; band < numBands; band++) {
-      binRanges[band * 4 + 2] = bandOffsets[band];
-      binRanges[band * 4 + 3] = firstBins[band];
+      binRanges[band * 4 + 1] = metadata[band * 4 + 1];
     }
   }
 
@@ -579,8 +513,6 @@ export class StrokeRenderer {
 
     this.pingPong = 0;
 
-    this.refreshDisplayMags(this.fullRange());
-
     // The stroke-start snapshot no longer matches the reset canvas; force the
     // next acquireScratch to rebuild it.
     this.pool.disown(this);
@@ -596,7 +528,7 @@ export class StrokeRenderer {
    * restoring the between-strokes invariants the paint path relies on.
    */
   private acquireScratch(): StrokeScratch {
-    const { textureWidth, textureHeight } = this.windowLayout;
+    const { textureWidth, textureHeight } = this.spectrogramData;
     const { scratch, refreshed } = this.pool.acquire(this, textureWidth, textureHeight);
     this.scratch = scratch;
     if (refreshed) {
@@ -792,7 +724,7 @@ export class StrokeRenderer {
       sourceSampleRate: { value: sourceFile.spectrogramData.sampleRate },
       sourceOnsetTex: { value: sourceFile.onsetTexture ?? placeholderTexture },
       destSpectrogramTex: { value: destTexture.texture || placeholderTexture },
-      destSpectrogramTextureSize: { value: this.windowTextureSize },
+      destSpectrogramTextureSize: { value: this.spectrogramData.packedTextureSize },
       destInverseMapTex: { value: this.textures.inverseMapTex || placeholderTexture },
       destMetadataTex: { value: this.textures.metadataTex || placeholderTexture },
       destMinFreq: { value: this.spectrogramData.minFreq },
@@ -874,7 +806,7 @@ export class StrokeRenderer {
     brushBottomLeftUv: Vector2,
     brushSizeUv: Vector2,
   ): { rowStart: number; rowCount: number } | null {
-    const { numBands, textureWidth, textureHeight, bandOffsets, bandLengths } = this.windowLayout;
+    const { numBands, textureWidth, textureHeight, metadata } = this.spectrogramData;
     const { lowBand, highBand } = this.brushBandRange(brushBottomLeftUv, brushSizeUv);
 
     // If brush covers most of the bands, don't bother with scissor
@@ -883,8 +815,11 @@ export class StrokeRenderer {
       return null;
     }
 
-    const firstPixel = bandOffsets[lowBand];
-    const lastPixel = bandOffsets[highBand] + bandLengths[highBand];
+    // Get pixel range from metadata (bandStartOffset is at metadata[band * 4])
+    const firstPixel = metadata[lowBand * 4];
+    const lastBandOffset = metadata[highBand * 4];
+    const lastBandLength = metadata[highBand * 4 + 1];
+    const lastPixel = lastBandOffset + lastBandLength;
 
     const rowStart = Math.max(0, Math.floor(firstPixel / textureWidth));
     const rowEnd = Math.min(textureHeight, Math.ceil(lastPixel / textureWidth));
@@ -905,13 +840,13 @@ export class StrokeRenderer {
     wholeBands: boolean,
     rows: { rowStart: number; rowCount: number } | null,
   ): StrokeFootprint | null {
-    const { numBands, textureWidth } = this.windowLayout;
+    const { numBands, textureWidth } = this.spectrogramData;
     const bands = wholeBands
       ? { lowBand: 0, highBand: numBands - 1 }
       : this.brushBandRange(brushBottomLeftUv, brushSizeUv);
     const footprint = this.footprint;
     footprint.count = brushFootprintRanges(
-      this.windowLayout,
+      this.spectrogramData,
       bands.lowBand,
       bands.highBand,
       window,
@@ -919,7 +854,6 @@ export class StrokeRenderer {
       footprint.ranges,
       footprint.binRanges,
       rows ? { start: rows.rowStart * textureWidth, end: (rows.rowStart + rows.rowCount) * textureWidth } : undefined,
-      this.windowLayout.firstBins,
     );
     footprint.pixels = 0;
     for (let i = 0; i < footprint.count; i++) footprint.pixels += footprint.ranges[i * 2 + 1];
@@ -1042,8 +976,7 @@ export class StrokeRenderer {
     // it writes the brush footprint alone. The brush's time window is rounded
     // to frames the way the brush shader rounds it.
     const scissorRows = yWrapsOutOfBounds ? null : this.calculateScissorRows(unionAnchor, maxBrushSizeUv);
-    const { textureWidth } = this.windowLayout;
-    const { numFrames } = this.spectrogramData;
+    const { textureWidth, numFrames } = this.spectrogramData;
     const window: FrameWindow = wholeTime
       ? null
       : {
@@ -1059,7 +992,7 @@ export class StrokeRenderer {
     // A footprint that covers most of the texture is cheaper to write with a
     // whole-texture draw and a buffer swap than to copy back, and with no
     // rows every pass has written the whole texture, so the swap is sound.
-    const { textureHeight } = this.windowLayout;
+    const { textureHeight } = this.spectrogramData;
     const swapWhole =
       footprint !== null &&
       scissorRows === null &&
@@ -1358,7 +1291,6 @@ export class StrokeRenderer {
     this.previewActive = preview;
     if (preview) {
       if (!footprint) this.markWholeTexturePreview();
-      this.fillPreviewWindowColumns();
       this.previewRangeTex.needsUpdate = true;
     }
 
@@ -1367,7 +1299,6 @@ export class StrokeRenderer {
       if (!copyBack) {
         this.pingPong = 1 - this.pingPong;
       }
-      this.refreshDisplayMags(copyBack && footprint ? footprint : this.fullRange());
 
       // Update stroke mask for non-cumulative mode. Any step being non-accumulate
       // means the per-step gate in the render loop will sample the mask for that
@@ -1382,7 +1313,9 @@ export class StrokeRenderer {
       }
       if (anyNonAccumulate) {
         const dabRowStart = scissorRows ? scissorRows.rowStart : 0;
-        const dabRowEnd = scissorRows ? scissorRows.rowStart + scissorRows.rowCount : this.windowLayout.textureHeight;
+        const dabRowEnd = scissorRows
+          ? scissorRows.rowStart + scissorRows.rowCount
+          : this.spectrogramData.textureHeight;
         this.maskRows = this.maskRows
           ? {
               rowStart: Math.min(this.maskRows.rowStart, dabRowStart),
@@ -1456,7 +1389,7 @@ export class StrokeRenderer {
     // Bind invariants (same for every step) once.
     uniforms.destMetadataTex.value = this.textures.metadataTex;
     uniforms.destInverseMapTex.value = this.textures.inverseMapTex;
-    uniforms.destSpectrogramTextureSize.value = this.windowTextureSize;
+    uniforms.destSpectrogramTextureSize.value = this.spectrogramData.packedTextureSize;
     uniforms.destFrameCount.value = this.spectrogramData.numFrames;
     uniforms.destBandCount.value = this.spectrogramData.numBands;
     uniforms.gainLut.value = modulatorScaleLut || placeholderTexture;
@@ -1466,8 +1399,8 @@ export class StrokeRenderer {
 
     const rows = this.maskRows;
     const maskRanges =
-      rows !== null && !this.disableScissorCopyBack && rows.rowEnd - rows.rowStart < this.windowLayout.textureHeight
-        ? rowRange(this.windowLayout.textureWidth, rows.rowStart, rows.rowEnd - rows.rowStart)
+      rows !== null && !this.disableScissorCopyBack && rows.rowEnd - rows.rowStart < this.spectrogramData.textureHeight
+        ? rowRange(this.spectrogramData.textureWidth, rows.rowStart, rows.rowEnd - rows.rowStart)
         : this.fullRange();
 
     let renderedAny = false;
@@ -1581,13 +1514,17 @@ export class StrokeRenderer {
     this.fboDataEpoch++;
   }
 
-  /** The committed FBO read back at its own (window) dimensions, cached. */
-  private async readWindowFbo(): Promise<Float32Array> {
+  /**
+   * Get the current FBO data asynchronously. The readback is issued against the
+   * FBO as it stands at the call, so the resolved array is that caller's
+   * snapshot even when later paint lands before it resolves.
+   */
+  async getFBOData(): Promise<Float32Array> {
     if (this.fboDataCache && !this.fboDataDirty) {
       return this.fboDataCache;
     }
 
-    const packedTextureSize = this.windowTextureSize;
+    const { packedTextureSize } = this.spectrogramData;
     const fboToRead = this.pingPong === 0 ? this.fbo1 : this.fbo2;
     const epoch = this.fboDataEpoch;
     const data = await readRenderTargetPixelsAsync(this.gl, fboToRead, 0, 0, packedTextureSize.x, packedTextureSize.y);
@@ -1603,80 +1540,34 @@ export class StrokeRenderer {
   }
 
   /**
-   * Get the current FBO data asynchronously, in the file's packed layout. The
-   * readback is issued against the FBO as it stands at the call, so the
-   * resolved array is that caller's snapshot even when later paint lands before
-   * it resolves.
-   *
-   * `into` is written only after the read resolves, and only at the pixels the
-   * window holds, so a caller that also patches it must not do so while this
-   * promise is in flight.
-   */
-  async getFBOData(into?: Float32Array): Promise<Float32Array> {
-    const windowData = await this.readWindowFbo();
-    if (this.wholeFileWindow) {
-      if (into && into !== windowData) into.set(windowData.subarray(0, into.length));
-      return into ?? windowData;
-    }
-
-    const { textureWidth, textureHeight } = this.spectrogramData;
-    const out = into ?? new Float32Array(textureWidth * textureHeight * 4);
-    scatterCompactPixelRanges(out, windowData, this.windowFileRanges());
-    return out;
-  }
-
-  /**
-   * The parts of `fileRanges` the window holds, still in file indices. A caller
-   * that must compare the canvas with the packed state samples only these:
-   * everything else reads back as a miss and would fail the comparison for a
-   * reason that has nothing to do with what it is testing.
-   */
-  residentRanges(fileRanges: Uint32Array): Uint32Array {
-    if (this.wholeFileWindow) return fileRanges;
-    const { mapped } = mapFileRangesToWindow(this.windowLayout, fileRanges);
-    const out = new Uint32Array((mapped.length / 3) * 2);
-    for (let i = 0, j = 0; i + 2 < mapped.length; i += 3, j += 2) {
-      out[j] = mapped[i];
-      out[j + 1] = mapped[i + 2];
-    }
-    return out;
-  }
-
-  /** The file packed ranges the window holds, built once per layout. */
-  private windowFileRanges(): Uint32Array {
-    this.windowRangesCache ??= windowFileRanges(this.windowLayout);
-    return this.windowRangesCache;
-  }
-
-  /**
    * Reads just the pixels of `pixelRanges` (a flat [pixelStart, pixelCount, ...]
    * list) from the committed FBO as it stands at the call, as one block in
    * range order. The ranges are gathered on the GPU into a compact target and
    * only that is read back, so the cost follows the footprint, not the file.
    */
   async readPixelRanges(pixelRanges: Uint32Array): Promise<Float32Array> {
-    const packedTextureSize = this.windowTextureSize;
+    const { packedTextureSize } = this.spectrogramData;
     const width = packedTextureSize.x;
 
     let patchPixels = 0;
-    for (let i = 0; i + 1 < pixelRanges.length; i += 2) patchPixels += pixelRanges[i + 1];
+    let numRanges = 0;
+    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
+      if (pixelRanges[i + 1] === 0) continue;
+      patchPixels += pixelRanges[i + 1];
+      numRanges++;
+    }
     if (patchPixels === 0) return new Float32Array(0);
 
-    // The block is keyed to the file ranges asked for, so a pixel the window
-    // misses keeps its place and reads back zero rather than shifting the rest.
-    const { mapped, blockOffsets } = this.mapRanges(pixelRanges, "read");
-    let numRanges = 0;
-    for (let i = 0; i + 2 < mapped.length; i += 3) if (mapped[i + 2] > 0) numRanges++;
-    if (numRanges === 0) return new Float32Array(patchPixels * 4);
-
     const instances = new Uint32Array(numRanges * 3);
+    let dstPixel = 0;
     let inst = 0;
-    for (let i = 0, piece = 0; i + 2 < mapped.length; i += 3, piece++) {
-      const count = mapped[i + 2];
+    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
+      const count = pixelRanges[i + 1];
       if (count === 0) continue;
-      instances[inst * 3] = mapped[i + 1];
+      instances[inst * 3] = pixelRanges[i];
       instances[inst * 3 + 1] = count;
-      instances[inst * 3 + 2] = blockOffsets[piece];
+      instances[inst * 3 + 2] = dstPixel;
+      dstPixel += count;
       inst++;
     }
 
@@ -1731,33 +1622,26 @@ export class StrokeRenderer {
    * other ping-pong buffer and are copied back, so nothing is uploaded.
    */
   applyPhaseTurns(turns: ArrayLike<number>): void {
-    const packedTextureSize = this.windowTextureSize;
+    const { packedTextureSize } = this.spectrogramData;
     const width = packedTextureSize.x;
     const height = packedTextureSize.y;
 
-    // Each turn range is mapped on its own, so the pieces the window holds keep
-    // the offsets of the range they came from.
-    const windowRanges: number[] = [];
-    const windowOffsets: number[] = [];
-    let missingPixels = 0;
-    for (let i = 0; i + 3 < turns.length; i += 4) {
-      if (turns[i + 1] <= 0) continue;
-      const piece = mapFileRangesToWindow(this.windowLayout, Uint32Array.of(turns[i], turns[i + 1]));
-      missingPixels += piece.missingPixels;
-      for (let j = 0; j + 2 < piece.mapped.length; j += 3) {
-        windowRanges.push(piece.mapped[j + 1], piece.mapped[j + 2]);
-        windowOffsets.push(turns[i + 2], turns[i + 3]);
-      }
-    }
-    if (missingPixels > 0) {
-      diag.warn("paging", "miss", { operation: "phaseTurns", pixels: missingPixels, fileId: this.fileId });
-    }
-    const numRanges = windowRanges.length / 2;
+    let numRanges = 0;
+    for (let i = 0; i + 3 < turns.length; i += 4) if (turns[i + 1] > 0) numRanges++;
     if (numRanges === 0) return;
 
-    const ranges = Uint32Array.from(windowRanges);
-    const offsets = Float32Array.from(windowOffsets);
+    const ranges = new Uint32Array(numRanges * 2);
+    const offsets = new Float32Array(numRanges * 2);
     const zeros = new Float32Array(numRanges * 2);
+    let inst = 0;
+    for (let i = 0; i + 3 < turns.length; i += 4) {
+      if (turns[i + 1] <= 0) continue;
+      ranges[inst * 2] = turns[i];
+      ranges[inst * 2 + 1] = turns[i + 1];
+      offsets[inst * 2] = turns[i + 2];
+      offsets[inst * 2 + 1] = turns[i + 3];
+      inst++;
+    }
 
     const draw = (source: WebGLRenderTarget, targets: WebGLRenderTarget[], offs: Float32Array): void => {
       const geometry = new InstancedBufferGeometry();
@@ -1799,13 +1683,12 @@ export class StrokeRenderer {
    * Set the FBO data from an external source (e.g., for undo/redo).
    */
   setFBOData(data: Float32Array): void {
-    const packedTextureSize = this.windowTextureSize;
-    const windowData = this.wholeFileWindow ? data : gatherWindowPacked(data, this.windowLayout);
+    const { packedTextureSize } = this.spectrogramData;
 
     this.releaseRollback();
     this.pingPong = 0;
 
-    const dataTex = new DataTexture(windowData, packedTextureSize.x, packedTextureSize.y, RGBAFormat, FloatType);
+    const dataTex = new DataTexture(data, packedTextureSize.x, packedTextureSize.y, RGBAFormat, FloatType);
     dataTex.needsUpdate = true;
 
     this.gl.initTexture(dataTex);
@@ -1826,7 +1709,6 @@ export class StrokeRenderer {
 
     dataTex.dispose();
 
-    this.refreshDisplayMags(this.fullRange());
     this.invalidateFboData();
   }
 
@@ -1840,16 +1722,15 @@ export class StrokeRenderer {
    * span most of the texture.
    */
   patchFBOData(data: Float32Array, pixelRanges: Uint32Array): void {
-    const packedTextureSize = this.windowTextureSize;
+    const { packedTextureSize } = this.spectrogramData;
     const width = packedTextureSize.x;
     const height = packedTextureSize.y;
-    const { mapped } = this.mapRanges(pixelRanges, "patch");
 
     let patchPixels = 0;
     let numRanges = 0;
-    for (let i = 0; i + 2 < mapped.length; i += 3) {
-      if (mapped[i + 2] === 0) continue;
-      patchPixels += mapped[i + 2];
+    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
+      if (pixelRanges[i + 1] === 0) continue;
+      patchPixels += pixelRanges[i + 1];
       numRanges++;
     }
     if (patchPixels === 0) return;
@@ -1866,13 +1747,12 @@ export class StrokeRenderer {
     const instances = new Uint32Array(numRanges * 3);
     let srcPixel = 0;
     let inst = 0;
-    for (let i = 0; i + 2 < mapped.length; i += 3) {
-      const fileStart = mapped[i];
-      const windowStart = mapped[i + 1];
-      const count = mapped[i + 2];
+    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
+      const start = pixelRanges[i];
+      const count = pixelRanges[i + 1];
       if (count === 0) continue;
-      patch.set(data.subarray(fileStart * 4, (fileStart + count) * 4), srcPixel * 4);
-      instances[inst * 3] = windowStart;
+      patch.set(data.subarray(start * 4, (start + count) * 4), srcPixel * 4);
+      instances[inst * 3] = start;
       instances[inst * 3 + 1] = count;
       instances[inst * 3 + 2] = srcPixel;
       srcPixel += count;
@@ -1928,13 +1808,6 @@ export class StrokeRenderer {
     this.gl.setRenderTarget(null);
     this.gl.autoClear = prevAutoClear;
 
-    const patched = new Uint32Array(numRanges * 2);
-    for (let i = 0; i < numRanges; i++) {
-      patched[i * 2] = instances[i * 3];
-      patched[i * 2 + 1] = instances[i * 3 + 1];
-    }
-    this.refreshDisplayMags({ ranges: patched, count: numRanges });
-
     geometry.dispose();
     patchTex.dispose();
     this.invalidateFboData();
@@ -1948,14 +1821,12 @@ export class StrokeRenderer {
     inverse: DataTexture;
     metadata: DataTexture;
     original: DataTexture;
-    window: WindowLayout;
   } {
     return {
       packed: this.pingPong === 0 ? this.fbo1 : this.fbo2,
       inverse: this.textures.inverseMapTex,
       metadata: this.textures.metadataTex,
       original: this.textures.originalPackedDataTex,
-      window: this.windowLayout,
     };
   }
 
@@ -1970,13 +1841,7 @@ export class StrokeRenderer {
    * preview is valid in, as a numBands×1 texture. `active` is false when there
    * is no preview to show.
    */
-  getPreviewDisplay(): {
-    committed: Texture;
-    preview: Texture;
-    binRanges: Texture;
-    active: boolean;
-    displayMags: Texture | null;
-  } {
+  getPreviewDisplay(): { committed: Texture; preview: Texture; binRanges: Texture; active: boolean } {
     const currentFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
     const nextFBO = this.pingPong === 0 ? this.fbo2 : this.fbo1;
     return {
@@ -1984,13 +1849,7 @@ export class StrokeRenderer {
       preview: nextFBO.texture,
       binRanges: this.previewRangeTex,
       active: this.previewActive,
-      displayMags: this.displayMags?.texture() ?? null,
     };
-  }
-
-  /** The RG16F dB magnitudes texture the display reads as its committed base. */
-  getDisplayMagsTexture(): Texture | null {
-    return this.displayMags?.texture() ?? null;
   }
 
   // Blocks until all GPU work submitted so far has finished. Lets opt-in paint
@@ -2008,9 +1867,12 @@ export class StrokeRenderer {
   captureRollback(): void {
     if (this.rollbackFbo) {
       this.blitFBO(this.rollbackFbo, this.pingPong === 0 ? this.fbo1 : this.fbo2);
-      this.refreshDisplayMags(this.fullRange());
     } else {
-      this.rollbackFbo = this.createFBO(this.windowLayout.textureWidth, this.windowLayout.textureHeight, RGBAFormat);
+      this.rollbackFbo = this.createFBO(
+        this.spectrogramData.textureWidth,
+        this.spectrogramData.textureHeight,
+        RGBAFormat,
+      );
       this.blitFBO(this.pingPong === 0 ? this.fbo1 : this.fbo2, this.rollbackFbo);
     }
     this.invalidateFboData();
@@ -2028,7 +1890,6 @@ export class StrokeRenderer {
   restoreRollback(): boolean {
     if (!this.rollbackFbo) return false;
     this.blitFBO(this.rollbackFbo, this.pingPong === 0 ? this.fbo1 : this.fbo2);
-    this.refreshDisplayMags(this.fullRange());
     this.releaseRollback();
     this.dirtyRegion = null;
     this.invalidateFboData();
@@ -2099,7 +1960,7 @@ export class StrokeRenderer {
   getDirtyPixelRanges(): Uint32Array | null {
     if (this.committedTimeMax <= this.committedTimeMin) return null;
 
-    const { numBands, bandOffsets, bandLengths } = this.windowLayout.file;
+    const { numBands, metadata } = this.spectrogramData;
     const pitchMargin = 4;
     const highBand = Math.min(
       numBands - 1,
@@ -2112,8 +1973,8 @@ export class StrokeRenderer {
 
     const ranges: number[] = [];
     for (let b = lowBand; b <= highBand; b++) {
-      const offset = bandOffsets[b];
-      const length = bandLengths[b];
+      const offset = Math.round(metadata[b * 4]);
+      const length = Math.round(metadata[b * 4 + 1]);
       const start = Math.max(offset, offset + Math.floor(t0 * length) - timeMargin);
       const end = Math.min(offset + length, offset + Math.ceil(t1 * length) + timeMargin);
       if (end > start) ranges.push(start, end - start);
@@ -2136,6 +1997,15 @@ export class StrokeRenderer {
     // Clear both Mask FBOs and reset ping-pong
     this.clearMasks(this.scratch);
     this.maskPingPong = 0;
+  }
+
+  /**
+   * Restore to original state.
+   */
+  restoreOriginal(): void {
+    this.isInitialized = false;
+    this.invalidateFboData();
+    this.dirtyRegion = null;
   }
 
   /**

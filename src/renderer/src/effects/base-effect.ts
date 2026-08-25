@@ -1,4 +1,3 @@
-import type { TimeReach, TimeReachContext } from "@renderer/lib/stroke-reach";
 import { defaultParameterUniform } from "@renderer/lib/static-modulation";
 import { OpenFile, State } from "@renderer/store/types";
 import { ModulatorParameterUniform, ParameterUniform } from "@renderer/types";
@@ -235,17 +234,6 @@ export abstract class BaseEffect {
    * through `inSwappedDomain`, which domain reaches it.
    */
   domainAfter?(state: State, inSwappedDomain: boolean): boolean;
-
-  /**
-   * How far beyond its own pixel one pass reads along time, per iteration,
-   * over what the shared source transform already reads. The base declaration
-   * is pointwise; an effect with its own time sampling must override it, or a
-   * stroke window sized from it will clamp those reads at its edges.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  timeReach(_ctx: TimeReachContext): TimeReach {
-    return { kind: "none" };
-  }
 
   updateCommonUniforms({ commonUniforms, passIndex }: { commonUniforms: CommonUniforms; passIndex: number }): void {
     const material = this.materials[passIndex];

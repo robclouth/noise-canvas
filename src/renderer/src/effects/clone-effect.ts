@@ -1,4 +1,3 @@
-import type { TimeReach, TimeReachContext } from "../lib/stroke-reach";
 import { useStore } from "@/store";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "@renderer/lib/scale-snap";
 import type { State } from "@renderer/store/types";
@@ -167,13 +166,6 @@ class CloneEffect extends BaseEffect {
     const bandIndex = props.commonUniforms.brushBottomLeftUv.value.y * spectrogramData.numBands;
     material.uniforms.brushBasePitchAbsSemis.value =
       minFreqSemisAboveC0(spectrogramData.minFreq) + bandIndex / bandsPerSemitone;
-  }
-
-  // The farthest copy sits count spacings from the dab.
-  timeReach(ctx: TimeReachContext): TimeReach {
-    const copies = Math.min(64, Math.max(1, ctx.maxAbs("cloneCountX")));
-    const frames = ctx.maxAbs("cloneSpaceBeats") * ctx.framesPerBeat * copies;
-    return { kind: "frames", frames: Math.ceil(frames) };
   }
 }
 

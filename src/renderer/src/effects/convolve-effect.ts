@@ -1,4 +1,3 @@
-import type { TimeReach } from "../lib/stroke-reach";
 import { getNumberParameterDef } from "@renderer/parameters";
 import { getOpenFileByPath, openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
@@ -116,9 +115,6 @@ class ConvolveEffect extends BaseEffect {
 
     material.uniforms.convolveIrRate.value = parameterUniform(state, "convolveIrRate", props.modContext);
     material.uniforms.convolveGainDb.value = parameterUniform(state, "convolveGainDb", props.modContext);
-  }
-  timeReach(): TimeReach {
-    return { kind: "wholeFile" };
   }
 }
 

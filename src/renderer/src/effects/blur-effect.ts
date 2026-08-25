@@ -1,4 +1,3 @@
-import type { TimeReach, TimeReachContext } from "../lib/stroke-reach";
 import { useStore } from "@/store";
 import { unitsToUv } from "@renderer/lib/utils";
 import { GLSL3, RawShaderMaterial, Vector2 } from "three";
@@ -126,14 +125,6 @@ class BlurEffect extends BaseEffect {
     material.uniforms.blurEdgeMode.value = blurEdgeMode;
     material.uniforms.blurSampleCount.value = passIndex === 0 ? blurSamplesX : blurSamplesY;
     material.uniforms.blurOrigin.value = blurOrigin;
-  }
-
-  // Mirrors the uniform build above: the box is (blurAmountTime * 4) / 100
-  // beats, and the noise jitter moves a tap by up to its own fraction of it.
-  timeReach(ctx: TimeReachContext): TimeReach {
-    const beats = (ctx.maxAbs("blurAmountTime") * 4) / 100;
-    const jitter = 1 + ctx.maxAbs("blurNoiseTime") / 100;
-    return { kind: "frames", frames: Math.ceil(beats * ctx.framesPerBeat * jitter) };
   }
 }
 

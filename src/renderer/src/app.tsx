@@ -30,6 +30,7 @@ import { setShaderWarmupProgress } from "./lib/shader-warmup-progress";
 import { clearAllHistoryManagers, getHistoryManager, pruneOrphanHistoryDirs } from "./lib/history-manager";
 import { useLinkSync } from "./lib/use-link-sync";
 import { useShortcuts } from "./lib/useShortcuts";
+import { openFiles } from "./store/files";
 import { openPreferencesModal } from "./components/preferences-modal";
 
 type Invalidator = RootState["invalidate"];
@@ -315,7 +316,16 @@ function App(): React.JSX.Element {
     const unsubRestoreOriginal = ipcOn("restore-original", () => {
       const { activeFileId } = useStore.getState();
       if (!activeFileId) return;
-      void useStore.getState().restoreOriginalFile(activeFileId);
+      const file = openFiles[activeFileId];
+
+      if (!file?.rendererRef?.current) return;
+
+      file.rendererRef.current.restoreOriginal();
+      // The canvas is the analysis again, so it holds no unprojected paint.
+      file.unprojectedPaint = false;
+      // restore-original bypasses history, so the FBO no longer matches the
+      // history's current node; navigation must not patch on top of it.
+      getHistoryManager(activeFileId).markFboOutOfSync();
     });
     unsubscribers.push(unsubRestoreOriginal);
 

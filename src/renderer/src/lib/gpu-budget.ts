@@ -2,11 +2,8 @@ import { host } from "./host";
 
 // GPU bytes per packed texel one open file keeps resident: two ping-pong FBOs
 // (2 × RGBA32F = 32), the pristine packed texture (RGBA32F = 16) and the
-// inverse map (RG32F = 8). Charged per texel of the resident window, which is
-// the whole file until paging moves it.
+// inverse map (RG32F = 8).
 export const GPU_BYTES_PER_TEXEL_FILE = 56;
-// The whole-window RG16F dB display texture.
-export const GPU_BYTES_PER_TEXEL_DISPLAY = 4;
 // The shared stroke scratch pool at its fullest, sized to the largest open
 // file: two pass FBOs (32), the stroke-start snapshot (16), a mask ping-pong
 // pair per brush step (MAX_STEPS × 2 × R16F = 20) and the two-target modulator
@@ -29,39 +26,16 @@ export function gpuMemoryInfo(): { bytes: number; unified: boolean } {
   return cachedInfo;
 }
 
-/** What one open file costs, split by the count each rate applies to. */
-export interface FileFootprint {
-  /** Packed texels the file has. The CPU copies are held for all of them. */
-  fileTexels: number;
-  /** Packed texels resident on the GPU. Equal to `fileTexels` until paging moves the window. */
-  windowTexels: number;
-  /** Texels the RG16F display texture holds. Zero before it is built. */
-  displayTexels: number;
-}
-
-/** A file with everything resident, charged as if the display texture is up. */
-export function wholeFileFootprint(fileTexels: number): FileFootprint {
-  return { fileTexels, windowTexels: fileTexels, displayTexels: fileTexels };
-}
-
 /** Bytes the open files hold, by the same rates the budget is spent at. */
-export function spectrogramBytes(files: FileFootprint[], unified: boolean): number {
-  let resident = 0;
+export function spectrogramBytes(openTexelCounts: number[], unified: boolean): number {
+  let sum = 0;
   let largest = 0;
-  let onCpu = 0;
-  let display = 0;
-  for (const file of files) {
-    resident += file.windowTexels;
-    largest = Math.max(largest, file.windowTexels);
-    onCpu += file.fileTexels;
-    display += file.displayTexels;
+  for (const texels of openTexelCounts) {
+    sum += texels;
+    largest = Math.max(largest, texels);
   }
-  return (
-    GPU_BYTES_PER_TEXEL_FILE * resident +
-    GPU_BYTES_PER_TEXEL_SCRATCH * largest +
-    GPU_BYTES_PER_TEXEL_DISPLAY * display +
-    (unified ? CPU_BYTES_PER_TEXEL_FILE * onCpu : 0)
-  );
+  const perTexel = GPU_BYTES_PER_TEXEL_FILE + (unified ? CPU_BYTES_PER_TEXEL_FILE : 0);
+  return perTexel * sum + GPU_BYTES_PER_TEXEL_SCRATCH * largest;
 }
 
 /**
@@ -69,20 +43,17 @@ export function spectrogramBytes(files: FileFootprint[], unified: boolean): numb
  * the menu bar reports. Undefined when the host names no GPU memory figure,
  * which leaves no budget to measure against.
  */
-export function usedBudgetFraction(files: FileFootprint[]): number | undefined {
+export function usedBudgetFraction(openTexelCounts: number[]): number | undefined {
   const info = gpuMemoryInfo();
   if (info.bytes <= 0) return undefined;
   const budget = info.bytes * GPU_BUDGET_SHARE;
-  return spectrogramBytes(files, info.unified) / budget;
+  return spectrogramBytes(openTexelCounts, info.unified) / budget;
 }
 
 /**
  * Largest packed coefficient count one more analysis may produce, given the
  * texel counts of the files already open. Undefined when the host reports no
  * GPU memory figure, leaving only the analyzer's texture-dimension cap.
- *
- * Counted as if every file were resident whole, which is what an unpaged file
- * costs and an over-estimate for a paged one.
  */
 export function remainingCoefficientBudget(openTexelCounts: number[]): number | undefined {
   const info = gpuMemoryInfo();

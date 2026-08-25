@@ -29,7 +29,6 @@ import { createMockState, createMockStateForIterations, createMockStateWithSteps
 import { brushEnvelopeShape } from "../brush-envelope";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";
-import { buildWindowLayout, fileLayoutOf } from "../window-layout";
 
 // Mock shaders check brush bounds in packed UV space, which doesn't align with
 // the unpacked band-index rows and footprint the real brush occupies. Draw the
@@ -2061,13 +2060,8 @@ describe("StrokeRenderer", () => {
   describe("scissor optimization", () => {
     // Call the real calculateScissorRows via prototype (bypasses the test override)
     function realScissorRows(brushPos: Vector2, brushSize: Vector2) {
-      const fileLayout = fileLayoutOf(spectrogramData);
       return StrokeRenderer.prototype.calculateScissorRows.call(
-        {
-          spectrogramData,
-          windowLayout: buildWindowLayout(fileLayout, 0, fileLayout.numFrames),
-          brushBandRange: StrokeRenderer.prototype.brushBandRange,
-        } as unknown as StrokeRenderer,
+        { spectrogramData, brushBandRange: StrokeRenderer.prototype.brushBandRange } as unknown as StrokeRenderer,
         brushPos,
         brushSize,
       );

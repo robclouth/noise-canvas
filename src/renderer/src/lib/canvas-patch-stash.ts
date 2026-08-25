@@ -23,11 +23,6 @@ export function takeCanvasPatchStash(fileId: string): CanvasPatchStash | null {
   return stash;
 }
 
-/** True while a file holds a patch the canvas has not taken. */
-export function hasCanvasPatchStash(fileId: string): boolean {
-  return stashes.has(fileId);
-}
-
 export function setCanvasPatchStash(fileId: string, stash: CanvasPatchStash): void {
   stashes.set(fileId, stash);
 }

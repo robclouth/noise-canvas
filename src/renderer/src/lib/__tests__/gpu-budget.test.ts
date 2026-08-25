@@ -1,13 +1,7 @@
 import { FloatType, HalfFloatType, RedFormat, RGFormat, RGBAFormat, UnsignedByteType } from "three";
 import type { WebGLRenderTarget } from "three";
 import { describe, expect, it } from "vitest";
-import {
-  GPU_BYTES_PER_TEXEL_FILE,
-  GPU_BYTES_PER_TEXEL_DISPLAY,
-  GPU_BYTES_PER_TEXEL_SCRATCH,
-  spectrogramBytes,
-  wholeFileFootprint,
-} from "../gpu-budget";
+import { GPU_BYTES_PER_TEXEL_FILE, GPU_BYTES_PER_TEXEL_SCRATCH, spectrogramBytes } from "../gpu-budget";
 import { MAX_STEPS } from "../constants";
 import { StrokeScratch, StrokeScratchPool } from "../stroke-scratch-pool";
 
@@ -102,20 +96,9 @@ describe("GPU budget rates", () => {
     // The pool is shared, so a second open file of the same size adds its own
     // resident textures but no second scratch set.
     const texels = 1000;
-    const one = spectrogramBytes([wholeFileFootprint(texels)], false);
-    const two = spectrogramBytes([wholeFileFootprint(texels), wholeFileFootprint(texels)], false);
-    expect(one).toBe((GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH + GPU_BYTES_PER_TEXEL_DISPLAY) * texels);
-    expect(two - one).toBe((GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_DISPLAY) * texels);
-  });
-
-  it("charges the resident window and the display texture, not the file", () => {
-    const paged = { fileTexels: 16000, windowTexels: 1000, displayTexels: 250 };
-    expect(spectrogramBytes([paged], false)).toBe(
-      (GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH) * paged.windowTexels +
-        GPU_BYTES_PER_TEXEL_DISPLAY * paged.displayTexels,
-    );
-    // On unified memory the CPU copies still cover the whole file.
-    const perCpuTexel = spectrogramBytes([paged], true) - spectrogramBytes([paged], false);
-    expect(perCpuTexel).toBe(24 * paged.fileTexels);
+    const one = spectrogramBytes([texels], false);
+    const two = spectrogramBytes([texels, texels], false);
+    expect(one).toBe((GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH) * texels);
+    expect(two - one).toBe(GPU_BYTES_PER_TEXEL_FILE * texels);
   });
 });

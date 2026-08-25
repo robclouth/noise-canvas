@@ -342,8 +342,7 @@ export async function deriveSideData(node: HistoryNode): Promise<{
   return { inverseMap, metadata };
 }
 
-/** The dimensions a history node records for `s`'s packed layout. */
-export function dimensionsFromSpectrogram(s: SpectrogramData): HistoryDimensions {
+function dimensionsFromSpectrogram(s: SpectrogramData): HistoryDimensions {
   return {
     textureWidth: s.textureWidth,
     textureHeight: s.textureHeight,

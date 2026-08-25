@@ -1,4 +1,3 @@
-import type { TimeReach } from "../lib/stroke-reach";
 import { useStore } from "@/store";
 import type { EffectsState } from "@renderer/store/effects";
 import { GLSL3, RawShaderMaterial } from "three";
@@ -55,9 +54,6 @@ class SortEffect extends BaseEffect {
     // sortAxis and passIndexOffset are fixed per material — not overridden here.
     // Override useLinearBlend to true so applyBrush uses exact linear mix for stable swaps.
     material.uniforms.useLinearBlend.value = true;
-  }
-  timeReach(): TimeReach {
-    return { kind: "wholeFile" };
   }
 }
 

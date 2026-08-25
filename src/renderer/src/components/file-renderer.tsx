@@ -21,18 +21,22 @@ import {
 } from "react";
 import {
   Camera,
+  ClampToEdgeWrapping,
   Color,
   DataTexture,
+  FloatType,
   GLSL3,
   Mesh,
+  NearestFilter,
   RawShaderMaterial,
+  RGBAFormat,
+  RGFormat,
   Texture,
   Vector2,
   WebGLRenderer,
   WebGLRenderTarget,
 } from "three";
 import { effects } from "../effects";
-import { type FileFootprint } from "@renderer/lib/gpu-budget";
 import { getHistoryManager } from "@renderer/lib/history-manager";
 import { serializeFileTask } from "@renderer/lib/file-task-queue";
 import displayFrag from "../glsl/display.frag";
@@ -40,10 +44,6 @@ import passThroughVert from "../glsl/pass-through.vert";
 import { DEFAULT_ONSET_SENSITIVITY } from "../lib/constants";
 import { getFileOnsets } from "../lib/file-onsets";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
-import { DisplayMags } from "../lib/display-mags";
-import { buildWindowLayout, fileLayoutOf, type WindowLayout } from "../lib/window-layout";
-import { buildFileMetadataTexture, buildWindowTextures } from "../lib/window-textures";
-import { subtractPixelRanges } from "../lib/pixel-ranges";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
 import { buildScaleOffsets, minFreqSemisAboveC0 } from "../lib/scale-snap";
 import { FULL_SCALE_DB_OFFSET } from "../lib/constants";
@@ -109,15 +109,8 @@ export interface FileRendererHandle {
   discardStrokePreview: () => boolean;
   /** Keeps the previewed pixels and forgets the saved ones, so they can be committed. */
   keepStrokePreview: () => void;
-  /**
-   * Gets the raw data from the current frame buffer object asynchronously, in
-   * the file's packed layout. `into` receives it in place; it is written only
-   * after the read resolves, so a caller that also patches it must not do so
-   * while the promise is in flight.
-   */
-  getFBOData: (into?: Float32Array) => Promise<Float32Array>;
-  /** Texel counts of what this file holds on the GPU, at the budget's rates. */
-  gpuFootprint: () => FileFootprint;
+  /** Gets the raw data from the current frame buffer object asynchronously. */
+  getFBOData: () => Promise<Float32Array>;
   /**
    * Reads only the pixels of the flat [pixelStart, pixelCount, ...] ranges from
    * the committed frame buffer, as one block in range order.
@@ -136,8 +129,6 @@ export interface FileRendererHandle {
    * everything outside the ranges already matches the FBO, but far cheaper.
    */
   patchFBOData: (data: Float32Array, pixelRanges: Uint32Array) => void;
-  /** The parts of the flat [pixelStart, pixelCount, ...] ranges the canvas holds. */
-  residentRanges: (pixelRanges: Uint32Array) => Uint32Array;
   /** Returns the textures used for rendering. */
   getTextures: () => {
     packed: WebGLRenderTarget;
@@ -145,6 +136,8 @@ export interface FileRendererHandle {
     metadata: DataTexture;
     original: DataTexture;
   } | null;
+  /** Restores the spectrogram to its original state. */
+  restoreOriginal: () => void;
   /** Clears the stroke preview. */
   clearPreview: () => void;
   /** Reloads all textures from the current spectrogramData (used after re-analysis). */
@@ -407,8 +400,6 @@ const FileRendererInner = memo(
           previewTex: { value: null as Texture | null },
           previewBinRangesTex: { value: null as Texture | null },
           previewActive: { value: false },
-          displayMagsTex: { value: null as Texture | null },
-          displayMagsActive: { value: false },
         },
         vertexShader: passThroughVert,
         fragmentShader: displayFrag,
@@ -431,18 +422,41 @@ const FileRendererInner = memo(
       };
     }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
 
-    // The span the packed, inverse-map and metadata textures hold.
-    const windowLayoutRef = useRef<WindowLayout | null>(null);
-
     /**
-     * Creates the packed, inverse-map and metadata textures for the resident
-     * window. Used both on initial load and when reloading textures.
+     * Creates DataTextures from spectrogram data.
+     * Used both on initial load and when reloading textures.
      */
     const createTextures = useCallback(() => {
-      const fileLayout = fileLayoutOf(spectrogramData);
-      const window = buildWindowLayout(fileLayout, 0, fileLayout.numFrames);
-      windowLayoutRef.current = window;
-      return buildWindowTextures(spectrogramData, window);
+      const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
+
+      const packed = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
+      packed.internalFormat = "RGBA32F";
+      packed.minFilter = NearestFilter;
+      packed.magFilter = NearestFilter;
+      packed.wrapS = ClampToEdgeWrapping;
+      packed.wrapT = ClampToEdgeWrapping;
+      packed.generateMipmaps = false;
+      packed.needsUpdate = true;
+
+      const inverse = new DataTexture(inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
+      inverse.internalFormat = "RG32F";
+      inverse.minFilter = NearestFilter;
+      inverse.magFilter = NearestFilter;
+      inverse.wrapS = ClampToEdgeWrapping;
+      inverse.wrapT = ClampToEdgeWrapping;
+      inverse.generateMipmaps = false;
+      inverse.needsUpdate = true;
+
+      const meta = new DataTexture(metadata, numBands, 1, RGBAFormat, FloatType);
+      meta.internalFormat = "RGBA32F";
+      meta.minFilter = NearestFilter;
+      meta.magFilter = NearestFilter;
+      meta.wrapS = ClampToEdgeWrapping;
+      meta.wrapT = ClampToEdgeWrapping;
+      meta.generateMipmaps = false;
+      meta.needsUpdate = true;
+
+      return { packed, inverse, meta };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
       spectrogramData.packedData,
@@ -452,49 +466,6 @@ const FileRendererInner = memo(
       spectrogramData.textureHeight,
       spectrogramData.numBands,
     ]);
-
-    // The display's committed base, file-sized, recreated with the textures so
-    // a re-analysis that changes the layout gets a matching target.
-    const displayMagsRef = useRef<DisplayMags | null>(null);
-
-    // The file's own band geometry for the display: the committed base is
-    // file-sized whatever window the paint textures hold.
-    const fileMetadataTexRef = useRef<DataTexture | null>(null);
-
-    useEffect(() => {
-      const mags = new DisplayMags(fileLayoutOf(spectrogramData));
-      displayMagsRef.current = mags;
-      const fileMeta = buildFileMetadataTexture(spectrogramData);
-      fileMetadataTexRef.current = fileMeta;
-      return () => {
-        displayMagsRef.current = null;
-        mags.dispose();
-        fileMetadataTexRef.current = null;
-        fileMeta.dispose();
-      };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [spectrogramData.textureWidth, spectrogramData.textureHeight, spectrogramData.numBands]);
-
-    /**
-     * Encodes into the display texture whatever part of `data` the stroke
-     * renderer's own refresh did not cover: the ranges its window misses, or
-     * everything when no renderer is alive. `ranges` null means the whole
-     * packed state.
-     */
-    const refreshDisplayFromPacked = (data: Float32Array, ranges: Uint32Array | null): void => {
-      const gl = glRef.current;
-      const mags = displayMagsRef.current;
-      if (!gl || !mags) return;
-      const renderer = strokeRendererRef.current;
-      if (!renderer) {
-        if (ranges) mags.patchFromPacked(gl, data, ranges);
-        else mags.seedFromPacked(gl, data);
-        return;
-      }
-      const full = ranges ?? Uint32Array.of(0, spectrogramData.textureWidth * spectrogramData.textureHeight);
-      const missing = subtractPixelRanges(full, renderer.residentRanges(full));
-      if (missing.length > 0) mags.patchFromPacked(gl, data, missing);
-    };
 
     /** The textures on the GPU now, so cleanup frees what is actually current. */
     const liveTexturesRef = useRef<{ packed: DataTexture; inverse: DataTexture; meta: DataTexture } | null>(null);
@@ -600,10 +571,7 @@ const FileRendererInner = memo(
 
       const uniforms = displayMaterial.uniforms;
       uniforms.sourceInverseMapTex.value = inverseMapTex;
-      uniforms.sourceMetadataTex.value = fileMetadataTexRef.current ?? metadataTex;
-      const displayMags = displayMagsRef.current?.texture() ?? null;
-      uniforms.displayMagsTex.value = displayMags;
-      uniforms.displayMagsActive.value = displayMags !== null;
+      uniforms.sourceMetadataTex.value = metadataTex;
       uniforms.sourceMinFreq.value = spectrogramData.minFreq;
       uniforms.sourceBandsPerOctave.value = spectrogramData.bandsPerOctave;
       uniforms.sourceFrameCount.value = spectrogramData.numFrames;
@@ -892,15 +860,7 @@ const FileRendererInner = memo(
         // The GPU can refuse the allocations even after analysis fit the
         // budget; closing the file keeps the context alive.
         try {
-          strokeRendererRef.current = new StrokeRenderer(
-            gl,
-            spectrogramData,
-            textures,
-            fileId,
-            effects,
-            windowLayoutRef.current,
-            displayMagsRef.current,
-          );
+          strokeRendererRef.current = new StrokeRenderer(gl, spectrogramData, textures, fileId, effects);
         } catch (error) {
           console.error("Creating the stroke renderer failed:", error);
           notifications.show({
@@ -1241,11 +1201,11 @@ const FileRendererInner = memo(
     /**
      * Reads the pixel data from the current FBO asynchronously.
      */
-    const getFBOData = async (into?: Float32Array): Promise<Float32Array> => {
+    const getFBOData = async (): Promise<Float32Array> => {
       if (!strokeRendererRef.current) {
         throw new Error("StrokeRenderer not initialized");
       }
-      return strokeRendererRef.current.getFBOData(into);
+      return strokeRendererRef.current.getFBOData();
     };
 
     const readPixelRanges = async (pixelRanges: Uint32Array): Promise<Float32Array> => {
@@ -1259,8 +1219,9 @@ const FileRendererInner = memo(
      * Sets the FBO data from an external source (e.g., for undo/redo).
      */
     const setFBOData = (data: Float32Array) => {
-      strokeRendererRef.current?.setFBOData(data);
-      refreshDisplayFromPacked(data, null);
+      if (!strokeRendererRef.current) return;
+
+      strokeRendererRef.current.setFBOData(data);
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();
@@ -1279,27 +1240,14 @@ const FileRendererInner = memo(
     };
 
     const patchFBOData = (data: Float32Array, pixelRanges: Uint32Array) => {
-      strokeRendererRef.current?.patchFBOData(data, pixelRanges);
-      refreshDisplayFromPacked(data, pixelRanges);
+      if (!strokeRendererRef.current) return;
+
+      strokeRendererRef.current.patchFBOData(data, pixelRanges);
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();
       snapshotStaleRef.current = true;
       scheduleSnapshotRefresh();
-    };
-
-    const residentRanges = (pixelRanges: Uint32Array): Uint32Array =>
-      strokeRendererRef.current?.residentRanges(pixelRanges) ?? new Uint32Array(0);
-
-    const gpuFootprint = (): FileFootprint => {
-      const fileTexels = spectrogramData.textureWidth * spectrogramData.textureHeight;
-      const window = windowLayoutRef.current;
-      const windowTexels = window ? window.textureWidth * window.textureHeight : fileTexels;
-      return {
-        fileTexels,
-        windowTexels,
-        displayTexels: displayMagsRef.current?.texture() ? displayMagsRef.current.texelCount() : 0,
-      };
     };
 
     /**
@@ -1313,6 +1261,19 @@ const FileRendererInner = memo(
     } | null => {
       if (!strokeRendererRef.current || !inverseMapTex || !metadataTex || !originalPackedDataTex) return null;
       return strokeRendererRef.current.getTextures();
+    };
+
+    /**
+     * Restores the spectrogram to its original, unmodified state.
+     */
+    const restoreOriginal = () => {
+      if (strokeRendererRef.current) {
+        strokeRendererRef.current.restoreOriginal();
+      }
+      invalidateRef.current();
+      snapshotStaleRef.current = true;
+      scheduleSnapshotRefresh();
+      useStore.getState().synthesizeFile(fileId);
     };
 
     /**
@@ -1399,13 +1360,12 @@ const FileRendererInner = memo(
       discardStrokePreview,
       keepStrokePreview: () => strokeRendererRef.current?.releaseRollback(),
       getFBOData,
-      gpuFootprint,
       readPixelRanges,
       applyPhaseTurns,
       setFBOData,
       patchFBOData,
-      residentRanges,
       getTextures,
+      restoreOriginal,
       clearPreview,
       reloadTextures,
       beginStroke,

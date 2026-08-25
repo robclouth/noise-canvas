@@ -56,7 +56,6 @@ vi.mock("../modals", () => ({
 }));
 vi.mock("../history-manager", () => ({
   destroyHistoryManager: vi.fn(async () => {}),
-  dimensionsFromSpectrogram: vi.fn(),
   getHistoryManager: vi.fn(() => ({
     currentNodeId: vi.fn(async () => gate.nodeId),
     markSaved: vi.fn(async (nodeId?: string) => {
@@ -70,7 +69,6 @@ vi.mock("../history-manager", () => ({
     setNodeOnsets: vi.fn(async (nodeId: string, packed: Float32Array) => {
       gate.storedOnsets.push({ nodeId, packed });
     }),
-    currentPackedState: vi.fn(() => null),
   })),
 }));
 vi.mock("../onset-map", () => ({
@@ -178,7 +176,6 @@ function openTestFile(filePath = "/audio/a.wav") {
       sampleRate: 48000,
       bandsPerOctave: 12,
       minFreq: 20,
-      packedData: new Float32Array(64),
       synthesisMetadata: {
         bandOffsets: new Uint32Array(numBands),
         bandStepLog2s: new Int32Array(numBands),
@@ -187,7 +184,7 @@ function openTestFile(filePath = "/audio/a.wav") {
     },
     rendererRef: {
       current: {
-        gpuFootprint: () => ({ fileTexels: 16, windowTexels: 16, displayTexels: 16 }),
+        getFBOData: async () => new Float32Array(64),
         getDirtyRegion: () => null,
         clearDirtyRegion: vi.fn(),
         reloadTextures: vi.fn(),

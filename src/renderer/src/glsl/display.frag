@@ -40,43 +40,23 @@ uniform sampler2D previewTex;
 uniform sampler2D previewBinRangesTex;
 uniform bool previewActive;
 
-// The committed base: whole-window magnitudes as dB in RG16F, kept current by
-// the stroke renderer at every committed write. With it inactive the canvas
-// itself is read, which only tests and the first frames before a build use.
-uniform sampler2D displayMagsTex;
-uniform bool displayMagsActive;
-
-#include "display-mags.glsl";
-
-
-vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, ivec2 texSize, ivec2 magsSize) {
+vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, ivec2 texSize) {
+    ivec2 texel = packedTexel(bandStartOffset + timeIndex, texSize);
     if (previewActive) {
-        // The preview texture is window-sized: .a holds the band's first file
-        // bin, so subtracting it turns the file bin into a window bin, and .b
-        // holds the band's offset into the window texture.
-        vec4 previewBins = texelFetch(previewBinRangesTex, ivec2(bandIndex, 0), 0);
-        float windowBin = timeIndex - previewBins.a;
-        if (windowBin >= previewBins.x && windowBin < previewBins.y) {
-            return texelFetch(previewTex, packedTexel(previewBins.b + windowBin, texSize), 0);
-        }
+        vec2 bins = texelFetch(previewBinRangesTex, ivec2(bandIndex, 0), 0).rg;
+        if (timeIndex >= bins.x && timeIndex < bins.y) return texelFetch(previewTex, texel, 0);
     }
-    if (displayMagsActive) {
-        vec2 db = texelFetch(displayMagsTex, packedTexel(bandStartOffset + timeIndex, magsSize), 0).rg;
-        return vec4(displayDbToMag(db.x), 0.0, displayDbToMag(db.y), 0.0);
-    }
-    return texelFetch(sourceSpectrogramTex, packedTexel(bandStartOffset + timeIndex, texSize), 0);
+    return texelFetch(sourceSpectrogramTex, texel, 0);
 }
 
-vec4 sampleDisplayInterp(vec2 uv, out bool resident) {
+vec4 sampleDisplayInterp(vec2 uv) {
     float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
     packedInterpBins(uv, sourceMetadataTex, sourceFrameCount, sourceBandCount,
-                     bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction, resident);
+                     bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
     ivec2 texSize = textureSize(sourceSpectrogramTex, 0);
-    ivec2 magsSize = textureSize(displayMagsTex, 0);
     int band = int(bandIndex);
-
-    vec4 sample1 = fetchDisplayTexel(band, bandStartOffset, timeIndex0, texSize, magsSize);
-    vec4 sample2 = fetchDisplayTexel(band, bandStartOffset, timeIndex1, texSize, magsSize);
+    vec4 sample1 = fetchDisplayTexel(band, bandStartOffset, timeIndex0, texSize);
+    vec4 sample2 = fetchDisplayTexel(band, bandStartOffset, timeIndex1, texSize);
     return vec4(interpolateComplex(sample1.rg, sample2.rg, timeFraction),
                 interpolateComplex(sample1.ba, sample2.ba, timeFraction));
 }
@@ -140,10 +120,7 @@ void main() {
     // Time axis samples edge-aligned: the stored coefficient for bin k is the
     // analysis atom centered at frame k * 2^step, so an impulse reads as a
     // vertical ridge at the same time in every band regardless of bin stride.
-    bool resident0, resident1;
-    vec4 sample0 = sampleDisplayInterp(uv0, resident0);
-    vec4 sample1 = sampleDisplayInterp(uv1, resident1);
-    vec4 packedValue = markResidency(mix(sample0, sample1, bandFrac), resident0 && resident1);
+    vec4 packedValue = mix(sampleDisplayInterp(uv0), sampleDisplayInterp(uv1), bandFrac);
 
     // packedValue stores [leftMagnitude, leftPhase, rightMagnitude, rightPhase]
     vec2 leftMagPhase = packedValue.rg;
