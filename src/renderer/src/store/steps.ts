@@ -1,9 +1,10 @@
 import { pickNextStepColor } from "@renderer/lib/colors";
+import { MAX_STEPS } from "@renderer/lib/constants";
 import { BrushStep, createDefaultStep, isStepParameter } from "@renderer/parameters";
 import { produce } from "immer";
 import type { ParameterKey, State, ZustandGet, ZustandSet } from "./types";
 
-export const MAX_STEPS = 5;
+export { MAX_STEPS };
 
 export const STEPS_PERSISTED_KEYS = ["activeStepIndex"] as const;
 

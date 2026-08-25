@@ -19,11 +19,16 @@ import {
  * pass and touches neither, which is the default brush and every brush Reduced
  * Mode allows.
  */
+/** A step's stroke mask as a ping-pong pair; the read target is the pair's current index. */
+export type MaskPair = [WebGLRenderTarget, WebGLRenderTarget];
+
 export interface StrokeScratch {
   passFbo1: WebGLRenderTarget | null;
   passFbo2: WebGLRenderTarget | null;
-  strokeMaskFbo: WebGLRenderTarget;
-  strokeMaskFbo2: WebGLRenderTarget;
+  // One mask pair per brush step, created when that step first needs one. A
+  // step's mask holds the strongest weight the step reached at each pixel, so
+  // steps with different envelopes cannot raise each other's weight.
+  strokeMaskFbos: (MaskPair | null)[];
   strokeStartFbo: WebGLRenderTarget;
   // Two half-float targets (MRT) holding the precomputed per-pixel modulator
   // outputs for the current step. tex[0] = (mod0.xy, mod1.xy); tex[1] = mod2.xy.
@@ -60,8 +65,7 @@ function createTargets(width: number, height: number): StrokeScratch {
   return {
     passFbo1: null,
     passFbo2: null,
-    strokeMaskFbo: createTarget(width, height, RedFormat, HalfFloatType),
-    strokeMaskFbo2: createTarget(width, height, RedFormat, HalfFloatType),
+    strokeMaskFbos: [],
     strokeStartFbo: createTarget(width, height, RGBAFormat, FloatType),
     modulatorFbo: null,
   };
@@ -80,7 +84,10 @@ function createModulatorTarget(width: number, height: number): WebGLRenderTarget
 }
 
 function allocatedTargets(t: StrokeScratch): WebGLRenderTarget[] {
-  const targets = [t.strokeMaskFbo, t.strokeMaskFbo2, t.strokeStartFbo];
+  const targets = [t.strokeStartFbo];
+  for (const pair of t.strokeMaskFbos) {
+    if (pair) targets.push(pair[0], pair[1]);
+  }
   if (t.passFbo1) targets.push(t.passFbo1);
   if (t.passFbo2) targets.push(t.passFbo2);
   if (t.modulatorFbo) targets.push(t.modulatorFbo);
@@ -129,6 +136,23 @@ export class StrokeScratchPool {
     return [targets.passFbo1, targets.passFbo2].filter((t): t is WebGLRenderTarget => t !== null).slice(0, count);
   }
 
+  /**
+   * A step's mask ping-pong pair at the pool's current size, created on first
+   * call. `created` is true on that first call, when the pair still holds
+   * whatever the driver left behind and the caller has to clear it.
+   */
+  maskFbos(stepIndex: number): { fbos: MaskPair; created: boolean } {
+    if (!this.targets) throw new Error("Scratch targets are acquired before the stroke masks are used.");
+    const pairs = this.targets.strokeMaskFbos;
+    const existing = pairs[stepIndex];
+    if (existing) return { fbos: existing, created: false };
+    const make = (): WebGLRenderTarget => createTarget(this.width, this.height, RedFormat, HalfFloatType);
+    const fbos: MaskPair = [make(), make()];
+    while (pairs.length < stepIndex) pairs.push(null);
+    pairs[stepIndex] = fbos;
+    return { fbos, created: true };
+  }
+
   /** The modulator MRT at the pool's current size, created on first call. */
   modulatorFbo(): WebGLRenderTarget {
     if (!this.targets) throw new Error("Scratch targets are acquired before the modulator target is used.");
@@ -152,7 +176,10 @@ export class StrokeScratchPool {
   get allocatedBytes(): number {
     if (!this.targets) return 0;
     const texels = this.width * this.height;
-    let perTexel = PACKED_BYTES_PER_TEXEL + 2 * MASK_BYTES_PER_TEXEL;
+    let perTexel = PACKED_BYTES_PER_TEXEL;
+    for (const pair of this.targets.strokeMaskFbos) {
+      if (pair) perTexel += 2 * MASK_BYTES_PER_TEXEL;
+    }
     if (this.targets.passFbo1) perTexel += PACKED_BYTES_PER_TEXEL;
     if (this.targets.passFbo2) perTexel += PACKED_BYTES_PER_TEXEL;
     if (this.targets.modulatorFbo) perTexel += MODULATOR_BYTES_PER_TEXEL;

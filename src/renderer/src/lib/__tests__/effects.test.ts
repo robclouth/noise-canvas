@@ -11,7 +11,12 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { SpectrogramData, State } from "../../store/types";
-import { createMockSpectrogramData, getPixelAtUv, readSpectrogramPixel } from "../../test/mock-spectrogram";
+import {
+  compareSpectrogramData,
+  createMockSpectrogramData,
+  getPixelAtUv,
+  readSpectrogramPixel,
+} from "../../test/mock-spectrogram";
 import { createMockState, createMockStateWithSteps } from "../../test/mock-state";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { BRUSH_SIZE_PITCH_FULL, BRUSH_SIZE_TIME_FULL } from "../utils";
@@ -1184,6 +1189,145 @@ describe("Effects", () => {
   // The transform's origin picks the point a scale or a rotation holds still.
   // A brush covering the whole file, squashed to half its length, must collect
   // the file's opening burst around that point.
+  function paintParams(): StrokeParams {
+    return {
+      cursorPos: new Vector2(0.0, 0.0),
+      preview: false,
+      bpm: 120,
+      totalDuration: spectrogramData.numFrames / spectrogramData.sampleRate,
+      viewZoomPower: 0,
+      viewOffset: 0,
+      viewZoomPowerY: 0,
+      viewOffsetY: 0,
+      pressure: 0,
+      tiltX: 0,
+      tiltY: 0,
+    };
+  }
+
+  describe("accumulate and iterations", () => {
+    /** Paints `dabs` committed dabs of a 4-iteration half-strength gain cut at one spot. */
+    async function paintGain(accumulate: boolean, dabs: number): Promise<Float32Array> {
+      const renderer = createRenderer();
+      const sourceFile = createSourceFile(renderer);
+      const state = createMockStateWithSteps([
+        {
+          name: "Gain",
+          overrides: {
+            accumulate,
+            brushIntensity: 50,
+            brushIterations: 4,
+            blendMode: 0,
+            brushSizeTime: BRUSH_SIZE_TIME_FULL,
+            brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+            effects: [
+              { id: "test-dynamics", effect: "dynamics" as const, enabled: true, params: { dynamicsGainDb: -12 } },
+            ],
+          },
+        },
+      ]) as State;
+
+      renderer.beginStroke();
+      for (let i = 0; i < dabs; i++) renderer.renderStroke(paintParams(), state, sourceFile);
+      const output = await renderer.getFBOData();
+      renderer.dispose();
+      return output;
+    }
+
+    it("renders one dab the same whether the step accumulates or not", async () => {
+      const untouched = await paintGain(false, 0);
+      const plain = await paintGain(false, 1);
+      const accumulated = await paintGain(true, 1);
+
+      expect(compareSpectrogramData(untouched, plain)).toBe(false);
+      expect(compareSpectrogramData(plain, accumulated)).toBe(true);
+    });
+
+    /** Paints `dabs` dabs of a plain front step feeding an accumulating Add step. */
+    async function paintFrontThenAccumulating(dabs: number): Promise<Float32Array> {
+      const renderer = createRenderer();
+      const sourceFile = createSourceFile(renderer);
+      const state = createMockStateWithSteps([
+        {
+          name: "Front",
+          overrides: {
+            accumulate: false,
+            brushSizeTime: BRUSH_SIZE_TIME_FULL,
+            brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+            effects: [{ id: "idle", effect: "dynamics" as const, enabled: false, params: {} }],
+          },
+        },
+        {
+          name: "Accumulating add",
+          overrides: {
+            accumulate: true,
+            blendMode: 1,
+            brushSizeTime: BRUSH_SIZE_TIME_FULL,
+            brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+            effects: [{ id: "add", effect: "dynamics" as const, enabled: true, params: { dynamicsGainDb: -6 } }],
+          },
+        },
+      ]) as State;
+
+      renderer.beginStroke();
+      for (let i = 0; i < dabs; i++) renderer.renderStroke(paintParams(), state, sourceFile);
+      const output = await renderer.getFBOData();
+      renderer.dispose();
+      return output;
+    }
+
+    it("builds up on a later step that accumulates behind a plain one", async () => {
+      const one = await paintFrontThenAccumulating(1);
+      const two = await paintFrontThenAccumulating(2);
+      expect(compareSpectrogramData(one, two)).toBe(false);
+    });
+
+    it("builds up across dabs only when the step accumulates", async () => {
+      expect(compareSpectrogramData(await paintGain(true, 1), await paintGain(true, 2))).toBe(false);
+      expect(compareSpectrogramData(await paintGain(false, 1), await paintGain(false, 2))).toBe(true);
+    });
+  });
+
+  describe("per-step stroke mask", () => {
+    /** Paints `dabs` dabs of a weak gain cut followed by a full-strength no-op step. */
+    async function paintWeakThenFull(dabs: number): Promise<Float32Array> {
+      const renderer = createRenderer();
+      const sourceFile = createSourceFile(renderer);
+      const state = createMockStateWithSteps([
+        {
+          name: "Weak cut",
+          overrides: {
+            accumulate: false,
+            brushIntensity: 20,
+            brushSizeTime: BRUSH_SIZE_TIME_FULL,
+            brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+            effects: [{ id: "weak-cut", effect: "dynamics" as const, enabled: true, params: { dynamicsGainDb: -24 } }],
+          },
+        },
+        {
+          name: "Full no-op",
+          overrides: {
+            accumulate: false,
+            brushIntensity: 100,
+            brushSizeTime: BRUSH_SIZE_TIME_FULL,
+            brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+            effects: [{ id: "idle", effect: "dynamics" as const, enabled: false, params: {} }],
+          },
+        },
+      ]) as State;
+
+      renderer.beginStroke();
+      for (let i = 0; i < dabs; i++) renderer.renderStroke(paintParams(), state, sourceFile);
+      const output = await renderer.getFBOData();
+      renderer.dispose();
+      return output;
+    }
+
+    it("keeps a weak step weak when a stronger step shares the stroke", async () => {
+      expect(compareSpectrogramData(await paintWeakThenFull(1), await paintWeakThenFull(2))).toBe(true);
+    });
+  });
+
   describe("transform origin", () => {
     const numBands = 8;
     const numFrames = 64;

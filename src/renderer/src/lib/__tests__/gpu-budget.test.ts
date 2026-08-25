@@ -8,6 +8,7 @@ import {
   spectrogramBytes,
   wholeFileFootprint,
 } from "../gpu-budget";
+import { MAX_STEPS } from "../constants";
 import { StrokeScratch, StrokeScratchPool } from "../stroke-scratch-pool";
 
 /**
@@ -46,7 +47,12 @@ function bytesPerTexel(target: WebGLRenderTarget): number {
 }
 
 function allocatedBytesPerTexel(scratch: StrokeScratch): number {
-  return Object.values(scratch).reduce((sum: number, target) => sum + (target ? bytesPerTexel(target) : 0), 0);
+  const { strokeMaskFbos, ...single } = scratch;
+  const masks = strokeMaskFbos.flatMap((pair) => pair ?? []);
+  return [...Object.values(single), ...masks].reduce(
+    (sum: number, target) => sum + (target ? bytesPerTexel(target) : 0),
+    0,
+  );
 }
 
 describe("GPU budget rates", () => {
@@ -60,6 +66,7 @@ describe("GPU budget rates", () => {
       const { scratch } = pool.acquire(owner, 32, 16);
       pool.passFbos(2);
       pool.modulatorFbo();
+      for (let step = 0; step < MAX_STEPS; step++) pool.maskFbos(step);
       expect(GPU_BYTES_PER_TEXEL_SCRATCH).toBe(allocatedBytesPerTexel(scratch));
       expect(pool.allocatedBytes).toBe(GPU_BYTES_PER_TEXEL_SCRATCH * 32 * 16);
     } finally {
@@ -74,6 +81,7 @@ describe("GPU budget rates", () => {
       const { scratch } = pool.acquire(owner, 32, 16);
       expect(scratch.passFbo1).toBeNull();
       expect(scratch.modulatorFbo).toBeNull();
+      expect(scratch.strokeMaskFbos).toEqual([]);
       const bare = pool.allocatedBytes;
 
       expect(pool.passFbos(1)).toHaveLength(1);

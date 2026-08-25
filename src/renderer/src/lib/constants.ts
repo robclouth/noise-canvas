@@ -2,6 +2,10 @@ import { BASE_HUES } from "./colors";
 
 export const MULTIPLIER_UNIT = "x";
 
+// Most steps one brush can hold. The stroke scratch pool sizes its per-step
+// mask allocation against this, and the GPU budget charges for that worst case.
+export const MAX_STEPS = 5;
+
 // Widest packed texture the analyser produces (gaborator-addon.cpp MAX_TEXTURE_SIZE).
 export const ANALYSIS_MAX_TEXTURE_SIZE = 8192;
 

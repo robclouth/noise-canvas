@@ -601,17 +601,26 @@ export class StrokeRenderer {
   }
 
   private clearMasks(scratch: StrokeScratch): void {
+    const targets: WebGLRenderTarget[] = [];
+    for (const pair of scratch.strokeMaskFbos) {
+      if (pair) targets.push(pair[0], pair[1]);
+    }
+    this.clearMaskTargets(targets);
+    this.maskRows = null;
+  }
+
+  private clearMaskTargets(targets: WebGLRenderTarget[]): void {
+    if (targets.length === 0) return;
     const oldClearColor = new Color();
     this.gl.getClearColor(oldClearColor);
     const oldClearAlpha = this.gl.getClearAlpha();
     this.gl.setClearColor(0x000000, 0);
-    this.gl.setRenderTarget(scratch.strokeMaskFbo);
-    this.gl.clear(true, false, false);
-    this.gl.setRenderTarget(scratch.strokeMaskFbo2);
-    this.gl.clear(true, false, false);
+    for (const target of targets) {
+      this.gl.setRenderTarget(target);
+      this.gl.clear(true, false, false);
+    }
     this.gl.setRenderTarget(null);
     this.gl.setClearColor(oldClearColor, oldClearAlpha);
-    this.maskRows = null;
   }
 
   /**
@@ -1257,11 +1266,16 @@ export class StrokeRenderer {
           value: isFirstOfStep ? commonUniforms.destSpectrogramTex.value : inputTexture,
         };
 
-        // Pass the mask if enabled (non-cumulative mode)
+        // Pass the mask if enabled (non-cumulative mode). The step reads its own
+        // mask, so a step with a different envelope cannot raise its weight. No
+        // pair exists until this step first commits, and the zero placeholder is
+        // what a cleared mask holds.
         if (!stepState.accumulate) {
-          const currentMaskFbo = this.maskPingPong === 0 ? scratch.strokeMaskFbo : scratch.strokeMaskFbo2;
+          const maskPair = scratch.strokeMaskFbos[stepIndex];
           (uniformsForThisIteration as any).useStrokeMask = { value: true };
-          (uniformsForThisIteration as any).strokeMaskTex = { value: currentMaskFbo.texture };
+          (uniformsForThisIteration as any).strokeMaskTex = {
+            value: maskPair ? maskPair[this.maskPingPong].texture : this.textures.placeholderTexture,
+          };
         } else {
           (uniformsForThisIteration as any).useStrokeMask = { value: false };
           (uniformsForThisIteration as any).strokeMaskTex = { value: this.textures.placeholderTexture };
@@ -1269,12 +1283,19 @@ export class StrokeRenderer {
         // The blend path reads this only for non-cumulative strokes, but an
         // effect undoing a domain swap needs the same snapshot either way.
         (uniformsForThisIteration as any).blendOriginalTex = { value: scratch.strokeStartFbo.texture };
-        // Step 0 blends out of the stroke-start snapshot, so dabs over the same
-        // area cannot accumulate. Every later step blends out of its own input,
-        // which holds the previous step's output — blending those steps out of
-        // the snapshot instead would discard everything the earlier steps wrote.
+        // An accumulating step blends out of the live canvas whatever its
+        // position, so its dabs pile up; it still processes its own input, which
+        // for a later step is the previous step's output. A non-cumulative step 0
+        // blends out of the stroke-start snapshot, so dabs over the same area
+        // cannot pile up, and a later one blends out of its own input —
+        // blending those out of the snapshot instead would discard everything
+        // the earlier steps wrote.
         uniformsForThisIteration.blendBaseTex = {
-          value: stepIndex === 0 ? scratch.strokeStartFbo.texture : stepInputFbo.texture,
+          value: stepState.accumulate
+            ? currentReadFBO.texture
+            : stepIndex === 0
+              ? scratch.strokeStartFbo.texture
+              : stepInputFbo.texture,
         };
 
         effect.updateEffectUniforms({
@@ -1337,7 +1358,7 @@ export class StrokeRenderer {
               rowEnd: Math.max(this.maskRows.rowEnd, dabRowEnd),
             }
           : { rowStart: dabRowStart, rowEnd: dabRowEnd };
-        this.updateStrokeMask(scratch, state, cursorPos, bpm, totalDuration, strokeRandom, pressure, tiltX, tiltY);
+        this.updateStrokeMask(state, cursorPos, bpm, totalDuration, strokeRandom, pressure, tiltX, tiltY);
       }
 
       // Update dirty region to include this stroke's bounds. Every step of
@@ -1377,13 +1398,12 @@ export class StrokeRenderer {
   }
 
   /**
-   * Update the stroke mask for non-cumulative mode.
+   * Update the stroke masks for non-cumulative mode.
    * Iterates every non-accumulate step so each step's envelope/intensity
-   * contribution is composited into the mask (via max in the shader). A pure
-   * no-op when every step is set to accumulate.
+   * contribution is composited into that step's own mask (via max in the
+   * shader). A pure no-op when every step is set to accumulate.
    */
   private updateStrokeMask(
-    scratch: StrokeScratch,
     state: State,
     cursorPos: Vector2,
     bpm: number,
@@ -1507,17 +1527,21 @@ export class StrokeRenderer {
         uniforms.modulatorTex0.value = this.textures.placeholderTexture;
         uniforms.modulatorTex1.value = this.textures.placeholderTexture;
       }
-      const currentMaskFbo = this.maskPingPong === 0 ? scratch.strokeMaskFbo : scratch.strokeMaskFbo2;
-      const nextMaskFbo = this.maskPingPong === 0 ? scratch.strokeMaskFbo2 : scratch.strokeMaskFbo;
-      uniforms.currentMaskTex.value = currentMaskFbo.texture;
+      const { fbos, created } = this.pool.maskFbos(stepIndex);
+      if (created) this.clearMaskTargets([fbos[0], fbos[1]]);
+      uniforms.currentMaskTex.value = fbos[this.maskPingPong].texture;
 
-      this.drawRanges(this.maskMaterial, nextMaskFbo, maskRanges);
+      this.drawRanges(this.maskMaterial, fbos[1 - this.maskPingPong], maskRanges);
 
-      this.maskPingPong = 1 - this.maskPingPong;
       renderedAny = true;
     }
 
-    if (renderedAny) this.gl.setRenderTarget(null);
+    // Every step wrote the same side of its own pair, so one flip switches them
+    // all over together.
+    if (renderedAny) {
+      this.maskPingPong = 1 - this.maskPingPong;
+      this.gl.setRenderTarget(null);
+    }
   }
 
   /** Marks the cached packed state stale, so the next read goes to the GPU. */

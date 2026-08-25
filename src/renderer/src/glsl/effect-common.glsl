@@ -71,9 +71,11 @@ uniform float magnitudeLimit;
 uniform sampler2D strokeMaskTex;
 uniform bool useStrokeMask;
 uniform sampler2D blendOriginalTex;
-// The state the blend builds its target from and interpolates out of. Step 0
-// takes the stroke-start snapshot, so repeated dabs cannot accumulate; every
-// later step takes its own input, which is the previous step's output.
+// The state the blend builds its target from and interpolates out of. It is
+// fixed for the whole step, so the brush weight lands once however many
+// iterations and passes run. Step 0 takes the canvas the dab started from —
+// the stroke-start snapshot when the step is non-cumulative, the live canvas
+// when it accumulates; every later step takes the previous step's output.
 uniform sampler2D blendBaseTex;
 
 // ============================================================================
@@ -1430,22 +1432,16 @@ bool brushWeightIsZero(vec2 unpackedUv) {
 // weight is vec2(L, R) — each channel carries its own brush envelope weight so
 // modulators driving brush shape parameters can decorrelate the two channels.
 vec4 applyBrush(vec4 original, vec4 modified, vec2 weight, vec2 destUv, vec2 packedUv) {
-  vec2 originalL = original.rg;
-  vec2 originalR = original.ba;
   vec2 modifiedL = modified.rg;
   vec2 modifiedR = modified.ba;
 
-  // Non-cumulative strokes blend from blendBaseTex rather than from the incoming
-  // data, so painting over the same area again cannot pile the blend up. The
-  // base feeds both the blend target and the final interpolation.
+  // The blend runs from blendBaseTex rather than from the incoming data, so the
+  // brush weight applies once per step instead of once per pass. The base feeds
+  // both the blend target and the final interpolation.
   // Use packedUv for sampling textures that are in packed format
-  vec2 blendOriginalL = originalL;
-  vec2 blendOriginalR = originalR;
-  if (useStrokeMask) {
-    vec4 blendBase = texture(blendBaseTex, packedUv);
-    blendOriginalL = blendBase.rg;
-    blendOriginalR = blendBase.ba;
-  }
+  vec4 blendBase = texture(blendBaseTex, packedUv);
+  vec2 blendOriginalL = blendBase.rg;
+  vec2 blendOriginalR = blendBase.ba;
 
   float audioLevelDb = getAudioLevelDb(destUv);
 
@@ -1473,8 +1469,8 @@ vec4 applyBrush(vec4 original, vec4 modified, vec2 weight, vec2 destUv, vec2 pac
 
   // Dissolve (stochastic)
   if (blendMode == 8) {
-    vec2 finalL = (random(destUv.xy) < effectiveWeight.x) ? pannedModifiedL : originalL;
-    vec2 finalR = (random(destUv.yx) < effectiveWeight.y) ? pannedModifiedR : originalR;
+    vec2 finalL = (random(destUv.xy) < effectiveWeight.x) ? pannedModifiedL : blendOriginalL;
+    vec2 finalR = (random(destUv.yx) < effectiveWeight.y) ? pannedModifiedR : blendOriginalR;
     finalL = limitMagnitude(finalL);
     finalR = limitMagnitude(finalR);
     return vec4(finalL, finalR);
