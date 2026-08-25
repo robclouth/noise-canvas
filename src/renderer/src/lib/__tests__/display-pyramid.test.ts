@@ -12,6 +12,9 @@ import {
   displayPyramidLevel,
   displayPyramidLevels,
   levelBinCount,
+  levelBinSpan,
+  levelDecimation,
+  sourceBinRanges,
   type BandLayout,
 } from "../display-pyramid";
 
@@ -146,5 +149,85 @@ describe("display level choice", () => {
     expect(choice.fine).toBe(levels.length - 1);
     expect(choice.coarse).toBe(levels.length - 1);
     expect(choice.blend).toBe(0);
+  });
+});
+
+describe("patch range mapping", () => {
+  const layout = layoutOf(4, 8);
+  const bandOf = (band: number) => ({
+    offset: layout.metadata[band * 4],
+    length: layout.metadata[band * 4 + 1],
+  });
+
+  it("names only the bands a range reaches", () => {
+    const { offset, length } = bandOf(5);
+    const spans = sourceBinRanges(layout, Uint32Array.of(offset + 10, Math.min(20, length - 10)));
+    for (let band = 0; band < layout.numBands; band++) {
+      const empty = spans[band * 2 + 1] <= spans[band * 2];
+      expect(empty).toBe(band !== 5);
+    }
+  });
+
+  it("covers the bins a range touches, with room to spare", () => {
+    const { offset, length } = bandOf(5);
+    expect(length).toBeGreaterThan(40);
+    const spans = sourceBinRanges(layout, Uint32Array.of(offset + 10, 20));
+    expect(spans[10]).toBeLessThan(10);
+    expect(spans[11]).toBeGreaterThan(30);
+  });
+
+  it("holds the widened span inside the band", () => {
+    const { offset, length } = bandOf(3);
+    const spans = sourceBinRanges(layout, Uint32Array.of(offset, length));
+    expect(spans[6]).toBe(0);
+    expect(spans[7]).toBe(length);
+  });
+
+  it("reaches every band a range crosses", () => {
+    const low = bandOf(2);
+    const high = bandOf(4);
+    const spans = sourceBinRanges(
+      layout,
+      Uint32Array.of(low.offset + low.length - 5, high.offset + 5 - (low.offset + low.length - 5)),
+    );
+    for (const band of [2, 3, 4]) expect(spans[band * 2 + 1]).toBeGreaterThan(spans[band * 2]);
+    expect(spans[1 * 2 + 1]).toBe(spans[1 * 2]);
+    expect(spans[5 * 2 + 1]).toBe(spans[5 * 2]);
+  });
+
+  it("merges two ranges in one band into a single span", () => {
+    const { offset, length } = bandOf(6);
+    expect(length).toBeGreaterThan(120);
+    const spans = sourceBinRanges(layout, Uint32Array.of(offset + 10, 10, offset + 100, 10));
+    expect(spans[12]).toBeLessThanOrEqual(10);
+    expect(spans[13]).toBeGreaterThanOrEqual(110);
+  });
+
+  it("ignores empty ranges", () => {
+    const spans = sourceBinRanges(layout, Uint32Array.of(bandOf(2).offset, 0));
+    expect(spans.every((value) => value === 0)).toBe(true);
+  });
+
+  it("carries a source span straight through at the finest step", () => {
+    const level = displayPyramidLevel(layout, 0);
+    expect(levelDecimation(level, layout.metadata[4 * 4 + 2], 4)).toBe(1);
+    expect(levelBinSpan(level, 4, layout.metadata[4 * 4 + 2], 7, 33)).toEqual({ start: 7, end: 33 });
+  });
+
+  it("divides a source span by the level's stride", () => {
+    const level = displayPyramidLevel(layout, 6);
+    const stride = levelDecimation(level, layout.metadata[0 * 4 + 2], 0);
+    expect(stride).toBe(64);
+    // A level bin reads the source bin at its own index times the stride, so a
+    // span starts at the first such bin inside it, not at the one before.
+    expect(levelBinSpan(level, 0, layout.metadata[0 * 4 + 2], 65, 200)).toEqual({ start: 2, end: 4 });
+    expect(levelBinSpan(level, 0, layout.metadata[0 * 4 + 2], 64, 200)).toEqual({ start: 1, end: 4 });
+  });
+
+  it("clamps a span to the bins the level holds", () => {
+    const level = displayPyramidLevel(layout, 6);
+    const bins = level.metadata[1];
+    const span = levelBinSpan(level, 0, layout.metadata[2], 0, layout.metadata[1] * 4);
+    expect(span.end).toBe(bins);
   });
 });

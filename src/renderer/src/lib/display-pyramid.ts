@@ -105,3 +105,75 @@ export function displayPyramidBytes(levels: DisplayPyramidLevel[]): number {
   for (const level of levels) texels += level.texelCount;
   return texels * DISPLAY_PYRAMID_BYTES_PER_TEXEL;
 }
+
+// Past 2^24 texels the float32 band offsets in metadata lose whole units, so a
+// mapped range is widened rather than trusted to the bin.
+const PATCH_MARGIN_BINS = 4;
+
+/** The band holding packed pixel `pixel`, or the first band past it. */
+function bandAtPixel(layout: BandLayout, pixel: number): number {
+  let low = 0;
+  let high = layout.numBands - 1;
+  while (low < high) {
+    const mid = (low + high + 1) >> 1;
+    if (layout.metadata[mid * 4] <= pixel) low = mid;
+    else high = mid - 1;
+  }
+  return low;
+}
+
+/**
+ * The bins of each band that `pixelRanges` covers, as [start, end) pairs
+ * widened by the margin the float32 band offsets need. Bands the ranges miss
+ * get an empty pair. Holes inside a band are filled in, so a band's pair is
+ * one span.
+ */
+export function sourceBinRanges(layout: BandLayout, pixelRanges: Uint32Array): Uint32Array {
+  const spans = new Uint32Array(layout.numBands * 2);
+  const touched = new Uint8Array(layout.numBands);
+  for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
+    const start = pixelRanges[i];
+    const end = start + pixelRanges[i + 1];
+    if (end <= start) continue;
+    for (let band = bandAtPixel(layout, start); band < layout.numBands; band++) {
+      const offset = layout.metadata[band * 4];
+      const length = layout.metadata[band * 4 + 1];
+      if (offset >= end) break;
+      const low = Math.max(start, offset);
+      const high = Math.min(end, offset + length);
+      if (high <= low) continue;
+      const binStart = Math.max(0, low - offset - PATCH_MARGIN_BINS);
+      const binEnd = Math.min(length, high - offset + PATCH_MARGIN_BINS);
+      if (touched[band]) {
+        spans[band * 2] = Math.min(spans[band * 2], binStart);
+        spans[band * 2 + 1] = Math.max(spans[band * 2 + 1], binEnd);
+      } else {
+        spans[band * 2] = binStart;
+        spans[band * 2 + 1] = binEnd;
+        touched[band] = 1;
+      }
+    }
+  }
+  return spans;
+}
+
+/** How many of a band's source bins one bin of `level` steps over. */
+export function levelDecimation(level: DisplayPyramidLevel, sourceStepLog2: number, band: number): number {
+  return 2 ** (level.metadata[band * 4 + 2] - sourceStepLog2);
+}
+
+/** The bins of `level` that a band's source bin span [start, end) reaches. */
+export function levelBinSpan(
+  level: DisplayPyramidLevel,
+  band: number,
+  sourceStepLog2: number,
+  start: number,
+  end: number,
+): { start: number; end: number } {
+  const decimation = levelDecimation(level, sourceStepLog2, band);
+  const bins = level.metadata[band * 4 + 1];
+  return {
+    start: Math.min(bins, Math.ceil(start / decimation)),
+    end: Math.min(bins, Math.ceil(end / decimation)),
+  };
+}
