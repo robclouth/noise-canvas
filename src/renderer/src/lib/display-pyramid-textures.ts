@@ -29,6 +29,7 @@ import {
   type BandLayout,
   type DisplayPyramidLevel,
 } from "./display-pyramid";
+import type { PixelRangeList } from "./range-quads";
 
 const QUAD_POSITIONS = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
 const QUAD_INDICES = new Uint16Array([0, 1, 2, 0, 2, 3]);
@@ -52,6 +53,7 @@ function createDecimateMaterial(): RawShaderMaterial {
       destHeight: { value: 0 },
       srcWidth: { value: 0 },
       sourceIsLinear: { value: false },
+      sourceRightInBlue: { value: false },
     },
     vertexShader: /*glsl*/ `
       precision highp float;
@@ -97,6 +99,7 @@ function createDecimateMaterial(): RawShaderMaterial {
       uniform int destWidth;
       uniform int srcWidth;
       uniform bool sourceIsLinear;
+      uniform bool sourceRightInBlue;
 
       out vec4 outColor;
 
@@ -108,7 +111,8 @@ function createDecimateMaterial(): RawShaderMaterial {
         if (destPixel < vRange.x || destPixel >= vRange.x + vRange.y) discard;
 
         uint srcPixel = vRange.z + (destPixel - vRange.x) * vRange.w;
-        vec2 pair = texelFetch(inputTex, ivec2(int(srcPixel % uint(srcWidth)), int(srcPixel / uint(srcWidth))), 0).rg;
+        vec4 texel = texelFetch(inputTex, ivec2(int(srcPixel % uint(srcWidth)), int(srcPixel / uint(srcWidth))), 0);
+        vec2 pair = sourceRightInBlue ? texel.rb : texel.rg;
         outColor = sourceIsLinear
           ? vec4(displayMagToDb(pair.r), displayMagToDb(pair.g), 0.0, 0.0)
           : vec4(pair, 0.0, 0.0);
@@ -119,6 +123,12 @@ function createDecimateMaterial(): RawShaderMaterial {
     depthWrite: false,
   });
 }
+
+/**
+ * Where a decimate draw reads its pairs from: another level's dB, the canvas's
+ * RGBA magnitude/phase, or a CPU upload's magnitude pair.
+ */
+type SourcePixels = "levelDb" | "canvas" | "chunk";
 
 /** One instance of the decimate draw: destination bins, their first source bin, and the source stride. */
 type DecimateInstance = { destStart: number; destCount: number; srcStart: number; decimation: number };
@@ -234,6 +244,24 @@ export class DisplayPyramid {
     this.decimateUpward(gl, spans);
   }
 
+  /**
+   * Re-encodes the bins `changed` covers straight off the canvas, which holds
+   * the packed layout, and carries them up the stack.
+   */
+  refreshFromCanvas(gl: WebGLRenderer, canvas: Texture, canvasWidth: number, changed: PixelRangeList): void {
+    const spans = sourceBinRanges(this.layout, changed.ranges.subarray(0, changed.count * 2));
+    const instances: DecimateInstance[] = [];
+    for (let band = 0; band < this.layout.numBands; band++) {
+      if (spans[band * 2 + 1] <= spans[band * 2]) continue;
+      const instance = this.finestInstance(band, spans[band * 2], spans[band * 2 + 1]);
+      if (instance) instances.push(instance);
+    }
+    if (instances.length === 0) return;
+    this.draw(gl, 0, canvas, canvasWidth, "canvas", instances);
+    this.seeded = true;
+    this.decimateUpward(gl, spans);
+  }
+
   /** The instance writing one band's source bins [start, end) into the finest level. */
   private finestInstance(band: number, start: number, end: number): DecimateInstance | null {
     const level = this.levels[0];
@@ -273,7 +301,7 @@ export class DisplayPyramid {
           decimation,
         });
       }
-      this.draw(gl, index, this.targets[index - 1].texture, source.textureWidth, false, instances);
+      this.draw(gl, index, this.targets[index - 1].texture, source.textureWidth, "levelDb", instances);
     }
   }
 
@@ -325,7 +353,7 @@ export class DisplayPyramid {
       texture.minFilter = NearestFilter;
       texture.magFilter = NearestFilter;
       texture.needsUpdate = true;
-      this.draw(gl, 0, texture, width, true, batch);
+      this.draw(gl, 0, texture, width, "chunk", batch);
       texture.dispose();
     }
   }
@@ -335,7 +363,7 @@ export class DisplayPyramid {
     levelIndex: number,
     source: Texture,
     srcWidth: number,
-    sourceIsLinear: boolean,
+    mode: SourcePixels,
     instances: DecimateInstance[],
   ): void {
     if (instances.length === 0) return;
@@ -360,7 +388,8 @@ export class DisplayPyramid {
     this.material.uniforms.destWidth.value = target.width;
     this.material.uniforms.destHeight.value = target.height;
     this.material.uniforms.srcWidth.value = srcWidth;
-    this.material.uniforms.sourceIsLinear.value = sourceIsLinear;
+    this.material.uniforms.sourceIsLinear.value = mode !== "levelDb";
+    this.material.uniforms.sourceRightInBlue.value = mode === "canvas";
 
     const previousAutoClear = gl.autoClear;
     gl.autoClear = false;

@@ -38,6 +38,7 @@ import { hasActiveModulatorRouting, hasNestedModulatorRouting, paramsRouteModula
 import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
+import { DisplayPyramid } from "./display-pyramid-textures";
 import { ATTRACT_MODULATOR_MAP_START } from "./constants";
 import { getFileOnsets } from "./file-onsets";
 import { buildModulatorUniforms } from "./modulator-utils";
@@ -283,6 +284,7 @@ export class StrokeRenderer {
   // FBO data cache
   private fboDataCache: Float32Array | null = null;
   private fboDataDirty = true;
+  private displayPyramid: DisplayPyramid | null = null;
   // Bumped on every change to the FBO contents. getFBOData() captures it before
   // its readback and keeps the result only if it still matches, so paint that
   // lands mid-read cannot leave a snapshot taken before it marked clean.
@@ -523,6 +525,12 @@ export class StrokeRenderer {
     // next acquireScratch to rebuild it.
     this.pool.disown(this);
 
+    if (!this.displayPyramid) {
+      this.displayPyramid = new DisplayPyramid({
+        numBands: this.spectrogramData.numBands,
+        metadata: this.spectrogramData.metadata,
+      });
+    }
     this.invalidateFboData();
     this.isInitialized = true;
   }
@@ -1360,7 +1368,7 @@ export class StrokeRenderer {
       this.committedPitchMin = Math.min(this.committedPitchMin, strokeStartY);
       this.committedPitchMax = Math.max(this.committedPitchMax, strokeEndY);
 
-      this.invalidateFboData();
+      this.invalidateFboData(copyBack && footprint ? footprint : undefined);
     }
 
     this.verifyScratchAllocation();
@@ -1509,10 +1517,25 @@ export class StrokeRenderer {
     }
   }
 
-  /** Marks the cached packed state stale, so the next read goes to the GPU. */
-  private invalidateFboData(): void {
+  /**
+   * Marks the cached packed state stale, so the next read goes to the GPU, and
+   * carries the changed pixels into the display pyramid. Without `changed` the
+   * whole canvas is re-encoded.
+   */
+  private invalidateFboData(changed?: PixelRangeList): void {
     this.fboDataDirty = true;
     this.fboDataEpoch++;
+    this.displayPyramid?.refreshFromCanvas(
+      this.gl,
+      this.getDisplayTexture(),
+      this.spectrogramData.textureWidth,
+      changed ?? this.fullRange(),
+    );
+  }
+
+  /** The display's committed levels, built once the canvas holds the file. */
+  getDisplayPyramid(): DisplayPyramid | null {
+    return this.displayPyramid;
   }
 
   /**
@@ -1811,7 +1834,7 @@ export class StrokeRenderer {
 
     geometry.dispose();
     patchTex.dispose();
-    this.invalidateFboData();
+    this.invalidateFboData({ ranges: pixelRanges, count: pixelRanges.length >> 1 });
   }
 
   /**
@@ -2056,5 +2079,7 @@ export class StrokeRenderer {
     this.rangeGeometry.dispose();
     this.rangeScene.remove(this.rangeMesh);
     this.previewRangeTex.dispose();
+    this.displayPyramid?.dispose();
+    this.displayPyramid = null;
   }
 }

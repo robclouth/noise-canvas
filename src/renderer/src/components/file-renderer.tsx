@@ -42,6 +42,7 @@ import { serializeFileTask } from "@renderer/lib/file-task-queue";
 import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { DEFAULT_ONSET_SENSITIVITY } from "../lib/constants";
+import { displayLevelChoice } from "../lib/display-pyramid";
 import { getFileOnsets } from "../lib/file-onsets";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
@@ -400,6 +401,12 @@ const FileRendererInner = memo(
           previewTex: { value: null as Texture | null },
           previewBinRangesTex: { value: null as Texture | null },
           previewActive: { value: false },
+          displayFineTex: { value: null as Texture | null },
+          displayFineMetaTex: { value: null as Texture | null },
+          displayCoarseTex: { value: null as Texture | null },
+          displayCoarseMetaTex: { value: null as Texture | null },
+          displayLevelBlend: { value: 0.0 },
+          displayPyramidActive: { value: false },
         },
         vertexShader: passThroughVert,
         fragmentShader: displayFrag,
@@ -558,6 +565,32 @@ const FileRendererInner = memo(
      * and the grid overlay. Shared by the live frame loop and snapshot capture
      * so a captured snapshot matches what the live view would draw.
      */
+    /**
+     * Binds the two pyramid levels whose bins best match the screen, with the
+     * weight of the coarser one. The canvas takes over when even the finest
+     * resident level is coarser than the view asks for.
+     */
+    const applyDisplayPyramidUniforms = (viewZoomPower: number, viewportWidth: number): void => {
+      const uniforms = displayMaterial.uniforms;
+      const pyramid = strokeRendererRef.current?.getDisplayPyramid();
+      if (!pyramid || !pyramid.texture(0)) {
+        uniforms.displayPyramidActive.value = false;
+        return;
+      }
+      const framesPerPixel = spectrogramData.numFrames / (Math.pow(2, viewZoomPower) * Math.max(1, viewportWidth));
+      if (2 ** pyramid.levels[0].stepLog2 > Math.max(framesPerPixel, 1)) {
+        uniforms.displayPyramidActive.value = false;
+        return;
+      }
+      const choice = displayLevelChoice(pyramid.levels, framesPerPixel);
+      uniforms.displayFineTex.value = pyramid.texture(choice.fine);
+      uniforms.displayFineMetaTex.value = pyramid.metadataTexture(choice.fine);
+      uniforms.displayCoarseTex.value = pyramid.texture(choice.coarse);
+      uniforms.displayCoarseMetaTex.value = pyramid.metadataTexture(choice.coarse);
+      uniforms.displayLevelBlend.value = choice.blend;
+      uniforms.displayPyramidActive.value = true;
+    };
+
     const applyStaticDisplayUniforms = (state: State, viewportWidth: number, viewportHeight: number): void => {
       const file = openFiles[fileId];
       if (!file?.spectrogramData || !inverseMapTex || !metadataTex) return;
@@ -587,6 +620,8 @@ const FileRendererInner = memo(
       uniforms.viewOffset.value = viewOffset;
       uniforms.viewZoomPowerY.value = viewZoomPowerY;
       uniforms.viewOffsetY.value = viewOffsetY;
+
+      applyDisplayPyramidUniforms(viewZoomPower, viewportWidth);
 
       // Calculate and update grid values
       const gridSizeBeats = state.gridSizeBeats;

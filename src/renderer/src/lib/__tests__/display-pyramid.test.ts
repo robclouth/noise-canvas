@@ -8,6 +8,7 @@ import {
 import {
   DISPLAY_PYRAMID_BYTES_PER_TEXEL,
   displayLevelChoice,
+  displayPyramidBudgetTexels,
   displayPyramidBytes,
   displayPyramidLevel,
   displayPyramidLevels,
@@ -104,6 +105,22 @@ describe("display pyramid layout", () => {
     const levels = displayPyramidLevels(layoutOf(4, 8), 1);
     expect(levels).toHaveLength(1);
     expect(levels[0].metadata[1]).toBe(1);
+  });
+
+  it("never outgrows the bound the budget charges it at", () => {
+    for (const seconds of [2, 10, 60, 600]) {
+      const layout = layoutOf(seconds);
+      const uncapped = displayPyramidLevels(layout, Number.MAX_SAFE_INTEGER);
+      const packed = uncapped[0].texelCount;
+      const actual = uncapped.reduce((sum, level) => sum + level.texelCount, 0);
+      expect(actual).toBeLessThanOrEqual(displayPyramidBudgetTexels(packed, Number.MAX_SAFE_INTEGER));
+
+      const cap = 100_000;
+      const capped = displayPyramidLevels(layout, cap);
+      expect(capped.reduce((sum, level) => sum + level.texelCount, 0)).toBeLessThanOrEqual(
+        displayPyramidBudgetTexels(packed, cap),
+      );
+    }
   });
 
   it("counts bytes at the half-float pair rate", () => {

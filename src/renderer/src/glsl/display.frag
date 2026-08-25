@@ -1,4 +1,5 @@
 #include "effect-common.glsl";
+#include "display-mags.glsl";
 
 // Uniforms specific to this display material
 uniform float minDb;
@@ -40,6 +41,17 @@ uniform sampler2D previewTex;
 uniform sampler2D previewBinRangesTex;
 uniform bool previewActive;
 
+// The committed picture as two levels of the display pyramid, in dB, with the
+// weight of the coarser one. Each level carries its own band layout, so a bin
+// index means something different in each. With displayPyramidActive off the
+// canvas is read instead.
+uniform sampler2D displayFineTex;
+uniform sampler2D displayFineMetaTex;
+uniform sampler2D displayCoarseTex;
+uniform sampler2D displayCoarseMetaTex;
+uniform float displayLevelBlend;
+uniform bool displayPyramidActive;
+
 vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, ivec2 texSize) {
     ivec2 texel = packedTexel(bandStartOffset + timeIndex, texSize);
     if (previewActive) {
@@ -59,6 +71,53 @@ vec4 sampleDisplayInterp(vec2 uv) {
     vec4 sample2 = fetchDisplayTexel(band, bandStartOffset, timeIndex1, texSize);
     return vec4(interpolateComplex(sample1.rg, sample2.rg, timeFraction),
                 interpolateComplex(sample1.ba, sample2.ba, timeFraction));
+}
+
+// The dB pair one pyramid level holds, blended along time in its own bins.
+vec2 sampleLevelDb(vec2 uv, sampler2D levelTex, sampler2D levelMetaTex) {
+    float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
+    packedInterpBins(uv, levelMetaTex, sourceFrameCount, sourceBandCount,
+                     bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
+    ivec2 texSize = textureSize(levelTex, 0);
+    vec2 sample1 = texelFetch(levelTex, packedTexel(bandStartOffset + timeIndex0, texSize), 0).rg;
+    vec2 sample2 = texelFetch(levelTex, packedTexel(bandStartOffset + timeIndex1, texSize), 0).rg;
+    return mix(sample1, sample2, timeFraction);
+}
+
+// The uncommitted preview's dB pair, where the preview covers this bin. The
+// preview lives on the canvas in the source layout, so it is addressed there
+// rather than in a level's.
+bool previewDbAt(vec2 uv, out vec2 db) {
+    if (!previewActive) return false;
+    float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
+    packedInterpBins(uv, sourceMetadataTex, sourceFrameCount, sourceBandCount,
+                     bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
+    vec2 bins = texelFetch(previewBinRangesTex, ivec2(int(bandIndex), 0), 0).rg;
+    if (timeIndex0 < bins.x || timeIndex0 >= bins.y) return false;
+    ivec2 texSize = textureSize(previewTex, 0);
+    vec4 sample1 = texelFetch(previewTex, packedTexel(bandStartOffset + timeIndex0, texSize), 0);
+    vec4 sample2 = texelFetch(previewTex, packedTexel(bandStartOffset + timeIndex1, texSize), 0);
+    vec2 left = interpolateComplex(sample1.rg, sample2.rg, timeFraction);
+    vec2 right = interpolateComplex(sample1.ba, sample2.ba, timeFraction);
+    db = vec2(displayMagToDb(left.x), displayMagToDb(right.x));
+    return true;
+}
+
+// Left and right magnitudes of the picture at an unpacked UV.
+vec2 sampleDisplayMags(vec2 uv) {
+    if (!displayPyramidActive) {
+        vec4 packedValue = sampleDisplayInterp(uv);
+        return vec2(packedValue.r, packedValue.b);
+    }
+    // The blend is uniform across the view, so the coarse read is skipped
+    // outright wherever the fine level alone is what the view asked for.
+    vec2 db = sampleLevelDb(uv, displayFineTex, displayFineMetaTex);
+    if (displayLevelBlend > 0.0) {
+        db = mix(db, sampleLevelDb(uv, displayCoarseTex, displayCoarseMetaTex), displayLevelBlend);
+    }
+    vec2 preview;
+    if (previewDbAt(uv, preview)) db = preview;
+    return vec2(displayDbToMag(db.x), displayDbToMag(db.y));
 }
 
 // Convert screen UV (what we see) to zoomed UV (actual data coordinates).
@@ -120,20 +179,15 @@ void main() {
     // Time axis samples edge-aligned: the stored coefficient for bin k is the
     // analysis atom centered at frame k * 2^step, so an impulse reads as a
     // vertical ridge at the same time in every band regardless of bin stride.
-    vec4 packedValue = mix(sampleDisplayInterp(uv0), sampleDisplayInterp(uv1), bandFrac);
+    vec2 mags = mix(sampleDisplayMags(uv0), sampleDisplayMags(uv1), bandFrac);
 
-    // packedValue stores [leftMagnitude, leftPhase, rightMagnitude, rightPhase]
-    vec2 leftMagPhase = packedValue.rg;
-    float leftMag = leftMagPhase.x;
-    float leftDb = magnitudeToDb(leftMag);
-    
+    float leftDb = magnitudeToDb(mags.x);
+
     vec3 color;
     if (sourceChannelCount == 1) {
         color = vec3(leftDb);
     } else {
-        vec2 rightMagPhase = packedValue.ba;
-        float rightMag = rightMagPhase.x;
-        float rightDb = magnitudeToDb(rightMag);
+        float rightDb = magnitudeToDb(mags.y);
 
         vec3 leftColor = vec3(leftDb, leftDb * 0.5, 0.0);
         vec3 rightColor = vec3(0.0, rightDb * 0.5, rightDb);

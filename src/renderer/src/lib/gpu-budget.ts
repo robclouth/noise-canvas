@@ -1,3 +1,8 @@
+import {
+  DISPLAY_PYRAMID_BYTES_PER_TEXEL,
+  DISPLAY_PYRAMID_MAX_TEXELS,
+  displayPyramidBudgetTexels,
+} from "./display-pyramid";
 import { historyCacheBudgets } from "./history-cache-budgets";
 import { host } from "./host";
 
@@ -52,7 +57,11 @@ export function spectrogramBytes(openTexelCounts: number[], unified: boolean): n
   const perTexel = GPU_BYTES_PER_TEXEL_FILE + (unified ? CPU_BYTES_PER_TEXEL_FILE : 0);
   // No open file, no history manager, so nothing holds the caches yet.
   const overhead = unified && openTexelCounts.length > 0 ? historyCacheBytes() : 0;
-  return perTexel * sum + GPU_BYTES_PER_TEXEL_SCRATCH * largest + overhead;
+  let pyramids = 0;
+  for (const texels of openTexelCounts) {
+    pyramids += displayPyramidBudgetTexels(texels) * DISPLAY_PYRAMID_BYTES_PER_TEXEL;
+  }
+  return perTexel * sum + GPU_BYTES_PER_TEXEL_SCRATCH * largest + overhead + pyramids;
 }
 
 /**
@@ -77,14 +86,18 @@ export function remainingCoefficientBudget(openTexelCounts: number[]): number | 
   if (info.bytes <= 0) return undefined;
 
   const perTexel = GPU_BYTES_PER_TEXEL_FILE + (info.unified ? CPU_BYTES_PER_TEXEL_FILE : 0);
-  const budget = info.bytes * GPU_BUDGET_SHARE - (info.unified ? historyCacheBytes() : 0);
+  let budget = info.bytes * GPU_BUDGET_SHARE - (info.unified ? historyCacheBytes() : 0);
 
   let sum = 0;
   let largest = 0;
   for (const texels of openTexelCounts) {
     sum += texels;
     largest = Math.max(largest, texels);
+    budget -= displayPyramidBudgetTexels(texels) * DISPLAY_PYRAMID_BYTES_PER_TEXEL;
   }
+  // The display pyramid of the file about to open, charged at its cap: it is
+  // bounded, so a longer file does not take more of the budget.
+  budget -= DISPLAY_PYRAMID_MAX_TEXELS * DISPLAY_PYRAMID_BYTES_PER_TEXEL;
 
   // A new file within the current pool size pays only the per-file rate; a
   // larger one also grows the scratch pool with it.

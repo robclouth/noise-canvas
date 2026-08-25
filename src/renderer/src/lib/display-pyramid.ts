@@ -3,8 +3,20 @@ import { ANALYSIS_MAX_TEXTURE_SIZE } from "./constants";
 /** RG16F: left and right magnitude, in dB. */
 export const DISPLAY_PYRAMID_BYTES_PER_TEXEL = 4;
 
-/** Texels every resident level together may hold — about 64 MB at RG16F. */
-export const DISPLAY_PYRAMID_MAX_TEXELS = 16_000_000;
+/** Texels every resident level together may hold — 20 MB at RG16F, per open file. */
+export const DISPLAY_PYRAMID_MAX_TEXELS = 5_000_000;
+
+// A level's bins halve for every band the step has reached, and a band's own
+// step doubles each octave down, which sums to three times the packed count
+// over the whole stack; the fourth covers each level's row padding and the tail
+// of levels holding one bin per band. Bounds the budget charge without building
+// the levels.
+const DISPLAY_PYRAMID_TEXEL_RATIO = 4;
+
+/** Texels a file's level stack can reach, for the memory budget. */
+export function displayPyramidBudgetTexels(packedTexels: number, maxTexels = DISPLAY_PYRAMID_MAX_TEXELS): number {
+  return Math.min(maxTexels, DISPLAY_PYRAMID_TEXEL_RATIO * packedTexels);
+}
 
 /** A packed spectrogram's per-band layout, as `SpectrogramData.metadata` holds it. */
 export type BandLayout = {

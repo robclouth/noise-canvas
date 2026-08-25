@@ -10,6 +10,11 @@ import {
   spectrogramBytes,
   usedBudgetFraction,
 } from "../gpu-budget";
+import {
+  DISPLAY_PYRAMID_BYTES_PER_TEXEL,
+  DISPLAY_PYRAMID_MAX_TEXELS,
+  displayPyramidBudgetTexels,
+} from "../display-pyramid";
 import { historyCacheBudgets } from "../history-cache-budgets";
 import { MAX_STEPS } from "../constants";
 import { StrokeScratch, StrokeScratchPool } from "../stroke-scratch-pool";
@@ -107,10 +112,13 @@ describe("GPU budget rates", () => {
     const texels = 1000;
     const one = spectrogramBytes([texels], false);
     const two = spectrogramBytes([texels, texels], false);
-    expect(one).toBe((GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH) * texels);
-    expect(two - one).toBe(GPU_BYTES_PER_TEXEL_FILE * texels);
+    expect(one).toBe((GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH) * texels + pyramidBytes(texels));
+    expect(two - one).toBe(GPU_BYTES_PER_TEXEL_FILE * texels + pyramidBytes(texels));
   });
 });
+
+/** What one open file's display pyramid takes out of the budget. */
+const pyramidBytes = (texels: number): number => displayPyramidBudgetTexels(texels) * DISPLAY_PYRAMID_BYTES_PER_TEXEL;
 
 describe("history cache overhead", () => {
   const TOTAL_MEMORY = 8 * 1024 ** 3;
@@ -139,9 +147,11 @@ describe("history cache overhead", () => {
     const one = spectrogramBytes([texels], true);
     const two = spectrogramBytes([texels, texels], true);
     expect(one).toBe(
-      (GPU_BYTES_PER_TEXEL_FILE + CPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH) * texels + overhead(),
+      (GPU_BYTES_PER_TEXEL_FILE + CPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH) * texels +
+        pyramidBytes(texels) +
+        overhead(),
     );
-    expect((two - one) / texels).toBe(GPU_BYTES_PER_TEXEL_FILE + CPU_BYTES_PER_TEXEL_FILE);
+    expect(two - one).toBe((GPU_BYTES_PER_TEXEL_FILE + CPU_BYTES_PER_TEXEL_FILE) * texels + pyramidBytes(texels));
   });
 
   it("charges nothing before a file is open", () => {
@@ -150,14 +160,34 @@ describe("history cache overhead", () => {
 
   it("leaves the caches uncharged when the GPU has its own memory", () => {
     const texels = 1000;
-    expect(spectrogramBytes([texels], false)).toBe((GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH) * texels);
+    expect(spectrogramBytes([texels], false)).toBe(
+      (GPU_BYTES_PER_TEXEL_FILE + GPU_BYTES_PER_TEXEL_SCRATCH) * texels + pyramidBytes(texels),
+    );
   });
 
   it("takes the caches out of the budget a new file is measured against", () => {
-    const budget = GPU_MEMORY * GPU_BUDGET_SHARE - overhead();
+    const budget =
+      GPU_MEMORY * GPU_BUDGET_SHARE - overhead() - DISPLAY_PYRAMID_MAX_TEXELS * DISPLAY_PYRAMID_BYTES_PER_TEXEL;
     const perTexel = GPU_BYTES_PER_TEXEL_FILE + CPU_BYTES_PER_TEXEL_FILE;
     // With nothing open the new file grows the scratch pool with it.
     expect(remainingCoefficientBudget([])).toBe(Math.floor(budget / (perTexel + GPU_BYTES_PER_TEXEL_SCRATCH)));
+  });
+
+  it("charges each open file's display pyramid", () => {
+    const texels = 1000;
+    const withPyramid = spectrogramBytes([texels], true);
+    const withoutPyramid = withPyramid - pyramidBytes(texels);
+    expect(pyramidBytes(texels)).toBeGreaterThan(0);
+    expect(spectrogramBytes([texels, texels], true) - withPyramid).toBe(
+      (GPU_BYTES_PER_TEXEL_FILE + CPU_BYTES_PER_TEXEL_FILE) * texels + pyramidBytes(texels),
+    );
+    expect(withoutPyramid).toBeLessThan(withPyramid);
+  });
+
+  it("stops charging a longer file more once its pyramid hits the cap", () => {
+    const capped = DISPLAY_PYRAMID_MAX_TEXELS;
+    expect(pyramidBytes(capped)).toBe(capped * DISPLAY_PYRAMID_BYTES_PER_TEXEL);
+    expect(pyramidBytes(capped * 100)).toBe(pyramidBytes(capped));
   });
 
   it("reports the open files' share of the budget, caches included", () => {
