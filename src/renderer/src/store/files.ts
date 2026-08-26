@@ -770,11 +770,14 @@ async function rebuildFileFromAudioNow(
   );
 }
 
-// The current painted state of a file, falling back to its analysed
-// coefficients when no renderer is mounted to read an FBO from.
+// The current painted state of a file. Without a mounted renderer to read an
+// FBO from, the block store's current tier serves it, and the in-RAM packed
+// array is the last resort.
 async function readCurrentPackedData(file: OpenFile): Promise<Float32Array | undefined> {
   const fboData = await file.rendererRef?.current?.getFBOData();
-  return fboData ?? file.spectrogramData?.packedData;
+  if (fboData) return fboData;
+  const blocks = await getHistoryManager(file.id).currentBlockState();
+  return blocks ?? file.spectrogramData?.packedData;
 }
 
 type FileAudioSnapshot = { nodeId: string | null; channels: Float32Array[]; sampleRate: number };

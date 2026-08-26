@@ -878,6 +878,33 @@ describe("HistoryManager hops", () => {
     clearAllHistoryManagers();
   });
 
+  it("serves the current state from the blocks, byte for byte, while the marker stands", async () => {
+    const { files } = installManagerEnv();
+    installPatchRenderer(w, h);
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    const a = paint(root, 2, 3, 1);
+
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([2, 3]) });
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(mgr.currentPackedState()!));
+
+    await mgr.navigateToParent();
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(mgr.currentPackedState()!));
+
+    // A marker naming another node means the blocks cannot serve the state.
+    clearAllHistoryManagers();
+    const treePath = "/userdata/history/f1/tree.json";
+    const parsed = JSON.parse(files.get(treePath) as string) as { overlayNodeId?: string };
+    parsed.overlayNodeId = "someone-else";
+    files.set(treePath, JSON.stringify(parsed));
+    const fresh = getHistoryManager("f1");
+    expect(await fresh.currentBlockState()).toBeNull();
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
+
   it("invalidates the tier on disk before it rewrites it", async () => {
     const { files } = installManagerEnv();
     clearAllHistoryManagers();
