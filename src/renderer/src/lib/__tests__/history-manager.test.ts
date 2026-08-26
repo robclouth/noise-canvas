@@ -252,6 +252,19 @@ function fakeHistoryCodec(): Record<string, unknown> {
       deltas.forEach((bytes, i) => applyFakeDelta(out, bytes, inverts[i]));
       return out;
     },
+    applyHistoryDeltasWindowed: async (
+      values: Float32Array,
+      table: Uint32Array,
+      deltas: Uint8Array[],
+      inverts: boolean[],
+      totalPixels: number,
+    ) => {
+      const whole = new Float32Array(totalPixels * 4);
+      scatterCompactPixelRanges(whole, values, table);
+      deltas.forEach((bytes, i) => applyFakeDelta(whole, bytes, inverts[i]));
+      values.set(gatherPixelRanges(whole, table));
+      return values;
+    },
     readHistoryDeltaTurns: async () => null,
     buildHistoryInverseMap: async (
       _bandOffsets: Uint32Array,
@@ -1009,6 +1022,51 @@ describe("HistoryManager hops", () => {
 
     mgr.dispose();
     delete fakeOpenFiles["f1"];
+  });
+
+  it("derives the tier's hop patch from the deltas, agreeing with the packed state", async () => {
+    installManagerEnv();
+    const { canvas } = installPatchRenderer(w, h);
+    clearAllHistoryManagers();
+    const warn = vi.spyOn(console, "warn");
+    try {
+      const root = lossyFill(w, h, 0);
+      for (let p = 8; p < w * h; p++) {
+        root[p * 4 + 1] = Math.fround(1e5 + p);
+        root[p * 4 + 3] = Math.fround(-1e5 - p);
+      }
+      const mgr = getHistoryManager("f1", { packedCacheBytes: 0 });
+      await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+      const current = mgr.currentPackedState()!;
+      const rootBytes = new Float32Array(current);
+      canvas.set(current);
+
+      const ranges = new Uint32Array([4, 4]);
+      const baseFootprint = current.slice(4 * 4, 8 * 4);
+      for (let p = 4; p < 8; p++) for (let c = 0; c < 4; c++) current[p * 4 + c] = ((p * 7 + c) % 29) / 29;
+      const turns: PhaseTurns = {
+        pixelStarts: Uint32Array.from([8]),
+        pixelCounts: Uint32Array.from([w * h - 8]),
+        offsets: Float32Array.from([Math.fround(2 * Math.PI), 0]),
+        residuals: new Uint32Array(0),
+      };
+      applyPhaseTurns(current, turns, false);
+      canvas.set(current);
+      await mgr.addStroke({ data: current, label: "A", dimensions, dirtyRanges: ranges, baseFootprint, turns });
+      const strokeBytes = new Float32Array(current);
+      const store = await getBlockStore("f1")!;
+
+      await mgr.navigateToParent();
+      expect(Array.from(await store.readAll())).toEqual(Array.from(rootBytes));
+      await mgr.navigateToLastChild();
+      expect(Array.from(await store.readAll())).toEqual(Array.from(strokeBytes));
+      expect(warn.mock.calls.filter((call) => String(call[0]).includes("tier's delta walk"))).toEqual([]);
+
+      mgr.dispose();
+      delete fakeOpenFiles["f1"];
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("carries a stroke's phase turns into the tier, both ways", async () => {

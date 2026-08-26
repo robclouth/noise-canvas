@@ -21,7 +21,7 @@ import { clearFileTaskQueue, drainFileTaskQueues, serializeFileTask } from "./fi
 import { historyCacheBudgets } from "./history-cache-budgets";
 import { ByteBudgetCache } from "./byte-budget-cache";
 import { host } from "./host";
-import { gatherPixelRanges, mergePixelRanges } from "./pixel-ranges";
+import { float32BitsEqual, gatherPixelRanges, mergePixelRanges } from "./pixel-ranges";
 
 const MANIFEST_FILENAME = "tree.json";
 const CHECKPOINT_INTERVAL = 20;
@@ -1038,7 +1038,7 @@ export class HistoryManager {
    * when a write fails, the marker goes unknown and the truth stays with the
    * root and the deltas.
    */
-  private async syncStoreToCurrent(baseId: string, ranges: Uint32Array | null): Promise<void> {
+  private async syncStoreToCurrent(baseId: string, ranges: Uint32Array | null, values?: Float32Array): Promise<void> {
     const manifest = this.manifest;
     const packed = this.currentPacked;
     if (!manifest || !packed) return;
@@ -1054,7 +1054,7 @@ export class HistoryManager {
       await this.writeManifest();
       if (this.manifest !== manifest) return;
       if (patchable && ranges) {
-        await store.patch(ranges, gatherPixelRanges(packed, ranges));
+        await store.patch(ranges, values ?? gatherPixelRanges(packed, ranges));
       } else {
         await store.seedCurrent(packed);
       }
@@ -1064,6 +1064,53 @@ export class HistoryManager {
     } catch (error) {
       manifest.overlayNodeId = undefined;
       console.error("history: block store current sync failed", error);
+    }
+  }
+
+  /**
+   * The current state's pixels over `spans`, derived by walking the hops'
+   * deltas from `fromId` over the tier's own values rather than gathering
+   * from the in-RAM state. Null when the tier does not hold the base state or
+   * a hop's delta is unknown. A result that disagrees with the packed state
+   * means a stale tier, so the packed state wins and the walk reports it.
+   */
+  private async walkTierValues(fromId: string, spans: Uint32Array): Promise<Float32Array | null> {
+    const manifest = this.manifest;
+    const packed = this.currentPacked;
+    if (!manifest || !packed || manifest.overlayNodeId !== fromId) return null;
+    const current = manifest.nodes[manifest.currentId];
+    const holder = this.seedHolder();
+    if (!holder || !current || !sameStoreDimensions(holder.dimensions, current.dimensions)) return null;
+    const hops = this.hopsBetween(fromId, manifest.currentId);
+    if (!hops) return null;
+    const ids = [...hops.up, ...hops.down];
+    if (!ids.length) return null;
+    const deltas: Uint8Array[] = [];
+    for (const id of ids) {
+      const bytes = await this.nodeDelta(id);
+      if (!bytes) return null;
+      deltas.push(bytes);
+    }
+    const inverts = ids.map((_, i) => i < hops.up.length);
+    try {
+      const store = await this.seedBlockStore(holder);
+      const values = await store.readRanges(spans);
+      const dims = current.dimensions;
+      const walked = await host.analysis.applyHistoryDeltasWindowed(
+        values,
+        spans,
+        deltas,
+        inverts,
+        dims.textureWidth * dims.textureHeight,
+      );
+      if (!float32BitsEqual(walked, gatherPixelRanges(packed, spans))) {
+        console.warn("history: the tier's delta walk disagrees with the packed state");
+        return null;
+      }
+      return walked;
+    } catch (error) {
+      console.warn("history: the tier's delta walk failed", error);
+      return null;
     }
   }
 
@@ -1352,7 +1399,10 @@ export class HistoryManager {
     this.currentPacked = packedData;
     this.packedCache.deleteValue(packedData, targetId);
     this.packedCache.set(targetId, packedData);
-    if (hopTierRanges) await this.syncStoreToCurrent(fromId, hopTierRanges);
+    if (hopTierRanges) {
+      const walked = await this.walkTierValues(fromId, hopTierRanges);
+      await this.syncStoreToCurrent(fromId, hopTierRanges, walked ?? undefined);
+    }
     this.scheduleManifestWrite();
     this.notifyStateChange();
 
