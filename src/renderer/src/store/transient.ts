@@ -35,6 +35,10 @@ export interface TransientState {
   setSelectionDrag: (
     drag: { fileId: string; selection: Selection; path?: { time: number; pitchUv: number }[] } | null,
   ) => void;
+  // True while Shift is held: in select mode it means add-to-selection, and
+  // the canvas cursor shows the plus.
+  shiftHeld: boolean;
+  setShiftHeld: (held: boolean) => void;
 }
 
 export const useTransientStore = create<TransientState>()(
@@ -51,5 +55,7 @@ export const useTransientStore = create<TransientState>()(
     setAxisDragFile: (fileId) => set({ axisDragFile: fileId }),
     selectionDrag: null,
     setSelectionDrag: (drag) => set({ selectionDrag: drag }),
+    shiftHeld: false,
+    setShiftHeld: (held) => set({ shiftHeld: held }),
   })),
 );

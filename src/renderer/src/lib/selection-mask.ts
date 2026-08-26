@@ -1,5 +1,11 @@
 import type { SpectrogramData } from "../store/types";
-import { selectionBandRange, selectionFrameRange, type Selection, type SelectionMask } from "./selection";
+import {
+  selectionBandRange,
+  selectionFrameRange,
+  selectionMaskTest,
+  type Selection,
+  type SelectionMask,
+} from "./selection";
 import { bandIndexToPitchUv } from "./utils";
 
 /** One vertex of a freehand path, in the file's seconds and pitch UV. */
@@ -109,22 +115,95 @@ export function lassoSelection(points: LassoPoint[], spec: SpectrogramData): Sel
   };
 }
 
+// True when `outer` is a plain rectangle that covers all of `inner`.
+function rectContains(outer: Selection, inner: Selection): boolean {
+  return (
+    !outer.mask &&
+    outer.start <= inner.start &&
+    outer.end >= inner.end &&
+    outer.pitchLo <= inner.pitchLo &&
+    outer.pitchHi >= inner.pitchHi
+  );
+}
+
+/**
+ * The union of two selections on one file, as one masked selection over their
+ * combined bounding rectangle. Each side keeps its own shape: a plain
+ * rectangle contributes its whole box, a masked one its mask. When one plain
+ * rectangle already covers the other selection, it is returned unchanged.
+ */
+export function unionSelections(a: Selection, b: Selection, spec: SpectrogramData): Selection {
+  if (rectContains(a, b)) return a;
+  if (rectContains(b, a)) return b;
+  const box: Selection = {
+    start: Math.min(a.start, b.start),
+    end: Math.max(a.end, b.end),
+    pitchLo: Math.min(a.pitchLo, b.pitchLo),
+    pitchHi: Math.max(a.pitchHi, b.pitchHi),
+  };
+  const { startFrame, endFrame } = selectionFrameRange(box, spec.sampleRate);
+  const { lowBand, highBand } = selectionBandRange(box, spec.numBands);
+  const rows = highBand - lowBand + 1;
+  const cols = maskColsFor(spec, startFrame, endFrame, lowBand, highBand);
+  const cells = new Uint8Array(rows * cols);
+  const framesPerCol = (endFrame - startFrame) / cols;
+
+  const parts = [a, b].map((part) => ({
+    frames: selectionFrameRange(part, spec.sampleRate),
+    bands: selectionBandRange(part, spec.numBands),
+    mask: selectionMaskTest(part, spec.sampleRate, spec.numBands),
+  }));
+  for (let row = 0; row < rows; row++) {
+    const band = lowBand + row;
+    for (let col = 0; col < cols; col++) {
+      // A cell joins when its time centre is inside either side's shape.
+      const frame = startFrame + Math.floor((col + 0.5) * framesPerCol);
+      const inside = parts.some(
+        (part) =>
+          band >= part.bands.lowBand &&
+          band <= part.bands.highBand &&
+          frame >= part.frames.startFrame &&
+          frame < part.frames.endFrame &&
+          (!part.mask || part.mask(band, frame)),
+      );
+      if (inside) cells[row * cols + col] = 255;
+    }
+  }
+  return { ...box, mask: { cols, rows, cells } };
+}
+
 /**
  * The boundary of a mask as horizontal and vertical cell-edge segments, in
  * cell coordinates: `[x0, y0, x1, y1, …]` with x in columns and y in rows.
+ * Collinear edges merge into one segment, so a dashed stroke flows along a
+ * straight boundary instead of restarting at every cell.
  */
 export function maskBoundarySegments(mask: SelectionMask): number[] {
   const { rows, cols, cells } = mask;
   const inside = (row: number, col: number): boolean =>
     row >= 0 && row < rows && col >= 0 && col < cols && cells[row * cols + col] > 0;
   const segments: number[] = [];
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      if (!inside(row, col)) continue;
-      if (!inside(row - 1, col)) segments.push(col, row, col + 1, row);
-      if (!inside(row + 1, col)) segments.push(col, row + 1, col + 1, row + 1);
-      if (!inside(row, col - 1)) segments.push(col, row, col, row + 1);
-      if (!inside(row, col + 1)) segments.push(col + 1, row, col + 1, row + 1);
+  // A horizontal edge lies on line y where the cells above and below disagree.
+  for (let y = 0; y <= rows; y++) {
+    let runStart = -1;
+    for (let col = 0; col <= cols; col++) {
+      const edge = col < cols && inside(y, col) !== inside(y - 1, col);
+      if (edge && runStart < 0) runStart = col;
+      if (!edge && runStart >= 0) {
+        segments.push(runStart, y, col, y);
+        runStart = -1;
+      }
+    }
+  }
+  for (let x = 0; x <= cols; x++) {
+    let runStart = -1;
+    for (let row = 0; row <= rows; row++) {
+      const edge = row < rows && inside(row, x) !== inside(row, x - 1);
+      if (edge && runStart < 0) runStart = row;
+      if (!edge && runStart >= 0) {
+        segments.push(x, runStart, x, row);
+        runStart = -1;
+      }
     }
   }
   return segments;

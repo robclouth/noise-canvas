@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { selectionBandRange, selectionFrameRange, selectionMaskTest, type Selection } from "../selection";
-import { lassoSelection, maskBoundarySegments } from "../selection-mask";
+import { lassoSelection, maskBoundarySegments, unionSelections } from "../selection-mask";
 
 // 1 s at 100 Hz with 10 bands: frames and pitch UV stay easy to reason about.
 const spec = () => createMockSpectrogramData({ numFrames: 100, sampleRate: 100, numBands: 10 });
@@ -116,6 +116,60 @@ describe("selectionMaskTest", () => {
         expect(movedTest(band, startFrame + 10 + off)).toBe(test(band, startFrame + off));
       }
     }
+  });
+});
+
+describe("unionSelections", () => {
+  it("joins two disjoint rectangles into one mask with a gap between them", () => {
+    const s = spec();
+    const a: Selection = { start: 0.1, end: 0.3, pitchLo: 0.2, pitchHi: 0.4 };
+    const b: Selection = { start: 0.6, end: 0.8, pitchLo: 0.6, pitchHi: 0.8 };
+    const joined = unionSelections(a, b, s);
+    expect(joined.start).toBeCloseTo(0.1);
+    expect(joined.end).toBeCloseTo(0.8);
+    expect(joined.pitchLo).toBeCloseTo(0.2);
+    expect(joined.pitchHi).toBeCloseTo(0.8);
+    const test = selectionMaskTest(joined, s.sampleRate, s.numBands);
+    expect(test).not.toBeNull();
+    if (!test) return;
+    // Inside a: band 7 (pitch 0.25-0.35), frame 20. Inside b: band 2, frame 70.
+    expect(test(7, 20)).toBe(true);
+    expect(test(2, 70)).toBe(true);
+    // The gap between them, and a's bands over b's time, stay out.
+    expect(test(7, 45)).toBe(false);
+    expect(test(7, 70)).toBe(false);
+    expect(test(2, 20)).toBe(false);
+  });
+
+  it("returns a covering rectangle unchanged", () => {
+    const s = spec();
+    const outer: Selection = { start: 0.1, end: 0.9, pitchLo: 0.1, pitchHi: 0.9 };
+    const inner: Selection = { start: 0.3, end: 0.5, pitchLo: 0.3, pitchHi: 0.5 };
+    expect(unionSelections(outer, inner, s)).toBe(outer);
+    expect(unionSelections(inner, outer, s)).toBe(outer);
+  });
+
+  it("keeps a masked side's shape through the union", () => {
+    const s = spec();
+    const triangle = lassoSelection(
+      [
+        { time: 0.5, pitchUv: 0.9 },
+        { time: 0.1, pitchUv: 0.1 },
+        { time: 0.9, pitchUv: 0.1 },
+      ],
+      s,
+    );
+    if (!triangle) throw new Error("no triangle");
+    const rect: Selection = { start: 0.0, end: 0.05, pitchLo: 0.0, pitchHi: 0.1 };
+    const joined = unionSelections(triangle, rect, s);
+    const test = selectionMaskTest(joined, s.sampleRate, s.numBands);
+    if (!test) throw new Error("no mask");
+    const triTest = selectionMaskTest(triangle, s.sampleRate, s.numBands);
+    if (!triTest) throw new Error("no triangle mask");
+    // The triangle's own membership survives at its sample points, within one
+    // cell of the resampled grid.
+    expect(test(5, 50)).toBe(triTest(5, 50));
+    expect(test(9, 1)).toBe(true);
   });
 });
 

@@ -33,9 +33,14 @@ export const UI_CONTROLS = {
     description: "Plays back the region you painted as soon as a stroke finishes.",
     manualSection: "transport-and-output",
   },
-  "transport-edit-mode": {
-    label: "Edit mode",
-    description: "Switches between painting with the brush and drawing a selection.",
+  "transport-brush-mode": {
+    label: "Brush mode",
+    description: "Paints when you drag on the canvas.",
+    manualSection: "selecting-a-region",
+  },
+  "transport-select-mode": {
+    label: "Select mode",
+    description: "Draws a selection when you drag on the canvas.",
     manualSection: "selecting-a-region",
   },
   "transport-select-shape": {

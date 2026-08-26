@@ -158,10 +158,12 @@ export function useShortcuts() {
     // also the fine modifier on a parameter control, so a drag under way keeps
     // it off the canvas.
     if (event.key === "Shift") {
+      useTransientStore.getState().setShiftHeld(true);
       // A region in flight owns Shift — it holds the region's pitch — so it
-      // must not flip the canvas into source-pick mode under the ghost.
+      // must not flip the canvas into source-pick mode under the ghost. Select
+      // mode owns it too: there, Shift adds to the selection.
       const state = useStore.getState();
-      if (!useTransientStore.getState().controlDragging && !state.placing) {
+      if (!useTransientStore.getState().controlDragging && !state.placing && state.editMode !== "select") {
         state.setPickingFileParam("sourceFile" as import("@renderer/store/types").ParameterKey);
       }
       return;
@@ -264,6 +266,7 @@ export function useShortcuts() {
   const handleKeyUp = (event: KeyboardEvent) => {
     if (event.key === "Shift") {
       useStore.getState().setPickingFileParam(null);
+      useTransientStore.getState().setShiftHeld(false);
     }
 
     // Platform-specific Zoom Reset
@@ -280,6 +283,7 @@ export function useShortcuts() {
     const state = useStore.getState();
     state.setPickingFileParam(null);
     state.setIsZooming(false);
+    useTransientStore.getState().setShiftHeld(false);
   };
 
   useEffect(() => {

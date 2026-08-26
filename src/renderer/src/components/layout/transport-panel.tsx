@@ -1,5 +1,5 @@
 import { useStore } from "@/store";
-import { Box, Divider, Group, Menu, Popover, Stack, Text } from "@mantine/core";
+import { ActionIcon, Box, Divider, Group, Menu, Popover, Stack, Text } from "@mantine/core";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import {
   TRANSPORT_GAP,
@@ -35,7 +35,7 @@ export const TransportPanel = memo(() => {
   const setAutoPlayStroke = useStore((state) => state.setAutoPlayStroke);
   const togglePlayback = useStore((state) => state.togglePlayback);
   const editMode = useStore((state) => state.editMode);
-  const toggleEditMode = useStore((state) => state.toggleEditMode);
+  const setEditMode = useStore((state) => state.setEditMode);
   const selectShape = useStore((state) => state.selectShape);
   const setSelectShape = useStore((state) => state.setSelectShape);
   const linkEnabled = useStore((state) => state.linkEnabled);
@@ -141,16 +141,22 @@ export const TransportPanel = memo(() => {
         >
           <Repeat size={18} />
         </HelpActionIcon>
-        <Group gap={1} wrap="nowrap">
+        <ActionIcon.Group>
           <HelpActionIcon
-            help="transport-edit-mode"
-            onClick={toggleEditMode}
+            help="transport-brush-mode"
+            onClick={() => setEditMode("brush")}
+            size={uiSize}
+            color={editMode === "brush" ? "orange" : "dark.5"}
+          >
+            <Paintbrush size={18} />
+          </HelpActionIcon>
+          <HelpActionIcon
+            help="transport-select-mode"
+            onClick={() => setEditMode("select")}
             size={uiSize}
             color={editMode === "select" ? "orange" : "dark.5"}
           >
-            {editMode !== "select" ? (
-              <Paintbrush size={18} />
-            ) : selectShape === "lasso" ? (
+            {selectShape === "lasso" ? (
               <Lasso size={18} />
             ) : selectShape === "wand" ? (
               <Wand2 size={18} />
@@ -182,7 +188,7 @@ export const TransportPanel = memo(() => {
               </Menu.Item>
             </Menu.Dropdown>
           </Menu>
-        </Group>
+        </ActionIcon.Group>
         <HelpActionIcon
           help="transport-audition"
           onClick={() => setAutoPlayStroke(!autoPlayStroke)}

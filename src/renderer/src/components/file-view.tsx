@@ -17,7 +17,7 @@ import {
   WAND_MIN_TOLERANCE_DB,
 } from "../lib/magic-wand";
 import { normaliseSelection, type Selection, type SelectionCorner } from "../lib/selection";
-import { lassoSelection, type LassoPoint } from "../lib/selection-mask";
+import { lassoSelection, unionSelections, type LassoPoint } from "../lib/selection-mask";
 import { sourceBandUvSlope, uvToUnits } from "../lib/utils";
 import { getFreehandCorner, getSelectionCorner, getSnappedCoordinates } from "../lib/view-aim";
 import FileHeader from "./file-header";
@@ -30,6 +30,16 @@ import { laneAnchorProps } from "../lib/ui-anchors";
 import { PITCH_LEGEND_WIDTH, PitchLegend } from "./pitch-legend";
 import { PlaybackLine } from "./playback-line";
 import { TimeLegend } from "./time-legend";
+
+// The select-mode crosshair with a small plus: Shift is down, so the next
+// drag or click adds to the selection instead of replacing it.
+const ADD_TO_SELECTION_CURSOR =
+  `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">` +
+  `<g stroke="black" stroke-width="3"><line x1="12" y1="3" x2="12" y2="21"/><line x1="3" y1="12" x2="21" y2="12"/>` +
+  `<line x1="19.5" y1="16.5" x2="19.5" y2="22.5"/><line x1="16.5" y1="19.5" x2="22.5" y2="19.5"/></g>` +
+  `<g stroke="white" stroke-width="1.5"><line x1="12" y1="3" x2="12" y2="21"/><line x1="3" y1="12" x2="21" y2="12"/>` +
+  `<line x1="19.5" y1="16.5" x2="19.5" y2="22.5"/><line x1="16.5" y1="19.5" x2="22.5" y2="19.5"/></g>` +
+  `</svg>') 12 12, crosshair`;
 
 export interface FileViewProps {
   fileId: string;
@@ -113,13 +123,15 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
   const [isPanning, setIsPanning] = useState(false);
   const editMode = useStore((state) => state.editMode);
+  const shiftHeld = useTransientStore((state) => state.shiftHeld);
 
   const cursorStyle = useMemo(() => {
     if (isPanning) return { cursor: "grabbing" };
     if (isZooming) return { cursor: "zoom-in" };
     if (pickingFileParam) return { cursor: "crosshair" };
+    if (editMode === "select" && shiftHeld) return { cursor: ADD_TO_SELECTION_CURSOR };
     return { cursor: "crosshair" };
-  }, [pickingFileParam, isPanning, isZooming]);
+  }, [pickingFileParam, isPanning, isZooming, editMode, shiftHeld]);
 
   const rendererRef = useRef<FileRendererHandle>(null);
   const strokeTimeRangeRef = useRef<{ min: number | null; max: number | null }>({ min: null, max: null });
@@ -129,12 +141,17 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const selectionStartRef = useRef<SelectionCorner | null>(null);
   // The freehand path under way, in the file's seconds and pitch UV.
   const lassoPointsRef = useRef<LassoPoint[] | null>(null);
+  // Set when the gesture started with Shift down: its result joins the
+  // selection that was already there instead of replacing it.
+  const addToSelectionRef = useRef(false);
   // A wand press in flight: where it grows from, and the vertical drag that
   // widens its tolerance. One grow runs at a time; the newest tolerance waits.
   const wandRef = useRef<{
     startY: number;
     time: number;
     pitchUv: number;
+    /** The selection committed before the press, when Shift asked to add to it. */
+    base: Selection | null;
     latest: Selection | null;
     busy: boolean;
     pendingTol: number | null;
@@ -581,9 +598,11 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         return;
       }
       wand.busy = true;
-      void wandSelectionAt(wand.time, wand.pitchUv, tolDb).then((selection) => {
+      void wandSelectionAt(wand.time, wand.pitchUv, tolDb).then((grown) => {
         if (wandRef.current !== wand) return;
         wand.busy = false;
+        const spec = openFiles[fileId]?.spectrogramData;
+        const selection = grown && wand.base && spec ? unionSelections(wand.base, grown, spec) : grown;
         if (selection) {
           wand.latest = selection;
           if (wand.done) {
@@ -661,6 +680,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
             bpm,
           );
           if (!point) return;
+          addToSelectionRef.current = event.shiftKey;
           const duration = spectrogramData.numFrames / spectrogramData.sampleRate;
           if (state.selectShape === "lasso") {
             lassoPointsRef.current = [{ time: point.timeUv * duration, pitchUv: point.pitchUv }];
@@ -669,6 +689,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
               startY: event.clientY,
               time: point.timeUv * duration,
               pitchUv: point.pitchUv,
+              base: event.shiftKey ? (state.filesSelection[fileId] ?? null) : null,
               latest: null,
               busy: false,
               pendingTol: null,
@@ -687,6 +708,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
           bpm,
         );
         if (!corner) return;
+        addToSelectionRef.current = event.shiftKey;
         selectionStartRef.current = corner;
         useTransientStore.getState().setSelectionDrag(null);
         return;
@@ -799,11 +821,18 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       useTransientStore.getState().setSelectionDrag(null);
       const store = useStore.getState();
       if (drag?.fileId === fileId) {
-        store.setFileSelection(fileId, drag.selection);
+        const spectrogramData = openFiles[fileId]?.spectrogramData;
+        const base = addToSelectionRef.current ? (store.filesSelection[fileId] ?? null) : null;
+        store.setFileSelection(
+          fileId,
+          base && spectrogramData ? unionSelections(base, drag.selection, spectrogramData) : drag.selection,
+        );
         return;
       }
       // A click with no drag clears the selection and puts the play start
       // marker where it landed, on the same snap the selection corner uses.
+      // With Shift down nothing was asked to go.
+      if (addToSelectionRef.current) return;
       store.setFileSelection(fileId, null);
       const spectrogramData = openFiles[fileId]?.spectrogramData;
       if (!spectrogramData) return;
@@ -852,11 +881,13 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       if (!spectrogramData) return;
       const selection = lassoSelection(points, spectrogramData);
       if (selection) {
-        store.setFileSelection(fileId, selection);
+        const base = addToSelectionRef.current ? (store.filesSelection[fileId] ?? null) : null;
+        store.setFileSelection(fileId, base ? unionSelections(base, selection, spectrogramData) : selection);
         return;
       }
       // A path that encloses nothing is a click: clear, and put the play start
-      // marker where it landed.
+      // marker where it landed. With Shift down nothing was asked to go.
+      if (addToSelectionRef.current) return;
       store.setFileSelection(fileId, null);
       const duration = spectrogramData.numFrames / spectrogramData.sampleRate;
       const time = Math.max(0, Math.min(duration, points[0]?.time ?? 0));

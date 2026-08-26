@@ -845,7 +845,7 @@ Zoom and scroll are remembered per file across restarts, and files in a [stem gr
 
 ### Selecting a Region
 
-The canvas has two modes, and `Tab` switches between them. The button in the transport bar shows which one you are in.
+The canvas has two modes, shown side by side on the joined control in the transport bar. The lit half is the one you are in — click either half, or press `Tab` to hop between them.
 
 - **Brush** – a drag paints.
 - **Select** – a drag draws a selection.
@@ -857,6 +857,8 @@ Select mode draws one of three shapes. The small arrow beside the mode button pi
 - **Magic wand** – a click selects the connected patch of sound under the pointer: everything touching it whose level reaches within a window below the point you clicked. Keep the button held and drag upward to widen the window and let the selection spread; drag back down to tighten it again.
 
 A selection covers a stretch of time **and** a range of pitch, so you can pick out one part of the frequency range rather than the whole height of the file.
+
+Hold `Shift` and draw — with any shape — to **add** to the selection instead of replacing it. The pointer gains a plus while `Shift` is down. A wand click adds its patch, a lasso adds what it encloses, and a rectangle adds its area, so a selection can be built from as many pieces as you need.
 
 Dragging along the time legend selects the full frequency range, whichever mode you are in.
 
