@@ -1364,7 +1364,10 @@ export class HistoryManager {
         for (const turn of turns) hopTierRanges = mergePixelRanges(hopTierRanges, phaseTurnRanges(turn.turns));
         // The patch writes its pixels from the state afterwards, so the turns
         // leave them out.
-        if (turns.length) await applyCanvasTurns(file.rendererRef.current, packedData, turns, ranges);
+        if (turns.length) {
+          const source = packedData;
+          await applyCanvasTurns(file.rendererRef.current, (r) => gatherPixelRanges(source, r), turns, ranges);
+        }
         if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
         file.rendererRef.current.patchFBOData(packedData, ranges);
         if (file.spectrogramData) {

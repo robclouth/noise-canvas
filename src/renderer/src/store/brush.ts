@@ -316,7 +316,13 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
             if (renderer.getStrokeGeneration() === snapshot.strokeGeneration) {
               const uploadStart = performance.now();
               if (canvasTurns.length) {
-                await applyCanvasTurns(renderer, data, canvasTurns, uploadRanges ?? undefined);
+                const source = data;
+                await applyCanvasTurns(
+                  renderer,
+                  (r) => gatherPixelRanges(source, r),
+                  canvasTurns,
+                  uploadRanges ?? undefined,
+                );
                 if (!openFiles[activeFileId]) return;
               }
               if (uploadRanges) {

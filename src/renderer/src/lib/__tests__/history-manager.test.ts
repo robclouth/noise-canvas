@@ -443,6 +443,16 @@ function installPatchRenderer(
           patches.push({ data: d, ranges: r });
           for (let i = 0; i + 1 < r.length; i += 2) canvas.set(d.subarray(r[i] * 4, (r[i] + r[i + 1]) * 4), r[i] * 4);
         },
+        patchFBODataCompact: (values: Float32Array, r: Uint32Array) => {
+          const whole = new Float32Array(canvas.length);
+          scatterCompactPixelRanges(whole, values, r);
+          patches.push({ data: whole, ranges: r });
+          let at = 0;
+          for (let i = 0; i + 1 < r.length; i += 2) {
+            canvas.set(values.subarray(at, at + r[i + 1] * 4), r[i] * 4);
+            at += r[i + 1] * 4;
+          }
+        },
         applyPhaseTurns: (flat: ArrayLike<number>) => {
           turns.push(Array.from(flat));
           for (let i = 0; i + 3 < flat.length; i += 4) {

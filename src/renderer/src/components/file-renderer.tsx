@@ -130,6 +130,8 @@ export interface FileRendererHandle {
    * everything outside the ranges already matches the FBO, but far cheaper.
    */
   patchFBOData: (data: Float32Array, pixelRanges: Uint32Array) => void;
+  /** As patchFBOData, from values holding exactly the ranges' pixels in range order. */
+  patchFBODataCompact: (values: Float32Array, pixelRanges: Uint32Array) => void;
   /** Returns the textures used for rendering. */
   getTextures: () => {
     packed: WebGLRenderTarget;
@@ -1338,6 +1340,17 @@ const FileRendererInner = memo(
       scheduleSnapshotRefresh();
     };
 
+    const patchFBODataCompact = (values: Float32Array, pixelRanges: Uint32Array) => {
+      if (!strokeRendererRef.current) return;
+
+      strokeRendererRef.current.patchFBODataCompact(values, pixelRanges);
+      applyStroke.current = false;
+      displayMode.current = "committed";
+      invalidateRef.current();
+      snapshotStaleRef.current = true;
+      scheduleSnapshotRefresh();
+    };
+
     /**
      * Returns the current set of textures.
      */
@@ -1452,6 +1465,7 @@ const FileRendererInner = memo(
       applyPhaseTurns,
       setFBOData,
       patchFBOData,
+      patchFBODataCompact,
       getTextures,
       restoreOriginal,
       clearPreview,

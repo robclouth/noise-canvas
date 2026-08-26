@@ -38,6 +38,7 @@ import { hasActiveModulatorRouting, hasNestedModulatorRouting, paramsRouteModula
 import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
+import { gatherPixelRanges, pixelRangeCount } from "./pixel-ranges";
 import { DisplayPyramid } from "./display-pyramid-textures";
 import { DisplayTileRing } from "./display-tiles-textures";
 import { ATTRACT_MODULATOR_MAP_START } from "./constants";
@@ -1756,6 +1757,26 @@ export class StrokeRenderer {
     const width = packedTextureSize.x;
     const height = packedTextureSize.y;
 
+    // Past roughly half the texture the gather plus scatter costs more than
+    // just re-uploading everything.
+    const patchPixels = pixelRangeCount(pixelRanges);
+    if (patchPixels >= width * height * 0.5) {
+      this.setFBOData(data);
+      return;
+    }
+
+    this.patchFBODataCompact(gatherPixelRanges(data, pixelRanges), pixelRanges);
+  }
+
+  /**
+   * Update only the texture rows covered by `pixelRanges` from `values`,
+   * which hold exactly those pixels laid end to end in range order.
+   */
+  patchFBODataCompact(values: Float32Array, pixelRanges: Uint32Array): void {
+    const { packedTextureSize } = this.spectrogramData;
+    const width = packedTextureSize.x;
+    const height = packedTextureSize.y;
+
     let patchPixels = 0;
     let numRanges = 0;
     for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
@@ -1764,16 +1785,11 @@ export class StrokeRenderer {
       numRanges++;
     }
     if (patchPixels === 0) return;
-    // Past roughly half the texture the gather plus scatter costs more than
-    // just re-uploading everything.
-    if (patchPixels >= width * height * 0.5) {
-      this.setFBOData(data);
-      return;
-    }
+    if (values.length !== patchPixels * 4) throw new Error("the patch values do not match the ranges");
 
-    // Gather the ranges into one compact block, and record where each range
-    // landed so the shader can scatter it back.
-    const patch = new Float32Array(patchPixels * 4);
+    // Record where each range sits in the compact block so the shader can
+    // scatter it back.
+    const patch = values;
     const instances = new Uint32Array(numRanges * 3);
     let srcPixel = 0;
     let inst = 0;
@@ -1781,7 +1797,6 @@ export class StrokeRenderer {
       const start = pixelRanges[i];
       const count = pixelRanges[i + 1];
       if (count === 0) continue;
-      patch.set(data.subarray(start * 4, (start + count) * 4), srcPixel * 4);
       instances[inst * 3] = start;
       instances[inst * 3 + 1] = count;
       instances[inst * 3 + 2] = srcPixel;

@@ -698,6 +698,24 @@ describe("StrokeRenderer", () => {
       expect(countDiffs(after, modified)).toBe(0);
     });
 
+    it("uploads compact values identically to the whole-state patch", async () => {
+      renderer.initialize();
+      const before = new Float32Array(await renderer.getFBOData());
+      const width = spectrogramData.packedTextureSize.x;
+      const ranges = new Uint32Array([5, 10, width * 3 - 4, 8, width * 7 + 20, width]);
+      const modified = modifyRanges(before, ranges);
+
+      renderer.patchFBODataCompact(gatherPixelRanges(modified, ranges), ranges);
+
+      const after = await renderer.getFBOData();
+      expect(countDiffs(after, modified)).toBe(0);
+    });
+
+    it("refuses compact values that do not match the ranges", () => {
+      renderer.initialize();
+      expect(() => renderer.patchFBODataCompact(new Float32Array(4), new Uint32Array([0, 5]))).toThrow(/do not match/);
+    });
+
     it("matches setFBOData when the ranges cover most of the texture (fallback)", async () => {
       renderer.initialize();
       const before = new Float32Array(await renderer.getFBOData());
