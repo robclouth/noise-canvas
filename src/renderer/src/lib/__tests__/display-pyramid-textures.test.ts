@@ -15,8 +15,10 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
+import { blockGrid, blockPixelRanges } from "../block-grid";
 import { DisplayPyramid } from "../display-pyramid-textures";
 import { levelDecimation } from "../display-pyramid";
+import { gatherPixelRanges } from "../pixel-ranges";
 
 const RESOLVE_VERT = /* glsl */ `
 in vec3 position;
@@ -220,6 +222,35 @@ describe("display pyramid textures", () => {
       expect(Array.from(readLevel(pyramid, index))).toEqual(Array.from(readLevel(reference, index)));
     }
     expect(Array.from(readLevel(pyramid, 0))).not.toEqual(Array.from(before));
+  });
+
+  it("patches from the ranges' own pixels the same as from the whole array", () => {
+    const source = new Float32Array(data.packedData);
+    for (let bin = 0; bin < source.length / 4; bin++) source[bin * 4] = 0.05 + ((bin * 3) % 41) * 0.01;
+    const fromWhole = seeded(source);
+    const fromCompact = seeded(source);
+    const before = readLevel(fromCompact, 0);
+
+    // Two ranges the level strides do not line up with, and one whole block
+    // of the store's grid, which is the shape the seed reads in.
+    const grid = blockGrid(layout, data.numFrames, data.sampleRate);
+    const block = blockPixelRanges(grid, 2);
+    const ranges = Uint32Array.from([301, 247, 903, 601, ...block.ranges.subarray(0, block.count * 2)]);
+    const patched = new Float32Array(source);
+    for (let r = 0; r < ranges.length; r += 2) {
+      for (let bin = ranges[r]; bin < ranges[r] + ranges[r + 1]; bin++) {
+        patched[bin * 4] *= 3;
+        patched[bin * 4 + 2] = 0.4;
+      }
+    }
+
+    fromWhole.patchFromPacked(gl, patched, ranges);
+    fromCompact.patchFromCompact(gl, gatherPixelRanges(patched, ranges), ranges);
+
+    for (let index = 0; index < fromWhole.levels.length; index++) {
+      expect(Array.from(readLevel(fromCompact, index))).toEqual(Array.from(readLevel(fromWhole, index)));
+    }
+    expect(Array.from(readLevel(fromCompact, 0))).not.toEqual(Array.from(before));
   });
 
   it("patches a capped stack up every level", () => {

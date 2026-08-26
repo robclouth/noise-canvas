@@ -1113,6 +1113,9 @@ const FileRendererInner = memo(
         if (window) {
           const view = strokeRenderer.committedSource().view;
           strokeRenderer.initialize((target) => window.composeResident(view, target));
+          // The canvas holds one window, so the picture of the rest of the
+          // file comes from the analysed state rather than from the canvas.
+          if (packedSeedRef.current) strokeRenderer.seedDisplayFromPacked(packedSeedRef.current);
           aimCanvasWindow(view.startFrame, view.endFrame);
         } else {
           strokeRenderer.initialize();
@@ -1501,7 +1504,12 @@ const FileRendererInner = memo(
       const renderer = strokeRendererRef.current;
       if (!renderer) return;
 
-      renderer.setFBOData(canvasCoversFile() ? data : composeViewContent(renderer.committedSource().view, data));
+      if (canvasCoversFile()) {
+        renderer.setFBOData(data);
+      } else {
+        renderer.setFBOData(composeViewContent(renderer.committedSource().view, data));
+        renderer.seedDisplayFromPacked(data);
+      }
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();

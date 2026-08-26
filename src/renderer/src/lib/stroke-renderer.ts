@@ -1616,6 +1616,19 @@ export class StrokeRenderer {
     this.displayTiles?.refreshFromCanvas(this.gl, source, ranges);
   }
 
+  /**
+   * Encodes the whole packed state into the display's committed levels. It is
+   * how a canvas holding part of the file gets a picture of all of it.
+   */
+  seedDisplayFromPacked(data: Float32Array): void {
+    this.displayPyramid?.seedFromPacked(this.gl, data);
+  }
+
+  /** Encodes the pixels of `ranges` into the display's levels from their own values. */
+  patchDisplayFromCompact(values: Float32Array, ranges: Uint32Array): void {
+    this.displayPyramid?.patchFromCompact(this.gl, values, ranges);
+  }
+
   /** The display's committed levels, built once the canvas holds the file. */
   getDisplayPyramid(): DisplayPyramid | null {
     return this.displayPyramid;

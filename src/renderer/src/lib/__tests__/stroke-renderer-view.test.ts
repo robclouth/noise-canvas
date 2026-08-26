@@ -533,6 +533,56 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     expect(apart).toBeLessThan(wholePixels.length / 100);
   });
 
+  it("keeps the whole file in the display pyramid while the canvas holds a sub-view", () => {
+    const whole = new StrokeRenderer(gl, data, strokeTextures, "parity", effects);
+    whole.initialize();
+    disposers.push(() => whole.dispose());
+    whole.seedDisplayFromPacked(data.packedData);
+
+    const sub = subViewRenderer();
+    sub.seedDisplayFromPacked(data.packedData);
+
+    const level = whole.getDisplayPyramid()!.levels[0];
+    const readLevel = (renderer: StrokeRenderer): Float32Array =>
+      readDisplayTexture(renderer.getDisplayPyramid()!.texture(0)!, level.textureWidth, level.textureHeight);
+    const seeded = readLevel(whole);
+    expect(firstDifference(readLevel(sub), seeded, seeded.length)).toBe(-1);
+
+    // The canvas re-encodes what it holds; the rest of the picture stays as
+    // it was seeded rather than falling back to silence.
+    const louder = Float32Array.from(data.packedData);
+    for (let i = 0; i < louder.length / 4; i++) {
+      louder[i * 4] *= 2;
+      louder[i * 4 + 2] *= 2;
+    }
+    sub.setFBOData(composeViewContent(view, louder));
+    const afterCanvas = readLevel(sub);
+    let outside = 0;
+    let insideChanged = 0;
+    for (let band = 0; band < view.layout.numBands; band++) {
+      const decimation = levelDecimation(level, data.metadata[band * 4 + 2], band);
+      const inFirst = Math.ceil(view.bandK0[band] / decimation);
+      const inEnd = Math.ceil((view.bandK0[band] + view.layout.metadata[band * 4 + 1]) / decimation);
+      for (let bin = 0; bin < level.metadata[band * 4 + 1]; bin++) {
+        const at = (level.metadata[band * 4] + bin) * 4;
+        if (bin >= inFirst && bin < inEnd) {
+          if (afterCanvas[at] !== seeded[at]) insideChanged++;
+          continue;
+        }
+        expect(afterCanvas[at], `band ${band} bin ${bin} outside the view`).toBe(seeded[at]);
+        if (seeded[at] > -100) outside++;
+      }
+    }
+    expect(outside).toBeGreaterThan(1000);
+    expect(insideChanged).toBeGreaterThan(1000);
+
+    whole.seedDisplayFromPacked(louder);
+    sub.seedDisplayFromPacked(louder);
+    const reseeded = readLevel(whole);
+    expect(firstDifference(reseeded, seeded, seeded.length)).not.toBe(-1);
+    expect(firstDifference(readLevel(sub), reseeded, reseeded.length)).toBe(-1);
+  });
+
   it("refuses to cut ring tiles the source view does not cover", () => {
     const sub = subViewRenderer();
     sub.setFBOData(composeViewContent(view, data.packedData));

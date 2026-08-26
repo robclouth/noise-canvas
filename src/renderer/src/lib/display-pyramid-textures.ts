@@ -11,7 +11,7 @@ import {
   WebGLRenderTarget,
 } from "three";
 
-import type { BandLayout } from "./band-layout";
+import { bandAtPixel, type BandLayout } from "./band-layout";
 import type { CanvasView } from "./canvas-view";
 import {
   clampToSourceBins,
@@ -119,6 +119,57 @@ export class DisplayPyramid {
     const instances = this.finestInstances(spans);
     if (instances.length === 0) return;
     this.uploadInstances(gl, data, instances);
+    this.decimateUpward(gl, spans);
+  }
+
+  /**
+   * Re-encodes the bins `pixelRanges` covers from the ranges' own pixels,
+   * compact and in order, as the block store hands them over. A level bin
+   * whose source tap falls outside the ranges keeps its value: the caller
+   * holds no pixel for it.
+   */
+  patchFromCompact(gl: WebGLRenderer, values: Float32Array, pixelRanges: Uint32Array): void {
+    if (!this.seeded) return;
+    const level = this.levels[0];
+    const instances: DecimateInstance[] = [];
+    const spans = new Uint32Array(this.layout.numBands * 2);
+    let compactBase = 0;
+    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
+      const rangeStart = pixelRanges[i];
+      const rangeEnd = rangeStart + pixelRanges[i + 1];
+      for (let band = bandAtPixel(this.layout, rangeStart); band < this.layout.numBands; band++) {
+        const offset = this.layout.metadata[band * 4];
+        if (offset >= rangeEnd) break;
+        const low = Math.max(rangeStart, offset);
+        const high = Math.min(rangeEnd, offset + this.layout.metadata[band * 4 + 1]);
+        if (high <= low) continue;
+        const firstBin = low - offset;
+        const endBin = high - offset;
+        const sourceStep = this.layout.metadata[band * 4 + 2];
+        const decimation = levelDecimation(level, sourceStep, band);
+        // The span is ceil-based at both ends, so every bin's tap sits inside
+        // the range and the compact values hold it.
+        const span = levelBinSpan(level, band, sourceStep, firstBin, endBin);
+        if (span.end <= span.start) continue;
+        const sourcePixel = this.layout.metadata[band * 4] + span.start * decimation;
+        instances.push({
+          destStart: level.metadata[band * 4] + span.start,
+          destCount: span.end - span.start,
+          srcStart: compactBase + (sourcePixel - rangeStart),
+          decimation,
+        });
+        if (spans[band * 2 + 1] <= spans[band * 2]) {
+          spans[band * 2] = firstBin;
+          spans[band * 2 + 1] = endBin;
+        } else {
+          spans[band * 2] = Math.min(spans[band * 2], firstBin);
+          spans[band * 2 + 1] = Math.max(spans[band * 2 + 1], endBin);
+        }
+      }
+      compactBase += pixelRanges[i + 1];
+    }
+    if (instances.length === 0) return;
+    this.uploadInstances(gl, values, instances);
     this.decimateUpward(gl, spans);
   }
 
