@@ -36,6 +36,55 @@ export function removeSpan(
 }
 
 /**
+ * `[timeSec, salience]` onset pairs with `[startSec, endSec)` removed and
+ * later times pulled earlier — the same move `removeSpan` makes on the audio.
+ * Pairs within `guardSec` of the seam are dropped: the declick fades reshape
+ * that sliver.
+ */
+export function removeOnsetSpan(onsets: Float32Array, startSec: number, endSec: number, guardSec = 0): Float32Array {
+  const out: number[] = [];
+  const span = Math.max(0, endSec - startSec);
+  for (let i = 0; i + 1 < onsets.length; i += 2) {
+    const time = onsets[i];
+    if (time >= startSec - guardSec && time < endSec + guardSec) continue;
+    out.push(time >= endSec ? time - span : time, onsets[i + 1]);
+  }
+  return new Float32Array(out);
+}
+
+/**
+ * `[timeSec, salience]` onset pairs with `insert`'s pairs (in the insert's own
+ * time, 0 at its start) spliced in at `atSec`, pushing later times back — the
+ * same move `insertSpan` makes on the audio. Pairs within `guardSec` of a seam
+ * are dropped.
+ */
+export function insertOnsetSpan(
+  onsets: Float32Array,
+  atSec: number,
+  spanSec: number,
+  insert: Float32Array,
+  guardSec = 0,
+): Float32Array {
+  const out: number[] = [];
+  for (let i = 0; i + 1 < onsets.length; i += 2) {
+    const time = onsets[i];
+    if (Math.abs(time - atSec) < guardSec) continue;
+    if (time < atSec) out.push(time, onsets[i + 1]);
+  }
+  for (let i = 0; i + 1 < insert.length; i += 2) {
+    const time = insert[i];
+    if (time < guardSec || time > spanSec - guardSec) continue;
+    out.push(atSec + time, insert[i + 1]);
+  }
+  for (let i = 0; i + 1 < onsets.length; i += 2) {
+    const time = onsets[i];
+    if (Math.abs(time - atSec) < guardSec) continue;
+    if (time >= atSec) out.push(time + spanSec, onsets[i + 1]);
+  }
+  return new Float32Array(out);
+}
+
+/**
  * Copies of `channels` with `insert`'s samples spliced in at `atSample`,
  * pushing everything after it later and declicking both seams. A channel the
  * insert does not carry repeats its first one, so mono material lands in both

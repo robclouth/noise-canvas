@@ -644,25 +644,45 @@ function bandLayout(data: SpectrogramData) {
 }
 
 /**
- * Rebuild a file from the audio `packedData` synthesises to, with `transform`
- * rewriting the channels in between. Replaces the file's spectrogram, audio
- * and peak, and adds the result to its history. The renderer is optional
- * throughout: a file showing a loading message has none mounted, and picks the
- * new analysis up from its spectrogram when it comes back.
+ * Rebuild a file from the audio it already plays, with `transform` rewriting
+ * the channels. The audio buffer is the synthesis of the canvas — every commit
+ * and navigation keeps it so — which makes it a starting point that needs no
+ * resynthesis and no FBO read. A file with no buffer yet takes the synthesis
+ * road instead. Replaces the file's spectrogram, audio and peak, and adds the
+ * result to its history; the renderer is optional throughout.
  */
-export async function rebuildFileFromAudio(
+/** Onsets a caller already knows for the rebuilt file, in place of detection. */
+export type PrecomputedOnsets = {
+  onsets: Float32Array;
+  reference: { odfMax: number; bandMax: Float32Array } | undefined;
+};
+
+export async function rebuildFileFromCurrentAudio(
   set: ZustandSet,
   fileId: string,
-  readPackedData: () => Promise<Float32Array | undefined>,
   transform: (channels: Float32Array[]) => Float32Array[],
   snapshot: { kind: "resize" | "reanalyze"; label: string },
+  onVisible?: () => void,
+  precomputedOnsets?: PrecomputedOnsets,
 ): Promise<void> {
-  // The read and the rebuild share one queue slot: a stroke commit landing
-  // between them would be encoded against dimensions this rebuild then replaces.
   return serializeFileTask(fileId, async () => {
-    const packedData = await readPackedData();
-    if (!packedData) throw new Error("Could not read the current spectrogram state.");
-    await rebuildFileFromAudioNow(set, fileId, packedData, transform, snapshot);
+    // Navigation moves the current node and then starts synthesis off the
+    // queue, so the buffer is the current state only once that has landed.
+    await awaitFileSynthesis(fileId);
+    const file = openFiles[fileId];
+    if (!file?.spectrogramData) return;
+    const buffer = file.audioBuffer;
+    if (!buffer) {
+      const packedData = await readCurrentPackedData(file);
+      if (!packedData) throw new Error("Could not read the current spectrogram state.");
+      await rebuildFileFromAudioNow(set, fileId, packedData, transform, snapshot, onVisible);
+      return;
+    }
+    const channels: Float32Array[] = [];
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+      channels.push(buffer.getChannelData(ch));
+    }
+    await rebuildFileWithChannels(set, fileId, transform(channels), snapshot, onVisible, precomputedOnsets);
   });
 }
 
@@ -672,6 +692,7 @@ async function rebuildFileFromAudioNow(
   packedData: Float32Array,
   transform: (channels: Float32Array[]) => Float32Array[],
   snapshot: { kind: "resize" | "reanalyze"; label: string },
+  onVisible?: () => void,
 ): Promise<void> {
   const file = openFiles[fileId];
   if (!file?.spectrogramData) return;
@@ -700,7 +721,35 @@ async function rebuildFileFromAudioNow(
 
   if (!openFiles[fileId]) return;
 
-  const channels = transform(synthResult.channels);
+  await rebuildFileWithChannels(set, fileId, transform(synthResult.channels), snapshot, onVisible);
+}
+
+/**
+ * The tail every rebuild shares: analyse `channels`, swap the file's
+ * spectrogram, audio, peak and onsets, and add the result to its history.
+ * `onVisible` fires once the new state is on screen and interactive; the
+ * history snapshot is written after it, still inside the caller's queue slot,
+ * so anything queued behind — another edit, an undo — waits for the node.
+ */
+async function rebuildFileWithChannels(
+  set: ZustandSet,
+  fileId: string,
+  channels: Float32Array[],
+  snapshot: { kind: "resize" | "reanalyze"; label: string },
+  onVisible?: () => void,
+  precomputedOnsets?: PrecomputedOnsets,
+): Promise<void> {
+  const file = openFiles[fileId];
+  if (!file?.spectrogramData) return;
+
+  const { spectrogramData } = file;
+  const analysisParams: AnalysisParams = {
+    bandsPerOctave: spectrogramData.bandsPerOctave,
+    minFreq: spectrogramData.minFreq,
+    maxCoefficients: remainingCoefficientBudget(openFileTexelCounts(fileId)),
+    ...(precomputedOnsets ? { detectOnsets: false } : {}),
+  };
+
   const length = channels[0]?.length ?? 0;
   if (length <= 0) throw new Error("There is no audio left to analyse.");
 
@@ -740,11 +789,12 @@ async function rebuildFileFromAudioNow(
   };
   file.audioBuffer = audioBuffer;
   file.unprojectedPaint = false;
-  // The rebuild moves every frame, so the onsets this analysis found replace
-  // the ones detected against the old length.
-  file.onsets = result.onsets;
-  file.onsetReference =
-    result.onsetOdfMax !== undefined && result.onsetBandMax
+  // The rebuild moves every frame, so the onsets come from the caller when it
+  // knows how they moved, else from the detection this analysis ran.
+  file.onsets = precomputedOnsets ? precomputedOnsets.onsets : result.onsets;
+  file.onsetReference = precomputedOnsets
+    ? precomputedOnsets.reference
+    : result.onsetOdfMax !== undefined && result.onsetBandMax
       ? { odfMax: result.onsetOdfMax, bandMax: result.onsetBandMax }
       : undefined;
 
@@ -759,20 +809,6 @@ async function rebuildFileFromAudioNow(
   file.audioPeak = newPeak > 0 ? newPeak : 1;
 
   file.rendererRef?.current?.reloadTextures();
-
-  const nodeId = await getHistoryManager(fileId).addSnapshot({
-    data: file.spectrogramData.packedData,
-    kind: snapshot.kind,
-    label: snapshot.label,
-    spectrogram: file.spectrogramData,
-  });
-
-  if (file.onsets && file.onsetReference) {
-    await getHistoryManager(fileId).setNodeOnsets(
-      nodeId,
-      packOnsetState({ onsets: file.onsets, reference: file.onsetReference }),
-    );
-  }
 
   const newDuration = length / spectrogramData.sampleRate;
   set(
@@ -796,6 +832,21 @@ async function rebuildFileFromAudioNow(
       }
     }),
   );
+  onVisible?.();
+
+  const nodeId = await getHistoryManager(fileId).addSnapshot({
+    data: file.spectrogramData.packedData,
+    kind: snapshot.kind,
+    label: snapshot.label,
+    spectrogram: file.spectrogramData,
+  });
+
+  if (file.onsets && file.onsetReference) {
+    await getHistoryManager(fileId).setNodeOnsets(
+      nodeId,
+      packOnsetState({ onsets: file.onsets, reference: file.onsetReference }),
+    );
+  }
 }
 
 // The current painted state of a file, falling back to its analysed
@@ -2643,10 +2694,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (!fileId || !file) return;
 
     try {
-      await rebuildFileFromAudio(
+      await rebuildFileFromCurrentAudio(
         set,
         fileId,
-        () => readCurrentPackedData(file),
         (channels) =>
           channels.map((src) => {
             const newLength = factor === 2 ? src.length * 2 : Math.floor(src.length / 2);
@@ -2700,8 +2750,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (padSamples <= 0) return;
     const playStartSample = (get().filesPlaybackStartTime[fileId] ?? 0) * sampleRate;
 
-    const packedData = await readCurrentPackedData(current);
-
+    const clearBusy = () =>
+      set(
+        produce((state: State) => {
+          delete state.filesBusy[fileId];
+        }),
+      );
     set(
       produce((state: State) => {
         state.filesBusy[fileId] = "Inserting silence...";
@@ -2709,12 +2763,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     );
 
     try {
-      await rebuildFileFromAudio(
+      await rebuildFileFromCurrentAudio(
         set,
         fileId,
-        async () => packedData,
         (channels) => insertSilence(channels, values.position, padSamples, playStartSample),
         { kind: "resize", label: "Insert silence" },
+        clearBusy,
       );
     } catch (error) {
       console.error("Insert silence failed:", error);
@@ -2724,21 +2778,13 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         color: "red",
       });
     } finally {
-      set(
-        produce((state: State) => {
-          delete state.filesBusy[fileId];
-        }),
-      );
+      clearBusy();
     }
   },
   setFileChannelCount: async (fileId, channelCount) => {
     const file = openFiles[fileId];
     if (!file?.spectrogramData || file.spectrogramData.numChannels === channelCount) return;
     if (get().filesLoading[fileId]) return;
-
-    // Read the painted state first: the loading message below takes the
-    // renderer, and with it the FBO, off the screen.
-    const packedData = await readCurrentPackedData(file);
 
     set(
       produce((state: State) => {
@@ -2747,13 +2793,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     );
 
     try {
-      await rebuildFileFromAudio(
-        set,
-        fileId,
-        async () => packedData,
-        (channels) => toChannelCount(channels, channelCount),
-        { kind: "reanalyze", label: channelCount === 1 ? "To mono" : "To stereo" },
-      );
+      await rebuildFileFromCurrentAudio(set, fileId, (channels) => toChannelCount(channels, channelCount), {
+        kind: "reanalyze",
+        label: channelCount === 1 ? "To mono" : "To stereo",
+      });
     } catch (error) {
       console.error("Channel change failed:", error);
       notifications.show({

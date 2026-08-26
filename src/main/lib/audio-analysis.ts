@@ -320,6 +320,22 @@ export async function analyseChannels(channelArrays: Float32Array[], sampleRate:
   const analyzeTime = performance.now() - analyzeStart;
   console.log(`[analyseChannels] Gaborator analyze time: ${analyzeTime.toFixed(2)}ms`);
 
+  // A caller that already knows the onsets — a splice moves them rigidly with
+  // the audio — passes detectOnsets: false and skips the detection pass. The
+  // empty map stands in only for the shape; such a caller replaces it.
+  if (params.detectOnsets === false) {
+    return {
+      ...analysisResult,
+      onsets: new Float32Array(0),
+      onsetOdfMax: 0,
+      onsetBandMax: new Float32Array(0),
+      sampleRate,
+      format: "wav", // in-memory audio is always PCM data
+      codec: "pcm_f32le",
+      channels,
+    };
+  }
+
   const onsetResult = await analysisOnsets(analysisResult, sampleRate);
   return {
     ...analysisResult,

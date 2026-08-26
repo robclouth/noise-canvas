@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { insertSpan, removeSpan } from "../ripple-edits";
+import { insertOnsetSpan, insertSpan, removeOnsetSpan, removeSpan } from "../ripple-edits";
 
 const channel = (...values: number[]) => new Float32Array(values);
 
@@ -53,5 +53,37 @@ describe("insertSpan", () => {
     const out = insertSpan([source], 2, [insert], 2);
     // Seams at 2 and 6; each has a 0 and a 0.5 on either side.
     expect(Array.from(out[0])).toEqual([0.5, 0, 0, 0.5, 0.5, 0, 0, 0.5]);
+  });
+});
+
+describe("removeOnsetSpan", () => {
+  it("drops the span's pairs and pulls later ones earlier", () => {
+    const onsets = new Float32Array([1, 0.9, 3, 0.8, 5, 0.7]);
+    const out = removeOnsetSpan(onsets, 2, 4);
+    const rounded = Array.from(out).map((v) => Math.round(v * 100) / 100);
+    expect(rounded).toEqual([1, 0.9, 3, 0.7]);
+  });
+
+  it("drops pairs inside the seam guard", () => {
+    const onsets = new Float32Array([1.995, 0.9, 4.004, 0.8]);
+    const out = removeOnsetSpan(onsets, 2, 4, 0.01);
+    expect(out.length).toBe(0);
+  });
+});
+
+describe("insertOnsetSpan", () => {
+  it("splices the insert's pairs in and pushes later ones back", () => {
+    const onsets = new Float32Array([1, 0.9, 3, 0.8]);
+    const insert = new Float32Array([0.5, 0.6]);
+    const out = insertOnsetSpan(onsets, 2, 2, insert);
+    const rounded = Array.from(out).map((v) => Math.round(v * 100) / 100);
+    expect(rounded).toEqual([1, 0.9, 2.5, 0.6, 5, 0.8]);
+  });
+
+  it("drops pairs on the seams", () => {
+    const onsets = new Float32Array([2.005, 0.9]);
+    const insert = new Float32Array([0.001, 0.6, 1.999, 0.5]);
+    const out = insertOnsetSpan(onsets, 2, 2, insert, 0.01);
+    expect(out.length).toBe(0);
   });
 });
