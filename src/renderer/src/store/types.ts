@@ -52,7 +52,10 @@ export type SpectrogramData = {
   // texture upload: the renderer releases it once the GPU holds the state,
   // and from then on the FBO and the block store carry it.
   packedData?: Float32Array;
-  inverseMap: Float32Array;
+  // The synthesis inverse map. Released with `packedData` once the GPU holds
+  // it; rebuilt in milliseconds from the band layout when a derived file or a
+  // reopen needs it again.
+  inverseMap?: Float32Array;
   metadata: Float32Array;
   textureWidth: number;
   textureHeight: number;

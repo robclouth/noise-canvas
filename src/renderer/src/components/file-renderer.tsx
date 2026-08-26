@@ -145,7 +145,7 @@ export interface FileRendererHandle {
   clearPreview: () => void;
   /** Reloads all textures from the current spectrogramData (used after re-analysis). */
   reloadTextures: () => void;
-  releasePackedData: () => void;
+  releaseAnalysisData: () => void;
   applyStroke: () => void;
   beginStroke: () => void;
   endStroke: () => void;
@@ -440,24 +440,32 @@ const FileRendererInner = memo(
       };
     }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
 
-    // The packed values the next texture build seeds from. Captured from the
-    // spectrogram once, so releasing the spectrogram's array later does not
-    // retrigger the texture effect with nothing to build from.
+    // The packed and inverse-map values the next texture build seeds from.
+    // Captured from the spectrogram once, so releasing the spectrogram's
+    // arrays later does not retrigger the texture effect with nothing to
+    // build from.
     const packedSeedRef = useRef<Float32Array | null>(null);
     if (spectrogramData.packedData) packedSeedRef.current = spectrogramData.packedData;
+    const inverseSeedRef = useRef<Float32Array | null>(null);
+    if (spectrogramData.inverseMap) inverseSeedRef.current = spectrogramData.inverseMap;
 
     /**
      * Creates DataTextures from spectrogram data.
      * Used both on initial load and when reloading textures.
      */
     const createTextures = useCallback(() => {
-      const { inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
+      const { metadata, textureWidth, textureHeight, numBands } = spectrogramData;
       let packedData = packedSeedRef.current;
       if (!packedData || packedData.length !== textureWidth * textureHeight * 4) {
         // The seed was already released; the canvas rebuilds from history.
         console.warn("history: the packed seed was already released; the canvas needs a full restore");
         getHistoryManager(fileId).markFboOutOfSync();
         packedData = new Float32Array(textureWidth * textureHeight * 4);
+      }
+      let inverseMap = inverseSeedRef.current;
+      if (!inverseMap || inverseMap.length !== textureWidth * textureHeight * 2) {
+        console.warn("history: the inverse-map seed was already released");
+        inverseMap = new Float32Array(textureWidth * textureHeight * 2);
       }
 
       const packed = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
@@ -1030,7 +1038,7 @@ const FileRendererInner = memo(
           });
           // The GPU and the store hold the state now, so the analysed array
           // is released; the local copy still feeds this first synthesis.
-          releasePackedData();
+          releaseAnalysisData();
           if (nodeId === null) {
             await historyManager.restoreCurrentAudio();
             return;
@@ -1416,12 +1424,13 @@ const FileRendererInner = memo(
     };
 
     /**
-     * Frees the analysed packed array once the GPU holds the state: the
-     * packed texture is uploaded now, its CPU-side copy emptied, and the
-     * spectrogram's reference dropped. From here the FBO and the block store
-     * carry the state.
+     * Frees the analysed packed array and the inverse map once the GPU holds
+     * them: both textures are uploaded now, their CPU-side copies emptied,
+     * and the spectrogram's references dropped. From here the FBO and the
+     * block store carry the state, and the inverse map rebuilds from the
+     * band layout when a derived file or a reopen needs it.
      */
-    const releasePackedData = () => {
+    const releaseAnalysisData = () => {
       const live = liveTexturesRef.current;
       const gl = glRef.current;
       if (!live || !gl) return;
@@ -1429,6 +1438,10 @@ const FileRendererInner = memo(
       live.packed.image.data = new Float32Array(0);
       packedSeedRef.current = null;
       spectrogramData.packedData = undefined;
+      gl.initTexture(live.inverse);
+      live.inverse.image.data = new Float32Array(0);
+      inverseSeedRef.current = null;
+      spectrogramData.inverseMap = undefined;
     };
 
     const discardStrokePreview = (): boolean => {
@@ -1504,7 +1517,7 @@ const FileRendererInner = memo(
       restoreOriginal,
       clearPreview,
       reloadTextures,
-      releasePackedData,
+      releaseAnalysisData,
       beginStroke,
       endStroke,
       applyStroke: () => {

@@ -1734,7 +1734,7 @@ export class HistoryManager {
     file.spectrogramData = spectrogramData;
     file.rendererRef.current.reloadTextures();
     file.rendererRef.current.setFBOData(packedData);
-    file.rendererRef.current.releasePackedData();
+    file.rendererRef.current.releaseAnalysisData();
   }
 
   // ---------- Audio LRU ----------

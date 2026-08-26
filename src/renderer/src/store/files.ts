@@ -627,11 +627,19 @@ export function getFileIdByPath(filePath: string): string | undefined {
  * child never writes through to its source; the file-sized inverse map is
  * shared, because nothing writes it — a re-analysis builds a fresh one.
  */
-export function deriveSpectrogramData(base: SpectrogramData, packedData: Float32Array): SpectrogramData {
+export async function deriveSpectrogramData(base: SpectrogramData, packedData: Float32Array): Promise<SpectrogramData> {
+  const inverseMap =
+    base.inverseMap ??
+    (await host.analysis.buildHistoryInverseMap(
+      new Uint32Array(base.synthesisMetadata.bandOffsets),
+      new Uint32Array(base.synthesisMetadata.bandLengths),
+      new Int32Array(base.synthesisMetadata.bandStepLog2s),
+      base.textureWidth * base.textureHeight,
+    ));
   return {
     ...base,
     packedData,
-    inverseMap: base.inverseMap,
+    inverseMap,
     metadata: base.metadata.slice(),
     synthesisMetadata: {
       bandLengths: base.synthesisMetadata.bandLengths.slice(),
@@ -777,7 +785,7 @@ async function rebuildFileFromAudioNow(
     label: snapshot.label,
     spectrogram: file.spectrogramData,
   });
-  file.rendererRef?.current?.releasePackedData();
+  file.rendererRef?.current?.releaseAnalysisData();
 
   if (file.onsets && file.onsetReference) {
     await getHistoryManager(fileId).setNodeOnsets(
@@ -1182,7 +1190,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       filePath: newFilePath,
       displayName,
       unprojectedPaint: originalFile.unprojectedPaint,
-      spectrogramData: deriveSpectrogramData(originalFile.spectrogramData, fboData),
+      spectrogramData: await deriveSpectrogramData(originalFile.spectrogramData, fboData),
     };
 
     openFiles[newFileId] = newFile;
@@ -1230,8 +1238,8 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     try {
       const { harmonic, percussive } = await host.analysis.hpss(fboData, bandLayout(spectrogramData));
 
-      updateOpenFile(ids[0], { spectrogramData: deriveSpectrogramData(spectrogramData, harmonic) });
-      updateOpenFile(ids[1], { spectrogramData: deriveSpectrogramData(spectrogramData, percussive) });
+      updateOpenFile(ids[0], { spectrogramData: await deriveSpectrogramData(spectrogramData, harmonic) });
+      updateOpenFile(ids[1], { spectrogramData: await deriveSpectrogramData(spectrogramData, percussive) });
     } catch (error) {
       console.error("HPSS separation failed:", error);
       notifications.show({
@@ -1267,7 +1275,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         throw new Error(`Expected ${parts} parts, got ${result.parts.length}`);
       }
       for (let i = 0; i < ids.length; i++) {
-        updateOpenFile(ids[i], { spectrogramData: deriveSpectrogramData(spectrogramData, result.parts[i]) });
+        updateOpenFile(ids[i], { spectrogramData: await deriveSpectrogramData(spectrogramData, result.parts[i]) });
       }
     } catch (error) {
       console.error("NMF separation failed:", error);
@@ -1358,7 +1366,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
       updateOpenFile(newFileId, {
         spectrogramData: {
-          ...deriveSpectrogramData(base, merged),
+          ...(await deriveSpectrogramData(base, merged)),
           // The parts each carry a slice of the original's energy, so none of
           // their totals describes the sum. Take the figure the split came
           // from when it's still around; the Convolve effect normalises its
@@ -2686,7 +2694,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           label: "Re-analyse",
           spectrogram: spectrogramData,
         });
-        file.rendererRef?.current?.releasePackedData();
+        file.rendererRef?.current?.releaseAnalysisData();
 
         set(
           produce((state: State) => {

@@ -302,7 +302,11 @@ function installManagerEnv(): { fbo: { last: Float32Array | null }; files: Map<s
   fakeOpenFiles["f1"] = {
     spectrogramData: {},
     rendererRef: {
-      current: { setFBOData: (d: Float32Array) => (fbo.last = d), reloadTextures: vi.fn(), releasePackedData: vi.fn() },
+      current: {
+        setFBOData: (d: Float32Array) => (fbo.last = d),
+        reloadTextures: vi.fn(),
+        releaseAnalysisData: vi.fn(),
+      },
     },
   };
   return { fbo, files: store };
@@ -418,7 +422,7 @@ function installPatchRenderer(
         },
         expandDirtyRegion: vi.fn(),
         reloadTextures: vi.fn(),
-        releasePackedData: vi.fn(),
+        releaseAnalysisData: vi.fn(),
       },
     },
   };
@@ -1432,7 +1436,7 @@ describe("HistoryManager side data", () => {
     const restored = await fresh.loadSpectrogramAtCurrent();
     expect(restored).not.toBeNull();
     expect(Array.from(restored!.metadata)).toEqual(Array.from(spectrogram.metadata));
-    expect(restored!.inverseMap.length).toBe(spectrogram.inverseMap.length);
+    expect(restored!.inverseMap!.length).toBe(spectrogram.inverseMap!.length);
     expect(Array.from(restored!.packedData!)).toEqual(Array.from(root));
 
     clearAllHistoryManagers();

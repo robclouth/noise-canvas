@@ -351,13 +351,36 @@ describe("pruneOrphanHistoryDirs", () => {
 describe("deriveSpectrogramData", () => {
   const base = createMockSpectrogramData({ numFrames: 64, numBands: 16, pattern: "gradient" });
 
-  it("shares the inverse map with the derived file", () => {
-    const derived = deriveSpectrogramData(base, new Float32Array(base.packedData.length));
+  it("shares the inverse map with the derived file", async () => {
+    const derived = await deriveSpectrogramData(base, new Float32Array(base.packedData.length));
     expect(derived.inverseMap).toBe(base.inverseMap);
   });
 
-  it("gives the derived file its own copy of the small layout arrays", () => {
-    const derived = deriveSpectrogramData(base, new Float32Array(base.packedData.length));
+  it("rebuilds the inverse map from the band layout when the base released it", async () => {
+    const released = { ...base, inverseMap: undefined };
+    const g = window as unknown as {
+      audioAnalysis?: { buildHistoryInverseMap?: (...args: unknown[]) => Promise<Float32Array> };
+    };
+    const prev = g.audioAnalysis;
+    const build = vi.fn(async (offsets: Uint32Array, lengths: Uint32Array, steps: Int32Array, pixelCount: number) => {
+      expect(Array.from(offsets)).toEqual(Array.from(base.synthesisMetadata.bandOffsets));
+      expect(Array.from(lengths)).toEqual(Array.from(base.synthesisMetadata.bandLengths));
+      expect(Array.from(steps)).toEqual(Array.from(base.synthesisMetadata.bandStepLog2s));
+      return new Float32Array(pixelCount * 2).fill(7);
+    });
+    g.audioAnalysis = { ...prev, buildHistoryInverseMap: build as (...args: unknown[]) => Promise<Float32Array> };
+    try {
+      const derived = await deriveSpectrogramData(released, new Float32Array(base.packedData.length));
+      expect(build).toHaveBeenCalledTimes(1);
+      expect(derived.inverseMap!.length).toBe(base.textureWidth * base.textureHeight * 2);
+      expect(derived.inverseMap![0]).toBe(7);
+    } finally {
+      g.audioAnalysis = prev;
+    }
+  });
+
+  it("gives the derived file its own copy of the small layout arrays", async () => {
+    const derived = await deriveSpectrogramData(base, new Float32Array(base.packedData.length));
     expect(derived.metadata).not.toBe(base.metadata);
     expect(Array.from(derived.metadata)).toEqual(Array.from(base.metadata));
     expect(derived.synthesisMetadata.bandOffsets).not.toBe(base.synthesisMetadata.bandOffsets);
@@ -366,9 +389,9 @@ describe("deriveSpectrogramData", () => {
     expect(Array.from(derived.synthesisMetadata.bandOffsets)).toEqual(Array.from(base.synthesisMetadata.bandOffsets));
   });
 
-  it("takes the coefficients it is handed and keeps the base's grid", () => {
+  it("takes the coefficients it is handed and keeps the base's grid", async () => {
     const packed = new Float32Array(base.packedData.length).fill(0.5);
-    const derived = deriveSpectrogramData(base, packed);
+    const derived = await deriveSpectrogramData(base, packed);
     expect(derived.packedData).toBe(packed);
     expect(derived.textureWidth).toBe(base.textureWidth);
     expect(derived.textureHeight).toBe(base.textureHeight);
