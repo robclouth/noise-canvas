@@ -368,12 +368,27 @@ Status: in progress. Done so far:
   (`navigateToNow` catches reconstruction errors once the manifest is gone) —
   a latent race the truthful recursive-rm test stub exposed.
 
-Remaining: the reader migration onto a current-state store
-(`readCurrentPackedData`, commit synthesis windows, export, save, undo/redo
-delta application), the per-block inverse map, and the renderer-heap exit
-measurement. The store currently holds the root state and is write-once
-outside `seed`; the migration decides whether commits patch this store in
-place or a generational copy-on-write layer keeps the root blocks intact.
+The store now carries the current state as well, on the copy-on-write shape
+(chosen 2026-08-26 under Rob's "whatever is best while keeping it safe"):
+
+- Seeded blocks are never rewritten. Patches flush into a `current/` overlay,
+  so a torn write can only reach the overlay; the seed plus the deltas stay
+  the durable truth, and a block whose size does not fit the store's grid is
+  refused rather than misread.
+- Commits and undo/redo hops patch the overlay in step with `currentPacked`
+  (phase-turn spans included) and flush inside the per-file queue, so disk
+  always holds the current state. The manifest's `overlayNodeId` names the
+  node the overlay holds; it is invalidated on disk before the overlay
+  changes, and a patch whose base the overlay does not hold reseeds it whole.
+- A re-analysis reshapes the store to the new grid with the new state as its
+  seed (`seedNodeId`); the previous seed-holder is first written out as its
+  own snapshot file, so every anchor stays reconstructable and no state is
+  ever stored twice.
+
+Remaining: the reader migration (`readCurrentPackedData` consumers, commit
+synthesis windows, export, save — each with a parity test before the
+whole-file array is removed), the per-block inverse map, and the
+renderer-heap exit measurement.
 
 ---
 
