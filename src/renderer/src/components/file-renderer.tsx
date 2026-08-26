@@ -498,9 +498,10 @@ const FileRendererInner = memo(
       return { packed, inverse, meta };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
+      // The spectrogram object stands in for its fields: every real change
+      // swaps the object, and listing `inverseMap` here would pin the released
+      // array in this hook's dependency record until the next render.
       spectrogramData,
-      spectrogramData.inverseMap,
-      spectrogramData.metadata,
       spectrogramData.textureWidth,
       spectrogramData.textureHeight,
       spectrogramData.numBands,
