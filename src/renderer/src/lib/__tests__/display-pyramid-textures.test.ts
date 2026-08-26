@@ -15,7 +15,6 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
-import type { SpectrogramData } from "../../store/types";
 import { DisplayPyramid } from "../display-pyramid-textures";
 import { levelDecimation } from "../display-pyramid";
 
@@ -45,7 +44,7 @@ function dbToMag(db: number): number {
 }
 
 describe("display pyramid textures", () => {
-  const data: SpectrogramData = createConstantQMockSpectrogramData({
+  const data = createConstantQMockSpectrogramData({
     durationSeconds: 2,
     sampleRate: 8000,
     bandsPerOctave: 4,

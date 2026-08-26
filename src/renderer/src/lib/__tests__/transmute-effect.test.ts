@@ -98,7 +98,8 @@ function createChainState(chain: ChainItem[]): State {
  * coefficients and a phase that accumulates along time to thousands of radians.
  */
 function fillRunningPhase(spectrogramData: SpectrogramData, phaseScale = 1): void {
-  const { packedData, numFrames, numBands } = spectrogramData;
+  const { numFrames, numBands } = spectrogramData;
+  const packedData = spectrogramData.packedData!;
   for (let band = 0; band < numBands; band++) {
     for (let frame = 0; frame < numFrames; frame++) {
       const i = (band * numFrames + frame) * 4;

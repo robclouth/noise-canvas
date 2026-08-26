@@ -48,7 +48,10 @@ export type FileSettings = {
 };
 
 export type SpectrogramData = {
-  packedData: Float32Array;
+  // The analysed packed state. Present only between analysis and the first
+  // texture upload: the renderer releases it once the GPU holds the state,
+  // and from then on the FBO and the block store carry it.
+  packedData?: Float32Array;
   inverseMap: Float32Array;
   metadata: Float32Array;
   textureWidth: number;

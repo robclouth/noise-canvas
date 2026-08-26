@@ -1,6 +1,9 @@
 import { Vector2 } from "three";
 import { SpectrogramData } from "../store/types";
 
+/** Mock spectrograms always carry their packed state; tests read it freely. */
+export type SeededSpectrogramData = SpectrogramData & { packedData: Float32Array };
+
 /**
  * Options for creating mock spectrogram data
  */
@@ -36,7 +39,7 @@ export interface MockSpectrogramOptions {
  * Creates mock SpectrogramData for testing.
  * The data structure matches what the real gaborator analysis produces.
  */
-export function createMockSpectrogramData(options: MockSpectrogramOptions = {}): SpectrogramData {
+export function createMockSpectrogramData(options: MockSpectrogramOptions = {}): SeededSpectrogramData {
   const {
     numFrames = 256,
     numBands = 128,
@@ -253,7 +256,7 @@ export function createConstantQMockSpectrogramData(
     minFreq?: number;
     constantMagnitude?: number;
   } = {},
-): SpectrogramData {
+): SeededSpectrogramData {
   const {
     durationSeconds = 10,
     sampleRate = 44100,
@@ -333,7 +336,7 @@ export function createConstantQMockSpectrogramData(
  * Creates a mock spectrogram with a specific test pattern.
  * Useful for testing that strokes are applied to the correct region.
  */
-export function createMockSpectrogramWithMarkers(options: MockSpectrogramOptions = {}): SpectrogramData {
+export function createMockSpectrogramWithMarkers(options: MockSpectrogramOptions = {}): SeededSpectrogramData {
   const spectrogramData = createMockSpectrogramData({ ...options, pattern: "silence" });
 
   // Add markers at specific positions for testing

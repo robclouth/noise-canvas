@@ -769,12 +769,15 @@ async function rebuildFileFromAudioNow(
 
   file.rendererRef?.current?.reloadTextures();
 
+  const reshaped = file.spectrogramData.packedData;
+  if (!reshaped) throw new Error("the snapshot result carries no packed state");
   const nodeId = await getHistoryManager(fileId).addSnapshot({
-    data: file.spectrogramData.packedData,
+    data: reshaped,
     kind: snapshot.kind,
     label: snapshot.label,
     spectrogram: file.spectrogramData,
   });
+  file.rendererRef?.current?.releasePackedData();
 
   if (file.onsets && file.onsetReference) {
     await getHistoryManager(fileId).setNodeOnsets(
@@ -791,13 +794,22 @@ async function rebuildFileFromAudioNow(
 }
 
 // The current painted state of a file. Without a mounted renderer to read an
-// FBO from, the block store's current tier serves it, and the in-RAM packed
-// array is the last resort.
+// FBO from, the block store's current tier serves it, and a transient rebuild
+// from the on-disk history is the last resort.
 async function readCurrentPackedData(file: OpenFile): Promise<Float32Array | undefined> {
   const fboData = await file.rendererRef?.current?.getFBOData();
   if (fboData) return fboData;
-  const blocks = await getHistoryManager(file.id).currentBlockState();
-  return blocks ?? file.spectrogramData?.packedData;
+  const manager = getHistoryManager(file.id);
+  const blocks = await manager.currentBlockState();
+  if (blocks) return blocks;
+  if (file.spectrogramData?.packedData) return file.spectrogramData.packedData;
+  const currentId = manager.getCurrentId();
+  if (!currentId) return undefined;
+  try {
+    return (await manager.reconstruct(currentId)).packedData;
+  } catch {
+    return undefined;
+  }
 }
 
 type FileAudioSnapshot = { nodeId: string | null; channels: Float32Array[]; sampleRate: number };
@@ -2630,8 +2642,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           : await host.analysis.analyze(file.filePath, reanalysisParams);
         const analysisMs = performance.now() - analysisStart;
 
+        const reshaped = new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4);
         const spectrogramData = {
-          packedData: new Float32Array(result.data.buffer, result.data.byteOffset, result.data.byteLength / 4),
+          packedData: reshaped,
           inverseMap: new Float32Array(
             result.inverseMap.buffer,
             result.inverseMap.byteOffset,
@@ -2668,11 +2681,12 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         file.rendererRef?.current?.reloadTextures();
 
         await getHistoryManager(fileId).addSnapshot({
-          data: spectrogramData.packedData,
+          data: reshaped,
           kind: "reanalyze",
           label: "Re-analyse",
           spectrogram: spectrogramData,
         });
+        file.rendererRef?.current?.releasePackedData();
 
         set(
           produce((state: State) => {

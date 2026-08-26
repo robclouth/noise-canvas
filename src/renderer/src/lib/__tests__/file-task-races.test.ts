@@ -189,6 +189,7 @@ function openTestFile(filePath = "/audio/a.wav") {
         getDirtyRegion: () => null,
         clearDirtyRegion: vi.fn(),
         reloadTextures: vi.fn(),
+        releasePackedData: vi.fn(),
       },
     },
   } as unknown as (typeof openFiles)[string];

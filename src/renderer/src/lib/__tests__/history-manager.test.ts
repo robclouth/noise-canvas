@@ -301,7 +301,9 @@ function installManagerEnv(): { fbo: { last: Float32Array | null }; files: Map<s
   const fbo = { last: null as Float32Array | null };
   fakeOpenFiles["f1"] = {
     spectrogramData: {},
-    rendererRef: { current: { setFBOData: (d: Float32Array) => (fbo.last = d), reloadTextures: vi.fn() } },
+    rendererRef: {
+      current: { setFBOData: (d: Float32Array) => (fbo.last = d), reloadTextures: vi.fn(), releasePackedData: vi.fn() },
+    },
   };
   return { fbo, files: store };
 }
@@ -309,7 +311,7 @@ function installManagerEnv(): { fbo: { last: Float32Array | null }; files: Map<s
 // A spectrogram whose packed data we control, laid out one band per texture row
 // so its band layout and metadata are self-consistent — the manager rebuilds
 // both from the manifest, so a nonsense layout wouldn't exercise that.
-function makeSpectrogram(packed: Float32Array, w: number, h: number): SpectrogramData {
+function makeSpectrogram(packed: Float32Array, w: number, h: number): SpectrogramData & { packedData: Float32Array } {
   const bandOffsets = new Uint32Array(h);
   const bandLengths = new Uint32Array(h);
   const bandStepLog2s = new Int32Array(h);
@@ -342,7 +344,7 @@ function makeSpectrogram(packed: Float32Array, w: number, h: number): Spectrogra
     bandsPerOctave: 12,
     packedTextureSize: { x: w, y: h },
     synthesisMetadata: { bandOffsets, bandStepLog2s, bandLengths },
-  } as unknown as SpectrogramData;
+  } as unknown as SpectrogramData & { packedData: Float32Array };
 }
 
 // Deterministic, deliberately lossy float fill — values like p/97 aren't exactly
@@ -416,6 +418,7 @@ function installPatchRenderer(
         },
         expandDirtyRegion: vi.fn(),
         reloadTextures: vi.fn(),
+        releasePackedData: vi.fn(),
       },
     },
   };
@@ -855,10 +858,10 @@ describe("HistoryManager hops", () => {
     const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
     await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([2, 3]) });
-    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(mgr.currentPackedState()!));
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(a));
 
     await mgr.navigateToParent();
-    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(mgr.currentPackedState()!));
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(root));
 
     // A marker naming another node means the blocks cannot serve the state.
     clearAllHistoryManagers();
@@ -954,7 +957,7 @@ describe("HistoryManager hops", () => {
     const root = lossyFill(w, h, 0);
     const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
-    const current = mgr.currentPackedState()!;
+    const current = root;
     canvas.set(current);
 
     const ranges = new Uint32Array([4, 4]);
@@ -988,7 +991,7 @@ describe("HistoryManager hops", () => {
       }
       const mgr = getHistoryManager("f1");
       await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
-      const current = mgr.currentPackedState()!;
+      const current = root;
       const rootBytes = new Float32Array(current);
       canvas.set(current);
 
@@ -1031,7 +1034,7 @@ describe("HistoryManager hops", () => {
     }
     const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
-    const current = mgr.currentPackedState()!;
+    const current = root;
     const rootBytes = new Float32Array(root);
     canvas.set(current);
 
@@ -1075,7 +1078,7 @@ describe("HistoryManager hops", () => {
     }
     const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
-    const current = mgr.currentPackedState()!;
+    const current = root;
     const rootBytes = new Float32Array(current);
     canvas.set(current);
 
@@ -1230,50 +1233,49 @@ describe("HistoryManager hops", () => {
     delete fakeOpenFiles["f1"];
   });
 
-  it("takes a stroke written into the current state in place, and hops it in place", async () => {
+  it("takes a footprint stroke without any whole array, and hops it exactly", async () => {
     installManagerEnv();
-    installPatchRenderer(w, h);
+    const { canvas } = installPatchRenderer(w, h);
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
     const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
-    const current = mgr.currentPackedState()!;
-    expect(current).toBe(root);
     const rootBytes = new Float32Array(root);
+    canvas.set(root);
 
-    // A commit with projection off: save the footprint's values, then write
-    // the stroke over them in the very same array.
+    // A commit with projection off: only the footprint's values move — the
+    // old ones from the store, the new ones from the brush window's readback.
     const ranges = new Uint32Array([2, 3]);
     const a = paint(root, 2, 3, 1);
-    const baseFootprint = new Float32Array(3 * 4);
-    baseFootprint.set(current.subarray(2 * 4, 5 * 4));
-    current.set(a.subarray(2 * 4, 5 * 4), 2 * 4);
+    const baseFootprint = await mgr.currentRanges(ranges);
+    expect(baseFootprint).not.toBeNull();
     const { id: aId, isNew } = await mgr.addStroke({
-      data: current,
       label: "A",
       dimensions,
       dirtyRanges: ranges,
-      baseFootprint,
+      baseFootprint: baseFootprint!,
+      afterFootprint: gatherPixelRanges(a, ranges),
     });
     expect(isNew).toBe(true);
     expect(mgr.getNode(aId)?.storage).toBe("delta");
-    expect(mgr.currentPackedState()).toBe(current);
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(a));
+    canvas.set(a);
 
     await mgr.navigateToParent();
-    expect(mgr.currentPackedState()).toBe(current);
-    expect(Array.from(current)).toEqual(Array.from(rootBytes));
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(rootBytes));
+    expect(Array.from(canvas)).toEqual(Array.from(rootBytes));
 
     await mgr.navigateToLastChild();
-    expect(mgr.currentPackedState()).toBe(current);
-    expect(Array.from(current)).toEqual(Array.from(a));
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(a));
+    expect(Array.from(canvas)).toEqual(Array.from(a));
 
     // A stroke that wrote the same values back makes no node.
     const same = await mgr.addStroke({
-      data: current,
       label: "same",
       dimensions,
       dirtyRanges: ranges,
-      baseFootprint: current.slice(2 * 4, 5 * 4),
+      baseFootprint: gatherPixelRanges(a, ranges),
+      afterFootprint: gatherPixelRanges(a, ranges),
     });
     expect(same.isNew).toBe(false);
     expect(same.id).toBe(aId);
@@ -1312,7 +1314,7 @@ describe("HistoryManager hops", () => {
     releaseOnsets!();
     await redo;
     expect(walks).toHaveBeenCalledTimes(2);
-    expect(Array.from(mgr.currentPackedState()!)).toEqual(Array.from(a));
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(a));
 
     walks.mockRestore();
     mgr.dispose();
@@ -1331,7 +1333,7 @@ describe("HistoryManager hops", () => {
     }
     const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
-    const current = mgr.currentPackedState()!;
+    const current = root;
     const rootBytes = new Float32Array(root);
     canvas.set(current);
 
@@ -1359,12 +1361,13 @@ describe("HistoryManager hops", () => {
       turns,
     });
     expect(mgr.getNode(aId)?.storage).toBe("delta");
+    const store = await getBlockStore("f1")!;
 
     await mgr.navigateToParent();
     expect(full).toHaveLength(0);
     expect(canvasTurns).toHaveLength(1);
     expect(canvasTurns[0]).toEqual([8, w * h - 8, -c0, -0]);
-    expect(Array.from(current)).toEqual(Array.from(rootBytes));
+    expect(Array.from(await store.readAll())).toEqual(Array.from(rootBytes));
     expect(Array.from(canvas)).toEqual(Array.from(rootBytes));
     // Only the window was uploaded; the tail travelled as an operation.
     expect(Array.from(patches.at(-1)!.ranges)).toEqual([4, 4]);
@@ -1372,7 +1375,7 @@ describe("HistoryManager hops", () => {
     await mgr.navigateToLastChild();
     expect(canvasTurns).toHaveLength(2);
     expect(canvasTurns[1]).toEqual([8, w * h - 8, c0, 0]);
-    expect(Array.from(current)).toEqual(Array.from(a));
+    expect(Array.from(await store.readAll())).toEqual(Array.from(a));
     expect(Array.from(canvas)).toEqual(Array.from(a));
     expect(full).toHaveLength(0);
 
@@ -1430,7 +1433,7 @@ describe("HistoryManager side data", () => {
     expect(restored).not.toBeNull();
     expect(Array.from(restored!.metadata)).toEqual(Array.from(spectrogram.metadata));
     expect(restored!.inverseMap.length).toBe(spectrogram.inverseMap.length);
-    expect(Array.from(restored!.packedData)).toEqual(Array.from(root));
+    expect(Array.from(restored!.packedData!)).toEqual(Array.from(root));
 
     clearAllHistoryManagers();
     delete fakeOpenFiles["f1"];
@@ -1516,8 +1519,8 @@ describe("HistoryManager resetToCurrent (purge history)", () => {
 
     await mgr.resetToCurrent();
 
-    // The new root keeps the array the state was already in, not a copy of it.
-    expect(mgr.currentPackedState()).toBe(b);
+    // The new root's state lives as the fresh seed, nothing else held in RAM.
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(b));
     // Only the current state survives, as the new root — nothing left to undo to.
     expect(mgr.listNodes().length).toBe(1);
     expect(mgr.getCurrentId()).toBe(bId);
@@ -1583,7 +1586,7 @@ describe("HistoryManager resetToCurrent (purge history)", () => {
   });
 });
 
-describe("HistoryManager root state alias", () => {
+describe("HistoryManager footprint commits over anchors", () => {
   const w = 8;
   const h = 4;
   const dimensions = {
@@ -1599,19 +1602,24 @@ describe("HistoryManager root state alias", () => {
   const ranges = new Uint32Array([2, 3]);
 
   /**
-   * A footprint commit as brush.ts issues one: the old values are gathered, the
-   * new ones are scattered into the very same array, and that array is stored.
+   * A footprint commit as brush.ts issues one: the old values come from the
+   * store, the new ones from the brush window's readback, and no whole array
+   * changes hands.
    */
-  async function commitInPlace(mgr: ReturnType<typeof getHistoryManager>, salt: number): Promise<Float32Array> {
-    const current = mgr.currentPackedState()!;
+  async function commitFootprint(mgr: ReturnType<typeof getHistoryManager>, salt: number): Promise<void> {
     const read = gatherPixelRanges(lossyFill(w, h, salt), ranges);
-    const baseFootprint = gatherPixelRanges(current, ranges);
-    scatterCompactPixelRanges(current, read, ranges);
-    await mgr.addStroke({ data: current, label: "A", dimensions, dirtyRanges: ranges, baseFootprint });
-    return current;
+    const baseFootprint = await mgr.currentRanges(ranges);
+    expect(baseFootprint).not.toBeNull();
+    await mgr.addStroke({
+      label: "A",
+      dimensions,
+      dirtyRanges: ranges,
+      baseFootprint: baseFootprint!,
+      afterFootprint: read,
+    });
   }
 
-  it("takes the analysed packed array as the current state rather than copying it", async () => {
+  it("serves the analysed bytes from the store without keeping the array", async () => {
     installManagerEnv();
     const spectrogram = makeSpectrogram(lossyFill(w, h, 0), w, h);
     installPatchRenderer(w, h, spectrogram);
@@ -1619,7 +1627,7 @@ describe("HistoryManager root state alias", () => {
 
     const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: spectrogram.packedData, kind: "root", label: "root", spectrogram });
-    expect(mgr.currentPackedState()).toBe(spectrogram.packedData);
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(spectrogram.packedData));
 
     mgr.dispose();
     delete fakeOpenFiles["f1"];
@@ -1636,18 +1644,17 @@ describe("HistoryManager root state alias", () => {
     const analysed = new Float32Array(spectrogram.packedData);
     canvas.set(spectrogram.packedData);
 
-    const current = await commitInPlace(mgr, 1);
-    expect(current).toBe(spectrogram.packedData);
-    const painted = new Float32Array(current);
+    await commitFootprint(mgr, 1);
+    const painted = (await mgr.currentBlockState())!;
     expect(Array.from(painted)).not.toEqual(Array.from(analysed));
-    canvas.set(current);
+    canvas.set(painted);
 
     await mgr.navigateToParent();
-    expect(Array.from(mgr.currentPackedState()!)).toEqual(Array.from(analysed));
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(analysed));
     expect(Array.from(canvas)).toEqual(Array.from(analysed));
 
     await mgr.navigateToLastChild();
-    expect(Array.from(mgr.currentPackedState()!)).toEqual(Array.from(painted));
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(painted));
     expect(Array.from(canvas)).toEqual(Array.from(painted));
 
     mgr.dispose();
@@ -1671,21 +1678,19 @@ describe("HistoryManager root state alias", () => {
       label: "Re-analyse",
       spectrogram: reanalysed,
     });
-    expect(mgr.currentPackedState()).toBe(reanalysed.packedData);
     const settled = new Float32Array(reanalysed.packedData);
     canvas.set(reanalysed.packedData);
 
-    const current = await commitInPlace(mgr, 6);
-    expect(current).toBe(reanalysed.packedData);
-    const painted = new Float32Array(current);
-    canvas.set(current);
+    await commitFootprint(mgr, 6);
+    const painted = (await mgr.currentBlockState())!;
+    canvas.set(painted);
 
     await mgr.navigateToParent();
-    expect(Array.from(mgr.currentPackedState()!)).toEqual(Array.from(settled));
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(settled));
     expect(Array.from(canvas)).toEqual(Array.from(settled));
 
     await mgr.navigateToLastChild();
-    expect(Array.from(mgr.currentPackedState()!)).toEqual(Array.from(painted));
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(painted));
     expect(Array.from(canvas)).toEqual(Array.from(painted));
 
     mgr.dispose();
@@ -1980,7 +1985,10 @@ describe("HistoryManager reshaped store", () => {
     const { mgr, aId, snapId, bId, a, snapBytes, b } = await reshapedChain(files);
 
     await mgr.navigateTo(aId);
-    const aState = new Float32Array(mgr.currentPackedState()!);
+    // The tier holds the other side of the boundary, so the old-grid state
+    // is rebuilt transiently rather than read from it.
+    expect(await mgr.currentBlockState()).toBeNull();
+    const aState = new Float32Array((await mgr.reconstruct(aId)).packedData);
     expect(Array.from(aState)).toEqual(Array.from(a));
     const c = paintAt(aState, 4, 2, 7);
     const { id: cId } = await mgr.addStroke({

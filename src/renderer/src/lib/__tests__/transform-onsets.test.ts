@@ -1,8 +1,8 @@
 import { Vector2, WebGLRenderer } from "three";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { SpectrogramData, State } from "../../store/types";
-import { createMockSpectrogramData } from "../../test/mock-spectrogram";
+import { State } from "../../store/types";
+import { createMockSpectrogramData, type SeededSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState } from "../../test/mock-state";
 import { createHarnessTextures, disposeHarnessTextures, toStrokeTextures } from "../../test/render-harness";
 import { NEUTRAL_ALGORITHM } from "../constants";
@@ -61,7 +61,7 @@ describe("onset transport in the neutral transform", () => {
   // mod 2π, so an additive phase rule must cancel it — while a rule that scales
   // phase by freqRatio 0.5 (a −12 semi shift) turns it into π·(band+1), an
   // alternating 0/π scatter that destroys cross-band alignment.
-  function impulseSpec(): SpectrogramData {
+  function impulseSpec(): SeededSpectrogramData {
     const spec = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "silence" });
     for (let band = 0; band < numBands; band++) {
       const freq = spec.metadata[band * 4 + 3];
@@ -84,7 +84,7 @@ describe("onset transport in the neutral transform", () => {
   // An impulse at t0 whose bands each carry a fixed extra deviation — an
   // asymmetric transient. A reversal must conjugate the deviation; an aligned
   // impulse cannot tell, because its deviation is zero.
-  function dispersedSpec(): SpectrogramData {
+  function dispersedSpec(): SeededSpectrogramData {
     const spec = impulseSpec();
     for (let band = 0; band < numBands; band++) {
       const idx = (band * numFrames + ridgeFrame) * 4;
@@ -99,7 +99,7 @@ describe("onset transport in the neutral transform", () => {
   // that smears the skirt is measurable here, where a one-frame ridge is not:
   // the geometric magnitude interpolation kills a lone ridge at every
   // fractional read position.
-  function skirtSpec(): SpectrogramData {
+  function skirtSpec(): SeededSpectrogramData {
     const spec = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "silence" });
     for (let band = 0; band < numBands; band++) {
       const freq = spec.metadata[band * 4 + 3];
@@ -143,7 +143,7 @@ describe("onset transport in the neutral transform", () => {
   // A magnitude ramp across time in every band, with tonal phase: the dest
   // magnitude reports which source frame each dest frame read, so the read
   // map itself is measurable.
-  function rampSpec(): SpectrogramData {
+  function rampSpec(): SeededSpectrogramData {
     const spec = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "silence" });
     for (let band = 0; band < numBands; band++) {
       const freq = spec.metadata[band * 4 + 3];
@@ -162,7 +162,7 @@ describe("onset transport in the neutral transform", () => {
 
   // A sustained partial in every band: magnitude everywhere, phase advancing at
   // the band's own rate, so its second difference is zero and it reads as tonal.
-  function tonalSpec(): SpectrogramData {
+  function tonalSpec(): SeededSpectrogramData {
     const spec = createMockSpectrogramData({ numFrames, numBands, sampleRate, pattern: "silence" });
     for (let band = 0; band < numBands; band++) {
       const freq = spec.metadata[band * 4 + 3];
@@ -179,7 +179,7 @@ describe("onset transport in the neutral transform", () => {
   }
 
   // The same but with phase scattered frame to frame — band-limited noise.
-  function noiseSpec(): SpectrogramData {
+  function noiseSpec(): SeededSpectrogramData {
     const spec = tonalSpec();
     let state = 1;
     for (let band = 0; band < numBands; band++) {
@@ -243,7 +243,7 @@ describe("onset transport in the neutral transform", () => {
     algorithm: number,
     onsets: { timeSec: number; strength: number }[],
     shift: { beats?: number; semis?: number },
-    makeSpec: () => SpectrogramData,
+    makeSpec: () => SeededSpectrogramData,
     scaleTime: number,
   ): Promise<{ data: Float32Array; destMeta: Float32Array }> {
     const srcSpec = makeSpec();
@@ -285,7 +285,7 @@ describe("onset transport in the neutral transform", () => {
     onsets: { timeSec: number; strength: number }[] = [{ timeSec: t0, strength: 1 }],
     shift: { beats?: number; semis?: number } = {},
     readFrame: number | "ridge" = ridgeFrame,
-    makeSpec: () => SpectrogramData = impulseSpec,
+    makeSpec: () => SeededSpectrogramData = impulseSpec,
     scaleTime = 1,
   ): Promise<{ band: number; phase: number; freq: number; mag: number }[]> {
     const { data, destMeta } = await paintShift(algorithm, onsets, shift, makeSpec, scaleTime);

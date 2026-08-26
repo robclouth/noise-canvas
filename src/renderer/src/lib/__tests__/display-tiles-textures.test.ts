@@ -16,7 +16,6 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
-import type { SpectrogramData } from "../../store/types";
 import { DisplayTileRing, type RingView } from "../display-tiles-textures";
 import { DISPLAY_TILES_BYTES_PER_TEXEL, displayTilesBytes, tileGrid } from "../display-tiles";
 
@@ -46,7 +45,7 @@ function magToDb(mag: number): number {
 }
 
 describe("display tile ring", () => {
-  const data: SpectrogramData = createConstantQMockSpectrogramData({
+  const data = createConstantQMockSpectrogramData({
     durationSeconds: 2,
     sampleRate: 8000,
     bandsPerOctave: 4,

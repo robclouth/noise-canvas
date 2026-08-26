@@ -145,6 +145,7 @@ export interface FileRendererHandle {
   clearPreview: () => void;
   /** Reloads all textures from the current spectrogramData (used after re-analysis). */
   reloadTextures: () => void;
+  releasePackedData: () => void;
   applyStroke: () => void;
   beginStroke: () => void;
   endStroke: () => void;
@@ -439,12 +440,25 @@ const FileRendererInner = memo(
       };
     }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
 
+    // The packed values the next texture build seeds from. Captured from the
+    // spectrogram once, so releasing the spectrogram's array later does not
+    // retrigger the texture effect with nothing to build from.
+    const packedSeedRef = useRef<Float32Array | null>(null);
+    if (spectrogramData.packedData) packedSeedRef.current = spectrogramData.packedData;
+
     /**
      * Creates DataTextures from spectrogram data.
      * Used both on initial load and when reloading textures.
      */
     const createTextures = useCallback(() => {
-      const { packedData, inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
+      const { inverseMap, metadata, textureWidth, textureHeight, numBands } = spectrogramData;
+      let packedData = packedSeedRef.current;
+      if (!packedData || packedData.length !== textureWidth * textureHeight * 4) {
+        // The seed was already released; the canvas rebuilds from history.
+        console.warn("history: the packed seed was already released; the canvas needs a full restore");
+        getHistoryManager(fileId).markFboOutOfSync();
+        packedData = new Float32Array(textureWidth * textureHeight * 4);
+      }
 
       const packed = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
       packed.internalFormat = "RGBA32F";
@@ -476,7 +490,7 @@ const FileRendererInner = memo(
       return { packed, inverse, meta };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
-      spectrogramData.packedData,
+      spectrogramData,
       spectrogramData.inverseMap,
       spectrogramData.metadata,
       spectrogramData.textureWidth,
@@ -990,15 +1004,16 @@ const FileRendererInner = memo(
 
         (async () => {
           const historyManager = getHistoryManager(fileId);
+          const packed = spectrogramData.packedData;
           // Queued against stroke commits: painting within the first moments of
           // opening would otherwise append a child while the root is still being
           // written, and the root's currentPacked would then overwrite the
           // stroke's — leaving the next delta encoded against the wrong base.
           const nodeId = await serializeFileTask(fileId, async () => {
             const hadExisting = await historyManager.initialize();
-            if (hadExisting) return null;
+            if (hadExisting || !packed) return null;
             const id = await historyManager.addRootSnapshot({
-              data: spectrogramData.packedData,
+              data: packed,
               kind: "root",
               label: "Opened",
               spectrogram: spectrogramData,
@@ -1013,11 +1028,14 @@ const FileRendererInner = memo(
             }
             return id;
           });
+          // The GPU and the store hold the state now, so the analysed array
+          // is released; the local copy still feeds this first synthesis.
+          releasePackedData();
           if (nodeId === null) {
             await historyManager.restoreCurrentAudio();
             return;
           }
-          await state.synthesizeFile(fileId);
+          await state.synthesizeFile(fileId, undefined, packed);
           const updated = openFiles[fileId];
           if (nodeId && updated?.audioBuffer) {
             historyManager.setStateAudio(nodeId, updated.audioBuffer, updated.audioPeak ?? 1);
@@ -1397,6 +1415,22 @@ const FileRendererInner = memo(
       scheduleSnapshotRefresh();
     };
 
+    /**
+     * Frees the analysed packed array once the GPU holds the state: the
+     * packed texture is uploaded now, its CPU-side copy emptied, and the
+     * spectrogram's reference dropped. From here the FBO and the block store
+     * carry the state.
+     */
+    const releasePackedData = () => {
+      const live = liveTexturesRef.current;
+      const gl = glRef.current;
+      if (!live || !gl) return;
+      gl.initTexture(live.packed);
+      live.packed.image.data = new Float32Array(0);
+      packedSeedRef.current = null;
+      spectrogramData.packedData = undefined;
+    };
+
     const discardStrokePreview = (): boolean => {
       const restored = strokeRendererRef.current?.restoreRollback() ?? false;
       if (restored) {
@@ -1470,6 +1504,7 @@ const FileRendererInner = memo(
       restoreOriginal,
       clearPreview,
       reloadTextures,
+      releasePackedData,
       beginStroke,
       endStroke,
       applyStroke: () => {

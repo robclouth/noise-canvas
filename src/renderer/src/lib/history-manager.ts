@@ -4,12 +4,7 @@ import { awaitFileSynthesis, openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
 import { isManagedFilePath } from "@renderer/store/managed-path";
 import type { PhaseTurns } from "../../../main/lib/types";
-import {
-  applyPhaseTurns,
-  hasPhaseTurns,
-  phaseTurnRanges,
-  phaseTurnResidualRanges,
-} from "../../../main/lib/history-delta";
+import { hasPhaseTurns, phaseTurnRanges, phaseTurnResidualRanges } from "../../../main/lib/history-delta";
 import { audioHopBytes, editsAlongHops, type AudioHop } from "./audio-hop";
 import type { BlockStore } from "./block-store";
 import {
@@ -26,13 +21,7 @@ import { clearFileTaskQueue, drainFileTaskQueues, serializeFileTask } from "./fi
 import { historyCacheBudgets } from "./history-cache-budgets";
 import { ByteBudgetCache } from "./byte-budget-cache";
 import { host } from "./host";
-import {
-  copyCompactOverlap,
-  gatherPixelRanges,
-  mergePixelRanges,
-  pixelRangeCount,
-  scatterCompactPixelRanges,
-} from "./pixel-ranges";
+import { copyCompactOverlap, gatherPixelRanges, mergePixelRanges, pixelRangeCount } from "./pixel-ranges";
 
 const MANIFEST_FILENAME = "tree.json";
 const CHECKPOINT_INTERVAL = 20;
@@ -377,7 +366,6 @@ export class HistoryManager {
   private readonly dir: Promise<string>;
   private manifest: HistoryManifest | null = null;
   private initPromise: Promise<void> | null = null;
-  private currentPacked: Float32Array | null = null;
   private audioLru: string[] = [];
   // On-disk size of each cached render, for the audio LRU's byte budget.
   private audioBytes = new Map<string, number>();
@@ -410,7 +398,7 @@ export class HistoryManager {
   // (e.g. restore-original bypasses history); forces the next navigation to
   // upload the full state rather than a patch.
   private fboOutOfSync = false;
-  // The onset restore still reading currentPacked, if any.
+  // The onset restore still reading the packed state it was handed, if any.
   private onsetRestore: Promise<void> | null = null;
 
   constructor(fileId: string) {
@@ -718,10 +706,6 @@ export class HistoryManager {
     );
     await store.seed(opts.data);
     await this.writeManifest();
-    // Aliased, not copied: `opts.data` is the file's live packed state, and a
-    // commit writes its footprint into that array in place. The node is on
-    // disk, so navigating back to it rebuilds rather than reading the cache.
-    this.currentPacked = opts.data;
     this.lastLoadedAnchorId = id;
     this.notifyStateChange();
     return id;
@@ -755,7 +739,6 @@ export class HistoryManager {
     this.linkChild(parentId, id);
     this.manifest.nodes[id] = node;
     this.manifest.currentId = id;
-    this.currentPacked = opts.data;
     this.lastLoadedAnchorId = id;
     this.fboOutOfSync = false;
     // The packed layout changes with the new dimensions, so a patch stashed
@@ -782,31 +765,31 @@ export class HistoryManager {
       parent.dimensions.textureWidth === opts.dimensions.textureWidth &&
       parent.dimensions.textureHeight === opts.dimensions.textureHeight;
 
-    const base = this.currentPacked;
     const ranges = opts.dirtyRanges;
     let footprintPixels = 0;
     if (ranges) for (let r = 1; r < ranges.length; r += 2) footprintPixels += ranges[r];
     const texturePixels = opts.dimensions.textureWidth * opts.dimensions.textureHeight;
     // A footprint commit compares against the values it saved before the
-    // stroke; any other compares against the whole base.
-    const compact = opts.baseFootprint;
+    // stroke; any other reads them back from the block store's tier.
     const turnsIn = hasPhaseTurns(opts.turns) ? opts.turns : null;
 
     // The delta's two sides, and the painted footprint values the tier's
     // patch writes. Null when the stroke has to store whole.
     let deltaSides: { base: Float32Array; after: Float32Array; patch: Float32Array } | null = null;
     if (sameDims && ranges != null && ranges.length > 0 && footprintPixels < texturePixels * 0.5) {
-      if (compact && compact.length === footprintPixels * 4) {
-        const after =
-          opts.afterFootprint?.length === footprintPixels * 4
-            ? opts.afterFootprint
-            : opts.data
-              ? gatherPixelRanges(opts.data, ranges)
-              : null;
-        if (after) deltaSides = { base: compact, after, patch: after };
-      } else if (!compact && base && opts.data && base.length === opts.data.length) {
-        deltaSides = { base, after: opts.data, patch: gatherPixelRanges(opts.data, ranges) };
-      }
+      const compact =
+        opts.baseFootprint?.length === footprintPixels * 4
+          ? opts.baseFootprint
+          : opts.data
+            ? await this.currentRanges(ranges)
+            : null;
+      const after =
+        opts.afterFootprint?.length === footprintPixels * 4
+          ? opts.afterFootprint
+          : opts.data
+            ? gatherPixelRanges(opts.data, ranges)
+            : null;
+      if (compact && after) deltaSides = { base: compact, after, patch: after };
     }
 
     let storage: "delta" | "packed";
@@ -817,7 +800,7 @@ export class HistoryManager {
     if (deltaSides != null && ranges != null) {
       const deltaStart = performance.now();
       const { base: deltaBase, after } = deltaSides;
-      if (!(await host.analysis.historyFootprintChanged(deltaBase, after, ranges, compact != null, compact != null))) {
+      if (!(await host.analysis.historyFootprintChanged(deltaBase, after, ranges, true, true))) {
         // The stroke changed nothing, so it gets no node of its own. The
         // caller must not then write its audio against the parent's id. The
         // canvas is still the parent's, so its projection state is too.
@@ -838,14 +821,7 @@ export class HistoryManager {
         rangesForPatch = ranges;
         // A checkpoint is stored whole on disk, but its delta still carries
         // the hops to and from it in memory.
-        deltaBytes = await host.analysis.encodeHistoryDelta(
-          deltaBase,
-          after,
-          ranges,
-          compact != null,
-          compact != null,
-          turnsIn ?? undefined,
-        );
+        deltaBytes = await host.analysis.encodeHistoryDelta(deltaBase, after, ranges, true, true, turnsIn ?? undefined);
         storage = this.deltaStepsSinceLastSnap(parentId) >= CHECKPOINT_INTERVAL ? "packed" : "delta";
         diag.timing("timing", "addStroke footprint delta", performance.now() - deltaStart, {
           ranges: ranges.length / 2,
@@ -887,14 +863,6 @@ export class HistoryManager {
     this.linkChild(parentId, id);
     this.manifest.nodes[id] = node;
     this.manifest.currentId = id;
-    if (opts.data) {
-      // opts.data is either a fresh readback or the current state written in
-      // place; either way it now holds this node and no other.
-      this.currentPacked = opts.data;
-    } else if (this.currentPacked && rangesForPatch && deltaSides) {
-      scatterCompactPixelRanges(this.currentPacked, deltaSides.after, rangesForPatch);
-      if (turnsIn) applyPhaseTurns(this.currentPacked, turnsIn, false);
-    }
     if (rangesForPatch) this.nodeDirtyRanges.set(id, rangesForPatch);
     if (deltaBytes) {
       this.nodeDeltas.set(id, deltaBytes);
@@ -903,10 +871,10 @@ export class HistoryManager {
     if (opts.audioRegion) this.nodeAudioRegions.set(id, opts.audioRegion);
     if (tierResiduals != null) {
       this.manifest.overlayNodeId = id;
-    } else {
+    } else if (opts.data) {
       let tierRanges = rangesForPatch;
       if (tierRanges && turnsIn) tierRanges = mergePixelRanges(tierRanges, phaseTurnRanges(turnsIn));
-      await this.syncStoreToCurrent(parentId, tierRanges);
+      await this.syncStoreToCurrent(parentId, tierRanges, opts.data);
     }
     if (!this.manifest) return { id, isNew: true };
     // The stroke was read back from the FBO, so the two are in step again.
@@ -1007,22 +975,28 @@ export class HistoryManager {
   }
 
   /**
-   * Brings the block store's current tier in step with `currentPacked`: a
+   * Brings the block store's current tier in step with the current state: a
    * patch over `ranges` when the tier already held the state `baseId` names,
-   * a full reseed of the tier otherwise. The store keeps the root's grid, so
-   * a current state with other dimensions stays out of the tier, which then
-   * keeps the node it already held. The tier is a cache of one node's state —
-   * when a write fails, the marker goes unknown and the truth stays with the
-   * root and the deltas.
+   * a full reseed of the tier from `whole` otherwise. The store keeps the
+   * root's grid, so a current state with other dimensions stays out of the
+   * tier, which then keeps the node it already held. The tier is a cache of
+   * one node's state — when a write fails, the marker goes unknown and the
+   * truth stays with the root and the deltas.
    */
-  private async syncStoreToCurrent(baseId: string, ranges: Uint32Array | null, values?: Float32Array): Promise<void> {
+  private async syncStoreToCurrent(
+    baseId: string,
+    ranges: Uint32Array | null,
+    whole: Float32Array | null,
+    values?: Float32Array,
+  ): Promise<void> {
     const manifest = this.manifest;
-    const packed = this.currentPacked;
-    if (!manifest || !packed) return;
+    if (!manifest) return;
     const holder = this.seedHolder();
     const current = manifest.nodes[manifest.currentId];
     if (!holder || !current || !sameStoreDimensions(holder.dimensions, current.dimensions)) return;
     const patchable = manifest.overlayNodeId === baseId && ranges != null;
+    const compact = patchable && ranges ? (values ?? (whole ? gatherPixelRanges(whole, ranges) : null)) : null;
+    if (patchable ? compact == null : whole == null) return;
     try {
       const store = await this.seedBlockStore(holder);
       // Invalidated on disk before the tier changes, so a crash mid-write
@@ -1030,10 +1004,10 @@ export class HistoryManager {
       manifest.overlayNodeId = undefined;
       await this.writeManifest();
       if (this.manifest !== manifest) return;
-      if (patchable && ranges) {
-        await store.patch(ranges, values ?? gatherPixelRanges(packed, ranges));
-      } else {
-        await store.seedCurrent(packed);
+      if (patchable && ranges && compact) {
+        await store.patch(ranges, compact);
+      } else if (whole) {
+        await store.seedCurrent(whole);
       }
       await store.flush();
       if (this.manifest !== manifest) return;
@@ -1211,8 +1185,6 @@ export class HistoryManager {
    * (dimensions, inverseMap, metadata, synthesisMetadata) and stroke deltas
    * forward from the nearest full anchor reproduce the painted state.
    *
-   * Side effect: caches currentPacked so future addStroke deltas compute
-   * against the correct base.
    */
   async loadSpectrogramAtCurrent(): Promise<SpectrogramData | null> {
     await this.initialize();
@@ -1228,10 +1200,6 @@ export class HistoryManager {
     if (!fullAnchor || !fullAnchor.synthesisMetadata) return null;
 
     const { inverseMap, metadata } = await deriveSideData(fullAnchor);
-    // `packedData` is handed straight to the caller as the file's live state, so
-    // tracking it here is a second reference, not a second copy.
-    this.currentPacked = packedData;
-
     const dims = fullAnchor.dimensions;
     return {
       packedData,
@@ -1280,7 +1248,7 @@ export class HistoryManager {
       target.audioCached = false;
     }
     const { synthesizeFile } = useStore.getState();
-    void synthesizeFile(this.fileId, undefined, this.currentPacked ?? undefined);
+    void synthesizeFile(this.fileId, undefined, (await this.currentBlockState()) ?? undefined);
   }
 
   // ---------- Navigation ----------
@@ -1292,8 +1260,8 @@ export class HistoryManager {
    */
   async navigateTo(targetId: string): Promise<void> {
     // Queued against stroke commits and against other navigations: both derive
-    // their result from currentId/currentPacked and then replace them, so the
-    // one that finishes last would otherwise win regardless of which was asked
+    // their result from the current state and then replace it, so the one
+    // that finishes last would otherwise win regardless of which was asked
     // for last.
     return serializeFileTask(this.fileId, () => this.navigateToNow(targetId));
   }
@@ -1369,9 +1337,6 @@ export class HistoryManager {
             copyCompactOverlap(out, r, walked, spans);
             return out;
           };
-          // The mirror keeps the readers that still hold the whole array in
-          // step with the walk.
-          if (this.currentPacked) scatterCompactPixelRanges(this.currentPacked, walked, spans);
           // The patch writes its pixels from the state afterwards, so the
           // turns leave them out.
           if (turns.length) await applyCanvasTurns(file.rendererRef.current, cut, turns, ranges);
@@ -1424,11 +1389,10 @@ export class HistoryManager {
     // unprojected paint is its answer too — the next re-analysing stroke reads
     // it to decide whether it settles the whole file.
     file.unprojectedPaint = target.unprojectedPaint === true;
-    if (packedData) this.currentPacked = packedData;
     if (hopTierRanges && hopWalked) {
-      await this.syncStoreToCurrent(fromId, hopTierRanges, hopWalked);
-    } else if (!hopWalked) {
-      await this.syncStoreToCurrent(fromId, null);
+      await this.syncStoreToCurrent(fromId, hopTierRanges, null, hopWalked);
+    } else if (packedData) {
+      await this.syncStoreToCurrent(fromId, null, packedData);
     }
     this.scheduleManifestWrite();
     this.notifyStateChange();
@@ -1436,9 +1400,7 @@ export class HistoryManager {
     // Onsets describe the coefficients they were found in, so they move with
     // the state. Not awaited: the picture is already back, and the markers and
     // the onset grid can follow a moment later.
-    this.onsetRestore = useStore
-      .getState()
-      .restoreOnsetsForNode(this.fileId, targetId, packedData ?? this.currentPacked ?? undefined);
+    this.onsetRestore = useStore.getState().restoreOnsetsForNode(this.fileId, targetId, packedData);
 
     // Every hop that kept the audio it rewrote puts it straight back, so the
     // state's audio returns exactly — limiting and all — without a synthesis.
@@ -1452,7 +1414,7 @@ export class HistoryManager {
       // packedData is the state the FBO was just set to, so passing it skips
       // the full FBO readback.
       const { synthesizeFile } = useStore.getState();
-      void synthesizeFile(this.fileId, undefined, packedData ?? this.currentPacked ?? undefined);
+      void synthesizeFile(this.fileId, undefined, packedData);
       return;
     }
     // Cached render if present, otherwise re-synthesize in full.
@@ -1468,7 +1430,7 @@ export class HistoryManager {
       target.audioCached = false;
     }
     const { synthesizeFile } = useStore.getState();
-    void synthesizeFile(this.fileId, undefined, packedData ?? this.currentPacked ?? undefined);
+    void synthesizeFile(this.fileId, undefined, packedData);
   }
 
   /**
@@ -1480,15 +1442,6 @@ export class HistoryManager {
   markFboOutOfSync(): void {
     this.fboOutOfSync = true;
     clearCanvasPatchStash(this.fileId);
-  }
-
-  /**
-   * The packed state of the current node. Commits write their footprint into
-   * it in place and hops walk it in place, so it only changes between the
-   * file's queued tasks, and only after {@link awaitPackedReaders}.
-   */
-  currentPackedState(): Float32Array | null {
-    return this.currentPacked;
   }
 
   /**
@@ -1781,6 +1734,7 @@ export class HistoryManager {
     file.spectrogramData = spectrogramData;
     file.rendererRef.current.reloadTextures();
     file.rendererRef.current.setFBOData(packedData);
+    file.rendererRef.current.releasePackedData();
   }
 
   // ---------- Audio LRU ----------
@@ -2078,7 +2032,7 @@ export class HistoryManager {
     const anchor = this.nearestFullAnchor(currentId);
     if (!anchor?.synthesisMetadata) return;
     const layout = anchor.synthesisMetadata;
-    const packed = this.currentPacked ?? (await this.reconstruct(currentId)).packedData;
+    const packed = (await this.currentBlockState()) ?? (await this.reconstruct(currentId)).packedData;
 
     // Drop any pending debounced write — the tree is about to be rewritten.
     this.manifestWritePending = false;
@@ -2132,7 +2086,6 @@ export class HistoryManager {
     // whether the current audio matches the last save, so the dirty flag carries
     // over (a now-deleted savedNodeId still reads as "differs from saved").
 
-    this.currentPacked = packed;
     this.nodeDirtyRanges.clear();
     this.nodeAudioRegions.clear();
     this.nodeDeltas.clear();
@@ -2162,7 +2115,6 @@ export class HistoryManager {
       // ignore
     }
     this.manifest = null;
-    this.currentPacked = null;
     this.nodeDirtyRanges.clear();
     this.nodeAudioRegions.clear();
     this.nodeDeltas.clear();
@@ -2184,7 +2136,6 @@ export class HistoryManager {
     // the context an unfinished write would still be using.
     await this.flushManifestWrite();
     this.manifest = null;
-    this.currentPacked = null;
     this.nodeDirtyRanges.clear();
     this.nodeAudioRegions.clear();
     this.nodeDeltas.clear();
