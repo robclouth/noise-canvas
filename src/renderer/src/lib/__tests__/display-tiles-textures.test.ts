@@ -346,6 +346,29 @@ describe("display tile ring", () => {
     expect(expectRingMatches(ring, maxTexels, varied, 0)).toBeGreaterThan(1000);
   });
 
+  it("names the level it cuts at and the tiles whose slots are free", () => {
+    const maxTexels = 1 << 16;
+    const ring = makeRing(maxTexels);
+    expect(ring.gridLevel()).toBe(-1);
+    const canvas = makeCanvas(varied);
+    const grid = tileGrid(layout, data.numFrames, 0);
+    ring.update(gl, asSource(canvas), view(1, 0), PYRAMID_STEP);
+    const bound = ring.uniforms();
+    expect(ring.gridLevel()).toBe(0);
+    expect(bound.tileCount).toBeGreaterThan(0);
+
+    // A tile the window shows can be cut again; one sharing that slot cannot,
+    // until an aim elsewhere lets the window go.
+    expect(ring.canCutTile(bound.firstTile)).toBe(true);
+    const clashing = bound.firstTile + bound.slotCount;
+    expect(ring.canCutTile(clashing)).toBe(false);
+
+    const far = view(1, grid.tileFrames * bound.tileCount * 3);
+    ring.aim(far, PYRAMID_STEP);
+    expect(ring.uniforms().tileCount).toBe(0);
+    expect(ring.canCutTile(clashing)).toBe(true);
+  });
+
   it("costs what the budget charges it", () => {
     const maxTexels = 100_000;
     const ring = makeRing(maxTexels);

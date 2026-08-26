@@ -212,6 +212,22 @@ export class DisplayTileRing {
     return missing;
   }
 
+  /** The time step the ring's tiles are cut at, or -1 while it has no grid. */
+  gridLevel(): number {
+    return this.grid ? this.grid.level : -1;
+  }
+
+  /**
+   * True when the tile can take its slot: no tile of the bound window is
+   * showing there, so cutting cannot corrupt the picture.
+   */
+  canCutTile(tile: number): boolean {
+    if (!this.grid || this.slots === 0) return false;
+    const held = this.residency[tile % this.slots];
+    if (held === tile) return true;
+    return !(this.window.count > 0 && held >= this.window.first && held < this.window.first + this.window.count);
+  }
+
   /**
    * The file pixel ranges holding one tile's source bins, as [start, count]
    * per band, in the order `cutTileFromPacked` reads their values.

@@ -55,6 +55,7 @@ import displayFrag from "../glsl/display.frag";
 import passThroughVert from "../glsl/pass-through.vert";
 import { DEFAULT_ONSET_SENSITIVITY } from "../lib/constants";
 import { displayLevelChoice } from "../lib/display-pyramid";
+import type { DisplayTileRing } from "../lib/display-tiles-textures";
 import { getFileOnsets } from "../lib/file-onsets";
 import { useModulatorScaleLut } from "../lib/modulator-utils";
 import { getOnsetTexture, packOnsetState } from "../lib/onset-map";
@@ -454,6 +455,8 @@ const FileRendererInner = memo(
     // The effects that drop the renderer run before the window helpers are
     // declared, so they reach the disposer through a ref.
     const disposeCanvasWindowRef = useRef<(() => void) | null>(null);
+    // Ring tiles being read out of the store, keyed by level and tile.
+    const ringRequestsRef = useRef<Set<string>>(new Set());
 
     // Cleanup StrokeRenderer on unmount or when textures change
     useEffect(() => {
@@ -647,12 +650,17 @@ const FileRendererInner = memo(
       const zoom = Math.pow(2, viewZoomPower);
       const span = spectrogramData.numFrames / zoom;
       const startFrame = zoom > 1 ? viewOffset * (spectrogramData.numFrames - span) : 0;
-      tiles.update(
-        gl,
-        strokeRenderer.committedSource(),
-        { framesPerPixel, startFrame, endFrame: startFrame + span, viewportPixels: Math.max(1, viewportWidth) },
-        pyramidStepLog2,
-      );
+      const ringView = {
+        framesPerPixel,
+        startFrame,
+        endFrame: startFrame + span,
+        viewportPixels: Math.max(1, viewportWidth),
+      };
+      if (canvasCoversFile()) {
+        tiles.update(gl, strokeRenderer.committedSource(), ringView, pyramidStepLog2);
+      } else {
+        requestRingTiles(tiles, tiles.aim(ringView, pyramidStepLog2));
+      }
 
       const ring = tiles.uniforms();
       uniforms.displayTileTex.value = tiles.texture();
@@ -663,6 +671,34 @@ const FileRendererInner = memo(
       uniforms.displayTileTexels.value = ring.tileTexels;
       uniforms.displayTileBlend.value = ring.blend;
       uniforms.displayTileLevel.value = ring.level;
+    };
+
+    /**
+     * Reads the tiles the ring is missing out of the block store and cuts
+     * them in as they land. A tile whose level has moved on, or whose slot
+     * the bound window took back, is dropped: the next aim asks again.
+     */
+    const requestRingTiles = (tiles: DisplayTileRing, missing: number[]): void => {
+      if (missing.length === 0) return;
+      const level = tiles.gridLevel();
+      for (const tile of missing) {
+        const key = `${level}:${tile}`;
+        if (ringRequestsRef.current.has(key)) continue;
+        ringRequestsRef.current.add(key);
+        const ranges = tiles.tileSourcePixelRanges(tile);
+        void getHistoryManager(fileId)
+          .currentRanges(ranges)
+          .then((values) => {
+            ringRequestsRef.current.delete(key);
+            const gl = glRef.current;
+            const live = strokeRendererRef.current?.getDisplayTiles();
+            if (!values || !gl || live !== tiles) return;
+            if (tiles.gridLevel() !== level || !tiles.canCutTile(tile)) return;
+            tiles.cutTileFromPacked(gl, tile, values);
+            invalidateRef.current();
+          })
+          .catch(() => ringRequestsRef.current.delete(key));
+      }
     };
 
     /**
