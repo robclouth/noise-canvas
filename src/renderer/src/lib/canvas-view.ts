@@ -87,6 +87,42 @@ export function wholeFileCanvasView(data: {
 }
 
 /**
+ * The view's synthesis inverse map: [view frame, band] per packed pixel,
+ * padded to the view's texture. Padding pixels map to the lowest band at
+ * frame 0, the same convention the file's own map uses.
+ */
+export function canvasViewInverseMap(view: CanvasView): Float32Array {
+  const { layout, textureWidth, textureHeight } = view;
+  const out = new Float32Array(textureWidth * textureHeight * 2);
+  for (let i = 0; i < textureWidth * textureHeight; i++) {
+    out[i * 2 + 1] = layout.numBands - 1;
+  }
+  for (let band = 0; band < layout.numBands; band++) {
+    const offset = layout.metadata[band * 4];
+    const count = layout.metadata[band * 4 + 1];
+    const step = 2 ** layout.metadata[band * 4 + 2];
+    for (let k = 0; k < count; k++) {
+      const index = offset + k;
+      out[index * 2] = k * step;
+      out[index * 2 + 1] = band;
+    }
+  }
+  return out;
+}
+
+/** The view's packed content gathered from a whole-file packed array, padded to the view's texture. */
+export function composeViewContent(view: CanvasView, filePacked: Float32Array): Float32Array {
+  const out = new Float32Array(view.textureWidth * view.textureHeight * 4);
+  for (let band = 0; band < view.layout.numBands; band++) {
+    const fileStart = view.ranges[band * 2];
+    const count = view.ranges[band * 2 + 1];
+    const viewStart = view.layout.metadata[band * 4];
+    out.set(filePacked.subarray(fileStart * 4, (fileStart + count) * 4), viewStart * 4);
+  }
+  return out;
+}
+
+/**
  * File-absolute pixel ranges as the view's own pixel indices, split at band
  * edges. Null when any pixel falls outside the view, which would leave it
  * without a place in the view's textures.

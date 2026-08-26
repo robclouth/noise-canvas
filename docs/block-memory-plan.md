@@ -575,10 +575,27 @@ Exit: a 10-minute file opens, paints, undoes and exports on an 8 GB machine at
 small file; a cold-jump stroke drops no frames (measure with the Playwright
 driver).
 
-Status: step (1) in progress — `canvas-view.ts` (view layout + file↔view
-range remapping) and `block-slot-cache.ts` (paged slot store with LRU claim,
-upload / compose / copy-back over the existing patch and gather materials)
-landed with tests. Next: the StrokeRenderer refit over a whole-file view.
+Status: step (1) in progress —
+
+- `canvas-view.ts`: view layout, file↔view range remapping, view inverse map,
+  view content compose, whole-file view (keeps the file's own texture fold).
+- `block-slot-cache.ts`: paged slot store with LRU claim, upload / compose /
+  copy-back over the existing patch and gather materials.
+- StrokeRenderer renders over a view: every dest-space size, layout, metadata
+  texture and frame count reads from `this.view` (whole-file by default,
+  byte-identical — full suite green). An explicit view builds its own
+  metadata + inverse-map textures.
+- Sub-view stroke parity proven (`stroke-renderer-view.test.ts`): the real
+  transform brush over a 4-block sub-view matches the whole-file path —
+  magnitudes < 1e-5, phases < 1e-3 (interpolated reads across seeded random
+  phase jumps amplify a last-bit UV difference; bit-exactness holds only for
+  the whole-file view), zero paint outside the view. A canvas composed from
+  block slots paints and folds back byte-identically.
+
+Known sub-view gaps, deliberate until step (2): `getDirtyPixelRanges` mixes
+view UV with the file layout (whole-file only); same-file source info,
+`originalSpectrogramTex`, onset textures and beat-anchored modulator phases
+need the wrapper's translation; displays still read the canvas texture.
 
 ---
 

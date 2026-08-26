@@ -2,6 +2,7 @@ import { createNoise2D } from "simplex-noise";
 import {
   BufferAttribute,
   Camera,
+  ClampToEdgeWrapping,
   Color,
   CustomBlending,
   DataTexture,
@@ -18,6 +19,7 @@ import {
   RawShaderMaterial,
   RedFormat,
   RGBAFormat,
+  RGFormat,
   Scene,
   Texture,
   Vector2,
@@ -39,7 +41,7 @@ import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { gatherPixelRanges, pixelRangeCount } from "./pixel-ranges";
-import { wholeFileCanvasView, type CanvasView } from "./canvas-view";
+import { canvasViewInverseMap, wholeFileCanvasView, type CanvasView } from "./canvas-view";
 import { DisplayPyramid } from "./display-pyramid-textures";
 import { DisplayTileRing } from "./display-tiles-textures";
 import { ATTRACT_MODULATOR_MAP_START } from "./constants";
@@ -95,6 +97,24 @@ const FOOTPRINT_MARGIN_BINS = 4;
 // Fraction of the texture above which a stroke's footprint is written by a
 // whole-texture draw and a buffer swap, rather than folded back by a copy.
 const SWAP_FOOTPRINT_FRACTION = 0.5;
+
+function viewDataTexture(
+  data: Float32Array,
+  width: number,
+  height: number,
+  format: typeof RGBAFormat | typeof RGFormat,
+  internalFormat: "RGBA32F" | "RG32F",
+): DataTexture {
+  const texture = new DataTexture(data, width, height, format, FloatType);
+  texture.internalFormat = internalFormat;
+  texture.minFilter = NearestFilter;
+  texture.magFilter = NearestFilter;
+  texture.wrapS = ClampToEdgeWrapping;
+  texture.wrapT = ClampToEdgeWrapping;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
+}
 
 /** Thrown when the graphics device refuses the memory a stroke needs. */
 export class GpuMemoryError extends Error {
@@ -243,6 +263,7 @@ export class StrokeRenderer {
   private viewSpec: { metadata: Float32Array; numBands: number; textureWidth: number; textureHeight: number };
   private viewMetadataTex: DataTexture;
   private viewInverseMapTex: DataTexture;
+  private ownsViewTextures = false;
 
   // FBOs for ping-pong rendering
   private fbo1: WebGLRenderTarget;
@@ -325,6 +346,7 @@ export class StrokeRenderer {
     textures: StrokeTextures,
     fileId: string,
     effects: EffectsRegistry,
+    view?: CanvasView,
   ) {
     this.gl = gl;
     this.spectrogramData = spectrogramData;
@@ -341,7 +363,7 @@ export class StrokeRenderer {
     this.fboMesh = new Mesh(new PlaneGeometry(2, 2));
     this.fboScene.add(this.fboMesh);
 
-    this.view = wholeFileCanvasView(spectrogramData);
+    this.view = view ?? wholeFileCanvasView(spectrogramData);
     const { textureWidth, textureHeight } = this.view;
     this.viewSize = new Vector2(textureWidth, textureHeight);
     this.viewSpec = {
@@ -350,8 +372,22 @@ export class StrokeRenderer {
       textureWidth,
       textureHeight,
     };
-    this.viewMetadataTex = textures.metadataTex;
-    this.viewInverseMapTex = textures.inverseMapTex;
+    // A given view carries its own packed layout, so it gets its own metadata
+    // and inverse-map textures; the whole-file default shares the file's.
+    if (view) {
+      this.viewMetadataTex = viewDataTexture(view.layout.metadata, view.layout.numBands, 1, RGBAFormat, "RGBA32F");
+      this.viewInverseMapTex = viewDataTexture(
+        canvasViewInverseMap(view),
+        textureWidth,
+        textureHeight,
+        RGFormat,
+        "RG32F",
+      );
+      this.ownsViewTextures = true;
+    } else {
+      this.viewMetadataTex = textures.metadataTex;
+      this.viewInverseMapTex = textures.inverseMapTex;
+    }
     const { numBands } = spectrogramData;
 
     this.rangeScene = new Scene();
@@ -1886,8 +1922,8 @@ export class StrokeRenderer {
   } {
     return {
       packed: this.pingPong === 0 ? this.fbo1 : this.fbo2,
-      inverse: this.textures.inverseMapTex,
-      metadata: this.textures.metadataTex,
+      inverse: this.viewInverseMapTex,
+      metadata: this.viewMetadataTex,
       original: this.textures.originalPackedDataTex,
     };
   }
@@ -2113,6 +2149,10 @@ export class StrokeRenderer {
     this.rangeGeometry.dispose();
     this.rangeScene.remove(this.rangeMesh);
     this.previewRangeTex.dispose();
+    if (this.ownsViewTextures) {
+      this.viewMetadataTex.dispose();
+      this.viewInverseMapTex.dispose();
+    }
     this.displayPyramid?.dispose();
     this.displayPyramid = null;
     this.displayTiles?.dispose();
