@@ -312,6 +312,13 @@ function installManagerEnv(): { fbo: { last: Float32Array | null }; files: Map<s
         if (key.startsWith(`${path}/`)) store.delete(key);
       }
     }),
+    access: vi.fn(async (path: string) => {
+      if (store.has(path)) return;
+      for (const key of store.keys()) {
+        if (key.startsWith(`${path}/`)) return;
+      }
+      throw new Error(`ENOENT: ${path}`);
+    }),
     readdir: vi.fn(async (path: string) => {
       const names = new Set<string>();
       for (const key of store.keys()) {
@@ -1757,6 +1764,137 @@ describe("HistoryManager under concurrent work", () => {
     expect(manifestPath).toBeDefined();
     expect(JSON.parse(files.get(manifestPath!) as string).currentId).toBe(aId);
 
+    delete fakeOpenFiles["f1"];
+  });
+});
+
+describe("HistoryManager reshaped store", () => {
+  const w = 8;
+  const h = 4;
+  const w2 = 10;
+  const dims1 = {
+    textureWidth: w,
+    textureHeight: h,
+    numFrames: w,
+    numBands: h,
+    numChannels: 1,
+    sampleRate: 44100,
+    minFreq: 20,
+    bandsPerOctave: 12,
+  };
+  const dims2 = { ...dims1, textureWidth: w2, numFrames: w2 };
+
+  /** Paints pixels `start..start+count` of `base` with a lossy fill keyed by `salt`. */
+  function paintAt(base: Float32Array, start: number, count: number, salt: number): Float32Array {
+    const out = new Float32Array(base);
+    for (let p = start; p < start + count; p++) {
+      for (let c = 0; c < 4; c++) out[p * 4 + c] = ((p * 7 + c + salt) % 89) / 89 + salt * 0.011;
+    }
+    return out;
+  }
+
+  /** Root, a stroke, then a re-analysis on a wider grid, then a stroke on it. */
+  async function reshapedChain(files: Map<string, string | Uint8Array>) {
+    const spectrogram = makeSpectrogram(lossyFill(w, h, 0), w, h);
+    const { file } = installPatchRenderer(w, h, spectrogram);
+    clearAllHistoryManagers();
+
+    const mgr = getHistoryManager("f1");
+    const rootId = await mgr.addRootSnapshot({
+      data: spectrogram.packedData,
+      kind: "root",
+      label: "root",
+      spectrogram,
+    });
+    const rootBytes = new Float32Array(spectrogram.packedData);
+    const a = paintAt(spectrogram.packedData, 2, 3, 1);
+    const { id: aId } = await mgr.addStroke({
+      data: a,
+      label: "A",
+      dimensions: dims1,
+      dirtyRanges: new Uint32Array([2, 3]),
+    });
+    expect(files.has(`/userdata/history/f1/${rootId}.packed.zst`)).toBe(false);
+
+    const reanalysed = makeSpectrogram(lossyFill(w2, h, 5), w2, h);
+    file.spectrogramData = reanalysed;
+    const snapId = await mgr.addSnapshot({
+      data: reanalysed.packedData,
+      kind: "reanalyze",
+      label: "Re-analyse",
+      spectrogram: reanalysed,
+    });
+    const snapBytes = new Float32Array(reanalysed.packedData);
+
+    const b = paintAt(snapBytes, 2, 3, 6);
+    const { id: bId } = await mgr.addStroke({
+      data: b,
+      label: "B",
+      dimensions: dims2,
+      dirtyRanges: new Uint32Array([2, 3]),
+    });
+    return { mgr, rootId, aId, snapId, bId, rootBytes, a, snapBytes, b };
+  }
+
+  it("moves the seed to a re-analysis and demotes the old root to a file", async () => {
+    const { files } = installManagerEnv();
+    const { mgr, rootId, aId, snapId, rootBytes, a, snapBytes, b } = await reshapedChain(files);
+
+    // The old root now has its own file; the re-analysis has none — it is the seed.
+    expect(files.has(`/userdata/history/f1/${rootId}.packed.zst`)).toBe(true);
+    expect(files.has(`/userdata/history/f1/${snapId}.packed.zst`)).toBe(false);
+    const manifest = JSON.parse(files.get("/userdata/history/f1/tree.json") as string) as {
+      seedNodeId?: string;
+      overlayNodeId?: string;
+    };
+    expect(manifest.seedNodeId).toBe(snapId);
+
+    expect(Array.from((await mgr.reconstruct(rootId)).packedData)).toEqual(Array.from(rootBytes));
+    expect(Array.from((await mgr.reconstruct(aId)).packedData)).toEqual(Array.from(a));
+    expect(Array.from((await mgr.reconstruct(snapId)).packedData)).toEqual(Array.from(snapBytes));
+
+    // Strokes on the new grid keep the tier current over the new seed.
+    const open = getBlockStore("f1");
+    expect(open).not.toBeNull();
+    const store = await open!;
+    expect(Array.from(await store.readAll())).toEqual(Array.from(b));
+    expect(Array.from(await store.readAllRoot())).toEqual(Array.from(snapBytes));
+
+    mgr.dispose();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it("leaves the tier alone for a stroke on the old grid after an undo across the boundary", async () => {
+    const { files } = installManagerEnv();
+    const { mgr, aId, snapId, bId, a, snapBytes, b } = await reshapedChain(files);
+
+    await mgr.navigateTo(aId);
+    const aState = new Float32Array(mgr.currentPackedState()!);
+    expect(Array.from(aState)).toEqual(Array.from(a));
+    const c = paintAt(aState, 4, 2, 7);
+    const { id: cId } = await mgr.addStroke({
+      data: c,
+      label: "C",
+      dimensions: dims1,
+      dirtyRanges: new Uint32Array([4, 2]),
+    });
+
+    // The tier still holds the re-analysis side, and the marker still says so.
+    const open = getBlockStore("f1");
+    expect(open).not.toBeNull();
+    const store = await open!;
+    expect(Array.from(await store.readAll())).toEqual(Array.from(b));
+    expect(Array.from(await store.readAllRoot())).toEqual(Array.from(snapBytes));
+    const manifest = JSON.parse(files.get("/userdata/history/f1/tree.json") as string) as {
+      seedNodeId?: string;
+      overlayNodeId?: string;
+    };
+    expect(manifest.overlayNodeId).toBe(bId);
+    expect(manifest.seedNodeId).toBe(snapId);
+
+    expect(Array.from((await mgr.reconstruct(cId)).packedData)).toEqual(Array.from(c));
+
+    mgr.dispose();
     delete fakeOpenFiles["f1"];
   });
 });

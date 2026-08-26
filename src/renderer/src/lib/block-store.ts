@@ -163,7 +163,7 @@ export class BlockStore {
     for (let index = 0; index < this.grid.blockCount; index++) {
       const bytes = await this.backend.read(index);
       if (!bytes) throw new Error(`block ${index} was never written`);
-      scatterCompactPixelRanges(out, await this.codec.decode(bytes), this.blockRanges(index));
+      scatterCompactPixelRanges(out, this.checked(index, await this.codec.decode(bytes)), this.blockRanges(index));
     }
     return out;
   }
@@ -263,8 +263,17 @@ export class BlockStore {
   private async load(index: number): Promise<Float32Array> {
     const bytes = (await this.overlay?.read(index)) ?? (await this.backend.read(index));
     if (!bytes) throw new Error(`block ${index} was never written`);
-    const block = await this.codec.decode(bytes);
+    const block = this.checked(index, await this.codec.decode(bytes));
     this.clean.set(String(index), block);
+    return block;
+  }
+
+  /** Refuses a block whose size does not fit this store's grid, so blocks cut for another grid can never be misread as this one's. */
+  private checked(index: number, block: Float32Array): Float32Array {
+    const expected = pixelRangeCount(this.blockRanges(index)) * 4;
+    if (block.length !== expected) {
+      throw new Error(`block ${index} holds ${block.length} floats, expected ${expected}`);
+    }
     return block;
   }
 }

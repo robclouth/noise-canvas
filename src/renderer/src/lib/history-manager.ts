@@ -104,6 +104,9 @@ interface HistoryManifest {
   // disk. A patch may build on the tier only when this names the exact state
   // it extends; anything else re-seeds the tier whole. Absent when unknown.
   overlayNodeId?: string;
+  // History anchor whose packed state is the block store's seed, so it has no
+  // snapshot file of its own. Absent means the root.
+  seedNodeId?: string;
   nodes: Record<string, HistoryNode>;
 }
 
@@ -799,7 +802,7 @@ export class HistoryManager {
       synthesisMetadata: synthesisMetadataFromSpectrogram(opts.spectrogram),
     };
 
-    await this.writeFullSnapshot(id, opts.data);
+    await this.reshapeStoreTo(node, opts.data);
     if (!this.manifest) return id;
 
     this.linkChild(parentId, id);
@@ -959,33 +962,70 @@ export class HistoryManager {
 
   // ---------- Full-snapshot I/O ----------
 
-  private async writeFullSnapshot(nodeId: string, packed: Float32Array): Promise<void> {
-    const dir = await this.ensureDir();
-    await writePackedCompressed(this.packedPath(dir, nodeId), packed);
-  }
-
   /**
-   * The root's packed state, which lives as the block store's seed. Histories
-   * written before the store keep it as a snapshot file beside the deltas, so
-   * a missing store falls back to that.
+   * The packed state of the anchor that lives as the block store's seed.
+   * Histories written before the store keep it as a snapshot file beside the
+   * deltas, so a store that is missing or cut for another grid falls back to
+   * that.
    */
-  private async readRootPacked(root: HistoryNode, dir: string): Promise<Float32Array> {
+  private async readSeedPacked(holder: HistoryNode, dir: string): Promise<Float32Array> {
     try {
-      return await (await this.rootBlockStore(root)).readAllRoot();
+      return await (await this.seedBlockStore(holder)).readAllRoot();
     } catch {
-      return await readPackedCompressed(this.packedPath(dir, root.id));
+      return await readPackedCompressed(this.packedPath(dir, holder.id));
     }
   }
 
-  private rootBlockStore(root: HistoryNode): Promise<BlockStore> {
+  /** The anchor whose packed state is the block store's seed. */
+  private seedHolder(): HistoryNode | null {
+    if (!this.manifest) return null;
+    return this.manifest.nodes[this.manifest.seedNodeId ?? this.manifest.rootId] ?? null;
+  }
+
+  private seedBlockStore(holder: HistoryNode): Promise<BlockStore> {
     const open = getBlockStore(this.fileId);
     if (open) return open;
-    const { textureWidth, textureHeight, numFrames, numBands, sampleRate } = root.dimensions;
+    const { textureWidth, textureHeight, numFrames, numBands, sampleRate } = holder.dimensions;
     return openBlockStore(
       this.fileId,
-      { numBands, metadata: bandMetadataOf(root) },
+      { numBands, metadata: bandMetadataOf(holder) },
       { numFrames, sampleRate, texelCount: textureWidth * textureHeight },
     );
+  }
+
+  /**
+   * Rebuilds the block store over `node`'s grid with `packed` as its seed.
+   * The anchor whose state was the old seed is written out as its own
+   * snapshot file first, so every anchor stays reconstructable.
+   */
+  private async reshapeStoreTo(node: HistoryNode, packed: Float32Array): Promise<void> {
+    const manifest = this.manifest;
+    const layout = node.synthesisMetadata;
+    if (!manifest || !layout) throw new Error(`HistoryManager: node ${node.id} has no band layout`);
+    const holder = this.seedHolder();
+    const dir = await this.ensureDir();
+    if (holder) {
+      const path = this.packedPath(dir, holder.id);
+      const demoted = await host.fs.access(path).then(
+        () => true,
+        () => false,
+      );
+      if (!demoted) {
+        const store = await this.seedBlockStore(holder);
+        await writePackedCompressed(path, await store.readAllRoot());
+      }
+    }
+    await destroyBlockStore(this.fileId);
+    const dims = node.dimensions;
+    const store = await openBlockStore(
+      this.fileId,
+      { numBands: dims.numBands, metadata: bandMetadataRows(layout, dims.numBands) },
+      { numFrames: dims.numFrames, sampleRate: dims.sampleRate, texelCount: dims.textureWidth * dims.textureHeight },
+    );
+    await store.seed(packed);
+    if (this.manifest !== manifest) return;
+    manifest.seedNodeId = node.id;
+    manifest.overlayNodeId = node.id;
   }
 
   /**
@@ -1001,12 +1041,12 @@ export class HistoryManager {
     const manifest = this.manifest;
     const packed = this.currentPacked;
     if (!manifest || !packed) return;
-    const root = manifest.nodes[manifest.rootId];
+    const holder = this.seedHolder();
     const current = manifest.nodes[manifest.currentId];
-    if (!root || !current || !sameStoreDimensions(root.dimensions, current.dimensions)) return;
+    if (!holder || !current || !sameStoreDimensions(holder.dimensions, current.dimensions)) return;
     const patchable = manifest.overlayNodeId === baseId && ranges != null;
     try {
-      const store = await this.rootBlockStore(root);
+      const store = await this.seedBlockStore(holder);
       // Invalidated on disk before the tier changes, so a crash mid-write
       // cannot leave a torn tier that still reads as current.
       manifest.overlayNodeId = undefined;
@@ -1053,8 +1093,8 @@ export class HistoryManager {
     const anchor = chain[0];
     const dir = await this.dir;
     let packed =
-      anchor.id === this.manifest.rootId
-        ? await this.readRootPacked(anchor, dir)
+      anchor.id === (this.manifest.seedNodeId ?? this.manifest.rootId)
+        ? await this.readSeedPacked(anchor, dir)
         : await readPackedCompressed(this.packedPath(dir, anchor.id));
 
     for (let i = 1; i < chain.length; i++) {
@@ -1997,6 +2037,7 @@ export class HistoryManager {
 
     this.manifest.rootId = currentId;
     this.manifest.overlayNodeId = currentId;
+    this.manifest.seedNodeId = undefined;
     this.manifest.nodes = { [currentId]: current };
     // savedNodeId is left untouched: purging on-disk history doesn't change
     // whether the current audio matches the last save, so the dirty flag carries

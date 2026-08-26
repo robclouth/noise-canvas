@@ -400,6 +400,14 @@ describe("BlockStore", () => {
     expect(decodes).toBe(1);
   });
 
+  it("refuses a block whose bytes were cut for another grid", async () => {
+    const { grid, backend } = await seeded();
+    backend.blocks.set(0, await rawCodec.encode(new Float32Array(3)));
+    const cold = new BlockStore(grid, backend, { codec: rawCodec });
+    await expect(cold.read([0])).rejects.toThrow(/expected/);
+    await expect(cold.readAllRoot()).rejects.toThrow(/expected/);
+  });
+
   it("refuses a block that was never written", async () => {
     const grid = makeGrid();
     const store = new BlockStore(grid, memoryBackend(), { codec: rawCodec });
