@@ -12,7 +12,8 @@ import {
 } from "three";
 
 import { ANALYSIS_MAX_TEXTURE_SIZE } from "./constants";
-import { DecimateDraw, type DecimateInstance } from "./display-decimate";
+import type { CanvasView } from "./canvas-view";
+import { clampToSourceBins, DecimateDraw, type CommittedSource, type DecimateInstance } from "./display-decimate";
 import type { BandLayout } from "./band-layout";
 import { sourceBinRanges } from "./display-pyramid";
 import {
@@ -130,7 +131,7 @@ export class DisplayTileRing {
    * the ones the ring does not already hold. Levels the pyramid holds at or
    * below `pyramidStepLog2` are left to it, and the ring empties.
    */
-  update(gl: WebGLRenderer, canvas: Texture, canvasWidth: number, view: RingView, pyramidStepLog2: number): void {
+  update(gl: WebGLRenderer, source: CommittedSource, view: RingView, pyramidStepLog2: number): void {
     const choice = ringLevelChoice(view.framesPerPixel);
     if (choice.level >= pyramidStepLog2) {
       this.window = { first: 0, count: 0 };
@@ -159,37 +160,47 @@ export class DisplayTileRing {
     for (let tile = this.window.first; tile < this.window.first + this.window.count; tile++) {
       const slot = tile % slots;
       if (this.residency[slot] === tile) continue;
-      this.appendTile(instances, tile);
+      this.appendTile(instances, tile, source.view);
       this.residency[slot] = tile;
     }
-    this.draw.run(gl, this.target, canvas, canvasWidth, "canvas", instances);
+    this.draw.run(gl, this.target, source.texture, source.view.textureWidth, "canvas", instances);
   }
 
   /**
-   * Re-cuts the bins `changed` covers in every tile the ring holds. Tiles the
-   * change misses are left alone. While no window is held the change cannot
-   * be cut, so every slot is marked stale instead.
+   * Re-cuts the bins `changed` covers in every tile the ring holds, with
+   * `changed` in the source view's own pixel space. Tiles the change misses
+   * are left alone. While no window is held the change cannot be cut, so
+   * every slot is marked stale instead.
    */
-  refreshFromCanvas(gl: WebGLRenderer, canvas: Texture, canvasWidth: number, changed: PixelRangeList): void {
+  refreshFromCanvas(gl: WebGLRenderer, source: CommittedSource, changed: PixelRangeList): void {
     if (!this.grid) return;
     if (this.window.count === 0) {
       this.residency.fill(-1);
       return;
     }
-    const spans = sourceBinRanges(this.layout, changed.ranges.subarray(0, changed.count * 2));
+    const viewSpans = sourceBinRanges(source.view.layout, changed.ranges.subarray(0, changed.count * 2));
+    const spans = new Uint32Array(this.layout.numBands * 2);
+    for (let band = 0; band < this.layout.numBands; band++) {
+      if (viewSpans[band * 2 + 1] <= viewSpans[band * 2]) continue;
+      spans[band * 2] = source.view.bandK0[band] + viewSpans[band * 2];
+      spans[band * 2 + 1] = source.view.bandK0[band] + viewSpans[band * 2 + 1];
+    }
     const instances: DecimateInstance[] = [];
     for (let tile = this.window.first; tile < this.window.first + this.window.count; tile++) {
       if (this.residency[tile % this.slots] !== tile) continue;
-      this.appendTile(instances, tile, spans);
+      this.appendTile(instances, tile, source.view, spans);
     }
-    this.draw.run(gl, this.target, canvas, canvasWidth, "canvas", instances);
+    this.draw.run(gl, this.target, source.texture, source.view.textureWidth, "canvas", instances);
   }
 
   /**
-   * Adds the instances filling one tile's slot from the canvas, restricted to
-   * the source bin spans `spans` names when it is given.
+   * Adds the instances filling one tile's slot from the committed source,
+   * restricted to the source bin spans `spans` names when it is given.
+   * Cutting a whole tile the source view does not fully cover would leave
+   * part of its slot stale, so that throws; a refresh clamps instead — a tap
+   * outside the view was never painted, so its encoded value stands.
    */
-  private appendTile(instances: DecimateInstance[], tile: number, spans?: Uint32Array): void {
+  private appendTile(instances: DecimateInstance[], tile: number, source: CanvasView, spans?: Uint32Array): void {
     const grid = this.grid;
     if (!grid) return;
     const slot = tile % this.slots;
@@ -209,12 +220,19 @@ export class DisplayTileRing {
         start = Math.max(start, Math.ceil(spans[band * 2] / decimation));
         end = Math.min(end, Math.ceil(spans[band * 2 + 1] / decimation));
       }
+      const first = source.bandK0[band];
+      const clamped = clampToSourceBins(start, end, decimation, first, first + source.layout.metadata[band * 4 + 1]);
+      if (!spans && end > start && (clamped.start !== start || clamped.end !== end)) {
+        throw new Error("the committed source does not cover the ring window");
+      }
+      start = clamped.start;
+      end = clamped.end;
       if (end <= start) continue;
 
       instances.push({
         destStart: slot * grid.tileTexels + grid.metadata[band * 4] + (start - base),
         destCount: end - start,
-        srcStart: this.layout.metadata[band * 4] + start * decimation,
+        srcStart: source.layout.metadata[band * 4] + start * decimation - first,
         decimation,
       });
     }

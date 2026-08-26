@@ -42,6 +42,7 @@ import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { gatherPixelRanges, pixelRangeCount } from "./pixel-ranges";
 import { canvasViewInverseMap, wholeFileCanvasView, type CanvasView } from "./canvas-view";
+import type { CommittedSource } from "./display-decimate";
 import { DisplayPyramid } from "./display-pyramid-textures";
 import { DisplayTileRing } from "./display-tiles-textures";
 import { ATTRACT_MODULATOR_MAP_START } from "./constants";
@@ -1589,10 +1590,9 @@ export class StrokeRenderer {
     this.fboDataEpoch++;
     if (!this.displayPyramid && !this.displayTiles) return;
     const ranges = changed ?? this.fullRange();
-    const canvas = this.getDisplayTexture();
-    const width = this.view.textureWidth;
-    this.displayPyramid?.refreshFromCanvas(this.gl, canvas, width, ranges);
-    this.displayTiles?.refreshFromCanvas(this.gl, canvas, width, ranges);
+    const source = this.committedSource();
+    this.displayPyramid?.refreshFromCanvas(this.gl, source, ranges);
+    this.displayTiles?.refreshFromCanvas(this.gl, source, ranges);
   }
 
   /** The display's committed levels, built once the canvas holds the file. */
@@ -1931,6 +1931,11 @@ export class StrokeRenderer {
   /** The committed spectrogram texture. */
   getDisplayTexture(): Texture {
     return (this.pingPong === 0 ? this.fbo1 : this.fbo2).texture;
+  }
+
+  /** The committed canvas texels together with the view that lays them out. */
+  committedSource(): CommittedSource {
+    return { texture: this.getDisplayTexture(), view: this.view };
   }
 
   /**

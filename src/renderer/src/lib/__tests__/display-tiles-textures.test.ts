@@ -16,6 +16,8 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
+import { wholeFileCanvasView } from "../canvas-view";
+import type { CommittedSource } from "../display-decimate";
 import { DisplayTileRing, type RingView } from "../display-tiles-textures";
 import { DISPLAY_TILES_BYTES_PER_TEXEL, displayTilesBytes, tileGrid } from "../display-tiles";
 
@@ -51,6 +53,8 @@ describe("display tile ring", () => {
     bandsPerOctave: 4,
   });
   const layout = { numBands: data.numBands, metadata: data.metadata };
+  const wholeView = wholeFileCanvasView(data);
+  const asSource = (canvas: Texture): CommittedSource => ({ texture: canvas, view: wholeView });
   // Far above any level under test, so the ring is never left to the pyramid.
   const PYRAMID_STEP = 30;
 
@@ -173,7 +177,7 @@ describe("display tile ring", () => {
     const maxTexels = 1 << 16;
     const ring = makeRing(maxTexels);
     const canvas = makeCanvas(varied);
-    ring.update(gl, canvas, data.textureWidth, view(1, 0), PYRAMID_STEP);
+    ring.update(gl, asSource(canvas), view(1, 0), PYRAMID_STEP);
     expect(expectRingMatches(ring, maxTexels, varied, 0)).toBeGreaterThan(1000);
   });
 
@@ -181,7 +185,7 @@ describe("display tile ring", () => {
     const maxTexels = 1 << 16;
     const ring = makeRing(maxTexels);
     const canvas = makeCanvas(varied);
-    ring.update(gl, canvas, data.textureWidth, view(16, 0), PYRAMID_STEP);
+    ring.update(gl, asSource(canvas), view(16, 0), PYRAMID_STEP);
     expect(ring.uniforms().level).toBe(4);
     expect(expectRingMatches(ring, maxTexels, varied, 4)).toBeGreaterThan(1000);
   });
@@ -192,13 +196,13 @@ describe("display tile ring", () => {
     const canvas = makeCanvas(varied);
     const grid = tileGrid(layout, data.numFrames, 0);
 
-    ring.update(gl, canvas, data.textureWidth, view(1, grid.tileFrames * 8), PYRAMID_STEP);
+    ring.update(gl, asSource(canvas), view(1, grid.tileFrames * 8), PYRAMID_STEP);
     const before = ring.uniforms();
     const kept = readRing(ring, maxTexels).slice(0, before.tileTexels * before.slotCount * 4);
 
     // Far enough to leave the window by exactly one tile.
     const panned = (before.firstTile + before.tileCount) * grid.tileFrames;
-    ring.update(gl, canvas, data.textureWidth, view(1, panned), PYRAMID_STEP);
+    ring.update(gl, asSource(canvas), view(1, panned), PYRAMID_STEP);
     const after = ring.uniforms();
     expect(after.firstTile).toBeGreaterThan(before.firstTile);
     expect(expectRingMatches(ring, maxTexels, varied, 0)).toBeGreaterThan(1000);
@@ -222,9 +226,9 @@ describe("display tile ring", () => {
     const ring = makeRing(maxTexels);
     const canvas = makeCanvas(varied);
     const grid = tileGrid(layout, data.numFrames, 0);
-    ring.update(gl, canvas, data.textureWidth, view(1, grid.tileFrames * 8), PYRAMID_STEP);
+    ring.update(gl, asSource(canvas), view(1, grid.tileFrames * 8), PYRAMID_STEP);
     const before = ring.uniforms();
-    ring.update(gl, canvas, data.textureWidth, view(1, grid.tileFrames * 8 + 4), PYRAMID_STEP);
+    ring.update(gl, asSource(canvas), view(1, grid.tileFrames * 8 + 4), PYRAMID_STEP);
     expect(ring.uniforms().firstTile).toBe(before.firstTile);
   });
 
@@ -233,7 +237,7 @@ describe("display tile ring", () => {
     const ring = makeRing(maxTexels);
     const packed = Float32Array.from(varied);
     const canvas = makeCanvas(packed);
-    ring.update(gl, canvas, data.textureWidth, view(1, 0), PYRAMID_STEP);
+    ring.update(gl, asSource(canvas), view(1, 0), PYRAMID_STEP);
 
     const grid = tileGrid(layout, data.numFrames, 0);
     const before = readRing(ring, maxTexels);
@@ -250,7 +254,7 @@ describe("display tile ring", () => {
     // Every texel changes, but only bins 100 to 132 of one band are declared.
     for (let i = 0; i < packed.length; i += 4) packed[i] *= 3;
     canvas.needsUpdate = true;
-    ring.refreshFromCanvas(gl, canvas, data.textureWidth, {
+    ring.refreshFromCanvas(gl, asSource(canvas), {
       ranges: Uint32Array.of(bandStart + 100, 32),
       count: 1,
     });
@@ -272,21 +276,21 @@ describe("display tile ring", () => {
     const ring = makeRing(maxTexels);
     const packed = Float32Array.from(varied);
     const canvas = makeCanvas(packed);
-    ring.update(gl, canvas, data.textureWidth, view(1, 0), PYRAMID_STEP);
+    ring.update(gl, asSource(canvas), view(1, 0), PYRAMID_STEP);
     expect(ring.uniforms().tileCount).toBeGreaterThan(0);
 
     // Zoomed out to where the pyramid serves, the ring empties its window.
-    ring.update(gl, canvas, data.textureWidth, view(16, 0), 4);
+    ring.update(gl, asSource(canvas), view(16, 0), 4);
     expect(ring.uniforms().tileCount).toBe(0);
 
     for (let i = 0; i < packed.length; i += 4) packed[i] *= 3;
     canvas.needsUpdate = true;
-    ring.refreshFromCanvas(gl, canvas, data.textureWidth, {
+    ring.refreshFromCanvas(gl, asSource(canvas), {
       ranges: Uint32Array.of(0, data.textureWidth * data.textureHeight),
       count: 1,
     });
 
-    ring.update(gl, canvas, data.textureWidth, view(1, 0), PYRAMID_STEP);
+    ring.update(gl, asSource(canvas), view(1, 0), PYRAMID_STEP);
     expect(expectRingMatches(ring, maxTexels, packed, 0)).toBeGreaterThan(1000);
   });
 
@@ -299,7 +303,7 @@ describe("display tile ring", () => {
   it("leaves the view to the pyramid when its bins are already that fine", () => {
     const ring = makeRing(1 << 16);
     const canvas = makeCanvas(varied);
-    ring.update(gl, canvas, data.textureWidth, view(16, 0), 4);
+    ring.update(gl, asSource(canvas), view(16, 0), 4);
     expect(ring.uniforms().tileCount).toBe(0);
     expect(ring.texture()).toBeNull();
   });
@@ -307,7 +311,7 @@ describe("display tile ring", () => {
   it("holds nothing when it is too small for a viewport", () => {
     const ring = makeRing(256);
     const canvas = makeCanvas(varied);
-    ring.update(gl, canvas, data.textureWidth, view(1, 0), PYRAMID_STEP);
+    ring.update(gl, asSource(canvas), view(1, 0), PYRAMID_STEP);
     expect(ring.uniforms().tileCount).toBe(0);
     expect(ring.texture()).toBeNull();
   });

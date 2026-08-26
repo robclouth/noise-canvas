@@ -191,8 +191,7 @@ function makeView(gl: WebGLRenderer, data: SpectrogramData, effects: EffectsRegi
     const startFrame = zoom > 1 ? offset * (data.numFrames - span) : 0;
     ring.update(
       gl,
-      renderer.getDisplayTexture(),
-      data.textureWidth,
+      renderer.committedSource(),
       { framesPerPixel: span / WIDTH, startFrame, endFrame: startFrame + span, viewportPixels: WIDTH },
       // Above every level under test, so the ring is never left to the pyramid.
       30,

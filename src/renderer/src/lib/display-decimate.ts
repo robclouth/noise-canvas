@@ -14,6 +14,7 @@ import {
 } from "three";
 
 import displayMagsGlsl from "../glsl/display-mags.glsl";
+import type { CanvasView } from "./canvas-view";
 
 const QUAD_POSITIONS = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
 const QUAD_INDICES = new Uint16Array([0, 1, 2, 0, 2, 3]);
@@ -26,6 +27,26 @@ export type SourcePixels = "levelDb" | "canvas" | "chunk";
 
 /** One instance of the decimate draw: destination bins, their first source bin, and the source stride. */
 export type DecimateInstance = { destStart: number; destCount: number; srcStart: number; decimation: number };
+
+/** A texture holding committed packed texels over `view`'s span, laid out by the view. */
+export type CommittedSource = { texture: Texture; view: CanvasView };
+
+/**
+ * Clamps a run of decimated bins to the ones whose source tap
+ * `bin * decimation` lies inside the source bins [firstBin, endBin).
+ */
+export function clampToSourceBins(
+  start: number,
+  end: number,
+  decimation: number,
+  firstBin: number,
+  endBin: number,
+): { start: number; end: number } {
+  return {
+    start: Math.max(start, Math.ceil(firstBin / decimation)),
+    end: Math.min(end, Math.ceil(endBin / decimation)),
+  };
+}
 
 /**
  * Reads one destination bin per fragment from its source bin, `decimation`

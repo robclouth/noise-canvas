@@ -12,7 +12,14 @@ import {
 } from "three";
 
 import type { BandLayout } from "./band-layout";
-import { DecimateDraw, type DecimateInstance, type SourcePixels } from "./display-decimate";
+import type { CanvasView } from "./canvas-view";
+import {
+  clampToSourceBins,
+  DecimateDraw,
+  type CommittedSource,
+  type DecimateInstance,
+  type SourcePixels,
+} from "./display-decimate";
 import {
   displayPyramidLevels,
   levelBinSpan,
@@ -116,40 +123,59 @@ export class DisplayPyramid {
   }
 
   /**
-   * Re-encodes the bins `changed` covers straight off the canvas, which holds
-   * the packed layout, and carries them up the stack.
+   * Re-encodes the bins `changed` covers straight off the committed source,
+   * which holds the packed layout of its view, and carries them up the stack.
+   * `changed` is in the source view's own pixel space. A bin whose source tap
+   * falls outside the view is left as it stands: the canvas never painted its
+   * tap, so its encoded value is already current.
    */
-  refreshFromCanvas(gl: WebGLRenderer, canvas: Texture, canvasWidth: number, changed: PixelRangeList): void {
-    const spans = sourceBinRanges(this.layout, changed.ranges.subarray(0, changed.count * 2));
-    const instances = this.finestInstances(spans);
+  refreshFromCanvas(gl: WebGLRenderer, source: CommittedSource, changed: PixelRangeList): void {
+    const { view } = source;
+    const viewSpans = sourceBinRanges(view.layout, changed.ranges.subarray(0, changed.count * 2));
+    const spans = new Uint32Array(this.layout.numBands * 2);
+    for (let band = 0; band < this.layout.numBands; band++) {
+      if (viewSpans[band * 2 + 1] <= viewSpans[band * 2]) continue;
+      spans[band * 2] = view.bandK0[band] + viewSpans[band * 2];
+      spans[band * 2 + 1] = view.bandK0[band] + viewSpans[band * 2 + 1];
+    }
+    const instances = this.finestInstances(spans, view);
     if (instances.length === 0) return;
-    this.run(gl, 0, canvas, canvasWidth, "canvas", instances);
+    this.run(gl, 0, source.texture, view.textureWidth, "canvas", instances);
     this.seeded = true;
     this.decimateUpward(gl, spans);
   }
 
   /** The instances writing every band's source bin span into the finest level. */
-  private finestInstances(spans: Uint32Array): DecimateInstance[] {
+  private finestInstances(spans: Uint32Array, source?: CanvasView): DecimateInstance[] {
     const instances: DecimateInstance[] = [];
     for (let band = 0; band < this.layout.numBands; band++) {
       if (spans[band * 2 + 1] <= spans[band * 2]) continue;
-      const instance = this.finestInstance(band, spans[band * 2], spans[band * 2 + 1]);
+      const instance = this.finestInstance(band, spans[band * 2], spans[band * 2 + 1], source);
       if (instance) instances.push(instance);
     }
     return instances;
   }
 
-  /** The instance writing one band's source bins [start, end) into the finest level. */
-  private finestInstance(band: number, start: number, end: number): DecimateInstance | null {
+  /**
+   * The instance writing one band's source bins [start, end) into the finest
+   * level, read from `source`'s layout when it is given.
+   */
+  private finestInstance(band: number, start: number, end: number, source?: CanvasView): DecimateInstance | null {
     const level = this.levels[0];
     const sourceStep = this.layout.metadata[band * 4 + 2];
-    const span = levelBinSpan(level, band, sourceStep, start, end);
-    if (span.end <= span.start) return null;
     const decimation = levelDecimation(level, sourceStep, band);
+    let span = levelBinSpan(level, band, sourceStep, start, end);
+    let srcStart = this.layout.metadata[band * 4] + span.start * decimation;
+    if (source) {
+      const first = source.bandK0[band];
+      span = clampToSourceBins(span.start, span.end, decimation, first, first + source.layout.metadata[band * 4 + 1]);
+      srcStart = source.layout.metadata[band * 4] + span.start * decimation - first;
+    }
+    if (span.end <= span.start) return null;
     return {
       destStart: level.metadata[band * 4] + span.start,
       destCount: span.end - span.start,
-      srcStart: this.layout.metadata[band * 4] + span.start * decimation,
+      srcStart,
       decimation,
     };
   }

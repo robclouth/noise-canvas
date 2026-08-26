@@ -2,9 +2,16 @@ import {
   ClampToEdgeWrapping,
   DataTexture,
   FloatType,
+  GLSL3,
+  Mesh,
   NearestFilter,
+  OrthographicCamera,
+  PlaneGeometry,
+  RawShaderMaterial,
   RGBAFormat,
   RGFormat,
+  Scene,
+  Texture,
   Vector2,
   WebGLRenderer,
   WebGLRenderTarget,
@@ -17,6 +24,8 @@ import { createMockState } from "../../test/mock-state";
 import { blockGrid, blockPixelRanges, blockTexels, PACKED_BYTES_PER_TEXEL, type BlockGrid } from "../block-grid";
 import { BlockSlotCache } from "../block-slot-cache";
 import { canvasViewOf, composeViewContent, type CanvasView } from "../canvas-view";
+import { levelDecimation } from "../display-pyramid";
+import { DisplayTileRing } from "../display-tiles-textures";
 import { gatherPixelRanges } from "../pixel-ranges";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 
@@ -154,6 +163,54 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     return renderer;
   }
 
+  /** The RG pairs of a display texture, read back through a full-precision pass. */
+  function readDisplayTexture(tex: Texture, width: number, height: number): Float32Array {
+    const material = new RawShaderMaterial({
+      uniforms: { srcTex: { value: tex } },
+      vertexShader: /* glsl */ `
+        in vec3 position;
+        in vec2 uv;
+        out vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = vec4(position.xy, 0.0, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        precision highp float;
+        uniform sampler2D srcTex;
+        in vec2 vUv;
+        layout(location = 0) out vec4 outColor;
+        void main() {
+          outColor = vec4(texture(srcTex, vUv).rg, 0.0, 1.0);
+        }
+      `,
+      glslVersion: GLSL3,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const scene = new Scene();
+    scene.add(new Mesh(new PlaneGeometry(2, 2), material));
+    const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+    camera.position.z = 1;
+    const target = new WebGLRenderTarget(width, height, {
+      format: RGBAFormat,
+      type: FloatType,
+      minFilter: NearestFilter,
+      magFilter: NearestFilter,
+      depthBuffer: false,
+      stencilBuffer: false,
+    });
+    gl.setRenderTarget(target);
+    gl.render(scene, camera);
+    gl.setRenderTarget(null);
+    const pixels = new Float32Array(width * height * 4);
+    gl.readRenderTargetPixels(target, 0, 0, width, height, pixels);
+    target.dispose();
+    material.dispose();
+    return pixels;
+  }
+
   it("commits the same coefficients through a sub-view as through the whole file", async () => {
     const state = createMockState();
 
@@ -239,5 +296,84 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     const roundTripped = new Float32Array(target.width * target.height * 4);
     gl.readRenderTargetPixels(target, 0, 0, target.width, target.height, roundTripped);
     expect(firstDifference(roundTripped, painted, view.texels * 4)).toBe(-1);
+  });
+
+  it("cuts the same display pyramid bins and ring tiles through a sub-view", () => {
+    const whole = new StrokeRenderer(gl, data, strokeTextures, "parity", effects);
+    whole.initialize();
+    whole.setFBOData(data.packedData);
+    disposers.push(() => whole.dispose());
+    const sub = subViewRenderer();
+    sub.setFBOData(composeViewContent(view, data.packedData));
+
+    // Pyramid level 0: every bin whose tap lies inside the view matches.
+    const level = whole.getDisplayPyramid()!.levels[0];
+    const wholeLevel = readDisplayTexture(
+      whole.getDisplayPyramid()!.texture(0)!,
+      level.textureWidth,
+      level.textureHeight,
+    );
+    const subLevel = readDisplayTexture(sub.getDisplayPyramid()!.texture(0)!, level.textureWidth, level.textureHeight);
+    let compared = 0;
+    let nonzero = 0;
+    let mismatchAt = -1;
+    for (let band = 0; band < view.layout.numBands && mismatchAt === -1; band++) {
+      const decimation = levelDecimation(level, data.metadata[band * 4 + 2], band);
+      const first = view.bandK0[band];
+      const start = Math.ceil(first / decimation);
+      const end = Math.ceil((first + view.layout.metadata[band * 4 + 1]) / decimation);
+      for (let bin = start; bin < end; bin++) {
+        const at = (level.metadata[band * 4] + bin) * 4;
+        if (subLevel[at] !== wholeLevel[at] || subLevel[at + 1] !== wholeLevel[at + 1]) {
+          mismatchAt = at;
+          break;
+        }
+        compared++;
+        if (wholeLevel[at] !== 0) nonzero++;
+      }
+    }
+    expect(mismatchAt, `first pyramid difference at float ${mismatchAt}`).toBe(-1);
+    expect(compared).toBeGreaterThan(1000);
+    expect(nonzero).toBeGreaterThan(0);
+
+    // The tile ring cut over the view span: identical tiles from both sources.
+    const fileLayout = { numBands: data.numBands, metadata: data.metadata };
+    const ringTexels = 1 << 16;
+    const wholeRing = new DisplayTileRing(fileLayout, data.numFrames, { maxTexels: ringTexels });
+    const subRing = new DisplayTileRing(fileLayout, data.numFrames, { maxTexels: ringTexels });
+    disposers.push(() => {
+      wholeRing.dispose();
+      subRing.dispose();
+    });
+    const mid = Math.round((view.startFrame + view.endFrame) / 2);
+    const ringView = { framesPerPixel: 1, startFrame: mid - 128, endFrame: mid + 128, viewportPixels: 256 };
+    wholeRing.update(gl, whole.committedSource(), ringView, 30);
+    subRing.update(gl, sub.committedSource(), ringView, 30);
+    const bound = wholeRing.uniforms();
+    expect(bound.tileCount).toBeGreaterThan(0);
+    expect(subRing.uniforms()).toEqual(bound);
+    const width = Math.min(8192, ringTexels);
+    const height = Math.ceil(ringTexels / width);
+    const wholePixels = readDisplayTexture(wholeRing.texture()!, width, height);
+    const subPixels = readDisplayTexture(subRing.texture()!, width, height);
+    expect(firstDifference(subPixels, wholePixels, wholePixels.length)).toBe(-1);
+    expect(wholePixels.some((value) => value !== 0)).toBe(true);
+  });
+
+  it("refuses to cut ring tiles the source view does not cover", () => {
+    const sub = subViewRenderer();
+    sub.setFBOData(composeViewContent(view, data.packedData));
+    const ring = new DisplayTileRing({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, {
+      maxTexels: 1 << 16,
+    });
+    disposers.push(() => ring.dispose());
+    expect(() =>
+      ring.update(
+        gl,
+        sub.committedSource(),
+        { framesPerPixel: 1, startFrame: 0, endFrame: 256, viewportPixels: 256 },
+        30,
+      ),
+    ).toThrow("does not cover");
   });
 });

@@ -622,8 +622,7 @@ const FileRendererInner = memo(
       const startFrame = zoom > 1 ? viewOffset * (spectrogramData.numFrames - span) : 0;
       tiles.update(
         gl,
-        strokeRenderer.getDisplayTexture(),
-        spectrogramData.textureWidth,
+        strokeRenderer.committedSource(),
         { framesPerPixel, startFrame, endFrame: startFrame + span, viewportPixels: Math.max(1, viewportWidth) },
         pyramidStepLog2,
       );
