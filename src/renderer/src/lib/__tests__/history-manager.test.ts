@@ -387,14 +387,12 @@ function installPatchRenderer(
           for (let i = 0; i + 1 < r.length; i += 2) canvas.set(d.subarray(r[i] * 4, (r[i] + r[i + 1]) * 4), r[i] * 4);
         },
         patchFBODataCompact: (values: Float32Array, r: Uint32Array) => {
-          const whole = new Float32Array(canvas.length);
-          scatterCompactPixelRanges(whole, values, r);
-          patches.push({ data: whole, ranges: r });
           let at = 0;
           for (let i = 0; i + 1 < r.length; i += 2) {
             canvas.set(values.subarray(at, at + r[i + 1] * 4), r[i] * 4);
             at += r[i + 1] * 4;
           }
+          patches.push({ data: new Float32Array(canvas), ranges: r });
         },
         applyPhaseTurns: (flat: ArrayLike<number>) => {
           turns.push(Array.from(flat));
@@ -1072,7 +1070,7 @@ describe("HistoryManager hops", () => {
 
   it("walks the kept stroke deltas both ways instead of rebuilding from disk", async () => {
     const { files } = installManagerEnv();
-    const { patches } = installPatchRenderer(w, h);
+    const { canvas } = installPatchRenderer(w, h);
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
     const a = paint(root, 2, 3, 1);
@@ -1086,6 +1084,7 @@ describe("HistoryManager hops", () => {
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
     await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: ra });
     await mgr.addStroke({ data: b, label: "B", dimensions, dirtyRanges: rb });
+    canvas.set(b);
 
     // Counts only history reads: hops may read tier blocks to keep them
     // current, but must never rebuild state from the deltas on disk.
@@ -1095,13 +1094,13 @@ describe("HistoryManager hops", () => {
       ).nodeFs.readFile.mock.calls.filter(([path]) => path.startsWith("/userdata/history/")).length;
     const readsBefore = reads();
     await mgr.navigateToParent(); // B → A
-    expect(Array.from(patches.at(-1)!.data)).toEqual(Array.from(a));
+    expect(Array.from(canvas)).toEqual(Array.from(a));
     await mgr.navigateToParent(); // A → root
-    expect(Array.from(patches.at(-1)!.data)).toEqual(Array.from(root));
+    expect(Array.from(canvas)).toEqual(Array.from(root));
     await mgr.navigateToLastChild(); // root → A
-    expect(Array.from(patches.at(-1)!.data)).toEqual(Array.from(a));
+    expect(Array.from(canvas)).toEqual(Array.from(a));
     await mgr.navigateToLastChild(); // A → B
-    expect(Array.from(patches.at(-1)!.data)).toEqual(Array.from(b));
+    expect(Array.from(canvas)).toEqual(Array.from(b));
     expect(reads()).toBe(readsBefore);
     expect(files.size).toBeGreaterThan(0);
 
@@ -1190,7 +1189,7 @@ describe("HistoryManager hops", () => {
 
   it("takes a stroke written into the current state in place, and hops it in place", async () => {
     installManagerEnv();
-    const { patches } = installPatchRenderer(w, h);
+    installPatchRenderer(w, h);
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
     const mgr = getHistoryManager("f1");
@@ -1220,7 +1219,6 @@ describe("HistoryManager hops", () => {
     await mgr.navigateToParent();
     expect(mgr.currentPackedState()).toBe(current);
     expect(Array.from(current)).toEqual(Array.from(rootBytes));
-    expect(patches.at(-1)!.data).toBe(current);
 
     await mgr.navigateToLastChild();
     expect(mgr.currentPackedState()).toBe(current);
@@ -1254,9 +1252,9 @@ describe("HistoryManager hops", () => {
     let releaseOnsets: (() => void) | null = null;
     restoreOnsetsForNode.mockImplementationOnce(() => new Promise<void>((resolve) => (releaseOnsets = resolve)));
     let releaseSynth: (() => void) | null = null;
-    const codec = (window as unknown as { audioAnalysis: { applyHistoryDeltas: ReturnType<typeof vi.fn> } })
+    const codec = (window as unknown as { audioAnalysis: { applyHistoryDeltasWindowed: ReturnType<typeof vi.fn> } })
       .audioAnalysis;
-    const walks = vi.spyOn(codec, "applyHistoryDeltas");
+    const walks = vi.spyOn(codec, "applyHistoryDeltasWindowed");
 
     await mgr.navigateToParent(); // starts the (held) onset restore
     awaitFileSynthesis.mockImplementationOnce(() => new Promise<void>((resolve) => (releaseSynth = resolve)));
@@ -1341,13 +1339,14 @@ describe("HistoryManager hops", () => {
 
   it("uploads a stashed commit patch with the navigation's own ranges", async () => {
     installManagerEnv();
-    const { patches, full } = installPatchRenderer(w, h);
+    const { patches, full, canvas } = installPatchRenderer(w, h);
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
     const a = paint(root, 2, 3, 1);
     const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
     await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([2, 3]) });
+    canvas.set(a);
 
     setCanvasPatchStash("f1", { data: a, ranges: new Uint32Array([6, 1]), turns: [] });
     await mgr.navigateToParent();

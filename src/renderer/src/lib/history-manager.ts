@@ -21,7 +21,13 @@ import { clearFileTaskQueue, drainFileTaskQueues, serializeFileTask } from "./fi
 import { historyCacheBudgets } from "./history-cache-budgets";
 import { ByteBudgetCache } from "./byte-budget-cache";
 import { host } from "./host";
-import { float32BitsEqual, gatherPixelRanges, mergePixelRanges } from "./pixel-ranges";
+import {
+  copyCompactOverlap,
+  gatherPixelRanges,
+  mergePixelRanges,
+  pixelRangeCount,
+  scatterCompactPixelRanges,
+} from "./pixel-ranges";
 
 const MANIFEST_FILENAME = "tree.json";
 const CHECKPOINT_INTERVAL = 20;
@@ -1044,20 +1050,18 @@ export class HistoryManager {
   }
 
   /**
-   * The current state's pixels over `spans`, derived by walking the hops'
-   * deltas from `fromId` over the tier's own values rather than gathering
-   * from the in-RAM state. Null when the tier does not hold the base state or
-   * a hop's delta is unknown. A result that disagrees with the packed state
-   * means a stale tier, so the packed state wins and the walk reports it.
+   * The target state's pixels over `spans`, derived by walking the hops'
+   * deltas from `fromId` over the tier's own values — bit-pattern arithmetic,
+   * so both directions are exact. Null when the tier does not hold the base
+   * state or a hop's delta is unknown; callers then rebuild in full.
    */
-  private async walkTierValues(fromId: string, spans: Uint32Array): Promise<Float32Array | null> {
+  private async walkTierValues(fromId: string, targetId: string, spans: Uint32Array): Promise<Float32Array | null> {
     const manifest = this.manifest;
-    const packed = this.currentPacked;
-    if (!manifest || !packed || manifest.overlayNodeId !== fromId) return null;
-    const current = manifest.nodes[manifest.currentId];
+    if (!manifest || manifest.overlayNodeId !== fromId) return null;
+    const target = manifest.nodes[targetId];
     const holder = this.seedHolder();
-    if (!holder || !current || !sameStoreDimensions(holder.dimensions, current.dimensions)) return null;
-    const hops = this.hopsBetween(fromId, manifest.currentId);
+    if (!holder || !target || !sameStoreDimensions(holder.dimensions, target.dimensions)) return null;
+    const hops = this.hopsBetween(fromId, targetId);
     if (!hops) return null;
     const ids = [...hops.up, ...hops.down];
     if (!ids.length) return null;
@@ -1071,19 +1075,14 @@ export class HistoryManager {
     try {
       const store = await this.seedBlockStore(holder);
       const values = await store.readRanges(spans);
-      const dims = current.dimensions;
-      const walked = await host.analysis.applyHistoryDeltasWindowed(
+      const dims = target.dimensions;
+      return await host.analysis.applyHistoryDeltasWindowed(
         values,
         spans,
         deltas,
         inverts,
         dims.textureWidth * dims.textureHeight,
       );
-      if (!float32BitsEqual(walked, gatherPixelRanges(packed, spans))) {
-        console.warn("history: the tier's delta walk disagrees with the packed state");
-        return null;
-      }
-      return walked;
     } catch (error) {
       console.warn("history: the tier's delta walk failed", error);
       return null;
@@ -1281,24 +1280,6 @@ export class HistoryManager {
     if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
     const fromId = this.manifest.currentId;
 
-    // Walk the hops' deltas over the current state — bit-pattern arithmetic,
-    // so round-trips are exact — and failing that rebuild from the nearest
-    // checkpoint on disk.
-    let packedData: Float32Array | undefined;
-    {
-      try {
-        packedData = (await this.reconstructByHops(fromId, targetId)) ?? (await this.reconstruct(targetId)).packedData;
-      } catch (error) {
-        // Closing the file deletes the tree under a rebuild already in
-        // flight, so its reads failing is the close, not a broken history.
-        if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
-        throw error;
-      }
-      // Closing the file purges the manifest and the on-disk tree; the
-      // reconstruction that was already running has nothing left to restore to.
-      if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
-    }
-
     // Only rebuild textures and swap spectrogramData when the full-snapshot
     // anchor has actually changed (i.e. we crossed a resize/reanalyze boundary).
     // For typical undo/redo within a single analysis, the file's existing
@@ -1306,60 +1287,86 @@ export class HistoryManager {
     const anchor = this.nearestFullAnchor(targetId);
     let hopRegion: UvRegion | null = null;
     let hopTierRanges: Uint32Array | null = null;
-    if (anchor && anchor.id !== this.lastLoadedAnchorId) {
-      await this.restoreSpectrogramFromFull(anchor, packedData);
-      if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
-      this.lastLoadedAnchorId = anchor.id;
-    } else {
+    let hopWalked: Float32Array | null = null;
+    let packedData: Float32Array | undefined;
+
+    if (!(anchor && anchor.id !== this.lastLoadedAnchorId)) {
       // When every hop between here and the target is a stroke whose dirty
       // ranges are known, only those texture rows differ from what the FBO
-      // already holds — upload just them. A commit's patch still waiting in
-      // the stash names pixels the FBO also misses, so they go in the same
-      // upload.
+      // already holds — upload just them, from a delta walk over the tier. A
+      // commit's patch still waiting in the stash names pixels the FBO also
+      // misses, so they go in the same upload.
       let ranges = this.fboOutOfSync ? null : this.pathDirtyRanges(fromId, targetId);
-      const stash = takeCanvasPatchStash(this.fileId);
+      const stash = ranges ? takeCanvasPatchStash(this.fileId) : null;
       if (ranges && stash) ranges = mergePixelRanges(ranges, stash.ranges);
       // Each hop's phase turns go on the canvas as operations, in walking
       // order, with the stash's first; the pixels an undone turn cannot
       // subtract back exactly come with the patch.
       const turns = ranges ? await this.pathTurns(fromId, targetId) : null;
-      if (!turns) ranges = null;
       if (ranges && turns) {
         for (const stashed of stash?.turns ?? []) turns.unshift({ turns: stashed, invert: false });
         for (const turn of turns) {
           if (turn.invert) ranges = mergePixelRanges(ranges, phaseTurnResidualRanges(turn.turns));
         }
-      }
-      const restoreStart = performance.now();
-      if (ranges && turns) {
-        // The turns change phase outside the uploaded ranges, so the tier's
-        // patch has to cover their spans as well.
-        hopTierRanges = ranges;
-        for (const turn of turns) hopTierRanges = mergePixelRanges(hopTierRanges, phaseTurnRanges(turn.turns));
-        // The patch writes its pixels from the state afterwards, so the turns
-        // leave them out.
-        if (turns.length) {
-          const source = packedData;
-          await applyCanvasTurns(file.rendererRef.current, (r) => gatherPixelRanges(source, r), turns, ranges);
-        }
+        // The turns change phase outside the uploaded ranges, so the walk and
+        // the tier's patch cover their spans as well.
+        let spans = ranges;
+        for (const turn of turns) spans = mergePixelRanges(spans, phaseTurnRanges(turn.turns));
+        hopWalked = await this.walkTierValues(fromId, targetId, spans);
         if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
-        file.rendererRef.current.patchFBOData(packedData, ranges);
-        if (file.spectrogramData) {
-          hopRegion =
-            this.pathAudioRegion(this.manifest.currentId, targetId) ??
-            packedRangesToUvRegion(
-              ranges,
-              file.spectrogramData.synthesisMetadata,
-              file.spectrogramData.numFrames,
-              file.spectrogramData.numBands,
-            );
+        if (hopWalked) {
+          const restoreStart = performance.now();
+          hopTierRanges = spans;
+          const walked = hopWalked;
+          const cut = (r: Uint32Array): Float32Array => {
+            const out = new Float32Array(pixelRangeCount(r) * 4);
+            copyCompactOverlap(out, r, walked, spans);
+            return out;
+          };
+          // The mirror keeps the readers that still hold the whole array in
+          // step with the walk.
+          if (this.currentPacked) scatterCompactPixelRanges(this.currentPacked, walked, spans);
+          // The patch writes its pixels from the state afterwards, so the
+          // turns leave them out.
+          if (turns.length) await applyCanvasTurns(file.rendererRef.current, cut, turns, ranges);
+          if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
+          file.rendererRef.current.patchFBODataCompact(cut(ranges), ranges);
+          if (file.spectrogramData) {
+            hopRegion =
+              this.pathAudioRegion(this.manifest.currentId, targetId) ??
+              packedRangesToUvRegion(
+                ranges,
+                file.spectrogramData.synthesisMetadata,
+                file.spectrogramData.numFrames,
+                file.spectrogramData.numBands,
+              );
+          }
+          diag.timing("timing", "navigateTo FBO upload", performance.now() - restoreStart, { mode: "patch" });
         }
-      } else {
-        file.rendererRef.current.setFBOData(packedData);
       }
-      diag.timing("timing", "navigateTo FBO upload", performance.now() - restoreStart, {
-        mode: ranges ? "patch" : "full",
-      });
+    }
+
+    if (!hopWalked) {
+      // A dimension change, unknown hops, or a tier that does not hold the
+      // base state: rebuild the whole target state from disk and upload it.
+      try {
+        packedData = (await this.reconstruct(targetId)).packedData;
+      } catch (error) {
+        // Closing the file deletes the tree under a rebuild already in
+        // flight, so its reads failing is the close, not a broken history.
+        if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
+        throw error;
+      }
+      if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
+      if (anchor && anchor.id !== this.lastLoadedAnchorId) {
+        await this.restoreSpectrogramFromFull(anchor, packedData);
+        if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
+        this.lastLoadedAnchorId = anchor.id;
+      } else {
+        const restoreStart = performance.now();
+        file.rendererRef.current.setFBOData(packedData);
+        diag.timing("timing", "navigateTo FBO upload", performance.now() - restoreStart, { mode: "full" });
+      }
     }
     this.fboOutOfSync = false;
     // The FBO now holds the target state; a patch stashed against the old
@@ -1371,11 +1378,11 @@ export class HistoryManager {
     // unprojected paint is its answer too — the next re-analysing stroke reads
     // it to decide whether it settles the whole file.
     file.unprojectedPaint = target.unprojectedPaint === true;
-    // packedData is a fresh rebuild or the current array walked in place.
-    this.currentPacked = packedData;
-    if (hopTierRanges) {
-      const walked = await this.walkTierValues(fromId, hopTierRanges);
-      await this.syncStoreToCurrent(fromId, hopTierRanges, walked ?? undefined);
+    if (packedData) this.currentPacked = packedData;
+    if (hopTierRanges && hopWalked) {
+      await this.syncStoreToCurrent(fromId, hopTierRanges, hopWalked);
+    } else if (!hopWalked) {
+      await this.syncStoreToCurrent(fromId, null);
     }
     this.scheduleManifestWrite();
     this.notifyStateChange();
@@ -1383,7 +1390,9 @@ export class HistoryManager {
     // Onsets describe the coefficients they were found in, so they move with
     // the state. Not awaited: the picture is already back, and the markers and
     // the onset grid can follow a moment later.
-    this.onsetRestore = useStore.getState().restoreOnsetsForNode(this.fileId, targetId, packedData);
+    this.onsetRestore = useStore
+      .getState()
+      .restoreOnsetsForNode(this.fileId, targetId, packedData ?? this.currentPacked ?? undefined);
 
     // Every hop that kept the audio it rewrote puts it straight back, so the
     // state's audio returns exactly — limiting and all — without a synthesis.
@@ -1397,7 +1406,7 @@ export class HistoryManager {
       // packedData is the state the FBO was just set to, so passing it skips
       // the full FBO readback.
       const { synthesizeFile } = useStore.getState();
-      void synthesizeFile(this.fileId, undefined, packedData);
+      void synthesizeFile(this.fileId, undefined, packedData ?? this.currentPacked ?? undefined);
       return;
     }
     // Cached render if present, otherwise re-synthesize in full.
@@ -1413,7 +1422,7 @@ export class HistoryManager {
       target.audioCached = false;
     }
     const { synthesizeFile } = useStore.getState();
-    void synthesizeFile(this.fileId, undefined, packedData);
+    void synthesizeFile(this.fileId, undefined, packedData ?? this.currentPacked ?? undefined);
   }
 
   /**
@@ -1579,39 +1588,6 @@ export class HistoryManager {
       this.nodeDeltas.set(id, bytes);
       return bytes;
     } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Builds the target state from the current one by walking the hops'
-   * deltas — subtracted going up, added going down — in one pass over the
-   * packed array. Null when a hop has no delta, which leaves the rebuild from
-   * the nearest snapshot on disk.
-   */
-  private async reconstructByHops(fromId: string, toId: string): Promise<Float32Array | null> {
-    const base = this.currentPacked;
-    const hops = this.hopsBetween(fromId, toId);
-    if (!base || !hops) return null;
-    const ids = [...hops.up, ...hops.down];
-    if (!ids.length) return null;
-    const deltas: Uint8Array[] = [];
-    for (const id of ids) {
-      const bytes = await this.nodeDelta(id);
-      if (!bytes) return null;
-      deltas.push(bytes);
-    }
-    if (!this.manifest) return null;
-    const inverts = ids.map((_, i) => i < hops.up.length);
-    const start = performance.now();
-    try {
-      // Walked in place: the array stops being `fromId`'s state and becomes
-      // the target's, which the caller records in the cache.
-      const packed = await host.analysis.applyHistoryDeltas(base, base, deltas, inverts);
-      diag.timing("timing", "navigateTo delta hops", performance.now() - start, { hops: ids.length });
-      return packed;
-    } catch (error) {
-      console.error("history: walking the stroke deltas failed", error);
       return null;
     }
   }

@@ -134,7 +134,7 @@ export interface FilesState {
    */
   commitStroke: (fileId: string, snapshot: StrokeCommitSnapshot, data: Float32Array) => Promise<CommitOutcome | null>;
   loadCachedAudio: (fileId: string, audioPath: string, peak: number) => Promise<boolean>;
-  restoreOnsetsForNode: (fileId: string, nodeId: string, packedData: Float32Array) => Promise<void>;
+  restoreOnsetsForNode: (fileId: string, nodeId: string, packedData?: Float32Array) => Promise<void>;
   exportHistory: () => Promise<void>;
   exportHistoryBranch: (nodeId: string) => Promise<void>;
   exportHistoryBranchToLive: (nodeId: string) => Promise<void>;
@@ -2321,7 +2321,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
    * before they were stored, or one whose file has gone, is detected once and
    * then stored, so a history heals as it is used.
    */
-  restoreOnsetsForNode: async (fileId: string, nodeId: string, packedData: Float32Array): Promise<void> => {
+  restoreOnsetsForNode: async (fileId: string, nodeId: string, packedData?: Float32Array): Promise<void> => {
     const file = openFiles[fileId];
     if (!file?.spectrogramData) return;
     const historyManager = getHistoryManager(fileId);
@@ -2336,8 +2336,15 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
 
       const spectrogramData = file.spectrogramData;
+      // Without stored onsets the coefficients are walked in full, from
+      // whichever whole copy is cheapest to come by.
+      const packed =
+        packedData ??
+        (await getHistoryManager(fileId).currentBlockState()) ??
+        (await file.rendererRef?.current?.getFBOData());
+      if (!packed) return;
       const result = await host.analysis.detectOnsets(
-        packedData,
+        packed,
         {
           numBands: spectrogramData.numBands,
           numChannels: spectrogramData.numChannels,
