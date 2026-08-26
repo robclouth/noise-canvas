@@ -838,7 +838,7 @@ When zoomed in far enough, the pitch legend turns into a piano keyboard so you c
 
 On the **time legend** along the bottom:
 
-- **Click** – set the playback start position, snapped to the grid.
+- **Click** – set the playback start position, snapped to the grid. The play state stays as it is: while playing, playback skips there and carries on.
 - **Drag** – select that stretch of time across every frequency, which sets the loop region and moves the playback start to its beginning.
 
 Zoom and scroll are remembered per file across restarts, and files in a [stem group](#stem-groups) with **Sync view** on share all four: time zoom, time scroll, pitch zoom, pitch scroll.

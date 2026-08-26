@@ -21,7 +21,6 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
   const gridSwing = useStore((state) => state.gridSwing);
   const snapTime = useStore((state) => state.snapTime);
   const setFilePlaybackStartTime = useStore((state) => state.setFilePlaybackStartTime);
-  const togglePlayback = useStore((state) => state.togglePlayback);
   const isPlaying = useStore((state) => state.isPlaying);
   const activeFileId = useStore((state) => state.activeFileId);
   const setPlaybackTime = useStore((state) => state.setPlaybackTime);
@@ -89,7 +88,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
       }
     };
 
-    const handleWindowMouseUp = async (event: MouseEvent) => {
+    const handleWindowMouseUp = (event: MouseEvent) => {
       if (dragStartTimeRef.current === null) return;
       const startTime = dragStartTimeRef.current;
       dragStartTimeRef.current = null;
@@ -120,15 +119,12 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
           setFilePlaybackStartTime(fileId, loopStart);
         }
       } else {
-        // It was a plain click — set playback position
+        // A plain click moves the play marker and never changes the play
+        // state: playing skips there and keeps going, stopped stays stopped.
         writeLoopRegion(null);
         useStore.getState().setFileSelection(fileId, null);
         setFilePlaybackStartTime(fileId, startTime);
-        if (activeFileId === fileId && isPlaying) {
-          setPlaybackTime(startTime);
-        } else if (activeFileId === fileId) {
-          await togglePlayback();
-        }
+        if (activeFileId === fileId && isPlaying) setPlaybackTime(startTime);
       }
     };
 
@@ -138,7 +134,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
       window.removeEventListener("mousemove", handleWindowMouseMove);
       window.removeEventListener("mouseup", handleWindowMouseUp);
     };
-  }, [file, fileId, getTimeFromX, setFilePlaybackStartTime, activeFileId, isPlaying, setPlaybackTime, togglePlayback]);
+  }, [file, fileId, getTimeFromX, setFilePlaybackStartTime, activeFileId, isPlaying, setPlaybackTime]);
 
   useEffect(() => {
     const draw = () => {
@@ -217,6 +213,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
   return (
     <Box
       ref={legendRef}
+      data-time-legend
       style={{
         width: "100%",
         height: 15,
