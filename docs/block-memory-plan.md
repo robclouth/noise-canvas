@@ -385,10 +385,25 @@ The store now carries the current state as well, on the copy-on-write shape
   own snapshot file, so every anchor stays reconstructable and no state is
   ever stored twice.
 
-Remaining: the reader migration (`readCurrentPackedData` consumers, commit
-synthesis windows, export, save — each with a parity test before the
-whole-file array is removed), the per-block inverse map, and the
-renderer-heap exit measurement.
+The commit now runs windowed (2026-08-26): the addon's `commitStroke` accepts
+a view — a buffer holding only a frame span of the file, block-aligned, with
+every packed access translated through a per-band origin — and validates each
+pass's reach against it before touching anything, so a view that falls short
+rejects with the buffer untouched. Tail turns come back unapplied
+(`tailApplied: false`); the caller shifts them with the addon's own float
+arithmetic and collects the residuals. Byte-for-byte parity with the
+whole-file commit is pinned in the addon suite (audio, patch, tails,
+residuals, onsets, levels), and `commit-view.ts` maps the view's gather and
+scatter on the renderer side, falling back to the whole state if the addon
+refuses the view. Measured live on the 120 s file: the same brush stroke
+committed windowed in 191 ms against 1.4–1.8 s for a whole-file pass, and the
+current tier followed the stroke and the undo hop. Export and save turned out
+to read the audio channels, not the packed state — nothing to migrate there.
+
+Remaining: the in-place packed truth itself — the stroke-commit base and
+`addStroke`/hop walks working per block instead of on one whole-file array,
+and the texture uploads reading the store transiently — then the per-block
+inverse map, and the renderer-heap exit measurement.
 
 ---
 
