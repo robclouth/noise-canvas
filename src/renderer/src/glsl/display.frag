@@ -41,6 +41,20 @@ uniform sampler2D previewTex;
 uniform sampler2D previewBinRangesTex;
 uniform bool previewActive;
 
+// The canvas holds the committed state over a block-aligned frame span of the
+// file, laid out by its own metadata; these place that span on the file's
+// timeline. The preview's bin ranges are in the same view-local bins.
+uniform sampler2D canvasMetadataTex;
+uniform float canvasFrameCount;
+uniform float canvasStartFrame;
+
+// File time UV as the canvas view's own UV; x leaves [0, 1] outside the span.
+// The whole-file view short-circuits so its UV stays bit-exact.
+vec2 canvasViewUv(vec2 uv) {
+    if (canvasStartFrame == 0.0 && canvasFrameCount == sourceFrameCount) return uv;
+    return vec2((uv.x * sourceFrameCount - canvasStartFrame) / canvasFrameCount, uv.y);
+}
+
 // The committed picture as two levels of the display pyramid, in dB, with the
 // weight of the coarser one. Each level carries its own band layout, so a bin
 // index means something different in each. With displayPyramidActive off the
@@ -76,8 +90,10 @@ vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, iv
 }
 
 vec4 sampleDisplayInterp(vec2 uv) {
+    vec2 viewUv = canvasViewUv(uv);
+    if (viewUv.x < 0.0 || viewUv.x > 1.0) return vec4(0.0);
     float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
-    packedInterpBins(uv, sourceMetadataTex, sourceFrameCount, sourceBandCount,
+    packedInterpBins(viewUv, canvasMetadataTex, canvasFrameCount, sourceBandCount,
                      bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
     ivec2 texSize = textureSize(sourceSpectrogramTex, 0);
     int band = int(bandIndex);
@@ -104,8 +120,10 @@ vec2 sampleLevelDb(vec2 uv, sampler2D levelTex, sampler2D levelMetaTex) {
 // committed canvas, the way the canvas path picks per texel.
 bool previewDbAt(vec2 uv, out vec2 db) {
     if (!previewActive) return false;
+    vec2 viewUv = canvasViewUv(uv);
+    if (viewUv.x < 0.0 || viewUv.x > 1.0) return false;
     float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
-    packedInterpBins(uv, sourceMetadataTex, sourceFrameCount, sourceBandCount,
+    packedInterpBins(viewUv, canvasMetadataTex, canvasFrameCount, sourceBandCount,
                      bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
     vec2 bins = texelFetch(previewBinRangesTex, ivec2(int(bandIndex), 0), 0).rg;
     bool covers0 = timeIndex0 >= bins.x && timeIndex0 < bins.y;

@@ -404,6 +404,9 @@ const FileRendererInner = memo(
           previewTex: { value: null as Texture | null },
           previewBinRangesTex: { value: null as Texture | null },
           previewActive: { value: false },
+          canvasMetadataTex: { value: null as Texture | null },
+          canvasFrameCount: { value: 0 },
+          canvasStartFrame: { value: 0 },
           displayFineTex: { value: null as Texture | null },
           displayFineMetaTex: { value: null as Texture | null },
           displayCoarseTex: { value: null as Texture | null },
@@ -682,6 +685,12 @@ const FileRendererInner = memo(
       const uniforms = displayMaterial.uniforms;
       uniforms.sourceInverseMapTex.value = inverseMapTex;
       uniforms.sourceMetadataTex.value = metadataTex;
+      const canvasView = strokeRendererRef.current?.committedSource().view;
+      uniforms.canvasMetadataTex.value = strokeRendererRef.current?.getTextures().metadata ?? metadataTex;
+      uniforms.canvasFrameCount.value = canvasView
+        ? canvasView.endFrame - canvasView.startFrame
+        : spectrogramData.numFrames;
+      uniforms.canvasStartFrame.value = canvasView?.startFrame ?? 0;
       uniforms.sourceMinFreq.value = spectrogramData.minFreq;
       uniforms.sourceBandsPerOctave.value = spectrogramData.bandsPerOctave;
       uniforms.sourceFrameCount.value = spectrogramData.numFrames;

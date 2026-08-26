@@ -19,6 +19,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { SpectrogramData } from "../../store/types";
+import { createDisplayTestMaterial } from "../../test/display-test-material";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState } from "../../test/mock-state";
 import { blockGrid, blockPixelRanges, blockTexels, PACKED_BYTES_PER_TEXEL, type BlockGrid } from "../block-grid";
@@ -358,6 +359,73 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     const subPixels = readDisplayTexture(subRing.texture()!, width, height);
     expect(firstDifference(subPixels, wholePixels, wholePixels.length)).toBe(-1);
     expect(wholePixels.some((value) => value !== 0)).toBe(true);
+  });
+
+  it("shows the same canvas picture through a sub-view", () => {
+    const whole = new StrokeRenderer(gl, data, strokeTextures, "parity", effects);
+    whole.initialize();
+    whole.setFBOData(data.packedData);
+    disposers.push(() => whole.dispose());
+    const sub = subViewRenderer();
+    sub.setFBOData(composeViewContent(view, data.packedData));
+
+    const material = createDisplayTestMaterial();
+    const scene = new Scene();
+    scene.add(new Mesh(new PlaneGeometry(2, 2), material));
+    const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+    camera.position.z = 1;
+    const width = 96;
+    const height = 48;
+    const target = new WebGLRenderTarget(width, height, { depthBuffer: false, stencilBuffer: false });
+    disposers.push(() => {
+      target.dispose();
+      material.dispose();
+    });
+
+    // Zoomed to the view's span alone, so both canvases cover every pixel.
+    const zoomPower = Math.log2(data.numFrames / viewFrames);
+    const offset = view.startFrame / (data.numFrames - viewFrames);
+
+    const renderCanvas = (renderer: StrokeRenderer): Uint8Array => {
+      const source = renderer.committedSource();
+      const u = material.uniforms;
+      u.sourceSpectrogramTex.value = source.texture;
+      u.sourceMetadataTex.value = strokeTextures.metadataTex;
+      u.sourceInverseMapTex.value = strokeTextures.inverseMapTex;
+      u.sourceMinFreq.value = data.minFreq;
+      u.sourceBandsPerOctave.value = data.bandsPerOctave;
+      u.sourceFrameCount.value = data.numFrames;
+      u.sourceBandCount.value = data.numBands;
+      u.sourceChannelCount.value = data.numChannels;
+      u.sourceSampleRate.value = data.sampleRate;
+      u.sourceSpectrogramTextureSize.value = data.packedTextureSize;
+      u.canvasMetadataTex.value = renderer.getTextures().metadata;
+      u.canvasFrameCount.value = source.view.endFrame - source.view.startFrame;
+      u.canvasStartFrame.value = source.view.startFrame;
+      u.viewZoomPower.value = zoomPower;
+      u.viewOffset.value = offset;
+      gl.setRenderTarget(target);
+      gl.render(scene, camera);
+      gl.setRenderTarget(null);
+      const pixels = new Uint8Array(width * height * 4);
+      gl.readRenderTargetPixels(target, 0, 0, width, height, pixels);
+      return pixels;
+    };
+
+    const wholePixels = renderCanvas(whole);
+    const subPixels = renderCanvas(sub);
+
+    // The two paths read the same bins from different texture bases, so the
+    // pictures agree except where a pixel sits on a bin edge and float
+    // rounding picks the neighbouring bin.
+    let lit = 0;
+    let apart = 0;
+    for (let i = 0; i < wholePixels.length; i++) {
+      if (wholePixels[i] > 8) lit++;
+      if (Math.abs(wholePixels[i] - subPixels[i]) > 2) apart++;
+    }
+    expect(lit).toBeGreaterThan(wholePixels.length / 16);
+    expect(apart).toBeLessThan(wholePixels.length / 100);
   });
 
   it("refuses to cut ring tiles the source view does not cover", () => {
