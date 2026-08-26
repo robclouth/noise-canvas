@@ -858,7 +858,10 @@ export class HistoryManager {
       footprintPixels < texturePixels * 0.5
     ) {
       const deltaStart = performance.now();
-      if (!(await host.analysis.historyFootprintChanged(deltaBase, opts.data, ranges, compact != null))) {
+      // With a compact base, the painted side compares and encodes from the
+      // footprint's values too, so neither side needs the whole state.
+      const after = compact ? gatherPixelRanges(opts.data, ranges) : opts.data;
+      if (!(await host.analysis.historyFootprintChanged(deltaBase, after, ranges, compact != null, compact != null))) {
         // The stroke changed nothing, so it gets no node of its own. The
         // caller must not then write its audio against the parent's id. The
         // canvas is still the parent's, so its projection state is too.
@@ -871,10 +874,10 @@ export class HistoryManager {
       // hops to and from it in memory.
       deltaBytes = await host.analysis.encodeHistoryDelta(
         deltaBase,
-        opts.data,
+        after,
         ranges,
         compact != null,
-        false,
+        compact != null,
         hasPhaseTurns(opts.turns) ? opts.turns : undefined,
       );
       storage = this.deltaStepsSinceLastSnap(parentId) >= CHECKPOINT_INTERVAL ? "packed" : "delta";
