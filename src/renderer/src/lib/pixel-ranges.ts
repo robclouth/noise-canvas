@@ -99,6 +99,45 @@ export function scatterCompactPixelRanges(dest: Float32Array, compact: Float32Ar
 }
 
 /**
+ * Copies the pixels both range lists hold, out of `src` laid out in
+ * `srcRanges` order and into `dest` laid out in `destRanges` order. Both lists
+ * must be sorted and non-overlapping.
+ */
+export function copyCompactOverlap(
+  dest: Float32Array,
+  destRanges: Uint32Array,
+  src: Float32Array,
+  srcRanges: Uint32Array,
+): void {
+  let srcIndex = 0;
+  let srcAt = 0;
+  let destAt = 0;
+  for (let i = 0; i + 1 < destRanges.length; i += 2) {
+    const destStart = destRanges[i];
+    const destEnd = destStart + destRanges[i + 1];
+    while (srcIndex + 1 < srcRanges.length && srcRanges[srcIndex] + srcRanges[srcIndex + 1] <= destStart) {
+      srcAt += srcRanges[srcIndex + 1] * 4;
+      srcIndex += 2;
+    }
+    let cursor = srcIndex;
+    let at = srcAt;
+    while (cursor + 1 < srcRanges.length && srcRanges[cursor] < destEnd) {
+      const srcStart = srcRanges[cursor];
+      const srcEnd = srcStart + srcRanges[cursor + 1];
+      const low = Math.max(destStart, srcStart);
+      const high = Math.min(destEnd, srcEnd);
+      if (high > low) {
+        const from = at + (low - srcStart) * 4;
+        dest.set(src.subarray(from, from + (high - low) * 4), destAt + (low - destStart) * 4);
+      }
+      at += srcRanges[cursor + 1] * 4;
+      cursor += 2;
+    }
+    destAt += destRanges[i + 1] * 4;
+  }
+}
+
+/**
  * Builds the values of `target`'s pixels as one block in range order, taking
  * each pixel from the first layer whose ranges hold it. Every layer's ranges
  * and values are in range order too. Throws when a pixel is in no layer.
