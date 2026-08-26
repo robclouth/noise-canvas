@@ -1,3 +1,4 @@
+import { bandAtPixel, type BandLayout } from "./band-layout";
 import { ANALYSIS_MAX_TEXTURE_SIZE } from "./constants";
 
 /** RG16F: left and right magnitude, in dB. */
@@ -17,13 +18,6 @@ const DISPLAY_PYRAMID_TEXEL_RATIO = 4;
 export function displayPyramidBudgetTexels(packedTexels: number, maxTexels = DISPLAY_PYRAMID_MAX_TEXELS): number {
   return Math.min(maxTexels, DISPLAY_PYRAMID_TEXEL_RATIO * packedTexels);
 }
-
-/** A packed spectrogram's per-band layout, as `SpectrogramData.metadata` holds it. */
-export type BandLayout = {
-  numBands: number;
-  /** RGBA per band: packed offset, bin count, time step log2, centre frequency. */
-  metadata: Float32Array;
-};
 
 /**
  * One level of the display pyramid: the same bands in the same packed order,
@@ -66,7 +60,7 @@ export function displayPyramidLevel(layout: BandLayout, stepLog2: number): Displ
 }
 
 /** The first step at which every band is down to a single bin. */
-function coarsestStepLog2(layout: BandLayout): number {
+function singleBinStepLog2(layout: BandLayout): number {
   let coarsest = 0;
   for (let band = 0; band < layout.numBands; band++) {
     let step = layout.metadata[band * 4 + 2];
@@ -85,7 +79,7 @@ export function displayPyramidLevels(
   layout: BandLayout,
   maxTexels = DISPLAY_PYRAMID_MAX_TEXELS,
 ): DisplayPyramidLevel[] {
-  const coarsest = coarsestStepLog2(layout);
+  const coarsest = singleBinStepLog2(layout);
   const levels: DisplayPyramidLevel[] = [];
   for (let step = 0; step <= coarsest; step++) levels.push(displayPyramidLevel(layout, step));
 
@@ -121,18 +115,6 @@ export function displayPyramidBytes(levels: DisplayPyramidLevel[]): number {
 // Past 2^24 texels the float32 band offsets in metadata lose whole units, so a
 // mapped range is widened rather than trusted to the bin.
 const PATCH_MARGIN_BINS = 4;
-
-/** The band holding packed pixel `pixel`, or the first band past it. */
-function bandAtPixel(layout: BandLayout, pixel: number): number {
-  let low = 0;
-  let high = layout.numBands - 1;
-  while (low < high) {
-    const mid = (low + high + 1) >> 1;
-    if (layout.metadata[mid * 4] <= pixel) low = mid;
-    else high = mid - 1;
-  }
-  return low;
-}
 
 /**
  * The bins of each band that `pixelRanges` covers, as [start, end) pairs

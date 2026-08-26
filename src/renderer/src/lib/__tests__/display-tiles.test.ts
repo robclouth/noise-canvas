@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { BandLayout } from "../display-pyramid";
+import type { BandLayout } from "../band-layout";
 import {
   DISPLAY_TILES_BYTES_PER_TEXEL,
   DISPLAY_TILES_MAX_TEXELS,
-  coarsestSourceStepLog2,
   displayTilesBytes,
   ringLevelChoice,
   ringSlotCount,
@@ -40,16 +39,6 @@ function handLayout(steps: number[], lengths: number[]): BandLayout {
   }
   return { numBands: steps.length, metadata };
 }
-
-describe("coarsestSourceStepLog2", () => {
-  it("takes the largest step any band uses", () => {
-    expect(coarsestSourceStepLog2(handLayout([0, 1, 5, 3], [64, 32, 2, 8]))).toBe(5);
-  });
-
-  it("is zero when every band is at the finest step", () => {
-    expect(coarsestSourceStepLog2(handLayout([0, 0], [16, 16]))).toBe(0);
-  });
-});
 
 describe("tileFramesFor", () => {
   it("holds a whole number of every band's bins", () => {

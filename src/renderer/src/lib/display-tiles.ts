@@ -1,4 +1,4 @@
-import type { BandLayout } from "./display-pyramid";
+import { coarsestStepLog2, type BandLayout } from "./band-layout";
 
 /** RG16F: left and right magnitude, in dB. */
 export const DISPLAY_TILES_BYTES_PER_TEXEL = 4;
@@ -35,15 +35,6 @@ export type TileGrid = {
 /** Which level the ring holds and how far towards the next one the view sits. */
 export type RingLevelChoice = { level: number; blend: number };
 
-/** The coarsest time step any band of `layout` uses, as a log2 of frames. */
-export function coarsestSourceStepLog2(layout: BandLayout): number {
-  let coarsest = 0;
-  for (let band = 0; band < layout.numBands; band++) {
-    coarsest = Math.max(coarsest, layout.metadata[band * 4 + 2]);
-  }
-  return coarsest;
-}
-
 /**
  * The level whose bins are at least as fine as one per screen pixel, and how
  * far the view has moved towards the next coarser one. Blending the pair keeps
@@ -57,7 +48,7 @@ export function ringLevelChoice(framesPerPixel: number): RingLevelChoice {
 
 /** Frames one tile covers at `level`, always a whole number of every band's bins. */
 export function tileFramesFor(layout: BandLayout, level: number): number {
-  return 2 ** Math.max(coarsestSourceStepLog2(layout), level + TILE_LOG2_PIXELS);
+  return 2 ** Math.max(coarsestStepLog2(layout), level + TILE_LOG2_PIXELS);
 }
 
 /** The ring's grid for one level of `layout`. */

@@ -11,13 +11,13 @@ import {
   WebGLRenderTarget,
 } from "three";
 
+import type { BandLayout } from "./band-layout";
 import { DecimateDraw, type DecimateInstance, type SourcePixels } from "./display-decimate";
 import {
   displayPyramidLevels,
   levelBinSpan,
   levelDecimation,
   sourceBinRanges,
-  type BandLayout,
   type DisplayPyramidLevel,
 } from "./display-pyramid";
 import type { PixelRangeList } from "./range-quads";

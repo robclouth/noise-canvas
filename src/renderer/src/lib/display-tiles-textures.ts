@@ -13,7 +13,8 @@ import {
 
 import { ANALYSIS_MAX_TEXTURE_SIZE } from "./constants";
 import { DecimateDraw, type DecimateInstance } from "./display-decimate";
-import { sourceBinRanges, type BandLayout } from "./display-pyramid";
+import type { BandLayout } from "./band-layout";
+import { sourceBinRanges } from "./display-pyramid";
 import {
   DISPLAY_TILES_MAX_TEXELS,
   ringLevelChoice,

@@ -5,6 +5,7 @@ import {
   constantQMetadata,
   createConstantQMockSpectrogramData,
 } from "../../test/mock-spectrogram";
+import type { BandLayout } from "../band-layout";
 import {
   DISPLAY_PYRAMID_BYTES_PER_TEXEL,
   displayLevelChoice,
@@ -16,7 +17,6 @@ import {
   levelBinSpan,
   levelDecimation,
   sourceBinRanges,
-  type BandLayout,
 } from "../display-pyramid";
 
 /** A constant-Q layout of any length, without the coefficient arrays. */
