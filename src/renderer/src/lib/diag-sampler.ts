@@ -98,7 +98,6 @@ async function memoryFigures(gl: WebGLRenderer): Promise<MemoryFigures> {
     openFiles: texels.length,
   };
   const history = historyMemoryCacheBytes();
-  figures.historyPackedMB = toMB(history.packedStates);
   figures.historyDeltaMB = toMB(history.deltas);
   figures.historyHopMB = toMB(history.audioHops);
   figures.blocksMB = toMB(await blockStoreResidentBytes());

@@ -46,12 +46,7 @@ vi.mock("@renderer/store/files", () => ({
 // Silence the renderer→main menu-state IPC the manager fires on every change.
 vi.mock("../ipc", () => ({ ipcSend: vi.fn() }));
 
-import {
-  clearAllHistoryManagers,
-  destroyHistoryManager,
-  getHistoryManager,
-  PackedStateCache,
-} from "../history-manager";
+import { clearAllHistoryManagers, destroyHistoryManager, getHistoryManager } from "../history-manager";
 import { getBlockStore } from "../block-stores";
 import { historyCacheBudgets } from "../history-cache-budgets";
 import { serializeFileTask } from "../file-task-queue";
@@ -67,71 +62,19 @@ describe("historyCacheBudgets", () => {
   const MIB = 1024 ** 2;
 
   it("gives the full budgets from 16 GiB up", () => {
-    expect(historyCacheBudgets(16 * GIB)).toEqual({ packedStates: 256 * MIB, deltas: 128 * MIB, audioHops: 256 * MIB });
+    expect(historyCacheBudgets(16 * GIB)).toEqual({ deltas: 128 * MIB, audioHops: 256 * MIB });
     expect(historyCacheBudgets(64 * GIB)).toEqual(historyCacheBudgets(16 * GIB));
   });
 
   it("gives a quarter of the budgets at 8 GiB and below", () => {
-    expect(historyCacheBudgets(8 * GIB)).toEqual({ packedStates: 64 * MIB, deltas: 32 * MIB, audioHops: 64 * MIB });
+    expect(historyCacheBudgets(8 * GIB)).toEqual({ deltas: 32 * MIB, audioHops: 64 * MIB });
     expect(historyCacheBudgets(4 * GIB)).toEqual(historyCacheBudgets(8 * GIB));
   });
 
   it("scales in proportion between", () => {
     const budgets = historyCacheBudgets(12 * GIB);
-    expect(budgets.packedStates).toBe(160 * MIB);
     expect(budgets.deltas).toBe(80 * MIB);
     expect(budgets.audioHops).toBe(160 * MIB);
-  });
-});
-
-describe("PackedStateCache", () => {
-  const a = new Float32Array([1, 2, 3, 4]); // 16 bytes each
-  const b = new Float32Array([5, 6, 7, 8]);
-  const c = new Float32Array([9, 10, 11, 12]);
-
-  it("returns the exact stored array (lossless round-trip)", () => {
-    const cache = new PackedStateCache(1024);
-    cache.set("a", a);
-    expect(cache.get("a")).toBe(a);
-  });
-
-  it("evicts least-recently-used entries once over the byte budget", () => {
-    const cache = new PackedStateCache(32); // room for 2 of the 16-byte arrays
-    cache.set("a", a);
-    cache.set("b", b);
-    cache.set("c", c); // pushes total to 48 > 32 → oldest ("a") evicted
-    expect(cache.has("a")).toBe(false);
-    expect(cache.has("b")).toBe(true);
-    expect(cache.has("c")).toBe(true);
-  });
-
-  it("get() refreshes recency so the touched entry survives eviction", () => {
-    const cache = new PackedStateCache(32);
-    cache.set("a", a);
-    cache.set("b", b);
-    cache.get("a"); // "a" is now most-recent, "b" oldest
-    cache.set("c", c); // evicts the oldest, which is now "b"
-    expect(cache.has("a")).toBe(true);
-    expect(cache.has("b")).toBe(false);
-    expect(cache.has("c")).toBe(true);
-  });
-
-  it("keeps the just-inserted entry even when it alone exceeds the budget", () => {
-    const cache = new PackedStateCache(4); // smaller than one 16-byte array
-    cache.set("a", a);
-    expect(cache.get("a")).toBe(a);
-    expect(cache.size).toBe(1);
-  });
-
-  it("delete() drops the entry and frees its budget", () => {
-    const cache = new PackedStateCache(32);
-    cache.set("a", a);
-    cache.set("b", b);
-    cache.delete("a");
-    expect(cache.has("a")).toBe(false);
-    cache.set("c", c); // a+b would have been 32; with "a" gone there's room for "c"
-    expect(cache.has("b")).toBe(true);
-    expect(cache.has("c")).toBe(true);
   });
 });
 
@@ -1011,7 +954,7 @@ describe("HistoryManager hops", () => {
     const { canvas } = installPatchRenderer(w, h);
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
-    const mgr = getHistoryManager("f1", { packedCacheBytes: 0 });
+    const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
     const current = mgr.currentPackedState()!;
     canvas.set(current);
@@ -1045,7 +988,7 @@ describe("HistoryManager hops", () => {
         root[p * 4 + 1] = Math.fround(1e5 + p);
         root[p * 4 + 3] = Math.fround(-1e5 - p);
       }
-      const mgr = getHistoryManager("f1", { packedCacheBytes: 0 });
+      const mgr = getHistoryManager("f1");
       await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
       const current = mgr.currentPackedState()!;
       const rootBytes = new Float32Array(current);
@@ -1088,7 +1031,7 @@ describe("HistoryManager hops", () => {
       root[p * 4 + 1] = Math.fround(1e5 + p);
       root[p * 4 + 3] = Math.fround(-1e5 - p);
     }
-    const mgr = getHistoryManager("f1", { packedCacheBytes: 0 });
+    const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
     const current = mgr.currentPackedState()!;
     const rootBytes = new Float32Array(root);
@@ -1139,7 +1082,7 @@ describe("HistoryManager hops", () => {
 
     // A cache that only ever holds the newest state, so every hop has to be
     // derived rather than looked up.
-    const mgr = getHistoryManager("f1", { packedCacheBytes: 0 });
+    const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
     await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: ra });
     await mgr.addStroke({ data: b, label: "B", dimensions, dirtyRanges: rb });
@@ -1174,7 +1117,7 @@ describe("HistoryManager hops", () => {
     const a = paint(root, 1, 4, 3);
     const b = paint(a, 3, 2, 4);
 
-    const mgr = getHistoryManager("f1", { packedCacheBytes: 0 });
+    const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
     await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([1, 4]) });
     const { id: bId } = await mgr.addStroke({ data: b, label: "B", dimensions, dirtyRanges: new Uint32Array([3, 2]) });
@@ -1182,7 +1125,7 @@ describe("HistoryManager hops", () => {
     // A fresh manager knows the tree but holds no deltas or ranges; the
     // first hop rebuilds in full, after which the state on screen is known.
     clearAllHistoryManagers();
-    const fresh = getHistoryManager("f1", { packedCacheBytes: 0 });
+    const fresh = getHistoryManager("f1");
     await fresh.initialize();
     expect(await fresh.currentNodeId()).toBe(bId);
     await fresh.navigateToParent(); // B → A
@@ -1250,7 +1193,7 @@ describe("HistoryManager hops", () => {
     const { patches } = installPatchRenderer(w, h);
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
-    const mgr = getHistoryManager("f1", { packedCacheBytes: 0 });
+    const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
     const current = mgr.currentPackedState()!;
     expect(current).toBe(root);
@@ -1304,7 +1247,7 @@ describe("HistoryManager hops", () => {
     clearAllHistoryManagers();
     const root = lossyFill(w, h, 0);
     const a = paint(root, 2, 3, 1);
-    const mgr = getHistoryManager("f1", { packedCacheBytes: 0 });
+    const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
     await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([2, 3]) });
 
@@ -1345,7 +1288,7 @@ describe("HistoryManager hops", () => {
       root[p * 4 + 1] = Math.fround(1e5 + p);
       root[p * 4 + 3] = Math.fround(-1e5 - p);
     }
-    const mgr = getHistoryManager("f1", { packedCacheBytes: 0 });
+    const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
     const current = mgr.currentPackedState()!;
     const rootBytes = new Float32Array(root);

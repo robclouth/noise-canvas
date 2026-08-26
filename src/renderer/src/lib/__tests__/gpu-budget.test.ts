@@ -139,7 +139,7 @@ describe("history cache overhead", () => {
 
   const overhead = (): number => {
     const budgets = historyCacheBudgets(TOTAL_MEMORY);
-    return budgets.packedStates + budgets.deltas + budgets.audioHops;
+    return budgets.deltas + budgets.audioHops;
   };
 
   it("sums the three history cache budgets", () => {

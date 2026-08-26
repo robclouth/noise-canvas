@@ -123,79 +123,6 @@ interface HistoryManifest {
  * codec is exactly lossless, so repeated undo/redo never drifts.
  */
 
-/**
- * Bounded LRU of canonical packed FBO states keyed by history node id. Holds the
- * exact arrays that were last on screen so revisiting a node during undo/redo is
- * both instant (no disk read / decompress / delta replay) and lossless — deriving
- * a neighbour by adding/subtracting a stored delta would accumulate float error
- * across repeated round-trips. Capacity is a byte budget so it adapts to texture
- * size; the most-recently used entry is always retained.
- */
-export class PackedStateCache {
-  private readonly map = new Map<string, Float32Array>();
-  private bytes = 0;
-
-  constructor(private readonly maxBytes: number) {}
-
-  get(id: string): Float32Array | undefined {
-    const v = this.map.get(id);
-    if (v === undefined) return undefined;
-    // Refresh recency: delete + re-insert moves it to the end of the Map.
-    this.map.delete(id);
-    this.map.set(id, v);
-    return v;
-  }
-
-  set(id: string, data: Float32Array): void {
-    const existing = this.map.get(id);
-    if (existing) {
-      this.bytes -= existing.byteLength;
-      this.map.delete(id);
-    }
-    this.map.set(id, data);
-    this.bytes += data.byteLength;
-    // Evict oldest (front of Map) until under budget, but never drop the entry
-    // we just inserted even if it alone exceeds the budget.
-    while (this.bytes > this.maxBytes && this.map.size > 1) {
-      const oldest = this.map.keys().next().value as string;
-      const v = this.map.get(oldest)!;
-      this.bytes -= v.byteLength;
-      this.map.delete(oldest);
-    }
-  }
-
-  delete(id: string): void {
-    const existing = this.map.get(id);
-    if (!existing) return;
-    this.bytes -= existing.byteLength;
-    this.map.delete(id);
-  }
-
-  /** Drops every entry holding this very array, except the one named. */
-  deleteValue(value: Float32Array, exceptId?: string): void {
-    for (const [id, v] of [...this.map.entries()]) {
-      if (v === value && id !== exceptId) this.delete(id);
-    }
-  }
-
-  clear(): void {
-    this.map.clear();
-    this.bytes = 0;
-  }
-
-  has(id: string): boolean {
-    return this.map.has(id);
-  }
-
-  get size(): number {
-    return this.map.size;
-  }
-
-  get byteCount(): number {
-    return this.bytes;
-  }
-}
-
 // --- Helpers ---
 
 function shortId(): string {
@@ -441,7 +368,6 @@ export class HistoryManager {
   private version = 0;
   private manifestWriteTimer: ReturnType<typeof setTimeout> | null = null;
   private manifestWritePending = false;
-  private readonly packedCache: PackedStateCache;
   // Dirty ranges of strokes added this session, keyed by node id. Lets
   // navigation between such nodes upload only the changed texture rows
   // instead of the whole packed state. Purely an optimization: a miss falls
@@ -465,10 +391,9 @@ export class HistoryManager {
   // The onset restore still reading currentPacked, if any.
   private onsetRestore: Promise<void> | null = null;
 
-  constructor(fileId: string, options: { packedCacheBytes?: number } = {}) {
+  constructor(fileId: string) {
     this.fileId = fileId;
     const budgets = historyCacheBudgets(host.os.totalmem());
-    this.packedCache = new PackedStateCache(options.packedCacheBytes ?? budgets.packedStates);
     this.nodeDeltas = new ByteBudgetCache<Uint8Array>(budgets.deltas, (bytes) => bytes.byteLength);
     this.nodeAudioHops = new ByteBudgetCache<AudioHop>(budgets.audioHops, audioHopBytes);
     this.dir = this.resolveDir();
@@ -919,8 +844,6 @@ export class HistoryManager {
     // opts.data is either a fresh readback or the current state written in
     // place; either way it now holds this node and no other.
     this.currentPacked = opts.data;
-    this.packedCache.deleteValue(opts.data);
-    this.packedCache.set(id, this.currentPacked);
     if (rangesForPatch) this.nodeDirtyRanges.set(id, rangesForPatch);
     if (deltaBytes) {
       this.nodeDeltas.set(id, deltaBytes);
@@ -1308,13 +1231,11 @@ export class HistoryManager {
     if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
     const fromId = this.manifest.currentId;
 
-    // Reuse the cached canonical packed state when we've recently visited the
-    // target (the common undo/redo case) — it's the exact array that was last on
-    // screen, so round-trips are lossless and need no disk read / decompress /
-    // delta replay. On a miss, walk the hops' deltas over the current state,
-    // and failing that rebuild from the nearest checkpoint on disk.
-    let packedData = this.packedCache.get(targetId);
-    if (!packedData) {
+    // Walk the hops' deltas over the current state — bit-pattern arithmetic,
+    // so round-trips are exact — and failing that rebuild from the nearest
+    // checkpoint on disk.
+    let packedData: Float32Array | undefined;
+    {
       try {
         packedData = (await this.reconstructByHops(fromId, targetId)) ?? (await this.reconstruct(targetId)).packedData;
       } catch (error) {
@@ -1400,11 +1321,8 @@ export class HistoryManager {
     // unprojected paint is its answer too — the next re-analysing stroke reads
     // it to decide whether it settles the whole file.
     file.unprojectedPaint = target.unprojectedPaint === true;
-    // packedData is a cache entry, a fresh rebuild, or the current array walked
-    // in place — which then no longer holds the node it was cached under.
+    // packedData is a fresh rebuild or the current array walked in place.
     this.currentPacked = packedData;
-    this.packedCache.deleteValue(packedData, targetId);
-    this.packedCache.set(targetId, packedData);
     if (hopTierRanges) {
       const walked = await this.walkTierValues(fromId, hopTierRanges);
       await this.syncStoreToCurrent(fromId, hopTierRanges, walked ?? undefined);
@@ -1828,10 +1746,9 @@ export class HistoryManager {
     return total;
   }
 
-  /** Bytes the in-memory caches hold: packed states, node deltas and audio hops. */
-  memoryCacheBytes(): { packedStates: number; deltas: number; audioHops: number } {
+  /** Bytes the in-memory caches hold: node deltas and audio hops. */
+  memoryCacheBytes(): { deltas: number; audioHops: number } {
     return {
-      packedStates: this.packedCache.byteCount,
       deltas: this.nodeDeltas.byteCount,
       audioHops: this.nodeAudioHops.byteCount,
     };
@@ -1926,7 +1843,6 @@ export class HistoryManager {
 
     for (const id of toDelete) {
       for (const f of this.nodeFilePaths(dir, id)) host.fs.rm(f).catch(() => {});
-      this.packedCache.delete(id);
       this.audioBytes.delete(id);
       this.nodeDirtyRanges.delete(id);
       this.nodeAudioRegions.delete(id);
@@ -2097,7 +2013,6 @@ export class HistoryManager {
     for (const id of Object.keys(this.manifest.nodes)) {
       if (id === currentId) continue;
       for (const f of this.nodeFilePaths(dir, id)) host.fs.rm(f).catch(() => {});
-      this.packedCache.delete(id);
       this.audioBytes.delete(id);
       this.nodeDirtyRanges.delete(id);
       this.nodeAudioRegions.delete(id);
@@ -2138,7 +2053,6 @@ export class HistoryManager {
     // over (a now-deleted savedNodeId still reads as "differs from saved").
 
     this.currentPacked = packed;
-    this.packedCache.clear();
     this.nodeDirtyRanges.clear();
     this.nodeAudioRegions.clear();
     this.nodeDeltas.clear();
@@ -2169,7 +2083,6 @@ export class HistoryManager {
     }
     this.manifest = null;
     this.currentPacked = null;
-    this.packedCache.clear();
     this.nodeDirtyRanges.clear();
     this.nodeAudioRegions.clear();
     this.nodeDeltas.clear();
@@ -2192,7 +2105,6 @@ export class HistoryManager {
     await this.flushManifestWrite();
     this.manifest = null;
     this.currentPacked = null;
-    this.packedCache.clear();
     this.nodeDirtyRanges.clear();
     this.nodeAudioRegions.clear();
     this.nodeDeltas.clear();
@@ -2208,21 +2120,20 @@ export class HistoryManager {
 // Global instances per fileId.
 const managers = new Map<string, HistoryManager>();
 
-export function getHistoryManager(fileId: string, options: { packedCacheBytes?: number } = {}): HistoryManager {
+export function getHistoryManager(fileId: string): HistoryManager {
   let m = managers.get(fileId);
   if (!m) {
-    m = new HistoryManager(fileId, options);
+    m = new HistoryManager(fileId);
     managers.set(fileId, m);
   }
   return m;
 }
 
 /** In-memory history cache bytes summed over every open file. */
-export function historyMemoryCacheBytes(): { packedStates: number; deltas: number; audioHops: number } {
-  const total = { packedStates: 0, deltas: 0, audioHops: 0 };
+export function historyMemoryCacheBytes(): { deltas: number; audioHops: number } {
+  const total = { deltas: 0, audioHops: 0 };
   for (const manager of managers.values()) {
     const bytes = manager.memoryCacheBytes();
-    total.packedStates += bytes.packedStates;
     total.deltas += bytes.deltas;
     total.audioHops += bytes.audioHops;
   }
