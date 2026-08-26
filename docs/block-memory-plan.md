@@ -576,7 +576,9 @@ small file; a cold-jump stroke drops no frames (measure with the Playwright
 driver).
 
 Status: step (1) in progress — `canvas-view.ts` (view layout + file↔view
-range remapping) landed with tests.
+range remapping) and `block-slot-cache.ts` (paged slot store with LRU claim,
+upload / compose / copy-back over the existing patch and gather materials)
+landed with tests. Next: the StrokeRenderer refit over a whole-file view.
 
 ---
 
