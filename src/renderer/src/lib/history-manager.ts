@@ -129,6 +129,12 @@ function shortId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+function sameUint32(a: Uint32Array, b: Uint32Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 async function getUserDataPath(): Promise<string> {
   return await host.dialogs.getUserDataPath();
 }
@@ -850,13 +856,7 @@ export class HistoryManager {
       this.nodeTurns.set(id, hasPhaseTurns(opts.turns) ? opts.turns : null);
     }
     if (opts.audioRegion) this.nodeAudioRegions.set(id, opts.audioRegion);
-    // The stroke's turns change phase outside the footprint, so the tier's
-    // patch has to cover their spans as well.
-    let tierRanges = rangesForPatch;
-    if (tierRanges && hasPhaseTurns(opts.turns)) {
-      tierRanges = mergePixelRanges(tierRanges, phaseTurnRanges(opts.turns));
-    }
-    await this.syncStoreToCurrent(parentId, tierRanges);
+    await this.syncTierForStroke(parentId, rangesForPatch, opts.data, hasPhaseTurns(opts.turns) ? opts.turns : null);
     if (!this.manifest) return { id, isNew: true };
     // The stroke was read back from the FBO, so the two are in step again.
     this.fboOutOfSync = false;
@@ -983,6 +983,56 @@ export class HistoryManager {
         await store.patch(ranges, values ?? gatherPixelRanges(packed, ranges));
       } else {
         await store.seedCurrent(packed);
+      }
+      await store.flush();
+      if (this.manifest !== manifest) return;
+      manifest.overlayNodeId = manifest.currentId;
+    } catch (error) {
+      manifest.overlayNodeId = undefined;
+      console.error("history: block store current sync failed", error);
+    }
+  }
+
+  /**
+   * Brings the tier in step with the stroke just appended: its footprint
+   * ranges are patched from the painted state, and its phase turns applied to
+   * the tier's own blocks — the same float arithmetic — whose residuals must
+   * come out as the ones the stroke's delta stored. A tier that does not hold
+   * the parent state falls back to the plain sync; a turn walk that disagrees
+   * is force-patched from the packed state.
+   */
+  private async syncTierForStroke(
+    parentId: string,
+    ranges: Uint32Array | null,
+    data: Float32Array,
+    turns: PhaseTurns | null,
+  ): Promise<void> {
+    const manifest = this.manifest;
+    if (!manifest) return;
+    if (manifest.overlayNodeId !== parentId || ranges == null) {
+      let tierRanges = ranges;
+      if (tierRanges && turns) tierRanges = mergePixelRanges(tierRanges, phaseTurnRanges(turns));
+      await this.syncStoreToCurrent(parentId, tierRanges);
+      return;
+    }
+    const holder = this.seedHolder();
+    const current = manifest.nodes[manifest.currentId];
+    if (!holder || !current || !sameStoreDimensions(holder.dimensions, current.dimensions)) return;
+    try {
+      const store = await this.seedBlockStore(holder);
+      // Invalidated on disk before the tier changes, so a crash mid-write
+      // cannot leave a torn tier that still reads as current.
+      manifest.overlayNodeId = undefined;
+      await this.writeManifest();
+      if (this.manifest !== manifest) return;
+      await store.patch(ranges, gatherPixelRanges(data, ranges));
+      if (turns) {
+        const residuals = await store.applyTurnsCollecting(turns);
+        if (!sameUint32(residuals, turns.residuals)) {
+          console.warn("history: the tier's turn walk disagrees with the stroke's residuals");
+          const spans = phaseTurnRanges(turns);
+          await store.patch(spans, gatherPixelRanges(data, spans));
+        }
       }
       await store.flush();
       if (this.manifest !== manifest) return;
