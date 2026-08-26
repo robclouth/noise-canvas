@@ -1,3 +1,4 @@
+import { DEFAULT_ONSET_SENSITIVITY } from "@renderer/lib/constants";
 import { serializeFileTask } from "@renderer/lib/file-task-queue";
 import { getHistoryManager } from "@renderer/lib/history-manager";
 import type { Selection } from "@renderer/lib/selection";
@@ -98,7 +99,14 @@ async function copyRegion(edit: EditTarget, selection: Selection): Promise<boole
     await getHistoryManager(edit.fileId).awaitPackedReaders();
     const data = await renderer.getFBOData();
     if (!data) return false;
-    const region = buildClipboardRegion(data, selection, edit.geometry.spec, edit.file.displayName);
+    const region = buildClipboardRegion(
+      data,
+      selection,
+      edit.geometry.spec,
+      edit.file.displayName,
+      edit.file.onsets,
+      edit.state.filepathsOnsetSensitivity[edit.file.filePath] ?? DEFAULT_ONSET_SENSITIVITY,
+    );
     if (!region) return false;
     clipboard = region;
     return true;
@@ -108,7 +116,12 @@ async function copyRegion(edit: EditTarget, selection: Selection): Promise<boole
 function openPlacingSource(edit: EditTarget): void {
   const renderer = edit.file.rendererRef?.current;
   if (!renderer || !clipboard || placingSource) return;
-  placingSource = renderer.createRegionSource(CLIPBOARD_PATH, clipboard.spec);
+  placingSource = renderer.createRegionSource(
+    CLIPBOARD_PATH,
+    clipboard.spec,
+    clipboard.onsets,
+    clipboard.onsetSensitivity,
+  );
 }
 
 function closePlacingSource(fileId: string): void {

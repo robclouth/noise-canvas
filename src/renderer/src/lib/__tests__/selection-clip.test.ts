@@ -120,6 +120,22 @@ describe("buildClipboardRegion", () => {
   });
 });
 
+describe("buildClipboardRegion onsets", () => {
+  it("keeps only the onsets inside the selection, in the clipboard's own time", () => {
+    const { spec, data } = makeSpec();
+    // Pairs of [timeSec, salience]; the crop origin is frame 4 at 1 Hz.
+    const sourceOnsets = new Float32Array([2, 0.9, 5, 0.8, 12, 0.7, 13, 0.6]);
+    const clip = buildClipboardRegion(data, midBands, spec, "src", sourceOnsets, 65);
+    expect(clip).not.toBeNull();
+    if (!clip) return;
+    // 2 sits before the selection and 13 at its exclusive end; 5 and 12 stay,
+    // shifted by the 4-frame crop origin.
+    const rounded = Array.from(clip.onsets).map((v, i) => (i % 2 === 0 ? v : Math.round(v * 100) / 100));
+    expect(rounded).toEqual([1, 0.8, 8, 0.7]);
+    expect(clip.onsetSensitivity).toBe(65);
+  });
+});
+
 describe("dropRect", () => {
   it("keeps the clipboard's size and moves only the corner", () => {
     const { spec, data } = makeSpec();

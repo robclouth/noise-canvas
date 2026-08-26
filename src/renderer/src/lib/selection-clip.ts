@@ -17,6 +17,14 @@ export interface ClipboardRegion {
   /** The frame the crop starts at, which is where the clipboard's own time zero sits. */
   originFrame: number;
   sourceName: string;
+  /**
+   * The source's detected onsets inside the copied span, as [timeSec, salience]
+   * pairs in the clipboard's own time. The Sharp warp re-anchors phase at them,
+   * so a paste moves transients the way a translation does.
+   */
+  onsets: Float32Array;
+  /** The source file's onset sensitivity, so the paste filters onsets as it would. */
+  onsetSensitivity: number;
 }
 
 /** The widest bin step among the bands a selection covers, in frames. */
@@ -42,6 +50,8 @@ export function buildClipboardRegion(
   selection: Selection,
   spec: SpectrogramData,
   sourceName: string,
+  sourceOnsets?: Float32Array,
+  onsetSensitivity = 50,
 ): ClipboardRegion | null {
   const { startFrame, endFrame } = selectionFrameRange(selection, spec.sampleRate);
   const { lowBand, highBand } = selectionBandRange(selection, spec.numBands);
@@ -109,6 +119,16 @@ export function buildClipboardRegion(
     metadata[band * 4 + 3] = spec.metadata[band * 4 + 3];
   }
 
+  const clipOnsets: number[] = [];
+  if (sourceOnsets) {
+    const originSec = originFrame / sampleRate;
+    for (let i = 0; i + 1 < sourceOnsets.length; i += 2) {
+      const time = sourceOnsets[i];
+      if (time < selection.start || time >= selection.end) continue;
+      clipOnsets.push(time - originSec, sourceOnsets[i + 1]);
+    }
+  }
+
   return {
     spec: {
       packedData,
@@ -129,6 +149,8 @@ export function buildClipboardRegion(
     rect: selection,
     originFrame,
     sourceName,
+    onsets: new Float32Array(clipOnsets),
+    onsetSensitivity,
   };
 }
 

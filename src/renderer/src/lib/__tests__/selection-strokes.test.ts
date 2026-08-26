@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { NEUTRAL_ALGORITHM } from "../constants";
 import { createMockSpectrogramData } from "../../test/mock-spectrogram";
 import { createMockState } from "../../test/mock-state";
 import type { Selection } from "../selection";
@@ -53,6 +54,11 @@ describe("pasteStrokeState", () => {
     expect(step.sourcePositionMode).toBe("fixed");
     expect(step.sourceTimeOffset).toBeCloseTo(12.5);
     expect(step.sourcePitchOffset).toBeCloseTo(25);
+  });
+
+  it("pins the faithful warp, whatever the step default becomes", () => {
+    const state = pasteStrokeState(createMockState(), rect, makeGeometry(), source);
+    expect(state.brushes[0].steps[0].algorithm).toBe(NEUTRAL_ALGORITHM);
   });
 
   it("carries no selection, so a paste can land outside the one it came from", () => {

@@ -124,7 +124,12 @@ export interface FileRendererHandle {
    */
   renderRegionStroke: (stroke: RegionStroke, preview: boolean) => boolean;
   /** GPU textures for a detached spectrogram, for `renderRegionStroke` to sample. */
-  createRegionSource: (id: string, spec: SpectrogramData) => SourceFileInfo | null;
+  createRegionSource: (
+    id: string,
+    spec: SpectrogramData,
+    onsets?: Float32Array,
+    onsetSensitivity?: number,
+  ) => SourceFileInfo | null;
   disposeRegionSource: (source: SourceFileInfo) => void;
   /**
    * Saves the spectrogram (or restores an already-saved one) so the strokes
@@ -1403,16 +1408,19 @@ const FileRendererInner = memo(
         scheduleSnapshotRefresh();
         return true;
       },
-      createRegionSource: (id: string, spec: SpectrogramData) => {
+      createRegionSource: (id: string, spec: SpectrogramData, onsets?: Float32Array, onsetSensitivity?: number) => {
         const strokeRenderer = strokeRendererRef.current;
         if (!strokeRenderer?.getIsInitialized()) return null;
+        // The Sharp warp re-anchors phase at the source's onsets, so a
+        // detached source carries its own map like an open file does.
+        const duration = spec.numFrames / spec.sampleRate;
         return {
           id,
           filePath: id,
           displayName: id,
           spectrogramData: spec,
           textures: strokeRenderer.createDetachedTextures(spec),
-          onsetTexture: null,
+          onsetTexture: getOnsetTexture(id, onsets, duration, onsetSensitivity ?? DEFAULT_ONSET_SENSITIVITY),
         };
       },
       disposeRegionSource: (source: SourceFileInfo) => {

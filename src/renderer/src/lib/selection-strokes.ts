@@ -1,4 +1,5 @@
 import type { EffectItem } from "../effects/types";
+import { NEUTRAL_ALGORITHM } from "./constants";
 import { createDefaultStep, type BrushStep } from "../parameters";
 import { DEFAULT_PALETTE_ID } from "../store/palette-id";
 import type { SpectrogramData, State } from "../store/types";
@@ -99,5 +100,7 @@ export function pasteStrokeState(
   writable.sourcePositionMode = "fixed";
   writable.sourceTimeOffset = source.timeFraction * 100;
   writable.sourcePitchOffset = source.pitchFraction * 100;
+  // The faithful warp, pinned: a paste is a translation, not a brush choice.
+  writable.algorithm = NEUTRAL_ALGORITHM;
   return withStep(state, step);
 }
