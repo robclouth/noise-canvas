@@ -20,6 +20,7 @@ import { wholeFileCanvasView } from "../canvas-view";
 import type { CommittedSource } from "../display-decimate";
 import { DisplayTileRing, type RingView } from "../display-tiles-textures";
 import { DISPLAY_TILES_BYTES_PER_TEXEL, displayTilesBytes, tileGrid } from "../display-tiles";
+import { gatherPixelRanges } from "../pixel-ranges";
 
 const RESOLVE_VERT = /* glsl */ `
 in vec3 position;
@@ -292,6 +293,57 @@ describe("display tile ring", () => {
 
     ring.update(gl, asSource(canvas), view(1, 0), PYRAMID_STEP);
     expect(expectRingMatches(ring, maxTexels, packed, 0)).toBeGreaterThan(1000);
+  });
+
+  it("cuts a tile from packed values the same as from the canvas", () => {
+    const maxTexels = 1 << 16;
+    const fromCanvas = makeRing(maxTexels);
+    const fromStore = makeRing(maxTexels);
+    const canvas = makeCanvas(varied);
+    // Zoomed out to a level whose fine bands stride, so the cut's stride shows.
+    const ringView = view(16, 0);
+    fromCanvas.update(gl, asSource(canvas), ringView, PYRAMID_STEP);
+    expect(fromCanvas.uniforms().tileCount).toBeGreaterThan(0);
+    expect(fromCanvas.uniforms().level).toBe(4);
+
+    const missing = fromStore.aim(ringView, PYRAMID_STEP);
+    expect(missing.length).toBeGreaterThan(0);
+    expect(fromStore.uniforms().tileCount).toBe(0);
+    for (const tile of missing) {
+      fromStore.cutTileFromPacked(gl, tile, gatherPixelRanges(varied, fromStore.tileSourcePixelRanges(tile)));
+    }
+    expect(fromStore.aim(ringView, PYRAMID_STEP)).toEqual([]);
+    expect(fromStore.uniforms()).toEqual(fromCanvas.uniforms());
+
+    const a = readRing(fromCanvas, maxTexels);
+    const b = readRing(fromStore, maxTexels);
+    const bound = fromCanvas.uniforms();
+    const used = bound.slotCount * bound.tileTexels * 4;
+    for (let i = 0; i < used; i++) {
+      if (a[i] !== b[i]) throw new Error(`ring texel float ${i} differs: ${a[i]} vs ${b[i]}`);
+    }
+  });
+
+  it("empties the bound window when a far pan retargets its slots", () => {
+    const maxTexels = 1 << 16;
+    const ring = makeRing(maxTexels);
+    const canvas = makeCanvas(varied);
+    const grid = tileGrid(layout, data.numFrames, 0);
+    ring.update(gl, asSource(canvas), view(1, 0), PYRAMID_STEP);
+    const before = ring.uniforms();
+    expect(before.tileCount).toBeGreaterThan(0);
+
+    const far = view(1, grid.tileFrames * before.tileCount * 3);
+    const missing = ring.aim(far, PYRAMID_STEP);
+    expect(missing.length).toBeGreaterThan(0);
+    expect(ring.uniforms().tileCount).toBe(0);
+
+    for (const tile of missing) {
+      ring.cutTileFromPacked(gl, tile, gatherPixelRanges(varied, ring.tileSourcePixelRanges(tile)));
+    }
+    expect(ring.aim(far, PYRAMID_STEP)).toEqual([]);
+    expect(ring.uniforms().firstTile).toBe(missing[0]);
+    expect(expectRingMatches(ring, maxTexels, varied, 0)).toBeGreaterThan(1000);
   });
 
   it("costs what the budget charges it", () => {

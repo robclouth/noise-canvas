@@ -167,6 +167,139 @@ export class DisplayTileRing {
   }
 
   /**
+   * Aims the ring at `view` without a covering canvas: picks the level, slots
+   * and window the way `update` does, and returns the wanted tiles that are
+   * not yet resident, for the caller to cut from packed values. The bound
+   * window empties when a wanted tile's slot still shows a different tile,
+   * and switches to the wanted window once every tile in it is resident.
+   */
+  aim(view: RingView, pyramidStepLog2: number): number[] {
+    const choice = ringLevelChoice(view.framesPerPixel);
+    if (choice.level >= pyramidStepLog2) {
+      this.window = { first: 0, count: 0 };
+      return [];
+    }
+    this.blend = choice.blend;
+
+    if (!this.grid || this.grid.level !== choice.level) {
+      this.grid = tileGrid(this.layout, this.numFrames, choice.level);
+      this.metadata.set(this.grid.metadata);
+      this.metadataTex.needsUpdate = true;
+      this.slots = 0;
+    }
+    const slots = ringSlotCount(this.grid, view.viewportPixels, this.maxTexels);
+    if (slots !== this.slots) {
+      this.slots = slots;
+      this.residency = new Int32Array(Math.max(slots, 1)).fill(-1);
+      this.window = { first: 0, count: 0 };
+      this.draw.reserve(slots * this.layout.numBands);
+    }
+    if (slots === 0) return [];
+
+    const wanted = ringWindow(this.grid, slots, view.startFrame, view.endFrame, this.window);
+    const missing: number[] = [];
+    let conflict = false;
+    for (let tile = wanted.first; tile < wanted.first + wanted.count; tile++) {
+      const held = this.residency[tile % slots];
+      if (held === tile) continue;
+      missing.push(tile);
+      if (held >= this.window.first && held < this.window.first + this.window.count && this.window.count > 0) {
+        conflict = true;
+      }
+    }
+    if (conflict) this.window = { first: 0, count: 0 };
+    else if (missing.length === 0) this.window = wanted;
+    return missing;
+  }
+
+  /**
+   * The file pixel ranges holding one tile's source bins, as [start, count]
+   * per band, in the order `cutTileFromPacked` reads their values.
+   */
+  tileSourcePixelRanges(tile: number): Uint32Array {
+    const grid = this.grid;
+    if (!grid) throw new Error("the ring has no grid");
+    const ranges: number[] = [];
+    for (let band = 0; band < this.layout.numBands; band++) {
+      const run = this.tileSourceRun(grid, tile, band);
+      if (!run) continue;
+      ranges.push(this.layout.metadata[band * 4] + run.srcStart, run.srcCount);
+    }
+    return Uint32Array.from(ranges);
+  }
+
+  /**
+   * Cuts one tile's slot from `values`, the compact packed pixels of
+   * `tileSourcePixelRanges(tile)`. Cutting into a slot the bound window
+   * still shows as another tile would corrupt the picture, so that throws;
+   * `aim` empties the window first when a pan retargets its slots.
+   */
+  cutTileFromPacked(gl: WebGLRenderer, tile: number, values: Float32Array): void {
+    const grid = this.grid;
+    if (!grid || this.slots === 0) throw new Error("the ring has no grid to cut into");
+    const slot = tile % this.slots;
+    const held = this.residency[slot];
+    if (
+      held !== tile &&
+      held >= this.window.first &&
+      held < this.window.first + this.window.count &&
+      this.window.count > 0
+    ) {
+      throw new Error("the tile's slot still shows another tile");
+    }
+
+    const instances: DecimateInstance[] = [];
+    let texels = 0;
+    for (let band = 0; band < this.layout.numBands; band++) {
+      const run = this.tileSourceRun(grid, tile, band);
+      if (!run) continue;
+      instances.push({
+        destStart: slot * grid.tileTexels + grid.metadata[band * 4],
+        destCount: run.destCount,
+        srcStart: texels,
+        decimation: run.decimation,
+      });
+      texels += run.srcCount;
+    }
+    if (values.length !== texels * 4) throw new Error("the values do not match the tile's source pixels");
+    if (texels === 0) return;
+
+    const width = Math.min(ANALYSIS_MAX_TEXTURE_SIZE, texels);
+    const height = Math.ceil(texels / width);
+    let padded = values;
+    if (values.length !== width * height * 4) {
+      padded = new Float32Array(width * height * 4);
+      padded.set(values);
+    }
+    const chunk = new DataTexture(padded, width, height, RGBAFormat, FloatType);
+    chunk.internalFormat = "RGBA32F";
+    chunk.needsUpdate = true;
+    gl.initTexture(chunk);
+    this.draw.run(gl, this.target, chunk, width, "canvas", instances);
+    chunk.dispose();
+    this.residency[slot] = tile;
+  }
+
+  /** One band's ring-bin and source-bin runs inside a tile, or null when the band has none. */
+  private tileSourceRun(
+    grid: TileGrid,
+    tile: number,
+    band: number,
+  ): { destCount: number; srcStart: number; srcCount: number; decimation: number } | null {
+    const sourceStep = this.layout.metadata[band * 4 + 2];
+    const ringStep = grid.metadata[band * 4 + 2];
+    const decimation = 2 ** (ringStep - sourceStep);
+    const totalBins = grid.metadata[band * 4 + 1];
+    const binsPerTile = grid.metadata[band * 4 + 3];
+    const base = tile * binsPerTile;
+    const end = Math.min(base + binsPerTile, totalBins);
+    if (end <= base) return null;
+    const srcStart = base * decimation;
+    const srcEnd = Math.min(end * decimation, this.layout.metadata[band * 4 + 1]);
+    return { destCount: end - base, srcStart, srcCount: srcEnd - srcStart, decimation };
+  }
+
+  /**
    * Re-cuts the bins `changed` covers in every tile the ring holds, with
    * `changed` in the source view's own pixel space. Tiles the change misses
    * are left alone. While no window is held the change cannot be cut, so
