@@ -140,6 +140,11 @@ export class DecimateDraw {
     return attribute;
   }
 
+  /** Grows the instance buffer now, so a later `run` allocates nothing. */
+  reserve(capacity: number): void {
+    if (capacity * 4 > this.attribute.array.length) this.attribute = this.createAttribute(capacity);
+  }
+
   /** Draws every instance into `target`, leaving texels no instance covers alone. */
   run(
     gl: WebGLRenderer,

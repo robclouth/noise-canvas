@@ -1,10 +1,14 @@
 import {
   Color,
+  DataTexture,
+  FloatType,
   GLSL3,
   Mesh,
+  NearestFilter,
   OrthographicCamera,
   PlaneGeometry,
   RawShaderMaterial,
+  RGBAFormat,
   Scene,
   Texture,
   Vector2,
@@ -226,7 +230,7 @@ function makeView(gl: WebGLRenderer, data: SpectrogramData, effects: EffectsRegi
     return render(false, zoomPower, textures.originalPackedDataTex);
   }
 
-  return { renderer, material, render, renderAtLevel, renderFromRing, renderOriginal, dispose };
+  return { renderer, material, textures, render, renderAtLevel, renderFromRing, renderOriginal, dispose };
 }
 
 describe("display pyramid parity", () => {
@@ -422,6 +426,42 @@ describe("display pyramid parity", () => {
       const after = v.renderFromRing(FINE_ZOOM);
       expect(maxChannelDiff(before, after)).toBeGreaterThan(1);
       expect(maxChannelDiff(after, v.render(false, FINE_ZOOM))).toBeLessThanOrEqual(1);
+    });
+
+    it("composites a preview the same way the canvas path does, edges included", () => {
+      const v = ringView();
+      // Per band, a preview range whose edges fall inside the view, so the
+      // interpolation straddles them on screen.
+      const viewFrames = data.numFrames / 2 ** FINE_ZOOM;
+      const binRanges = new Float32Array(data.numBands * 4);
+      for (let band = 0; band < data.numBands; band++) {
+        const binsInView = viewFrames / 2 ** data.metadata[band * 4 + 2];
+        binRanges[band * 4] = Math.floor(binsInView * 0.25);
+        binRanges[band * 4 + 1] = Math.floor(binsInView * 0.7);
+      }
+      const rangeTex = new DataTexture(binRanges, data.numBands, 1, RGBAFormat, FloatType);
+      rangeTex.minFilter = NearestFilter;
+      rangeTex.magFilter = NearestFilter;
+      rangeTex.needsUpdate = true;
+
+      const u = v.material.uniforms;
+      const withPreview = (path: () => Uint8Array): Uint8Array => {
+        u.previewActive.value = true;
+        u.previewTex.value = v.textures.originalPackedDataTex;
+        u.previewBinRangesTex.value = rangeTex;
+        const pixels = path();
+        u.previewActive.value = false;
+        u.previewTex.value = null;
+        u.previewBinRangesTex.value = null;
+        return pixels;
+      };
+      const fromRing = withPreview(() => v.renderFromRing(FINE_ZOOM));
+      const fromCanvas = withPreview(() => v.render(false, FINE_ZOOM));
+      rangeTex.dispose();
+
+      // The preview really shows over the varied canvas.
+      expect(maxChannelDiff(fromRing, v.renderFromRing(FINE_ZOOM))).toBeGreaterThan(1);
+      expect(maxChannelDiff(fromRing, fromCanvas)).toBeLessThanOrEqual(1);
     });
   });
 });

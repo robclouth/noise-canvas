@@ -1,4 +1,5 @@
 import { coarsestStepLog2, type BandLayout } from "./band-layout";
+import { ANALYSIS_MAX_TEXTURE_SIZE } from "./constants";
 
 /** RG16F: left and right magnitude, in dB. */
 export const DISPLAY_TILES_BYTES_PER_TEXEL = 4;
@@ -82,7 +83,9 @@ export function tileGrid(layout: BandLayout, numFrames: number, level: number): 
  */
 export function ringSlotCount(grid: TileGrid, viewportPixels: number, maxTexels: number): number {
   const affordable = Math.floor(maxTexels / Math.max(1, grid.tileTexels));
-  const wanted = Math.ceil((viewportPixels * 2 ** grid.level) / grid.tileFrames) + RING_SLACK_TILES;
+  // The level serves views up to just under 2^(level+1) frames per pixel, so
+  // the slots must cover that worst case, not the level's own step.
+  const wanted = Math.ceil((viewportPixels * 2 ** (grid.level + 1)) / grid.tileFrames) + RING_SLACK_TILES;
   const slots = Math.min(affordable, wanted, grid.tileCount);
   return slots < Math.min(RING_MIN_SLOTS, grid.tileCount) ? 0 : slots;
 }
@@ -111,7 +114,8 @@ export function ringWindow(
   return { first, count };
 }
 
-/** GPU bytes a file's tile ring holds. */
+/** GPU bytes a file's tile ring holds, texture row rounding included. */
 export function displayTilesBytes(maxTexels = DISPLAY_TILES_MAX_TEXELS): number {
-  return maxTexels * DISPLAY_TILES_BYTES_PER_TEXEL;
+  const width = Math.min(ANALYSIS_MAX_TEXTURE_SIZE, Math.max(1, maxTexels));
+  return Math.ceil(maxTexels / width) * width * DISPLAY_TILES_BYTES_PER_TEXEL;
 }

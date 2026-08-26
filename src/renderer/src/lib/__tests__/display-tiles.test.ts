@@ -142,6 +142,17 @@ describe("ringSlotCount", () => {
     expect(slots * grid.tileFrames).toBeGreaterThan(VIEWPORT * 2 ** grid.level);
   });
 
+  it("covers the view at the coarsest zoom the level serves", () => {
+    const grid = tileGrid(layout, layout.numFrames, 6);
+    const slots = ringSlotCount(grid, VIEWPORT, DISPLAY_TILES_MAX_TEXELS);
+    // Just under the frames-per-pixel at which the next level takes over.
+    const span = VIEWPORT * (2 ** (grid.level + 1) - 1e-3);
+    const start = grid.tileFrames * 2 + 7;
+    const window = ringWindow(grid, slots, start, start + span);
+    expect(window.first).toBeLessThanOrEqual(Math.floor(start / grid.tileFrames));
+    expect(window.first + window.count).toBeGreaterThan(Math.floor((start + span - 1) / grid.tileFrames));
+  });
+
   it("never asks for more texels than the ring holds", () => {
     for (let level = 0; level <= 12; level++) {
       const grid = tileGrid(layout, layout.numFrames, level);
@@ -209,7 +220,12 @@ describe("ringWindow", () => {
 
 describe("ring size", () => {
   it("costs the same whatever the file's length", () => {
-    expect(displayTilesBytes()).toBe(DISPLAY_TILES_MAX_TEXELS * DISPLAY_TILES_BYTES_PER_TEXEL);
+    const rows = Math.ceil(DISPLAY_TILES_MAX_TEXELS / 8192);
+    expect(displayTilesBytes()).toBe(rows * 8192 * DISPLAY_TILES_BYTES_PER_TEXEL);
+  });
+
+  it("charges the rows the ring's texture really allocates", () => {
+    expect(displayTilesBytes(100_000)).toBe(13 * 8192 * DISPLAY_TILES_BYTES_PER_TEXEL);
   });
 
   it("covers a viewport at every level of an hour-long file", () => {
@@ -218,7 +234,10 @@ describe("ring size", () => {
       const grid = tileGrid(layout, layout.numFrames, level);
       const slots = ringSlotCount(grid, VIEWPORT, DISPLAY_TILES_MAX_TEXELS);
       expect(slots, `level ${level}`).toBeGreaterThan(0);
-      expect(slots * grid.tileFrames, `level ${level}`).toBeGreaterThan(VIEWPORT * 2 ** level);
+      // The worst view the level serves sits just under 2^(level+1) frames
+      // per pixel; the slots must cover it, or the whole file if that is less.
+      const worst = Math.min(VIEWPORT * (2 ** (level + 1) - 1), layout.numFrames);
+      expect(slots * grid.tileFrames, `level ${level}`).toBeGreaterThanOrEqual(worst);
     }
   });
 });

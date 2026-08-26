@@ -100,17 +100,20 @@ vec2 sampleLevelDb(vec2 uv, sampler2D levelTex, sampler2D levelMetaTex) {
 
 // The uncommitted preview's dB pair, where the preview covers this bin. The
 // preview lives on the canvas in the source layout, so it is addressed there
-// rather than in a level's.
+// rather than in a level's. A tap outside the preview's ranges reads the
+// committed canvas, the way the canvas path picks per texel.
 bool previewDbAt(vec2 uv, out vec2 db) {
     if (!previewActive) return false;
     float bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction;
     packedInterpBins(uv, sourceMetadataTex, sourceFrameCount, sourceBandCount,
                      bandIndex, bandStartOffset, timeIndex0, timeIndex1, timeFraction);
     vec2 bins = texelFetch(previewBinRangesTex, ivec2(int(bandIndex), 0), 0).rg;
-    if (timeIndex0 < bins.x || timeIndex0 >= bins.y) return false;
+    bool covers0 = timeIndex0 >= bins.x && timeIndex0 < bins.y;
+    bool covers1 = timeIndex1 >= bins.x && timeIndex1 < bins.y;
+    if (!covers0 && !covers1) return false;
     ivec2 texSize = textureSize(previewTex, 0);
-    vec4 sample1 = texelFetch(previewTex, packedTexel(bandStartOffset + timeIndex0, texSize), 0);
-    vec4 sample2 = texelFetch(previewTex, packedTexel(bandStartOffset + timeIndex1, texSize), 0);
+    vec4 sample1 = fetchDisplayTexel(int(bandIndex), bandStartOffset, timeIndex0, texSize);
+    vec4 sample2 = fetchDisplayTexel(int(bandIndex), bandStartOffset, timeIndex1, texSize);
     vec2 left = interpolateComplex(sample1.rg, sample2.rg, timeFraction);
     vec2 right = interpolateComplex(sample1.ba, sample2.ba, timeFraction);
     db = vec2(displayMagToDb(left.x), displayMagToDb(right.x));

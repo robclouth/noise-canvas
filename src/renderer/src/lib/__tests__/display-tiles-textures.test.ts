@@ -18,7 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import type { SpectrogramData } from "../../store/types";
 import { DisplayTileRing, type RingView } from "../display-tiles-textures";
-import { tileGrid } from "../display-tiles";
+import { DISPLAY_TILES_BYTES_PER_TEXEL, displayTilesBytes, tileGrid } from "../display-tiles";
 
 const RESOLVE_VERT = /* glsl */ `
 in vec3 position;
@@ -266,6 +266,35 @@ describe("display tile ring", () => {
     for (const bin of [0, 50, 200, 400]) {
       expect(binAt(after, bin), `bin ${bin}`).toBe(binAt(before, bin));
     }
+  });
+
+  it("re-cuts a slot that went stale while it held no window", () => {
+    const maxTexels = 1 << 16;
+    const ring = makeRing(maxTexels);
+    const packed = Float32Array.from(varied);
+    const canvas = makeCanvas(packed);
+    ring.update(gl, canvas, data.textureWidth, view(1, 0), PYRAMID_STEP);
+    expect(ring.uniforms().tileCount).toBeGreaterThan(0);
+
+    // Zoomed out to where the pyramid serves, the ring empties its window.
+    ring.update(gl, canvas, data.textureWidth, view(16, 0), 4);
+    expect(ring.uniforms().tileCount).toBe(0);
+
+    for (let i = 0; i < packed.length; i += 4) packed[i] *= 3;
+    canvas.needsUpdate = true;
+    ring.refreshFromCanvas(gl, canvas, data.textureWidth, {
+      ranges: Uint32Array.of(0, data.textureWidth * data.textureHeight),
+      count: 1,
+    });
+
+    ring.update(gl, canvas, data.textureWidth, view(1, 0), PYRAMID_STEP);
+    expect(expectRingMatches(ring, maxTexels, packed, 0)).toBeGreaterThan(1000);
+  });
+
+  it("costs what the budget charges it", () => {
+    const maxTexels = 100_000;
+    const ring = makeRing(maxTexels);
+    expect(ring.texelCount() * DISPLAY_TILES_BYTES_PER_TEXEL).toBe(displayTilesBytes(maxTexels));
   });
 
   it("leaves the view to the pyramid when its bins are already that fine", () => {

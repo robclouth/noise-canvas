@@ -149,6 +149,7 @@ export class DisplayTileRing {
       this.slots = slots;
       this.residency = new Int32Array(Math.max(slots, 1)).fill(-1);
       this.window = { first: 0, count: 0 };
+      this.draw.reserve(slots * this.layout.numBands);
     }
     if (slots === 0) return;
 
@@ -166,10 +167,15 @@ export class DisplayTileRing {
 
   /**
    * Re-cuts the bins `changed` covers in every tile the ring holds. Tiles the
-   * change misses are left alone.
+   * change misses are left alone. While no window is held the change cannot
+   * be cut, so every slot is marked stale instead.
    */
   refreshFromCanvas(gl: WebGLRenderer, canvas: Texture, canvasWidth: number, changed: PixelRangeList): void {
-    if (!this.grid || this.window.count === 0) return;
+    if (!this.grid) return;
+    if (this.window.count === 0) {
+      this.residency.fill(-1);
+      return;
+    }
     const spans = sourceBinRanges(this.layout, changed.ranges.subarray(0, changed.count * 2));
     const instances: DecimateInstance[] = [];
     for (let tile = this.window.first; tile < this.window.first + this.window.count; tile++) {
