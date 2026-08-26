@@ -52,6 +52,12 @@ export type CommonUniforms = {
   originalSpectrogramTex: { value: Texture | null };
   brushBottomLeftUv: { value: Vector2 };
   brushSizeUv: { value: Vector2 };
+  // Selection clip: 0 when no selection is set, and the brush writes everywhere
+  // it would otherwise. The frames are (startFrame, endFrame) and the bands are
+  // the inclusive (lowBand, highBand) pair the selection covers.
+  selectionActive: { value: number };
+  selectionFrames: { value: Vector2 };
+  selectionBands: { value: Vector2 };
   viewZoomPower: { value: number };
   viewOffset: { value: number };
   viewZoomPowerY: { value: number };
@@ -139,6 +145,9 @@ export function createDefaultUniforms(): CommonUniforms {
     originalSpectrogramTex: { value: null },
     brushBottomLeftUv: { value: new Vector2(0.0, 0.0) },
     brushSizeUv: { value: new Vector2(0.1, 0.1) },
+    selectionActive: { value: 0 },
+    selectionFrames: { value: new Vector2(0.0, 0.0) },
+    selectionBands: { value: new Vector2(0.0, 0.0) },
     viewZoomPower: { value: 0.0 },
     viewOffset: { value: 0.0 },
     viewZoomPowerY: { value: 0.0 },

@@ -22,6 +22,7 @@ import { createBrushSlice } from "./brush";
 import { createEffectsSlice } from "./effects";
 import { createFilesSlice, FILES_PERSISTED_KEYS, openFiles } from "./files";
 import { createFillSlice } from "./fill";
+import { createSelectionClipboardSlice } from "./selection-clipboard";
 import { createLinkSlice, LINK_PERSISTED_KEYS } from "./link";
 import { createModulatorsSlice } from "./modulators";
 import { createPalettesSlice, makeDefaultPalette, PALETTES_PERSISTED_KEYS } from "./palettes";
@@ -197,6 +198,7 @@ export const useStore = create<State>()(
         ...createLinkSlice(set, get),
         ...createStemGroupsSlice(set, get),
         ...createFillSlice(set, get),
+        ...createSelectionClipboardSlice(set, get),
         setParameter: (key: ParameterKey, value: unknown, effectId?: string) => {
           const state = get();
           const activeBrush = state.brushes[state.activeBrushIndex];

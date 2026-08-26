@@ -19,6 +19,7 @@ import {
 } from "../../test/mock-spectrogram";
 import { createMockState, createMockStateWithSteps } from "../../test/mock-state";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
+import type { Selection } from "../selection";
 import { BRUSH_SIZE_PITCH_FULL, BRUSH_SIZE_TIME_FULL } from "../utils";
 
 /**
@@ -1467,6 +1468,92 @@ describe("Effects", () => {
         transformEdgeMode: 0,
       });
       expect(centroid).toBeCloseTo(1 - burstSpan / 2, 1);
+    });
+  });
+
+  describe("selection clip", () => {
+    /** Paints one full-file gain cut, clipped to `selection` when there is one. */
+    async function paintGain(selection: Selection | null): Promise<Float32Array> {
+      const renderer = createRenderer();
+      const sourceFile = createSourceFile(renderer);
+      const state = createMockStateWithSteps([
+        {
+          name: "Gain",
+          overrides: {
+            brushIntensity: 100,
+            blendMode: 0,
+            brushSizeTime: BRUSH_SIZE_TIME_FULL,
+            brushSizePitch: BRUSH_SIZE_PITCH_FULL,
+            effects: [
+              { id: "test-dynamics", effect: "dynamics" as const, enabled: true, params: { dynamicsGainDb: -24 } },
+            ],
+          },
+        },
+      ]) as State;
+
+      renderer.beginStroke();
+      renderer.renderStroke({ ...paintParams(), selection }, state, sourceFile);
+      const output = await renderer.getFBOData();
+      renderer.dispose();
+      return output;
+    }
+
+    /** The file's packed values before any paint. */
+    async function unpainted(): Promise<Float32Array> {
+      const renderer = createRenderer();
+      const data = await renderer.getFBOData();
+      renderer.dispose();
+      return data;
+    }
+
+    /** Indices of the packed values a paint changed. */
+    function changedIndices(before: Float32Array, after: Float32Array): Set<number> {
+      const changed = new Set<number>();
+      for (let i = 0; i < before.length; i++) if (before[i] !== after[i]) changed.add(i);
+      return changed;
+    }
+
+    // The mock file has 8 bands, so a split at pitch 0.5 falls on a band edge
+    // and the two halves partition every band between them.
+    const duration = () => spectrogramData.numFrames / spectrogramData.sampleRate;
+    const lowerHalf = (): Selection => ({ start: 0, end: duration(), pitchLo: 0, pitchHi: 0.5 });
+    const upperHalf = (): Selection => ({ start: 0, end: duration(), pitchLo: 0.5, pitchHi: 1 });
+
+    it("paints only inside the selection, and paints there exactly as it would unclipped", async () => {
+      const before = await unpainted();
+      const unclipped = await paintGain(null);
+      const clipped = await paintGain(lowerHalf());
+
+      const changedUnclipped = changedIndices(before, unclipped);
+      const changedClipped = changedIndices(before, clipped);
+
+      expect(changedUnclipped.size).toBeGreaterThan(0);
+      expect(changedClipped.size).toBeGreaterThan(0);
+      expect(changedClipped.size).toBeLessThan(changedUnclipped.size);
+
+      for (const i of changedClipped) {
+        expect(changedUnclipped.has(i)).toBe(true);
+        expect(clipped[i]).toBe(unclipped[i]);
+      }
+    });
+
+    it("covers the whole file when two selections partition it", async () => {
+      const before = await unpainted();
+      const unclipped = await paintGain(null);
+      const lower = await paintGain(lowerHalf());
+      const upper = await paintGain(upperHalf());
+
+      const changedUnclipped = changedIndices(before, unclipped);
+      const union = new Set([...changedIndices(before, lower), ...changedIndices(before, upper)]);
+
+      expect([...union].sort()).toEqual([...changedUnclipped].sort());
+    });
+
+    it("leaves the file alone when the selection lies outside the brush", async () => {
+      const before = await unpainted();
+      // A span past the end of the file cannot contain any bin.
+      const painted = await paintGain({ start: duration() * 2, end: duration() * 3, pitchLo: 0, pitchHi: 1 });
+      expect(changedIndices(before, painted).size).toBe(0);
     });
   });
 });

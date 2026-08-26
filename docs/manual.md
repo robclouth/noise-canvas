@@ -49,6 +49,8 @@ Every control has a tooltip and an entry in the `?` overlay.
    - [Onsets](#onsets)
    - [The Level Strip](#the-level-strip)
    - [Navigating the Canvas](#navigating-the-canvas)
+   - [Selecting a Region](#selecting-a-region)
+   - [Moving Sound Around](#moving-sound-around)
 10. [History](#history)
 11. [Transport and Output](#transport-and-output)
     - [Which Device the Sound Plays Through](#which-device-the-sound-plays-through)
@@ -757,7 +759,7 @@ Open files stack vertically in the canvas column. Each header gives you:
 - **Fullscreen** – expands it to fill the canvas area.
 - **Close**.
 
-The active file has an orange border. Click any file to make it active, or use `Tab` and `Shift+Tab` to cycle through them.
+The active file has an orange border. Click any file to make it active.
 
 Files you create in the app (New File, duplicates, stems) get a real path when you Save As.
 
@@ -837,9 +839,43 @@ When zoomed in far enough, the pitch legend turns into a piano keyboard so you c
 On the **time legend** along the bottom:
 
 - **Click** – set the playback start position, snapped to the grid.
-- **Drag** – set a loop region, which also moves the playback start to its beginning.
+- **Drag** – select that stretch of time across every frequency, which sets the loop region and moves the playback start to its beginning.
 
 Zoom and scroll are remembered per file across restarts, and files in a [stem group](#stem-groups) with **Sync view** on share all four: time zoom, time scroll, pitch zoom, pitch scroll.
+
+### Selecting a Region
+
+The canvas has two modes, and `Tab` switches between them. The button in the transport bar shows which one you are in.
+
+- **Brush** – a drag paints.
+- **Select** – a drag draws a rectangle instead.
+
+A selection covers a stretch of time **and** a range of pitch, so you can pick out one part of the frequency range rather than the whole height of the file. Both edges snap to the grid, following the same **Snap** settings the brush uses.
+
+Dragging along the time legend selects the full frequency range, whichever mode you are in.
+
+A selection on the canvas leaves the loop region alone — only a [drag on the time legend](#navigating-the-canvas) sets that. So you can loop one part of the file and cut, copy and paste in another without losing your place. `Esc` clears the selection.
+
+In Select mode a plain click, without a drag, clears the selection and puts the playback start position where you clicked, snapped to the grid — the same thing a click on the time legend does, aimed anywhere on the canvas.
+
+**A selection confines the brush.** While one is set, a stroke only lands inside it, in Brush mode and in [Fill Grid](#fill-grid) alike. Everything outside is protected. Paint a wash over the whole file with the top octave selected and only the top octave changes.
+
+The edges land on whole bins and whole bands, because those are the smallest things the file stores. A band the selection touches at all is painted in full.
+
+### Moving Sound Around
+
+With a selection set, the Edit menu works on it.
+
+- **Copy** (`Cmd/Ctrl+C`) – picks the selected sound up. A ghost of it follows the pointer, and the original stays where it was.
+- **Cut** (`Cmd/Ctrl+X`) – the same, except the original goes when the ghost lands.
+- **Paste** (`Cmd/Ctrl+V`) – picks up whatever was last copied, so you can drop it again, as many times as you like.
+- **Silence Selection** – wipes the selection without taking anything.
+
+Click to put the ghost down. Dragging from inside the selection picks it up too — hold `Alt` while you drag to leave a copy behind. Either way the drop is a single edit in the history, so one undo brings everything back.
+
+The ghost moves in pitch as well as time: drop it higher or lower and the sound is transposed to match. Hold `Shift` to keep it at its original pitch while you place it. `Esc` puts everything back without painting anything — what you copied is kept, so a later paste still works.
+
+The file keeps its length throughout — nothing slides along to make room, so what was already at the destination is written over.
 
 ---
 
@@ -920,11 +956,13 @@ Memory climbs with the length and resolution of everything you have open, not wi
 **Edit**
 
 - **Undo / Redo** (`Cmd/Ctrl+Z`, `Shift+Cmd/Ctrl+Z`).
+- **Cut / Copy / Paste** (`Cmd/Ctrl+X`, `Cmd/Ctrl+C`, `Cmd/Ctrl+V`) – work on the selection. See [Selecting a Region](#selecting-a-region).
+- **Silence Selection** – empties the selection without copying it.
 - **Fill Grid with Brush** (`Cmd/Ctrl+G`) – see [Fill Grid](#fill-grid).
 - **Restore Original** – reloads the unedited file.
 - **Duplicate File** (`Cmd/Ctrl+D`).
 - **Double Length / Half Length** – stretches or shrinks the file's length.
-- **Insert Silence…** – pushes the file apart and drops empty time in. **Length** is in beats or seconds, and **At** puts it at the file start, at the play start on the time legend, or at the file end.
+- **Insert Silence…** (`Cmd/Ctrl+I`) – pushes the file apart and drops empty time in. **Length** is in beats or seconds, and **At** puts it at the file start, at the play start on the time legend, or at the file end.
 
 **View**
 
@@ -960,7 +998,9 @@ The keys below are the ones your keyboard prints. On a layout that prints someth
 | `\`                   | Randomise the brush                                    |
 | `Shift+\`             | Randomise the brush and shuffle the effect chain       |
 | `,` / `.`             | Loop / auto-play stroke                                |
-| `Tab` / `Shift+Tab`   | Next / previous file                                   |
+| `Tab`                 | Switch between the brush and selection                 |
+| `Esc`                 | Put a picked-up region back, or clear the selection    |
+| `Cmd/Ctrl+X/C/V`      | Cut / copy / paste the selection                       |
 | `1`–`9`, `0`          | Select the top palette's first ten brushes             |
 | `a`–`z`               | Select the brush bound to that key                     |
 | Hold `Shift` + click  | Pick a source file and position                        |

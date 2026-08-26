@@ -1,3 +1,4 @@
+import type { Selection } from "@renderer/lib/selection";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 
@@ -26,6 +27,11 @@ export interface TransientState {
   // throttled snapshots mid-gesture.
   axisDragFile: string | null;
   setAxisDragFile: (fileId: string | null) => void;
+  // The selection rectangle being dragged, before the pointer is released.
+  // Held here so a drag redraws the overlay without writing the loop region on
+  // every pointer move.
+  selectionDrag: { fileId: string; selection: Selection } | null;
+  setSelectionDrag: (drag: { fileId: string; selection: Selection } | null) => void;
 }
 
 export const useTransientStore = create<TransientState>()(
@@ -40,5 +46,7 @@ export const useTransientStore = create<TransientState>()(
     setControlDragging: (dragging) => set({ controlDragging: dragging }),
     axisDragFile: null,
     setAxisDragFile: (fileId) => set({ axisDragFile: fileId }),
+    selectionDrag: null,
+    setSelectionDrag: (drag) => set({ selectionDrag: drag }),
   })),
 );

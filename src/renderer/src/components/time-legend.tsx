@@ -4,6 +4,7 @@ import { openFiles } from "@renderer/store/files";
 import { memo, useCallback, useEffect, useRef } from "react";
 import { Vector2 } from "three";
 import { shallow } from "zustand/shallow";
+import { fullHeightSelection } from "../lib/selection";
 import { computeTimeMarkers } from "../lib/time-markers";
 import { screenToZoomed, snapToSwungGridRound, zoomedToScreen } from "../lib/utils";
 import { LOOP_DRAG_COLOUR } from "./loop-region";
@@ -112,13 +113,16 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
         const endTime = getTimeFromX(event.clientX, rect);
         const loopStart = Math.min(startTime, endTime);
         const loopEnd = Math.max(startTime, endTime);
-        if (loopEnd > loopStart) {
+        const selection = fullHeightSelection(loopStart, loopEnd);
+        if (selection) {
+          useStore.getState().setFileSelection(fileId, selection);
           writeLoopRegion({ start: loopStart, end: loopEnd });
           setFilePlaybackStartTime(fileId, loopStart);
         }
       } else {
         // It was a plain click — set playback position
         writeLoopRegion(null);
+        useStore.getState().setFileSelection(fileId, null);
         setFilePlaybackStartTime(fileId, startTime);
         if (activeFileId === fileId && isPlaying) {
           setPlaybackTime(startTime);

@@ -8,6 +8,8 @@ import { Canvas, RootState, useFrame, useThree } from "@react-three/fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone, type FileRejection } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
+import { trackPointer } from "./lib/last-pointer";
+import { pointerSelectionAim } from "./lib/view-aim";
 import { openImageExportModal } from "./components/image-export-modal";
 import { CanvasPanel, Dock } from "./components/layout/canvas-panel";
 import { AppMenuBar } from "./components/layout/menu-bar";
@@ -178,6 +180,14 @@ function App(): React.JSX.Element {
     document.documentElement.dataset.uiSize = uiSize;
   }, [uiSize]);
 
+  // A paste from the keyboard aims at the pointer, so its position has to be
+  // known outside any one component's handlers.
+  useEffect(() => {
+    const track = (event: PointerEvent): void => trackPointer(event.clientX, event.clientY);
+    window.addEventListener("pointermove", track, { passive: true });
+    return () => window.removeEventListener("pointermove", track);
+  }, []);
+
   useEffect(() => {
     useStore.getState().init();
     void useStore.getState().initSectionPresets();
@@ -296,6 +306,28 @@ function App(): React.JSX.Element {
       void useStore.getState().fillGrid();
     });
     unsubscribers.push(unsubFillGrid);
+
+    const unsubCopySelection = ipcOn("copy-selection", () => {
+      void useStore.getState().copySelection();
+    });
+    unsubscribers.push(unsubCopySelection);
+
+    const unsubCutSelection = ipcOn("cut-selection", () => {
+      void useStore.getState().cutSelection();
+    });
+    unsubscribers.push(unsubCutSelection);
+
+    const unsubPasteSelection = ipcOn("paste-selection", () => {
+      const state = useStore.getState();
+      const aim = state.activeFileId ? pointerSelectionAim(state.activeFileId) : null;
+      state.beginPaste(aim ?? undefined);
+    });
+    unsubscribers.push(unsubPasteSelection);
+
+    const unsubSilenceSelection = ipcOn("silence-selection", () => {
+      void useStore.getState().silenceSelection();
+    });
+    unsubscribers.push(unsubSilenceSelection);
 
     const unsubUndo = ipcOn("undo", async () => {
       const { activeFileId } = useStore.getState();

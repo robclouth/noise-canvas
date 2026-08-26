@@ -15,6 +15,7 @@ import {
   RawShaderMaterial,
   RedFormat,
   RGBAFormat,
+  RGFormat,
   Scene,
   Texture,
   Vector2,
@@ -38,6 +39,7 @@ import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { footprintAimToBlUv } from "./brush-anchor";
 import { ATTRACT_MODULATOR_MAP_START } from "./constants";
 import { getFileOnsets } from "./file-onsets";
+import { selectionBandRange, selectionFrameRange, selectionUvRect, type Selection } from "./selection";
 import { buildModulatorUniforms } from "./modulator-utils";
 import {
   brushFootprintRanges,
@@ -223,6 +225,22 @@ export interface StrokeParams {
   // names no source file of its own, so it reads what the steps before it
   // produced (or, for the first step, the `sourceFile` argument).
   stepSources?: readonly (SourceFileInfo | undefined)[];
+  // The file's selection rectangle, which the stroke cannot paint outside.
+  selection?: Selection | null;
+}
+
+/** The selection clip as the shader reads it. `active` is 0 when there is none. */
+interface SelectionClip {
+  active: number;
+  frames: Vector2;
+  bands: Vector2;
+}
+
+function selectionClipFor(selection: Selection | null, data: SpectrogramData): SelectionClip {
+  if (!selection) return { active: 0, frames: new Vector2(), bands: new Vector2() };
+  const { startFrame, endFrame } = selectionFrameRange(selection, data.sampleRate);
+  const { lowBand, highBand } = selectionBandRange(selection, data.numBands);
+  return { active: 1, frames: new Vector2(startFrame, endFrame), bands: new Vector2(lowBand, highBand) };
 }
 
 /** Where one step's brush lands, from that step's own size and anchor mode. */
@@ -758,6 +776,7 @@ export class StrokeRenderer {
     viewZoomPowerY: number,
     viewOffsetY: number,
     magnitudeLimit: number,
+    selectionClip: SelectionClip,
   ): CommonUniforms {
     const { placeholderTexture, modulatorScaleLut, modulator1Texture, modulator2Texture, modulator3Texture } =
       this.textures;
@@ -802,6 +821,9 @@ export class StrokeRenderer {
       viewZoomPowerY: { value: viewZoomPowerY },
       viewOffsetY: { value: viewOffsetY },
       brushBottomLeftUv: { value: cursorPos },
+      selectionActive: { value: selectionClip.active },
+      selectionFrames: { value: selectionClip.frames },
+      selectionBands: { value: selectionClip.bands },
       brushCurveTime: { value: brushParamUniform(stepState, "brushCurveTime", ctx) },
       brushSkewTime: { value: brushParamUniform(stepState, "brushSkewTime", ctx) },
       brushCurvePitch: { value: brushParamUniform(stepState, "brushCurvePitch", ctx) },
@@ -1003,6 +1025,28 @@ export class StrokeRenderer {
         wholeTime = true;
       }
     }
+    // The shader rejects everything outside the selection, so the rows and bins
+    // a dab has to touch are the brush's extent clipped to it. A wrapping or
+    // Full-axis step reaches the whole axis, and the selection bounds it there
+    // too. With no overlap the extent collapses, which leaves an empty
+    // footprint: the passes draw nothing and no preview is composited.
+    const selection = params.selection ?? null;
+    const selectionClip = selectionClipFor(selection, this.spectrogramData);
+    if (selection) {
+      const rect = selectionUvRect(selection, totalDuration);
+      const selMaxX = rect.anchor.x + rect.size.x;
+      const selMaxY = rect.anchor.y + rect.size.y;
+      const clipMinX = wholeTime ? rect.anchor.x : Math.max(unionMin.x, rect.anchor.x);
+      const clipMaxX = wholeTime ? selMaxX : Math.min(unionMax.x, selMaxX);
+      const clipMinY = yWrapsOutOfBounds ? rect.anchor.y : Math.max(unionMin.y, rect.anchor.y);
+      const clipMaxY = yWrapsOutOfBounds ? selMaxY : Math.min(unionMax.y, selMaxY);
+      const empty = clipMaxX <= clipMinX || clipMaxY <= clipMinY;
+      unionMin.set(clipMinX, clipMinY);
+      unionMax.set(empty ? clipMinX : clipMaxX, empty ? clipMinY : clipMaxY);
+      wholeTime = false;
+      yWrapsOutOfBounds = false;
+    }
+
     const unionAnchor = unionMin;
     const maxBrushSizeUv = new Vector2(unionMax.x - unionMin.x, unionMax.y - unionMin.y);
 
@@ -1119,6 +1163,7 @@ export class StrokeRenderer {
         viewZoomPowerY,
         viewOffsetY,
         state.magnitudeLimit,
+        selectionClip,
       );
 
       // The source half of the uniforms has to describe whatever texture the
@@ -1389,7 +1434,17 @@ export class StrokeRenderer {
               rowEnd: Math.max(this.maskRows.rowEnd, dabRowEnd),
             }
           : { rowStart: dabRowStart, rowEnd: dabRowEnd };
-        this.updateStrokeMask(stepGeometries, cursorPos, bpm, totalDuration, strokeRandom, pressure, tiltX, tiltY);
+        this.updateStrokeMask(
+          stepGeometries,
+          cursorPos,
+          bpm,
+          totalDuration,
+          strokeRandom,
+          pressure,
+          tiltX,
+          tiltY,
+          selectionClip,
+        );
       }
 
       // Update dirty region to include this stroke's bounds. Every step of
@@ -1443,6 +1498,7 @@ export class StrokeRenderer {
     pressure: number,
     tiltX: number,
     tiltY: number,
+    selectionClip: SelectionClip,
   ): void {
     const numSteps = stepGeometries.length;
     if (numSteps === 0) return;
@@ -1458,6 +1514,9 @@ export class StrokeRenderer {
     uniforms.destSpectrogramTextureSize.value = this.spectrogramData.packedTextureSize;
     uniforms.destFrameCount.value = this.spectrogramData.numFrames;
     uniforms.destBandCount.value = this.spectrogramData.numBands;
+    uniforms.selectionActive.value = selectionClip.active;
+    uniforms.selectionFrames.value = selectionClip.frames;
+    uniforms.selectionBands.value = selectionClip.bands;
     uniforms.gainLut.value = modulatorScaleLut || placeholderTexture;
     uniforms.modulator1ImageTex.value = modulator1Texture || placeholderTexture;
     uniforms.modulator2ImageTex.value = modulator2Texture || placeholderTexture;
@@ -1882,6 +1941,50 @@ export class StrokeRenderer {
   /**
    * Get the current textures for reading.
    */
+  /**
+   * Textures for a spectrogram that is not an open file — a clipboard region,
+   * say — so a stroke can sample it the way it samples another file. The caller
+   * owns what comes back and disposes it.
+   */
+  createDetachedTextures(spec: SpectrogramData): {
+    packed: WebGLRenderTarget;
+    inverse: DataTexture;
+    metadata: DataTexture;
+    original: DataTexture;
+  } {
+    const { textureWidth, textureHeight } = spec;
+
+    const packedTex = new DataTexture(spec.packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
+    packedTex.internalFormat = "RGBA32F";
+    packedTex.minFilter = NearestFilter;
+    packedTex.magFilter = NearestFilter;
+    packedTex.needsUpdate = true;
+
+    const inverse = new DataTexture(spec.inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
+    inverse.internalFormat = "RG32F";
+    inverse.minFilter = NearestFilter;
+    inverse.magFilter = NearestFilter;
+    inverse.needsUpdate = true;
+
+    const metadata = new DataTexture(spec.metadata, spec.numBands, 1, RGBAFormat, FloatType);
+    metadata.internalFormat = "RGBA32F";
+    metadata.minFilter = NearestFilter;
+    metadata.magFilter = NearestFilter;
+    metadata.needsUpdate = true;
+
+    // The sampler wants a render target, so the data goes through one draw.
+    const packed = this.createFBO(textureWidth, textureHeight, RGBAFormat);
+    this.gl.initTexture(packedTex);
+    this.fboMesh.material = copyMaterial;
+    copyMaterial.uniforms.inputTex.value = packedTex;
+    this.gl.setRenderTarget(packed);
+    this.gl.render(this.fboScene, this.camera);
+    this.gl.setRenderTarget(null);
+    copyMaterial.uniforms.inputTex.value = null;
+
+    return { packed, inverse, metadata, original: packedTex };
+  }
+
   getTextures(): {
     packed: WebGLRenderTarget;
     inverse: DataTexture;

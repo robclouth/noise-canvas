@@ -8,7 +8,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { createDefaultUniforms } from "@renderer/effects/base-effect";
 import { getOpenFileByPath, logFileFootprint, openFiles } from "@renderer/store/files";
 import type { BrushStep } from "@renderer/parameters";
-import { State, type OpenFile } from "@renderer/store/types";
+import { State, type OpenFile, type SpectrogramData } from "@renderer/store/types";
 import {
   forwardRef,
   memo,
@@ -82,6 +82,15 @@ interface FileRendererProps {
 }
 
 /** One stroke of a batch: where it is aimed, and the state to paint it with. */
+/** A stroke over one region, painted from a state built for it. */
+export interface RegionStroke {
+  aimX: number;
+  aimY: number;
+  state: State;
+  /** The spectrogram the stroke samples, when it is not an open file. */
+  source?: SourceFileInfo;
+}
+
 export interface StrokeDispatch {
   /** Aim point in pitch UV — y up from the file's lowest band, as unitsToUv gives it. */
   aimX: number;
@@ -108,6 +117,15 @@ export interface FileRendererHandle {
    * how many were painted.
    */
   renderStrokeBatch: (strokes: StrokeDispatch[]) => number;
+  /**
+   * Paints one stroke from an explicit state, optionally sampling a spectrogram
+   * that is not an open file. A preview goes to the partner buffer and can be
+   * redrawn as the pointer moves; a commit is the caller's to make.
+   */
+  renderRegionStroke: (stroke: RegionStroke, preview: boolean) => boolean;
+  /** GPU textures for a detached spectrogram, for `renderRegionStroke` to sample. */
+  createRegionSource: (id: string, spec: SpectrogramData) => SourceFileInfo | null;
+  disposeRegionSource: (source: SourceFileInfo) => void;
   /**
    * Saves the spectrogram (or restores an already-saved one) so the strokes
    * painted next can be taken back without touching history.
@@ -703,7 +721,12 @@ const FileRendererInner = memo(
      * a grid fill calls it once per stroke with a shared state. Returns false
      * when the source file's textures aren't ready.
      */
-    const dispatchStroke = (state: State, cursorPos: Vector2, preview: boolean): boolean => {
+    const dispatchStroke = (
+      state: State,
+      cursorPos: Vector2,
+      preview: boolean,
+      sourceOverride?: SourceFileInfo,
+    ): boolean => {
       const strokeRenderer = strokeRendererRef.current;
       const file = openFiles[fileId];
       if (!strokeRenderer || !file?.spectrogramData) return false;
@@ -736,7 +759,9 @@ const FileRendererInner = memo(
       // A step with no Source of its own falls back to this: the file being
       // painted, which is what "paint from myself" means.
       const sourceFileInfo =
-        toSourceInfo(state.activeFileId ? openFiles[state.activeFileId] : undefined) ?? toSourceInfo(openFiles[fileId]);
+        sourceOverride ??
+        toSourceInfo(state.activeFileId ? openFiles[state.activeFileId] : undefined) ??
+        toSourceInfo(openFiles[fileId]);
       if (!sourceFileInfo) return false;
 
       // Every step samples from the file its own Source control names, so the
@@ -748,6 +773,7 @@ const FileRendererInner = memo(
       const stepSources = steps.map((step) => {
         const path = step.sourceFile?.path;
         if (path === undefined) return undefined;
+        if (sourceOverride) return sourceOverride;
         if (!resolved.has(path)) resolved.set(path, toSourceInfo(getOpenFileByPath(path)));
         return resolved.get(path);
       });
@@ -784,6 +810,7 @@ const FileRendererInner = memo(
               tiltY: penState.tiltY,
               destOnsetTexture,
               stepSources,
+              selection: state.filesSelection[fileId] ?? null,
             },
             state,
             sourceFileInfo,
@@ -1367,6 +1394,32 @@ const FileRendererInner = memo(
         }
         applyStroke.current = true;
         invalidateRef.current?.();
+      },
+      renderRegionStroke: (stroke: RegionStroke, preview: boolean) => {
+        const painted = dispatchStroke(stroke.state, new Vector2(stroke.aimX, stroke.aimY), preview, stroke.source);
+        if (!painted) return false;
+        displayMode.current = preview ? "preview" : "committed";
+        invalidateRef.current?.();
+        scheduleSnapshotRefresh();
+        return true;
+      },
+      createRegionSource: (id: string, spec: SpectrogramData) => {
+        const strokeRenderer = strokeRendererRef.current;
+        if (!strokeRenderer?.getIsInitialized()) return null;
+        return {
+          id,
+          filePath: id,
+          displayName: id,
+          spectrogramData: spec,
+          textures: strokeRenderer.createDetachedTextures(spec),
+          onsetTexture: null,
+        };
+      },
+      disposeRegionSource: (source: SourceFileInfo) => {
+        source.textures.packed.dispose();
+        source.textures.inverse.dispose();
+        source.textures.metadata.dispose();
+        source.textures.original.dispose();
       },
       renderStrokeBatch: (strokes: StrokeDispatch[]) => {
         const strokeRenderer = strokeRendererRef.current;

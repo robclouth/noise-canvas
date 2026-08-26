@@ -11,6 +11,7 @@ import { diag } from "../lib/diag-log";
 import { remainingCoefficientBudget, usedBudgetFraction } from "../lib/gpu-budget";
 import { toChannelCount } from "../lib/channel-mix";
 import { insertSilence, type InsertSilenceValues } from "../lib/insert-silence";
+import type { Selection } from "../lib/selection";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type { AnalysisParams, CommitLevels, CommitStrokeResult, PackedOnsets } from "../../../main/lib/types";
 import {
@@ -172,6 +173,11 @@ export interface FilesState {
   // one file's seconds against another's buffer.
   filesLoopRegion: Record<string, LoopRegion | null>;
   setFileLoopRegion: (fileId: string, region: LoopRegion | null) => void;
+  // Selection rectangle per file. Setting one also writes its time span to the
+  // loop region, so the transport always plays what the selection covers.
+  // Clearing one leaves the loop region alone.
+  filesSelection: Record<string, Selection | null>;
+  setFileSelection: (fileId: string, selection: Selection | null) => void;
   filesDirty: Record<string, boolean>;
   setFileDirty: (fileId: string, dirty: boolean) => void;
   filesSynthesizing: Record<string, boolean>;
@@ -187,8 +193,6 @@ export interface FilesState {
   /** Moves a file so it sits directly before `beforeFileId`, or last when null. */
   moveFileBefore: (fileId: string, beforeFileId: string | null) => void;
   openFileMinimized: (filePath: string) => Promise<void>;
-  switchToNextFile: () => void;
-  switchToPreviousFile: () => void;
 }
 
 // Open files keyed by file ID
@@ -763,6 +767,9 @@ async function rebuildFileFromAudioNow(
   set(
     produce((state: State) => {
       state.filesDirty[fileId] = true;
+      // The rebuild moves every frame, so a selection measured against the old
+      // length no longer covers what it was drawn over.
+      state.filesSelection[fileId] = null;
     }),
   );
 }
@@ -860,6 +867,7 @@ function discardFiles(set: ZustandSet, ids: string[]): void {
         delete state.filesOffsetY[id];
         delete state.filesPlaybackStartTime[id];
         delete state.filesLoopRegion[id];
+        delete state.filesSelection[id];
         delete state.filesDirty[id];
         delete state.filesLoading[id];
         delete state.persistedFilePaths[id];
@@ -900,6 +908,11 @@ function registerStemGroup(
 /** The active file's loop region, or null when there is no file or no region. */
 export function activeLoopRegion(state: Pick<State, "activeFileId" | "filesLoopRegion">): LoopRegion | null {
   return state.activeFileId ? (state.filesLoopRegion[state.activeFileId] ?? null) : null;
+}
+
+/** The active file's selection, or null when there is no file or no selection. */
+export function activeSelection(state: Pick<State, "activeFileId" | "filesSelection">): Selection | null {
+  return state.activeFileId ? (state.filesSelection[state.activeFileId] ?? null) : null;
 }
 
 /**
@@ -1113,6 +1126,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesOffsetY[fileId];
           delete state.filesPlaybackStartTime[fileId];
           delete state.filesLoopRegion[fileId];
+          delete state.filesSelection[fileId];
           delete state.persistedFilePaths[fileId];
           delete state.fileDisplayNames[fileId];
         }),
@@ -1857,6 +1871,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           delete state.filesOffsetY[fileId];
           delete state.filesPlaybackStartTime[fileId];
           delete state.filesLoopRegion[fileId];
+          delete state.filesSelection[fileId];
           delete state.filesDirty[fileId];
           delete state.filesLoading[fileId];
           delete state.filesSynthesizing[fileId];
@@ -2976,6 +2991,16 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesLoopRegion[fileId] = region;
       }),
     ),
+  filesSelection: {},
+  // The selection never writes the loop region; the time legend is the only
+  // gesture that does.
+  setFileSelection: (fileId, selection) => {
+    set(
+      produce((state: State) => {
+        state.filesSelection[fileId] = selection;
+      }),
+    );
+  },
   filesDirty: {},
   setFileDirty: (fileId: string, dirty: boolean) => {
     set((state) => ({
@@ -3095,19 +3120,5 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         }),
       );
     }
-  },
-  switchToNextFile: () => {
-    const { openFileIds, activeFileId, setActiveFileId } = get();
-    if (openFileIds.length <= 1 || !activeFileId) return;
-    const currentIndex = openFileIds.indexOf(activeFileId);
-    const nextIndex = (currentIndex + 1) % openFileIds.length;
-    setActiveFileId(openFileIds[nextIndex]);
-  },
-  switchToPreviousFile: () => {
-    const { openFileIds, activeFileId, setActiveFileId } = get();
-    if (openFileIds.length <= 1 || !activeFileId) return;
-    const currentIndex = openFileIds.indexOf(activeFileId);
-    const prevIndex = (currentIndex - 1 + openFileIds.length) % openFileIds.length;
-    setActiveFileId(openFileIds[prevIndex]);
   },
 });

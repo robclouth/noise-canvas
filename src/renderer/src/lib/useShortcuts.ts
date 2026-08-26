@@ -41,8 +41,7 @@ export enum ShortcutAction {
   RandomizeBrushAndEffects = "RandomizeBrushAndEffects",
   ToggleLoop = "ToggleLoop",
   ToggleAutoPlayStroke = "ToggleAutoPlayStroke",
-  NextFile = "NextFile",
-  PreviousFile = "PreviousFile",
+  ToggleEditMode = "ToggleEditMode",
   TogglePlayback = "TogglePlayback",
 }
 
@@ -73,8 +72,7 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   { code: "Backslash", shift: true, chars: ["|"], action: ShortcutAction.RandomizeBrushAndEffects },
   { code: "Comma", chars: [","], action: ShortcutAction.ToggleLoop },
   { code: "Period", chars: ["."], action: ShortcutAction.ToggleAutoPlayStroke },
-  { code: "Tab", action: ShortcutAction.NextFile },
-  { code: "Tab", shift: true, action: ShortcutAction.PreviousFile },
+  { code: "Tab", action: ShortcutAction.ToggleEditMode },
   { code: "Space", chars: [" "], action: ShortcutAction.TogglePlayback },
 ];
 
@@ -128,6 +126,20 @@ export function useShortcuts() {
     // Ahead of the modifier branches: Shift for a capital letter must not put
     // the canvas into source-pick mode.
     if (isTextEntry(event.target as HTMLElement)) return;
+
+    // Escape belongs to whatever is on top: a dialog or the help overlay closes
+    // first, and only a bare canvas clears its selection. This listener is on
+    // the capture phase, so the event is left unconsumed either way.
+    if (event.key === "Escape") {
+      const state = useStore.getState();
+      const dialogOpen = document.querySelector("[role='dialog']") !== null;
+      if (dialogOpen || state.helpOverlayOpen) return;
+      // A region in flight goes back to the clipboard before the selection is
+      // given up, so one press never loses both.
+      if (state.placing) state.cancelPlacing();
+      else if (state.activeFileId) state.setFileSelection(state.activeFileId, null);
+      return;
+    }
 
     // Special handling for Shift (hold) - Pick source file position. Shift is
     // also the fine modifier on a parameter control, so a drag under way keeps
@@ -216,11 +228,8 @@ export function useShortcuts() {
         case ShortcutAction.ToggleAutoPlayStroke:
           state.setAutoPlayStroke(!state.autoPlayStroke);
           break;
-        case ShortcutAction.NextFile:
-          state.switchToNextFile();
-          break;
-        case ShortcutAction.PreviousFile:
-          state.switchToPreviousFile();
+        case ShortcutAction.ToggleEditMode:
+          state.toggleEditMode();
           break;
         case ShortcutAction.TogglePlayback:
           state.togglePlayback();

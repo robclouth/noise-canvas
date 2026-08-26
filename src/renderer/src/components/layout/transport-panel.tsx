@@ -8,7 +8,7 @@ import {
   TRANSPORT_TIME_WIDTH,
   useUiSize,
 } from "@renderer/lib/ui-density";
-import { Brush, Link2, Play, Repeat, Square } from "lucide-react";
+import { BoxSelect, Brush, Link2, Paintbrush, Play, Repeat, Square } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { HelpActionIcon } from "../controls/help-control";
 import { ParameterControl } from "../controls/parameter-control";
@@ -34,6 +34,8 @@ export const TransportPanel = memo(() => {
   const autoPlayStroke = useStore((state) => state.autoPlayStroke);
   const setAutoPlayStroke = useStore((state) => state.setAutoPlayStroke);
   const togglePlayback = useStore((state) => state.togglePlayback);
+  const editMode = useStore((state) => state.editMode);
+  const toggleEditMode = useStore((state) => state.toggleEditMode);
   const linkEnabled = useStore((state) => state.linkEnabled);
   const setLinkEnabled = useStore((state) => state.setLinkEnabled);
   const linkNumPeers = useStore((state) => state.linkNumPeers);
@@ -136,6 +138,14 @@ export const TransportPanel = memo(() => {
           color={loop ? "orange" : "dark.5"}
         >
           <Repeat size={18} />
+        </HelpActionIcon>
+        <HelpActionIcon
+          help="transport-edit-mode"
+          onClick={toggleEditMode}
+          size={uiSize}
+          color={editMode === "select" ? "orange" : "dark.5"}
+        >
+          {editMode === "select" ? <BoxSelect size={18} /> : <Paintbrush size={18} />}
         </HelpActionIcon>
         <HelpActionIcon
           help="transport-audition"

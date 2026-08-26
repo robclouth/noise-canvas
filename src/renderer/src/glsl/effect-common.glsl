@@ -32,6 +32,9 @@ uniform float     destBandsPerOctave;
 
 uniform sampler2D originalSpectrogramTex;
 
+uniform float selectionActive;
+uniform vec2  selectionFrames;
+uniform vec2  selectionBands;
 uniform float viewZoomPower;
 uniform float viewOffset;
 uniform float viewZoomPowerY;
@@ -1261,10 +1264,30 @@ float getBrushTimeCoverage(vec2 unpackedUv, vec4 meta, out float localX) {
   return (inside || fallback) ? 1.0 : 0.0;
 }
 
+// Selection clip. A bin is inside the selection iff its left edge k·2^step
+// falls in [startFrame, endFrame) — the same edge-of-bin rule the brush's own
+// time coverage uses, so a selection edge and a brush edge landing on the same
+// frame claim the same bins. A band is inside iff its index falls in the
+// inclusive band pair, which the CPU rounds outwards: a band is the smallest
+// thing that can be painted.
+bool insideSelection(vec2 unpackedUv, vec4 meta) {
+  if (selectionActive < 0.5) return true;
+
+  float bandIndex = floor((1.0 - unpackedUv.y) * destBandCount);
+  if (bandIndex < selectionBands.x || bandIndex > selectionBands.y) return false;
+
+  float cellFrames = exp2(meta.b);
+  float pixelFrame = floor(unpackedUv.x * destFrameCount + 0.5);
+  float binIndex = clamp(floor((pixelFrame + 0.5) / cellFrames), 0.0, meta.g - 1.0);
+  float edgeFrame = binIndex * cellFrames;
+  return edgeFrame >= selectionFrames.x && edgeFrame < selectionFrames.y;
+}
+
 // Returns vec2(weightL, weightR) — brush weight can decorrelate per channel
 // when the modulators driving envelope curve/skew have non-zero stereo spread.
 vec2 getBrushWeight(vec2 unpackedUv, float audioLevelDb) {
   vec4 meta = getDestMetadata(unpackedUv);
+  if (!insideSelection(unpackedUv, meta)) return vec2(0.0);
 
   vec2 off = getEffectiveBrushOffset(unpackedUv);
   vec2 safeBrush = max(vec2(EPSILON), brushSizeUv);
@@ -1335,11 +1358,13 @@ bool brushWeightIsZero(vec2 unpackedUv) {
 #ifdef ABLATE_BRUSH_REJECT
   return false;
 #else
+  vec4 meta = getDestMetadata(unpackedUv);
+  if (!insideSelection(unpackedUv, meta)) return true;
   vec2 off = getEffectiveBrushOffset(unpackedUv);
   float safeBrushY = max(EPSILON, brushSizeUv.y);
   if (off.y < 0.0 || off.y > safeBrushY) return true;
   float localX;
-  return getBrushTimeCoverage(unpackedUv, getDestMetadata(unpackedUv), localX) <= 0.0;
+  return getBrushTimeCoverage(unpackedUv, meta, localX) <= 0.0;
 #endif
 }
 

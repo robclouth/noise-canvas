@@ -12,7 +12,10 @@ export type UiSize = "md" | "sm";
 const envUiSize = import.meta.env.VITE_DEFAULT_UI_SIZE;
 export const DEFAULT_UI_SIZE: UiSize = envUiSize === "sm" || envUiSize === "md" ? envUiSize : "md";
 
-export const APP_PERSISTED_KEYS = ["uiSize", "walkthroughSeen"] as const;
+export const APP_PERSISTED_KEYS = ["uiSize", "walkthroughSeen", "editMode"] as const;
+
+/** Which tool a left drag on the canvas runs: the brush, or a selection rectangle. */
+export type EditMode = "brush" | "select";
 
 export interface AppState {
   uiSize: UiSize;
@@ -33,6 +36,10 @@ export interface AppState {
   // True while the discoverability overlay is outlining every area at once.
   helpOverlayOpen: boolean;
   setHelpOverlayOpen: (open: boolean) => void;
+
+  editMode: EditMode;
+  setEditMode: (mode: EditMode) => void;
+  toggleEditMode: () => void;
 
   displayMinDb: number;
   displayMaxDb: number;
@@ -68,6 +75,9 @@ export const createAppSlice = (set: ZustandSet): AppState => {
     closeManual: () => set({ manualSection: null }),
     helpOverlayOpen: false,
     setHelpOverlayOpen: (helpOverlayOpen) => set({ helpOverlayOpen }),
+    editMode: "brush",
+    setEditMode: (editMode) => set({ editMode }),
+    toggleEditMode: () => set((state) => ({ editMode: state.editMode === "brush" ? "select" : "brush" })),
     displayMinDb: getParameterDef("displayMinDb").default,
     displayMaxDb: getParameterDef("displayMaxDb").default,
     magnitudeLimit: getParameterDef("magnitudeLimit").default,

@@ -173,6 +173,10 @@ export interface IpcRendererEvents {
   "double-active-file-length": () => void;
   "halve-active-file-length": () => void;
   "insert-silence": () => void;
+  "copy-selection": () => void;
+  "cut-selection": () => void;
+  "paste-selection": () => void;
+  "silence-selection": () => void;
   "update-available": (info: UpdateInfo) => void;
   "update-not-available": () => void;
   "update-downloaded": (info: UpdateInfo) => void;
