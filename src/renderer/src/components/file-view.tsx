@@ -383,7 +383,12 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       // A control drag is aimed at the control, wherever the pointer travels.
       if (isPanning || useTransientStore.getState().controlDragging) return;
       const store = useStore.getState();
-      if (store.placing?.fileId === fileId) {
+      if (store.placing) {
+        // The ghost follows the pointer across views: entering another file's
+        // canvas carries it over, keeping its frequencies.
+        if (store.placing.fileId !== fileId) store.retargetPlacing(fileId);
+        const placing = useStore.getState().placing;
+        if (placing?.fileId !== fileId) return;
         const corner = getSelectionCorner(
           event.clientX,
           event.clientY,
@@ -396,7 +401,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         const duration = spectrogram.numFrames / spectrogram.sampleRate;
         // Shift holds the region at the pitch it was picked up from, so a move
         // along the file cannot drift off its own frequencies.
-        const pitch = event.shiftKey ? store.placing.rect.pitchLo : corner.pitchUv;
+        const pitch = event.shiftKey ? placing.rect.pitchLo : corner.pitchUv;
         store.movePlacing(corner.timeUv * duration, pitch);
         return;
       }
@@ -547,6 +552,14 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       );
       if (!aim) return;
 
+      // A drop beats pick mode: while a region is in flight, the click puts it
+      // down whatever else the canvas is armed for.
+      if (state.placing) {
+        if (state.placing.fileId !== fileId) state.retargetPlacing(fileId);
+        if (useStore.getState().placing?.fileId === fileId) await state.dropPlacing();
+        return;
+      }
+
       // Pick mode: clicking on a canvas sets the file path and position params
       if (state.pickingFileParam) {
         state.setParameter(state.pickingFileParam, { path: openFiles[fileId].filePath });
@@ -554,11 +567,6 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         state.setParameter("sourceTimeOffset" as import("@renderer/store/types").ParameterKey, aim.x * 100);
         state.setParameter("sourcePitchOffset" as import("@renderer/store/types").ParameterKey, aim.y * 100);
         state.setPickingFileParam(null);
-        return;
-      }
-
-      if (state.placing?.fileId === fileId) {
-        await state.dropPlacing();
         return;
       }
 

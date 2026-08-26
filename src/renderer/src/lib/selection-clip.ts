@@ -1,6 +1,7 @@
 import { Vector2 } from "three";
 import type { SpectrogramData } from "../store/types";
 import { selectionBandRange, selectionFrameRange, type Selection } from "./selection";
+import { sourceBandUvSlope } from "./utils";
 
 /**
  * A copied region, held as a file in its own right: the same bands as the file
@@ -156,15 +157,23 @@ export function buildClipboardRegion(
 
 /**
  * Where a drop lands, as the rectangle the pasted sound will occupy. The
- * clipboard keeps its own size, so only the corner moves.
+ * clipboard keeps its own size, so only the corner moves. The height converts
+ * into `dest`'s band UV, so the sound spans the same octaves whatever layout
+ * it lands in; in its own file the conversion is exactly 1.
  */
-export function dropRect(clipboard: ClipboardRegion, aimTimeSeconds: number, aimPitchUv: number): Selection {
-  const { rect } = clipboard;
+export function dropRect(
+  clipboard: ClipboardRegion,
+  aimTimeSeconds: number,
+  aimPitchUv: number,
+  dest: { numBands: number; bandsPerOctave: number },
+): Selection {
+  const { rect, spec } = clipboard;
+  const span = (rect.pitchHi - rect.pitchLo) * sourceBandUvSlope(spec, dest);
   return {
     start: aimTimeSeconds,
     end: aimTimeSeconds + (rect.end - rect.start),
     pitchLo: aimPitchUv,
-    pitchHi: aimPitchUv + (rect.pitchHi - rect.pitchLo),
+    pitchHi: aimPitchUv + span,
   };
 }
 

@@ -877,6 +877,8 @@ Click to put the ghost down. The drop is a single edit in the history, so one un
 
 The ghost moves in pitch as well as time: drop it higher or lower and the sound is transposed to match. Hold `Shift` to keep it at its original pitch while you place it. `Esc` puts everything back without painting anything — what you copied is kept, so a later paste still works.
 
+The ghost also crosses files: carry it over another open file and drop it there. It keeps its frequencies on the way over, whatever resolution the other file was analysed at, and a cut leaves silence behind in the file it came from. `Cmd/Ctrl+V` pastes into whichever file is under the pointer.
+
 All of the above work in place: the file keeps its length, nothing slides along to make room, and what was already at the destination is written over.
 
 The `Shift` variants work on **time itself**. They change the file's length, so they always take the full height of the file with them, whatever height you selected:
@@ -993,33 +995,33 @@ File and Edit shortcuts (`Cmd/Ctrl+N`, `+O`, `+S`, `+W`, `+D`, …) are listed u
 
 The keys below are the ones your keyboard prints. On a layout that prints something else, the shortcut stays on the key in the same place on the board.
 
-| Key                   | Action                                                 |
-| --------------------- | ------------------------------------------------------ |
-| `Space`               | Play / stop                                            |
-| `Arrow keys`          | Move the brush by one grid cell                        |
-| `Enter`               | Apply the brush at the current position                |
-| `-` / `=`             | Decrease / increase the time grid                      |
-| `Shift` + `-` / `=`   | Decrease / increase the pitch grid                     |
-| `[` / `]`             | Shrink / grow the brush, in time                       |
-| `Shift` + `[` / `]`   | Shrink / grow the brush, in pitch                      |
-| `;` / `'`             | Snap to the time grid / to the pitch grid              |
-| `\`                   | Randomise the brush                                    |
-| `Shift+\`             | Randomise the brush and shuffle the effect chain       |
-| `,` / `.`             | Loop / auto-play stroke                                |
-| `Tab`                 | Switch between the brush and selection                 |
-| `Esc`                 | Put a picked-up region back, or clear the selection    |
-| `Cmd/Ctrl+X/C/V`      | Cut / copy / paste the selection                       |
-| `Cmd/Ctrl+Shift+X/V/D` | Cut, paste or duplicate a stretch of time             |
-| `1`–`9`, `0`          | Select the top palette's first ten brushes             |
-| `a`–`z`               | Select the brush bound to that key                     |
-| Hold `Shift` + click  | Pick a source file and position                        |
-| `Cmd`/`Ctrl` + scroll | Zoom                                                   |
-| Right-click drag      | Pan                                                    |
-| `Cmd/Ctrl+Z`          | Undo                                                   |
-| `Shift+Cmd/Ctrl+Z`    | Redo                                                   |
-| `Cmd/Ctrl+Shift+C`    | Toggle compact UI                                      |
-| `?`                   | Outline every area (see [Getting Help](#getting-help)) |
-| `Cmd/Ctrl+/`          | Open this manual                                       |
+| Key                    | Action                                                 |
+| ---------------------- | ------------------------------------------------------ |
+| `Space`                | Play / stop                                            |
+| `Arrow keys`           | Move the brush by one grid cell                        |
+| `Enter`                | Apply the brush at the current position                |
+| `-` / `=`              | Decrease / increase the time grid                      |
+| `Shift` + `-` / `=`    | Decrease / increase the pitch grid                     |
+| `[` / `]`              | Shrink / grow the brush, in time                       |
+| `Shift` + `[` / `]`    | Shrink / grow the brush, in pitch                      |
+| `;` / `'`              | Snap to the time grid / to the pitch grid              |
+| `\`                    | Randomise the brush                                    |
+| `Shift+\`              | Randomise the brush and shuffle the effect chain       |
+| `,` / `.`              | Loop / auto-play stroke                                |
+| `Tab`                  | Switch between the brush and selection                 |
+| `Esc`                  | Put a picked-up region back, or clear the selection    |
+| `Cmd/Ctrl+X/C/V`       | Cut / copy / paste the selection                       |
+| `Cmd/Ctrl+Shift+X/V/D` | Cut, paste or duplicate a stretch of time              |
+| `1`–`9`, `0`           | Select the top palette's first ten brushes             |
+| `a`–`z`                | Select the brush bound to that key                     |
+| Hold `Shift` + click   | Pick a source file and position                        |
+| `Cmd`/`Ctrl` + scroll  | Zoom                                                   |
+| Right-click drag       | Pan                                                    |
+| `Cmd/Ctrl+Z`           | Undo                                                   |
+| `Shift+Cmd/Ctrl+Z`     | Redo                                                   |
+| `Cmd/Ctrl+Shift+C`     | Toggle compact UI                                      |
+| `?`                    | Outline every area (see [Getting Help](#getting-help)) |
+| `Cmd/Ctrl+/`           | Open this manual                                       |
 
 ---
 

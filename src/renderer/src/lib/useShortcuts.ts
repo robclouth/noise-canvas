@@ -145,8 +145,11 @@ export function useShortcuts() {
     // also the fine modifier on a parameter control, so a drag under way keeps
     // it off the canvas.
     if (event.key === "Shift") {
-      if (!useTransientStore.getState().controlDragging) {
-        useStore.getState().setPickingFileParam("sourceFile" as import("@renderer/store/types").ParameterKey);
+      // A region in flight owns Shift — it holds the region's pitch — so it
+      // must not flip the canvas into source-pick mode under the ghost.
+      const state = useStore.getState();
+      if (!useTransientStore.getState().controlDragging && !state.placing) {
+        state.setPickingFileParam("sourceFile" as import("@renderer/store/types").ParameterKey);
       }
       return;
     }

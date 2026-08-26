@@ -137,17 +137,31 @@ describe("buildClipboardRegion onsets", () => {
 });
 
 describe("dropRect", () => {
-  it("keeps the clipboard's size and moves only the corner", () => {
+  it("keeps the clipboard's size and moves only the corner in its own layout", () => {
     const { spec, data } = makeSpec();
     const clip = buildClipboardRegion(data, midBands, spec, "src");
     expect(clip).not.toBeNull();
     if (!clip) return;
 
-    const rect = dropRect(clip, 20, 0.5);
+    const rect = dropRect(clip, 20, 0.5, spec);
     expect(rect.start).toBe(20);
     expect(rect.end - rect.start).toBeCloseTo(midBands.end - midBands.start);
     expect(rect.pitchLo).toBe(0.5);
     expect(rect.pitchHi - rect.pitchLo).toBeCloseTo(midBands.pitchHi - midBands.pitchLo);
+  });
+
+  it("converts the height so another layout gets the same octaves", () => {
+    const { spec, data } = makeSpec();
+    const clip = buildClipboardRegion(data, midBands, spec, "src");
+    expect(clip).not.toBeNull();
+    if (!clip) return;
+
+    // Half the bands at the same bands-per-octave: each octave spans twice the
+    // UV, so the rectangle doubles in height.
+    const dest = { numBands: spec.numBands / 2, bandsPerOctave: spec.bandsPerOctave };
+    const rect = dropRect(clip, 20, 0.5, dest);
+    expect(rect.pitchHi - rect.pitchLo).toBeCloseTo((midBands.pitchHi - midBands.pitchLo) * 2);
+    expect(rect.end - rect.start).toBeCloseTo(midBands.end - midBands.start);
   });
 });
 

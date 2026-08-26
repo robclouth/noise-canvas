@@ -10,6 +10,7 @@ import {
 } from "@renderer/lib/selection-clip";
 import { pasteStrokeState, regionAim, silenceStrokeState, type StrokeGeometry } from "@renderer/lib/selection-strokes";
 import type { SourceFileInfo } from "@renderer/lib/stroke-renderer";
+import { destToSourceBandUv } from "@renderer/lib/utils";
 import { openFiles } from "./files";
 import type { OpenFile, State, ZustandGet, ZustandSet } from "./types";
 
@@ -35,6 +36,8 @@ export interface PlacingState {
   rect: Selection;
   /** The region to silence when the drop lands. Null for a copy or a paste. */
   vacate: Selection | null;
+  /** The file `vacate` lives in; a move dropped into another file silences it there. */
+  vacateFileId: string | null;
   label: string;
 }
 
@@ -47,7 +50,9 @@ export interface SelectionClipboardState {
   /** Silence the active file's selection. */
   silenceSelection: () => Promise<void>;
   /** Pick the clipboard up so it follows the pointer, starting at `aim` when given. */
-  beginPaste: (aim?: { timeSeconds: number; pitchUv: number }) => void;
+  beginPaste: (aim?: { fileId?: string; timeSeconds: number; pitchUv: number }) => void;
+  /** Carry what is in flight into another file's view, at the same frequencies. */
+  retargetPlacing: (fileId: string) => void;
   /** Copy `selection` from the active file into the clipboard, without picking it up. */
   stashSelection: (selection: Selection) => Promise<boolean>;
   /** Pick the active file's selection up, leaving a copy behind or not. */
@@ -156,11 +161,11 @@ async function commitRegionStrokes(
   strokes: { state: State; rect: Selection }[],
   label: string,
   get: ZustandGet,
+  source: SourceFileInfo | null = placingSource,
 ): Promise<void> {
   const renderer = edit.file.rendererRef?.current;
   if (!renderer || strokes.length === 0) return;
 
-  const source = placingSource;
   renderer.beginStroke();
   try {
     let painted = 0;
@@ -208,16 +213,17 @@ export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet):
   },
 
   beginPaste: (aim) => {
-    const edit = target(get);
+    const edit = target(get, aim?.fileId);
     if (!edit || !clipboard) return;
     const selection = activeSelectionOf(get, edit);
-    // The ghost starts under the pointer when it is over the canvas. When it is
+    // The ghost starts under the pointer when it is over a canvas. When it is
     // not — a paste from the menu bar — it starts where the last selection was.
     const from = aim ? { start: aim.timeSeconds, pitchLo: aim.pitchUv } : (selection ?? clipboard.rect);
     const placing: PlacingState = {
       fileId: edit.fileId,
-      rect: dropRect(clipboard, from.start, from.pitchLo),
+      rect: dropRect(clipboard, from.start, from.pitchLo, edit.geometry.spec),
       vacate: null,
+      vacateFileId: null,
       label: "Paste",
     };
     openPlacingSource(edit);
@@ -234,6 +240,7 @@ export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet):
       fileId: edit.fileId,
       rect: selection,
       vacate: copy ? null : selection,
+      vacateFileId: copy ? null : edit.fileId,
       label: copy ? "Paste" : "Move",
     };
     openPlacingSource(edit);
@@ -244,12 +251,35 @@ export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet):
   movePlacing: (timeSeconds, pitchUv) => {
     const current = get().placing;
     if (!current || !clipboard) return;
-    const rect = dropRect(clipboard, timeSeconds, pitchUv);
+    const edit = target(get, current.fileId);
+    if (!edit) return;
+    const rect = dropRect(clipboard, timeSeconds, pitchUv, edit.geometry.spec);
     if (rect.start === current.rect.start && rect.pitchLo === current.rect.pitchLo) return;
     const placing = { ...current, rect };
     set({ placing });
-    const edit = target(get, placing.fileId);
-    if (edit) previewPlacing(edit, placing);
+    previewPlacing(edit, placing);
+  },
+
+  retargetPlacing: (fileId) => {
+    const current = get().placing;
+    if (!current || current.fileId === fileId || !clipboard) return;
+    const to = target(get, fileId);
+    const fromSpec = openFiles[current.fileId]?.spectrogramData;
+    if (!to || !fromSpec) return;
+    // The source textures live per renderer, so the crossing rebuilds them on
+    // the new file's context. The rectangle keeps its frequencies: its corner
+    // converts to the band UV holding the same frequency in the new layout.
+    closePlacingSource(current.fileId);
+    openFiles[current.fileId]?.rendererRef?.current?.clearPreview();
+    openPlacingSource(to);
+    const pitchLo = destToSourceBandUv(current.rect.pitchLo, fromSpec, to.geometry.spec);
+    const placing: PlacingState = {
+      ...current,
+      fileId,
+      rect: dropRect(clipboard, current.rect.start, pitchLo, to.geometry.spec),
+    };
+    set({ placing });
+    previewPlacing(to, placing);
   },
 
   dropPlacing: async () => {
@@ -273,7 +303,7 @@ export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet):
     // The paste samples the clipboard, not the canvas, so vacating first cannot
     // take the sound with it — and a drop overlapping its own origin keeps what
     // it just wrote.
-    if (placing.vacate) {
+    if (placing.vacate && placing.vacateFileId === placing.fileId) {
       strokes.push({ state: silenceStrokeState(edit.state, placing.vacate, edit.geometry), rect: placing.vacate });
     }
     strokes.push({
@@ -284,6 +314,22 @@ export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet):
       }),
       rect: placing.rect,
     });
+
+    // A move that crossed into another file leaves its silence behind in the
+    // file it came from — its own edit, in its own history.
+    if (placing.vacate && placing.vacateFileId && placing.vacateFileId !== placing.fileId) {
+      const origin = target(get, placing.vacateFileId);
+      if (origin) {
+        get().setFileSelection(origin.fileId, null);
+        await commitRegionStrokes(
+          origin,
+          [{ state: silenceStrokeState(origin.state, placing.vacate, origin.geometry), rect: placing.vacate }],
+          placing.label,
+          get,
+          null,
+        );
+      }
+    }
 
     await commitRegionStrokes(edit, strokes, placing.label, get);
     closePlacingSource(placing.fileId);

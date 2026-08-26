@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone, type FileRejection } from "react-dropzone";
 import { EmptyState } from "./components/empty-state";
 import { trackPointer } from "./lib/last-pointer";
-import { pointerSelectionAim } from "./lib/view-aim";
+import { pointerFileAim } from "./lib/view-aim";
 import { openImageExportModal } from "./components/image-export-modal";
 import { CanvasPanel, Dock } from "./components/layout/canvas-panel";
 import { AppMenuBar } from "./components/layout/menu-bar";
@@ -318,9 +318,9 @@ function App(): React.JSX.Element {
     unsubscribers.push(unsubCutSelection);
 
     const unsubPasteSelection = ipcOn("paste-selection", () => {
-      const state = useStore.getState();
-      const aim = state.activeFileId ? pointerSelectionAim(state.activeFileId) : null;
-      state.beginPaste(aim ?? undefined);
+      // The paste lands in the file under the pointer; over none of them it
+      // falls back to the active file's own selection.
+      useStore.getState().beginPaste(pointerFileAim() ?? undefined);
     });
     unsubscribers.push(unsubPasteSelection);
 

@@ -96,3 +96,17 @@ export function pointerSelectionAim(fileId: string): { timeSeconds: number; pitc
     pitchUv: corner.pitchUv,
   };
 }
+
+/**
+ * The snapped selection corner under the pointer over any open file's canvas,
+ * with the file it is over. Null when the pointer is over none of them.
+ */
+export function pointerFileAim(): { fileId: string; timeSeconds: number; pitchUv: number } | null {
+  for (const el of document.querySelectorAll("[data-file-view-id]")) {
+    const fileId = el.getAttribute("data-file-view-id");
+    if (!fileId) continue;
+    const aim = pointerSelectionAim(fileId);
+    if (aim) return { fileId, ...aim };
+  }
+  return null;
+}
