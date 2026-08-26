@@ -264,6 +264,10 @@ struct PackedCoefs
     const uint32_t *bandLengths = nullptr;
     const int32_t *bandStepLog2s = nullptr;
     int numBands = 0;
+    // Per-band absolute index of the buffer's first coefficient. When set,
+    // bandOffsets/bandLengths describe a window of the file rather than all of
+    // it, and coefficient k of band b lives at bandOffsets[b] + (k - kStarts[b]).
+    const int64_t *kStarts = nullptr;
 };
 
 /**
@@ -283,7 +287,7 @@ static void fillCoefsFromPacked(const PackedCoefs &src, int channel, int bandBeg
                 coef = {0.0f, 0.0f};
                 return;
             }
-            const int64_t k = t >> src.bandStepLog2s[bi];
+            const int64_t k = (t >> src.bandStepLog2s[bi]) - (src.kStarts ? src.kStarts[bi] : 0);
             if (k < 0 || (size_t)k >= (size_t)src.bandLengths[bi])
             {
                 coef = {0.0f, 0.0f};
@@ -707,6 +711,14 @@ struct OnsetBandLayout
     const uint32_t *bandOffsets = nullptr;
     const uint32_t *bandLengths = nullptr;
     const int32_t *bandStepLog2s = nullptr;
+    // When the packed buffer holds only a window of the file, these map a
+    // band's absolute coefficient index into it: coefficient k lives at
+    // viewOffsets[b] + (k - viewK0[b]), and only viewLens[b] of them are held.
+    // bandOffsets/bandLengths still describe the whole file. Null means the
+    // buffer is the whole file.
+    const uint32_t *viewOffsets = nullptr;
+    const uint32_t *viewLens = nullptr;
+    const int64_t *viewK0 = nullptr;
 };
 
 struct DetectedOnset
@@ -795,6 +807,24 @@ struct OnsetRegion
     int bandMaxCount;
 };
 
+/**
+ * The span of the file a regional onset pass reads, wider than the span it
+ * reports on: the whitening needs its warm-up, a peak is judged against a mean
+ * taken either side of it, and an event's level is measured for a moment after
+ * it. Without a region, the whole file.
+ */
+static void onsetReadSpanSec(const OnsetRegion *region, double durationSec, double maxStrideSec,
+                             double &readStartSec, double &readEndSec)
+{
+    const double emitStartSec = region ? std::max(0.0, region->startSec) : 0.0;
+    const double emitEndSec = region ? std::min(durationSec, region->endSec) : durationSec;
+    const double leadSec = ONSET_WHITEN_WARMUP_SEC + ONSET_MEAN_PRE_SEC + 2.0 * maxStrideSec;
+    const double trailSec =
+        ONSET_LEVEL_POST_SEC + ONSET_MEAN_POST_SEC + ONSET_RIDGE_SEARCH_SEC + 2.0 * maxStrideSec;
+    readStartSec = region ? std::max(0.0, emitStartSec - leadSec) : 0.0;
+    readEndSec = region ? std::min(durationSec, emitEndSec + trailSec) : durationSec;
+}
+
 static std::vector<DetectedOnset> computeOnsets(const float *packed,
                                                 size_t packedFloats,
                                                 const OnsetBandLayout &layout,
@@ -809,8 +839,13 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
         return onsets;
 
     // The four floats of one coefficient, or null when it is out of bounds.
+    // With a view, the absolute index translates into the windowed buffer.
     const auto pixelAt = [&](int b, int64_t k) -> const float * {
-        const size_t px = ((size_t)layout.bandOffsets[b] + (size_t)k) * 4;
+        const int64_t rel = k - (layout.viewK0 ? layout.viewK0[b] : 0);
+        if (layout.viewLens && (rel < 0 || (size_t)rel >= (size_t)layout.viewLens[b]))
+            return nullptr;
+        const size_t base = layout.viewOffsets ? (size_t)layout.viewOffsets[b] : (size_t)layout.bandOffsets[b];
+        const size_t px = (base + (size_t)rel) * 4;
         if (px + 3 >= packedFloats)
             return nullptr;
         return packed + px;
@@ -833,11 +868,8 @@ static std::vector<DetectedOnset> computeOnsets(const float *packed,
     const double emitEndSec = region ? std::min(durationSec, region->endSec) : durationSec;
     if (emitEndSec <= emitStartSec)
         return onsets;
-    const double leadSec = ONSET_WHITEN_WARMUP_SEC + ONSET_MEAN_PRE_SEC + 2.0 * maxStrideSec;
-    const double trailSec =
-        ONSET_LEVEL_POST_SEC + ONSET_MEAN_POST_SEC + ONSET_RIDGE_SEARCH_SEC + 2.0 * maxStrideSec;
-    const double readStartSec = region ? std::max(0.0, emitStartSec - leadSec) : 0.0;
-    const double readEndSec = region ? std::min(durationSec, emitEndSec + trailSec) : durationSec;
+    double readStartSec, readEndSec;
+    onsetReadSpanSec(region, durationSec, maxStrideSec, readStartSec, readEndSec);
     // The detection curves only have to be right where candidates are picked
     // and measured: the peak window, the mean before a peak and the walk down
     // an attack ahead of the span, plus the spread of the widest coefficient.
@@ -2071,6 +2103,13 @@ public:
         applyLimiter = strokeObj.Get("applyLimiter").ToBoolean().Value();
         if (strokeObj.Has("project"))
             projectEnabled = strokeObj.Get("project").ToBoolean().Value();
+
+        if (metaObj.Has("viewStartFrame") && metaObj.Has("viewEndFrame"))
+        {
+            windowed = true;
+            viewStart = metaObj.Get("viewStartFrame").As<Napi::Number>().Int64Value();
+            viewEnd = metaObj.Get("viewEndFrame").As<Napi::Number>().Int64Value();
+        }
     }
 
     void Execute()
@@ -2086,8 +2125,11 @@ public:
         const int bandBegin = analyzer.bandpass_bands_begin();
         const int bandEnd = analyzer.bandpass_bands_end();
 
-        const PackedCoefs src{packed, packedLen, bandOffsets.data(), bandLengths.data(), bandStepLog2s.data(),
-                              numBands};
+        const PackedCoefs src =
+            windowed ? PackedCoefs{packed,   packedLen, viewOffsets.data(), viewLens.data(), bandStepLog2s.data(),
+                                   numBands, viewK0.data()}
+                     : PackedCoefs{packed, packedLen, bandOffsets.data(), bandLengths.data(), bandStepLog2s.data(),
+                                   numBands};
 
         const bool partial = !existingAudio.empty() && winStartFrame >= 0 && winEndFrame > winStartFrame;
 
@@ -2138,6 +2180,35 @@ public:
             fillStart = std::max<int64_t>(0, w0 - support * 2);
             fillEnd = std::min<int64_t>(numFrames, w1 + support * 2);
         }
+        if (!viewCoversFrames(fillStart, fillEnd))
+        {
+            SetError("commitStroke: the view does not cover the synthesis window's reach");
+            return;
+        }
+        if (windowed && detectOnsets)
+        {
+            double maxStrideSec = 0.0;
+            for (int b = 0; b < numBands; ++b)
+                maxStrideSec = std::max(maxStrideSec, (double)(1LL << bandStepLog2s[(size_t)b]) / sampleRate);
+            double readStartSec, readEndSec;
+            onsetReadSpanSec(hasOnsetRegion ? &onsetRegion : nullptr, (double)numFrames / sampleRate, maxStrideSec,
+                             readStartSec, readEndSec);
+            for (int b = 0; b < numBands; ++b)
+            {
+                const double strideSec = (double)(1LL << bandStepLog2s[(size_t)b]) / sampleRate;
+                const int64_t len = (int64_t)bandLengths[(size_t)b];
+                const int64_t kLo =
+                    std::min(len, std::max<int64_t>(0, (int64_t)std::floor(readStartSec / strideSec)));
+                const int64_t kHi = std::min(len, (int64_t)std::ceil(readEndSec / strideSec) + 2);
+                if (kHi <= kLo)
+                    continue;
+                if (kLo < viewK0[(size_t)b] || kHi > viewK0[(size_t)b] + (int64_t)viewLens[(size_t)b])
+                {
+                    SetError("commitStroke: the view does not cover the onset pass's reach");
+                    return;
+                }
+            }
+        }
 
         // 1. Synthesize the window and splice it into the audio there was.
         audioChannels.resize(channels);
@@ -2175,8 +2246,8 @@ public:
 
         // 4. Project the canvas through the audio. Skipped when the stroke
         //    keeps its painted coefficients; the patch then comes back empty.
-        if (projectEnabled)
-            project(analyzer, bandBegin, bandEnd, w0, w1);
+        if (projectEnabled && !project(analyzer, bandBegin, bandEnd, w0, w1))
+            return;
 
         peakValue = 0.0f;
         for (const auto &channel : audioChannels)
@@ -2194,6 +2265,12 @@ public:
             layout.bandOffsets = bandOffsets.data();
             layout.bandLengths = bandLengths.data();
             layout.bandStepLog2s = bandStepLog2s.data();
+            if (windowed)
+            {
+                layout.viewOffsets = viewOffsets.data();
+                layout.viewLens = viewLens.data();
+                layout.viewK0 = viewK0.data();
+            }
 
             onsets = computeOnsets(packed, packedLen, layout, numFrames, sampleRate,
                                    hasOnsetRegion ? &onsetRegion : nullptr, &onsetOdfMax, &onsetBandMaxOut);
@@ -2264,6 +2341,9 @@ public:
         tail.Set("offsets", tailOffs);
         tail.Set("residuals", residuals);
         result.Set("tail", tail);
+        // Whole-file commits shift the tails in the packed buffer themselves;
+        // a windowed commit cannot reach them, so the caller applies the turns.
+        result.Set("tailApplied", Napi::Boolean::New(env, !windowed));
 
         Napi::Float32Array grBuffer = Napi::Float32Array::New(env, gainReductionDb.size());
         if (!gainReductionDb.empty())
@@ -2316,12 +2396,59 @@ private:
             SetError("commitStroke: band tables are shorter than numBands");
             return false;
         }
-        for (int b = 0; b < numBands; ++b)
+        if (!windowed)
         {
-            const size_t end = (size_t)bandOffsets[b] + (size_t)bandLengths[b];
-            if (end * 4 > packedLen)
+            for (int b = 0; b < numBands; ++b)
             {
-                SetError("commitStroke: band layout runs past the end of the packed buffer");
+                const size_t end = (size_t)bandOffsets[b] + (size_t)bandLengths[b];
+                if (end * 4 > packedLen)
+                {
+                    SetError("commitStroke: band layout runs past the end of the packed buffer");
+                    return false;
+                }
+            }
+        }
+        else
+        {
+            if (viewStart < 0 || viewEnd <= viewStart || viewEnd > numFrames)
+            {
+                SetError("commitStroke: the view falls outside the file");
+                return false;
+            }
+            if (existingAudio.empty() || winStartFrame < 0 || winEndFrame <= winStartFrame)
+            {
+                SetError("commitStroke: a windowed commit needs a synthesis window and existing audio");
+                return false;
+            }
+            if (detectOnsets && (!hasOnsetRegion || (int)onsetBandMaxIn.size() < numBands))
+            {
+                SetError("commitStroke: a windowed commit needs a regional onset reference");
+                return false;
+            }
+            viewOffsets.resize((size_t)numBands);
+            viewLens.resize((size_t)numBands);
+            viewK0.resize((size_t)numBands);
+            size_t at = 0;
+            for (int b = 0; b < numBands; ++b)
+            {
+                const int32_t step = bandStepLog2s[(size_t)b];
+                const int64_t len = (int64_t)bandLengths[(size_t)b];
+                const int64_t k0 = viewStart >> step;
+                if ((k0 << step) != viewStart ||
+                    (viewEnd < numFrames && ((viewEnd >> step) << step) != viewEnd))
+                {
+                    SetError("commitStroke: the view's edges do not sit on every band's grid");
+                    return false;
+                }
+                const int64_t kEnd = viewEnd >= numFrames ? len : std::min<int64_t>(len, viewEnd >> step);
+                viewK0[(size_t)b] = k0;
+                viewLens[(size_t)b] = (uint32_t)std::max<int64_t>(0, kEnd - std::min(k0, kEnd));
+                viewOffsets[(size_t)b] = (uint32_t)at;
+                at += (size_t)viewLens[(size_t)b];
+            }
+            if (at * 4 != packedLen)
+            {
+                SetError("commitStroke: the view buffer does not match the view's span");
                 return false;
             }
         }
@@ -2389,7 +2516,7 @@ private:
                         return;
                     if (t >= footStart && t < footEnd)
                         return;
-                    const int64_t k = t >> src.bandStepLog2s[bi];
+                    const int64_t k = (t >> src.bandStepLog2s[bi]) - (src.kStarts ? src.kStarts[bi] : 0);
                     if (k < 0 || (size_t)k >= (size_t)src.bandLengths[bi])
                         return;
                     const size_t off = ((size_t)src.bandOffsets[bi] + (size_t)k) * 4 + (size_t)ch * 2;
@@ -2543,7 +2670,40 @@ private:
      * wherever the stroke moved a phase by more than pi, and the transform
      * reads the difference between neighbours as pitch.
      */
-    void project(gaborator::analyzer<float> &analyzer, int bandBegin, int bandEnd, int64_t w0, int64_t w1)
+    /** Whether every band's view holds all of its coefficients for [f0, f1). */
+    bool viewCoversFrames(int64_t f0, int64_t f1) const
+    {
+        if (!windowed)
+            return true;
+        for (int b = 0; b < numBands; ++b)
+        {
+            const int32_t step = bandStepLog2s[(size_t)b];
+            const int64_t kLo = std::max<int64_t>(0, f0 >> step);
+            const int64_t kHi = std::min<int64_t>((int64_t)bandLengths[(size_t)b] - 1, (f1 - 1) >> step);
+            if (kHi < kLo)
+                continue;
+            if (kLo < viewK0[(size_t)b] || kHi >= viewK0[(size_t)b] + (int64_t)viewLens[(size_t)b])
+                return false;
+        }
+        return true;
+    }
+
+    /**
+     * Buffer offset (in floats) of band b's absolute coefficient k. Out of a
+     * window's view it returns the buffer length, which fails every bounds
+     * guard the way an offset past the padding does.
+     */
+    size_t packedOffsetOf(int b, int64_t k) const
+    {
+        if (!windowed)
+            return ((size_t)bandOffsets[(size_t)b] + (size_t)k) * 4;
+        const int64_t rel = k - viewK0[(size_t)b];
+        if (rel < 0 || rel >= (int64_t)viewLens[(size_t)b])
+            return packedLen;
+        return ((size_t)viewOffsets[(size_t)b] + (size_t)rel) * 4;
+    }
+
+    bool project(gaborator::analyzer<float> &analyzer, int bandBegin, int bandEnd, int64_t w0, int64_t w1)
     {
         const int64_t marginCap = (int64_t)(sampleRate * COMMIT_MAX_ANALYSIS_MARGIN_SEC);
         std::vector<int64_t> bandMargin((size_t)numBands, 0);
@@ -2573,6 +2733,28 @@ private:
                 continue;
             patchK0[(size_t)b] = k0;
             patchCount[(size_t)b] = k1 - k0 + 1;
+        }
+
+        // Checked before anything is written, so a view that falls short
+        // rejects the commit with the buffer untouched. The patch needs the
+        // coefficient before it for its unwrap anchor and the one after it for
+        // the branch seam.
+        if (windowed)
+        {
+            for (int b = 0; b < numBands; ++b)
+            {
+                if (!patchCount[(size_t)b])
+                    continue;
+                const int64_t k0 = patchK0[(size_t)b];
+                const int64_t k1 = k0 + patchCount[(size_t)b] - 1;
+                const int64_t lo = k0 > 0 ? k0 - 1 : k0;
+                const int64_t hi = std::min<int64_t>((int64_t)bandLengths[(size_t)b] - 1, k1 + 1);
+                if (lo < viewK0[(size_t)b] || hi >= viewK0[(size_t)b] + (int64_t)viewLens[(size_t)b])
+                {
+                    SetError("commitStroke: the view does not cover the projection's reach");
+                    return false;
+                }
+            }
         }
 
         // Harvest per band, then unwrap in time order — process() gives no
@@ -2620,7 +2802,7 @@ private:
                 bool havePrev = false;
                 if (k0 > 0)
                 {
-                    const size_t off = ((size_t)bandOffsets[(size_t)b] + (size_t)(k0 - 1)) * 4 + (size_t)ch * 2;
+                    const size_t off = packedOffsetOf(b, k0 - 1) + (size_t)ch * 2;
                     if (off + 1 < packedLen)
                     {
                         prev = packed[off + 1];
@@ -2646,7 +2828,7 @@ private:
                 const int64_t k1 = k0 + (int64_t)count - 1;
                 if (k1 + 1 < (int64_t)bandLengths[(size_t)b])
                 {
-                    const size_t nextOff = ((size_t)bandOffsets[(size_t)b] + (size_t)(k1 + 1)) * 4 + (size_t)ch * 2;
+                    const size_t nextOff = packedOffsetOf(b, k1 + 1) + (size_t)ch * 2;
                     if (nextOff + 1 < packedLen)
                     {
                         const float stored = packed[nextOff + 1];
@@ -2685,7 +2867,7 @@ private:
 
             for (size_t rel = 0; rel < count; ++rel)
             {
-                const size_t off = ((size_t)bandOffsets[(size_t)b] + (size_t)k0 + rel) * 4;
+                const size_t off = packedOffsetOf(b, k0 + (int64_t)rel);
                 if (off + 3 >= packedLen)
                 {
                     for (int c = 0; c < 4; ++c)
@@ -2705,7 +2887,7 @@ private:
             if (!needsTail[(size_t)b] || k0 + (int64_t)count >= len)
                 continue;
             const int64_t tailK = k0 + (int64_t)count;
-            const size_t tailOff = ((size_t)bandOffsets[(size_t)b] + (size_t)tailK) * 4;
+            const size_t tailOff = packedOffsetOf(b, tailK);
             if (tailOff + 3 >= packedLen)
                 continue;
             float offsets[2] = {0.0f, 0.0f};
@@ -2725,6 +2907,11 @@ private:
             tailPixelCounts.push_back((uint32_t)tailCount);
             tailOffsets.push_back(offsets[0]);
             tailOffsets.push_back(offsets[1]);
+            // The tail runs to the end of the band, past what a view holds, so
+            // a windowed commit returns the turns unapplied for the caller to
+            // shift with — collecting the residuals as it goes.
+            if (windowed)
+                continue;
             for (int ch = 0; ch < 2; ++ch)
             {
                 const float c = offsets[ch];
@@ -2750,6 +2937,7 @@ private:
                 }
             }
         }
+        return true;
     }
 
     int64_t levelHopSamples() const
@@ -2829,6 +3017,14 @@ private:
     std::vector<size_t> existingAudioLens;
 
     int64_t winStartFrame = -1, winEndFrame = -1;
+    // The frame span the packed buffer holds when it is a window of the file
+    // rather than all of it. Every packed read and write then translates
+    // through viewOffsets/viewLens/viewK0, spans the pass reads are checked
+    // against the view, and the tail turns are returned unapplied.
+    int64_t viewStart = 0, viewEnd = -1;
+    bool windowed = false;
+    std::vector<uint32_t> viewOffsets, viewLens;
+    std::vector<int64_t> viewK0;
     int32_t winStartBand = -1, winEndBand = -1;
     int64_t footStart = 0, footEnd = 0;
     bool hardEdgeStart = false, hardEdgeEnd = false;
