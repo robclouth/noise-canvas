@@ -774,12 +774,26 @@ async function rebuildFileFromAudioNow(
     );
   }
 
+  const newDuration = length / spectrogramData.sampleRate;
   set(
     produce((state: State) => {
       state.filesDirty[fileId] = true;
-      // The rebuild moves every frame, so a selection measured against the old
-      // length no longer covers what it was drawn over.
+      // The rebuild moves every frame, so a selection, loop region or play
+      // marker measured against the old length no longer points at what it
+      // covered — and a loop end past the new duration cannot start playback.
       state.filesSelection[fileId] = null;
+      const marker = state.filesPlaybackStartTime[fileId];
+      if (marker !== undefined && marker > newDuration) {
+        state.filesPlaybackStartTime[fileId] = newDuration;
+      }
+      const region = state.filesLoopRegion[fileId];
+      if (region) {
+        if (region.start >= newDuration) {
+          state.filesLoopRegion[fileId] = null;
+        } else if (region.end > newDuration) {
+          state.filesLoopRegion[fileId] = { ...region, end: newDuration };
+        }
+      }
     }),
   );
 }

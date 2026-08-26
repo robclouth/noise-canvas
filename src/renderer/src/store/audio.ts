@@ -338,8 +338,10 @@ export const createAudioSlice = (set: ZustandSet, get: ZustandGet): AudioState =
     player.buffer = new Tone.ToneAudioBuffer(playBuffer);
     player.volume.value = 0;
 
-    const end = region?.end ?? playBuffer.duration;
-    const loopStart = region?.start ?? 0;
+    // The buffer bounds the window: a region measured against an older, longer
+    // file cannot push the loop points past the end.
+    const end = Math.min(region?.end ?? playBuffer.duration, playBuffer.duration);
+    const loopStart = Math.min(region?.start ?? 0, end);
 
     // When Link is enabled and active, phase-align and adjust playback rate
     const { linkEnabled, linkTempo, linkQuantum, filepathsBpm, linkLatencyMs } = get();
