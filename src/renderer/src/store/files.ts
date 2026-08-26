@@ -26,7 +26,7 @@ import { ONSET_REGION_PAD_SEC } from "../lib/constants";
 import { reorderFileIds } from "../lib/file-reorder";
 import type { HostRender } from "../lib/host/types";
 import { destroyHistoryManager, getHistoryManager } from "../lib/history-manager";
-import { serializeFileTask } from "../lib/file-task-queue";
+import { serializeEditCommand, serializeFileTask } from "../lib/file-task-queue";
 import { buildChildIndexPaths, chainFromRootTo, runHistoryExport } from "../lib/history-export";
 import { disposeOnsetTexture, packOnsetState, spliceOnsets, unpackOnsetState } from "../lib/onset-map";
 import { commitStrokeOf, commitWindowOf, projectsWholeFile, type StrokeCommitSnapshot } from "../lib/stroke-commit";
@@ -2688,39 +2688,40 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       );
     }
   },
-  resizeActiveFileLength: async (factor: 2 | 0.5) => {
-    const fileId = get().activeFileId;
-    const file = fileId ? openFiles[fileId] : undefined;
-    if (!fileId || !file) return;
+  resizeActiveFileLength: (factor: 2 | 0.5) =>
+    serializeEditCommand(async () => {
+      const fileId = get().activeFileId;
+      const file = fileId ? openFiles[fileId] : undefined;
+      if (!fileId || !file) return;
 
-    try {
-      await rebuildFileFromCurrentAudio(
-        set,
-        fileId,
-        (channels) =>
-          channels.map((src) => {
-            const newLength = factor === 2 ? src.length * 2 : Math.floor(src.length / 2);
-            if (newLength <= 0) throw new Error("The file is too short to halve.");
-            const dst = new Float32Array(newLength);
-            if (factor === 2) {
-              dst.set(src, 0);
-              dst.set(src, src.length);
-            } else {
-              dst.set(src.subarray(0, newLength), 0);
-            }
-            return dst;
-          }),
-        { kind: "resize", label: "Resize" },
-      );
-    } catch (error) {
-      console.error("Resize failed:", error);
-      notifications.show({
-        title: "Resize failed",
-        message: error instanceof Error ? error.message : "Unknown error",
-        color: "red",
-      });
-    }
-  },
+      try {
+        await rebuildFileFromCurrentAudio(
+          set,
+          fileId,
+          (channels) =>
+            channels.map((src) => {
+              const newLength = factor === 2 ? src.length * 2 : Math.floor(src.length / 2);
+              if (newLength <= 0) throw new Error("The file is too short to halve.");
+              const dst = new Float32Array(newLength);
+              if (factor === 2) {
+                dst.set(src, 0);
+                dst.set(src, src.length);
+              } else {
+                dst.set(src.subarray(0, newLength), 0);
+              }
+              return dst;
+            }),
+          { kind: "resize", label: "Resize" },
+        );
+      } catch (error) {
+        console.error("Resize failed:", error);
+        notifications.show({
+          title: "Resize failed",
+          message: error instanceof Error ? error.message : "Unknown error",
+          color: "red",
+        });
+      }
+    }),
   insertSilenceIntoActiveFile: async () => {
     const fileId = get().activeFileId;
     const file = fileId ? openFiles[fileId] : undefined;
@@ -2741,45 +2742,47 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     });
     if (!values) return;
 
-    const current = openFiles[fileId];
-    if (!current?.spectrogramData) return;
-    const { sampleRate } = current.spectrogramData;
-    const bpm = get().filepathsBpm[current.filePath] || 120;
-    const seconds = values.unit === "beats" ? (60 / bpm) * values.length : values.length;
-    const padSamples = Math.round(seconds * sampleRate);
-    if (padSamples <= 0) return;
-    const playStartSample = (get().filesPlaybackStartTime[fileId] ?? 0) * sampleRate;
+    await serializeEditCommand(async () => {
+      const current = openFiles[fileId];
+      if (!current?.spectrogramData) return;
+      const { sampleRate } = current.spectrogramData;
+      const bpm = get().filepathsBpm[current.filePath] || 120;
+      const seconds = values.unit === "beats" ? (60 / bpm) * values.length : values.length;
+      const padSamples = Math.round(seconds * sampleRate);
+      if (padSamples <= 0) return;
+      const playStartSample = (get().filesPlaybackStartTime[fileId] ?? 0) * sampleRate;
 
-    const clearBusy = () =>
+      const clearBusy = () =>
+        set(
+          produce((state: State) => {
+            delete state.filesBusy[fileId];
+          }),
+        );
       set(
         produce((state: State) => {
-          delete state.filesBusy[fileId];
+          state.filesBusy[fileId] = "Inserting silence...";
         }),
       );
-    set(
-      produce((state: State) => {
-        state.filesBusy[fileId] = "Inserting silence...";
-      }),
-    );
 
-    try {
-      await rebuildFileFromCurrentAudio(
-        set,
-        fileId,
-        (channels) => insertSilence(channels, values.position, padSamples, playStartSample),
-        { kind: "resize", label: "Insert silence" },
-        clearBusy,
-      );
-    } catch (error) {
-      console.error("Insert silence failed:", error);
-      notifications.show({
-        title: "Insert silence failed",
-        message: error instanceof Error ? error.message : "Unknown error",
-        color: "red",
-      });
-    } finally {
-      clearBusy();
-    }
+      try {
+        await rebuildFileFromCurrentAudio(
+          set,
+          fileId,
+          (channels) => insertSilence(channels, values.position, padSamples, playStartSample),
+          { kind: "resize", label: "Insert silence" },
+          clearBusy,
+        );
+      } catch (error) {
+        console.error("Insert silence failed:", error);
+        notifications.show({
+          title: "Insert silence failed",
+          message: error instanceof Error ? error.message : "Unknown error",
+          color: "red",
+        });
+      } finally {
+        clearBusy();
+      }
+    });
   },
   setFileChannelCount: async (fileId, channelCount) => {
     const file = openFiles[fileId];

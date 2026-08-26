@@ -1,5 +1,5 @@
 import { DEFAULT_ONSET_SENSITIVITY } from "@renderer/lib/constants";
-import { serializeFileTask } from "@renderer/lib/file-task-queue";
+import { serializeEditCommand, serializeFileTask } from "@renderer/lib/file-task-queue";
 import { getHistoryManager } from "@renderer/lib/history-manager";
 import type { Selection } from "@renderer/lib/selection";
 import {
@@ -188,25 +188,22 @@ async function commitRegionStrokes(
 export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet): SelectionClipboardState => ({
   placing: null,
 
-  copySelection: async () => {
-    await get().beginMove(true);
-  },
+  copySelection: () => serializeEditCommand(() => get().beginMove(true)),
 
-  cutSelection: async () => {
-    await get().beginMove(false);
-  },
+  cutSelection: () => serializeEditCommand(() => get().beginMove(false)),
 
-  silenceSelection: async () => {
-    const edit = target(get);
-    const selection = activeSelectionOf(get, edit);
-    if (!edit || !selection) return;
-    await commitRegionStrokes(
-      edit,
-      [{ state: silenceStrokeState(edit.state, selection, edit.geometry), rect: selection }],
-      "Silence",
-      get,
-    );
-  },
+  silenceSelection: () =>
+    serializeEditCommand(async () => {
+      const edit = target(get);
+      const selection = activeSelectionOf(get, edit);
+      if (!edit || !selection) return;
+      await commitRegionStrokes(
+        edit,
+        [{ state: silenceStrokeState(edit.state, selection, edit.geometry), rect: selection }],
+        "Silence",
+        get,
+      );
+    }),
 
   stashSelection: async (selection) => {
     const edit = target(get);
@@ -214,46 +211,47 @@ export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet):
     return copyRegion(edit, selection);
   },
 
-  duplicateSelection: async () => {
-    if (get().placing) return;
-    const edit = target(get);
-    const selection = activeSelectionOf(get, edit);
-    if (!edit || !selection) return;
+  duplicateSelection: () =>
+    serializeEditCommand(async () => {
+      if (get().placing) return;
+      const edit = target(get);
+      const selection = activeSelectionOf(get, edit);
+      if (!edit || !selection) return;
 
-    // The duplicate takes its own copy and puts the user's clipboard back, so
-    // a later paste still drops what was last copied.
-    const stash = clipboard;
-    try {
-      if (!(await copyRegion(edit, selection))) return;
-      const copied = clipboard;
-      if (!copied) return;
-      const rect = dropRect(copied, selection.end, selection.pitchLo, edit.geometry.spec);
-      if (rect.start >= edit.geometry.totalDuration) return;
+      // The duplicate takes its own copy and puts the user's clipboard back, so
+      // a later paste still drops what was last copied.
+      const stash = clipboard;
+      try {
+        if (!(await copyRegion(edit, selection))) return;
+        const copied = clipboard;
+        if (!copied) return;
+        const rect = dropRect(copied, selection.end, selection.pitchLo, edit.geometry.spec);
+        if (rect.start >= edit.geometry.totalDuration) return;
 
-      openPlacingSource(edit);
-      const offset = clipboardSourceOffset(copied);
-      // The selection moves onto the copy, so pressing again lays the next one.
-      get().setFileSelection(edit.fileId, { ...rect, end: Math.min(rect.end, edit.geometry.totalDuration) });
-      await commitRegionStrokes(
-        edit,
-        [
-          {
-            state: pasteStrokeState(edit.state, rect, edit.geometry, {
-              path: CLIPBOARD_PATH,
-              timeFraction: offset.timeFraction,
-              pitchFraction: offset.pitchFraction,
-            }),
-            rect,
-          },
-        ],
-        "Duplicate",
-        get,
-      );
-      closePlacingSource(edit.fileId);
-    } finally {
-      clipboard = stash;
-    }
-  },
+        openPlacingSource(edit);
+        const offset = clipboardSourceOffset(copied);
+        // The selection moves onto the copy, so pressing again lays the next one.
+        get().setFileSelection(edit.fileId, { ...rect, end: Math.min(rect.end, edit.geometry.totalDuration) });
+        await commitRegionStrokes(
+          edit,
+          [
+            {
+              state: pasteStrokeState(edit.state, rect, edit.geometry, {
+                path: CLIPBOARD_PATH,
+                timeFraction: offset.timeFraction,
+                pitchFraction: offset.pitchFraction,
+              }),
+              rect,
+            },
+          ],
+          "Duplicate",
+          get,
+        );
+        closePlacingSource(edit.fileId);
+      } finally {
+        clipboard = stash;
+      }
+    }),
 
   beginPaste: (aim) => {
     const edit = target(get, aim?.fileId);
@@ -325,58 +323,59 @@ export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet):
     previewPlacing(to, placing);
   },
 
-  dropPlacing: async () => {
-    const placing = get().placing;
-    if (!placing || !clipboard) return;
-    const edit = target(get, placing.fileId);
-    if (!edit) {
-      set({ placing: null });
-      closePlacingSource(placing.fileId);
-      return;
-    }
-    // The landed rectangle becomes the selection before the placing state goes,
-    // so the overlay never falls back to the old selection while the commit
-    // runs.
-    get().setFileSelection(placing.fileId, placing.rect);
-    set({ placing: null });
-    edit.file.rendererRef?.current?.clearPreview();
-
-    const offset = clipboardSourceOffset(clipboard);
-    const strokes: { state: State; rect: Selection }[] = [];
-    // The paste samples the clipboard, not the canvas, so vacating first cannot
-    // take the sound with it — and a drop overlapping its own origin keeps what
-    // it just wrote.
-    if (placing.vacate && placing.vacateFileId === placing.fileId) {
-      strokes.push({ state: silenceStrokeState(edit.state, placing.vacate, edit.geometry), rect: placing.vacate });
-    }
-    strokes.push({
-      state: pasteStrokeState(edit.state, placing.rect, edit.geometry, {
-        path: CLIPBOARD_PATH,
-        timeFraction: offset.timeFraction,
-        pitchFraction: offset.pitchFraction,
-      }),
-      rect: placing.rect,
-    });
-
-    // A move that crossed into another file leaves its silence behind in the
-    // file it came from — its own edit, in its own history.
-    if (placing.vacate && placing.vacateFileId && placing.vacateFileId !== placing.fileId) {
-      const origin = target(get, placing.vacateFileId);
-      if (origin) {
-        get().setFileSelection(origin.fileId, null);
-        await commitRegionStrokes(
-          origin,
-          [{ state: silenceStrokeState(origin.state, placing.vacate, origin.geometry), rect: placing.vacate }],
-          placing.label,
-          get,
-          null,
-        );
+  dropPlacing: () =>
+    serializeEditCommand(async () => {
+      const placing = get().placing;
+      if (!placing || !clipboard) return;
+      const edit = target(get, placing.fileId);
+      if (!edit) {
+        set({ placing: null });
+        closePlacingSource(placing.fileId);
+        return;
       }
-    }
+      // The landed rectangle becomes the selection before the placing state goes,
+      // so the overlay never falls back to the old selection while the commit
+      // runs.
+      get().setFileSelection(placing.fileId, placing.rect);
+      set({ placing: null });
+      edit.file.rendererRef?.current?.clearPreview();
 
-    await commitRegionStrokes(edit, strokes, placing.label, get);
-    closePlacingSource(placing.fileId);
-  },
+      const offset = clipboardSourceOffset(clipboard);
+      const strokes: { state: State; rect: Selection }[] = [];
+      // The paste samples the clipboard, not the canvas, so vacating first cannot
+      // take the sound with it — and a drop overlapping its own origin keeps what
+      // it just wrote.
+      if (placing.vacate && placing.vacateFileId === placing.fileId) {
+        strokes.push({ state: silenceStrokeState(edit.state, placing.vacate, edit.geometry), rect: placing.vacate });
+      }
+      strokes.push({
+        state: pasteStrokeState(edit.state, placing.rect, edit.geometry, {
+          path: CLIPBOARD_PATH,
+          timeFraction: offset.timeFraction,
+          pitchFraction: offset.pitchFraction,
+        }),
+        rect: placing.rect,
+      });
+
+      // A move that crossed into another file leaves its silence behind in the
+      // file it came from — its own edit, in its own history.
+      if (placing.vacate && placing.vacateFileId && placing.vacateFileId !== placing.fileId) {
+        const origin = target(get, placing.vacateFileId);
+        if (origin) {
+          get().setFileSelection(origin.fileId, null);
+          await commitRegionStrokes(
+            origin,
+            [{ state: silenceStrokeState(origin.state, placing.vacate, origin.geometry), rect: placing.vacate }],
+            placing.label,
+            get,
+            null,
+          );
+        }
+      }
+
+      await commitRegionStrokes(edit, strokes, placing.label, get);
+      closePlacingSource(placing.fileId);
+    }),
 
   cancelPlacing: () => {
     const placing = get().placing;

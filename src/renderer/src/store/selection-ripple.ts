@@ -2,6 +2,7 @@ import { notifications } from "@mantine/notifications";
 import { produce } from "immer";
 import type { AnalysisParams } from "../../../main/lib/types";
 import { host } from "../lib/host";
+import { serializeEditCommand } from "../lib/file-task-queue";
 import { insertOnsetSpan, insertSpan, removeOnsetSpan, removeSpan } from "../lib/ripple-edits";
 
 const SPLICE_FADE_SECONDS = 0.005;
@@ -135,111 +136,117 @@ async function clipboardSpanAudio(clipboard: ClipboardRegion): Promise<Float32Ar
 }
 
 export const createSelectionRippleSlice = (set: ZustandSet, get: ZustandGet): SelectionRippleState => ({
-  cutTimeSelection: async () => {
-    const edit = target(get);
-    const selection = edit ? (get().filesSelection[edit.fileId] ?? null) : null;
-    if (!edit || !selection) return;
-    const widened = fullHeightSelection(selection.start, selection.end);
-    if (!widened) return;
+  cutTimeSelection: () =>
+    serializeEditCommand(async () => {
+      const edit = target(get);
+      const selection = edit ? (get().filesSelection[edit.fileId] ?? null) : null;
+      if (!edit || !selection) return;
+      const widened = fullHeightSelection(selection.start, selection.end);
+      if (!widened) return;
 
-    // A ripple cut takes the full column of time with it, whatever height was
-    // drawn, so the clipboard holds what the file loses.
-    if (!(await get().stashSelection(widened))) return;
+      // A ripple cut takes the full column of time with it, whatever height was
+      // drawn, so the clipboard holds what the file loses.
+      if (!(await get().stashSelection(widened))) return;
 
-    const startSample = widened.start * edit.sampleRate;
-    const endSample = widened.end * edit.sampleRate;
-    const fade = Math.round(SPLICE_FADE_SECONDS * edit.sampleRate);
-    await rippleRebuild(
-      set,
-      edit,
-      "Cutting time...",
-      "Cut time",
-      (channels) => removeSpan(channels, startSample, endSample, fade),
-      () => {
-        const newDuration = edit.duration - (widened.end - widened.start);
-        get().setFilePlaybackStartTime(edit.fileId, Math.max(0, Math.min(widened.start, newDuration)));
-      },
-      splicedOnsets(edit, (onsets) => removeOnsetSpan(onsets, widened.start, widened.end, ONSET_SEAM_GUARD_SECONDS)),
-    );
-  },
+      const startSample = widened.start * edit.sampleRate;
+      const endSample = widened.end * edit.sampleRate;
+      const fade = Math.round(SPLICE_FADE_SECONDS * edit.sampleRate);
+      await rippleRebuild(
+        set,
+        edit,
+        "Cutting time...",
+        "Cut time",
+        (channels) => removeSpan(channels, startSample, endSample, fade),
+        () => {
+          const newDuration = edit.duration - (widened.end - widened.start);
+          get().setFilePlaybackStartTime(edit.fileId, Math.max(0, Math.min(widened.start, newDuration)));
+        },
+        splicedOnsets(edit, (onsets) => removeOnsetSpan(onsets, widened.start, widened.end, ONSET_SEAM_GUARD_SECONDS)),
+      );
+    }),
 
-  pasteTimeSelection: async () => {
-    const edit = target(get);
-    const clipboard = getSelectionClipboard();
-    if (!edit || !clipboard) return;
+  pasteTimeSelection: () =>
+    serializeEditCommand(async () => {
+      const edit = target(get);
+      const clipboard = getSelectionClipboard();
+      if (!edit || !clipboard) return;
 
-    // The splice lands at the selection when there is one, else at the play
-    // start marker.
-    const selection = get().filesSelection[edit.fileId] ?? null;
-    const at = Math.max(0, Math.min(edit.duration, selection?.start ?? get().filesPlaybackStartTime[edit.fileId] ?? 0));
-    const insert = await clipboardSpanAudio(clipboard);
-    if (!insert) return;
-    const spanSeconds = (insert[0]?.length ?? 0) / clipboard.spec.sampleRate;
+      // The splice lands at the selection when there is one, else at the play
+      // start marker.
+      const selection = get().filesSelection[edit.fileId] ?? null;
+      const at = Math.max(
+        0,
+        Math.min(edit.duration, selection?.start ?? get().filesPlaybackStartTime[edit.fileId] ?? 0),
+      );
+      const insert = await clipboardSpanAudio(clipboard);
+      if (!insert) return;
+      const spanSeconds = (insert[0]?.length ?? 0) / clipboard.spec.sampleRate;
 
-    const fade = Math.round(SPLICE_FADE_SECONDS * edit.sampleRate);
-    // The clipboard's onsets in the inserted span's own time: it stores them
-    // from its crop origin, and the span starts at the copied rectangle.
-    const originSec = clipboard.originFrame / clipboard.spec.sampleRate;
-    const localOffset = clipboard.rect.start - originSec;
-    const clipLocal: number[] = [];
-    for (let i = 0; i + 1 < clipboard.onsets.length; i += 2) {
-      clipLocal.push(clipboard.onsets[i] - localOffset, clipboard.onsets[i + 1]);
-    }
-    await rippleRebuild(
-      set,
-      edit,
-      "Pasting time...",
-      "Paste time",
-      (channels) => insertSpan(channels, at * edit.sampleRate, insert, fade),
-      () => {
-        get().setFileSelection(edit.fileId, fullHeightSelection(at, at + spanSeconds));
-        get().setFilePlaybackStartTime(edit.fileId, at);
-      },
-      splicedOnsets(edit, (onsets) =>
-        insertOnsetSpan(onsets, at, spanSeconds, new Float32Array(clipLocal), ONSET_SEAM_GUARD_SECONDS),
-      ),
-    );
-  },
-
-  duplicateTimeSelection: async () => {
-    const edit = target(get);
-    const selection = edit ? (get().filesSelection[edit.fileId] ?? null) : null;
-    if (!edit || !selection) return;
-    const widened = fullHeightSelection(selection.start, selection.end);
-    if (!widened) return;
-
-    const startSample = Math.round(widened.start * edit.sampleRate);
-    const endSample = Math.round(widened.end * edit.sampleRate);
-    const fade = Math.round(SPLICE_FADE_SECONDS * edit.sampleRate);
-    const span = widened.end - widened.start;
-    // The copy carries the span's own onsets, in the copy's own time.
-    const fileOnsets = edit.file.onsets;
-    const copyOnsets: number[] = [];
-    if (fileOnsets) {
-      for (let i = 0; i + 1 < fileOnsets.length; i += 2) {
-        const time = fileOnsets[i];
-        if (time >= widened.start && time < widened.end) copyOnsets.push(time - widened.start, fileOnsets[i + 1]);
+      const fade = Math.round(SPLICE_FADE_SECONDS * edit.sampleRate);
+      // The clipboard's onsets in the inserted span's own time: it stores them
+      // from its crop origin, and the span starts at the copied rectangle.
+      const originSec = clipboard.originFrame / clipboard.spec.sampleRate;
+      const localOffset = clipboard.rect.start - originSec;
+      const clipLocal: number[] = [];
+      for (let i = 0; i + 1 < clipboard.onsets.length; i += 2) {
+        clipLocal.push(clipboard.onsets[i] - localOffset, clipboard.onsets[i + 1]);
       }
-    }
-    await rippleRebuild(
-      set,
-      edit,
-      "Duplicating time...",
-      "Duplicate time",
-      (channels) =>
-        insertSpan(
-          channels,
-          endSample,
-          channels.map((channel) => channel.slice(startSample, endSample)),
-          fade,
+      await rippleRebuild(
+        set,
+        edit,
+        "Pasting time...",
+        "Paste time",
+        (channels) => insertSpan(channels, at * edit.sampleRate, insert, fade),
+        () => {
+          get().setFileSelection(edit.fileId, fullHeightSelection(at, at + spanSeconds));
+          get().setFilePlaybackStartTime(edit.fileId, at);
+        },
+        splicedOnsets(edit, (onsets) =>
+          insertOnsetSpan(onsets, at, spanSeconds, new Float32Array(clipLocal), ONSET_SEAM_GUARD_SECONDS),
         ),
-      () => {
-        get().setFileSelection(edit.fileId, fullHeightSelection(widened.end, widened.end + span));
-        get().setFilePlaybackStartTime(edit.fileId, widened.end);
-      },
-      splicedOnsets(edit, (onsets) =>
-        insertOnsetSpan(onsets, widened.end, span, new Float32Array(copyOnsets), ONSET_SEAM_GUARD_SECONDS),
-      ),
-    );
-  },
+      );
+    }),
+
+  duplicateTimeSelection: () =>
+    serializeEditCommand(async () => {
+      const edit = target(get);
+      const selection = edit ? (get().filesSelection[edit.fileId] ?? null) : null;
+      if (!edit || !selection) return;
+      const widened = fullHeightSelection(selection.start, selection.end);
+      if (!widened) return;
+
+      const startSample = Math.round(widened.start * edit.sampleRate);
+      const endSample = Math.round(widened.end * edit.sampleRate);
+      const fade = Math.round(SPLICE_FADE_SECONDS * edit.sampleRate);
+      const span = widened.end - widened.start;
+      // The copy carries the span's own onsets, in the copy's own time.
+      const fileOnsets = edit.file.onsets;
+      const copyOnsets: number[] = [];
+      if (fileOnsets) {
+        for (let i = 0; i + 1 < fileOnsets.length; i += 2) {
+          const time = fileOnsets[i];
+          if (time >= widened.start && time < widened.end) copyOnsets.push(time - widened.start, fileOnsets[i + 1]);
+        }
+      }
+      await rippleRebuild(
+        set,
+        edit,
+        "Duplicating time...",
+        "Duplicate time",
+        (channels) =>
+          insertSpan(
+            channels,
+            endSample,
+            channels.map((channel) => channel.slice(startSample, endSample)),
+            fade,
+          ),
+        () => {
+          get().setFileSelection(edit.fileId, fullHeightSelection(widened.end, widened.end + span));
+          get().setFilePlaybackStartTime(edit.fileId, widened.end);
+        },
+        splicedOnsets(edit, (onsets) =>
+          insertOnsetSpan(onsets, widened.end, span, new Float32Array(copyOnsets), ONSET_SEAM_GUARD_SECONDS),
+        ),
+      );
+    }),
 });

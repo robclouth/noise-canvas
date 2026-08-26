@@ -112,12 +112,14 @@ function resolveBrushIndex(event: KeyboardEvent): number | undefined {
 export function useShortcuts() {
   const handleKeyDown = (event: KeyboardEvent) => {
     // Menu accelerators run wherever the focus is, as a native menu's would,
-    // and are matched before anything that a text field would swallow.
+    // and are matched before anything that a text field would swallow. A held
+    // key runs its command once, like a native menu accelerator — except undo
+    // and redo, which repeat so a held key scrubs through history.
     for (const { accelerator, command } of acceleratorCommands()) {
       if (!matchesAccelerator(event, accelerator)) continue;
       event.preventDefault();
       event.stopPropagation();
-      runCommand(command);
+      if (!event.repeat || command === "undo" || command === "redo") runCommand(command);
       return;
     }
 
@@ -141,13 +143,13 @@ export function useShortcuts() {
       return;
     }
 
-    // Backspace and Delete wipe the selected region in place.
+    // Backspace and Delete wipe the selected region in place, once per press.
     if (event.key === "Backspace" || event.key === "Delete") {
       const state = useStore.getState();
       const selection = state.activeFileId ? state.filesSelection[state.activeFileId] : null;
       if (selection && !state.placing) {
         event.preventDefault();
-        void state.silenceSelection();
+        if (!event.repeat) void state.silenceSelection();
         return;
       }
     }

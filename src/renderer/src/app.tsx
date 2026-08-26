@@ -23,6 +23,7 @@ import { ANALYSIS_MAX_TEXTURE_SIZE } from "./lib/constants";
 import { diag } from "./lib/diag-log";
 import { recordDiagFrame, startDiagSampler } from "./lib/diag-sampler";
 import { host } from "./lib/host";
+import { serializeEditCommand } from "./lib/file-task-queue";
 import { ipcOn, ipcSend } from "./lib/ipc";
 import { watchAudioOutputs } from "./lib/audio-devices";
 import { anchorProps } from "./lib/ui-anchors";
@@ -319,8 +320,12 @@ function App(): React.JSX.Element {
 
     const unsubPasteSelection = ipcOn("paste-selection", () => {
       // The paste lands in the file under the pointer; over none of them it
-      // falls back to the active file's own selection.
-      useStore.getState().beginPaste(pointerFileAim() ?? undefined);
+      // falls back to the active file's own selection. The aim is the pointer
+      // at the press; the pick-up itself waits its turn behind pending edits.
+      const aim = pointerFileAim() ?? undefined;
+      void serializeEditCommand(async () => {
+        useStore.getState().beginPaste(aim);
+      });
     });
     unsubscribers.push(unsubPasteSelection);
 
