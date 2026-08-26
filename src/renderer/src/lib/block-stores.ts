@@ -28,16 +28,20 @@ export function getBlockStore(fileId: string): Promise<BlockStore> | null {
 
 /**
  * Opens the store holding a file's packed state as blocks on disk, creating
- * it over `<userData>/blocks/<fileId>` when the file has none open. The
- * resident budget is zero: the state is read at launch and on far history
- * navigation, so nothing stays decoded between reads.
+ * it over `<userData>/blocks/<fileId>` when the file has none open. The seed
+ * stays in that directory untouched; patched blocks flush into its `current`
+ * overlay, so the root state survives any torn write. The resident budget is
+ * zero: the state is read at launch and on far history navigation, so
+ * nothing stays decoded between reads.
  */
 export function openBlockStore(fileId: string, layout: BandLayout, shape: BlockStoreShape): Promise<BlockStore> {
   let store = stores.get(fileId);
   if (!store) {
     store = (async () => {
       const grid = blockGrid(layout, shape.numFrames, shape.sampleRate);
-      return new BlockStore(grid, fileBlockBackend(await blockStoreDirectory(fileId)), {
+      const dir = await blockStoreDirectory(fileId);
+      return new BlockStore(grid, fileBlockBackend(dir), {
+        overlay: fileBlockBackend(host.path.join(dir, "current")),
         texelCount: shape.texelCount,
         maxResidentBytes: 0,
       });

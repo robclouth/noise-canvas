@@ -55,13 +55,15 @@ const rawCodec: BlockCodec = {
 async function seeded(opts: { targetSeconds?: number; maxResidentBytes?: number; codec?: BlockCodec } = {}) {
   const grid = makeGrid(opts.targetSeconds);
   const backend = memoryBackend();
+  const overlay = memoryBackend();
   const store = new BlockStore(grid, backend, {
     codec: opts.codec ?? rawCodec,
     maxResidentBytes: opts.maxResidentBytes ?? 1 << 30,
+    overlay,
     texelCount: data.textureWidth * data.textureHeight,
   });
   await store.seed(packed);
-  return { grid, backend, store };
+  return { grid, backend, overlay, store };
 }
 
 /** The pixels of one band, as a sorted range list a footprint would carry. */
@@ -69,12 +71,20 @@ function bandRange(band: number, firstBin: number, bins: number): Uint32Array {
   return Uint32Array.of(layout.metadata[band * 4] + firstBin, bins);
 }
 
+// Whole-array mismatches are asserted through this index rather than a
+// toEqual, whose failure diff over ~70k elements wedges the browser runner.
+function firstDifference(a: Float32Array, b: Float32Array): number {
+  if (a.length !== b.length) return Math.min(a.length, b.length);
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return i;
+  return -1;
+}
+
 describe("BlockStore", () => {
   it("gives back everything it was seeded with", async () => {
     const { store } = await seeded();
     const all = await store.readAll();
     expect(all.length).toBe(packed.length);
-    expect(Array.from(all)).toEqual(Array.from(packed));
+    expect(firstDifference(all, packed)).toBe(-1);
   });
 
   it("writes one file per block", async () => {
@@ -113,27 +123,56 @@ describe("BlockStore", () => {
     const expected = Float32Array.from(packed);
     const start = ranges[0] * 4;
     expected.set(values, start);
-    expect(Array.from(await store.readAll())).toEqual(Array.from(expected));
+    expect(firstDifference(await store.readAll(), expected)).toBe(-1);
   });
 
   it("holds a patch until it is flushed, then writes it", async () => {
-    const { grid, backend, store } = await seeded();
-    const before = backend.writes;
+    const { grid, backend, overlay, store } = await seeded();
+    const before = overlay.writes;
     const ranges = Uint32Array.of(...bandRange(1, 40, 200));
     const values = gatherPixelRanges(packed, ranges).map((value) => value * -1);
 
     await store.patch(ranges, values);
     expect(store.dirtyCount).toBeGreaterThan(0);
-    expect(backend.writes).toBe(before);
+    expect(overlay.writes).toBe(before);
 
     await store.flush();
     expect(store.dirtyCount).toBe(0);
-    expect(backend.writes).toBeGreaterThan(before);
-    expect(backend.writes - before).toBeLessThan(grid.blockCount);
+    expect(overlay.writes).toBeGreaterThan(before);
+    expect(overlay.writes - before).toBeLessThan(grid.blockCount);
 
     // A fresh store over the same bytes sees the patch, so it reached the backend.
-    const reopened = new BlockStore(grid, backend, { codec: rawCodec });
+    const reopened = new BlockStore(grid, backend, { codec: rawCodec, overlay });
     expect(Array.from(await reopened.readRanges(ranges))).toEqual(Array.from(values));
+  });
+
+  it("flushes patches into the overlay and never rewrites a seeded block", async () => {
+    const { grid, backend, overlay, store } = await seeded();
+    const rootWrites = backend.writes;
+    const ranges = Uint32Array.of(...bandRange(1, 40, 200));
+    const values = gatherPixelRanges(packed, ranges).map((value) => value * -1);
+    await store.patch(ranges, values);
+    await store.flush();
+
+    expect(backend.writes).toBe(rootWrites);
+    expect(overlay.blocks.size).toBeGreaterThan(0);
+
+    // A store over the seeded blocks alone still holds the state before the patch.
+    const rootOnly = new BlockStore(grid, backend, { codec: rawCodec });
+    expect(Array.from(await rootOnly.readRanges(ranges))).toEqual(Array.from(gatherPixelRanges(packed, ranges)));
+  });
+
+  it("reads the seeded state back from under a flushed patch", async () => {
+    const { store } = await seeded();
+    const all = Uint32Array.of(0, layoutTexels(layout));
+    await store.patch(
+      all,
+      gatherPixelRanges(packed, all).map((value) => value * -1),
+    );
+    await store.flush();
+    const root = await store.readAllRoot();
+    expect(root.length).toBe(packed.length);
+    expect(firstDifference(root, packed)).toBe(-1);
   });
 
   it("answers a patched block from RAM, not from the bytes it was written as", async () => {
@@ -193,6 +232,21 @@ describe("BlockStore", () => {
     );
     await store.seed(packed);
     expect(store.dirtyCount).toBe(0);
+    expect(Array.from(await store.readRanges(ranges))).toEqual(Array.from(gatherPixelRanges(packed, ranges)));
+  });
+
+  it("drops the overlay when it is seeded again", async () => {
+    const { overlay, store } = await seeded();
+    const ranges = Uint32Array.of(...bandRange(1, 40, 200));
+    await store.patch(
+      ranges,
+      gatherPixelRanges(packed, ranges).map((value) => value * -1),
+    );
+    await store.flush();
+    expect(overlay.blocks.size).toBeGreaterThan(0);
+
+    await store.seed(packed);
+    expect(overlay.blocks.size).toBe(0);
     expect(Array.from(await store.readRanges(ranges))).toEqual(Array.from(gatherPixelRanges(packed, ranges)));
   });
 
@@ -286,15 +340,15 @@ describe("BlockStore", () => {
   });
 
   it("flushes itself rather than hold every patched block in RAM", async () => {
-    const { backend, store } = await seeded({ maxResidentBytes: 1 << 16 });
-    const writesBefore = backend.writes;
+    const { overlay, store } = await seeded({ maxResidentBytes: 1 << 16 });
+    const writesBefore = overlay.writes;
     const all = Uint32Array.of(0, layoutTexels(layout));
     const values = gatherPixelRanges(packed, all).map((value) => value * -1);
     await store.patch(all, values);
 
-    expect(backend.writes).toBeGreaterThan(writesBefore);
+    expect(overlay.writes).toBeGreaterThan(writesBefore);
     expect(store.residentBytes).toBeLessThanOrEqual(1 << 16);
-    expect(Array.from(await store.readRanges(all))).toEqual(Array.from(values));
+    expect(firstDifference(await store.readRanges(all), values)).toBe(-1);
   });
 
   it("drops clean blocks to stay inside its budget", async () => {
@@ -341,9 +395,16 @@ describe("BlockStore", () => {
   });
 
   it("cannot be read after it is disposed", async () => {
-    const { backend, store } = await seeded();
+    const { backend, overlay, store } = await seeded();
+    const ranges = Uint32Array.of(...bandRange(1, 40, 200));
+    await store.patch(
+      ranges,
+      gatherPixelRanges(packed, ranges).map((value) => value * -1),
+    );
+    await store.flush();
     await store.dispose();
     expect(backend.blocks.size).toBe(0);
+    expect(overlay.blocks.size).toBe(0);
     await expect(store.readAll()).rejects.toThrow(/disposed/);
   });
 

@@ -52,6 +52,7 @@ import {
   getHistoryManager,
   PackedStateCache,
 } from "../history-manager";
+import { getBlockStore } from "../block-stores";
 import { historyCacheBudgets } from "../history-cache-budgets";
 import { serializeFileTask } from "../file-task-queue";
 import { canvasPatchStashCount, setCanvasPatchStash } from "../canvas-patch-stash";
@@ -310,6 +311,24 @@ function installManagerEnv(): { fbo: { last: Float32Array | null }; files: Map<s
       for (const key of [...store.keys()]) {
         if (key.startsWith(`${path}/`)) store.delete(key);
       }
+    }),
+    readdir: vi.fn(async (path: string) => {
+      const names = new Set<string>();
+      for (const key of store.keys()) {
+        if (key.startsWith(`${path}/`)) names.add(key.slice(path.length + 1).split("/")[0]);
+      }
+      if (names.size === 0) throw new Error(`ENOENT: ${path}`);
+      return [...names];
+    }),
+    stat: vi.fn(async (path: string) => {
+      const v = store.get(path);
+      if (v !== undefined) {
+        return { size: typeof v === "string" ? v.length : v.byteLength, isDirectory: () => false, isFile: () => true };
+      }
+      for (const key of store.keys()) {
+        if (key.startsWith(`${path}/`)) return { size: 0, isDirectory: () => true, isFile: () => false };
+      }
+      throw new Error(`ENOENT: ${path}`);
     }),
   };
 
@@ -592,6 +611,56 @@ describe("HistoryManager undo/redo round-trip", () => {
 
     await destroyHistoryManager("f5");
     expect([...files.keys()].some((path) => path.startsWith("/userdata/blocks/f5/"))).toBe(false);
+  });
+
+  it("reads the root from under a patched store", async () => {
+    installManagerEnv();
+    const w = 8,
+      h = 4;
+    const root = lossyFill(w, h, 0);
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f7");
+    const rootId = await mgr.addRootSnapshot({
+      data: root,
+      kind: "root",
+      label: "root",
+      spectrogram: makeSpectrogram(root, w, h),
+    });
+
+    const open = getBlockStore("f7");
+    expect(open).not.toBeNull();
+    const store = await open!;
+    const ranges = new Uint32Array([5, 5]);
+    await store.patch(
+      ranges,
+      gatherPixelRanges(root, ranges).map((value) => value + 1),
+    );
+    await store.flush();
+
+    clearAllHistoryManagers();
+    const fresh = getHistoryManager("f7");
+    await fresh.initialize();
+    const { packedData } = await fresh.reconstruct(rootId);
+    expect(Array.from(packedData)).toEqual(Array.from(root));
+    clearAllHistoryManagers();
+  });
+
+  it("weighs the overlay's blocks in the file's disk usage", async () => {
+    const { files } = installManagerEnv();
+    const w = 8,
+      h = 4;
+    const root = lossyFill(w, h, 0);
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f6");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    const before = await mgr.getDiskUsageBytes();
+    expect(before).toBeGreaterThan(0);
+
+    files.set("/userdata/blocks/f6/current/0.blk", new Uint8Array(64));
+    expect((await mgr.getDiskUsageBytes()) - before).toBe(64);
+    clearAllHistoryManagers();
   });
 
   it("puts the file's unprojected paint back with the state it belongs to", async () => {

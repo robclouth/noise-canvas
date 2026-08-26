@@ -36,6 +36,13 @@ export type BlockStoreOptions = {
   codec?: BlockCodec;
   maxResidentBytes?: number;
   /**
+   * Where flushed patches land. With an overlay, the seeded blocks are never
+   * rewritten — a torn write can only reach the overlay — and reads take the
+   * overlay's copy of a block over the seeded one. Without one, flushes
+   * rewrite the seeded blocks in place.
+   */
+  overlay?: BlockBackend;
+  /**
    * Texels a whole packed array holds, padding included. `readAll` returns an
    * array of this size, so it drops straight into the readers that upload it
    * as a texture. Defaults to the coefficients alone.
@@ -52,6 +59,7 @@ export type BlockStoreOptions = {
 export class BlockStore {
   readonly grid: BlockGrid;
   private readonly backend: BlockBackend;
+  private readonly overlay: BlockBackend | null;
   private readonly codec: BlockCodec;
   private readonly clean: ByteBudgetCache<Float32Array>;
   private readonly dirty = new Map<number, Float32Array>();
@@ -66,6 +74,7 @@ export class BlockStore {
   constructor(grid: BlockGrid, backend: BlockBackend, options: BlockStoreOptions = {}) {
     this.grid = grid;
     this.backend = backend;
+    this.overlay = options.overlay ?? null;
     this.codec = options.codec ?? packedBlockCodec;
     this.texelCount = Math.max(options.texelCount ?? 0, layoutTexels(grid.layout));
     this.maxResidentBytes = options.maxResidentBytes ?? DEFAULT_RESIDENT_BYTES;
@@ -105,6 +114,7 @@ export class BlockStore {
     this.dirty.clear();
     this.dirtyVersion.clear();
     this.clean.clear();
+    await this.overlay?.clear();
     for (let index = 0; index < this.grid.blockCount; index++) {
       const block = gatherPixelRanges(packed, this.blockRanges(index));
       await this.backend.write(index, await this.codec.encode(block));
@@ -122,6 +132,21 @@ export class BlockStore {
     const out = new Float32Array(this.texelCount * 4);
     for (let index = 0; index < this.grid.blockCount; index++) {
       scatterCompactPixelRanges(out, await this.block(index), this.blockRanges(index));
+    }
+    return out;
+  }
+
+  /**
+   * The packed state as it was seeded, straight from the seeded blocks. The
+   * resident copies hold patched state, so they are not consulted.
+   */
+  async readAllRoot(): Promise<Float32Array> {
+    if (this.disposed) throw new Error("block store is disposed");
+    const out = new Float32Array(this.texelCount * 4);
+    for (let index = 0; index < this.grid.blockCount; index++) {
+      const bytes = await this.backend.read(index);
+      if (!bytes) throw new Error(`block ${index} was never written`);
+      scatterCompactPixelRanges(out, await this.codec.decode(bytes), this.blockRanges(index));
     }
     return out;
   }
@@ -174,7 +199,7 @@ export class BlockStore {
     for (const [index, block] of [...this.dirty]) {
       if (this.disposed) return;
       const version = this.dirtyVersion.get(index);
-      await this.backend.write(index, await this.codec.encode(block.slice()));
+      await (this.overlay ?? this.backend).write(index, await this.codec.encode(block.slice()));
       if (this.dirtyVersion.get(index) !== version) continue;
       this.dirty.delete(index);
       this.dirtyVersion.delete(index);
@@ -190,6 +215,7 @@ export class BlockStore {
     this.dirtyVersion.clear();
     this.clean.clear();
     this.inflight.clear();
+    await this.overlay?.clear();
     await this.backend.clear();
   }
 
@@ -218,7 +244,7 @@ export class BlockStore {
   }
 
   private async load(index: number): Promise<Float32Array> {
-    const bytes = await this.backend.read(index);
+    const bytes = (await this.overlay?.read(index)) ?? (await this.backend.read(index));
     if (!bytes) throw new Error(`block ${index} was never written`);
     const block = await this.codec.decode(bytes);
     this.clean.set(String(index), block);

@@ -940,7 +940,7 @@ export class HistoryManager {
    */
   private async readRootPacked(root: HistoryNode, dir: string): Promise<Float32Array> {
     try {
-      return await (await this.rootBlockStore(root)).readAll();
+      return await (await this.rootBlockStore(root)).readAllRoot();
     } catch {
       return await readPackedCompressed(this.packedPath(dir, root.id));
     }
@@ -1829,8 +1829,9 @@ export class HistoryManager {
         let total = 0;
         for (const entry of entries) {
           try {
-            const s = await host.fs.stat(host.path.join(dir, entry));
-            total += Number(s.size);
+            const path = host.path.join(dir, entry);
+            const s = await host.fs.stat(path);
+            total += s.isDirectory() ? await dirBytes(path) : Number(s.size);
           } catch {
             // ignore
           }
