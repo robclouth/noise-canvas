@@ -2,6 +2,15 @@ import { createStepStateView, useStore } from "@/store";
 import { notifications } from "@mantine/notifications";
 import { useTransientStore } from "@renderer/store/transient";
 import { diag } from "@renderer/lib/diag-log";
+import {
+  clipRangesToView,
+  composeViewContent,
+  fileUvToViewUv,
+  viewCoversFile,
+  viewRangesToFile,
+  viewUvToFileUv,
+} from "@renderer/lib/canvas-view";
+import { gatherPixelRanges } from "@renderer/lib/pixel-ranges";
 import { countDiagStroke } from "@renderer/lib/diag-sampler";
 import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
 import { useFrame, useThree } from "@react-three/fiber";
@@ -110,8 +119,8 @@ export interface FileRendererHandle {
   discardStrokePreview: () => boolean;
   /** Keeps the previewed pixels and forgets the saved ones, so they can be committed. */
   keepStrokePreview: () => void;
-  /** Gets the raw data from the current frame buffer object asynchronously. */
-  getFBOData: () => Promise<Float32Array>;
+  /** The whole packed state from the frame buffer, or null when the canvas view does not hold the whole file. */
+  getFBOData: () => Promise<Float32Array | null>;
   /**
    * Reads only the pixels of the flat [pixelStart, pixelCount, ...] ranges from
    * the committed frame buffer, as one block in range order.
@@ -1323,30 +1332,61 @@ const FileRendererInner = memo(
       }
     });
 
+    // The handle speaks file space whatever span the canvas holds: ranges,
+    // values and UVs translate through the renderer's view at this boundary,
+    // and a view covering the whole file passes everything straight through.
+    const regionToFileUv = (
+      region: { startX: number; endX: number; startY: number; endY: number } | null,
+    ): { startX: number; endX: number; startY: number; endY: number } | null => {
+      const renderer = strokeRendererRef.current;
+      if (!renderer || !region || canvasCoversFile()) return region;
+      const view = renderer.committedSource().view;
+      return {
+        ...region,
+        startX: viewUvToFileUv(view, spectrogramData.numFrames, region.startX),
+        endX: viewUvToFileUv(view, spectrogramData.numFrames, region.endX),
+      };
+    };
+    const canvasCoversFile = (): boolean => {
+      const view = strokeRendererRef.current?.committedSource().view;
+      return view !== undefined && viewCoversFile(view, spectrogramData.numFrames);
+    };
+    const fileBandLayout = (): { numBands: number; metadata: Float32Array } => ({
+      numBands: spectrogramData.numBands,
+      metadata: spectrogramData.metadata,
+    });
+
     /**
-     * Reads the pixel data from the current FBO asynchronously.
+     * Reads the whole packed state from the FBO, or null when the canvas
+     * view does not hold the whole file (the block store serves it then).
      */
-    const getFBOData = async (): Promise<Float32Array> => {
+    const getFBOData = async (): Promise<Float32Array | null> => {
       if (!strokeRendererRef.current) {
         throw new Error("StrokeRenderer not initialized");
       }
+      if (!canvasCoversFile()) return null;
       return strokeRendererRef.current.getFBOData();
     };
 
     const readPixelRanges = async (pixelRanges: Uint32Array): Promise<Float32Array> => {
-      if (!strokeRendererRef.current) {
+      const renderer = strokeRendererRef.current;
+      if (!renderer) {
         throw new Error("StrokeRenderer not initialized");
       }
-      return strokeRendererRef.current.readPixelRanges(pixelRanges);
+      if (canvasCoversFile()) return renderer.readPixelRanges(pixelRanges);
+      const clipped = clipRangesToView(renderer.committedSource().view, fileBandLayout(), pixelRanges);
+      if (!clipped.covered) throw new Error("the canvas view does not hold the requested pixels");
+      return renderer.readPixelRanges(clipped.viewRanges);
     };
 
     /**
      * Sets the FBO data from an external source (e.g., for undo/redo).
      */
     const setFBOData = (data: Float32Array) => {
-      if (!strokeRendererRef.current) return;
+      const renderer = strokeRendererRef.current;
+      if (!renderer) return;
 
-      strokeRendererRef.current.setFBOData(data);
+      renderer.setFBOData(canvasCoversFile() ? data : composeViewContent(renderer.committedSource().view, data));
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();
@@ -1355,8 +1395,22 @@ const FileRendererInner = memo(
     };
 
     const applyPhaseTurns = (turns: ArrayLike<number>) => {
-      if (!strokeRendererRef.current) return;
-      strokeRendererRef.current.applyPhaseTurns(turns);
+      const renderer = strokeRendererRef.current;
+      if (!renderer) return;
+      if (canvasCoversFile()) {
+        renderer.applyPhaseTurns(turns);
+      } else {
+        const view = renderer.committedSource().view;
+        const layout = fileBandLayout();
+        const translated: number[] = [];
+        for (let i = 0; i + 3 < turns.length; i += 4) {
+          const clipped = clipRangesToView(view, layout, Uint32Array.of(turns[i], turns[i + 1]));
+          for (let j = 0; j + 1 < clipped.viewRanges.length; j += 2) {
+            translated.push(clipped.viewRanges[j], clipped.viewRanges[j + 1], turns[i + 2], turns[i + 3]);
+          }
+        }
+        renderer.applyPhaseTurns(translated);
+      }
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();
@@ -1365,9 +1419,15 @@ const FileRendererInner = memo(
     };
 
     const patchFBOData = (data: Float32Array, pixelRanges: Uint32Array) => {
-      if (!strokeRendererRef.current) return;
+      const renderer = strokeRendererRef.current;
+      if (!renderer) return;
 
-      strokeRendererRef.current.patchFBOData(data, pixelRanges);
+      if (canvasCoversFile()) {
+        renderer.patchFBOData(data, pixelRanges);
+      } else {
+        const clipped = clipRangesToView(renderer.committedSource().view, fileBandLayout(), pixelRanges);
+        renderer.patchFBODataCompact(gatherPixelRanges(data, clipped.fileRanges), clipped.viewRanges);
+      }
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();
@@ -1376,9 +1436,15 @@ const FileRendererInner = memo(
     };
 
     const patchFBODataCompact = (values: Float32Array, pixelRanges: Uint32Array) => {
-      if (!strokeRendererRef.current) return;
+      const renderer = strokeRendererRef.current;
+      if (!renderer) return;
 
-      strokeRendererRef.current.patchFBODataCompact(values, pixelRanges);
+      if (canvasCoversFile()) {
+        renderer.patchFBODataCompact(values, pixelRanges);
+      } else {
+        const clipped = clipRangesToView(renderer.committedSource().view, fileBandLayout(), pixelRanges, values);
+        if (clipped.viewValues) renderer.patchFBODataCompact(clipped.viewValues, clipped.viewRanges);
+      }
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();
@@ -1534,14 +1600,42 @@ const FileRendererInner = memo(
         applyStroke.current = true;
         invalidateRef.current?.();
       },
-      getDirtyRegion: () => strokeRendererRef.current?.getDirtyRegion() ?? null,
+      getDirtyRegion: () => regionToFileUv(strokeRendererRef.current?.getDirtyRegion() ?? null),
       clearDirtyRegion: () => strokeRendererRef.current?.clearDirtyRegion(),
-      consumeDirtyRegion: () => strokeRendererRef.current?.consumeDirtyRegion() ?? null,
-      getDirtyPixelRanges: () => strokeRendererRef.current?.getDirtyPixelRanges() ?? null,
-      getCommittedFootprintUv: () => strokeRendererRef.current?.getCommittedFootprintUv() ?? null,
+      consumeDirtyRegion: () => regionToFileUv(strokeRendererRef.current?.consumeDirtyRegion() ?? null),
+      getDirtyPixelRanges: () => {
+        const renderer = strokeRendererRef.current;
+        const ranges = renderer?.getDirtyPixelRanges() ?? null;
+        if (!renderer || !ranges || canvasCoversFile()) return ranges;
+        return viewRangesToFile(renderer.committedSource().view, ranges);
+      },
+      getCommittedFootprintUv: () => {
+        const renderer = strokeRendererRef.current;
+        const footprint = renderer?.getCommittedFootprintUv() ?? null;
+        if (!renderer || !footprint || canvasCoversFile()) return footprint;
+        const view = renderer.committedSource().view;
+        return {
+          ...footprint,
+          timeMin: viewUvToFileUv(view, spectrogramData.numFrames, footprint.timeMin),
+          timeMax: viewUvToFileUv(view, spectrogramData.numFrames, footprint.timeMax),
+        };
+      },
       getStrokeGeneration: () => strokeRendererRef.current?.getStrokeGeneration() ?? 0,
-      expandDirtyRegion: (startX: number, endX: number, startY: number, endY: number) =>
-        strokeRendererRef.current?.expandDirtyRegion(startX, endX, startY, endY),
+      expandDirtyRegion: (startX: number, endX: number, startY: number, endY: number) => {
+        const renderer = strokeRendererRef.current;
+        if (!renderer) return;
+        if (canvasCoversFile()) {
+          renderer.expandDirtyRegion(startX, endX, startY, endY);
+        } else {
+          const view = renderer.committedSource().view;
+          renderer.expandDirtyRegion(
+            fileUvToViewUv(view, spectrogramData.numFrames, startX),
+            fileUvToViewUv(view, spectrogramData.numFrames, endX),
+            startY,
+            endY,
+          );
+        }
+      },
       captureSnapshot,
       refreshSnapshot: scheduleSnapshotRefresh,
       renderExportImage,

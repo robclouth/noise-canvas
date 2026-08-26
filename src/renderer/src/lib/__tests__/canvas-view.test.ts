@@ -3,7 +3,15 @@ import { describe, expect, it } from "vitest";
 import { constantQBandLayout, constantQMetadata } from "../../test/mock-spectrogram";
 import { layoutTexels, type BandLayout } from "../band-layout";
 import { blockGrid, blockPixelRanges, blockTexels } from "../block-grid";
-import { canvasViewOf, fileRangesToView, viewRangesToFile } from "../canvas-view";
+import {
+  canvasViewOf,
+  clipRangesToView,
+  fileRangesToView,
+  fileUvToViewUv,
+  viewCoversFile,
+  viewRangesToFile,
+  viewUvToFileUv,
+} from "../canvas-view";
 
 /** A constant-Q band layout, without the packed data. */
 function layoutOf(
@@ -111,5 +119,83 @@ describe("range remapping", () => {
     expect(fileRangesToView(view, small, beforeView)).toBeNull();
     const straddling = Uint32Array.of(view.ranges[band * 2] + view.ranges[band * 2 + 1] - 1, 2);
     expect(fileRangesToView(view, small, straddling)).toBeNull();
+  });
+});
+
+describe("clipRangesToView", () => {
+  const view = canvasViewOf(grid, 2, 4);
+
+  it("keeps a fully covered range, translated with its values", () => {
+    const band = 1;
+    const fileStart = view.ranges[band * 2] + 3;
+    const ranges = Uint32Array.of(fileStart, 4);
+    const values = new Float32Array(4 * 4);
+    for (let i = 0; i < values.length; i++) values[i] = i + 1;
+    const clipped = clipRangesToView(view, small, ranges, values);
+    expect(clipped.covered).toBe(true);
+    expect(Array.from(clipped.viewRanges)).toEqual([view.layout.metadata[band * 4] + 3, 4]);
+    expect(Array.from(clipped.fileRanges)).toEqual([fileStart, 4]);
+    expect(Array.from(clipped.viewValues!)).toEqual(Array.from(values));
+  });
+
+  it("drops the pixels outside the view and keeps their neighbours' values", () => {
+    const band = 2;
+    const viewFileStart = view.ranges[band * 2];
+    // Two pixels before the view, three inside.
+    const ranges = Uint32Array.of(viewFileStart - 2, 5);
+    const values = new Float32Array(5 * 4);
+    for (let i = 0; i < values.length; i++) values[i] = i + 1;
+    const clipped = clipRangesToView(view, small, ranges, values);
+    expect(clipped.covered).toBe(false);
+    expect(Array.from(clipped.viewRanges)).toEqual([view.layout.metadata[band * 4], 3]);
+    expect(Array.from(clipped.fileRanges)).toEqual([viewFileStart, 3]);
+    expect(Array.from(clipped.viewValues!)).toEqual(Array.from(values.subarray(2 * 4)));
+  });
+
+  it("splits a range crossing a band edge and reports full coverage", () => {
+    const wholeFile = canvasViewOf(grid, 0, grid.blockCount - 1);
+    const band0Len = small.metadata[1];
+    const ranges = Uint32Array.of(small.metadata[0] + band0Len - 2, 5);
+    const clipped = clipRangesToView(wholeFile, small, ranges);
+    expect(clipped.covered).toBe(true);
+    expect(clipped.viewRanges.length).toBe(4);
+    expect(clipped.viewRanges[1]).toBe(2);
+    expect(clipped.viewRanges[3]).toBe(3);
+    expect(Array.from(clipped.fileRanges)).toEqual([small.metadata[0] + band0Len - 2, 2, small.metadata[4], 3]);
+  });
+
+  it("keeps values aligned across several ranges when the first is clipped", () => {
+    const band = 1;
+    const viewFileStart = view.ranges[band * 2];
+    const inside = view.ranges[band * 2] + 5;
+    const ranges = Uint32Array.of(viewFileStart - 1, 2, inside, 2);
+    const values = new Float32Array(4 * 4);
+    for (let i = 0; i < values.length; i++) values[i] = i + 1;
+    const clipped = clipRangesToView(view, small, ranges, values);
+    expect(clipped.covered).toBe(false);
+    expect(Array.from(clipped.viewRanges)).toEqual([
+      view.layout.metadata[band * 4],
+      1,
+      view.layout.metadata[band * 4] + 5,
+      2,
+    ]);
+    expect(Array.from(clipped.viewValues!)).toEqual(
+      Array.from(values.subarray(4, 8)).concat(Array.from(values.subarray(8, 16))),
+    );
+  });
+});
+
+describe("view UV translation", () => {
+  const view = canvasViewOf(grid, 2, 4);
+
+  it("covers the file only from the first to the last block", () => {
+    expect(viewCoversFile(canvasViewOf(grid, 0, grid.blockCount - 1), small.numFrames)).toBe(true);
+    expect(viewCoversFile(view, small.numFrames)).toBe(false);
+  });
+
+  it("round-trips a time UV through the view", () => {
+    const fileX = viewUvToFileUv(view, small.numFrames, 0.25);
+    expect(fileX).toBeCloseTo((view.startFrame + 0.25 * (view.endFrame - view.startFrame)) / small.numFrames, 12);
+    expect(fileUvToViewUv(view, small.numFrames, fileX)).toBeCloseTo(0.25, 12);
   });
 });

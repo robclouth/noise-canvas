@@ -122,6 +122,76 @@ export function composeViewContent(view: CanvasView, filePacked: Float32Array): 
   return out;
 }
 
+/** True when the view holds every frame of a file `numFrames` long. */
+export function viewCoversFile(view: CanvasView, numFrames: number): boolean {
+  return view.startFrame === 0 && view.endFrame >= numFrames;
+}
+
+/** A time UV on the view's span as the same position on the file's span. */
+export function viewUvToFileUv(view: CanvasView, numFrames: number, x: number): number {
+  return (view.startFrame + x * (view.endFrame - view.startFrame)) / numFrames;
+}
+
+/** A time UV on the file's span as the same position on the view's span. */
+export function fileUvToViewUv(view: CanvasView, numFrames: number, x: number): number {
+  return (x * numFrames - view.startFrame) / (view.endFrame - view.startFrame);
+}
+
+/**
+ * Clips file-absolute pixel ranges to the view: the covered pieces as view
+ * pixel ranges and as file ranges, split at band edges in walk order, with
+ * the covered pixels of `values` (the ranges' compact pixels) gathered in
+ * the same order. `covered` is false when some pixel fell outside the view.
+ */
+export function clipRangesToView(
+  view: CanvasView,
+  fileLayout: BandLayout,
+  ranges: Uint32Array,
+  values?: Float32Array,
+): { viewRanges: Uint32Array; fileRanges: Uint32Array; viewValues: Float32Array | null; covered: boolean } {
+  const viewRanges: number[] = [];
+  const fileRanges: number[] = [];
+  const pieces: Array<{ valueStart: number; count: number }> = [];
+  let covered = true;
+  let keptPixels = 0;
+  let valueOffset = 0;
+  for (let i = 0; i + 1 < ranges.length; i += 2) {
+    const rangeStart = ranges[i];
+    const rangeEnd = rangeStart + ranges[i + 1];
+    let at = rangeStart;
+    for (let band = bandAtPixel(fileLayout, rangeStart); band < fileLayout.numBands && at < rangeEnd; band++) {
+      const bandStart = fileLayout.metadata[band * 4];
+      const bandEnd = bandStart + fileLayout.metadata[band * 4 + 1];
+      if (bandStart >= rangeEnd) break;
+      const pieceEnd = Math.min(rangeEnd, bandEnd);
+      if (pieceEnd <= at) continue;
+      const viewFileStart = view.ranges[band * 2];
+      const viewFileEnd = viewFileStart + view.ranges[band * 2 + 1];
+      const keptStart = Math.max(at, viewFileStart);
+      const keptEnd = Math.min(pieceEnd, viewFileEnd);
+      if (keptEnd < pieceEnd || keptStart > at) covered = false;
+      if (keptEnd > keptStart) {
+        viewRanges.push(view.layout.metadata[band * 4] + (keptStart - viewFileStart), keptEnd - keptStart);
+        fileRanges.push(keptStart, keptEnd - keptStart);
+        pieces.push({ valueStart: valueOffset + (keptStart - rangeStart), count: keptEnd - keptStart });
+        keptPixels += keptEnd - keptStart;
+      }
+      at = pieceEnd;
+    }
+    valueOffset += ranges[i + 1];
+  }
+  let viewValues: Float32Array | null = null;
+  if (values) {
+    viewValues = new Float32Array(keptPixels * 4);
+    let out = 0;
+    for (const piece of pieces) {
+      viewValues.set(values.subarray(piece.valueStart * 4, (piece.valueStart + piece.count) * 4), out * 4);
+      out += piece.count;
+    }
+  }
+  return { viewRanges: Uint32Array.from(viewRanges), fileRanges: Uint32Array.from(fileRanges), viewValues, covered };
+}
+
 /**
  * (next-view texel, count, current-view texel) triples for the frame span two
  * views of one file share, one triple per band with any overlap.

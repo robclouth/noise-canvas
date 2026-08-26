@@ -2200,15 +2200,16 @@ export class StrokeRenderer {
   }
 
   /**
-   * Packed-pixel ranges the current stroke's committed footprint covers, as a
-   * flat [pixelStart, pixelCount, ...] list — one range per band, mapping the
-   * footprint's time window into each band's packed segment. Returns null when
-   * nothing was committed, so history stores a full snapshot.
+   * Packed-pixel ranges the current stroke's committed footprint covers, in
+   * the view's own pixel space, as a flat [pixelStart, pixelCount, ...] list —
+   * one range per band, mapping the footprint's time window into each band's
+   * packed segment. Returns null when nothing was committed, so history
+   * stores a full snapshot.
    */
   getDirtyPixelRanges(): Uint32Array | null {
     if (this.committedTimeMax <= this.committedTimeMin) return null;
 
-    const { numBands, metadata } = this.spectrogramData;
+    const { numBands, metadata } = this.viewSpec;
     const pitchMargin = 4;
     const highBand = Math.min(
       numBands - 1,
