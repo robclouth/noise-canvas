@@ -1,5 +1,5 @@
-import { Group, NumberInput, SegmentedControl, Stack, Text } from "@mantine/core";
-import type { InsertSilenceValues, SilencePosition } from "@renderer/lib/insert-silence";
+import { Group, NumberInput, SegmentedControl, Stack } from "@mantine/core";
+import type { InsertSilenceValues } from "@renderer/lib/insert-silence";
 import { useState, type RefObject } from "react";
 
 /** The body of the Insert Silence dialog, writing each edit into `values`. */
@@ -36,22 +36,6 @@ export const InsertSilenceFields = ({ values }: { values: RefObject<InsertSilenc
           ]}
         />
       </Group>
-      <Stack gap={6}>
-        <Text size="xs" c="dimmed">
-          At
-        </Text>
-        <SegmentedControl
-          size="xs"
-          fullWidth
-          value={fields.position}
-          onChange={(value) => update({ position: value as SilencePosition })}
-          data={[
-            { value: "start", label: "File Start" },
-            { value: "play-start", label: "Play Start" },
-            { value: "end", label: "File End" },
-          ]}
-        />
-      </Stack>
     </Stack>
   );
 };

@@ -12,7 +12,7 @@ import { remainingCoefficientBudget, usedBudgetFraction } from "../lib/gpu-budge
 import { toChannelCount } from "../lib/channel-mix";
 import { insertSilence, silenceCutSample, type InsertSilenceValues } from "../lib/insert-silence";
 import { insertOnsetSpan, insertSpanPieces, removeOnsetSpan } from "../../../main/lib/ripple-edits";
-import type { Selection } from "../lib/selection";
+import { fullHeightSelection, type Selection } from "../lib/selection";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
 import type {
   AnalysisParams,
@@ -2798,35 +2798,49 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (!fileId || !file?.spectrogramData) return;
     if (get().filesLoading[fileId] || get().filesBusy[fileId]) return;
 
-    const values = await new Promise<InsertSilenceValues | null>((resolve) => {
-      let confirmed = false;
-      openInsertSilencePrompt({
-        onConfirm: (v) => {
-          confirmed = true;
-          resolve(v);
-        },
-        onClose: () => {
-          if (!confirmed) resolve(null);
-        },
+    // With a selection, the silence takes the selection's own place and
+    // length; the dialog only asks when there is nothing to measure.
+    let values: InsertSilenceValues | null = null;
+    if (!get().filesSelection[fileId]) {
+      values = await new Promise<InsertSilenceValues | null>((resolve) => {
+        let confirmed = false;
+        openInsertSilencePrompt({
+          onConfirm: (v) => {
+            confirmed = true;
+            resolve(v);
+          },
+          onClose: () => {
+            if (!confirmed) resolve(null);
+          },
+        });
       });
-    });
-    if (!values) return;
+      if (!values) return;
+    }
 
     await serializeEditCommand(async () => {
       const current = openFiles[fileId];
       if (!current?.spectrogramData) return;
-      const { sampleRate } = current.spectrogramData;
-      const bpm = get().filepathsBpm[current.filePath] || 120;
-      const seconds = values.unit === "beats" ? (60 / bpm) * values.length : values.length;
-      const requestedPad = Math.round(seconds * sampleRate);
+      const { sampleRate, numFrames } = current.spectrogramData;
+      const selection = get().filesSelection[fileId];
+
+      let requestedPad: number;
+      let cutSample: number;
+      if (selection) {
+        requestedPad = Math.round((selection.end - selection.start) * sampleRate);
+        cutSample = silenceCutSample(numFrames, selection.start * sampleRate);
+      } else if (values) {
+        const bpm = get().filepathsBpm[current.filePath] || 120;
+        const seconds = values.unit === "beats" ? (60 / bpm) * values.length : values.length;
+        requestedPad = Math.round(seconds * sampleRate);
+        cutSample = silenceCutSample(numFrames, (get().filesPlaybackStartTime[fileId] ?? 0) * sampleRate);
+      } else {
+        return;
+      }
       if (requestedPad <= 0) return;
       const padSamples = quantizeSpliceLength(requestedPad, sampleRate);
-      const playStartSample = (get().filesPlaybackStartTime[fileId] ?? 0) * sampleRate;
 
       // The silence moves the onsets rigidly, so the rebuild splices the map
       // instead of detecting it again.
-      const numFrames = current.spectrogramData.numFrames;
-      const cutSample = silenceCutSample(values.position, numFrames, playStartSample);
       const fileOnsets = current.onsets;
       const precomputedOnsets = fileOnsets
         ? {
@@ -2851,12 +2865,19 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         await rebuildFileFromCurrentAudio(
           set,
           fileId,
-          (channels) => insertSilence(channels, values.position, padSamples, playStartSample),
+          (channels) => insertSilence(channels, cutSample, padSamples),
           { kind: "resize", label: "Insert silence" },
-          clearBusy,
+          () => {
+            clearBusy();
+            // The silence is what the edit made, so it is what stays selected.
+            if (selection) {
+              const startSec = cutSample / sampleRate;
+              get().setFileSelection(fileId, fullHeightSelection(startSec, startSec + padSamples / sampleRate));
+              get().setFilePlaybackStartTime(fileId, startSec);
+            }
+          },
           precomputedOnsets,
-          (oldFrames) =>
-            insertSpanPieces(oldFrames, silenceCutSample(values.position, oldFrames, playStartSample), padSamples, 0),
+          (oldFrames) => insertSpanPieces(oldFrames, cutSample, padSamples, 0),
         );
       } catch (error) {
         console.error("Insert silence failed:", error);

@@ -984,7 +984,7 @@ Memory climbs with the length and resolution of everything you have open, not wi
 - **Restore Original** – reloads the unedited file.
 - **Duplicate File**.
 - **Double Length / Half Length** – stretches or shrinks the file's length.
-- **Insert Silence…** (`Cmd/Ctrl+I`) – pushes the file apart and drops empty time in. **Length** is in beats or seconds, and **At** puts it at the file start, at the play start on the time legend, or at the file end.
+- **Insert Silence…** (`Cmd/Ctrl+I`) – pushes the file apart and drops empty time in. With a selection, the selection's own stretch opens up: its length of silence lands at its start, what was selected moves later, and the silence stays selected. With nothing selected, a dialog asks for a **Length** in beats or seconds, and the silence lands at the play start marker.
 
 **View**
 

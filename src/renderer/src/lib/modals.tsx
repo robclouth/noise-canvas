@@ -317,7 +317,7 @@ export function openSplitPartsPrompt({
 }
 
 // Last-used settings, so reopening the dialog picks up where it left off.
-let lastSilenceValues: InsertSilenceValues = { length: 4, unit: "beats", position: "play-start" };
+let lastSilenceValues: InsertSilenceValues = { length: 4, unit: "beats" };
 
 type OpenInsertSilencePromptOptions = {
   onConfirm: (values: InsertSilenceValues) => void | Promise<void>;
