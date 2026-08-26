@@ -781,10 +781,12 @@ export class HistoryManager {
     // footprint values it saved; any other compares against the whole base.
     const compact = opts.baseFootprint;
     const deltaBase = compact ?? base;
+    const turnsIn = hasPhaseTurns(opts.turns) ? opts.turns : null;
 
     let storage: "delta" | "packed";
     let deltaBytes: Uint8Array | undefined;
     let rangesForPatch: Uint32Array | null = null;
+    let tierResiduals: Uint32Array | null = null;
 
     if (
       sameDims &&
@@ -806,22 +808,39 @@ export class HistoryManager {
         if (file) file.unprojectedPaint = parent.unprojectedPaint === true;
         return { id: parentId, isNew: false };
       }
-      rangesForPatch = ranges;
-      // A checkpoint is stored whole on disk, but its delta still carries the
-      // hops to and from it in memory.
-      deltaBytes = await host.analysis.encodeHistoryDelta(
-        deltaBase,
-        after,
+      // The tier takes the stroke before the delta is cut: its turn walk
+      // yields the residuals that make the turns invertible over the store.
+      tierResiduals = await this.tierStrokePatch(
+        parentId,
         ranges,
-        compact != null,
-        compact != null,
-        hasPhaseTurns(opts.turns) ? opts.turns : undefined,
+        compact ? after : gatherPixelRanges(opts.data, ranges),
+        turnsIn,
+        opts.data,
       );
-      storage = this.deltaStepsSinceLastSnap(parentId) >= CHECKPOINT_INTERVAL ? "packed" : "delta";
-      diag.timing("timing", "addStroke footprint delta", performance.now() - deltaStart, {
-        ranges: ranges.length / 2,
-        footprintPixels,
-      });
+      if (!this.manifest) return { id: parentId, isNew: false };
+      if (turnsIn && tierResiduals == null) {
+        // Without a tier walk there are no residuals to subtract the turns
+        // back exactly, so the stroke stores whole.
+        storage = "packed";
+      } else {
+        if (turnsIn && tierResiduals) turnsIn.residuals = tierResiduals;
+        rangesForPatch = ranges;
+        // A checkpoint is stored whole on disk, but its delta still carries
+        // the hops to and from it in memory.
+        deltaBytes = await host.analysis.encodeHistoryDelta(
+          deltaBase,
+          after,
+          ranges,
+          compact != null,
+          compact != null,
+          turnsIn ?? undefined,
+        );
+        storage = this.deltaStepsSinceLastSnap(parentId) >= CHECKPOINT_INTERVAL ? "packed" : "delta";
+        diag.timing("timing", "addStroke footprint delta", performance.now() - deltaStart, {
+          ranges: ranges.length / 2,
+          footprintPixels,
+        });
+      }
     } else {
       storage = "packed";
     }
@@ -859,10 +878,16 @@ export class HistoryManager {
     if (rangesForPatch) this.nodeDirtyRanges.set(id, rangesForPatch);
     if (deltaBytes) {
       this.nodeDeltas.set(id, deltaBytes);
-      this.nodeTurns.set(id, hasPhaseTurns(opts.turns) ? opts.turns : null);
+      this.nodeTurns.set(id, turnsIn);
     }
     if (opts.audioRegion) this.nodeAudioRegions.set(id, opts.audioRegion);
-    await this.syncTierForStroke(parentId, rangesForPatch, opts.data, hasPhaseTurns(opts.turns) ? opts.turns : null);
+    if (tierResiduals != null) {
+      this.manifest.overlayNodeId = id;
+    } else {
+      let tierRanges = rangesForPatch;
+      if (tierRanges && turnsIn) tierRanges = mergePixelRanges(tierRanges, phaseTurnRanges(turnsIn));
+      await this.syncStoreToCurrent(parentId, tierRanges);
+    }
     if (!this.manifest) return { id, isNew: true };
     // The stroke was read back from the FBO, so the two are in step again.
     this.fboOutOfSync = false;
@@ -1000,52 +1025,53 @@ export class HistoryManager {
   }
 
   /**
-   * Brings the tier in step with the stroke just appended: its footprint
-   * ranges are patched from the painted state, and its phase turns applied to
-   * the tier's own blocks — the same float arithmetic — whose residuals must
-   * come out as the ones the stroke's delta stored. A tier that does not hold
-   * the parent state falls back to the plain sync; a turn walk that disagrees
-   * is force-patched from the packed state.
+   * Applies a stroke to the tier itself: its footprint ranges are patched
+   * from the painted values, and its phase turns walked over the tier's own
+   * blocks — the same float arithmetic — collecting the residuals an inverted
+   * hop needs. Turns that already carry residuals (an addon-applied tail) must
+   * agree with the walk; a disagreement means a stale tier, so its spans are
+   * force-patched from the painted state and the stored residuals stand. Null
+   * when the tier does not hold the parent state or the write fails; the
+   * manifest then keeps the tier unknown and the caller falls back to the
+   * plain sync.
    */
-  private async syncTierForStroke(
+  private async tierStrokePatch(
     parentId: string,
-    ranges: Uint32Array | null,
-    data: Float32Array,
+    ranges: Uint32Array,
+    after: Float32Array,
     turns: PhaseTurns | null,
-  ): Promise<void> {
+    data: Float32Array | undefined,
+  ): Promise<Uint32Array | null> {
     const manifest = this.manifest;
-    if (!manifest) return;
-    if (manifest.overlayNodeId !== parentId || ranges == null) {
-      let tierRanges = ranges;
-      if (tierRanges && turns) tierRanges = mergePixelRanges(tierRanges, phaseTurnRanges(turns));
-      await this.syncStoreToCurrent(parentId, tierRanges);
-      return;
-    }
+    if (!manifest || manifest.overlayNodeId !== parentId) return null;
     const holder = this.seedHolder();
-    const current = manifest.nodes[manifest.currentId];
-    if (!holder || !current || !sameStoreDimensions(holder.dimensions, current.dimensions)) return;
+    const parent = manifest.nodes[parentId];
+    if (!holder || !parent || !sameStoreDimensions(holder.dimensions, parent.dimensions)) return null;
     try {
       const store = await this.seedBlockStore(holder);
       // Invalidated on disk before the tier changes, so a crash mid-write
       // cannot leave a torn tier that still reads as current.
       manifest.overlayNodeId = undefined;
       await this.writeManifest();
-      if (this.manifest !== manifest) return;
-      await store.patch(ranges, gatherPixelRanges(data, ranges));
+      if (this.manifest !== manifest) return null;
+      await store.patch(ranges, after);
+      let residuals: Uint32Array = new Uint32Array(0);
       if (turns) {
-        const residuals = await store.applyTurnsCollecting(turns);
-        if (!sameUint32(residuals, turns.residuals)) {
+        residuals = await store.applyTurnsCollecting(turns);
+        if (turns.residuals.length > 0 && !sameUint32(residuals, turns.residuals)) {
           console.warn("history: the tier's turn walk disagrees with the stroke's residuals");
+          if (!data) return null;
           const spans = phaseTurnRanges(turns);
           await store.patch(spans, gatherPixelRanges(data, spans));
+          residuals = turns.residuals;
         }
       }
       await store.flush();
-      if (this.manifest !== manifest) return;
-      manifest.overlayNodeId = manifest.currentId;
+      if (this.manifest !== manifest) return null;
+      return residuals;
     } catch (error) {
-      manifest.overlayNodeId = undefined;
       console.error("history: block store current sync failed", error);
+      return null;
     }
   }
 

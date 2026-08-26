@@ -54,7 +54,7 @@ import { canvasPatchStashCount, setCanvasPatchStash } from "../canvas-patch-stas
 import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";
 import type { AudioHop } from "../audio-hop";
 import type { PhaseTurns } from "../../../../main/lib/types";
-import { applyPhaseTurns } from "../../../../main/lib/history-delta";
+import { applyPhaseTurns, applyPhaseTurnsCollecting } from "../../../../main/lib/history-delta";
 import type { SpectrogramData } from "../../store/types";
 
 describe("historyCacheBudgets", () => {
@@ -1057,6 +1057,49 @@ describe("HistoryManager hops", () => {
 
     await mgr.navigateToParent();
     expect(Array.from(await store.readAll())).toEqual(Array.from(rootBytes));
+
+    mgr.dispose();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it("stores the residuals the tier's turn walk collects, so undo is exact", async () => {
+    installManagerEnv();
+    const { canvas } = installPatchRenderer(w, h);
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    // Phases past pixel 8 are tiny, so a whole-turn shift cannot subtract
+    // back exactly and the walk must collect residuals.
+    for (let p = 8; p < w * h; p++) {
+      root[p * 4 + 1] = Math.fround(1e-3 * (p + 1));
+      root[p * 4 + 3] = Math.fround(-1e-3 * (p + 1));
+    }
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    const current = mgr.currentPackedState()!;
+    const rootBytes = new Float32Array(current);
+    canvas.set(current);
+
+    const ranges = new Uint32Array([4, 4]);
+    const baseFootprint = current.slice(4 * 4, 8 * 4);
+    for (let p = 4; p < 8; p++) for (let c = 0; c < 4; c++) current[p * 4 + c] = ((p * 5 + c) % 23) / 23;
+    const c0 = Math.fround(6 * Math.PI);
+    const turns: PhaseTurns = {
+      pixelStarts: Uint32Array.from([8]),
+      pixelCounts: Uint32Array.from([w * h - 8]),
+      offsets: Float32Array.from([c0, -c0]),
+      residuals: new Uint32Array(0),
+    };
+    expect(applyPhaseTurnsCollecting(new Float32Array(rootBytes), turns).length).toBeGreaterThan(0);
+    applyPhaseTurns(current, turns, false);
+    canvas.set(current);
+    const strokeBytes = new Float32Array(current);
+    await mgr.addStroke({ data: current, label: "A", dimensions, dirtyRanges: ranges, baseFootprint, turns });
+    const store = await getBlockStore("f1")!;
+    expect(Array.from(await store.readAll())).toEqual(Array.from(strokeBytes));
+
+    await mgr.navigateToParent();
+    expect(Array.from(await store.readAll())).toEqual(Array.from(rootBytes));
+    expect(Array.from(canvas)).toEqual(Array.from(rootBytes));
 
     mgr.dispose();
     delete fakeOpenFiles["f1"];

@@ -19,7 +19,7 @@ import type {
   PackedLayout,
   PackedOnsets,
 } from "../../../main/lib/types";
-import { applyPhaseTurnsCollecting, hasPhaseTurns } from "../../../main/lib/history-delta";
+import { applyPhaseTurns, hasPhaseTurns } from "../../../main/lib/history-delta";
 import { commitViewOf, composeViewBuffer, scatterCommitPatch } from "../lib/commit-view";
 import { float32BitsEqual, gatherPixelRanges } from "../lib/pixel-ranges";
 import {
@@ -2276,8 +2276,10 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       }
       if (usedView && view && viewBuffer) {
         scatterCommitPatch(data, view, viewBuffer, result.patch.ranges, layout);
+        // The residuals that make the tail invertible are collected by the
+        // history's own turn walk over the block store, not from this copy.
         if (result.tailApplied === false && hasPhaseTurns(result.tail)) {
-          result.tail.residuals = applyPhaseTurnsCollecting(data, result.tail);
+          applyPhaseTurns(data, result.tail, false);
         }
       }
       diag.timing("timing", "commitStroke", performance.now() - commitStart, {
