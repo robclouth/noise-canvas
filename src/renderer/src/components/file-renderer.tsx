@@ -9,7 +9,10 @@ import {
   viewCoversFile,
   viewRangesToFile,
   viewUvToFileUv,
+  type CanvasView,
 } from "@renderer/lib/canvas-view";
+import { blockGrid } from "@renderer/lib/block-grid";
+import { CANVAS_WINDOW_BLOCKS, CanvasWindow, needsCanvasWindow } from "@renderer/lib/canvas-window";
 import { gatherPixelRanges } from "@renderer/lib/pixel-ranges";
 import { countDiagStroke } from "@renderer/lib/diag-sampler";
 import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
@@ -442,6 +445,16 @@ const FileRendererInner = memo(
     // Stroke params for render loop
     const strokePreview = useRef(false);
 
+    // The canvas window this file paints through, the view it is moving to,
+    // and whether a stroke is in progress (a window that moves mid-stroke has
+    // to carry the stroke's scratch with it).
+    const canvasWindowRef = useRef<CanvasWindow | null>(null);
+    const windowRequestRef = useRef<CanvasView | null>(null);
+    const strokeActiveRef = useRef(false);
+    // The effects that drop the renderer run before the window helpers are
+    // declared, so they reach the disposer through a ref.
+    const disposeCanvasWindowRef = useRef<(() => void) | null>(null);
+
     // Cleanup StrokeRenderer on unmount or when textures change
     useEffect(() => {
       return () => {
@@ -449,6 +462,7 @@ const FileRendererInner = memo(
           strokeRendererRef.current.dispose();
           strokeRendererRef.current = null;
         }
+        disposeCanvasWindowRef.current?.();
       };
     }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
 
@@ -547,6 +561,7 @@ const FileRendererInner = memo(
         strokeRendererRef.current.dispose();
         strokeRendererRef.current = null;
       }
+      disposeCanvasWindowRef.current?.();
 
       return () => {
         // Whatever is live now, not what this run created: reloadTextures
@@ -819,6 +834,78 @@ const FileRendererInner = memo(
       );
     };
 
+    /** The frames the file's view shows at its current zoom and offset. */
+    const visibleFrameRange = (state: State): { start: number; end: number } => {
+      const { numFrames } = spectrogramData;
+      const zoom = Math.pow(2, state.filesZoom[fileId] ?? 0);
+      const span = numFrames / zoom;
+      const start = zoom > 1 ? (state.filesOffset[fileId] ?? 0) * (numFrames - span) : 0;
+      return { start, end: start + span };
+    };
+
+    /**
+     * The block window the canvas paints through, built on first use for a
+     * file with more blocks than the window holds. With CANVAS_WINDOW_BLOCKS
+     * at Infinity the canvas holds the whole file and no window is made.
+     */
+    const canvasWindowFor = (gl: WebGLRenderer): CanvasWindow | null => {
+      if (canvasWindowRef.current) return canvasWindowRef.current;
+      const grid = blockGrid(
+        { numBands: spectrogramData.numBands, metadata: spectrogramData.metadata },
+        spectrogramData.numFrames,
+        spectrogramData.sampleRate,
+      );
+      if (!needsCanvasWindow(grid, CANVAS_WINDOW_BLOCKS)) return null;
+      canvasWindowRef.current = new CanvasWindow(gl, grid, {
+        windowBlocks: CANVAS_WINDOW_BLOCKS,
+        read: (ranges) => getHistoryManager(fileId).currentRanges(ranges),
+      });
+      return canvasWindowRef.current;
+    };
+
+    const disposeCanvasWindow = (): void => {
+      canvasWindowRef.current?.dispose();
+      canvasWindowRef.current = null;
+      windowRequestRef.current = null;
+    };
+    disposeCanvasWindowRef.current = disposeCanvasWindow;
+
+    /**
+     * Points the canvas window at the frames [startFrame, endFrame). Blocks
+     * the window lacks are read in the background and the canvas takes them
+     * when they land, so a brush ahead of the reads keeps painting on what the
+     * canvas already holds.
+     */
+    const aimCanvasWindow = (startFrame: number, endFrame: number): void => {
+      const window = canvasWindowRef.current;
+      const renderer = strokeRendererRef.current;
+      if (!window || !renderer?.getIsInitialized()) return;
+      const current = renderer.committedSource().view;
+      const next = window.plan(current, startFrame, endFrame);
+      const cold = next === current ? window.missing(current) : window.missing(next);
+      if (next === current && cold.length === 0) return;
+      const pending = windowRequestRef.current;
+      if (pending && pending.firstBlock === next.firstBlock && pending.lastBlock === next.lastBlock) return;
+      windowRequestRef.current = next;
+      void window.acquire(next).then((filled) => {
+        if (windowRequestRef.current !== next) return;
+        windowRequestRef.current = null;
+        const live = strokeRendererRef.current;
+        if (!filled || !live?.getIsInitialized() || canvasWindowRef.current !== window) return;
+        const held = live.committedSource().view;
+        if (held.firstBlock === next.firstBlock && held.lastBlock === next.lastBlock) {
+          // The canvas is already over these blocks and only lacks content for
+          // the cold ones, so nothing painted is drawn over.
+          if (cold.length > 0) live.fillCanvas((target) => window.compose(held, cold, target));
+        } else {
+          live.slideView(next, (target, blocks) => window.compose(next, blocks, target), {
+            midStroke: strokeActiveRef.current,
+          });
+        }
+        invalidateRef.current();
+      });
+    };
+
     /**
      * Paints one stroke into the FBO from an explicit state snapshot. The frame
      * loop calls it with the live store and the cursor's brush origin; batch
@@ -832,6 +919,17 @@ const FileRendererInner = memo(
 
       const bpm = state.filepathsBpm[file.filePath] || 120;
       const totalDuration = file.spectrogramData.numFrames / file.spectrogramData.sampleRate;
+
+      // The renderer paints over the span the canvas holds, so the cursor and
+      // the duration it reads them against are the window's, not the file's.
+      const view = strokeRenderer.committedSource().view;
+      const overWholeFile = viewCoversFile(view, file.spectrogramData.numFrames);
+      const dabCursor = overWholeFile
+        ? cursorPos
+        : new Vector2(fileUvToViewUv(view, file.spectrogramData.numFrames, cursorPos.x), cursorPos.y);
+      const dabDuration = overWholeFile
+        ? totalDuration
+        : (view.endFrame - view.startFrame) / file.spectrogramData.sampleRate;
 
       // The active step names the file the brush samples from; null means this
       // file paints from itself.
@@ -882,10 +980,10 @@ const FileRendererInner = memo(
         perfMark("renderStroke", () =>
           strokeRenderer.renderStroke(
             {
-              cursorPos,
+              cursorPos: dabCursor,
               preview,
               bpm,
-              totalDuration,
+              totalDuration: dabDuration,
               viewZoomPower: state.filesZoom[fileId],
               viewOffset: state.filesOffset[fileId],
               viewZoomPowerY: state.filesZoomY[fileId] ?? 0,
@@ -990,7 +1088,9 @@ const FileRendererInner = memo(
         // The GPU can refuse the allocations even after analysis fit the
         // budget; closing the file keeps the context alive.
         try {
-          strokeRendererRef.current = new StrokeRenderer(gl, spectrogramData, textures, fileId, effects);
+          const visible = visibleFrameRange(state);
+          const view = canvasWindowFor(gl)?.plan(null, visible.start, visible.end);
+          strokeRendererRef.current = new StrokeRenderer(gl, spectrogramData, textures, fileId, effects, view);
         } catch (error) {
           console.error("Creating the stroke renderer failed:", error);
           notifications.show({
@@ -1009,7 +1109,14 @@ const FileRendererInner = memo(
 
       // Initialize StrokeRenderer if not done yet
       if (!strokeRenderer.getIsInitialized()) {
-        strokeRenderer.initialize();
+        const window = canvasWindowRef.current;
+        if (window) {
+          const view = strokeRenderer.committedSource().view;
+          strokeRenderer.initialize((target) => window.composeResident(view, target));
+          aimCanvasWindow(view.startFrame, view.endFrame);
+        } else {
+          strokeRenderer.initialize();
+        }
       }
 
       // Hook up the history manager exactly once per component lifetime.
@@ -1198,6 +1305,14 @@ const FileRendererInner = memo(
           // At rest: show at the source position
           sourceDisplayPos = sourcePositionUv;
         }
+      }
+
+      if (canvasWindowRef.current) {
+        const { numFrames } = spectrogramData;
+        const visible = visibleFrameRange(state);
+        const start = cursorPos.x >= 0 ? cursorPos.x * numFrames : visible.start;
+        const end = cursorPos.x >= 0 ? (cursorPos.x + brushSizeUv.x) * numFrames : visible.end;
+        aimCanvasWindow(start, end);
       }
 
       // Render brush stroke if requested
@@ -1490,6 +1605,7 @@ const FileRendererInner = memo(
         strokeRendererRef.current.dispose();
         strokeRendererRef.current = null;
       }
+      disposeCanvasWindow();
 
       installTextures(createTextures());
 
@@ -1532,12 +1648,14 @@ const FileRendererInner = memo(
     const beginStroke = () => {
       // Painting by hand supersedes a pattern preview rather than stacking on it.
       discardStrokePreview();
+      strokeActiveRef.current = true;
       if (strokeRendererRef.current) {
         strokeRendererRef.current.beginStroke();
       }
     };
 
     const endStroke = () => {
+      strokeActiveRef.current = false;
       if (strokeRendererRef.current) {
         strokeRendererRef.current.endStroke();
       }

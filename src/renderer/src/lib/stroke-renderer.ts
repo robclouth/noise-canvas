@@ -41,7 +41,13 @@ import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { gatherPixelRanges, pixelRangeCount } from "./pixel-ranges";
-import { canvasViewInverseMap, viewOverlapTriples, wholeFileCanvasView, type CanvasView } from "./canvas-view";
+import {
+  canvasViewInverseMap,
+  viewCoversFile,
+  viewOverlapTriples,
+  wholeFileCanvasView,
+  type CanvasView,
+} from "./canvas-view";
 import type { CommittedSource } from "./display-decimate";
 import { DisplayPyramid } from "./display-pyramid-textures";
 import { DisplayTileRing } from "./display-tiles-textures";
@@ -577,17 +583,26 @@ export class StrokeRenderer {
 
   /**
    * Initialize the renderer with the spectrogram data.
-   * Must be called before rendering strokes.
+   * Must be called before rendering strokes. A canvas holding a window of the
+   * file takes its content from `composeCanvas`, which writes the view's own
+   * packed layout; the whole-file canvas copies the pristine texture.
    */
-  initialize(): void {
+  initialize(composeCanvas?: (target: WebGLRenderTarget) => void): void {
     if (this.isInitialized) return;
 
-    this.fboMesh.material = copyMaterial;
-    copyMaterial.uniforms.inputTex.value = this.textures.originalPackedDataTex;
+    if (composeCanvas || !viewCoversFile(this.view, this.spectrogramData.numFrames)) {
+      // The pristine texture lays the whole file out, so a canvas holding a
+      // window of it starts empty and takes its content block by block.
+      this.clearTargets([this.fbo1]);
+      composeCanvas?.(this.fbo1);
+    } else {
+      this.fboMesh.material = copyMaterial;
+      copyMaterial.uniforms.inputTex.value = this.textures.originalPackedDataTex;
 
-    this.gl.setRenderTarget(this.fbo1);
-    this.gl.render(this.fboScene, this.camera);
-    this.gl.setRenderTarget(null);
+      this.gl.setRenderTarget(this.fbo1);
+      this.gl.render(this.fboScene, this.camera);
+      this.gl.setRenderTarget(null);
+    }
 
     this.pingPong = 0;
 
@@ -648,11 +663,11 @@ export class StrokeRenderer {
     for (const mask of scratch.strokeMaskFbos) {
       if (mask) targets.push(mask);
     }
-    this.clearMaskTargets(targets);
+    this.clearTargets(targets);
     this.maskRows = null;
   }
 
-  private clearMaskTargets(targets: WebGLRenderTarget[]): void {
+  private clearTargets(targets: WebGLRenderTarget[]): void {
     if (targets.length === 0) return;
     const oldClearColor = new Color();
     this.gl.getClearColor(oldClearColor);
@@ -1574,7 +1589,7 @@ export class StrokeRenderer {
         uniforms.modulatorTex1.value = this.textures.placeholderTexture;
       }
       const { fbo, created } = this.pool.maskFbo(stepIndex);
-      if (created) this.clearMaskTargets([fbo]);
+      if (created) this.clearTargets([fbo]);
 
       this.drawRanges(this.maskMaterial, fbo, maskRanges);
 
@@ -1945,6 +1960,16 @@ export class StrokeRenderer {
   }
 
   /**
+   * Writes committed content into the canvas through `fill`, which draws over
+   * the view's own packed layout. It is for the parts of the view the canvas
+   * does not hold yet, so it must not reach pixels a stroke has painted.
+   */
+  fillCanvas(fill: (target: WebGLRenderTarget) => void): void {
+    fill(this.pingPong === 0 ? this.fbo1 : this.fbo2);
+    this.invalidateFboData();
+  }
+
+  /**
    * The textures the display composites when a preview is up: the committed
    * spectrogram, the preview, and the per-band bin ranges [start, end) the
    * preview is valid in, as a numBands×1 texture. `active` is false when there
@@ -2090,7 +2115,7 @@ export class StrokeRenderer {
         for (const mask of scratch.strokeMaskFbos) {
           if (!mask) continue;
           shiftInto(bounce, mask.texture, false);
-          this.clearMaskTargets([mask]);
+          this.clearTargets([mask]);
           patchMaterial.uniforms.patchTex.value = bounce.texture;
           patchMaterial.uniforms.destWidth.value = next.textureWidth;
           patchMaterial.uniforms.destHeight.value = next.textureHeight;

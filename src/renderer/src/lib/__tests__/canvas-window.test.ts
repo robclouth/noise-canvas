@@ -306,6 +306,38 @@ describe("a canvas window that follows the brush", () => {
     expect(maxPhase, `largest phase difference ${maxPhase}`).toBeLessThan(1e-2);
   });
 
+  it("starts the canvas empty and takes each block as it lands", async () => {
+    const window = new CanvasWindow(gl, grid, {
+      windowBlocks: 4,
+      read: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+    });
+    disposers.push(() => window.dispose());
+    const view = window.viewFor({ firstBlock: 1, lastBlock: 4 });
+    const renderer = new StrokeRenderer(gl, data, strokeTextures, "window", effects, view);
+    disposers.push(() => renderer.dispose());
+
+    const cold: number[] = [];
+    renderer.initialize((target) => cold.push(...window.composeResident(view, target)));
+    expect(cold).toEqual([1, 2, 3, 4]);
+    const empty = await renderer.getFBOData();
+    let painted = 0;
+    for (let i = 0; i < view.texels * 4; i++) if (empty[i] !== 0) painted++;
+    expect(painted).toBe(0);
+
+    expect(await window.acquire(view)).toBe(true);
+    renderer.fillCanvas((target) => window.compose(view, cold, target));
+    const filled = await renderer.getFBOData();
+    const expected = composeViewContent(view, data.packedData);
+    let firstDifference = -1;
+    for (let i = 0; i < view.texels * 4; i++) {
+      if (filled[i] !== expected[i]) {
+        firstDifference = i;
+        break;
+      }
+    }
+    expect(firstDifference, `first differing texel value at ${firstDifference}`).toBe(-1);
+  });
+
   it("reads a block once however many windows ask for it", async () => {
     let reads = 0;
     const window = new CanvasWindow(gl, grid, {

@@ -15,6 +15,9 @@ export const CANVAS_WINDOW_BLOCKS: number =
 /** Blocks the canvas keeps past the brush before the window moves. */
 export const CANVAS_WINDOW_MARGIN_BLOCKS = 1;
 
+/** Slots kept beyond the window, so a window the brush comes back to is still resident. */
+export const CANVAS_WINDOW_SPARE_BLOCKS = 4;
+
 /** A run of blocks, both ends included. */
 export type BlockSpan = { firstBlock: number; lastBlock: number };
 
@@ -85,13 +88,14 @@ export class CanvasWindow {
   constructor(
     gl: WebGLRenderer,
     grid: BlockGrid,
-    opts: { windowBlocks: number; maxBytes: number; read: BlockValueReader },
+    opts: { windowBlocks: number; maxBytes?: number; read: BlockValueReader },
   ) {
     this.grid = grid;
     this.read = opts.read;
     this.windowBlocks = Math.min(Math.max(1, Math.floor(opts.windowBlocks)), grid.blockCount);
     const slotBytes = blockTexels(grid, 0) * PACKED_BYTES_PER_TEXEL;
-    this.cache = new BlockSlotCache(gl, grid, Math.max(opts.maxBytes, this.windowBlocks * slotBytes));
+    const budget = opts.maxBytes ?? (this.windowBlocks + CANVAS_WINDOW_SPARE_BLOCKS) * slotBytes;
+    this.cache = new BlockSlotCache(gl, grid, Math.max(budget, this.windowBlocks * slotBytes));
   }
 
   /** Bytes the slot pages hold. */
@@ -158,6 +162,17 @@ export class CanvasWindow {
   /** Draws the blocks' committed texels into `target` where `view` places them. */
   compose(view: CanvasView, blocks: number[], target: WebGLRenderTarget): void {
     this.cache.compose(view, blocks, target);
+  }
+
+  /**
+   * Draws the blocks of `view` that have slots into `target` and returns the
+   * ones that had none, which the target is still missing.
+   */
+  composeResident(view: CanvasView, target: WebGLRenderTarget): number[] {
+    const cold = new Set(this.missing(view));
+    const resident = this.blocksOf(view).filter((block) => !cold.has(block));
+    if (resident.length > 0) this.cache.compose(view, resident, target);
+    return [...cold];
   }
 
   /** Folds the painted texels of the view's blocks back into their slots. */
