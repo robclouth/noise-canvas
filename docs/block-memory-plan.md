@@ -461,6 +461,41 @@ Follow-ups, not in this phase: heap-snapshot attribution of the remaining
 slope; a hop-synthesis view over the store only if the FBO-readback fallback
 measurably slows undo.
 
+### Attribution and stroke-cost investigation (2026-08-26, post-exit)
+
+Heap-snapshot attribution (CDP snapshot, retainer walk) found the remaining
+non-audio slope: `createTextures` listed `spectrogramData.inverseMap` in its
+dependency array, and React's hook record kept the pre-release array alive
+until the component's next render — 91 MiB at 60 s, 227 MiB at 150 s, the
+whole "unattributed" slope. Fixed by dropping the field from the deps (the
+spectrogram object identity already covers every real change). Corrected
+numbers, same procedure: 60 s open+settle 293 MB, 150 s 353 MB → slope
+~0.66 MB/s, which is the audio alone (0.34 MB/s JS channel arrays +
+~0.32 MB/s native audio copy — Phase 4 scope). The display pyramid and the
+addon hold nothing length-scaled at settle.
+
+Stroke timing against the fork point (9f2e9a5, same harness, 6 strokes +
+6 undo + 6 redo, medians, end-to-end):
+
+|                                          | commit 60 s | commit 150 s | undo 150 s | redo 150 s |
+| ---------------------------------------- | ----------- | ------------ | ---------- | ---------- |
+| old (fork)                               | 363 ms      | 776 ms       | 210 ms     | 434 ms     |
+| new, resident budget 0                   | 1054 ms     | 1449 ms      | 534 ms     | 546 ms     |
+| new, resident budget 256 MB (experiment) | —           | ~946 ms      | ~332 ms    | ~294 ms    |
+
+Paint-time fps is unchanged (~60 both systems). The overhead is entirely the
+block layer, and the codec dominates: `openBlockStore` sets
+`maxResidentBytes: 0` (a pre-hot-path choice), so every read decodes zstd
+(~15 ms/block, 43–76 decodes per 150 s stroke) and every dirty set encodes
+on the awaited `store.flush()` inside `tierStrokePatch` and
+`syncStoreToCurrent`. Disk IO itself is minor (~100–200 ms/stroke read+write
+combined). With a 256 MB budget the decodes vanish once warm; the remaining
+gap over the old system is the awaited encode+flush (~170–480 ms per op).
+Candidate remedies, undecided: a RAM-scaled resident budget; deferring the
+flush off the commit path (write-behind — the overlay marker already
+invalidates before mutation, so a crash costs a longer restore, not
+corruption); keeping hot overlay blocks raw and compressing on eviction.
+
 ---
 
 ## Phase 3 — block-resident canvas (2–3 weeks) — the class change
