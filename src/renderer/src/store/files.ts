@@ -1175,9 +1175,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const originalFile = openFiles[fileId];
     if (!originalFile?.spectrogramData) return;
 
-    const fboData = await originalFile.rendererRef?.current?.getFBOData();
+    const fboData = await readCurrentPackedData(originalFile);
     if (!fboData) {
-      console.error("Failed to duplicate file: could not get FBO data");
+      console.error("Failed to duplicate file: could not read the painted state");
       return;
     }
 
@@ -1220,7 +1220,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const originalFile = openFiles[fileId];
     if (!originalFile) return;
 
-    const fboData = await originalFile.rendererRef?.current?.getFBOData();
+    const fboData = await readCurrentPackedData(originalFile);
     if (!fboData) return;
 
     const { spectrogramData } = originalFile;
@@ -1258,7 +1258,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const originalFile = openFiles[fileId];
     if (!originalFile) return;
 
-    const fboData = await originalFile.rendererRef?.current?.getFBOData();
+    const fboData = await readCurrentPackedData(originalFile);
     if (!fboData) return;
 
     const { spectrogramData } = originalFile;
@@ -1483,7 +1483,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     let audioContext: AudioContext | null = null;
     try {
       // Step 1: Synthesize the current painted state via Gaborator → get audio channels
-      const fboData = await originalFile.rendererRef?.current?.getFBOData();
+      const fboData = await readCurrentPackedData(originalFile);
       if (!fboData) throw new Error("Could not read current spectrogram state");
 
       const synthesisResult = await host.analysis.synthesize(
@@ -1958,7 +1958,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         fboData = prefetchedFboData;
       } else {
         const fboStart = performance.now();
-        fboData = await renderer.getFBOData();
+        const whole = await readCurrentPackedData(file);
+        if (!whole) throw new Error("the synthesis could not read the painted state");
+        fboData = whole;
         diag.timing("timing", "getFBOData for synthesis", performance.now() - fboStart);
       }
 
