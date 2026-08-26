@@ -41,7 +41,7 @@ import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { gatherPixelRanges, pixelRangeCount } from "./pixel-ranges";
-import { canvasViewInverseMap, wholeFileCanvasView, type CanvasView } from "./canvas-view";
+import { canvasViewInverseMap, viewOverlapTriples, wholeFileCanvasView, type CanvasView } from "./canvas-view";
 import type { CommittedSource } from "./display-decimate";
 import { DisplayPyramid } from "./display-pyramid-textures";
 import { DisplayTileRing } from "./display-tiles-textures";
@@ -88,6 +88,12 @@ const noise2D = createNoise2D();
 // by patchMaterial's vertex shader.
 const PATCH_QUAD_POSITIONS = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]);
 const PATCH_QUAD_INDICES = new Uint16Array([0, 1, 2, 0, 2, 3]);
+
+function metadataEquals(a: Float32Array, b: Float32Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
 
 const createParameterUniform = defaultParameterUniform;
 
@@ -1999,6 +2005,149 @@ export class StrokeRenderer {
   releaseRollback(): void {
     this.rollbackFbo?.dispose();
     this.rollbackFbo = null;
+  }
+
+  /** Draws (dest texel, count, src texel) patch triples into `target`, leaving other texels alone. */
+  private drawPatchTriples(target: WebGLRenderTarget, triples: Uint32Array): void {
+    const geometry = new InstancedBufferGeometry();
+    geometry.setAttribute("position", new BufferAttribute(PATCH_QUAD_POSITIONS, 3));
+    geometry.setIndex(new BufferAttribute(PATCH_QUAD_INDICES, 1));
+    geometry.setAttribute("aRange", new InstancedBufferAttribute(triples, 3));
+    geometry.instanceCount = triples.length / 3;
+    const mesh = new Mesh(geometry, patchMaterial);
+    mesh.frustumCulled = false;
+    const scene = new Scene();
+    scene.add(mesh);
+    const prevAutoClear = this.gl.autoClear;
+    this.gl.autoClear = false;
+    this.gl.setRenderTarget(target);
+    this.gl.render(scene, this.camera);
+    this.gl.setRenderTarget(null);
+    this.gl.autoClear = prevAutoClear;
+    geometry.dispose();
+  }
+
+  /**
+   * Moves the canvas onto `next`, a view with the same texture fold. Texels
+   * the two views share are carried over, and `composeEntering` writes the
+   * committed values of the blocks that enter where `next` places them. With
+   * `midStroke` the stroke-start snapshot, the rollback target and the step
+   * masks move too, so the stroke keeps blending against the same base;
+   * otherwise the shared scratch is disowned and rebuilds at the next stroke.
+   * The display caches are untouched: the picture does not change in file
+   * space. Painted texels of blocks that leave must be read before the call.
+   */
+  slideView(
+    next: CanvasView,
+    composeEntering: (target: WebGLRenderTarget, blocks: number[]) => void,
+    opts: { midStroke: boolean },
+  ): void {
+    const current = this.view;
+    if (next.firstBlock === current.firstBlock && next.lastBlock === current.lastBlock) return;
+    if (next.textureWidth !== current.textureWidth || next.textureHeight !== current.textureHeight) {
+      throw new Error("the next view must keep the canvas texture fold");
+    }
+    if (!this.isInitialized) throw new Error("the canvas cannot slide before it is initialized");
+
+    const entering: number[] = [];
+    for (let block = next.firstBlock; block <= next.lastBlock; block++) {
+      if (block < current.firstBlock || block > current.lastBlock) entering.push(block);
+    }
+    const triples = viewOverlapTriples(current, next);
+
+    const shiftInto = (target: WebGLRenderTarget, sourceTex: Texture, withEntering: boolean): void => {
+      if (withEntering && entering.length > 0) composeEntering(target, entering);
+      if (triples.length > 0) {
+        patchMaterial.uniforms.patchTex.value = sourceTex;
+        patchMaterial.uniforms.destWidth.value = next.textureWidth;
+        patchMaterial.uniforms.destHeight.value = next.textureHeight;
+        patchMaterial.uniforms.patchWidth.value = current.textureWidth;
+        this.drawPatchTriples(target, triples);
+        patchMaterial.uniforms.patchTex.value = null;
+      }
+    };
+
+    const canonical = this.pingPong === 0 ? this.fbo1 : this.fbo2;
+    const partner = this.pingPong === 0 ? this.fbo2 : this.fbo1;
+    shiftInto(partner, canonical.texture, true);
+    this.pingPong = 1 - this.pingPong;
+
+    if (opts.midStroke && this.scratch && this.pool.ownedBy(this)) {
+      const scratch = this.scratch;
+      const [bounce] = this.pool.passFbos(1);
+      shiftInto(bounce, scratch.strokeStartFbo.texture, true);
+      this.blitFBO(bounce, scratch.strokeStartFbo);
+      if (this.rollbackFbo) {
+        shiftInto(bounce, this.rollbackFbo.texture, true);
+        this.blitFBO(bounce, this.rollbackFbo);
+      }
+      if (triples.length > 0) {
+        // The mask's entering span was never painted, so it clears to zero;
+        // the overlap bounces out, the target clears, and the overlap comes
+        // back at its new place.
+        const identity = Uint32Array.from(triples);
+        for (let i = 0; i < identity.length; i += 3) identity[i + 2] = identity[i];
+        for (const mask of scratch.strokeMaskFbos) {
+          if (!mask) continue;
+          shiftInto(bounce, mask.texture, false);
+          this.clearMaskTargets([mask]);
+          patchMaterial.uniforms.patchTex.value = bounce.texture;
+          patchMaterial.uniforms.destWidth.value = next.textureWidth;
+          patchMaterial.uniforms.destHeight.value = next.textureHeight;
+          patchMaterial.uniforms.patchWidth.value = next.textureWidth;
+          this.drawPatchTriples(mask, identity);
+          patchMaterial.uniforms.patchTex.value = null;
+        }
+      } else {
+        this.clearMasks(scratch);
+      }
+      if (this.maskRows) this.maskRows = { rowStart: 0, rowEnd: next.textureHeight };
+    } else {
+      this.pool.disown(this);
+      this.maskRows = null;
+      this.rollbackFbo?.dispose();
+      this.rollbackFbo = null;
+    }
+
+    const currentFrames = current.endFrame - current.startFrame;
+    const nextFrames = next.endFrame - next.startFrame;
+    const rebaseX = (x: number): number => (x * currentFrames + current.startFrame - next.startFrame) / nextFrames;
+    if (this.committedTimeMax > this.committedTimeMin) {
+      this.committedTimeMin = rebaseX(this.committedTimeMin);
+      this.committedTimeMax = rebaseX(this.committedTimeMax);
+    }
+    if (this.dirtyRegion) {
+      this.dirtyRegion.startX = rebaseX(this.dirtyRegion.startX);
+      this.dirtyRegion.endX = rebaseX(this.dirtyRegion.endX);
+    }
+    this.previewActive = false;
+    this.fboDataCache = null;
+    this.fboDataDirty = true;
+    this.fboDataEpoch++;
+
+    const layoutChanged = !metadataEquals(current.layout.metadata, next.layout.metadata);
+    this.view = next;
+    this.viewSpec = {
+      metadata: next.layout.metadata,
+      numBands: next.layout.numBands,
+      textureWidth: next.textureWidth,
+      textureHeight: next.textureHeight,
+    };
+    if (layoutChanged) {
+      if (this.ownsViewTextures) {
+        this.viewMetadataTex.dispose();
+        this.viewInverseMapTex.dispose();
+      }
+      this.viewMetadataTex = viewDataTexture(next.layout.metadata, next.layout.numBands, 1, RGBAFormat, "RGBA32F");
+      this.viewInverseMapTex = viewDataTexture(
+        canvasViewInverseMap(next),
+        next.textureWidth,
+        next.textureHeight,
+        RGFormat,
+        "RG32F",
+      );
+      this.ownsViewTextures = true;
+    }
   }
 
   /**

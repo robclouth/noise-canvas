@@ -123,6 +123,30 @@ export function composeViewContent(view: CanvasView, filePacked: Float32Array): 
 }
 
 /**
+ * (next-view texel, count, current-view texel) triples for the frame span two
+ * views of one file share, one triple per band with any overlap.
+ */
+export function viewOverlapTriples(current: CanvasView, next: CanvasView): Uint32Array {
+  const triples: number[] = [];
+  for (let band = 0; band < current.layout.numBands; band++) {
+    const currentStart = current.bandK0[band];
+    const nextStart = next.bandK0[band];
+    const from = Math.max(currentStart, nextStart);
+    const to = Math.min(
+      currentStart + current.layout.metadata[band * 4 + 1],
+      nextStart + next.layout.metadata[band * 4 + 1],
+    );
+    if (to <= from) continue;
+    triples.push(
+      next.layout.metadata[band * 4] + (from - nextStart),
+      to - from,
+      current.layout.metadata[band * 4] + (from - currentStart),
+    );
+  }
+  return Uint32Array.from(triples);
+}
+
+/**
  * File-absolute pixel ranges as the view's own pixel indices, split at band
  * edges. Null when any pixel falls outside the view, which would leave it
  * without a place in the view's textures.

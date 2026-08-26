@@ -21,7 +21,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SpectrogramData } from "../../store/types";
 import { createDisplayTestMaterial } from "../../test/display-test-material";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
-import { createMockState } from "../../test/mock-state";
+import { createMockState, createMockStateWithSteps } from "../../test/mock-state";
 import { blockGrid, blockPixelRanges, blockTexels, PACKED_BYTES_PER_TEXEL, type BlockGrid } from "../block-grid";
 import { BlockSlotCache } from "../block-slot-cache";
 import { canvasViewOf, composeViewContent, type CanvasView } from "../canvas-view";
@@ -130,7 +130,7 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     gl.dispose();
   });
 
-  function strokeParams(cursor: Vector2, totalDuration: number): StrokeParams {
+  function strokeParams(cursor: Vector2, totalDuration: number, pressure = 1): StrokeParams {
     return {
       cursorPos: cursor,
       preview: false,
@@ -140,7 +140,7 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
       viewOffset: 0,
       viewZoomPowerY: 0,
       viewOffsetY: 0,
-      pressure: 1,
+      pressure,
       tiltX: 0,
       tiltY: 0,
     };
@@ -359,6 +359,111 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     const subPixels = readDisplayTexture(subRing.texture()!, width, height);
     expect(firstDifference(subPixels, wholePixels, wholePixels.length)).toBe(-1);
     expect(wholePixels.some((value) => value !== 0)).toBe(true);
+  });
+
+  it("slides the view mid-stroke and keeps parity with the whole-file stroke", async () => {
+    // A real pitch shift, so a dab's output differs from its blend base and a
+    // wrong mask or snapshot after the slide shows up in the picture.
+    const state = createMockStateWithSteps([
+      {
+        name: "Slide",
+        overrides: {
+          transformShiftSemis: 3,
+          effects: [{ id: "transform", effect: "transform", enabled: true, params: { transformShiftSemis: 3 } }],
+        },
+      },
+    ]);
+    const whole = new StrokeRenderer(gl, data, strokeTextures, "parity", effects);
+    whole.initialize();
+    whole.setFBOData(data.packedData);
+    disposers.push(() => whole.dispose());
+
+    const viewA = canvasViewOf(grid, 1, 4);
+    const viewB = canvasViewOf(grid, 3, 6);
+    expect(viewB.textureWidth).toBe(viewA.textureWidth);
+    expect(viewB.textureHeight).toBe(viewA.textureHeight);
+
+    const sub = new StrokeRenderer(gl, data, strokeTextures, "parity", effects, viewA);
+    sub.initialize();
+    disposers.push(() => sub.dispose());
+    sub.setFBOData(composeViewContent(viewA, data.packedData));
+
+    const cache = new BlockSlotCache(gl, grid, grid.blockCount * blockTexels(grid, 0) * PACKED_BYTES_PER_TEXEL);
+    disposers.push(() => cache.dispose());
+    for (let block = 0; block < grid.blockCount; block++) {
+      const list = blockPixelRanges(grid, block);
+      cache.upload(block, gatherPixelRanges(data.packedData, list.ranges.subarray(0, list.count * 2)));
+    }
+
+    const specFor = (v: CanvasView): SpectrogramData => ({
+      ...data,
+      numFrames: v.endFrame - v.startFrame,
+      metadata: v.layout.metadata,
+      textureWidth: v.textureWidth,
+      textureHeight: v.textureHeight,
+      packedTextureSize: new Vector2(v.textureWidth, v.textureHeight),
+    });
+    const cursorFor = (v: CanvasView, fileX: number): Vector2 =>
+      new Vector2((fileX * data.numFrames - v.startFrame) / (v.endFrame - v.startFrame), fileCursor.y);
+    const durationFor = (v: CanvasView): number => (v.endFrame - v.startFrame) / SAMPLE_RATE;
+    const x1 = 0.4;
+    const x2 = 0.45;
+    // The third dab reaches into the span that entered with the slide, at an
+    // intensity below the earlier dabs', so a stale mask would raise it.
+    const x3 = 0.55;
+    const lightState = createMockStateWithSteps([
+      {
+        name: "Slide",
+        overrides: {
+          transformShiftSemis: 3,
+          brushIntensity: 30,
+          effects: [{ id: "transform", effect: "transform", enabled: true, params: { transformShiftSemis: 3 } }],
+        },
+      },
+    ]);
+
+    whole.beginStroke();
+    whole.renderStroke(
+      strokeParams(new Vector2(x1, fileCursor.y), data.numFrames / SAMPLE_RATE),
+      state,
+      sourceFor(whole, data),
+    );
+    whole.renderStroke(
+      strokeParams(new Vector2(x2, fileCursor.y), data.numFrames / SAMPLE_RATE),
+      state,
+      sourceFor(whole, data),
+    );
+    whole.renderStroke(
+      strokeParams(new Vector2(x3, fileCursor.y), data.numFrames / SAMPLE_RATE),
+      lightState,
+      sourceFor(whole, data),
+    );
+    const wholeData = await whole.getFBOData();
+
+    sub.beginStroke();
+    sub.renderStroke(strokeParams(cursorFor(viewA, x1), durationFor(viewA)), state, sourceFor(sub, specFor(viewA)));
+    sub.slideView(viewB, (target, blocks) => cache.compose(viewB, blocks, target), { midStroke: true });
+    sub.renderStroke(strokeParams(cursorFor(viewB, x2), durationFor(viewB)), state, sourceFor(sub, specFor(viewB)));
+    sub.renderStroke(
+      strokeParams(cursorFor(viewB, x3), durationFor(viewB)),
+      lightState,
+      sourceFor(sub, specFor(viewB)),
+    );
+    const subData = await sub.getFBOData();
+
+    const inView = composeViewContent(viewB, wholeData);
+    let maxMagnitude = 0;
+    let maxPhase = 0;
+    for (let i = 0; i < viewB.texels * 4; i++) {
+      const diff = Math.abs(subData[i] - inView[i]);
+      if (i % 2 === 0) maxMagnitude = Math.max(maxMagnitude, diff);
+      else maxPhase = Math.max(maxPhase, diff);
+    }
+    expect(maxMagnitude, `largest magnitude difference ${maxMagnitude}`).toBeLessThan(1e-5);
+    expect(maxPhase, `largest phase difference ${maxPhase}`).toBeLessThan(1e-3);
+
+    // Both dabs really painted: the slid view differs from the committed seed.
+    expect(firstDifference(subData, composeViewContent(viewB, data.packedData), viewB.texels * 4)).not.toBe(-1);
   });
 
   it("shows the same canvas picture through a sub-view", () => {

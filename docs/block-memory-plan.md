@@ -597,6 +597,42 @@ view UV with the file layout (whole-file only); same-file source info,
 `originalSpectrogramTex`, onset textures and beat-anchored modulator phases
 need the wrapper's translation; displays still read the canvas texture.
 
+Step (2) in progress. Landed so far (each parity-tested, whole-file identity
+pinned by the full suite):
+
+- The display pyramid and tile ring cut from a `CommittedSource` — the canvas
+  texture plus the view that lays it out — with every source address
+  translated through the view and clamped to taps the view holds. Cutting a
+  whole ring tile the view does not cover throws.
+- The display shader's canvas taps (fallback and hover preview) address the
+  canvas through `canvasMetadataTex` / `canvasFrameCount` /
+  `canvasStartFrame`; the whole-file case short-circuits bit-exactly.
+- Whole-state readers in files.ts (duplicate, HPSS, NMF, AI stems, whole-file
+  synthesis) go through `readCurrentPackedData`'s FBO → tier → reconstruct
+  chain, so the FBO step can be view-gated in one place at the shrink.
+- The ring works without a covering canvas: `aim` picks the window and lists
+  missing tiles (emptying the bound window when a far pan retargets slots
+  it still shows), `tileSourcePixelRanges` names the file pixels to read, and
+  `cutTileFromPacked` cuts a tile from those values byte-identically to the
+  canvas path.
+
+Chosen shrink architecture (step 2 remainder): the canvas pair becomes a
+fixed K-block sliding window. Every interior K-block view shares one band
+layout, and the only other shape is the tail view, so both layouts and their
+metadata/inverse textures are built once — a slide moves content, never
+allocates. A slide runs between dabs: range-copies shift the canvas pair,
+stroke-start snapshot and masks through a bounce target; blocks entering
+compose from the slot cache or store; painted texels leaving are read back
+and stashed for the commit. Files at or under K blocks keep the whole-file
+view and today's behaviour exactly. Order: (S1) `slideView` in the renderer
+with dab-across-slide parity, (S2) wrapper view placement on hover/drag,
+(S3) commit across slides + file-space translation at the handle, (S4)
+navigation patches invalidate slots and patch the intersecting view, (S5)
+load seeds the pyramid from packed data and the ring drives aim/cut when the
+canvas cannot cover, (S6) source-file views (cross-file and same-file), (S7)
+original/onset textures composed from the seed tier per view, (S8) budget,
+admission and the whole-file-effect gate.
+
 ---
 
 ## Phase 4 — whole-file effects inside the budget (1–2 weeks)
