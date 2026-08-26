@@ -1,3 +1,4 @@
+import type { PhaseTurns } from "../../../main/lib/types";
 import { layoutTexels } from "./band-layout";
 import { blockPixelRanges, blocksForPixelRanges, type BlockGrid } from "./block-grid";
 import { ByteBudgetCache } from "./byte-budget-cache";
@@ -192,11 +193,59 @@ export class BlockStore {
     for (const index of blocks) {
       const block = await this.block(index);
       copyCompactOverlap(block, this.blockRanges(index), values, ranges);
-      this.clean.delete(String(index));
-      this.dirty.set(index, block);
-      this.dirtyVersion.set(index, (this.dirtyVersion.get(index) ?? 0) + 1);
+      this.markDirty(index, block);
     }
     if (this.residentBytes > this.maxResidentBytes) await this.flush();
+  }
+
+  /**
+   * Adds the turns' offsets to the phases of the blocks' pixels in place —
+   * the same float arithmetic the addon and the GPU use — and returns the
+   * residuals an inverted apply needs: for each float the shift cannot
+   * subtract back exactly, its file-absolute index and its original bits, in
+   * the order the whole-array walk finds them. Changed blocks stay dirty
+   * until the next flush; past the resident budget they flush themselves.
+   */
+  async applyTurnsCollecting(turns: PhaseTurns): Promise<Uint32Array> {
+    const residuals: number[] = [];
+    for (let i = 0; i < turns.pixelStarts.length; i++) {
+      const spanStart = turns.pixelStarts[i];
+      const spanEnd = spanStart + turns.pixelCounts[i];
+      const span = Uint32Array.of(spanStart, turns.pixelCounts[i]);
+      for (let ch = 0; ch < 2; ch++) {
+        const c = turns.offsets[i * 2 + ch];
+        if (c === 0) continue;
+        for (const index of blocksForPixelRanges(this.grid, span)) {
+          const block = await this.block(index);
+          const bits = new Uint32Array(block.buffer, block.byteOffset, block.length);
+          const ranges = this.blockRanges(index);
+          let at = 0;
+          for (let r = 0; r + 1 < ranges.length; r += 2) {
+            const start = ranges[r];
+            const count = ranges[r + 1];
+            const lo = Math.max(spanStart, start);
+            const hi = Math.min(spanEnd, start + count);
+            for (let p = lo; p < hi; p++) {
+              const j = (at + (p - start)) * 4 + ch * 2 + 1;
+              const before = block[j];
+              const after = Math.fround(before + c);
+              if (Math.fround(after - c) !== before) residuals.push(p * 4 + ch * 2 + 1, bits[j]);
+              block[j] = after;
+            }
+            at += count;
+          }
+          this.markDirty(index, block);
+          if (this.residentBytes > this.maxResidentBytes) await this.flush();
+        }
+      }
+    }
+    return Uint32Array.from(residuals);
+  }
+
+  private markDirty(index: number, block: Float32Array): void {
+    this.clean.delete(String(index));
+    this.dirty.set(index, block);
+    this.dirtyVersion.set(index, (this.dirtyVersion.get(index) ?? 0) + 1);
   }
 
   /**

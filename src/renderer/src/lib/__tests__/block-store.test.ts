@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { applyPhaseTurnsCollecting } from "../../../../main/lib/history-delta";
+import type { PhaseTurns } from "../../../../main/lib/types";
 import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram";
 import { layoutTexels } from "../band-layout";
 import { blockGrid, blockPixelRanges } from "../block-grid";
@@ -73,7 +75,7 @@ function bandRange(band: number, firstBin: number, bins: number): Uint32Array {
 
 // Whole-array mismatches are asserted through this index rather than a
 // toEqual, whose failure diff over ~70k elements wedges the browser runner.
-function firstDifference(a: Float32Array, b: Float32Array): number {
+function firstDifference(a: ArrayLike<number>, b: ArrayLike<number>): number {
   if (a.length !== b.length) return Math.min(a.length, b.length);
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return i;
   return -1;
@@ -124,6 +126,34 @@ describe("BlockStore", () => {
     const start = ranges[0] * 4;
     expected.set(values, start);
     expect(firstDifference(await store.readAll(), expected)).toBe(-1);
+  });
+
+  it("applies tail turns block by block, exactly as the whole-array walk", async () => {
+    const { grid, backend, overlay, store } = await seeded();
+    const turns: PhaseTurns = {
+      pixelStarts: Uint32Array.of(layout.metadata[0] + 8, layout.metadata[2 * 4] + 4),
+      pixelCounts: Uint32Array.of(layout.metadata[1] - 8, layout.metadata[2 * 4 + 1] - 4),
+      offsets: Float32Array.from([Math.fround(2 * Math.PI), Math.fround(-2 * Math.PI), 0, Math.fround(6 * Math.PI)]),
+      residuals: new Uint32Array(0),
+    };
+    const expected = Float32Array.from(packed);
+    const expectedResiduals = applyPhaseTurnsCollecting(expected, turns);
+    expect(expectedResiduals.length).toBeGreaterThan(0);
+
+    const residuals = await store.applyTurnsCollecting(turns);
+    expect(firstDifference(residuals, expectedResiduals)).toBe(-1);
+    expect(firstDifference(await store.readAll(), expected)).toBe(-1);
+
+    // The turned blocks reach disk on the next flush, so a reopened store
+    // holds them too.
+    await store.flush();
+    const reopened = new BlockStore(grid, backend, {
+      codec: rawCodec,
+      maxResidentBytes: 1 << 30,
+      overlay,
+      texelCount: data.textureWidth * data.textureHeight,
+    });
+    expect(firstDifference(await reopened.readAll(), expected)).toBe(-1);
   });
 
   it("holds a patch until it is flushed, then writes it", async () => {
