@@ -8,6 +8,7 @@ import type { BrushState } from "./brush";
 import type { EffectsState } from "./effects";
 import type { FilesState } from "./files";
 import type { FillState } from "./fill";
+import type { SelectionAuditionState } from "./selection-audition";
 import type { SelectionClipboardState } from "./selection-clipboard";
 import { ModulatorsState } from "./modulators";
 import type { LinkState } from "./link";
@@ -133,6 +134,7 @@ export type State = BrushState &
   LinkState &
   FillState &
   StemGroupsState &
+  SelectionAuditionState &
   SelectionClipboardState & {
     setParameter: (key: ParameterKey, value: unknown, effectId?: string) => void;
     randomizationAmounts: Record<string, number>;

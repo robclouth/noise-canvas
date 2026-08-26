@@ -856,6 +856,8 @@ Dragging along the time legend selects the full frequency range, whichever mode 
 
 A selection on the canvas leaves the loop region alone — only a [drag on the time legend](#navigating-the-canvas) sets that. So you can loop one part of the file and cut, copy and paste in another without losing your place. `Esc` clears the selection.
 
+With a selection set, `Space` plays the selection alone: its stretch of time, and only the bands inside it. Everything outside stays silent, so you hear exactly what a cut would take. **Loop** loops it, and painting inside the selection while it loops lands in your ears on the next pass. Clear the selection and `Space` plays the whole file again.
+
 In Select mode a plain click, without a drag, clears the selection and puts the playback start position where you clicked, snapped to the grid — the same thing a click on the time legend does, aimed anywhere on the canvas.
 
 **A selection confines the brush.** While one is set, a stroke only lands inside it, in Brush mode and in [Fill Grid](#fill-grid) alike. Everything outside is protected. Paint a wash over the whole file with the top octave selected and only the top octave changes.

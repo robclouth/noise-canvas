@@ -212,6 +212,11 @@ export async function awaitFileSynthesis(fileId: string): Promise<void> {
   await fileSynthesisSettled.get(fileId);
 }
 
+/** How many audio rebuilds a file has seen; a cache keyed on it goes stale with the canvas. */
+export function getFileSynthesisGeneration(fileId: string): number {
+  return fileSynthesisGeneration.get(fileId) ?? 0;
+}
+
 /**
  * Merges `patch` into an open file. Returns false when the file is no longer
  * open: closing a file deletes its entry, so a write that assumes the entry is
@@ -3000,6 +3005,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         state.filesSelection[fileId] = selection;
       }),
     );
+    get().retargetSelectionAudition(fileId);
   },
   filesDirty: {},
   setFileDirty: (fileId: string, dirty: boolean) => {
