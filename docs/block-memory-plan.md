@@ -651,6 +651,40 @@ S1 and the handle half of S3 are done:
   serves those callers), and a covering view passes everything through
   untouched — today's whole-file behaviour is pinned by the full suite.
 
+S2, S4 and S5 are done. The window is off unless the build sets
+`VITE_CANVAS_WINDOW_BLOCKS`, so the shipped canvas still holds the whole file
+and the full suite pins that behaviour:
+
+- `canvas-window.ts` places the window — centred on the blocks the brush
+  needs, held still while a margin of blocks remains on each side the file
+  continues past, clamped at the ends — and fills its slots from the store,
+  one read per block. Every window of a file keeps the texture fold of a full
+  window, so the shorter window at the end lays out in the same textures and
+  a slide never allocates.
+- The renderer builds the window, composes the blocks it holds, reads the
+  rest in the background, and moves the canvas when they land: a slide
+  between strokes, or mid-stroke while one is up. A dab's cursor and duration
+  are the window's, not the file's.
+- The display stopped needing a covering canvas. The pyramid is seeded from
+  the analysed state at load and from a whole-state restore
+  (`patchFromCompact` takes a range's own pixels, so the store can feed it),
+  the ring cuts its tiles from the store through `aim` / `cutTileFromPacked`,
+  and a history hop patches the picture from the values it applies while the
+  block slots and the ring tiles it touched are dropped. Phase turns drop
+  slots too: the display never shows phase, but the slots hold it.
+- Measured live on a 60 s file with an 8-block window (~15 s of canvas): the
+  window follows the pointer end to end, the picture shows the whole file, a
+  stroke commits windowed (`windowed:1, viewFromStore:1`, 80–102 ms), and an
+  undo and a redo with the canvas at the far end of the file patch through
+  (`navigateTo FBO upload mode:patch`, 1.4–3.9 ms) with no parity warning.
+
+Left before the window can carry a real session: the source a dab samples
+(same-file dabs still hand the shader the file's own spectrogram, and a
+cross-file source needs its own window composed), original and onset
+textures per view, the painted texels of blocks that leave mid-stroke (they
+must reach the commit), the whole-file-effect gate, and the budget that sets
+K — S6, S7, S3's commit half and S8.
+
 ---
 
 ## Phase 4 — whole-file effects inside the budget (1–2 weeks)
