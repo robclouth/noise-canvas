@@ -8,7 +8,7 @@ import {
   TRANSPORT_TIME_WIDTH,
   useUiSize,
 } from "@renderer/lib/ui-density";
-import { BoxSelect, Brush, ChevronDown, Lasso, Link2, Paintbrush, Play, Repeat, Square, Wand2 } from "lucide-react";
+import { BoxSelect, ChevronDown, Ear, Lasso, Link2, Paintbrush, Play, Repeat, Square, Wand2 } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { HelpActionIcon } from "../controls/help-control";
 import { ParameterControl } from "../controls/parameter-control";
@@ -195,7 +195,7 @@ export const TransportPanel = memo(() => {
           size={uiSize}
           color={autoPlayStroke ? "orange" : "dark.5"}
         >
-          <Brush size={18} />
+          <Ear size={18} />
         </HelpActionIcon>
         <Text ff="monospace" size="lg" ref={timeRef} w={TRANSPORT_TIME_WIDTH}>
           {formatTime(0)}
