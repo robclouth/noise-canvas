@@ -14,7 +14,7 @@ import {
 import { ANALYSIS_MAX_TEXTURE_SIZE } from "./constants";
 import type { CanvasView } from "./canvas-view";
 import { clampToSourceBins, DecimateDraw, type CommittedSource, type DecimateInstance } from "./display-decimate";
-import type { BandLayout } from "./band-layout";
+import { bandAtPixel, type BandLayout } from "./band-layout";
 import { sourceBinRanges } from "./display-pyramid";
 import {
   DISPLAY_TILES_MAX_TEXELS,
@@ -226,6 +226,40 @@ export class DisplayTileRing {
     const held = this.residency[tile % this.slots];
     if (held === tile) return true;
     return !(this.window.count > 0 && held >= this.window.first && held < this.window.first + this.window.count);
+  }
+
+  /**
+   * Forgets the tiles the file pixel ranges reach, so the next aim cuts them
+   * again. The bound window lets go of a tile it was showing, since what the
+   * ring holds for it is out of date.
+   */
+  dropTiles(pixelRanges: Uint32Array): void {
+    const grid = this.grid;
+    if (!grid || this.slots === 0) return;
+    for (let i = 0; i + 1 < pixelRanges.length; i += 2) {
+      const start = pixelRanges[i];
+      const end = start + pixelRanges[i + 1];
+      if (end <= start) continue;
+      for (let band = bandAtPixel(this.layout, start); band < this.layout.numBands; band++) {
+        const offset = this.layout.metadata[band * 4];
+        if (offset >= end) break;
+        const low = Math.max(start, offset);
+        const high = Math.min(end, offset + this.layout.metadata[band * 4 + 1]);
+        if (high <= low) continue;
+        const decimation = 2 ** (grid.metadata[band * 4 + 2] - this.layout.metadata[band * 4 + 2]);
+        const binsPerTile = grid.metadata[band * 4 + 3];
+        const first = Math.floor((low - offset) / decimation / binsPerTile);
+        const last = Math.floor((high - 1 - offset) / decimation / binsPerTile);
+        for (let tile = first; tile <= last; tile++) {
+          const slot = tile % this.slots;
+          if (this.residency[slot] !== tile) continue;
+          this.residency[slot] = -1;
+          if (this.window.count > 0 && tile >= this.window.first && tile < this.window.first + this.window.count) {
+            this.window = { first: 0, count: 0 };
+          }
+        }
+      }
+    }
   }
 
   /**

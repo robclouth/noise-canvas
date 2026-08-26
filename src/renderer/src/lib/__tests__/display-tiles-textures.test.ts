@@ -369,6 +369,26 @@ describe("display tile ring", () => {
     expect(ring.canCutTile(clashing)).toBe(true);
   });
 
+  it("cuts a dropped tile again and leaves the others alone", () => {
+    const maxTexels = 1 << 16;
+    const ring = makeRing(maxTexels);
+    const canvas = makeCanvas(varied);
+    ring.update(gl, asSource(canvas), view(1, 0), PYRAMID_STEP);
+    const bound = ring.uniforms();
+    expect(bound.tileCount).toBeGreaterThan(1);
+    expect(ring.aim(view(1, 0), PYRAMID_STEP)).toEqual([]);
+
+    // The pixels of the first tile alone: the ring forgets that tile and
+    // keeps the rest of the window.
+    const dropped = bound.firstTile;
+    ring.dropTiles(ring.tileSourcePixelRanges(dropped));
+    expect(ring.aim(view(1, 0), PYRAMID_STEP)).toEqual([dropped]);
+
+    ring.cutTileFromPacked(gl, dropped, gatherPixelRanges(varied, ring.tileSourcePixelRanges(dropped)));
+    expect(ring.aim(view(1, 0), PYRAMID_STEP)).toEqual([]);
+    expect(expectRingMatches(ring, maxTexels, varied, 0)).toBeGreaterThan(1000);
+  });
+
   it("costs what the budget charges it", () => {
     const maxTexels = 100_000;
     const ring = makeRing(maxTexels);

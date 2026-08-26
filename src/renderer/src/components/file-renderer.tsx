@@ -11,7 +11,7 @@ import {
   viewUvToFileUv,
   type CanvasView,
 } from "@renderer/lib/canvas-view";
-import { blockGrid } from "@renderer/lib/block-grid";
+import { blockGrid, blocksForPixelRanges } from "@renderer/lib/block-grid";
 import { CANVAS_WINDOW_BLOCKS, CanvasWindow, needsCanvasWindow } from "@renderer/lib/canvas-window";
 import { gatherPixelRanges } from "@renderer/lib/pixel-ranges";
 import { countDiagStroke } from "@renderer/lib/diag-sampler";
@@ -1509,6 +1509,15 @@ const FileRendererInner = memo(
       numBands: spectrogramData.numBands,
       metadata: spectrogramData.metadata,
     });
+    /** Every packed pixel of the file, as one range per band. */
+    const fullFilePixelRanges = (): Uint32Array => {
+      const ranges = new Uint32Array(spectrogramData.numBands * 2);
+      for (let band = 0; band < spectrogramData.numBands; band++) {
+        ranges[band * 2] = spectrogramData.metadata[band * 4];
+        ranges[band * 2 + 1] = spectrogramData.metadata[band * 4 + 1];
+      }
+      return ranges;
+    };
 
     /**
      * Reads the whole packed state from the FBO, or null when the canvas
@@ -1545,6 +1554,8 @@ const FileRendererInner = memo(
       } else {
         renderer.setFBOData(composeViewContent(renderer.committedSource().view, data));
         renderer.seedDisplayFromPacked(data);
+        renderer.getDisplayTiles()?.dropTiles(fullFilePixelRanges());
+        canvasWindowRef.current?.invalidate();
       }
       applyStroke.current = false;
       displayMode.current = "committed";
@@ -1569,12 +1580,32 @@ const FileRendererInner = memo(
           }
         }
         renderer.applyPhaseTurns(translated);
+        // Turns move phase, which the display does not show, but the slots
+        // still hold the untorned values for the blocks they carry.
+        const window = canvasWindowRef.current;
+        if (window) {
+          const turned: number[] = [];
+          for (let i = 0; i + 3 < turns.length; i += 4) turned.push(turns[i], turns[i + 1]);
+          window.invalidate(blocksForPixelRanges(window.grid, Uint32Array.from(turned)));
+        }
       }
       applyStroke.current = false;
       displayMode.current = "committed";
       invalidateRef.current();
       snapshotStaleRef.current = true;
       scheduleSnapshotRefresh();
+    };
+
+    /**
+     * Carries a change the canvas cannot hold all of to the rest of the file:
+     * the display picture takes the new values, the block slots forget the
+     * blocks they held, and the ring lets go of the tiles over them.
+     */
+    const patchOutsideCanvas = (renderer: StrokeRenderer, values: Float32Array, fileRanges: Uint32Array): void => {
+      renderer.patchDisplayFromCompact(values, fileRanges);
+      renderer.getDisplayTiles()?.dropTiles(fileRanges);
+      const window = canvasWindowRef.current;
+      if (window) window.invalidate(blocksForPixelRanges(window.grid, fileRanges));
     };
 
     const patchFBOData = (data: Float32Array, pixelRanges: Uint32Array) => {
@@ -1586,6 +1617,7 @@ const FileRendererInner = memo(
       } else {
         const clipped = clipRangesToView(renderer.committedSource().view, fileBandLayout(), pixelRanges);
         renderer.patchFBODataCompact(gatherPixelRanges(data, clipped.fileRanges), clipped.viewRanges);
+        patchOutsideCanvas(renderer, gatherPixelRanges(data, pixelRanges), pixelRanges);
       }
       applyStroke.current = false;
       displayMode.current = "committed";
@@ -1603,6 +1635,7 @@ const FileRendererInner = memo(
       } else {
         const clipped = clipRangesToView(renderer.committedSource().view, fileBandLayout(), pixelRanges, values);
         if (clipped.viewValues) renderer.patchFBODataCompact(clipped.viewValues, clipped.viewRanges);
+        patchOutsideCanvas(renderer, values, pixelRanges);
       }
       applyStroke.current = false;
       displayMode.current = "committed";
