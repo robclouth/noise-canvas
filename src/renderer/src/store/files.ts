@@ -20,8 +20,8 @@ import type {
   PackedOnsets,
 } from "../../../main/lib/types";
 import { applyPhaseTurnsCollecting, hasPhaseTurns } from "../../../main/lib/history-delta";
-import { commitViewOf, scatterCommitPatch } from "../lib/commit-view";
-import { gatherPixelRanges } from "../lib/pixel-ranges";
+import { commitViewOf, composeViewBuffer, scatterCommitPatch } from "../lib/commit-view";
+import { float32BitsEqual, gatherPixelRanges } from "../lib/pixel-ranges";
 import {
   computeOutputLevels,
   measureOutputLevels,
@@ -2231,10 +2231,28 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           stroke,
         );
       let usedView = false;
+      let viewFromStore = false;
       let viewBuffer: Float32Array | null = null;
       let result: CommitStrokeResult;
       if (view && window) {
         viewBuffer = gatherPixelRanges(data, view.ranges);
+        const preStroke = snapshot.dirtyRanges ? await getHistoryManager(fileId).currentRanges(view.ranges) : null;
+        if (preStroke && snapshot.dirtyRanges) {
+          const composed = composeViewBuffer(
+            preStroke,
+            view,
+            gatherPixelRanges(data, snapshot.dirtyRanges),
+            snapshot.dirtyRanges,
+          );
+          // The store must hold the pre-stroke state bit for bit; a
+          // disagreement means a stale tier, and the canvas-backed gather wins.
+          if (composed && float32BitsEqual(composed, viewBuffer)) {
+            viewBuffer = composed;
+            viewFromStore = true;
+          } else if (composed) {
+            console.warn("history: the block store's view disagrees with the packed state");
+          }
+        }
         try {
           result = await host.analysis.commitStroke(
             viewBuffer,
@@ -2265,6 +2283,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       diag.timing("timing", "commitStroke", performance.now() - commitStart, {
         bandRanges: result.patch.ranges.length / 3,
         windowed: usedView ? 1 : 0,
+        viewFromStore: viewFromStore ? 1 : 0,
       });
 
       if (snapshot.reanalyzeEnabled) file.unprojectedPaint = false;

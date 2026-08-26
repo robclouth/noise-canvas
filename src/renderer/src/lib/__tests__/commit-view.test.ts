@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { applyPhaseTurns, applyPhaseTurnsCollecting } from "../../../../main/lib/history-delta";
 import type { PackedLayout, PhaseTurns } from "../../../../main/lib/types";
-import { commitViewOf, scatterCommitPatch } from "../commit-view";
+import { commitViewOf, composeViewBuffer, scatterCommitPatch } from "../commit-view";
 import { gatherPixelRanges } from "../pixel-ranges";
 
 // A windowed commit hands the addon a buffer holding only the window's reach.
@@ -86,6 +86,43 @@ describe("commitViewOf", () => {
       const inPatch = i >= dst && i < dst + count * 4;
       expect(data[i]).toBe(inPatch ? -1000 - (i - dst) : before[i]);
     }
+  });
+});
+
+describe("composeViewBuffer", () => {
+  const layout = layoutOf(4001, [0, 1, 2]);
+  const window = { startFrame: 1000, endFrame: 1100, startBand: 0, endBand: 3 };
+
+  it("equals a gather of the painted state when the stroke lands inside the view", () => {
+    const view = commitViewOf(layout, window, SR);
+    expect(view).not.toBeNull();
+    if (!view) return;
+    const pre = new Float32Array(texelCount(layout) * 4);
+    for (let i = 0; i < pre.length; i++) pre[i] = Math.sin(i * 0.37);
+    const after = new Float32Array(pre);
+    // A footprint inside the window: a run in band 0 and one in band 2.
+    const strokeRanges = Uint32Array.from([layout.bandOffsets[0] + 1000, 40, layout.bandOffsets[2] + 250, 10]);
+    for (let r = 0; r < strokeRanges.length; r += 2) {
+      for (let p = strokeRanges[r]; p < strokeRanges[r] + strokeRanges[r + 1]; p++) {
+        for (let c = 0; c < 4; c++) after[p * 4 + c] = -((p * 3 + c) % 17) - 1;
+      }
+    }
+    const composed = composeViewBuffer(
+      gatherPixelRanges(pre, view.ranges),
+      view,
+      gatherPixelRanges(after, strokeRanges),
+      strokeRanges,
+    );
+    expect(composed).not.toBeNull();
+    expect(Array.from(composed!)).toEqual(Array.from(gatherPixelRanges(after, view.ranges)));
+  });
+
+  it("refuses a footprint that reaches outside the view", () => {
+    const view = commitViewOf(layout, window, SR);
+    expect(view).not.toBeNull();
+    if (!view) return;
+    const outside = Uint32Array.from([layout.bandOffsets[0] + view.bandK0[0] - 2, 4]);
+    expect(composeViewBuffer(new Float32Array(view.texels * 4), view, new Float32Array(4 * 4), outside)).toBeNull();
   });
 });
 

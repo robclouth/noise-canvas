@@ -1432,6 +1432,24 @@ export class HistoryManager {
   }
 
   /**
+   * The named pixels of the current node's packed state, read from the block
+   * store, or null when the store does not carry that state. Callers queue
+   * this against commits, the way every packed reader queues.
+   */
+  async currentRanges(ranges: Uint32Array): Promise<Float32Array | null> {
+    await this.initialize();
+    const manifest = this.manifest;
+    if (!manifest || manifest.overlayNodeId !== manifest.currentId) return null;
+    const holder = this.seedHolder();
+    if (!holder) return null;
+    try {
+      return await (await this.seedBlockStore(holder)).readRanges(ranges);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Resolves once nothing outside the queue still reads the current packed
    * state: a synthesis it was handed, or an onset pass over it.
    */

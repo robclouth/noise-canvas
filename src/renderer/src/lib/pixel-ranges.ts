@@ -74,6 +74,15 @@ export function pixelRangeCount(ranges: Uint32Array): number {
   return count;
 }
 
+/** Whether two float arrays hold the same bit patterns, NaNs and signed zeros included. */
+export function float32BitsEqual(a: Float32Array, b: Float32Array): boolean {
+  if (a.length !== b.length) return false;
+  const aBits = new Uint32Array(a.buffer, a.byteOffset, a.length);
+  const bBits = new Uint32Array(b.buffer, b.byteOffset, b.length);
+  for (let i = 0; i < aBits.length; i++) if (aBits[i] !== bBits[i]) return false;
+  return true;
+}
+
 /** Copies the ranges' pixels (4 floats each) out of `src` into one block, in range order. */
 export function gatherPixelRanges(src: Float32Array, ranges: Uint32Array): Float32Array {
   const out = new Float32Array(pixelRangeCount(ranges) * 4);

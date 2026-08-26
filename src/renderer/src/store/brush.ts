@@ -7,6 +7,7 @@ import { serializeFileTask } from "@renderer/lib/file-task-queue";
 import { buildStrokeCommitSnapshot, projectsWholeFile } from "@renderer/lib/stroke-commit";
 import {
   composePixelRangeValues,
+  float32BitsEqual,
   gatherPixelRanges,
   mergePixelRanges,
   pixelRangeCount,
@@ -240,7 +241,12 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         let data: Float32Array;
         let baseFootprint: Float32Array | undefined;
         if (footprintOnly && historyManager.currentPackedState() === base) {
+          const stored = await historyManager.currentRanges(footprintRanges);
           baseFootprint = gatherPixelRanges(base, footprintRanges);
+          // The store must hold the pre-stroke state bit for bit; a
+          // disagreement means a stale tier, and the canvas-backed state wins.
+          if (stored && float32BitsEqual(stored, baseFootprint)) baseFootprint = stored;
+          else if (stored) console.warn("history: the block store's footprint disagrees with the packed state");
           scatterCompactPixelRanges(base, read, footprintRanges);
           data = base;
         } else if (footprintOnly) {

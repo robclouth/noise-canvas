@@ -1,4 +1,5 @@
 import type { CommitWindow, PackedLayout } from "../../../main/lib/types";
+import { copyCompactOverlap, subtractPixelRanges } from "./pixel-ranges";
 
 /** The packed pixels a windowed commit works on, and their map back into the file. */
 export type CommitView = {
@@ -71,4 +72,21 @@ export function scatterCommitPatch(
     const src = (view.bandOffsets[band] + (k0 - view.bandK0[band])) * 4;
     data.set(viewBuffer.subarray(src, src + count * 4), (layout.bandOffsets[band] + k0) * 4);
   }
+}
+
+/**
+ * The view's pixels for the addon: the pre-stroke values with the stroke's
+ * footprint written over them, in place in `preStroke`. Null when the
+ * footprint reaches outside the view, which would leave stroke pixels out of
+ * the buffer.
+ */
+export function composeViewBuffer(
+  preStroke: Float32Array,
+  view: CommitView,
+  strokeValues: Float32Array,
+  strokeRanges: Uint32Array,
+): Float32Array | null {
+  if (subtractPixelRanges(strokeRanges, view.ranges).length > 0) return null;
+  copyCompactOverlap(preStroke, view.ranges, strokeValues, strokeRanges);
+  return preStroke;
 }

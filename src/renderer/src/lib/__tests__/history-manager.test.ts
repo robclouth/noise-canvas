@@ -983,6 +983,34 @@ describe("HistoryManager hops", () => {
     delete fakeOpenFiles["f1"];
   });
 
+  it("serves the current state's pixels from the tier, and nothing when the tier is stale", async () => {
+    installManagerEnv();
+    const { canvas } = installPatchRenderer(w, h);
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    const mgr = getHistoryManager("f1", { packedCacheBytes: 0 });
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    const current = mgr.currentPackedState()!;
+    canvas.set(current);
+
+    const ranges = new Uint32Array([4, 4]);
+    const baseFootprint = current.slice(4 * 4, 8 * 4);
+    for (let p = 4; p < 8; p++) for (let c = 0; c < 4; c++) current[p * 4 + c] = ((p * 5 + c) % 23) / 23;
+    canvas.set(current);
+    await mgr.addStroke({ data: current, label: "A", dimensions, dirtyRanges: ranges, baseFootprint });
+
+    const probe = new Uint32Array([2, 8, 12, 3]);
+    const served = await mgr.currentRanges(probe);
+    expect(served).not.toBeNull();
+    expect(Array.from(served!)).toEqual(Array.from(gatherPixelRanges(current, probe)));
+
+    mgr.getManifest()!.overlayNodeId = undefined;
+    expect(await mgr.currentRanges(probe)).toBeNull();
+
+    mgr.dispose();
+    delete fakeOpenFiles["f1"];
+  });
+
   it("carries a stroke's phase turns into the tier, both ways", async () => {
     installManagerEnv();
     const { canvas } = installPatchRenderer(w, h);

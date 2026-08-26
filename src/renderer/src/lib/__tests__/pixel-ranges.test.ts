@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergePixelRanges, scatterPixelRanges, subtractPixelRanges } from "../pixel-ranges";
+import { float32BitsEqual, mergePixelRanges, scatterPixelRanges, subtractPixelRanges } from "../pixel-ranges";
 
 describe("subtractPixelRanges", () => {
   it("cuts a hole out of a range", () => {
@@ -62,5 +62,14 @@ describe("scatterPixelRanges", () => {
     scatterPixelRanges(dest, src, merged);
     expect(dest[3 * 4]).toBe(src[3 * 4]);
     expect(dest[4 * 4]).toBe(0);
+  });
+});
+
+describe("float32BitsEqual", () => {
+  it("matches on bit patterns, NaN included, and tells signed zeros apart", () => {
+    expect(float32BitsEqual(Float32Array.from([1, NaN, 0]), Float32Array.from([1, NaN, 0]))).toBe(true);
+    expect(float32BitsEqual(Float32Array.from([0]), Float32Array.from([-0]))).toBe(false);
+    expect(float32BitsEqual(Float32Array.from([1, 2]), Float32Array.from([1, 3]))).toBe(false);
+    expect(float32BitsEqual(Float32Array.from([1]), Float32Array.from([1, 1]))).toBe(false);
   });
 });
