@@ -1,5 +1,5 @@
 import { useStore } from "@/store";
-import { Box, Divider, Group, Popover, Stack, Text } from "@mantine/core";
+import { Box, Divider, Group, Menu, Popover, Stack, Text } from "@mantine/core";
 import { anchorProps } from "@renderer/lib/ui-anchors";
 import {
   TRANSPORT_GAP,
@@ -8,7 +8,7 @@ import {
   TRANSPORT_TIME_WIDTH,
   useUiSize,
 } from "@renderer/lib/ui-density";
-import { BoxSelect, Brush, Link2, Paintbrush, Play, Repeat, Square } from "lucide-react";
+import { BoxSelect, Brush, ChevronDown, Lasso, Link2, Paintbrush, Play, Repeat, Square, Wand2 } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { HelpActionIcon } from "../controls/help-control";
 import { ParameterControl } from "../controls/parameter-control";
@@ -36,6 +36,8 @@ export const TransportPanel = memo(() => {
   const togglePlayback = useStore((state) => state.togglePlayback);
   const editMode = useStore((state) => state.editMode);
   const toggleEditMode = useStore((state) => state.toggleEditMode);
+  const selectShape = useStore((state) => state.selectShape);
+  const setSelectShape = useStore((state) => state.setSelectShape);
   const linkEnabled = useStore((state) => state.linkEnabled);
   const setLinkEnabled = useStore((state) => state.setLinkEnabled);
   const linkNumPeers = useStore((state) => state.linkNumPeers);
@@ -139,14 +141,48 @@ export const TransportPanel = memo(() => {
         >
           <Repeat size={18} />
         </HelpActionIcon>
-        <HelpActionIcon
-          help="transport-edit-mode"
-          onClick={toggleEditMode}
-          size={uiSize}
-          color={editMode === "select" ? "orange" : "dark.5"}
-        >
-          {editMode === "select" ? <BoxSelect size={18} /> : <Paintbrush size={18} />}
-        </HelpActionIcon>
+        <Group gap={1} wrap="nowrap">
+          <HelpActionIcon
+            help="transport-edit-mode"
+            onClick={toggleEditMode}
+            size={uiSize}
+            color={editMode === "select" ? "orange" : "dark.5"}
+          >
+            {editMode !== "select" ? (
+              <Paintbrush size={18} />
+            ) : selectShape === "lasso" ? (
+              <Lasso size={18} />
+            ) : selectShape === "wand" ? (
+              <Wand2 size={18} />
+            ) : (
+              <BoxSelect size={18} />
+            )}
+          </HelpActionIcon>
+          <Menu position="bottom-start" withinPortal>
+            <Menu.Target>
+              <HelpActionIcon
+                help="transport-select-shape"
+                size={uiSize}
+                w={14}
+                miw={14}
+                color={editMode === "select" ? "orange" : "dark.5"}
+              >
+                <ChevronDown size={12} />
+              </HelpActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item leftSection={<BoxSelect size={14} />} onClick={() => setSelectShape("rectangle")}>
+                Rectangle
+              </Menu.Item>
+              <Menu.Item leftSection={<Lasso size={14} />} onClick={() => setSelectShape("lasso")}>
+                Lasso
+              </Menu.Item>
+              <Menu.Item leftSection={<Wand2 size={14} />} onClick={() => setSelectShape("wand")}>
+                Magic wand
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
+        </Group>
         <HelpActionIcon
           help="transport-audition"
           onClick={() => setAutoPlayStroke(!autoPlayStroke)}

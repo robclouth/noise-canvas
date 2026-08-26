@@ -140,3 +140,8 @@ export function resolveAimUv(params: ResolveUvParams<AimSnapping>): AimUv {
 export function resolveSelectionUv(params: ResolveUvParams): AimUv {
   return resolveUv(params, "round");
 }
+
+/** A freehand point: the pointer position itself, with no snapping. */
+export function resolveFreehandUv(params: ResolveUvParams): AimUv {
+  return resolveUv({ ...params, snapping: { ...params.snapping, snapTime: false, snapPitch: false } }, "round");
+}

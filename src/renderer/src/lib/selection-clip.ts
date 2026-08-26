@@ -1,6 +1,6 @@
 import { Vector2 } from "three";
 import type { SpectrogramData } from "../store/types";
-import { selectionBandRange, selectionFrameRange, type Selection } from "./selection";
+import { selectionBandRange, selectionFrameRange, selectionMaskTest, type Selection } from "./selection";
 import { sourceBandUvSlope } from "./utils";
 
 /**
@@ -57,6 +57,7 @@ export function buildClipboardRegion(
   const { startFrame, endFrame } = selectionFrameRange(selection, spec.sampleRate);
   const { lowBand, highBand } = selectionBandRange(selection, spec.numBands);
   if (endFrame <= startFrame || highBand < lowBand) return null;
+  const maskTest = selectionMaskTest(selection, spec.sampleRate, spec.numBands);
 
   const cell = coarsestCell(selection, spec);
   const originFrame = Math.max(0, Math.floor(startFrame / cell) * cell);
@@ -106,6 +107,7 @@ export function buildClipboardRegion(
       if (!copied) continue;
       const sourceBin = (originFrame >> bandStepLog2s[band]) + k;
       if (sourceBin < firstBin || sourceBin >= lastBin || sourceBin >= sourceLength) continue;
+      if (maskTest && !maskTest(band, sourceBin * step)) continue;
       const from = (sourceOffset + sourceBin) * 4;
       packedData.set(data.subarray(from, from + 4), target * 4);
     }
@@ -174,6 +176,9 @@ export function dropRect(
     end: aimTimeSeconds + (rect.end - rect.start),
     pitchLo: aimPitchUv,
     pitchHi: aimPitchUv + span,
+    // The mask reads proportionally within its rectangle, so it moves — and
+    // crosses layouts — with the corner untouched.
+    ...(rect.mask ? { mask: rect.mask } : {}),
   };
 }
 

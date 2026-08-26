@@ -30,7 +30,9 @@ let cache: { fileId: string; rect: Selection; generation: number; buffer: AudioB
 let retargetTimer: ReturnType<typeof setTimeout> | null = null;
 
 function sameRect(a: Selection, b: Selection): boolean {
-  return a.start === b.start && a.end === b.end && a.pitchLo === b.pitchLo && a.pitchHi === b.pitchHi;
+  return (
+    a.start === b.start && a.end === b.end && a.pitchLo === b.pitchLo && a.pitchHi === b.pitchHi && a.mask === b.mask
+  );
 }
 
 function cached(fileId: string, rect: Selection): AudioBuffer | null {

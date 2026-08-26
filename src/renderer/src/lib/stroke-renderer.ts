@@ -18,6 +18,7 @@ import {
   RGFormat,
   Scene,
   Texture,
+  UnsignedByteType,
   Vector2,
   WebGLRenderer,
   WebGLRenderTarget,
@@ -234,13 +235,25 @@ interface SelectionClip {
   active: number;
   frames: Vector2;
   bands: Vector2;
+  maskActive: number;
+  maskTexture: Texture | null;
 }
 
-function selectionClipFor(selection: Selection | null, data: SpectrogramData): SelectionClip {
-  if (!selection) return { active: 0, frames: new Vector2(), bands: new Vector2() };
+function selectionClipFor(
+  selection: Selection | null,
+  data: SpectrogramData,
+  maskTexture: Texture | null,
+): SelectionClip {
+  if (!selection) return { active: 0, frames: new Vector2(), bands: new Vector2(), maskActive: 0, maskTexture: null };
   const { startFrame, endFrame } = selectionFrameRange(selection, data.sampleRate);
   const { lowBand, highBand } = selectionBandRange(selection, data.numBands);
-  return { active: 1, frames: new Vector2(startFrame, endFrame), bands: new Vector2(lowBand, highBand) };
+  return {
+    active: 1,
+    frames: new Vector2(startFrame, endFrame),
+    bands: new Vector2(lowBand, highBand),
+    maskActive: maskTexture ? 1 : 0,
+    maskTexture,
+  };
 }
 
 /** Where one step's brush lands, from that step's own size and anchor mode. */
@@ -313,6 +326,10 @@ export class StrokeRenderer {
   // stroke mask onto a full-texture update, so equivalence between the two
   // can be asserted.
   disableScissorCopyBack = false;
+
+  // The current selection mask as a GPU texture, keyed by the mask's cell
+  // array; selections change rarely, so one live texture is enough.
+  private selectionMaskCache: { cells: Uint8Array; texture: DataTexture } | null = null;
 
   // FBO data cache
   private fboDataCache: Float32Array | null = null;
@@ -824,6 +841,8 @@ export class StrokeRenderer {
       selectionActive: { value: selectionClip.active },
       selectionFrames: { value: selectionClip.frames },
       selectionBands: { value: selectionClip.bands },
+      selectionMaskActive: { value: selectionClip.maskActive },
+      selectionMaskTex: { value: selectionClip.maskTexture || placeholderTexture },
       brushCurveTime: { value: brushParamUniform(stepState, "brushCurveTime", ctx) },
       brushSkewTime: { value: brushParamUniform(stepState, "brushSkewTime", ctx) },
       brushCurvePitch: { value: brushParamUniform(stepState, "brushCurvePitch", ctx) },
@@ -1031,7 +1050,7 @@ export class StrokeRenderer {
     // too. With no overlap the extent collapses, which leaves an empty
     // footprint: the passes draw nothing and no preview is composited.
     const selection = params.selection ?? null;
-    const selectionClip = selectionClipFor(selection, this.spectrogramData);
+    const selectionClip = selectionClipFor(selection, this.spectrogramData, this.selectionMaskTexture(selection));
     if (selection) {
       const rect = selectionUvRect(selection, totalDuration);
       const selMaxX = rect.anchor.x + rect.size.x;
@@ -1517,6 +1536,8 @@ export class StrokeRenderer {
     uniforms.selectionActive.value = selectionClip.active;
     uniforms.selectionFrames.value = selectionClip.frames;
     uniforms.selectionBands.value = selectionClip.bands;
+    uniforms.selectionMaskActive.value = selectionClip.maskActive;
+    uniforms.selectionMaskTex.value = selectionClip.maskTexture || placeholderTexture;
     uniforms.gainLut.value = modulatorScaleLut || placeholderTexture;
     uniforms.modulator1ImageTex.value = modulator1Texture || placeholderTexture;
     uniforms.modulator2ImageTex.value = modulator2Texture || placeholderTexture;
@@ -2213,8 +2234,23 @@ export class StrokeRenderer {
   /**
    * Dispose of all WebGL resources.
    */
+  private selectionMaskTexture(selection: Selection | null): Texture | null {
+    const mask = selection?.mask;
+    if (!mask) return null;
+    if (this.selectionMaskCache?.cells === mask.cells) return this.selectionMaskCache.texture;
+    this.selectionMaskCache?.texture.dispose();
+    const texture = new DataTexture(mask.cells, mask.cols, mask.rows, RedFormat, UnsignedByteType);
+    texture.minFilter = NearestFilter;
+    texture.magFilter = NearestFilter;
+    texture.needsUpdate = true;
+    this.selectionMaskCache = { cells: mask.cells, texture };
+    return texture;
+  }
+
   dispose(): void {
     this.releaseRollback();
+    this.selectionMaskCache?.texture.dispose();
+    this.selectionMaskCache = null;
     this.pool.release(this);
     this.scratch = null;
     this.fbo1.dispose();

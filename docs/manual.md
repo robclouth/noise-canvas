@@ -848,9 +848,15 @@ Zoom and scroll are remembered per file across restarts, and files in a [stem gr
 The canvas has two modes, and `Tab` switches between them. The button in the transport bar shows which one you are in.
 
 - **Brush** – a drag paints.
-- **Select** – a drag draws a rectangle instead.
+- **Select** – a drag draws a selection.
 
-A selection covers a stretch of time **and** a range of pitch, so you can pick out one part of the frequency range rather than the whole height of the file. Both edges snap to the grid, following the same **Snap** settings the brush uses.
+Select mode draws one of three shapes. The small arrow beside the mode button picks the shape, and the button's icon follows it. `Tab` keeps switching between Brush and Select, and comes back to the shape you last picked.
+
+- **Rectangle** – a drag spans a stretch of time and a range of pitch. Both edges snap to the grid, following the same **Snap** settings the brush uses.
+- **Lasso** – a drag draws a freehand outline, and what it encloses becomes the selection. Nothing snaps: the shape is exactly what you drew.
+- **Magic wand** – a click selects the connected patch of sound under the pointer: everything touching it whose level reaches within a window below the point you clicked. Keep the button held and drag upward to widen the window and let the selection spread; drag back down to tighten it again.
+
+A selection covers a stretch of time **and** a range of pitch, so you can pick out one part of the frequency range rather than the whole height of the file.
 
 Dragging along the time legend selects the full frequency range, whichever mode you are in.
 
@@ -858,11 +864,13 @@ A selection on the canvas leaves the loop region alone — only a [drag on the t
 
 With a selection set, `Space` plays the selection alone: its stretch of time, and only the bands inside it. Everything outside stays silent, so you hear exactly what a cut would take. **Loop** loops it, and painting inside the selection while it loops lands in your ears on the next pass. Clear the selection and `Space` plays the whole file again.
 
-In Select mode a plain click, without a drag, clears the selection and puts the playback start position where you clicked, snapped to the grid — the same thing a click on the time legend does, aimed anywhere on the canvas.
+In Select mode a plain click, without a drag, clears the selection and puts the playback start position where you clicked, snapped to the grid — the same thing a click on the time legend does, aimed anywhere on the canvas. The wand is the exception: its click is the selection.
 
 **A selection confines the brush.** While one is set, a stroke only lands inside it, in Brush mode and in [Fill Grid](#fill-grid) alike. Everything outside is protected. Paint a wash over the whole file with the top octave selected and only the top octave changes.
 
 The edges land on whole bins and whole bands, because those are the smallest things the file stores. A band the selection touches at all is painted in full.
+
+A lasso or wand selection works everywhere a rectangle does. The brush is confined to the shape, `Space` plays only what is inside it, and Copy, Cut, Paste, Duplicate and `Backspace` all follow the outline — a pasted lasso lands as the same shape, and what falls outside it is left alone. Only the time edits below still take whole columns, from the shape's start to its end.
 
 ### Moving Sound Around
 

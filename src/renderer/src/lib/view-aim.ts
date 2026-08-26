@@ -1,7 +1,7 @@
 import { useStore } from "@/store";
 import { openFiles } from "@renderer/store/files";
 import { Vector2 } from "three";
-import { resolveAimUv, resolveSelectionUv, type AimSnapping, type ResolveUvParams } from "./aim";
+import { resolveAimUv, resolveFreehandUv, resolveSelectionUv, type AimSnapping, type ResolveUvParams } from "./aim";
 import { getFileOnsets } from "./file-onsets";
 import { lastPointer } from "./last-pointer";
 import type { SelectionCorner } from "./selection";
@@ -72,6 +72,22 @@ export function getSelectionCorner(
   const params = resolveParams(clientX, clientY, rect, fileId, bpm);
   if (!params) return null;
   const uv = resolveSelectionUv(params);
+  return { timeUv: uv.x, pitchUv: uv.y };
+}
+
+/**
+ * Resolves a pointer position to an unsnapped point, for a freehand path.
+ */
+export function getFreehandCorner(
+  clientX: number,
+  clientY: number,
+  rect: DOMRect,
+  fileId: string,
+  bpm: number,
+): SelectionCorner | null {
+  const params = resolveParams(clientX, clientY, rect, fileId, bpm);
+  if (!params) return null;
+  const uv = resolveFreehandUv(params);
   return { timeUv: uv.x, pitchUv: uv.y };
 }
 

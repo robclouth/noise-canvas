@@ -27,11 +27,14 @@ export interface TransientState {
   // throttled snapshots mid-gesture.
   axisDragFile: string | null;
   setAxisDragFile: (fileId: string | null) => void;
-  // The selection rectangle being dragged, before the pointer is released.
-  // Held here so a drag redraws the overlay without writing the loop region on
-  // every pointer move.
-  selectionDrag: { fileId: string; selection: Selection } | null;
-  setSelectionDrag: (drag: { fileId: string; selection: Selection } | null) => void;
+  // The selection being dragged, before the pointer is released. Held here so
+  // a drag redraws the overlay without writing the loop region on every
+  // pointer move. A lasso drag carries its path, in seconds and pitch UV, for
+  // the overlay to draw instead of the bounding rectangle.
+  selectionDrag: { fileId: string; selection: Selection; path?: { time: number; pitchUv: number }[] } | null;
+  setSelectionDrag: (
+    drag: { fileId: string; selection: Selection; path?: { time: number; pitchUv: number }[] } | null,
+  ) => void;
 }
 
 export const useTransientStore = create<TransientState>()(

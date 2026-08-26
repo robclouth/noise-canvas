@@ -46,12 +46,14 @@ function regionStep(name: string, rect: Selection, geometry: StrokeGeometry, eff
 /**
  * Replaces the active brush with `step`, leaving the rest of the state alone.
  * The selection is dropped: a region stroke's rectangle is its own extent, and
- * a paste must be able to land outside the selection it was copied from.
+ * a paste must be able to land outside the selection it was copied from. A
+ * masked rectangle stays behind as the stroke's own clip instead — the shader's
+ * membership test is what gives the stroke its shape.
  */
-function withStep(state: State, step: BrushStep): State {
+function withStep(state: State, step: BrushStep, clip: { fileId: string; rect: Selection } | null): State {
   return {
     ...state,
-    filesSelection: {},
+    filesSelection: clip?.rect.mask ? { [clip.fileId]: clip.rect } : {},
     brushes: [
       {
         id: "selection-stroke",
@@ -72,12 +74,13 @@ function withStep(state: State, step: BrushStep): State {
 }
 
 /** A stroke that wipes `rect`, the way the eraser brush does. */
-export function silenceStrokeState(state: State, rect: Selection, geometry: StrokeGeometry): State {
+export function silenceStrokeState(state: State, rect: Selection, geometry: StrokeGeometry, fileId: string): State {
   return withStep(
     state,
     regionStep("Silence", rect, geometry, [
       { id: "selection-silence", effect: "dynamics", enabled: true, params: { dynamicsGainDb: WIPE_GAIN_DB } },
     ]),
+    { fileId, rect },
   );
 }
 
@@ -91,6 +94,7 @@ export function pasteStrokeState(
   rect: Selection,
   geometry: StrokeGeometry,
   source: { path: string; timeFraction: number; pitchFraction: number },
+  fileId: string,
 ): State {
   const step = regionStep("Paste", rect, geometry, [
     { id: "selection-paste", effect: "passthrough", enabled: true, params: {} },
@@ -102,5 +106,5 @@ export function pasteStrokeState(
   writable.sourcePitchOffset = source.pitchFraction * 100;
   // The faithful warp, pinned: a paste is a translation, not a brush choice.
   writable.algorithm = NEUTRAL_ALGORITHM;
-  return withStep(state, step);
+  return withStep(state, step, { fileId, rect });
 }

@@ -144,11 +144,17 @@ function previewPlacing(edit: EditTarget, placing: PlacingState): void {
   const renderer = edit.file.rendererRef?.current;
   if (!renderer || !clipboard || !placingSource) return;
   const offset = clipboardSourceOffset(clipboard);
-  const state = pasteStrokeState(edit.state, placing.rect, edit.geometry, {
-    path: CLIPBOARD_PATH,
-    timeFraction: offset.timeFraction,
-    pitchFraction: offset.pitchFraction,
-  });
+  const state = pasteStrokeState(
+    edit.state,
+    placing.rect,
+    edit.geometry,
+    {
+      path: CLIPBOARD_PATH,
+      timeFraction: offset.timeFraction,
+      pitchFraction: offset.pitchFraction,
+    },
+    edit.fileId,
+  );
   renderer.renderRegionStroke({ ...regionAim(placing.rect, edit.geometry), state, source: placingSource }, true);
 }
 
@@ -199,7 +205,7 @@ export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet):
       if (!edit || !selection) return;
       await commitRegionStrokes(
         edit,
-        [{ state: silenceStrokeState(edit.state, selection, edit.geometry), rect: selection }],
+        [{ state: silenceStrokeState(edit.state, selection, edit.geometry, edit.fileId), rect: selection }],
         "Silence",
         get,
       );
@@ -236,11 +242,17 @@ export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet):
           edit,
           [
             {
-              state: pasteStrokeState(edit.state, rect, edit.geometry, {
-                path: CLIPBOARD_PATH,
-                timeFraction: offset.timeFraction,
-                pitchFraction: offset.pitchFraction,
-              }),
+              state: pasteStrokeState(
+                edit.state,
+                rect,
+                edit.geometry,
+                {
+                  path: CLIPBOARD_PATH,
+                  timeFraction: offset.timeFraction,
+                  pitchFraction: offset.pitchFraction,
+                },
+                edit.fileId,
+              ),
               rect,
             },
           ],
@@ -346,14 +358,23 @@ export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet):
       // take the sound with it — and a drop overlapping its own origin keeps what
       // it just wrote.
       if (placing.vacate && placing.vacateFileId === placing.fileId) {
-        strokes.push({ state: silenceStrokeState(edit.state, placing.vacate, edit.geometry), rect: placing.vacate });
+        strokes.push({
+          state: silenceStrokeState(edit.state, placing.vacate, edit.geometry, edit.fileId),
+          rect: placing.vacate,
+        });
       }
       strokes.push({
-        state: pasteStrokeState(edit.state, placing.rect, edit.geometry, {
-          path: CLIPBOARD_PATH,
-          timeFraction: offset.timeFraction,
-          pitchFraction: offset.pitchFraction,
-        }),
+        state: pasteStrokeState(
+          edit.state,
+          placing.rect,
+          edit.geometry,
+          {
+            path: CLIPBOARD_PATH,
+            timeFraction: offset.timeFraction,
+            pitchFraction: offset.pitchFraction,
+          },
+          placing.fileId,
+        ),
         rect: placing.rect,
       });
 
@@ -365,7 +386,12 @@ export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet):
           get().setFileSelection(origin.fileId, null);
           await commitRegionStrokes(
             origin,
-            [{ state: silenceStrokeState(origin.state, placing.vacate, origin.geometry), rect: placing.vacate }],
+            [
+              {
+                state: silenceStrokeState(origin.state, placing.vacate, origin.geometry, origin.fileId),
+                rect: placing.vacate,
+              },
+            ],
             placing.label,
             get,
             null,

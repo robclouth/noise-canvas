@@ -35,6 +35,11 @@ uniform sampler2D originalSpectrogramTex;
 uniform float selectionActive;
 uniform vec2  selectionFrames;
 uniform vec2  selectionBands;
+// Set when the selection carries a shape mask over its bounding rectangle:
+// rows span the inclusive band pair, columns the frame range, looked up
+// proportionally so the mask survives translation and cross-file drops.
+uniform float selectionMaskActive;
+uniform sampler2D selectionMaskTex;
 uniform float viewZoomPower;
 uniform float viewOffset;
 uniform float viewZoomPowerY;
@@ -1280,7 +1285,12 @@ bool insideSelection(vec2 unpackedUv, vec4 meta) {
   float pixelFrame = floor(unpackedUv.x * destFrameCount + 0.5);
   float binIndex = clamp(floor((pixelFrame + 0.5) / cellFrames), 0.0, meta.g - 1.0);
   float edgeFrame = binIndex * cellFrames;
-  return edgeFrame >= selectionFrames.x && edgeFrame < selectionFrames.y;
+  if (edgeFrame < selectionFrames.x || edgeFrame >= selectionFrames.y) return false;
+  if (selectionMaskActive < 0.5) return true;
+
+  float rowUv = (bandIndex - selectionBands.x + 0.5) / (selectionBands.y - selectionBands.x + 1.0);
+  float colUv = (edgeFrame - selectionFrames.x) / max(1.0, selectionFrames.y - selectionFrames.x);
+  return texture(selectionMaskTex, vec2(clamp(colUv, 0.0, 1.0), rowUv)).r > 0.5;
 }
 
 // Returns vec2(weightL, weightR) — brush weight can decorrelate per channel

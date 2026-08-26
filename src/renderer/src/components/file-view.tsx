@@ -9,9 +9,17 @@ import { type AimUv } from "../lib/aim";
 import { aimUvToBrushBlUv, brushUnionForAim } from "../lib/brush-anchor";
 import { heldRepeatIntervalMs } from "../lib/brush-repeat";
 import { penState } from "../lib/pen-state";
-import { normaliseSelection, type SelectionCorner } from "../lib/selection";
+import { getHistoryManager } from "../lib/history-manager";
+import {
+  growWandSelection,
+  WAND_DEFAULT_TOLERANCE_DB,
+  WAND_MAX_TOLERANCE_DB,
+  WAND_MIN_TOLERANCE_DB,
+} from "../lib/magic-wand";
+import { normaliseSelection, type Selection, type SelectionCorner } from "../lib/selection";
+import { lassoSelection, type LassoPoint } from "../lib/selection-mask";
 import { sourceBandUvSlope, uvToUnits } from "../lib/utils";
-import { getSelectionCorner, getSnappedCoordinates } from "../lib/view-aim";
+import { getFreehandCorner, getSelectionCorner, getSnappedCoordinates } from "../lib/view-aim";
 import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { LoopRegion } from "./loop-region";
@@ -119,6 +127,19 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const isStrokingRef = useRef(false);
   // The corner a selection drag started from, or null when none is running.
   const selectionStartRef = useRef<SelectionCorner | null>(null);
+  // The freehand path under way, in the file's seconds and pitch UV.
+  const lassoPointsRef = useRef<LassoPoint[] | null>(null);
+  // A wand press in flight: where it grows from, and the vertical drag that
+  // widens its tolerance. One grow runs at a time; the newest tolerance waits.
+  const wandRef = useRef<{
+    startY: number;
+    time: number;
+    pitchUv: number;
+    latest: Selection | null;
+    busy: boolean;
+    pendingTol: number | null;
+    done: boolean;
+  } | null>(null);
   const momentumRef = useRef<{ vx: number; vy: number; raf: number | null }>({ vx: 0, vy: 0, raf: null });
   // Non-null while the held brush repeats on its own clock; the move handlers
   // then leave the painting to the clock instead of dabbing per movement.
@@ -537,6 +558,63 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     rendererRef.current?.clearPreview();
   }, [editMode]);
 
+  // Grows the wand region from the current canvas coefficients.
+  const wandSelectionAt = useCallback(
+    async (timeSec: number, pitchUv: number, tolDb: number) => {
+      const spec = openFiles[fileId]?.spectrogramData;
+      const renderer = rendererRef?.current;
+      if (!spec || !renderer) return null;
+      await getHistoryManager(fileId).awaitPackedReaders();
+      const packed = await renderer.getFBOData();
+      if (!packed) return null;
+      return growWandSelection(packed, spec, timeSec, pitchUv, tolDb);
+    },
+    [fileId, rendererRef],
+  );
+
+  const runWand = useCallback(
+    (tolDb: number) => {
+      const wand = wandRef.current;
+      if (!wand || wand.done) return;
+      if (wand.busy) {
+        wand.pendingTol = tolDb;
+        return;
+      }
+      wand.busy = true;
+      void wandSelectionAt(wand.time, wand.pitchUv, tolDb).then((selection) => {
+        if (wandRef.current !== wand) return;
+        wand.busy = false;
+        if (selection) {
+          wand.latest = selection;
+          if (wand.done) {
+            wandRef.current = null;
+            useTransientStore.getState().setSelectionDrag(null);
+            useStore.getState().setFileSelection(fileId, selection);
+            return;
+          }
+          useTransientStore.getState().setSelectionDrag({ fileId, selection });
+        }
+        if (wand.pendingTol !== null) {
+          const tol = wand.pendingTol;
+          wand.pendingTol = null;
+          runWand(tol);
+        }
+      });
+    },
+    [fileId, wandSelectionAt],
+  );
+
+  const finishWand = useCallback(() => {
+    const wand = wandRef.current;
+    if (!wand) return;
+    wand.done = true;
+    // With a grow still running, its own landing commits instead.
+    if (!wand.latest && wand.busy) return;
+    wandRef.current = null;
+    useTransientStore.getState().setSelectionDrag(null);
+    if (wand.latest) useStore.getState().setFileSelection(fileId, wand.latest);
+  }, [fileId]);
+
   const handleCanvasMouseDown: PointerEventHandler<HTMLDivElement> = useCallback(
     async (event) => {
       if (event.button !== 0) return;
@@ -572,6 +650,35 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
 
       if (state.editMode === "select") {
         if (!isActive) state.setActiveFileId(fileId);
+        const spectrogramData = openFiles[fileId]?.spectrogramData;
+        if (!spectrogramData) return;
+        if (state.selectShape !== "rectangle") {
+          const point = getFreehandCorner(
+            event.clientX,
+            event.clientY,
+            event.currentTarget.getBoundingClientRect(),
+            fileId,
+            bpm,
+          );
+          if (!point) return;
+          const duration = spectrogramData.numFrames / spectrogramData.sampleRate;
+          if (state.selectShape === "lasso") {
+            lassoPointsRef.current = [{ time: point.timeUv * duration, pitchUv: point.pitchUv }];
+          } else {
+            wandRef.current = {
+              startY: event.clientY,
+              time: point.timeUv * duration,
+              pitchUv: point.pitchUv,
+              latest: null,
+              busy: false,
+              pendingTol: null,
+              done: false,
+            };
+            runWand(WAND_DEFAULT_TOLERANCE_DB);
+          }
+          useTransientStore.getState().setSelectionDrag(null);
+          return;
+        }
         const corner = getSelectionCorner(
           event.clientX,
           event.clientY,
@@ -626,7 +733,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         startRepeatClock();
       }
     },
-    [fileId, isActive, aimToBeatsAndPitch, file, startRepeatClock],
+    [fileId, isActive, aimToBeatsAndPitch, file, startRepeatClock, runWand],
   );
 
   const handleCanvasMouseUp: PointerEventHandler<HTMLDivElement> = useCallback(
@@ -706,7 +813,79 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       if (store.activeFileId === fileId && store.isPlaying) store.setPlaybackTime(time);
     };
 
+    const updateLassoDrag = (event: MouseEvent): void => {
+      const points = lassoPointsRef.current;
+      const rect = viewRef.current?.getBoundingClientRect();
+      const spectrogramData = openFiles[fileId]?.spectrogramData;
+      if (!points || !rect || !spectrogramData) return;
+      const bpm = useStore.getState().filepathsBpm[openFiles[fileId].filePath];
+      const corner = getFreehandCorner(event.clientX, event.clientY, rect, fileId, bpm);
+      if (!corner) return;
+      const duration = spectrogramData.numFrames / spectrogramData.sampleRate;
+      const point = { time: corner.timeUv * duration, pitchUv: corner.pitchUv };
+      const last = points[points.length - 1];
+      if (last && last.time === point.time && last.pitchUv === point.pitchUv) return;
+      points.push(point);
+      let start = Number.POSITIVE_INFINITY;
+      let end = Number.NEGATIVE_INFINITY;
+      let pitchLo = Number.POSITIVE_INFINITY;
+      let pitchHi = Number.NEGATIVE_INFINITY;
+      for (const p of points) {
+        start = Math.min(start, p.time);
+        end = Math.max(end, p.time);
+        pitchLo = Math.min(pitchLo, p.pitchUv);
+        pitchHi = Math.max(pitchHi, p.pitchUv);
+      }
+      if (end <= start || pitchHi <= pitchLo) return;
+      useTransientStore
+        .getState()
+        .setSelectionDrag({ fileId, selection: { start, end, pitchLo, pitchHi }, path: points });
+    };
+
+    const finishLassoDrag = (): void => {
+      const points = lassoPointsRef.current;
+      if (!points) return;
+      lassoPointsRef.current = null;
+      useTransientStore.getState().setSelectionDrag(null);
+      const store = useStore.getState();
+      const spectrogramData = openFiles[fileId]?.spectrogramData;
+      if (!spectrogramData) return;
+      const selection = lassoSelection(points, spectrogramData);
+      if (selection) {
+        store.setFileSelection(fileId, selection);
+        return;
+      }
+      // A path that encloses nothing is a click: clear, and put the play start
+      // marker where it landed.
+      store.setFileSelection(fileId, null);
+      const duration = spectrogramData.numFrames / spectrogramData.sampleRate;
+      const time = Math.max(0, Math.min(duration, points[0]?.time ?? 0));
+      store.setFilePlaybackStartTime(fileId, time);
+      if (store.activeFileId === fileId && store.isPlaying) store.setPlaybackTime(time);
+    };
+
     const handleWindowMouseMove = (event: MouseEvent) => {
+      if (lassoPointsRef.current) {
+        if (event.buttons === 0) {
+          finishLassoDrag();
+          return;
+        }
+        updateLassoDrag(event);
+        return;
+      }
+      if (wandRef.current) {
+        if (event.buttons === 0) {
+          finishWand();
+          return;
+        }
+        // Dragging upward reaches further down from the seed level.
+        const tol = Math.max(
+          WAND_MIN_TOLERANCE_DB,
+          Math.min(WAND_MAX_TOLERANCE_DB, WAND_DEFAULT_TOLERANCE_DB + (wandRef.current.startY - event.clientY) * 0.25),
+        );
+        runWand(tol);
+        return;
+      }
       if (selectionStartRef.current) {
         if (event.buttons === 0) {
           finishSelectionDrag();
@@ -759,6 +938,14 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     };
 
     const handleWindowMouseUp = async (event: MouseEvent) => {
+      if (event.button === 0 && lassoPointsRef.current) {
+        finishLassoDrag();
+        return;
+      }
+      if (event.button === 0 && wandRef.current) {
+        finishWand();
+        return;
+      }
       if (event.button === 0 && selectionStartRef.current) {
         finishSelectionDrag();
         return;
@@ -774,6 +961,8 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
     };
 
     const handleWindowBlur = () => {
+      finishLassoDrag();
+      finishWand();
       finishSelectionDrag();
       void endStrokeOutsideWindow();
     };
@@ -786,7 +975,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       window.removeEventListener("mouseup", handleWindowMouseUp);
       window.removeEventListener("blur", handleWindowBlur);
     };
-  }, [fileId, finishStroke, aimToBeatsAndPitch]);
+  }, [fileId, finishStroke, aimToBeatsAndPitch, runWand, finishWand]);
 
   if (!file) return null;
 

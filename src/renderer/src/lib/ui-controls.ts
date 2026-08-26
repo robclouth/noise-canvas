@@ -38,6 +38,11 @@ export const UI_CONTROLS = {
     description: "Switches between painting with the brush and drawing a selection.",
     manualSection: "selecting-a-region",
   },
+  "transport-select-shape": {
+    label: "Selection shape",
+    description: "Picks what a selection drag draws: a rectangle, a freehand lasso, or the magic wand.",
+    manualSection: "selecting-a-region",
+  },
   "transport-link": {
     label: "Ableton Link",
     description: "Syncs tempo and playback with other Ableton Link apps on the network.",

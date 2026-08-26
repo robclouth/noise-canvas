@@ -12,10 +12,13 @@ export type UiSize = "md" | "sm";
 const envUiSize = import.meta.env.VITE_DEFAULT_UI_SIZE;
 export const DEFAULT_UI_SIZE: UiSize = envUiSize === "sm" || envUiSize === "md" ? envUiSize : "md";
 
-export const APP_PERSISTED_KEYS = ["uiSize", "walkthroughSeen", "editMode"] as const;
+export const APP_PERSISTED_KEYS = ["uiSize", "walkthroughSeen", "editMode", "selectShape"] as const;
 
-/** Which tool a left drag on the canvas runs: the brush, or a selection rectangle. */
+/** Which tool a left drag on the canvas runs: the brush, or a selection. */
 export type EditMode = "brush" | "select";
+
+/** The shape select mode draws: a rectangle, a freehand lasso, or the magic wand. */
+export type SelectShape = "rectangle" | "lasso" | "wand";
 
 export interface AppState {
   uiSize: UiSize;
@@ -40,6 +43,9 @@ export interface AppState {
   editMode: EditMode;
   setEditMode: (mode: EditMode) => void;
   toggleEditMode: () => void;
+  selectShape: SelectShape;
+  /** Picks the selection shape and puts the canvas in select mode. */
+  setSelectShape: (shape: SelectShape) => void;
 
   displayMinDb: number;
   displayMaxDb: number;
@@ -78,6 +84,8 @@ export const createAppSlice = (set: ZustandSet): AppState => {
     editMode: "brush",
     setEditMode: (editMode) => set({ editMode }),
     toggleEditMode: () => set((state) => ({ editMode: state.editMode === "brush" ? "select" : "brush" })),
+    selectShape: "rectangle",
+    setSelectShape: (selectShape) => set({ selectShape, editMode: "select" }),
     displayMinDb: getParameterDef("displayMinDb").default,
     displayMaxDb: getParameterDef("displayMaxDb").default,
     magnitudeLimit: getParameterDef("magnitudeLimit").default,
