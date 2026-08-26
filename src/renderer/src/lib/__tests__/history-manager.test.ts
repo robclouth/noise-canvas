@@ -46,7 +46,12 @@ vi.mock("@renderer/store/files", () => ({
 // Silence the renderer→main menu-state IPC the manager fires on every change.
 vi.mock("../ipc", () => ({ ipcSend: vi.fn() }));
 
-import { clearAllHistoryManagers, getHistoryManager, PackedStateCache } from "../history-manager";
+import {
+  clearAllHistoryManagers,
+  destroyHistoryManager,
+  getHistoryManager,
+  PackedStateCache,
+} from "../history-manager";
 import { historyCacheBudgets } from "../history-cache-budgets";
 import { serializeFileTask } from "../file-task-queue";
 import { canvasPatchStashCount, setCanvasPatchStash } from "../canvas-patch-stash";
@@ -261,13 +266,18 @@ function installManagerEnv(): { fbo: { last: Float32Array | null }; files: Map<s
   // has no Buffer, so stand in a byte-compatible Uint8Array factory.
   const g = globalThis as unknown as { Buffer?: unknown };
   if (g.Buffer === undefined) {
-    g.Buffer = {
+    // A function, not a plain object: error serialisers probe `x instanceof
+    // Buffer`, which throws on a non-callable stand-in.
+    function stub(): void {
+      return undefined;
+    }
+    g.Buffer = Object.assign(stub, {
       from: (src: ArrayBuffer | ArrayBufferView | number[], off?: number, len?: number): Uint8Array => {
         if (src instanceof ArrayBuffer) return new Uint8Array(src, off ?? 0, len ?? src.byteLength - (off ?? 0));
         if (ArrayBuffer.isView(src)) return new Uint8Array(src.buffer, src.byteOffset, src.byteLength);
         return new Uint8Array(src);
       },
-    };
+    });
   }
 
   const store = new Map<string, string | Uint8Array>();
@@ -296,6 +306,10 @@ function installManagerEnv(): { fbo: { last: Float32Array | null }; files: Map<s
     }),
     rm: vi.fn(async (path: string) => {
       store.delete(path);
+      // A directory holds its files as prefixed keys, the way a recursive rm sees them.
+      for (const key of [...store.keys()]) {
+        if (key.startsWith(`${path}/`)) store.delete(key);
+      }
     }),
   };
 
@@ -492,6 +506,92 @@ describe("HistoryManager undo/redo round-trip", () => {
 
     clearAllHistoryManagers();
     delete fakeOpenFiles["f1"];
+  });
+
+  it("keeps the root as blocks, not as its own snapshot file", async () => {
+    const { files } = installManagerEnv();
+    const w = 8,
+      h = 4;
+    const root = lossyFill(w, h, 0);
+    const a = new Float32Array(root);
+    const rs = new Uint32Array([5, 5]);
+    for (let p = 5; p < 10; p++) for (let c = 0; c < 4; c++) a[p * 4 + c] = ((p * 3 + c) % 89) / 89;
+    const dimensions = {
+      textureWidth: w,
+      textureHeight: h,
+      numFrames: w,
+      numBands: h,
+      numChannels: 1,
+      sampleRate: 44100,
+      minFreq: 20,
+      bandsPerOctave: 12,
+    };
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f3");
+    const rootId = await mgr.addRootSnapshot({
+      data: root,
+      kind: "root",
+      label: "root",
+      spectrogram: makeSpectrogram(root, w, h),
+    });
+    await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: rs });
+
+    expect(files.has(`/userdata/history/f3/${rootId}.packed.zst`)).toBe(false);
+    expect([...files.keys()].some((path) => path.startsWith("/userdata/blocks/f3/"))).toBe(true);
+
+    // A fresh manager reads the root back from the blocks, byte-identical.
+    clearAllHistoryManagers();
+    const fresh = getHistoryManager("f3");
+    await fresh.initialize();
+    const { packedData } = await fresh.reconstruct(rootId);
+    expect(Array.from(packedData)).toEqual(Array.from(root));
+    clearAllHistoryManagers();
+  });
+
+  it("reads a root that an older history wrote as its own snapshot file", async () => {
+    const { files } = installManagerEnv();
+    const w = 8,
+      h = 4;
+    const root = lossyFill(w, h, 0);
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f4");
+    const rootId = await mgr.addRootSnapshot({
+      data: root,
+      kind: "root",
+      label: "root",
+      spectrogram: makeSpectrogram(root, w, h),
+    });
+
+    // Rewrite the layout the way histories before the block store left it: the
+    // root as one snapshot file, no blocks. The codec is identity in this env.
+    const blocks = [...files.keys()].filter((path) => path.startsWith("/userdata/blocks/f4/"));
+    expect(blocks.length).toBeGreaterThan(0);
+    files.set(`/userdata/history/f4/${rootId}.packed.zst`, new Uint8Array(new Float32Array(root).buffer));
+    for (const path of blocks) files.delete(path);
+
+    clearAllHistoryManagers();
+    const fresh = getHistoryManager("f4");
+    await fresh.initialize();
+    const { packedData } = await fresh.reconstruct(rootId);
+    expect(Array.from(packedData)).toEqual(Array.from(root));
+    clearAllHistoryManagers();
+  });
+
+  it("deletes a file's blocks when its history is destroyed", async () => {
+    const { files } = installManagerEnv();
+    const w = 8,
+      h = 4;
+    const root = lossyFill(w, h, 0);
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f5");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    expect([...files.keys()].some((path) => path.startsWith("/userdata/blocks/f5/"))).toBe(true);
+
+    await destroyHistoryManager("f5");
+    expect([...files.keys()].some((path) => path.startsWith("/userdata/blocks/f5/"))).toBe(false);
   });
 
   it("puts the file's unprojected paint back with the state it belongs to", async () => {

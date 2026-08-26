@@ -6,6 +6,14 @@ import { isManagedFilePath } from "@renderer/store/managed-path";
 import type { PhaseTurns } from "../../../main/lib/types";
 import { hasPhaseTurns, phaseTurnResidualRanges } from "../../../main/lib/history-delta";
 import { audioHopBytes, editsAlongHops, type AudioHop } from "./audio-hop";
+import type { BlockStore } from "./block-store";
+import {
+  blockStoreDirectory,
+  destroyBlockStore,
+  getBlockStore,
+  openBlockStore,
+  releaseBlockStores,
+} from "./block-stores";
 import { applyCanvasTurns, type CanvasTurn } from "./canvas-phase-turns";
 import { clearCanvasPatchStash, takeCanvasPatchStash } from "./canvas-patch-stash";
 import { diag } from "./diag-log";
@@ -243,7 +251,7 @@ export async function deriveSideData(node: HistoryNode): Promise<{
   inverseMap: Float32Array;
   metadata: Float32Array;
 }> {
-  const { textureWidth, textureHeight, numBands } = node.dimensions;
+  const { textureWidth, textureHeight } = node.dimensions;
   const layout = node.synthesisMetadata;
   if (!layout) throw new Error(`HistoryManager: node ${node.id} has no band layout`);
 
@@ -256,6 +264,11 @@ export async function deriveSideData(node: HistoryNode): Promise<{
     textureWidth * textureHeight,
   );
 
+  return { inverseMap, metadata: bandMetadataOf(node) };
+}
+
+/** The metadata texture rows of a band layout. */
+function bandMetadataRows(layout: NonNullable<HistoryNode["synthesisMetadata"]>, numBands: number): Float32Array {
   const metadata = new Float32Array(numBands * 4);
   for (let band = 0; band < numBands; band++) {
     metadata[band * 4] = layout.bandOffsets[band];
@@ -263,7 +276,14 @@ export async function deriveSideData(node: HistoryNode): Promise<{
     metadata[band * 4 + 2] = layout.bandStepLog2s[band];
     metadata[band * 4 + 3] = layout.bandFreqs[band];
   }
-  return { inverseMap, metadata };
+  return metadata;
+}
+
+/** The metadata texture rows of a full-snapshot node's band layout. */
+function bandMetadataOf(node: HistoryNode): Float32Array {
+  const layout = node.synthesisMetadata;
+  if (!layout) throw new Error(`HistoryManager: node ${node.id} has no band layout`);
+  return bandMetadataRows(layout, node.dimensions.numBands);
 }
 
 function dimensionsFromSpectrogram(s: SpectrogramData): HistoryDimensions {
@@ -715,7 +735,15 @@ export class HistoryManager {
       synthesisMetadata: synthesisMetadataFromSpectrogram(opts.spectrogram),
     };
     this.manifest = { version: HISTORY_MANIFEST_VERSION, rootId: id, currentId: id, nodes: { [id]: node } };
-    await this.writeFullSnapshot(id, opts.data);
+    // The root's packed state lives as the block store's seed rather than as
+    // its own snapshot file, so the state is not written to disk twice.
+    const s = opts.spectrogram;
+    const store = await openBlockStore(
+      this.fileId,
+      { numBands: s.numBands, metadata: s.metadata },
+      { numFrames: s.numFrames, sampleRate: s.sampleRate, texelCount: s.textureWidth * s.textureHeight },
+    );
+    await store.seed(opts.data);
     await this.writeManifest();
     // Aliased, not copied: `opts.data` is the file's live packed state, and a
     // commit writes its footprint into that array in place. The node is on
@@ -905,6 +933,30 @@ export class HistoryManager {
     await writePackedCompressed(this.packedPath(dir, nodeId), packed);
   }
 
+  /**
+   * The root's packed state, which lives as the block store's seed. Histories
+   * written before the store keep it as a snapshot file beside the deltas, so
+   * a missing store falls back to that.
+   */
+  private async readRootPacked(root: HistoryNode, dir: string): Promise<Float32Array> {
+    try {
+      return await (await this.rootBlockStore(root)).readAll();
+    } catch {
+      return await readPackedCompressed(this.packedPath(dir, root.id));
+    }
+  }
+
+  private rootBlockStore(root: HistoryNode): Promise<BlockStore> {
+    const open = getBlockStore(this.fileId);
+    if (open) return open;
+    const { textureWidth, textureHeight, numFrames, numBands, sampleRate } = root.dimensions;
+    return openBlockStore(
+      this.fileId,
+      { numBands, metadata: bandMetadataOf(root) },
+      { numFrames, sampleRate, texelCount: textureWidth * textureHeight },
+    );
+  }
+
   // ---------- Reconstruction ----------
 
   /**
@@ -931,7 +983,10 @@ export class HistoryManager {
 
     const anchor = chain[0];
     const dir = await this.dir;
-    let packed = await readPackedCompressed(this.packedPath(dir, anchor.id));
+    let packed =
+      anchor.id === this.manifest.rootId
+        ? await this.readRootPacked(anchor, dir)
+        : await readPackedCompressed(this.packedPath(dir, anchor.id));
 
     for (let i = 1; i < chain.length; i++) {
       const n = chain[i];
@@ -1100,7 +1155,14 @@ export class HistoryManager {
     // and failing that rebuild from the nearest checkpoint on disk.
     let packedData = this.packedCache.get(targetId);
     if (!packedData) {
-      packedData = (await this.reconstructByHops(fromId, targetId)) ?? (await this.reconstruct(targetId)).packedData;
+      try {
+        packedData = (await this.reconstructByHops(fromId, targetId)) ?? (await this.reconstruct(targetId)).packedData;
+      } catch (error) {
+        // Closing the file deletes the tree under a rebuild already in
+        // flight, so its reads failing is the close, not a broken history.
+        if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
+        throw error;
+      }
       // Closing the file purges the manifest and the on-disk tree; the
       // reconstruction that was already running has nothing left to restore to.
       if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
@@ -1761,19 +1823,27 @@ export class HistoryManager {
   }
 
   async getDiskUsageBytes(): Promise<number> {
-    try {
-      const dir = await this.dir;
-      const entries = await host.fs.readdir(dir);
-      let total = 0;
-      for (const entry of entries) {
-        try {
-          const s = await host.fs.stat(host.path.join(dir, entry));
-          total += Number(s.size);
-        } catch {
-          // ignore
+    const dirBytes = async (dir: string): Promise<number> => {
+      try {
+        const entries = await host.fs.readdir(dir);
+        let total = 0;
+        for (const entry of entries) {
+          try {
+            const s = await host.fs.stat(host.path.join(dir, entry));
+            total += Number(s.size);
+          } catch {
+            // ignore
+          }
         }
+        return total;
+      } catch {
+        return 0;
       }
-      return total;
+    };
+    try {
+      // The root's packed state lives in the blocks directory, so the file's
+      // history weighs both.
+      return (await dirBytes(await this.dir)) + (await dirBytes(await blockStoreDirectory(this.fileId)));
     } catch {
       return 0;
     }
@@ -1823,10 +1893,19 @@ export class HistoryManager {
       this.nodeAudioRegions.delete(id);
     }
 
-    // Rewrite the current node as a standalone full snapshot so it can be the
-    // root with no ancestors left to reconstruct from.
+    // Rewrite the current node as the new root. Its packed state becomes a
+    // fresh block store seed, the way the original root's was, so it gains no
+    // snapshot file of its own.
     host.fs.rm(this.deltaPath(dir, currentId)).catch(() => {});
-    await this.writeFullSnapshot(currentId, packed);
+    host.fs.rm(this.packedPath(dir, currentId)).catch(() => {});
+    await destroyBlockStore(this.fileId);
+    const dims = current.dimensions;
+    const store = await openBlockStore(
+      this.fileId,
+      { numBands: dims.numBands, metadata: bandMetadataRows(layout, dims.numBands) },
+      { numFrames: dims.numFrames, sampleRate: dims.sampleRate, texelCount: dims.textureWidth * dims.textureHeight },
+    );
+    await store.seed(packed);
     if (!this.manifest) return;
 
     current.parentId = null;
@@ -1942,6 +2021,7 @@ export function historyMemoryCacheBytes(): { packedStates: number; deltas: numbe
  * Called when the user closes a file tab — deletes on-disk history permanently.
  */
 export async function destroyHistoryManager(fileId: string): Promise<void> {
+  await destroyBlockStore(fileId);
   const m = managers.get(fileId);
   if (!m) return;
   await m.purge();
@@ -1958,6 +2038,7 @@ export async function clearAllHistoryManagers(): Promise<void> {
   const open = [...managers.values()];
   const openIds = [...managers.keys()];
   managers.clear();
+  const blocksReleased = releaseBlockStores();
   // A stroke commit or a navigation still on the queue owns the manifest and the
   // node it is writing; disposing under it leaves the tree on disk half-written.
   // Main's quit timeout is the backstop if one of them never settles.
@@ -1973,6 +2054,7 @@ export async function clearAllHistoryManagers(): Promise<void> {
       await m.dispose();
     }),
   );
+  await blocksReleased;
 }
 
 /**

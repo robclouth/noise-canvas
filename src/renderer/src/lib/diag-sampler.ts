@@ -1,5 +1,6 @@
 import type { WebGLRenderer } from "three";
 import { openFiles } from "../store/files";
+import { blockStoreResidentBytes } from "./block-stores";
 import { diag } from "./diag-log";
 import { gpuMemoryInfo, spectrogramBytes, usedBudgetFraction } from "./gpu-budget";
 import { historyMemoryCacheBytes } from "./history-manager";
@@ -100,6 +101,7 @@ async function memoryFigures(gl: WebGLRenderer): Promise<MemoryFigures> {
   figures.historyPackedMB = toMB(history.packedStates);
   figures.historyDeltaMB = toMB(history.deltas);
   figures.historyHopMB = toMB(history.audioHops);
+  figures.blocksMB = toMB(await blockStoreResidentBytes());
   const heap = performanceWithMemory.memory;
   if (heap) figures.jsHeapMB = toMB(heap.usedJSHeapSize);
   if (typeof process !== "undefined" && typeof process.getProcessMemoryInfo === "function") {
