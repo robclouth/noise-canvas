@@ -270,9 +270,38 @@ Tests:
 Exit: no read of `fbo1`/`fbo2` remains in the display path; parity and perf
 measurements pass. **STOP-ASK** with the measurements before Phase 2.
 
-Status: pyramid built, wired and measured; tiles not started, so the canvas
-still covers views finer than the finest resident level. Awaiting the call on
-tiles.
+Status: done. Pyramid and tile ring both built, wired and measured. The
+committed picture no longer reads the canvas at any zoom; the hover preview
+still does, by the design this phase keeps.
+
+Two figures in this section did not survive contact with the code, and the
+built numbers are what shipped:
+
+- The epsilon is 1e-9, not 1e-7. `interpolateComplex` mixes magnitudes under
+  1e-9, and 1e-7 broke parity by 32 grey units next to silence.
+- The pyramid cap is 5M texels (20 MB), not 16M (64 MB). 64 MB is 17% of the
+  Iris 655's whole budget for one open file, and the plan's own fixed-budget
+  list says 20 MB.
+
+The tile ring differs from this section's sketch in one way that matters: its
+tiles are not a fixed grid. A tile's frame span follows the zoom (256 screen
+pixels wide, rounded up to the coarsest band's step), because a fixed grid
+either needs hundreds of slots when zoomed out or covers a fraction of a
+screen when zoomed in. The ring is therefore a screen-sized cache, not an
+early cut of Phase 2's block grid; the two are separate objects.
+
+Measured on a 120 s stereo 48 kHz file, `17e2672` (pyramid only) vs `19d2402`:
+
+|                              | pyramid only         | with the ring        |
+| ---------------------------- | -------------------- | -------------------- |
+| accounted spectrogram memory | 4463 MB              | 4471 MB              |
+| budget readout               | 54 %                 | 55 %                 |
+| pan/zoom cadence             | 18.240 ms (54.8 fps) | 18.015 ms (55.5 fps) |
+| `fileFrame(active)`          | 1.655 ms             | 1.874 ms             |
+
+Memory is +8 MB, the ring's flat charge, and it does not grow with the file.
+Cadence does not regress. The display shader costs +0.22 ms a frame for the
+ring's extra reads.
 
 ---
 
