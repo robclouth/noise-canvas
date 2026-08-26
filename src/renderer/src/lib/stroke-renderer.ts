@@ -39,6 +39,7 @@ import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { DisplayPyramid } from "./display-pyramid-textures";
+import { DisplayTileRing } from "./display-tiles-textures";
 import { ATTRACT_MODULATOR_MAP_START } from "./constants";
 import { getFileOnsets } from "./file-onsets";
 import { buildModulatorUniforms } from "./modulator-utils";
@@ -285,6 +286,7 @@ export class StrokeRenderer {
   private fboDataCache: Float32Array | null = null;
   private fboDataDirty = true;
   private displayPyramid: DisplayPyramid | null = null;
+  private displayTiles: DisplayTileRing | null = null;
   // Bumped on every change to the FBO contents. getFBOData() captures it before
   // its readback and keeps the result only if it still matches, so paint that
   // lands mid-read cannot leave a snapshot taken before it marked clean.
@@ -526,10 +528,9 @@ export class StrokeRenderer {
     this.pool.disown(this);
 
     if (!this.displayPyramid) {
-      this.displayPyramid = new DisplayPyramid({
-        numBands: this.spectrogramData.numBands,
-        metadata: this.spectrogramData.metadata,
-      });
+      const layout = { numBands: this.spectrogramData.numBands, metadata: this.spectrogramData.metadata };
+      this.displayPyramid = new DisplayPyramid(layout);
+      this.displayTiles = new DisplayTileRing(layout, this.spectrogramData.numFrames);
     }
     this.invalidateFboData();
     this.isInitialized = true;
@@ -1525,17 +1526,22 @@ export class StrokeRenderer {
   private invalidateFboData(changed?: PixelRangeList): void {
     this.fboDataDirty = true;
     this.fboDataEpoch++;
-    this.displayPyramid?.refreshFromCanvas(
-      this.gl,
-      this.getDisplayTexture(),
-      this.spectrogramData.textureWidth,
-      changed ?? this.fullRange(),
-    );
+    if (!this.displayPyramid && !this.displayTiles) return;
+    const ranges = changed ?? this.fullRange();
+    const canvas = this.getDisplayTexture();
+    const width = this.spectrogramData.textureWidth;
+    this.displayPyramid?.refreshFromCanvas(this.gl, canvas, width, ranges);
+    this.displayTiles?.refreshFromCanvas(this.gl, canvas, width, ranges);
   }
 
   /** The display's committed levels, built once the canvas holds the file. */
   getDisplayPyramid(): DisplayPyramid | null {
     return this.displayPyramid;
+  }
+
+  /** The display's tile ring, which holds the view at a finer level than the pyramid. */
+  getDisplayTiles(): DisplayTileRing | null {
+    return this.displayTiles;
   }
 
   /**
@@ -2081,5 +2087,7 @@ export class StrokeRenderer {
     this.previewRangeTex.dispose();
     this.displayPyramid?.dispose();
     this.displayPyramid = null;
+    this.displayTiles?.dispose();
+    this.displayTiles = null;
   }
 }

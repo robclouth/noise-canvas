@@ -52,6 +52,20 @@ uniform sampler2D displayCoarseMetaTex;
 uniform float displayLevelBlend;
 uniform bool displayPyramidActive;
 
+// The tile ring: the committed picture around the view, in dB, at a level fine
+// enough for the screen. Tile `t` lives in slot `t mod displayTileSlots`, and
+// only the tiles [displayTileFirst, displayTileFirst + displayTileCount) are
+// there. Every band's tile layout is one metadata texel, the same for every
+// slot. With displayTileCount at zero the pyramid is read instead.
+uniform sampler2D displayTileTex;
+uniform sampler2D displayTileMetaTex;
+uniform float displayTileFirst;
+uniform float displayTileCount;
+uniform float displayTileSlots;
+uniform float displayTileTexels;
+uniform float displayTileBlend;
+uniform float displayTileLevel;
+
 vec4 fetchDisplayTexel(int bandIndex, float bandStartOffset, float timeIndex, ivec2 texSize) {
     ivec2 texel = packedTexel(bandStartOffset + timeIndex, texSize);
     if (previewActive) {
@@ -103,17 +117,63 @@ bool previewDbAt(vec2 uv, out vec2 db) {
     return true;
 }
 
-// Left and right magnitudes of the picture at an unpacked UV.
-vec2 sampleDisplayMags(vec2 uv) {
-    if (!displayPyramidActive) {
-        vec4 packedValue = sampleDisplayInterp(uv);
-        return vec2(packedValue.r, packedValue.b);
-    }
+// One bin of a band in the tile ring, when the tile holding it is resident.
+bool ringBinDb(vec4 meta, float bin, out vec2 db) {
+    float binsPerTile = meta.a;
+    float tileIndex = floor(bin / binsPerTile);
+    if (tileIndex < displayTileFirst || tileIndex >= displayTileFirst + displayTileCount) return false;
+    float slot = mod(tileIndex, displayTileSlots);
+    float linear = slot * displayTileTexels + meta.r + (bin - tileIndex * binsPerTile);
+    db = texelFetch(displayTileTex, packedTexel(linear, textureSize(displayTileTex, 0)), 0).rg;
+    return true;
+}
+
+// The ring's dB pair at an unpacked UV, blended along time and towards the
+// next coarser level, when every tile it reads is resident.
+bool sampleRingDb(vec2 uv, out vec2 db) {
+    if (displayTileCount <= 0.0) return false;
+    vec4 meta = fetchBandMetadata(displayTileMetaTex, floor((1.0 - uv.y) * sourceBandCount));
+    float scaledTime = uv.x * sourceFrameCount / exp2(meta.b);
+    float bin0, bin1, fraction;
+    bandTimeIndices(scaledTime, meta.g, bin0, bin1, fraction);
+
+    vec2 fine0, fine1;
+    if (!ringBinDb(meta, bin0, fine0) || !ringBinDb(meta, bin1, fine1)) return false;
+    db = mix(fine0, fine1, fraction);
+
+    // A band already coarser than the ring's level holds the same bins one
+    // level up, so only the finer bands need the coarse tap.
+    if (displayTileBlend <= 0.0 || meta.b > displayTileLevel) return true;
+    float coarse0, coarse1, coarseFraction;
+    bandTimeIndices(scaledTime * 0.5, ceil(meta.g * 0.5), coarse0, coarse1, coarseFraction);
+    // One level up keeps every second bin, so it reads the same tiles at even
+    // indices. Where that crosses out of the ring the fine read stands alone.
+    vec2 up0, up1;
+    if (!ringBinDb(meta, min(coarse0 * 2.0, meta.g - 1.0), up0)) return true;
+    if (!ringBinDb(meta, min(coarse1 * 2.0, meta.g - 1.0), up1)) return true;
+    db = mix(db, mix(up0, up1, coarseFraction), displayTileBlend);
+    return true;
+}
+
+// The pyramid's dB pair at an unpacked UV, blended between the two levels
+// whose bins bracket the screen.
+bool samplePyramidDb(vec2 uv, out vec2 db) {
+    if (!displayPyramidActive) return false;
     // The blend is uniform across the view, so the coarse read is skipped
     // outright wherever the fine level alone is what the view asked for.
-    vec2 db = sampleLevelDb(uv, displayFineTex, displayFineMetaTex);
+    db = sampleLevelDb(uv, displayFineTex, displayFineMetaTex);
     if (displayLevelBlend > 0.0) {
         db = mix(db, sampleLevelDb(uv, displayCoarseTex, displayCoarseMetaTex), displayLevelBlend);
+    }
+    return true;
+}
+
+// Left and right magnitudes of the picture at an unpacked UV.
+vec2 sampleDisplayMags(vec2 uv) {
+    vec2 db;
+    if (!sampleRingDb(uv, db) && !samplePyramidDb(uv, db)) {
+        vec4 packedValue = sampleDisplayInterp(uv);
+        return vec2(packedValue.r, packedValue.b);
     }
     vec2 preview;
     if (previewDbAt(uv, preview)) db = preview;

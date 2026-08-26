@@ -41,7 +41,7 @@ void main() {
 
 /** Magnitude a dB pair encodes, the inverse of the shader's forward conversion. */
 function dbToMag(db: number): number {
-  return Math.max(10 ** (db / 20) - 1e-7, 0);
+  return Math.max(10 ** (db / 20) - 1e-9, 0);
 }
 
 describe("display pyramid textures", () => {

@@ -407,6 +407,14 @@ const FileRendererInner = memo(
           displayCoarseMetaTex: { value: null as Texture | null },
           displayLevelBlend: { value: 0.0 },
           displayPyramidActive: { value: false },
+          displayTileTex: { value: null as Texture | null },
+          displayTileMetaTex: { value: null as Texture | null },
+          displayTileFirst: { value: 0.0 },
+          displayTileCount: { value: 0.0 },
+          displayTileSlots: { value: 1.0 },
+          displayTileTexels: { value: 0.0 },
+          displayTileBlend: { value: 0.0 },
+          displayTileLevel: { value: 0.0 },
         },
         vertexShader: passThroughVert,
         fragmentShader: displayFrag,
@@ -566,19 +574,64 @@ const FileRendererInner = memo(
      * so a captured snapshot matches what the live view would draw.
      */
     /**
-     * Binds the two pyramid levels whose bins best match the screen, with the
-     * weight of the coarser one. The canvas takes over when even the finest
-     * resident level is coarser than the view asks for.
+     * Holds the tiles the view needs and binds them. The ring stays empty
+     * wherever the pyramid already has bins as fine as the screen asks for.
      */
-    const applyDisplayPyramidUniforms = (viewZoomPower: number, viewportWidth: number): void => {
+    const applyDisplayTileUniforms = (
+      pyramidStepLog2: number,
+      framesPerPixel: number,
+      viewZoomPower: number,
+      viewOffset: number,
+      viewportWidth: number,
+    ): void => {
+      const uniforms = displayMaterial.uniforms;
+      const gl = glRef.current;
+      const strokeRenderer = strokeRendererRef.current;
+      const tiles = strokeRenderer?.getDisplayTiles();
+      if (!gl || !strokeRenderer || !tiles) {
+        uniforms.displayTileCount.value = 0;
+        return;
+      }
+      const zoom = Math.pow(2, viewZoomPower);
+      const span = spectrogramData.numFrames / zoom;
+      const startFrame = zoom > 1 ? viewOffset * (spectrogramData.numFrames - span) : 0;
+      tiles.update(
+        gl,
+        strokeRenderer.getDisplayTexture(),
+        spectrogramData.textureWidth,
+        { framesPerPixel, startFrame, endFrame: startFrame + span, viewportPixels: Math.max(1, viewportWidth) },
+        pyramidStepLog2,
+      );
+
+      const ring = tiles.uniforms();
+      uniforms.displayTileTex.value = tiles.texture();
+      uniforms.displayTileMetaTex.value = tiles.metadataTexture();
+      uniforms.displayTileFirst.value = ring.firstTile;
+      uniforms.displayTileCount.value = ring.tileCount;
+      uniforms.displayTileSlots.value = Math.max(1, ring.slotCount);
+      uniforms.displayTileTexels.value = ring.tileTexels;
+      uniforms.displayTileBlend.value = ring.blend;
+      uniforms.displayTileLevel.value = ring.level;
+    };
+
+    /**
+     * Binds the two pyramid levels whose bins best match the screen, with the
+     * weight of the coarser one, and the tile ring that covers what the
+     * pyramid is too coarse for. The canvas takes over when neither has bins.
+     */
+    const applyDisplayPyramidUniforms = (viewZoomPower: number, viewOffset: number, viewportWidth: number): void => {
       const uniforms = displayMaterial.uniforms;
       const pyramid = strokeRendererRef.current?.getDisplayPyramid();
       if (!pyramid || !pyramid.texture(0)) {
         uniforms.displayPyramidActive.value = false;
+        uniforms.displayTileCount.value = 0;
         return;
       }
       const framesPerPixel = spectrogramData.numFrames / (Math.pow(2, viewZoomPower) * Math.max(1, viewportWidth));
-      if (2 ** pyramid.levels[0].stepLog2 > Math.max(framesPerPixel, 1)) {
+      const finestStepLog2 = pyramid.levels[0].stepLog2;
+      applyDisplayTileUniforms(finestStepLog2, framesPerPixel, viewZoomPower, viewOffset, viewportWidth);
+
+      if (2 ** finestStepLog2 > Math.max(framesPerPixel, 1)) {
         uniforms.displayPyramidActive.value = false;
         return;
       }
@@ -621,7 +674,7 @@ const FileRendererInner = memo(
       uniforms.viewZoomPowerY.value = viewZoomPowerY;
       uniforms.viewOffsetY.value = viewOffsetY;
 
-      applyDisplayPyramidUniforms(viewZoomPower, viewportWidth);
+      applyDisplayPyramidUniforms(viewZoomPower, viewOffset, viewportWidth);
 
       // Calculate and update grid values
       const gridSizeBeats = state.gridSizeBeats;

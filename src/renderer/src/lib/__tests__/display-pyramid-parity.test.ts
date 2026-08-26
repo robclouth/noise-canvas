@@ -6,6 +6,7 @@ import {
   PlaneGeometry,
   RawShaderMaterial,
   Scene,
+  Texture,
   Vector2,
   WebGLRenderer,
   WebGLRenderTarget,
@@ -80,6 +81,14 @@ function createDisplayTestMaterial(): RawShaderMaterial {
       displayCoarseMetaTex: { value: null },
       displayLevelBlend: { value: 0 },
       displayPyramidActive: { value: false },
+      displayTileTex: { value: null },
+      displayTileMetaTex: { value: null },
+      displayTileFirst: { value: 0 },
+      displayTileCount: { value: 0 },
+      displayTileSlots: { value: 1 },
+      displayTileTexels: { value: 0 },
+      displayTileBlend: { value: 0 },
+      displayTileLevel: { value: 0 },
     },
     vertexShader: passThroughVert,
     fragmentShader: displayFrag,
@@ -107,10 +116,10 @@ function makeView(gl: WebGLRenderer, data: SpectrogramData, effects: EffectsRegi
   const target = new WebGLRenderTarget(WIDTH, HEIGHT, { depthBuffer: false, stencilBuffer: false });
 
   /** Renders from the pyramid or the canvas at a zoom, the way the app binds them. */
-  function render(fromPyramid: boolean, zoomPower = 0): Uint8Array {
+  function render(fromPyramid: boolean, zoomPower = 0, sourceTex?: Texture, offset = 0): Uint8Array {
     const preview = renderer.getPreviewDisplay();
     const u = material.uniforms;
-    u.sourceSpectrogramTex.value = preview.committed;
+    u.sourceSpectrogramTex.value = sourceTex ?? preview.committed;
     u.sourceMetadataTex.value = textures.metadataTex;
     u.sourceInverseMapTex.value = textures.inverseMapTex;
     u.sourceMinFreq.value = data.minFreq;
@@ -121,7 +130,7 @@ function makeView(gl: WebGLRenderer, data: SpectrogramData, effects: EffectsRegi
     u.sourceSampleRate.value = data.sampleRate;
     u.sourceSpectrogramTextureSize.value = data.packedTextureSize;
     u.viewZoomPower.value = zoomPower;
-    u.viewOffset.value = 0;
+    u.viewOffset.value = offset;
 
     const pyramid = renderer.getDisplayPyramid();
     if (fromPyramid && pyramid) {
@@ -134,6 +143,7 @@ function makeView(gl: WebGLRenderer, data: SpectrogramData, effects: EffectsRegi
       u.displayLevelBlend.value = choice.blend;
     }
     u.displayPyramidActive.value = fromPyramid;
+    u.displayTileCount.value = 0;
 
     gl.setRenderTarget(target);
     gl.render(scene, camera);
@@ -163,6 +173,47 @@ function makeView(gl: WebGLRenderer, data: SpectrogramData, effects: EffectsRegi
     return pixels;
   }
 
+  /**
+   * Renders from the tile ring, the way the app holds and binds it.
+   * `shrinkWindow` narrows the window the shader is told about, so a view
+   * reaches past the tiles the ring holds.
+   */
+  function renderFromRing(zoomPower = 0, offset = 0, shrinkWindow = 0): Uint8Array {
+    render(false, zoomPower, undefined, offset);
+    const ring = renderer.getDisplayTiles();
+    if (!ring) throw new Error("the renderer built no tile ring");
+    const zoom = 2 ** zoomPower;
+    const span = data.numFrames / zoom;
+    const startFrame = zoom > 1 ? offset * (data.numFrames - span) : 0;
+    ring.update(
+      gl,
+      renderer.getDisplayTexture(),
+      data.textureWidth,
+      { framesPerPixel: span / WIDTH, startFrame, endFrame: startFrame + span, viewportPixels: WIDTH },
+      // Above every level under test, so the ring is never left to the pyramid.
+      30,
+    );
+
+    const u = material.uniforms;
+    const bound = ring.uniforms();
+    u.displayTileTex.value = ring.texture();
+    u.displayTileMetaTex.value = ring.metadataTexture();
+    u.displayTileFirst.value = bound.firstTile;
+    u.displayTileCount.value = Math.max(bound.tileCount - shrinkWindow, 0);
+    u.displayTileSlots.value = Math.max(1, bound.slotCount);
+    u.displayTileTexels.value = bound.tileTexels;
+    u.displayTileBlend.value = bound.blend;
+    u.displayTileLevel.value = bound.level;
+
+    gl.setRenderTarget(target);
+    gl.render(scene, camera);
+    gl.setRenderTarget(null);
+    const pixels = new Uint8Array(WIDTH * HEIGHT * 4);
+    gl.readRenderTargetPixels(target, 0, 0, WIDTH, HEIGHT, pixels);
+    u.displayTileCount.value = 0;
+    return pixels;
+  }
+
   function dispose(): void {
     target.dispose();
     material.dispose();
@@ -170,7 +221,12 @@ function makeView(gl: WebGLRenderer, data: SpectrogramData, effects: EffectsRegi
     disposeHarnessTextures(textures);
   }
 
-  return { renderer, material, render, renderAtLevel, dispose };
+  /** The canvas path over the file as it was analysed, whatever the canvas now holds. */
+  function renderOriginal(zoomPower = 0): Uint8Array {
+    return render(false, zoomPower, textures.originalPackedDataTex);
+  }
+
+  return { renderer, material, render, renderAtLevel, renderFromRing, renderOriginal, dispose };
 }
 
 describe("display pyramid parity", () => {
@@ -304,6 +360,68 @@ describe("display pyramid parity", () => {
     it("stays close to the canvas at whole-file zoom, where it shows a coarser level", () => {
       const v = view(data);
       expect(maxChannelDiff(v.render(true, 0), v.render(false, 0))).toBeLessThanOrEqual(24);
+    });
+  });
+
+  describe("the tile ring", () => {
+    const data = createConstantQMockSpectrogramData({ durationSeconds: 2, sampleRate: 8000, bandsPerOctave: 4 });
+    const FINE_ZOOM = 8;
+
+    // The mock's magnitude is the same everywhere, which hides a bin read from
+    // the wrong place; this varies it along the packed layout.
+    const varied = Float32Array.from(data.packedData);
+    for (let i = 0; i < varied.length / 4; i++) {
+      varied[i * 4] = 0.05 + 0.45 * (1 + Math.sin(i * 0.37));
+      varied[i * 4 + 2] = 0.05 + 0.45 * (1 + Math.cos(i * 0.11));
+    }
+
+    function ringView(): ReturnType<typeof makeView> {
+      const made = view(data);
+      made.renderer.setFBOData(varied);
+      return made;
+    }
+
+    it("matches the canvas within a grey unit where its bins are the source's", () => {
+      const v = ringView();
+      expect(maxChannelDiff(v.renderFromRing(FINE_ZOOM), v.render(false, FINE_ZOOM))).toBeLessThanOrEqual(1);
+    });
+
+    it("matches the canvas away from the file's start, where the ring has wrapped", () => {
+      const v = ringView();
+      expect(
+        maxChannelDiff(v.renderFromRing(FINE_ZOOM, 0.5), v.render(false, FINE_ZOOM, undefined, 0.5)),
+      ).toBeLessThanOrEqual(1);
+      expect(
+        maxChannelDiff(v.renderFromRing(FINE_ZOOM, 0.93), v.render(false, FINE_ZOOM, undefined, 0.93)),
+      ).toBeLessThanOrEqual(1);
+    });
+
+    it("really reads the ring rather than falling through to the canvas", async () => {
+      const v = ringView();
+      await paintCommittedStroke(v.renderer, data, -18);
+      // The canvas sampler is pointed at the file as analysed, so a fall
+      // through to it would show the stroke missing.
+      expect(maxChannelDiff(v.renderFromRing(FINE_ZOOM), v.renderOriginal(FINE_ZOOM))).toBeGreaterThan(1);
+    });
+
+    it("leaves the picture alone while it holds no tile", () => {
+      const v = ringView();
+      expect(maxChannelDiff(v.renderFromRing(FINE_ZOOM, 0, 99), v.render(false, FINE_ZOOM))).toBe(0);
+    });
+
+    it("agrees with the pyramid where both cover the view", () => {
+      const v = ringView();
+      expect(maxChannelDiff(v.renderFromRing(0), v.render(true, 0))).toBeLessThanOrEqual(1);
+      expect(maxChannelDiff(v.renderFromRing(4), v.render(true, 4))).toBeLessThanOrEqual(1);
+    });
+
+    it("follows a committed stroke", async () => {
+      const v = ringView();
+      const before = v.renderFromRing(FINE_ZOOM);
+      await paintCommittedStroke(v.renderer, data, -18);
+      const after = v.renderFromRing(FINE_ZOOM);
+      expect(maxChannelDiff(before, after)).toBeGreaterThan(1);
+      expect(maxChannelDiff(after, v.render(false, FINE_ZOOM))).toBeLessThanOrEqual(1);
     });
   });
 });

@@ -3,6 +3,7 @@ import {
   DISPLAY_PYRAMID_MAX_TEXELS,
   displayPyramidBudgetTexels,
 } from "./display-pyramid";
+import { displayTilesBytes } from "./display-tiles";
 import { historyCacheBudgets } from "./history-cache-budgets";
 import { host } from "./host";
 
@@ -57,11 +58,11 @@ export function spectrogramBytes(openTexelCounts: number[], unified: boolean): n
   const perTexel = GPU_BYTES_PER_TEXEL_FILE + (unified ? CPU_BYTES_PER_TEXEL_FILE : 0);
   // No open file, no history manager, so nothing holds the caches yet.
   const overhead = unified && openTexelCounts.length > 0 ? historyCacheBytes() : 0;
-  let pyramids = 0;
+  let displays = 0;
   for (const texels of openTexelCounts) {
-    pyramids += displayPyramidBudgetTexels(texels) * DISPLAY_PYRAMID_BYTES_PER_TEXEL;
+    displays += displayPyramidBudgetTexels(texels) * DISPLAY_PYRAMID_BYTES_PER_TEXEL + displayTilesBytes();
   }
-  return perTexel * sum + GPU_BYTES_PER_TEXEL_SCRATCH * largest + overhead + pyramids;
+  return perTexel * sum + GPU_BYTES_PER_TEXEL_SCRATCH * largest + overhead + displays;
 }
 
 /**
@@ -93,11 +94,11 @@ export function remainingCoefficientBudget(openTexelCounts: number[]): number | 
   for (const texels of openTexelCounts) {
     sum += texels;
     largest = Math.max(largest, texels);
-    budget -= displayPyramidBudgetTexels(texels) * DISPLAY_PYRAMID_BYTES_PER_TEXEL;
+    budget -= displayPyramidBudgetTexels(texels) * DISPLAY_PYRAMID_BYTES_PER_TEXEL + displayTilesBytes();
   }
-  // The display pyramid of the file about to open, charged at its cap: it is
-  // bounded, so a longer file does not take more of the budget.
-  budget -= DISPLAY_PYRAMID_MAX_TEXELS * DISPLAY_PYRAMID_BYTES_PER_TEXEL;
+  // The display textures of the file about to open, charged at their cap:
+  // both are bounded, so a longer file does not take more of the budget.
+  budget -= DISPLAY_PYRAMID_MAX_TEXELS * DISPLAY_PYRAMID_BYTES_PER_TEXEL + displayTilesBytes();
 
   // A new file within the current pool size pays only the per-file rate; a
   // larger one also grows the scratch pool with it.
