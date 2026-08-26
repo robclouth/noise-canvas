@@ -438,11 +438,28 @@ show the compact route end to end (`commitStroke` logs `windowed:1,
 viewFromStore:1`, hops log `mode:"patch"` at 5–45 ms) with no history parity
 warnings.
 
-Remaining in this phase: the per-block inverse map (`deriveSideData` already
-regenerates it in milliseconds — the resident copy can go with the same
-texture-upload trick once `deriveSpectrogramData`'s stem-split sharing is
-handled), then the phase exit. A hop-synthesis view over the store is a
-follow-up only if the FBO-readback fallback measurably slows undo.
+The inverse map is released the same way (2026-08-26): `inverseMap` is
+optional, `releaseAnalysisData` frees it with the packed array once both
+textures are on the GPU, and `deriveSpectrogramData` (stem splits, merges)
+rebuilds it from the band layout via `buildHistoryInverseMap` when the base
+has released its copy.
+
+Phase 2 exit measurements (renderer private memory, fresh profile, GC'd):
+
+- 150 s stereo: open+settle costs ~316 MB over the ~154 MB idle app
+  (pre-removal: 1364 MB — 4.3× less); after a stroke, an undo and a redo the
+  process sits at ~560 MB against 1679 MB before.
+- 60 s stereo: open+settle costs 121 MB. The open cost therefore still
+  scales at ~2.2 MB per second of audio (it was ~9.1 MB/s), and the release
+  of the packed and inverse arrays is verified to run — so the remaining
+  slope lives elsewhere: the audio buffers (~0.7 MB/s by design until
+  Phase 4), and unattributed length-scaled state (display pyramid strips,
+  addon-held analysis state — the addon runs in-process). Attribution needs
+  a heap snapshot; `Runtime.queryObjects` cannot see the page realm here.
+
+Follow-ups, not in this phase: heap-snapshot attribution of the remaining
+slope; a hop-synthesis view over the store only if the FBO-readback fallback
+measurably slows undo.
 
 ---
 
