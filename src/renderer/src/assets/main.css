@@ -24,9 +24,9 @@
   --ui-font-xl: 18px;
   --ui-icon-scale: 1;
   --ui-transport-pad: 10px;
-  --ui-transport-gap: 12px;
+  --ui-transport-gap: 8px;
   --ui-transport-label-w: 40px;
-  --ui-transport-time-w: 110px;
+  --ui-transport-time-w: 96px;
 }
 
 [data-ui-size="sm"] {

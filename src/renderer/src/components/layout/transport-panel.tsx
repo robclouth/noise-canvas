@@ -78,12 +78,13 @@ export const TransportPanel = memo(() => {
   return (
     <Group
       align="center"
-      justify="center"
+      justify="safe center"
       gap={TRANSPORT_GAP}
       p={TRANSPORT_PAD}
       bg="dark.7"
       wrap="nowrap"
-      style={{ zIndex: 1000 }}
+      // A window too narrow for the whole bar scrolls the bar, not the app.
+      style={{ zIndex: 1000, overflowX: "auto", overflowY: "hidden" }}
       {...anchorProps("transport")}
     >
       <Group gap="xs" wrap="nowrap">
@@ -91,7 +92,6 @@ export const TransportPanel = memo(() => {
           opened={linkPopoverOpened}
           onChange={setLinkPopoverOpened}
           withArrow
-          withinPortal={false}
           zIndex={10001}
           position="top"
           clickOutsideEvents={["click", "mousedown", "touchstart"]}
