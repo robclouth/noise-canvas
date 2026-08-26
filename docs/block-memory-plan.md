@@ -343,7 +343,37 @@ paint/undo/export byte-identical on a 60 s file; suite + addon tests green.
 **STOP-ASK** with measurements. (A 10-minute file still cannot open; the GPU
 side waits for Phase 3.)
 
-Status: not started.
+Status: in progress. Done so far:
+
+- Block grid (`block-grid.ts`) and store (`block-store.ts`), with an exact
+  tiling proof, a patch-during-flush version counter, copy-on-encode against
+  torn writes, a serialised flush chain that `dispose` fences, and a dirty
+  tier that flushes itself past the resident budget.
+- The history root now lives as the block store's seed (`block-stores.ts`
+  registry at `<userData>/blocks/<fileId>`): `addRootSnapshot` seeds instead
+  of writing a snapshot file, `reconstruct` reads the root anchor from the
+  store (falling back to the file for older histories), `resetToCurrent`
+  re-seeds, close destroys the blocks, app start sweeps orphans, and the diag
+  log carries `blocksMB`.
+- Deviations, both approved 2026-08-26: the blocks live beside the history
+  directory rather than inside it (`readManifest` wipes the history dir on a
+  manifest-version bump, which would destroy the blocks), and the root
+  snapshot file is replaced by the seed rather than duplicated (the store is
+  read-only until the reader migration, so seed == root).
+- Measured on the 120 s file (this Mac): open-to-loaded 2.7 s → 3.1 s, disk
+  settle 6.7 s → 8.1 s, on-disk 271 MB → 296 MB (23 MB history + 273 MB
+  blocks; per-block zstd compresses ~9% worse than one whole-file pass). The
+  plan as written would have doubled disk to ~544 MB.
+- A close during a disk rebuild now drops the navigation instead of rejecting
+  (`navigateToNow` catches reconstruction errors once the manifest is gone) —
+  a latent race the truthful recursive-rm test stub exposed.
+
+Remaining: the reader migration onto a current-state store
+(`readCurrentPackedData`, commit synthesis windows, export, save, undo/redo
+delta application), the per-block inverse map, and the renderer-heap exit
+measurement. The store currently holds the root state and is write-once
+outside `seed`; the migration decides whether commits patch this store in
+place or a generational copy-on-write layer keeps the root blocks intact.
 
 ---
 
