@@ -496,6 +496,30 @@ flush off the commit path (write-behind — the overlay marker already
 invalidates before mutation, so a crash costs a longer restore, not
 corruption); keeping hot overlay blocks raw and compressing on eviction.
 
+Remedies shipped (2026-08-26, Rob picked the first two): the RAM-scaled
+resident budget (`historyCacheBudgets().blockResident`, 64→256 MiB over
+8→16 GiB of system memory, charged in the GPU-budget overhead) and the
+write-behind flush (`scheduleTierFlush` in history-manager). The write-behind
+keeps the crash contract: the in-RAM tier marker goes valid at patch time so
+the next stroke and the packed readers never wait, while every manifest write
+masks the on-disk marker until the last pending flush lands and writes it
+unmasked — the disk can never name a tier the overlay does not fully hold. A
+failed flush leaves the mask standing. `seed`/`seedCurrent` join the store's
+flush chain, and reshape/reset/dispose/purge drain pending flushes first.
+Same harness, medians, end-to-end:
+
+|                    | commit 60 s | undo 60 s | redo 60 s | commit 150 s | undo 150 s | redo 150 s |
+| ------------------ | ----------- | --------- | --------- | ------------ | ---------- | ---------- |
+| old (fork)         | 363 ms      | 151 ms    | 178 ms    | 776 ms       | 210 ms     | 434 ms     |
+| new, both remedies | 367 ms      | 115 ms    | 117 ms    | 1058 ms      | 395 ms     | 360 ms     |
+
+At 60 s the gap is closed — undo and redo beat the old system. The overhead
+left at 150 s is the O(file-length) turn-tail work through the store (a
+decode per cold block, the float walk, the patch of every block right of the
+stroke), which a longer resident budget cannot remove; end-of-session private
+at 150 s is 1086 MB (the resident cache full) against the old system's
+2644 MB. Raw hot overlay blocks (the third remedy) stay unimplemented.
+
 ---
 
 ## Phase 3 — block-resident canvas (2–3 weeks) — the class change

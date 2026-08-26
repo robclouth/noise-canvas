@@ -112,6 +112,9 @@ export class BlockStore {
    */
   async seed(packed: Float32Array): Promise<void> {
     if (this.disposed) throw new Error("block store is disposed");
+    // An in-flight flush finishes first, so none of its writes can land over
+    // the reseeded blocks.
+    await this.flushing;
     this.dirty.clear();
     this.dirtyVersion.clear();
     this.clean.clear();
@@ -130,6 +133,9 @@ export class BlockStore {
    */
   async seedCurrent(packed: Float32Array): Promise<void> {
     if (this.disposed) throw new Error("block store is disposed");
+    // An in-flight flush finishes first, so none of its writes can land over
+    // the reseeded blocks.
+    await this.flushing;
     this.dirty.clear();
     this.dirtyVersion.clear();
     this.clean.clear();

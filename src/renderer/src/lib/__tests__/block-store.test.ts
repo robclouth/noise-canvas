@@ -292,6 +292,53 @@ describe("BlockStore", () => {
     expect(Array.from(await store.readRanges(ranges))).toEqual(Array.from(gatherPixelRanges(packed, ranges)));
   });
 
+  it("finishes an in-flight flush before it reseeds the current tier", async () => {
+    const grid = makeGrid();
+    const backend = memoryBackend();
+    const overlay = memoryBackend();
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached = (): void => {};
+    const flushParked = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let gated = true;
+    const slowOverlay: BlockBackend = {
+      read: (index) => overlay.read(index),
+      write: async (index, bytes) => {
+        if (gated) {
+          gated = false;
+          reached();
+          await gate;
+        }
+        await overlay.write(index, bytes);
+      },
+      clear: () => overlay.clear(),
+    };
+    const store = new BlockStore(grid, backend, {
+      codec: rawCodec,
+      maxResidentBytes: 1 << 30,
+      overlay: slowOverlay,
+      texelCount: data.textureWidth * data.textureHeight,
+    });
+    await store.seed(packed);
+
+    const ranges = bandRange(0, 0, 4);
+    await store.patch(ranges, new Float32Array(4 * 4).fill(0.25));
+    const flushing = store.flush();
+    await flushParked;
+
+    const reseeded = packed.map((value) => Math.fround(value * 0.5 + 0.1));
+    const seeding = store.seedCurrent(reseeded);
+    release();
+    await Promise.all([flushing, seeding]);
+
+    const expected = gatherPixelRanges(reseeded, store.blockRanges(0));
+    expect(firstDifference(await rawCodec.decode(overlay.blocks.get(0)!), expected)).toBe(-1);
+  });
+
   it("writes bytes a mid-encode patch cannot tear", async () => {
     const grid = makeGrid();
     const backend = memoryBackend();

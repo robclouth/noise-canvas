@@ -1,6 +1,7 @@
 import type { BandLayout } from "./band-layout";
 import { blockGrid } from "./block-grid";
 import { BlockStore, fileBlockBackend } from "./block-store";
+import { historyCacheBudgets } from "./history-cache-budgets";
 import { host } from "./host";
 
 /** What a file's store needs beyond its band layout. */
@@ -30,9 +31,10 @@ export function getBlockStore(fileId: string): Promise<BlockStore> | null {
  * Opens the store holding a file's packed state as blocks on disk, creating
  * it over `<userData>/blocks/<fileId>` when the file has none open. The seed
  * stays in that directory untouched; patched blocks flush into its `current`
- * overlay, so the root state survives any torn write. The resident budget is
- * zero: the state is read at launch and on far history navigation, so
- * nothing stays decoded between reads.
+ * overlay, so the root state survives any torn write. The resident budget
+ * scales with system memory: the blocks a stroke reads stay decoded for the
+ * next one, while a file longer than the budget still cannot hold itself
+ * decoded.
  */
 export function openBlockStore(fileId: string, layout: BandLayout, shape: BlockStoreShape): Promise<BlockStore> {
   let store = stores.get(fileId);
@@ -43,7 +45,7 @@ export function openBlockStore(fileId: string, layout: BandLayout, shape: BlockS
       return new BlockStore(grid, fileBlockBackend(dir), {
         overlay: fileBlockBackend(host.path.join(dir, "current")),
         texelCount: shape.texelCount,
-        maxResidentBytes: 0,
+        maxResidentBytes: historyCacheBudgets(host.os.totalmem()).blockResident,
       });
     })();
     stores.set(fileId, store);

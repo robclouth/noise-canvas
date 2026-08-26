@@ -3,18 +3,20 @@ const GIB = 1024 * MIB;
 
 /**
  * In-memory cache budgets: the per-stroke coefficient deltas that carry undo
- * and redo, and the audio either side of each hop's window. Full size from
- * 16 GiB of system memory, a quarter of it at 8 GiB, and in proportion
- * between.
+ * and redo, the audio either side of each hop's window, and the decoded
+ * blocks a file's packed-state store keeps resident. Full size from 16 GiB of
+ * system memory, a quarter of it at 8 GiB, and in proportion between.
  */
 export function historyCacheBudgets(totalMemoryBytes: number): {
   deltas: number;
   audioHops: number;
+  blockResident: number;
 } {
   const position = Math.min(1, Math.max(0, (totalMemoryBytes - 8 * GIB) / (8 * GIB)));
   const scale = 0.25 + 0.75 * position;
   return {
     deltas: Math.round(128 * MIB * scale),
     audioHops: Math.round(256 * MIB * scale),
+    blockResident: Math.round(256 * MIB * scale),
   };
 }

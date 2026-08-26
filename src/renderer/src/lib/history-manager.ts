@@ -378,6 +378,12 @@ export class HistoryManager {
   private version = 0;
   private manifestWriteTimer: ReturnType<typeof setTimeout> | null = null;
   private manifestWritePending = false;
+  // Serializes manifest writes so an older write cannot land over a newer one.
+  private manifestWriting: Promise<void> = Promise.resolve();
+  // Tier flushes scheduled behind commits and not yet landed. While any are
+  // pending, every manifest write masks the tier marker.
+  private tierFlushes = 0;
+  private tierFlushing: Promise<void> = Promise.resolve();
   // Dirty ranges of strokes added this session, keyed by node id. Lets
   // navigation between such nodes upload only the changed texture rows
   // instead of the whole packed state. Purely an optimization: a miss falls
@@ -465,14 +471,20 @@ export class HistoryManager {
     }
   }
 
-  private async writeManifest(): Promise<void> {
-    // Snapshot synchronously so a flush triggered just before dispose() nulls
-    // the manifest still persists the captured tree across the await below.
+  private writeManifest(): Promise<void> {
+    // Serialized synchronously so a flush triggered just before dispose() nulls
+    // the manifest still persists the captured tree across the awaits below.
+    // The tier marker is masked while a tier flush is pending: the disk may
+    // only name a tier the overlay fully holds.
     const manifest = this.manifest;
-    if (!manifest) return;
-    const dir = await this.ensureDir();
-    const path = host.path.join(dir, MANIFEST_FILENAME);
-    await host.fs.writeFile(path, JSON.stringify(manifest));
+    if (!manifest) return Promise.resolve();
+    const json = JSON.stringify(this.tierFlushes > 0 ? { ...manifest, overlayNodeId: undefined } : manifest);
+    const run = this.manifestWriting.then(async () => {
+      const dir = await this.ensureDir();
+      await host.fs.writeFile(host.path.join(dir, MANIFEST_FILENAME), json);
+    });
+    this.manifestWriting = run.catch(() => undefined);
+    return run;
   }
 
   /**
@@ -940,6 +952,31 @@ export class HistoryManager {
   }
 
   /**
+   * Runs the store's flush behind the commit rather than on it. When the last
+   * pending flush lands, the manifest is written with the tier marker
+   * unmasked. A failed flush leaves the mask standing, so the disk never
+   * names a tier the overlay does not hold; the resident blocks stay the
+   * truth and the next flush retries the same dirty set.
+   */
+  private scheduleTierFlush(store: BlockStore): void {
+    this.tierFlushes++;
+    this.tierFlushing = store.flush().then(
+      async () => {
+        this.tierFlushes--;
+        if (this.tierFlushes === 0 && this.manifest) await this.writeManifest();
+      },
+      (error) => {
+        console.error("history: block store flush failed", error);
+      },
+    );
+  }
+
+  /** Resolves once every scheduled tier flush and its manifest write have landed. */
+  awaitTierFlush(): Promise<void> {
+    return this.tierFlushing;
+  }
+
+  /**
    * Rebuilds the block store over `node`'s grid with `packed` as its seed.
    * The anchor whose state was the old seed is written out as its own
    * snapshot file first, so every anchor stays reconstructable.
@@ -948,6 +985,9 @@ export class HistoryManager {
     const manifest = this.manifest;
     const layout = node.synthesisMetadata;
     if (!manifest || !layout) throw new Error(`HistoryManager: node ${node.id} has no band layout`);
+    // Pending tier flushes land first, so none of their writes can fire while
+    // the store is rebuilt over another grid.
+    await this.tierFlushing;
     const holder = this.seedHolder();
     const dir = await this.ensureDir();
     if (holder) {
@@ -1000,16 +1040,18 @@ export class HistoryManager {
     try {
       const store = await this.seedBlockStore(holder);
       // Invalidated on disk before the tier changes, so a crash mid-write
-      // cannot leave a torn tier that still reads as current.
+      // cannot leave a torn tier that still reads as current. With a flush
+      // pending, every manifest write is already masked, so the disk says
+      // undefined without another write.
       manifest.overlayNodeId = undefined;
-      await this.writeManifest();
+      if (this.tierFlushes === 0) await this.writeManifest();
       if (this.manifest !== manifest) return;
       if (patchable && ranges && compact) {
         await store.patch(ranges, compact);
       } else if (whole) {
         await store.seedCurrent(whole);
       }
-      await store.flush();
+      this.scheduleTierFlush(store);
       if (this.manifest !== manifest) return;
       manifest.overlayNodeId = manifest.currentId;
     } catch (error) {
@@ -1044,9 +1086,11 @@ export class HistoryManager {
     try {
       const store = await this.seedBlockStore(holder);
       // Invalidated on disk before the tier changes, so a crash mid-write
-      // cannot leave a torn tier that still reads as current.
+      // cannot leave a torn tier that still reads as current. With a flush
+      // pending, every manifest write is already masked, so the disk says
+      // undefined without another write.
       manifest.overlayNodeId = undefined;
-      await this.writeManifest();
+      if (this.tierFlushes === 0) await this.writeManifest();
       if (this.manifest !== manifest) return null;
       await store.patch(ranges, after);
       let residuals: Uint32Array = new Uint32Array(0);
@@ -1060,7 +1104,7 @@ export class HistoryManager {
           residuals = turns.residuals;
         }
       }
-      await store.flush();
+      this.scheduleTierFlush(store);
       if (this.manifest !== manifest) return null;
       return residuals;
     } catch (error) {
@@ -2057,6 +2101,9 @@ export class HistoryManager {
     // snapshot file of its own.
     host.fs.rm(this.deltaPath(dir, currentId)).catch(() => {});
     host.fs.rm(this.packedPath(dir, currentId)).catch(() => {});
+    // Pending tier flushes land first, so none of their writes can fire while
+    // the store is rebuilt over the fresh seed.
+    await this.tierFlushing;
     await destroyBlockStore(this.fileId);
     const dims = current.dimensions;
     const store = await openBlockStore(
@@ -2108,13 +2155,17 @@ export class HistoryManager {
       clearTimeout(this.manifestWriteTimer);
       this.manifestWriteTimer = null;
     }
+    // Queued manifest writes land before the wipe and none start after it,
+    // so a late write cannot resurrect the tree file in a deleted directory.
+    this.manifest = null;
+    await this.tierFlushing;
+    await this.manifestWriting;
     const dir = await this.dir;
     try {
       await host.fs.rm(dir, { recursive: true, force: true });
     } catch {
       // ignore
     }
-    this.manifest = null;
     this.nodeDirtyRanges.clear();
     this.nodeAudioRegions.clear();
     this.nodeDeltas.clear();
@@ -2133,8 +2184,10 @@ export class HistoryManager {
   async dispose(): Promise<void> {
     // Awaited, not fired off: the caller signals the main process that quitting
     // may proceed as soon as this resolves, and closing the window tears down
-    // the context an unfinished write would still be using.
+    // the context an unfinished write would still be using. The tier flushes
+    // settle too, so the manifest on disk names the tier the overlay holds.
     await this.flushManifestWrite();
+    await this.tierFlushing;
     this.manifest = null;
     this.nodeDirtyRanges.clear();
     this.nodeAudioRegions.clear();

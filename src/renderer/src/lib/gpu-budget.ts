@@ -35,14 +35,14 @@ export function gpuMemoryInfo(): { bytes: number; unified: boolean } {
 }
 
 /**
- * RAM the history caches may hold — stroke deltas and hop audio. A flat
- * overhead, not a per-texel rate: the budgets are the same whatever length is
- * open, and painting fills them.
+ * RAM the history caches may hold — stroke deltas, hop audio and resident
+ * packed blocks. A flat overhead, not a per-texel rate: the budgets are the
+ * same whatever length is open, and painting fills them.
  */
 export function historyCacheBytes(): number {
   if (cachedHistoryBytes === null) {
     const budgets = historyCacheBudgets(host.os.totalmem());
-    cachedHistoryBytes = budgets.deltas + budgets.audioHops;
+    cachedHistoryBytes = budgets.deltas + budgets.audioHops + budgets.blockResident;
   }
   return cachedHistoryBytes;
 }

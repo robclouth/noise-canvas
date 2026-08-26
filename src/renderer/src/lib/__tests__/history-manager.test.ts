@@ -62,12 +62,16 @@ describe("historyCacheBudgets", () => {
   const MIB = 1024 ** 2;
 
   it("gives the full budgets from 16 GiB up", () => {
-    expect(historyCacheBudgets(16 * GIB)).toEqual({ deltas: 128 * MIB, audioHops: 256 * MIB });
+    expect(historyCacheBudgets(16 * GIB)).toEqual({
+      deltas: 128 * MIB,
+      audioHops: 256 * MIB,
+      blockResident: 256 * MIB,
+    });
     expect(historyCacheBudgets(64 * GIB)).toEqual(historyCacheBudgets(16 * GIB));
   });
 
   it("gives a quarter of the budgets at 8 GiB and below", () => {
-    expect(historyCacheBudgets(8 * GIB)).toEqual({ deltas: 32 * MIB, audioHops: 64 * MIB });
+    expect(historyCacheBudgets(8 * GIB)).toEqual({ deltas: 32 * MIB, audioHops: 64 * MIB, blockResident: 64 * MIB });
     expect(historyCacheBudgets(4 * GIB)).toEqual(historyCacheBudgets(8 * GIB));
   });
 
@@ -75,6 +79,7 @@ describe("historyCacheBudgets", () => {
     const budgets = historyCacheBudgets(12 * GIB);
     expect(budgets.deltas).toBe(80 * MIB);
     expect(budgets.audioHops).toBe(160 * MIB);
+    expect(budgets.blockResident).toBe(160 * MIB);
   });
 });
 
@@ -772,6 +777,7 @@ describe("HistoryManager hops", () => {
     const store = await open!;
     expect(Array.from(await store.readAll())).toEqual(Array.from(a));
     expect(Array.from(await store.readAllRoot())).toEqual(Array.from(root));
+    await mgr.awaitTierFlush();
     const manifest = JSON.parse(files.get("/userdata/history/f1/tree.json") as string) as { overlayNodeId?: string };
     expect(manifest.overlayNodeId).toBe(id);
     clearAllHistoryManagers();
@@ -828,6 +834,7 @@ describe("HistoryManager hops", () => {
     const mgr = getHistoryManager("f1");
     await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram });
     await mgr.addStroke({ data: a, label: "A", dimensions: wideDims, dirtyRanges: new Uint32Array([2, 3]) });
+    await mgr.awaitTierFlush();
 
     clearAllHistoryManagers();
     const fresh = getHistoryManager("f1");
@@ -840,6 +847,7 @@ describe("HistoryManager hops", () => {
     const before = overlayWrites();
     const b = paint(a, 5, 2, 2);
     await fresh.addStroke({ data: b, label: "B", dimensions: wideDims, dirtyRanges: new Uint32Array([5, 2]) });
+    await fresh.awaitTierFlush();
 
     const open = getBlockStore("f1");
     expect(open).not.toBeNull();
@@ -868,6 +876,7 @@ describe("HistoryManager hops", () => {
     expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(root));
 
     // A marker naming another node means the blocks cannot serve the state.
+    await mgr.awaitTierFlush();
     clearAllHistoryManagers();
     const treePath = "/userdata/history/f1/tree.json";
     const parsed = JSON.parse(files.get(treePath) as string) as { overlayNodeId?: string };
@@ -900,10 +909,48 @@ describe("HistoryManager hops", () => {
       return realWriteFile(path, data);
     };
     await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([2, 3]) });
+    await mgr.awaitTierFlush();
     nodeFs.writeFile = realWriteFile;
 
     expect(seen).toEqual([undefined]);
     clearAllHistoryManagers();
+  });
+
+  it("commits without waiting for the tier flush, and marks the tier once it lands", async () => {
+    const { files } = installManagerEnv();
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    const a = paint(root, 2, 3, 1);
+
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+
+    // Hold the overlay's writes shut, so the flush cannot land under the test.
+    const nodeFs = (window as unknown as { nodeFs: { writeFile: (p: string, d: unknown) => Promise<void> } }).nodeFs;
+    const realWriteFile = nodeFs.writeFile;
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    nodeFs.writeFile = async (path: string, contents: unknown) => {
+      if (path.startsWith("/userdata/blocks/f1/current/")) await gate;
+      return realWriteFile(path, contents);
+    };
+
+    const { id } = await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([2, 3]) });
+    // The commit resolved with the overlay write still held. The store already
+    // serves the stroke's state, but the disk must not name the tier yet.
+    const masked = JSON.parse(files.get("/userdata/history/f1/tree.json") as string) as { overlayNodeId?: string };
+    expect(masked.overlayNodeId).toBeUndefined();
+    expect(Array.from((await mgr.currentBlockState())!)).toEqual(Array.from(a));
+
+    release();
+    await mgr.awaitTierFlush();
+    nodeFs.writeFile = realWriteFile;
+    const settled = JSON.parse(files.get("/userdata/history/f1/tree.json") as string) as { overlayNodeId?: string };
+    expect(settled.overlayNodeId).toBe(id);
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
   });
 
   it("patches the tier along an undo hop instead of leaving it behind", async () => {
@@ -936,6 +983,7 @@ describe("HistoryManager hops", () => {
       ).nodeFs.writeFile.mock.calls.filter(([path]) => path.startsWith("/userdata/blocks/f1/current/")).length;
     const beforeNav = overlayWrites();
     await mgr.navigateToParent();
+    await mgr.awaitTierFlush();
 
     const open = getBlockStore("f1");
     expect(open).not.toBeNull();
@@ -948,6 +996,7 @@ describe("HistoryManager hops", () => {
     const beforeStroke = overlayWrites();
     const c = paint(root, 5, 2, 3);
     await mgr.addStroke({ data: c, label: "C", dimensions: wideDims, dirtyRanges: new Uint32Array([5, 2]) });
+    await mgr.awaitTierFlush();
     expect(overlayWrites() - beforeStroke).toBe(1);
     expect(firstDifference(await store.readAll(), c)).toBe(-1);
     clearAllHistoryManagers();
@@ -2008,6 +2057,7 @@ describe("HistoryManager reshaped store", () => {
     const store = await open!;
     expect(Array.from(await store.readAll())).toEqual(Array.from(b));
     expect(Array.from(await store.readAllRoot())).toEqual(Array.from(snapBytes));
+    await mgr.awaitTierFlush();
     const manifest = JSON.parse(files.get("/userdata/history/f1/tree.json") as string) as {
       seedNodeId?: string;
       overlayNodeId?: string;
