@@ -20,8 +20,8 @@ import type {
   PackedOnsets,
 } from "../../../main/lib/types";
 import { applyPhaseTurns, hasPhaseTurns } from "../../../main/lib/history-delta";
-import { commitViewOf, composeViewBuffer, scatterCommitPatch } from "../lib/commit-view";
-import { float32BitsEqual, gatherPixelRanges } from "../lib/pixel-ranges";
+import { commitViewOf, composeViewBuffer, scatterCommitPatch, type CommitView } from "../lib/commit-view";
+import { gatherPixelRanges } from "../lib/pixel-ranges";
 import {
   computeOutputLevels,
   measureOutputLevels,
@@ -70,6 +70,17 @@ export interface CommitOutcome {
   result: CommitStrokeResult;
   audioBuffer: AudioBuffer | null;
   audioHop: AudioHop | null;
+  /** The view a windowed commit ran on, with `viewBuffer` holding its pixels after the commit. */
+  view: CommitView | null;
+  viewBuffer: Float32Array | null;
+  /** The whole painted state, when the commit had to read or was handed one. */
+  data: Float32Array | null;
+}
+
+/** What a commit reads the painted state from: the whole canvas, or the stroke's footprint over the block store. */
+export interface CommitSource {
+  data: Float32Array | null;
+  footprint: { ranges: Uint32Array; values: Float32Array } | null;
 }
 
 export interface FilesState {
@@ -132,7 +143,7 @@ export interface FilesState {
    * Rejects whole — a commit that half happened would leave the three
    * disagreeing.
    */
-  commitStroke: (fileId: string, snapshot: StrokeCommitSnapshot, data: Float32Array) => Promise<CommitOutcome | null>;
+  commitStroke: (fileId: string, snapshot: StrokeCommitSnapshot, source: CommitSource) => Promise<CommitOutcome | null>;
   loadCachedAudio: (fileId: string, audioPath: string, peak: number) => Promise<boolean>;
   restoreOnsetsForNode: (fileId: string, nodeId: string, packedData?: Float32Array) => Promise<void>;
   exportHistory: () => Promise<void>;
@@ -2155,7 +2166,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (get().isPlaying && get().activeFileId === fileId) get().swapPlayingBuffer(audioBuffer);
     return true;
   },
-  commitStroke: async (fileId, snapshot, data) => {
+  commitStroke: async (fileId, snapshot, source) => {
     const file = openFiles[fileId];
     if (!file?.spectrogramData) return null;
 
@@ -2220,9 +2231,19 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const view = windowable && window ? commitViewOf(layout, window, spec.sampleRate) : null;
 
       const commitStart = performance.now();
-      const commitWhole = (): Promise<CommitStrokeResult> =>
+      let data = source.data;
+      // The whole painted state, read from the canvas only when a pass needs
+      // all of it and the caller did not hand it over.
+      const readWhole = async (): Promise<Float32Array> => {
+        if (data) return data;
+        const whole = await file.rendererRef?.current?.getFBOData();
+        if (!whole) throw new Error("the commit could not read the canvas");
+        data = whole;
+        return whole;
+      };
+      const commitWhole = async (): Promise<CommitStrokeResult> =>
         host.analysis.commitStroke(
-          data,
+          await readWhole(),
           layout,
           spec.sampleRate,
           params,
@@ -2235,24 +2256,15 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       let viewBuffer: Float32Array | null = null;
       let result: CommitStrokeResult;
       if (view && window) {
-        viewBuffer = gatherPixelRanges(data, view.ranges);
-        const preStroke = snapshot.dirtyRanges ? await getHistoryManager(fileId).currentRanges(view.ranges) : null;
-        if (preStroke && snapshot.dirtyRanges) {
-          const composed = composeViewBuffer(
-            preStroke,
-            view,
-            gatherPixelRanges(data, snapshot.dirtyRanges),
-            snapshot.dirtyRanges,
-          );
-          // The store must hold the pre-stroke state bit for bit; a
-          // disagreement means a stale tier, and the canvas-backed gather wins.
-          if (composed && float32BitsEqual(composed, viewBuffer)) {
-            viewBuffer = composed;
-            viewFromStore = true;
-          } else if (composed) {
-            console.warn("history: the block store's view disagrees with the packed state");
-          }
+        // The view's pre-stroke pixels come from the block store, with the
+        // stroke's own footprint written over them; only when the store
+        // cannot serve them is the view gathered from a whole readback.
+        const preStroke = source.footprint ? await getHistoryManager(fileId).currentRanges(view.ranges) : null;
+        if (preStroke && source.footprint) {
+          viewBuffer = composeViewBuffer(preStroke, view, source.footprint.values, source.footprint.ranges);
+          viewFromStore = viewBuffer != null;
         }
+        if (!viewBuffer) viewBuffer = gatherPixelRanges(await readWhole(), view.ranges);
         try {
           result = await host.analysis.commitStroke(
             viewBuffer,
@@ -2274,7 +2286,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       } else {
         result = await commitWhole();
       }
-      if (usedView && view && viewBuffer) {
+      if (usedView && view && viewBuffer && data) {
         scatterCommitPatch(data, view, viewBuffer, result.patch.ranges, layout);
         // The residuals that make the tail invertible are collected by the
         // history's own turn walk over the block store, not from this copy.
@@ -2312,7 +2324,14 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
         onsetEndSec: params.onsetEndSec,
         levelWindow: window ? result.levels : undefined,
       });
-      return { result, audioBuffer, audioHop };
+      return {
+        result,
+        audioBuffer,
+        audioHop,
+        view: usedView ? view : null,
+        viewBuffer: usedView ? viewBuffer : null,
+        data: data ?? null,
+      };
     } finally {
       get().setFileSynthesizing(fileId, false);
     }

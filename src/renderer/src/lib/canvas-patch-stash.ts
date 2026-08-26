@@ -2,12 +2,11 @@ import type { PhaseTurns } from "../../../main/lib/types";
 
 /**
  * A projection patch whose FBO upload was skipped because a newer stroke was
- * already on the canvas. The next commit uploads it at its own safe moment;
- * any restore from history makes it stale, so restores must clear it.
+ * already on the canvas. The pixel values live in the block store's current
+ * tier; the next commit or navigation uploads them at its own safe moment.
+ * Any restore from history makes the stash stale, so restores must clear it.
  */
 export interface CanvasPatchStash {
-  /** Full packed array holding the patched values. */
-  data: Float32Array;
   /** Flat [pixelStart, pixelCount, ...] list of the pixels the canvas misses. */
   ranges: Uint32Array;
   /** Phase turns the canvas has not yet taken, in the order they were made. */

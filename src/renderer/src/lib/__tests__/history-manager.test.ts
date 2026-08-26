@@ -1391,7 +1391,7 @@ describe("HistoryManager hops", () => {
     await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([2, 3]) });
     canvas.set(a);
 
-    setCanvasPatchStash("f1", { data: a, ranges: new Uint32Array([6, 1]), turns: [] });
+    setCanvasPatchStash("f1", { ranges: new Uint32Array([6, 1]), turns: [] });
     await mgr.navigateToParent();
     expect(canvasPatchStashCount()).toBe(0);
     expect(full).toHaveLength(0);

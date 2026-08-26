@@ -4,7 +4,12 @@ import { awaitFileSynthesis, openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
 import { isManagedFilePath } from "@renderer/store/managed-path";
 import type { PhaseTurns } from "../../../main/lib/types";
-import { hasPhaseTurns, phaseTurnRanges, phaseTurnResidualRanges } from "../../../main/lib/history-delta";
+import {
+  applyPhaseTurns,
+  hasPhaseTurns,
+  phaseTurnRanges,
+  phaseTurnResidualRanges,
+} from "../../../main/lib/history-delta";
 import { audioHopBytes, editsAlongHops, type AudioHop } from "./audio-hop";
 import type { BlockStore } from "./block-store";
 import {
@@ -278,7 +283,9 @@ export interface AddStrokeOutcome {
 }
 
 export interface AddStrokeOpts {
-  data: Float32Array;
+  // The whole painted state. Optional when the stroke's footprint values are
+  // given instead; a stroke that must store whole without it is refused.
+  data?: Float32Array;
   label: string;
   dimensions: HistoryDimensions;
   // Packed-pixel ranges the brush footprint covers, as a flat
@@ -292,9 +299,12 @@ export interface AddStrokeOpts {
   audioRegion?: UvRegion | null;
   // Whether the state this stroke leaves holds paint no projection passed over.
   unprojectedPaint?: boolean;
-  // When `data` is the current packed state written in place, the values the
-  // dirty ranges held before the stroke, laid end to end in range order.
+  // The values the dirty ranges held before the stroke, laid end to end in
+  // range order.
   baseFootprint?: Float32Array;
+  // The painted values over the dirty ranges, laid end to end in range order.
+  // With `baseFootprint`, lets the stroke commit without any whole state.
+  afterFootprint?: Float32Array;
   // Whole-turn phase shifts the stroke's projection made past its ranges.
   turns?: PhaseTurns;
 }
@@ -777,29 +787,36 @@ export class HistoryManager {
     let footprintPixels = 0;
     if (ranges) for (let r = 1; r < ranges.length; r += 2) footprintPixels += ranges[r];
     const texturePixels = opts.dimensions.textureWidth * opts.dimensions.textureHeight;
-    // A stroke written into the current state in place compares against the
-    // footprint values it saved; any other compares against the whole base.
+    // A footprint commit compares against the values it saved before the
+    // stroke; any other compares against the whole base.
     const compact = opts.baseFootprint;
-    const deltaBase = compact ?? base;
     const turnsIn = hasPhaseTurns(opts.turns) ? opts.turns : null;
+
+    // The delta's two sides, and the painted footprint values the tier's
+    // patch writes. Null when the stroke has to store whole.
+    let deltaSides: { base: Float32Array; after: Float32Array; patch: Float32Array } | null = null;
+    if (sameDims && ranges != null && ranges.length > 0 && footprintPixels < texturePixels * 0.5) {
+      if (compact && compact.length === footprintPixels * 4) {
+        const after =
+          opts.afterFootprint?.length === footprintPixels * 4
+            ? opts.afterFootprint
+            : opts.data
+              ? gatherPixelRanges(opts.data, ranges)
+              : null;
+        if (after) deltaSides = { base: compact, after, patch: after };
+      } else if (!compact && base && opts.data && base.length === opts.data.length) {
+        deltaSides = { base, after: opts.data, patch: gatherPixelRanges(opts.data, ranges) };
+      }
+    }
 
     let storage: "delta" | "packed";
     let deltaBytes: Uint8Array | undefined;
     let rangesForPatch: Uint32Array | null = null;
     let tierResiduals: Uint32Array | null = null;
 
-    if (
-      sameDims &&
-      deltaBase != null &&
-      (compact ? compact.length === footprintPixels * 4 : deltaBase.length === opts.data.length) &&
-      ranges != null &&
-      ranges.length > 0 &&
-      footprintPixels < texturePixels * 0.5
-    ) {
+    if (deltaSides != null && ranges != null) {
       const deltaStart = performance.now();
-      // With a compact base, the painted side compares and encodes from the
-      // footprint's values too, so neither side needs the whole state.
-      const after = compact ? gatherPixelRanges(opts.data, ranges) : opts.data;
+      const { base: deltaBase, after } = deltaSides;
       if (!(await host.analysis.historyFootprintChanged(deltaBase, after, ranges, compact != null, compact != null))) {
         // The stroke changed nothing, so it gets no node of its own. The
         // caller must not then write its audio against the parent's id. The
@@ -810,13 +827,7 @@ export class HistoryManager {
       }
       // The tier takes the stroke before the delta is cut: its turn walk
       // yields the residuals that make the turns invertible over the store.
-      tierResiduals = await this.tierStrokePatch(
-        parentId,
-        ranges,
-        compact ? after : gatherPixelRanges(opts.data, ranges),
-        turnsIn,
-        opts.data,
-      );
+      tierResiduals = await this.tierStrokePatch(parentId, ranges, deltaSides.patch, turnsIn, opts.data);
       if (!this.manifest) return { id: parentId, isNew: false };
       if (turnsIn && tierResiduals == null) {
         // Without a tier walk there are no residuals to subtract the turns
@@ -862,7 +873,11 @@ export class HistoryManager {
     if (storage === "delta" && deltaBytes) {
       await host.fs.writeFile(this.deltaPath(dir, id), Buffer.from(deltaBytes));
     } else {
-      await writePackedCompressed(this.packedPath(dir, id), opts.data);
+      // A checkpoint after a footprint commit has no whole array of its own;
+      // the tier was just patched to this state, so it reads back whole.
+      const whole = opts.data ?? (tierResiduals != null ? await this.tierWholeState() : null);
+      if (!whole) throw new Error("HistoryManager: the stroke needs the whole state and none was read back");
+      await writePackedCompressed(this.packedPath(dir, id), whole);
     }
 
     // Closing the file purges the manifest while the delta encoding and the
@@ -872,9 +887,14 @@ export class HistoryManager {
     this.linkChild(parentId, id);
     this.manifest.nodes[id] = node;
     this.manifest.currentId = id;
-    // opts.data is either a fresh readback or the current state written in
-    // place; either way it now holds this node and no other.
-    this.currentPacked = opts.data;
+    if (opts.data) {
+      // opts.data is either a fresh readback or the current state written in
+      // place; either way it now holds this node and no other.
+      this.currentPacked = opts.data;
+    } else if (this.currentPacked && rangesForPatch && deltaSides) {
+      scatterCompactPixelRanges(this.currentPacked, deltaSides.after, rangesForPatch);
+      if (turnsIn) applyPhaseTurns(this.currentPacked, turnsIn, false);
+    }
     if (rangesForPatch) this.nodeDirtyRanges.set(id, rangesForPatch);
     if (deltaBytes) {
       this.nodeDeltas.set(id, deltaBytes);
@@ -1481,6 +1501,14 @@ export class HistoryManager {
     await this.initialize();
     const manifest = this.manifest;
     if (!manifest || manifest.overlayNodeId !== manifest.currentId) return null;
+    return await this.tierWholeState();
+  }
+
+  /**
+   * The tier's whole state, read without the current-marker check. Only for
+   * callers that just wrote the tier themselves and know which node it holds.
+   */
+  private async tierWholeState(): Promise<Float32Array | null> {
     const holder = this.seedHolder();
     if (!holder) return null;
     try {

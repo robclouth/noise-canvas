@@ -7,16 +7,15 @@ import { serializeFileTask } from "@renderer/lib/file-task-queue";
 import { buildStrokeCommitSnapshot, projectsWholeFile } from "@renderer/lib/stroke-commit";
 import {
   composePixelRangeValues,
-  float32BitsEqual,
+  copyCompactOverlap,
   gatherPixelRanges,
   mergePixelRanges,
   pixelRangeCount,
   scatterCompactPixelRanges,
-  scatterPixelRanges,
   subtractPixelRanges,
 } from "@renderer/lib/pixel-ranges";
-import { applyCanvasTurns, type CanvasTurn } from "@renderer/lib/canvas-phase-turns";
-import { applyPhaseTurns, hasPhaseTurns } from "../../../main/lib/history-delta";
+import { applyCanvasTurns, type CanvasTurn, type PackedGather } from "@renderer/lib/canvas-phase-turns";
+import { applyPhaseTurns, hasPhaseTurns, phaseTurnRanges } from "../../../main/lib/history-delta";
 import { aimUvToBrushBlUv } from "@renderer/lib/brush-anchor";
 import { BRUSH_ANCHOR_MODE_CENTER } from "@renderer/lib/constants";
 import { buildScaleOffsets, minFreqSemisAboveC0, stepScaleSemis } from "@renderer/lib/scale-snap";
@@ -214,18 +213,17 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
       });
       // A stroke changes the packed state inside its footprint, and a
       // projection inside its window and as whole phase turns past it — so
-      // only the footprint is read back and written into the current state in
-      // place. A commit that rebuilds the whole file reads the whole canvas.
+      // only the footprint is read back, and the rest of the state stays in
+      // the block store. A commit that rebuilds the whole file reads the
+      // whole canvas.
       const historyManager = getHistoryManager(activeFileId);
-      const base = historyManager.currentPackedState();
+      const currentIdBefore = historyManager.getCurrentId();
       const { textureWidth, textureHeight } = file.spectrogramData;
       const footprintRanges = snapshot.dirtyRanges;
       const footprintOnly =
         !projectsWholeFile(snapshot) &&
         footprintRanges != null &&
         footprintRanges.length > 0 &&
-        base != null &&
-        base.length === textureWidth * textureHeight * 4 &&
         pixelRangeCount(footprintRanges) < textureWidth * textureHeight * 0.5;
       const readPromise = footprintOnly ? renderer.readPixelRanges(footprintRanges) : renderer.getFBOData();
 
@@ -238,48 +236,59 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
         await historyManager.awaitPackedReaders();
         if (!openFiles[activeFileId]) return;
 
-        let data: Float32Array;
-        let baseFootprint: Float32Array | undefined;
-        if (footprintOnly && historyManager.currentPackedState() === base) {
-          const stored = await historyManager.currentRanges(footprintRanges);
-          baseFootprint = gatherPixelRanges(base, footprintRanges);
-          // The store must hold the pre-stroke state bit for bit; a
-          // disagreement means a stale tier, and the canvas-backed state wins.
-          if (stored && float32BitsEqual(stored, baseFootprint)) baseFootprint = stored;
-          else if (stored) console.warn("history: the block store's footprint disagrees with the packed state");
-          scatterCompactPixelRanges(base, read, footprintRanges);
-          data = base;
-        } else if (footprintOnly) {
-          // The state moved under the read (a reanalysis between mouse-up and
-          // here); the canvas as it stands now is the only whole picture left.
-          data = await renderer.getFBOData();
-        } else {
-          data = read;
-        }
-
         // A patch an earlier commit could not upload, because this stroke was
-        // already on the canvas when it landed. Fold it in before anything
-        // reads `data`, so synthesis, history and the canvas all agree on it.
-        // Pixels this stroke painted are left out: the older patch describes
-        // the canvas before them, and writing it there would erase them.
+        // already on the canvas when it landed. Its pixels live in the block
+        // store; the ones this stroke painted are left out, because the older
+        // patch describes the canvas before them.
         const stash = takeCanvasPatchStash(activeFileId);
         const stashRanges =
           stash && snapshot.dirtyRanges
             ? subtractPixelRanges(stash.ranges, snapshot.dirtyRanges)
             : (stash?.ranges ?? null);
-        if (stash && stashRanges && stash.data !== data) scatterPixelRanges(data, stash.data, stashRanges);
+
+        let data: Float32Array | null = null;
+        let baseFootprint: Float32Array | undefined;
+        let footprint: { ranges: Uint32Array; values: Float32Array } | null = null;
+        if (footprintOnly && footprintRanges && historyManager.getCurrentId() === currentIdBefore) {
+          // The store holds the pre-stroke state, stashed pixels included.
+          baseFootprint = (await historyManager.currentRanges(footprintRanges)) ?? undefined;
+          if (baseFootprint) footprint = { ranges: footprintRanges, values: read };
+        }
+        if (!footprint) {
+          // The state moved under the read (a reanalysis between mouse-up and
+          // here), or the store cannot serve it; the canvas as it stands now
+          // is the only whole picture left.
+          baseFootprint = undefined;
+          data = footprintOnly ? ((await renderer.getFBOData()) ?? null) : read;
+          if (!data) return;
+          // The canvas never took the stashed patch or its turns, so those
+          // pixels are put back from the store.
+          if (stash) {
+            let fix = stashRanges ?? new Uint32Array(0);
+            for (const t of stash.turns) fix = mergePixelRanges(fix, phaseTurnRanges(t));
+            if (snapshot.dirtyRanges) fix = subtractPixelRanges(fix, snapshot.dirtyRanges);
+            if (fix.length) {
+              const values = await historyManager.currentRanges(fix);
+              if (values) scatterCompactPixelRanges(data, values, fix);
+              else console.warn("history: a stashed patch could not be recovered from the block store");
+            }
+          }
+        }
 
         try {
           // One pass derives the audio and the coefficients that audio
           // analyses to, so what is stored, shown and heard are the same
           // thing. Anything less than all of it is a bug, not a fallback.
-          const outcome = await commitStroke(activeFileId, snapshot, data);
+          const outcome = await commitStroke(activeFileId, snapshot, { data, footprint });
           if (!outcome) return;
           const { result } = outcome;
+          // The commit read the whole canvas itself when the store fell short.
+          if (outcome.data) data = outcome.data;
 
           let historyDirtyRanges = snapshot.dirtyRanges;
+          if (!data && result.patch.pixels) throw new Error("the commit returned pixels without a whole state");
           const extent = applyCoefficientPatch(
-            data,
+            data ?? new Float32Array(0),
             result.patch,
             snapshot.spec.synthesisMetadata.bandOffsets,
             snapshot.spec.synthesisMetadata.bandStepLog2s,
@@ -287,7 +296,7 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           // A host that hands the patch back as pixels did not write the turns
           // into this copy either.
           const turns = hasPhaseTurns(result.tail) ? result.tail : null;
-          if (turns && result.patch.pixels) applyPhaseTurns(data, turns, false);
+          if (data && turns && result.patch.pixels) applyPhaseTurns(data, turns, false);
           if (extent) {
             // The projection reaches past the painted rect, so the delta must
             // cover it too or undo would store stale margins.
@@ -306,8 +315,31 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
             }
           }
 
+          // A footprint commit's painted values over the merged ranges, cut
+          // from the view the commit worked on.
+          let afterFootprint: Float32Array | undefined;
+          if (!data && outcome.view && outcome.viewBuffer && historyDirtyRanges) {
+            afterFootprint = new Float32Array(pixelRangeCount(historyDirtyRanges) * 4);
+            copyCompactOverlap(afterFootprint, historyDirtyRanges, outcome.viewBuffer, outcome.view.ranges);
+          }
+          if (!data && !afterFootprint) throw new Error("the commit produced no state to store");
+
+          const node = await historyManager.addStroke({
+            data: data ?? undefined,
+            label: snapshot.brushName,
+            dimensions: snapshot.dimensions,
+            dirtyRanges: historyDirtyRanges,
+            audioRegion: projectsWholeFile(snapshot) ? null : snapshot.dirtyRegion,
+            unprojectedPaint: openFiles[activeFileId]?.unprojectedPaint === true,
+            baseFootprint,
+            afterFootprint,
+            turns: turns ?? undefined,
+          });
+
           // The turns go on the canvas as an operation; the window pixels and
-          // any stashed ones are uploaded from the state.
+          // any stashed ones are uploaded from the state — the whole readback
+          // when there is one, the block store's tier otherwise, which holds
+          // the stroke now that it is stored.
           let uploadRanges = extent ? extent.pixelRanges : null;
           if (stashRanges) uploadRanges = uploadRanges ? mergePixelRanges(stashRanges, uploadRanges) : stashRanges;
           const canvasTurns: CanvasTurn[] = (stash?.turns ?? []).map((t) => ({ turns: t, invert: false }));
@@ -315,49 +347,45 @@ export const createBrushSlice = (set: ZustandSet, get: ZustandGet): BrushState =
           if (uploadRanges || canvasTurns.length) {
             if (renderer.getStrokeGeneration() === snapshot.strokeGeneration) {
               const uploadStart = performance.now();
-              if (canvasTurns.length) {
-                const source = data;
-                await applyCanvasTurns(
-                  renderer,
-                  (r) => gatherPixelRanges(source, r),
-                  canvasTurns,
-                  uploadRanges ?? undefined,
-                );
-                if (!openFiles[activeFileId]) return;
-              }
-              if (uploadRanges) {
-                if (renderer.getStrokeGeneration() === snapshot.strokeGeneration) {
-                  renderer.patchFBOData(data, uploadRanges);
-                } else {
-                  setCanvasPatchStash(activeFileId, { data, ranges: uploadRanges, turns: [] });
+              const whole = data;
+              const gather: PackedGather = whole
+                ? (r) => gatherPixelRanges(whole, r)
+                : async (r) => {
+                    const values = await historyManager.currentRanges(r);
+                    if (!values) throw new Error("the block store cannot serve the committed pixels");
+                    return values;
+                  };
+              try {
+                if (canvasTurns.length) {
+                  await applyCanvasTurns(renderer, gather, canvasTurns, uploadRanges ?? undefined);
+                  if (!openFiles[activeFileId]) return;
                 }
+                if (uploadRanges) {
+                  if (renderer.getStrokeGeneration() === snapshot.strokeGeneration) {
+                    if (whole) renderer.patchFBOData(whole, uploadRanges);
+                    else renderer.patchFBODataCompact(await gather(uploadRanges), uploadRanges);
+                  } else {
+                    setCanvasPatchStash(activeFileId, { ranges: uploadRanges, turns: [] });
+                  }
+                }
+                diag.timing("timing", "commit FBO upload", performance.now() - uploadStart);
+              } catch (error) {
+                // The canvas kept pixels the store could not serve; the next
+                // navigation rebuilds it whole.
+                console.error("the commit patch could not reach the canvas:", error);
+                historyManager.markFboOutOfSync();
               }
-              diag.timing("timing", "commit FBO upload", performance.now() - uploadStart);
             } else if (openFiles[activeFileId]) {
               // A new stroke started while this one was in flight; its dabs
-              // are not in `data`, so uploading would paint over them. Stash
-              // the patch for the next commit, or the next navigation, to
-              // upload with its own.
-              // Only while the file is still open: a stash for a closed file
-              // holds its whole packed state with no commit left to take it.
+              // are not in the patch, so uploading would paint over them.
+              // Stash the patch for the next commit, or the next navigation,
+              // to upload with its own.
               setCanvasPatchStash(activeFileId, {
-                data,
                 ranges: uploadRanges ?? new Uint32Array(0),
                 turns: canvasTurns.map((t) => t.turns),
               });
             }
           }
-
-          const node = await historyManager.addStroke({
-            data,
-            label: snapshot.brushName,
-            dimensions: snapshot.dimensions,
-            dirtyRanges: historyDirtyRanges,
-            audioRegion: projectsWholeFile(snapshot) ? null : snapshot.dirtyRegion,
-            unprojectedPaint: openFiles[activeFileId]?.unprojectedPaint === true,
-            baseFootprint,
-            turns: turns ?? undefined,
-          });
 
           const updated = openFiles[activeFileId];
           // A stroke that changed nothing gets no node, and the id that comes
