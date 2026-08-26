@@ -400,10 +400,45 @@ committed windowed in 191 ms against 1.4–1.8 s for a whole-file pass, and the
 current tier followed the stroke and the undo hop. Export and save turned out
 to read the audio channels, not the packed state — nothing to migrate there.
 
-Remaining: the in-place packed truth itself — the stroke-commit base and
-`addStroke`/hop walks working per block instead of on one whole-file array,
-and the texture uploads reading the store transiently — then the per-block
-inverse map, and the renderer-heap exit measurement.
+Remaining: the in-place packed truth itself. Design for the removal (settled
+2026-08-26):
+
+- The store's current tier becomes the read source for every packed consumer,
+  gated on `overlayNodeId === currentId`; a tier that does not hold the
+  current state falls back to a transient whole-array rebuild that reseeds it.
+  Transient whole-file arrays stay legal (reconstruct, setFBOData, checkpoint
+  encode, onset re-detection); only resident ones go.
+- Addon: `historyFootprintChanged`/`historyEncodeDelta` learn a compact
+  `after` (both sides then live as gathered range values), and a windowed
+  `historyApplyDeltas` applies a delta chain into a compact buffer described
+  by a file-absolute range table, preserving each delta's internal order
+  (diffs, turns, residuals) because a later stroke's footprint can overlap an
+  earlier stroke's turn span. Delta spans (diff ∪ turn ranges) parse in JS
+  from the decompressed blob, so hop walks know which pixels to gather; a
+  turn-carrying hop still gathers rest-of-file — a transient, same cost class
+  as today's in-RAM walk.
+- Migration is dual-write: each reader moves to the store one commit at a
+  time with a parity test, while commits and hops keep mutating the array;
+  the final change removes `currentPacked`, the `PackedStateCache`,
+  `spectrogramData.packedData` (field goes optional, dropped after the
+  texture upload — `image.data` is replaced with an empty array once
+  `initTexture` has run; three never re-reads it, and the erase-to-original
+  GPU copy already outlives the CPU array today), and the commit's in-place
+  scatter.
+- Reader inventory still on the array: commit base gather + view build
+  (`store.readRanges` replaces both), `addStroke`'s delta encode (compact
+  both sides) and checkpoint write (`store.readAll` transient), hop walks
+  (windowed delta apply + `store.patch`), the FBO patch after a hop (a
+  compact `patchFBOData` variant), `applyCanvasTurns`' exactness probe and
+  fallback (provider-based reads), hop-synthesis' prefetched state (a
+  synthesis view over the store, reusing the commit view's per-band origins),
+  `restoreOnsetsForNode` (lazy transient read), `resetToCurrent`, and the
+  extension host (same store; only the windowed addon commit stays
+  desktop-only).
+
+Then the per-block inverse map (`deriveSideData` already regenerates it in
+milliseconds — the resident copy can go with the same texture-upload trick),
+and the renderer-heap exit measurement.
 
 ---
 
