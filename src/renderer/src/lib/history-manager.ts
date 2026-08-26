@@ -21,7 +21,7 @@ import { clearFileTaskQueue, drainFileTaskQueues, serializeFileTask } from "./fi
 import { historyCacheBudgets } from "./history-cache-budgets";
 import { ByteBudgetCache } from "./byte-budget-cache";
 import { host } from "./host";
-import { mergePixelRanges } from "./pixel-ranges";
+import { gatherPixelRanges, mergePixelRanges } from "./pixel-ranges";
 
 const MANIFEST_FILENAME = "tree.json";
 const CHECKPOINT_INTERVAL = 20;
@@ -46,6 +46,19 @@ export interface HistoryDimensions {
   // Optional so manifests written before this field round-trip cleanly; absent
   // means the Convolve effect falls back to no IR normalization for that file.
   magnitudeEnergy?: number;
+}
+
+/** Whether two nodes' packed states share one analysis grid, texel for texel. */
+function sameStoreDimensions(a: HistoryDimensions, b: HistoryDimensions): boolean {
+  return (
+    a.textureWidth === b.textureWidth &&
+    a.textureHeight === b.textureHeight &&
+    a.numFrames === b.numFrames &&
+    a.numBands === b.numBands &&
+    a.sampleRate === b.sampleRate &&
+    a.minFreq === b.minFreq &&
+    a.bandsPerOctave === b.bandsPerOctave
+  );
 }
 
 export interface HistoryNode {
@@ -87,6 +100,10 @@ interface HistoryManifest {
   // exactly when currentId differs from it. Absent on legacy manifests and on
   // never-saved files; both fall back to the root snapshot.
   savedNodeId?: string;
+  // History node whose packed state the block store's current tier holds on
+  // disk. A patch may build on the tier only when this names the exact state
+  // it extends; anything else re-seeds the tier whole. Absent when unknown.
+  overlayNodeId?: string;
   nodes: Record<string, HistoryNode>;
 }
 
@@ -734,7 +751,13 @@ export class HistoryManager {
       dimensions: dimensionsFromSpectrogram(opts.spectrogram),
       synthesisMetadata: synthesisMetadataFromSpectrogram(opts.spectrogram),
     };
-    this.manifest = { version: HISTORY_MANIFEST_VERSION, rootId: id, currentId: id, nodes: { [id]: node } };
+    this.manifest = {
+      version: HISTORY_MANIFEST_VERSION,
+      rootId: id,
+      currentId: id,
+      overlayNodeId: id,
+      nodes: { [id]: node },
+    };
     // The root's packed state lives as the block store's seed rather than as
     // its own snapshot file, so the state is not written to disk twice.
     const s = opts.spectrogram;
@@ -897,6 +920,8 @@ export class HistoryManager {
       this.nodeTurns.set(id, hasPhaseTurns(opts.turns) ? opts.turns : null);
     }
     if (opts.audioRegion) this.nodeAudioRegions.set(id, opts.audioRegion);
+    await this.syncStoreToCurrent(parentId, rangesForPatch);
+    if (!this.manifest) return { id, isNew: true };
     // The stroke was read back from the FBO, so the two are in step again.
     this.fboOutOfSync = false;
     await this.writeManifest();
@@ -955,6 +980,44 @@ export class HistoryManager {
       { numBands, metadata: bandMetadataOf(root) },
       { numFrames, sampleRate, texelCount: textureWidth * textureHeight },
     );
+  }
+
+  /**
+   * Brings the block store's current tier in step with `currentPacked`: a
+   * patch over `ranges` when the tier already held the state `baseId` names,
+   * a full reseed of the tier otherwise. The store keeps the root's grid, so
+   * a current state with other dimensions stays out of the tier, which then
+   * keeps the node it already held. The tier is a cache of one node's state —
+   * when a write fails, the marker goes unknown and the truth stays with the
+   * root and the deltas.
+   */
+  private async syncStoreToCurrent(baseId: string, ranges: Uint32Array | null): Promise<void> {
+    const manifest = this.manifest;
+    const packed = this.currentPacked;
+    if (!manifest || !packed) return;
+    const root = manifest.nodes[manifest.rootId];
+    const current = manifest.nodes[manifest.currentId];
+    if (!root || !current || !sameStoreDimensions(root.dimensions, current.dimensions)) return;
+    const patchable = manifest.overlayNodeId === baseId && ranges != null;
+    try {
+      const store = await this.rootBlockStore(root);
+      // Invalidated on disk before the tier changes, so a crash mid-write
+      // cannot leave a torn tier that still reads as current.
+      manifest.overlayNodeId = undefined;
+      await this.writeManifest();
+      if (this.manifest !== manifest) return;
+      if (patchable && ranges) {
+        await store.patch(ranges, gatherPixelRanges(packed, ranges));
+      } else {
+        await store.seedCurrent(packed);
+      }
+      await store.flush();
+      if (this.manifest !== manifest) return;
+      manifest.overlayNodeId = manifest.currentId;
+    } catch (error) {
+      manifest.overlayNodeId = undefined;
+      console.error("history: block store current sync failed", error);
+    }
   }
 
   // ---------- Reconstruction ----------
@@ -1921,6 +1984,7 @@ export class HistoryManager {
     };
 
     this.manifest.rootId = currentId;
+    this.manifest.overlayNodeId = currentId;
     this.manifest.nodes = { [currentId]: current };
     // savedNodeId is left untouched: purging on-disk history doesn't change
     // whether the current audio matches the last save, so the dirty flag carries

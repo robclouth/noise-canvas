@@ -768,6 +768,136 @@ describe("HistoryManager hops", () => {
     return out;
   }
 
+  // Whole-array mismatches are asserted through this index rather than a
+  // toEqual, whose failure diff over huge arrays wedges the browser runner.
+  function firstDifference(a: Float32Array, b: Float32Array): number {
+    if (a.length !== b.length) return Math.min(a.length, b.length);
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return i;
+    return -1;
+  }
+
+  it("keeps the store's current tier in step with a committed stroke", async () => {
+    const { files } = installManagerEnv();
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    const a = paint(root, 2, 3, 1);
+
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    const { id } = await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([2, 3]) });
+
+    const open = getBlockStore("f1");
+    expect(open).not.toBeNull();
+    const store = await open!;
+    expect(Array.from(await store.readAll())).toEqual(Array.from(a));
+    expect(Array.from(await store.readAllRoot())).toEqual(Array.from(root));
+    const manifest = JSON.parse(files.get("/userdata/history/f1/tree.json") as string) as { overlayNodeId?: string };
+    expect(manifest.overlayNodeId).toBe(id);
+    clearAllHistoryManagers();
+  });
+
+  it("reseeds the current tier for a stroke whose base it does not hold", async () => {
+    installManagerEnv();
+    installPatchRenderer(w, h);
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    const a = paint(root, 2, 3, 1);
+
+    const mgr = getHistoryManager("f1");
+    const rootId = await mgr.addRootSnapshot({
+      data: root,
+      kind: "root",
+      label: "root",
+      spectrogram: makeSpectrogram(root, w, h),
+    });
+    await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([2, 3]) });
+    await mgr.navigateTo(rootId);
+
+    const b = paint(root, 5, 2, 2);
+    await mgr.addStroke({ data: b, label: "B", dimensions, dirtyRanges: new Uint32Array([5, 2]) });
+
+    const open = getBlockStore("f1");
+    expect(open).not.toBeNull();
+    const store = await open!;
+    // Pixels 2..4 hold the root's values again, not the undone stroke's.
+    expect(Array.from(await store.readAll())).toEqual(Array.from(b));
+    expect(Array.from(await store.readAllRoot())).toEqual(Array.from(root));
+    clearAllHistoryManagers();
+  });
+
+  it("builds on the tier it kept across a relaunch instead of rewriting it", async () => {
+    installManagerEnv();
+    clearAllHistoryManagers();
+    const wide = 20000;
+    const bands = 2;
+    const wideDims = {
+      textureWidth: wide,
+      textureHeight: bands,
+      numFrames: wide,
+      numBands: bands,
+      numChannels: 1,
+      sampleRate: 8000,
+      minFreq: 20,
+      bandsPerOctave: 12,
+    };
+    const root = lossyFill(wide, bands, 0);
+    const a = paint(root, 2, 3, 1);
+    const spectrogram = { ...makeSpectrogram(root, wide, bands), sampleRate: 8000 };
+
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram });
+    await mgr.addStroke({ data: a, label: "A", dimensions: wideDims, dirtyRanges: new Uint32Array([2, 3]) });
+
+    clearAllHistoryManagers();
+    const fresh = getHistoryManager("f1");
+    expect(await fresh.loadSpectrogramAtCurrent()).not.toBeNull();
+
+    const overlayWrites = (): number =>
+      (
+        window as unknown as { nodeFs: { writeFile: { mock: { calls: [string][] } } } }
+      ).nodeFs.writeFile.mock.calls.filter(([path]) => path.startsWith("/userdata/blocks/f1/current/")).length;
+    const before = overlayWrites();
+    const b = paint(a, 5, 2, 2);
+    await fresh.addStroke({ data: b, label: "B", dimensions: wideDims, dirtyRanges: new Uint32Array([5, 2]) });
+
+    const open = getBlockStore("f1");
+    expect(open).not.toBeNull();
+    const store = await open!;
+    expect(store.grid.blockCount).toBeGreaterThan(1);
+    // One block under the stroke was patched; the rest of the tier was kept.
+    expect(overlayWrites() - before).toBe(1);
+    expect(firstDifference(await store.readAll(), b)).toBe(-1);
+    expect(firstDifference(await store.readAllRoot(), root)).toBe(-1);
+    clearAllHistoryManagers();
+  });
+
+  it("invalidates the tier on disk before it rewrites it", async () => {
+    const { files } = installManagerEnv();
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    const a = paint(root, 2, 3, 1);
+
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+
+    // Record what the on-disk manifest claims at the moment each tier write lands.
+    const nodeFs = (window as unknown as { nodeFs: { writeFile: (p: string, d: unknown) => Promise<void> } }).nodeFs;
+    const realWriteFile = nodeFs.writeFile;
+    const seen: (string | undefined)[] = [];
+    nodeFs.writeFile = async (path: string, data: unknown) => {
+      if (path.startsWith("/userdata/blocks/f1/current/")) {
+        const tree = files.get("/userdata/history/f1/tree.json");
+        seen.push(tree ? (JSON.parse(tree as string) as { overlayNodeId?: string }).overlayNodeId : "missing");
+      }
+      return realWriteFile(path, data);
+    };
+    await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: new Uint32Array([2, 3]) });
+    nodeFs.writeFile = realWriteFile;
+
+    expect(seen).toEqual([undefined]);
+    clearAllHistoryManagers();
+  });
+
   beforeEach(() => {
     synthesizeFile.mockClear();
     spliceFileAudio.mockClear();
@@ -1148,7 +1278,7 @@ describe("HistoryManager pruneAudioCache", () => {
 
 describe("HistoryManager resetToCurrent (purge history)", () => {
   it("collapses to a single root at the current state and keeps undo working", async () => {
-    const { fbo } = installManagerEnv();
+    const { fbo, files } = installManagerEnv();
     const w = 6,
       h = 4;
     const root = lossyFill(w, h, 0);
@@ -1181,6 +1311,9 @@ describe("HistoryManager resetToCurrent (purge history)", () => {
     expect(mgr.getCurrentId()).toBe(bId);
     expect(mgr.canUndo()).toBe(false);
     expect(mgr.canRedo()).toBe(false);
+    // The fresh seed holds the collapsed state, and the manifest says so.
+    const manifest = JSON.parse(files.get("/userdata/history/f1/tree.json") as string) as { overlayNodeId?: string };
+    expect(manifest.overlayNodeId).toBe(bId);
     // The kept root reconstructs to the exact pre-purge state.
     expect(Array.from((await mgr.reconstruct(bId)).packedData)).toEqual(Array.from(b));
 
@@ -1191,6 +1324,47 @@ describe("HistoryManager resetToCurrent (purge history)", () => {
     expect(mgr.canUndo()).toBe(true);
     await mgr.navigateToParent();
     expect(Array.from(fbo.last!)).toEqual(Array.from(b));
+
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it("marks the fresh seed current after a reset from an undone state", async () => {
+    const { files } = installManagerEnv();
+    const w = 6,
+      h = 4;
+    const root = lossyFill(w, h, 0);
+    const a = lossyFill(w, h, 1);
+    const b = lossyFill(w, h, 2);
+    const dimensions = {
+      textureWidth: w,
+      textureHeight: h,
+      numFrames: w,
+      numBands: h,
+      numChannels: 1,
+      sampleRate: 44100,
+      minFreq: 20,
+      bandsPerOctave: 12,
+    };
+
+    clearAllHistoryManagers();
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    const { id: aId } = await mgr.addStroke({ data: a, label: "A", dimensions });
+    await mgr.addStroke({ data: b, label: "B", dimensions });
+    await mgr.navigateToParent();
+
+    await mgr.resetToCurrent();
+    const manifest = JSON.parse(files.get("/userdata/history/f1/tree.json") as string) as {
+      currentId: string;
+      overlayNodeId?: string;
+    };
+    expect(manifest.currentId).toBe(aId);
+    expect(manifest.overlayNodeId).toBe(aId);
+
+    const open = getBlockStore("f1");
+    expect(open).not.toBeNull();
+    expect(Array.from(await (await open!).readAll())).toEqual(Array.from(a));
 
     clearAllHistoryManagers();
     delete fakeOpenFiles["f1"];

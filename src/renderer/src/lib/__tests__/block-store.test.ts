@@ -162,6 +162,18 @@ describe("BlockStore", () => {
     expect(Array.from(await rootOnly.readRanges(ranges))).toEqual(Array.from(gatherPixelRanges(packed, ranges)));
   });
 
+  it("reseeds the current tier without touching the seeded blocks", async () => {
+    const { backend, overlay, store } = await seeded();
+    const rootWrites = backend.writes;
+    const replaced = packed.map((value) => value * -1);
+    await store.seedCurrent(replaced);
+
+    expect(backend.writes).toBe(rootWrites);
+    expect(overlay.blocks.size).toBeGreaterThan(0);
+    expect(firstDifference(await store.readAll(), replaced)).toBe(-1);
+    expect(firstDifference(await store.readAllRoot(), packed)).toBe(-1);
+  });
+
   it("reads the seeded state back from under a flushed patch", async () => {
     const { store } = await seeded();
     const all = Uint32Array.of(0, layoutTexels(layout));

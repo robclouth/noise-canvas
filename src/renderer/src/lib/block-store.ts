@@ -122,6 +122,23 @@ export class BlockStore {
     }
   }
 
+  /**
+   * Writes the whole packed state into the current tier block by block,
+   * replacing whatever unflushed patches the store held. The seeded blocks
+   * stay as they are.
+   */
+  async seedCurrent(packed: Float32Array): Promise<void> {
+    if (this.disposed) throw new Error("block store is disposed");
+    this.dirty.clear();
+    this.dirtyVersion.clear();
+    this.clean.clear();
+    for (let index = 0; index < this.grid.blockCount; index++) {
+      const block = gatherPixelRanges(packed, this.blockRanges(index));
+      await (this.overlay ?? this.backend).write(index, await this.codec.encode(block));
+      this.clean.set(String(index), block);
+    }
+  }
+
   /** The named blocks' coefficients, in the order asked for. */
   async read(blocks: number[]): Promise<Float32Array[]> {
     return await Promise.all(blocks.map((index) => this.block(index)));
