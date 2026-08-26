@@ -182,6 +182,9 @@ const commitStroke: CommitStrokeFn = async (
   window,
   stroke,
 ): Promise<CommitResult> => {
+  if (analysisMetadata.viewStartFrame !== undefined || analysisMetadata.viewEndFrame !== undefined) {
+    throw new Error("the extension host commits against the whole packed state, not a view");
+  }
   const arrays: Record<string, NumericArray> = {
     packedData,
     bandOffsets: analysisMetadata.bandOffsets,

@@ -72,6 +72,32 @@ export function applyPhaseTurns(data: Float32Array, turns: PhaseTurns, invert: b
   }
 }
 
+/**
+ * Adds the turns' offsets to the phases in place — the same float arithmetic
+ * the addon uses when it applies a tail itself — and returns the residuals an
+ * inverted apply needs: for each float the shift cannot subtract back exactly,
+ * its index and its original bits.
+ */
+export function applyPhaseTurnsCollecting(data: Float32Array, turns: PhaseTurns): Uint32Array {
+  const bits = new Uint32Array(data.buffer, data.byteOffset, data.length);
+  const residuals: number[] = [];
+  for (let i = 0; i < turns.pixelStarts.length; i++) {
+    for (let ch = 0; ch < 2; ch++) {
+      const c = turns.offsets[i * 2 + ch];
+      if (c === 0) continue;
+      let at = turns.pixelStarts[i] * FLOATS_PER_PIXEL + ch * 2 + 1;
+      const end = Math.min(data.length, (turns.pixelStarts[i] + turns.pixelCounts[i]) * FLOATS_PER_PIXEL);
+      for (; at < end; at += FLOATS_PER_PIXEL) {
+        const before = data[at];
+        const after = Math.fround(before + c);
+        if (Math.fround(after - c) !== before) residuals.push(at, bits[at]);
+        data[at] = after;
+      }
+    }
+  }
+  return Uint32Array.from(residuals);
+}
+
 /** The residual floats' pixels as a flat [pixelStart, pixelCount, ...] list, one pixel each. */
 export function phaseTurnResidualRanges(turns: PhaseTurns): Uint32Array {
   const pixels = new Set<number>();

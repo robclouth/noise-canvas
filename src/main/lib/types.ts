@@ -58,6 +58,15 @@ export interface PackedLayout {
   bandOffsets: Uint32Array;
   bandStepLog2s: Int32Array;
   bandLengths: Uint32Array;
+  /**
+   * When set, the packed buffer holds only this frame span of the file — each
+   * band's coefficients for it, laid back to back in band order — while the
+   * band tables above still describe the whole file. Both edges must sit on
+   * every band's time grid, and the span must cover every read the pass
+   * makes, or the pass rejects with the buffer untouched.
+   */
+  viewStartFrame?: number;
+  viewEndFrame?: number;
 }
 
 /**
@@ -121,6 +130,13 @@ export interface CommitStrokeResult {
   /** Sample span the commit rewrote; outside it the audio is the existing audio unchanged. */
   audioWindow: { start: number; end: number };
   tail: PhaseTurns;
+  /**
+   * Whether the pass shifted the tails into the packed buffer itself. A
+   * windowed commit cannot reach them, so it returns false and the caller
+   * applies the turns — collecting the residuals as it goes. Absent from
+   * hosts that predate windowed commits, which always apply.
+   */
+  tailApplied?: boolean;
   levels: CommitLevels;
   onsets?: PackedOnsets;
   onsetOdfMax?: number;

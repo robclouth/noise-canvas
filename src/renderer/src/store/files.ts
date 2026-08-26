@@ -12,7 +12,16 @@ import { remainingCoefficientBudget, usedBudgetFraction } from "../lib/gpu-budge
 import { toChannelCount } from "../lib/channel-mix";
 import { insertSilence, type InsertSilenceValues } from "../lib/insert-silence";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
-import type { AnalysisParams, CommitLevels, CommitStrokeResult, PackedOnsets } from "../../../main/lib/types";
+import type {
+  AnalysisParams,
+  CommitLevels,
+  CommitStrokeResult,
+  PackedLayout,
+  PackedOnsets,
+} from "../../../main/lib/types";
+import { applyPhaseTurnsCollecting, hasPhaseTurns } from "../../../main/lib/history-delta";
+import { commitViewOf, scatterCommitPatch } from "../lib/commit-view";
+import { gatherPixelRanges } from "../lib/pixel-ranges";
 import {
   computeOutputLevels,
   measureOutputLevels,
@@ -2191,25 +2200,71 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
 
     get().setFileSynthesizing(fileId, true);
     try {
+      const layout: PackedLayout = {
+        numFrames: spec.numFrames,
+        numChannels: spec.numChannels,
+        numBands: spec.numBands,
+        bandOffsets: spec.synthesisMetadata.bandOffsets,
+        bandStepLog2s: spec.synthesisMetadata.bandStepLog2s,
+        bandLengths: spec.synthesisMetadata.bandLengths,
+      };
+      // A windowed call hands the addon only the window's reach instead of the
+      // whole packed state. It needs a window with audio to splice into and a
+      // regional onset reference, and the extension host does not speak it.
+      const windowable =
+        window != null &&
+        !wholeFile &&
+        existingAudio.length > 0 &&
+        !(params.detectOnsets && params.onsetStartSec === undefined) &&
+        !host.env.isExtension;
+      const view = windowable && window ? commitViewOf(layout, window, spec.sampleRate) : null;
+
       const commitStart = performance.now();
-      const result = await host.analysis.commitStroke(
-        data,
-        {
-          numFrames: spec.numFrames,
-          numChannels: spec.numChannels,
-          numBands: spec.numBands,
-          bandOffsets: spec.synthesisMetadata.bandOffsets,
-          bandStepLog2s: spec.synthesisMetadata.bandStepLog2s,
-          bandLengths: spec.synthesisMetadata.bandLengths,
-        },
-        spec.sampleRate,
-        params,
-        existingAudio,
-        window ?? { startFrame: -1, endFrame: -1, startBand: -1, endBand: -1 },
-        stroke,
-      );
+      const commitWhole = (): Promise<CommitStrokeResult> =>
+        host.analysis.commitStroke(
+          data,
+          layout,
+          spec.sampleRate,
+          params,
+          existingAudio,
+          window ?? { startFrame: -1, endFrame: -1, startBand: -1, endBand: -1 },
+          stroke,
+        );
+      let usedView = false;
+      let viewBuffer: Float32Array | null = null;
+      let result: CommitStrokeResult;
+      if (view && window) {
+        viewBuffer = gatherPixelRanges(data, view.ranges);
+        try {
+          result = await host.analysis.commitStroke(
+            viewBuffer,
+            { ...layout, viewStartFrame: view.startFrame, viewEndFrame: view.endFrame },
+            spec.sampleRate,
+            params,
+            existingAudio,
+            window,
+            stroke,
+          );
+          usedView = true;
+        } catch (error) {
+          if (!(error instanceof Error) || !/view/.test(error.message)) throw error;
+          // The view fell short of a pass's reach; the whole state still
+          // commits correctly, at the cost of reading all of it.
+          console.error("windowed commit fell back to the whole state:", error);
+          result = await commitWhole();
+        }
+      } else {
+        result = await commitWhole();
+      }
+      if (usedView && view && viewBuffer) {
+        scatterCommitPatch(data, view, viewBuffer, result.patch.ranges, layout);
+        if (result.tailApplied === false && hasPhaseTurns(result.tail)) {
+          result.tail.residuals = applyPhaseTurnsCollecting(data, result.tail);
+        }
+      }
       diag.timing("timing", "commitStroke", performance.now() - commitStart, {
         bandRanges: result.patch.ranges.length / 3,
+        windowed: usedView ? 1 : 0,
       });
 
       if (snapshot.reanalyzeEnabled) file.unprojectedPaint = false;
