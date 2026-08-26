@@ -59,6 +59,8 @@ export class BlockStore {
   private readonly inflight = new Map<number, Promise<Float32Array>>();
   private readonly ranges: Array<Uint32Array | undefined>;
   private readonly texelCount: number;
+  private readonly maxResidentBytes: number;
+  private flushing: Promise<void> = Promise.resolve();
   private disposed = false;
 
   constructor(grid: BlockGrid, backend: BlockBackend, options: BlockStoreOptions = {}) {
@@ -66,10 +68,8 @@ export class BlockStore {
     this.backend = backend;
     this.codec = options.codec ?? packedBlockCodec;
     this.texelCount = Math.max(options.texelCount ?? 0, layoutTexels(grid.layout));
-    this.clean = new ByteBudgetCache<Float32Array>(
-      options.maxResidentBytes ?? DEFAULT_RESIDENT_BYTES,
-      (block) => block.byteLength,
-    );
+    this.maxResidentBytes = options.maxResidentBytes ?? DEFAULT_RESIDENT_BYTES;
+    this.clean = new ByteBudgetCache<Float32Array>(this.maxResidentBytes, (block) => block.byteLength);
     this.ranges = new Array<Uint32Array | undefined>(grid.blockCount);
   }
 
@@ -97,9 +97,14 @@ export class BlockStore {
 
   /**
    * Writes the whole packed state out block by block, encoding each as it
-   * goes so no more than one block's bytes are held beyond the cache.
+   * goes so no more than one block's bytes are held beyond the cache. It
+   * replaces whatever the store held.
    */
   async seed(packed: Float32Array): Promise<void> {
+    if (this.disposed) throw new Error("block store is disposed");
+    this.dirty.clear();
+    this.dirtyVersion.clear();
+    this.clean.clear();
     for (let index = 0; index < this.grid.blockCount; index++) {
       const block = gatherPixelRanges(packed, this.blockRanges(index));
       await this.backend.write(index, await this.codec.encode(block));
@@ -136,7 +141,9 @@ export class BlockStore {
 
   /**
    * Writes values laid out in `ranges` order back into the blocks they fall
-   * in, which stay in RAM until the next flush.
+   * in, which stay in RAM until the next flush. When the dirty blocks grow
+   * past the resident budget, the patch flushes them itself, so unflushed
+   * paint cannot hold a whole file decoded.
    */
   async patch(ranges: Uint32Array, values: Float32Array): Promise<void> {
     const blocks = blocksForPixelRanges(this.grid, ranges);
@@ -147,18 +154,27 @@ export class BlockStore {
       this.dirty.set(index, block);
       this.dirtyVersion.set(index, (this.dirtyVersion.get(index) ?? 0) + 1);
     }
+    if (this.residentBytes > this.maxResidentBytes) await this.flush();
   }
 
   /**
-   * Encodes and writes every block changed since the last call. A block stays
-   * dirty while it is being written, so a patch arriving meanwhile lands on
-   * the same array; the bytes just written do not hold that patch, so the
-   * block stays dirty for the next flush.
+   * Encodes and writes every block changed since the last call, one at a
+   * time. Each block is encoded from a copy, so a patch landing mid-encode
+   * cannot reach the bytes in flight; the version check keeps such a block
+   * dirty for the next flush. Calls run one after another, and `dispose`
+   * waits for the one in flight.
    */
   async flush(): Promise<void> {
+    const run = this.flushing.then(() => this.flushNow());
+    this.flushing = run.catch(() => undefined);
+    return await run;
+  }
+
+  private async flushNow(): Promise<void> {
     for (const [index, block] of [...this.dirty]) {
+      if (this.disposed) return;
       const version = this.dirtyVersion.get(index);
-      await this.backend.write(index, await this.codec.encode(block));
+      await this.backend.write(index, await this.codec.encode(block.slice()));
       if (this.dirtyVersion.get(index) !== version) continue;
       this.dirty.delete(index);
       this.dirtyVersion.delete(index);
@@ -169,6 +185,7 @@ export class BlockStore {
   /** Drops everything, on disk and in RAM. The store cannot be read after this. */
   async dispose(): Promise<void> {
     this.disposed = true;
+    await this.flushing.catch(() => undefined);
     this.dirty.clear();
     this.dirtyVersion.clear();
     this.clean.clear();

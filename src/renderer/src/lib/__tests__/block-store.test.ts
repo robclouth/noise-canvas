@@ -184,6 +184,119 @@ describe("BlockStore", () => {
     expect(Array.from(await reopened.readRanges(second))).toEqual(Array.from(secondValues));
   });
 
+  it("replaces unflushed patches when it is seeded again", async () => {
+    const { store } = await seeded();
+    const ranges = Uint32Array.of(...bandRange(1, 40, 200));
+    await store.patch(
+      ranges,
+      gatherPixelRanges(packed, ranges).map((value) => value * -1),
+    );
+    await store.seed(packed);
+    expect(store.dirtyCount).toBe(0);
+    expect(Array.from(await store.readRanges(ranges))).toEqual(Array.from(gatherPixelRanges(packed, ranges)));
+  });
+
+  it("writes bytes a mid-encode patch cannot tear", async () => {
+    const grid = makeGrid();
+    const backend = memoryBackend();
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let hold = false;
+    const slow: BlockCodec = {
+      async encode(block) {
+        if (hold) {
+          hold = false;
+          await gate;
+        }
+        return await rawCodec.encode(block);
+      },
+      decode: rawCodec.decode,
+    };
+    const store = new BlockStore(grid, backend, { codec: slow });
+    await store.seed(packed);
+    const ranges = Uint32Array.of(...bandRange(1, 40, 200));
+    const first = gatherPixelRanges(packed, ranges).map((value) => value * -1);
+    await store.patch(ranges, first);
+
+    hold = true;
+    const flushing = store.flush();
+    const second = gatherPixelRanges(packed, ranges).map((value) => value * 3);
+    await store.patch(ranges, second);
+    release();
+    await flushing;
+
+    // The bytes on disk hold the state the flush saw, whole, not the patch.
+    const reopened = new BlockStore(grid, backend, { codec: rawCodec });
+    expect(Array.from(await reopened.readRanges(ranges))).toEqual(Array.from(first));
+  });
+
+  it("stops an in-flight flush when it is disposed, leaving nothing behind", async () => {
+    const grid = makeGrid();
+    const backend = memoryBackend();
+    let release = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let hold = false;
+    const slow: BlockCodec = {
+      async encode(block) {
+        if (hold) {
+          hold = false;
+          reached();
+          await gate;
+        }
+        return await rawCodec.encode(block);
+      },
+      decode: rawCodec.decode,
+    };
+    const store = new BlockStore(grid, backend, { codec: slow });
+    await store.seed(packed);
+    const inFirst = Uint32Array.of(...bandRange(0, 5, 20));
+    const inFourth = Uint32Array.of(...bandRange(0, grid.binsPerBlock[0] * 3 + 5, 20));
+    await store.patch(
+      inFirst,
+      gatherPixelRanges(packed, inFirst).map((value) => value * -1),
+    );
+    await store.patch(
+      inFourth,
+      gatherPixelRanges(packed, inFourth).map((value) => value * -1),
+    );
+    expect(store.dirtyCount).toBe(2);
+
+    hold = true;
+    const writesBefore = backend.writes;
+    const flushing = store.flush();
+    // Dispose lands while the flush is inside its first encode.
+    await held;
+    const disposing = store.dispose();
+    release();
+    await Promise.all([flushing, disposing]);
+
+    // The flush gives up after the block it was writing; dispose then clears
+    // the backend behind it.
+    expect(backend.writes - writesBefore).toBeLessThanOrEqual(1);
+    expect(backend.blocks.size).toBe(0);
+    expect(store.residentBytes).toBe(0);
+  });
+
+  it("flushes itself rather than hold every patched block in RAM", async () => {
+    const { backend, store } = await seeded({ maxResidentBytes: 1 << 16 });
+    const writesBefore = backend.writes;
+    const all = Uint32Array.of(0, layoutTexels(layout));
+    const values = gatherPixelRanges(packed, all).map((value) => value * -1);
+    await store.patch(all, values);
+
+    expect(backend.writes).toBeGreaterThan(writesBefore);
+    expect(store.residentBytes).toBeLessThanOrEqual(1 << 16);
+    expect(Array.from(await store.readRanges(all))).toEqual(Array.from(values));
+  });
+
   it("drops clean blocks to stay inside its budget", async () => {
     const { grid, store } = await seeded({ maxResidentBytes: 1 << 16 });
     await store.readAll();
