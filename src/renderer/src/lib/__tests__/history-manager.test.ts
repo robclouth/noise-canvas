@@ -898,6 +898,96 @@ describe("HistoryManager hops", () => {
     clearAllHistoryManagers();
   });
 
+  it("patches the tier along an undo hop instead of leaving it behind", async () => {
+    installManagerEnv();
+    const wide = 20000;
+    const bands = 2;
+    const wideDims = {
+      textureWidth: wide,
+      textureHeight: bands,
+      numFrames: wide,
+      numBands: bands,
+      numChannels: 1,
+      sampleRate: 8000,
+      minFreq: 20,
+      bandsPerOctave: 12,
+    };
+    const root = lossyFill(wide, bands, 0);
+    const spectrogram = { ...makeSpectrogram(root, wide, bands), sampleRate: 8000 };
+    installPatchRenderer(wide, bands, spectrogram);
+    clearAllHistoryManagers();
+    const a = paint(root, 2, 3, 1);
+
+    const mgr = getHistoryManager("f1");
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram });
+    await mgr.addStroke({ data: a, label: "A", dimensions: wideDims, dirtyRanges: new Uint32Array([2, 3]) });
+
+    const overlayWrites = (): number =>
+      (
+        window as unknown as { nodeFs: { writeFile: { mock: { calls: [string][] } } } }
+      ).nodeFs.writeFile.mock.calls.filter(([path]) => path.startsWith("/userdata/blocks/f1/current/")).length;
+    const beforeNav = overlayWrites();
+    await mgr.navigateToParent();
+
+    const open = getBlockStore("f1");
+    expect(open).not.toBeNull();
+    const store = await open!;
+    expect(store.grid.blockCount).toBeGreaterThan(1);
+    expect(overlayWrites() - beforeNav).toBe(1);
+    expect(firstDifference(await store.readAll(), root)).toBe(-1);
+
+    // A stroke from here builds on the tier the hop kept current.
+    const beforeStroke = overlayWrites();
+    const c = paint(root, 5, 2, 3);
+    await mgr.addStroke({ data: c, label: "C", dimensions: wideDims, dirtyRanges: new Uint32Array([5, 2]) });
+    expect(overlayWrites() - beforeStroke).toBe(1);
+    expect(firstDifference(await store.readAll(), c)).toBe(-1);
+    clearAllHistoryManagers();
+    delete fakeOpenFiles["f1"];
+  });
+
+  it("carries a stroke's phase turns into the tier, both ways", async () => {
+    installManagerEnv();
+    const { canvas } = installPatchRenderer(w, h);
+    clearAllHistoryManagers();
+    const root = lossyFill(w, h, 0);
+    for (let p = 8; p < w * h; p++) {
+      root[p * 4 + 1] = Math.fround(1e5 + p);
+      root[p * 4 + 3] = Math.fround(-1e5 - p);
+    }
+    const mgr = getHistoryManager("f1", { packedCacheBytes: 0 });
+    await mgr.addRootSnapshot({ data: root, kind: "root", label: "root", spectrogram: makeSpectrogram(root, w, h) });
+    const current = mgr.currentPackedState()!;
+    const rootBytes = new Float32Array(root);
+    canvas.set(current);
+
+    const ranges = new Uint32Array([4, 4]);
+    const baseFootprint = current.slice(4 * 4, 8 * 4);
+    for (let p = 4; p < 8; p++) for (let c = 0; c < 4; c++) current[p * 4 + c] = ((p * 3 + c) % 31) / 31;
+    const c0 = Math.fround(2 * Math.PI);
+    const turns: PhaseTurns = {
+      pixelStarts: Uint32Array.from([8]),
+      pixelCounts: Uint32Array.from([w * h - 8]),
+      offsets: Float32Array.from([c0, 0]),
+      residuals: new Uint32Array(0),
+    };
+    applyPhaseTurns(current, turns, false);
+    canvas.set(current);
+    await mgr.addStroke({ data: current, label: "A", dimensions, dirtyRanges: ranges, baseFootprint, turns });
+
+    const open = getBlockStore("f1");
+    expect(open).not.toBeNull();
+    const store = await open!;
+    // The stroke's tier patch covers the window and the turned tail.
+    expect(Array.from(await store.readAll())).toEqual(Array.from(current));
+
+    await mgr.navigateToParent();
+    expect(Array.from(await store.readAll())).toEqual(Array.from(rootBytes));
+
+    mgr.dispose();
+    delete fakeOpenFiles["f1"];
+  });
+
   beforeEach(() => {
     synthesizeFile.mockClear();
     spliceFileAudio.mockClear();
@@ -921,8 +1011,12 @@ describe("HistoryManager hops", () => {
     await mgr.addStroke({ data: a, label: "A", dimensions, dirtyRanges: ra });
     await mgr.addStroke({ data: b, label: "B", dimensions, dirtyRanges: rb });
 
+    // Counts only history reads: hops may read tier blocks to keep them
+    // current, but must never rebuild state from the deltas on disk.
     const reads = (): number =>
-      (window as unknown as { nodeFs: { readFile: { mock: { calls: unknown[] } } } }).nodeFs.readFile.mock.calls.length;
+      (
+        window as unknown as { nodeFs: { readFile: { mock: { calls: [string][] } } } }
+      ).nodeFs.readFile.mock.calls.filter(([path]) => path.startsWith("/userdata/history/")).length;
     const readsBefore = reads();
     await mgr.navigateToParent(); // B → A
     expect(Array.from(patches.at(-1)!.data)).toEqual(Array.from(a));

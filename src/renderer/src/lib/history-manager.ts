@@ -4,7 +4,7 @@ import { awaitFileSynthesis, openFiles } from "@renderer/store/files";
 import type { SpectrogramData } from "@renderer/store/types";
 import { isManagedFilePath } from "@renderer/store/managed-path";
 import type { PhaseTurns } from "../../../main/lib/types";
-import { hasPhaseTurns, phaseTurnResidualRanges } from "../../../main/lib/history-delta";
+import { hasPhaseTurns, phaseTurnRanges, phaseTurnResidualRanges } from "../../../main/lib/history-delta";
 import { audioHopBytes, editsAlongHops, type AudioHop } from "./audio-hop";
 import type { BlockStore } from "./block-store";
 import {
@@ -920,7 +920,13 @@ export class HistoryManager {
       this.nodeTurns.set(id, hasPhaseTurns(opts.turns) ? opts.turns : null);
     }
     if (opts.audioRegion) this.nodeAudioRegions.set(id, opts.audioRegion);
-    await this.syncStoreToCurrent(parentId, rangesForPatch);
+    // The stroke's turns change phase outside the footprint, so the tier's
+    // patch has to cover their spans as well.
+    let tierRanges = rangesForPatch;
+    if (tierRanges && hasPhaseTurns(opts.turns)) {
+      tierRanges = mergePixelRanges(tierRanges, phaseTurnRanges(opts.turns));
+    }
+    await this.syncStoreToCurrent(parentId, tierRanges);
     if (!this.manifest) return { id, isNew: true };
     // The stroke was read back from the FBO, so the two are in step again.
     this.fboOutOfSync = false;
@@ -1237,6 +1243,7 @@ export class HistoryManager {
     // inverseMap/metadata/dims are still correct — just push the new FBO bytes.
     const anchor = this.nearestFullAnchor(targetId);
     let hopRegion: UvRegion | null = null;
+    let hopTierRanges: Uint32Array | null = null;
     if (anchor && anchor.id !== this.lastLoadedAnchorId) {
       await this.restoreSpectrogramFromFull(anchor, packedData);
       if (!this.manifest || !openFiles[this.fileId]?.rendererRef?.current) return;
@@ -1263,6 +1270,10 @@ export class HistoryManager {
       }
       const restoreStart = performance.now();
       if (ranges && turns) {
+        // The turns change phase outside the uploaded ranges, so the tier's
+        // patch has to cover their spans as well.
+        hopTierRanges = ranges;
+        for (const turn of turns) hopTierRanges = mergePixelRanges(hopTierRanges, phaseTurnRanges(turn.turns));
         // The patch writes its pixels from the state afterwards, so the turns
         // leave them out.
         if (turns.length) await applyCanvasTurns(file.rendererRef.current, packedData, turns, ranges);
@@ -1300,6 +1311,7 @@ export class HistoryManager {
     this.currentPacked = packedData;
     this.packedCache.deleteValue(packedData, targetId);
     this.packedCache.set(targetId, packedData);
+    if (hopTierRanges) await this.syncStoreToCurrent(fromId, hopTierRanges);
     this.scheduleManifestWrite();
     this.notifyStateChange();
 
