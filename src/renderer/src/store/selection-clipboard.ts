@@ -48,6 +48,8 @@ export interface SelectionClipboardState {
   silenceSelection: () => Promise<void>;
   /** Pick the clipboard up so it follows the pointer, starting at `aim` when given. */
   beginPaste: (aim?: { timeSeconds: number; pitchUv: number }) => void;
+  /** Copy `selection` from the active file into the clipboard, without picking it up. */
+  stashSelection: (selection: Selection) => Promise<boolean>;
   /** Pick the active file's selection up, leaving a copy behind or not. */
   beginMove: (copy: boolean) => Promise<void>;
   /** Move what is in flight to a new corner, in the file's seconds and pitch UV. */
@@ -197,6 +199,12 @@ export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet):
       "Silence",
       get,
     );
+  },
+
+  stashSelection: async (selection) => {
+    const edit = target(get);
+    if (!edit) return false;
+    return copyRegion(edit, selection);
   },
 
   beginPaste: (aim) => {

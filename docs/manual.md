@@ -877,7 +877,13 @@ Click to put the ghost down. The drop is a single edit in the history, so one un
 
 The ghost moves in pitch as well as time: drop it higher or lower and the sound is transposed to match. Hold `Shift` to keep it at its original pitch while you place it. `Esc` puts everything back without painting anything — what you copied is kept, so a later paste still works.
 
-The file keeps its length throughout — nothing slides along to make room, so what was already at the destination is written over.
+All of the above work in place: the file keeps its length, nothing slides along to make room, and what was already at the destination is written over.
+
+The `Shift` variants work on **time itself**. They change the file's length, so they always take the full height of the file with them, whatever height you selected:
+
+- **Cut Time** (`Cmd/Ctrl+Shift+X`) – takes the selection's stretch of time out and closes the gap. What it takes lands in the clipboard.
+- **Paste Time** (`Cmd/Ctrl+Shift+V`) – splices the clipboard's stretch in at the selection — or at the play start marker with nothing selected — and pushes everything after it later.
+- **Duplicate Time** (`Cmd/Ctrl+Shift+D`) – splices a copy of the selection's stretch in, directly after it, and selects the copy.
 
 ---
 
@@ -1003,6 +1009,7 @@ The keys below are the ones your keyboard prints. On a layout that prints someth
 | `Tab`                 | Switch between the brush and selection                 |
 | `Esc`                 | Put a picked-up region back, or clear the selection    |
 | `Cmd/Ctrl+X/C/V`      | Cut / copy / paste the selection                       |
+| `Cmd/Ctrl+Shift+X/V/D` | Cut, paste or duplicate a stretch of time             |
 | `1`–`9`, `0`          | Select the top palette's first ten brushes             |
 | `a`–`z`               | Select the brush bound to that key                     |
 | Hold `Shift` + click  | Pick a source file and position                        |

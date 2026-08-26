@@ -10,6 +10,7 @@ import type { FilesState } from "./files";
 import type { FillState } from "./fill";
 import type { SelectionAuditionState } from "./selection-audition";
 import type { SelectionClipboardState } from "./selection-clipboard";
+import type { SelectionRippleState } from "./selection-ripple";
 import { ModulatorsState } from "./modulators";
 import type { LinkState } from "./link";
 import type { PalettesState } from "./palettes";
@@ -135,7 +136,8 @@ export type State = BrushState &
   FillState &
   StemGroupsState &
   SelectionAuditionState &
-  SelectionClipboardState & {
+  SelectionClipboardState &
+  SelectionRippleState & {
     setParameter: (key: ParameterKey, value: unknown, effectId?: string) => void;
     randomizationAmounts: Record<string, number>;
     setRandomizationAmount: (key: string, amount: number) => void;

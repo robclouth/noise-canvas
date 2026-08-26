@@ -650,7 +650,7 @@ function bandLayout(data: SpectrogramData) {
  * throughout: a file showing a loading message has none mounted, and picks the
  * new analysis up from its spectrogram when it comes back.
  */
-async function rebuildFileFromAudio(
+export async function rebuildFileFromAudio(
   set: ZustandSet,
   fileId: string,
   readPackedData: () => Promise<Float32Array | undefined>,
@@ -786,7 +786,7 @@ async function rebuildFileFromAudioNow(
 
 // The current painted state of a file, falling back to its analysed
 // coefficients when no renderer is mounted to read an FBO from.
-async function readCurrentPackedData(file: OpenFile): Promise<Float32Array | undefined> {
+export async function readCurrentPackedData(file: OpenFile): Promise<Float32Array | undefined> {
   const fboData = await file.rendererRef?.current?.getFBOData();
   return fboData ?? file.spectrogramData?.packedData;
 }

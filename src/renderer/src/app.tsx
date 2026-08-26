@@ -329,6 +329,21 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubSilenceSelection);
 
+    const unsubCutTime = ipcOn("cut-time-selection", () => {
+      void useStore.getState().cutTimeSelection();
+    });
+    unsubscribers.push(unsubCutTime);
+
+    const unsubPasteTime = ipcOn("paste-time-selection", () => {
+      void useStore.getState().pasteTimeSelection();
+    });
+    unsubscribers.push(unsubPasteTime);
+
+    const unsubDuplicateTime = ipcOn("duplicate-time-selection", () => {
+      void useStore.getState().duplicateTimeSelection();
+    });
+    unsubscribers.push(unsubDuplicateTime);
+
     const unsubUndo = ipcOn("undo", async () => {
       const { activeFileId } = useStore.getState();
       if (!activeFileId) return;

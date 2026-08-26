@@ -177,6 +177,9 @@ export interface IpcRendererEvents {
   "cut-selection": () => void;
   "paste-selection": () => void;
   "silence-selection": () => void;
+  "cut-time-selection": () => void;
+  "paste-time-selection": () => void;
+  "duplicate-time-selection": () => void;
   "update-available": (info: UpdateInfo) => void;
   "update-not-available": () => void;
   "update-downloaded": (info: UpdateInfo) => void;
