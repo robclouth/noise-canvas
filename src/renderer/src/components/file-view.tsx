@@ -87,6 +87,7 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
   const isZooming = useStore((state) => state.isZooming);
   const isSynthesizing = useStore((state) => state.filesSynthesizing[fileId]);
   const loadingMessage = useStore((state) => state.filesLoading[fileId]);
+  const busyMessage = useStore((state) => state.filesBusy[fileId]);
 
   const isHovered = useTransientStore((state) => state.hoveredFile === fileId);
   // An axis drag moves every view-synced file, so all of them stay live.
@@ -877,6 +878,39 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         </>
       )}
       {isSynthesizing && <Loader size="xs" pos="absolute" bottom={25} right={10} />}
+      {/* The view stays visible under a splice; this layer just badges it and
+          soaks up pointer input until the rebuild lands. */}
+      {busyMessage && (
+        <Box
+          pos="absolute"
+          style={{
+            inset: 0,
+            zIndex: 3,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "wait",
+          }}
+        >
+          <Box
+            bg="dark.7"
+            px={10}
+            py={6}
+            style={{
+              borderRadius: 6,
+              border: "1px solid var(--mantine-color-dark-4)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <Loader size="xs" />
+            <Text size="xs" c="dimmed">
+              {busyMessage}
+            </Text>
+          </Box>
+        </Box>
+      )}
     </Box>
   );
 });

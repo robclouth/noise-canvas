@@ -15,7 +15,7 @@ import { Tooltip } from "../tooltip";
 const DockedFile = memo(({ fileId }: { fileId: string }) => {
   const file = openFiles[fileId];
   const isHighlighted = useStore((state) => state.highlightedSourcePath === file?.filePath);
-  const isLoading = useStore((state) => !!state.filesLoading[fileId]);
+  const isLoading = useStore((state) => !!state.filesLoading[fileId] || !!state.filesBusy[fileId]);
   const fileColor = useStore((state) => selectFileColor(state, fileId));
   if (!file) return null;
   const displayName = file.displayName;
@@ -139,7 +139,7 @@ FileLane.displayName = "FileLane";
 const StemGroupSection = memo(
   ({ groupId, fileIds, ...laneProps }: { groupId: string; fileIds: string[] } & Omit<FileLaneProps, "fileId">) => {
     const group = useStore((state) => state.stemGroups[groupId]);
-    const anyLoading = useStore((state) => fileIds.some((id) => !!state.filesLoading[id]));
+    const anyLoading = useStore((state) => fileIds.some((id) => !!state.filesLoading[id] || !!state.filesBusy[id]));
     const uiSize = useUiSize();
 
     // Fullscreen takes over the canvas, so the group chrome would just be a

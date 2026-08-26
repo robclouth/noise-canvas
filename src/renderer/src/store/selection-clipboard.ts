@@ -71,7 +71,7 @@ function target(get: ZustandGet, fileId?: string): EditTarget | null {
   if (!id) return null;
   const file = openFiles[id];
   if (!file?.spectrogramData || !file.rendererRef?.current) return null;
-  if (state.filesLoading[id]) return null;
+  if (state.filesLoading[id] || state.filesBusy[id]) return null;
 
   const spec = file.spectrogramData;
   return {

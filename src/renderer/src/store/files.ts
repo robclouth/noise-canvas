@@ -184,6 +184,11 @@ export interface FilesState {
   setFileSynthesizing: (fileId: string, synthesizing: boolean) => void;
   filesLoading: Record<string, string>;
   setFileLoading: (fileId: string, message: string | undefined) => void;
+  /**
+   * Like `filesLoading`, but the file's view stays mounted and visible: the
+   * message shows in a badge over it while pointer input is held off.
+   */
+  filesBusy: Record<string, string>;
   activeFileId: string | null;
   setActiveFileId: (activeFileId: string | null) => Promise<void>;
   fullscreenFileId: string | null;
@@ -2656,7 +2661,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     const fileId = get().activeFileId;
     const file = fileId ? openFiles[fileId] : undefined;
     if (!fileId || !file?.spectrogramData) return;
-    if (get().filesLoading[fileId]) return;
+    if (get().filesLoading[fileId] || get().filesBusy[fileId]) return;
 
     const values = await new Promise<InsertSilenceValues | null>((resolve) => {
       let confirmed = false;
@@ -2681,13 +2686,11 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     if (padSamples <= 0) return;
     const playStartSample = (get().filesPlaybackStartTime[fileId] ?? 0) * sampleRate;
 
-    // Read the painted state first: the loading message below takes the
-    // renderer, and with it the FBO, off the screen.
     const packedData = await readCurrentPackedData(current);
 
     set(
       produce((state: State) => {
-        state.filesLoading[fileId] = "Inserting silence...";
+        state.filesBusy[fileId] = "Inserting silence...";
       }),
     );
 
@@ -2709,7 +2712,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     } finally {
       set(
         produce((state: State) => {
-          delete state.filesLoading[fileId];
+          delete state.filesBusy[fileId];
         }),
       );
     }
@@ -3020,6 +3023,7 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
     }));
   },
   filesLoading: {},
+  filesBusy: {},
   setFileLoading: (fileId: string, message: string | undefined) => {
     set(
       produce((state: State) => {

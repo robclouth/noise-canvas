@@ -197,6 +197,7 @@ export const TimeLegend = memo(({ fileId }: TimeLegendProps) => {
         bpm: legendFile && state.filepathsBpm[legendFile.filePath],
         gridSizeBeats: state.gridSizeBeats,
         loading: state.filesLoading[fileId],
+        busy: state.filesBusy[fileId],
       }),
       draw,
       { equalityFn: shallow, fireImmediately: true },

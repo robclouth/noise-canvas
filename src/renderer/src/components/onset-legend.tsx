@@ -120,6 +120,7 @@ export const OnsetLegend = memo(({ fileId }: OnsetLegendProps) => {
         // returns new onsets repaints on the store update that comes with it.
         onsets: openFiles[fileId]?.onsets,
         loading: state.filesLoading[fileId],
+        busy: state.filesBusy[fileId],
       }),
       draw,
       { equalityFn: shallow, fireImmediately: true },
