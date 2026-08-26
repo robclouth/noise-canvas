@@ -30,10 +30,16 @@ export interface TransientState {
   // The selection being dragged, before the pointer is released. Held here so
   // a drag redraws the overlay without writing the loop region on every
   // pointer move. A lasso drag carries its path, in seconds and pitch UV, for
-  // the overlay to draw instead of the bounding rectangle.
-  selectionDrag: { fileId: string; selection: Selection; path?: { time: number; pitchUv: number }[] } | null;
+  // the overlay to draw instead of the bounding rectangle. `add` marks a
+  // Shift gesture: the overlay keeps the committed selection visible under it.
+  selectionDrag: {
+    fileId: string;
+    selection: Selection;
+    path?: { time: number; pitchUv: number }[];
+    add?: boolean;
+  } | null;
   setSelectionDrag: (
-    drag: { fileId: string; selection: Selection; path?: { time: number; pitchUv: number }[] } | null,
+    drag: { fileId: string; selection: Selection; path?: { time: number; pitchUv: number }[]; add?: boolean } | null,
   ) => void;
   // True while Shift is held: in select mode it means add-to-selection, and
   // the canvas cursor shows the plus.

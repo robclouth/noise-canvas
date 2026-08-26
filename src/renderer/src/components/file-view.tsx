@@ -810,7 +810,9 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       if (!to) return;
       const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
       const selection = normaliseSelection(from, to, totalDuration);
-      useTransientStore.getState().setSelectionDrag(selection ? { fileId, selection } : null);
+      useTransientStore
+        .getState()
+        .setSelectionDrag(selection ? { fileId, selection, add: addToSelectionRef.current } : null);
     };
 
     const finishSelectionDrag = (): void => {
@@ -866,9 +868,12 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
         pitchHi = Math.max(pitchHi, p.pitchUv);
       }
       if (end <= start || pitchHi <= pitchLo) return;
-      useTransientStore
-        .getState()
-        .setSelectionDrag({ fileId, selection: { start, end, pitchLo, pitchHi }, path: points });
+      useTransientStore.getState().setSelectionDrag({
+        fileId,
+        selection: { start, end, pitchLo, pitchHi },
+        path: points,
+        add: addToSelectionRef.current,
+      });
     };
 
     const finishLassoDrag = (): void => {

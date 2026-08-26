@@ -164,7 +164,7 @@ export const TransportPanel = memo(() => {
               <BoxSelect size={18} />
             )}
           </HelpActionIcon>
-          <Menu position="bottom-start" withinPortal>
+          <Menu position="bottom-start" withinPortal zIndex={10001}>
             <Menu.Target>
               <HelpActionIcon
                 help="transport-select-shape"

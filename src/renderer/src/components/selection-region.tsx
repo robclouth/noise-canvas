@@ -1,5 +1,6 @@
 import { pitchUvToViewUvY, zoomedToScreen } from "@/lib/utils";
 import { maskBoundarySegments } from "@/lib/selection-mask";
+import type { Selection } from "@/lib/selection";
 import { useStore } from "@/store";
 import { openFiles } from "@renderer/store/files";
 import { useTransientStore } from "@renderer/store/transient";
@@ -12,6 +13,9 @@ import { Vector2 } from "three";
 export const SELECTION_COLOUR = "rgba(255, 140, 51, 0.95)";
 const SELECTION_FILL = "rgba(255, 140, 51, 0.1)";
 const INSET_PX = 1;
+// One dash for every selection outline — rectangle, lasso, wand, in progress
+// or committed — so no two shapes read as different kinds of selection.
+const DASH_PX = 4;
 
 interface SelectionRegionProps {
   fileId: string;
@@ -67,6 +71,7 @@ function drawMask(
 
   ctx.strokeStyle = SELECTION_COLOUR;
   ctx.lineWidth = view.dpr;
+  ctx.setLineDash([DASH_PX * view.dpr, DASH_PX * view.dpr]);
   ctx.beginPath();
   const segments = maskBoundarySegments(mask);
   for (let i = 0; i + 3 < segments.length; i += 4) {
@@ -101,20 +106,39 @@ function drawPath(
   ctx.fill("evenodd");
   ctx.strokeStyle = SELECTION_COLOUR;
   ctx.lineWidth = dpr;
-  ctx.setLineDash([4 * dpr, 4 * dpr]);
+  ctx.setLineDash([DASH_PX * dpr, DASH_PX * dpr]);
   ctx.stroke();
 }
 
-/** The selection over the canvas: a rectangle, or a shape in its bounding box. */
-export const SelectionRegion = ({ fileId }: SelectionRegionProps) => {
+// Draws a plain rectangle the same way the shapes draw: canvas dash and fill,
+// with edges scrolled off screen falling outside the canvas.
+function drawRect(canvas: HTMLCanvasElement, view: OverlayView): void {
+  const ctx = beginOverlayDraw(canvas, view);
+  if (!ctx) return;
+  const w = view.fullWidth * view.dpr;
+  const h = view.fullHeight * view.dpr;
+  ctx.fillStyle = SELECTION_FILL;
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = SELECTION_COLOUR;
+  ctx.lineWidth = view.dpr;
+  ctx.setLineDash([DASH_PX * view.dpr, DASH_PX * view.dpr]);
+  ctx.strokeRect(view.dpr / 2, view.dpr / 2, w - view.dpr, h - view.dpr);
+}
+
+// One selection drawn over the canvas: a rectangle, or a shape in its
+// bounding box, or an in-progress freehand path.
+const SelectionBox = ({
+  fileId,
+  selection,
+  path,
+}: {
+  fileId: string;
+  selection: Selection | null;
+  path: { time: number; pitchUv: number }[] | null;
+}) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const file = openFiles[fileId];
-  const committed = useStore((state) => state.filesSelection[fileId] ?? null);
-  const placing = useStore((state) => (state.placing?.fileId === fileId ? state.placing.rect : null));
-  const drag = useTransientStore((state) => (state.selectionDrag?.fileId === fileId ? state.selectionDrag : null));
-  // A region in flight is what the rectangle means until it is put down.
-  const selection = placing ?? drag?.selection ?? committed;
   const zoom = useStore((state) => state.filesZoom[fileId]);
   const offset = useStore((state) => state.filesOffset[fileId]);
   const zoomY = useStore((state) => state.filesZoomY[fileId] ?? 0);
@@ -166,56 +190,56 @@ export const SelectionRegion = ({ fileId }: SelectionRegionProps) => {
     overlay.style.top = `calc(${top * 100}% + ${insetY}px)`;
     overlay.style.height = `calc(${(bottom - top) * 100}% - ${insetY * 2}px)`;
 
-    // A shape draws its own outline and fill on the canvas; the rectangle
-    // keeps the dashed border and plain fill.
-    const path = drag?.path && drag.path.length >= 2 ? drag.path : null;
-    const shaped = path !== null || selection.mask !== undefined;
-    overlay.style.backgroundColor = shaped ? "transparent" : SELECTION_FILL;
+    // Every selection paints on the canvas, so one dash serves them all. An
+    // edge scrolled off screen falls outside the canvas and draws no line.
     const canvas = canvasRef.current;
-    if (canvas) {
-      canvas.style.display = shaped ? "block" : "none";
-      if (shaped && bounds) {
-        const view = {
-          width: (right - left) * bounds.width,
-          height: (bottom - top) * bounds.height,
-          fullWidth: (bottomRight.x - topLeft.x) * bounds.width,
-          fullHeight: (bottomRight.y - topLeft.y) * bounds.height,
-          offsetX: (topLeft.x - left) * bounds.width,
-          offsetY: (topLeft.y - top) * bounds.height,
-          dpr: Math.min(2, window.devicePixelRatio || 1),
-        };
-        if (path) drawPath(canvas, path, selection, view);
-        else if (selection.mask) drawMask(canvas, selection.mask, view);
-      }
+    if (canvas && bounds) {
+      const view = {
+        width: (right - left) * bounds.width,
+        height: (bottom - top) * bounds.height,
+        fullWidth: (bottomRight.x - topLeft.x) * bounds.width,
+        fullHeight: (bottomRight.y - topLeft.y) * bounds.height,
+        offsetX: (topLeft.x - left) * bounds.width,
+        offsetY: (topLeft.y - top) * bounds.height,
+        dpr: Math.min(2, window.devicePixelRatio || 1),
+      };
+      if (path) drawPath(canvas, path, selection, view);
+      else if (selection.mask) drawMask(canvas, selection.mask, view);
+      else drawRect(canvas, view);
     }
-
-    // An edge scrolled off screen draws no line, so the clamp never reads as a
-    // selection boundary that isn't there. A shape draws no border at all.
-    overlay.style.borderLeftWidth = !shaped && topLeft.x >= 0 ? "1px" : "0";
-    overlay.style.borderRightWidth = !shaped && bottomRight.x <= 1 ? "1px" : "0";
-    overlay.style.borderTopWidth = !shaped && topLeft.y >= 0 ? "1px" : "0";
-    overlay.style.borderBottomWidth = !shaped && bottomRight.y <= 1 ? "1px" : "0";
-  }, [selection, drag, zoom, offset, zoomY, offsetY, file]);
+  }, [selection, path, zoom, offset, zoomY, offsetY, file]);
 
   return (
     <div
       ref={overlayRef}
+      data-selection-overlay
       style={{
         position: "absolute",
         boxSizing: "border-box",
-        borderStyle: "dashed",
-        borderColor: SELECTION_COLOUR,
-        borderWidth: "1px",
-        backgroundColor: SELECTION_FILL,
         pointerEvents: "none",
         display: "none",
         zIndex: 11,
       }}
     >
-      <canvas
-        ref={canvasRef}
-        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", display: "none" }}
-      />
+      <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
     </div>
+  );
+};
+
+/** The selection over the canvas; an add-gesture shows what it adds to as well. */
+export const SelectionRegion = ({ fileId }: SelectionRegionProps) => {
+  const committed = useStore((state) => state.filesSelection[fileId] ?? null);
+  const placing = useStore((state) => (state.placing?.fileId === fileId ? state.placing.rect : null));
+  const drag = useTransientStore((state) => (state.selectionDrag?.fileId === fileId ? state.selectionDrag : null));
+  // A region in flight is what the shape means until it is put down.
+  const active = placing ?? drag?.selection ?? committed;
+  const activePath = drag?.path && drag.path.length >= 2 ? drag.path : null;
+  // The selection the gesture is adding to stays on screen underneath it.
+  const base = drag?.add ? committed : null;
+  return (
+    <>
+      {base && <SelectionBox fileId={fileId} selection={base} path={null} />}
+      <SelectionBox fileId={fileId} selection={active} path={activePath} />
+    </>
   );
 };
