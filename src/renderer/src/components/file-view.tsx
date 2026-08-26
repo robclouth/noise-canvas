@@ -571,23 +571,6 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
           bpm,
         );
         if (!corner) return;
-        // A drag that starts inside the selection carries it: Alt leaves a copy
-        // behind, a plain drag takes the sound with it.
-        const selection = state.filesSelection[fileId] ?? null;
-        const spectrogram = openFiles[fileId]?.spectrogramData;
-        if (selection && spectrogram) {
-          const duration = spectrogram.numFrames / spectrogram.sampleRate;
-          const time = corner.timeUv * duration;
-          const inside =
-            time >= selection.start &&
-            time <= selection.end &&
-            corner.pitchUv >= selection.pitchLo &&
-            corner.pitchUv <= selection.pitchHi;
-          if (inside) {
-            await state.beginMove(event.altKey);
-            return;
-          }
-        }
         selectionStartRef.current = corner;
         useTransientStore.getState().setSelectionDrag(null);
         return;

@@ -873,7 +873,7 @@ With a selection set, the Edit menu works on it.
 - **Paste** (`Cmd/Ctrl+V`) – picks up whatever was last copied, so you can drop it again, as many times as you like.
 - **Silence Selection** – wipes the selection without taking anything.
 
-Click to put the ghost down. Dragging from inside the selection picks it up too — hold `Alt` while you drag to leave a copy behind. Either way the drop is a single edit in the history, so one undo brings everything back.
+Click to put the ghost down. The drop is a single edit in the history, so one undo brings everything back.
 
 The ghost moves in pitch as well as time: drop it higher or lower and the sound is transposed to match. Hold `Shift` to keep it at its original pitch while you place it. `Esc` puts everything back without painting anything — what you copied is kept, so a later paste still works.
 
