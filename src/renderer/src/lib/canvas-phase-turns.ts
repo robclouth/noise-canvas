@@ -10,7 +10,7 @@ export interface PhaseTurnCanvas {
 }
 
 /** The named pixels of the turned packed state, laid end to end in range order. */
-export type PackedGather = (ranges: Uint32Array) => Float32Array;
+export type PackedGather = (ranges: Uint32Array) => Float32Array | Promise<Float32Array>;
 
 /** A turn to put on the canvas, subtracted when it is being undone. */
 export interface CanvasTurn {
@@ -105,7 +105,7 @@ export async function applyCanvasTurns(
   }
   if (!all.length) return;
   if (canvasAddsExactly === false) {
-    canvas.patchFBODataCompact(gather(all), all);
+    canvas.patchFBODataCompact(await gather(all), all);
     return;
   }
   if (canvasAddsExactly === true) return;
@@ -113,7 +113,7 @@ export async function applyCanvasTurns(
   const sample = samplePixelRanges(all, 64, except);
   if (!sample.length) return;
   const read = await canvas.readPixelRanges(sample);
-  const want = gather(sample);
+  const want = await gather(sample);
   let exact = true;
   for (let i = 0; i < want.length; i++) {
     if (read[i] !== want[i] && !(Number.isNaN(read[i]) && Number.isNaN(want[i]))) {
@@ -124,6 +124,6 @@ export async function applyCanvasTurns(
   canvasAddsExactly = exact;
   if (!exact) {
     console.warn("history: the canvas does not take phase turns exactly; uploading turned pixels instead");
-    canvas.patchFBODataCompact(gather(all), all);
+    canvas.patchFBODataCompact(await gather(all), all);
   }
 }
