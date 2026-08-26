@@ -49,6 +49,8 @@ export interface SelectionClipboardState {
   cutSelection: () => Promise<void>;
   /** Silence the active file's selection. */
   silenceSelection: () => Promise<void>;
+  /** Stamp a copy of the selection directly after it, and select the copy. */
+  duplicateSelection: () => Promise<void>;
   /** Pick the clipboard up so it follows the pointer, starting at `aim` when given. */
   beginPaste: (aim?: { fileId?: string; timeSeconds: number; pitchUv: number }) => void;
   /** Carry what is in flight into another file's view, at the same frequencies. */
@@ -210,6 +212,47 @@ export const createSelectionClipboardSlice = (set: ZustandSet, get: ZustandGet):
     const edit = target(get);
     if (!edit) return false;
     return copyRegion(edit, selection);
+  },
+
+  duplicateSelection: async () => {
+    if (get().placing) return;
+    const edit = target(get);
+    const selection = activeSelectionOf(get, edit);
+    if (!edit || !selection) return;
+
+    // The duplicate takes its own copy and puts the user's clipboard back, so
+    // a later paste still drops what was last copied.
+    const stash = clipboard;
+    try {
+      if (!(await copyRegion(edit, selection))) return;
+      const copied = clipboard;
+      if (!copied) return;
+      const rect = dropRect(copied, selection.end, selection.pitchLo, edit.geometry.spec);
+      if (rect.start >= edit.geometry.totalDuration) return;
+
+      openPlacingSource(edit);
+      const offset = clipboardSourceOffset(copied);
+      // The selection moves onto the copy, so pressing again lays the next one.
+      get().setFileSelection(edit.fileId, { ...rect, end: Math.min(rect.end, edit.geometry.totalDuration) });
+      await commitRegionStrokes(
+        edit,
+        [
+          {
+            state: pasteStrokeState(edit.state, rect, edit.geometry, {
+              path: CLIPBOARD_PATH,
+              timeFraction: offset.timeFraction,
+              pitchFraction: offset.pitchFraction,
+            }),
+            rect,
+          },
+        ],
+        "Duplicate",
+        get,
+      );
+      closePlacingSource(edit.fileId);
+    } finally {
+      clipboard = stash;
+    }
   },
 
   beginPaste: (aim) => {

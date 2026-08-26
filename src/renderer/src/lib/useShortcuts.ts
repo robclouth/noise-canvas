@@ -141,6 +141,17 @@ export function useShortcuts() {
       return;
     }
 
+    // Backspace and Delete wipe the selected region in place.
+    if (event.key === "Backspace" || event.key === "Delete") {
+      const state = useStore.getState();
+      const selection = state.activeFileId ? state.filesSelection[state.activeFileId] : null;
+      if (selection && !state.placing) {
+        event.preventDefault();
+        void state.silenceSelection();
+        return;
+      }
+    }
+
     // Special handling for Shift (hold) - Pick source file position. Shift is
     // also the fine modifier on a parameter control, so a drag under way keeps
     // it off the canvas.

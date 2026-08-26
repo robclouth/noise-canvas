@@ -871,7 +871,8 @@ With a selection set, the Edit menu works on it.
 - **Copy** (`Cmd/Ctrl+C`) – picks the selected sound up. A ghost of it follows the pointer, and the original stays where it was.
 - **Cut** (`Cmd/Ctrl+X`) – the same, except the original goes when the ghost lands.
 - **Paste** (`Cmd/Ctrl+V`) – picks up whatever was last copied, so you can drop it again, as many times as you like.
-- **Silence Selection** – wipes the selection without taking anything.
+- **Duplicate** (`Cmd/Ctrl+D`) – stamps a copy of the selection directly after it, no ghost involved, and moves the selection onto the copy — so pressing it again lays the next one along.
+- **Silence Selection** (`Backspace` or `Delete`) – wipes the selection without taking anything.
 
 Click to put the ghost down. The drop is a single edit in the history, so one undo brings everything back.
 
@@ -967,10 +968,11 @@ Memory climbs with the length and resolution of everything you have open, not wi
 
 - **Undo / Redo** (`Cmd/Ctrl+Z`, `Shift+Cmd/Ctrl+Z`).
 - **Cut / Copy / Paste** (`Cmd/Ctrl+X`, `Cmd/Ctrl+C`, `Cmd/Ctrl+V`) – work on the selection. See [Selecting a Region](#selecting-a-region).
-- **Silence Selection** – empties the selection without copying it.
+- **Duplicate** (`Cmd/Ctrl+D`) – stamps a copy of the selection directly after it. With nothing selected it duplicates the file.
+- **Silence Selection** (`Backspace`) – empties the selection without copying it.
 - **Fill Grid with Brush** (`Cmd/Ctrl+G`) – see [Fill Grid](#fill-grid).
 - **Restore Original** – reloads the unedited file.
-- **Duplicate File** (`Cmd/Ctrl+D`).
+- **Duplicate File**.
 - **Double Length / Half Length** – stretches or shrinks the file's length.
 - **Insert Silence…** (`Cmd/Ctrl+I`) – pushes the file apart and drops empty time in. **Length** is in beats or seconds, and **At** puts it at the file start, at the play start on the time legend, or at the file end.
 
@@ -1011,6 +1013,8 @@ The keys below are the ones your keyboard prints. On a layout that prints someth
 | `Tab`                  | Switch between the brush and selection                 |
 | `Esc`                  | Put a picked-up region back, or clear the selection    |
 | `Cmd/Ctrl+X/C/V`       | Cut / copy / paste the selection                       |
+| `Cmd/Ctrl+D`           | Duplicate the selection in place                       |
+| `Backspace` / `Delete` | Silence the selection                                  |
 | `Cmd/Ctrl+Shift+X/V/D` | Cut, paste or duplicate a stretch of time              |
 | `1`–`9`, `0`           | Select the top palette's first ten brushes             |
 | `a`–`z`                | Select the brush bound to that key                     |

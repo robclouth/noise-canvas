@@ -329,6 +329,15 @@ function App(): React.JSX.Element {
     });
     unsubscribers.push(unsubSilenceSelection);
 
+    const unsubDuplicateSelection = ipcOn("duplicate-selection", () => {
+      const state = useStore.getState();
+      const selection = state.activeFileId ? state.filesSelection[state.activeFileId] : null;
+      // With nothing selected the key keeps its old meaning: duplicate the file.
+      if (selection) void state.duplicateSelection();
+      else if (state.activeFileId && !host.env.isExtension) state.duplicateFile(state.activeFileId);
+    });
+    unsubscribers.push(unsubDuplicateSelection);
+
     const unsubCutTime = ipcOn("cut-time-selection", () => {
       void useStore.getState().cutTimeSelection();
     });
