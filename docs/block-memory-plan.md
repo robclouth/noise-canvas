@@ -400,45 +400,49 @@ committed windowed in 191 ms against 1.4–1.8 s for a whole-file pass, and the
 current tier followed the stroke and the undo hop. Export and save turned out
 to read the audio channels, not the packed state — nothing to migrate there.
 
-Remaining: the in-place packed truth itself. Design for the removal (settled
-2026-08-26):
+The in-place packed truth is gone (2026-08-26). What shipped:
 
-- The store's current tier becomes the read source for every packed consumer,
-  gated on `overlayNodeId === currentId`; a tier that does not hold the
-  current state falls back to a transient whole-array rebuild that reseeds it.
-  Transient whole-file arrays stay legal (reconstruct, setFBOData, checkpoint
-  encode, onset re-detection); only resident ones go.
-- Addon: `historyFootprintChanged`/`historyEncodeDelta` learn a compact
-  `after` (both sides then live as gathered range values), and a windowed
-  `historyApplyDeltas` applies a delta chain into a compact buffer described
-  by a file-absolute range table, preserving each delta's internal order
-  (diffs, turns, residuals) because a later stroke's footprint can overlap an
-  earlier stroke's turn span. Delta spans (diff ∪ turn ranges) parse in JS
-  from the decompressed blob, so hop walks know which pixels to gather; a
-  turn-carrying hop still gathers rest-of-file — a transient, same cost class
-  as today's in-RAM walk.
-- Migration is dual-write: each reader moves to the store one commit at a
-  time with a parity test, while commits and hops keep mutating the array;
-  the final change removes `currentPacked`, the `PackedStateCache`,
-  `spectrogramData.packedData` (field goes optional, dropped after the
-  texture upload — `image.data` is replaced with an empty array once
-  `initTexture` has run; three never re-reads it, and the erase-to-original
-  GPU copy already outlives the CPU array today), and the commit's in-place
-  scatter.
-- Reader inventory still on the array: commit base gather + view build
-  (`store.readRanges` replaces both), `addStroke`'s delta encode (compact
-  both sides) and checkpoint write (`store.readAll` transient), hop walks
-  (windowed delta apply + `store.patch`), the FBO patch after a hop (a
-  compact `patchFBOData` variant), `applyCanvasTurns`' exactness probe and
-  fallback (provider-based reads), hop-synthesis' prefetched state (a
-  synthesis view over the store, reusing the commit view's per-band origins),
-  `restoreOnsetsForNode` (lazy transient read), `resetToCurrent`, and the
-  extension host (same store; only the windowed addon commit stays
-  desktop-only).
+- The tier is the read source, gated on `overlayNodeId === currentId`. A
+  stroke's `addStroke` runs the tier ops before the delta encode: the store
+  patches its own blocks from the painted footprint and walks the tail turns
+  itself (`applyTurnsCollecting`), and the residuals that walk collects are
+  the ones the delta stores — so undo subtracts back exactly over the store
+  with no whole-array walk anywhere. A tier that cannot take the patch drops
+  to a whole snapshot, and turns without a tier walk refuse rather than store
+  an uninvertible delta.
+- The commit is compact end to end: brush.ts reads only the footprint back
+  (`readPixelRanges`), takes the pre-stroke values from the store
+  (`currentRanges`), and `commitStroke` composes the addon's view from the
+  store's pixels with the footprint written over them. The canvas patch and
+  the turn probe read from the store after the stroke is stored (the
+  `PackedGather` is async now); a store that cannot serve marks the FBO out
+  of sync and the next navigation rebuilds whole. Stashed patches slimmed to
+  `{ranges, turns}` — their values live in the tier.
+- Hops walk the deltas windowed over the store (`walkTierValues`) and patch
+  the canvas compactly; the whole-array mirror (`currentPacked`,
+  `currentPackedState`) is deleted, and every fallback reader
+  (`readCurrentPackedData`, onset restore, hop synthesis, `resetToCurrent`)
+  goes FBO → tier → transient reconstruct.
+- `spectrogramData.packedData` is optional and released once the GPU holds
+  the state: `releasePackedData` forces the texture upload (`initTexture`),
+  empties the texture's CPU copy, and drops the field — after the history
+  hookup on mount, after a re-analysis snapshot, and after a cross-anchor
+  restore. The texture seed lives in a ref keyed to the spectrogram object,
+  so the release cannot retrigger the texture effect with nothing to build
+  from.
 
-Then the per-block inverse map (`deriveSideData` already regenerates it in
-milliseconds — the resident copy can go with the same texture-upload trick),
-and the renderer-heap exit measurement.
+Measured (150 s stereo file, fresh profile, renderer private memory, GC'd):
+open+settle 1518 MB before → 468 MB after (the app idles at ~154 MB); after
+a stroke, an undo and a redo 1679 MB → 516 MB. Live runs on the built app
+show the compact route end to end (`commitStroke` logs `windowed:1,
+viewFromStore:1`, hops log `mode:"patch"` at 5–45 ms) with no history parity
+warnings.
+
+Remaining in this phase: the per-block inverse map (`deriveSideData` already
+regenerates it in milliseconds — the resident copy can go with the same
+texture-upload trick once `deriveSpectrogramData`'s stem-split sharing is
+handled), then the phase exit. A hop-synthesis view over the store is a
+follow-up only if the FBO-readback fallback measurably slows undo.
 
 ---
 
