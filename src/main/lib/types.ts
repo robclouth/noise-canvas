@@ -50,6 +50,16 @@ export type AnalysisParams = {
 /** Flat [time0, salience0, time1, salience1, …]; times in seconds. */
 export type PackedOnsets = Float32Array;
 
+/**
+ * One range of a spliced file's new audio that is sample-identical to a range
+ * of its old audio, in samples. What the pieces do not cover is re-analysed.
+ */
+export interface SplicePiece {
+  newStart: number;
+  oldStart: number;
+  length: number;
+}
+
 /** Band layout of a packed spectrogram, as every coefficient pass wants it. */
 export interface PackedLayout {
   numFrames: number;

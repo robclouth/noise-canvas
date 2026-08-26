@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { insertOnsetSpan, insertSpan, removeOnsetSpan, removeSpan } from "../ripple-edits";
+import { insertOnsetSpan, insertSpan, removeOnsetSpan, removeSpan } from "../../../../main/lib/ripple-edits";
 
 const channel = (...values: number[]) => new Float32Array(values);
 

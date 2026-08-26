@@ -1,3 +1,5 @@
+import type { SplicePiece } from "./types";
+
 /**
  * Ramps the samples on both sides of a seam to zero, linearly over
  * `fadeSamples`, so a splice cannot click. Both sides reach silence exactly at
@@ -14,6 +16,18 @@ function declickSeam(channel: Float32Array, seam: number, fadeSamples: number): 
   }
 }
 
+/** The clamped integer bounds a span removal actually uses. */
+function removeBounds(length: number, startSample: number, endSample: number) {
+  const start = Math.max(0, Math.min(length, Math.round(startSample)));
+  const end = Math.max(start, Math.min(length, Math.round(endSample)));
+  return { start, end };
+}
+
+/** The clamped integer position a span insertion actually uses. */
+function insertAt(length: number, atSample: number): number {
+  return Math.max(0, Math.min(length, Math.round(atSample)));
+}
+
 /**
  * Copies of `channels` with `[startSample, endSample)` removed and the gap
  * closed, declicked at the join.
@@ -25,8 +39,7 @@ export function removeSpan(
   fadeSamples = 0,
 ): Float32Array[] {
   return channels.map((source) => {
-    const start = Math.max(0, Math.min(source.length, Math.round(startSample)));
-    const end = Math.max(start, Math.min(source.length, Math.round(endSample)));
+    const { start, end } = removeBounds(source.length, startSample, endSample);
     const result = new Float32Array(source.length - (end - start));
     result.set(source.subarray(0, start), 0);
     result.set(source.subarray(end), start);
@@ -98,7 +111,7 @@ export function insertSpan(
 ): Float32Array[] {
   const insertLength = insert[0]?.length ?? 0;
   return channels.map((source, ch) => {
-    const at = Math.max(0, Math.min(source.length, Math.round(atSample)));
+    const at = insertAt(source.length, atSample);
     const result = new Float32Array(source.length + insertLength);
     result.set(source.subarray(0, at), 0);
     const inserted = insert[ch] ?? insert[0];
@@ -110,4 +123,45 @@ export function insertSpan(
     }
     return result;
   });
+}
+
+/**
+ * The ranges of `removeSpan`'s result that are sample-identical to the source:
+ * everything except the declick fades round the seam. Same bounds as the audio
+ * edit, so the pieces cannot drift from it.
+ */
+export function removeSpanPieces(
+  sourceLength: number,
+  startSample: number,
+  endSample: number,
+  fadeSamples = 0,
+): SplicePiece[] {
+  const { start, end } = removeBounds(sourceLength, startSample, endSample);
+  if (end <= start) return [{ newStart: 0, oldStart: 0, length: sourceLength }];
+  const fade = Math.max(0, fadeSamples);
+  const pieces: SplicePiece[] = [];
+  if (start - fade > 0) pieces.push({ newStart: 0, oldStart: 0, length: start - fade });
+  const tail = sourceLength - end - fade;
+  if (tail > 0) pieces.push({ newStart: start + fade, oldStart: end + fade, length: tail });
+  return pieces;
+}
+
+/**
+ * The ranges of `insertSpan`'s result that are sample-identical to the source:
+ * everything except the inserted span and the declick fades round its seams.
+ */
+export function insertSpanPieces(
+  sourceLength: number,
+  atSample: number,
+  insertLength: number,
+  fadeSamples = 0,
+): SplicePiece[] {
+  const at = insertAt(sourceLength, atSample);
+  if (insertLength <= 0) return [{ newStart: 0, oldStart: 0, length: sourceLength }];
+  const fade = Math.max(0, Math.min(fadeSamples, insertLength));
+  const pieces: SplicePiece[] = [];
+  if (at - fade > 0) pieces.push({ newStart: 0, oldStart: 0, length: at - fade });
+  const tail = sourceLength - at - fade;
+  if (tail > 0) pieces.push({ newStart: at + insertLength + fade, oldStart: at + fade, length: tail });
+  return pieces;
 }

@@ -7,6 +7,7 @@ import {
   CommitWindow,
   PackedLayout,
   PhaseTurns,
+  SplicePiece,
 } from "../main/lib/types";
 
 // Type definitions for window globals
@@ -68,6 +69,42 @@ declare global {
         onsets: Float32Array;
         // What the whole-file onset pass learned, so later passes can re-derive
         // one span of the file and still judge it on the file's own terms.
+        onsetOdfMax?: number;
+        onsetBandMax?: Float32Array;
+        format: string;
+        codec: string;
+        channels: number;
+      }>;
+      /** The splice grid in samples; edits quantise their lengths to it. */
+      spliceQuantSamples: (sampleRate: number) => number;
+      /**
+       * Analyse spliced audio against the file's previous analysis: ranges the
+       * pieces mark as unchanged copy across, only the seams re-analyse. Same
+       * result shape as `analyseBuffer` with empty onsets — the caller
+       * supplies the spliced map. Rejects when the layouts cannot splice.
+       */
+      spliceAnalyseChannels: (
+        channelArrays: Float32Array[],
+        sampleRate: number,
+        params: AnalysisParams,
+        oldPacked: Float32Array,
+        oldLayout: PackedLayout,
+        pieces: SplicePiece[],
+      ) => Promise<{
+        data: Float32Array;
+        inverseMap: Float32Array;
+        metadata: Float32Array;
+        textureWidth: number;
+        textureHeight: number;
+        numFrames: number;
+        numChannels: number;
+        numBands: number;
+        bandOffsets: Uint32Array;
+        bandStepLog2s: Int32Array;
+        bandLengths: Uint32Array;
+        sampleRate: number;
+        magnitudeEnergy: number;
+        onsets: Float32Array;
         onsetOdfMax?: number;
         onsetBandMax?: Float32Array;
         format: string;

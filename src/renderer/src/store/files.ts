@@ -10,10 +10,17 @@ import { host } from "../lib/host";
 import { diag } from "../lib/diag-log";
 import { remainingCoefficientBudget, usedBudgetFraction } from "../lib/gpu-budget";
 import { toChannelCount } from "../lib/channel-mix";
-import { insertSilence, type InsertSilenceValues } from "../lib/insert-silence";
+import { insertSilence, silenceCutSample, type InsertSilenceValues } from "../lib/insert-silence";
+import { insertOnsetSpan, insertSpanPieces, removeOnsetSpan } from "../../../main/lib/ripple-edits";
 import type { Selection } from "../lib/selection";
 import { isBundledPath, resolveBundledPath } from "../lib/bundled-samples";
-import type { AnalysisParams, CommitLevels, CommitStrokeResult, PackedOnsets } from "../../../main/lib/types";
+import type {
+  AnalysisParams,
+  CommitLevels,
+  CommitStrokeResult,
+  PackedOnsets,
+  SplicePiece,
+} from "../../../main/lib/types";
 import {
   computeOutputLevels,
   measureOutputLevels,
@@ -651,6 +658,17 @@ function bandLayout(data: SpectrogramData) {
  * road instead. Replaces the file's spectrogram, audio and peak, and adds the
  * result to its history; the renderer is optional throughout.
  */
+/**
+ * A splice length rounded to the analysis splice grid (~1.5 ms), so the tail
+ * rigid-moves in the splice analysis. A length that rounds to nothing comes
+ * back unrounded: the edit stays exact and takes the slow road.
+ */
+export function quantizeSpliceLength(samples: number, sampleRate: number): number {
+  const quant = host.analysis.spliceQuantSamples?.(sampleRate) ?? 1;
+  const rounded = Math.round(samples / quant) * quant;
+  return rounded > 0 ? rounded : Math.round(samples);
+}
+
 /** Onsets a caller already knows for the rebuilt file, in place of detection. */
 export type PrecomputedOnsets = {
   onsets: Float32Array;
@@ -664,6 +682,7 @@ export async function rebuildFileFromCurrentAudio(
   snapshot: { kind: "resize" | "reanalyze"; label: string },
   onVisible?: () => void,
   precomputedOnsets?: PrecomputedOnsets,
+  pieces?: (oldFrames: number) => SplicePiece[],
 ): Promise<void> {
   return serializeFileTask(fileId, async () => {
     // Navigation moves the current node and then starts synthesis off the
@@ -682,7 +701,7 @@ export async function rebuildFileFromCurrentAudio(
     for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
       channels.push(buffer.getChannelData(ch));
     }
-    await rebuildFileWithChannels(set, fileId, transform(channels), snapshot, onVisible, precomputedOnsets);
+    await rebuildFileWithChannels(set, fileId, transform(channels), snapshot, onVisible, precomputedOnsets, pieces);
   });
 }
 
@@ -738,6 +757,7 @@ async function rebuildFileWithChannels(
   snapshot: { kind: "resize" | "reanalyze"; label: string },
   onVisible?: () => void,
   precomputedOnsets?: PrecomputedOnsets,
+  pieces?: (oldFrames: number) => SplicePiece[],
 ): Promise<void> {
   const file = openFiles[fileId];
   if (!file?.spectrogramData) return;
@@ -759,7 +779,32 @@ async function rebuildFileWithChannels(
     audioBuffer.getChannelData(ch).set(channels[ch]);
   }
 
-  const result = await host.analysis.analyseBuffer(audioBuffer, analysisParams);
+  // A splice-shaped rebuild reuses the old coefficients wherever the pieces
+  // say the audio is unchanged; anything that cannot splice takes the full
+  // analysis road below.
+  let result: Awaited<ReturnType<typeof host.analysis.analyseBuffer>> | undefined;
+  if (pieces && precomputedOnsets && host.analysis.spliceAnalyseChannels) {
+    try {
+      result = await host.analysis.spliceAnalyseChannels(
+        channels,
+        spectrogramData.sampleRate,
+        analysisParams,
+        spectrogramData.packedData,
+        {
+          numFrames: spectrogramData.numFrames,
+          numChannels: spectrogramData.numChannels,
+          numBands: spectrogramData.numBands,
+          bandOffsets: spectrogramData.synthesisMetadata.bandOffsets,
+          bandStepLog2s: spectrogramData.synthesisMetadata.bandStepLog2s,
+          bandLengths: spectrogramData.synthesisMetadata.bandLengths,
+        },
+        pieces(spectrogramData.numFrames),
+      );
+    } catch (error) {
+      console.warn("Splice analysis fell back to a full analysis:", error);
+    }
+  }
+  if (!result) result = await host.analysis.analyseBuffer(audioBuffer, analysisParams);
 
   if (!openFiles[fileId]) return;
 
@@ -2694,6 +2739,22 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const file = fileId ? openFiles[fileId] : undefined;
       if (!fileId || !file) return;
 
+      // The resize moves the onsets rigidly: doubling repeats the map a file
+      // length later, halving keeps the first half.
+      const spec = file.spectrogramData;
+      const fileOnsets = file.onsets;
+      const duration = spec ? spec.numFrames / spec.sampleRate : 0;
+      const precomputedOnsets =
+        spec && fileOnsets
+          ? {
+              onsets:
+                factor === 2
+                  ? insertOnsetSpan(fileOnsets, duration, duration, fileOnsets)
+                  : removeOnsetSpan(fileOnsets, duration / 2, duration),
+              reference: file.onsetReference,
+            }
+          : undefined;
+
       try {
         await rebuildFileFromCurrentAudio(
           set,
@@ -2712,6 +2773,15 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
               return dst;
             }),
           { kind: "resize", label: "Resize" },
+          undefined,
+          precomputedOnsets,
+          (oldFrames) =>
+            factor === 2
+              ? [
+                  { newStart: 0, oldStart: 0, length: oldFrames },
+                  { newStart: oldFrames, oldStart: 0, length: oldFrames },
+                ]
+              : [{ newStart: 0, oldStart: 0, length: Math.floor(oldFrames / 2) }],
         );
       } catch (error) {
         console.error("Resize failed:", error);
@@ -2748,9 +2818,22 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
       const { sampleRate } = current.spectrogramData;
       const bpm = get().filepathsBpm[current.filePath] || 120;
       const seconds = values.unit === "beats" ? (60 / bpm) * values.length : values.length;
-      const padSamples = Math.round(seconds * sampleRate);
-      if (padSamples <= 0) return;
+      const requestedPad = Math.round(seconds * sampleRate);
+      if (requestedPad <= 0) return;
+      const padSamples = quantizeSpliceLength(requestedPad, sampleRate);
       const playStartSample = (get().filesPlaybackStartTime[fileId] ?? 0) * sampleRate;
+
+      // The silence moves the onsets rigidly, so the rebuild splices the map
+      // instead of detecting it again.
+      const numFrames = current.spectrogramData.numFrames;
+      const cutSample = silenceCutSample(values.position, numFrames, playStartSample);
+      const fileOnsets = current.onsets;
+      const precomputedOnsets = fileOnsets
+        ? {
+            onsets: insertOnsetSpan(fileOnsets, cutSample / sampleRate, padSamples / sampleRate, new Float32Array(0)),
+            reference: current.onsetReference,
+          }
+        : undefined;
 
       const clearBusy = () =>
         set(
@@ -2771,6 +2854,9 @@ export const createFilesSlice = (set: ZustandSet, get: ZustandGet): FilesState =
           (channels) => insertSilence(channels, values.position, padSamples, playStartSample),
           { kind: "resize", label: "Insert silence" },
           clearBusy,
+          precomputedOnsets,
+          (oldFrames) =>
+            insertSpanPieces(oldFrames, silenceCutSample(values.position, oldFrames, playStartSample), padSamples, 0),
         );
       } catch (error) {
         console.error("Insert silence failed:", error);

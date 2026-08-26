@@ -3,7 +3,15 @@ import { produce } from "immer";
 import type { AnalysisParams } from "../../../main/lib/types";
 import { host } from "../lib/host";
 import { serializeEditCommand } from "../lib/file-task-queue";
-import { insertOnsetSpan, insertSpan, removeOnsetSpan, removeSpan } from "../lib/ripple-edits";
+import {
+  insertOnsetSpan,
+  insertSpan,
+  insertSpanPieces,
+  removeOnsetSpan,
+  removeSpan,
+  removeSpanPieces,
+} from "../../../main/lib/ripple-edits";
+import type { SplicePiece } from "../../../main/lib/types";
 
 const SPLICE_FADE_SECONDS = 0.005;
 // Onsets this close to a splice seam are dropped rather than carried over: the
@@ -12,7 +20,7 @@ const ONSET_SEAM_GUARD_SECONDS = 0.01;
 import { fullHeightSelection, selectionFrameRange } from "../lib/selection";
 import type { ClipboardRegion } from "../lib/selection-clip";
 import { getSelectionClipboard } from "./selection-clipboard";
-import { openFiles, rebuildFileFromCurrentAudio, type PrecomputedOnsets } from "./files";
+import { openFiles, quantizeSpliceLength, rebuildFileFromCurrentAudio, type PrecomputedOnsets } from "./files";
 import type { OpenFile, State, ZustandGet, ZustandSet } from "./types";
 
 export interface SelectionRippleState {
@@ -57,6 +65,7 @@ async function rippleRebuild(
   transform: (channels: Float32Array[]) => Float32Array[],
   onVisible?: () => void,
   precomputedOnsets?: PrecomputedOnsets,
+  pieces?: (oldFrames: number) => SplicePiece[],
 ): Promise<boolean> {
   const clearBusy = () =>
     set(
@@ -80,6 +89,7 @@ async function rippleRebuild(
         onVisible?.();
       },
       precomputedOnsets,
+      pieces,
     );
     return true;
   } catch (error) {
@@ -149,7 +159,12 @@ export const createSelectionRippleSlice = (set: ZustandSet, get: ZustandGet): Se
       if (!(await get().stashSelection(widened))) return;
 
       const startSample = widened.start * edit.sampleRate;
-      const endSample = widened.end * edit.sampleRate;
+      // The cut length lands on the splice grid, so the splice analysis moves
+      // the tail rigidly; the difference stays under the seam fade.
+      const removed = quantizeSpliceLength((widened.end - widened.start) * edit.sampleRate, edit.sampleRate);
+      if (removed <= 0) return;
+      const endSample = startSample + removed;
+      const cutEnd = widened.start + removed / edit.sampleRate;
       const fade = Math.round(SPLICE_FADE_SECONDS * edit.sampleRate);
       await rippleRebuild(
         set,
@@ -158,10 +173,11 @@ export const createSelectionRippleSlice = (set: ZustandSet, get: ZustandGet): Se
         "Cut time",
         (channels) => removeSpan(channels, startSample, endSample, fade),
         () => {
-          const newDuration = edit.duration - (widened.end - widened.start);
+          const newDuration = edit.duration - (cutEnd - widened.start);
           get().setFilePlaybackStartTime(edit.fileId, Math.max(0, Math.min(widened.start, newDuration)));
         },
-        splicedOnsets(edit, (onsets) => removeOnsetSpan(onsets, widened.start, widened.end, ONSET_SEAM_GUARD_SECONDS)),
+        splicedOnsets(edit, (onsets) => removeOnsetSpan(onsets, widened.start, cutEnd, ONSET_SEAM_GUARD_SECONDS)),
+        (oldFrames) => removeSpanPieces(oldFrames, startSample, endSample, fade),
       );
     }),
 
@@ -180,7 +196,18 @@ export const createSelectionRippleSlice = (set: ZustandSet, get: ZustandGet): Se
       );
       const insert = await clipboardSpanAudio(clipboard);
       if (!insert) return;
-      const spanSeconds = (insert[0]?.length ?? 0) / clipboard.spec.sampleRate;
+      // The inserted length lands on the splice grid; the clipboard audio is
+      // padded or trimmed by at most half a grid step, under the seam fade.
+      const spanSamples = quantizeSpliceLength(insert[0]?.length ?? 0, edit.sampleRate);
+      if (spanSamples <= 0) return;
+      const fitted = insert.map((channel) => {
+        if (channel.length === spanSamples) return channel;
+        if (channel.length > spanSamples) return channel.subarray(0, spanSamples);
+        const padded = new Float32Array(spanSamples);
+        padded.set(channel, 0);
+        return padded;
+      });
+      const spanSeconds = spanSamples / clipboard.spec.sampleRate;
 
       const fade = Math.round(SPLICE_FADE_SECONDS * edit.sampleRate);
       // The clipboard's onsets in the inserted span's own time: it stores them
@@ -196,7 +223,7 @@ export const createSelectionRippleSlice = (set: ZustandSet, get: ZustandGet): Se
         edit,
         "Pasting time...",
         "Paste time",
-        (channels) => insertSpan(channels, at * edit.sampleRate, insert, fade),
+        (channels) => insertSpan(channels, at * edit.sampleRate, fitted, fade),
         () => {
           get().setFileSelection(edit.fileId, fullHeightSelection(at, at + spanSeconds));
           get().setFilePlaybackStartTime(edit.fileId, at);
@@ -204,6 +231,7 @@ export const createSelectionRippleSlice = (set: ZustandSet, get: ZustandGet): Se
         splicedOnsets(edit, (onsets) =>
           insertOnsetSpan(onsets, at, spanSeconds, new Float32Array(clipLocal), ONSET_SEAM_GUARD_SECONDS),
         ),
+        (oldFrames) => insertSpanPieces(oldFrames, at * edit.sampleRate, spanSamples, fade),
       );
     }),
 
@@ -218,14 +246,23 @@ export const createSelectionRippleSlice = (set: ZustandSet, get: ZustandGet): Se
       const startSample = Math.round(widened.start * edit.sampleRate);
       const endSample = Math.round(widened.end * edit.sampleRate);
       const fade = Math.round(SPLICE_FADE_SECONDS * edit.sampleRate);
-      const span = widened.end - widened.start;
+      // The copy's length lands on the splice grid, clamped to the audio that
+      // exists after the selection start.
+      const oldFrames = edit.file.spectrogramData ? edit.file.spectrogramData.numFrames : endSample;
+      const copyLength = Math.min(
+        quantizeSpliceLength(endSample - startSample, edit.sampleRate),
+        oldFrames - startSample,
+      );
+      if (copyLength <= 0) return;
+      const span = copyLength / edit.sampleRate;
       // The copy carries the span's own onsets, in the copy's own time.
       const fileOnsets = edit.file.onsets;
       const copyOnsets: number[] = [];
       if (fileOnsets) {
         for (let i = 0; i + 1 < fileOnsets.length; i += 2) {
           const time = fileOnsets[i];
-          if (time >= widened.start && time < widened.end) copyOnsets.push(time - widened.start, fileOnsets[i + 1]);
+          if (time >= widened.start && time < widened.start + span)
+            copyOnsets.push(time - widened.start, fileOnsets[i + 1]);
         }
       }
       await rippleRebuild(
@@ -237,7 +274,7 @@ export const createSelectionRippleSlice = (set: ZustandSet, get: ZustandGet): Se
           insertSpan(
             channels,
             endSample,
-            channels.map((channel) => channel.slice(startSample, endSample)),
+            channels.map((channel) => channel.slice(startSample, startSample + copyLength)),
             fade,
           ),
         () => {
@@ -247,6 +284,16 @@ export const createSelectionRippleSlice = (set: ZustandSet, get: ZustandGet): Se
         splicedOnsets(edit, (onsets) =>
           insertOnsetSpan(onsets, widened.end, span, new Float32Array(copyOnsets), ONSET_SEAM_GUARD_SECONDS),
         ),
+        (frames) => {
+          // The copy itself is old audio too, so it rides in as a third piece
+          // between the head and the tail.
+          const base = insertSpanPieces(frames, endSample, copyLength, fade);
+          const seamFade = Math.min(fade, copyLength);
+          const copyBody = copyLength - 2 * seamFade;
+          if (copyBody > 0)
+            base.push({ newStart: endSample + seamFade, oldStart: startSample + seamFade, length: copyBody });
+          return base;
+        },
       );
     }),
 });

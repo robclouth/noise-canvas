@@ -7,7 +7,8 @@
     "src/extension/webview/**/*",
     "src/preload/*.d.ts",
     "src/main/lib/types.ts",
-    "src/main/lib/audio-extensions.ts"
+    "src/main/lib/audio-extensions.ts",
+    "src/main/lib/ripple-edits.ts"
   ],
   "compilerOptions": {
     "composite": true,

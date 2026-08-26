@@ -381,6 +381,174 @@ static bool writeOutputAudio(const std::vector<std::vector<float>> &audioChannel
     return true;
 }
 
+// ─── Shared analysis layout ──────────────────────────────────────────────────
+
+/** The packed band tables and texture dimensions an analysis produces. */
+struct SpectrogramLayout
+{
+    int numBands = 0;
+    size_t totalCoefficients = 0;
+    int textureWidth = 0;
+    int textureHeight = 0;
+    std::vector<uint32_t> bandOffsets;
+    std::vector<int32_t> bandStepLog2s;
+    std::vector<uint32_t> bandLengths;
+    std::vector<float> bandFreqsHz;
+};
+
+/** The layout `analyzer` produces over `numFrames` frames at `sampleRate`. */
+static SpectrogramLayout computeSpectrogramLayout(const gaborator::analyzer<float> &analyzer,
+                                                  double sampleRate, size_t numFrames)
+{
+    SpectrogramLayout layout;
+    const int bandBegin = analyzer.bandpass_bands_begin();
+    layout.numBands = analyzer.bandpass_bands_end() - bandBegin;
+    if (layout.numBands <= 0)
+        return layout;
+    layout.bandOffsets.resize(layout.numBands);
+    layout.bandStepLog2s.resize(layout.numBands);
+    layout.bandLengths.resize(layout.numBands);
+    layout.bandFreqsHz.resize(layout.numBands);
+    for (int i = 0; i < layout.numBands; ++i)
+    {
+        const int gbno = bandBegin + i;
+        const int stepLog2 = analyzer.band_step_log2(gbno);
+        const size_t len = (numFrames > 0) ? ((numFrames - 1) >> stepLog2) + 1 : 0;
+        layout.bandOffsets[i] = static_cast<uint32_t>(layout.totalCoefficients);
+        layout.bandStepLog2s[i] = stepLog2;
+        layout.bandLengths[i] = static_cast<uint32_t>(len);
+        layout.bandFreqsHz[i] = static_cast<float>(analyzer.bandpass_band_ff(gbno) * sampleRate);
+        layout.totalCoefficients += len;
+    }
+    layout.textureWidth = (int)std::min((size_t)MAX_TEXTURE_SIZE, layout.totalCoefficients);
+    layout.textureHeight =
+        (layout.totalCoefficients > 0)
+            ? (int)((layout.totalCoefficients + (size_t)layout.textureWidth - 1) / (size_t)layout.textureWidth)
+            : 0;
+    return layout;
+}
+
+/** Writes the per-pixel (sample time, band index) inverse map for `layout`. */
+static void fillInverseMap(const SpectrogramLayout &layout, float *out, size_t outLen)
+{
+    for (int band = 0; band < layout.numBands; ++band)
+    {
+        const uint64_t timeStep = 1ULL << layout.bandStepLog2s[band];
+        for (uint32_t i = 0; i < layout.bandLengths[band]; ++i)
+        {
+            const size_t idx = ((size_t)layout.bandOffsets[band] + i) * 2;
+            if (idx + 1 >= outLen)
+                return;
+            out[idx + 0] = static_cast<float>(i * timeStep);
+            out[idx + 1] = static_cast<float>(band);
+        }
+    }
+}
+
+/** Writes the per-band metadata pixels (offset, length, stepLog2, freqHz). */
+static void fillBandMetadata(const SpectrogramLayout &layout, float *out, size_t outLen)
+{
+    for (int i = 0; i < layout.numBands; ++i)
+    {
+        const size_t idx = (size_t)i * 4;
+        if (idx + 3 >= outLen)
+            return;
+        out[idx + 0] = static_cast<float>(layout.bandOffsets[i]);
+        out[idx + 1] = static_cast<float>(layout.bandLengths[i]);
+        out[idx + 2] = static_cast<float>(layout.bandStepLog2s[i]);
+        out[idx + 3] = layout.bandFreqsHz[i];
+    }
+}
+
+/**
+ * One band's coefficients out of an analyzed coefficient set, ordered by time:
+ * fills `out[k - k0]` for band-local bins k0..k0+count-1. Bins the analysis did
+ * not produce stay zero.
+ */
+static void harvestBandCoefs(gaborator::coefs<float> &coefs, int gbno, int32_t stepLog2,
+                             int64_t k0, size_t count, int64_t t0, int64_t t1,
+                             std::vector<std::complex<float>> &out)
+{
+    out.assign(count, {0.0f, 0.0f});
+    gaborator::process(
+        [&](int, int64_t t, std::complex<float> &coef)
+        {
+            const int64_t rel = (t >> stepLog2) - k0;
+            if (rel < 0 || rel >= (int64_t)count)
+                return;
+            out[(size_t)rel] = coef;
+        },
+        gbno, gbno + 1, t0, t1, coefs);
+}
+
+// ─── Splice grid and zero-phase decimation ───────────────────────────────────
+
+/**
+ * The splice grid, as a power of two: an edit whose length is a multiple of
+ * `1 << spliceQuantLog2` keeps every band with a step at or below the grid on
+ * its own bin grid, so those bands rigid-move under the splice instead of
+ * re-analysing. About 1.5 ms of audio.
+ */
+static int spliceQuantLog2(double sampleRate)
+{
+    const int f = (int)std::lround(std::log2(std::max(1.0, sampleRate) * 0.0015));
+    return std::min(8, std::max(4, f));
+}
+
+/**
+ * Kaiser-windowed halfband lowpass, `halfTaps` taps each side of the centre.
+ * Zero-phase by construction: convolved with the centre tap on the kept sample.
+ */
+static std::vector<double> designHalfbandKernel(int halfTaps, double beta)
+{
+    const auto bessel0 = [](double v)
+    {
+        double sum = 1.0, term = 1.0;
+        for (int k = 1; k < 40; ++k)
+        {
+            const double f = v / (2.0 * k);
+            term *= f * f;
+            sum += term;
+        }
+        return sum;
+    };
+    std::vector<double> taps(2 * halfTaps + 1, 0.0);
+    const double denom = bessel0(beta);
+    for (int n = -halfTaps; n <= halfTaps; ++n)
+    {
+        double v = 0.0;
+        if (n == 0)
+            v = 0.5;
+        else if (n % 2 != 0)
+        {
+            const double sinc = std::sin(M_PI * n / 2.0) / (M_PI * n);
+            const double r = (double)n / halfTaps;
+            v = sinc * bessel0(beta * std::sqrt(std::max(0.0, 1.0 - r * r))) / denom;
+        }
+        taps[n + halfTaps] = v;
+    }
+    return taps;
+}
+
+/** Halves `x`'s rate, zero-phase, reading zeros outside the array. */
+static void downsampleByTwo(const std::vector<float> &x, const std::vector<double> &taps,
+                            std::vector<float> &out)
+{
+    const int64_t half = ((int64_t)taps.size() - 1) / 2;
+    const int64_t n = (int64_t)x.size();
+    out.assign((size_t)(n >> 1), 0.0f);
+    for (int64_t k = 0; k < (int64_t)out.size(); ++k)
+    {
+        const int64_t c = 2 * k;
+        double acc = 0.0;
+        const int64_t jFrom = std::max<int64_t>(-half, -c);
+        const int64_t jTo = std::min<int64_t>(half, n - 1 - c);
+        for (int64_t j = jFrom; j <= jTo; ++j)
+            acc += taps[(size_t)(j + half)] * x[(size_t)(c + j)];
+        out[(size_t)k] = (float)acc;
+    }
+}
+
 class AnalyzeWorker : public Napi::AsyncWorker
 {
 public:
@@ -432,31 +600,19 @@ public:
         gaborator::analyzer<float> analyzer(params);
 
         int bandBegin = analyzer.bandpass_bands_begin();
-        numBands = analyzer.bandpass_bands_end() - bandBegin;
+        SpectrogramLayout layout = computeSpectrogramLayout(analyzer, sampleRate, numFrames);
+        numBands = layout.numBands;
         if (numBands < 0)
         {
             SetError("Gaborator analysis resulted in a negative number of bands.");
             return;
         }
 
-        bandOffsets.resize(numBands);
-        bandStepLog2s.resize(numBands);
-        bandLengths.resize(numBands);
-        bandFreqsHz.resize(numBands);
-        size_t totalComplexCoefficients = 0;
-
-        for (int i = 0; i < numBands; ++i)
-        {
-            int gbno = bandBegin + i;
-            int stepLog2 = analyzer.band_step_log2(gbno);
-            double centerFreq = analyzer.bandpass_band_ff(gbno) * sampleRate;
-            size_t len = (numFrames > 0) ? ((numFrames - 1) >> stepLog2) + 1 : 0;
-            bandOffsets[i] = static_cast<uint32_t>(totalComplexCoefficients);
-            bandStepLog2s[i] = stepLog2;
-            bandLengths[i] = static_cast<uint32_t>(len);
-            bandFreqsHz[i] = centerFreq;
-            totalComplexCoefficients += len;
-        }
+        bandOffsets = layout.bandOffsets;
+        bandStepLog2s = layout.bandStepLog2s;
+        bandLengths = layout.bandLengths;
+        bandFreqsHz = layout.bandFreqsHz;
+        size_t totalComplexCoefficients = layout.totalCoefficients;
 
         // The coefficient cap is the texture dimension limit or the caller's
         // GPU-memory budget, whichever is smaller. Checked before any
@@ -476,8 +632,8 @@ public:
             return;
         }
 
-        textureWidth = std::min((size_t)MAX_TEXTURE_SIZE, totalComplexCoefficients);
-        textureHeight = (totalComplexCoefficients > 0) ? (totalComplexCoefficients + textureWidth - 1) / textureWidth : 0;
+        textureWidth = layout.textureWidth;
+        textureHeight = layout.textureHeight;
 
         size_t floatsPerPixel = 4;
         size_t dataFloatCount = (size_t)textureWidth * textureHeight * floatsPerPixel;
@@ -489,28 +645,9 @@ public:
 
         size_t maxPixelIndex = (size_t)textureWidth * textureHeight;
 
-        size_t floatsPerMetaPixel = 4;
-        size_t metadataFloatCount = (size_t)numBands * floatsPerMetaPixel;
-        metadata.resize(metadataFloatCount);
-
-        for (int i = 0; i < numBands; ++i)
-        {
-            metadata[i * floatsPerMetaPixel + 0] = static_cast<float>(bandOffsets[i]);
-            metadata[i * floatsPerMetaPixel + 1] = static_cast<float>(bandLengths[i]);
-            metadata[i * floatsPerMetaPixel + 2] = static_cast<float>(bandStepLog2s[i]);
-            metadata[i * floatsPerMetaPixel + 3] = bandFreqsHz[i];
-        }
-
-        for (int bandIdx = 0; bandIdx < numBands; ++bandIdx)
-        {
-            uint64_t timeStep = 1ULL << bandStepLog2s[bandIdx];
-            for (uint32_t i = 0; i < bandLengths[bandIdx]; ++i)
-            {
-                size_t linearPixelIndex = bandOffsets[bandIdx] + i;
-                inverseMap[linearPixelIndex * 2 + 0] = static_cast<float>(i * timeStep);
-                inverseMap[linearPixelIndex * 2 + 1] = static_cast<float>(bandIdx);
-            }
-        }
+        metadata.assign((size_t)numBands * 4, 0.0f);
+        fillBandMetadata(layout, metadata.data(), metadata.size());
+        fillInverseMap(layout, inverseMap.data(), inverseMap.size());
 
         std::vector<gaborator::coefs<float>> allCoefs;
         allCoefs.reserve(channels);
@@ -680,6 +817,619 @@ Napi::Value AnalyzeAsync(const Napi::CallbackInfo &info)
     AnalyzeWorker *worker = new AnalyzeWorker(env, planarInput, channels, sampleRate, paramsJs);
     worker->Queue();
     return worker->GetPromise();
+}
+
+// ─── Splice re-analysis ──────────────────────────────────────────────────────
+
+static inline int64_t floorDivInt64(int64_t a, int64_t b)
+{
+    return (a >= 0) ? a / b : -((-a + b - 1) / b);
+}
+
+/**
+ * Rebuilds a file's packed coefficients after a time splice without a
+ * full-file analysis. `pieces` names the ranges of the new audio that are
+ * sample-identical to ranges of the old audio; their coefficients copy across
+ * with the constant per-band phase rotation a rigid shift causes under the
+ * global phase convention. Only the rest of the audio is analysed: fine bands
+ * over windows round the seams at full rate, coarse bands from decimated
+ * audio on the same absolute band grid. Matches a full analysis of the same
+ * audio to float rounding.
+ */
+class SpliceAnalyzeWorker : public Napi::AsyncWorker
+{
+public:
+    SpliceAnalyzeWorker(Napi::Env env, const Napi::Array &planarInput, double sampleRate,
+                        const Napi::Object &paramsJs, const Napi::Float32Array &oldPackedJs,
+                        const Napi::Object &oldLayoutObj, const Napi::Array &piecesJs,
+                        const Napi::Object &outObj)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), sampleRate(sampleRate)
+    {
+        channels = (int)planarInput.Length();
+        audioRefs.reserve((size_t)std::max(channels, 0));
+        size_t length = 0;
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            Napi::Float32Array channelData = planarInput.Get((uint32_t)ch).As<Napi::Float32Array>();
+            audioRefs.push_back(Napi::Reference<Napi::Float32Array>::New(channelData, 1));
+            newAudio.push_back(channelData.Data());
+            const size_t channelLength = channelData.ElementLength();
+            if (ch == 0 || channelLength < length)
+                length = channelLength;
+        }
+        newFrames = length;
+
+        bandsPerOctave = paramsJs.Get("bandsPerOctave").As<Napi::Number>().Int32Value();
+        fminHz = paramsJs.Get("minFreq").As<Napi::Number>().DoubleValue();
+        if (paramsJs.Has("maxCoefficients") && paramsJs.Get("maxCoefficients").IsNumber())
+        {
+            double v = paramsJs.Get("maxCoefficients").As<Napi::Number>().DoubleValue();
+            if (v > 0)
+                maxCoefficientBudget = (size_t)v;
+        }
+
+        oldPackedRef = Napi::Reference<Napi::Float32Array>::New(oldPackedJs, 1);
+        oldPacked = oldPackedJs.Data();
+        oldPackedLen = oldPackedJs.ElementLength();
+
+        oldNumFrames = oldLayoutObj.Get("numFrames").As<Napi::Number>().Int64Value();
+        oldNumChannels = oldLayoutObj.Get("numChannels").As<Napi::Number>().Int32Value();
+        oldNumBands = oldLayoutObj.Get("numBands").As<Napi::Number>().Int32Value();
+        Napi::Uint32Array bo = oldLayoutObj.Get("bandOffsets").As<Napi::Uint32Array>();
+        oldBandOffsets.assign(bo.Data(), bo.Data() + bo.ElementLength());
+        Napi::Uint32Array bl = oldLayoutObj.Get("bandLengths").As<Napi::Uint32Array>();
+        oldBandLengths.assign(bl.Data(), bl.Data() + bl.ElementLength());
+        Napi::Int32Array bs = oldLayoutObj.Get("bandStepLog2s").As<Napi::Int32Array>();
+        oldBandStepLog2s.assign(bs.Data(), bs.Data() + bs.ElementLength());
+
+        const uint32_t pieceCount = piecesJs.Length();
+        for (uint32_t i = 0; i < pieceCount; ++i)
+        {
+            Napi::Object p = piecesJs.Get(i).As<Napi::Object>();
+            pieces.push_back({p.Get("newStart").As<Napi::Number>().Int64Value(),
+                              p.Get("oldStart").As<Napi::Number>().Int64Value(),
+                              p.Get("length").As<Napi::Number>().Int64Value()});
+        }
+
+        // Caller-allocated outputs, filled on the worker thread.
+        Napi::Float32Array dataJs = outObj.Get("data").As<Napi::Float32Array>();
+        outDataRef = Napi::Reference<Napi::Float32Array>::New(dataJs, 1);
+        outData = dataJs.Data();
+        outDataLen = dataJs.ElementLength();
+        Napi::Float32Array mapJs = outObj.Get("inverseMap").As<Napi::Float32Array>();
+        outMapRef = Napi::Reference<Napi::Float32Array>::New(mapJs, 1);
+        outMap = mapJs.Data();
+        outMapLen = mapJs.ElementLength();
+        Napi::Float32Array metaJs = outObj.Get("metadata").As<Napi::Float32Array>();
+        outMetaRef = Napi::Reference<Napi::Float32Array>::New(metaJs, 1);
+        outMeta = metaJs.Data();
+        outMetaLen = metaJs.ElementLength();
+    }
+
+    ~SpliceAnalyzeWorker() {}
+
+    void Execute()
+    {
+        if (channels <= 0 || channels > 2)
+        {
+            SetError("spliceAnalyze: channel count must be 1 or 2");
+            return;
+        }
+        if (oldNumChannels != channels)
+        {
+            SetError("spliceAnalyze: the channel count changed");
+            return;
+        }
+        if (newFrames == 0)
+        {
+            SetError("spliceAnalyze: no audio to analyse");
+            return;
+        }
+
+        const double fminFrac = fminHz / sampleRate;
+        gaborator::log_fq_scale scale(bandsPerOctave, fminFrac);
+        gaborator::parameters params(scale, OVERLAP);
+        params.phase = gaborator::coef_phase::global;
+        gaborator::analyzer<float> analyzer(params);
+        const int bandBegin = analyzer.bandpass_bands_begin();
+
+        layout = computeSpectrogramLayout(analyzer, sampleRate, newFrames);
+        const int numBands = layout.numBands;
+        if (numBands <= 0)
+        {
+            SetError("spliceAnalyze: the analysis produced no bands");
+            return;
+        }
+
+        // The old layout must be this analyzer's own over the old length; a
+        // different band structure cannot splice, and the caller re-analyses.
+        if (oldNumBands != numBands || (int)oldBandOffsets.size() < numBands ||
+            (int)oldBandLengths.size() < numBands || (int)oldBandStepLog2s.size() < numBands)
+        {
+            SetError("spliceAnalyze: band layout mismatch");
+            return;
+        }
+        for (int b = 0; b < numBands; ++b)
+        {
+            const int32_t s = layout.bandStepLog2s[(size_t)b];
+            const size_t oldLen = (oldNumFrames > 0) ? (size_t)(((oldNumFrames - 1) >> s) + 1) : 0;
+            if (oldBandStepLog2s[(size_t)b] != s || oldBandLengths[(size_t)b] != (uint32_t)oldLen ||
+                ((size_t)oldBandOffsets[(size_t)b] + oldLen) * 4 > oldPackedLen)
+            {
+                SetError("spliceAnalyze: band layout mismatch");
+                return;
+            }
+        }
+
+        // The same budget gate a full analysis applies.
+        size_t maxCoefficients = (size_t)MAX_TEXTURE_SIZE * MAX_TEXTURE_SIZE;
+        maxCoefficients = std::min(maxCoefficients, maxCoefficientBudget);
+        const double worstCaseCoefficients = (double)newFrames * MAX_COEFFICIENT_DENSITY;
+        if (worstCaseCoefficients > (double)maxCoefficients || layout.totalCoefficients > maxCoefficients)
+        {
+            const double maxSeconds = (double)maxCoefficients / MAX_COEFFICIENT_DENSITY / sampleRate;
+            std::stringstream ss;
+            ss << "The maximum audio duration is " << std::fixed << std::setprecision(0) << maxSeconds
+               << " seconds.";
+            SetError(ss.str().c_str());
+            return;
+        }
+
+        const size_t pixelCount = (size_t)layout.textureWidth * layout.textureHeight;
+        if (outDataLen != pixelCount * 4 || outMapLen != pixelCount * 2 || outMetaLen != (size_t)numBands * 4)
+        {
+            SetError("spliceAnalyze: output buffers do not match the new layout");
+            return;
+        }
+
+        std::sort(pieces.begin(), pieces.end(),
+                  [](const Piece &a, const Piece &b) { return a.newStart < b.newStart; });
+        int64_t prevEnd = 0;
+        bool firstPiece = true;
+        for (const Piece &p : pieces)
+        {
+            if (p.length <= 0 || p.newStart < 0 || p.oldStart < 0 ||
+                p.newStart + p.length > (int64_t)newFrames || p.oldStart + p.length > oldNumFrames ||
+                (!firstPiece && p.newStart < prevEnd))
+            {
+                SetError("spliceAnalyze: pieces must be disjoint ranges inside both files");
+                return;
+            }
+            prevEnd = p.newStart + p.length;
+            firstPiece = false;
+        }
+
+        // Every bin lands in a copy run or a fresh write, so only the texture
+        // padding past the last coefficient needs zeroing.
+        std::fill(outData + layout.totalCoefficients * 4, outData + outDataLen, 0.0f);
+        std::fill(outMap + layout.totalCoefficients * 2, outMap + outMapLen, 0.0f);
+
+        const double twoPi = 2.0 * M_PI;
+        const int F = spliceQuantLog2(sampleRate);
+
+        // Per band, in time order: which bin runs copy from which piece
+        // (pieceIdx >= 0) and which are fresh (pieceIdx < 0). A bin copies when
+        // its own filter support sits inside a piece whose shift lands on the
+        // band's grid; a support that runs off matching file edges on both
+        // sides sees the same silence in both files, so file-edge bins copy
+        // too.
+        struct Run
+        {
+            int64_t k0;
+            int64_t k1;
+            int pieceIdx;
+        };
+        struct FreshRun
+        {
+            int band;
+            int64_t k0;
+            int64_t k1;
+        };
+        std::vector<std::vector<Run>> bandRuns((size_t)numBands);
+        std::vector<FreshRun> fineFresh, coarseFresh;
+
+        for (int b = 0; b < numBands; ++b)
+        {
+            const int32_t s = layout.bandStepLog2s[(size_t)b];
+            const int64_t len = (int64_t)layout.bandLengths[(size_t)b];
+            if (len <= 0)
+                continue;
+            const int64_t support = (int64_t)std::ceil(analyzer.band_analysis_support(bandBegin + b));
+
+            std::vector<Run> covered;
+            for (size_t pi = 0; pi < pieces.size(); ++pi)
+            {
+                const Piece &p = pieces[pi];
+                const int64_t delta = p.newStart - p.oldStart;
+                if ((delta & (((int64_t)1 << s) - 1)) != 0)
+                    continue;
+                const bool leftFree = (p.newStart == 0 && p.oldStart == 0);
+                const bool rightFree =
+                    (p.newStart + p.length == (int64_t)newFrames && p.oldStart + p.length == oldNumFrames);
+                const int64_t tMin = leftFree ? 0 : p.newStart + support;
+                const int64_t tMax = rightFree ? (int64_t)newFrames - 1 : p.newStart + p.length - 1 - support;
+                int64_t k0 = (tMin + (((int64_t)1 << s) - 1)) >> s;
+                int64_t k1 = tMax >> s;
+                k0 = std::max<int64_t>(k0, 0);
+                k1 = std::min<int64_t>(k1, len - 1);
+                if (!covered.empty())
+                    k0 = std::max(k0, covered.back().k1 + 1);
+                if (k1 >= k0)
+                    covered.push_back({k0, k1, (int)pi});
+            }
+
+            std::vector<Run> &runs = bandRuns[(size_t)b];
+            int64_t next = 0;
+            for (const Run &c : covered)
+            {
+                if (c.k0 > next)
+                    runs.push_back({next, c.k0 - 1, -1});
+                runs.push_back(c);
+                next = c.k1 + 1;
+            }
+            if (next < len)
+                runs.push_back({next, len - 1, -1});
+
+            for (const Run &r : runs)
+            {
+                if (r.pieceIdx >= 0)
+                    continue;
+                if (s <= F)
+                    fineFresh.push_back({b, r.k0, r.k1});
+                else
+                    coarseFresh.push_back({b, r.k0, r.k1});
+            }
+        }
+
+        // Copy pass. A rigid shift under the global phase convention rotates a
+        // band by the constant -2*pi*ff*delta; magnitudes carry over untouched.
+        for (int b = 0; b < numBands; ++b)
+        {
+            const int32_t s = layout.bandStepLog2s[(size_t)b];
+            const double ff = analyzer.bandpass_band_ff(bandBegin + b);
+            for (const Run &r : bandRuns[(size_t)b])
+            {
+                if (r.pieceIdx < 0)
+                    continue;
+                const Piece &p = pieces[(size_t)r.pieceIdx];
+                const int64_t delta = p.newStart - p.oldStart;
+                const int64_t srcK0 = r.k0 - (delta >> s);
+                const float *src = oldPacked + ((size_t)oldBandOffsets[(size_t)b] + (size_t)srcK0) * 4;
+                float *dst = outData + ((size_t)layout.bandOffsets[(size_t)b] + (size_t)r.k0) * 4;
+                const size_t count = (size_t)(r.k1 - r.k0 + 1);
+                memcpy(dst, src, count * 4 * sizeof(float));
+                const double rot = std::remainder(-twoPi * ff * (double)delta, twoPi);
+                if (delta != 0 && rot != 0.0)
+                {
+                    const float rotF = (float)rot;
+                    for (size_t i = 0; i < count; ++i)
+                        for (int ch = 0; ch < channels; ++ch)
+                            dst[i * 4 + (size_t)ch * 2 + 1] += rotF;
+                }
+            }
+        }
+
+        const auto writeFresh = [&](const FreshRun &fr, int ch, const std::vector<std::complex<float>> &h)
+        {
+            float *base = outData + ((size_t)layout.bandOffsets[(size_t)fr.band] + (size_t)fr.k0) * 4;
+            for (size_t i = 0; i < h.size(); ++i)
+            {
+                base[i * 4 + (size_t)ch * 2 + 0] = std::abs(h[i]);
+                base[i * 4 + (size_t)ch * 2 + 1] = std::arg(h[i]);
+                if (channels == 1)
+                {
+                    base[i * 4 + 2] = 0.0f;
+                    base[i * 4 + 3] = 0.0f;
+                }
+            }
+        };
+
+        struct Window
+        {
+            int64_t t0;
+            int64_t t1;
+        };
+        const auto mergedWindows = [&](const std::vector<FreshRun> &fresh)
+        {
+            std::vector<Window> raw;
+            raw.reserve(fresh.size());
+            for (const FreshRun &fr : fresh)
+            {
+                const int32_t s = layout.bandStepLog2s[(size_t)fr.band];
+                const int64_t support = (int64_t)std::ceil(analyzer.band_analysis_support(bandBegin + fr.band));
+                raw.push_back({std::max<int64_t>(0, (fr.k0 << s) - support),
+                               std::min<int64_t>((int64_t)newFrames, (fr.k1 << s) + support + 1)});
+            }
+            std::sort(raw.begin(), raw.end(), [](const Window &a, const Window &b) { return a.t0 < b.t0; });
+            std::vector<Window> merged;
+            for (const Window &w : raw)
+            {
+                if (!merged.empty() && w.t0 <= merged.back().t1)
+                    merged.back().t1 = std::max(merged.back().t1, w.t1);
+                else
+                    merged.push_back(w);
+            }
+            return merged;
+        };
+
+        // Fresh fine bands: full-rate analysis over windows round the seams.
+        // Every kept bin's support sits inside its window, so its value equals
+        // the full analysis exactly.
+        std::vector<std::complex<float>> harvest;
+        for (const Window &w : mergedWindows(fineFresh))
+        {
+            for (int ch = 0; ch < channels; ++ch)
+            {
+                gaborator::coefs<float> coefs(analyzer);
+                analyzer.analyze(newAudio[(size_t)ch] + w.t0, w.t0, w.t1, coefs);
+                for (const FreshRun &fr : fineFresh)
+                {
+                    const int32_t s = layout.bandStepLog2s[(size_t)fr.band];
+                    if ((fr.k0 << s) < w.t0 || (fr.k0 << s) >= w.t1)
+                        continue;
+                    harvestBandCoefs(coefs, bandBegin + fr.band, s, fr.k0, (size_t)(fr.k1 - fr.k0 + 1), w.t0,
+                                     w.t1, harvest);
+                    writeFresh(fr, ch, harvest);
+                }
+            }
+        }
+
+        // Fresh coarse bands: analysed from decimated audio. A gaborator at
+        // fs/2^d with fmin scaled by 2^d lands on the same absolute band grid,
+        // steps and global phase reference, and the kept bands sit at least
+        // three octaves under the decimated Nyquist, in the halfband cascade's
+        // flat passband.
+        if (!coarseFresh.empty())
+        {
+            int decLog2 = std::max(1, F - 3);
+            while (decLog2 > 0 && fminFrac * (double)(1 << decLog2) >= 0.25)
+                --decLog2;
+            const int64_t dec = (int64_t)1 << decLog2;
+
+            const double fminFrac2 = fminFrac * (double)dec;
+            gaborator::log_fq_scale scale2(bandsPerOctave, fminFrac2);
+            gaborator::parameters params2(scale2, OVERLAP);
+            params2.phase = gaborator::coef_phase::global;
+            gaborator::analyzer<float> analyzer2(params2);
+            const int bandBegin2 = analyzer2.bandpass_bands_begin();
+            const int numBands2 = analyzer2.bandpass_bands_end() - bandBegin2;
+            const int bandShift = decLog2 * bandsPerOctave;
+
+            for (const FreshRun &fr : coarseFresh)
+            {
+                const int b2 = fr.band - bandShift;
+                const double ff = analyzer.bandpass_band_ff(bandBegin + fr.band);
+                if (b2 < 0 || b2 >= numBands2 ||
+                    std::abs(analyzer2.bandpass_band_ff(bandBegin2 + b2) / ((double)dec * ff) - 1.0) > 1e-9 ||
+                    (int32_t)analyzer2.band_step_log2(bandBegin2 + b2) !=
+                        layout.bandStepLog2s[(size_t)fr.band] - decLog2)
+                {
+                    SetError("spliceAnalyze: decimated band grid mismatch");
+                    return;
+                }
+            }
+
+            const std::vector<double> hbTaps = designHalfbandKernel(21, 12.0);
+            const int64_t pad = 21 * (dec - 1) + dec;
+            std::vector<float> seg, segNext;
+            for (const Window &w : mergedWindows(coarseFresh))
+            {
+                const int64_t p0 = floorDivInt64(w.t0 - pad, dec) * dec;
+                const int64_t p1 = w.t1 + pad;
+                for (int ch = 0; ch < channels; ++ch)
+                {
+                    seg.assign((size_t)(p1 - p0), 0.0f);
+                    const int64_t from = std::max<int64_t>(p0, 0);
+                    const int64_t to = std::min<int64_t>(p1, (int64_t)newFrames);
+                    if (to > from)
+                        memcpy(seg.data() + (size_t)(from - p0), newAudio[(size_t)ch] + from,
+                               (size_t)(to - from) * sizeof(float));
+                    for (int stage = 0; stage < decLog2; ++stage)
+                    {
+                        downsampleByTwo(seg, hbTaps, segNext);
+                        seg.swap(segNext);
+                    }
+                    const int64_t d0 = p0 / dec;
+                    gaborator::coefs<float> coefs2(analyzer2);
+                    analyzer2.analyze(seg.data(), d0, d0 + (int64_t)seg.size(), coefs2);
+                    for (const FreshRun &fr : coarseFresh)
+                    {
+                        const int32_t s = layout.bandStepLog2s[(size_t)fr.band];
+                        if ((fr.k0 << s) < w.t0 || (fr.k0 << s) >= w.t1)
+                            continue;
+                        harvestBandCoefs(coefs2, bandBegin2 + (fr.band - bandShift), s - decLog2, fr.k0,
+                                         (size_t)(fr.k1 - fr.k0 + 1), d0, d0 + (int64_t)seg.size(), harvest);
+                        writeFresh(fr, ch, harvest);
+                    }
+                }
+            }
+        }
+
+        // Re-branch so the within-pi unwrap invariant holds across every
+        // junction: fresh runs unwrap forward bin by bin, copied runs keep
+        // their interior branches and take one whole-turn constant where the
+        // seam demands it.
+        for (int b = 0; b < numBands; ++b)
+        {
+            float *base = outData + (size_t)layout.bandOffsets[(size_t)b] * 4;
+            for (int ch = 0; ch < channels; ++ch)
+            {
+                const size_t phaseOff = (size_t)ch * 2 + 1;
+                double prev = 0.0;
+                bool havePrev = false;
+                for (const Run &r : bandRuns[(size_t)b])
+                {
+                    if (r.pieceIdx < 0)
+                    {
+                        for (int64_t k = r.k0; k <= r.k1; ++k)
+                        {
+                            float &p = base[(size_t)k * 4 + phaseOff];
+                            if (havePrev)
+                            {
+                                double diff = (double)p - std::fmod(prev, twoPi);
+                                diff -= twoPi * std::round(diff / twoPi);
+                                p = (float)(prev + diff);
+                            }
+                            prev = (double)p;
+                            havePrev = true;
+                        }
+                    }
+                    else
+                    {
+                        if (havePrev)
+                        {
+                            const float firstVal = base[(size_t)r.k0 * 4 + phaseOff];
+                            double diff = (double)firstVal - std::fmod(prev, twoPi);
+                            diff -= twoPi * std::round(diff / twoPi);
+                            const double turns = std::round((prev + diff - (double)firstVal) / twoPi);
+                            const float c = (float)(twoPi * turns);
+                            if (c != 0.0f)
+                                for (int64_t k = r.k0; k <= r.k1; ++k)
+                                    base[(size_t)k * 4 + phaseOff] += c;
+                        }
+                        prev = (double)base[(size_t)r.k1 * 4 + phaseOff];
+                        havePrev = true;
+                    }
+                }
+            }
+        }
+
+        magnitudeEnergy = 0.0;
+        for (size_t i = 0; i < layout.totalCoefficients; ++i)
+            for (int ch = 0; ch < channels; ++ch)
+            {
+                const double m = outData[i * 4 + (size_t)ch * 2];
+                magnitudeEnergy += m * m;
+            }
+
+        fillInverseMap(layout, outMap, outMapLen);
+        fillBandMetadata(layout, outMeta, outMetaLen);
+    }
+
+    void OnOK()
+    {
+        Napi::Env env = Env();
+        Napi::HandleScope scope(env);
+        Napi::Object resultJs = Napi::Object::New(env);
+
+        resultJs.Set("data", outDataRef.Value());
+        resultJs.Set("inverseMap", outMapRef.Value());
+        resultJs.Set("metadata", outMetaRef.Value());
+        resultJs.Set("textureWidth", Napi::Number::New(env, layout.textureWidth));
+        resultJs.Set("textureHeight", Napi::Number::New(env, layout.textureHeight));
+        resultJs.Set("numFrames", Napi::Number::New(env, (double)newFrames));
+        resultJs.Set("numChannels", Napi::Number::New(env, channels));
+        resultJs.Set("numBands", Napi::Number::New(env, layout.numBands));
+        resultJs.Set("sampleRate", Napi::Number::New(env, sampleRate));
+        resultJs.Set("magnitudeEnergy", Napi::Number::New(env, magnitudeEnergy));
+
+        Napi::Uint32Array bandOffsetsJs = Napi::Uint32Array::New(env, layout.bandOffsets.size());
+        memcpy(bandOffsetsJs.Data(), layout.bandOffsets.data(), layout.bandOffsets.size() * sizeof(uint32_t));
+        resultJs.Set("bandOffsets", bandOffsetsJs);
+
+        Napi::Int32Array bandStepLog2sJs = Napi::Int32Array::New(env, layout.bandStepLog2s.size());
+        memcpy(bandStepLog2sJs.Data(), layout.bandStepLog2s.data(), layout.bandStepLog2s.size() * sizeof(int32_t));
+        resultJs.Set("bandStepLog2s", bandStepLog2sJs);
+
+        Napi::Float32Array bandFreqsHzJs = Napi::Float32Array::New(env, layout.bandFreqsHz.size());
+        memcpy(bandFreqsHzJs.Data(), layout.bandFreqsHz.data(), layout.bandFreqsHz.size() * sizeof(float));
+        resultJs.Set("bandFreqsHz", bandFreqsHzJs);
+
+        Napi::Uint32Array bandLengthsJs = Napi::Uint32Array::New(env, layout.bandLengths.size());
+        memcpy(bandLengthsJs.Data(), layout.bandLengths.data(), layout.bandLengths.size() * sizeof(uint32_t));
+        resultJs.Set("bandLengths", bandLengthsJs);
+
+        deferred.Resolve(resultJs);
+    }
+
+    void OnError(const Napi::Error &e)
+    {
+        deferred.Reject(e.Value());
+    }
+
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+private:
+    struct Piece
+    {
+        int64_t newStart;
+        int64_t oldStart;
+        int64_t length;
+    };
+
+    Napi::Promise::Deferred deferred;
+    std::vector<Napi::Reference<Napi::Float32Array>> audioRefs;
+    std::vector<const float *> newAudio;
+    int channels = 0;
+    double sampleRate;
+    size_t newFrames = 0;
+    int bandsPerOctave = 0;
+    double fminHz = 0.0;
+    size_t maxCoefficientBudget = SIZE_MAX;
+
+    Napi::Reference<Napi::Float32Array> oldPackedRef;
+    const float *oldPacked = nullptr;
+    size_t oldPackedLen = 0;
+    int64_t oldNumFrames = 0;
+    int oldNumChannels = 0;
+    int oldNumBands = 0;
+    std::vector<uint32_t> oldBandOffsets;
+    std::vector<uint32_t> oldBandLengths;
+    std::vector<int32_t> oldBandStepLog2s;
+
+    std::vector<Piece> pieces;
+
+    Napi::Reference<Napi::Float32Array> outDataRef, outMapRef, outMetaRef;
+    float *outData = nullptr;
+    float *outMap = nullptr;
+    float *outMeta = nullptr;
+    size_t outDataLen = 0, outMapLen = 0, outMetaLen = 0;
+
+    SpectrogramLayout layout;
+    double magnitudeEnergy = 0.0;
+};
+
+Napi::Value SpliceAnalyzeAsync(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+
+    if (info.Length() < 7 || !info[0].IsArray() || !info[1].IsNumber() || !info[2].IsObject() ||
+        !info[3].IsTypedArray() || !info[4].IsObject() || !info[5].IsArray() || !info[6].IsObject())
+    {
+        Napi::TypeError::New(env,
+                             "Expected: channelArrays (Array of Float32Arrays), sampleRate (Number), params "
+                             "(Object), oldPacked (Float32Array), oldLayout (Object), pieces (Array), out (Object)")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    Napi::Object paramsJs = info[2].As<Napi::Object>();
+    if (!paramsJs.Has("bandsPerOctave") || !paramsJs.Get("bandsPerOctave").IsNumber() ||
+        !paramsJs.Has("minFreq") || !paramsJs.Get("minFreq").IsNumber())
+    {
+        Napi::TypeError::New(env, "params.bandsPerOctave and params.minFreq are required numbers")
+            .ThrowAsJavaScriptException();
+        return env.Null();
+    }
+
+    SpliceAnalyzeWorker *worker =
+        new SpliceAnalyzeWorker(env, info[0].As<Napi::Array>(), info[1].As<Napi::Number>().DoubleValue(),
+                                paramsJs, info[3].As<Napi::Float32Array>(), info[4].As<Napi::Object>(),
+                                info[5].As<Napi::Array>(), info[6].As<Napi::Object>());
+    worker->Queue();
+    return worker->GetPromise();
+}
+
+/** The splice grid for a sample rate, so JS quantises edits with one formula. */
+Napi::Value SpliceQuantLog2(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsNumber())
+    {
+        Napi::TypeError::New(env, "Expected: sampleRate (Number)").ThrowAsJavaScriptException();
+        return env.Null();
+    }
+    return Napi::Number::New(env, spliceQuantLog2(info[0].As<Napi::Number>().DoubleValue()));
 }
 
 // ─── Onset detection ─────────────────────────────────────────────────────────
@@ -2599,20 +3349,9 @@ private:
                 const size_t count = (size_t)patchCount[(size_t)b];
                 if (!count)
                     continue;
-                harvest.assign(count, {0.0f, 0.0f});
                 const int32_t step = bandStepLog2s[(size_t)b];
                 const int64_t k0 = patchK0[(size_t)b];
-                gaborator::process(
-                    [&](int gb, int64_t t, std::complex<float> &coef)
-                    {
-                        if (gb - bandBegin != b)
-                            return;
-                        const int64_t rel = (t >> step) - k0;
-                        if (rel < 0 || rel >= (int64_t)count)
-                            return;
-                        harvest[(size_t)rel] = coef;
-                    },
-                    bandBegin + b, bandBegin + b + 1, a0, a1, coefs);
+                harvestBandCoefs(coefs, bandBegin + b, step, k0, count, a0, a1, harvest);
 
                 // Anchored on the coefficient before the patch, so the branch
                 // continues the one already stored.
@@ -4739,6 +5478,8 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
     exports.Set("historyApplyDeltas", Napi::Function::New(env, HistoryApplyDeltasAsync));
     exports.Set("historyInverseMap", Napi::Function::New(env, HistoryInverseMapAsync));
     exports.Set("analyze", Napi::Function::New(env, AnalyzeAsync));
+    exports.Set("spliceAnalyze", Napi::Function::New(env, SpliceAnalyzeAsync));
+    exports.Set("spliceQuantLog2", Napi::Function::New(env, SpliceQuantLog2));
     exports.Set("getGpuMemoryInfo", Napi::Function::New(env, GetGpuMemoryInfo));
     exports.Set("synthesize", Napi::Function::New(env, SynthesizeAsync));
     exports.Set("commitStroke", Napi::Function::New(env, CommitStrokeAsync));

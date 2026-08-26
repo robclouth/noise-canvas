@@ -402,6 +402,24 @@ export function createExtensionAnalysis(): AnalysisApi {
     },
     analyze,
     analyseBuffer,
+    // The embedded host has no splice fast path; the grid mirrors the addon's
+    // formula and a splice request takes the full-analysis road.
+    spliceQuantSamples: (sampleRate) =>
+      1 << Math.min(8, Math.max(4, Math.round(Math.log2(Math.max(1, sampleRate) * 0.0015)))),
+    spliceAnalyseChannels: async (channelArrays, sampleRate, params) => {
+      const arrays: Record<string, NumericArray> = {};
+      channelArrays.forEach((channel, ch) => {
+        arrays[`channel${ch}`] = channel;
+      });
+      const meta: Record<string, number> = {
+        numChannels: channelArrays.length,
+        sampleRate,
+        bandsPerOctave: params.bandsPerOctave,
+        minFreq: params.minFreq,
+      };
+      if (params.maxCoefficients !== undefined) meta.maxCoefficients = params.maxCoefficients;
+      return frameToAnalysis(await analysisOp("analyseChannels", arrays, meta));
+    },
     synthesize,
     commitStroke,
     encodeHistorySnapshot: async (packed) =>
