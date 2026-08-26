@@ -1,5 +1,5 @@
 import { bandAtPixel, type BandLayout } from "./band-layout";
-import { frameRangeOfBlock, type BlockGrid } from "./block-grid";
+import { blockGrid, frameRangeOfBlock, type BlockGrid } from "./block-grid";
 import { ANALYSIS_MAX_TEXTURE_SIZE } from "./constants";
 
 /**
@@ -63,6 +63,26 @@ export function canvasViewOf(grid: BlockGrid, firstBlock: number, lastBlock: num
     texels,
     textureWidth,
     textureHeight,
+  };
+}
+
+/**
+ * The view spanning the whole file, keeping the file's own texture fold —
+ * not every analysis sizes its packed texture by the view width convention.
+ */
+export function wholeFileCanvasView(data: {
+  numBands: number;
+  metadata: Float32Array;
+  numFrames: number;
+  sampleRate: number;
+  textureWidth: number;
+  textureHeight: number;
+}): CanvasView {
+  const grid = blockGrid({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, data.sampleRate);
+  return {
+    ...canvasViewOf(grid, 0, grid.blockCount - 1),
+    textureWidth: data.textureWidth,
+    textureHeight: data.textureHeight,
   };
 }
 

@@ -39,6 +39,7 @@ import type { ParameterKey, SpectrogramData, State } from "../store/types";
 import type { ParameterUniform } from "../types";
 import { readRenderTargetPixelsAsync } from "./async-readpixels";
 import { gatherPixelRanges, pixelRangeCount } from "./pixel-ranges";
+import { wholeFileCanvasView, type CanvasView } from "./canvas-view";
 import { DisplayPyramid } from "./display-pyramid-textures";
 import { DisplayTileRing } from "./display-tiles-textures";
 import { ATTRACT_MODULATOR_MAP_START } from "./constants";
@@ -235,6 +236,14 @@ export class StrokeRenderer {
   private fileId: string;
   private effects: EffectsRegistry;
 
+  // The packed span the canvas renders over. Every dest-space size, layout,
+  // metadata texture and frame count reads from this view.
+  private view: CanvasView;
+  private viewSize: Vector2;
+  private viewSpec: { metadata: Float32Array; numBands: number; textureWidth: number; textureHeight: number };
+  private viewMetadataTex: DataTexture;
+  private viewInverseMapTex: DataTexture;
+
   // FBOs for ping-pong rendering
   private fbo1: WebGLRenderTarget;
   private fbo2: WebGLRenderTarget;
@@ -332,7 +341,18 @@ export class StrokeRenderer {
     this.fboMesh = new Mesh(new PlaneGeometry(2, 2));
     this.fboScene.add(this.fboMesh);
 
-    const { textureWidth, textureHeight, numBands } = spectrogramData;
+    this.view = wholeFileCanvasView(spectrogramData);
+    const { textureWidth, textureHeight } = this.view;
+    this.viewSize = new Vector2(textureWidth, textureHeight);
+    this.viewSpec = {
+      metadata: this.view.layout.metadata,
+      numBands: this.view.layout.numBands,
+      textureWidth,
+      textureHeight,
+    };
+    this.viewMetadataTex = textures.metadataTex;
+    this.viewInverseMapTex = textures.inverseMapTex;
+    const { numBands } = spectrogramData;
 
     this.rangeScene = new Scene();
     this.rangeGeometry = new RangeQuadGeometry(numBands * 3);
@@ -400,6 +420,11 @@ export class StrokeRenderer {
     mu.brushSkewPitch = { value: createParameterUniform(0.5, 0, 1) };
   }
 
+  /** Frames the view spans; the dest frame count the shaders address with. */
+  private get viewFrameCount(): number {
+    return this.view.endFrame - this.view.startFrame;
+  }
+
   /**
    * Draws `material` over the packed pixel ranges of `list` into `target`,
    * leaving every other pixel of the target as it was.
@@ -407,7 +432,7 @@ export class StrokeRenderer {
   private drawRanges(material: RawShaderMaterial, target: WebGLRenderTarget, list: PixelRangeList): void {
     if (list.count === 0) return;
     this.rangeGeometry.setRanges(list);
-    const size = this.spectrogramData.packedTextureSize;
+    const size = this.viewSize;
     if (material.uniforms.destSpectrogramTextureSize) {
       material.uniforms.destSpectrogramTextureSize.value = size;
     } else {
@@ -423,13 +448,12 @@ export class StrokeRenderer {
 
   /** The whole packed texture as one range. */
   private fullRange(): PixelRangeList {
-    const { textureWidth, textureHeight } = this.spectrogramData;
-    return fullTextureRange(textureWidth, textureHeight);
+    return fullTextureRange(this.view.textureWidth, this.view.textureHeight);
   }
 
   /** Marks every bin of every band as holding a preview. */
   private markWholeTexturePreview(): void {
-    const { numBands, metadata } = this.spectrogramData;
+    const { numBands, metadata } = this.view.layout;
     const binRanges = this.footprint.binRanges;
     for (let band = 0; band < numBands; band++) {
       binRanges[band * 4] = 0;
@@ -544,7 +568,7 @@ export class StrokeRenderer {
    * restoring the between-strokes invariants the paint path relies on.
    */
   private acquireScratch(): StrokeScratch {
-    const { textureWidth, textureHeight } = this.spectrogramData;
+    const { textureWidth, textureHeight } = this.view;
     const { scratch, refreshed } = this.pool.acquire(this, textureWidth, textureHeight);
     this.scratch = scratch;
     if (refreshed) {
@@ -739,12 +763,12 @@ export class StrokeRenderer {
       sourceSampleRate: { value: sourceFile.spectrogramData.sampleRate },
       sourceOnsetTex: { value: sourceFile.onsetTexture ?? placeholderTexture },
       destSpectrogramTex: { value: destTexture.texture || placeholderTexture },
-      destSpectrogramTextureSize: { value: this.spectrogramData.packedTextureSize },
-      destInverseMapTex: { value: this.textures.inverseMapTex || placeholderTexture },
-      destMetadataTex: { value: this.textures.metadataTex || placeholderTexture },
+      destSpectrogramTextureSize: { value: this.viewSize },
+      destInverseMapTex: { value: this.viewInverseMapTex || placeholderTexture },
+      destMetadataTex: { value: this.viewMetadataTex || placeholderTexture },
       destMinFreq: { value: this.spectrogramData.minFreq },
       destBandsPerOctave: { value: this.spectrogramData.bandsPerOctave },
-      destFrameCount: { value: this.spectrogramData.numFrames },
+      destFrameCount: { value: this.viewFrameCount },
       destBandCount: { value: this.spectrogramData.numBands },
       destChannelCount: { value: this.spectrogramData.numChannels },
       destSampleRate: { value: this.spectrogramData.sampleRate },
@@ -821,7 +845,8 @@ export class StrokeRenderer {
     brushBottomLeftUv: Vector2,
     brushSizeUv: Vector2,
   ): { rowStart: number; rowCount: number } | null {
-    const { numBands, textureWidth, textureHeight, metadata } = this.spectrogramData;
+    const { numBands, metadata } = this.view.layout;
+    const { textureWidth, textureHeight } = this.view;
     const { lowBand, highBand } = this.brushBandRange(brushBottomLeftUv, brushSizeUv);
 
     // If brush covers most of the bands, don't bother with scissor
@@ -855,13 +880,13 @@ export class StrokeRenderer {
     wholeBands: boolean,
     rows: { rowStart: number; rowCount: number } | null,
   ): StrokeFootprint | null {
-    const { numBands, textureWidth } = this.spectrogramData;
+    const { numBands, textureWidth } = this.viewSpec;
     const bands = wholeBands
       ? { lowBand: 0, highBand: numBands - 1 }
       : this.brushBandRange(brushBottomLeftUv, brushSizeUv);
     const footprint = this.footprint;
     footprint.count = brushFootprintRanges(
-      this.spectrogramData,
+      this.viewSpec,
       bands.lowBand,
       bands.highBand,
       window,
@@ -991,7 +1016,8 @@ export class StrokeRenderer {
     // it writes the brush footprint alone. The brush's time window is rounded
     // to frames the way the brush shader rounds it.
     const scissorRows = yWrapsOutOfBounds ? null : this.calculateScissorRows(unionAnchor, maxBrushSizeUv);
-    const { textureWidth, numFrames } = this.spectrogramData;
+    const { textureWidth } = this.view;
+    const numFrames = this.viewFrameCount;
     const window: FrameWindow = wholeTime
       ? null
       : {
@@ -1007,7 +1033,7 @@ export class StrokeRenderer {
     // A footprint that covers most of the texture is cheaper to write with a
     // whole-texture draw and a buffer swap than to copy back, and with no
     // rows every pass has written the whole texture, so the swap is sound.
-    const { textureHeight } = this.spectrogramData;
+    const { textureHeight } = this.view;
     const swapWhole =
       footprint !== null &&
       scissorRows === null &&
@@ -1328,9 +1354,7 @@ export class StrokeRenderer {
       }
       if (anyNonAccumulate) {
         const dabRowStart = scissorRows ? scissorRows.rowStart : 0;
-        const dabRowEnd = scissorRows
-          ? scissorRows.rowStart + scissorRows.rowCount
-          : this.spectrogramData.textureHeight;
+        const dabRowEnd = scissorRows ? scissorRows.rowStart + scissorRows.rowCount : this.view.textureHeight;
         this.maskRows = this.maskRows
           ? {
               rowStart: Math.min(this.maskRows.rowStart, dabRowStart),
@@ -1402,10 +1426,10 @@ export class StrokeRenderer {
     const uniforms = this.maskMaterial.uniforms;
 
     // Bind invariants (same for every step) once.
-    uniforms.destMetadataTex.value = this.textures.metadataTex;
-    uniforms.destInverseMapTex.value = this.textures.inverseMapTex;
-    uniforms.destSpectrogramTextureSize.value = this.spectrogramData.packedTextureSize;
-    uniforms.destFrameCount.value = this.spectrogramData.numFrames;
+    uniforms.destMetadataTex.value = this.viewMetadataTex;
+    uniforms.destInverseMapTex.value = this.viewInverseMapTex;
+    uniforms.destSpectrogramTextureSize.value = this.viewSize;
+    uniforms.destFrameCount.value = this.viewFrameCount;
     uniforms.destBandCount.value = this.spectrogramData.numBands;
     uniforms.gainLut.value = modulatorScaleLut || placeholderTexture;
     uniforms.modulator1ImageTex.value = modulator1Texture || placeholderTexture;
@@ -1414,8 +1438,8 @@ export class StrokeRenderer {
 
     const rows = this.maskRows;
     const maskRanges =
-      rows !== null && !this.disableScissorCopyBack && rows.rowEnd - rows.rowStart < this.spectrogramData.textureHeight
-        ? rowRange(this.spectrogramData.textureWidth, rows.rowStart, rows.rowEnd - rows.rowStart)
+      rows !== null && !this.disableScissorCopyBack && rows.rowEnd - rows.rowStart < this.view.textureHeight
+        ? rowRange(this.view.textureWidth, rows.rowStart, rows.rowEnd - rows.rowStart)
         : this.fullRange();
 
     let renderedAny = false;
@@ -1530,7 +1554,7 @@ export class StrokeRenderer {
     if (!this.displayPyramid && !this.displayTiles) return;
     const ranges = changed ?? this.fullRange();
     const canvas = this.getDisplayTexture();
-    const width = this.spectrogramData.textureWidth;
+    const width = this.view.textureWidth;
     this.displayPyramid?.refreshFromCanvas(this.gl, canvas, width, ranges);
     this.displayTiles?.refreshFromCanvas(this.gl, canvas, width, ranges);
   }
@@ -1555,10 +1579,10 @@ export class StrokeRenderer {
       return this.fboDataCache;
     }
 
-    const { packedTextureSize } = this.spectrogramData;
+    const { textureWidth, textureHeight } = this.view;
     const fboToRead = this.pingPong === 0 ? this.fbo1 : this.fbo2;
     const epoch = this.fboDataEpoch;
-    const data = await readRenderTargetPixelsAsync(this.gl, fboToRead, 0, 0, packedTextureSize.x, packedTextureSize.y);
+    const data = await readRenderTargetPixelsAsync(this.gl, fboToRead, 0, 0, textureWidth, textureHeight);
 
     // Paint that landed while the read was in flight is absent from `data`, so
     // it stands in for nothing later: leave the cache stale for the next read.
@@ -1577,8 +1601,7 @@ export class StrokeRenderer {
    * only that is read back, so the cost follows the footprint, not the file.
    */
   async readPixelRanges(pixelRanges: Uint32Array): Promise<Float32Array> {
-    const { packedTextureSize } = this.spectrogramData;
-    const width = packedTextureSize.x;
+    const width = this.view.textureWidth;
 
     let patchPixels = 0;
     let numRanges = 0;
@@ -1653,9 +1676,7 @@ export class StrokeRenderer {
    * other ping-pong buffer and are copied back, so nothing is uploaded.
    */
   applyPhaseTurns(turns: ArrayLike<number>): void {
-    const { packedTextureSize } = this.spectrogramData;
-    const width = packedTextureSize.x;
-    const height = packedTextureSize.y;
+    const { textureWidth: width, textureHeight: height } = this.view;
 
     let numRanges = 0;
     for (let i = 0; i + 3 < turns.length; i += 4) if (turns[i + 1] > 0) numRanges++;
@@ -1714,12 +1735,12 @@ export class StrokeRenderer {
    * Set the FBO data from an external source (e.g., for undo/redo).
    */
   setFBOData(data: Float32Array): void {
-    const { packedTextureSize } = this.spectrogramData;
+    const { textureWidth, textureHeight } = this.view;
 
     this.releaseRollback();
     this.pingPong = 0;
 
-    const dataTex = new DataTexture(data, packedTextureSize.x, packedTextureSize.y, RGBAFormat, FloatType);
+    const dataTex = new DataTexture(data, textureWidth, textureHeight, RGBAFormat, FloatType);
     dataTex.needsUpdate = true;
 
     this.gl.initTexture(dataTex);
@@ -1753,9 +1774,7 @@ export class StrokeRenderer {
    * span most of the texture.
    */
   patchFBOData(data: Float32Array, pixelRanges: Uint32Array): void {
-    const { packedTextureSize } = this.spectrogramData;
-    const width = packedTextureSize.x;
-    const height = packedTextureSize.y;
+    const { textureWidth: width, textureHeight: height } = this.view;
 
     // Past roughly half the texture the gather plus scatter costs more than
     // just re-uploading everything.
@@ -1773,9 +1792,7 @@ export class StrokeRenderer {
    * which hold exactly those pixels laid end to end in range order.
    */
   patchFBODataCompact(values: Float32Array, pixelRanges: Uint32Array): void {
-    const { packedTextureSize } = this.spectrogramData;
-    const width = packedTextureSize.x;
-    const height = packedTextureSize.y;
+    const { textureWidth: width, textureHeight: height } = this.view;
 
     let patchPixels = 0;
     let numRanges = 0;
@@ -1913,11 +1930,7 @@ export class StrokeRenderer {
     if (this.rollbackFbo) {
       this.blitFBO(this.rollbackFbo, this.pingPong === 0 ? this.fbo1 : this.fbo2);
     } else {
-      this.rollbackFbo = this.createFBO(
-        this.spectrogramData.textureWidth,
-        this.spectrogramData.textureHeight,
-        RGBAFormat,
-      );
+      this.rollbackFbo = this.createFBO(this.view.textureWidth, this.view.textureHeight, RGBAFormat);
       this.blitFBO(this.pingPong === 0 ? this.fbo1 : this.fbo2, this.rollbackFbo);
     }
     this.invalidateFboData();

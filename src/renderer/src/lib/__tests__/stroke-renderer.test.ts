@@ -27,6 +27,7 @@ import {
 } from "../../test/mock-spectrogram";
 import { createMockState, createMockStateForIterations, createMockStateWithSteps } from "../../test/mock-state";
 import { brushEnvelopeShape } from "../brush-envelope";
+import { wholeFileCanvasView } from "../canvas-view";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 import { gatherPixelRanges, scatterCompactPixelRanges } from "../pixel-ranges";
 
@@ -2079,7 +2080,11 @@ describe("StrokeRenderer", () => {
     // Call the real calculateScissorRows via prototype (bypasses the test override)
     function realScissorRows(brushPos: Vector2, brushSize: Vector2) {
       return StrokeRenderer.prototype.calculateScissorRows.call(
-        { spectrogramData, brushBandRange: StrokeRenderer.prototype.brushBandRange } as unknown as StrokeRenderer,
+        {
+          spectrogramData,
+          view: wholeFileCanvasView(spectrogramData),
+          brushBandRange: StrokeRenderer.prototype.brushBandRange,
+        } as unknown as StrokeRenderer,
         brushPos,
         brushSize,
       );
