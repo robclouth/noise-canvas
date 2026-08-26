@@ -874,6 +874,7 @@ export class HistoryManager {
         opts.data,
         ranges,
         compact != null,
+        false,
         hasPhaseTurns(opts.turns) ? opts.turns : undefined,
       );
       storage = this.deltaStepsSinceLastSnap(parentId) >= CHECKPOINT_INTERVAL ? "packed" : "delta";

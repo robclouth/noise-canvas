@@ -48,6 +48,20 @@ export function parseHistoryDeltaTurns(delta: Uint8Array): PhaseTurns | null {
 }
 
 /**
+ * Reads the footprint ranges out of a decompressed delta, as a flat
+ * [pixelStart, pixelCount, ...] list. Null when the header is truncated.
+ */
+export function parseHistoryDeltaRanges(delta: Uint8Array): Uint32Array | null {
+  if (delta.byteLength < 4) return null;
+  const view = new DataView(delta.buffer, delta.byteOffset, delta.byteLength);
+  const rangeCount = view.getUint32(0, true) & ~TURNS_FLAG;
+  if (4 + rangeCount * 8 > delta.byteLength) return null;
+  const ranges = new Uint32Array(rangeCount * 2);
+  for (let i = 0; i < ranges.length; i++) ranges[i] = view.getUint32(4 + i * 4, true);
+  return ranges;
+}
+
+/**
  * Adds (or, inverted, subtracts) the turns' offsets to the phases of a packed
  * state in place, the same float arithmetic the addon and the GPU use. Inverting
  * puts the residual floats back afterwards, so the state returns bit for bit.

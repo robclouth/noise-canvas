@@ -99,12 +99,14 @@ interface HistoryCodecAddon {
     after: Float32Array,
     ranges: Uint32Array,
     baseCompact: boolean,
+    afterCompact: boolean,
   ): Promise<boolean>;
   historyEncodeDelta(
     base: Float32Array,
     after: Float32Array,
     ranges: Uint32Array,
     baseCompact: boolean,
+    afterCompact: boolean,
     turns: PhaseTurns | undefined,
   ): Promise<Buffer>;
   historyApplyDelta(base: Float32Array, delta: Uint8Array): Promise<Float32Array>;
@@ -113,6 +115,13 @@ interface HistoryCodecAddon {
     out: Float32Array,
     deltas: Uint8Array[],
     inverts: boolean[],
+  ): Promise<Float32Array>;
+  historyApplyDeltasWindowed(
+    values: Float32Array,
+    table: Uint32Array,
+    deltas: Uint8Array[],
+    inverts: boolean[],
+    totalPixels: number,
   ): Promise<Float32Array>;
   historyInverseMap(
     bandOffsets: Uint32Array,
@@ -140,31 +149,35 @@ export async function decodeHistorySnapshot(bytes: Uint8Array): Promise<Float32A
 
 /**
  * True if a stroke changed anything inside the footprint it claims to cover.
- * `base` is the whole state the stroke was painted onto, or, with
- * `baseCompact`, just the footprint's values laid end to end in range order.
+ * Either state is whole, or, with its compact flag, just the footprint's
+ * values laid end to end in range order.
  */
 export async function historyFootprintChanged(
   base: Float32Array,
   after: Float32Array,
   ranges: Uint32Array,
   baseCompact = false,
+  afterCompact = false,
 ): Promise<boolean> {
-  return await historyCodec().historyFootprintChanged(base, after, ranges, baseCompact);
+  return await historyCodec().historyFootprintChanged(base, after, ranges, baseCompact, afterCompact);
 }
 
 /**
- * Encode a stroke as the difference from the state it was painted onto; `base`
- * is whole or compact as for historyFootprintChanged. `turns` carries the
- * phase shifts the stroke made past its ranges.
+ * Encode a stroke as the difference from the state it was painted onto; each
+ * state is whole or compact as for historyFootprintChanged. `turns` carries
+ * the phase shifts the stroke made past its ranges.
  */
 export async function encodeHistoryDelta(
   base: Float32Array,
   after: Float32Array,
   ranges: Uint32Array,
   baseCompact = false,
+  afterCompact = false,
   turns?: PhaseTurns,
 ): Promise<Buffer> {
-  return await zstdCompressAsync(await historyCodec().historyEncodeDelta(base, after, ranges, baseCompact, turns));
+  return await zstdCompressAsync(
+    await historyCodec().historyEncodeDelta(base, after, ranges, baseCompact, afterCompact, turns),
+  );
 }
 
 /** The phase turns a stored delta carries, or null when it has none. */
@@ -190,6 +203,25 @@ export async function applyHistoryDeltas(
 ): Promise<Float32Array> {
   const raw = await Promise.all(deltas.map((bytes) => zstdDecompressAsync(bytes)));
   return await historyCodec().historyApplyDeltas(base, out, raw, inverts);
+}
+
+/**
+ * Walk a chain of stroke deltas in place over a compact buffer holding only
+ * the pixels `table` names (sorted, non-overlapping [pixelStart, pixelCount]
+ * pairs). A write a delta makes outside the table is skipped, so the caller's
+ * table must cover every pixel it wants updated. `totalPixels` is the whole
+ * state's pixel count, which the table and every delta are checked against
+ * before anything is written.
+ */
+export async function applyHistoryDeltasWindowed(
+  values: Float32Array,
+  table: Uint32Array,
+  deltas: Uint8Array[],
+  inverts: boolean[],
+  totalPixels: number,
+): Promise<Float32Array> {
+  const raw = await Promise.all(deltas.map((bytes) => zstdDecompressAsync(bytes)));
+  return await historyCodec().historyApplyDeltasWindowed(values, table, raw, inverts, totalPixels);
 }
 
 /** Each packed pixel's time offset and band index, from the band layout. */

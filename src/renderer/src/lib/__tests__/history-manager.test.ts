@@ -194,14 +194,15 @@ function fakeHistoryCodec(): Record<string, unknown> {
   return {
     encodeHistorySnapshot: async (packed: Float32Array) => new Uint8Array(bytesOf(packed)),
     decodeHistorySnapshot: async (bytes: Uint8Array) => new Float32Array(bytes.slice().buffer),
-    // `base` is the whole state, or with `baseCompact` just the footprint's
+    // Either state is whole, or with its compact flag just the footprint's
     // values in range order.
     historyFootprintChanged: async (
       base: Float32Array,
       after: Float32Array,
       ranges: Uint32Array,
       baseCompact = false,
-    ) => footprint(ranges).some((dst, i) => base[baseCompact ? i : dst] !== after[dst]),
+      afterCompact = false,
+    ) => footprint(ranges).some((dst, i) => base[baseCompact ? i : dst] !== after[afterCompact ? i : dst]),
     // Like the addon, the delta stores each footprint value as the integer
     // difference of its bit pattern, so adding and subtracting are exact.
     encodeHistoryDelta: async (
@@ -209,6 +210,7 @@ function fakeHistoryCodec(): Record<string, unknown> {
       after: Float32Array,
       ranges: Uint32Array,
       baseCompact = false,
+      afterCompact = false,
       turns?: PhaseTurns,
     ) => {
       const indices = footprint(ranges);
@@ -219,7 +221,8 @@ function fakeHistoryCodec(): Record<string, unknown> {
       const baseBits = new Uint32Array(base.buffer, base.byteOffset, base.length);
       const afterBits = new Uint32Array(after.buffer, after.byteOffset, after.length);
       indices.forEach(
-        (dst, i) => (out[1 + ranges.length + i] = (afterBits[dst] - baseBits[baseCompact ? i : dst]) >>> 0),
+        (dst, i) =>
+          (out[1 + ranges.length + i] = (afterBits[afterCompact ? i : dst] - baseBits[baseCompact ? i : dst]) >>> 0),
       );
       let at = 1 + ranges.length + indices.length;
       out[at++] = turns ? turns.pixelStarts.length : 0;

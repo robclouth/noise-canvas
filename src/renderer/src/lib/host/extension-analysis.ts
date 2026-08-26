@@ -411,12 +411,17 @@ export function createExtensionAnalysis(): AnalysisApi {
       u8((await historyCodec("encodeSnapshot", { packed })).arrays.bytes, "bytes"),
     decodeHistorySnapshot: async (bytes) =>
       f32((await historyCodec("decodeSnapshot", { bytes })).arrays.packed, "packed"),
-    historyFootprintChanged: async (base, after, ranges, baseCompact = false) =>
+    historyFootprintChanged: async (base, after, ranges, baseCompact = false, afterCompact = false) =>
       Number(
-        (await historyCodec("footprintChanged", { base, after, ranges }, { baseCompact: baseCompact ? 1 : 0 })).meta
-          .changed,
+        (
+          await historyCodec(
+            "footprintChanged",
+            { base, after, ranges },
+            { baseCompact: baseCompact ? 1 : 0, afterCompact: afterCompact ? 1 : 0 },
+          )
+        ).meta.changed,
       ) === 1,
-    encodeHistoryDelta: async (base, after, ranges, baseCompact = false, turns) => {
+    encodeHistoryDelta: async (base, after, ranges, baseCompact = false, afterCompact = false, turns) => {
       const arrays: Record<string, NumericArray> = { base, after, ranges };
       if (turns) {
         arrays.tailPixelStarts = turns.pixelStarts;
@@ -425,7 +430,12 @@ export function createExtensionAnalysis(): AnalysisApi {
         arrays.tailResiduals = turns.residuals;
       }
       return u8(
-        (await historyCodec("encodeDelta", arrays, { baseCompact: baseCompact ? 1 : 0 })).arrays.bytes,
+        (
+          await historyCodec("encodeDelta", arrays, {
+            baseCompact: baseCompact ? 1 : 0,
+            afterCompact: afterCompact ? 1 : 0,
+          })
+        ).arrays.bytes,
         "bytes",
       );
     },
@@ -455,6 +465,22 @@ export function createExtensionAnalysis(): AnalysisApi {
       );
       out.set(packed);
       return out;
+    },
+    applyHistoryDeltasWindowed: async (values, table, deltas, inverts, totalPixels) => {
+      const arrays: Record<string, NumericArray> = { values, table };
+      deltas.forEach((bytes, i) => (arrays[`delta${i}`] = bytes));
+      const walked = f32(
+        (
+          await historyCodec("applyDeltasWindowed", arrays, {
+            deltaCount: deltas.length,
+            inverts: inverts.map((flag) => (flag ? "1" : "0")).join(""),
+            totalPixels,
+          })
+        ).arrays.values,
+        "values",
+      );
+      values.set(walked);
+      return values;
     },
     buildHistoryInverseMap: async (bandOffsets, bandLengths, bandStepLog2s, pixelCount) =>
       f32(

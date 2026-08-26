@@ -179,12 +179,14 @@ declare global {
         after: Float32Array,
         ranges: Uint32Array,
         baseCompact?: boolean,
+        afterCompact?: boolean,
       ) => Promise<boolean>;
       encodeHistoryDelta: (
         base: Float32Array,
         after: Float32Array,
         ranges: Uint32Array,
         baseCompact?: boolean,
+        afterCompact?: boolean,
         turns?: PhaseTurns,
       ) => Promise<Uint8Array>;
       readHistoryDeltaTurns: (bytes: Uint8Array) => Promise<PhaseTurns | null>;
@@ -194,6 +196,13 @@ declare global {
         out: Float32Array,
         deltas: Uint8Array[],
         inverts: boolean[],
+      ) => Promise<Float32Array>;
+      applyHistoryDeltasWindowed: (
+        values: Float32Array,
+        table: Uint32Array,
+        deltas: Uint8Array[],
+        inverts: boolean[],
+        totalPixels: number,
       ) => Promise<Float32Array>;
       buildHistoryInverseMap: (
         bandOffsets: Uint32Array,

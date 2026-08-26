@@ -4,6 +4,7 @@ import {
   analyze,
   applyHistoryDelta,
   applyHistoryDeltas,
+  applyHistoryDeltasWindowed,
   buildHistoryInverseMap,
   readHistoryDeltaTurns,
   commitStroke,
@@ -423,6 +424,7 @@ export async function runHistoryCodecFramed(request: ArrayBuffer): Promise<Uint8
         asF32(arrays.after, "after"),
         asU32(arrays.ranges, "ranges"),
         Number(meta.baseCompact) === 1,
+        Number(meta.afterCompact) === 1,
       );
       return encodeFrame({ meta: { changed: changed ? 1 : 0 }, arrays: {} });
     }
@@ -435,6 +437,7 @@ export async function runHistoryCodecFramed(request: ArrayBuffer): Promise<Uint8
             asF32(arrays.after, "after"),
             asU32(arrays.ranges, "ranges"),
             Number(meta.baseCompact) === 1,
+            Number(meta.afterCompact) === 1,
             arrays.tailPixelStarts
               ? {
                   pixelStarts: asU32(arrays.tailPixelStarts, "tailPixelStarts"),
@@ -475,6 +478,25 @@ export async function runHistoryCodecFramed(request: ArrayBuffer): Promise<Uint8
       return encodeFrame({
         meta: {},
         arrays: { packed: await applyHistoryDeltas(base, new Float32Array(base.length), deltas, inverts) },
+      });
+    }
+    case "applyDeltasWindowed": {
+      const count = Number(meta.deltaCount);
+      const deltas = Array.from({ length: count }, (_, i) => asU8(arrays[`delta${i}`], `delta${i}`));
+      const inverts = String(meta.inverts)
+        .split("")
+        .map((flag) => flag === "1");
+      return encodeFrame({
+        meta: {},
+        arrays: {
+          values: await applyHistoryDeltasWindowed(
+            asF32(arrays.values, "values"),
+            asU32(arrays.table, "table"),
+            deltas,
+            inverts,
+            Number(meta.totalPixels),
+          ),
+        },
       });
     }
     case "inverseMap":

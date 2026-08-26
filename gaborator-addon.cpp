@@ -4296,26 +4296,36 @@ static const uint32_t HISTORY_DELTA_TURNS_FLAG = 0x80000000u;
  * values laid end to end in range order. Returns an error message, or null.
  */
 static const char *historyCheckFootprint(const HistoryBufferRef &base, const HistoryBufferRef &after,
-                                         const std::vector<uint32_t> &ranges, bool baseCompact,
+                                         const std::vector<uint32_t> &ranges, bool baseCompact, bool afterCompact,
                                          const char *what)
 {
     static thread_local std::string message;
     size_t total = 0;
-    const size_t valueCount = after.byteLength / HISTORY_VALUE_BYTES;
+    const size_t baseCount = base.byteLength / HISTORY_VALUE_BYTES;
+    const size_t afterCount = after.byteLength / HISTORY_VALUE_BYTES;
     for (size_t r = 0; r + 1 < ranges.size(); r += 2)
     {
         const size_t end = (static_cast<size_t>(ranges[r]) + ranges[r + 1]) * HISTORY_CHANNELS;
-        if (end > valueCount)
+        if ((!afterCompact && end > afterCount) || (!baseCompact && end > baseCount))
         {
             message = std::string(what) + ": footprint range runs past the end of the state";
             return message.c_str();
         }
         total += static_cast<size_t>(ranges[r + 1]) * HISTORY_CHANNELS;
     }
-    if (baseCompact ? base.byteLength / HISTORY_VALUE_BYTES != total : base.byteLength != after.byteLength)
+    if (baseCompact && baseCount != total)
     {
-        message = std::string(what) + (baseCompact ? ": the compact base does not match the footprint"
-                                                   : ": the painted state is a different size to the base");
+        message = std::string(what) + ": the compact base does not match the footprint";
+        return message.c_str();
+    }
+    if (afterCompact && afterCount != total)
+    {
+        message = std::string(what) + ": the compact painted state does not match the footprint";
+        return message.c_str();
+    }
+    if (!baseCompact && !afterCompact && base.byteLength != after.byteLength)
+    {
+        message = std::string(what) + ": the painted state is a different size to the base";
         return message.c_str();
     }
     return nullptr;
@@ -4326,8 +4336,9 @@ class HistoryFootprintChangedWorker : public Napi::AsyncWorker
 {
 public:
     HistoryFootprintChangedWorker(Napi::Env env, const Napi::Value &baseJs, const Napi::Value &afterJs,
-                                  const Napi::Uint32Array &rangesJs, bool baseCompact)
-        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), baseCompact(baseCompact)
+                                  const Napi::Uint32Array &rangesJs, bool baseCompact, bool afterCompact)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), baseCompact(baseCompact),
+          afterCompact(afterCompact)
     {
         base.hold(baseJs);
         after.hold(afterJs);
@@ -4336,7 +4347,7 @@ public:
 
     void Execute() override
     {
-        const char *err = historyCheckFootprint(base, after, ranges, baseCompact, "history footprint");
+        const char *err = historyCheckFootprint(base, after, ranges, baseCompact, afterCompact, "history footprint");
         if (err)
         {
             SetError(err);
@@ -4351,9 +4362,10 @@ public:
             const size_t start = static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
             const size_t count = static_cast<size_t>(ranges[r + 1]) * HISTORY_CHANNELS;
             const uint32_t *baseRun = baseBits + (baseCompact ? p : start);
+            const uint32_t *afterRun = afterBits + (afterCompact ? p : start);
             for (size_t i = 0; i < count; ++i)
             {
-                if (baseRun[i] != afterBits[start + i])
+                if (baseRun[i] != afterRun[i])
                 {
                     changed = true;
                     return;
@@ -4378,6 +4390,7 @@ private:
     std::vector<uint32_t> ranges;
     bool changed = false;
     bool baseCompact = false;
+    bool afterCompact = false;
 };
 
 // Builds a stroke's on-disk delta. Layout:
@@ -4393,8 +4406,10 @@ class HistoryEncodeDeltaWorker : public Napi::AsyncWorker
 {
 public:
     HistoryEncodeDeltaWorker(Napi::Env env, const Napi::Value &baseJs, const Napi::Value &afterJs,
-                             const Napi::Uint32Array &rangesJs, bool baseCompact, const Napi::Value &turnsJs)
-        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), baseCompact(baseCompact)
+                             const Napi::Uint32Array &rangesJs, bool baseCompact, bool afterCompact,
+                             const Napi::Value &turnsJs)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), baseCompact(baseCompact),
+          afterCompact(afterCompact)
     {
         base.hold(baseJs);
         after.hold(afterJs);
@@ -4426,7 +4441,7 @@ public:
         for (size_t r = 1; r < ranges.size(); r += 2)
             total += static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
 
-        const char *err = historyCheckFootprint(base, after, ranges, baseCompact, "history delta");
+        const char *err = historyCheckFootprint(base, after, ranges, baseCompact, afterCompact, "history delta");
         if (err)
         {
             SetError(err);
@@ -4443,8 +4458,9 @@ public:
             const size_t start = static_cast<size_t>(ranges[r]) * HISTORY_CHANNELS;
             const size_t count = static_cast<size_t>(ranges[r + 1]) * HISTORY_CHANNELS;
             const uint32_t *baseRun = baseBits + (baseCompact ? p : start);
+            const uint32_t *afterRun = afterBits + (afterCompact ? p : start);
             for (size_t i = 0; i < count; ++i)
-                diff[p + i] = afterBits[start + i] - baseRun[i];
+                diff[p + i] = afterRun[i] - baseRun[i];
             p += count;
         }
 
@@ -4494,6 +4510,7 @@ private:
     std::vector<uint32_t> ranges;
     std::vector<uint8_t> out;
     bool baseCompact = false;
+    bool afterCompact = false;
     bool hasTurns = false;
     std::vector<HistoryPhaseTurn> turns;
     std::vector<uint32_t> residuals;
@@ -4751,6 +4768,183 @@ private:
     std::vector<bool> inverts;
 };
 
+/**
+ * Walks a chain of stroke deltas over a compact buffer holding only the pixels
+ * a sorted, non-overlapping range table names. A write a delta makes outside
+ * the table is skipped; inside it it lands at the table's compact offset, and
+ * each delta keeps its own order — differences, then turns, then, inverted,
+ * residuals — because a later stroke's footprint can overlap an earlier
+ * stroke's turn span. Every delta and the table are checked against the whole
+ * state's size before anything is written, so a bad one leaves the buffer
+ * untouched.
+ */
+class HistoryApplyDeltasWindowedWorker : public Napi::AsyncWorker
+{
+public:
+    HistoryApplyDeltasWindowedWorker(Napi::Env env, const Napi::Value &valuesJs, const Napi::Uint32Array &tableJs,
+                                     const Napi::Array &deltasJs, const Napi::Array &invertsJs, size_t totalPixels)
+        : Napi::AsyncWorker(env), deferred(Napi::Promise::Deferred::New(env)), totalPixels(totalPixels)
+    {
+        values.hold(valuesJs);
+        table.assign(tableJs.Data(), tableJs.Data() + tableJs.ElementLength());
+        const uint32_t n = deltasJs.Length();
+        deltas.resize(n);
+        inverts.resize(n);
+        for (uint32_t i = 0; i < n; ++i)
+        {
+            deltas[i].hold(deltasJs.Get(i));
+            inverts[i] = invertsJs.Get(i).ToBoolean().Value();
+        }
+    }
+
+    void Execute() override
+    {
+        if ((table.size() & 1) != 0)
+        {
+            SetError("history deltas: the range table is not [start, count] pairs");
+            return;
+        }
+        size_t tablePixels = 0;
+        uint64_t prevEnd = 0;
+        for (size_t r = 0; r + 1 < table.size(); r += 2)
+        {
+            if (table[r] < prevEnd)
+            {
+                SetError("history deltas: the range table is not sorted and disjoint");
+                return;
+            }
+            prevEnd = static_cast<uint64_t>(table[r]) + table[r + 1];
+            if (prevEnd > totalPixels)
+            {
+                SetError("history deltas: the range table runs past the end of the state");
+                return;
+            }
+            tablePixels += table[r + 1];
+        }
+        if (values.byteLength != tablePixels * HISTORY_CHANNELS * HISTORY_VALUE_BYTES)
+        {
+            SetError("history deltas: the buffer does not match the range table");
+            return;
+        }
+        bases.resize(table.size() / 2);
+        size_t at = 0;
+        for (size_t e = 0; e < bases.size(); ++e)
+        {
+            bases[e] = at;
+            at += table[e * 2 + 1];
+        }
+        const size_t valueCount = totalPixels * HISTORY_CHANNELS;
+        std::vector<HistoryDecodedDelta> decoded(deltas.size());
+        for (size_t i = 0; i < deltas.size(); ++i)
+        {
+            const char *err = historyDecodeDelta(deltas[i].data, deltas[i].byteLength, valueCount, decoded[i]);
+            if (err)
+            {
+                SetError(err);
+                return;
+            }
+        }
+        uint32_t *bits = reinterpret_cast<uint32_t *>(const_cast<uint8_t *>(values.data));
+        for (size_t i = 0; i < decoded.size(); ++i)
+            applyWindowed(bits, decoded[i], inverts[i]);
+    }
+
+    void OnOK() override
+    {
+        Napi::HandleScope scope(Env());
+        deferred.Resolve(values.ref.Value());
+    }
+
+    void OnError(const Napi::Error &e) override { deferred.Reject(e.Value()); }
+    Napi::Promise GetPromise() { return deferred.Promise(); }
+
+private:
+    // Calls f(compactPixel, absPixel, count) for each table run inside [start, end).
+    template <typename F>
+    void forEachOverlap(uint32_t start, uint64_t end, F f) const
+    {
+        size_t lo = 0, hi = table.size() / 2;
+        while (lo < hi)
+        {
+            const size_t mid = (lo + hi) / 2;
+            if (static_cast<uint64_t>(table[mid * 2]) + table[mid * 2 + 1] <= start)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        for (size_t e = lo; e * 2 < table.size() && table[e * 2] < end; ++e)
+        {
+            const uint32_t es = table[e * 2];
+            const uint64_t ee = static_cast<uint64_t>(es) + table[e * 2 + 1];
+            const uint64_t from = std::max<uint64_t>(start, es);
+            const uint64_t to = std::min<uint64_t>(end, ee);
+            if (to > from)
+                f(bases[e] + static_cast<size_t>(from - es), static_cast<uint32_t>(from),
+                  static_cast<uint32_t>(to - from));
+        }
+    }
+
+    void applyWindowed(uint32_t *bits, const HistoryDecodedDelta &delta, bool invert) const
+    {
+        size_t p = 0;
+        for (size_t r = 0; r + 1 < delta.ranges.size(); r += 2)
+        {
+            const uint32_t s = delta.ranges[r];
+            forEachOverlap(s, static_cast<uint64_t>(s) + delta.ranges[r + 1],
+                           [&](size_t compactPixel, uint32_t absPixel, uint32_t count) {
+                               const size_t di = p + static_cast<size_t>(absPixel - s) * HISTORY_CHANNELS;
+                               uint32_t *dst = bits + compactPixel * HISTORY_CHANNELS;
+                               const size_t n = static_cast<size_t>(count) * HISTORY_CHANNELS;
+                               if (invert)
+                                   for (size_t i = 0; i < n; ++i)
+                                       dst[i] -= delta.diff[di + i];
+                               else
+                                   for (size_t i = 0; i < n; ++i)
+                                       dst[i] += delta.diff[di + i];
+                           });
+            p += static_cast<size_t>(delta.ranges[r + 1]) * HISTORY_CHANNELS;
+        }
+        float *floats = reinterpret_cast<float *>(bits);
+        for (const HistoryPhaseTurn &turn : delta.turns)
+        {
+            forEachOverlap(turn.pixelStart, static_cast<uint64_t>(turn.pixelStart) + turn.pixelCount,
+                           [&](size_t compactPixel, uint32_t, uint32_t count) {
+                               for (int ch = 0; ch < 2; ++ch)
+                               {
+                                   const float c = invert ? -turn.offset[ch] : turn.offset[ch];
+                                   if (c == 0.0f)
+                                       continue;
+                                   float *f = floats + compactPixel * HISTORY_CHANNELS +
+                                              static_cast<size_t>(ch) * 2 + 1;
+                                   for (uint32_t i = 0; i < count; ++i)
+                                       f[i * HISTORY_CHANNELS] += c;
+                               }
+                           });
+        }
+        if (invert)
+        {
+            for (size_t i = 0; i + 1 < delta.residuals.size(); i += 2)
+            {
+                const uint32_t vi = delta.residuals[i];
+                const uint32_t pixel = vi / HISTORY_CHANNELS;
+                forEachOverlap(pixel, static_cast<uint64_t>(pixel) + 1,
+                               [&](size_t compactPixel, uint32_t, uint32_t) {
+                                   bits[compactPixel * HISTORY_CHANNELS + vi % HISTORY_CHANNELS] =
+                                       delta.residuals[i + 1];
+                               });
+            }
+        }
+    }
+
+    Napi::Promise::Deferred deferred;
+    HistoryBufferRef values;
+    std::vector<uint32_t> table;
+    std::vector<size_t> bases;
+    std::vector<HistoryBufferRef> deltas;
+    std::vector<bool> inverts;
+    size_t totalPixels = 0;
+};
+
 // Rebuilds the inverse map (each packed pixel's time offset and band index) from
 // a band layout. The analysis writes the same values every time, so the history
 // derives it on load rather than storing a copy beside every full snapshot.
@@ -4821,8 +5015,9 @@ Napi::Value HistoryDecodePlanesAsync(const Napi::CallbackInfo &info)
 Napi::Value HistoryFootprintChangedAsync(const Napi::CallbackInfo &info)
 {
     const bool baseCompact = info.Length() > 3 && info[3].ToBoolean().Value();
+    const bool afterCompact = info.Length() > 4 && info[4].ToBoolean().Value();
     auto *worker = new HistoryFootprintChangedWorker(info.Env(), info[0], info[1], info[2].As<Napi::Uint32Array>(),
-                                                     baseCompact);
+                                                     baseCompact, afterCompact);
     worker->Queue();
     return worker->GetPromise();
 }
@@ -4830,8 +5025,10 @@ Napi::Value HistoryFootprintChangedAsync(const Napi::CallbackInfo &info)
 Napi::Value HistoryEncodeDeltaAsync(const Napi::CallbackInfo &info)
 {
     const bool baseCompact = info.Length() > 3 && info[3].ToBoolean().Value();
+    const bool afterCompact = info.Length() > 4 && info[4].ToBoolean().Value();
     auto *worker = new HistoryEncodeDeltaWorker(info.Env(), info[0], info[1], info[2].As<Napi::Uint32Array>(),
-                                                baseCompact, info.Length() > 4 ? info[4] : info.Env().Undefined());
+                                                baseCompact, afterCompact,
+                                                info.Length() > 5 ? info[5] : info.Env().Undefined());
     worker->Queue();
     return worker->GetPromise();
 }
@@ -4855,6 +5052,24 @@ Napi::Value HistoryApplyDeltasAsync(const Napi::CallbackInfo &info)
     }
     auto *worker = new HistoryApplyDeltasWorker(env, info[0], info[1], info[2].As<Napi::Array>(),
                                                 info[3].As<Napi::Array>());
+    worker->Queue();
+    return worker->GetPromise();
+}
+
+Napi::Value HistoryApplyDeltasWindowedAsync(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() < 5 || !info[0].IsTypedArray() || !info[1].IsTypedArray() || !info[2].IsArray() ||
+        !info[3].IsArray() || !info[4].IsNumber())
+    {
+        Napi::TypeError::New(env, "Expected: values (Float32Array), table (Uint32Array), deltas (Array), "
+                                  "inverts (Array), totalPixels (number)")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    auto *worker = new HistoryApplyDeltasWindowedWorker(env, info[0], info[1].As<Napi::Uint32Array>(),
+                                                        info[2].As<Napi::Array>(), info[3].As<Napi::Array>(),
+                                                        static_cast<size_t>(info[4].As<Napi::Number>().Int64Value()));
     worker->Queue();
     return worker->GetPromise();
 }
@@ -4933,6 +5148,7 @@ Napi::Object init(Napi::Env env, Napi::Object exports)
     exports.Set("historyEncodeDelta", Napi::Function::New(env, HistoryEncodeDeltaAsync));
     exports.Set("historyApplyDelta", Napi::Function::New(env, HistoryApplyDeltaAsync));
     exports.Set("historyApplyDeltas", Napi::Function::New(env, HistoryApplyDeltasAsync));
+    exports.Set("historyApplyDeltasWindowed", Napi::Function::New(env, HistoryApplyDeltasWindowedAsync));
     exports.Set("historyInverseMap", Napi::Function::New(env, HistoryInverseMapAsync));
     exports.Set("analyze", Napi::Function::New(env, AnalyzeAsync));
     exports.Set("getGpuMemoryInfo", Napi::Function::New(env, GetGpuMemoryInfo));
