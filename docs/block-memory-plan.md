@@ -551,12 +551,32 @@ whole-file-sized cache (pure refactor, parity-tested byte-identical), (2)
 shrink the cache + acquisition/prefetch, (3) late-dab replay, (4) budget and
 gate. **STOP-ASK** after (1) with the parity result.
 
+Step (1) architecture (decided 2026-08-26): the canvas renders over a
+**view** — a block-aligned frame span expressed as its own packed layout
+(`canvas-view.ts`), the GPU twin of the addon's `CommitView`. The stroke
+shaders are already parametrised by a metadata texture and a frame count, so
+a view needs no shader changes: the FBO pair, the scratch set and the
+footprint machinery are built over the view's layout, and the wrapper
+translates coordinates at the edges. The per-block GPU LRU holds committed
+block texels in slots; stroke start composes the acquired blocks into the
+view (a blit per resident block, an upload from the block store per cold
+one) and commit copies the painted blocks back to their slots. This keeps
+every effect pass byte-identical by construction and puts all block logic on
+the CPU side, instead of an atlas indirection inside every GLSL sampling
+helper — and per-view addressing retires the 2^24 ceiling the same way
+per-block would. With the whole file as one view, step (1) degenerates to
+today's behaviour exactly. A view's inverse map comes from the existing
+`buildHistoryInverseMap` over the view's band table. Displays stop reading
+the canvas texture as their full-res fallback in step (2) — the tile ring
+takes that over.
+
 Exit: a 10-minute file opens, paints, undoes and exports on an 8 GB machine at
 ≤ ~1 GB resident; committed strokes byte-identical to the whole-file path on a
 small file; a cold-jump stroke drops no frames (measure with the Playwright
 driver).
 
-Status: not started.
+Status: step (1) in progress — `canvas-view.ts` (view layout + file↔view
+range remapping) landed with tests.
 
 ---
 
