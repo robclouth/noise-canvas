@@ -633,6 +633,24 @@ canvas cannot cover, (S6) source-file views (cross-file and same-file), (S7)
 original/onset textures composed from the seed tier per view, (S8) budget,
 admission and the whole-file-effect gate.
 
+S1 and the handle half of S3 are done:
+
+- `slideView` moves the canvas onto a new same-fold view mid-stroke: overlap
+  carries over by patch triples, entering blocks compose committed values
+  into the canvas and the stroke-start snapshot, masks bounce out, clear and
+  come back at their new place, and the view-relative CPU state (committed
+  bounds, dirty region, mask rows) rebases. A three-dab stroke across a
+  slide matches the whole-file stroke to the sub-view tolerances, with a
+  low-intensity dab pinning the mask move (a flat envelope hides a stale
+  mask — the weight is max(own, mask), so only a weaker later dab can see
+  it). Between strokes the slide disowns the scratch instead.
+- The handle speaks file space whatever the view holds: reads, patches,
+  phase turns and dirty ranges translate through `clipRangesToView` /
+  `viewRangesToFile`, UV regions rebase on the time axis, `getFBOData`
+  returns null when the view does not cover the file (the store chain
+  serves those callers), and a covering view passes everything through
+  untouched — today's whole-file behaviour is pinned by the full suite.
+
 ---
 
 ## Phase 4 — whole-file effects inside the budget (1–2 weeks)
