@@ -189,24 +189,19 @@ describe("a canvas window that follows the brush", () => {
     };
   }
 
-  function sourceFor(renderer: StrokeRenderer, spec: SpectrogramData): SourceFileInfo {
+  /**
+   * The renderer as its own paint source. The file's own spectrogram travels
+   * with the canvas, so `span` is what tells the shaders which part of it the
+   * canvas holds.
+   */
+  function sourceFor(renderer: StrokeRenderer, span?: CanvasView): SourceFileInfo {
     return {
       id: "window",
       filePath: "/window.wav",
       displayName: "window.wav",
-      spectrogramData: spec,
+      spectrogramData: data,
       textures: renderer.getTextures(),
-    };
-  }
-
-  function specFor(view: CanvasView): SpectrogramData {
-    return {
-      ...data,
-      numFrames: view.endFrame - view.startFrame,
-      metadata: view.layout.metadata,
-      textureWidth: view.textureWidth,
-      textureHeight: view.textureHeight,
-      packedTextureSize: new Vector2(view.textureWidth, view.textureHeight),
+      view: span,
     };
   }
 
@@ -232,7 +227,7 @@ describe("a canvas window that follows the brush", () => {
     disposers.push(() => whole.dispose());
     whole.beginStroke();
     for (const x of dabs) {
-      whole.renderStroke(strokeParams(new Vector2(x, pitch), fileDuration), state, sourceFor(whole, data));
+      whole.renderStroke(strokeParams(new Vector2(x, pitch), fileDuration), state, sourceFor(whole));
     }
     const wholeData = await whole.getFBOData();
 
@@ -275,7 +270,7 @@ describe("a canvas window that follows the brush", () => {
       }
       const viewFrames = view.endFrame - view.startFrame;
       const cursor = new Vector2((x * data.numFrames - view.startFrame) / viewFrames, pitch);
-      sub.renderStroke(strokeParams(cursor, viewFrames / SAMPLE_RATE), state, sourceFor(sub, specFor(view)));
+      sub.renderStroke(strokeParams(cursor, viewFrames / SAMPLE_RATE), state, sourceFor(sub, view));
     }
     const subData = await sub.getFBOData();
 

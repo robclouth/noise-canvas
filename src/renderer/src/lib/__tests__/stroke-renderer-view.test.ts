@@ -69,7 +69,6 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
   let grid: BlockGrid;
   let view: CanvasView;
   let viewFrames: number;
-  let viewSpec: SpectrogramData;
   let strokeTextures: StrokeTextures;
   const fileCursor = new Vector2(0.4, 0.35);
   let viewCursor: Vector2;
@@ -93,14 +92,6 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     expect(grid.blockCount).toBeGreaterThanOrEqual(8);
     view = canvasViewOf(grid, 2, 5);
     viewFrames = view.endFrame - view.startFrame;
-    viewSpec = {
-      ...data,
-      numFrames: viewFrames,
-      metadata: view.layout.metadata,
-      textureWidth: view.textureWidth,
-      textureHeight: view.textureHeight,
-      packedTextureSize: new Vector2(view.textureWidth, view.textureHeight),
-    };
     viewCursor = new Vector2((fileCursor.x * data.numFrames - view.startFrame) / viewFrames, fileCursor.y);
 
     const originalPackedDataTex = dataTexture(packed, data.textureWidth, data.textureHeight, RGBAFormat, "RGBA32F");
@@ -146,14 +137,19 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     };
   }
 
-  function sourceFor(renderer: StrokeRenderer, spec: SpectrogramData): SourceFileInfo {
-    const textures = renderer.getTextures();
+  /**
+   * The renderer as its own paint source. The file's own spectrogram travels
+   * with the canvas, so `span` is what tells the shaders which part of it the
+   * canvas holds.
+   */
+  function sourceFor(renderer: StrokeRenderer, span?: CanvasView): SourceFileInfo {
     return {
       id: "parity",
       filePath: "/parity.wav",
       displayName: "parity.wav",
-      spectrogramData: spec,
-      textures,
+      spectrogramData: data,
+      textures: renderer.getTextures(),
+      view: span,
     };
   }
 
@@ -224,9 +220,9 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     sub.setFBOData(composeViewContent(view, data.packedData));
 
     whole.beginStroke();
-    whole.renderStroke(strokeParams(fileCursor, data.numFrames / SAMPLE_RATE), state, sourceFor(whole, data));
+    whole.renderStroke(strokeParams(fileCursor, data.numFrames / SAMPLE_RATE), state, sourceFor(whole));
     sub.beginStroke();
-    sub.renderStroke(strokeParams(viewCursor, viewFrames / SAMPLE_RATE), state, sourceFor(sub, viewSpec));
+    sub.renderStroke(strokeParams(viewCursor, viewFrames / SAMPLE_RATE), state, sourceFor(sub, view));
 
     const wholeData = await whole.getFBOData();
     const subData = await sub.getFBOData();
@@ -279,7 +275,7 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     expect(firstDifference(seeded, composeViewContent(view, data.packedData), view.texels * 4)).toBe(-1);
 
     sub.beginStroke();
-    sub.renderStroke(strokeParams(viewCursor, viewFrames / SAMPLE_RATE), state, sourceFor(sub, viewSpec));
+    sub.renderStroke(strokeParams(viewCursor, viewFrames / SAMPLE_RATE), state, sourceFor(sub, view));
     const painted = await sub.getFBOData();
     expect(firstDifference(painted, seeded, view.texels * 4)).not.toBe(-1);
 
@@ -395,14 +391,6 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
       cache.upload(block, gatherPixelRanges(data.packedData, list.ranges.subarray(0, list.count * 2)));
     }
 
-    const specFor = (v: CanvasView): SpectrogramData => ({
-      ...data,
-      numFrames: v.endFrame - v.startFrame,
-      metadata: v.layout.metadata,
-      textureWidth: v.textureWidth,
-      textureHeight: v.textureHeight,
-      packedTextureSize: new Vector2(v.textureWidth, v.textureHeight),
-    });
     const cursorFor = (v: CanvasView, fileX: number): Vector2 =>
       new Vector2((fileX * data.numFrames - v.startFrame) / (v.endFrame - v.startFrame), fileCursor.y);
     const durationFor = (v: CanvasView): number => (v.endFrame - v.startFrame) / SAMPLE_RATE;
@@ -426,29 +414,25 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     whole.renderStroke(
       strokeParams(new Vector2(x1, fileCursor.y), data.numFrames / SAMPLE_RATE),
       state,
-      sourceFor(whole, data),
+      sourceFor(whole),
     );
     whole.renderStroke(
       strokeParams(new Vector2(x2, fileCursor.y), data.numFrames / SAMPLE_RATE),
       state,
-      sourceFor(whole, data),
+      sourceFor(whole),
     );
     whole.renderStroke(
       strokeParams(new Vector2(x3, fileCursor.y), data.numFrames / SAMPLE_RATE),
       lightState,
-      sourceFor(whole, data),
+      sourceFor(whole),
     );
     const wholeData = await whole.getFBOData();
 
     sub.beginStroke();
-    sub.renderStroke(strokeParams(cursorFor(viewA, x1), durationFor(viewA)), state, sourceFor(sub, specFor(viewA)));
+    sub.renderStroke(strokeParams(cursorFor(viewA, x1), durationFor(viewA)), state, sourceFor(sub, viewA));
     sub.slideView(viewB, (target, blocks) => cache.compose(viewB, blocks, target), { midStroke: true });
-    sub.renderStroke(strokeParams(cursorFor(viewB, x2), durationFor(viewB)), state, sourceFor(sub, specFor(viewB)));
-    sub.renderStroke(
-      strokeParams(cursorFor(viewB, x3), durationFor(viewB)),
-      lightState,
-      sourceFor(sub, specFor(viewB)),
-    );
+    sub.renderStroke(strokeParams(cursorFor(viewB, x2), durationFor(viewB)), state, sourceFor(sub, viewB));
+    sub.renderStroke(strokeParams(cursorFor(viewB, x3), durationFor(viewB)), lightState, sourceFor(sub, viewB));
     const subData = await sub.getFBOData();
 
     const inView = composeViewContent(viewB, wholeData);

@@ -233,9 +233,20 @@ export interface SourceFileInfo {
     metadata: DataTexture;
     original: DataTexture;
   };
+  /**
+   * The span `textures.packed` lays out. Absent when it holds the whole file.
+   * Source UVs address this span, so every source-space scale reads its frame
+   * count, not the file's.
+   */
+  view?: CanvasView;
   // Nearest-onset lookup row for this file at the current sensitivity, baked by
   // lib/onset-map.ts. Null when the file has no onsets yet.
   onsetTexture?: Texture | null;
+}
+
+/** Frames the source textures lay out. */
+function sourceViewFrames(source: SourceFileInfo): number {
+  return source.view ? source.view.endFrame - source.view.startFrame : source.spectrogramData.numFrames;
 }
 
 /**
@@ -810,12 +821,16 @@ export class StrokeRenderer {
       modulatorTex0: { value: null },
       modulatorTex1: { value: null },
       sourceSpectrogramTex: { value: sourceFile.textures.packed.texture || placeholderTexture },
-      sourceSpectrogramTextureSize: { value: sourceFile.spectrogramData.packedTextureSize },
+      sourceSpectrogramTextureSize: {
+        value: sourceFile.view
+          ? new Vector2(sourceFile.view.textureWidth, sourceFile.view.textureHeight)
+          : sourceFile.spectrogramData.packedTextureSize,
+      },
       sourceInverseMapTex: { value: sourceFile.textures.inverse || placeholderTexture },
       sourceMetadataTex: { value: sourceFile.textures.metadata || placeholderTexture },
       sourceMinFreq: { value: sourceFile.spectrogramData.minFreq },
       sourceBandsPerOctave: { value: sourceFile.spectrogramData.bandsPerOctave },
-      sourceFrameCount: { value: sourceFile.spectrogramData.numFrames },
+      sourceFrameCount: { value: sourceViewFrames(sourceFile) },
       sourceBandCount: { value: sourceFile.spectrogramData.numBands },
       sourceChannelCount: { value: sourceFile.spectrogramData.numChannels },
       sourceSampleRate: { value: sourceFile.spectrogramData.sampleRate },
@@ -849,7 +864,7 @@ export class StrokeRenderer {
       // Beat-based scale: 1 beat in dest UV = 1 beat in source UV
       sourceTimeScale: {
         value: (() => {
-          const sourceDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
+          const sourceDuration = sourceViewFrames(sourceFile) / sourceFile.spectrogramData.sampleRate;
           const divisor = sourceBpm * sourceDuration;
           return divisor > 0 ? (bpm * totalDuration) / divisor : 1;
         })(),
@@ -987,14 +1002,15 @@ export class StrokeRenderer {
     // band count, so an empty source would put NaN coordinates into the shaders
     // and write corrupted coefficients over the destination.
     const sourceSpec = sourceFile.spectrogramData;
-    if (!(sourceSpec.numFrames > 0) || !(sourceSpec.numBands > 0) || !(sourceSpec.sampleRate > 0)) return;
+    const sourceFrames = sourceViewFrames(sourceFile);
+    if (!(sourceFrames > 0) || !(sourceSpec.numBands > 0) || !(sourceSpec.sampleRate > 0)) return;
 
     const activeStepState = createStepStateView(state, state.activeStepIndex);
     const activeStep = (state.brushes[state.activeBrushIndex]?.steps ?? [])[state.activeStepIndex];
 
     // Beat-based scale: converts dest UV to source UV so 1 beat = 1 beat
     const srcBpm = state.filepathsBpm?.[sourceFile.filePath] || bpm;
-    const srcDuration = sourceFile.spectrogramData.numFrames / sourceFile.spectrogramData.sampleRate;
+    const srcDuration = sourceFrames / sourceFile.spectrogramData.sampleRate;
     const timeScale = (bpm * totalDuration) / (srcBpm * srcDuration);
     const bandScale = sourceBandUvSlope(this.spectrogramData, sourceFile.spectrogramData);
 

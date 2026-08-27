@@ -152,6 +152,8 @@ export interface FileRendererHandle {
     metadata: DataTexture;
     original: DataTexture;
   } | null;
+  /** The span the canvas textures lay out, or null before the renderer exists. */
+  getCanvasView: () => CanvasView | null;
   /** Restores the spectrogram to its original state. */
   restoreOriginal: () => void;
   /** Clears the stroke preview. */
@@ -978,7 +980,12 @@ const FileRendererInner = memo(
           : null;
       const resolvedSourceFile = sourceFileData ?? openFiles[fileId];
       const resolvedSourceTextures = resolvedSourceFile?.rendererRef?.current?.getTextures();
+      const resolvedSourceView = resolvedSourceFile?.rendererRef?.current?.getCanvasView();
       if (!resolvedSourceTextures || !resolvedSourceFile?.spectrogramData) return false;
+      const sourceSpan =
+        resolvedSourceView && !viewCoversFile(resolvedSourceView, resolvedSourceFile.spectrogramData.numFrames)
+          ? resolvedSourceView
+          : undefined;
 
       // Both onset maps are baked here rather than inside the renderer so the
       // sensitivity control and the file's latest detections reach the shader
@@ -990,6 +997,7 @@ const FileRendererInner = memo(
         displayName: resolvedSourceFile.displayName,
         spectrogramData: resolvedSourceFile.spectrogramData,
         textures: resolvedSourceTextures,
+        view: sourceSpan,
         onsetTexture: getOnsetTexture(
           resolvedSourceFile.id,
           resolvedSourceFile.onsets,
@@ -1657,6 +1665,9 @@ const FileRendererInner = memo(
       return strokeRendererRef.current.getTextures();
     };
 
+    /** The span those textures lay out. */
+    const getCanvasView = (): CanvasView | null => strokeRendererRef.current?.committedSource().view ?? null;
+
     /**
      * Restores the spectrogram to its original, unmodified state.
      */
@@ -1784,6 +1795,7 @@ const FileRendererInner = memo(
       patchFBOData,
       patchFBODataCompact,
       getTextures,
+      getCanvasView,
       restoreOriginal,
       clearPreview,
       reloadTextures,
