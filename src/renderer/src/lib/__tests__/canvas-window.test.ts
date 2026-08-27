@@ -492,12 +492,12 @@ describe("a canvas window that follows the brush", () => {
 
   it("stops calling a block painted once the store fills its slot again", async () => {
     const window = new CanvasWindow(gl, grid, {
-      windowBlocks: 4,
+      windowBlocks: 2,
       maxBytes: 0,
       read: async (ranges) => gatherPixelRanges(data.packedData, ranges),
     });
     disposers.push(() => window.dispose());
-    const first = window.viewFor({ firstBlock: 0, lastBlock: 3 });
+    const first = window.viewFor({ firstBlock: 0, lastBlock: 1 });
     expect(await window.acquire(first)).toBe(true);
     const renderer = new StrokeRenderer(gl, data, strokeTextures, "window", effects, first);
     renderer.initialize();
@@ -507,9 +507,11 @@ describe("a canvas window that follows the brush", () => {
     window.copyBack(first, [0], renderer.committedSource().texture);
     expect(window.holdsPaint(0)).toBe(true);
 
-    // Four slots and three blocks entering: block 0 is the oldest, loses its
-    // slot, and comes back from the store without what the canvas gave it.
-    expect(await window.acquire(window.viewFor({ firstBlock: 3, lastBlock: 6 }))).toBe(true);
+    // The smallest cache holds two windows, here four slots. Four more blocks
+    // enter, so block 0 is the oldest, loses its slot, and comes back from the
+    // store without what the canvas gave it.
+    expect(await window.acquire(window.viewFor({ firstBlock: 2, lastBlock: 3 }))).toBe(true);
+    expect(await window.acquire(window.viewFor({ firstBlock: 4, lastBlock: 5 }))).toBe(true);
     expect(await window.acquire(first)).toBe(true);
     expect(window.holdsPaint(0)).toBe(false);
   });
@@ -595,6 +597,49 @@ describe("a canvas window that follows the brush", () => {
     expect(window.ready(second)).toBe(true);
     expect(await window.acquire(second)).toBe(true);
     expect(reads).toBe(6);
+  });
+
+  it("keeps the slots of both windows when the brush jumps a whole window", async () => {
+    // Finer blocks, so two windows of five sit side by side with no overlap.
+    const fine = blockGrid({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, SAMPLE_RATE, 0.1);
+    const window = new CanvasWindow(gl, fine, {
+      windowBlocks: 5,
+      read: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+    });
+    disposers.push(() => window.dispose());
+
+    const first = window.viewFor({ firstBlock: 0, lastBlock: 4 });
+    expect(await window.acquire(first)).toBe(true);
+    const renderer = new StrokeRenderer(gl, data, strokeTextures, "window", effects, first);
+    renderer.initialize();
+    disposers.push(() => renderer.dispose());
+    window.compose(first, window.blocksOf(first), renderer.getTextures().packed);
+
+    const state = createMockStateWithSteps([
+      {
+        name: "Jump",
+        overrides: {
+          transformShiftSemis: 3,
+          effects: [{ id: "transform", effect: "transform", enabled: true, params: { transformShiftSemis: 3 } }],
+        },
+      },
+    ]);
+    renderer.beginStroke();
+    const firstFrames = first.endFrame - first.startFrame;
+    renderer.renderStroke(
+      strokeParams(new Vector2(0.2, 0.35), firstFrames / SAMPLE_RATE),
+      state,
+      sourceFor(renderer, first),
+    );
+
+    // The whole window leaves at once: its paint folds back into its own slots
+    // while the entering blocks hold theirs, so the cache carries both sets.
+    const next = window.viewFor({ firstBlock: 10, lastBlock: 14 });
+    expect(await window.acquire(next)).toBe(true);
+    carryPaintOut(renderer, window, new CarriedPaint(), next, data.numFrames);
+    renderer.slideView(next, (target, blocks) => window.compose(next, blocks, target), { midStroke: true });
+    expect(window.missing(next)).toEqual([]);
+    expect(window.holdsPaint(0)).toBe(true);
   });
 
   it("reports a view it could not fill", async () => {

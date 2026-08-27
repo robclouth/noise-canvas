@@ -100,8 +100,13 @@ export class CanvasWindow {
     this.read = opts.read;
     this.windowBlocks = Math.min(Math.max(1, Math.floor(opts.windowBlocks)), grid.blockCount);
     const slotBytes = blockTexels(grid, 0) * PACKED_BYTES_PER_TEXEL;
-    const budget = opts.maxBytes ?? (this.windowBlocks + CANVAS_WINDOW_SPARE_BLOCKS) * slotBytes;
-    this.cache = new BlockSlotCache(gl, grid, Math.max(budget, this.windowBlocks * slotBytes));
+    // A slide holds two windows at once: the one it enters, claimed before the
+    // move, and the one it leaves, whose paint is folded back into its slots.
+    // A jump the width of the window makes those sets disjoint, so anything
+    // smaller evicts a block the slide is about to compose.
+    const slide = 2 * this.windowBlocks;
+    const budget = opts.maxBytes ?? (slide + CANVAS_WINDOW_SPARE_BLOCKS) * slotBytes;
+    this.cache = new BlockSlotCache(gl, grid, Math.max(budget, slide * slotBytes));
   }
 
   /** Bytes the slot pages hold. */
