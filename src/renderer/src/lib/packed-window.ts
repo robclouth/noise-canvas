@@ -24,7 +24,7 @@ export class PackedWindow {
     opts: { windowBlocks: number; maxBytes?: number; read: BlockValueReader },
   ) {
     this.gl = gl;
-    this.blocks = new CanvasWindow(gl, grid, opts);
+    this.blocks = new CanvasWindow(gl, grid, { ...opts, readOnly: true });
     const fold = this.blocks.viewFor({ firstBlock: 0, lastBlock: this.blocks.windowBlocks - 1 });
     this.target = new WebGLRenderTarget(fold.textureWidth, fold.textureHeight, {
       format: RGBAFormat,
@@ -39,6 +39,11 @@ export class PackedWindow {
   /** Bytes the slot pages and the composed texture hold. */
   get allocatedBytes(): number {
     return this.blocks.allocatedBytes + this.target.width * this.target.height * 16;
+  }
+
+  /** Blocks the slots can hold at once. */
+  get slotCount(): number {
+    return this.blocks.slotCount;
   }
 
   get texture(): Texture {

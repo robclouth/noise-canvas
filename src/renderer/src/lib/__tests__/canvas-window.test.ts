@@ -16,8 +16,15 @@ import { createConstantQMockSpectrogramData } from "../../test/mock-spectrogram"
 import { createMockStateWithSteps } from "../../test/mock-state";
 import { blockGrid, blockPixelRanges, type BlockGrid } from "../block-grid";
 import { canvasViewOf, composeViewContent, fileRangesToView, viewRangesToFile, type CanvasView } from "../canvas-view";
-import { canvasWindowView, CanvasWindow, needsCanvasWindow, placeCanvasWindow } from "../canvas-window";
+import {
+  canvasWindowView,
+  CanvasWindow,
+  needsCanvasWindow,
+  placeCanvasWindow,
+  type BlockValueReader,
+} from "../canvas-window";
 import { CarriedPaint, carryPaintOut, dropReturningPaint } from "../carried-paint";
+import { PackedWindow } from "../packed-window";
 import {
   composePixelRangeValues,
   gatherPixelRanges,
@@ -640,6 +647,20 @@ describe("a canvas window that follows the brush", () => {
     renderer.slideView(next, (target, blocks) => window.compose(next, blocks, target), { midStroke: true });
     expect(window.missing(next)).toEqual([]);
     expect(window.holdsPaint(0)).toBe(true);
+  });
+
+  it("gives a window nothing folds paint back into one window of slots", () => {
+    // Finer blocks, so the file has more of them than either budget asks for.
+    const fine = blockGrid({ numBands: data.numBands, metadata: data.metadata }, data.numFrames, SAMPLE_RATE, 0.1);
+    const read: BlockValueReader = async (ranges) => gatherPixelRanges(data.packedData, ranges);
+    const painted = new CanvasWindow(gl, fine, { windowBlocks: 5, read });
+    const readOnly = new CanvasWindow(gl, fine, { windowBlocks: 5, readOnly: true, read });
+    const original = new PackedWindow(gl, fine, { windowBlocks: 5, read });
+    disposers.push(() => painted.dispose());
+    disposers.push(() => readOnly.dispose());
+    disposers.push(() => original.dispose());
+    expect(painted.slotCount).toBe(readOnly.slotCount + 5);
+    expect(original.slotCount).toBe(readOnly.slotCount);
   });
 
   it("reports a view it could not fill", async () => {
