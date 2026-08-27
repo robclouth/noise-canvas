@@ -678,12 +678,51 @@ and the full suite pins that behaviour:
   undo and a redo with the canvas at the far end of the file patch through
   (`navigateTo FBO upload mode:patch`, 1.4–3.9 ms) with no parity warning.
 
-Left before the window can carry a real session: the source a dab samples
-(same-file dabs still hand the shader the file's own spectrogram, and a
-cross-file source needs its own window composed), original and onset
-textures per view, the painted texels of blocks that leave mid-stroke (they
-must reach the commit), the whole-file-effect gate, and the budget that sets
-K — S6, S7, S3's commit half and S8.
+S6's same-file half, S3's commit half and most of S7 are done:
+
+- A dab's source carries the span its textures lay out, so every source-space
+  scale reads the canvas's frame count instead of the file's. Without it a
+  windowed canvas painting from itself read the last texel of every band.
+- Paint on a block that leaves the canvas mid-stroke is kept: the block slots
+  take the painted texels so a window coming back shows them, the display
+  picture takes them so they stay on screen, and the carry holds them for the
+  commit, which merges them into its footprint and its values. A block whose
+  slot loses its paint to the store keeps its pixels in the carry. Measured on
+  a 60 s file with an 8-block window: a 36 s drag commits the same 153 ranges
+  and 1,430,229 pixels the whole-file canvas commits; without the carry the
+  commit keeps 372,189 of them.
+- Reading for a window no longer takes the slot of a block that window needs.
+- Absolute positions are the file's, not the canvas's: onset lookups, the
+  transient phase anchors, the carrier re-anchor in the Sharp warp, the
+  modulator patterns and the sequencer, and the random draws behind
+  Synthesise's noise and the warp's noise-phase replacement. Each is pinned by
+  a sub-view parity test; the whole-file path returns its old value untouched,
+  which the full suite pins.
+- Two random draws changed for everyone: Synthesise's noise and the warp's
+  noise-phase replacement now seed on whole frames rather than on the UV a
+  fragment happens to arrive with. The noise is different, its character is
+  not.
+
+Left before the window can carry a real session:
+
+- A cross-file source reads through the source file's own canvas, so a source
+  longer than the window serves only the span that canvas holds and clamps at
+  its edges. The dest renderer needs its own window over the source (S6b).
+- `originalSpectrogramTex` is still the whole file, read through the view's
+  metadata: Read From → Original is wrong under a window, and the texture is a
+  whole-file GPU allocation that the shrink has to remove (S7b).
+- Reverse and wrap work on the canvas axis, so under a window they reverse or
+  wrap the window. Both belong in the whole-file-effect gate.
+- The warp's noise-phase replacement still draws differently for about 0.8% of
+  texels through a window (517 of 65,216 measured) even with the file-seeded
+  draw. It is a random phase either way, so it is a difference in the noise,
+  not in the signal.
+- Not pinned by a test yet: the rigid transient tail at a file edge, the
+  cross-resolution carrier rebase (it needs two bands-per-octave settings), and
+  the warp's noise seed.
+- S8: the budget that sets K, admission, the whole-file-effect gate, image
+  export and snapshot off the whole canvas, and brush.ts's whole-canvas commit
+  fallback, which bails when the canvas cannot serve the whole file.
 
 ---
 
