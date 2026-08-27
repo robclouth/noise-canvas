@@ -2,20 +2,10 @@ import { createStepStateView, useStore } from "@/store";
 import { notifications } from "@mantine/notifications";
 import { useTransientStore } from "@renderer/store/transient";
 import { diag } from "@renderer/lib/diag-log";
-import {
-  clipRangesToView,
-  composeViewContent,
-  fileUvToViewUv,
-  viewCoversFile,
-  viewRangesToFile,
-  viewUvToFileUv,
-  type CanvasView,
-} from "@renderer/lib/canvas-view";
-import { blockGrid, blockOfFrame, blocksForPixelRanges } from "@renderer/lib/block-grid";
-import { CANVAS_WINDOW_BLOCKS, CanvasWindow, needsCanvasWindow } from "@renderer/lib/canvas-window";
-import { CarriedPaint, carryPaintOut, dropReturningPaint } from "@renderer/lib/carried-paint";
-import { PackedWindow } from "@renderer/lib/packed-window";
-import { composePixelRangeValues, gatherPixelRanges, mergePixelRanges } from "@renderer/lib/pixel-ranges";
+import { viewCoversFile, type CanvasView } from "@renderer/lib/canvas-view";
+import { blockGrid } from "@renderer/lib/block-grid";
+import { CANVAS_WINDOW_BLOCKS, needsCanvasWindow } from "@renderer/lib/canvas-window";
+import { WindowedCanvas, type UvRegion } from "@renderer/lib/windowed-canvas";
 import { countDiagStroke } from "@renderer/lib/diag-sampler";
 import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
 import { useFrame, useThree } from "@react-three/fiber";
@@ -450,20 +440,13 @@ const FileRendererInner = memo(
     // Stroke params for render loop
     const strokePreview = useRef(false);
 
-    // The canvas window this file paints through, the view it is moving to,
-    // and whether a stroke is in progress (a window that moves mid-stroke has
-    // to carry the stroke's scratch with it).
-    const canvasWindowRef = useRef<CanvasWindow | null>(null);
-    // The same window over the file's original state, which the shaders read
-    // through the canvas view's metadata, so it moves with the canvas.
-    const originalWindowRef = useRef<PackedWindow | null>(null);
-    const windowRequestRef = useRef<CanvasView | null>(null);
-    const strokeActiveRef = useRef(false);
-    // Stroke paint on blocks that left the window, until the commit reads it.
-    const carriedPaintRef = useRef<CarriedPaint>(new CarriedPaint());
-    // The effects that drop the renderer run before the window helpers are
+    // The canvas as the rest of the app sees it: file coordinates, whatever
+    // span the canvas itself holds. lib/windowed-canvas.ts owns the block
+    // window, the window over the original, and the carried paint.
+    const canvasRef = useRef<WindowedCanvas | null>(null);
+    // The effects that drop the renderer run before the canvas helpers are
     // declared, so they reach the disposer through a ref.
-    const disposeCanvasWindowRef = useRef<(() => void) | null>(null);
+    const disposeCanvasRef = useRef<(() => void) | null>(null);
     // Ring tiles being read out of the store, keyed by level and tile.
     const ringRequestsRef = useRef<Set<string>>(new Set());
 
@@ -474,7 +457,7 @@ const FileRendererInner = memo(
           strokeRendererRef.current.dispose();
           strokeRendererRef.current = null;
         }
-        disposeCanvasWindowRef.current?.();
+        disposeCanvasRef.current?.();
       };
     }, [spectrogramData.textureWidth, spectrogramData.textureHeight]);
 
@@ -583,7 +566,7 @@ const FileRendererInner = memo(
         strokeRendererRef.current.dispose();
         strokeRendererRef.current = null;
       }
-      disposeCanvasWindowRef.current?.();
+      disposeCanvasRef.current?.();
 
       return () => {
         // Whatever is live now, not what this run created: reloadTextures
@@ -898,112 +881,26 @@ const FileRendererInner = memo(
       return { start, end: start + span };
     };
 
-    /**
-     * The block window the canvas paints through, built on first use for a
-     * file with more blocks than the window holds. With CANVAS_WINDOW_BLOCKS
-     * at Infinity the canvas holds the whole file and no window is made.
-     */
-    const canvasWindowFor = (gl: WebGLRenderer): CanvasWindow | null => {
-      if (canvasWindowRef.current) return canvasWindowRef.current;
-      const grid = blockGrid(
-        { numBands: spectrogramData.numBands, metadata: spectrogramData.metadata },
-        spectrogramData.numFrames,
-        spectrogramData.sampleRate,
-      );
-      if (!needsCanvasWindow(grid, CANVAS_WINDOW_BLOCKS)) return null;
-      canvasWindowRef.current = new CanvasWindow(gl, grid, {
-        windowBlocks: CANVAS_WINDOW_BLOCKS,
-        read: (ranges) => getHistoryManager(fileId).currentRanges(ranges),
-      });
-      originalWindowRef.current = new PackedWindow(gl, grid, {
-        windowBlocks: CANVAS_WINDOW_BLOCKS,
-        read: (ranges) => getHistoryManager(fileId).rootRanges(ranges),
-      });
-      return canvasWindowRef.current;
+    /** The canvas, built on first use once there is a graphics device. */
+    const canvasFor = (gl: WebGLRenderer): WindowedCanvas => {
+      if (!canvasRef.current) {
+        canvasRef.current = new WindowedCanvas({
+          gl,
+          spectrogram: spectrogramData,
+          renderer: () => strokeRendererRef.current,
+          readCurrent: (ranges) => getHistoryManager(fileId).currentRanges(ranges),
+          readRoot: (ranges) => getHistoryManager(fileId).rootRanges(ranges),
+          onChanged: () => invalidateRef.current(),
+        });
+      }
+      return canvasRef.current;
     };
 
-    const disposeCanvasWindow = (): void => {
-      canvasWindowRef.current?.dispose();
-      canvasWindowRef.current = null;
-      originalWindowRef.current?.dispose();
-      originalWindowRef.current = null;
-      windowRequestRef.current = null;
+    const disposeCanvas = (): void => {
+      canvasRef.current?.dispose();
+      canvasRef.current = null;
     };
-    disposeCanvasWindowRef.current = disposeCanvasWindow;
-
-    /** True while the canvas holds every block of [startFrame, endFrame) its view covers. */
-    const canvasHoldsFrames = (window: CanvasWindow, startFrame: number, endFrame: number): boolean => {
-      const view = strokeRendererRef.current?.committedSource().view;
-      if (!view) return false;
-      const first = Math.max(view.firstBlock, blockOfFrame(window.grid, startFrame));
-      const last = Math.min(view.lastBlock, blockOfFrame(window.grid, Math.max(startFrame, endFrame - 1)));
-      return window.canvasLacks({ firstBlock: first, lastBlock: last }).length === 0;
-    };
-
-    /**
-     * Keeps what the stroke painted on the blocks about to leave the canvas:
-     * the block slots take the painted texels so a window coming back shows
-     * them, the display picture takes them so they stay on screen, and the
-     * carry holds them for the commit.
-     */
-    const carryPaintOffCanvas = (renderer: StrokeRenderer, window: CanvasWindow, next: CanvasView): void => {
-      const carried = carryPaintOut(renderer, window, carriedPaintRef.current, next, spectrogramData.numFrames);
-      if (!carried) return;
-      void carried.read.then((values) => {
-        if (strokeRendererRef.current !== renderer) return;
-        renderer.patchDisplayFromCompact(values, carried.fileRanges);
-        renderer.getDisplayTiles()?.dropTiles(carried.fileRanges);
-        invalidateRef.current();
-      });
-    };
-
-    /**
-     * Points the canvas window at the frames [startFrame, endFrame). Blocks
-     * the window lacks are read in the background and the canvas takes them
-     * when they land, so a brush ahead of the reads keeps painting on what the
-     * canvas already holds. The original window reads alongside, so the
-     * original texture never lays out a span the canvas has left.
-     */
-    const aimCanvasWindow = (startFrame: number, endFrame: number): void => {
-      const window = canvasWindowRef.current;
-      const original = originalWindowRef.current;
-      const renderer = strokeRendererRef.current;
-      if (!window || !renderer?.getIsInitialized()) return;
-      const current = renderer.committedSource().view;
-      const next = window.plan(current, startFrame, endFrame);
-      const originalHeld = original?.holds(next) ?? true;
-      if (next === current && window.canvasLacks(next).length === 0 && originalHeld) return;
-      const pending = windowRequestRef.current;
-      if (pending && pending.firstBlock === next.firstBlock && pending.lastBlock === next.lastBlock) return;
-      windowRequestRef.current = next;
-      const reads = Promise.all([window.acquire(next), original ? original.hold(next) : Promise.resolve(true)]);
-      void reads.then(([filled, originalFilled]) => {
-        if (windowRequestRef.current !== next) return;
-        windowRequestRef.current = null;
-        const live = strokeRendererRef.current;
-        if (!filled || !originalFilled || !live?.getIsInitialized() || canvasWindowRef.current !== window) return;
-        if (original) live.setOriginalTexture(original.texture);
-        const held = live.committedSource().view;
-        if (held.firstBlock !== next.firstBlock || held.lastBlock !== next.lastBlock) {
-          if (strokeActiveRef.current) carryPaintOffCanvas(live, window, next);
-          live.slideView(next, (target, blocks) => window.compose(next, blocks, target), {
-            midStroke: strokeActiveRef.current,
-          });
-          window.markSlid(next, held);
-          if (strokeActiveRef.current) dropReturningPaint(carriedPaintRef.current, window, next, held);
-        }
-        // Whatever the canvas still lacks: the blocks a slide did not bring in,
-        // and the ones an abandoned fill left empty. Nothing painted is drawn
-        // over, because a dab never lands on a block the canvas lacks.
-        const view = live.committedSource().view;
-        const lacking = window.canvasLacks(view);
-        if (lacking.length > 0) {
-          live.fillCanvas((target) => window.compose(view, lacking, target));
-          window.markOnCanvas(lacking);
-        }
-        invalidateRef.current();
-      });
-    };
+    disposeCanvasRef.current = disposeCanvas;
 
     /**
      * Paints one stroke into the FBO from an explicit state snapshot. The frame
@@ -1021,14 +918,9 @@ const FileRendererInner = memo(
 
       // The renderer paints over the span the canvas holds, so the cursor and
       // the duration it reads them against are the window's, not the file's.
-      const view = strokeRenderer.committedSource().view;
-      const overWholeFile = viewCoversFile(view, file.spectrogramData.numFrames);
-      const dabCursor = overWholeFile
-        ? cursorPos
-        : new Vector2(fileUvToViewUv(view, file.spectrogramData.numFrames, cursorPos.x), cursorPos.y);
-      const dabDuration = overWholeFile
-        ? totalDuration
-        : (view.endFrame - view.startFrame) / file.spectrogramData.sampleRate;
+      const canvas = canvasRef.current;
+      const dabCursor = canvas ? canvas.dabCursor(cursorPos) : cursorPos;
+      const dabDuration = canvas ? canvas.dabDuration(totalDuration) : totalDuration;
 
       // The active step names the file the brush samples from; null means this
       // file paints from itself.
@@ -1194,7 +1086,7 @@ const FileRendererInner = memo(
         // budget; closing the file keeps the context alive.
         try {
           const visible = visibleFrameRange(state);
-          const view = canvasWindowFor(gl)?.plan(null, visible.start, visible.end);
+          const view = canvasFor(gl).firstView(visible.start, visible.end);
           strokeRendererRef.current = new StrokeRenderer(gl, spectrogramData, textures, fileId, effects, view);
         } catch (error) {
           console.error("Creating the stroke renderer failed:", error);
@@ -1214,21 +1106,7 @@ const FileRendererInner = memo(
 
       // Initialize StrokeRenderer if not done yet
       if (!strokeRenderer.getIsInitialized()) {
-        const window = canvasWindowRef.current;
-        if (window) {
-          const view = strokeRenderer.committedSource().view;
-          window.clearCanvas();
-          strokeRenderer.initialize((target) => {
-            const cold = new Set(window.composeResident(view, target));
-            window.markOnCanvas(window.blocksOf(view).filter((block) => !cold.has(block)));
-          });
-          // The canvas holds one window, so the picture of the rest of the
-          // file comes from the analysed state rather than from the canvas.
-          if (packedSeedRef.current) strokeRenderer.seedDisplayFromPacked(packedSeedRef.current);
-          aimCanvasWindow(view.startFrame, view.endFrame);
-        } else {
-          strokeRenderer.initialize();
-        }
+        canvasFor(gl).initialize(packedSeedRef.current);
       }
 
       // Hook up the history manager exactly once per component lifetime.
@@ -1419,16 +1297,17 @@ const FileRendererInner = memo(
         }
       }
 
-      if (canvasWindowRef.current) {
+      const canvas = canvasFor(gl);
+      if (!canvas.wholeFile) {
         const { numFrames } = spectrogramData;
         const visible = visibleFrameRange(state);
         const start = cursorPos.x >= 0 ? cursorPos.x * numFrames : visible.start;
         const end = cursorPos.x >= 0 ? (cursorPos.x + brushSizeUv.x) * numFrames : visible.end;
-        aimCanvasWindow(start, end);
+        canvas.aim(start, end);
         // A dab blends out of the canvas, so one landing on a block the canvas
         // has no content for would paint silence and commit it. The dab waits
         // for the block, and the frame loop brings it back when it lands.
-        if (applyStroke.current && cursorPos.x >= 0 && !canvasHoldsFrames(canvasWindowRef.current, start, end)) return;
+        if (applyStroke.current && cursorPos.x >= 0 && !canvas.holdsFrames(start, end)) return;
       }
 
       // Render brush stroke if requested
@@ -1563,37 +1442,19 @@ const FileRendererInner = memo(
       }
     });
 
-    // The handle speaks file space whatever span the canvas holds: ranges,
-    // values and UVs translate through the renderer's view at this boundary,
-    // and a view covering the whole file passes everything straight through.
-    const regionToFileUv = (
-      region: { startX: number; endX: number; startY: number; endY: number } | null,
-    ): { startX: number; endX: number; startY: number; endY: number } | null => {
-      const renderer = strokeRendererRef.current;
-      if (!renderer || !region || canvasCoversFile()) return region;
-      const view = renderer.committedSource().view;
-      return {
-        ...region,
-        startX: viewUvToFileUv(view, spectrogramData.numFrames, region.startX),
-        endX: viewUvToFileUv(view, spectrogramData.numFrames, region.endX),
-      };
-    };
-    const canvasCoversFile = (): boolean => {
-      const view = strokeRendererRef.current?.committedSource().view;
-      return view !== undefined && viewCoversFile(view, spectrogramData.numFrames);
-    };
-    const fileBandLayout = (): { numBands: number; metadata: Float32Array } => ({
-      numBands: spectrogramData.numBands,
-      metadata: spectrogramData.metadata,
-    });
-    /** Every packed pixel of the file, as one range per band. */
-    const fullFilePixelRanges = (): Uint32Array => {
-      const ranges = new Uint32Array(spectrogramData.numBands * 2);
-      for (let band = 0; band < spectrogramData.numBands; band++) {
-        ranges[band * 2] = spectrogramData.metadata[band * 4];
-        ranges[band * 2 + 1] = spectrogramData.metadata[band * 4 + 1];
-      }
-      return ranges;
+    /** True while the canvas holds every frame of the file. */
+    const canvasCoversFile = (): boolean => canvasRef.current?.coversFile() ?? true;
+
+    const regionToFileUv = (region: UvRegion | null): UvRegion | null =>
+      canvasRef.current ? canvasRef.current.regionToFileUv(region) : region;
+
+    /** Display bookkeeping every whole-state move shares. */
+    const afterStateMove = (): void => {
+      applyStroke.current = false;
+      displayMode.current = "committed";
+      invalidateRef.current();
+      snapshotStaleRef.current = true;
+      scheduleSnapshotRefresh();
     };
 
     /**
@@ -1601,138 +1462,32 @@ const FileRendererInner = memo(
      * view does not hold the whole file (the block store serves it then).
      */
     const getFBOData = async (): Promise<Float32Array | null> => {
-      if (!strokeRendererRef.current) {
-        throw new Error("StrokeRenderer not initialized");
-      }
-      if (!canvasCoversFile()) return null;
-      return strokeRendererRef.current.getFBOData();
+      if (!canvasRef.current) throw new Error("StrokeRenderer not initialized");
+      return await canvasRef.current.getFBOData();
     };
 
     const readPixelRanges = async (pixelRanges: Uint32Array): Promise<Float32Array> => {
-      const renderer = strokeRendererRef.current;
-      if (!renderer) {
-        throw new Error("StrokeRenderer not initialized");
-      }
-      if (canvasCoversFile()) return renderer.readPixelRanges(pixelRanges);
-      // Taken before the first await: a stroke starting now installs its own.
-      const carried = carriedPaintRef.current;
-      const clipped = clipRangesToView(renderer.committedSource().view, fileBandLayout(), pixelRanges);
-      const inView = await renderer.readPixelRanges(clipped.viewRanges);
-      if (clipped.covered) return inView;
-      // What the canvas no longer holds was carried off it as the window slid.
-      await carried.settled();
-      return composePixelRangeValues(pixelRanges, [carried.snapshot(), { ranges: clipped.fileRanges, values: inView }]);
+      if (!canvasRef.current) throw new Error("StrokeRenderer not initialized");
+      return await canvasRef.current.readPixelRanges(pixelRanges);
     };
 
     /**
      * Sets the FBO data from an external source (e.g., for undo/redo).
      */
     const setFBOData = (data: Float32Array) => {
-      const renderer = strokeRendererRef.current;
-      if (!renderer) return;
-
-      if (canvasCoversFile()) {
-        renderer.setFBOData(data);
-      } else {
-        const view = renderer.committedSource().view;
-        renderer.setFBOData(composeViewContent(view, data));
-        renderer.seedDisplayFromPacked(data);
-        renderer.getDisplayTiles()?.dropTiles(fullFilePixelRanges());
-        const window = canvasWindowRef.current;
-        window?.invalidate();
-        // The whole view was written, so the canvas lacks none of it.
-        window?.markOnCanvas(window.blocksOf(view));
-        carriedPaintRef.current = new CarriedPaint();
-      }
-      applyStroke.current = false;
-      displayMode.current = "committed";
-      invalidateRef.current();
-      snapshotStaleRef.current = true;
-      scheduleSnapshotRefresh();
+      if (canvasRef.current?.setFBOData(data)) afterStateMove();
     };
 
     const applyPhaseTurns = (turns: ArrayLike<number>) => {
-      const renderer = strokeRendererRef.current;
-      if (!renderer) return;
-      if (canvasCoversFile()) {
-        renderer.applyPhaseTurns(turns);
-      } else {
-        const view = renderer.committedSource().view;
-        const layout = fileBandLayout();
-        const translated: number[] = [];
-        for (let i = 0; i + 3 < turns.length; i += 4) {
-          const clipped = clipRangesToView(view, layout, Uint32Array.of(turns[i], turns[i + 1]));
-          for (let j = 0; j + 1 < clipped.viewRanges.length; j += 2) {
-            translated.push(clipped.viewRanges[j], clipped.viewRanges[j + 1], turns[i + 2], turns[i + 3]);
-          }
-        }
-        renderer.applyPhaseTurns(translated);
-        // Turns move phase, which the display does not show, but the slots
-        // still hold the untorned values for the blocks they carry.
-        const window = canvasWindowRef.current;
-        if (window) {
-          const turned: number[] = [];
-          for (let i = 0; i + 3 < turns.length; i += 4) turned.push(turns[i], turns[i + 1]);
-          window.invalidate(blocksForPixelRanges(window.grid, Uint32Array.from(turned)));
-        }
-        carriedPaintRef.current = new CarriedPaint();
-      }
-      applyStroke.current = false;
-      displayMode.current = "committed";
-      invalidateRef.current();
-      snapshotStaleRef.current = true;
-      scheduleSnapshotRefresh();
-    };
-
-    /**
-     * Carries a change the canvas cannot hold all of to the rest of the file:
-     * the display picture takes the new values, the block slots forget the
-     * blocks they held, and the ring lets go of the tiles over them.
-     */
-    const patchOutsideCanvas = (renderer: StrokeRenderer, values: Float32Array, fileRanges: Uint32Array): void => {
-      renderer.patchDisplayFromCompact(values, fileRanges);
-      renderer.getDisplayTiles()?.dropTiles(fileRanges);
-      const window = canvasWindowRef.current;
-      if (window) window.invalidate(blocksForPixelRanges(window.grid, fileRanges));
-      // The state moved, so paint carried off the canvas no longer speaks for
-      // it. A commit already reading the old carry keeps the object it took.
-      carriedPaintRef.current = new CarriedPaint();
+      if (canvasRef.current?.applyPhaseTurns(turns)) afterStateMove();
     };
 
     const patchFBOData = (data: Float32Array, pixelRanges: Uint32Array) => {
-      const renderer = strokeRendererRef.current;
-      if (!renderer) return;
-
-      if (canvasCoversFile()) {
-        renderer.patchFBOData(data, pixelRanges);
-      } else {
-        const clipped = clipRangesToView(renderer.committedSource().view, fileBandLayout(), pixelRanges);
-        renderer.patchFBODataCompact(gatherPixelRanges(data, clipped.fileRanges), clipped.viewRanges);
-        patchOutsideCanvas(renderer, gatherPixelRanges(data, pixelRanges), pixelRanges);
-      }
-      applyStroke.current = false;
-      displayMode.current = "committed";
-      invalidateRef.current();
-      snapshotStaleRef.current = true;
-      scheduleSnapshotRefresh();
+      if (canvasRef.current?.patchFBOData(data, pixelRanges)) afterStateMove();
     };
 
     const patchFBODataCompact = (values: Float32Array, pixelRanges: Uint32Array) => {
-      const renderer = strokeRendererRef.current;
-      if (!renderer) return;
-
-      if (canvasCoversFile()) {
-        renderer.patchFBODataCompact(values, pixelRanges);
-      } else {
-        const clipped = clipRangesToView(renderer.committedSource().view, fileBandLayout(), pixelRanges, values);
-        if (clipped.viewValues) renderer.patchFBODataCompact(clipped.viewValues, clipped.viewRanges);
-        patchOutsideCanvas(renderer, values, pixelRanges);
-      }
-      applyStroke.current = false;
-      displayMode.current = "committed";
-      invalidateRef.current();
-      snapshotStaleRef.current = true;
-      scheduleSnapshotRefresh();
+      if (canvasRef.current?.patchFBODataCompact(values, pixelRanges)) afterStateMove();
     };
 
     /**
@@ -1776,7 +1531,7 @@ const FileRendererInner = memo(
         strokeRendererRef.current.dispose();
         strokeRendererRef.current = null;
       }
-      disposeCanvasWindow();
+      disposeCanvas();
 
       installTextures(createTextures());
 
@@ -1819,19 +1574,11 @@ const FileRendererInner = memo(
     const beginStroke = () => {
       // Painting by hand supersedes a pattern preview rather than stacking on it.
       discardStrokePreview();
-      strokeActiveRef.current = true;
-      // A fresh carry per stroke, so a commit still reading the last one keeps it.
-      carriedPaintRef.current = new CarriedPaint();
-      if (strokeRendererRef.current) {
-        strokeRendererRef.current.beginStroke();
-      }
+      canvasRef.current?.beginStroke();
     };
 
     const endStroke = () => {
-      strokeActiveRef.current = false;
-      if (strokeRendererRef.current) {
-        strokeRendererRef.current.endStroke();
-      }
+      canvasRef.current?.endStroke();
       invalidateRef.current?.();
     };
 
@@ -1895,51 +1642,11 @@ const FileRendererInner = memo(
       getDirtyRegion: () => regionToFileUv(strokeRendererRef.current?.getDirtyRegion() ?? null),
       clearDirtyRegion: () => strokeRendererRef.current?.clearDirtyRegion(),
       consumeDirtyRegion: () => regionToFileUv(strokeRendererRef.current?.consumeDirtyRegion() ?? null),
-      getDirtyPixelRanges: () => {
-        const renderer = strokeRendererRef.current;
-        const ranges = renderer?.getDirtyPixelRanges() ?? null;
-        if (!renderer || canvasCoversFile()) return ranges;
-        const inView = ranges ? viewRangesToFile(renderer.committedSource().view, ranges) : null;
-        const carried = carriedPaintRef.current.ranges();
-        if (carried.length === 0) return inView;
-        return inView ? mergePixelRanges(inView, carried) : carried;
-      },
-      getCommittedFootprintUv: () => {
-        const renderer = strokeRendererRef.current;
-        const footprint = renderer?.getCommittedFootprintUv() ?? null;
-        if (!renderer || canvasCoversFile()) return footprint;
-        const view = renderer.committedSource().view;
-        const inView = footprint && {
-          ...footprint,
-          timeMin: viewUvToFileUv(view, spectrogramData.numFrames, footprint.timeMin),
-          timeMax: viewUvToFileUv(view, spectrogramData.numFrames, footprint.timeMax),
-        };
-        const carried = carriedPaintRef.current.paintBox();
-        if (!carried) return inView;
-        if (!inView) return carried;
-        return {
-          timeMin: Math.min(inView.timeMin, carried.timeMin),
-          timeMax: Math.max(inView.timeMax, carried.timeMax),
-          pitchMin: Math.min(inView.pitchMin, carried.pitchMin),
-          pitchMax: Math.max(inView.pitchMax, carried.pitchMax),
-        };
-      },
+      getDirtyPixelRanges: () => canvasRef.current?.dirtyPixelRanges() ?? null,
+      getCommittedFootprintUv: () => canvasRef.current?.committedFootprintUv() ?? null,
       getStrokeGeneration: () => strokeRendererRef.current?.getStrokeGeneration() ?? 0,
-      expandDirtyRegion: (startX: number, endX: number, startY: number, endY: number) => {
-        const renderer = strokeRendererRef.current;
-        if (!renderer) return;
-        if (canvasCoversFile()) {
-          renderer.expandDirtyRegion(startX, endX, startY, endY);
-        } else {
-          const view = renderer.committedSource().view;
-          renderer.expandDirtyRegion(
-            fileUvToViewUv(view, spectrogramData.numFrames, startX),
-            fileUvToViewUv(view, spectrogramData.numFrames, endX),
-            startY,
-            endY,
-          );
-        }
-      },
+      expandDirtyRegion: (startX: number, endX: number, startY: number, endY: number) =>
+        canvasRef.current?.expandDirtyRegion(startX, endX, startY, endY),
       captureSnapshot,
       refreshSnapshot: scheduleSnapshotRefresh,
       renderExportImage,
