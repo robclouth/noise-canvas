@@ -678,7 +678,7 @@ and the full suite pins that behaviour:
   undo and a redo with the canvas at the far end of the file patch through
   (`navigateTo FBO upload mode:patch`, 1.4–3.9 ms) with no parity warning.
 
-S6's same-file half, S3's commit half and most of S7 are done:
+S6's same-file half, S3's commit half, S7 and the original window are done:
 
 - A dab's source carries the span its textures lay out, so every source-space
   scale reads the canvas's frame count instead of the file's. Without it a
@@ -702,17 +702,31 @@ S6's same-file half, S3's commit half and most of S7 are done:
   noise-phase replacement now seed on whole frames rather than on the UV a
   fragment happens to arrive with. The noise is different, its character is
   not.
+- The original is a window too. The block store serves its seeded state by
+  range, so a second window over the same blocks composes the original into
+  one texture laid out by the canvas view, and the shaders read it through the
+  destination's metadata. The two windows move together: the canvas slides
+  only once both have their blocks.
+- The file-sized packed and inverse-map textures are gone under a window.
+  Nothing samples them any more, and they were the largest thing a long file
+  put on the graphics device: a 60 s file at rest went from 791 MB to 573 MB.
+- A window request that superseded a pending one used to drop its fill, and
+  the next slide then shifted the empty overlap into place and composed only
+  what entered — half the window stayed black, and a dab there blended out of
+  nothing and committed silence. The window now tracks which blocks the canvas
+  holds, composes whatever it still lacks, and a dab waits for a block the
+  canvas has no content for.
 
 Left before the window can carry a real session:
 
 - A cross-file source reads through the source file's own canvas, so a source
   longer than the window serves only the span that canvas holds and clamps at
   its edges. The dest renderer needs its own window over the source (S6b).
-- `originalSpectrogramTex` is still the whole file, read through the view's
-  metadata: Read From → Original is wrong under a window, and the texture is a
-  whole-file GPU allocation that the shrink has to remove (S7b).
 - Reverse and wrap work on the canvas axis, so under a window they reverse or
   wrap the window. Both belong in the whole-file-effect gate.
+- A dab that waits for its block is dropped, not replayed: a brush that
+  outruns the reads leaves a gap in the stroke rather than a trail. Step (3)
+  is what turns the wait into a replay.
 - The warp's noise-phase replacement still draws differently for about 0.8% of
   texels through a window (517 of 65,216 measured) even with the file-seeded
   draw. It is a random phase either way, so it is a difference in the noise,
