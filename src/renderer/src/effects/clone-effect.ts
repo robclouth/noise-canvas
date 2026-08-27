@@ -14,7 +14,7 @@ import {
 import cloneBrushFrag from "../glsl/clone-effect.frag";
 import rangeQuadVert from "../glsl/range-quad.vert";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
-import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
+import { BaseEffect, createDefaultUniforms, sourceLayout, UpdateEffectUniformsProps } from "./base-effect";
 import { activeClonePasses, buildShapeTable, CloneShapeKey } from "./clone-shapes";
 
 function createUniforms() {
@@ -137,7 +137,7 @@ class CloneEffect extends BaseEffect {
     if (!spectrogramData) return;
 
     const bpm = filepathsBpm[filePath] || 120;
-    const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+    const totalDuration = sourceLayout(props.commonUniforms).totalDuration;
 
     // The gap reaches the shader in beats; the beat-to-UV factor carries the file's tempo.
     material.uniforms.cloneSpaceX.value = parameterUniform(state, "cloneSpaceBeats", props.modContext);

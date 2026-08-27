@@ -41,17 +41,28 @@ import { gatherPixelRanges } from "../pixel-ranges";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 
 async function loadEffects(): Promise<EffectsRegistry> {
-  const [{ transformEffect }, { passThroughEffect }, { dynamicsEffect }, { synthesizeEffect }] = await Promise.all([
+  const [
+    { transformEffect },
+    { passThroughEffect },
+    { dynamicsEffect },
+    { synthesizeEffect },
+    { blurEffect },
+    { cloneEffect },
+  ] = await Promise.all([
     import("../../effects/transform-effect"),
     import("../../effects/passthrough-effect"),
     import("../../effects/dynamics-effect"),
     import("../../effects/synthesize-effect"),
+    import("../../effects/blur-effect"),
+    import("../../effects/clone-effect"),
   ]);
   return {
     transform: transformEffect,
     passthrough: passThroughEffect,
     dynamics: dynamicsEffect,
     synthesize: synthesizeEffect,
+    blur: blurEffect,
+    clone: cloneEffect,
   };
 }
 
@@ -586,6 +597,73 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
       expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(0.1);
     },
   );
+
+  // A smear and a repeat gap are offsets added to a source UV, so the beats
+  // they are given convert against the span the source textures hold. Against
+  // the file instead, a windowed canvas smears and spaces by the wrong
+  // fraction of what it holds. Both average many taps, so their rounding is
+  // looser than a single read.
+  it("smears a blur over the same span through a sub-view", async () => {
+    const state = createMockStateWithSteps([
+      {
+        name: "Blurred",
+        overrides: {
+          blurAmountTime: 4,
+          blurAmountPitch: 0,
+          blurNoiseTime: 0,
+          blurEdgeMode: 1,
+          effects: [{ id: "blur", effect: "blur", enabled: true, params: {} }],
+        },
+      },
+    ]);
+    state.filepathsBpm = { "/parity.wav": 120 };
+    const parity = await parityOf(state);
+    expect(parity.changed).toBeGreaterThan(0);
+    expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-4);
+    expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
+  });
+
+  // Cut drops every tap that lands outside the brush, so a blur wider than the
+  // view reads nothing the view lacks and has to match exactly.
+  it("cuts a blur at the same taps through a sub-view", async () => {
+    const state = createMockStateWithSteps([
+      {
+        name: "Blurred",
+        overrides: {
+          blurAmountTime: 25,
+          blurAmountPitch: 0,
+          blurNoiseTime: 0,
+          blurEdgeMode: 0,
+          effects: [{ id: "blur", effect: "blur", enabled: true, params: {} }],
+        },
+      },
+    ]);
+    state.filepathsBpm = { "/parity.wav": 120 };
+    const parity = await parityOf(state);
+    expect(parity.changed).toBeGreaterThan(0);
+    expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-4);
+    expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
+  });
+
+  it("spaces repeat copies by the same gap through a sub-view", async () => {
+    const state = createMockStateWithSteps([
+      {
+        name: "Cloned",
+        overrides: {
+          cloneCountX: 2,
+          cloneCountY: 0,
+          cloneSpaceBeats: 0.05,
+          cloneEdgeMode: 1,
+          effects: [{ id: "clone", effect: "clone", enabled: true, params: {} }],
+        },
+      },
+    ]);
+    state.filepathsBpm = { "/parity.wav": 120 };
+    const parity = await parityOf(state);
+    expect(parity.changed).toBeGreaterThan(0);
+    expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-4);
+    expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
+  });
 
   /** A packed texture read back through a full-precision 1:1 pass. */
   function readPackedTexture(tex: Texture, width: number, height: number): Float32Array {

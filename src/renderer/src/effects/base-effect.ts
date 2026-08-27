@@ -215,6 +215,24 @@ export function destinationLayout(commonUniforms: CommonUniforms): {
   };
 }
 
+/**
+ * The source side's own layout, for effects that offset a source UV. The frame
+ * count is the span the source textures hold, which is a window of the source
+ * file when the canvas holds one.
+ */
+export function sourceLayout(commonUniforms: CommonUniforms): {
+  totalDuration: number;
+  bandsPerOctave: number;
+  numBands: number;
+} {
+  const sampleRate = commonUniforms.sourceSampleRate.value;
+  return {
+    totalDuration: sampleRate > 0 ? commonUniforms.sourceFrameCount.value / sampleRate : 0,
+    bandsPerOctave: commonUniforms.sourceBandsPerOctave.value,
+    numBands: commonUniforms.sourceBandCount.value,
+  };
+}
+
 export type UpdateEffectUniformsProps = {
   commonUniforms: CommonUniforms;
   passIndex: number;

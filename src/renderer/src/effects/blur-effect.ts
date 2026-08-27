@@ -4,7 +4,7 @@ import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import blurBrushFrag from "../glsl/blur-effect.frag";
 import rangeQuadVert from "../glsl/range-quad.vert";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
-import { BaseEffect, createDefaultUniforms, UpdateEffectUniformsProps } from "./base-effect";
+import { BaseEffect, createDefaultUniforms, sourceLayout, UpdateEffectUniformsProps } from "./base-effect";
 
 function createUniforms() {
   return {
@@ -83,23 +83,25 @@ class BlurEffect extends BaseEffect {
     if (!spectrogramData) return;
 
     const bpm = filepathsBpm[filePath] || 120;
+    const source = sourceLayout(props.commonUniforms);
+    if (!(source.totalDuration > 0) || !(source.numBands > 0)) return;
 
     const blurSizeUv = unitsToUv(
       (blurAmountTime * 4) / 100,
       (blurAmountPitch / 100) * 12,
       bpm,
-      spectrogramData.numFrames / spectrogramData.sampleRate,
-      spectrogramData.bandsPerOctave,
-      spectrogramData.numBands,
+      source.totalDuration,
+      source.bandsPerOctave,
+      source.numBands,
     );
 
     const blurNoiseUv = unitsToUv(
       (blurNoiseTime * 4) / 100,
       (blurNoisePitch / 100) * 12,
       bpm,
-      spectrogramData.numFrames / spectrogramData.sampleRate,
-      spectrogramData.bandsPerOctave,
-      spectrogramData.numBands,
+      source.totalDuration,
+      source.bandsPerOctave,
+      source.numBands,
     );
 
     material.uniforms.blurSizeX.value = parameterUniform(state, "blurAmountTime", props.modContext, {
