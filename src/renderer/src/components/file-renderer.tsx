@@ -14,6 +14,7 @@ import {
 import { blockGrid, blocksForPixelRanges } from "@renderer/lib/block-grid";
 import { CANVAS_WINDOW_BLOCKS, CanvasWindow, needsCanvasWindow } from "@renderer/lib/canvas-window";
 import { CarriedPaint, carryPaintOut, dropReturningPaint } from "@renderer/lib/carried-paint";
+import { PackedWindow } from "@renderer/lib/packed-window";
 import { composePixelRangeValues, gatherPixelRanges, mergePixelRanges } from "@renderer/lib/pixel-ranges";
 import { countDiagStroke } from "@renderer/lib/diag-sampler";
 import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
@@ -151,7 +152,7 @@ export interface FileRendererHandle {
     packed: WebGLRenderTarget;
     inverse: DataTexture;
     metadata: DataTexture;
-    original: DataTexture;
+    original: Texture;
   } | null;
   /** The span the canvas textures lay out, or null before the renderer exists. */
   getCanvasView: () => CanvasView | null;
@@ -453,6 +454,9 @@ const FileRendererInner = memo(
     // and whether a stroke is in progress (a window that moves mid-stroke has
     // to carry the stroke's scratch with it).
     const canvasWindowRef = useRef<CanvasWindow | null>(null);
+    // The same window over the file's original state, which the shaders read
+    // through the canvas view's metadata, so it moves with the canvas.
+    const originalWindowRef = useRef<PackedWindow | null>(null);
     const windowRequestRef = useRef<CanvasView | null>(null);
     const strokeActiveRef = useRef(false);
     // Stroke paint on blocks that left the window, until the commit reads it.
@@ -901,12 +905,18 @@ const FileRendererInner = memo(
         windowBlocks: CANVAS_WINDOW_BLOCKS,
         read: (ranges) => getHistoryManager(fileId).currentRanges(ranges),
       });
+      originalWindowRef.current = new PackedWindow(gl, grid, {
+        windowBlocks: CANVAS_WINDOW_BLOCKS,
+        read: (ranges) => getHistoryManager(fileId).rootRanges(ranges),
+      });
       return canvasWindowRef.current;
     };
 
     const disposeCanvasWindow = (): void => {
       canvasWindowRef.current?.dispose();
       canvasWindowRef.current = null;
+      originalWindowRef.current?.dispose();
+      originalWindowRef.current = null;
       windowRequestRef.current = null;
     };
     disposeCanvasWindowRef.current = disposeCanvasWindow;
@@ -932,24 +942,29 @@ const FileRendererInner = memo(
      * Points the canvas window at the frames [startFrame, endFrame). Blocks
      * the window lacks are read in the background and the canvas takes them
      * when they land, so a brush ahead of the reads keeps painting on what the
-     * canvas already holds.
+     * canvas already holds. The original window reads alongside, so the
+     * original texture never lays out a span the canvas has left.
      */
     const aimCanvasWindow = (startFrame: number, endFrame: number): void => {
       const window = canvasWindowRef.current;
+      const original = originalWindowRef.current;
       const renderer = strokeRendererRef.current;
       if (!window || !renderer?.getIsInitialized()) return;
       const current = renderer.committedSource().view;
       const next = window.plan(current, startFrame, endFrame);
       const cold = next === current ? window.missing(current) : window.missing(next);
-      if (next === current && cold.length === 0) return;
+      const originalHeld = original?.holds(next) ?? true;
+      if (next === current && cold.length === 0 && originalHeld) return;
       const pending = windowRequestRef.current;
       if (pending && pending.firstBlock === next.firstBlock && pending.lastBlock === next.lastBlock) return;
       windowRequestRef.current = next;
-      void window.acquire(next).then((filled) => {
+      const reads = Promise.all([window.acquire(next), original ? original.hold(next) : Promise.resolve(true)]);
+      void reads.then(([filled, originalFilled]) => {
         if (windowRequestRef.current !== next) return;
         windowRequestRef.current = null;
         const live = strokeRendererRef.current;
-        if (!filled || !live?.getIsInitialized() || canvasWindowRef.current !== window) return;
+        if (!filled || !originalFilled || !live?.getIsInitialized() || canvasWindowRef.current !== window) return;
+        if (original) live.setOriginalTexture(original.texture);
         const held = live.committedSource().view;
         if (held.firstBlock === next.firstBlock && held.lastBlock === next.lastBlock) {
           // The canvas is already over these blocks and only lacks content for
@@ -1691,7 +1706,7 @@ const FileRendererInner = memo(
       packed: WebGLRenderTarget;
       inverse: DataTexture;
       metadata: DataTexture;
-      original: DataTexture;
+      original: Texture;
     } | null => {
       if (!strokeRendererRef.current || !inverseMapTex || !metadataTex || !originalPackedDataTex) return null;
       return strokeRendererRef.current.getTextures();

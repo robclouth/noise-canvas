@@ -209,7 +209,7 @@ function writeBrushParamStatics(uniforms: CommonUniforms, step: State, ctx: ModC
  * Textures required for stroke rendering
  */
 export interface StrokeTextures {
-  originalPackedDataTex: DataTexture;
+  originalPackedDataTex: Texture;
   inverseMapTex: DataTexture;
   metadataTex: DataTexture;
   placeholderTexture: Texture;
@@ -231,7 +231,7 @@ export interface SourceFileInfo {
     packed: WebGLRenderTarget;
     inverse: DataTexture;
     metadata: DataTexture;
-    original: DataTexture;
+    original: Texture;
   };
   /**
    * The span `textures.packed` lays out. Absent when it holds the whole file.
@@ -277,6 +277,8 @@ export class StrokeRenderer {
   private gl: WebGLRenderer;
   private spectrogramData: SpectrogramData;
   private textures: StrokeTextures;
+  // Set when the original lays out the canvas view rather than the whole file.
+  private originalTexture: Texture | null = null;
   private fileId: string;
   private effects: EffectsRegistry;
 
@@ -593,6 +595,20 @@ export class StrokeRenderer {
   }
 
   /**
+   * Points the original reads at `texture`, which must lay the canvas view
+   * out: the shaders address it through the destination's metadata. A canvas
+   * holding a window of the file takes a window of the original.
+   */
+  setOriginalTexture(texture: Texture): void {
+    this.originalTexture = texture;
+  }
+
+  /** The texture the original reads sample, laid out as the canvas view is. */
+  private originalSource(): Texture {
+    return this.originalTexture ?? this.textures.originalPackedDataTex;
+  }
+
+  /**
    * Initialize the renderer with the spectrogram data.
    * Must be called before rendering strokes. A canvas holding a window of the
    * file takes its content from `composeCanvas`, which writes the view's own
@@ -849,7 +865,7 @@ export class StrokeRenderer {
       destSampleRate: { value: this.spectrogramData.sampleRate },
       destViewStartFrame: { value: this.view.startFrame },
       destFileFrameCount: { value: this.spectrogramData.numFrames },
-      originalSpectrogramTex: { value: this.textures.originalPackedDataTex || placeholderTexture },
+      originalSpectrogramTex: { value: this.originalSource() || placeholderTexture },
       viewZoomPower: { value: viewZoomPower },
       viewOffset: { value: viewOffset },
       viewZoomPowerY: { value: viewZoomPowerY },
@@ -1037,7 +1053,7 @@ export class StrokeRenderer {
 
     // Determine the initial source FBO based on sourceDataMode
     const isSameFile = sourceFile.id === this.fileId;
-    let initialSourceFbo: WebGLRenderTarget | { texture: DataTexture } =
+    let initialSourceFbo: WebGLRenderTarget | { texture: Texture } =
       activeStepState.sourceDataMode === "original"
         ? { texture: sourceFile.textures.original }
         : isSameFile
@@ -1045,7 +1061,7 @@ export class StrokeRenderer {
           : sourceFile.textures.packed;
 
     // For multi-step rendering, we iterate through all steps sequentially
-    let stepInputFbo: WebGLRenderTarget | { texture: DataTexture } = initialSourceFbo;
+    let stepInputFbo: WebGLRenderTarget | { texture: Texture } = initialSourceFbo;
 
     // Non-cumulative strokes: use snapshot as source to prevent self-feedback.
     // Gated by step 0's flags since step 0 is the step that actually consumes
@@ -1242,7 +1258,7 @@ export class StrokeRenderer {
       };
 
       // Reset currentReadFbo to the step's input for effect processing
-      let currentReadFbo: WebGLRenderTarget | { texture: DataTexture } = stepInputFbo;
+      let currentReadFbo: WebGLRenderTarget | { texture: Texture } = stepInputFbo;
 
       const isLastStep = stepIndex === numSteps - 1;
 
@@ -1974,13 +1990,13 @@ export class StrokeRenderer {
     packed: WebGLRenderTarget;
     inverse: DataTexture;
     metadata: DataTexture;
-    original: DataTexture;
+    original: Texture;
   } {
     return {
       packed: this.pingPong === 0 ? this.fbo1 : this.fbo2,
       inverse: this.viewInverseMapTex,
       metadata: this.viewMetadataTex,
-      original: this.textures.originalPackedDataTex,
+      original: this.originalSource(),
     };
   }
 

@@ -1534,6 +1534,22 @@ export class HistoryManager {
   }
 
   /**
+   * The named pixels of the file's original packed state — the anchor the
+   * block store holds as its seed, which is what the pristine texture holds —
+   * or null when the store cannot serve it.
+   */
+  async rootRanges(ranges: Uint32Array): Promise<Float32Array | null> {
+    await this.initialize();
+    const holder = this.seedHolder();
+    if (!holder) return null;
+    try {
+      return await (await this.seedBlockStore(holder)).readRootRanges(ranges);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Resolves once nothing outside the queue still reads the current packed
    * state: a synthesis it was handed, or an onset pass over it.
    */

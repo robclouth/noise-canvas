@@ -217,6 +217,14 @@ describe("BlockStore", () => {
     expect(firstDifference(root, packed)).toBe(-1);
   });
 
+  it("reads a range list of the seeded state from under an unflushed patch", async () => {
+    const { store } = await seeded();
+    const ranges = Uint32Array.of(...bandRange(1, 40, 200), ...bandRange(4, 0, 500));
+    const values = gatherPixelRanges(packed, ranges).map((value) => value * -1);
+    await store.patch(ranges, values);
+    expect(Array.from(await store.readRootRanges(ranges))).toEqual(Array.from(gatherPixelRanges(packed, ranges)));
+  });
+
   it("answers a patched block from RAM, not from the bytes it was written as", async () => {
     const { backend, store } = await seeded();
     const ranges = Uint32Array.of(...bandRange(1, 40, 200));

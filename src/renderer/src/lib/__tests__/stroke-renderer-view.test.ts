@@ -29,6 +29,7 @@ import { BlockSlotCache } from "../block-slot-cache";
 import { canvasViewOf, composeViewContent, type CanvasView } from "../canvas-view";
 import { levelDecimation } from "../display-pyramid";
 import { DisplayTileRing } from "../display-tiles-textures";
+import { PackedWindow } from "../packed-window";
 import { gatherPixelRanges } from "../pixel-ranges";
 import { EffectsRegistry, SourceFileInfo, StrokeParams, StrokeRenderer, StrokeTextures } from "../stroke-renderer";
 
@@ -396,6 +397,115 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     expect(parity.changed).toBeGreaterThan(0);
     expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-5);
     expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
+  });
+
+  /** A packed texture read back through a full-precision 1:1 pass. */
+  function readPackedTexture(tex: Texture, width: number, height: number): Float32Array {
+    const material = new RawShaderMaterial({
+      uniforms: { srcTex: { value: tex } },
+      vertexShader: /* glsl */ `
+        in vec3 position;
+        void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }
+      `,
+      fragmentShader: /* glsl */ `
+        precision highp float;
+        uniform sampler2D srcTex;
+        layout(location = 0) out vec4 outColor;
+        void main() { outColor = texelFetch(srcTex, ivec2(gl_FragCoord.xy), 0); }
+      `,
+      glslVersion: GLSL3,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const scene = new Scene();
+    scene.add(new Mesh(new PlaneGeometry(2, 2), material));
+    const camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+    camera.position.z = 1;
+    const target = new WebGLRenderTarget(width, height, {
+      format: RGBAFormat,
+      type: FloatType,
+      minFilter: NearestFilter,
+      magFilter: NearestFilter,
+      depthBuffer: false,
+      stencilBuffer: false,
+    });
+    gl.setRenderTarget(target);
+    gl.render(scene, camera);
+    gl.setRenderTarget(null);
+    const pixels = new Float32Array(width * height * 4);
+    gl.readRenderTargetPixels(target, 0, 0, width, height, pixels);
+    target.dispose();
+    material.dispose();
+    return pixels;
+  }
+
+  it("composes a window of the packed state as the view lays it out", async () => {
+    const window = new PackedWindow(gl, grid, {
+      windowBlocks: view.lastBlock - view.firstBlock + 1,
+      maxBytes: 0,
+      read: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+    });
+    disposers.push(() => window.dispose());
+    expect(await window.hold(view)).toBe(true);
+    expect(window.view).toBe(view);
+    expect(window.holds(view)).toBe(true);
+
+    const composed = readPackedTexture(window.texture, view.textureWidth, view.textureHeight);
+    const expected = composeViewContent(view, data.packedData);
+    expect(firstDifference(composed, expected, view.texels * 4)).toBe(-1);
+  });
+
+  it("reads the original through a window of the file's blocks", async () => {
+    const state = createMockStateWithSteps([
+      {
+        name: "From the original",
+        overrides: {
+          sourceDataMode: "original",
+          effects: [{ id: "transform", effect: "transform", enabled: true, params: {} }],
+        },
+      },
+    ]);
+
+    // The canvas has to differ from the original, or a dab reading the wrong
+    // one paints the same coefficients either way.
+    const painted = Float32Array.from(data.packedData, (value, i) => (i % 2 === 0 ? value * 0.25 : value + 1.7));
+
+    const whole = new StrokeRenderer(gl, data, strokeTextures, "parity", effects);
+    whole.initialize();
+    whole.setFBOData(painted);
+    disposers.push(() => whole.dispose());
+
+    const sub = subViewRenderer();
+    sub.setFBOData(composeViewContent(view, painted));
+    const original = new PackedWindow(gl, grid, {
+      windowBlocks: view.lastBlock - view.firstBlock + 1,
+      maxBytes: 0,
+      read: async (ranges) => gatherPixelRanges(data.packedData, ranges),
+    });
+    disposers.push(() => original.dispose());
+    expect(await original.hold(view)).toBe(true);
+    sub.setOriginalTexture(original.texture);
+
+    whole.beginStroke();
+    whole.renderStroke(strokeParams(fileCursor, data.numFrames / SAMPLE_RATE), state, sourceFor(whole));
+    sub.beginStroke();
+    sub.renderStroke(strokeParams(viewCursor, viewFrames / SAMPLE_RATE), state, sourceFor(sub, view));
+
+    const inView = composeViewContent(view, await whole.getFBOData());
+    const subData = await sub.getFBOData();
+    const before = composeViewContent(view, painted);
+    let changed = 0;
+    let magnitude = 0;
+    let phase = 0;
+    for (let i = 0; i < view.texels * 4; i++) {
+      if (inView[i] !== before[i]) changed++;
+      const diff = Math.abs(subData[i] - inView[i]);
+      if (i % 2 === 0) magnitude = Math.max(magnitude, diff);
+      else phase = Math.max(phase, diff);
+    }
+    expect(changed).toBeGreaterThan(0);
+    expect(magnitude, `largest magnitude difference ${magnitude}`).toBeLessThan(1e-5);
+    expect(phase, `largest phase difference ${phase}`).toBeLessThan(1e-3);
   });
 
   it("paints over a canvas composed from block slots and folds the blocks back", async () => {

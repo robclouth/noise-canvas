@@ -176,6 +176,22 @@ export class BlockStore {
   }
 
   /**
+   * The pixels `ranges` names as they were seeded, laid end to end in range
+   * order. The resident copies hold patched state, so they are not consulted
+   * and the blocks read here are not kept.
+   */
+  async readRootRanges(ranges: Uint32Array): Promise<Float32Array> {
+    if (this.disposed) throw new Error("block store is disposed");
+    const out = new Float32Array(pixelRangeCount(ranges) * 4);
+    for (const index of blocksForPixelRanges(this.grid, ranges)) {
+      const bytes = await this.backend.read(index);
+      if (!bytes) throw new Error(`block ${index} was never written`);
+      copyCompactOverlap(out, ranges, this.checked(index, await this.codec.decode(bytes)), this.blockRanges(index));
+    }
+    return out;
+  }
+
+  /**
    * The pixels `ranges` names, laid end to end in range order. The list must
    * be sorted and non-overlapping, as every footprint in the app is.
    */
