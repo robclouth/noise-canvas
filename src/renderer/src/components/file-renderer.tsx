@@ -493,20 +493,30 @@ const FileRendererInner = memo(
      */
     const createTextures = useCallback(() => {
       const { metadata, textureWidth, textureHeight, numBands } = spectrogramData;
-      let packedData = packedSeedRef.current;
-      if (!packedData || packedData.length !== textureWidth * textureHeight * 4) {
+      // A canvas holding a window of the file takes its content, its original
+      // and its inverse map from the block store and the view, so nothing
+      // samples the file-sized pair. At ten minutes they are the largest thing
+      // this file puts on the graphics device, so they are never built.
+      const windowed = needsCanvasWindow(
+        blockGrid({ numBands, metadata }, spectrogramData.numFrames, spectrogramData.sampleRate),
+        CANVAS_WINDOW_BLOCKS,
+      );
+      const texWidth = windowed ? 1 : textureWidth;
+      const texHeight = windowed ? 1 : textureHeight;
+      let packedData = windowed ? new Float32Array(4) : packedSeedRef.current;
+      if (!packedData || packedData.length !== texWidth * texHeight * 4) {
         // The seed was already released; the canvas rebuilds from history.
         console.warn("history: the packed seed was already released; the canvas needs a full restore");
         getHistoryManager(fileId).markFboOutOfSync();
-        packedData = new Float32Array(textureWidth * textureHeight * 4);
+        packedData = new Float32Array(texWidth * texHeight * 4);
       }
-      let inverseMap = inverseSeedRef.current;
-      if (!inverseMap || inverseMap.length !== textureWidth * textureHeight * 2) {
+      let inverseMap = windowed ? new Float32Array(2) : inverseSeedRef.current;
+      if (!inverseMap || inverseMap.length !== texWidth * texHeight * 2) {
         console.warn("history: the inverse-map seed was already released");
-        inverseMap = new Float32Array(textureWidth * textureHeight * 2);
+        inverseMap = new Float32Array(texWidth * texHeight * 2);
       }
 
-      const packed = new DataTexture(packedData, textureWidth, textureHeight, RGBAFormat, FloatType);
+      const packed = new DataTexture(packedData, texWidth, texHeight, RGBAFormat, FloatType);
       packed.internalFormat = "RGBA32F";
       packed.minFilter = NearestFilter;
       packed.magFilter = NearestFilter;
@@ -515,7 +525,7 @@ const FileRendererInner = memo(
       packed.generateMipmaps = false;
       packed.needsUpdate = true;
 
-      const inverse = new DataTexture(inverseMap, textureWidth, textureHeight, RGFormat, FloatType);
+      const inverse = new DataTexture(inverseMap, texWidth, texHeight, RGFormat, FloatType);
       inverse.internalFormat = "RG32F";
       inverse.minFilter = NearestFilter;
       inverse.magFilter = NearestFilter;
