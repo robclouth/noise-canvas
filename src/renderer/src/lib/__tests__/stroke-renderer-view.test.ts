@@ -34,6 +34,7 @@ import { NEUTRAL_ALGORITHM } from "../constants";
 import { bakeOnsetTexture } from "../onset-map";
 import { BlockSlotCache } from "../block-slot-cache";
 import { canvasViewOf, composeViewContent, type CanvasView } from "../canvas-view";
+import { strokeReach } from "../effect-reach";
 import { levelDecimation } from "../display-pyramid";
 import { DisplayTileRing } from "../display-tiles-textures";
 import { PackedWindow } from "../packed-window";
@@ -188,15 +189,15 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     };
   }
 
-  function subViewRenderer(): StrokeRenderer {
-    const renderer = new StrokeRenderer(gl, data, strokeTextures, "parity", effects, view);
+  function subViewRenderer(span: CanvasView = view): StrokeRenderer {
+    const renderer = new StrokeRenderer(gl, data, strokeTextures, "parity", effects, span);
     renderer.initialize();
     // Original reads are addressed through the canvas metadata, so a sub-view
     // canvas takes a window of the original, as the app's canvas does.
     const original = dataTexture(
-      composeViewContent(view, data.packedData),
-      view.textureWidth,
-      view.textureHeight,
+      composeViewContent(span, data.packedData),
+      span.textureWidth,
+      span.textureHeight,
       RGBAFormat,
       "RGBA32F",
     );
@@ -313,14 +314,17 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
   async function parityOf(
     state: State,
     onsetTexture?: Texture,
+    span: CanvasView = view,
   ): Promise<{ magnitude: number; phase: number; changed: number }> {
     const whole = new StrokeRenderer(gl, data, strokeTextures, "parity", effects);
     whole.initialize();
     whole.setFBOData(data.packedData);
     disposers.push(() => whole.dispose());
 
-    const sub = subViewRenderer();
-    sub.setFBOData(composeViewContent(view, data.packedData));
+    const sub = subViewRenderer(span);
+    sub.setFBOData(composeViewContent(span, data.packedData));
+    const spanFrames = span.endFrame - span.startFrame;
+    const spanCursor = new Vector2((fileCursor.x * data.numFrames - span.startFrame) / spanFrames, fileCursor.y);
 
     whole.beginStroke();
     whole.renderStroke(
@@ -330,18 +334,18 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     );
     sub.beginStroke();
     sub.renderStroke(
-      strokeParams(viewCursor, viewFrames / SAMPLE_RATE, 1, onsetTexture),
+      strokeParams(spanCursor, spanFrames / SAMPLE_RATE, 1, onsetTexture),
       state,
-      sourceFor(sub, view, onsetTexture),
+      sourceFor(sub, span, onsetTexture),
     );
 
-    const inView = composeViewContent(view, await whole.getFBOData());
+    const inView = composeViewContent(span, await whole.getFBOData());
     const subData = await sub.getFBOData();
-    const before = composeViewContent(view, data.packedData);
+    const before = composeViewContent(span, data.packedData);
     let magnitude = 0;
     let phase = 0;
     let changed = 0;
-    for (let i = 0; i < view.texels * 4; i++) {
+    for (let i = 0; i < span.texels * 4; i++) {
       if (inView[i] !== before[i]) changed++;
       const diff = Math.abs(subData[i] - inView[i]);
       if (i % 2 === 0) magnitude = Math.max(magnitude, diff);
@@ -681,6 +685,46 @@ describe("stroke parity between a whole-file canvas and a sub-view canvas", () =
     state.transformRotation = degrees;
     state.filepathsBpm = { "/parity.wav": 120 };
     const parity = await parityOf(state);
+    expect(parity.changed).toBeGreaterThan(0);
+    expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-4);
+    expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);
+  });
+
+  // The declared reach is what tells the canvas how much of the file to hold
+  // around a dab. A view that holds the dab alone reads past its own edge and
+  // paints the wrong values; the same view widened by the reach is at parity.
+  it("holds what a shifted warp reads once the view covers its reach", async () => {
+    const state = createMockStateWithSteps([
+      {
+        name: "Shifted",
+        overrides: {
+          transformShiftBeats: 1.5,
+          transformEdgeMode: 1,
+          effects: [{ id: "transform", effect: "transform", enabled: true, params: {} }],
+        },
+      },
+    ]);
+    state.filepathsBpm = { "/parity.wav": 120 };
+
+    const fileSeconds = data.numFrames / SAMPLE_RATE;
+    const reach = strokeReach(state, {
+      bpm: 120,
+      fileSeconds,
+      canvasSeconds: viewFrames / SAMPLE_RATE,
+      bandsPerOctave: data.bandsPerOctave,
+      numBands: data.numBands,
+    });
+    expect(reach.before).toBeGreaterThan(0);
+
+    const tight = await parityOf(state);
+    expect(tight.magnitude, "a view holding only the dab reads past its edge").toBeGreaterThan(0.1);
+
+    const wide = canvasViewOf(
+      grid,
+      blockOfFrame(grid, view.startFrame - reach.before * SAMPLE_RATE),
+      blockOfFrame(grid, view.endFrame - 1 + reach.after * SAMPLE_RATE),
+    );
+    const parity = await parityOf(state, undefined, wide);
     expect(parity.changed).toBeGreaterThan(0);
     expect(parity.magnitude, `largest magnitude difference ${parity.magnitude}`).toBeLessThan(1e-4);
     expect(parity.phase, `largest phase difference ${parity.phase}`).toBeLessThan(1e-3);

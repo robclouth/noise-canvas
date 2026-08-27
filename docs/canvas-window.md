@@ -44,6 +44,7 @@ where the window should sit, the slot cache pages the blocks in from disk, and
 | `lib/canvas-window.ts`    | placing the window, filling it, and what the canvas holds              |
 | `lib/packed-window.ts`    | the same window over the file's original, as one texture               |
 | `lib/source-window.ts`    | a window over another file, for a brush painting from it               |
+| `lib/effect-reach.ts`     | how far past the brush each effect reads                               |
 | `lib/whole-file-gate.ts`  | what a brush asks for that a window cannot serve                       |
 | `lib/carried-paint.ts`    | paint on blocks that left the window mid-stroke                        |
 | `lib/windowed-canvas.ts`  | **the boundary.** File coordinates in, view coordinates out            |
@@ -107,10 +108,23 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    holds. A canvas over the whole file returns the value it always did.
 9. **A brush that reads the whole file does not paint on a window.** Wrapping in
    time folds a read onto the far end of the canvas, a full-length brush spans
-   the canvas, and the effects in `WHOLE_FILE_EFFECTS` read past any span a
-   window holds. `wholeFileNeeds` names them, `dispatchStroke` refuses the dab
-   and the file view says so once. The gate is off while the canvas holds the
-   whole file, which is every file today.
+   the canvas, source tracking away from Follow puts the read anywhere in the
+   file, and the effects in `WHOLE_FILE_EFFECTS` read past any span a window
+   holds. `wholeFileNeeds` names them, `dispatchStroke` refuses the dab and the
+   file view says so once. The gate is off while the canvas holds the whole
+   file, which is every file today.
+10. **The canvas holds what an effect reads, not only what the dab covers.** A
+    blur smear, a repeat gap and a warp's turn, stretch or shift all read past
+    the brush when the edge mode is Bleed or Invert; the other edge modes fold
+    the read back inside the brush and reach nothing. `effect-reach.ts` says how
+    far, in seconds of the file, and the aim and the dab's own wait widen by it.
+    A brush whose dab plus reach is wider than a whole window can never be
+    served, so `overReachNeeds` names it and the dab is refused.
+11. **An offset added to a source UV converts against the span the source
+    textures hold.** A blur's beats and a repeat's gap are source-UV distances
+    (`sourceLayout`), a warp's shift is a destination-UV one
+    (`destinationLayout`), and a turn mixes the two axes, so it converts to the
+    file's own time axis first (`destFileUvSpanX`).
 
 ## How to check it still works
 

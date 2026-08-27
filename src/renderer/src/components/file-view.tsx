@@ -13,7 +13,6 @@ import { heldRepeatIntervalMs } from "../lib/brush-repeat";
 import { getFileOnsets } from "../lib/file-onsets";
 import { penState } from "../lib/pen-state";
 import { sourceBandUvSlope, uvToUnits } from "../lib/utils";
-import { wholeFileRefusal } from "../lib/whole-file-gate";
 import FileHeader from "./file-header";
 import { FileRenderer, FileRendererHandle } from "./file-renderer";
 import { LoopRegion } from "./loop-region";
@@ -554,14 +553,9 @@ export const FileView = memo(({ fileId, isFullscreen = false }: FileViewProps) =
       if (rendererRef?.current) {
         const { spectrogramData } = file;
         if (!spectrogramData) return;
-        const blockers = rendererRef.current.strokeBlockers(state);
-        if (blockers.length > 0) {
-          notifications.show({
-            id: "whole-file-brush",
-            color: "yellow",
-            title: "Nothing painted",
-            message: wholeFileRefusal(blockers),
-          });
+        const refusal = rendererRef.current.strokeRefusal(state);
+        if (refusal !== null) {
+          notifications.show({ id: "whole-file-brush", color: "yellow", title: "Nothing painted", message: refusal });
           return;
         }
         isStrokingRef.current = true;

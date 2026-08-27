@@ -807,15 +807,41 @@ rather than gating; wrap could not be:
   bit of the coordinate. At -1.013 the window is bit-identical to the whole
   file. It is a knife edge in the algorithm, not in the window.
 
+Effects under a window are done. Three separate faults, each measured on the
+sub-view parity harness before it was fixed:
+
+- **A smear and a repeat gap converted against the file.** Both are offsets
+  added to a source UV, and the shader reads that UV against the span the
+  source textures hold. A 4% blur was out by 0.178 in magnitude and a 2-copy
+  repeat by 0.270, with no read leaving the view at all. `sourceLayout` gives
+  them the source side's own duration, as `destinationLayout` already gave the
+  warp its shift.
+- **A turn traded time for pitch on the canvas's axis.** A rotation mixes the
+  two UV axes, so a shorter canvas turned the sound by a different amount: out
+  by 0.89 in magnitude at 5 degrees, 30 and 90 alike. `destFileUvSpanX` and
+  `destCanvasUvSpanX` take the turn to the file's time axis and back. A canvas
+  over the whole file returns the distance untouched.
+- **A read that leaves the window clamps at its edge.** `effect-reach.ts`
+  declares how far each effect reads past the brush, in seconds of the file:
+  the blur smear and its tap noise (one-sided by Origin), the furthest repeat
+  copy through its shape table, and the warp's arm, turn, mirror and shift. A
+  modulated parameter reaches as far as its own sources can move it, and a
+  scale that can pass through zero reads without bound. Only Bleed and Invert
+  read past the brush at all — Cut, Wrap, Clamp and Reflect fold the read back
+  inside it, so they reach nothing. The aim and the dab's wait widen by the
+  reach, and `overReachNeeds` refuses a brush whose dab plus reach cannot fit a
+  whole window. Pinned by a parity test that fails at 0.95 on a view holding
+  only the dab and passes on the same view widened by the declared reach.
+- Source tracking away from Follow, and a source time offset, put a same-file
+  read anywhere in the file. Both are now named by `wholeFileNeeds`.
+
 Left before the window can carry a real session:
 
-- A read that leaves the window clamps at its edge. A 2-beat Warp shift over a
-  4-block window paints magnitudes out by 0.95. The window is aimed at the
-  dab's own span only, so an effect's reach has to widen the aim (the declared
-  halo), and the gate has to refuse when dab + reach will not fit K blocks. A
-  brush wider than K blocks fails the same way and needs the same answer: 32
-  beats at 120 bpm is 16 s, which is an eight-block window at the 2 s default.
-  This is the next piece of work; it needs the budget, so it lands with S8.
+- The cross-file source window still widens by the dab's own span either side
+  rather than by the declared reach; the reach is in destination seconds and
+  the source window counts source frames through the beat ratio.
+- The fit refusal measures the brush from `resolveBrushFootprint`, which does
+  not know the grid swing that can widen a snapped cell.
 - The warp's noise-phase replacement still draws differently for about 0.8% of
   texels through a window (517 of 65,216 measured) even with the file-seeded
   draw. It is a random phase either way, so it is a difference in the noise,
@@ -824,9 +850,9 @@ Left before the window can carry a real session:
   reason.
 - Not pinned by a test yet: the rigid transient tail at a file edge, the
   cross-resolution carrier rebase (it needs two bands-per-octave settings), the
-  warp's noise seed, and the two wirings that decide a window is needed
-  (`sourceNeedFor` and `strokeBlockers`) — both live in the React component and
-  `window:check` opens one file with a plain brush.
+  warp's noise seed, and the three wirings in the React component that decide
+  what a window has to hold (`sourceNeedFor`, `reachFrames` and
+  `strokeRefusal`) — `window:check` opens one file with a plain brush.
 - S8: the budget that sets K, admission, image export and snapshot off the
   whole canvas, and brush.ts's whole-canvas commit fallback, which bails when
   the canvas cannot serve the whole file.

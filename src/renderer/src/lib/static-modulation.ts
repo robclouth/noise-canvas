@@ -114,6 +114,24 @@ export function staticModulation(
   return { staticSum: acc.sum, staticWeight: acc.weight };
 }
 
+/**
+ * How far every source that drives `key` can move it, as a fraction of the
+ * range it sweeps. The shader clamps the same sum, so 1 means a source can
+ * reach the far end of the range on its own.
+ */
+export function modulationWeight(state: State, key: ParameterKey): number {
+  let weight = 0;
+  const groups = [
+    getModAmountValuesNormalized(state, key),
+    getContextualModAmountsNormalized(state, key),
+    getMacroAmountValuesNormalized(state, key),
+  ];
+  for (const amounts of groups) {
+    for (const amount of amounts) if (!Number.isNaN(amount)) weight += Math.abs(amount);
+  }
+  return Math.min(1, weight);
+}
+
 /** A linear parameter's value and range in shader units, when they differ from the slider's. */
 export type ShaderRange = { value: number; min: number; max: number };
 

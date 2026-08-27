@@ -296,6 +296,20 @@ export class WindowedCanvas {
     return new Vector2(fileUvToViewUv(view, this.numFrames, cursorPos.x), cursorPos.y);
   }
 
+  /**
+   * The seconds a full window of the canvas holds, which is the whole file when
+   * the canvas holds all of it. The window at the end of the file is shorter;
+   * this is the span the canvas can hold wherever it sits.
+   */
+  windowSeconds(): number {
+    const window = this.blocks;
+    const { sampleRate } = this.deps.spectrogram;
+    if (!window) return this.numFrames / sampleRate;
+    const blocks = Math.min(window.windowBlocks, window.grid.blockCount);
+    const full = window.viewFor({ firstBlock: 0, lastBlock: blocks - 1 });
+    return (full.endFrame - full.startFrame) / sampleRate;
+  }
+
   /** The seconds the canvas's own UV spans. */
   dabDuration(totalDuration: number): number {
     const view = this.view();

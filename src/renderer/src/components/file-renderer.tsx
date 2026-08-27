@@ -7,7 +7,8 @@ import { blockGrid } from "@renderer/lib/block-grid";
 import { CANVAS_WINDOW_BLOCKS, needsCanvasWindow } from "@renderer/lib/canvas-window";
 import { sourceReadSpan } from "@renderer/lib/source-window";
 import { WindowedCanvas, type SourceNeed, type UvRegion } from "@renderer/lib/windowed-canvas";
-import { wholeFileNeeds } from "@renderer/lib/whole-file-gate";
+import { strokeReach, type ReachContext } from "@renderer/lib/effect-reach";
+import { strokeRefusal as refusalFor } from "@renderer/lib/whole-file-gate";
 import { countDiagStroke } from "@renderer/lib/diag-sampler";
 import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
 import { useFrame, useThree } from "@react-three/fiber";
@@ -151,10 +152,10 @@ export interface FileRendererHandle {
   /** Changes whenever the committed state moves, so another file's source window re-reads. */
   getStateRevision: () => number;
   /**
-   * What the brush reads that a canvas holding a window of the file cannot
-   * serve, named as the user sees it. Empty when the stroke can paint.
+   * Why the brush cannot paint on a canvas holding a window of the file, in the
+   * words the user reads. Null when the stroke can paint.
    */
-  strokeBlockers: (state: State) => string[];
+  strokeRefusal: (state: State) => string | null;
   /** Restores the spectrogram to its original state. */
   restoreOriginal: () => void;
   /** Clears the stroke preview. */
@@ -980,7 +981,7 @@ const FileRendererInner = memo(
 
       // A window of the file cannot serve a brush that reads all of it, and a
       // dab that painted anyway would commit whatever the window's edge held.
-      if (strokeBlockers(state).length > 0) return false;
+      if (strokeRefusal(state) !== null) return false;
 
       // The active step names the file the brush samples from; null means this
       // file paints from itself.
@@ -1364,19 +1365,22 @@ const FileRendererInner = memo(
       }
 
       const canvas = canvasFor(gl);
+      // An effect reads around the dab, so the canvas has to hold that reach as
+      // well as the dab itself.
+      const reach = canvas.wholeFile ? { before: 0, after: 0 } : reachFrames(state);
       if (!canvas.wholeFile) {
         const { numFrames } = spectrogramData;
         const visible = visibleFrameRange(state);
-        const start = cursorPos.x >= 0 ? cursorPos.x * numFrames : visible.start;
-        const end = cursorPos.x >= 0 ? (cursorPos.x + brushSizeUv.x) * numFrames : visible.end;
+        const start = cursorPos.x >= 0 ? cursorPos.x * numFrames - reach.before : visible.start;
+        const end = cursorPos.x >= 0 ? (cursorPos.x + brushSizeUv.x) * numFrames + reach.after : visible.end;
         canvas.aim(start, end);
       }
 
       // Render brush stroke if requested
       if (applyStroke.current && cursorPos.x >= 0) {
         const preview = strokePreview.current;
-        const dabStart = cursorPos.x * spectrogramData.numFrames;
-        const dabEnd = (cursorPos.x + brushSizeUv.x) * spectrogramData.numFrames;
+        const dabStart = cursorPos.x * spectrogramData.numFrames - reach.before;
+        const dabEnd = (cursorPos.x + brushSizeUv.x) * spectrogramData.numFrames + reach.after;
         const sourceNeed = sourceNeedFor(state, cursorPos);
         if (sourceNeed) canvas.aimSource(sourceNeed);
         if (preview) {
@@ -1522,9 +1526,37 @@ const FileRendererInner = memo(
     /** True while the canvas holds every frame of the file. */
     const canvasCoversFile = (): boolean => canvasRef.current?.coversFile() ?? true;
 
-    const strokeBlockers = (state: State): string[] => {
+    /** The clocks a reach is measured against, or null while the canvas holds the whole file. */
+    const reachContext = (state: State): ReachContext | null => {
       const canvas = canvasRef.current;
-      return canvas && !canvas.wholeFile ? wholeFileNeeds(state) : [];
+      const file = openFiles[fileId];
+      if (!canvas || canvas.wholeFile || !file?.spectrogramData) return null;
+      const spectrogram = file.spectrogramData;
+      return {
+        bpm: state.filepathsBpm[file.filePath] || 120,
+        fileSeconds: spectrogram.numFrames / spectrogram.sampleRate,
+        canvasSeconds: canvas.windowSeconds(),
+        bandsPerOctave: spectrogram.bandsPerOctave,
+        numBands: spectrogram.numBands,
+      };
+    };
+
+    const strokeRefusal = (state: State): string | null => refusalFor(state, reachContext(state));
+
+    /**
+     * Frames of the file the effect chain reads either side of the dab's own
+     * span. Capped at the file, because an effect that reads without bound is
+     * refused rather than aimed at.
+     */
+    const reachFrames = (state: State): { before: number; after: number } => {
+      const ctx = reachContext(state);
+      if (!ctx) return { before: 0, after: 0 };
+      const reach = strokeReach(state, ctx);
+      const { numFrames, sampleRate } = spectrogramData;
+      return {
+        before: Math.min(reach.before * sampleRate, numFrames),
+        after: Math.min(reach.after * sampleRate, numFrames),
+      };
     };
 
     const regionToFileUv = (region: UvRegion | null): UvRegion | null =>
@@ -1713,7 +1745,7 @@ const FileRendererInner = memo(
       getTextures,
       getCanvasView,
       getStateRevision,
-      strokeBlockers,
+      strokeRefusal,
       restoreOriginal,
       clearPreview,
       reloadTextures,

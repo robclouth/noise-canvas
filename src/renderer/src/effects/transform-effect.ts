@@ -5,15 +5,11 @@ import { GLSL3, RawShaderMaterial, Vector2 } from "three";
 import rangeQuadVert from "../glsl/range-quad.vert";
 import transformEffectFrag from "../glsl/transform-effect.frag";
 import { defaultParameterUniform, parameterUniform } from "@renderer/lib/static-modulation";
+import { originFraction } from "@renderer/lib/utils";
 import { BaseEffect, createDefaultUniforms, destinationLayout, UpdateEffectUniformsProps } from "./base-effect";
 
 export const boundaryModes = ["smear", "cut", "wrap"] as const;
 export type BoundaryMode = (typeof boundaryModes)[number];
-
-/** Turns an origin option (0 low, 1 middle, 2 high) into its fraction of the brush. */
-function originFraction(option: number): number {
-  return Math.min(2, Math.max(0, option)) * 0.5;
-}
 
 class TransformEffect extends BaseEffect {
   materials: RawShaderMaterial[];
