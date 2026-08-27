@@ -50,6 +50,16 @@ export class PackedWindow {
     return this.target.texture;
   }
 
+  /** The render target the window composes into. */
+  get renderTarget(): WebGLRenderTarget {
+    return this.target;
+  }
+
+  /** The view the window should hold to serve [startFrame, endFrame). */
+  plan(startFrame: number, endFrame: number): CanvasView {
+    return this.blocks.plan(this.held, startFrame, endFrame);
+  }
+
   /** The view the texture lays out, or null while it lays out nothing. */
   get view(): CanvasView | null {
     return this.held;

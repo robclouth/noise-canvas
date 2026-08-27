@@ -15,13 +15,17 @@ import { CarriedPaint, carryPaintOut, dropReturningPaint, type PaintBox } from "
 import { diag } from "./diag-log";
 import { PackedWindow } from "./packed-window";
 import { composePixelRangeValues, gatherPixelRanges, mergePixelRanges } from "./pixel-ranges";
+import { SourceWindow, type SourceFileBlocks, type SourceWindowTextures } from "./source-window";
 import type { StrokeRenderer } from "./stroke-renderer";
 
 /** A rectangle of the file in unpacked UV, as the dirty region is kept. */
 export type UvRegion = { startX: number; endX: number; startY: number; endY: number };
 
+/** The file and frames a dab reads through a window the destination owns. */
+export type SourceNeed = { fileId: string; startFrame: number; endFrame: number; wantOriginal: boolean };
+
 /** Paint waiting for the canvas to hold the frames it lands on. */
-type HeldPaint = { startFrame: number; endFrame: number; paint: () => boolean };
+type HeldPaint = { startFrame: number; endFrame: number; source: SourceNeed | null; paint: () => boolean };
 
 /** Fills `settle` waits through before it gives up on the paint still held. */
 const HELD_PAINT_FILLS = 8;
@@ -38,6 +42,8 @@ export type WindowedCanvasDeps = {
   readRoot: BlockValueReader;
   /** Called when the canvas or the display picture changed. */
   onChanged: () => void;
+  /** Another open file's blocks, for a brush painting from it. Null when it has none. */
+  sourceBlocks: (fileId: string) => SourceFileBlocks | null;
   /** Blocks the canvas holds at once. Defaults to the build's setting. */
   windowBlocks?: number;
 };
@@ -64,23 +70,32 @@ export type WindowedCanvasDeps = {
  *    commit reads the carry as well as the canvas.
  * 4. Any move of the whole state (a history hop, a restore, phase turns)
  *    installs a fresh carry, because the old one no longer speaks for the file.
+ * 5. A brush painting from another windowed file reads it through a window of
+ *    this canvas's own, placed by the frames the dab asks for. That window
+ *    holds the other file's committed state, so it re-reads when that state
+ *    moves.
  */
 export class WindowedCanvas {
   private readonly deps: WindowedCanvasDeps;
   private readonly numFrames: number;
   private readonly blocks: CanvasWindow | null;
   private readonly original: PackedWindow | null;
+  private readonly windowBlocks: number;
+  private source: SourceWindow | null = null;
+  private sourceRevision = 0;
   private request: CanvasView | null = null;
   private fill: Promise<void> | null = null;
   private readonly held: HeldPaint[] = [];
   private carried = new CarriedPaint();
   private stroking = false;
+  private revision = 0;
 
   constructor(deps: WindowedCanvasDeps) {
     this.deps = deps;
     this.numFrames = deps.spectrogram.numFrames;
     const { numBands, metadata, sampleRate, numFrames } = deps.spectrogram;
     const windowBlocks = deps.windowBlocks ?? CANVAS_WINDOW_BLOCKS;
+    this.windowBlocks = windowBlocks;
     const grid = blockGrid({ numBands, metadata }, numFrames, sampleRate);
     if (needsCanvasWindow(grid, windowBlocks)) {
       this.blocks = new CanvasWindow(deps.gl, grid, { windowBlocks, read: deps.readCurrent });
@@ -94,6 +109,11 @@ export class WindowedCanvas {
   /** True when this file is short enough for the canvas to hold all of it. */
   get wholeFile(): boolean {
     return this.blocks === null;
+  }
+
+  /** Changes whenever the committed state moves, so another file's window re-reads. */
+  get stateRevision(): number {
+    return this.revision;
   }
 
   /** True while the canvas as it stands holds every frame of the file. */
@@ -216,10 +236,36 @@ export class WindowedCanvas {
    * Held paint runs in the order it was given, so a dab behind a waiting one
    * waits with it. Returns false only when `paint` itself refused.
    */
-  paintWhenHeld(startFrame: number, endFrame: number, paint: () => boolean): boolean {
-    if (this.held.length === 0 && this.holdsFrames(startFrame, endFrame)) return paint();
-    this.held.push({ startFrame, endFrame, paint });
+  paintWhenHeld(startFrame: number, endFrame: number, source: SourceNeed | null, paint: () => boolean): boolean {
+    if (this.held.length === 0 && this.holdsFrames(startFrame, endFrame) && this.sourceHolds(source)) return paint();
+    this.held.push({ startFrame, endFrame, source, paint });
     return true;
+  }
+
+  /**
+   * Points a window at the frames a dab reads of another file, building it on
+   * first use and re-reading it once that file's committed state moves.
+   * Returns the textures to sample that file through, or null while the window
+   * cannot serve the frames.
+   */
+  aimSource(need: SourceNeed): SourceWindowTextures | null {
+    const blocks = this.deps.sourceBlocks(need.fileId);
+    if (!blocks) return null;
+    if (this.source && this.source.fileId !== need.fileId) {
+      this.source.dispose();
+      this.source = null;
+    }
+    if (!this.source) {
+      this.source = new SourceWindow(this.deps.gl, need.fileId, blocks, this.windowBlocks);
+      this.sourceRevision = blocks.revision();
+    }
+    const revision = blocks.revision();
+    if (revision !== this.sourceRevision) {
+      this.sourceRevision = revision;
+      this.source.invalidate();
+    }
+    this.source.aim(need.startFrame, need.endFrame, need.wantOriginal);
+    return this.sourceHolds(need) ? this.source.textures() : null;
   }
 
   /**
@@ -232,9 +278,10 @@ export class WindowedCanvas {
     for (let fills = 0; this.held.length > 0 && fills < HELD_PAINT_FILLS; fills++) {
       const next = this.held[0];
       this.aim(next.startFrame, next.endFrame);
-      const pending = this.fill;
-      if (!pending) break;
-      await pending;
+      if (next.source) this.aimSource(next.source);
+      const reads = [this.fill, this.source?.settled() ?? null].filter((read): read is Promise<void> => read !== null);
+      if (reads.length === 0) break;
+      await Promise.all(reads);
       this.releaseHeld();
     }
     if (this.held.length === 0) return;
@@ -355,6 +402,7 @@ export class WindowedCanvas {
   setFBOData(data: Float32Array): boolean {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
+    this.revision++;
     if (this.coversFile()) {
       renderer.setFBOData(data);
       return true;
@@ -375,6 +423,7 @@ export class WindowedCanvas {
   patchFBOData(data: Float32Array, pixelRanges: Uint32Array): boolean {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
+    this.revision++;
     if (this.coversFile()) {
       renderer.patchFBOData(data, pixelRanges);
       return true;
@@ -389,6 +438,7 @@ export class WindowedCanvas {
   patchFBODataCompact(values: Float32Array, pixelRanges: Uint32Array): boolean {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
+    this.revision++;
     if (this.coversFile()) {
       renderer.patchFBODataCompact(values, pixelRanges);
       return true;
@@ -403,6 +453,7 @@ export class WindowedCanvas {
   applyPhaseTurns(turns: ArrayLike<number>): boolean {
     const renderer = this.deps.renderer();
     if (!renderer) return false;
+    this.revision++;
     if (this.coversFile()) {
       renderer.applyPhaseTurns(turns);
       return true;
@@ -432,6 +483,8 @@ export class WindowedCanvas {
   dispose(): void {
     this.blocks?.dispose();
     this.original?.dispose();
+    this.source?.dispose();
+    this.source = null;
     this.request = null;
     this.held.length = 0;
   }
@@ -446,10 +499,18 @@ export class WindowedCanvas {
   private releaseHeld(): void {
     while (this.held.length > 0) {
       const next = this.held[0];
-      if (!this.holdsFrames(next.startFrame, next.endFrame)) return;
+      if (!this.holdsFrames(next.startFrame, next.endFrame) || !this.sourceHolds(next.source)) return;
       this.held.shift();
       next.paint();
     }
+  }
+
+  /** True while the source window holds what the dab asked of it. */
+  private sourceHolds(need: SourceNeed | null): boolean {
+    if (!need) return true;
+    const source = this.source;
+    if (source?.fileId !== need.fileId) return false;
+    return source.holdsFrames(need.startFrame, need.endFrame, need.wantOriginal);
   }
 
   private expectRenderer(): StrokeRenderer {

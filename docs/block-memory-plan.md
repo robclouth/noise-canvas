@@ -749,11 +749,42 @@ Step (3) is done. A dab the canvas cannot take is held rather than dropped:
   against the band's bin count, which the file rounds up again, so the two
   runs can land a bin apart at an edge. The four-bin margin covers it.
 
+S6b is done. A brush painting from another file reads it through a window of
+the destination's own:
+
+- The source read had to become a position in the source FILE before a window
+  could be placed by it. `sourceOffsetForViews` puts the brush anchor on the
+  destination file's clock, asks `calculateSourceOffset` for a fraction of the
+  source file, and divides that by the span the source textures hold; the
+  shader scales the source time offset the same way, because that control names
+  a fraction of the source file's whole length. Whole-file spans on both sides
+  return the old value untouched, which the full suite pins. Painting from a
+  short source onto a windowed canvas was already wrong before the window
+  existed on the source side: it read from the source's start rather than the
+  beat-matched position.
+- `source-window.ts` is a window over another file: a `PackedWindow` over its
+  committed state plus the view's own band table, and a second window over its
+  original built the first time a step reads it. `sourceReadFrames` names the
+  frames a dab reads, `sourceReadSpan` widens and wraps them, and the dab waits
+  through `paintWhenHeld` until both the canvas and that window hold what it
+  asked for.
+- A read-only block window now takes one window of slots plus the spare, not
+  two. The two-window budget exists so a slide can fold the leaving window's
+  paint back while the entering window holds its own; nothing copies back into
+  the original or the source window. `window:check` resident went 603 → 545 MB.
+- The window serves the source file's COMMITTED state, so it re-reads when that
+  state moves (`WindowedCanvas.stateRevision`, watched through the file
+  handle). Reading another file's half-painted stroke, which the live-canvas
+  path allowed, is gone.
+- Not covered by a test: the wiring in `file-renderer.tsx` that decides a
+  source window is needed. `window:check` paints one file only, so a cross-file
+  drag would have to open two files and set the step's source.
+- `sourceInverseMapTex` is declared and uploaded but no shader samples it. The
+  source texture set makes it optional rather than removing it; removing the
+  uniform touches every test that builds a `SourceFileInfo`.
+
 Left before the window can carry a real session:
 
-- A cross-file source reads through the source file's own canvas, so a source
-  longer than the window serves only the span that canvas holds and clamps at
-  its edges. The dest renderer needs its own window over the source (S6b).
 - Reverse and wrap work on the canvas axis, so under a window they reverse or
   wrap the window. Both belong in the whole-file-effect gate.
 - The warp's noise-phase replacement still draws differently for about 0.8% of

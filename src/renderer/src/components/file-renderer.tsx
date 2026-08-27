@@ -5,7 +5,8 @@ import { diag } from "@renderer/lib/diag-log";
 import { viewCoversFile, type CanvasView } from "@renderer/lib/canvas-view";
 import { blockGrid } from "@renderer/lib/block-grid";
 import { CANVAS_WINDOW_BLOCKS, needsCanvasWindow } from "@renderer/lib/canvas-window";
-import { WindowedCanvas, type UvRegion } from "@renderer/lib/windowed-canvas";
+import { sourceReadSpan } from "@renderer/lib/source-window";
+import { WindowedCanvas, type SourceNeed, type UvRegion } from "@renderer/lib/windowed-canvas";
 import { countDiagStroke } from "@renderer/lib/diag-sampler";
 import { perfAdd, perfEnabled, perfMark, perfSyncEnabled } from "@renderer/lib/perf-probe";
 import { useFrame, useThree } from "@react-three/fiber";
@@ -146,6 +147,8 @@ export interface FileRendererHandle {
   } | null;
   /** The span the canvas textures lay out, or null before the renderer exists. */
   getCanvasView: () => CanvasView | null;
+  /** Changes whenever the committed state moves, so another file's source window re-reads. */
+  getStateRevision: () => number;
   /** Restores the spectrogram to its original state. */
   restoreOriginal: () => void;
   /** Clears the stroke preview. */
@@ -893,6 +896,17 @@ const FileRendererInner = memo(
           readCurrent: (ranges) => getHistoryManager(fileId).currentRanges(ranges),
           readRoot: (ranges) => getHistoryManager(fileId).rootRanges(ranges),
           onChanged: () => invalidateRef.current(),
+          sourceBlocks: (sourceId) => {
+            const source = openFiles[sourceId];
+            const spectrogram = source?.spectrogramData;
+            if (!spectrogram) return null;
+            return {
+              spectrogram,
+              readCurrent: (ranges) => getHistoryManager(sourceId).currentRanges(ranges),
+              readRoot: (ranges) => getHistoryManager(sourceId).rootRanges(ranges),
+              revision: () => source.rendererRef?.current?.getStateRevision() ?? 0,
+            };
+          },
         });
       }
       return canvasRef.current;
@@ -903,6 +917,40 @@ const FileRendererInner = memo(
       canvasRef.current = null;
     };
     disposeCanvasRef.current = disposeCanvas;
+
+    /**
+     * The file and frames a dab at `cursorPos` reads through a window of this
+     * canvas's own. Null when the brush paints from this file, or from one
+     * whose canvas holds all of it — that canvas serves the read as it always
+     * did. `cursorPos` is in the file's UV.
+     */
+    const sourceNeedFor = (state: State, cursorPos: Vector2): SourceNeed | null => {
+      const strokeRenderer = strokeRendererRef.current;
+      const canvas = canvasRef.current;
+      const file = openFiles[fileId];
+      if (!strokeRenderer || !canvas || !file || cursorPos.x < 0) return null;
+      const step = (state.brushes[state.activeBrushIndex]?.steps ?? [])[state.activeStepIndex];
+      const sourcePath = step?.sourceFile?.path;
+      if (!sourcePath) return null;
+      const source = getOpenFileByPath(sourcePath);
+      const sourceSpectrogram = source?.spectrogramData;
+      if (!source || !sourceSpectrogram || source.id === fileId) return null;
+      const sourceView = source.rendererRef?.current?.getCanvasView();
+      if (!sourceView || viewCoversFile(sourceView, sourceSpectrogram.numFrames)) return null;
+
+      const totalDuration = spectrogramData.numFrames / spectrogramData.sampleRate;
+      const read = strokeRenderer.sourceReadFrames(
+        state,
+        canvas.dabCursor(cursorPos),
+        state.filepathsBpm[file.filePath] || 120,
+        canvas.dabDuration(totalDuration),
+        { filePath: source.filePath, spectrogramData: sourceSpectrogram },
+      );
+      const wantOriginal = (state.brushes[state.activeBrushIndex]?.steps ?? []).some(
+        (_step, index) => createStepStateView(state, index).sourceDataMode === "original",
+      );
+      return { fileId: source.id, ...sourceReadSpan(read, sourceSpectrogram.numFrames), wantOriginal };
+    };
 
     /**
      * Paints one stroke into the FBO from an explicit state snapshot. The frame
@@ -942,6 +990,12 @@ const FileRendererInner = memo(
           ? resolvedSourceView
           : undefined;
 
+      // The source file's own canvas holds whatever span its own brush left it
+      // on, so a window of this canvas's own serves the read instead.
+      const sourceNeed = sourceNeedFor(state, cursorPos);
+      const sourceWindow = sourceNeed ? canvas?.aimSource(sourceNeed) : null;
+      if (sourceNeed && !sourceWindow) return false;
+
       // Both onset maps are baked here rather than inside the renderer so the
       // sensitivity control and the file's latest detections reach the shader
       // through one path. Sensitivity is per file — each side of a cross-file
@@ -951,8 +1005,8 @@ const FileRendererInner = memo(
         filePath: resolvedSourceFile.filePath,
         displayName: resolvedSourceFile.displayName,
         spectrogramData: resolvedSourceFile.spectrogramData,
-        textures: resolvedSourceTextures,
-        view: sourceSpan,
+        textures: sourceWindow ?? resolvedSourceTextures,
+        view: sourceWindow ? sourceWindow.view : sourceSpan,
         onsetTexture: getOnsetTexture(
           resolvedSourceFile.id,
           resolvedSourceFile.onsets,
@@ -1313,6 +1367,8 @@ const FileRendererInner = memo(
         const preview = strokePreview.current;
         const dabStart = cursorPos.x * spectrogramData.numFrames;
         const dabEnd = (cursorPos.x + brushSizeUv.x) * spectrogramData.numFrames;
+        const sourceNeed = sourceNeedFor(state, cursorPos);
+        if (sourceNeed) canvas.aimSource(sourceNeed);
         if (preview) {
           // A preview shows what a dab would do. One the canvas cannot take
           // shows nothing rather than waiting for a position already stale.
@@ -1321,10 +1377,12 @@ const FileRendererInner = memo(
         } else {
           // A dab blends out of the canvas, so one landing on a block the
           // canvas has no content for would paint silence and commit it. The
-          // dab waits for its block and then paints where it was asked to.
+          // dab waits for its block, and for the source window it reads
+          // through, and then paints where it was asked to.
           const dabState = state;
           const dabPos = cursorPos.clone();
-          if (!canvas.paintWhenHeld(dabStart, dabEnd, () => dispatchStroke(dabState, dabPos, false))) return;
+          if (!canvas.paintWhenHeld(dabStart, dabEnd, sourceNeed, () => dispatchStroke(dabState, dabPos, false)))
+            return;
           displayMode.current = "committed";
         }
 
@@ -1515,6 +1573,8 @@ const FileRendererInner = memo(
     /** The span those textures lay out. */
     const getCanvasView = (): CanvasView | null => strokeRendererRef.current?.committedSource().view ?? null;
 
+    const getStateRevision = (): number => canvasRef.current?.stateRevision ?? 0;
+
     /**
      * Restores the spectrogram to its original, unmodified state.
      */
@@ -1637,6 +1697,7 @@ const FileRendererInner = memo(
       patchFBODataCompact,
       getTextures,
       getCanvasView,
+      getStateRevision,
       restoreOriginal,
       clearPreview,
       reloadTextures,

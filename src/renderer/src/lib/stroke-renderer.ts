@@ -229,9 +229,11 @@ export interface SourceFileInfo {
   spectrogramData: SpectrogramData;
   textures: {
     packed: WebGLRenderTarget;
-    inverse: DataTexture;
     metadata: DataTexture;
-    original: Texture;
+    /** No shader samples the source's inverse map; a source window has none. */
+    inverse?: Texture;
+    /** Absent until a step that reads the original has asked a window for it. */
+    original?: Texture;
   };
   /**
    * The span `textures.packed` lays out. Absent when it holds the whole file.
@@ -824,22 +826,77 @@ export class StrokeRenderer {
     if (wholeSource && viewCoversFile(this.view, this.spectrogramData.numFrames)) {
       return this.calculateSourceOffset(lockedOffset, mode, anchor, timeScale, bandScale);
     }
-    // The anchor goes on the destination file's clock and the offset comes
-    // back as a fraction of the source file, so neither depends on the span
-    // its canvas happens to hold.
+    const sourceDuration = sourceSpec.numFrames / sourceSpec.sampleRate;
+    const fileOffset = this.sourceFileOffset(sourceSpec, lockedOffset, mode, anchor, bandScale, beatRatio);
+    // Where the destination span's first frame falls in the source, beat for beat.
+    const spanStartSec = (beatRatio * this.view.startFrame) / this.spectrogramData.sampleRate;
+    const readFrame = (spanStartSec + fileOffset.x * sourceDuration) * sourceSpec.sampleRate;
+    return new Vector2((readFrame - sourceStart) / sourceFrames, fileOffset.y);
+  }
+
+  /**
+   * The source-read offset as a fraction of the source file, from an anchor on
+   * the destination file's clock. Neither end depends on the span a canvas
+   * happens to hold, so a window over the source can be placed from it before
+   * its textures exist.
+   */
+  private sourceFileOffset(
+    sourceSpec: SpectrogramData,
+    lockedOffset: { beats: number; pitch: number } | null | undefined,
+    mode: string,
+    anchor: Vector2,
+    bandScale: number,
+    beatRatio: number,
+  ): Vector2 {
     const sourceDuration = sourceSpec.numFrames / sourceSpec.sampleRate;
     const anchorFileSec = (this.view.startFrame + anchor.x * this.viewFrameCount) / this.spectrogramData.sampleRate;
-    const fileOffset = this.calculateSourceOffset(
+    return this.calculateSourceOffset(
       lockedOffset,
       mode,
       new Vector2(anchorFileSec, anchor.y),
       beatRatio / sourceDuration,
       bandScale,
     );
-    // Where the destination span's first frame falls in the source, beat for beat.
-    const spanStartSec = (beatRatio * this.view.startFrame) / this.spectrogramData.sampleRate;
-    const readFrame = (spanStartSec + fileOffset.x * sourceDuration) * sourceSpec.sampleRate;
-    return new Vector2((readFrame - sourceStart) / sourceFrames, fileOffset.y);
+  }
+
+  /**
+   * The frames of the source file a dab at `cursorPos` reads, before any
+   * effect's own reach. `cursorPos` and `totalDuration` are the canvas's, the
+   * answer is the source file's own frames, so a window over the source can be
+   * placed by what the brush asks for rather than by where that file's canvas
+   * sits.
+   */
+  sourceReadFrames(
+    state: State,
+    cursorPos: Vector2,
+    bpm: number,
+    totalDuration: number,
+    source: Pick<SourceFileInfo, "filePath" | "spectrogramData">,
+  ): { start: number; end: number } {
+    const stepState = createStepStateView(state, state.activeStepIndex);
+    const step = (state.brushes[state.activeBrushIndex]?.steps ?? [])[state.activeStepIndex];
+    const mode = stepState.sourcePositionMode as string;
+    const sourceSpec = source.spectrogramData;
+    const beatRatio = bpm / (state.filepathsBpm?.[source.filePath] || bpm);
+    const bandScale = sourceBandUvSlope(this.spectrogramData, sourceSpec);
+    const footprint = this.resolveBrushFootprint(stepState, bpm, totalDuration, cursorPos.x);
+    const anchor = resolveBrushAnchor(cursorPos, footprint.fullTime, footprint.fullPitch);
+    const offset = this.sourceFileOffset(
+      sourceSpec,
+      state.isStroking ? step?.lockedOffset : null,
+      mode,
+      anchor,
+      bandScale,
+      beatRatio,
+    );
+    // The shader adds the step's own source position on top, as a fraction of
+    // the source file's length. Follow mode pins it to zero.
+    const positionUv = mode === "follow" ? 0 : Number(stepState.sourceTimeOffset ?? 0) / 100;
+    const shift = (offset.x + positionUv) * sourceSpec.numFrames;
+    const scale = (beatRatio * sourceSpec.sampleRate) / this.spectrogramData.sampleRate;
+    const first = (this.view.startFrame + anchor.x * this.viewFrameCount) * scale + shift;
+    const last = first + footprint.sizeUv.x * this.viewFrameCount * scale;
+    return { start: first, end: last };
   }
 
   /**
@@ -1095,11 +1152,19 @@ export class StrokeRenderer {
     const currentReadFBO = this.pingPong === 0 ? this.fbo1 : this.fbo2;
     const destinationFbo = this.pingPong === 0 ? this.fbo2 : this.fbo1;
 
+    // A window over another file builds its original only once a step asks for
+    // it, so a dab arriving before that read lands paints nothing.
+    const sourceOriginal = sourceFile.textures.original;
+    const stepCount = (state.brushes[state.activeBrushIndex]?.steps ?? []).length;
+    for (let index = 0; index < stepCount && !sourceOriginal; index++) {
+      if (createStepStateView(state, index).sourceDataMode === "original") return;
+    }
+
     // Determine the initial source FBO based on sourceDataMode
     const isSameFile = sourceFile.id === this.fileId;
     let initialSourceFbo: WebGLRenderTarget | { texture: Texture } =
-      activeStepState.sourceDataMode === "original"
-        ? { texture: sourceFile.textures.original }
+      activeStepState.sourceDataMode === "original" && sourceOriginal
+        ? { texture: sourceOriginal }
         : isSameFile
           ? currentReadFBO
           : sourceFile.textures.packed;
@@ -1233,7 +1298,7 @@ export class StrokeRenderer {
       // Determine source texture based on this step's sourceDataMode
       const stepSourceDataMode = stepState.sourceDataMode;
       const stepSourceFbo =
-        stepSourceDataMode === "original" ? { texture: sourceFile.textures.original } : stepInputFbo;
+        stepSourceDataMode === "original" && sourceOriginal ? { texture: sourceOriginal } : stepInputFbo;
 
       // Override the source texture to use the correct input for this step
       commonUniforms.sourceSpectrogramTex.value = stepSourceFbo.texture;

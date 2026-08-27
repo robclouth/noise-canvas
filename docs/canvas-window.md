@@ -43,6 +43,7 @@ where the window should sit, the slot cache pages the blocks in from disk, and
 | `lib/block-slot-cache.ts` | the blocks that are on the GPU, in fixed slots, under a byte budget    |
 | `lib/canvas-window.ts`    | placing the window, filling it, and what the canvas holds              |
 | `lib/packed-window.ts`    | the same window over the file's original, as one texture               |
+| `lib/source-window.ts`    | a window over another file, for a brush painting from it               |
 | `lib/carried-paint.ts`    | paint on blocks that left the window mid-stroke                        |
 | `lib/windowed-canvas.ts`  | **the boundary.** File coordinates in, view coordinates out            |
 | `lib/stroke-renderer.ts`  | painting, in view coordinates only                                     |
@@ -93,6 +94,12 @@ Each of these has cost real damage. Break one and the app eats audio quietly.
    scales the source time offset the same way, because that control is a
    fraction of the source file's whole length. Without both, a windowed canvas
    reads from the start of whatever window it happens to show.
+7. **A brush painting from another windowed file reads it through a window of
+   its own.** The other file's canvas sits wherever its own brush left it, so
+   the destination places a `SourceWindow` by the frames the dab asks for
+   (`sourceReadFrames` names them) and holds the dab until it lands. That
+   window serves the other file's **committed** state, so it re-reads when that
+   state moves — a stroke still under the other file's brush is not in it.
 
 ## How to check it still works
 
@@ -115,8 +122,11 @@ build. It also prints resident memory.
 Per open file, windowed, at eight blocks:
 
 - canvas pair, sized to the window, not the file
-- block slots on the GPU: the window plus four spare
-- the original window: the same again, plus its composed texture
+- block slots on the GPU: two windows plus four spare, because a slide holds
+  the window it enters and the one whose paint it folds back
+- the original window: one window plus four spare, plus its composed texture
+- a source window while a brush paints from another windowed file, and its
+  original once a step reads that
 - the display pyramid and tile ring, which are bounded by the viewport
 
 The file-sized pristine texture and inverse map are gone. A 60-second file at
